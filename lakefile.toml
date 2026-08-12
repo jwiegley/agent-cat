@@ -18,6 +18,13 @@ rev = "v4.30.0"
 name = "HardenPatch"
 srcDir = "example"
 
+# The opt-in tour of HardenPatch: the checked read-outs (cost bounds, muS at
+# Prop, answer-sheet runs) that teach what the workflow's meanings say. Same
+# verification status as HardenPatch. Build with `lake build Tour`.
+[[lean_lib]]
+name = "Tour"
+srcDir = "example"
+
 # The instance-pollution probe (test/Pollution.lean): machine-checked assertions
 # that importing this package installs no arithmetic on `Bool`, `Prop` or `ℕ`.
 # In defaultTargets on purpose — a re-polluting instance must break the build.
