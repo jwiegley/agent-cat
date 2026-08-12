@@ -13,6 +13,33 @@ vocabulary of `Agentic.Examples.Combinators` — and every other section is a
 *reading* of those four: by the grade, by `muS` at `Cost` and at `Prop`, and by
 `muExt` at an answer sheet. Nothing about the term changes between the
 readings, which is the whole claim of the design.
+
+## The vocabulary
+
+Every combinator this file writes, and nothing else. Read the table before §3
+and §3 needs no glossary. `f` is the grade of the annotated or composed part,
+`Wf f i o` is this example's `Term PatchOp Sc Lbl f i o`.
+
+| combinator | reads as | denotes | grade |
+| --- | --- | --- | --- |
+| `ask op` | consult `op`, once | this leaf's matrix; the world's answer at this occurrence's key | `.static` |
+| `fn h` | compute `h` locally | `Mat.pointMat h`; `some ∘ h` | `.static` |
+| `w >>> v` | then | `Mat.comp` (Chapman–Kolmogorov); `Option`-bind | `f.join g` |
+| `keep w` | run `w`, keep the input beside it | the diagonal, then `idMat ⊗ w` | `f` |
+| `panel rs` | ask all of them, combine the verdicts | `⊗` of the members, folded by the monoid on `o` | `Frag.parN rs.length f` |
+| `briefed aside r` | consult `r`, handed what `aside` said | `aside ⊗ id`, then the leaf | `.static` |
+| `guided l q r` | …handed the *shared* briefing | the same, with every `l` reading one cell | `.static` |
+| `share l w` | ask once, read twice | rebases the sites inside `w` onto `l` | `f` |
+| `under g w` | run `w` in this scope | precomposition on the reader | `f` |
+| `gate b w` | only with permission | the scalar action of an indicator; refusal is `0` | `f` |
+| `loop n w` | up to `n` more tries | the truncated star `(M_A · d)^{≤n} · M_B` | `f` |
+| `Term.fanT n w` | one `w` per item, at most `n` | the fold truncated at `n` | `f.scale n` |
+
+`share` is written here only inside `guided`, and `Term.fanT` only in
+`perFile`; the other ten are the workflow. The two columns that carry the
+argument are the third and the fourth: the *denotation* is what the term means
+in whatever carrier is chosen, and the *grade* is what the type already knows
+before a carrier is chosen at all.
 -/
 
 namespace Agentic
@@ -62,8 +89,31 @@ def Findings.meet : Findings → Findings → Findings
   | .approve, v => v
   | .revise, _ => .revise
 
-/-- The panel's fan-in: three verdicts become one, by a plain function. -/
-def mergeFindings (a b c : Findings) : Findings := a.meet (b.meet c)
+/-- **The panel's reducer, as the monoid it is.** `Term.panel` asks for a
+`Monoid` on the verdict type and for nothing else, and this is that monoid:
+`*` is `meet`, `1` is `approve`. The three laws are the three cases; what a
+`Monoid` deliberately does *not* carry is the other two licences below, because
+`panel` does not need them and charging for them here would misprice the
+scheduler's freedom (`Agentic.Panel`'s "two reorderings, two licences"). -/
+instance : Monoid Findings where
+  mul := Findings.meet
+  one := .approve
+  mul_assoc a b c := by cases a <;> cases b <;> cases c <;> rfl
+  one_mul _ := rfl
+  mul_one a := by cases a <;> rfl
+
+/-- Unfolding: the monoid's `*` is `meet`, definitionally. -/
+theorem Findings.mul_def (a b : Findings) : a * b = a.meet b := rfl
+
+/-- **The reordering licence**, which `panel` does not require: the members of
+a panel may be consulted in any order, because their verdicts commute. -/
+theorem Findings.meet_comm (a b : Findings) : a * b = b * a := by
+  cases a <;> cases b <;> rfl
+
+/-- **The duplication licence**, which `panel` does not require either: the
+same verdict counted twice counts once, so a race between two copies of one
+reviewer is the reviewer. -/
+theorem Findings.meet_idem (a : Findings) : a * a = a := by cases a <;> rfl
 
 /-- The decoder: a reviewed patch is either *this patch, approved* (`Sum.inl`,
 which the loop reads as **done**) or *go round again with this* (`Sum.inr`) —
@@ -82,21 +132,28 @@ index is what the constructors computed, and a term whose grade arithmetic
 failed to reduce would need a coercion here and would not elaborate. -/
 
 /-- Three reviewers over one patch: two read the shared style guide, the third
-is asked naively. -/
+is asked naively. The list is the panel — its length is the panel's arity, and
+`Frag.parN 3 .static = .static` is why this signature needs no cast. -/
 def review : Wf .static Patch Findings :=
-  panel₃ (guided sg .style .correct) (guided sg .style .secure) (ask .simple)
-    mergeFindings
+  panel
+    [ guided sg .style .correct   -- correctness, against the guide shared under `sg`
+    , guided sg .style .secure    -- security, against the *same* cell of the world
+    , ask .simple ]               -- simplicity, asked with no briefing at all
+    -- fan-in is `Findings`' monoid: any objection carries, `approve` is the unit
 
 /-- One attempt: draft under the deep model, keep the patch beside its review,
 decode the verdict. -/
 def attempt : Wf .static Spec (Sum Patch Spec) :=
-  under deepModel (ask .draft) ⟫ keep review ⟫ fn decodeVerdict
+  under deepModel (ask .draft)  -- the expensive model, for this stage only
+    >>> keep review             -- the patch is still needed after the verdict
+    >>> fn decodeVerdict        -- (patch, verdict) ↦ done | go round again
 
 /-- The whole workflow: at most three attempts, then the tool call behind a
 consent gate. `consent` is a parameter because a written term is a finite datum
 — the guard's `Bool` has to be supplied when the term is built. -/
 def harden (consent : Bool) : Wf .static Spec Unit :=
-  loop 2 attempt ⟫ gate consent (ask .applyP)
+  loop 2 attempt                 -- one attempt, then at most two more
+    >>> gate consent (ask .applyP)  -- the effect, and the only one
 
 /-- The dynamic counterpart of the fixed panel: one simplicity review per file
 the draft touched, at most eight, the list's length being a value. -/
@@ -110,6 +167,10 @@ use site, it is already the answer. -/
 /-- **The whole workflow is static** — gate, loop, panel and all — so every
 a-priori instrument over `harden` is exact. -/
 example (c : Bool) : Term.grade (harden c) = .static := rfl
+
+/-- The panel's grade is a function of the list the designer wrote: three
+members, each static, `Frag.parN 3 .static`, which *is* `.static`. -/
+example : Term.grade review = Frag.parN 3 .static := rfl
 
 /-- The width fold agrees. It says `0` of a workflow that asks seven questions,
 which is not a bug: grade width counts copies of a written shell that values can
@@ -146,7 +207,8 @@ theorem const_costBounded (k : Nat) :
     Mat.CostBounded k (fun (_ : ι) (_ : κ) => Cost.fin k) := fun _ _ => le_refl _
 
 /-- **A `Transform` is free**: `1` at `Cost` is `fin 0`, so copying, pairing,
-decoding and merging cost nothing. -/
+decoding and merging cost nothing — and so does the empty panel, which is a
+`Transform` and nothing else. -/
 theorem pointMat_costBounded (h : ι → κ) :
     Mat.CostBounded 0 (Mat.pointMat h : Mat Cost ι κ) := by
   intro a b; by_cases hb : h a = b
@@ -154,7 +216,8 @@ theorem pointMat_costBounded (h : ι → κ) :
   · rw [Mat.pointMat_apply_ne hb]; exact Cost.bot_le _
 
 /-- **Branches in flight add** — a Kronecker entry is a product of entries, the
-same arithmetic `Frag.par` does on widths one stratum up. -/
+same arithmetic `Frag.par` does on widths one stratum up, and the same
+arithmetic `Frag.parN` iterates for a panel. -/
 theorem kron_costBounded {ι' κ' : Type} {j k : Nat} {A : Mat Cost ι κ}
     {B : Mat Cost ι' κ'} (hA : Mat.CostBounded j A) (hB : Mat.CostBounded k B) :
     Mat.CostBounded (j + k) (Mat.kron A B) := by
@@ -190,7 +253,14 @@ def costInterp : Term.Interp PatchOp Sc Cost :=
 /-- **One attempt costs at most 3400**: the deep-model draft at 2000 — 2000 and
 not 800 is `under` doing its work, the annotation reaching the price list — then
 the panel at 1400, two guides at 100 and three reviews at 400. Every `Transform`
-in it (the `keep` wire, the copies, the decoder, the merge) is free. -/
+in it (the `keep` wire, the copies, the decoder, the merges) is free, and so is
+the empty panel that closes the fold.
+
+The proof's shape is the panel's recursion, read outwards: `[]` at 0, `[simple]`
+at 400, `[secure, simple]` at 900, `[correct, secure, simple]` at 1400. A fixed
+`panel₃` hid that nesting behind a 3-ary merge; the `n`-ary panel puts it in the
+proof, where it is one `kron_costBounded` per member and reads as the sum it
+is. -/
 theorem cost_attempt (g : Sc) : Mat.CostBounded 3400 (Term.muS costInterp attempt g) :=
   have brief : ∀ r : PatchOp (Guide × Patch) Findings, price g r = 400 →
       Mat.CostBounded 500 (Term.muS costInterp (guided sg .style r : Wf .static Patch Findings) g) :=
@@ -198,15 +268,25 @@ theorem cost_attempt (g : Sc) : Mat.CostBounded 3400 (Term.muS costInterp attemp
       (Mat.comp_costBounded (Mat.comp_costBounded (pointMat_costBounded _)
         (kron_costBounded (const_costBounded 100) (pointMat_costBounded _)))
         (const_costBounded (price g r)))
+  -- the empty panel that closes the fold: a `Transform`, hence free
+  have panel₀ := pointMat_costBounded (ι := Patch) (κ := Findings) (fun _ => (1 : Findings))
   Mat.costBounded_mono (by norm_num) <|
     Mat.comp_costBounded
       (Mat.comp_costBounded (const_costBounded 2000)
         (Mat.comp_costBounded (pointMat_costBounded _)
           (kron_costBounded (pointMat_costBounded _)
+            -- `review` = the panel of three, each level a copy, a tensor, a merge
             (Mat.comp_costBounded
               (Mat.comp_costBounded (pointMat_costBounded _)
                 (kron_costBounded (brief .correct rfl)
-                  (kron_costBounded (brief .secure rfl) (const_costBounded 400))))
+                  (Mat.comp_costBounded
+                    (Mat.comp_costBounded (pointMat_costBounded _)
+                      (kron_costBounded (brief .secure rfl)
+                        (Mat.comp_costBounded
+                          (Mat.comp_costBounded (pointMat_costBounded _)
+                            (kron_costBounded (const_costBounded 400) panel₀))
+                          (pointMat_costBounded _))))
+                    (pointMat_costBounded _))))
               (pointMat_costBounded _)))))
       (pointMat_costBounded _)
 
@@ -268,18 +348,38 @@ run, outside in: zero trips round the loop (the identity summand of the truncate
 star), one attempt whose reviewers approve, the tool call behind an open gate.
 Its counterpart is `muS_harden_false` — without consent the entry is not
 "unlikely" but `False` — and the two together are the design's claim that a
-permission is a scalar. -/
+permission is a scalar.
+
+`pan` is where the `n`-ary panel shows in a proof: one `comp`/`kron`/`merge`
+triple per member, nested to the right, closed by the unit. Every merge but the
+innermost reduces on the nose, `approve * v` being `v` by `Findings.meet`'s
+first equation; the innermost is `v * 1`, which is `mul_one` — the monoid law,
+present exactly because `panel` asked for a `Monoid`, and discharged here by
+the verdict's two cases (`mrg1`). -/
 theorem harden_possible (g : Sc) (s : Spec) : Term.muS possible (harden true) g s () :=
   have rev : ∀ (r : PatchOp (Guide × Patch) Findings) (p : Patch) (v : Findings),
       Term.muS possible (guided (Op := PatchOp) (G := Sc) sg .style r) g p v := fun _ p _ =>
     comp_possible ("", p) (comp_possible ((), p) (point_possible _ p)
       (kron_possible trivial (point_possible id p))) trivial
+  have mrg : ∀ q : Findings × Findings,
+      (Mat.pointMat (fun p : Findings × Findings => p.1 * p.2) : Mat Prop _ Findings) q (q.1 * q.2) :=
+    fun q => point_possible (fun p : Findings × Findings => p.1 * p.2) q
+  have mrg1 : ∀ w : Findings,
+      (Mat.pointMat (fun p : Findings × Findings => p.1 * p.2) : Mat Prop _ Findings) (w, 1) w := by
+    intro w; cases w <;> exact point_possible (fun p : Findings × Findings => p.1 * p.2) _
   have pan : ∀ (p : Patch) (v : Findings), Term.muS possible review g p v := fun p v =>
-    comp_possible (Findings.approve, (Findings.approve, v))
-      (comp_possible (p, (p, p)) (point_possible (fun a : Patch => (a, (a, a))) p)
+    comp_possible (Findings.approve, v)
+      (comp_possible (p, p) (point_possible (fun a : Patch => (a, a)) p)
         (kron_possible (rev .correct p .approve)
-          (kron_possible (rev .secure p .approve) trivial)))
-      (point_possible _ _)
+          (comp_possible (Findings.approve, v)
+            (comp_possible (p, p) (point_possible (fun a : Patch => (a, a)) p)
+              (kron_possible (rev .secure p .approve)
+                (comp_possible (v, (1 : Findings))
+                  (comp_possible (p, p) (point_possible (fun a : Patch => (a, a)) p)
+                    (kron_possible trivial (point_possible (fun _ : Patch => (1 : Findings)) p)))
+                  (mrg1 v))))
+            (mrg (Findings.approve, v)))))
+      (mrg (Findings.approve, v))
   have att : ∀ q : Patch, Term.muS possible attempt g q (Sum.inl q) := fun q =>
     comp_possible (q, Findings.approve)
       (comp_possible q trivial
@@ -318,33 +418,64 @@ def sheetRunner (ε : Env (Key Lbl) String) : Runner PatchOp Sc Lbl :=
 
 /-! Where each consultation happens, reading the terms below from the root. No
 path here is postulated: each is the site the fold computes, and the `rfl`s are
-the check. `kGuide` is the one that is *rebased* — it records the label and the
-path below it and nothing about where in the term the occurrence sits, which is
-exactly why two occurrences of `share sg` collide. -/
+the check.
 
-def kCorrect : Key Lbl := .abs [.seqL, .seqR, .parL, .seqR]                       -- correctness
-def kSecure : Key Lbl := .abs [.seqL, .seqR, .parR, .parL, .seqR]                 -- security
-def kSimple : Key Lbl := .abs [.seqL, .seqR, .parR, .parR]                        -- simplicity
-def kGuide : Key Lbl := .rel sg []                                                -- the shared guide
-def kStyle₁ : Key Lbl := .abs [.seqL, .seqR, .parL, .seqL, .seqR, .parL]          -- unshared draw 1
-def kStyle₂ : Key Lbl := .abs [.seqL, .seqR, .parR, .parL, .seqL, .seqR, .parL]   -- unshared draw 2
-def kDraft (trip : Nat) : Key Lbl := .abs [.retry trip, .seqL, .seqL, .scope]     -- the trip-th draft
+**The paths are the `n`-ary panel's recursion.** `panel [a, b, c]` is
+`fn copy >>> parT a (panel [b, c]) >>> fn merge`, so the head member sits at
+`[.seqL, .seqR, .parL]` and the *rest of the panel* at `[.seqL, .seqR, .parR]`:
+each successive member is one `[.seqL, .seqR, .parR]` deeper than the last. That
+is a real change from the fixed `panel₃`, whose three members sat at `parL`,
+`parR/parL` and `parR/parR` — the first member's path is unchanged, the second's
+and the third's are longer. A key is a fact about a written term, and the term
+was rewritten.
+
+`kGuide` is the one that is *rebased* — it records the label and the path below
+it and nothing about where in the term the occurrence sits, which is exactly why
+two occurrences of `share sg` collide, and why lengthening the panel's spine did
+not move it. -/
+
+-- correctness: panel member 0, then the leaf of `briefed`
+def kCorrect : Key Lbl := .abs [.seqL, .seqR, .parL, .seqR]
+-- security: one panel step in, then member 0 of the tail, then the leaf
+def kSecure : Key Lbl := .abs [.seqL, .seqR, .parR, .seqL, .seqR, .parL, .seqR]
+-- simplicity: two panel steps in, then member 0 of that tail; no briefing to pass
+def kSimple : Key Lbl := .abs [.seqL, .seqR, .parR, .seqL, .seqR, .parR, .seqL, .seqR, .parL]
+-- the shared guide: rebased onto the label, so it carries no path at all
+def kGuide : Key Lbl := .rel sg []
+-- the two unshared draws of the guide in `reviewDup`, at the two briefing sites
+def kStyle₁ : Key Lbl := .abs [.seqL, .seqR, .parL, .seqL, .seqR, .parL]
+def kStyle₂ : Key Lbl :=
+  .abs [.seqL, .seqR, .parR, .seqL, .seqR, .parL, .seqL, .seqR, .parL]
+-- the trip-th draft, the trip index sitting above the whole attempt
+def kDraft (trip : Nat) : Key Lbl := .abs [.retry trip, .seqL, .seqL, .scope]
 
 /-- **(4) The shared panel reads one guide cell, twice.** `ε kGuide` appears
 twice on the right with one cell behind both: the two `share sg` occurrences
 rebase to the same key, so the world is asked once and both reviewers read the
-answer. -/
+answer.
+
+The right-hand side is the panel's fold written out — `v₀ * (v₁ * (v₂ * 1))` —
+and the trailing `1` is the empty panel, the term `fn (fun _ => 1)` that closes
+the recursion. It is not noise: it is what makes the arity a property of the
+list rather than of the combinator's name. -/
 theorem review_reads_one_cell (ε : Env (Key Lbl) String) (p : Patch) :
     Term.muExt (sheetRunner ε) review LastOpt.unset Key.root p
-      = some (mergeFindings (judge (ε kCorrect) (ε kGuide))
-          (judge (ε kSecure) (ε kGuide)) (judge (ε kSimple) "")) := rfl
+      = some (judge (ε kCorrect) (ε kGuide)
+          * (judge (ε kSecure) (ε kGuide) * (judge (ε kSimple) "" * 1))) := rfl
+
+/-- The same read-out with the unit discharged, which is all `mul_one` is for:
+the empty panel contributes the identity and then goes away. -/
+theorem review_reads_one_cell' (ε : Env (Key Lbl) String) (p : Patch) :
+    Term.muExt (sheetRunner ε) review LastOpt.unset Key.root p
+      = some (judge (ε kCorrect) (ε kGuide)
+          * (judge (ε kSecure) (ε kGuide) * judge (ε kSimple) "")) := by
+  simpa using review_reads_one_cell ε p
 
 /-- **The one contrast definition**: the same panel with the sharing removed.
 `review` writes `guided sg .style`, which is `briefed (share sg (ask .style))`;
 this writes `briefed (ask .style)`. One word, and it is the word §6a is about. -/
 def reviewDup : Wf .static Patch Findings :=
-  panel₃ (briefed (ask .style) .correct) (briefed (ask .style) .secure)
-    (ask .simple) mergeFindings
+  panel [briefed (ask .style) .correct, briefed (ask .style) .secure, ask .simple]
 
 /-- **(5) The unshared panel reads two.** Same reviewers, same merge, and now
 the guide is drawn twice — two independent samples, the default, and what a
@@ -353,8 +484,8 @@ designer who did not write `share` asked for. A sheet answering `kStyle₁` and
 that is a difference in *meaning* and not a missed cache hit. -/
 theorem reviewDup_reads_two_cells (ε : Env (Key Lbl) String) (p : Patch) :
     Term.muExt (sheetRunner ε) reviewDup LastOpt.unset Key.root p
-      = some (mergeFindings (judge (ε kCorrect) (ε kStyle₁))
-          (judge (ε kSecure) (ε kStyle₂)) (judge (ε kSimple) "")) := rfl
+      = some (judge (ε kCorrect) (ε kStyle₁)
+          * (judge (ε kSecure) (ε kStyle₂) * (judge (ε kSimple) "" * 1))) := rfl
 
 -- Second-trip cells read `"ok"`, first-trip cells `"no"`, the shared guide lenient.
 def sheetRevise : Env (Key Lbl) String
@@ -394,24 +525,37 @@ part — the four places an implementation must **differ**.
   relations is exactly `review` versus `reviewDup`: content addressing silently
   merges two draws into one, collapsing an ensemble and leaving the variance
   wrong while the support stays right. Key by content **only** where the leaf is
-  deterministic. Likewise `share` ↔ `leafKey`: the fold keys on the label alone
-  and never compares bodies (acat-bmc), so labels generated from source position
-  are safe and labels taken from user configuration are not. And innermost-wins
-  is not code — it is `LastOpt`'s non-commutativity, so `under` is got right by
-  using a monoid and wrong by writing an interpreter rule.
+  deterministic. Positional keying has its own liability, and §5's key table is
+  where it shows: adding a fourth reviewer to `panel` lengthens the spine and
+  *renames* every member below the insertion point, so a session file is
+  invalidated by an edit that changed nobody's prompt. That is the honest price
+  of "a site is a position", and a store that wants edit-stable keys must earn
+  them with a labelling (`share`) rather than by hashing behind the designer's
+  back. Likewise `share` ↔ `leafKey`: the fold keys on the label alone and never
+  compares bodies (acat-bmc), so labels generated from source position are safe
+  and labels taken from user configuration are not. And innermost-wins is not
+  code — it is `LastOpt`'s non-commutativity, so `under` is got right by using a
+  monoid and wrong by writing an interpreter rule.
 * **What may be quoted before spending.** `.static` is an exact quote
   (`cost_harden`'s 10200), `.bounded n` a supremum honestly labelled (`perFile`
-  quotes eight), `.monadic` a refusal to quote — the truth, not an evasion.
+  quotes eight), `.monadic` a refusal to quote — the truth, not an evasion. A
+  panel quotes `Frag.parN rs.length f`, so the quote grows with the list and
+  needs no new combinator to do it.
 * **Where the spec is not the run.** `muExt run` is the meaning *at* a world; a
   real run samples one, so a passing run proves nothing and a theorem quantified
   over `ε` proves everything. `muExt` also runs a tensor left-first and
   short-circuits, so a parallel strategy consults sites the spec says are never
   reached — `muS` is symmetric, so the *cost* is unchanged, and the extra
   consultations are the implementation's business, not answers the workflow may
-  read. Finally, bounds must be enforced and not intended: `fanT n` truncates
-  *in the meaning*, so an uncapped parallel map denotes a different workflow,
-  and `gateT`'s `Bool` wants to become a lattice of permissions, which the
-  semantics is ready for, gating being the action of a scalar (acat-755).
+  read. The panel's fold is right-nested and its reducer is a monoid, which is
+  the licence to reduce members as they land rather than in written order;
+  reordering the *members* is a further licence (`Findings.meet_comm`) and racing
+  duplicates a further one still (`Findings.meet_idem`), and an implementation
+  that helps itself to either without the corresponding law is not implementing
+  this term. Finally, bounds must be enforced and not intended: `fanT n`
+  truncates *in the meaning*, so an uncapped parallel map denotes a different
+  workflow, and `gateT`'s `Bool` wants to become a lattice of permissions, which
+  the semantics is ready for, gating being the action of a scalar (acat-755).
 -/
 
 end HardenPatch
