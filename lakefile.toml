@@ -1,6 +1,6 @@
 name = "agentic"
 version = "0.1.0"
-defaultTargets = ["Agentic"]
+defaultTargets = ["Agentic", "Pollution"]
 
 [[lean_lib]]
 name = "Agentic"
@@ -17,3 +17,10 @@ rev = "v4.30.0"
 [[lean_lib]]
 name = "HardenPatch"
 srcDir = "example"
+
+# The instance-pollution probe (test/Pollution.lean): machine-checked assertions
+# that importing this package installs no arithmetic on `Bool`, `Prop` or `ℕ`.
+# In defaultTargets on purpose — a re-polluting instance must break the build.
+[[lean_lib]]
+name = "Pollution"
+srcDir = "test"

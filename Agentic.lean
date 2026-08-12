@@ -1,13 +1,15 @@
--- The package's one monoid, now Mathlib's: `PMonoid`/`CMonoid`/`IdemCMonoid`
--- are abbreviations for `Monoid`/`CommMonoid`/`Std.IdempotentOp`, the order an
--- idempotent join induces is `SemilatticeSup` + `OrderBot`, and `⋄` is scoped
--- notation for `*`. What survives is the pair of actions on a reader (`actR`
--- for scoping, `actL` for the derivative), with the docstring saying exactly
--- why Mathlib's `DomMulAct` cannot serve.
+-- The package's one monoid is Mathlib's, and is now spelled Mathlib's way:
+-- binders say `Monoid`/`CommMonoid`/`Std.IdempotentOp (· * ·)`, combination is
+-- `*`, and the order an idempotent join induces is `SemilatticeSup` +
+-- `OrderBot`. Two things survive: the pair of actions on a reader (`actR` for
+-- scoping, `actL` for the derivative), with the docstring saying exactly why
+-- Mathlib's `DomMulAct` cannot serve; and `SupMon`, the join presented as a
+-- monoid (`* = ⊔`, `1 = ⊥`), which is what both join reducers of `Keys` are
+-- and which Mathlib has in no form.
 import Agentic.Monoid
--- The resource algebra, now Mathlib's: `NSemiring`/`CSemiring`/`IdemAdd`/
--- `KleeneStar` are `Semiring`/`CommSemiring`/`IdemSemiring`/`KleeneAlgebra`,
--- the canonical additive order `≤+` is Mathlib's `≤`, and `star` is `kstar`.
+-- The resource algebra is Mathlib's, and is now spelled Mathlib's way:
+-- `Semiring`/`CommSemiring`/`IdemSemiring`/`KleeneAlgebra`, the canonical
+-- additive order written `≤`, and iteration written `x∗` (`KStar.kstar`).
 -- Two things survive with survivor docstrings: `StarSemiring` (one unrolling
 -- law and nothing else, for the expectation semiring, whose `+` is not
 -- idempotent and which is therefore outside `KleeneAlgebra`) and
@@ -15,19 +17,25 @@ import Agentic.Monoid
 -- covering both the lattice carriers and expectation); also why countability
 -- is a remark about the models rather than a premise of the meanings.
 import Agentic.Semiring
--- Carriers, now Mathlib's: possibility (`Prop`), worst-case cost (`Cost`,
+-- Carriers, now Mathlib's: possibility (`Prop`, whose semiring is `scoped` in
+-- `Agentic.Possibility` — importing this package must not install arithmetic on
+-- propositions; `test/Pollution.lean` is the standing check)), worst-case cost (`Cost`,
 -- max-plus on `Multiplicative (WithBot ℕ∞)`, the genuine ⊥ being `WithBot`'s),
 -- consensus weight (`Prob`, Viterbi `(max, ×)` on `ℝ≥0∞` — real probabilities,
 -- with `[0,1]` appearing as the hypothesis it is), and the expectation
 -- semiring `P ⋉ M` as Mathlib's `TrivSqZeroExt` — complete over any complete
 -- module of moments (`CompletePMod`) and starred by `⟨p*, p* m p*⟩`.
--- Aggregation at the three lattice carriers is Mathlib's `iSup`. The first
--- three carry stars that are least (`KleeneStar`); the fourth carries a star
--- that answers the unrolling law, its `+` not being idempotent.
+-- Aggregation at the three lattice carriers is Mathlib's `iSup`, and saying so
+-- (`CsumIsSup`) is the whole of what each contributes to the star: the first
+-- three are Kleene algebras by one construction, `x∗ = ⊕ₙ xⁿ`; the fourth
+-- carries a star that only answers the unrolling law, its `+` not being
+-- idempotent.
 import Agentic.Instances
 -- `S`-matrices as resource-weighted transitions: identity, zero,
 -- Chapman–Kolmogorov composition (a semiring), Kronecker product,
--- value-dependent sequencing = composition.
+-- value-dependent sequencing = composition — and, over any carrier whose
+-- aggregation is a supremum, the matrix Kleene star `M∗ = ⨆ₙ Mⁿ`, both
+-- inductions included even though composition does not commute.
 import Agentic.Matrix
 -- Consultations and environments `ε`, pinning `ε[q ↦ a]` (Mathlib's
 -- `Function.update`, with its five laws), the extensional meaning space,
@@ -41,8 +49,9 @@ import Agentic.Env
 import Agentic.Panel
 -- Inhabitants for the panel keys: the free monoid on names (Mathlib's
 -- `FreeMonoid`, transported to `List`), `Tally` as `Multiplicative ℕ`, and the
--- two joins Mathlib carries as lattices but not as monoids — `Width` under
--- `max` and the idempotent Bool-or witness for speculate/race.
+-- two joins Mathlib carries as lattices but not as monoids — `Width` (`max` on
+-- ℕ) and `Race` (`or` on `Bool`, the speculate/race witness) — both of them
+-- `SupMon`, so that neither `ℕ`'s arithmetic nor `Bool`'s is ours to decide.
 import Agentic.Keys
 -- Mazurkiewicz traces as a genuine quotient — Mathlib's `FreeMonoid` modulo
 -- the congruence `conGen Swap`, so the quotient monoid is `Con.monoid` and only
@@ -62,19 +71,25 @@ import Agentic.Gate
 -- index family, and the `const ε` collapse.
 import Agentic.Context
 -- The retry solve `(M_A · d)* · M_B`, its loop equation and — under
--- `KleeneStar` — its leastness, at matrices as well as scalars; the
--- reachability star at possibility, least by induction on path length; the
+-- `KleeneAlgebra` — its leastness, at matrices as well as scalars, with the
+-- matrix algebra constructed rather than assumed; reachability as the read-out
+-- of that star at possibility, its closure facts read off the Kleene laws; the
 -- read-outs at `Prop`, `Cost` (including the three-answer loop the leastness
 -- principle was written for), `Prob` (Viterbi absorption) and expectation
 -- (`p* m p*`, and the projection commuting with the solve); fuel as
 -- truncation, bounded at the retry matrix.
 import Agentic.Star
 -- The Pareto preorder on resource factors: Mathlib's product order, with the
--- incomparability witness and `Scalarization` as an `OrderHom`.
+-- incomparability witness — the one thing Mathlib does not have — and the
+-- reading of a scalarization as an `OrderHom`.
 import Agentic.Pareto
--- The fragment grade: static | bounded n | monadic, with join (sequencing),
--- par (tensor widths add), and scale (fan multiplicities multiply, the body
--- counting at least as one copy of itself).
+-- The fragment grade, which is Mathlib's `ℕ∞`: static is 0 (the bottom),
+-- bounded n is the numeral, monadic is ⊤, sequencing joins by ⊔ and a tensor
+-- adds by +, so the order and every law of the two operations are Mathlib's.
+-- One operation survives, the one the shelf has no name for: scale n f =
+-- n * max 1 f, the fan, whose `max 1` is the written shape counting as one
+-- copy of itself — and whose arithmetic in ℕ∞ grades a zero-fan of an opaque
+-- body `static`, because 0 * ⊤ = 0.
 import Agentic.Frag
 -- The syntax stratum: workflow terms as an inductive family indexed by Frag,
 -- semiring-free; consultation identity is positional, so duplication is the
@@ -82,10 +97,10 @@ import Agentic.Frag
 import Agentic.Term
 -- The meaning stratum: the two folds of §3 out of one syntax — the
 -- quantitative muS into matrices (each clause a §4 type-class-morphism row)
--- and the site-keyed extensional muExt into partial functions — the width
--- fold that re-runs the grade arithmetic beside the semantic width `peak`
--- that counts consultations (the two are incomparable; what the grade bounds
--- is `peak ≤ writtenSites * copies`), sharing made observable, and
+-- and the site-keyed extensional muExt into partial functions — the semantic
+-- width `peak` that counts consultations in flight, incomparable with the
+-- grade index it was meant to bound (what the grade bounds is
+-- `peak ≤ writtenSites * Frag.copies f`), sharing made observable, and
 -- workflow equality as the quotient by extensional meaning up to a
 -- relabelling of consultation sites, on which the static fragment is a
 -- category.

@@ -137,7 +137,37 @@ The `Option` is *refusal*: partiality here is not failure-as-error but a
 workflow declining to produce a result — a gate closed, a guard unsatisfied, a
 budget exhausted. Refusal is the annihilating element (`extComp_none_left`,
 `extComp_none_right`), which is the extensional shadow of `0` absorbing in the
-resource semiring. -/
+resource semiring.
+
+**SURVIVOR — what Mathlib lacks, stated exactly, after the law-dedup.** Not
+much, and it is important to say which part. The `Option` half is not ours and
+is no longer proved here: `extComp` *is* `Option.bind` pointwise, `extId` *is*
+`some`, and the three category laws below are `Option.bind_assoc`,
+`Option.bind_some` and `Option.bind_fun_some` applied, not re-proved. `Env` is
+a function type and `pin` is `Function.update` with Mathlib's five laws. If
+that were all, this module would be a naming layer and should be deleted.
+
+Two things are not that, and they are the reason the type is written out rather
+than assembled from `StateT`/`ReaderT`/`OptionT`:
+
+* **The world is threaded, and the threading is the point.** `W × ι → Option (W
+  × κ)` sequences effects on a shared world, and that is what makes the
+  design's tensor *premonoidal*: two branches of a `kron` cannot be commuted
+  past one another even though their resource weights multiply commutatively.
+  Mathlib has no premonoidal category and no theory of this shape; a
+  `StateT W (OptionT (Reader (Env C O)))` would give exactly this type from the
+  shelf, but its laws — the ones Mathlib does have — are the monad laws, and
+  the *inequality* the design needs (`share_ne_dup`, and world effects not
+  commuting) is precisely what those laws do not state. What we keep is the
+  statement, not the algebra.
+
+* **The environment is read, not carried.** Both halves of `extComp` receive
+  the *same* `ε`, and pinning is what makes a counterfactual meaningful; that
+  is randomness-at-the-edge, and it is a modelling commitment expressed in the
+  type. The theorems that pay for it are `share_ne_dup` and
+  `share_eq_dup_of_agree` below, neither of which is a monad law and neither of
+  which Mathlib could supply, because they are facts about *this* design's
+  identification of model, tool and human as one consultation index. -/
 def Ext (C O W ι κ : Type) : Type := Env C O → W × ι → Option (W × κ)
 
 /-- The workflow that does nothing: it consults nothing, changes no world,
@@ -158,30 +188,33 @@ def extComp {C O W ι κ ν : Type} (f : Ext C O W ι κ) (g : Ext C O W κ ν) 
     Ext C O W ι ν :=
   fun ε s => (f ε s).bind (g ε)
 
+/-! The three category laws below are the `Option` monad laws, pointwise in the
+sample point: `extComp` is `Option.bind`, `extId` is `some`, so associativity
+is `Option.bind_assoc`, the left unit is `Option.bind_some`
+(`(some a).bind f = f a`) and the right unit is `Option.bind_fun_some`
+(`x.bind some = x`). The docstring of
+`extComp` says the composition is Kleisli-of-`Option`; the proofs say it
+too. -/
+
 /-- Sequencing is associative: a pipeline has one meaning, not a bracketing of
-meanings. Refusal propagates identically either way, which is the whole of the
-`Option` case analysis. -/
+meanings. Refusal propagates identically either way, and that is exactly
+`Option.bind_assoc`. -/
 theorem extComp_assoc {C O W ι κ ν ρ : Type}
     (f : Ext C O W ι κ) (g : Ext C O W κ ν) (h : Ext C O W ν ρ) :
-    extComp (extComp f g) h = extComp f (extComp g h) := by
-  funext ε s
-  show ((f ε s).bind (g ε)).bind (h ε) = (f ε s).bind (fun t => (g ε t).bind (h ε))
-  cases f ε s with
-  | none => rfl
-  | some t => rfl
+    extComp (extComp f g) h = extComp f (extComp g h) :=
+  funext fun ε => funext fun s => Option.bind_assoc (f ε s) (g ε) (h ε)
 
-/-- Doing nothing first changes no meaning. -/
+/-- Doing nothing first changes no meaning: the left unit law of `Option`,
+`(some s).bind (f ε) = f ε s`. -/
 theorem extId_comp {C O W ι κ : Type} (f : Ext C O W ι κ) :
-    extComp extId f = f := rfl
+    extComp extId f = f :=
+  funext fun ε => funext fun s => Option.bind_some s (f ε)
 
-/-- Doing nothing afterwards changes no meaning. -/
+/-- Doing nothing afterwards changes no meaning: the right unit law of
+`Option`, `x.bind some = x`. -/
 theorem extComp_id {C O W ι κ : Type} (f : Ext C O W ι κ) :
-    extComp f extId = f := by
-  funext ε s
-  show (f ε s).bind (fun t => some t) = f ε s
-  cases f ε s with
-  | none => rfl
-  | some t => rfl
+    extComp f extId = f :=
+  funext fun ε => funext fun s => Option.bind_fun_some (f ε s)
 
 /-- Refusing first refuses the whole: nothing downstream of a closed gate
 runs. -/

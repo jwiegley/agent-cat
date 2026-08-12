@@ -11,6 +11,8 @@ introduced later and lives there, not here.
 
 namespace Agentic
 
+open Computability KStar
+
 /-- A `Mat S ι κ` is a representation of a resource-weighted transition: the
 entry `M a b` is the weight of `a` becoming `b`. A model IS such a matrix — the
 weight of a prompt becoming a completion; so is a workflow, so is a tool call,
@@ -22,7 +24,38 @@ so "the design has no separate notion of program" is no longer the whole story.
 It remains true that the syntax is not a second kind of *meaning*: a term is a
 tree a designer writes, and the quantitative meaning function that reads it,
 `Agentic.Term.muS`, lands in exactly these matrices — every clause of it is one
-of the operations below. The two strata now touch, and they touch here. -/
+of the operations below. The two strata now touch, and they touch here.
+
+**SURVIVOR — what Mathlib lacks.** Mathlib has `Matrix m n α := m → n → α`
+(`Mathlib/LinearAlgebra/Matrix/Defs.lean`, line 53), which is this type on the
+nose, and it is *not* the type that is missing. What is missing is the
+multiplication. Mathlib's matrix product is
+
+```
+@[default_instance 100]
+instance [Fintype m] [Mul α] [AddCommMonoid α] :
+    HMul (Matrix l m α) (Matrix m n α) (Matrix l n α)
+```
+
+(`Mathlib/Data/Matrix/Mul.lean`, line 294), summing with `Finset.sum` over
+`Finset.univ`; its own docstring says "This is currently only defined when `m`
+is finite". Every index in this package is an arbitrary `Type`: prompts,
+completions, patches, findings, sessions, the environment's answer space. None
+of them is a `Fintype`, and none of them may be assumed one — "the table of all
+replies" is the whole idea of §1, and there are infinitely many replies. The
+intermediate index of a Chapman–Kolmogorov composition is therefore summed with
+`csum` (`Agentic.CompleteCSemiring`, itself a survivor for the same reason),
+not with `Finset.sum`, and a distinct type is what keeps the two products from
+being confused: `Mat` is a `def`, so `Matrix`'s `HMul` — a `default_instance`,
+which fires eagerly — cannot reach it and silently demand a `Fintype`.
+
+Everything else in this module is downstream of that one choice. `comp` is not
+`Matrix.mul`; `kron` is not `Matrix.kroneckerMap`
+(`Mathlib/LinearAlgebra/Matrix/Kronecker.lean`, line 55); the
+`Semiring (Mat S ι ι)` instance is not `Matrix.semiring`
+(`Mathlib/Data/Matrix/Mul.lean`, line 496, `[Fintype n] [DecidableEq n]`).
+Should Mathlib ever acquire an arbitrary-index matrix product over a complete
+semiring, this module becomes a transport. -/
 def Mat (S : Type) (ι κ : Type) : Type := ι → κ → S
 
 /-- `CsumAdditive S` is the property that aggregation splits over binary
@@ -35,7 +68,7 @@ this law but the law relating `csum` to `+` at all, `CompleteCSemiring.csum_pair
 and with that axiom in place `CsumAdditive S` holds of *every* complete
 resource semiring (`csumAdditive`, below). The name survives as a statement,
 not as an obligation. -/
-def CsumAdditive (S : Type) [CompleteCSemiring S] : Prop :=
+def CsumAdditive (S : Type) [CommSemiring S] [CompleteCSemiring S] : Prop :=
   ∀ {ι : Type} (x y : ι → S), csum (fun i => x i + y i) = csum x + csum y
 
 /-- **Every complete resource semiring aggregates additively.** The derivation
@@ -44,7 +77,7 @@ because `Panel` needs it too: rewrite each binary `+` as an aggregation over `Bo
 (two-point agreement, read backwards), exchange the two aggregations (Fubini),
 and read the outer one back as a `+`. No hypothesis on the carrier is left,
 so the theorems below state the distributive laws they mean. -/
-theorem csumAdditive {S : Type} [CompleteCSemiring S] : CsumAdditive S :=
+theorem csumAdditive {S : Type} [CommSemiring S] [CompleteCSemiring S] : CsumAdditive S :=
   fun x y => csum_add x y
 
 namespace Mat
@@ -61,36 +94,36 @@ equal is an implementation's problem; a meaning is entitled to say that `a`
 becomes `a` whether or not anyone can check it, and the price — this
 definition, and everything downstream of it, is `noncomputable` — is exactly
 the price of letting the meaning be uncomputable. -/
-noncomputable def idMat [CSemiring S] : Mat S ι ι :=
+noncomputable def idMat [CommSemiring S] : Mat S ι ι :=
   fun a b => if a = b then 1 else 0
 
 /-- Staying put is free: the diagonal entry of the identity is `1`. Stated as
 a lemma so that no later proof has to name the classical decision procedure
 that `idMat` was defined with. -/
-theorem idMat_self [CSemiring S] (a : ι) : (idMat : Mat S ι ι) a a = 1 :=
+theorem idMat_self [CommSemiring S] (a : ι) : (idMat : Mat S ι ι) a a = 1 :=
   if_pos rfl
 
 /-- Becoming something else is impossible: the off-diagonal entries of the
 identity are `0`. -/
-theorem idMat_ne [CSemiring S] {a b : ι} (h : a ≠ b) : (idMat : Mat S ι ι) a b = 0 :=
+theorem idMat_ne [CommSemiring S] {a b : ι} (h : a ≠ b) : (idMat : Mat S ι ι) a b = 0 :=
   if_neg h
 
 /-- Composition of transitions: the weight of `a` becoming `c` is the
 aggregate, over every intermediate `b`, of doing the first step and then the
 second. This is Chapman–Kolmogorov, and it is the only sequencing operator the
 design needs. -/
-def comp [CompleteCSemiring S] (M : Mat S ι κ) (N : Mat S κ ν) : Mat S ι ν :=
+def comp [CommSemiring S] [CompleteCSemiring S] (M : Mat S ι κ) (N : Mat S κ ν) : Mat S ι ν :=
   fun a c => csum fun b => M a b * N b c
 
 /-- The Kronecker product: two transitions run side by side on a pair of
 indices, their weights multiplied. -/
-def kron [CSemiring S] (A : Mat S ι κ) (B : Mat S ι' κ') :
+def kron [CommSemiring S] (A : Mat S ι κ) (B : Mat S ι' κ') :
     Mat S (ι × ι') (κ × κ') :=
   fun p q => A p.1 q.1 * B p.2 q.2
 
 /-- Composition is associative: the intermediate index may be summed over in
 either order, so a pipeline has one meaning, not a bracketing of meanings. -/
-theorem comp_assoc [CompleteCSemiring S]
+theorem comp_assoc [CommSemiring S] [CompleteCSemiring S]
     (M : Mat S ι κ) (N : Mat S κ ν) (P : Mat S ν ρ) :
     comp (comp M N) P = comp M (comp N P) := by
   funext a d
@@ -109,7 +142,7 @@ theorem comp_assoc [CompleteCSemiring S]
 /-- The identity transition is a left unit: prefixing "do nothing" changes no
 meaning. The point-mass axiom for aggregation is exactly what makes this
 work. -/
-theorem id_comp [CompleteCSemiring S] (M : Mat S ι κ) :
+theorem id_comp [CommSemiring S] [CompleteCSemiring S] (M : Mat S ι κ) :
     comp idMat M = M := by
   funext a c
   show csum (fun b => (idMat : Mat S ι ι) a b * M b c) = M a c
@@ -120,7 +153,7 @@ theorem id_comp [CompleteCSemiring S] (M : Mat S ι κ) :
 
 /-- The identity transition is a right unit: appending "do nothing" changes no
 meaning. -/
-theorem comp_id [CompleteCSemiring S] (M : Mat S ι κ) :
+theorem comp_id [CommSemiring S] [CompleteCSemiring S] (M : Mat S ι κ) :
     comp M idMat = M := by
   funext a c
   show csum (fun b => M a b * (idMat : Mat S κ κ) b c) = M a c
@@ -140,7 +173,7 @@ premonoidal degradation — the failure of `(f ⊗ id) ∘ (id ⊗ g)` to equal
 `(id ⊗ g) ∘ (f ⊗ id)` — comes from world-threading, from effects on a shared
 environment; it does not come from the resource algebra, and so it cannot be
 seen at this level. -/
-theorem kron_mixed_product [CompleteCSemiring S]
+theorem kron_mixed_product [CommSemiring S] [CompleteCSemiring S]
     (A : Mat S ι κ) (B : Mat S ι' κ') (C : Mat S κ ν) (D : Mat S κ' ν') :
     comp (kron A B) (kron C D) = kron (comp A C) (comp B D) := by
   funext p q
@@ -175,33 +208,33 @@ The equality test is classical, exactly as `idMat`'s is and for the same
 reason: a meaning is entitled to say that `a` becomes `f a` whether or not
 anyone can decide the outcome type's equality. Indeed `idMat` *is* `pointMat
 id` (`pointMat_id`). -/
-noncomputable def pointMat [CSemiring S] (f : ι → κ) : Mat S ι κ :=
+noncomputable def pointMat [CommSemiring S] (f : ι → κ) : Mat S ι κ :=
   fun a b => if f a = b then 1 else 0
 
 /-- A function reaches its own value for free. Stated as a lemma so that no
 proof below has to name the classical decision procedure `pointMat` was
 defined with, exactly as `idMat_self` does for the identity. -/
-theorem pointMat_apply_self [CSemiring S] (f : ι → κ) (a : ι) :
+theorem pointMat_apply_self [CommSemiring S] (f : ι → κ) (a : ι) :
     (pointMat f : Mat S ι κ) a (f a) = 1 :=
   if_pos rfl
 
 /-- A function reaches nothing else: every outcome other than the function's
 value has the impossible weight. -/
-theorem pointMat_apply_ne [CSemiring S] {f : ι → κ} {a : ι} {b : κ}
+theorem pointMat_apply_ne [CommSemiring S] {f : ι → κ} {a : ι} {b : κ}
     (h : f a ≠ b) : (pointMat f : Mat S ι κ) a b = 0 :=
   if_neg h
 
 /-- Doing nothing is the identity function's transition: the two definitions
 agree on the nose, so the `Transform` row subsumes the `Category` row's unit
 rather than sitting beside it. -/
-theorem pointMat_id [CSemiring S] :
+theorem pointMat_id [CommSemiring S] :
     (pointMat (fun a : ι => a) : Mat S ι ι) = idMat := rfl
 
 /-- **A function composes by substitution**: prefixing a pipeline with the
 transition of `f` is evaluating the pipeline at `f a`. The aggregate collapses
 to its one nonzero term, which is what makes a `Transform` cost nothing and
 sum over nothing. -/
-theorem pointMat_comp [CompleteCSemiring S] (f : ι → κ) (M : Mat S κ ν) :
+theorem pointMat_comp [CommSemiring S] [CompleteCSemiring S] (f : ι → κ) (M : Mat S κ ν) :
     comp (pointMat f) M = fun a c => M (f a) c := by
   funext a c
   show csum (fun b => (pointMat f : Mat S ι κ) a b * M b c) = M (f a) c
@@ -214,7 +247,7 @@ theorem pointMat_comp [CompleteCSemiring S] (f : ι → κ) (M : Mat S κ ν) :
 /-- **Transforms fuse.** Two plain functions in sequence denote the composite
 function's transition: the `Transform` row is a functor, so a decoding step
 followed by a projection is one step and costs what one step costs. -/
-theorem pointMat_pointMat [CompleteCSemiring S] (f : ι → κ) (g : κ → ν) :
+theorem pointMat_pointMat [CommSemiring S] [CompleteCSemiring S] (f : ι → κ) (g : κ → ν) :
     comp (pointMat f : Mat S ι κ) (pointMat g) = pointMat (fun a => g (f a)) := by
   rw [pointMat_comp]
   funext a c
@@ -233,7 +266,7 @@ def caseMat (M : Mat S ι ν) (N : Mat S κ ν) : Mat S (Sum ι κ) ν :=
 /-- A branch followed by a common continuation is the branch of the two
 continued arms: whatever both sides do next may be pushed into either side.
 This is the first composition law of the coproduct. -/
-theorem caseMat_comp [CompleteCSemiring S]
+theorem caseMat_comp [CommSemiring S] [CompleteCSemiring S]
     (M : Mat S ι ν) (N : Mat S κ ν) (P : Mat S ν ρ) :
     comp (caseMat M N) P = caseMat (comp M P) (comp N P) := by
   funext x c
@@ -243,14 +276,14 @@ theorem caseMat_comp [CompleteCSemiring S]
 computation rule, and the second composition law. Together with `caseMat_inr`
 this says the branch really is defined by what it does on the two injections,
 so nothing about `caseMat` depends on the encoding of `Sum`. -/
-theorem caseMat_inl [CompleteCSemiring S] (M : Mat S ι ν) (N : Mat S κ ν) :
+theorem caseMat_inl [CommSemiring S] [CompleteCSemiring S] (M : Mat S ι ν) (N : Mat S κ ν) :
     comp (pointMat Sum.inl) (caseMat M N) = M := by
   rw [pointMat_comp]
   funext a c
   rfl
 
 /-- Injecting on the right and then branching is the right arm. -/
-theorem caseMat_inr [CompleteCSemiring S] (M : Mat S ι ν) (N : Mat S κ ν) :
+theorem caseMat_inr [CommSemiring S] [CompleteCSemiring S] (M : Mat S ι ν) (N : Mat S κ ν) :
     comp (pointMat Sum.inr) (caseMat M N) = N := by
   rw [pointMat_comp]
   funext a c
@@ -271,16 +304,10 @@ otherwise — so no output longer than `n` has any weight at all
 list's positions, because the copies run together rather than as
 alternatives. -/
 
-/-- The product of a list of resources, `1` on the empty list. This is the
-weight of running several things all of which must happen — the fan's
-arithmetic, as distinct from `csum`'s, which is the arithmetic of
-alternatives. -/
-def listProd [CSemiring S] : List S → S
-  | [] => 1
-  | x :: xs => x * listProd xs
-
-/-- The empty fan weighs `1`: running nothing costs nothing. -/
-theorem listProd_nil [CSemiring S] : listProd ([] : List S) = 1 := rfl
+/-! The weight of running several things all of which must happen is the
+product of a list of resources — `List.prod`, with `List.prod_nil` for the
+empty fan, which costs nothing. This is the fan's arithmetic, as distinct from
+`csum`'s, which is the arithmetic of alternatives. -/
 
 /-- **The truncating fan.** `fanMat n M` runs `M` on each of the *first `n`*
 elements of its input, weighing an output list by the product of the entrywise
@@ -290,34 +317,34 @@ Truncation is the whole content of the `bounded n` grade's honesty: the
 promise "at most `n` copies" is not enforced by a length-indexed input type,
 it is *made true* by the meaning, which simply cannot see past the `n`-th
 element (`fanMat_take`). -/
-def fanMat [CSemiring S] (n : Nat) (M : Mat S ι κ) : Mat S (List ι) (List κ) :=
+def fanMat [CommSemiring S] (n : Nat) (M : Mat S ι κ) : Mat S (List ι) (List κ) :=
   fun as bs =>
     if (as.take n).length = bs.length then
-      listProd (List.zipWith (fun a b => M a b) (as.take n) bs)
+      (List.zipWith (fun a b => M a b) (as.take n) bs).prod
     else 0
 
 /-- Cutting the input at `n` before the fan changes nothing, because the fan
 cuts it anyway: two inputs agreeing on their first `n` entries have the same
 meaning under `fanT n`. -/
-theorem fanMat_take [CSemiring S] (n : Nat) (M : Mat S ι κ) (as : List ι) :
+theorem fanMat_take [CommSemiring S] (n : Nat) (M : Mat S ι κ) (as : List ι) :
     fanMat n M (as.take n) = fanMat n M as := by
   funext bs
   show (if ((as.take n).take n).length = bs.length then
-          listProd (List.zipWith (fun a b => M a b) ((as.take n).take n) bs) else 0)
+          (List.zipWith (fun a b => M a b) ((as.take n).take n) bs).prod else 0)
       = if (as.take n).length = bs.length then
-          listProd (List.zipWith (fun a b => M a b) (as.take n) bs) else 0
+          (List.zipWith (fun a b => M a b) (as.take n) bs).prod else 0
   rw [List.take_take, Nat.min_self]
 
 /-- **The truncation is observable**: no output longer than the fan's bound has
 any weight. This is the consequence `Agentic.Term.fanT` promised would be
 stated at the fold — the `bounded n` grade is not a decoration on a meaning
 that could exceed it. -/
-theorem fanMat_eq_zero_of_length_gt [CSemiring S] (n : Nat) (M : Mat S ι κ)
+theorem fanMat_eq_zero_of_length_gt [CommSemiring S] (n : Nat) (M : Mat S ι κ)
     (as : List ι) (bs : List κ) (h : n < bs.length) : fanMat n M as bs = 0 := by
   have hlen : (as.take n).length ≤ n := by
     rw [List.length_take]; exact Nat.min_le_left n as.length
   show (if (as.take n).length = bs.length then
-          listProd (List.zipWith (fun a b => M a b) (as.take n) bs) else 0) = 0
+          (List.zipWith (fun a b => M a b) (as.take n) bs).prod else 0) = 0
   exact if_neg fun he => by omega
 
 /-- **A fan of no copies denotes the constant `[]`**: `fanT 0` is the point
@@ -325,7 +352,7 @@ matrix of the function that answers with the empty list, whatever it was
 given. This is the observable consequence `Agentic.Term.fanT`'s docstring
 promised, in the form it promised it, and it is a corollary of truncation
 rather than a special case in the definition. -/
-theorem fanMat_zero [CSemiring S] (M : Mat S ι κ) :
+theorem fanMat_zero [CommSemiring S] (M : Mat S ι κ) :
     fanMat 0 M = pointMat (fun _ : List ι => ([] : List κ)) := by
   funext as bs
   cases bs with
@@ -348,14 +375,15 @@ it: powers of a square matrix, the Horner sum of those powers, and the block
 split that turns a body returning `o ⊕ i` — *answer* or *go round again* —
 into the fueled retry matrix.
 
-The *untruncated* matrix star is not built here, and the omission is not an
-oversight: over an arbitrary complete carrier the aggregate-of-powers
-construction needs a reindexing law for `csum` that `CompleteCSemiring` does
-not have (acat-9ml). What it no longer waits on is a leastness principle —
-`Agentic.Semiring`'s `KleeneStar` supplies that, and `Mat Prop ι ι` is an
-instance of it. Where the star does exist in this package it is constructed by
-hand — at possibility, as reachability (`Mat.reach`, in `Agentic.Star`) — and
-the fueled constructions below are what every other carrier has.
+The *untruncated* matrix star is built too, at the end of this module
+(`Mat.instKleeneAlgebra`), for **every** carrier whose aggregation is a
+supremum. It used to be absent, on the ground that the aggregate-of-powers
+construction needed a reindexing law for `csum` that `CompleteCSemiring` does
+not have; that ground was mistaken. What the construction needs is not
+reindexing but *order* — that the aggregate be a least upper bound — and
+`CsumIsSup` supplies exactly that. So `powSum` is no longer the only iteration
+this module offers, and the fueled constructions below are what a *fuel* is,
+not what a missing star made do.
 
 One algebraic fact governs the shape of everything below: whether aggregation
 splits over binary alternatives, `⊕ᵢ (xᵢ + yᵢ) = (⊕ᵢ xᵢ) + (⊕ᵢ yᵢ)`. It does,
@@ -385,18 +413,18 @@ unconditionally. -/
 /-- Alternatives of transitions, entrywise: `matAdd M N` is the weight of
 getting there by `M` *or* by `N`. Fan-in of two whole transitions, as opposed
 to the fan-in over intermediate states that composition performs. -/
-def matAdd [CSemiring S] (M N : Mat S ι κ) : Mat S ι κ :=
+def matAdd [CommSemiring S] (M N : Mat S ι κ) : Mat S ι κ :=
   fun a b => M a b + N a b
 
 /-- Alternatives of transitions are unbracketed, because alternatives of
 weights are. -/
-theorem matAdd_assoc [CSemiring S] (M N P : Mat S ι κ) :
+theorem matAdd_assoc [CommSemiring S] (M N P : Mat S ι κ) :
     matAdd (matAdd M N) P = matAdd M (matAdd N P) := by
   funext a b
   exact add_assoc (M a b) (N a b) (P a b)
 
 /-- Alternatives of transitions are unordered. -/
-theorem matAdd_comm [CSemiring S] (M N : Mat S ι κ) :
+theorem matAdd_comm [CommSemiring S] (M N : Mat S ι κ) :
     matAdd M N = matAdd N M := by
   funext a b
   exact add_comm (M a b) (N a b)
@@ -409,28 +437,28 @@ It is defined here, beside the identity and the two compositions it interacts
 with, rather than in `Agentic.Gate` where it first appeared: the zero matrix is
 not about gating, it is the additive unit of the matrix semiring, and gating is
 one of the things that produces it. -/
-def matZero [CSemiring S] : Mat S ι κ := fun _ _ => 0
+def matZero [CommSemiring S] : Mat S ι κ := fun _ _ => 0
 
 /-- `zeroMat` is `matZero`: the spelling `Agentic.Gate` introduced, kept so
 that the refusal theorems there read as they did. -/
-abbrev zeroMat [CSemiring S] : Mat S ι κ := matZero
+abbrev zeroMat [CommSemiring S] : Mat S ι κ := matZero
 
 /-- Refusal is no alternative at all: offering a transition beside the refused
 one is offering the transition. -/
-theorem matAdd_zero [CSemiring S] (M : Mat S ι κ) : matAdd M matZero = M := by
+theorem matAdd_zero [CommSemiring S] (M : Mat S ι κ) : matAdd M matZero = M := by
   funext a b
   exact add_zero (M a b)
 
 /-- The same on the other side: the refused transition is the unit of
 alternation. -/
-theorem zero_matAdd [CSemiring S] (M : Mat S ι κ) : matAdd matZero M = M := by
+theorem zero_matAdd [CommSemiring S] (M : Mat S ι κ) : matAdd matZero M = M := by
   funext a b
   exact zero_add (M a b)
 
 /-- Composition distributes over alternatives on the left. The proof is one
 application of the semiring's distributive law under the aggregation sign, and
 then the split of one aggregation into two that `csumAdditive` licenses. -/
-theorem comp_matAdd_left [CompleteCSemiring S]
+theorem comp_matAdd_left [CommSemiring S] [CompleteCSemiring S]
     (M : Mat S ι κ) (N P : Mat S κ ν) :
     comp M (matAdd N P) = matAdd (comp M N) (comp M P) := by
   funext a c
@@ -440,7 +468,7 @@ theorem comp_matAdd_left [CompleteCSemiring S]
   exact csum_congr fun b => left_distrib (M a b) (N b c) (P b c)
 
 /-- Composition distributes over alternatives on the right. -/
-theorem comp_matAdd_right [CompleteCSemiring S]
+theorem comp_matAdd_right [CommSemiring S] [CompleteCSemiring S]
     (M N : Mat S ι κ) (P : Mat S κ ν) :
     comp (matAdd M N) P = matAdd (comp M P) (comp N P) := by
   funext a c
@@ -452,7 +480,7 @@ theorem comp_matAdd_right [CompleteCSemiring S]
 /-- Nothing follows refusal: composing after the refused transition is refusal
 again. This is `zero_mul` carried through the aggregation, and it is the reason
 the design needs no `Halt`. -/
-theorem zero_comp [CompleteCSemiring S] (N : Mat S κ ν) :
+theorem zero_comp [CommSemiring S] [CompleteCSemiring S] (N : Mat S κ ν) :
     comp (matZero : Mat S ι κ) N = matZero := by
   funext a c
   show (csum fun b => (0 : S) * N b c) = 0
@@ -461,7 +489,7 @@ theorem zero_comp [CompleteCSemiring S] (N : Mat S κ ν) :
 /-- Nothing reaches past refusal: composing before the refused transition is
 refusal again. The two annihilation laws together say that a shut gate anywhere
 in a pipeline shuts the pipeline. -/
-theorem comp_zero [CompleteCSemiring S] (M : Mat S ι κ) :
+theorem comp_zero [CommSemiring S] [CompleteCSemiring S] (M : Mat S ι κ) :
     comp M (matZero : Mat S κ ν) = matZero := by
   funext a c
   show (csum fun b => M a b * (0 : S)) = 0
@@ -473,15 +501,15 @@ refused transition as `0`, composition is `*` with the identity as `1`, and the
 fourteen laws are the theorems above — associativity of composition, the two
 unit laws, the two distributivities, the two annihilations.
 
-It is an `NSemiring` and not a `CSemiring`, and that is the whole reason the
-base class exists: `comp M N` is not `comp N M`, so the meaning space could not
-be called a semiring at all while the package's only semiring class demanded a
-commutative `*`. The category laws of §3–4 and the semiring laws are now the
+It is a `Semiring` and not a `CommSemiring`, and that is the whole reason the
+base class is Mathlib's non-commutative one: `comp M N` is not `comp N M`, so
+the meaning space could not be called a semiring at all while the package's
+only semiring class demanded a commutative `*`. The category laws of §3–4 and the semiring laws are now the
 same statement, made once.
 
 Noncomputable, because `idMat` is: the identity tests equality of states
 classically, which is what lets it exist at every index type. -/
-noncomputable instance instAddCommMonoid [CompleteCSemiring S] :
+noncomputable instance instAddCommMonoid [CommSemiring S] [CompleteCSemiring S] :
     AddCommMonoid (Mat S ι ι) where
   add := matAdd
   zero := matZero
@@ -497,7 +525,7 @@ section. It is a `Semiring` and not a `CommSemiring`, and that is the point:
 `comp M N` is not `comp N M`, so the category laws of §3–4 and the semiring
 laws are the same statement only because Mathlib's base does not demand a
 commutative `*`. -/
-noncomputable instance instNSemiring [CompleteCSemiring S] : Semiring (Mat S ι ι) where
+noncomputable instance instNSemiring [CommSemiring S] [CompleteCSemiring S] : Semiring (Mat S ι ι) where
   __ := instAddCommMonoid
   mul := comp
   one := idMat
@@ -509,26 +537,107 @@ noncomputable instance instNSemiring [CompleteCSemiring S] : Semiring (Mat S ι 
   zero_mul := zero_comp
   mul_zero := comp_zero
 
-/-- **Alternation of transitions inherits idempotence from the carrier.**
-Offering the same transition twice offers it once, entrywise — so if the
-resource semiring's `+` is a join then the meaning space's is, and the
-canonical additive order `≤+` is a partial order on matrices.
+/-! ### The matrix star, at every carrier whose aggregation is a supremum
 
-This is what makes leastness statable at matrices: `Agentic.KleeneStar` asks
-for an idempotent `+`, and this instance discharges that half of the demand for
-`Mat Prop ι ι` (and for any other idempotent carrier a matrix star is later
-built over). -/
-noncomputable instance instIdemAdd [CompleteCSemiring S]
-    [Std.IdempotentOp (α := S) (· + ·)] : IdemSemiring (Mat S ι ι) :=
-  IdemSemiring.ofSemiring fun M =>
-    show matAdd M M = M from funext fun a => funext fun b =>
-      Std.IdempotentOp.idempotent (op := fun x y : S => x + y) (M a b)
+This is the payoff of `CsumIsSup`, and it closes the gap the module's opening
+paragraphs used to apologise for. `Mat S ι ι` is a `Semiring`; give the entries
+a complete lattice and matrices inherit one entrywise; then the three
+hypotheses of `KleeneAlgebra.ofSupDistrib` are entrywise readings of the three
+facts about `S`, and the matrix star `M∗ = ⨆ₙ Mⁿ` — *some number of steps* —
+exists, is a least solution, and satisfies **both** Kleene inductions.
 
-/-- Iterated composition: `pow n M` is `M` run exactly `n` times, with
-`pow 0 M` the identity — doing nothing is running the transition no times. -/
-noncomputable def pow [CompleteCSemiring S] : Nat → Mat S ι ι → Mat S ι ι
-  | 0, _ => idMat
-  | n + 1, M => comp M (pow n M)
+Both matters. `Mat S ι ι` is not commutative, so `kstar_mul_le_self` and
+`mul_kstar_le_self` are genuinely different statements; the general
+construction proves each by its own induction on the exponent, which is why
+this instance costs nothing beyond the two distributive laws below.
+-/
+
+/-- **Matrices inherit the entries' complete lattice, entrywise.** Nothing is
+new here — it is Mathlib's `Pi` instance twice over — but it has to be said
+once, because `Mat` is a type synonym and instance search does not see through
+it. The join is alternation of transitions (`matAdd`, by `matAdd_eq_sup`), so
+this order is the canonical additive order and not a second one. -/
+noncomputable instance instCompleteLattice [CompleteLattice S] :
+    CompleteLattice (Mat S ι κ) :=
+  inferInstanceAs (CompleteLattice (ι → κ → S))
+
+section IsSup
+
+variable [CommSemiring S] [CompleteCSemiring S] [CompleteLattice S] [CsumIsSup S]
+
+omit [CommSemiring S] [CompleteCSemiring S] [CsumIsSup S] in
+/-- An aggregate of transitions is read entrywise: `(⨆ᵢ Fᵢ) a b = ⨆ᵢ Fᵢ a b`.
+Mathlib's `iSup_apply`, applied twice, through the `Mat` synonym. -/
+theorem apply_iSup {J : Type} (F : J → Mat S ι κ) (a : ι) (b : κ) :
+    (⨆ i, F i) a b = ⨆ i, F i a b :=
+  calc (⨆ i, F i) a b = (⨆ i, F i a) b := congrFun (iSup_apply (f := F) (a := a)) b
+    _ = ⨆ i, F i a b := iSup_apply
+
+/-- **Alternation of transitions is the lattice join.** Offering `M` or `N` is
+the entrywise better of the two, which is `csum_add_eq_sup` at every entry. It
+replaces `Mat.instIdemAdd`, which used to induce a *second* order on matrices
+from `+` rather than reading off the one the entries already carried. -/
+theorem matAdd_eq_sup (M N : Mat S ι κ) : matAdd M N = M ⊔ N :=
+  funext fun a => funext fun b => csum_add_eq_sup (M a b) (N a b)
+
+/-- **Composition distributes over an arbitrary alternation on the right**:
+`M · (⨆ᵢ Fᵢ) = ⨆ᵢ (M · Fᵢ)`. Two aggregations are exchanged — over the
+intermediate state and over the family — which is Fubini for `csum`. -/
+theorem comp_iSup {J : Type} (M : Mat S ι κ) (F : J → Mat S κ ν) :
+    comp M (⨆ i, F i) = ⨆ i, comp M (F i) := by
+  funext a c
+  rw [apply_iSup]
+  calc csum (fun b => M a b * (⨆ i, F i) b c)
+      = csum (fun b => csum fun i => M a b * F i b c) :=
+        csum_congr fun b => by rw [apply_iSup, csum_mul_iSup, csum_eq_iSup]
+    _ = csum (fun i => csum fun b => M a b * F i b c) := csum_swap _
+    _ = ⨆ i, csum fun b => M a b * F i b c := csum_eq_iSup _
+
+/-- **Composition distributes over an arbitrary alternation on the left**:
+`(⨆ᵢ Fᵢ) · M = ⨆ᵢ (Fᵢ · M)`. The right-handed twin, and it is a separate
+theorem because matrix composition is not commutative. -/
+theorem iSup_comp {J : Type} (M : Mat S κ ν) (F : J → Mat S ι κ) :
+    comp (⨆ i, F i) M = ⨆ i, comp (F i) M := by
+  funext a c
+  rw [apply_iSup]
+  calc csum (fun b => (⨆ i, F i) a b * M b c)
+      = csum (fun b => csum fun i => F i a b * M b c) :=
+        csum_congr fun b => by rw [apply_iSup, csum_iSup_mul, csum_eq_iSup]
+    _ = csum (fun i => csum fun b => F i a b * M b c) := csum_swap _
+    _ = ⨆ i, csum fun b => F i a b * M b c := csum_eq_iSup _
+
+/-- **The matrix star, for every idempotent complete carrier.** Square
+transitions over a carrier whose aggregation is a supremum form a Kleene
+algebra, with `M∗ = ⨆ₙ Mⁿ` — the transition of running `M` some number of
+times, the untruncated limit of `powSum`.
+
+This is what the package used to have exactly one instance of, built by hand at
+possibility and called reachability. It now holds at possibility, at worst-case
+cost and at consensus weight alike, so §5.2's `(M_A · d)* · M_B` is an element
+of the meaning space at *every* factor the design reads a workflow in, and
+`retry_least` applies there. Reachability survives as the read-out of this
+instance at `Prop` (`Mat.reach`, in `Agentic.Star`), not as its only witness.
+
+Idempotence of `+` comes with the instance, so `Mat.instIdemAdd` — which
+induced its own order from `+` — is gone; `add_idem` at matrices is now
+Mathlib's, about this order. -/
+noncomputable instance instKleeneAlgebra : KleeneAlgebra (Mat S ι ι) :=
+  KleeneAlgebra.ofSupDistrib matAdd_eq_sup (fun M F => comp_iSup M F) (fun M F => iSup_comp M F)
+
+/-- **The matrix star is the aggregate of the powers, entrywise**: the weight
+of getting from `a` to `b` at all is the aggregate, over the number of steps,
+of getting there in exactly that many. At possibility this reads "some finite
+path"; at worst-case cost, "the worst of all path lengths". -/
+theorem kstar_apply (M : Mat S ι ι) (a b : ι) :
+    (M∗) a b = csum fun n : Nat => (M ^ n) a b := by
+  show (⨆ n : Nat, M ^ n) a b = _
+  rw [apply_iSup, csum_eq_iSup]
+
+end IsSup
+
+/-! Iterated composition is `M ^ n`, the `Monoid` power of the semiring
+instance above: `M` run exactly `n` times, with `M ^ 0 = 1 = idMat` — doing
+nothing is running the transition no times. -/
 
 /-- **The truncated star.** `powSum n M` is the transition of running `M` at
 most `n` times, built by the Horner recursion `Σ⁰ = I`, `Σⁿ⁺¹ = I + M · Σⁿ`.
@@ -538,13 +647,13 @@ alone and why the grade is honest.
 
 The recursion, not the sum of powers, is the definition; `powSum_eq_sumPow`
 recovers the sum on the one extra hypothesis that recovering it needs. -/
-noncomputable def powSum [CompleteCSemiring S] : Nat → Mat S ι ι → Mat S ι ι
+noncomputable def powSum [CommSemiring S] [CompleteCSemiring S] : Nat → Mat S ι ι → Mat S ι ι
   | 0, _ => idMat
   | n + 1, M => matAdd idMat (comp M (powSum n M))
 
 /-- No fuel is the identity: a retry allowed zero trips through the body still
 does nothing, for free. -/
-theorem powSum_zero [CompleteCSemiring S] (M : Mat S ι ι) :
+theorem powSum_zero [CommSemiring S] [CompleteCSemiring S] (M : Mat S ι ι) :
     powSum 0 M = idMat := rfl
 
 /-- **The truncated-star unfolding**, the fueled analogue of `star_eq_left`:
@@ -552,34 +661,36 @@ running `M` at most `n+1` times is doing nothing, or running `M` once and then
 running it at most `n` more times. Unconditional, and true by `rfl` — which is
 the whole reason `powSum` is defined by the Horner recursion rather than as a
 sum of powers. -/
-theorem powSum_succ [CompleteCSemiring S] (n : Nat) (M : Mat S ι ι) :
+theorem powSum_succ [CommSemiring S] [CompleteCSemiring S] (n : Nat) (M : Mat S ι ι) :
     powSum (n + 1) M = matAdd idMat (comp M (powSum n M)) := rfl
 
 /-- The sum of powers, written directly: `I + M + M² + ⋯ + Mⁿ`. This is the
 reading one *wants* of the truncated star, and it is kept separate from
 `powSum` because only the Horner recursion makes `powSum_succ` hold by `rfl`;
 that the two agree is `powSum_eq_sumPow`. -/
-noncomputable def sumPow [CompleteCSemiring S] : Nat → Mat S ι ι → Mat S ι ι
+noncomputable def sumPow [CommSemiring S] [CompleteCSemiring S] : Nat → Mat S ι ι → Mat S ι ι
   | 0, _ => idMat
-  | n + 1, M => matAdd (sumPow n M) (pow (n + 1) M)
+  | n + 1, M => matAdd (sumPow n M) (M ^ (n + 1))
 
 /-- The sum of powers satisfies the Horner unfolding. This is the whole
 content of the equivalence; the induction is on the fuel, and the only step
 that needs additivity of aggregation is pushing `M` across the final `+`. -/
-theorem sumPow_horner [CompleteCSemiring S]
+theorem sumPow_horner [CommSemiring S] [CompleteCSemiring S]
     (M : Mat S ι ι) : ∀ n : Nat, matAdd idMat (comp M (sumPow n M)) = sumPow (n + 1) M
-  | 0 => rfl
+  | 0 => by
+    show matAdd idMat (comp M idMat) = matAdd idMat (M ^ 1)
+    rw [comp_id, pow_one]
   | n + 1 => by
-    show matAdd idMat (comp M (matAdd (sumPow n M) (pow (n + 1) M)))
-        = matAdd (sumPow (n + 1) M) (pow (n + 1 + 1) M)
-    rw [comp_matAdd_left, ← matAdd_assoc, sumPow_horner M n]
-    rfl
+    show matAdd idMat (comp M (matAdd (sumPow n M) (M ^ (n + 1))))
+        = matAdd (sumPow (n + 1) M) (M ^ (n + 1 + 1))
+    rw [comp_matAdd_left, ← matAdd_assoc, sumPow_horner M n,
+      show M ^ (n + 1 + 1) = comp M (M ^ (n + 1)) from pow_succ' M (n + 1)]
 
 /-- **The Σ-reading of the truncated star.** The Horner recursion really is
 `I + M + M² + ⋯ + Mⁿ`, so "run the body at most `n` times" and "run it exactly
 `k` times, for some `k ≤ n`" are the same transition — in every complete
 resource semiring, with no side condition on the carrier. -/
-theorem powSum_eq_sumPow [CompleteCSemiring S]
+theorem powSum_eq_sumPow [CommSemiring S] [CompleteCSemiring S]
     (M : Mat S ι ι) : ∀ n : Nat, powSum n M = sumPow n M
   | 0 => rfl
   | n + 1 => by
@@ -607,13 +718,13 @@ at the fuel: go round the loop block at most `n` times, then leave by the exit
 block. This is what a `.static` `retryT` denotes, and why its grade is honest —
 the meaning is a finite fold over the term, with no appeal to a fixed point
 that the term does not exhibit. -/
-noncomputable def retryTrunc [CompleteCSemiring S]
+noncomputable def retryTrunc [CommSemiring S] [CompleteCSemiring S]
     (n : Nat) (M : Mat S ι (Sum κ ι)) : Mat S ι κ :=
   comp (powSum n (loopBlock M)) (exitBlock M)
 
 /-- A retry with no fuel is its body's exit block: one attempt, no trips round
 the loop. Unconditional. -/
-theorem retryTrunc_zero [CompleteCSemiring S]
+theorem retryTrunc_zero [CommSemiring S] [CompleteCSemiring S]
     (M : Mat S ι (Sum κ ι)) : retryTrunc 0 M = exitBlock M :=
   id_comp (exitBlock M)
 
@@ -622,7 +733,7 @@ workflow either leaves at once by the exit block, or goes once round the loop
 block and retries with fuel `n`. This is `powSum_succ` transported across the
 block split; distributing the exit across the two alternatives is where
 additivity of aggregation is consumed. -/
-theorem retryTrunc_succ [CompleteCSemiring S]
+theorem retryTrunc_succ [CommSemiring S] [CompleteCSemiring S]
     (n : Nat) (M : Mat S ι (Sum κ ι)) :
     retryTrunc (n + 1) M
       = matAdd (exitBlock M) (comp (loopBlock M) (retryTrunc n M)) := by
@@ -634,7 +745,7 @@ theorem retryTrunc_succ [CompleteCSemiring S]
 /-- Value-dependent sequencing: the second transition may depend on the value
 the first produced. `k b` is the transition chosen once `b` is known, read as a
 matrix out of the one-point index because its source is that value itself. -/
-def dependentSeq [CompleteCSemiring S] (M : Mat S ι κ) (k : κ → Mat S Unit ν) :
+def dependentSeq [CommSemiring S] [CompleteCSemiring S] (M : Mat S ι κ) (k : κ → Mat S Unit ν) :
     Mat S ι ν :=
   fun a c => csum fun b => M a b * k b () c
 
@@ -643,7 +754,7 @@ bind, and the meaning space is therefore monadic (design §4, stratification).
 The intermediate value is summed over; nothing new is needed, and in
 particular the design does not acquire a second sequencing operator when
 workflows start branching on what they read. -/
-theorem dependentSeq_eq_comp [CompleteCSemiring S]
+theorem dependentSeq_eq_comp [CommSemiring S] [CompleteCSemiring S]
     (M : Mat S ι κ) (k : κ → Mat S Unit ν) :
     dependentSeq M k = comp M (fun b c => k b () c) := rfl
 

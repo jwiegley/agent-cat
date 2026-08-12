@@ -31,12 +31,26 @@ Three parameters keep this stratum honest:
   labels build equal keys and no `DecidableEq L` is ever demanded.
 
 The grading rules, in one line each: leaves and `Transform`s are `static`;
-sequencing, alternation and branching join their parts' grades; tensoring
-*adds* them (`Frag.par` — both branches are in flight, so their widths add);
-gating, scoping, sharing and fueled retry leave the grade alone; `fanT n`
-*scales* by `n` (`Frag.scale` — `n` copies of an `m`-wide body is `n * m`
-wide, the body counting at least as one copy of itself); `bindT` is `monadic`
-outright.
+sequencing, alternation and branching take the `⊔` of their parts' grades;
+tensoring *adds* them (`+` — both branches are in flight, so their widths
+add); gating, scoping, sharing and fueled retry leave the grade alone;
+`fanT n` *scales* by `n` (`Frag.scale` — `n` copies of an `m`-wide body is
+`n * m` wide, the body counting at least as one copy of itself); `bindT` is
+`monadic` outright.
+
+The grade is `ℕ∞` (`Agentic.Frag`), so `⊔` and `+` in those indices are
+Mathlib's own operations on the extended naturals and not a private
+arithmetic. Two consequences show up in this module and nowhere else. First,
+the indices no longer reduce for a *variable* grade: `static ⊔ f` and
+`static + f` are `bot_sup_eq` and `zero_add`, propositional equations rather
+than definitional ones, so the one smoke example that puts a static part
+beside a variable-graded one now carries an explicit `castGrade`. On *literal*
+grades — which is every written workflow — the indices still reduce by `rfl`,
+and the smoke examples below are exactly that check. Second, `⊔` on `ℕ∞` is
+noncomputable, so a term literal whose *stored sub-grades* mention it is
+noncomputable too; that is why the examples below say `noncomputable
+example`, and it costs nothing, since folds over terms still compute and
+`decide` still settles grade comparisons.
 
 ## Consultation identity: duplication is the default, sharing is labeled
 
@@ -122,24 +136,24 @@ inductive Term (Op : Type → Type → Type) (G L : Type) : Frag → Type → Ty
   /-- Sequencing: run the first, feed its answer to the second. The composite
   is as opaque as its most opaque part, so the grade is the join. -/
   | seqT {f g : Frag} {i j o : Type} :
-      Term Op G L f i j → Term Op G L g j o → Term Op G L (f.join g) i o
+      Term Op G L f i j → Term Op G L g j o → Term Op G L (f ⊔ g) i o
   /-- Tensoring: two workflows side by side on a pair of inputs. This is the
   panel's skeleton (design §5.1) — the *reducer* that fans the results back in
   is a choice made in the semantics, where convolution over the key monoid
   lives; the syntax only records that both ran.
 
-  Grade is `Frag.par`, **not** the join: both branches are in flight, so their
+  Grade is `+`, **not** `⊔`: both branches are in flight, so their
   data-dependent widths add. A three-wide fan beside a five-wide fan is eight
   consultations outstanding, and grading it `bounded 5` would be a bound the
   term does not respect. A static side still costs its neighbour nothing,
   since `static` is the grade of zero data-dependent width. -/
   | parT {f g : Frag} {i j k l : Type} :
-      Term Op G L f i j → Term Op G L g k l → Term Op G L (f.par g) (i × k) (j × l)
+      Term Op G L f i j → Term Op G L g k l → Term Op G L (f + g) (i × k) (j × l)
   /-- Alternatives: `⊕`, which is fallback and beam search. The design is
   emphatic that sums are *alternatives*, a different combinator from the
   panel and not a variant of it (design §5.1). Grade is the join. -/
   | sumT {f g : Frag} {i o : Type} :
-      Term Op G L f i o → Term Op G L g i o → Term Op G L (f.join g) i o
+      Term Op G L f i o → Term Op G L g i o → Term Op G L (f ⊔ g) i o
   /-- Value-dependent branching among enumerated alternatives: the input has
   already been decoded into a coproduct, and each branch handles its side.
   This is how the static fragment buys value-dependence — the huge token space
@@ -148,7 +162,7 @@ inductive Term (Op : Type → Type → Type) (G L : Type) : Frag → Type → Ty
   Grade is the join, and in particular a choice between static branches is
   still static. -/
   | choiceT {f g : Frag} {i j o : Type} :
-      Term Op G L f i o → Term Op G L g j o → Term Op G L (f.join g) (Sum i j) o
+      Term Op G L f i o → Term Op G L g j o → Term Op G L (f ⊔ g) (Sum i j) o
   /-- A permission guard: a grant, a policy veto, a refusal. The syntax
   carries only the datum; the semantics reads it as the scalar action of an
   indicator, where refusal is `0` and annihilates everything downstream
@@ -213,14 +227,15 @@ inductive Term (Op : Type → Type → Type) (G L : Type) : Frag → Type → Ty
   precisely the `bounded` fragment — the folds still answer, and what they
   answer is an honest supremum (design §4).
 
-  Grade is `Frag.scale n`, **not** a join with `.bounded n`: `n` copies of a
+  Grade is `Frag.scale n`, **not** a `⊔` with `.bounded n`: `n` copies of a
   body that is itself at most `m` wide is at most `n * m` wide. A three-way fan
   over a five-way fan is fifteen consultations, and grading it `bounded 5`
   would be a bound the term does not respect. Over a static body the fan itself
-  is the only data-dependent width, so the grade is exactly `.bounded n` — and
-  over a `.bounded 0` body it is `.bounded n` as well, since the fan
-  instantiates the body's static shell `n` times over whatever its
-  data-dependent width happens to be (`Frag.scale`'s `max 1 m`, acat-l59).
+  is the only data-dependent width, so the grade is exactly `.bounded n`, since
+  the fan instantiates the body's written shape `n` times over whatever its
+  data-dependent width happens to be (`Frag.copies`, the `max 1` of
+  `Frag.scale`). A fan of *no* copies grades `.static` whatever its body,
+  opaque bodies included: `.fanT 0 t` runs nothing (`Frag.scale_zero`).
 
   **The bound is a contract on the MEANING, not the type**, and the contract
   is now kept: both folds of `Agentic.Meaning` truncate the input list at `n`,
@@ -229,12 +244,10 @@ inductive Term (Op : Type → Type → Type) (G L : Type) : Frag → Type → Ty
   (`Term.muS_fanT_eq_zero_of_length_gt`). A length-indexed input type was the
   alternative repair, and truncation did not prove surprising enough to need
   it. Nothing in *this* module makes the promise good — the grade is about
-  shape — but the width fold `Term.widthT` now agrees with the grade index on
-  the nose (`Term.widthT_eq_width`), which checks the index against a second
-  computation of the same arithmetic. The *semantic* width bound is now proved
-  too, and it is not the shape it was expected to be: consultations in flight
-  are counted by `Term.peak`, which is incomparable with the width claim
-  (`Term.peak_not_le_widthE`), and what a `bounded n` index bounds is one
+  shape. The *semantic* width bound is proved in `Agentic.Meaning`, and it is
+  not the shape it was expected to be: consultations in flight are counted by
+  `Term.peak`, which is incomparable with the grade
+  (`Term.peak_not_le_grade`), and what a `bounded n` index bounds is one
   factor of the count — `Term.peak_le_of_bounded`, `peak ≤ writtenSites * n`.
   A fan of a body that consults nothing consults nothing, however wide:
   `Term.peak_fanT_pureT`. -/
@@ -259,9 +272,9 @@ def grade {Op : Type → Type → Type} {G L : Type} {f : Frag} {i o : Type}
 /-- Transport a term along an *equation* between grades. This is not the
 weakening the module header refuses: it relabels a term by a grade that is
 already the same grade, which is what one needs when an index arrives in a
-form the elaborator has not reduced — `Frag.par f .static` where `f` was
-wanted, say. It is a `cases` on the equality and nothing else, so it computes
-away. -/
+form the elaborator has not reduced — `f + .static` where `f` was wanted, say,
+which since the grade became `ℕ∞` is `add_zero` and no longer `rfl`. It is a
+`cases` on the equality and nothing else, so it computes away. -/
 def castGrade {Op : Type → Type → Type} {G L : Type} {f g : Frag} {i o : Type}
     (h : f = g) (t : Term Op G L f i o) : Term Op G L g i o :=
   match h with
@@ -290,15 +303,24 @@ section Smoke
 
 These are the load-bearing checks on the *encoding*, not decoration. Each one
 elaborates at a literal grade with no coercion and no `show`, which is the
-claim that the joins reduce definitionally — if `Frag.join`'s equation order
-were wrong, these would fail even though the grade arithmetic is "the same". -/
+claim that `ℕ∞`'s `⊔`, `+` and `Frag.scale` reduce definitionally on the
+numerals a written workflow actually produces. That claim survived the move
+from a three-constructor grade to `ℕ∞` and is the reason this section is worth
+keeping: `⊤ ⊔ f` still absorbs by `rfl`, `3 ⊔ 5`, `3 + 5` and `3 * max 1 5`
+still compute, and only the two examples with a *variable* grade need the
+propositional equations (`bot_sup_eq`, `zero_add`) that Mathlib supplies.
+
+`noncomputable` on the examples is the one visible cost: `⊔` on `ℕ∞` comes
+from a noncomputable complete lattice, and a term whose stored sub-grades
+mention it inherits that. Grades are type indices, so nothing that runs is
+affected. -/
 
 /-- A static pipeline: consult, decode the answer onto a coproduct of
 verdicts, branch, all under a permission guard and a fueled retry. Every
 combinator here joins `static` with `static`, and the whole tree elaborates at
 `.static` with no coercion — the design's "write in the lowest fragment that
 expresses the job", made checkable. -/
-example (Op : Type → Type → Type) (G L : Type) (q : Op String String) :
+noncomputable example (Op : Type → Type → Type) (G L : Type) (q : Op String String) :
     Term Op G L .static String Nat :=
   .retryT 3
     (.gateT true
@@ -322,37 +344,40 @@ example (Op : Type → Type → Type) (G L : Type) (q : Op String String) :
 
 /-- A static prefix followed by a bounded stage is bounded: the composite is
 as opaque as its most opaque part, and no more. -/
-example (Op : Type → Type → Type) (G L : Type) (q : Op String String) :
+noncomputable example (Op : Type → Type → Type) (G L : Type) (q : Op String String) :
     Term Op G L (.bounded 3) String (List String) :=
   .seqT (.pureT (fun s => [s])) (.fanT 3 (.prim q))
 
 /-- Two bounded stages *in sequence* take the larger bound: only one of them
 is in flight at a time. -/
-example (Op : Type → Type → Type) (G L : Type) (q : Op String String) :
+noncomputable example (Op : Type → Type → Type) (G L : Type) (q : Op String String) :
     Term Op G L (.bounded 5) (List String) (List String) :=
   .seqT (.fanT 3 (.prim q)) (.fanT 5 (.prim q))
 
 /-- Two bounded stages *side by side* add: a three-wide fan beside a five-wide
 fan has eight consultations outstanding, and the grade says eight. This is the
 example the join got wrong. -/
-example (Op : Type → Type → Type) (G L : Type) (q : Op String String) :
+noncomputable example (Op : Type → Type → Type) (G L : Type) (q : Op String String) :
     Term Op G L (.bounded 8) (List String × List String) (List String × List String) :=
   .parT (.fanT 3 (.prim q)) (.fanT 5 (.prim q))
 
 /-- A fan over a fan multiplies: three copies of an at-most-five-wide body is
 at most fifteen wide. This is the other example the join got wrong. -/
-example (Op : Type → Type → Type) (G L : Type) (q : Op String String) :
+noncomputable example (Op : Type → Type → Type) (G L : Type) (q : Op String String) :
     Term Op G L (.bounded 15) (List (List String)) (List (List String)) :=
   .fanT 3 (.fanT 5 (.prim q))
 
-/-- **The acat-l59 witness**, kept as a term. A body that consults, transforms,
-and then fans zero ways grades `.bounded 0`; fanning that body three ways runs
-its consultation three times, so the honest bound is three. Under the old
-`n * m` arithmetic this term elaborated at `.bounded 0` — a bound it plainly
-does not respect, since three consultations are outstanding — and the grade is
-now `.bounded 3` because `Frag.scale`'s multiplier is `max 1 m`: the body
-counts at least as one copy of itself. -/
-example (Op : Type → Type → Type) (G L : Type) (q : Op String String) :
+/-- **The acat-l59 witness**, kept as a term and re-stated for the collapsed
+grade. A body that consults, transforms, and then fans zero ways grades
+`.static` — under the `ℕ∞` grade `bounded 0` *is* `static`, so the old story's
+"the body grades `bounded 0`" and "the body grades `static`" are one sentence
+now (`Frag.bounded_zero`). Fanning that body three ways runs its consultation
+three times, so the honest bound is three, and the term elaborates at
+`.bounded 3`: `Frag.scale`'s multiplier is `Frag.copies`, so a body that
+claims no data-dependent width still counts as one copy of itself. A plain
+`n * m` would grade this term `.bounded 0`, a bound it plainly does not
+respect with three consultations outstanding. -/
+noncomputable example (Op : Type → Type → Type) (G L : Type) (q : Op String String) :
     Term Op G L (.bounded 3) (List String) (List (List String)) :=
   .fanT 3
     (.seqT (.seqT (.prim q) (.pureT (fun s => [s])))
@@ -399,17 +424,23 @@ example (Op : Type → Type → Type) (G L : Type) (f : Frag) (l : L)
 
 /-- A static branch beside a bounded one is bounded by the bounded one alone:
 a static branch has no data-dependent width to add. -/
-example (Op : Type → Type → Type) (G L : Type) (q : Op String String) :
+noncomputable example (Op : Type → Type → Type) (G L : Type) (q : Op String String) :
     Term Op G L (.bounded 3) (String × List String) (String × List String) :=
   .parT (.pureT (fun s => s)) (.fanT 3 (.prim q))
 
-/-- The equation order pays off at the term level: a static branch on the left
-of a tensor leaves even a *variable* grade untouched, with no coercion — which
-is the property `Frag.par`'s equation order exists to provide. -/
+/-- **What the collapse costs, written down.** A static branch on the left of
+a tensor leaves a *variable* grade untouched — but on `ℕ∞` that is `zero_add`,
+a propositional equation, where the three-constructor grade made it `rfl` by
+choosing the equation order of a hand-written `par`. So this example carries a
+`castGrade`, and it is the only kind of place the collapse is visible: the
+grade of a *written* workflow is always a numeral, and numerals still reduce
+(every other example in this section). Paying one cast at a variable grade to
+delete a private arithmetic, a private order and the laws of both is the trade
+this arc made. -/
 example (Op : Type → Type → Type) (G L : Type) (f : Frag)
     (t : Term Op G L f String Nat) :
     Term Op G L f (String × String) (String × Nat) :=
-  .parT (.pureT (fun s => s)) t
+  castGrade (zero_add f) (.parT (.pureT (fun s => s)) t)
 
 /-- The derived monadic weakening lands at `.monadic` with no coercion, which
 is what makes it usable as the common type in a heterogeneous planner. -/
@@ -438,25 +469,34 @@ section GradeExact
 
 /-! ### Exactness of the grade arithmetic
 
-The claims the smoke examples rely on, stated on `Frag` alone. Each is `rfl`:
-the index of a composite is not computed by a decision procedure at use sites,
-it is already the answer. -/
+The claims the smoke examples rely on, stated on `Frag` alone, and now stated
+against Mathlib's arithmetic on `ℕ∞`. Each one that a written workflow needs
+is `rfl`: the index of a composite is not computed by a decision procedure at
+use sites, it is already the answer.
 
-/-- A static part costs its neighbour nothing. -/
-example (n : Nat) : Frag.join .static (.bounded n) = .bounded n := rfl
+Two are *not* `rfl` and say so with the Mathlib lemma that proves them. That
+is the whole of what the collapse cost, and it is confined to grades that are
+variables rather than numerals. -/
 
-/-- And costs it nothing on the other side either. -/
-example (n : Nat) : Frag.join (.bounded n) .static = .bounded n := rfl
+/-- A static part costs its neighbour nothing. Not `rfl` on `ℕ∞`: it is
+`bot_sup_eq`, since `static` is `⊥`. -/
+example (n : Nat) : (Frag.static ⊔ Frag.bounded n) = .bounded n :=
+  bot_sup_eq _
 
-/-- Bounded widths join to the larger bound. -/
-example : Frag.join (.bounded 3) (.bounded 5) = .bounded 5 := rfl
+/-- And costs it nothing on the other side either — `sup_bot_eq`. -/
+example (n : Nat) : (Frag.bounded n ⊔ Frag.static) = .bounded n :=
+  sup_bot_eq _
+
+/-- Bounded widths join to the larger bound, and on numerals this reduces. -/
+example : (Frag.bounded 3 ⊔ Frag.bounded 5) = .bounded 5 := rfl
 
 /-- Bounded widths in a tensor add. -/
-example : Frag.par (.bounded 3) (.bounded 5) = .bounded 8 := rfl
+example : (Frag.bounded 3 + Frag.bounded 5) = .bounded 8 := rfl
 
-/-- A static branch adds nothing to a tensor — for a *variable* grade, by
-`rfl`, which is what keeps `parT` with a static side coercion-free. -/
-example (f : Frag) : Frag.par .static f = f := rfl
+/-- A static branch adds nothing to a tensor. This is the one that used to be
+`rfl` for a *variable* grade and now is `zero_add`; `Term.castGrade` carries
+it at the term level. -/
+example (f : Frag) : Frag.static + f = f := zero_add f
 
 /-- A fan over a static body is bounded by the fan's own width. -/
 example : Frag.scale 3 .static = .bounded 3 := rfl
@@ -464,18 +504,24 @@ example : Frag.scale 3 .static = .bounded 3 := rfl
 /-- Nested fans multiply. -/
 example : Frag.scale 3 (.bounded 5) = .bounded 15 := rfl
 
-/-- A fan over a `bounded 0` body grades at the fan's own width — the same
-grade as a fan over a static body, since the two are the same claim about
-shape. This is the index the acat-l59 witness above elaborates at, and it
-reduces on literals like the rest. -/
+/-- A fan over a `bounded 0` body grades at the fan's own width — the *same*
+grade as a fan over a static body, and now for the sharpest possible reason:
+`bounded 0` and `static` are one grade (`Frag.bounded_zero`). This is the
+index the acat-l59 witness above elaborates at. -/
 example : Frag.scale 3 (.bounded 0) = .bounded 3 := rfl
 
-/-- An opaque continuation absorbs whatever precedes it — for a *variable*
-grade, by `rfl`. -/
-example (f : Frag) : Frag.join .monadic f = .monadic := rfl
+/-- **A fan of no copies is static, whatever its body.** The review's finding
+1: the old arithmetic graded a zero-fan of an opaque body `monadic`, claiming
+no a-priori width for a provable constant. `0 * ⊤ = 0` in `ℕ∞`. -/
+example : Frag.scale 0 .monadic = .static := rfl
 
-/-- And whatever follows it, by cases on the neighbour. -/
-example (f : Frag) : Frag.join f .monadic = .monadic := Frag.join_monadic f
+/-- An opaque continuation absorbs whatever precedes it — for a *variable*
+grade, by `rfl`, because `WithTop`'s `⊔` matches on `⊤` first. -/
+example (f : Frag) : (Frag.monadic ⊔ f) = .monadic := rfl
+
+/-- And whatever follows it — `sup_top_eq`, the one direction that needs a
+lemma. -/
+example (f : Frag) : (f ⊔ Frag.monadic) = .monadic := sup_top_eq f
 
 /-- `grade` returns the index and nothing else — the name of a fact, not a
 traversal. -/

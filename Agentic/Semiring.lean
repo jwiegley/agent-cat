@@ -2,27 +2,38 @@ import Agentic.Monoid
 import Mathlib.Algebra.Order.Kleene
 import Mathlib.Algebra.Module.Defs
 import Mathlib.Algebra.Module.Prod
+import Mathlib.Order.CompleteLattice.Lemmas
 
 /-!
 # The resource algebra: Mathlib's semirings, and the one thing Mathlib lacks
 
 This module used to define the whole algebraic vocabulary of the package:
 `NSemiring` (fourteen fields), `CSemiring`, the canonical additive order `≤+`
-with its own eight lemmas, `IdemAdd`, `StarSemiring`, `KleeneStar`. All but one
-of those is now Mathlib's, and the migration is not a renaming exercise — the
-Mathlib versions come with an order, a lattice, monotonicity instances and a
-Kleene-induction library that the hand-rolled classes did not have.
+with its own eight lemmas, `IdemAdd`, `StarSemiring`, `KleeneStar`. All but two
+of those are Mathlib's, and as of this arc the package no longer keeps a second
+name for any of them: the binders below and in every consumer say
+`Semiring`/`CommSemiring`/`IdemSemiring`/`KleeneAlgebra`, the canonical
+additive order is written `≤`, and iteration is written `x∗` (Mathlib's
+`KStar.kstar`, notation from the `Computability` scope). The old names survive
+for one `@[deprecated]` line each, with no consumers, because
+`doc/walkthrough.html` still spells them.
 
-| ours | Mathlib |
+| was | is |
 | --- | --- |
 | `NSemiring` | `Semiring` |
 | `CSemiring` | `CommSemiring` |
 | `IdemAdd` | `IdemSemiring` (idempotent `+`, *with* the induced lattice) |
 | `≤+`, `addLe` | `≤` (`IdemSemiring`'s `SemilatticeSup`) |
 | `KleeneStar` | `KleeneAlgebra` (`kstar`, `∗`, and both inductions) |
-| `star` | `KStar.kstar` |
+| `star x` | `x∗` |
 
-Two things survive, and each says here exactly what Mathlib lacks.
+Two things survive as *interfaces*, and each says here exactly what Mathlib
+lacks. Beside them this module now carries the arc's one piece of mathematics:
+`CsumIsSup`, the mixin that says a carrier's aggregation is its supremum, and
+`KleeneAlgebra.ofSupDistrib`, which turns that into a star. Four hand-built
+Kleene algebras — possibility, worst-case cost, consensus weight, and the
+reachability star at `Prop`-matrices — and the `ofCommStarLe` builder they
+shared are gone, replaced by one construction and four one-line instances.
 
 * **`StarSemiring`** — a star satisfying the unrolling law `x∗ = 1 + x · x∗`
   and *nothing else*. Mathlib's weakest star-with-laws is `KleeneAlgebra`,
@@ -46,74 +57,27 @@ Two things survive, and each says here exactly what Mathlib lacks.
 
 namespace Agentic
 
-open Computability
+open Computability KStar
 
-/-- `NSemiring S` is Mathlib's `Semiring S`: `+` combines alternatives, `*`
-sequences, `0` is the impossible alternative and `1` the free step, and `*` is
-**n**ot assumed commutative — which is what lets `Mat S ι ι` and the monoid
-semiring `S⟨K⟩` be semirings at all. -/
+/-- `NSemiring S` is Mathlib's `Semiring S`. Deprecated compatibility alias,
+kept only because `doc/walkthrough.html` still spells it. -/
+@[deprecated Semiring (since := "2026-08-12")]
 abbrev NSemiring (S : Type) := Semiring S
 
-/-- `CSemiring S` is Mathlib's `CommSemiring S`: a resource semiring whose
-sequencing is order-insensitive. Every *carrier* (possibility, worst-case cost,
-consensus weight, expectation) has it; the algebra built over them (matrices,
-panels) does not, which is why the base is `Semiring`. -/
+/-- `CSemiring S` is Mathlib's `CommSemiring S`. Deprecated compatibility
+alias, kept only because `doc/walkthrough.html` still spells it. -/
+@[deprecated CommSemiring (since := "2026-08-12")]
 abbrev CSemiring (S : Type) := CommSemiring S
 
-/-- `IdemAdd S` is Mathlib's `IdemSemiring S`: a semiring whose alternation is
-a join. Mathlib's version carries the induced `SemilatticeSup` and `OrderBot`
-as part of the class, so the canonical additive order — the eight lemmas this
-module used to prove — arrives with it. -/
+/-- `IdemAdd S` is Mathlib's `IdemSemiring S`. Deprecated compatibility alias,
+kept only because `doc/walkthrough.html` still spells it. -/
+@[deprecated IdemSemiring (since := "2026-08-12")]
 abbrev IdemAdd (S : Type) := IdemSemiring S
 
-namespace NSemiring
-
-variable {S : Type} [Semiring S]
-
-/-- Alternatives are unordered (Mathlib's `add_comm`, under the old name). -/
-theorem add_comm (a b : S) : a + b = b + a := _root_.add_comm a b
-
-/-- Alternatives are unbracketed (Mathlib's `add_assoc`). -/
-theorem add_assoc (a b c : S) : a + b + c = a + (b + c) := _root_.add_assoc a b c
-
-/-- `0` is a left unit for `+` (Mathlib's `zero_add`). -/
-theorem zero_add (a : S) : (0 : S) + a = a := _root_.zero_add a
-
-/-- Sequencing is unbracketed (Mathlib's `mul_assoc`). -/
-theorem mul_assoc (a b c : S) : a * b * c = a * (b * c) := _root_.mul_assoc a b c
-
-/-- `1` is a left unit for `*` (Mathlib's `one_mul`). -/
-theorem one_mul (a : S) : (1 : S) * a = a := _root_.one_mul a
-
-/-- `1` is a right unit for `*` (Mathlib's `mul_one`). -/
-theorem mul_one (a : S) : a * 1 = a := _root_.mul_one a
-
-/-- Sequencing distributes over alternatives on the left (Mathlib's
-`left_distrib`). -/
-theorem left_distrib (a b c : S) : a * (b + c) = a * b + a * c :=
-  _root_.left_distrib a b c
-
-/-- Sequencing distributes over alternatives on the right (Mathlib's
-`right_distrib`). -/
-theorem right_distrib (a b c : S) : (a + b) * c = a * c + b * c :=
-  _root_.right_distrib a b c
-
-/-- `0` annihilates on the left (Mathlib's `zero_mul`). -/
-theorem zero_mul (a : S) : (0 : S) * a = 0 := MulZeroClass.zero_mul a
-
-/-- `0` annihilates on the right (Mathlib's `mul_zero`). -/
-theorem mul_zero (a : S) : a * (0 : S) = 0 := MulZeroClass.mul_zero a
-
-end NSemiring
-
-namespace CSemiring
-
-/-- Sequencing is order-insensitive (Mathlib's `mul_comm`, under the old
-name). -/
-theorem mul_comm {S : Type} [CommSemiring S] (a b : S) : a * b = b * a :=
-  _root_.mul_comm a b
-
-end CSemiring
+/-- `KleeneStar S` is Mathlib's `KleeneAlgebra S`. Deprecated compatibility
+alias, kept only because `doc/walkthrough.html` still spells it. -/
+@[deprecated KleeneAlgebra (since := "2026-08-12")]
+abbrev KleeneStar (S : Type) := KleeneAlgebra S
 
 /-- A `CompleteCSemiring S` is a representation of a resource semiring in which
 *aggregation over an index* makes sense: `csum f` is the ⊕-sum of the whole
@@ -142,8 +106,18 @@ cover both families, so the interface stays — but it now extends Mathlib's
 
 **The index type is arbitrary** (`ι : Type`), deliberately: nothing in the
 semantics appeals to an enumeration of the index, so a `Countable ι` hypothesis
-would add a proof obligation at every use site and buy no theorem. -/
-class CompleteCSemiring (S : Type) extends CommSemiring S where
+would add a proof obligation at every use site and buy no theorem.
+
+**It is a mixin, not an extension.** `[CommSemiring S]` is an instance
+*parameter*: the class adds `csum` to a carrier that already has its
+arithmetic, and carries no `Semiring` structure of its own. Extending would
+create a second `Semiring S` beside every other one — beside `IdemSemiring S`
+in particular — so a construction generic in *both* (`Mat S ι ι`'s idempotent
+alternation, the panel's duplication licence, matrix leastness) could not
+consume the two together without proving the two arithmetics defeq. As a mixin
+there is nothing to reconcile, and `[IdemCommSemiring S] [CompleteCSemiring S]`
+is an ordinary pair of hypotheses. -/
+class CompleteCSemiring (S : Type) [CommSemiring S] where
   /-- The ⊕-aggregate of a whole family: `csum f = ⊕ᵢ f i`. -/
   csum : {ι : Type} → (ι → S) → S
   /-- Aggregating nothing but impossibilities is impossible. -/
@@ -177,7 +151,7 @@ export CompleteCSemiring (csum)
 
 section CompleteLaws
 
-variable {S : Type} [CompleteCSemiring S]
+variable {S : Type} [CommSemiring S] [CompleteCSemiring S]
 
 /-- Aggregating nothing but impossibilities is impossible (the field, exported). -/
 theorem csum_zero {ι : Type} : csum (fun _ : ι => (0 : S)) = 0 :=
@@ -206,6 +180,11 @@ theorem csum_prod {ι κ : Type} (f : ι → κ → S) :
 /-- Aggregation of a two-point family is binary alternation (the field). -/
 theorem csum_pair (x y : S) : csum (fun b : Bool => cond b x y) = x + y :=
   CompleteCSemiring.csum_pair x y
+
+/-- Aggregating over the one-point index is reading off the one value. The
+bookkeeping lemma that identifies a `1 × 1` matrix with a scalar. -/
+theorem csum_unit (f : Unit → S) : csum f = f () :=
+  csum_point () f fun _ hi => absurd rfl hi
 
 /-- Sequencing distributes over aggregation on the right: the symmetric
 variant, from commutativity of `*`. -/
@@ -244,14 +223,92 @@ theorem csum_add {ι : Type} (x y : ι → S) :
 
 end CompleteLaws
 
+/-! ## Aggregation as a supremum
+
+`CompleteCSemiring` says what an aggregate *is* — a `⊕`-sum over an arbitrary
+index — and its six laws say how it behaves under the semiring operations. What
+they do not say is anything about *order*: from them one can derive `f i ≤ csum
+f` at an idempotent carrier, but never the converse, `csum f ≤ y` from `∀ i, f
+i ≤ y`. Leastness of an aggregate is exactly the fact the six fields lack, and
+without it the aggregate of a family is only an upper bound of it, not the
+least one.
+
+The mixin below supplies precisely that, and supplies it by identifying `csum`
+with an operator that already has the property: Mathlib's `iSup`. It is not a
+new axiom about `csum` so much as the statement that on a *lattice* carrier the
+package's aggregation and Mathlib's are the same function — after which the
+whole `iSup` API (`le_iSup`, `iSup_le`, `iSup_le_iff`, `iSup_comm`, …) applies
+to `csum` with no translation. -/
+
+/-- `CsumIsSup S` says that the aggregation of `CompleteCSemiring S` is the
+supremum of the carrier's complete lattice: `⊕ᵢ fᵢ = ⨆ᵢ fᵢ`.
+
+**Why this is a separate mixin and not a field of `CompleteCSemiring`.** The
+expectation semiring `SqZero P M` is a `CompleteCSemiring` whose aggregation is
+componentwise and is *not* a supremum — its `+` accumulates moments rather than
+joining them — so the law cannot be asked of every complete carrier. It holds
+at exactly the three lattice carriers (`Prop`, `Cost`, `Prob`), and at those it
+holds by `rfl` or by one Mathlib lemma, because their `csum` was *defined* as
+`iSup`.
+
+**What it buys.** Everything an order buys over an equation. With it, `csum f ≤
+y` follows from `∀ i, f i ≤ y` (`csum_le`), the finitary `+` is the lattice
+join (`csum_add_eq_sup`), the infinitary distributive laws become
+`iSup`-distributivity (`csum_mul_iSup`, `csum_iSup_mul`), and those three facts
+are exactly the hypotheses of `KleeneAlgebra.ofSupDistrib` — so every carrier
+satisfying this mixin has a Kleene star, `x∗ = ⨆ₙ xⁿ`, with no per-carrier
+construction at all. -/
+class CsumIsSup (S : Type) [CommSemiring S] [CompleteCSemiring S] [CompleteLattice S] : Prop where
+  /-- Aggregation is the lattice supremum. -/
+  csum_eq_iSup : ∀ {ι : Type} (f : ι → S), csum f = ⨆ i, f i
+
+section IsSupLaws
+
+variable {S : Type} [CommSemiring S] [CompleteCSemiring S] [CompleteLattice S] [CsumIsSup S]
+
+/-- Aggregation is the lattice supremum (the field, exported). -/
+theorem csum_eq_iSup {ι : Type} (f : ι → S) : csum f = ⨆ i, f i :=
+  CsumIsSup.csum_eq_iSup f
+
+/-- Every member of a family is below its aggregate: Mathlib's `le_iSup`. -/
+theorem le_csum {ι : Type} (f : ι → S) (i : ι) : f i ≤ csum f :=
+  (csum_eq_iSup f).ge.trans' (le_iSup f i)
+
+/-- **The aggregate is the *least* upper bound**: Mathlib's `iSup_le`. This is
+the fact `CompleteCSemiring`'s six fields cannot deliver, and the reason this
+mixin exists. -/
+theorem csum_le {ι : Type} {f : ι → S} {y : S} (h : ∀ i, f i ≤ y) : csum f ≤ y :=
+  (csum_eq_iSup f).le.trans (iSup_le h)
+
+/-- **Binary alternation is the lattice join**: `x + y = x ⊔ y`. Two-point
+agreement (`csum_pair`) says the `+` of the semiring is the aggregate of a
+two-point family; this mixin says that aggregate is a supremum; and
+`iSup_bool_eq` reads a two-point supremum as a join. So the semiring's `⊕` and
+the carrier's `⊔` are one operation, which is what an `IdemSemiring` demands. -/
+theorem csum_add_eq_sup (x y : S) : x + y = x ⊔ y := by
+  rw [← csum_pair x y, csum_eq_iSup, iSup_bool_eq]
+  rfl
+
+/-- **Sequencing distributes over arbitrary suprema on the left**, the
+infinitary distributive law of `CompleteCSemiring` restated in Mathlib's
+vocabulary. -/
+theorem csum_mul_iSup {ι : Type} (x : S) (f : ι → S) : x * (⨆ i, f i) = ⨆ i, x * f i := by
+  rw [← csum_eq_iSup, csum_mul_left, csum_eq_iSup]
+
+/-- **Sequencing distributes over arbitrary suprema on the right**, from
+commutativity of `*`. -/
+theorem csum_iSup_mul {ι : Type} (x : S) (f : ι → S) : (⨆ i, f i) * x = ⨆ i, f i * x := by
+  rw [mul_comm, csum_mul_iSup]
+  exact iSup_congr fun i => mul_comm x (f i)
+
+end IsSupLaws
+
 /-! ## Iteration
 
-`star` is Mathlib's `KStar.kstar`, written `x∗` in the `Computability` scope.
+Iteration is Mathlib's `KStar.kstar`, written `x∗` in the `Computability`
+scope. The package's own `star` abbreviation is gone; the survivor below is the
+*law*, not the operation.
 -/
-
-/-- `star x` is `KStar.kstar x`: any number of repetitions of `x`, including
-none. The package's spelling, kept resolving over Mathlib's notation class. -/
-abbrev star {S : Type} [KStar S] (x : S) : S := KStar.kstar x
 
 /-- A `StarSemiring S` is a representation of *iteration* in a resource
 semiring: the single equation says that unrolling the loop once from the front
@@ -277,7 +334,7 @@ carrier it is `star_eq_right`, and over a non-commutative one it is a
 genuinely different law that no construction here requires of this class. -/
 class StarSemiring (S : Type) [Semiring S] [KStar S] : Prop where
   /-- Unrolling from the front: `x∗ = 1 + x · x∗`. -/
-  star_eq_left : ∀ x : S, star x = 1 + x * star x
+  star_eq_left : ∀ x : S, x∗ = 1 + x * x∗
 
 /-- Every Kleene algebra unrolls from the front: Mathlib's
 `one_add_mul_kstar`, read as the survivor class's single field. This is what
@@ -287,38 +344,27 @@ instance (priority := 100) instStarSemiringOfKleene {S : Type} [KleeneAlgebra S]
     StarSemiring S where
   star_eq_left _ := one_add_mul_kstar.symm
 
-/-- `ConwayStar` is `StarSemiring`: the former name, kept resolving.
-
-The rename was a correction of an overclaim — the class never had the Conway
-identities — and the name is kept for callers that spelled it out. -/
-abbrev ConwayStar (S : Type) [CommSemiring S] [KStar S] : Prop := StarSemiring S
-
-/-- `ConwayStar.star_eq_left` is `StarSemiring.star_eq_left`: the old
-projection name, kept resolving for callers that spelled the field out. -/
-theorem ConwayStar.star_eq_left {S : Type} [Semiring S] [KStar S] [StarSemiring S]
-    (x : S) : star x = 1 + x * star x :=
-  StarSemiring.star_eq_left x
-
 /-- Unrolling from the back: `x∗ = 1 + x∗ · x`. Not an assumption — with a
 commutative `*` the two unrollings are one law. Over a non-commutative carrier
 (matrices, panels) this is unavailable, and deliberately: the retry solve is
 left-handed, so nothing needs it. -/
 theorem star_eq_right {S : Type} [CommSemiring S] [KStar S] [StarSemiring S] (x : S) :
-    star x = 1 + star x * x :=
-  (StarSemiring.star_eq_left x).trans (congrArg (fun y => 1 + y) (mul_comm x (star x)))
+    x∗ = 1 + x∗ * x :=
+  (StarSemiring.star_eq_left x).trans (congrArg (fun y => 1 + y) (mul_comm x (x∗)))
 
 /-! ## The canonical additive order
 
 An equation cannot select a solution; only an order can. The order used here is
-the canonical one a semiring already carries: `x ≤+ y` iff `x + y = y` — *`y`
-is an alternative that already includes `x`*.
+the canonical one a semiring already carries: `x ≤ y` iff `x + y = y` — *`y` is
+an alternative that already includes `x`*.
 
-That order is now **Mathlib's `≤`**. `IdemSemiring` is defined so that
-`a ≤ b ↔ a + b = b` (`add_eq_right_iff_le`), with the `SemilatticeSup` and
-`OrderBot` structure that follows, and every lemma this module used to prove —
-reflexivity, transitivity, antisymmetry, `0` least, both monotonicities of `*`,
-the least-upper-bound property of `+` — is Mathlib's. `≤+` survives as notation
-so that existing statements keep reading as they did.
+That order is **Mathlib's `≤`**, and it is now also Mathlib's *spelling*.
+`IdemSemiring` is defined so that `a ≤ b ↔ a + b = b`
+(`add_eq_right_iff_le`), with the `SemilatticeSup` and `OrderBot` structure
+that follows, and every lemma this module used to prove — reflexivity,
+transitivity, antisymmetry, `0` least, both monotonicities of `*`, the
+least-upper-bound property of `+` — is Mathlib's, under Mathlib's names. The
+`≤+` notation and its twelve wrappers are retired.
 
 It is a *partial* order exactly when `+` is idempotent, and that fence is worth
 naming: the expectation semiring `SqZero P M` of `Agentic.Instances`, whose `+`
@@ -328,156 +374,137 @@ available there. (The Viterbi carrier `Prob` is a different matter: its `⊕` is
 `max`, so it is idempotent and it *is* a `KleeneAlgebra`; "probability" alone
 does not decide the question, the choice of `⊕` does.) -/
 
-/-- `x ≤+ y` — *`y` already includes `x`* — is Mathlib's `≤`. At an
-`IdemSemiring` that relation *is* `x + y = y` (`add_eq_right_iff_le`), so this
-is the same order the package always meant, with Mathlib's library attached. -/
+/-- `addLe` is Mathlib's `≤`. Deprecated compatibility alias, kept only
+because `doc/walkthrough.html` still spells it; the `≤+` notation it carried is
+retired and every statement in the package is written with `≤`. -/
+@[deprecated LE.le (since := "2026-08-12")]
 abbrev addLe {S : Type} [LE S] (x y : S) : Prop := x ≤ y
 
-@[inherit_doc addLe]
-infix:50 " ≤+ " => addLe
-
-section AddOrder
-
-variable {S : Type} [IdemSemiring S]
-
-/-- The order is the equation (Mathlib's `add_eq_right_iff_le`, reversed). -/
-theorem addLe_iff {x y : S} : x ≤+ y ↔ x + y = y := add_eq_right_iff_le.symm
-
-/-- The impossible alternative is below everything: `0` is `⊥`. -/
-theorem zero_addLe (x : S) : (0 : S) ≤+ x := by
-  simp
-
-/-- The order is transitive (Mathlib's `le_trans`). -/
-theorem addLe_trans {x y z : S} (hxy : x ≤+ y) (hyz : y ≤+ z) : x ≤+ z :=
-  le_trans hxy hyz
-
-/-- The order is antisymmetric (Mathlib's `le_antisymm`). -/
-theorem addLe_antisymm {x y : S} (hxy : x ≤+ y) (hyx : y ≤+ x) : x = y :=
-  le_antisymm hxy hyx
-
-/-- Sequencing is monotone in its right operand (Mathlib's `mul_left_mono`). -/
-theorem mul_addLe_mul_left (a : S) {x y : S} (h : x ≤+ y) : a * x ≤+ a * y :=
-  mul_right_mono h
-
-/-- Sequencing is monotone in its left operand (Mathlib's `mul_right_mono`). -/
-theorem mul_addLe_mul_right (a : S) {x y : S} (h : x ≤+ y) : x * a ≤+ y * a :=
-  mul_left_mono h
-
-/-- `+` is the *least* upper bound of `≤+` (Mathlib's `add_le`). -/
-theorem add_addLe {x y z : S} (hx : x ≤+ z) (hy : y ≤+ z) : x + y ≤+ z :=
-  add_le hx hy
-
-/-- Alternation is idempotent (Mathlib's `add_idem`). -/
-theorem add_idem (x : S) : x + x = x := _root_.add_idem x
-
-/-- The order is reflexive (Mathlib's `le_refl`). -/
-theorem addLe_refl (x : S) : x ≤+ x := le_refl x
-
-/-- Equals are below equals: the bridge from a solved equation to the order in
-which the solution is compared. -/
-theorem addLe_of_eq {x y : S} (h : x = y) : x ≤+ y := le_of_eq h
-
-/-- An alternative is below any choice that offers it, on the left (Mathlib's
-`le_self_add`). -/
-theorem addLe_add_left (x y : S) : x ≤+ x + y := le_self_add
-
-/-- An alternative is below any choice that offers it, on the right (Mathlib's
-`le_add_self`). -/
-theorem addLe_add_right (x y : S) : y ≤+ x + y := le_add_self
-
-end AddOrder
-
-/-- Every idempotent semiring's `+` is an idempotent operation, in Mathlib's
-unbundled form. The bundled `IdemSemiring` carries its own `Semiring` structure,
-so a construction that is generic in *another* semiring structure on the same
-carrier — `Mat S ι ι` over `[CompleteCSemiring S]`, say — cannot consume
-`IdemSemiring S` without a diamond. The unbundled mixin has no structure to
-clash, so it is what such constructions ask for. -/
-instance (priority := 100) instIdempotentAddOfIdemSemiring {S : Type} [IdemSemiring S] :
-    Std.IdempotentOp (α := S) (· + ·) :=
-  ⟨add_idem⟩
-
-/-- `KleeneStar S` is Mathlib's `KleeneAlgebra S`: iteration that is
-*characterised* rather than merely constrained, the star being the least
-solution of the loop equation in the canonical additive order.
-
-Mathlib's class asks for five laws where ours asked for one (`star_le_left`)
-plus idempotence, and the extra four are the right-handed twins that a
-non-commutative carrier genuinely needs. In exchange it brings `le_kstar`,
-`kstar_mono`, `kstar_idem`, `kstar_eq_one`, `one_add_mul_kstar`, the two
-`kstar_mul_le`/`mul_kstar_le` families, and the `IdemSemiring` order. -/
-abbrev KleeneStar (S : Type) := KleeneAlgebra S
-
 /-- **Kleene induction**, left-handed: anything closed under the loop step is
-above the loop's solve. Read `b + a * x ≤+ x` as "`x` absorbs the exit and one
+above the loop's solve. Read `b + a * x ≤ x` as "`x` absorbs the exit and one
 more trip", and the conclusion as "then `x` absorbs the whole loop".
 
 This was a class field; it is now Mathlib's `kstar_mul_le`, which is the same
 statement with the hypothesis split into its two halves. -/
 theorem star_le_left {S : Type} [KleeneAlgebra S] (a b x : S)
-    (h : b + a * x ≤+ x) : star a * b ≤+ x :=
+    (h : b + a * x ≤ x) : a∗ * b ≤ x :=
   kstar_mul_le (le_trans le_self_add h) (le_trans le_add_self h)
 
 /-- **The star is the least solution of its own unrolling law**: any `x` with
-`1 + a · x ≤+ x` — in particular any `x` with `x = 1 + a · x` — is above `a∗`.
+`1 + a · x ≤ x` — in particular any `x` with `x = 1 + a · x` — is above `a∗`.
 With the unrolling law, which says `a∗` *is* such an `x`, this characterises
 the star: it is the least prefixed point of `y ↦ 1 + a · y`. -/
 theorem star_le {S : Type} [KleeneAlgebra S] (a x : S)
-    (h : 1 + a * x ≤+ x) : star a ≤+ x := by
+    (h : 1 + a * x ≤ x) : a∗ ≤ x := by
   have hx := star_le_left a 1 x h
   rwa [mul_one] at hx
 
 /-- The star of a solved equation, in the form the read-outs use: if
-`x = 1 + a · x` then `a∗ ≤+ x`. -/
+`x = 1 + a · x` then `a∗ ≤ x`. -/
 theorem star_le_of_eq {S : Type} [KleeneAlgebra S] {a x : S}
-    (h : x = 1 + a * x) : star a ≤+ x :=
-  star_le a x (addLe_of_eq h.symm)
+    (h : x = 1 + a * x) : a∗ ≤ x :=
+  star_le a x (le_of_eq h.symm)
 
-/-- `IdemAdd.add_idem` — the old class field, kept resolving as Mathlib's
-`add_idem`. -/
-theorem IdemAdd.add_idem {S : Type} [IdemSemiring S] (x : S) : x + x = x := _root_.add_idem x
+/-! ## The one star: iteration as the aggregate of the powers
 
-/-- `KleeneStar.star_le_left` — the old class field, kept resolving as the
-theorem `star_le_left` (Mathlib's `kstar_mul_le`). -/
-theorem KleeneStar.star_le_left {S : Type} [KleeneAlgebra S] (a b x : S)
-    (h : b + a * x ≤+ x) : star a * b ≤+ x := _root_.Agentic.star_le_left a b x h
+Every star in this package is the same element — `x∗ = ⨆ₙ xⁿ`, the aggregate
+over how many times the loop is run — and until this arc every one of them was
+built by hand: a closed-form `if` at `Cost`, the identical closed form again at
+`Prob`, `True` at possibility, reachability at `Prop`-matrices, each with its
+own unrolling law and its own leastness proof. The construction below replaces
+all four. It asks for the three facts a *complete idempotent* semiring has —
+the join is the sum, and multiplication distributes over arbitrary joins on
+each side — and produces the star, both unrolling laws and both Kleene
+inductions.
 
-/-- `addIdemCMonoid S` is the join-semilattice on the additive half of an
-idempotent semiring.
+Nothing here is commutative, deliberately: the payoff is
+`Mat.instKleeneAlgebra`, where `*` is composition and the right-handed
+induction is a genuinely different statement from the left-handed one. Both are
+proved, by the same induction on the exponent read on the other side.
+-/
 
-It used to build an `IdemCMonoid` by hand — the fourth copy of the package's
-order — and that copy is what the migration deleted: `IdemSemiring` *is* a
-`SemilatticeSup` whose `⊔` is `+`, so the bridge is `inferInstance`. -/
-abbrev addIdemCMonoid (S : Type) [IdemSemiring S] : SemilatticeSup S := inferInstance
+/-- **The Kleene star of a complete idempotent semiring**: `x∗ = ⨆ₙ xⁿ`.
 
-/-- **The additive order is the package's join order**, by `rfl`: `≤+` is
-Mathlib's `≤`, and at an `IdemSemiring` that is the join order of `+`. The two
-developments the package used to keep in step are now one development, in
-Mathlib. -/
-theorem addLe_eq_le {S : Type} [IdemSemiring S] (x y : S) : (x ≤+ y) = (x ≤ y) := rfl
+The hypotheses are exactly what the proofs use, and each is the honest name of
+a property of the carrier:
 
-/-- Build a Kleene algebra on a **commutative** idempotent semiring out of the
-two facts the package's carriers actually prove: the unrolling law and
-left-handed Kleene induction.
+* `hadd` — the semiring's `⊕` is the lattice's `⊔`. This is what makes the
+  carrier an `IdemSemiring` at *the lattice's own order*, so that `≤` in the
+  conclusion is the order the carrier came with and not a second one induced by
+  `+`. (`0 = ⊥` is not assumed: `0 + a = a` and `hadd` already make `0` a
+  bottom.)
+* `hmul_iSup`, `hiSup_mul` — sequencing distributes over an *arbitrary*
+  aggregate of alternatives, on each side. Finite distributivity is a semiring
+  law; these are its infinitary strengthening, and they are the whole reason a
+  supremum of powers behaves like a loop.
 
-Mathlib's `KleeneAlgebra` asks for five fields, two of which are the
-right-handed twins of the other two. Over a commutative `*` the twins are the
-same law, so the carriers `Cost` and `Prob` — which had exactly `star_eq_left`
-and `star_le_left` — become instances with no new mathematics. -/
-abbrev KleeneAlgebra.ofCommStarLe {S : Type} [IdemCommSemiring S] (kst : S → S)
-    (unroll : ∀ x : S, kst x = 1 + x * kst x)
-    (least : ∀ a b x : S, b + a * x ≤ x → kst a * b ≤ x) : KleeneAlgebra S where
-  kstar := kst
-  one_le_kstar a := by rw [unroll a]; exact le_self_add
-  mul_kstar_le_kstar a := by conv_rhs => rw [unroll a]
-                             exact le_add_self
-  kstar_mul_le_kstar a := by
-    rw [mul_comm]
-    conv_rhs => rw [unroll a]
-    exact le_add_self
-  kstar_mul_le_self a b h := least a b b (add_le le_rfl h)
-  mul_kstar_le_self a b h := by
-    rw [mul_comm]
-    exact least a b b (add_le le_rfl (by rwa [mul_comm]))
+All five `KleeneAlgebra` fields fall out of `le_iSup`/`iSup_le`. Unrolling is
+the reindexing `n ↦ n+1` of the powers; the two inductions are the two ways of
+proving `aⁿ · b ≤ b` from `a · b ≤ b`, by induction on `n` peeling the exponent
+from the near or the far end. The right-handed induction is *not* obtained from
+the left by commutativity — it is proved — which is what lets the same
+construction serve matrices. -/
+@[reducible] noncomputable def KleeneAlgebra.ofSupDistrib {S : Type} [Semiring S]
+    [CompleteLattice S]
+    (hadd : ∀ x y : S, x + y = x ⊔ y)
+    (hmul_iSup : ∀ {ι : Type} (x : S) (f : ι → S), x * (⨆ i, f i) = ⨆ i, x * f i)
+    (hiSup_mul : ∀ {ι : Type} (x : S) (f : ι → S), (⨆ i, f i) * x = ⨆ i, f i * x) :
+    KleeneAlgebra S :=
+  have hml : ∀ (x : S) {y z : S}, y ≤ z → x * y ≤ x * z := by
+    intro x y z h
+    calc x * y ≤ x * y ⊔ x * z := le_sup_left
+      _ = x * (y ⊔ z) := by rw [← hadd y z, mul_add, hadd]
+      _ = x * z := by rw [sup_eq_right.mpr h]
+  have hmr : ∀ (x : S) {y z : S}, y ≤ z → y * x ≤ z * x := by
+    intro x y z h
+    calc y * x ≤ y * x ⊔ z * x := le_sup_left
+      _ = (y ⊔ z) * x := by rw [← hadd y z, add_mul, hadd]
+      _ = z * x := by rw [sup_eq_right.mpr h]
+  { __ := (inferInstance : Semiring S)
+    __ := (inferInstance : CompleteLattice S)
+    add_eq_sup := hadd
+    kstar := fun x => ⨆ n : Nat, x ^ n
+    one_le_kstar := fun a => le_iSup_of_le 0 (le_of_eq (pow_zero a).symm)
+    mul_kstar_le_kstar := fun a => by
+      show a * (⨆ n : Nat, a ^ n) ≤ ⨆ n : Nat, a ^ n
+      rw [hmul_iSup]
+      exact iSup_le fun n => le_iSup_of_le (n + 1) (le_of_eq (pow_succ' a n).symm)
+    kstar_mul_le_kstar := fun a => by
+      show (⨆ n : Nat, a ^ n) * a ≤ ⨆ n : Nat, a ^ n
+      rw [hiSup_mul]
+      exact iSup_le fun n => le_iSup_of_le (n + 1) (le_of_eq (pow_succ a n).symm)
+    kstar_mul_le_self := fun a b h => by
+      show (⨆ n : Nat, a ^ n) * b ≤ b
+      rw [hiSup_mul]
+      refine iSup_le fun n => ?_
+      induction n with
+      | zero => exact le_of_eq (by rw [pow_zero, one_mul])
+      | succ n ih =>
+        calc a ^ (n + 1) * b = a ^ n * (a * b) := by rw [pow_succ, mul_assoc]
+          _ ≤ a ^ n * b := hml _ h
+          _ ≤ b := ih
+    mul_kstar_le_self := fun a b h => by
+      show b * (⨆ n : Nat, a ^ n) ≤ b
+      rw [hmul_iSup]
+      refine iSup_le fun n => ?_
+      induction n with
+      | zero => exact le_of_eq (by rw [pow_zero, mul_one])
+      | succ n ih =>
+        calc b * a ^ (n + 1) = (b * a) * a ^ n := by rw [pow_succ', ← mul_assoc]
+          _ ≤ b * a ^ n := hmr _ h
+          _ ≤ b := ih }
+
+/-- **The star of every lattice carrier of this package**, in one line: a
+commutative complete resource semiring whose aggregation is its supremum is a
+Kleene algebra, with `x∗ = ⊕ₙ xⁿ`.
+
+This is `ofSupDistrib` with its three hypotheses discharged by `CsumIsSup`
+(`csum_add_eq_sup`, `csum_mul_iSup`, `csum_iSup_mul`). Possibility, worst-case
+cost and consensus weight are its three instances, and each of the three
+carriers now contributes *no* star mathematics of its own — only the one line
+that says its `csum` is an `iSup`. -/
+@[reducible] noncomputable def KleeneAlgebra.ofCsumIsSup (S : Type) [CommSemiring S]
+    [CompleteCSemiring S] [CompleteLattice S] [CsumIsSup S] : KleeneAlgebra S :=
+  KleeneAlgebra.ofSupDistrib csum_add_eq_sup csum_mul_iSup csum_iSup_mul
 
 end Agentic

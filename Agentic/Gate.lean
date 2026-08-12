@@ -57,13 +57,13 @@ variable {S : Type} {ι κ ν : Type}
 /-- The indicator scalar of a condition: the free step `1` if the condition
 holds, the impossible alternative `0` if it does not. Every guard in the
 design is this scalar and nothing else. -/
-noncomputable def indicator [CSemiring S] (b : Prop) : S :=
+noncomputable def indicator [CommSemiring S] (b : Prop) : S :=
   if b then 1 else 0
 
 /-- Scaling a transition by a resource: every weight is multiplied by `s`.
 This is the action of the semiring on matrices over it — the only mechanism
 gating needs. -/
-def smul [CSemiring S] (s : S) (M : Mat S ι κ) : Mat S ι κ :=
+def smul [CommSemiring S] (s : S) (M : Mat S ι κ) : Mat S ι κ :=
   fun a c => s * M a c
 
 /-- Gating a transition on a condition: **the scalar action of the condition's
@@ -72,12 +72,12 @@ it multiplies by `1` or by `0`, and the choice is what that multiplication
 already does. Every law below is therefore semiring arithmetic carried
 entrywise, and the guard's two-valuedness enters only through the indicator
 (`indicator_pos`, `indicator_neg`, `indicator_and`). -/
-noncomputable def gate [CSemiring S] (b : Prop) (M : Mat S ι κ) : Mat S ι κ :=
+noncomputable def gate [CommSemiring S] (b : Prop) (M : Mat S ι κ) : Mat S ι κ :=
   smul (indicator b) M
 
 section Basic
 
-variable [CSemiring S]
+variable [CommSemiring S]
 
 /-- The action is an action: scaling twice is scaling by the product. This is
 associativity of `*`, entrywise, and it is what makes nesting of guards
@@ -152,7 +152,7 @@ end Basic
 
 section Annihilation
 
-variable [CompleteCSemiring S]
+variable [CommSemiring S] [CompleteCSemiring S]
 
 /-- Nothing follows refusal: composing after the zero matrix is refusal again.
 This is `zero_mul` carried through the aggregation, and it is the reason the

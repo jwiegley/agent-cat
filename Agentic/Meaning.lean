@@ -88,17 +88,19 @@ package is allowed to do.
 ## Semantic width, and a finding about the grade
 
 Stage 2b adds the count the grade index was supposed to be about: `Term.peak`,
-the consultation sites a run can have in flight, in Mathlib's `ℕ∞`. It is
-anchored to `muExt` rather than to the grade's arithmetic — a term of peak zero
-means the same thing in every world (`muExt_indep_of_peak_eq_zero`), which is a
-property `widthT` does not have at zero (`widthE_zero_not_indep`).
+the consultation sites a run can have in flight, in Mathlib's `ℕ∞` — which is
+also where the grade lives (`Agentic.Frag`), so the count and the claim are
+compared directly and no encoding stands between them. `peak` is anchored to
+`muExt` rather than to the grade's arithmetic: a term of peak zero means the
+same thing in every world (`muExt_indep_of_peak_eq_zero`), a property the grade
+does not have at zero (`grade_zero_not_indep`).
 
-The bound that was expected, `peak t ≤ widthT t`, is **false**, and both
-directions fail: `dupPair` peaks at two with a grade width of zero, and
-`fanT 7 (pureT id)` peaks at zero with a grade width of seven. Grade width
-counts copies of a written shell, not consultations. What is true is
-`peak t ≤ writtenSites t * copiesT t` — the consultations written times the
-copies the grade admits — and it is tight at both witnesses.
+The bound that was expected, `peak t ≤ f`, is **false**, and both directions
+fail: `dupPair` peaks at two at grade `static`, and `fanT 7 (pureT id)` peaks
+at zero at grade `bounded 7`. A grade counts copies of a written shape, not
+consultations. What is true is `peak t ≤ writtenSites t * Frag.copies f` — the
+consultations written times the copies the grade admits — and it is tight at
+both witnesses.
 -/
 
 namespace Agentic
@@ -171,7 +173,7 @@ with no constructor are:
 Noncomputable, as everything downstream of `Mat.idMat` is: the identity, the
 point matrix and the indicator all decide equality classically. -/
 noncomputable def muS {Op : Type → Type → Type} {G L S : Type}
-    [CompleteCSemiring S] [PMonoid G] (interp : Interp Op G S) :
+    [CommSemiring S] [CompleteCSemiring S] [Monoid G] (interp : Interp Op G S) :
     ∀ {f : Frag} {i o : Type}, Term Op G L f i o → Scoped G (Mat S i o)
   | _, _, _, .prim op => fun g => interp g op
   | _, _, _, .pureT fn => fun _ => Mat.pointMat fn
@@ -190,7 +192,7 @@ noncomputable def muS {Op : Type → Type → Type} {G L S : Type}
 section Equations
 
 variable {Op : Type → Type → Type} {G L S : Type}
-  [CompleteCSemiring S] [PMonoid G] (interp : Interp Op G S)
+  [CommSemiring S] [CompleteCSemiring S] [Monoid G] (interp : Interp Op G S)
 
 /-- **The leaf row**: a consultation denotes whatever the interpretation says
 it denotes *under the scope in force*. -/
@@ -249,7 +251,7 @@ theorem muS_gateT {f : Frag} {i o : Type} (b : Bool) (t : Term Op G L f i o)
 ambient scope `g` meeting the annotation `h` on the right, so that `h` is
 innermost. -/
 theorem muS_scopeT {f : Frag} {i o : Type} (h : G) (t : Term Op G L f i o) (g : G) :
-    muS interp (.scopeT h t) g = muS interp t (g ⋄ h) := rfl
+    muS interp (.scopeT h t) g = muS interp t (g * h) := rfl
 
 /-- **Sharing is quantitatively transparent, for now.** The v1 fold charges a
 shared consultation exactly what it charges an unshared one, so `shareT` moves
@@ -284,21 +286,21 @@ end Equations
 section ScopeLaws
 
 variable {Op : Type → Type → Type} {G L S : Type}
-  [CompleteCSemiring S] [PMonoid G] (interp : Interp Op G S)
+  [CommSemiring S] [CompleteCSemiring S] [Monoid G] (interp : Interp Op G S)
 
 /-- **Scoping composes covariantly**, at meanings: nesting `h₂` inside `h₁` is
-entering the single scope `h₁ ⋄ h₂`, outer operand on the left. This is
+entering the single scope `h₁ * h₂`, outer operand on the left. This is
 `Scope.withScope_compose` — the theorem `Agentic.Scope` proved about the
 action — read at the quantitative fold, and writing it with the operands
 exchanged would be the classic §5.3 error and a false equation. -/
 theorem muS_scopeT_scopeT {f : Frag} {i o : Type} (h₁ h₂ : G)
     (t : Term Op G L f i o) :
-    muS interp (.scopeT h₁ (.scopeT h₂ t)) = withScope (h₁ ⋄ h₂) (muS interp t) :=
+    muS interp (.scopeT h₁ (.scopeT h₂ t)) = withScope (h₁ * h₂) (muS interp t) :=
   withScope_compose h₁ h₂ (muS interp t)
 
 /-- The empty scope changes no meaning. -/
 theorem muS_scopeT_unit {f : Frag} {i o : Type} (t : Term Op G L f i o) :
-    muS interp (.scopeT (PMonoid.unit : G) t) = muS interp t :=
+    muS interp (.scopeT (1 : G) t) = muS interp t :=
   withScope_one (muS interp t)
 
 end ScopeLaws
@@ -306,7 +308,7 @@ end ScopeLaws
 section Refusal
 
 variable {Op : Type → Type → Type} {G L S : Type}
-  [CompleteCSemiring S] [PMonoid G] (interp : Interp Op G S)
+  [CommSemiring S] [CompleteCSemiring S] [Monoid G] (interp : Interp Op G S)
 
 /-- **A shut gate denotes refusal**: `gateT false` is the zero matrix, whatever
 it guards. The `Bool → Prop` bridge is what makes this a computation —
@@ -343,238 +345,38 @@ end Refusal
 
 end Term
 
-/-! ## Stage 1b — width as a term fold, checked against the grade
+/-! ## Stage 1b — the width fold, and why it is gone
 
-The grade index of `Agentic.Term` is a *claim* about a term's data-dependent
-width. This section re-runs the same arithmetic as a fold over the term and
-proves the two agree exactly. Both sides are syntax: the fold reads the term,
-the index is computed by the constructors, and their agreement is a
-homomorphism check between two ways of doing one piece of arithmetic. Nothing
-here counts a consultation.
+There used to be a fold `Term.widthT` here that re-ran the grade's arithmetic
+over the term and a theorem that it agreed with the index the constructors
+computed. Both were an artefact of the grade being a private three-constructor
+type: the fold's target was `Option Nat`, the index's was `Frag`, and the
+agreement theorem was the claim that the two *encodings* of one number matched.
 
-The *semantic* width — consultations in flight at a run — is Stage 2b's
-`Term.peak`, and the comparison between the two is not the one this section
-used to promise. `peak t ≤ widthT t` is **false**
-(`Term.peak_not_le_widthE`: `dupPair` has two consultations in flight and a
-grade width of zero), because grade width counts *copies of a written shell*
-and `peak` counts consultations. What the grade does bound is one factor of the
-count, `peak t ≤ writtenSites t * copiesT t`
-(`Term.peak_le_writtenSites_mul_copiesT`), and that is what makes a `.bounded n`
-index a statement about a run.
+With the grade collapsed onto `ℕ∞` there is one encoding. The fold and the
+index are the same function of the term — `Term.grade` reads the index off,
+and `⊔`, `+` and `Frag.scale` are what a re-run would recompute — so the fold
+is `grade` and the theorem is `rfl`. Deleting it removes the last place where
+the package computed the same arithmetic twice and called the agreement a
+check.
 
-Width is not a semiring factor — the design's §7 correction, "peak width is not
-a semiring at all (its would-be one and zero coincide); it is a separate
-monoid fold" — so `widthT` is a fold on the *term*, not a read-out of `muS`,
-and it needs no carrier at all. Its target is `Option Nat`, `none` being the
-honest answer of the monadic fragment: not "zero", not "unknown", but *there is
-no a-priori width*, which is exactly what an opaque continuation forfeits.
+What replaced its *intended* job is Stage 2b below: `Term.peak`, the
+consultations a run can have in flight, anchored to `muExt` rather than to the
+grade, and the bound `peak t ≤ writtenSites t * Frag.copies f` that says what a
+grade index does and does not promise about a run.
 -/
-
-namespace Frag
-
-/-- The width a grade claims: `static` claims zero data-dependent width,
-`bounded n` claims at most `n`, and `monadic` claims nothing — `none` is the
-a-priori silence of §4, not a numeral.
-
-`static` and `bounded 0` are the two ways of writing "no data-dependent width"
-(`Agentic.Frag`'s header), and this function identifies them, which is why the
-agreement theorem below is an *equation* and not merely an inequality. -/
-def width : Frag → Option Nat
-  | static => some 0
-  | bounded n => some n
-  | monadic => none
-
-/-- Widths of parts that are not in flight together: the larger one, silence
-absorbing. This is the arithmetic of `join`. -/
-def wMax : Option Nat → Option Nat → Option Nat
-  | some a, some b => some (max a b)
-  | _, _ => none
-
-/-- Widths of parts that *are* in flight together: they add, silence
-absorbing. This is the arithmetic of `par`. -/
-def wAdd : Option Nat → Option Nat → Option Nat
-  | some a, some b => some (a + b)
-  | _, _ => none
-
-/-- The width of `n` copies of a body: multiplicities multiply, the body
-counting at least as one copy of itself (`max 1 m`, acat-l59). This is the
-arithmetic of `scale`. -/
-def wScale (n : Nat) : Option Nat → Option Nat
-  | some m => some (n * max 1 m)
-  | none => none
-
-/-- Sequencing, alternation and branching claim the larger width. -/
-theorem width_join (f g : Frag) : width (join f g) = wMax (width f) (width g) := by
-  cases f <;> cases g <;> simp [width, join, wMax] <;> omega
-
-/-- A tensor claims the sum of its branches' widths. -/
-theorem width_par (f g : Frag) : width (par f g) = wAdd (width f) (width g) := by
-  cases f <;> cases g <;> simp [width, par, wAdd]
-
-/-- A fan claims the product of its multiplicity with its body's width, the
-body counting at least once. -/
-theorem width_scale (n : Nat) (f : Frag) : width (scale n f) = wScale n (width f) := by
-  cases f <;> simp [width, scale, wScale]
-
-end Frag
 
 namespace Term
 
-/-- **The width fold**: the width a written workflow claims, computed from the
-term and nothing else. It is the grade's arithmetic re-run as a term fold. It
-was *intended* to bound how many consultations can be outstanding at once, and
-it does not: `Term.peak` counts those, and it is neither above nor below this
-fold (`Term.peak_not_le_widthE`, `Term.peak_lt_widthE_fanT_pureT`). What this
-number is, exactly, is the number of copies of the written shell that values
-can bring into flight — the second factor of the true bound,
-`Term.peak_le_writtenSites_mul_copiesT`.
+/-- The width a written workflow claims, as a fold: it is the grade index, and
+`Term.grade` is how one reads it.
 
-`none` is the monadic fragment's honest answer — an opaque continuation has no
-a-priori width, and the fold says so instead of inventing a number. Everything
-else is the arithmetic the grade already fixed: sequencing and alternation take
-the larger width, a tensor adds (both branches are in flight), a fan multiplies
-by its multiplicity with the body counting at least once, and gates, scopes,
-labels and fuel change no shape at all.
-
-Note what is *not* here: no recursion into `bindT`'s continuation. There is
-none to do — the continuation is an opaque function, so the fold is finite
-precisely because it stops. -/
-def widthT {Op : Type → Type → Type} {G L : Type} :
-    ∀ {f : Frag} {i o : Type}, Term Op G L f i o → Option Nat
-  | _, _, _, .prim _ => some 0
-  | _, _, _, .pureT _ => some 0
-  | _, _, _, .seqT t u => Frag.wMax (widthT t) (widthT u)
-  | _, _, _, .parT t u => Frag.wAdd (widthT t) (widthT u)
-  | _, _, _, .sumT t u => Frag.wMax (widthT t) (widthT u)
-  | _, _, _, .choiceT t u => Frag.wMax (widthT t) (widthT u)
-  | _, _, _, .gateT _ t => widthT t
-  | _, _, _, .scopeT _ t => widthT t
-  | _, _, _, .shareT _ t => widthT t
-  | _, _, _, .retryT _ t => widthT t
-  | _, _, _, .fanT n t => Frag.wScale n (widthT t)
-  | _, _, _, .bindT _ _ => none
-
-section Width
-
-variable {Op : Type → Type → Type} {G L : Type}
-
-/-- **The fold and the index compute the same arithmetic.** The width `widthT`
-folds out of a term is exactly the width its grade index claims — for every
-term, at every grade, with no side condition.
-
-Read it for what it is: a syntax-to-syntax homomorphism check. `widthT` re-runs
-the grade arithmetic (`Frag.wMax`/`wAdd`/`wScale`) as a fold over the term,
-`Frag.width` reads it off the index the constructors computed, and the theorem
-says the two routes agree. It confirms that the fold's arithmetic and the
-index's arithmetic were not written to diverge; it does *not* say either one
-counts consultations. The count is `Term.peak` (Stage 2b), the statement that
-turns a `.bounded 3` index into a fact about a run is
-`Term.peak_le_of_bounded`, and it needed a second factor — the consultations
-the term has *written* — because this fold and the count are incomparable
-(`Term.peak_not_le_widthE`).
-
-It is an equation rather than the expected inequality because `Frag.width`
-collapses the one residual slack in the grade order (`static` versus
-`bounded 0`) that `Frag`'s header records; the inequality forms that a fold
-consumer wants are the corollaries below. -/
-theorem widthT_eq_width : ∀ {f : Frag} {i o : Type} (t : Term Op G L f i o),
-    widthT t = Frag.width f := by
-  intro f i o t
-  induction t with
-  | prim _ => rfl
-  | pureT _ => rfl
-  | seqT t u ih₁ ih₂ =>
-    show Frag.wMax (widthT t) (widthT u) = _
-    rw [ih₁, ih₂, Frag.width_join]
-  | parT t u ih₁ ih₂ =>
-    show Frag.wAdd (widthT t) (widthT u) = _
-    rw [ih₁, ih₂, Frag.width_par]
-  | sumT t u ih₁ ih₂ =>
-    show Frag.wMax (widthT t) (widthT u) = _
-    rw [ih₁, ih₂, Frag.width_join]
-  | choiceT t u ih₁ ih₂ =>
-    show Frag.wMax (widthT t) (widthT u) = _
-    rw [ih₁, ih₂, Frag.width_join]
-  | gateT _ t ih => exact ih
-  | scopeT _ t ih => exact ih
-  | shareT _ t ih => exact ih
-  | retryT _ t ih => exact ih
-  | fanT n t ih =>
-    show Frag.wScale n (widthT t) = _
-    rw [ih, Frag.width_scale]
-  | bindT _ _ _ _ => rfl
-
-/-- A term graded `bounded n` has width exactly `n`: the bound in the type is
-the bound the fold reports. -/
-theorem widthT_bounded {n : Nat} {i o : Type} (t : Term Op G L (.bounded n) i o) :
-    widthT t = some n := widthT_eq_width t
-
-/-- A static term has no data-dependent width at all. -/
-theorem widthT_static {i o : Type} (t : Term Op G L .static i o) :
-    widthT t = some 0 := widthT_eq_width t
-
-/-- A monadic term has no a-priori width: the instruments answer "no a-priori
-cost", which is the truth and not an evasion. -/
-theorem widthT_monadic {i o : Type} (t : Term Op G L .monadic i o) :
-    widthT t = none := widthT_eq_width t
-
-/-- **The fan's width, as the inequality acat-l59 asked for.** True by
-definition of the fold: `widthT (fanT n t)` *is* `Frag.wScale n (widthT t)`, so
-this is `Nat.le_of_eq` on a definitional identity, not a bound proved against
-anything independent. The semantic bound is Stage 2b's, and it is not this
-statement with `peak` written in: a run of `fanT n t` has at most
-`writtenSites t * n * max 1 m` consultations in flight
-(`Term.peak_le_writtenSites_mul_copiesT` at a fan), the extra factor being the
-consultations the body has written, which no width claim mentions.
-
-The `max 1 m` is what the arithmetic buys: with a plain `n * m` a three-way fan
-over a body of width `0` would be reported at width `0`, while the body's own
-consultations are instantiated three times over. -/
-theorem widthT_fanT_le {f : Frag} {i o : Type} (n m w : Nat)
-    (t : Term Op G L f i o) (ht : widthT t = some m)
-    (hw : widthT (.fanT n t) = some w) : w ≤ n * max 1 m := by
-  have h : widthT (Term.fanT n t) = Frag.wScale n (widthT t) := rfl
-  rw [h, ht] at hw
-  exact Nat.le_of_eq (Option.some.inj hw.symm)
-
-/-- The same fact as an equation, which is what the fold actually computes. -/
-theorem widthT_fanT {f : Frag} {i o : Type} (n : Nat) (t : Term Op G L f i o) :
-    widthT (.fanT n t) = Frag.wScale n (widthT t) := rfl
-
-end Width
-
-section WidthSmoke
-
-/-! ### The width fold at the memorialized witnesses
-
-`Agentic.Term`'s smoke section keeps the terms that fixed the grade
-arithmetic. Here the *fold* is run on them, which is what turns those examples
-from claims about indices into claims about width. -/
-
-/-- **The acat-l59 witness, weighed.** A body that consults, transforms and
-then fans zero ways is graded `bounded 0`; fanning it three ways runs its
-consultation three times, and the fold reports three — the number the old
-`n * m` arithmetic got wrong. -/
-example (Op : Type → Type → Type) (G L : Type) (q : Op String String) :
-    widthT (G := G) (L := L)
-      (.fanT 3 (.seqT (.seqT (.prim q) (.pureT (fun s => [s]))) (.fanT 0 (.prim q))))
-      = some 3 := rfl
-
-/-- Two bounded stages side by side add: eight, not five. -/
-example (Op : Type → Type → Type) (G L : Type) (q : Op String String) :
-    widthT (G := G) (L := L) (.parT (.fanT 3 (.prim q)) (.fanT 5 (.prim q)))
-      = some 8 := rfl
-
-/-- A fan over a fan multiplies: fifteen. -/
-example (Op : Type → Type → Type) (G L : Type) (q : Op String String) :
-    widthT (G := G) (L := L) (.fanT 3 (.fanT 5 (.prim q))) = some 15 := rfl
-
-/-- A full continuation forfeits the a-priori width, and the fold says so. -/
-example (Op : Type → Type → Type) (G L : Type) (q : Op String String)
-    (plan : String → Term Op G L .static PUnit Nat) :
-    widthT (.bindT (.prim q) plan) = none := rfl
-
-end WidthSmoke
+Deprecated alias, kept for one release because `doc/walkthrough.html` names
+`widthT` (there as `widthT harden = some 0`; the honest reading is now
+`grade harden = 0`, with no `Option`). -/
+@[deprecated Term.grade (since := "acat-vel")]
+abbrev widthT {Op : Type → Type → Type} {G L : Type} {f : Frag} {i o : Type}
+    (t : Term Op G L f i o) : Frag := grade t
 
 section MeaningSmoke
 
@@ -587,7 +389,7 @@ and the fan, retry and choice rows are where that could fail. -/
 /-- **The acat-l59 witness has a quantitative meaning**, at every complete
 resource semiring and every scope monoid. -/
 noncomputable example (Op : Type → Type → Type) (G L S : Type)
-    [CompleteCSemiring S] [PMonoid G] (interp : Interp Op G S)
+    [CommSemiring S] [CompleteCSemiring S] [Monoid G] (interp : Interp Op G S)
     (q : Op String String) : Scoped G (Mat S (List String) (List (List String))) :=
   muS (L := L) interp
     (.fanT 3 (.seqT (.seqT (.prim q) (.pureT (fun s => [s]))) (.fanT 0 (.prim q))))
@@ -596,7 +398,7 @@ noncomputable example (Op : Type → Type → Type) (G L S : Type)
 decode onto a coproduct, branch, all under a guard and a fueled retry — has a
 quantitative meaning too, and every row it uses is one of the §4 rows. -/
 noncomputable example (Op : Type → Type → Type) (G L S : Type)
-    [CompleteCSemiring S] [PMonoid G] (interp : Interp Op G S)
+    [CommSemiring S] [CompleteCSemiring S] [Monoid G] (interp : Interp Op G S)
     (q : Op String String) : Scoped G (Mat S String Nat) :=
   muS (L := L) interp
     (.retryT 3
@@ -683,35 +485,34 @@ promised — `parT (prim q) (prim q)` yields the two distinct sites `[parL]` and
 `[parR]`. -/
 abbrev Site : Type := List Step
 
-/-- `Site.strip p s` is `some t` when `s` is `p ++ t`, and `none` when `s` does
-not begin with `p`: the one decision a site-relabelling has to make, namely
-*is this site below the node I am rewriting at*.
-
-It is written here rather than taken from the list library because the library
-spelling that answers the same question (`List.isPrefixOf` plus `List.drop`)
-answers it in two steps and forces the caller to re-derive the remainder from a
-`Bool`; `strip` returns the remainder with the decision, which is exactly the
-shape `Key.relocate` consumes. Decidability comes from `Step`'s derived
-`DecidableEq` and asks nothing of `L`, so the fold's promise that labels are
-never compared survives into the relabelling machinery. -/
-def Site.strip : Site → Site → Option Site
-  | [], s => some s
-  | _ :: _, [] => none
-  | a :: as, b :: bs => if a = b then Site.strip as bs else none
+/-! The one decision a site-relabelling has to make is *is this site below the
+node I am rewriting at*, and the answer wanted is the remainder, not a `Bool`.
+That is exactly `List.dropPrefix?`: `s.dropPrefix? p` is `some t` when `s` is
+`p ++ t` and `none` otherwise. Decidability comes from `Step`'s derived
+`DecidableEq` (through `BEq`) and asks nothing of `L`, so the fold's promise
+that labels are never compared survives into the relabelling machinery. The
+two facts the relabelling proofs need are below; both come out of
+`List.dropPrefix?_eq_some_iff`. -/
 
 /-- Stripping a genuine prefix returns the remainder. -/
-theorem Site.strip_append (p s : Site) : Site.strip p (p ++ s) = some s := by
-  induction p with
-  | nil => rfl
-  | cons a as ih => simp [Site.strip, ih]
+theorem Site.dropPrefix?_append (p s : Site) : (p ++ s).dropPrefix? p = some s := by
+  simp [List.dropPrefix?_eq_some_iff]
 
 /-- Two sites that diverge at the same position are not below one another:
 this is what keeps a relabelling of the left branch from touching the right. -/
-theorem Site.strip_diverge (p : Site) {a b : Step} (hab : a ≠ b) (s t : Site) :
-    Site.strip (p ++ a :: s) (p ++ b :: t) = none := by
-  induction p with
-  | nil => simp [Site.strip, hab]
-  | cons c cs ih => simp [Site.strip, ih]
+theorem Site.dropPrefix?_diverge (p : Site) {a b : Step} (hab : a ≠ b) (s t : Site) :
+    (p ++ b :: t).dropPrefix? (p ++ a :: s) = none := by
+  rcases h : (p ++ b :: t).dropPrefix? (p ++ a :: s) with _ | u
+  · rfl
+  · rw [List.dropPrefix?_eq_some_iff] at h
+    obtain ⟨p', hp, hbeq⟩ := h
+    simp only [beq_iff_eq] at hbeq
+    subst hbeq
+    rw [List.append_assoc] at hp
+    have hcons := List.append_cancel_left hp
+    rw [List.cons_append] at hcons
+    simp only [List.cons.injEq] at hcons
+    exact absurd hcons.1 (Ne.symm hab)
 
 /-- A `Key L` is a representation of *the consultation index a leaf reads at*:
 a site, together with what that site is measured from.
@@ -800,7 +601,7 @@ not positioned, so a renaming of positions has no business moving it — and
 that restraint is exactly what keeps `dupPair` and `sharedPair` apart under the
 coarser equality (`WEqR_dupPair_ne_sharedPair`). -/
 def relocate (base : Site) (φ : Site → Site) : Key L → Key L
-  | .abs s => match Site.strip base s with
+  | .abs s => match s.dropPrefix? base with
       | some rest => .abs (base ++ φ rest)
       | none => .abs s
   | .rel l s => .rel l s
@@ -808,7 +609,7 @@ def relocate (base : Site) (φ : Site → Site) : Key L → Key L
 /-- A relocation acts on the sites below its base by `φ`. -/
 theorem relocate_abs (base : Site) (φ : Site → Site) (s : Site) :
     (relocate (L := L) base φ) (.abs (base ++ s)) = .abs (base ++ φ s) := by
-  simp [relocate, Site.strip_append]
+  simp [relocate, Site.dropPrefix?_append]
 
 /-- **Two relabellings, spliced at a branch**: `splice s st₁ st₂ σ₁ σ₂` runs
 `σ₁` on the sites below `s ++ [st₁]`, `σ₂` on those below `s ++ [st₂]`, and
@@ -816,9 +617,9 @@ fixes the rest. It is what turns "each child of a node has a relabelling" into
 "the node has one", which is the congruence proof for every binary
 constructor. -/
 def splice (s : Site) (st₁ st₂ : Step) (σ₁ σ₂ : Key L → Key L) : Key L → Key L
-  | .abs t => match Site.strip (s ++ [st₁]) t with
+  | .abs t => match t.dropPrefix? (s ++ [st₁]) with
       | some _ => σ₁ (.abs t)
-      | none => match Site.strip (s ++ [st₂]) t with
+      | none => match t.dropPrefix? (s ++ [st₂]) with
         | some _ => σ₂ (.abs t)
         | none => .abs t
   | .rel l t => .rel l t
@@ -826,9 +627,9 @@ def splice (s : Site) (st₁ st₂ : Step) (σ₁ σ₂ : Key L → Key L) : Key
 /-- Below the first branch, the splice is the first relabelling. -/
 theorem splice_left (s : Site) (st₁ st₂ : Step) (σ₁ σ₂ : Key L → Key L) (t : Site) :
     splice s st₁ st₂ σ₁ σ₂ (.abs (s ++ st₁ :: t)) = σ₁ (.abs (s ++ st₁ :: t)) := by
-  have h₁ : Site.strip (s ++ [st₁]) (s ++ st₁ :: t) = some t := by
+  have h₁ : (s ++ st₁ :: t).dropPrefix? (s ++ [st₁]) = some t := by
     have hh : s ++ st₁ :: t = (s ++ [st₁]) ++ t := by simp
-    rw [hh, Site.strip_append]
+    rw [hh, Site.dropPrefix?_append]
   simp only [splice]
   rw [h₁]
 
@@ -837,11 +638,11 @@ splice is the second relabelling. -/
 theorem splice_right (s : Site) {st₁ st₂ : Step} (hst : st₁ ≠ st₂)
     (σ₁ σ₂ : Key L → Key L) (t : Site) :
     splice s st₁ st₂ σ₁ σ₂ (.abs (s ++ st₂ :: t)) = σ₂ (.abs (s ++ st₂ :: t)) := by
-  have hne : Site.strip (s ++ [st₁]) (s ++ st₂ :: t) = none :=
-    Site.strip_diverge s hst [] t
-  have h₂ : Site.strip (s ++ [st₂]) (s ++ st₂ :: t) = some t := by
+  have hne : (s ++ st₂ :: t).dropPrefix? (s ++ [st₁]) = none :=
+    Site.dropPrefix?_diverge s hst [] t
+  have h₂ : (s ++ st₂ :: t).dropPrefix? (s ++ [st₂]) = some t := by
     have hh : s ++ st₂ :: t = (s ++ [st₂]) ++ t := by simp
-    rw [hh, Site.strip_append]
+    rw [hh, Site.dropPrefix?_append]
   simp only [splice]
   rw [hne, h₂]
 
@@ -1018,7 +819,7 @@ The clauses, and the decisions in them:
   cost, §4's static fragment.
 * `gateT false` is `none`: refusal is partiality, `Env`'s documented
   convention, and it annihilates by the `Option` threading above.
-* `scopeT h` recurses at `g ⋄ h` — the same right action as `muS`, so the two
+* `scopeT h` recurses at `g * h` — the same right action as `muS`, so the two
   meanings scope alike.
 * `shareT l` **rebases the key on the label alone**, and that is the one
   clause the whole section exists for. The body is not consulted and neither
@@ -1028,7 +829,7 @@ The clauses, and the decisions in them:
   keys each copy by its index.
 * `bindT` binds through the intermediate value, prefix and continuation
   keyed apart. -/
-def muExt {Op : Type → Type → Type} {G L : Type} [PMonoid G]
+def muExt {Op : Type → Type → Type} {G L : Type} [Monoid G]
     (run : Runner Op G L) :
     ∀ {f : Frag} {i o : Type}, Term Op G L f i o → G → Key L → i → Option o
   | _, _, _, .prim op => fun g k a => run g k op a
@@ -1047,7 +848,7 @@ def muExt {Op : Type → Type → Type} {G L : Type} [PMonoid G]
       | Sum.inr b => muExt run u g (k.push .choiceR) b
   | _, _, _, .gateT b t => fun g k a =>
       if b then muExt run t g (k.push .gate) a else none
-  | _, _, _, .scopeT h t => fun g k => muExt run t (g ⋄ h) (k.push .scope)
+  | _, _, _, .scopeT h t => fun g k => muExt run t (g * h) (k.push .scope)
   | _, _, _, .shareT l t => fun g _ => muExt run t g (Key.rebase l)
   | _, _, _, .retryT n t => fun g k a =>
       retryLoop (fun trip a' => muExt run t g (k.push (.retry trip)) a') n 0 a
@@ -1059,7 +860,7 @@ def muExt {Op : Type → Type → Type} {G L : Type} [PMonoid G]
 
 section ExtEquations
 
-variable {Op : Type → Type → Type} {G L : Type} [PMonoid G] (run : Runner Op G L)
+variable {Op : Type → Type → Type} {G L : Type} [Monoid G] (run : Runner Op G L)
 
 /-- A leaf consults the world at its own site. -/
 theorem muExt_prim {i o : Type} (op : Op i o) (g : G) (k : Key L) (a : i) :
@@ -1115,7 +916,7 @@ theorem muExt_gateT_true {f : Frag} {i o : Type} (t : Term Op G L f i o)
 "innermost wins" means. -/
 theorem muExt_scopeT {f : Frag} {i o : Type} (h : G) (t : Term Op G L f i o)
     (g : G) (k : Key L) :
-    muExt run (.scopeT h t) g k = muExt run t (g ⋄ h) (k.push .scope) := rfl
+    muExt run (.scopeT h t) g k = muExt run t (g * h) (k.push .scope) := rfl
 
 /-- **Sharing rebases on the label alone**: the key inside `shareT l` does not
 depend on where the `shareT` was written, only on the label. This is the clause
@@ -1174,7 +975,7 @@ end ExtEquations
 
 section KeyIrrelevance
 
-variable {Op : Type → Type → Type} {G L : Type} [PMonoid G] {run : Runner Op G L}
+variable {Op : Type → Type → Type} {G L : Type} [Monoid G] {run : Runner Op G L}
 
 /-- **When the runner ignores keys, the fold ignores sites.** A runner that
 answers the same question the same way wherever it is asked is precisely a
@@ -1219,7 +1020,7 @@ theorem muExt_key_irrelevant
     cases b with
     | false => rfl
     | true => exact ih g (k.push .gate) (k'.push .gate) x
-  | scopeT h t ih => intro g k k' x; exact ih (g ⋄ h) (k.push .scope) (k'.push .scope) x
+  | scopeT h t ih => intro g k k' x; exact ih (g * h) (k.push .scope) (k'.push .scope) x
   | shareT l t _ => intro _ _ _ _; rfl
   | retryT n t ih =>
     intro g k k' x
@@ -1260,7 +1061,7 @@ relabelling that connects the two bases*. It is proved once, by the same
 twelve-constructor induction as `muExt_key_irrelevant`, and every law of the
 quotient is an instance of it with a different finite rewrite of paths. -/
 
-variable {Op : Type → Type → Type} {G L : Type} [PMonoid G]
+variable {Op : Type → Type → Type} {G L : Type} [Monoid G]
 
 /-- Two worlds *agree below a pair of bases* when asking the first at `k₁`
 extended by a path gives what asking the second at `k₀` extended by the same
@@ -1270,7 +1071,7 @@ def AgreeBelow (run₁ run₂ : Runner Op G L) (k₁ k₀ : Key L) : Prop :=
   ∀ (g : G) (s : Site) {a b : Type} (op : Op a b) (x : a),
     run₁ g (k₁.extend s) op x = run₂ g (k₀.extend s) op x
 
-omit [PMonoid G] in
+omit [Monoid G] in
 /-- Agreement below a pair of bases descends into any child. -/
 theorem AgreeBelow.push {run₁ run₂ : Runner Op G L} {k₁ k₀ : Key L}
     (h : AgreeBelow run₁ run₂ k₁ k₀) (st : Step) :
@@ -1335,7 +1136,7 @@ theorem muExt_transport {run₁ run₂ : Runner Op G L}
     | true => exact ih (k₁.push .gate) (k₀.push .gate) (h.push _) g
   | scopeT hs t ih =>
     intro k₁ k₀ h g
-    exact ih (k₁.push .scope) (k₀.push .scope) (h.push _) (g ⋄ hs)
+    exact ih (k₁.push .scope) (k₀.push .scope) (h.push _) (g * hs)
   | shareT l t ih =>
     intro _ _ _ g
     refine ih (Key.rebase l) (Key.rebase l) ?_ g
@@ -1480,7 +1281,7 @@ theorem muExt_dupPair_ne_sharedPair :
 sheet is the sample point at which the two agree, which is
 `Env.share_eq_dup_of_agree` for written terms: the distinction is real, and it
 is invisible to any single world that does not depend on where it is asked. -/
-theorem muExt_dupPair_eq_sharedPair_of_const {G : Type} [PMonoid G] (v : Nat)
+theorem muExt_dupPair_eq_sharedPair_of_const {G : Type} [Monoid G] (v : Nat)
     (l : Nat) :
     Term.muExt (askRunner (G := G) (fun _ => v))
         (Term.dupPair (L := Nat) AskOp.ask)
@@ -1518,12 +1319,11 @@ theorem muExt_shareT_label_collision (ε : Env (Key Nat) Nat) :
 /-! ## Stage 2b — semantic width: consultations in flight, and what the grade
 actually bounds
 
-Stage 1b's `widthT` folds the *grade's* arithmetic out of the term, and
-`widthT_eq_width` checks that fold against the index the constructors computed.
-Both sides are syntax, and the check carries no information about meaning: it
-is happy to weigh `fanT 7 (pureT id)` at seven while that term consults nothing
-at all. This section builds the quantity the grade was supposed to be a bound
-on, and then reports what is true of the pair — which is not what was expected.
+The grade index claims a *width*, and the claim is about the term's shape: how
+many copies of the written shape values can bring into flight. This section
+builds the quantity that claim was supposed to be a bound on — the number of
+consultation sites a run can have outstanding — and reports what is true of
+the pair, which is not what was expected.
 
 **`peak`, and why it is not the grade arithmetic again.** `peak` counts
 *consultation sites*: a `prim` is one, a `pureT` is none, and every other
@@ -1531,49 +1331,46 @@ clause combines its children by how they sit in time. Sequencing, alternation
 and branching take the larger of their children (only one of them is in flight
 at a time); a tensor adds (both are); a fan of `n` multiplies by `n` (the copies
 are in flight together, and `0` copies are `0` consultations — no `max 1` here,
-because that correction belongs to the grade's *shell* arithmetic, not to a
+because that correction belongs to the grade's *shape* arithmetic, not to a
 count of consultations); a shut gate is `0`, because nothing under it runs;
 labels, scopes and fuel change nothing; and `bindT` is `⊤`, an opaque
-continuation forfeiting any a-priori count. So the two folds part company
-immediately: `peak (prim q) = 1` where `widthT (prim q) = some 0`, and
-`peak (fanT 7 (pureT id)) = 0` where `widthT` says seven.
+continuation forfeiting any a-priori count. So the count and the grade part
+company immediately: `peak (prim q) = 1` at grade `static = 0`, and
+`peak (fanT 7 (pureT id)) = 0` at grade `bounded 7`.
 
-The target is Mathlib's `ℕ∞` — `WithTop ℕ`, whose `⊤` is the monadic
-fragment's silence and whose order, `max`, `+` and `*` are the ones from the
-shelf. (That order's `max` is the complete lattice's, so the fold is
-`noncomputable`; it is a specification of a count, not a metering
-instrument.)
+The target is Mathlib's `ℕ∞` — which is now also the grade (`Agentic.Frag`),
+so the count and the claim are comparable without a translation, and the two
+theorems below that compare them say `peak t ≤ f` in the grade's own letters.
+(`ℕ∞`'s `max` is the complete lattice's, so the fold is `noncomputable`; it is
+a specification of a count, not a metering instrument.)
 
 **What makes it semantic.** `muExt_indep_of_peak_eq_zero`: a term whose peak is
 `0` has a meaning that does not depend on the runner *at all* — every world
 gives it the same partial function. That is a statement about `⟦·⟧_ext`, proved
 by the same twelve-constructor induction as the rest of this module, and it is
-the property `widthT` conspicuously lacks: `widthT (prim q) = some 0` while
-`prim q` reads whatever the world says (`widthE_zero_not_indep`). A fold
-answering `0` on a term that consults is not measuring consultations, and a
-fold answering `7` on a term that consults nothing is not measuring them
-either.
+the property the *grade* conspicuously lacks: `prim q` is graded `static` while
+reading whatever the world says (`grade_zero_not_indep`). A number that is `0`
+on a term that consults is not measuring consultations, and a number that is
+`7` on a term that consults nothing is not measuring them either.
 
-**The inequality acat-vbl asked for is false.** `peak t ≤ widthT t` fails, and
-the counterexample is the package's own memorialized pair: `peak (dupPair q)`
-is two consultations and `widthT (dupPair q)` is `some 0`
-(`peak_not_le_widthE`). The reason is not a bug in either fold — it is what
-grade width *means*. `Frag.width` measures data-dependent width, the number of
-copies of a written shell that values can bring into flight, and `static` is
-the grade of "no copies beyond the one you wrote", not of "no consultations".
-Two `prim`s side by side are two consultations and one shell. So the grade
-never bounded the count, and no amount of arithmetic agreement between `widthT`
-and `Frag.width` was going to make it.
+**The inequality acat-vbl asked for is false.** `peak t ≤ f` fails, and the
+counterexample is the package's own memorialized pair: `peak (dupPair q)` is
+two consultations at grade `static` (`peak_not_le_grade`). The reason is not a
+bug in the fold — it is what a grade *means*. It measures data-dependent
+width, the number of copies of a written shape that values can bring into
+flight, and `static` is the grade of "no copies beyond the one you wrote", not
+of "no consultations". Two `prim`s side by side are two consultations and one
+shape.
 
 **The inequality that is true.** What the grade bounds is one *factor* of the
 count:
 
-`peak t ≤ writtenSites t * copiesT t`
+`peak t ≤ writtenSites t * Frag.copies f`
 
 — the peak number of consultations in flight is at most the number of
 consultations *written* in the term times the number of copies the grade
-admits (`Frag.copies`, which is the grade's own `max 1 m` from `Frag.wScale`:
-the shell counts as one copy of itself). Neither factor can be dropped, and the
+admits (`Frag.copies`, the `max 1` that `Frag.scale` also uses: the written
+shape counts as one copy of itself). Neither factor can be dropped, and the
 bound is *tight* at both of the witnesses that refute the naive one:
 `fanT 7 (pureT id)` has seven copies of nothing (`0 = 0 * 7`) and `dupPair` has
 two writings of one copy (`2 = 2 * 1`). It is not an equality — sequencing puts
@@ -1598,117 +1395,6 @@ needs either a `DecidableEq L` hypothesis or a set-valued fold. That is
 recorded as discovered work rather than smuggled in, because it changes what
 `peak` means and not merely how it is computed.
 -/
-
-namespace Frag
-
-/-- A width claim, read in Mathlib's `ℕ∞`: silence is `⊤`.
-
-`Frag.width`'s `none` is "no a-priori width", and `⊤` in `WithTop ℕ` is the
-element that says exactly that while still being comparable to every numeral —
-which is what the bound below needs and what `Option Nat`'s own order (where
-`none` is `⊥`) would get backwards. -/
-def ofWidth : Option Nat → ℕ∞
-  | none => ⊤
-  | some n => (n : ℕ∞)
-
-/-- **The copies a grade admits**: `max 1` of the claim.
-
-The `max 1` is not a fudge; it is `Frag.wScale`'s own arithmetic (acat-l59)
-read one level up. A grade's width counts *data-dependent* copies of a written
-shell, and the shell always counts as one copy of itself, so a `static` term
-admits one copy and not zero. This is the factor the bound below multiplies the
-written sites by. -/
-noncomputable def copies (w : Option Nat) : ℕ∞ := max 1 (ofWidth w)
-
-/-- Every grade admits at least one copy. -/
-theorem one_le_copies (w : Option Nat) : 1 ≤ copies w := le_max_left _ _
-
-/-- Hence no grade admits zero copies — which is what keeps the bound's
-right-hand side from collapsing at `⊤`. -/
-theorem copies_ne_zero (w : Option Nat) : copies w ≠ 0 := by
-  intro h
-  have h1 := one_le_copies w
-  rw [h] at h1
-  exact absurd h1 (by simp)
-
-/-- Copies at a finite claim, with the `max` moved inside the cast: the form
-every arithmetic step below uses. -/
-theorem copies_some (m : Nat) : copies (some m) = ((max 1 m : Nat) : ℕ∞) := by
-  show max 1 ((m : Nat) : ℕ∞) = _
-  exact_mod_cast rfl
-
-/-- Copies at silence: unboundedly many. -/
-theorem copies_none : copies none = ⊤ := by
-  show max 1 (⊤ : ℕ∞) = ⊤
-  simp
-
-/-- Copies is monotone in the claim. -/
-theorem copies_mono {w₁ w₂ : Option Nat} (h : ofWidth w₁ ≤ ofWidth w₂) :
-    copies w₁ ≤ copies w₂ := max_le_max le_rfl h
-
-/-- The width of a join dominates its left claim. -/
-theorem ofWidth_le_wMax_left (w₁ w₂ : Option Nat) :
-    ofWidth w₁ ≤ ofWidth (wMax w₁ w₂) := by
-  cases w₁ with
-  | none => exact le_of_eq rfl
-  | some a =>
-    cases w₂ with
-    | none => exact le_top
-    | some b =>
-      show ((a : Nat) : ℕ∞) ≤ ((max a b : Nat) : ℕ∞)
-      exact_mod_cast le_max_left a b
-
-/-- The width of a join dominates its right claim. -/
-theorem ofWidth_le_wMax_right (w₁ w₂ : Option Nat) :
-    ofWidth w₂ ≤ ofWidth (wMax w₁ w₂) := by
-  cases w₁ with
-  | none => exact le_top
-  | some a =>
-    cases w₂ with
-    | none => exact le_of_eq rfl
-    | some b =>
-      show ((b : Nat) : ℕ∞) ≤ ((max a b : Nat) : ℕ∞)
-      exact_mod_cast le_max_right a b
-
-/-- The width of a tensor dominates its left branch's claim. -/
-theorem ofWidth_le_wAdd_left (w₁ w₂ : Option Nat) :
-    ofWidth w₁ ≤ ofWidth (wAdd w₁ w₂) := by
-  cases w₁ with
-  | none => exact le_of_eq rfl
-  | some a =>
-    cases w₂ with
-    | none => exact le_top
-    | some b =>
-      show ((a : Nat) : ℕ∞) ≤ ((a + b : Nat) : ℕ∞)
-      exact_mod_cast Nat.le_add_right a b
-
-/-- The width of a tensor dominates its right branch's claim. -/
-theorem ofWidth_le_wAdd_right (w₁ w₂ : Option Nat) :
-    ofWidth w₂ ≤ ofWidth (wAdd w₁ w₂) := by
-  cases w₁ with
-  | none => exact le_top
-  | some a =>
-    cases w₂ with
-    | none => exact le_of_eq rfl
-    | some b =>
-      show ((b : Nat) : ℕ∞) ≤ ((a + b : Nat) : ℕ∞)
-      exact_mod_cast Nat.le_add_left b a
-
-/-- **A fan multiplies the copies**, provided it has at least one: this is the
-one arithmetic identity the fan case of the bound turns on, and it is where
-`wScale`'s `max 1` pays for itself — `n` copies of a shell that already counts
-once is `n * max 1 m`, which is `≥ 1`, so the outer `max 1` is absorbed. -/
-theorem copies_wScale_some {n : Nat} (hn : 0 < n) (m : Nat) :
-    copies (wScale n (some m)) = (n : ℕ∞) * copies (some m) := by
-  show copies (some (n * max 1 m)) = _
-  rw [copies_some, copies_some]
-  have h1 : max 1 (n * max 1 m) = n * max 1 m :=
-    max_eq_right (Nat.one_le_iff_ne_zero.mpr
-      (Nat.mul_ne_zero (by omega) (by omega)))
-  rw [h1]
-  exact_mod_cast rfl
-
-end Frag
 
 namespace Term
 
@@ -1737,8 +1423,8 @@ a `prim` contributes:
 
 Two clauses deserve their reasons written down. `fanT` multiplies by `n` with
 no `max 1`: `fanT 0 t` runs nothing, and a fan of a body that consults nothing
-consults nothing however wide it is — the `max 1` of `Frag.wScale` is about
-copies of a *shell*, and a shell is not a consultation. `retryT` takes the max
+consults nothing however wide it is — the `max 1` of `Frag.scale` is about
+copies of a written *shape*, and a shape is not a consultation. `retryT` takes the max
 over trips rather than the sum because a fueled loop's trips happen one after
 another; that they are *distinct sites* (`Step.retry trip`) is the keying
 decision of `Step`, and distinct sites visited in sequence are not sites in
@@ -1787,23 +1473,18 @@ def writtenSites {Op : Type → Type → Type} {G L : Type} :
   | _, _, _, .fanT _ t => writtenSites t
   | _, _, _, .bindT _ _ => ⊤
 
-/-- The grade's width claim about a term, read in `ℕ∞`: `widthT` with `none`
-sent to `⊤`. This is the form in which the claim can be compared with `peak`
-at all, and the comparison is the discovery recorded above. -/
-def widthE {f : Frag} {i o : Type} (t : Term Op G L f i o) : ℕ∞ :=
-  Frag.ofWidth (widthT t)
-
-/-- The number of copies of its written shell a term's grade admits. -/
-noncomputable def copiesT {f : Frag} {i o : Type} (t : Term Op G L f i o) : ℕ∞ :=
-  Frag.copies (widthT t)
-
 /-- **The grade bounds the data-dependent factor of the semantic width.**
 
-At most `writtenSites t` consultations are written, at most `copiesT t` copies
-of the written shell can be in flight, and the peak is at most their product.
-This is the honest replacement for the bound acat-vbl asked for (`peak t ≤
-widthT t`), which is false (`peak_not_le_widthE`) because grade width counts
+At most `writtenSites t` consultations are written, at most `Frag.copies f`
+copies of the written shape can be in flight, and the peak is at most their
+product. This is the honest replacement for the bound acat-vbl asked for
+(`peak t ≤ f`), which is false (`peak_not_le_grade`) because a grade counts
 copies and `peak` counts consultations.
+
+Note what the statement no longer needs: a translation. The grade *is* `ℕ∞`,
+so the right-hand side multiplies a count by a grade with no encoding in
+between, and the three `Frag` lemmas the induction uses (`copies_mono`,
+`copies_scale`, `copies_ne_zero`) are the only grade arithmetic that appears.
 
 Both factors are load-bearing and the bound is tight at the two witnesses that
 kill the naive statement: at `fanT 7 (pureT id)` the copies are seven and the
@@ -1813,61 +1494,53 @@ inequality and not an equation because sequencing writes two sites and puts one
 in flight (`peak_lt_bound_seqT`).
 
 The proof is the twelve-constructor induction, with the arithmetic done in
-`ℕ∞`: `max` and `+` need only monotonicity of `Frag.copies` in the claim, and
-`fanT` needs `Frag.copies_wScale_some` plus the two degenerate cases — a fan of
-no copies (`0 ≤ anything`) and a fan over a monadic body, where the body's own
-bound forces `peak = 0` if nothing is written and `⊤` absorbs otherwise. -/
-theorem peak_le_writtenSites_mul_copiesT :
+`ℕ∞`: `⊔` and `+` need only monotonicity of `Frag.copies`, and `fanT` needs
+`Frag.copies_scale` and the degenerate fan of no copies. The `⊤` cases need no
+argument of their own — a monadic grade admits `⊤` copies and `⊤` absorbs —
+which is where the collapse paid: the old proof case-split on `none` versus
+`some` at every fan. -/
+theorem peak_le_writtenSites_mul_copies :
     ∀ {f : Frag} {i o : Type} (t : Term Op G L f i o),
-      peak t ≤ writtenSites t * copiesT t := by
+      peak t ≤ writtenSites t * Frag.copies f := by
   intro f i o t
   induction t with
   | prim op =>
-    show (1 : ℕ∞) ≤ 1 * Frag.copies (some 0)
-    rw [Frag.copies_some, one_mul]
-    have h1 : max 1 0 = 1 := by decide
-    rw [h1]
-    simp
+    show (1 : ℕ∞) ≤ 1 * Frag.copies Frag.static
+    rw [Frag.copies_static, one_mul]
   | pureT fn => exact zero_le
   | seqT t u ih₁ ih₂ =>
-    show max (peak t) (peak u)
-        ≤ (writtenSites t + writtenSites u) * Frag.copies (Frag.wMax (widthT t) (widthT u))
     refine max_le (ih₁.trans ?_) (ih₂.trans ?_)
     · gcongr
       · exact le_self_add
-      · exact Frag.copies_mono (Frag.ofWidth_le_wMax_left _ _)
+      · exact Frag.copies_mono le_sup_left
     · gcongr
       · exact le_add_self
-      · exact Frag.copies_mono (Frag.ofWidth_le_wMax_right _ _)
+      · exact Frag.copies_mono le_sup_right
   | parT t u ih₁ ih₂ =>
     show peak t + peak u
-        ≤ (writtenSites t + writtenSites u) * Frag.copies (Frag.wAdd (widthT t) (widthT u))
+        ≤ (writtenSites t + writtenSites u) * Frag.copies (_ + _)
     rw [add_mul]
     refine add_le_add (ih₁.trans ?_) (ih₂.trans ?_)
     · gcongr
-      exact Frag.copies_mono (Frag.ofWidth_le_wAdd_left _ _)
+      exact Frag.copies_mono le_self_add
     · gcongr
-      exact Frag.copies_mono (Frag.ofWidth_le_wAdd_right _ _)
+      exact Frag.copies_mono le_add_self
   | sumT t u ih₁ ih₂ =>
-    show max (peak t) (peak u)
-        ≤ (writtenSites t + writtenSites u) * Frag.copies (Frag.wMax (widthT t) (widthT u))
     refine max_le (ih₁.trans ?_) (ih₂.trans ?_)
     · gcongr
       · exact le_self_add
-      · exact Frag.copies_mono (Frag.ofWidth_le_wMax_left _ _)
+      · exact Frag.copies_mono le_sup_left
     · gcongr
       · exact le_add_self
-      · exact Frag.copies_mono (Frag.ofWidth_le_wMax_right _ _)
+      · exact Frag.copies_mono le_sup_right
   | choiceT t u ih₁ ih₂ =>
-    show max (peak t) (peak u)
-        ≤ (writtenSites t + writtenSites u) * Frag.copies (Frag.wMax (widthT t) (widthT u))
     refine max_le (ih₁.trans ?_) (ih₂.trans ?_)
     · gcongr
       · exact le_self_add
-      · exact Frag.copies_mono (Frag.ofWidth_le_wMax_left _ _)
+      · exact Frag.copies_mono le_sup_left
     · gcongr
       · exact le_add_self
-      · exact Frag.copies_mono (Frag.ofWidth_le_wMax_right _ _)
+      · exact Frag.copies_mono le_sup_right
   | gateT b t ih =>
     cases b with
     | false => exact zero_le
@@ -1876,33 +1549,17 @@ theorem peak_le_writtenSites_mul_copiesT :
   | shareT l t ih => exact ih
   | retryT n t ih => exact ih
   | fanT n t ih =>
-    show (n : ℕ∞) * peak t ≤ writtenSites t * Frag.copies (Frag.wScale n (widthT t))
+    show (n : ℕ∞) * peak t ≤ writtenSites t * Frag.copies (Frag.scale n _)
     rcases Nat.eq_zero_or_pos n with hn | hn
     · subst hn
       rw [Nat.cast_zero, zero_mul]
       exact zero_le
-    · have ih' : peak t ≤ writtenSites t * Frag.copies (widthT t) := ih
-      cases hw : widthT t with
-      | none =>
-        rw [hw] at ih'
-        rcases eq_or_ne (writtenSites t) 0 with hN | hN
-        · rw [hN, Frag.copies_none, zero_mul] at ih'
-          have hp : peak t = 0 := le_antisymm ih' zero_le
-          rw [hp, mul_zero]
-          exact zero_le
-        · rw [show Frag.wScale n none = none from rfl, Frag.copies_none,
-            ENat.mul_top hN]
-          exact le_top
-      | some m =>
-        rw [hw] at ih'
-        rw [Frag.copies_wScale_some hn]
-        calc (n : ℕ∞) * peak t
-            ≤ (n : ℕ∞) * (writtenSites t * Frag.copies (some m)) :=
-              mul_le_mul_right ih' _
-          _ = writtenSites t * ((n : ℕ∞) * Frag.copies (some m)) :=
-              mul_left_comm _ _ _
+    · rw [Frag.copies_scale hn]
+      calc (n : ℕ∞) * peak t
+          ≤ (n : ℕ∞) * (writtenSites t * Frag.copies _) := mul_le_mul_right ih _
+        _ = writtenSites t * ((n : ℕ∞) * Frag.copies _) := mul_left_comm _ _ _
   | bindT t kf ih₁ ih₂ =>
-    show (⊤ : ℕ∞) ≤ ⊤ * Frag.copies (widthT (Term.bindT t kf))
+    show (⊤ : ℕ∞) ≤ ⊤ * Frag.copies Frag.monadic
     rw [ENat.top_mul (Frag.copies_ne_zero _)]
 
 /-- **A static workflow has at most as many consultations in flight as it has
@@ -1911,34 +1568,26 @@ second factor — and this is the first statement in the package that makes
 `static` mean something about a run rather than about a shape. -/
 theorem peak_le_writtenSites_of_static {i o : Type} (t : Term Op G L .static i o) :
     peak t ≤ writtenSites t := by
-  have h := peak_le_writtenSites_mul_copiesT t
-  have hc : copiesT t = 1 := by
-    show Frag.copies (widthT t) = 1
-    rw [widthT_static t, Frag.copies_some]
-    have h1 : max 1 0 = 1 := by decide
-    rw [h1]
-    exact Nat.cast_one
-  rwa [hc, mul_one] at h
+  have h := peak_le_writtenSites_mul_copies t
+  rwa [Frag.copies_static, mul_one] at h
 
 /-- **A `bounded n` workflow has at most `n` times its written consultations in
-flight** (with `max 1 n`, so `bounded 0` still admits the one shell it wrote).
-This is the `.bounded 3` index finally saying something about what a run does.
--/
+flight** (with `max 1 n`, so `bounded 0` — which is `static` — still admits the
+one shape it wrote). This is the `.bounded 3` index finally saying something
+about what a run does. -/
 theorem peak_le_of_bounded {n : Nat} {i o : Type} (t : Term Op G L (.bounded n) i o) :
     peak t ≤ writtenSites t * ((max 1 n : Nat) : ℕ∞) := by
-  have h := peak_le_writtenSites_mul_copiesT t
-  have hc : copiesT t = ((max 1 n : Nat) : ℕ∞) := by
-    show Frag.copies (widthT t) = _
-    rw [widthT_bounded t, Frag.copies_some]
-  rwa [hc] at h
+  have h := peak_le_writtenSites_mul_copies t
+  rwa [Frag.copies_bounded] at h
 
-/-! ### The witnesses: the two folds are incomparable
+/-! ### The witnesses: the count and the grade are incomparable
 
-Neither `peak ≤ widthE` nor `widthE ≤ peak` holds, and one witness for each
-direction is all it takes. Both are terms the package already cares about. -/
+Neither `peak t ≤ f` nor `f ≤ peak t` holds, and one witness for each
+direction is all it takes. Both are terms the package already cares about, and
+both comparisons are now literal — the grade and the count live in one type. -/
 
 /-- **A fan of seven Transforms consults nothing.** This is the term the review
-finding named, and the fold now says the true thing about it. -/
+finding named, and the fold says the true thing about it. -/
 theorem peak_fanT_pureT :
     peak (Op := Op) (G := G) (L := L)
       (.fanT 7 (.pureT (fun s : String => s))) = 0 := by
@@ -1946,19 +1595,20 @@ theorem peak_fanT_pureT :
   exact mul_zero _
 
 /-- …and the grade weighs it at seven. -/
-theorem widthE_fanT_pureT :
-    widthE (Op := Op) (G := G) (L := L)
-      (.fanT 7 (.pureT (fun s : String => s))) = ((7 : Nat) : ℕ∞) := rfl
+theorem grade_fanT_pureT :
+    grade (Op := Op) (G := G) (L := L)
+      (.fanT 7 (.pureT (fun s : String => s))) = Frag.bounded 7 := rfl
 
 /-- **The strictness witness.** `peak` is *strictly* below the grade's claim at
 `fanT 7 (pureT id)`: zero consultations against a width of seven. The gap is
-not slack in a bound — it is the grade measuring copies of a shell that
+not slack in a bound — it is the grade measuring copies of a shape that
 contains no consultation. -/
-theorem peak_lt_widthE_fanT_pureT :
+theorem peak_lt_grade_fanT_pureT :
     peak (Op := Op) (G := G) (L := L) (.fanT 7 (.pureT (fun s : String => s)))
-      < widthE (Op := Op) (G := G) (L := L)
+      < grade (Op := Op) (G := G) (L := L)
         (.fanT 7 (.pureT (fun s : String => s))) := by
-  rw [peak_fanT_pureT, widthE_fanT_pureT]
+  rw [peak_fanT_pureT, grade_fanT_pureT]
+  show (0 : ℕ∞) < ((7 : Nat) : ℕ∞)
   exact_mod_cast Nat.succ_pos 6
 
 /-- **Duplication peaks at two.** The corollary acat-vbl asked for: two `prim`
@@ -1970,36 +1620,33 @@ theorem peak_dupPair (q : Op String Nat) :
   exact one_add_one_eq_two
 
 /-- …and the grade weighs the same term at zero, because two branches of a
-tensor whose widths are both `0` add to `0`. -/
-theorem widthE_dupPair (q : Op String Nat) :
-    widthE (dupPair (G := G) (L := L) q) = 0 := rfl
+tensor whose grades are both `static` add to `static`. -/
+theorem grade_dupPair (q : Op String Nat) :
+    grade (dupPair (G := G) (L := L) q) = 0 := rfl
 
-/-- **The bound acat-vbl asked for is false.** `peak t ≤ widthT t` cannot hold
-for every term, and `dupPair` is the counterexample: two consultations in
-flight, a grade width of zero.
+/-- **The bound acat-vbl asked for is false.** `peak t ≤ f` cannot hold for
+every term, and `dupPair` is the counterexample: two consultations in flight at
+grade `static`.
 
-The finding is not that a fold is wrong. It is that `Frag.width` measures
-*data-dependent* width — copies of a written shell — and a count of
+The finding is not that a fold is wrong. It is that a grade measures
+*data-dependent* width — copies of a written shape — and a count of
 consultations is not below it, in either direction
-(`peak_lt_widthE_fanT_pureT` goes the other way). What the grade does bound is
-one factor of the count, which is `peak_le_writtenSites_mul_copiesT`. -/
-theorem peak_not_le_widthE (q : Op String Nat) :
-    ¬ ∀ {f : Frag} {i o : Type} (t : Term Op G L f i o), peak t ≤ widthE t := by
+(`peak_lt_grade_fanT_pureT` goes the other way). What the grade does bound is
+one factor of the count, which is `peak_le_writtenSites_mul_copies`. -/
+theorem peak_not_le_grade (q : Op String Nat) :
+    ¬ ∀ {f : Frag} {i o : Type} (t : Term Op G L f i o), peak t ≤ f := by
   intro h
   have h2 := h (dupPair (G := G) (L := L) q)
-  rw [peak_dupPair, widthE_dupPair] at h2
-  exact absurd h2 (by simp)
+  rw [peak_dupPair] at h2
+  exact absurd h2 (by decide)
 
 /-- The true bound is tight at `dupPair`: two written sites, one copy, two in
 flight. -/
 theorem peak_dupPair_eq_bound (q : Op String Nat) :
     peak (dupPair (G := G) (L := L) q)
-      = writtenSites (dupPair (G := G) (L := L) q)
-        * copiesT (dupPair (G := G) (L := L) q) := by
-  show (1 : ℕ∞) + 1 = (1 + 1) * Frag.copies (Frag.wAdd (some 0) (some 0))
-  rw [show Frag.wAdd (some 0) (some 0) = some 0 from rfl, Frag.copies_some]
-  have h1 : max 1 0 = 1 := by decide
-  rw [h1, Nat.cast_one, mul_one]
+      = writtenSites (dupPair (G := G) (L := L) q) * Frag.copies .static := by
+  show (1 : ℕ∞) + 1 = (1 + 1) * Frag.copies Frag.static
+  rw [Frag.copies_static, mul_one]
 
 /-- …and strict at a sequence: two consultations written, one in flight at a
 time. This is why the bound is an inequality and why `writtenSites` alone is
@@ -2007,11 +1654,9 @@ not the semantic width. -/
 theorem peak_lt_bound_seqT (q : Op String String) :
     peak (Op := Op) (G := G) (L := L) (.seqT (.prim q) (.prim q))
       < writtenSites (Op := Op) (G := G) (L := L) (.seqT (.prim q) (.prim q))
-        * copiesT (Op := Op) (G := G) (L := L) (.seqT (.prim q) (.prim q)) := by
-  show max (1 : ℕ∞) 1 < (1 + 1) * Frag.copies (Frag.wMax (some 0) (some 0))
-  rw [show Frag.wMax (some 0) (some 0) = some 0 from rfl, Frag.copies_some]
-  have h1 : max 1 0 = 1 := by decide
-  rw [h1, Nat.cast_one, mul_one, max_self]
+        * Frag.copies .static := by
+  show max (1 : ℕ∞) 1 < (1 + 1) * Frag.copies Frag.static
+  rw [Frag.copies_static, mul_one, max_self]
   exact_mod_cast Nat.one_lt_two
 
 /-- **Sharing does not change the count, and that is a decision.** The labelled
@@ -2030,7 +1675,7 @@ theorem peak_sharedPair (l : L) (q : Op String Nat) :
   show (1 : ℕ∞) + 1 = 2
   exact one_add_one_eq_two
 
-/-! ### The anchor: `peak` is about meaning, and `widthT` is not
+/-! ### The anchor: `peak` is about meaning, and the grade is not
 
 A fold on syntax is only a *semantic* width if some property of `⟦·⟧_ext`
 depends on it. Here is that property, at the one value where it can be stated
@@ -2047,15 +1692,16 @@ and each one is the reason the corresponding clause of `peak` was written the
 way it was: `prim` is excluded because it counts `1`; `gateT false` is
 runner-blind because it is `none`; `fanT 0` is runner-blind because it denotes
 the constant `[]` (`muExt_fanT_zero`) — which is precisely why that clause
-multiplies by `n` with no `max 1`; `retryT` and `fanT` propagate through
+multiplies by `n` with no `max 1`, and why the *grade* of a zero-fan is
+`static` (`Frag.scale_zero`); `retryT` and `fanT` propagate through
 `retryLoop_congr` and `fanRun_congr`; and `bindT` is excluded because `⊤ ≠ 0`.
 
 The converse is *not* claimed and is not provable in this generality: to show
 that a positive peak is observable one must build two runners that differ, and
 a runner must produce values in an arbitrary `Op`'s answer type, which nothing
 here supplies. At a concrete leaf signature it is easy, and
-`widthE_zero_not_indep` does exactly that. -/
-theorem muExt_indep_of_peak_eq_zero [PMonoid G] (run run' : Runner Op G L) :
+`grade_zero_not_indep` does exactly that. -/
+theorem muExt_indep_of_peak_eq_zero [Monoid G] (run run' : Runner Op G L) :
     ∀ {f : Frag} {i o : Type} (t : Term Op G L f i o), peak t = 0 →
       ∀ (g : G) (k : Key L), muExt run t g k = muExt run' t g k := by
   intro f i o t
@@ -2104,7 +1750,7 @@ theorem muExt_indep_of_peak_eq_zero [PMonoid G] (run run' : Runner Op G L) :
     cases b with
     | false => rfl
     | true => exact ih h g (k.push .gate)
-  | scopeT hs t ih => intro h g k; exact ih h (g ⋄ hs) (k.push .scope)
+  | scopeT hs t ih => intro h g k; exact ih h (g * hs) (k.push .scope)
   | shareT l t ih => intro h g _; exact ih h g (Key.rebase l)
   | retryT n t ih =>
     intro h g k
@@ -2131,24 +1777,24 @@ end Term
 /-- **The pure fan means one thing in every world.** The corollary of the
 anchor at the strictness witness: the term the grade weighs at seven is proved
 here to be entirely independent of what the world answers, because its
-semantic width is zero. Read the two together — `peak_lt_widthE_fanT_pureT`
+semantic width is zero. Read the two together — `peak_lt_grade_fanT_pureT`
 and this — and the review finding is discharged in the strongest available
 form: the number the grade reports is not a number about this run. -/
-theorem muExt_fanT_pureT_indep {Op : Type → Type → Type} {G L : Type} [PMonoid G]
+theorem muExt_fanT_pureT_indep {Op : Type → Type → Type} {G L : Type} [Monoid G]
     (run run' : Runner Op G L) (g : G) (k : Key L) :
     Term.muExt run (.fanT 7 (.pureT (fun s : String => s))) g k
       = Term.muExt run' (.fanT 7 (.pureT (fun s : String => s))) g k :=
   Term.muExt_indep_of_peak_eq_zero run run' _ Term.peak_fanT_pureT g k
 
-/-- **A grade width of zero is not runner-blindness.** The leaf `prim ask` has
-`widthE = 0` and two worlds that disagree about it, so no theorem of the shape
-`muExt_indep_of_peak_eq_zero` can hold for `widthT`.
+/-- **A grade of zero is not runner-blindness.** The leaf `prim ask` is graded
+`static` and has two worlds that disagree about it, so no theorem of the shape
+`muExt_indep_of_peak_eq_zero` can hold for the grade index.
 
 This is the sharp form of the review finding: `peak = 0` has a semantic
-consequence and `widthT = 0` has none, so the two folds are not two spellings
-of one measurement. -/
-theorem widthE_zero_not_indep :
-    Term.widthE (Term.prim (Op := AskOp) (G := LastOpt Unit) (L := Nat) AskOp.ask) = 0
+consequence and `grade = 0` has none, so the count and the claim are not two
+spellings of one measurement. -/
+theorem grade_zero_not_indep :
+    Term.grade (Term.prim (Op := AskOp) (G := LastOpt Unit) (L := Nat) AskOp.ask) = 0
       ∧ Term.muExt (askRunner (G := LastOpt Unit) (L := Nat) (fun _ => 0))
             (Term.prim AskOp.ask) LastOpt.unset Key.root ""
           ≠ Term.muExt (askRunner (G := LastOpt Unit) (L := Nat) (fun _ => 1))
@@ -2260,13 +1906,13 @@ associativity, the units, and the absorption of an open gate all fail for it.
 equalities (`WEq.toWEqR`), and the quotient is taken by `WEqR` — this same
 comparison up to a relabelling of absolute sites. The inclusion is strict
 (`WEqR_strictly_coarser`). -/
-def WEq {Op : Type → Type → Type} {G L : Type} [PMonoid G] {f : Frag}
+def WEq {Op : Type → Type → Type} {G L : Type} [Monoid G] {f : Frag}
     {i o : Type} (t u : Term Op G L f i o) : Prop :=
   ∀ (run : Runner Op G L) (g : G) (k : Key L), muExt run t g k = muExt run u g k
 
 namespace WEq
 
-variable {Op : Type → Type → Type} {G L : Type} [PMonoid G] {f : Frag} {i o : Type}
+variable {Op : Type → Type → Type} {G L : Type} [Monoid G] {f : Frag} {i o : Type}
 
 /-- Every workflow means what it means. -/
 theorem refl (t : Term Op G L f i o) : WEq t t := fun _ _ _ => rfl
@@ -2280,19 +1926,6 @@ theorem trans {t u v : Term Op G L f i o} (h₁ : WEq t u) (h₂ : WEq u v) : WE
   fun run g k => (h₁ run g k).trans (h₂ run g k)
 
 end WEq
-
-/-- Workflow equality is an equivalence, so it is one: the `Setoid` of the
-*fine* equality.
-
-It is a `def` and no longer the instance. The quotient below is taken by
-`wSetoidR`, the coarsening this module's Stage 3 exists to build, and two
-`Setoid` instances on one type would make `Quotient.mk` ambiguous; the name is
-kept resolving because it is the honest statement of what `WEq` is, and because
-`WEq.toWEqR` is stated against it. -/
-def wSetoid {Op : Type → Type → Type} {G L : Type} [PMonoid G] {f : Frag}
-    {i o : Type} : Setoid (Term Op G L f i o) where
-  r := WEq
-  iseqv := ⟨WEq.refl, WEq.symm, WEq.trans⟩
 
 /-! ### The coarsening: equality up to a relabelling of sites
 
@@ -2323,13 +1956,13 @@ order of quantifiers is the whole design:
 
 `WEqR` is the symmetrization: `t ≈ u` when each reads as the other. Both
 relations are stated across *grades* (`f` and `f'` may differ), because
-associativity of `seqT` changes the grade index by `Frag.join_assoc` and a
+associativity of `seqT` changes the grade index by `sup_assoc` and a
 homogeneous relation could not even state it. -/
 
 /-- **One-way site-relabelling refinement**: at every absolute base there is a
 relabelling of sites carrying `t`'s consultations onto `u`'s. See the section
 header for why the quantifiers sit exactly here. -/
-def WLe {Op : Type → Type → Type} {G L : Type} [PMonoid G] {f f' : Frag}
+def WLe {Op : Type → Type → Type} {G L : Type} [Monoid G] {f f' : Frag}
     {i o : Type} (t : Term Op G L f i o) (u : Term Op G L f' i o) : Prop :=
   ∀ s : Site, ∃ σ : Key L → Key L, Relabels σ ∧
     ∀ (run : Runner Op G L) (g : G),
@@ -2337,7 +1970,7 @@ def WLe {Op : Type → Type → Type} {G L : Type} [PMonoid G] {f f' : Frag}
 
 namespace WLe
 
-variable {Op : Type → Type → Type} {G L : Type} [PMonoid G] {f f' f'' : Frag}
+variable {Op : Type → Type → Type} {G L : Type} [Monoid G] {f f' f'' : Frag}
   {i o : Type}
 
 /-- Every term reads as itself, by the identity relabelling. -/
@@ -2365,16 +1998,16 @@ it is literally `AntisymmRel WLe` — Mathlib's own construction, whose `Setoid`
 (`AntisymmRel.setoid`) would supply the equivalence for free. What Mathlib
 lacks is the heterogeneous case: `AntisymmRel` relates two elements of *one*
 type, while `seqT`'s grade index makes the two sides of associativity live in
-`Term … ((f₁.join f₂).join f₃) …` and `Term … (f₁.join (f₂.join f₃)) …`, which
+`Term … (f₁ ⊔ f₂ ⊔ f₃) …` and `Term … (f₁ ⊔ (f₂ ⊔ f₃)) …`, which
 are two types. Spelling the conjunction out is what lets the law be *stated*;
 the equivalence proofs below are the three lines Mathlib's would have been. -/
-def WEqR {Op : Type → Type → Type} {G L : Type} [PMonoid G] {f f' : Frag}
+def WEqR {Op : Type → Type → Type} {G L : Type} [Monoid G] {f f' : Frag}
     {i o : Type} (t : Term Op G L f i o) (u : Term Op G L f' i o) : Prop :=
   WLe t u ∧ WLe u t
 
 namespace WEqR
 
-variable {Op : Type → Type → Type} {G L : Type} [PMonoid G] {f f' f'' : Frag}
+variable {Op : Type → Type → Type} {G L : Type} [Monoid G] {f f' f'' : Frag}
   {i o : Type}
 
 /-- Every workflow means what it means. -/
@@ -2392,7 +2025,7 @@ theorem trans {t : Term Op G L f i o} {u : Term Op G L f' i o}
 
 /-- Transporting one side along an equation of grades. The two sides of
 associativity have grade indices that agree only propositionally
-(`Frag.join_assoc`), so the quotient's laws need this and nothing more: a cast
+(`sup_assoc`), so the quotient's laws need this and nothing more: a cast
 in the index is invisible to the meaning. -/
 theorem cast {e : f = f'} (t : Term Op G L f i o) {u : Term Op G L f'' i o}
     (h : WEqR t u) : WEqR (e ▸ t) u := by
@@ -2403,14 +2036,14 @@ end WEqR
 /-- **The fine equality refines the coarse one**: `WEq ⊆ WEqR`, by taking the
 identity relabelling. The inclusion is *strict* — `WEq_ne_WEqR` exhibits the
 witness — which is the content of the coarsening. -/
-theorem WEq.toWEqR {Op : Type → Type → Type} {G L : Type} [PMonoid G] {f : Frag}
+theorem WEq.toWEqR {Op : Type → Type → Type} {G L : Type} [Monoid G] {f : Frag}
     {i o : Type} {t u : Term Op G L f i o} (h : WEq t u) : WEqR t u :=
   ⟨fun _ => ⟨fun k => k, Relabels.id, fun run g => h run g _⟩,
    fun _ => ⟨fun k => k, Relabels.id, fun run g => (h run g _).symm⟩⟩
 
 section Shift
 
-variable {Op : Type → Type → Type} {G L : Type} [PMonoid G]
+variable {Op : Type → Type → Type} {G L : Type} [Monoid G]
 
 /-- **A node that only shifts its body's sites is invisible to `WEqR`.**
 
@@ -2484,7 +2117,7 @@ end Shift
 
 section Assoc
 
-variable {Op : Type → Type → Type} {G L : Type} [PMonoid G]
+variable {Op : Type → Type → Type} {G L : Type} [Monoid G]
 
 /-- **The path rewrite that reassociates a pipeline.** A right-nested
 `seqT a (seqT b c)` keys its three stages at `[seqL]`, `[seqR, seqL]` and
@@ -2512,10 +2145,10 @@ def seqAssocPathInv : Site → Site
 /-- **Sequencing is associative up to relabelling** — the law the fine equality
 could not have, and the one that makes the quotient a category.
 
-Note the grades: the two sides are `Term … ((f₁.join f₂).join f₃) …` and
-`Term … (f₁.join (f₂.join f₃)) …`, *different types*, which is why `WEqR` was
-stated across grades. On the quotient the index is reconciled by
-`Frag.join_assoc` and the law reappears as `Workflow.seq_assoc`. -/
+Note the grades: the two sides are `Term … (f₁ ⊔ f₂ ⊔ f₃) …` and
+`Term … (f₁ ⊔ (f₂ ⊔ f₃)) …`, *different types*, which is why `WEqR` was
+stated across grades. On the quotient the index is reconciled by Mathlib's
+`sup_assoc` and the law reappears as `Workflow.seq_assoc`. -/
 theorem WEqR_seqT_assoc {f₁ f₂ f₃ : Frag} {i j k' o : Type}
     (a : Term Op G L f₁ i j) (b : Term Op G L f₂ j k') (c : Term Op G L f₃ k' o) :
     WEqR (.seqT (.seqT a b) c) (.seqT a (.seqT b c)) := by
@@ -2622,7 +2255,7 @@ The binary constructors that descend are `seqT`, `parT`, `sumT` and `choiceT`;
 all. What does **not** descend here is `retryT`, `fanT`, `shareT` and `bindT` —
 see the remainder note at `Workflow.seq_of`. -/
 
-variable {Op : Type → Type → Type} {G L : Type} [PMonoid G]
+variable {Op : Type → Type → Type} {G L : Type} [Monoid G]
 
 /-- Below the left branch, a splice reads as the left child's relabelling. -/
 theorem muExt_splice_left {run : Runner Op G L} {σ₁ σ₂ : Key L → Key L}
@@ -2739,7 +2372,7 @@ theorem WLe.scopeT_congr {i o : Type} (h : G) {t : Term Op G L f₁ i o}
     WLe (.scopeT h t) (.scopeT h t') := by
   intro s
   obtain ⟨σ, hσ, e⟩ := ht (s ++ [Step.scope])
-  exact ⟨σ, hσ, fun run g => e run (g ⋄ h)⟩
+  exact ⟨σ, hσ, fun run g => e run (g * h)⟩
 
 /-- Sequencing descends: the two-sided form of `WLe.seqT_congr`, and the
 obligation `Workflow.seq` discharges. -/
@@ -2841,7 +2474,7 @@ end Witnesses
 
 /-- Site-relabelling equality is an equivalence, so it is one: **the** `Setoid`
 of this module, and the one the quotient below is taken by. -/
-instance wSetoidR {Op : Type → Type → Type} {G L : Type} [PMonoid G] {f : Frag}
+instance wSetoidR {Op : Type → Type → Type} {G L : Type} [Monoid G] {f : Frag}
     {i o : Type} : Setoid (Term Op G L f i o) where
   r := WEqR
   iseqv := ⟨WEqR.refl, fun h => WEqR.symm h, fun h₁ h₂ => WEqR.trans h₁ h₂⟩
@@ -2862,36 +2495,27 @@ and scope absorption, and six congruences; the static fragment is a genuine
 `CategoryTheory.Category` (`Workflow.staticCategory`). What it does *not* do is
 identify sharing with duplication (`WEqR_dupPair_ne_sharedPair`): the
 coarsening moves positions and leaves names alone. -/
-def Workflow (Op : Type → Type → Type) (G L : Type) [PMonoid G] (f : Frag)
+def Workflow (Op : Type → Type → Type) (G L : Type) [Monoid G] (f : Frag)
     (i o : Type) : Type 1 :=
   Quotient (wSetoidR (Op := Op) (G := G) (L := L) (f := f) (i := i) (o := o))
 
 /-- The workflow a written term denotes. -/
-def Workflow.of {Op : Type → Type → Type} {G L : Type} [PMonoid G] {f : Frag}
+def Workflow.of {Op : Type → Type → Type} {G L : Type} [Monoid G] {f : Frag}
     {i o : Type} (t : Term Op G L f i o) : Workflow Op G L f i o :=
   Quotient.mk _ t
-
-/-- **Sequencing respects meaning**, so it descends to the quotient: this is
-the lifting obligation, discharged. Both arguments may be replaced by terms of
-equal meaning, and the composite's meaning does not move — because the `seqT`
-clause of the fold consults its subterms only through their own meanings, at
-keys it computes from the node and not from the subterms' shapes. -/
-theorem WEq.seqT_congr {Op : Type → Type → Type} {G L : Type} [PMonoid G]
-    {f g' : Frag} {i j o : Type} {t t' : Term Op G L f i j}
-    {u u' : Term Op G L g' j o} (ht : WEq t t') (hu : WEq u u') :
-    WEq (.seqT t u) (.seqT t' u') := by
-  intro run g k
-  funext a
-  rw [muExt_seqT, muExt_seqT, ht run g (k.push .seqL), hu run g (k.push .seqR)]
 
 /-- **Sequencing on the quotient**: `Workflow.seq` exists because
 `WEqR.seqT_congr` exists; had sequencing failed to respect meaning, this
 definition would not elaborate, which is exactly the discipline the design
-asked a host language to enforce. -/
-def Workflow.seq {Op : Type → Type → Type} {G L : Type} [PMonoid G]
+asked a host language to enforce.
+
+`noncomputable` because its *type* mentions `⊔` on `ℕ∞`, which Mathlib's
+complete lattice supplies noncomputably; the quotient itself computes nothing
+anyway. -/
+noncomputable def Workflow.seq {Op : Type → Type → Type} {G L : Type} [Monoid G]
     {f g' : Frag} {i j o : Type} :
     Workflow Op G L f i j → Workflow Op G L g' j o →
-      Workflow Op G L (f.join g') i o :=
+      Workflow Op G L (f ⊔ g') i o :=
   Quotient.lift₂ (fun t u => Workflow.of (Term.seqT t u))
     (fun _ _ _ _ ht hu => Quotient.sound (WEqR.seqT_congr ht hu))
 
@@ -2936,7 +2560,7 @@ and the static fragment is a `CategoryTheory.Category`.
   (`one_add_one_of_muS_respects_WEq`), and `WEq ⊆ WEqR` means it applies a
   fortiori — `WEqR` identifies *more*, so a quantitative meaning respecting it
   still forces `1 + 1 = 1`. -/
-theorem Workflow.seq_of {Op : Type → Type → Type} {G L : Type} [PMonoid G]
+theorem Workflow.seq_of {Op : Type → Type → Type} {G L : Type} [Monoid G]
     {f g' : Frag} {i j o : Type} (t : Term Op G L f i j)
     (u : Term Op G L g' j o) :
     Workflow.seq (Workflow.of t) (Workflow.of u) = Workflow.of (Term.seqT t u) :=
@@ -2944,17 +2568,27 @@ theorem Workflow.seq_of {Op : Type → Type → Type} {G L : Type} [PMonoid G]
 
 /-! ### The laws, on the quotient
 
-Two of the four are stated with a cast in the grade index, and the cast is not
-bureaucracy: `seqT`'s index is `Frag.join`, whose associativity and right unit
-hold only propositionally (`Frag.join_assoc`, `Frag.join_static`), so the two
-sides of the law inhabit two types that are equal but not definitionally so.
-`Workflow.of_cast` moves the cast through the quotient map and `WEqR.cast`
-absorbs it into the relation, after which the law is exactly the term-level
-theorem. -/
+Three of the four are stated with a cast in the grade index, and the cast is
+not bureaucracy: `seqT`'s index is `⊔`, whose associativity and two units hold
+only propositionally, so the two sides of the law inhabit two types that are
+equal but not definitionally so. `Workflow.of_cast` moves the cast through the
+quotient map and `WEqR.cast` absorbs it into the relation, after which the law
+is exactly the term-level theorem.
+
+**Three, where there used to be two** — and the arithmetic to say so is now
+Mathlib's. The old hand-written `Frag.join` chose its equation order so that
+`join static g` reduced by `rfl` for a *variable* `g`, which bought
+`seq_id_left` a cast-free statement; `⊥ ⊔ g = g` on `ℕ∞` is `bot_sup_eq`, a
+theorem. That is the whole of what the grade's collapse onto `ℕ∞` cost at this
+stratum: one extra `▸` in one law, against an arithmetic, an order and their
+laws deleted. The casts that remain are `sup_assoc`, `bot_sup_eq` and
+`sup_bot_eq` — Mathlib's names for what `Frag.join_assoc`, `Frag.static_join`
+and `Frag.join_static` used to be — and the graded category that would
+systematize all three is still the successor recorded below. -/
 
 section QuotientLaws
 
-variable {Op : Type → Type → Type} {G L : Type} [PMonoid G]
+variable {Op : Type → Type → Type} {G L : Type} [Monoid G]
 
 /-- A cast in the grade index passes through the quotient map. -/
 theorem Workflow.of_cast {f f' : Frag} {i o : Type} (e : f = f')
@@ -2962,32 +2596,36 @@ theorem Workflow.of_cast {f f' : Frag} {i o : Type} (e : f = f')
   cases e; rfl
 
 /-- **Sequencing on the quotient is associative** — modulo the grade index,
-which the two sides compute differently and `Frag.join_assoc` reconciles. This
-is the law acat-5b7 exists to obtain. -/
+which the two sides compute differently and Mathlib's `sup_assoc` reconciles.
+This is the law acat-5b7 exists to obtain. -/
 theorem Workflow.seq_assoc {f₁ f₂ f₃ : Frag} {i j k' o : Type}
     (a : Workflow Op G L f₁ i j) (b : Workflow Op G L f₂ j k')
     (c : Workflow Op G L f₃ k' o) :
-    Frag.join_assoc f₁ f₂ f₃ ▸ ((a.seq b).seq c) = a.seq (b.seq c) := by
+    sup_assoc f₁ f₂ f₃ ▸ ((a.seq b).seq c) = a.seq (b.seq c) := by
   refine Quotient.inductionOn₃ a b c (fun ta tb tc => ?_)
-  show Frag.join_assoc f₁ f₂ f₃ ▸ Workflow.of (Term.seqT (Term.seqT ta tb) tc)
+  show sup_assoc f₁ f₂ f₃ ▸ Workflow.of (Term.seqT (Term.seqT ta tb) tc)
       = Workflow.of (Term.seqT ta (Term.seqT tb tc))
   rw [Workflow.of_cast]
   exact Quotient.sound (WEqR.cast _ (WEqR_seqT_assoc ta tb tc))
 
-/-- **The identity `Transform` is a left unit for sequencing.** No cast: a
-static stage in front costs the grade nothing, definitionally
-(`Frag.static_join` is `rfl`). -/
+/-- **The identity `Transform` is a left unit for sequencing**, modulo the
+grade index: a static stage in front costs the grade nothing, and on `ℕ∞` that
+is `bot_sup_eq` rather than the `rfl` a hand-chosen equation order used to
+supply. -/
 theorem Workflow.seq_id_left {f : Frag} {i o : Type} (w : Workflow Op G L f i o) :
-    Workflow.seq (Workflow.of (.pureT (fun a : i => a))) w = w :=
-  Quotient.inductionOn w (fun t => Quotient.sound (WEqR_seqT_pureT_id_left t))
+    bot_sup_eq f ▸ (Workflow.seq (Workflow.of (.pureT (fun a : i => a))) w) = w := by
+  refine Quotient.inductionOn w (fun t => ?_)
+  show bot_sup_eq f ▸ Workflow.of (Term.seqT (Term.pureT (fun a : i => a)) t)
+      = Workflow.of t
+  rw [Workflow.of_cast]
+  exact Quotient.sound (WEqR.cast _ (WEqR_seqT_pureT_id_left t))
 
-/-- **And a right unit**, modulo the grade index: `Frag.join_static` needs the
-cases that `Frag.static_join` did not. -/
+/-- **And a right unit**, modulo the grade index: `sup_bot_eq`. -/
 theorem Workflow.seq_id_right {f : Frag} {i o : Type}
     (w : Workflow Op G L f i o) :
-    Frag.join_static f ▸ (w.seq (Workflow.of (.pureT (fun a : o => a)))) = w := by
+    sup_bot_eq f ▸ (w.seq (Workflow.of (.pureT (fun a : o => a)))) = w := by
   refine Quotient.inductionOn w (fun t => ?_)
-  show Frag.join_static f ▸ Workflow.of (Term.seqT t (Term.pureT (fun a : o => a)))
+  show sup_bot_eq f ▸ Workflow.of (Term.seqT t (Term.pureT (fun a : o => a)))
       = Workflow.of t
   rw [Workflow.of_cast]
   exact Quotient.sound (WEqR.cast _ (WEqR_seqT_pureT_id_right t))
@@ -3022,11 +2660,14 @@ example :
   rw [Workflow.of_gateT_true]
   show Workflow.seq (Workflow.of (Term.pureT (fun s : String => s)))
       (Workflow.of (Term.scopeT 1 (Term.prim AskOp.ask))) = _
-  rw [Workflow.seq_id_left, Workflow.of_scopeT_unit]
+  exact (Workflow.seq_id_left
+      (Workflow.of (Op := AskOp) (G := LastOpt Unit) (L := Nat)
+        (Term.scopeT 1 (Term.prim AskOp.ask)))).trans
+    (Workflow.of_scopeT_unit _)
 
 /-- **Associativity, cast-free, on the fragment where it is cast-free.** At
-`static` the grade index is a fixed point of `Frag.join`, so the law is a plain
-equation between morphisms — which is exactly why the category instance below
+`static` the grade index is a fixed point of `⊔` — `0 ⊔ 0` reduces to `0` —
+so the law is a plain equation between morphisms — which is exactly why the category instance below
 can exist. -/
 example (a b c : Term AskOp (LastOpt Unit) Nat .static String String) :
     Workflow.seq (Workflow.seq (Workflow.of a) (Workflow.of b)) (Workflow.of c)
@@ -3063,13 +2704,14 @@ carried anyway because the morphisms do: without them on the object type,
 `staticCategory` would leave the leaf signature and the label type
 undetermined at instance resolution, and there would be no way to say *which*
 category of workflows is meant. -/
-def StaticObj (Op : Type → Type → Type) (G L : Type) [PMonoid G] : Type 1 := Type
+def StaticObj (Op : Type → Type → Type) (G L : Type) [Monoid G] : Type 1 := Type
 
 /-- **`Workflow` on the static fragment is a category**: objects are types,
 morphisms are static workflows up to site relabelling, the identity is the
 identity `Transform`, and composition is `Workflow.seq`. Every law is one of
 the theorems above, and none of them was available before the coarsening. -/
-instance staticCategory {Op : Type → Type → Type} {G L : Type} [PMonoid G] :
+noncomputable instance staticCategory {Op : Type → Type → Type} {G L : Type}
+    [Monoid G] :
     CategoryTheory.Category (StaticObj Op G L) where
   Hom i o := Workflow Op G L .static i o
   id i := Workflow.of (.pureT (fun a : i => a))
@@ -3125,7 +2767,7 @@ Read with `WEqR_dupPair_ne_sharedPair`, this is the sharp form of "the
 quantitative meaning does not refine the extensional one": here are two terms
 one meaning cannot tell apart and the other must. -/
 theorem muS_dupPair_eq_sharedPair {Op : Type → Type → Type} {G S : Type}
-    [CompleteCSemiring S] [PMonoid G] (interp : Interp Op G S) (l : Nat)
+    [CommSemiring S] [CompleteCSemiring S] [Monoid G] (interp : Interp Op G S) (l : Nat)
     (q : Op String Nat) :
     muS (L := Nat) interp (Term.dupPair q) = muS interp (Term.sharedPair l q) := rfl
 
@@ -3133,7 +2775,7 @@ theorem muS_dupPair_eq_sharedPair {Op : Type → Type → Type} {G S : Type}
 sequence are the composite function. This is the shape of equality that
 survives the fine-grained keying — neither term consults, so no key enters the
 comparison — and it is the sanity check that `WEq` identifies *something*. -/
-theorem WEq_seqT_pureT {Op : Type → Type → Type} {G L : Type} [PMonoid G]
+theorem WEq_seqT_pureT {Op : Type → Type → Type} {G L : Type} [Monoid G]
     {i j o : Type} (f₁ : i → j) (f₂ : j → o) :
     WEq (Op := Op) (G := G) (L := L)
       (.seqT (.pureT f₁) (.pureT f₂)) (.pureT (fun a => f₂ (f₁ a))) := by
@@ -3144,7 +2786,7 @@ theorem WEq_seqT_pureT {Op : Type → Type → Type} {G L : Type} [PMonoid G]
 /-- A duplicated alternative is extensionally invisible: the leftmost branch
 answers, so the second is never reached. (Stated for `pureT` so that no
 consultation, and hence no key, enters the comparison.) -/
-theorem WEq_sumT_pureT_self {Op : Type → Type → Type} {G L : Type} [PMonoid G]
+theorem WEq_sumT_pureT_self {Op : Type → Type → Type} {G L : Type} [Monoid G]
     {i o : Type} (fn : i → o) :
     WEq (Op := Op) (G := G) (L := L) (.sumT (.pureT fn) (.pureT fn)) (.pureT fn) := by
   intro _ _ _
@@ -3170,7 +2812,7 @@ see sharing (`muS_dupPair_eq_sharedPair` against
 `WEqR_dupPair_ne_sharedPair`). The quantitative meaning lives beside the
 quotient, not over it, until a site-aware carrier is built (acat-qtv). -/
 theorem one_add_one_of_muS_respects_WEq {Op : Type → Type → Type} {G L S : Type}
-    [CompleteCSemiring S] [PMonoid G] (g : G) (interp : Interp Op G S)
+    [CommSemiring S] [CompleteCSemiring S] [Monoid G] (g : G) (interp : Interp Op G S)
     (h : ∀ t u : Term Op G L .static Unit Unit, WEq t u → muS interp t = muS interp u) :
     (1 : S) + 1 = 1 := by
   have he := h _ _ (WEq_sumT_pureT_self (Op := Op) (G := G) (L := L)

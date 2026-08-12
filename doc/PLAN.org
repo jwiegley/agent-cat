@@ -196,15 +196,33 @@ README table omits Keys/Frag/Term; 'not the workflow syntax' now false; Countabl
 ]
 #+end_src
 
-* TODO [#C] Shortest-list 8: the three missing what-Mathlib-lacks docstrings
+* TODO [#B] Certification residue: three violations, then the thesis is simply true
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-2q8
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-12 Wed 15:45]
+:MODIFIED: [2026-08-12 Wed 15:45]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Certify verdict: NOT yet certified; 25 declarations. V1: Mat.powSum/sumPow ARE Mathlib's geom_sum (probe-proved verbatim via Algebra.Ring.GeomSum; square-only so no rectangular excuse) — delete 6 decls, one import. V2: Env.pin + 5 laws ARE Function.update + its 5 (self-confessed docstring; 4 laws have zero consumers) — keep pin/pin_same as thin uses, delete the rest. V3: the 13 @[deprecated] aliases are justified ONLY by doc/walkthrough.html still speaking the retired vocabulary — rewrite walkthrough sections I/II/V/VIII to Mathlib names, then delete all 13. Below-bar: extComp_none_right = Option.bind_fun_none (phase-2 claim falsified); ~10 dead Cost decls. One small pass + one doc edit; certification re-run after.
+
+* DONE [#C] Shortest-list 8: the three missing what-Mathlib-lacks docstrings
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-2sn
 :LABELS: []
 :ISSUE_TYPE: docs
 :CREATED:  [2026-08-12 Wed 13:31]
-:MODIFIED: [2026-08-12 Wed 13:31]
+:MODIFIED: [2026-08-12 Wed 15:45]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-12 Wed 15:45]
+:CLOSE_REASON: Survivor registry complete: 7 explicit SURVIVOR blocks + prose absence claims, certify-audited; one false claim found and killed en route (Site.strip)
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -708,15 +726,17 @@ Discovered during acat-9kn: CSemiring's mul_comm blocks both the monoid semiring
 
 From acat-jyw: shareT l (shareT l' t) unspecified; Scope sets the precedent (innermost-wins proved, not interpreted). The analogue is owed at the fold.
 
-* TODO [#B] Shortest-list 1+2+3: delete 89 dead wrappers, retire the 31 live aliases, make CompleteCSemiring a mixin
+* DONE [#B] Shortest-list 1+2+3: delete 89 dead wrappers, retire the 31 live aliases, make CompleteCSemiring a mixin
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-da0
 :LABELS: []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-12 Wed 13:31]
-:MODIFIED: [2026-08-12 Wed 13:31]
+:MODIFIED: [2026-08-12 Wed 15:45]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-12 Wed 15:45]
+:CLOSE_REASON: 174 declarations deleted, 6 renamed, 181 binder sites rewritten to Mathlib spellings (the review's zero-consumer list was stale in places — live sites rewritten first, verified by compile per block); 10 doc-cited names kept as inert @[deprecated] abbrevs (zero consumers, no warnings); CompleteCSemiring/CompletePMod now mixins — the diamond's second instance path GONE (toCommSemiring is Unknown constant), workarounds deleted
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -910,15 +930,67 @@ From acat-ubt: CSemiring (MSemiring S K) under [CMonoid K] is now provable ({ins
 :ORIGINAL_SIZE: 0
 :END:
 
-* TODO [#C] Shortest-list 7: newtype the polluted carriers; one join-as-monoid synonym
+* DOING [#B] Worked example in Lean: harden-a-patch, specified end-to-end
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-h0k
+:LABELS: []
+:ISSUE_TYPE: feature
+:CREATED:  [2026-08-12 Wed 13:54]
+:MODIFIED: [2026-08-12 Wed 15:29]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Owner request: the artifact §VII example as REAL compiling Lean — Op signature (draft/style/correct/secure/simple/applyP), the panel/attempt/harden terms with grade checks, muS read-outs at Cost (concrete worst-case numbers via an Interp) and Prop (feasibility; gate-false annihilation), a toy runner exhibiting share-vs-dup inside this example, and realization notes mapping each piece to the agent-functor/incite scheme (Op ~ ACP leaves, Interp ~ backend registry, Runner ~ LeafRunner, scopeT ~ withBackend/withMode). Authored against pushed commit ef61ff5 in a worktree while the closing arc mutates main; ported into Agentic/Examples/ when the arc lands.
+
+** Comments
+#+begin_src json
+[
+  {
+    "id": 41,
+    "issue_id": "acat-h0k",
+    "author": "johnw",
+    "text": "Delivered in the worktree: 1103 lines, 93 declarations, builds green (1319 jobs). Twelve §VII corrections recorded (notably: muS shareT-transparency means the panel is BILLED twice for a guide READ once — exact folds true of shape, not of price; retryTrunc finiteness is conditional on uniform CostBounded; the trip-free rel key means the shared guide is drawn once per LOOP; four costBounded lemmas belong upstream in Star.lean). Stays open until ported to main post-arc.",
+    "created_at": "2026-08-12T21:31:47Z"
+  },
+  {
+    "id": 42,
+    "issue_id": "acat-h0k",
+    "author": "johnw",
+    "text": "Committed as 82620d2: example/HardenPatch.lean + a non-default lake target (lake build HardenPatch) so the closing arc's build gates are unaffected while the API moves. Issue stays open for the post-arc port: re-verify against the new tree (Frag := ENat grade spellings, one-star deletions), move the four costBounded lemmas upstream to Star.lean, then consider adding the target to defaultTargets.",
+    "created_at": "2026-08-12T21:51:18Z"
+  },
+  {
+    "id": 43,
+    "issue_id": "acat-h0k",
+    "author": "johnw",
+    "text": "Owner verdict on v1: too complex — the workflow invisible under per-workflow plumbing. Rework in flight: combinator stratum extracted (new issue), example rewritten so review/attempt/harden appear in the first ~50 lines in combinator vocabulary, theorems slimmed to the teaching set, ceremony deleted.",
+    "created_at": "2026-08-12T22:00:34Z"
+  },
+  {
+    "id": 45,
+    "issue_id": "acat-h0k",
+    "author": "johnw",
+    "text": "v2 committed: 1103->421 lines, 92->51 declarations, workflow at line 76 with zero lambdas. Remaining slimming lever: the BelongsInStar block (44 lines) moves upstream with the post-arc port.",
+    "created_at": "2026-08-12T22:29:48Z"
+  }
+]
+#+end_src
+
+* DONE [#C] Shortest-list 7: newtype the polluted carriers; one join-as-monoid synonym
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-j0y
 :LABELS: []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-12 Wed 13:31]
-:MODIFIED: [2026-08-12 Wed 13:31]
+:MODIFIED: [2026-08-12 Wed 15:45]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-12 Wed 15:45]
+:CLOSE_REASON: Race := Bool newtype, Prop pollution pinned; test/Pollution.lean IS in defaultTargets and green — re-pollution now breaks the build (certify re-verified all nine non-synthesis checks from a bare import); SupMon join-as-monoid synonym subsumes Width/Race/Frag-join uses
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -1096,6 +1168,42 @@ From acat-zms: star_star, sliding a(ba)* = (ab)*a, denesting, (a+b)* are now pro
 
 From acat-ubt: only total_msSmul exists; S<K> deserves Gate's set (msSmul s (msSmul t f) = msSmul (s*t) f; conv (msSmul s f) g = msSmul s (conv f g)) — what lets panelOf compose with gate.
 
+* TODO [#B] Combinator stratum for Term: the vocabulary workflows are written in
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-nov
+:LABELS: []
+:ISSUE_TYPE: feature
+:CREATED:  [2026-08-12 Wed 15:00]
+:MODIFIED: [2026-08-12 Wed 15:40]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Owner feedback on the first worked example (1103 lines): WAY too much complexity; the workflow was buried under plumbing that belongs in the library. Needed as reusable, grade-transparent (reducible, definitional-grade-preserving) combinators: ask (prim), fn (pureT), seq sugar, keep (carry input beside a stage), panel-n (copy to all, tensor, merge), guided (shared consultation feeding a reviewer), scoped/gate/retry surface names. Authored first under example/Combinators.lean (mid-arc isolation); MOVE into Agentic/ proper post-arc — this is the design's §4 combinator vocabulary finally landing at the Term layer, mirroring agent-functor's keeping/fanout/panelAcross.
+
+** Comments
+#+begin_src json
+[
+  {
+    "id": 44,
+    "issue_id": "acat-nov",
+    "author": "johnw",
+    "text": "Authored: example/Combinators.lean, 12 combinators as grade-transparent abbrevs with 13 grade examples (incl. variable-grade transparency and a bounded-9 panel-of-fans). Naming bends recorded: under (scoped is a keyword), loop (retry collides with Agentic.retry via enclosing-namespace resolution). Move to Agentic/Combinators.lean post-arc.",
+    "created_at": "2026-08-12T22:29:48Z"
+  },
+  {
+    "id": 46,
+    "issue_id": "acat-nov",
+    "author": "johnw",
+    "text": "Owner feedback round 2: (1) panel must be n-ary — a List of reviewers (or monoidal composition), never arity-indexed panel-2/panel-3; merge via a Monoid on the findings (reducer-as-monoid, design §5.1 made literal; empty panel = unit). Needs Frag.parN with literal reduction. (2) Composition notation must be >>> — implement via an HShiftRight instance (heterogeneous class fits grade-indexed seqT exactly). (3) Every combinator needs a full docstring (denotation + realization + grade behavior) and the example a vocabulary table at the top.",
+    "created_at": "2026-08-12T22:40:27Z"
+  }
+]
+#+end_src
+
 * TODO [#C] Context repair: Preorder, connect Interior to Ctx, restore third consequence
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -1112,15 +1220,17 @@ From acat-ubt: only total_msSmul exists; S<K> deserves Gate's set (msSmul s (msS
 
 Interior sits on a lawless LE (Interior.id must take refl as an argument); it is never applied to Ctx; the design's third collapse consequence (finite-dimensional in the prompt) was silently replaced. A Preorder class also deletes Pareto's hand-passed law arguments and Cost's hand-rolled order lemmas.
 
-* TODO [#B] Shortest-list 6: ONE star — CsumIsSup mixin, kstar x := csum (x ^ .)
+* DONE [#B] Shortest-list 6: ONE star — CsumIsSup mixin, kstar x := csum (x ^ .)
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-nub
 :LABELS: []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-12 Wed 13:31]
-:MODIFIED: [2026-08-12 Wed 13:31]
+:MODIFIED: [2026-08-12 Wed 15:45]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-12 Wed 15:45]
+:CLOSE_REASON: ONE star: kstar x = iSup (x^n) by rfl at Prop/Cost/Prob via CsumIsSup mixin + KleeneAlgebra.ofCsumIsSup; hand-built instances, ofCommStarLe, and the reach tower deleted; KleeneAlgebra (Mat S i i) synthesizes for every idempotent complete carrier (Prob-matrix witness in-tree); Mat.kstar_apply gives the entrywise reading
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -1448,15 +1558,17 @@ HIGH (abstraction/deep/alexey/comments): scheduler licences are proved about Lis
 
 Review finding 2: widthT re-runs the grade arithmetic, so widthT_eq_width is a homomorphism check carrying zero information about meaning (fanT 7 (pureT id) weighs 7 while consulting nothing). The true l59/grade discharge: count sites from muExt's own machinery, peak over concurrent branches, prove peak <= widthT. Until then the 'grade discipline is true' claim is prose (being relabeled honestly now).
 
-* TODO [#B] Shortest-list 5: Frag := ENat
+* DONE [#B] Shortest-list 5: Frag := ENat
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-vel
 :LABELS: []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-12 Wed 13:31]
-:MODIFIED: [2026-08-12 Wed 13:31]
+:MODIFIED: [2026-08-12 Wed 15:45]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-12 Wed 15:45]
+:CLOSE_REASON: Frag := ENat landed stronger than asked: the INSTANCES are identical by rfl (SemilatticeSup Frag = SemilatticeSup ENat), scale 0 monadic = static = 0 by rfl (the grade lie fixed and memorialized at Term.lean:516), decide unaffected; honest cost recorded by certify: Frag-indexed theorems widened to include Classical.choice via instCompleteLinearOrderENat — presentational, traced, now stated
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -1569,7 +1681,7 @@ parT is the tensor skeleton only; §7 says the panel is a primitive, not derivab
 :LABELS: []
 :ISSUE_TYPE: epic
 :CREATED:  [2026-08-12 Wed 10:16]
-:MODIFIED: [2026-08-12 Wed 13:31]
+:MODIFIED: [2026-08-12 Wed 15:45]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -1608,6 +1720,13 @@ Drive the design to its simplest, purest form: coarsen WEq so Workflow is a cate
     "author": "johnw",
     "text": "MIGRATION COMPLETE (6 phases, review-verified): axioms are nine-tenths Mathlib's; 11->3 classes, 52->16 fields; five clean carrier/order migrations confirmed through the constant graph. The purity review's 8-step shortest list is filed as the closing arc of this epic — steps 1-4 pure deletion, step 5 the ENat collapse, step 6 the one-star generalization (the single remaining piece of real mathematical content), 7-8 hygiene. After those: four ideas, two from the shelf, none replicated — simply true.",
     "created_at": "2026-08-12T20:31:39Z"
+  },
+  {
+    "id": 47,
+    "issue_id": "acat-xlh",
+    "author": "johnw",
+    "text": "Closing arc COMPLETE: all probes pass (diamond gone, pollution build-guarded, Frag IS ENat by instance-identity, kstar = iSup of powers by rfl, quotient laws alive, dupPair/sharedPair distinguishable at muExt and WEqR while muS collapses them, peak strict). Verdict: NOT YET certified — the residue issue carries the exact 25-declaration path; the blocker is mostly a documentation rewrite. Epic closes when the residue does.",
+    "created_at": "2026-08-12T22:45:06Z"
   }
 ]
 #+end_src
@@ -1660,15 +1779,17 @@ Binary-only and disconnected from the package's own carriers; the promised front
 
 §6c: reducers monotone in the information order, first-past-the-post as unamb. Unblocked once the idempotent reducer witness lands (Keys rework).
 
-* TODO [#B] Shortest-list 4: delete the four standard-library replications
+* DONE [#B] Shortest-list 4: delete the four standard-library replications
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-yyg
 :LABELS: []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-12 Wed 13:31]
-:MODIFIED: [2026-08-12 Wed 13:31]
+:MODIFIED: [2026-08-12 Wed 15:45]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-12 Wed 15:45]
+:CLOSE_REASON: Site.strip -> List.dropPrefix? (false docstring deleted), foldPanel/listProd -> List.prod, Mat.pow -> ^, Ext laws -> Option monad laws; per certify, all verified
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0

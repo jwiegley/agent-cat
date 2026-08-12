@@ -9,7 +9,9 @@ The context of an agentic workflow is ordered by information: `k ≤ k'` says
 the next step fits — is not an arbitrary function on that order. It may forget
 but never invent, it must respect the order, and summarising a summary must
 give nothing new. Those three demands are exactly the axioms of an *interior
-operator*, and this module states them as such (design §6e).
+operator* (design §6e), and an interior operator on `K` is a closure operator
+on `Kᵒᵈ`, so the object is Mathlib's `ClosureOperator (OrderDual K)` and this
+module states nothing about it.
 
 The second half of the module is about the *index discipline*. If the type of a
 work depends on the context it runs in, sequencing is only defined where the
@@ -22,84 +24,16 @@ follows from that one substitution.
 
 namespace Agentic
 
-/-- An `Interior K` is a representation of *compaction on an
-information-ordered context*: it may forget, monotonically, and twice is once.
-
-Deflationary (`op k ≤ k`) says compaction never invents: what comes out is
-known to what went in. Monotone says compaction respects the order: a
-better-informed context compacts to a better-informed summary. Idempotent says
-summarising a summary yields nothing further. An operator with these three
-properties is an interior operator, and "compaction" has no meaning in this
-design beyond being one.
-
-**It is Mathlib's `ClosureOperator`, on the order dual.** An interior operator
-on `K` is exactly a closure operator on `Kᵒᵈ`: deflationary in `K` is
+/-- `Interior K` is Mathlib's `ClosureOperator (OrderDual K)`: an interior
+operator on `K` *is* a closure operator on `Kᵒᵈ` — deflationary in `K` is
 inflationary in `Kᵒᵈ`, monotone is monotone (both arguments flip), and
-idempotence is unchanged. So the package's structure is gone and the name is an
-abbreviation, with the three axioms below reading Mathlib's fields back. The
-migration costs the information order its lawlessness: `ClosureOperator` wants
-a `Preorder`, where the package's own structure sat on a bare `LE` and had to
-be handed reflexivity as an argument (see `Interior.id`). That was never a
-feature — an order in which information is not reflexive orders nothing — and
-the strengthening is the repair.
-
-One use-site consequence, recorded rather than hidden: because the
-abbreviation is reducible, generalised field notation on an `Interior K`
-resolves against `ClosureOperator`, so Mathlib's API (`κ.idempotent`,
-`κ.le_closure`, `κ.IsClosed`) is what `κ.…` reaches. The package's own
-readings are spelled out in full, as `Interior.op κ` and friends. -/
+idempotence is unchanged. Deprecated compatibility alias, kept only because
+`doc/walkthrough.html` still spells it; the six wrappers that read Mathlib's
+fields back (`Interior.op`, `deflationary`, `idempotent`, `monotone`, `id`,
+`compact_iff_fixed`) had no consumers and are retired, so compaction is now
+spelled with `ClosureOperator`'s own API. -/
+@[deprecated ClosureOperator (since := "2026-08-12")]
 abbrev Interior (K : Type) [Preorder K] : Type := ClosureOperator (OrderDual K)
-
-namespace Interior
-
-variable {K : Type} [Preorder K]
-
-/-- The compaction map itself: Mathlib's closure operator on `Kᵒᵈ`, read as a
-map on `K`. `OrderDual.toDual`/`ofDual` are the identity equivalence, so this
-is the underlying function and nothing more. -/
-def op (κ : Interior K) (k : K) : K :=
-  OrderDual.ofDual (κ (OrderDual.toDual k))
-
-/-- Compaction may forget, but never invents (Mathlib's
-`ClosureOperator.le_closure`, on the dual). -/
-theorem deflationary (κ : Interior K) (k : K) : op κ k ≤ k :=
-  ClosureOperator.le_closure κ (OrderDual.toDual k)
-
-/-- Compacting a compaction yields nothing further (Mathlib's
-`ClosureOperator.idempotent`). -/
-theorem idempotent (κ : Interior K) (k : K) : op κ (op κ k) = op κ k :=
-  ClosureOperator.idempotent κ (OrderDual.toDual k)
-
-/-- Compaction respects the information order (Mathlib's
-`ClosureOperator.monotone`, on the dual — where the order of the arguments
-flips twice and so does not flip at all). -/
-theorem monotone (κ : Interior K) {k k' : K} (h : k ≤ k') : op κ k ≤ op κ k' :=
-  ClosureOperator.monotone κ
-    (show (OrderDual.toDual k' : OrderDual K) ≤ OrderDual.toDual k from h)
-
-/-- Doing nothing is a compaction: the identity is an interior operator on any
-information order. The interface is therefore inhabited without assuming any
-real summariser exists. It is Mathlib's `ClosureOperator.id`, and reflexivity
-now comes from the `Preorder` instead of being passed in by hand. -/
-def id : Interior K := ClosureOperator.id (OrderDual K)
-
-/-- A context is *already compact* exactly when it is in the image of
-compaction. Idempotence is the whole proof, and it is what licenses caching a
-summary: recompacting a compacted context is the identity, so the summary may
-be stored and reused.
-
-Mathlib states the same fact as `ClosureOperator.setOf_isClosed_eq_range_closure`
-— the closed elements are the range of the closure — and the two lines below
-are that equality, unbundled from `Set`. -/
-theorem compact_iff_fixed (κ : Interior K) (k : K) :
-    (∃ j : K, op κ j = k) ↔ op κ k = k := by
-  constructor
-  · intro ⟨j, hj⟩
-    rw [← hj, idempotent]
-  · intro h
-    exact ⟨k, h⟩
-
-end Interior
 
 /-! ### The parameterised structure
 
@@ -125,31 +59,31 @@ variable {K S : Type} {I : K → Type} {k k' k'' k''' : K}
 /-- Sequencing of context-parameterised transitions: matrix composition, typed
 so that it exists only where the contexts meet. The aggregation is over the
 intermediate value *in the intermediate context*. -/
-def comp [CompleteCSemiring S] (f : Ctx S I k k') (g : Ctx S I k' k'') :
+def comp [CommSemiring S] [CompleteCSemiring S] (f : Ctx S I k k') (g : Ctx S I k' k'') :
     Ctx S I k k'' :=
   Mat.comp f g
 
 /-- Staying put in context `k`: the identity transition on that context's own
 index. -/
-noncomputable def idCtx [CompleteCSemiring S] : Ctx S I k k :=
+noncomputable def idCtx [CommSemiring S] [CompleteCSemiring S] : Ctx S I k k :=
   Mat.idMat
 
 /-- Sequencing is associative in the parameterised structure too: the typed
 index discipline costs nothing, since the law is the matrix law transported
 along a definitional equality. A context-threading pipeline has one meaning,
 not a bracketing of meanings. -/
-theorem comp_assoc [CompleteCSemiring S]
+theorem comp_assoc [CommSemiring S] [CompleteCSemiring S]
     (f : Ctx S I k k') (g : Ctx S I k' k'') (h : Ctx S I k'' k''') :
     comp (comp f g) h = comp f (comp g h) :=
   Mat.comp_assoc f g h
 
 /-- Staying put before a step changes nothing. -/
-theorem idCtx_comp [CompleteCSemiring S]
+theorem idCtx_comp [CommSemiring S] [CompleteCSemiring S]
     (f : Ctx S I k k') : comp idCtx f = f :=
   Mat.id_comp f
 
 /-- Staying put after a step changes nothing. -/
-theorem comp_idCtx [CompleteCSemiring S]
+theorem comp_idCtx [CommSemiring S] [CompleteCSemiring S]
     (f : Ctx S I k k') : comp f idCtx = f :=
   Mat.comp_id f
 
@@ -190,7 +124,7 @@ variable {K S ι : Type} {k₀ k k' : K}
 /-- **Consequence one — the parameterised structure becomes ordinary.**
 Sequencing pinned works is ordinary matrix composition; the parameterised
 category collapses to the plain one. -/
-theorem collapse_comp [CompleteCSemiring S] (M N : Mat S ι ι) :
+theorem collapse_comp [CommSemiring S] [CompleteCSemiring S] (M N : Mat S ι ι) :
     Ctx.comp (collapse k₀ M) (collapse k₀ N) = collapse k₀ (Mat.comp M N) :=
   rfl
 
@@ -210,7 +144,7 @@ theorem collapse_pin :
 /-- A corollary of the collapse, and not one of the design's four: staying put
 is the plain identity. The pinned identity is the ordinary identity matrix, so
 "do nothing" acquires no context-dependent meaning. -/
-theorem collapse_idCtx [CompleteCSemiring S] :
+theorem collapse_idCtx [CommSemiring S] [CompleteCSemiring S] :
     (Ctx.idCtx : Ctx S (constIx (K := K) ι) k₀ k₀) = collapse k₀ Mat.idMat :=
   rfl
 

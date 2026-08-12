@@ -9,20 +9,20 @@ precomposition with the scope's element. Two facts follow, and both are
 theorems below rather than conventions:
 
 * **Innermost wins** is not a rule imposed on the interpreter. It is the
-  monoid: each axis of a scope is the `Last` monoid on `Option`, whose `⋄`
+  monoid: each axis of a scope is the `Last` monoid on `Option`, whose `*`
   keeps the right operand when it is present. Change the monoid and the
   override discipline changes with it; there is nothing else to change.
 
   Note what that costs, and that the cost is the content: `Last` is
   **non-commutative on every axis with two or more inhabitants** —
-  `set a ⋄ set b = set b` while `set b ⋄ set a = set a` — and that failure of
+  `set a * set b = set b` while `set b * set a = set a` — and that failure of
   commutativity *is* innermost-wins. What commutes is the product across
   *distinct* axes (`axis_comm`, `axis_independence`), because the axes act on
   separate coordinates and cannot see each other.
 
 * **Scoping is a monoid homomorphism, covariantly.**
-  `withScope g₁ (withScope g₂ f)` is `withScope (g₁ ⋄ g₂) f`: the operand order
-  is *preserved*, so `withScope` takes `⋄` in the scope monoid to composition
+  `withScope g₁ (withScope g₂ f)` is `withScope (g₁ * g₂) f`: the operand order
+  is *preserved*, so `withScope` takes `*` in the scope monoid to composition
   of scope-entering maps in the same order, and nothing here is contravariant.
   Mind the operand order all the same — `g₁` is the *outer* scope and must sit
   on the left, because the ambient scope meets it first and `g₂`, the inner
@@ -36,15 +36,15 @@ theorems below rather than conventions:
   and is appended to the ambient one, so no reversal occurs. The hazard the
   warning points at is the same, and it is the operand order above.
 
-A scope algebra is a `PMonoid` (`Agentic.Monoid`) and nothing more: the package
-has one monoid class, and a scope is one of the things it is about. This module
+A scope algebra is a Mathlib `Monoid` and nothing more: the package has one
+monoid class, Mathlib's, and a scope is one of the things it is about. This module
 used to declare a second class, `ScopeMonoid`, together with `Mul` and `One`
 instances whose heads were unconstrained — `[ScopeMonoid G] : Mul G` claimed
 `*` for *every* type carrying a scope algebra, which is precisely how a scope
-and a resource come to share a notation by accident. Both are gone: `⋄` is the
-combination of scopes as it is the combination of everything else, and
-`PMonoid.unit` is the empty scope. What is a real distinction — that a scope
-monoid must *not* be commutative — survives as the absence of a `CMonoid`
+and a resource come to share a notation by accident. Both are gone: `*` is the
+combination of scopes as it is the combination of everything else, and `1` is
+the empty scope. What is a real distinction — that a scope
+monoid must *not* be commutative — survives as the absence of a `CommMonoid`
 instance and as `LastOpt.set_overrides`.
 -/
 
@@ -106,7 +106,7 @@ theorem one_mul (x : LastOpt α) : mul one x = x := by
 theorem mul_one (x : LastOpt α) : mul x one = x := rfl
 
 /-- The `Last` monoid: one axis of a scope, with innermost-wins as its
-combination. It is a `PMonoid` and deliberately not a `CMonoid` — see
+combination. It is a `Monoid` and deliberately not a `CommMonoid` — see
 `set_overrides`, which is the failure of commutativity and is also the whole
 of innermost-wins. -/
 instance instPMonoid : Monoid (LastOpt α) where
@@ -118,20 +118,20 @@ instance instPMonoid : Monoid (LastOpt α) where
   mul_one := mul_one
 
 /-- The axis combination is `Last`, definitionally. -/
-theorem op_eq_mul (x y : LastOpt α) : x ⋄ y = mul x y := rfl
+theorem op_eq_mul (x y : LastOpt α) : x * y = mul x y := rfl
 
 /-- A present inner setting overrides whatever the axis said before. -/
-theorem set_overrides (x : LastOpt α) (a : α) : x ⋄ set a = set a := rfl
+theorem set_overrides (x : LastOpt α) (a : α) : x * set a = set a := rfl
 
 /-- An absent inner setting defers to whatever the axis said before. -/
-theorem unset_defers (x : LastOpt α) : x ⋄ unset = x := rfl
+theorem unset_defers (x : LastOpt α) : x * unset = x := rfl
 
 end LastOpt
 
 /-! ## Several axes: the product monoid
 
 Two axes that know nothing about each other are the product monoid, and the
-product monoid is `Agentic.instPMonoidProd` — it is not built here, because
+product monoid is Mathlib's `Prod.instMonoid` — it is not built here, because
 independence of coordinates is not a fact about scopes. `axis_independence`
 below reads that instance back at the two-axis scope.
 -/
@@ -166,7 +166,7 @@ def snd (a : α) : Scope μ α := mk LastOpt.unset (LastOpt.set a)
 the axes do not interfere. This is bifunctoriality of the product, and it is a
 computation. -/
 theorem axis_comm (m : μ) (a : α) :
-    (fst m : Scope μ α) ⋄ snd a = snd a ⋄ fst m := rfl
+    (fst m : Scope μ α) * snd a = snd a * fst m := rfl
 
 end Scope
 
@@ -199,7 +199,7 @@ theorem withScope_one (f : Scoped G R) : withScope (1 : G) f = f :=
   actR_unit f
 
 /-- **Scoping is a covariant monoid homomorphism.** Nesting `g₂` inside `g₁` is
-entering the single scope `g₁ ⋄ g₂` — outer on the *left*, operand order
+entering the single scope `g₁ * g₂` — outer on the *left*, operand order
 preserved, so `withScope` carries the scope monoid into the monoid of
 scope-entering maps without reversal. It is `actR_compose`.
 
@@ -209,7 +209,7 @@ and must sit rightmost, where the `Last` monoid lets it win. Stating this law
 with the operands exchanged type-checks and is false — `Last` is
 non-commutative wherever an axis has two values to choose between. -/
 theorem withScope_compose (g₁ g₂ : G) (f : Scoped G R) :
-    withScope g₁ (withScope g₂ f) = withScope (g₁ ⋄ g₂) f :=
+    withScope g₁ (withScope g₂ f) = withScope (g₁ * g₂) f :=
   actR_compose g₁ g₂ f
 
 end Laws
@@ -223,13 +223,13 @@ axis, an inner scope that speaks on that axis has the last word. Note that the
 outer scope's own ambient prefix `h` is irrelevant — this is the monoid
 absorbing it. -/
 theorem innermost_wins (h : Scope μ α) (a₁ a₂ : μ) (b₁ b₂ : LastOpt α) :
-    Scope.axis₁ (h ⋄ Scope.mk (LastOpt.set a₁) b₁ ⋄ Scope.mk (LastOpt.set a₂) b₂)
+    Scope.axis₁ (h * Scope.mk (LastOpt.set a₁) b₁ * Scope.mk (LastOpt.set a₂) b₂)
       = LastOpt.set a₂ := rfl
 
 /-- An inner scope silent on the first axis leaves the outer setting standing:
 the other half of innermost-wins, and the reason silence is not a value. -/
 theorem outer_survives_silence (h : Scope μ α) (a₁ : μ) (b₁ b₂ : LastOpt α) :
-    Scope.axis₁ (h ⋄ Scope.mk (LastOpt.set a₁) b₁ ⋄ Scope.mk LastOpt.unset b₂)
+    Scope.axis₁ (h * Scope.mk (LastOpt.set a₁) b₁ * Scope.mk LastOpt.unset b₂)
       = LastOpt.set a₁ := rfl
 
 /-- **Axis independence.** Entering a scope that sets the first axis and then

@@ -1,6 +1,6 @@
 import Mathlib.Algebra.Group.Prod
 import Mathlib.Order.Lattice
-import Mathlib.Order.BoundedOrder.Basic
+import Mathlib.Order.BoundedOrder.Lattice
 
 /-!
 # One monoid, one action, one order — now Mathlib's
@@ -8,24 +8,19 @@ import Mathlib.Order.BoundedOrder.Basic
 Combination is the most-repeated structure in this package. Panel keys
 combine, scopes nest, histories concatenate, fragment grades join, costs take
 their worst case. This module used to *state* that algebra: three classes
-(`PMonoid`, `CMonoid`, `IdemCMonoid`), a notation, and a fourteen-line
+(`PMonoid`, `CMonoid`, `IdemCMonoid`), a `⋄` notation, and a fourteen-line
 development of the order an idempotent join induces.
 
-None of that is stated here any more, because all of it is in Mathlib.
+None of that is stated here any more, because all of it is in Mathlib, and as
+of this arc none of it is *spelled* here any more either: the binders say
+`Monoid`, `CommMonoid` and `Std.IdempotentOp (· * ·)`, combination is written
+`*`, and the order is `≤` of `SemilatticeSup` + `OrderBot`. The three old class
+names survive for one line each, `@[deprecated]`, solely because
+`doc/walkthrough.html` still spells them; nothing in the package consumes them.
 
-* **The monoid** is `Monoid` and `CommMonoid`. `PMonoid`/`CMonoid` survive as
-  reducible abbreviations so that every binder and instance name in the package
-  keeps elaborating; `⋄` is scoped notation for `*`.
-* **The order** is `SemilatticeSup` together with `OrderBot`: `a ≤ b`,
-  `le_refl`, `le_trans`, `le_antisymm`, `le_sup_left`, `le_sup_right`,
-  `sup_le`, `sup_le_sup` and `bot_le` are Mathlib's, and the carriers that had
-  their own copies (`Cost`, `Frag`, `Width`) now instantiate Mathlib's classes
-  and delegate. `IdemCMonoid` survives as the abbreviation
-  `Std.IdempotentOp (· * ·)` over a `CommMonoid` — the *duplication licence*
-  separated from the order, which is how Mathlib factors it.
-* **The two actions on a reader** are the one thing that does not come from
-  Mathlib, and they are kept here with the survivor docstring the migration
-  policy requires (`actR`, `actL`, and their four laws).
+**The two actions on a reader** are the one thing that does not come from
+Mathlib, and they are what this module is now for (`actR`, `actL`, and their
+four laws), with the survivor docstring the migration policy requires.
 
 Nothing in this module mentions a semiring, an aggregation or a matrix: it is
 below all of them.
@@ -33,119 +28,138 @@ below all of them.
 
 namespace Agentic
 
-/-- `a ⋄ b` is `a * b`: the package's historic spelling of monoid combination,
-kept as scoped notation for one migration era so that every `⋄` already written
-— panel keys, scopes, histories, grades, costs — keeps parsing while the
-carriers move to Mathlib's `*` (and, where the carrier is a join-semilattice,
-to `⊔`, which the carriers below make definitionally the same operation). -/
-scoped infixl:70 " ⋄ " => HMul.hMul
-
-/-- `PMonoid K` is Mathlib's `Monoid K`.
-
-The package's own class had exactly Mathlib's fields — associativity and a
-two-sided unit — and none of its consumers used anything else, so the class is
-gone and the name is an abbreviation. What the old class *documented* is still
-true and still load-bearing: commutativity is a separate licence
-(`CMonoid`/`CommMonoid`, needed by `foldPanel_perm`) and idempotence a further
-one (`IdemCMonoid`, needed by `foldPanel_dup`), and an ordered transcript, a
-nested scope and a history of turns are legitimate carriers that have neither. -/
+/-- `PMonoid K` is Mathlib's `Monoid K`. Deprecated compatibility alias: the
+name is still spelled in `doc/walkthrough.html`, and nothing in the package
+uses it. -/
+@[deprecated Monoid (since := "2026-08-12")]
 abbrev PMonoid (K : Type) := Monoid K
 
-/-- `CMonoid K` is Mathlib's `CommMonoid K`: the scheduling licence, charged
-separately from the monoid itself. -/
+/-- `CMonoid K` is Mathlib's `CommMonoid K`. Deprecated compatibility alias,
+kept only because `doc/walkthrough.html` still spells it. -/
+@[deprecated CommMonoid (since := "2026-08-12")]
 abbrev CMonoid (K : Type) := CommMonoid K
 
-/-- `IdemCMonoid K` is Mathlib's `Std.IdempotentOp` at the monoid operation:
-*a contribution counted twice counts once*.
-
-Mathlib has no bundled "idempotent commutative monoid" class, and does not need
-one: such a thing is a join-semilattice with a bottom, which Mathlib carries as
-`SemilatticeSup` + `OrderBot`, and the *order* development that used to live
-here comes from there. What a `SemilatticeSup` does not supply is a `Monoid`
-structure, and the panel algebra (`Agentic.MSemiring`) is generic in a monoid;
-so the licence is taken in Mathlib's unbundled form — the standard
-`Std.IdempotentOp` mixin on `(· * ·)` — rather than by reintroducing a class. -/
+/-- `IdemCMonoid K` is Mathlib's `Std.IdempotentOp` at `*`. Deprecated
+compatibility alias, kept only because `doc/walkthrough.html` still spells
+it. -/
+@[deprecated Std.IdempotentOp (since := "2026-08-12")]
 abbrev IdemCMonoid (K : Type) [CommMonoid K] := Std.IdempotentOp (α := K) (· * ·)
 
-namespace PMonoid
+/-! ## The join, presented as a monoid
 
-variable {K : Type}
+Several of the package's reducers *are* joins: the width fold of §2/§7 is
+`max` on `ℕ`, the race reducer of the speculate/race licence is `or` on
+`Bool`. The panel algebra (`Agentic.MSemiring`) is generic in a `Monoid` on the
+key, so a join has to be presented as one somewhere. `SupMon` is that
+presentation, written once.
 
-/-- `PMonoid.op` is `*`: the old projection, kept resolving. -/
-abbrev op [Mul K] (a b : K) : K := a * b
+**Survivor, and exactly what Mathlib lacks.** Mathlib has the join
+(`SemilatticeSup`), its unit (`OrderBot`), and the unbundled facts that `⊔` is
+associative, commutative and idempotent (`Std.Associative`, `Std.Commutative`,
+`Std.IdempotentOp` in `Mathlib/Order/Lattice.lean`). What it has nowhere is a
+`Monoid` whose `*` is `⊔`, nor the type synonym that would carry one — a
+`Multiplicative`-for-joins. It cannot install such an instance on the carrier
+itself, for the same reason this module cannot: `Mul` on a lattice is spoken
+for by whatever genuine multiplication the carrier already has (`ℕ`'s, `Bool`'s
+in `Mathlib/Algebra/Ring/BooleanRing.lean`), and a second one would silently
+change the meaning of every `*`. Hence the synonym, whose entire content is
+that `SupMon α` is a *different type* from `α` to instance resolution.
 
-/-- `PMonoid.unit` is `1`: the old projection, kept resolving. -/
-abbrev unit [One K] : K := 1
+This is an upstream candidate: nothing in it mentions this package, and it is
+the exact join-side dual of `Multiplicative`/`Additive`. -/
 
-/-- Contributions are unbracketed (Mathlib's `mul_assoc`, under the old name). -/
-theorem op_assoc [Semigroup K] (a b c : K) : a * b * c = a * (b * c) :=
-  mul_assoc a b c
+/-- `SupMon α` is `α` carrying the *join* as its multiplication: `a * b = a ⊔ b`
+and `1 = ⊥`. It is a `def`, not an `abbrev`, so `α`'s own `Mul` and `One` — if
+it has any — are not in competition with the join's; that isolation is the
+whole point.
 
-/-- The empty contribution adds nothing on the left (Mathlib's `one_mul`). -/
-theorem unit_op [MulOneClass K] (a : K) : 1 * a = a := one_mul a
+`Agentic.Width` (the width fold, `max` on `ℕ`) and `Agentic.Race` (the race
+reducer, `or` on `Bool`) are both this synonym, and the four monoid laws and
+the idempotence they used to prove separately are `Mathlib`'s `sup_assoc`,
+`bot_sup_eq`, `sup_bot_eq`, `sup_comm` and `sup_idem` here, proved once.
 
-/-- The empty contribution adds nothing on the right (Mathlib's `mul_one`). -/
-theorem op_unit [MulOneClass K] (a : K) : a * 1 = a := mul_one a
+See the section docstring for the absence claim and the upstream note. -/
+def SupMon (α : Type) : Type := α
 
-end PMonoid
+namespace SupMon
 
-namespace CMonoid
+variable {α : Type}
 
-/-- Contributions are interchangeable (Mathlib's `mul_comm`, under the old
-name). -/
-theorem op_comm {K : Type} [CommMonoid K] (a b : K) : a * b = b * a := mul_comm a b
+/-- The element `a`, read as a member of the join monoid. -/
+def of (a : α) : SupMon α := a
 
-end CMonoid
+/-- The underlying element of a member of the join monoid. -/
+def val (a : SupMon α) : α := a
 
-namespace IdemCMonoid
+/-- `of` and `val` are mutually inverse, definitionally: the synonym adds no
+data, only an instance boundary. -/
+@[simp] theorem val_of (a : α) : val (of a) = a := rfl
 
-variable {K : Type}
+/-- The same, the other way round. -/
+@[simp] theorem of_val (a : SupMon α) : of (val a) = a := rfl
 
-/-- A contribution counted twice counts once (the `Std.IdempotentOp` field,
-under the old name). -/
-theorem op_idem [CommMonoid K] [IdemCMonoid K] (a : K) : a * a = a :=
-  Std.IdempotentOp.idempotent (op := fun a b : K => a * b) a
+/-- The synonym is injective on the nose, so equations between joins may be
+proved on the carrier. -/
+theorem of_inj {a b : α} (h : of a = of b) : a = b := h
 
-/-- `IdemCMonoid.le` is Mathlib's `≤`.
+/-- The order comes along with the carrier: `SupMon α` is ordered exactly as
+`α` is, so the order the join induces is Mathlib's and not a second one. -/
+instance instSemilatticeSup [SemilatticeSup α] : SemilatticeSup (SupMon α) :=
+  inferInstanceAs (SemilatticeSup α)
 
-The old definition was `a ⋄ b = b`, and every carrier that used it now carries
-a Mathlib `SemilatticeSup` whose `⊔` *is* its `⋄`, so the two orders are the
-same relation and the six lemmas below are Mathlib's. -/
-abbrev le [LE K] (a b : K) : Prop := a ≤ b
+/-- The bare comparison, transported: needed before `OrderBot` and
+`DecidableLE` can even be stated at the synonym. -/
+instance instLE [LE α] : LE (SupMon α) := inferInstanceAs (LE α)
 
-/-- The induced order is reflexive (Mathlib's `le_refl`). -/
-theorem le_refl [Preorder K] (a : K) : a ≤ a := _root_.le_refl a
+/-- The unit of the join is the bottom of the order, transported. -/
+instance instOrderBot [LE α] [OrderBot α] : OrderBot (SupMon α) :=
+  inferInstanceAs (OrderBot α)
 
-/-- The induced order is transitive (Mathlib's `le_trans`). -/
-theorem le_trans [Preorder K] {a b c : K} (hab : a ≤ b) (hbc : b ≤ c) : a ≤ c :=
-  _root_.le_trans hab hbc
+/-- Decidable equality, transported: a verdict is compared as its carrier is. -/
+instance instDecidableEq [DecidableEq α] : DecidableEq (SupMon α) :=
+  inferInstanceAs (DecidableEq α)
 
-/-- The induced order is antisymmetric (Mathlib's `le_antisymm`). -/
-theorem le_antisymm [PartialOrder K] {a b : K} (hab : a ≤ b) (hba : b ≤ a) : a = b :=
-  _root_.le_antisymm hab hba
+/-- Decidable comparison, transported, so `decide` closes order goals about
+widths and races. -/
+instance instDecidableLE [LE α] [DecidableLE α] : DecidableLE (SupMon α) :=
+  inferInstanceAs (DecidableLE α)
 
-/-- A part is below the join (Mathlib's `le_sup_left`). -/
-theorem le_op_left [SemilatticeSup K] (a b : K) : a ≤ a ⊔ b := le_sup_left
+/-- Printing, transported. -/
+instance instRepr [Repr α] : Repr (SupMon α) := inferInstanceAs (Repr α)
 
-/-- A part is below the join, on the right (Mathlib's `le_sup_right`). -/
-theorem le_op_right [SemilatticeSup K] (a b : K) : b ≤ a ⊔ b := le_sup_right
+/-- **The join as a commutative monoid**: `*` is `⊔`, `1` is `⊥`. Every law is
+Mathlib's, and this is the one instance the synonym exists to carry. -/
+instance instCommMonoid [SemilatticeSup α] [OrderBot α] : CommMonoid (SupMon α) where
+  mul a b := of (val a ⊔ val b)
+  one := of ⊥
+  mul_assoc a b c := congrArg of (sup_assoc (val a) (val b) (val c))
+  one_mul a := congrArg of (bot_sup_eq (val a))
+  mul_one a := congrArg of (sup_bot_eq (val a))
+  mul_comm a b := congrArg of (sup_comm (val a) (val b))
 
-/-- The join is least among upper bounds (Mathlib's `sup_le`). -/
-theorem op_le [SemilatticeSup K] {a b c : K} (ha : a ≤ c) (hb : b ≤ c) : a ⊔ b ≤ c :=
-  sup_le ha hb
+/-- Multiplication in the join monoid *is* the join, definitionally. -/
+theorem mul_def [SemilatticeSup α] [OrderBot α] (a b : SupMon α) :
+    a * b = of (val a ⊔ val b) := rfl
 
-/-- The join is monotone in both arguments (Mathlib's `sup_le_sup`). -/
-theorem op_le_op [SemilatticeSup K] {a a' b b' : K} (ha : a ≤ a') (hb : b ≤ b') :
-    a ⊔ b ≤ a' ⊔ b' := sup_le_sup ha hb
+/-- The unit of the join monoid *is* the bottom, definitionally. -/
+theorem one_def [SemilatticeSup α] [OrderBot α] : (1 : SupMon α) = of ⊥ := rfl
 
-end IdemCMonoid
+/-- **A join is idempotent**, so every `SupMon` reducer carries the duplication
+licence — speculation, retry and at-least-once delivery are free at any of
+them, and no carrier has to earn it separately. -/
+instance instIdempotentOp [SemilatticeSup α] [OrderBot α] :
+    Std.IdempotentOp (α := SupMon α) (· * ·) :=
+  ⟨fun a => congrArg of (sup_idem (val a))⟩
 
-/-- The product of two combinable verdicts, acting coordinatewise: Mathlib's
-`Prod.instMonoid`. Kept under the package's old instance name so that
-`Agentic.Scope` may name it; independence of the coordinates is that instance,
-and `Agentic.Scope.axis_independence` is still a computation. -/
-abbrev instPMonoidProd {G H : Type} [Monoid G] [Monoid H] : Monoid (G × H) :=
-  inferInstance
+/-- **The monoid order is the lattice order.** `a ≤ b` iff combining the two
+reports `b`: the order `Agentic`'s idempotent reducers used to define by hand
+is Mathlib's `≤`, and this theorem is the bridge that says so once for all of
+them. -/
+theorem le_iff_mul [SemilatticeSup α] [OrderBot α] {a b : SupMon α} :
+    a ≤ b ↔ a * b = b :=
+  ⟨fun h => congrArg of (sup_eq_right.mpr h), fun h => sup_eq_right.mp (of_inj h)⟩
+
+end SupMon
 
 /-! ## The two actions on a reader
 

@@ -34,11 +34,11 @@ therefore ours; the quotient algebra is not.
 A session is then a semiring-valued judgment of every history, and the
 Brzozowski derivative is the act of continuing a session past a prefix.
 
-The trace monoid is stated once, as the package's `PMonoid` (`Agentic.Monoid`),
+The trace monoid is stated once, as Mathlib's `Monoid`,
 and not a second time as bespoke `Mul`/`One` instances with their own three
 law theorems. That also settles the module's place in the import graph: this
 file needs the monoid, not the panel, so it imports `Agentic.Monoid` and the
-edge `Trace → Panel` — which existed only to reach `PMonoid` and pointed the
+edge `Trace → Panel` — which existed only to reach the monoid class and pointed the
 wrong way, a concurrency object depending on a fan-in construction that ought
 to depend on it — is gone.
 -/
@@ -72,46 +72,17 @@ classes, and Mathlib both generates it and proves it a congruence. -/
 def traceCon (ind : A → A → Prop) : Con (FreeMonoid A) :=
   conGen (M := FreeMonoid A) (Swap ind)
 
-/-- A `TraceEqv ind u v` is a representation of *`u` and `v` are the same
-history*: one can be turned into the other by finitely many exchanges of
-adjacent independent turns, in any context. It is Mathlib's `ConGen.Rel` at
-`Swap ind` — the inductively generated congruence, whose constructors are
-`of`, `refl`, `symm`, `trans` and `mul` — under the package's name. -/
-abbrev TraceEqv (ind : A → A → Prop) (u v : FreeMonoid A) : Prop :=
-  ConGen.Rel (M := FreeMonoid A) (Swap ind) u v
+/-! ### Sameness of histories
 
-/-- One rescheduling step is a rescheduling (`ConGen.Rel.of`, under the
-package's old constructor name). -/
-theorem TraceEqv.step {u v : List A} (h : Swap ind u v) : TraceEqv ind u v :=
-  ConGen.Rel.of (M := FreeMonoid A) u v h
-
-/-- A history is itself (`ConGen.Rel.refl`). -/
-theorem TraceEqv.refl (u : List A) : TraceEqv ind u u :=
-  ConGen.Rel.refl (M := FreeMonoid A) u
-
-/-- Rescheduling is reversible (`ConGen.Rel.symm`). -/
-theorem TraceEqv.symm {u v : List A} (h : TraceEqv ind u v) : TraceEqv ind v u :=
-  ConGen.Rel.symm (M := FreeMonoid A) h
-
-/-- Reschedulings compose (`ConGen.Rel.trans`). -/
-theorem TraceEqv.trans {u v w : List A} (h₁ : TraceEqv ind u v) (h₂ : TraceEqv ind v w) :
-    TraceEqv ind u w :=
-  ConGen.Rel.trans (M := FreeMonoid A) h₁ h₂
-
-/-- Prefixing a common history preserves sameness of histories: the left
-congruence of `append`. It used to be an induction over the generated
-equivalence resting on a list-surgery lemma about `Swap`; a congruence is
-closed under multiplication by construction, so it is now one application of
-`ConGen.Rel.mul`. -/
-theorem TraceEqv.append_left {u v : List A} (w : List A) (h : TraceEqv ind u v) :
-    TraceEqv ind (w ++ u) (w ++ v) :=
-  ConGen.Rel.mul (M := FreeMonoid A) (TraceEqv.refl w) h
-
-/-- Appending a common suffix preserves sameness of histories: the right
-congruence of `append`, likewise `ConGen.Rel.mul`. -/
-theorem TraceEqv.append_right {u v : List A} (w : List A) (h : TraceEqv ind u v) :
-    TraceEqv ind (u ++ w) (v ++ w) :=
-  ConGen.Rel.mul (M := FreeMonoid A) h (TraceEqv.refl w)
+Two schedules are *the same history* when one can be turned into the other
+by finitely many exchanges of adjacent independent turns, in any context. That
+relation is Mathlib's `ConGen.Rel (Swap ind)` — the inductively generated
+congruence, whose constructors `of`, `refl`, `symm`, `trans` and `mul` are
+exactly the five facts the package used to restate — and it is written that way
+here, so no name of ours stands between the reader and the congruence. The two
+`append` congruences in particular are `ConGen.Rel.mul` against `refl`, and are
+not worth a theorem each.
+-/
 
 /-- A `Trace ind` is a representation of an *interaction history up to
 scheduling*: a sequence of turns in which independent adjacent turns may be
@@ -133,12 +104,8 @@ def mk (u : List A) : Trace ind := Quotient.mk'' (u : FreeMonoid A)
 /-- The one-turn history. -/
 def single (a : A) : Trace ind := mk [a]
 
-/-- The empty history: no turns have been taken. It is the monoid's `1`
-(`one_eq_mk`), kept as a name of its own. -/
-def one : Trace ind := mk []
-
 /-- **Histories combine, and this is the package's monoid.** Concatenation of
-histories is `⋄` and the empty history is `PMonoid.unit`.
+histories is `*` and the empty history is `1`.
 
 The three laws are no longer proved here: the quotient of a monoid by a
 congruence is a monoid, which is Mathlib's `Con.monoid`, and the instance below
@@ -154,40 +121,6 @@ it (acat-192). -/
 instance instPMonoid : Monoid (Trace ind) :=
   inferInstanceAs (Monoid (traceCon ind).Quotient)
 
-/-- Concatenation of histories: take the turns of the first, then those of the
-second. It is well defined on classes because `traceCon ind` is a *congruence*
-— Mathlib's `conGen` closes `Swap` under multiplication on both sides — so the
-two nested `Quot.lift`s the package used to write are `Con`'s. -/
-abbrev mul (x y : Trace ind) : Trace ind := x * y
-
-/-- The key operation on histories is concatenation, definitionally. -/
-theorem op_eq_mul (x y : Trace ind) : x ⋄ y = Trace.mul x y := rfl
-
-/-- Concatenation of classes is the class of the concatenation: the defining
-computation rule of `⋄` on traces, and the only fact about it later proofs
-need. It is Mathlib's `Con.coe_mul`, which is `rfl`. -/
-theorem mk_mul_mk (u v : List A) : (mk u : Trace ind) ⋄ mk v = mk (u ++ v) := rfl
-
-/-- The empty history is the class of the empty schedule. -/
-theorem one_eq_mk : (1 : Trace ind) = mk [] := rfl
-
-/-- A one-turn history is the class of the one-element schedule. -/
-theorem single_eq_mk (a : A) : (single a : Trace ind) = mk [a] := rfl
-
-/-- Concatenation of histories is unbracketed: a history has no grouping (the
-monoid field, in notation). -/
-theorem mul_assoc (x y z : Trace ind) : x ⋄ y ⋄ z = x ⋄ (y ⋄ z) :=
-  _root_.mul_assoc x y z
-
-/-- The empty history is a left unit: starting from nothing changes nothing. -/
-theorem one_mul (x : Trace ind) : 1 ⋄ x = x :=
-  _root_.one_mul x
-
-/-- The empty history is a right unit: continuing with nothing changes
-nothing. -/
-theorem mul_one (x : Trace ind) : x ⋄ 1 = x :=
-  _root_.mul_one x
-
 /-- Independent turns commute.
 
 Which schedules are EQUAL is chosen here: independent turns commute, dependent
@@ -197,7 +130,7 @@ order-sensitivity in one object. The proof is soundness of the quotient
 sides; everything else about the quotient exists to make this one equation true
 without making any other equation true. -/
 theorem indep_comm {a b : A} (h : ind a b) :
-    (single a : Trace ind) ⋄ single b = single b ⋄ single a :=
+    (single a : Trace ind) * single b = single b * single a :=
   Quot.sound (ConGen.Rel.of (M := FreeMonoid A) _ _ (Swap.swap (u := []) (v := []) h))
 
 /-- With no independence at all, rescheduling is equality: the quotient
@@ -206,7 +139,7 @@ quotient identifies independent schedules and *nothing else*. The `mul` case is
 the one Mathlib's generated congruence adds over a bare equivalence, and it is
 discharged by congruence of `append`. -/
 theorem eq_of_traceEqv_of_indep_empty (hind : ∀ a b : A, ¬ ind a b)
-    {u v : List A} (h : TraceEqv ind u v) : u = v := by
+    {u v : List A} (h : ConGen.Rel (M := FreeMonoid A) (Swap ind) u v) : u = v := by
   induction h with
   | of _ _ hs => cases hs with | swap hab => exact absurd hab (hind _ _)
   | refl _ => rfl
@@ -224,9 +157,9 @@ Mathlib's `Quotient.exact`, where the package used to build the retraction by
 hand with a `Quot.lift`. -/
 theorem single_mul_single_ne_of_indep_empty (hind : ∀ a b : A, ¬ ind a b)
     {a b : A} (hab : a ≠ b) :
-    (single a : Trace ind) ⋄ single b ≠ single b ⋄ single a := by
+    (single a : Trace ind) * single b ≠ single b * single a := by
   intro h
-  have h1 : TraceEqv ind [a, b] [b, a] := Quotient.exact h
+  have h1 : ConGen.Rel (M := FreeMonoid A) (Swap ind) [a, b] [b, a] := Quotient.exact h
   have h2 : [a, b] = [b, a] := eq_of_traceEqv_of_indep_empty hind h1
   injection h2 with h3 _
   exact hab h3
@@ -240,10 +173,10 @@ histories, over `Cost` the worst-case budget of reaching one, over an
 expectation semiring its measure. Because the domain is the quotient, a
 session cannot distinguish two schedules that differ only in the order of
 independent turns; the invariance is structural, not asserted. -/
-def Session (S : Type) [CompleteCSemiring S] {A : Type} (ind : A → A → Prop) : Type :=
+def Session (S : Type) [CommSemiring S] [CompleteCSemiring S] {A : Type} (ind : A → A → Prop) : Type :=
   Trace ind → S
 
-variable {S : Type} [CompleteCSemiring S]
+variable {S : Type} [CommSemiring S] [CompleteCSemiring S]
 
 /-- The Brzozowski derivative of a session by a prefix: what the session says
 about everything that can still happen once `u` has happened.
@@ -265,13 +198,13 @@ def deriv (u : Trace ind) (f : Session S ind) : Session S ind :=
 theorem deriv_one (f : Session S ind) : deriv (1 : Trace ind) f = f :=
   actL_unit f
 
-/-- Continuing past `u ⋄ v` is continuing past `u` and then past `v`: the
+/-- Continuing past `u * v` is continuing past `u` and then past `v`: the
 derivative is a monoid action (contravariantly composed, which is what makes
 resume-after-fork associate). It is `actL_compose`, and the reversal of the
 operands against `withScope_compose` is the difference between the two
 actions. -/
 theorem deriv_mul (u v : Trace ind) (f : Session S ind) :
-    deriv (u ⋄ v) f = deriv v (deriv u f) :=
+    deriv (u * v) f = deriv v (deriv u f) :=
   actL_compose u v f
 
 /-- Independent turns are indistinguishable to *every* session: the
@@ -279,8 +212,8 @@ permutation invariance of a panel, transported to judgments. This is the
 payoff of quotienting — it is a theorem about all meanings at once, with no
 hypothesis on the session. -/
 theorem deriv_indep_comm {a b : A} (h : ind a b) (f : Session S ind) :
-    deriv (Trace.single a ⋄ Trace.single b) f
-      = deriv (Trace.single b ⋄ Trace.single a) f := by
+    deriv (Trace.single a * Trace.single b) f
+      = deriv (Trace.single b * Trace.single a) f := by
   rw [Trace.indep_comm h]
 
 end Traces
