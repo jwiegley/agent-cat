@@ -1,0 +1,6 @@
+name = "agentic"
+version = "0.1.0"
+defaultTargets = ["Agentic"]
+
+[[lean_lib]]
+name = "Agentic"

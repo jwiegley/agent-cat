@@ -1,0 +1,1420 @@
+#+TITLE: Obr Issues
+#+SEQ_TODO: TODO DOING DRAFT WAIT DEFER NOTE | DONE CANCELED
+#+ISSUE_PREFIX: acat
+
+* TODO [#C] shareT under retryT/fanT: iteration and fan indices in the site key, or ask-once semantics
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-0vv
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-12 Wed 00:06]
+:MODIFIED: [2026-08-12 Wed 00:06]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+From acat-jyw (sharpest unresolved): with key (l, site-within-t) and no trip index, a labeled retry body reads the same answer every iteration — the loop equation holds but the meaning is constant. Decide per combinator: fold trip/fan index into the key, or declare ask-once-reuse as the intended combinator. Interacts with the width-fold soundness owed on acat-444.
+
+* TODO [#D] Session: drop unused csum constraint; add the trace-monoid product
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-135
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 21:41]
+:MODIFIED: [2026-08-11 Tue 21:41]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Session demands CompleteCSemiring that no proof uses (probe: class-free restatement compiles); the 'monoid semiring' has no product — conv at K := Trace ind, unblocked by decidability-free conv.
+
+** Dependencies
+#+begin_src json
+[
+  {
+    "issue_id": "acat-135",
+    "depends_on_id": "acat-ubt",
+    "type": "blocks",
+    "created_at": "2026-08-12T04:41:33.742880Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* DONE [#B] Evict decidability from the semantic layer
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-192
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 21:41]
+:MODIFIED: [2026-08-11 Tue 22:13]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-11 Tue 22:13]
+:CLOSE_REASON: DecidableEq evicted from csum_point (class axiom), idMat/pow/powSum/sumPow/retryTrunc, conv/convOne/MSemiring, pin, indicator/gate — all now classical/noncomputable, which is the design's stance. Payoff proved in-tree: MSemiring Prop (Trace ind) elaborates — the Mazurkiewicz trace monoid is now a legal panel key, with conv_assoc and total_conv exercised at that key. Supersedes acat-6pq
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+HIGH (4 passes): [DecidableEq] on csum_point is provably vacuous at both carriers; it propagates through idMat/id_comp/pow/retryTrunc/Ctx/conv/pin/gate. Consequences: the meaning category lacks identities at function-typed objects; the Mazurkiewicz trace monoid (a Quot) cannot be a panel key. Fix: drop the binder from the class axiom, classical idMat, propagate removals. Supersedes acat-6pq.
+
+* TODO [#D] PMod's additive half is the fifth monoid presentation; migration has a diamond hazard
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-1d1
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 22:36]
+:MODIFIED: [2026-08-11 Tue 23:12]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Discovered in acat-47y: migrating PMod to [CMonoid M] makes instPModSelf demand CMonoid P for every CSemiring P (unconstrained head, the Scope hazard) and collides with IdemCMonoid Cost (two CMonoid Cost paths). Repair: a newtype for a semiring's additive monoid, or PMod taking the monoid structure explicitly.
+
+** Comments
+#+begin_src json
+[
+  {
+    "id": 18,
+    "issue_id": "acat-1d1",
+    "author": "johnw",
+    "text": "From acat-zms: addIdemCMonoid is deliberately a @[reducible] def, NOT an instance — promoting it creates an IdemCMonoid Cost diamond with the bespoke instance. The repair direction: delete the bespoke instance and route Cost.le through addIdemCMonoid, in the same pass as this issue's newtype decision.",
+    "created_at": "2026-08-12T06:12:19Z"
+  }
+]
+#+end_src
+
+* DONE [#C] Delete dead weight (probe/grep-verified zero consumers)
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-1g4
+:LABELS: []
+:ISSUE_TYPE: chore
+:CREATED:  [2026-08-11 Tue 21:41]
+:MODIFIED: [2026-08-11 Tue 23:24]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-11 Tue 22:13]
+:CLOSE_REASON: 12 declarations + 1 module deleted, zero consumers verified by grep before each: star_eq_right (re-derived as theorem first), op_compact, constBot, axis2, gate_*_of_false x2, pi_hom, pareto_not_total, cached_cached/comp, gate_eq_smul bridge (gate now defined as smul-indicator, six lemmas re-proved by algebra), Countable.lean folded into CompleteCSemiring docstring. Net -8 declarations
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+star_eq_right (derivable; costs every instance a proof), Interior.op_compact, Interior.constBot, Scope.axis2, gate_comp_of_false/comp_gate_of_false, SqZero.pi_hom (or make it a Hom object), pareto_not_total, cached_cached/cached_comp, define gate as smul(indicator) deleting the bridge, fold Countable.lean into the CompleteCSemiring docstring.
+
+** Comments
+#+begin_src json
+[
+  {
+    "id": 19,
+    "issue_id": "acat-1g4",
+    "author": "johnw",
+    "text": "Judgment call from acat-zms, flagged by its author: the ≤+ order API (8 lemmas) currently has ~3 consumers; kept following Monoid.lean's precedent and because the next carrier's leastness proof wants the monotonicity lemmas — re-audit for dead weight when acat-jmm lands.",
+    "created_at": "2026-08-12T06:12:19Z"
+  },
+  {
+    "id": 21,
+    "issue_id": "acat-1g4",
+    "author": "johnw",
+    "text": "Small harmonisation from acat-ubt: foldPanel_dup takes an explicit idempotence hypothesis while convFold_dup takes [IdemCMonoid K]; align or document when next auditing.",
+    "created_at": "2026-08-12T06:24:05Z"
+  }
+]
+#+end_src
+
+* DONE [#C] Docs truth pass: README, section citations, false docstrings
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-1lk
+:LABELS: []
+:ISSUE_TYPE: docs
+:CREATED:  [2026-08-11 Tue 21:41]
+:MODIFIED: [2026-08-11 Tue 22:13]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-11 Tue 22:13]
+:CLOSE_REASON: README rewritten true (3 missing rows added, Countable row replaced by the decision paragraph, docstring rule stated as actually held); section citations corrected (Env 6a/6d, gateT 2/4, Panel 2); false sentences fixed (Last non-commutativity, covariant relabel with 5.3 reconciliation, ConwayStar de-overclaimed to star-with-unrolling-laws, CsumAdditive counter-model named explicitly, Context three-of-four consequences honest). Review report at doc/reviews/2026-08-12-heavy-review.md
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+README table omits Keys/Frag/Term; 'not the workflow syntax' now false; Countable row inverted; 'Mathlib path noted per module' noted in none; docstring rule claims 100% holds 30/100; countable-sum wording contradicts the code. Citations: Env swaps 6a/6d; gateT cites 6c for gating; Panel cites 3 for 2. False sentences: Scope claims Last commutative on one axis (refuted by elaboration); 'contravariance' labels a covariant homomorphism; CsumAdditive counter-model reads as Cost which satisfies the law; Matrix 'no separate notion of program' stale; Context 'four consequences' substitutes one; fanT docstring present-tense for a fold that does not exist.
+
+** Comments
+#+begin_src json
+[
+  {
+    "id": 9,
+    "issue_id": "acat-1lk",
+    "author": "johnw",
+    "text": "Review report preserved in-tree at doc/reviews/2026-08-12-heavy-review.md with the full finding-to-issue mapping.",
+    "created_at": "2026-08-12T04:50:56Z"
+  }
+]
+#+end_src
+
+* TODO [#D] zeroT: the additive unit
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-1xo
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 19:56]
+:MODIFIED: [2026-08-12 Wed 00:42]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+§4 Additive row needs 0 with ⟦0⟧ = 0; sumT has no unit and refusal is only expressible as gateT false t. Env.extNone is the semantic zero waiting. Cheapest gap.
+
+** Comments
+#+begin_src json
+[
+  {
+    "id": 31,
+    "issue_id": "acat-1xo",
+    "author": "johnw",
+    "text": "acat-444's review (finding 6): the missing Additive zero is now visible in the meaning stratum too — no zero constructor means the 0-row of §4 is half-implemented at the fold.",
+    "created_at": "2026-08-12T07:42:00Z"
+  }
+]
+#+end_src
+
+* TODO [#D] Leastness at expectation: SqZero star has no order; IdemAdd (SqZero P M) derivable when M's accumulation is idempotent
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-3ov
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 23:50]
+:MODIFIED: [2026-08-11 Tue 23:50]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+From acat-ozh: acat-jmm's first hard consumer. At SqZero Prop Prop / Cost / Prob the derived IdemAdd may make leastness provable; untried.
+
+* TODO [#C] Atkey-parameterise Term with the context index
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-41c
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 19:56]
+:MODIFIED: [2026-08-11 Tue 19:56]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Term hard-codes the const-e collapse by omission — the exact symptom §9 diagnoses in agent-functor. Needs Term k k' f i o composing when indices meet (cf. Context.Ctx).
+
+* DONE [#C] Meaning functions ext/S as structural folds; workflow equality as Quotient (Setoid.ker ext); TCM equations as theorems
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-444
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 19:02]
+:MODIFIED: [2026-08-12 Wed 00:49]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-12 Wed 00:49]
+:CLOSE_REASON: LANDED: Meaning.lean (1207 lines) — muS with all twelve clauses = their §4 rows (each equation genuinely rfl, review-verified), retryT->retryTrunc, fanT truncating with fanT 0 = const [] as theorems; muExt with Site/Key machinery, trip+fan indices in keys, shareT rebasing with NO DecidableEq L (equal labels build equal keys); muExt_key_irrelevant (12-constructor induction: runner key-sensitivity IS sharing observability) discharging jyw a-c; muExt_dupPair_ne_sharedPair; WEq + Workflow quotient + seq lifted; one_add_one_of_muS_respects_WEq (a carrier respecting WEq cannot count). Adversarially reviewed; all prose overclaims corrected in the honesty round incl. the new machine-checked muExt_shareT_label_collision witness. SUCCESSORS (the honest remainder): acat-5b7 (WEq coarsening — quotient currently one operation, no laws), acat-vbl (semantic width), acat-qtv (pi after coarsening), acat-frb (sumT bias), acat-bmc (label collision, evidence attached)
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+
+** Dependencies
+#+begin_src json
+[
+  {
+    "issue_id": "acat-444",
+    "depends_on_id": "acat-6pq",
+    "type": "blocks",
+    "created_at": "2026-08-12T02:56:49.368206Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  },
+  {
+    "issue_id": "acat-444",
+    "depends_on_id": "acat-jyw",
+    "type": "blocks",
+    "created_at": "2026-08-12T02:56:49.247864Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  },
+  {
+    "issue_id": "acat-444",
+    "depends_on_id": "acat-l59",
+    "type": "blocks",
+    "created_at": "2026-08-12T03:10:36.779970Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  },
+  {
+    "issue_id": "acat-444",
+    "depends_on_id": "acat-zcl",
+    "type": "blocks",
+    "created_at": "2026-08-12T02:02:24.476972Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+#+begin_src json
+[
+  {
+    "id": 2,
+    "issue_id": "acat-444",
+    "author": "johnw",
+    "text": "Fold-writing cautions from the review: (1) the scopeT case must respect withScope_compose contravariance — design §5.3 flags composing on the wrong side as the classic error; (2) the fanT case must truncate the input list at n and state the observable consequence (fanT 0 denotes const []); (3) the retryT case's target is Mat.retryTrunc (truncated star), never Star.retry — the unbounded star makes a .static grade denote unbounded cost; (4) recursion into bindT's continuation verified fine, csum needs no countability.",
+    "created_at": "2026-08-12T02:56:49Z"
+  },
+  {
+    "id": 8,
+    "issue_id": "acat-444",
+    "author": "johnw",
+    "text": "Review (alexey pass): the §3 fibration is entirely absent today — Ext and Mat never meet, no pi, no pushforward, no quotient-by-meaning anywhere (Trace's quotient is by scheduling). This issue IS that gap; noting so the review trail connects.",
+    "created_at": "2026-08-12T04:41:33Z"
+  },
+  {
+    "id": 24,
+    "issue_id": "acat-444",
+    "author": "johnw",
+    "text": "From acat-l59: the max-1-m static-shell justification is prose until the width fold exists — the discharging statement is width(fanT n t) <= n * max 1 (width t), the honest-supremum soundness; state it beside the fanT truncation obligation.",
+    "created_at": "2026-08-12T06:58:01Z"
+  },
+  {
+    "id": 25,
+    "issue_id": "acat-444",
+    "author": "johnw",
+    "text": "From acat-jyw, the fold's site-keying obligation, precisely: (a) a Site notion (path through the term) + injection into Env's consultation index; (b) the shareT clause rebasing absolute path to (l, site-within-t); (c) the observability theorems: sharedPair means an askPair q q shape, dupPair means distinct indices, whence dupPair != sharedPair by Env.share_ne_dup. Label equality is demanded AT THE FOLD (DecidableEq L or classical, as Env.pin already chose) — the syntax deliberately demands nothing.",
+    "created_at": "2026-08-12T07:06:23Z"
+  }
+]
+#+end_src
+
+* TODO [#C] Mathlib bridge: PMF for the edge measure, ENNReal/Tropical csum instances, Stoch for the kernel category
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-467
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 19:02]
+:MODIFIED: [2026-08-11 Tue 23:50]
+:CREATED_BY: johnw
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+
+** Comments
+#+begin_src json
+[
+  {
+    "id": 7,
+    "issue_id": "acat-467",
+    "author": "johnw",
+    "text": "Review: the Mathlib swap will NOT preserve theorems as README claims — Cost's completeness proof depends on exists_greatest and exists_eq_fin_of_isSup (suprema attained), both false in ENNReal (sup{1-1/n}=1 unattained), and the attainment feeds mul_csum_le, i.e. the infinitary distributive law itself. Plan the bridge as re-proof, not re-instantiation.",
+    "created_at": "2026-08-12T04:41:33Z"
+  },
+  {
+    "id": 22,
+    "issue_id": "acat-467",
+    "author": "johnw",
+    "text": "acat-ozh narrowed this: the remaining numeric gap is one carrier for both quantities (R>=0, sum-product Markov absorption read-out) plus the Prob->Rat bridge; everything structural (CompletePMod, SqZero csum, the p*mp* theorem) is done and generic.",
+    "created_at": "2026-08-12T06:50:01Z"
+  }
+]
+#+end_src
+
+* DONE [#C] Unify the three monoid classes (Panel PMonoid/CMonoid, ScopeMonoid, Trace Mul/One) into one hierarchy
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-47y
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 19:02]
+:MODIFIED: [2026-08-11 Tue 22:36]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-11 Tue 22:36]
+:CLOSE_REASON: Agentic/Monoid.lean: one PMonoid/CMonoid/IdemCMonoid hierarchy + actR/actL reader actions + the join-order development written once. ScopeMonoid and Trace's bespoke Mul/One retired; withScope := actR, deriv := actL (the review's duplication proved literal); Frag/Cost orders are generic instantiations under their old names; Trace->Panel edge dissolved; Term untouched and its definitional grades verified. All old theorem names resolve
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+
+** Comments
+#+begin_src json
+[
+  {
+    "id": 4,
+    "issue_id": "acat-47y",
+    "author": "johnw",
+    "text": "Review sharpened this: FIVE presentations, not three (also Frag's join/par and PMod's additive half), and the duplication is load-bearing — Trace.deriv + its two laws ARE Scope.withScope + its two laws at G := Trace ind, proved twice. Probes give Trace/LastOpt/Frag the existing PMonoid in <=5 lines each. Also fold in: the join-induced order development written 3x (Cost in Instances, Cost again in Star, Frag) wants one idempotent-comm-monoid->order abstraction (absorbs acat-7rm); and Scope's unconstrained-head Mul/One instances reintroduce the clash Pareto fixed for LE — probe: ScopeMonoid Cost silently captures * at Cost.",
+    "created_at": "2026-08-12T04:41:33Z"
+  },
+  {
+    "id": 10,
+    "issue_id": "acat-47y",
+    "author": "johnw",
+    "text": "From acat-192: Trace.lean temporarily imports Panel.lean solely to host instPMonoid (Trace ind) — when the unified monoid module lands, both should import it and this wrong-direction edge dissolves.",
+    "created_at": "2026-08-12T05:14:03Z"
+  },
+  {
+    "id": 14,
+    "issue_id": "acat-47y",
+    "author": "johnw",
+    "text": "Post-close corrections to the review record: (a) the review's 'Cost order re-derived in Star' was use, not duplication — grep found no third development; (b) Frag.par deliberately gets no monoid instance (one carrier one op; a Frag.Par newtype is the repair if a fold ever needs it).",
+    "created_at": "2026-08-12T05:36:07Z"
+  }
+]
+#+end_src
+
+* TODO [#B] Coarsen WEq: key-renaming invariance, so the Workflow quotient is a category
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-5b7
+:LABELS: []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-08-12 Wed 00:42]
+:MODIFIED: [2026-08-12 Wed 00:42]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Review FIX-NOW on acat-444 (machine-checked probes): WEq quantifies keys inside the comparison, so gateT true A, scopeT unit A, seq-assoc and seq-unit ALL fail to be WEq — the quotient has one operation and no laws, and deleting a no-op counts as a semantic change. Fix direction per review: key-renaming/site-relabelling invariance (a groupoid quotient on keys FIRST); naive outside-quantification still fails associativity because the two shapes assign different site-sets. Blocks any real use of Workflow; also the prerequisite for pi (the folds are incomparable until this lands: muS does not respect WEq and WEq does not respect muS — one_add_one_of_muS_respects_WEq + probes).
+
+* TODO [#E] Note: Tally/Width deriving DecidableEq now unconsumed; Cost.add_mono deleted with its only consumer
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-5ly
+:LABELS: []
+:ISSUE_TYPE: chore
+:CREATED:  [2026-08-11 Tue 22:14]
+:MODIFIED: [2026-08-11 Tue 22:14]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Two small residues of acat-192/acat-9kn: prune the deriving clauses if nothing wants decide there, and re-home monotonicity of Cost's + (as Cost.add_mono near Cost.add_le, or generalized to any idempotent-+ carrier) when next needed.
+
+* DONE [#C] Fix a package-wide classical Decidable convention before the folds
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-6pq
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 19:56]
+:MODIFIED: [2026-08-11 Tue 22:13]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-11 Tue 22:13]
+:CLOSE_REASON: Superseded by acat-192: the convention question dissolved by removing the decidability hypotheses from the semantic layer entirely; the only surviving Decidable instances are the checking stratum (Frag.decLe, Cost.decLe), which is the correct boundary
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Transform matrices need DecidableEq o (Classical.propDecidable) while Mat/Panel take instance hypotheses; two Decidable instances are propositionally but not definitionally equal — law proofs will need Subsingleton (Decidable _) congruence unless one convention is fixed up front.
+
+* TODO [#D] gateT: generalize Bool to a grant-lattice parameter
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-755
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 19:56]
+:MODIFIED: [2026-08-11 Tue 19:56]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+scopeT is parameterised (G) but gateT hard-wires Bool; §2/§9 want the Grant lattice acting through {0,1} with nested grants intersecting in the lattice.
+
+* TODO [#E] Frag.meet: complete the grade lattice
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-7rm
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 19:56]
+:MODIFIED: [2026-08-11 Tue 19:56]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+join exists; 'lowest fragment that expresses the job' as an infimum wants meet + absorption laws.
+
+* TODO [#E] Note: finite-index aggregation law (csum over Fin n / lists) derivable from csum_pair + csum_zero by induction
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-80z
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 22:14]
+:MODIFIED: [2026-08-11 Tue 22:14]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Any later n-ary-panel-equals-fold theorem wants it; record before it is rediscovered.
+
+* DONE [#C] Decide CsumAdditive's status: fenced hypothesis vs class axiom
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-9kn
+:LABELS: []
+:ISSUE_TYPE: question
+:CREATED:  [2026-08-11 Tue 20:10]
+:MODIFIED: [2026-08-11 Tue 22:13]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-11 Tue 22:13]
+:CLOSE_REASON: Resolved as neither framed option: csum_pair (two-point agreement, csum over Bool = binary +) added as the class axiom the review showed was missing; discharged at Prop (propext) and Cost (sup of pair = max); CsumAdditive now DERIVED for every carrier; five fences deleted; total_add proved, augmentation now a full semiring homomorphism (0,1,+,conv) with the non-instantiability of S<K> as CSemiring honestly documented (mul_comm)
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Binary csum-additivity proved independent of CompleteCSemiring (sup counter-model); currently a named predicate proved at Prop and Cost, fencing sumPow/powSum_eq_sumPow. Promoting it to the class would simplify statements but obligates every future instance.
+
+** Comments
+#+begin_src json
+[
+  {
+    "id": 3,
+    "issue_id": "acat-9kn",
+    "author": "johnw",
+    "text": "RESOLVED BY THE REVIEW (abstraction pass, probe-compiled): neither framed option. Add the two-point agreement axiom csum (fun b : Bool => cond b x y) = x + y to CompleteCSemiring — CsumAdditive then DERIVES for every carrier from csum_prod/csum_swap/csum_congr; the claimed independence was an artifact of the class omitting a defining axiom of a complete semiring. One-line obligation per instance (trivial at Prop and Cost); delete the fences on comp_matAdd_*/sumPow_horner/powSum_eq_sumPow/retryTrunc_succ.",
+    "created_at": "2026-08-12T04:41:33Z"
+  }
+]
+#+end_src
+
+* TODO [#C] Add a csum shift/Sum-index axiom: the cheapest route to a Cost matrix star
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-9ml
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 22:52]
+:MODIFIED: [2026-08-11 Tue 22:52]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+From acat-ruz: reach = csum of powers is carrier-generic except star_eq_left needs csum f = f 0 + csum (f . succ) (or csum over Sum = csum + csum). CompleteCSemiring has no reindexing law. Adding one likely yields the Cost matrix star with no fixed-point theory — adjacent to but distinct from acat-zms; also gives acat-80z's finite-index law.
+
+* TODO [#E] conv_comm converse: needs a Nontrivial fence and delta_injective
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-ab7
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 23:24]
+:MODIFIED: [2026-08-11 Tue 23:24]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+From acat-ubt: non-commutative K forcing non-commutative conv is shown at one carrier only; the generic converse needs (1:S) != 0 (no Nontrivial-style class exists) + delta injectivity, then conv_comm iff CMonoid K.
+
+* TODO [#E] Alternative: make bounded 0 unrepresentable (normalize to static)
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-b22
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 23:58]
+:MODIFIED: [2026-08-11 Tue 23:58]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+From acat-l59: would delete the residual join-slack paragraph and make static/bounded-0 indistinguishable outright; larger index-type change interacting with fanT 0. Candidate simplification, weigh against the definitional-reduction discipline.
+
+* TODO [#C] Give cachedAt content: a replay construction proved equal to f
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-bf8
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 21:41]
+:MODIFIED: [2026-08-11 Tue 21:41]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+cachedAt := f makes cached_eq a tautology about the identity function; the non-vacuous statement is a first-consult/replay interpretation proved equal, connecting to share_eq_dup_of_agree.
+
+* TODO [#C] shareT label collision across unequal bodies
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-bmc
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-12 Wed 00:06]
+:MODIFIED: [2026-08-12 Wed 00:42]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+From acat-jyw: shareT l (prim q1) beside shareT l (prim q2) keys both to (l, root) — one answer for two different questions. Fold options: include the leaf datum in the key (needs Op equality), require syntactically equal bodies (not statable internally; see acat-m0t), or accept designer-declared identity. The last place the syntax is still silent.
+
+** Comments
+#+begin_src json
+[
+  {
+    "id": 30,
+    "issue_id": "acat-bmc",
+    "author": "johnw",
+    "text": "acat-444's review sharpened this with machine-checked evidence: muExt (envRunner e) (shareT 0 (prim q1)) = same at q2 for ALL e with q1 != q2 — the fold rebases on label alone while Term.lean promises same-label-AND-same-body; sharing is also scope-blind (same label under model=A and model=B hits one index). Options per review: key by (label, body-hash), DecidableEq on a term skeleton, or let-bound restriction.",
+    "created_at": "2026-08-12T07:42:00Z"
+  }
+]
+#+end_src
+
+* DONE [#C] Split a non-commutative semiring base class out of CSemiring
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-ci8
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 22:14]
+:MODIFIED: [2026-08-11 Tue 22:36]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-11 Tue 22:36]
+:CLOSE_REASON: NSemiring (not-necessarily-commutative base: both distributivities, both annihilations) with CSemiring extends + mul_comm; Prop/Cost/SqZero migrated. Payoffs both landed: noncomputable NSemiring (Mat S i i) — category laws and semiring laws now one statement — and NSemiring (MSemiring S K): the monoid semiring joined the hierarchy
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Discovered during acat-9kn: CSemiring's mul_comm blocks both the monoid semiring (MSemiring is a genuine semiring with non-commutative conv, currently exhibited by equations instead of instantiated) and the matrix star (acat-ruz needs star over a non-commutative carrier). One base class (semiring, no mul_comm) with CSemiring extending it lets total be a homomorphism of structures and lets Mat/MSemiring join the hierarchy. Touches acat-ruz, acat-ubt, acat-47y.
+
+* TODO [#D] shareT nesting: prove the innermost/outermost/compose rule as a theorem
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-d1t
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-12 Wed 00:06]
+:MODIFIED: [2026-08-12 Wed 00:06]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+From acat-jyw: shareT l (shareT l' t) unspecified; Scope sets the precedent (innermost-wins proved, not interpreted). The analogue is owed at the fold.
+
+* TODO [#D] Restate Mat/MSemiring theorems in their new notation
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-dm1
+:LABELS: []
+:ISSUE_TYPE: chore
+:CREATED:  [2026-08-11 Tue 22:36]
+:MODIFIED: [2026-08-11 Tue 22:36]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Both now carry + * 0 1 via NSemiring but theorems still spell matAdd/comp/conv; make comp_assoc/id_comp/comp_id wrappers of mul_assoc/one_mul/mul_one. Deferred in acat-ci8 to keep names stable.
+
+* TODO [#D] Weakening fold: Term f -> Term g for f <= g
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-ejy
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 19:56]
+:MODIFIED: [2026-08-11 Tue 21:41]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Deliberately not a constructor; castGrade covers =. The <= case is a structural fold; needed when a static workflow sits in a uniform monadic pipeline type.
+
+** Comments
+#+begin_src json
+[
+  {
+    "id": 6,
+    "issue_id": "acat-ejy",
+    "author": "johnw",
+    "text": "Review: Term.toMonadic already violates the no-weakening rationale it sits under — it relabels via an opaque bindT (inexact, PUnit-only, blinds every fold). Prefer the structural <= fold here, or a grade-existential continuation (g : Frag) x Term Op G g PUnit o for heterogeneous planners; delete toMonadic when either lands.",
+    "created_at": "2026-08-12T04:41:33Z"
+  }
+]
+#+end_src
+
+* TODO [#D] Matrix star at Prob: attained suprema may make aggregate-of-powers go through
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-ew8
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 23:50]
+:MODIFIED: [2026-08-11 Tue 23:50]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+From acat-ozh: Mat Prop is the only matrix star; at Prob the csum-of-powers construction may work BECAUSE suprema are attained — plausibly the cheapest second matrix star, sidestepping acat-9ml's missing reindexing law at this carrier.
+
+* TODO [#D] sumT extensional bias: relational layer, choice function, or priority in the syntax
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-frb
+:LABELS: []
+:ISSUE_TYPE: question
+:CREATED:  [2026-08-12 Wed 00:42]
+:MODIFIED: [2026-08-12 Wed 00:42]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Design question from acat-444: sumT is symmetric in muS (matAdd_comm) but leftmost-defined in muExt (documented). Decide the honest reconciliation.
+
+* TODO [#D] Deliberate-diamond decision: CSemiring/IdemAdd instances on MSemiring
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-gl8
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 23:24]
+:MODIFIED: [2026-08-11 Tue 23:24]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+From acat-ubt: CSemiring (MSemiring S K) under [CMonoid K] is now provable ({instNSemiring with mul_comm := conv_comm}) but undeclared — second semiring instance on one carrier wants deliberate design; same for IdemAdd from msAdd_idem.
+
+* DONE [#C] Inhabit MSemiring: supply the panel key monoid instance (convolution algebra currently uninhabited in-package)
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-gsv
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 19:02]
+:MODIFIED: [2026-08-11 Tue 20:10]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-11 Tue 20:10]
+:CLOSE_REASON: Keys.lean: free monoid on List (panel names), newtype Tally/Width reducers (carrier-instance trap defused), idempotent Bool-or witness inhabiting foldPanel_dup; conv elaboration examples pass
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+
+* TODO [#D] Ordered-carrier class: resource semiring with monotone +,*,csum
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-jmm
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 22:52]
+:MODIFIED: [2026-08-11 Tue 23:50]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+From acat-ruz: Mat.CostBounded and starTrunc_le_star are Cost-only for lack of it; fuel bounds and truncation<=star want stating once per ordered carrier. Also re-homes Cost.add_mono (acat-5ly).
+
+** Comments
+#+begin_src json
+[
+  {
+    "id": 23,
+    "issue_id": "acat-jmm",
+    "author": "johnw",
+    "text": "acat-ozh delivered your first hard consumer: SqZero has a star and no order — leastness at expectation is unstatable until this class exists.",
+    "created_at": "2026-08-12T06:50:01Z"
+  }
+]
+#+end_src
+
+* DONE [#B] shareT/dupT: make consultation sharing syntactic
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-jyw
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 19:56]
+:MODIFIED: [2026-08-12 Wed 00:06]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-12 Wed 00:06]
+:CLOSE_REASON: Twelfth constructor shareT : L -> Term -> Term with new abstract label parameter L (Unit refuted: total label equality would make every share share with every other — the exact confusion under repair; String refuted: pins a type for no theorem). Dup-by-default documented at prim (positional site identity) and pureT (copying a value is not re-asking a question); dupPair/sharedPair named examples replace the formerly ambiguous tensor example; different-labels-is-dup and grade-transparency (rfl at variable grade) exhibited. Meaning obligations recorded verbatim in the docstring for acat-444
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is ambiguous between one consultation reused and two spent — a distinction Env.share_ne_dup proves is extensional. Must be settled before the meaning fold picks a convention silently. Design §6a.
+
+* DONE [#C] Demote global LE (a x b) Pareto instance to the named ParetoLE relation (instance-clash hazard)
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-k9j
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 19:02]
+:MODIFIED: [2026-08-11 Tue 20:10]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-11 Tue 20:10]
+:CLOSE_REASON: Global LE (a x b) instance removed; all Pareto theorems restated on the named ParetoLE relation; no external uses found
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+
+* TODO [#E] Prob->Rat faithfulness bridge blocked by core Rat's proof poverty
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-kwb
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 23:50]
+:MODIFIED: [2026-08-11 Tue 23:50]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+From acat-ozh: toRat homomorphism lemmas not built — core Rat has arithmetic but no ordered-field lemmas and kernel reduction sticks at Rat.normalize (decide fails; native_decide adds an axiom). Fold into acat-467's Mathlib bridge.
+
+* DONE [#B] Resolve bounded 0 vs static: scale is not monotone in its body
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-l59
+:LABELS: []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-08-11 Tue 20:10]
+:MODIFIED: [2026-08-11 Tue 23:58]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-11 Tue 23:58]
+:CLOSE_REASON: scale n (bounded m) = bounded (n * max 1 m) — the static-shell arithmetic, as decided: a fan instantiates its whole body including its static shell, so the multiplier never drops below 1. Monotonicity restored in BOTH arguments (scale_le_scale_right was the false direction, now a 9-case proof); scale n static = scale n (bounded 0) agree (scale_bounded_zero); the under-graded witness memorialized in Term.lean at its honest grade bounded 3 with the old wrong grade named; residual static-vs-bounded-0 slack machine-checked and documented as upper-bound-safe; the old rationalizing paragraph deleted
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+static <= bounded 0 in the order, but scale n static = bounded n while scale n (bounded 0) = bounded 0 — under the fixed payload reading these should agree. Candidates: normalize bounded 0 to static (costs definitional reductions) or scale n (bounded m) = bounded (n * max 1 m). Until decided, no fold may assume scale monotone in its body.
+
+** Comments
+#+begin_src json
+[
+  {
+    "id": 5,
+    "issue_id": "acat-l59",
+    "author": "johnw",
+    "text": "Sharper witness from review (probe): Frag.scale 3 (.bounded 0) = .bounded 0, so fanT 3 over a body containing fanT 0 grades bounded 0 while performing a 3-wide data-dependent fan — UNDER-grading, not just non-monotonicity. static and bounded 0 are two grades for one declared meaning; the docstring at Frag.lean:376-381 rationalizes against the module's own line 19.",
+    "created_at": "2026-08-12T04:41:33Z"
+  }
+]
+#+end_src
+
+* TODO [#D] Rendering homomorphism out of the term algebra
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-m0t
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 19:56]
+:MODIFIED: [2026-08-12 Wed 00:06]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The design names three homomorphisms: extensional, quantitative, rendering. Term has no render and cannot easily get one while i/o are unconstrained.
+
+** Comments
+#+begin_src json
+[
+  {
+    "id": 29,
+    "issue_id": "acat-m0t",
+    "author": "johnw",
+    "text": "From acat-jyw: internal term equality (syntactically equal bodies for share collision) would come from a normal form or decidable equality — adjacent to this rendering issue.",
+    "created_at": "2026-08-12T07:06:23Z"
+  }
+]
+#+end_src
+
+* TODO [#E] Prove the classical Kleene-algebra identities now that KleeneStar makes them theorems
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-n8m
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 23:12]
+:MODIFIED: [2026-08-11 Tue 23:12]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+From acat-zms: star_star, sliding a(ba)* = (ab)*a, denesting, (a+b)* are now provable rather than assumable — the identities StarSemiring's docstring disclaims. No consumer today; prove when a consumer appears or as a soundness exhibit.
+
+* TODO [#D] msSmul semimodule laws, so panels compose with gating
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-nka
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 23:24]
+:MODIFIED: [2026-08-11 Tue 23:24]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+From acat-ubt: only total_msSmul exists; S<K> deserves Gate's set (msSmul s (msSmul t f) = msSmul (s*t) f; conv (msSmul s f) g = msSmul s (conv f g)) — what lets panelOf compose with gate.
+
+* TODO [#C] Context repair: Preorder, connect Interior to Ctx, restore third consequence
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-npb
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 21:41]
+:MODIFIED: [2026-08-11 Tue 21:41]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Interior sits on a lawless LE (Interior.id must take refl as an argument); it is never applied to Ctx; the design's third collapse consequence (finite-dimensional in the prompt) was silently replaced. A Preorder class also deletes Pareto's hand-passed law arguments and Cost's hand-rolled order lemmas.
+
+* TODO [#D] Weighted convolution fold: the n-ary panel bridge
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-od5
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 23:24]
+:MODIFIED: [2026-08-11 Tue 23:24]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+From acat-ubt: convFold handles certain members only; the general List (MSemiring S K) -> MSemiring S K reducer + perm invariance (needs conv_left_comm) is what the panelT syntax combinator (acat-x9v) will be built on. Also: §5.1's necessity claims (R must be a monoid; unit = empty panel) remain prose — formalize with it.
+
+* DONE [#B] Complete SqZero: csum instance, off-diagonal PMod, probability carrier
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-ozh
+:LABELS: []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-08-11 Tue 21:41]
+:MODIFIED: [2026-08-11 Tue 23:50]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-11 Tue 23:50]
+:CLOSE_REASON: Expectation semiring completed: CompletePMod class (msum + laws incl. csum_smul, PMod-as-parameter avoiding the diamond), instCompleteCSemiringSqZero — Mat.comp now elaborates over SqZero, the review's failing probe kept as passing theorems. Probability carrier: Prob, the dyadic sub-semiring of the design's Viterbi ([0,1],max,x) — exact Nat arithmetic, genuinely COMPLETE because suprema are attained (option a refuted honestly: rationals in [0,1] lack suprema so cannot be complete; recorded in prose). Full Kleene at Prob. The p*mp* read-out proved GENERICALLY: instStarSemiringSqZero with star_moment_dual = star p * m * star p, retry_expectation (weight component = retry of weights, moment = expected cost), and pi_star/pi_retry — the design §3 projection commutes with the whole solve. KleeneStar honestly NOT claimed for SqZero (non-idempotent +)
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+HIGH (deep/alexey): SqZero has no CompleteCSemiring and no PMod P M beyond the diagonal, so Mat.comp fails to elaborate over the expectation semiring and no probability/Viterbi carrier exists — design §3's projection has nothing to project. Provide complete PMod + CompleteCSemiring (SqZero P M) + one probability-reading carrier.
+
+** Comments
+#+begin_src json
+[
+  {
+    "id": 11,
+    "issue_id": "acat-ozh",
+    "author": "johnw",
+    "text": "From acat-9kn: the new csum_pair axiom is an undischarged obligation for the SqZero CompleteCSemiring instance this issue will add — two-point agreement must be proved for the square-zero csum once defined.",
+    "created_at": "2026-08-12T05:14:04Z"
+  },
+  {
+    "id": 16,
+    "issue_id": "acat-ozh",
+    "author": "johnw",
+    "text": "From acat-ruz: §5.2's probability read-outs (Markov absorption; p* m p* at expectation) remain unstatable until this lands — noted as consumers waiting on the carrier.",
+    "created_at": "2026-08-12T05:52:11Z"
+  },
+  {
+    "id": 17,
+    "issue_id": "acat-ozh",
+    "author": "johnw",
+    "text": "From acat-zms: the probability carrier's + is not idempotent, so KleeneStar induction is unavailable there — its leastness story needs the ordered-carrier class (acat-jmm). Link when planning.",
+    "created_at": "2026-08-12T06:12:19Z"
+  }
+]
+#+end_src
+
+* TODO [#E] fanT fusion holds only laxly at m=0 after the l59 repair
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pjg
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 23:58]
+:MODIFIED: [2026-08-11 Tue 23:58]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+scale n (scale 0 f) = bounded n while scale (n*0) f = bounded 0: the composite over-approximates (sound as upper bound; a fan of a 0-fan runs nothing). Any future fanT-fusion/normalization rule holds as scale (n*m) f <= scale n (scale m f), not equality. Record before a normalization pass assumes it.
+
+* TODO [#C] pi after coarsening: relate muS and muExt over the coarsened quotient
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-qtv
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-12 Wed 00:42]
+:MODIFIED: [2026-08-12 Wed 00:42]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Folds report item 1 + review finding 5: no theorem relates the two meanings; needs the edge measure and the WEq coarsening first. Include muExt_parT's left-short-circuit (review finding 9) as a latent obstruction to record when stating it.
+
+* TODO [#D] caseT: k-ary verdict branching
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-qx8
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 19:56]
+:MODIFIED: [2026-08-11 Tue 19:56]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+choiceT is binary; verdict enums re-encode as nested Sums. A caseT over a finite verdict type (and the lens-by-backend grid of §5.1) has no direct form.
+
+* DONE [#B] Star repair: decouple star from commutativity so matrices can carry it
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-ruz
+:LABELS: []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-08-11 Tue 21:41]
+:MODIFIED: [2026-08-11 Tue 22:52]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-11 Tue 22:52]
+:CLOSE_REASON: StarSemiring re-based on NSemiring (single field star_eq_left; ConwayStar kept as abbrev; star_eq_right stays a CSemiring theorem). Verified retry/retry_fixed never used mul_comm — generalized verbatim, now statable at Mat via [StarSemiring (Mat S i i)]. Instances added: Prop (retry_possible read-out) and the genuine Prop-MATRIX star: Mat.reach = csum of powers, with reach_least (least refl-trans relation) and reach_le_of_eq_left (least solution of X = I + M*X at this carrier). Fuel theorems moved to their honest home: CostBounded at matrices, retryTrunc_cost_finite, scalar bounds re-derived at Unit not re-inducted
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+HIGH (deep/alexey/validated): ConwayStar extends commutative CSemiring; Mat.comp is non-commutative (probe-proved), so no matrix star can exist and retry/retry_fixed are scalar-only with Cost the sole instance (no ConwayStar Prop — even the Bool read-out is unavailable). Fix: a star class over a non-commutative semiring core; state fuel theorems at powSum/retryTrunc with scalars as the Unit corollary; add Prop instance; rename honestly (two unrolling laws are not the Conway identities).
+
+** Dependencies
+#+begin_src json
+[
+  {
+    "issue_id": "acat-ruz",
+    "depends_on_id": "acat-ci8",
+    "type": "blocks",
+    "created_at": "2026-08-12T05:14:44.953829Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+#+begin_src json
+[
+  {
+    "id": 13,
+    "issue_id": "acat-ruz",
+    "author": "johnw",
+    "text": "Unblocked by acat-ci8: star_eq_left needs only NSemiring (star_eq_right genuinely needs commutativity — it is already a derived theorem, not a field). Re-base ConwayStar on NSemiring and a MATRIX star becomes statable; then acat-zms adds the least-fixed-point axiom to the re-based class.",
+    "created_at": "2026-08-12T05:36:07Z"
+  }
+]
+#+end_src
+
+* TODO [#D] Unify Cost.csum and Prob.csum: one IsSup-based completeness construction
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-rzy
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 23:50]
+:MODIFIED: [2026-08-11 Tue 23:50]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+From acat-ozh: both carriers are complete-because-suprema-attained with parallel constructions; a shared construction (or acat-jmm's ordered class) makes the third such carrier free. Also: pointwise module (i -> M) as a third PMod instance when wanted; Prob.never_eq_zero/exp2_zero_eq_one are zero-consumer bridge lemmas for the next acat-1g4 audit.
+
+* TODO [#E] Environment note: PAL MCP provider keys are broken (blocks multi-model review)
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-sb0
+:LABELS: []
+:ISSUE_TYPE: chore
+:CREATED:  [2026-08-11 Tue 21:50]
+:MODIFIED: [2026-08-11 Tue 21:50]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Observed during the heavy review's validated pass: every mcp__pal__chat call fails at the provider layer — OpenAI 401 with an UNEXPANDED shell placeholder (${OPENAI*****KEY}), Gemini 400 API_KEY_INVALID, Anthropic 401 invalid x-api-key — while listmodels reports all three as configured. Fix lives in the pal MCP daemon environment, not this repo; recorded here so the next multi-model review pass is not silently degraded.
+
+* DONE [#C] Vendor the design document (Revision 2.1) into doc/ as the normative reference each module cites
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-ssx
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 19:02]
+:MODIFIED: [2026-08-11 Tue 19:36]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-11 Tue 19:36]
+:CLOSE_REASON: Vendored Revision 2.1 as doc/design.html (self-contained HTML); modules cite its section numbers
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+
+* DONE [#D] Mat lacks a zero matrix: matZero with matAdd unit law, comp_zero/zero_comp
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-ubl
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 22:14]
+:MODIFIED: [2026-08-11 Tue 22:36]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-11 Tue 22:36]
+:CLOSE_REASON: Gate.zeroMat relocated as Mat.matZero beside its operations (reducible alias kept), matAdd_zero/zero_matAdd/zero_comp/comp_zero proved and wired into the Mat NSemiring instance
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Asymmetry became visible when Panel gained convZero/total_zero during acat-9kn. Also gives gate_false a canonical target.
+
+* DONE [#B] Panel repair: delta, conv_comm, addition, total_add, decidability-free conv
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-ubt
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 21:41]
+:MODIFIED: [2026-08-11 Tue 23:24]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-11 Tue 23:24]
+:CLOSE_REASON: delta + conv_delta (the §5.1 collapse), delta_unit=convOne by rfl, total_delta; conv_comm (10 lines, the probe's proof); panelOf bridging list representation to denotation with panelOf_perm needing NO hypothesis on K (reordering contributions is free — alternation) sharply distinguished from convFold_perm under CMonoid (reordering convolution factors); convFold_dup under IdemCMonoid; negative example at Prop<List Nat> showing conv_comm's hypothesis is not idle. Honesty: no general conv f f = f — total_conv forces total f idempotent, so the licence holds at point masses and nowhere in general, documented
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+#+begin_example
+HIGH (abstraction/deep/alexey/comments): scheduler licences are proved about List folds, not conv (conv_comm provable in 8 lines, absent); no delta so the §5.1 collapse is prose; MSemiring has no addition so 'augmentation semiring homomorphism' is only half-proved; DecidableEq K excludes Trace as key. 
+#+end_example
+
+** Comments
+#+begin_src json
+[
+  {
+    "id": 12,
+    "issue_id": "acat-ubt",
+    "author": "johnw",
+    "text": "Shrunk by earlier closures: decidability-free conv landed in acat-192; msAdd/total_add landed in acat-9kn. Remaining here: delta + the collapse lemma (conv of deltas = delta of product), conv_comm under CMonoid, and licence theorems stated about conv rather than List folds.",
+    "created_at": "2026-08-12T05:14:45Z"
+  }
+]
+#+end_src
+
+* TODO [#C] Semantic width: a consultations-in-flight fold with peak t <= widthT t
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-vbl
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-12 Wed 00:42]
+:MODIFIED: [2026-08-12 Wed 00:42]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Review finding 2: widthT re-runs the grade arithmetic, so widthT_eq_width is a homomorphism check carrying zero information about meaning (fanT 7 (pureT id) weighs 7 while consulting nothing). The true l59/grade discharge: count sites from muExt's own machinery, peak over concurrent branches, prove peak <= widthT. Until then the 'grade discipline is true' claim is prose (being relabeled honestly now).
+
+* TODO [#C] pinT/forkT: syntax above Env.pin and the Brzozowski derivative
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-vgz
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 19:56]
+:MODIFIED: [2026-08-12 Wed 00:06]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+§4 Comonad row; §9 rebuild list ('make pin a term constructor'). Env.pin and Trace.deriv are semantics with no syntax above them.
+
+** Comments
+#+begin_src json
+[
+  {
+    "id": 26,
+    "issue_id": "acat-vgz",
+    "author": "johnw",
+    "text": "From acat-jyw: pinT should name sites by the SAME L, not a fresh scheme (a second identity scheme for one notion is the duplication just removed). Caveats: pinT also carries the pinned answer whose type is the site's o (signature not a straight copy); if pins name only labeled sites, say so as discipline, else positional site naming reopens path syntax.",
+    "created_at": "2026-08-12T07:06:23Z"
+  }
+]
+#+end_src
+
+* TODO [#C] Footprints + disjointness-licensed exchange: the world-threaded layer where premonoidality degrades
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-w7l
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 19:02]
+:MODIFIED: [2026-08-12 Wed 00:06]
+:CREATED_BY: johnw
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+
+** Comments
+#+begin_src json
+[
+  {
+    "id": 1,
+    "issue_id": "acat-w7l",
+    "author": "johnw",
+    "text": "From the syntax review: parT carries no footprint, so the lax-monoidal row's equality half (footprint-disjoint fragment) cannot be stated from the syntax, and Trace.ind has no producer. The footprint should live on Op or parT and feed the Mazurkiewicz independence relation.",
+    "created_at": "2026-08-12T02:56:49Z"
+  },
+  {
+    "id": 28,
+    "issue_id": "acat-w7l",
+    "author": "johnw",
+    "text": "From acat-jyw: a footprint is nearly a site key by another name — align the footprint identity with the L/positional convention when this lands.",
+    "created_at": "2026-08-12T07:06:23Z"
+  }
+]
+#+end_src
+
+* TODO [#C] panelT: n-ary panel primitive with reducer monoid + augmentation fan-in
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-x9v
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 19:56]
+:MODIFIED: [2026-08-12 Wed 00:06]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+parT is the tensor skeleton only; §7 says the panel is a primitive, not derivable from tensor+copy. Carry the reducer key monoid; fan-in is the augmentation homomorphism (§5.1).
+
+** Comments
+#+begin_src json
+[
+  {
+    "id": 20,
+    "issue_id": "acat-x9v",
+    "author": "johnw",
+    "text": "acat-ubt landed the semantic groundwork (delta, conv_delta, conv_comm, panelOf); the weighted convolution fold issue is the remaining semantic prerequisite for this syntax combinator.",
+    "created_at": "2026-08-12T06:24:05Z"
+  },
+  {
+    "id": 27,
+    "issue_id": "acat-x9v",
+    "author": "johnw",
+    "text": "From acat-jyw: panelT must state its own site-identity rule — an n-ary panel has n sites, not one. Do not fork the positional convention silently.",
+    "created_at": "2026-08-12T07:06:23Z"
+  }
+]
+#+end_src
+
+* TODO [#D] Relate bindT's meaning to its parts once the fold exists
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-xsp
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 20:10]
+:MODIFIED: [2026-08-11 Tue 20:10]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+bindT discards both sub-grades (monadic outright); toMonadic is the only route from graded to monadic. A lemma tying the bindT fold case to dependentSeq of the parts is owed.
+
+* TODO [#D] Pareto: n-ary axes, strict dominance, frontier, tie to Cost
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-yad
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 19:56]
+:MODIFIED: [2026-08-11 Tue 19:56]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Binary-only and disconnected from the package's own carriers; the promised frontier is not defined; Tier-as-region (§2) has no formal counterpart.
+
+* TODO [#D] raceT/unamb: first-past-the-post over idempotent reducers
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-ylz
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 19:56]
+:MODIFIED: [2026-08-11 Tue 19:56]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+§6c: reducers monotone in the information order, first-past-the-post as unamb. Unblocked once the idempotent reducer witness lands (Keys rework).
+
+* DONE [#C] Syntax stratum: workflow terms as an inductive family with fragment index (static | bounded n | monadic)
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-zcl
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-11 Tue 19:02]
+:MODIFIED: [2026-08-11 Tue 20:10]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-11 Tue 20:10]
+:CLOSE_REASON: Frag (join/par/scale + order lemmas, linear order) and Term (11 constructors, grade-exact smoke examples, castGrade, toMonadic) landed; adversarial review's FIX-NOW 1-2 repaired (tensor widths add, fan multiplicities multiply, fan-bound contract documented); full clean build green, zero sorry
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+
+* DONE [#B] Add least-fixed-point induction: retry_fixed has multiple solutions
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-zms
+:LABELS: []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-08-11 Tue 21:41]
+:MODIFIED: [2026-08-11 Tue 23:12]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-11 Tue 23:12]
+:CLOSE_REASON: KleeneStar extends StarSemiring + IdemAdd (Prop-class, diamond-free) with left-handed b-form induction star_le_left over the canonical additive order ≤+ (proved identical to the Monoid.lean join order — no fourth copy). Instances: Prop, Cost (eq_inf_of_mul_le: no finite bound absorbs a costly trip), Mat Prop (generalizing reach_le_of_eq_left, old name kept as corollary). retry_least proved: the design's solve is now a characterization where KleeneStar holds; the fin3/fin5/inf multiplicity memorialized in-tree as retry_cost_ambiguous + retry_cost_selects_least. Honest consequence documented: non-idempotent carriers (future probability semiring) need a separate order story (acat-jmm); stale acat-zms citations re-pointed at acat-9ml where existence (not leastness) is the gap
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+HIGH (validated, machine-checked): at Cost with mA=d=fin 0, mB=fin 3, all of fin 3, fin 5, inf satisfy x = mA*(d*x) + mB by rfl — the unrolling laws do not pin the loop's meaning. Add a Kleene-style induction/least-fixpoint axiom to the star class and prove star is the least solution at each carrier.
+
+** Dependencies
+#+begin_src json
+[
+  {
+    "issue_id": "acat-zms",
+    "depends_on_id": "acat-ruz",
+    "type": "blocks",
+    "created_at": "2026-08-12T04:41:33.857683Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+#+begin_src json
+[
+  {
+    "id": 15,
+    "issue_id": "acat-zms",
+    "author": "johnw",
+    "text": "acat-ruz's residue is precisely this issue: docstrings now say retry_fixed ANSWERS the equation rather than solves it; reach_le_of_eq_left gives leastness only at Prop. The general principle (Kleene induction: star as least solution) turns satisfaction into characterization. Also unlocks Cost-matrix checkBounds at full width (with acat-<shift-axiom> as the alternative route).",
+    "created_at": "2026-08-12T05:52:11Z"
+  }
+]
+#+end_src
+
