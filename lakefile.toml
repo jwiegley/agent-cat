@@ -9,3 +9,11 @@ name = "Agentic"
 name = "mathlib"
 git = "https://github.com/leanprover-community/mathlib4"
 rev = "v4.30.0"
+
+# The worked example (doc/walkthrough.html §VII as real Lean). Deliberately not
+# in defaultTargets: it is verified against the commit it was authored on and
+# is re-verified/ported when the library's API moves (tracker: acat-h0k).
+# Build it explicitly with `lake build HardenPatch`.
+[[lean_lib]]
+name = "HardenPatch"
+srcDir = "example"
