@@ -1,4 +1,5 @@
 import Agentic.Matrix
+import Mathlib.Order.Closure
 
 /-!
 # Context: compaction as an interior operator, and the const-ε collapse
@@ -29,39 +30,72 @@ known to what went in. Monotone says compaction respects the order: a
 better-informed context compacts to a better-informed summary. Idempotent says
 summarising a summary yields nothing further. An operator with these three
 properties is an interior operator, and "compaction" has no meaning in this
-design beyond being one. -/
-structure Interior (K : Type) [LE K] where
-  /-- The compaction map itself. -/
-  op : K → K
-  /-- Compaction may forget, but never invents. -/
-  deflationary : ∀ k : K, op k ≤ k
-  /-- Compacting a compaction yields nothing further. -/
-  idempotent : ∀ k : K, op (op k) = op k
-  /-- Compaction respects the information order. -/
-  monotone : ∀ {k k' : K}, k ≤ k' → op k ≤ op k'
+design beyond being one.
+
+**It is Mathlib's `ClosureOperator`, on the order dual.** An interior operator
+on `K` is exactly a closure operator on `Kᵒᵈ`: deflationary in `K` is
+inflationary in `Kᵒᵈ`, monotone is monotone (both arguments flip), and
+idempotence is unchanged. So the package's structure is gone and the name is an
+abbreviation, with the three axioms below reading Mathlib's fields back. The
+migration costs the information order its lawlessness: `ClosureOperator` wants
+a `Preorder`, where the package's own structure sat on a bare `LE` and had to
+be handed reflexivity as an argument (see `Interior.id`). That was never a
+feature — an order in which information is not reflexive orders nothing — and
+the strengthening is the repair.
+
+One use-site consequence, recorded rather than hidden: because the
+abbreviation is reducible, generalised field notation on an `Interior K`
+resolves against `ClosureOperator`, so Mathlib's API (`κ.idempotent`,
+`κ.le_closure`, `κ.IsClosed`) is what `κ.…` reaches. The package's own
+readings are spelled out in full, as `Interior.op κ` and friends. -/
+abbrev Interior (K : Type) [Preorder K] : Type := ClosureOperator (OrderDual K)
 
 namespace Interior
 
-variable {K : Type} [LE K]
+variable {K : Type} [Preorder K]
+
+/-- The compaction map itself: Mathlib's closure operator on `Kᵒᵈ`, read as a
+map on `K`. `OrderDual.toDual`/`ofDual` are the identity equivalence, so this
+is the underlying function and nothing more. -/
+def op (κ : Interior K) (k : K) : K :=
+  OrderDual.ofDual (κ (OrderDual.toDual k))
+
+/-- Compaction may forget, but never invents (Mathlib's
+`ClosureOperator.le_closure`, on the dual). -/
+theorem deflationary (κ : Interior K) (k : K) : op κ k ≤ k :=
+  ClosureOperator.le_closure κ (OrderDual.toDual k)
+
+/-- Compacting a compaction yields nothing further (Mathlib's
+`ClosureOperator.idempotent`). -/
+theorem idempotent (κ : Interior K) (k : K) : op κ (op κ k) = op κ k :=
+  ClosureOperator.idempotent κ (OrderDual.toDual k)
+
+/-- Compaction respects the information order (Mathlib's
+`ClosureOperator.monotone`, on the dual — where the order of the arguments
+flips twice and so does not flip at all). -/
+theorem monotone (κ : Interior K) {k k' : K} (h : k ≤ k') : op κ k ≤ op κ k' :=
+  ClosureOperator.monotone κ
+    (show (OrderDual.toDual k' : OrderDual K) ≤ OrderDual.toDual k from h)
 
 /-- Doing nothing is a compaction: the identity is an interior operator on any
-reflexive information order. The interface is therefore inhabited without
-assuming any real summariser exists. -/
-def id (le_refl : ∀ k : K, k ≤ k) : Interior K where
-  op := fun k => k
-  deflationary := le_refl
-  idempotent := fun _ => rfl
-  monotone := fun h => h
+information order. The interface is therefore inhabited without assuming any
+real summariser exists. It is Mathlib's `ClosureOperator.id`, and reflexivity
+now comes from the `Preorder` instead of being passed in by hand. -/
+def id : Interior K := ClosureOperator.id (OrderDual K)
 
 /-- A context is *already compact* exactly when it is in the image of
 compaction. Idempotence is the whole proof, and it is what licenses caching a
 summary: recompacting a compacted context is the identity, so the summary may
-be stored and reused. -/
+be stored and reused.
+
+Mathlib states the same fact as `ClosureOperator.setOf_isClosed_eq_range_closure`
+— the closed elements are the range of the closure — and the two lines below
+are that equality, unbundled from `Set`. -/
 theorem compact_iff_fixed (κ : Interior K) (k : K) :
-    (∃ j : K, κ.op j = k) ↔ κ.op k = k := by
+    (∃ j : K, op κ j = k) ↔ op κ k = k := by
   constructor
   · intro ⟨j, hj⟩
-    rw [← hj, κ.idempotent]
+    rw [← hj, idempotent]
   · intro h
     exact ⟨k, h⟩
 

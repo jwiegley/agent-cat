@@ -476,7 +476,7 @@ theorem total_conv (f g : MSemiring S K) : total (conv f g) = total f * total g 
         csum_congr fun k1 => (csum_mul_left (f k1) fun k2 => g k2).symm
     _ = total f * total g := (csum_mul_right _ fun k1 => f k1).symm
 
-/-- **The monoid semiring is a semiring.** `S⟨K⟩` carries `NSemiring`:
+/-- **The monoid semiring is a semiring.** `S⟨K⟩` carries Mathlib's `Semiring`:
 alternation of panels is `+` with the impossible panel as `0`, convolution is
 `*` with the empty panel as `1`, and the fourteen laws are the theorems above.
 
@@ -492,14 +492,24 @@ sat outside its own algebraic hierarchy. It is inside it now.
 Noncomputable, for the reason `convOne` and `conv` are: the test against the
 empty verdict is classical, which is what lets the key monoid be any monoid at
 all — a Mazurkiewicz trace of turns, say. -/
-noncomputable instance instNSemiring : NSemiring (MSemiring S K) where
+noncomputable instance instAddCommMonoid : AddCommMonoid (MSemiring S K) where
   add := msAdd
-  mul := conv
   zero := convZero
-  one := convOne
+  nsmul n f := Nat.rec convZero (fun _ ih => msAdd ih f) n
   add_comm := msAdd_comm
   add_assoc := msAdd_assoc
   zero_add := zero_msAdd
+  add_zero f := (msAdd_comm f convZero).trans (zero_msAdd f)
+
+/-- **The monoid semiring is a semiring.** Convolution is `*` with the empty
+panel as `1`, over the keywise alternation above. Convolution is commutative
+exactly when the key monoid is (`conv_comm`), and `PMonoid` deliberately does
+not require it — an ordered transcript is a legitimate verdict type — so the
+base must be Mathlib's non-commutative `Semiring`. -/
+noncomputable instance instNSemiring : Semiring (MSemiring S K) where
+  __ := instAddCommMonoid
+  mul := conv
+  one := convOne
   mul_assoc := conv_assoc
   one_mul := conv_one_left
   mul_one := conv_one_right
@@ -652,7 +662,7 @@ It does *not* generalise to `conv f f = f` for arbitrary `f`, and the
 augmentation says why: `total (conv f f) = total f * total f`, which returns
 `total f` only when the total weight is idempotent under `*`. The point mass
 satisfies that (`total_delta` is `1`); a spread-out weighting need not. -/
-theorem conv_delta_idem {K : Type} [IdemCMonoid K] (k : K) :
+theorem conv_delta_idem {K : Type} [CommMonoid K] [IdemCMonoid K] (k : K) :
     conv (delta k) (delta k) = (delta k : MSemiring S K) := by
   rw [conv_delta, IdemCMonoid.op_idem]
 
@@ -661,10 +671,10 @@ alternation is a join: offering the same panel twice as a fallback offers it
 once. This is the other half of the duplication licence, and it is charged to
 `S` rather than to `K` — `IdemAdd` (possibility, worst-case cost) has it, a
 counting or probabilistic carrier does not. -/
-theorem msAdd_idem {K : Type} [PMonoid K] [IdemAdd S] (f : MSemiring S K) :
-    msAdd f f = f := by
+theorem msAdd_idem {K : Type} [PMonoid K] [Std.IdempotentOp (α := S) (· + ·)]
+    (f : MSemiring S K) : msAdd f f = f := by
   funext k
-  exact add_idem (f k)
+  exact Std.IdempotentOp.idempotent (op := fun x y : S => x + y) (f k)
 
 end Idempotent
 
@@ -687,14 +697,14 @@ point mass at `foldPanel`, whence the denotational forms of the two licences.
 starting from the empty verdict. This is the free reducer on the key monoid,
 and it is what a scheduler holding a list of members' verdicts computes. -/
 def foldPanel {F : Type} [PMonoid F] (l : List F) : F :=
-  l.foldr PMonoid.op PMonoid.unit
+  l.foldr (fun a b => a * b) 1
 
 section Reducer
 
 variable {F : Type}
 
 /-- The empty panel reduces to the empty verdict. -/
-theorem foldPanel_nil [PMonoid F] : foldPanel ([] : List F) = PMonoid.unit := rfl
+theorem foldPanel_nil [PMonoid F] : foldPanel ([] : List F) = 1 := rfl
 
 /-- Reducing a panel is combining the first member with the reduction of the
 rest. -/
@@ -796,7 +806,7 @@ theorem convFold_perm {S K : Type} [CompleteCSemiring S] [CMonoid K]
 key monoid, running the whole panel twice denotes the same weighting as running
 it once: at-least-once delivery does not change the panel's meaning. This is
 `foldPanel_dup` transported across `convFold_delta`. -/
-theorem convFold_dup {S K : Type} [CompleteCSemiring S] [IdemCMonoid K]
+theorem convFold_dup {S K : Type} [CompleteCSemiring S] [CommMonoid K] [IdemCMonoid K]
     (l : List K) : (convFold (l ++ l) : MSemiring S K) = convFold l := by
   rw [convFold_delta, convFold_delta, foldPanel_dup IdemCMonoid.op_idem]
 

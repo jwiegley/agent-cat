@@ -67,15 +67,17 @@ Session demands CompleteCSemiring that no proof uses (probe: class-free restatem
 
 HIGH (4 passes): [DecidableEq] on csum_point is provably vacuous at both carriers; it propagates through idMat/id_comp/pow/retryTrunc/Ctx/conv/pin/gate. Consequences: the meaning category lacks identities at function-typed objects; the Mazurkiewicz trace monoid (a Quot) cannot be a panel key. Fix: drop the binder from the class axiom, classical idMat, propagate removals. Supersedes acat-6pq.
 
-* TODO [#D] PMod's additive half is the fifth monoid presentation; migration has a diamond hazard
+* DONE [#D] PMod's additive half is the fifth monoid presentation; migration has a diamond hazard
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-1d1
 :LABELS: []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-11 Tue 22:36]
-:MODIFIED: [2026-08-11 Tue 23:12]
+:MODIFIED: [2026-08-12 Wed 13:31]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-12 Wed 13:31]
+:CLOSE_REASON: Dissolved by acat-dha: Module's additive half IS AddCommMonoid; the fifth presentation no longer exists
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -194,6 +196,22 @@ README table omits Keys/Frag/Term; 'not the workflow syntax' now false; Countabl
 ]
 #+end_src
 
+* TODO [#C] Shortest-list 8: the three missing what-Mathlib-lacks docstrings
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-2sn
+:LABELS: []
+:ISSUE_TYPE: docs
+:CREATED:  [2026-08-12 Wed 13:31]
+:MODIFIED: [2026-08-12 Wed 13:31]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Mat vs Matrix (Fintype-bound HMul), MSemiring vs MonoidAlgebra (finite support), Env/Ext vs Option Kleisli — absences real, nowhere stated. After steps 1-7 the survivor registry is checkable by eye.
+
 * TODO [#D] Leastness at expectation: SqZero star has no order; IdemAdd (SqZero P M) derivable when M's accumulation is idempotent
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -209,6 +227,22 @@ README table omits Keys/Frag/Term; 'not the workflow syntax' now false; Countabl
 :END:
 
 From acat-ozh: acat-jmm's first hard consumer. At SqZero Prop Prop / Cost / Prob the derived IdemAdd may make leastness provable; untried.
+
+* TODO [#C] Extend WEqR congruence beyond the 6/12 sub-algebra
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-3tu
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-12 Wed 13:31]
+:MODIFIED: [2026-08-12 Wed 13:31]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+From acat-5b7's honest scope: retryT/fanT need an n-ary Key.splice (provable, unproved); bindT needs a uniformly-chosen relabelling; shareT is different in kind (gate-erasure genuinely false under rel bases — may need its own equivalence layer). Until then Workflow quotients the seq/par/sum/choice/gate/scope sub-algebra only.
 
 * TODO [#C] Atkey-parameterise Term with the context index
 :PROPERTIES:
@@ -324,7 +358,7 @@ Term hard-codes the const-e collapse by omission — the exact symptom §9 diagn
 :LABELS: []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-11 Tue 19:02]
-:MODIFIED: [2026-08-11 Tue 23:50]
+:MODIFIED: [2026-08-12 Wed 10:40]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -346,6 +380,13 @@ Term hard-codes the const-e collapse by omission — the exact symptom §9 diagn
     "author": "johnw",
     "text": "acat-ozh narrowed this: the remaining numeric gap is one carrier for both quantities (R>=0, sum-product Markov absorption read-out) plus the Prob->Rat bridge; everything structural (CompletePMod, SqZero csum, the p*mp* theorem) is done and generic.",
     "created_at": "2026-08-12T06:50:01Z"
+  },
+  {
+    "id": 33,
+    "issue_id": "acat-467",
+    "author": "johnw",
+    "text": "SUPERSEDED-BY-DIRECTIVE: promoted from optional bridge to standing policy (owner, 2026-08-12) — see the four new adoption issues. This issue's numeric-carrier content moves to the carriers issue.",
+    "created_at": "2026-08-12T17:40:45Z"
   }
 ]
 #+end_src
@@ -392,15 +433,17 @@ Term hard-codes the const-e collapse by omission — the exact symptom §9 diagn
 ]
 #+end_src
 
-* TODO [#B] Coarsen WEq: key-renaming invariance, so the Workflow quotient is a category
+* DONE [#B] Coarsen WEq: key-renaming invariance, so the Workflow quotient is a category
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-5b7
 :LABELS: []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-08-12 Wed 00:42]
-:MODIFIED: [2026-08-12 Wed 00:42]
+:MODIFIED: [2026-08-12 Wed 13:31]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-12 Wed 13:31]
+:CLOSE_REASON: WEqR (relabelling-invariant coarsening) landed on the Mathlib foundation: seq-assoc/seq-unit/gate-true/scope-unit all hold; dupPair STILL not equiv sharedPair (on propext alone); WEq strictly finer, witnessed; Workflow.seq_assoc + staticCategory on [propext, Quot.sound] only. HONEST SCOPE: congruence for 6/12 constructors — Workflow is the quotient of the seq/par/sum/choice/gate/scope sub-algebra; retryT/fanT need Key.splice, bindT a uniform relabelling, shareT is genuinely different (gate-erasure false under rel bases); documented in-file, follow-up filed
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -521,21 +564,36 @@ Binary csum-additivity proved independent of CompleteCSemiring (sup counter-mode
 ]
 #+end_src
 
-* TODO [#C] Add a csum shift/Sum-index axiom: the cheapest route to a Cost matrix star
+* DONE [#C] Add a csum shift/Sum-index axiom: the cheapest route to a Cost matrix star
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-9ml
 :LABELS: []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-11 Tue 22:52]
-:MODIFIED: [2026-08-11 Tue 22:52]
+:MODIFIED: [2026-08-12 Wed 13:31]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-12 Wed 13:31]
+:CLOSE_REASON: Subsumed by the one-star issue (CsumIsSup): kstar := csum of powers needs iSup facts, not the shift axiom
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
 From acat-ruz: reach = csum of powers is carrier-generic except star_eq_left needs csum f = f 0 + csum (f . succ) (or csum over Sum = csum + csum). CompleteCSemiring has no reindexing law. Adding one likely yields the Cost matrix star with no fixed-point theory — adjacent to but distinct from acat-zms; also gives acat-80z's finite-index law.
+
+** Comments
+#+begin_src json
+[
+  {
+    "id": 39,
+    "issue_id": "acat-9ml",
+    "author": "johnw",
+    "text": "SUBSUMED by shortest-list 6 (one star via CsumIsSup): the csum-of-powers construction sidesteps the reindexing-law route entirely.",
+    "created_at": "2026-08-12T20:31:39Z"
+  }
+]
+#+end_src
 
 * TODO [#E] conv_comm converse: needs a Nontrivial fence and delta_injective
 :PROPERTIES:
@@ -553,15 +611,17 @@ From acat-ruz: reach = csum of powers is carrier-generic except star_eq_left nee
 
 From acat-ubt: non-commutative K forcing non-commutative conv is shown at one carrier only; the generic converse needs (1:S) != 0 (no Nontrivial-style class exists) + delta injectivity, then conv_comm iff CMonoid K.
 
-* TODO [#E] Alternative: make bounded 0 unrepresentable (normalize to static)
+* DONE [#E] Alternative: make bounded 0 unrepresentable (normalize to static)
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-b22
 :LABELS: []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-11 Tue 23:58]
-:MODIFIED: [2026-08-11 Tue 23:58]
+:MODIFIED: [2026-08-12 Wed 13:31]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-12 Wed 13:31]
+:CLOSE_REASON: Subsumed by Frag := ENat (shortest-list 5): bounded 0 and static collapse to 0 in ENat; the l59 max-1 patch becomes the honest arithmetic n * max 1 w with no special cases
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -648,21 +708,95 @@ Discovered during acat-9kn: CSemiring's mul_comm blocks both the monoid semiring
 
 From acat-jyw: shareT l (shareT l' t) unspecified; Scope sets the precedent (innermost-wins proved, not interpreted). The analogue is owed at the fold.
 
-* TODO [#D] Restate Mat/MSemiring theorems in their new notation
+* TODO [#B] Shortest-list 1+2+3: delete 89 dead wrappers, retire the 31 live aliases, make CompleteCSemiring a mixin
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
-:ID:       acat-dm1
+:ID:       acat-da0
 :LABELS: []
-:ISSUE_TYPE: chore
-:CREATED:  [2026-08-11 Tue 22:36]
-:MODIFIED: [2026-08-11 Tue 22:36]
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-12 Wed 13:31]
+:MODIFIED: [2026-08-12 Wed 13:31]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
+Purity review: 89/120 audited compat names have ZERO consumers (constant-graph, not grep) — pure deletion (~500 lines). The 31 live aliases (PMonoid 136 uses, CSemiring 70, PMod 63...) keep a private vocabulary over Mathlib: rewrite binders to Monoid/CommMonoid/CommSemiring/Module/kstar/<=; same pass makes CompleteCSemiring a mixin [CommSemiring S], killing the non-defeq Semiring diamond (probe P4) and the Std.IdempotentOp workarounds.
+
+* DONE [#B] Migrate the algebra hierarchy to Mathlib
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-dha
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-12 Wed 10:40]
+:MODIFIED: [2026-08-12 Wed 13:31]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-12 Wed 13:31]
+:CLOSE_REASON: Hierarchy migrated: 11 hand-rolled classes -> 3 documented survivors (CompleteCSemiring, StarSemiring-as-Prop-mixin over KStar, CompletePMod); 52 axiom fields -> 16. PMonoid/CMonoid->Monoid/CommMonoid, IdemCMonoid->Std.IdempotentOp mixin, NSemiring/CSemiring->Semiring/CommSemiring, IdemAdd->IdemSemiring, KleeneStar->KleeneAlgebra with star_le_left now THEOREM kstar_mul_le; PMod->Module (dissolving acat-1d1); order developments deleted in favor of SemilatticeSup/IdemSemiring; actR/actL survive with the DomMulAct analysis in the docstring
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+PMonoid/CMonoid -> Monoid/CommMonoid (or Add* where additive); IdemCMonoid + its order -> SemilatticeSup (+OrderBot); NSemiring/CSemiring -> Semiring/CommSemiring; StarSemiring+IdemAdd+KleeneStar -> IdemSemiring/KleeneAlgebra (Mathlib.Algebra.Order.Kleene has kstar + the induction laws). actR/actL survive as the two reader actions (check Mathlib MulAction/DomMulAct for a home). Keep every current theorem name resolving via wrappers during migration. csum: Mathlib has no arbitrary-index complete-semiring class — decide per finding: idempotent carriers via CompleteLattice iSup; ENNReal via tsum; keep a thin documented interface ONLY if the theorems cannot be carried otherwise.
+
+* DONE [#D] Restate Mat/MSemiring theorems in their new notation
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-dm1
+:LABELS: []
+:ISSUE_TYPE: chore
+:CREATED:  [2026-08-11 Tue 22:36]
+:MODIFIED: [2026-08-12 Wed 13:31]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-12 Wed 13:31]
+:CLOSE_REASON: Absorbed by acat-dha: law lemmas now resolve to Mathlib root names; remaining spelling issues are the alias-retirement item from the purity review
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
 Both now carry + * 0 1 via NSemiring but theorems still spell matAdd/comp/conv; make comp_assoc/id_comp/comp_id wrappers of mul_assoc/one_mul/mul_one. Deferred in acat-ci8 to keep names stable.
+
+* DONE [#B] Adopt Mathlib: infrastructure — dependency, version pin for Lean 4.30, olean cache
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-e3c
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-12 Wed 10:40]
+:MODIFIED: [2026-08-12 Wed 10:46]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-12 Wed 10:46]
+:CLOSE_REASON: mathlib v4.30.0 required in lakefile.toml; lean-toolchain declared (inert under nix, satisfies lake's dep check — wrinkle documented in comments); lake update + lake exe cache get complete: 8459 oleans, 7.4GB packages; KleeneAlgebra elaborates against the cache from our package env
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Owner directive 2026-08-12: use the standard libraries as much as possible; do not replicate Monoid or other standard constructions. This issue: add mathlib to lakefile.toml pinned to the rev matching the nix-provided Lean 4.30.0 (no elan — the toolchain IS the flake's lean4), run lake exe cache get, verify a Mathlib-importing stub builds. Flake may need adjustment (network for cache; consider vendoring or a fixed-output derivation later).
+
+** Comments
+#+begin_src json
+[
+  {
+    "id": 35,
+    "issue_id": "acat-e3c",
+    "author": "johnw",
+    "text": "Pin confirmed by probe: mathlib4 tag v4.30.0 has lean-toolchain EXACTLY leanprover/lean4:v4.30.0 — matches the flake's nix-provided Lean. require mathlib from git @ v4.30.0; lake exe cache get should key cleanly. Migration must WAIT for the purity campaign (wf_6486f885-fb4) to finish mutating the tree.",
+    "created_at": "2026-08-12T17:41:14Z"
+  },
+  {
+    "id": 38,
+    "issue_id": "acat-e3c",
+    "author": "johnw",
+    "text": "Wrinkle recorded: without elan, lake update aborts ('no Elan detected; you will need to manually restart Lake') when the workspace lacks a lean-toolchain file to compare against mathlib's. Fix: declare lean-toolchain = leanprover/lean4:v4.30.0 (matches the nix-provided binary, so the comparison is a no-op and no restart is wanted). The file is inert for binary selection under nix — it exists purely to satisfy lake's dependency toolchain check. Retry in flight.",
+    "created_at": "2026-08-12T17:45:26Z"
+  }
+]
+#+end_src
 
 * TODO [#D] Weakening fold: Term f -> Term g for f <= g
 :PROPERTIES:
@@ -693,21 +827,41 @@ Deliberately not a constructor; castGrade covers =. The <= case is a structural 
 ]
 #+end_src
 
-* TODO [#D] Matrix star at Prob: attained suprema may make aggregate-of-powers go through
+* DONE [#D] Matrix star at Prob: attained suprema may make aggregate-of-powers go through
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-ew8
 :LABELS: []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-11 Tue 23:50]
-:MODIFIED: [2026-08-11 Tue 23:50]
+:MODIFIED: [2026-08-12 Wed 13:31]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-12 Wed 13:31]
+:CLOSE_REASON: Subsumed by the one-star issue: KleeneAlgebra (Mat S i i) for every idempotent complete carrier falls out of the general construction — Prob-matrices included
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
 From acat-ozh: Mat Prop is the only matrix star; at Prob the csum-of-powers construction may work BECAUSE suprema are attained — plausibly the cheapest second matrix star, sidestepping acat-9ml's missing reindexing law at this carrier.
+
+* DONE [#B] Carriers via Mathlib: ENat/Tropical for Cost, ENNReal/PMF for probability and expectation
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-f4r
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-12 Wed 10:40]
+:MODIFIED: [2026-08-12 Wed 13:31]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-12 Wed 13:31]
+:CLOSE_REASON: Carriers migrated and review-verified through the constant graph: Cost = Multiplicative (WithBot ENat), Prob = ENNReal (the REAL probability carrier, ending the dyadic workaround), SqZero = TrivSqZeroExt; the entire IsSup supremum machinery deleted; read-outs restated
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Replaces the hand-rolled Cost supremum machinery and the dyadic Prob workaround; unlocks the real-valued probability carrier (resolves the acat-467/kwb deferrals), sum-product Markov read-outs, and the numeric expectation module. SqZero may survive as a construction over Mathlib semirings (check Mathlib for dual numbers: TrivSqZeroExt exists!).
 
 * TODO [#D] sumT extensional bias: relational layer, choice function, or priority in the syntax
 :PROPERTIES:
@@ -755,6 +909,22 @@ From acat-ubt: CSemiring (MSemiring S K) under [CMonoid K] is now provable ({ins
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
 :END:
+
+* TODO [#C] Shortest-list 7: newtype the polluted carriers; one join-as-monoid synonym
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-j0y
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-12 Wed 13:31]
+:MODIFIED: [2026-08-12 Wed 13:31]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Probe P7: importing Agentic installs (1:Bool)=false, (0:Prop)=False, NatCast Prop package-globally — and Bool is the gateT type, so the collision surface is real. Race := Bool newtype; pin Prop behind a synonym or scoped instance. Fold Keys.Width + Race + Frag.join into ONE synonym over [SemilatticeSup a][OrderBot a] (confirmed absent from Mathlib; upstreamable).
 
 * TODO [#D] Ordered-carrier class: resource semiring with monotone +,*,csum
 :PROPERTIES:
@@ -942,6 +1112,22 @@ From acat-ubt: only total_msSmul exists; S<K> deserves Gate's set (msSmul s (msS
 
 Interior sits on a lawless LE (Interior.id must take refl as an argument); it is never applied to Ctx; the design's third collapse consequence (finite-dimensional in the prompt) was silently replaced. A Preorder class also deletes Pareto's hand-passed law arguments and Cost's hand-rolled order lemmas.
 
+* TODO [#B] Shortest-list 6: ONE star — CsumIsSup mixin, kstar x := csum (x ^ .)
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-nub
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-12 Wed 13:31]
+:MODIFIED: [2026-08-12 Wed 13:31]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The largest remaining generalization failure: four hand-built KleeneAlgebra instances are all csum-of-powers in a complete idempotent semiring (Cost and Prob literally re-prove the identical formula). One construction over [CompleteCSemiring S] + CsumIsSup deletes both star defs, four star-law proofs, ofCommStarLe, and the reach lemma tower — and yields KleeneAlgebra (Mat S i i) for EVERY idempotent complete carrier, making retry_mat_least construct its algebra instead of assuming it (review finding 12). Wrinkle: leastness needs csum f <= y from pointwise — not derivable from the six fields; CsumIsSup (csum = iSup over CompleteLattice) is the clean mixin, rfl at all three lattice carriers. SUBSUMES acat-9ml and acat-ew8.
+
 * TODO [#D] Weighted convolution fold: the n-ary panel bridge
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -1035,6 +1221,24 @@ scale n (scale 0 f) = bounded n while scale (n*0) f = bounded 0: the composite o
 
 Folds report item 1 + review finding 5: no theorem relates the two meanings; needs the edge measure and the WEq coarsening first. Include muExt_parT's left-short-circuit (review finding 9) as a latent obstruction to record when stating it.
 
+* DONE [#C] Replace bespoke order/topology-adjacent pieces with Mathlib counterparts
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-qvk
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-12 Wed 10:40]
+:MODIFIED: [2026-08-12 Wed 13:31]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-12 Wed 13:31]
+:CLOSE_REASON: Interior = ClosureOperator (OrderDual), Pareto = stock Prod orders, pin = Function.update (names kept as wrappers), Tally = Multiplicative Nat, panel keys via Monoid (List), Trace rebuilt as Con.Quotient of conGen Swap (construction simplified; the quotient itself survives — Mazurkiewicz confirmed absent from Mathlib by grep)
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Interior -> ClosureOperator on the order dual; Pareto -> Mathlib's Prod Preorder/PartialOrder instances + Set.Pareto? (check); LastOpt -> check Mathlib Option algebra; Env.pin -> Function.update; FreeMonoid for panel keys. Trace/Mazurkiewicz likely stays (verify Mathlib lacks trace monoids; FreeMonoid + Con(gruence) machinery may still simplify the quotient).
+
 * TODO [#D] caseT: k-ary verdict branching
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -1097,21 +1301,36 @@ HIGH (deep/alexey/validated): ConwayStar extends commutative CSemiring; Mat.comp
 ]
 #+end_src
 
-* TODO [#D] Unify Cost.csum and Prob.csum: one IsSup-based completeness construction
+* DONE [#D] Unify Cost.csum and Prob.csum: one IsSup-based completeness construction
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-rzy
 :LABELS: []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-11 Tue 23:50]
-:MODIFIED: [2026-08-11 Tue 23:50]
+:MODIFIED: [2026-08-12 Wed 13:31]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-12 Wed 13:31]
+:CLOSE_REASON: Superseded as predicted: CompleteLattice adoption deleted both bespoke completeness constructions
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
 From acat-ozh: both carriers are complete-because-suprema-attained with parallel constructions; a shared construction (or acat-jmm's ordered class) makes the third such carrier free. Also: pointwise module (i -> M) as a third PMod instance when wanted; Prob.never_eq_zero/exp2_zero_eq_one are zero-consumer bridge lemmas for the next acat-1g4 audit.
+
+** Comments
+#+begin_src json
+[
+  {
+    "id": 37,
+    "issue_id": "acat-rzy",
+    "author": "johnw",
+    "text": "Superseded in place: CompleteLattice/iSup adoption (acat-f4r) replaces the bespoke IsSup construction entirely; close when the carriers migrate.",
+    "created_at": "2026-08-12T17:43:50Z"
+  }
+]
+#+end_src
 
 * TODO [#E] Environment note: PAL MCP provider keys are broken (blocks multi-model review)
 :PROPERTIES:
@@ -1143,6 +1362,22 @@ Observed during the heavy review's validated pass: every mcp__pal__chat call fai
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
 :END:
+
+* TODO [#D] Generalize the peak semantic anchor beyond peak = 0
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-ti2
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-12 Wed 13:31]
+:MODIFIED: [2026-08-12 Wed 13:31]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+From acat-vbl: muExt_indep_of_peak_eq_zero anchors the count semantically only at zero; parT=+ / seqT=max remain postulated readings. A per-run trace of consulted sites with |in-flight| <= peak is the real anchor; the module header should not say 'semantic width' until it exists (review finding 11).
 
 * DONE [#D] Mat lacks a zero matrix: matZero with matAdd unit law, comp_zero/zero_comp
 :PROPERTIES:
@@ -1195,21 +1430,39 @@ HIGH (abstraction/deep/alexey/comments): scheduler licences are proved about Lis
 ]
 #+end_src
 
-* TODO [#C] Semantic width: a consultations-in-flight fold with peak t <= widthT t
+* DONE [#C] Semantic width: a consultations-in-flight fold with peak t <= widthT t
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-vbl
 :LABELS: []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-12 Wed 00:42]
-:MODIFIED: [2026-08-12 Wed 00:42]
+:MODIFIED: [2026-08-12 Wed 13:31]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-12 Wed 13:31]
+:CLOSE_REASON: peak landed: counts only prim-reaching sites, so peak (fanT 7 (pureT id)) = 0 < 7 = widthE — strictness witness proved; bound peak <= writtenSites * copiesT tight at both memorial terms and strict at seqT; semantic anchor muExt_indep_of_peak_eq_zero proved at peak=0 (converse honestly not claimed — follow-up filed for the general anchor)
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
 Review finding 2: widthT re-runs the grade arithmetic, so widthT_eq_width is a homomorphism check carrying zero information about meaning (fanT 7 (pureT id) weighs 7 while consulting nothing). The true l59/grade discharge: count sites from muExt's own machinery, peak over concurrent branches, prove peak <= widthT. Until then the 'grade discipline is true' claim is prose (being relabeled honestly now).
+
+* TODO [#B] Shortest-list 5: Frag := ENat
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-vel
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-12 Wed 13:31]
+:MODIFIED: [2026-08-12 Wed 13:31]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Probe P8: w(join)=sup, w(par)=+, w(scale n)=n*max 1 w — Frag is ENat encoded four times (Frag, Option Nat width, ENat widthE, Keys.Width). Collapse: static=0, bounded n=n, monadic=T, join=sup, par=+, scale n=n*max 1. Fixes FIX-NOW 1 (scale 0 monadic = monadic contradicts the proved peak=0 — the grade lies about a provable constant); deletes the Frag order development and the ofWidth case-bashes; removes grade casts from Workflow.seq_assoc. Cost: join noncomputable (decide still closes goals). Subsumes acat-b22 and retires the l59 max-1 patch story.
 
 * TODO [#C] pinT/forkT: syntax above Env.pin and the Brzozowski derivative
 :PROPERTIES:
@@ -1309,6 +1562,56 @@ parT is the tensor skeleton only; §7 says the panel is a primitive, not derivab
 ]
 #+end_src
 
+* TODO [#B] Purity campaign
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-xlh
+:LABELS: []
+:ISSUE_TYPE: epic
+:CREATED:  [2026-08-12 Wed 10:16]
+:MODIFIED: [2026-08-12 Wed 13:31]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Drive the design to its simplest, purest form: coarsen WEq so Workflow is a category (5b7), semantic width (vbl), then the unification/simplification sweep (1d1 PMod newtype, rzy IsSup construction, dm1 notation), closed by an adversarial purity review under the governing lens. Walkthrough vendored at doc/walkthrough.html states the four-ideas thesis this campaign completes.
+
+** Comments
+#+begin_src json
+[
+  {
+    "id": 32,
+    "issue_id": "acat-xlh",
+    "author": "johnw",
+    "text": "Walkthrough extended: §0 dictionary (concrete-to-abstract intuition bridge) and §VII worked example (harden-a-patch: multi-prompt, sub-agent panel, shared consultation, verdict branching, consent gate, fueled retry; one term read by four carriers). Vendored copy updated.",
+    "created_at": "2026-08-12T17:28:25Z"
+  },
+  {
+    "id": 34,
+    "issue_id": "acat-xlh",
+    "author": "johnw",
+    "text": "Owner directive extends the campaign's definition of purest: not replicating standard constructions is now part of purity. The Mathlib adoption issues follow the running campaign (must not collide with its in-flight mutations); the campaign's rzy (IsSup unification) will be partially superseded by CompleteLattice adoption — its author should keep the construction thin.",
+    "created_at": "2026-08-12T17:40:45Z"
+  },
+  {
+    "id": 36,
+    "issue_id": "acat-xlh",
+    "author": "johnw",
+    "text": "Campaign STOPPED mid-phase-1 by coordinator (2026-08-12): the Mathlib adoption directive supersedes doing the quotient/width proofs on the hand-rolled foundation. In-flight Meaning.lean edits restored to last green state (verified by build). 5b7/vbl re-queued to run ON the Mathlib foundation as late phases of the migration; 1d1/dm1 fold into acat-dha; rzy superseded by CompleteLattice adoption (acat-f4r). No work lost that would not have been redone.",
+    "created_at": "2026-08-12T17:43:50Z"
+  },
+  {
+    "id": 40,
+    "issue_id": "acat-xlh",
+    "author": "johnw",
+    "text": "MIGRATION COMPLETE (6 phases, review-verified): axioms are nine-tenths Mathlib's; 11->3 classes, 52->16 fields; five clean carrier/order migrations confirmed through the constant graph. The purity review's 8-step shortest list is filed as the closing arc of this epic — steps 1-4 pure deletion, step 5 the ENat collapse, step 6 the one-star generalization (the single remaining piece of real mathematical content), 7-8 hygiene. After those: four ideas, two from the shelf, none replicated — simply true.",
+    "created_at": "2026-08-12T20:31:39Z"
+  }
+]
+#+end_src
+
 * TODO [#D] Relate bindT's meaning to its parts once the fold exists
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -1356,6 +1659,22 @@ Binary-only and disconnected from the package's own carriers; the promised front
 :END:
 
 §6c: reducers monotone in the information order, first-past-the-post as unamb. Unblocked once the idempotent reducer witness lands (Keys rework).
+
+* TODO [#B] Shortest-list 4: delete the four standard-library replications
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-yyg
+:LABELS: []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-12 Wed 13:31]
+:MODIFIED: [2026-08-12 Wed 13:31]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Site.strip = List.dropPrefix? (proved; the survivor docstring names the WRONG function — false absence claim, fix it); foldPanel and Mat.listProd = List.prod (rfl); Mat.pow = ^ ; Ext's three laws = Option monad laws. All probe-proved.
 
 * DONE [#C] Syntax stratum: workflow terms as an inductive family with fragment index (static | bounded n | monadic)
 :PROPERTIES:

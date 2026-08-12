@@ -468,7 +468,7 @@ theorem comp_zero [CompleteCSemiring S] (M : Mat S ι κ) :
   rw [csum_congr fun b => mul_zero (M a b), csum_zero]
 
 /-- **The meaning space is a semiring.** Square matrices over a complete
-resource semiring carry `NSemiring`: alternation of transitions is `+` with the
+resource semiring carry Mathlib's `Semiring`: alternation of transitions is `+` with the
 refused transition as `0`, composition is `*` with the identity as `1`, and the
 fourteen laws are the theorems above — associativity of composition, the two
 unit laws, the two distributivities, the two annihilations.
@@ -481,14 +481,26 @@ same statement, made once.
 
 Noncomputable, because `idMat` is: the identity tests equality of states
 classically, which is what lets it exist at every index type. -/
-noncomputable instance instNSemiring [CompleteCSemiring S] : NSemiring (Mat S ι ι) where
+noncomputable instance instAddCommMonoid [CompleteCSemiring S] :
+    AddCommMonoid (Mat S ι ι) where
   add := matAdd
-  mul := comp
   zero := matZero
-  one := idMat
+  nsmul n M := Nat.rec matZero (fun _ ih => matAdd ih M) n
   add_comm := matAdd_comm
   add_assoc := matAdd_assoc
   zero_add := zero_matAdd
+  add_zero := matAdd_zero
+
+/-- **The meaning space is a semiring.** Composition is `*` with the identity
+as `1`, over the entrywise alternation above; the laws are the theorems of this
+section. It is a `Semiring` and not a `CommSemiring`, and that is the point:
+`comp M N` is not `comp N M`, so the category laws of §3–4 and the semiring
+laws are the same statement only because Mathlib's base does not demand a
+commutative `*`. -/
+noncomputable instance instNSemiring [CompleteCSemiring S] : Semiring (Mat S ι ι) where
+  __ := instAddCommMonoid
+  mul := comp
+  one := idMat
   mul_assoc := comp_assoc
   one_mul := id_comp
   mul_one := comp_id
@@ -506,8 +518,11 @@ This is what makes leastness statable at matrices: `Agentic.KleeneStar` asks
 for an idempotent `+`, and this instance discharges that half of the demand for
 `Mat Prop ι ι` (and for any other idempotent carrier a matrix star is later
 built over). -/
-instance instIdemAdd [CompleteCSemiring S] [IdemAdd S] : IdemAdd (Mat S ι ι) where
-  add_idem M := funext fun a => funext fun b => add_idem (M a b)
+noncomputable instance instIdemAdd [CompleteCSemiring S]
+    [Std.IdempotentOp (α := S) (· + ·)] : IdemSemiring (Mat S ι ι) :=
+  IdemSemiring.ofSemiring fun M =>
+    show matAdd M M = M from funext fun a => funext fun b =>
+      Std.IdempotentOp.idempotent (op := fun x y : S => x + y) (M a b)
 
 /-- Iterated composition: `pow n M` is `M` run exactly `n` times, with
 `pow 0 M` the identity — doing nothing is running the transition no times. -/

@@ -1,3 +1,5 @@
+import Mathlib.Logic.Function.Basic
+
 /-!
 # The extensional layer: environments, pinning, and partial meanings
 
@@ -31,9 +33,10 @@ commentary:
   (`share_eq_dup_of_agree`); it is under the measure at the edge that they
   come apart, because the second is a fresh draw.
 
-Nothing in this module needs the resource algebra, so nothing is imported: the
-extensional layer stands on its own, which is itself part of the design's
-claim about stratification.
+Nothing in this module needs the resource algebra, and nothing of the package
+is imported: the extensional layer stands on its own, which is itself part of
+the design's claim about stratification. The one import is Mathlib's
+`Function.update`, which *is* counterfactual substitution — see `pin`.
 -/
 
 namespace Agentic
@@ -76,53 +79,50 @@ at *every* type of consultation and not only at those whose questions can be
 compared by a program. A question is a semantic object — a prompt, a tool
 invocation, a whole sub-session — and demanding that equality of questions be
 decidable would restrict the meaning space for the benefit of an implementation
-that is not being written here. The price is that `pin` is `noncomputable`. -/
+that is not being written here. The price is that `pin` is `noncomputable`.
+
+**This is Mathlib's `Function.update`**, at the classical `DecidableEq C` that
+`open Classical` supplies, and the five laws below are Mathlib's five: nothing
+about counterfactual substitution is special to answer sheets, which is the
+honest reason the operation carries a design story rather than a proof. -/
 noncomputable def pin {C O : Type} (ε : Env C O) (q : C) (a : O) : Env C O :=
-  fun q' => if q' = q then a else ε q'
+  Function.update ε q a
 
 /-- Reading back the pinned question gives the pinned answer: an override
-overrides. -/
+overrides (Mathlib's `Function.update_self`). -/
 theorem pin_same {C O : Type} (ε : Env C O) (q : C) (a : O) :
     pin ε q a q = a :=
-  if_pos rfl
+  show Function.update ε q a q = a from Function.update_self q a ε
 
 /-- Reading back any *other* question is undisturbed: pinning is surgical, and
-in particular a fork does not perturb the consultations it did not fix. -/
+in particular a fork does not perturb the consultations it did not fix
+(Mathlib's `Function.update_of_ne`). -/
 theorem pin_other {C O : Type} (ε : Env C O) (q q' : C) (a : O)
     (h : q' ≠ q) : pin ε q a q' = ε q' :=
-  if_neg h
+  show Function.update ε q a q' = ε q' from Function.update_of_ne h a ε
 
 /-- The later pin wins: re-editing a cache entry discards the earlier edit
-rather than layering on it. -/
+rather than layering on it (Mathlib's `Function.update_idem`). -/
 theorem pin_pin_same {C O : Type} (ε : Env C O) (q : C) (a b : O) :
-    pin (pin ε q a) q b = pin ε q b := by
-  funext q'
-  by_cases h : q' = q
-  · simp [pin, h]
-  · simp [pin, h]
+    pin (pin ε q a) q b = pin ε q b :=
+  show Function.update (Function.update ε q a) q b = Function.update ε q b from
+    Function.update_idem a b ε
 
 /-- Pinning a question to the answer it already had changes nothing: recording
-a cache faithfully is not an intervention. -/
+a cache faithfully is not an intervention (Mathlib's
+`Function.update_eq_self`). -/
 theorem pin_get {C O : Type} (ε : Env C O) (q : C) :
-    pin ε q (ε q) = ε := by
-  funext q'
-  by_cases h : q' = q
-  · simp [pin, h]
-  · simp [pin, h]
+    pin ε q (ε q) = ε :=
+  show Function.update ε q (ε q) = ε from Function.update_eq_self q ε
 
 /-- Pins at distinct questions commute: independent overrides may be applied in
 either order, so a fork specified by a set of pinnings is well defined without
-choosing an order for them. -/
+choosing an order for them (Mathlib's `Function.update_comm`). -/
 theorem pin_pin_comm {C O : Type} (ε : Env C O) {q₁ q₂ : C}
-    (a b : O) (h : q₁ ≠ q₂) : pin (pin ε q₁ a) q₂ b = pin (pin ε q₂ b) q₁ a := by
-  funext q'
-  by_cases h₁ : q' = q₁
-  · by_cases h₂ : q' = q₂
-    · exact absurd (h₁ ▸ h₂ ▸ rfl : q₁ = q₂) h
-    · simp [pin, h₁, h]
-  · by_cases h₂ : q' = q₂
-    · simp [pin, h₂, h.symm]
-    · simp [pin, h₁, h₂]
+    (a b : O) (h : q₁ ≠ q₂) : pin (pin ε q₁ a) q₂ b = pin (pin ε q₂ b) q₁ a :=
+  show Function.update (Function.update ε q₁ a) q₂ b
+      = Function.update (Function.update ε q₂ b) q₁ a from
+    Function.update_comm h a b ε
 
 /-- An `Ext C O W ι κ` is a representation of the extensional meaning of a
 workflow: given one sample point `ε`, a partial function from an input value

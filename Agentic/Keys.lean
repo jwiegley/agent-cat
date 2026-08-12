@@ -48,37 +48,55 @@ licence rather than part of what a panel is.
 
 This is the one carrier that may keep a bare instance: concatenation is the
 only monoid `List α` carries for an arbitrary `α`, so nothing is being decided
-on anyone else's behalf. -/
-instance instPMonoidList {α : Type} : PMonoid (List α) where
-  op := List.append
-  unit := []
-  op_assoc := List.append_assoc
-  unit_op := List.nil_append
-  op_unit := List.append_nil
+on anyone else's behalf.
+
+**The monoid itself is Mathlib's `FreeMonoid α`**, which is *defined* as a
+synonym for `List α` with `*` given by `++`; the instance below is that
+instance, transported along the synonym, and the four law proofs the package
+used to carry are gone. Mathlib keeps the synonym precisely so that `List α`
+carries no `Mul` — the one deliberate difference here is that this package does
+put the instance on `List α` itself, because the panel algebra is generic in a
+`Monoid` and every use site would otherwise be spelled `FreeMonoid.ofList`. -/
+instance instPMonoidList {α : Type} : Monoid (List α) :=
+  inferInstanceAs (Monoid (FreeMonoid α))
 
 /-- A `Tally` is a representation of a *counted* verdict: votes cast, findings
 counted, tokens spent. It is a wrapper on `Nat` rather than `Nat` itself
 because the counting monoid is one of several structures `Nat` carries, and
 the class that interprets `⋄` is keyed by the carrier — the wrapper is what
-keeps `Width` (below) writable at all. -/
-structure Tally where
-  /-- The count. -/
-  val : Nat
-  deriving DecidableEq, Repr
+keeps `Width` (below) writable at all.
+
+**The wrapper is Mathlib's `Multiplicative ℕ`**: writing an additive monoid
+multiplicatively is exactly what `Multiplicative` is for, and the package
+already uses it for `Cost` (`Agentic.Instances`). So `Tally` is a synonym, not
+a structure, and its `CommMonoid` is `Nat`'s additive one, transported —
+nothing about counting is re-proved here. -/
+def Tally : Type := Multiplicative Nat
+
+/-- The tally that counts `n`: `Multiplicative.ofAdd`, under the package's
+constructor name. -/
+def Tally.mk (n : Nat) : Tally := Multiplicative.ofAdd n
+
+/-- The count a tally records: `Multiplicative.toAdd`, under the package's
+projection name. -/
+def Tally.val (t : Tally) : Nat := Multiplicative.toAdd t
 
 /-- Counting reducers: tallies under addition are a commutative key monoid.
 Because `op_comm` holds, `foldPanel_perm` applies: the scheduler may run the
 members in any order it likes, and the tally is unchanged. Note that it is
 *not* idempotent — counting the same member twice counts twice — so a tally
 panel gets no duplication licence, which is the honest statement of why
-at-least-once delivery corrupts a count. -/
-instance instCMonoidTally : CMonoid Tally where
-  op := fun a b => ⟨a.val + b.val⟩
-  unit := ⟨0⟩
-  op_assoc := fun a b c => congrArg Tally.mk (Nat.add_assoc a.val b.val c.val)
-  unit_op := fun a => congrArg Tally.mk (Nat.zero_add a.val)
-  op_unit := fun a => congrArg Tally.mk (Nat.add_zero a.val)
-  op_comm := fun a b => congrArg Tally.mk (Nat.add_comm a.val b.val)
+at-least-once delivery corrupts a count.
+
+The instance is Mathlib's `Multiplicative.commMonoid` at `ℕ`; the four laws are
+`Nat`'s addition laws, which the package no longer restates. -/
+instance instCMonoidTally : CommMonoid Tally :=
+  inferInstanceAs (CommMonoid (Multiplicative Nat))
+
+/-- Tallies have decidable equality, being counts: `Nat`'s instance,
+transported. -/
+instance instDecidableEqTally : DecidableEq Tally :=
+  inferInstanceAs (DecidableEq Nat)
 
 /-- A `Width` is a representation of a *width* verdict: how wide a fan-out
 got, how deep a queue went, how many members a panel ran at once. Its monoid
@@ -97,35 +115,69 @@ distinct types.
 
 Idempotence is claimed at the class (`IdemCMonoid`) rather than exhibited as a
 loose theorem, which is what makes the duplication licence and the induced
-order available here without proving either again. -/
-instance instIdemCMonoidWidth : IdemCMonoid Width where
-  op := fun a b => ⟨max a.val b.val⟩
-  unit := ⟨0⟩
-  op_assoc := fun a b c => congrArg Width.mk (Nat.max_assoc a.val b.val c.val)
-  unit_op := fun a => congrArg Width.mk (Nat.max_eq_right (Nat.zero_le a.val))
-  op_unit := fun a => congrArg Width.mk (Nat.max_eq_left (Nat.zero_le a.val))
-  op_comm := fun a b => congrArg Width.mk (Nat.max_comm a.val b.val)
-  op_idem := fun a => congrArg Width.mk (Nat.max_self a.val)
+order available here without proving either again.
+
+**Survivor, and exactly what Mathlib lacks.** Mathlib has `max` on `ℕ` as a
+`SemilatticeSup` with `⊥ = 0` (`OrderBot`), and it has `Std.Associative`,
+`Std.Commutative` and `Std.IdempotentOp` for `⊔` — but it has no `Monoid` whose
+`*` is a join, and no type synonym (a `Multiplicative`-for-`⊔`) that would
+manufacture one, because installing `Mul := ⊔` on a lattice would collide with
+every genuine multiplication. The panel algebra (`Agentic.MSemiring`) is
+generic in a `Monoid` on the key, so the join has to be presented as one
+somewhere; that is this instance, and its four laws are Mathlib's `Nat.max_*`
+lemmas rather than new proofs. -/
+instance instCMonoidWidth : CommMonoid Width where
+  mul := fun a b => ⟨max a.val b.val⟩
+  one := ⟨0⟩
+  npow n a := Nat.rec ⟨0⟩ (fun _ ih => ⟨max ih.val a.val⟩) n
+  mul_assoc := fun a b c => congrArg Width.mk (Nat.max_assoc a.val b.val c.val)
+  one_mul := fun a => congrArg Width.mk (Nat.max_eq_right (Nat.zero_le a.val))
+  mul_one := fun a => congrArg Width.mk (Nat.max_eq_left (Nat.zero_le a.val))
+  mul_comm := fun a b => congrArg Width.mk (Nat.max_comm a.val b.val)
+
+/-- The width fold is idempotent: the duplication licence at `Width`, in
+Mathlib's unbundled form. -/
+instance instIdemCMonoidWidth : IdemCMonoid Width :=
+  ⟨fun a => congrArg Width.mk (Nat.max_self a.val)⟩
+
+/-- Widths are linearly ordered by the width they record, and that order *is*
+the one the fold induces (`width_le_iff`). It is Mathlib's, transported along
+the wrapper — the package no longer builds an order out of the join by hand. -/
+instance instLinearOrderWidth : LinearOrder Width :=
+  LinearOrder.lift' Width.val (fun a b h => by cases a; cases b; cases h; rfl)
 
 /-- Speculative verdicts: `Bool` under "or", with `false` — nobody answered —
 as the unit. This is the reducer of a race: several members are launched at
 the same question and the panel's verdict is that *some* member answered yes;
 hearing the same yes twice is hearing it once, so the monoid is idempotent and
-says so. -/
-instance instIdemCMonoidBool : IdemCMonoid Bool where
-  op := or
-  unit := false
-  op_assoc := Bool.or_assoc
-  unit_op := Bool.false_or
-  op_unit := Bool.or_false
-  op_comm := Bool.or_comm
-  op_idem := by decide
+says so.
+
+**Survivor, for the same reason as `Width`, and with one hazard named.** `Bool`
+is a Mathlib `BooleanAlgebra`, so `∨` is its `⊔` with `false` as `⊥`, and again
+Mathlib carries no `Monoid` at a join. The hazard is that Mathlib *does* carry
+a different multiplication on `Bool`: `Mathlib/Algebra/Ring/BooleanRing.lean`
+installs `Mul Bool := and` as part of `BooleanRing Bool`. That file is not in
+this package's import graph (checked), so `⋄` on `Bool` is unambiguous here;
+should it ever be imported, two `Mul Bool` instances would disagree and the
+race reducer would have to move to a newtype, exactly as `Tally` and `Width`
+did for `Nat`. -/
+instance instCMonoidBool : CommMonoid Bool where
+  mul := or
+  one := false
+  npow n b := Nat.rec false (fun _ ih => or ih b) n
+  mul_assoc := Bool.or_assoc
+  one_mul := Bool.false_or
+  mul_one := Bool.or_false
+  mul_comm := Bool.or_comm
+
+/-- Racing is idempotent: hearing the same yes twice is hearing it once. -/
+instance instIdemCMonoidBool : IdemCMonoid Bool := ⟨by decide⟩
 
 /-- Concatenation of findings is the key operation, definitionally. -/
 theorem list_op_eq_append {α : Type} (l l' : List α) : l ⋄ l' = l ++ l' := rfl
 
 /-- Tallying is addition, definitionally. -/
-theorem tally_op_eq_add (m n : Tally) : m ⋄ n = ⟨m.val + n.val⟩ := rfl
+theorem tally_op_eq_add (m n : Tally) : m ⋄ n = Tally.mk (m.val + n.val) := rfl
 
 /-- The width fold is `max`, definitionally. -/
 theorem width_op_eq_max (m n : Width) : m ⋄ n = ⟨max m.val n.val⟩ := rfl
@@ -207,24 +259,29 @@ are equations in that monoid rather than an extra structure to define. -/
 
 /-- A narrower shard is below a wider one, and the proof is the fold itself:
 `⟨2⟩ ⋄ ⟨5⟩` computes to `⟨5⟩`, so the order holds by `rfl`. -/
-example : IdemCMonoid.le (Width.mk 2) (Width.mk 5) := rfl
+example : IdemCMonoid.le (Width.mk 2) (Width.mk 5) := by decide
 
 /-- And the false comparison is refuted just as directly: the width order is
 not a matter of opinion about which shard mattered. -/
-example : ¬ IdemCMonoid.le (Width.mk 5) (Width.mk 2) := fun h =>
-  absurd (Width.mk.inj h) (by decide)
+example : ¬ IdemCMonoid.le (Width.mk 5) (Width.mk 2) := by decide
 
 /-- The width order *is* the order of `Nat`, unfolded: the generic construction
 lands where the design says the width fold lands. -/
 theorem width_le_iff {m n : Nat} :
-    IdemCMonoid.le (Width.mk m) (Width.mk n) ↔ m ≤ n := by
+    IdemCMonoid.le (Width.mk m) (Width.mk n) ↔ m ≤ n := Iff.rfl
+
+/-- **And it is still the order the fold induces.** `Width`'s order is now
+Mathlib's, lifted from `Nat`, rather than defined as `w ⋄ w' = w'`; this is the
+theorem that the two agree, so nothing the old construction said about the
+width fold has been given up in the move. -/
+theorem width_le_iff_op {a b : Width} : a ≤ b ↔ a ⋄ b = b := by
   constructor
   · intro h
-    have h' : max m n = n := Width.mk.inj h
-    exact h' ▸ Nat.le_max_left m n
-  · intro h
-    show (Width.mk (max m n)) = Width.mk n
     exact congrArg Width.mk (Nat.max_eq_right h)
+  · intro h
+    have h' : max a.val b.val = b.val := congrArg Width.val h
+    show a.val ≤ b.val
+    exact h' ▸ Nat.le_max_left a.val b.val
 
 /-- A raced panel of three members answers yes when any of them does. -/
 example : foldPanel [false, true, false] = true := rfl
@@ -241,7 +298,7 @@ example : MSemiring Prop (List Nat) :=
 /-- The same at a commutative key monoid, where the scheduler's licence holds:
 convolution over tallies elaborates too. -/
 example : MSemiring Prop Tally :=
-  MSemiring.conv (fun n => n = ⟨0⟩) (fun n => n = ⟨1⟩)
+  MSemiring.conv (fun n => n = Tally.mk 0) (fun n => n = Tally.mk 1)
 
 /-- And at the width fold, the design's other commutative reducer. -/
 example : MSemiring Prop Width :=
@@ -253,7 +310,7 @@ the report type. -/
 example : foldPanel [[0], [1], ([2] : List Nat)] = [0, 1, 2] := rfl
 
 /-- Fan-in over tallies is the sum of the members' counts. -/
-example : foldPanel [Tally.mk 2, Tally.mk 3, Tally.mk 4] = ⟨9⟩ := rfl
+example : foldPanel [Tally.mk 2, Tally.mk 3, Tally.mk 4] = Tally.mk 9 := rfl
 
 /-- Fan-in over widths is the worst width, not the total. -/
 example : foldPanel [Width.mk 2, Width.mk 3, Width.mk 4] = ⟨4⟩ := rfl
@@ -296,7 +353,7 @@ pair of turns is independent — the fully concurrent alphabet, whose traces are
 multisets of turns. The panel convolved is one member certain to have done
 nothing and one certain to have taken the turn `0`. -/
 example : MSemiring Prop (Trace (fun _ _ : Nat => True)) :=
-  MSemiring.conv (fun t => t = PMonoid.unit) (fun t => t = Trace.single 0)
+  MSemiring.conv (fun t => t = 1) (fun t => t = Trace.single 0)
 
 /-- The augmentation homomorphism holds at the trace key too: the total weight
 of a panel of sessions is the product of the halves' totals, which is the audit

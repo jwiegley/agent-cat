@@ -54,7 +54,20 @@ namespace Agentic
 
 /-- A `LastOpt α` is a representation of *one axis of a scope*: either the axis
 says nothing (`none`) or it says one thing (`some a`). It is `Option α`, given
-a name of its own because the monoid below — not the type — is the content. -/
+a name of its own because the monoid below — not the type — is the content.
+
+**Survivor, and exactly what Mathlib lacks.** The last-wins monoid is the
+*right-zero* semigroup on `α` (`a * b = b`) with a unit adjoined, and Mathlib
+supplies the second half of that and not the first: `WithOne α` is `Option α`
+with `none` as the unit, and `WithOne.instMonoid` upgrades any `Semigroup α` to
+a monoid on it. But Mathlib has no right-zero semigroup — no instance, no type
+synonym, not even the name — so there is nothing to feed `WithOne`, and
+`Option`'s own `orElse` (which is first-wins, and the mirror image of what a
+scope needs) carries no `Monoid` instance either. Manufacturing a one-element
+synonym here purely to hand it to `WithOne` would trade three two-line proofs
+for a synonym, an instance and a defeq that no longer holds on the nose
+(`WithOne`'s multiplication case-splits on *both* arguments, where
+`set_overrides` below is `rfl`). So the definition and its three laws stay. -/
 def LastOpt (α : Type) : Type := Option α
 
 namespace LastOpt
@@ -96,12 +109,13 @@ theorem mul_one (x : LastOpt α) : mul x one = x := rfl
 combination. It is a `PMonoid` and deliberately not a `CMonoid` — see
 `set_overrides`, which is the failure of commutativity and is also the whole
 of innermost-wins. -/
-instance instPMonoid : PMonoid (LastOpt α) where
-  op := mul
-  unit := one
-  op_assoc := mul_assoc
-  unit_op := one_mul
-  op_unit := mul_one
+instance instPMonoid : Monoid (LastOpt α) where
+  mul := mul
+  one := one
+  npow n x := Nat.rec one (fun _ ih => mul ih x) n
+  mul_assoc := mul_assoc
+  one_mul := one_mul
+  mul_one := mul_one
 
 /-- The axis combination is `Last`, definitionally. -/
 theorem op_eq_mul (x y : LastOpt α) : x ⋄ y = mul x y := rfl
@@ -133,8 +147,8 @@ namespace Scope
 variable {μ α : Type}
 
 /-- Scopes compose axis by axis, each axis by innermost-wins. -/
-instance instPMonoid : PMonoid (Scope μ α) :=
-  inferInstanceAs (PMonoid (LastOpt μ × LastOpt α))
+instance instPMonoid : Monoid (Scope μ α) :=
+  inferInstanceAs (Monoid (LastOpt μ × LastOpt α))
 
 /-- A scope built from its two axes. -/
 def mk (m : LastOpt μ) (a : LastOpt α) : Scope μ α := (m, a)
@@ -172,16 +186,16 @@ is inside `h` and the inner setting is the one that wins.
 `Agentic.Monoid`, at no distance whatever. The two laws below are that action's
 two laws, and they are imported rather than reproved; what is specific to
 scoping is not the action but the monoid it acts by, and that is `LastOpt`. -/
-def withScope {G R : Type} [PMonoid G] (g : G) (f : Scoped G R) :
+def withScope {G R : Type} [Monoid G] (g : G) (f : Scoped G R) :
     Scoped G R :=
   actR g f
 
 section Laws
 
-variable {G R : Type} [PMonoid G]
+variable {G R : Type} [Monoid G]
 
 /-- Entering the empty scope is doing nothing (`actR_unit`). -/
-theorem withScope_one (f : Scoped G R) : withScope (PMonoid.unit : G) f = f :=
+theorem withScope_one (f : Scoped G R) : withScope (1 : G) f = f :=
   actR_unit f
 
 /-- **Scoping is a covariant monoid homomorphism.** Nesting `g₂` inside `g₁` is

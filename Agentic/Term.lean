@@ -231,8 +231,13 @@ inductive Term (Op : Type → Type → Type) (G L : Type) : Frag → Type → Ty
   it. Nothing in *this* module makes the promise good — the grade is about
   shape — but the width fold `Term.widthT` now agrees with the grade index on
   the nose (`Term.widthT_eq_width`), which checks the index against a second
-  computation of the same arithmetic. The *semantic* width bound, consultations
-  in flight at a run, is still owed (acat-vbl). -/
+  computation of the same arithmetic. The *semantic* width bound is now proved
+  too, and it is not the shape it was expected to be: consultations in flight
+  are counted by `Term.peak`, which is incomparable with the width claim
+  (`Term.peak_not_le_widthE`), and what a `bounded n` index bounds is one
+  factor of the count — `Term.peak_le_of_bounded`, `peak ≤ writtenSites * n`.
+  A fan of a body that consults nothing consults nothing, however wide:
+  `Term.peak_fanT_pureT`. -/
   | fanT {f : Frag} {i o : Type} :
       (n : Nat) → Term Op G L f i o → Term Op G L (f.scale n) (List i) (List o)
   /-- A full value-dependent continuation: plan, then execute the plan the

@@ -157,17 +157,22 @@ theorem bounded_join_bounded (n m : Nat) :
 
 /-- **The join is the package's idempotent commutative monoid**, with `static`
 as its unit: the five theorems above are its five laws, and the instance adds
-no content beyond naming them. What it buys is the order — `Frag.le` below is
-`IdemCMonoid.le` and nothing else — and, with it, the licence reading:
-idempotence is why a grade recomputed twice is the grade computed once. -/
-instance instIdemCMonoid : IdemCMonoid Frag where
-  op := join
-  unit := static
-  op_assoc := join_assoc
-  unit_op := static_join
-  op_unit := join_static
-  op_comm := join_comm
-  op_idem := join_idem
+no content beyond naming them. What it buys is the order — `Frag.le` below is the join order, and `Frag` is
+therefore a Mathlib `SemilatticeSup` with `⊔ = join` and `⊥ = static` — and,
+with it, the licence reading: idempotence is why a grade recomputed twice is
+the grade computed once. -/
+instance instCMonoidFrag : CommMonoid Frag where
+  mul := join
+  one := static
+  npow n f := Nat.rec static (fun _ ih => join ih f) n
+  mul_assoc := join_assoc
+  one_mul := static_join
+  mul_one := join_static
+  mul_comm := join_comm
+
+/-- Recomputing a grade twice is computing it once: the duplication licence at
+`Frag`, in Mathlib's unbundled `Std.IdempotentOp` form. -/
+instance instIdemCMonoid : IdemCMonoid Frag := ⟨join_idem⟩
 
 /-- The grade combination is the join, definitionally. -/
 theorem op_eq_join (f g : Frag) : f ⋄ g = join f g := rfl
@@ -293,13 +298,46 @@ beside the point once the multiplicity is zero. -/
 example : scale 0 (bounded 7) = bounded 0 := rfl
 
 /-- `f ≤ g` on grades means *`f` is no more opaque than `g`*: the order induced
-by the join, `f ⊔ g = g`. It is `IdemCMonoid.le` at `Frag`, which is why the
-lemmas below are one line each — an idempotent commutative operation induces a
-partial order, and `Cost` induces its own by the same construction. -/
-def le (f g : Frag) : Prop := IdemCMonoid.le f g
+by the join, `f ⊔ g = g`. It is the `≤` of the Mathlib `SemilatticeSup` just
+below, which is why the lemmas after it are one line each — the order comes
+from Mathlib, as `Cost`'s does (there it is Mathlib's complete lattice on
+`WithBot ℕ∞`). -/
+def le (f g : Frag) : Prop := join f g = g
 
-/-- `≤` on grades is the join order. -/
-instance instLEFrag : LE Frag := ⟨Frag.le⟩
+/-- **The grade order is Mathlib's.** `Frag` is a join-semilattice with a
+bottom: `⊔` is `join`, `⊥` is `static`, and `≤` is the equation `f ⊔ g = g`.
+Reflexivity, transitivity, antisymmetry, the two upper-bound laws, the
+least-upper-bound law and monotonicity are Mathlib's from here on; the package
+no longer re-derives an order from an idempotent join. -/
+instance instSemilatticeSupFrag : SemilatticeSup Frag where
+  le := Frag.le
+  le_refl := join_idem
+  le_trans := fun f g h hfg hgh => by
+    show join f h = h
+    rw [← hgh, ← join_assoc, hfg]
+  le_antisymm := fun f g hfg hgf => by
+    have h : join f g = join g f := join_comm f g
+    rw [hfg] at h; rw [hgf] at h; exact h.symm
+  sup := join
+  le_sup_left := fun f g => by
+    show join f (join f g) = join f g
+    rw [← join_assoc, join_idem]
+  le_sup_right := fun f g => by
+    show join g (join f g) = join f g
+    rw [join_comm f g, ← join_assoc, join_idem]
+  sup_le := fun f g h hf hg => by
+    show join (join f g) h = h
+    rw [join_assoc, show join g h = h from hg, hf]
+
+/-- `static` is the bottom of the grade order: the design's guidance — *write
+in the lowest fragment that expresses the job* — has a bottom to aim at. -/
+instance instOrderBotFrag : OrderBot Frag where
+  bot := static
+  bot_le _ := rfl
+
+/-- `≤` on grades is the join order (the old `LE` instance name, now the one
+Mathlib's semilattice supplies). -/
+abbrev instLEFrag : LE Frag := inferInstance
 
 /-- The grade order is decidable: it is an equation between grades, and grades
 have decidable equality. -/
@@ -309,18 +347,18 @@ instance decLe (f g : Frag) : Decidable (f ≤ g) :=
 /-- Unfolding lemma: `f ≤ g` is by definition `f ⊔ g = g`. -/
 theorem le_def {f g : Frag} : (f ≤ g) = (join f g = g) := rfl
 
-/-- The grade order is reflexive (the generic order, at `Frag`). -/
-theorem le_refl (f : Frag) : f ≤ f := IdemCMonoid.le_refl f
+/-- The grade order is reflexive (Mathlib's, at `Frag`). -/
+theorem le_refl (f : Frag) : f ≤ f := _root_.le_refl f
 
 /-- The grade order is transitive. -/
 theorem le_trans {f g h : Frag} (hfg : f ≤ g) (hgh : g ≤ h) : f ≤ h :=
-  IdemCMonoid.le_trans hfg hgh
+  _root_.le_trans hfg hgh
 
 /-- The grade order is antisymmetric: it is a genuine partial order, so
 "lowest fragment that expresses the job" names a unique grade when it names
 one at all. -/
 theorem le_antisymm {f g : Frag} (hfg : f ≤ g) (hgf : g ≤ f) : f = g :=
-  IdemCMonoid.le_antisymm hfg hgf
+  _root_.le_antisymm hfg hgf
 
 /-- `static` is the bottom: the design's guidance — *write in the lowest
 fragment that expresses the job* — has a bottom to aim at. -/
@@ -363,15 +401,15 @@ theorem eq_monadic_of_monadic_le : ∀ {g : Frag}, monadic ≤ g → g = monadic
 
 /-- A composite is at least as opaque as its left part. A fold that answers
 for a `join` grade therefore answers for either part's grade. -/
-theorem le_join_left (f g : Frag) : f ≤ join f g := IdemCMonoid.le_op_left f g
+theorem le_join_left (f g : Frag) : f ≤ join f g := le_sup_left
 
 /-- A composite is at least as opaque as its right part. -/
-theorem le_join_right (f g : Frag) : g ≤ join f g := IdemCMonoid.le_op_right f g
+theorem le_join_right (f g : Frag) : g ≤ join f g := le_sup_right
 
 /-- A grade above both parts is above the composite: the join really is the
 join of the grade order, and not merely one upper bound of the two parts. -/
 theorem join_le {f g h : Frag} (hf : f ≤ h) (hg : g ≤ h) : join f g ≤ h :=
-  IdemCMonoid.op_le hf hg
+  sup_le hf hg
 
 /-- The join is monotone in both arguments: weakening the parts' claims about
 shape weakens the composite's, and never the other way. This is the lemma a
@@ -379,7 +417,7 @@ grade-respecting fold needs when it recurses under `seqT`, `sumT` and
 `choiceT`. -/
 theorem join_le_join {f f' g g' : Frag} (hf : f ≤ f') (hg : g ≤ g') :
     join f g ≤ join f' g' :=
-  IdemCMonoid.op_le_op hf hg
+  sup_le_sup hf hg
 
 /-- The grade order is linear: `static` below every `bounded n`, every
 `bounded n` below `monadic`, and two bounded widths compared by `Nat`. Two

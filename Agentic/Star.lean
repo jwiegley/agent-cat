@@ -41,7 +41,7 @@ namespace Agentic
 
 section Retry
 
-variable {S : Type} [NSemiring S] [StarSemiring S]
+variable {S : Type} [Semiring S] [KStar S] [StarSemiring S]
 
 /-- `retry mA mB d` is the meaning of *do `A`; while the decision `d` says so,
 do `A` again; then do `B`*: the star of the loop body `mA * d`, followed by the
@@ -96,6 +96,7 @@ theorem retry_zero_decision (mA mB : S) : retry mA mB (0 : S) = mB := by
   show star (mA * (0 : S)) * mB = mB
   rw [mul_zero, star_zero, one_mul]
 
+omit [StarSemiring S] in
 /-- **A loop whose exit is free is the star of its body**: `retry mA 1 d` is
 `(M_A · d)*`. One rewrite, and it earns a name because it is the form the
 per-carrier read-outs are stated in — the exit contributes nothing, so whatever
@@ -125,7 +126,7 @@ theorems below assume `[KleeneStar S]` and claim that it *solves* it. -/
 
 section RetryLeast
 
-variable {S : Type} [NSemiring S] [KleeneStar S]
+variable {S : Type} [KleeneAlgebra S]
 
 /-- **The retry solve absorbs into any invariant of the loop step.** If `x`
 absorbs the exit and one more trip — `M_A · (d · x) + M_B ≤+ x`, the loop
@@ -194,8 +195,10 @@ matrices the design writes its solve in. -/
 
 section RetryMat
 
-variable {S : Type} [CompleteCSemiring S] {ι : Type} [StarSemiring (Mat S ι ι)]
+variable {S : Type} [CompleteCSemiring S] {ι : Type} [KStar (Mat S ι ι)]
+  [StarSemiring (Mat S ι ι)]
 
+omit [StarSemiring (Mat S ι ι)] in
 /-- **The retry solve at matrices**, in the design's own notation:
 `L = (M_A · d)* · M_B`. This is `retry` with the matrix semiring's operations
 written out, and it is true by `rfl` — the general definition already *is* the
@@ -219,7 +222,7 @@ end RetryMat
 
 section RetryMatLeast
 
-variable {S : Type} [CompleteCSemiring S] {ι : Type} [KleeneStar (Mat S ι ι)]
+variable {S ι : Type} [KleeneAlgebra (Mat S ι ι)]
 
 /-- **The design's loop equation, at matrices, with its answer pinned**: every
 transition `L` satisfying `L = M_A · (d · L) + M_B` is entrywise above the
@@ -227,12 +230,17 @@ retry solve. This is `retry_least` at `Mat S ι ι`, so §5.2's `(M_A · d)* · 
 is *the* meaning of a retry node and not one of several transitions that happen
 to satisfy its equation.
 
-The hypothesis is `KleeneStar` at matrices, which `Mat Prop ι ι` supplies
-(`Mat.instKleeneStarMatProp`); there the order is entrywise implication, and
-the theorem says a retry loop admits no transition that any other solution
-forbids. -/
+The hypothesis is Mathlib's `KleeneAlgebra` at matrices, which `Mat Prop ι ι`
+supplies (`Mat.instKleeneStarMatProp`); there `*` is `Mat.comp`, `+` is
+`Mat.matAdd`, the order is entrywise implication, and the theorem says a retry
+loop admits no transition that any other solution forbids. The equation is
+written in the class's operations rather than in `Mat.comp`/`Mat.matAdd`
+because the Kleene algebra carries its own semiring structure; at the one
+instance that exists they are the same operations, and `retry_mat_fixed` above
+— which does not assume a second semiring — states the reading in the design's
+spelling. -/
 theorem retry_mat_least (mA mB d L : Mat S ι ι)
-    (h : L = Mat.matAdd (Mat.comp mA (Mat.comp d L)) mB) :
+    (h : L = mA * (d * L) + mB) :
     retry mA mB d ≤+ L :=
   retry_least mA mB d L h
 
@@ -386,6 +394,21 @@ theorem reach_le_of_step (M X : Mat Prop ι ι)
   reach_rec M (fun a c => X c b → X a b) (fun _ hh => hh)
     (fun a' c₀ _ hedge hrec hxc => hX a' b ⟨c₀, hedge, hrec hxc⟩) hr hx
 
+/-- **Reachability is absorbed on the right too.** If `X` is closed under
+appending one edge of `M`, then appending a whole `M`-path keeps it closed:
+`X a c` and `reach M c b` give `X a b`.
+
+This is the right-handed twin of `reach_le_of_step`, and it exists because
+Mathlib's `KleeneAlgebra` asks for both inductions — rightly, since the carrier
+`Mat Prop ι ι` is non-commutative and over such a carrier the two are genuinely
+different laws. The proof is the same induction on the length of a path, with
+the invariant carried on the other side. -/
+theorem reach_le_of_step_right (M X : Mat Prop ι ι)
+    (hX : ∀ a b, (∃ c, X a c ∧ M c b) → X a b)
+    {c b : ι} (hr : reach M c b) : ∀ a, X a c → X a b :=
+  reach_rec M (fun c b => ∀ a, X a c → X a b) (fun _ _ hh => hh)
+    (fun c₀ d _ hedge hrec a hxc => hrec a (hX a d ⟨c₀, hxc, hedge⟩)) hr
+
 /-- **Reachability is the least solution of the unrolling equation.** Any
 matrix `X` with `X = I + M · X` is implied entrywise by `reach M`, so among the
 solutions the `StarSemiring` field admits, this star is the smallest.
@@ -443,9 +466,8 @@ claims no more than that reachability solves that equation. The stronger fact �
 that it is the *least* solution — is `instKleeneStarMatProp` below, and it is
 the reason the design's `(M_A · d)* · M_B` denotes reachability rather than
 merely satisfying reachability's equation. -/
-noncomputable instance instStarSemiringMatProp : StarSemiring (Mat Prop ι ι) where
-  star := reach
-  star_eq_left := reach_eq_left
+noncomputable instance instKStarMatProp : KStar (Mat Prop ι ι) where
+  kstar := reach
 
 /-- **The matrix star at possibility is least**: Kleene induction holds of
 reachability, so `Mat Prop ι ι` is a `KleeneStar` and the retry solve at
@@ -459,16 +481,31 @@ into an `X`-exit stays inside `X`, which read as matrices is
 `A* · B ≤+ X`. Nothing new is proved; what is new is that the fact is now an
 instance of a general principle rather than a lemma about this carrier, so
 `retry_least` applies to it. -/
-noncomputable instance instKleeneStarMatProp : KleeneStar (Mat Prop ι ι) where
-  star_le_left A B X h := by
-    have hentry : ∀ a b : ι, (B a b ∨ ∃ c, A a c ∧ X c b) → X a b :=
-      addLe_iff_entrywise.mp h
+noncomputable instance instKleeneStarMatProp : KleeneAlgebra (Mat Prop ι ι) where
+  __ := (Mat.instIdemAdd : IdemSemiring (Mat Prop ι ι))
+  __ := instKStarMatProp
+  one_le_kstar A := addLe_iff_entrywise.mpr fun a b hab =>
+    ((pow_zero_iff A a b).mp hab) ▸ reach_refl A a
+  mul_kstar_le_kstar A := addLe_iff_entrywise.mpr fun _ _ hab =>
+    match hab with
+    | ⟨c, hac, hcb⟩ => reach_trans A (reach_of_edge A hac) hcb
+  kstar_mul_le_kstar A := addLe_iff_entrywise.mpr fun _ _ hab =>
+    match hab with
+    | ⟨c, hac, hcb⟩ => reach_trans A hac (reach_of_edge A hcb)
+  kstar_mul_le_self A B h := by
+    have hentry : ∀ a b : ι, (∃ c, A a c ∧ B c b) → B a b := addLe_iff_entrywise.mp h
     refine addLe_iff_entrywise.mpr fun a b hab => ?_
-    have hab' : ∃ c, reach A a c ∧ B c b := hab
-    match hab' with
-    | ⟨c, hr, hB⟩ =>
-      exact reach_le_of_step A X (fun a' b' hc => hentry a' b' (Or.inr hc)) hr
-        (hentry c b (Or.inl hB))
+    match (hab : ∃ c, reach A a c ∧ B c b) with
+    | ⟨c, hr, hB⟩ => exact reach_le_of_step A B hentry hr hB
+  mul_kstar_le_self A B h := by
+    have hentry : ∀ a b : ι, (∃ c, B a c ∧ A c b) → B a b := addLe_iff_entrywise.mp h
+    refine addLe_iff_entrywise.mpr fun a b hab => ?_
+    match (hab : ∃ c, B a c ∧ reach A c b) with
+    | ⟨c, hB, hr⟩ => exact reach_le_of_step_right A B hentry hr a hB
+
+/-- `instStarSemiringMatProp` is the unrolling law at `Prop`-matrices, now
+derived from the Kleene algebra (`instStarSemiringOfKleene`). Kept resolving. -/
+noncomputable abbrev instStarSemiringMatProp : StarSemiring (Mat Prop ι ι) := inferInstance
 
 /-- **The retry solve, at matrices over possibility, read out.** A retry loop
 can end at `b` from `a` exactly when attempt-and-retry reaches some state `c`
@@ -491,7 +528,7 @@ is a finite fold, which is exactly why a fueled retry keeps a static grade. -/
 
 section Trunc
 
-variable {S : Type} [NSemiring S]
+variable {S : Type} [Semiring S]
 
 /-- `starTrunc n x` is the resource of doing `x` at most `n` times: the scalar
 truncated star, `1 + x · (1 + x · (⋯))` to depth `n`. Where `star` answers the
@@ -515,7 +552,7 @@ theorem starTrunc_succ (n : Nat) (x : S) :
 already agrees with the star, so does truncating at `n+1`. This is the exact
 sense in which the truncation approximates the solution — the star is a fixed
 point of the very step the truncation iterates. -/
-theorem starTrunc_succ_of_eq [StarSemiring S] {n : Nat} {x : S}
+theorem starTrunc_succ_of_eq [KStar S] [StarSemiring S] {n : Nat} {x : S}
     (h : starTrunc n x = star x) : starTrunc (n + 1) x = star x := by
   rw [starTrunc_succ, h, ← StarSemiring.star_eq_left]
 
@@ -645,7 +682,7 @@ theorem star_fin_zero_solutions (x : Cost) :
     have h1 : Cost.mul (Cost.fin 0) x = x := NSemiring.one_mul x
     show x = Cost.add (Cost.fin 0) (Cost.mul (Cost.fin 0) x)
     rw [h1]
-    exact hx.symm
+    exact (sup_eq_right.mpr hx).symm
 
 /-- **`checkBounds` is the existence of the star.** A retry loop at worst-case
 cost has a finite bound precisely when its body is free; otherwise the star is
@@ -785,19 +822,19 @@ theorem starTrunc_cost_finite (n k : Nat) : starTrunc n (Cost.fin k) ≠ Cost.in
   match starTrunc_fin n k with
   | ⟨m, hm⟩ =>
     rw [hm]
-    exact fun h => Cost.noConfusion h
+    exact fun h => Cost.not_inf_le_fin (le_of_eq h.symm)
 
 /-- The truncation is sound for the solution: however much fuel is spent, the
 fueled loop is no worse than the star, so a bound proved of the star is a
 bound of every truncation of it. -/
 theorem starTrunc_le_star (n : Nat) (x : Cost) : starTrunc n x ≤ star x := by
-  cases x with
-  | bot => rw [starTrunc_bot]; exact Cost.le_refl _
-  | fin k =>
+  rcases Cost.cost_cases x with hb | ⟨k, hk⟩ | hi
+  · subst hb; rw [starTrunc_bot, star_bot]
+  · subst hk
     cases k with
-    | zero => rw [starTrunc_fin_zero]; exact Cost.le_refl _
-    | succ _ => exact Cost.le_inf _
-  | inf => exact Cost.le_inf _
+    | zero => rw [starTrunc_fin_zero, star_fin_zero]
+    | succ _ => rw [star_pos]; exact Cost.le_inf _
+  · subst hi; rw [star_inf]; exact Cost.le_inf _
 
 /-! ### Fuel at its honest home: the fueled retry *matrix* has a finite bound
 
@@ -933,10 +970,11 @@ theorem starTrunc_fin_le (n k : Nat) :
 The design reads the retry solve per factor, and at the probability factor it
 reads "absorption of a Markov chain" (§5.2). Which probability factor is meant
 matters. Sum-product absorption — the total probability of leaving, summed over
-path lengths — lives in `([0,1], +, ×)`, which §2's own audit rules out as not
-being a semiring at all, and its honest home is `ℝ≥0` (acat-467). The factor §2
-actually names is Viterbi, `([0,1], max, ×)`, and that is the one `Prob` builds
-exactly.
+path lengths — lives in `(ℝ≥0∞, +, ×)`, a different semiring on the same
+numbers, whose star is a geometric series rather than a maximum. The factor §2
+actually names is Viterbi, `([0,1], max, ×)`, and that is the one `Prob` reads
+off `ℝ≥0∞`: `⊕` is `max`, `⊗` is `×`, and `[0,1]` appears as the hypothesis
+`≤ 1` on the theorems that need it.
 
 At Viterbi the read-out is best-path absorption, and it has a sharp closed
 form: the most probable run of a retry loop is the one that goes round it no
@@ -945,20 +983,33 @@ says. Each trip multiplies by a probability, probabilities are at most one, and
 `⊕` keeps the best alternative — so the best run through a loop is the shortest
 one, and the loop's weight is its exit's weight. -/
 
-/-- Iteration at consensus weight is certain: `p* = 1`, the Viterbi twin of
-`star_prop`. -/
-theorem star_prob (p : Prob) : star p = 1 := rfl
+/-- Iteration at a sub-unit consensus weight is certain: `p* = 1`, the Viterbi
+twin of `star_prop`.
+
+The hypothesis `p ≤ 1` is the design's `[0,1]`, and it is a hypothesis rather
+than a fact about the type because the carrier is now `ℝ≥0∞` and not a
+constructor-restricted stand-in for it. Above `1` the star answers `⊤`, which
+is the honest reading of a step that amplifies: iterated without limit it has
+no finite weight. -/
+theorem star_prob {p : Prob} (hp : p ≤ 1) : star p = 1 := by
+  show Prob.star p = 1
+  unfold Prob.star
+  exact if_pos hp
 
 /-- **Viterbi absorption.** At consensus weight a retry loop weighs exactly what
 its exit weighs: the attempt and the retry decision drop out, because taking the
 loop again cannot raise a probability and `max` keeps the best alternative.
 
 This is §5.2's absorption read-out at the Viterbi factor — the best absorbing
-run is the immediate exit — and it is a statement that was unstatable while the
-package had no probability carrier at all. The sum-product reading, where the
-loop contributes a geometric series rather than a maximum, needs a carrier this
-package does not have. -/
-theorem retry_prob (mA mB d : Prob) : retry mA mB d = mB := one_mul mB
+run is the immediate exit. The hypothesis is that attempt-and-decide is at most
+certain, which is exactly what makes "taking the loop again cannot raise a
+probability" true; at `ℝ≥0∞` it has to be said, and saying it is a repair
+rather than a restriction. The sum-product reading, where the loop contributes
+a geometric series rather than a maximum, is a different semiring on the same
+carrier and is not built here. -/
+theorem retry_prob (mA mB d : Prob) (h : mA * d ≤ 1) : retry mA mB d = mB := by
+  show star (mA * d) * mB = mB
+  rw [star_prob h, one_mul]
 
 /-! ### Read-outs at expectation: `p* m p*`, and the projection that survives it
 
@@ -979,8 +1030,9 @@ needs an order supplied separately, which is acat-jmm. -/
 
 section RetryExpectation
 
-variable {P M : Type} [CSemiring P] [PMod P M] [StarSemiring P]
+variable {P M : Type} [CSemiring P] [AddCommMonoid M] [PMod P M] [KStar P] [StarSemiring P]
 
+omit [StarSemiring P] in
 /-- **The projection commutes with the retry solve.** Forgetting the moment
 turns a loop at expectation into the same loop at the weights: the probability
 factor of a retry loop is the retry loop of the probability factors.
@@ -993,6 +1045,7 @@ theorem pi_retry (mA mB d : SqZero P M) :
     SqZero.pi (retry mA mB d) = retry (SqZero.pi mA) (SqZero.pi mB) (SqZero.pi d) :=
   rfl
 
+omit [StarSemiring P] in
 /-- **The expected cost of a retry loop.** The moment of the solve is the
 exit's moment weighted by the loop's star, plus the body's moment weighted by
 the exit and by the star *twice* — `p* m p*`, with the exit's weight carried
@@ -1014,6 +1067,7 @@ theorem retry_moment (mA mB d : SqZero P M) :
     (PMod.mul_smul mB.base (star (mA * d).base * star (mA * d).base)
       (mA * d).moment).symm
 
+omit [StarSemiring P] in
 /-- **The retry solve at expectation, both components at once**: a pair whose
 weight is the retry solve of the weights and whose moment is the expected cost.
 This is the read-out the design asks for — "read it per factor, changing only
@@ -1027,6 +1081,7 @@ theorem retry_expectation (mA mB d : SqZero P M) :
              (mA * d).moment)⟩ :=
   SqZero.eq_of_parts (pi_retry mA mB d) (retry_moment mA mB d)
 
+omit [StarSemiring P] in
 /-- **`p* m p*`, with the exit removed.** A loop whose exit is free has for its
 expected cost exactly the design's formula: the body's moment weighted by the
 star on both sides. `retry_one` reduces the loop to the star of its body, and
@@ -1037,6 +1092,7 @@ theorem retry_one_moment (mA d : SqZero P M) :
   rw [retry_one]
   exact SqZero.star_moment (mA * d)
 
+omit [StarSemiring P] in
 /-- **The design's three lines, at the dual numbers.** With the moment module
 the carrier itself, the weighting is multiplication and the expected cost of a
 free-exit retry loop is literally `p* · m · p*` — §5.2's formula, in §5.2's

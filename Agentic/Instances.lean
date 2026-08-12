@@ -1,5 +1,9 @@
 import Agentic.Monoid
 import Agentic.Semiring
+import Mathlib.Data.ENat.Lattice
+import Mathlib.Data.ENNReal.Inv
+import Mathlib.Algebra.TrivSqZeroExt.Basic
+import Mathlib.Algebra.Module.Opposite
 
 /-!
 # The carriers: possibility, worst-case cost, consensus weight, expectation
@@ -7,31 +11,60 @@ import Agentic.Semiring
 Four instances of the resource algebra, one for each reading of "resource"
 the design uses:
 
-* `Prop` — *can this happen at all?* `⊕` is disjunction, `⊗` conjunction.
-* `Cost` — *how bad can it get?* `⊕` is maximum, `⊗` is addition: max-plus,
-  with the ⊥ that the audit found missing.
+* `Prop` — *can this happen at all?* `⊕` is disjunction, `⊗` conjunction, and
+  the lattice is Mathlib's own order on `Prop`.
+* `Cost` — *how bad can it get?* max-plus on Mathlib's `WithBot ℕ∞`, read
+  through `Multiplicative`, with the ⊥ that the audit found missing supplied by
+  `WithBot`. Aggregation is `iSup` on Mathlib's complete lattice.
 * `Prob` — *how likely is the best run?* the Viterbi semiring `([0,1], max, ×)`
-  of §2, built exactly and without reals as the probabilities `2⁻ⁿ` and `0`.
+  of §2, on Mathlib's `ℝ≥0∞`: real probabilities at last, with `[0,1]` visible
+  as the hypothesis `≤ 1` on the theorems that need it. Aggregation is `iSup`,
+  and its infinitary distributive law is Mathlib's `ENNReal.mul_iSup`.
 * `SqZero P M` — *what does it cost on average?* Eisner's expectation
-  semiring, the square-zero extension, complete and starred over any complete
-  base and any complete module of moments.
+  semiring, which is Mathlib's `TrivSqZeroExt P M`, complete and starred over
+  any complete base and any complete module of moments.
+
+Three of the four carriers were hand-rolled inductives with hand-rolled
+arithmetic and hand-built suprema; all three are now Mathlib carriers, and what
+survives in this file is what Mathlib does not have: the star at expectation,
+the complete module of moments (`CompletePMod`), and the arbitrary-index
+aggregation (`CompleteCSemiring`, in `Agentic.Semiring`).
 -/
 
 namespace Agentic
+
+open scoped ENNReal NNReal
 
 /-! ## Possibility: the `Prop` semiring -/
 
 /-- Possibility as a resource semiring: `⊕` is `∨` (either way of succeeding
 will do), `⊗` is `∧` (both steps must succeed), `0` is `False` (refusal) and
-`1` is `True` (the free step). -/
-instance instCSemiringProp : CSemiring Prop where
+`1` is `True` (the free step).
+
+The instance is Mathlib's `IdemCommSemiring`, and the *order* half of it is
+taken from Mathlib's existing lattice on `Prop` rather than induced afresh:
+`⊔` there is `Or`, `⊥` is `False`, and `≤` is implication. So the canonical
+additive order at this carrier is `→` on the nose — which is what
+`addLe_prop_iff` used to have to prove — and no second order on `Prop` is
+created. -/
+instance instAddCommMonoidProp : AddCommMonoid Prop where
   add := Or
-  mul := And
   zero := False
-  one := True
+  nsmul n p := Nat.rec False (fun _ ih => Or ih p) n
   add_comm _ _ := propext ⟨Or.symm, Or.symm⟩
   add_assoc _ _ _ := propext or_assoc
   zero_add _ := propext ⟨fun h => h.elim False.elim id, Or.inr⟩
+  add_zero _ := propext ⟨fun h => h.elim id False.elim, Or.inl⟩
+
+/-- Possibility is an idempotent commutative semiring: `⊗` is `∧` with `True`
+for `1`, on top of the `∨`/`False` alternation above, and the lattice half is
+Mathlib's own order on `Prop`. -/
+noncomputable instance instCSemiringProp : IdemCommSemiring Prop where
+  __ := instAddCommMonoidProp
+  __ := (inferInstance : SemilatticeSup Prop)
+  __ := (inferInstance : OrderBot Prop)
+  mul := And
+  one := True
   mul_comm _ _ := propext ⟨And.symm, And.symm⟩
   mul_assoc _ _ _ := propext and_assoc
   one_mul _ := propext ⟨And.right, fun h => ⟨trivial, h⟩⟩
@@ -44,13 +77,14 @@ instance instCSemiringProp : CSemiring Prop where
      fun h => h.elim (fun ⟨ha, hc⟩ => ⟨Or.inl ha, hc⟩) (fun ⟨hb, hc⟩ => ⟨Or.inr hb, hc⟩)⟩
   zero_mul _ := propext ⟨And.left, False.elim⟩
   mul_zero _ := propext ⟨And.right, False.elim⟩
+  add_eq_sup _ _ := rfl
 
 /-- Aggregation over `Prop` is existential quantification: the family is
 possible exactly when some member of it is. This is the smallest complete
 semiring the design uses, and the one that makes "meaning as a matrix"
 degenerate to "meaning as a relation". -/
-instance instCompleteCSemiringProp : CompleteCSemiring Prop where
-  toCSemiring := instCSemiringProp
+noncomputable instance instCompleteCSemiringProp : CompleteCSemiring Prop where
+  __ := (inferInstance : CommSemiring Prop)
   csum := fun {_} f => ∃ i, f i
   csum_zero := propext ⟨fun ⟨_, h⟩ => h, False.elim⟩
   csum_point := by
@@ -87,352 +121,414 @@ until this instance existed it could not be stated: the star had exactly one
 carrier, worst-case cost. Degenerate is not the same as vacuous — the content
 is carried by what the star does *inside* a retry, where it says that a loop
 is possible exactly when its exit is (`Agentic.retry_possible`, in
-`Agentic.Star`). -/
-instance instStarSemiringProp : StarSemiring Prop where
-  star := fun _ => True
-  star_eq_left := fun _ => propext ⟨fun _ => Or.inl trivial, fun _ => trivial⟩
+`Agentic.Star`).
 
-/-- Possibility is idempotent: `p ∨ p` is `p`. Two ways of doing the same
-thing are one way, which is the duplication licence at this carrier. -/
-instance instIdemAddProp : IdemAdd Prop where
-  add_idem _ := propext ⟨fun h => h.elim id id, Or.inl⟩
-
-/-- **The additive order at possibility is implication.** `p ≤+ q` unfolds to
-`(p ∨ q) = q`, and an equation between propositions is a two-way implication;
-one direction is trivial, so what the order says is `p → q`. Stating this once
-turns every leastness proof at `Prop` into ordinary propositional reasoning. -/
-theorem addLe_prop_iff {p q : Prop} : p ≤+ q ↔ (p → q) := by
-  constructor
-  · intro h hp
-    have h' : (p ∨ q) = q := h
-    exact cast h' (Or.inl hp)
-  · intro h
-    show (p ∨ q) = q
-    exact propext ⟨fun hpq => hpq.elim h id, Or.inr⟩
-
-/-- **Iteration at possibility is least.** Kleene induction here is one step of
-propositional reasoning: `p* · b` is `True ∧ b`, so what has to be shown is
+**Iteration at possibility is least**, too. Kleene induction here is one step
+of propositional reasoning: `p∗ · b` is `True ∧ b`, so what has to be shown is
 `b → x`, and that is the left half of the hypothesis `b ∨ (p ∧ x) → x`.
 
-That it holds at all is worth a sentence, because the star answers `True` — the
-*greatest* element of the implication order — and a greatest element can be
-least only if it is the only competitor. It is: every solution of
-`x = 1 + p · x` collapses to `True` (`Agentic.star_prop_solution`). So at this
-carrier the equation already determines its answer and leastness merely agrees
-with it, whereas at `Cost` the equation does not and leastness is what decides.
-The instance earns its place by making the generic `Agentic.retry_least`
-readable at possibility, not by being hard. -/
-instance instKleeneStarProp : KleeneStar Prop where
-  star_le_left _ _ _ h :=
-    addLe_prop_iff.mpr fun hsb => addLe_prop_iff.mp h (Or.inl hsb.right)
+That leastness holds at all is worth a sentence, because the star answers
+`True` — the *greatest* element of the implication order — and a greatest
+element can be least only if it is the only competitor. It is: every solution
+of `x = 1 + p · x` collapses to `True` (`Agentic.star_prop_solution`). So at
+this carrier the equation already determines its answer and leastness merely
+agrees with it, whereas at `Cost` the equation does not and leastness is what
+decides. -/
+noncomputable instance instKleeneStarProp : KleeneAlgebra Prop :=
+  KleeneAlgebra.ofCommStarLe (fun _ => True)
+    (fun _ => propext ⟨fun _ => Or.inl trivial, fun _ => trivial⟩)
+    (fun _ _ _ h hsb => h (Or.inl hsb.right))
 
-/-! ## Worst-case cost: max-plus with a genuine bottom -/
+/-- `instStarSemiringProp` is the unrolling law at possibility, now derived
+from the Kleene algebra (`instStarSemiringOfKleene`). Kept resolving. -/
+noncomputable abbrev instStarSemiringProp : StarSemiring Prop := inferInstance
 
-/-- A `Cost` is a representation of a worst-case resource bound: `bot` is the
-identity of `max` — the audit's corrected carrier, without which max-plus has
-`0 = 1` and the semiring collapses — `fin n` is the bound `n`, and `inf` is
-divergence, the bound that no run respects.
+/-- Possibility is idempotent: `p ∨ p` is `p`. Two ways of doing the same
+thing are one way, which is the duplication licence at this carrier. It is now
+part of `instCSemiringProp` — Mathlib's `IdemCommSemiring` — so this is the
+name kept resolving, not a second instance. -/
+noncomputable abbrev instIdemAddProp : IdemAdd Prop := inferInstance
 
-`bot` is *not* "zero cost": it is the cost of the impossible run, the empty
-alternative. Zero cost is `fin 0`, which is `1`. -/
-inductive Cost where
-  /-- The impossible run: the identity of `max`, hence the semiring's `0`. -/
-  | bot : Cost
-  /-- The bound `n`. -/
-  | fin (n : Nat) : Cost
-  /-- Divergence: a run with no bound at all. -/
-  | inf : Cost
-  deriving DecidableEq, Repr
+/-- **The additive order at possibility is implication.** With `Prop`'s
+Mathlib order this is `Iff.rfl`: `≤` on `Prop` *is* `→`. The theorem is kept
+because every leastness read-out at this carrier is phrased through it. -/
+theorem addLe_prop_iff {p q : Prop} : p ≤+ q ↔ (p → q) := Iff.rfl
+
+/-! ## Worst-case cost: max-plus over Mathlib's `WithBot ℕ∞`
+
+The carrier used to be a three-constructor inductive with a hand-rolled `max`,
+a hand-rolled `+`, thirty lines of order development and — the bulk of it — two
+hundred lines building a supremum by hand. All of that is Mathlib's:
+
+| was | now |
+| --- | --- |
+| `inductive Cost` (`bot`/`fin n`/`inf`) | `Multiplicative (WithBot ℕ∞)` |
+| `Cost.add` (hand-written `max`) | `⊔` of Mathlib's lattice on `WithBot ℕ∞` |
+| `Cost.mul` (hand-written `+` with `bot` absorbing) | `+` of `WithBot ℕ∞`, through `Multiplicative` |
+| the order and its eight lemmas | `CompleteLinearOrder (WithBot ℕ∞)` |
+| `IsSup`, `exists_greatest`, `exists_isSup`, `csum` | `iSup` |
+
+**Why `Multiplicative (WithBot ℕ∞)` and not `Tropical`.** Mathlib has a
+tropical-semiring construction (`Mathlib.Algebra.Tropical.Basic`), and it is
+min-plus: `Tropical R`'s `+` is `min` *in `R`'s own order*, so the canonical
+additive order of the semiring is the reverse of the order the type carries.
+An `IdemSemiring` — which is what `KleeneAlgebra` and hence every leastness
+theorem in `Agentic.Star` needs — must have `a + b = a ⊔ b` in *its* order, so
+`Tropical` would supply the lattice pointing the wrong way and the two orders
+would be a diamond. `Multiplicative` has no order of its own to clash: it turns
+`WithBot ℕ∞`'s `+` into `*`, leaves the lattice alone, and the join is then the
+semiring's `⊕` on the nose.
+
+**Why `WithBot ℕ∞` and not `ℕ∞`.** This is the audit's finding, in Mathlib's
+vocabulary. Max-plus on `ℕ∞` alone would have `0 = ⊥ = (0 : ℕ∞) = 1`: the
+identity of `max` and the identity of `+` are the same element and the semiring
+collapses. `WithBot` adjoins the missing `-∞`, which is the cost of the run
+that does not happen, and `WithBot.bot_add` — `⊥` absorbs — is precisely
+`0 * x = 0`. The same `⊥` is what makes the infinitary distributive law
+unconditional (`Cost.mul_iSup` below needs no `Nonempty ι`, where Mathlib's
+`ENat.add_iSup` does).
+-/
+
+/-- A `Cost` is a worst-case resource bound: Mathlib's `WithBot ℕ∞`, read
+multiplicatively, so that the type's `+` becomes the semiring's `⊗` and the
+type's `⊔` becomes the semiring's `⊕`.
+
+`⊥` (`Cost.bot`) is the impossible run — the identity of `max`, hence the
+semiring's `0`, and the element without which max-plus has `0 = 1`. A coerced
+natural (`Cost.fin n`) is the bound `n`, and `↑⊤` (`Cost.inf`) is divergence,
+the bound no run respects. Zero cost is `fin 0`, which is `1`.
+
+This is a `def` rather than an `abbrev` deliberately: `WithBot ℕ∞` already
+carries an `AddCommMonoid` in which `+` is `+`, and the resource semiring needs
+`+` to be `⊔`. The synonym keeps the two readings apart, exactly as
+`Multiplicative` and `Tropical` do in Mathlib. -/
+def Cost := Multiplicative (WithBot ℕ∞)
 
 namespace Cost
 
-/-- Combination of alternatives on costs is worst-case: `max`, with `bot`
-least and `inf` greatest. -/
-def add : Cost → Cost → Cost
-  | bot,   y     => y
-  | fin m, bot   => fin m
-  | fin m, fin n => fin (max m n)
-  | fin _, inf   => inf
-  | inf,   _     => inf
+/-- The impossible run: `⊥`, the identity of `max`, hence the semiring's `0`. -/
+def bot : Cost := Multiplicative.ofAdd (⊥ : WithBot ℕ∞)
 
-/-- Sequencing of costs adds them, with `bot` annihilating — even
-`inf * bot = bot`, because a step that cannot happen cannot diverge. -/
-def mul : Cost → Cost → Cost
-  | bot,   _     => bot
-  | fin _, bot   => bot
-  | fin m, fin n => fin (m + n)
-  | fin _, inf   => inf
-  | inf,   bot   => bot
-  | inf,   fin _ => inf
-  | inf,   inf   => inf
+/-- The bound `n`, as a cost: the natural `n` inside `ℕ∞` inside `WithBot`. -/
+def fin (n : Nat) : Cost := Multiplicative.ofAdd (((n : ℕ∞)) : WithBot ℕ∞)
 
-/-- Worst-case combination is idempotent: one alternative twice is that
-alternative. -/
-theorem add_idem : ∀ x : Cost, add x x = x
-  | bot => rfl
-  | fin n => congrArg fin (Nat.max_self n)
-  | inf => rfl
+/-- Divergence: a run with no bound at all, `↑⊤`. -/
+def inf : Cost := Multiplicative.ofAdd (((⊤ : ℕ∞)) : WithBot ℕ∞)
 
-/-- Combination of costs is commutative. -/
-theorem add_comm' : ∀ x y : Cost, add x y = add y x
-  | bot, bot => rfl
-  | bot, fin _ => rfl
-  | bot, inf => rfl
-  | fin _, bot => rfl
-  | fin m, fin n => congrArg fin (Nat.max_comm m n)
-  | fin _, inf => rfl
-  | inf, bot => rfl
-  | inf, fin _ => rfl
-  | inf, inf => rfl
+/-- The underlying extended natural, for statements that have to name the
+`WithBot ℕ∞` operations rather than the semiring's. -/
+abbrev val (x : Cost) : WithBot ℕ∞ := Multiplicative.toAdd x
 
-/-- Combination of costs is associative. -/
-theorem add_assoc' : ∀ x y z : Cost, add (add x y) z = add x (add y z) := by
-  intro x y z
-  cases x <;> cases y <;> cases z <;>
-    first
-      | rfl
-      | exact congrArg fin (Nat.max_assoc _ _ _)
+end Cost
 
-/-- **Worst-case combination is the package's idempotent commutative monoid**,
-with `bot` — the impossible run — as its unit. Associativity, commutativity and
-idempotence are the three theorems just proved; the unit laws are the first
-equation of `add` and that equation read through commutativity.
+/-- Sequencing of costs is `WithBot ℕ∞`'s addition, read multiplicatively:
+bounds of successive steps add, `1` is `fin 0`, and this is Mathlib's
+`CommMonoid` on `Multiplicative`, not a re-proof of it. -/
+instance instCommMonoidCost : CommMonoid Cost :=
+  inferInstanceAs (CommMonoid (Multiplicative (WithBot ℕ∞)))
 
-The instance is what makes the cost order below three lines rather than thirty:
-an idempotent commutative operation induces a partial order (`IdemCMonoid.le`),
-and `Cost` and `Frag` are two carriers of that one construction. It is also the
-duplication licence at `Cost`, and reading it as such is the statement that a
-worst case counted twice is the same worst case. -/
-instance instIdemCMonoid : IdemCMonoid Cost where
-  op := add
-  unit := bot
-  op_assoc := add_assoc'
-  unit_op _ := rfl
-  op_unit x := (add_comm' bot x).symm
-  op_comm := add_comm'
-  op_idem := add_idem
+/-- **The cost order is Mathlib's, and it is complete.** `WithBot ℕ∞` is a
+`CompleteLinearOrder` (`Mathlib.Data.ENat.Lattice`), so every family of costs
+has a least upper bound and the aggregation the design calls for is `iSup` —
+which is what deleted two hundred lines of hand-built supremum here.
+Noncomputable because Mathlib's instance is. -/
+noncomputable instance instCompleteLinearOrderCost : CompleteLinearOrder Cost :=
+  inferInstanceAs (CompleteLinearOrder (WithBot ℕ∞))
 
-/-- The cost combination is worst-case, definitionally. -/
-theorem op_eq_add (x y : Cost) : x ⋄ y = add x y := rfl
+/-- Costs have decidable equality (they are `Option (Option ℕ)` underneath). -/
+instance instDecidableEqCost : DecidableEq Cost :=
+  inferInstanceAs (DecidableEq (WithBot ℕ∞))
 
-/-- `x ≤ y` on costs means `x` is no worse a bound than `y`: the order induced
-by `max`, `x + y = y`. It is `IdemCMonoid.le` at `Cost` — the same definition
-that gives `Frag` its grade order — so the lemmas below are that development
-instantiated rather than a second copy of it. -/
-def le (x y : Cost) : Prop := IdemCMonoid.le x y
+/-- The impossible run is the semiring's `0`. -/
+instance instZeroCost : Zero Cost := ⟨Cost.bot⟩
 
-/-- `≤` on costs is the max-order. -/
-instance : LE Cost := ⟨Cost.le⟩
+/-- Combination of alternatives on costs is worst-case: the join of the
+complete lattice, which on `WithBot ℕ∞` is `max`. -/
+noncomputable instance instAddCost : Add Cost := ⟨fun x y => (x ⊔ y : Cost)⟩
 
-/-- The cost order is decidable: it is an equation between costs. -/
-instance decLe (x y : Cost) : Decidable (x ≤ y) :=
-  inferInstanceAs (Decidable (add x y = y))
+/-- **Worst-case cost is a commutative idempotent resource semiring**, and
+every field of it is a Mathlib lemma about `WithBot ℕ∞`: `⊕` is the lattice
+join (`sup_comm`, `sup_assoc`, `bot_sup_eq`), `⊗` is addition through
+`Multiplicative` (the whole `CommMonoid`, inherited), distributivity is
+`add_max`/`max_add` — addition is monotone on a linear order, so it maps
+maxima to maxima — and annihilation is `WithBot.bot_add`/`WithBot.add_bot`.
 
-/-- Unfolding lemma: `x ≤ y` is by definition `x + y = y`. -/
-theorem le_def {x y : Cost} : (x ≤ y) = (add x y = y) := rfl
+`add_eq_sup` holds by `rfl`, so the lattice `IdemSemiring` demands *is* the
+lattice the carrier came with: no second order is created, and the canonical
+additive order `≤+` is the `WithBot ℕ∞` order on the nose. -/
+noncomputable instance instIdemCommSemiringCost : IdemCommSemiring Cost where
+  __ := (inferInstance : CommMonoid Cost)
+  add_comm := sup_comm (α := Cost)
+  add_assoc := sup_assoc (α := Cost)
+  zero_add := bot_sup_eq (α := Cost)
+  add_zero := sup_bot_eq (α := Cost)
+  nsmul := nsmulRec
+  nsmul_zero := fun _ => rfl
+  nsmul_succ := fun _ _ => rfl
+  left_distrib a b c := add_max (α := WithBot ℕ∞) a b c
+  right_distrib a b c := max_add (α := WithBot ℕ∞) a b c
+  zero_mul := WithBot.bot_add (α := ℕ∞)
+  mul_zero := WithBot.add_bot (α := ℕ∞)
+  bot_le := fun _ => bot_le (α := Cost)
+  add_eq_sup _ _ := rfl
 
-/-- The cost order is reflexive (the generic order, at `Cost`). -/
-theorem le_refl (x : Cost) : x ≤ x := IdemCMonoid.le_refl x
+/-- `instAddCommMonoidCost` — the alternation half of the cost semiring, now a
+projection of `instIdemCommSemiringCost`. The name is kept resolving. -/
+noncomputable abbrev instAddCommMonoidCost : AddCommMonoid Cost := inferInstance
+
+/-- `instCSemiringCost` — worst-case cost as a commutative semiring, now a
+projection of `instIdemCommSemiringCost`. The name is kept resolving. -/
+noncomputable abbrev instCSemiringCost : CommSemiring Cost := inferInstance
+
+/-- `instIdemAddCost` — the duplication licence at `Cost` (a worst case counted
+twice is the same worst case), now `instIdemCommSemiringCost` itself. The name
+is kept resolving. -/
+noncomputable abbrev instIdemAddCost : IdemCommSemiring Cost := inferInstance
+
+namespace Cost
+
+/-- The impossible run *is* the semiring's `0`. -/
+theorem bot_eq_zero : bot = (0 : Cost) := rfl
+
+/-- The impossible run *is* the order's `⊥`. -/
+theorem bot_eq_bot : bot = (⊥ : Cost) := rfl
+
+/-- Divergence *is* the order's `⊤`. -/
+theorem inf_eq_top : inf = (⊤ : Cost) := rfl
+
+/-- Zero cost *is* the semiring's `1`. -/
+theorem fin_zero_eq_one : fin 0 = (1 : Cost) := rfl
+
+/-- Combination of alternatives on costs is worst-case, as an operation named
+for the callers that spelled it out. -/
+noncomputable abbrev add (x y : Cost) : Cost := x + y
+
+/-- Sequencing of costs adds their bounds, as an operation named for the
+callers that spelled it out. -/
+noncomputable abbrev mul (x y : Cost) : Cost := x * y
+
+/-- The cost combination is worst-case, definitionally: the join Mathlib
+induces from the idempotent `+` *is* `Cost.add`. -/
+theorem op_eq_add (x y : Cost) : x ⊔ y = add x y := rfl
+
+/-- `x ≤ y` on costs means `x` is no worse a bound than `y`: Mathlib's order on
+`WithBot ℕ∞`. -/
+abbrev le (x y : Cost) : Prop := x ≤ y
+
+/-- The cost order is decidable — classically, since Mathlib's complete lattice
+on `WithBot ℕ∞` is noncomputable. -/
+noncomputable instance decLe (x y : Cost) : Decidable (x ≤ y) := inferInstance
+
+/-- Unfolding lemma: `x ≤ y` says exactly `x ⊕ y = y`, the canonical additive
+order. It used to hold by `rfl` (the order *was* the equation); now the order
+is Mathlib's and the two agree by `sup_eq_right`. -/
+theorem le_def {x y : Cost} : (x ≤ y) = (add x y = y) := propext sup_eq_right.symm
+
+/-- Worst-case combination is idempotent (Mathlib's `add_idem`). -/
+theorem add_idem (x : Cost) : add x x = x := _root_.add_idem x
+
+/-- Combination of costs is commutative (Mathlib's `add_comm`). -/
+theorem add_comm' (x y : Cost) : add x y = add y x := _root_.add_comm x y
+
+/-- Combination of costs is associative (Mathlib's `add_assoc`). -/
+theorem add_assoc' (x y z : Cost) : add (add x y) z = add x (add y z) :=
+  _root_.add_assoc x y z
+
+/-- Sequencing of costs is order-insensitive, because addition on `WithBot ℕ∞`
+is. Named here so that proofs about `Cost.mul` may use it without going through
+the semiring's notation — the matrix bounds of `Agentic.Star` do exactly
+that. -/
+theorem mul_comm' (x y : Cost) : mul x y = mul y x := _root_.mul_comm x y
+
+/-- Sequencing of costs is unbracketed. -/
+theorem mul_assoc' (x y z : Cost) : mul (mul x y) z = mul x (mul y z) :=
+  _root_.mul_assoc x y z
+
+/-- Bounds add along sequencing: `fin m ⊗ fin n = fin (m + n)`. -/
+theorem fin_mul_fin (m n : Nat) : fin m * fin n = fin (m + n) := by
+  show Multiplicative.ofAdd (((m : ℕ∞) : WithBot ℕ∞) + ((n : ℕ∞) : WithBot ℕ∞)) = _
+  rw [← WithBot.coe_add, ← Nat.cast_add]
+  rfl
+
+/-- On finite bounds the cost order is the order of `Nat`. -/
+theorem fin_le_fin {m n : Nat} : (fin m ≤ fin n) ↔ m ≤ n := by
+  show (((m : ℕ∞) : WithBot ℕ∞) ≤ ((n : ℕ∞) : WithBot ℕ∞)) ↔ _
+  rw [WithBot.coe_le_coe, Nat.cast_le]
+
+/-- The cost order is reflexive (Mathlib's, at `Cost`). -/
+theorem le_refl (x : Cost) : x ≤ x := _root_.le_refl x
 
 /-- The cost order is transitive. -/
 theorem le_trans {x y z : Cost} (hxy : x ≤ y) (hyz : y ≤ z) : x ≤ z :=
-  IdemCMonoid.le_trans hxy hyz
+  _root_.le_trans hxy hyz
 
 /-- The cost order is antisymmetric: it is a genuine partial order. -/
 theorem le_antisymm {x y : Cost} (hxy : x ≤ y) (hyx : y ≤ x) : x = y :=
-  IdemCMonoid.le_antisymm hxy hyx
+  _root_.le_antisymm hxy hyx
 
 /-- An alternative is no worse than the choice between it and another. -/
-theorem le_add_left (x y : Cost) : x ≤ add x y := IdemCMonoid.le_op_left x y
+theorem le_add_left (x y : Cost) : x ≤ add x y := le_sup_left
 
 /-- The same on the right. -/
-theorem le_add_right (x y : Cost) : y ≤ add x y := IdemCMonoid.le_op_right x y
+theorem le_add_right (x y : Cost) : y ≤ add x y := le_sup_right
 
 /-- A bound on two alternatives separately is a bound on their combination:
 `add` really is the join of the cost order. -/
 theorem add_le {x y z : Cost} (hx : x ≤ z) (hy : y ≤ z) : add x y ≤ z :=
-  IdemCMonoid.op_le hx hy
+  sup_le hx hy
 
 /-- `bot` is the least cost: the impossible run is no worse than anything. -/
-theorem bot_le (x : Cost) : bot ≤ x := rfl
+theorem bot_le (x : Cost) : bot ≤ x := _root_.bot_le
 
 /-- `inf` is the greatest cost: divergence is the worst bound. -/
-theorem le_inf : ∀ x : Cost, x ≤ inf
-  | bot => rfl
-  | fin _ => rfl
-  | inf => rfl
+theorem le_inf (x : Cost) : x ≤ inf := le_top
 
 /-- Nothing below `bot` but `bot`. -/
-theorem eq_bot_of_le_bot : ∀ {x : Cost}, x ≤ bot → x = bot
-  | bot, _ => rfl
-  | fin _, h => absurd h (by simp [le_def, add])
-  | inf, h => absurd h (by simp [le_def, add])
+theorem eq_bot_of_le_bot {x : Cost} (h : x ≤ bot) : x = bot := le_bot_iff.mp h
 
 /-- Nothing above `inf` but `inf`. -/
-theorem eq_inf_of_inf_le : ∀ {y : Cost}, inf ≤ y → y = inf
-  | bot, h => h.symm
-  | fin _, h => h.symm
-  | inf, _ => rfl
-
-/-- On finite bounds the cost order is the order of `Nat`. -/
-theorem fin_le_fin {m n : Nat} : (fin m ≤ fin n) ↔ m ≤ n := by
-  constructor
-  · intro h
-    have h' : max m n = n := fin.inj h
-    exact h' ▸ Nat.le_max_left m n
-  · intro h
-    show add (fin m) (fin n) = fin n
-    exact congrArg fin (Nat.max_eq_right h)
+theorem eq_inf_of_inf_le {y : Cost} (h : inf ≤ y) : y = inf := (top_le_iff.mp h).symm ▸ rfl
 
 /-- A finite bound is never below `bot`. -/
-theorem not_fin_le_bot {n : Nat} : ¬ (fin n ≤ bot) := by
-  simp [le_def, add]
+theorem not_fin_le_bot {n : Nat} : ¬ (fin n ≤ bot) := fun h =>
+  absurd (le_bot_iff.mp h : ((n : ℕ∞) : WithBot ℕ∞) = ⊥) WithBot.coe_ne_bot
+
+/-- A finite bound is not the impossible run. -/
+theorem fin_ne_bot {n : Nat} : fin n ≠ bot := fun h => not_fin_le_bot (_root_.le_of_eq h)
 
 /-- Divergence is never below a finite bound. -/
-theorem not_inf_le_fin {n : Nat} : ¬ (inf ≤ fin n) := by
-  simp [le_def, add]
+theorem not_inf_le_fin {n : Nat} : ¬ (inf ≤ fin n) := fun h =>
+  absurd (top_le_iff.mp (WithBot.coe_le_coe.mp h)) (ENat.coe_ne_top n)
 
 /-- Divergence is never below `bot`. -/
-theorem not_inf_le_bot : ¬ (inf ≤ bot) := by
-  simp [le_def, add]
+theorem not_inf_le_bot : ¬ (inf ≤ bot) := fun h =>
+  absurd (le_bot_iff.mp h : ((⊤ : ℕ∞) : WithBot ℕ∞) = ⊥) WithBot.coe_ne_bot
 
-/-- Sequencing of costs is order-insensitive, because `Nat` addition is.
-Named here, and not left inside the `CSemiring` instance, so that proofs about
-`Cost.mul` may use it without going through the semiring's notation — the
-matrix bounds of `Agentic.Star` do exactly that. -/
-theorem mul_comm' : ∀ x y : Cost, mul x y = mul y x := by
-  intro a b
-  cases a <;> cases b <;>
-    first
-      | rfl
-      | exact congrArg Cost.fin (Nat.add_comm _ _)
+/-- Every cost is `bot`, some `fin n`, or `inf` — case analysis packaged as a
+disjunction so that proofs may split on the *value* of a term. Where the old
+inductive gave this by `cases`, the synonym gives it by matching on the two
+`Option` layers underneath. -/
+theorem cost_cases (x : Cost) : x = bot ∨ (∃ n, x = fin n) ∨ x = inf := by
+  match x with
+  | (⊥ : WithBot ℕ∞) => exact Or.inl rfl
+  | ((⊤ : ℕ∞) : WithBot ℕ∞) => exact Or.inr (Or.inr rfl)
+  | (((n : Nat) : ℕ∞) : WithBot ℕ∞) => exact Or.inr (Or.inl ⟨n, rfl⟩)
 
-end Cost
+/-- Below a finite bound there is only `bot` and smaller finite bounds. -/
+theorem le_fin_cases {x : Cost} {m : Nat} (h : x ≤ fin m) :
+    x = bot ∨ ∃ n, x = fin n ∧ n ≤ m := by
+  rcases cost_cases x with hb | ⟨n, hn⟩ | hi
+  · exact Or.inl hb
+  · exact Or.inr ⟨n, hn, fin_le_fin.mp (hn ▸ h)⟩
+  · exact absurd (hi ▸ h) not_inf_le_fin
 
-/-- Worst-case cost is a resource semiring: `⊕` is `max` (the worse of two
-alternatives is the bound you must quote) and `⊗` is `+` (bounds of successive
-steps add), with `0 = bot` and `1 = fin 0`. This is max-plus — commutative
-because `Nat` addition is. -/
-instance instCSemiringCost : CSemiring Cost where
-  add := Cost.add
-  mul := Cost.mul
-  zero := Cost.bot
-  one := Cost.fin 0
-  add_comm := Cost.add_comm'
-  add_assoc := Cost.add_assoc'
-  zero_add _ := rfl
-  mul_comm := Cost.mul_comm'
-  mul_assoc := by
-    intro a b c
-    cases a <;> cases b <;> cases c <;>
-      first
-        | rfl
-        | exact congrArg Cost.fin (Nat.add_assoc _ _ _)
-  one_mul := by
-    intro a
-    cases a <;>
-      first
-        | rfl
-        | exact congrArg Cost.fin (Nat.zero_add _)
-  mul_one := by
-    intro a
-    cases a <;>
-      first
-        | rfl
-        | exact congrArg Cost.fin (Nat.add_zero _)
-  left_distrib := by
-    intro a b c
-    cases a <;> cases b <;> cases c <;>
-      first
-        | rfl
-        | exact congrArg Cost.fin (Nat.add_max_add_left _ _ _).symm
-  right_distrib := by
-    intro a b c
-    cases a <;> cases b <;> cases c <;>
-      first
-        | rfl
-        | exact congrArg Cost.fin (Nat.add_max_add_right _ _ _).symm
-  zero_mul _ := rfl
-  mul_zero := by
-    intro a
-    cases a <;> rfl
+/-- Sequencing a fixed step before a worse alternative is worse: addition on
+`WithBot ℕ∞` is monotone. -/
+theorem mul_mono_right (x : Cost) {y z : Cost} (h : y ≤ z) : mul x y ≤ mul x z := by
+  have h' : val y ≤ val z := h
+  show val x + val y ≤ val x + val z
+  exact add_le_add_right h' _
 
-namespace Cost
+/-- A possible step never makes a run cheaper: `y ≤ x ⊗ y` whenever `x` is not
+the impossible run. (At `x = bot` both sides are `bot`, so the hypothesis is
+not decoration.) -/
+theorem le_mul_of_ne_bot {x : Cost} (hx : x ≠ bot) (y : Cost) : y ≤ mul x y := by
+  rcases cost_cases y with hb | ⟨m, hm⟩ | hi
+  · exact hb ▸ (mul_zero x).symm.le
+  · rcases cost_cases x with hb' | ⟨n, hn'⟩ | hi'
+    · exact absurd hb' hx
+    · subst hm; subst hn'; rw [show mul (fin n) (fin m) = fin (n + m) from fin_mul_fin n m]
+      exact fin_le_fin.mpr (Nat.le_add_left m n)
+    · subst hm; subst hi'
+      show ((m : ℕ∞) : WithBot ℕ∞) ≤ ((⊤ : ℕ∞) : WithBot ℕ∞) + ((m : ℕ∞) : WithBot ℕ∞)
+      rw [← WithBot.coe_add, WithBot.coe_le_coe, top_add]
+      exact le_top
+  · subst hi
+    rcases cost_cases x with hb' | ⟨n, hn'⟩ | hi'
+    · exact absurd hb' hx
+    · subst hn'
+      show ((⊤ : ℕ∞) : WithBot ℕ∞) ≤ ((n : ℕ∞) : WithBot ℕ∞) + ((⊤ : ℕ∞) : WithBot ℕ∞)
+      rw [← WithBot.coe_add, add_top]
+    · subst hi'
+      show ((⊤ : ℕ∞) : WithBot ℕ∞) ≤ ((⊤ : ℕ∞) : WithBot ℕ∞) + ((⊤ : ℕ∞) : WithBot ℕ∞)
+      rw [← WithBot.coe_add, add_top]
+
+/-- A possible step before divergence diverges. -/
+theorem mul_inf_of_ne_bot {x : Cost} (hx : x ≠ bot) : mul x inf = inf :=
+  _root_.le_antisymm (le_inf _) (le_mul_of_ne_bot hx inf)
+
+/-- Divergence before a possible step diverges. -/
+theorem inf_mul_of_ne_bot {x : Cost} (hx : x ≠ bot) : mul inf x = inf := by
+  rw [mul_comm']
+  exact mul_inf_of_ne_bot hx
+
+/-- Only the impossible step makes a possible step impossible. -/
+theorem eq_bot_of_mul_eq_bot {x z : Cost} (hx : x ≠ bot) (h : mul x z = bot) : z = bot := by
+  by_contra hz
+  exact absurd (h ▸ le_mul_of_ne_bot hx z : z ≤ bot) (fun hle => hz (eq_bot_of_le_bot hle))
+
+/-- A finite step followed by `z` is finitely bounded only if `z` is. -/
+theorem le_of_mul_fin_le_fin {k j : Nat} {z : Cost} (h : mul (fin k) z ≤ fin j) :
+    z ≤ fin j :=
+  _root_.le_trans (le_mul_of_ne_bot (x := fin k) fin_ne_bot z) h
 
 /-- Iteration of a cost: repeating a step any number of times costs nothing
-extra only if the step itself is free. Concretely `star bot = fin 0`,
-`star (fin 0) = fin 0`, and everything else diverges — which is the honest
-worst case for an unbounded retry loop. -/
-def star : Cost → Cost
-  | bot => fin 0
-  | fin 0 => fin 0
-  | fin (_ + 1) => inf
-  | inf => inf
+extra only if the step itself is free; otherwise the honest worst case is
+divergence. The old three-way pattern match is now the one conditional the
+`star_spec` of the previous version proved it equal to. -/
+noncomputable def star (x : Cost) : Cost := if x ≤ 1 then 1 else inf
 
 /-- `star` is the promised conditional: one, if the step is free; divergence
-otherwise. -/
-theorem star_spec (x : Cost) : star x = if x ≤ fin 0 then fin 0 else inf := by
-  cases x with
-  | bot => rfl
-  | fin n =>
-    cases n with
-    | zero => rfl
-    | succ k =>
-      have h : ¬ (fin (k + 1) ≤ fin 0) := by
-        intro hle
-        exact absurd (fin_le_fin.mp hle) (by simp)
-      simp [star, h]
-  | inf => simp [star, not_inf_le_fin]
+otherwise. Where this used to be a theorem about a pattern match, it is now the
+definition — and `fin 0` is `1` by `rfl`. -/
+theorem star_spec (x : Cost) : star x = if x ≤ fin 0 then fin 0 else inf := rfl
 
 /-- Unrolling an iteration from the front changes nothing. -/
 theorem star_eq_left' (x : Cost) : star x = add (fin 0) (mul x (star x)) := by
-  cases x with
-  | bot => rfl
-  | fin n => cases n with
-    | zero => rfl
-    | succ _ => rfl
-  | inf => rfl
+  unfold star
+  split
+  · next h => rw [show mul x 1 = x from mul_one x]; exact (sup_eq_left.mpr h).symm
+  · next h =>
+      have hx : x ≠ bot := fun hb => h (hb ▸ _root_.bot_le)
+      rw [show mul x inf = inf from mul_inf_of_ne_bot hx]
+      exact (sup_eq_right.mpr le_top).symm
 
 /-! ### Iteration at `Cost` is the *least* bound, not merely a bound
 
 The unrolling law leaves the loop's bound open: at this carrier `x = 1 + a · x`
 is solved by a whole up-set of costs, and only an order can say which of them
-the loop means. `star_le_left'` says it means the smallest, and the proof is the
-two-case analysis the definition of `star` invites — a free body, where the
-star is `1` and the exit's own bound suffices; and a costly body, where the star
-is `inf` and the work is to show that *every* absorbing `x` is already `inf`. -/
+the loop means. `star_le_left'` says it means the smallest. -/
 
 /-- A bound on a choice bounds the left alternative. -/
 theorem le_of_add_le_left {x y z : Cost} (h : add x y ≤ z) : x ≤ z :=
-  le_trans (le_add_left x y) h
+  _root_.le_trans le_sup_left h
 
 /-- A bound on a choice bounds the right alternative. -/
 theorem le_of_add_le_right {x y z : Cost} (h : add x y ≤ z) : y ≤ z :=
-  le_trans (le_add_right x y) h
+  _root_.le_trans le_sup_right h
 
 /-- **A costly step cannot be absorbed by a finite bound.** If the body `a` is
 not free and `x` is a possible bound that absorbs one more trip round it —
 `a · x ≤ x` — then `x` is divergence.
 
 This is the whole content of `star (fin (n+1)) = inf` being *least*: the star
-answers `inf`, and the lemma says nothing smaller was available. The argument
-is that `fin (k+1) · fin m = fin (k+1+m)`, which is strictly worse than
-`fin m`, so no finite bound absorbs a trip. -/
+answers `inf`, and the lemma says nothing smaller was available. -/
 theorem eq_inf_of_mul_le {a x : Cost} (ha : ¬ a ≤ fin 0) (hx : x ≠ bot)
     (h : mul a x ≤ x) : x = inf := by
-  cases x with
-  | bot => exact absurd rfl hx
-  | inf => rfl
-  | fin m =>
-    cases a with
-    | bot => exact absurd (bot_le (fin 0)) ha
-    | inf => exact absurd h not_inf_le_fin
-    | fin n =>
-      cases n with
-      | zero => exact absurd (le_refl (fin 0)) ha
-      | succ k =>
-        have hle : k + 1 + m ≤ m := fin_le_fin.mp h
-        omega
+  rcases cost_cases x with hb | ⟨m, hm⟩ | hi
+  · exact absurd hb hx
+  · subst hm
+    rcases cost_cases a with hb' | ⟨n, hn'⟩ | hi'
+    · exact absurd (hb' ▸ bot_le (fin 0)) ha
+    · subst hn'
+      rw [show mul (fin n) (fin m) = fin (n + m) from fin_mul_fin n m] at h
+      have hnm : n + m ≤ m := fin_le_fin.mp h
+      have hn0 : n ≠ 0 := fun h0 => ha (by rw [h0])
+      omega
+    · subst hi'
+      rw [inf_mul_of_ne_bot fin_ne_bot] at h
+      exact absurd h not_inf_le_fin
+  · exact hi
 
 /-- **The star is the least solution at worst-case cost.** If `x` absorbs the
 exit `b` and one more trip round the body `a`, then `x` already absorbs
@@ -450,186 +546,75 @@ theorem star_le_left' (a b x : Cost) (h : add b (mul a x) ≤ x) :
   have hb : b ≤ x := le_of_add_le_left h
   have hax : mul a x ≤ x := le_of_add_le_right h
   by_cases ha : a ≤ fin 0
-  · rw [star_spec, if_pos ha]
-    have h1 : mul (fin 0) b = b := NSemiring.one_mul b
-    rw [h1]
+  · rw [star_spec, if_pos ha, fin_zero_eq_one, show mul 1 b = b from one_mul b]
     exact hb
   · rw [star_spec, if_neg ha]
     by_cases hbot : b = bot
     · rw [hbot]
-      show mul inf bot ≤ x
-      exact bot_le x
-    · have hxbot : x ≠ bot := fun hx =>
-        hbot (eq_bot_of_le_bot (hx ▸ hb))
-      have hmul : mul inf b = inf := by
-        cases b with
-        | bot => exact absurd rfl hbot
-        | fin _ => rfl
-        | inf => rfl
-      rw [hmul, eq_inf_of_mul_le ha hxbot hax]
-      exact le_refl inf
+      exact _root_.le_trans (mul_zero inf).le (bot_le x)
+    · have hxbot : x ≠ bot := fun hx => hbot (eq_bot_of_le_bot (hx ▸ hb))
+      rw [inf_mul_of_ne_bot hbot]
+      exact (eq_inf_of_mul_le ha hxbot hax).ge
 
 end Cost
 
-/-- Iteration on worst-case cost is a star: it unrolls from the front, and —
-because `⊗` happens to be commutative here — from the back as well
-(`star_eq_right`). Only the front unrolling is asked of the instance; the
-Conway identities are neither assumed by the class nor proved here. -/
-instance instStarSemiringCost : StarSemiring Cost where
-  star := Cost.star
-  star_eq_left := Cost.star_eq_left'
-
-/-- Worst-case combination is idempotent: `max x x = x`. The same theorem that
-gives `Cost` its `IdemCMonoid`, read at the semiring's `+`. -/
-instance instIdemAddCost : IdemAdd Cost where
-  add_idem := Cost.add_idem
-
 /-- **Iteration at worst-case cost is the least solution of the loop
-equation.** The additive order `≤+` is `Cost.le` — both are `max x y = y` — so
-this instance says exactly what `Cost.star_le_left'` proves, and the
-under-determination of the unrolling law at this carrier
+equation.** The additive order `≤+` is `Cost.le` — both are Mathlib's order on
+`WithBot ℕ∞` — so this instance says exactly what `Cost.star_le_left'` proves,
+and the under-determination of the unrolling law at this carrier
 (`Agentic.retry_cost_ambiguous`: `fin 3`, `fin 5` and `inf` all solve one loop)
 is thereby resolved in favour of the smallest bound.
 
 That is the answer a bound checker wants. `checkBounds` is a question about the
 *best* bound quotable for a loop, and an equation with three answers cannot be
 asked it; with this instance the question has one answer, and `star_eq_one_iff`
-of `Agentic.Star` reads it off. -/
-instance instKleeneStarCost : KleeneStar Cost where
-  star_le_left := Cost.star_le_left'
+of `Agentic.Star` reads it off.
+
+Mathlib's `KleeneAlgebra` asks for the right-handed inductions as well; over
+this commutative carrier they are the left-handed ones, which is what
+`KleeneAlgebra.ofCommStarLe` discharges — so the two theorems `Cost` has
+(`star_eq_left'`, `star_le_left'`) are still the whole of its content. -/
+noncomputable instance instKleeneStarCost : KleeneAlgebra Cost :=
+  KleeneAlgebra.ofCommStarLe Cost.star Cost.star_eq_left' Cost.star_le_left'
+
+/-- Iteration on worst-case cost unrolls from the front, and — because `⊗`
+happens to be commutative here — from the back as well (`star_eq_right`). Now
+derived from the Kleene algebra; the name is kept resolving. -/
+noncomputable abbrev instStarSemiringCost : StarSemiring Cost := inferInstance
 
 namespace Cost
 
-/-! ### Aggregation of costs is supremum
+/-! ### Aggregation of costs is Mathlib's `iSup`
 
-`Cost` is a complete linear order, so an arbitrary family of costs has a least
-upper bound; that bound is the aggregation the design calls for. The
-construction is classical (`Classical.choose` on the proved existence of a
-supremum) and therefore `noncomputable` — legitimately so: the meaning of "the
-worst case over all runs" is not something an implementation enumerates. -/
+`Cost` is a complete lattice, so an arbitrary family of costs has a least upper
+bound and that bound is the aggregation the design calls for. This is where the
+migration paid best: `IsSup`, `isSup_unique`, `exists_greatest`, `exists_isSup`,
+`csum_isSup`, `csum_eq`, `exists_eq_fin_of_isSup`, `csum_csum_upper`,
+`csum_csum_least` and the classical choice that produced the supremum are all
+deleted in favour of `iSup`, `le_iSup`, `iSup_le`, `iSup_comm` and `iSup_prod`.
+The one fact that is genuinely about *this* carrier and not about lattices in
+general — a finite supremum is attained — survives below, because the
+infinitary distributive law needs it. -/
 
-/-- Every cost is `bot`, some `fin n`, or `inf` — case analysis packaged as a
-disjunction so that proofs may split on the *value* of a term. -/
-theorem cost_cases (x : Cost) : x = bot ∨ (∃ n, x = fin n) ∨ x = inf := by
-  cases x
-  · exact Or.inl rfl
-  · exact Or.inr (Or.inl ⟨_, rfl⟩)
-  · exact Or.inr (Or.inr rfl)
+/-- The aggregation of a family of costs: its worst case, Mathlib's `iSup`. -/
+noncomputable abbrev csum {ι : Type} (f : ι → Cost) : Cost := ⨆ i, f i
 
-/-- Below a finite bound there is only `bot` and smaller finite bounds. -/
-theorem le_fin_cases {x : Cost} {m : Nat} (h : x ≤ fin m) :
-    x = bot ∨ ∃ n, x = fin n ∧ n ≤ m := by
-  cases x with
-  | bot => exact Or.inl rfl
-  | fin n => exact Or.inr ⟨n, rfl, fin_le_fin.mp h⟩
-  | inf => exact absurd h not_inf_le_fin
+/-- Every member of a family is bounded by its aggregate (Mathlib's
+`le_iSup`). -/
+theorem le_csum {ι : Type} (f : ι → Cost) (i : ι) : f i ≤ csum f := le_iSup f i
 
-/-- A bounded, inhabited set of naturals has a greatest element. This is the
-one piece of arithmetic the supremum construction needs, and it is where the
-absence of `Nat.find` from core is paid for: induction on the bound. -/
-theorem exists_greatest (p : Nat → Prop) :
-    ∀ b : Nat, (∀ n, p n → n ≤ b) → (∃ n, p n) → ∃ m, p m ∧ ∀ n, p n → n ≤ m := by
-  intro b
-  induction b with
-  | zero =>
-    intro hb hne
-    match hne with
-    | ⟨n, hn⟩ => exact ⟨n, hn, fun k hk => Nat.le_trans (hb k hk) (Nat.zero_le n)⟩
-  | succ b ih =>
-    intro hb hne
-    by_cases hp : p (b + 1)
-    · exact ⟨b + 1, hp, hb⟩
-    · refine ih ?_ hne
-      intro n hn
-      match Nat.lt_or_ge n (b + 1) with
-      | Or.inl h => exact Nat.le_of_lt_succ h
-      | Or.inr h => exact absurd (Nat.le_antisymm (hb n hn) h ▸ hn) hp
-
-/-- `IsSup f x` is a representation of "`x` is the worst case over the family
-`f`": an upper bound, and the least one. -/
-def IsSup {ι : Type} (f : ι → Cost) (x : Cost) : Prop :=
-  (∀ i, f i ≤ x) ∧ ∀ y, (∀ i, f i ≤ y) → x ≤ y
-
-/-- A family has at most one supremum: the order is antisymmetric. -/
-theorem isSup_unique {ι : Type} {f : ι → Cost} {x y : Cost}
-    (hx : IsSup f x) (hy : IsSup f y) : x = y :=
-  le_antisymm (hx.2 y hy.1) (hy.2 x hx.1)
-
-/-- Every family of costs has a supremum. The proof is the case analysis the
-carrier suggests: divergence dominates; otherwise all-`bot` is `bot`; otherwise
-the finite bounds are either bounded — and then have a greatest element — or
-unbounded, and their worst case is divergence. -/
-theorem exists_isSup {ι : Type} (f : ι → Cost) : ∃ x, IsSup f x := by
-  by_cases hinf : ∃ i, f i = inf
-  · refine ⟨inf, fun i => le_inf _, fun y hy => ?_⟩
-    match hinf with
-    | ⟨i, hi⟩ => exact hi ▸ hy i
-  · have hnotinf : ∀ i, f i ≠ inf := fun i hi => hinf ⟨i, hi⟩
-    by_cases hbot : ∀ i, f i = bot
-    · exact ⟨bot, fun i => (hbot i) ▸ le_refl bot, fun y _ => bot_le y⟩
-    · have hex : ∃ i, f i ≠ bot :=
-        Classical.byContradiction fun hc =>
-          hbot fun i => Classical.byContradiction fun h' => hc ⟨i, h'⟩
-      match hex with
-      | ⟨i₀, hi₀⟩ =>
-        have hfin : ∃ n, f i₀ = fin n := by
-          match cost_cases (f i₀) with
-          | Or.inl h => exact absurd h hi₀
-          | Or.inr (Or.inl h) => exact h
-          | Or.inr (Or.inr h) => exact absurd h (hnotinf i₀)
-        match hfin with
-        | ⟨n₀, hn₀⟩ =>
-          by_cases hbdd : ∃ b, ∀ n, (∃ i, f i = fin n) → n ≤ b
-          · match hbdd with
-            | ⟨b, hb⟩ =>
-              match exists_greatest (fun n => ∃ i, f i = fin n) b hb ⟨n₀, i₀, hn₀⟩ with
-              | ⟨m, hm, hmax⟩ =>
-                refine ⟨fin m, fun i => ?_, fun y hy => ?_⟩
-                · match cost_cases (f i) with
-                  | Or.inl h => exact h ▸ bot_le _
-                  | Or.inr (Or.inl ⟨n, h⟩) =>
-                    exact h ▸ fin_le_fin.mpr (hmax n ⟨i, h⟩)
-                  | Or.inr (Or.inr h) => exact absurd h (hnotinf i)
-                · match hm with
-                  | ⟨i, hi⟩ => exact hi ▸ hy i
-          · refine ⟨inf, fun i => le_inf _, fun y hy => ?_⟩
-            match cost_cases y with
-            | Or.inl h =>
-              exact absurd (h ▸ hn₀ ▸ hy i₀) not_fin_le_bot
-            | Or.inr (Or.inl ⟨j, h⟩) =>
-              refine absurd ⟨j, fun n hn => ?_⟩ hbdd
-              match hn with
-              | ⟨i, hi⟩ => exact fin_le_fin.mp (h ▸ hi ▸ hy i)
-            | Or.inr (Or.inr h) => exact h ▸ le_refl inf
-
-/-- The aggregation of a family of costs: its worst case, the least upper
-bound whose existence `exists_isSup` establishes. Noncomputable by
-construction, and rightly so — this is a meaning, not an algorithm. -/
-noncomputable def csum {ι : Type} (f : ι → Cost) : Cost :=
-  Classical.choose (exists_isSup f)
-
-/-- `csum f` is the supremum of `f`. -/
-theorem csum_isSup {ι : Type} (f : ι → Cost) : IsSup f (csum f) :=
-  Classical.choose_spec (exists_isSup f)
-
-/-- Every member of a family is bounded by its aggregate. -/
-theorem le_csum {ι : Type} (f : ι → Cost) (i : ι) : f i ≤ csum f := (csum_isSup f).1 i
-
-/-- The aggregate is the least of the family's upper bounds. -/
+/-- The aggregate is the least of the family's upper bounds (Mathlib's
+`iSup_le`). -/
 theorem csum_le {ι : Type} {f : ι → Cost} {y : Cost} (h : ∀ i, f i ≤ y) : csum f ≤ y :=
-  (csum_isSup f).2 y h
-
-/-- Anything that is a supremum of `f` *is* `csum f`. -/
-theorem csum_eq {ι : Type} {f : ι → Cost} {x : Cost} (h : IsSup f x) : csum f = x :=
-  isSup_unique (csum_isSup f) h
+  iSup_le h
 
 /-- The aggregate of impossibilities is impossible. -/
-theorem csum_zero' {ι : Type} : csum (fun _ : ι => bot) = bot :=
-  csum_eq ⟨fun _ => le_refl bot, fun y _ => bot_le y⟩
+theorem csum_zero' {ι : Type} : csum (fun _ : ι => bot) = bot := iSup_bot
 
 /-- A family that is `bot` everywhere aggregates to `bot`. -/
-theorem csum_eq_bot {ι : Type} {f : ι → Cost} (h : ∀ i, f i = bot) : csum f = bot :=
-  csum_eq ⟨fun i => (h i) ▸ le_refl bot, fun y _ => bot_le y⟩
+theorem csum_eq_bot {ι : Type} {f : ι → Cost} (h : ∀ i, f i = bot) : csum f = bot := by
+  rw [show f = (fun _ => bot) from funext h]
+  exact csum_zero'
 
 /-- If the aggregate is not `bot`, some member is not. -/
 theorem exists_ne_bot_of_csum_ne_bot {ι : Type} {f : ι → Cost} (h : csum f ≠ bot) :
@@ -637,204 +622,104 @@ theorem exists_ne_bot_of_csum_ne_bot {ι : Type} {f : ι → Cost} (h : csum f �
   Classical.byContradiction fun hc =>
     h (csum_eq_bot fun i => Classical.byContradiction fun h' => hc ⟨i, h'⟩)
 
-/-- A finite supremum is attained: if the worst case is `fin m`, some member
-*is* `fin m`. (In a complete linear order with no infinitesimals, suprema of
-finite value are maxima.) -/
-theorem exists_eq_fin_of_isSup {ι : Type} {f : ι → Cost} {m : Nat} (h : IsSup f (fin m)) :
-    ∃ i, f i = fin m := by
-  apply Classical.byContradiction
-  intro hcon
-  have hne : ∀ i, f i ≠ fin m := fun i hi => hcon ⟨i, hi⟩
+/-- **A finite aggregate is attained.** If the worst case over a family is
+`fin m`, some member *is* `fin m`: the costs below `fin m` have a greatest
+element, so a supremum that were not attained would be one of them.
+
+This is the one lemma of the old supremum development that survives, and it
+survives because it is a fact about `WithBot ℕ∞` and not about complete
+lattices: it is false at, say, the reals in `[0, 1]`. It is what makes the
+infinitary distributive law below three lines long. -/
+theorem exists_eq_fin_of_csum_eq_fin {ι : Type} {f : ι → Cost} {m : Nat}
+    (h : csum f = fin m) : ∃ i, f i = fin m := by
+  by_contra hc
+  have hne : ∀ i, f i ≠ fin m := fun i hi => hc ⟨i, hi⟩
+  have hle : ∀ i, f i ≤ fin m := fun i => h ▸ le_csum f i
   cases m with
   | zero =>
     have hb : ∀ i, f i ≤ bot := by
       intro i
-      match le_fin_cases (h.1 i) with
-      | Or.inl he => exact he ▸ le_refl bot
-      | Or.inr ⟨n, he, hn⟩ =>
-        exact absurd (he.trans (congrArg fin (Nat.le_zero.mp hn))) (hne i)
-    exact absurd (h.2 bot hb) not_fin_le_bot
+      rcases le_fin_cases (hle i) with hb | ⟨n, hn, hnm⟩
+      · exact hb ▸ le_refl _
+      · exact absurd (hn.trans (congrArg fin (Nat.le_zero.mp hnm))) (hne i)
+    exact absurd (h ▸ csum_le hb) not_fin_le_bot
   | succ k =>
     have hb : ∀ i, f i ≤ fin k := by
       intro i
-      match le_fin_cases (h.1 i) with
-      | Or.inl he => exact he ▸ bot_le _
-      | Or.inr ⟨n, he, hn⟩ =>
-        have hnk : n ≤ k := by
-          match Nat.eq_or_lt_of_le hn with
-          | Or.inl heq => exact absurd (he.trans (congrArg fin heq)) (hne i)
-          | Or.inr hlt => exact Nat.le_of_lt_succ hlt
-        exact he ▸ fin_le_fin.mpr hnk
-    exact absurd (fin_le_fin.mp (h.2 (fin k) hb)) (Nat.not_succ_le_self k)
-
-/-- A finite aggregate is attained by some member of the family. -/
-theorem exists_eq_fin_of_csum_eq_fin {ι : Type} {f : ι → Cost} {m : Nat}
-    (h : csum f = fin m) : ∃ i, f i = fin m :=
-  exists_eq_fin_of_isSup (h ▸ csum_isSup f)
+      rcases le_fin_cases (hle i) with hb | ⟨n, hn, hnm⟩
+      · exact hb ▸ bot_le _
+      · have hnk : n ≤ k := by
+          rcases Nat.eq_or_lt_of_le hnm with he | hlt
+          · exact absurd (hn.trans (congrArg fin he)) (hne i)
+          · omega
+        exact hn ▸ fin_le_fin.mpr hnk
+    exact absurd (fin_le_fin.mp (h ▸ csum_le hb)) (by omega)
 
 /-- A family supported at one index aggregates to its one value. -/
 theorem csum_point' {ι : Type} (i₀ : ι) (f : ι → Cost) (h : ∀ i, i ≠ i₀ → f i = bot) :
     csum f = f i₀ :=
-  csum_eq ⟨fun i => by
+  _root_.le_antisymm
+    (csum_le fun i => by
       by_cases he : i = i₀
       · exact he ▸ le_refl (f i)
-      · exact (h i he) ▸ bot_le (f i₀),
-    fun y hy => hy i₀⟩
+      · rw [h i he]; exact bot_le (f i₀))
+    (le_csum f i₀)
 
 /-- **Two-point agreement at `Cost`**: the supremum of a two-point family is
-the worse of its two values, which is exactly what `⊕ = max` says. The
-supremum's two halves discharge it directly — each value is a lower bound of
-the pair's maximum, and any common bound bounds the maximum. -/
-theorem csum_pair' (x y : Cost) : csum (fun b : Bool => cond b x y) = add x y :=
-  csum_eq ⟨fun b =>
-      match b with
-      | true => le_add_left x y
-      | false => le_add_right x y,
-    fun _ hz => add_le (hz true) (hz false)⟩
+the worse of its two values, which is exactly what `⊕ = max` says (Mathlib's
+`iSup_bool_eq`). -/
+theorem csum_pair' (x y : Cost) : csum (fun b : Bool => cond b x y) = add x y := by
+  show (⨆ b : Bool, cond b x y) = add x y
+  rw [iSup_bool_eq]
+  rfl
 
-/-! ### Sequencing distributes over aggregation -/
+/-- **Sequencing distributes over aggregation**: the infinitary left
+distributive law for worst-case cost, `x ⊗ ⨆ᵢ fᵢ = ⨆ᵢ (x ⊗ fᵢ)`.
 
-/-- Sequencing a fixed step before a worse alternative is worse. -/
-theorem mul_mono_right (x : Cost) {y z : Cost} (h : y ≤ z) : mul x y ≤ mul x z := by
-  cases x with
-  | bot => exact le_refl _
-  | fin k =>
-    cases y with
-    | bot => exact bot_le _
-    | fin n =>
-      cases z with
-      | bot => exact absurd h not_fin_le_bot
-      | fin m => exact fin_le_fin.mpr (Nat.add_le_add_left (fin_le_fin.mp h) k)
-      | inf => exact le_inf _
-    | inf =>
-      cases z with
-      | bot => exact absurd h not_inf_le_bot
-      | fin m => exact absurd h not_inf_le_fin
-      | inf => exact le_refl _
-  | inf =>
-    cases y with
-    | bot => exact bot_le _
-    | fin n =>
-      cases z with
-      | bot => exact absurd h not_fin_le_bot
-      | fin m => exact le_refl _
-      | inf => exact le_refl _
-    | inf =>
-      cases z with
-      | bot => exact absurd h not_inf_le_bot
-      | fin m => exact absurd h not_inf_le_fin
-      | inf => exact le_refl _
+Note what the genuine `⊥` buys: Mathlib's `ENat.add_iSup` needs `[Nonempty ι]`,
+because over `ℕ∞` the empty supremum is `0` and `a + 0 ≠ 0`. Here the empty
+supremum is `bot`, which annihilates, so the law is unconditional — the same
+element that rescues the semiring from `0 = 1` rescues the distributive law
+from a side condition.
 
-/-- Divergence before a possible step diverges. -/
-theorem mul_inf_of_ne_bot {z : Cost} (h : z ≠ bot) : mul inf z = inf := by
-  cases z with
-  | bot => exact absurd rfl h
-  | fin _ => rfl
-  | inf => rfl
-
-/-- Only the impossible step makes a possible step impossible. -/
-theorem eq_bot_of_mul_eq_bot {x z : Cost} (hx : x ≠ bot) (h : mul x z = bot) : z = bot := by
-  cases x with
-  | bot => exact absurd rfl hx
-  | fin k =>
-    cases z with
-    | bot => rfl
-    | fin n => exact Cost.noConfusion h
-    | inf => exact Cost.noConfusion h
-  | inf =>
-    cases z with
-    | bot => rfl
-    | fin n => exact Cost.noConfusion h
-    | inf => exact Cost.noConfusion h
-
-/-- A finite step followed by `z` is finitely bounded only if `z` is. -/
-theorem le_of_mul_fin_le_fin {k j : Nat} {z : Cost} (h : mul (fin k) z ≤ fin j) :
-    z ≤ fin j := by
-  cases z with
-  | bot => exact bot_le _
-  | fin n =>
-    exact fin_le_fin.mpr (Nat.le_trans (Nat.le_add_left n k) (fin_le_fin.mp h))
-  | inf => exact absurd h not_inf_le_fin
-
-/-- The aggregate, sequenced after a fixed step, is still bounded by any bound
-on the sequenced members: the "least upper bound" half of infinitary
-distributivity. -/
-theorem mul_csum_le {ι : Type} (x : Cost) (f : ι → Cost) {y : Cost}
-    (hy : ∀ i, mul x (f i) ≤ y) : mul x (csum f) ≤ y := by
-  cases x with
-  | bot => exact bot_le _
-  | inf =>
-    by_cases hb : csum f = bot
-    · exact hb ▸ bot_le y
-    · match exists_ne_bot_of_csum_ne_bot hb with
-      | ⟨i, hi⟩ =>
-        have hinf : inf ≤ y := (mul_inf_of_ne_bot hi) ▸ hy i
-        have hyi : y = inf := eq_inf_of_inf_le hinf
-        rw [hyi]
-        exact le_inf _
-  | fin k =>
-    match cost_cases (csum f) with
-    | Or.inl hb => exact hb ▸ bot_le y
-    | Or.inr (Or.inl ⟨m, hs⟩) =>
-      match exists_eq_fin_of_csum_eq_fin hs with
-      | ⟨i, hi⟩ => exact hs ▸ hi ▸ hy i
-    | Or.inr (Or.inr hs) =>
-      have hyinf : y = inf := by
-        match cost_cases y with
-        | Or.inl hyb =>
-          have hall : ∀ i, f i = bot := by
-            intro i
-            have h1 : mul (fin k) (f i) ≤ bot := hyb ▸ hy i
-            exact eq_bot_of_mul_eq_bot (fun hc => Cost.noConfusion hc)
-              (eq_bot_of_le_bot h1)
-          have h2 : csum f = bot := csum_eq_bot hall
-          rw [h2] at hs
-          exact Cost.noConfusion hs
-        | Or.inr (Or.inl ⟨j, hyj⟩) =>
-          have hall : ∀ i, f i ≤ fin j := fun i => le_of_mul_fin_le_fin (hyj ▸ hy i)
-          exact absurd (hs ▸ csum_le hall) not_inf_le_fin
-        | Or.inr (Or.inr hyi) => exact hyi
-      rw [hyinf]
-      exact le_inf _
-
-/-- Sequencing distributes over aggregation: the infinitary left distributive
-law for worst-case cost. -/
+The proof is the three cases of the aggregate: impossible (both sides `bot`),
+finite (attained, so substitute the attaining member), or divergent (and then
+the right-hand side already dominates the left, since a possible step never
+makes a run cheaper). -/
 theorem mul_csum {ι : Type} (x : Cost) (f : ι → Cost) :
-    mul x (csum f) = csum (fun i => mul x (f i)) :=
-  (csum_eq ⟨fun i => mul_mono_right x (le_csum f i), fun _ hy => mul_csum_le x f hy⟩).symm
+    mul x (csum f) = csum (fun i => mul x (f i)) := by
+  refine _root_.le_antisymm ?_ (csum_le fun i => mul_mono_right x (le_csum f i))
+  by_cases hx : x = bot
+  · subst hx
+    exact _root_.le_trans (zero_mul _).le (bot_le _)
+  · rcases cost_cases (csum f) with hb | ⟨m, hm⟩ | hinf
+    · rw [hb]
+      exact _root_.le_trans (mul_zero x).le (bot_le _)
+    · obtain ⟨i, hi⟩ := exists_eq_fin_of_csum_eq_fin hm
+      rw [hm, ← hi]
+      exact le_csum (fun i => mul x (f i)) i
+    · rw [hinf, mul_inf_of_ne_bot hx, ← hinf]
+      exact iSup_mono fun i => le_mul_of_ne_bot hx (f i)
 
-/-! ### Fubini -/
-
-/-- Each member of a doubly-indexed family is bounded by the iterated aggregate. -/
-theorem csum_csum_upper {ι κ : Type} (f : ι → κ → Cost) (i : ι) (j : κ) :
-    f i j ≤ csum (fun i => csum (fun j => f i j)) :=
-  le_trans (le_csum (fun j => f i j) j) (le_csum (fun i => csum (fun j => f i j)) i)
-
-/-- Any bound on all members bounds the iterated aggregate. -/
-theorem csum_csum_least {ι κ : Type} (f : ι → κ → Cost) {y : Cost}
-    (h : ∀ i j, f i j ≤ y) : csum (fun i => csum (fun j => f i j)) ≤ y :=
-  csum_le fun i => csum_le fun j => h i j
-
-/-- Fubini: a doubly-indexed family may be aggregated in either order. -/
+/-- Fubini: a doubly-indexed family may be aggregated in either order
+(Mathlib's `iSup_comm`). -/
 theorem csum_swap' {ι κ : Type} (f : ι → κ → Cost) :
     csum (fun i => csum (fun j => f i j)) = csum (fun j => csum (fun i => f i j)) :=
-  le_antisymm
-    (csum_csum_least f fun i j => csum_csum_upper (fun j i => f i j) j i)
-    (csum_csum_least (fun j i => f i j) fun j i => csum_csum_upper f i j)
+  iSup_comm
 
-/-- Aggregating over a product index is aggregating twice. -/
+/-- Aggregating over a product index is aggregating twice (Mathlib's
+`iSup_prod`). -/
 theorem csum_prod' {ι κ : Type} (f : ι → κ → Cost) :
     csum (fun p : ι × κ => f p.1 p.2) = csum (fun i => csum (fun j => f i j)) :=
-  csum_eq ⟨fun p => csum_csum_upper f p.1 p.2,
-    fun _ hy => csum_csum_least f fun i j => hy (i, j)⟩
+  iSup_prod
 
 end Cost
 
 /-- Worst-case cost is a complete resource semiring: aggregation over an
-arbitrary family is its supremum. Noncomputable, because the supremum is
-obtained classically. -/
+arbitrary family is Mathlib's `iSup`. Noncomputable, because the complete
+lattice on `WithBot ℕ∞` is. -/
 noncomputable instance instCompleteCSemiringCost : CompleteCSemiring Cost where
-  toCSemiring := instCSemiringCost
+  __ := (inferInstance : CommSemiring Cost)
   csum := fun {_} f => Cost.csum f
   csum_zero := Cost.csum_zero'
   csum_point := by
@@ -845,437 +730,346 @@ noncomputable instance instCompleteCSemiringCost : CompleteCSemiring Cost where
   csum_prod := Cost.csum_prod'
   csum_pair := Cost.csum_pair'
 
-/-! ## Consensus weight: the Viterbi semiring, in exact logarithms
+/-! ## Consensus weight: Viterbi at `ℝ≥0∞`, the real probability carrier
 
 The design names a third carrier beside possibility and worst-case cost: *the
 Viterbi semiring `([0,1], max, ×)` (consensus weight — not `([0,1], +, ×)`,
-which is not closed under addition)* (§2). It is the probability-reading
-factor — what §3's projection projects onto, and where §5.2 reads its
-absorption — and until now the package had no carrier for it at all.
+which is not closed under addition)* (§2).
 
-**Why not the rational unit interval.** Lean 4.30's core does ship `Rat`
-(probe: `#check @Rat` answers `Rat : Type`, and `Rat.mul_comm`, `Rat.mul_assoc`
-are core theorems), so `{q : Rat // 0 ≤ q ∧ q ≤ 1}` with `max` and `×` could be
-written down, and it would be a `CSemiring`. It could **not** be a
-`CompleteCSemiring`, and the obstruction is mathematical rather than a matter
-of missing lemmas: `csum` must aggregate an *arbitrary* family; at a carrier
-whose `⊕` is `max` the aggregate has to be the supremum — two-point agreement
-(`csum_pair`) already forces it to be the supremum on families of two — and a
-family of rationals in `[0,1]` need not have a rational supremum. The rational
-unit interval is not a complete lattice, so the aggregate a complete semiring
-*means* — the join of the family — is not available there; an operation called
-`csum` that is not that join is the disease two-point agreement was added to
-prevent (acat-9kn), moved from pairs to families. No impossibility theorem is
-claimed, and none is needed: nothing is being ruled out here except writing
-down an aggregation that is not an aggregation. Reals would repair it properly,
-and reals are Mathlib's (acat-467).
+**What this used to be, and why.** It used to be a two-constructor inductive
+carrying a `Nat` exponent — the probabilities `2⁻ⁿ` and `0` — with `max` and
+`×` written out on exponents, its own `IsSup`, its own well-ordering argument
+(`exists_least`), its own `Classical.choose` aggregation and its own attainment
+lemma. The reason given was completeness: `csum` must be a supremum, and a
+family of *rationals* in `[0,1]` need not have a rational supremum. That
+reason is sound and it is also an argument for using the reals, which is what
+happens here.
 
-**What is built instead.** The sub-semiring of `([0,1], max, ×)` generated by
-one half: the probabilities `2⁻ⁿ` together with `0`. It is closed under both
-operations — `2⁻ᵐ · 2⁻ⁿ = 2⁻⁽ᵐ⁺ⁿ⁾` and `max 2⁻ᵐ 2⁻ⁿ = 2⁻ᵐᶦⁿ⁽ᵐ˒ⁿ⁾` — and, which
-is the point, it *is* complete: a supremum is a least exponent, the naturals
-are well-ordered, so every family has one and it is attained. Attainment is
-what makes the infinitary distributive law a dozen lines here where `Cost`
-needed forty — a supremum that is a member of its family can simply be
-substituted for.
+**What it is now.** Mathlib's `ℝ≥0∞` (`ENNReal`), with `⊕ = ⊔` and `⊗ = ×`.
+`ℝ≥0∞` is a `CompleteLinearOrder` whose `⊥` is `0`, a `CommMonoidWithZero`
+under multiplication, and — the lemma that deletes this section's entire
+aggregation development — it satisfies `ENNReal.mul_iSup` unconditionally.
+Probabilities are now real numbers; `Prob.exp2 n` is the actual number `2⁻ⁿ`,
+not a tag for it.
 
-The carrier is therefore represented by its exponent — a log-probability,
-which is what an implementation of Viterbi carries anyway — and its arithmetic
-is exact `Nat` arithmetic rather than a floating-point apology. Reading the
-representation: `exp2 n` *is* the probability `2⁻ⁿ`, `never` is `0`, `⊕` takes
-the more probable alternative and `⊗` multiplies. Because `⊕` is `max` it is
-idempotent, so unlike the expectation carrier below this one keeps the
-canonical additive order, and its star is least (`instKleeneStarProb`). -/
+**What the widening costs, stated plainly.** `ℝ≥0∞` contains weights above `1`,
+and two theorems that were unconditional at the dyadic carrier are conditional
+here: `Prob.le_one` (certainty is the top) and, downstream in `Agentic.Star`,
+Viterbi absorption `retry_prob`. That is not a loss of content but a repair of
+an overclaim — "the star of a consensus weight is certainty" is *true because
+the weight is at most certain*, and at the old carrier that hypothesis was
+smuggled in by the choice of constructors. The sub-unit hypothesis `p ≤ 1` is
+exactly the design's `[0,1]`, now visible in the statements that need it.
+Above `1` the star answers `⊤`, which is the honest reading: a step that
+amplifies, iterated without limit, has unbounded weight.
+-/
 
-/-- A `Prob` is a representation of a *consensus weight*: the probability of
-the best run, either impossible (`never`) or a power of one half (`exp2 n`
-denotes `2⁻ⁿ`, so `exp2 0` is certainty).
+/-- A `Prob` is a *consensus weight*: Mathlib's `ℝ≥0∞`, with `⊕` the join
+(`max`, the better of two alternatives) and `⊗` multiplication (weights of
+successive independent steps multiply). `0` is the impossible run — which is
+also `⊥`, so the semiring's zero and the order's bottom coincide without any
+adjustment — and `1` is certainty.
 
-The exponent, not the probability, is the datum — the carrier is the Viterbi
-semiring in logarithms — and the two constructors are the two things a
-probability of this shape can be. Restricting to powers of one half is what
-buys completeness: every family of these has a supremum, namely the least
-exponent occurring in it, whereas a family of rationals in `[0,1]` need not
-have one in `[0,1] ∩ ℚ`. -/
-inductive Prob where
-  /-- The impossible run: probability `0`, the semiring's `0`. -/
-  | never : Prob
-  /-- The probability `2⁻ⁿ`. `exp2 0` is certainty, the semiring's `1`. -/
-  | exp2 (n : Nat) : Prob
-  deriving DecidableEq, Repr
+A `def` rather than an `abbrev`, for the reason `Cost` is: `ℝ≥0∞` already
+carries an `AddCommMonoid` whose `+` is addition, and the Viterbi semiring
+needs `+` to be `⊔`. The sum-product reading of `ℝ≥0∞` (`+` really `+`, with
+`tsum` for aggregation) is a *different* semiring on the same numbers, and
+keeping them apart is what the synonym is for. -/
+def Prob := ℝ≥0∞
 
 namespace Prob
 
-/-- Combination of alternatives is the more probable of the two — `max` on
-probabilities, which on exponents is `min` — with the impossible run losing to
-everything. -/
-def add : Prob → Prob → Prob
-  | never,  y      => y
-  | exp2 m, never  => exp2 m
-  | exp2 m, exp2 n => exp2 (min m n)
+/-- The impossible run: probability `0`, the semiring's `0` and the order's
+`⊥`. -/
+def never : Prob := (0 : ℝ≥0∞)
 
-/-- Sequencing multiplies probabilities, which on exponents adds them; the
-impossible run annihilates, since a step that cannot happen cannot be
-followed. -/
-def mul : Prob → Prob → Prob
-  | never,  _      => never
-  | exp2 _, never  => never
-  | exp2 m, exp2 n => exp2 (m + n)
+/-- The probability `2⁻ⁿ`, as a real number. `exp2 0` is certainty, the
+semiring's `1`. The old carrier could represent nothing else; this one can, and
+the constructor survives only because the read-outs and examples name it. -/
+noncomputable def exp2 (n : Nat) : Prob := (2 : ℝ≥0∞)⁻¹ ^ n
 
-/-- Alternatives are unordered. -/
-theorem add_comm' : ∀ x y : Prob, add x y = add y x
-  | never,  never  => rfl
-  | never,  exp2 _ => rfl
-  | exp2 _, never  => rfl
-  | exp2 m, exp2 n => congrArg exp2 (Nat.min_comm m n)
-
-/-- Alternatives are unbracketed. -/
-theorem add_assoc' : ∀ x y z : Prob, add (add x y) z = add x (add y z) := by
-  intro x y z
-  cases x <;> cases y <;> cases z <;>
-    first
-      | rfl
-      | exact congrArg exp2 (Nat.min_assoc _ _ _)
-
-/-- The best of two identical alternatives is that alternative: `max` is
-idempotent, which is the duplication licence at this carrier. -/
-theorem add_idem' : ∀ x : Prob, add x x = x
-  | never  => rfl
-  | exp2 n => congrArg exp2 (Nat.min_self n)
-
-/-- Probabilities multiply in either order. -/
-theorem mul_comm' : ∀ x y : Prob, mul x y = mul y x := by
-  intro x y
-  cases x <;> cases y <;>
-    first
-      | rfl
-      | exact congrArg exp2 (Nat.add_comm _ _)
-
-/-- Sequencing is unbracketed. -/
-theorem mul_assoc' : ∀ x y z : Prob, mul (mul x y) z = mul x (mul y z) := by
-  intro x y z
-  cases x <;> cases y <;> cases z <;>
-    first
-      | rfl
-      | exact congrArg exp2 (Nat.add_assoc _ _ _)
-
-/-- Certainty before a step changes nothing. -/
-theorem one_mul' : ∀ x : Prob, mul (exp2 0) x = x
-  | never  => rfl
-  | exp2 n => congrArg exp2 (Nat.zero_add n)
-
-/-- Certainty after a step changes nothing. -/
-theorem mul_one' : ∀ x : Prob, mul x (exp2 0) = x
-  | never  => rfl
-  | exp2 n => congrArg exp2 (Nat.add_zero n)
-
-/-- Sequencing distributes over the better alternative, downstream. -/
-theorem left_distrib' : ∀ x y z : Prob, mul x (add y z) = add (mul x y) (mul x z) := by
-  intro x y z
-  cases x <;> cases y <;> cases z <;>
-    first
-      | rfl
-      | exact congrArg exp2 (Nat.add_min_add_left _ _ _).symm
-
-/-- Sequencing distributes over the better alternative, upstream. -/
-theorem right_distrib' : ∀ x y z : Prob, mul (add x y) z = add (mul x z) (mul y z) := by
-  intro x y z
-  cases x <;> cases y <;> cases z <;>
-    first
-      | rfl
-      | exact congrArg exp2 (Nat.add_min_add_right _ _ _).symm
-
-/-- Sequencing before the impossible run is impossible. -/
-theorem mul_zero' : ∀ x : Prob, mul x never = never
-  | never  => rfl
-  | exp2 _ => rfl
+/-- The underlying extended non-negative real, for statements that must name
+`ℝ≥0∞`'s operations rather than the semiring's. -/
+abbrev val (x : Prob) : ℝ≥0∞ := x
 
 end Prob
 
-/-- Consensus weight is a resource semiring: `⊕` is `max` (the better of two
-alternatives is the one a Viterbi read-out keeps) and `⊗` is `×` (probabilities
-of successive independent steps multiply), with `0` the impossible run and `1`
-certainty. This is the design's `([0,1], max, ×)`, exactly, on the
-probabilities it can represent. -/
-instance instCSemiringProb : CSemiring Prob where
-  add := Prob.add
-  mul := Prob.mul
-  zero := Prob.never
-  one := Prob.exp2 0
-  add_comm := Prob.add_comm'
-  add_assoc := Prob.add_assoc'
-  zero_add _ := rfl
-  mul_comm := Prob.mul_comm'
-  mul_assoc := Prob.mul_assoc'
-  one_mul := Prob.one_mul'
-  mul_one := Prob.mul_one'
-  left_distrib := Prob.left_distrib'
-  right_distrib := Prob.right_distrib'
-  zero_mul _ := rfl
-  mul_zero := Prob.mul_zero'
+/-- Sequencing of consensus weights is multiplication of probabilities:
+Mathlib's `CommMonoid` on `ℝ≥0∞`, not a re-proof of it. -/
+noncomputable instance instCommMonoidProb : CommMonoid Prob := inferInstanceAs (CommMonoid ℝ≥0∞)
 
-/-- Consensus weight is idempotent: the better of an alternative and itself is
-that alternative. This is what separates the Viterbi carrier from a
-measure-theoretic one, and it is why the canonical additive order and Kleene
-induction are available here and not there. -/
-instance instIdemAddProb : IdemAdd Prob where
-  add_idem := Prob.add_idem'
+/-- **The probability order is Mathlib's, and it is complete.** Every family of
+consensus weights has a least upper bound — the aggregation the design calls
+for — and it is `iSup`. This is what deleted `IsSup`, `exists_least`,
+`exists_attained` and the classical choice they fed. -/
+noncomputable instance instCompleteLinearOrderProb : CompleteLinearOrder Prob :=
+  inferInstanceAs (CompleteLinearOrder ℝ≥0∞)
+
+/-- Consensus weights have decidable equality (Mathlib's, on `ℝ≥0∞`). -/
+noncomputable instance instDecidableEqProb : DecidableEq Prob :=
+  inferInstanceAs (DecidableEq ℝ≥0∞)
+
+/-- The impossible run is the semiring's `0` — and `ℝ≥0∞`'s `0` is its `⊥`, so
+this is also the order's bottom. -/
+instance instZeroProb : Zero Prob := ⟨Prob.never⟩
+
+/-- Combination of alternatives is the better of the two: the join, which on
+`ℝ≥0∞` is `max`. -/
+noncomputable instance instAddProb : Add Prob := ⟨fun x y => (x ⊔ y : Prob)⟩
+
+/-- **Consensus weight is a commutative idempotent resource semiring**, every
+field of it a Mathlib lemma about `ℝ≥0∞`: `⊕` is the lattice join, `⊗` is the
+inherited `CommMonoid`, distributivity is `max_mul_mul_left`/`max_mul_mul_right`
+(multiplication is monotone on a linear order, so it maps maxima to maxima) and
+annihilation is `mul_zero`/`zero_mul`.
+
+Idempotence of `⊕` is what separates this carrier from a measure-theoretic
+one — `max` is idempotent, `+` is not — and it is why the canonical additive
+order and Kleene induction are available here. -/
+noncomputable instance instIdemCommSemiringProb : IdemCommSemiring Prob where
+  __ := (inferInstance : CommMonoid Prob)
+  add_comm := sup_comm (α := Prob)
+  add_assoc := sup_assoc (α := Prob)
+  zero_add := bot_sup_eq (α := Prob)
+  add_zero := sup_bot_eq (α := Prob)
+  nsmul := nsmulRec
+  nsmul_zero := fun _ => rfl
+  nsmul_succ := fun _ _ => rfl
+  left_distrib a b c := (max_mul_mul_left (α := ℝ≥0∞) a b c).symm
+  right_distrib a b c := (max_mul_mul_right (α := ℝ≥0∞) a b c).symm
+  zero_mul := MulZeroClass.zero_mul (M₀ := ℝ≥0∞)
+  mul_zero := MulZeroClass.mul_zero (M₀ := ℝ≥0∞)
+  bot_le := fun _ => bot_le (α := Prob)
+  add_eq_sup _ _ := rfl
+
+/-- `instAddCommMonoidProb` — the alternation half of the consensus-weight
+semiring, now a projection of `instIdemCommSemiringProb`. Name kept
+resolving. -/
+noncomputable abbrev instAddCommMonoidProb : AddCommMonoid Prob := inferInstance
+
+/-- `instCSemiringProb` — consensus weight as a commutative semiring, now a
+projection of `instIdemCommSemiringProb`. Name kept resolving. -/
+noncomputable abbrev instCSemiringProb : CommSemiring Prob := inferInstance
+
+/-- `instIdemAddProb` — the duplication licence at consensus weight (the better
+of an alternative and itself is that alternative), now
+`instIdemCommSemiringProb` itself. Name kept resolving. -/
+noncomputable abbrev instIdemAddProb : IdemCommSemiring Prob := inferInstance
 
 namespace Prob
 
 /-- The impossible run *is* the semiring's `0`. -/
 theorem never_eq_zero : (never : Prob) = 0 := rfl
 
+/-- The impossible run *is* the order's `⊥`: at `ℝ≥0∞` the two coincide with no
+adjunction of a bottom, which is the one respect in which this carrier is
+simpler than `Cost`. -/
+theorem never_eq_bot : (never : Prob) = ⊥ := rfl
+
 /-- Certainty *is* the semiring's `1`. -/
-theorem exp2_zero_eq_one : exp2 0 = (1 : Prob) := rfl
+theorem exp2_zero_eq_one : exp2 0 = (1 : Prob) := pow_zero _
+
+/-- Combination of alternatives is the better of the two, as an operation named
+for the callers that spelled it out. -/
+noncomputable abbrev add (x y : Prob) : Prob := x + y
+
+/-- Sequencing multiplies probabilities, as an operation named for the callers
+that spelled it out. -/
+noncomputable abbrev mul (x y : Prob) : Prob := x * y
+
+/-- Alternatives are unordered (Mathlib's `add_comm`). -/
+theorem add_comm' (x y : Prob) : add x y = add y x := _root_.add_comm x y
+
+/-- Alternatives are unbracketed (Mathlib's `add_assoc`). -/
+theorem add_assoc' (x y z : Prob) : add (add x y) z = add x (add y z) :=
+  _root_.add_assoc x y z
+
+/-- The best of two identical alternatives is that alternative: `max` is
+idempotent, which is the duplication licence at this carrier. -/
+theorem add_idem' (x : Prob) : add x x = x := _root_.add_idem x
+
+/-- Probabilities multiply in either order. -/
+theorem mul_comm' (x y : Prob) : mul x y = mul y x := _root_.mul_comm x y
+
+/-- Sequencing is unbracketed. -/
+theorem mul_assoc' (x y z : Prob) : mul (mul x y) z = mul x (mul y z) :=
+  _root_.mul_assoc x y z
+
+/-- Certainty before a step changes nothing. -/
+theorem one_mul' (x : Prob) : mul 1 x = x := _root_.one_mul x
+
+/-- Certainty after a step changes nothing. -/
+theorem mul_one' (x : Prob) : mul x 1 = x := _root_.mul_one x
+
+/-- Sequencing distributes over the better alternative, downstream. -/
+theorem left_distrib' (x y z : Prob) : mul x (add y z) = add (mul x y) (mul x z) :=
+  _root_.left_distrib x y z
+
+/-- Sequencing distributes over the better alternative, upstream. -/
+theorem right_distrib' (x y z : Prob) : mul (add x y) z = add (mul x z) (mul y z) :=
+  _root_.right_distrib x y z
+
+/-- Sequencing before the impossible run is impossible. -/
+theorem mul_zero' (x : Prob) : mul x never = never := MulZeroClass.mul_zero x
+
+/-- Powers of one half multiply by adding exponents: `2⁻ᵐ · 2⁻ⁿ = 2⁻⁽ᵐ⁺ⁿ⁾`,
+now an identity about real numbers rather than the definition of `⊗`. -/
+theorem exp2_mul_exp2 (m n : Nat) : mul (exp2 m) (exp2 n) = exp2 (m + n) :=
+  (pow_add _ m n).symm
 
 /-- **The additive order at consensus weight is the probability order**, which
-on exponents is reversed: `2⁻ᵐ` is no more probable than `2⁻ⁿ` exactly when
-`n ≤ m`. -/
+on the exponents of `2⁻ⁿ` is reversed: `2⁻ᵐ` is no more probable than `2⁻ⁿ`
+exactly when `n ≤ m`. At the old carrier this was the definition of the order;
+here it is a fact about powers of a real number below one. -/
 theorem addLe_exp2_iff {m n : Nat} : (exp2 m ≤+ exp2 n) ↔ n ≤ m := by
-  constructor
-  · intro h
-    have h' : exp2 (min m n) = exp2 n := h
-    have h'' : min m n = n := exp2.inj h'
-    exact h'' ▸ Nat.min_le_left m n
-  · intro h
-    show add (exp2 m) (exp2 n) = exp2 n
-    exact congrArg exp2 (Nat.min_eq_right h)
+  show ((2 : ℝ≥0∞)⁻¹ ^ m ≤ (2 : ℝ≥0∞)⁻¹ ^ n) ↔ n ≤ m
+  rw [← ENNReal.inv_pow, ← ENNReal.inv_pow, ENNReal.inv_le_inv,
+    show (2 : ℝ≥0∞) = ((2 : NNReal) : ℝ≥0∞) from rfl, ← ENNReal.coe_pow, ← ENNReal.coe_pow,
+    ENNReal.coe_le_coe]
+  exact pow_le_pow_iff_right₀ (by norm_num)
 
-/-- **Certainty is the top of the order**: nothing is more probable than the
-free step. This is the fact that makes the star at this carrier constant. -/
-theorem addLe_one : ∀ x : Prob, x ≤+ (1 : Prob)
-  | never  => rfl
-  | exp2 n => congrArg exp2 (Nat.min_eq_right (Nat.zero_le n))
+/-- **Certainty is the top of the sub-unit weights**: a weight that is at most
+certain is below certainty in the additive order, which is the same statement.
 
-/-- **Iteration at consensus weight is certainty**: `p* = 1`. A loop may be run
-no times, the empty run is certain, and `max` keeps the best — so repeating a
-step any number of times *including none* is certain whatever the step. This is
-the Viterbi reading of §5.2's star, and it is the exact analogue of `p* = True`
-at possibility. -/
-theorem star_eq_left' (x : Prob) : (1 : Prob) = 1 + x * 1 := by
-  have h : x + 1 = (1 : Prob) := addLe_one x
-  rw [mul_one, add_comm, h]
+This is where the honest carrier shows its teeth. At the dyadic carrier every
+element was at most `1` and the hypothesis was invisible; at `ℝ≥0∞` it is a
+hypothesis, and it is exactly the design's `[0,1]`. -/
+theorem addLe_one {x : Prob} (hx : x ≤ 1) : x ≤+ (1 : Prob) := hx
 
 end Prob
 
-/-- Iteration at consensus weight: the star is certainty, because the empty run
-is always available and `max` prefers it to any product of probabilities. -/
-instance instStarSemiringProb : StarSemiring Prob where
-  star := fun _ => 1
-  star_eq_left := Prob.star_eq_left'
-
-/-- **Iteration at consensus weight is least.** The star answers `1`, which is
-the *top* of the probability order, so leastness is worth a sentence: the
-hypothesis of Kleene induction already contains `b ≤+ x`, and `1 · b` is `b`,
-so the loop's solve is below every invariant of the loop step for the same
-reason it is at possibility — a loop that may be taken zero times imposes no
-condition. This carrier is therefore a `KleeneStar` and `retry_least` applies
-to it, which is *not* true of the expectation semiring below. -/
-instance instKleeneStarProb : KleeneStar Prob where
-  star_le_left a b x h := by
-    show (1 : Prob) * b ≤+ x
-    rw [one_mul]
-    exact addLe_trans (addLe_add_left b (a * x)) h
+/-- Iteration at consensus weight: certainty if the step is at most certain,
+and `⊤` otherwise. The first case is the design's Viterbi star — a loop may be
+run no times, the empty run is certain, and `max` keeps the best — and the
+second is what a real carrier forces one to say about a step that amplifies. -/
+noncomputable def Prob.star (x : Prob) : Prob := if x ≤ 1 then 1 else ⊤
 
 namespace Prob
 
-/-! ### Aggregation of consensus weights is the most probable member
+/-- Unrolling an iteration from the front changes nothing. -/
+theorem star_eq_left' (x : Prob) : star x = 1 + x * star x := by
+  unfold star
+  split
+  · next h => rw [show x * 1 = x from _root_.mul_one x]; exact (sup_eq_left.mpr h).symm
+  · next h =>
+      have hx : x ≠ 0 := fun h0 => h (h0 ▸ zero_le_one)
+      rw [show x * (⊤ : Prob) = (⊤ : Prob) from ENNReal.mul_top hx]
+      exact (sup_eq_right.mpr le_top).symm
 
-An arbitrary family of consensus weights has a supremum in the probability
-order, and — unlike at `Cost`, where a family of unboundedly growing finite
-bounds has only `inf` for a supremum — that supremum is always *attained*: it
-is the least exponent occurring in the family, and the naturals are
-well-ordered. Attainment is the whole reason this section is short. Every
-aggregation axiom below is either the order's own arithmetic or the observation
-that a sup which is a member can be substituted for. -/
+/-- **Iteration at consensus weight is least.** If the body is at most certain
+the star is `1`, and Kleene induction is immediate: `1 · b` is `b`, and the
+hypothesis already contains `b ≤ x`, so a loop that may be taken zero times
+imposes no condition. If the body amplifies, the star is `⊤`, and the work is
+the observation that an amplifying loop with a possible exit has no finite
+weight: `a · x ≤ x` with `0 < x < ⊤` and `a > 1` is a contradiction in
+`ℝ≥0∞`. -/
+theorem star_le_left' (a b x : Prob) (h : b + a * x ≤ x) : star a * b ≤ x := by
+  have hb : b ≤ x := _root_.le_trans le_sup_left h
+  have hax : a * x ≤ x := _root_.le_trans le_sup_right h
+  unfold star
+  split
+  · next ha => rw [_root_.one_mul]; exact hb
+  · next ha =>
+      by_cases hxt : x = ⊤
+      · rw [hxt]; exact le_top
+      · by_cases hb0 : b = 0
+        · rw [hb0, MulZeroClass.mul_zero]; exact bot_le
+        · have hx0 : x ≠ 0 := fun h0 => hb0 (le_antisymm (h0 ▸ hb) bot_le)
+          have hax1 : a * x ≤ 1 * x := by
+            rw [_root_.one_mul]
+            exact hax
+          exact absurd ((ENNReal.mul_le_mul_iff_left hx0 hxt).mp hax1) ha
 
-/-- `IsSup f x` is a representation of "`x` is the most probable member of the
-family `f`": an upper bound in the additive order, and the least one. -/
-def IsSup {ι : Type} (f : ι → Prob) (x : Prob) : Prop :=
-  (∀ i, f i ≤+ x) ∧ ∀ y, (∀ i, f i ≤+ y) → x ≤+ y
+end Prob
 
-/-- A family has at most one supremum: the additive order is antisymmetric. -/
-theorem isSup_unique {ι : Type} {f : ι → Prob} {x y : Prob}
-    (hx : IsSup f x) (hy : IsSup f y) : x = y :=
-  addLe_antisymm (hx.2 y hy.1) (hy.2 x hx.1)
+/-- **Iteration at consensus weight is a Kleene star**: the least solution of
+the loop equation, in the canonical additive order. This carrier is therefore a
+`KleeneStar` and `retry_least` applies to it, which is *not* true of the
+expectation semiring below. -/
+noncomputable instance instKleeneStarProb : KleeneAlgebra Prob :=
+  KleeneAlgebra.ofCommStarLe Prob.star Prob.star_eq_left' Prob.star_le_left'
 
-/-- **A nonempty set of naturals has a least member.** The one piece of
-arithmetic the supremum needs, and — `Nat.find` being absent from core — it is
-paid for by induction on a witness bound, exactly as `Cost.exists_greatest`
-pays for the dual fact. -/
-theorem exists_least (p : Nat → Prop) :
-    ∀ b : Nat, ∀ k, k ≤ b → p k → ∃ m, p m ∧ ∀ j, p j → m ≤ j := by
-  intro b
-  induction b with
-  | zero =>
-    intro k hk hp
-    have hk0 : k = 0 := Nat.le_zero.mp hk
-    exact ⟨0, hk0 ▸ hp, fun j _ => Nat.zero_le j⟩
-  | succ b ih =>
-    intro k hk hp
-    by_cases hlow : ∃ j, j ≤ b ∧ p j
-    · match hlow with
-      | ⟨j, hjb, hj⟩ => exact ih j hjb hj
-    · have hnone : ∀ j, j ≤ b → ¬ p j := fun j hjb hj => hlow ⟨j, hjb, hj⟩
-      have hk' : k = b + 1 := by
-        match Nat.lt_or_ge k (b + 1) with
-        | Or.inl h => exact absurd hp (hnone k (Nat.le_of_lt_succ h))
-        | Or.inr h => exact Nat.le_antisymm hk h
-      refine ⟨b + 1, hk' ▸ hp, fun j hj => ?_⟩
-      match Nat.lt_or_ge j (b + 1) with
-      | Or.inl h => exact absurd hj (hnone j (Nat.le_of_lt_succ h))
-      | Or.inr h => exact h
+/-- Iteration at consensus weight unrolls from the front. Now derived from the
+Kleene algebra; the name is kept resolving. -/
+noncomputable abbrev instStarSemiringProb : StarSemiring Prob := inferInstance
 
-/-- A family of impossible runs has the impossible run for its supremum. -/
-theorem isSup_zero {ι : Type} {f : ι → Prob} (h : ∀ i, f i = 0) : IsSup f 0 := by
-  refine ⟨fun i => ?_, fun y _ => zero_addLe y⟩
-  rw [h i]
-  exact addLe_refl (0 : Prob)
+namespace Prob
 
-/-- **The supremum is attained.** Either every member of the family is
-impossible, or some member *is* the family's supremum — there is no third case,
-because a supremum here is a least exponent and a nonempty set of naturals has
-a least member. This is the lemma the whole completeness argument runs on. -/
-theorem exists_attained {ι : Type} (f : ι → Prob) :
-    (∀ i, f i = 0) ∨ ∃ i, IsSup f (f i) := by
-  by_cases hall : ∀ i, f i = 0
-  · exact Or.inl hall
-  · refine Or.inr ?_
-    have hex : ∃ i, f i ≠ 0 := Classical.byContradiction fun hc =>
-      hall fun i => Classical.byContradiction fun h' => hc ⟨i, h'⟩
-    match hex with
-    | ⟨i₀, hi₀⟩ =>
-      have hfin : ∃ n, f i₀ = exp2 n := by
-        cases h : f i₀ with
-        | never => exact absurd h hi₀
-        | exp2 n => exact ⟨n, rfl⟩
-      match hfin with
-      | ⟨n₀, hn₀⟩ =>
-        match exists_least (fun n => ∃ i, f i = exp2 n) n₀ n₀ (Nat.le_refl n₀)
-            ⟨i₀, hn₀⟩ with
-        | ⟨m, ⟨i₁, hi₁⟩, hmin⟩ =>
-          refine ⟨i₁, fun i => ?_, fun y hy => hy i₁⟩
-          cases h : f i with
-          | never => exact zero_addLe (f i₁)
-          | exp2 k =>
-            rw [hi₁]
-            exact addLe_exp2_iff.mpr (hmin k ⟨i, h⟩)
+/-! ### Aggregation of consensus weights is Mathlib's `iSup`
 
-/-- Every family of consensus weights has a supremum. -/
-theorem exists_isSup {ι : Type} (f : ι → Prob) : ∃ x, IsSup f x :=
-  match exists_attained f with
-  | Or.inl h => ⟨0, isSup_zero h⟩
-  | Or.inr ⟨i, h⟩ => ⟨f i, h⟩
+The old development built the supremum by hand: a well-ordering argument on
+exponents (`exists_least`), an `IsSup` predicate, its uniqueness, a
+`Classical.choose`, an attainment lemma and a proof of the infinitary
+distributive law from attainment. All of it is `iSup` on `ℝ≥0∞`, and the
+infinitary distributive law — the one axiom that is not lattice bookkeeping —
+is Mathlib's `ENNReal.mul_iSup`, which holds for an arbitrary and possibly
+empty index. -/
 
 /-- The aggregation of a family of consensus weights: the probability of its
-best member. Noncomputable, because the choice of that member is classical —
-the same price `Cost.csum` pays, and for the same reason. -/
-noncomputable def csum {ι : Type} (f : ι → Prob) : Prob :=
-  Classical.choose (exists_isSup f)
+best member, Mathlib's `iSup`. -/
+noncomputable abbrev csum {ι : Type} (f : ι → Prob) : Prob := ⨆ i, f i
 
-/-- `csum f` is the supremum of `f`. -/
-theorem csum_isSup {ι : Type} (f : ι → Prob) : IsSup f (csum f) :=
-  Classical.choose_spec (exists_isSup f)
+/-- Every member of a family is at most its aggregate (Mathlib's `le_iSup`). -/
+theorem le_csum {ι : Type} (f : ι → Prob) (i : ι) : f i ≤+ csum f := le_iSup f i
 
-/-- Every member of a family is at most its aggregate. -/
-theorem le_csum {ι : Type} (f : ι → Prob) (i : ι) : f i ≤+ csum f :=
-  (csum_isSup f).1 i
-
-/-- The aggregate is the least of the family's upper bounds. -/
-theorem csum_le {ι : Type} {f : ι → Prob} {y : Prob} (h : ∀ i, f i ≤+ y) :
-    csum f ≤+ y :=
-  (csum_isSup f).2 y h
-
-/-- Anything that is a supremum of `f` *is* `csum f`. -/
-theorem csum_eq {ι : Type} {f : ι → Prob} {x : Prob} (h : IsSup f x) : csum f = x :=
-  isSup_unique (csum_isSup f) h
+/-- The aggregate is the least of the family's upper bounds (Mathlib's
+`iSup_le`). -/
+theorem csum_le {ι : Type} {f : ι → Prob} {y : Prob} (h : ∀ i, f i ≤+ y) : csum f ≤+ y :=
+  iSup_le h
 
 /-- Aggregation respects pointwise equality of families. -/
 theorem csum_congr' {ι : Type} {f g : ι → Prob} (h : ∀ i, f i = g i) :
     csum f = csum g :=
-  congrArg csum (funext h)
-
-/-- **The aggregate is a member**, unless the whole family is impossible. This
-is `exists_attained` read through `csum`, and it is what replaces `Cost`'s
-laborious case analysis on whether a supremum is finite. -/
-theorem csum_attained {ι : Type} (f : ι → Prob) :
-    ((∀ i, f i = 0) ∧ csum f = 0) ∨ ∃ i, csum f = f i :=
-  match exists_attained f with
-  | Or.inl h => Or.inl ⟨h, csum_eq (isSup_zero h)⟩
-  | Or.inr ⟨i, h⟩ => Or.inr ⟨i, csum_eq h⟩
+  congrArg _ (funext h)
 
 /-- Aggregating impossibilities is impossible. -/
-theorem csum_zero' {ι : Type} : csum (fun _ : ι => (0 : Prob)) = 0 :=
-  csum_eq (isSup_zero fun _ => rfl)
+theorem csum_zero' {ι : Type} : csum (fun _ : ι => (0 : Prob)) = 0 := iSup_bot
 
 /-- A family supported at one index aggregates to its one value. -/
 theorem csum_point' {ι : Type} (i₀ : ι) (f : ι → Prob) (h : ∀ i, i ≠ i₀ → f i = 0) :
-    csum f = f i₀ := by
-  refine csum_eq ⟨fun i => ?_, fun y hy => hy i₀⟩
-  by_cases he : i = i₀
-  · rw [he]
-    exact addLe_refl (f i₀)
-  · rw [h i he]
-    exact zero_addLe (f i₀)
+    csum f = f i₀ :=
+  le_antisymm
+    (csum_le fun i => by
+      by_cases he : i = i₀
+      · exact he ▸ le_rfl
+      · rw [h i he]; exact bot_le)
+    (le_csum f i₀)
 
 /-- **Two-point agreement at consensus weight**: the supremum of a two-point
-family is the better of its two values, which is what `⊕ = max` says. -/
+family is the better of its two values, which is what `⊕ = max` says (Mathlib's
+`iSup_bool_eq`). -/
 theorem csum_pair' (x y : Prob) : csum (fun b : Bool => cond b x y) = x + y := by
-  refine csum_eq ⟨fun b => ?_, fun z hz => add_addLe (hz true) (hz false)⟩
-  cases b
-  · exact addLe_add_right x y
-  · exact addLe_add_left x y
+  show (⨆ b : Bool, cond b x y) = x + y
+  rw [iSup_bool_eq]
+  rfl
 
 /-- **Sequencing distributes over aggregation**: the infinitary left
-distributive law. Attainment does all the work — the aggregate is a member, and
-a fixed step before the best member is the best of the stepped members. -/
+distributive law, which at this carrier is exactly Mathlib's
+`ENNReal.mul_iSup` — no attainment argument, no case analysis, no `Nonempty`
+side condition. -/
 theorem mul_csum' {ι : Type} (x : Prob) (f : ι → Prob) :
     x * csum f = csum (fun i => x * f i) := by
-  match csum_attained f with
-  | Or.inl ⟨hall, h0⟩ =>
-    have hz : ∀ i, x * f i = 0 := fun i => by rw [hall i, mul_zero]
-    rw [h0, mul_zero, csum_congr' hz, csum_zero']
-  | Or.inr ⟨i₀, hi₀⟩ =>
-    have hstep : ∀ i, x * f i ≤+ x * f i₀ := by
-      intro i
-      refine mul_addLe_mul_left x ?_
-      rw [← hi₀]
-      exact le_csum f i
-    rw [hi₀]
-    exact (csum_eq ⟨hstep, fun y hy => hy i₀⟩).symm
+  show x * (⨆ i, f i) = ⨆ i, x * f i
+  exact ENNReal.mul_iSup x f
 
-/-- Each member of a doubly-indexed family is below the iterated aggregate. -/
-theorem csum_csum_upper {ι κ : Type} (f : ι → κ → Prob) (i : ι) (j : κ) :
-    f i j ≤+ csum (fun i => csum (fun j => f i j)) :=
-  addLe_trans (le_csum (fun j => f i j) j) (le_csum (fun i => csum (fun j => f i j)) i)
-
-/-- Any bound on all members bounds the iterated aggregate. -/
-theorem csum_csum_least {ι κ : Type} (f : ι → κ → Prob) {y : Prob}
-    (h : ∀ i j, f i j ≤+ y) : csum (fun i => csum (fun j => f i j)) ≤+ y :=
-  csum_le fun i => csum_le fun j => h i j
-
-/-- Fubini: a doubly-indexed family may be aggregated in either order. -/
+/-- Fubini: a doubly-indexed family may be aggregated in either order
+(Mathlib's `iSup_comm`). -/
 theorem csum_swap' {ι κ : Type} (f : ι → κ → Prob) :
     csum (fun i => csum (fun j => f i j)) = csum (fun j => csum (fun i => f i j)) :=
-  addLe_antisymm
-    (csum_csum_least f fun i j => csum_csum_upper (fun j i => f i j) j i)
-    (csum_csum_least (fun j i => f i j) fun j i => csum_csum_upper f i j)
+  iSup_comm
 
-/-- Aggregating over a product index is aggregating twice. -/
+/-- Aggregating over a product index is aggregating twice (Mathlib's
+`iSup_prod`). -/
 theorem csum_prod' {ι κ : Type} (f : ι → κ → Prob) :
     csum (fun p : ι × κ => f p.1 p.2) = csum (fun i => csum (fun j => f i j)) :=
-  csum_eq ⟨fun p => csum_csum_upper f p.1 p.2,
-    fun _ hy => csum_csum_least f fun i j => hy (i, j)⟩
+  iSup_prod
 
 end Prob
 
 /-- Consensus weight is a complete resource semiring: aggregation over an
-arbitrary family is the probability of its best member. Noncomputable, because
-that member is chosen classically — but *attained*, which is why this instance
-costs a fifth of what `Cost`'s costs. -/
+arbitrary family is the probability of its best member, Mathlib's `iSup`. -/
 noncomputable instance instCompleteCSemiringProb : CompleteCSemiring Prob where
-  toCSemiring := instCSemiringProb
+  __ := (inferInstance : CommSemiring Prob)
   csum := fun {_} f => Prob.csum f
   csum_zero := Prob.csum_zero'
   csum_point := by
@@ -1288,213 +1082,243 @@ noncomputable instance instCompleteCSemiringProb : CompleteCSemiring Prob where
 
 /-! ## Expectation: the square-zero extension -/
 
-/-- A `PMod P M` is a representation of the *moments* a resource semiring `P`
-can carry: a commutative monoid `M` on which `P` acts. In the expectation
-semiring `M` holds the accumulated cost and `P` the probability that weights
-it; `smul p m` is "the moment `m`, seen through the weight `p`".
+/-- `PMod P M` is Mathlib's `Module P M`: the *moments* a resource semiring
+`P` can carry — a commutative additive monoid `M` on which `P` acts, with
+`smul p m` reading "the moment `m`, seen through the weight `p`".
 
-Only the laws the square-zero construction actually consumes are demanded —
-they are exactly the module laws. -/
-class PMod (P M : Type) [CSemiring P] where
-  /-- The absent moment. -/
-  zero : M
-  /-- Accumulation of moments. -/
-  add : M → M → M
-  /-- The weighting of a moment by a resource. -/
-  smul : P → M → M
-  /-- Accumulation is unordered. -/
-  add_comm : ∀ m n : M, add m n = add n m
-  /-- Accumulation is unbracketed. -/
-  add_assoc : ∀ m n o : M, add (add m n) o = add m (add n o)
-  /-- The absent moment accumulates nothing. -/
-  zero_add : ∀ m : M, add zero m = m
-  /-- Weighting the absent moment leaves it absent. -/
-  smul_zero : ∀ p : P, smul p zero = zero
-  /-- Weighting distributes over accumulation. -/
-  smul_add : ∀ (p : P) (m n : M), smul p (add m n) = add (smul p m) (smul p n)
-  /-- Weighting distributes over alternatives of resource. -/
-  add_smul : ∀ (p q : P) (m : M), smul (p + q) m = add (smul p m) (smul q m)
-  /-- Weighting by a sequence is weighting twice. -/
-  mul_smul : ∀ (p q : P) (m : M), smul (p * q) m = smul p (smul q m)
-  /-- The free step does not reweight. -/
-  one_smul : ∀ m : M, smul 1 m = m
-  /-- The impossible step erases the moment. -/
-  zero_smul : ∀ m : M, smul (0 : P) m = zero
+The hand-rolled class had exactly the module axioms and nothing else
+(`smul_zero`, `smul_add`, `add_smul`, `mul_smul`, `one_smul`, `zero_smul` over
+a commutative additive monoid), so it is Mathlib's `Module` on the nose. The
+additive half — which the class used to carry as three of its own fields, and
+which `acat-1d1` recorded as a fifth presentation of the package's monoid — is
+`AddCommMonoid`, so that duplication dissolves rather than being renamed. -/
+abbrev PMod (P M : Type) [CommSemiring P] [AddCommMonoid M] := Module P M
 
-namespace PMod
+/-- `PMod.zero P : M` is `(0 : M)`: the absent moment, under the old name.
+The `P` is kept explicit because every call site spells it. -/
+abbrev PMod.zero (_P : Type) {M : Type} [AddCommMonoid M] : M := 0
 
-variable {P M : Type} [CSemiring P] [PMod P M]
+/-- `PMod.add P m n` is `m + n`: accumulation of moments, under the old name. -/
+abbrev PMod.add (_P : Type) {M : Type} [AddCommMonoid M] (m n : M) : M := m + n
+
+/-- `PMod.smul p m` is `p • m`: the weighting of a moment by a resource. -/
+abbrev PMod.smul {P M : Type} [SMul P M] (p : P) (m : M) : M := p • m
+
+section PModLaws
+
+variable {P M : Type} [CommSemiring P] [AddCommMonoid M] [Module P M]
+
+/-- Mathlib's `smul_zero`, named so that `PMod.smul_zero` may cite it without
+resolving to itself. -/
+private theorem smulZeroAux (p : P) : p • (0 : M) = 0 := smul_zero p
+/-- Mathlib's `smul_add`, named for `PMod.smul_add`. -/
+private theorem smulAddAux (p : P) (m n : M) : p • (m + n) = p • m + p • n := smul_add p m n
+/-- Mathlib's `add_smul`, named for `PMod.add_smul`. -/
+private theorem addSmulAux (p q : P) (m : M) : (p + q) • m = p • m + q • m := add_smul p q m
+/-- Mathlib's `mul_smul`, named for `PMod.mul_smul`. -/
+private theorem mulSmulAux (p q : P) (m : M) : (p * q) • m = p • q • m := mul_smul p q m
+/-- Mathlib's `one_smul`, named for `PMod.one_smul`. -/
+private theorem oneSmulAux (m : M) : (1 : P) • m = m := one_smul P m
+/-- Mathlib's `zero_smul`, named for `PMod.zero_smul`. -/
+private theorem zeroSmulAux (m : M) : (0 : P) • m = (0 : M) := zero_smul P m
+
+/-- Accumulation is unordered (Mathlib's `add_comm`). -/
+theorem PMod.add_comm (m n : M) : m + n = n + m := _root_.add_comm m n
+
+/-- Accumulation is unbracketed (Mathlib's `add_assoc`). -/
+theorem PMod.add_assoc (m n o : M) : m + n + o = m + (n + o) := _root_.add_assoc m n o
+
+/-- The absent moment accumulates nothing (Mathlib's `zero_add`). -/
+theorem PMod.zero_add (m : M) : 0 + m = m := _root_.zero_add m
 
 /-- The absent moment accumulates nothing on the right either. -/
-theorem add_zero (m : M) : PMod.add P m (PMod.zero P) = m := by
-  rw [PMod.add_comm, PMod.zero_add]
+theorem PMod.add_zero (m : M) : m + 0 = m := _root_.add_zero m
+
+/-- Weighting the absent moment leaves it absent (Mathlib's `smul_zero`). -/
+theorem PMod.smul_zero (p : P) : p • (0 : M) = 0 := smulZeroAux p
+
+/-- Weighting distributes over accumulation (Mathlib's `smul_add`). -/
+theorem PMod.smul_add (p : P) (m n : M) : p • (m + n) = p • m + p • n := smulAddAux p m n
+
+/-- Weighting distributes over alternatives of resource (Mathlib's `add_smul`). -/
+theorem PMod.add_smul (p q : P) (m : M) : (p + q) • m = p • m + q • m := addSmulAux p q m
+
+/-- Weighting by a sequence is weighting twice (Mathlib's `mul_smul`). -/
+theorem PMod.mul_smul (p q : P) (m : M) : (p * q) • m = p • q • m := mulSmulAux p q m
+
+/-- The free step does not reweight (Mathlib's `one_smul`). -/
+theorem PMod.one_smul (m : M) : (1 : P) • m = m := oneSmulAux m
+
+/-- The impossible step erases the moment (Mathlib's `zero_smul`). -/
+theorem PMod.zero_smul (m : M) : (0 : P) • m = (0 : M) := zeroSmulAux m
 
 /-- Two independent weightings commute, because the resource semiring does. -/
-theorem smul_comm (p q : P) (m : M) : smul p (smul q m) = smul q (smul p m) := by
-  rw [← PMod.mul_smul, ← PMod.mul_smul, mul_comm]
+theorem PMod.smul_comm (p q : P) (m : M) : p • q • m = q • p • m := by
+  rw [← mulSmulAux, ← mulSmulAux, mul_comm]
 
 /-- The middle-four interchange for accumulation: the rearrangement the
-distributive law needs. -/
-theorem add_add_add_comm (a b c d : M) :
-    PMod.add P (PMod.add P a b) (PMod.add P c d) = PMod.add P (PMod.add P a c) (PMod.add P b d) := by
-  rw [PMod.add_assoc, PMod.add_assoc, ← PMod.add_assoc b c d, ← PMod.add_assoc c b d,
-    PMod.add_comm b c]
+distributive law needs (Mathlib's `add_add_add_comm`). -/
+theorem PMod.add_add_add_comm (a b c d : M) : a + b + (c + d) = a + c + (b + d) :=
+  _root_.add_add_add_comm a b c d
 
-end PMod
+end PModLaws
 
 /-- Any resource semiring is a module over itself: the moment is another
 resource, weighted by multiplication. This is the instance that makes
 `SqZero P P` the dual numbers over `P`. -/
-instance instPModSelf {P : Type} [CSemiring P] : PMod P P where
-  zero := 0
-  add := fun p q => p + q
-  smul := fun p q => p * q
-  add_comm := add_comm
-  add_assoc := add_assoc
-  zero_add := zero_add
-  smul_zero := mul_zero
-  smul_add := left_distrib
-  add_smul := right_distrib
-  mul_smul := mul_assoc
-  one_smul := one_mul
-  zero_smul := zero_mul
+abbrev instPModSelf {P : Type} [CSemiring P] : PMod P P := inferInstance
 
-/-- A `SqZero P M` is a representation of a resource together with a *first
-moment* of it: `base` is the weight of the run, `moment` the weighted quantity
-carried along with it. This is Eisner's expectation semiring — the same
-square-zero extension that gives forward-mode automatic differentiation, with
-`moment` playing the part of the derivative — so composition of meanings
-computes an expected cost, not merely a possibility. -/
-structure SqZero (P M : Type) where
-  /-- The weight of the run: a probability, a possibility, a count. -/
-  base : P
-  /-- The weighted quantity accumulated along the run. -/
-  moment : M
+/-! ### The opposite action a `TrivSqZeroExt` needs
+
+Mathlib's square-zero extension is stated for a possibly *non-commutative* base
+`R`, so its multiplication weights the moment on both sides — `r •> m` and
+`m <• r` — and its semiring instances ask for `[Module Rᵐᵒᵖ M]` and
+`[IsCentralScalar R M]` beside `[Module R M]`. Over the commutative carriers
+this package uses, those two are not extra data: the opposite ring is the ring,
+and the two actions coincide. The instances below supply exactly that, so every
+`SqZero P M` statement keeps the hypotheses it always had (`[CSemiring P]`,
+`[AddCommMonoid M]`, `[PMod P M]`) and no call site changes.
+
+Both are given **low priority** deliberately. When `M` is `P` itself — the dual
+numbers, `SqZero P P`, which is the instance the read-outs use — Mathlib's own
+`Semiring.toOppositeModule` (priority 910) already applies, and it must keep
+winning: its action is `m * unop r`, ours would be `unop r • m`, and the two
+are equal only by commutativity, not by `rfl`. Priority 50 keeps Mathlib's
+instance in front and confines ours to the modules Mathlib has nothing to say
+about. -/
+
+/-- **SURVIVOR (instance, not definition) — what Mathlib lacks.** A commutative
+semiring acts on any of its modules through the opposite ring, because the
+opposite ring is the ring; Mathlib has this only for the action of `P` on
+itself (`Semiring.toOppositeModule`), so a `Module Pᵐᵒᵖ M` for a general module
+of moments has to be produced, and this is it: restriction of scalars along
+`Pᵐᵒᵖ →+* P`, which exists because every pair of elements of `P` commutes. -/
+instance (priority := 50) instPModOpposite {P M : Type} [CSemiring P] [AddCommMonoid M]
+    [PMod P M] : Module Pᵐᵒᵖ M :=
+  Module.compHom M ((RingHom.id P).fromOpposite fun x y => mul_comm x y)
+
+/-- The two actions of a commutative `P` on a module of moments are the same
+action — by `rfl`, given `instPModOpposite` — which is what
+`TrivSqZeroExt`'s commutative instances mean by `IsCentralScalar`. -/
+instance (priority := 50) instPModIsCentralScalar {P M : Type} [CSemiring P]
+    [AddCommMonoid M] [PMod P M] : IsCentralScalar P M :=
+  ⟨fun _ _ => rfl⟩
+
+/-- A `SqZero P M` is a resource together with a *first moment* of it: `base`
+is the weight of the run, `moment` the weighted quantity carried along with it.
+This is Eisner's expectation semiring — the same square-zero extension that
+gives forward-mode automatic differentiation, with `moment` playing the part of
+the derivative — so composition of meanings computes an expected cost, not
+merely a possibility.
+
+It is now **Mathlib's** `TrivSqZeroExt P M`, which is that construction under
+its Mathlib name (`R × M` with `(r₁, m₁) * (r₂, m₂) = (r₁r₂, r₁m₂ + r₂m₁)`),
+and the hundred lines of semiring laws this package proved by hand — the
+product rule's associativity, the two distributive laws, the annihilations —
+are `TrivSqZeroExt.commSemiring`.
+
+A `def` rather than an `abbrev`, so that `x.base` and `x.moment` keep resolving
+through this package's field names rather than Mathlib's `fst`/`snd`. Every
+instance the carrier needs is transported by `inferInstanceAs` in one line
+each. -/
+def SqZero (P M : Type) := TrivSqZeroExt P M
 
 namespace SqZero
 
-/-- Two such pairs are equal when their parts are. -/
+/-- The weight of the run: a probability, a possibility, a count. Mathlib's
+`TrivSqZeroExt.fst`, under this package's field name. -/
+abbrev base {P M : Type} (x : SqZero P M) : P := TrivSqZeroExt.fst x
+
+/-- The weighted quantity accumulated along the run. Mathlib's
+`TrivSqZeroExt.snd`, under this package's field name. -/
+abbrev moment {P M : Type} (x : SqZero P M) : M := TrivSqZeroExt.snd x
+
+/-- Two such pairs are equal when their parts are (Mathlib's
+`TrivSqZeroExt.ext`). -/
 theorem eq_of_parts {P M : Type} {x y : SqZero P M}
-    (hb : x.base = y.base) (hm : x.moment = y.moment) : x = y := by
-  cases x with
-  | mk b m =>
-    cases y with
-    | mk b' m' =>
-      have hb' : b = b' := hb
-      have hm' : m = m' := hm
-      rw [hb', hm']
-
-variable {P M : Type} [CSemiring P] [PMod P M]
-
-/-- Alternatives combine componentwise: weights add, moments accumulate. -/
-def add (x y : SqZero P M) : SqZero P M :=
-  ⟨x.base + y.base, PMod.add P x.moment y.moment⟩
-
-/-- Sequencing multiplies the weights and cross-weights the moments: this is
-the product rule, and the reason the extension is called square-zero — a pure
-moment times a pure moment is nothing. -/
-def mul (x y : SqZero P M) : SqZero P M :=
-  ⟨x.base * y.base, PMod.add P (PMod.smul x.base y.moment) (PMod.smul y.base x.moment)⟩
-
-/-- The impossible run, carrying no moment. -/
-def zero : SqZero P M := ⟨0, PMod.zero P⟩
-
-/-- The free step, carrying no moment. -/
-def one : SqZero P M := ⟨1, PMod.zero P⟩
-
-/-- Alternatives are unordered. -/
-theorem add_comm' (x y : SqZero P M) : add x y = add y x :=
-  eq_of_parts (Agentic.add_comm _ _) (PMod.add_comm _ _)
-
-/-- Alternatives are unbracketed. -/
-theorem add_assoc' (x y z : SqZero P M) : add (add x y) z = add x (add y z) :=
-  eq_of_parts (Agentic.add_assoc _ _ _) (PMod.add_assoc _ _ _)
-
-/-- The impossible run contributes nothing. -/
-theorem zero_add' (x : SqZero P M) : add zero x = x :=
-  eq_of_parts (Agentic.zero_add _) (PMod.zero_add _)
-
-/-- Sequencing is order-insensitive: the cross terms swap. -/
-theorem mul_comm' (x y : SqZero P M) : mul x y = mul y x :=
-  eq_of_parts (Agentic.mul_comm _ _) (PMod.add_comm _ _)
-
-/-- Sequencing is unbracketed. -/
-theorem mul_assoc' (x y z : SqZero P M) : mul (mul x y) z = mul x (mul y z) := by
-  refine eq_of_parts (Agentic.mul_assoc _ _ _) ?_
-  show PMod.add P (PMod.smul (x.base * y.base) z.moment)
-      (PMod.smul z.base (PMod.add P (PMod.smul x.base y.moment) (PMod.smul y.base x.moment)))
-    = PMod.add P (PMod.smul x.base (PMod.add P (PMod.smul y.base z.moment)
-        (PMod.smul z.base y.moment)))
-      (PMod.smul (y.base * z.base) x.moment)
-  rw [PMod.smul_add, PMod.smul_add, PMod.mul_smul, PMod.mul_smul,
-    PMod.smul_comm z.base x.base y.moment, PMod.smul_comm z.base y.base x.moment,
-    PMod.add_assoc]
-
-/-- The free step costs nothing and carries nothing. -/
-theorem one_mul' (x : SqZero P M) : mul one x = x := by
-  refine eq_of_parts (Agentic.one_mul _) ?_
-  show PMod.add P (PMod.smul (1 : P) x.moment) (PMod.smul x.base (PMod.zero P)) = x.moment
-  rw [PMod.one_smul, PMod.smul_zero, PMod.add_zero]
-
-/-- The free step costs nothing after, either: the right unit law, which the
-base class asks for as a field and which a commutative carrier answers with one
-rewrite. -/
-theorem mul_one' (x : SqZero P M) : mul x one = x :=
-  (mul_comm' x one).trans (one_mul' x)
-
-/-- Sequencing distributes over alternatives. -/
-theorem left_distrib' (x y z : SqZero P M) : mul x (add y z) = add (mul x y) (mul x z) := by
-  refine eq_of_parts (Agentic.left_distrib _ _ _) ?_
-  show PMod.add P (PMod.smul x.base (PMod.add P y.moment z.moment))
-      (PMod.smul (y.base + z.base) x.moment)
-    = PMod.add P (PMod.add P (PMod.smul x.base y.moment) (PMod.smul y.base x.moment))
-      (PMod.add P (PMod.smul x.base z.moment) (PMod.smul z.base x.moment))
-  rw [PMod.smul_add, PMod.add_smul, PMod.add_add_add_comm]
-
-/-- Sequencing distributes over alternatives on the right too. -/
-theorem right_distrib' (x y z : SqZero P M) :
-    mul (add x y) z = add (mul x z) (mul y z) := by
-  rw [mul_comm' (add x y) z, left_distrib' z x y, mul_comm' z x, mul_comm' z y]
-
-/-- The impossible run stays impossible, moment and all. -/
-theorem zero_mul' (x : SqZero P M) : mul zero x = zero := by
-  refine eq_of_parts (Agentic.zero_mul _) ?_
-  show PMod.add P (PMod.smul (0 : P) x.moment) (PMod.smul x.base (PMod.zero P))
-    = PMod.zero P
-  rw [PMod.zero_smul, PMod.smul_zero, PMod.add_zero]
-
-/-- An impossible step downstream is still impossible. -/
-theorem mul_zero' (x : SqZero P M) : mul x zero = zero :=
-  (mul_comm' x zero).trans (zero_mul' x)
+    (hb : x.base = y.base) (hm : x.moment = y.moment) : x = y :=
+  TrivSqZeroExt.ext hb hm
 
 end SqZero
 
-/-- Eisner's expectation semiring: the square-zero extension of `P` by `M`.
-Composition in this semiring computes an expected cost — the base component
-carries the probability, the moment component the probability-weighted cost —
-which is precisely how forward-mode automatic differentiation carries a
-derivative alongside a value. -/
-instance instCSemiringSqZero {P M : Type} [CSemiring P] [PMod P M] :
-    CSemiring (SqZero P M) where
-  add := SqZero.add
-  mul := SqZero.mul
-  zero := SqZero.zero
-  one := SqZero.one
-  add_comm := SqZero.add_comm'
-  add_assoc := SqZero.add_assoc'
-  zero_add := SqZero.zero_add'
-  mul_comm := SqZero.mul_comm'
-  mul_assoc := SqZero.mul_assoc'
-  one_mul := SqZero.one_mul'
-  mul_one := SqZero.mul_one'
-  left_distrib := SqZero.left_distrib'
-  right_distrib := SqZero.right_distrib'
-  zero_mul := SqZero.zero_mul'
-  mul_zero := SqZero.mul_zero'
+/-- Eisner's expectation semiring, alternation half: componentwise addition,
+Mathlib's `TrivSqZeroExt.addCommMonoid`, transported to the package's name. -/
+instance instAddCommMonoidSqZero {P M : Type} [CSemiring P] [AddCommMonoid M] [PMod P M] :
+    AddCommMonoid (SqZero P M) :=
+  inferInstanceAs (AddCommMonoid (TrivSqZeroExt P M))
+
+/-- Eisner's expectation semiring: `⊗` is the product rule — weights multiply
+and the moments cross-weight — over the componentwise alternation above. This
+is Mathlib's `TrivSqZeroExt.commSemiring`; what used to be eleven hand-proved
+laws is one `inferInstanceAs`. -/
+instance instCSemiringSqZero {P M : Type} [CSemiring P] [AddCommMonoid M] [PMod P M] :
+    CommSemiring (SqZero P M) :=
+  inferInstanceAs (CommSemiring (TrivSqZeroExt P M))
 
 namespace SqZero
 
-variable {P M : Type} [CSemiring P] [PMod P M]
+variable {P M : Type} [CSemiring P] [AddCommMonoid M] [PMod P M]
+
+/-- Alternatives combine componentwise: weights add, moments accumulate. Now
+Mathlib's `+` on `TrivSqZeroExt`, under the name the package used. -/
+abbrev add (x y : SqZero P M) : SqZero P M := x + y
+
+/-- Sequencing multiplies the weights and cross-weights the moments: the
+product rule, and the reason the extension is called square-zero — a pure
+moment times a pure moment is nothing. Now Mathlib's `*` on `TrivSqZeroExt`. -/
+abbrev mul (x y : SqZero P M) : SqZero P M := x * y
+
+/-- The impossible run, carrying no moment. -/
+abbrev zero : SqZero P M := 0
+
+/-- The free step, carrying no moment. -/
+abbrev one : SqZero P M := 1
+
+/-- Alternatives are unordered (Mathlib's `add_comm`). -/
+theorem add_comm' (x y : SqZero P M) : add x y = add y x := _root_.add_comm x y
+
+/-- Alternatives are unbracketed (Mathlib's `add_assoc`). -/
+theorem add_assoc' (x y z : SqZero P M) : add (add x y) z = add x (add y z) :=
+  _root_.add_assoc x y z
+
+/-- The impossible run contributes nothing (Mathlib's `zero_add`). -/
+theorem zero_add' (x : SqZero P M) : add zero x = x := _root_.zero_add x
+
+/-- Sequencing is order-insensitive: the cross terms swap (Mathlib's
+`mul_comm`, at `TrivSqZeroExt.commSemiring`). -/
+theorem mul_comm' (x y : SqZero P M) : mul x y = mul y x := _root_.mul_comm x y
+
+/-- Sequencing is unbracketed (Mathlib's `mul_assoc`). -/
+theorem mul_assoc' (x y z : SqZero P M) : mul (mul x y) z = mul x (mul y z) :=
+  _root_.mul_assoc x y z
+
+/-- The free step costs nothing and carries nothing (Mathlib's `one_mul`). -/
+theorem one_mul' (x : SqZero P M) : mul one x = x := _root_.one_mul x
+
+/-- The free step costs nothing after, either (Mathlib's `mul_one`). -/
+theorem mul_one' (x : SqZero P M) : mul x one = x := _root_.mul_one x
+
+/-- Sequencing distributes over alternatives (Mathlib's `left_distrib`). -/
+theorem left_distrib' (x y z : SqZero P M) : mul x (add y z) = add (mul x y) (mul x z) :=
+  _root_.left_distrib x y z
+
+/-- Sequencing distributes over alternatives on the right too (Mathlib's
+`right_distrib`). -/
+theorem right_distrib' (x y z : SqZero P M) :
+    mul (add x y) z = add (mul x z) (mul y z) :=
+  _root_.right_distrib x y z
+
+/-- The impossible run stays impossible, moment and all. -/
+theorem zero_mul' (x : SqZero P M) : mul zero x = zero := MulZeroClass.zero_mul x
+
+/-- An impossible step downstream is still impossible. -/
+theorem mul_zero' (x : SqZero P M) : mul x zero = zero := MulZeroClass.mul_zero x
+
+end SqZero
+
+namespace SqZero
+
+variable {P M : Type} [CSemiring P] [AddCommMonoid M] [PMod P M]
 
 /-- The projection to the weight: forgetting the moment. -/
 def pi (x : SqZero P M) : P := x.base
@@ -1517,9 +1341,9 @@ theorem pi_mul (x y : SqZero P M) : pi (x * y) = pi x * pi y := rfl
 /-- Why "square-zero": two pure moments multiply to nothing, so the extension
 carries first moments only — expectations, not variances. -/
 theorem moment_sq_zero (m n : M) :
-    (⟨0, m⟩ : SqZero P M) * (⟨0, n⟩ : SqZero P M) = 0 := by
-  refine eq_of_parts (Agentic.zero_mul _) ?_
-  show PMod.add P (PMod.smul (0 : P) n) (PMod.smul (0 : P) m) = PMod.zero P
+    mul (⟨0, m⟩ : SqZero P M) (⟨0, n⟩ : SqZero P M) = 0 := by
+  refine eq_of_parts (MulZeroClass.zero_mul (0 : P)) ?_
+  show (0 : P) • n + (0 : P) • m = (0 : M)
   rw [PMod.zero_smul, PMod.zero_smul, PMod.zero_add]
 
 end SqZero
@@ -1563,13 +1387,22 @@ carrier's own multiplication) and the product module. -/
 *aggregation over an index* makes sense: `msum f` is the accumulation of the
 whole family `f`, as `csum` is for the weights.
 
+**SURVIVOR — what Mathlib lacks.** Mathlib has no class for a module with an
+arbitrary-index sum. Its infinitary sums on a module are `tsum` (topological,
+needing `TopologicalSpace`, `T2Space` and summability) and `iSup` (needing a
+`CompleteLattice`, hence an idempotent addition on the moments, which the
+intended moment module — accumulated costs — does not have). The moment side of
+`CompleteCSemiring`'s obligation therefore has to be stated, and this class is
+that statement and nothing more: `msum` and its laws, over Mathlib's
+`Module`.
+
 Every field is the moment-side twin of a `CompleteCSemiring` field, save the
 last, which is the only genuinely new law: it says the two aggregations agree
 when a family of *weights* acts on one fixed moment. Without it the
 distributive law for the square-zero `csum` cannot be proved, because the
 cross-term of the product rule weights a fixed moment by every member of an
 aggregated family of weights. -/
-class CompletePMod (P M : Type) [CompleteCSemiring P] [PMod P M] where
+class CompletePMod (P M : Type) [CompleteCSemiring P] [AddCommMonoid M] [PMod P M] where
   /-- The accumulation of a whole family of moments: `msum f = ⊕ᵢ f i`. -/
   msum : {ι : Type} → (ι → M) → M
   /-- Accumulating absent moments leaves the moment absent. -/
@@ -1602,7 +1435,7 @@ export CompletePMod (msum)
 
 namespace CompletePMod
 
-variable {P M : Type} [CompleteCSemiring P] [PMod P M] [CompletePMod P M]
+variable {P M : Type} [CompleteCSemiring P] [AddCommMonoid M] [PMod P M] [CompletePMod P M]
 
 /-- Accumulation respects pointwise equality of families. -/
 theorem msum_congr {ι : Type} {f g : ι → M} (h : ∀ i, f i = g i) :
@@ -1671,24 +1504,13 @@ The instance exists to answer a real gap rather than to be used: before it, the
 only `PMod` in the package was the diagonal `instPModSelf`, so "`M` is a
 `P`-module of costs" (design §3) was a phrase with exactly one witness, and the
 class could not be told apart from a redundant copy of `P`. -/
-instance instPModProd {P M N : Type} [CSemiring P] [PMod P M] [PMod P N] :
-    PMod P (M × N) where
-  zero := (PMod.zero P, PMod.zero P)
-  add := fun a b => (PMod.add P a.1 b.1, PMod.add P a.2 b.2)
-  smul := fun p a => (PMod.smul p a.1, PMod.smul p a.2)
-  add_comm _ _ := prod_eq_of_parts (PMod.add_comm _ _) (PMod.add_comm _ _)
-  add_assoc _ _ _ := prod_eq_of_parts (PMod.add_assoc _ _ _) (PMod.add_assoc _ _ _)
-  zero_add _ := prod_eq_of_parts (PMod.zero_add _) (PMod.zero_add _)
-  smul_zero _ := prod_eq_of_parts (PMod.smul_zero _) (PMod.smul_zero _)
-  smul_add _ _ _ := prod_eq_of_parts (PMod.smul_add _ _ _) (PMod.smul_add _ _ _)
-  add_smul _ _ _ := prod_eq_of_parts (PMod.add_smul _ _ _) (PMod.add_smul _ _ _)
-  mul_smul _ _ _ := prod_eq_of_parts (PMod.mul_smul _ _ _) (PMod.mul_smul _ _ _)
-  one_smul _ := prod_eq_of_parts (PMod.one_smul _) (PMod.one_smul _)
-  zero_smul _ := prod_eq_of_parts (PMod.zero_smul _) (PMod.zero_smul _)
+abbrev instPModProd {P M N : Type} [CSemiring P] [AddCommMonoid M] [AddCommMonoid N]
+    [PMod P M] [PMod P N] : PMod P (M × N) := inferInstance
 
 /-- Two complete moment modules side by side aggregate componentwise, so the
 two-moment expectation semiring is complete as well. -/
 instance instCompletePModProd {P M N : Type} [CompleteCSemiring P]
+    [AddCommMonoid M] [AddCommMonoid N]
     [PMod P M] [PMod P N] [CompletePMod P M] [CompletePMod P N] :
     CompletePMod P (M × N) where
   msum := fun {_} f => (msum P fun i => (f i).1, msum P fun i => (f i).2)
@@ -1722,7 +1544,7 @@ instance instCompletePModProd {P M N : Type} [CompleteCSemiring P]
 
 namespace SqZero
 
-variable {P M : Type} [CompleteCSemiring P] [PMod P M] [CompletePMod P M]
+variable {P M : Type} [CompleteCSemiring P] [AddCommMonoid M] [PMod P M] [CompletePMod P M]
 
 /-- **Aggregation in the expectation semiring is componentwise**: the weights
 aggregate in `P`, the moments accumulate in `M`. This is the definition the
@@ -1807,9 +1629,9 @@ complete module of moments. Both are supplied for free on the diagonal
 (`instCompletePModSelf`), so `SqZero Prop Prop`, `SqZero Cost Cost` and
 `SqZero Prob Prob` are complete without further work. -/
 instance instCompleteCSemiringSqZero {P M : Type}
-    [CompleteCSemiring P] [PMod P M] [CompletePMod P M] :
+    [CompleteCSemiring P] [AddCommMonoid M] [PMod P M] [CompletePMod P M] :
     CompleteCSemiring (SqZero P M) where
-  toCSemiring := instCSemiringSqZero
+  __ := instCSemiringSqZero
   csum := fun {_} F => SqZero.csum F
   csum_zero := SqZero.csum_zero'
   csum_point := by
@@ -1846,7 +1668,7 @@ theorem star_base_key {P : Type} [CSemiring P] (p q : P) (h : q = 1 + p * q) :
     _ = q + p * (q * q) := by rw [one_mul, mul_assoc]
     _ = p * (q * q) + q := add_comm _ _
 
-variable {P M : Type} [CSemiring P] [PMod P M] [StarSemiring P]
+variable {P M : Type} [CSemiring P] [AddCommMonoid M] [PMod P M] [KStar P] [StarSemiring P]
 
 /-- Iteration at expectation: the weight iterates by the base carrier's star,
 and the moment is the design's `p* m p*` — the moment weighted by the star on
@@ -1859,25 +1681,34 @@ genuinely adds, is not (acat-zms). So the canonical additive order is not this
 carrier's order, no leastness is claimed here, and the class that would let it
 be claimed is the ordered-carrier class acat-jmm. What this instance says is
 exactly what the design says: the formula answers the unrolling equation. -/
+instance instKStarSqZero : KStar (SqZero P M) where
+  kstar x := ⟨star x.base, (star x.base * star x.base) • x.moment⟩
+
+/-- The expectation star answers the unrolling law. This is `StarSemiring` and
+not `KleeneAlgebra`, deliberately: leastness needs an idempotent `+`, and the
+`+` of `SqZero P M` is idempotent only if `M`'s accumulation is — which the
+*intended* `M`, an expectation of costs that genuinely adds, is not (acat-zms).
+What this instance says is exactly what the design says: the formula answers
+the unrolling equation. -/
 instance instStarSemiringSqZero : StarSemiring (SqZero P M) where
-  star := fun x => ⟨star x.base, PMod.smul (star x.base * star x.base) x.moment⟩
   star_eq_left := by
     intro x
     refine eq_of_parts (StarSemiring.star_eq_left x.base) ?_
-    show PMod.smul (star x.base * star x.base) x.moment
-        = PMod.add P (PMod.zero P)
-            (PMod.add P
-              (PMod.smul x.base (PMod.smul (star x.base * star x.base) x.moment))
-              (PMod.smul (star x.base) x.moment))
+    show (star x.base * star x.base) • x.moment
+        = (0 : M)
+            + (x.base • ((star x.base * star x.base) • x.moment)
+              + star x.base • x.moment)
     rw [PMod.zero_add, ← PMod.mul_smul, ← PMod.add_smul,
       ← star_base_key x.base (star x.base) (StarSemiring.star_eq_left x.base)]
 
+omit [StarSemiring P] in
 /-- **The expectation star, read out**: its weight is the weight's star and its
 moment is `p* m p*`. True by `rfl` — it is the definition — and stated because
 the design's formula deserves a name that a reader can grep for. -/
 theorem star_moment (x : SqZero P M) :
-    (star x).moment = PMod.smul (star x.base * star x.base) x.moment := rfl
+    (star x).moment = (star x.base * star x.base) • x.moment := rfl
 
+omit [StarSemiring P] in
 /-- The weight of the star is the star of the weight: forgetting the moment
 commutes with iteration, so the first projection is a homomorphism of *starred*
 semirings and not merely of semirings. This is the fibration of design §3 with
@@ -1885,6 +1716,7 @@ the star included: the probability factor of a loop is the loop of the
 probability factors. -/
 theorem pi_star (x : SqZero P M) : pi (star x) = star (pi x) := rfl
 
+omit [StarSemiring P] in
 /-- **`p* m p*`, literally.** At the dual numbers — the moment module is the
 carrier itself — the expectation star's moment is the design's `p* · m · p*`
 with the multiplications written out and in the design's order. -/
