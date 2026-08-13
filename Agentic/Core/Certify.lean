@@ -46,9 +46,12 @@ table never recorded still answers, and a plan can be certified against a world
 the run only partly determined. The check for that is *coverage* — every event
 of the replayed transcript recorded in the table, with the answer the replay
 reads (`covered`, in `demo/Main.lean`) — and coverage is meaningful only because
-no defaulted cell is ever written *into* a table: an answer the trusted base
-could not read aborts the run (`Exec.oracle`) instead of entering the log as an
-answer it would then be indistinguishable from.
+no cell nobody answered is ever written *into* a table. Two rules keep it that
+way, and both are in `Agentic/Core/Exec.lean`: an answer the trusted base could
+not read aborts the run (`Exec.oracle`), and an *act* — or anything asked of a
+person — whose turn did not complete aborts it too
+(`Exec.requiresCompletedTurn`). Either way the alternative would be a log entry
+indistinguishable, in the table, from one somebody gave.
 -/
 
 namespace Agentic.Core

@@ -48,10 +48,20 @@ order is the point.
   behind is a world agreeing with `ω` on the transcript.
 
 **What is `IO`, and is therefore definitions and not theorems.** `Exec.oracle`
-and everything it calls. It renders a question into a prompt, sends it over the
-transport, decodes the reply, re-asks on a decode failure, and — when no attempt
-could be read — **fails the run**, because the one thing an answering service
-must never do is record an answer nobody gave. No declaration in this file is an
+and everything it calls. It opens a session per question where the runtime was
+told to (`Settings.freshSessionPerQuestion`, which is this layer's approximation
+of "a world is a function of the question"), routes a question put to a *person*
+to the keyboard where the runtime was told to (`Settings.askPersonOnStdin`:
+stderr out, stdin in, so a supervised run and a piped one are one run), selects
+the scope over the protocol where the adapter takes it, renders a question into
+a prompt, sends it over the transport, reports how the turn ended and how long
+it took (`Settings.onTurn` — latency is not part of a meaning, which is why it
+is reported and never recorded), decodes the reply, re-asks on a decode failure,
+and **fails the run** in the two cases where there is no answer to record: when no attempt could be read
+(`Exec.oracle`), and when the turn that would have answered an *act* — or any
+question put to a person — did not complete (`Exec.say`, via
+`Exec.requiresCompletedTurn`). The one thing an answering service must never do
+is record an answer nobody gave, and an act nobody performed is a case of that. No declaration in this file is an
 `axiom`; the trust boundary is *documented*, never asserted as a proposition. An
 adapter that lies merely exhibits a different world, and `execM_adequacy`
 quantifies over all of them. Since none of that has a proof, it has a test
@@ -89,24 +99,119 @@ to emit discarded. -/
 def answerLines (s : String) : List String :=
   ((s.splitOn "\n").map (fun l => l.trimAscii.toString)).filter (fun l => !l.isEmpty)
 
-/-- The spellings accepted as *yes*. -/
-def yesWords : List String := ["yes", "y", "true", "approve", "ok"]
+/-- `[[words s]]` = the reply as lowercase alphanumeric tokens: what a
+word-matching parser actually compares against.
 
-/-- The spellings accepted as *no*. -/
-def noWords : List String := ["no", "n", "false", "reject", "deny"]
+**Why tokens and not the whole string.** A reply is written by somebody who was
+asked to say one word and who is under no obligation to obey — the measured
+replies to "Reply with exactly yes or no." include `Yes.` and `**yes**`, neither
+of which is the string `"yes"`. Splitting on non-alphanumeric characters and
+lowercasing (`norm`) is the whole of the leniency, and note what it is leniency
+*about*: punctuation, case and emphasis, never content. `words s = ["yes"]`
+still says the reply was one word; a reply with anything else in it — the
+measured `Yes, apply it.` among them — has a longer token list and is read
+below as something other than a yes. No substring of a longer word matches
+(`nothing` is not `no`), and a reply the parsers below cannot classify is
+unreadable, which is what keeps `Decode_eq_none` meaningful. -/
+def words (s : String) : List String :=
+  let flush : List Char → List String → List String := fun cur acc =>
+    if cur.isEmpty then acc else String.ofList cur :: acc
+  let go := (norm s).toList.foldr
+    (fun ch (p : List Char × List String) =>
+      if ch.isAlphanum then (ch :: p.1, p.2) else (([] : List Char), flush p.1 p.2))
+    (([], []) : List Char × List String)
+  flush go.1 go.2
 
-/-- The one spelling that means "nothing was objected to". -/
-def approveWord : String := "approve"
+/-- `[[sole l ws]]` = is `ws` a single token, and is that token one of `l`?
+
+The shape of both strict readings below — consent (`saidYes`) and approval
+(`approvesB`) — factored out so that "it had to be the whole reply" is one
+definition with one characterization (`sole_eq_true_iff`) rather than two
+copies. Taking the token list as an argument rather than the reply is what makes
+its equations reduce. -/
+def sole (l : List String) : List String → Bool
+  | [w] => l.contains w
+  | _ => false
+
+/-- **What a strict reading accepts, exactly**: one token, and it is in the
+list. -/
+theorem sole_eq_true_iff (l ws : List String) :
+    sole l ws = true ↔ ∃ w, ws = [w] ∧ w ∈ l := by
+  rcases ws with _ | ⟨a, _ | ⟨b, rest⟩⟩ <;> simp [sole]
+
+/-- The spellings accepted as *yes* — as the **whole** of a reply, never as a
+word inside one (`saidYes`). -/
+def yesWords : List String := ["yes", "y", "true", "approve", "approved", "ok"]
+
+/-- The spellings accepted as *no*, **anywhere** in a reply (`saidNo`). -/
+def noWords : List String := ["no", "n", "false", "reject", "rejected", "deny"]
+
+/-- `[[saidNo s]]` = the reply contains a *no* word somewhere.
+
+Lenient, and deliberately so: `Ok. Actually, no — do not apply this.` is a
+refusal however it is punctuated, and a rule that only read a bare `no` would
+read that sentence as unclassifiable and then, at the next attempt, possibly as
+the `ok` it opens with. Reading a hedge as a denial costs a re-ask; reading one
+as consent costs an act nobody authorized, which is the asymmetry the whole
+section is built around. -/
+def saidNo (s : String) : Bool := (words s).any (fun w => noWords.contains w)
+
+/-- `[[saidYes s]]` = the reply is a *yes* word **and nothing else**.
+
+Strict, and deliberately so. `words` has already absorbed punctuation, case and
+emphasis, so `yes`, `Yes.` and `**yes**` all reach here as `["yes"]` and are
+consent; anything with a second token in it is not. That rules out, by the
+shape of the rule rather than by a list of bad phrases, every reply of the form
+measured against a live adapter:
+
+* `I cannot approve this patch.` — five tokens, one of which is `approve`;
+* `Ok, I'll take a look at the working directory first.` — narration that opens
+  with a filler `ok`;
+* `Yes, apply it.` — a real consent, which this rule declines to read and
+  re-asks for instead, because no rule can accept it without also accepting the
+  first two. -/
+def saidYes (s : String) : Bool := sole yesWords (words s)
 
 /-- `[[decodeFlag s]]` = the yes/no `s` states, or `none` if it states neither.
 
 **The only clause of `Decode` that can fail**, which is `Decode_eq_none` below.
 A `flag` is the one code whose answer set is smaller than what an addressee can
-say, so it is the one place the runtime has to be prepared to re-ask. -/
+say, so it is the one place the runtime has to be prepared to re-ask.
+
+**The two sides are not symmetric, and that is the safety property.** A *no*
+counts wherever it appears; a *yes* has to be the entire reply. So the only
+input that yields `some true` is one recognized word and nothing else
+(`decodeFlag_eq_some_true_iff`), and every other reading of a reply is either a
+denial or a re-ask — never an unearned yes. Since the workflow's one human
+control is a `flag` (`Harden.consentQ`), that is the difference between a
+runtime that fails closed and one that fails open. The `no` test is applied
+first, so a spelling appearing in both lists would read as a denial: the tie is
+broken toward the safe side by the order of the `if`, not by an assumption
+about the literals. -/
 def decodeFlag (s : String) : Option Bool :=
-  if norm s ∈ yesWords then some true
-  else if norm s ∈ noWords then some false
+  if saidNo s then some false
+  else if saidYes s then some true
   else none
+
+/-- The spellings that mean "nothing was objected to" — as the whole of a
+reply, by the same rule as `yesWords`. There is no list of *objection* words to
+put beside this one, and that is the asymmetry again: `OBJECTION:` is the word
+the questions of `Agentic/Core/HardenPatch.lean` ask for, but a reviewer who
+uses some other word, or no word, still objects, because objection is what
+anything that is not an approval means. -/
+def approveWords : List String := ["approve", "approved", "lgtm"]
+
+/-- `[[approvesB s]]` = did the reply approve? The reply is an approve word and
+nothing else, exactly as `saidYes` is a yes word and nothing else.
+
+Named separately from `decodeVerdict` because the classifier below
+(`tag_decodeVerdict`) is stated through it, and because it is the one predicate
+in the file whose `false` costs money: a reviewer whose approval this cannot
+read is a revision round. That is the price of the direction of the error —
+`I approve of nothing here. OBJECTION: unsafe.` is not one token, so it objects,
+which is the reading anybody would give it and which a scan for the word
+`approve` anywhere gives the opposite of. -/
+def approvesB (s : String) : Bool := sole approveWords (words s)
 
 /-- `[[decodeVerdict s]]` = the verdict `s` records.
 
@@ -117,14 +222,21 @@ meaning:
 * an addressee who said nothing at all `declined` — an empty turn is what a
   `stopReason` of `refusal` or `cancelled` arrives as, and recording it as
   approval would be recording an answer nobody gave;
-* the single word *approve* is `1`, the unit of the verdict monoid;
+* a reply that is an approve word and nothing else is `1`, the unit of the
+  verdict monoid — so `APPROVE`, `Approve.` and `**LGTM**` are approval, and
+  `The patch is fine. APPROVE` is not, because a rule that read that one would
+  by the same token read `I approve of nothing here. OBJECTION: unsafe.`;
 * anything else is the formal product of its nonblank lines, one objection per
   line, so that `Verdict.object` and hence `Approved`'s morphism into
-  conjunction see exactly what the reviewer wrote. -/
+  conjunction see exactly what the reviewer wrote.
+
+**The asymmetry is deliberate.** Approval must be *said*, objection is the
+default: a reply nobody can classify objects rather than approves, so a model
+that rambles costs a revision and never an unearned approval. -/
 def decodeVerdict (s : String) : Verdict :=
   let ls := answerLines s
   if ls = [] then Verdict.declined
-  else if ls.map norm = [approveWord] then Verdict.approve
+  else if approvesB s then Verdict.approve
   else Verdict.object ls
 
 end Exec
@@ -197,64 +309,150 @@ theorem Decode_isSome {c : Code} (s : String) (h : c ≠ .flag) : (Decode c s).i
 
 namespace Exec
 
-/-- **Clause equation, the yes side.** -/
-theorem decodeFlag_eq_some_true {s : String} (h : norm s ∈ yesWords) :
-    decodeFlag s = some true := by simp [decodeFlag, h]
+/-- **Consent is a lone yes word**, `sole_eq_true_iff` at `yesWords`. -/
+theorem saidYes_eq_true_iff {s : String} :
+    saidYes s = true ↔ ∃ w, words s = [w] ∧ w ∈ yesWords :=
+  sole_eq_true_iff yesWords (words s)
 
-/-- **Clause equation, the no side.** The `yes` list is consulted first, so a
-spelling appearing in both would read as yes; that the two lists are disjoint is
-a fact about six string literals which this Lean cannot reduce, and it is
-therefore a *hypothesis* here rather than a lemma — an honest statement of what
-the parser branches on, and the reason the lists are named constants a reader
-can check by eye. -/
-theorem decodeFlag_eq_some_false {s : String} (h₁ : norm s ∉ yesWords)
-    (h₂ : norm s ∈ noWords) : decodeFlag s = some false := by
-  simp [decodeFlag, h₁, h₂]
+/-- **Approval is a lone approve word**, the same at `approveWords`. -/
+theorem approvesB_eq_true_iff {s : String} :
+    approvesB s = true ↔ ∃ w, words s = [w] ∧ w ∈ approveWords :=
+  sole_eq_true_iff approveWords (words s)
 
-/-- **…and the failure is exactly "neither spelling".** The one re-ask trigger in
-the whole runtime, characterized. -/
-theorem decodeFlag_eq_none_iff {s : String} :
-    decodeFlag s = none ↔ norm s ∉ yesWords ∧ norm s ∉ noWords := by
+/-- **Clause equation, the no side.** A *no* word anywhere denies, whatever else
+the reply contains — which is the clause that reads
+`Ok. Actually, no — do not apply this.` as the refusal it is. -/
+theorem decodeFlag_eq_some_false {s : String} (h : saidNo s = true) :
+    decodeFlag s = some false := by simp [decodeFlag, h]
+
+/-- **Clause equation, the yes side.** Consent is one recognized word and
+nothing else, and no *no* word — the second hypothesis is not redundant and not
+an assumption about the literals: the `if` tests `saidNo` first, so a spelling
+in both lists denies. That the two lists are disjoint is a fact about twelve
+string literals which this Lean cannot reduce, which is why it is a hypothesis
+here and why the lists are named constants a reader can check by eye. -/
+theorem decodeFlag_eq_some_true {s w : String} (hw : words s = [w])
+    (hy : w ∈ yesWords) (hn : w ∉ noWords) : decodeFlag s = some true := by
+  have hno : saidNo s = false := by simp [saidNo, hw, hn]
+  have hyes : saidYes s = true := saidYes_eq_true_iff.mpr ⟨w, hw, hy⟩
+  simp [decodeFlag, hno, hyes]
+
+/-- **The safety property of the trusted base, as an iff.** `decodeFlag` says
+*yes* **only** for a reply that is a single recognized yes word with no *no*
+word in it. Everything else — a refusal, a hedge, an explanation, a yes with a
+clause after it — is a denial or a re-ask.
+
+This is the theorem the consent gate rests on: `Harden.consentQ` is a `flag`,
+`Harden.consent_of_ack` says the act happens only where that flag is `true`, and
+this says a `true` had to be *said* and had to be the whole of what was said. -/
+theorem decodeFlag_eq_some_true_iff {s : String} :
+    decodeFlag s = some true ↔ saidNo s = false ∧ ∃ w, words s = [w] ∧ w ∈ yesWords := by
   unfold decodeFlag
-  by_cases h₁ : norm s ∈ yesWords
+  by_cases h : saidNo s = true
+  · simp [h]
+  · simp only [Bool.not_eq_true] at h
+    rw [if_neg (by simp [h])]
+    by_cases hy : saidYes s = true
+    · simp [hy, h, saidYes_eq_true_iff.mp hy]
+    · simp only [Bool.not_eq_true] at hy
+      rw [if_neg (by simp [hy])]
+      constructor
+      · intro hc; exact absurd hc (by simp)
+      · rintro ⟨-, w, hw, hm⟩
+        exact absurd (saidYes_eq_true_iff.mpr ⟨w, hw, hm⟩) (by simp [hy])
+
+/-- **A rambling reply is never consent.** Two tokens or more and `decodeFlag`
+cannot answer `true`, whatever the tokens are — which is
+`I cannot approve this patch.`, `Ok, I'll take a look at the working directory
+first.` and every other narrated reply a live adapter produces, decided by the
+shape of the rule and not by a blacklist. -/
+theorem decodeFlag_ne_some_true_of_two {s w₁ w₂ : String} {rest : List String}
+    (h : words s = w₁ :: w₂ :: rest) : decodeFlag s ≠ some true := by
+  intro hc
+  obtain ⟨-, w, hw, -⟩ := decodeFlag_eq_some_true_iff.mp hc
+  rw [h] at hw
+  exact absurd hw (by simp)
+
+/-- **…and a stated refusal is never consent**, however the rest of the reply
+reads. -/
+theorem decodeFlag_ne_some_true_of_saidNo {s : String} (h : saidNo s = true) :
+    decodeFlag s ≠ some true := by rw [decodeFlag_eq_some_false h]; simp
+
+/-- **…and the failure is exactly "neither a no anywhere nor a yes alone".** The
+one re-ask trigger in the whole runtime, characterized. -/
+theorem decodeFlag_eq_none_iff {s : String} :
+    decodeFlag s = none ↔ saidNo s = false ∧ saidYes s = false := by
+  unfold decodeFlag
+  by_cases h₁ : saidNo s = true
   · simp [h₁]
-  · by_cases h₂ : norm s ∈ noWords <;> simp [h₁, h₂]
+  · simp only [Bool.not_eq_true] at h₁
+    rw [if_neg (by simp [h₁])]
+    by_cases h₂ : saidYes s = true
+    · simp [h₁, h₂]
+    · simp only [Bool.not_eq_true] at h₂
+      rw [if_neg (by simp [h₂])]
+      simp [h₁, h₂]
+
+/-- …and neither holds exactly when no token is a *no* and the reply is not a
+lone *yes*. -/
+theorem saidNo_eq_false_iff {s : String} :
+    saidNo s = false ↔ ∀ w ∈ words s, w ∉ noWords := by
+  simp [saidNo, List.any_eq_false]
 
 /-- **Clause equation.** An addressee who said nothing declined. -/
 theorem decodeVerdict_eq_declined {s : String} (h : answerLines s = []) :
     decodeVerdict s = Verdict.declined := by simp [decodeVerdict, h]
 
-/-- **Clause equation.** The single word *approve* is the unit of the verdict
-monoid. -/
-theorem decodeVerdict_eq_approve {s : String} (h₁ : answerLines s ≠ [])
-    (h₂ : (answerLines s).map norm = [approveWord]) :
-    decodeVerdict s = Verdict.approve := by simp [decodeVerdict, h₁, h₂]
+/-- **Clause equation.** A reply that is an approve word and nothing else is the
+unit of the verdict monoid. -/
+theorem decodeVerdict_eq_approve {s w : String} (h₁ : answerLines s ≠ [])
+    (h₂ : words s = [w]) (h₃ : w ∈ approveWords) :
+    decodeVerdict s = Verdict.approve := by
+  have h : approvesB s = true := approvesB_eq_true_iff.mpr ⟨w, h₂, h₃⟩
+  simp [decodeVerdict, h₁, h]
 
-/-- **Clause equation.** Anything else is the formal product of the lines. -/
+/-- **Clause equation, and the asymmetry.** Every other reply is the formal
+product of its lines: silence about approval is not approval, and neither is
+approval with a sentence attached. -/
 theorem decodeVerdict_eq_object {s : String} (h₁ : answerLines s ≠ [])
-    (h₂ : (answerLines s).map norm ≠ [approveWord]) :
+    (h₂ : approvesB s = false) :
     decodeVerdict s = Verdict.object (answerLines s) := by simp [decodeVerdict, h₁, h₂]
 
+/-- **…and approval is one word or nothing.** A reply with two tokens or more
+objects, which is the clause that reads `I approve of nothing here. OBJECTION:
+unsafe.` as an objection rather than as the word `approve` it contains. -/
+theorem decodeVerdict_ne_approve_of_two {s w₁ w₂ : String} {rest : List String}
+    (h₁ : answerLines s ≠ []) (h₂ : words s = w₁ :: w₂ :: rest) :
+    decodeVerdict s = Verdict.object (answerLines s) := by
+  refine decodeVerdict_eq_object h₁ ?_
+  simp [approvesB, h₂, sole]
+
 /-- **The classifier a `caseV` branches on, read off the wire.** Silence
-declines, *approve* approves, and everything else objects — so the three arms of
-`Plan.caseV` are in bijection with the three clauses of the parser, and no
-fourth reading of a reply exists. -/
+declines, a lone *approve* word approves, and everything else objects — so
+the three arms of `Plan.caseV` are in bijection with the three clauses of the
+parser, and no fourth reading of a reply exists. -/
 theorem tag_decodeVerdict (s : String) :
     Verdict.tag (decodeVerdict s) =
       (if answerLines s = [] then VTag.declined
-       else if (answerLines s).map norm = [approveWord] then VTag.approve
+       else if approvesB s then VTag.approve
        else VTag.object) := by
   by_cases h₁ : answerLines s = []
   · simp [decodeVerdict_eq_declined h₁, h₁]
-  · by_cases h₂ : (answerLines s).map norm = [approveWord]
-    · simp [decodeVerdict_eq_approve h₁ h₂, h₁, h₂]
-    · rw [decodeVerdict_eq_object h₁ h₂]
-      have hne : answerLines s ≠ [] := h₁
-      simp only [h₁, h₂, if_false, Verdict.tag]
+  · have hobj : ∀ ls : List Objection, ls ≠ [] →
+        Verdict.tag (Verdict.object ls) = VTag.object := by
+      intro ls hne
+      simp only [Verdict.tag]
       rw [if_neg (Verdict.object_ne_declined _), if_neg ?hap]
       case hap =>
         intro hcon
-        exact hne ((Verdict.approved_object_iff (answerLines s)).mp hcon)
+        exact hne ((Verdict.approved_object_iff ls).mp hcon)
+    by_cases h₂ : approvesB s = true
+    · obtain ⟨w, hw, hm⟩ := approvesB_eq_true_iff.mp h₂
+      rw [decodeVerdict_eq_approve h₁ hw hm]
+      simp [h₁, h₂]
+    · simp only [Bool.not_eq_true] at h₂
+      rw [decodeVerdict_eq_object h₁ h₂, hobj _ h₁]
+      simp [h₁, h₂]
 
 end Exec
 
@@ -604,44 +802,64 @@ def modeAxis {c : Code} (q : Q c) : Option String :=
 
 /-- What the addressee must say for `Decode` to read it. Sent with every
 question, because the trusted base is narrow on purpose and an addressee cannot
-be expected to guess it. -/
+be expected to guess it.
+
+**Each line here is the same instruction the questions themselves carry**
+(`Agentic/Core/HardenPatch.lean`), on purpose: an addressee told two different
+formats in one prompt obeys neither, and the header is the copy a question that
+forgot to say it still gets. -/
 def answerSpec : Code → String
   | .text => "Reply with the text itself and nothing else."
-  | .verdict =>
-      "Reply with exactly APPROVE if you have no objection; " ++
-      "otherwise reply with one objection per line and nothing else."
+  | .verdict => "Reply with exactly APPROVE if acceptable, or OBJECTION: <one line> if not."
   | .flag => "Reply with exactly yes or no."
-  | .ack => "Reply with ok."
+  | .ack => "Do what was asked, then reply with exactly DONE."
 
-/-- `[[renderQ c q]]` = the question as bytes on the wire: a header naming
-everything that determines the reply, the answer format, then the words.
+/-- `[[Selected]]` = which axes of a question's scope the *protocol* carried, so
+that the prompt header can say the rest and neither axis is said twice.
+
+The value represents what happened on the wire a moment ago, and it is a pair of
+`Bool`s rather than a pair of `Option String`s because the axis itself is still
+in the question: this records only whether the call was made and accepted. -/
+structure Selected where
+  /-- `session/set_mode` was sent for this question and the adapter took it. -/
+  mode : Bool := false
+  /-- `session/set_config_option {configId := "model"}` was sent and taken. -/
+  model : Bool := false
+  deriving DecidableEq, Repr, Inhabited
+
+/-- `[[renderQ c q sent]]` = the question as bytes on the wire: a header naming
+everything that determines the reply and was *not* already said over the
+protocol, the answer format, then the words.
 
 **Where the scope goes, and why.** A question's scope is two axes, and ACP v1
-treats them differently:
+has a call for each — which is a correction of what this file used to say:
 
-* the **mode** axis is a protocol concept — `session/set_mode` — so
-  `Exec.selectScope` sends it as a call and it is deliberately *absent* from
-  the header when `Settings.useSessionMode` is on;
-* the **model** axis is **not** a protocol concept: ACP v1 defines no
-  `session/set_model` (see `Agentic/Core/Acp.lean`), and inventing an
-  adapter-specific `session/set_config_option` here would be guessing. It
-  therefore goes into the header, as an instruction the addressee can read.
+* the **mode** axis is `session/set_mode`, which claude implements and codex
+  answers `-32602` to;
+* the **model** axis is `session/set_config_option` with `configId := "model"`,
+  which is in the ACP 1.3.0 schema (`SetSessionConfigOptionRequest`) and which
+  *both* real adapters implement. This file previously claimed that selecting a
+  model "would be guessing" because ACP defines no `session/set_model`. The
+  second half of that is true and the conclusion was wrong: `session/set_model`
+  does not exist, and `session/set_config_option` does.
 
-That is the documented choice: *select via the protocol where the protocol says
-how, otherwise say it in words*. The alternative — silently dropping a scope the
-transport cannot express — would make `under (atModel m)` a no-op at runtime
-while remaining meaningful in the semantics, and a scope operator that means
-something to `denote` and nothing to the adapter is the worst of both.
+The rule is unchanged — *select via the protocol where the protocol says how,
+otherwise say it in words* — but the protocol now says how for both axes, so the
+header carries an axis only when the call for it was not made or was refused.
+That fallback is not hypothetical: it is the only way the same question can be
+put to codex (no `set_mode`) and to a stub (neither call) without a scope
+operator silently becoming a no-op at runtime while remaining meaningful in the
+semantics.
 
 `draw` is in the header whenever it is nonzero, because a resample is a
 *different question* (§3 q1) and the addressee is entitled to know that it is
 being asked again on purpose rather than by mistake. -/
-def renderQ (c : Code) (q : Q c) (sentMode : Bool) : String :=
+def renderQ (c : Code) (q : Q c) (sent : Selected) : String :=
   let model := match modelAxis q with
-    | some m => s!"model: {m}\n"
+    | some m => if sent.model then "" else s!"model: {m}\n"
     | none => ""
   let mode := match modeAxis q with
-    | some m => if sentMode then "" else s!"mode: {m}\n"
+    | some m => if sent.mode then "" else s!"mode: {m}\n"
     | none => ""
   let draw := if q.draw = 0 then "" else s!"draw: {q.draw} (an independent re-draw)\n"
   s!"[question for {Addressee.render q.addressee}\n{model}{mode}{draw}\
@@ -669,77 +887,206 @@ structure Settings where
   the adapter's stub answers for the human. -/
   askPersonOnStdin : Bool := false
   /-- Send the scope's mode axis as `session/set_mode`. Off makes the mode a
-  prompt header instead, for an adapter that does not implement the call. -/
+  prompt header instead, for an adapter that does not implement the call. An
+  adapter that *refuses* the call needs no setting: the refusal is a value
+  (`Conn.setMode`), and the header carries the axis instead. -/
   useSessionMode : Bool := true
+  /-- Send the scope's model axis as `session/set_config_option` with
+  `configId := "model"`. On by default because both real adapters implement it;
+  refusal falls back to the header exactly as the mode axis does. -/
+  useConfigOptionModel : Bool := true
+  /-- Open a **new session** (`session/new`) before every question the adapter
+  is asked.
+
+  Off by default, because it costs one round trip per question and a stub has
+  nothing to forget. On, it is the runtime's half of the semantics' central
+  assumption: a world is a function of the *question* (`Agentic/Core/World.lean`
+  — `Ω := (c : Code) → Q c → El c`, a function of the question and nothing
+  else), so an answer must not depend on what was asked before it. A single
+  session carries conversation history, and an agent that has just written a
+  patch is not the same answerer as one asked to review a patch cold; the memo
+  table, not the agent's memory, is where this runtime keeps what was said
+  (`Dlg.execM`). A fresh session is the closest a real adapter comes to that
+  discipline, and it is stated as a setting because it is a *policy*, not a
+  theorem: nothing here can force an agent to forget. -/
+  freshSessionPerQuestion : Bool := false
   /-- Where a warning goes: a turn that ended oddly, a reply being re-asked.
   Warnings report what the run is *about* to do about something it noticed; they
   are never a substitute for doing it, which is why an answer that could not be
   read at all is an error and not a log line. -/
   log : String → IO Unit := fun msg => do (← IO.getStderr).putStrLn s!"agentic: {msg}"
+  /-- Called once per *turn* — not per question, since a question that had to be
+  re-asked took two — with the code asked for, who was asked, how the turn
+  ended, and how many milliseconds it took.
 
-/-- Put the question to the person at the keyboard. One line, because a
+  Reporting and nothing else: the interpreter does not read it back, and a
+  `Settings` that drops every call runs identically. It exists because a live
+  run's latency and stop reasons are facts about the `IO` layer that no theorem
+  mentions and no transcript records, and an operator watching a workflow spend
+  real money is owed both. -/
+  onTurn : (c : Code) → Addressee → Acp.StopReason → Nat → IO Unit :=
+    fun _ _ _ _ => pure ()
+
+/-- Put the question to the person at the keyboard.
+
+**The prompt goes to stderr and the answer is read from stdin**, so that a
+supervised run and a piped one are the same run: `printf 'yes\n' | …` answers
+the owner's question, and stdout stays the transcript alone. One line, because a
 transport that needed a terminator would need a protocol, and this is a
 convenience for supervised runs rather than an interface. -/
 def askPersonStdin (who : String) (text : String) : IO String := do
-  let out ← IO.getStdout
-  out.putStrLn s!"\n--- question for {who} ---"
-  out.putStrLn text
-  out.putStr "> "
-  out.flush
+  let err ← IO.getStderr
+  err.putStrLn s!"\n--- question for {who} ---"
+  err.putStrLn text
+  err.putStr "> "
+  err.flush
   let line ← (← IO.getStdin).getLine
   return line.trimAscii.toString
 
-/-- Send the mode axis over the protocol, where the protocol has a call for it.
-The model axis has none in ACP v1 and rides in the header instead; see
-`renderQ`. Returns whether the mode was in fact sent, which is what keeps the
-header and the protocol from saying it twice. -/
-def selectScope (st : Settings) (conn : Conn) {c : Code} (q : Q c) : IO Bool := do
-  match modeAxis q, st.useSessionMode with
-  | some m, true => conn.setMode m; return true
-  | _, _ => return false
+/-- Send both axes of the scope over the protocol, where the adapter accepts
+them, and report which ones it took. A refusal is a *value* from
+`Conn.setMode`/`Conn.setConfigOption`, not an exception, and it is logged and
+then said in the prompt header instead (`renderQ`): claude refuses no axis,
+codex refuses the mode axis, and the stub refuses whichever the test tells it
+to, so all three must be one code path. -/
+def selectScope (st : Settings) (conn : Conn) {c : Code} (q : Q c) : IO Selected := do
+  let mode ← match modeAxis q, st.useSessionMode with
+    | some m, true => do
+      match ← conn.setMode m with
+      | .ok _ => pure true
+      | .error e => do
+        st.log s!"session/set_mode '{m}' was refused ({e.compress}); \
+                  the mode axis goes in the prompt header instead"
+        pure false
+    | _, _ => pure false
+  let model ← match modelAxis q, st.useConfigOptionModel with
+    | some m, true => do
+      match ← conn.setConfigOption "model" m with
+      | .ok _ => pure true
+      | .error e => do
+        st.log s!"session/set_config_option model='{m}' was refused ({e.compress}); \
+                  the model axis goes in the prompt header instead"
+        pure false
+    | _, _ => pure false
+  return { mode, model }
 
-/-- Put one question and return the bytes that came back — over the transport,
-or to the keyboard when the addressee is a person and the runtime was told a
-person is there.
+/-- `[[requiresCompletedTurn c a]]` = may an answer to this question be recorded
+from a turn the agent did **not** finish?
+
+`false` is *refusal is an answer* (§3 q8): a `text`, `verdict` or `flag` from a
+model or a tool is read as given even if the turn was cut short, because a
+review that stopped mid-sentence is still a review with objections in it, and
+because `Decode` is total on two of those three codes by design.
+
+`true` is the case that argument does not cover, and there are two of them:
+
+* **`.ack` — an acknowledgement.** An `ack` question does not ask what somebody
+  thinks; it asks them to *do* something and say when it is done. A turn that was
+  cancelled, refused, or truncated is precisely the case where the act did not
+  happen, and `Decode .ack` is total, so nothing downstream could ever tell the
+  difference: `Table.cons .ack q () t` is the same term whether the tool acted or
+  was killed halfway. Recording it would be recording an act nobody performed,
+  which is the same fault as recording an answer nobody gave, and it gets the
+  same answer — the run is abandoned. (Kernel §5's trust boundary; ticket
+  `acat-fuk`.)
+* **A person.** A person-addressed question whose turn was cancelled or refused
+  was not answered *by that person*; the adapter standing in for them stopped.
+  Nobody answered, so there is nothing to record.
+
+Both are decisions about what bytes are allowed to mean, so both are stated as a
+function with equations rather than buried in an `if` inside an `IO` block. -/
+def requiresCompletedTurn (c : Code) (a : Addressee) : Bool :=
+  match c, a with
+  | .ack, _ => true
+  | _, .person _ => true
+  | _, _ => false
+
+/-- **Clause equation.** An act always requires a completed turn, whoever is
+asked to perform it. -/
+@[simp] theorem requiresCompletedTurn_ack (a : Addressee) :
+    requiresCompletedTurn .ack a = true := rfl
+
+/-- **Clause equation.** A person always requires a completed turn, whatever
+they were asked for. -/
+@[simp] theorem requiresCompletedTurn_person (c : Code) (id : String) :
+    requiresCompletedTurn c (.person id) = true := by cases c <;> rfl
+
+/-- **…and nowhere else**: refusal is still an answer for everything a model or
+a tool is asked that is not an act. -/
+theorem requiresCompletedTurn_eq_false {c : Code} {a : Addressee} (hc : c ≠ .ack)
+    (ha : ∀ id, a ≠ .person id) : requiresCompletedTurn c a = false := by
+  cases a <;> cases c <;> simp_all [requiresCompletedTurn]
+
+/-- Put one question and return the whole turn — over the transport, or to the
+keyboard when the addressee is a person and the runtime was told a person is
+there.
 
 **This is `askHuman`'s routing rule**, and it is one `match`: a
 `Addressee.person` question goes to stdin when `Settings.askPersonOnStdin` is
 set, and otherwise to the adapter, which is what makes an unattended run
-possible (the stub answers for the human) without a second interpreter. -/
-def say (st : Settings) (conn : Conn) (c : Code) (q : Q c) (sentMode : Bool)
-    (extra : String) : IO String := do
-  let text := renderQ c q sentMode ++ extra
+possible (the stub answers for the human) without a second interpreter. A line
+typed at the keyboard is a completed turn by construction: the person pressed
+return, which is the whole of what `end_turn` means here. -/
+def sayTurn (st : Settings) (conn : Conn) (c : Code) (q : Q c) (sent : Selected)
+    (extra : String) : IO Turn := do
+  let text := renderQ c q sent ++ extra
   match q.addressee with
   | .person who =>
-      if st.askPersonOnStdin then askPersonStdin who text else conn.prompt text
-  | _ =>
-      let turn ← conn.promptTurn text
-      if turn.stopReason != "end_turn" then
-        st.log s!"turn ended with stopReason '{turn.stopReason}' ({Code.name c}); \
-                  the reply is being read as given"
-      return turn.text
+      if st.askPersonOnStdin then
+        return { text := ← askPersonStdin who text, stopReason := .endTurn }
+      conn.promptTurn text
+  | _ => conn.promptTurn text
 
-/-- `[[attempt st conn c q sentMode n extra]]` = ask, decode, and on a failure to
+/-- `[[say st conn c q sent extra]]` = put the question and return the bytes,
+**having first insisted that the bytes are somebody's answer**.
+
+Every turn that did not end in `end_turn` is logged, whatever the code, because
+an operator is owed the fact that the agent was cut off; and a turn that did not
+end in `end_turn` where `requiresCompletedTurn` says one was needed abandons the
+run, quoting the stop reason, the addressee and the words. That is the same
+policy as decode exhaustion in `Exec.oracle` and for the same reason: the table
+records a code, a question and an answer and nothing else, so a cell entered
+from an interrupted turn is indistinguishable from one an addressee gave, and no
+check further down can recover the difference. -/
+def say (st : Settings) (conn : Conn) (c : Code) (q : Q c) (sent : Selected)
+    (extra : String) : IO String := do
+  let t₀ ← IO.monoMsNow
+  let turn ← sayTurn st conn c q sent extra
+  st.onTurn c q.addressee turn.stopReason ((← IO.monoMsNow) - t₀)
+  if turn.stopReason.completed then return turn.text
+  st.log s!"turn for a {Code.name c} from {Addressee.render q.addressee} ended \
+            '{turn.stopReason.render}', not 'end_turn'"
+  if requiresCompletedTurn c q.addressee then
+    throw <| IO.userError s!"the turn that would have answered a \
+      {Code.name c} from {Addressee.render q.addressee} ended \
+      '{turn.stopReason.render}' rather than completing (prompt: '{q.prompt}'; \
+      what arrived: '{turn.text.trimAscii.toString}'). The run is abandoned: \
+      an unfinished turn did not perform the act it was asked to perform, and a \
+      recorded acknowledgement of it would be indistinguishable, in the table, \
+      from one that did."
+  return turn.text
+
+/-- `[[attempt st conn c q sent n extra]]` = ask, decode, and on a failure to
 decode ask again — structurally, `n + 1` attempts in all.
 
 `.ok a` is the answer the trusted base read. `.error reply` is the **last
 unreadable reply, verbatim**: it is returned rather than discarded because it is
 the only evidence the caller has of what was actually said, and the caller's job
 is to report it, never to replace it with an answer of its own. -/
-def attempt (st : Settings) (conn : Conn) (c : Code) (q : Q c) (sentMode : Bool) :
+def attempt (st : Settings) (conn : Conn) (c : Code) (q : Q c) (sent : Selected) :
     Nat → String → IO (Except String (El c))
   | 0, extra => do
-      let reply ← say st conn c q sentMode extra
+      let reply ← say st conn c q sent extra
       return match Decode c reply with
         | some a => .ok a
         | none => .error reply
   | n + 1, extra => do
-      let reply ← say st conn c q sentMode extra
+      let reply ← say st conn c q sent extra
       match Decode c reply with
       | some a => return .ok a
       | none =>
           st.log s!"could not read a {Code.name c} from '{reply.trimAscii.toString}'; re-asking"
-          attempt st conn c q sentMode n (nudge c reply)
+          attempt st conn c q sent n (nudge c reply)
 
 /-- `[[Exec.oracle st conn]]` = the answering service that puts questions to a
 live adapter: select the scope the protocol can express, render, prompt, decode,
@@ -765,9 +1112,17 @@ the run either has an answer somebody gave, or it has no run.
 * Only `.flag` can fail to decode at all (`Decode_eq_none`), so this path is one
   code wide: `.verdict` is total, and *refusal is an answer* — an unreadable
   review reads as objections and never as approval.
+* The *other* way a run is abandoned is one layer down, in `Exec.say`: a turn
+  that did not end in `end_turn` where `Exec.requiresCompletedTurn` says one was
+  needed. The two rules are the same rule at two codes — do not record what did
+  not happen — and they are stated separately because the evidence differs: here
+  the bytes could not be read, there the bytes were never finished.
 * `Settings.retries` says how many times to re-ask first, and each failed
   attempt is logged with the words that failed, so the error is the end of a
   visible sequence rather than a surprise.
+* `Settings.freshSessionPerQuestion` opens a new session first, which is this
+  layer's approximation of "a world is a function of the question" — see the
+  field's own docstring, and note that it is an approximation and not a proof.
 * The error names the code, the addressee, the attempt count, the prompt and the
   last reply — trimmed of surrounding whitespace and otherwise untouched —
   because that reply is the only record of what was said and it is about to be
@@ -784,8 +1139,16 @@ lies through it merely exhibits a different world. What is ruled out here is not
 lying — no runtime can rule that out — but *this* runtime lying on the
 addressee's behalf. -/
 def oracle (st : Settings) (conn : Conn) : Oracle IO := fun c q _ => do
-  let sentMode ← selectScope st conn q
-  match ← attempt st conn c q sentMode st.retries "" with
+  -- A question the keyboard answers needs neither a session nor a scope call:
+  -- the person is not the adapter, and telling the adapter about a mode it will
+  -- not be asked anything under is a round trip that buys nothing.
+  let toKeyboard := match q.addressee with
+    | .person _ => st.askPersonOnStdin
+    | _ => false
+  let sent ← if toKeyboard then pure ({} : Selected) else do
+    if st.freshSessionPerQuestion then discard <| conn.newSession
+    selectScope st conn q
+  match ← attempt st conn c q sent st.retries "" with
   | .ok a => return a
   | .error reply =>
       throw <| IO.userError s!"no readable {Code.name c} from \

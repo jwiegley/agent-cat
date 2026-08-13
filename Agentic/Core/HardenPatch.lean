@@ -39,18 +39,44 @@ text. -/
 scope override the surface writes as `model "deep" <| …`. -/
 def deep : Sig := atModel "deep"
 
+/-! ### How an answer must be spelled
+
+Two constants, because two of the four codes have an answer set smaller than
+what an addressee can say, and a question that does not say which words it wants
+is a question a real model answers in prose.
+
+They are *the same words* `Exec.answerSpec` puts in the header of every question
+(`demo/Main.lean` proves the two agree, by `rfl`, in the one module that imports
+both): a prompt telling an addressee two different formats is a prompt that
+gets neither. -/
+
+/-- `[[verdictSpec]]` = how a reviewer must answer. `APPROVE` is the unit of the
+verdict monoid and `OBJECTION: …` is one line of `Verdict.object`, so the two
+spellings are the two constructors and there is no third. -/
+def verdictSpec : String :=
+  "Reply with exactly APPROVE if acceptable, or OBJECTION: <one line> if not."
+
+/-- `[[flagSpec]]` = how a yes/no question must be answered. -/
+def flagSpec : String := "Reply with exactly yes or no."
+
 /-- `[[guideQ]]` = the one closed question of the workflow: read the house style
 guide. Closed, so the plan starts at the `batch` rung. -/
 def guideQ : Q .text :=
-  { addressee := .tool "cat", scope := 1, prompt := "Write out the house style guide.", draw := 0 }
+  { addressee := .tool "cat", scope := 1,
+    prompt := "Write out the house style guide, at most four short lines.",
+    draw := 0 }
 
 /-- `[[authorShape]]` = whom a patch is asked of, and under what: the shape
 shared by the first draft and every revision. Written in the term at both
 nodes, which is what makes "at most three drafts" a statement about shapes. -/
 def authorShape : Q.Shape .text := { addressee := .model "author", scope := 1, draw := 0 }
 
-/-- `[[draftText spec]]` = the words of the first draft request. -/
-def draftText (spec : String) : String := "Draft a patch satisfying:\n" ++ spec
+/-- `[[draftText spec]]` = the words of the first draft request: the
+specification, and the format the answer must take — a patch, and only a patch,
+because the answer is quoted verbatim into three reviewers' prompts and into the
+act. -/
+def draftText (spec : String) : String :=
+  "Draft a patch satisfying:\n" ++ spec ++ "\nReply with a unified diff only."
 
 /-- `[[draftQ spec]]` = ask the author for a first patch meeting `spec`. -/
 def draftQ (spec : String) : Q .text := authorShape.withPrompt (draftText spec)
@@ -67,7 +93,8 @@ def render (v : Verdict) : String := String.intercalate "; " (objections v)
 /-- `[[reviseText guide patch v]]` = the words of a revision request: the guide,
 the patch and what the reviewers objected to. Everything an answer reaches. -/
 def reviseText (guide patch : String) (v : Verdict) : String :=
-  guide ++ "\nRevise this patch:\n" ++ patch ++ "\n" ++ render v
+  guide ++ "\nRevise this patch:\n" ++ patch ++ "\n" ++ render v ++
+    "\nReply with the revised diff only."
 
 /-- `[[reviseQ guide patch v]]` = ask the author to revise `patch`, quoting the
 guide **and the objections**. -/
@@ -80,7 +107,7 @@ def correctShape : Q.Shape .verdict :=
 
 /-- `[[correctText guide patch]]` = what is said to the correctness reviewer. -/
 def correctText (guide patch : String) : String :=
-  guide ++ "\nIs this patch correct?\n" ++ patch
+  guide ++ "\nIs this patch correct?\n" ++ patch ++ "\n" ++ verdictSpec
 
 /-- `[[correctQ guide patch]]` = the correctness reviewer, quoting the guide. -/
 def correctQ (guide patch : String) : Q .verdict :=
@@ -92,7 +119,7 @@ def secureShape : Q.Shape .verdict :=
 
 /-- `[[secureText guide patch]]` = what is said to the security reviewer. -/
 def secureText (guide patch : String) : String :=
-  guide ++ "\nIs this patch secure?\n" ++ patch
+  guide ++ "\nIs this patch secure?\n" ++ patch ++ "\n" ++ verdictSpec
 
 /-- `[[secureQ guide patch]]` = the security reviewer, quoting the same guide. -/
 def secureQ (guide patch : String) : Q .verdict :=
@@ -104,7 +131,8 @@ def simplerShape : Q.Shape .verdict :=
 
 /-- `[[simplerText patch]]` = what is said to the simplicity reviewer, who does
 not need the guide. -/
-def simplerText (patch : String) : String := "Could this patch be simpler?\n" ++ patch
+def simplerText (patch : String) : String :=
+  "Could this patch be simpler?\n" ++ patch ++ "\n" ++ verdictSpec
 
 /-- `[[simplerQ patch]]` = the simplicity reviewer, who does not need the
 guide. -/
@@ -115,7 +143,8 @@ any other (§3 q7); nothing about this node is a construct. -/
 def consentShape : Q.Shape .flag := { addressee := .person "owner", scope := 1, draw := 0 }
 
 /-- `[[consentText patch]]` = what the owner is shown. -/
-def consentText (patch : String) : String := "Apply this patch?\n" ++ patch
+def consentText (patch : String) : String :=
+  "Apply this patch?\n" ++ patch ++ "\n" ++ flagSpec
 
 /-- `[[consentQ patch]]` = ask the owner whether to apply. -/
 def consentQ (patch : String) : Q .flag := consentShape.withPrompt (consentText patch)
@@ -124,8 +153,12 @@ def consentQ (patch : String) : Q .flag := consentShape.withPrompt (consentText 
 the patch. -/
 def applyShape : Q.Shape .ack := { addressee := .tool "apply", scope := 1, draw := 0 }
 
-/-- `[[applyText patch]]` = what is said to it. -/
-def applyText (patch : String) : String := "Apply:\n" ++ patch
+/-- `[[applyText patch]]` = what is said to it: the patch, and the act itself
+spelled out — write the file, *here*, and say so. "Here" is the session's
+working directory, which `demo/Main.lean` makes a fresh scratch directory for a
+live run, so the act is confined to somewhere nobody minds. -/
+def applyText (patch : String) : String :=
+  "Apply:\n" ++ patch ++ "\nWrite the patched file here, then reply DONE."
 
 /-- `[[applyQ patch]]` = the terminal act, addressed to the tool that applies
 it. The only `.ack` question in the workflow, which is what makes "the apply
@@ -872,13 +905,20 @@ def ωStubborn : Ω := fun c => match c with
 /-- `[[ωEcho]]` = the world that echoes every prompt back and whose reviewers
 approve only a patch long enough to have been revised twice: it objects at
 rounds 1 and 2 and approves at round 3. At `demo`'s specification the threshold sits above round
-2's longest reviewer prompt (162 characters) and below round 3's shortest
-(198). Only a world that can tell the rounds apart reaches the dearest leaf, and
+2's longest reviewer prompt (355 characters) and below round 3's shortest
+(425). Only a world that can tell the rounds apart reaches the dearest leaf, and
 the only thing that distinguishes them is the patch under review — which is why
-attaining the maximum needs a world that reads prompt text. -/
+attaining the maximum needs a world that reads prompt text.
+
+The threshold is a function of the *words* of the questions, which is why it
+moved when they were rewritten to tell a real model how to answer: 190 was the
+number when a reviewer's prompt was the guide, the patch and nothing else. That
+is the one thing in this module prompt text can change, and it changes a `def`
+in a world, never a theorem — `bill_echo_demo` below is the same statement it
+was, and it is still 15. -/
 def ωEcho : Ω := fun c => match c with
   | .text => fun q => q.prompt
-  | .verdict => fun q => if 190 ≤ q.prompt.length then Verdict.approve else Verdict.object ["no"]
+  | .verdict => fun q => if 400 ≤ q.prompt.length then Verdict.approve else Verdict.object ["no"]
   | .flag => fun _ => true
   | .ack => fun _ => ()
 
@@ -901,8 +941,14 @@ theorem bill_stubborn_demo :
   exact congrArg _ (by decide)
 
 set_option maxRecDepth 100000 in
+set_option maxHeartbeats 1000000 in
 /-- **The maximum is attained.** Fifteen consultations: guide, draft, three
-panel rounds of three, two revisions, the owner, and the act. -/
+panel rounds of three, two revisions, the owner, and the act.
+
+The heartbeat budget above is what a `decide` on this world costs: `ωEcho` is
+the one world in the module that *reads* prompt text, so the kernel evaluates
+every prompt of the dearest run — three rounds of a patch that quotes the
+previous patch, which is 478 characters by round three. -/
 theorem bill_echo_demo :
     billFresh tick (Plan.trace ωEcho demo Env.nil) = Multiplicative.ofAdd 15 := by
   rw [billFresh_tick]
