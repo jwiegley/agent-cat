@@ -105,6 +105,12 @@ import Agentic.Term
 -- relabelling of consultation sites, on which the static fragment is a
 -- category.
 import Agentic.Meaning
+-- The authoring surface: the words a workflow is actually written in — `ask`,
+-- `askHuman`, `model`, `panel`, `revising`, and a `Monad` instance so that
+-- sharing an answer is variable binding. Its signature is the stable contract;
+-- its internals are scaffolding over the current Term calculus, which the
+-- re-derivation condemns (dossier rederivation-kernel.md; obr acat-o8s).
+import Agentic.Surface
 
 /-!
 # Agentic — the denotational design of agentic workflows

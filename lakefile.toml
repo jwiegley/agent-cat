@@ -1,6 +1,6 @@
 name = "agentic"
 version = "0.1.0"
-defaultTargets = ["Agentic", "Pollution"]
+defaultTargets = ["Agentic", "Pollution", "HardenPatch"]
 
 [[lean_lib]]
 name = "Agentic"
@@ -10,19 +10,12 @@ name = "mathlib"
 git = "https://github.com/leanprover-community/mathlib4"
 rev = "v4.30.0"
 
-# The worked example (doc/walkthrough.html §VII as real Lean). Deliberately not
-# in defaultTargets: it is verified against the commit it was authored on and
-# is re-verified/ported when the library's API moves (tracker: acat-h0k).
-# Build it explicitly with `lake build HardenPatch`.
+# The worked example: the workflow as a user would write it, in the authoring
+# surface (`Agentic.Surface`). In defaultTargets on purpose — it builds against
+# main, not against the commit it was authored on, so a surface that regresses
+# must break the build.
 [[lean_lib]]
 name = "HardenPatch"
-srcDir = "example"
-
-# The opt-in tour of HardenPatch: the checked read-outs (cost bounds, muS at
-# Prop, answer-sheet runs) that teach what the workflow's meanings say. Same
-# verification status as HardenPatch. Build with `lake build Tour`.
-[[lean_lib]]
-name = "Tour"
 srcDir = "example"
 
 # The instance-pollution probe (test/Pollution.lean): machine-checked assertions
