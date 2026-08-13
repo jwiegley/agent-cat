@@ -1,6 +1,5 @@
 import Agentic.Core.Dlg
-import Mathlib.Data.Fintype.Basic
-import Mathlib.Tactic.DeriveFintype
+import Mathlib.Data.FinEnum
 
 /-!
 # Plans: the first-order syntax with binders
@@ -220,9 +219,22 @@ inductive Plan : Ctx → Type → Type 1 where
       (k : Plan (c :: Γ) A) : Plan Γ A
   /-- **Finite-tag branching, both arms in the term.** `Selective.branch`, with
   the payload riding in the context into whichever arm is taken. `T` is a
-  `Fintype`, so the branch structure is a genuine finite tree and the cost of
-  the not-taken arm is enumerable rather than lost. -/
-  | case {Γ : Ctx} {A : Type} {T : Type} [Fintype T] [DecidableEq T]
+  `FinEnum`, so the branch structure is a genuine finite tree and the cost of
+  the not-taken arm is enumerable rather than lost.
+
+  **`FinEnum` and not `Fintype`, for one reason and it is recorded here.**
+  Mathlib's `Fintype` holds a `Finset`, a `Finset` holds a `Multiset`, and a
+  `Multiset` is a quotient — so a syntax whose `case` node mentions `Fintype`
+  depends on `propext` and `Quot.sound` *as a type*, before any theorem about it
+  is stated. `Agentic/Core/Certify.lean` claims an empty axiom set for
+  `certify_sound`, and that claim is about the whole transitive graph, of which
+  this constructor is a part. `FinEnum` says the same thing — a bijection with
+  `Fin n` — out of `Fin`, `Equiv` and `List`, none of which is a quotient, and
+  Mathlib derives `Fintype` from it (priority 100), so every `Finset.univ` in
+  `Agentic/Core/Level.lean` and `Agentic/Core/Cost.lean` is unchanged. The
+  enumeration adds an order that the semantics does not read; nothing below
+  branches on it. -/
+  | case {Γ : Ctx} {A : Type} {T : Type} [FinEnum T] [DecidableEq T]
       (e : Expr Γ T) (arms : T → Plan Γ A) : Plan Γ A
   /-- **Quarantined: a plan computed from an unbounded answer.** The one
   higher-order node, kept because directive (1) asks for it and no finite tag
@@ -230,6 +242,17 @@ inductive Plan : Ctx → Type → Type 1 where
   analysis homomorphism here is a theorem to be proved rather than a hole to be
   papered over. -/
   | dyn {Γ : Ctx} {A : Type} {B : Type} (e : Expr Γ B) (f : B → Plan Γ A) : Plan Γ A
+
+/-- The two-element tag type, enumerated, so that `Plan.caseB` is `Plan.case` at
+`Bool` and nothing new. Mathlib has `Fintype Bool` but no `FinEnum Bool`.
+
+**`scoped`, because `Bool` is not this package's type.** `test/Pollution.lean`
+exists to keep this package from making claims about `Bool`, `Prop` and `ℕ` on
+everyone who transitively imports it; a `scoped` instance is a claim made only
+where the package's vocabulary has been opened, which is the smallest scope in
+which `caseB` can be written at all. -/
+scoped instance instFinEnumBool : FinEnum Bool :=
+  FinEnum.ofList [false, true] (by decide)
 
 namespace Plan
 
@@ -435,7 +458,14 @@ inductive VTag where
   | object
   /-- The addressee would not answer. -/
   | declined
-  deriving DecidableEq, Repr, Inhabited, Fintype
+  deriving DecidableEq, Repr, Inhabited
+
+/-- The three tags, enumerated. Written out rather than derived because `case`
+asks for a `FinEnum` and there is no `deriving FinEnum`; `Fintype VTag` comes
+back from Mathlib's `FinEnum`-to-`Fintype` instance, so nothing downstream
+notices. -/
+instance instFinEnumVTag : FinEnum VTag :=
+  FinEnum.ofList [.approve, .object, .declined] (by intro t; cases t <;> simp)
 
 /-- **Morphism equation.** `[[Verdict.tag]]` is the classifying map onto the
 three-element tag set: refusal to `declined`, the unit to `approve`, and every

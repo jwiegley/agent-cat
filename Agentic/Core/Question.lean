@@ -104,10 +104,27 @@ instance instMonoidWithZero : MonoidWithZero Verdict :=
 instance instDecidableEq : DecidableEq Verdict :=
   inferInstanceAs (DecidableEq (Option (List Objection)))
 
-instance instInhabited : Inhabited Verdict := ⟨1⟩
+/-- The default verdict is approval — `default = 1`, which `default_eq_approve`
+below states and proves.
+
+**Written as `Option.some []` rather than as `1`, and that spelling is the whole
+point.** `1 : Verdict` is Mathlib's, and Mathlib's `One (WithZero (FreeMonoid α))`
+carries `Classical.choice` in its dependency graph. This instance is what
+`Agentic.Core.worldOf` defaults with, so it is reached by
+`Agentic.Core.certify_sound`, whose axiom set is a claim the package makes
+(`Agentic/Core/Certify.lean`). Spelling the same element without the algebra
+keeps that claim empty; `default_eq_approve` is `rfl`, so nothing is lost but
+the axioms. -/
+instance instInhabited : Inhabited Verdict :=
+  ⟨(Option.some ([] : List Objection) : Verdict)⟩
 
 /-- Nothing was objected to. `[[approve]] = 1`. -/
 def approve : Verdict := 1
+
+/-- …and the `Inhabited` default is that: an addressee who says nothing has
+objected to nothing. `rfl`, so the two spellings are one element and the
+axiom-free one may be used wherever the algebraic one is meant. -/
+@[simp] theorem default_eq_approve : (default : Verdict) = approve := rfl
 
 /-- The addressee would not answer. `[[declined]] = 0`. -/
 def declined : Verdict := 0

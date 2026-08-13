@@ -1,6 +1,7 @@
 import Agentic.Core.Denote
 import Mathlib.Data.Fintype.Lattice
 import Mathlib.Order.Basic
+import Mathlib.Tactic.DeriveFintype
 
 /-!
 # The level: which analyses apply, computed by a fold
@@ -133,7 +134,7 @@ variable {Γ Δ : Ctx} {A B C : Type}
 @[simp] theorem level_ask (c : Code) (s : Q.Shape c) (e : Expr Γ String) (k : Plan (c :: Γ) A) :
     level (Plan.ask c s e k) = max .pipeline (level k) := rfl
 
-@[simp] theorem level_case {T : Type} [Fintype T] [DecidableEq T]
+@[simp] theorem level_case {T : Type} [FinEnum T] [DecidableEq T]
     (e : Expr Γ T) (arms : T → Plan Γ A) :
     level (Plan.case e arms) = max .branch (Finset.univ.sup fun t => level (arms t)) := rfl
 
@@ -158,7 +159,7 @@ theorem le_of_ask {ℓ : Level} {c : Code} {s : Q.Shape c} {e : Expr Γ String}
 
 /-- A `case` forces `branch` and bounds every arm — *every* arm, because both
 arms are in the term, which is exactly what makes the cost a finite tree. -/
-theorem le_of_case {ℓ : Level} {T : Type} [Fintype T] [DecidableEq T]
+theorem le_of_case {ℓ : Level} {T : Type} [FinEnum T] [DecidableEq T]
     {e : Expr Γ T} {arms : T → Plan Γ A} (h : level (Plan.case e arms) ≤ ℓ) :
     Level.branch ≤ ℓ ∧ ∀ t, level (arms t) ≤ ℓ := by
   obtain ⟨hb, hs⟩ := max_le_iff.mp h

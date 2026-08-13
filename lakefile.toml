@@ -1,9 +1,16 @@
 name = "agentic"
 version = "0.1.0"
-defaultTargets = ["Agentic", "Pollution", "HardenPatch"]
+defaultTargets = ["Agentic", "Pollution", "HardenPatch", "acp_smoke", "exec_smoke", "harden_demo"]
 
+# The root module and every `Agentic/Core/*` module. The glob is explicit
+# because the runtime stratum is deliberately NOT imported by the root:
+# `Agentic.lean` is the mathematical space, and `Agentic/Core/Acp.lean` is a
+# transport that imports no part of it. Without the glob a runtime module would
+# be invisible to `lake build`; with it, one that stops compiling breaks the
+# build like everything else.
 [[lean_lib]]
 name = "Agentic"
+globs = ["Agentic", "Agentic.Core.+"]
 
 [[require]]
 name = "mathlib"
@@ -24,3 +31,36 @@ srcDir = "example"
 [[lean_lib]]
 name = "Pollution"
 srcDir = "test"
+
+# The transport's integration test (test/AcpSmoke.lean), which drives
+# `Agentic.Core.Acp` against test/stub_adapter.py over real pipes:
+# `lake exe acp_smoke`, from the repository root. In defaultTargets on purpose —
+# building it is what keeps a test of the transport compiling with it; running
+# it is the separate, explicit step that checks the bytes.
+[[lean_exe]]
+name = "acp_smoke"
+srcDir = "test"
+root = "AcpSmoke"
+
+# The interpreter's integration test (test/ExecSmoke.lean), which drives
+# `Agentic.Core.Exec` — `Decode`, the oracle, the person route and the memo
+# table — against the same stub: `lake exe exec_smoke`, from the repository
+# root. In defaultTargets for the same reason as `acp_smoke`: every theorem
+# about `exec` is stated at `Id`, so the `IO` instantiation has no proof and a
+# test that runs it is the only evidence there is.
+[[lean_exe]]
+name = "exec_smoke"
+srcDir = "test"
+root = "ExecSmoke"
+
+# The whole stack at once (demo/Main.lean): `Agentic.Core.Harden.demo` — the
+# flagship workload — denoted, folded, put to test/stub_adapter.py over real
+# pipes, and checked against the theorems that price it:
+# `lake exe harden_demo` and `lake exe harden_demo --refuse`, from the
+# repository root. In defaultTargets for the reason the two smoke tests are:
+# building it keeps the end-to-end path compiling; running it is the separate,
+# explicit step that checks the bytes, the bill and the certificate.
+[[lean_exe]]
+name = "harden_demo"
+srcDir = "demo"
+root = "Main"

@@ -671,8 +671,10 @@ def costTree [CommMonoid S] (price : Price S) :
   | _, _, .askC c q k, h, γ => (costTree price k h (.cons default γ)).map (price c q * ·)
   | _, _, .ask c s e k, h, γ =>
       (costTree price k (le_of_ask h).2 (.cons default γ)).map (price c (s.withPrompt (e γ)) * ·)
-  | _, _, @Plan.case _ _ T fT _ _ arms, h, γ =>
-      .node T fT (fun t => costTree price (arms t) ((le_of_case h).2 t) γ)
+  | _, _, @Plan.case _ _ T _ _ _ arms, h, γ =>
+      -- `case` carries a `FinEnum`; the tree carries the `Fintype` Mathlib
+      -- derives from it, which is the same finite set with the order forgotten.
+      .node T inferInstance (fun t => costTree price (arms t) ((le_of_case h).2 t) γ)
   | _, _, .dyn _ _, h, _ => absurd h (by simp only [level_dyn]; decide)
 
 /-- **Kernel obligation C3.** At `level ≤ branch`, with the one hypothesis that
@@ -705,7 +707,7 @@ theorem bill_mem_leaves [CommMonoid S] {price : Price S} (hp : PricesByShape pri
   | case e arms ih =>
     intro h γ γ' ω
     rw [Plan.trace, denote_case]
-    refine Multiset.mem_bind.mpr ⟨e γ, Finset.mem_univ _, ?_⟩
+    refine Multiset.mem_bind.mpr ⟨e γ, Finset.mem_univ_val _, ?_⟩
     exact ih (e γ) ((le_of_case h).2 _) γ γ' ω
   | dyn e f hdyn => intro h; exact absurd h (by simp only [level_dyn]; decide)
 

@@ -81,7 +81,7 @@ variable {Γ Δ Θ : Ctx} {A B C : Type}
     denote (Plan.ask c s e k) γ
       = .ask c (s.withPrompt (e γ)) (fun x => denote k (.cons x γ)) := by simp [denote]
 
-@[simp] theorem denote_case {T : Type} [Fintype T] [DecidableEq T]
+@[simp] theorem denote_case {T : Type} [FinEnum T] [DecidableEq T]
     (e : Expr Γ T) (arms : T → Plan Γ A) (γ : Env Γ) :
     denote (Plan.case e arms) γ = denote (arms (e γ)) γ := by simp [denote]
 

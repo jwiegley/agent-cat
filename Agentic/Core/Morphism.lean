@@ -109,7 +109,7 @@ theorem denote_ask (c : Code) (s : Q.Shape c) (e : Expr Γ String) (k : Plan (c 
 
 /-- **`case` is selection in the environment.** Both arms are in the term; the
 meaning takes the one the tag names. -/
-theorem denote_case {T : Type} [Fintype T] [DecidableEq T] (e : Expr Γ T)
+theorem denote_case {T : Type} [FinEnum T] [DecidableEq T] (e : Expr Γ T)
     (arms : T → Plan Γ A) (γ : Env Γ) :
     denote (Plan.case e arms) γ = denote (arms (e γ)) γ := rfl
 
