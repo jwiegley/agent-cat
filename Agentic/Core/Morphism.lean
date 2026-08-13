@@ -30,15 +30,15 @@ performing the corresponding operation on dialogues.
               ⟦op⟧
 ```
 
-**Four claims are refuted here, each in code and each beside the repaired
+**Three claims are refuted here, each in code and each beside the repaired
 statement that replaces it.** They are the return on writing the squares out:
-three of the four are invisible until the equation is stated in full.
+each is invisible until the equation is stated in full. (A fourth used to sit at
+the head of this list — the kernel's C2, that the sequence of question shapes is
+world-independent at `pipeline`. It was false of a representation in which
+`ask` carried an arbitrary `Expr Γ (Q c)`. It is true of this one, in which the
+`ask` node carries the shape as term-level data, and it is proved unconditionally
+as `level_sound_pipeline_shape`.)
 
-* `level p ≤ pipeline → the sequence of question *shapes* is world-independent`
-  (kernel C2) is **false**: `shape_not_world_indep_at_pipeline`. What is
-  unconditionally true at `pipeline` is world-independence of the *code*
-  sequence (`level_sound_pipeline`), and the shape claim holds exactly under the
-  missing hypothesis `ShapeStatic` (`level_sound_pipeline_shape`).
 * **Grafting is not natural in the context** (`sub_graft_not_natural`): the
   square `sub (graft p k) σ = graft (sub p σ) (k ∘ σ)` fails at a `ret` root and
   the smallest weakening, because `Cont` is an arbitrary context-indexed family.
@@ -78,8 +78,8 @@ variable {Γ Δ Θ : Ctx} {A B C D : Type} {c : Code}
 
 ```
 den (ret e)        γ = .done (e γ)
-den (askC c q k)   γ = .ask c q       (fun x => den k (γ ▷ x))
-den (ask  c e k)   γ = .ask c (e γ)   (fun x => den k (γ ▷ x))
+den (askC c q k)   γ = .ask c q                    (fun x => den k (γ ▷ x))
+den (ask c s e k)  γ = .ask c (s.withPrompt (e γ)) (fun x => den k (γ ▷ x))
 den (case e arms)  γ = den (arms (e γ)) γ
 den (dyn  e f)     γ = den (f (e γ))  γ
 ```
@@ -97,12 +97,15 @@ and continues with `k` under the answer. -/
 theorem denote_askC (c : Code) (q : Q c) (k : Plan (c :: Γ) A) (γ : Env Γ) :
     denote (Plan.askC c q k) γ = Dlg.ask c q (fun x => denote k (.cons x γ)) := rfl
 
-/-- **`ask` is the generator at a question built from what is known** — the node
-the domain forces, and the whole reason a content-dependent prompt stays below
-the monadic rung. The only difference from `askC` is that the question is
-`e γ` rather than `q`. -/
-theorem denote_ask (c : Code) (e : Expr Γ (Q c)) (k : Plan (c :: Γ) A) (γ : Env Γ) :
-    denote (Plan.ask c e k) γ = Dlg.ask c (e γ) (fun x => denote k (.cons x γ)) := rfl
+/-- **`ask` is the generator at a question whose *words* are built from what is
+known** — the node the domain forces, and the whole reason a content-dependent
+prompt stays below the monadic rung. The only difference from `askC` is that the
+words are `e γ` rather than `q.prompt`; the shape `s` is written in the term
+either way, which is what makes C2 hold with no hypothesis. -/
+theorem denote_ask (c : Code) (s : Q.Shape c) (e : Expr Γ String) (k : Plan (c :: Γ) A)
+    (γ : Env Γ) :
+    denote (Plan.ask c s e k) γ
+      = Dlg.ask c (s.withPrompt (e γ)) (fun x => denote k (.cons x γ)) := rfl
 
 /-- **`case` is selection in the environment.** Both arms are in the term; the
 meaning takes the one the tag names. -/
@@ -123,7 +126,7 @@ theorem denote_dyn {B : Type} (e : Expr Γ B) (f : B → Plan Γ A) (γ : Env Γ
 dialogue. The redundancy buys the batch rung a domain and costs exactly this
 theorem. -/
 theorem askC_coherent (c : Code) (q : Q c) (k : Plan (c :: Γ) A) (γ : Env Γ) :
-    denote (Plan.askC c q k) γ = denote (Plan.ask c (fun _ => q) k) γ := rfl
+    denote (Plan.askC c q k) γ = denote (Plan.ask c q.shape (fun _ => q.prompt) k) γ := rfl
 
 /-! ## Context morphisms: `denote` is a presheaf map -/
 
@@ -156,7 +159,7 @@ run ω (⟦under σ p⟧ γ) = run (ω ∘ σ) (⟦p⟧ γ)
 This is the kernel's "scope is part of the question": there is no scope layer
 wrapped around the meaning, only a change of which world is being read. -/
 theorem run_under (ω : Ω) (σ : Sig) (p : Plan Γ A) (γ : Env Γ) :
-    Plan.run ω (Plan.under σ p) γ = Plan.run (fun c q => ω c (σ c q)) p γ :=
+    Plan.run ω (Plan.under σ p) γ = Plan.run (fun c q => ω c (σ.onQ c q)) p γ :=
   Agentic.Core.run_under ω σ p γ
 
 /-- **Scope is reindexing, on transcripts** — and the transcript half is *not*
@@ -171,7 +174,7 @@ The bill of a scoped plan is therefore the bill of the unscoped plan at the
 relabelled prices, which is what a per-model price list means. -/
 theorem trace_under (ω : Ω) (σ : Sig) (p : Plan Γ A) (γ : Env Γ) :
     Plan.trace ω (Plan.under σ p) γ
-      = (Plan.trace (fun c q => ω c (σ c q)) p γ).map (Event.relabel σ) := by
+      = (Plan.trace (fun c q => ω c (σ.onQ c q)) p γ).map (Event.relabel σ) := by
   show Dlg.trace ω (denote (Plan.under σ p) γ) = _
   rw [Agentic.Core.denote_under, Dlg.trace_under]
   rfl
@@ -206,7 +209,7 @@ theorem graft_pure : ∀ {Γ : Ctx} {A : Type} (p : Plan Γ A),
   induction p with
   | ret e => rfl
   | askC c q p ih => simp only [Plan.graft]; exact congrArg _ ih
-  | ask c d p ih => simp only [Plan.graft]; exact congrArg _ ih
+  | ask c s d p ih => simp only [Plan.graft]; exact congrArg _ ih
   | case d arms ih => simp only [Plan.graft]; exact congrArg _ (funext fun t => ih t)
   | dyn d f ih => simp only [Plan.graft]; exact congrArg _ (funext fun b => ih b)
 
@@ -230,7 +233,7 @@ theorem graft_assoc {B D : Type} : ∀ {Γ : Ctx} {A : Type} (p : Plan Γ A)
   induction p with
   | ret e => intro k k'; rfl
   | askC c q p ih => intro k k'; simp only [Plan.graft]; exact congrArg _ (ih _ _)
-  | ask c d p ih => intro k k'; simp only [Plan.graft]; exact congrArg _ (ih _ _)
+  | ask c s d p ih => intro k k'; simp only [Plan.graft]; exact congrArg _ (ih _ _)
   | case d arms ih =>
     intro k k'; simp only [Plan.graft]; exact congrArg _ (funext fun t => ih t _ _)
   | dyn d f ih =>
@@ -407,15 +410,18 @@ def panellistA : Q .verdict := { addressee := .model "a", scope := 1, prompt := 
 the two events differ in shape and a reordering is visible. -/
 def panellistB : Q .verdict := { addressee := .model "b", scope := 1, prompt := "", draw := 0 }
 
-/-- **The honest order fact.** The value of a panel is permutation-invariant
-whenever the reducer's monoid is commutative (`run_panel_perm`), and its
-transcript is **never** permutation-invariant: reordering the members reorders
-the events, in every world.
+/-- **The honest order fact.** A panel's transcript is **never** permutation-
+invariant *as a list*: reordering the members reorders the events, in every
+world. What is invariant is the transcript as a multiset
+(`trace_panel_perm_multiset`), the approval decision
+(`approved_panel_perm`) and, in a commutative carrier, the bill
+(`billFresh_panel_perm`).
 
 So "parallel" is a fact about a runtime and not about the meaning, and the
-licence to reorder is a licence about *answers* only. That is the correct
-outcome: were the transcript a multiset, a scheduler could change the bill of a
-metered conversation without changing its meaning. -/
+licence to reorder is a licence to choose an order — not to change which
+consultations happen. That is the correct outcome: were the transcript itself a
+multiset, the *order* of a metered conversation would be outside the meaning,
+and it is not. -/
 theorem trace_panel_not_perm_invariant :
     ∃ (ω : Ω) (ps ps' : List (Plan [] (El .verdict))), ps.Perm ps' ∧
       (Plan.trace ω (Plan.panel ps) Env.nil).map Event.shape
@@ -492,41 +498,45 @@ theorem level_sound_pipeline_count (p : Plan Γ A) (h : level p ≤ Level.pipeli
     (Plan.trace ω p γ).length = (Plan.trace ω' p γ).length :=
   length_trace_eq_of_le_pipeline p h γ ω ω'
 
-/-- **The kernel's C2 is false as written.** "At `level ≤ pipeline` the sequence
-of question *shapes* is world-independent" fails on a two-node plan: `ask` takes
-an arbitrary `Expr Γ (Q c)`, the addressee is a field of `Q`, and the addressee
-is part of the shape — so an answer can choose *whom* the next question goes to
-while the code sequence stays fixed.
+/-- **The kernel's C2, in full and with no hypothesis.** At `level ≤ pipeline`
+the sequence of question *shapes* — addressee, scope and draw, all of it — is
+fixed by the term, in every world and under every environment.
 
-Recorded here, next to the true statements, because the kernel's exact-bill
-claim at `pipeline` rests on the false one. -/
-theorem shape_not_world_indep_at_pipeline :
-    ∃ (p : Plan [] String) (ω ω' : Ω), level p ≤ Level.pipeline ∧
-      (Plan.trace ω p Env.nil).map Event.shape
-        ≠ (Plan.trace ω' p Env.nil).map Event.shape :=
-  ⟨shifty, heads, tails, le_of_eq level_shifty, shapes_not_world_indep⟩
-
-/-- **…and the repair.** Under `ShapeStatic` — the missing hypothesis, which
-says an answer flows into the *prompt text* and nowhere else, and which is
-exactly the domain's own pivot — the shape sequence is world-independent after
-all, and then the bill is exact (`bill_exact_pipeline`). -/
+This is the claim that was false of an earlier representation, in which `ask`
+carried an arbitrary `Expr Γ (Q c)` and an answer could therefore choose *whom*
+the next question went to. It is true of this one because the choice is not
+there to make: an `ask` node writes `s : Q.Shape c` and computes only the words.
+The predicate that used to be its hypothesis is deleted rather than discharged —
+`shape_projects_from_ask` below is what replaced it. -/
 theorem level_sound_pipeline_shape (p : Plan Γ A) (h : level p ≤ Level.pipeline)
-    (hs : ShapeStatic p) (γ γ' : Env Γ) (ω ω' : Ω) :
+    (γ γ' : Env Γ) (ω ω' : Ω) :
     (Plan.trace ω p γ).map Event.shape = (Plan.trace ω' p γ').map Event.shape :=
-  shapes_eq_of_le_pipeline p h hs γ γ' ω ω'
+  shapes_eq_of_le_pipeline p h γ γ' ω ω'
+
+/-- **…and the one-line reason.** The shape of the event an `ask` node records
+is the shape written in the node, whatever the environment says. Every world and
+every environment sees the same `s`; the induction of
+`shapes_eq_of_le_pipeline` is this equation and nothing else.
+
+Stated as a `rfl` on purpose: "the shape is a projection of the syntax" is the
+kind of claim that should cost nothing to check. -/
+theorem shape_projects_from_ask (ω : Ω) (c : Code) (s : Q.Shape c) (e : Expr Γ String)
+    (k : Plan (c :: Γ) A) (γ : Env Γ) :
+    ((Plan.trace ω (Plan.ask c s e k) γ).head?).map Event.shape = some ⟨c, s⟩ := rfl
 
 /-- **`branch` is sound**: the bill of every run is a leaf of the finite tree
-the term determines. Both arms are in the term, so the tree exists; the two
-hypotheses are the same two that `pipeline` needs. -/
+the term determines. Both arms are in the term, so the tree exists; the one
+hypothesis is the one `pipeline` needs. -/
 theorem level_sound_branch [CommMonoid S] {price : Price S} (hp : PricesByShape price)
-    (p : Plan Γ A) (h : level p ≤ Level.branch) (hs : ShapeStatic p) (γ : Env Γ) (ω : Ω) :
+    (p : Plan Γ A) (h : level p ≤ Level.branch) (γ : Env Γ) (ω : Ω) :
     billFresh price (Plan.trace ω p γ) ∈ (costTree price p h γ).leaves :=
-  bill_mem_leaves hp p h hs γ γ ω
+  bill_mem_leaves hp p h γ γ ω
 
-/-- **…and at `dynamic` there is nothing to be sound about**: no finite set of
-bills exists, hence no cost tree of any shape. The level fold's top rung is a
-non-existence theorem, which is the honest replacement for a type index that
-bounds nothing. -/
+/-- **…and at `dynamic` there is nothing to be sound about**: the rung admits a
+plan (`unbounded`) for which no finite set of bills exists, hence no cost tree
+of any shape. The level fold's top rung is a non-existence theorem — a witness,
+not a universal — which is the honest replacement for a type index that bounds
+nothing. -/
 theorem level_sound_dynamic :
     ¬ ∃ L : List (Multiplicative Nat),
         ∀ ω : Ω, billFresh tick (Plan.trace ω unbounded Env.nil) ∈ L :=

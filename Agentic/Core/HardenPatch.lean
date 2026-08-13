@@ -9,9 +9,9 @@ first-order syntax `Plan` and proves, **in the meaning space**, the six things
 the kernel promises about it.
 
 Nothing here is a statement about the shape of a term. Every theorem quantifies
-over worlds and speaks of `run` or `trace` of `⟦hardenPatch⟧`, except the two
-that are *about* the fold (`level_hardenPatch`, `shapeStatic_hardenPatch`) and
-exist precisely to license the branch-rung cost theorems on this workload.
+over worlds and speaks of `run` or `trace` of `⟦hardenPatch⟧`, except the one
+that is *about* the fold (`level_hardenPatch`) and exists precisely to license
+the branch-rung cost theorems on this workload.
 
 The method is the doctrine's: **the meaning is written first** (`hardenD`, an
 ordinary recursion over `Dlg`), the plan second, and the two are joined by one
@@ -44,10 +44,16 @@ guide. Closed, so the plan starts at the `batch` rung. -/
 def guideQ : Q .text :=
   { addressee := .tool "cat", scope := 1, prompt := "Write out the house style guide.", draw := 0 }
 
+/-- `[[authorShape]]` = whom a patch is asked of, and under what: the shape
+shared by the first draft and every revision. Written in the term at both
+nodes, which is what makes "at most three drafts" a statement about shapes. -/
+def authorShape : Q.Shape .text := { addressee := .model "author", scope := 1, draw := 0 }
+
+/-- `[[draftText spec]]` = the words of the first draft request. -/
+def draftText (spec : String) : String := "Draft a patch satisfying:\n" ++ spec
+
 /-- `[[draftQ spec]]` = ask the author for a first patch meeting `spec`. -/
-def draftQ (spec : String) : Q .text :=
-  { addressee := .model "author", scope := 1,
-    prompt := "Draft a patch satisfying:\n" ++ spec, draw := 0 }
+def draftQ (spec : String) : Q .text := authorShape.withPrompt (draftText spec)
 
 /-- `[[objections v]]` = the reasons a verdict gave; `[]` if it declined. The
 projection that lets a revision be told *what* was wrong (kernel §3 q5, and
@@ -58,39 +64,73 @@ def objections (v : Verdict) : List Objection :=
 /-- `[[render v]]` = a verdict as text an addressee can read. -/
 def render (v : Verdict) : String := String.intercalate "; " (objections v)
 
+/-- `[[reviseText guide patch v]]` = the words of a revision request: the guide,
+the patch and what the reviewers objected to. Everything an answer reaches. -/
+def reviseText (guide patch : String) (v : Verdict) : String :=
+  guide ++ "\nRevise this patch:\n" ++ patch ++ "\n" ++ render v
+
 /-- `[[reviseQ guide patch v]]` = ask the author to revise `patch`, quoting the
 guide **and the objections**. -/
 def reviseQ (guide patch : String) (v : Verdict) : Q .text :=
-  { addressee := .model "author", scope := 1,
-    prompt := guide ++ "\nRevise this patch:\n" ++ patch ++ "\n" ++ render v, draw := 0 }
+  authorShape.withPrompt (reviseText guide patch v)
+
+/-- `[[correctShape]]` = whom the correctness review goes to. -/
+def correctShape : Q.Shape .verdict :=
+  { addressee := .model "reviewer-correct", scope := 1, draw := 0 }
+
+/-- `[[correctText guide patch]]` = what is said to the correctness reviewer. -/
+def correctText (guide patch : String) : String :=
+  guide ++ "\nIs this patch correct?\n" ++ patch
 
 /-- `[[correctQ guide patch]]` = the correctness reviewer, quoting the guide. -/
 def correctQ (guide patch : String) : Q .verdict :=
-  { addressee := .model "reviewer-correct", scope := 1,
-    prompt := guide ++ "\nIs this patch correct?\n" ++ patch, draw := 0 }
+  correctShape.withPrompt (correctText guide patch)
+
+/-- `[[secureShape]]` = whom the security review goes to. -/
+def secureShape : Q.Shape .verdict :=
+  { addressee := .model "reviewer-secure", scope := 1, draw := 0 }
+
+/-- `[[secureText guide patch]]` = what is said to the security reviewer. -/
+def secureText (guide patch : String) : String :=
+  guide ++ "\nIs this patch secure?\n" ++ patch
 
 /-- `[[secureQ guide patch]]` = the security reviewer, quoting the same guide. -/
 def secureQ (guide patch : String) : Q .verdict :=
-  { addressee := .model "reviewer-secure", scope := 1,
-    prompt := guide ++ "\nIs this patch secure?\n" ++ patch, draw := 0 }
+  secureShape.withPrompt (secureText guide patch)
+
+/-- `[[simplerShape]]` = whom the simplicity review goes to. -/
+def simplerShape : Q.Shape .verdict :=
+  { addressee := .model "reviewer-simple", scope := 1, draw := 0 }
+
+/-- `[[simplerText patch]]` = what is said to the simplicity reviewer, who does
+not need the guide. -/
+def simplerText (patch : String) : String := "Could this patch be simpler?\n" ++ patch
 
 /-- `[[simplerQ patch]]` = the simplicity reviewer, who does not need the
 guide. -/
-def simplerQ (patch : String) : Q .verdict :=
-  { addressee := .model "reviewer-simple", scope := 1,
-    prompt := "Could this patch be simpler?\n" ++ patch, draw := 0 }
+def simplerQ (patch : String) : Q .verdict := simplerShape.withPrompt (simplerText patch)
 
-/-- `[[consentQ patch]]` = ask the owner whether to apply. A person is an
-addressee like any other (§3 q7); nothing about this node is a construct. -/
-def consentQ (patch : String) : Q .flag :=
-  { addressee := .person "owner", scope := 1,
-    prompt := "Apply this patch?\n" ++ patch, draw := 0 }
+/-- `[[consentShape]]` = whom consent is asked of. A person is an addressee like
+any other (§3 q7); nothing about this node is a construct. -/
+def consentShape : Q.Shape .flag := { addressee := .person "owner", scope := 1, draw := 0 }
+
+/-- `[[consentText patch]]` = what the owner is shown. -/
+def consentText (patch : String) : String := "Apply this patch?\n" ++ patch
+
+/-- `[[consentQ patch]]` = ask the owner whether to apply. -/
+def consentQ (patch : String) : Q .flag := consentShape.withPrompt (consentText patch)
+
+/-- `[[applyShape]]` = the addressee of the terminal act: the tool that applies
+the patch. -/
+def applyShape : Q.Shape .ack := { addressee := .tool "apply", scope := 1, draw := 0 }
+
+/-- `[[applyText patch]]` = what is said to it. -/
+def applyText (patch : String) : String := "Apply:\n" ++ patch
 
 /-- `[[applyQ patch]]` = the terminal act, addressed to the tool that applies
 it. The only `.ack` question in the workflow, which is what makes "the apply
 question was not put" a statement about codes. -/
-def applyQ (patch : String) : Q .ack :=
-  { addressee := .tool "apply", scope := 1, prompt := "Apply:\n" ++ patch, draw := 0 }
+def applyQ (patch : String) : Q .ack := applyShape.withPrompt (applyText patch)
 
 /-! ## The meaning, written first
 
@@ -111,7 +151,7 @@ def panelD (guide patch : String) : Dlg (El .verdict) :=
 /-- `[[redraftD guide patch v]]` = one revision, under the deep model, told what
 the reviewers objected to. -/
 def redraftD (guide patch : String) (v : Verdict) : Dlg (El .text) :=
-  Dlg.ask1 .text (deep .text (reviseQ guide patch v))
+  Dlg.ask1 .text (deep.onQ .text (reviseQ guide patch v))
 
 /-- `[[loopD guide n patch]]` = review `patch`; if the panel approves, stop with
 it; otherwise revise and go again, at most `n` more times; if the last review
@@ -141,7 +181,7 @@ model; review-and-revise up to twice; ask the owner; apply if and only if the
 owner consented. -/
 def hardenD (spec : String) : Dlg Unit :=
   Dlg.ask1 .text guideQ >>= fun guide =>
-  Dlg.ask1 .text (deep .text (draftQ spec)) >>= fun draft =>
+  Dlg.ask1 .text (deep.onQ .text (draftQ spec)) >>= fun draft =>
   loopD guide 2 draft >>= fun final =>
   finishD final
 
@@ -157,15 +197,16 @@ owner consent". -/
 `panelD` at the guide in scope. -/
 def review : Cont [.text] (El .text) Verdict := fun _ σ patch =>
   Plan.panel
-    [ Plan.ask1 .verdict (fun δ => correctQ (σ δ).head (patch δ)),
-      Plan.ask1 .verdict (fun δ => secureQ (σ δ).head (patch δ)),
-      Plan.ask1 .verdict (fun δ => simplerQ (patch δ)) ]
+    [ Plan.ask1 .verdict correctShape (fun δ => correctText (σ δ).head (patch δ)),
+      Plan.ask1 .verdict secureShape (fun δ => secureText (σ δ).head (patch δ)),
+      Plan.ask1 .verdict simplerShape (fun δ => simplerText (patch δ)) ]
 
 /-- `[[redraft]]` = the revision, as a continuation of the loop: `revise`, in
 `revising`'s sense, with the verdict threaded into the prompt. **Morphism
 equation** (`denotes_redraft`): it denotes `redraftD`. -/
 def redraft : Cont [.text] (El .text × Verdict) (El .text) := fun _ σ av =>
-  Plan.under deep (Plan.ask1 .text (fun δ => reviseQ (σ δ).head (av δ).1 (av δ).2))
+  Plan.under deep
+    (Plan.ask1 .text authorShape (fun δ => reviseText (σ δ).head (av δ).1 (av δ).2))
 
 /-- `[[patchOf o]]` = the patch the loop produced, or `""` where it produced
 none. Only ever read on the arm where the loop *did* produce one; the fallback
@@ -182,9 +223,10 @@ def finishK (Γ : Ctx) : Cont Γ (Option (El .text)) Unit := fun _ _ final =>
   -- if the loop produced a patch …
   Plan.caseB (fun θ => (final θ).isSome)
     -- … ok ← askHuman "Apply this patch?" ; if ok then ask "Apply: …"
-    (Plan.ask .flag (fun θ => consentQ (patchOf (final θ)))
+    (Plan.ask .flag consentShape (fun θ => consentText (patchOf (final θ)))
       (Plan.caseB (fun θ => θ.head)
-        (Plan.ask .ack (fun θ => applyQ (patchOf (final θ.tail))) (.ret fun _ => ()))
+        (Plan.ask .ack applyShape (fun θ => applyText (patchOf (final θ.tail)))
+          (.ret fun _ => ()))
         (.ret fun _ => ())))
     (.ret fun _ => ())
 
@@ -222,12 +264,14 @@ theorem denotes_review : Plan.Denotes review Kreview := by
   show denote (Plan.panel _) δ = _
   rw [Morphism.denote_panel]
   simp only [List.map_cons, List.map_nil, List.foldr_cons, List.foldr_nil, denote_ask1,
-    Kreview, panelD, seq_eq_bind_map, map_eq_pure_bind, bind_assoc, pure_bind, mul_one]
+    Kreview, panelD, correctQ, secureQ, simplerQ, seq_eq_bind_map, map_eq_pure_bind,
+    bind_assoc, pure_bind, mul_one]
 
 /-- **The revision square, at this workload.** -/
 theorem denotes_redraft : Plan.Denotes redraft Kredraft := by
   intro Δ σ e δ
-  simp [redraft, Kredraft, redraftD, Plan.ask1, Dlg.ask1, Plan.under, denote]
+  simp [redraft, Kredraft, redraftD, reviseQ, Plan.ask1, Dlg.ask1, Plan.under, denote,
+    Sig.onQ]
 
 /-- **The loop square.** `revising`'s semantic loop, instantiated here, *is*
 `loopD` — two independently written recursions agreeing at every fuel. -/
@@ -287,7 +331,7 @@ theorem denote_hardenPatch (spec : String) :
   have key : ∀ guide : El .text,
       denote (Plan.graft (Plan.under deep (Plan.askC1 .text (draftQ spec))) bodyK)
           (Env.cons guide Env.nil)
-        = (Dlg.ask1 .text (deep .text (draftQ spec)) >>= fun draft =>
+        = (Dlg.ask1 .text (deep.onQ .text (draftQ spec)) >>= fun draft =>
             loopD guide 2 draft >>= fun final => finishD final) := by
     intro guide
     rw [Agentic.Core.denote_graft _ Kbody bodyK denotes_bodyK (Env.cons guide Env.nil)]
@@ -296,7 +340,7 @@ theorem denote_hardenPatch (spec : String) :
       (fun guide => denote (Plan.graft (Plan.under deep (Plan.askC1 .text (draftQ spec))) bodyK)
         (Env.cons guide Env.nil))
     = Dlg.ask .text guideQ (fun guide =>
-        Dlg.ask1 .text (deep .text (draftQ spec)) >>= fun draft =>
+        Dlg.ask1 .text (deep.onQ .text (draftQ spec)) >>= fun draft =>
           loopD guide 2 draft >>= fun final => finishD final)
   exact congrArg _ (funext key)
 
@@ -346,10 +390,10 @@ what `x` consults. A `Functor`-level restatement of `trace_bind`. -/
 
 @[simp] theorem trace_redraftD (g a : String) (v : Verdict) :
     Dlg.trace ω (redraftD g a v)
-      = [⟨.text, deep .text (reviseQ g a v), ω .text (deep .text (reviseQ g a v))⟩] := rfl
+      = [⟨.text, deep.onQ .text (reviseQ g a v), ω .text (deep.onQ .text (reviseQ g a v))⟩] := rfl
 
 @[simp] theorem run_redraftD (g a : String) (v : Verdict) :
-    Dlg.run ω (redraftD g a v) = ω .text (deep .text (reviseQ g a v)) := rfl
+    Dlg.run ω (redraftD g a v) = ω .text (deep.onQ .text (reviseQ g a v)) := rfl
 
 theorem trace_loopD_zero (g : String) (a : El .text) :
     Dlg.trace ω (loopD g 0 a) = Dlg.trace ω (panelD g a) := by
@@ -395,11 +439,11 @@ tail. Everything the six theorems say is read off this line. -/
 theorem trace_hardenD (spec : String) :
     Dlg.trace ω (hardenD spec)
       = ⟨.text, guideQ, ω .text guideQ⟩
-        :: ⟨.text, deep .text (draftQ spec), ω .text (deep .text (draftQ spec))⟩
-        :: (Dlg.trace ω (loopD (ω .text guideQ) 2 (ω .text (deep .text (draftQ spec))))
+        :: ⟨.text, deep.onQ .text (draftQ spec), ω .text (deep.onQ .text (draftQ spec))⟩
+        :: (Dlg.trace ω (loopD (ω .text guideQ) 2 (ω .text (deep.onQ .text (draftQ spec))))
             ++ Dlg.trace ω
                 (finishD (Dlg.run ω
-                  (loopD (ω .text guideQ) 2 (ω .text (deep .text (draftQ spec))))))) := by
+                  (loopD (ω .text guideQ) 2 (ω .text (deep.onQ .text (draftQ spec))))))) := by
   simp only [hardenD, Dlg.trace_bind', Dlg.trace_ask1, Dlg.run_ask1,
     List.cons_append, List.nil_append]
 
@@ -447,7 +491,7 @@ theorem loopD_key_ne_guide (g : String) :
         · rw [trace_redraftD] at h'
           simp only [List.mem_cons, List.not_mem_nil, or_false] at h'
           subst h'
-          exact key_ne_of_addressee (by simp [deep, atModel, reviseQ, guideQ])
+          exact key_ne_of_addressee (by simp [deep, atModel, reviseQ, guideQ, authorShape])
         · exact ih _ e h'
 
 theorem loopD_code_ne_ack (g : String) :
@@ -485,7 +529,7 @@ theorem loopD_countP_draft (g : String) :
   | zero =>
     intro a
     rw [trace_loopD_zero, trace_panelD]
-    simp [isDraft, correctQ, secureQ, simplerQ]
+    simp [isDraft, correctQ, secureQ, simplerQ, correctShape, secureShape, simplerShape]
   | succ n ih =>
     intro a
     rw [trace_loopD_succ, List.countP_append, trace_panelD]
@@ -493,15 +537,15 @@ theorem loopD_countP_draft (g : String) :
         [(⟨.verdict, correctQ g a, ω .verdict (correctQ g a)⟩ : Event),
          ⟨.verdict, secureQ g a, ω .verdict (secureQ g a)⟩,
          ⟨.verdict, simplerQ a, ω .verdict (simplerQ a)⟩]) = 0 := by
-      simp [isDraft, correctQ, secureQ, simplerQ]
+      simp [isDraft, correctQ, secureQ, simplerQ, correctShape, secureShape, simplerShape]
     rw [hpanel, Nat.zero_add]
     split
     · simp
     · rw [List.countP_append, trace_redraftD]
       have hrev : (List.countP isDraft
-          [(⟨.text, deep .text (reviseQ g a (Dlg.run ω (panelD g a))),
-             ω .text (deep .text (reviseQ g a (Dlg.run ω (panelD g a))))⟩ : Event)]) = 1 := by
-        simp [isDraft, deep, atModel, reviseQ]
+          [(⟨.text, deep.onQ .text (reviseQ g a (Dlg.run ω (panelD g a))),
+             ω .text (deep.onQ .text (reviseQ g a (Dlg.run ω (panelD g a))))⟩ : Event)]) = 1 := by
+        simp [isDraft, deep, atModel, reviseQ, authorShape]
       rw [hrev, Nat.add_comm]
       exact Nat.succ_le_succ (ih _)
 
@@ -554,99 +598,9 @@ theorem finishD_countP_draft (o : Option (El .text)) :
   rcases o with _ | p
   · rfl
   · rw [trace_finishD_some]
-    split <;> simp [isDraft, consentQ, applyQ]
+    split <;> simp [isDraft, consentQ, applyQ, consentShape, applyShape]
 
 end Transcript
-
-/-! ## `ShapeStatic` is closed under the derived forms
-
-`Agentic/Core/Cost.lean` states the repaired C2/C3 with the hypothesis
-`ShapeStatic p` — "the answer flows into the prompt text and nowhere else" — and
-proves it of `askC`, `ask` and `case` directly. To *use* those theorems on an
-authored workflow one needs the hypothesis to survive the forms an author
-actually writes, and that is what these six lemmas are. They are stated here
-rather than in `Cost.lean` because they are what this workload needs; nothing
-about them is special to it. -/
-
-section ShapeStaticClosure
-
-variable {Γ Δ : Ctx} {A B C : Type}
-
-/-- Renaming cannot make a shape depend on an answer: it rewrites the pure
-`Expr`s and nothing else. -/
-theorem shapeStatic_sub : ∀ {Γ : Ctx} {A : Type} (p : Plan Γ A) {Δ : Ctx} (σ : Sub Γ Δ),
-    ShapeStatic p → ShapeStatic (Plan.sub p σ) := by
-  intro Γ A p
-  induction p with
-  | ret e => intro Δ σ _; trivial
-  | askC c q k ih => intro Δ σ hp; exact ih _ hp
-  | ask c e k ih =>
-    intro Δ σ hp
-    obtain ⟨hs, hrest⟩ := (shapeStatic_ask c e k).mp hp
-    exact ⟨fun γ γ' => hs _ _, ih _ hrest⟩
-  | case e arms ih => intro Δ σ hp t; exact ih t σ ((shapeStatic_case e arms).mp hp t)
-  | dyn e f ih => intro Δ σ hp b; exact ih b σ (hp b)
-
-/-- **Grafting preserves it.** Sequencing a shape-static plan onto a shape-static
-continuation is shape-static — which is what makes the hypothesis usable at all,
-since every derived form is a graft. -/
-theorem shapeStatic_graft {B : Type} : ∀ {Γ : Ctx} {A : Type} (p : Plan Γ A) (k : Plan.Cont Γ A B),
-    ShapeStatic p → (∀ (Δ : Ctx) (σ : Sub Γ Δ) (e : Expr Δ A), ShapeStatic (k Δ σ e)) →
-      ShapeStatic (Plan.graft p k) := by
-  intro Γ A p
-  induction p with
-  | ret e => intro k _ hk; exact hk _ Sub.id e
-  | askC c q k ih => intro k' hp hk; exact ih _ hp (fun Δ σ e => hk Δ _ e)
-  | ask c e k ih =>
-    intro k' hp hk
-    obtain ⟨hs, hrest⟩ := (shapeStatic_ask c e k).mp hp
-    exact ⟨hs, ih _ hrest (fun Δ σ e => hk Δ _ e)⟩
-  | case e arms ih => intro k hp hk t; exact ih t k ((shapeStatic_case e arms).mp hp t) hk
-  | dyn e f ih => intro k hp hk b; exact ih b k (hp b) hk
-
-/-- One consultation whose shape is written in the term. -/
-theorem shapeStatic_ask1 (c : Code) (e : Expr Γ (Q c))
-    (h : ∀ γ γ' : Env Γ, (e γ).shape = (e γ').shape) : ShapeStatic (Plan.ask1 c e) :=
-  (shapeStatic_ask c e _).mpr ⟨h, by simp⟩
-
-theorem shapeStatic_zipWith (f : A → B → C) (p : Plan Γ A) (q : Plan Γ B)
-    (hp : ShapeStatic p) (hq : ShapeStatic q) : ShapeStatic (Plan.zipWith f p q) :=
-  shapeStatic_graft p _ hp fun Δ σ e =>
-    shapeStatic_graft (Plan.sub q σ) _ (shapeStatic_sub q σ hq) fun _ _ _ => by simp
-
-/-- **A panel of shape-static members is shape-static**, so a panel's bill is
-still a fold of the term. -/
-theorem shapeStatic_panel {c : Code} [Monoid (El c)] :
-    ∀ (ps : List (Plan Γ (El c))), (∀ p ∈ ps, ShapeStatic p) → ShapeStatic (Plan.panel ps)
-  | [], _ => by simp [Plan.panel]
-  | p :: ps, h =>
-      shapeStatic_zipWith _ p (Plan.panel ps) (h p (by simp))
-        (shapeStatic_panel ps fun q hq => h q (by simp [hq]))
-
-theorem shapeStatic_caseB (e : Expr Γ Bool) (t f : Plan Γ A)
-    (ht : ShapeStatic t) (hf : ShapeStatic f) : ShapeStatic (Plan.caseB e t f) :=
-  (shapeStatic_case e _).mpr fun b => by cases b <;> simpa using ‹_›
-
-/-- **Bounded revision preserves it**, at every fuel: the loop adds `case` nodes
-and grafts, and neither can make a shape depend on an answer. -/
-theorem shapeStatic_revising {c : Code} {check : Plan.Cont Γ (El c) Verdict}
-    {revise : Plan.Cont Γ (El c × Verdict) (El c)}
-    (hc : ∀ Δ (σ : Sub Γ Δ) a, ShapeStatic (check Δ σ a))
-    (hr : ∀ Δ (σ : Sub Γ Δ) a, ShapeStatic (revise Δ σ a)) :
-    ∀ (n : Nat) (Δ : Ctx) (σ : Sub Γ Δ) (a : Expr Δ (El c)),
-      ShapeStatic (Plan.revising check revise n Δ σ a) := by
-  intro n
-  induction n with
-  | zero =>
-    intro Δ σ a
-    exact shapeStatic_graft _ _ (hc _ _ _) fun _ _ _ => by simp
-  | succ n ih =>
-    intro Δ σ a
-    refine shapeStatic_graft _ _ (hc _ _ _) fun Θ τ v => ?_
-    refine shapeStatic_caseB _ _ _ (by simp) ?_
-    exact shapeStatic_graft _ _ (hr _ _ _) fun _ _ _ => ih _ _ _
-
-end ShapeStaticClosure
 
 /-! ## The six theorems
 
@@ -675,7 +629,7 @@ theorem consent_of_ack (e : Event) (he : e ∈ Plan.trace ω (hardenPatch spec) 
   · exact absurd hc (loopD_code_ne_ack ω _ 2 _ e h)
   · revert h
     rcases hfin : Dlg.run ω (loopD (ω .text guideQ) 2
-        (ω .text (deep .text (draftQ spec)))) with _ | p
+        (ω .text (deep.onQ .text (draftQ spec)))) with _ | p
     · intro h; exact absurd h (by simp)
     · intro h
       rw [trace_finishD_some] at h
@@ -721,10 +675,10 @@ theorem guide_once :
     exact List.countP_eq_zero.mpr fun e he => by simpa [isGuide] using hl e he
   rw [trace_hardenPatch, trace_hardenD, List.countP_cons, List.countP_cons, List.countP_append,
     hzero _ (loopD_key_ne_guide ω _ 2 _), hzero _ (finishD_key_ne_guide ω _)]
-  have hd : isGuide ⟨.text, deep .text (draftQ spec),
-      ω .text (deep .text (draftQ spec))⟩ = false := by
+  have hd : isGuide ⟨.text, deep.onQ .text (draftQ spec),
+      ω .text (deep.onQ .text (draftQ spec))⟩ = false := by
     simp only [isGuide, decide_eq_false_iff_not]
-    exact key_ne_of_addressee (by simp [deep, atModel, draftQ, guideQ])
+    exact key_ne_of_addressee (by simp [deep, atModel, draftQ, guideQ, authorShape])
   have hg : isGuide ⟨.text, guideQ, ω .text guideQ⟩ = true := by
     simp [isGuide, Event.key, guideKey]
   rw [hd, hg]
@@ -742,10 +696,10 @@ theorem draft_count_le_three :
     finishD_countP_draft ω _]
   have hg : isDraft ⟨.text, guideQ, ω .text guideQ⟩ = false := by
     simp [isDraft, guideQ]
-  have hd : isDraft ⟨.text, deep .text (draftQ spec),
-      ω .text (deep .text (draftQ spec))⟩ = true := by
-    simp [isDraft, deep, atModel, draftQ]
-  have hloop := loopD_countP_draft ω (ω .text guideQ) 2 (ω .text (deep .text (draftQ spec)))
+  have hd : isDraft ⟨.text, deep.onQ .text (draftQ spec),
+      ω .text (deep.onQ .text (draftQ spec))⟩ = true := by
+    simp [isDraft, deep, atModel, draftQ, authorShape]
+  have hloop := loopD_countP_draft ω (ω .text guideQ) 2 (ω .text (deep.onQ .text (draftQ spec)))
   simp only [hg, hd, if_true, Bool.false_eq_true, if_false, Nat.add_zero]
   omega
 
@@ -768,10 +722,10 @@ theorem length_trace_hardenPatch :
     (Plan.trace ω (hardenPatch spec) Env.nil).length ∈ [6, 7, 10, 11, 13, 14, 15] := by
   rw [trace_hardenPatch, trace_hardenD]
   obtain ⟨k, hk, hlen, hnone⟩ :=
-    loopD_rounds ω (ω .text guideQ) 2 (ω .text (deep .text (draftQ spec)))
+    loopD_rounds ω (ω .text guideQ) 2 (ω .text (deep.onQ .text (draftQ spec)))
   simp only [List.length_cons, List.length_append, hlen]
   rcases hfin : Dlg.run ω (loopD (ω .text guideQ) 2
-      (ω .text (deep .text (draftQ spec)))) with _ | p
+      (ω .text (deep.onQ .text (draftQ spec)))) with _ | p
   · rw [hnone hfin]
     simp
   · rw [length_trace_finishD_some]
@@ -792,34 +746,14 @@ theorem length_le_fifteen : (Plan.trace ω (hardenPatch spec) Env.nil).length �
 
 /-! ### 3. The workflow sits at the branch rung
 
-Two facts about the *term*, and the only two in this module. They are here
-because they are the hypotheses of the C3 cost theorems, and stating them is how
-the workload gets billed. -/
-
-theorem shapeStatic_review (Δ : Ctx) (σ : Sub [Code.text] Δ) (a : Expr Δ (El .text)) :
-    ShapeStatic (review Δ σ a) := by
-  refine shapeStatic_panel _ ?_
-  intro p hp
-  simp only [List.mem_cons, List.not_mem_nil, or_false] at hp
-  rcases hp with rfl | rfl | rfl <;> exact shapeStatic_ask1 _ _ (fun _ _ => rfl)
-
-theorem shapeStatic_redraft (Δ : Ctx) (σ : Sub [Code.text] Δ)
-    (a : Expr Δ (El .text × Verdict)) : ShapeStatic (redraft Δ σ a) :=
-  (shapeStatic_ask _ _ _).mpr ⟨fun _ _ => rfl, by trivial⟩
-
-/-- **The answers flow into prompt text and nowhere else.** Every question in
-the workflow has its addressee, its scope and its draw written in the term; only
-the words change with what was answered. This is `attack-adequacy` §7's missing
-hypothesis, discharged for this workload. -/
-theorem shapeStatic_hardenPatch (spec : String) : ShapeStatic (hardenPatch spec) := by
-  refine (shapeStatic_askC _ _ _).mpr ?_
-  refine shapeStatic_graft _ bodyK (by trivial) fun Δ σ draft => ?_
-  refine shapeStatic_graft _ (finishK Δ)
-    (shapeStatic_revising shapeStatic_review shapeStatic_redraft 2 Δ σ draft) fun Θ τ final => ?_
-  refine shapeStatic_caseB _ _ _ ?_ (by trivial)
-  refine (shapeStatic_ask _ _ _).mpr ⟨fun _ _ => rfl, ?_⟩
-  refine shapeStatic_caseB _ _ _ ?_ (by trivial)
-  exact (shapeStatic_ask _ _ _).mpr ⟨fun _ _ => rfl, by trivial⟩
+One fact about the *term*, and the only one in this module. It is here because
+it is the hypothesis of the C3 cost theorems, and stating it is how the workload
+gets billed. There used to be a second — `ShapeStatic (hardenPatch spec)`, "the
+answers flow into prompt text and nowhere else", together with six closure
+lemmas proving that the property survives `sub`, `graft`, `ask1`, `zipWith`,
+`panel`, `caseB` and `revising`. All eight are gone: the `ask` node now carries
+its shape as term-level data, so the property they established is the type of
+the node and there is nothing left to establish. -/
 
 /-- **Kernel theorem 3.** `level (hardenPatch spec) = branch`, by `rfl`.
 
@@ -859,14 +793,14 @@ theorem bill_le_maxFold_hardenPatch (spec : String) (ω : Ω) :
         WithBot (Multiplicative Nat))
       ≤ (costTree tick (hardenPatch spec) (level_le_branch spec) Env.nil).maxFold :=
   bill_le_maxFold (S := Multiplicative Nat) (price := tick) tick_pricesByShape
-    (hardenPatch spec) (level_le_branch spec) (shapeStatic_hardenPatch spec) Env.nil ω
+    (hardenPatch spec) (level_le_branch spec) Env.nil ω
 
 theorem minFold_le_bill_hardenPatch (spec : String) (ω : Ω) :
     (costTree tick (hardenPatch spec) (level_le_branch spec) Env.nil).minFold
       ≤ ((billFresh tick (Plan.trace ω (hardenPatch spec) Env.nil) : Multiplicative Nat) :
           WithTop (Multiplicative Nat)) :=
   minFold_le_bill (S := Multiplicative Nat) (price := tick) tick_pricesByShape
-    (hardenPatch spec) (level_le_branch spec) (shapeStatic_hardenPatch spec) Env.nil ω
+    (hardenPatch spec) (level_le_branch spec) Env.nil ω
 
 /-- **The bill of a run, in every world**: `Multiplicative.ofAdd` of one of seven
 numbers. -/
@@ -998,7 +932,7 @@ theorem minFold_not_attained_demo (ω : Ω) :
 /-- `[[demoUpTo]]` = the workflow, presented as an inhabitant of the budget
 type. **The budget is a type, and this workflow inhabits it at fifteen.** -/
 def demoUpTo : PlanUpTo tick (Multiplicative.ofAdd 15 : Multiplicative Nat) Unit :=
-  ⟨demo, level_demo, shapeStatic_hardenPatch _, le_of_eq maxFold_demo⟩
+  ⟨demo, level_demo, le_of_eq maxFold_demo⟩
 
 theorem demoUpTo_bill_le (ω : Ω) :
     billFresh tick (Plan.trace ω demo Env.nil) ≤ Multiplicative.ofAdd 15 :=

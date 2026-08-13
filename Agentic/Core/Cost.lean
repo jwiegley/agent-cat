@@ -25,22 +25,27 @@ is graded by `Agentic.Core.level`:
 | rung | what is known before the run | here |
 |---|---|---|
 | `batch` | the exact question list, independent of world *and* of environment | `asks_eq_of_le_batch` |
-| `pipeline` | the exact count and code sequence; and, under `ShapeStatic` + `PricesByShape`, the exact bill | `codes_eq_of_le_pipeline`, `bill_exact_pipeline` |
-| `branch` | a finite `CostTree` containing the bill; bounds; best and worst case attained | `bill_mem_leaves`, `minFold_le_bill`, `exists_min_bill` |
-| `dynamic` | **nothing**: no finite set of bills exists at all | `no_finite_bill_set_at_dyn` |
+| `pipeline` | the exact count and code sequence, and the exact sequence of question *shapes* as a fold of the term alone; and, under `PricesByShape`, the exact bill | `codes_eq_of_le_pipeline`, `shapes_eq_trace_of_le_pipeline`, `bill_exact_pipeline` |
+| `branch` | a finite `CostTree` containing the bill; bounds; best and worst *achievable* case attained | `bill_mem_leaves`, `minFold_le_bill`, `exists_min_bill` |
+| `dynamic` | nothing, and a witness says so: at `unbounded` no finite set of bills exists at all | `no_finite_bill_set_at_dyn` |
 
 ## Three corrections to the kernel, each machine-checked
 
-1. **C2 as written is false.** The kernel claims that at `level ≤ pipeline` the
-   sequence of question *shapes* is world-independent. It is not: `ask`'s
-   question is an arbitrary `Expr Γ (Q c)`, so an earlier answer can select the
-   *addressee*, and `shape` includes the addressee. `shapes_not_world_indep`
-   exhibits the two-line counterexample, and `bill_not_world_indep` upgrades it
-   to two different bills under a price that does satisfy `PricesByShape`. The
-   repair is the missing hypothesis `ShapeStatic`: an answer may flow into the
-   *prompt text* and nowhere else. That is exactly the domain's pivot (§2.3:
-   "the prompt is a function of an earlier answer"), it is a property of the
-   term, and under it C2 is true — `bill_exact_pipeline`.
+1. **C2 is true, and the *representation* is why.** The kernel claims that at
+   `level ≤ pipeline` the sequence of question *shapes* is world-independent.
+   Under an earlier representation, in which `ask` carried an arbitrary
+   `Expr Γ (Q c)`, that claim was false — an answer could select the
+   *addressee*, and the addressee is part of the shape — and the repair on offer
+   was a side predicate (`ShapeStatic`) asserting that answers flow into prompt
+   text and nowhere else. That predicate is gone. `Plan.ask` now carries the
+   shape as **term-level data** and only the prompt as an expression
+   (`Q c ≅ Q.Shape c × String`), so the counterexample is not expressible and
+   the shape sequence is a projection of the syntax — literally, as the fold
+   `shapes`, which reads it off the term with no environment and no world
+   (`shapes_eq_trace_of_le_pipeline`). `bill_exact_pipeline` carries no
+   hypothesis beyond the level bound and `PricesByShape`. The domain's pivot (§2.3, "the
+   prompt is a function of an earlier answer") is now the *type* of the node
+   rather than a property of it.
 
 2. **C3's attainment claim is false as stated.** A `case` whose tag does not
    depend on any answer has an arm no world reaches, so the extreme *leaves* of
@@ -53,10 +58,14 @@ is graded by `Agentic.Core.level`:
 3. **C4 is stated too weakly by the kernel and is strengthened here.** "No
    `Φ : Plan → S` returns the bill" is true at `dynamic` but is equally true at
    `branch` (`no_static_bill_at_branch`), so it does not separate the rungs. The
-   statement that does is
-   `no_finite_bill_set_at_dyn`: at `dynamic` there is no finite *set* of
-   possible bills, hence no `CostTree` of any shape — which is precisely the
-   negation of C3 and the honest replacement for `Frag`.
+   statement that does is `no_finite_bill_set_at_dyn`: a `dyn` plan is
+   *exhibited* whose possible bills form no finite set, hence which admits no
+   `CostTree` of any shape — precisely the negation of C3, and the honest
+   replacement for `Frag`. Note the quantifier: this is a witness at the rung,
+   not a claim about every term the rung contains. A `dyn` whose function is
+   constant costs exactly what its body costs; what `dynamic` says is that the
+   rung *admits* plans no finite analysis reaches, so no analysis is licensed
+   there.
 
 ## Two bills, both derived, neither baked in
 
@@ -72,47 +81,7 @@ namespace Agentic.Core
 
 open Plan
 
-/-! ## The shape of a question: everything except the prompt -/
-
-/-- `[[Shape]]` = what a question is, minus what it says: the code of the answer
-asked for, the addressee, the standing conditions and the draw index.
-
-This is the finite quotient of question space that `attack-adequacy` §7 says all
-four re-derivations needed and none stated. Per-call and per-latency pricing
-factor through it; per-token pricing does not, and for per-token pricing the
-honest output is an interval keyed to a token bound carried in the answer type
-(kernel §2.5). -/
-structure Shape where
-  /-- The kind of answer asked for. -/
-  code : Code
-  /-- Who is being asked. -/
-  addressee : Addressee
-  /-- Under what standing conditions. -/
-  scope : QScope
-  /-- Which independent draw this is. -/
-  draw : Nat
-  deriving DecidableEq
-
-/-- `[[q.shape]]` = the question with its prompt forgotten. -/
-def Q.shape {c : Code} (q : Q c) : Shape := ⟨c, q.addressee, q.scope, q.draw⟩
-
-@[simp] theorem Q.shape_code {c : Code} (q : Q c) : q.shape.code = c := rfl
-
-@[simp] theorem Q.shape_addressee {c : Code} (q : Q c) : q.shape.addressee = q.addressee := rfl
-
-/-- **Morphism equation.** `shape` forgets the prompt and *only* the prompt: two
-questions with one shape and one prompt are the same question. This is what
-makes `ShapeStatic` below say "the answer flows into the prompt text and nowhere
-else" rather than something weaker. -/
-theorem Q.eq_of_shape_of_prompt {c : Code} {q q' : Q c}
-    (hs : q.shape = q'.shape) (hp : q.prompt = q'.prompt) : q = q' := by
-  obtain ⟨a, s, pr, d⟩ := q
-  obtain ⟨a', s', pr', d'⟩ := q'
-  simp only [Q.shape, Shape.mk.injEq] at hs
-  simp only [Q.mk.injEq]
-  exact ⟨hs.2.1, hs.2.2.1, hp, hs.2.2.2⟩
-
-/-! ## Keys: a question with its code, which is what a price is a function of -/
+/-! ## Keys and shapes: what a price is a function of -/
 
 /-- `[[Key]]` = a question together with the code it asks for: a point of
 question space, forgetting the answer. This is the key of the memo table, the
@@ -120,14 +89,31 @@ key of a content-addressed cache, and the argument of a price — three uses of
 one object (§3 q1). -/
 abbrev Key : Type := (c : Code) × Q c
 
+/-- `[[Shape]]` = what a question is, minus what it says, across all codes: the
+total space of `Q.Shape` (`Agentic/Core/Question.lean`), which is where a
+*transcript* reads shapes off, since a transcript mixes codes.
+
+This is the finite quotient of question space that `attack-adequacy` §7 says all
+four re-derivations needed and none stated. Per-call and per-latency pricing
+factor through it; per-token pricing does not, and for per-token pricing the
+honest output is an interval keyed to a token bound carried in the answer type
+(kernel §2.5). -/
+abbrev Shape : Type := (c : Code) × Q.Shape c
+
+/-- The kind of answer asked for. -/
+abbrev Shape.code (s : Shape) : Code := s.1
+
+/-- Who is being asked. -/
+abbrev Shape.addressee (s : Shape) : Addressee := s.2.addressee
+
 /-- The question an event put. -/
 def Event.key (e : Event) : Key := ⟨e.c, e.q⟩
 
 /-- The shape of a key. -/
-def Key.shape (k : Key) : Shape := k.2.shape
+def Key.shape (k : Key) : Shape := ⟨k.1, k.2.shape⟩
 
 /-- The shape of the question an event put. -/
-def Event.shape (e : Event) : Shape := e.q.shape
+def Event.shape (e : Event) : Shape := ⟨e.c, e.q.shape⟩
 
 @[simp] theorem Event.shape_eq_key_shape (e : Event) : e.shape = e.key.shape := rfl
 
@@ -164,7 +150,7 @@ theorem PricesByShape.key {price : Price S} (hp : PricesByShape price) :
   rintro ⟨c, q⟩ ⟨c', q'⟩ h
   have hc : c = c' := congrArg Shape.code h
   subst hc
-  exact hp c q q' h
+  exact hp c q q' (by simpa [Key.shape] using h)
 
 /-- `[[billOfKeys price ks]]` = what that list of questions comes to. -/
 def billOfKeys [Monoid S] (price : Price S) (ks : List Key) : S :=
@@ -238,6 +224,32 @@ theorem billMemo_le_billFresh [Monoid S] [Preorder S] [MulLeftMono S] [MulRightM
   obtain ⟨k, _, rfl⟩ := List.mem_map.mp ha
   exact h1 k.1 k.2
 
+/-! ## What a scheduler is allowed to change about the bill
+
+`Agentic/Core/Denote.lean` states the scheduling licence twice — on the approval
+decision (`approved_panel_perm`) and on the transcript up to permutation
+(`trace_panel_perm`). This is the third reading, and the one an owner cares
+about: reordering a panel does not change what it costs, provided the cost
+carrier does not care about order either. -/
+
+/-- Permuted transcripts cost the same in a **commutative** carrier. The
+hypothesis is on the carrier and not on the runtime: `Multiplicative ℕ` (hence
+`tick`) is commutative, so counting bills are order-blind, while a carrier that
+records the order of charges is not and must not be told otherwise. -/
+theorem billFresh_perm [CommMonoid S] (price : Price S) {t t' : Trace} (h : t.Perm t') :
+    billFresh price t = billFresh price t' :=
+  ((h.map Event.key).map (priceKey price)).prod_eq
+
+/-- **The scheduling licence, on the bill.** A runtime may run a panel's members
+in any order without changing what the run costs. This is the cost reading of
+`trace_panel_perm`, and it is the statement that makes reordering *safe* rather
+than merely undetectable. -/
+theorem billFresh_panel_perm [CommMonoid S] (price : Price S) {Γ : Ctx} {c : Code}
+    [Monoid (El c)] (ω : Ω) {ps ps' : List (Plan Γ (El c))} (h : ps.Perm ps') (γ : Env Γ) :
+    billFresh price (Plan.trace ω (Plan.panel ps) γ)
+      = billFresh price (Plan.trace ω (Plan.panel ps') γ) :=
+  billFresh_perm price (trace_panel_perm ω h γ)
+
 /-! ## The counting price, which is what "#asks" means as a bill -/
 
 /-- `[[tick]]` = one unit per consultation. The bill at this price is the number
@@ -292,21 +304,39 @@ elsewhere: no environment, no world. -/
 def codes : {Γ : Ctx} → {A : Type} → Plan Γ A → Option (List Code)
   | _, _, .ret _ => some []
   | _, _, .askC c _ k => (c :: ·) <$> codes k
-  | _, _, .ask c _ k => (c :: ·) <$> codes k
+  | _, _, .ask c _ _ k => (c :: ·) <$> codes k
+  | _, _, @Plan.case _ _ _ _ _ _ _ => none
+  | _, _, .dyn _ _ => none
+
+/-- `[[shapes p]]` = the sequence of question *shapes* `p` will put — who is
+asked, under what scope, at which draw — if that sequence is fixed by the term.
+
+**No environment and no world.** This fold is the payoff of the representation
+repair: an `ask` node carries `s : Q.Shape c` as data, so its shape can be read
+off without evaluating anything. Under the old node, in which the whole question
+was an `Expr Γ (Q c)`, no such fold could exist — the best available was `asks`,
+which substitutes `default` answers and is exact only up to shape.
+
+`none` at `case` and `dyn`, where the sequence is not fixed by the term. -/
+def shapes : {Γ : Ctx} → {A : Type} → Plan Γ A → Option (List Shape)
+  | _, _, .ret _ => some []
+  | _, _, .askC c q k => (⟨c, q.shape⟩ :: ·) <$> shapes k
+  | _, _, .ask c s _ k => (⟨c, s⟩ :: ·) <$> shapes k
   | _, _, @Plan.case _ _ _ _ _ _ _ => none
   | _, _, .dyn _ _ => none
 
 /-- `[[asks p γ]]` = the list of questions `p` will put, evaluated with the
 least informative answers.
 
-An environment is needed because an `ask` builds its question from the answers
-in scope; `default` stands in for those answers, and the two theorems below say
-exactly when that substitution is harmless: always at `batch` (there are no
-`ask` nodes), and up to shape at `pipeline` under `ShapeStatic`. -/
+An environment is needed because an `ask` builds its *words* from the answers in
+scope; `default` stands in for those answers, and the two theorems below say
+exactly when that substitution is harmless: exactly at `batch` (there are no
+`ask` nodes), and up to shape at `pipeline` — where "up to shape" is now free,
+since the shape is written in the term. -/
 def asks : {Γ : Ctx} → {A : Type} → Plan Γ A → Env Γ → Option (List Key)
   | _, _, .ret _, _ => some []
   | _, _, .askC c q k, γ => (⟨c, q⟩ :: ·) <$> asks k (.cons default γ)
-  | _, _, .ask c e k, γ => (⟨c, e γ⟩ :: ·) <$> asks k (.cons default γ)
+  | _, _, .ask c s e k, γ => (⟨c, s.withPrompt (e γ)⟩ :: ·) <$> asks k (.cons default γ)
   | _, _, @Plan.case _ _ _ _ _ _ _, _ => none
   | _, _, .dyn _ _, _ => none
 
@@ -330,7 +360,7 @@ theorem asks_isSome_of_le_pipeline (p : Plan Γ A) (h : level p ≤ Level.pipeli
   induction p with
   | ret e => simp [asks]
   | askC c q k ih => simpa [asks, Option.isSome_map] using ih h _
-  | ask c e k ih => simpa [asks, Option.isSome_map] using ih (le_of_ask h).2 _
+  | ask c s e k ih => simpa [asks, Option.isSome_map] using ih (le_of_ask h).2 _
   | case e arms _ => exact absurd (le_of_case h).1 (by decide)
   | dyn e f _ => exact absurd h (by simp only [level_dyn]; decide)
 
@@ -340,7 +370,18 @@ theorem codes_isSome_of_le_pipeline (p : Plan Γ A) (h : level p ≤ Level.pipel
   induction p with
   | ret e => simp [codes]
   | askC c q k ih => simpa [codes, Option.isSome_map] using ih h
-  | ask c e k ih => simpa [codes, Option.isSome_map] using ih (le_of_ask h).2
+  | ask c s e k ih => simpa [codes, Option.isSome_map] using ih (le_of_ask h).2
+  | case e arms _ => exact absurd (le_of_case h).1 (by decide)
+  | dyn e f _ => exact absurd h (by simp only [level_dyn]; decide)
+
+/-- And so is the shape fold — which under the old `ask` node it could not have
+been, because there was no shape in the term to fold over. -/
+theorem shapes_isSome_of_le_pipeline (p : Plan Γ A) (h : level p ≤ Level.pipeline) :
+    (shapes p).isSome := by
+  induction p with
+  | ret e => simp [shapes]
+  | askC c q k ih => simpa [shapes, Option.isSome_map] using ih h
+  | ask c s e k ih => simpa [shapes, Option.isSome_map] using ih (le_of_ask h).2
   | case e arms _ => exact absurd (le_of_case h).1 (by decide)
   | dyn e f _ => exact absurd h (by simp only [level_dyn]; decide)
 
@@ -361,7 +402,7 @@ theorem asks_eq_of_le_batch (p : Plan Γ A) (h : level p ≤ Level.batch) :
     intro γ γ' ω
     rw [asks, ih h (.cons default γ) (.cons (ω c q) γ') ω]
     simp [Plan.trace_askC, Event.key]
-  | ask c e k _ => exact absurd (le_of_ask h).1 (by decide)
+  | ask c s e k _ => exact absurd (le_of_ask h).1 (by decide)
   | case e arms _ => exact absurd (le_of_case h).1 (by decide)
   | dyn e f _ => exact absurd h (by simp only [level_dyn]; decide)
 
@@ -387,15 +428,16 @@ theorem bill_exact_batch [Monoid S] (price : Price S) (p : Plan Γ A)
   rw [asksBill, asks_eq_of_le_batch p h γ γ ω]
   rfl
 
-/-! ## C2 — PIPELINE: the exact count and code sequence -/
+/-! ## C2 — PIPELINE: the exact count, code sequence and shapes -/
 
-/-- **Kernel obligation C2, the half that is unconditionally true.** At
-`level ≤ pipeline` the sequence of answer codes — and hence the number of
-consultations — is fixed by the term: no world and no environment can change it.
+/-- **Kernel obligation C2, at the codes.** At `level ≤ pipeline` the sequence
+of answer codes — and hence the number of consultations — is fixed by the term:
+no world and no environment can change it.
 
-This is the honest core of the pipeline guarantee. What is *not* true without a
-further hypothesis is the kernel's claim about shapes; see
-`shapes_not_world_indep`. -/
+The code is the coarsest thing a question has, so this is the weakest half of
+the pipeline guarantee; `shapes_eq_trace_of_le_pipeline` below strengthens it to
+the whole shape, and that half was the one the kernel got wrong before the `ask`
+node carried its shape. -/
 theorem codes_eq_of_le_pipeline (p : Plan Γ A) (h : level p ≤ Level.pipeline) :
     ∀ (γ : Env Γ) (ω : Ω), codes p = some ((Plan.trace ω p γ).map Event.c) := by
   induction p with
@@ -404,9 +446,9 @@ theorem codes_eq_of_le_pipeline (p : Plan Γ A) (h : level p ≤ Level.pipeline)
     intro γ ω
     rw [codes, ih h (.cons (ω c q) γ) ω]
     simp [Plan.trace_askC]
-  | ask c e k ih =>
+  | ask c s e k ih =>
     intro γ ω
-    rw [codes, ih (le_of_ask h).2 (.cons (ω c (e γ)) γ) ω]
+    rw [codes, ih (le_of_ask h).2 (.cons (ω c (s.withPrompt (e γ))) γ) ω]
     simp [Plan.trace_ask]
   | case e arms _ => exact absurd (le_of_case h).1 (by decide)
   | dyn e f _ => exact absurd h (by simp only [level_dyn]; decide)
@@ -421,25 +463,10 @@ theorem length_trace_eq_of_le_pipeline (p : Plan Γ A) (h : level p ≤ Level.pi
   have := Option.some.inj (h₁.symm.trans h₂)
   simpa using congrArg List.length this
 
-/-! ## …and the half that is false, with the counterexample and the repair -/
+/-! ## …and the half the kernel got wrong, now true by construction -/
 
 /-- A coin to consult. -/
 def coinQ : Q .flag := { addressee := .tool "coin", scope := 1, prompt := "heads?", draw := 0 }
-
-/-- Two reviewers, differing in *addressee* — which is part of the shape. -/
-def reviewerA : Q .text := { addressee := .model "a", scope := 1, prompt := "?", draw := 0 }
-
-/-- The other reviewer. -/
-def reviewerB : Q .text := { addressee := .model "b", scope := 1, prompt := "?", draw := 0 }
-
-/-- A `pipeline` plan whose second question's **addressee** is chosen by the
-first answer. Nothing here is exotic: `ask` takes an arbitrary `Expr Γ (Q c)`,
-and the addressee is a field of `Q`. -/
-def shifty : Plan [] String :=
-  .askC .flag coinQ (.ask .text (fun γ => cond (γ.head : Bool) reviewerA reviewerB)
-    (.ret (Expr.var .here)))
-
-theorem level_shifty : level shifty = Level.pipeline := rfl
 
 /-- The world that says heads. -/
 def heads : Ω := fun c => match c with
@@ -449,100 +476,62 @@ def heads : Ω := fun c => match c with
 def tails : Ω := fun c => match c with
   | .text => fun _ => "" | .verdict => fun _ => 1 | .flag => fun _ => false | .ack => fun _ => ()
 
-/-- **The kernel's C2 is false as written.** At `level ≤ pipeline` the sequence
-of question *shapes* is not world-independent, because an answer may select the
-addressee and the addressee is part of the shape.
-
-Recorded in code, next to the repaired theorem, because the kernel's exact-bill
-claim at `pipeline` rests on it. -/
-theorem shapes_not_world_indep :
-    (Plan.trace heads shifty Env.nil).map Event.shape
-      ≠ (Plan.trace tails shifty Env.nil).map Event.shape := by
-  decide
-
 /-- A price that charges by addressee — per-call pricing with two vendors. It
-satisfies `PricesByShape` exactly because the addressee is part of the shape. -/
+satisfies `PricesByShape` exactly because the addressee is part of the shape,
+and it is the witness that `PricesByShape` is not a vacuous hypothesis: `tick`
+satisfies it by not reading the question at all, `byVendor` by reading only the
+part of it the term fixes. -/
 def byVendor : Price (Multiplicative Nat) :=
   fun _ q => Multiplicative.ofAdd (if q.addressee = Addressee.model "a" then 5 else 1)
 
 theorem byVendor_pricesByShape : PricesByShape byVendor := by
   intro c q q' h
-  have : q.addressee = q'.addressee := congrArg Shape.addressee h
+  have : q.addressee = q'.addressee := congrArg Q.Shape.addressee h
   simp [byVendor, this]
 
-/-- **…and the bill really does move.** `PricesByShape` alone does not buy an
-exact bill at `pipeline`: this is `attack-adequacy` §7's missing hypothesis
-being missing in the other direction, and it is why `ShapeStatic` below is not
-bookkeeping. -/
-theorem bill_not_world_indep :
-    billFresh byVendor (Plan.trace heads shifty Env.nil)
-      ≠ billFresh byVendor (Plan.trace tails shifty Env.nil) := by
-  decide
+/-- **Kernel obligation C2, and it needs no hypothesis.** At
+`level ≤ pipeline` the sequence of question shapes is not merely fixed by the
+term but *computed from it*: `shapes p` is a fold over the syntax alone, and it
+returns the shape sequence of the run, in every world and under every
+environment.
 
-/-- `[[ShapeStatic p]]` = every question `p` builds from an answer varies only
-in its **prompt text**: the addressee, the scope and the draw are fixed by the
-term.
+**Why there is nothing to assume.** The kernel's C2 was refuted under a
+representation in which `ask` carried an arbitrary `Expr Γ (Q c)`: an answer
+could then choose the *addressee*, and the addressee is part of the shape. The
+counterexample is no longer expressible. `Plan.ask` carries `s : Q.Shape c` as
+term-level data and `e : Expr Γ String` as the words, and the `ask` case of this
+induction is `congrArg₂ _ rfl …` — the shape on both sides is the literal `s`
+written in the term. The side predicate that used to repair this theorem
+(`ShapeStatic`, "the answer flows into the prompt text and nowhere else") is
+deleted: it said of a term exactly what the term's type now says of itself.
 
-The missing hypothesis, and it is exactly the domain's pivot: "the prompt is a
-function of an earlier answer" (kernel §2.3). It is a property of the term — of
-each `ask` node's `Expr` — not of a trace and not of a runtime, so a checker can
-demand it and an author can read it. By `Q.eq_of_shape_of_prompt` it says
-precisely that the answer flows into the prompt and nowhere else. -/
-def ShapeStatic : {Γ : Ctx} → {A : Type} → Plan Γ A → Prop
-  | _, _, .ret _ => True
-  | _, _, .askC _ _ k => ShapeStatic k
-  | _, _, .ask _ e k => (∀ γ γ', (e γ).shape = (e γ').shape) ∧ ShapeStatic k
-  | _, _, @Plan.case _ _ _ _ _ _ arms => ∀ t, ShapeStatic (arms t)
-  | _, _, .dyn _ f => ∀ b, ShapeStatic (f b)
-
-@[simp] theorem shapeStatic_ret (e : Expr Γ A) : ShapeStatic (Plan.ret e) := by
-  simp [ShapeStatic]
-
-@[simp] theorem shapeStatic_askC (c : Code) (q : Q c) (k : Plan (c :: Γ) A) :
-    ShapeStatic (Plan.askC c q k) ↔ ShapeStatic k := by simp [ShapeStatic]
-
-@[simp] theorem shapeStatic_ask (c : Code) (e : Expr Γ (Q c)) (k : Plan (c :: Γ) A) :
-    ShapeStatic (Plan.ask c e k) ↔ (∀ γ γ', (e γ).shape = (e γ').shape) ∧ ShapeStatic k := by
-  simp [ShapeStatic]
-
-@[simp] theorem shapeStatic_case {T : Type} [Fintype T] [DecidableEq T]
-    (e : Expr Γ T) (arms : T → Plan Γ A) :
-    ShapeStatic (Plan.case e arms) ↔ ∀ t, ShapeStatic (arms t) := by simp [ShapeStatic]
-
-/-- A closed question is shape-static for free, so `batch` plans satisfy the
-hypothesis vacuously and C1 is the `ShapeStatic`-free special case of C2. -/
-theorem shapeStatic_of_le_batch (p : Plan Γ A) (h : level p ≤ Level.batch) : ShapeStatic p := by
+The `ask` case of the induction is `simp [Plan.trace_ask, Event.shape]` and
+nothing else: the shape recorded in the event is the literal `s` written in the
+node. -/
+theorem shapes_eq_trace_of_le_pipeline (p : Plan Γ A) (h : level p ≤ Level.pipeline) :
+    ∀ (γ : Env Γ) (ω : Ω), shapes p = some ((Plan.trace ω p γ).map Event.shape) := by
   induction p with
-  | ret e => simp
-  | askC c q k ih => exact ih h
-  | ask c e k _ => exact absurd (le_of_ask h).1 (by decide)
-  | case e arms _ => exact absurd (le_of_case h).1 (by decide)
-  | dyn e f _ => exact absurd h (by simp only [level_dyn]; decide)
-
-/-- **Kernel obligation C2, repaired.** At `level ≤ pipeline`, if answers flow
-only into prompt text, then the sequence of question shapes is fixed by the
-term: no world and no environment can change it.
-
-The statement quantifies over *two* environments as well as two worlds, because
-that is what the induction needs — at each `ask` the continuations run in
-environments that already differ. -/
-theorem shapes_eq_of_le_pipeline (p : Plan Γ A) (h : level p ≤ Level.pipeline)
-    (hs : ShapeStatic p) :
-    ∀ (γ γ' : Env Γ) (ω ω' : Ω),
-      (Plan.trace ω p γ).map Event.shape = (Plan.trace ω' p γ').map Event.shape := by
-  induction p with
-  | ret e => intro γ γ' ω ω'; rfl
+  | ret e => intro γ ω; simp [shapes, Plan.trace]
   | askC c q k ih =>
-    intro γ γ' ω ω'
-    simp only [Plan.trace_askC, List.map_cons]
-    exact congrArg _ (ih h (shapeStatic_askC c q k |>.mp hs) _ _ _ _)
-  | ask c e k ih =>
-    intro γ γ' ω ω'
-    obtain ⟨hshape, hrest⟩ := (shapeStatic_ask c e k).mp hs
-    simp only [Plan.trace_ask, List.map_cons]
-    exact congrArg₂ _ (hshape γ γ') (ih (le_of_ask h).2 hrest _ _ _ _)
+    intro γ ω
+    rw [shapes, ih h (.cons (ω c q) γ) ω]
+    simp [Plan.trace_askC, Event.shape]
+  | ask c s e k ih =>
+    intro γ ω
+    rw [shapes, ih (le_of_ask h).2 (.cons (ω c (s.withPrompt (e γ))) γ) ω]
+    simp [Plan.trace_ask, Event.shape]
   | case e arms _ => exact absurd (le_of_case h).1 (by decide)
   | dyn e f _ => exact absurd h (by simp only [level_dyn]; decide)
+
+/-- …and the world-independence the kernel actually wrote, as its immediate
+corollary: two runs of a `pipeline` plan, in any two worlds and under any two
+environments, put questions of the same shapes in the same order. -/
+theorem shapes_eq_of_le_pipeline (p : Plan Γ A) (h : level p ≤ Level.pipeline)
+    (γ γ' : Env Γ) (ω ω' : Ω) :
+    (Plan.trace ω p γ).map Event.shape = (Plan.trace ω' p γ').map Event.shape :=
+  Option.some.inj
+    ((shapes_eq_trace_of_le_pipeline p h γ ω).symm.trans
+      (shapes_eq_trace_of_le_pipeline p h γ' ω'))
 
 /-- Shape-equal question lists cost the same, when the price factors through the
 shape. The induction compares the two lists position by position, and the
@@ -571,14 +560,14 @@ theorem billFresh_eq_of_shape_eq [Monoid S] {price : Price S} (hp : PricesByShap
   rw [← Event.map_shape, ← Event.map_shape]
   exact h
 
-/-- **The bill is world-independent at `pipeline`**, under the two hypotheses
-that are jointly necessary: the price factors through the shape, and the answers
-flow only into the prompt. -/
+/-- **The bill is world-independent at `pipeline`**, under the one hypothesis
+that is left: the price factors through the shape. That the answers flow only
+into the prompt is no longer a hypothesis but the shape of the `ask` node. -/
 theorem bill_indep_of_le_pipeline [Monoid S] {price : Price S} (hp : PricesByShape price)
-    (p : Plan Γ A) (h : level p ≤ Level.pipeline) (hs : ShapeStatic p)
+    (p : Plan Γ A) (h : level p ≤ Level.pipeline)
     (γ γ' : Env Γ) (ω ω' : Ω) :
     billFresh price (Plan.trace ω p γ) = billFresh price (Plan.trace ω' p γ') :=
-  billFresh_eq_of_shape_eq hp (shapes_eq_of_le_pipeline p h hs γ γ' ω ω')
+  billFresh_eq_of_shape_eq hp (shapes_eq_of_le_pipeline p h γ γ' ω ω')
 
 /-- The question fold is the transcript of the default world: this is the sense
 in which `asks` is computable from the term. -/
@@ -590,24 +579,25 @@ theorem asks_eq_default (p : Plan Γ A) (h : level p ≤ Level.pipeline) :
     intro γ
     rw [asks, ih h (.cons default γ)]
     simp [Plan.trace_askC, Event.key]
-  | ask c e k ih =>
+  | ask c s e k ih =>
     intro γ
     rw [asks, ih (le_of_ask h).2 (.cons default γ)]
     simp [Plan.trace_ask, Event.key]
   | case e arms _ => exact absurd (le_of_case h).1 (by decide)
   | dyn e f _ => exact absurd h (by simp only [level_dyn]; decide)
 
-/-- **Kernel obligation C2's bill, repaired and exact.** At `level ≤ pipeline`,
-with a shape-factoring price and answers flowing only into prompts, the bill is
-computed from the term and is the bill of the run in *every* world.
+/-- **Kernel obligation C2's bill, exact and unconditional beyond the price.**
+At `level ≤ pipeline`, with a shape-factoring price, the bill is computed from
+the term and is the bill of the run in *every* world.
 
 This is directive (1)'s "exact value when monad is not necessary", stated where
-it is true. -/
+it is true — and, since the shape repair, stated with the hypothesis that the
+kernel actually asked for and nothing else. -/
 theorem bill_exact_pipeline [Monoid S] {price : Price S} (hp : PricesByShape price)
-    (p : Plan Γ A) (h : level p ≤ Level.pipeline) (hs : ShapeStatic p) (γ : Env Γ) (ω : Ω) :
+    (p : Plan Γ A) (h : level p ≤ Level.pipeline) (γ : Env Γ) (ω : Ω) :
     asksBill price p γ = some (billFresh price (Plan.trace ω p γ)) := by
   rw [asksBill, asks_eq_default p h γ]
-  exact congrArg _ (bill_indep_of_le_pipeline hp p h hs γ γ ωDefault ω)
+  exact congrArg _ (bill_indep_of_le_pipeline hp p h γ γ ωDefault ω)
 
 /-! ## C3 — BRANCH: a finite tree of possible bills -/
 
@@ -667,51 +657,56 @@ absorbed into the signature.
 ```
 costTree (ret e)       γ = leaf 1
 costTree (askC c q k)  γ = map (price c q *)     (costTree k γ)
-costTree (ask c e k)   γ = map (price c (e γ) *) (costTree k γ)
+costTree (ask c s e k) γ = map (price c (s.withPrompt (e γ)) *) (costTree k γ)
 costTree (case _ arms) γ = node T (fun t => costTree (arms t) γ)
 ```
 
-The continuation is analysed under `default` answers, which is harmless exactly
-under `ShapeStatic` — the same repair as at `pipeline`, and the reason
-`bill_mem_leaves` carries the same two hypotheses. -/
+The continuation is analysed under `default` answers. That is harmless because
+an `ask` node writes its shape in the term: the *question* the analysis reads
+may differ from the run's in its words, and a `PricesByShape` price cannot see
+the difference. `bill_mem_leaves` is that argument. -/
 def costTree [CommMonoid S] (price : Price S) :
     {Γ : Ctx} → {A : Type} → (p : Plan Γ A) → level p ≤ Level.branch → Env Γ → CostTree S
   | _, _, .ret _, _, _ => .leaf 1
   | _, _, .askC c q k, h, γ => (costTree price k h (.cons default γ)).map (price c q * ·)
-  | _, _, .ask c e k, h, γ =>
-      (costTree price k (le_of_ask h).2 (.cons default γ)).map (price c (e γ) * ·)
+  | _, _, .ask c s e k, h, γ =>
+      (costTree price k (le_of_ask h).2 (.cons default γ)).map (price c (s.withPrompt (e γ)) * ·)
   | _, _, @Plan.case _ _ T fT _ _ arms, h, γ =>
       .node T fT (fun t => costTree price (arms t) ((le_of_case h).2 t) γ)
   | _, _, .dyn _ _, h, _ => absurd h (by simp only [level_dyn]; decide)
 
-/-- **Kernel obligation C3.** At `level ≤ branch`, with the same two hypotheses
-that `pipeline` needs, the bill of *every* run is a leaf of the tree.
+/-- **Kernel obligation C3.** At `level ≤ branch`, with the one hypothesis that
+`pipeline` needs, the bill of *every* run is a leaf of the tree.
 
 The kernel writes this as `bill = evalTree (costTree p) (decisions p γ ω)`;
 membership is that statement with the path existentially quantified, and it is
-what the bounds and the budget subtype are proved from. -/
+what the bounds and the budget subtype are proved from.
+
+The `ask` case is where the shape repair pays: the analysis prices
+`s.withPrompt (e γ')` and the run pays for `s.withPrompt (e γ)`, two questions
+of the *same shape* `s`, so `PricesByShape` closes the gap with no side
+condition on the term. -/
 theorem bill_mem_leaves [CommMonoid S] {price : Price S} (hp : PricesByShape price) :
-    ∀ {Γ : Ctx} {A : Type} (p : Plan Γ A) (h : level p ≤ Level.branch), ShapeStatic p →
+    ∀ {Γ : Ctx} {A : Type} (p : Plan Γ A) (h : level p ≤ Level.branch),
       ∀ (γ γ' : Env Γ) (ω : Ω),
         billFresh price (Plan.trace ω p γ) ∈ (costTree price p h γ').leaves := by
   intro Γ A p
   induction p with
-  | ret e => intro h hs γ γ' ω; simp [costTree, Plan.trace]
+  | ret e => intro h γ γ' ω; simp [costTree, Plan.trace]
   | askC c q k ih =>
-    intro h hs γ γ' ω
+    intro h γ γ' ω
     simp only [costTree, CostTree.leaves_map, Plan.trace_askC, billFresh_cons]
-    exact Multiset.mem_map_of_mem _ (ih h ((shapeStatic_askC c q k).mp hs) _ _ ω)
-  | ask c e k ih =>
-    intro h hs γ γ' ω
-    obtain ⟨hshape, hrest⟩ := (shapeStatic_ask c e k).mp hs
+    exact Multiset.mem_map_of_mem _ (ih h _ _ ω)
+  | ask c s e k ih =>
+    intro h γ γ' ω
     simp only [costTree, CostTree.leaves_map, Plan.trace_ask, billFresh_cons]
-    rw [hp c (e γ) (e γ') (hshape γ γ')]
-    exact Multiset.mem_map_of_mem _ (ih (le_of_ask h).2 hrest _ _ ω)
+    rw [hp c (s.withPrompt (e γ)) (s.withPrompt (e γ')) rfl]
+    exact Multiset.mem_map_of_mem _ (ih (le_of_ask h).2 _ _ ω)
   | case e arms ih =>
-    intro h hs γ γ' ω
+    intro h γ γ' ω
     rw [Plan.trace, denote_case]
     refine Multiset.mem_bind.mpr ⟨e γ, Finset.mem_univ _, ?_⟩
-    exact ih (e γ) ((le_of_case h).2 _) ((shapeStatic_case e arms).mp hs _) γ γ' ω
+    exact ih (e γ) ((le_of_case h).2 _) γ γ' ω
   | dyn e f hdyn => intro h; exact absurd h (by simp only [level_dyn]; decide)
 
 /-! ### The tropical folds, and the bounds they give -/
@@ -760,14 +755,14 @@ theorem CostTree.le_maxFold_of_mem (τ : CostTree S) {s : S} (hs : s ∈ τ.leav
 
 /-- **The bounds are sound**: every run's bill lies in the tree's interval. -/
 theorem minFold_le_bill {price : Price S} (hp : PricesByShape price) (p : Plan Γ A)
-    (h : level p ≤ Level.branch) (hs : ShapeStatic p) (γ : Env Γ) (ω : Ω) :
+    (h : level p ≤ Level.branch) (γ : Env Γ) (ω : Ω) :
     (costTree price p h γ).minFold ≤ ((billFresh price (Plan.trace ω p γ) : S) : WithTop S) :=
-  CostTree.minFold_le_of_mem _ (bill_mem_leaves hp p h hs γ γ ω)
+  CostTree.minFold_le_of_mem _ (bill_mem_leaves hp p h γ γ ω)
 
 theorem bill_le_maxFold {price : Price S} (hp : PricesByShape price) (p : Plan Γ A)
-    (h : level p ≤ Level.branch) (hs : ShapeStatic p) (γ : Env Γ) (ω : Ω) :
+    (h : level p ≤ Level.branch) (γ : Env Γ) (ω : Ω) :
     ((billFresh price (Plan.trace ω p γ) : S) : WithBot S) ≤ (costTree price p h γ).maxFold :=
-  CostTree.le_maxFold_of_mem _ (bill_mem_leaves hp p h hs γ γ ω)
+  CostTree.le_maxFold_of_mem _ (bill_mem_leaves hp p h γ γ ω)
 
 /-- **Best and worst case are attained** — by *worlds*, which is what a budget
 argument needs and what the kernel asks for.
@@ -777,13 +772,13 @@ a nonempty finite set in a linear order has a least element. The kernel's
 version of this theorem attains `minFold`, and that is false
 (`minFold_not_attained`); this is the true statement in its place. -/
 theorem exists_min_bill {price : Price S} (hp : PricesByShape price) (p : Plan Γ A)
-    (h : level p ≤ Level.branch) (hs : ShapeStatic p) (γ : Env Γ) :
+    (h : level p ≤ Level.branch) (γ : Env Γ) :
     ∃ ω₀ : Ω, ∀ ω : Ω,
       billFresh price (Plan.trace ω₀ p γ) ≤ billFresh price (Plan.trace ω p γ) := by
   set f : Ω → S := fun ω => billFresh price (Plan.trace ω p γ) with hf
   have hsub : Set.range f ⊆ {x | x ∈ (costTree price p h γ).leaves} := by
     rintro _ ⟨ω, rfl⟩
-    exact bill_mem_leaves hp p h hs γ γ ω
+    exact bill_mem_leaves hp p h γ γ ω
   have hfin : (Set.range f).Finite :=
     Set.Finite.subset (Multiset.finite_toSet _) hsub
   have hne : hfin.toFinset.Nonempty :=
@@ -793,13 +788,13 @@ theorem exists_min_bill {price : Price S} (hp : PricesByShape price) (p : Plan �
   exact ⟨ω₀, fun ω => hmin (f ω) (hfin.mem_toFinset.mpr ⟨ω, rfl⟩)⟩
 
 theorem exists_max_bill {price : Price S} (hp : PricesByShape price) (p : Plan Γ A)
-    (h : level p ≤ Level.branch) (hs : ShapeStatic p) (γ : Env Γ) :
+    (h : level p ≤ Level.branch) (γ : Env Γ) :
     ∃ ω₁ : Ω, ∀ ω : Ω,
       billFresh price (Plan.trace ω p γ) ≤ billFresh price (Plan.trace ω₁ p γ) := by
   set f : Ω → S := fun ω => billFresh price (Plan.trace ω p γ) with hf
   have hsub : Set.range f ⊆ {x | x ∈ (costTree price p h γ).leaves} := by
     rintro _ ⟨ω, rfl⟩
-    exact bill_mem_leaves hp p h hs γ γ ω
+    exact bill_mem_leaves hp p h γ γ ω
   have hfin : (Set.range f).Finite :=
     Set.Finite.subset (Multiset.finite_toSet _) hsub
   have hne : hfin.toFinset.Nonempty :=
@@ -821,10 +816,6 @@ def constBranch : Plan [] Unit :=
   Plan.caseB (fun _ => true) (.askC .ack (ackQ 0) (.ret (fun _ => ()))) (.ret (fun _ => ()))
 
 theorem level_constBranch : level constBranch ≤ Level.branch := by decide
-
-theorem shapeStatic_constBranch : ShapeStatic constBranch := by
-  refine (shapeStatic_case _ _).mpr (fun t => ?_)
-  cases t <;> simp
 
 /-- Every world pays for the one consultation on the taken path. -/
 theorem bill_constBranch (ω : Ω) :
@@ -896,14 +887,22 @@ theorem bill_unbounded (n : Nat) :
     exact congrArg (· + 1) (length_trace_ticks (sayLong n) n _)
   rw [billFresh_tick, hlen]
 
-/-- **Kernel obligation C4, strengthened.** At `dynamic` there is no finite set
-of possible bills — so there is no `CostTree`, no interval, and no static bill,
-because the answer chooses how much work there is and answers are unbounded.
+/-- **Kernel obligation C4, strengthened — and stated as the witness it is.**
+For the plan `unbounded` there is no finite set of possible bills, so for that
+plan there is no `CostTree`, no interval and no static bill: the answer chooses
+how much work there is, and answers are unbounded.
 
-This is the statement that separates the rungs. The kernel's own formulation
-("no `Φ : Plan → S` returns the bill") is *also* true at `branch`, where the
-bill genuinely varies with the world, so it does not distinguish `dyn` from
-`case`; the failure of finiteness does. -/
+Read the quantifier carefully. This is a theorem about *one* `dyn` plan, not a
+universal over the rung: `dyn (const b) (fun _ => ret e)` is `dynamic` and costs
+nothing, and no theorem here says otherwise. What separates the rungs is that
+`dynamic` **admits** a plan like this one while `branch` does not
+(`no_cost_tree_at_dyn` plus `bill_mem_leaves`), which is exactly why no analysis
+is licensed at `dynamic` — a fold defined there would have to be sound for this
+plan too.
+
+The kernel's own formulation ("no `Φ : Plan → S` returns the bill") is *also*
+true at `branch`, where the bill genuinely varies with the world, so it does not
+distinguish `dyn` from `case`; the failure of finiteness does. -/
 theorem no_finite_bill_set_at_dyn :
     ¬ ∃ L : List (Multiplicative Nat),
         ∀ ω : Ω, billFresh tick (Plan.trace ω unbounded Env.nil) ∈ L := by
@@ -917,9 +916,11 @@ theorem no_finite_bill_set_at_dyn :
     simpa using hab
   exact Set.infinite_range_of_injective hinj (Set.Finite.subset (List.finite_toSet _) hsub)
 
-/-- **Hence C3 does not extend**: no cost tree of any shape describes a `dyn`
-plan, because a tree has finitely many leaves. The tree is not merely
-*uncomputable* at `dynamic`; it does not exist. -/
+/-- **Hence C3 does not extend**: no cost tree of any shape describes *this*
+`dyn` plan, because a tree has finitely many leaves. The tree is not merely
+*uncomputable* for it; it does not exist. And a `costTree` defined at `dynamic`
+would have to cover this plan, which is why the fold's signature stops at
+`branch`. -/
 theorem no_cost_tree_at_dyn :
     ¬ ∃ τ : CostTree (Multiplicative Nat),
         ∀ ω : Ω, billFresh tick (Plan.trace ω unbounded Env.nil) ∈ τ.leaves := by
@@ -986,19 +987,21 @@ term, needing no `Fintype (El c)` and therefore defined for free-text answers
 (`G_cost_needs_fintype.lean` is what happens otherwise). -/
 
 /-- `[[PlanUpTo price β A]]` = the plans that cannot cost more than `β`: a
-closed plan at or below `branch`, whose answers flow only into prompts, whose
-cost tree's worst leaf is within budget. -/
+closed plan at or below `branch` whose cost tree's worst leaf is within budget.
+
+Two conditions where there used to be three: "the answers flow only into
+prompts" was the third, and it is now the type of the `ask` node. -/
 def PlanUpTo [CommMonoid S] [LinearOrder S] (price : Price S) (β : S) (A : Type) : Type 1 :=
   { p : Plan [] A // ∃ h : level p ≤ Level.branch,
-      ShapeStatic p ∧ (costTree price p h Env.nil).maxFold ≤ (β : WithBot S) }
+      (costTree price p h Env.nil).maxFold ≤ (β : WithBot S) }
 
 /-- **And the budget is honoured, in every world.** The subtype's defining
 condition is about the term; the conclusion is about every run. -/
 theorem PlanUpTo.bill_le [CommMonoid S] [LinearOrder S] {price : Price S}
     (hp : PricesByShape price) {β : S} {A : Type} (p : PlanUpTo price β A) (ω : Ω) :
     billFresh price (Plan.trace ω p.1 Env.nil) ≤ β := by
-  obtain ⟨p, h, hs, hβ⟩ := p
-  have := le_trans (bill_le_maxFold hp p h hs Env.nil ω) hβ
+  obtain ⟨p, h, hβ⟩ := p
+  have := le_trans (bill_le_maxFold hp p h Env.nil ω) hβ
   exact WithBot.coe_le_coe.mp this
 
 /-! ## The workloads, billed
@@ -1013,12 +1016,6 @@ namespace Acceptance
 /-- The owner's own example — two reviewers sharing one reading of a style
 guide — is `pipeline`: content-dependent prompts, no branching, no `dyn`. -/
 theorem level_sharedGuide : level sharedGuide = Level.pipeline := rfl
-
-/-- Its questions differ only in prompt text, so the missing hypothesis holds. -/
-theorem shapeStatic_sharedGuide : ShapeStatic sharedGuide := by
-  refine ⟨fun γ γ' => rfl, ?_⟩
-  refine ⟨fun γ γ' => rfl, ?_⟩
-  trivial
 
 /-- **The bill is exact, in every world**: three consultations, priced from the
 term, with the guide read once. This is the workload `attack-adequacy` §1 says

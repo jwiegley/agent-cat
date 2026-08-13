@@ -49,8 +49,8 @@ and this definition is their solved form.
 
 ```
 denote (ret e)        γ = .done (e γ)
-denote (askC c q k)   γ = .ask c q     (fun x => denote k (γ ▷ x))
-denote (ask  c e k)   γ = .ask c (e γ) (fun x => denote k (γ ▷ x))
+denote (askC c q k)   γ = .ask c q                    (fun x => denote k (γ ▷ x))
+denote (ask c s e k)  γ = .ask c (s.withPrompt (e γ)) (fun x => denote k (γ ▷ x))
 denote (case e arms)  γ = denote (arms (e γ)) γ
 denote (dyn  e f)     γ = denote (f (e γ))    γ
 ```
@@ -64,7 +64,7 @@ because the meaning does not record it. -/
 def denote {A : Type} : {Γ : Ctx} → Plan Γ A → Env Γ → Dlg A
   | _, .ret e, γ => .done (e γ)
   | _, .askC c q k, γ => .ask c q (fun x => denote k (.cons x γ))
-  | _, .ask c e k, γ => .ask c (e γ) (fun x => denote k (.cons x γ))
+  | _, .ask c s e k, γ => .ask c (s.withPrompt (e γ)) (fun x => denote k (.cons x γ))
   | _, @Plan.case _ _ _ _ _ e arms, γ => denote (arms (e γ)) γ
   | _, .dyn e f, γ => denote (f (e γ)) γ
 
@@ -76,8 +76,10 @@ variable {Γ Δ Θ : Ctx} {A B C : Type}
 @[simp] theorem denote_askC (c : Code) (q : Q c) (k : Plan (c :: Γ) A) (γ : Env Γ) :
     denote (Plan.askC c q k) γ = .ask c q (fun x => denote k (.cons x γ)) := by simp [denote]
 
-@[simp] theorem denote_ask (c : Code) (e : Expr Γ (Q c)) (k : Plan (c :: Γ) A) (γ : Env Γ) :
-    denote (Plan.ask c e k) γ = .ask c (e γ) (fun x => denote k (.cons x γ)) := by simp [denote]
+@[simp] theorem denote_ask (c : Code) (s : Q.Shape c) (e : Expr Γ String) (k : Plan (c :: Γ) A)
+    (γ : Env Γ) :
+    denote (Plan.ask c s e k) γ
+      = .ask c (s.withPrompt (e γ)) (fun x => denote k (.cons x γ)) := by simp [denote]
 
 @[simp] theorem denote_case {T : Type} [Fintype T] [DecidableEq T]
     (e : Expr Γ T) (arms : T → Plan Γ A) (γ : Env Γ) :
@@ -128,12 +130,15 @@ theorem trace_eq_trace_denote (ω : Ω) (p : Plan Γ A) (γ : Env Γ) :
 @[simp] theorem trace_askC (ω : Ω) (c : Code) (q : Q c) (k : Plan (c :: Γ) A) (γ : Env Γ) :
     trace ω (Plan.askC c q k) γ = ⟨c, q, ω c q⟩ :: trace ω k (.cons (ω c q) γ) := by simp [trace]
 
-@[simp] theorem run_ask (ω : Ω) (c : Code) (e : Expr Γ (Q c)) (k : Plan (c :: Γ) A) (γ : Env Γ) :
-    run ω (Plan.ask c e k) γ = run ω k (.cons (ω c (e γ)) γ) := by simp [run]
+@[simp] theorem run_ask (ω : Ω) (c : Code) (s : Q.Shape c) (e : Expr Γ String)
+    (k : Plan (c :: Γ) A) (γ : Env Γ) :
+    run ω (Plan.ask c s e k) γ = run ω k (.cons (ω c (s.withPrompt (e γ))) γ) := by simp [run]
 
-@[simp] theorem trace_ask (ω : Ω) (c : Code) (e : Expr Γ (Q c)) (k : Plan (c :: Γ) A) (γ : Env Γ) :
-    trace ω (Plan.ask c e k) γ
-      = ⟨c, e γ, ω c (e γ)⟩ :: trace ω k (.cons (ω c (e γ)) γ) := by simp [trace]
+@[simp] theorem trace_ask (ω : Ω) (c : Code) (s : Q.Shape c) (e : Expr Γ String)
+    (k : Plan (c :: Γ) A) (γ : Env Γ) :
+    trace ω (Plan.ask c s e k) γ
+      = ⟨c, s.withPrompt (e γ), ω c (s.withPrompt (e γ))⟩
+          :: trace ω k (.cons (ω c (s.withPrompt (e γ))) γ) := by simp [trace]
 
 end Plan
 
@@ -144,7 +149,7 @@ same meaning. The redundancy is deliberate — `askC` is what records, *in the
 term*, that a question is closed, which is what gives a `Const S`-valued
 analysis a domain — and this is the coherence it owes. -/
 theorem askC_coherent (c : Code) (q : Q c) (k : Plan (c :: Γ) A) (γ : Env Γ) :
-    denote (Plan.askC c q k) γ = denote (Plan.ask c (fun _ => q) k) γ := by simp
+    denote (Plan.askC c q k) γ = denote (Plan.ask c q.shape (fun _ => q.prompt) k) γ := by simp
 
 /-! ## Renaming and substitution -/
 
@@ -159,7 +164,7 @@ plan in another context is precomposing its meaning. -/
     intro Δ σ δ
     simp only [Plan.sub, denote_askC, Dlg.ask.injEq, heq_eq_eq, true_and]
     exact funext fun x => ih (Sub.lift σ) (.cons x δ)
-  | ask c e k ih =>
+  | ask c s e k ih =>
     intro Δ σ δ
     simp only [Plan.sub, denote_ask, Dlg.ask.injEq, heq_eq_eq, true_and]
     exact funext fun x => ih (Sub.lift σ) (.cons x δ)
@@ -180,15 +185,16 @@ the meaning; with `Plan.under_idSig` and `Plan.under_under` it says relabellings
   | askC c q k ih =>
     simp only [Plan.under, denote_askC, Dlg.under_ask, Dlg.ask.injEq, heq_eq_eq, true_and]
     exact funext fun x => ih _
-  | ask c e k ih =>
-    simp only [Plan.under, denote_ask, Dlg.under_ask, Dlg.ask.injEq, heq_eq_eq, true_and]
+  | ask c s e k ih =>
+    simp only [Plan.under, denote_ask, Dlg.under_ask, Sig.onQ_withPrompt, Dlg.ask.injEq,
+      heq_eq_eq, true_and]
     exact funext fun x => ih _
   | case e arms ih => simp only [Plan.under, denote_case]; exact ih _ _
   | dyn e f ih => simp only [Plan.under, denote_dyn]; exact ih _ _
 
 /-- Relabelling a plan is precomposition on worlds, at the plan level. -/
 theorem run_under (ω : Ω) (σ : Sig) (p : Plan Γ A) (γ : Env Γ) :
-    Plan.run ω (Plan.under σ p) γ = Plan.run (fun c q => ω c (σ c q)) p γ := by
+    Plan.run ω (Plan.under σ p) γ = Plan.run (fun c q => ω c (σ.onQ c q)) p γ := by
   simp [Plan.run, Dlg.run_under]
 
 /-! ## Grafting: the master lemma -/
@@ -233,7 +239,7 @@ theorem denote_graft {B : Type} {A : Type} {Γ : Ctx} (p : Plan Γ A) :
     simp only [Plan.graft, denote_askC, Dlg.bind_ask, Dlg.ask.injEq, heq_eq_eq, true_and]
     exact funext fun x =>
       ih (fun a δ => K a δ.tail) _ (fun Δ σ e δ => hk Δ _ e δ) (.cons x γ)
-  | ask c d p ih =>
+  | ask c s d p ih =>
     intro K k hk γ
     simp only [Plan.graft, denote_ask, Dlg.bind_ask, Dlg.ask.injEq, heq_eq_eq, true_and]
     exact funext fun x =>
@@ -266,7 +272,8 @@ theorem denote_mapP' (f : A → B) (p : Plan Γ A) (γ : Env Γ) :
 /-- **Applicative.** `[[zipWith f p q]] = f <$> [[p]] <*> [[q]]`, again with no
 `dyn`. The `<*>` is `Dlg`'s, hence sequential in the transcript — which is
 correct, since a transcript is what was actually said and in what order; what a
-runtime may reorder is settled separately, by `run_panel_perm`. -/
+runtime may reorder is settled separately, by `approved_panel_perm` and
+`trace_panel_perm_multiset`. -/
 @[simp] theorem denote_zipWith (f : A → B → C) (p : Plan Γ A) (q : Plan Γ B) (γ : Env Γ) :
     denote (Plan.zipWith f p q) γ
       = Dlg.bind (denote p γ) (fun a => Dlg.bind (denote q γ) (fun b => .done (f a b))) := by
@@ -317,8 +324,8 @@ theorem denote_bindP_assoc {D : Type} (p : Plan Γ A) (k : A → Plan Γ B) (h :
     denote (Plan.askC1 c q) γ = Dlg.ask1 c q := by
   simp [Plan.askC1, Dlg.ask1]
 
-@[simp] theorem denote_ask1 (c : Code) (e : Expr Γ (Q c)) (γ : Env Γ) :
-    denote (Plan.ask1 c e) γ = Dlg.ask1 c (e γ) := by
+@[simp] theorem denote_ask1 (c : Code) (s : Q.Shape c) (e : Expr Γ String) (γ : Env Γ) :
+    denote (Plan.ask1 c s e) γ = Dlg.ask1 c (s.withPrompt (e γ)) := by
   simp [Plan.ask1, Dlg.ask1]
 
 @[simp] theorem denote_caseB (e : Expr Γ Bool) (t f : Plan Γ A) (γ : Env Γ) :
@@ -334,10 +341,12 @@ theorem denote_bindP_assoc {D : Type} (p : Plan Γ A) (k : A → Plan Γ B) (h :
 /-- One consultation whose answer is read twice records **one** event. The
 answer flows into a *question* — which is what the dossier's applicative kernels
 cannot do below the monadic rung and what `ask` exists for. -/
-theorem trace_share (ω : Ω) (c : Code) (q : Q c) (f : El c → El c → Q c) :
+theorem trace_share (ω : Ω) (c : Code) (q : Q c) (s : Q.Shape c) (f : El c → El c → String) :
     Plan.trace ω
-        (Plan.askC c q (Plan.ask c (fun γ => f γ.head γ.head) (Plan.ret (Expr.var .here)))) Env.nil
-      = [⟨c, q, ω c q⟩, ⟨c, f (ω c q) (ω c q), ω c (f (ω c q) (ω c q))⟩] := by
+        (Plan.askC c q (Plan.ask c s (fun γ => f γ.head γ.head) (Plan.ret (Expr.var .here))))
+        Env.nil
+      = [⟨c, q, ω c q⟩,
+         ⟨c, s.withPrompt (f (ω c q) (ω c q)), ω c (s.withPrompt (f (ω c q) (ω c q)))⟩] := by
   simp [Plan.trace]
 
 /-- Two consultations record **two** events, even though the world answers them
@@ -375,16 +384,74 @@ theorem about the term. -/
       List.map_cons, List.flatten_cons]
     simpa [Plan.trace] using congrArg (fun x => Dlg.trace ω (denote p γ) ++ x) ih
 
-/-- **The scheduling licence, semantically.** When the reducer's monoid is
-commutative, the panel's *answer* does not depend on the order of its members —
-so a runtime may reorder them — while its transcript does, which is why cost
-stays exact. This is a property of the plan and its meaning, not a hypothesis
-about how the term was built. -/
-theorem run_panel_perm [CommMonoid (El c)] (ω : Ω) {ps ps' : List (Plan Γ (El c))}
+/-- `Verdict.approved_prod` at the `El .verdict` presentation of the verdict
+monoid. Stated because instance search does not unfold `El`, so a `rw` against
+the theorem as proved at `Verdict` does not fire on a `panel`'s product. -/
+theorem approved_prod_el (vs : List (El .verdict)) :
+    Verdict.Approved vs.prod ↔ ∀ v ∈ vs, Verdict.Approved v :=
+  Verdict.approved_prod vs
+
+/-! ### The scheduling licence, stated where it is not vacuous
+
+A panel's aggregate value is **not** permutation-invariant, and no hypothesis
+rescues it: the licence would need `CommMonoid (El c)`, and nothing in the
+answer universe carries one — `Verdict` is `WithZero (FreeMonoid Objection)`,
+whose product is concatenation of objection lists, and an objection list is a
+*record* of what was said. So the earlier `run_panel_perm [CommMonoid (El c)]`
+was a theorem with no instances, which is a way of saying nothing.
+
+Two statements say what a scheduler may actually be given, and both have
+inhabited hypotheses. -/
+
+/-- **The licence on values, at the projection a policy reads.** `Approved` is
+the monoid morphism into conjunction (`Verdict.approved_mul`), and conjunction
+is commutative — so *whether everyone approved* is invariant under reordering
+the panel, even though the aggregate verdict is not.
+
+That is exactly the licence: a runtime may reorder a panel whenever what depends
+on the panel is the approval decision rather than the objection record. -/
+theorem approved_panel_perm (ω : Ω) {ps ps' : List (Plan Γ (El .verdict))}
     (h : ps.Perm ps') (γ : Env Γ) :
-    Plan.run ω (Plan.panel ps) γ = Plan.run ω (Plan.panel ps') γ := by
-  simp only [run_panel]
-  exact (h.map _).prod_eq
+    Verdict.Approved (Plan.run (A := El .verdict) ω (Plan.panel ps) γ)
+      ↔ Verdict.Approved (Plan.run (A := El .verdict) ω (Plan.panel ps') γ) := by
+  rw [run_panel, run_panel, approved_prod_el, approved_prod_el]
+  exact ⟨fun H v hv => H v ((h.map _).mem_iff.mpr hv),
+         fun H v hv => H v ((h.map _).mem_iff.mp hv)⟩
+
+/-- Concatenating a permuted list of lists permutes the concatenation. The
+scheduler's freedom, before any of it is about workflows: the order of the
+blocks may change, the contents may not. -/
+theorem flatten_perm {α : Type} {L L' : List (List α)} (h : L.Perm L') :
+    L.flatten.Perm L'.flatten := by
+  induction h with
+  | nil => exact .refl _
+  | cons l _ ih => exact ih.append_left l
+  | swap l₁ l₂ L =>
+    simp only [List.flatten_cons, ← List.append_assoc]
+    exact List.perm_append_comm.append_right _
+  | trans _ _ ih₁ ih₂ => exact ih₁.trans ih₂
+
+/-- **The licence on transcripts.** Reordering a panel reorders its events —
+`Morphism.trace_panel_not_perm_invariant` says the transcript *as a list* is
+never invariant — but it does not change *which* events occurred. Up to
+permutation the transcript is invariant, and that is exactly the amount of
+freedom a scheduler has: it may choose an order, and it may not add, drop or
+change a consultation.
+
+`Agentic/Core/Cost.lean`'s `billFresh_panel_perm` is the cost reading. -/
+theorem trace_panel_perm [Monoid (El c)] (ω : Ω) {ps ps' : List (Plan Γ (El c))}
+    (h : ps.Perm ps') (γ : Env Γ) :
+    (Plan.trace ω (Plan.panel ps) γ).Perm (Plan.trace ω (Plan.panel ps') γ) := by
+  rw [trace_panel, trace_panel]
+  exact flatten_perm (h.map _)
+
+/-- …and the same fact read in the object that forgets order: as a `Multiset` of
+events, a panel's transcript does not depend on the order of its members. -/
+theorem trace_panel_perm_multiset [Monoid (El c)] (ω : Ω) {ps ps' : List (Plan Γ (El c))}
+    (h : ps.Perm ps') (γ : Env Γ) :
+    (Plan.trace ω (Plan.panel ps) γ : Multiset Event)
+      = (Plan.trace ω (Plan.panel ps') γ : Multiset Event) :=
+  Multiset.coe_eq_coe.mpr (trace_panel_perm ω h γ)
 
 /-- A panel of verdicts approves exactly when every member approves — the
 `foldMap` of `Verdict.Approved`'s morphism into conjunction (§3 q6), which is
@@ -470,9 +537,13 @@ that approves immediately it is one review and nothing else. -/
 
 namespace Acceptance
 
-/-- The reviewer's question, built from the artefact under review. -/
-def reviewQ (s : String) : Q .verdict :=
-  { addressee := .model "reviewer", scope := 1, prompt := s, draw := 0 }
+/-- `[[reviewShape]]` = whom the review goes to and under what: the part of the
+reviewer's question that is written in the term. -/
+def reviewShape : Q.Shape .verdict := { addressee := .model "reviewer", scope := 1, draw := 0 }
+
+/-- The reviewer's question, whose words are built from the artefact under
+review. -/
+def reviewQ (s : String) : Q .verdict := reviewShape.withPrompt s
 
 /-- What the reviewer's verdict comes to, in words the author can read. -/
 def tagText : VTag → String
@@ -480,21 +551,25 @@ def tagText : VTag → String
   | .object => "objections raised"
   | .declined => "declined to review"
 
-/-- The author's question, built from the artefact and the objections. -/
-def reviseQ (s : String) : Q .text :=
-  { addressee := .model "author", scope := 1, prompt := s, draw := 0 }
+/-- `[[reviseShape]]` = whom a revision goes to and under what. -/
+def reviseShape : Q.Shape .text := { addressee := .model "author", scope := 1, draw := 0 }
+
+/-- The author's question, whose words are built from the artefact and the
+objections. -/
+def reviseQ (s : String) : Q .text := reviseShape.withPrompt s
 
 /-- Check the artefact: one consultation, whose prompt is a function of the
 artefact — the `ask` node, which is the whole reason the domain sits below the
 monadic rung. -/
 def check : Cont [] (El .text) Verdict :=
-  fun _ _ a => Plan.ask1 .verdict (fun δ => reviewQ (a δ))
+  fun _ _ a => Plan.ask1 .verdict reviewShape (fun δ => a δ)
 
 /-- Revise the artefact, **threading the objections**: the question mentions
 both the artefact and what the reviewer said. -/
 def revise : Cont [] (El .text × Verdict) (El .text) :=
   fun _ _ a =>
-    Plan.ask1 .text (fun δ => reviseQ (String.append (a δ).1 (tagText (Verdict.tag (a δ).2))))
+    Plan.ask1 .text reviseShape
+      (fun δ => String.append (a δ).1 (tagText (Verdict.tag (a δ).2)))
 
 /-- The world in which the reviewer never approves. -/
 def stubborn : Ω := fun c =>
@@ -553,21 +628,32 @@ consulted exactly once. -/
 def guideQ : Q .text :=
   { addressee := .tool "cat", scope := 1, prompt := "STYLE.md", draw := 0 }
 
+/-- `[[correctShape]]` = whom the correctness review goes to. -/
+def correctShape : Q.Shape .verdict := { addressee := .model "reviewer-a", scope := 1, draw := 0 }
+
+/-- `[[correctText guide]]` = what is said to the correctness reviewer: the only
+part of the question the guide's text reaches. -/
+def correctText (guide : String) : String := "correctness: " ++ guide
+
 /-- Ask the correctness reviewer, quoting the guide. -/
-def correctQ (guide : String) : Q .verdict :=
-  { addressee := .model "reviewer-a", scope := 1, prompt := "correctness: " ++ guide, draw := 0 }
+def correctQ (guide : String) : Q .verdict := correctShape.withPrompt (correctText guide)
+
+/-- `[[secureShape]]` = whom the security review goes to. -/
+def secureShape : Q.Shape .verdict := { addressee := .model "reviewer-b", scope := 1, draw := 0 }
+
+/-- `[[secureText guide]]` = what is said to the security reviewer. -/
+def secureText (guide : String) : String := "security: " ++ guide
 
 /-- Ask the security reviewer, quoting the same guide. -/
-def secureQ (guide : String) : Q .verdict :=
-  { addressee := .model "reviewer-b", scope := 1, prompt := "security: " ++ guide, draw := 0 }
+def secureQ (guide : String) : Q .verdict := secureShape.withPrompt (secureText guide)
 
 /-- The plan: read the guide once, then a two-member panel whose questions both
 mention it. Both reviewers' prompts are functions of an earlier answer, and the
 term contains neither `case` nor `dyn`. -/
 def sharedGuide : Plan [] (El .verdict) :=
   Plan.askC .text guideQ
-    (Plan.panel [Plan.ask1 .verdict (fun γ => correctQ γ.head),
-                 Plan.ask1 .verdict (fun γ => secureQ γ.head)])
+    (Plan.panel [Plan.ask1 .verdict correctShape (fun γ => correctText γ.head),
+                 Plan.ask1 .verdict secureShape (fun γ => secureText γ.head)])
 
 /-- **Sharing is a variable used twice, and it costs one event — in every
 world.** Three consultations, not four: the guide is read once and its text
@@ -577,14 +663,14 @@ theorem trace_sharedGuide (ω : Ω) :
       = [⟨.text, guideQ, ω .text guideQ⟩,
          ⟨.verdict, correctQ (ω .text guideQ), ω .verdict (correctQ (ω .text guideQ))⟩,
          ⟨.verdict, secureQ (ω .text guideQ), ω .verdict (secureQ (ω .text guideQ))⟩] := by
-  simp [Plan.trace, sharedGuide, Dlg.ask1]
+  simp [Plan.trace, sharedGuide, Dlg.ask1, correctQ, secureQ]
 
 /-- And the answer is the product of the two verdicts in the verdict monoid —
 `foldMap`, which is all a panel's reducer ever is. -/
 theorem run_sharedGuide (ω : Ω) :
     Plan.run ω sharedGuide Env.nil
       = ω .verdict (correctQ (ω .text guideQ)) * ω .verdict (secureQ (ω .text guideQ)) := by
-  simp [Plan.run, sharedGuide, Dlg.ask1]
+  simp [Plan.run, sharedGuide, Dlg.ask1, correctQ, secureQ]
 
 end Acceptance
 

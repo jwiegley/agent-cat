@@ -114,8 +114,11 @@ import Agentic.Surface
 -- The rederivation kernel's mathematical space, Stage 1 (dossier
 -- rederivation-kernel.md §1–§3): question space — the small universe of answer
 -- types `El`, the question `Q c` that carries everything determining the reply
--- (scope included, so `under` is a fold and not a constructor), and `Verdict`
--- as `WithZero (FreeMonoid Objection)`, in which refusal is an answer.
+-- (scope included, so `under` is a fold and not a constructor), its
+-- factorization `Q c ≅ Q.Shape c × String` into what is asked of whom and what
+-- is said (which is what `Plan`'s `ask` node splits, and hence why the kernel's
+-- C2 needs no side condition), and `Verdict` as `WithZero (FreeMonoid
+-- Objection)`, in which refusal is an answer.
 import Agentic.Core.Question
 -- Worlds: the total answer sheet `Ω = (c : Code) → Q c → El c`, the finite
 -- partial sheets a run accumulates (`Table`, its extension preorder, and the
@@ -130,10 +133,12 @@ import Agentic.Core.Dlg
 -- Plans, Stage 2: the representation. Contexts as lists of codes, environments
 -- as their products, variables as de Bruijn membership proofs, and the five
 -- term formers — `ret`, `askC`, `ask`, `case`, `dyn` — of a first-order,
--- intrinsically-typed syntax in which a question is built by a pure `Expr` over
--- the answers in scope. Sequencing is `graft` (substitution into the `ret`
--- leaves), not a constructor; `under σ`, `panel` and `revising` are derived, and
--- only general value-sequencing (`bindP`) needs the quarantined `dyn`.
+-- intrinsically-typed syntax. `ask` carries the question's *shape* as term-level
+-- data and only its *words* as a pure `Expr` over the answers in scope, so an
+-- answer reaches the prompt and nothing else by construction. Sequencing is
+-- `graft` (substitution into the `ret` leaves), not a constructor; `under σ`,
+-- `panel` and `revising` are derived, and only general value-sequencing
+-- (`bindP`) needs the quarantined `dyn`.
 import Agentic.Core.Plan
 -- The meaning of a plan: `denote : Plan Γ A → Env Γ → Dlg A`, the fold whose
 -- five clauses are the kernel's five morphism equations, with `run`/`trace` of a
@@ -152,22 +157,26 @@ import Agentic.Core.Level
 -- The bill, Stage 3: prices as functions of the question, the transcript's two
 -- bills (`billFresh`, `billMemo`, related by divisibility), and the kernel's
 -- cost obligations proved where they are true — the exact question list at
--- `batch`, the exact count at `pipeline` and the exact bill there under the
--- missing hypothesis `ShapeStatic` (the kernel's C2 is refuted as written), a
--- finite `CostTree` at `branch` with sound bounds and attained best/worst
--- achievable bills (the kernel's attainment claim is refuted as written), and
--- at `dynamic` the non-existence of any finite set of bills at all.
+-- `batch`, the exact count, code sequence and question *shapes* at `pipeline`
+-- and the exact bill there under `PricesByShape` alone (the kernel's C2 holds
+-- unconditionally now that the `ask` node carries its shape; the side predicate
+-- that used to repair it is deleted), a finite `CostTree` at `branch` with sound
+-- bounds and attained best/worst achievable bills (the kernel's attainment claim
+-- is refuted as written), and at `dynamic` an exhibited plan admitting no finite
+-- set of bills at all. Plus the scheduling licence at the bill: reordering a
+-- panel is free in a commutative carrier.
 import Agentic.Core.Cost
 -- The commuting squares, Stage 4: every operation of the representation stated
 -- once against `denote` in standard vocabulary — the five leaf laws, the
 -- substitution and scope squares (scope is reindexing of the world, on values
 -- *and* on transcripts), grafting as the monad morphism into `Dlg`'s `bind`
 -- with its unit and associativity halves, the panel's convolution law with the
--- honest order fact that a transcript is never permutation-invariant, the
--- check-then-revise unrolling, and C5: the level fold is sound at `batch`,
--- `pipeline` (for codes unconditionally, for shapes only under `ShapeStatic` —
--- the kernel's C2 is refuted here as written) and `branch`, and vacuous at
--- `dynamic`. Plus the monad laws of the surface ops, descended from `Dlg`'s
+-- honest order fact that a transcript is never permutation-invariant as a list
+-- (what survives reordering is the multiset, the approval decision and the bill
+-- in a commutative carrier), the check-then-revise unrolling, and C5: the level
+-- fold is sound at `batch`, `pipeline` (for codes *and* for shapes, both
+-- unconditionally) and `branch`, and at `dynamic` there is a witness that there
+-- is nothing to be sound about. Plus the monad laws of the surface ops, descended from `Dlg`'s
 -- `LawfulMonad` through the kernel of `denote`, and the theorem that the level
 -- is *not* an invariant of that kernel — which is what "the fold classifies
 -- terms, not meanings" means.
@@ -183,8 +192,9 @@ import Agentic.Core.Morphism
 -- most three drafts are asked for, the cost tree has nine leaves with
 -- min 5 / max 15 while the seven *reachable* bills are 6, 7, 10, 11, 13, 14, 15
 -- (so the tree's minimum is sound but not attained, the cheapest run costs six,
--- and the dearest costs fifteen and is exhibited), and `run` is total. Plus the six `ShapeStatic` closure lemmas that make the
--- branch-rung hypothesis usable on an authored workflow.
+-- and the dearest costs fifteen and is exhibited), and `run` is total. The six
+-- `ShapeStatic` closure lemmas this module used to carry are gone with the
+-- predicate: the branch-rung cost theorems now need only `level ≤ branch`.
 import Agentic.Core.HardenPatch
 
 /-!

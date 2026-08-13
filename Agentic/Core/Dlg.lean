@@ -223,19 +223,19 @@ constructor — the incumbent's `scopeT` is condemned by the package's own
 no-weakening-constructor rule. -/
 def under (σ : Sig) : Dlg A → Dlg A
   | .done a => .done a
-  | .ask c q f => .ask c (σ c q) (fun x => under σ (f x))
+  | .ask c q f => .ask c (σ.onQ c q) (fun x => under σ (f x))
 
 @[simp] theorem under_done (σ : Sig) (a : A) : under σ (.done a) = .done a := rfl
 
 @[simp] theorem under_ask (σ : Sig) (c : Code) (q : Q c) (f : El c → Dlg A) :
-    under σ (.ask c q f) = .ask c (σ c q) (fun x => under σ (f x)) := rfl
+    under σ (.ask c q f) = .ask c (σ.onQ c q) (fun x => under σ (f x)) := rfl
 
 /-- **Action law 1** (`under 1 = id`). -/
 theorem under_idSig (p : Dlg A) : under idSig p = p := by
   induction p with
   | done a => rfl
   | ask c q f ih =>
-    simp only [under_ask, idSig, Dlg.ask.injEq, heq_eq_eq, true_and]
+    simp only [under_ask, idSig_onQ, Dlg.ask.injEq, heq_eq_eq, true_and]
     funext x; exact ih x
 
 /-- **Action law 2** (`under σ ∘ under τ = under (σ ∘ τ)`). Together with
@@ -246,7 +246,7 @@ theorem under_under (σ τ : Sig) (p : Dlg A) :
   induction p with
   | done a => rfl
   | ask c q f ih =>
-    simp only [under_ask, compSig, Dlg.ask.injEq, heq_eq_eq, true_and]
+    simp only [under_ask, compSig_onQ, Dlg.ask.injEq, heq_eq_eq, true_and]
     funext x; exact ih x
 
 /-- **Innermost wins, at the meaning.** Wrapping a further model scope *outside*
@@ -266,19 +266,19 @@ theorem under_atModel_atModel (mOuter mInner : String) (p : Dlg A) :
 on worlds. `[[run ω (under σ p)]] = [[run (ω ∘ σ) p]]` — which is the sense in
 which scope is part of the question and not a layer around the meaning. -/
 theorem run_under (ω : Ω) (σ : Sig) (p : Dlg A) :
-    run ω (under σ p) = run (fun c q => ω c (σ c q)) p := by
+    run ω (under σ p) = run (fun c q => ω c (σ.onQ c q)) p := by
   induction p with
   | done a => rfl
   | ask c q f ih => simp only [under_ask, run_ask]; exact ih _
 
 /-- Relabelling one event. -/
-def _root_.Agentic.Core.Event.relabel (σ : Sig) (e : Event) : Event := ⟨e.c, σ e.c e.q, e.a⟩
+def _root_.Agentic.Core.Event.relabel (σ : Sig) (e : Event) : Event := ⟨e.c, σ.onQ e.c e.q, e.a⟩
 
 /-- **Morphism equation for `under` on transcripts**: the transcript of a
 relabelled dialogue is the relabelled transcript of the dialogue at the
 precomposed world. -/
 theorem trace_under (ω : Ω) (σ : Sig) (p : Dlg A) :
-    trace ω (under σ p) = (trace (fun c q => ω c (σ c q)) p).map (Event.relabel σ) := by
+    trace ω (under σ p) = (trace (fun c q => ω c (σ.onQ c q)) p).map (Event.relabel σ) := by
   induction p with
   | done a => rfl
   | ask c q f ih =>

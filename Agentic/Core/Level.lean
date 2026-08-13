@@ -46,9 +46,9 @@ One rung per *recognized class*, and the entry in the last column is what
 | rung | syntactic criterion | class | the analysis |
 |---|---|---|---|
 | `batch` | only `askC` and `ret` | free `Applicative` | the exact question list, world-independent; exact bill |
-| `pipeline` | `ask` allowed; no `case`, no `dyn` | static arrow | the exact count and code sequence; exact bill under `PricesByShape` **and** `ShapeStatic` |
+| `pipeline` | `ask` allowed; no `case`, no `dyn` | static arrow | the exact count, code sequence and question *shapes*; exact bill under `PricesByShape` |
 | `branch` | `case` allowed; no `dyn` | `Selective.branch` | a finite `CostTree` containing every run's bill (`bill_mem_leaves`); sound bounds, and the best and worst *achievable* bills attained by worlds |
-| `dynamic` | `dyn` present | `Monad` | **no finite set of bills exists at all** (`no_finite_bill_set_at_dyn`), hence no cost tree of any shape | -/
+| `dynamic` | `dyn` present | `Monad` | nothing survives: a `dyn` plan is exhibited (`unbounded`) for which **no finite set of bills exists at all** (`no_finite_bill_set_at_dyn`), hence no cost tree of any shape. The claim is a witness at this rung, not a universal over its inhabitants — a `dyn` whose function is constant costs what its body costs | -/
 inductive Level where
   /-- Every question is closed: the term names its whole question list. -/
   | batch
@@ -104,9 +104,9 @@ A **fold**, defined by structural recursion on the finished term, never an
 index on the family:
 
 ```
-level (ret e)       = batch
-level (askC c q k)  = level k
-level (ask c e k)   = pipeline ⊔ level k
+level (ret e)        = batch
+level (askC c q k)   = level k
+level (ask c s e k)  = pipeline ⊔ level k
 level (case e arms) = branch ⊔ ⨆ t, level (arms t)
 level (dyn e f)     = dynamic
 ```
@@ -119,7 +119,7 @@ each a `rfl`. -/
 def level {A : Type} : {Γ : Ctx} → Plan Γ A → Level
   | _, .ret _ => .batch
   | _, .askC _ _ k => level k
-  | _, .ask _ _ k => max .pipeline (level k)
+  | _, .ask _ _ _ k => max .pipeline (level k)
   | _, @Plan.case _ _ _ _ _ _ arms => max .branch (Finset.univ.sup fun t => level (arms t))
   | _, .dyn _ _ => .dynamic
 
@@ -130,8 +130,8 @@ variable {Γ Δ : Ctx} {A B C : Type}
 @[simp] theorem level_askC (c : Code) (q : Q c) (k : Plan (c :: Γ) A) :
     level (Plan.askC c q k) = level k := rfl
 
-@[simp] theorem level_ask (c : Code) (e : Expr Γ (Q c)) (k : Plan (c :: Γ) A) :
-    level (Plan.ask c e k) = max .pipeline (level k) := rfl
+@[simp] theorem level_ask (c : Code) (s : Q.Shape c) (e : Expr Γ String) (k : Plan (c :: Γ) A) :
+    level (Plan.ask c s e k) = max .pipeline (level k) := rfl
 
 @[simp] theorem level_case {T : Type} [Fintype T] [DecidableEq T]
     (e : Expr Γ T) (arms : T → Plan Γ A) :
@@ -151,8 +151,9 @@ theorem level_le_of_askC {ℓ : Level} {c : Code} {q : Q c} {k : Plan (c :: Γ) 
     (h : level (Plan.askC c q k) ≤ ℓ) : level k ≤ ℓ := h
 
 /-- An `ask` forces `pipeline` and bounds its continuation. -/
-theorem le_of_ask {ℓ : Level} {c : Code} {e : Expr Γ (Q c)} {k : Plan (c :: Γ) A}
-    (h : level (Plan.ask c e k) ≤ ℓ) : Level.pipeline ≤ ℓ ∧ level k ≤ ℓ :=
+theorem le_of_ask {ℓ : Level} {c : Code} {s : Q.Shape c} {e : Expr Γ String}
+    {k : Plan (c :: Γ) A} (h : level (Plan.ask c s e k) ≤ ℓ) :
+    Level.pipeline ≤ ℓ ∧ level k ≤ ℓ :=
   max_le_iff.mp h
 
 /-- A `case` forces `branch` and bounds every arm — *every* arm, because both
@@ -189,7 +190,7 @@ transformation out of the presheaf `Γ ↦ Plan Γ A` to the constant presheaf. 
   induction p with
   | ret e => intro Δ σ; rfl
   | askC c q k ih => intro Δ σ; simpa [Plan.sub] using ih _
-  | ask c e k ih =>
+  | ask c s e k ih =>
     intro Δ σ
     simp only [Plan.sub, level_ask]
     exact congrArg _ (ih (Sub.lift σ))
@@ -206,7 +207,7 @@ licensed at a rung are licensed at every scope. -/
   induction p with
   | ret e => rfl
   | askC c q k ih => simpa [Plan.under] using ih
-  | ask c e k ih =>
+  | ask c s e k ih =>
     simp only [Plan.under, level_ask]
     exact congrArg _ ih
   | case e arms ih =>
@@ -233,7 +234,7 @@ theorem level_graft_le {B : Type} {ℓ₀ : Level} (p : Plan Γ A) :
   | askC c q k ih =>
     intro k' hk
     simpa [Plan.graft] using ih _ (fun Δ σ e => hk Δ _ e)
-  | ask c e k ih =>
+  | ask c s e k ih =>
     intro k' hk
     simp only [Plan.graft, level_ask, level_ask, max_le_iff]
     refine ⟨le_trans (le_max_left _ _) (le_max_left _ _), ?_⟩
@@ -260,7 +261,7 @@ theorem level_graft_of_batch {B : Type} (p : Plan Γ A) :
   induction p with
   | ret e => intro k hk; exact (hk _ Sub.id e).trans rfl
   | askC c q k ih => intro k' hk; simpa [Plan.graft] using ih _ (fun Δ σ e => hk Δ _ e)
-  | ask c e k ih =>
+  | ask c s e k ih =>
     intro k' hk
     simp only [Plan.graft, level_ask]
     exact congrArg _ (ih _ (fun Δ σ e => hk Δ _ e))
@@ -316,8 +317,8 @@ non-degenerate plan has. -/
 
 /-- A question built from what is known is `pipeline` — the rung the kernel
 exists to carry, and the reason a content-dependent prompt is not monadic. -/
-@[simp] theorem level_ask1 (c : Code) (e : Expr Γ (Q c)) :
-    level (Plan.ask1 c e) = .pipeline := rfl
+@[simp] theorem level_ask1 (c : Code) (s : Q.Shape c) (e : Expr Γ String) :
+    level (Plan.ask1 c s e) = .pipeline := rfl
 
 /-- A two-armed branch is at least `branch`. -/
 theorem branch_le_level_caseB (e : Expr Γ Bool) (t f : Plan Γ A) :

@@ -18,8 +18,11 @@ The one design decision, which the whole module is a consequence of: the dilemma
 the binder. A `Plan` is first-order — an inspectable term — and its variables
 are de Bruijn indices, so there is no α-equivalence, no capture, no ill-scoped
 term and no `Quot`. What the host supplies is not the sequencing but the *pure*
-part: a question is built by an `Expr`, an ordinary function of the answers in
-scope. That is what keeps a content-dependent prompt below the monadic rung.
+part: a question's **words** are built by an `Expr`, an ordinary function of the
+answers in scope, while the question's **shape** — who is asked, under what
+scope, at which draw — is written in the term. That split is what keeps a
+content-dependent prompt below the monadic rung *and* keeps the cost of the
+conversation readable off the term (`Agentic/Core/Cost.lean`, C2).
 
 Three things are therefore **not** here, on purpose.
 
@@ -183,8 +186,8 @@ Five formers, each forced (kernel §2.3), and the meaning function `denote` in
 
 ```
 denote (ret e)        γ = .done (e γ)
-denote (askC c q k)   γ = .ask c q     (fun x => denote k (γ ▷ x))
-denote (ask  c e k)   γ = .ask c (e γ) (fun x => denote k (γ ▷ x))
+denote (askC c q k)   γ = .ask c q                     (fun x => denote k (γ ▷ x))
+denote (ask c s e k)  γ = .ask c (s.withPrompt (e γ))  (fun x => denote k (γ ▷ x))
 denote (case e arms)  γ = denote (arms (e γ)) γ
 denote (dyn  e f)     γ = denote (f (e γ))    γ
 ```
@@ -200,12 +203,21 @@ inductive Plan : Ctx → Type → Type 1 where
   `Const S`-valued analysis a domain — the batch rung is recorded in the term or
   it is not well defined (kernel §2.3, `attack-adequacy` F1). -/
   | askC {Γ : Ctx} {A : Type} (c : Code) (q : Q c) (k : Plan (c :: Γ) A) : Plan Γ A
-  /-- **Ask a question built from the answers so far, and bind the answer.** The
-  node the domain forces: the guide's text goes into the reviewer's prompt, the
-  draft into the review, the objections into the revision. Ask-and-bind in one
-  former, so the syntax is already A-normal and no analysis has to reconstruct
-  where an answer went. -/
-  | ask {Γ : Ctx} {A : Type} (c : Code) (e : Expr Γ (Q c)) (k : Plan (c :: Γ) A) : Plan Γ A
+  /-- **Ask a question whose *words* are built from the answers so far, and bind
+  the answer.** The node the domain forces: the guide's text goes into the
+  reviewer's prompt, the draft into the review, the objections into the
+  revision. Ask-and-bind in one former, so the syntax is already A-normal and no
+  analysis has to reconstruct where an answer went.
+
+  **The shape is term-level data and only the prompt is an expression**, which
+  is the whole of the kernel's C2. `Q c ≅ Q.Shape c × String`; the addressee,
+  the scope and the draw are written by the author in the term `s`, and the
+  answer flows into the words and nowhere else — not because a predicate on the
+  term says so, but because there is no place in the node for it to flow. The
+  shape sequence of a `pipeline` plan is therefore a *projection of the syntax*
+  (`shapes_eq_of_le_pipeline`, which carries no hypothesis). -/
+  | ask {Γ : Ctx} {A : Type} (c : Code) (s : Q.Shape c) (e : Expr Γ String)
+      (k : Plan (c :: Γ) A) : Plan Γ A
   /-- **Finite-tag branching, both arms in the term.** `Selective.branch`, with
   the payload riding in the context into whichever arm is taken. `T` is a
   `Fintype`, so the branch structure is a genuine finite tree and the cost of
@@ -233,7 +245,7 @@ operation here, because a context morphism is a function on environments. -/
 def sub {A : Type} : {Γ Δ : Ctx} → Plan Γ A → Sub Γ Δ → Plan Δ A
   | _, _, .ret e, σ => .ret (fun δ => e (σ δ))
   | _, _, .askC c q k, σ => .askC c q (sub k (Sub.lift σ))
-  | _, _, .ask c e k, σ => .ask c (fun δ => e (σ δ)) (sub k (Sub.lift σ))
+  | _, _, .ask c s e k, σ => .ask c s (fun δ => e (σ δ)) (sub k (Sub.lift σ))
   | _, _, @Plan.case _ _ T fT dT e arms, σ =>
       @Plan.case _ _ T fT dT (fun δ => e (σ δ)) (fun t => sub (arms t) σ)
   | _, _, .dyn e f, σ => .dyn (fun δ => e (σ δ)) (fun b => sub (f b) σ)
@@ -244,7 +256,7 @@ presheaf `Γ ↦ Plan Γ A`. -/
   induction p with
   | ret e => rfl
   | askC c q k ih => simp only [sub, Sub.lift_id, ih]
-  | ask c e k ih => simp only [sub, Sub.lift_id, ih]
+  | ask c s e k ih => simp only [sub, Sub.lift_id, ih]
   | case e arms ih => simp only [sub]; exact congrArg _ (funext fun t => ih t)
   | dyn e f ih => simp only [sub]; exact congrArg _ (funext fun b => ih b)
 
@@ -254,7 +266,7 @@ theorem sub_comp (p : Plan Γ A) (σ : Sub Γ Δ) (τ : Sub Δ Θ) :
   induction p generalizing Δ Θ with
   | ret e => rfl
   | askC c q k ih => simp only [sub, Sub.lift_comp]; exact congrArg _ (ih _ _)
-  | ask c e k ih => simp only [sub, Sub.lift_comp]; exact congrArg _ (ih _ _)
+  | ask c s e k ih => simp only [sub, Sub.lift_comp]; exact congrArg _ (ih _ _)
   | case e arms ih => simp only [sub]; exact congrArg _ (funext fun t => ih t _ _)
   | dyn e f ih => simp only [sub]; exact congrArg _ (funext fun b => ih b _ _)
 
@@ -269,8 +281,8 @@ defined where the recursion's target lives, and not a constructor: the
 package's own no-weakening-constructor rule is what condemns `scopeT`. -/
 def under {A : Type} (σ : Sig) : {Γ : Ctx} → Plan Γ A → Plan Γ A
   | _, .ret e => .ret e
-  | _, .askC c q k => .askC c (σ c q) (under σ k)
-  | _, .ask c e k => .ask c (fun γ => σ c (e γ)) (under σ k)
+  | _, .askC c q k => .askC c (σ.onQ c q) (under σ k)
+  | _, .ask c s e k => .ask c (σ c s) e (under σ k)
   | _, @Plan.case _ _ T fT dT e arms => @Plan.case _ _ T fT dT e (fun t => under σ (arms t))
   | _, .dyn e f => .dyn e (fun b => under σ (f b))
 
@@ -278,8 +290,8 @@ def under {A : Type} (σ : Sig) : {Γ : Ctx} → Plan Γ A → Plan Γ A
 @[simp] theorem under_idSig (p : Plan Γ A) : under idSig p = p := by
   induction p with
   | ret e => rfl
-  | askC c q k ih => simp only [under, idSig, ih]
-  | ask c e k ih => simp only [under, idSig, ih]
+  | askC c q k ih => simp only [under, idSig_onQ, ih]
+  | ask c s e k ih => simp only [under, idSig, ih]
   | case e arms ih => simp only [under]; exact congrArg _ (funext fun t => ih t)
   | dyn e f ih => simp only [under]; exact congrArg _ (funext fun b => ih b)
 
@@ -290,8 +302,8 @@ theorem under_under (σ τ : Sig) (p : Plan Γ A) :
     under σ (under τ p) = under (compSig σ τ) p := by
   induction p with
   | ret e => rfl
-  | askC c q k ih => simp only [under, compSig, ih]
-  | ask c e k ih => simp only [under, compSig, ih]
+  | askC c q k ih => simp only [under, compSig_onQ, ih]
+  | ask c s e k ih => simp only [under, compSig, ih]
   | case e arms ih => simp only [under]; exact congrArg _ (funext fun t => ih t)
   | dyn e f ih => simp only [under]; exact congrArg _ (funext fun b => ih b)
 
@@ -316,7 +328,7 @@ theorem under_sub (σ : Sig) (p : Plan Γ A) (τ : Sub Γ Δ) :
   induction p generalizing Δ with
   | ret e => rfl
   | askC c q k ih => simp only [sub, under]; exact congrArg _ (ih _)
-  | ask c e k ih => simp only [sub, under]; exact congrArg _ (ih _)
+  | ask c s e k ih => simp only [sub, under]; exact congrArg _ (ih _)
   | case e arms ih => simp only [sub, under]; exact congrArg _ (funext fun t => ih t _)
   | dyn e f ih => simp only [sub, under]; exact congrArg _ (funext fun b => ih b _)
 
@@ -345,7 +357,7 @@ see and what makes a plan a *term* rather than a tree of closures. -/
 def graft {B : Type} : {Γ : Ctx} → {A : Type} → Plan Γ A → Cont Γ A B → Plan Γ B
   | _, _, .ret e, k => k _ Sub.id e
   | _, _, .askC c q p, k => .askC c q (graft p (fun Δ σ e => k Δ (Sub.comp Sub.wk σ) e))
-  | _, _, .ask c d p, k => .ask c d (graft p (fun Δ σ e => k Δ (Sub.comp Sub.wk σ) e))
+  | _, _, .ask c s d p, k => .ask c s d (graft p (fun Δ σ e => k Δ (Sub.comp Sub.wk σ) e))
   | _, _, @Plan.case _ _ T fT dT d arms, k =>
       @Plan.case _ _ T fT dT d (fun t => graft (arms t) k)
   | _, _, .dyn d f, k => .dyn d (fun b => graft (f b) k)
@@ -392,9 +404,10 @@ def bindP (p : Plan Γ A) (k : A → Plan Γ B) : Plan Γ B :=
 reply. -/
 def askC1 (c : Code) (q : Q c) : Plan Γ (El c) := .askC c q (.ret (Expr.var .here))
 
-/-- `[[ask1 c e]]` = put the question `e` builds from what is known, and answer
-with the reply. -/
-def ask1 (c : Code) (e : Expr Γ (Q c)) : Plan Γ (El c) := .ask c e (.ret (Expr.var .here))
+/-- `[[ask1 c s e]]` = put the question of shape `s` whose words `e` builds from
+what is known, and answer with the reply. -/
+def ask1 (c : Code) (s : Q.Shape c) (e : Expr Γ String) : Plan Γ (El c) :=
+  .ask c s e (.ret (Expr.var .here))
 
 /-- `[[caseB e t f]] = if e then t else f`, with **both** arms in the term.
 `Bool` is the two-element `Fintype`, so this is `case` and nothing new; the
@@ -493,8 +506,11 @@ trace ω (denote (panel ps) γ) = (ps.map (fun p => trace ω (denote p γ))).fla
 
 — the value is a `foldMap` into the monoid, and the transcript is the
 concatenation, in order. "Parallel" is a fact about a runtime; what is semantic
-is that when the monoid is commutative the *value* does not depend on the order
-(`run_panel_perm`) while the transcript always does. -/
+is exactly how much of a panel survives reordering, and the answer is: the
+approval decision (`approved_panel_perm`), the transcript up to permutation
+(`trace_panel_perm`) and the bill in a commutative carrier
+(`billFresh_panel_perm`) — but *not* the aggregate verdict, whose monoid is
+noncommutative because an objection list is a record. -/
 def panel [Monoid (El c)] (ps : List (Plan Γ (El c))) : Plan Γ (El c) :=
   ps.foldr (zipWith (· * ·)) (.ret (fun _ => 1))
 
