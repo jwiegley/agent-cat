@@ -111,6 +111,81 @@ import Agentic.Meaning
 -- its internals are scaffolding over the current Term calculus, which the
 -- re-derivation condemns (dossier rederivation-kernel.md; obr acat-o8s).
 import Agentic.Surface
+-- The rederivation kernel's mathematical space, Stage 1 (dossier
+-- rederivation-kernel.md §1–§3): question space — the small universe of answer
+-- types `El`, the question `Q c` that carries everything determining the reply
+-- (scope included, so `under` is a fold and not a constructor), and `Verdict`
+-- as `WithZero (FreeMonoid Objection)`, in which refusal is an answer.
+import Agentic.Core.Question
+-- Worlds: the total answer sheet `Ω = (c : Code) → Q c → El c`, the finite
+-- partial sheets a run accumulates (`Table`, its extension preorder, and the
+-- defaulting totalization `worldOf`), and `pin` as `Function.update` at the two
+-- levels `Ω` actually has, with the fork law re-derived rather than assumed.
+import Agentic.Core.World
+-- Dialogues: the coherent world-indexed (answer, transcript) pair, `Monad` and
+-- `LawfulMonad` with no quotient, `run`/`trace` as the two morphisms that are
+-- the meaning, `under σ` as a monoid action, and the Forcing Lemma — proved on
+-- the repeat-free fragment and *refuted* in general (`Dlg.not_forcing`).
+import Agentic.Core.Dlg
+-- Plans, Stage 2: the representation. Contexts as lists of codes, environments
+-- as their products, variables as de Bruijn membership proofs, and the five
+-- term formers — `ret`, `askC`, `ask`, `case`, `dyn` — of a first-order,
+-- intrinsically-typed syntax in which a question is built by a pure `Expr` over
+-- the answers in scope. Sequencing is `graft` (substitution into the `ret`
+-- leaves), not a constructor; `under σ`, `panel` and `revising` are derived, and
+-- only general value-sequencing (`bindP`) needs the quarantined `dyn`.
+import Agentic.Core.Plan
+-- The meaning of a plan: `denote : Plan Γ A → Env Γ → Dlg A`, the fold whose
+-- five clauses are the kernel's five morphism equations, with `run`/`trace` of a
+-- plan *defined* as `run`/`trace` of its denotation (so the interpreter is the
+-- fold and commutation is `rfl`), the substitution and scope lemmas, the master
+-- grafting equation every derived form is checked against, and the acceptance
+-- test that `revising 2` performs three reviews and two revisions.
+import Agentic.Core.Denote
+-- The level, Stage 3: which analyses apply, as a fold of the finished term and
+-- never an index on the family (the compiled refutation is
+-- `D_graded_index_fails.lean`, the repair `E_grade_as_fold_works.lean`). Four
+-- rungs — `batch ≤ pipeline ≤ branch ≤ dynamic` — joined along the structure by
+-- Mathlib's `max` and `Finset.sup`, invariant under renaming and scope, and
+-- unmoved by `mapP`/`zipWith` while `bindP` sits at the top.
+import Agentic.Core.Level
+-- The bill, Stage 3: prices as functions of the question, the transcript's two
+-- bills (`billFresh`, `billMemo`, related by divisibility), and the kernel's
+-- cost obligations proved where they are true — the exact question list at
+-- `batch`, the exact count at `pipeline` and the exact bill there under the
+-- missing hypothesis `ShapeStatic` (the kernel's C2 is refuted as written), a
+-- finite `CostTree` at `branch` with sound bounds and attained best/worst
+-- achievable bills (the kernel's attainment claim is refuted as written), and
+-- at `dynamic` the non-existence of any finite set of bills at all.
+import Agentic.Core.Cost
+-- The commuting squares, Stage 4: every operation of the representation stated
+-- once against `denote` in standard vocabulary — the five leaf laws, the
+-- substitution and scope squares (scope is reindexing of the world, on values
+-- *and* on transcripts), grafting as the monad morphism into `Dlg`'s `bind`
+-- with its unit and associativity halves, the panel's convolution law with the
+-- honest order fact that a transcript is never permutation-invariant, the
+-- check-then-revise unrolling, and C5: the level fold is sound at `batch`,
+-- `pipeline` (for codes unconditionally, for shapes only under `ShapeStatic` —
+-- the kernel's C2 is refuted here as written) and `branch`, and vacuous at
+-- `dynamic`. Plus the monad laws of the surface ops, descended from `Dlg`'s
+-- `LawfulMonad` through the kernel of `denote`, and the theorem that the level
+-- is *not* an invariant of that kernel — which is what "the fold classifies
+-- terms, not meanings" means.
+import Agentic.Core.Morphism
+-- The flagship workload, Stage 5: `example/HardenPatch.lean`'s twelve lines as
+-- a `Plan` — guide, a deep-model draft, three review-and-revise rounds over a
+-- shared guide, human consent and a gated act — with its meaning written first
+-- as an ordinary `Dlg` recursion and joined to the term by one morphism
+-- equation. Six theorems in the meaning space: consent gates the act (no `.ack`
+-- event in a world that refuses), the guide is read exactly once in every
+-- world, the level is `branch` (so the C3 cost theorems apply, and the workload
+-- `attack-adequacy` A3 calls monadic in all four dossier kernels is not), at
+-- most three drafts are asked for, the cost tree has nine leaves with
+-- min 5 / max 15 while the seven *reachable* bills are 6, 7, 10, 11, 13, 14, 15
+-- (so the tree's minimum is sound but not attained, the cheapest run costs six,
+-- and the dearest costs fifteen and is exhibited), and `run` is total. Plus the six `ShapeStatic` closure lemmas that make the
+-- branch-rung hypothesis usable on an authored workflow.
+import Agentic.Core.HardenPatch
 
 /-!
 # Agentic — the denotational design of agentic workflows
