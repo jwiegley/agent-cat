@@ -950,7 +950,7 @@ Design question from acat-444: sumT is symmetric in muS (matAdd_comm) but leftmo
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-13 Thu 02:06]
-:MODIFIED: [2026-08-13 Thu 02:06]
+:MODIFIED: [2026-08-13 Thu 15:29]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -958,6 +958,20 @@ Design question from acat-444: sumT is symmetric in muS (matAdd_comm) but leftmo
 :END:
 
 From the runtime adversarial pass (commit 71a212a). MEDIUM: (1) Exec.say logs but proceeds on stopReason != end_turn, so a cancelled/refused ACP turn decodes as '' on .text and () on .ack — refusal-is-an-answer is a documented decode position, but an ACT acknowledgement arguably requires a COMPLETED turn; decide per-code turn-completion requirements and enforce in Exec.say. (2) The .person branch uses conn.prompt which discards Turn.stopReason entirely (Acp.lean:376) — same issue, person-addressed. LOW: (3) nothing consults Settings.log in the demo harness, so warnings are invisible in exit-0 runs — either surface warnings in harden_demo output or drop the setting. Context: the HIGH fabrication finding was already fixed (exhaustion aborts); these are the nearest remaining places where a failed turn and an answered turn leave the same cell.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 62,
+    "issue_id": "acat-fuk",
+    "author": "johnw",
+    "text": "Partially closed by 4875b4e: tool acts (.ack) now require a completed turn. STILL OPEN from the real-run adversarial pass: (1) Exec.lean:925 the keyboard route hardcodes stopReason := .endTurn so requiresCompletedTurn is a no-op for Addressee.person (a person cannot cancel a turn — decide whether EOF/empty stdin should abort); (2) demo/Main.lean:254 'the run certifies' is vacuous on this workload (certify_demo_vacuous proves it) — the certificate is falsifiable in general but not on a Unit-valued plan; report it honestly or check a value-carrying plan; (3) freshSessionPerQuestion has no automated coverage (stub does not distinguish sessions); (4) stub-fidelity divergences measured: unlisted model value error shape, and no stub test reproduces adapter narration interleaved into agent_message_chunk (live codex does it).",
+    "created_at": "2026-08-13T22:29:26Z"
+  }
+]
+#+end_src
 
 * TODO [#D] Deliberate-diamond decision: CSemiring/IdemAdd instances on MSemiring
 :PROPERTIES:
@@ -1760,7 +1774,7 @@ HIGH (abstraction/deep/alexey/comments): scheduler licences are proved about Lis
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-12 Wed 17:32]
-:MODIFIED: [2026-08-13 Thu 02:06]
+:MODIFIED: [2026-08-13 Thu 15:29]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -1793,6 +1807,13 @@ Grounded by 3-agent recon 2026-08-12 (pi-claude-bridge source, incite entry poin
     "author": "johnw",
     "text": "DELIVERED (commit 71a212a, pushed): Path 2 runtime complete. Acp.lean (line-JSON-RPC transport over IO.Process, pure transport, no claims), Exec.lean (memoizing interpreter factored so IO = oracle only; execWith_eq_execM_denote by rfl AXIOM-FREE), Certify.lean (Plan.adequacy [propext]; certify_sound AXIOM-FREE, #guard_msgs-pinned; certify_execWith completeness [propext]). harden_demo end-to-end vs stub adapter: consenting bill 7 / refusing bill 6, each build-tied to its attainment proof. Adversarial pass: HIGH fabrication bug (decode exhaustion recorded Inhabited.default as a real answer, invisible to certify) FIXED at the cons — retry exhaustion abandons the run, Table stays pure math, negative-control regression test in ExecSmoke. Live adapter (claude-agent-acp) is a config default away: Acp.Config{cmd}. Remaining findings filed separately.",
     "created_at": "2026-08-13T09:06:50Z"
+  },
+  {
+    "id": 61,
+    "issue_id": "acat-uc1",
+    "author": "johnw",
+    "text": "REAL EXECUTION ACHIEVED (commit 4875b4e, pushed). harden_demo --adapter claude drives nix-built claude-agent-acp 0.64.0 (from agent-functor's pinned nixpkgs 70ce2343) against John's authenticated Claude Code. Live consenting run: 7 consultations / 83.5s / bill 7 (in the proved set), guide_once observed, <=3 drafts, consent<=>ack, certificate TRUE on real bytes, and the scratch parse.c is genuinely the hardened version (bounds-checked, no strcpy). Refusing run: bill 6, no ack, file untouched. PROTOCOL FINDINGS the stub could not surface: (1) answering session/request_permission with -32601 does NOT end the turn — it launders into an end_turn NON-ANSWER (model apologizes, ~97k tokens, act silently does not happen); permissions now granted within session cwd as a stated trust boundary; (2) agent-initiated request ids are small ints starting at 0, colliding numerically with ours (safe: Msg.ofLine splits on method presence first); (3) codex injects non-model narration as a genuine agent_message_chunk (indistinguishable from model output on the wire); (4) available_commands_update is a 39.6KB single line — readLine must survive it; (5) session/set_config_option model='deep' refused by this adapter, so the model axis goes in the prompt header (warned, not silently dropped); (6) seven session/update kinds arrive, stub emitted two. FIXES: fail-open decoder (\"I cannot approve this patch.\" read as CONSENT) — yes/approve must now be the whole reply, refusal anywhere denies, 16 measured sentences pinned in ExecSmoke; unchecked act — new theorem ack_quotes_consented_patch (the acknowledged patch IS the consented one), run verifies byte-identity and reads added lines off disk, --sloppy-apply negative control. Remaining mediums filed on acat-fuk.",
+    "created_at": "2026-08-13T22:29:26Z"
   }
 ]
 #+end_src
