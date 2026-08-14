@@ -1715,15 +1715,17 @@ Observed during the heavy review's validated pass: every mcp__pal__chat call fai
 
 From acat-vbl: muExt_indep_of_peak_eq_zero anchors the count semantically only at zero; parT=+ / seqT=max remain postulated readings. A per-run trace of consulted sites with |in-flight| <= peak is the real anchor; the module header should not say 'semantic width' until it exists (review finding 11).
 
-* TODO [#C] agent-cat CLI: run | cost | plan over DSL program files, with hardenPatch reconstructed as a program
+* DONE [#C] agent-cat CLI: run | cost | plan over DSL program files, with hardenPatch reconstructed as a program
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-tki
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-13 Thu 20:26]
-:MODIFIED: [2026-08-13 Thu 20:26]
+:MODIFIED: [2026-08-14 Fri 02:43]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-14 Fri 02:43]
+:CLOSE_REASON: Delivered in 7218213: examples/harden.wf is the flagship's authoritative text (Dsl.lean include_str's it; CliSmoke guards staleness). One binary agent-cat with plan|cost|run over one front end (withProgram; parseAndCheckRaw_eq proves it is the same front end as workflow_check and dsl_smoke, so all three accept/refuse identically with path:line:col + caret + excerpt, exit 2). plan renders the term (representation, labelled as such); cost prints level, shape sequence where fixed, cost-tree leaves/extremes and what holds of every world, reporting the unattained minimum as a lower bound that may not be paid; run executes against an adapter with transcript, both bills, coverage and certificate. Explain.lean holds the folds so the CLI computes nothing of its own; CliSmoke checks output line-for-line against the library functions the theorems are about. harden_demo retained (workload-specific assertions naming their theorems). Verification pass CLEAN; 5 low findings filed as follow-ups.
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -2094,6 +2096,22 @@ Binary-only and disconnected from the package's own carriers; the promised front
 :END:
 
 Site.strip = List.dropPrefix? (proved; the survivor docstring names the WRONG function — false absence claim, fix it); foldPanel and Mat.listProd = List.prod (rfl); Mat.pow = ^ ; Ext's three laws = Option monad laws. All probe-proved.
+
+* TODO [#C] agent-cat CLI polish (5 low findings from the clean verification pass)
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-zbx
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-14 Fri 02:43]
+:MODIFIED: [2026-08-14 Fri 02:43]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+From the CLI adversarial pass, commit 7218213, all LOW: (1) cli/AgentCat.lean:279 — a successful run prints four ok lines and exits 0 without saying what it did NOT check; with --adapter-arg --sloppy-apply the act writes the wrong file and run still reports success, because artifact checking is the demo's job; print a line naming what is out of scope. (2) :103 — --quiet's usage text promises only the verdict and failures, but check/checkTrue still print ok lines. (3) :139 — caretLines pads with pos.col-1 spaces, so a tab-indented source line misplaces the caret; count display columns. (4) :135 — caretLines echoes the offending source line untruncated: a 5000-char line prints in full plus a 5053-char caret line; truncate with an ellipsis around the column. (5) doc/PLAN.org was modified during the run (obr's own sync of acat-tki, benign).
 
 * DONE [#C] Syntax stratum: workflow terms as an inductive family with fragment index (static | bounded n | monadic)
 :PROPERTIES:

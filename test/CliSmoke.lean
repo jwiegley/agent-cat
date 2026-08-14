@@ -17,7 +17,7 @@ checker allowed (`Dsl.revisionBounds_le_of_bounded`). This checks the four thing
 no proof in the package can make a statement about.
 
 * **That the file and the module are the same text.** `Dsl.flagshipSource` is
-  `include_str "../../examples/harden.wf"`, so the module and the file are one text
+  `include_str "../../example/harden.wf"`, so the module and the file are one text
   by construction — at the moment the module is elaborated. Lake's build trace does
   not know about the `.wf` file, so an edit to it does not by itself rebuild
   `Agentic/Core/Dsl.lean`, and a stale `.olean` would be a module compiled from a
@@ -66,15 +66,15 @@ def cliPath : String := ".lake/build/bin/agent-cat"
 
 /-- The flagship, as a file. `Dsl.flagshipSource` is this file's contents, and
 that is checked below rather than assumed. -/
-def hardenPath : String := "examples/harden.wf"
+def hardenPath : String := "example/harden.wf"
 
 /-- The small program, which exists so that the command line has a subject that is
 not the flagship: three questions, no branching, and therefore a bill the analysis
 knows exactly rather than bounds. -/
-def helloPath : String := "examples/hello.wf"
+def helloPath : String := "example/hello.wf"
 
 /-- …and the one that must be refused. -/
-def illPath : String := "examples/ill-typed.wf"
+def illPath : String := "example/ill-typed.wf"
 
 /-- `[[expectedApply]]` = what a run of the flagship bills when the owner consents:
 guide, draft, three reviewers, the owner, the act. -/
@@ -127,7 +127,7 @@ def main : IO UInt32 := do
     -- re-elaborate it when only the `.wf` changes, so this is where a stale
     -- `.olean` is caught.
     let onDisk ← IO.FS.readFile hardenPath
-    check "examples/harden.wf is byte-for-byte Dsl.flagshipSource"
+    check "example/harden.wf is byte-for-byte Dsl.flagshipSource"
       (toString Dsl.flagshipSource.length) (toString onDisk.length)
     checkTrue "…and not merely the same length" (onDisk == Dsl.flagshipSource)
 
@@ -196,7 +196,7 @@ def main : IO UInt32 := do
     check "…and cost's diagnosis is plan's, byte for byte" illPlan.err illCost.err
     check "…and run's is too" illPlan.err illRun.err
     checkTrue "…and it says where, what and which fragment"
-      ((illPlan.err.splitOn "examples/ill-typed.wf:10:14:").length > 1
+      ((illPlan.err.splitOn "example/ill-typed.wf:10:14:").length > 1
         && (illPlan.err.splitOn "only a text answer interpolates").length > 1
         && (illPlan.err.splitOn "at `review`").length > 1)
     check "…and nothing was printed on stdout" "" (String.intercalate "\n" illPlan.out)
@@ -215,7 +215,7 @@ def main : IO UInt32 := do
 
     -- …and a file that is not there is refused the same way, because "there is no
     -- workflow here" is what both answers say.
-    let missing ← cli ["plan", "examples/there-is-no-such-file.wf"]
+    let missing ← cli ["plan", "example/there-is-no-such-file.wf"]
     check "a missing program exits 2" "2" (toString missing.code)
 
     IO.println "cli smoke: all checks passed"

@@ -51,7 +51,7 @@ workload**: `Agentic.Core.Harden.demo`, which is `hardenPatch "harden the
 parser"`, the term the six kernel theorems and all seven bills are about.
 
 **Why this target still exists beside `agent-cat run`.** `lake exe agent-cat run
-examples/harden.wf` runs *this same workflow* — `examples/harden.wf` is
+example/harden.wf` runs *this same workflow* — `example/harden.wf` is
 `Dsl.flagshipSource`, whose plan agrees with `Harden.demo` in each of the four
 worlds `Agentic/Core/Dsl.lean` names — and checks the four things that are true of
 *any* program: coverage, the memo bill, the certificate, and that the bill is a

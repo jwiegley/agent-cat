@@ -8,11 +8,11 @@ The command line over `Agentic/Core/Dsl.lean`. Three subcommands, one front end,
 and no analysis of its own:
 
 ```
-agent-cat plan examples/harden.wf
-agent-cat cost examples/harden.wf
-agent-cat run  examples/harden.wf
-agent-cat run  examples/harden.wf --adapter-arg --refuse       # the stub refuses
-printf 'yes\n' | agent-cat run examples/harden.wf --adapter claude
+agent-cat plan example/harden.wf
+agent-cat cost example/harden.wf
+agent-cat run  example/harden.wf
+agent-cat run  example/harden.wf --adapter-arg --refuse       # the stub refuses
+printf 'yes\n' | agent-cat run example/harden.wf --adapter claude
 ```
 
 **One front end, and it is one function.** `withProgram` reads the file, calls

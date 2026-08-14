@@ -382,10 +382,10 @@ consented — written in the concrete syntax. Compare
 forty of a language here, and the same dialogue at the end of both. -/
 
 /-- `[[flagshipSource]]` = the owner's workflow, in the DSL — **the file
-`examples/harden.wf`**, included here rather than copied.
+`example/harden.wf`**, included here rather than copied.
 
 One text in one place, and the place is the file: `agent-cat run
-examples/harden.wf` and every theorem below are about the same characters, so
+example/harden.wf` and every theorem below are about the same characters, so
 there is no second copy to drift. `include_str` elaborates to a string literal,
 exactly as the `r##"…"##` it replaced did, so nothing about the kernel
 reductions the proofs below perform changes — and nothing about them touches this
@@ -394,12 +394,12 @@ docstring for the measurement that forces that).
 
 **What the inclusion cannot do, and where that is caught.** Lake's build trace
 records the module's imports and its own source, not the files a term elaborator
-reads, so editing `examples/harden.wf` alone does not rebuild this module: the
+reads, so editing `example/harden.wf` alone does not rebuild this module: the
 `.olean` would then hold a text that is no longer on disk. `test/CliSmoke.lean`
 reads the file at run time and compares it with this constant, which is the check
 the inclusion cannot arrange for itself. The file begins with a newline because
 this literal did, and `flagshipRaw`'s positions count lines from it. -/
-def flagshipSource : String := include_str "../../examples/harden.wf"
+def flagshipSource : String := include_str "../../example/harden.wf"
 
 /-- `[[flagshipRaw]]` = the raw syntax of `flagshipSource`: the same workflow
 after lexing, macro expansion and parsing.

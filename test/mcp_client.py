@@ -23,7 +23,7 @@ of `Agentic/Core/Dsl.lean` runs end to end with no model and no network:
 Order matters: the review prompts embed the guide and the patch, so the most
 specific key is tested first, and no canned answer contains a key.
 
-**The workflow source is `examples/harden.wf`**, not copied here: that file is
+**The workflow source is `example/harden.wf`**, not copied here: that file is
 the program `agent-cat run` runs, and `Dsl.flagshipSource` is `include_str` of
 it, so the program this client drives over MCP is the very text the theorems of
 `Agentic/Core/Dsl.lean` price — one file, three consumers, nothing to drift.

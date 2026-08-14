@@ -138,7 +138,7 @@ root = "AgentCat"
 # repository root. It drives the built `agent-cat` binary over both example
 # programs and one deliberately ill-typed one, checking the three subcommands, the
 # exit codes and the parity of the diagnosis — and it checks that
-# `examples/harden.wf` on disk is byte-for-byte the string `Dsl.flagshipSource`
+# `example/harden.wf` on disk is byte-for-byte the string `Dsl.flagshipSource`
 # compiled in, which is the one thing `include_str` cannot arrange by itself.
 # In defaultTargets for the reason the other smoke tests are.
 [[lean_exe]]
