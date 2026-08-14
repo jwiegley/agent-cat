@@ -137,6 +137,228 @@ def mkScratchDir : IO String := do
   let out ← IO.Process.run { cmd := "mktemp", args := #["-d"] }
   return out.trimAscii.toString
 
+/-! ## The workspace: what the run is given to act on
+
+`mkScratchDir` answers *where may a run write*. It does not answer *what is
+there to write about*, and the measured failure that makes this section exist is
+exactly that gap.
+
+**The failure, recorded.** `agent-cat run example/harden.wf --adapter claude`
+was run in a fresh, empty scratch directory. The author model answered —
+correctly — that it could not produce a diff, because the working directory held
+no parser to patch; the three reviewers approved that explanation; the owner was
+asked to consent to it; and every check printed `ok`, because every check in
+`cli/AgentCat.lean` is about the *shape* of a run and that run had the right
+shape. The same failure is recorded from the other side in `demo/Main.lean`,
+whose `seedText` was the demo's private fix for it. This section is that fix
+made general: a workflow that acts on files needs something to act on, and which
+files those are is an input to a run and not a constant in a demo.
+
+**Why the header prints what was seeded.** An empty directory is a legitimate
+state — some workflows create rather than change — so seeding nothing is not an
+error. What is not acceptable is that it be *silent*: `Seeded.render` always
+emits at least one line (`Seeded.render_ne_nil`), and when nothing was copied
+that line says so in words. An author is allowed to be surprised by an empty
+workspace once.
+
+**The trust boundary.** Copying is ordinary `IO` and proves nothing: that the
+bytes now in the scratch directory are the bytes of `DIR` is a fact about the
+filesystem, not a theorem. What the code does guarantee by construction is the
+direction of travel — every operation reads `DIR` and writes the scratch
+directory, and there is no call here that could modify `DIR` — and that a
+symbolic link is refused rather than followed, so a workspace cannot hand a run
+a file the header did not name.
+-/
+
+/-- `[[Seeded]]` = what a run's fresh directory was given before the first
+question was put: where the contents came from, what arrived, and what did not.
+
+A value rather than a printout, for `ArtifactCheck`'s reason: a caller that
+wants to *assert* something about the seeding — a test that a symlink was
+refused, say — needs the facts and not the prose. -/
+structure Seeded where
+  /-- The directory the contents were copied from, or `none` when the run
+  starts in an empty directory. -/
+  source : Option String
+  /-- One entry per ordinary file copied: its path relative to the workspace
+  root, and its size in bytes. -/
+  files : List (String × Nat) := []
+  /-- One entry per thing that was *not* copied, with the reason it was not. -/
+  refused : List (String × String) := []
+  deriving Repr, Inhabited
+
+/-- How deeply a workspace may nest before the copy stops descending. A bound
+rather than a `partial` walk, for `Agentic/Core/Acp.lean`'s reason: every loop
+in this package is structural on an explicit fuel, so a cyclic or pathological
+directory is a reported refusal and never a hung run. -/
+def workspaceDepth : Nat := 16
+
+/-- One breadth-first level of the copy: every directory in `todo` is read, its
+ordinary files are written into the matching destination, and its
+subdirectories are created and handed to the next level.
+
+Structural on the fuel, with the single recursive call outside both loops, so
+the termination argument is the fuel and nothing else. Entries are sorted by
+name, so the header a reader sees is a function of the workspace and not of the
+order the filesystem happened to return. -/
+private def copyLevel :
+    Nat → List (System.FilePath × System.FilePath × String) →
+    IO (List (String × Nat) × List (String × String))
+  | _, [] => return ([], [])
+  | 0, todo =>
+    return ([], todo.map fun t =>
+      (t.2.2, s!"is nested more than {workspaceDepth} directories deep, and was not descended into"))
+  | fuel + 1, todo => do
+    let mut files : List (String × Nat) := []
+    let mut refused : List (String × String) := []
+    let mut next : List (System.FilePath × System.FilePath × String) := []
+    for (src, dst, rel) in todo do
+      match ← (src.readDir).toBaseIO with
+      | .error e => refused := refused ++ [(rel, s!"could not be listed ({e})")]
+      | .ok entries =>
+        for e in entries.qsort (fun a b => decide (a.fileName < b.fileName)) do
+          let name := e.fileName
+          let here := if rel.isEmpty then name else rel ++ "/" ++ name
+          -- `symlinkMetadata` and not `metadata`: the latter follows the link,
+          -- which is the thing this refuses to do.
+          match ← (e.path.symlinkMetadata).toBaseIO with
+          | .error err => refused := refused ++ [(here, s!"could not be inspected ({err})")]
+          | .ok md =>
+            match md.type with
+            | .symlink =>
+              refused := refused ++ [(here,
+                "is a symbolic link; a workspace is copied and not followed, so a link \
+                 would give the run a file this header does not name")]
+            | .dir =>
+              match ← (IO.FS.createDirAll (dst / name)).toBaseIO with
+              | .error err => refused := refused ++ [(here, s!"could not be created ({err})")]
+              | .ok _ => next := next ++ [(src / name, dst / name, here)]
+            | .file =>
+              match ← (IO.FS.readBinFile e.path).toBaseIO with
+              | .error err => refused := refused ++ [(here, s!"could not be read ({err})")]
+              | .ok bytes =>
+                match ← (IO.FS.writeBinFile (dst / name) bytes).toBaseIO with
+                | .error err => refused := refused ++ [(here, s!"could not be written ({err})")]
+                | .ok _ => files := files ++ [(here, bytes.size)]
+            | _ =>
+              refused := refused ++ [(here,
+                "is neither an ordinary file nor a directory, and a run is given neither")]
+    let (f, r) ← copyLevel fuel next
+    return (files ++ f, refused ++ r)
+
+/-- `[[WorkspaceChoice]]` = what a caller said about the workspace: nothing
+(`auto`, and the convention decides), a directory, or `off`.
+
+Three constructors and not a `Option String`, because "the caller said nothing"
+and "the caller said no workspace" are different instructions and only one of
+them may consult the convention. -/
+inductive WorkspaceChoice where
+  /-- Nothing was said: use `conventionalWorkspace` if it is there. -/
+  | auto
+  /-- Use this directory, and fail if it is not one. -/
+  | dir (path : String)
+  /-- Start empty on purpose. -/
+  | off
+  deriving DecidableEq, Repr, Inhabited
+
+/-- `[[conventionalWorkspace program]]` = the directory that sits beside a
+program and holds what the program acts on: `example/harden.wf` →
+`example/harden.d`.
+
+The extension is *replaced* rather than appended, so the workspace is a sibling
+named after the program rather than a child of its filename. An author who does
+not want the convention writes `--no-workspace`; an author who wants a different
+one writes `--workspace DIR`. -/
+def conventionalWorkspace (program : String) : String :=
+  ((System.FilePath.mk program).withExtension "d").toString
+
+-- The convention, on the program it was written for, and on one whose name has
+-- no extension at all. `#guard` and not a theorem: `withExtension` is `String`
+-- surgery that this Lean's kernel does not reduce, so the claim is checked by
+-- the evaluator at elaboration time, which is the same discipline `occursIn`
+-- above is held to.
+#guard conventionalWorkspace "example/harden.wf" == "example/harden.d"
+#guard conventionalWorkspace "run" == "run.d"
+
+/-- `[[seedWorkspace choice program dst]]` = `dst`, seeded, and the account of
+what went into it.
+
+**`DIR` is never written to.** Every filesystem call below either reads the
+source or writes the destination; there is no call that could modify the
+workspace, which is what makes running the same program twice against the same
+workspace two runs of the same program.
+
+**An absent workspace is not an error, and an unusable one is.** Under `auto`
+the convention is a convenience: a program with no `.d` beside it runs in an
+empty directory and the header says so. Under `dir` the caller named a
+directory, so a name that is not a readable directory is a mistake and is
+raised — a run that quietly ignored `--workspace` would be the very failure this
+mechanism exists to prevent. -/
+def seedWorkspace (choice : WorkspaceChoice) (program : String) (dst : String) : IO Seeded := do
+  let src? : Option String ←
+    match choice with
+    | .off => pure none
+    | .dir p => pure (some p)
+    | .auto =>
+      let p := conventionalWorkspace program
+      if ← (System.FilePath.mk p).isDir then pure (some p) else pure none
+  match src? with
+  | none => return { source := none }
+  | some src =>
+    unless ← (System.FilePath.mk src).isDir do
+      throw <| IO.userError s!"workspace: {src} is not a directory that can be read"
+    let (files, refused) ←
+      copyLevel workspaceDepth [(System.FilePath.mk src, System.FilePath.mk dst, "")]
+    return { source := some src, files := files, refused := refused }
+
+namespace Seeded
+
+/-- How many bytes the run was handed. -/
+def totalBytes (s : Seeded) : Nat := (s.files.map Prod.snd).sum
+
+/-- `[[s.render]]` = the run header's account of the workspace: where it came
+from, then one line per file with its size, then one line per refusal.
+
+Printed on every run and not only on the interesting ones, for
+`ArtifactCheck.render`'s reason: a report whose evidence appears only when
+something went wrong is a report nobody has read before it matters. -/
+def render (s : Seeded) : List String :=
+  let refusals := s.refused.map fun r => s!"  refused {head 40 r.1}: {r.2}"
+  match s.source with
+  | none =>
+    ["workspace: none — this run starts in an empty directory, so a question that \
+      asks for a change to a file has no file to change"] ++ refusals
+  | some src =>
+    if s.files.isEmpty then
+      [s!"workspace: {src} holds nothing to copy — this run starts in an empty directory"]
+        ++ refusals
+    else
+      [s!"workspace: {src} → {s.files.length} \
+          {if s.files.length == 1 then "file" else "files"}, {s.totalBytes} bytes"]
+        ++ s.files.map (fun f => s!"  {pad 28 f.1}{f.2} bytes")
+        ++ refusals
+
+/-- **The header always says something.** The point of the section: an empty
+workspace is a legitimate state and a silent one is not, so there is no `Seeded`
+whose rendering is nothing at all. -/
+theorem render_ne_nil (s : Seeded) : s.render ≠ [] := by
+  unfold render
+  cases s.source <;> simp
+  split <;> simp
+
+/-- **Nothing copied goes unmentioned.** One line of provenance, one line per
+file, one line per refusal, and no line for anything else — so counting the
+header's lines counts what the agent was given. -/
+theorem render_length_of_seeded (s : Seeded) (src : String)
+    (hs : s.source = some src) (hf : s.files ≠ []) :
+    s.render.length = 1 + s.files.length + s.refused.length := by
+  unfold render
+  rw [hs]
+  simp [List.isEmpty_iff, hf]
+  omega
+
+end Seeded
+
 /-- `[[ArtifactCheck]]` = a directory read back, against the lines something
 claimed to write into it: what was there, what was claimed, and what is missing.
 

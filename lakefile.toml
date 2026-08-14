@@ -8,6 +8,25 @@ defaultTargets = ["Agentic", "Pollution", "HardenPatch", "acp_smoke", "exec_smok
 # transport that imports no part of it. Without the glob a runtime module would
 # be invisible to `lake build`; with it, one that stops compiling breaks the
 # build like everything else.
+#
+# WHERE THE BUILD TIME IS. One module in this glob dominates the whole build:
+# `Agentic/Core/DslFlagship.lean` takes about six minutes and several gigabytes
+# to elaborate, because its nineteen `decide +kernel` proofs make the kernel run
+# the checker, the cost algebra and the interpreter on `example/harden.wf` — the
+# theorems about the flagship are true by computation, not by assertion, and
+# that is what computation costs. Never elaborate it twice concurrently; two at
+# once have exhausted 48 GB on a developer machine.
+#
+# It is a separate module from `Agentic/Core/Dsl.lean` for exactly that reason.
+# `Dsl.lean` is the cheap half — the level theorems about the *checker*, about a
+# second and a half — and it is all that `Agentic/Core/Explain.lean`,
+# `Agentic/Core/Mcp.lean` and `cli/AgentCat.lean` need, so none of the three
+# executables below imports the flagship. `lake build agent-cat` from cold for
+# the DSL layer is six seconds rather than the three hundred and forty-five it
+# was when the two halves shared a file, and editing `example/harden.wf` no
+# longer invalidates the command line. Keep it so: if a binary comes to need
+# something proved about the flagship, move the *statement* into the cheap half
+# rather than the import into the binary.
 [[lean_lib]]
 name = "Agentic"
 globs = ["Agentic", "Agentic.Core.+"]
@@ -66,13 +85,16 @@ srcDir = "demo"
 root = "Main"
 
 # The DSL's test (test/DslSmoke.lean): `lake exe dsl_smoke`, from the repository
-# root. It checks the two things `Agentic/Core/Dsl.lean` does not prove — that
+# root. It checks the two things the DSL modules do not prove — that
 # the parser reads `Dsl.flagshipSource` as `Dsl.flagshipRaw`, which is the
 # hypothesis of `Dsl.parseAndCheck_flagship`, and that every clause of the
 # typing judgment rejects what it says it rejects, message and position
 # included. In defaultTargets for the reason the other two smoke tests are:
 # building it keeps a test of the checker compiling with it; running it is the
 # separate, explicit step that checks the diagnoses.
+# This one *does* import `Agentic.Core.DslFlagship`, so it pays the six minutes;
+# so do `cli_smoke` and `mcp_smoke`, which quote the flagship's proved numbers.
+# The three executables above and below do not.
 [[lean_exe]]
 name = "dsl_smoke"
 srcDir = "test"
@@ -129,6 +151,10 @@ root = "McpClientSmoke"
 # (The root is `AgentCat` and not `Main` for the reason `workflow_mcp`'s is
 # `WorkflowMcp`: module names are global to the package, `demo/Main.lean` is
 # already `Main`, and lake refuses two executables with the same root.)
+# It imports `Agentic.Core.Dsl` (through `Explain`) and *not*
+# `Agentic.Core.DslFlagship`: the front end needs `Dsl.parseAndCheck_level_le`,
+# which is a theorem about the checker, and nothing about `example/harden.wf`.
+# That is why this target builds in seconds; see the note on the `Agentic` lib.
 [[lean_exe]]
 name = "agent-cat"
 srcDir = "cli"

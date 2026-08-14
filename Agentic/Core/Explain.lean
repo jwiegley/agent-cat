@@ -259,13 +259,45 @@ namespace Dsl
 through: the same parse, the same check, the same diagnosis.
 
 `parseAndCheckRaw_eq` is the statement that this is not a second front end. -/
-def parseAndCheckRaw (s : String) : Except CheckError (Raw × Plan [] Unit) :=
-  match parse s with
+def parseAndCheckRawWith (ov : List (String × Prompt)) (s : String) :
+    Except CheckError (Raw × Plan [] Unit) :=
+  match parseWith ov s with
   | .error e => .error e
   | .ok r =>
     match check [] [] r with
     | .error e => .error e
     | .ok p => .ok (r, p)
+
+/-- The front end with no runtime parameters, which is the front end: `parse` is
+`parseWith []` (`Dsl.parse_eq_parseWith_nil`), so this is not a second reading
+of a program but the same one with an empty list of overrides. -/
+def parseAndCheckRaw (s : String) : Except CheckError (Raw × Plan [] Unit) :=
+  parseAndCheckRawWith [] s
+
+/-- **A program loaded with no overrides is the program.** The obligation
+`--define` carries: the default path must produce the identical term, so that
+every theorem proved about `parse`'s output is a theorem about what the command
+line actually ran. -/
+theorem parseAndCheckRaw_eq_with_nil (s : String) :
+    parseAndCheckRaw s = parseAndCheckRawWith [] s := rfl
+
+/-- …and hence every program the *overriding* front end accepts is at or below
+the branch rung too. Not a corollary of `parseAndCheckRaw_level_le`: an
+overridden program is a different term, so the bound is re-derived from
+`Dsl.checkBlock_level_le`, which is a statement about every term the checker
+accepts and therefore about that one. -/
+theorem parseAndCheckRawWith_level_le (ov : List (String × Prompt)) (s : String)
+    (r : Raw) (p : Plan [] Unit) (h : parseAndCheckRawWith ov s = .ok (r, p)) :
+    level p ≤ Level.branch := by
+  unfold parseAndCheckRawWith at h
+  split at h
+  · exact absurd h (by simp)
+  · split at h
+    · exact absurd h (by simp)
+    · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      rename_i hc
+      exact checkBlock_level_le _ [] [] _ hc
 
 /-- **One front end.** Forgetting the raw syntax gives `parseAndCheckE` back on the
 nose — the same plan on success and the same `CheckError` on failure — so a tool
@@ -274,12 +306,15 @@ parity of `agent-cat run|cost|plan` discharged by construction rather than by
 three call sites agreeing. -/
 theorem parseAndCheckRaw_eq (s : String) :
     (parseAndCheckRaw s).map Prod.snd = parseAndCheckE s := by
-  cases hp : parse s with
-  | error e => simp [parseAndCheckRaw, parseAndCheckE, Except.map, hp]
+  cases hp : parseWith [] s with
+  | error e =>
+    simp [parseAndCheckRaw, parseAndCheckRawWith, parseAndCheckE, parse, Except.map, hp]
   | ok r =>
     cases hc : check [] [] r with
-    | error e => simp [parseAndCheckRaw, parseAndCheckE, Except.map, hp, hc]
-    | ok p => simp [parseAndCheckRaw, parseAndCheckE, Except.map, hp, hc]
+    | error e =>
+      simp [parseAndCheckRaw, parseAndCheckRawWith, parseAndCheckE, parse, Except.map, hp, hc]
+    | ok p =>
+      simp [parseAndCheckRaw, parseAndCheckRawWith, parseAndCheckE, parse, Except.map, hp, hc]
 
 /-- …and hence every program this front end accepts is at or below the branch
 rung, which is what makes a cost report over a source file compile

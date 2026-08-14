@@ -53,7 +53,7 @@ parser"`, the term the six kernel theorems and all seven bills are about.
 **Why this target still exists beside `agent-cat run`.** `lake exe agent-cat run
 example/harden.wf` runs *this same workflow* — `example/harden.wf` is
 `Dsl.flagshipSource`, whose plan agrees with `Harden.demo` in each of the four
-worlds `Agentic/Core/Dsl.lean` names — and checks the four things that are true of
+worlds `Agentic/Core/DslFlagship.lean` names — and checks the four things that are true of
 *any* program: coverage, the memo bill, the certificate, and that the bill is a
 leaf of the cost tree. What it does not check, and cannot, is anything about *this*
 workload: that the bill is 7 or 6 on the two stub paths, that the guide was read
@@ -286,20 +286,17 @@ are about worlds and not about whether an agent did anything useful.
 
 A demo should nevertheless be about something, so the directory gets a parser
 with an unbounded `strcpy` in it: a thing "harden" has a meaning for, small
-enough that a live turn reads it in one look. -/
-def seedText : String :=
-  "#include <stdio.h>\n\
-   #include <string.h>\n\
-   \n\
-   /* Parse one line of the form NAME=VALUE into name and value. */\n\
-   int parse_line(const char *line, char *name, char *value) {\n\
-   \x20 const char *eq = strchr(line, '=');\n\
-   \x20 if (!eq) return -1;\n\
-   \x20 memcpy(name, line, eq - line);\n\
-   \x20 name[eq - line] = '\\0';\n\
-   \x20 strcpy(value, eq + 1);\n\
-   \x20 return 0;\n\
-   }\n"
+enough that a live turn reads it in one look.
+
+**One text, and the file is it.** The parser used to be a string literal here,
+and the same parser is now what `agent-cat run example/harden.wf` seeds itself
+with — by the general mechanism in `Agentic/Core/Artifact.lean`, which copies
+`example/harden.d/` because it sits beside the program. Two copies of a demo's
+subject would drift, so this is `include_str` of the one on disk, exactly as
+`Dsl.flagshipSource` is `include_str` of `example/harden.wf`. Nothing here is
+proved *about* these bytes — `seedText` appears in no theorem, only in
+`scratchDir` — so making the file authoritative disturbs nothing that is. -/
+def seedText : String := include_str "../example/harden.d/parse.c"
 
 /-- `[[scratchDir]]` = `Artifact.mkScratchDir` with `parse.c` in it: the fresh
 directory every run of this file is given, seeded with the thing the

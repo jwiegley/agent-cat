@@ -34,7 +34,21 @@ command line, the scratch directory, the exit protocol, and the checks a run is
 subjected to; each of the latter names the theorem it shadows, exactly as
 `demo/Main.lean` does for the flagship workload.
 
-**Three decisions about the command line, and the reason for each.**
+**Five decisions about the command line, and the reason for each.**
+
+* **A run is given something to act on.** `--workspace DIR` copies `DIR`'s
+  contents into the run's fresh directory before the first question, and never
+  writes to `DIR`; with no flag, a directory named after the program with a `.d`
+  suffix (`example/harden.wf` → `example/harden.d/`) is used, and
+  `--no-workspace` opts out. The header says what was seeded, or that the
+  directory is empty. The mechanism, and the live run that made it necessary, are
+  in `Agentic/Core/Artifact.lean`; what is here is the flag.
+
+* **`--define NAME=VALUE` is accepted by all three subcommands, and nothing
+  else is.** An option that changes the *program* must be available wherever a
+  program is read, or `plan` and `cost` would be describing a different program
+  from the one `run` runs. Options that describe a *run* remain `run`'s alone,
+  and one handed to `plan` is a mistake reported rather than ignored.
 
 * **There is no `--refuse`.** It is not a CLI concern: it is a fact about how one
   particular answering program, `test/stub_adapter.py`, is started, and it means
@@ -94,20 +108,48 @@ def usage : String :=
    \x20 agent-cat run  <program.wf> [options]  run it against an agent\n\
    \x20 agent-cat --help\n\
    \n\
+   load options (all three subcommands):\n\
+   \x20 --define NAME=VALUE                give a `define` the program wrote these words\n\
+   \x20                                    instead; repeatable, and taken literally\n\
+   \n\
    run options:\n\
    \x20 --adapter stub|claude|codex|PATH   the answering program (default: stub)\n\
    \x20 --adapter-arg ARG                  one argument for the adapter's argv; repeatable.\n\
    \x20                                    `--adapter-arg --refuse` is how the stub is told\n\
    \x20                                    to answer *no* to a person's yes/no question\n\
+   \x20 --workspace DIR                    copy DIR's contents into the run's directory\n\
+   \x20                                    first; DIR itself is never written to\n\
+   \x20 --no-workspace                     start empty, ignoring the `.d` convention\n\
+   \x20 --model NAME=REAL                  what a scope's `model \"NAME\"` means to this\n\
+   \x20                                    adapter, e.g. `--model deep=opus`; repeatable\n\
    \x20 --scratch DIR                      run in DIR instead of a fresh mktemp directory\n\
    \x20 --quiet                            print the verdict and what failed, and no more\n\
+   \n\
+   without --workspace, a directory named after the program with a `.d` suffix\n\
+   (example/harden.wf → example/harden.d/) is the workspace, and the run header\n\
+   says either what was seeded from it or that the directory is empty.\n\
    \n\
    exit: 0 the run passed its checks, 1 a check failed or the run aborted,\n\
    \x20     2 the program could not be read or does not check\n"
 
 /-! ## Options -/
 
-/-- `[[Options]]` = everything the command line can say about a run. -/
+/-- `[[splitPair what s]]` = `NAME=VALUE` read as a pair, cut at the **first**
+`=` so that a value may contain one. An empty name is refused: `--define =x`
+names nothing. -/
+def splitPair (what : String) (s : String) : Except String (String × String) :=
+  match s.splitOn "=" with
+  | [] | [_] => .error s!"{what} takes NAME=VALUE, and there is no `=` in `{s}`"
+  | k :: rest =>
+    if k.isEmpty then .error s!"{what} takes NAME=VALUE, and the name is empty in `{s}`"
+    else .ok (k, String.intercalate "=" rest)
+
+/-- `[[Options]]` = everything the command line can say about a run.
+
+`defines` is the only field the *loader* reads; the rest describe a run. That is
+why `plan` and `cost` accept `--define` and nothing else — the three subcommands
+must be talking about the same program, and an option that changes the program
+belongs to all three or to none. -/
 structure Options where
   /-- The answering program: `stub`, a known name, or a path. -/
   adapter : String := "stub"
@@ -115,6 +157,13 @@ structure Options where
   adapterArgs : Array String := #[]
   /-- Where the run happens; a fresh directory when absent. -/
   scratch : Option String := none
+  /-- What the run is given to act on: the `.d` convention unless told
+  otherwise. -/
+  workspace : WorkspaceChoice := .auto
+  /-- What a scope's model name means to this adapter. -/
+  modelAliases : List (String × String) := []
+  /-- `define`s the caller replaced, as name and the literal words. -/
+  defines : List (String × String) := []
   /-- Print the verdict and the failures, and nothing else. -/
   quiet : Bool := false
 
@@ -126,8 +175,34 @@ def parseOptions : List String → Except String Options
   | "--adapter-arg" :: a :: rest =>
       (parseOptions rest).map (fun o => { o with adapterArgs := #[a] ++ o.adapterArgs })
   | "--scratch" :: d :: rest => (parseOptions rest).map ({ · with scratch := some d })
+  | "--workspace" :: d :: rest => (parseOptions rest).map ({ · with workspace := .dir d })
+  | "--no-workspace" :: rest => (parseOptions rest).map ({ · with workspace := .off })
+  | "--model" :: a :: rest => do
+      let kv ← splitPair "--model" a
+      (parseOptions rest).map (fun o => { o with modelAliases := kv :: o.modelAliases })
+  | "--define" :: a :: rest => do
+      let kv ← splitPair "--define" a
+      (parseOptions rest).map (fun o => { o with defines := kv :: o.defines })
   | "--quiet" :: rest => (parseOptions rest).map ({ · with quiet := true })
   | a :: _ => .error s!"unknown option or missing argument: {a}"
+
+/-- The `--define`s of a `plan` or `cost`, which take no other option. -/
+def parseDefineOptions : List String → Except String (List (String × String))
+  | [] => .ok []
+  | "--define" :: a :: rest => do
+      let kv ← splitPair "--define" a
+      return kv :: (← parseDefineOptions rest)
+  | a :: _ => .error s!"plan and cost take only --define: {a}"
+
+/-- `[[overrides ds]]` = the command line's `--define`s as the parser's macro
+bodies.
+
+**Taken literally.** A value from a shell is words a person typed, so `{x}` in
+one is the two characters and not an interpolation: a runtime parameter that
+could quietly name a binding would be a way to rewrite a program's dataflow from
+outside it, and what `--define` is for is naming a real target. -/
+def overrides (ds : List (String × String)) : List (String × Dsl.Prompt) :=
+  ds.map fun d => (d.1, Dsl.Prompt.normalize [.lit d.2])
 
 /-! ## The one front end -/
 
@@ -155,18 +230,26 @@ is one of the ways the answer is no.
 Continuation-passing, and not by taste: `Plan [] Unit` is a `Type 1` and `IO` is a
 `Type`-valued monad, so a checked plan cannot be *returned* from `IO` — it is
 passed to what needs it. What `k` is handed with it is the proof
-`level p ≤ Level.branch`, which `Dsl.parseAndCheckRaw_level_le` produces from the
-very equation this match established, so the cost analysis a subcommand runs is
-justified by the load that produced its plan and by nothing else. -/
-def withProgram (path : String)
+`level p ≤ Level.branch`, which `Dsl.parseAndCheckRawWith_level_le` produces from
+the very equation this match established, so the cost analysis a subcommand runs
+is justified by the load that produced its plan and by nothing else. That the
+bound survives `--define` is the point of proving it about the overriding front
+end rather than inheriting it: an overridden program is a different term, and it
+is bounded because *every* term the checker accepts is.
+
+With no `--define`, `parseAndCheckRawWith []` is `parseAndCheckRaw`
+(`Dsl.parseAndCheckRaw_eq_with_nil`) is `parseAndCheckE` up to the raw syntax
+(`Dsl.parseAndCheckRaw_eq`), so the default path reads exactly the program the
+theorems are about. -/
+def withProgram (path : String) (ds : List (String × String))
     (k : Dsl.Raw → (p : Plan [] Unit) → level p ≤ Level.branch → IO UInt32) : IO UInt32 := do
   let src ← try
       IO.FS.readFile path
     catch e =>
       IO.eprintln s!"agent-cat: {path}: {e}"
       IO.Process.exit 2
-  match h : Dsl.parseAndCheckRaw src with
-  | .ok (r, p) => k r p (Dsl.parseAndCheckRaw_level_le src r p h)
+  match h : Dsl.parseAndCheckRawWith (overrides ds) src with
+  | .ok (r, p) => k r p (Dsl.parseAndCheckRawWith_level_le _ src r p h)
   | .error e =>
     IO.eprintln s!"{path}:{e.pos.line}:{e.pos.col}: {e.message}"
     for l in caretLines src e.pos do IO.eprintln l
@@ -179,16 +262,16 @@ def withProgram (path : String)
 
 /-- `agent-cat plan`: the checked term, and the revision bounds the term does not
 hold. Both renderings are `Agentic/Core/Explain.lean`'s; this prints them. -/
-def planCmd (path : String) : IO UInt32 :=
-  withProgram path fun raw p _ => do
+def planCmd (path : String) (ds : List (String × String)) : IO UInt32 :=
+  withProgram path ds fun raw p _ => do
     IO.println s!"plan: {path}"
     for l in Explain.planLines p do IO.println l
     for l in Explain.revisionLines raw do IO.println l
     return 0
 
 /-- `agent-cat cost`: what the program costs, without running it. -/
-def costCmd (path : String) : IO UInt32 :=
-  withProgram path fun _ p _ => do
+def costCmd (path : String) (ds : List (String × String)) : IO UInt32 :=
+  withProgram path ds fun _ p _ => do
     IO.println s!"cost: {path}"
     for l in Explain.costLines p do IO.println l
     return 0
@@ -230,6 +313,15 @@ def runCmd (path : String) (p : Plan [] Unit) (h : level p ≤ Level.branch) (o 
   let dir ← match o.scratch with
     | some d => pure d
     | none => mkScratchDir
+  -- …and every run is given something to act on, before the first question is
+  -- put. A workflow whose questions are about files and whose directory holds
+  -- none is a workflow every check passes and nothing happens in; that run was
+  -- measured, and `Agentic/Core/Artifact.lean` records it.
+  let seeded ← try
+      seedWorkspace o.workspace path dir
+    catch e =>
+      IO.eprintln s!"agent-cat: {e}"
+      IO.Process.exit 2
   let cfg : Acp.Config :=
     { adapter
     , args := o.adapterArgs
@@ -248,6 +340,10 @@ def runCmd (path : String) (p : Plan [] Unit) (h : level p ≤ Level.branch) (o 
       -- it.
       freshSessionPerQuestion := !stubbed
     , retries := if stubbed then 1 else 2
+      -- What the author's model names mean to *this* adapter. Empty unless
+      -- `--model NAME=REAL` was given, and empty is the identity
+      -- (`Exec.Settings.aliasFor_nil`).
+    , modelAliases := o.modelAliases
     , log := fun msg => do
         warnings.modify (· + 1)
         unless o.quiet do IO.println s!"warn {msg}"
@@ -256,6 +352,10 @@ def runCmd (path : String) (p : Plan [] Unit) (h : level p ≤ Level.branch) (o 
     unless o.quiet do
       let argsShown := String.intercalate " " cfg.args.toList
       IO.println s!"run: {path} against {o.adapter} {argsShown} (cwd {dir})"
+      -- What the agent can see, named and sized. `Seeded.render_ne_nil`: this
+      -- always says something, so an empty directory is a stated fact and not
+      -- an omission.
+      for l in seeded.render do IO.println l
       -- What the analysis quoted, before anything is spent. The check after the
       -- run is against these very numbers.
       for l in Explain.costLines p do IO.println l
@@ -288,8 +388,9 @@ def runCmd (path : String) (p : Plan [] Unit) (h : level p ≤ Level.branch) (o 
 /-- The three subcommands, `--help`, and a bare invocation that prints the usage.
 
 A subcommand and a program, and then whatever the subcommand takes: `plan` and
-`cost` take nothing, because there is nothing about a rendering to configure, and
-an option handed to one is a mistake reported rather than ignored. -/
+`cost` take `--define` and nothing else, because a rendering has nothing to
+configure but the program it renders, and an option handed to one is a mistake
+reported rather than ignored. -/
 def main (argv : List String) : IO UInt32 := do
   match argv with
   | [] =>
@@ -301,18 +402,26 @@ def main (argv : List String) : IO UInt32 := do
   | cmd :: path :: rest =>
     match cmd with
     | "plan" =>
-      if rest.isEmpty then planCmd path
-      else do IO.eprintln s!"agent-cat: plan takes no options: {rest}"; return 1
+      match parseDefineOptions rest with
+      | .error m => do
+        IO.eprintln s!"agent-cat: {m}"
+        IO.eprint usage
+        return 1
+      | .ok ds => planCmd path ds
     | "cost" =>
-      if rest.isEmpty then costCmd path
-      else do IO.eprintln s!"agent-cat: cost takes no options: {rest}"; return 1
+      match parseDefineOptions rest with
+      | .error m => do
+        IO.eprintln s!"agent-cat: {m}"
+        IO.eprint usage
+        return 1
+      | .ok ds => costCmd path ds
     | "run" =>
       match parseOptions rest with
       | .error m => do
         IO.eprintln s!"agent-cat: {m}"
         IO.eprint usage
         return 1
-      | .ok o => withProgram path fun _ p h => runCmd path p h o
+      | .ok o => withProgram path o.defines fun _ p h => runCmd path p h o
     | _ => do
       IO.eprintln s!"agent-cat: unknown subcommand `{cmd}`"
       IO.eprint usage

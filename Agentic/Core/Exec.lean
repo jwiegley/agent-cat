@@ -895,6 +895,23 @@ structure Settings where
   `configId := "model"`. On by default because both real adapters implement it;
   refusal falls back to the header exactly as the mode axis does. -/
   useConfigOptionModel : Bool := true
+  /-- What an author's model name means to *this* adapter, given as pairs.
+
+  **Why an alias is a separate thing from resolution.** `Acp.resolveValue`
+  matches an author's name against the values the adapter advertises, and it is
+  deliberately unable to invent one (`Acp.resolveValue_value_mem`). The flagship
+  writes `model "deep"`, and claude advertises `default`, `opus[1m]`,
+  `claude-fable-5`, `sonnet` and `haiku`: `deep` is not a misspelling of any of
+  them, it is a *role*, and no matcher can bridge a role to a product name
+  without guessing. So the bridge is stated by whoever knows it —
+  `--model deep=opus` on the command line — and the guess is never made.
+
+  An alias is resolved before matching, not instead of it, so `deep=opus` still
+  goes through `resolveValue` and comes out as the advertised `opus[1m]`.
+
+  Empty by default, and the empty list is the identity (`aliasFor_nil`), so a
+  run that gives no alias behaves exactly as it did. -/
+  modelAliases : List (String × String) := []
   /-- Open a **new session** (`session/new`) before every question the adapter
   is asked.
 
@@ -943,6 +960,88 @@ def askPersonStdin (who : String) (text : String) : IO String := do
   let line ← (← IO.getStdin).getLine
   return line.trimAscii.toString
 
+/-- `[[st.aliasFor m]]` = what this runtime calls the author's model `m`, or `m`
+itself where it has nothing to say. -/
+def Settings.aliasFor (st : Settings) (m : String) : String :=
+  match st.modelAliases.find? (fun a => a.1 == m) with
+  | some a => a.2
+  | none => m
+
+/-- **No aliases is no change.** The default path is the identity on the name
+the author wrote, so every run that gives no `--model NAME=REAL` sends what it
+sent before. -/
+theorem Settings.aliasFor_nil (st : Settings) (h : st.modelAliases = []) (m : String) :
+    st.aliasFor m = m := by simp [Settings.aliasFor, h]
+
+/-- Say something once per connection, under `key`. -/
+private def logOnce (st : Settings) (conn : Conn) (key : String) (msg : String) : IO Unit := do
+  if ← conn.firstWarning key then st.log msg
+
+/-- Put the model axis to the adapter as `session/set_config_option`, against
+the values the adapter itself advertised.
+
+**The failure this replaces.** A live run of the flagship against claude printed
+`warn session/set_config_option model='deep' was refused (Invalid value for
+config option model: deep); the model axis goes in the prompt header instead`,
+forty-odd times, and nothing said what claude *would* have taken. The adapter
+publishes exactly that at `session/new`, in `configOptions`; this reads it
+(`Conn.optionValues`) and resolves against it (`Acp.resolveValue`), so an author
+who writes a name the adapter spells differently gets the model they asked for
+and an author who writes a name it does not have is told the list.
+
+**Four outcomes, and each one is honest about what happened.**
+
+* The adapter published no catalogue at all — codex — so there is nothing to
+  resolve against and the value goes as written, which is what this code did
+  before. "It did not say" is not "it said no".
+* The name resolves. It is sent; if the match was not literal, the run is told
+  once which real model it got, because a run that quietly substituted a model
+  would be spending the owner's money on an addressee they did not name.
+* The name is ambiguous, or matches nothing. Nothing is sent, the fallback is
+  the prompt header exactly as before, and the warning **names the values the
+  adapter advertised** — once per connection, not once per question.
+* The call is sent and the adapter refuses it anyway. The header again, and the
+  adapter's own error quoted.
+
+The header fallback is honest — the addressee is still told which model was
+asked for, in words — but it must not be silent, because a silent fallback is
+how the axis came to mean nothing at all. -/
+def selectModel (st : Settings) (conn : Conn) (m : String) : IO Bool := do
+  let want := st.aliasFor m
+  let said := if want == m then s!"model='{m}'" else s!"model='{m}' (aliased to '{want}')"
+  let advertised ← conn.optionValues "model"
+  let send (v : String) : IO Bool := do
+    match ← conn.setConfigOption "model" v with
+    | .ok _ => pure true
+    | .error e => do
+      logOnce st conn s!"model:refused:{m}"
+        s!"session/set_config_option {said} was refused ({e.compress}); \
+           the model axis goes in the prompt header instead"
+      pure false
+  if advertised.isEmpty then
+    -- Nothing published: send it as written, as this did before there was a
+    -- catalogue to read.
+    send want
+  else
+    match Acp.resolveValue advertised want with
+    | .exact v => send v
+    | .fuzzy v how => do
+      logOnce st conn s!"model:resolved:{m}"
+        s!"the model axis {said} resolved {how} to '{v}', which is what this run is asking"
+      send v
+    | .ambiguous cs => do
+      logOnce st conn s!"model:ambiguous:{m}"
+        s!"the model axis {said} names {cs.length} of the models \
+           '{conn.prog}' offers ({String.intercalate ", " cs}); an ambiguous choice is not \
+           made for you, so the model axis goes in the prompt header instead"
+      pure false
+    | .unknown => do
+      logOnce st conn s!"model:unknown:{m}"
+        s!"the model axis {said} is none of the models '{conn.prog}' offers \
+           ({String.intercalate ", " advertised}); name one of those, or map yours onto one \
+           with --model {m}=NAME. Until then the model axis goes in the prompt header instead"
+      pure false
+
 /-- Send both axes of the scope over the protocol, where the adapter accepts
 them, and report which ones it took. A refusal is a *value* from
 `Conn.setMode`/`Conn.setConfigOption`, not an exception, and it is logged and
@@ -955,18 +1054,13 @@ def selectScope (st : Settings) (conn : Conn) {c : Code} (q : Q c) : IO Selected
       match ← conn.setMode m with
       | .ok _ => pure true
       | .error e => do
-        st.log s!"session/set_mode '{m}' was refused ({e.compress}); \
-                  the mode axis goes in the prompt header instead"
+        logOnce st conn s!"mode:refused:{m}"
+          s!"session/set_mode '{m}' was refused ({e.compress}); \
+             the mode axis goes in the prompt header instead"
         pure false
     | _, _ => pure false
   let model ← match modelAxis q, st.useConfigOptionModel with
-    | some m, true => do
-      match ← conn.setConfigOption "model" m with
-      | .ok _ => pure true
-      | .error e => do
-        st.log s!"session/set_config_option model='{m}' was refused ({e.compress}); \
-                  the model axis goes in the prompt header instead"
-        pure false
+    | some m, true => selectModel st conn m
     | _, _ => pure false
   return { mode, model }
 

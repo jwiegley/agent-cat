@@ -1,4 +1,5 @@
 import Agentic.Core.Mcp
+import Agentic.Core.DslFlagship
 
 /-!
 # The server, driven end to end over a scripted stream
@@ -23,7 +24,7 @@ Four scripts, and each checks something the code cannot claim on its own:
 
 1. **The handshake, the tool list, and `workflow_check`.** The cost this server
    quotes for the flagship is checked against the numbers
-   `Agentic/Core/Dsl.lean` *proves* about it — `minFold_flagship` (5),
+   `Agentic/Core/DslFlagship.lean` *proves* about it — `minFold_flagship` (5),
    `maxFold_flagship` (15) and `card_leaves_flagship` (9). A tool that
    miscomputed a price would disagree with a theorem here.
 2. **A whole run**, question by question, to the refuse path, whose bill

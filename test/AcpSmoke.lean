@@ -103,6 +103,27 @@ def checkSelection (conn : Conn) : IO Unit := do
   match ← conn.setMode "plan" with
   | .ok _ => IO.println "ok   session/set_mode"
   | .error e => throw <| IO.userError s!"FAIL session/set_mode: {e.compress}"
+  -- What the adapter published at `session/new`, read back — the thing the live
+  -- run against claude never looked at, and the reason `model='deep'` came back
+  -- `Invalid value for config option model: deep` with no list of what would
+  -- have worked.
+  let models ← conn.optionValues "model"
+  checkTrue "session/new's model catalogue was recorded" (models.length > 0)
+  checkTrue "…a value the adapter advertises resolves to itself"
+    (resolveValue models "reviewer" == .exact "reviewer")
+  checkTrue "…a case variant resolves to the advertised spelling"
+    (resolveValue models "REVIEWER" == .fuzzy "reviewer" "case-insensitively")
+  checkTrue "…a name the adapter never advertised resolves to nothing at all"
+    (resolveValue models "deeeep" == .unknown)
+  checkTrue "…and whatever does resolve is a value the adapter itself named"
+    (match (resolveValue models "stub").value? with
+     | some v => models.contains v
+     | none => true)
+  -- An option the adapter does not publish is not a refusal: `optionValues`
+  -- reads "it did not say" as the empty list, and `Exec.selectModel` sends the
+  -- value as written in that case, which is what keeps codex working.
+  check "an option the adapter never published reads as empty" "0"
+    (toString (← conn.optionValues "no-such-option").length)
   match ← conn.setConfigOption "model" "reviewer" with
   | .ok res =>
     checkTrue "session/set_config_option returns the updated catalogue"

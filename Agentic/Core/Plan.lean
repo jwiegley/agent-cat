@@ -75,7 +75,7 @@ in `test/DslSmoke.lean`.
 
 It is not free, and the price is paid in the kernel: reducing `Env.tail` now
 costs one β-step more, and the module that reduces the most of them,
-`Agentic/Core/Dsl.lean`, elaborates in 249 s where it took 178 s
+`Agentic/Core/DslFlagship.lean`, elaborates in 249 s where it took 178 s
 (`Agentic/Core/HardenPatch.lean`, 75 s, does not move). That is the trade — 40%
 on one module's proofs, against `2ⁿ` on every run. -/
 inductive Env : Ctx → Type where

@@ -12,8 +12,8 @@ a shortcut.** Neither pass recurses on a structurally smaller argument — a lex
 consumes a prefix of a character list and a parser consumes a prefix of a token
 list, and neither prefix is a subterm — so Lean would compile either as a
 well-founded recursion, and `WellFounded.fix` **does not reduce in the kernel**.
-`Agentic/Core/Dsl.lean` proves things about the flagship *by `decide`*, which
-means the kernel must evaluate `parseAndCheck` on a string; a well-founded
+`Agentic/Core/DslFlagship.lean` proves things about the flagship *by `decide`*,
+which means the kernel must evaluate `parseAndCheck` on a string; a well-founded
 parser would make every one of those theorems unprovable without
 `native_decide`, which is forbidden here because it would put
 `Lean.ofReduceBool` in the axiom set that `Agentic/Core/Certify.lean` pins.
@@ -21,8 +21,9 @@ Recursion on a budget is structural recursion on `Nat`, and it reduces.
 
 The budget is the input's length, and every step of both passes consumes at
 least one item, so the exhausted branch is unreachable. That it is unreachable
-is *not proved* — see the failed-morphism note in `Agentic/Core/Dsl.lean` — so
-it returns a diagnosis like any other failure rather than a `panic!`.
+is *not proved* — see the failed-morphism note in
+`Agentic/Core/DslFlagship.lean` — so it returns a diagnosis like any other
+failure rather than a `panic!`.
 
 `define` is expanded here, by textual substitution into prompt chunks, so the
 raw syntax the checker sees mentions only names a checker can resolve. Adjacent
@@ -408,8 +409,16 @@ private def parseBlock : Nat → List (String × Prompt) → List Tok →
       .error (unexpected ts
         "a statement (`let`) or a tail (`done`, `act`, `case`, `revising`)")
 
-/-- `{define}` — the macro preamble. -/
-private def parseDefines : Nat → List (String × Prompt) → List Tok →
+/-- `{define}` — the macro preamble, with a caller's overrides.
+
+An override *replaces the right-hand side of a `define` the program wrote*, at
+the point the program writes it, so a name means one thing throughout and later
+macros that mention it see the override. It does not introduce a name: a program
+that never wrote `define x` has no `x` to override, and `parseWith` refuses the
+attempt rather than quietly turning some `{x}` that meant a let-bound answer
+into a constant. -/
+private def parseDefines (ov : List (String × Prompt)) :
+    Nat → List (String × Prompt) → List Tok →
     Except CheckError (List (String × Prompt) × List Tok)
   | 0, defs, ts => .ok (defs, ts)
   | fuel + 1, defs, ts =>
@@ -418,20 +427,58 @@ private def parseDefines : Nat → List (String × Prompt) → List Tok →
       let (x, rest) ← expectIdent rest
       let rest ← expectPunct '=' rest
       let (pr, rest) ← expectStr rest
-      parseDefines fuel (defs ++ [(x, prompt defs pr)]) rest
+      let body := match ov.find? (fun o => o.1 == x) with
+        | some o => o.2
+        | none => prompt defs pr
+      parseDefines ov fuel (defs ++ [(x, body)]) rest
     | _ => .ok (defs, ts)
+
+/-- `[[parseWith ov s]]` = the raw syntax `s` writes when each `define` named in
+`ov` is given the words `ov` gives it, or the first thing in `s` that is not
+syntax.
+
+**A runtime parameter, and why it is one.** A program that hardcodes
+`define spec = "harden the parser"` can only ever be run against that
+specification; `--define spec="harden the CSV reader"` lets the same checked
+program name a real target. The substitution happens *at load time*, before the
+checker ever sees a term, so nothing downstream can tell an overridden program
+from one written that way — which is exactly the property that keeps every
+theorem about the language true of it.
+
+**The no-override path is not merely equivalent, it is the same function.**
+`parse` below is `parseWith []`, and `List.find?` on the empty list is `none`,
+so a run that overrides nothing takes the identical code path and builds the
+identical term (`parse_eq_parseWith_nil`). That is what makes the flagship's
+`decide +kernel` proofs unaffected by this feature's existence.
+
+**An override nobody asked for is an error.** A name the program does not define
+is a mistake — a typo, or a program that has moved on — and guessing what it
+was meant to say is the discipline this package refuses everywhere else, so it
+is reported with the name quoted. -/
+def parseWith (ov : List (String × Prompt)) (s : String) : Except CheckError Raw := do
+  let ts ← lex s
+  let (defs, rest) ← parseDefines ov (ts.length + 1) [] ts
+  match ov.find? (fun o => !defs.any (fun d => d.1 == o.1)) with
+  | some o =>
+    -- Pointed at the end of the preamble, which is where the missing `define`
+    -- would have had to be written.
+    .error ⟨posOf rest, s!"this program has no `define {o.1}` to override", o.1⟩
+  | none => do
+    let ts ← expectKw "workflow" rest
+    let ts ← expectPunct '{' ts
+    let (b, ts) ← parseBlock (ts.length + 1) defs ts
+    let ts ← expectPunct '}' ts
+    match ts with
+    | [] => .ok b
+    | _ => .error (unexpected ts "the end of the source after the workflow")
 
 /-- `[[parse s]]` = the raw syntax `s` writes, or the first thing in `s` that is
 not syntax. -/
-def parse (s : String) : Except CheckError Raw := do
-  let ts ← lex s
-  let (defs, ts) ← parseDefines (ts.length + 1) [] ts
-  let ts ← expectKw "workflow" ts
-  let ts ← expectPunct '{' ts
-  let (b, ts) ← parseBlock (ts.length + 1) defs ts
-  let ts ← expectPunct '}' ts
-  match ts with
-  | [] => .ok b
-  | _ => .error (unexpected ts "the end of the source after the workflow")
+def parse (s : String) : Except CheckError Raw := parseWith [] s
+
+/-- **Overriding nothing is parsing.** Stated rather than assumed, because every
+proved fact about the flagship is a fact about `parse` and this is what says the
+override machinery did not move it. -/
+theorem parse_eq_parseWith_nil (s : String) : parse s = parseWith [] s := rfl
 
 end Agentic.Core.Dsl

@@ -97,6 +97,17 @@ CLIs. Where the two disagree, both readings are handled.
   and not `configOptionId`, and *both* adapters implement it with a `model`
   option. Selecting a model is therefore a protocol operation after all, and
   `Conn.setConfigOption` is it.
+* **Which values `model` takes, re-measured.** Claude's `session/new` publishes
+  four `configOptions` — `mode`, `model`, `effort`, `agent` — each a `select`
+  with a `currentValue` and an `options` array of `{value, name, description}`.
+  For `model` the values were, verbatim: `default`, `opus[1m]`,
+  `claude-fable-5`, `sonnet`, `haiku`. Nothing there is `deep`, which is what a
+  live run of the flagship found out the hard way (`Invalid value for config
+  option model: deep`), and nothing there resembles it closely enough for any
+  matcher to bridge — which is why `Exec.Settings.modelAliases` exists and why
+  `resolveValue` below is forbidden to guess. Codex publishes no `configOptions`
+  at all, and `configCatalogue` reads that as "said nothing" rather than "said
+  no".
 * `session/set_model` — **does not exist**: claude answers `-32601`, and no such
   method is in the schema. It is deliberately absent here.
 * `session/cancel` — a notification; the outstanding `session/prompt` then
@@ -281,6 +292,143 @@ abbrev pipes : IO.Process.StdioConfig where
   stdout := .piped
   stderr := .inherit
 
+/-! ## What an adapter says it will accept, and what a scope asked for
+
+A scope names a model the *author* chose — `deep`, in the flagship — and an
+adapter accepts the values the *adapter* publishes. `session/new` publishes
+them, in `configOptions`, and the measured failure that makes this section exist
+is that nobody read it: a live run sent `model='deep'`, claude answered
+`Invalid value for config option model: deep`, and the axis fell silently back
+to a line in the prompt header.
+
+The two halves of the fix are separate on purpose. **Resolution** is pure, total
+and proved not to invent values (`resolveValue_value_mem`); it is the same
+discipline `agent-functor` applies to key lookup, where an ambiguous key is an
+error and never a guess. **Aliasing** is a caller's business and lives in
+`Exec.Settings`, because `deep` is not a misspelling of anything claude
+advertises — no amount of matching bridges it, and pretending otherwise would be
+the guess this refuses to make.
+-/
+
+/-- `[[Resolution]]` = what a requested value came to, among the values an
+adapter advertised for one config option.
+
+`ambiguous` is a constructor and not a silent first-match: two candidates mean
+the caller has not said which one they want, and answering anyway is how a
+configuration comes to mean something nobody chose. -/
+inductive Resolution where
+  /-- The adapter advertises exactly this value. -/
+  | exact (value : String)
+  /-- One advertised value matched, but not literally; `how` says in what way. -/
+  | fuzzy (value : String) (how : String)
+  /-- More than one advertised value matched, so none was chosen. -/
+  | ambiguous (candidates : List String)
+  /-- No advertised value matched. -/
+  | unknown
+  deriving DecidableEq, Repr, Inhabited
+
+/-- The value a resolution settled on, if it settled on one. -/
+def Resolution.value? : Resolution → Option String
+  | .exact v | .fuzzy v _ => some v
+  | .ambiguous _ | .unknown => none
+
+/-- Does `needle` occur in `hay`? `splitOn` cuts at every occurrence, so "more
+than one piece" is "at least one occurrence". Local rather than imported:
+`Agentic/Core/Artifact.lean`'s `occursIn` is the same function, and this module
+imports nothing above `Agentic.Core.Rpc` on purpose. -/
+private def infixOf (hay needle : String) : Bool := (hay.splitOn needle).length > 1
+
+/-- `[[resolveValue advertised want]]` = which advertised value `want` names.
+
+Four rungs, tried in order, and each one only accepted when it picks out exactly
+one candidate: literal equality, then case, then prefix, then substring. A rung
+that matches two or more stops the search with `ambiguous` rather than falling
+through to a looser rung, because a looser rung cannot make a choice the tighter
+one already showed to be underdetermined. -/
+def resolveValue (advertised : List String) (want : String) : Resolution :=
+  if advertised.contains want then .exact want else
+  match advertised.filter (fun v => v.toLower == want.toLower) with
+  | [v] => .fuzzy v "case-insensitively"
+  | cs@(_ :: _ :: _) => .ambiguous cs
+  | [] =>
+    match advertised.filter (fun v => v.toLower.startsWith want.toLower) with
+    | [v] => .fuzzy v "as a unique prefix"
+    | cs@(_ :: _ :: _) => .ambiguous cs
+    | [] =>
+      match advertised.filter (fun v => infixOf v.toLower want.toLower) with
+      | [v] => .fuzzy v "as a unique substring"
+      | cs@(_ :: _ :: _) => .ambiguous cs
+      | [] => .unknown
+
+/-- A singleton `filter` names a member of the list it filtered: the one step
+every rung of `resolveValue` takes. -/
+private theorem mem_of_filter_eq_singleton {p : String → Bool} {l : List String} {v : String}
+    (h : l.filter p = [v]) : v ∈ l :=
+  (List.mem_filter.mp (by rw [h]; exact List.mem_singleton_self v)).1
+
+/-- **Resolution never invents a value.** Whatever comes out of `resolveValue`
+is a value the adapter itself advertised — so a successful resolution cannot be
+the source of an `Invalid value for config option` on the next call. -/
+theorem resolveValue_value_mem (advertised : List String) (want v : String)
+    (h : (resolveValue advertised want).value? = some v) : v ∈ advertised := by
+  unfold resolveValue at h
+  split at h
+  · rename_i hc
+    simp only [Resolution.value?, Option.some.injEq] at h
+    subst h
+    simpa using hc
+  · split at h
+    · rename_i hf
+      simp only [Resolution.value?, Option.some.injEq] at h
+      subst h
+      exact mem_of_filter_eq_singleton hf
+    · simp [Resolution.value?] at h
+    · split at h
+      · rename_i hf
+        simp only [Resolution.value?, Option.some.injEq] at h
+        subst h
+        exact mem_of_filter_eq_singleton hf
+      · simp [Resolution.value?] at h
+      · split at h
+        · rename_i hf
+          simp only [Resolution.value?, Option.some.injEq] at h
+          subst h
+          exact mem_of_filter_eq_singleton hf
+        · simp [Resolution.value?] at h
+        · simp [Resolution.value?] at h
+
+/-- **An adapter that advertises nothing resolves nothing.** The case the caller
+must handle separately: codex publishes no `configOptions`, and a client that
+read this as "no model is acceptable" would refuse an axis the adapter would
+have taken. -/
+theorem resolveValue_nil (want : String) : resolveValue [] want = .unknown := rfl
+
+/-- **A value the adapter advertises resolves to itself, literally.** -/
+theorem resolveValue_exact (advertised : List String) (want : String)
+    (h : want ∈ advertised) : resolveValue advertised want = .exact want := by
+  have hc : advertised.contains want = true := by simpa using h
+  unfold resolveValue
+  rw [if_pos hc]
+
+/-- `[[configCatalogue res]]` = the `configOptions` of a `session/new` or
+`session/set_config_option` result, as option id and the values it accepts.
+
+Total and forgiving: a result with no catalogue, an entry with no id, or an
+option with no enumerated values yields the empty list for that part rather than
+an error. An adapter is entitled not to publish a catalogue — codex does not —
+and "it did not say" must not be read as "it said no". -/
+def configCatalogue (res : Json) : List (String × List String) :=
+  match res.getObjVal? "configOptions" >>= Json.getArr? with
+  | .error _ => []
+  | .ok opts => opts.toList.filterMap fun o =>
+      match o.getObjVal? "id" >>= Json.getStr? with
+      | .error _ => none
+      | .ok id =>
+        let values := match o.getObjVal? "options" >>= Json.getArr? with
+          | .error _ => []
+          | .ok vs => vs.toList.filterMap fun v => (v.getObjVal? "value" >>= Json.getStr?).toOption
+        some (id, values)
+
 /-- `[[Conn]]` = a handle to one live answering process — the runtime's window
 onto a world.
 
@@ -302,6 +450,14 @@ structure Conn where
   nextId : IO.Ref Nat
   /-- The session opened by `Conn.newSession`, if one has been. -/
   sessionId : IO.Ref (Option String)
+  /-- What the adapter published at `session/new`: for each config option, the
+  values it says it will accept. Empty for an adapter that publishes no
+  catalogue, which is a fact about the adapter and not a refusal. -/
+  configValues : IO.Ref (List (String × List String))
+  /-- The keys a fallback has already been reported under, so that a run whose
+  every question carries the same unusable axis says so once and then gets on
+  with it. A warning repeated forty times is a warning nobody finishes reading. -/
+  warned : IO.Ref (List String)
 
 /-! ## How a turn ended -/
 
@@ -694,18 +850,42 @@ def handshake (conn : Conn) : IO Json := do
 /-- Open a session in `cfg.cwd` — made absolute, because the protocol requires
 an absolute path — and remember its id.
 
-Only `sessionId` is read. Claude also returns `modes` and `configOptions` (the
-mode and model catalogues) and codex returns a nonstandard `models`; a caller
-who wants either can have the whole result from `Conn.request`. -/
+`sessionId` is what the session *is*, and `configOptions` is recorded beside it
+because it is the only place an adapter says which values it will accept: the
+model axis is resolved against it (`Conn.optionValues`, `resolveValue`). Codex
+returns a nonstandard `models` and no `configOptions`, which `configCatalogue`
+reads as "published nothing"; a caller who wants the rest can have the whole
+result from `Conn.request`. -/
 def newSession (conn : Conn) : IO String := do
   let dir ← IO.FS.realPath conn.cfg.cwd
   let res ← conn.request "session/new" <| Json.mkObj
     [ ("cwd", Json.str dir.toString), ("mcpServers", Json.arr #[]) ]
+  conn.configValues.set (configCatalogue res)
   match res.getObjVal? "sessionId" >>= Json.getStr? with
   | .ok sid => conn.sessionId.set (some sid); return sid
   | .error e =>
     throw <| IO.userError
       s!"acp: session/new returned no sessionId ({e}): {Json.compress res}"
+
+/-- `[[conn.optionValues id]]` = the values the adapter published for config
+option `id`, or `[]` if it published none. -/
+def optionValues (conn : Conn) (configId : String) : IO (List String) := do
+  let cat ← conn.configValues.get
+  return match cat.find? (fun o => o.1 == configId) with
+    | some o => o.2
+    | none => []
+
+/-- `[[conn.firstWarning key]]` = is this the first time anything has asked
+about `key` on this connection? True once, false thereafter.
+
+A connection and not a session, deliberately: `freshSessionPerQuestion` opens a
+session per question, and an axis that a model cannot take is a fact about the
+adapter, so reporting it once per session would report it once per question. -/
+def firstWarning (conn : Conn) (key : String) : IO Bool := do
+  let seen ← conn.warned.get
+  if seen.contains key then return false
+  conn.warned.set (key :: seen)
+  return true
 
 /-- The session id, or an error naming the call that was skipped. -/
 private def theSession (conn : Conn) : IO String := do
@@ -799,7 +979,9 @@ def connect (cfg : Config := {}) : IO Conn := do
     { toStdioConfig := pipes, cmd := prog, args := baseArgs ++ cfg.args, cwd := some cfg.cwd }
   let nextId ← IO.mkRef 0
   let sessionId ← IO.mkRef none
-  let conn : Conn := { cfg, prog, child, nextId, sessionId }
+  let configValues ← IO.mkRef []
+  let warned ← IO.mkRef []
+  let conn : Conn := { cfg, prog, child, nextId, sessionId, configValues, warned }
   try
     discard <| conn.handshake
     discard <| conn.newSession

@@ -91,7 +91,7 @@ import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_SERVER = os.path.join(ROOT, ".lake", "build", "bin", "workflow_mcp")
-DEFAULT_SOURCE = os.path.join(ROOT, "examples", "harden.wf")
+DEFAULT_SOURCE = os.path.join(ROOT, "example", "harden.wf")
 
 # The bills a run of the flagship can actually present: 5 questions to the first
 # verdict plus a consent (6) plus an act (7), and the same again with one

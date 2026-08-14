@@ -18,7 +18,7 @@ the requirement that the checker be *structurally* recursive.
   alternative, `case (x : String) (arms : List (String × RawBlock))`, is a
   nested inductive and a checker recursing through it must be well-founded;
   `WellFounded.fix` does not reduce in the kernel, and the flagship theorems of
-  `Agentic/Core/Dsl.lean` need the checker to reduce. A *mutual* inductive
+  `Agentic/Core/DslFlagship.lean` need the checker to reduce. A *mutual* inductive
   `RawBlock`/`RawArms` avoids that and was measured: its `brecOn` turned a
   three-second kernel reduction into a three-minute one, because the
   course-of-values structure of a mutual family is rebuilt at every node. So
@@ -41,8 +41,8 @@ namespace Agentic.Core
 
 The one library function the DSL needs that the stack did not already have.
 `Agentic/Core/HardenPatch.lean` has the same function under `Harden.render`;
-`Agentic/Core/Dsl.lean` proves the two spellings are one function, by `rfl`, so
-nothing here is a second convention. -/
+`Agentic/Core/DslFlagship.lean` proves the two spellings are one function, by
+`rfl`, so nothing here is a second convention. -/
 
 namespace Verdict
 
@@ -57,7 +57,7 @@ construct.
 
 The projection is written out rather than taken from `Verdict.objections`
 because that name belongs to `Agentic/Core/Report.lean`, which imports the
-transport; a checker must not. `Agentic/Core/Dsl.lean` proves this is
+transport; a checker must not. `Agentic/Core/DslFlagship.lean` proves this is
 `Harden.render`, by `rfl`, so the three spellings are one function. -/
 def render (v : Verdict) : String :=
   String.intercalate "; " (if h : v = 0 then [] else FreeMonoid.toList (WithZero.unzero h))

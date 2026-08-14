@@ -1,4 +1,6 @@
 import Agentic.Core.Explain
+import Agentic.Core.Artifact
+import Agentic.Core.DslFlagship
 
 /-!
 # The command line, driven end to end
@@ -20,9 +22,10 @@ no proof in the package can make a statement about.
   `include_str "../../example/harden.wf"`, so the module and the file are one text
   by construction — at the moment the module is elaborated. Lake's build trace does
   not know about the `.wf` file, so an edit to it does not by itself rebuild
-  `Agentic/Core/Dsl.lean`, and a stale `.olean` would be a module compiled from a
-  text that is no longer on disk. That is checked here, by reading the file at run
-  time and comparing, which is the check `include_str` cannot arrange for itself.
+  `Agentic/Core/DslFlagship.lean`, and a stale `.olean` would be a module compiled
+  from a text that is no longer on disk. That is checked here, by reading the file
+  at run time and comparing, which is the check `include_str` cannot arrange for
+  itself.
 
 * **That the binary prints the library's folds and not its own.** The `plan` and
   `cost` output of the built `agent-cat`, line for line, against
@@ -46,6 +49,21 @@ no proof in the package can make a statement about.
   byte on stderr, and `2` from all three — which is what "one front end" means
   observationally. `Agentic/Core/Explain.lean` proves the front end is one
   function; this checks that all three subcommands go through it.
+
+* **That a run of the flagship has a parser to harden.** The failure that made
+  `Agentic/Core/Artifact.lean`'s workspace necessary was a run in an empty
+  directory that passed every check; the check against a repeat is that
+  `agent-cat run example/harden.wf`, with no flag at all, prints
+  `example/harden.d` and `parse.c` in its header. Also that `--no-workspace`
+  says the directory is empty rather than saying nothing, and that a symbolic
+  link in a workspace is refused with a reason instead of followed.
+
+* **That `--define` changes what it says it changes and nothing else.** Two
+  statements, and the second is the load-bearing one: overriding a `define` with
+  *the same words the program wrote* produces output byte-identical to giving no
+  option at all, so the no-override path is not merely similar to the pinned
+  program but equal to it. (The pinned text itself is checked above, where
+  `plan` is compared against `Explain.planLines Dsl.flagshipPlan`.)
 -/
 
 open Agentic.Core
@@ -123,9 +141,9 @@ def main : IO UInt32 := do
         s!"cli_smoke: no binary at '{cliPath}' — run `lake build` from the repository root first"
 
     -- 1. The file the module compiled in is the file on disk. `include_str` makes
-    -- them one text when `Agentic/Core/Dsl.lean` is elaborated; nothing makes lake
-    -- re-elaborate it when only the `.wf` changes, so this is where a stale
-    -- `.olean` is caught.
+    -- them one text when `Agentic/Core/DslFlagship.lean` is elaborated; nothing
+    -- makes lake re-elaborate it when only the `.wf` changes, so this is where a
+    -- stale `.olean` is caught.
     let onDisk ← IO.FS.readFile hardenPath
     check "example/harden.wf is byte-for-byte Dsl.flagshipSource"
       (toString Dsl.flagshipSource.length) (toString onDisk.length)
@@ -217,6 +235,82 @@ def main : IO UInt32 := do
     -- workflow here" is what both answers say.
     let missing ← cli ["plan", "example/there-is-no-such-file.wf"]
     check "a missing program exits 2" "2" (toString missing.code)
+
+    -- 6. The workspace. `agent-cat run example/harden.wf` with no flag must find
+    -- `example/harden.d/` beside the program and say so: the measured failure
+    -- this guards against is a run of the flagship in an empty directory, where
+    -- the author correctly refused to write a diff, the reviewers approved the
+    -- refusal, and every check printed `ok`.
+    check "the convention names the directory beside the program"
+      "example/harden.d" (conventionalWorkspace hardenPath)
+    let seedPath := "example/harden.d/parse.c"
+    checkTrue s!"{seedPath} is on disk"
+      (← System.FilePath.pathExists (System.FilePath.mk seedPath))
+    let seedText ← IO.FS.readFile seedPath
+    let seeded ← cli ["run", hardenPath]
+    check "a seeded run exits 0" "0" (toString seeded.code)
+    checkTrue "…and its header names the workspace the convention found"
+      (seeded.out.any fun l => (l.splitOn "workspace: example/harden.d").length > 1)
+    checkTrue "…and names the file the agent was given, with its size"
+      (seeded.out.any fun l =>
+        (l.splitOn "parse.c").length > 1 && (l.splitOn s!"{seedText.length} bytes").length > 1)
+
+    -- An empty run is a legitimate run and a silent one is not: `Seeded.render`
+    -- always emits a line (`Seeded.render_ne_nil`), and this is that line.
+    let bare ← cli ["run", hardenPath, "--no-workspace"]
+    check "--no-workspace exits 0" "0" (toString bare.code)
+    checkTrue "…and the header says the directory is empty, in words"
+      (bare.out.any fun l => (l.splitOn "starts in an empty directory").length > 1)
+
+    -- A symbolic link is refused with a reason rather than followed, and the
+    -- workspace itself is not written to. Built here with `ln` because Lean core
+    -- has no symlink call, which is also why this is a test and not a theorem.
+    let tmp := (← IO.Process.run { cmd := "mktemp", args := #["-d"] }).trimAscii.toString
+    IO.FS.writeFile (System.FilePath.mk tmp / "given.txt") "four\n"
+    discard <| IO.Process.run { cmd := "ln", args := #["-s", "/etc/hosts", tmp ++ "/link.txt"] }
+    let linked ← cli ["run", helloPath, "--workspace", tmp]
+    check "a workspace with a symlink in it still runs" "0" (toString linked.code)
+    checkTrue "…the ordinary file arrived"
+      (linked.out.any fun l =>
+        (l.splitOn "given.txt").length > 1 && (l.splitOn "5 bytes").length > 1)
+    checkTrue "…and the link was refused, with the reason given"
+      (linked.out.any fun l =>
+        (l.splitOn "refused link.txt").length > 1
+          && (l.splitOn "copied and not followed").length > 1)
+    checkTrue "…and the workspace itself still holds exactly what it held"
+      ((← listDir tmp).length == 2)
+
+    -- 7. Runtime parameters. The flagship's `spec` is the thing the whole
+    -- workflow is about, so this is the one `define` worth naming from outside.
+    let asWritten ← cli ["plan", hardenPath, "--define", "spec=harden the parser"]
+    check "--define with the program's own words exits 0" "0" (toString asWritten.code)
+    check "…and prints byte-for-byte what no --define prints"
+      (String.intercalate "\n" planRan.out) (String.intercalate "\n" asWritten.out)
+    let retargeted ← cli ["plan", hardenPath, "--define", "spec=harden the CSV reader"]
+    check "--define with other words exits 0" "0" (toString retargeted.code)
+    checkTrue "…and the plan now names the target the caller gave"
+      (retargeted.out.any fun l => (l.splitOn "harden the CSV reader").length > 1)
+    checkTrue "…and no longer the one the file wrote"
+      (retargeted.out.all fun l => (l.splitOn "harden the parser").length == 1)
+    let unknown ← cli ["cost", hardenPath, "--define", "nosuchmacro=x"]
+    check "--define of a name the program never defined exits 2" "2" (toString unknown.code)
+    checkTrue "…saying which name"
+      ((unknown.err.splitOn "no `define nosuchmacro` to override").length > 1)
+    -- …and a run option handed to `plan` is still a mistake, which is the half of
+    -- "plan takes only --define" that the line above does not check.
+    let misplaced ← cli ["plan", hardenPath, "--quiet"]
+    check "plan still refuses a run option" "1" (toString misplaced.code)
+
+    -- 8. The model axis. An alias is accepted and changes nothing against the
+    -- stub, which advertises `deep` itself: `Acp.resolveValue_exact` says a value
+    -- the adapter advertises resolves to itself, so the stub's runs are the runs
+    -- they were.
+    let aliased ← cli ["run", hardenPath, "--model", "deep=deep", "--quiet"]
+    check "--model NAME=REAL is accepted" "0" (toString aliased.code)
+    checkTrue s!"…and the run still bills {expectedApply}"
+      (aliased.out.any fun l => (l.splitOn s!"agent-cat: {expectedApply} consultations").length > 1)
+    let badPair ← cli ["run", hardenPath, "--model", "deep"]
+    check "…and --model without an `=` is refused" "1" (toString badPair.code)
 
     IO.println "cli smoke: all checks passed"
     return (0 : UInt32)

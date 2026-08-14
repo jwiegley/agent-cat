@@ -1,4 +1,4 @@
-import Agentic.Core.Dsl
+import Agentic.Core.DslFlagship
 
 /-!
 # The DSL, driven end to end
@@ -10,10 +10,10 @@ lake exe dsl_smoke
 ```
 
 `Agentic/Core/Dsl.lean` proves what is provable about the checker: that every
-program it accepts sits at or below the branch rung, and that the flagship's
-elaboration agrees with `Agentic/Core/HardenPatch.lean` in each of the four
-named worlds. This checks the two things no proof in the package makes a
-statement about.
+program it accepts sits at or below the branch rung.
+`Agentic/Core/DslFlagship.lean` proves that the flagship's elaboration agrees
+with `Agentic/Core/HardenPatch.lean` in each of the four named worlds. This
+checks the two things no proof in the package makes a statement about.
 
 * **The parser.** Kernel reduction of the lexer is quadratic in the character
   count — 189 characters in 2s, 369 in 6s, 729 in 20s, and the flagship's 1400
@@ -23,8 +23,8 @@ statement about.
   therefore checked *here*, by `decide` at run time on `DecidableEq Raw`, and
   `Dsl.parseAndCheck_flagship` is the theorem that takes it as a hypothesis. A
   drift between the source text and the raw syntax written out in
-  `Agentic/Core/Dsl.lean` fails this check and nothing else, which is exactly
-  where it should fail.
+  `Agentic/Core/DslFlagship.lean` fails this check and nothing else, which is
+  exactly where it should fail.
 
 * **Every rejection.** A checker is only as good as what it refuses, and what it
   refuses is not visible in the type of `check`: the type says an accepted
@@ -156,7 +156,7 @@ def main : IO UInt32 := do
   IO.println "dsl smoke: the parser against the flagship, and every rejection"
   try
     -- 1. The parser reads the flagship source as the raw syntax
-    -- `Agentic/Core/Dsl.lean` proves about. This is the hypothesis of
+    -- `Agentic/Core/DslFlagship.lean` proves about. This is the hypothesis of
     -- `Dsl.parseAndCheck_flagship`, and the only thing in the DSL that is
     -- checked rather than proved.
     match Dsl.parse flagshipSource with
