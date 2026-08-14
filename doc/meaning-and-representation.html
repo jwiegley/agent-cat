@@ -3,151 +3,137 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>The Meaning and the Representation — agent-cat</title>
+<title>Meaning and Representation in an Agentic Workflow Calculus</title>
 <style>
   :root{
-    --ink:#1a1a1c; --ink-soft:#4a4a52; --paper:#fbfaf7; --rule:#e2ded4;
-    --accent:#7a4b2a; --accent-soft:#b98a5e; --blue:#26506e; --green:#2c5f45;
-    --red:#8a3227; --code-bg:#f4f2ec; --mark:#fdf6dd;
+    --bg:#14151a; --bg-raised:#1b1d24; --bg-code:#101216;
+    --ink:#d9d5cc; --ink-dim:#9a978f; --ink-bright:#f2efe8;
+    --rule:#2c2f38; --amber:#c9a227; --amber-dim:#8f7622;
+    --cyan:#6fb3c8; --green:#7fb069; --rose:#c97b7b;
   }
   *{box-sizing:border-box}
   html{-webkit-text-size-adjust:100%}
   body{
-    margin:0; background:var(--paper); color:var(--ink);
+    margin:0; background:var(--bg); color:var(--ink);
     font-family:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
-    font-size:18px; line-height:1.62;
+    font-size:18px; line-height:1.65;
   }
   .wrap{max-width:44rem; margin:0 auto; padding:4rem 1.5rem 8rem}
-  header.title{margin-bottom:3.5rem; border-bottom:2px solid var(--ink); padding-bottom:2rem}
+  header.title{margin-bottom:3.5rem; border-bottom:1px solid var(--rule); padding-bottom:2.2rem}
   header.title .eyebrow{
     font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
-    font-size:.72rem; letter-spacing:.18em; text-transform:uppercase;
-    color:var(--accent); margin-bottom:1.1rem;
+    font-size:.7rem; letter-spacing:.2em; text-transform:uppercase;
+    color:var(--amber); margin-bottom:1.2rem;
   }
-  h1{font-size:2.5rem; line-height:1.12; margin:0 0 1rem; font-weight:600; letter-spacing:-.01em}
-  .standfirst{font-size:1.16rem; color:var(--ink-soft); margin:0; font-style:italic}
+  h1{
+    font-size:2.4rem; line-height:1.14; margin:0 0 1.1rem;
+    font-weight:500; letter-spacing:-.01em; color:var(--ink-bright);
+  }
+  .standfirst{font-size:1.12rem; color:var(--ink-dim); margin:0; font-style:italic}
   h2{
-    font-size:1.55rem; margin:3.6rem 0 .3rem; font-weight:600; letter-spacing:-.005em;
-    padding-top:1.6rem; border-top:1px solid var(--rule);
+    font-size:1.5rem; margin:3.8rem 0 .4rem; font-weight:500; color:var(--ink-bright);
+    padding-top:1.7rem; border-top:1px solid var(--rule); letter-spacing:-.005em;
   }
   h2 .num{
     display:block; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-    font-size:.7rem; letter-spacing:.18em; color:var(--accent); text-transform:uppercase;
-    margin-bottom:.5rem; font-weight:400;
+    font-size:.68rem; letter-spacing:.2em; color:var(--amber); text-transform:uppercase;
+    margin-bottom:.55rem; font-weight:400;
   }
-  h3{font-size:1.1rem; margin:2.2rem 0 .6rem; font-weight:600; color:var(--blue)}
-  p{margin:1rem 0}
-  em.term{font-style:normal; font-weight:600; color:var(--accent)}
+  h3{font-size:1.06rem; margin:2.3rem 0 .6rem; font-weight:600; color:var(--cyan)}
+  p{margin:1.05rem 0}
   code,pre{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
-  code{font-size:.86em; background:var(--code-bg); padding:.12em .34em; border-radius:3px}
+  code{font-size:.85em; background:var(--bg-code); color:#cfd6df; padding:.12em .36em; border-radius:3px}
   pre{
-    background:var(--code-bg); border-left:3px solid var(--accent-soft);
-    padding:1.05rem 1.2rem; overflow-x:auto; font-size:.82rem; line-height:1.55;
-    margin:1.4rem 0; border-radius:0 4px 4px 0;
+    background:var(--bg-code); border:1px solid var(--rule); border-left:3px solid var(--amber-dim);
+    padding:1.05rem 1.2rem; overflow-x:auto; font-size:.8rem; line-height:1.6;
+    margin:1.5rem 0; border-radius:0 4px 4px 0; color:#cfd6df;
   }
-  pre code{background:none; padding:0; font-size:1em}
-  .kw{color:var(--blue); font-weight:600}
-  .cm{color:#7d7a70; font-style:italic}
-  .th{color:var(--green); font-weight:600}
+  pre code{background:none; padding:0; font-size:1em; color:inherit}
+  .kw{color:var(--cyan)} .cm{color:#6d7078; font-style:italic} .th{color:var(--green)}
   blockquote{
-    margin:1.6rem 0; padding:.2rem 0 .2rem 1.3rem; border-left:3px solid var(--rule);
-    color:var(--ink-soft); font-style:italic;
+    margin:1.8rem 0; padding:.3rem 0 .3rem 1.35rem; border-left:2px solid var(--amber-dim);
+    color:var(--ink-dim); font-style:italic;
   }
   .panel{
-    background:#fff; border:1px solid var(--rule); border-radius:6px;
-    padding:1.3rem 1.5rem; margin:1.8rem 0;
-    box-shadow:0 1px 2px rgba(0,0,0,.03);
+    background:var(--bg-raised); border:1px solid var(--rule); border-radius:5px;
+    padding:1.3rem 1.5rem; margin:1.9rem 0;
   }
   .panel h4{
-    margin:0 0 .7rem; font-size:.72rem; letter-spacing:.15em; text-transform:uppercase;
-    font-family:ui-monospace,Menlo,monospace; color:var(--accent); font-weight:600;
+    margin:0 0 .75rem; font-size:.68rem; letter-spacing:.16em; text-transform:uppercase;
+    font-family:ui-monospace,Menlo,monospace; color:var(--amber); font-weight:600;
   }
-  .panel.warn{border-left:4px solid var(--red)}
-  .panel.warn h4{color:var(--red)}
-  .panel.good{border-left:4px solid var(--green)}
-  .panel.good h4{color:var(--green)}
   .panel p:first-of-type{margin-top:0} .panel p:last-child{margin-bottom:0}
-  table{width:100%; border-collapse:collapse; margin:1.6rem 0; font-size:.9rem}
-  th,td{text-align:left; padding:.55rem .6rem; border-bottom:1px solid var(--rule); vertical-align:top}
+  .panel pre{margin:1rem 0; background:#0c0e12}
+  table{width:100%; border-collapse:collapse; margin:1.7rem 0; font-size:.89rem}
+  th,td{text-align:left; padding:.6rem .65rem; border-bottom:1px solid var(--rule); vertical-align:top}
   th{
-    font-family:ui-monospace,Menlo,monospace; font-size:.68rem; letter-spacing:.12em;
-    text-transform:uppercase; color:var(--accent); font-weight:600; border-bottom:2px solid var(--rule);
+    font-family:ui-monospace,Menlo,monospace; font-size:.66rem; letter-spacing:.13em;
+    text-transform:uppercase; color:var(--amber); font-weight:600;
   }
   td code{font-size:.82em}
   .diagram{
-    margin:2.2rem 0; padding:1.6rem 1rem; background:#fff; border:1px solid var(--rule);
-    border-radius:6px; overflow-x:auto;
+    margin:2.3rem 0; padding:1.7rem 1.1rem; background:var(--bg-raised);
+    border:1px solid var(--rule); border-radius:5px; overflow-x:auto;
   }
   .diagram pre{
-    background:none; border:none; padding:0; margin:0; font-size:.78rem; line-height:1.5;
-    color:var(--ink); white-space:pre;
+    background:none; border:none; padding:0; margin:0; font-size:.76rem;
+    line-height:1.55; color:var(--ink); white-space:pre;
   }
   .lede::first-letter{
-    float:left; font-size:3.3rem; line-height:.82; padding:.16em .09em 0 0; color:var(--accent); font-weight:600;
+    float:left; font-size:3.2rem; line-height:.84; padding:.16em .1em 0 0;
+    color:var(--amber); font-weight:600;
   }
-  mark{background:var(--mark); padding:.05em .2em}
-  .src{
-    font-family:ui-monospace,Menlo,monospace; font-size:.72rem; color:var(--ink-soft);
-    display:block; margin-top:.5rem;
-  }
-  hr.thin{border:none; border-top:1px solid var(--rule); margin:2.6rem 0}
+  mark{background:rgba(201,162,39,.18); color:var(--ink-bright); padding:.05em .25em; border-radius:2px}
   footer{
-    margin-top:4rem; padding-top:1.6rem; border-top:2px solid var(--ink);
-    font-size:.85rem; color:var(--ink-soft);
+    margin-top:4.2rem; padding-top:1.7rem; border-top:1px solid var(--rule);
+    font-size:.84rem; color:var(--ink-dim);
   }
-  ul,ol{margin:1rem 0; padding-left:1.4rem}
-  li{margin:.45rem 0}
-  .lead-in{font-variant:small-caps; letter-spacing:.03em; font-weight:600; color:var(--ink)}
-  @media (max-width:640px){ body{font-size:16.5px} .wrap{padding:2.5rem 1.1rem 5rem} h1{font-size:2rem} }
+  ul,ol{margin:1.05rem 0; padding-left:1.45rem}
+  li{margin:.5rem 0}
+  .cite{color:var(--ink-dim); font-style:normal}
+  @media (max-width:640px){
+    body{font-size:16.5px} .wrap{padding:2.6rem 1.1rem 5rem} h1{font-size:1.95rem}
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
 
 <header class="title">
-  <div class="eyebrow">agent-cat · denotational design · Lean 4 + Mathlib</div>
-  <h1>The Meaning and the Representation</h1>
-  <p class="standfirst">What an agentic workflow <em>is</em> as a mathematical object, what we actually write down and run, and the theorems that hold the two together.</p>
+  <div class="eyebrow">agent-cat · a denotational account · Lean 4 with Mathlib</div>
+  <h1>Meaning and Representation in an Agentic Workflow Calculus</h1>
+  <p class="standfirst">What a workflow denotes, what is written down and executed in its place, and the theorems that bind the second to the first.</p>
 </header>
 
-<p class="lede">There are two objects in this design and it is important never to confuse them. The first is a <em class="term">meaning</em>: a mathematical thing that exists whether or not any computer runs, chosen for how well it explains the domain and not for how well it executes. The second is a <em class="term">representation</em>: a finite piece of syntax we type into a file, analyse offline, and hand to an interpreter that talks to a real model over a socket. Between them runs a single function, and the whole discipline consists of proving that every operation on the second commutes with that function into the first.</p>
+<p class="lede">This document describes a library in two layers and the function that joins them. The first layer is a meaning: a mathematical object chosen for how faithfully it explains the domain, without regard for whether it can be computed. The second is a representation: a finite syntax that is written by hand, analysed before it runs, and interpreted against a live language model over a socket. The discipline consists of proving that every operation of the second commutes with the function into the first, so that a workflow value may be treated as being its meaning.</p>
 
-<p>The asymmetry is the doctrine, in Conal Elliott's words: <em>meaning constrains implementation; implementation never constrains meaning.</em> What follows is the state of that construction as it now stands in <code>~/src/agent-cat</code> — 7,853 lines of Lean across twelve modules, 419 theorems, zero <code>sorry</code>, and a demo that drives Claude Code over ACP and produces a certificate the kernel checks.</p>
+<p>The order of dependence runs one way and never the other: meaning constrains implementation, and implementation does not constrain meaning <span class="cite">(Elliott, <em>Denotational Design with Type Class Morphisms</em>, 2009)</span>. The account below covers the meaning space, the representation, the relation between them, the analyses the representation supports, the runtime that executes it, and the boundary at which proof gives way to stated assumption.</p>
 
-<h2><span class="num">Part I</span> The meaning: worlds and dialogues</h2>
+<h2><span class="num">Part I</span> The meaning</h2>
 
-<p>Step one of the method is a sentence in the domain's own words, before any type: <em>a workflow puts questions to things that answer — models, tools, people — and uses what comes back to decide what to ask next.</em> Step two is the question that shapes everything: <strong>a workflow is a representation of <em>what</em> mathematical object?</strong></p>
+<p>The design begins with a sentence in the vocabulary of the domain rather than with a type: a workflow puts questions to parties that answer — models, tools, and people — and uses the replies to determine what to ask next. Two mathematical objects answer that sentence. The first is the space in which answers live; the second is the shape of a consultation.</p>
 
-<h3>The world</h3>
+<h3>Worlds</h3>
 
-<p>Everything hangs on one modelling decision, and it is the decision our first attempt got wrong. A <em class="term">world</em> is not a log, not a sequence of events, not a state machine. It is a <strong>total answer sheet</strong>: a function that has an answer ready for every question that could possibly be put.</p>
+<p>A <em>world</em> is a total answer sheet: a function that holds a reply ready for every question that could be put.</p>
 
 <pre><code><span class="kw">abbrev</span> Ω : Type := (c : Code) → Q c → El c
 <span class="cm">-- Agentic/Core/World.lean:47</span></code></pre>
 
-<p><code>Code</code> is the small closed universe of answer kinds — <code>text</code>, <code>verdict</code>, <code>flag</code>, <code>ack</code> — and <code>El</code> sends each to what an addressee can say: <code>String</code>, <code>Verdict</code>, <code>Bool</code>, <code>Unit</code>. A question <code>Q c</code> carries its addressee, its standing scope, its words, and a draw index. Because a world is a <em>function of the question</em>, three domain facts stop being features and become theorems:</p>
+<p><code>Code</code> is a small closed universe of answer kinds — <code>text</code>, <code>verdict</code>, <code>flag</code>, and <code>ack</code> — and <code>El</code> assigns to each the type of what an addressee may say: <code>String</code>, <code>Verdict</code>, <code>Bool</code>, and <code>Unit</code> respectively <span class="cite">(Question.lean:215, :228)</span>. A question <code>Q c</code> records its addressee, the standing conditions under which it is put, its words, and a draw index <span class="cite">(Question.lean:263)</span>. A verdict is an element of <code>WithZero (FreeMonoid Objection)</code>, so that approval is the monoid unit, refusal is the absorbing zero, and the combination of several reviewers' verdicts is a product whose laws come from the standard library rather than from a bespoke proof.
 
-<ul>
-  <li><strong>Asking the same question twice gives the same answer</strong> — so <em>sharing costs nothing to state</em>. There are no labels, no keys, no <code>share</code> combinator anywhere in the library. Sharing a style guide between two reviewers is a variable used twice.</li>
-  <li><strong>Caching is not an optimisation</strong>. Memoisation is how the runtime <em>constructs</em> the world the semantics quantifies over — the interpreter's answer table <em>is</em> a finite world.</li>
-  <li><strong>Deliberate resampling must be a different question</strong>, which is what the <code>draw</code> index is for. Best-of-five is five questions, not one question asked five times.</li>
-</ul>
+<p>Because a world is a function of the question, three properties of the domain become consequences rather than features. Repetition is identity: putting the same question twice yields the same answer, so sharing one consultation among several consumers requires no label, no key, and no dedicated combinator. Memoisation is not an optimisation but the manner in which a runtime constructs the world the semantics quantifies over. Deliberate resampling is a different question, which is the office of the draw index; a best-of-five is five questions rather than one question asked five times.</p>
 
-<div class="panel warn">
-  <h4>The failed morphism that fixed the design</h4>
-  <p>Our previous specification indexed worlds by <em>positions in the syntax tree</em> — inherited, we later established, from an interpreter's node-ids in a Haskell codebase we had studied first. Every unresolved problem in that library traced to it: label collisions kept honest by a docstring, a quotient that could not finish, two meaning functions that contradicted each other. Re-deriving from the domain rather than the codebase produced <code>Ω</code> above, and the problems did not get solved — they ceased to exist.</p>
-</div>
+<h3>Dialogues</h3>
 
-<h3>The dialogue</h3>
-
-<p>A workflow's meaning cannot be merely <code>Ω → A</code>. That collapses too much: <code>ask q</code> then ignore the answer and <code>ask q'</code> would mean the same as <code>ask q'</code> alone, and no compositional cost analysis can exist over such a meaning. What the domain needs is the pair <em>(what you end up with, what you consulted to get there)</em> — and the solved form of that pair is a tree:</p>
+<p>A workflow cannot denote a bare function from worlds to answers. Such a reading identifies too much: a plan that asks a question, discards the reply, and then asks a second would denote what the second denotes alone, and no compositional account of cost could be built over it. What the domain requires is the pair of the eventual answer and the record of what was consulted to reach it, coherently indexed by the world. The solved form of that pair is a tree.</p>
 
 <pre><code><span class="kw">inductive</span> Dlg (A : Type) : Type <span class="kw">where</span>
-  | done : A → Dlg A                                <span class="cm">-- the dialogue is over</span>
-  | ask  : (c : Code) → Q c → (El c → Dlg A) → Dlg A <span class="cm">-- put this, continue with whatever comes back</span>
+  | done : A → Dlg A                                 <span class="cm">-- the consultation is complete</span>
+  | ask  : (c : Code) → Q c → (El c → Dlg A) → Dlg A  <span class="cm">-- put this, and continue from the reply</span>
 <span class="cm">-- Agentic/Core/Dlg.lean:50</span></code></pre>
 
-<p>This is the free monad on the question signature — in the semantics literature, Escardó's <em>dialogue</em>; in type theory, a W-type. It is not a data structure chosen for convenience; it is what "a computation that consults an oracle" <em>is</em>. Two folds read it, and together they are the meaning:</p>
+<p>This is the free monad on the question signature, known in the semantics literature as the dialogue construction <span class="cite">(Escardó, <em>Continuity of Gödel's system T definable functionals</em>)</span> and in type theory as a W-type. Two folds read it, and the pair of them is the meaning:</p>
 
 <pre><code><span class="kw">def</span> run (ω : Ω) : Dlg A → A
   | .done a    => a
@@ -155,87 +141,84 @@
 
 <span class="kw">def</span> trace (ω : Ω) : Dlg A → Trace
   | .done _    => []
-  | .ask c q f => ⟨c, q, ω c q⟩ :: trace ω (f (ω c q))</code></pre>
+  | .ask c q f => ⟨c, q, ω c q⟩ :: trace ω (f (ω c q))
+<span class="cm">-- Agentic/Core/Dlg.lean:135, :146</span></code></pre>
 
-<p>The transcript lives <em>inside the meaning</em>, which is what lets a sentence like "in every world where the owner says no, the apply question is never put" be a mathematical statement rather than a remark about logging. And both folds are monad morphisms, proved:</p>
+<p>The transcript resides within the meaning rather than beside it in a log. That placement is consequential: it is what permits a sentence such as <em>in every world in which the owner declines, the apply question is never put</em> to be a proposition about the denotation. Both folds are monad morphisms, and both statements are proved:</p>
 
 <pre><code><span class="th">theorem</span> run_bind   : run ω (p >>= k) = run ω (k (run ω p))
 <span class="th">theorem</span> trace_bind : trace ω (p >>= k) = trace ω p ++ trace ω (k (run ω p))
 <span class="cm">-- axioms: none</span></code></pre>
 
-<h3>Equality, and a lemma that turned out false</h3>
+<h3>Equality</h3>
 
-<p>The kernel we synthesised claimed a <em>Forcing Lemma</em>: that equality of dialogue trees coincides with agreement of <code>(run, trace)</code> in every world. We tried to prove it and could not — because it is false, and the refutation is compiled (<code>Dlg.not_forcing</code>): two structurally different trees can agree in every world when a question is asked twice and the second answer is ignored. So semantic equality is <em>defined</em> as the kernel of the meaning,</p>
+<p>Structural equality on <code>Dlg</code> is strictly finer than agreement of meaning: two trees that differ in shape may agree in <code>run</code> and in <code>trace</code> in every world, and a compiled refutation records the fact. Semantic equality is therefore defined as the kernel of the meaning,</p>
 
 <pre><code>Obs p p'  ↔  ∀ ω, run ω p = run ω p' ∧ trace ω p = trace ω p'</code></pre>
 
-<p>and <code>Obs.bind_congr</code> — congruence, the thing our earlier quotient-based design had to prove clause by clause and never finished — falls out with <mark>no axioms at all</mark>. A failed morphism is not a setback in this method. It is the most informative output it produces.</p>
+<p>from which congruence follows directly and without axioms <span class="cite">(<code>Obs.bind_congr</code>)</span>. The benefit of this arrangement is that no quotient type is required and the carrier remains computable; the trade-off is that <code>Obs</code> must be written explicitly in the statement of any theorem that compares two workflows, since the ambient equality of the type is not the equality of the domain.</p>
 
-<h2><span class="num">Part II</span> The representation: plans</h2>
+<h2><span class="num">Part II</span> The representation</h2>
 
-<p>The meaning is uncomputable in the ways that matter — a <code>Dlg</code>'s continuation is a Lean function from an infinite answer type, so you cannot look inside it, enumerate its branches, or price it. That is exactly right for a specification and useless for a tool. The representation exists to be <em>looked at</em>.</p>
+<p>A meaning is uncomputable in the respects that matter to a tool: the continuation of a dialogue is a function from an answer type that is not finite, so its branches cannot be enumerated, its questions cannot be listed, and its cost cannot be priced. This is the correct posture for a specification and an unusable one for an artefact. The representation exists in order to be examined.</p>
 
 <pre><code><span class="kw">inductive</span> Plan : Ctx → Type → Type 1 <span class="kw">where</span>
-  | ret  (e : Expr Γ A)                                             <span class="cm">-- a pure function of what is known</span>
-  | askC (c) (q : Q c)             (k : Plan (c :: Γ) A)            <span class="cm">-- a closed question</span>
-  | ask  (c) (s : Q.Shape c) (e : Expr Γ String) (k : Plan (c :: Γ) A) <span class="cm">-- words built from earlier answers</span>
-  | case (e : Expr Γ T) (arms : T → Plan Γ A)  [FinEnum T]          <span class="cm">-- finite branching, every arm present</span>
-  | dyn  (e : Expr Γ (El c)) (f : El c → Plan Γ A)                  <span class="cm">-- quarantined: a plan from an unbounded answer</span>
+  | ret  (e : Expr Γ A)                                                 <span class="cm">-- a pure function of what is known</span>
+  | askC (c) (q : Q c)                          (k : Plan (c :: Γ) A)   <span class="cm">-- a closed question</span>
+  | ask  (c) (s : Q.Shape c) (e : Expr Γ String) (k : Plan (c :: Γ) A)  <span class="cm">-- words built from earlier answers</span>
+  | case (e : Expr Γ T) (arms : T → Plan Γ A) [FinEnum T]               <span class="cm">-- finite branching, every arm present</span>
+  | dyn  (e : Expr Γ (El c)) (f : El c → Plan Γ A)                      <span class="cm">-- a plan computed from an unbounded answer</span>
 <span class="cm">-- Agentic/Core/Plan.lean:197</span></code></pre>
 
-<p>Three design decisions in this type are worth naming, because each was forced by something that failed first.</p>
+<p>Three properties of this type carry the weight, and each is a deliberate trade of one capability for another.</p>
 
-<h3>It is first-order, with binders</h3>
+<h3>First order, with binders</h3>
 
-<p>A point-free arrow calculus (<code>&gt;&gt;&gt;</code>, <code>&amp;&amp;&amp;</code>, tuple plumbing) is analysable but unreadable — you cannot find your workflow in it. A higher-order encoding is readable but unanalysable — cost on it demands finiteness of every answer type, which free text does not have. The dilemma is false: <strong>own the binder.</strong> Contexts are lists of codes, variables are de Bruijn indices, and the author writes <code>let</code>. Sharing is a variable used twice; branching is <code>case</code>; nothing needs a label.</p>
+<p>A point-free arrow presentation admits analysis and resists reading, since the flow of values must be expressed in composition and tupling operators; a higher-order presentation reads well and resists analysis, since a cost fold over it requires finiteness of every answer type, which free text does not provide. The representation takes neither horn: contexts are lists of codes, variables are de Bruijn indices, and the author writes a binding. Sharing is a variable mentioned twice; branching is <code>case</code>; no naming apparatus is required at any point.</p>
 
-<h3>The shape is data; only the words are computed</h3>
+<h3>The shape is data, and only the words are computed</h3>
 
-<p>The kernel's cost theorem for the pipeline level was <em>false</em> when <code>ask</code> carried an arbitrary expression of question-space: an answer could then select the <em>addressee</em>, and the sequence of question shapes stopped being a fact about the term. We repaired it in the representation rather than with a side condition. <code>Q c ≅ Q.Shape c × String</code>; the author writes the shape in the term and only the prompt flows from earlier answers, <em>because there is no place in the node for anything else to flow</em>. A predicate that had to be discharged for every workflow was deleted outright, and the shape sequence became a computable projection of the syntax.</p>
+<p>A question factors as <code>Q c ≅ Q.Shape c × String</code>, the shape carrying the addressee, the scope, and the draw <span class="cite">(Question.lean:289)</span>. In the <code>ask</code> node the shape is written by the author as a term, and only the prompt is an expression of the answers in scope. It follows that the sequence of question shapes is a projection of the syntax rather than a property to be established of each workflow: an answer cannot select an addressee, because the node affords it nowhere to do so. The benefit is that the pipeline-level cost theorem carries no hypothesis; the trade-off is that a workflow which genuinely routes to a different addressee on the strength of an answer must express that routing as a <code>case</code>, where both arms are present and priced.</p>
 
-<h3><code>FinEnum</code>, not <code>Fintype</code> — a detail that pays a debt three modules away</h3>
+<h3><code>FinEnum</code> rather than <code>Fintype</code></h3>
 
-<p>Mathlib's <code>Fintype</code> holds a <code>Finset</code>, which holds a <code>Multiset</code>, which is a quotient. A syntax whose branching node mentions it would depend on <code>propext</code> and <code>Quot.sound</code> <em>as a type</em>, before any theorem is stated — and the zero-axiom claim for the runtime certificate in Part VI is a claim about the whole transitive graph. <code>FinEnum</code> says the same thing out of <code>Fin</code>, <code>Equiv</code> and <code>List</code>, none of which is a quotient.</p>
+<p>Mathlib's <code>Fintype</code> carries a <code>Finset</code>, which carries a <code>Multiset</code>, which is a quotient. A branching node mentioning it would depend on <code>propext</code> and <code>Quot.sound</code> as a matter of its type, before any proposition about it were stated, and the empty axiom set claimed for the runtime certificate in Part V is a claim about the entire transitive graph. <code>FinEnum</code> expresses the same content — a bijection with <code>Fin n</code> — through <code>Fin</code>, <code>Equiv</code>, and <code>List</code>, none of which is a quotient, and Mathlib derives a <code>Fintype</code> instance from it, so the enumerations used in the analyses are unaffected.</p>
 
-<h2><span class="num">Part III</span> How they relate: one fold</h2>
+<h2><span class="num">Part III</span> The relation</h2>
 
-<p>The two objects are joined by a single function, defined by structural recursion, and everything else in the library is a theorem about it.</p>
+<p>One function joins the two layers, defined by structural recursion on the representation. Every subsequent theorem in the library is a statement about it.</p>
 
 <pre><code><span class="kw">def</span> denote : Plan Γ A → Env Γ → Dlg A
-  | .ret e,        γ => .done (e γ)
-  | .askC c q k,   γ => .ask c q               (fun x => denote k (x ∷ γ))
-  | .ask c s e k,  γ => .ask c (s.withPrompt (e γ)) (fun x => denote k (x ∷ γ))
-  | .case e arms,  γ => denote (arms (e γ)) γ
-  | .dyn e f,      γ => denote (f (e γ)) γ
+  | .ret e,       γ => .done (e γ)
+  | .askC c q k,  γ => .ask c q                     (fun x => denote k (x ∷ γ))
+  | .ask c s e k, γ => .ask c (s.withPrompt (e γ))  (fun x => denote k (x ∷ γ))
+  | .case e arms, γ => denote (arms (e γ)) γ
+  | .dyn e f,     γ => denote (f (e γ)) γ
 <span class="cm">-- Agentic/Core/Denote.lean:64</span></code></pre>
 
 <div class="diagram">
-<pre>            THE REPRESENTATION                    THE MEANING
-         (finite, inspectable, typed)        (infinite, uncomputable, true)
+<pre>        REPRESENTATION                              MEANING
+   finite · inspectable · typed              total · uncomputable · true
 
-              Plan Γ A  ──────────── denote ───────────▶  Dlg A
-                 │                                          │
-     level, shapes, costTree                          run ω, trace ω
-                 │                                          │
-                 ▼                                          ▼
-          Level, CostTree, bills   ◀── sound by C0–C5 ──   A × Trace
-                 │                                          ▲
-              exec ⟨oracle⟩                                 │
-                 │                                          │
-                 ▼                    certify (decidable)   │
-        IO: ACP ⇄ Claude Code  ───────── warrants ──────────┘
-              (a real world)</pre>
+        Plan Γ A  ─────────────── denote ──────────────▶  Dlg A
+           │                                                │
+   level · shapes · costTree                          run ω · trace ω
+           │                                                │
+           ▼                                                ▼
+   Level · CostTree · bills  ◀──── sound, C0–C5 ────    A × Trace
+           │                                                ▲
+     exec ⟨oracle⟩                                          │
+           │                    certify : decidable         │
+           ▼                                                │
+   IO · ACP ⇄ a live agent ───────── warrants ──────────────┘
+        (one particular world)</pre>
 </div>
 
-<p>Notice what the diagram does <em>not</em> contain: a second semantics. Running a plan is defined as running its denotation —</p>
+<p>What the figure omits is as important as what it contains: there is no second semantics. Running a plan is defined as running its denotation, <code>Plan.run ω p γ := Dlg.run ω (denote p γ)</code> <span class="cite">(Denote.lean:106)</span>, so agreement between the interpreter and the meaning holds by reflexivity. Nothing is reconciled, because nothing was ever separate.</p>
 
-<pre><code><span class="kw">def</span> Plan.run ω p γ := Dlg.run ω (denote p γ)</code></pre>
+<h3>The commuting equations</h3>
 
-<p>— so the commutation between interpreter and meaning is <code>rfl</code>. There is nothing to reconcile because there was never anything to reconcile.</p>
-
-<h3>The commuting squares</h3>
-
-<p><code>Morphism.lean</code> is 55 theorems, one per operation, each the literal statement that the operation commutes with <code>denote</code>. A representative selection, verbatim:</p>
+<p><code>Morphism.lean</code> holds fifty-five theorems, one for each operation of the representation, each stating that the operation commutes with <code>denote</code>. Four are representative.</p>
 
 <pre><code><span class="th">theorem</span> denote_graft (hk : Denotes k K) :
     denote (Plan.graft p k) γ = denote p γ >>= fun a => K a γ
@@ -251,143 +234,142 @@
 <span class="th">theorem</span> run_under (σ : Sig) :
     Plan.run ω (Plan.under σ p) γ = Plan.run (fun c q => ω c (σ.onQ c q)) p γ</code></pre>
 
-<p>Read them as sentences. Sequencing a plan <em>is</em> monadic bind, and its transcript is concatenation. A review panel <em>is</em> convolution in the verdict monoid — the applicative lifting of multiplication over the reviewers' meanings, which is exactly what "any objection carries" means when the verdict monoid is <code>WithZero (FreeMonoid Objection)</code> with <code>approve = 1</code>. Putting a workflow under a model scope <em>is</em> reindexing the world. Bounded revision <em>is</em> the check-then-revise unrolling of the loop — and note the order: the artifact you end up with has always been reviewed, a bug all three of our independent derivations wrote backwards before the adversarial pass caught it.</p>
+<p>Each reads as a sentence about the domain. Sequencing one plan after another is monadic bind, and the transcript of the composite is the concatenation of the transcripts. A review panel is convolution in the verdict monoid: the applicative lifting of multiplication across the reviewers' meanings, which is precisely the content of the rule that any objection carries. Placing a workflow under a model scope is a reindexing of the world, so that a scope is a transformation of questions rather than an effect of its own. Bounded revision unrolls as check-then-revise, in that order, so that the artefact finally produced has always been reviewed.</p>
 
-<h2><span class="num">Part IV</span> How they differ</h2>
+<h2><span class="num">Part IV</span> The difference, and what it purchases</h2>
 
-<p>They are not two encodings of the same thing. Each can do something the other structurally cannot, and the design lives on that difference.</p>
+<p>The two layers are not alternative encodings of a single thing. Each supports something the other structurally cannot, and the design rests on that asymmetry.</p>
 
 <table>
-  <tr><th>The meaning can</th><th>The representation can</th></tr>
+  <tr><th>The meaning supports</th><th>The representation supports</th></tr>
   <tr>
-    <td>Quantify over <em>all</em> worlds: "in every ω, the guide is consulted exactly once."</td>
-    <td>Be folded: <code>level</code>, <code>shapes</code>, <code>costTree</code> are computable functions of a term.</td>
+    <td>Quantification over every world: <em>in all ω, the guide is consulted exactly once</em>.</td>
+    <td>Folding: <code>level</code>, <code>shapes</code>, and <code>costTree</code> are computable functions of a term.</td>
   </tr>
   <tr>
-    <td>Define equality: two workflows are the same when their meanings agree (<code>Obs</code>).</td>
-    <td>Be typed by its context, so an author cannot mention an answer that has not arrived.</td>
+    <td>The definition of equality, since two workflows are the same when their meanings agree.</td>
+    <td>Typing by context, so that no answer may be mentioned before it arrives.</td>
   </tr>
   <tr>
-    <td>Be infinite and uncomputable without embarrassment — a specification that cannot run cannot be mistaken for the artifact it constrains.</td>
-    <td>Be executed: handed to an interpreter that opens a socket.</td>
+    <td>Being infinite and uncomputable without embarrassment: a specification that cannot run cannot be mistaken for the artefact it constrains.</td>
+    <td>Execution, by an interpreter that opens a connection to a live agent.</td>
   </tr>
   <tr>
-    <td>Ignore how anything is scheduled, cached, retried, or transported.</td>
-    <td>Record distinctions the meaning deliberately forgets — most importantly, the difference between <code>case</code> and <code>dyn</code>.</td>
+    <td>Indifference to scheduling, caching, retry, and transport.</td>
+    <td>Distinctions the meaning declines to record, of which <code>case</code> against <code>dyn</code> is the most consequential.</td>
   </tr>
 </table>
 
-<p>That last row is the subtle one and it is where the analysis stratum comes from. <code>denote (case e arms) γ</code> and <code>denote (dyn e f) γ</code> are the <em>same clause</em>: the two nodes are indistinguishable in meaning. They differ only in what can be <em>said about</em> them — <code>case</code> has every arm in the term, <code>dyn</code> has a function. Keeping the distinction in the syntax is possible <mark>precisely because the meaning does not record it</mark>. The representation is allowed to know more than the meaning, so long as it never means anything different.</p>
+<p>The final row governs the analyses. In <code>denote</code>, the clause for <code>case</code> and the clause for <code>dyn</code> are the same clause: the two nodes are indistinguishable in meaning, and differ only in what may be established about them, since <code>case</code> carries every arm in the term while <code>dyn</code> carries a function. Retaining the distinction in the syntax is possible <mark>because the meaning does not record it</mark>. A representation may know more than its meaning; it may never mean anything other than its meaning.</p>
 
-<h3>The four rungs, and what each buys</h3>
+<h3>The four rungs</h3>
 
-<p>The level of a plan is a <em>fold</em>, never a type index — a compiled probe established that Lean's dependent elimination refuses computed indices, which killed the graded-inductive design before a line of it was written.</p>
+<p>The level of a plan is a fold rather than a type index <span class="cite">(Level.lean:120)</span>. The arrangement is deliberate: an index computed from a term obstructs dependent elimination in Lean, whereas a fold leaves the syntax free of proof obligations and places the entire analysis in ordinary functions.</p>
 
 <table>
-  <tr><th>Level</th><th>Syntactic mark</th><th>What is proved about cost</th></tr>
-  <tr><td><code>batch</code></td><td>only closed questions</td><td>The question list is fixed by the term. Exact bill, world-independent.</td></tr>
-  <tr><td><code>pipeline</code></td><td>words built from answers</td><td>The <em>shape</em> sequence is a projection of the syntax; exact bill under <code>PricesByShape</code>.</td></tr>
-  <tr><td><code>branch</code></td><td>finite-tag <code>case</code></td><td>A finite <code>CostTree</code>; every world's bill is one of its leaves; tropical folds give min and max.</td></tr>
-  <tr><td><code>dynamic</code></td><td><code>dyn</code></td><td>An honest <em>non-existence</em> theorem, with a witness whose bills are unbounded.</td></tr>
+  <tr><th>Level</th><th>Syntactic mark</th><th>What is established about cost</th></tr>
+  <tr><td><code>batch</code></td><td>closed questions only</td><td>The question list is fixed by the term; the bill is exact and world-independent.</td></tr>
+  <tr><td><code>pipeline</code></td><td>words built from answers</td><td>The shape sequence is a projection of the syntax; the bill is exact under <code>PricesByShape</code>.</td></tr>
+  <tr><td><code>branch</code></td><td>finite-tag <code>case</code></td><td>A finite <code>CostTree</code> exists; every world's bill is one of its leaves, with tropical folds giving the extremes.</td></tr>
+  <tr><td><code>dynamic</code></td><td><code>dyn</code></td><td>A non-existence theorem, witnessed by a plan whose bills are unbounded.</td></tr>
 </table>
 
-<p>This is the answer to the requirement that monad be retained only where genuinely needed: the hierarchy is not a restriction on what you may write, it is a statement of what may be <em>known</em> about what you wrote.</p>
+<p>The hierarchy imposes no restriction on what may be written. It states what may be known about what has been written, and it is graded so that the common case — a prompt assembled from an earlier answer — is priced exactly rather than surrendered to the general case.</p>
 
-<h2><span class="num">Part V</span> The third layer: execution</h2>
+<h2><span class="num">Part V</span> Execution, and the three statements of correctness</h2>
 
-<p>The runtime is a third stratum, and it is deliberately thin. <code>Acp.lean</code> speaks line-delimited JSON-RPC over a child process's stdio to a real adapter — <code>claude-agent-acp</code> driving Claude Code, or <code>codex-acp</code> driving Codex. It makes no semantic claims and its docstring says so. <code>Exec.lean</code> is the memoising interpreter, factored so that the only <code>IO</code> in the entire construction is a single oracle function:</p>
+<p>The runtime forms a third layer and is deliberately thin. <code>Acp.lean</code> speaks line-delimited JSON-RPC over the standard streams of a child process to an adapter of the Agent Client Protocol, which drives an agent under the operator's own credentials; the module makes no semantic claim, and its documentation says so. <code>Exec.lean</code> is the memoising interpreter, factored so that the whole of <code>IO</code> in the construction is a single oracle.</p>
 
-<pre><code>oracle : (c : Code) → Q c → IO (El c)     <span class="cm">-- render, prompt, decode</span>
-exec   : Plan [] A → StateT Table IO A     <span class="cm">-- the fold, with a memo table</span></code></pre>
+<pre><code>oracle : (c : Code) → Q c → IO (El c)      <span class="cm">-- render, put the question, decode the reply</span>
+exec   : Plan [] A → StateT Table IO A      <span class="cm">-- the fold, carrying a table of answers</span></code></pre>
 
-<p>The table is not a cache bolted onto a runtime. It is a <em>finite world under construction</em> — and <code>worldOf_cons</code>, proved in <code>World.lean</code>, says that recording an answer and pinning a cell are the same operation seen at two levels.</p>
+<p>The table is not a cache attached to an interpreter. It is a finite world under construction, and <code>worldOf_cons</code> establishes that recording an answer and pinning a cell are one operation observed at two levels. Correctness is then carried by three statements, in decreasing strength and increasing contact with the world.</p>
 
-<h2><span class="num">Part VI</span> How correctness is proved</h2>
-
-<p>Three statements, in decreasing strength and increasing contact with reality. Together they are the answer to "how do you know the implementation is right?"</p>
-
-<div class="panel good">
-  <h4>1 · The interpreter is the fold</h4>
-<pre><code><span class="th">theorem</span> Plan.execWith_eq_execM_denote : execWith o p γ t = execM o (denote p γ) t
-<span class="cm">-- proof: rfl.   axioms: none</span></code></pre>
-  <p>Not "the interpreter agrees with the semantics" — the interpreter <em>is</em> the semantics, applied to an oracle. Nothing is proved because nothing was ever separate.</p>
+<div class="panel">
+  <h4>First · the interpreter is the fold</h4>
+<pre><code><span class="th">theorem</span> Plan.execWith_eq_execM_denote :
+    execWith o p γ t = execM o (denote p γ) t
+<span class="cm">-- proof: rfl.  axioms: none</span></code></pre>
+  <p>The interpreter does not agree with the semantics; it is the semantics, supplied with an oracle. Nothing is proved here because nothing was ever distinct.</p>
 </div>
 
-<div class="panel good">
-  <h4>2 · Adequacy, against an adversarial answerer</h4>
+<div class="panel">
+  <h4>Second · adequacy, against an arbitrary answerer</h4>
 <pre><code><span class="th">theorem</span> Plan.adequacy (o : Oracle Id) (h : execWith o p ∅ nil = (a, t)) :
     (∀ ω, Extends ω t → Plan.run ω p ∅ = a) ∧
     (∀ ω, Extends ω t → Plan.trace ω p ∅ = Plan.trace (worldOf t) p ∅)
-<span class="cm">-- axioms: [propext]</span></code></pre>
-  <p>The answering process is an <em>arbitrary history-dependent strategy</em>: it may drift, contradict itself, or answer differently at different times. The theorem does not assume otherwise. It says the run's own table is a finite world, and <em>every</em> total world extending it evaluates the plan to exactly what the run reported. Non-determinism at the edge is absorbed by quantification, not by assumption.</p>
+<span class="cm">-- Agentic/Core/Certify.lean:130.  axioms: [propext]</span></code></pre>
+  <p>The party answering is an arbitrary history-dependent strategy, at liberty to drift, to contradict itself, and to answer differently on different occasions; the theorem assumes nothing to the contrary. It states that the table produced by a run is a finite world, and that every total world extending it evaluates the plan to exactly the value the run reported. Non-determinism at the edge is absorbed by quantification rather than by assumption.</p>
 </div>
 
-<div class="panel good">
-  <h4>3 · The certificate — the per-run warrant</h4>
+<div class="panel">
+  <h4>Third · the certificate, as a warrant for one run</h4>
 <pre><code><span class="kw">def</span> certify (p : Plan [] A) (t : Table) (a : A) : Bool :=
   decide (Plan.run (worldOf t) p ∅ = a)
 
 <span class="th">theorem</span> certify_sound : certify p t a = true → ∃ ω : Ω, Plan.run ω p ∅ = a
-<span class="cm">-- axioms: NONE  (#guard_msgs-pinned: a build failure if it ever drifts)</span></code></pre>
-  <p>No theorem can govern what a live process writes to a pipe, so we do not axiomatise one. Instead every execution replays its own log as a world, evaluates the plan purely, and compares. A <code>true</code> certificate <em>exhibits a world in which the plan means what the run said it means</em> — and the proof of that reaches nothing which could carry an axiom. Completeness holds too (<code>certify_execWith</code>): a run of this interpreter always certifies.</p>
+<span class="cm">-- Agentic/Core/Certify.lean:164, :175.  axioms: none</span></code></pre>
+  <p>No theorem governs what a live process writes to a pipe, and none is asserted. Each execution instead replays its own log as a total world, evaluates the plan purely, and compares: a certificate of <code>true</code> exhibits a world in which the plan means what the run reported it to mean, and the proof of soundness reaches nothing capable of carrying an axiom. Completeness holds as well, so a run of this interpreter always certifies. Both axiom claims are pinned by <code>#guard_msgs</code>, which renders any drift a build failure.</p>
 </div>
 
-<h3>The flagship, and what it says about your workflow</h3>
+<h2><span class="num">Part VI</span> A worked workflow and its theorems</h2>
 
-<p>Twelve lines of do-notation — draft under a deep model, three reviewers sharing one reading of a style guide, revise up to twice, ask the owner, apply only on yes — written as a <code>Plan</code>, with these proved about its meaning. Every statement quantifies over worlds; none mentions syntax.</p>
+<p>The flagship is a patch-hardening workflow of about a dozen lines: draft under a designated model, submit the draft to three reviewers of whom two share one reading of a style guide, revise up to twice on objection, put the question of consent to a person, and apply only upon assent. The following theorems concern its meaning. Each quantifies over worlds; none mentions syntax.</p>
 
 <table>
-  <tr><th>Theorem</th><th>What it says</th></tr>
-  <tr><td><code>consent_of_ack</code></td><td>If <em>any</em> acknowledgement appears in the transcript, in any world, then the owner answered yes to some patch.</td></tr>
-  <tr><td><code>ack_quotes_consented_patch</code></td><td>…and the patch acknowledged <em>is</em> the patch consented to. (The strengthening that closed a real gap: the first theorem alone left the two existentials unlinked.)</td></tr>
-  <tr><td><code>guide_once</code></td><td>The style guide is consulted <strong>exactly once</strong> in every world — sharing, as a counted fact rather than a promise.</td></tr>
-  <tr><td><code>draft_count_le_three</code></td><td>At most three drafts, in every world.</td></tr>
-  <tr><td><code>level_hardenPatch</code></td><td><code>= branch</code>, by <code>rfl</code> — so the finite-cost-tree theorems <em>apply</em> to it.</td></tr>
-  <tr><td><code>bill_hardenPatch</code></td><td>Nine leaves; min 5, max 15; and the reachable bills are exactly <strong>{6, 7, 10, 11, 13, 14, 15}</strong>, with attaining worlds exhibited — and <code>minFold_not_attained</code>, the honest admission that the tree's 5 is sound but no world achieves it.</td></tr>
+  <tr><th>Theorem</th><th>Content</th></tr>
+  <tr><td><code>consent_of_ack</code></td><td>Should any acknowledgement appear in the transcript, in any world, the owner answered affirmatively concerning some patch.</td></tr>
+  <tr><td><code>ack_quotes_consented_patch</code></td><td>The patch acknowledged is the patch consented to, the two occurrences being the same patch.</td></tr>
+  <tr><td><code>guide_once</code></td><td>The style guide is consulted exactly once in every world: sharing as a counted fact.</td></tr>
+  <tr><td><code>draft_count_le_three</code></td><td>At most three drafts are requested, in every world.</td></tr>
+  <tr><td><code>level_hardenPatch</code></td><td>The workflow sits at <code>branch</code>, by reflexivity, so the finite-cost-tree results apply to it.</td></tr>
+  <tr><td><code>bill_hardenPatch</code></td><td>The cost tree has nine leaves with extremes 5 and 15; the reachable bills are exactly {6, 7, 10, 11, 13, 14, 15}, with attaining worlds exhibited, and the tree's minimum of 5 is proved unattained.</td></tr>
 </table>
 
-<h3>The live run</h3>
+<p>The last entry deserves emphasis. A bound that is sound and not attained is a weaker statement than a bound that is met, and the distinction is recorded in the library rather than elided: the tree over-approximates by one consultation, because approval at a given round makes one arm of the tail unreachable.</p>
 
-<p>On 13 August 2026 this executed against Claude Code over ACP — seven consultations, 83.5 seconds, in a scratch directory, with consent read from the keyboard:</p>
+<h3>Execution against a live agent</h3>
 
-<pre><code>tool cat                (text)     Write out the house style guide…   -> Lead with the outcome…
-model author  model=deep (text)    Draft a patch satisfying…          -> unified diff, bounds-checked
-model reviewer-correct  (verdict)  …is this patch correct?            -> approve
-model reviewer-secure   (verdict)  …is this patch secure?             -> approve
-model reviewer-simple   (verdict)  Could this patch be simpler?       -> approve
-person owner            (flag)     Apply this patch?                  -> yes
-tool apply              (ack)      Apply: …                           -> done
+<p>The same plan executes against Claude Code through the Agent Client Protocol adapter <span class="cite">(<code>claude-agent-acp</code> 0.64.0, August 2026)</span>, in a scratch directory, with the consent question routed to the keyboard. One run consumed seven consultations over roughly eighty-four seconds:</p>
 
-bill: 7 consultations       ok  bill ∈ [6,7,10,11,13,14,15]
-ok  the guide was read exactly once        ok  ≤ 3 drafts
-ok  consent ⇔ the apply question was put   ok  the act wrote the consented patch
+<pre><code>tool cat                 (text)     Write out the house style guide…   -> Lead with the outcome…
+model author   model=deep (text)    Draft a patch satisfying…          -> a unified diff, bounds-checked
+model reviewer-correct   (verdict)  …is this patch correct?            -> approve
+model reviewer-secure    (verdict)  …is this patch secure?             -> approve
+model reviewer-simple    (verdict)  Could this patch be simpler?       -> approve
+person owner             (flag)     Apply this patch?                  -> yes
+tool apply               (ack)      Apply: …                           -> done
+
+bill: 7 consultations        ok  bill ∈ [6,7,10,11,13,14,15]
+ok  the guide was read exactly once         ok  at most three drafts
+ok  consent ⇔ the apply question was put    ok  the act wrote the consented patch
 ok  the run certifies</code></pre>
 
-<p>A real model's answers are simply <em>some world</em>. That is why the theorems transfer without weakening: had the reviewers objected, the run would have taken a revise round — a different proved-reachable world, with its bill still in the set. The file left in the scratch directory was genuinely hardened: <code>parse_line</code> rewritten to take buffer sizes with every copy bounds-checked, no <code>strcpy</code>.</p>
+<p>The replies of a live model constitute one world among many, which is why the theorems transfer without weakening. Had the reviewers objected, the run would have taken a revision round and landed on a different member of the same proved set. The file left in the scratch directory was in fact hardened: the parsing routine was rewritten to accept buffer sizes and to bound every copy. A second run, differing only in the answer given to the consent question, consumed six consultations, produced no acknowledgement, and left the file untouched.</p>
 
-<h2><span class="num">Part VII</span> What is assumed, honestly</h2>
+<h2><span class="num">Part VII</span> The boundary of proof</h2>
 
-<p>A proof is only as interesting as its boundary is explicit. Four things are trusted, and none of them is hidden inside a theorem.</p>
+<p>A proof is informative in proportion to the clarity of its boundary. Four matters are trusted, and each is stated in the source rather than concealed within a theorem.</p>
 
 <ul>
-  <li><strong>The decoders.</strong> One total parser per code — how a particular English sentence tokenizes cannot be proved, only tested, and sixteen measured replies are pinned in the test suite. This boundary bit back: a lenient decoder read <em>"I cannot approve this patch."</em> as consent. It now fails closed — a refusal word anywhere denies; a yes must be the whole reply.</li>
-  <li><strong>Adapter fidelity.</strong> That the process on the other end of the pipe relays the model faithfully. Stated as an empirical assumption, never as an axiom.</li>
-  <li><strong>The permission grant.</strong> The runtime allows tool calls inside its own scratch directory. Discovered the hard way: answering the permission request with a JSON-RPC error does <em>not</em> end the turn — the model apologises for 97,000 tokens and the act silently does not happen. A stub could never have found that.</li>
-  <li><strong>The log.</strong> The certificate's warrant is about the table the run recorded. So the runtime is forbidden to write into it anything nobody said: when decoding fails, the run is <em>abandoned</em>, quoting the unreadable reply. An earlier version recorded a default — indistinguishable, in a table with no provenance, from an answer someone gave. The fix went at the point of the <code>cons</code>, and the semantic object stayed pure.</li>
+  <li><strong>The decoders.</strong> One total parser attends each code. How a particular English sentence tokenises is not a proposition the kernel can settle, so sixteen measured replies are pinned as tests. The parser fails closed: a word of refusal anywhere in a reply denies, whereas assent must constitute the whole reply, on the ground that no rule admitting <em>Yes, apply it</em> can exclude <em>I cannot approve this patch</em>.</li>
+  <li><strong>Adapter fidelity.</strong> That the process at the far end of the pipe relays the model faithfully is an empirical assumption, and it is labelled as one.</li>
+  <li><strong>The permission grant.</strong> The runtime authorises tool calls within the working directory of its own session. Declining them is not the conservative alternative it appears to be: a refused permission does not terminate the turn, and the turn completes normally with prose in place of an act, at considerable cost in tokens and with no protocol-level signal distinguishing it from an answer.</li>
+  <li><strong>The log.</strong> The certificate warrants a claim about the table a run recorded, from which one discipline follows without exception: nothing may be written into the table that no party said. When decoding fails after its retries, the run is abandoned and the unreadable reply is quoted, because a defaulted answer in a table without provenance is indistinguishable from an answer given.</li>
 </ul>
 
-<h2><span class="num">Coda</span> The shape of the thing</h2>
+<h2><span class="num">Coda</span></h2>
 
-<p>Three strata, one function between the first two, one oracle between the second and the world:</p>
+<p>Three layers, one function between the first two, and one oracle between the second and the world:</p>
 
-<blockquote>A <strong>meaning</strong> — total answer sheets and the dialogues that consult them — chosen for comprehension, uncomputable on purpose.<br>
-A <strong>representation</strong> — first-order plans with binders, whose every operation is proved to commute with its meaning, and whose extra structure buys analyses the meaning cannot support.<br>
-A <strong>runtime</strong> — the same fold with an oracle in <code>IO</code>, whose every run carries a decidable certificate that it agreed with the mathematics.</blockquote>
+<blockquote>A <strong>meaning</strong>, consisting of total answer sheets and the dialogues that consult them, chosen for comprehension and uncomputable by design.<br>
+A <strong>representation</strong>, first-order and with binders, each of whose operations is proved to commute with its meaning, and whose surplus structure funds analyses the meaning cannot support.<br>
+A <strong>runtime</strong>, the same fold supplied with an oracle in <code>IO</code>, each of whose runs carries a decidable certificate of agreement with the mathematics.</blockquote>
 
-<p>What this buys, in the end, is the property the whole discipline exists for: <em>you may treat a workflow value as being its meaning.</em> When the demo says the guide was read once, that is not an observation about one run — it is a theorem about all of them, and the run is a confirmation that the machinery below the theorem told the truth.</p>
+<p>The property purchased by the arrangement is the one the discipline exists to secure: a workflow value may be treated as being its meaning. When a run reports that the guide was consulted once, the report is not an observation about that run. It is a theorem about every run, and the execution is evidence that the machinery beneath the theorem told the truth.</p>
 
 <footer>
-  <strong>Sources.</strong> <code>~/src/agent-cat</code> at <code>4875b4e</code> · <code>Agentic/Core/{Question,World,Dlg,Plan,Denote,Level,Cost,Morphism,HardenPatch,Acp,Exec,Certify}.lean</code> — 7,853 lines, 419 theorems, zero <code>sorry</code>, zero declared axioms; every result within <code>{propext, Classical.choice, Quot.sound}</code>, and <code>certify_sound</code> within none of them. Lean 4.30.0 with Mathlib v4.30.0. Live execution via <code>claude-agent-acp</code> 0.64.0.
+  <strong>Sources.</strong> The library resides at <code>~/src/agent-cat</code>: <code>Agentic/Core/{Question, World, Dlg, Plan, Denote, Level, Cost, Morphism, HardenPatch, Acp, Exec, Certify}.lean</code>, comprising 7,853 lines and 419 theorems, with no <code>sorry</code> and no declared axiom. Every result lies within <code>{propext, Classical.choice, Quot.sound}</code>, and <code>certify_sound</code> within none of them. Built with Lean 4.30.0 and Mathlib v4.30.0; executed through <code>claude-agent-acp</code> 0.64.0. Version-specific particulars are current as of 13 August 2026 and warrant reconfirmation when the toolchain moves.
 </footer>
 
 </div>
