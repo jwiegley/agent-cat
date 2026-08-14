@@ -129,10 +129,12 @@ def listDir (dir : String) : IO (List String) := do
 that ends in an act is allowed to act at all.
 
 `Acp.Permission.grant`'s stated assumption is that a tool call *inside the
-session's working directory* is authorized by the act of starting the run there
-(`Agentic/Core/Acp.lean`). A run whose working directory is a repository is a run
+session's working directory*, made *during a question that asked for an effect*,
+is authorized by the act of starting the run there (`Agentic/Core/Acp.lean`,
+`Exec.permissionByCode`). A run whose working directory is a repository is a run
 authorized to edit that repository. So a run that acts is given a directory
-nobody minds, and what the act leaves in it is what `ArtifactCheck` reads. -/
+nobody minds, and what the act leaves in it is what `ArtifactCheck` reads — and
+what anything *else* left in it is what `WorkspaceDiff` reads. -/
 def mkScratchDir : IO String := do
   let out ← IO.Process.run { cmd := "mktemp", args := #["-d"] }
   return out.trimAscii.toString
@@ -358,6 +360,258 @@ theorem render_length_of_seeded (s : Seeded) (src : String)
   omega
 
 end Seeded
+
+/-! ## The workspace before and after: what a run actually changed
+
+`Seeded` says what a run was *given*. Nothing above says what it *left*, and the
+measured defect that makes this section exist is precisely that gap
+(`acat-08l`). In a refusing run of the flagship — the owner answered `no`, the
+transcript held six turns, no act was put, and `Harden.no_ack_of_refused` was
+satisfied — the scratch `parse.c` was nevertheless replaced by a hardened
+version. The birth time of the file placed the write inside the *author's* draft
+turn: an editing tool, granted permission by a connection-wide policy that could
+not tell an ask from an act. Every check the run made passed, because every
+check was about the shape of the run, and the bytes are not part of any shape.
+
+**What this is.** Evidence about one run: a fingerprint of the run's directory
+taken after seeding and again when the run ends, and the difference between
+them. Files created, modified or removed, with sizes and a content hash.
+
+**What this is not.**
+
+* It is *not a theorem*. Nothing here is proved about any run; what is proved is
+  that the comparison says "unchanged" when nothing changed
+  (`WorkspaceDiff.of_self`) and that its verdict is exactly the disjunction it
+  claims (`WorkspaceDiff.changed_eq_true_iff`). Whether the fingerprint is an
+  honest reading of a filesystem is a fact about `IO.FS.readBinFile`, in the
+  same class as `ArtifactCheck`'s reading of the same directory.
+* It is *defeated by a write outside the workspace*. A run's directory is the
+  only place looked at, so an agent that edits `~/.bashrc`, or the repository it
+  was started from, leaves this check reporting nothing at all. The permission
+  policy (`Exec.permissionByCode`) is what is supposed to prevent that; this is
+  what notices when it did not.
+* It cannot attribute a change to anybody. It says the bytes differ, not who
+  differed them — a second process writing into the same temporary directory
+  would be reported identically.
+* The hash is FNV-1a, not a cryptographic digest: it detects an edit, and an
+  adversary who wants a collision can have one.
+-/
+
+/-- The FNV-1a offset basis, as `UInt64`. -/
+def hashBasis : UInt64 := 14695981039346656037
+
+/-- The FNV-1a prime. -/
+def hashPrime : UInt64 := 1099511628211
+
+/-- `[[hashBytes bs]]` = FNV-1a over the bytes, in 64 bits.
+
+Written out here rather than shelled out to `sha256sum`, for the reason every
+loop in this package is structural on a fuel: a check that spawns a process to
+say whether a file changed is a check that fails when the process is missing,
+and a run that cannot tell whether it wrote to the workspace should not be a
+run that reports success. Total, one pass, no allocation beyond the fold. -/
+def hashBytes (bs : ByteArray) : UInt64 :=
+  bs.foldl (fun h b => (h ^^^ b.toUInt64) * hashPrime) hashBasis
+
+-- The empty file hashes to the basis, and one flipped byte does not hash to
+-- what it flipped from. `#guard` and not theorems: `ByteArray.foldl` is a loop
+-- over an opaque array that this Lean's kernel does not reduce, so the claims
+-- are checked by the evaluator at elaboration time, which is the discipline
+-- `occursIn` above is held to.
+#guard hashBytes ByteArray.empty == hashBasis
+#guard hashBytes ⟨#[1]⟩ != hashBytes ⟨#[2]⟩
+#guard hashBytes ⟨#[1, 2]⟩ != hashBytes ⟨#[2, 1]⟩
+
+/-- `[[hex n]]` = a `UInt64` in base sixteen, for a report a person reads. -/
+def hex (n : UInt64) : String := String.ofList (Nat.toDigits 16 n.toNat)
+
+/-- `[[FileStamp]]` = one file of a workspace as a fingerprint sees it: where it
+is, how big it is, and what is in it.
+
+The path is relative to the workspace root, so two fingerprints of the same
+directory taken at different times are comparable, and a temporary directory's
+name never appears in a diff. -/
+structure FileStamp where
+  /-- The path relative to the workspace root. -/
+  path : String
+  /-- The size in bytes. -/
+  size : Nat
+  /-- `hashBytes` of the contents. -/
+  hash : UInt64
+  deriving DecidableEq, Repr, Inhabited
+
+/-- `[[Fingerprint]]` = a whole workspace, stamped: one entry per ordinary file,
+in a deterministic order (each directory's entries sorted by name, shallowest
+first). -/
+abbrev Fingerprint := List FileStamp
+
+/-- One breadth-first level of the fingerprint, structural on the fuel, exactly
+as `copyLevel` is and for the same reason: a cyclic or pathological directory is
+a reported entry and never a hung run.
+
+Every unreadable thing becomes an entry whose path *says* it was unreadable
+rather than being dropped: a file that appears and cannot be read is a change,
+and a fingerprint that omitted it would report no change. A symbolic link is
+recorded by its presence and not followed — the same refusal `copyLevel` makes —
+so a link whose *target* changed is a change this does not see. -/
+private def stampLevel : Nat → List (System.FilePath × String) → IO Fingerprint
+  | _, [] => return []
+  | 0, todo =>
+    return todo.map fun t =>
+      { path := s!"{t.2}/… (more than {workspaceDepth} deep, not descended into)"
+      , size := 0, hash := 0 }
+  | fuel + 1, todo => do
+    let mut here : Fingerprint := []
+    let mut next : List (System.FilePath × String) := []
+    for (dir, rel) in todo do
+      match ← dir.readDir.toBaseIO with
+      | .error _ =>
+        here := here ++ [{ path := s!"{rel} (could not be listed)", size := 0, hash := 0 }]
+      | .ok entries =>
+        for e in entries.qsort (fun a b => decide (a.fileName < b.fileName)) do
+          let name := e.fileName
+          let path := if rel.isEmpty then name else rel ++ "/" ++ name
+          match ← e.path.symlinkMetadata.toBaseIO with
+          | .error _ =>
+            here := here ++ [{ path := s!"{path} (could not be inspected)", size := 0, hash := 0 }]
+          | .ok md =>
+            match md.type with
+            | .dir => next := next ++ [(e.path, path)]
+            | .symlink =>
+              here := here ++ [{ path := s!"{path} (a symbolic link)", size := 0, hash := 0 }]
+            | _ =>
+              match ← (IO.FS.readBinFile e.path).toBaseIO with
+              | .error _ =>
+                here := here ++ [{ path := s!"{path} (could not be read)", size := 0, hash := 0 }]
+              | .ok bytes =>
+                here := here ++ [{ path := path, size := bytes.size, hash := hashBytes bytes }]
+    let deeper ← stampLevel fuel next
+    return here ++ deeper
+
+/-- `[[fingerprint dir]]` = what `dir` holds, stamped. A directory that cannot
+be read at all fingerprints as one entry saying so, which is a change from a
+directory that could be. -/
+def fingerprint (dir : String) : IO Fingerprint :=
+  stampLevel workspaceDepth [(System.FilePath.mk dir, "")]
+
+/-- `[[WorkspaceDiff]]` = two fingerprints of one directory, compared: what
+appeared, what changed, and what went away. -/
+structure WorkspaceDiff where
+  /-- Files whose path was not there before. -/
+  created : List FileStamp
+  /-- Files whose path was there and whose contents are not what they were, as
+  the stamp before and the stamp after. -/
+  modified : List (FileStamp × FileStamp)
+  /-- Files whose path is no longer there, as they last were. -/
+  removed : List FileStamp
+  deriving Repr, Inhabited
+
+namespace WorkspaceDiff
+
+/-- `[[WorkspaceDiff.of before after]]` = the difference between two
+fingerprints of one directory.
+
+`modified` tests the *whole stamp* for membership and not the hash against a
+looked-up entry, which is what makes `of_self` hold with no side condition about
+paths being distinct: a stamp that is in both fingerprints is unchanged by
+construction, whatever else shares its path. -/
+def of (before after : Fingerprint) : WorkspaceDiff where
+  created := after.filter fun f => !before.any (·.path == f.path)
+  modified := after.filterMap fun f =>
+    if before.contains f then none
+    else (before.find? (·.path == f.path)).map (fun g => (g, f))
+  removed := before.filter fun g => !after.any (·.path == g.path)
+
+/-- `[[d.changed]]` = did anything at all differ? -/
+def changed (d : WorkspaceDiff) : Bool :=
+  !(d.created.isEmpty && d.modified.isEmpty && d.removed.isEmpty)
+
+/-- **What the verdict means**, exactly: the disjunction and nothing else, so a
+reader of a `changed = true` knows one of the three lists names the evidence. -/
+theorem changed_eq_true_iff (d : WorkspaceDiff) :
+    d.changed = true ↔ d.created ≠ [] ∨ d.modified ≠ [] ∨ d.removed ≠ [] := by
+  simp [changed, or_assoc]
+
+/-- **A workspace compared with itself has not changed.** The property the check
+rests on: a run that wrote nothing produces two equal fingerprints, and this says
+those are reported as no change — so a `FAIL` from this check is never the
+check's own doing. -/
+@[simp] theorem of_self (f : Fingerprint) : of f f = ⟨[], [], []⟩ := by
+  have hpath : ∀ g ∈ f, (f.any (·.path == g.path)) = true := by
+    intro g hg; exact List.any_eq_true.mpr ⟨g, hg, by simp⟩
+  refine WorkspaceDiff.mk.injEq .. ▸ ⟨?_, ?_, ?_⟩ <;>
+    simp_all [List.filter_eq_nil_iff]
+
+/-- **…and therefore reports no change.** -/
+theorem changed_of_self (f : Fingerprint) : (of f f).changed = false := by
+  simp [changed]
+
+/-- `[[d.render]]` = the difference as lines, printed on every run and not only
+on the interesting ones (`Seeded.render`'s rule): a report whose evidence
+appears only when something went wrong is a report nobody has read before it
+matters. -/
+def render (d : WorkspaceDiff) : List String :=
+  if !d.changed then
+    ["--- the workspace after the run: unchanged ---"]
+  else
+    [s!"--- the workspace after the run: {d.created.length} created, \
+        {d.modified.length} modified, {d.removed.length} removed ---"]
+      ++ d.created.map (fun f =>
+          s!"  created  {pad 28 f.path}{f.size} bytes  ({hex f.hash})")
+      ++ d.modified.map (fun p =>
+          s!"  modified {pad 28 p.2.path}{p.1.size} → {p.2.size} bytes  \
+             ({hex p.1.hash} → {hex p.2.hash})")
+      ++ d.removed.map (fun f =>
+          s!"  removed  {pad 28 f.path}was {f.size} bytes  ({hex f.hash})")
+
+/-- **The difference always says something**, `Seeded.render_ne_nil`'s rule
+again: "nothing changed" is a fact a reader is owed and not an omission. -/
+theorem render_ne_nil (d : WorkspaceDiff) : d.render ≠ [] := by
+  unfold render; split <;> simp
+
+/-- The paths a difference names, for a message that says which files. -/
+def paths (d : WorkspaceDiff) : List String :=
+  d.created.map (·.path) ++ d.modified.map (·.2.path) ++ d.removed.map (·.path)
+
+/-- `[[d.unauthorised acted]]` = the complaint a run owes its operator, if it
+owes one: a run that performed **no act** and whose workspace changed anyway.
+
+`acted` is read off the run's transcript — was an `.ack` event in it — and not
+off the command line, because whether an act ran is a fact about the meaning of
+the run and the command line only says what was asked for.
+
+**Why the asymmetry.** When an act ran, the difference is information: an act is
+a question whose whole point is an effect, the permission layer granted it on
+purpose (`Exec.permissionByCode`), and what it wrote is `ArtifactCheck`'s
+business rather than this one's. When no act ran, *no question this run asked was
+permitted to write*, so bytes that changed anyway were written by something
+nobody authorized, and the run is a failure whatever else it proved. -/
+def unauthorised (acted : Bool) (d : WorkspaceDiff) : Option String :=
+  if acted || !d.changed then none
+  else some <|
+    s!"the run performed no act — no `ack` question was put, so nothing it asked \
+       for was permitted to write — and yet the workspace changed: \
+       {String.intercalate ", " d.paths}. Something wrote to the run's directory \
+       without authorisation. This is evidence about this run and not a theorem: \
+       it names bytes that differ, not who differed them, and a write outside \
+       the run's directory would not appear here at all."
+
+/-- **An act's run is never accused.** -/
+@[simp] theorem unauthorised_of_acted (d : WorkspaceDiff) : d.unauthorised true = none := by
+  simp [unauthorised]
+
+/-- **…nor is a run that changed nothing.** -/
+theorem unauthorised_of_unchanged (acted : Bool) {d : WorkspaceDiff}
+    (h : d.changed = false) : d.unauthorised acted = none := by
+  simp [unauthorised, h]
+
+/-- **…and the complaint is made in exactly the one case.** -/
+theorem unauthorised_isSome_iff (acted : Bool) (d : WorkspaceDiff) :
+    (d.unauthorised acted).isSome = true ↔ acted = false ∧ d.changed = true := by
+  unfold unauthorised
+  cases acted <;> cases h : d.changed <;> simp
+
+end WorkspaceDiff
 
 /-- `[[ArtifactCheck]]` = a directory read back, against the lines something
 claimed to write into it: what was there, what was claimed, and what is missing.

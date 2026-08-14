@@ -35,10 +35,18 @@ made *by this file's code* and are discharged by nothing:
    into an `El c` is the single total parsing function per `Code` that the
    kernel names as the remaining trust boundary, and it lives in `Exec`;
 4. **granting a tool permission inside the session's working directory is
-   authorized** — see `Permission` below, where the reasoning is set out. This
-   is the one assumption that lets the agent act on the world rather than merely
-   talk about it, and it is a policy of the runtime, stated here and proved
-   nowhere.
+   authorized *when the question under way asked for an effect*** — see
+   `Permission` below, where the reasoning is set out. This is the one
+   assumption that lets the agent act on the world rather than merely talk about
+   it, and it is a policy of the runtime, stated here and proved nowhere. What
+   this file will not do is decide *which* questions those are: it answers with
+   the `Permission` it was handed for the question under way
+   (`Conn.underQuestion`), and the caller that knows what a question is —
+   `Agentic/Core/Exec.lean`, whose `Settings.permission` is the policy — hands it
+   over. A connection-wide policy that nothing ever set is precisely the defect
+   this arrangement replaces: it made `ask` and `act` indistinguishable to the
+   permission layer, so a draft turn could write to the workspace with the same
+   authority as a consented act.
 
 None of the four is an `axiom` command, and none is needed by any proof: the
 adequacy theorem quantifies over *all* worlds extending the run's table, so an
@@ -224,15 +232,21 @@ itself into a non-answer is worse than either honest alternative, so this client
 now takes one of them explicitly.
 
 * `.grant` selects the agent's own least-standing-authority allow option —
-  `allow_once` if it is offered, then `allow_always`, then whatever is first —
-  and is the default. **The assumption**: the runtime is speaking to an adapter
-  it started, in a working directory the caller chose, and a tool call inside
-  that directory is authorized by the act of starting the run there. That is a
-  policy, it is stated, and it is proved nowhere. A caller who does not want it
-  should not be pointing the runtime at a directory they care about.
+  `allow_once` if it is offered, then `allow_always`, then whatever is first.
+  **The assumption**: the runtime is speaking to an adapter it started, in a
+  working directory the caller chose, and a tool call inside that directory is
+  authorized *by a question that asked for one*. That is a policy, it is stated,
+  and it is proved nowhere. A caller who does not want it should not be pointing
+  the runtime at a directory they care about.
 * `.cancel` answers in the schema's own vocabulary — `{"outcome":"cancelled"}` —
   which is the *documented* way to decline, and unlike `-32601` it tells the
   agent that the request was understood and denied.
+
+**Which of the two applies is a function of the question**, not of the
+connection: `Conn.underQuestion` is how a caller says so, and
+`Exec.permissionByCode` is the policy that says an act may write and an ask may
+not. A `Permission` in `Config` is only what a request arriving outside any
+question gets.
 
 Either way the answer is immediate and unattended: nothing here asks a human,
 because `pump` runs inside somebody else's `session/prompt` and a client that
@@ -243,6 +257,28 @@ inductive Permission where
   /-- Decline, in the schema's own words. -/
   | cancel
   deriving DecidableEq, Repr, Inhabited
+
+/-- `[[PermissionDecision]]` = one `session/request_permission`, answered: the
+question that was under way when it arrived, the tool call it asked for, and
+whether this client granted it.
+
+A value and not a log line, for `ArtifactCheck`'s reason: a consumer that wants
+to *assert* something about what was authorized — a test that a draft turn was
+denied — needs the facts and not the prose. `Conn.decisions` accumulates them in
+arrival order. -/
+structure PermissionDecision where
+  /-- How the caller described the question under way (`Conn.underQuestion`). -/
+  question : String
+  /-- The `title` of the tool call the agent wanted to make. -/
+  tool : String
+  /-- Whether an allow option was selected. -/
+  granted : Bool
+  deriving DecidableEq, Repr, Inhabited
+
+/-- `[[d.render]]` = one decision as one line, for a log or a report. -/
+def PermissionDecision.render (d : PermissionDecision) : String :=
+  s!"permission {if d.granted then "granted" else "DENIED "} to '{d.tool}' \
+     during {d.question}"
 
 /-! ## Configuration -/
 
@@ -267,7 +303,11 @@ structure Config where
   args : Array String := #[]
   /-- The session's working directory; sent to `session/new` made absolute. -/
   cwd : System.FilePath := "."
-  /-- How a `session/request_permission` request is answered. -/
+  /-- How a `session/request_permission` request arriving while **no question is
+  under way** is answered — before the first prompt, and for the whole run of a
+  caller that never calls `Conn.underQuestion`. The interpreter sets a policy per
+  question (`Exec.Settings.permission`), so for a run of a workflow this value
+  governs nothing; it is what a bare user of the transport gets. -/
   permission : Permission := .grant
   /-- Milliseconds to wait for one pipe operation; `none` blocks forever. Five
   minutes by default: the longest measured gap between two lines of a real turn
@@ -458,6 +498,17 @@ structure Conn where
   every question carries the same unusable axis says so once and then gets on
   with it. A warning repeated forty times is a warning nobody finishes reading. -/
   warned : IO.Ref (List String)
+  /-- The question under way: how the caller describes it, and what a
+  `session/request_permission` arriving during it is answered with. Set by
+  `Conn.underQuestion` before every prompt whose caller knows what it is asking;
+  started at `cfg.permission`, so a caller that never sets one behaves as it did
+  before there was anything to set. -/
+  asked : IO.Ref (String × Permission)
+  /-- Every permission decision this connection has made, in arrival order.
+  Kept on the connection rather than reported and forgotten, because "the run
+  performed no act and something wrote anyway" is a question asked *after* the
+  run, and the answers to it are these. -/
+  decisions : IO.Ref (Array PermissionDecision)
 
 /-! ## How a turn ended -/
 
@@ -647,23 +698,55 @@ def pickAllow (params : Json) : Option String :=
         | some o => (o.getObjVal? "optionId" >>= Json.getStr?).toOption
         | none => none
 
-/-- `[[permissionResult p params]]` = the `RequestPermissionResponse` this
-client sends back: `{"outcome":{"outcome":"selected","optionId":…}}` when it
-grants, and `{"outcome":{"outcome":"cancelled"}}` when it declines or when the
-request offered nothing to select. Both are the schema's own shapes; neither is
-an error, because a permission request is a question and not a call the client
-failed to implement. -/
-def permissionResult (p : Permission) (params : Json) : Json :=
-  let cancelled := Json.mkObj [("outcome", Json.mkObj [("outcome", Json.str "cancelled")])]
+/-- `[[permissionChoice p params]]` = the option this client selects, under the
+policy `p`, for a request offering `params`: nothing at all when the policy is
+`.cancel`, and `pickAllow`'s least-standing-authority option when it is
+`.grant`.
+
+Separated from the response it becomes because it is the *decision*, and the
+decision is what a caller asserts about (`PermissionDecision.granted`) and what
+`Exec.permissionChoice_ask` is a theorem about. -/
+def permissionChoice (p : Permission) (params : Json) : Option String :=
   match p with
-  | .cancel => cancelled
-  | .grant =>
-    match pickAllow params with
-    | none => cancelled
-    | some id =>
-      Json.mkObj
-        [ ("outcome", Json.mkObj
-            [ ("outcome", Json.str "selected"), ("optionId", Json.str id) ]) ]
+  | .cancel => none
+  | .grant => pickAllow params
+
+/-- **A declined policy selects nothing**, whatever the agent offered — so a
+caller that hands `.cancel` down for a question cannot be talked into an allow
+option by an adapter that offers a generous one. -/
+@[simp] theorem permissionChoice_cancel (params : Json) :
+    permissionChoice .cancel params = none := rfl
+
+/-- **…and a granting one selects exactly what `pickAllow` picks.** -/
+@[simp] theorem permissionChoice_grant (params : Json) :
+    permissionChoice .grant params = pickAllow params := rfl
+
+/-- `[[permissionResponse sel]]` = the `RequestPermissionResponse` for a
+selection: `{"outcome":{"outcome":"selected","optionId":…}}` when there is one,
+and `{"outcome":{"outcome":"cancelled"}}` when there is not. Both are the
+schema's own shapes; neither is an error, because a permission request is a
+question and not a call the client failed to implement. -/
+def permissionResponse : Option String → Json
+  | none => Json.mkObj [("outcome", Json.mkObj [("outcome", Json.str "cancelled")])]
+  | some id =>
+    Json.mkObj
+      [ ("outcome", Json.mkObj
+          [ ("outcome", Json.str "selected"), ("optionId", Json.str id) ]) ]
+
+/-- `[[permissionResult p params]]` = what this client sends back: the response
+to the choice the policy made. -/
+def permissionResult (p : Permission) (params : Json) : Json :=
+  permissionResponse (permissionChoice p params)
+
+/-- `[[permissionTool params]]` = the title of the tool call a permission
+request is about, so that a record of the decision names what was asked for.
+Total and forgiving: a request that names nothing says so in words rather than
+failing, because a decision that was made must be recorded whether or not the
+agent described it. -/
+def permissionTool (params : Json) : String :=
+  match params.getObjVal? "toolCall" >>= (·.getObjVal? "title") >>= Json.getStr? with
+  | .ok t => t
+  | .error _ => "an unnamed tool call"
 
 /-! ## What a live conversation can be asked to do
 
@@ -720,15 +803,42 @@ private def writeJson (conn : Conn) (j : Json) : IO Unit :=
     conn.child.stdin.putStr (j.compress ++ "\n")
     conn.child.stdin.flush
 
+/-- `[[conn.underQuestion what p]]` = say which question the connection is
+putting, and how a `session/request_permission` arriving during it is to be
+answered.
+
+This is the whole of what the transport knows about workflows: a string for the
+record and a `Permission` for the decision. Called before every prompt by
+`Exec.say`; a caller that never calls it leaves `cfg.permission` in force. -/
+def underQuestion (conn : Conn) (what : String) (p : Permission) : IO Unit :=
+  conn.asked.set (what, p)
+
+/-- `[[conn.decisionCount]]` = how many permission decisions this connection has
+made so far, so that a caller can report the ones its own turn provoked. -/
+def decisionCount (conn : Conn) : IO Nat := return (← conn.decisions.get).size
+
+/-- `[[conn.decisionsFrom n]]` = the permission decisions made after the first
+`n`: what happened during the turn a caller has just finished. -/
+def decisionsFrom (conn : Conn) (n : Nat) : IO (Array PermissionDecision) := do
+  let all ← conn.decisions.get
+  return all.extract n all.size
+
 /-- Answer a request the agent made of us. `session/request_permission` is
-answered by policy (`Config.permission`); everything else — every `fs/*` and
-`terminal/*` method — is answered `-32601`, honestly, because the `initialize`
-handshake advertised no such capability and a conforming agent should not have
-asked. -/
+answered by the policy for the question under way (`Conn.underQuestion`, falling
+back to `Config.permission`) and the decision is recorded on the connection;
+everything else — every `fs/*` and `terminal/*` method — is answered `-32601`,
+honestly, because the `initialize` handshake advertised no such capability and a
+conforming agent should not have asked. -/
 private def answerAgentRequest (conn : Conn) (id : Json) (method : String)
     (params : Json) : IO Unit :=
-  if method == "session/request_permission" then
-    writeJson conn <| Rpc.result id (permissionResult conn.cfg.permission params)
+  if method == "session/request_permission" then do
+    let (question, policy) ← conn.asked.get
+    let choice := permissionChoice policy params
+    conn.decisions.modify
+      (·.push { question := question
+              , tool := permissionTool params
+              , granted := choice.isSome })
+    writeJson conn <| Rpc.result id (permissionResponse choice)
   else
     writeJson conn <| Rpc.errorFrame id Rpc.methodNotFound
       s!"{method}: this client advertised no such capability"
@@ -981,7 +1091,13 @@ def connect (cfg : Config := {}) : IO Conn := do
   let sessionId ← IO.mkRef none
   let configValues ← IO.mkRef []
   let warned ← IO.mkRef []
-  let conn : Conn := { cfg, prog, child, nextId, sessionId, configValues, warned }
+  -- Before any question there is no question, and the connection-wide policy is
+  -- what a permission request arriving now gets. `Exec.say` replaces both parts
+  -- of this before every prompt it puts.
+  let asked ← IO.mkRef ("no question (the handshake, or a caller that set none)", cfg.permission)
+  let decisions ← IO.mkRef #[]
+  let conn : Conn :=
+    { cfg, prog, child, nextId, sessionId, configValues, warned, asked, decisions }
   try
     discard <| conn.handshake
     discard <| conn.newSession

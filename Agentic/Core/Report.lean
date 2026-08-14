@@ -575,7 +575,8 @@ the log covers the replay, and what each turn cost in wall-clock time.
 **Which fields are meaning and which are observation**, because the distinction
 is the whole reason this is one structure rather than a print statement.
 
-* `value`, `table`, `turns` and `certified` are **observations**: what the `IO`
+* `value`, `table`, `turns`, `permissions` and `certified` are **observations**:
+  what the `IO`
   layer returned. `certified` in particular is the `Bool` the run itself computed
   (`Plan.runCertified`); at `Id` it is provably `true`
   (`Plan.runCertified_certified`), so in `IO` it is a check on the trust
@@ -605,6 +606,12 @@ structure RunReport (A : Type) where
   covered : Bool
   /-- What the `IO` layer saw, turn by turn. -/
   turns : List Turn
+  /-- What the run authorized, request by request: an observation, like `turns`,
+  and for the same reason — a permission is a fact about the `IO` layer, and `Ω`
+  is a function of the question, so no theorem can mention one. It is here
+  because it is the evidence for the one claim a refusing run wants to make:
+  that nothing was allowed to write. -/
+  permissions : List Acp.PermissionDecision := []
 
 namespace RunReport
 
@@ -617,13 +624,15 @@ turns.
 The transcript and the coverage verdict are computed here, from `p` and `t`, and
 are not arguments: a caller cannot report a transcript the log does not denote. -/
 def of (p : Plan [] A) (value : A) (table : Table) (certified : Bool)
-    (turns : List Turn := []) : RunReport A :=
+    (turns : List Turn := []) (permissions : List Acp.PermissionDecision := []) :
+    RunReport A :=
   { value := value
   , table := table
   , transcript := Plan.trace (worldOf table) p Env.nil
   , certified := certified
   , covered := Plan.coveredB table p
-  , turns := turns }
+  , turns := turns
+  , permissions := permissions }
 
 @[simp] theorem of_transcript (p : Plan [] A) (a : A) (t : Table) (cert : Bool)
     (turns : List Turn) :
@@ -679,6 +688,11 @@ def render (r : RunReport A) : List String :=
     ++ ["---", "--- turns (code | addressee | stop reason | latency) ---"]
     ++ r.turns.map Turn.render
     ++ [s!"  {r.turns.length} turns, {r.totalMs}ms in total", "---",
+        "--- permissions (what was asked for, during which question) ---"]
+    ++ (if r.permissions.isEmpty then
+          ["  none: no tool call asked this run for permission to act"]
+        else r.permissions.map (fun d => s!"  {d.render}"))
+    ++ ["---",
         s!"bill: {r.billFresh} consultations fresh, {r.billMemo} memoized \
            (tick: one unit per consultation)"]
 

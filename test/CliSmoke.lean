@@ -58,6 +58,20 @@ no proof in the package can make a statement about.
   says the directory is empty rather than saying nothing, and that a symbolic
   link in a workspace is refused with a reason instead of followed.
 
+* **That an ask cannot write, and that a run notices when something wrote
+  anyway.** Three runs of the refusing flagship, which is the run that puts no
+  act and is therefore permitted to write nothing at all. Against the ordinary
+  stub it passes and reports an unchanged workspace. Against
+  `--write-on-ask` — an adapter that asks permission to edit `parse.c` while
+  merely *answering* — it still passes and is still unchanged, because
+  `Exec.permissionByCode` denies every request that did not arrive during an
+  act; the report names the denials. Against `--write-anyway` — an adapter that
+  edits without asking, which no permission policy can prevent — it **fails**,
+  naming the file, which is the only evidence that the fingerprint check has
+  teeth. The measured defect (`acat-08l`) is the middle case with the denial
+  removed: a refusing run whose `parse.c` was replaced during the author's draft
+  turn while every semantic check passed.
+
 * **That `--define` changes what it says it changes and nothing else.** Two
   statements, and the second is the load-bearing one: overriding a `define` with
   *the same words the program wrote* produces output byte-identical to giving no
@@ -311,6 +325,52 @@ def main : IO UInt32 := do
       (aliased.out.any fun l => (l.splitOn s!"agent-cat: {expectedApply} consultations").length > 1)
     let badPair ← cli ["run", hardenPath, "--model", "deep"]
     check "…and --model without an `=` is refused" "1" (toString badPair.code)
+
+    -- 9. What a question is allowed to write. The refusing flagship puts no act
+    -- (`Dsl.bill_flagship_refuse` is six consultations and none of them an
+    -- `.ack`), so nothing it asked for was permitted to write, and a workspace
+    -- that changed anyway was changed by something nobody authorized.
+    let quiet ← cli ["run", hardenPath, "--adapter-arg", "--refuse"]
+    check "a refusing run against the well-behaved stub exits 0" "0" (toString quiet.code)
+    checkTrue "…and reports the workspace unchanged"
+      (quiet.out.any fun l => (l.splitOn "the workspace after the run: unchanged").length > 1)
+    checkTrue "…and says so as a check, not only as a heading"
+      (quiet.out.any fun l =>
+        (l.splitOn "the run performed no act, and the workspace is unchanged").length > 1)
+    checkTrue "…and nothing asked it for permission to act"
+      (quiet.out.any fun l => (l.splitOn "none: no tool call asked").length > 1)
+
+    -- An adapter that asks to edit the workspace while answering a *text*
+    -- question. This is the measured defect's shape; the client denies it
+    -- because the question under way was an ask (`Exec.permissionByCode`), so
+    -- the run is unchanged and passes — and the denials are in the report,
+    -- because a denial is what the run paid for its safety.
+    let asked ← cli ["run", hardenPath, "--adapter-arg", "--refuse",
+                     "--adapter-arg", "--write-on-ask"]
+    check "a refusing run against a stub that asks to write during an ask exits 0" "0"
+      (toString asked.code)
+    checkTrue "…with every request denied, named in the report"
+      (asked.out.any fun l =>
+        (l.splitOn "permission DENIED").length > 1
+          && (l.splitOn "edit parse.c while answering").length > 1)
+    checkTrue "…and nothing was granted"
+      (asked.out.all fun l => (l.splitOn "permission granted").length == 1)
+    checkTrue "…so the workspace is unchanged, which is the whole of the fix"
+      (asked.out.any fun l => (l.splitOn "the workspace after the run: unchanged").length > 1)
+
+    -- …and an adapter that writes without asking at all, which no permission
+    -- policy can stop. The run must fail, naming the file: without this the
+    -- fingerprint check is a claim rather than a test.
+    let wrote ← cli ["run", hardenPath, "--adapter-arg", "--refuse",
+                     "--adapter-arg", "--write-anyway"]
+    check "a refusing run whose workspace was written to anyway exits 1" "1"
+      (toString wrote.code)
+    checkTrue "…saying plainly that something wrote without authorisation"
+      ((wrote.err.splitOn "without authorisation").length > 1)
+    checkTrue "…and naming the file it wrote"
+      ((wrote.err.splitOn "the workspace changed: parse.c").length > 1)
+    checkTrue "…and the run's own checks are not what failed"
+      (wrote.out.all fun l => (l.splitOn "FAIL").length == 1)
 
     IO.println "cli smoke: all checks passed"
     return (0 : UInt32)

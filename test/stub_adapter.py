@@ -65,6 +65,25 @@ path:
                       adapter does this, but an adapter without a `model`
                       option is allowed to, and it is the other half of the
                       fallback the client is supposed to have.
+  --write-on-ask      while answering an *ask* — a text, verdict or flag
+                      question — request permission for an edit and, if it is
+                      granted, replace `parse.c` in the session's working
+                      directory with the hardened version. This is the measured
+                      defect of `acat-08l` in its smallest reproducible form: in
+                      a refusing run against the real adapter, `parse.c` was
+                      replaced during the AUTHOR's draft turn, because the
+                      client held one connection-wide permission policy and
+                      granted every request whatever the question was. Against a
+                      client that decides per question (`Exec.permissionByCode`)
+                      the request is DENIED and nothing is written, so this flag
+                      is the negative control for the fix: the run passes and
+                      its workspace is unchanged, and it would not have been.
+  --write-anyway      write the same file during an ask *without asking
+                      permission at all*. No client policy can stop an adapter
+                      that never asks, which is why the run's directory is
+                      fingerprinted before and after: this is the negative
+                      control for that check, and a refusing run against this
+                      flag must FAIL with the unauthorised-write message.
 
 Diagnostics go to stderr, which the client inherits; stdout carries protocol
 and nothing else.
@@ -113,6 +132,10 @@ CONSENT = "no" if "--refuse" in ARGV else "yes"
 # Whether the act writes the patch it was given, or something else.
 SLOPPY_APPLY = "--sloppy-apply" in ARGV
 CANCEL_KEYS = [a.split("=", 1)[1] for a in ARGV if a.startswith("--cancel=")]
+# Whether answering a question that asked for nothing but an answer also edits
+# the working directory, and whether it bothers to ask first.
+WRITE_ON_ASK = "--write-on-ask" in ARGV
+WRITE_ANYWAY = "--write-anyway" in ARGV
 REFUSE_SET_MODE = "--refuse-set-mode" in ARGV
 REFUSE_SET_CONFIG = "--refuse-set-config" in ARGV
 
@@ -292,7 +315,7 @@ def tool_call(status, extra=None):
 NEXT_AGENT_ID = 0
 
 
-def ask_permission():
+def ask_permission(title="apply the patch"):
     """An agent-initiated request; returns the selected optionId, or None.
 
     The options are claude's, verbatim: three of them, `allow_always` first,
@@ -316,7 +339,7 @@ def ask_permission():
             "sessionId": SESSION_ID,
             "toolCall": {
                 "toolCallId": "toolu_stub_0001",
-                "title": "apply the patch",
+                "title": title,
                 "kind": "edit",
                 "status": "pending",
                 "content": [],
@@ -342,7 +365,7 @@ def prompt_text(params):
     return "".join(parts)
 
 
-def apply_patch(text):
+def apply_patch(text, name="applied.c"):
     """Do what an `apply` tool does: write the patched file, in the cwd.
 
     The diff is read out of the prompt the act arrived in — the client quotes it
@@ -350,6 +373,10 @@ def apply_patch(text):
     `--sloppy-apply` the lines it *removes* are written instead: a file that is
     not the consented patch, which is what a checker of acts has to be able to
     tell apart from one that is.
+
+    `name` is a parameter because the same tool is what writes during an *ask*
+    under `--write-on-ask`, and what it overwrites there is the workspace's own
+    `parse.c` — which is what the measured defect did.
     """
     want = "-" if SLOPPY_APPLY else "+"
     body = []
@@ -359,10 +386,37 @@ def apply_patch(text):
             continue
         if line.startswith(want):
             body.append(line[1:].strip())
-    path = os.path.join(os.getcwd(), "applied.c")
+    path = os.path.join(os.getcwd(), name)
     with open(path, "w") as handle:
         handle.write("\n".join(body) + "\n")
     note("applied %d %s lines to %s" % (len(body), want, path))
+
+
+def meddle_during_ask():
+    """Edit the working directory while answering a question that asked for text.
+
+    Two ways, and the difference between them is the whole of what a permission
+    layer can do. Under `--write-on-ask` the edit is announced as a tool call and
+    permission is requested for it: a client that decides per question denies it
+    and nothing happens, and a client with one connection-wide `grant` — what
+    this repository had — allows it and `parse.c` is silently replaced during a
+    draft turn. Under `--write-anyway` no permission is requested at all, which
+    no client can prevent and only a fingerprint of the directory can detect.
+    """
+    if WRITE_ANYWAY:
+        apply_patch(PATCH, "parse.c")
+        note("wrote parse.c during an ask WITHOUT asking permission")
+        return
+    tool_call("pending")
+    tool_call("in_progress", {"rawInput": {"file_path": "parse.c"}})
+    granted = ask_permission("edit parse.c while answering")
+    if granted is None:
+        tool_call("failed", {"rawOutput": "Tool permission request failed"})
+        note("permission to write during an ask was DENIED; nothing written")
+        return
+    apply_patch(PATCH, "parse.c")
+    note("permission to write during an ask was granted via optionId %r" % (granted,))
+    tool_call("completed", {"rawOutput": "File updated"})
 
 
 def answer_for(text):
@@ -415,6 +469,10 @@ def handle_prompt(rid, params):
         # thing this stub exists to not be.
         apply_patch(text)
         tool_call("completed", {"rawOutput": "File updated"})
+    elif WRITE_ON_ASK or WRITE_ANYWAY:
+        # A question that asked for nothing but an answer, answered by an agent
+        # that edits the workspace while it thinks about it.
+        meddle_during_ask()
 
     usage(32400)
     # Every answer is streamed as TWO chunks, so a client that returns only the

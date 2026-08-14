@@ -83,11 +83,25 @@ flagship workload:
 | the table holds one entry per question | `Dlg.execM_ask_hit`             |
 | the run certifies                      | `Plan.runCertified_certified`   |
 | the bill is a leaf of the cost tree    | `Cost.bill_mem_leaves`          |
+| no act ran, and nothing was written    | *none — it is not a theorem*    |
 
-The last one is the cost report, checked: `agent-cat cost` prints the leaves of
+The fourth is the cost report, checked: `agent-cat cost` prints the leaves of
 `Cost.costTree`, and `Cost.bill_mem_leaves` says the bill of every run is one of
 them, so a run whose bill is not one of them is a run the `IO` layer produced and
 no world can.
+
+**The fifth shadows nothing, and that is the point.** A theorem says a refused
+run puts no apply question (`Harden.no_ack_of_refused`); no theorem says the
+workspace is unchanged, and none can, because bytes on a disk are not in the
+semantics. So the run's directory is fingerprinted after seeding and again when
+the run ends (`Agentic/Core/Artifact.lean`), the difference is printed either
+way, and a run whose transcript holds no `.ack` event and whose workspace changed
+anyway exits `1` naming the files. When an act *did* run, the difference is
+printed as information: an act is a question whose point is an effect, and what
+it wrote is `ArtifactCheck`'s business. The check is evidence about one run and
+not a theorem, it is defeated by a write outside the run's directory, and a run
+that aborted before finishing is not compared at all — it exits nonzero for the
+abort.
 
 **Exit codes.** `0` if the run and its checks passed; `1` if a check failed or the
 run aborted; `2` if the program could not be read or does not check. `plan` and
@@ -327,9 +341,18 @@ def runCmd (path : String) (p : Plan [] Unit) (h : level p ≤ Level.branch) (o 
     , args := o.adapterArgs
     , cwd := dir
     , readTimeoutMs := if stubbed then some 20000 else ({} : Acp.Config).readTimeoutMs
-    , turnTimeoutMs := if stubbed then some 60000 else ({} : Acp.Config).turnTimeoutMs }
+    , turnTimeoutMs := if stubbed then some 60000 else ({} : Acp.Config).turnTimeoutMs
+      -- What a permission request arriving while *no question is under way*
+      -- gets. Nothing this run asked for is outstanding then, so nothing is
+      -- authorized; the per-question policy is `Exec.Settings.permission`, which
+      -- `Exec.say` sets before every prompt.
+    , permission := .cancel }
+  -- What the run was given, stamped, before the first question is put. The
+  -- comparison at the end of the run is against exactly this.
+  let before ← fingerprint dir
   let warnings ← IO.mkRef 0
   let turns ← IO.mkRef (#[] : Array Turn)
+  let permissions ← IO.mkRef (#[] : Array Acp.PermissionDecision)
   let st : Exec.Settings :=
     { -- Live, a person is asked at the keyboard and the adapter never answers for
       -- them; against the stub the stub answers, which is what makes an
@@ -347,7 +370,13 @@ def runCmd (path : String) (p : Plan [] Unit) (h : level p ≤ Level.branch) (o 
     , log := fun msg => do
         warnings.modify (· + 1)
         unless o.quiet do IO.println s!"warn {msg}"
-    , onTurn := fun c a r ms => turns.modify (·.push ⟨c, a, r, ms⟩) }
+    , onTurn := fun c a r ms => turns.modify (·.push ⟨c, a, r, ms⟩)
+      -- A permission decision is not a warning — granting an act is the run
+      -- working — so it is printed as itself and counted as itself, and it is
+      -- kept for the report (`RunReport.permissions`).
+    , onPermission := fun d => do
+        permissions.modify (·.push d)
+        unless o.quiet do IO.println s!"perm {d.render}" }
   try
     unless o.quiet do
       let argsShown := String.intercalate " " cfg.args.toList
@@ -360,8 +389,19 @@ def runCmd (path : String) (p : Plan [] Unit) (h : level p ≤ Level.branch) (o 
       -- run is against these very numbers.
       for l in Explain.costLines p do IO.println l
     let res ← execCertifiedIO (st := st) (cfg := cfg) p
-    let report := RunReport.of p res.1 res.2.1 res.2.2 (← turns.get).toList
+    let report :=
+      RunReport.of p res.1 res.2.1 res.2.2 (← turns.get).toList (← permissions.get).toList
     unless o.quiet do for l in report.render do IO.println l
+    -- What is on disk now, against what was on disk when the run started. An
+    -- observation about this run and not a theorem — `WorkspaceDiff`'s docstring
+    -- says what it is defeated by — and the one statement `agent-cat` makes
+    -- about the world outside the process.
+    let diff := WorkspaceDiff.of before (← fingerprint dir)
+    -- Did the run *act*? Read off the replayed transcript, because whether an
+    -- act ran is a fact about what the run meant; a run with no `.ack` event in
+    -- it asked nothing that was permitted to write (`Exec.permissionByCode`).
+    let acted := report.transcript.any (Event.hasCode .ack)
+    unless o.quiet do for l in diff.render do IO.println l
     -- Every event of the replay is in the log, with the answer the replay reads.
     -- Without this the certificate is satisfied by a defaulted world
     -- (`certify_unit_vacuous`); with it, `Plan.certify_sound_of_covered` turns the
@@ -376,6 +416,19 @@ def runCmd (path : String) (p : Plan [] Unit) (h : level p ≤ Level.branch) (o 
       ((Explain.leafBills p h).contains report.billFresh)
     -- Plan.runCertified_certified, in IO where it is a check and not a theorem.
     check "the run certifies" "true" (toString report.certified)
+    -- No theorem, and no theorem is possible: bytes on a disk are not in the
+    -- semantics. A run with no `.ack` event in it asked nothing that was
+    -- permitted to write (`Exec.permissionByCode`), so a workspace that changed
+    -- anyway was written to by something nobody authorized.
+    match diff.unauthorised acted with
+    | some complaint => throw <| IO.userError s!"FAIL {complaint}"
+    | none =>
+      IO.println <|
+        if acted then
+          s!"ok   the run acted, so a change in the workspace is information and not a \
+             fault ({diff.paths.length} \
+             {if diff.paths.length == 1 then "path differs" else "paths differ"})"
+        else "ok   the run performed no act, and the workspace is unchanged"
     IO.println s!"agent-cat: {report.billFresh} consultations, {report.turns.length} turns, \
                   {report.totalMs}ms, {← warnings.get} warnings (cwd {dir})"
     return (0 : UInt32)

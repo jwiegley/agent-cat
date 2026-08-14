@@ -40,9 +40,13 @@ live (`--adapter claude`, `--adapter codex`, or a path):
 
 *Every* run — stub or live — happens in a fresh `mktemp -d` holding a seed file,
 because the workflow ends in an act that writes: `Acp.Permission.grant`
-authorizes tool calls *in the session's working directory*, so that directory
-had better be one nobody minds, and a harness that reads the file back needs
-somewhere to read it from.
+authorizes tool calls *in the session's working directory*, and
+`Exec.permissionByCode` authorizes them *only during the act* — so that
+directory had better be one nobody minds, and a harness that reads the file back
+needs somewhere to read it from. Which questions were allowed to write is
+printed with the run (`perm …` lines, `RunReport.permissions`), and the check
+`every permission granted arrived during an act` is that policy observed on the
+wire rather than assumed.
 
 `test/AcpSmoke.lean` checks the wire and `test/ExecSmoke.lean` checks the
 interpreter on a three-node plan. This runs the same stack (`Plan` → `denote` →
@@ -424,9 +428,15 @@ def main (argv : List String) : IO UInt32 := do
       -- The stub answers instantly; a live agent is given the generous
       -- defaults, which are what they are for.
     , readTimeoutMs := if stubbed then some 20000 else ({} : Acp.Config).readTimeoutMs
-    , turnTimeoutMs := if stubbed then some 60000 else ({} : Acp.Config).turnTimeoutMs }
+    , turnTimeoutMs := if stubbed then some 60000 else ({} : Acp.Config).turnTimeoutMs
+      -- What a permission request arriving while *no question is under way*
+      -- gets. Nothing this run asked for is outstanding then, so nothing is
+      -- authorized; the per-question policy is `Exec.Settings.permission`, which
+      -- `Exec.say` sets before every prompt.
+    , permission := .cancel }
   let warnings ← IO.mkRef 0
   let turns ← IO.mkRef (#[] : Array Turn)
+  let permissions ← IO.mkRef (#[] : Array Acp.PermissionDecision)
   let st : Exec.Settings :=
     { -- Live, the owner is the owner: the consent question goes to the keyboard
       -- (stderr and stdin, so the run pipes), and the adapter never answers for
@@ -443,7 +453,13 @@ def main (argv : List String) : IO UInt32 := do
     , log := fun msg => do
         warnings.modify (· + 1)
         IO.println s!"warn {msg}"
-    , onTurn := fun c a r ms => turns.modify (·.push ⟨c, a, r, ms⟩) }
+    , onTurn := fun c a r ms => turns.modify (·.push ⟨c, a, r, ms⟩)
+      -- Which questions were allowed to write. Not a warning — granting the
+      -- act is the workflow working — and not silent either: the whole of
+      -- `Exec.permissionByCode` is visible here or nowhere.
+    , onPermission := fun d => do
+        permissions.modify (·.push d)
+        IO.println s!"perm {d.render}" }
   let expected := if refusing then expectedRefuse else expectedApply
   try
     let argsShown := String.intercalate " " cfg.args.toList
@@ -456,7 +472,8 @@ def main (argv : List String) : IO UInt32 := do
     -- own memo table denotes, the two bills, the coverage verdict, and the half
     -- no theorem can hold — how each turn ended and what it cost in wall-clock
     -- time.
-    let report := RunReport.of Harden.demo res.1 res.2.1 res.2.2 turnLog.toList
+    let report :=
+      RunReport.of Harden.demo res.1 res.2.1 res.2.2 turnLog.toList (← permissions.get).toList
     let tr : Trace := report.transcript
     for l in report.render do IO.println l
     -- The transcript above prints answers in the words the addressee was told to
@@ -502,6 +519,13 @@ def main (argv : List String) : IO UInt32 := do
         checkTrue "consent given: the apply question was put" (tr.any (Event.hasCode .ack))
     -- Plan.runCertified_certified, in IO where it is a check and not a theorem.
     check "the run certifies" "true" (toString report.certified)
+    -- Exec.permissionByCode, observed on the wire: an act may write and an ask
+    -- may not, so every permission this run granted arrived during a question
+    -- whose code was `ack`. Read off the record the transport kept
+    -- (`Acp.Conn.decisions`), which is the only place the two can be compared.
+    checkTrue "every permission granted arrived during an act"
+      (report.permissions.all fun d =>
+        !d.granted || (d.question.splitOn "ack question").length > 1)
     -- The act, against the artifact. `ack_quotes_consented_patch` says the plan
     -- can only hand the act the patch the owner approved; these checks are what
     -- a run can observe of that, and the last of them is the only statement in

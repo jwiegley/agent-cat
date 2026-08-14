@@ -54,8 +54,12 @@ of "a world is a function of the question"), routes a question put to a *person*
 to the keyboard where the runtime was told to (`Settings.askPersonOnStdin`:
 stderr out, stdin in, so a supervised run and a piped one are one run), selects
 the scope over the protocol where the adapter takes it, renders a question into
-a prompt, sends it over the transport, reports how the turn ended and how long
-it took (`Settings.onTurn` — latency is not part of a meaning, which is why it
+a prompt, **says whether a tool call arriving during that question may write**
+(`Settings.permission`, whose default `permissionByCode` grants an act and denies
+an ask — the transport has no `Code` and so cannot decide this itself), sends it
+over the transport, reports how the turn ended, how long
+it took and what it was permitted (`Settings.onTurn`, `Settings.onPermission` —
+latency is not part of a meaning, which is why it
 is reported and never recorded), decodes the reply, re-asks on a decode failure,
 and **fails the run** in the two cases where there is no answer to record: when no attempt could be read
 (`Exec.oracle`), and when the turn that would have answered an *act* — or any
@@ -871,9 +875,80 @@ def nudge (c : Code) (reply : String) : String :=
   s!"\n\n[Your previous reply could not be read as a {Code.name c}: \
      {reply.trimAscii.toString}\n{answerSpec c}]"
 
+/-! ### May the addressee of *this* question write to the workspace?
+
+`Agentic/Core/Acp.lean` answers `session/request_permission` with the
+`Acp.Permission` it was handed for the question under way, and this is what
+hands it one. The transport cannot make this decision — it has no `Code`, no
+`Q`, and by construction no way of acquiring either — so the decision is made
+here, where a question is a thing.
+-/
+
+/-- `[[permissionByCode c a]]` = whether a tool call the adapter asks for
+*during this question* is authorized.
+
+**An act may write; an ask may not.** `.ack` is the code whose whole point is an
+effect — the question does not ask what somebody thinks, it asks them to do
+something and say when it is done — so a tool call inside the session's working
+directory is what it was put for, and it is granted on the standing assumption
+`Acp.Permission` states. `.text`, `.verdict` and `.flag` are questions whose
+value is their *answer*: drafting a patch, reviewing one, or consenting to one
+requires nothing to be written, so a tool call arriving during one is denied.
+
+**Why this exists** (`acat-08l`). The transport used to hold one connection-wide
+`Permission` that nothing ever set, so `pickAllow` answered `allow_once` to
+every request whatever the question. A measured refusing run — the owner
+answered `no`, the transcript held six turns, no act was put, the bill was six,
+and `Harden.no_ack_of_refused` was satisfied — nevertheless ended with the
+scratch `parse.c` replaced by a hardened version, written during the *author's*
+draft turn. Nothing in the semantics was violated: the theorem is about
+acknowledgements, and the bytes were written by an editing tool the permission
+layer could not tell from a consented act. This function is the distinction the
+permission layer was missing.
+
+**What denial costs, measured, because it is not free.** A refused permission
+does not end the turn. The tool call fails, the model retries — sometimes with a
+different tool — apologises in prose, and the turn completes with `end_turn`;
+`test/stub_adapter.py`'s `APOLOGY` is a real transcript of it. So a denial buys
+its safety with tokens (ninety-odd thousand in the measured case) and produces
+*no protocol-level signal at all*: what arrives is an ordinary answer, which
+`Decode` will read as one. That is tolerable exactly where it is applied — an
+ask's answer is prose either way, and an apology for not writing a file is a
+truthful answer to a question that never wanted a file written — and it would
+not be tolerable for an act, which is why an act is granted.
+
+The addressee is an argument and is not read: who is asked does not change
+whether the question wanted an effect. It is there because a caller overriding
+`Settings.permission` may well want it — "this tool, never" is a policy about an
+addressee — and a policy that had to be rewritten to see one would be a policy
+nobody overrides. -/
+def permissionByCode (c : Code) (_a : Addressee) : Acp.Permission :=
+  match c with
+  | .ack => .grant
+  | .text | .verdict | .flag => .cancel
+
+/-- **Clause equation.** An act is granted, whoever is asked to perform it. -/
+@[simp] theorem permissionByCode_ack (a : Addressee) :
+    permissionByCode .ack a = .grant := rfl
+
+/-- **…and every ask is denied**: the three codes whose value is their answer
+get `.cancel`, whoever is asked. -/
+theorem permissionByCode_of_ne_ack {c : Code} (hc : c ≠ .ack) (a : Addressee) :
+    permissionByCode c a = .cancel := by
+  cases c <;> simp_all [permissionByCode]
+
+/-- **An ask selects no allow option, whatever the adapter offered.** The
+composition that matters: `Acp.permissionChoice` under this policy, at any code
+but `.ack`, is `none` — so no `options` array a permission request can carry
+can win a write to the workspace for a question that only wanted an answer. -/
+theorem permissionChoice_ask {c : Code} (hc : c ≠ .ack) (a : Addressee)
+    (params : Lean.Json) :
+    Acp.permissionChoice (permissionByCode c a) params = none := by
+  rw [permissionByCode_of_ne_ack hc a]; rfl
+
 /-- `[[Settings]]` = the policy an `IO` run needs and the semantics does not:
 how many times to re-ask, whether a person is at a keyboard, whether the mode
-axis goes over the protocol, and where warnings go.
+axis goes over the protocol, which questions may write, and where warnings go.
 
 The value represents *this runtime's choices*. Nothing here is visible to any
 theorem: two runs with different `Settings` exhibit two worlds, and every result
@@ -927,6 +1002,29 @@ structure Settings where
   discipline, and it is stated as a setting because it is a *policy*, not a
   theorem: nothing here can force an agent to forget. -/
   freshSessionPerQuestion : Bool := false
+  /-- Which questions may write: what a `session/request_permission` arriving
+  during a question is answered with.
+
+  `permissionByCode` by default — an act is granted, an ask is denied — and that
+  default is the point of the field's existence (`acat-08l`). A caller who
+  genuinely wants the old connection-wide grant asks for it in as many words:
+
+  ```
+  { permission := fun _ _ => .grant }
+  ```
+
+  which is a sentence somebody has to write, and which a reader of a run's
+  configuration can see. -/
+  permission : Code → Addressee → Acp.Permission := permissionByCode
+  /-- Called once per permission decision, with the question it arrived during,
+  the tool it was about and whether it was granted.
+
+  Reporting, like `onTurn`, and it defaults to stderr rather than to nothing: a
+  run that denied an agent the workspace and paid a retry for it must not look
+  identical to one nobody asked anything of. A harness that wants the decisions
+  in its report collects them here (`RunReport.permissions`). -/
+  onPermission : Acp.PermissionDecision → IO Unit :=
+    fun d => do (← IO.getStderr).putStrLn s!"agentic: {d.render}"
   /-- Where a warning goes: a turn that ended oddly, a reply being re-asked.
   Warnings report what the run is *about* to do about something it noticed; they
   are never a substitute for doing it, which is why an answer that could not be
@@ -1134,6 +1232,13 @@ def sayTurn (st : Settings) (conn : Conn) (c : Code) (q : Q c) (sent : Selected)
 /-- `[[say st conn c q sent extra]]` = put the question and return the bytes,
 **having first insisted that the bytes are somebody's answer**.
 
+**The permission policy is set here**, immediately before the prompt goes out,
+because "the question under way" is a fact this function has and the transport
+does not (`Acp.Conn.underQuestion`, `Settings.permission`). Every decision the
+turn provoked is reported afterwards through `Settings.onPermission`, in arrival
+order: a denial is the reason a turn cost what it cost, and an operator reading
+a long turn is owed the reason.
+
 Every turn that did not end in `end_turn` is logged, whatever the code, because
 an operator is owed the fact that the agent was cut off; and a turn that did not
 end in `end_turn` where `requiresCompletedTurn` says one was needed abandons the
@@ -1145,7 +1250,11 @@ check further down can recover the difference. -/
 def say (st : Settings) (conn : Conn) (c : Code) (q : Q c) (sent : Selected)
     (extra : String) : IO String := do
   let t₀ ← IO.monoMsNow
+  let decidedBefore ← conn.decisionCount
+  conn.underQuestion s!"the {Code.name c} question put to {Addressee.render q.addressee}"
+    (st.permission c q.addressee)
   let turn ← sayTurn st conn c q sent extra
+  for d in ← conn.decisionsFrom decidedBefore do st.onPermission d
   st.onTurn c q.addressee turn.stopReason ((← IO.monoMsNow) - t₀)
   if turn.stopReason.completed then return turn.text
   st.log s!"turn for a {Code.name c} from {Addressee.render q.addressee} ended \
