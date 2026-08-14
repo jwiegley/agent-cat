@@ -853,6 +853,15 @@ def checkTool : Tool where
   description :=
     "Parse and type-check a workflow written in the closed-plan DSL. Runs \
      nothing, asks nobody, costs nothing.\n\n\
+     A program is `workflow { … }` over braced blocks: `let x = ask <model|tool|\
+     person> \"name\" [using model \"m\"] for <text|verdict|flag|ack> \"words\"` \
+     binds an answer, `{x}` splices a text answer into a later prompt, `panel \
+     [ ask …, ask … ]` combines verdicts, `act <addressee> \"words\"` is the \
+     effect, `if x { … } else { … }` branches on a flag, `case v { approve { … } \
+     object { … } declined { … } }` on a verdict, and `revising a up to n \
+     revisions { check given p { … } revise given p, why { … } } approved given \
+     p { … } never approved { … }` is the bounded revision loop. A block that \
+     runs out of statements is over; `{ }` does nothing.\n\n\
      On success it reports the rung the program sits at (batch, pipeline or \
      branch — the language has no syntax for the dynamic rung, so every \
      accepted program is at most branch, and that is a theorem about the \
@@ -1511,8 +1520,10 @@ def serverCapabilities : Json :=
 
 /-- The prose a client shows the model about this server as a whole. -/
 def instructions : String :=
-  "Four tools over workflows written in a small DSL for closed plans. Check a \
-   program with workflow_check; run one by calling workflow_start and then \
+  "Four tools over workflows written in a small DSL for closed plans — braced \
+   blocks, `let x = ask … for …` bindings, `panel`, `act`, `if`/`else`, `case` \
+   and `revising … up to n revisions`; workflow_check's description carries the \
+   whole of it. Check a program with workflow_check; run one by calling workflow_start and then \
    workflow_answer once per question until the report comes back; recover with \
    workflow_transcript. Answers are read by the interpreter's own trusted base, \
    so reply in the words each question's answerSpec asks for. A question marked \

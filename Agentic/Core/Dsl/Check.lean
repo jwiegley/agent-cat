@@ -27,12 +27,12 @@ Three points where the elaboration is a decision rather than a transcription.
   `let` bound by an `ask` extends it with `Expr.var .here` in `c :: Γ` and
   weakens everything already there along `Sub.wk`, so the resolved variable
   *is* the de Bruijn index and the shifting is `Sub`'s. The three binders that
-  are **not** context entries — `accepted (p)`, whose value is an
-  `Option (El c)` and so cannot be one (`Ctx = List Code`), and `with (p, why)`,
-  whose `why` is a rendered verdict — are entries of the same table carrying a
-  different `Expr`. One table, no escape hatch.
+  are **not** context entries — `approved given p`, whose value is an
+  `Option (El c)` and so cannot be one (`Ctx = List Code`), and
+  `revise given p, why`, whose `why` is a rendered verdict — are entries of the
+  same table carrying a different `Expr`. One table, no escape hatch.
 
-* **`@model` rewrites a shape; it does not wrap a term.** `Plan.under σ` is a
+* **`using model` rewrites a shape; it does not wrap a term.** `Plan.under σ` is a
   fold over a whole plan, so wrapping the continuation of a `let` in it would
   put the scope on every later question. At a single question the fold is the
   shape's relabelling and nothing else — `under_ask1` below, which is `rfl` —
@@ -107,7 +107,7 @@ private def lookupBinding {Γ : Ctx} (S : Bindings Γ) (pos : Pos) (x : String) 
 text-typed names: `El .text = String` and nothing else embeds in a string
 without a choice of renderer, and a language that silently picked one would be a
 language whose prompts are not determined by their source. The one construct
-that appears to break the rule — `with (patch, why)` — does not: `why` is bound
+that appears to break the rule — `revise given patch, why` — does not: `why` is bound
 to `Verdict.render ∘ ·`, so the renderer is written where the binder is. -/
 private def chunkExpr {Γ : Ctx} (S : Bindings Γ) (pos : Pos) :
     Chunk → Except CheckError (Expr Γ String)
@@ -153,7 +153,7 @@ def Prompt.expr {Γ : Ctx} (S : Bindings Γ) (pos : Pos) :
 /-! ## Questions -/
 
 /-- The shape a target writes: the addressee and the draw as given, the scope at
-the unit of the scope monoid, and the `@model` override — if there is one —
+the unit of the scope monoid, and the `using model` override — if there is one —
 applied to it. `atModel` appends on the *left*, where the non-commutative
 `LastOpt` lets an inner setting have the last word. -/
 def askShape (m : Option String) (c : Code) (t : RawTarget) : Q.Shape c :=
@@ -164,7 +164,7 @@ def askShape (m : Option String) (c : Code) (t : RawTarget) : Q.Shape c :=
 
 /-- **Morphism equation.** At a single question the scope fold *is* the shape's
 relabelling: `Plan.under σ (Plan.ask1 c s e) = Plan.ask1 c (σ c s) e`. This is
-the equation that licenses `@model` being elaborated by rewriting a shape rather
+the equation that licenses `using model` being elaborated by rewriting a shape rather
 than by wrapping a term — wrapping would have put the scope on the whole rest of
 the block, which is a different workflow. -/
 theorem under_ask1 (σ : Sig) {Γ : Ctx} (c : Code) (s : Q.Shape c) (e : Expr Γ String) :
@@ -202,7 +202,7 @@ structure Binder (Γ : Ctx) : Type 1 where
 
 /-- One question, as a plan of its own: `Plan.askC1` where the words are in the
 term, `Plan.ask1` where they are computed. Used for panel members and for the
-`with` clause, whose results are values rather than binders. -/
+`revise` clause, whose results are values rather than binders. -/
 def checkAsk {Γ : Ctx} (S : Bindings Γ) (a : RawAsk) : Except CheckError (Checked Γ) :=
   let s := askShape a.model a.code a.target
   match Prompt.closed a.prompt with
@@ -302,7 +302,7 @@ def checkCont {Γ : Ctx} {c : Code} (chk : Plan (c :: Γ) (El .verdict)) :
     Plan.Cont Γ (El c) Verdict :=
   fun _ σ a => Plan.sub chk (fun δ => Env.cons (a δ) (σ δ))
 
-/-- The `with` clause: the verdict is de Bruijn `0` and the artefact de Bruijn
+/-- The `revise` clause: the verdict is de Bruijn `0` and the artefact de Bruijn
 `1`, so a revision knows *what* it is answering — the correction
 `attack-adequacy` §2.3 makes to the incumbent, here as a binder rather than as
 advice. -/
@@ -311,7 +311,7 @@ def reviseCont {Γ : Ctx} {c : Code} (rev : Plan (.verdict :: c :: Γ) (El c)) :
   fun _ σ av => Plan.sub rev (fun δ => Env.cons (av δ).2 (Env.cons (av δ).1 (σ δ)))
 
 /-- The two outcomes: `caseB` on whether the loop produced an artefact, with the
-artefact reaching the `accepted` block as de Bruijn `0`. The `none` arm reads
+artefact reaching the `approved given p` block as de Bruijn `0`. The `none` arm reads
 `default`, which no run ever sees — the two theorems about consent in
 `Agentic/Core/HardenPatch.lean` are the statement that the unreachable branch is
 unreachable. -/
@@ -324,21 +324,23 @@ def finishCont {Γ : Ctx} {c : Code} (acc : Plan (c :: Γ) Unit) (exh : Plan Γ 
 
 /-! ## How far a bounded revision may be unrolled
 
-`revising a upto n` elaborates to `Plan.revising … n`, which is `Nat.rec`
-building the unrolling, so the source's numeral is the size of the term the
-checker returns and the depth of the recursion that returns it. Nothing else in
-the language has that property: every other construct costs what it is written
-out to.
+`revising a up to n revisions` elaborates to `Plan.revising … n`, which is
+`Nat.rec` building the unrolling, so the source's numeral is the size of the
+term the checker returns and the depth of the recursion that returns it. Nothing
+else in the language has that property: every other construct costs what it is
+written out to.
 
 An unbounded numeral is therefore an unbounded elaboration, and `check`'s type
 does not say otherwise — it is total as a function of `Raw`, and a total
 function may still be one no machine can run. Measured, at
-`revising d upto n check … with … accepted { done } exhausted { done }`:
-`upto 1000000000` aborts the process with `Stack overflow detected` in 0.3 s,
-`upto 1000` prices in 71 s, `upto 400` in 3.5 s, `upto 100` in 56 ms and
-`upto 64` in 20 ms. The bound below is where that curve is still free. -/
+`revising d up to n revisions { check … revise … } approved given p { }
+never approved { }`: `up to 1000000000 revisions` aborts the process with
+`Stack overflow detected` in 0.3 s, `1000` prices in 71 s, `400` in 3.5 s, `100`
+in 56 ms and `64` in 20 ms. The bound below is where that curve is still
+free. -/
 
-/-- `[[maxRevisions]]` = the largest `n` a `revising … upto n` may name.
+/-- `[[maxRevisions]]` = the largest `n` a `revising … up to n revisions` may
+name.
 
 A resource limit and not a judgment, so it is refused with the same
 `CheckError` — position, message, excerpt — as every other refusal, rather than
@@ -350,14 +352,14 @@ to parsed text, and a bound in `Dsl.Parse` would leave that caller unguarded.
 `checkBlock_bounded` is the statement that this clause is the only way in. -/
 def maxRevisions : Nat := 64
 
-/-- `[[b.bounded]]` = every `revising … upto n` in `b` names an `n` that
-`maxRevisions` allows. Decidable, and first-order in the syntax: `RawRhs` has no
-block inside it, so the recursion is `RawBlock`'s own. -/
+/-- `[[b.bounded]]` = every `revising … up to n revisions` in `b` names an `n`
+that `maxRevisions` allows. Decidable, and first-order in the syntax: `RawRhs`
+has no block inside it, so the recursion is `RawBlock`'s own. -/
 def RawBlock.bounded : RawBlock → Bool
-  | .done _ => true
+  | .empty _ => true
   | .act _ _ _ => true
   | .bind _ _ rest _ => rest.bounded
-  | .caseFlag _ y n _ => y.bounded && n.bounded
+  | .ifFlag _ y n _ => y.bounded && n.bounded
   | .caseVerdict _ a o d _ => a.bounded && o.bounded && d.bounded
   | .revising _ n _ _ _ _ _ _ acc exh _ =>
       decide (n ≤ maxRevisions) && acc.bounded && exh.bounded
@@ -367,11 +369,11 @@ def RawBlock.bounded : RawBlock → Bool
 /-- `[[checkBlock Γ S b]]` = the plan `b` writes under the names `S`, or the
 reason it writes none.
 
-The result type is `Plan Γ Unit` and not `Plan Γ A`: every block ends in `done`
-or `act`, so a block *is* a closed workflow's worth of syntax, and "a workflow
-with a value nobody can receive" is not representable rather than rejected. -/
+The result type is `Plan Γ Unit` and not `Plan Γ A`: a block runs out or ends in
+a tail, so a block *is* a closed workflow's worth of syntax, and "a workflow with
+a value nobody can receive" is not representable rather than rejected. -/
 def checkBlock : (Γ : Ctx) → Bindings Γ → RawBlock → Except CheckError (Plan Γ Unit)
-  | _, _, .done _ => .ok (.ret fun _ => ())
+  | _, _, .empty _ => .ok (.ret fun _ => ())
   | _, S, .act t pr pos =>
     let s : Q.Shape .ack := { addressee := t.addressee, scope := 1, draw := t.draw }
     match Prompt.closed pr with
@@ -387,7 +389,7 @@ def checkBlock : (Γ : Ctx) → Bindings Γ → RawBlock → Except CheckError (
       match checkBlock (b.code :: Γ) (Bindings.push x b.code S) rest with
       | .error err => .error err
       | .ok k => .ok (b.form k)
-  | Γ, S, .caseFlag x y n pos =>
+  | Γ, S, .ifFlag x y n pos =>
     match lookupBinding S pos x with
     | .error err => .error err
     | .ok bnd =>
@@ -400,7 +402,7 @@ def checkBlock : (Γ : Ctx) → Bindings Γ → RawBlock → Except CheckError (
     match bnd.at? .flag with
     | some e => .ok (Plan.caseB e y' n')
     | none =>
-      .error ⟨pos, s!"the arms `yes` and `no` branch on a `flag`, \
+      .error ⟨pos, s!"an `if` branches on a flag, \
                      but `{x}` answers `{codeName bnd.code}`", x⟩
   | Γ, S, .caseVerdict x a o d pos =>
     match lookupBinding S pos x with
@@ -428,15 +430,16 @@ def checkBlock : (Γ : Ctx) → Bindings Γ → RawBlock → Except CheckError (
     if maxRevisions < n then
       .error ⟨pos, s!"a bounded revision is unrolled into the term it writes, \
                      so its bound may name at most {maxRevisions} revisions",
-              s!"upto {n}"⟩
+              s!"up to {n} revisions"⟩
     else
     match lookupBinding S pos subj with
     | .error err => .error err
     | .ok b =>
-    -- The names each clause adds. `check` and `accepted` see the artefact as
-    -- de Bruijn `0`; `with` sees the verdict as `0` and the artefact as `1`,
-    -- and binds `why` to that verdict *rendered*, which is what keeps
-    -- interpolation a text-only operation with no exception.
+    -- The names each clause is handed. `check given p` and `approved given p`
+    -- see the artefact as de Bruijn `0`; `revise given p, why` sees the verdict
+    -- as `0` and the artefact as `1`, and binds `why` to that verdict
+    -- *rendered*, which is what keeps interpolation a text-only operation with
+    -- no exception.
     let Swith : Bindings (Code.verdict :: b.code :: Γ) :=
       ⟨av, b.code, fun δ => Env.head (Env.tail δ)⟩ ::
       ⟨wv, Code.text, fun δ => Verdict.render (Env.head δ)⟩ ::
@@ -445,7 +448,7 @@ def checkBlock : (Γ : Ctx) → Bindings Γ → RawBlock → Except CheckError (
         "the `check` clause of a bounded revision" with
     | .error err => .error err
     | .ok chkP =>
-    match checkRhsAt b.code Swith rev "the `with` clause of a bounded revision" with
+    match checkRhsAt b.code Swith rev "the `revise` clause of a bounded revision" with
     | .error err => .error err
     | .ok revP =>
     match checkBlock (b.code :: Γ) (Bindings.push pv b.code S) acc with
@@ -471,7 +474,7 @@ theorem checkBlock_bounded : ∀ (r : RawBlock) (Γ : Ctx) (S : Bindings Γ) (p 
     checkBlock Γ S r = .ok p → r.bounded = true := by
   intro r
   induction r with
-  | done pos => intro _ _ _ _; rfl
+  | empty pos => intro _ _ _ _; rfl
   | act t pr pos => intro _ _ _ _; rfl
   | bind x rhs rest pos ih =>
     intro Γ S p h
@@ -481,7 +484,7 @@ theorem checkBlock_bounded : ∀ (r : RawBlock) (Γ : Ctx) (S : Bindings Γ) (p 
     · split at h
       · exact absurd h (by simp)
       · rename_i k hk; exact ih _ _ k hk
-  | caseFlag x y n pos ihy ihn =>
+  | ifFlag x y n pos ihy ihn =>
     intro Γ S p h
     simp only [checkBlock] at h
     split at h

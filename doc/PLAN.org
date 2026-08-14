@@ -2,6 +2,24 @@
 #+SEQ_TODO: TODO DOING DRAFT WAIT DEFER NOTE | DONE CANCELED
 #+ISSUE_PREFIX: acat
 
+* DONE [#C] The consent gate is decorative against a live adapter: permission is granted per connection, not per question
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-08l
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-14 Fri 12:14]
+:MODIFIED: [2026-08-14 Fri 12:55]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-14 Fri 12:55]
+:CLOSE_REASON: Fixed in 3b2ab57 and live-verified. Permission is now a function of the question under way (Exec.permissionByCode: .ack grants, every ask denies; Settings.permission overridable; Conn.asked/decisions record each decision with the question that provoked it; Config.permission now only covers requests arriving outside any question, set to .cancel by both harnesses). Plus the empirical counterpart: Artifact.fingerprint/WorkspaceDiff — the workspace is hashed after seeding and at the end, the difference is reported either way, and a run that performed no act (read off the replayed transcript, not the command line) and changed files exits 1 naming them. Negative controls in stub_adapter.py: --write-on-ask (the live defect's shape) must be denied and leave the workspace unchanged; --write-anyway must be caught by the fingerprint. LIVE: refusing run leaves the 323-byte seed byte-identical (md5 unchanged), with two DENIED Bash requests recorded — one of them the author trying to compile its patch in /tmp, OUTSIDE the workspace where the fingerprint is blind, caught only by the permission layer; consenting run grants exactly once during the ack and writes a 1090-byte parser, no strcpy, clean under -Wall -Wextra and ASan/UBSan. RESIDUE (filed separately): denial cost 0 extra turns in this run, contradicting the ~97k-token figure in the docstring, and the harness discards the usage object that would settle it; adapter substituted claude-fable-5 -> opus-4-8 with the narration concatenated onto a reviewer's APPROVE, which decodeVerdict then read as an objection and bought a revision round.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Found by the live run on 2026-08-14 (workflow w5sz6gul7, live stage). SYMPTOM: in the REFUSING run (owner answered no, transcript has six turns and no 'tool apply' line, bill 6) the scratch parse.c was nevertheless replaced with the hardened 823-byte version (seed is 323 bytes, md5 f18314ef... -> 8e856c16...). Timestamps place the write inside the AUTHOR's draft turn (dir birth 12:03:34, file birth 12:04:08, author turn spans ~12:03:49-12:04:23), and it is a birth not a modification: write-and-rename, the signature of an editing tool. CAUSE: Agentic/Core/Acp.lean:271 'permission : Permission := .grant' is a single connection-wide policy that nothing sets; pickAllow answers allow_once to every session/request_permission regardless of the question's Code. To the permission layer, 'ask text model author' and 'act tool apply' are the same thing, so the program's ask/act distinction and the case ok { no -> done } consent branch are unenforceable against a live agent. Harden.no_ack_of_refused still holds — it is about acknowledgements, not bytes — which is exactly the point: there is no theorem and no runtime check saying 'a refused run leaves the workspace as it found it'. FIX (two parts): (1) make the permission decision a function of the QUESTION, not of the connection: grant only for the act (.ack), deny for every ask, and document the known consequence of denial (the turn completes with prose in place of an act, ~97k tokens, no protocol signal); thread the current question through Exec into Acp; log each decision in the transcript. (2) Add the empirical counterpart of the consent theorem: fingerprint the workspace before and after a run, report changes, and fail the run when no act was performed and the workspace changed. Cover both with stub tests. ALSO from the same run, separate issues: the adapter substituted claude-opus-4-8 (not in its advertised catalogue) after claude-fable-5 declined on policy grounds, reporting it only as prose inside the answer — so Conn.configValues is not a complete account of what may answer; and all three reviewers approved a draft that was a policy-refusal banner plus prose plus a fenced diff rather than 'a unified diff only'.
+
 * TODO [#C] shareT under retryT/fanT: iteration and fan indices in the site key, or ask-once semantics
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -1443,6 +1461,22 @@ Owner directive 2026-08-12, verbatim core: 'your observation that agent-functor 
 :END:
 
 From acat-ubt: convFold handles certain members only; the general List (MSemiring S K) -> MSemiring S K reducer + perm invariance (needs conv_left_comm) is what the panelT syntax combinator (acat-x9v) will be built on. Also: §5.1's necessity claims (R must be a monoid; unit = empty panel) remain prose — formalize with it.
+
+* TODO [#C] Adapter narration corrupts answers; usage data discarded; denial cost unmeasured
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-owa
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-14 Fri 12:55]
+:MODIFIED: [2026-08-14 Fri 12:55]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+From the live re-test at 3b2ab57. (1) claude-agent-acp prepends model-fallback narration ('**Model fallback:** claude-fable-5 declined this request (cyber); retried with claude-opus-4-8') to the answer stream as ordinary agent_message_chunk text. In one run it was concatenated to a reviewer's 'APPROVE', and because approval must be the WHOLE reply (the fail-closed rule), decodeVerdict read the result as an objection and bought a revision round. Consider: strip a recognised leading narration block before decoding (fragile, and it is the adapter's text not the model's), or record it as a turn annotation, or leave decoding strict and surface the narration in the transcript so a reader knows why a verdict flipped. Note the substituted model (claude-opus-4-8) is NOT in the adapter's advertised catalogue, so Conn.configValues is not a complete account of what may answer. (2) Exec.say discards the usage object claude puts on the wire; capturing tokens per turn would let the runtime report real cost beside the tick bill, and would settle (3). (3) permissionByCode's docstring cites ~97k tokens as the measured cost of denial, but the live refusing run showed 0 extra turns and 0 retries — the figure came from an earlier probe under different conditions. Either measure it properly with usage data or soften the claim to what is known.
 
 * DONE [#B] Complete SqZero: csum instance, off-diagonal PMod, probability carrier
 :PROPERTIES:

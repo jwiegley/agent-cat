@@ -29,7 +29,7 @@ the requirement that the checker be *structurally* recursive.
   `Option (El c)` a bounded revision produces cannot be a context entry; it is
   reached by `Plan.graft`, whose continuation is not a binder. The syntax
   records that by giving `revising` no name to bind and putting its two
-  outcomes — `accepted` and `exhausted` — in the term.
+  outcomes — `approved given p` and `never approved` — in the term.
 
 `define` does not appear below. It is textual and the parser expands it, so a
 `Raw` mentions only names that a checker can be asked to resolve.
@@ -50,10 +50,10 @@ namespace Verdict
 separated by `"; "`, and nothing where it declined — a refusal has no objection
 list to show.
 
-This is what makes `with (patch, why)` legal in a language whose interpolation
-is restricted to text: `why` is bound to `render ∘ ·`, an `Expr Γ String`, so
-the restriction holds without an exception rather than being waived for one
-construct.
+This is what makes `revise given patch, why` legal in a language whose
+interpolation is restricted to text: `why` is bound to `render ∘ ·`, an
+`Expr Γ String`, so the restriction holds without an exception rather than being
+waived for one construct.
 
 The projection is written out rather than taken from `Verdict.objections`
 because that name belongs to `Agentic/Core/Report.lean`, which imports the
@@ -162,8 +162,8 @@ def Prompt.normalize : Prompt → Prompt
 
 /-- `[[RawTarget]]` = whom a question is put to and which draw it is: the part
 of `Q.Shape` an author writes. The third field of a shape — the scope — is the
-unit of the scope monoid at every node the syntax can write, and `@model` is the
-only override, so it is not a field here. -/
+unit of the scope monoid at every node the syntax can write, and
+`using model "…"` is the only override, so it is not a field here. -/
 structure RawTarget where
   /-- Who is asked. -/
   addressee : Addressee
@@ -171,10 +171,10 @@ structure RawTarget where
   draw : Nat
   deriving Repr, DecidableEq, Inhabited
 
-/-- `[[RawAsk]]` = one question, as written: an optional model override, the
-kind of answer wanted, the addressee, and the words. -/
+/-- `[[RawAsk]]` = one question, as written: the addressee, an optional model
+override, the kind of answer wanted, and the words. -/
 structure RawAsk where
-  /-- The `@model "s"` prefix, if any. -/
+  /-- The `using model "s"` override, if any. -/
   model : Option String
   /-- Which of the four answer kinds is wanted. -/
   code : Code
@@ -196,36 +196,42 @@ inductive RawRhs where
   | panel (members : List RawAsk) (pos : Pos)
   deriving Repr, DecidableEq, Inhabited
 
-/-- `[[RawBlock]]` = an unchecked block: some bindings, then a tail.
+/-- `[[RawBlock]]` = an unchecked block: some bindings, then at most a tail.
 
-Every block ends in a tail — `done`, `act`, a branching or `revising` — which is
-what makes every block a workflow returning unit rather than a workflow
-returning an answer somebody has to do something with. -/
+A block that runs out of statements is over, which is `.empty`; a block that
+ends in a tail — `act`, a branching or `revising` — ends there, because each arm
+and each outcome *is* the rest of the workflow. Either way a block is a workflow
+returning unit rather than a workflow returning an answer somebody has to do
+something with. -/
 inductive RawBlock where
   /-- `let x = rhs` followed by the rest of the block. -/
   | bind (x : String) (rhs : RawRhs) (rest : RawBlock) (pos : Pos)
-  /-- `done`: stop, having done nothing further. -/
-  | done (pos : Pos)
+  /-- `{ }`, or a block whose statements ran out: nothing further is done. The
+  position is the block's opening brace, which is where a reader looks to see
+  what did not happen. -/
+  | empty (pos : Pos)
   /-- `act tgt "…"`: the terminal act, an `.ack` question and nothing after
   it. -/
   | act (target : RawTarget) (prompt : Prompt) (pos : Pos)
-  /-- `case x { yes -> {…} no -> {…} }`: the two values of `El .flag`. -/
-  | caseFlag (x : String) (yes no : RawBlock) (pos : Pos)
-  /-- `case x { approve -> {…} object -> {…} declined -> {…} }`: the three
-  values of `VTag`, the finite classifier of a verdict. -/
+  /-- `if x {…} else {…}`: the two values of `El .flag`, both arms written. -/
+  | ifFlag (x : String) (yes no : RawBlock) (pos : Pos)
+  /-- `case x { approve {…} object {…} declined {…} }`: the three values of
+  `VTag`, the finite classifier of a verdict. -/
   | caseVerdict (x : String) (approve object declined : RawBlock) (pos : Pos)
-  /-- `revising a upto n check (p) {…} with (p, why) {…} accepted (p) {…}
-  exhausted {…}`: bounded revision, whose four clauses are literally
-  `Plan.revising`'s four arguments plus the two outcomes.
+  /-- `revising a up to n revisions { check given p {…} revise given p, why {…} }
+  approved given p {…} never approved {…}`: bounded revision, whose two braced
+  clauses are literally `Plan.revising`'s two continuations and whose two
+  outcome clauses are the two arms the graft's `finishCont` writes.
 
-  `upto n` performs **n+1 checks and at most n revisions** — check first, revise
-  in the recursive call — which is the reading `Plan.revising`'s docstring
-  records three independent derivations getting backwards. -/
-  | revising (subject : String) (upto : Nat)
+  `up to n revisions` performs **n+1 checks and at most n revisions** — check
+  first, revise in the recursive call — which is the reading `Plan.revising`'s
+  docstring records three independent derivations getting backwards, and which
+  the surface now spells where the numeral is. -/
+  | revising (subject : String) (bound : Nat)
       (checkBinder : String) (check : RawRhs)
       (artBinder : String) (whyBinder : String) (revise : RawRhs)
-      (acceptedBinder : String) (accepted : RawBlock)
-      (exhausted : RawBlock) (pos : Pos)
+      (approvedBinder : String) (approved : RawBlock)
+      (neverApproved : RawBlock) (pos : Pos)
   deriving Repr, DecidableEq, Inhabited
 
 /-- `[[Raw]]` = an unchecked text of a workflow: the body of `workflow { … }`,

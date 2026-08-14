@@ -26,9 +26,16 @@ is *not proved* — see the failed-morphism note in
 failure rather than a `panic!`.
 
 `define` is expanded here, by textual substitution into prompt chunks, so the
-raw syntax the checker sees mentions only names a checker can resolve. Adjacent
-literal chunks are fused afterwards (`Prompt.normalize`), which is what makes a
-prompt assembled from three macros one string rather than three.
+raw syntax the checker sees mentions only names a checker can resolve. Empty
+literal chunks are dropped afterwards (`Prompt.normalize`); adjacent ones are
+deliberately *not* fused, for the reason that function's docstring gives.
+
+**One structural rule, and the grammar is its consequences.** A scope is a pair
+of braces and `parseBlockFrom` is the one function that closes them, so
+indentation means nothing anywhere; a name is introduced by a word that says a
+name is being introduced (`define`, `let`, `given`), so no construct binds
+silently; and a block is a list of statements that may end in a tail, so a block
+which runs out is over and `{ }` is the way to write doing nothing.
 -/
 
 namespace Agentic.Core.Dsl
@@ -45,10 +52,8 @@ inductive Token where
   | str (p : Prompt)
   /-- A numeral. -/
   | num (n : Nat)
-  /-- One of `{ } [ ] ( ) , = @`. -/
+  /-- One of `{ } [ ] , =`: a scope, a list, a separator, a binding. -/
   | punct (c : Char)
-  /-- `->`, which separates an arm's tag from its block. -/
-  | arrow
   deriving Repr, Inhabited
 
 /-- `[[Tok]]` = a lexeme and where it was written. -/
@@ -65,7 +70,6 @@ def Token.excerpt : Token → String
   | .str _ => "\"…\""
   | .num n => toString n
   | .punct c => String.ofList [c]
-  | .arrow => "->"
 
 /-! ## The lexer -/
 
@@ -73,7 +77,7 @@ private def isIdentStart (c : Char) : Bool := c.isAlpha || c == '_'
 
 private def isIdentCont (c : Char) : Bool := c.isAlpha || c.isDigit || c == '_'
 
-private def punctChars : List Char := ['{', '}', '[', ']', '(', ')', ',', '=', '@']
+private def punctChars : List Char := ['{', '}', '[', ']', ',', '=']
 
 private def natOfDigits (ds : List Char) : Nat :=
   ds.foldl (fun n d => n * 10 + (d.toNat - 48)) 0
@@ -126,8 +130,9 @@ private def scanString : Nat → List Char → Pos → List Char → Prompt →
     else
       scanString fuel cs ⟨p.line, p.col + 1⟩ (c :: acc) chunks
 
-/-- The lexer proper. Comments run from `--` to the end of the line; `->` is the
-one two-character lexeme. -/
+/-- The lexer proper. Comments run from `--` to the end of the line, and there
+is no two-character lexeme: every lexeme is a word, a number, a string or one of
+six punctuation marks. -/
 private def lexAux : Nat → List Char → Pos → List Tok → Except CheckError (List Tok)
   | 0, _, p, _ => .error ⟨p, "internal: lexer budget exhausted", ""⟩
   | _ + 1, [], _, acc => .ok acc.reverse
@@ -137,8 +142,8 @@ private def lexAux : Nat → List Char → Pos → List Tok → Except CheckErro
     else if c == '-' then
       match cs with
       | '-' :: cs' => lexAux fuel (cs'.dropWhile (fun d => d != '\n')) p acc
-      | '>' :: cs' => lexAux fuel cs' ⟨p.line, p.col + 2⟩ (⟨.arrow, p⟩ :: acc)
-      | _ => .error ⟨p, "stray `-`; `--` begins a comment and `->` an arm", "-"⟩
+      | _ => .error ⟨p, "stray `-`; `--` begins a comment, and nothing else in the language \
+                        begins with one", "-"⟩
     else if c == '"' then
       match scanString (fuel + 1) cs ⟨p.line, p.col + 1⟩ [] [] with
       | .error e => .error e
@@ -182,16 +187,41 @@ private def expectPunct (c : Char) (ts : List Tok) : Except CheckError (List Tok
     if c' == c then .ok rest else .error (unexpected ts s!"`{String.ofList [c]}`")
   | _ => .error (unexpected ts s!"`{String.ofList [c]}`")
 
-private def expectArrow (ts : List Tok) : Except CheckError (List Tok) :=
-  match ts with
-  | ⟨.arrow, _⟩ :: rest => .ok rest
-  | _ => .error (unexpected ts "`->`")
-
 private def expectKw (k : String) (ts : List Tok) : Except CheckError (List Tok) :=
   match ts with
   | ⟨.ident k', _⟩ :: rest =>
     if k' == k then .ok rest else .error (unexpected ts s!"`{k}`")
   | _ => .error (unexpected ts s!"`{k}`")
+
+/-- A keyword whose absence deserves more than its own name: the whole clause
+that was expected, spelled out. Used where the missing word is the head of a
+construct a reader has to be told the *shape* of — the two outcome clauses of a
+bounded revision — rather than a word they can see is missing. -/
+private def expectKwSaying (k : String) (what : String) (ts : List Tok) :
+    Except CheckError (List Tok) :=
+  match ts with
+  | ⟨.ident k', _⟩ :: rest =>
+    if k' == k then .ok rest else .error (unexpected ts what)
+  | _ => .error (unexpected ts what)
+
+/-- The opening brace of a block, and where it is. The position is kept because
+an empty block has no other token of its own to be diagnosed at, and because
+`{ }` is where a reader looks to see what did not happen. -/
+private def expectOpen (ts : List Tok) : Except CheckError (Pos × List Tok) :=
+  match ts with
+  | ⟨.punct '{', p⟩ :: rest => .ok (p, rest)
+  | _ => .error (unexpected ts "`{`")
+
+/-- The closing brace of a block, after its tail. A tail is the last thing in
+its block — each arm and each outcome *is* the rest of the workflow — so the
+diagnosis says that rather than naming a brace. -/
+private def expectBlockEnd (ts : List Tok) : Except CheckError (List Tok) :=
+  match ts with
+  | ⟨.punct '}', _⟩ :: rest => .ok rest
+  | _ =>
+    .error (unexpected ts
+      "`}`: `act`, `if`, `case` and `revising` are tails, and a tail ends its block — \
+       each arm and each outcome is the rest of the workflow")
 
 private def expectIdent (ts : List Tok) : Except CheckError (String × List Tok) :=
   match ts with
@@ -251,24 +281,42 @@ private def parseTarget (ts : List Tok) : Except CheckError (RawTarget × List T
     | _ => .ok (⟨mk name, 0⟩, rest)
   | _ => .error (unexpected ts "an addressee: `model`, `tool` or `person`")
 
-/-- `ask ::= [sig] "ask" code target prompt`, with `sig ::= "@model" string`. -/
+/-- `ask ::= "ask" target ["using" "model" string] "for" code string`.
+
+Three prepositions, in the order a reader needs them: *who* is asked, *which
+model serves it*, *what kind of answer* is wanted, and then the words. The kind
+sits between the addressee's name and the prompt, so no two string literals are
+ever adjacent in an `ask` and nobody has to know an arity to see where the
+phrase ends. -/
 private def parseAsk (defs : List (String × Prompt)) (ts : List Tok) :
     Except CheckError (RawAsk × List Tok) := do
+  let p := posOf ts
+  let ts ← expectKw "ask" ts
+  let (tgt, ts) ← parseTarget ts
   let (model, ts) : Option String × List Tok ←
     match ts with
-    | ⟨.punct '@', _⟩ :: rest => do
+    | ⟨.ident "using", _⟩ :: rest => do
       let rest ← expectKw "model" rest
       let (m, rest) ← expectPlainStr rest
       .ok (some m, rest)
     | _ => .ok (none, ts)
-  let p := posOf ts
-  let ts ← expectKw "ask" ts
+  let ts ← expectKw "for" ts
+  let kp := posOf ts
   let (cname, ts) ← expectIdent ts
   let code : Code ←
     match codeOfName cname with
     | some c => .ok c
-    | none => .error ⟨p, "expected an answer kind: `text`, `verdict`, `flag` or `ack`", cname⟩
-  let (tgt, ts) ← parseTarget ts
+    | none => .error ⟨kp, "expected an answer kind: `text`, `verdict`, `flag` or `ack`", cname⟩
+  -- The one order the grammar fixes and a reader can get wrong. `using model`
+  -- says *who serves* the addressee, so it belongs beside the addressee and
+  -- before `for`; written after the kind it would put two string literals side
+  -- by side, which is the adjacency the phrase order exists to prevent.
+  let ts ← match ts with
+    | ⟨.ident "using", up⟩ :: _ =>
+      .error ⟨up, "`using model` says which model serves the addressee, so it is written \
+                  beside the addressee and before `for`: \
+                  `ask <addressee> \"name\" using model \"m\" for <kind> \"words\"`", "using"⟩
+    | _ => .ok ts
   let (pr, ts) ← expectStr ts
   .ok (⟨model, code, tgt, prompt defs pr, p⟩, ts)
 
@@ -284,7 +332,12 @@ private def parsePanelMembers : Nat → List (String × Prompt) → List Tok →
       .ok (a :: as, ts)
     | _ => .ok ([a], ts)
 
-/-- `rhs ::= ask | panel` -/
+/-- `rhs ::= ask | panel`.
+
+A bounded revision is refused here by name. It is the one construct a reader
+might reasonably try to bind — it produces an artefact — and it cannot be bound:
+`Plan.revising` yields an `Option (El c)`, which `Ctx = List Code` has no room
+for, so its result is consumed by two outcome clauses rather than by a name. -/
 private def parseRhs (defs : List (String × Prompt)) (ts : List Tok) :
     Except CheckError (RawRhs × List Tok) := do
   match ts with
@@ -293,121 +346,141 @@ private def parseRhs (defs : List (String × Prompt)) (ts : List Tok) :
     let (ms, rest) ← parsePanelMembers (rest.length + 1) defs rest
     let rest ← expectPunct ']' rest
     .ok (.panel ms p, rest)
+  | ⟨.ident "revising", p⟩ :: _ =>
+    .error ⟨p, "a bounded revision has two outcomes and is not an answer to bind: write its \
+               `approved given …` and `never approved` clauses after its braces", "revising"⟩
   | _ => do
     let (a, ts) ← parseAsk defs ts
     .ok (.ask a, ts)
 
-/-- `block ::= {stmt} tail`.
+/-- `rhs` in braces, which is what a `check` or `revise` clause carries. Written
+`{ rhs }` rather than bare so that the clause can be relaxed later to a block
+without moving a character of what exists. -/
+private def parseBracedRhs (defs : List (String × Prompt)) (ts : List Tok) :
+    Except CheckError (RawRhs × List Tok) := do
+  let ts ← expectPunct '{' ts
+  let (r, ts) ← parseRhs defs ts
+  let ts ← expectPunct '}' ts
+  .ok (r, ts)
+
+/-- `block ::= "{" {binding} [tail] "}"`, the opening brace already consumed and
+its position passed in as `opos`.
+
+**The block consumes its own closing brace**, and the empty block is what a
+block that runs out of statements is, so `{ }` does nothing and needs no word to
+say so. `opos` is where that nothing is written.
 
 The budget decreases at every nested block and at every statement; a block
 nested `n` deep and `m` statements long needs `n + m` of it, and the caller
 supplies the token count, which bounds both. -/
-private def parseBlock : Nat → List (String × Prompt) → List Tok →
+private def parseBlockFrom : Nat → List (String × Prompt) → Pos → List Tok →
     Except CheckError (RawBlock × List Tok)
-  | 0, _, ts => .error ⟨posOf ts, "internal: parser budget exhausted", ""⟩
-  | fuel + 1, defs, ts =>
+  | 0, _, _, ts => .error ⟨posOf ts, "internal: parser budget exhausted", ""⟩
+  | fuel + 1, defs, opos, ts =>
     match ts with
     | ⟨.ident "let", p⟩ :: rest => do
       let (x, rest) ← expectIdent rest
       let rest ← expectPunct '=' rest
       let (rhs, rest) ← parseRhs defs rest
-      let (b, rest) ← parseBlock fuel defs rest
+      let (b, rest) ← parseBlockFrom fuel defs opos rest
       .ok (.bind x rhs b p, rest)
-    | ⟨.ident "done", p⟩ :: rest => .ok (.done p, rest)
+    | ⟨.punct '}', _⟩ :: rest => .ok (.empty opos, rest)
     | ⟨.ident "act", p⟩ :: rest => do
       let (tgt, rest) ← parseTarget rest
       let (pr, rest) ← expectStr rest
+      let rest ← expectBlockEnd rest
       .ok (.act tgt (prompt defs pr) p, rest)
+    | ⟨.ident "if", p⟩ :: rest => do
+      let (x, rest) ← expectIdent rest
+      let (o, rest) ← expectOpen rest
+      let (y, rest) ← parseBlockFrom fuel defs o rest
+      let rest ← expectKw "else" rest
+      let (o', rest) ← expectOpen rest
+      let (n, rest) ← parseBlockFrom fuel defs o' rest
+      let rest ← expectBlockEnd rest
+      .ok (.ifFlag x y n p, rest)
     | ⟨.ident "case", p⟩ :: rest => do
       let (x, rest) ← expectIdent rest
       let rest ← expectPunct '{' rest
       -- The arms, whose *shape* is the branching: `FinEnum` demands every arm,
       -- so a source text that omits one is rejected here rather than carried
-      -- into a term that could not represent the omission anyway.
-      match rest with
-      | ⟨.ident "yes", _⟩ :: _ => do
-        let rest ← expectKw "yes" rest
-        let rest ← expectArrow rest
-        let rest ← expectPunct '{' rest
-        let (y, rest) ← parseBlock fuel defs rest
-        let rest ← expectPunct '}' rest
-        let rest ← expectKw "no" rest
-        let rest ← expectArrow rest
-        let rest ← expectPunct '{' rest
-        let (n, rest) ← parseBlock fuel defs rest
-        let rest ← expectPunct '}' rest
-        let rest ← expectPunct '}' rest
-        .ok (.caseFlag x y n p, rest)
-      | ⟨.ident "approve", _⟩ :: _ => do
-        let rest ← expectKw "approve" rest
-        let rest ← expectArrow rest
-        let rest ← expectPunct '{' rest
-        let (a, rest) ← parseBlock fuel defs rest
-        let rest ← expectPunct '}' rest
-        let rest ← expectKw "object" rest
-        let rest ← expectArrow rest
-        let rest ← expectPunct '{' rest
-        let (o, rest) ← parseBlock fuel defs rest
-        let rest ← expectPunct '}' rest
-        let rest ← expectKw "declined" rest
-        let rest ← expectArrow rest
-        let rest ← expectPunct '{' rest
-        let (d, rest) ← parseBlock fuel defs rest
-        let rest ← expectPunct '}' rest
-        let rest ← expectPunct '}' rest
-        .ok (.caseVerdict x a o d p, rest)
-      | _ =>
-        .error (unexpected rest
-          "the arms of a branching: `yes` and `no` for a flag, or `approve`, `object` \
-           and `declined` for a verdict")
+      -- into a term that could not represent the omission anyway. `if` takes
+      -- the two-valued branching, so `case` is a verdict's three tags and
+      -- nothing else.
+      let rest ← expectKwSaying "approve"
+        "the arms of a verdict branching, all three: `approve`, `object` and `declined` \
+         (a two-way branching on a flag is `if … else`)" rest
+      let (o1, rest) ← expectOpen rest
+      let (a, rest) ← parseBlockFrom fuel defs o1 rest
+      let rest ← expectKw "object" rest
+      let (o2, rest) ← expectOpen rest
+      let (o, rest) ← parseBlockFrom fuel defs o2 rest
+      let rest ← expectKw "declined" rest
+      let (o3, rest) ← expectOpen rest
+      let (d, rest) ← parseBlockFrom fuel defs o3 rest
+      let rest ← expectPunct '}' rest
+      let rest ← expectBlockEnd rest
+      .ok (.caseVerdict x a o d p, rest)
     | ⟨.ident "revising", p⟩ :: rest => do
       let (subject, rest) ← expectIdent rest
-      let rest ← expectKw "upto" rest
+      let rest ← expectKw "up" rest
+      let rest ← expectKw "to" rest
       let (n, rest) ← expectNat rest
-      -- check (x) { rhs }
-      let rest ← expectKw "check" rest
-      let rest ← expectPunct '(' rest
-      let (cv, rest) ← expectIdent rest
-      let rest ← expectPunct ')' rest
+      -- Both spellings of the noun, so that `up to 1 revision` is English. The
+      -- unit is named where the numeral is because the numeral is the one thing
+      -- three independent readers of `Plan.revising` got backwards.
+      let rest ← match rest with
+        | ⟨.ident "revisions", _⟩ :: r => .ok r
+        | ⟨.ident "revision", _⟩ :: r => .ok r
+        | _ => .error (unexpected rest "`revisions`, the unit the numeral counts")
+      -- The loop's own braces hold exactly the loop: `check` and `revise` are
+      -- `Plan.revising`'s two continuations. The two outcomes belong to the
+      -- graft and are written outside them.
       let rest ← expectPunct '{' rest
-      let (chk, rest) ← parseRhs defs rest
-      let rest ← expectPunct '}' rest
-      -- with (x, why) { ask }
-      let rest ← expectKw "with" rest
-      let rest ← expectPunct '(' rest
+      let rest ← expectKw "check" rest
+      let rest ← expectKw "given" rest
+      let (cv, rest) ← expectIdent rest
+      let (chk, rest) ← parseBracedRhs defs rest
+      let rest ← expectKwSaying "revise"
+        "`revise given <artefact>, <why> { … }`: a bounded revision says how a rejected \
+         candidate is rewritten" rest
+      let rest ← expectKw "given" rest
       let (av, rest) ← expectIdent rest
       let rest ← expectPunct ',' rest
       let (wv, rest) ← expectIdent rest
-      let rest ← expectPunct ')' rest
-      let rest ← expectPunct '{' rest
-      let (rev, rest) ← parseRhs defs rest
+      let (rev, rest) ← parseBracedRhs defs rest
       let rest ← expectPunct '}' rest
-      -- accepted (x) { block }
-      let rest ← expectKw "accepted" rest
-      let rest ← expectPunct '(' rest
+      -- approved given x { block }
+      let rest ← expectKwSaying "approved"
+        "`approved given <name> { … }`: a bounded revision writes both of its outcomes" rest
+      let rest ← expectKw "given" rest
       let (pv, rest) ← expectIdent rest
-      let rest ← expectPunct ')' rest
-      let rest ← expectPunct '{' rest
-      let (acc, rest) ← parseBlock fuel defs rest
-      let rest ← expectPunct '}' rest
-      -- exhausted { block }
-      let rest ← expectKw "exhausted" rest
-      let rest ← expectPunct '{' rest
-      let (exh, rest) ← parseBlock fuel defs rest
-      let rest ← expectPunct '}' rest
+      let (o1, rest) ← expectOpen rest
+      let (acc, rest) ← parseBlockFrom fuel defs o1 rest
+      -- never approved { block }
+      let rest ← expectKwSaying "never"
+        "`never approved { … }`: a bounded revision writes both of its outcomes, and this \
+         is the one in which there is no artefact to hand over" rest
+      let rest ← expectKw "approved" rest
+      let (o2, rest) ← expectOpen rest
+      let (exh, rest) ← parseBlockFrom fuel defs o2 rest
+      let rest ← expectBlockEnd rest
       .ok (.revising subject n cv chk av wv rev pv acc exh p, rest)
     | ⟨.ident "ask", p⟩ :: _ =>
-      .error ⟨p, "a block ends in `done` or `act`; this one ends with an answer, and a closed \
-                 workflow has nowhere to return one", "ask"⟩
+      .error ⟨p, "a question here has nowhere to put its answer: write `let x = ask …`, \
+                 or `act` if the point is the doing", "ask"⟩
     | ⟨.ident "panel", p⟩ :: _ =>
-      .error ⟨p, "a block ends in `done` or `act`; this one ends with an answer, and a closed \
-                 workflow has nowhere to return one", "panel"⟩
-    | ⟨.punct '@', p⟩ :: _ =>
-      .error ⟨p, "a block ends in `done` or `act`; this one ends with an answer, and a closed \
-                 workflow has nowhere to return one", "@"⟩
+      .error ⟨p, "a question here has nowhere to put its answer: write `let x = panel …`, \
+                 or `act` if the point is the doing", "panel"⟩
     | _ =>
       .error (unexpected ts
-        "a statement (`let`) or a tail (`done`, `act`, `case`, `revising`)")
+        "a statement (`let`), a tail (`act`, `if`, `case`, `revising`), or `}`")
+
+/-- `block ::= "{" {binding} [tail] "}"`, braces and all. -/
+private def parseBlock (fuel : Nat) (defs : List (String × Prompt)) (ts : List Tok) :
+    Except CheckError (RawBlock × List Tok) := do
+  let (o, ts) ← expectOpen ts
+  parseBlockFrom fuel defs o ts
 
 /-- `{define}` — the macro preamble, with a caller's overrides.
 
@@ -465,9 +538,7 @@ def parseWith (ov : List (String × Prompt)) (s : String) : Except CheckError Ra
     .error ⟨posOf rest, s!"this program has no `define {o.1}` to override", o.1⟩
   | none => do
     let ts ← expectKw "workflow" rest
-    let ts ← expectPunct '{' ts
     let (b, ts) ← parseBlock (ts.length + 1) defs ts
-    let ts ← expectPunct '}' ts
     match ts with
     | [] => .ok b
     | _ => .error (unexpected ts "the end of the source after the workflow")

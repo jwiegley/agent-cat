@@ -103,29 +103,31 @@
 <span class="kw">define</span> brief = <span class="str">"Reply in one short line."</span>
 
 <span class="kw">workflow</span> {
-  <span class="kw">let</span> subject = <span class="kw">ask</span> text tool <span class="str">"cat"</span>
+  <span class="kw">let</span> subject = <span class="kw">ask</span> tool <span class="str">"cat"</span> <span class="kw">for</span> text
     <span class="str">"Name one thing worth greeting.\n{brief}"</span>
 
-  <span class="kw">let</span> greeting = <span class="kw">ask</span> text model <span class="str">"greeter"</span>
+  <span class="kw">let</span> greeting = <span class="kw">ask</span> model <span class="str">"greeter"</span> <span class="kw">for</span> text
     <span class="str">"Write a greeting for this, and nothing else:\n{subject}\n{brief}"</span>
 
   <span class="kw">act</span> tool <span class="str">"say"</span>
     <span class="str">"Say it:\n{greeting}\nThen reply DONE."</span>
 }</code></pre>
 
-<p>Read it as five decisions. <code>define</code> introduces a piece of text used more than once; the parser expands it, so nothing of it survives into the program. <code>workflow { … }</code> encloses the body, which is a sequence of bindings ending in an act or in <code>done</code>. Each <code>let</code> puts one question and binds its answer to a name. <code>ask text</code> says the answer wanted is free text; <code>tool "cat"</code> and <code>model "greeter"</code> say who is asked. Inside a prompt, <code>{subject}</code> splices an answer already in scope, which is how one question's reply becomes part of the next question's words.</p>
+<p>Read it as five decisions. <code>define</code> introduces a piece of text used more than once; the parser expands it, so nothing of it survives into the program. <code>workflow { … }</code> encloses the body, which is a sequence of bindings ending in an act — or simply running out, since a list of things to do that runs out is over. Each <code>let</code> puts one question and binds its answer to a name. <code>ask tool "cat"</code> says who is asked; <code>for text</code> says the answer wanted is free text. Inside a prompt, <code>{subject}</code> splices an answer already in scope, which is how one question's reply becomes part of the next question's words.</p>
 
-<p>Two points follow from this that are worth grasping early, because the rest of the language rests on them. A name is bound to <em>an answer</em>, not to a question, so mentioning <code>{brief}</code> twice costs nothing and mentioning <code>{subject}</code> twice puts no second question: <mark>sharing is binding</mark>. And an act is terminal: <code>act</code> puts a question whose answer carries no information, and nothing follows it in the block.</p>
+<p>Three rules hold everywhere in the language, and the rest of it is their consequences. <mark>A scope is a pair of braces</mark> — every region in which a name is visible is <code>{ … }</code>, and indentation means nothing anywhere. <mark>A name is introduced by a word that says a name is being introduced</mark> — <code>define x =</code> and <code>let x =</code> for a name bound to an answer, <code>given x</code> for a name a clause is handed, and there is no third way. <mark>A prompt is the last thing in its phrase</mark>, and the kind sits between the addressee's name and the words, so no two string literals are ever adjacent in an <code>ask</code> and nobody has to know an arity to see where a phrase ends.</p>
+
+<p>Two more points are worth grasping early. A name is bound to <em>an answer</em>, not to a question, so mentioning <code>{brief}</code> twice costs nothing and mentioning <code>{subject}</code> twice puts no second question: <mark>sharing is binding</mark>. And an act is terminal: <code>act</code> puts a question whose answer carries no information, and nothing follows it in the block.</p>
 
 <h2 id="vocab"><span class="num">Two</span> The vocabulary</h2>
 
-<p>The language has eight constructs. Each one names an object the library already has, and the checker translates it into that object rather than into an interpretation of its own.</p>
+<p>The language has eight constructs and thirty-eight lexemes. Each construct names an object the library already has, and the checker translates it into that object rather than into an interpretation of its own.</p>
 
 <h3>Asking</h3>
 
-<pre><code><span class="kw">ask</span> &lt;kind&gt; &lt;addressee&gt; <span class="str">"words"</span>
-<span class="kw">ask</span> &lt;kind&gt; &lt;addressee&gt; draw &lt;n&gt; <span class="str">"words"</span>
-@model <span class="str">"name"</span> <span class="kw">ask</span> &lt;kind&gt; &lt;addressee&gt; <span class="str">"words"</span></code></pre>
+<pre><code><span class="kw">ask</span> &lt;addressee&gt; <span class="kw">for</span> &lt;kind&gt; <span class="str">"words"</span>
+<span class="kw">ask</span> &lt;addressee&gt; draw &lt;n&gt; <span class="kw">for</span> &lt;kind&gt; <span class="str">"words"</span>
+<span class="kw">ask</span> &lt;addressee&gt; <span class="kw">using model</span> <span class="str">"name"</span> <span class="kw">for</span> &lt;kind&gt; <span class="str">"words"</span></code></pre>
 
 <p>Four kinds of answer exist, and the kind is part of the question rather than a hope about the reply.</p>
 
@@ -139,7 +141,7 @@
 
 <p>Three addressees exist — <code>model "name"</code>, <code>tool "name"</code>, and <code>person "name"</code> — and they are recorded in the question, not in the runtime. A person is an addressee like any other; asking one for consent is an ordinary question whose answer is a flag.</p>
 
-<p><code>draw n</code> marks an independent resample. Two questions with identical words and different draws are two questions and are answered separately; without it they are the same question and are answered once. <code>@model "name"</code> directs one question to a particular model, and it rewrites that question's own scope rather than wrapping anything, so it never leaks onto the questions that follow.</p>
+<p><code>draw n</code> marks an independent resample. Two questions with identical words and different draws are two questions and are answered separately; without it they are the same question and are answered once. <code>using model "name"</code> directs one question to a particular model, and it rewrites that question's own scope rather than wrapping anything, so it never leaks onto the questions that follow. Read the two together as English: <code>ask model "author"</code> says <em>who is asked</em>, <code>using model "deep"</code> says <em>which model serves it</em>, and the two prepositions keep two different fields of the question apart.</p>
 
 <h3>Binding</h3>
 
@@ -155,31 +157,38 @@
 
 <h3>Bounded revision</h3>
 
-<pre><code><span class="kw">revising</span> &lt;subject&gt; <span class="kw">upto</span> &lt;n&gt;
-  <span class="kw">check</span>     (a)      { &lt;ask or panel yielding a verdict&gt; }
-  <span class="kw">with</span>      (a, why) { &lt;ask yielding text&gt; }
-  <span class="kw">accepted</span>  (a)      { &lt;block&gt; }
-  <span class="kw">exhausted</span>          { &lt;block&gt; }</code></pre>
+<pre><code><span class="kw">revising</span> &lt;subject&gt; <span class="kw">up to</span> &lt;n&gt; <span class="kw">revisions</span> {
+  <span class="kw">check</span>  <span class="kw">given</span> a       { &lt;ask or panel yielding a verdict&gt; }
+  <span class="kw">revise</span> <span class="kw">given</span> a, why  { &lt;ask yielding the artefact's kind&gt; }
+}
+<span class="kw">approved</span> <span class="kw">given</span> a { &lt;block&gt; }
+<span class="kw">never approved</span>   { &lt;block&gt; }</code></pre>
 
-<p>The four clauses are read in order. <code>check</code> reviews the current artefact; if it approves, control passes to <code>accepted</code> with that artefact bound. If it objects and revisions remain, <code>with</code> produces a new artefact — <code>why</code> is bound to the objections as text — and the cycle repeats. If the budget runs out, <code>exhausted</code> runs instead.</p>
+<p>The loop's braces hold exactly the loop. <code>check</code> reviews the current artefact; if it objects and revisions remain, <code>revise</code> produces a new one — <code>why</code> is bound to the objections as text — and the cycle repeats. Each clause says <code>given</code> because each is <em>handed</em> its names: the author does not choose the artefact, the loop hands it over, and <code>a</code> in <code>check</code>, in <code>revise</code> and in <code>approved</code> are three different binders that happen to share a spelling.</p>
 
-<p>Note the order and count: <code>upto n</code> performs <strong>n + 1 checks and at most n revisions</strong>. The artefact reaching <code>accepted</code> has always been reviewed, which is the property worth having and the one easily written backwards.</p>
+<p>The two clauses <em>after</em> the braces are the two ways the loop can end, and they are outside because they are not part of it: <code>approved given a</code> runs with an approved artefact in hand, <code>never approved</code> runs when the budget ran out with objections outstanding, and there is no artefact to hand it. Each outcome <em>is</em> the rest of the workflow — control does not rejoin, and nothing follows them — which is why they are written as two clauses of one statement rather than as a value some later line consumes.</p>
+
+<p>Note the order and count: <code>up to n revisions</code> performs <strong>n + 1 checks and at most n revisions</strong>. The unit is named where the numeral is precisely because three independent readers of the library got that number backwards. Both spellings are accepted, so <code>up to 1 revision</code> is English; it is the only word in the language with two spellings. The artefact reaching <code>approved</code> has always been reviewed, which is the property worth having and the one easily written backwards.</p>
 
 <h3>Branching</h3>
 
-<pre><code><span class="kw">case</span> flagName    { yes -&gt; { … }  no -&gt; { … } }
-<span class="kw">case</span> verdictName { approve -&gt; { … }  object -&gt; { … }  declined -&gt; { … } }</code></pre>
+<pre><code><span class="kw">if</span> flagName { … } <span class="kw">else</span> { … }
+<span class="kw">case</span> verdictName { <span class="kw">approve</span> { … }  <span class="kw">object</span> { … }  <span class="kw">declined</span> { … } }</code></pre>
 
-<p>Every arm is written out; there is no default and no fall-through. This is not strictness for its own sake. An arm that is present in the program can be priced whether or not any run takes it, which is what allows a branching program to have a cost analysis at all.</p>
+<p>Every arm is written out; there is no default, no fall-through, and no elidable <code>else</code>. This is not strictness for its own sake. An arm that is present in the program can be priced whether or not any run takes it, which is what allows a branching program to have a cost analysis at all — the flagship's nine-leaf cost tree counts the arm nobody takes, and an author who cannot see that arm cannot read the bill.</p>
+
+<p>A branching is a tail: each arm is the rest of the workflow, and nothing follows the branching in its block.</p>
 
 <h3>Ending</h3>
 
 <pre><code><span class="kw">act</span> &lt;addressee&gt; <span class="str">"words"</span>     <span class="cm">-- do the thing; nothing follows</span>
-<span class="kw">done</span>                        <span class="cm">-- stop, having done nothing further</span></code></pre>
+{ }                         <span class="cm">-- a block that does nothing; there is no word for it</span></code></pre>
+
+<p>A block is a list of things to do, and a list that runs out is over: <code>{ }</code> does nothing, and <code>{ let x = ask … }</code> asks and stops. Doing nothing therefore looks like doing nothing, which is what the language has instead of a keyword for it.</p>
 
 <h3>Prompts</h3>
 
-<p>A prompt is a string in which <code>{name}</code> splices a bound answer. The escapes are <code>\n</code>, <code>\t</code>, <code>\r</code>, <code>\\</code>, <code>\"</code>, <code>\{</code>, and <code>\}</code>. Only text-valued names may be spliced, with one exception the language grants rather than waives: inside <code>with</code>, the objection binder <code>why</code> is bound to the verdict already rendered as text.</p>
+<p>A prompt is a string in which <code>{name}</code> splices a bound answer. The escapes are <code>\n</code>, <code>\t</code>, <code>\r</code>, <code>\\</code>, <code>\"</code>, <code>\{</code>, and <code>\}</code>. Only text-valued names may be spliced, with one exception the language grants rather than waives: inside <code>revise given a, why</code>, the objection binder <code>why</code> is bound to the verdict already rendered as text, so the renderer is written where the binder is.</p>
 
 <h2 id="check"><span class="num">Three</span> What the checker will not allow</h2>
 
@@ -192,7 +201,13 @@
   <tr><td>a clause given the wrong kind</td><td><code>expected an answer of kind `verdict`, …</code></td></tr>
   <tr><td>a panel of anything but verdicts</td><td><code>a panel combines its members' answers in the monoid of their kind, and only `verdict` carries one</code></td></tr>
   <tr><td>a revision bound above 64</td><td><code>a bounded revision is unrolled into the term it writes, so its bound may name at most 64 revisions</code></td></tr>
-  <tr><td>a program that yields a value</td><td>refused: a workflow has nowhere to return one</td></tr>
+  <tr><td>a question in tail position</td><td><code>a question here has nowhere to put its answer: write `let x = ask …`, or `act` if the point is the doing</code></td></tr>
+  <tr><td><code>let p = revising …</code></td><td><code>a bounded revision has two outcomes and is not an answer to bind: write its `approved given …` and `never approved` clauses after its braces</code></td></tr>
+  <tr><td>a statement after a tail</td><td><code>expected `}`: `act`, `if`, `case` and `revising` are tails, and a tail ends its block</code></td></tr>
+  <tr><td>an outcome clause missing</td><td><code>expected `approved given &lt;name&gt; { … }`: a bounded revision writes both of its outcomes</code></td></tr>
+  <tr><td><code>if</code> on something else</td><td><code>an `if` branches on a flag, but `x` answers `text`</code></td></tr>
+  <tr><td><code>using model</code> after the kind</td><td><code>`using model` says which model serves the addressee, so it is written beside the addressee and before `for`</code></td></tr>
+  <tr><td>a name mentioned where no clause was handed it</td><td><code>unbound name; nothing in scope answers to it</code> — this is what mentioning the artefact inside <code>never approved</code> gets, and it is the truth: there is no artefact there</td></tr>
 </table>
 
 <p>Two of these deserve their reasons. The bound of sixty-four is not a matter of taste: a bounded revision is <em>unrolled</em> into the term it writes, so a bound of a billion is a billion-node term, and elaborating it exhausts the stack before anything runs. Every accepted program is bounded, and that is a proved property of the language rather than a guard on one clause. The panel restriction is the same principle from the other side: combining answers needs an operation with a unit and an associative combination, verdicts have one, and free text does not.</p>
@@ -207,48 +222,50 @@
 
 <span class="kw">workflow</span> {
   <span class="cm">-- Asked once. Both reviewers below splice this one answer.</span>
-  <span class="kw">let</span> guide = <span class="kw">ask</span> text tool <span class="str">"cat"</span>
+  <span class="kw">let</span> guide = <span class="kw">ask</span> tool <span class="str">"cat"</span> <span class="kw">for</span> text
     <span class="str">"Write out the house style guide, at most four short lines."</span>
 
-  <span class="cm">-- @model directs this question, and only this one, to the deep model.</span>
-  <span class="kw">let</span> draft = @model <span class="str">"deep"</span> <span class="kw">ask</span> text model <span class="str">"author"</span>
+  <span class="cm">-- `using model` directs this question, and only this one, to the deep model.</span>
+  <span class="kw">let</span> draft = <span class="kw">ask</span> model <span class="str">"author"</span> <span class="kw">using model</span> <span class="str">"deep"</span> <span class="kw">for</span> text
     <span class="str">"Draft a patch satisfying:\n{spec}\nReply with a unified diff only."</span>
 
-  <span class="kw">revising</span> draft <span class="kw">upto</span> 2
-
+  <span class="kw">revising</span> draft <span class="kw">up to</span> 2 <span class="kw">revisions</span> {
     <span class="cm">-- Three verdicts, combined: any objection carries.</span>
-    <span class="kw">check</span> (patch) {
+    <span class="kw">check</span> <span class="kw">given</span> patch {
       <span class="kw">panel</span> [
-        <span class="kw">ask</span> verdict model <span class="str">"reviewer-correct"</span>
+        <span class="kw">ask</span> model <span class="str">"reviewer-correct"</span> <span class="kw">for</span> verdict
           <span class="str">"{guide}\nIs this patch correct?\n{patch}\n{verdictSpec}"</span>,
-        <span class="kw">ask</span> verdict model <span class="str">"reviewer-secure"</span>
+        <span class="kw">ask</span> model <span class="str">"reviewer-secure"</span> <span class="kw">for</span> verdict
           <span class="str">"{guide}\nIs this patch secure?\n{patch}\n{verdictSpec}"</span>,
-        <span class="kw">ask</span> verdict model <span class="str">"reviewer-simple"</span>
+        <span class="kw">ask</span> model <span class="str">"reviewer-simple"</span> <span class="kw">for</span> verdict
           <span class="str">"Could this patch be simpler?\n{patch}\n{verdictSpec}"</span>
       ]
     }
 
     <span class="cm">-- why is the objections, as text.</span>
-    <span class="kw">with</span> (patch, why) {
-      @model <span class="str">"deep"</span> <span class="kw">ask</span> text model <span class="str">"author"</span>
+    <span class="kw">revise</span> <span class="kw">given</span> patch, why {
+      <span class="kw">ask</span> model <span class="str">"author"</span> <span class="kw">using model</span> <span class="str">"deep"</span> <span class="kw">for</span> text
         <span class="str">"{guide}\nRevise this patch:\n{patch}\n{why}\nReply with the revised diff only."</span>
     }
+  }
 
-    <span class="cm">-- Reached only with a reviewed patch in hand.</span>
-    <span class="kw">accepted</span> (patch) {
-      <span class="kw">let</span> ok = <span class="kw">ask</span> flag person <span class="str">"owner"</span>
-        <span class="str">"Apply this patch?\n{patch}\n{flagSpec}"</span>
-      <span class="kw">case</span> ok {
-        yes -&gt; { <span class="kw">act</span> tool <span class="str">"apply"</span>
-                   <span class="str">"Apply:\n{patch}\nWrite the patched file here, then reply DONE."</span> }
-        no  -&gt; { <span class="kw">done</span> }
-      }
-    }
+  <span class="cm">-- Reached only with a reviewed patch in hand.</span>
+  <span class="kw">approved</span> <span class="kw">given</span> patch {
+    <span class="kw">let</span> ok = <span class="kw">ask</span> person <span class="str">"owner"</span> <span class="kw">for</span> flag
+      <span class="str">"Apply this patch?\n{patch}\n{flagSpec}"</span>
 
-    <span class="kw">exhausted</span> { <span class="kw">done</span> }
+    <span class="kw">if</span> ok {
+      <span class="kw">act</span> tool <span class="str">"apply"</span>
+        <span class="str">"Apply:\n{patch}\nWrite the patched file here, then reply DONE."</span>
+    } <span class="kw">else</span> { }
+  }
+
+  <span class="kw">never approved</span> { }
 }</code></pre>
 
-<p>Everything the workflow guarantees is visible in the text. The guide is bound once, so it is asked once however many reviewers read it. The act sits inside the <code>yes</code> arm of a branching on a person's answer, so no run can apply a patch nobody approved. The revision budget is written, so the number of drafts is bounded by the program rather than by hope.</p>
+<p>Read aloud with no glossary: <em>let</em> <code>guide</code> <em>be what you get when you ask the tool</em> <code>cat</code> <em>for text, saying this; let</em> <code>draft</code> <em>be what you get when you ask the model</em> <code>author</code>, <em>using the model</em> <code>deep</code>, <em>for text. Revising</em> <code>draft</code>, <em>up to two revisions: to check it, given a patch, put this panel of three questions; to revise it, given a patch and why it was rejected, ask the author again. Approved, given the patch: let</em> <code>ok</code> <em>be what you get when you ask the person</em> <code>owner</code> <em>for a flag; if</em> <code>ok</code>, <em>act through the tool</em> <code>apply</code>; <em>else do nothing. Never approved: do nothing.</em></p>
+
+<p>Everything the workflow guarantees is visible in the text. The guide is bound once, so it is asked once however many reviewers read it. The act sits inside the <code>if</code> arm of a branching on a person's answer, so no run can apply a patch nobody approved. The revision budget is written, so the number of drafts is bounded by the program rather than by hope. And <code>patch</code> is declared three times, once in each clause that is handed it, so there is no scope to explain and no name in <code>never approved</code> that seems to mean an artefact that does not exist.</p>
 
 <h2 id="tools"><span class="num">Five</span> Reading, pricing, running</h2>
 
@@ -308,7 +325,7 @@ ok   the run certifies</code></pre>
   <tr><th>Level</th><th>Reached by</th><th>What can be said before running</th></tr>
   <tr><td><code>batch</code></td><td>questions with no spliced answers</td><td>the exact question list, and the exact bill</td></tr>
   <tr><td><code>pipeline</code></td><td>splicing answers into later prompts</td><td>the exact sequence of questions to be put, and the exact count</td></tr>
-  <tr><td><code>branch</code></td><td><code>case</code>, and hence <code>revising</code></td><td>a finite tree of possible bills, with least and greatest</td></tr>
+  <tr><td><code>branch</code></td><td><code>if</code>, <code>case</code>, and hence <code>revising</code></td><td>a finite tree of possible bills, with least and greatest</td></tr>
   <tr><td><code>dynamic</code></td><td><em>not expressible</em></td><td>nothing: no finite set of bills exists</td></tr>
 </table>
 
@@ -322,19 +339,19 @@ ok   the run certifies</code></pre>
 
 <h3>A human gate before an effect</h3>
 
-<p>Ask a person for a flag, branch on it, and put the act in the <code>yes</code> arm alone. Two properties follow from the text: no run applies without assent, and a refusal costs one consultation less than an assent, which is visible in the bill.</p>
+<p>Ask a person for a flag, branch on it with <code>if</code>, and put the act in the taken arm alone; the <code>else</code> arm is written as <code>{ }</code>, because doing nothing is a thing the program says rather than omits. Two properties follow from the text: no run applies without assent, and a refusal costs one consultation less than an assent, which is visible in the bill.</p>
 
 <h3>Best of several drafts</h3>
 
 <p>Give each attempt its own <code>draw</code>, then judge them. Without distinct draws the attempts are the same question and receive the same answer; with them they are independent, and the resampling is written down rather than assumed.</p>
 
-<pre><code><span class="kw">let</span> a = <span class="kw">ask</span> text model <span class="str">"author"</span> draw 0 <span class="str">"Draft a patch for:\n{spec}"</span>
-<span class="kw">let</span> b = <span class="kw">ask</span> text model <span class="str">"author"</span> draw 1 <span class="str">"Draft a patch for:\n{spec}"</span>
-<span class="kw">let</span> pick = <span class="kw">ask</span> verdict model <span class="str">"judge"</span> <span class="str">"Which is better?\nA:\n{a}\nB:\n{b}\n{verdictSpec}"</span></code></pre>
+<pre><code><span class="kw">let</span> a = <span class="kw">ask</span> model <span class="str">"author"</span> draw 0 <span class="kw">for</span> text <span class="str">"Draft a patch for:\n{spec}"</span>
+<span class="kw">let</span> b = <span class="kw">ask</span> model <span class="str">"author"</span> draw 1 <span class="kw">for</span> text <span class="str">"Draft a patch for:\n{spec}"</span>
+<span class="kw">let</span> pick = <span class="kw">ask</span> model <span class="str">"judge"</span> <span class="kw">for</span> verdict <span class="str">"Which is better?\nA:\n{a}\nB:\n{b}\n{verdictSpec}"</span></code></pre>
 
 <h3>Revision that always reviews what it returns</h3>
 
-<p>Use <code>revising</code> rather than a hand-built loop of asks. Its clause order is check-then-revise, so the artefact reaching <code>accepted</code> has been reviewed; a loop written by hand tends to revise last and hand back something nobody looked at.</p>
+<p>Use <code>revising</code> rather than a hand-built loop of asks. Its clause order is check-then-revise, so the artefact reaching <code>approved given …</code> has been reviewed; a loop written by hand tends to revise last and hand back something nobody looked at.</p>
 
 <h3>Pitfalls worth naming</h3>
 
@@ -342,41 +359,50 @@ ok   the run certifies</code></pre>
   <li><strong>Two prompts with identical words are one question.</strong> That is usually the intent and occasionally a surprise. Distinguish them with <code>draw</code>, or with different words.</li>
   <li><strong>A cheapest bill is not a price.</strong> The cost tree prices arms independently while a run correlates them, so its minimum may be paid by no run at all. The report says so; do not quote the number without the qualification.</li>
   <li><strong>Kinds are contracts with the addressee.</strong> Asking for a <code>flag</code> obliges the prompt to say how to answer one; the runtime's decoders are deliberately strict, and a reply that cannot be read aborts the run rather than being guessed at.</li>
-  <li><strong><code>@model</code> attaches to one question.</strong> To direct several, write it on each; there is no block-level form, and this is deliberate, since a scope that leaks is a scope nobody can read off the text.</li>
+  <li><strong><code>using model</code> attaches to one question.</strong> To direct several, write it on each; there is no block-level form, and this is deliberate, since a scope that leaks is a scope nobody can read off the text.</li>
+  <li><strong>A tail ends its block.</strong> Nothing may follow <code>act</code>, <code>if</code>, <code>case</code> or <code>revising</code>: each arm and each outcome <em>is</em> the rest of the workflow. If two arms need the same sequel, write it in both — the language will not pretend control rejoins where the mathematics says it does not.</li>
+  <li><strong>Three clauses, three binders.</strong> <code>check given patch</code>, <code>revise given patch, why</code> and <code>approved given patch</code> each introduce their own <code>patch</code>. Spelling them alike is a convenience for the reader; they are three different names, and none of them is in scope in <code>never approved</code>, where there is no artefact.</li>
 </ul>
 
 <h2 id="card"><span class="num">Eight</span> Reference card</h2>
 
-<pre><code>program  ::= {define} "workflow" "{" block "}"
+<pre><code>program  ::= {define} "workflow" block
 define   ::= "define" name "=" string
 
-block    ::= "let" name "=" rhs block
-           | "case" name "{" "yes" "->" "{" block "}" "no" "->" "{" block "}" "}"
-           | "case" name "{" "approve" "->" "{" block "}"
-                             "object"  "->" "{" block "}"
-                             "declined" "->" "{" block "}" "}"
-           | "revising" name "upto" nat
-               "check"     "(" name ")" "{" rhs "}"
-               "with"      "(" name "," name ")" "{" rhs "}"
-               "accepted"  "(" name ")" "{" block "}"
-               "exhausted" "{" block "}"
-           | "act" target string
-           | "done"
+block    ::= "{" {binding} [tail] "}"
+binding  ::= "let" name "=" rhs
+tail     ::= act | if | case | revising
 
-rhs      ::= ask | "panel" "[" ask {"," ask} "]"
-ask      ::= ["@model" string] "ask" kind target string
-kind     ::= "text" | "verdict" | "flag" | "ack"
+rhs      ::= ask | panel
+ask      ::= "ask" target ["using" "model" string] "for" kind string
+panel    ::= "panel" "[" ask {"," ask} "]"
+act      ::= "act" target string
+
 target   ::= ("model" | "tool" | "person") string ["draw" nat]
+kind     ::= "text" | "verdict" | "flag" | "ack"
+
+if       ::= "if" name block "else" block
+case     ::= "case" name "{" "approve" block "object" block "declined" block "}"
+
+revising ::= "revising" name "up" "to" nat ("revision"|"revisions") "{"
+               "check"  "given" name          "{" rhs "}"
+               "revise" "given" name "," name "{" rhs "}"
+             "}"
+             "approved" "given" name block
+             "never" "approved" block
 
 string   ::= "…"  with {name} interpolation and \n \t \r \\ \" \{ \} escapes
+punct    ::= { } [ ] , =
 comment  ::= -- to end of line</code></pre>
+
+<p>There are no reserved words: a word is a keyword only where that word is expected, so the lexer stays a function of characters alone. Removed from the previous surface: <code>upto</code>, <code>done</code>, <code>exhausted</code>, <code>accepted</code>, <code>with</code>, <code>yes</code>, <code>no</code>, and the four punctuation marks <code>@</code>, <code>-&gt;</code>, <code>(</code>, <code>)</code>. Added: <code>for</code>, <code>using</code>, <code>up</code>, <code>to</code>, <code>revision(s)</code>, <code>given</code>, <code>revise</code>, <code>approved</code>, <code>never</code>, <code>if</code>, <code>else</code>. Five more words, four fewer punctuation marks, and nothing taken out of the language.</p>
 
 <table>
   <tr><th>Limit or rule</th><th>Value</th></tr>
-  <tr><td>revision bound</td><td>at most 64; <code>upto n</code> is n + 1 checks and at most n revisions</td></tr>
+  <tr><td>revision bound</td><td>at most 64; <code>up to n revisions</code> is n + 1 checks and at most n revisions</td></tr>
   <tr><td>panels</td><td><code>verdict</code> only</td></tr>
-  <tr><td>interpolation</td><td>text-valued names, and <code>why</code> inside <code>with</code></td></tr>
-  <tr><td>program result</td><td>nothing; a workflow ends in <code>act</code> or <code>done</code></td></tr>
+  <tr><td>interpolation</td><td>text-valued names, and <code>why</code> inside <code>revise given …</code></td></tr>
+  <tr><td>program result</td><td>nothing; a block ends in a tail or simply runs out</td></tr>
   <tr><td>exit status</td><td>0 passed · 1 a check failed or the run aborted · 2 unreadable or ill-typed</td></tr>
 </table>
 

@@ -4,39 +4,39 @@ define verdictSpec = "Reply with exactly APPROVE if acceptable, or OBJECTION: <o
 define flagSpec    = "Reply with exactly yes or no."
 
 workflow {
-  let guide = ask text tool "cat"
+  let guide = ask tool "cat" for text
     "Write out the house style guide, at most four short lines."
 
-  let draft = @model "deep" ask text model "author"
+  let draft = ask model "author" using model "deep" for text
     "Draft a patch satisfying:\n{spec}\nReply with a unified diff only."
 
-  revising draft upto 2
-
-    check (patch) {
+  revising draft up to 2 revisions {
+    check given patch {
       panel [
-        ask verdict model "reviewer-correct"
+        ask model "reviewer-correct" for verdict
           "{guide}\nIs this patch correct?\n{patch}\n{verdictSpec}",
-        ask verdict model "reviewer-secure"
+        ask model "reviewer-secure" for verdict
           "{guide}\nIs this patch secure?\n{patch}\n{verdictSpec}",
-        ask verdict model "reviewer-simple"
+        ask model "reviewer-simple" for verdict
           "Could this patch be simpler?\n{patch}\n{verdictSpec}"
       ]
     }
 
-    with (patch, why) {
-      @model "deep" ask text model "author"
+    revise given patch, why {
+      ask model "author" using model "deep" for text
         "{guide}\nRevise this patch:\n{patch}\n{why}\nReply with the revised diff only."
     }
+  }
 
-    accepted (patch) {
-      let ok = ask flag person "owner"
-        "Apply this patch?\n{patch}\n{flagSpec}"
-      case ok {
-        yes -> { act tool "apply"
-                   "Apply:\n{patch}\nWrite the patched file here, then reply DONE." }
-        no  -> { done }
-      }
-    }
+  approved given patch {
+    let ok = ask person "owner" for flag
+      "Apply this patch?\n{patch}\n{flagSpec}"
 
-    exhausted { done }
+    if ok {
+      act tool "apply"
+        "Apply:\n{patch}\nWrite the patched file here, then reply DONE."
+    } else { }
+  }
+
+  never approved { }
 }

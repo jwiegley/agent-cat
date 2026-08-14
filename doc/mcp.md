@@ -51,39 +51,60 @@ A program is a preamble of textual macros and one `workflow` block:
 define spec = "harden the parser"
 
 workflow {
-  let guide = ask text tool "cat" "Write out the house style guide."
-  let draft = @model "deep" ask text model "author"
+  let guide = ask tool "cat" for text "Write out the house style guide."
+  let draft = ask model "author" using model "deep" for text
       "Draft a patch satisfying:\n{spec}\nReply with a unified diff only."
-  revising draft upto 2
-    check (patch) { panel [ ask verdict model "reviewer" "{guide}\nIs {patch} correct?" ] }
-    with (patch, why) { @model "deep" ask text model "author" "Revise:\n{patch}\n{why}" }
-    accepted (patch) {
-      let ok = ask flag person "owner" "Apply this patch?\n{patch}"
-      case ok { yes -> { act tool "apply" "Apply:\n{patch}" }
-                no  -> { done } }
+
+  revising draft up to 2 revisions {
+    check given patch {
+      panel [ ask model "reviewer" for verdict "{guide}\nIs {patch} correct?" ]
     }
-    exhausted { done }
+    revise given patch, why {
+      ask model "author" using model "deep" for text "Revise:\n{patch}\n{why}"
+    }
+  }
+
+  approved given patch {
+    let ok = ask person "owner" for flag "Apply this patch?\n{patch}"
+    if ok {
+      act tool "apply" "Apply:\n{patch}"
+    } else { }
+  }
+
+  never approved { }
 }
 ```
 
 The pieces, in the grammar's own words:
 
-* `ask <code> <addressee> "<id>" "<prompt>"` — one question. The **code** is the
-  kind of answer: `text`, `verdict` (approve, or object with a reason), `flag`
-  (yes or no), `ack` (an act was done). The **addressee** is `model`, `tool` or
-  `person`, with an identifier; `draw n` asks for the *n*-th sample.
-* `@model "name"` before an `ask` requests a model for that question.
+* A **scope is a pair of braces**, and a **name is introduced by a word that
+  says a name is being introduced**: `define x =` and `let x =` for a name bound
+  to an answer, `given x` for a name a clause is handed. Indentation means
+  nothing anywhere.
+* `ask <addressee> "<id>" for <code> "<prompt>"` — one question. The
+  **addressee** is `model`, `tool` or `person`, with an identifier; `draw n`
+  asks for the *n*-th sample. The **code** is the kind of answer: `text`,
+  `verdict` (approve, or object with a reason), `flag` (yes or no), `ack` (an
+  act was done).
+* `using model "name"`, written between the addressee and `for`, asks that this
+  one question be served by that model. It rewrites the question's own scope and
+  leaks onto nothing after it.
 * `panel [ ask …, ask … ]` — several verdicts at once, combined as a monoid: one
   objection is an objection.
-* `revising x upto n check (p) {…} with (p, why) {…} accepted (p) {…} exhausted {…}`
-  — a bounded revision loop. `upto n` is a numeral, and it is what keeps every
-  program in this language finite.
-* `case x { yes -> {…} no -> {…} }` — branching on a `flag`; every arm must be
-  written out.
+* `revising x up to n revisions { check given p {…} revise given p, why {…} }
+  approved given p {…} never approved {…}` — a bounded revision loop. `up to n
+  revisions` is `n + 1` checks and at most `n` revisions, and the numeral is what
+  keeps every program in this language finite. The braces hold exactly the loop;
+  the two outcome clauses after them are the two ways it can end, and control
+  does not rejoin.
+* `if x {…} else {…}` — branching on a `flag`; both arms written out.
+* `case v { approve {…} object {…} declined {…} }` — branching on a `verdict`;
+  all three arms written out.
 * `act <addressee> "<id>" "<prompt>"` — an `ask` of code `ack`: a request that
-  something be *done*.
+  something be *done*. It ends its block.
 * `{name}` in a prompt splices a `define` or a bound variable.
-* `done` ends a block.
+* A block that runs out of statements is over, so `{ }` does nothing and there
+  is no word for it.
 
 Every program the checker accepts is a closed plan at or below the *branch*
 rung (`Dsl.parseAndCheck_level_le`), which is exactly the condition under which

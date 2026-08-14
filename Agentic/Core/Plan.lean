@@ -68,7 +68,7 @@ environment — even for an expression that reads nothing but the answer just
 bound. In `Plan.revising` the artefact expression at round `i+1` is exactly such
 a read, and it is read twice per round (once on its own, once inside the
 verdict), so the cost of an expression doubled with every round: measured on
-`revising d upto n`, `Mcp.costSummary` took 3 ms at `n = 2`, 121 ms at 14, 1.9 s
+`revising d up to n revisions`, `Mcp.costSummary` took 3 ms at `n = 2`, 121 ms at 14, 1.9 s
 at 18 and 122 s at 24 — while the tree it prices has `2n + 2` leaves. Delaying
 the tail makes reading index `0` a projection again; the same measurements are
 in `test/DslSmoke.lean`.

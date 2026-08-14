@@ -264,7 +264,7 @@ theorem checkBlock_level_le : ∀ (b : RawBlock) (Γ : Ctx) (S : Bindings Γ) (p
     checkBlock Γ S b = .ok p → level p ≤ Level.branch := by
   intro b
   induction b with
-  | done pos => intro Γ S p h; cases h; exact bot_le
+  | empty pos => intro Γ S p h; cases h; exact bot_le
   | act t pr pos =>
     intro Γ S p h
     simp only [checkBlock] at h
@@ -285,7 +285,7 @@ theorem checkBlock_level_le : ∀ (b : RawBlock) (Γ : Ctx) (S : Bindings Γ) (p
       · rename_i k hk
         cases h
         exact checkBinder_level_le S rhs bd hbd k (ih _ _ k hk)
-  | caseFlag x y n pos ihy ihn =>
+  | ifFlag x y n pos ihy ihn =>
     intro Γ S p h
     simp only [checkBlock] at h
     split at h
@@ -325,7 +325,7 @@ theorem checkBlock_level_le : ∀ (b : RawBlock) (Γ : Ctx) (S : Bindings Γ) (p
   | revising subj n cv chk av wv rev pv acc exh pos iha ihe =>
     intro Γ S p h
     simp only [checkBlock] at h
-    -- The first `split` is the bound of `Dsl.maxRevisions`: an `upto` the
+    -- The first `split` is the bound of `Dsl.maxRevisions`: a numeral the
     -- checker refuses writes no plan, so there is nothing to price.
     split at h
     · exact absurd h (by simp)

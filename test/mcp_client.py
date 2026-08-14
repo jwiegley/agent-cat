@@ -96,7 +96,7 @@ DEFAULT_SOURCE = os.path.join(ROOT, "example", "harden.wf")
 # The bills a run of the flagship can actually present: 5 questions to the first
 # verdict plus a consent (6) plus an act (7), and the same again with one
 # revision round (10, 11) and with two (13, 14, 15 — the last being the
-# exhausted loop's own tail).
+# `never approved` outcome's own tail).
 LEGAL_BILLS = {6, 7, 10, 11, 13, 14, 15}
 
 # What each mode's path through that tree costs: five questions to the first

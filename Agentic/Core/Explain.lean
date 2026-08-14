@@ -18,7 +18,7 @@ fold, one set of numbers, three surfaces.
 * **A rendering of the term is a rendering of the term.** `Plan.explain` walks the
   `Plan`, which is the object the theorems are about, and therefore shows what the
   term holds and *only* that: de Bruijn binders rather than the source's names, an
-  unrolled `Plan.revising` rather than the `upto n` that wrote it, and the arms of
+  unrolled `Plan.revising` rather than the `up to n revisions` that wrote it, and the arms of
   a `case` in the enumeration order of their `FinEnum` rather than by tag, because
   the tag type is quantified inside the constructor and no inhabitant of it is
   printable. Each of those three gaps is named in the legend the rendering prints;
@@ -37,7 +37,7 @@ fold, one set of numbers, three surfaces.
   silently empty, i.e. a prompt the node does not have.
 
   What a probe cannot do is know which arm it is inside. A term may compute a value
-  from a branch it has already taken — `Plan.revising`'s accepted arm reads
+  from a branch it has already taken — `Plan.revising`'s approved arm reads
   `(final δ).getD default`, which is the artefact exactly when the loop approved —
   and the probe, which approves nothing, shows the `default` there. That is the
   term's own computation at the probe's answers, and it is the same
@@ -91,12 +91,12 @@ make that order readable: the two branchings the DSL writes are `Bool` and `VTag
 and each enumerates the way the source text reads. -/
 
 /-- The arms of a flag branching, in `FinEnum` order: the `false` arm first.
-`Plan.caseB t f` is `cond`, so that is the `no` block of `case x { yes -> … no ->
-… }`. -/
+`Plan.caseB t f` is `cond`, so that is the `else` block of `if x { … } else
+{ … }`. -/
 theorem finEnum_toList_bool : FinEnum.toList Bool = [false, true] := by decide
 
 /-- …and of a verdict branching: `approve`, `object`, `declined`, which is the
-order `case v { … }` writes them in. -/
+order `case v { approve … object … declined … }` writes them in. -/
 theorem finEnum_toList_vtag : FinEnum.toList VTag = [.approve, .object, .declined] := by decide
 
 /-! ## Probe environments: showing a prompt where its answers go -/
@@ -106,8 +106,8 @@ binder it came from.
 
 `{#n}` at `.text`, because that is the only kind that interpolates into a prompt;
 one objection reading `{#n}` at `.verdict`, because `Verdict.render` — the
-renderer the DSL's `with (patch, why)` binder is bound to — sends that to exactly
-that string; and the `Inhabited` default at the two kinds no prompt can
+renderer the DSL's `revise given patch, why` binder is bound to — sends that to
+exactly that string; and the `Inhabited` default at the two kinds no prompt can
 mention. -/
 def probeAnswer : (c : Code) → Nat → El c
   | .text, n => "{#" ++ toString n ++ "}"
@@ -250,8 +250,8 @@ def Plan.explain : {Γ : Ctx} → {A : Type} → Nat → Plan Γ A → List Stri
 
 `Dsl.parseAndCheckE` reads a text and returns the plan. A tool that also wants to
 say something about what was *written* — and the one thing the term does not hold
-is the `upto n` of a bounded revision — needs the raw syntax as well, and must not
-get it by parsing twice. -/
+is the `up to n revisions` of a bounded revision — needs the raw syntax as well,
+and must not get it by parsing twice. -/
 
 namespace Dsl
 
@@ -327,16 +327,16 @@ theorem parseAndCheckRaw_level_le (s : String) (r : Raw) (p : Plan [] Unit)
 
 /-! ### The one thing the term does not hold -/
 
-/-- `[[b.revisionBounds]]` = every `revising … upto n` written in `b`, with where
-it is written.
+/-- `[[b.revisionBounds]]` = every `revising … up to n revisions` written in
+`b`, with where it is written.
 
 First-order in the syntax, like `RawBlock.bounded`, and for the same reason: a
 `RawRhs` has no block inside it, so the recursion is `RawBlock`'s own. -/
 def RawBlock.revisionBounds : RawBlock → List (Pos × Nat)
-  | .done _ => []
+  | .empty _ => []
   | .act _ _ _ => []
   | .bind _ _ rest _ => rest.revisionBounds
-  | .caseFlag _ y n _ => y.revisionBounds ++ n.revisionBounds
+  | .ifFlag _ y n _ => y.revisionBounds ++ n.revisionBounds
   | .caseVerdict _ a o d _ => a.revisionBounds ++ o.revisionBounds ++ d.revisionBounds
   | .revising _ n _ _ _ _ _ _ acc exh pos =>
       (pos, n) :: (acc.revisionBounds ++ exh.revisionBounds)
@@ -344,16 +344,16 @@ def RawBlock.revisionBounds : RawBlock → List (Pos × Nat)
 /-- **Every bound a report prints is a bound the checker allowed.**
 `RawBlock.bounded` is the predicate `checkBlock_bounded` proves of everything the
 checker accepts; this says the numerals `revisionLines` prints are exactly the
-ones that predicate is about, so `upto n` beside a plan is an `n` no larger than
-`maxRevisions`. -/
+ones that predicate is about, so `up to n revisions` beside a plan is an `n` no
+larger than `maxRevisions`. -/
 theorem revisionBounds_le_of_bounded :
     ∀ (b : RawBlock), b.bounded = true → ∀ x ∈ b.revisionBounds, x.2 ≤ maxRevisions := by
   intro b
   induction b with
-  | done pos => intro _ x hx; exact absurd hx (by simp [RawBlock.revisionBounds])
+  | empty pos => intro _ x hx; exact absurd hx (by simp [RawBlock.revisionBounds])
   | act t pr pos => intro _ x hx; exact absurd hx (by simp [RawBlock.revisionBounds])
   | bind x rhs rest pos ih => intro hb; exact ih hb
-  | caseFlag x y n pos ihy ihn =>
+  | ifFlag x y n pos ihy ihn =>
     intro hb z hz
     rw [RawBlock.bounded, Bool.and_eq_true] at hb
     rcases List.mem_append.mp hz with h | h
@@ -393,23 +393,23 @@ def planLines {A : Type} (p : Plan [] A) : List String :=
      root, and `{#d}` inside a prompt is where the term splices that answer;"
   , "        `askC` carries its words in the term (a closed question, the batch rung), `ask` \
      computes them from the answers in scope (the pipeline rung);"
-  , "        a `case` prints its arms in the enumeration order of its tag type — `no` then \
-     `yes` for a flag, `approve` then `object` then `declined` for a verdict;"
+  , "        a `case` prints its arms in the enumeration order of its tag type — the `else` \
+     arm then the `if` arm for a flag, `approve` then `object` then `declined` for a verdict;"
   , "        a bounded revision is not a node: `Plan.revising` is `Nat.rec`, so the term holds \
-     its unrolling and the numeral that wrote it is a fact about the source;"
+     its unrolling and the `up to n revisions` that wrote it is a fact about the source;"
   , "        a prompt is shown at a probe environment, which does not know which arm it is \
-     inside — an empty splice under an accepted arm is `Plan.revising`'s own \
+     inside — an empty splice under an approved arm is `Plan.revising`'s own \
      `(final δ).getD default` at a probe that did not approve, and not a prompt a run puts." ]
     ++ Plan.explain 1 p
 
-/-- `[[revisionLines b]]` = the `revising … upto n` bounds the *source* writes,
-with what each one buys.
+/-- `[[revisionLines b]]` = the `revising … up to n revisions` bounds the
+*source* writes, with what each one buys.
 
 Printed beside a plan rendering, and labelled as coming from the source, because
 the term cannot hold it: by the time there is a plan the numeral has become the
-unrolling. That `upto n` buys `n+1` checks and at most `n` revisions is
-`Plan.revising`'s docstring — check first, revise in the recursive call — and that
-the numeral printed is one the checker allowed is
+unrolling. That `up to n revisions` buys `n+1` checks and at most `n` revisions
+is `Plan.revising`'s docstring — check first, revise in the recursive call — and
+that the numeral printed is one the checker allowed is
 `Dsl.revisionBounds_le_of_bounded`. -/
 def revisionLines (b : Dsl.Raw) : List String :=
   match b.revisionBounds with
@@ -417,8 +417,8 @@ def revisionLines (b : Dsl.Raw) : List String :=
   | bs =>
     "--- bounded revisions, read off the SOURCE text (the term holds the unrolling) ---"
       :: bs.map fun pn =>
-        s!"  line {pn.1.line}, col {pn.1.col}: upto {pn.2} → {pn.2 + 1} checks and at most \
-           {pn.2} revisions, written out into the term"
+        s!"  line {pn.1.line}, col {pn.1.col}: up to {pn.2} revisions → {pn.2 + 1} checks \
+           and at most {pn.2} revisions, written out into the term"
 
 /-- `[[costSummary p h]]` = the cheapest bill, the dearest bill and the number of
 paths, from `Cost.costTree`.

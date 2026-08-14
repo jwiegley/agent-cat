@@ -183,7 +183,7 @@ def main : IO UInt32 := do
           (Explain.planLines Dsl.flagshipPlan ++ Explain.revisionLines Dsl.flagshipRaw)))
       (String.intercalate "\n" planRan.out)
     checkTrue "…including the revision bound the term does not hold"
-      (planRan.out.any fun l => (l.splitOn "upto 2").length > 1)
+      (planRan.out.any fun l => (l.splitOn "up to 2 revisions").length > 1)
 
     let costRan ← cli ["cost", hardenPath]
     check "cost exits 0" "0" (toString costRan.code)

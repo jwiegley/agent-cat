@@ -128,7 +128,7 @@ def flagshipRaw : Raw :=
           target := { addressee := Addressee.model "author", draw := 0 },
           prompt := [Chunk.lit "Draft a patch satisfying:\n", Chunk.lit "harden the parser",
             Chunk.lit "\nReply with a unified diff only."],
-          pos := { line := 10, col := 29 } })
+          pos := { line := 10, col := 15 } })
       (RawBlock.revising "draft" 2 "patch"
         (RawRhs.panel
           [{ model := none, code := Code.verdict,
@@ -136,20 +136,20 @@ def flagshipRaw : Raw :=
              prompt := [Chunk.interp "guide", Chunk.lit "\nIs this patch correct?\n",
                Chunk.interp "patch", Chunk.lit "\n", Chunk.lit
                  "Reply with exactly APPROVE if acceptable, or OBJECTION: <one line> if not."],
-             pos := { line := 17, col := 9 } },
+             pos := { line := 16, col := 9 } },
            { model := none, code := Code.verdict,
              target := { addressee := Addressee.model "reviewer-secure", draw := 0 },
              prompt := [Chunk.interp "guide", Chunk.lit "\nIs this patch secure?\n",
                Chunk.interp "patch", Chunk.lit "\n", Chunk.lit
                  "Reply with exactly APPROVE if acceptable, or OBJECTION: <one line> if not."],
-             pos := { line := 19, col := 9 } },
+             pos := { line := 18, col := 9 } },
            { model := none, code := Code.verdict,
              target := { addressee := Addressee.model "reviewer-simple", draw := 0 },
              prompt := [Chunk.lit "Could this patch be simpler?\n", Chunk.interp "patch",
                Chunk.lit "\n", Chunk.lit
                  "Reply with exactly APPROVE if acceptable, or OBJECTION: <one line> if not."],
-             pos := { line := 21, col := 9 } }]
-          { line := 16, col := 7 })
+             pos := { line := 20, col := 9 } }]
+          { line := 15, col := 7 })
         "patch" "why"
         (RawRhs.ask
           { model := some "deep", code := Code.text,
@@ -157,7 +157,7 @@ def flagshipRaw : Raw :=
             prompt := [Chunk.interp "guide", Chunk.lit "\nRevise this patch:\n",
               Chunk.interp "patch", Chunk.lit "\n", Chunk.interp "why",
               Chunk.lit "\nReply with the revised diff only."],
-            pos := { line := 27, col := 21 } })
+            pos := { line := 26, col := 7 } })
         "patch"
         (RawBlock.bind "ok"
           (RawRhs.ask
@@ -165,16 +165,16 @@ def flagshipRaw : Raw :=
               target := { addressee := Addressee.person "owner", draw := 0 },
               prompt := [Chunk.lit "Apply this patch?\n", Chunk.interp "patch",
                 Chunk.lit "\n", Chunk.lit "Reply with exactly yes or no."],
-              pos := { line := 32, col := 16 } })
-          (RawBlock.caseFlag "ok"
+              pos := { line := 32, col := 14 } })
+          (RawBlock.ifFlag "ok"
             (RawBlock.act { addressee := Addressee.tool "apply", draw := 0 }
               [Chunk.lit "Apply:\n", Chunk.interp "patch",
                Chunk.lit "\nWrite the patched file here, then reply DONE."]
-              { line := 35, col := 18 })
-            (RawBlock.done { line := 37, col := 18 })
-            { line := 34, col := 7 })
-          { line := 32, col := 7 })
-        (RawBlock.done { line := 41, col := 17 })
+              { line := 36, col := 7 })
+            (RawBlock.empty { line := 38, col := 12 })
+            { line := 35, col := 5 })
+          { line := 32, col := 5 })
+        (RawBlock.empty { line := 41, col := 18 })
         { line := 13, col := 3 })
       { line := 10, col := 3 })
     { line := 7, col := 3 }
