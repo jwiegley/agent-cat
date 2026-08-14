@@ -52,28 +52,65 @@ syntax first-order. -/
 abbrev Ctx : Type := List Code
 
 /-- `[[Env Γ]]` = a point of the product `∏ c ∈ Γ, El c`: one actual answer for
-each code the context records. -/
+each code the context records.
+
+**The tail is delayed, and that is a measurement and not a taste.** The one
+constructor takes its tail as `Unit → Env Γ`; `Env.cons` is the eager
+constructor everything else writes, and `Env.consBy` the delayed one that
+`Sub.lift` needs. The meaning is unchanged — `Unit → A` is `A` up to the η law
+Lean decides definitionally, which is why `head_cons`, `tail_cons` and
+`cons_head_tail` are all still `rfl`.
+
+What changes is what it costs to read index `0`. A `Sub Γ Δ` is a *function*
+`Env Δ → Env Γ`, so going under a binder is `Sub.lift σ = fun δ => δ.head ∷ σ
+δ.tail`, and with a strict tail that `∷` runs `σ` — rebuilding the entire outer
+environment — even for an expression that reads nothing but the answer just
+bound. In `Plan.revising` the artefact expression at round `i+1` is exactly such
+a read, and it is read twice per round (once on its own, once inside the
+verdict), so the cost of an expression doubled with every round: measured on
+`revising d upto n`, `Mcp.costSummary` took 3 ms at `n = 2`, 121 ms at 14, 1.9 s
+at 18 and 122 s at 24 — while the tree it prices has `2n + 2` leaves. Delaying
+the tail makes reading index `0` a projection again; the same measurements are
+in `test/DslSmoke.lean`.
+
+It is not free, and the price is paid in the kernel: reducing `Env.tail` now
+costs one β-step more, and the module that reduces the most of them,
+`Agentic/Core/Dsl.lean`, elaborates in 249 s where it took 178 s
+(`Agentic/Core/HardenPatch.lean`, 75 s, does not move). That is the trade — 40%
+on one module's proofs, against `2ⁿ` on every run. -/
 inductive Env : Ctx → Type where
   /-- The empty environment: nothing has been answered yet. -/
   | nil : Env []
-  /-- One more answer, in front of the rest. -/
-  | cons {c : Code} {Γ : Ctx} (x : El c) (γ : Env Γ) : Env (c :: Γ)
+  /-- One more answer, in front of the rest, with the rest not yet demanded. -/
+  | consBy {c : Code} {Γ : Ctx} (x : El c) (γ : Unit → Env Γ) : Env (c :: Γ)
 
 namespace Env
 
 variable {c : Code} {Γ : Ctx}
 
+/-- `[[Env.cons x γ]]` = `x` in front of `γ`: the constructor as the rest of this
+package writes it, with the tail already in hand. -/
+def cons (x : El c) (γ : Env Γ) : Env (c :: Γ) := .consBy x fun _ => γ
+
 /-- The most recent answer. -/
 def head : Env (c :: Γ) → El c
-  | .cons x _ => x
+  | .consBy x _ => x
 
 /-- Everything but the most recent answer. -/
 def tail : Env (c :: Γ) → Env Γ
-  | .cons _ γ => γ
+  | .consBy _ γ => γ ()
 
 @[simp] theorem head_cons (x : El c) (γ : Env Γ) : (Env.cons x γ).head = x := rfl
 
 @[simp] theorem tail_cons (x : El c) (γ : Env Γ) : (Env.cons x γ).tail = γ := rfl
+
+/-- **Delaying the tail changes no environment.** `consBy` is `cons` on a tail
+that has already been produced, so the two agree wherever both apply and the
+delay is invisible to every theorem — which is why nothing else in the package
+mentions `consBy`, and why `head_cons`, `tail_cons` and `cons_head_tail` are
+still the whole interface. -/
+@[simp] theorem consBy_eq_cons (x : El c) (γ : Env Γ) :
+    Env.consBy x (fun _ => γ) = Env.cons x γ := rfl
 
 /-- η for environments: an extended environment is its head consed onto its
 tail. This is what makes the identity substitution's lift the identity. -/
@@ -146,8 +183,12 @@ abbrev comp (σ : Sub Γ Δ) (τ : Sub Δ Θ) : Sub Γ Θ := fun θ => σ (τ θ
 abbrev wk : Sub Γ (c :: Γ) := Env.tail
 
 /-- Going under a binder: keep the new answer, act with `σ` on the rest.
-`[[lift σ]] = fun δ => δ.head ∷ σ δ.tail`. -/
-abbrev lift (σ : Sub Γ Δ) : Sub (c :: Γ) (c :: Δ) := fun δ => .cons δ.head (σ δ.tail)
+`[[lift σ]] = fun δ => δ.head ∷ σ δ.tail`.
+
+Written with `Env.consBy`, so `σ` runs only if something reads past the new
+answer. `Env.consBy_eq_cons` says that is the same environment; the docstring on
+`Env` says what it costs when it is not. -/
+abbrev lift (σ : Sub Γ Δ) : Sub (c :: Γ) (c :: Δ) := fun δ => .consBy δ.head fun _ => σ δ.tail
 
 /-- Left unit of composition. -/
 @[simp] theorem id_comp (σ : Sub Γ Δ) : comp Sub.id σ = σ := rfl

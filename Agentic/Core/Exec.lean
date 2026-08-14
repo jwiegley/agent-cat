@@ -699,8 +699,8 @@ Note what is *not* claimed: off the transcript the two worlds differ freely,
 because `worldOf` defaults there, and `Inhabited Verdict` is `approve` — a cell
 nobody asked about reads as approval. Every theorem here is therefore stated
 *on* the transcript and never off it, and a consumer that wants a replay pinned
-to the log must check that the log *covers* the transcript (`covered`, in
-`demo/Main.lean`). Nothing puts a defaulted cell *into* a table: `Exec.oracle`
+to the log must check that the log *covers* the transcript (`Plan.Covered`, in
+`Agentic/Core/Report.lean`). Nothing puts a defaulted cell *into* a table: `Exec.oracle`
 fails the run rather than recording an answer it could not read, so the only
 defaults in sight are `worldOf`'s own, on cells no run ever touched. -/
 theorem worldOf_execM_pure {A : Type} (ω : Ω) (p : Dlg A) (t : Table) (ht : Extends ω t) :

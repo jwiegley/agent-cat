@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "workflows": {
+      "type": "stdio",
+      "command": "./.lake/build/bin/workflow_mcp",
+      "args": [],
+      "env": {}
+    }
+  }
+}

@@ -1,6 +1,6 @@
 name = "agentic"
 version = "0.1.0"
-defaultTargets = ["Agentic", "Pollution", "HardenPatch", "acp_smoke", "exec_smoke", "harden_demo"]
+defaultTargets = ["Agentic", "Pollution", "HardenPatch", "acp_smoke", "exec_smoke", "harden_demo", "dsl_smoke", "workflow_mcp", "mcp_smoke", "mcp_client_smoke"]
 
 # The root module and every `Agentic/Core/*` module. The glob is explicit
 # because the runtime stratum is deliberately NOT imported by the root:
@@ -64,3 +64,58 @@ root = "ExecSmoke"
 name = "harden_demo"
 srcDir = "demo"
 root = "Main"
+
+# The DSL's test (test/DslSmoke.lean): `lake exe dsl_smoke`, from the repository
+# root. It checks the two things `Agentic/Core/Dsl.lean` does not prove — that
+# the parser reads `Dsl.flagshipSource` as `Dsl.flagshipRaw`, which is the
+# hypothesis of `Dsl.parseAndCheck_flagship`, and that every clause of the
+# typing judgment rejects what it says it rejects, message and position
+# included. In defaultTargets for the reason the other two smoke tests are:
+# building it keeps a test of the checker compiling with it; running it is the
+# separate, explicit step that checks the diagnoses.
+[[lean_exe]]
+name = "dsl_smoke"
+srcDir = "test"
+root = "DslSmoke"
+
+# The MCP server (mcp/Main.lean): `lake exe workflow_mcp`, or registered with a
+# client as `.lake/build/bin/workflow_mcp`. It speaks line-delimited JSON-RPC
+# 2.0 on stdin/stdout and offers the four tools of `Agentic/Core/Mcp.lean` over
+# DSL sources. In defaultTargets because a server that stops compiling with the
+# stack it serves must break the build like everything else.
+# (The root is `WorkflowMcp` and not `Main` because module names are global to
+# the package and `demo/Main.lean` already is `Main`; lake refuses two
+# executables with the same root.)
+[[lean_exe]]
+name = "workflow_mcp"
+srcDir = "mcp"
+root = "WorkflowMcp"
+
+# The server's test (test/McpSmoke.lean): `lake exe mcp_smoke`, from the
+# repository root. It drives `Mcp.serve` — the same function the executable
+# runs — over a scripted stream instead of a pipe, and checks the handshake, the
+# tool list, the flagship's quoted cost against the theorems that prove it, a
+# whole run answered question by question, the two safety rules (an answer the
+# trusted base cannot read is not recorded; a declined elicitation is not a
+# `no`), and the final report. In defaultTargets for the reason the other smoke
+# tests are: building it keeps a test of the server compiling with it; running
+# it is the separate, explicit step that checks the frames.
+[[lean_exe]]
+name = "mcp_smoke"
+srcDir = "test"
+root = "McpSmoke"
+
+# The server's other test (test/McpClientSmoke.lean), which starts the built
+# `workflow_mcp` as a child and drives it with test/mcp_client.py — a real MCP
+# client, over a real pipe: `lake exe mcp_client_smoke`, from the repository
+# root. `mcp_smoke` drives `serve` over a list of lines and tests the
+# dispatcher; this one tests the binary, the pipe, the flush, an
+# `elicitation/create` answered by a genuinely concurrent peer, and the clean
+# shutdown that closing stdin is. In defaultTargets for the reason the other
+# smoke tests are: building it keeps the client's expectations about the
+# server's name, version and revision compiling against the server's own
+# constants; running it is the separate, explicit step that speaks the protocol.
+[[lean_exe]]
+name = "mcp_client_smoke"
+srcDir = "test"
+root = "McpClientSmoke"

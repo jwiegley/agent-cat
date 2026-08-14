@@ -1,4 +1,4 @@
-import Lean.Data.Json
+import Agentic.Core.Rpc
 
 /-!
 # ACP: the wire, and nothing but the wire
@@ -414,44 +414,19 @@ is in the error text and never in a `panic!`. -/
 private def fail {α : Type} (line : String) (msg : String) : IO α :=
   throw <| IO.userError s!"acp: {msg}\n  offending line: {line}"
 
-/-! ## The three shapes a line can have -/
+/-! ## The three shapes a line can have
 
-/-- `[[Msg]]` = one decoded line of the wire: JSON-RPC 2.0 admits exactly three
-shapes, and this is them.
+The decoder is `Agentic/Core/Rpc.lean`'s, not this file's: `Agentic/Core/Mcp.lean`
+speaks the same line-delimited JSON-RPC 2.0 from the other side of the wire, and
+one decoder read by both is one decoder to be wrong. The abbreviation keeps this
+file's own vocabulary (`Acp.Msg`) pointing at it. -/
 
-The value represents *what arrived*, not what it means. Ids stay raw `Json`
-rather than `Nat` because JSON-RPC permits string ids and a request from the
-agent must be answered with the id it chose, unchanged; our own ids are always
-numeric, which is why matching a response needs only `getNat?`. Note that the
-agent's ids and ours are drawn from *different* counters that both start at
-zero: what tells an inbound request from the response to our own request `0` is
-the presence of `method`, which is why it is tested first. -/
-inductive Msg where
-  /-- A reply to one of our requests; `Except` is the error/result split. -/
-  | response (id : Json) (payload : Except Json Json)
-  /-- A request *from* the agent, which must be answered with the same id. -/
-  | request (id : Json) (method : String) (params : Json)
-  /-- A notification, which must not be answered. -/
-  | notification (method : String) (params : Json)
+/-- `[[Acp.Msg]]` = `Agentic.Core.Rpc.Msg`: one decoded line of the wire. -/
+abbrev Msg : Type := Rpc.Msg
 
-/-- Decode one line. Failure is an `Except` here and becomes an `IO` error at
-the call site, where the line is still in hand. -/
-def Msg.ofLine (line : String) : Except String Msg := do
-  let j ← Json.parse line
-  match j.getObjVal? "method" with
-  | .ok mj =>
-    let method ← mj.getStr?
-    let params := j.getObjValD "params"
-    match j.getObjVal? "id" with
-    | .ok id => return .request id method params
-    | .error _ => return .notification method params
-  | .error _ =>
-    match j.getObjVal? "id" with
-    | .error _ => throw "line is neither a request, a notification nor a response"
-    | .ok id =>
-      match j.getObjVal? "error" with
-      | .ok e => return .response id (.error e)
-      | .error _ => return .response id (.ok (j.getObjValD "result"))
+/-- Decode one line; `Rpc.Msg.ofLine`. Failure is an `Except` here and becomes an
+`IO` error at the call site, where the line is still in hand. -/
+abbrev Msg.ofLine : String → Except String Msg := Rpc.Msg.ofLine
 
 /-- The text of a `session/update` notification when that update is an
 `agent_message_chunk`; `none` for every other kind of update.
@@ -597,18 +572,10 @@ asked. -/
 private def answerAgentRequest (conn : Conn) (id : Json) (method : String)
     (params : Json) : IO Unit :=
   if method == "session/request_permission" then
-    writeJson conn <| Json.mkObj
-      [ ("jsonrpc", Json.str "2.0")
-      , ("id", id)
-      , ("result", permissionResult conn.cfg.permission params) ]
+    writeJson conn <| Rpc.result id (permissionResult conn.cfg.permission params)
   else
-    writeJson conn <| Json.mkObj
-      [ ("jsonrpc", Json.str "2.0")
-      , ("id", id)
-      , ("error", Json.mkObj
-          [ ("code", ((-32601 : Int) : Json))
-          , ("message",
-              Json.str s!"{method}: this client advertised no such capability") ]) ]
+    writeJson conn <| Rpc.errorFrame id Rpc.methodNotFound
+      s!"{method}: this client advertised no such capability"
 
 /-- Read messages until the reply to request `wantId` arrives, feeding every
 `agent_message_chunk` to `onChunk` on the way and answering every request the
@@ -679,11 +646,7 @@ def tryRequest (conn : Conn) (method : String) (params : Json)
   let deadline ← match conn.cfg.turnTimeoutMs with
     | none => pure none
     | some ms => do let now ← IO.monoMsNow; pure (some (now + ms))
-  writeJson conn <| Json.mkObj
-    [ ("jsonrpc", Json.str "2.0")
-    , ("id", (id : Nat))
-    , ("method", Json.str method)
-    , ("params", params) ]
+  writeJson conn <| Rpc.request ((id : Nat) : Json) method params
   pump conn id onChunk deadline conn.cfg.maxMessages
 
 /-- Send a request and return its `result`, raising the agent's error if it sent
@@ -699,10 +662,7 @@ def request (conn : Conn) (method : String) (params : Json)
 
 /-- Send a notification: no id, and no reply expected or waited for. -/
 def notify (conn : Conn) (method : String) (params : Json) : IO Unit :=
-  writeJson conn <| Json.mkObj
-    [ ("jsonrpc", Json.str "2.0")
-    , ("method", Json.str method)
-    , ("params", params) ]
+  writeJson conn <| Rpc.notification method params
 
 /-- The `initialize` handshake, returning the agent's raw result (capabilities,
 version, `agentInfo`, `authMethods`) for a caller who wants to look.

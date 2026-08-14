@@ -45,7 +45,9 @@ gap is in the other direction: `worldOf` totalizes by defaulting, so a cell the
 table never recorded still answers, and a plan can be certified against a world
 the run only partly determined. The check for that is *coverage* — every event
 of the replayed transcript recorded in the table, with the answer the replay
-reads (`covered`, in `demo/Main.lean`) — and coverage is meaningful only because
+reads (`Plan.Covered`, in `Agentic/Core/Report.lean`, where
+`Plan.certify_sound_of_covered` turns this module's *some* world into *every*
+world extending the log) — and coverage is meaningful only because
 no cell nobody answered is ever written *into* a table. Two rules keep it that
 way, and both are in `Agentic/Core/Exec.lean`: an answer the trusted base could
 not read aborts the run (`Exec.oracle`), and an *act* — or anything asked of a
