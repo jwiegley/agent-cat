@@ -1,6 +1,6 @@
 name = "agentic"
 version = "0.1.0"
-defaultTargets = ["Agentic", "Pollution", "HardenPatch", "acp_smoke", "exec_smoke", "harden_demo", "dsl_smoke", "workflow_mcp", "mcp_smoke", "mcp_client_smoke"]
+defaultTargets = ["Agentic", "Pollution", "HardenPatch", "acp_smoke", "exec_smoke", "harden_demo", "dsl_smoke", "workflow_mcp", "mcp_smoke", "mcp_client_smoke", "agent-cat", "cli_smoke"]
 
 # The root module and every `Agentic/Core/*` module. The glob is explicit
 # because the runtime stratum is deliberately NOT imported by the root:
@@ -119,3 +119,29 @@ root = "McpSmoke"
 name = "mcp_client_smoke"
 srcDir = "test"
 root = "McpClientSmoke"
+
+# The command line (cli/AgentCat.lean): `lake exe agent-cat`, from the repository
+# root. `agent-cat plan|cost|run <program.wf>` is `Agentic/Core/Explain.lean`'s
+# two renderings and `Agentic/Core/Certify.lean`'s `execCertifiedIO` behind one
+# front end (`Dsl.parseAndCheckRaw`, whose parity with `Dsl.parseAndCheckE` is
+# `Dsl.parseAndCheckRaw_eq`). In defaultTargets because a command line that stops
+# compiling with the library it exposes must break the build like everything else.
+# (The root is `AgentCat` and not `Main` for the reason `workflow_mcp`'s is
+# `WorkflowMcp`: module names are global to the package, `demo/Main.lean` is
+# already `Main`, and lake refuses two executables with the same root.)
+[[lean_exe]]
+name = "agent-cat"
+srcDir = "cli"
+root = "AgentCat"
+
+# The command line's test (test/CliSmoke.lean): `lake exe cli_smoke`, from the
+# repository root. It drives the built `agent-cat` binary over both example
+# programs and one deliberately ill-typed one, checking the three subcommands, the
+# exit codes and the parity of the diagnosis — and it checks that
+# `examples/harden.wf` on disk is byte-for-byte the string `Dsl.flagshipSource`
+# compiled in, which is the one thing `include_str` cannot arrange by itself.
+# In defaultTargets for the reason the other smoke tests are.
+[[lean_exe]]
+name = "cli_smoke"
+srcDir = "test"
+root = "CliSmoke"

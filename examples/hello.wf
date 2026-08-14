@@ -1,0 +1,16 @@
+-- The smallest program the language can write that is still a workflow: two
+-- questions and an act. It exists so that `agent-cat` has a subject that is not
+-- the flagship — cheap to run, `pipeline` rather than `branch`, and therefore
+-- the one program whose bill the analysis knows exactly rather than bounds.
+define brief = "Reply in one short line."
+
+workflow {
+  let subject = ask text tool "cat"
+    "Name one thing worth greeting.\n{brief}"
+
+  let greeting = ask text model "greeter"
+    "Write a greeting for this, and nothing else:\n{subject}\n{brief}"
+
+  act tool "say"
+    "Say it:\n{greeting}\nThen reply DONE."
+}

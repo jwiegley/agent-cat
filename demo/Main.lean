@@ -50,6 +50,19 @@ interpreter on a three-node plan. This runs the same stack (`Plan` → `denote` 
 workload**: `Agentic.Core.Harden.demo`, which is `hardenPatch "harden the
 parser"`, the term the six kernel theorems and all seven bills are about.
 
+**Why this target still exists beside `agent-cat run`.** `lake exe agent-cat run
+examples/harden.wf` runs *this same workflow* — `examples/harden.wf` is
+`Dsl.flagshipSource`, whose plan agrees with `Harden.demo` in each of the four
+worlds `Agentic/Core/Dsl.lean` names — and checks the four things that are true of
+*any* program: coverage, the memo bill, the certificate, and that the bill is a
+leaf of the cost tree. What it does not check, and cannot, is anything about *this*
+workload: that the bill is 7 or 6 on the two stub paths, that the guide was read
+exactly once, that at most three drafts were asked for, that consent holds if and
+only if the act was put, and that the file on disk is the patch the owner
+consented to. Those are `Harden`'s theorems made out of bytes, and a general runner
+has no business asserting them, so they stay here, where the theorems they shadow
+are named line by line in the table above. Two targets, two kinds of claim.
+
 **What is general is not here.** The report a run produces — its transcript, its
 two bills, its coverage verdict, the rendering of all three — is
 `Agentic/Core/Report.lean`, and the artifact check is

@@ -381,50 +381,25 @@ consented — written in the concrete syntax. Compare
 `Agentic/Core/HardenPatch.lean`: twelve lines of authoring surface there,
 forty of a language here, and the same dialogue at the end of both. -/
 
-/-- `[[flagshipSource]]` = the owner's workflow, in the DSL. -/
-def flagshipSource : String := r##"
-define spec        = "harden the parser"
-define verdictSpec = "Reply with exactly APPROVE if acceptable, or OBJECTION: <one line> if not."
-define flagSpec    = "Reply with exactly yes or no."
+/-- `[[flagshipSource]]` = the owner's workflow, in the DSL — **the file
+`examples/harden.wf`**, included here rather than copied.
 
-workflow {
-  let guide = ask text tool "cat"
-    "Write out the house style guide, at most four short lines."
+One text in one place, and the place is the file: `agent-cat run
+examples/harden.wf` and every theorem below are about the same characters, so
+there is no second copy to drift. `include_str` elaborates to a string literal,
+exactly as the `r##"…"##` it replaced did, so nothing about the kernel
+reductions the proofs below perform changes — and nothing about them touches this
+constant anyway, which is the point of `flagshipRaw` being written out (see its
+docstring for the measurement that forces that).
 
-  let draft = @model "deep" ask text model "author"
-    "Draft a patch satisfying:\n{spec}\nReply with a unified diff only."
-
-  revising draft upto 2
-
-    check (patch) {
-      panel [
-        ask verdict model "reviewer-correct"
-          "{guide}\nIs this patch correct?\n{patch}\n{verdictSpec}",
-        ask verdict model "reviewer-secure"
-          "{guide}\nIs this patch secure?\n{patch}\n{verdictSpec}",
-        ask verdict model "reviewer-simple"
-          "Could this patch be simpler?\n{patch}\n{verdictSpec}"
-      ]
-    }
-
-    with (patch, why) {
-      @model "deep" ask text model "author"
-        "{guide}\nRevise this patch:\n{patch}\n{why}\nReply with the revised diff only."
-    }
-
-    accepted (patch) {
-      let ok = ask flag person "owner"
-        "Apply this patch?\n{patch}\n{flagSpec}"
-      case ok {
-        yes -> { act tool "apply"
-                   "Apply:\n{patch}\nWrite the patched file here, then reply DONE." }
-        no  -> { done }
-      }
-    }
-
-    exhausted { done }
-}
-"##
+**What the inclusion cannot do, and where that is caught.** Lake's build trace
+records the module's imports and its own source, not the files a term elaborator
+reads, so editing `examples/harden.wf` alone does not rebuild this module: the
+`.olean` would then hold a text that is no longer on disk. `test/CliSmoke.lean`
+reads the file at run time and compares it with this constant, which is the check
+the inclusion cannot arrange for itself. The file begins with a newline because
+this literal did, and `flagshipRaw`'s positions count lines from it. -/
+def flagshipSource : String := include_str "../../examples/harden.wf"
 
 /-- `[[flagshipRaw]]` = the raw syntax of `flagshipSource`: the same workflow
 after lexing, macro expansion and parsing.

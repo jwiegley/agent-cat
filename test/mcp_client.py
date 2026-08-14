@@ -23,10 +23,11 @@ of `Agentic/Core/Dsl.lean` runs end to end with no model and no network:
 Order matters: the review prompts embed the guide and the patch, so the most
 specific key is tested first, and no canned answer contains a key.
 
-**The workflow source is read out of `Agentic/Core/Dsl.lean`**, not copied here:
-the client extracts the raw string literal of `Dsl.flagshipSource`, so the
-program it runs is the program the theorems in that file price, and a change to
-one is a change to both. `--source` overrides the file it is read from.
+**The workflow source is `examples/harden.wf`**, not copied here: that file is
+the program `agent-cat run` runs, and `Dsl.flagshipSource` is `include_str` of
+it, so the program this client drives over MCP is the very text the theorems of
+`Agentic/Core/Dsl.lean` price — one file, three consumers, nothing to drift.
+`--source` overrides the file it is read from.
 
 What is asserted of a finished run, in every mode:
 
@@ -90,7 +91,7 @@ import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_SERVER = os.path.join(ROOT, ".lake", "build", "bin", "workflow_mcp")
-DEFAULT_SOURCE = os.path.join(ROOT, "Agentic", "Core", "Dsl.lean")
+DEFAULT_SOURCE = os.path.join(ROOT, "examples", "harden.wf")
 
 # The bills a run of the flagship can actually present: 5 questions to the first
 # verdict plus a consent (6) plus an act (7), and the same again with one
@@ -161,18 +162,12 @@ def answer_for(prompt, consent):
 
 
 def flagship_source(path):
-    """`Dsl.flagshipSource`, read out of the Lean source that defines it."""
-    with open(path, encoding="utf-8") as handle:
-        text = handle.read()
-    marker = 'def flagshipSource : String := r##"'
-    start = text.find(marker)
-    if start < 0:
-        raise SystemExit("mcp_client: no `flagshipSource` raw literal in " + path)
-    start += len(marker)
-    end = text.find('"##', start)
-    if end < 0:
-        raise SystemExit("mcp_client: unterminated `flagshipSource` literal in " + path)
-    return text[start:end]
+    """The program, read off the file `Dsl.flagshipSource` is included from."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return handle.read()
+    except OSError as err:
+        raise SystemExit("mcp_client: cannot read the workflow at %s: %s" % (path, err))
 
 
 # --- assertions -------------------------------------------------------------
@@ -492,7 +487,7 @@ def main():
     ap.add_argument("--server", default=DEFAULT_SERVER,
                     help="the workflow_mcp binary (default: %s)" % DEFAULT_SERVER)
     ap.add_argument("--source", default=DEFAULT_SOURCE,
-                    help="the Lean file `flagshipSource` is read out of")
+                    help="the .wf program to drive (default: %s)" % DEFAULT_SOURCE)
     ap.add_argument("--expect-server", default=None,
                     help='"name version protocolVersion" the server must answer with')
     ap.add_argument("--verbose", action="store_true", help="print every frame")

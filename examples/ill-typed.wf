@@ -1,0 +1,14 @@
+-- This program is here to be refused, and `test/CliSmoke.lean` requires that it
+-- be refused identically by `agent-cat plan`, `agent-cat cost` and `agent-cat
+-- run`. It interpolates a verdict into a prompt: `El .text` is `String` and
+-- nothing else embeds in a string without a choice of renderer, so the checker
+-- rejects it rather than picking one (`Agentic/Core/Dsl/Check.lean`, `chunkExpr`).
+workflow {
+  let review = ask verdict model "reviewer"
+    "Is the parser correct?"
+
+  let note = ask text model "scribe"
+    "Write this up: {review}"
+
+  done
+}

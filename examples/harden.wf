@@ -1,0 +1,42 @@
+
+define spec        = "harden the parser"
+define verdictSpec = "Reply with exactly APPROVE if acceptable, or OBJECTION: <one line> if not."
+define flagSpec    = "Reply with exactly yes or no."
+
+workflow {
+  let guide = ask text tool "cat"
+    "Write out the house style guide, at most four short lines."
+
+  let draft = @model "deep" ask text model "author"
+    "Draft a patch satisfying:\n{spec}\nReply with a unified diff only."
+
+  revising draft upto 2
+
+    check (patch) {
+      panel [
+        ask verdict model "reviewer-correct"
+          "{guide}\nIs this patch correct?\n{patch}\n{verdictSpec}",
+        ask verdict model "reviewer-secure"
+          "{guide}\nIs this patch secure?\n{patch}\n{verdictSpec}",
+        ask verdict model "reviewer-simple"
+          "Could this patch be simpler?\n{patch}\n{verdictSpec}"
+      ]
+    }
+
+    with (patch, why) {
+      @model "deep" ask text model "author"
+        "{guide}\nRevise this patch:\n{patch}\n{why}\nReply with the revised diff only."
+    }
+
+    accepted (patch) {
+      let ok = ask flag person "owner"
+        "Apply this patch?\n{patch}\n{flagSpec}"
+      case ok {
+        yes -> { act tool "apply"
+                   "Apply:\n{patch}\nWrite the patched file here, then reply DONE." }
+        no  -> { done }
+      }
+    }
+
+    exhausted { done }
+}

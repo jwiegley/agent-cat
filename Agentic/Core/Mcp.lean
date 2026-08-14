@@ -1,5 +1,6 @@
 import Agentic.Core.Rpc
 import Agentic.Core.Dsl
+import Agentic.Core.Explain
 import Agentic.Core.Report
 import Agentic.Core.Certify
 
@@ -285,19 +286,12 @@ def serverName : String := "agent-cat-workflow"
 /-- The server's version, moved by hand when the tool surface changes. -/
 def serverVersion : String := "0.1.0"
 
-/-- `[[levelName ℓ]]` = the rung of `Agentic/Core/Level.lean` as the word the
-protocol carries. -/
-def levelName : Level → String
-  | .batch => "batch"
-  | .pipeline => "pipeline"
-  | .branch => "branch"
-  | .dynamic => "dynamic"
-
-/-- **The word determines the rung**, so a client that reads it back has lost
-nothing. Four constructors and four words, decided rather than asserted — this
-is the one rendering in this file that is injective, and `Report.sayFlag` is the
-other one in the package. -/
-theorem levelName_injective : Function.Injective levelName := by decide
+/-! The rung's name on the wire is `Agentic.Core.levelName`, of
+`Agentic/Core/Explain.lean`, and not a table of this server's own: a client that
+reads `"branch"` off a `workflow_check` and a reader who reads it off
+`agent-cat cost` are reading one function, whose injectivity —
+`levelName_injective`, so that the word determines the rung and a client that
+reads it back has lost nothing — is proved there. -/
 
 /-! ## Small JSON helpers
 
@@ -314,12 +308,6 @@ author set no model axis" from "the author set the empty one". -/
 def jstr? : Option String → Json
   | some s => Json.str s
   | none => Json.null
-
-/-- An optional number, for a reader: the number, or a dash where the rung
-admits none. -/
-def sayNat? : Option Nat → String
-  | some n => toString n
-  | none => "—"
 
 /-- An optional number as a number or `null`. -/
 def jnat? : Option Nat → Json
@@ -1049,18 +1037,10 @@ def errObj (kind : String) (message : String) (extra : List (String × Json) := 
 
 /-! ## `workflow_check` -/
 
-/-- `[[costSummary p h]]` = the cheapest bill, the dearest bill and the number
-of paths, from `Cost.costTree`.
-
-`h : level p ≤ Level.branch` is the argument `costTree` demands, which is why
-`Dsl.parseAndCheck_level_le` is the term this tool is built on. The folds are
-`CostTree.minFold` and `CostTree.maxFold` at `tick`, so the numbers are
-consultations. -/
-def costSummary (p : Plan [] Unit) (h : level p ≤ Level.branch) : Option Nat × Option Nat × Nat :=
-  let τ := costTree tick p h Env.nil
-  ( τ.minFold.recTopCoe none (fun s => some (Multiplicative.toAdd s))
-  , τ.maxFold.recBotCoe none (fun s => some (Multiplicative.toAdd s))
-  , Multiset.card τ.leaves )
+/-! The cost quoted here is `Explain.costSummary` — the cheapest bill, the
+dearest bill and the number of paths, from `Cost.costTree` — and not a second
+fold: what a client is quoted over the wire and what `agent-cat cost` prints for
+a reader are the same three numbers out of the same tree. -/
 
 /-- A question shape as JSON: who would be asked, under what scope, at which
 draw. `Q.Shape.withPrompt` with the empty prompt is how the scope axes are read
@@ -1093,7 +1073,7 @@ that say the same thing.
 Shared by `workflow_check` and `workflow_start`, so a run reports the same
 prices its source was quoted. -/
 def checkSummary (p : Plan [] Unit) (h : level p ≤ Level.branch) : Json × List String :=
-  let (lo, hi, paths) := costSummary p h
+  let (lo, hi, paths) := Explain.costSummary p h
   let cs := codes p
   let shs := shapes p
   let render :=

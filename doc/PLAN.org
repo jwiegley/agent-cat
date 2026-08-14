@@ -1715,6 +1715,22 @@ Observed during the heavy review's validated pass: every mcp__pal__chat call fai
 
 From acat-vbl: muExt_indep_of_peak_eq_zero anchors the count semantically only at zero; parT=+ / seqT=max remain postulated readings. A per-run trace of consulted sites with |in-flight| <= peak is the real anchor; the module header should not say 'semantic width' until it exists (review finding 11).
 
+* TODO [#C] agent-cat CLI: run | cost | plan over DSL program files, with hardenPatch reconstructed as a program
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-tki
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-13 Thu 20:26]
+:MODIFIED: [2026-08-13 Thu 20:26]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Owner 2026-08-13, after the DSL/MCP work: (1) reconstruct the hardenPatch Lean example as a PROGRAM TEXT in the DSL — a file in the repo (examples/harden.wf or similar), not just a string constant in a test; (2) a single executable 'agent-cat' with three subcommands over that file: 'agent-cat run <program>' parses, type-checks, and EXECUTES the plan against a live agent (ACP adapter as in harden_demo; --adapter stub|claude|codex), printing the transcript, bill and certificate; 'agent-cat cost <program>' parses, type-checks and prints the COST analysis without executing — level, shape sequence, cost tree leaves, min/max, and the reachable-bill set where the level permits it, stating plainly when a bound is sound but unattained; 'agent-cat plan <program>' parses, type-checks and PRINTS THE PLAN — a readable rendering of the checked term (structure, questions with addressee/scope, binders, branches, revision bounds), i.e. what the author wrote as the library understands it. All three share one parseAndCheck front end and must report type errors identically with position and message. Exit nonzero on type error. Keep harden_demo working or fold it into 'agent-cat run' with the demo's assertions behind a flag. Depends on the DSL landing (workflow wlkbf4jne).
+
 * DONE [#D] Mat lacks a zero matrix: matZero with matAdd unit law, comp_zero/zero_comp
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
