@@ -1379,7 +1379,7 @@ Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 18:34]
-:MODIFIED: [2026-08-15 Sat 09:19]
+:MODIFIED: [2026-08-15 Sat 10:46]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -1479,6 +1479,13 @@ Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is
     "author": "johnw",
     "text": "Round thirteen (owner, 2026-08-15): the {$x} define sigil is deleted — one hole spelling, {name}, for defines and bindings alike. Sound because the namespaces are provably disjoint (a binder may not spell a define; a duplicate define is refused), so the name alone decides — resolution is an exact lookup, not a heuristic, keeping the survey's anti-ApplicativeDo prohibition satisfied. The rung-at-a-glance property from survey amendment 1 is consciously traded away at the owner's direction: the rung remains an exact fact of the source (the preamble decides closedness; agent-cat plan names each question's rung). Brace escaping documented and made symmetric: \\{ and \\} in both prompt spellings (blocks previously only escaped the open brace — a \\} would have kept its backslash silently). Battery green; flagshipRaw unchanged (define holes expand to the same literal chunks); GRAMMAR.md round-thirteen note added.",
     "created_at": "2026-08-15T16:19:48Z"
+  },
+  {
+    "id": 82,
+    "issue_id": "acat-k28",
+    "author": "johnw",
+    "text": "Round fourteen (owner): complete test battery. test/DslSmoke.lean rebuilt as a 112-case table (19 accepts, 93 refusals pinned to whole diagnoses, positions included) generated from an empirical probe so expected strings cannot be transcription errors, plus semantic sections: flagship parse pin, verdict-arm distinctness, the three render states of a {v} splice, the --define override path at the library level (applied + refused), the at-bound loop with wall clocks, draw indices, block/string trace identity, and the one refusal unreachable from source (empty panel) tested against a hand-built Raw. test/coverage_audit.py mechanically cross-checks every .error site in Parse/Check against the battery — 63 sites, 54 audited and hit, 9 exempt with stated reasons (six unreachable fuel branches, two generic wrapper shapes, expectPunct's mark-is-the-message) — and FAILS if a future refusal ships untested. All smokes green. Parallel discovery workflow (5 axes + synthesis) now hunting behaviors the site audit cannot see: untested legal combinations, run-level semantics, and mutation-surviving gaps.",
+    "created_at": "2026-08-15T17:46:01Z"
   }
 ]
 #+end_src
