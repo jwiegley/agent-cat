@@ -1379,7 +1379,7 @@ Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 18:34]
-:MODIFIED: [2026-08-14 Fri 23:23]
+:MODIFIED: [2026-08-15 Sat 07:54]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -1465,6 +1465,13 @@ Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is
     "author": "johnw",
     "text": "ROUND ELEVEN — IMPLEMENTED. The redesigned surface is live: Syntax/Parse/Check/Dsl rewritten (inference = first ground use + ground-free refusal; pending-result discipline enforced by the checker with the case as the next statement; text blocks in the lexer with dedent/escalation/CRLF/mixed-tab rules; {$x} define holes; served by; panel rule phrase; if/case; revising-as-amend; stop; known here; no-shadowing; binder-vs-define separation). parseAndCheck_level_le re-proved over the new checker with the PendLevel invariant. DslFlagship re-transcribed mechanically from the parser itself; all nine decide +kernel theorems recomputed — the module now elaborates in ~107 s (was 5-6 min). All four trace agreements with Harden.demo hold (the apply-prompt DONE phrase retained pending acat-nhz). Examples rewritten; dsl-guide.html rewritten; full battery green: dsl/cli/mcp/exec/acp/mcp_client smokes + harden_demo x3 + full workspace build. V1 deltas vs GRAMMAR.md noted in its implementation-status section.",
     "created_at": "2026-08-15T06:23:06Z"
+  },
+  {
+    "id": 80,
+    "issue_id": "acat-k28",
+    "author": "johnw",
+    "text": "Round twelve (owner, 2026-08-15): the '.reasons' projection is deleted — it implied that a verdict is a record with fields, and there is exactly one field, i.e. none. A {v} hole now splices an answer AS TEXT, kind by kind: text is itself, a verdict is its objections joined by '; ' (the kind's one canonical rendering — total, and nothing for the author to choose), and flags/receipts are refused (no canonical text; a language that silently picked 'yes' would have prompts undetermined by their source). The hole grammar is back to {name} | {$name}. Inference note: a hole grounds text; verdict bindings are grounded positionally (panel/review/case) or by annotation — and bind-of-panel now imposes verdict directly rather than running inference, fixing a latent bug where a panel result used only in a hole inferred text and tripped the panel diagnosis. The elaborated flagship term is unchanged (render at the hole = the same Expr); all four trace agreements re-verified at runtime; example/ill-typed.wf rewritten around a flag interpolation (a verdict one is now legal); a positive render test pins 'said: too long; unsafe'. GRAMMAR.md, block-syntax.md, and the guide updated.",
+    "created_at": "2026-08-15T14:54:16Z"
   }
 ]
 #+end_src

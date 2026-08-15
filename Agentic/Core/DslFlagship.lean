@@ -51,8 +51,8 @@ open Agentic.Core
 
 /-! ## `Verdict.render` is `Harden.render`
 
-The DSL needed a renderer for the `{v.reasons}` hole and the frozen flagship
-module already had one. They are the same function, so the language introduces
+The DSL needed a renderer for a verdict spliced into a prompt and the frozen
+flagship module already had one. They are the same function, so the language introduces
 no second convention about what a verdict says. -/
 
 /-- The two spellings are one function, by `rfl`. -/
@@ -159,7 +159,7 @@ def flagshipRaw : Raw :=
                          Chunk.lit "\nRevise this patch:\n",
                          Chunk.interp "patch",
                          Chunk.lit "\n",
-                         Chunk.interp "verdict.reasons",
+                         Chunk.interp "verdict",
                          Chunk.lit "\nReply with the revised diff only."],
               pos := { line := 39, col := 7 } })
           { line := 16, col := 13 })
@@ -306,9 +306,9 @@ and not only on the short ones.
 
 That the prompts agree is where the left-associated `Prompt.expr` earns its
 keep — the elaborated prompts are `Harden`'s `++`-chains on the nose — and
-where the `{verdict.reasons}` hole earns its place: it elaborates to the same
-`Verdict.render ∘ ·` expression the old surface installed at the binder, so
-moving the renderer to the use site moved no term.
+where the `{verdict}` hole earns its keep: at a verdict binding it elaborates
+to the same `Verdict.render ∘ ·` expression the old surface installed at the
+binder, so moving the renderer to the use site moved no term.
 
 The **universally quantified** form is not proved; see the "not proved" section
 below. -/

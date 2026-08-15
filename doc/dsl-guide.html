@@ -142,7 +142,7 @@
           {guide}
           Revise this patch:
           {patch}
-          {verdict.reasons}
+          {verdict}
           Reply with the revised diff only.
       ```
     }
@@ -181,7 +181,6 @@
 <table>
 <tr><th>use</th><th>kind it fixes</th></tr>
 <tr><td><code>{x}</code> in a prompt</td><td><code>text</code></td></tr>
-<tr><td><code>{x.reasons}</code> in a prompt</td><td><code>verdict</code></td></tr>
 <tr><td><code>if x</code></td><td><code>flag</code></td></tr>
 <tr><td><code>case x { approved … }</code></td><td><code>verdict</code></td></tr>
 <tr><td>bound from a <code>panel</code>, or the review binding of a loop</td><td><code>verdict</code>, by position</td></tr>
@@ -204,8 +203,7 @@
 
 <table>
 <tr><th>hole</th><th>meaning</th></tr>
-<tr><td><code>{x}</code></td><td>an <em>answer</em>, spliced when the program runs; <code>x</code> must answer <code>text</code></td></tr>
-<tr><td><code>{x.reasons}</code></td><td>a verdict's objections, rendered as text where they are used, joined by <code>"; "</code></td></tr>
+<tr><td><code>{x}</code></td><td>an <em>answer</em>, spliced as text when the program runs: a text answer is itself, a verdict is its objections joined by <code>"; "</code> (approval and no-answer splice as nothing); flags and receipts are refused — they have no canonical text</td></tr>
 <tr><td><code>{$d}</code></td><td>a <em>define</em>: literal text, expanded where you see it, before anything runs</td></tr>
 </table>
 
@@ -242,7 +240,7 @@ x &lt;- <span class="kw">ask person</span> <span class="str">"owner"</span> <spa
   <span class="kw">unsettled</span>     { … }
 }</code></pre>
 
-<p>Read it as its own sentence: revise <code>draft</code>, calling the moving candidate <code>patch</code>, at most 2 amendments. Each round binds one verdict — an ordinary binding with a name you choose, consumed by the normal scope rules (<code>{verdict.reasons}</code> in the amend prompt) — and <mark>the loop settles the moment a review approves</mark>; otherwise the <code>amend</code> block's answer becomes the next <code>patch</code>, its head naming what it replaces. <code>at most n amendments</code> is between one and n+1 reviews and at most n amendments, and the unit agrees with its numeral (<code>at most 1 amendment</code>).</p>
+<p>Read it as its own sentence: revise <code>draft</code>, calling the moving candidate <code>patch</code>, at most 2 amendments. Each round binds one verdict — an ordinary binding with a name you choose, consumed by the normal scope rules (<code>{verdict}</code> in the amend prompt, where a verdict splices as its objections) — and <mark>the loop settles the moment a review approves</mark>; otherwise the <code>amend</code> block's answer becomes the next <code>patch</code>, its head naming what it replaces. <code>at most n amendments</code> is between one and n+1 reviews and at most n amendments, and the unit agrees with its numeral (<code>at most 1 amendment</code>).</p>
 
 <p>The loop's result is <em>settled-or-not</em> — not one of the four kinds, so it is not an ordinary value: the very next statement must be its <code>case</code>, the <code>settled</code> arm names the artefact where it exists, and <code>unsettled</code> is the path the author must write for a loop that never came to rest. Nothing else may touch the result, and a result nothing consumes is refused.</p>
 
@@ -252,7 +250,7 @@ x &lt;- <span class="kw">ask person</span> <span class="str">"owner"</span> <spa
 
 <p>Several questions asked side by side, their verdicts combined — and the rule is on the page. The menu currently has this one entry: <code>all must approve</code> is the verdict monoid — objections concatenate in member order, and one member who does not answer sinks the whole panel to <em>no answer</em>, deliberately: silence is not an opinion to outvote. A panel always answers <code>verdict</code> (no other kind carries the monoid), and a bare <code>panel [ … ]</code> is refused: a panel that does not say its rule leaves the reader to guess.</p>
 
-<p>One hazard, named rather than hidden: under <code>all must approve</code>, a member who declines annihilates every other member's objections, so a revision's <code>{verdict.reasons}</code> can legitimately be empty — the reviser is told it failed but not why. The designed second entry, <code>at least n must approve</code>, fixes this for n &lt; k and is specified in <code>doc/research/dsl-redesign/panel-rules.md</code> (obr <code>acat-f10</code>).</p>
+<p>One hazard, named rather than hidden: under <code>all must approve</code>, a member who declines annihilates every other member's objections, so a revision's <code>{verdict}</code> can legitimately splice as empty text — the reviser is told it failed but not why. The designed second entry, <code>at least n must approve</code>, fixes this for n &lt; k and is specified in <code>doc/research/dsl-redesign/panel-rules.md</code> (obr <code>acat-f10</code>).</p>
 
 <h2 id="refusals"><span class="num">Seven</span>What the checker will not allow</h2>
 
@@ -261,7 +259,7 @@ x &lt;- <span class="kw">ask person</span> <span class="str">"owner"</span> <spa
 <table>
 <tr><th>you wrote</th><th>the refusal</th></tr>
 <tr><td>a bound name with no use and no annotation</td><td>nothing fixes what kind of answer it names: use it, or annotate it</td></tr>
-<tr><td><code>{v}</code> where <code>v</code> is a verdict</td><td>only text interpolates; write <code>{v.reasons}</code>, or <code>case v</code></td></tr>
+<tr><td><code>{ok}</code> where <code>ok</code> is a flag</td><td>a flag has no text of its own; only text and verdicts interpolate</td></tr>
 <tr><td><code>{spec}</code> where <code>spec</code> is a define</td><td>a define's hole carries the sigil: <code>{$spec}</code></td></tr>
 <tr><td>a second <code>define</code> of one name, or a binder spelling one</td><td>one define per name; the namespaces never merge</td></tr>
 <tr><td>re-introducing a live name</td><td>no shadowing; rename one of the two</td></tr>

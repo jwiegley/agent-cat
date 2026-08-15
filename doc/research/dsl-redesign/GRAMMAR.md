@@ -28,6 +28,11 @@ menu ships entry one only (`at least n must approve` is acat-f10); and a
 consume — a refusal to add. Kind inference is first-ground-use with the
 ground-free refusal, exactly as §rules-4 states.
 
+Round twelve (owner): the `.reasons` projection is deleted — it implied fields
+a verdict does not have. A `{v}` hole splices a verdict as its objections,
+which is the kind's one canonical text; flags and receipts remain refused. The
+elaborated term is unchanged (`Verdict.render` at the hole).
+
 ## Grammar
 
 Braces delimit; indentation means nothing. Comments run `--` to end of line.
@@ -72,9 +77,11 @@ text       ::= a quoted string, or a fenced block (see block-syntax.md)
 plainstring::= a quoted string with no holes (names are written, not computed)
 ```
 
-Holes inside `text`: `{x}` splices an answer (text only), `{x.reasons}`
-renders a verdict's objections where it is used, `{$x}` expands a define.
-`\{` is a literal brace.
+Holes inside `text`: `{x}` splices an answer *as text* — a text answer is
+itself, a verdict is its objections joined by `"; "` (each kind has at most
+one way to be text, so there is nothing to project and no field syntax);
+`{$x}` expands a define. Flags and receipts have no canonical text and are
+refused. `\{` is a literal brace.
 
 ## The rules the grammar does not carry
 
@@ -91,7 +98,8 @@ renders a verdict's objections where it is used, `{$x}` expands a define.
    answerable by searching the page.
 
 4. **Kinds are inferred** from the constraint sites: a `{x}` hole forces
-   `text`; `{x.reasons}` forces `verdict`; `if` forces `flag`; verdict arms
+   `text` (a verdict binding is grounded positionally or by annotation,
+   never by a hole); `if` forces `flag`; verdict arms
    force `verdict`; panel members, panel results, and the review binding are
    `verdict`; a statement-position ask is `receipt`; the loop subject, its
    carrier, and its `settled` binder share one kind. Annotations remain legal
@@ -177,8 +185,9 @@ on `acat-k28`):
   lambda — no `Ctx` entry, no kernel change);
 - graft replicates the loop's tail once per exit: price the product in
   `RawBlock.bounded`, not each numeral;
-- `{x.reasons}` adds a projection chunk deliberately and updates
-  Check.lean's "interpolation is text-only" invariant;
+- a `{v}` hole at a verdict supplies the renderer at the use site, updating
+  Check.lean's "interpolation is text-only" invariant to "text or verdict,
+  each by its one canonical rendering";
 - `served by` is refused off `ask model` (no such refusal exists today);
 - for the quorum rule: the agreement-at-top-threshold and
   trace-independence theorems are **required**, as is the lemma that a
@@ -191,7 +200,7 @@ on `acat-k28`):
 ## Hazards, named
 
 A panel under `all must approve` with a silent member hands `amend` an empty
-`{verdict.reasons}` — the reference points at `at least n` as the way out. A
+`{verdict}` — the reference points at `at least n` as the way out. A
 receipt verifies nothing. The kind of a question can change when its uses
 change (rule 4). Prompt text like `verdictSpec` helps an addressee satisfy
 the kind's decoder; it is a courtesy, and the two can drift.

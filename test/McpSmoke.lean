@@ -161,7 +161,7 @@ def hostileSource : String :=
   "  d : text <- ask model \"a\" \"draft\"\n" ++
   "  r <- revising d as c, at most 1000000000 amendments {\n" ++
   "    v <- ask model \"m\" \"review {c}\"\n" ++
-  "    amend c { ask model \"a\" \"fix {c} {v.reasons}\" }\n" ++
+  "    amend c { ask model \"a\" \"fix {c} {v}\" }\n" ++
   "  }\n" ++
   "  case r { settled x { stop } unsettled { stop } }\n}\n"
 

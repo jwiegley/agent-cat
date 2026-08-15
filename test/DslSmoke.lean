@@ -85,10 +85,18 @@ def srcIfOnText : String :=
   r#"           n : text <- ask tool "t" "{g}""# ++ "\n" ++
   r#"           if g { stop } else { stop } }"#
 
-/-- An interpolation of a verdict, refused with the two legal uses named. -/
-def srcInterpVerdict : String :=
-  r#"workflow { v : verdict <- ask model "m" "hi""# ++ "\n" ++
-  r#"           g : text <- ask tool "cat" "quoting {v}" }"#
+/-- An interpolation of a flag, which has no canonical text. (A verdict does —
+its objections — so `{v}` at a verdict is *accepted*; the render test below
+pins what it splices.) -/
+def srcInterpFlag : String :=
+  r#"workflow { ok : flag <- ask person "o" "hi""# ++ "\n" ++
+  r#"           g : text <- ask tool "cat" "quoting {ok}" }"#
+
+/-- A verdict spliced into a prompt: the plan the render test runs to pin that
+`{v}` at a verdict splices the objections, joined by `"; "`. -/
+def srcInterpRender : String :=
+  r#"workflow { v : verdict <- ask model "m" "judge this""# ++ "\n" ++
+  r#"           ask tool "log" "said: {v}" }"#
 
 /-- A panel bound at `text`: only `verdict` carries the monoid. -/
 def srcPanelText : String :=
@@ -112,7 +120,7 @@ def srcPendingUnconsumed : String :=
   r#"workflow { d : text <- ask model "a" "draft""# ++ "\n" ++
   r#"           r <- revising d as c, at most 1 amendment {"# ++ "\n" ++
   r#"             v <- ask model "m" "{c}""# ++ "\n" ++
-  r#"             amend c { ask model "a" "{c} {v.reasons}" } } }"#
+  r#"             amend c { ask model "a" "{c} {v}" } } }"#
 
 /-- A settled/unsettled `case` on a name that is not a revising result. -/
 def srcCaseNotPending : String :=
@@ -150,7 +158,7 @@ def srcAmendWrongName : String :=
   r#"workflow { d : text <- ask model "a" "draft""# ++ "\n" ++
   r#"           r <- revising d as c, at most 1 amendment {"# ++ "\n" ++
   r#"             v <- ask model "m" "{c}""# ++ "\n" ++
-  r#"             amend d { ask model "a" "{c} {v.reasons}" } }"# ++ "\n" ++
+  r#"             amend d { ask model "a" "{c} {v}" } }"# ++ "\n" ++
   r#"           case r { settled x { stop } unsettled { stop } } }"#
 
 /-- The unit agrees with its numeral, in both directions. -/
@@ -158,13 +166,13 @@ def srcPluralOne : String :=
   r#"workflow { d : text <- ask model "a" "draft""# ++ "\n" ++
   r#"           r <- revising d as c, at most 1 amendments {"# ++ "\n" ++
   r#"             v <- ask model "m" "{c}""# ++ "\n" ++
-  r#"             amend c { ask model "a" "{c} {v.reasons}" } }"# ++ "\n" ++
+  r#"             amend c { ask model "a" "{c} {v}" } }"# ++ "\n" ++
   r#"           case r { settled x { stop } unsettled { stop } } }"#
 def srcSingularTwo : String :=
   r#"workflow { d : text <- ask model "a" "draft""# ++ "\n" ++
   r#"           r <- revising d as c, at most 2 amendment {"# ++ "\n" ++
   r#"             v <- ask model "m" "{c}""# ++ "\n" ++
-  r#"             amend c { ask model "a" "{c} {v.reasons}" } }"# ++ "\n" ++
+  r#"             amend c { ask model "a" "{c} {v}" } }"# ++ "\n" ++
   r#"           case r { settled x { stop } unsettled { stop } } }"#
 
 /-- The old flag spelling of `case`, which is `if … else` now. -/
@@ -183,7 +191,7 @@ def srcRevising (n : Nat) : String :=
   "workflow { d : text <- ask model \"a\" \"draft\"\n" ++
   s!"           r <- revising d as c, at most {n} amendments " ++ "{\n" ++
   "             v <- ask model \"m\" \"review {c}\"\n" ++
-  "             amend c { ask model \"a\" \"fix {c} {v.reasons}\" }\n" ++
+  "             amend c { ask model \"a\" \"fix {c} {v}\" }\n" ++
   "           }\n" ++
   "           case r { settled x { ask tool \"t\" \"apply {x}\" }\n" ++
   "                    unsettled { stop } } }"
@@ -255,10 +263,23 @@ def main : IO UInt32 := do
        `case`), or annotate it — `g : text <- …` at `g`"
     rejects "the first use fixes the kind; a later `if` disagrees and is refused" srcIfOnText
       "3:12: an `if` branches on a flag, but `g` answers `text` at `g`"
-    rejects "interpolating a verdict is refused, with the two legal uses named" srcInterpVerdict
-      "2:24: only a text answer interpolates into a prompt, and `v` answers `verdict`; \
-       write `v.reasons` in the hole for its objections as text, or `case v` to take a \
-       different path for each outcome at `v`"
+    rejects "interpolating a flag is refused; it has no text of its own" srcInterpFlag
+      "2:24: only a text or a verdict answer interpolates into a prompt — a verdict \
+       splices as its objections — but `ok` answers `flag`, which has no text of its \
+       own at `ok`"
+    -- …and a verdict interpolates as its objections: the one canonical rendering,
+    -- pinned by running the program in an objecting world.
+    match parseAndCheckE srcInterpRender with
+    | .error e => throw <| IO.userError s!"FAIL the render program does not check: {e}"
+    | .ok p =>
+      let ωObj : Ω := fun c => match c with
+        | .text => fun _ => "" | .verdict => fun _ => Verdict.object ["too long", "unsafe"]
+        | .flag => fun _ => true | .ack => fun _ => ()
+      check "a verdict splices as its objections, joined"
+        "said: too long; unsafe"
+        (match (Plan.trace ωObj p Env.nil).getLast? with
+         | some e => e.q.prompt
+         | none => "no events")
     rejects "a panel bound at `text` is refused" srcPanelText
       "1:24: this binding: a panel combines its members in the verdict monoid, so it \
        answers `verdict`, not `text` at `panel`"

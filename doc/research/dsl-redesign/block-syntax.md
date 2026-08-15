@@ -36,10 +36,10 @@ take quoted strings only (`expectPlainStr` refuses a block token).
    fence's line break is a terminator, not content. A final blank content line
    adds one if wanted.
 
-5. HOLES AND THE ONE ESCAPE. A hole is exactly `{` `$`? name [ `.reasons` ] `}`
-   where name is isIdentStart isIdentCont* — the same hole grammar the quoted form
-   has: `{x}` splices an ANSWER (text only; `{x.reasons}` renders a verdict where
-   it is used), `{$x}` expands a DEFINE (literal text, so the question stays
+5. HOLES AND THE ONE ESCAPE. A hole is exactly `{` `$`? name `}` where name
+   is isIdentStart isIdentCont* — the same hole grammar the quoted form has:
+   `{x}` splices an ANSWER as text (a text answer is itself; a verdict is its
+   objections), `{$x}` expands a DEFINE (literal text, so the question stays
    closed). `\{` is a literal brace. EVERYTHING ELSE IS LITERAL: quotes, lone
    backslashes, short backtick runs, tabs, Markdown's own escapes. Any other `{`
    is refused at lex time with a message naming `\{`. Two stated limits: a literal
@@ -72,7 +72,9 @@ re-indentation, as in the quoted form).
 
 - Six of the seven blocks dedent+join to the byte-identical prompt strings the
   quoted flagship carried (verified by hand against DslFlagship.lean:118-180).
-- The amend block reads `{why.reasons}` where the incumbent wrote `{why}`: the new
+- (Historical: at validation time the amend block read `{why.reasons}`; round
+  twelve deleted the projection, and the hole is now `{verdict}`.) It read
+  `{why.reasons}` where the incumbent wrote `{why}`: the new
   surface moves the verdict renderer from the binder to the use site. chunkExpr
   splits the name at the dot and produces THE SAME Expr the incumbent produced
   (Verdict.render ∘ Env.head at the same de Bruijn index), so the elaborated Plan

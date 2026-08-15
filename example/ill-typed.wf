@@ -1,13 +1,13 @@
 -- This program is here to be refused, and `test/CliSmoke.lean` requires that it
 -- be refused identically by `agent-cat plan`, `agent-cat cost` and `agent-cat
--- run`. It interpolates a verdict into a prompt: `El .text` is `String` and
--- nothing else embeds in a string without a choice of renderer, so the checker
--- rejects it and names the two legal uses — `{review.reasons}` for the
--- objections as text, and `case review` to take a different path per outcome.
+-- run`. It interpolates a flag into a prompt: a flag has no canonical text —
+-- a language that silently picked "yes" would be a language whose prompts are
+-- not determined by their source — so the checker rejects it rather than
+-- choosing one. (Text splices as itself; a verdict as its objections.)
 workflow {
-  review : verdict <- ask model "reviewer"
-    "Is the parser correct?"
+  ok : flag <- ask person "owner"
+    "Shall we?"
 
   note : text <- ask model "scribe"
-    "Write this up: {review}"
+    "Write this up: {ok}"
 }

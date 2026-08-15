@@ -229,8 +229,8 @@ def main : IO UInt32 := do
     check "…and run's is too" illPlan.err illRun.err
     checkTrue "…and it says where, what and which fragment"
       ((illPlan.err.splitOn "example/ill-typed.wf:11:18:").length > 1
-        && (illPlan.err.splitOn "only a text answer interpolates").length > 1
-        && (illPlan.err.splitOn "at `review`").length > 1)
+        && (illPlan.err.splitOn "only a text or a verdict answer interpolates").length > 1
+        && (illPlan.err.splitOn "at `ok`").length > 1)
     check "…and nothing was printed on stdout" "" (String.intercalate "\n" illPlan.out)
 
     -- 5. The rung at which there is no number. `Cost.unbounded` is the `dyn` plan

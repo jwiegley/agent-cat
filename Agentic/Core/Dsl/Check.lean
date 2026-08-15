@@ -24,11 +24,12 @@ Four points where the elaboration is a decision rather than a transcription.
   already there along `Sub.wk`, so the resolved variable *is* the de Bruijn
   index and the shifting is `Sub`'s. The one entry carrying a different `Expr`
   is a loop's review binding, presented at `Code.verdict` and rendered only
-  where a `{v.reasons}` hole asks for text.
+  where a `{v}` hole asks for it as text.
 
 * **The kind of a binding is inferred from its first ground use.** The language
   restricts consumption to holes and branchings, so the walk is short and
-  deterministic: a `{x}` hole says `text`, a `{x.reasons}` hole says `verdict`,
+  deterministic: a `{x}` hole says `text` (a verdict binding is grounded
+  positionally, never by a hole),
   `if x` says `flag`, a verdict `case` says `verdict`, a panel or a review
   position says `verdict`, and a `revising` subject shares its carrier's kind.
   A later use that disagrees is refused by the ordinary kind-mismatch
@@ -116,40 +117,29 @@ private def freshName {Γ : Ctx} (S : Bindings Γ) (pos : Pos) (x : String) :
 
 /-! ## Prompts -/
 
-/-- One chunk, as an expression. Interpolation is defined **only** over
-text-typed names — `El .text = String` and nothing else embeds in a string
-without a choice of renderer. The one renderer the language has is written
-where it is used: `{v.reasons}` is a verdict's objections joined by `"; "`,
-which is `Verdict.render` at the hole. -/
+/-- One chunk, as an expression. A hole splices an answer *as text*, and each
+kind has at most one way to be text: a text answer is itself, and a verdict is
+its objections joined by `"; "` (`Verdict.render` — approval and no-answer
+splice as nothing, having nothing to say). A flag and a receipt have no
+canonical text, so they are refused: a language that silently picked `"yes"`
+would be a language whose prompts are not determined by their source. -/
 private def chunkExpr {Γ : Ctx} (S : Bindings Γ) (pos : Pos) :
     Chunk → Except CheckError (Expr Γ String)
   | .lit s => .ok (fun _ => s)
   | .interp nm =>
-    if nm.endsWith ".reasons" then
-      let x := String.ofList (nm.toList.take (nm.length - ".reasons".length))
-      match lookupBinding S pos x with
-      | .error err => .error err
-      | .ok b =>
+    match lookupBinding S pos nm with
+    | .error err => .error err
+    | .ok b =>
+      match b.at? .text with
+      | some e => .ok e
+      | none =>
         match b.at? .verdict with
         | some e => .ok (fun δ => Verdict.render (e δ))
         | none =>
-          .error ⟨pos, s!"`.reasons` renders a verdict's objections as text, \
-                         but `{x}` answers `{codeName b.code}`", nm⟩
-    else
-      match lookupBinding S pos nm with
-      | .error err => .error err
-      | .ok b =>
-        match b.at? .text with
-        | some e => .ok e
-        | none =>
-          if b.code = Code.verdict then
-            .error ⟨pos, s!"only a text answer interpolates into a prompt, and \
-                           `{nm}` answers `verdict`; write `{nm}.reasons` in the \
-                           hole for its objections as text, or `case {nm}` to \
-                           take a different path for each outcome", nm⟩
-          else
-            .error ⟨pos, s!"only a text answer interpolates into a prompt, \
-                           but `{nm}` answers `{codeName b.code}`", nm⟩
+          .error ⟨pos, s!"only a text or a verdict answer interpolates into a \
+                         prompt — a verdict splices as its objections — but \
+                         `{nm}` answers `{codeName b.code}`, which has no text \
+                         of its own", nm⟩
 
 /-- The chunks after the first, appended to what is already built.
 **Left-associated, and that is the decision** — see `Prompt.normalize`'s
@@ -213,16 +203,16 @@ private def firstOf (a b : Option Code) : Option Code :=
   | some c => some c
   | none => b
 
-/-- The kind a prompt's holes assert about `x`: `{x}` says text,
-`{x.reasons}` says verdict. -/
+/-- The kind a prompt's holes assert about `x`. A hole splices text *or* a
+verdict, so as a ground site it is read as `text` — a name whose only use is
+being spliced is a text question. A verdict binding never depends on this:
+panels, review bindings and `case` arms ground it positionally, and the
+annotation is always there for the remaining case. -/
 private def usePrompt (x : String) (p : Prompt) : Option Code :=
   p.findSome? fun ch =>
     match ch with
     | .lit _ => none
-    | .interp nm =>
-      if nm == x then some Code.text
-      else if nm == x ++ ".reasons" then some Code.verdict
-      else none
+    | .interp nm => if nm == x then some Code.text else none
 
 private def useKindR (x : String) : RawRhs → Option Code
   | .ask a => usePrompt x a.prompt
@@ -345,7 +335,7 @@ def checkCont {Γ : Ctx} {c : Code} (chk : Plan (c :: Γ) (El .verdict)) :
   fun _ σ a => Plan.sub chk (fun δ => Env.cons (a δ) (σ δ))
 
 /-- The `amend` clause: the review's verdict is de Bruijn `0` — bound under the
-author's chosen name, *at* `Code.verdict`, rendered only where a `.reasons`
+author's chosen name, *at* `Code.verdict`, rendered only where a `{v}`
 hole asks — and the candidate is de Bruijn `1`. -/
 def reviseCont {Γ : Ctx} {c : Code} (rev : Plan (.verdict :: c :: Γ) (El c)) :
     Plan.Cont Γ (El c × Verdict) (El c) :=
@@ -421,7 +411,12 @@ def checkBlock : (Γ : Ctx) → Bindings Γ → Option (Pend Γ) → RawBlock �
     match freshName S pos x with
     | .error err => .error err
     | .ok _ =>
-    match bindKind pos x ann rest with
+    -- A panel's kind is positional — it answers `verdict` or nothing — so
+    -- inference runs only for a plain ask. A wrong annotation on a panel is
+    -- refused by `bindForm`'s own panel diagnosis.
+    match (match rhs with
+           | .panel _ _ => .ok (ann.getD Code.verdict)
+           | .ask _ => bindKind pos x ann rest : Except CheckError Code) with
     | .error err => .error err
     | .ok c =>
     match bindForm c S rhs with
@@ -468,7 +463,7 @@ def checkBlock : (Γ : Ctx) → Bindings Γ → Option (Pend Γ) → RawBlock �
     -- The names each clause is handed. The review sees the candidate as de
     -- Bruijn `0` under the carrier's name; the amend sees the verdict as `0`
     -- under the review binding's name — at `Code.verdict`, rendered only where
-    -- a `.reasons` hole asks — and the candidate as `1`.
+    -- a hole asks for it as text — and the candidate as `1`.
     let Swith : Bindings (Code.verdict :: b.code :: Γ) :=
       ⟨carrier, b.code, fun δ => Env.head (Env.tail δ)⟩ ::
       ⟨rname, Code.verdict, fun δ => Env.head δ⟩ ::

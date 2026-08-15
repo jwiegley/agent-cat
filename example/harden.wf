@@ -40,7 +40,7 @@ workflow {
           {guide}
           Revise this patch:
           {patch}
-          {verdict.reasons}
+          {verdict}
           Reply with the revised diff only.
       ```
     }

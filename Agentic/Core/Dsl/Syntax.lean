@@ -55,10 +55,10 @@ namespace Verdict
 separated by `"; "`, and nothing where it declined — a refusal has no objection
 list to show.
 
-This is what makes `{v.reasons}` legal in a language whose interpolation is
-restricted to text: the hole elaborates to `render ∘ ·`, an `Expr Γ String`,
-so the restriction holds with the renderer written at the use site rather than
-being waived for one construct. -/
+This is what a `{v}` hole means at a verdict: a verdict has exactly one way to
+be text — this one — so the hole elaborates to `render ∘ ·`, an
+`Expr Γ String`, totally and canonically, with nothing for the author to
+choose and therefore nothing for the surface to say. -/
 def render (v : Verdict) : String :=
   String.intercalate "; " (if h : v = 0 then [] else FreeMonoid.toList (WithZero.unzero h))
 
@@ -114,9 +114,7 @@ def CheckError.render (e : CheckError) : String := toString e
 
 The interpolation `{x}` is a `Chunk` and not a general expression because the
 language has no expressions: a prompt is a concatenation of things said and
-things heard, and nothing else can appear in one. A `{v.reasons}` hole is
-carried as `interp "v.reasons"` — the checker splits the name at the dot and
-supplies the verdict renderer at the use site. A `{$d}` define-hole never
+things heard, and nothing else can appear in one. A `{$d}` define-hole never
 reaches this type: the parser expands it, so a `Raw`'s prompts hold only
 literals and answer-holes. -/
 inductive Chunk where

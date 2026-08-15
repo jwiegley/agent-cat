@@ -35,9 +35,9 @@ joined with `\n`, and the result is scanned for holes exactly as a string body
 is. Either way the token is a `Token.str` and nothing downstream can tell the
 spellings apart.
 
-A **hole** is `{name}`, `{name.reasons}` or `{$name}` — an answer spliced at
-run time, a verdict's objections rendered at run time, or a define expanded
-right here — and nothing else: any other `{` is refused at lex time with the
+A **hole** is `{name}` or `{$name}` — an answer spliced at run time, or a
+define expanded right here — and nothing else: any other `{` is refused at lex
+time with the
 escape (`\{`) named. `define` is expanded in this module, so the raw syntax the
 checker sees mentions only names a checker can resolve; a `{name}` whose name
 is a define is refused (*write `{$name}`*), a `{$name}` with no earlier define
@@ -99,11 +99,11 @@ private def flushLit (acc : List Char) (chunks : Prompt) : Prompt :=
   if acc.isEmpty then chunks else Chunk.lit (String.ofList acc.reverse) :: chunks
 
 /-- The body of a hole, the opening `{` already consumed: an optional `$`, a
-name, an optional `.reasons`, and the closing brace. Returns the stored form —
-`x`, `x.reasons` or `$x` — and the characters consumed (braces included).
+name, and the closing brace. Returns the stored form — `x` or `$x` — and the
+characters consumed (braces included).
 
 One grammar for both prompt spellings, enforced at lex time: a `{` that does
-not open one of the three hole forms is refused with the escape named, because
+not open one of the two hole forms is refused with the escape named, because
 the alternative — carrying arbitrary text to the checker as a name — turns a
 lexical mistake into a misleading scope error. -/
 private def scanHole (p : Pos) (cs : List Char) :
@@ -118,30 +118,12 @@ private def scanHole (p : Pos) (cs : List Char) :
       let name := cs.takeWhile isIdentCont
       let cs := cs.drop name.length
       let used := used + name.length
-      if dollar then
-        match cs with
-        | '}' :: rest => .ok ("$" ++ String.ofList name, used + 2, rest)
-        | '.' :: _ =>
-          .error ⟨p, "a define is literal text and has no `.reasons`; \
-                     only an answered verdict does", "$" ++ String.ofList name⟩
-        | _ => .error ⟨p, "unterminated hole: no closing brace", String.ofList name⟩
-      else
-        match cs with
-        | '}' :: rest => .ok (String.ofList name, used + 2, rest)
-        | '.' :: cs' =>
-          let field := cs'.takeWhile isIdentCont
-          let cs' := cs'.drop field.length
-          if String.ofList field == "reasons" then
-            match cs' with
-            | '}' :: rest =>
-              .ok (String.ofList name ++ ".reasons", used + field.length + 3, rest)
-            | _ => .error ⟨p, "unterminated hole: no closing brace", String.ofList name⟩
-          else
-            .error ⟨p, "the one projection a hole may write is `.reasons`, \
-                       a verdict's objections as text", String.ofList field⟩
-        | _ => .error ⟨p, "unterminated hole: no closing brace", String.ofList name⟩
+      let stored := (if dollar then "$" else "") ++ String.ofList name
+      match cs with
+      | '}' :: rest => .ok (stored, used + 2, rest)
+      | _ => .error ⟨p, "unterminated hole: no closing brace", stored⟩
     else
-      .error ⟨p, "a hole is `{name}`, `{name.reasons}` or `{$define}`; \
+      .error ⟨p, "a hole is `{name}` (an answer) or `{$define}`; \
                  a literal brace is written `\\{`", ""⟩
   | [] => .error ⟨p, "unterminated hole: the source ended", ""⟩
 
@@ -452,12 +434,6 @@ private def expectPlainStr (ts : List Tok) : Except CheckError (String × List T
 
 /-! ## `define`: literal text, expanded here -/
 
-/-- The name a hole stores, split from its `.reasons` projection if any. -/
-private def holeBase (nm : String) : String :=
-  if nm.endsWith ".reasons" then
-    String.ofList (nm.toList.take (nm.length - ".reasons".length))
-  else nm
-
 /-- A binder may not spell a define: the two namespaces must not silently
 merge, because a `{name}` hole reads from one and a `{$name}` hole from the
 other, and the reader has only the spelling to go by. -/
@@ -491,9 +467,9 @@ private def expand (defs : List (String × Prompt)) (pos : Pos) : Prompt →
         .error ⟨pos, "no define answers to this hole; a `{$name}` names an \
                      earlier `define`", name⟩
     else
-      match defs.find? (fun d => d.1 == holeBase nm) with
+      match defs.find? (fun d => d.1 == nm) with
       | some _ =>
-        .error ⟨pos, s!"`{holeBase nm}` is a define, and a define's hole carries \
+        .error ⟨pos, s!"`{nm}` is a define, and a define's hole carries \
                        the sigil: write it with `$` after the opening brace", nm⟩
       | none => do
         let r ← expand defs pos rest
