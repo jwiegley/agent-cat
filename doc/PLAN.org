@@ -1379,7 +1379,7 @@ Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 18:34]
-:MODIFIED: [2026-08-15 Sat 13:44]
+:MODIFIED: [2026-08-15 Sat 16:13]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -1514,6 +1514,13 @@ Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is
     "author": "johnw",
     "text": "Owner approves the functions+imports design (round sixteen), 2026-08-15: 'I approve of this design.' Committing the design record; implementation begins — value bodies as bind-chains ending in 'answer x', receipt procedures restricted per attack repair A2, arity-directed calls with the statement-word refusal (B1), 'answer' as an inference ground site (E1), labeled fences in the info-string slot, imports spliced post-order with dedup and dotted exports, --define routed by module prefix (D3), a pre-elaboration size recurrence for the call graph (C1), MCP refusing imports in v1.",
     "created_at": "2026-08-15T20:44:59Z"
+  },
+  {
+    "id": 87,
+    "issue_id": "acat-k28",
+    "author": "johnw",
+    "text": "Round 16 IMPLEMENTED and pushed (58b755e): functions and imports, exactly as the approved design derives them.\n\n**Core.** A function is an open plan over its parameter context; checkFn/checkBody elaborate the body once (CPS, `answer` grounds inference at the declared result); a call is Plan.sub through a dependently-built argument substitution; an import is a plan prefix plus a namespace (walkImports: post-order DFS, dedup, cycles refused by name). Recursion is unwritable (heads resolve against the table so far), calls cannot be arguments (arity-directed parsing; a function's name in argument position is refused with the bind-it escape), bodies cannot see callers (by type).\n\n**Theorems.** FnLevel (every table entry ≤ pipeline) threaded through checkBlock_level_le / checkBody_level_le / checkFn_level_le / checkFnsList_fnLevel / checkProgram_level_le / parseAndCheckProgramWith_level_le — all building on first pass. Flagship parse pin upgraded to the whole RawProgram (DecidableEq RawProgram); checkProgram_flagship bridges by rfl; all nine kernel proofs recompute.\n\n**Priced before built, both paths.** bodyAsks now guards checkFn (was: build then price), and a hostile `at most 10^9 amendments` is refused at its own line by a raw pre-scan (overRevised) rather than as a 0:0 question count.\n\n**Two bugs found by the battery discipline.** Cycle diagnosis printed `a -> a -> b` for a→b→a (stack reversed after appending, fixed); library-internal diagnoses had no file attribution (now wrapped `in module …`; the full Pos.module fix is acat-pos-module-attribution-oxq).\n\n**Surfaces.** CLI resolves `name.wf` beside the program (readModules, capped, misread file diagnosed); a library runs alone — its priming, then nothing (`agent-cat cost library.wf` answers); MCP refuses `import` with the inlining advice at check and start.\n\n**Tests.** Battery 201 cases (calls, $labels, trailing blocks, module shapes, budget chains at 2^13, hand-built checker refusals); round-16 semantic pins: call = its hand-inlining (one trace), three argument spellings = one program, priming leads the trace, sharing survives inlining, --define reaches through the module prefix; coverage audit green over 126 sites (extractor no longer picks interpolation contents as fragments). cli_smoke runs example/harden-imported.wf end-to-end against the stub; mcp_smoke pins the import refusal.\n\n**Examples/docs.** example/library.wf + example/harden-imported.wf; GRAMMAR.md round-16 productions and status; dsl-guide.html gains 'Functions and libraries'.\n\nNoted, not blocking: the labelled-fence-in-ask-position diagnosis ('expected a string literal or a text block') is truthful but could hint that labelled blocks belong to calls.\n",
+    "created_at": "2026-08-15T23:13:34Z"
   }
 ]
 #+end_src
