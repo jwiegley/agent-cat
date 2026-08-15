@@ -35,6 +35,20 @@ ALLOW = {
         "{what} phrase is audited individually",
     '`{String.ofList [c]}`': "expectPunct's {what} is the mark itself; the "
         "battery exercises `]` `,` `=` `:` `{` and `}` expectations by source",
+    # parsePrimer returns only at the end of its token list — any token that
+    # does not begin a priming statement is refused inside it, with a position
+    # — so the callers' trailing-junk arms below are defensive totality code
+    # that no source text reaches.
+    'expected the end of the library': "parsePrimer never returns a nonempty "
+        "rest; the offending token is diagnosed inside it",
+    'a file is a program (`workflow { … }`) or a library (its priming, then '
+    'the end of the file); expected `workflow`, or the end of the library':
+        "parsePrimer never returns a nonempty rest; the offending token is "
+        "diagnosed inside it",
+    # parseModuleSrc returns a workflow, a primer, or an error, so the
+    # program front end's neither-arm cannot fire.
+    'a program has a `workflow` block': "parseModuleSrc with qual=none returns "
+        "a workflow or a primer, or errors; the neither-arm is unreachable",
 }
 
 
@@ -72,8 +86,10 @@ def fragments(path):
         msg = ''.join(buf)
         # Interpolations make the literal a template, and escapes differ between
         # the source spelling and the smoke test's expected strings, so the
-        # audited fragment is the longest run free of braces and backslashes.
-        parts = re.split(r'[{}\\]', msg)
+        # audited fragment is the longest run free of braces and backslashes —
+        # with interpolation *contents* removed first, because `{codeName x}`
+        # is Lean code that never appears in a rendered diagnosis.
+        parts = re.split(r'[\x00{}\\]', re.sub(r'\{[^{}]*\}', '\x00', msg))
         frag = max(parts, key=len).strip()
         if len(frag) >= 8:  # too-short fragments match everything
             out.append((path, msg, frag))

@@ -90,6 +90,7 @@
     <li><a href="#asks">Questions, addressees, and the act</a></li>
     <li><a href="#branching">Branching, and the revision loop</a></li>
     <li><a href="#panels">Panels</a></li>
+    <li><a href="#functions">Functions and libraries</a></li>
     <li><a href="#refusals">What the checker will not allow</a></li>
     <li><a href="#tools">The three commands</a></li>
     <li><a href="#guarantees">What is guaranteed, and what is not</a></li>
@@ -252,7 +253,31 @@ x &lt;- <span class="kw">ask person</span> <span class="str">"owner"</span> <spa
 
 <p>One hazard, named rather than hidden: under <code>all must approve</code>, a member who declines annihilates every other member's objections, so a revision's <code>{verdict}</code> can legitimately splice as empty text — the reviser is told it failed but not why. The designed second entry, <code>at least n must approve</code>, fixes this for n &lt; k and is specified in <code>doc/research/dsl-redesign/panel-rules.md</code> (obr <code>acat-f10</code>).</p>
 
-<h2 id="refusals"><span class="num">Seven</span>What the checker will not allow</h2>
+<h2 id="functions"><span class="num">Seven</span>Functions and libraries</h2>
+
+<p>A function is a reusable sequence of questions: typed parameters, one declared result, a straight-line body.</p>
+
+<pre><code><span class="kw">function</span> judged (patch : text, rubric : text) -&gt; verdict {
+  v &lt;- <span class="kw">ask model</span> <span class="str">"judge"</span> ```
+      Judge this patch against the rubric.
+      {patch}
+      {rubric}
+  ```
+  <span class="kw">answer</span> v
+}</code></pre>
+
+<p>A call is written by juxtaposition and reads like the sentence it is: <code>second &lt;- judged patch "the rubric"</code>. An argument is a name or quoted words (words fill a <code>text</code> parameter); <mark>a call is not an argument</mark> — bind it first. Long arguments have two spellings: one <em>trailing block</em> fills the last parameter, and a <code>$label</code> in the argument list is answered by a labelled block written after the call:</p>
+
+<pre><code>second &lt;- judged patch $rubric
+```rubric
+    A patch passes when it is minimal, tested, and reversible.
+```</code></pre>
+
+<p>A body is bindings, acts and calls, ending with <code>answer name</code> — except a <code>-&gt; receipt</code> body, which just ends and is called in statement position, like the act it is. A body cannot branch, cannot revise, and cannot see its caller's names (its parameters are its whole world, by type); a call head resolves against the functions declared <em>above</em> it, so recursion is unwritable. Parameters answer <code>text</code> or <code>verdict</code>: a flag parameter would smuggle a decision into a body that cannot branch, and a receipt carries nothing to pass. A call <em>inlines</em> — the function's plan is substituted at each site (<code>Plan.sub</code>: a call is the library's own substitution, not a new former) — so <code>agent-cat plan</code> prints exactly what runs, and two calls with the same arguments are one answer, as sharing always is.</p>
+
+<p>A <em>library</em> is a file with no <code>workflow</code> block: defines, functions, and top-level statements — its <em>priming</em>, which runs at load, before anything the importer writes. <code>import lib</code> reads <code>lib.wf</code> beside the program (the CLI resolves; all modules of one program live in one directory), and everything a library exports is read qualified — <code>lib.guide</code>, <code>lib.judged</code>, <code>{lib.spec}</code> — so a library can never collide with your names: the shadowing problem is dissolved, not ruled on. A library's top-level bindings are annotated, always — inference scans forward, and forward is the importer's text. Imports run post-order, each file once, cycles refused by name; transitive imports execute but do not re-export. A program cannot be imported, and a library may be run: its priming, then nothing — <code>agent-cat cost lib.wf</code> prices the standing context. The elaborated term is priced before it is built: a function or a program whose inlining would exceed <code>maxQuestions</code> is refused with the count.</p>
+
+<h2 id="refusals"><span class="num">Eight</span>What the checker will not allow</h2>
 
 <p>Refusals name a position, say what is wrong in one sentence, and quote the fragment. The ones worth knowing before you meet them:</p>
 
@@ -268,9 +293,13 @@ x &lt;- <span class="kw">ask person</span> <span class="str">"owner"</span> <spa
 <tr><td><code>case ok { yes … no … }</code></td><td>a flag branches with <code>if … else</code></td></tr>
 <tr><td><code>at most n amendments</code> above 64</td><td>the loop is unrolled into the term, so the bound is a resource limit (<code>maxRevisions</code>)</td></tr>
 <tr><td>a block mixing tabs and spaces, or a fence nothing closes</td><td>refused at the fence, rather than guessed at</td></tr>
+<tr><td>a function's name standing as an argument</td><td>a call is not an argument: bind it, then pass the name</td></tr>
+<tr><td>binding a <code>-&gt; receipt</code> call, or a value call in statement position</td><td>a receipt binds nothing that can be consumed; a value's answer has nowhere to go — each refusal names the other spelling</td></tr>
+<tr><td>a verdict name passed to a <code>text</code> parameter</td><td>the kinds do not convert silently; the refusal names the escape — <code>"{v}"</code>, a hole, where the splice is visible</td></tr>
+<tr><td><code>import</code> in a program handed to the MCP server</td><td>that surface takes one self-contained program and has no files to resolve a module against: inline the library, or run it with <code>agent-cat</code></td></tr>
 </table>
 
-<h2 id="tools"><span class="num">Eight</span>The three commands</h2>
+<h2 id="tools"><span class="num">Nine</span>The three commands</h2>
 
 <p><code>agent-cat plan program.wf</code> prints the checked term — every question, its addressee, its rung, and where each answer is spliced. <code>agent-cat cost program.wf</code> prices it; for the flagship it prints, verbatim:</p>
 
@@ -280,9 +309,9 @@ branches, and the cost tree below is what stands in its place.
 cost tree: 9 leaves, cheapest 5, dearest 15 consultations (tick: one unit per consultation)
 leaf bills, with multiplicity: {5, 6, 7, 9, 10, 11, 13, 14, 15}</code></pre>
 
-<p>…followed by the honest paragraph: the leaves are what the <em>tree</em> admits, a path is not a world, and the cheapest bound may be unattained. <code>agent-cat run program.wf</code> runs it against a real agent over ACP, with the permission and fingerprint discipline described in <code>doc/mcp.md</code> and the run report at the end. All three are one front end: an ill-typed program is refused byte-identically, with exit code 2, by all three.</p>
+<p>…followed by the honest paragraph: the leaves are what the <em>tree</em> admits, a path is not a world, and the cheapest bound may be unattained. <code>agent-cat run program.wf</code> runs it against a real agent over ACP, with the permission and fingerprint discipline described in <code>doc/mcp.md</code> and the run report at the end. All three resolve <code>import name</code> to <code>name.wf</code> beside the program, and all three are one front end: an ill-typed program is refused byte-identically, with exit code 2, by all three.</p>
 
-<h2 id="guarantees"><span class="num">Nine</span>What is guaranteed, and what is not</h2>
+<h2 id="guarantees"><span class="num">Ten</span>What is guaranteed, and what is not</h2>
 
 <p>Every program this language accepts elaborates into the library's representation at or below the <em>branch</em> rung — <code>Dsl.parseAndCheck_level_le</code>, a theorem — so every program has a finite cost tree before it runs. The language has no syntax for the dynamic rung at all: data-dependent workflow <em>shape</em>, unbounded loops, data-width fan-out, and arbitrary code are each unwritable, which is why the bill enumeration exists. Sharing is the meaning: one binding is one answer in every world, and deliberate resampling is a different question by construction.</p>
 

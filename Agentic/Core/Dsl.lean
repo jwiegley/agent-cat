@@ -154,11 +154,35 @@ theorem checkMembers_level_le {Γ : Ctx} (S : Bindings Γ) :
         · exact askPlan_level_le _ S a p hq
         · exact ih qs hqs p hp'
 
+/-- The invariant of the function table: every entry's plan is at or below the
+pipeline rung — a body is a sequence of questions, and a call's rung is the
+function's by `level_sub`. -/
+def FnLevel (fns : Fns) : Prop :=
+  ∀ fe ∈ fns, level fe.plan ≤ Level.pipeline
+
+/-- A call is `Plan.sub` of a table entry, so its rung is the entry's. -/
+theorem callPlan_level_le {Δ : Ctx} (S : Bindings Δ) {fns : Fns}
+    (hf : FnLevel fns) (f : String) (args : List RawArg) (pos : Pos)
+    {c : Code} {p : Plan Δ (El c)}
+    (h : callPlan S fns f args pos = .ok ⟨c, p⟩) : level p ≤ Level.pipeline := by
+  unfold callPlan at h
+  split at h
+  · exact absurd h (by simp)
+  · rename_i fe hfe
+    split at h
+    · exact absurd h (by simp)
+    · rename_i σ hσ
+      cases h
+      exact le_trans (le_of_eq (level_sub _ _)) (hf fe (List.mem_of_find?_eq_some hfe))
+
 /-- A clause-position source likewise: a panel of `pipeline` members is
-`pipeline`, so nothing in the language's expression layer reaches the branch
-rung at all — the branching does that, and only the branching. -/
-theorem rhsPlan_level_le {Γ : Ctx} (c : Code) (S : Bindings Γ) (r : RawRhs) (what : String)
-    (p : Plan Γ (El c)) (h : rhsPlan c S r what = .ok p) : level p ≤ Level.pipeline := by
+`pipeline`, and a call is its function's plan, so nothing in the language's
+expression layer reaches the branch rung at all — the branching does that, and
+only the branching. -/
+theorem rhsPlan_level_le {Γ : Ctx} {fns : Fns} (hf : FnLevel fns)
+    (c : Code) (S : Bindings Γ) (r : RawRhs) (what : String)
+    (p : Plan Γ (El c)) (h : rhsPlan fns c S r what = .ok p) :
+    level p ≤ Level.pipeline := by
   cases r with
   | ask a =>
     simp only [rhsPlan] at h
@@ -175,13 +199,28 @@ theorem rhsPlan_level_le {Γ : Ctx} (c : Code) (S : Bindings Γ) (r : RawRhs) (w
           cases h
           exact level_panel_le' _ (checkMembers_level_le S ms ps hps)
       · exact absurd h (by simp)
+  | call f args pos =>
+    simp only [rhsPlan] at h
+    split at h
+    · exact absurd h (by simp)
+    · rename_i rc q hq
+      split at h
+      · rename_i hrc
+        cases h
+        subst hrc
+        exact callPlan_level_le S hf f args pos hq
+      · exact absurd h (by simp)
 
-/-- A binding's former does not move the rung of what it is given: an `ask`
-node adds `pipeline`, and a panel's graft adds the panel's own rung. -/
-theorem bindForm_level_le {Γ : Ctx} (c : Code) (S : Bindings Γ) (r : RawRhs)
-    (form : Plan (c :: Γ) Unit → Plan Γ Unit) (h : bindForm c S r = .ok form)
-    (k : Plan (c :: Γ) Unit) (hk : level k ≤ Level.branch) :
-    level (form k) ≤ Level.branch := by
+/-- A binding's former does not move the rung of what it is given, at any rung
+from `pipeline` up: an `ask` node adds `pipeline`, and a panel's or a call's
+graft adds the source's own rung. Stated at an arbitrary bound so bodies can
+use it at `pipeline` and blocks at `branch`. -/
+theorem bindForm_level_le {A : Type} {Γ : Ctx} {fns : Fns} (hf : FnLevel fns)
+    {ℓ : Level} (hp : Level.pipeline ≤ ℓ)
+    (c : Code) (S : Bindings Γ) (r : RawRhs)
+    (form : Plan (c :: Γ) A → Plan Γ A) (h : bindForm fns c S r = .ok form)
+    (k : Plan (c :: Γ) A) (hk : level k ≤ ℓ) :
+    level (form k) ≤ ℓ := by
   cases r with
   | ask a =>
     simp only [bindForm] at h
@@ -191,17 +230,25 @@ theorem bindForm_level_le {Γ : Ctx} (c : Code) (S : Bindings Γ) (r : RawRhs)
     · split at h
       · exact absurd h (by simp)
       · cases h
-        exact le_trans (le_of_eq (level_ask ..)) (max_le (by decide) hk)
+        exact le_trans (le_of_eq (level_ask ..)) (max_le hp hk)
   | panel ms pos =>
     simp only [bindForm] at h
     split at h
     · exact absurd h (by simp)
     · rename_i v hv
       cases h
-      refine le_trans (level_graft_le (ℓ₀ := Level.branch) _ _ fun _ σ e => ?_)
-        (max_le (le_trans (rhsPlan_level_le c S (.panel ms pos) _ v hv) (by decide)) le_rfl)
+      refine le_trans (level_graft_le (ℓ₀ := ℓ) _ _ fun _ σ e => ?_)
+        (max_le (le_trans (rhsPlan_level_le hf c S (.panel ms pos) _ v hv) hp) le_rfl)
       exact le_trans (le_of_eq (level_sub _ _)) hk
-
+  | call f args pos =>
+    simp only [bindForm] at h
+    split at h
+    · exact absurd h (by simp)
+    · rename_i v hv
+      cases h
+      refine le_trans (level_graft_le (ℓ₀ := ℓ) _ _ fun _ σ e => ?_)
+        (max_le (le_trans (rhsPlan_level_le hf c S (.call f args pos) _ v hv) hp) le_rfl)
+      exact le_trans (le_of_eq (level_sub _ _)) hk
 /-- The invariant the pending loop result carries through the induction: its
 plan is at or below the branch rung, which is what the consuming `case`'s
 graft needs. -/
@@ -215,10 +262,10 @@ could.
 
 Not decoration: `Cost.costTree` takes this bound as an argument, so a cost
 report over a source file is not writable without it. -/
-theorem checkBlock_level_le :
+theorem checkBlock_level_le {fns : Fns} (hf : FnLevel fns) :
     ∀ (b : RawBlock) (Γ : Ctx) (S : Bindings Γ) (pend : Option (Pend Γ)),
       PendLevel pend → ∀ (p : Plan Γ Unit),
-        checkBlock Γ S pend b = .ok p → level p ≤ Level.branch := by
+        checkBlock fns Γ S pend b = .ok p → level p ≤ Level.branch := by
   intro b
   induction b with
   | empty pos =>
@@ -247,8 +294,26 @@ theorem checkBlock_level_le :
         · exact absurd h (by simp)
         · rename_i k hk
           cases h
-          exact bindForm_level_le _ S _ form hform _
+          exact bindForm_level_le hf (by decide) _ S _ form hform _
             (le_trans (le_of_eq (level_sub _ _)) (ih _ _ none trivial k hk))
+    | some pd => simp only [checkBlock] at h; exact absurd h (by simp)
+  | callStmt f args rest pos ih =>
+    intro Γ S pend hpend p h
+    cases pend with
+    | none =>
+      simp only [checkBlock] at h
+      split at h
+      · exact absurd h (by simp)
+      · rename_i rc q hq
+        split at h
+        · split at h
+          · exact absurd h (by simp)
+          · rename_i k hk
+            cases h
+            refine le_trans (level_graft_le (ℓ₀ := Level.branch) _ _ fun _ σ _ => ?_)
+              (max_le (le_trans (callPlan_level_le S hf f args pos hq) (by decide)) le_rfl)
+            exact le_trans (le_of_eq (level_sub _ _)) (ih _ _ none trivial k hk)
+        · exact absurd h (by simp)
     | some pd => simp only [checkBlock] at h; exact absurd h (by simp)
   | bind x ann src rest pos ih =>
     intro Γ S pend hpend p h
@@ -277,7 +342,8 @@ theorem checkBlock_level_le :
               · exact absurd h (by simp)
               · rename_i k hk
                 cases h
-                exact bindForm_level_le c S r form hform k (ih _ _ none trivial k hk)
+                exact bindForm_level_le hf (by decide) c S r form hform k
+                  (ih _ _ none trivial k hk)
       | revising subj carrier n rname rann review amend rpos =>
         simp only [checkBlock] at h
         split at h
@@ -306,10 +372,10 @@ theorem checkBlock_level_le :
                           refine level_revising_le le_rfl (fun _ _ _ => ?_) (fun _ _ _ => ?_)
                             n _ _ _
                           · exact le_trans (le_of_eq (level_sub _ _))
-                              (le_trans (rhsPlan_level_le _ _ review _ reviewP hreview)
+                              (le_trans (rhsPlan_level_le hf _ _ review _ reviewP hreview)
                                 (by decide))
                           · exact le_trans (le_of_eq (level_sub _ _))
-                              (le_trans (rhsPlan_level_le _ _ amend _ amendP hamend)
+                              (le_trans (rhsPlan_level_le hf _ _ amend _ amendP hamend)
                                 (by decide))
   | ifFlag x y n pos ihy ihn =>
     intro Γ S pend hpend p h
@@ -378,13 +444,161 @@ theorem checkBlock_level_le :
                 (le_trans (le_of_eq (level_sub _ _)) (ihs _ _ none trivial settledP hsettled))
                 (le_trans (le_of_eq (level_sub _ _)) (ihu _ _ none trivial unsettledP hunsettled))
 
-/-- …and hence of every source text the front end accepts. -/
+/-! ## Function bodies stay at the pipeline rung
+
+A body is a sequence of questions — asks, panels, calls — and a result, so its
+plan never reaches `branch`: the loop and the branchings are unwritable in one,
+by type and by refusal respectively. -/
+
+theorem checkBody_level_le {k : Code} {fns : Fns} (hf : FnLevel fns)
+    (answer : Option String) (result : Code) :
+    ∀ (stmts : List RawBodyStmt) (Γ : Ctx) (S : Bindings Γ)
+      (fin : (Δ : Ctx) → Bindings Δ → Except CheckError (Plan Δ (El k)))
+      (_ : ∀ (Δ : Ctx) (SΔ : Bindings Δ) (q : Plan Δ (El k)),
+        fin Δ SΔ = .ok q → level q ≤ Level.pipeline)
+      (p : Plan Γ (El k)),
+      checkBody fns answer result Γ S stmts fin = .ok p →
+      level p ≤ Level.pipeline := by
+  intro stmts
+  induction stmts with
+  | nil =>
+    intro Γ S fin hfin p h
+    simp only [checkBody] at h
+    exact hfin Γ S p h
+  | cons st rest ih =>
+    intro Γ S fin hfin p h
+    cases st with
+    | bind x ann rhs pos =>
+      simp only [checkBody] at h
+      split at h
+      · exact absurd h (by simp)
+      · split at h
+        · exact absurd h (by simp)
+        · rename_i c hc
+          split at h
+          · exact absurd h (by simp)
+          · rename_i form hform
+            split at h
+            · exact absurd h (by simp)
+            · rename_i k' hk'
+              cases h
+              exact bindForm_level_le hf le_rfl c S rhs form hform k'
+                (ih _ _ fin hfin k' hk')
+    | act a pos =>
+      simp only [checkBody] at h
+      split at h
+      · exact absurd h (by simp)
+      · rename_i form hform
+        split at h
+        · exact absurd h (by simp)
+        · rename_i k' hk'
+          cases h
+          exact bindForm_level_le hf le_rfl _ S _ form hform _
+            (le_trans (le_of_eq (level_sub _ _)) (ih _ _ fin hfin k' hk'))
+    | callS f args pos =>
+      simp only [checkBody] at h
+      split at h
+      · exact absurd h (by simp)
+      · rename_i rc q hq
+        split at h
+        · split at h
+          · exact absurd h (by simp)
+          · rename_i k' hk'
+            cases h
+            refine le_trans (level_graft_le (ℓ₀ := Level.pipeline) _ _ fun _ σ _ => ?_)
+              (max_le (callPlan_level_le S hf f args pos hq) le_rfl)
+            exact le_trans (le_of_eq (level_sub _ _)) (ih _ _ fin hfin k' hk')
+        · exact absurd h (by simp)
+
+/-- One checked function's plan is at or below `pipeline`. -/
+theorem checkFn_level_le {fns : Fns} (hf : FnLevel fns) (f : RawFn) (fe : FnEntry)
+    (h : checkFn fns f = .ok fe) : level fe.plan ≤ Level.pipeline := by
+  simp only [checkFn] at h
+  split at h
+  · rename_i x hx
+    split at h
+    · exact absurd h (by simp)
+    · rename_i p hp
+      cases h
+      refine checkBody_level_le hf _ _ _ _ _ _ ?_ p hp
+      intro Δ SΔ q hq
+      simp only at hq
+      split at hq
+      · exact absurd hq (by simp)
+      · split at hq
+        · rename_i e he
+          cases hq
+          exact le_trans (le_of_eq (level_ret _)) bot_le
+        · exact absurd hq (by simp)
+  · split at h
+    · rename_i hres
+      split at h
+      · exact absurd h (by simp)
+      · rename_i p hp
+        cases h
+        refine checkBody_level_le hf _ _ _ _ _ _ ?_ p hp
+        intro Δ SΔ q hq
+        simp only at hq
+        cases hq
+        exact le_trans (le_of_eq (level_ret _)) bot_le
+    · exact absurd h (by simp)
+
+/-- The whole table stays at `pipeline`, entry by entry. -/
+theorem checkFnsList_fnLevel :
+    ∀ (l : List RawFn) (acc : Fns), FnLevel acc → ∀ (fns : Fns),
+      checkFnsList acc l = .ok fns → FnLevel fns := by
+  intro l
+  induction l with
+  | nil =>
+    intro acc hacc fns h
+    simp only [checkFnsList] at h
+    cases h
+    exact hacc
+  | cons f rest ih =>
+    intro acc hacc fns h
+    simp only [checkFnsList] at h
+    split at h
+    · exact absurd h (by simp)
+    · split at h
+      · exact absurd h (by simp)
+      · rename_i fe hfe
+        refine ih _ ?_ fns h
+        intro g hg
+        rcases List.mem_append.mp hg with hg | hg
+        · exact hacc g hg
+        · rcases List.mem_singleton.mp hg with rfl
+          exact checkFn_level_le hacc f fe hfe
+
+/-- **The program claim.** Everything `checkProgram` accepts is at or below the
+branch rung: the table is at `pipeline`, and the spliced block is bounded by
+`checkBlock_level_le` over it. -/
+theorem checkProgram_level_le (prog : RawProgram) (p : Plan [] Unit)
+    (h : checkProgram prog = .ok p) : level p ≤ Level.branch := by
+  simp only [checkProgram] at h
+  split at h
+  · exact absurd h (by simp)
+  · rename_i fns hfns
+    split at h
+    · exact absurd h (by simp)
+    · split at h
+      · exact absurd h (by simp)
+      · exact checkBlock_level_le
+          (checkFnsList_fnLevel prog.fns [] (fun _ hg => absurd hg (by simp)) fns hfns)
+          _ [] [] none trivial p h
+
+/-- …and hence of every source text the front end accepts, modules and all. -/
+theorem parseAndCheckProgramWith_level_le (ov : List (String × Prompt))
+    (mods : List (String × String)) (main : String) (p : Plan [] Unit)
+    (h : parseAndCheckProgramWith ov mods main = .ok p) : level p ≤ Level.branch := by
+  unfold parseAndCheckProgramWith at h
+  split at h
+  · exact absurd h (by simp)
+  · exact checkProgram_level_le _ p h
+
+/-- …and of the single-file spelling in particular. -/
 theorem parseAndCheck_level_le (s : String) (p : Plan [] Unit) (h : parseAndCheck s = .ok p) :
     level p ≤ Level.branch := by
   rw [parseAndCheck_ok_iff] at h
-  unfold parseAndCheckE at h
-  split at h
-  · exact absurd h (by simp)
-  · exact checkBlock_level_le _ [] [] none trivial p h
+  exact parseAndCheckProgramWith_level_le [] [] s p h
 
 end Agentic.Core.Dsl

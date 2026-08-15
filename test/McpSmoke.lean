@@ -178,7 +178,9 @@ def scriptOne : IO Unit := do
     , req 6 "resources/list" (Json.mkObj [])
     , req 7 "ping" (Json.mkObj [])
     , call 8 "workflow_check" [("source", Json.str hostileSource)]
-    , req 9 "ping" (Json.mkObj []) ]
+    , req 9 "ping" (Json.mkObj [])
+    , call 10 "workflow_check"
+        [("source", Json.str "import lib\nworkflow { stop }")] ]
 
   check "a request before initialize is refused" "-32600"
     (field (reply frames 0) ["error", "code"])
@@ -239,6 +241,11 @@ def scriptOne : IO Unit := do
     (field (structured frames 8) ["error", "line"])
   check "…and the server is still answering afterwards" "{}"
     (((reply frames 9).getObjValD "result").compress)
+
+  checkTrue "an `import` is refused: this surface has no files to resolve it against"
+    (isErr frames 10)
+  checkTrue "…and the refusal names the inlining escape"
+    (((field (structured frames 10) ["error", "message"]).splitOn "inline").length > 1)
 
 /-! ## 2. A whole run, to the refuse path -/
 

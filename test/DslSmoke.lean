@@ -58,7 +58,46 @@ def outcome (src : String) : String :=
   | .ok _ => "ok"
   | .error e => e
 
+/-- …and the same reading, with modules handed over the way the CLI hands
+them. -/
+def outcomeM (mods : List (String × String)) (src : String) : String :=
+  match parseAndCheckProgramWith [] mods src with
+  | .ok _ => "ok"
+  | .error e => e.render
+
 /-! ## The battery: every construction, and every mistaken use of one -/
+
+/-- One function of each result kind, shared by the round-sixteen call cases.
+Eleven lines, so a workflow appended to it always begins at line 12 — the
+positions in the expected diagnoses count on that. -/
+def fnsPre : String :=
+  "function mk (goal : text) -> text {\n" ++
+  "  d <- ask model \"author\" \"draft: {goal}\"\n" ++
+  "  answer d\n}\n" ++
+  "function judged (patch : text) -> verdict {\n" ++
+  "  v <- ask model \"judge\" \"judge: {patch}\"\n" ++
+  "  answer v\n}\n" ++
+  "function applied (patch : text) -> receipt {\n" ++
+  "  ask tool \"apply\" \"apply: {patch}\"\n}\n"
+
+/-- A small library — a define, a function, one annotated priming binding —
+shared by the module cases. -/
+def libOk : String :=
+  "define greeting = \"hello\"\n" ++
+  "function drafted (goal : text) -> text {\n" ++
+  "  d <- ask model \"author\" \"draft: {goal}\"\n" ++
+  "  answer d\n}\n" ++
+  "guide : text <- ask tool \"cat\" \"style guide\"\n"
+
+/-- A chain of functions whose questions double per link: `f1` is one ask and
+`f(i+1)` calls `f i` twice, so `f n` inlines to `2^(n-1)` questions — the
+cheapest source text that outgrows `maxQuestions`. `f1` is four lines and each
+later link five, so `f n`'s header sits at line `5n - 5` for `n ≥ 2`. -/
+def chain (n : Nat) : String := Id.run do
+  let mut s := "function f1 (p : text) -> text {\n  d <- ask model \"m\" \"1: {p}\"\n  answer d\n}\n"
+  for i in [2:n+1] do
+    s := s ++ s!"function f{i} (p : text) -> text \{\n  a <- f{i-1} p\n  b <- f{i-1} a\n  answer b\n}\n"
+  return s
 
 def batteryCases : List (String × String × String) :=
 [
@@ -97,7 +136,7 @@ def batteryCases : List (String × String × String) :=
    "2:28: this block mixes tabs and spaces in its indentation"),
   ("text after the opening fence",
    "workflow {\n  g : text <- ask tool \"t\" ```md\n    a\n  ```\n}",
-   "2:28: the content of a block begins on the next line: nothing but whitespace may follow the opening fence at `md`"),
+   "2:28: expected a string literal or a text block at ````md`"),
   ("an opening fence at the end of the source",
    "workflow {\n  g : text <- ask tool \"t\" ```",
    "2:28: this fence of 3 backticks is never closed"),
@@ -113,9 +152,6 @@ def batteryCases : List (String × String × String) :=
   ("CRLF content behaves as LF",
    "workflow {\n  ask tool \"t\" ```\r\n    a\r\n    b\r\n  ```\r\n}",
    "ok"),
-  ("a stray dash",
-   "workflow { - }",
-   "1:12: stray `-`; `--` begins a comment, and nothing else in the language begins with one at `-`"),
   ("a stray angle bracket",
    "workflow { g < ask }",
    "1:14: stray `<`; `<-` binds an answer, and nothing else in the language begins with one at `<`"),
@@ -136,7 +172,7 @@ def batteryCases : List (String × String × String) :=
    "2:12: a binder may not spell a define; one of the two must be renamed at `a`"),
   ("a loop carrier may not spell a define",
    "define c = \"x\"\nworkflow { d : text <- ask model \"a\" \"draft\"\n           r <- revising d as c, at most 1 amendment {\n             v <- ask model \"m\" \"review {c}\"\n             amend c { ask model \"a\" \"fix {c} {v}\" }\n           }\n           case r { settled x { stop } unsettled { stop } } }",
-   "3:17: a binder may not spell a define; one of the two must be renamed at `c`"),
+   "3:17: a loop's carrier may not spell a define; one of the two must be renamed at `c`"),
   ("a define missing its equals sign",
    "define a \"x\"\nworkflow { stop }",
    "1:10: expected `=` at `\"…\"`"),
@@ -152,9 +188,9 @@ def batteryCases : List (String × String × String) :=
   ("a define written as a text block",
    "define spec = ```\n  a spec\n  of two lines\n```\nworkflow { ask tool \"t\" \"{spec}\" }",
    "ok"),
-  ("a source that does not begin with workflow",
+  ("a source that does not begin with workflow is a library, and stop is not priming",
    "stop",
-   "1:1: expected `workflow` at `stop`"),
+   "1:1: a library's priming is a prefix of every importing program, so it is straight-line: bindings, acts and calls only at `stop`"),
   ("tokens after the workflow",
    "workflow { stop } trailing",
    "1:19: expected the end of the source after the workflow at `trailing`"),
@@ -166,10 +202,10 @@ def batteryCases : List (String × String × String) :=
    "1:17: expected `}` at `ask`"),
   ("the source ends inside the workflow",
    "workflow { ask tool \"t\" \"hi\"",
-   "0:0: expected a statement: a binding (`x <- …`), an act (`ask …`), `if`, `case`, `known here:`, or `stop`, but the source ended"),
+   "0:0: expected a statement: a binding (`x <- …`), an act (`ask …`), a call, `if`, `case`, `known here:`, or `stop`, but the source ended"),
   ("a statement that is not one",
    "workflow { [ }",
-   "1:12: expected a statement: a binding (`x <- …`), an act (`ask …`), `if`, `case`, `known here:`, or `stop` at `[`"),
+   "1:12: expected a statement: a binding (`x <- …`), an act (`ask …`), a call, `if`, `case`, `known here:`, or `stop` at `[`"),
   ("an unbound name in a prompt",
    "workflow { g : text <- ask tool \"cat\" \"read {nowhere}\" }",
    "1:24: unbound name; nothing in scope answers to it at `nowhere`"),
@@ -327,7 +363,7 @@ def batteryCases : List (String × String × String) :=
    "ok"),
   ("a review binding may not spell a define",
    "define v = \"x\"\nworkflow { d : text <- ask model \"a\" \"draft\"\n           r <- revising d as c, at most 1 amendment {\n             v <- ask model \"m\" \"review {c}\"\n             amend c { ask model \"a\" \"fix {c} {v}\" }\n           }\n           case r { settled x { stop } unsettled { stop } } }",
-   "3:54: a binder may not spell a define; one of the two must be renamed at `v`"),
+   "3:54: a review binding may not spell a define; one of the two must be renamed at `v`"),
   ("an amend missing its keyword",
    "workflow { d : text <- ask model \"a\" \"draft\"\n           r <- revising d as c, at most 1 amendment {\n             v <- ask model \"m\" \"review {c}\"\n           }\n           case r { settled x { stop } unsettled { stop } } }",
    "4:12: expected `amend <carrier> { … }`: a bounded revision says how a rejected candidate is rewritten, and its answer becomes the next candidate at `}`"),
@@ -465,9 +501,12 @@ def batteryCases : List (String × String × String) :=
   ("first-use-wins across the arms of an if",
    "workflow {\n  ok : flag <- ask person \"o\" \"ready?\"\n  g <- ask tool \"c\" \"hi\"\n  if ok { ask tool \"log\" \"{g}\" }\n  else { if g { stop } else { stop } }\n}",
    "5:10: an `if` branches on a flag, but `g` answers `text` at `g`"),
-  ("keywords spelled as binder names",
-   "workflow { known <- ask tool \"t\" \"a\"\n           text : text <- ask tool \"t\" \"b\"\n           workflow <- ask tool \"t\" \"c\"\n           verdict <- ask model \"m\" \"judge {text}\"\n           ask tool \"log\" \"{known} {workflow}\"\n           case verdict { approved { stop } objected { stop } no answer { stop } } }",
+  ("kind names spelled as binder names",
+   "workflow { text : text <- ask tool \"t\" \"b\"\n           verdict <- ask model \"m\" \"judge {text}\"\n           case verdict { approved { stop } objected { stop } no answer { stop } } }",
    "ok"),
+  ("a binder spelling a statement word (round sixteen: every name means one thing)",
+   "workflow { known <- ask tool \"t\" \"a\"\n           ask tool \"log\" \"{known}\" }",
+   "1:12: a binder may not spell a word that begins a statement: stop, known, if, case, ask, panel, revising, answer, amend, settled, unsettled, else, import, define, function, workflow at `known`"),
   ("a known here is a whole block body",
    "workflow {\n  ok : flag <- ask person \"o\" \"go ahead?\"\n  if ok { known here: ok } else { stop }\n}",
    "ok"),
@@ -495,7 +534,201 @@ def batteryCases : List (String × String × String) :=
    "ok"),
   ("columns count characters, not bytes",
    "workflow { ask tool \"t\" \"αβγ\" ; }",
-   "1:31: unexpected character at `;`")
+   "1:31: unexpected character at `;`"),
+
+  -- Round sixteen: functions, calls, and the single-file shapes of libraries.
+  ("a value call with a short argument",
+   fnsPre ++ "workflow { x <- mk \"a goal\"\n ask tool \"t\" \"use {x}\" }",
+   "ok"),
+  ("a statement call of a procedure",
+   fnsPre ++ "workflow { d : text <- ask tool \"t\" \"w\"\n applied d }",
+   "ok"),
+  ("a trailing block fills the last argument",
+   fnsPre ++ "workflow {\n  x <- mk ```\n      the goal\n  ```\n  ask tool \"t\" \"use {x}\"\n}",
+   "ok"),
+  ("a $label answered by a labelled block",
+   fnsPre ++ "workflow {\n  x <- mk $goal\n  ```goal\n      the goal\n  ```\n  ask tool \"t\" \"use {x}\"\n}",
+   "ok"),
+  ("a function may answer a flag; the caller branches",
+   "function f (p : text) -> flag {\n  x <- ask model \"m\" \"{p}\"\n  answer x\n}\nworkflow { stop }",
+   "ok"),
+  ("a library runs alone: its priming, then nothing",
+   libOk,
+   "ok"),
+  ("a stray dash",
+   "workflow { - }",
+   "1:12: stray `-`; `--` begins a comment and `->` a function's result, and nothing else in the language begins with one at `-`"),
+  ("a dollar at the end of the source",
+   fnsPre ++ "workflow { x <- mk $",
+   "12:20: a `$name` names a labelled block argument; a name follows the dollar at `$`"),
+  ("a dollar before a non-name",
+   fnsPre ++ "workflow { x <- mk $ goal }",
+   "12:20: a `$name` names a labelled block argument; a name follows the dollar at `$`"),
+  ("text after a fence that is not a label",
+   "workflow {\n  g : text <- ask tool \"t\" ```two words\n    a\n  ```\n}",
+   "2:28: the content of a block begins on the next line: nothing but a label and whitespace may follow the opening fence at ` words`"),
+  ("a carrier spelling a statement word",
+   "workflow { d : text <- ask tool \"t\" \"w\"\n r <- revising d as stop, at most 1 amendments {\n  v <- ask model \"m\" \"r {stop}\"\n  amend stop { ask model \"a\" \"f\" } }\n case r { settled x { ask tool \"t\" \"a {x}\" } unsettled { stop } } }",
+   "2:7: a loop's carrier may not spell a word that begins a statement: stop, known, if, case, ask, panel, revising, answer, amend, settled, unsettled, else, import, define, function, workflow at `stop`"),
+  ("a carrier spelling a function",
+   fnsPre ++ "workflow { d : text <- ask tool \"t\" \"w\"\n r <- revising d as mk, at most 1 amendment {\n  v <- ask model \"m\" \"r {mk}\"\n  amend mk { ask model \"a\" \"f\" } }\n case r { settled x { stop } unsettled { stop } } }",
+   "13:7: a loop's carrier may not spell a function; one of the two must be renamed at `mk`"),
+  ("a call given too few arguments",
+   fnsPre ++ "workflow { x <- mk }",
+   "12:20: `mk` takes 1 argument and got 0: this is not an argument (a name, words, or a `$label`) at `}`"),
+  ("a function's name standing as an argument",
+   fnsPre ++ "workflow { x <- mk judged\n ask tool \"t\" \"use {x}\" }",
+   "12:20: a call is not an argument: bind it above — `y <- judged …` — and pass `y` at `judged`"),
+  ("a call given too many arguments",
+   fnsPre ++ "workflow { x <- mk \"a\" \"b\" }",
+   "12:24: expected a statement: a binding (`x <- …`), an act (`ask …`), a call, `if`, `case`, `known here:`, or `stop` at `\"…\"`"),
+  ("a labelled block standing where an argument is expected",
+   fnsPre ++ "workflow {\n  x <- mk ```goal\n      words\n  ```\n  ask tool \"t\" \"use {x}\"\n}",
+   "13:11: a labelled block answers a `$label` and follows the call's arguments; here an argument itself is expected at `````"),
+  ("two labelled blocks answering one label",
+   fnsPre ++ "workflow {\n  x <- mk $goal\n  ```goal\n      a\n  ```\n  ```goal\n      b\n  ```\n  ask tool \"t\" \"use {x}\"\n}",
+   "17:3: two labelled blocks answer to one label in this call; one label, one block at `goal`"),
+  ("a $label no block answers",
+   fnsPre ++ "workflow {\n  x <- mk $goal\n  ask tool \"t\" \"use {x}\"\n}",
+   "13:11: `$goal` names no labelled block: write ```goal after the call's arguments at `goal`"),
+  ("a labelled block no $label asked for",
+   fnsPre ++ "workflow {\n  x <- mk \"a\"\n  ```goal\n      words\n  ```\n  ask tool \"t\" \"use {x}\"\n}",
+   "14:3: no `$goal` in the call names this labelled block at `goal`"),
+  ("a bind of a name that is not a function",
+   "workflow { x <- banana \"y\" }",
+   "1:17: expected a question (`ask …`), a panel, or the name of a function declared above at `banana`"),
+  ("a bind of something that is not even a name",
+   "workflow { x <- [ }",
+   "1:17: expected a question, a panel, or a function's name at `[`"),
+  ("a review that is not a source",
+   "workflow { d : text <- ask tool \"t\" \"w\"\n r <- revising d as c, at most 1 amendment {\n  v <- banana\n  amend c { ask model \"a\" \"f\" } }\n case r { settled x { stop } unsettled { stop } } }",
+   "3:8: expected a question (`ask …`), a panel, or the name of a function declared above at `banana`"),
+  ("a review answering the wrong kind through a call",
+   fnsPre ++ "workflow { d : text <- ask tool \"t\" \"w\"\n r <- revising d as c, at most 1 amendment {\n  v <- mk c\n  amend c { ask model \"a\" \"f {v}\" } }\n case r { settled x { stop } unsettled { stop } } }",
+   "14:8: the review of a bounded revision: `mk` answers `text`, not `verdict` at `mk`"),
+  ("a value function with no answer",
+   "function f (p : text) -> text {\n  x <- ask model \"m\" \"{p}\"\n}\nworkflow { stop }",
+   "3:1: a value function ends with `answer <name>`; `f` answers `text` at `}`"),
+  ("a procedure with an answer",
+   "function f (p : text) -> receipt {\n  ask tool \"t\" \"{p}\"\n  answer p\n}\nworkflow { stop }",
+   "3:3: a `-> receipt` function's body just ends: the end of the block is the answer, and there is nothing to name at `answer`"),
+  ("a body statement that branches",
+   "function f (p : text) -> text {\n  if p { stop } else { stop }\n  answer p\n}\nworkflow { stop }",
+   "2:3: a function is a reusable sequence of questions, not a reusable decision: return a `flag` or a `verdict` and branch at the call site, where the branch is read at `if`"),
+  ("two parameters answering one name",
+   "function f (p : text, p : text) -> text {\n  answer p\n}\nworkflow { stop }",
+   "1:23: two parameters answer to one name; rename one at `p`"),
+  ("a flag parameter",
+   "function f (ok : flag) -> text {\n  d <- ask model \"m\" \"w\"\n  answer d\n}\nworkflow { stop }",
+   "1:18: a `flag` parameter is refused: nothing in a body can consume one — `if` is not written in a body, and a flag has no text for a hole at `flag`"),
+  ("a receipt parameter",
+   "function f (r : receipt) -> text {\n  d <- ask model \"m\" \"w\"\n  answer d\n}\nworkflow { stop }",
+   "1:17: a `receipt` parameter is refused: a receipt carries no information, and ordering is the sequence of statements at `receipt`"),
+  ("a parameter list missing its comma",
+   "function f (p : text q : text) -> text {\n  answer p\n}\nworkflow { stop }",
+   "1:22: expected `,` or `)` at `q`"),
+  ("a function missing its arrow",
+   "function f (p : text) text {\n  answer p\n}\nworkflow { stop }",
+   "1:23: expected `->`, the function's result at `text`"),
+  ("a dotted module name",
+   "import a.b\nworkflow { stop }",
+   "1:8: a module's name has no dot: modules do not nest at `a.b`"),
+  ("an import missing its name",
+   "import \"lib\"\nworkflow { stop }",
+   "1:8: expected a module's name at `\"…\"`"),
+  ("an import after a define",
+   "define d = \"w\"\nimport lib\nworkflow { stop }",
+   "2:1: imports come first, before any define or function at `import`"),
+  ("an empty source",
+   "",
+   "0:0: expected `workflow`, but the source ended"),
+  ("a workflow-less source is read as a library",
+   "banana",
+   "1:1: a library's top-level binding carries its kind — inference scans forward, and forward is the importer's file; a library's questions must not depend on who imports it at `banana`"),
+  ("junk after a priming in a workflow-less source",
+   "g : text <- ask tool \"t\" \"w\"\n) x",
+   "2:1: expected a priming statement: a binding (`x : kind <- …`), an act (`ask …`), or a call at `)`"),
+  ("a verdict passed to a text parameter",
+   fnsPre ++ "workflow {\n  v : verdict <- ask model \"m\" \"q\"\n  x <- mk v\n  ask tool \"t\" \"use {x}\"\n}",
+   "14:11: `mk`'s parameter `goal` takes `text`, and `v` answers `verdict`; a hole is where a verdict becomes text — write the argument as words: \"{v}\" at `v`"),
+  ("words passed to a verdict parameter",
+   "function g (v : verdict) -> text {\n  d <- ask model \"m\" \"about {v}\"\n  answer d\n}\nworkflow { x <- g \"words\"\n ask tool \"t\" \"use {x}\" }",
+   "5:19: words fill a `text` parameter, and `g`'s parameter `v` takes `verdict`; pass a name that answers it at `g`"),
+  ("a flag passed to a text parameter",
+   fnsPre ++ "workflow {\n  b : flag <- ask person \"p\" \"yes or no\"\n  x <- mk b\n  ask tool \"t\" \"use {x}\"\n}",
+   "14:11: `mk`'s parameter `goal` takes `text`, but `b` answers `flag` at `b`"),
+  ("a value call as a statement",
+   fnsPre ++ "workflow { mk \"a goal\" }",
+   "12:12: `mk` answers `text`, and its answer has nowhere to go: bind it, `x <- mk …` at `mk`"),
+  ("a value call as a body statement",
+   fnsPre ++ "function h (p : text) -> receipt {\n  mk p\n  ask tool \"t\" \"done\"\n}\nworkflow { d : text <- ask tool \"t\" \"w\"\n h d }",
+   "13:3: `mk` answers `text`, and its answer has nowhere to go: bind it, `x <- mk …` at `mk`"),
+  ("a procedure call bound",
+   fnsPre ++ "workflow { x <- applied \"patch\" }",
+   "12:12: `applied` answers `receipt`, which binds nothing that can be consumed; call it as a statement at `applied`"),
+  ("a procedure call bound in a body",
+   fnsPre ++ "function h (p : text) -> text {\n  x <- applied p\n  answer p\n}\nworkflow { stop }",
+   "13:3: `applied` answers `receipt`, which binds nothing that can be consumed; call it as a statement at `applied`"),
+  ("a body statement that is nothing",
+   "function f (p : text) -> text {\n  ) x\n  answer p\n}\nworkflow { stop }",
+   "2:3: expected a body statement (a binding, an act, a call) or `answer <name>` at `)`"),
+  ("a body binding nothing grounds",
+   "function f (p : text) -> text {\n  x <- ask model \"m\" \"{p}\"\n  answer p\n}\nworkflow { stop }",
+   "2:3: nothing fixes what kind of answer `x` names: use it (a hole, an argument, the `answer`), or annotate it — `x : text <- …` at `x`"),
+  ("an answer at the wrong kind",
+   "function f (p : text) -> verdict {\n  v : text <- ask model \"m\" \"{p}\"\n  answer v\n}\nworkflow { stop }",
+   "3:3: `answer v`: `v` answers `text`, but `f` answers `verdict` at `v`")
+]
+
+/-- The module cases: the same battery discipline, with the sources a CLI
+would have read from beside the program. -/
+def batteryCasesM : List (String × List (String × String) × String × String) :=
+[
+  ("an import, a dotted call, a dotted define in a hole",
+   [("lib", libOk)],
+   "import lib\nworkflow {\n  x <- lib.drafted lib.guide\n  ask tool \"t\" \"use {x} {lib.greeting}\"\n}",
+   "ok"),
+  ("known here sees the qualified priming",
+   [("lib", libOk)],
+   "import lib\nworkflow {\n  known here: lib.guide\n  ask tool \"t\" \"use {lib.guide}\"\n}",
+   "ok"),
+  ("a binder spelling a module",
+   [("lib", libOk)],
+   "import lib\nworkflow { lib <- ask tool \"t\" \"w\" }",
+   "2:12: a binder may not spell an imported module's name at `lib`"),
+  ("importing a program",
+   [("prog", "workflow { stop }")],
+   "import prog\nworkflow { stop }",
+   "1:1: in module `prog`: this file has a `workflow` block, so it is a program; a program is run, not imported at `workflow`"),
+  ("a library that branches",
+   [("lib", "g : text <- ask tool \"t\" \"w\"\nif g { stop } else { stop }\n")],
+   "import lib\nworkflow { ask tool \"t\" \"use {lib.g}\" }",
+   "2:1: in module `lib`: a library's priming is a prefix of every importing program, so it is straight-line: bindings, acts and calls only at `if`"),
+  ("a library asserting known here",
+   [("lib", "g : text <- ask tool \"t\" \"w\"\nknown here: g\n")],
+   "import lib\nworkflow { stop }",
+   "2:1: in module `lib`: `known here` asserts a workflow's scope, and a priming is spliced into somebody else's; leave it to the importer at `known`"),
+  ("a library binding with no annotation",
+   [("lib", "g <- ask tool \"t\" \"w\"\n")],
+   "import lib\nworkflow { stop }",
+   "1:1: in module `lib`: a library's top-level binding carries its kind — inference scans forward, and forward is the importer's file; a library's questions must not depend on who imports it at `g`"),
+  ("a library statement that is nothing",
+   [("lib", "g : text <- ask tool \"t\" \"w\"\n= x\n")],
+   "import lib\nworkflow { stop }",
+   "2:1: in module `lib`: expected a priming statement: a binding (`x : kind <- …`), an act (`ask …`), or a call at `=`"),
+  ("a cycle of two modules",
+   [("a", "import b\ng : text <- ask tool \"t\" \"w\"\n"),
+    ("b", "import a\nh : text <- ask tool \"t\" \"w\"\n")],
+   "import a\nworkflow { stop }",
+   "1:1: the imports cycle: a -> b -> a at `a`"),
+  ("a module that imports itself",
+   [("self", "import self\ng : text <- ask tool \"t\" \"w\"\n")],
+   "import self\nworkflow { stop }",
+   "1:1: the imports cycle: self -> self at `self`"),
+  ("a module nobody handed over",
+   [],
+   "import zed\nworkflow { stop }",
+   "1:1: module `zed` is not among the sources this front end was given (the CLI resolves `zed.wf` beside the program) at `zed`")
 ]
 
 /-! ## The discovery pins (round fourteen): what a run must observe
@@ -508,6 +741,13 @@ baseline to refresh. -/
 /-- The events of a source under a world, or `[]` where it does not check. -/
 def evsOf (ω : Ω) (src : String) : List Event :=
   match parseAndCheckE src with
+  | .error _ => []
+  | .ok p => Plan.trace ω p Env.nil
+
+/-- …and with overrides and modules, for the pins that need either. -/
+def evsOfM (ω : Ω) (ov : List (String × Prompt)) (mods : List (String × String))
+    (src : String) : List Event :=
+  match parseAndCheckProgramWith ov mods src with
   | .error _ => []
   | .ok p => Plan.trace ω p Env.nil
 
@@ -635,14 +875,17 @@ def main : IO UInt32 := do
     -- 0. Every construction, and every mistaken use of one.
     for (what, src, want) in batteryCases do
       check what want (outcome src)
-    IO.println s!"battery: {batteryCases.length} cases"
+    for (what, mods, src, want) in batteryCasesM do
+      check what want (outcomeM mods src)
+    IO.println s!"battery: {batteryCases.length + batteryCasesM.length} cases"
 
     -- 1. The parser reads the flagship source as the raw syntax the kernel
     -- proofs are about — the hypothesis of `Dsl.parseAndCheck_flagship`.
-    match Dsl.parse flagshipSource with
+    match Dsl.parseProgramWith [] [] flagshipSource with
     | .error e => throw <| IO.userError s!"FAIL the flagship does not parse: {e}"
-    | .ok r =>
-      checkTrue "the flagship parses to Dsl.flagshipRaw" (decide (r = flagshipRaw))
+    | .ok prog =>
+      checkTrue "the flagship parses to Dsl.flagshipProgram"
+        (decide (prog = flagshipProgram))
     check "the flagship checks" "ok" (outcome flagshipSource)
     let rung : String :=
       match parseAndCheck flagshipSource with
@@ -932,6 +1175,110 @@ def main : IO UInt32 := do
     check "…even shallower than the content" "line three" (promptAt evs 1)
 
     IO.println "discovery pins: done"
+
+    -- 10. Round sixteen: functions and imports, as a run observes them. The
+    -- expectations below were argued from the design (fn-import-design.md)
+    -- before being run: a call is `Plan.sub`, so a call and its hand-inlining
+    -- are one trace; an import is a plan prefix, so the priming leads; the
+    -- three argument spellings normalize to one prompt; sharing is by the
+    -- question, so one call twice is one answer twice.
+    let wEcho : Ω := world (t := fun q => s!"<{q.prompt}>")
+
+    -- 10a. The priming runs first; a dotted define expands; a dotted binding
+    -- splices.
+    let s16a := "import lib\nworkflow { ask tool \"t\" \"use {lib.guide} {lib.greeting}\" }"
+    let e16a := evsOfM wEcho [] [("lib", libOk)] s16a
+    check "priming first: the library's question leads the trace"
+      "text,receipt" (codesOf e16a)
+    check "…worded by the library" "style guide" (promptAt e16a 0)
+    check "…and the program's act splices the answer and the dotted define"
+      "use <style guide> hello" (promptAt e16a 1)
+
+    -- 10b. A call is its inlining: `Plan.sub`, not a new former.
+    let callSrc := fnsPre ++ "workflow { x <- mk \"the goal\"\n ask tool \"t\" \"use {x}\" }"
+    let inlSrc := "workflow { x <- ask model \"author\" \"draft: the goal\"\n ask tool \"t\" \"use {x}\" }"
+    checkTrue "a call and its hand-inlining are one trace"
+      (decide (evsOf wEcho callSrc = evsOf wEcho inlSrc))
+
+    -- 10c. Three spellings of one argument are one program.
+    let trailSrc := fnsPre ++ "workflow {\n  x <- mk ```\n      the goal\n  ```\n  ask tool \"t\" \"use {x}\"\n}"
+    let lblSrc := fnsPre ++ "workflow {\n  x <- mk $goal\n  ```goal\n      the goal\n  ```\n  ask tool \"t\" \"use {x}\"\n}"
+    checkTrue "a short argument, a trailing block and a $label are one trace"
+      (decide (evsOf wEcho callSrc = evsOf wEcho trailSrc
+        ∧ evsOf wEcho trailSrc = evsOf wEcho lblSrc))
+
+    -- 10d. A procedure's acts run in order, between the caller's statements.
+    let procSrc := fnsPre ++
+      "workflow { d : text <- ask tool \"cat\" \"the patch\"\n applied d\n ask tool \"log\" \"done\" }"
+    let e16d := evsOf wEcho procSrc
+    check "a procedure's acts, in order" "text,receipt,receipt" (codesOf e16d)
+    check "…the first act reads the argument" "apply: <the patch>" (promptAt e16d 1)
+
+    -- 10e. Same call, same answer: sharing survives inlining, because the
+    -- inlined asks are the same question.
+    let shareSrc := fnsPre ++
+      "workflow { x <- mk \"g\"\n y <- mk \"g\"\n ask tool \"t\" \"cmp {x} :: {y}\" }"
+    let e16e := evsOf wEcho shareSrc
+    check "two calls with one argument are one question twice, one answer"
+      "cmp <draft: g> :: <draft: g>" (promptAt e16e 2)
+
+    -- 10f. `--define` reaches through the module prefix.
+    let e16f := evsOfM wEcho [("lib.greeting", Prompt.normalize [.lit "swapped"])]
+      [("lib", libOk)] s16a
+    check "an override through the module prefix changes exactly those words"
+      "use <style guide> swapped" (promptAt e16f 1)
+
+    -- 10g. The examples on disk.
+    let libFile ← IO.FS.readFile "example/library.wf"
+    let progFile ← IO.FS.readFile "example/harden-imported.wf"
+    check "example/harden-imported.wf checks against example/library.wf" "ok"
+      (outcomeM [("library", libFile)] progFile)
+    let e16g := evsOfM wEcho [] [("library", libFile)] progFile
+    check "…and its consenting trace is priming, draft, review panel, judge, consent, apply"
+      "text,receipt,text,verdict,verdict,verdict,flag,receipt,receipt" (codesOf e16g)
+    check "example/library.wf runs alone: its priming, then nothing" "ok"
+      (outcomeM [] libFile)
+
+    -- 10h. The two resource bounds of the elaboration, at chain-built sources:
+    -- `f n` inlines to 2^(n-1) questions and its header sits at line 5n-5.
+    check "a function over the question budget is refused with the count"
+      "65:1: `f14` elaborates to 8192 questions, and the bound is 4096 at `f14`"
+      (outcome (chain 14 ++ "workflow { stop }"))
+    check "a program over the question budget is refused with the count"
+      "0:0: this program elaborates to 8193 questions, and the bound is 4096"
+      (outcome (chain 13 ++ "workflow { a <- f13 \"x\"\n b <- f13 \"y\"\n ask tool \"t\" \"{a} {b}\" }"))
+
+    -- 10i. The refusals no source text reaches, at the hand-built entry point
+    -- (the parser is arity-directed and resolves every call head, so only a
+    -- hand-built `RawProgram` can present these to the checker).
+    let hbFn : RawFn :=
+      { name := "f", params := [("p", Code.text), ("q", Code.text)], result := Code.text
+      , body := [], answer := some "p", answerPos := { line := 1, col := 1 }
+      , pos := { line := 1, col := 1 } }
+    let hbOutcome (main : Raw) : String :=
+      match checkProgram ⟨[hbFn], main⟩ with
+      | .ok _ => "ok"
+      | .error e => e.render
+    check "a hand-built call with too few arguments is refused"
+      "0:0: `f` is applied to too few arguments at `f`"
+      (hbOutcome (RawBlock.bind "x" none
+        (RawSource.rhs (RawRhs.call "f" [] { line := 2, col := 3 }))
+        (RawBlock.empty { line := 3, col := 1 }) { line := 2, col := 1 }))
+    check "…and with too many"
+      "0:0: `f` is applied to too many arguments at `f`"
+      (hbOutcome (RawBlock.bind "x" none
+        (RawSource.rhs (RawRhs.call "f"
+          [RawArg.lit (Prompt.normalize [.lit "a"]) { line := 2, col := 5 },
+           RawArg.lit (Prompt.normalize [.lit "b"]) { line := 2, col := 7 },
+           RawArg.lit (Prompt.normalize [.lit "c"]) { line := 2, col := 9 }]
+          { line := 2, col := 3 }))
+        (RawBlock.empty { line := 3, col := 1 }) { line := 2, col := 1 }))
+    check "…and a call of a name no function answers"
+      "2:1: no function answers to this name (functions are declared above their first use) at `nosuch`"
+      (hbOutcome (RawBlock.callStmt "nosuch" []
+        (RawBlock.empty { line := 3, col := 1 }) { line := 2, col := 1 }))
+
+    IO.println "round sixteen pins: done"
 
     IO.println "dsl smoke: all checks passed"
     return (0 : UInt32)

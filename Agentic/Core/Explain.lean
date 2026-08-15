@@ -255,18 +255,29 @@ and must not get it by parsing twice. -/
 
 namespace Dsl
 
-/-- `[[parseAndCheckRaw s]]` = the front end, keeping the raw syntax it went
-through: the same parse, the same check, the same diagnosis.
+/-- `[[parseAndCheckRawProgramWith ov mods s]]` = the front end, keeping the
+raw syntax of the block it ran: the same parse — imports resolved from `mods`,
+functions checked into the table — the same check, the same diagnosis. The raw
+kept is the *spliced main block*, because that is the one whose source-level
+facts (the `at most n amendments` bounds) a rendering wants; a function body
+cannot hold a bounded revision, so nothing is lost to the table.
 
-`parseAndCheckRaw_eq` is the statement that this is not a second front end. -/
+`parseAndCheckRawProgramWith_eq` is the statement that this is not a second
+front end. -/
+def parseAndCheckRawProgramWith (ov : List (String × Prompt))
+    (mods : List (String × String)) (s : String) :
+    Except CheckError (Raw × Plan [] Unit) :=
+  match parseProgramWith ov mods s with
+  | .error e => .error e
+  | .ok prog =>
+    match checkProgram prog with
+    | .error e => .error e
+    | .ok p => .ok (prog.main, p)
+
+/-- The moduleless spelling: a single file, keeping its raw syntax. -/
 def parseAndCheckRawWith (ov : List (String × Prompt)) (s : String) :
     Except CheckError (Raw × Plan [] Unit) :=
-  match parseWith ov s with
-  | .error e => .error e
-  | .ok r =>
-    match check [] [] r with
-    | .error e => .error e
-    | .ok p => .ok (r, p)
+  parseAndCheckRawProgramWith ov [] s
 
 /-- The front end with no runtime parameters, which is the front end: `parse` is
 `parseWith []` (`Dsl.parse_eq_parseWith_nil`), so this is not a second reading
@@ -281,40 +292,50 @@ line actually ran. -/
 theorem parseAndCheckRaw_eq_with_nil (s : String) :
     parseAndCheckRaw s = parseAndCheckRawWith [] s := rfl
 
-/-- …and hence every program the *overriding* front end accepts is at or below
-the branch rung too. Not a corollary of `parseAndCheckRaw_level_le`: an
-overridden program is a different term, so the bound is re-derived from
-`Dsl.checkBlock_level_le`, which is a statement about every term the checker
-accepts and therefore about that one. -/
+/-- **One front end.** Forgetting the raw syntax gives
+`Dsl.parseAndCheckProgramWith` back on the nose — the same plan on success and
+the same `CheckError` on failure — so a tool built on this one diagnoses what a
+tool built on that one diagnoses. This is the parity of `agent-cat
+run|cost|plan` discharged by construction rather than by three call sites
+agreeing. -/
+theorem parseAndCheckRawProgramWith_eq (ov : List (String × Prompt))
+    (mods : List (String × String)) (s : String) :
+    (parseAndCheckRawProgramWith ov mods s).map Prod.snd
+      = parseAndCheckProgramWith ov mods s := by
+  cases hp : parseProgramWith ov mods s with
+  | error e =>
+    simp [parseAndCheckRawProgramWith, parseAndCheckProgramWith, Except.map, hp]
+  | ok prog =>
+    cases hc : checkProgram prog with
+    | error e =>
+      simp [parseAndCheckRawProgramWith, parseAndCheckProgramWith, Except.map, hp, hc]
+    | ok p =>
+      simp [parseAndCheckRawProgramWith, parseAndCheckProgramWith, Except.map, hp, hc]
+
+/-- …and hence every program the *overriding, importing* front end accepts is
+at or below the branch rung too: forgetting the raw syntax lands in
+`Dsl.parseAndCheckProgramWith`, whose bound is `Dsl.checkProgram_level_le`'s. -/
+theorem parseAndCheckRawProgramWith_level_le (ov : List (String × Prompt))
+    (mods : List (String × String)) (s : String)
+    (r : Raw) (p : Plan [] Unit)
+    (h : parseAndCheckRawProgramWith ov mods s = .ok (r, p)) :
+    level p ≤ Level.branch := by
+  refine parseAndCheckProgramWith_level_le ov mods s p ?_
+  rw [← parseAndCheckRawProgramWith_eq, h]
+  rfl
+
+/-- The moduleless spelling of the bound, which is what a single-file tool
+holds. -/
 theorem parseAndCheckRawWith_level_le (ov : List (String × Prompt)) (s : String)
     (r : Raw) (p : Plan [] Unit) (h : parseAndCheckRawWith ov s = .ok (r, p)) :
-    level p ≤ Level.branch := by
-  unfold parseAndCheckRawWith at h
-  split at h
-  · exact absurd h (by simp)
-  · split at h
-    · exact absurd h (by simp)
-    · simp only [Except.ok.injEq, Prod.mk.injEq] at h
-      obtain ⟨rfl, rfl⟩ := h
-      rename_i hc
-      exact checkBlock_level_le _ [] [] none trivial _ hc
+    level p ≤ Level.branch :=
+  parseAndCheckRawProgramWith_level_le ov [] s r p h
 
-/-- **One front end.** Forgetting the raw syntax gives `parseAndCheckE` back on the
-nose — the same plan on success and the same `CheckError` on failure — so a tool
-built on this one diagnoses what a tool built on that one diagnoses. This is the
-parity of `agent-cat run|cost|plan` discharged by construction rather than by
-three call sites agreeing. -/
+/-- …and the moduleless, overrideless spelling of the parity, stated against
+`parseAndCheckE`, which is `parseAndCheckProgramWith [] []` by definition. -/
 theorem parseAndCheckRaw_eq (s : String) :
-    (parseAndCheckRaw s).map Prod.snd = parseAndCheckE s := by
-  cases hp : parseWith [] s with
-  | error e =>
-    simp [parseAndCheckRaw, parseAndCheckRawWith, parseAndCheckE, parse, Except.map, hp]
-  | ok r =>
-    cases hc : check [] [] r with
-    | error e =>
-      simp [parseAndCheckRaw, parseAndCheckRawWith, parseAndCheckE, parse, Except.map, hp, hc]
-    | ok p =>
-      simp [parseAndCheckRaw, parseAndCheckRawWith, parseAndCheckE, parse, Except.map, hp, hc]
+    (parseAndCheckRaw s).map Prod.snd = parseAndCheckE s :=
+  parseAndCheckRawProgramWith_eq [] [] s
 
 /-- …and hence every program this front end accepts is at or below the branch
 rung, which is what makes a cost report over a source file compile
@@ -338,6 +359,7 @@ def RawBlock.revisionBounds : RawBlock → List (Pos × Nat)
   | .empty _ => []
   | .knownHere _ rest _ => rest.revisionBounds
   | .act _ rest _ => rest.revisionBounds
+  | .callStmt _ _ rest _ => rest.revisionBounds
   | .bind _ _ (.rhs _) rest _ => rest.revisionBounds
   | .bind _ _ (.revising _ _ n _ _ _ _ rpos) rest _ => (rpos, n) :: rest.revisionBounds
   | .ifFlag _ y n _ => y.revisionBounds ++ n.revisionBounds

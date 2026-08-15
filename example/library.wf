@@ -1,0 +1,70 @@
+-- A library: standing context, shared words, and reusable questions. It has
+-- no `workflow` block, so it is imported, not run; its top-level statements
+-- are the priming, and they are the first questions of every program that
+-- imports it. Its top-level bindings are annotated, because a library's
+-- questions must not depend on who imports it.
+
+define spec        = "harden the parser"
+define verdictSpec = "Reply with exactly APPROVE if acceptable, or OBJECTION: <one line> if not."
+define flagSpec    = "Reply with exactly yes or no."
+
+function drafted (guide : text, goal : text, shape : text) -> text {
+  d <- ask model "author" served by "deep" ```
+      {guide}
+      Draft a patch satisfying:
+      {goal}
+      {shape}
+      Reply with a unified diff only.
+  ```
+  answer d
+}
+
+function reviewed (guide : text, patch : text) -> verdict {
+  v <- panel, all must approve [
+    ask model "reviewer-correct" ```
+        {guide}
+        Is this patch correct?
+        {patch}
+        {verdictSpec}
+    ```,
+    ask model "reviewer-secure" ```
+        {guide}
+        Is this patch secure?
+        {patch}
+        {verdictSpec}
+    ```
+  ]
+  answer v
+}
+
+function judged (patch : text, rubric : text, context : text) -> verdict {
+  v <- ask model "judge" ```
+      {context}
+      Judge this patch against the rubric.
+      {patch}
+      {rubric}
+      {verdictSpec}
+  ```
+  answer v
+}
+
+-- A procedure: a reusable act sequence. It answers `receipt`, so it is called
+-- as a statement and binds nothing.
+function applied (patch : text) -> receipt {
+  ask tool "apply" ```
+      Apply:
+      {patch}
+      Write the patched file here, then reply DONE.
+  ```
+  ask tool "test" "Run the test suite, then reply with its last line."
+}
+
+-- The priming. Asked once, before anything an importer writes. The first is a
+-- closed question, so it is the same question in every program that imports
+-- this file, and a memoizing runtime pays for it once.
+guide : text <- ask tool "cat" "Write out the house style guide, at most four short lines."
+
+ask model "author" ```
+    {guide}
+    You are drafting patches for this codebase. Hold this style guide.
+```

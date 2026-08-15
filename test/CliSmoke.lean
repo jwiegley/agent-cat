@@ -166,9 +166,10 @@ def main : IO UInt32 := do
     -- …and the parser reads it as the raw syntax the flagship theorems are about,
     -- which is what makes the plan the binary works on `Dsl.flagshipPlan` and not
     -- merely a plan.
-    match Dsl.parse onDisk with
+    match Dsl.parseProgramWith [] [] onDisk with
     | .error e => throw <| IO.userError s!"FAIL the file does not parse: {e}"
-    | .ok r => checkTrue "…and parses to Dsl.flagshipRaw" (decide (r = Dsl.flagshipRaw))
+    | .ok prog =>
+      checkTrue "…and parses to Dsl.flagshipProgram" (decide (prog = Dsl.flagshipProgram))
 
     -- 2. `plan` and `cost` print the library's folds, line for line. The numbers in
     -- them are `Dsl.level_flagshipPlan`, `Dsl.card_leaves_flagship`,
@@ -216,6 +217,28 @@ def main : IO UInt32 := do
     check "run harden (the stub refuses) exits 0" "0" (toString refuse.code)
     checkTrue s!"…and bills {expectedRefuse}, which is Dsl.bill_flagship_refuse"
       (refuse.out.any fun l => (l.splitOn s!"agent-cat: {expectedRefuse} consultations").length > 1)
+
+    -- 3b. Imports. The CLI reads `library.wf` beside the program, the
+    -- priming's question stands first in the printed term, a whole run of the
+    -- imported flagship passes its checks, and a module nobody wrote is a
+    -- diagnosis naming the file the CLI looked for — not a hang.
+    let importedPath := "example/harden-imported.wf"
+    let iplan ← cli ["plan", importedPath]
+    check "plan of the imported flagship exits 0" "0" (toString iplan.code)
+    checkTrue "…and the library's priming is in the term"
+      (iplan.out.any fun l => (l.splitOn "house style guide").length > 1)
+    let irun ← cli ["run", importedPath, "--quiet"]
+    check "run of the imported flagship exits 0" "0" (toString irun.code)
+    checkTrue "…and every check of the run passed"
+      (irun.out.all fun l => (l.splitOn "FAIL").length == 1)
+    let tmpDir ← IO.FS.createTempDir
+    let orphan := tmpDir / "orphan.wf"
+    IO.FS.writeFile orphan "import zed\nworkflow { stop }\n"
+    let miss ← cli ["plan", orphan.toString]
+    check "a module nobody wrote is exit 2" "2" (toString miss.code)
+    checkTrue "…diagnosed with the file the CLI looked for"
+      ((miss.err.splitOn "zed.wf").length > 1)
+    IO.FS.removeDirAll tmpDir
 
     -- 4. One front end: the same diagnosis and the same exit code from all three
     -- subcommands, byte for byte.

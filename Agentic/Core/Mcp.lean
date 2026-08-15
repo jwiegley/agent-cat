@@ -877,7 +877,9 @@ def checkTool : Tool where
      the offending fragment. That is a tool execution error and not a protocol \
      error, because it is the actionable kind: fix the source and call again."
   inputSchema := objSchema
-    [("source", prop "string" "The workflow program.")] ["source"]
+    [("source", prop "string" "The workflow program, one self-contained \
+      source: this surface has no files to resolve an `import` against, so a \
+      program that imports is refused with the inlining advice.")] ["source"]
   outputSchema := Json.mkObj
     [ ("type", Json.str "object")
     , ("properties", Json.mkObj
@@ -908,7 +910,9 @@ def startTool : Tool where
      marked relay: true, and must be put to the human in your session and \
      answered verbatim in their words, never in yours."
   inputSchema := objSchema
-    [("source", prop "string" "The workflow program.")] ["source"]
+    [("source", prop "string" "The workflow program, one self-contained \
+      source: this surface has no files to resolve an `import` against, so a \
+      program that imports is refused with the inlining advice.")] ["source"]
   outputSchema := Json.mkObj
     [ ("type", Json.str "object")
     , ("properties", Json.mkObj
@@ -1114,8 +1118,27 @@ def addRender (j : Json) (render : List String) : Json :=
   | .obj kvs => Json.obj (kvs.insert "render" (jarr (render.map Json.str)))
   | _ => j
 
+/-- The import refusal of this surface: an MCP tool is handed one program and
+has no directory to resolve a module against, so `import` is refused here — at
+the first `import` line, in this surface's own words — before anything is
+parsed. A source whose imports cannot even be *listed* is not refused here: the
+front end diagnoses its lex in the parser's words, once. -/
+def importRefusal (source : String) : Option Dsl.CheckError :=
+  match Dsl.importsOf source with
+  | .ok [] => none
+  | .ok ((m, ip) :: _) =>
+    some ⟨ip, s!"this surface takes one program and has no files to resolve \
+               `{m}` against: inline the library, or run the program with \
+               `agent-cat`, which reads `{m}.wf` beside it", m⟩
+  | .error _ => none
+
 /-- `workflow_check`, as a function of the source alone: no state, no IO. -/
 def runCheck (source : String) : Json :=
+  match importRefusal source with
+  | some e =>
+    toolResult (withRender [("ok", Json.bool false), ("error", checkErrorJson e)]
+      [s!"workflow_check: {toString e}"]) true
+  | none =>
   match h : Dsl.parseAndCheckE source with
   | .error e =>
     let render := [s!"workflow_check: {toString e}"]
@@ -1361,6 +1384,12 @@ def runStateJson (r : Run) (pending : Option (Dlg.Ask Unit)) : Json :=
 
 /-- `workflow_start`. -/
 def runStart (io : Io) (set : Settings) (st : State) (source : String) : IO (State × Json) := do
+  match importRefusal source with
+  | some e =>
+    return (st, toolResult
+      (withRender [("ok", Json.bool false), ("runId", Json.null), ("error", checkErrorJson e)]
+        [s!"workflow_start: {toString e}"]) true)
+  | none =>
   match h : Dsl.parseAndCheckE source with
   | .error e =>
     return (st, toolResult

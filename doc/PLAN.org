@@ -1972,6 +1972,26 @@ HIGH (deep/alexey): SqZero has no CompleteCSemiring and no PMod P M beyond the d
 
 scale n (scale 0 f) = bounded n while scale (n*0) f = bounded 0: the composite over-approximates (sound as upper bound; a fan of a 0-fan runs nothing). Any future fanT-fusion/normalization rule holds as scale (n*m) f <= scale n (scale m f), not equality. Record before a normalization pass assumes it.
 
+* TODO [#C] DSL: a diagnosis inside a library carets the program's text — Pos has no module field
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pos-module-attribution-oxq
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-08-15 Sat 15:05]
+:MODIFIED: [2026-08-15 Sat 15:05]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Round 16 gave the front end modules (import), so a CheckError can now point into a library's source, but Dsl.Pos carries only line/col. The walk wraps such errors with 'in module `m`:' (walkImports.inMod), which names the file, but the CLI's caretLines still slices the *program's* text at the library's line, so a caret can underline an unrelated line when the position happens to be in range.
+
+The design of record (doc/research/dsl-redesign/fn-import-design.md, 'The one tax that is not local') prescribes the fix: add module : String := "" to Dsl.Pos, stamped by the parser per module, printed by ToString CheckError, added to Mcp.checkErrorJson. Defaulted so structure-instance literals are unchanged, but the ~25 anonymous constructors in Parse.lean need a Pos.at helper, and flagshipRaw/battery position pins recompute.
+
+Until then: the 'in module' prefix is the attribution, and the CLI's caret is best-effort. Acceptance: a syntax error inside an imported library renders with its own file's line quoted (or no caret), never the program's.
+
 * TODO [#C] Kill the condemned stratum; re-point the surface at Plan; example verbatim-stable
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17

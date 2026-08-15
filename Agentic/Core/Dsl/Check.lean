@@ -214,47 +214,103 @@ private def usePrompt (x : String) (p : Prompt) : Option Code :=
     | .lit _ => none
     | .interp nm => if nm == x then some Code.text else none
 
-private def useKindR (x : String) : RawRhs → Option Code
+/-- The kind a call's arguments assert: a name passed at a parameter is
+grounded at the parameter's kind — positional, like a panel member. -/
+private def useArgs (sig : List (String × List (String × Code) × Code))
+    (x : String) (fn : String) (args : List RawArg) : Option Code :=
+  match sig.find? (fun q => q.1 == fn) with
+  | none => none
+  | some (_, ps, _) =>
+    (args.zip ps).findSome? fun aq =>
+      match aq.1 with
+      | .name y _ => if y == x then some aq.2.2 else none
+      | .lit p _ => usePrompt x p
+
+private def useKindR (sig : List (String × List (String × Code) × Code))
+    (x : String) : RawRhs → Option Code
   | .ask a => usePrompt x a.prompt
   | .panel ms _ => ms.findSome? (fun a => usePrompt x a.prompt)
+  | .call f args _ => useArgs sig x f args
 
-private def useKindS (x : String) : RawSource → Option Code
-  | .rhs r => useKindR x r
+private def useKindS (sig : List (String × List (String × Code) × Code))
+    (x : String) : RawSource → Option Code
+  | .rhs r => useKindR sig x r
   | .revising subj carrier _ _ _ review amend _ =>
-    firstOf (useKindR x review)
-      (firstOf (useKindR x amend)
+    firstOf (useKindR sig x review)
+      (firstOf (useKindR sig x amend)
         (if subj == x then
-          firstOf (useKindR carrier review) (useKindR carrier amend)
+          firstOf (useKindR sig carrier review) (useKindR sig carrier amend)
         else none))
 
 /-- The first ground use of `x` in a block, in reading order. -/
-private def useKindB (x : String) : RawBlock → Option Code
+private def useKindB (sig : List (String × List (String × Code) × Code))
+    (x : String) : RawBlock → Option Code
   | .empty _ => none
-  | .knownHere _ rest _ => useKindB x rest
-  | .act a rest _ => firstOf (usePrompt x a.prompt) (useKindB x rest)
-  | .bind _ _ src rest _ => firstOf (useKindS x src) (useKindB x rest)
+  | .knownHere _ rest _ => useKindB sig x rest
+  | .act a rest _ => firstOf (usePrompt x a.prompt) (useKindB sig x rest)
+  | .callStmt f args rest _ =>
+    firstOf (useArgs sig x f args) (useKindB sig x rest)
+  | .bind _ _ src rest _ => firstOf (useKindS sig x src) (useKindB sig x rest)
   | .ifFlag x' y n _ =>
     if x' == x then some Code.flag
-    else firstOf (useKindB x y) (useKindB x n)
+    else firstOf (useKindB sig x y) (useKindB sig x n)
   | .caseVerdict x' a o d _ =>
     if x' == x then some Code.verdict
-    else firstOf (useKindB x a) (firstOf (useKindB x o) (useKindB x d))
+    else firstOf (useKindB sig x a) (firstOf (useKindB sig x o) (useKindB sig x d))
   | .caseResult _ _ settled unsettled _ =>
-    firstOf (useKindB x settled) (useKindB x unsettled)
+    firstOf (useKindB sig x settled) (useKindB sig x unsettled)
 
 /-- The kind of a binding: its annotation, or its first ground use, or the
 refusal that names the annotation. -/
-private def bindKind (pos : Pos) (x : String) (ann : Option Code) (rest : RawBlock) :
+private def bindKind (sig : List (String × List (String × Code) × Code))
+    (pos : Pos) (x : String) (ann : Option Code) (rest : RawBlock) :
     Except CheckError Code :=
   match ann with
   | some c => .ok c
   | none =>
-    match useKindB x rest with
+    match useKindB sig x rest with
     | some c => .ok c
     | none =>
       .error ⟨pos, s!"nothing fixes what kind of answer `{x}` names: use it \
                      (a hole, an `if`, a `case`), or annotate it — \
                      `{x} : text <- …`", x⟩
+
+/-! ## The function table
+
+A function is a named open plan over exactly its parameters: `Sub Γ Δ` is
+definitionally an argument list of typed expressions, so a call is `Plan.sub`
+and everything else is inherited (the β-law is `denote_sub`, a call's rung is
+the function's by `level_sub`). The table is stratified — a call may name only
+an earlier entry — which is what refuses recursion. -/
+
+/-- The context of a parameter list, innermost-last: `p₁` is the outermost
+binding, exactly as `Bindings.push` builds it. -/
+def paramCtx (l : List Code) : Ctx := l.foldl (fun Γ c => c :: Γ) []
+
+/-- One checked function: its parameters, its result, its plan — and the number
+of questions its plan holds, pre-computed for the size guard. -/
+structure FnEntry : Type 1 where
+  /-- The full (possibly dotted) name. -/
+  name : String
+  /-- The parameters, in source order. -/
+  params : List (String × Code)
+  /-- The declared result kind. -/
+  result : Code
+  /-- The body, checked once, over exactly the parameters. -/
+  plan : Plan (paramCtx (params.map Prod.snd)) (El result)
+  /-- How many questions the plan holds — the size the guard prices. -/
+  asks : Nat
+
+/-- The table, in stratified order. -/
+abbrev Fns : Type 1 := List FnEntry
+
+/-- Look a call head up. -/
+def Fns.find? (fns : Fns) (x : String) : Option FnEntry :=
+  List.find? (fun f => f.name == x) fns
+
+/-- The parameter kinds by name, for inference's positional grounding. -/
+def fnSigsOf (fns : Fns) : List (String × List (String × Code) × Code) :=
+  fns.map (fun f => (f.name, f.params, f.result))
 
 /-! ## Elaborating questions at an imposed kind -/
 
@@ -283,10 +339,66 @@ def checkMembers {Γ : Ctx} (S : Bindings Γ) :
       | .error err => .error err
       | .ok ps => .ok (p :: ps)
 
+/-- One argument, elaborated at the parameter's kind: a name reads its binding
+(at exactly that kind — no silent rendering), and words fill a `text`
+parameter. -/
+def argExpr {Γ : Ctx} (S : Bindings Γ) (fname pname : String) (c : Code) :
+    RawArg → Except CheckError (Expr Γ (El c))
+  | .name x pos =>
+    match lookupBinding S pos x with
+    | .error err => .error err
+    | .ok b =>
+      match b.at? c with
+      | some e => .ok e
+      | none =>
+        if b.code = Code.verdict && c = Code.text then
+          .error ⟨pos, s!"`{fname}`'s parameter `{pname}` takes `text`, and \
+                        `{x}` answers `verdict`; a hole is where a verdict \
+                        becomes text — write the argument as words: \"\{{x}}\"", x⟩
+        else
+          .error ⟨pos, s!"`{fname}`'s parameter `{pname}` takes \
+                        `{codeName c}`, but `{x}` answers `{codeName b.code}`", x⟩
+  | .lit p pos =>
+    match c with
+    | .text => Prompt.expr S pos p
+    | c =>
+      .error ⟨pos, s!"words fill a `text` parameter, and `{fname}`'s parameter \
+                    `{pname}` takes `{codeName c}`; pass a name that answers \
+                    it", fname⟩
+
+/-- The arguments, elaborated left to right into the context morphism a call
+substitutes along: `Sub Γf Δ` is definitionally this argument list, so the
+fold below *is* the calling convention. -/
+def checkArgs {Δ : Ctx} (S : Bindings Δ) (fname : String) :
+    (ps : List (String × Code)) → List RawArg → (acc : Ctx) → Sub acc Δ →
+    Except CheckError (Sub ((ps.map Prod.snd).foldl (fun Γ c => c :: Γ) acc) Δ)
+  | [], [], _, σ => .ok σ
+  | (pn, c) :: ps, a :: as, acc, σ =>
+    match argExpr S fname pn c a with
+    | .error err => .error err
+    | .ok e => checkArgs S fname ps as (c :: acc) (fun δ => Env.cons (e δ) (σ δ))
+  | (_, _) :: _, [], _, _ =>
+    .error ⟨⟨0, 0⟩, s!"`{fname}` is applied to too few arguments", fname⟩
+  | [], _ :: _, _, _ =>
+    .error ⟨⟨0, 0⟩, s!"`{fname}` is applied to too many arguments", fname⟩
+
+/-- A call, as the plan it substitutes to: the function's plan, read through
+the argument list. -/
+def callPlan {Δ : Ctx} (S : Bindings Δ) (fns : Fns) (f : String)
+    (args : List RawArg) (pos : Pos) : Except CheckError (Σ c : Code, Plan Δ (El c)) :=
+  match fns.find? f with
+  | none =>
+    .error ⟨pos, "no function answers to this name (functions are declared \
+                 above their first use)", f⟩
+  | some fe =>
+    match checkArgs S f fe.params args [] (fun _ => Env.nil) with
+    | .error err => .error err
+    | .ok σ => .ok ⟨fe.result, Plan.sub fe.plan σ⟩
+
 /-- A clause-position source at an imposed kind. A panel answers `verdict` and
 nothing else — `all must approve` is the verdict monoid, and no other kind
-carries one. -/
-def rhsPlan {Γ : Ctx} (c : Code) (S : Bindings Γ) (r : RawRhs) (what : String) :
+carries one. A call answers its declared result. -/
+def rhsPlan {Γ : Ctx} (fns : Fns) (c : Code) (S : Bindings Γ) (r : RawRhs) (what : String) :
     Except CheckError (Plan Γ (El c)) :=
   match r with
   | .ask a => askPlan c S a
@@ -302,12 +414,20 @@ def rhsPlan {Γ : Ctx} (c : Code) (S : Bindings Γ) (r : RawRhs) (what : String)
       | c =>
         .error ⟨pos, s!"{what}: a panel combines its members in the verdict \
                        monoid, so it answers `verdict`, not `{codeName c}`", "panel"⟩
+  | .call f args pos =>
+    match callPlan S fns f args pos with
+    | .error err => .error err
+    | .ok ⟨rc, p⟩ =>
+      if h : rc = c then .ok (h ▸ p)
+      else
+        .error ⟨pos, s!"{what}: `{f}` answers `{codeName rc}`, \
+                       not `{codeName c}`", f⟩
 
 /-- A binding's former at an imposed kind: `x <- ask …` is **one** node —
 `Plan.ask` is ask-and-bind — and a panel's value reaches the rest through
 `Plan.graft`. -/
-def bindForm {Γ : Ctx} (c : Code) (S : Bindings Γ) (r : RawRhs) :
-    Except CheckError (Plan (c :: Γ) Unit → Plan Γ Unit) :=
+def bindForm {A : Type} {Γ : Ctx} (fns : Fns) (c : Code) (S : Bindings Γ) (r : RawRhs) :
+    Except CheckError (Plan (c :: Γ) A → Plan Γ A) :=
   match r with
   | .ask a =>
     let s := askShape a.model c a.target
@@ -318,7 +438,12 @@ def bindForm {Γ : Ctx} (c : Code) (S : Bindings Γ) (r : RawRhs) :
       | .error err => .error err
       | .ok e => .ok (fun k => Plan.ask c s e k)
   | .panel ms pos =>
-    match rhsPlan c S (.panel ms pos) "this binding" with
+    match rhsPlan fns c S (.panel ms pos) "this binding" with
+    | .error err => .error err
+    | .ok v => .ok (fun k =>
+        Plan.graft v (fun _ σ e => Plan.sub k (fun δ => Env.cons (e δ) (σ δ))))
+  | .call f args pos =>
+    match rhsPlan fns c S (.call f args pos) "this binding" with
     | .error err => .error err
     | .ok v => .ok (fun k =>
         Plan.graft v (fun _ σ e => Plan.sub k (fun δ => Env.cons (e δ) (σ δ))))
@@ -383,46 +508,71 @@ private def pendingErr (pos : Pos) (x : String) : CheckError :=
 /-! ## The checker -/
 
 set_option maxHeartbeats 1000000 in
-/-- `[[checkBlock Γ S pend b]]` = the plan `b` writes under the names `S`, with
-`pend` the loop result the previous statement left to be consumed, or the
-reason `b` writes none. -/
-def checkBlock : (Γ : Ctx) → Bindings Γ → Option (Pend Γ) → RawBlock →
+/-- `[[checkBlock fns Γ S pend b]]` = the plan `b` writes under the names `S`
+and the function table `fns`, with `pend` the loop result the previous
+statement left to be consumed, or the reason `b` writes none. -/
+def checkBlock (fns : Fns) : (Γ : Ctx) → Bindings Γ → Option (Pend Γ) → RawBlock →
     Except CheckError (Plan Γ Unit)
   | _, _, none, .empty _ => .ok (.ret fun _ => ())
   | _, _, some pd, .empty pos => .error (pendingErr pos pd.name)
   | Γ, S, none, .knownHere names rest pos =>
     let live := S.map (·.name)
-    if names == live then checkBlock Γ S none rest
+    if names == live then checkBlock fns Γ S none rest
     else
       .error ⟨pos, s!"`known here` asserts the names in scope, innermost first, \
                      and they are: {String.intercalate ", " live}",
               String.intercalate ", " names⟩
   | _, _, some pd, .knownHere _ _ pos => .error (pendingErr pos pd.name)
   | Γ, S, none, .act a rest _pos =>
-    match bindForm Code.ack S (.ask a) with
+    match bindForm fns Code.ack S (.ask a) with
     | .error err => .error err
     | .ok form =>
-      match checkBlock Γ S none rest with
+      match checkBlock fns Γ S none rest with
       | .error err => .error err
       | .ok k => .ok (form (Plan.sub k Sub.wk))
   | _, _, some pd, .act _ _ pos => .error (pendingErr pos pd.name)
   | _, _, some pd, .bind _ _ _ _ pos => .error (pendingErr pos pd.name)
+  | _, _, some pd, .callStmt _ _ _ pos => .error (pendingErr pos pd.name)
+  | Γ, S, none, .callStmt f args rest pos =>
+    -- A statement call runs for its doing: only a `-> receipt` function has
+    -- nothing to hand back, so only one may stand here.
+    match callPlan S fns f args pos with
+    | .error err => .error err
+    | .ok ⟨rc, p⟩ =>
+      match rc, p with
+      | .ack, p =>
+        match checkBlock fns Γ S none rest with
+        | .error err => .error err
+        | .ok k =>
+          .ok (Plan.graft p (fun _ σ _ => Plan.sub k σ))
+      | rc, _ =>
+        .error ⟨pos, s!"`{f}` answers `{codeName rc}`, and its answer has \
+                       nowhere to go: bind it, `x <- {f} …`", f⟩
   | Γ, S, none, .bind x ann (.rhs rhs) rest pos =>
     match freshName S pos x with
     | .error err => .error err
     | .ok _ =>
-    -- A panel's kind is positional — it answers `verdict` or nothing — so
-    -- inference runs only for a plain ask. A wrong annotation on a panel is
-    -- refused by `bindForm`'s own panel diagnosis.
+    -- A panel's or a call's kind is positional; inference runs only for a
+    -- plain ask. A wrong annotation is refused by the positional diagnosis.
     match (match rhs with
            | .panel _ _ => .ok (ann.getD Code.verdict)
-           | .ask _ => bindKind pos x ann rest : Except CheckError Code) with
+           | .call f _ _ =>
+             (match fns.find? f with
+              | some fe =>
+                if fe.result = Code.ack then
+                  .error ⟨pos, s!"`{f}` answers `receipt`, which binds nothing \
+                                that can be consumed; call it as a statement", f⟩
+                else .ok (ann.getD fe.result)
+              | none =>
+                .error ⟨pos, "no function answers to this name (functions are \
+                             declared above their first use)", f⟩)
+           | .ask _ => bindKind (fnSigsOf fns) pos x ann rest : Except CheckError Code) with
     | .error err => .error err
     | .ok c =>
-    match bindForm c S rhs with
+    match bindForm fns c S rhs with
     | .error err => .error err
     | .ok form =>
-      match checkBlock (c :: Γ) (Bindings.push x c S) none rest with
+      match checkBlock fns (c :: Γ) (Bindings.push x c S) none rest with
       | .error err => .error err
       | .ok k => .ok (form k)
   | Γ, S, none, .bind x ann (.revising subj carrier n rname rann review amend rpos) rest pos =>
@@ -468,14 +618,14 @@ def checkBlock : (Γ : Ctx) → Bindings Γ → Option (Pend Γ) → RawBlock �
       ⟨carrier, b.code, fun δ => Env.head (Env.tail δ)⟩ ::
       ⟨rname, Code.verdict, fun δ => Env.head δ⟩ ::
       Bindings.rename Sub.wk (Bindings.rename Sub.wk S)
-    match rhsPlan Code.verdict (Bindings.push carrier b.code S) review
+    match rhsPlan fns Code.verdict (Bindings.push carrier b.code S) review
         "the review of a bounded revision" with
     | .error err => .error err
     | .ok reviewP =>
-    match rhsPlan b.code Swith amend "the `amend` of a bounded revision" with
+    match rhsPlan fns b.code Swith amend "the `amend` of a bounded revision" with
     | .error err => .error err
     | .ok amendP =>
-      checkBlock Γ S
+      checkBlock fns Γ S
         (some ⟨x, b.code,
           Plan.revising (checkCont reviewP) (reviseCont amendP) n Γ Sub.id b.val⟩)
         rest
@@ -488,10 +638,10 @@ def checkBlock : (Γ : Ctx) → Bindings Γ → Option (Pend Γ) → RawBlock �
       .error ⟨pos, s!"an `if` branches on a flag, \
                      but `{x}` answers `{codeName bnd.code}`", x⟩
     | some e =>
-    match checkBlock Γ S none y with
+    match checkBlock fns Γ S none y with
     | .error err => .error err
     | .ok y' =>
-    match checkBlock Γ S none n with
+    match checkBlock fns Γ S none n with
     | .error err => .error err
     | .ok n' => .ok (Plan.caseB e y' n')
   | _, _, some pd, .ifFlag _ _ _ pos => .error (pendingErr pos pd.name)
@@ -504,13 +654,13 @@ def checkBlock : (Γ : Ctx) → Bindings Γ → Option (Pend Γ) → RawBlock �
       .error ⟨pos, s!"the arms `approved`, `objected` and `no answer` branch on \
                      a `verdict`, but `{x}` answers `{codeName bnd.code}`", x⟩
     | some e =>
-    match checkBlock Γ S none a with
+    match checkBlock fns Γ S none a with
     | .error err => .error err
     | .ok a' =>
-    match checkBlock Γ S none o with
+    match checkBlock fns Γ S none o with
     | .error err => .error err
     | .ok o' =>
-    match checkBlock Γ S none d with
+    match checkBlock fns Γ S none d with
     | .error err => .error err
     | .ok d' =>
       .ok (Plan.caseV e (fun t => match t with
@@ -524,10 +674,10 @@ def checkBlock : (Γ : Ctx) → Bindings Γ → Option (Pend Γ) → RawBlock �
     match freshName S pos sname with
     | .error err => .error err
     | .ok _ =>
-    match checkBlock (pd.code :: Γ) (Bindings.push sname pd.code S) none settled with
+    match checkBlock fns (pd.code :: Γ) (Bindings.push sname pd.code S) none settled with
     | .error err => .error err
     | .ok settledP =>
-    match checkBlock Γ S none unsettled with
+    match checkBlock fns Γ S none unsettled with
     | .error err => .error err
     | .ok unsettledP =>
       .ok (Plan.graft pd.plan (finishCont settledP unsettledP))
@@ -542,14 +692,245 @@ def checkBlock : (Γ : Ctx) → Bindings Γ → Option (Pend Γ) → RawBlock �
 `Except CheckError (Plan Γ Unit)` cannot return an ill-typed plan, because an
 ill-typed plan is not an inhabitant of `Plan Γ Unit`. -/
 def check (Γ : Ctx) (S : Bindings Γ) (r : Raw) : Except CheckError (Plan Γ Unit) :=
-  checkBlock Γ S none r
+  checkBlock [] Γ S none r
+
+/-! ## Function bodies
+
+A body is checked once, over exactly its parameters, and the entry's plan is
+what every call substitutes into. The initial bindings are the parameters, so
+"a body cannot see the caller" is the type, not a rule. -/
+
+/-- The parameters, as the bindings a body starts from — the same left fold
+`paramCtx` takes, so the two agree definitionally. -/
+def paramBindings : (ps : List (String × Code)) → (acc : Ctx) → Bindings acc →
+    Bindings ((ps.map Prod.snd).foldl (fun Γ c => c :: Γ) acc)
+  | [], _, S => S
+  | (pn, c) :: ps, acc, S => paramBindings ps (c :: acc) (Bindings.push pn c S)
+
+/-- The first ground use of `x` in a body, in reading order. -/
+private def useKindBody (sig : List (String × List (String × Code) × Code))
+    (x : String) : List RawBodyStmt → Option Code
+  | [] => none
+  | .bind _ _ r _ :: rest => firstOf (useKindR sig x r) (useKindBody sig x rest)
+  | .act a _ :: rest => firstOf (usePrompt x a.prompt) (useKindBody sig x rest)
+  | .callS f args _ :: rest => firstOf (useArgs sig x f args) (useKindBody sig x rest)
+
+/-- A body binding's kind: its annotation, its first ground use, the `answer`
+that names it (grounded at the function's result), or the refusal. -/
+private def bodyBindKind (sig : List (String × List (String × Code) × Code))
+    (pos : Pos) (x : String) (ann : Option Code) (rest : List RawBodyStmt)
+    (answer : Option String) (result : Code) : Except CheckError Code :=
+  match ann with
+  | some c => .ok c
+  | none =>
+    match firstOf (useKindBody sig x rest)
+        (match answer with
+         | some y => if y == x then some result else none
+         | none => none) with
+    | some c => .ok c
+    | none =>
+      .error ⟨pos, s!"nothing fixes what kind of answer `{x}` names: use it \
+                     (a hole, an argument, the `answer`), or annotate it — \
+                     `{x} : text <- …`", x⟩
+
+/-- The body's statements, continuation-passed so the terminal sees the final
+bindings. -/
+def checkBody {k : Code} (fns : Fns) (answer : Option String) (result : Code) :
+    (Γ : Ctx) → Bindings Γ → List RawBodyStmt →
+    (fin : (Δ : Ctx) → Bindings Δ → Except CheckError (Plan Δ (El k))) →
+    Except CheckError (Plan Γ (El k))
+  | Γ, S, [], fin => fin Γ S
+  | Γ, S, .bind x ann rhs pos :: rest, fin =>
+    match freshName S pos x with
+    | .error err => .error err
+    | .ok _ =>
+    match (match rhs with
+           | .panel _ _ => .ok (ann.getD Code.verdict)
+           | .call f _ _ =>
+             (match fns.find? f with
+              | some fe =>
+                if fe.result = Code.ack then
+                  .error ⟨pos, s!"`{f}` answers `receipt`, which binds nothing \
+                                that can be consumed; call it as a statement", f⟩
+                else .ok (ann.getD fe.result)
+              | none =>
+                .error ⟨pos, "no function answers to this name (functions are \
+                             declared above their first use)", f⟩)
+           | .ask _ =>
+             bodyBindKind (fnSigsOf fns) pos x ann rest answer result :
+           Except CheckError Code) with
+    | .error err => .error err
+    | .ok c =>
+    match bindForm fns c S rhs with
+    | .error err => .error err
+    | .ok form =>
+      match checkBody fns answer result (c :: Γ) (Bindings.push x c S) rest fin with
+      | .error err => .error err
+      | .ok k' => .ok (form k')
+  | Γ, S, .act a _ :: rest, fin =>
+    match bindForm fns Code.ack S (.ask a) with
+    | .error err => .error err
+    | .ok form =>
+      match checkBody fns answer result Γ S rest fin with
+      | .error err => .error err
+      | .ok k' => .ok (form (Plan.sub k' Sub.wk))
+  | Γ, S, .callS f args pos :: rest, fin =>
+    match callPlan S fns f args pos with
+    | .error err => .error err
+    | .ok ⟨rc, p⟩ =>
+      match rc, p with
+      | .ack, p =>
+        match checkBody fns answer result Γ S rest fin with
+        | .error err => .error err
+        | .ok k' => .ok (Plan.graft p (fun _ σ _ => Plan.sub k' σ))
+      | rc, _ =>
+        .error ⟨pos, s!"`{f}` answers `{codeName rc}`, and its answer has \
+                       nowhere to go: bind it, `x <- {f} …`", f⟩
+
+/-- One function, checked into its entry. -/
+def checkFn (fns : Fns) (f : RawFn) : Except CheckError FnEntry :=
+  let Γ0 := paramCtx (f.params.map Prod.snd)
+  let S0 : Bindings Γ0 := paramBindings f.params [] []
+  match f.answer with
+  | some x =>
+    match checkBody (k := f.result) fns f.answer f.result Γ0 S0 f.body
+        (fun _ SΔ =>
+          match lookupBinding SΔ f.answerPos x with
+          | .error err => .error err
+          | .ok b =>
+            match b.at? f.result with
+            | some e => .ok (Plan.ret e)
+            | none =>
+              .error ⟨f.answerPos, s!"`answer {x}`: `{x}` answers \
+                                     `{codeName b.code}`, but `{f.name}` \
+                                     answers `{codeName f.result}`", x⟩) with
+    | .error err => .error err
+    | .ok p => .ok ⟨f.name, f.params, f.result, p, 0⟩
+  | none =>
+    match f.result with
+    | .ack =>
+      match checkBody (k := Code.ack) fns f.answer f.result Γ0 S0 f.body
+          (fun _ _ => .ok (Plan.ret (fun _ => ()))) with
+      | .error err => .error err
+      | .ok p => .ok ⟨f.name, f.params, Code.ack, p, 0⟩
+    | c =>
+      .error ⟨f.answerPos, s!"a value function ends with `answer <name>`; \
+                            `{f.name}` answers `{codeName c}`", f.name⟩
+
+/-! ## The size of the elaboration
+
+The term a program elaborates to is priced before it is built: a loop's tail
+is replicated once per exit, and a call inlines its function's questions per
+site, so the recurrence below is the elaborated term's question count, computed
+over the raw syntax with the (already stratified) table. -/
+
+/-- The largest number of questions an elaborated program may hold. A resource
+limit, like `maxRevisions`, refused with an ordinary diagnosis. -/
+def maxQuestions : Nat := 4096
+
+/-- Questions in a clause-position source. -/
+def rhsAsks (fns : Fns) : RawRhs → Nat
+  | .ask _ => 1
+  | .panel ms _ => ms.length
+  | .call f _ _ =>
+    match fns.find? f with
+    | some fe => fe.asks
+    | none => 0
+
+/-- Questions in a body. -/
+def bodyAsks (fns : Fns) : List RawBodyStmt → Nat
+  | [] => 0
+  | .bind _ _ r _ :: rest => rhsAsks fns r + bodyAsks fns rest
+  | .act _ _ :: rest => 1 + bodyAsks fns rest
+  | .callS f _ _ :: rest => rhsAsks fns (.call f [] ⟨0, 0⟩) + bodyAsks fns rest
+
+/-- Questions in the elaborated term of a block — with the loop's tail counted
+once per exit, which is what the graft builds. -/
+def blockAsks (fns : Fns) : RawBlock → Nat
+  | .empty _ => 0
+  | .knownHere _ r _ => blockAsks fns r
+  | .act _ r _ => 1 + blockAsks fns r
+  | .callStmt f _ r _ => rhsAsks fns (.call f [] ⟨0, 0⟩) + blockAsks fns r
+  | .bind _ _ (.rhs rhs) r _ => rhsAsks fns rhs + blockAsks fns r
+  | .bind _ _ (.revising _ _ n _ _ rev am _) (.caseResult _ _ st un _) _ =>
+    (n + 1) * rhsAsks fns rev + n * rhsAsks fns am
+      + (n + 1) * (blockAsks fns st + blockAsks fns un)
+  | .bind _ _ (.revising _ _ n _ _ rev am _) r _ =>
+    (n + 1) * rhsAsks fns rev + n * rhsAsks fns am + blockAsks fns r
+  | .ifFlag _ y n _ => blockAsks fns y + blockAsks fns n
+  | .caseVerdict _ a o d _ => blockAsks fns a + blockAsks fns o + blockAsks fns d
+  | .caseResult _ _ st un _ => blockAsks fns st + blockAsks fns un
+
+/-- The table, checked in order — each entry **priced before it is built**:
+`bodyAsks` reads the raw body against the table so far, so an entry whose
+inlining would exceed the bound is refused without elaborating a node of
+it. -/
+def checkFnsList (acc : Fns) : List RawFn → Except CheckError Fns
+  | [] => .ok acc
+  | f :: rest =>
+    let n := bodyAsks acc f.body
+    if maxQuestions < n then
+      .error ⟨f.pos, s!"`{f.name}` elaborates to {n} questions, and the \
+                       bound is {maxQuestions}", f.name⟩
+    else
+      match checkFn acc f with
+      | .error err => .error err
+      | .ok fe => checkFnsList (acc ++ [{ fe with asks := n }]) rest
+
+/-! ## The program front end -/
+
+/-- The first revising bound over `maxRevisions`, in reading order — scanned
+off the raw syntax so a hostile bound is refused *at its own line*, before the
+question count at `⟨0,0⟩` would claim it as a mere size. The message is
+byte-identical to `checkBlock`'s own refusal, which still stands behind it for
+the hand-built entry points. -/
+def overRevised : Raw → Option (Pos × Nat)
+  | .empty _ => none
+  | .knownHere _ r _ => overRevised r
+  | .act _ r _ => overRevised r
+  | .callStmt _ _ r _ => overRevised r
+  | .bind _ _ (.rhs _) r _ => overRevised r
+  | .bind _ _ (.revising _ _ n _ _ _ _ rpos) r _ =>
+    if maxRevisions < n then some (rpos, n) else overRevised r
+  | .ifFlag _ y n _ => (overRevised y).orElse fun _ => overRevised n
+  | .caseVerdict _ a o d _ =>
+    ((overRevised a).orElse fun _ => overRevised o).orElse fun _ => overRevised d
+  | .caseResult _ _ s u _ => (overRevised s).orElse fun _ => overRevised u
+
+/-- `[[checkProgram prog]]` = the plan the whole program writes: the functions
+checked once, the elaboration sized — hostile loop bounds first, at their own
+lines, then the question count — and the spliced block checked against the
+table. -/
+def checkProgram (prog : RawProgram) : Except CheckError (Plan [] Unit) :=
+  match checkFnsList [] prog.fns with
+  | .error err => .error err
+  | .ok fns =>
+    match overRevised prog.main with
+    | some (rpos, n) =>
+      .error ⟨rpos, s!"a bounded revision is unrolled into the term it writes, \
+                      so its bound may name at most {maxRevisions} amendments",
+              s!"at most {n} amendments"⟩
+    | none =>
+      let n := blockAsks fns prog.main
+      if maxQuestions < n then
+        .error ⟨⟨0, 0⟩, s!"this program elaborates to {n} questions, and the \
+                          bound is {maxQuestions}", ""⟩
+      else
+        checkBlock fns [] [] none prog.main
+
+/-- `[[parseAndCheckProgramWith ov mods main]]` = the whole front end: modules,
+functions, splice, check. -/
+def parseAndCheckProgramWith (ov : List (String × Prompt))
+    (mods : List (String × String)) (main : String) :
+    Except CheckError (Plan [] Unit) :=
+  match parseProgramWith ov mods main with
+  | .error e => .error e
+  | .ok prog => checkProgram prog
 
 /-- `[[parseAndCheckE s]]` = the closed workflow `s` denotes, or the reason it
 denotes none, with a position and an excerpt. -/
 def parseAndCheckE (s : String) : Except CheckError (Plan [] Unit) :=
-  match parse s with
-  | .error e => .error e
-  | .ok r => check [] [] r
+  parseAndCheckProgramWith [] [] s
 
 /-- `[[parseAndCheck s]]` = the closed workflow `s` denotes, or the reason it
 denotes none. -/

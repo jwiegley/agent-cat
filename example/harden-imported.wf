@@ -1,0 +1,68 @@
+-- The flagship, written against `library.wf`: the priming runs first, the
+-- drafting and reviewing are the library's functions, and every imported name
+-- says where it came from. `agent-cat run example/harden-imported.wf` reads
+-- `library.wf` from beside this file.
+
+import library
+
+define aim = "Harden the parser against malformed input, minimally."
+
+workflow {
+
+  known here: library.guide
+
+  -- A dotted function call: two short arguments — a dotted binding, a local
+  -- define — and one trailing block for the last parameter.
+  draft <- library.drafted library.guide aim ```
+      Keep the diff under forty lines. The standing objective is:
+      {library.spec}
+  ```
+
+  result <- revising draft as patch, at most 2 amendments {
+
+    why <- library.reviewed library.guide patch
+
+    amend patch {
+      ask model "author" served by "deep" ```
+          {library.guide}
+          Revise this patch:
+          {patch}
+          {why}
+          Reply with the revised diff only.
+      ```
+    }
+  }
+
+  case result {
+
+    settled patch {
+
+      -- A call with two $labels, each satisfied by a labelled block below.
+      second <- library.judged patch $rubric $context
+      ```rubric
+          A patch passes when it is minimal, tested, and reversible.
+          Nothing else counts.
+      ```
+      ```context
+          {library.guide}
+          You have already reviewed this patch once; this is the second reading.
+      ```
+
+      case second {
+        approved {
+          ok <- ask person "owner" ```
+              Apply this patch?
+              {patch}
+              {library.flagSpec}
+          ```
+
+          if ok { library.applied patch } else { stop }
+        }
+        objected { stop }
+        no answer { stop }
+      }
+    }
+
+    unsettled { stop }
+  }
+}

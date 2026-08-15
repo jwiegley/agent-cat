@@ -41,27 +41,69 @@ exact fact of the source — `agent-cat plan` names it per question — just not
 a glyph in the prompt. Brace escaping: `\{` and `\}` in both prompt
 spellings; in blocks everything else is literal.
 
+Round sixteen (owner): **functions and imports, landed.** Both derived rather
+than invented — `Sub Γ Δ ≅ ∏ᵢ Expr Δ (El cᵢ)` says a function *is* an open
+plan over its parameter context and a call *is* `Plan.sub`; an import is a plan
+prefix plus a namespace. The design of record for the two features is
+`fn-import-design.md` beside this file, with its adversarial pass in
+`fn-import-attack.md`; the grammar below carries the productions. What holds by
+construction: a body cannot see its caller (by type), recursion cannot be
+written (a call head resolves against the functions already declared above),
+calls cannot be arguments (parsing is arity-directed and needs no lookahead),
+and the whole function table sits at or below the pipeline rung (`FnLevel`,
+threaded through `Dsl.checkProgram_level_le`). A library's top-level
+statements are its priming and run at load, before anything the importer
+writes; its exports read as `lib.name`; a file with a `workflow` block cannot
+be imported, and a library may be run — its priming, then nothing. The
+elaborated term is priced before it is built: `maxQuestions` refuses a table
+entry or a program whose inlining would exceed the bound. One softening of
+"no reserved words": a binder, parameter, or function name may not spell a
+statement word, a function, or an imported module's name — each such name is
+refused where it is written, so every name in a program means exactly one
+thing.
+
 ## Grammar
 
 Braces delimit; indentation means nothing. Comments run `--` to end of line.
 There are no reserved words: positions decide.
 
 ```
-program    ::= { define } "workflow" block
+program    ::= { import } { define | function } "workflow" block
+library    ::= { import } { define | function } { primer }   -- no workflow block
+
+import     ::= "import" name          -- the file <name>.wf beside the program; the CLI resolves
 
 define     ::= "define" name "=" text
+
+function   ::= "function" name "(" param { "," param } ")" "->" kind "{" body "}"
+param      ::= name ":" ( "text" | "verdict" )     -- flag and receipt parameters are refused
+body       ::= { bodystmt } "answer" name          -- a value function ends with its answer…
+             | { bodystmt }                        -- …and a `-> receipt` body just ends
+bodystmt   ::= name [ ":" kind ] "<-" ( ask | panel | call )
+             | ask                                 -- an act
+             | call                                -- a `-> receipt` function, run for its doing
+
+call       ::= fname { argument } { labelledblock }
+argument   ::= name | text | "$" label             -- a call is not an argument: bind it
+labelledblock ::= a fenced block whose opening fence carries the label
+
+primer     ::= name ":" kind "<-" ( ask | panel | call )   -- annotated, always
+             | ask
+             | call
 
 block      ::= "{" statement { statement } "}"
              | "{" "stop" "}"
 
 statement  ::= name [ ":" kind ] "<-" source      -- bind an answer (kind usually inferred)
              | ask                                 -- statement ask: the act; answers receipt
+             | call                                -- statement call: a `-> receipt` function
              | "if" name block "else" block        -- flag elimination; both arms mandatory
              | "case" name "{" arms "}"            -- sum elimination
              | "known" "here" ":" ( "nothing" | name { "," name } )   -- optional, checker-verified
 
 source     ::= ask
              | "panel" "," rule "[" ask { "," ask } "]"
+             | call
              | loop
 
 ask        ::= "ask" "model"  plainstring [ "served" "by" plainstring ]

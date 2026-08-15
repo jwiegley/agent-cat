@@ -227,6 +227,52 @@ def caretLines (src : String) (pos : Dsl.Pos) : List String :=
   | none => []
   | some l => [s!"  {l}", "  " ++ "".pushn ' ' (pos.col - 1) ++ "^"]
 
+/-- The most modules one program may reach. A resource limit in the spirit of
+`Dsl.maxRevisions`: a directory that feeds the walk more than this is a runaway,
+and a runaway is a diagnosis, not a hang. -/
+def maxModules : Nat := 64
+
+/-- `[[readModules dir fuel todo acc]]` = the sources of every module reachable
+from the names in `todo`, each read once from `<name>.wf` in `dir`.
+
+**The CLI does the filesystem and nothing else.** Which modules run, in what
+order, what a dotted name means, whether the graph cycles — all of that is the
+parser's import walk; this loop only fetches the bytes that walk will ask for,
+so it reads *at least* the closure and diagnoses only the two facts that are
+its own: a file that cannot be read, and a graph too large to be believed. A
+language error inside a module (a dotted module name, text after an import) is
+left where it belongs: the one front-end call diagnoses it in the parser's
+words, so this loop treats such a file as importing nothing. -/
+def readModules (dir : System.FilePath) : Nat → List String →
+    List (String × String) → IO (List (String × String))
+  | 0, todo, acc => do
+    unless todo.isEmpty do
+      IO.eprintln s!"agent-cat: the import graph does not close after reading \
+                    {acc.length} modules; a program has at most {maxModules}"
+      IO.Process.exit 2
+    return acc
+  | _ + 1, [], acc => return acc
+  | fuel + 1, m :: rest, acc => do
+    if acc.any (fun q => q.1 == m) then
+      readModules dir fuel rest acc
+    else do
+      if maxModules ≤ acc.length then
+        IO.eprintln s!"agent-cat: the import graph reaches more than \
+                      {maxModules} modules; a program has at most {maxModules}"
+        IO.Process.exit 2
+      let path := dir / s!"{m}.wf"
+      let src ← try
+          IO.FS.readFile path
+        catch _ =>
+          IO.eprintln s!"agent-cat: {path}: cannot read the source for `{m}`; \
+                        a module named `{m}` is the file `{m}.wf` beside the \
+                        importing program"
+          IO.Process.exit 2
+      let subs := match Dsl.importsOf src with
+        | .ok l => l.map (·.1)
+        | .error _ => []
+      readModules dir fuel (subs ++ rest) (acc ++ [(m, src)])
+
 /-- `[[withProgram path k]]` = the program at `path`, checked, handed to `k`; or a
 diagnosis on stderr and exit `2`.
 
@@ -244,14 +290,15 @@ is one of the ways the answer is no.
 Continuation-passing, and not by taste: `Plan [] Unit` is a `Type 1` and `IO` is a
 `Type`-valued monad, so a checked plan cannot be *returned* from `IO` — it is
 passed to what needs it. What `k` is handed with it is the proof
-`level p ≤ Level.branch`, which `Dsl.parseAndCheckRawWith_level_le` produces from
-the very equation this match established, so the cost analysis a subcommand runs
-is justified by the load that produced its plan and by nothing else. That the
-bound survives `--define` is the point of proving it about the overriding front
-end rather than inheriting it: an overridden program is a different term, and it
-is bounded because *every* term the checker accepts is.
+`level p ≤ Level.branch`, which `Dsl.parseAndCheckRawProgramWith_level_le`
+produces from the very equation this match established, so the cost analysis a
+subcommand runs is justified by the load that produced its plan and by nothing
+else. That the bound survives `--define` and `import` is the point of proving it
+about the overriding, importing front end rather than inheriting it: an
+overridden or spliced program is a different term, and it is bounded because
+*every* term the checker accepts is.
 
-With no `--define`, `parseAndCheckRawWith []` is `parseAndCheckRaw`
+With no `--define` and no imports, this front end is `parseAndCheckRaw`
 (`Dsl.parseAndCheckRaw_eq_with_nil`) is `parseAndCheckE` up to the raw syntax
 (`Dsl.parseAndCheckRaw_eq`), so the default path reads exactly the program the
 theorems are about. -/
@@ -262,8 +309,16 @@ def withProgram (path : String) (ds : List (String × String))
     catch e =>
       IO.eprintln s!"agent-cat: {path}: {e}"
       IO.Process.exit 2
-  match h : Dsl.parseAndCheckRawWith (overrides ds) src with
-  | .ok (r, p) => k r p (Dsl.parseAndCheckRawWith_level_le _ src r p h)
+  -- The import closure, read from beside the program. What the walk *means* is
+  -- the parser's; a bad import line inside `src` is diagnosed by the front-end
+  -- call below, so a failing `importsOf` here just means no modules to fetch.
+  let dir := (System.FilePath.mk path).parent.getD ⟨"."⟩
+  let mods ← readModules dir (maxModules * 64)
+    (match Dsl.importsOf src with
+     | .ok l => l.map (·.1)
+     | .error _ => []) []
+  match h : Dsl.parseAndCheckRawProgramWith (overrides ds) mods src with
+  | .ok (r, p) => k r p (Dsl.parseAndCheckRawProgramWith_level_le _ mods src r p h)
   | .error e =>
     IO.eprintln s!"{path}:{e.pos.line}:{e.pos.col}: {e.message}"
     for l in caretLines src e.pos do IO.eprintln l

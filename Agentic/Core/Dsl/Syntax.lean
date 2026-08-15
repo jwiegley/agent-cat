@@ -190,9 +190,25 @@ structure RawAsk where
   pos : Pos
   deriving Repr, DecidableEq, Inhabited
 
-/-- `[[RawRhs]]` = a clause-position source: one question, or a panel of them.
-The loop is not here — a bounded revision's result is not a value a clause can
-hold. -/
+/-- `[[RawArg]]` = one argument at a call site, after the parser has resolved
+defines and `$label` fences: the name of something in scope, or literal words
+(a quoted string, a fenced block, an expanded define, or a labelled fence's
+content — the checker cannot tell, which is the point). -/
+inductive RawArg where
+  /-- A name in scope, passed at the parameter's kind. -/
+  | name (x : String) (pos : Pos)
+  /-- Words, elaborated in the caller's bindings; fills a `text` parameter. -/
+  | lit (p : Prompt) (pos : Pos)
+  deriving Repr, DecidableEq, Inhabited
+
+/-- Where an argument is written. -/
+def RawArg.pos : RawArg → Pos
+  | .name _ p => p
+  | .lit _ p => p
+
+/-- `[[RawRhs]]` = a clause-position source: one question, a panel of them, or
+a call of a function. The loop is not here — a bounded revision's result is not
+a value a clause can hold. -/
 inductive RawRhs where
   /-- A single question. -/
   | ask (a : RawAsk)
@@ -200,6 +216,10 @@ inductive RawRhs where
   in the verdict monoid — the one rule the menu currently has, named on the
   page. -/
   | panel (members : List RawAsk) (pos : Pos)
+  /-- `f a₁ … aₙ`: a function applied, by juxtaposition, to exactly its arity
+  in single-token arguments. The function is a named open plan; the call is
+  substitution, so nothing here is a new node. -/
+  | call (fn : String) (args : List RawArg) (pos : Pos)
   deriving Repr, DecidableEq, Inhabited
 
 /-- `[[RawSource]]` = what a binding may bind: a clause-position source, or a
@@ -249,16 +269,66 @@ inductive RawBlock where
   assertion of exactly the names in scope, innermost first. Documentation that
   cannot rot. -/
   | knownHere (names : List String) (rest : RawBlock) (pos : Pos)
+  /-- A statement-position call of a `-> receipt` function: a reusable act
+  sequence, run for its doing, and the block continues after it. -/
+  | callStmt (fn : String) (args : List RawArg) (rest : RawBlock) (pos : Pos)
   deriving Repr, DecidableEq, Inhabited
 
 /-- `[[Raw]]` = an unchecked text of a workflow: the body of `workflow { … }`,
 with every `define` already expanded. -/
 abbrev Raw : Type := RawBlock
 
+/-- `[[RawBodyStmt]]` = one statement of a function body. A body's binding takes
+a `RawRhs`, not a `RawSource`, so a loop in a body is unwritable by type; the
+branchings are likewise absent, so **a function is a reusable sequence of
+questions, not a reusable decision** — decisions stay where they are read. -/
+inductive RawBodyStmt where
+  /-- `x <- rhs`, with the optional kind annotation. -/
+  | bind (x : String) (ann : Option Code) (rhs : RawRhs) (pos : Pos)
+  /-- A statement-position ask: an act inside the body. -/
+  | act (a : RawAsk) (pos : Pos)
+  /-- A statement-position call of a `-> receipt` function. -/
+  | callS (fn : String) (args : List RawArg) (pos : Pos)
+  deriving Repr, DecidableEq, Inhabited
+
+/-- `[[RawFn]]` = one function, as written: `function name (p : kind, …) ->
+kind { body }`. The body is statements and — for a value-returning function —
+`answer x`, naming a parameter or a body binding; a `-> receipt` function's
+body just ends, because `El .ack = Unit` and the end of a block already is the
+receipt. -/
+structure RawFn where
+  /-- The function's name (dotted when it came in through an import). -/
+  name : String
+  /-- The parameters, in source order, each with its kind. -/
+  params : List (String × Code)
+  /-- The declared result kind. -/
+  result : Code
+  /-- The body's statements, in order. -/
+  body : List RawBodyStmt
+  /-- `answer x` for a value function; `none` for `-> receipt`. -/
+  answer : Option String
+  /-- Where the `answer` (or the body's end) is written, for diagnoses. -/
+  answerPos : Pos
+  /-- Where the function begins. -/
+  pos : Pos
+  deriving Repr, DecidableEq, Inhabited
+
+/-- `[[RawProgram]]` = a whole program after the import walk: every reachable
+library's functions (dotted), and one block — the libraries' primings, in
+post-order, spliced ahead of the main workflow. -/
+structure RawProgram where
+  /-- Every function in scope, in stratified order: a call may name only an
+  earlier entry, which is what refuses recursion. -/
+  fns : List RawFn
+  /-- The primings and the workflow, as one block. -/
+  main : Raw
+  deriving Repr, DecidableEq, Inhabited
+
 /-- Where a right-hand side begins, for diagnoses. -/
 def RawRhs.pos : RawRhs → Pos
   | .ask a => a.pos
   | .panel _ p => p
+  | .call _ _ p => p
 
 /-- Where a source begins, for diagnoses. -/
 def RawSource.pos : RawSource → Pos
