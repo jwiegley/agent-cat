@@ -35,15 +35,16 @@ joined with `\n`, and the result is scanned for holes exactly as a string body
 is. Either way the token is a `Token.str` and nothing downstream can tell the
 spellings apart.
 
-A **hole** is `{name}` or `{$name}` — an answer spliced at run time, or a
-define expanded right here — and nothing else: any other `{` is refused at lex
-time with the
-escape (`\{`) named. `define` is expanded in this module, so the raw syntax the
-checker sees mentions only names a checker can resolve; a `{name}` whose name
-is a define is refused (*write `{$name}`*), a `{$name}` with no earlier define
-is refused, a duplicate `define` is refused, and a define's body may hole only
-earlier defines — so expansion always yields literals, no define is cyclic, and
-a question is closed exactly when every hole it wrote was a `{$…}`.
+A **hole** is `{name}`, and nothing else: any other `{` is refused at lex
+time with the escape (`\{`) named. A hole *names* — a define, expanded where
+it stands, or a binding, spliced when the program runs — and the two
+namespaces are disjoint by construction (a binder may not spell a define), so
+the name alone decides and there is nothing further to mark. `define` is
+expanded in this module, so the raw syntax the checker sees mentions only
+names a checker can resolve; a duplicate `define` is refused, and a define's
+body may hole only earlier defines — so expansion always yields literals, no
+define is cyclic, and a question is closed exactly when every hole it wrote
+named a define.
 -/
 
 namespace Agentic.Core.Dsl
@@ -98,33 +99,27 @@ private def natOfDigits (ds : List Char) : Nat :=
 private def flushLit (acc : List Char) (chunks : Prompt) : Prompt :=
   if acc.isEmpty then chunks else Chunk.lit (String.ofList acc.reverse) :: chunks
 
-/-- The body of a hole, the opening `{` already consumed: an optional `$`, a
-name, and the closing brace. Returns the stored form — `x` or `$x` — and the
-characters consumed (braces included).
+/-- The body of a hole, the opening `{` already consumed: a name and the
+closing brace. Returns the name and the characters consumed (braces included).
 
 One grammar for both prompt spellings, enforced at lex time: a `{` that does
-not open one of the two hole forms is refused with the escape named, because
-the alternative — carrying arbitrary text to the checker as a name — turns a
-lexical mistake into a misleading scope error. -/
+not open a hole is refused with the escape named, because the alternative —
+carrying arbitrary text to the checker as a name — turns a lexical mistake
+into a misleading scope error. A hole *names*: a define (expanded where it
+stands) or a binding (spliced when the program runs), and the two namespaces
+are disjoint by construction, so the name alone decides. -/
 private def scanHole (p : Pos) (cs : List Char) :
     Except CheckError (String × Nat × List Char) := do
-  let (dollar, cs, used) :=
-    match cs with
-    | '$' :: rest => (true, rest, 1)
-    | _ => (false, cs, 0)
   match cs with
   | c :: _ =>
     if isIdentStart c then
       let name := cs.takeWhile isIdentCont
       let cs := cs.drop name.length
-      let used := used + name.length
-      let stored := (if dollar then "$" else "") ++ String.ofList name
       match cs with
-      | '}' :: rest => .ok (stored, used + 2, rest)
-      | _ => .error ⟨p, "unterminated hole: no closing brace", stored⟩
+      | '}' :: rest => .ok (String.ofList name, name.length + 2, rest)
+      | _ => .error ⟨p, "unterminated hole: no closing brace", String.ofList name⟩
     else
-      .error ⟨p, "a hole is `{name}` (an answer) or `{$define}`; \
-                 a literal brace is written `\\{`", ""⟩
+      .error ⟨p, "a hole is `{name}`; a literal brace is written `\\{`", ""⟩
   | [] => .error ⟨p, "unterminated hole: the source ended", ""⟩
 
 /-- Scan the body of a string literal, the opening quote already consumed.
@@ -274,6 +269,7 @@ private def scanBlockChunks (openPos : Pos) :
     if c == '\\' then
       match cs with
       | '{' :: cs' => scanBlockChunks openPos fuel cs' ('{' :: acc) chunks
+      | '}' :: cs' => scanBlockChunks openPos fuel cs' ('}' :: acc) chunks
       | _ => scanBlockChunks openPos fuel cs (c :: acc) chunks
     else if c == '{' then
       match scanHole openPos cs with
@@ -435,50 +431,31 @@ private def expectPlainStr (ts : List Tok) : Except CheckError (String × List T
 /-! ## `define`: literal text, expanded here -/
 
 /-- A binder may not spell a define: the two namespaces must not silently
-merge, because a `{name}` hole reads from one and a `{$name}` hole from the
-other, and the reader has only the spelling to go by. -/
+merge, because a hole names either a define or a binding, and disjointness
+is exactly what lets one spelling serve both. -/
 private def freshOfDefines (defs : List (String × Prompt)) (p : Pos) (x : String) :
     Except CheckError Unit :=
   if defs.any (fun d => d.1 == x) then
     .error ⟨p, "a binder may not spell a define; one of the two must be renamed", x⟩
   else .ok ()
 
-/-- `[[expand defs pos p]]` = `p` with every `{$x}` replaced by the define `x`'s
-literal chunks, every `{x}` checked not to name a define, and everything else
-untouched.
+/-- `[[expand defs p]]` = `p` with every hole that names a define replaced by
+the define's literal chunks, and every other hole left for the checker to
+resolve against the bindings.
 
-Fail-closed on both sides of the sigil: an unknown `{$x}` and a `{x}` that
-names a define are each refused, because both are programs whose text says
-something their meaning would not. -/
-private def expand (defs : List (String × Prompt)) (pos : Pos) : Prompt →
-    Except CheckError Prompt
-  | [] => .ok []
-  | .lit s :: rest => do
-    let r ← expand defs pos rest
-    .ok (.lit s :: r)
+Expansion-wins is safe, not a precedence rule: a binder may not spell a define
+(`freshOfDefines`), so a hole's name lives in exactly one of the two
+namespaces and nothing can be captured. -/
+private def expand (defs : List (String × Prompt)) : Prompt → Prompt
+  | [] => []
+  | .lit s :: rest => .lit s :: expand defs rest
   | .interp nm :: rest =>
-    if nm.startsWith "$" then
-      let name := String.ofList (nm.toList.drop 1)
-      match defs.find? (fun d => d.1 == name) with
-      | some d => do
-        let r ← expand defs pos rest
-        .ok (d.2 ++ r)
-      | none =>
-        .error ⟨pos, "no define answers to this hole; a `{$name}` names an \
-                     earlier `define`", name⟩
-    else
-      match defs.find? (fun d => d.1 == nm) with
-      | some _ =>
-        .error ⟨pos, s!"`{nm}` is a define, and a define's hole carries \
-                       the sigil: write it with `$` after the opening brace", nm⟩
-      | none => do
-        let r ← expand defs pos rest
-        .ok (.interp nm :: r)
+    match defs.find? (fun d => d.1 == nm) with
+    | some d => d.2 ++ expand defs rest
+    | none => .interp nm :: expand defs rest
 
-private def prompt (defs : List (String × Prompt)) (pos : Pos) (p : Prompt) :
-    Except CheckError Prompt := do
-  let e ← expand defs pos p
-  .ok (Prompt.normalize e)
+private def prompt (defs : List (String × Prompt)) (p : Prompt) : Prompt :=
+  Prompt.normalize (expand defs p)
 
 /-! ## The grammar -/
 
@@ -525,10 +502,8 @@ private def parseAsk (defs : List (String × Prompt)) (ts : List Tok) :
       let (n, rest) ← expectNat rest
       .ok (n, rest)
     | _ => .ok (0, ts)
-  let ppos := posOf ts
   let (pr, ts) ← expectStr ts
-  let pr ← prompt defs ppos pr
-  .ok (⟨model, ⟨addr, draw⟩, pr, p⟩, ts)
+  .ok (⟨model, ⟨addr, draw⟩, prompt defs pr, p⟩, ts)
 
 /-- `panel ::= "panel" "," "all" "must" "approve" "[" ask {"," ask} "]"`.
 
@@ -776,11 +751,11 @@ private def parseDefines (ov : List (String × Prompt)) :
         let (pr, rest) ← expectStr rest
         let body ← match ov.find? (fun o => o.1 == x) with
           | some o => .ok o.2
-          | none => do
-            let b ← prompt defs bpos pr
+          | none =>
+            let b := prompt defs pr
             if b.any (fun ch => match ch with | .interp _ => true | .lit _ => false) then
-              .error ⟨bpos, "a define is literal text: only `{$name}` holes of \
-                            earlier defines are legal in one", x⟩
+              .error ⟨bpos, "a define is literal text: only holes naming earlier \
+                            defines are legal in one", x⟩
             else .ok b
         parseDefines ov fuel (defs ++ [(x, body)]) rest
     | _ => .ok (defs, ts)

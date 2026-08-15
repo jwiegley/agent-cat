@@ -36,11 +36,12 @@ take quoted strings only (`expectPlainStr` refuses a block token).
    fence's line break is a terminator, not content. A final blank content line
    adds one if wanted.
 
-5. HOLES AND THE ONE ESCAPE. A hole is exactly `{` `$`? name `}` where name
-   is isIdentStart isIdentCont* — the same hole grammar the quoted form has:
-   `{x}` splices an ANSWER as text (a text answer is itself; a verdict is its
-   objections), `{$x}` expands a DEFINE (literal text, so the question stays
-   closed). `\{` is a literal brace. EVERYTHING ELSE IS LITERAL: quotes, lone
+5. HOLES AND THE ESCAPES. A hole is exactly `{` name `}` where name is
+   isIdentStart isIdentCont* — the same hole grammar the quoted form has: a
+   hole names a define (expanded in place, so the question stays closed) or a
+   binding (spliced as text when the program runs — a text answer is itself, a
+   verdict is its objections), and the disjoint namespaces decide which. `\{`
+   and `\}` are literal braces. `\{` is a literal brace. EVERYTHING ELSE IS LITERAL: quotes, lone
    backslashes, short backtick runs, tabs, Markdown's own escapes. Any other `{`
    is refused at lex time with a message naming `\{`. Two stated limits: a literal
    backslash immediately before a hole cannot be written in a block (use the

@@ -1379,7 +1379,7 @@ Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 18:34]
-:MODIFIED: [2026-08-15 Sat 07:54]
+:MODIFIED: [2026-08-15 Sat 09:19]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -1472,6 +1472,13 @@ Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is
     "author": "johnw",
     "text": "Round twelve (owner, 2026-08-15): the '.reasons' projection is deleted — it implied that a verdict is a record with fields, and there is exactly one field, i.e. none. A {v} hole now splices an answer AS TEXT, kind by kind: text is itself, a verdict is its objections joined by '; ' (the kind's one canonical rendering — total, and nothing for the author to choose), and flags/receipts are refused (no canonical text; a language that silently picked 'yes' would have prompts undetermined by their source). The hole grammar is back to {name} | {$name}. Inference note: a hole grounds text; verdict bindings are grounded positionally (panel/review/case) or by annotation — and bind-of-panel now imposes verdict directly rather than running inference, fixing a latent bug where a panel result used only in a hole inferred text and tripped the panel diagnosis. The elaborated flagship term is unchanged (render at the hole = the same Expr); all four trace agreements re-verified at runtime; example/ill-typed.wf rewritten around a flag interpolation (a verdict one is now legal); a positive render test pins 'said: too long; unsafe'. GRAMMAR.md, block-syntax.md, and the guide updated.",
     "created_at": "2026-08-15T14:54:16Z"
+  },
+  {
+    "id": 81,
+    "issue_id": "acat-k28",
+    "author": "johnw",
+    "text": "Round thirteen (owner, 2026-08-15): the {$x} define sigil is deleted — one hole spelling, {name}, for defines and bindings alike. Sound because the namespaces are provably disjoint (a binder may not spell a define; a duplicate define is refused), so the name alone decides — resolution is an exact lookup, not a heuristic, keeping the survey's anti-ApplicativeDo prohibition satisfied. The rung-at-a-glance property from survey amendment 1 is consciously traded away at the owner's direction: the rung remains an exact fact of the source (the preamble decides closedness; agent-cat plan names each question's rung). Brace escaping documented and made symmetric: \\{ and \\} in both prompt spellings (blocks previously only escaped the open brace — a \\} would have kept its backslash silently). Battery green; flagshipRaw unchanged (define holes expand to the same literal chunks); GRAMMAR.md round-thirteen note added.",
+    "created_at": "2026-08-15T16:19:48Z"
   }
 ]
 #+end_src

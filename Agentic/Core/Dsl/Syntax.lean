@@ -36,8 +36,9 @@ amendments { v <- review-source  amend c { source } }`; a statement-position
   say exactly where one would go.
 
 `define` does not appear below. It is textual and the parser expands it — a
-`{$name}` hole is a define, a `{name}` hole is an answer — so a `Raw` mentions
-only names a checker can be asked to resolve.
+hole names a define or a binding, and the two namespaces are disjoint by
+construction — so a `Raw` mentions only names a checker can be asked to
+resolve.
 -/
 
 namespace Agentic.Core
@@ -114,8 +115,8 @@ def CheckError.render (e : CheckError) : String := toString e
 
 The interpolation `{x}` is a `Chunk` and not a general expression because the
 language has no expressions: a prompt is a concatenation of things said and
-things heard, and nothing else can appear in one. A `{$d}` define-hole never
-reaches this type: the parser expands it, so a `Raw`'s prompts hold only
+things heard, and nothing else can appear in one. A hole that names a define
+never reaches this type: the parser expands it, so a `Raw`'s prompts hold only
 literals and answer-holes. -/
 inductive Chunk where
   /-- Text written in the source. -/
@@ -134,8 +135,8 @@ abbrev Prompt : Type := List Chunk
 The distinction is not cosmetic. A prompt that mentions nothing in scope is a
 *closed* question, which is `Plan.askC` and starts a plan at the `batch` rung;
 one that mentions something is `Plan.ask`, which is `pipeline`. After `define`
-expansion every `{$d}` hole is a literal, so a question is closed exactly when
-every hole it wrote was a define — which is readable at the question. -/
+expansion every hole that named a define is a literal, so a question is closed
+exactly when every hole it wrote named one. -/
 def Prompt.closed : Prompt → Option String
   | [] => some ""
   | [.lit s] => some s

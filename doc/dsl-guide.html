@@ -111,7 +111,7 @@
 
   draft &lt;- <span class="kw">ask model</span> <span class="str">"author"</span> <span class="kw">served by</span> <span class="str">"deep"</span> ```
       Draft a patch satisfying:
-      {$spec}
+      {spec}
       Reply with a unified diff only.
   ```
 
@@ -122,18 +122,18 @@
           {guide}
           Is this patch correct?
           {patch}
-          {$verdictSpec}
+          {verdictSpec}
       ```,
       <span class="kw">ask model</span> <span class="str">"reviewer-secure"</span> ```
           {guide}
           Is this patch secure?
           {patch}
-          {$verdictSpec}
+          {verdictSpec}
       ```,
       <span class="kw">ask model</span> <span class="str">"reviewer-simple"</span> ```
           Could this patch be simpler?
           {patch}
-          {$verdictSpec}
+          {verdictSpec}
       ```
     ]
 
@@ -154,7 +154,7 @@
       ok &lt;- <span class="kw">ask person</span> <span class="str">"owner"</span> ```
           Apply this patch?
           {patch}
-          {$flagSpec}
+          {flagSpec}
       ```
 
       <span class="kw">if</span> ok {
@@ -197,17 +197,17 @@
 
 <p>A prompt is a quoted string — with the escapes <code>\n \t \r \\ \" \{ \}</code> — or a <em>text block</em>: a fence of three or more backticks at the end of the line, the content on the following lines, closed by the first line whose first non-blank characters are exactly the same number of backticks. The block's non-blank lines are dedented by their longest common indentation, blank lines are kept (they are Markdown's paragraph breaks), and the lines are joined with newlines. What the addressee is told is exactly what the file shows, shifted left.</p>
 
-<p>Inside a block exactly two things are special: a hole, and <code>\{</code> for a literal brace. Everything else — quotes, backslashes, shorter backtick runs — is literal, so pasted Markdown survives verbatim except for <code>{</code>. Markdown containing a three-backtick fence is quoted with a four-backtick outer fence, which is CommonMark's own escalation rule. Mixed tabs and spaces in a block's indentation are refused rather than guessed at.</p>
+<p>Inside a block, three things are special: a hole, and <code>\{</code> / <code>\}</code> for literal braces. Everything else — quotes, backslashes, shorter backtick runs — is literal, so pasted Markdown survives verbatim except for <code>{</code>. Markdown containing a three-backtick fence is quoted with a four-backtick outer fence, which is CommonMark's own escalation rule. Mixed tabs and spaces in a block's indentation are refused rather than guessed at.</p>
 
 <p>The three holes, in either spelling of a prompt:</p>
 
 <table>
 <tr><th>hole</th><th>meaning</th></tr>
 <tr><td><code>{x}</code></td><td>an <em>answer</em>, spliced as text when the program runs: a text answer is itself, a verdict is its objections joined by <code>"; "</code> (approval and no-answer splice as nothing); flags and receipts are refused — they have no canonical text</td></tr>
-<tr><td><code>{$d}</code></td><td>a <em>define</em>: literal text, expanded where you see it, before anything runs</td></tr>
+<tr><td><code>{d}</code>, where <code>d</code> names a define</td><td>literal text, expanded where you see it, before anything runs — the question stays closed</td></tr>
 </table>
 
-<p>The sigil is load-bearing: <mark>a question is closed — asked identically in every world, priced at the batch rung — exactly when every hole in it is a <code>{$…}</code></mark>, and that is now readable at the question rather than by cross-reference to the top of the file. A <code>{x}</code> whose name is a define, and a <code>{$x}</code> with no define, are both refused.</p>
+<p>One spelling serves both because it cannot be ambiguous: <mark>a hole's name is a define or a binding, never both</mark> — a binder may not spell a define, and the checker refuses the collision — so the name alone decides. A question is closed, and priced at the batch rung, exactly when every hole it wrote named a define, which the preamble at the top of the file decides; <code>agent-cat plan</code> names each question's rung.</p>
 
 <p>A <code>define</code> is one name for one piece of literal text, written once, before <code>workflow</code>. A define's body may hole only <em>earlier</em> defines, a duplicate define is refused, and <code>agent-cat --define name="…"</code> replaces a define's body at load time — same program, different words — and refuses a name the program never defined.</p>
 
@@ -260,8 +260,7 @@ x &lt;- <span class="kw">ask person</span> <span class="str">"owner"</span> <spa
 <tr><th>you wrote</th><th>the refusal</th></tr>
 <tr><td>a bound name with no use and no annotation</td><td>nothing fixes what kind of answer it names: use it, or annotate it</td></tr>
 <tr><td><code>{ok}</code> where <code>ok</code> is a flag</td><td>a flag has no text of its own; only text and verdicts interpolate</td></tr>
-<tr><td><code>{spec}</code> where <code>spec</code> is a define</td><td>a define's hole carries the sigil: <code>{$spec}</code></td></tr>
-<tr><td>a second <code>define</code> of one name, or a binder spelling one</td><td>one define per name; the namespaces never merge</td></tr>
+<tr><td>a binder spelling a define, or a second <code>define</code> of one name</td><td>the namespaces never merge — which is what makes one hole spelling unambiguous</td></tr>
 <tr><td>re-introducing a live name</td><td>no shadowing; rename one of the two</td></tr>
 <tr><td><code>{ }</code></td><td>a path that does nothing says so: write <code>stop</code></td></tr>
 <tr><td>a revising result nothing consumes, or touched by anything but its <code>case</code></td><td>the <code>case</code> is the next statement, and nothing else touches it</td></tr>
@@ -287,7 +286,7 @@ leaf bills, with multiplicity: {5, 6, 7, 9, 10, 11, 13, 14, 15}</code></pre>
 
 <p>Every program this language accepts elaborates into the library's representation at or below the <em>branch</em> rung — <code>Dsl.parseAndCheck_level_le</code>, a theorem — so every program has a finite cost tree before it runs. The language has no syntax for the dynamic rung at all: data-dependent workflow <em>shape</em>, unbounded loops, data-width fan-out, and arbitrary code are each unwritable, which is why the bill enumeration exists. Sharing is the meaning: one binding is one answer in every world, and deliberate resampling is a different question by construction.</p>
 
-<p>What is <em>not</em> guaranteed: that a leaf of the cost tree is attained (the cheapest may not be the bill of any run); that a receipt's act succeeded (a receipt carries no information); that the words of a prompt make an addressee produce the kind's decodable answer (the kind is the contract; <code>{$verdictSpec}</code>-style defines are a courtesy beside it, and they can drift). The design record — including twelve things surveyed frameworks do that this language deliberately refuses, and the honest regressions of the redesign — is in <code>doc/research/dsl-redesign/</code>.</p>
+<p>What is <em>not</em> guaranteed: that a leaf of the cost tree is attained (the cheapest may not be the bill of any run); that a receipt's act succeeded (a receipt carries no information); that the words of a prompt make an addressee produce the kind's decodable answer (the kind is the contract; <code>{verdictSpec}</code>-style defines are a courtesy beside it, and they can drift). The design record — including twelve things surveyed frameworks do that this language deliberately refuses, and the honest regressions of the redesign — is in <code>doc/research/dsl-redesign/</code>.</p>
 
 <footer>
 agent-cat · the workflow language, as approved in round ten of the redesign (obr acat-k28) ·

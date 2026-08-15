@@ -9,7 +9,7 @@ workflow {
 
   draft <- ask model "author" served by "deep" ```
       Draft a patch satisfying:
-      {$spec}
+      {spec}
       Reply with a unified diff only.
   ```
 
@@ -20,18 +20,18 @@ workflow {
           {guide}
           Is this patch correct?
           {patch}
-          {$verdictSpec}
+          {verdictSpec}
       ```,
       ask model "reviewer-secure" ```
           {guide}
           Is this patch secure?
           {patch}
-          {$verdictSpec}
+          {verdictSpec}
       ```,
       ask model "reviewer-simple" ```
           Could this patch be simpler?
           {patch}
-          {$verdictSpec}
+          {verdictSpec}
       ```
     ]
 
@@ -52,7 +52,7 @@ workflow {
       ok <- ask person "owner" ```
           Apply this patch?
           {patch}
-          {$flagSpec}
+          {flagSpec}
       ```
 
       if ok {

@@ -33,6 +33,14 @@ a verdict does not have. A `{v}` hole splices a verdict as its objections,
 which is the kind's one canonical text; flags and receipts remain refused. The
 elaborated term is unchanged (`Verdict.render` at the hole).
 
+Round thirteen (owner): the `{$x}` define sigil is deleted — one hole
+spelling, `{name}`, resolved by the disjoint namespaces (the binder-spells-
+define refusal is what carries the guarantee the sigil carried). The survey's
+rung-at-a-glance argument is consciously traded away: the rung is still an
+exact fact of the source — `agent-cat plan` names it per question — just not
+a glyph in the prompt. Brace escaping: `\{` and `\}` in both prompt
+spellings; in blocks everything else is literal.
+
 ## Grammar
 
 Braces delimit; indentation means nothing. Comments run `--` to end of line.
@@ -77,11 +85,13 @@ text       ::= a quoted string, or a fenced block (see block-syntax.md)
 plainstring::= a quoted string with no holes (names are written, not computed)
 ```
 
-Holes inside `text`: `{x}` splices an answer *as text* — a text answer is
-itself, a verdict is its objections joined by `"; "` (each kind has at most
-one way to be text, so there is nothing to project and no field syntax);
-`{$x}` expands a define. Flags and receipts have no canonical text and are
-refused. `\{` is a literal brace.
+Holes inside `text`: one spelling, `{name}`. A hole *names*: a define is
+expanded where it stands, and a binding is spliced *as text* when the program
+runs — a text answer is itself, a verdict is its objections joined by `"; "`
+(each kind has at most one way to be text, so there is nothing to project).
+Flags and receipts have no canonical text and are refused. The two namespaces
+are disjoint by construction — a binder may not spell a define — so the name
+alone decides. `\{` is a literal brace (`\}` likewise, in both spellings).
 
 ## The rules the grammar does not carry
 
@@ -111,11 +121,11 @@ refused. `\{` is a literal brace.
    is asked.
 
 5. **Define hygiene.** A define is literal text, expanded at parse time.
-   Inside a define, only `{$earlier-define}` holes are legal, so expansion
-   yields literals and cannot be cyclic. A binder may not spell a define;
-   `{x}` is refused if `x` names a define, and `{$x}` if it does not. A
-   question is closed — batch rung — exactly when every hole is `{$…}`,
-   readable at the question.
+   Inside a define, only holes naming earlier defines are legal, so expansion
+   yields literals and cannot be cyclic. A binder may not spell a define —
+   the disjointness that makes the one hole spelling unambiguous. A question
+   is closed — batch rung — exactly when every hole it wrote named a define,
+   which the preamble at the top of the file decides.
 
 6. **No shadowing.** A live name may not be introduced again; dead names are
    reusable (which is what lets `settled patch` name what the loop revised).

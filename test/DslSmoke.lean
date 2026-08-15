@@ -26,8 +26,8 @@ checks the things no proof in the package makes a statement about.
   refuses is not visible in the type of `check`. Each case below is one clause
   of the judgment, checked by its message and its position — the inference
   refusal for a name nothing grounds, the hole and branching kind mismatches,
-  the define hygiene (duplicate, missing sigil, unknown sigil, an answer hole in
-  a define, a binder that spells one), no-shadowing, the pending-result
+  the define hygiene (a duplicate, an answer hole in a define, a binder that
+  spells one), no-shadowing, the pending-result
   discipline, the panel's kind, the `served by` restriction, the `amend` head,
   the unit/numeral agreement, and the text-block refusals (mixed indentation,
   an unclosed fence).
@@ -130,10 +130,12 @@ def srcCaseNotPending : String :=
 /-- `{ }`: a path that does nothing says so. -/
 def srcEmptyBraces : String := "workflow { }"
 
-/-- Define hygiene, all five refusals. -/
+/-- Define hygiene: the refusals, and the one spelling. A hole names a define
+or a binding with one syntax, which is sound because the namespaces are
+disjoint (`srcBinderSpellsDefine` is the refusal that keeps them so). -/
 def srcDupDefine : String := "define a = \"x\"\ndefine a = \"y\"\nworkflow { stop }"
-def srcDefineNoSigil : String := "define spec = \"x\"\nworkflow { ask tool \"t\" \"do {spec}\" }"
-def srcUnknownSigil : String := "workflow { ask tool \"t\" \"do {$spec}\" }"
+def srcDefineHole : String := "define spec = \"x\"\nworkflow { ask tool \"t\" \"do {spec}\" }"
+def srcSigil : String := "workflow { ask tool \"t\" \"do {" ++ "$" ++ "spec}\" }"
 def srcDefineAnswerHole : String := "define a = \"x {later}\"\nworkflow { stop }"
 def srcBinderSpellsDefine : String :=
   "define a = \"x\"\nworkflow { a : text <- ask tool \"t\" \"hi\" }"
@@ -226,7 +228,7 @@ inner three-backtick fence, a `\{` literal brace, a blank content line, a
 quoted word, and a define-hole beside an answer-hole downstream. -/
 def srcBlockCorners : String :=
   "define spec = \"S\"\nworkflow {\n  g <- ask tool \"t\" ````\n    a \\{brace} \"quoted\"\n\n" ++
-  "    ```\n    fenced\n    ```\n    {$spec}\n  ````\n  ask tool \"log\" \"{g}\"\n}"
+  "    ```\n    fenced\n    ```\n    {spec}\n  ````\n  ask tool \"log\" \"{g}\"\n}"
 
 /-- One program, two prompt spellings: a text block and a quoted string. The
 chunk identity — a block is the string its dedented join spells — is pinned by
@@ -299,14 +301,11 @@ def main : IO UInt32 := do
     rejects "a duplicate define is refused" srcDupDefine
       "2:1: this name is already defined, and the earlier body would silently win; one \
        define per name at `a`"
-    rejects "a define holed without its sigil is refused" srcDefineNoSigil
-      "2:25: `spec` is a define, and a define's hole carries the sigil: write it with \
-       `$` after the opening brace at `spec`"
-    rejects "a sigil hole with no define is refused" srcUnknownSigil
-      "1:25: no define answers to this hole; a `{$name}` names an earlier `define` at \
-       `spec`"
+    check "a define is holed like any other name" "ok" (outcome srcDefineHole)
+    rejects "the retired sigil is not a hole" srcSigil
+      "1:29: a hole is `{name}`; a literal brace is written `\\{`"
     rejects "an answer hole inside a define is refused" srcDefineAnswerHole
-      "1:12: a define is literal text: only `{$name}` holes of earlier defines are \
+      "1:12: a define is literal text: only holes naming earlier defines are \
        legal in one at `a`"
     rejects "a binder that spells a define is refused" srcBinderSpellsDefine
       "2:12: a binder may not spell a define; one of the two must be renamed at `a`"

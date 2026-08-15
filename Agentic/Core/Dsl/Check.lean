@@ -48,9 +48,9 @@ Four points where the elaboration is a decision rather than a transcription.
 
 * **A closed prompt is a closed question.** A prompt that mentions no name has
   its words in the term, so the node emitted is `Plan.askC` and the plan starts
-  at the `batch` rung; one that mentions a name is `Plan.ask`. Every define
-  hole was expanded by the parser into literal text, so a question is closed
-  exactly when every hole it wrote was a `{$…}` — readable at the question.
+  at the `batch` rung; one that mentions a name is `Plan.ask`. Every hole that
+  named a define was expanded by the parser into literal text, so a question is
+  closed exactly when every hole it wrote named a define.
 
 No clause emits `Plan.dyn`. That is not an accident of this implementation but
 the point of the language, and `Agentic/Core/Dsl.lean` proves it.
