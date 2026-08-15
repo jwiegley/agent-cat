@@ -183,7 +183,7 @@ def main : IO UInt32 := do
           (Explain.planLines Dsl.flagshipPlan ++ Explain.revisionLines Dsl.flagshipRaw)))
       (String.intercalate "\n" planRan.out)
     checkTrue "…including the revision bound the term does not hold"
-      (planRan.out.any fun l => (l.splitOn "up to 2 revisions").length > 1)
+      (planRan.out.any fun l => (l.splitOn "at most 2 amendments").length > 1)
 
     let costRan ← cli ["cost", hardenPath]
     check "cost exits 0" "0" (toString costRan.code)
@@ -228,7 +228,7 @@ def main : IO UInt32 := do
     check "…and cost's diagnosis is plan's, byte for byte" illPlan.err illCost.err
     check "…and run's is too" illPlan.err illRun.err
     checkTrue "…and it says where, what and which fragment"
-      ((illPlan.err.splitOn "example/ill-typed.wf:10:14:").length > 1
+      ((illPlan.err.splitOn "example/ill-typed.wf:11:18:").length > 1
         && (illPlan.err.splitOn "only a text answer interpolates").length > 1
         && (illPlan.err.splitOn "at `review`").length > 1)
     check "…and nothing was printed on stdout" "" (String.intercalate "\n" illPlan.out)

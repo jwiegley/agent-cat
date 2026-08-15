@@ -768,15 +768,17 @@ From acat-ruz: reach = csum of powers is carrier-generic except star_eq_left nee
 ]
 #+end_src
 
-* TODO [#B] DSL: caseVerdict arm mapping is unproved and untested — permuting arms passes the whole package
+* DONE [#B] DSL: caseVerdict arm mapping is unproved and untested — permuting arms passes the whole package
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-a6x
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 19:00]
-:MODIFIED: [2026-08-14 Fri 19:00]
+:MODIFIED: [2026-08-14 Fri 23:23]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-14 Fri 23:23]
+:CLOSE_REASON: test/DslSmoke.lean now runs the caseVerdict plan under three worlds and asserts the arm-identifying act of each (approved/objected/no answer); the lexer/macro/override region is covered by the new refusal battery (define hygiene, hole grammar, fences, overrides via CliSmoke --define).
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -871,7 +873,7 @@ From acat-jyw: shareT l (prim q1) beside shareT l (prim q2) keys both to (l, roo
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 19:00]
-:MODIFIED: [2026-08-14 Fri 19:00]
+:MODIFIED: [2026-08-14 Fri 23:23]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -879,6 +881,20 @@ From acat-jyw: shareT l (prim q1) beside shareT l (prim q2) keys both to (l, roo
 :END:
 
 deep-review + alexey + validated. (1) End-of-input errors report 0:0 (Parse.lean:174-181), violating the one-based Pos contract; cli/AgentCat.lean:224-225 then drops the caret entirely — the commonest editing error (truncated file) gets the worst message. Fix: carry the end-of-source position. (2) Chunk.interp has no Pos (Syntax.lean:118-123), so every prompt error is reported at the enclosing ask (Check.lean:112-151) — in a language whose principal dataflow mechanism is interpolation. Fix: add Pos to Chunk.interp (the lexer knows it, Parse.lean:117-127). (3) ifFlag/caseVerdict elaborate all arms before checking the scrutinee's kind (Check.lean:392-426), so a wrong-kinded scrutinee reports an error from inside an arm. Fix: test bnd.at? first. (4) Panel monoid refusal names the first member's kind as everyone's (Check.lean:250-258). (5) Interpolation names lex as any run up to }/"/newline (Parse.lean:118), so non-identifiers surface later as 'unbound name' at the wrong place. (6) `up to 2 revision` and `up to 1 revisions` both parse (Parse.lean:430-435), defeating the two spellings' stated purpose.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 77,
+    "issue_id": "acat-bqx",
+    "author": "johnw",
+    "text": "Implementation (round eleven): the arm-before-scrutinee ordering is fixed (checkBlock tests the scrutinee kind before elaborating arms); interpolation lexing is now a strict hole grammar refused at lex time; the unit/numeral agreement is enforced (at most 1 amendment / 2 amendments); the panel first-member message is moot (members carry no written kinds). REMAINING: end-of-source diagnoses still report 0:0 with no caret, and Chunk still carries no Pos so prompt errors cite the enclosing statement.",
+    "created_at": "2026-08-15T06:23:06Z"
+  }
+]
+#+end_src
 
 * DONE [#C] Split a non-commutative semiring base class out of CSemiring
 :PROPERTIES:
@@ -1054,6 +1070,19 @@ Deliberately not a constructor; castGrade covers =. The <= case is a structural 
 :END:
 
 From acat-ozh: Mat Prop is the only matrix star; at Prob the csum-of-powers construction may work BECAUSE suprema are attained — plausibly the cheapest second matrix star, sidestepping acat-9ml's missing reindexing law at this carrier.
+
+* TODO [#C] DSL: implement 'panel, at least n must approve' (quorum read-out) with its three required theorems
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-f10
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-14 Fri 22:27]
+:MODIFIED: [2026-08-14 Fri 22:27]
+:CREATED_BY: johnw
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
 
 * DONE [#B] Carriers via Mathlib: ENat/Tropical for Cost, ENNReal/PMF for probability and expectation
 :PROPERTIES:
@@ -1350,7 +1379,7 @@ Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 18:34]
-:MODIFIED: [2026-08-14 Fri 22:10]
+:MODIFIED: [2026-08-14 Fri 23:23]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -1422,6 +1451,20 @@ Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is
     "author": "johnw",
     "text": "Round ten: panel-rules design + adversarial check complete (wf_55e8039e; full docs at scratchpad/panel-design.md, panel-attack.md). ANSWER to owner: today 'all must approve' is one syntactic term naming the kernel's only fold (the verdict monoid); no expression language hides anywhere. The designed menu: TWO real entries — 'all must approve' (monoid product: objections concatenate in member order, one decline sinks everything to no-answer; ASSOCIATIVE, panels flatten lawfully) and 'at least n must approve' (counted read-out: approvals counted, every non-approver's objections kept, decliners noted by name; fixes the acat-88m annihilation for n<k; NOT associative — the law/parameter trade stated honestly per the attack, which killed the 'one-parameter family' framing as vacuous since rho is not a monoid morphism, though the n=k agreement is exact and verified against Question.lean:139/149/152/198). Both entries: cost exactly k in every world (the menu is read-outs, not schedules — trace equation independent of the fold), and the quorum elaborates as a PURE READ-OUT in a ret-leaf Expr (elaboration A) staying at pipeline rung — checkRhs_level_le's statement survives unchanged; bind-k-then-case (B) refused (sound but costs a rung for nothing). REFUSED with one-line reasons: bare 'panel [' (silent default once a menu exists); 'a majority must approve' (attack: ambiguous cold — of members or of answerers — the exact defect the menu exists to prevent, plus a synonym of a numeral); 'any may veto' (= all-must-approve said backwards); 'at most n may object' (complement, disagrees invisibly about silence); 'best of 3' (a panel folds verdicts, best-of ranks candidates and needs a judge — write n draws + one judge ask, ~4 questions at pipeline, workaround verified except the draw syntax is 'draw n' not 'independent draw n' per Parse.lean:267); percentages (hidden rounding rule); weights/binding member (member predicate = expression language; put the binding reviewer in their own panel); early-exit veto (changes which questions are asked — a different program, writable as asks + case). Attack majors to carry into implementation: object-R-never-empty must be a stated lemma (else a failed quorum could spell approve and silently settle the loop); no parallel notes list (derive decline notes from the shape's addressee, no zipWith truncation); the two panel theorems (agreement at n=k, trace independence) are REQUIRED, not optional; migration blast radius includes example/harden.wf and dsl-guide. FLAGSHIP v5 (scratchpad/flagship-v5.wf) also folds in round-8/9 validation fixes: 'amend patch { }' (back-edge named on the page), 'at most 2 amendments' (counts the visible step), 'served by \"deep\"' (via was cold-unreadable), apply prompt no longer demands an unverified DONE.",
     "created_at": "2026-08-15T05:10:28Z"
+  },
+  {
+    "id": 74,
+    "issue_id": "acat-k28",
+    "author": "johnw",
+    "text": "Owner: 'Let's commit to this redesign' — implementation begins at 48045b3. Scope note: the panel menu of record has two entries; this implementation pass delivers 'all must approve' (the monoid, existing Plan.panel); 'at least n must approve' is deferred to its own issue because its required theorems (agreement at n=k, trace independence, object-nonempty) are real proof work — the grammar will refuse the phrase by not knowing it, not by a stub.",
+    "created_at": "2026-08-15T05:27:10Z"
+  },
+  {
+    "id": 79,
+    "issue_id": "acat-k28",
+    "author": "johnw",
+    "text": "ROUND ELEVEN — IMPLEMENTED. The redesigned surface is live: Syntax/Parse/Check/Dsl rewritten (inference = first ground use + ground-free refusal; pending-result discipline enforced by the checker with the case as the next statement; text blocks in the lexer with dedent/escalation/CRLF/mixed-tab rules; {$x} define holes; served by; panel rule phrase; if/case; revising-as-amend; stop; known here; no-shadowing; binder-vs-define separation). parseAndCheck_level_le re-proved over the new checker with the PendLevel invariant. DslFlagship re-transcribed mechanically from the parser itself; all nine decide +kernel theorems recomputed — the module now elaborates in ~107 s (was 5-6 min). All four trace agreements with Harden.demo hold (the apply-prompt DONE phrase retained pending acat-nhz). Examples rewritten; dsl-guide.html rewritten; full battery green: dsl/cli/mcp/exec/acp/mcp_client smokes + harden_demo x3 + full workspace build. V1 deltas vs GRAMMAR.md noted in its implementation-status section.",
+    "created_at": "2026-08-15T06:23:06Z"
   }
 ]
 #+end_src
@@ -1542,7 +1585,7 @@ From acat-zms: star_star, sliding a(ba)* = (ab)*a, denesting, (a+b)* are now pro
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 19:00]
-:MODIFIED: [2026-08-14 Fri 19:00]
+:MODIFIED: [2026-08-14 Fri 23:04]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -1550,6 +1593,20 @@ From acat-zms: star_star, sliding a(ba)* = (ab)*a, denesting, (a+b)* are now pro
 :END:
 
 validated pass (P1, attribution corrected by the pass itself). example/harden.wf:41 `never approved { }` does nothing (faithful to Agentic/Core/HardenPatch.lean:753); example/HardenPatch.lean:17-19 asks the owner about the last patch unconditionally, because Surface.revising returns the last artefact rather than an Option. The two flagships put different questions to the world. Decide which is authoritative and make the other match; interacts with [[acat-q1i]] (re-pointing the example) and the redesign [[acat-k28]] (what the surface says about the exhausted arm).
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 75,
+    "issue_id": "acat-nhz",
+    "author": "johnw",
+    "text": "Implementation note (round eleven): the validation round's prompt fix — dropping 'then reply DONE.' from the apply prompt, since nothing verifies the token — cannot land in example/harden.wf alone: the four trace-agreement theorems pin the flagship's prompts byte-for-byte to Harden.demo's applyText (Core/HardenPatch.lean:160). The redesigned harden.wf keeps the phrase for now; when this issue's divergence question is settled, edit applyText on the Harden side and the example together.",
+    "created_at": "2026-08-15T06:04:33Z"
+  }
+]
+#+end_src
 
 * TODO [#D] msSmul semimodule laws, so panels compose with gating
 :PROPERTIES:
@@ -1689,7 +1746,7 @@ Owner, 2026-08-12, after four rounds of example feedback: 'I feel like you haven
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 19:00]
-:MODIFIED: [2026-08-14 Fri 19:00]
+:MODIFIED: [2026-08-14 Fri 23:23]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -1697,6 +1754,20 @@ Owner, 2026-08-12, after four rounds of example feedback: 'I feel like you haven
 :END:
 
 ponytail pass, corroborated by dead-code. (1) RawBlock.bounded / checkBlock_bounded / check_bounded / revisionBounds_le_of_bounded (~105 lines, Check.lean:358-547, Explain.lean:349-377) have no consumer — only prose mentions. (2) checkAskAt duplicates checkRhsAt and checkMembers' Code parameter has one call-site value (Check.lean:216-268). (3) Prompt.normalize is provably identity on the parser path (lexer cannot emit empty literals) — its stated reason cannot happen. (4) parseAndCheckRaw + parseAndCheckRaw_eq_with_nil + parseAndCheckRaw_level_le + parse_eq_parseWith_nil are unused (CLI uses the With forms; dead-code pass confirms with two signals). (5) expectKw/expectKwSaying are one function twice. (6) check's (G, S) parameters take exactly one value everywhere. (7) CheckError.render aliases toString; isIdentCont is Char.isAlphanum || '_'. (8) Plan.size_eq_askNodes_succ and under_ask1/under_askC1 are applied by nothing. (9) The cost report prints one multiset three ways (Explain.lean:509-512). (10) The askShape/closed-open dispatch body is written three times (Check.lean:206,277,377) and the act arm re-inlines askShape by hand. (11) act itself duplicates the ask-for-ack path (abstraction pass): parse it as sugar for a bind+empty and drop RawBlock.act with its four proof cases. (12) ask..for ack is a legal production nothing can consume — refuse it with proposal B's message. (13) parseBracedRhs braces are speculation for a relaxation that has not happened. Several items may be mooted by the redesign [[acat-k28]] — check before fixing individually.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 78,
+    "issue_id": "acat-o5o",
+    "author": "johnw",
+    "text": "Implementation (round eleven): the bounded proof chain, checkAskAt/checkMembers code parameter, the act mechanism (now sugar: a statement ask is bind-and-discard through one path), and the ask-for-ack production are all gone with the rewrite; parseAndCheckRaw/its rfl theorems and Prompt.normalize survive in Explain and are still candidates. NEW small finding: a bound ask may be annotated \": receipt\", binding a name nothing can consume — worth a refusal.",
+    "created_at": "2026-08-15T06:23:06Z"
+  }
+]
+#+end_src
 
 * DONE [#C] Ground-up re-derivation of the specification: derive from meaning, do not inherit from agent-functor
 :PROPERTIES:
@@ -2221,7 +2292,7 @@ Grounded by 3-agent recon 2026-08-12 (pi-claude-bridge source, incite entry poin
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 19:00]
-:MODIFIED: [2026-08-14 Fri 19:00]
+:MODIFIED: [2026-08-14 Fri 23:23]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -2229,6 +2300,20 @@ Grounded by 3-agent recon 2026-08-12 (pi-claude-bridge source, incite entry poin
 :END:
 
 From the 2026-08-14 heavy review (7 passes; sources: deep-review, alexey, validated[P1, single-model], comments). (1) CAPTURE: expand (Parse.lean:254-260) rewrites .interp x whenever a define matches, before any scope exists; let/given binder names are never compared against defs, so `define patch = ...` silently turns every later {patch} into constant text. Because the prompt becomes closed, checkAsk emits Plan.askC instead of Plan.ask — the node silently moves from pipeline to batch, revision loops stop transmitting the artefact, and nothing diagnoses it. (2) DUP: parseDefines appends (Parse.lean:506) but expand finds first (Parse.lean:258), so a repeated define is silently first-wins. (3) FORWARD REF: bodies are expanded once against earlier macros only (Parse.lean:503-506), so `define a = "{b}"` before `define b` degrades into an unbound-name error at the wrong position. (4) BUDGET: eager define-on-define expansion is exponential (2^N chunks) with no output budget (validated P1). (5) OVERRIDES: parseWith overrides skip expand/normalize (Parse.lean:503-505), contradicting the docstring's 'nothing downstream can tell an overridden program from one written that way'. (6) parseDefines fuel-zero returns .ok (Parse.lean:496) where every sibling fuel-zero branch errors — contradicts Parse.lean:24-26 and DslFlagship.lean:422-424. Fixes: refuse define/binder collisions, duplicate defines, and unexpanded forward refs with CheckErrors; budget expansion; run overrides through the same pipeline; make the fuel branch error. NOTE: the surface-level cure (visibly distinct macro syntax vs answer splice) belongs to the redesign [[acat-k28]].
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 76,
+    "issue_id": "acat-ulu",
+    "author": "johnw",
+    "text": "Implementation (round eleven): capture is now unwritable ({$x} vs {x} with collision refusals), duplicates and forward references are refused, define bodies must expand to literals, and a binder may not spell a define — all pinned in DslSmoke. REMAINING: the expansion budget. All-literal bodies prevent hole nesting but not text doubling: define d1 = \"{$d0}{$d0}\" still squares the text per layer, so N defines can still materialise 2^N characters at parse time. A cumulative character budget in parseDefines is still owed.",
+    "created_at": "2026-08-15T06:23:06Z"
+  }
+]
+#+end_src
 
 * DONE [#C] Semantic width: a consultations-in-flight fold with peak t <= widthT t
 :PROPERTIES:
@@ -2296,15 +2381,17 @@ Probe P8: w(join)=sup, w(par)=+, w(scale n)=n*max 1 w — Frag is ENat encoded f
 ]
 #+end_src
 
-* TODO [#C] DSL: revise given x, x accepted — artefact silently shadows the objection binder
+* DONE [#C] DSL: revise given x, x accepted — artefact silently shadows the objection binder
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-vq9
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 19:00]
-:MODIFIED: [2026-08-14 Fri 19:00]
+:MODIFIED: [2026-08-14 Fri 23:23]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-14 Fri 23:23]
+:CLOSE_REASON: Fixed structurally by the redesign implementation: the dual revise-binder no longer exists (the review is an ordinary binding; the amend head names the carrier), and the no-shadowing rule refuses re-introduction of any live name.
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -2346,15 +2433,17 @@ deep-review + validated (both medium). Parse.lean:447-451 reads the two idents w
 ]
 #+end_src
 
-* TODO [#D] dsl-guide.html: headline rules false, samples abridged and wrong, decoder claim inverted, ack undocumented
+* DONE [#D] dsl-guide.html: headline rules false, samples abridged and wrong, decoder claim inverted, ack undocumented
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-x8j
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 19:00]
-:MODIFIED: [2026-08-14 Fri 19:00]
+:MODIFIED: [2026-08-14 Fri 23:23]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-14 Fri 23:23]
+:CLOSE_REASON: doc/dsl-guide.html rewritten for the approved surface: grammar, inference, holes/blocks, refusal table, real regenerated tool output, guarantees and hazards. The old guide described the deleted grammar.
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0

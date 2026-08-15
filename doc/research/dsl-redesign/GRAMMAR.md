@@ -13,6 +13,21 @@ finite cost tree at level ≤ branch. Question shapes are term-level data; only
 prompt words are computed from earlier answers. Sharing is by binding: asking
 twice is one answer, and deliberate resampling is a distinct draw index.
 
+## Implementation status (round eleven, landed)
+
+The surface below is implemented in `Agentic/Core/Dsl/{Syntax,Parse,Check}.lean`
+as of the commit that carries this note, with every smoke green and all nine
+flagship kernel proofs recomputed (the module now elaborates in ~107 s, down
+from five-six minutes). Four deliberate v1 deltas against this document, each
+tracked: the consuming `case` of a revising result must be the **next**
+statement (the spec's "later in the same block" is a relaxation for the day a
+workflow needs it); branchings are terminal in their block (statements after a
+branch would need the graft-through-case elaboration — same day); the panel
+menu ships entry one only (`at least n must approve` is acat-f10); and a
+*bound* ask may still be annotated `: receipt`, which binds a name nothing can
+consume — a refusal to add. Kind inference is first-ground-use with the
+ground-free refusal, exactly as §rules-4 states.
+
 ## Grammar
 
 Braces delimit; indentation means nothing. Comments run `--` to end of line.

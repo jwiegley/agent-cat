@@ -12,32 +12,24 @@ state or prove any of them.
 
 ## What this module costs, and why it is worth paying
 
-**This module takes on the order of five minutes of wall clock to elaborate, and
-several gigabytes of memory.** Almost all of it is nineteen `decide +kernel`
-proofs, four of them at `maxRecDepth 1000000`. That is not accidental
-expense and it is not a proof-engineering failure: it is the price of the
-statements being true *by computation* rather than by assertion. `level
-flagshipPlan = Level.branch`, `Multiset.card … .leaves = 9`, `minFold = 5`,
-`maxFold = 15` and the four `Plan.trace … flagshipPlan = Plan.trace …
-Harden.demo` equations are not proved by a general argument about programs of
-this shape; they are proved by the kernel running the checker, the cost
-algebra, and the interpreter on this concrete program in these concrete worlds,
-and reporting the answer. A cheaper proof would be a weaker one — it would say
-something about a class of programs, and the point here is the specific claim
-that the DSL program and the hand-written flagship consult exactly the same
-questions in exactly the same order, including on `ωEcho`, the longest path the
-workload has. Nothing about the flagship is asserted; it is all computed, and
-computation costs what it costs.
+**This module takes minutes of wall clock to elaborate, and several gigabytes
+of memory.** Almost all of it is nine `decide +kernel` proofs, four of them at
+`maxRecDepth 1000000`. That is not accidental expense and it is not a
+proof-engineering failure: it is the price of the statements being true *by
+computation* rather than by assertion. `level flagshipPlan = Level.branch`,
+`Multiset.card … .leaves = 9`, `minFold = 5`, `maxFold = 15` and the four
+`Plan.trace … flagshipPlan = Plan.trace … Harden.demo` equations are proved by
+the kernel running the checker, the cost algebra, and the interpreter on this
+concrete program in these concrete worlds, and reporting the answer — including
+on `ωEcho`, the longest path the workload has.
 
 **What the split buys.** Because this module is separate, that cost is paid only
 by the things that actually want the flagship: `test/DslSmoke.lean`,
-`test/CliSmoke.lean` and the `Agentic` aggregate. The three executables
-(`agent-cat`, `workflow_mcp`, `harden_demo`) reach `Dsl.parseAndCheck_level_le`
-through `Agentic/Core/Dsl.lean` and never import this file, so `lake exe
-agent-cat` builds in seconds and editing `example/harden.wf` does not invalidate
-it. Keep it that way: if a binary comes to need something proved here, prefer
-moving the *statement* it needs into the cheap half over importing this module
-into the binary's path.
+`test/CliSmoke.lean`, `test/McpSmoke.lean` and the `Agentic` aggregate. The
+three executables (`agent-cat`, `workflow_mcp`, `harden_demo`) reach
+`Dsl.parseAndCheck_level_le` through `Agentic/Core/Dsl.lean` and never import
+this file, so `lake exe agent-cat` builds in seconds and editing
+`example/harden.wf` does not invalidate it. Keep it that way.
 
 ## What is here
 
@@ -50,14 +42,7 @@ into the binary's path.
   (`card_leaves_flagship`, `minFold_flagship`, `maxFold_flagship`), the four
   transcript agreements, the four bills transferred rather than recomputed, and
   the budget type the program inhabits at fifteen (`flagshipUpTo`).
-* The section "What is not proved" at the foot, which states three claims a
-  reader might expect and the measurement or missing lemma that stops each,
-  rather than weakening them into something that closes.
-
-The `DecidableEq Event` instance that makes the four transcript agreements a
-`decide` at all is deliberately *not* here: it lives in `Agentic/Core/Dsl.lean`,
-because `Mcp.reportJson` decides an equality of transcripts too and must not
-have to import this module to do it.
+* The section "What is not proved" at the foot.
 -/
 
 namespace Agentic.Core.Dsl
@@ -66,9 +51,9 @@ open Agentic.Core
 
 /-! ## `Verdict.render` is `Harden.render`
 
-The DSL needed a renderer for the `why` binder and the frozen flagship module
-already had one. They are the same function, so the language introduces no
-second convention about what a verdict says. -/
+The DSL needed a renderer for the `{v.reasons}` hole and the frozen flagship
+module already had one. They are the same function, so the language introduces
+no second convention about what a verdict says. -/
 
 /-- The two spellings are one function, by `rfl`. -/
 theorem render_eq_harden_render (v : Verdict) : Verdict.render v = Harden.render v := rfl
@@ -76,114 +61,148 @@ theorem render_eq_harden_render (v : Verdict) : Verdict.render v = Harden.render
 /-! ## The flagship, in the language
 
 `Harden.demo` — read the house style guide, draft under the deep model, review
-and revise up to twice, ask the owner, apply if and only if the owner
-consented — written in the concrete syntax. Compare
-`Agentic/Core/HardenPatch.lean`: twelve lines of authoring surface there,
-forty of a language here, and the same dialogue at the end of both. -/
+and amend up to twice, ask the owner, apply if and only if the owner
+consented — written in the concrete syntax approved in round ten of the
+redesign (doc/research/dsl-redesign/). -/
 
 /-- `[[flagshipSource]]` = the owner's workflow, in the DSL — **the file
 `example/harden.wf`**, included here rather than copied.
 
 One text in one place, and the place is the file: `agent-cat run
 example/harden.wf` and every theorem below are about the same characters, so
-there is no second copy to drift. `include_str` elaborates to a string literal,
-exactly as the `r##"…"##` it replaced did, so nothing about the kernel
-reductions the proofs below perform changes — and nothing about them touches this
-constant anyway, which is the point of `flagshipRaw` being written out (see its
-docstring for the measurement that forces that).
+there is no second copy to drift.
 
 **What the inclusion cannot do, and where that is caught.** Lake's build trace
 records the module's imports and its own source, not the files a term elaborator
 reads, so editing `example/harden.wf` alone does not rebuild this module: the
 `.olean` would then hold a text that is no longer on disk. `test/CliSmoke.lean`
-reads the file at run time and compares it with this constant, which is the check
-the inclusion cannot arrange for itself. The file begins with a newline because
-this literal did, and `flagshipRaw`'s positions count lines from it. -/
+reads the file at run time and compares it with this constant, which is the
+check the inclusion cannot arrange for itself. -/
 def flagshipSource : String := include_str "../../example/harden.wf"
 
 /-- `[[flagshipRaw]]` = the raw syntax of `flagshipSource`: the same workflow
-after lexing, macro expansion and parsing.
+after lexing, block dedenting, define expansion and parsing.
 
 **Written out rather than computed, and the reason is a measurement.** Kernel
-reduction of the lexer is quadratic in the character count — 189 characters
-reduce in 2s, 369 in 6s, 729 in 20s and this source's 1400 in 211s — so a
-theorem stated about `parseAndCheck flagshipSource` would have to run the lexer
-in the kernel, and `native_decide` is forbidden here because it would put
-`Lean.ofReduceBool` into the axiom set `Agentic/Core/Certify.lean` pins. So the
-*checker* is exercised in the kernel, where it is cheap, and the *parser* is
-exercised at runtime, in `test/DslSmoke.lean`, which checks
+reduction of the lexer is quadratic in the character count, so a theorem stated
+about `parseAndCheck flagshipSource` would have to run the lexer in the kernel,
+and `native_decide` is forbidden here because it would put `Lean.ofReduceBool`
+into the axiom set `Agentic/Core/Certify.lean` pins. So the *checker* is
+exercised in the kernel, where it is cheap, and the *parser* is exercised at
+runtime, in `test/DslSmoke.lean`, which checks
 `parse flagshipSource = .ok flagshipRaw` by `decide` on a `DecidableEq` of
-first-order data. `parseAndCheck_flagship` below is the theorem that joins
-the two, with that check as its hypothesis. -/
+first-order data. This constant was generated by that very parser and then
+frozen, so a drift between the file and this term fails that check and nothing
+else — which is exactly where it should fail. -/
 def flagshipRaw : Raw :=
-  RawBlock.bind "guide"
-    (RawRhs.ask
-      { model := none, code := Code.text,
-        target := { addressee := Addressee.tool "cat", draw := 0 },
-        prompt := [Chunk.lit "Write out the house style guide, at most four short lines."],
-        pos := { line := 7, col := 15 } })
-    (RawBlock.bind "draft"
+  RawBlock.bind
+    "guide"
+    none
+    (RawSource.rhs
       (RawRhs.ask
-        { model := some "deep", code := Code.text,
-          target := { addressee := Addressee.model "author", draw := 0 },
-          prompt := [Chunk.lit "Draft a patch satisfying:\n", Chunk.lit "harden the parser",
-            Chunk.lit "\nReply with a unified diff only."],
-          pos := { line := 10, col := 15 } })
-      (RawBlock.revising "draft" 2 "patch"
-        (RawRhs.panel
-          [{ model := none, code := Code.verdict,
-             target := { addressee := Addressee.model "reviewer-correct", draw := 0 },
-             prompt := [Chunk.interp "guide", Chunk.lit "\nIs this patch correct?\n",
-               Chunk.interp "patch", Chunk.lit "\n", Chunk.lit
-                 "Reply with exactly APPROVE if acceptable, or OBJECTION: <one line> if not."],
-             pos := { line := 16, col := 9 } },
-           { model := none, code := Code.verdict,
-             target := { addressee := Addressee.model "reviewer-secure", draw := 0 },
-             prompt := [Chunk.interp "guide", Chunk.lit "\nIs this patch secure?\n",
-               Chunk.interp "patch", Chunk.lit "\n", Chunk.lit
-                 "Reply with exactly APPROVE if acceptable, or OBJECTION: <one line> if not."],
-             pos := { line := 18, col := 9 } },
-           { model := none, code := Code.verdict,
-             target := { addressee := Addressee.model "reviewer-simple", draw := 0 },
-             prompt := [Chunk.lit "Could this patch be simpler?\n", Chunk.interp "patch",
-               Chunk.lit "\n", Chunk.lit
-                 "Reply with exactly APPROVE if acceptable, or OBJECTION: <one line> if not."],
-             pos := { line := 20, col := 9 } }]
-          { line := 15, col := 7 })
-        "patch" "why"
+        { model := none,
+          target := { addressee := Addressee.tool "cat", draw := 0 },
+          prompt := [Chunk.lit "Write out the house style guide, at most four short lines."],
+          pos := { line := 7, col := 12 } }))
+    (RawBlock.bind
+      "draft"
+      none
+      (RawSource.rhs
         (RawRhs.ask
-          { model := some "deep", code := Code.text,
+          { model := some "deep",
             target := { addressee := Addressee.model "author", draw := 0 },
-            prompt := [Chunk.interp "guide", Chunk.lit "\nRevise this patch:\n",
-              Chunk.interp "patch", Chunk.lit "\n", Chunk.interp "why",
-              Chunk.lit "\nReply with the revised diff only."],
-            pos := { line := 26, col := 7 } })
-        "patch"
-        (RawBlock.bind "ok"
+            prompt := [Chunk.lit "Draft a patch satisfying:\n",
+                       Chunk.lit "harden the parser",
+                       Chunk.lit "\nReply with a unified diff only."],
+            pos := { line := 10, col := 12 } }))
+      (RawBlock.bind
+        "result"
+        none
+        (RawSource.revising
+          "draft"
+          "patch"
+          2
+          "verdict"
+          none
+          (RawRhs.panel
+            [{ model := none,
+               target := { addressee := Addressee.model "reviewer-correct", draw := 0 },
+               prompt := [Chunk.interp "guide",
+                          Chunk.lit "\nIs this patch correct?\n",
+                          Chunk.interp "patch",
+                          Chunk.lit "\n",
+                          Chunk.lit
+                            "Reply with exactly APPROVE if acceptable, or OBJECTION: <one line> if not."],
+               pos := { line := 19, col := 7 } },
+             { model := none,
+               target := { addressee := Addressee.model "reviewer-secure", draw := 0 },
+               prompt := [Chunk.interp "guide",
+                          Chunk.lit "\nIs this patch secure?\n",
+                          Chunk.interp "patch",
+                          Chunk.lit "\n",
+                          Chunk.lit
+                            "Reply with exactly APPROVE if acceptable, or OBJECTION: <one line> if not."],
+               pos := { line := 25, col := 7 } },
+             { model := none,
+               target := { addressee := Addressee.model "reviewer-simple", draw := 0 },
+               prompt := [Chunk.lit "Could this patch be simpler?\n",
+                          Chunk.interp "patch",
+                          Chunk.lit "\n",
+                          Chunk.lit
+                            "Reply with exactly APPROVE if acceptable, or OBJECTION: <one line> if not."],
+               pos := { line := 31, col := 7 } }]
+            { line := 18, col := 16 })
           (RawRhs.ask
-            { model := none, code := Code.flag,
-              target := { addressee := Addressee.person "owner", draw := 0 },
-              prompt := [Chunk.lit "Apply this patch?\n", Chunk.interp "patch",
-                Chunk.lit "\n", Chunk.lit "Reply with exactly yes or no."],
-              pos := { line := 32, col := 14 } })
-          (RawBlock.ifFlag "ok"
-            (RawBlock.act { addressee := Addressee.tool "apply", draw := 0 }
-              [Chunk.lit "Apply:\n", Chunk.interp "patch",
-               Chunk.lit "\nWrite the patched file here, then reply DONE."]
-              { line := 36, col := 7 })
-            (RawBlock.empty { line := 38, col := 12 })
-            { line := 35, col := 5 })
-          { line := 32, col := 5 })
-        (RawBlock.empty { line := 41, col := 18 })
-        { line := 13, col := 3 })
+            { model := some "deep",
+              target := { addressee := Addressee.model "author", draw := 0 },
+              prompt := [Chunk.interp "guide",
+                         Chunk.lit "\nRevise this patch:\n",
+                         Chunk.interp "patch",
+                         Chunk.lit "\n",
+                         Chunk.interp "verdict.reasons",
+                         Chunk.lit "\nReply with the revised diff only."],
+              pos := { line := 39, col := 7 } })
+          { line := 16, col := 13 })
+        (RawBlock.caseResult
+          "result"
+          "patch"
+          (RawBlock.bind
+            "ok"
+            none
+            (RawSource.rhs
+              (RawRhs.ask
+                { model := none,
+                  target := { addressee := Addressee.person "owner", draw := 0 },
+                  prompt := [Chunk.lit "Apply this patch?\n",
+                             Chunk.interp "patch",
+                             Chunk.lit "\n",
+                             Chunk.lit "Reply with exactly yes or no."],
+                  pos := { line := 52, col := 13 } }))
+            (RawBlock.ifFlag
+              "ok"
+              (RawBlock.act
+                { model := none,
+                  target := { addressee := Addressee.tool "apply", draw := 0 },
+                  prompt := [Chunk.lit "Apply:\n",
+                             Chunk.interp "patch",
+                             Chunk.lit "\nWrite the patched file here, then reply DONE."],
+                  pos := { line := 59, col := 9 } }
+                (RawBlock.empty { line := 58, col := 13 })
+                { line := 59, col := 9 })
+              (RawBlock.empty { line := 64, col := 16 })
+              { line := 58, col := 7 })
+            { line := 52, col := 7 })
+          (RawBlock.empty { line := 67, col := 17 })
+          { line := 49, col := 3 })
+        { line := 16, col := 3 })
       { line := 10, col := 3 })
     { line := 7, col := 3 }
 
 /-- `[[flagshipPlan]]` = the plan `flagshipRaw` checks to.
 
-The `.error` branch is unreachable — `check_flagshipRaw` below says so, by
-`rfl` — and is written as the trivial workflow rather than as a `panic!`
-because a `Plan [] Unit` is what the type promises and one exists. -/
+The `.error` branch is unreachable — `check_flagshipRaw` below says so — and is
+written as the trivial workflow rather than as a `panic!` because a
+`Plan [] Unit` is what the type promises and one exists. -/
 def flagshipPlan : Plan [] Unit :=
   match check [] [] flagshipRaw with
   | .ok p => p
@@ -193,14 +212,13 @@ def flagshipPlan : Plan [] Unit :=
 
 A `Bool` and not a `Prop`, because the fact that the flagship checks is
 established by kernel reduction and `decide` on a `Bool` needs only the *head*
-constructor of the result. Asking for `check … = .ok flagshipPlan` directly
-instead makes the kernel compare two normal forms of the whole plan, which was
-measured at 211 seconds against the two below. -/
+constructor of the result. -/
 def accepted {ε : Type} {α : Type 1} (x : Except ε α) : Bool :=
   match x with
   | .ok _ => true
   | .error _ => false
 
+set_option maxRecDepth 20000 in
 /-- **The flagship checks.** By kernel reduction of the checker on
 `flagshipRaw`; nothing about the parser is involved. -/
 theorem flagshipRaw_accepted : accepted (check [] [] flagshipRaw) = true := by decide +kernel
@@ -222,8 +240,7 @@ parser reads as `r` checks exactly as `r` does.
 
 Stated generally on purpose. Instantiating it at `flagshipSource` inside a
 tactic proof makes the elaborator whnf `parseAndCheckE flagshipSource`, which
-runs the lexer in the kernel and costs the 211 seconds `flagshipRaw`'s docstring
-measures; applied as a lemma it costs nothing. -/
+runs the lexer in the kernel; applied as a lemma it costs nothing. -/
 theorem parseAndCheck_of_parse {s : String} {r : Raw} {p : Plan [] Unit}
     (h : parse s = .ok r) (hc : check [] [] r = .ok p) : parseAndCheck s = .ok p := by
   rw [parseAndCheck_ok_iff]
@@ -244,8 +261,9 @@ theorem parseAndCheck_flagship (h : parse flagshipSource = .ok flagshipRaw) :
 set_option maxRecDepth 20000 in
 /-- **The rung, exactly.** `level flagshipPlan = branch`, computed rather than
 bounded: `parseAndCheck_level_le` gives `≤ branch` for every program, and this
-says the flagship attains it — the consent gate is a `case`, so it is not
-`pipeline`, and nothing is a `dyn`, so it is not `dynamic`. -/
+says the flagship attains it — the consent gate and the loop's outcome are
+`case`s, so it is not `pipeline`, and nothing is a `dyn`, so it is not
+`dynamic`. -/
 theorem level_flagshipPlan : level flagshipPlan = Level.branch := by decide +kernel
 
 /-- …hence the C3 cost theorems apply to it, which is what `Cost.costTree` asks
@@ -263,8 +281,8 @@ theorem card_leaves_flagship :
 
 set_option maxRecDepth 20000 in
 /-- **The cheapest leaf is 5 consultations**, and no world pays it —
-`Harden.minFold_not_attained_demo` again, transported by
-`trace_flagshipPlan`. -/
+`Harden.minFold_not_attained_demo` again, transported by the trace
+agreements. -/
 theorem minFold_flagship :
     (costTree tick flagshipPlan level_flagshipPlan_le Env.nil).minFold
       = ((Multiplicative.ofAdd 5 : Multiplicative Nat) : WithTop (Multiplicative Nat)) := by
@@ -277,11 +295,6 @@ theorem maxFold_flagship :
       = ((Multiplicative.ofAdd 15 : Multiplicative Nat) : WithBot (Multiplicative Nat)) := by
   decide +kernel
 
-/-! ### The flagship elaborates to the hand-written flagship
-
-One equation, and everything `Agentic/Core/HardenPatch.lean` proves passes
-through it. -/
-
 /-! ### The flagship elaborates to the hand-written flagship, world by world
 
 `Agentic/Core/HardenPatch.lean` fixes four worlds and prices the workload in
@@ -292,9 +305,10 @@ dearest leaf, so the agreement is checked on the longest path the workload has
 and not only on the short ones.
 
 That the prompts agree is where the left-associated `Prompt.expr` earns its
-keep: `Harden.correctText` writes `guide ++ … ++ patch ++ "\n" ++ verdictSpec`,
-and the elaborated prompt is that `++`-chain on the nose, so the four equations
-are computations rather than proofs about `String.append_assoc`.
+keep — the elaborated prompts are `Harden`'s `++`-chains on the nose — and
+where the `{verdict.reasons}` hole earns its place: it elaborates to the same
+`Verdict.render ∘ ·` expression the old surface installed at the binder, so
+moving the renderer to the use site moved no term.
 
 The **universally quantified** form is not proved; see the "not proved" section
 below. -/
@@ -313,7 +327,7 @@ theorem trace_flagship_apply :
 
 set_option maxRecDepth 1000000 in
 /-- …and the one in which the panel never approves, so the loop exhausts its two
-revisions and the owner is never troubled. -/
+amendments and the owner is never troubled. -/
 theorem trace_flagship_stubborn :
     Plan.trace Harden.ωStubborn flagshipPlan Env.nil
       = Plan.trace Harden.ωStubborn Harden.demo Env.nil := by decide +kernel
@@ -325,11 +339,7 @@ theorem trace_flagship_echo :
     Plan.trace Harden.ωEcho flagshipPlan Env.nil
       = Plan.trace Harden.ωEcho Harden.demo Env.nil := by decide +kernel
 
-/-! ### …hence the bills, transferred rather than recomputed
-
-Each is `Harden`'s theorem with the trace rewritten. Nothing is recomputed and
-nothing is restated: the DSL program is billed by the theorems that price the
-hand-written one. -/
+/-! ### …hence the bills, transferred rather than recomputed -/
 
 /-- Six consultations when the owner refuses (`Harden.bill_refuse_demo`). -/
 theorem bill_flagship_refuse :
@@ -363,15 +373,13 @@ reason. -/
 def flagshipUpTo : PlanUpTo tick (Multiplicative.ofAdd 15 : Multiplicative Nat) Unit :=
   ⟨flagshipPlan, level_flagshipPlan_le, le_of_eq maxFold_flagship⟩
 
-/-- …so every world bills at most fifteen consultations, and this one is
-universally quantified because `PlanUpTo.bill_le` is. -/
+/-- …so every world bills at most fifteen consultations. -/
 theorem flagship_bill_le (ω : Ω) :
     billFresh tick (Plan.trace ω flagshipPlan Env.nil) ≤ Multiplicative.ofAdd 15 :=
   PlanUpTo.bill_le Harden.tick_pricesByShape flagshipUpTo ω
 
 /-- …and at least the cheapest achievable one: `minFold_flagship` is `5`, and no
-world attains it, exactly as on the hand-written flagship
-(`Harden.minFold_not_attained_demo`). -/
+world attains it, exactly as on the hand-written flagship. -/
 theorem minFold_flagship_le_bill (ω : Ω) :
     (costTree tick flagshipPlan level_flagshipPlan_le Env.nil).minFold
       ≤ ((billFresh tick (Plan.trace ω flagshipPlan Env.nil) : Multiplicative Nat) :
@@ -382,46 +390,32 @@ theorem minFold_flagship_le_bill (ω : Ω) :
 /-! ## What is not proved
 
 Three statements a reader might expect, and what actually stands in the way of
-each. None of them is weakened into a form that closes; each is stated here in
-the form it would have to take.
+each. None of them is weakened into a form that closes.
 
 **1. `parse flagshipSource = .ok flagshipRaw`.** True, and checked — at run
 time, in `test/DslSmoke.lean`, on `DecidableEq Raw`. It is not a *theorem*
-because kernel reduction of the lexer is quadratic in the character count,
-measured at 189 characters in 2s, 369 in 6s, 729 in 20s and this source's 1400
-in 211s; the cost is `brecOn`'s course-of-values structure, which a fuelled or
-list-structural recursion pays alike, and a trivial fuelled character counter
-shows the same curve (700 characters 18s, 1400 characters 80s). `native_decide`
-closes it in milliseconds and is forbidden: it puts `Lean.ofReduceBool` into
-the axiom set, and `Agentic/Core/Certify.lean` pins `certify_sound` at *no*
-axioms with a `#guard_msgs`. `parseAndCheck_flagship` therefore takes the
-equation as a hypothesis, which is the honest shape: everything downstream of
-the parser is proved, and the parser itself is tested.
+because kernel reduction of the lexer is quadratic in the character count;
+`native_decide` closes it in milliseconds and is forbidden, because it puts
+`Lean.ofReduceBool` into the axiom set, and `Agentic/Core/Certify.lean` pins
+`certify_sound` at *no* axioms with a `#guard_msgs`.
+`parseAndCheck_flagship` therefore takes the equation as a hypothesis, which is
+the honest shape: everything downstream of the parser is proved, and the parser
+itself is tested.
 
 **2. `∀ ω, Plan.trace ω flagshipPlan Env.nil = Plan.trace ω Harden.demo Env.nil`.**
-The four named worlds are proved above, `ωEcho` among them, which is the
-world that drives the workload to its deepest path — so the agreement is
-checked on the longest transcript the workload has. The universally quantified
-form was attempted the direct way, by `denote flagshipPlan Env.nil =
-denote Harden.demo Env.nil := rfl`; the elaborator worked for 54 seconds and
-reported the two sides not definitionally equal, so there is a real syntactic
-difference that no named world observes. Closing it needs the `Plan.Denotes`
-route rather than reduction: general coherence lemmas for `checkCont`,
-`reviseCont` and `finishCont` (each one line from `denote_sub`), then
+The four named worlds are proved above, `ωEcho` among them. The universally
+quantified form needs the `Plan.Denotes` route rather than reduction — general
+coherence lemmas for `checkCont`, `reviseCont` and `finishCont`, then
 `denotes_revising` and `denote_graft`, then a per-clause agreement with
-`Harden.Kreview`, `Harden.Kredraft` and `Harden.finishD` — which is
-`Agentic/Core/HardenPatch.lean`'s own five-theorem argument, repeated against
-the checker's output. It needs that output *named*, and naming it means writing
-out by hand the plan the checker builds; that is the work not done here.
+`Harden`'s own continuations — and it needs the checker's output *named*, which
+means writing out by hand the plan the checker builds; that is the work not
+done here.
 
 **3. The lexer's and parser's budgets are never exhausted.** Both recurse on a
 `Nat` budget seeded with the input's length, and every step consumes at least
 one item, so the exhausted branch is unreachable — a fact about the code that is
-not proved. It could be: the parser's steps consume tokens and the lexer's
-consume characters, and the invariant is an ordinary induction. It is not proved
-because a proof of it buys nothing that the diagnosis in that branch does not
-already give — the branch returns a `CheckError` like every other failure rather
-than a `panic!`, so an exhausted budget is a rejected program, not an unsound
+not proved, because a proof of it buys nothing that the diagnosis in that branch
+does not already give: an exhausted budget is a rejected program, not an unsound
 one. -/
 
 end Agentic.Core.Dsl

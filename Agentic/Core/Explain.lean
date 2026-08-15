@@ -297,7 +297,7 @@ theorem parseAndCheckRawWith_level_le (ov : List (String × Prompt)) (s : String
     · simp only [Except.ok.injEq, Prod.mk.injEq] at h
       obtain ⟨rfl, rfl⟩ := h
       rename_i hc
-      exact checkBlock_level_le _ [] [] _ hc
+      exact checkBlock_level_le _ [] [] none trivial _ hc
 
 /-- **One front end.** Forgetting the raw syntax gives `parseAndCheckE` back on the
 nose — the same plan on success and the same `CheckError` on failure — so a tool
@@ -327,54 +327,22 @@ theorem parseAndCheckRaw_level_le (s : String) (r : Raw) (p : Plan [] Unit)
 
 /-! ### The one thing the term does not hold -/
 
-/-- `[[b.revisionBounds]]` = every `revising … up to n revisions` written in
+/-- `[[b.revisionBounds]]` = every `revising … at most n amendments` written in
 `b`, with where it is written.
 
-First-order in the syntax, like `RawBlock.bounded`, and for the same reason: a
-`RawRhs` has no block inside it, so the recursion is `RawBlock`'s own. -/
+First-order in the syntax: a `RawRhs` has no block inside it, so the recursion
+is `RawBlock`'s own, with one step into a binding's source. The bound printed
+is one the checker allowed, because `checkBlock` refuses any numeral above
+`maxRevisions` before it elaborates anything. -/
 def RawBlock.revisionBounds : RawBlock → List (Pos × Nat)
   | .empty _ => []
-  | .act _ _ _ => []
-  | .bind _ _ rest _ => rest.revisionBounds
+  | .knownHere _ rest _ => rest.revisionBounds
+  | .act _ rest _ => rest.revisionBounds
+  | .bind _ _ (.rhs _) rest _ => rest.revisionBounds
+  | .bind _ _ (.revising _ _ n _ _ _ _ rpos) rest _ => (rpos, n) :: rest.revisionBounds
   | .ifFlag _ y n _ => y.revisionBounds ++ n.revisionBounds
   | .caseVerdict _ a o d _ => a.revisionBounds ++ o.revisionBounds ++ d.revisionBounds
-  | .revising _ n _ _ _ _ _ _ acc exh pos =>
-      (pos, n) :: (acc.revisionBounds ++ exh.revisionBounds)
-
-/-- **Every bound a report prints is a bound the checker allowed.**
-`RawBlock.bounded` is the predicate `checkBlock_bounded` proves of everything the
-checker accepts; this says the numerals `revisionLines` prints are exactly the
-ones that predicate is about, so `up to n revisions` beside a plan is an `n` no
-larger than `maxRevisions`. -/
-theorem revisionBounds_le_of_bounded :
-    ∀ (b : RawBlock), b.bounded = true → ∀ x ∈ b.revisionBounds, x.2 ≤ maxRevisions := by
-  intro b
-  induction b with
-  | empty pos => intro _ x hx; exact absurd hx (by simp [RawBlock.revisionBounds])
-  | act t pr pos => intro _ x hx; exact absurd hx (by simp [RawBlock.revisionBounds])
-  | bind x rhs rest pos ih => intro hb; exact ih hb
-  | ifFlag x y n pos ihy ihn =>
-    intro hb z hz
-    rw [RawBlock.bounded, Bool.and_eq_true] at hb
-    rcases List.mem_append.mp hz with h | h
-    · exact ihy hb.1 z h
-    · exact ihn hb.2 z h
-  | caseVerdict x a o d pos iha iho ihd =>
-    intro hb z hz
-    rw [RawBlock.bounded, Bool.and_eq_true, Bool.and_eq_true] at hb
-    rcases List.mem_append.mp hz with h | h
-    · rcases List.mem_append.mp h with h' | h'
-      · exact iha hb.1.1 z h'
-      · exact iho hb.1.2 z h'
-    · exact ihd hb.2 z h
-  | revising subj n cv chk av wv rev pv acc exh pos iha ihe =>
-    intro hb z hz
-    rw [RawBlock.bounded, Bool.and_eq_true, Bool.and_eq_true, decide_eq_true_eq] at hb
-    rcases List.mem_cons.mp hz with rfl | h
-    · exact hb.1.1
-    · rcases List.mem_append.mp h with h' | h'
-      · exact iha hb.1.2 z h'
-      · exact ihe hb.2 z h'
+  | .caseResult _ _ s u _ => s.revisionBounds ++ u.revisionBounds
 
 end Dsl
 
@@ -394,31 +362,31 @@ def planLines {A : Type} (p : Plan [] A) : List String :=
   , "        `askC` carries its words in the term (a closed question, the batch rung), `ask` \
      computes them from the answers in scope (the pipeline rung);"
   , "        a `case` prints its arms in the enumeration order of its tag type — the `else` \
-     arm then the `if` arm for a flag, `approve` then `object` then `declined` for a verdict;"
+     arm then the `if` arm for a flag, `approved` then `objected` then `no answer` for a \
+     verdict;"
   , "        a bounded revision is not a node: `Plan.revising` is `Nat.rec`, so the term holds \
-     its unrolling and the `up to n revisions` that wrote it is a fact about the source;"
+     its unrolling and the `at most n amendments` that wrote it is a fact about the source;"
   , "        a prompt is shown at a probe environment, which does not know which arm it is \
      inside — an empty splice under an approved arm is `Plan.revising`'s own \
      `(final δ).getD default` at a probe that did not approve, and not a prompt a run puts." ]
     ++ Plan.explain 1 p
 
-/-- `[[revisionLines b]]` = the `revising … up to n revisions` bounds the
+/-- `[[revisionLines b]]` = the `revising … at most n amendments` bounds the
 *source* writes, with what each one buys.
 
 Printed beside a plan rendering, and labelled as coming from the source, because
 the term cannot hold it: by the time there is a plan the numeral has become the
-unrolling. That `up to n revisions` buys `n+1` checks and at most `n` revisions
-is `Plan.revising`'s docstring — check first, revise in the recursive call — and
-that the numeral printed is one the checker allowed is
-`Dsl.revisionBounds_le_of_bounded`. -/
+unrolling. `at most n amendments` buys between one and `n+1` reviews — the loop
+reviews first, and stops the moment a review approves — and at most `n`
+amendments. -/
 def revisionLines (b : Dsl.Raw) : List String :=
   match b.revisionBounds with
   | [] => []
   | bs =>
     "--- bounded revisions, read off the SOURCE text (the term holds the unrolling) ---"
       :: bs.map fun pn =>
-        s!"  line {pn.1.line}, col {pn.1.col}: up to {pn.2} revisions → {pn.2 + 1} checks \
-           and at most {pn.2} revisions, written out into the term"
+        s!"  line {pn.1.line}, col {pn.1.col}: at most {pn.2} amendments → between 1 and \
+           {pn.2 + 1} reviews, at most {pn.2} amendments, written out into the term"
 
 /-- `[[costSummary p h]]` = the cheapest bill, the dearest bill and the number of
 paths, from `Cost.costTree`.

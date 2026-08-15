@@ -147,7 +147,7 @@ def leadIn (firstId : Nat) (runId : String) : List String :=
 /-! ## 1. The handshake, the tool list, and the price of the flagship -/
 
 /-- A source that does not type-check, with a fault the checker can point at. -/
-def brokenSource : String := "workflow {\n  let g = ask tool\n}\n"
+def brokenSource : String := "workflow {\n  g : text <- ask tool\n}\n"
 
 /-- A source that type-checks in the mathematics and not on a machine: the bound
 takes a `Nat`, and `Plan.revising … n` is an unrolling `n` deep, so the numeral
@@ -158,13 +158,12 @@ refusal that replaced it, and the `ping` after it is the part that matters: the
 server is still there. -/
 def hostileSource : String :=
   "workflow {\n" ++
-  "  let d = ask model \"a\" for text \"draft\"\n" ++
-  "  revising d up to 1000000000 revisions {\n" ++
-  "    check given p { ask model \"r\" for verdict \"review {p}\" }\n" ++
-  "    revise given p, why { ask model \"a\" for text \"fix {p} {why}\" }\n" ++
+  "  d : text <- ask model \"a\" \"draft\"\n" ++
+  "  r <- revising d as c, at most 1000000000 amendments {\n" ++
+  "    v <- ask model \"m\" \"review {c}\"\n" ++
+  "    amend c { ask model \"a\" \"fix {c} {v.reasons}\" }\n" ++
   "  }\n" ++
-  "  approved given p { }\n" ++
-  "  never approved { }\n}\n"
+  "  case r { settled x { stop } unsettled { stop } }\n}\n"
 
 def scriptOne : IO Unit := do
   let src := Json.str Dsl.flagshipSource

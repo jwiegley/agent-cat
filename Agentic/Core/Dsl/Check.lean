@@ -14,35 +14,42 @@ check : (Γ : Ctx) → Bindings Γ → Raw → Except CheckError (Plan Γ Unit)
 validate after the fact and no second pass that could disagree with the first:
 on success the checker hands back an inhabitant of `Plan Γ Unit`, which is the
 intrinsically-typed syntax of `Agentic/Core/Plan.lean`, so "the program
-type-checks" and "the program exists" are one proposition. Everything the
-judgment of the design says — that a name is in scope, that it answers the kind
-the construct wants, that a panel's members share a monoid, that a branching is
-total — is discharged *before* a term is built, because there is no term to
-build otherwise. `Agentic/Core/Dsl.lean` says what that does and does not buy.
+type-checks" and "the program exists" are one proposition.
 
-Three points where the elaboration is a decision rather than a transcription.
+Four points where the elaboration is a decision rather than a transcription.
 
 * **A name is a de Bruijn index, computed by the plumbing rather than by hand.**
   `Bindings Γ` maps a source name to a `Code` and an `Expr Γ (El code)`. A
-  `let` bound by an `ask` extends it with `Expr.var .here` in `c :: Γ` and
-  weakens everything already there along `Sub.wk`, so the resolved variable
-  *is* the de Bruijn index and the shifting is `Sub`'s. The three binders that
-  are **not** context entries — `approved given p`, whose value is an
-  `Option (El c)` and so cannot be one (`Ctx = List Code`), and
-  `revise given p, why`, whose `why` is a rendered verdict — are entries of the
-  same table carrying a different `Expr`. One table, no escape hatch.
+  binding extends it with `Expr.var .here` in `c :: Γ` and weakens everything
+  already there along `Sub.wk`, so the resolved variable *is* the de Bruijn
+  index and the shifting is `Sub`'s. The one entry carrying a different `Expr`
+  is a loop's review binding, presented at `Code.verdict` and rendered only
+  where a `{v.reasons}` hole asks for text.
 
-* **`using model` rewrites a shape; it does not wrap a term.** `Plan.under σ` is a
-  fold over a whole plan, so wrapping the continuation of a `let` in it would
-  put the scope on every later question. At a single question the fold is the
-  shape's relabelling and nothing else — `under_ask1` below, which is `rfl` —
-  so that is what is emitted, and the equation says the two agree.
+* **The kind of a binding is inferred from its first ground use.** The language
+  restricts consumption to holes and branchings, so the walk is short and
+  deterministic: a `{x}` hole says `text`, a `{x.reasons}` hole says `verdict`,
+  `if x` says `flag`, a verdict `case` says `verdict`, a panel or a review
+  position says `verdict`, and a `revising` subject shares its carrier's kind.
+  A later use that disagrees is refused by the ordinary kind-mismatch
+  diagnoses, so "the first use fixes the kind" is a reading order, not a
+  loophole; a bound name with *no* ground use is refused with the annotation
+  named, because a question's kind is an observable of the question and must
+  come from somewhere.
+
+* **A bound loop's result is *pending*, not in scope.** `Ctx = List Code` has
+  no code for "settled-or-not", so `x <- revising …` does not extend the
+  context: the checker carries the loop's plan as a pending obligation that
+  the very next statement — `case x { settled p {…} unsettled {…} }` — must
+  consume, and the pair elaborates to one `Plan.graft` whose continuation is
+  the `caseB` the arms write. Any other statement while a result is pending is
+  refused by name.
 
 * **A closed prompt is a closed question.** A prompt that mentions no name has
   its words in the term, so the node emitted is `Plan.askC` and the plan starts
-  at the `batch` rung; one that mentions a name is `Plan.ask`. The syntax
-  therefore decides the rung, which is what makes `level` a fact about the
-  source text.
+  at the `batch` rung; one that mentions a name is `Plan.ask`. Every define
+  hole was expanded by the parser into literal text, so a question is closed
+  exactly when every hole it wrote was a `{$…}` — readable at the question.
 
 No clause emits `Plan.dyn`. That is not an accident of this implementation but
 the point of the language, and `Agentic/Core/Dsl.lean` proves it.
@@ -73,15 +80,11 @@ construct can be told that it was handed the wrong kind of answer. -/
 def Binding.at? {Γ : Ctx} (b : Binding Γ) (c : Code) : Option (Expr Γ (El c)) :=
   if h : b.code = c then some (h ▸ b.val) else none
 
-/-- `[[Bindings.rename σ S]]` = the names of `S`, read in a bigger context.
-This is the weakening every binder performs, and it is `Sub`'s: a context
-morphism is a function on environments, so renaming a table of names is
-precomposition. -/
+/-- `[[Bindings.rename σ S]]` = the names of `S`, read in a bigger context. -/
 def Bindings.rename {Γ Δ : Ctx} (σ : Sub Γ Δ) (S : Bindings Γ) : Bindings Δ :=
   List.map (fun b => (⟨b.name, b.code, fun δ => b.val (σ δ)⟩ : Binding Δ)) S
 
-/-- Innermost-first lookup, so a `let` shadows an outer name of the same
-spelling. -/
+/-- Innermost-first lookup. -/
 def Bindings.find? {Γ : Ctx} (S : Bindings Γ) (x : String) : Option (Binding Γ) :=
   List.find? (fun b => b.name == x) S
 
@@ -101,35 +104,56 @@ private def lookupBinding {Γ : Ctx} (S : Bindings Γ) (pos : Pos) (x : String) 
   | some b => .ok b
   | none => .error (unbound pos x)
 
+/-- **No shadowing.** A live name may not be introduced again; a name whose
+scope has ended may be. The refusal names the collision, so an author who meant
+a new value knows which of the two spellings must move. -/
+private def freshName {Γ : Ctx} (S : Bindings Γ) (pos : Pos) (x : String) :
+    Except CheckError Unit :=
+  match Bindings.find? S x with
+  | some _ => .error ⟨pos, "this name is already in scope, and a live name is \
+                           not introduced twice; rename one of the two", x⟩
+  | none => .ok ()
+
 /-! ## Prompts -/
 
 /-- One chunk, as an expression. Interpolation is defined **only** over
-text-typed names: `El .text = String` and nothing else embeds in a string
-without a choice of renderer, and a language that silently picked one would be a
-language whose prompts are not determined by their source. The one construct
-that appears to break the rule — `revise given patch, why` — does not: `why` is bound
-to `Verdict.render ∘ ·`, so the renderer is written where the binder is. -/
+text-typed names — `El .text = String` and nothing else embeds in a string
+without a choice of renderer. The one renderer the language has is written
+where it is used: `{v.reasons}` is a verdict's objections joined by `"; "`,
+which is `Verdict.render` at the hole. -/
 private def chunkExpr {Γ : Ctx} (S : Bindings Γ) (pos : Pos) :
     Chunk → Except CheckError (Expr Γ String)
   | .lit s => .ok (fun _ => s)
-  | .interp x =>
-    match lookupBinding S pos x with
-    | .error err => .error err
-    | .ok b =>
-    match b.at? .text with
-    | some e => .ok e
-    | none =>
-      .error ⟨pos, s!"only a text answer interpolates into a prompt, \
-                     but `{x}` answers `{codeName b.code}`", x⟩
+  | .interp nm =>
+    if nm.endsWith ".reasons" then
+      let x := String.ofList (nm.toList.take (nm.length - ".reasons".length))
+      match lookupBinding S pos x with
+      | .error err => .error err
+      | .ok b =>
+        match b.at? .verdict with
+        | some e => .ok (fun δ => Verdict.render (e δ))
+        | none =>
+          .error ⟨pos, s!"`.reasons` renders a verdict's objections as text, \
+                         but `{x}` answers `{codeName b.code}`", nm⟩
+    else
+      match lookupBinding S pos nm with
+      | .error err => .error err
+      | .ok b =>
+        match b.at? .text with
+        | some e => .ok e
+        | none =>
+          if b.code = Code.verdict then
+            .error ⟨pos, s!"only a text answer interpolates into a prompt, and \
+                           `{nm}` answers `verdict`; write `{nm}.reasons` in the \
+                           hole for its objections as text, or `case {nm}` to \
+                           take a different path for each outcome", nm⟩
+          else
+            .error ⟨pos, s!"only a text answer interpolates into a prompt, \
+                           but `{nm}` answers `{codeName b.code}`", nm⟩
 
 /-- The chunks after the first, appended to what is already built.
-
-**Left-associated, and that is the decision.** `a ++ b ++ c` parses in Lean as
-`(a ++ b) ++ c`, so a prompt written in the DSL with the same chunk boundaries
-an author would write in Lean elaborates to a syntactically identical `Expr`.
-Right-associating instead is equally correct and equally readable, and it costs
-`String.append_assoc` under a `funext` under `Dlg.ask`'s continuation at every
-theorem that compares an elaborated prompt with a hand-written one. -/
+**Left-associated, and that is the decision** — see `Prompt.normalize`'s
+docstring for what it buys. -/
 private def Prompt.exprFrom {Γ : Ctx} (S : Bindings Γ) (pos : Pos) (acc : Expr Γ String) :
     Prompt → Except CheckError (Expr Γ String)
   | [] => .ok acc
@@ -139,9 +163,7 @@ private def Prompt.exprFrom {Γ : Ctx} (S : Bindings Γ) (pos : Pos) (acc : Expr
     | .ok e => Prompt.exprFrom S pos (fun δ => acc δ ++ e δ) rest
 
 /-- `[[Prompt.expr S p]]` = the words `p` writes, as a pure function of what is
-known: literals are constants, interpolations are the variables they name, and
-the whole is their concatenation in source order, left-associated. A prompt of
-one chunk is that chunk, with no unit appended to it. -/
+known. -/
 def Prompt.expr {Γ : Ctx} (S : Bindings Γ) (pos : Pos) :
     Prompt → Except CheckError (Expr Γ String)
   | [] => .ok (fun _ => "")
@@ -153,9 +175,8 @@ def Prompt.expr {Γ : Ctx} (S : Bindings Γ) (pos : Pos) :
 /-! ## Questions -/
 
 /-- The shape a target writes: the addressee and the draw as given, the scope at
-the unit of the scope monoid, and the `using model` override — if there is one —
-applied to it. `atModel` appends on the *left*, where the non-commutative
-`LastOpt` lets an inner setting have the last word. -/
+the unit of the scope monoid, and the `served by` override — if there is one —
+applied to it. -/
 def askShape (m : Option String) (c : Code) (t : RawTarget) : Q.Shape c :=
   let s : Q.Shape c := { addressee := t.addressee, scope := 1, draw := t.draw }
   match m with
@@ -163,158 +184,176 @@ def askShape (m : Option String) (c : Code) (t : RawTarget) : Q.Shape c :=
   | some mid => atModel mid c s
 
 /-- **Morphism equation.** At a single question the scope fold *is* the shape's
-relabelling: `Plan.under σ (Plan.ask1 c s e) = Plan.ask1 c (σ c s) e`. This is
-the equation that licenses `using model` being elaborated by rewriting a shape rather
-than by wrapping a term — wrapping would have put the scope on the whole rest of
-the block, which is a different workflow. -/
+relabelling: this is what licenses `served by` being elaborated by rewriting a
+shape rather than by wrapping a term. -/
 theorem under_ask1 (σ : Sig) {Γ : Ctx} (c : Code) (s : Q.Shape c) (e : Expr Γ String) :
     Plan.under σ (Plan.ask1 c s e) = Plan.ask1 c (σ c s) e := rfl
 
-/-- …and the same at a closed question — the case `checkBinder` and `checkAsk`
-actually take for the flagship's `guide` and `draft` nodes, where the relabelling
-acts on the whole `Q` because the words are in the term too. -/
+/-- …and the same at a closed question, where the relabelling acts on the whole
+`Q` because the words are in the term too. -/
 theorem under_askC1 (σ : Sig) {Γ : Ctx} (c : Code) (q : Q c) :
     Plan.under σ (Plan.askC1 (Γ := Γ) c q) = Plan.askC1 c (σ.onQ c q) := rfl
 
-/-! ## Elaborating the constructs -/
+/-! ## Kind inference
 
-/-- `[[Checked Γ]]` = a plan together with the kind of answer it produces. The
-dependent pair the judgment `Γ; Σ ⊢ a ⇝ Plan Γ (El c)` writes: the code is
-recovered from the syntax and the plan's type mentions it, so a construct that
-wants a particular kind asks for it in a `match` and nowhere else. -/
-structure Checked (Γ : Ctx) : Type 1 where
-  /-- The kind of answer. -/
-  code : Code
-  /-- The plan that produces it. -/
-  plan : Plan Γ (El code)
+The language has exactly two consumption sites — a hole in a prompt, and a
+branching — so the kind of a binding is decided by scanning forward for the
+first ground use. The scan is structural, first-match, and deliberately
+ignorant of shadowing: a program that shadows is refused by `freshName` before
+any inferred kind is acted on.
 
-/-- `[[Binder Γ]]` = a `let`'s right-hand side, elaborated: the kind of answer
-it binds, and the term former awaiting the rest of the block.
+One share is followed: a `revising` subject has its carrier's kind, so the
+subject's scan continues into the loop's clauses under the carrier's name. The
+share from a loop's result to its `settled` binder is *not* followed — a
+program whose kind is discoverable only through it writes one annotation, and
+the refusal says where. -/
 
-A former rather than a plan, because `let x = ask …` is **one** node —
-`Plan.ask` is ask-and-bind — and reconstructing it from a plan and a graft would
-put a `sub` between the question and its continuation for no reason. -/
-structure Binder (Γ : Ctx) : Type 1 where
-  /-- The kind of answer bound. -/
-  code : Code
-  /-- The rest of the block, plugged in. -/
-  form : Plan (code :: Γ) Unit → Plan Γ Unit
+private def firstOf (a b : Option Code) : Option Code :=
+  match a with
+  | some c => some c
+  | none => b
 
-/-- One question, as a plan of its own: `Plan.askC1` where the words are in the
-term, `Plan.ask1` where they are computed. Used for panel members and for the
-`revise` clause, whose results are values rather than binders. -/
-def checkAsk {Γ : Ctx} (S : Bindings Γ) (a : RawAsk) : Except CheckError (Checked Γ) :=
-  let s := askShape a.model a.code a.target
+/-- The kind a prompt's holes assert about `x`: `{x}` says text,
+`{x.reasons}` says verdict. -/
+private def usePrompt (x : String) (p : Prompt) : Option Code :=
+  p.findSome? fun ch =>
+    match ch with
+    | .lit _ => none
+    | .interp nm =>
+      if nm == x then some Code.text
+      else if nm == x ++ ".reasons" then some Code.verdict
+      else none
+
+private def useKindR (x : String) : RawRhs → Option Code
+  | .ask a => usePrompt x a.prompt
+  | .panel ms _ => ms.findSome? (fun a => usePrompt x a.prompt)
+
+private def useKindS (x : String) : RawSource → Option Code
+  | .rhs r => useKindR x r
+  | .revising subj carrier _ _ _ review amend _ =>
+    firstOf (useKindR x review)
+      (firstOf (useKindR x amend)
+        (if subj == x then
+          firstOf (useKindR carrier review) (useKindR carrier amend)
+        else none))
+
+/-- The first ground use of `x` in a block, in reading order. -/
+private def useKindB (x : String) : RawBlock → Option Code
+  | .empty _ => none
+  | .knownHere _ rest _ => useKindB x rest
+  | .act a rest _ => firstOf (usePrompt x a.prompt) (useKindB x rest)
+  | .bind _ _ src rest _ => firstOf (useKindS x src) (useKindB x rest)
+  | .ifFlag x' y n _ =>
+    if x' == x then some Code.flag
+    else firstOf (useKindB x y) (useKindB x n)
+  | .caseVerdict x' a o d _ =>
+    if x' == x then some Code.verdict
+    else firstOf (useKindB x a) (firstOf (useKindB x o) (useKindB x d))
+  | .caseResult _ _ settled unsettled _ =>
+    firstOf (useKindB x settled) (useKindB x unsettled)
+
+/-- The kind of a binding: its annotation, or its first ground use, or the
+refusal that names the annotation. -/
+private def bindKind (pos : Pos) (x : String) (ann : Option Code) (rest : RawBlock) :
+    Except CheckError Code :=
+  match ann with
+  | some c => .ok c
+  | none =>
+    match useKindB x rest with
+    | some c => .ok c
+    | none =>
+      .error ⟨pos, s!"nothing fixes what kind of answer `{x}` names: use it \
+                     (a hole, an `if`, a `case`), or annotate it — \
+                     `{x} : text <- …`", x⟩
+
+/-! ## Elaborating questions at an imposed kind -/
+
+/-- One question at the kind its position or its binder fixed: `Plan.askC1`
+where the words are in the term, `Plan.ask1` where they are computed. -/
+def askPlan {Γ : Ctx} (c : Code) (S : Bindings Γ) (a : RawAsk) :
+    Except CheckError (Plan Γ (El c)) :=
+  let s := askShape a.model c a.target
   match Prompt.closed a.prompt with
-  | some words => .ok ⟨a.code, Plan.askC1 a.code (s.withPrompt words)⟩
+  | some words => .ok (Plan.askC1 c (s.withPrompt words))
   | none =>
     match Prompt.expr S a.pos a.prompt with
     | .error err => .error err
-    | .ok e => .ok ⟨a.code, Plan.ask1 a.code s e⟩
+    | .ok e => .ok (Plan.ask1 c s e)
 
-/-- The same, required to answer a particular kind. -/
-def checkAskAt {Γ : Ctx} (c : Code) (S : Bindings Γ) (a : RawAsk) (what : String) :
-    Except CheckError (Plan Γ (El c)) :=
-  match checkAsk S a with
-  | .error err => .error err
-  | .ok r =>
-    if h : r.code = c then .ok (h ▸ r.plan)
-    else .error ⟨a.pos, s!"{what}: expected an answer of kind `{codeName c}`, \
-                          but this question asks for `{codeName r.code}`", codeName r.code⟩
-
-/-- The members of a panel, each required to be at the kind the first one
-chose. -/
-def checkMembers {Γ : Ctx} (c : Code) (S : Bindings Γ) :
-    List RawAsk → Except CheckError (List (Plan Γ (El c)))
+/-- The members of a panel, each at `.verdict` — the kind the rule's monoid
+lives at. -/
+def checkMembers {Γ : Ctx} (S : Bindings Γ) :
+    List RawAsk → Except CheckError (List (Plan Γ (El .verdict)))
   | [] => .ok []
   | a :: as =>
-    match checkAskAt c S a "the members of a panel must agree in answer kind, and this one \
-                            disagrees with the first" with
+    match askPlan Code.verdict S a with
     | .error err => .error err
     | .ok p =>
-      match checkMembers c S as with
+      match checkMembers S as with
       | .error err => .error err
       | .ok ps => .ok (p :: ps)
 
-/-- A right-hand side, as a plan: one question, or a panel.
-
-A panel reduces its members in the monoid of the answer kind, and the answer
-universe declares one only at `.verdict` — deliberately, since nothing installs
-arithmetic on `El .flag = Bool`. So a panel of anything else is rejected here,
-naming the kind it was given. -/
-def checkRhs {Γ : Ctx} (S : Bindings Γ) : RawRhs → Except CheckError (Checked Γ)
-  | .ask a => checkAsk S a
+/-- A clause-position source at an imposed kind. A panel answers `verdict` and
+nothing else — `all must approve` is the verdict monoid, and no other kind
+carries one. -/
+def rhsPlan {Γ : Ctx} (c : Code) (S : Bindings Γ) (r : RawRhs) (what : String) :
+    Except CheckError (Plan Γ (El c)) :=
+  match r with
+  | .ask a => askPlan c S a
   | .panel ms pos =>
     match ms with
     | [] => .error ⟨pos, "a panel needs at least one member", "panel"⟩
-    | m :: rest =>
-      if m.code = Code.verdict then
-        match checkMembers Code.verdict S (m :: rest) with
+    | _ =>
+      match c with
+      | .verdict =>
+        match checkMembers S ms with
         | .error err => .error err
-        | .ok ps => .ok ⟨Code.verdict, Plan.panel ps⟩
-      else
-        .error ⟨pos, s!"a panel combines its members' answers in the monoid of their kind, \
-                       and only `verdict` carries one; these answer \
-                       `{codeName m.code}`", "panel"⟩
+        | .ok ps => .ok (Plan.panel ps)
+      | c =>
+        .error ⟨pos, s!"{what}: a panel combines its members in the verdict \
+                       monoid, so it answers `verdict`, not `{codeName c}`", "panel"⟩
 
-/-- A right-hand side required to answer a particular kind. -/
-def checkRhsAt {Γ : Ctx} (c : Code) (S : Bindings Γ) (r : RawRhs) (what : String) :
-    Except CheckError (Plan Γ (El c)) :=
-  match checkRhs S r with
-  | .error err => .error err
-  | .ok v =>
-    if h : v.code = c then .ok (h ▸ v.plan)
-    else .error ⟨r.pos, s!"{what}: expected an answer of kind `{codeName c}`, \
-                          but this one produces `{codeName v.code}`", codeName v.code⟩
-
-/-- A `let`'s right-hand side, as the former that binds it.
-
-An `ask` becomes the node itself, so `let x = ask …` is one `Plan.ask`. A panel
-is not a binding former, so its value reaches the rest of the block through
-`Plan.graft` and the substitution that extends the environment by it — which is
-what `graft`'s continuation is for. -/
-def checkBinder {Γ : Ctx} (S : Bindings Γ) : RawRhs → Except CheckError (Binder Γ)
+/-- A binding's former at an imposed kind: `x <- ask …` is **one** node —
+`Plan.ask` is ask-and-bind — and a panel's value reaches the rest through
+`Plan.graft`. -/
+def bindForm {Γ : Ctx} (c : Code) (S : Bindings Γ) (r : RawRhs) :
+    Except CheckError (Plan (c :: Γ) Unit → Plan Γ Unit) :=
+  match r with
   | .ask a =>
-    let s := askShape a.model a.code a.target
+    let s := askShape a.model c a.target
     match Prompt.closed a.prompt with
-    | some words => .ok ⟨a.code, fun k => Plan.askC a.code (s.withPrompt words) k⟩
+    | some words => .ok (fun k => Plan.askC c (s.withPrompt words) k)
     | none =>
       match Prompt.expr S a.pos a.prompt with
       | .error err => .error err
-      | .ok e => .ok ⟨a.code, fun k => Plan.ask a.code s e k⟩
+      | .ok e => .ok (fun k => Plan.ask c s e k)
   | .panel ms pos =>
-    match checkRhs S (.panel ms pos) with
+    match rhsPlan c S (.panel ms pos) "this binding" with
     | .error err => .error err
-    | .ok v => .ok ⟨v.code, fun k =>
-        Plan.graft v.plan (fun _ σ e => Plan.sub k (fun δ => Env.cons (e δ) (σ δ)))⟩
+    | .ok v => .ok (fun k =>
+        Plan.graft v (fun _ σ e => Plan.sub k (fun δ => Env.cons (e δ) (σ δ))))
 
 /-! ### The three continuations of a bounded revision
 
 Each is a `Plan.Cont`, i.e. a family indexed by the context the leaf sits in,
 and each is built from **one** plan checked in **one** context by the same move:
-extend the context morphism by the value the continuation is handed. That move
-is `Sub`'s, so a continuation elaborated this way is coherent by construction —
-which is exactly the hypothesis `Plan.Denotes` states and `denotes_revising`
-consumes. -/
+extend the context morphism by the value the continuation is handed. -/
 
-/-- The `check` clause: the artefact under review is de Bruijn `0`. -/
+/-- The review binding's source: the candidate under review is de Bruijn `0`. -/
 def checkCont {Γ : Ctx} {c : Code} (chk : Plan (c :: Γ) (El .verdict)) :
     Plan.Cont Γ (El c) Verdict :=
   fun _ σ a => Plan.sub chk (fun δ => Env.cons (a δ) (σ δ))
 
-/-- The `revise` clause: the verdict is de Bruijn `0` and the artefact de Bruijn
-`1`, so a revision knows *what* it is answering — the correction
-`attack-adequacy` §2.3 makes to the incumbent, here as a binder rather than as
-advice. -/
+/-- The `amend` clause: the review's verdict is de Bruijn `0` — bound under the
+author's chosen name, *at* `Code.verdict`, rendered only where a `.reasons`
+hole asks — and the candidate is de Bruijn `1`. -/
 def reviseCont {Γ : Ctx} {c : Code} (rev : Plan (.verdict :: c :: Γ) (El c)) :
     Plan.Cont Γ (El c × Verdict) (El c) :=
   fun _ σ av => Plan.sub rev (fun δ => Env.cons (av δ).2 (Env.cons (av δ).1 (σ δ)))
 
 /-- The two outcomes: `caseB` on whether the loop produced an artefact, with the
-artefact reaching the `approved given p` block as de Bruijn `0`. The `none` arm reads
-`default`, which no run ever sees — the two theorems about consent in
-`Agentic/Core/HardenPatch.lean` are the statement that the unreachable branch is
-unreachable. -/
+artefact reaching the `settled` arm as de Bruijn `0`. The `none` arm reads
+`default`, which no run ever sees. -/
 def finishCont {Γ : Ctx} {c : Code} (acc : Plan (c :: Γ) Unit) (exh : Plan Γ Unit) :
     Plan.Cont Γ (Option (El c)) Unit :=
   fun _ σ final =>
@@ -322,229 +361,193 @@ def finishCont {Γ : Ctx} {c : Code} (acc : Plan (c :: Γ) Unit) (exh : Plan Γ 
       (Plan.sub acc (fun δ => Env.cons ((final δ).getD default) (σ δ)))
       (Plan.sub exh σ)
 
-/-! ## How far a bounded revision may be unrolled
+/-! ## How far a bounded revision may be unrolled -/
 
-`revising a up to n revisions` elaborates to `Plan.revising … n`, which is
-`Nat.rec` building the unrolling, so the source's numeral is the size of the
-term the checker returns and the depth of the recursion that returns it. Nothing
-else in the language has that property: every other construct costs what it is
-written out to.
-
-An unbounded numeral is therefore an unbounded elaboration, and `check`'s type
-does not say otherwise — it is total as a function of `Raw`, and a total
-function may still be one no machine can run. Measured, at
-`revising d up to n revisions { check … revise … } approved given p { }
-never approved { }`: `up to 1000000000 revisions` aborts the process with
-`Stack overflow detected` in 0.3 s, `1000` prices in 71 s, `400` in 3.5 s, `100`
-in 56 ms and `64` in 20 ms. The bound below is where that curve is still
-free. -/
-
-/-- `[[maxRevisions]]` = the largest `n` a `revising … up to n revisions` may
-name.
-
+/-- `[[maxRevisions]]` = the largest `n` an `at most n amendments` may name.
 A resource limit and not a judgment, so it is refused with the same
-`CheckError` — position, message, excerpt — as every other refusal, rather than
-by a different mechanism that a caller would have to learn.
-
-**Here and not in the parser**, because it is the *elaboration* that unrolls:
-`Dsl.check` applied to a hand-built `Raw` runs the same `Nat.rec` as one applied
-to parsed text, and a bound in `Dsl.Parse` would leave that caller unguarded.
-`checkBlock_bounded` is the statement that this clause is the only way in. -/
+`CheckError` as every other refusal. **Here and not in the parser**, because it
+is the *elaboration* that unrolls: `Dsl.check` applied to a hand-built `Raw`
+runs the same `Nat.rec` as one applied to parsed text. -/
 def maxRevisions : Nat := 64
 
-/-- `[[b.bounded]]` = every `revising … up to n revisions` in `b` names an `n`
-that `maxRevisions` allows. Decidable, and first-order in the syntax: `RawRhs`
-has no block inside it, so the recursion is `RawBlock`'s own. -/
-def RawBlock.bounded : RawBlock → Bool
-  | .empty _ => true
-  | .act _ _ _ => true
-  | .bind _ _ rest _ => rest.bounded
-  | .ifFlag _ y n _ => y.bounded && n.bounded
-  | .caseVerdict _ a o d _ => a.bounded && o.bounded && d.bounded
-  | .revising _ n _ _ _ _ _ _ acc exh _ =>
-      decide (n ≤ maxRevisions) && acc.bounded && exh.bounded
+/-! ## The pending result of a bound loop -/
+
+/-- `[[Pend Γ]]` = a bound loop whose settled-or-not result the next statement
+must consume: the name it was bound to, the candidate's kind, and the loop's
+plan. Not a `Binding` — `Ctx` has no code for an `Option` — which is exactly
+why it is carried here instead. -/
+structure Pend (Γ : Ctx) : Type 1 where
+  /-- The name the loop was bound to. -/
+  name : String
+  /-- The candidate's kind. -/
+  code : Code
+  /-- The loop, as a plan of its settled-or-not result. -/
+  plan : Plan Γ (Option (El code))
+
+/-- The refusal every statement other than the consuming `case` gets while a
+result is pending. -/
+private def pendingErr (pos : Pos) (x : String) : CheckError :=
+  ⟨pos, s!"the revising result `{x}` is not yet consumed: `case {x} \{ settled … \
+          unsettled … }` is the next statement, and nothing else touches it", x⟩
 
 /-! ## The checker -/
 
-/-- `[[checkBlock Γ S b]]` = the plan `b` writes under the names `S`, or the
-reason it writes none.
-
-The result type is `Plan Γ Unit` and not `Plan Γ A`: a block runs out or ends in
-a tail, so a block *is* a closed workflow's worth of syntax, and "a workflow with
-a value nobody can receive" is not representable rather than rejected. -/
-def checkBlock : (Γ : Ctx) → Bindings Γ → RawBlock → Except CheckError (Plan Γ Unit)
-  | _, _, .empty _ => .ok (.ret fun _ => ())
-  | _, S, .act t pr pos =>
-    let s : Q.Shape .ack := { addressee := t.addressee, scope := 1, draw := t.draw }
-    match Prompt.closed pr with
-    | some words => .ok (Plan.askC .ack (s.withPrompt words) (.ret fun _ => ()))
-    | none =>
-      match Prompt.expr S pos pr with
+set_option maxHeartbeats 1000000 in
+/-- `[[checkBlock Γ S pend b]]` = the plan `b` writes under the names `S`, with
+`pend` the loop result the previous statement left to be consumed, or the
+reason `b` writes none. -/
+def checkBlock : (Γ : Ctx) → Bindings Γ → Option (Pend Γ) → RawBlock →
+    Except CheckError (Plan Γ Unit)
+  | _, _, none, .empty _ => .ok (.ret fun _ => ())
+  | _, _, some pd, .empty pos => .error (pendingErr pos pd.name)
+  | Γ, S, none, .knownHere names rest pos =>
+    let live := S.map (·.name)
+    if names == live then checkBlock Γ S none rest
+    else
+      .error ⟨pos, s!"`known here` asserts the names in scope, innermost first, \
+                     and they are: {String.intercalate ", " live}",
+              String.intercalate ", " names⟩
+  | _, _, some pd, .knownHere _ _ pos => .error (pendingErr pos pd.name)
+  | Γ, S, none, .act a rest _pos =>
+    match bindForm Code.ack S (.ask a) with
+    | .error err => .error err
+    | .ok form =>
+      match checkBlock Γ S none rest with
       | .error err => .error err
-      | .ok e => .ok (Plan.ask .ack s e (.ret fun _ => ()))
-  | Γ, S, .bind x rhs rest _ =>
-    match checkBinder S rhs with
+      | .ok k => .ok (form (Plan.sub k Sub.wk))
+  | _, _, some pd, .act _ _ pos => .error (pendingErr pos pd.name)
+  | _, _, some pd, .bind _ _ _ _ pos => .error (pendingErr pos pd.name)
+  | Γ, S, none, .bind x ann (.rhs rhs) rest pos =>
+    match freshName S pos x with
     | .error err => .error err
-    | .ok b =>
-      match checkBlock (b.code :: Γ) (Bindings.push x b.code S) rest with
+    | .ok _ =>
+    match bindKind pos x ann rest with
+    | .error err => .error err
+    | .ok c =>
+    match bindForm c S rhs with
+    | .error err => .error err
+    | .ok form =>
+      match checkBlock (c :: Γ) (Bindings.push x c S) none rest with
       | .error err => .error err
-      | .ok k => .ok (b.form k)
-  | Γ, S, .ifFlag x y n pos =>
-    match lookupBinding S pos x with
-    | .error err => .error err
-    | .ok bnd =>
-    match checkBlock Γ S y with
-    | .error err => .error err
-    | .ok y' =>
-    match checkBlock Γ S n with
-    | .error err => .error err
-    | .ok n' =>
-    match bnd.at? .flag with
-    | some e => .ok (Plan.caseB e y' n')
-    | none =>
-      .error ⟨pos, s!"an `if` branches on a flag, \
-                     but `{x}` answers `{codeName bnd.code}`", x⟩
-  | Γ, S, .caseVerdict x a o d pos =>
-    match lookupBinding S pos x with
-    | .error err => .error err
-    | .ok bnd =>
-    match checkBlock Γ S a with
-    | .error err => .error err
-    | .ok a' =>
-    match checkBlock Γ S o with
-    | .error err => .error err
-    | .ok o' =>
-    match checkBlock Γ S d with
-    | .error err => .error err
-    | .ok d' =>
-    match bnd.at? .verdict with
-    | some e =>
-      .ok (Plan.caseV e (fun t => match t with
-        | .approve => a' | .object => o' | .declined => d'))
-    | none =>
-      .error ⟨pos, s!"the arms `approve`, `object` and `declined` branch on a `verdict`, \
-                     but `{x}` answers `{codeName bnd.code}`", x⟩
-  | Γ, S, .revising subj n cv chk av wv rev pv acc exh pos =>
+      | .ok k => .ok (form k)
+  | Γ, S, none, .bind x ann (.revising subj carrier n rname rann review amend rpos) rest pos =>
     -- Before anything is elaborated, because `n` is the depth of the
     -- elaboration itself and not merely the size of its result.
     if maxRevisions < n then
-      .error ⟨pos, s!"a bounded revision is unrolled into the term it writes, \
-                     so its bound may name at most {maxRevisions} revisions",
-              s!"up to {n} revisions"⟩
+      .error ⟨rpos, s!"a bounded revision is unrolled into the term it writes, \
+                      so its bound may name at most {maxRevisions} amendments",
+              s!"at most {n} amendments"⟩
     else
-    match lookupBinding S pos subj with
+    match ann with
+    | some _ =>
+      .error ⟨pos, "a revising result is settled-or-not, which is not one of the \
+                   four kinds; it takes no annotation and is consumed by its \
+                   `case`", x⟩
+    | none =>
+    match (match rann with
+           | none => .ok ()
+           | some Code.verdict => .ok ()
+           | some c =>
+             .error ⟨rpos, s!"a review answers `verdict`, not `{codeName c}`: \
+                            the loop settles when it approves", rname⟩ :
+           Except CheckError Unit) with
+    | .error err => .error err
+    | .ok _ =>
+    match freshName S pos x with
+    | .error err => .error err
+    | .ok _ =>
+    match freshName S rpos carrier with
+    | .error err => .error err
+    | .ok _ =>
+    match freshName S rpos rname with
+    | .error err => .error err
+    | .ok _ =>
+    match lookupBinding S rpos subj with
     | .error err => .error err
     | .ok b =>
-    -- The names each clause is handed. `check given p` and `approved given p`
-    -- see the artefact as de Bruijn `0`; `revise given p, why` sees the verdict
-    -- as `0` and the artefact as `1`, and binds `why` to that verdict
-    -- *rendered*, which is what keeps interpolation a text-only operation with
-    -- no exception.
+    -- The names each clause is handed. The review sees the candidate as de
+    -- Bruijn `0` under the carrier's name; the amend sees the verdict as `0`
+    -- under the review binding's name — at `Code.verdict`, rendered only where
+    -- a `.reasons` hole asks — and the candidate as `1`.
     let Swith : Bindings (Code.verdict :: b.code :: Γ) :=
-      ⟨av, b.code, fun δ => Env.head (Env.tail δ)⟩ ::
-      ⟨wv, Code.text, fun δ => Verdict.render (Env.head δ)⟩ ::
+      ⟨carrier, b.code, fun δ => Env.head (Env.tail δ)⟩ ::
+      ⟨rname, Code.verdict, fun δ => Env.head δ⟩ ::
       Bindings.rename Sub.wk (Bindings.rename Sub.wk S)
-    match checkRhsAt Code.verdict (Bindings.push cv b.code S) chk
-        "the `check` clause of a bounded revision" with
+    match rhsPlan Code.verdict (Bindings.push carrier b.code S) review
+        "the review of a bounded revision" with
     | .error err => .error err
-    | .ok chkP =>
-    match checkRhsAt b.code Swith rev "the `revise` clause of a bounded revision" with
+    | .ok reviewP =>
+    match rhsPlan b.code Swith amend "the `amend` of a bounded revision" with
     | .error err => .error err
-    | .ok revP =>
-    match checkBlock (b.code :: Γ) (Bindings.push pv b.code S) acc with
+    | .ok amendP =>
+      checkBlock Γ S
+        (some ⟨x, b.code,
+          Plan.revising (checkCont reviewP) (reviseCont amendP) n Γ Sub.id b.val⟩)
+        rest
+  | Γ, S, none, .ifFlag x y n pos =>
+    match lookupBinding S pos x with
     | .error err => .error err
-    | .ok accP =>
-    match checkBlock Γ S exh with
+    | .ok bnd =>
+    match bnd.at? .flag with
+    | none =>
+      .error ⟨pos, s!"an `if` branches on a flag, \
+                     but `{x}` answers `{codeName bnd.code}`", x⟩
+    | some e =>
+    match checkBlock Γ S none y with
     | .error err => .error err
-    | .ok exhP =>
-    .ok (Plan.graft
-      (Plan.revising (checkCont chkP) (reviseCont revP) n Γ Sub.id b.val)
-      (finishCont accP exhP))
-
-/-- **The elaboration is bounded by the source, and `maxRevisions` is the
-bound.** Every `revising` the checker accepts — at any depth, in any arm —
-names an `n` the bound allows, so the term `checkBlock` returns is at most a
-constant times the length of the text that wrote it, and the recursion that
-built it went no deeper.
-
-This is the theorem the refusal in the `revising` clause exists to make true.
-Without it "we added a guard" is a claim about one clause; with it, it is a
-claim about the language. -/
-theorem checkBlock_bounded : ∀ (r : RawBlock) (Γ : Ctx) (S : Bindings Γ) (p : Plan Γ Unit),
-    checkBlock Γ S r = .ok p → r.bounded = true := by
-  intro r
-  induction r with
-  | empty pos => intro _ _ _ _; rfl
-  | act t pr pos => intro _ _ _ _; rfl
-  | bind x rhs rest pos ih =>
-    intro Γ S p h
-    simp only [checkBlock] at h
-    split at h
-    · exact absurd h (by simp)
-    · split at h
-      · exact absurd h (by simp)
-      · rename_i k hk; exact ih _ _ k hk
-  | ifFlag x y n pos ihy ihn =>
-    intro Γ S p h
-    simp only [checkBlock] at h
-    split at h
-    · exact absurd h (by simp)
-    · split at h
-      · exact absurd h (by simp)
-      · split at h
-        · exact absurd h (by simp)
-        · rename_i y' hy _ n' hn
-          simp only [RawBlock.bounded, ihy _ _ y' hy, ihn _ _ n' hn, Bool.and_self]
-  | caseVerdict x a o d pos iha iho ihd =>
-    intro Γ S p h
-    simp only [checkBlock] at h
-    split at h
-    · exact absurd h (by simp)
-    · split at h
-      · exact absurd h (by simp)
-      · split at h
-        · exact absurd h (by simp)
-        · split at h
-          · exact absurd h (by simp)
-          · rename_i a' ha _ o' ho _ d' hd
-            simp only [RawBlock.bounded, iha _ _ a' ha, iho _ _ o' ho, ihd _ _ d' hd,
-              Bool.and_self]
-  | revising subj n cv chk av wv rev pv acc exh pos iha ihe =>
-    intro Γ S p h
-    simp only [checkBlock] at h
-    split at h
-    · exact absurd h (by simp)
-    · rename_i hle
-      split at h
-      · exact absurd h (by simp)
-      · split at h
-        · exact absurd h (by simp)
-        · split at h
-          · exact absurd h (by simp)
-          · split at h
-            · exact absurd h (by simp)
-            · rename_i accP hacc
-              split at h
-              · exact absurd h (by simp)
-              · rename_i exhP hexh
-                simp only [RawBlock.bounded, iha _ _ accP hacc, ihe _ _ exhP hexh,
-                  Bool.and_true, decide_eq_true_eq]
-                omega
+    | .ok y' =>
+    match checkBlock Γ S none n with
+    | .error err => .error err
+    | .ok n' => .ok (Plan.caseB e y' n')
+  | _, _, some pd, .ifFlag _ _ _ pos => .error (pendingErr pos pd.name)
+  | Γ, S, none, .caseVerdict x a o d pos =>
+    match lookupBinding S pos x with
+    | .error err => .error err
+    | .ok bnd =>
+    match bnd.at? .verdict with
+    | none =>
+      .error ⟨pos, s!"the arms `approved`, `objected` and `no answer` branch on \
+                     a `verdict`, but `{x}` answers `{codeName bnd.code}`", x⟩
+    | some e =>
+    match checkBlock Γ S none a with
+    | .error err => .error err
+    | .ok a' =>
+    match checkBlock Γ S none o with
+    | .error err => .error err
+    | .ok o' =>
+    match checkBlock Γ S none d with
+    | .error err => .error err
+    | .ok d' =>
+      .ok (Plan.caseV e (fun t => match t with
+        | .approve => a' | .object => o' | .declined => d'))
+  | _, _, some pd, .caseVerdict _ _ _ _ pos => .error (pendingErr pos pd.name)
+  | Γ, S, some pd, .caseResult x sname settled unsettled pos =>
+    if x != pd.name then
+      .error ⟨pos, s!"the pending revising result is `{pd.name}`, and it is \
+                     consumed first", x⟩
+    else
+    match freshName S pos sname with
+    | .error err => .error err
+    | .ok _ =>
+    match checkBlock (pd.code :: Γ) (Bindings.push sname pd.code S) none settled with
+    | .error err => .error err
+    | .ok settledP =>
+    match checkBlock Γ S none unsettled with
+    | .error err => .error err
+    | .ok unsettledP =>
+      .ok (Plan.graft pd.plan (finishCont settledP unsettledP))
+  | _, _, none, .caseResult x _ _ _ pos =>
+    .error ⟨pos, s!"`case {x} \{ settled … }` consumes a revising result, and \
+                   `{x}` is not one: it is bound by `{x} <- revising …` as the \
+                   statement before its `case`", x⟩
 
 /-- `[[check Γ S r]]` = the workflow `r` writes, or the reason it writes none.
 
 **This type is the type-soundness theorem.** A checker returning
-`Except String (Plan Γ Unit)` cannot return an ill-typed plan, because an
-ill-typed plan is not an inhabitant of `Plan Γ Unit`; there is nothing further
-to prove and nothing that could go out of date. -/
+`Except CheckError (Plan Γ Unit)` cannot return an ill-typed plan, because an
+ill-typed plan is not an inhabitant of `Plan Γ Unit`. -/
 def check (Γ : Ctx) (S : Bindings Γ) (r : Raw) : Except CheckError (Plan Γ Unit) :=
-  checkBlock Γ S r
-
-/-- …and hence of every source the front end accepts: an attacker who chooses
-the numeral chooses a number no larger than `maxRevisions`. -/
-theorem check_bounded (Γ : Ctx) (S : Bindings Γ) (r : Raw) (p : Plan Γ Unit)
-    (h : check Γ S r = .ok p) : r.bounded = true :=
-  checkBlock_bounded r Γ S p h
+  checkBlock Γ S none r
 
 /-- `[[parseAndCheckE s]]` = the closed workflow `s` denotes, or the reason it
 denotes none, with a position and an excerpt. -/
@@ -554,10 +557,7 @@ def parseAndCheckE (s : String) : Except CheckError (Plan [] Unit) :=
   | .ok r => check [] [] r
 
 /-- `[[parseAndCheck s]]` = the closed workflow `s` denotes, or the reason it
-denotes none.
-
-The owner's `W Unit` is `Plan [] Unit`, and that is the type: closedness is not
-a theorem about the result, it is the result's type. -/
+denotes none. -/
 def parseAndCheck (s : String) : Except String (Plan [] Unit) :=
   match parseAndCheckE s with
   | .ok p => .ok p

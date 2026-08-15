@@ -5,12 +5,12 @@
 define brief = "Reply in one short line."
 
 workflow {
-  let subject = ask tool "cat" for text
-    "Name one thing worth greeting.\n{brief}"
+  subject <- ask tool "cat"
+    "Name one thing worth greeting.\n{$brief}"
 
-  let greeting = ask model "greeter" for text
-    "Write a greeting for this, and nothing else:\n{subject}\n{brief}"
+  greeting <- ask model "greeter"
+    "Write a greeting for this, and nothing else:\n{subject}\n{$brief}"
 
-  act tool "say"
-    "Say it:\n{greeting}\nThen reply DONE."
+  ask tool "say"
+    "Say it:\n{greeting}"
 }

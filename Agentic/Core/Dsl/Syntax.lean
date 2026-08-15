@@ -8,31 +8,36 @@ language of names, strings and numbers that mentions no `Plan`, no `Env` and no
 `Expr`, so that parsing is a total function into ordinary data and every
 question of well-typedness is deferred to `Agentic/Core/Dsl/Check.lean`.
 
-Two shapes here are decisions rather than conveniences, and both are forced by
-the requirement that the checker be *structurally* recursive.
+This is the **redesigned** surface (doc/research/dsl-redesign/GRAMMAR.md, obr
+acat-k28): bindings are `name <- source` with the kind usually inferred;
+branching is `if`/`else` on a flag and `case` on a verdict or on a bounded
+revision's settled-or-not result; the loop is `revising s as c, at most n
+amendments { v <- review-source  amend c { source } }`; a statement-position
+`ask` is the act. Three shapes here are decisions rather than conveniences.
 
 * **A branching is one constructor per tag type, and its arms are fields.**
-  `Plan.case` demands a `FinEnum`, hence *total* arms, so the two branchings the
-  answer universe admits — two-valued (`El .flag`) and three-valued (`VTag`) —
-  are two constructors whose arms are ordinary recursive fields. The obvious
-  alternative, `case (x : String) (arms : List (String × RawBlock))`, is a
-  nested inductive and a checker recursing through it must be well-founded;
-  `WellFounded.fix` does not reduce in the kernel, and the flagship theorems of
-  `Agentic/Core/DslFlagship.lean` need the checker to reduce. A *mutual* inductive
-  `RawBlock`/`RawArms` avoids that and was measured: its `brecOn` turned a
-  three-second kernel reduction into a three-minute one, because the
-  course-of-values structure of a mutual family is rebuilt at every node. So
-  exhaustiveness is enforced in the shape of the syntax, which is the cheapest
-  place there is, and *which* branching a `case` is remains a question for the
-  checker, where the scrutinee's code is known.
-* **`revising` is a tail and not a right-hand side.** `Ctx = List Code`, so the
-  `Option (El c)` a bounded revision produces cannot be a context entry; it is
-  reached by `Plan.graft`, whose continuation is not a binder. The syntax
-  records that by giving `revising` no name to bind and putting its two
-  outcomes — `approved given p` and `never approved` — in the term.
+  `Plan.case` demands a `FinEnum`, hence *total* arms, so each branching the
+  surface writes — two-valued (`El .flag`), three-valued (`VTag`), and the
+  two-valued settled-or-not of a loop result — is a constructor whose arms are
+  ordinary recursive fields. A nested `List (String × RawBlock)` would force
+  well-founded recursion on the checker, and `WellFounded.fix` does not reduce
+  in the kernel, which the flagship theorems need it to.
+* **A bound loop is a source, and its `case` is the next statement.** `Ctx =
+  List Code`, so the `Option (El c)` a bounded revision produces cannot be a
+  context entry; it is reached by `Plan.graft`, whose continuation is not a
+  binder. The surface writes `x <- revising …` and then `case x { settled p
+  {…} unsettled {…} }`, and the checker requires the `case` to be the very
+  next statement, so the option value never needs a context slot: the pair
+  elaborates to one graft whose continuation is the `caseB` the arms write.
+* **The kind annotation is optional syntax, not optional information.** A
+  binder may write `x : text <-`; when it does not, the checker infers the
+  kind from the name's first ground use, and refuses a name with no use to
+  infer from. The annotation is carried in the syntax so that the refusal can
+  say exactly where one would go.
 
-`define` does not appear below. It is textual and the parser expands it, so a
-`Raw` mentions only names that a checker can be asked to resolve.
+`define` does not appear below. It is textual and the parser expands it — a
+`{$name}` hole is a define, a `{name}` hole is an answer — so a `Raw` mentions
+only names a checker can be asked to resolve.
 -/
 
 namespace Agentic.Core
@@ -50,15 +55,10 @@ namespace Verdict
 separated by `"; "`, and nothing where it declined — a refusal has no objection
 list to show.
 
-This is what makes `revise given patch, why` legal in a language whose
-interpolation is restricted to text: `why` is bound to `render ∘ ·`, an
-`Expr Γ String`, so the restriction holds without an exception rather than being
-waived for one construct.
-
-The projection is written out rather than taken from `Verdict.objections`
-because that name belongs to `Agentic/Core/Report.lean`, which imports the
-transport; a checker must not. `Agentic/Core/DslFlagship.lean` proves this is
-`Harden.render`, by `rfl`, so the three spellings are one function. -/
+This is what makes `{v.reasons}` legal in a language whose interpolation is
+restricted to text: the hole elaborates to `render ∘ ·`, an `Expr Γ String`,
+so the restriction holds with the renderer written at the use site rather than
+being waived for one construct. -/
 def render (v : Verdict) : String :=
   String.intercalate "; " (if h : v = 0 then [] else FreeMonoid.toList (WithZero.unzero h))
 
@@ -114,7 +114,11 @@ def CheckError.render (e : CheckError) : String := toString e
 
 The interpolation `{x}` is a `Chunk` and not a general expression because the
 language has no expressions: a prompt is a concatenation of things said and
-things heard, and nothing else can appear in one. -/
+things heard, and nothing else can appear in one. A `{v.reasons}` hole is
+carried as `interp "v.reasons"` — the checker splits the name at the dot and
+supplies the verdict renderer at the use site. A `{$d}` define-hole never
+reaches this type: the parser expands it, so a `Raw`'s prompts hold only
+literals and answer-holes. -/
 inductive Chunk where
   /-- Text written in the source. -/
   | lit (s : String)
@@ -131,8 +135,9 @@ abbrev Prompt : Type := List Chunk
 
 The distinction is not cosmetic. A prompt that mentions nothing in scope is a
 *closed* question, which is `Plan.askC` and starts a plan at the `batch` rung;
-one that mentions something is `Plan.ask`, which is `pipeline`. The syntax
-therefore decides the rung of a node, and this function is where it does it. -/
+one that mentions something is `Plan.ask`, which is `pipeline`. After `define`
+expansion every `{$d}` hole is a literal, so a question is closed exactly when
+every hole it wrote was a define — which is readable at the question. -/
 def Prompt.closed : Prompt → Option String
   | [] => some ""
   | [.lit s] => some s
@@ -148,11 +153,9 @@ nothing would otherwise leave a chunk that says nothing.
 tidying and it is wrong here: `Prompt.expr` emits the concatenation of the
 chunks *left-associated*, exactly as `a ++ b ++ c` parses in Lean, so a prompt
 whose chunks are written the way an author would write the same string in Lean
-elaborates to the very same `Expr` — which is what makes
-`Dsl.denote_flagshipPlan` a `rfl` against `Agentic/Core/HardenPatch.lean`'s
-hand-written prompts rather than a proof about `String.append_assoc`. Fusing
-`"\n"` into the `verdictSpec` macro that follows it would reassociate one
-append and cost that equation. -/
+elaborates to the very same `Expr` — which is what keeps the flagship's
+transcript agreements with `Agentic/Core/HardenPatch.lean` computations rather
+than proofs about `String.append_assoc`. -/
 def Prompt.normalize : Prompt → Prompt
   | [] => []
   | .lit "" :: rest => Prompt.normalize rest
@@ -163,7 +166,7 @@ def Prompt.normalize : Prompt → Prompt
 /-- `[[RawTarget]]` = whom a question is put to and which draw it is: the part
 of `Q.Shape` an author writes. The third field of a shape — the scope — is the
 unit of the scope monoid at every node the syntax can write, and
-`using model "…"` is the only override, so it is not a field here. -/
+`served by "…"` is the only override, so it is not a field here. -/
 structure RawTarget where
   /-- Who is asked. -/
   addressee : Addressee
@@ -171,13 +174,15 @@ structure RawTarget where
   draw : Nat
   deriving Repr, DecidableEq, Inhabited
 
-/-- `[[RawAsk]]` = one question, as written: the addressee, an optional model
-override, the kind of answer wanted, and the words. -/
+/-- `[[RawAsk]]` = one question, as written: the addressee, an optional serving
+model, and the words. The **kind is not a field**: it comes from the binder's
+annotation or inference, from the position (a panel member and a review binding
+answer `verdict`; a statement ask answers `receipt`), and the checker imposes
+it. -/
 structure RawAsk where
-  /-- The `using model "s"` override, if any. -/
+  /-- The `served by "s"` override, if any; legal only on a model addressee,
+  which the parser enforces. -/
   model : Option String
-  /-- Which of the four answer kinds is wanted. -/
-  code : Code
   /-- Whom to ask. -/
   target : RawTarget
   /-- What to say. -/
@@ -186,52 +191,65 @@ structure RawAsk where
   pos : Pos
   deriving Repr, DecidableEq, Inhabited
 
-/-- `[[RawRhs]]` = what a name may be bound to, or what a `check` clause may
-be: one question, or a panel of them. -/
+/-- `[[RawRhs]]` = a clause-position source: one question, or a panel of them.
+The loop is not here — a bounded revision's result is not a value a clause can
+hold. -/
 inductive RawRhs where
   /-- A single question. -/
   | ask (a : RawAsk)
-  /-- A panel: several questions, their answers combined in the monoid of the
-  answer kind. Only `.verdict` carries one, which the checker enforces. -/
+  /-- `panel, all must approve [ … ]`: several questions, their answers combined
+  in the verdict monoid — the one rule the menu currently has, named on the
+  page. -/
   | panel (members : List RawAsk) (pos : Pos)
   deriving Repr, DecidableEq, Inhabited
 
-/-- `[[RawBlock]]` = an unchecked block: some bindings, then at most a tail.
+/-- `[[RawSource]]` = what a binding may bind: a clause-position source, or a
+bounded revision.
 
-A block that runs out of statements is over, which is `.empty`; a block that
-ends in a tail — `act`, a branching or `revising` — ends there, because each arm
-and each outcome *is* the rest of the workflow. Either way a block is a workflow
-returning unit rather than a workflow returning an answer somebody has to do
-something with. -/
+`revising s as c, at most n amendments { v <- review  amend c { source } }`:
+the loop revises `s`, calling the moving candidate `c`; each round binds one
+verdict (`v`, an ordinary binding with an author-chosen name) by the review
+source; the loop settles when it approves, and otherwise the `amend` source's
+answer — with `c` and `v` in scope — becomes the next candidate. -/
+inductive RawSource where
+  /-- One question or one panel. -/
+  | rhs (r : RawRhs)
+  /-- A bounded revision. `reviewAnn` is the optional `: verdict` annotation on
+  the review binding, kept so the checker can refuse a wrong one at its own
+  position. -/
+  | revising (subject carrier : String) (bound : Nat)
+      (reviewName : String) (reviewAnn : Option Code) (review : RawRhs)
+      (amend : RawRhs) (pos : Pos)
+  deriving Repr, DecidableEq, Inhabited
+
+/-- `[[RawBlock]]` = an unchecked block: statements, of which the branchings
+are terminal — each arm *is* the rest of the workflow — and a statement-position
+ask is the act, which may be followed. `stop` writes the block that does
+nothing, and `{ }` is not writable. -/
 inductive RawBlock where
-  /-- `let x = rhs` followed by the rest of the block. -/
-  | bind (x : String) (rhs : RawRhs) (rest : RawBlock) (pos : Pos)
-  /-- `{ }`, or a block whose statements ran out: nothing further is done. The
-  position is the block's opening brace, which is where a reader looks to see
-  what did not happen. -/
+  /-- `stop`, or a block whose statements ran out after an act. The position is
+  where the nothing is written. -/
   | empty (pos : Pos)
-  /-- `act tgt "…"`: the terminal act, an `.ack` question and nothing after
-  it. -/
-  | act (target : RawTarget) (prompt : Prompt) (pos : Pos)
+  /-- `x <- source` or `x : kind <- source`, followed by the rest. When the
+  source is a `revising`, the rest must begin with `case x { settled …
+  unsettled … }`, which the checker enforces. -/
+  | bind (x : String) (ann : Option Code) (src : RawSource) (rest : RawBlock) (pos : Pos)
+  /-- A statement-position `ask`: the act. It binds nothing and asks for
+  nothing back (`.ack`), and the block continues after it. -/
+  | act (a : RawAsk) (rest : RawBlock) (pos : Pos)
   /-- `if x {…} else {…}`: the two values of `El .flag`, both arms written. -/
   | ifFlag (x : String) (yes no : RawBlock) (pos : Pos)
-  /-- `case x { approve {…} object {…} declined {…} }`: the three values of
+  /-- `case x { approved {…} objected {…} no answer {…} }`: the three values of
   `VTag`, the finite classifier of a verdict. -/
-  | caseVerdict (x : String) (approve object declined : RawBlock) (pos : Pos)
-  /-- `revising a up to n revisions { check given p {…} revise given p, why {…} }
-  approved given p {…} never approved {…}`: bounded revision, whose two braced
-  clauses are literally `Plan.revising`'s two continuations and whose two
-  outcome clauses are the two arms the graft's `finishCont` writes.
-
-  `up to n revisions` performs **n+1 checks and at most n revisions** — check
-  first, revise in the recursive call — which is the reading `Plan.revising`'s
-  docstring records three independent derivations getting backwards, and which
-  the surface now spells where the numeral is. -/
-  | revising (subject : String) (bound : Nat)
-      (checkBinder : String) (check : RawRhs)
-      (artBinder : String) (whyBinder : String) (revise : RawRhs)
-      (approvedBinder : String) (approved : RawBlock)
-      (neverApproved : RawBlock) (pos : Pos)
+  | caseVerdict (x : String) (approved objected noAnswer : RawBlock) (pos : Pos)
+  /-- `case x { settled p {…} unsettled {…} }`: the two outcomes of a bounded
+  revision, with the settled artefact bound as `p`. Legal only immediately
+  after `x <- revising …`, which the checker enforces. -/
+  | caseResult (x : String) (settledName : String) (settled unsettled : RawBlock) (pos : Pos)
+  /-- `known here: a, b, c` (or `known here: nothing`): a checker-verified
+  assertion of exactly the names in scope, innermost first. Documentation that
+  cannot rot. -/
+  | knownHere (names : List String) (rest : RawBlock) (pos : Pos)
   deriving Repr, DecidableEq, Inhabited
 
 /-- `[[Raw]]` = an unchecked text of a workflow: the body of `workflow { … }`,
@@ -243,6 +261,11 @@ def RawRhs.pos : RawRhs → Pos
   | .ask a => a.pos
   | .panel _ p => p
 
+/-- Where a source begins, for diagnoses. -/
+def RawSource.pos : RawSource → Pos
+  | .rhs r => r.pos
+  | .revising _ _ _ _ _ _ _ p => p
+
 /-! ## The names of the answer kinds
 
 Spelled once, so that the parser's keywords and the checker's diagnoses cannot
@@ -253,19 +276,20 @@ def codeName : Code → String
   | .text => "text"
   | .verdict => "verdict"
   | .flag => "flag"
-  | .ack => "ack"
+  | .ack => "receipt"
 
 /-- …and the keyword parsed back, which is the section `codeName` splits. -/
 def codeOfName : String → Option Code
   | "text" => some .text
   | "verdict" => some .verdict
   | "flag" => some .flag
-  | "ack" => some .ack
+  | "receipt" => some .ack
   | _ => none
 
 /-- **Morphism equation.** `codeOfName` is a retraction of `codeName`: every
 answer kind is written by exactly one keyword and read back as itself, so the
-two tables above are one table. -/
+two tables above are one table. (`.ack` is *written* `receipt`, because what an
+act hands back is a receipt and carries no information.) -/
 @[simp] theorem codeOfName_codeName (c : Code) : codeOfName (codeName c) = some c := by
   cases c <;> rfl
 
