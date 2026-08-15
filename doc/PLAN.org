@@ -1379,7 +1379,7 @@ Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 18:34]
-:MODIFIED: [2026-08-15 Sat 10:46]
+:MODIFIED: [2026-08-15 Sat 11:51]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -1486,6 +1486,13 @@ Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is
     "author": "johnw",
     "text": "Round fourteen (owner): complete test battery. test/DslSmoke.lean rebuilt as a 112-case table (19 accepts, 93 refusals pinned to whole diagnoses, positions included) generated from an empirical probe so expected strings cannot be transcription errors, plus semantic sections: flagship parse pin, verdict-arm distinctness, the three render states of a {v} splice, the --define override path at the library level (applied + refused), the at-bound loop with wall clocks, draw indices, block/string trace identity, and the one refusal unreachable from source (empty panel) tested against a hand-built Raw. test/coverage_audit.py mechanically cross-checks every .error site in Parse/Check against the battery — 63 sites, 54 audited and hit, 9 exempt with stated reasons (six unreachable fuel branches, two generic wrapper shapes, expectPunct's mark-is-the-message) — and FAILS if a future refusal ships untested. All smokes green. Parallel discovery workflow (5 axes + synthesis) now hunting behaviors the site audit cannot see: untested legal combinations, run-level semantics, and mutation-surviving gaps.",
     "created_at": "2026-08-15T17:46:01Z"
+  },
+  {
+    "id": 83,
+    "issue_id": "acat-k28",
+    "author": "johnw",
+    "text": "Round fifteen: the parallel discovery workflow (5 axes + synthesis; 31 survivors of 37 proposals) landed. FOUND AND FIXED A LIVE LEXER BUG: scanString advanced the column by used+1 after a hole while scanHole already counts both braces, shifting every diagnosis later on the line by one per hole — caught by the mutation-minded discovery, pinned by a hand-counted expectation (1:46), fixed with zero drift in all 112 prior expectations (none had an error after a hole, which is itself why no test caught it). The battery grows to 143 table cases + 19 run-level discovery pins whose expectations were stated independently of the implementation: sharing (three consumptions, one question), early loop settlement with the amended candidate visible in round-2's review prompt, the panel read-out with mixed answers concatenating objections in member order, a verdict-carrier loop, act weakening (names straddling an act), the four kinds on the wire, draw-distinguished questions, define-holes keeping a question closed across disagreeing worlds (batch rung pinned), zero-amendment loops, a flag-carrier loop, in-place define splicing, overrides reaching later defines, adjacent holes, block backslash literalness, CRLF=LF, dedent-as-meet, empty prompts, fence closers before ,/]/}, and closing-fence indentation. One expectation of mine was corrected by argument (a verdict subject makes all four events verdicts). Also from discovery: rhsPlan's 'the review of a bounded revision' wording is dead code (the review's kind is always imposed as verdict) — for the acat-o5o sweep. Character-counted columns now pinned with Greek letters. All smokes + audit green.",
+    "created_at": "2026-08-15T18:51:48Z"
   }
 ]
 #+end_src

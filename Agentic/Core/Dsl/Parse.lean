@@ -154,7 +154,10 @@ private def scanString : Nat → List Char → Pos → List Char → Prompt →
       match scanHole p cs with
       | .error e => .error e
       | .ok (name, used, rest) =>
-        scanString fuel rest ⟨p.line, p.col + used + 1⟩ []
+        -- `used` already counts both braces, so the hole advances the column
+        -- by exactly `used`; anything more would shift every later diagnosis
+        -- on the line (found by the round-fourteen discovery pass).
+        scanString fuel rest ⟨p.line, p.col + used⟩ []
           (Chunk.interp name :: flushLit acc chunks)
     else if c == '\n' then
       scanString fuel cs ⟨p.line + 1, 1⟩ (c :: acc) chunks

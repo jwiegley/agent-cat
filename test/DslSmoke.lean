@@ -255,10 +255,12 @@ def batteryCases : List (String × String × String) :=
    "workflow { p : text <- panel, all must approve [ ask model \"a\" \"x\" ] }",
    "1:24: this binding: a panel combines its members in the verdict monoid, so it answers `verdict`, not `text` at `panel`"),
   ("a panel needs no annotation",
-   "workflow { p <- panel, all must approve [ ask model \"a\" \"x\" ]\n           case p { approved { stop } objected { stop } no answer { stop } } }",
+   "workflow { p <- panel, all must approve [ ask model \"a\" \"x\" ]
+           case p { approved { stop } objected { stop } no answer { stop } } }",
    "ok"),
   ("a panel result spliced as its objections",
-   "workflow { p <- panel, all must approve [ ask model \"a\" \"x\", ask model \"b\" \"y\" ]\n           ask tool \"log\" \"{p}\" }",
+   "workflow { p <- panel, all must approve [ ask model \"a\" \"x\", ask model \"b\" \"y\" ]
+           ask tool \"log\" \"{p}\" }",
    "ok"),
   ("a panel at statement position",
    "workflow { panel, all must approve [ ask model \"a\" \"x\" ] }",
@@ -397,8 +399,192 @@ def batteryCases : List (String × String × String) :=
    "2:18: expected `{` at `stop`"),
   ("an amendment bound above the limit",
    "workflow { d : text <- ask model \"a\" \"draft\"\n           r <- revising d as c, at most 65 amendments {\n             v <- ask model \"m\" \"review {c}\"\n             amend c { ask model \"a\" \"fix {c} {v}\" }\n           }\n           case r { settled x { stop } unsettled { stop } } }",
-   "2:17: a bounded revision is unrolled into the term it writes, so its bound may name at most 64 amendments at `at most 65 amendments`")
+   "2:17: a bounded revision is unrolled into the term it writes, so its bound may name at most 64 amendments at `at most 65 amendments`"),
+  ("one binding, holed three times, asked once",
+   "workflow {\n  g <- ask tool \"cat\" \"read the file\"\n  ask tool \"log\" \"{g}||{g}\"\n  ask tool \"audit\" \"seen: {g}\"\n}",
+   "ok"),
+  ("a loop that settles at round two of four",
+   "workflow {\n  d : text <- ask model \"author\" \"draft\"\n  r <- revising d as patch, at most 3 amendments {\n    v <- ask model \"critic\" \"review {patch}\"\n    amend patch { ask model \"author\" \"amend {patch} given {v}\" }\n  }\n  case r { settled final { ask tool \"apply\" \"apply {final}\" }\n           unsettled { ask tool \"log\" \"gave up\" } }\n}",
+   "ok"),
+  ("three panel members, answered differently",
+   "workflow {\n  p <- panel, all must approve [ ask model \"alpha\" \"check one\",\n                                ask model \"beta\" \"check two\",\n                                ask model \"gamma\" \"check three\" ]
+  ask tool \"log\" \"objections: {p}\"\n  case p { approved { ask tool \"t\" \"went-approved\" }\n           objected { ask tool \"t\" \"went-objected\" }\n           no answer { ask tool \"t\" \"went-noanswer\" } }\n}",
+   "ok"),
+  ("a revising subject of kind verdict",
+   "workflow {\n  j : verdict <- ask model \"judge\" \"Judge the draft; object with reasons.\"\n  r <- revising j as c, at most 1 amendment {\n    v <- ask model \"meta\" \"Is this judgment fair?\\n{c}\"\n    amend c { ask model \"judge\" \"Rejudge, given: {c} and {v}\" }\n  }\n  case r {\n    settled p { case p { approved { ask tool \"log\" \"went-approved\" }\n                         objected { ask tool \"log\" \"went-objected\" }\n                         no answer { ask tool \"log\" \"went-noanswer\" } } }\n    unsettled { stop }\n  }\n}",
+   "ok"),
+  ("names straddling an act",
+   "workflow {\n  a : text <- ask tool \"t\" \"AAA\"\n  ask tool \"warm\" \"an act between\"\n  b : text <- ask tool \"t\" \"BBB\"\n  ask tool \"log\" \"{a}|{b}\"\n}",
+   "ok"),
+  ("the four kinds, as the codes actually asked",
+   "workflow {\n  t : text <- ask tool \"reader\" \"read\"\n  v : verdict <- ask model \"judge\" \"judge\"\n  f : flag <- ask person \"owner\" \"yes or no?\"\n  ask tool \"recorder\" \"record {t} and {v}\"\n  if f { ask tool \"t\" \"went-yes\" } else { ask tool \"t\" \"went-no\" }\n}",
+   "ok"),
+  ("two draws of one prompt are two questions",
+   "workflow {\n  a <- ask model \"oracle\" \"same words\"\n  b <- ask model \"oracle\" \"same words\"\n  c <- ask model \"oracle\" independent draw 1 \"same words\"\n  ask tool \"log\" \"{a}|{b}|{c}\"\n}",
+   "ok"),
+  ("a define-holed prompt is still a closed question",
+   "define spec = \"the house rules\"\nworkflow {\n  g : text <- ask person \"owner\" \"what shall I read?\"\n  ask tool \"brief\" \"brief against {spec}\"\n}",
+   "ok"),
+  ("served by and independent draw together, in every ask position",
+   "workflow {\n  a : text <- ask model \"author\" served by \"deep\" independent draw 2 \"draft it\"\n  ask model \"logger\" served by \"cheap\" independent draw 1 \"note {a}\"\n  p <- panel, all must approve [\n    ask model \"one\" served by \"deep\" independent draw 3 \"review {a}\",\n    ask tool \"lint\" independent draw 1 \"lint {a}\",\n    ask person \"owner\" independent draw 2 \"ok? {a}\"\n  ]
+  case p { approved { stop } objected { stop } no answer { stop } }\n}",
+   "ok"),
+  ("a revision bounded at zero amendments",
+   "workflow {\n  d : text <- ask model \"a\" \"draft\"\n  r <- revising d as c, at most 0 amendments {\n    v <- ask model \"m\" \"review {c}\"\n    amend c { ask model \"a\" \"fix {c} {v}\" }\n  }\n  case r { settled x { ask tool \"log\" \"settled {x}\" }\n           unsettled { ask tool \"log\" \"unsettled\" } }\n}",
+   "ok"),
+  ("a bounded revision whose candidate is not text",
+   "workflow {\n  ready : flag <- ask person \"owner\" \"is the release ready?\"\n  r <- revising ready as cand, at most 2 amendments {\n    v <- ask model \"m\" \"does the release look ready?\"\n    amend cand { ask person \"owner\" \"is it ready now?\" }\n  }\n  case r {\n    settled done { if done { ask tool \"ship\" \"ship it\" } else { stop } }\n    unsettled { stop }\n  }\n}",
+   "ok"),
+  ("two define holes in one prompt",
+   "define a = \"A\"\ndefine b = \"B\"\nworkflow { ask tool \"t\" \"{a} and {b}\" }",
+   "ok"),
+  ("an override reaches a later define that holes it",
+   "define target = \"the parser\"\ndefine brief  = \"Harden {target}, briefly.\"\nworkflow { ask tool \"t\" \"{brief}\" }",
+   "ok"),
+  ("adjacent holes and escapes against holes",
+   "workflow { a : text <- ask tool \"t\" \"A\"\n           b : text <- ask tool \"t\" \"B\"\n           ask tool \"log\" \"{a}{b}\\{{a}\\}{b}\" }",
+   "ok"),
+  ("a backslash in a block is not a string escape",
+   "workflow { a : text <- ask tool \"t\" \"A\"\n           ask tool \"log\" ```\n             C:\\path and \\\\{a} and \\{a} and {a} and a trailing \\\n             ```\n}",
+   "ok"),
+  ("crlf block content, observed rather than accepted",
+   "workflow {\r\n  g : text <- ask tool \"t\" ```\r\n    line one\r\n    line two\r\n  ```\r\n}\r\n",
+   "ok"),
+  ("a block whose lines are not uniformly indented",
+   "workflow {\n  g : text <- ask tool \"t\" ```\n        alpha\n      beta\n        \n  ```\n  ask tool \"log\" \"{g}\"\n}",
+   "ok"),
+  ("the scope at a loop's two exits, asserted",
+   "workflow {\n  d : text <- ask model \"a\" \"draft\"\n  r <- revising d as c, at most 1 amendment {\n    v <- ask model \"m\" \"review {c}\"\n    amend c { ask model \"a\" \"fix {c} {v}\" }\n  }\n  case r {\n    settled x { known here: x, d\n                ask tool \"log\" \"{x}\" }\n    unsettled { known here: d\n                stop }\n  }\n}",
+   "ok"),
+  ("a kind fixed on the far side of a known here and a graft",
+   "workflow {\n  d : text <- ask model \"a\" \"draft\"\n  note <- ask tool \"c\" \"notes\"\n  known here: note, d\n  r <- revising d as c, at most 1 amendment {\n    v <- ask model \"m\" \"review {c}\"\n    amend c { ask model \"a\" \"fix {c} {v}\" }\n  }\n  case r { settled x { ask tool \"log\" \"{x} and {note}\" }\n           unsettled { stop } }\n}",
+   "ok"),
+  ("kind inference that only the amend clause grounds",
+   "workflow {\n  style <- ask tool \"cat\" \"the house style\"\n  d <- ask model \"a\" \"draft something\"\n  r <- revising d as p, at most 2 amendments {\n    v <- ask model \"m\" \"is the work acceptable?\"\n    amend p { ask model \"a\" \"improve {p} to match {style}\" }\n  }\n  case r { settled x { ask tool \"log\" \"{x}\" } unsettled { stop } }\n}",
+   "ok"),
+  ("first-use-wins across the arms of an if",
+   "workflow {\n  ok : flag <- ask person \"o\" \"ready?\"\n  g <- ask tool \"c\" \"hi\"\n  if ok { ask tool \"log\" \"{g}\" }\n  else { if g { stop } else { stop } }\n}",
+   "5:10: an `if` branches on a flag, but `g` answers `text` at `g`"),
+  ("keywords spelled as binder names",
+   "workflow { known <- ask tool \"t\" \"a\"\n           text : text <- ask tool \"t\" \"b\"\n           workflow <- ask tool \"t\" \"c\"\n           verdict <- ask model \"m\" \"judge {text}\"\n           ask tool \"log\" \"{known} {workflow}\"\n           case verdict { approved { stop } objected { stop } no answer { stop } } }",
+   "ok"),
+  ("a known here is a whole block body",
+   "workflow {\n  ok : flag <- ask person \"o\" \"go ahead?\"\n  if ok { known here: ok } else { stop }\n}",
+   "ok"),
+  ("a panel in the amend position of a bounded revision",
+   "workflow { d : text <- ask model \"a\" \"draft\"\n           r <- revising d as c, at most 1 amendment {\n             v <- ask model \"m\" \"review {c}\"\n             amend c { panel, all must approve [ ask model \"z\" \"fix {c}\" ] }\n           }\n           case r { settled x { stop } unsettled { stop } } }",
+   "4:24: the `amend` of a bounded revision: a panel combines its members in the verdict monoid, so it answers `verdict`, not `text` at `panel`"),
+  ("an addressee named by a define hole",
+   "define cat = \"cat\"\nworkflow { g : text <- ask tool \"{cat}\" \"read something\"\n           ask tool \"log\" \"{g}\" }",
+   "2:33: a name here is written, not computed: no holes"),
+  ("empty prompts and an empty define",
+   "define empty = \"\"\nworkflow { ask tool \"t\" \"\"\n           ask tool \"t\" \"{empty}\"\n           ask tool \"t\" \"pre{empty}post\" }",
+   "ok"),
+  ("a fence closed by a comma, a bracket and a brace",
+   "workflow {\n  p <- panel, all must approve [ ask model \"a\" ```\n    is this ok\n    ```, ask model \"b\" ```\n    and this\n    ``` ]
+  case p {\n    approved { ask tool \"t\" ```\n      approved\n      ```}\n    objected { stop }\n    no answer { stop } }\n}",
+   "ok"),
+  ("a closing fence indented other than its content",
+   "workflow {\n  g : text <- ask tool \"t\" ```\n\t\tline one\n\t\tline two\n      ```\n  h : text <- ask tool \"t\" ```\n    line three\n```\n  ask tool \"log\" \"{g} {h}\"\n}",
+   "ok"),
+  ("a diagnosis column after a hole in a quoted string",
+   "workflow { g : text <- ask tool \"t\" \"hi {g}\" ; }",
+   "1:46: unexpected character at `;`"),
+  ("a numeral abutting the next token",
+   "workflow{d:text<-ask model\"a\"independent draw 2\"draft\"\nr<-revising d as c,at most 2amendments{v<-ask model\"m\"\"review {c}\"amend c{ask model\"a\"\"fix {c} {v}\"}}\ncase r{settled x{ask tool\"t\"\"{x}\"}unsettled{stop}}}",
+   "ok"),
+  ("columns count characters, not bytes",
+   "workflow { ask tool \"t\" \"αβγ\" ; }",
+   "1:31: unexpected character at `;`")
 ]
+
+/-! ## The discovery pins (round fourteen): what a run must observe
+
+Each expectation below was stated independently of the implementation — by the
+discovery pass, from the grammar's rules — and is NOT regenerated from observed
+output, so a failure here is a bug or a wrong reading of the rules, never a
+baseline to refresh. -/
+
+/-- The events of a source under a world, or `[]` where it does not check. -/
+def evsOf (ω : Ω) (src : String) : List Event :=
+  match parseAndCheckE src with
+  | .error _ => []
+  | .ok p => Plan.trace ω p Env.nil
+
+def promptAt (evs : List Event) (i : Nat) : String :=
+  match evs.drop i with | e :: _ => e.q.prompt | [] => "<none>"
+
+def codesOf (evs : List Event) : String :=
+  String.intercalate "," (evs.map fun e => codeName e.c)
+
+def drawsOf (evs : List Event) : String :=
+  String.intercalate "," (evs.map fun e => toString e.q.draw)
+
+/-- A world from one function per kind, echoing prompts by default. -/
+def world (t : Q .text → String := fun q => q.prompt)
+    (v : Q .verdict → Verdict := fun _ => Verdict.approve)
+    (f : Q .flag → Bool := fun _ => true) : Ω := fun c =>
+  match c with
+  | .text => t | .verdict => v | .flag => f | .ack => fun _ => ()
+
+/-- one binding, holed three times, asked once -/
+def semSrc0 : String := "workflow {\n  g <- ask tool \"cat\" \"read the file\"\n  ask tool \"log\" \"{g}||{g}\"\n  ask tool \"audit\" \"seen: {g}\"\n}"
+
+/-- a loop that settles at round two of four -/
+def semSrc1 : String := "workflow {\n  d : text <- ask model \"author\" \"draft\"\n  r <- revising d as patch, at most 3 amendments {\n    v <- ask model \"critic\" \"review {patch}\"\n    amend patch { ask model \"author\" \"amend {patch} given {v}\" }\n  }\n  case r { settled final { ask tool \"apply\" \"apply {final}\" }\n           unsettled { ask tool \"log\" \"gave up\" } }\n}"
+
+/-- three panel members, answered differently -/
+def semSrc2 : String := "workflow {\n  p <- panel, all must approve [ ask model \"alpha\" \"check one\",\n                                ask model \"beta\" \"check two\",\n                                ask model \"gamma\" \"check three\" ]
+  ask tool \"log\" \"objections: {p}\"\n  case p { approved { ask tool \"t\" \"went-approved\" }\n           objected { ask tool \"t\" \"went-objected\" }\n           no answer { ask tool \"t\" \"went-noanswer\" } }\n}"
+
+/-- a revising subject of kind verdict -/
+def semSrc3 : String := "workflow {\n  j : verdict <- ask model \"judge\" \"Judge the draft; object with reasons.\"\n  r <- revising j as c, at most 1 amendment {\n    v <- ask model \"meta\" \"Is this judgment fair?\\n{c}\"\n    amend c { ask model \"judge\" \"Rejudge, given: {c} and {v}\" }\n  }\n  case r {\n    settled p { case p { approved { ask tool \"log\" \"went-approved\" }\n                         objected { ask tool \"log\" \"went-objected\" }\n                         no answer { ask tool \"log\" \"went-noanswer\" } } }\n    unsettled { stop }\n  }\n}"
+
+/-- names straddling an act -/
+def semSrc4 : String := "workflow {\n  a : text <- ask tool \"t\" \"AAA\"\n  ask tool \"warm\" \"an act between\"\n  b : text <- ask tool \"t\" \"BBB\"\n  ask tool \"log\" \"{a}|{b}\"\n}"
+
+/-- the four kinds, as the codes actually asked -/
+def semSrc5 : String := "workflow {\n  t : text <- ask tool \"reader\" \"read\"\n  v : verdict <- ask model \"judge\" \"judge\"\n  f : flag <- ask person \"owner\" \"yes or no?\"\n  ask tool \"recorder\" \"record {t} and {v}\"\n  if f { ask tool \"t\" \"went-yes\" } else { ask tool \"t\" \"went-no\" }\n}"
+
+/-- two draws of one prompt are two questions -/
+def semSrc6 : String := "workflow {\n  a <- ask model \"oracle\" \"same words\"\n  b <- ask model \"oracle\" \"same words\"\n  c <- ask model \"oracle\" independent draw 1 \"same words\"\n  ask tool \"log\" \"{a}|{b}|{c}\"\n}"
+
+/-- a define-holed prompt is still a closed question -/
+def semSrc7 : String := "define spec = \"the house rules\"\nworkflow {\n  g : text <- ask person \"owner\" \"what shall I read?\"\n  ask tool \"brief\" \"brief against {spec}\"\n}"
+
+/-- a revision bounded at zero amendments -/
+def semSrc8 : String := "workflow {\n  d : text <- ask model \"a\" \"draft\"\n  r <- revising d as c, at most 0 amendments {\n    v <- ask model \"m\" \"review {c}\"\n    amend c { ask model \"a\" \"fix {c} {v}\" }\n  }\n  case r { settled x { ask tool \"log\" \"settled {x}\" }\n           unsettled { ask tool \"log\" \"unsettled\" } }\n}"
+
+/-- a bounded revision whose candidate is not text -/
+def semSrc9 : String := "workflow {\n  ready : flag <- ask person \"owner\" \"is the release ready?\"\n  r <- revising ready as cand, at most 2 amendments {\n    v <- ask model \"m\" \"does the release look ready?\"\n    amend cand { ask person \"owner\" \"is it ready now?\" }\n  }\n  case r {\n    settled done { if done { ask tool \"ship\" \"ship it\" } else { stop } }\n    unsettled { stop }\n  }\n}"
+
+/-- two define holes in one prompt -/
+def semSrc10 : String := "define a = \"A\"\ndefine b = \"B\"\nworkflow { ask tool \"t\" \"{a} and {b}\" }"
+
+/-- an override reaches a later define that holes it -/
+def semSrc11 : String := "define target = \"the parser\"\ndefine brief  = \"Harden {target}, briefly.\"\nworkflow { ask tool \"t\" \"{brief}\" }"
+
+/-- adjacent holes and escapes against holes -/
+def semSrc12 : String := "workflow { a : text <- ask tool \"t\" \"A\"\n           b : text <- ask tool \"t\" \"B\"\n           ask tool \"log\" \"{a}{b}\\{{a}\\}{b}\" }"
+
+/-- a backslash in a block is not a string escape -/
+def semSrc13 : String := "workflow { a : text <- ask tool \"t\" \"A\"\n           ask tool \"log\" ```\n             C:\\path and \\\\{a} and \\{a} and {a} and a trailing \\\n             ```\n}"
+
+/-- crlf block content, observed rather than accepted -/
+def semSrc14 : String := "workflow {\r\n  g : text <- ask tool \"t\" ```\r\n    line one\r\n    line two\r\n  ```\r\n}\r\n"
+
+/-- a block whose lines are not uniformly indented -/
+def semSrc15 : String := "workflow {\n  g : text <- ask tool \"t\" ```\n        alpha\n      beta\n        \n  ```\n  ask tool \"log\" \"{g}\"\n}"
+
+/-- empty prompts and an empty define -/
+def semSrc16 : String := "define empty = \"\"\nworkflow { ask tool \"t\" \"\"\n           ask tool \"t\" \"{empty}\"\n           ask tool \"t\" \"pre{empty}post\" }"
+
+/-- a fence closed by a comma, a bracket and a brace -/
+def semSrc17 : String := "workflow {\n  p <- panel, all must approve [ ask model \"a\" ```\n    is this ok\n    ```, ask model \"b\" ```\n    and this\n    ``` ]
+  case p {\n    approved { ask tool \"t\" ```\n      approved\n      ```}\n    objected { stop }\n    no answer { stop } }\n}"
+
+/-- a closing fence indented other than its content -/
+def semSrc18 : String := "workflow {\n  g : text <- ask tool \"t\" ```\n\t\tline one\n\t\tline two\n      ```\n  h : text <- ask tool \"t\" ```\n    line three\n```\n  ask tool \"log\" \"{g} {h}\"\n}"
 
 /-! ## What a table of sources cannot say -/
 
@@ -584,6 +770,168 @@ def main : IO UInt32 := do
     checkTrue "a block prompt and its quoted spelling are one program"
       (decide (traceOf srcBlockSpelling = traceOf srcStringSpelling)
         && (traceOf srcBlockSpelling).length == 2)
+
+
+    -- 9. The discovery pins.
+    -- 9a. Sharing: one binding, holed three times, asked once.
+    let evs := evsOf (world) semSrc0
+    check "sharing: three consumptions are three events, one text question" "3"
+      (toString evs.length)
+    check "sharing: the doubled hole splices one answer twice"
+      "read the file||read the file" (promptAt evs 1)
+    check "sharing: the third consumption reads the same answer"
+      "seen: read the file" (promptAt evs 2)
+
+    -- 9b. A loop that settles at round two of four.
+    let evs := evsOf (world (v := fun q =>
+      if q.prompt == "review draft" then Verdict.object ["too short"] else Verdict.approve))
+      semSrc1
+    check "early settlement: five events, not the nine of exhaustion"
+      "text,verdict,text,verdict,receipt" (codesOf evs)
+    check "…the amend is told the candidate and the objections"
+      "amend draft given too short" (promptAt evs 2)
+    check "…round two reviews the AMENDED candidate"
+      "review amend draft given too short" (promptAt evs 3)
+    check "…and the settled arm receives it"
+      "apply amend draft given too short" (promptAt evs 4)
+
+    -- 9c. Three panel members, answered differently: the fold is a read-out.
+    let mixed : Ω := world (v := fun q =>
+      if q.addressee = Addressee.model "alpha" then Verdict.object ["A"]
+      else if q.addressee = Addressee.model "beta" then Verdict.approve
+      else Verdict.object ["C"])
+    let evs := evsOf mixed semSrc2
+    check "a mixed panel is five events" "5" (toString evs.length)
+    check "…objections concatenate in member order" "objections: A; C" (promptAt evs 3)
+    check "…and the mixed panel objects" "went-objected" (promptAt evs 4)
+    let evs := evsOf (world) semSrc2
+    check "…while a unanimous one approves" "went-approved" (promptAt evs 4)
+
+    -- 9d. A revising subject of kind verdict: the carrier splices rendered.
+    let evs := evsOf (world (v := fun _ => Verdict.object ["too long"])) semSrc3
+    check "a verdict carrier splices as its objections"
+      "Is this judgment fair?\ntoo long" (promptAt evs 1)
+    -- j itself answers a verdict, so all four events are verdicts: the bind,
+    -- round one's review, the amend, and round two's review of an identical
+    -- question, which the world (a function) must answer identically.
+    check "…and a constant objection exhausts the loop"
+      "verdict,verdict,verdict,verdict" (codesOf evs)
+    let evs := evsOf (world) semSrc3
+    check "…an approving world settles at once and cases the verdict"
+      "went-approved" (promptAt evs 2)
+
+    -- 9e. Names straddling an act: the act's weakening moves no index.
+    let evs := evsOf (world) semSrc4
+    check "an act between two bindings shifts neither" "AAA|BBB" (promptAt evs 3)
+
+    -- 9f. The four kinds, as the codes actually asked.
+    let evs := evsOf (world (t := fun _ => "TXT") (v := fun _ => Verdict.object ["OBJ"])) semSrc5
+    check "the trace's codes are the annotations' kinds"
+      "text,verdict,flag,receipt,receipt" (codesOf evs)
+    check "…text and a verdict splice by kind" "record TXT and OBJ" (promptAt evs 3)
+    check "…a true flag takes the yes arm" "went-yes" (promptAt evs 4)
+    let evs := evsOf (world (f := fun _ => false)) semSrc5
+    check "…a false flag takes the no arm, five events still" "went-no" (promptAt evs 4)
+
+    -- 9g. Two draws of one prompt are two questions; one draw is one.
+    let evs := evsOf (world (t := fun q => "draw" ++ toString q.draw)) semSrc6
+    check "two identical asks are two events" "4" (toString evs.length)
+    checkTrue "…of the same question"
+      (match evs with | e0 :: e1 :: _ => decide (e0 = e1) | _ => false)
+    checkTrue "…and the fresh draw is a different question"
+      (match evs with | e0 :: _ :: e2 :: _ => decide (e2 ≠ e0) | _ => false)
+    check "…whose answers the world keys on the draw" "draw0|draw0|draw1" (promptAt evs 3)
+
+    -- 9h. A define-holed prompt is a closed question: same event in every world.
+    let t1 := evsOf (world (t := fun _ => "AAA")) semSrc7
+    let t2 := evsOf (world (t := fun _ => "BBB")) semSrc7
+    checkTrue "a define-holed question is the same event in disagreeing worlds"
+      (match t1, t2 with
+       | [a1, b1], [a2, b2] => decide (b1 = b2) && decide (a1 ≠ a2)
+       | _, _ => false)
+    check "…and the program sits at the batch rung" "Agentic.Core.Level.batch"
+      (match parseAndCheckE semSrc7 with
+       | .ok p => toString (repr (level p))
+       | .error e => s!"did not check: {e}")
+
+    -- 9i. A revision bounded at zero amendments: the amend is written, never asked.
+    let evs := evsOf (world (v := fun _ => Verdict.object ["no"])) semSrc8
+    check "zero amendments, objecting: draft, one review, the unsettled act"
+      "text,verdict,receipt" (codesOf evs)
+    check "…which says so" "unsettled" (promptAt evs 2)
+    checkTrue "…and no amend question was ever put"
+      (evs.all fun e => !(e.q.prompt.startsWith "fix"))
+    let evs := evsOf (world) semSrc8
+    check "zero amendments, approving: settled with the original" "settled draft"
+      (promptAt evs 2)
+
+    -- 9j. A loop at a flag carrier: settled receives the candidate, at a kind
+    -- no prompt can show. (A closed review is one question, so its answer is
+    -- one answer: the loop settles at once or exhausts — that is the world
+    -- being a function, not a gap.)
+    let evs := evsOf (world (f := fun q => q.prompt == "is it ready now?")) semSrc9
+    check "an approving world settles with the original flag, which is false"
+      "flag,verdict" (codesOf evs)
+    let evs := evsOf (world (v := fun _ => Verdict.object ["not ready"])
+                            (f := fun q => q.prompt == "is it ready now?")) semSrc9
+    check "an objecting world exhausts through two flag amendments"
+      "flag,verdict,flag,verdict,flag,verdict" (codesOf evs)
+    checkTrue "…and ships nothing"
+      (evs.all fun e => e.q.prompt != "ship it")
+
+    -- 9k. Two define holes in one prompt splice in place.
+    let evs := evsOf (world) semSrc10
+    check "two define holes, spliced where they stand" "A and B" (promptAt evs 0)
+
+    -- 9l. An override reaches a later define that holes it.
+    check "an override is seen by later defines" "Harden the CSV reader, briefly."
+      (match parseWith [("target", [Chunk.lit "the CSV reader"])] semSrc11 with
+       | .error e => s!"did not parse: {e}"
+       | .ok r =>
+         match Dsl.check [] [] r with
+         | .error e => s!"did not check: {e}"
+         | .ok p => promptAt (Plan.trace (world) p Env.nil) 0)
+
+    -- 9m. Adjacent holes, and escapes against holes.
+    let evs := evsOf (world (t := fun q => q.prompt)) semSrc12
+    check "adjacent holes and brace escapes around a hole" "AB{A}B" (promptAt evs 2)
+
+    -- 9n. A backslash in a block is not a string escape.
+    let evs := evsOf (world (t := fun _ => "A")) semSrc13
+    let bs := "\\"
+    check "block backslashes are literal; the brace escapes are not"
+      ("C:" ++ bs ++ "path and " ++ bs ++ "{a} and {a} and A and a trailing " ++ bs)
+      (promptAt evs 1)
+
+    -- 9o. CRLF block content equals its LF spelling.
+    checkTrue "CRLF and LF spell one program"
+      (decide (evsOf (world) semSrc14 = evsOf (world) (semSrc14.replace "\r" "")))
+    check "…with no carriage return in the prompt" "line one\nline two"
+      (promptAt (evsOf (world) semSrc14) 0)
+
+    -- 9p. A block whose lines are not uniformly indented: the dedent is a meet.
+    let evs := evsOf (world) semSrc15
+    check "the dedent strips the COMMON indent and empties blank lines"
+      "  alpha\nbeta\n" (promptAt evs 0)
+
+    -- 9q. Empty prompts, and an empty define.
+    let evs := evsOf (world) semSrc16
+    check "an empty prompt asks with no words" "" (promptAt evs 0)
+    check "…an empty define splices nothing" "" (promptAt evs 1)
+    check "…and vanishes between its neighbours" "prepost" (promptAt evs 2)
+
+    -- 9r. A fence closed by a comma, a bracket and a brace.
+    let evs := evsOf (world) semSrc17
+    check "fences close before , ] and }" "is this ok,and this,approved"
+      (String.intercalate "," (evs.map fun e => e.q.prompt))
+
+    -- 9s. A closing fence indented other than its content.
+    let evs := evsOf (world) semSrc18
+    check "the closing fence's indent is not content" "line one\nline two"
+      (promptAt evs 0)
+    check "…even shallower than the content" "line three" (promptAt evs 1)
+
+    IO.println "discovery pins: done"
 
     IO.println "dsl smoke: all checks passed"
     return (0 : UInt32)
