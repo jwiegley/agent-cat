@@ -1379,7 +1379,7 @@ Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 18:34]
-:MODIFIED: [2026-08-15 Sat 11:51]
+:MODIFIED: [2026-08-15 Sat 13:44]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -1493,6 +1493,27 @@ Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is
     "author": "johnw",
     "text": "Round fifteen: the parallel discovery workflow (5 axes + synthesis; 31 survivors of 37 proposals) landed. FOUND AND FIXED A LIVE LEXER BUG: scanString advanced the column by used+1 after a hole while scanHole already counts both braces, shifting every diagnosis later on the line by one per hole — caught by the mutation-minded discovery, pinned by a hand-counted expectation (1:46), fixed with zero drift in all 112 prior expectations (none had an error after a hole, which is itself why no test caught it). The battery grows to 143 table cases + 19 run-level discovery pins whose expectations were stated independently of the implementation: sharing (three consumptions, one question), early loop settlement with the amended candidate visible in round-2's review prompt, the panel read-out with mixed answers concatenating objections in member order, a verdict-carrier loop, act weakening (names straddling an act), the four kinds on the wire, draw-distinguished questions, define-holes keeping a question closed across disagreeing worlds (batch rung pinned), zero-amendment loops, a flag-carrier loop, in-place define splicing, overrides reaching later defines, adjacent holes, block backslash literalness, CRLF=LF, dedent-as-meet, empty prompts, fence closers before ,/]/}, and closing-fence indentation. One expectation of mine was corrected by argument (a verdict subject makes all four events verdicts). Also from discovery: rhsPlan's 'the review of a bounded revision' wording is dead code (the review's kind is always imposed as verdict) — for the acat-o5o sweep. Character-counted columns now pinned with Greek letters. All smokes + audit green.",
     "created_at": "2026-08-15T18:51:48Z"
+  },
+  {
+    "id": 84,
+    "issue_id": "acat-k28",
+    "author": "johnw",
+    "text": "Round sixteen (owner, 2026-08-15): two feature requests. (1) FUNCTIONS: typed argument lists, typed result, Haskell-feel application by juxtaposition; long-form arguments as a trailing fenced block, or as $label references satisfied by labeled fences following the call. (2) IMPORTS: a library file holding functions, defines, and top-level statements; loading executes the top-level statements immediately (system-prompt priming); thereafter dotted references (library.spec, library.some_function). Design questions to settle denotationally: what a function IS (an open Plan over its parameter context; calls inline by substitution, so level<=branch and the exact cost tree survive; recursion refused by stratification); function body form (bindings then a result — does the body admit branches in v1?); call-boundary determinism under juxtaposition in a newline-insensitive grammar (args end where an ident is followed by <- or :); labeled fences as named arguments (the info-string position, previously refused, becomes the label); import semantics (library statements sequence BEFORE the main workflow; exports and their dotted holes; transitive imports with cycle refusal; diamond dedup; purity — the core stays String-in, the CLI resolves files). Design workflow launching.",
+    "created_at": "2026-08-15T20:02:14Z"
+  },
+  {
+    "id": 85,
+    "issue_id": "acat-k28",
+    "author": "johnw",
+    "text": "Round sixteen design complete (max-effort designer + max-effort adversary; docs at doc/research/dsl-redesign/fn-import-{design,attack}.md, uncommitted pending owner review). MEANING, derived not assumed: Sub Γ Δ = Env Δ → Env Γ is definitionally an argument list of typed Exprs, so a FUNCTION IS AN OPEN PLAN over its parameter context and a CALL IS Plan.sub — the β-law is denote_sub, a call's rung is the function's by level_sub, bodies cannot see the caller by TYPE (no implicit context accumulator is even writable), and the cost tree stays exact because the elaborated plan has no call node. Calls: arity-directed juxtaposition (functions declared before use ⇒ the parser knows n ⇒ zero lookahead; the same stratification refuses recursion); args are single tokens (name | literal | $label); nested calls refused (bind instead — sharing stays searchable); trailing block = final arg; $labels satisfied by labeled fences (the info-string slot). Body: bindings then 'answer x'; v1 refuses branches/loops in value bodies (recorded restriction); receipt procedures per attack repair A2 get the same restricted form. IMPORTS: a library is a plan prefix plus a namespace — no workflow block, top-level statements ARE the priming, spliced post-order DFS, deduped; exports (defines, functions, top-level bindings) dotted everywhere a name stands; closed priming questions are the same Q in every importer (memoization = standing context, no loader state); pure core takes (name, source) pairs, CLI resolves files, MCP v1 refuses imports. ATTACK: ADEQUATE — core sound, ~10 majors all with small local repairs, ordered list in the attack doc (receipt bodies restricted; 'answer' as a ground site for inference; known-here refused in primers; --define routed by module prefix; maxQuestions recurrence with the (n+1)-tail factor; statement-word refusal at argument positions; rule 3 amended to three consumption sites).",
+    "created_at": "2026-08-15T20:42:08Z"
+  },
+  {
+    "id": 86,
+    "issue_id": "acat-k28",
+    "author": "johnw",
+    "text": "Owner approves the functions+imports design (round sixteen), 2026-08-15: 'I approve of this design.' Committing the design record; implementation begins — value bodies as bind-chains ending in 'answer x', receipt procedures restricted per attack repair A2, arity-directed calls with the statement-word refusal (B1), 'answer' as an inference ground site (E1), labeled fences in the info-string slot, imports spliced post-order with dedup and dotted exports, --define routed by module prefix (D3), a pre-elaboration size recurrence for the call graph (C1), MCP refusing imports in v1.",
+    "created_at": "2026-08-15T20:44:59Z"
   }
 ]
 #+end_src
