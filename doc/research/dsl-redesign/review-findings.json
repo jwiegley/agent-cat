@@ -1,0 +1,932 @@
+[
+ {
+  "pass": "deep-review",
+  "kind": "defect",
+  "sev": "high",
+  "cat": "name-capture",
+  "loc": "Agentic/Core/Dsl/Parse.lean:254",
+  "claim": "A `define` silently captures every `{name}` splice of a `let`/`given` binder with the same spelling, turning a runtime answer into compile-time text with no diagnostic and no way to see it at the splice site.",
+  "evidence": "`expand` (Parse.lean:254-260) rewrites `.interp x` to the macro body whenever `defs.find? (\u00b7.1 == x)` succeeds, and `prompt defs p = Prompt.normalize (expand defs p)` (Parse.lean:262-263) is applied to every prompt in `parseAsk` (Parse.lean:321) and to `act` (Parse.lean:392). Binder names \u2014 `let x` (Parse.lean:381-382), `check given cv` (442), `revise given av, wv` (448-450), `approved given pv` (457) \u2014 are ordinary strings that are never compared against `defs`; `parseWith` (531-544) checks only that every *override* names an existing `define`. The checker never sees `defs` at all (`Check.lean` has no reference to it). Failure scenario: `define patch = \"the parser\"` followed by `revising dr",
+  "fix": "Either (a) refuse at `parseWith` any program in which a `define` name is later used as a `let`/`given` binder, with a `CheckError` naming both positions; or (b) give macros a splice syntax distinct from answers (e.g. `$spec` for a `define`, `{spec}` reserved for a bound answer) so capture becomes un"
+ },
+ {
+  "pass": "deep-review",
+  "kind": "defect",
+  "sev": "high",
+  "cat": "readability-dataflow",
+  "loc": "doc/dsl-guide.html:191",
+  "claim": "`{name}` denotes two entirely different mechanisms \u2014 a parse-time macro substitution and a runtime answer splice \u2014 with identical notation, so a reader cannot tell from a prompt which earlier answers it depends on; this is precisely the owner's \"hard to see how data was moving and who could see it\".",
+  "evidence": "Guide line 191 states flatly \"A prompt is a string in which `{name}` splices a bound answer\", and line 118 lists \"`define x =` and `let x =` for a name bound to an answer\" as one rule. Neither is true of `define`: `Parse.lean:254-263` substitutes macro bodies textually before any scope exists, while `Check.lean:112-123` resolves the survivors against `Bindings`. In `example/harden.wf` the prompt at line 17 reads `\"{guide}\\nIs this patch correct?\\n{patch}\\n{verdictSpec}\"` \u2014 `{guide}` and `{patch}` are runtime answers, `{verdictSpec}` is constant text from line 3, and nothing in the line distinguishes them. The consequence is visible in the elaborated term: `DslFlagship.lean:126-131` shows `dr",
+  "fix": "Distinct splice syntax for macros (see previous finding), and correct guide lines 118 and 191 to say that `define` binds text at parse time and `let`/`given` bind answers at run time, and that only the latter affect the rung."
+ },
+ {
+  "pass": "deep-review",
+  "kind": "observation",
+  "sev": "high",
+  "cat": "readability-flow",
+  "loc": "example/harden.wf:31",
+  "claim": "The `revising` statement's four clauses straddle two brace depths with no lexical marker joining them, so `approved given patch` and `never approved` read as new statements responding to the nearest preceding `ask` \u2014 which is exactly how the owner read them.",
+  "evidence": "In `example/harden.wf`, `revising draft up to 2 revisions {` opens at line 13; its `}` closes at line 29; `approved given patch {` begins at line 31 at the same indentation as `revising`, and `never approved { }` at line 41 \u2014 twenty-eight lines and three nested constructs after the word they belong to. The nearest preceding construct at the moment the reader reaches line 31 is the `ask model \"author\" ... for text` at line 26, inside `revise`. Nothing in the token stream joins them: `Parse.lean:454-467` simply demands the keywords `approved`/`given`/ident/block and then `never`/`approved`/block after `expectPunct '}'` at line 452. Compare `if x { \u2026 } else { \u2026 }` (Parse.lean:393-401), where `e",
+  "fix": "Either bring the outcomes inside the loop's braces as two more `given` clauses, or attach them to the closing brace the way `else` is attached (`} approved given patch {` \u2026 `} never approved {` \u2026 `}`), so the join is a single token rather than an indentation convention."
+ },
+ {
+  "pass": "deep-review",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "grammar-consistency",
+  "loc": "Agentic/Core/Dsl/Parse.lean:359",
+  "claim": "`{ }` carries four unrelated meanings in the grammar, contradicting the guide's headline rule \"A scope is a pair of braces\", and the error message a reader gets when they confuse two of them does not mention the difference.",
+  "evidence": "(1) A block of statements with an optional tail \u2014 `parseBlockFrom` (Parse.lean:376-387), used by `workflow`, `if`/`else` arms, `case` arms, `approved given \u2026` and `never approved`. (2) A single expression whose value is *returned* \u2014 `parseBracedRhs` (Parse.lean:359-364), used by `check given p { \u2026 }` and `revise given p, why { \u2026 }`; it accepts exactly one `RawRhs` and no statements. (3) A grouping of three arm clauses with no scope of its own \u2014 `expectPunct '{'` at Parse.lean:404 paired with Parse.lean:421 for `case`; note `if` has no such grouping brace. (4) A grouping of two loop clauses with no scope of its own \u2014 Parse.lean:439 paired with Parse.lean:452 for `revising`. The guide asserts ",
+  "fix": "At minimum give `parseBracedRhs` its own `expectKwSaying`-style diagnosis (\"a `check` clause holds one question or panel, not a block of statements\"). Better: use a different delimiter for the value-returning clauses (`check given p = panel [ \u2026 ]`), and drop the two pure grouping braces so `{ }` mea"
+ },
+ {
+  "pass": "deep-review",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "diagnostics",
+  "loc": "Agentic/Core/Dsl/Parse.lean:174",
+  "claim": "Every end-of-input diagnosis is reported at position 0:0, which is not a position in any file; a truncated program \u2014 the commonest editing error \u2014 gets a message a reader cannot act on and no caret.",
+  "evidence": "`posOf [] = \u27e80, 0\u27e9` (Parse.lean:174-176) and `unexpected` returns `\u27e8\u27e80,0\u27e9, s!\"expected {what}, but the source ended\", \"\"\u27e9` on an empty token list (Parse.lean:179-181). Failure scenario: `workflow { let g = ask tool \"c\" for text \"hi\"` (missing `}`) drives `parseBlockFrom` to `ts = []`, falls to the catch-all at Parse.lean:475-477, and renders as `0:0: expected a statement (\\`let\\`), a tail (\\`act\\`, \\`if\\`, \\`case\\`, \\`revising\\`), or \\`}\\`, but the source ended`. `cli/AgentCat.lean:224` (`caretLines`) short-circuits on `pos.line == 0`, so the user also gets no source line and no caret \u2014 unlike every other refusal in the language. The same happens for `parse \"\"` and for a program whose `workf",
+  "fix": "Thread the end-of-source position (line count and final column, computed once in `lex`) into `parseWith` and use it in `unexpected`'s `[]` branch instead of `\u27e80,0\u27e9`."
+ },
+ {
+  "pass": "deep-review",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "maintainability",
+  "loc": "Agentic/Core/Dsl/Syntax.lean:230",
+  "claim": "`RawBlock.revising` has eleven positional fields including four adjacent bare `String`s and two adjacent bare `RawBlock`s, so transposing the two outcome blocks \u2014 or any two binder names \u2014 type-checks silently and inverts the workflow.",
+  "evidence": "`Syntax.lean:230-234` declares `| revising (subject : String) (bound : Nat) (checkBinder : String) (check : RawRhs) (artBinder : String) (whyBinder : String) (revise : RawRhs) (approvedBinder : String) (approved : RawBlock) (neverApproved : RawBlock) (pos : Pos)`. It is consumed positionally everywhere: `Check.lean:364` (`.revising _ n _ _ _ _ _ _ acc exh _` \u2014 eight underscores), `Check.lean:427`, `Explain.lean:341`, the induction cases at `Check.lean:512` and `Dsl.lean:325`, and \u2014 most exposed \u2014 `DslFlagship.lean:133-179`, where the flagship's raw syntax is written out by hand as `RawBlock.revising \"draft\" 2 \"patch\" (panel \u2026) \"patch\" \"why\" (ask \u2026) \"patch\" (bind \u2026) (RawBlock.empty \u2026) \u2026`. Fai",
+  "fix": "Pull the loop into a `structure RawRevising` with named fields (or at least newtype the binder names as `Binder := String`), so `RawBlock.revising (r : RawRevising) (pos : Pos)` and every consumer names what it takes."
+ },
+ {
+  "pass": "deep-review",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "diagnostics",
+  "loc": "Agentic/Core/Dsl/Parse.lean:258",
+  "claim": "A `define` whose body mentions a later or self-named `define` produces `unbound name; nothing in scope answers to it` for a name that is plainly defined, pointing at a line where the name does not appear.",
+  "evidence": "`expand` substitutes a macro body but does not re-expand it: `| .interp x :: rest => match defs.find? \u2026 | some d => d.2 ++ expand defs rest` (Parse.lean:258-259) \u2014 `d.2` is passed through untouched. Bodies are expanded once, at definition time, against only the macros preceding them (`parseDefines`, Parse.lean:503-506). Failure scenario: `define a = \"x {b} y\"` / `define b = \"zz\"` / `workflow { act tool \"t\" \"{a}\" }`. At `a`'s definition `defs = []`, so `Chunk.interp \"b\"` survives; at the use site `\"{a}\"` expands to `[lit \"x \", interp \"b\", lit \" y\"]` and stops. `chunkExpr` (Check.lean:112-123) then reports `unbound name; nothing in scope answers to it at \\`b\\`` \u2014 at the `act`'s position (the o",
+  "fix": "Expand macro bodies against the full table after the preamble is read (with a cycle check), or refuse at `parseDefines` any `define` body that still holds a `Chunk.interp` naming a macro defined later, with a message that says so."
+ },
+ {
+  "pass": "deep-review",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "diagnostics-ordering",
+  "loc": "Agentic/Core/Dsl/Check.lean:392",
+  "claim": "`ifFlag` and `caseVerdict` check both/all arms before checking that the scrutinee has the right kind, so a program with a wrong-kinded scrutinee reports an error from inside an arm and never mentions the actual mistake.",
+  "evidence": "`Check.lean:392-406`: after `lookupBinding`, the checker runs `checkBlock \u0393 S y` and `checkBlock \u0393 S n` and only then evaluates `bnd.at? .flag`; `Check.lean:407-426` does the same with three arms before `bnd.at? .verdict`. Failure scenario: `workflow { let g = ask tool \"c\" for text \"hi\"  if g { act tool \"t\" \"{nope}\" } else { } }` reports `unbound name; nothing in scope answers to it at \\`nope\\`` and never says `an \\`if\\` branches on a flag, but \\`g\\` answers \\`text\\``. `test/DslSmoke.lean:80-82` only escapes this because its `srcWrongKind` arms are both empty. It also does wasted work: the arms of a rejected branching are fully elaborated before the branching is refused.",
+  "fix": "Move the `bnd.at? .flag` / `bnd.at? .verdict` match immediately after `lookupBinding`, before the arm recursions."
+ },
+ {
+  "pass": "deep-review",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "performance",
+  "loc": "Agentic/Core/Dsl/Check.lean:80",
+  "claim": "The naming environment is re-mapped and re-wrapped in closures at every binder, so checking a block of k `let`s costs \u0398(k\u00b2) closure allocations \u2014 an unbounded cost on the MCP path, which type-checks source supplied by a remote agent.",
+  "evidence": "`Bindings.rename \u03c3 S = List.map (fun b => \u27e8b.name, b.code, fun \u03b4 => b.val (\u03c3 \u03b4)\u27e9) S` (Check.lean:80-81) and `Bindings.push x c S = \u27e8x, c, Expr.var .here\u27e9 :: S.rename Sub.wk` (Check.lean:90-91), called once per `let` at `Check.lean:389`. After k pushes the table has been copied k times and the j-th binding's `val` is a chain of (k\u2212j) composed closures, so allocation is \u0398(k\u00b2) and each variable read at run time walks that chain. The `revising` clause pays it twice in one step: `Bindings.rename Sub.wk (Bindings.rename Sub.wk S)` (Check.lean:446). `Agentic/Core/Mcp.lean:1117-1124` (`runCheck`) applies `Dsl.parseAndCheckE` to a `source` string taken straight from a tool call, with no length limit ",
+  "fix": "Store a de Bruijn *index* in `Binding` (a `Var \u0393 c` or a `Nat` depth plus the code) and build the `Expr` at lookup time, so `push` is a cons and `rename` disappears; or cap source length / binder count on the MCP entry point."
+ },
+ {
+  "pass": "deep-review",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "correctness",
+  "loc": "Agentic/Core/Dsl/Parse.lean:506",
+  "claim": "A repeated `define` of the same name is silently accepted and the *first* body wins, the opposite of every macro system a reader knows, with no diagnostic.",
+  "evidence": "`parseDefines` accumulates with `defs ++ [(x, body)]` (Parse.lean:506) while `expand` resolves with `defs.find? (fun d => d.1 == x)` (Parse.lean:258), which returns the earliest match. Failure scenario: a program that opens `define spec = \"harden the parser\"` and, twenty lines later during editing, `define spec = \"harden the CSV reader\"` silently keeps the first. The same asymmetry reaches `--define`: `parseWith`'s override lookup (Parse.lean:534) is satisfied by *any* matching define, so `--define spec=\u2026` on a doubly-defined name replaces both bodies but only the first is ever read (Parse.lean:503-505), which happens to be right by accident rather than by design.",
+  "fix": "Refuse a duplicate `define` with a `CheckError` naming both positions; a language that refuses an override for a name nobody defined (Parse.lean:534-538) should not accept two definitions of one name."
+ },
+ {
+  "pass": "deep-review",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "correctness",
+  "loc": "Agentic/Core/Dsl/Check.lean:443",
+  "claim": "`revise given p, p` \u2014 the same spelling for the artefact and the objection binder \u2014 is accepted, and the objection binder is silently unreachable.",
+  "evidence": "`Swith` is built as `\u27e8av, b.code, \u2026\u27e9 :: \u27e8wv, Code.text, \u2026\u27e9 :: \u2026` (Check.lean:443-446) and `Bindings.find?` is innermost-first `List.find?` (Check.lean:85-86). When `av == wv` the artefact entry shadows the `why` entry, so every `{p}` in the revise prompt is the artefact and the verdict \u2014 the only thing that tells a revision *what it is answering* (Check.lean:305-307) \u2014 is not reachable under any spelling. The program checks and runs; the author gets a revision loop that never transmits an objection. The parser accepts it without comment (Parse.lean:448-450 reads two idents with no distinctness check). The same silent shadowing applies to a `given` binder that reuses an enclosing `let` name, ",
+  "fix": "Refuse `av == wv` in the `revising` clause of `checkBlock` with a `CheckError`; optionally warn when a `given` binder shadows a name already in `S`."
+ },
+ {
+  "pass": "deep-review",
+  "kind": "defect",
+  "sev": "low",
+  "cat": "diagnostics",
+  "loc": "Agentic/Core/Dsl/Check.lean:256",
+  "claim": "The panel monoid refusal asserts a fact about all members from the first member alone, so its message is false whenever only the first member is off-kind.",
+  "evidence": "`Check.lean:250-258` matches `m :: rest`, tests only `m.code = Code.verdict`, and on failure reports `s!\"\u2026only \\`verdict\\` carries one; these answer \\`{codeName m.code}\\`\"`. Failure scenario: `panel [ ask person \"o\" for flag \"x\", ask model \"a\" for verdict \"y\" ]` renders `\u2026these answer \\`flag\\``, which is untrue of the second member and points the author at the wrong repair. `test/DslSmoke.lean:98-100` only exercises the single-member case, where the claim happens to hold.",
+  "fix": "Say `the first of these answers \\`flag\\``, or check all members' codes first and name the position of each offender."
+ },
+ {
+  "pass": "deep-review",
+  "kind": "defect",
+  "sev": "low",
+  "cat": "diagnostics",
+  "loc": "Agentic/Core/Dsl/Check.lean:112",
+  "claim": "An error inside a prompt is reported at the position of the enclosing `ask`, not of the offending interpolation, because `Chunk` carries no position \u2014 in a language whose principal dataflow mechanism is interpolation.",
+  "evidence": "`Chunk` (Syntax.lean:118-123) has no `Pos` field, so `Prompt.expr S a.pos p` (Check.lean:145-151, called from Check.lean:211) hands `chunkExpr` the ask's own `pos` for every chunk. In `example/harden.wf` line 17 the prompt has three splices spread over one line and a macro splice besides; a mistake in any of them is reported at `16:9` (the `ask` keyword \u2014 cf. `DslFlagship.lean:139`) with only the name as excerpt. For a multi-line prompt the reported line is not the line the mistake is on. The same limitation makes the macro-forward-reference message (finding above) point at a construct that does not mention the name at all.",
+  "fix": "Add a `Pos` to `Chunk.interp` (the lexer already tracks it \u2014 Parse.lean:117-127 knows the `{`'s position) and use it in `chunkExpr`."
+ },
+ {
+  "pass": "deep-review",
+  "kind": "observation",
+  "sev": "low",
+  "cat": "unchecked-combination",
+  "loc": "Agentic/Core/Dsl/Parse.lean:296",
+  "claim": "`using model \"m\"` is accepted on `person` and `tool` addressees, where the guide's own reading of it (\"which model serves the addressee\") has no meaning, and nothing refuses it.",
+  "evidence": "`parseAsk` (Parse.lean:296-302) accepts `using model` after any target, and `askShape` (Check.lean:159-164) applies `atModel mid c s` regardless of `t.addressee`. `ask person \"owner\" using model \"deep\" for flag \"apply?\"` type-checks and puts a scope label on a human's consent question. `atModel_onQ_addressee` (Question.lean:438-439) confirms the addressee is untouched, so the label is inert but present in the recorded shape and therefore in the transcript and the memo key.",
+  "fix": "Refuse `using model` on a non-`model` addressee, or rename it to something that is true of all three (`served by`)."
+ },
+ {
+  "pass": "deep-review",
+  "kind": "observation",
+  "sev": "low",
+  "cat": "surface-redundancy",
+  "loc": "example/harden.wf:16",
+  "claim": "`for <kind>` is mandatory in the two positions where the checker already fixes the kind, so the author writes something the language will reject if it differs.",
+  "evidence": "`checkRhsAt Code.verdict \u2026 \"the \\`check\\` clause of a bounded revision\"` (Check.lean:447-448) forces the check clause to `verdict`, and `checkRhsAt b.code Swith rev \u2026` (Check.lean:451) forces the revise clause to the subject's kind; a panel is additionally forced to `verdict` by `checkRhs` (Check.lean:251). So in `example/harden.wf`, the three `for verdict` at lines 16, 18, 20 and the `for text` at line 26 are all determined before they are read. Four of the six kind annotations in the flagship carry no information. Against the comparison target, `example/HardenPatch.lean:13-17` writes none of them.",
+  "fix": "Make `for <kind>` optional where the position determines it, keeping it mandatory on `let` right-hand sides where it genuinely chooses the binder's type."
+ },
+ {
+  "pass": "deep-review",
+  "kind": "observation",
+  "sev": "medium",
+  "cat": "test-coverage",
+  "loc": "test/DslSmoke.lean:240",
+  "claim": "The smoke tests cover the checker's refusals well and the lexer's and the macro system's not at all; the two highest-severity defects above are in exactly the untested region.",
+  "evidence": "`test/DslSmoke.lean:240-297` checks fourteen rejections by exact rendered text, all from `parseBlockFrom`/`checkBlock`. Nothing exercises: `define` at all (no macro test other than the flagship, where macros happen to work); `define`/`let` name capture; duplicate `define`; macro forward reference; `parseWith` overrides and the \"no `define` to override\" refusal at Parse.lean:538; any `scanString` failure \u2014 unterminated string literal (Parse.lean:95), unterminated escape (101), unknown escape (114), empty interpolation (123), unterminated interpolation (127); `stray \\`-\\`` (Parse.lean:145); `unexpected character` (162); `expectPlainStr`'s interpolation-in-an-addressee-name (247); a missing `fo",
+  "fix": "Add a `rejects` case per lexer error and per untested checker clause, plus accept-cases for macro composition and for `--define` overrides; the `rejects` harness already in the file makes each one a two-line addition."
+ },
+ {
+  "pass": "deep-review",
+  "kind": "observation",
+  "sev": "medium",
+  "cat": "proof-scope",
+  "loc": "Agentic/Core/Dsl.lean:37",
+  "claim": "What the theorems establish about the surface is narrower than the module's framing suggests: they bound the *rung* and the *unrolling* of anything the checker accepts, and say nothing about what a program means or about which plans the language can express.",
+  "evidence": "`Dsl.lean` proves exactly two things about the language: `checkBlock_level_le`/`parseAndCheck_level_le` (Dsl.lean:263-367) and, in `Check.lean:473-547`, `checkBlock_bounded`/`check_bounded`. Both are real and load-bearing (`Cost.costTree` takes the level bound as an argument, per Dsl.lean:41-42). But: (1) \"the checker is sound\" is a reading of the signature, as Dsl.lean:28-35 honestly says, not a theorem; (2) there is no adequacy statement \u2014 the DSL is a strict fragment of `Plan` at \u2264 branch (no general `graft`, no `case` over an arbitrary `FinEnum`, no block as a `check` clause) and nothing states the fragment; (3) the connection from source *text* to plan rests on four `decide +kernel` wor",
+  "fix": "State the fragment explicitly (an inductive predicate on `Plan` that `check`'s image inhabits), and record the missing adequacy direction in Dsl.lean's \"where the proofs stop\" section alongside the three already there."
+ },
+ {
+  "pass": "deep-review",
+  "kind": "question",
+  "sev": "medium",
+  "cat": "surface-design",
+  "loc": "example/harden.wf:13",
+  "claim": "Why is the artefact renamed twice on its way through the loop, and why does the revise clause's value become the next artefact without anything in the text saying so?",
+  "evidence": "`revising draft up to 2 revisions` names the subject `draft` (harden.wf:13); `check given patch` renames it `patch` (16); `revise given patch, why` renames it again and returns a new one implicitly (25-28); `approved given patch` names the loop's *output* `patch` (31). Four names for three distinct values, three of them the same spelling. `Check.lean:301-323` shows what the text does not: `checkCont` binds the candidate at de Bruijn 0, `reviseCont` binds the verdict at 0 and the candidate at 1, and `finishCont` binds `(final \u03b4).getD default` at 0 \u2014 three different environments, one spelling. The comparison target writes the same loop with the state visible: `revising 2 spec fun current => do",
+  "fix": "Make the loop's state a parameter and the clause values explicit \u2014 e.g. `revising draft up to 2 revisions { check p = panel [ \u2026 ]  revise p given why = ask \u2026 }` \u2014 so a reader can see that the revise clause's value replaces `p`."
+ },
+ {
+  "pass": "deep-review",
+  "kind": "observation",
+  "sev": "low",
+  "cat": "doc-accuracy",
+  "loc": "doc/dsl-guide.html:118",
+  "claim": "Two of the guide's three headline rules are false of the implementation as written.",
+  "evidence": "Guide line 118: \"A scope is a pair of braces \u2014 every region in which a name is visible is `{ \u2026 }`\" \u2014 false of the `case` arm-group brace (Parse.lean:404/421), the `revising` clause-group brace (Parse.lean:439/452), and the value-returning `check`/`revise` braces (Parse.lean:359-364), none of which is a scope. Same line: \"`define x =` and `let x =` for a name bound to an answer\" \u2014 a `define` binds text at parse time, not an answer (Parse.lean:254-263), and the difference determines the rung. The guide's own worked `agent-cat plan` output at lines 278-288 demonstrates the second point (the `draft` node prints as `askC`, i.e. batch, because `{spec}` was a macro) without naming it.",
+  "fix": "Restate rule one as \"a block is a pair of braces; two constructs also use braces to group clauses\", and split rule two into a parse-time and a run-time half."
+ },
+ {
+  "pass": "deep-review",
+  "kind": "observation",
+  "sev": "low",
+  "cat": "lexer-laxity",
+  "loc": "Agentic/Core/Dsl/Parse.lean:118",
+  "claim": "An interpolation name is any run of characters up to `}`, `\"` or newline, so non-identifiers become `Chunk.interp` and surface as \"unbound name\" rather than as a lexical error, and escapes do not work inside `{ }`.",
+  "evidence": "`let name := cs.takeWhile (fun d => d != '}' && d != '\"' && d != '\\n')` (Parse.lean:118). `\"{a b}\"`, `\"{ x }\"`, `\"{a-b}\"` and `\"{\\}\"` all lex to `Chunk.interp` of the literal run \u2014 the last one to `interp \"\\\\\"`, because the escape branch at Parse.lean:99-116 is not reached inside an interpolation. Each then reaches `chunkExpr` and is refused as `unbound name; nothing in scope answers to it`, at the enclosing `ask`'s position. `\"{ x }\"` in particular can never resolve, since binder names come from `expectIdent` and cannot contain spaces.",
+  "fix": "Require the interpolation body to satisfy `isIdentStart` followed by `isIdentCont*` in `scanString`, and refuse anything else with a message that says what a name looks like."
+ },
+ {
+  "pass": "alexey",
+  "kind": "defect",
+  "sev": "high",
+  "cat": "unsupported-claim",
+  "loc": "doc/HANDOFF.md:447",
+  "claim": "\u00a74.6's evidence does not support its conclusion: no artefact in the repository can witness that the revised grammar elaborates to the plan the old grammar did, because `flagshipPlan` is *defined* as the checker's output on `flagshipRaw` and `check_flagshipRaw` is therefore unfalsifiable.",
+  "evidence": "HANDOFF.md:447-450: \"**The elaborated plan did not move**: every theorem block in `DslFlagship.lean` is byte-identical, statement and proof, and `check_flagshipRaw` still closes by kernel evaluation, so the new text is *proved* to elaborate to the plan the old text did.\" But `Agentic/Core/DslFlagship.lean:187-190` defines `flagshipPlan := match check [] [] flagshipRaw with | .ok p => p | .error _ => .ret fun _ => ()`, and `Agentic/Core/DslFlagship.lean:206` proves only `accepted (check [] [] flagshipRaw) = true`, where `accepted` (line 199-202) inspects the head constructor alone \u2014 its docstring says so explicitly: \"`decide` on a `Bool` needs only the *head* constructor of the result\". `chec",
+  "fix": "Replace the claim with what is actually true and is actually strong: \"the four `trace_flagship_*` equations against `Harden.demo`, `\u03c9Echo` among them, still close by kernel evaluation, so the revised text consults the same questions in the same order in the four named worlds.\" Do not offer byte-iden"
+ },
+ {
+  "pass": "alexey",
+  "kind": "defect",
+  "sev": "high",
+  "cat": "test-coverage",
+  "loc": "Agentic/Core/Dsl/Check.lean:422",
+  "claim": "The assignment of the three `case` arms to the three `VTag` constructors is neither proved nor tested anywhere; permuting `object` and `declined` (or `approve` and `object`) silently miscompiles every program that uses `case` and passes the entire package.",
+  "evidence": "`Check.lean:422-423` is the only place the mapping exists: `.ok (Plan.caseV e (fun t => match t with | .approve => a' | .object => o' | .declined => d'))`. Nothing constrains it. `checkBlock_level_le` (`Agentic/Core/Dsl.lean:319-323`) does `cases t` and discharges all three arms with the *same* bound, so a permutation still typechecks and still proves. `checkBlock_bounded` (`Check.lean:498-511`) is `Bool.and_self` over the three, likewise permutation-invariant. The flagship never uses `caseVerdict` \u2014 `example/harden.wf:35` branches with `if ok`, and `Dsl.flagshipRaw` (`DslFlagship.lean:169`) contains `RawBlock.ifFlag` and no `caseVerdict` \u2014 so none of the nine kernel proofs touch it. The onl",
+  "fix": "Extend `srcCaseVerdict` in `test/DslSmoke.lean` to run the plan under three worlds \u2014 `fun _ => Verdict.approve`, `fun _ => Verdict.object [\"no\"]`, `fun _ => Verdict.declined` \u2014 and assert a distinct, arm-identifying `act` fires in each. Three extra `Plan.trace` calls; no kernel cost."
+ },
+ {
+  "pass": "alexey",
+  "kind": "defect",
+  "sev": "high",
+  "cat": "correctness",
+  "loc": "Agentic/Core/Dsl/Check.lean:44",
+  "claim": "`{x}` denotes two entirely different things \u2014 a parse-time textual macro and a run-time answer splice \u2014 with identical syntax, and which one it is decides the *rung*. The claim that \"the syntax decides the rung\" is false as written, and `example/harden.wf` is its own counterexample.",
+  "evidence": "`Check.lean:42-46`: \"A prompt that mentions no name has its words in the term, so the node emitted is `Plan.askC` and the plan starts at the `batch` rung\u2026 The syntax therefore decides the rung, which is what makes `level` a fact about the source text.\" Same claim at `Agentic/Core/Dsl/Syntax.lean:132-135`. But `Parse.lean:262` sets `prompt defs p := Prompt.normalize (expand defs p)`, and `expand` (`Parse.lean:254-260`) replaces a `.interp x` naming a `define` with the macro's chunks *before* the checker sees anything. So `example/harden.wf:11` \u2014 `\"Draft a patch satisfying:\\n{spec}\\nReply with a unified diff only.\"` \u2014 reaches the checker as three literals (`DslFlagship.lean:129-130`), `Prompt.",
+  "fix": "Give macros a distinct sigil (e.g. `@spec` or `{{spec}}`), or at minimum state in `doc/dsl-guide.html` \u00a7One and \u00a7Six, and in both docstrings, that `{x}` is a macro when `x` is `define`d and an answer otherwise, that the macro wins, and that the rung is a fact about the text *after* expansion."
+ },
+ {
+  "pass": "alexey",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "correctness",
+  "loc": "Agentic/Core/Dsl/Parse.lean:254",
+  "claim": "Three silent `define` hazards, all of which produce a program different from the one a reader reads, none diagnosed: a forward macro reference degrades into a variable reference; a duplicate `define` silently takes the *first*; and a `define` silently shadows a `let` of the same name everywhere.",
+  "evidence": "`expand` (`Parse.lean:254-260`) splices `d.2` **without re-expanding it**, and `parseDefines` (`Parse.lean:499-506`) expands each body against only the macros before it (`prompt defs pr`). So `define a = \"{b}\"` followed by `define b = \"hi\"` leaves `.interp \"b\"` inside `a`'s body; a later `{a}` yields `.interp \"b\"`, which `chunkExpr` (`Check.lean:117`) resolves against `Bindings` and rejects as `\"unbound name; nothing in scope answers to it\"` \u2014 pointing at a name whose `define` is three lines above. Second: `defs` is accumulated with `defs ++ [(x, body)]` and read with `defs.find?`, which returns the earliest match, so a second `define x` is accepted and ignored \u2014 while `Bindings.find?` (`Che",
+  "fix": "In `parseDefines`, reject a redefinition and reject a body containing an `.interp` that names a later `define`; in `parseBlockFrom`'s `.bind` clause, reject a `let` whose name is a `define` (the `defs` list is already in scope there). Three `CheckError`s, no new machinery."
+ },
+ {
+  "pass": "alexey",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "stale-doc",
+  "loc": "Agentic/Core/Dsl/Check.lean:28",
+  "claim": "The module docstring's account of which binders are context entries is materially wrong: it names three, two of which *are* ordinary context entries built by the same plumbing it says they escape.",
+  "evidence": "`Check.lean:28-33`: \"The three binders that are **not** context entries \u2014 `approved given p`, whose value is an `Option (El c)` and so cannot be one (`Ctx = List Code`), and `revise given p, why`, whose `why` is a rendered verdict \u2014 are entries of the same table carrying a different `Expr`.\" It names two clauses, not three. And `approved given p` *is* a context entry: `Check.lean:454` reads `checkBlock (b.code :: \u0393) (Bindings.push pv b.code S) acc`, and `Bindings.push` (`Check.lean:90-91`) binds it to `Expr.var .here` \u2014 de Bruijn 0 in `b.code :: \u0393`. The `Option` never reaches the block: `finishCont` (`Check.lean:318-323`) strips it with `caseB \u2026 ((final \u03b4).getD default)` before `Plan.sub acc",
+  "fix": "Rewrite as: \"One binder is not a context entry \u2014 `why` in `revise given p, why`, bound to de Bruijn 0 *rendered*. The artefact binders `check given p`, `revise given p` and `approved given p` are ordinary context entries; the loop's `Option (El c)` is eliminated by `finishCont`'s `caseB` before the "
+ },
+ {
+  "pass": "alexey",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "scope",
+  "loc": "Agentic/Core/Dsl/Syntax.lean:62",
+  "claim": "`Verdict.render` and its `objections` projection now exist in three places with identical bodies. By the project's own house rule 7 (\"any definition an example forces on its author is a library gap\") this is a library gap papered over with an `rfl` theorem instead of closed.",
+  "evidence": "`Agentic/Core/Dsl/Syntax.lean:62-63` defines `Verdict.render v := String.intercalate \"; \" (if h : v = 0 then [] else FreeMonoid.toList (WithZero.unzero h))`. `Agentic/Core/HardenPatch.lean:87-91` defines `Harden.objections` and `Harden.render` with the same body. `Agentic/Core/Report.lean:453-454` defines `Verdict.objections` with the same body again, and `Report.lean:462` inlines the same `String.intercalate`. `DslFlagship.lean:74` then glues two of the three with `theorem render_eq_harden_render (v : Verdict) : Verdict.render v = Harden.render v := rfl`. The stated justification \u2014 `Syntax.lean:58-60`, \"that name belongs to `Agentic/Core/Report.lean`, which imports the transport; a checker ",
+  "fix": "Move `Verdict.objections` and `Verdict.render` to `Agentic/Core/Question.lean` beside the verdict algebra; have `Report.sayVerdict`, `Harden.render` and the DSL's `why` binder all call it. Delete two definitions and the `rfl` theorem that existed to reconcile them."
+ },
+ {
+  "pass": "alexey",
+  "kind": "question",
+  "sev": "medium",
+  "cat": "premise",
+  "loc": "Agentic/Core/DslFlagship.lean:79",
+  "claim": "The premise is not established: the one guarantee the textual surface is sold on does not require textuality, while textuality demonstrably costs the project its central proof \u2014 and the \"Lean twin\" the grammar was scored against is a different workflow on a carrier the project has condemned.",
+  "evidence": "(1) The deliverable is `parseAndCheck_level_le` (`Agentic/Core/Dsl.lean:361`). Its content lives in four lemmas that are stated about `Plan`, not about syntax: `level_caseB_le`, `level_caseV_le`, `level_panel_le'`, `level_revising_le` (`Dsl.lean:93-141`). A restricted Lean combinator API over `Plan` that never exposes `dyn`/`bindP` gets the same theorem from the same lemmas without a lexer, a parser, a `Raw` inductive, a `Bindings` table, a fuel discipline or a positioned error type \u2014 ~1400 lines across `Syntax/Parse/Check`. (2) Textuality moved the flagship's central claim out of the proof boundary: `DslFlagship.lean:104-117` and `:388-399` record that kernel reduction of the lexer is quadr",
+  "fix": "Re-point `Agentic/Surface.lean`'s five words (`ask`, `askHuman`, `model`, `panel`, `revising`) at `Plan` \u2014 its own docstring says the signatures survive and only the bodies change \u2014 and prove `level \u2264 branch` for each from the four lemmas already in `Dsl.lean`. That hands the owner the surface he ap"
+ },
+ {
+  "pass": "alexey",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "naming",
+  "loc": "Agentic/Core/Dsl/Parse.lean:444",
+  "claim": "The owner's \"Why both `revise` and `revising`?\" has a one-word answer the library already supplies, and taking it changes no `Pos` in `flagshipRaw` and no theorem.",
+  "evidence": "`revising` (the statement), `revise` (one of `Plan.revising`'s two continuations), `revision`, `revisions` are four inflections of one root doing three different jobs inside one statement \u2014 `Parse.lean:424-468`. House rule 8 (`doc/HANDOFF.md:479`): \"a keyword either says what it means or does not exist.\" The library's own name for that continuation is not `revise`: `Agentic/Core/HardenPatch.lean:186` and `:238` define `redraftD` and `redraft` \u2014 \"`[[redraftD guide patch v]]` = one revision\". Substituting `redraft` for the keyword at `Parse.lean:444` and the diagnosis at `:445-446` removes the collision. Verified cost: the only `Pos` values recorded anywhere near it are the `revising` statemen",
+  "fix": "`revise given p, why { \u2026 }` \u2192 `redraft given p, why { \u2026 }`. One string literal in `Parse.lean`, one in `Syntax.lean`'s docstring, one in `doc/dsl-guide.html`, one line of `example/harden.wf`, and the corresponding `test/DslSmoke.lean` sources."
+ },
+ {
+  "pass": "alexey",
+  "kind": "defect",
+  "sev": "low",
+  "cat": "stale-doc",
+  "loc": "Agentic/Core/DslFlagship.lean:16",
+  "claim": "\"Nineteen `decide +kernel` proofs\" is wrong in seven places; there are nine.",
+  "evidence": "`grep -c \"decide +kernel\" Agentic/Core/DslFlagship.lean` = 10, of which one is the docstring occurrence at line 16; the nine proofs are at lines 206, 249, 262, 271, 278, 306, 312, 319, 326. The claim appears at `Agentic/Core/DslFlagship.lean:16` (\"Almost all of it is nineteen `decide +kernel` proofs, four of them at `maxRecDepth 1000000`\" \u2014 the \"four\" is correct: lines 302, 308, 314, 321), `Agentic/Core/Dsl.lean:15`, `lakefile.toml:14`, `doc/research/dsl-proposal-A.md:502,546`, and `doc/research/dsl-chosen.md:515,552,624`. This is the number a reader uses to decide whether the five-minute rebuild is worth paying, in a project whose house rule 5 is \"report progress as theorem statements with ",
+  "fix": "s/nineteen/nine/ at the seven sites."
+ },
+ {
+  "pass": "alexey",
+  "kind": "defect",
+  "sev": "low",
+  "cat": "stale-doc",
+  "loc": "doc/dsl-guide.html:282",
+  "claim": "The `agent-cat plan` sample output in \u00a7Five is not what the tool prints: two of its three question lines drop the `mode=` axis, and one prompt loses a line.",
+  "evidence": "`Agentic/Core/Explain.lean:218-221` builds every question line as `pad 8 (Code.name c) ++ pad 24 (Addressee.render \u2026) ++ pad 22 (Q.axes q) ++ \"draw=\"`, and `Agentic/Core/Report.lean:505-508` defines `Q.axes q := s!\"model={m} mode={d}\"` \u2014 both axes, always. `doc/dsl-guide.html:280` shows `model=- mode=-` correctly, but `:282` shows `model=deep` and `:285` shows `model=-`, each missing `mode=-`. Separately, `Explain.quoted` splits the prompt on `\\n`, so the draft node prints three lines (`Draft a patch satisfying:` / `harden the parser` / `Reply with a unified diff only.`); `:283-284` shows two. `test/CliSmoke.lean:180-184` compares the binary against `Explain.planLines` line for line, so the ",
+  "fix": "Regenerate the excerpt from `lake exe agent-cat plan example/harden.wf` rather than hand-editing it, and mark the elision of the banner and legend lines explicitly."
+ },
+ {
+  "pass": "alexey",
+  "kind": "defect",
+  "sev": "low",
+  "cat": "diagnostics",
+  "loc": "Agentic/Core/Dsl/Check.lean:145",
+  "claim": "Every error inside a prompt is reported at the `ask` keyword rather than at the interpolation, because `Chunk` carries no position \u2014 which defeats the stated purpose of `CheckError`.",
+  "evidence": "`Prompt.expr` and `chunkExpr` (`Check.lean:112-151`) take a single `pos` and it is the construct's: `checkAsk` passes `a.pos` (`Check.lean:211`), `checkBlock`'s `act` clause passes the act's `pos` (`Check.lean:383`). `Chunk` (`Syntax.lean:118-123`) has no `Pos` field. So in a four-line prompt with five interpolations, an unbound or non-text one is diagnosed at the `ask` on the first line. `Syntax.lean:87-93` states the contrary purpose: \"`[[CheckError]]` = why a source text denotes no workflow: where, what was wrong, and the fragment it was wrong at\", and `doc/dsl-guide.html:195` promises \"Refusals name the construct and the position.\" The excerpt still names the offending name, so this is a",
+  "fix": "Add a `pos : Pos` field to `Chunk.interp` \u2014 `scanString` already tracks the position of the opening brace (`Parse.lean:117-126`) \u2014 and thread it through `chunkExpr`. `DecidableEq Chunk` survives; `Dsl.flagshipRaw`'s prompt lists would each gain a position."
+ },
+ {
+  "pass": "alexey",
+  "kind": "observation",
+  "sev": "low",
+  "cat": "layering",
+  "loc": "Agentic/Core/Explain.lean:262",
+  "claim": "The front end the CLI actually runs is defined in the reporting module, not in the DSL subsystem, and `cli/AgentCat.lean`'s parity claim names a theorem that does not cover the path it takes.",
+  "evidence": "`cli/AgentCat.lean:265` calls `Dsl.parseAndCheckRawWith (overrides ds) src`, defined at `Agentic/Core/Explain.lean:262`; `Dsl.RawBlock.revisionBounds`, a fold over `RawBlock`, is at `Explain.lean:335`, three modules away from `RawBlock.bounded` (`Check.lean:358`) which it mirrors clause for clause. Meanwhile `Agentic/Core/Dsl.lean:6` describes itself as \"the front end and the theorem the language exists to make true\". Separately, `cli/AgentCat.lean:24` claims flatly \"That the front end it calls is the front end everything else calls is `Dsl.parseAndCheckRaw_eq`\", but `parseAndCheckRaw_eq` (`Explain.lean:307`) relates `parseAndCheckRaw` \u2014 i.e. `parseAndCheckRawWith []` \u2014 to `parseAndCheckE`, ",
+  "fix": "Move `parseAndCheckRawWith`/`parseAndCheckRaw` and `RawBlock.revisionBounds` into `Agentic/Core/Dsl/Check.lean` and `Agentic/Core/Dsl.lean`; qualify line 24 with \"on the no-override path\"."
+ },
+ {
+  "pass": "alexey",
+  "kind": "observation",
+  "sev": "low",
+  "cat": "scope",
+  "loc": "Agentic/Core/Dsl/Check.lean:349",
+  "claim": "`maxRevisions` guards the DSL path only, and the module's own argument for placing it in the checker rather than the parser applies one level further up.",
+  "evidence": "`Check.lean:349-352`: \"**Here and not in the parser**, because it is the *elaboration* that unrolls: `Dsl.check` applied to a hand-built `Raw` runs the same `Nat.rec` as one applied to parsed text, and a bound in `Dsl.Parse` would leave that caller unguarded.\" By the identical argument, `Plan.revising` (`Agentic/Core/Plan.lean:611`) applied directly in Lean runs the same `Nat.rec` and is unguarded \u2014 and the measurement that motivated the bound is recorded at `Plan.lean:68-71` as a property of `Plan.revising` and `Mcp.costSummary`, not of the DSL. Today no non-DSL caller takes an attacker-chosen numeral (`Agentic/Core/Mcp.lean:1119` parses source), so this is a latent rather than live exposur",
+  "fix": "Either state in `Plan.revising`'s docstring that the numeral is a recursion depth and callers must bound it, or expose a `Plan.revisingBounded` that carries the bound as a proof obligation."
+ },
+ {
+  "pass": "abstraction",
+  "kind": "defect",
+  "sev": "high",
+  "cat": "surface-obscures-denotation",
+  "loc": "Agentic/Core/Dsl/Check.lean:318",
+  "claim": "One denotational former, `Plan.case`, wears three unrelated surface spellings, and the third \u2014 `approved given p { \u2026 } never approved { \u2026 }` \u2014 is spelled so that nothing in the text says it is a branching, which is precisely what the owner read and could not decode.",
+  "evidence": "`finishCont` is literally a two-arm case: `Plan.caseB (fun \u03b4 => (final \u03b4).isSome) (Plan.sub acc \u2026) (Plan.sub exh \u03c3)` (Check.lean:318-323). The same former is written `if x { \u2026 } else { \u2026 }` at Check.lean:403 (`Plan.caseB e y' n'`) and `case x { approve \u2026 object \u2026 declined \u2026 }` at Check.lean:422 (`Plan.caseV`). So the language has three surfaces for one node, and the third has no branching keyword, no scrutinee, no shared brace pair, and no nesting: in `example/harden.wf` lines 31 and 41 the two arms are two sibling statements at the same indentation as the `revising` that produced them. The owner's verbatim reading \u2014 \"I take it that 'approved given patch' followed by 'never approved' represe",
+  "fix": "Give every `case` node in the language one spelling with a scrutinee and its arms inside one brace pair, and write the loop's outcome with it. The minimum is that the two outcomes nest under a single branching head the way `if`/`case` already do (e.g. `revising \u2026 { check \u2026 revise \u2026 } outcome { appro"
+ },
+ {
+  "pass": "abstraction",
+  "kind": "defect",
+  "sev": "high",
+  "cat": "contract-shoehorning",
+  "loc": "Agentic/Core/Dsl/Syntax.lean:230",
+  "claim": "`Plan.revising` \u2014 one *derived* form of the library, not one of the five formers \u2014 is hard-coded as grammar: an eleven-field `Raw` constructor, six dedicated keywords, and a clause category (`RawRhs` in braces) that exists nowhere else. It is the only construct of the language that is not a projection of the term it elaborates to, so every tool must carry `Raw` beside `Plan` to say anything about it.",
+  "evidence": "`RawBlock.revising (subject) (bound) (checkBinder) (check) (artBinder) (whyBinder) (revise) (approvedBinder) (approved) (neverApproved) (pos)` (Syntax.lean:230-234), parsed by a 45-line clause (Parse.lean:424-468) and elaborated by a 35-line clause (Check.lean:427-462). Because `Plan.revising` is `Nat.rec` unrolled at check time, the term does not hold the construct: `Explain` says so in its own legend (\"a bounded revision is not a node: `Plan.revising` is `Nat.rec`, so the term holds its unrolling and the `up to n revisions` that wrote it is a fact about the source\", Explain.lean:398-399) and compensates with a second fold over the *source*, `RawBlock.revisionBounds` (Explain.lean:335-342),",
+  "fix": "Stop treating one library function as syntax. Minimally: make the two continuation clauses ordinary blocks-with-a-value so the construct is `revising` plus the block former the language already has, and let the outcome be the branching of the previous finding \u2014 then `revising` is a head that names a"
+ },
+ {
+  "pass": "abstraction",
+  "kind": "defect",
+  "sev": "high",
+  "cat": "missing-meaning-function",
+  "loc": "Agentic/Core/Dsl/Syntax.lean:199",
+  "claim": "The DSL is the one stratum of this repository with no meaning function: its `[[\u00b7]]` lines describe the representation rather than a mathematical object, and no theorem anywhere relates `check`'s output to `denote`. With no equation for what a surface construct means, surface shape could only be settled by rubric, which is how a case came to be spelled as two sibling clauses.",
+  "evidence": "`[[RawBlock]]` = \"an unchecked block: some bindings, then at most a tail\" (Syntax.lean:199), `[[RawRhs]]` = \"what a name may be bound to\" (Syntax.lean:189), `[[RawAsk]]` = \"one question, as written\" (Syntax.lean:174) \u2014 all descriptions of layout, against house rule 1 (\"Every type's docstring opens with `[[T]] = <one-line mathematical object>`\", HANDOFF.md \u00a75.1) and doctrine anti-pattern 1 (\"an interface of signatures with no stated meaning\"). Everything proved about the checker is a *level* bound (Dsl.lean:263 `checkBlock_level_le`); nothing states `denote (check \u0393 S r) \u2026`. The gap is visible in the flagship: `denote flagshipPlan Env.nil = denote Harden.demo Env.nil` was attempted and failed",
+  "fix": "Write the meaning of the surface down: `[[RawBlock]] : Bindings \u0393 \u2192 Option (Env \u0393 \u2192 Dlg Unit)`, i.e. `denote \u2218 check`, and prove one equation per construct using the `Plan.Denotes` / `denotes_revising` machinery already in `Denote.lean`. Two constructs whose equations are the same branching then hav"
+ },
+ {
+  "pass": "abstraction",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "name-carried-semantics",
+  "loc": "example/harden.wf:14",
+  "claim": "The scope of a name is carried by clause keywords rather than by nesting: three sibling clauses each bind a different `patch`, in three different contexts, and a fourth clause silently has no `patch` at all. This is the data-visibility regression the owner names (\"it was easy to see how data was moving and who could see it\").",
+  "evidence": "`harden.wf:14` (`check given patch`), `:25` (`revise given patch, why`), `:31` (`approved given patch`) all spell `patch`; `doc/dsl-guide.html` states outright that \"`a` in check, in revise and in approved are three different binders that happen to share a spelling\", and `doc/research/dsl-chosen.md:107` confirms \"three different binders in the library \u2014 de Bruijn `0` of three different contexts\". In the checker they are indeed three unrelated pushes: `Bindings.push cv b.code S` (Check.lean:447), the hand-built `Swith` (Check.lean:443-446), and `Bindings.push pv b.code S` (Check.lean:454). Meanwhile `never approved` (harden.wf:41) is handed nothing, and mentioning `patch` there is an unbound-",
+  "fix": "Same cure as the branching finding: let the clauses nest inside the construct that hands them their values, so each `given` binder's extent is a brace pair a reader can see, and the outcome without a binder is visibly an arm of a case rather than a sibling statement."
+ },
+ {
+  "pass": "abstraction",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "parallel-mechanism",
+  "loc": "Agentic/Core/Dsl/Check.lean:377",
+  "claim": "`act` is a second implementation of a node the language already writes: it elaborates to exactly the term `let x = ask <t> for ack \"\u2026\"` at end of block produces, but carries its own `Raw` constructor, its own copy of the shape construction and of the closed/open prompt dispatch, and its own case in four inductive proofs.",
+  "evidence": "`checkBlock`'s `.act` clause builds `let s : Q.Shape .ack := { addressee := t.addressee, scope := 1, draw := t.draw }` (Check.lean:378), a character-for-character copy of `askShape`'s body (Check.lean:160), then repeats `checkAsk`'s closed/open dispatch (Check.lean:379-384 vs 207-213) to emit `Plan.askC .ack (s.withPrompt words) (.ret fun _ => ())`. The `.bind` path with an `ack` ask and an `.empty` rest emits the identical term: `checkBinder` gives `fun k => Plan.askC .ack (s.withPrompt words) k` (Check.lean:280) and `.empty` gives `.ret fun _ => ()` (Check.lean:376). The duplicate path is then paid for again in `RawBlock.bounded` (Check.lean:360), `checkBlock_bounded` (Check.lean:478), `ch",
+  "fix": "Keep the word, delete the mechanism: parse `act t \"w\"` into `.bind \"_\" (.ask \u27e8none, .ack, t, prompt, pos\u27e9) (.empty pos)` and drop `RawBlock.act` with its four proof cases. Nothing about the accepted language or the emitted term changes."
+ },
+ {
+  "pass": "abstraction",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "false-premise-in-prose",
+  "loc": "Agentic/Core/Dsl/Check.lean:29",
+  "claim": "The premise used throughout to justify the two-outcome clause shape \u2014 that the approved artefact cannot be a context entry \u2014 is false as stated, and the true fact is exactly the one the surface hides: the `Option` must be case-split before it can be bound.",
+  "evidence": "Check.lean:29-33 states: \"The three binders that are **not** context entries \u2014 `approved given p`, whose value is an `Option (El c)` and so cannot be one (`Ctx = List Code`) \u2026 are entries of the same table carrying a different `Expr`.\" The code does the opposite: `checkBlock (b.code :: \u0393) (Bindings.push pv b.code S) acc` (Check.lean:454) pushes the artefact as an ordinary context entry of code `b.code`, because `finishCont` has already eliminated the `Option` with `Plan.caseB \u2026 ((final \u03b4).getD default)` (Check.lean:318-323). The same premise is repeated as grammar justification in `doc/research/dsl-chosen.md:181-184` (\"the outcome is not a context entry\") and in the parser's refusal message ",
+  "fix": "Correct the three docstrings/messages to say what is true \u2014 a bounded revision answers `Option (El c)`, so it is consumed by a two-arm branching and the artefact is bound in the arm where it exists \u2014 and then let the surface say the same thing (see the first finding)."
+ },
+ {
+  "pass": "abstraction",
+  "kind": "observation",
+  "sev": "low",
+  "cat": "plumbing-bypass",
+  "loc": "Agentic/Core/Dsl/Check.lean:443",
+  "claim": "Two of the checker's binders compute their de Bruijn projection by hand instead of going through the plumbing the module says owns that job.",
+  "evidence": "Check.lean:24-27 claims \"the resolved variable *is* the de Bruijn index and the shifting is `Sub`'s\", yet `Swith` writes `\u27e8av, b.code, fun \u03b4 => Env.head (Env.tail \u03b4)\u27e9` and `\u27e8wv, Code.text, fun \u03b4 => Verdict.render (Env.head \u03b4)\u27e9` over a doubly-renamed table (Check.lean:443-446), where `Expr.var (.there .here)` / `Expr.var .here` (Plan.lean:154) and a second `Bindings.push` are the sanctioned forms. Only the `why` entry genuinely needs a different `Expr` (the `Verdict.render` composition); the artefact entry is `Bindings.push` open-coded.",
+  "fix": "Build `Swith` as `\u27e8wv, .text, Verdict.render \u2218 Expr.var .here\u27e9 :: (Bindings.push av b.code S).rename Sub.wk`, leaving exactly one hand-written `Expr` \u2014 the one that renders \u2014 and keeping the module's \"one table, no escape hatch\" claim literally true."
+ },
+ {
+  "pass": "abstraction",
+  "kind": "observation",
+  "sev": "low",
+  "cat": "runtime-rediscovery",
+  "loc": "Agentic/Core/Dsl/Check.lean:216",
+  "claim": "The answer kind is written in the source and stored in the syntax node, then erased into an existential and recovered downstream by a runtime equality test and a transport \u2014 the mildest form of runtime rediscovery, reported for completeness rather than as a demand.",
+  "evidence": "`RawAsk.code : Code` is a field the author writes (`for verdict`, Syntax.lean:180); `checkAsk` packs it into `Checked` (Check.lean:185-190, 206-213); `checkAskAt` and `checkRhsAt` then recover it with `if h : r.code = c then .ok (h \u25b8 r.plan)` plus a bespoke diagnosis each (Check.lean:216-223, 261-268), and the transport has to be carried through two extra lemmas in the level proof (`checkRhsAt_level_le`, Dsl.lean:219-230). Nothing is unsound and the transport reduces, so this is a note about where the code lives, not a defect.",
+  "fix": "If it is ever touched: have the `At`-flavoured checkers match on `a.code` before elaborating, so the plan is built at `c` and no transport is introduced. Not worth a change on its own."
+ },
+ {
+  "pass": "abstraction",
+  "kind": "observation",
+  "sev": "low",
+  "cat": "identity-dispatch",
+  "loc": "Agentic/Core/Dsl/Check.lean:251",
+  "claim": "A panel's combinability is decided by comparing a `Code` against a constant in the shared checker path, and the panel's kind is decided by whichever member happens to be written first. Acceptable while exactly one kind carries a monoid; flagged so that the second one does not arrive as a second branch.",
+  "evidence": "`if m.code = Code.verdict then \u2026 else .error \u2026` (Check.lean:251-258), with member agreement enforced against the head of the list and diagnosed as \"disagrees with the first\" (Check.lean:231-232). The constraint is real \u2014 `instMonoidElVerdict` is the only `Monoid (El c)` instance in the package (Plan.lean:562) and instance search cannot unfold `El` at a runtime `Code` \u2014 so this is currently the best available design; the calibration note is that no present requirement proves a second panellable kind, so nothing should be generalised speculatively.",
+  "fix": "When a second combinable kind appears, make it data rather than a branch: a `(c : Code) \u2192 Option (Monoid (El c))` table consulted by `checkRhs`, so a new kind costs an entry instead of a new arm plus a new case in `checkRhs_level_le` (Dsl.lean:200-215)."
+ },
+ {
+  "pass": "validated",
+  "kind": "defect",
+  "sev": "high",
+  "cat": "macro-hygiene",
+  "loc": "Agentic/Core/Dsl/Parse.lean:254",
+  "claim": "P1 \u2014 `define` expansion is unhygienic: a macro name silently captures and overrides a `let`-bound name of the same spelling, and because the substituted body is literal text the prompt becomes *closed*, so the checker emits `Plan.askC` (batch) where the author wrote what reads as an interpolating `Plan.ask` (pipeline).",
+  "evidence": "Parse.lean:254-260 `| .interp x :: rest => match defs.find? (fun d => d.1 == x) with | some d => d.2 ++ expand defs rest | none => .interp x :: expand defs rest` \u2014 expansion happens in the *parser*, before any binding table exists, so it wins unconditionally over the lexical scope that Check.lean:83-86 (`Bindings.find?`, \"innermost-first lookup, so a `let` shadows an outer name of the same spelling\") promises. Then Check.lean:377-384 (`.act`) and Check.lean:279-284 (`checkBinder`) both branch on `Prompt.closed`, so the expanded, name-free prompt takes the `askC` path. Failure scenario I traced by hand against the snapshot: `define x = \"STATIC\"` followed by `workflow { let x = ask model \"m\" f",
+  "fix": "Either give macro references a visibly distinct sigil (`{$spec}` vs `{spec}`), or have `check` reject any program where a `define` name collides with a `let`/`given` binder name, so the two namespaces cannot silently merge."
+ },
+ {
+  "pass": "validated",
+  "kind": "defect",
+  "sev": "high",
+  "cat": "resource-exhaustion",
+  "loc": "Agentic/Core/Dsl/Parse.lean:503",
+  "claim": "P1 \u2014 `define` bodies are expanded eagerly at definition time and macros may mention earlier macros, so N defines can materialise 2^N prompt chunks before the checker ever runs; no budget in the parser bounds the *output* size.",
+  "evidence": "Parse.lean:503-506 `let body := match ov.find? \u2026 | none => prompt defs pr` then `parseDefines ov fuel (defs ++ [(x, body)]) rest` \u2014 the stored body is already expanded (`prompt` = `Prompt.normalize (expand defs \u2026)`, Parse.lean:262-263), and Syntax.lean:147-155 deliberately does *not* fuse adjacent literals (\"Adjacent literals are deliberately *not* fused\"), so nothing collapses the duplication. `define d1 = \"{d0}{d0}\"` \u2026 `define d30 = \"{d29}{d29}\"` followed by `workflow { }` allocates on the order of 2^30 chunks at parse time even though no macro is used. Every fuel in this file is a *token* count (`lex`: Parse.lean:169 `cs.length + 1`; `parseDefines`: Parse.lean:533 `ts.length + 1`), which ",
+  "fix": "Thread a cumulative chunk/character budget through `parseDefines`/`expand` and fail with an ordinary `CheckError` when it is exceeded, the same way `maxRevisions` (Check.lean:353) bounds the other unbounded elaboration."
+ },
+ {
+  "pass": "validated",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "correctness",
+  "loc": "Agentic/Core/Dsl/Check.lean:445",
+  "claim": "P1 \u2014 a panel in which any member declines annihilates every objection the other members raised, so the `why` a revision is handed is the empty string: the revision is told it failed but not what was wrong.",
+  "evidence": "Check.lean:443-446 binds `why` to `\u27e8wv, Code.text, fun \u03b4 => Verdict.render (Env.head \u03b4)\u27e9`, and Syntax.lean:62-63 `def render (v : Verdict) : String := String.intercalate \"; \" (if h : v = 0 then [] else FreeMonoid.toList (WithZero.unzero h))`, with Syntax.lean:71 `@[simp] theorem render_declined : render Verdict.declined = \"\" := rfl` and the docstring at Syntax.lean:68-70 confirming \"`declined = 0` annihilates, and there is no objection list under it\". Failure scenario: in example/harden.wf:16-22 three reviewers are asked for verdicts; if `reviewer-simple` declines while `reviewer-secure` returns `OBJECTION: SQL injection`, the combined verdict is `declined`, `{why}` in the revise prompt at h",
+  "fix": "Either keep refusal and objections separable in the value handed to `revise` (so a declined panel still carries the objections that were raised alongside it), or state the collapse explicitly at the surface and in the guide, since a silently empty `{why}` is indistinguishable from an approved-but-so"
+ },
+ {
+  "pass": "validated",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "surface-readability",
+  "loc": "Agentic/Core/Dsl/Parse.lean:424",
+  "claim": "P1 \u2014 the owner's critique is substantiated: the `revising` construct assigns its five clauses' meanings positionally, spells three *different* binders with the same word, and writes two mandatory outcomes outside the braces of the construct that produces them, so the surface cannot be read without the glossary that house rule 8 forbids.",
+  "evidence": "Parse.lean:424-468 parses one node out of five separated phrases (`revising <subj> up to n revisions {`, `check given <cv> { rhs }`, `revise given <av>, <wv> { rhs }`, `}`, `approved given <pv> { block }`, `never approved { block }`), and Syntax.lean:230-234 shows they are indeed one constructor with ten fields. Concrete consequences, each checkable against example/harden.wf:13-41: (a) `patch` at harden.wf:14, at harden.wf:25 and at harden.wf:31 are three unrelated binders in three different contexts (Check.lean:447 `Bindings.push cv b.code S`; Check.lean:443-446 `Swith`; Check.lean:454 `Bindings.push pv b.code S`) \u2014 nothing in the text says so, which is exactly the owner's \"it was easy to s",
+  "fix": "A parser-only change that elaborates to the identical `RawBlock.revising` and so needs no checker or proof edits: put every clause inside one brace pair and name each binder's role where it is bound, e.g. `seek approval for draft, up to 2 revisions { check candidate as patch { \u2026 }  revise candidate "
+ },
+ {
+  "pass": "validated",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "correctness",
+  "loc": "Agentic/Core/Dsl/Check.lean:443",
+  "claim": "P1 \u2014 `revise given x, x` is accepted and silently drops `why`: the artefact shadows the rendered verdict because `Swith` lists the artefact first and lookup is head-first.",
+  "evidence": "Parse.lean:447-451 reads the two identifiers independently with no distinctness check (`let (av, rest) \u2190 expectIdent rest` \u2026 `let (wv, rest) \u2190 expectIdent rest`). Check.lean:443-446 builds `Swith` as `\u27e8av, b.code, \u2026\u27e9 :: \u27e8wv, Code.text, \u2026\u27e9 :: \u2026`, and Check.lean:85-86 `List.find? (fun b => b.name == x) S` takes the first match. So with `revise given x, x { ask model \"author\" for text \"fix {x}\" }` over a text artefact, `{x}` resolves to the artefact and the verdict rendering is unreachable \u2014 the program checks, runs, and quietly never shows the reviewer's objections to the author. Over a non-text artefact the same source is *rejected* with \"only a text answer interpolates into a prompt\" (Check.",
+  "fix": "Reject `av == wv` at the second `expectIdent` in Parse.lean:450 with a `CheckError` pointing at the duplicate name; two simultaneous binders have no shadowing order to appeal to."
+ },
+ {
+  "pass": "validated",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "flagship-divergence",
+  "loc": "example/harden.wf:41",
+  "claim": "P1 \u2014 the DSL flagship and the owner-approved Lean surface disagree about the exhausted path: `never approved { }` does nothing, whereas the do-block asks the owner about the last patch anyway. (Correcting GPT-5's attribution: the DSL matches the *Plan* flagship, so the divergence is between Agentic/Core/HardenPatch.lean and example/HardenPatch.lean, not something the DSL introduced.)",
+  "evidence": "example/harden.wf:41 `never approved { }` elaborates through Check.lean:318-323 `finishCont`, whose `none` arm runs `exh` \u2014 here the empty block. example/HardenPatch.lean:17-19 instead runs `let ok : Bool \u2190 askHuman s!\"Apply this patch?\\n{patch}\"` *unconditionally* after `revising`, because Agentic/Surface.lean:146 `| .revise, 0 => pure s` returns the last artefact rather than an `Option`. Agentic/Core/Plan.lean:596-598 is the other combinator: \"if the last check still objects, give up with `none`\". Agentic/Core/HardenPatch.lean:753 documents the Plan flagship as taking the give-up path \u2014 \"its revisions and gives up \u2014 in which case the owner is never troubled\" \u2014 so harden.wf is faithful to t",
+  "fix": "Decide which is authoritative and make the other match: either give `Surface.revising` the `Option` result the Plan has, or write the consent gate into `never approved { \u2026 }` in example/harden.wf so the two flagships put the same questions."
+ },
+ {
+  "pass": "validated",
+  "kind": "defect",
+  "sev": "low",
+  "cat": "stale-doc",
+  "loc": "Agentic/Core/Dsl/Syntax.lean:152",
+  "claim": "P2 \u2014 a docstring justifies a design decision by appeal to a theorem that does not exist anywhere in the snapshot.",
+  "evidence": "Syntax.lean:151-153 explains why adjacent literals are not fused: \"which is what makes `Dsl.denote_flagshipPlan` a `rfl` against `Agentic/Core/HardenPatch.lean`'s hand-written prompts\". `grep -rn \"denote_flagshipPlan\" .` over the whole snapshot returns exactly one hit \u2014 this docstring itself. The rationale for a deliberate non-normalisation (which is load-bearing: it is why `Prompt.normalize` at Syntax.lean:156-159 drops empty literals but never fuses) therefore cannot be checked by a reader, and if the theorem was renamed or abandoned the reason to keep the behaviour is now unrecorded. PROVENANCE: raised by GPT-5; confirmed by my own grep; NOT verified by a second model.",
+  "fix": "Point at the theorem that actually carries the obligation in Agentic/Core/DslFlagship.lean, or state the constraint without naming a theorem."
+ },
+ {
+  "pass": "validated",
+  "kind": "defect",
+  "sev": "low",
+  "cat": "stale-doc",
+  "loc": "Agentic/Core/Dsl.lean:15",
+  "claim": "P2 \u2014 the build-cost prose counts nineteen `decide +kernel` proofs; the file it is describing contains nine.",
+  "evidence": "Dsl.lean:14-16 \"Everything about the flagship program itself \u2026 and the nineteen `decide +kernel` proofs that price it lives in `Agentic/Core/DslFlagship.lean`\", and DslFlagship.lean:16 repeats \"Almost all of it is nineteen `decide +kernel`\". `grep -n \"decide +kernel\" Agentic/Core/DslFlagship.lean` returns 10 lines, of which one (line 16) is the prose itself: the actual proof sites are lines 206, 249, 262, 271, 278, 306, 312, 319 and 326 \u2014 nine. Consequence: the number is the project's own justification for the module split and its five-minute elaboration budget, so a reader sizing the cost of adding another kernel proof is working from a figure that is off by a factor of two. PROVENANCE: rai",
+  "fix": "Correct both counts, or say \"the kernel-reduction proofs\" without a numeral so it cannot drift again."
+ },
+ {
+  "pass": "validated",
+  "kind": "defect",
+  "sev": "low",
+  "cat": "diagnostics",
+  "loc": "Agentic/Core/Dsl/Parse.lean:181",
+  "claim": "P2 \u2014 end-of-source diagnoses report position `0:0`, violating the one-based `Pos` contract, and the CLI then silently omits the caret line for them.",
+  "evidence": "Syntax.lean:79-85 defines `Pos` as \"a point of the source text, one-based, as a reader counts\". Parse.lean:175-176 `| [] => \u27e80, 0\u27e9` and Parse.lean:181 `| [] => \u27e8\u27e80, 0\u27e9, s!\"expected {what}, but the source ended\", \"\"\u27e9` return a position no reader can count to. cli/AgentCat.lean:225 `if pos.line == 0 then []` then drops the caret display entirely for exactly these errors. Failure scenario: a file whose final `}` is missing reports `0:0: expected \u2026` with no excerpt and no caret, pointing the author at nothing. PROVENANCE: raised by GPT-5; confirmed by my own reading; NOT verified by a second model.",
+  "fix": "Carry the lexer's final position into an explicit EOF sentinel token (or into the parser state) so `unexpected` can cite the end of the last line."
+ },
+ {
+  "pass": "validated",
+  "kind": "defect",
+  "sev": "low",
+  "cat": "diagnostics",
+  "loc": "Agentic/Core/Dsl/Parse.lean:118",
+  "claim": "P2 \u2014 interpolation names are scanned with an over-permissive `takeWhile`, so non-identifiers lex as names and are reported later as \"unbound\"; and `Chunk.interp` carries no position, so every prompt-level error is reported at the enclosing `ask`.",
+  "evidence": "Parse.lean:118 `let name := cs.takeWhile (fun d => d != '}' && d != '\"' && d != '\\n')` accepts spaces, backslashes and braces-free punctuation, while identifiers proper are constrained at Parse.lean:76-78 (`isIdentStart`/`isIdentCont`). So `act tool \"t\" \"{not a name}\"` lexes, then fails at Check.lean:96 with \"unbound name; nothing in scope answers to it\" quoting `not a name` \u2014 a lexical error diagnosed as a scope error. Compounding it, Syntax.lean:118-123 gives `Chunk.interp` no position field, and Check.lean:112-123 `chunkExpr` takes a single `pos` for the whole prompt (passed from `a.pos`, Check.lean:211), so in a five-line prompt every bad interpolation is reported at the line where `ask`",
+  "fix": "Apply `isIdentStart`/`isIdentCont` inside `scanString`'s interpolation branch and add a `Pos` to `Chunk.interp` so `chunkExpr` can cite the brace it failed at."
+ },
+ {
+  "pass": "validated",
+  "kind": "defect",
+  "sev": "low",
+  "cat": "correctness",
+  "loc": "Agentic/Core/Dsl/Parse.lean:506",
+  "claim": "P2 \u2014 a repeated `define` is silently first-wins: the second definition is dead code with no diagnostic.",
+  "evidence": "Parse.lean:506 appends (`parseDefines ov fuel (defs ++ [(x, body)]) rest`) while Parse.lean:258 looks up head-first (`defs.find? (fun d => d.1 == x)`). So `define x = \"old\"` followed by `define x = \"new\"` leaves every `{x}` meaning `\"old\"`. An author editing a program by adding a corrected `define` below the original \u2014 the natural edit \u2014 gets the old text with no warning. The same head-first rule applies to duplicate `--define` overrides collected at cli/AgentCat.lean:197-199. PROVENANCE: raised by GPT-5; confirmed by my own reading; NOT verified by a second model.",
+  "fix": "Reject a duplicate `define` name in `parseDefines` with a `CheckError` quoting the name; the language refuses to guess everywhere else."
+ },
+ {
+  "pass": "validated",
+  "kind": "defect",
+  "sev": "low",
+  "cat": "api-contract",
+  "loc": "Agentic/Core/Dsl/Parse.lean:503",
+  "claim": "P2 \u2014 `parseWith` overrides are not put through `expand`/`normalize`, contradicting the docstring's claim that an override is indistinguishable from a `define` the program wrote.",
+  "evidence": "Parse.lean:503-505 `let body := match ov.find? (fun o => o.1 == x) with | some o => o.2 | none => prompt defs pr` \u2014 the program-written branch runs `prompt defs pr` (expand + normalize, Parse.lean:262-263), the override branch does not. Parse.lean:514-519 nevertheless claims \"The substitution happens *at load time*, before the checker ever sees a term, so nothing downstream can tell an overridden program from one written that way\". An override whose `Prompt` contains `Chunk.interp` is neither expanded against earlier macros nor normalized, so it can fail as unbound, capture a later `let`, or turn a closed prompt open and move the node from `askC` to `ask`. Blast radius is bounded because the",
+  "fix": "Have `parseWith` take `List (String \u00d7 String)` and build the literal chunk itself, or run overrides through `prompt defs` and reject any residual `Chunk.interp`."
+ },
+ {
+  "pass": "validated",
+  "kind": "observation",
+  "sev": "low",
+  "cat": "defensive-asymmetry",
+  "loc": "Agentic/Core/Dsl/Parse.lean:496",
+  "claim": "P2 \u2014 `parseDefines` returns `.ok` on fuel exhaustion while every other fuel-zero branch in the file returns a diagnosis; the branch is currently unreachable, but the asymmetry is a silent-truncation trap.",
+  "evidence": "Parse.lean:496 `| 0, defs, ts => .ok (defs, ts)`, against Parse.lean:94 `| 0, _, p, _, _ => .error \u2026 \"internal: lexer budget exhausted inside a string literal\"`, Parse.lean:137, Parse.lean:326 and Parse.lean:378, all of which error. With the caller's budget of `ts.length + 1` (Parse.lean:533) and at least four tokens consumed per `define`, exhaustion cannot happen today; if the budget is ever recomputed or the preamble grammar grows, the failure mode is a silently truncated macro table rather than a refusal, which is the one outcome the module's stated discipline (Parse.lean:23-26) rules out. PROVENANCE: raised by GPT-5, who also classified it unreachable; confirmed by my own reading; NOT ve",
+  "fix": "Return the same \"internal: parser budget exhausted\" error as the other fuel-zero branches."
+ },
+ {
+  "pass": "validated",
+  "kind": "defect",
+  "sev": "low",
+  "cat": "stale-doc",
+  "loc": "Agentic/Core/Dsl/Syntax.lean:227",
+  "claim": "P2 \u2014 the surface's headline description of the revision bound states an unconditional count that only holds in the worst case: an approved first round performs one check, not n+1.",
+  "evidence": "Syntax.lean:226-228 \"`up to n revisions` performs **n+1 checks and at most n revisions**\", echoed in doc/dsl-guide.html. Agentic/Core/Plan.lean:618-621 shows the early exit: `caseB (fun \u03b8 => Verdict.approvedB (v \u03b8)) (.ret (fun \u03b8 => some (a (\u03c4 \u03b8)))) (\u2026)` \u2014 approval stops immediately, so with `up to 2 revisions` and a first-round approval exactly one check is performed. Plan.lean:601-602 hedges the revisions (\"at most `n` revisions\") but not the checks. Consequence: the numeral is precisely the thing the project says three independent readers got backwards (Syntax.lean:228-229), so the one sentence that exists to fix that misreading should not itself overstate. PROVENANCE: raised by GPT-5; con",
+  "fix": "State it as \"between one and n+1 checks, at most n revisions, and always exactly one more check than revisions\"."
+ },
+ {
+  "pass": "validated",
+  "kind": "defect",
+  "sev": "low",
+  "cat": "diagnostics",
+  "loc": "Agentic/Core/Dsl/Check.lean:256",
+  "claim": "P2 \u2014 the mixed-panel diagnosis reports the whole panel as answering the *first* member's kind, which is wrong whenever the members disagree.",
+  "evidence": "Check.lean:251-258: the guard is `if m.code = Code.verdict` on the head alone, and the failure message is `s!\"a panel combines its members' answers in the monoid of their kind, and only `verdict` carries one; these answer `{codeName m.code}`\"` \u2014 \"these\" (plural) but `m` is only the first member. A panel of one `text` question and one `flag` question is reported as though both answer `text`, sending the author to fix the wrong line. PROVENANCE: raised by GPT-5; confirmed by my own reading; NOT verified by a second model.",
+  "fix": "Say \"the first of these answers `<kind>`\", or check every member first and name each disagreeing one with its own position."
+ },
+ {
+  "pass": "validated",
+  "kind": "defect",
+  "sev": "low",
+  "cat": "grammar",
+  "loc": "Agentic/Core/Dsl/Parse.lean:432",
+  "claim": "P2 \u2014 the singular/plural spellings of the revision unit are accepted interchangeably, so `up to 1 revisions` and `up to 2 revision` both parse, defeating the stated reason the two spellings exist.",
+  "evidence": "Parse.lean:430-435: \"Both spellings of the noun, so that `up to 1 revision` is English\" followed by `| \u27e8.ident \"revisions\", _\u27e9 :: r => .ok r  | \u27e8.ident \"revision\", _\u27e9 :: r => .ok r` \u2014 neither branch consults `n`. The comment claims a readability property the grammar does not enforce, and a surface whose stated purpose is that the numeral cannot be misread now admits `up to 2 revision`. PROVENANCE: raised by GPT-5; confirmed by my own reading; NOT verified by a second model.",
+  "fix": "Require `revision` iff `n == 1`, which costs one comparison and makes the comment true."
+ },
+ {
+  "pass": "ponytail",
+  "kind": "defect",
+  "sev": "high",
+  "cat": "over-engineering",
+  "loc": "Agentic/Core/Dsl/Check.lean:358",
+  "claim": "The whole `RawBlock.bounded` / `checkBlock_bounded` / `check_bounded` / `revisionBounds_le_of_bounded` chain \u2014 roughly 105 lines, 90 of them tactic proof \u2014 has no consumer anywhere in the repository.",
+  "evidence": "`def RawBlock.bounded` (Check.lean:358-365), `theorem checkBlock_bounded` (Check.lean:473-532, a 60-line six-case induction), `theorem check_bounded` (Check.lean:545-547), `theorem revisionBounds_le_of_bounded` (Explain.lean:349-377, 29 lines). Grepping every one of these names over the snapshot returns only their own definitions and *prose*: `test/DslSmoke.lean:41` (\"`Dsl.checkBlock_bounded` proves that the checker names no `n` above `Dsl.maxRevisions`\") and `test/CliSmoke.lean:18` (\"a printed revision bound is one the checker allowed (`Dsl.revisionBounds_le_of_bounded`)\") are comments, not applications; neither test file applies either term. Nothing supplies `b.bounded = true` to `revision",
+  "fix": "Delete all four. Keep `maxRevisions` (Check.lean:353), its guard (Check.lean:430-433), and `RawBlock.revisionBounds` (Explain.lean:335-342), which `Explain.revisionLines` genuinely uses. If the invariant is worth stating, one `#guard`-style smoke assertion is the ponytail minimum and it is already t"
+ },
+ {
+  "pass": "ponytail",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "over-engineering",
+  "loc": "Agentic/Core/Dsl/Syntax.lean:62",
+  "claim": "Three copies of one function: `objections` is written out identically in three modules and `render` in two, with a `rfl` theorem asserting two of them are the same function.",
+  "evidence": "`Verdict.render` (Syntax.lean:62-63) inlines `if h : v = 0 then [] else FreeMonoid.toList (WithZero.unzero h)`; `Harden.objections` (HardenPatch.lean:87-88) is the same expression; `Verdict.objections` (Report.lean:453-454) is the same expression again. `Harden.render` (HardenPatch.lean:91) and `Verdict.render` are the same function, and `DslFlagship.lean:74` proves it: `theorem render_eq_harden_render (v : Verdict) : Verdict.render v = Harden.render v := rfl`. The docstring's justification (Syntax.lean:58-61: \"that name belongs to `Agentic/Core/Report.lean`, which imports the transport; a checker must not\") argues against importing *Report*, but does not explain why the definition is not si",
+  "fix": "Define `Verdict.objections` and `Verdict.render` once, in `Agentic/Core/Question.lean` beside `Verdict`. Delete the copies at Syntax.lean:62, HardenPatch.lean:87-91 and Report.lean:453, and delete `render_eq_harden_render` \u2014 two definitions that are one definition need no theorem saying so."
+ },
+ {
+  "pass": "ponytail",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "over-engineering",
+  "loc": "Agentic/Core/Dsl/Check.lean:216",
+  "claim": "`checkAskAt` duplicates `checkRhsAt`, and `checkMembers`'s `Code` parameter has exactly one call-site value.",
+  "evidence": "`checkAskAt c S a what` (Check.lean:216-223) is `checkRhsAt c S (.ask a) what` (Check.lean:261-268) modulo one word in the message (\"this question asks for\" vs \"this one produces\") \u2014 note `checkRhs S (.ask a) = checkAsk S a` (Check.lean:246) and `RawRhs.pos (.ask a) = a.pos` (Syntax.lean:243), so even the reported position agrees. `checkAskAt`'s only caller is `checkMembers` (Check.lean:231), and `checkMembers`'s only caller passes `Code.verdict` literally: `match checkMembers Code.verdict S (m :: rest)` (Check.lean:252), guarded by `if m.code = Code.verdict` on the line above. So the \"members must agree with the first\" generality (Check.lean:227, message at 231-232) can only ever mean \"memb",
+  "fix": "Delete `checkAskAt` (Check.lean:216-223). Drop `checkMembers`'s `c` parameter, hard-wire `Code.verdict`, and have it call `checkRhsAt Code.verdict S (.ask a) \"a panel's members all answer `verdict`\"`. The `unfold checkAskAt` limb of `checkMembers_level_le` then collapses to `checkRhsAt_level_le`."
+ },
+ {
+  "pass": "ponytail",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "over-engineering",
+  "loc": "Agentic/Core/Dsl/Syntax.lean:156",
+  "claim": "`Prompt.normalize` is provably the identity on the parser path, and the docstring's stated reason for it describes something that cannot happen.",
+  "evidence": "`Prompt.normalize` (Syntax.lean:156-159) drops `.lit \"\"` chunks and is applied by `prompt` (Parse.lean:262-263) to every parsed prompt. But the lexer cannot emit an empty literal: `flushLit` is `if acc.isEmpty then chunks else Chunk.lit \u2026 :: chunks` (Parse.lean:86-87), and an interpolation's name is checked non-empty (Parse.lean:122-123, \"empty interpolation; write a name between the braces\"). Nor can expansion introduce one: `expand` maps `.lit s => .lit s :: \u2026` and splices `d.2 ++ \u2026` (Parse.lean:254-260), and macro bodies are themselves `prompt defs pr` (Parse.lean:505). The docstring's justification \u2014 \"Applied by the parser after `define` expansion, where a macro that expands to nothing w",
+  "fix": "Drop `Prompt.normalize` from `prompt` (Parse.lean:263 becomes `expand defs p`), and write the CLI's one real case inline: `(d.1, if d.2.isEmpty then [] else [.lit d.2])`. That deletes the definition and its 14-line docstring."
+ },
+ {
+  "pass": "ponytail",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "over-engineering",
+  "loc": "Agentic/Core/Explain.lean:274",
+  "claim": "`parseAndCheckRaw` and two of its three theorems have no code caller; one of them is `rfl` on the definition written immediately above it.",
+  "evidence": "`def parseAndCheckRaw (s) := parseAndCheckRawWith [] s` (Explain.lean:274-275) is called by nothing: `cli/AgentCat.lean:265` uses `Dsl.parseAndCheckRawWith (overrides ds) src`, and `Agentic/Core/Mcp.lean:1119,1364` use `Dsl.parseAndCheckE`. `theorem parseAndCheckRaw_eq_with_nil : parseAndCheckRaw s = parseAndCheckRawWith [] s := rfl` (Explain.lean:281-282) restates line 275's definition. `theorem parseAndCheckRaw_level_le` (Explain.lean:322-326) is unused \u2014 the CLI takes its proof from `parseAndCheckRawWith_level_le` (cli/AgentCat.lean:266). The same tautology appears in the parser: `def parse (s) := parseWith [] s` (Parse.lean:548) followed by `theorem parse_eq_parseWith_nil : parse s = par",
+  "fix": "Delete `parseAndCheckRaw`, `parseAndCheckRaw_eq_with_nil`, `parseAndCheckRaw_level_le` and `parse_eq_parseWith_nil`. Restate the one theorem that carries content, `parseAndCheckRaw_eq` (Explain.lean:307), directly about `parseAndCheckRawWith [] s`."
+ },
+ {
+  "pass": "ponytail",
+  "kind": "observation",
+  "sev": "medium",
+  "cat": "over-engineering",
+  "loc": "Agentic/Core/Dsl/Parse.lean:359",
+  "claim": "`parseBracedRhs`'s braces are speculation, justified in the docstring by a change that has not happened, and they buy the construct the owner called confusing two extra nesting levels.",
+  "evidence": "Parse.lean:357-364: \"`rhs` in braces, which is what a `check` or `revise` clause carries. Written `{ rhs }` rather than bare **so that the clause can be relaxed later to a block without moving a character of what exists**.\" The braces carry nothing today \u2014 `parseRhs` accepts exactly one `ask` or one `panel`, and `Raw` has no constructor that could hold a block there (`RawBlock.revising` takes `check : RawRhs`, Syntax.lean:231). The cost is visible in the only example that uses the construct, `example/harden.wf:13-29`, where `revising` nests four brace levels deep to hold one panel: `revising draft up to 2 revisions { check given patch { panel [ \u2026 ] } revise given patch, why { ask \u2026 } }`.",
+  "fix": "Delete `parseBracedRhs` (Parse.lean:359-364) and parse `check given patch = <rhs>` / `revise given patch, why = <rhs>` bare. Add the braces back on the day a block is actually admitted there."
+ },
+ {
+  "pass": "ponytail",
+  "kind": "observation",
+  "sev": "low",
+  "cat": "over-engineering",
+  "loc": "Agentic/Core/Dsl/Check.lean:206",
+  "claim": "The \"build a shape, closed prompt \u2192 `askC`, open prompt \u2192 `ask`\" body is written three times, and the third copy also re-inlines `askShape` by hand.",
+  "evidence": "`checkAsk` (Check.lean:206-213), `checkBinder`'s `.ask` arm (Check.lean:277-284) and `checkBlock`'s `.act` arm (Check.lean:377-384) are the same five-line shape: `askShape \u2026` then `match Prompt.closed \u2026 with | some words => \u2026withPrompt words | none => match Prompt.expr \u2026 `. The third writes the shape out longhand \u2014 `let s : Q.Shape .ack := { addressee := t.addressee, scope := 1, draw := t.draw }` (Check.lean:378) \u2014 which is exactly `askShape none .ack t` (Check.lean:159-164).",
+  "fix": "One helper `askWords : Bindings \u0393 \u2192 Pos \u2192 Prompt \u2192 Except CheckError (Sum String (Expr \u0393 String))`; the three sites then differ only in what they wrap the result in (`askC1`/`ask1`, `askC`/`ask` former, `askC`/`ask` with a `ret` tail). At minimum, replace Check.lean:378 with `askShape none .ack t`."
+ },
+ {
+  "pass": "ponytail",
+  "kind": "observation",
+  "sev": "low",
+  "cat": "over-engineering",
+  "loc": "Agentic/Core/Dsl/Parse.lean:190",
+  "claim": "`expectKw` and `expectKwSaying` are one function written twice.",
+  "evidence": "`expectKw` (Parse.lean:190-194) and `expectKwSaying` (Parse.lean:200-205) have identical bodies except that one builds its message as `s!\"`{k}`\"` and the other takes it as an argument: `expectKw k ts = expectKwSaying k s!\"`{k}`\" ts` holds on the nose. Four call sites use the second (Parse.lean:410, 444, 454, 461), the rest the first.",
+  "fix": "Keep `expectKwSaying`, define `expectKw k ts := expectKwSaying k s!\"`{k}`\" ts` in one line."
+ },
+ {
+  "pass": "ponytail",
+  "kind": "observation",
+  "sev": "low",
+  "cat": "over-engineering",
+  "loc": "Agentic/Core/Dsl/Check.lean:540",
+  "claim": "`check`'s `(\u0393 : Ctx) \u2192 Bindings \u0393 \u2192` parameters take exactly one value at every call site in the repository.",
+  "evidence": "`def check (\u0393 : Ctx) (S : Bindings \u0393) (r : Raw)` (Check.lean:540-541) is invoked as `check [] []` at Check.lean:554, Explain.lean:267, Explain.lean:313, DslFlagship.lean:188, 206, 211, 213 and 228 \u2014 every occurrence. The genuinely context-general function, `checkBlock` (Check.lean:375), is already exported and is what the induction proofs in Dsl.lean use.",
+  "fix": "`def check (r : Raw) : Except CheckError (Plan [] Unit) := checkBlock [] [] r`. Callers that ever need an open context call `checkBlock` directly, as the proofs already do. (`check_bounded`, the only theorem that quantifies over the parameters, is deleted by the first finding.)"
+ },
+ {
+  "pass": "ponytail",
+  "kind": "observation",
+  "sev": "low",
+  "cat": "over-engineering",
+  "loc": "Agentic/Core/Dsl/Syntax.lean:263",
+  "claim": "`ask \u2026 for ack` is a legal grammar production that binds a value nothing in the language can consume, exercised by no example, no test and no line of the guide.",
+  "evidence": "`codeOfName` accepts `\"ack\"` (Syntax.lean:263) and `parseAsk` accepts whatever it returns (Parse.lean:306-309), so `let x = ask tool \"t\" for ack \"\u2026\"` checks and binds `El .ack = Unit`. Nothing can then use `x`: interpolation demands `.text` (Check.lean:119-123), `if` demands `.flag` (Check.lean:402), `case` demands `.verdict` (Check.lean:420), a panel demands `.verdict` (Check.lean:251). `grep -c 'for ack' doc/dsl-guide.html` is 0, no `.wf` example writes it, and `test/DslSmoke.lean` never exercises it. The chosen proposal recorded that it would be refused \u2014 doc/research/dsl-proposal-B.md:680, \"`ack` is refused at the `ask` position by `parseAsk`, with 'an acknowledgement is what `act` asks ",
+  "fix": "Refuse `.ack` at Parse.lean:306-309 with that message (three lines), which keeps `codeOfName_codeName` a retraction over all four kinds while removing the dead production."
+ },
+ {
+  "pass": "ponytail",
+  "kind": "observation",
+  "sev": "low",
+  "cat": "over-engineering",
+  "loc": "Agentic/Core/Explain.lean:190",
+  "claim": "Lemmas nothing applies: one unused fold identity in Explain.lean, and two `rfl` morphism equations in Check.lean whose only references are docstrings.",
+  "evidence": "`theorem Plan.size_eq_askNodes_succ` (Explain.lean:190-197, 8 lines with proof) is referenced nowhere \u2014 and the two numbers it relates are both printed side by side anyway (Explain.lean:391: `nodes: {p.size}   consultations written: {p.askNodes}`), so at `level \u2264 pipeline` the report prints n and n+1 as if they were independent facts. `under_ask1` and `under_askC1` (Check.lean:170-177) are `rfl` and are applied by no definition and no proof; the only hits are prose (Check.lean:38 and the research documents).",
+  "fix": "Delete `Plan.size_eq_askNodes_succ`, and print one of the two node counts. Keep at most one of `under_ask1`/`under_askC1` if the morphism equation is wanted on the record; both say the same thing about the same fold."
+ },
+ {
+  "pass": "ponytail",
+  "kind": "observation",
+  "sev": "low",
+  "cat": "over-engineering",
+  "loc": "Agentic/Core/Explain.lean:509",
+  "claim": "The cost report prints the same multiset of leaf bills three times.",
+  "evidence": "Explain.lean:509-512 emits `cost tree: {paths} leaves, cheapest {sayNat? lo}, dearest {sayNat? hi}`, then `leaf bills, with multiplicity: {sayNats bills}`, then `leaf bills, as a set: {sayNats bills.dedup}`. `paths` is `Multiset.card \u03c4.leaves` (Explain.lean:436), which is `bills.length`; `lo`/`hi` are the min and max of `bills`; and the deduped list is the same list. Four derived numbers, one underlying multiset.",
+  "fix": "Print the multiset once (`leaf bills: {sayNats bills}`) and drop `paths`, `lo`, `hi` and the deduped line, or keep the summary line and drop the two listings. `sayNat?`'s `\"\u2014\"` branch (Explain.lean:81-83) then goes with them: `lo`/`hi` are `none` only for a tree with no leaves, which no plan produce"
+ },
+ {
+  "pass": "ponytail",
+  "kind": "observation",
+  "sev": "low",
+  "cat": "over-engineering",
+  "loc": "Agentic/Core/Dsl/Syntax.lean:109",
+  "claim": "Two small hand-rolls where the platform already has the thing, and one that must stay \u2014 recorded here because the brief asks the question directly.",
+  "evidence": "(a) `def CheckError.render (e : CheckError) : String := toString e` (Syntax.lean:109) is an alias for the `ToString` instance eight lines above it, with one caller (Check.lean:564, `.error e.render`). (b) `isIdentCont c := c.isAlpha || c.isDigit || c == '_'` (Parse.lean:78) is `c.isAlphanum || c == '_'`. (c) The one that must stay: `natOfDigits` (Parse.lean:82-83) and the fuel-driven `lexAux`/`parseBlockFrom` are *not* reinvented stdlib \u2014 `String.toNat?` and any `String.foldl`- or `Parsec`-based scanner iterate by `String.Pos` under well-founded recursion, and Parse.lean:10-20 records the measured reason that is fatal here (`DslFlagship.lean` proves by `decide +kernel`; `native_decide` is ba",
+  "fix": "Delete `CheckError.render` and write `toString e` at its one call site; use `Char.isAlphanum` in `isIdentCont`. Leave the lexer's fuel and `natOfDigits` alone \u2014 swapping in `String.toNat?` would trade two lines for an unprovable flagship."
+ },
+ {
+  "pass": "dead-code",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "stale-doc",
+  "loc": "README.md:13",
+  "claim": "README's front-door paragraph states the package has no Mathlib dependency and defines its algebra classes locally; the package requires Mathlib and its own table two paragraphs later says so.",
+  "evidence": "README.md:13-23 reads \"Self-contained: no Mathlib dependency. [\u2026] The algebra classes are defined locally (they are small, and the design's complete semiring with a star is not in Mathlib in this shape anyway). An upgrade path to Mathlib exists [\u2026] and taking it would change interfaces, not theorems.\" Signal 1: lakefile.toml:34-36 declares `[[require]] name = \"mathlib\" git = \"https://github.com/leanprover-community/mathlib4\" rev = \"v4.30.0\"`, and 30+ modules carry `import Mathlib.*` (e.g. Agentic/Core/Plan.lean:2 `import Mathlib.Data.FinEnum`, Agentic/Core/Explain.lean:3 `import Mathlib.Data.Multiset.Sort`). Signal 2: README's own table contradicts the paragraph above it \u2014 README.md:29 \"the ",
+  "fix": "Replace README.md:13-23 with the current statement: Mathlib v4.30.0 is a hard dependency pinned in lakefile.toml; only the survivors named in Agentic.lean's import comments (SupMon, StarSemiring, CompleteCSemiring, actR/actL) are local."
+ },
+ {
+  "pass": "dead-code",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "stale-doc",
+  "loc": "README.md:1",
+  "claim": "README documents only the superseded pre-Core stratum: it names no `Agentic/Core/*` module, no DSL, no `agent-cat`, and no `.wf` program, while pointing readers at exactly the half the project has retired.",
+  "evidence": "README.md:5-11 presents the repository as \"the graded term language of `Agentic.Term` [\u2026] together with its two meaning functions (`Agentic.Meaning`)\", and its module table (README.md:28-45) ends at `Agentic.Meaning`. Signal 1: `Agentic.lean` \u2014 whose docstring says \"see README.md for the mapping to the design document\" \u2014 imports eight `Agentic/Core` modules (Question, World, Dlg, Plan, Denote, Level, Cost, Morphism, HardenPatch) that README never mentions, and its comment on `import Agentic.Surface` says Surface's \"internals are scaffolding over the current Term calculus, which the re-derivation condemns (dossier rederivation-kernel.md; obr acat-o8s)\". Signal 2: doc/HANDOFF.md:531-536 record",
+  "fix": "Rewrite README around `Agentic/Core` + the DSL + the three binaries, and demote the Term/Meaning table under the same \"superseded, keep for history\" banner HANDOFF.md:528-530 already uses."
+ },
+ {
+  "pass": "dead-code",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "dead-code",
+  "loc": "Agentic/Core/Explain.lean:322",
+  "claim": "`Dsl.parseAndCheckRaw_level_le` has no consumer and has been superseded by `parseAndCheckRawWith_level_le`, yet two docstrings still cite it as the theorem the CLI runs on.",
+  "evidence": "Signal 1: a whole-snapshot grep for `parseAndCheckRaw_level_le` finds only its own statement (Agentic/Core/Explain.lean:322), one docstring mention in the same file (Explain.lean:285) and two prose references (cli/AgentCat.lean:314, doc/HANDOFF.md:268) \u2014 no term-level application anywhere. Signal 2: the generalization that replaced it is what the binary actually applies: cli/AgentCat.lean:265-266 reads `match h : Dsl.parseAndCheckRawWith (overrides ds) src with | .ok (r, p) => k r p (Dsl.parseAndCheckRawWith_level_le _ src r p h)`, and Explain.lean:284-288's own docstring says the `With` form is \"Not a corollary of `parseAndCheckRaw_level_le`\" \u2014 i.e. the specialized one was left behind when ",
+  "fix": "Either delete `parseAndCheckRaw_level_le` and repoint AgentCat.lean:314 / HANDOFF.md:268 at `parseAndCheckRawWith_level_le`, or keep it and correct AgentCat.lean:19 and :314 to name the function the code calls."
+ },
+ {
+  "pass": "dead-code",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "stale-doc",
+  "loc": "flake.nix:18",
+  "claim": "The devShell comment asserts two facts that are both false in this snapshot: that there is no lean-toolchain file, and that the package needs no network because it has no Mathlib.",
+  "evidence": "flake.nix:16-20: \"Lean 4 (compiler + lake), from nixpkgs rather than elan: the toolchain is exactly this derivation [\u2026] and there is deliberately no lean-toolchain file for elan to consult. The package is self-contained (no Mathlib), so nothing here needs the network after this shell.\" Signal 1: a `lean-toolchain` file exists at the snapshot root and contains `leanprover/lean4:v4.30.0`; doc/HANDOFF.md:28-29 documents it as load-bearing \u2014 \"`lean-toolchain` pins `leanprover/lean4:v4.30.0`. It is inert under nix but required by lake's dependency check, and it must match the nix Lean exactly.\" Signal 2: lakefile.toml:34-36 fetches Mathlib from git, so `lake build` from a cold `.lake` requires th",
+  "fix": "Replace the comment with the current arrangement described in HANDOFF.md:28-29, and state that the first build fetches Mathlib."
+ },
+ {
+  "pass": "dead-code",
+  "kind": "defect",
+  "sev": "low",
+  "cat": "stale-doc",
+  "loc": "doc/HANDOFF.md:35",
+  "claim": "HANDOFF quotes DslFlagship.lean's elaboration cost as ~100 seconds in two places; the module and the lakefile both say five to six minutes.",
+  "evidence": "doc/HANDOFF.md:33-35 \"`Agentic/Core/DslFlagship.lean` costs roughly 100 seconds and several gigabytes\" and doc/HANDOFF.md:502 \"DslFlagship.lean 427  the flagship program's decide-proofs (~100 s; binaries do NOT)\". Signal 1: lakefile.toml:13-14 \"One module in this glob dominates the whole build: `Agentic/Core/DslFlagship.lean` takes about six minutes and several gigabytes to elaborate\". Signal 2: Agentic/Core/DslFlagship.lean:15 \"**This module takes on the order of five minutes of wall clock to elaborate, and several gigabytes of memory.**\" The figure is stale by roughly 3\u00d7, which matters because HANDOFF.md:32 is the section telling a new session how long to wait before assuming a hang.",
+  "fix": "Update both HANDOFF figures to five to six minutes, sourced from lakefile.toml:13."
+ },
+ {
+  "pass": "dead-code",
+  "kind": "defect",
+  "sev": "low",
+  "cat": "stale-doc",
+  "loc": "doc/dsl-guide.html:120",
+  "claim": "Neither user-facing document mentions `ask \u2026 for ack`, which the chosen-grammar record identifies as the only non-terminal effect in the language; both teach `ack` as an act-only kind, so the guide's \"an act is terminal\" reads as a language property the language does not have.",
+  "evidence": "doc/dsl-guide.html:120 \"an act is terminal: `act` puts a question whose answer carries no information, and nothing follows it in the block\", and doc/dsl-guide.html:139 gives `ack` the sole use \"acts, where the point is the effect and not the reply\"; doc/mcp.md:87-88 likewise glosses `ack` as \"(an act was done)\". Signal 1: the form is deliberately retained \u2014 doc/research/dsl-chosen.md:203 \"**`ask \u2026 for ack` stays legal.** An act is terminal, so a question asked for\u2026\", scored at dsl-chosen.md:32 as the reason proposal B lost a point (\"pays for it by deleting `ask \u2026 for ack`, which is the only non-terminal effect the language has\") and re-affirmed at dsl-chosen.md:602. Signal 2: the code accept",
+  "fix": "Add one line to the guide's Ending/Reference-card sections documenting `let _ = ask <addressee> for ack \"\u2026\"` as the non-terminal effect, or qualify dsl-guide.html:120 to say `act` \u2014 not effects \u2014 is what is terminal."
+ },
+ {
+  "pass": "dead-code",
+  "kind": "observation",
+  "sev": "low",
+  "cat": "dead-code",
+  "loc": "Agentic/Core/Dsl/Check.lean:148",
+  "claim": "The empty-prompt clause of `Prompt.expr` is unreachable from every one of its three call sites.",
+  "evidence": "Agentic/Core/Dsl/Check.lean:145-148 defines `Prompt.expr \u2026 | [] => .ok (fun _ => \"\")`. Signal 1: all three call sites sit in the `| none =>` arm of `match Prompt.closed \u2026 with` \u2014 Check.lean:208-211 (`checkAsk`), Check.lean:279-282 (`checkBinder`), Check.lean:379-382 (`checkBlock`'s `.act`). Signal 2: `Prompt.closed` maps the empty prompt to `some`, not `none` \u2014 Agentic/Core/Dsl/Syntax.lean:136-137 `def Prompt.closed : Prompt \u2192 Option String | [] => some \"\"` \u2014 so `none` entails at least one `.interp` chunk and hence a non-empty list. The clause is harmless (a total function needs it) but it is not a reachable behaviour, and its existence is what makes the `Prompt.expr []` case look like a des",
+  "fix": "Leave the clause (totality requires it) but note in its docstring that it is unreachable because `Prompt.closed [] = some \"\"`, as Parse.lean:11-26 does for the budget branches."
+ },
+ {
+  "pass": "dead-code",
+  "kind": "observation",
+  "sev": "low",
+  "cat": "dead-code",
+  "loc": "Agentic/Core/Dsl/Check.lean:249",
+  "claim": "The diagnosis \"a panel needs at least one member\" cannot be produced by any source text; it is reachable only from a hand-built `Raw`.",
+  "evidence": "Agentic/Core/Dsl/Check.lean:247-249: `| .panel ms pos => match ms with | [] => .error \u27e8pos, \"a panel needs at least one member\", \"panel\"\u27e9`. Signal 1: the only constructor of `RawRhs.panel` in the parser is Agentic/Core/Dsl/Parse.lean:344-348, which fills the member list from `parsePanelMembers`. Signal 2: `parsePanelMembers` cannot return the empty list \u2014 Parse.lean:326-333 either errors on exhausted fuel or parses one `ask` first and returns `[a]` or `a :: as`. Unlike the fuel branches, this one is not documented as unreachable, and unlike them it has a legitimate caller: Check.lean:349-351's docstring notes that `Dsl.check` is applied to hand-built `Raw` too, which is the reason to keep it",
+  "fix": "Add the one-line note that this clause guards the hand-built-`Raw` entry point only, matching the justification already written at Check.lean:349-351 for `maxRevisions`."
+ },
+ {
+  "pass": "dead-code",
+  "kind": "observation",
+  "sev": "low",
+  "cat": "dead-code",
+  "loc": "Agentic/Core/Explain.lean:190",
+  "claim": "`Plan.size_eq_askNodes_succ` has no consumer anywhere in the snapshot and, unlike its neighbours, no stated documentary purpose.",
+  "evidence": "Agentic/Core/Explain.lean:190-197 states `p.size = p.askNodes + 1` under `level p \u2264 Level.pipeline`. Signal 1: a whole-snapshot grep for `size_eq_askNodes_succ` returns only the declaration \u2014 no proof, test, binary or document mentions it. Signal 2: it is not marked `@[simp]`, so no tactic can pick it up implicitly, and its two file-neighbours both carry an explicit reason to exist that it lacks \u2014 `finEnum_toList_bool`/`finEnum_toList_vtag` are named at Explain.lean:26 as what \"pins\" the arm order for a reader, and `Plan.length_trace_eq_askNodes` is named at Explain.lean:55 and used at Explain.lean:494 as the theorem behind the one printed bill. Its own docstring (Explain.lean:188-189) offer",
+  "fix": "Either delete it, or give it the same one-line \"this is what X in the report relies on\" justification the surrounding lemmas carry."
+ },
+ {
+  "pass": "dead-code",
+  "kind": "observation",
+  "sev": "low",
+  "cat": "dead-code",
+  "loc": "example/HardenPatch.lean:9",
+  "claim": "The artifact the review brief names as the owner-approved comparison surface is written against the condemned pre-Core stratum and is connected to the flagship's theorems by nothing; keeping it in defaultTargets is what pins ~4,700 superseded lines alive.",
+  "evidence": "example/HardenPatch.lean:1 `import Agentic` and :9 `def hardenPatch (spec : String) : W Unit := do` \u2014 `W` and the five words (`ask`, `askHuman`, `model`, `panel`, `revising`) come from `Agentic.Surface`, whose import comment in Agentic.lean says its \"internals are scaffolding over the current Term calculus, which the re-derivation condemns (dossier rederivation-kernel.md; obr acat-o8s)\". Signal 1: the pre-Core stratum is imported by nothing but the root aggregate \u2014 `grep -l '^import Agentic.Surface$'` over every .lean file returns only `Agentic.lean`, and the same holds for Term, Meaning, Frag, Star, Pareto, Context, Gate, Keys \u2014 so no `Agentic/Core/*`, `cli/`, `mcp/`, `demo/` or DSL module ",
+  "fix": "Re-point example/HardenPatch.lean at a `Agentic.Core`-level authoring surface (or state explicitly, as HANDOFF.md:515 does with \"pre-Core\", that it is a historical artifact) before treating it as the standard the DSL must match."
+ },
+ {
+  "pass": "comments",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "comment",
+  "loc": "Agentic/Core/DslFlagship.lean:16",
+  "claim": "\"nineteen `decide +kernel` proofs\" \u2014 the module contains nine; the same wrong number is repeated in Agentic/Core/Dsl.lean and lakefile.toml.",
+  "evidence": "DslFlagship.lean:16 says \"Almost all of it is nineteen `decide +kernel` proofs, four of them at `maxRecDepth 1000000`.\" `grep -n 'decide +kernel' Agentic/Core/DslFlagship.lean` returns the prose line plus exactly nine tactic uses: lines 206, 249, 262, 271, 278, 306, 312, 319, 326. (The \"four at maxRecDepth 1000000\" half is correct: lines 302, 308, 314, 321.) The same figure is asserted at Agentic/Core/Dsl.lean:15 (\"the nineteen `decide +kernel` proofs that price it\") and in lakefile.toml's build-time note (\"its nineteen `decide +kernel` proofs\"). Repo-wide there are only ten `decide +kernel` tactic invocations in total, so no reading of the scope reaches nineteen. A reader budgeting the modu",
+  "fix": "Replace \"nineteen\" with \"nine\" at DslFlagship.lean:16, Dsl.lean:15 and lakefile.toml; better, phrase it as \"the `decide +kernel` proofs\" so the count cannot drift again."
+ },
+ {
+  "pass": "comments",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "comment",
+  "loc": "Agentic/Core/Dsl/Parse.lean:24",
+  "claim": "The module docstring's promise that every exhausted-budget branch \"returns a diagnosis like any other failure rather than a `panic!`\" is false of `parseDefines`, whose exhausted branch silently succeeds.",
+  "evidence": "Parse.lean:24-26: \"That it is unreachable is *not proved* \u2026 so it returns a diagnosis like any other failure rather than a `panic!`.\" DslFlagship.lean:422-424 repeats it as a proof-obligation waiver: \"the branch returns a `CheckError` like every other failure rather than a `panic!`, so an exhausted budget is a rejected program, not an unsound one.\" Four of the five fuelled functions do that \u2014 scanString (Parse.lean:94), lexAux (137), parsePanelMembers (326), parseBlockFrom (378) all `.error`. `parseDefines` does not: Parse.lean:496 reads `| 0, defs, ts => .ok (defs, ts)`. On an exhausted budget it returns success with the defines gathered so far, so the failure would surface (if at all) as a",
+  "fix": "Either make Parse.lean:496 `.error \u27e8posOf ts, \"internal: parser budget exhausted in the define preamble\", \"\"\u27e9` to match what both docstrings claim, or amend both docstrings to exempt `parseDefines` and say why silently stopping is safe there."
+ },
+ {
+  "pass": "comments",
+  "kind": "defect",
+  "sev": "medium",
+  "cat": "comment",
+  "loc": "Agentic/Core/Dsl/Check.lean:29",
+  "claim": "The module docstring says three binders are \"not context entries\", but two of the three are ordinary context entries; only `why` is not.",
+  "evidence": "Check.lean:29-33: \"The three binders that are **not** context entries \u2014 `approved given p`, whose value is an `Option (El c)` and so cannot be one (`Ctx = List Code`), and `revise given p, why`, whose `why` is a rendered verdict \u2014 are entries of the same table carrying a different `Expr`.\" The code contradicts two thirds of that. The `approved given p` binder is pushed exactly like a `let`: Check.lean:454 reads `checkBlock (b.code :: \u0393) (Bindings.push pv b.code S) acc`, and `Bindings.push` (Check.lean:90-91) installs `Expr.var .here` in the extended context \u2014 a de Bruijn context entry, not a derived expression. Its `Option (El c)` justification is about the graft's value, which `finishCont` ",
+  "fix": "Rewrite as: \"The one binder that is **not** a context entry is `why` in `revise given p, why`, a rendered verdict; `check given p`, `revise`'s artefact and `approved given p` are ordinary context slots reached through the same table.\""
+ },
+ {
+  "pass": "comments",
+  "kind": "defect",
+  "sev": "low",
+  "cat": "comment",
+  "loc": "Agentic/Core/Dsl/Parse.lean:196",
+  "claim": "`expectKwSaying`'s docstring says it is used only for \"the two outcome clauses of a bounded revision\"; it is used at four call sites, two of which are neither.",
+  "evidence": "Parse.lean:196-199: \"Used where the missing word is the head of a construct a reader has to be told the *shape* of \u2014 the two outcome clauses of a bounded revision \u2014 rather than a word they can see is missing.\" The four call sites are Parse.lean:410 (`approve`, the arms of a `case` branching), Parse.lean:444 (`revise`, a clause *inside* the loop braces, not an outcome), Parse.lean:454 (`approved`) and Parse.lean:461 (`never`). Only the last two are outcome clauses. Anyone editing the `case` or `revise` diagnostics on the strength of this docstring would believe those messages are unreachable from this helper.",
+  "fix": "Broaden to \"\u2026used wherever the missing word heads a construct whose shape must be spelled out: a verdict branching's arms, and the `revise` clause and two outcome clauses of a bounded revision.\""
+ },
+ {
+  "pass": "comments",
+  "kind": "defect",
+  "sev": "low",
+  "cat": "comment",
+  "loc": "Agentic/Core/Dsl/Syntax.lean:60",
+  "claim": "`Verdict.render`'s docstring claims DslFlagship proves \"the three spellings are one function\"; only two spellings exist and only one such theorem is stated.",
+  "evidence": "Syntax.lean:60-61: \"`Agentic/Core/DslFlagship.lean` proves this is `Harden.render`, by `rfl`, so the three spellings are one function.\" The proof in question is DslFlagship.lean:73-74, whose own docstring says \"The two spellings are one function, by `rfl`\" and whose statement is `Verdict.render v = Harden.render v` \u2014 two spellings, one equation. There is no third `render`: the third name the paragraph gestures at, `Verdict.objections` in Agentic/Core/Report.lean:450, is a different function (an objection list, not a string) and no theorem relates it here. The same file already states the count correctly forty lines earlier, at Syntax.lean:44-45 (\"proves the two spellings are one function\"), ",
+  "fix": "Change \"the three spellings\" to \"the two spellings\" at Syntax.lean:61, matching Syntax.lean:44 and DslFlagship.lean:73."
+ },
+ {
+  "pass": "comments",
+  "kind": "defect",
+  "sev": "low",
+  "cat": "stale-doc",
+  "loc": "doc/dsl-guide.html:361",
+  "claim": "The guide tells authors \"the runtime's decoders are deliberately strict\" and that an unreadable reply \"aborts the run\"; the decoders are deliberately asymmetric \u2014 lenient on refusal, total on verdicts \u2014 and an unreadable reply is re-asked before any abort.",
+  "evidence": "doc/dsl-guide.html:361: \"the runtime's decoders are deliberately strict, and a reply that cannot be read aborts the run rather than being guessed at.\" Agentic/Core/Exec.lean:153-156 says the opposite of half of it: \"`[[saidNo s]]` = the reply contains a *no* word somewhere. Lenient, and deliberately so\", and Exec.lean:185-188 states the asymmetry as the safety property (\"A *no* counts wherever it appears; a *yes* has to be the entire reply\"). Verdict decoding cannot fail at all: Exec.lean:266 documents `Decode .verdict s = some (decodeVerdict s) -- total: refusal is an answer`, matching Exec.lean:276. And Exec.lean:63-64 says the run \"decodes the reply, re-asks on a decode failure, and **fai",
+  "fix": "Rewrite the bullet as: \"Kinds are contracts with the addressee. Decoding is deliberately asymmetric: a refusal word anywhere denies, while consent must be a lone yes word; verdicts always decode (refusal is an answer). A reply that decodes to nothing is re-asked, and only then does the run fail.\""
+ },
+ {
+  "pass": "comments",
+  "kind": "defect",
+  "sev": "low",
+  "cat": "comment",
+  "loc": "Agentic/Core/Dsl/Check.lean:173",
+  "claim": "`under_askC1`'s docstring says the closed-question case is \"the case `checkBinder` and `checkAsk` actually take for the flagship's `guide` and `draft` nodes\"; those two nodes go through `checkBinder` only, which never calls `checkAsk`.",
+  "evidence": "Check.lean:173-175: \"\u2026the case `checkBinder` and `checkAsk` actually take for the flagship's `guide` and `draft` nodes\". `guide` and `draft` are `let` right-hand sides (example/harden.wf:7 and :10), and Check.lean:385-391 routes `.bind` exclusively through `checkBinder`. `checkBinder` (Check.lean:276-284) re-implements the closed/open split itself and never calls `checkAsk`; `checkAsk`'s own docstring (Check.lean:203-205) says where it is used instead \u2014 \"Used for panel members and for the `revise` clause\". So no path takes `checkAsk` for `guide` or `draft`.",
+  "fix": "Drop `checkAsk` from the sentence, or say \"the case `checkBinder` takes for the flagship's `guide` and `draft` nodes, and `checkAsk` takes for its panel members\"."
+ },
+ {
+  "pass": "comments",
+  "kind": "defect",
+  "sev": "low",
+  "cat": "stale-doc",
+  "loc": "Agentic/Core/DslFlagship.lean:33",
+  "claim": "The list of what pays this module's elaboration cost omits `test/McpSmoke.lean`, which imports it.",
+  "evidence": "DslFlagship.lean:32-34: \"Because this module is separate, that cost is paid only by the things that actually want the flagship: `test/DslSmoke.lean`, `test/CliSmoke.lean` and the `Agentic` aggregate.\" test/McpSmoke.lean:2 is `import Agentic.Core.DslFlagship`, and lakefile.toml's own note contradicts the docstring explicitly: \"This one *does* import `Agentic.Core.DslFlagship`, so it pays the six minutes; so do `cli_smoke` and `mcp_smoke`\". The word \"only\" makes the omission a false exhaustiveness claim, which matters because the docstring's closing instruction (\"Keep it that way\") is a rule someone will apply against this list. (The three executables it says do not import it \u2014 cli/AgentCat.le",
+  "fix": "Add `test/McpSmoke.lean` to the list at DslFlagship.lean:33."
+ },
+ {
+  "pass": "comments",
+  "kind": "observation",
+  "sev": "low",
+  "cat": "stale-doc",
+  "loc": "doc/dsl-guide.html:398",
+  "claim": "The arithmetic in \"Five more words, four fewer punctuation marks\" only works if `revision` and `revisions` are counted as two added words, which the sentence's own list writes as one item.",
+  "evidence": "doc/dsl-guide.html:398 lists seven removed words (`upto`, `done`, `exhausted`, `accepted`, `with`, `yes`, `no`) and eleven added items (`for`, `using`, `up`, `to`, `revision(s)`, `given`, `revise`, `approved`, `never`, `if`, `else`), then concludes \"Five more words\". 11 \u2212 7 = 4 unless `revision(s)` counts twice \u2014 which is in fact how the same page's own lexeme total is reached (doc/dsl-guide.html:124's \"thirty-eight lexemes\" = 32 words + 6 punctuation, and 32 requires counting both `revision` and `revisions`, both of which Parse.lean:433-434 accepts). The \"four fewer punctuation marks\" half is exact (`@`, `->`, `(`, `)` removed against punctChars at Parse.lean:80). This is a counting-convent",
+  "fix": "Write the added list as `revision`/`revisions` (two entries) so the +5 is self-evident, or change \"Five\" to \"Four\"."
+ },
+ {
+  "pass": "comments",
+  "kind": "observation",
+  "sev": "low",
+  "cat": "stale-doc",
+  "loc": "doc/dsl-guide.html:278",
+  "claim": "The \u00a75 `plan` and `cost` samples are silently abridged: real output carries a banner and five legend lines before the first number, and two `leaf bills` lines the sample drops without an ellipsis.",
+  "evidence": "doc/dsl-guide.html:278 opens the `plan` sample with `nodes: 36   consultations written: 19   level: branch`, but Explain.planLines (Agentic/Core/Explain.lean:388-403) emits a `--- the checked term, as the library holds it \u2026 ---` banner as its first line and five legend lines (Explain.lean:392-402) immediately after the counts, before any node. In the `cost` sample the guide jumps from `cost tree: 9 leaves\u2026` (line 299) straight to `attained:` (line 300), whereas costLines (Explain.lean:509-513) prints `leaf bills, with multiplicity:` and `leaf bills, as a set:` between them; the guide also drops the parenthetical `(\\`Cost.shapes\\` is \\`none\\` at a \\`case\\`)` from the shape-sequence line (Expl",
+  "fix": "Add an elided-lines marker to both `pre` blocks, or include the banner/legend and leaf-bill lines."
+ },
+ {
+  "pass": "comments",
+  "kind": "observation",
+  "sev": "low",
+  "cat": "comment",
+  "loc": "Agentic/Core/DslFlagship.lean:81",
+  "claim": "\"Compare `Agentic/Core/HardenPatch.lean`: twelve lines of authoring surface there, forty of a language here\" points at the wrong file for the twelve lines, and rounds forty-two down.",
+  "evidence": "The twelve-line authoring surface is example/HardenPatch.lean, whose do-block runs lines 9-19 (eleven lines, twelve with the signature); Agentic/Core/HardenPatch.lean is the `Plan` transcription with its theorems, which is far longer \u2014 and the REVIEW-BRIEF describes the same split (\"`example/HardenPatch.lean` \u2014 the owner-approved Lean surface (12-line do-block)\"). example/harden.wf is 42 lines, not forty. Both numbers are rhetorical rather than load-bearing, hence an observation.",
+  "fix": "Cite example/HardenPatch.lean for the twelve lines, and say \"forty-odd\" or \"42\" for the .wf file."
+ },
+ {
+  "pass": "comments",
+  "kind": "observation",
+  "sev": "low",
+  "cat": "comment",
+  "loc": "Agentic/Core/Dsl/Parse.lean:286",
+  "claim": "Unverifiable-by-reading claims in the DSL scope, recorded so a later pass with a build can check them: all timing and memory measurements, and one prose count.",
+  "evidence": "Every performance figure in scope is a claim about elaboration that this pass is forbidden to run and that no file records: Syntax.lean:22-24 (\"its `brecOn` turned a three-second kernel reduction into a three-minute one\"), Parse.lean:12-20 (well-founded recursion would make the flagship theorems unprovable), Check.lean:336-340 (\"`up to 1000000000 revisions` aborts the process with `Stack overflow detected` in 0.3 s, `1000` prices in 71 s, `400` in 3.5 s, `100` in 56 ms and `64` in 20 ms\"), DslFlagship.lean:15 (\"on the order of five minutes\" \u2014 lakefile.toml says \"about six minutes\" for the same module), DslFlagship.lean:107-111 and 390-394 (the quadratic lexer curve, 189/369/729/1400 characte",
+  "fix": "No change; re-check the timings whenever the module is next elaborated, and reconcile DslFlagship.lean:15 with lakefile.toml's \"six minutes\"."
+ }
+]

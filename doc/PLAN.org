@@ -189,6 +189,22 @@ README table omits Keys/Frag/Term; 'not the workflow syntax' now false; Countabl
 ]
 #+end_src
 
+* TODO [#D] Layering: the CLI front end lives in Explain.lean and the parity claim cites the wrong theorem
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-1t1
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-14 Fri 19:00]
+:MODIFIED: [2026-08-14 Fri 19:00]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+alexey, low. parseAndCheckRawWith and RawBlock.revisionBounds are defined in Explain.lean (262, 335) three modules from the subsystem that owns them, while Dsl.lean calls itself 'the front end'. cli/AgentCat.lean:24 claims parity via parseAndCheckRaw_eq, which covers only the no-override path; the overridden path has no stated relation. Move the definitions into Dsl/, qualify the claim. Also alexey (low): maxRevisions guards the DSL path only — Plan.revising applied directly is the same Nat.rec unguarded; state the obligation in its docstring or expose a bounded variant.
+
 * TODO [#D] zeroT: the additive unit
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -218,6 +234,22 @@ README table omits Keys/Frag/Term; 'not the workflow syntax' now false; Countabl
   }
 ]
 #+end_src
+
+* TODO [#B] DSL: no meaning function for the surface — state [[RawBlock]] and prove denote-after-check equations
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-22m
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-14 Fri 19:00]
+:MODIFIED: [2026-08-14 Fri 19:00]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+abstraction pass, high; converges with deep-review's proof-scope observation. The DSL is the only stratum with no [[.]]: Syntax.lean:199/189/174 describe layout, not mathematical objects, and no theorem anywhere relates check's output to denote (nothing states `denote (check ...) = ...`). With no equation for what a construct means, surface shape was settled by rubric — which is how a case came to be spelled as two sibling clauses. Fix: write [[RawBlock]] : Bindings G -> Option (Env G -> Dlg Unit) (i.e. denote . check), prove one equation per construct using the Plan.Denotes machinery already in Denote.lean, and state the accepted fragment (an inductive predicate on Plan that check's image inhabits) plus the missing adequacy direction in Dsl.lean's 'where the proofs stop'. Constrains and is partially subsumed by the redesign [[acat-k28]].
 
 * TODO [#B] Certification residue: three violations, then the thesis is simply true
 :PROPERTIES:
@@ -284,6 +316,22 @@ From acat-ozh: acat-jmm's first hard consumer. At SqZero Prop Prop / Cost / Prob
 :END:
 
 From acat-5b7's honest scope: retryT/fanT need an n-ary Key.splice (provable, unproved); bindT needs a uniformly-chosen relabelling; shareT is different in kind (gate-erasure genuinely false under rel bases — may need its own equivalence layer). Until then Workflow quotients the seq/par/sum/choice/gate/scope sub-algebra only.
+
+* TODO [#C] DSL checker: Theta(k^2) Bindings plumbing on the MCP path, which accepts unbounded remote source
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-3wq
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-14 Fri 19:00]
+:MODIFIED: [2026-08-14 Fri 19:00]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+deep-review, medium. Bindings.rename remaps the whole table in closures at every binder (Check.lean:80-91), so k lets cost Theta(k^2) closure allocations and each variable read walks a compose chain; the revising clause pays a double rename (Check.lean:446). Mcp.runCheck (Mcp.lean:1117-1124) type-checks source straight from a tool call with no length limit. Fix: store a de Bruijn index in Binding and build the Expr at lookup (push becomes cons, rename disappears), or cap source size on the MCP entry.
 
 * TODO [#C] Atkey-parameterise Term with the context index
 :PROPERTIES:
@@ -393,6 +441,22 @@ Term hard-codes the const-e collapse by omission — the exact symptom §9 diagn
   }
 ]
 #+end_src
+
+* TODO [#C] DSL tooling: pre-run floor/ceiling cost report (Over/Under fold) with dry-run presentation and machine diagnostics
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-455
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-14 Fri 20:22]
+:MODIFIED: [2026-08-14 Fri 20:22]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Adopted from the 2026-08-14 web survey (comparison judge, acat-k28 phase C). (1) Add a second fold over the existing finite cost tree computing the selective-functors Over/Under pair: the UNDER set is the questions asked in every world (the floor — exactly the panel dispatchable immediately); the OVER set is every question any world can ask (the ceiling). No former, no shape change; sources: Mokhov et al Selective Applicative Functors (static.tex in github.com/snowleopard/selective), Haxl/ApplicativeDo as the cautionary tale (never recover the rung by a heuristic desugarer — GHC's own manual admits ApplicativeDo 'might miss an opportunity'; ours is syntax, {$x} vs {x}). (2) Presentation modeled on Snakemake --dry-run job tables + a --why column naming the binding that forced each question (Snakemake -r). (3) A machine-readable validate mode shaped like AWS ValidateStateMachineDefinition: result OK|FAIL plus diagnostics {code, message, severity, location}, pitched for CI/pre-commit, with the stated stability discipline (rely on result, not on message wording). (4) LlamaIndex framing for docs: the same declarations serve two moments — before a run (every possible path) and after (what happened); our cost tree IS the picture and a transcript is a sub-tree of it.
 
 * TODO [#C] Mathlib bridge: PMF for the edge measure, ENNReal/Tropical csum instances, Stoch for the kernel category
 :PROPERTIES:
@@ -608,6 +672,38 @@ join exists; 'lowest fragment that expresses the job' as an infimum wants meet +
 
 Any later n-ary-panel-equals-fold theorem wants it; record before it is rediscovered.
 
+* TODO [#C] DSL: panel with a declined member annihilates objections — revise receives an empty why
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-88m
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-14 Fri 19:00]
+:MODIFIED: [2026-08-14 Fri 19:00]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+validated pass (P1, single-model; verified against source by the pass agent). Verdict.declined = 0 annihilates in the monoid (Syntax.lean:68-71, render_declined = ""), so if any panellist declines, every objection the others raised is destroyed and the why handed to the revision (Check.lean:443-446) is the empty string — the reviser is told it failed but not why, indistinguishable from an approved-but-empty message. Decide: keep refusal and objections separable in the value handed to revise, or state the collapse explicitly at the surface and in the guide. Related surface question in the redesign [[acat-k28]].
+
+* TODO [#D] DSL docstring corrections: binder account, under_askC1 routing, expectKwSaying scope, render spellings, n+1 checks
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-8zf
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-14 Fri 19:00]
+:MODIFIED: [2026-08-14 Fri 19:00]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+alexey + comments + abstraction. (1) Check.lean:28-33: 'three binders are not context entries' — two of the three ARE ordinary entries (approved-given is Bindings.push at Check.lean:454); only why is derived. The same false premise ('the outcome is not a context entry') recurs in dsl-chosen.md:181-184 and a parser refusal message. (2) Check.lean:173-175: guide/draft route through checkBinder only, never checkAsk. (3) Parse.lean:196-199: expectKwSaying has four call sites, two of which are not outcome clauses. (4) Syntax.lean:60-61: 'three spellings' — the theorem states two. (5) Syntax.lean:226-228: 'performs n+1 checks' is worst-case only — approval on round one performs exactly one check (Plan.lean:618-621). (6) Check.lean:24-27 vs 443-446: Swith open-codes de Bruijn projections the module says Sub owns; build it with Bindings.push so only the rendering Expr stays hand-written (abstraction, low).
+
 * DONE [#C] Decide CsumAdditive's status: fenced hypothesis vs class axiom
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -671,6 +767,22 @@ From acat-ruz: reach = csum of powers is carrier-generic except star_eq_left nee
   }
 ]
 #+end_src
+
+* TODO [#B] DSL: caseVerdict arm mapping is unproved and untested — permuting arms passes the whole package
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-a6x
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-14 Fri 19:00]
+:MODIFIED: [2026-08-14 Fri 19:00]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+alexey pass, high. Check.lean:422-423 is the only place the approve/object/declined -> arm assignment exists. checkBlock_level_le discharges all three arms with the same bound and checkBlock_bounded is permutation-invariant; the flagship uses ifFlag, not caseVerdict, so none of the nine kernel proofs touch it. A transposition of arms miscompiles every case-using program and passes every test and theorem. Fix: extend srcCaseVerdict in test/DslSmoke.lean to run the plan under three worlds (approve / object ['no'] / declined) and assert a distinct arm-identifying act fires in each. Also from deep-review (medium): the lexer/macro/override region has zero test coverage — no define test, no scanString failure test, no --define override test; each is a two-line addition to the existing rejects harness (test/DslSmoke.lean:240-297).
 
 * TODO [#E] conv_comm converse: needs a Nontrivial fence and delta_injective
 :PROPERTIES:
@@ -751,6 +863,22 @@ From acat-jyw: shareT l (prim q1) beside shareT l (prim q2) keys both to (l, roo
   }
 ]
 #+end_src
+
+* TODO [#C] DSL diagnostics: EOF at 0:0, positionless Chunk, arm-before-scrutinee ordering, misleading messages
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-bqx
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-14 Fri 19:00]
+:MODIFIED: [2026-08-14 Fri 19:00]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+deep-review + alexey + validated. (1) End-of-input errors report 0:0 (Parse.lean:174-181), violating the one-based Pos contract; cli/AgentCat.lean:224-225 then drops the caret entirely — the commonest editing error (truncated file) gets the worst message. Fix: carry the end-of-source position. (2) Chunk.interp has no Pos (Syntax.lean:118-123), so every prompt error is reported at the enclosing ask (Check.lean:112-151) — in a language whose principal dataflow mechanism is interpolation. Fix: add Pos to Chunk.interp (the lexer knows it, Parse.lean:117-127). (3) ifFlag/caseVerdict elaborate all arms before checking the scrutinee's kind (Check.lean:392-426), so a wrong-kinded scrutinee reports an error from inside an arm. Fix: test bnd.at? first. (4) Panel monoid refusal names the first member's kind as everyone's (Check.lean:250-258). (5) Interpolation names lex as any run up to }/"/newline (Parse.lean:118), so non-identifiers surface later as 'unbound name' at the wrong place. (6) `up to 2 revision` and `up to 1 revisions` both parse (Parse.lean:430-435), defeating the two spellings' stated purpose.
 
 * DONE [#C] Split a non-commutative semiring base class out of CSemiring
 :PROPERTIES:
@@ -945,6 +1073,22 @@ From acat-ozh: Mat Prop is the only matrix star; at Prob the csum-of-powers cons
 
 Replaces the hand-rolled Cost supremum machinery and the dyadic Prob workaround; unlocks the real-valued probability carrier (resolves the acat-467/kwb deferrals), sum-product Markov read-outs, and the numeric expectation module. SqZero may survive as a construction over Mathlib semirings (check Mathlib for dual numbers: TrivSqZeroExt exists!).
 
+* TODO [#D] DSL reference page: elaboration contract, three named hazards, determinism law, edit-preservation statement
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-f8e
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-14 Fri 20:22]
+:MODIFIED: [2026-08-14 Fri 20:22]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Adopted from the web survey (comparison judge). (1) CONTRACT: name the checker's five refusal clauses as an advertised validation contract (Microsoft Agent Framework precedent): every hole names a live binder or earlier define of the right kind; every branch scrutinee is flag/verdict with all arms written in order; every binder's kind matches its source; no live name introduced twice and no binder spells a define; known-here matches Gamma. (2) HAZARDS, named not fixed: (a) panel annihilation — a declined member zeroes objections so {why.reasons} is legitimately empty (Inspect AI's 'collect' reducer is the shape of an eventual monoid-side fix; see acat-88m); (b) arms export nothing — a binding inside a branch arm cannot reach the join, a PRINCIPLED refusal (a value exported from an arm has a sum type and Ctx holds Codes); (c) the kind is the shape, the spec define is a courtesy — flag is what the adapter must satisfy, flagSpec is words helping the addressee produce it, and they can drift (PDL derives the constraint from the type; that is an adapter-layer fix). (3) DETERMINISM AS LAW: given the same answer sheet the run is the same — free here since meaning is a function on total sheets; MAF needs a Pregel barrier to approximate it; say it out loud because the field taught users nondeterminism. (4) EDIT-PRESERVATION, honest form: editing a question's WORDS changes its index into Omega (answers not preserved); what IS preserved is the shape sequence and the cost tree — the user-visible payoff of shape-as-data and what define buys (editing verdictSpec moves no binding and no cost node). (5) Two review criteria as standing rules (YAWL OR-join cautionary tale): no former's enablement may depend on state outside its own subterm; a construct whose cost is not readable from its own syntax must show it in the notation. (6) One-sentence docs items: per-iteration questions are distinct by unrolling (memoization does not collapse rounds); 'all must approve' is the named-reducer pattern at set size one and the comma slot is reserved for the day a second verdict combiner exists (PoLL evidence).
+
 * TODO [#D] sumT extensional bias: relational layer, choice function, or priority in the syntax
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -990,6 +1134,22 @@ From the runtime adversarial pass (commit 71a212a). MEDIUM: (1) Exec.say logs bu
   }
 ]
 #+end_src
+
+* TODO [#C] Prose refuted by code: HANDOFF 4.6 elaboration claim, 'nineteen' kernel proofs, stale cost figures
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-gdk
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-14 Fri 19:00]
+:MODIFIED: [2026-08-14 Fri 19:00]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+alexey (high) + comments + dead-code. (1) HANDOFF.md:447-450 claims the grammar revision is 'proved to elaborate to the plan the old text did' — unfalsifiable as stated: flagshipPlan is DEFINED as the checker's output (DslFlagship.lean:187-190) and check_flagshipRaw checks only the head constructor (accepted, line 199-206). State instead what is true: the four trace_flagship_* equations still close, so the revised text consults the same questions in the same order in the named worlds. (2) 'nineteen decide +kernel proofs' appears at DslFlagship.lean:16, Dsl.lean:15, lakefile.toml:14 (and research docs); there are nine (206,249,262,271,278,306,312,319,326). (3) HANDOFF.md:33-35 and :502 say ~100 s for DslFlagship; the module (line 15) and lakefile.toml:13 say five-six minutes. (4) DslFlagship.lean:33's 'only ... DslSmoke, CliSmoke and the aggregate' omits test/McpSmoke.lean (lakefile.toml contradicts it explicitly). (5) Syntax.lean:151-153 justifies non-fusing by a theorem (Dsl.denote_flagshipPlan) that exists nowhere in the repository.
 
 * TODO [#D] Deliberate-diamond decision: CSemiring/IdemAdd instances on MSemiring
 :PROPERTIES:
@@ -1119,6 +1279,22 @@ Owner request: the artifact §VII example as REAL compiling Lean — Op signatur
 
 Probe P7: importing Agentic installs (1:Bool)=false, (0:Prop)=False, NatCast Prop package-globally — and Bool is the gateT type, so the collision surface is real. Race := Bool newtype; pin Prop behind a synonym or scoped instance. Fold Keys.Width + Race + Frag.join into ONE synonym over [SemilatticeSup a][OrderBot a] (confirmed absent from Mathlib; upstreamable).
 
+* TODO [#C] Verdict.render/objections defined three times across strata — close the library gap in Question.lean
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-j61
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-14 Fri 19:00]
+:MODIFIED: [2026-08-14 Fri 19:00]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+alexey + ponytail (both medium). Verdict.render (Dsl/Syntax.lean:62-63), Harden.objections/render (HardenPatch.lean:87-91), Verdict.objections (Report.lean:453-454) are the same expressions, glued by render_eq_harden_render (DslFlagship.lean:74), an rfl theorem asserting two definitions are one function. House rule 7 names this exactly. Fix: define objections/render once in Agentic/Core/Question.lean beside the verdict algebra; delete the copies and the reconciliation theorem.
+
 * TODO [#D] Ordered-carrier class: resource semiring with monotone +,*,csum
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -1166,6 +1342,89 @@ From acat-ruz: Mat.CostBounded and starTrunc_le_star are Cost-only for lack of i
 :END:
 
 Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is ambiguous between one consultation reused and two spent — a distinction Env.share_ne_dup proves is extensional. Must be settled before the meaning fold picks a convention silently. Design §6a.
+
+* DOING [#B] Redesign the textual DSL surface: review findings + new grammar reflecting the Lean expression's clarity
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-k28
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-14 Fri 18:34]
+:MODIFIED: [2026-08-14 Fri 22:10]
+:CREATED_BY: johnw
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 65,
+    "issue_id": "acat-k28",
+    "author": "johnw",
+    "text": "Heavy review complete (7 passes, 93 raw findings; frozen snapshot d2fc0db). The owner's critique is mechanically substantiated, with three-pass convergence on each point: (1) Plan.case wears three unrelated spellings and the third — approved given p / never approved — has no branching keyword, no scrutinee, no shared brace pair: the arms are sibling statements 28 lines from the revising they belong to, joined by nothing lexical, so reading them as replies to the preceding ask is the layout's own suggestion (deep-review, abstraction, validated). (2) Plan.revising, a derived combinator, is frozen as an 11-positional-field Raw constructor with six keywords and a one-off clause category; three different binders are all spelled patch; the revise clause's value becomes the next candidate with nothing in the text saying so; revise/revising collide where the library's own name is redraft (abstraction, deep-review, alexey, validated). (3) Root cause per the abstraction pass: the DSL is the only stratum with no meaning function, so surface shape was settled by rubric, not equation — the redesign must let a case read as a case ([[acat-22m]]). Design phase running: three independent designs (one blinded from the current grammar), nine adversarial attacks, synthesis. Finding issues: [[acat-ulu]] [[acat-a6x]] [[acat-22m]] [[acat-vq9]] [[acat-88m]] [[acat-nhz]] [[acat-bqx]] [[acat-o5o]] [[acat-j61]] [[acat-3wq]] [[acat-gdk]] [[acat-8zf]] [[acat-x8j]] [[acat-tvy]] [[acat-1t1]] [[acat-slj]].",
+    "created_at": "2026-08-15T02:00:37Z"
+  },
+  {
+    "id": 66,
+    "issue_id": "acat-k28",
+    "author": "johnw",
+    "text": "Owner directive (2026-08-14): after review+redesign, run a deep web survey of other agentic-workflow systems — what languages/DSLs they use — compare against the proposed design, and refine the design where something of significant value fits the architecture (Plan formers, level<=branch guarantee, denotational discipline, house rule 8). Phase C planned: ~10 research agents by family (graph orchestrators, agent frameworks, LLM-call DSLs, pipeline orchestrators, formal workflow calculi, typed-effects/build-systems literature, human-in-the-loop mechanisms, cost-aware systems, config-based workflow specs, critique-loop patterns) + comparison judge.",
+    "created_at": "2026-08-15T02:04:15Z"
+  },
+  {
+    "id": 67,
+    "issue_id": "acat-k28",
+    "author": "johnw",
+    "text": "Design phase complete (13 agents: 3 independent designs, 9 adversarial attacks, max-effort synthesis). Winner: dataflow-first, amended with grafts from blind and mirror-lean, every surviving fatal/major repaired. Final surface in one line each: bindings are 'name : kind <- ask who ...' (kind at the binder, where the approved Lean puts it; <- mirrors the do-block); consumption is exactly {x} in a prompt or 'branch on x' (no expression language — 'who can see it' is answerable by search); the loop is 'revising draft as patch, at most 2 revisions { review -> verdict {..} amend (why : verdict) -> patch {..} } giving { settled (patch : text) {..} never settled {..} }' — outcomes nest in a giving-brace attached to the loop, the amend arrow writes the back-edge, review/amend replace check/revise (revise deleted; no gerund/verb pair remains); panels are 'panel, all must approve [..]' (fan-in rule on the page); acts are '_ : receipt <- ask tool ..' (act deleted; free position buys apply-then-verify); empty paths write 'stop' ({ } unwritable); defines' holes may name only earlier defines and binders may not spell a define (closedness decidable by eye — fixes acat-ulu at the surface); {v.reasons} renders a verdict at the use site; 'known here: a, b' is a checker-verified scope assertion. Implementation delta: kernel untouched; lexer unchanged; every DslFlagship theorem statement survives (5 verbatim incl. proof, 16 verbatim statement recomputed by decide +kernel at unchanged cost); flagshipRaw re-transcribed. Synthesis records 8 honest regressions, incl. the irreversible-line-is-quieter trade and 'giving' being the one cold-unread word. Full artifacts: scratchpad syn-*.txt + wg-dsldesign/synthesis.md. Survey phase (10 web researchers + comparison judge) now running.",
+    "created_at": "2026-08-15T02:46:53Z"
+  },
+  {
+    "id": 68,
+    "issue_id": "acat-k28",
+    "author": "johnw",
+    "text": "Owner directive (2026-08-14): the surface must accept whole multi-line Markdown blocks as prompts, not just quoted strings — question text may span hundreds of lines. Reference point: Template Haskell interpolation quasiquoters, with the expectation we do better since we own structure and syntax. Amendment designed: fenced text blocks (N>=3 backticks, CommonMark fence-escalation for embedded fences, common-indentation dedent, lines joined by newline, exactly two special sequences: {name} hole and backslash-brace literal), lexing to the SAME List Chunk as the quoted form — Prompt.closed, checker, Plan, level, cost all untouched, and the flagship's prompts re-spelled as blocks dedent to byte-identical strings so the elaborated Plan is unchanged. Flagship example amended.",
+    "created_at": "2026-08-15T03:13:16Z"
+  },
+  {
+    "id": 69,
+    "issue_id": "acat-k28",
+    "author": "johnw",
+    "text": "Phase C complete. SURVEY (10 families, 87 rated ideas, 11 agents): judge adopted THREE grammar amendments — (1) define-holes marked {$x} vs answer-holes {x} (LMQL two-bracket-kinds precedent; the batch/pipeline rung becomes readable AT the question; prohibition recorded: never recover the rung by heuristic desugarer, GHC ApplicativeDo the cautionary tale); (2) no-shadowing rule 10 (AWS Step Functions verbatim precedent; refuses 'revising draft as draft', live-name re-introduction; _ exempt; dead names reusable so 'settled (patch : text)' stays legal); (3) per-addressee ask productions — 'using model' only on ask model (BAML/Conductor precedent). Everything else defended with reasons; tooling/docs adoptions tracked as acat-455 (Over/Under floor-ceiling cost report + dry-run presentation + validate-mode diagnostics) and acat-f8e (contract, hazards, determinism law, edit-preservation). Twelve evidence-backed differentiators recorded — headline: nothing shipping offers a per-branch pre-run cost tree (closest: lambda_A's scalar bound, arXiv 2604.11767); memoization-as-meaning vs everyone's cache-with-modes; the non-settling path unwritable-to-omit; MCP's 2026 MRTR protocol independently rediscovers our replay semantics. TEXT BLOCKS (owner directive) validated by 2-agent adversarial pass: 6/7 flagship blocks byte-exact; {why.reasons} same-Expr-different-bytes stated honestly; 5 rule gaps fixed in v2 (CRLF, mixed-tab refusal, fence-followed-by-text is content, blank defined, hole grammar explicit); lexer confirmed implementable in the fuel style. Final artifacts: scratchpad/block-syntax-v2.md, amended-flagship-v2.wf, cmp-*.txt, syn-*.txt.",
+    "created_at": "2026-08-15T03:24:19Z"
+  },
+  {
+    "id": 70,
+    "issue_id": "acat-k28",
+    "author": "johnw",
+    "text": "Round eight (owner critique of the synthesized surface, 2026-08-14): eight directives, all applied. (1) kinds inferred from the two consumption sites, annotations optional (required only for unused names or conflicts); (2) 'via' replaces 'using model' — kills the model/model word collision; (3) review clause loses '-> verdict' (position fixes the kind — the review's own for-<kind> finding, which the synthesis had repeated); (4) 'amend why { ... }' — one binder, no arrow, next-candidate rule carried by the loop head; (5+6) 'giving/settled(...)/never settled' deleted: the loop is now a binding 'result <- revising draft as patch, ...' and the ordinary case eliminates it — 'case result { settled patch {..} unsettled {..} }' — owner's Maybe-functor reading; elaborates to the identical graft+caseB, no kernel change; result is a pending-option that exactly one case must consume (rides the graft lambda, not Ctx); (7) 'case' replaces 'branch on'; (8) a statement-position bare 'ask' is the act (kind receipt, binds nothing) — '_ : receipt <-' deleted, and the irreversible line reads imperative again. Flagship v3 at scratchpad/flagship-v3.wf, delta at round8-delta.md. Validation running (cold-reader + semantics/inference auditor, wf_0123524c).",
+    "created_at": "2026-08-15T04:34:25Z"
+  },
+  {
+    "id": 71,
+    "issue_id": "acat-k28",
+    "author": "johnw",
+    "text": "Round nine (owner, 2026-08-14): (1) flags eliminate with if/else like any normal language — 'case ok { yes/no }' deleted, 'if ok { } else { }' restored, both arms mandatory (both paths priced); case remains for sums (verdict arms, settled/unsettled). (2) 'amend why' rejected again — the binder fell out of the sky. Fix: the loop body's review is now an ORDINARY BINDING with an author-chosen name ('verdict <- panel, all must approve [...]'), and the amend block consumes it by the normal rules ('{verdict.reasons}') — no special binder, no review keyword at all (deleted). Loop semantics: the body binds one verdict; the loop settles when it approves, otherwise the amend block's answer is the next candidate. Elaboration unchanged: the binding's source is checkCont (candidate in scope), the amend block is reviseCont (candidate + verdict in scope, verdict now under the author's name at Code.verdict), exit tests the bound verdict — same Plan, same graft+caseB, kernel untouched. Flagship v4 at scratchpad/flagship-v4.wf. Round-8 validation (wf_0123524c) still running; its inference/pending-option audits remain applicable, its cold-read of 'amend why'/'case ok' is superseded.",
+    "created_at": "2026-08-15T04:41:25Z"
+  },
+  {
+    "id": 72,
+    "issue_id": "acat-k28",
+    "author": "johnw",
+    "text": "Round-8/9 validation returned (2 agents, verdicts fatal — on claims, not on the direction). COLD READER: (fatal) with the arrow gone, the loop back-edge is expressible only in prompt prose — a program that feeds a prose summary into {patch} is structurally identical to one that revises; fix adopted for v5: 'amend patch { ... }' names the carrier in the clause head, checker-matched against 'as patch'. (majors) 'via \"deep\"' unreadable cold (recommend 'served by \"deep\"' — says the noun); bare-ask marks discard, not consequence — binding-arity and irreversibility are orthogonal properties wearing one mark (surface to owner; permission layer keys on receipt kind); 'reply DONE' prompt implies verification that does not exist (drop phrase from example); 'at most 2 revisions' counts neither visible loop step — fix: 'at most 2 amendments' now the clause is named amend; 'stop' does not distinguish a declined outcome from a never-settled failure (reference must state all stops are clean ends, or the surface gains a status). SEMANTICS AUDITOR: (fatal) inference completeness claim false — witness: a share-only constraint component (revising subject/candidate/settled binder joined by share rules, no ground site) where every name is used, nothing conflicts, and the Code is undetermined; real rule: one annotation per ground-free component, refusal message must say so; constraint-site list was incomplete ({x.reasons} forces verdict; panel binding forced verdict by the monoid; statement-ask forces receipt) and inference deletes example/ill-typed.wf (strip 'for verdict' and it infers text — CliSmoke's byte-exact refusal unproducible; rewrite the example around a conflict). (majors, all fixable): pending-case implementation is a continuation-returning checkBlock mode with a pendings table, not 'no change' (kernel-only no-change is true); the rule should be per-path (exactly one elimination on every path; arm-nesting legal); graft replicates the loop's tail once per exit — price it in bounded via the product; {x.reasons} reverses Check.lean:104-111's text-only interpolation invariant — add the projection chunk deliberately + the constraint rule; 'via only on ask model' needs an actual refusal (none exists today). Fidelity CONFIRMED: v3/v4 structure = four case nodes, nine leaves, eight questions; bare ask = the act's exact term; via = atModel.",
+    "created_at": "2026-08-15T04:48:43Z"
+  },
+  {
+    "id": 73,
+    "issue_id": "acat-k28",
+    "author": "johnw",
+    "text": "Round ten: panel-rules design + adversarial check complete (wf_55e8039e; full docs at scratchpad/panel-design.md, panel-attack.md). ANSWER to owner: today 'all must approve' is one syntactic term naming the kernel's only fold (the verdict monoid); no expression language hides anywhere. The designed menu: TWO real entries — 'all must approve' (monoid product: objections concatenate in member order, one decline sinks everything to no-answer; ASSOCIATIVE, panels flatten lawfully) and 'at least n must approve' (counted read-out: approvals counted, every non-approver's objections kept, decliners noted by name; fixes the acat-88m annihilation for n<k; NOT associative — the law/parameter trade stated honestly per the attack, which killed the 'one-parameter family' framing as vacuous since rho is not a monoid morphism, though the n=k agreement is exact and verified against Question.lean:139/149/152/198). Both entries: cost exactly k in every world (the menu is read-outs, not schedules — trace equation independent of the fold), and the quorum elaborates as a PURE READ-OUT in a ret-leaf Expr (elaboration A) staying at pipeline rung — checkRhs_level_le's statement survives unchanged; bind-k-then-case (B) refused (sound but costs a rung for nothing). REFUSED with one-line reasons: bare 'panel [' (silent default once a menu exists); 'a majority must approve' (attack: ambiguous cold — of members or of answerers — the exact defect the menu exists to prevent, plus a synonym of a numeral); 'any may veto' (= all-must-approve said backwards); 'at most n may object' (complement, disagrees invisibly about silence); 'best of 3' (a panel folds verdicts, best-of ranks candidates and needs a judge — write n draws + one judge ask, ~4 questions at pipeline, workaround verified except the draw syntax is 'draw n' not 'independent draw n' per Parse.lean:267); percentages (hidden rounding rule); weights/binding member (member predicate = expression language; put the binding reviewer in their own panel); early-exit veto (changes which questions are asked — a different program, writable as asks + case). Attack majors to carry into implementation: object-R-never-empty must be a stated lemma (else a failed quorum could spell approve and silently settle the loop); no parallel notes list (derive decline notes from the shape's addressee, no zipWith truncation); the two panel theorems (agreement at n=k, trace independence) are REQUIRED, not optional; migration blast radius includes example/harden.wf and dsl-guide. FLAGSHIP v5 (scratchpad/flagship-v5.wf) also folds in round-8/9 validation fixes: 'amend patch { }' (back-edge named on the page), 'at most 2 amendments' (counts the visible step), 'served by \"deep\"' (via was cold-unreadable), apply prompt no longer demands an unverified DONE.",
+    "created_at": "2026-08-15T05:10:28Z"
+  }
+]
+#+end_src
 
 * DONE [#C] Demote global LE (a x b) Pareto instance to the named ParetoLE relation (instance-clash hazard)
 :PROPERTIES:
@@ -1275,6 +1534,22 @@ The design names three homomorphisms: extensional, quantitative, rendering. Term
 :END:
 
 From acat-zms: star_star, sliding a(ba)* = (ab)*a, denesting, (a+b)* are now provable rather than assumable — the identities StarSemiring's docstring disclaims. No consumer today; prove when a consumer appears or as a soundness exhibit.
+
+* TODO [#C] Flagship divergence: never-approved arm gives up in Plan/DSL but asks the owner in the approved do-block
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-nhz
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-14 Fri 19:00]
+:MODIFIED: [2026-08-14 Fri 19:00]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+validated pass (P1, attribution corrected by the pass itself). example/harden.wf:41 `never approved { }` does nothing (faithful to Agentic/Core/HardenPatch.lean:753); example/HardenPatch.lean:17-19 asks the owner about the last patch unconditionally, because Surface.revising returns the last artefact rather than an Option. The two flagships put different questions to the world. Decide which is authoritative and make the other match; interacts with [[acat-q1i]] (re-pointing the example) and the redesign [[acat-k28]] (what the surface says about the exhausted arm).
 
 * TODO [#D] msSmul semimodule laws, so panels compose with gating
 :PROPERTIES:
@@ -1407,6 +1682,22 @@ Owner, 2026-08-12, after four rounds of example feedback: 'I feel like you haven
 ]
 #+end_src
 
+* TODO [#C] DSL over-engineering: ~230 deletable lines (bounded chain, duplicated helpers, identity pass, unused theorems)
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-o5o
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-14 Fri 19:00]
+:MODIFIED: [2026-08-14 Fri 19:00]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+ponytail pass, corroborated by dead-code. (1) RawBlock.bounded / checkBlock_bounded / check_bounded / revisionBounds_le_of_bounded (~105 lines, Check.lean:358-547, Explain.lean:349-377) have no consumer — only prose mentions. (2) checkAskAt duplicates checkRhsAt and checkMembers' Code parameter has one call-site value (Check.lean:216-268). (3) Prompt.normalize is provably identity on the parser path (lexer cannot emit empty literals) — its stated reason cannot happen. (4) parseAndCheckRaw + parseAndCheckRaw_eq_with_nil + parseAndCheckRaw_level_le + parse_eq_parseWith_nil are unused (CLI uses the With forms; dead-code pass confirms with two signals). (5) expectKw/expectKwSaying are one function twice. (6) check's (G, S) parameters take exactly one value everywhere. (7) CheckError.render aliases toString; isIdentCont is Char.isAlphanum || '_'. (8) Plan.size_eq_askNodes_succ and under_ask1/under_askC1 are applied by nothing. (9) The cost report prints one multiset three ways (Explain.lean:509-512). (10) The askShape/closed-open dispatch body is written three times (Check.lean:206,277,377) and the act arm re-inlines askShape by hand. (11) act itself duplicates the ask-for-ack path (abstraction pass): parse it as sugar for a bind+empty and drop RawBlock.act with its four proof cases. (12) ask..for ack is a legal production nothing can consume — refuse it with proposal B's message. (13) parseBracedRhs braces are speculation for a relaxation that has not happened. Several items may be mooted by the redesign [[acat-k28]] — check before fixing individually.
+
 * DONE [#C] Ground-up re-derivation of the specification: derive from meaning, do not inherit from agent-functor
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -1469,7 +1760,7 @@ From acat-ubt: convFold handles certain members only; the general List (MSemirin
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 12:55]
-:MODIFIED: [2026-08-14 Fri 12:55]
+:MODIFIED: [2026-08-14 Fri 18:34]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -1477,6 +1768,27 @@ From acat-ubt: convFold handles certain members only; the general List (MSemirin
 :END:
 
 From the live re-test at 3b2ab57. (1) claude-agent-acp prepends model-fallback narration ('**Model fallback:** claude-fable-5 declined this request (cyber); retried with claude-opus-4-8') to the answer stream as ordinary agent_message_chunk text. In one run it was concatenated to a reviewer's 'APPROVE', and because approval must be the WHOLE reply (the fail-closed rule), decodeVerdict read the result as an objection and bought a revision round. Consider: strip a recognised leading narration block before decoding (fragile, and it is the adapter's text not the model's), or record it as a turn annotation, or leave decoding strict and surface the narration in the transcript so a reader knows why a verdict flipped. Note the substituted model (claude-opus-4-8) is NOT in the adapter's advertised catalogue, so Conn.configValues is not a complete account of what may answer. (2) Exec.say discards the usage object claude puts on the wire; capturing tokens per turn would let the runtime report real cost beside the tick bill, and would settle (3). (3) permissionByCode's docstring cites ~97k tokens as the measured cost of denial, but the live refusing run showed 0 extra turns and 0 retries — the figure came from an earlier probe under different conditions. Either measure it properly with usage data or soften the claim to what is known.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 63,
+    "issue_id": "acat-owa",
+    "author": "johnw",
+    "text": "Machine moved (2026-08-14): adapters on PATH are now claude-agent-acp 0.66.0 and codex-acp 1.1.14 — newer than the pinned/documented claude-agent-acp 0.64.0 (Acp.lean:73,148) and codex-acp 0.13.0. The narration-injection and catalogue observations in this issue were made against 0.64.0; re-verify against 0.66.0 before designing the fix, since the fallback narration format (or its presence) may have changed. Live acp_smoke --adapter claude passes on 0.66.0.",
+    "created_at": "2026-08-15T01:30:31Z"
+  },
+  {
+    "id": 64,
+    "issue_id": "acat-owa",
+    "author": "johnw",
+    "text": "Suspended 2026-08-14: owner redirected to a full DSL surface redesign (heavy review + new surface design) before adapter work. Version-drift note above still stands.",
+    "created_at": "2026-08-15T01:34:34Z"
+  }
+]
+#+end_src
 
 * DONE [#B] Complete SqZero: csum instance, off-diagonal PMod, probability carrier
 :PROPERTIES:
@@ -1718,6 +2030,22 @@ From acat-ozh: both carriers are complete-because-suprema-attained with parallel
 
 Observed during the heavy review's validated pass: every mcp__pal__chat call fails at the provider layer — OpenAI 401 with an UNEXPANDED shell placeholder (${OPENAI*****KEY}), Gemini 400 API_KEY_INVALID, Anthropic 401 invalid x-api-key — while listmodels reports all three as configured. Fix lives in the pal MCP daemon environment, not this repo; recorded here so the next multi-model review pass is not silently degraded.
 
+* TODO [#C] Tooling: PAL cross-model verification unavailable — OpenAI key unexpanded, Gemini key invalid, gemini CLI absent
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-slj
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-14 Fri 19:00]
+:MODIFIED: [2026-08-14 Fri 19:00]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Meta-finding from the validated review pass, which ABORTED per its attestation contract: mcp__pal__listmodels succeeded, but the OpenAI key is an unexpanded ${OPENAI...KEY} template, the Gemini key is invalid, and the gemini CLI is absent, so only one non-Anthropic model (GPT-5 via clink/codex) was reachable and no finding could be verified by a second model. Until fixed, any validated-code-review run degrades to single-model review. Fix the PAL server env or add a second reachable provider.
+
 * DONE [#C] Vendor the design document (Revision 2.1) into doc/ as the normative reference each module cites
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -1766,6 +2094,22 @@ From acat-vbl: muExt_indep_of_peak_eq_zero anchors the count semantically only a
 :END:
 
 Owner 2026-08-13, after the DSL/MCP work: (1) reconstruct the hardenPatch Lean example as a PROGRAM TEXT in the DSL — a file in the repo (examples/harden.wf or similar), not just a string constant in a test; (2) a single executable 'agent-cat' with three subcommands over that file: 'agent-cat run <program>' parses, type-checks, and EXECUTES the plan against a live agent (ACP adapter as in harden_demo; --adapter stub|claude|codex), printing the transcript, bill and certificate; 'agent-cat cost <program>' parses, type-checks and prints the COST analysis without executing — level, shape sequence, cost tree leaves, min/max, and the reachable-bill set where the level permits it, stating plainly when a bound is sound but unattained; 'agent-cat plan <program>' parses, type-checks and PRINTS THE PLAN — a readable rendering of the checked term (structure, questions with addressee/scope, binders, branches, revision bounds), i.e. what the author wrote as the library understands it. All three share one parseAndCheck front end and must report type errors identically with position and message. Exit nonzero on type error. Keep harden_demo working or fold it into 'agent-cat run' with the demo's assertions behind a flag. Depends on the DSL landing (workflow wlkbf4jne).
+
+* TODO [#C] Front-door docs describe a repository two re-derivations old: README and flake.nix
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-tvy
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-14 Fri 19:00]
+:MODIFIED: [2026-08-14 Fri 19:00]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+dead-code pass, medium, two signals each. README.md:13-23 claims 'no Mathlib dependency' while lakefile.toml:34-36 requires mathlib v4.30.0 and 30+ modules import it; README's module table (28-45) ends at the superseded Term/Meaning stratum and names no Agentic/Core module, no DSL, no agent-cat binary, no .wf program. flake.nix:16-20 claims 'there is deliberately no lean-toolchain file' (one exists and HANDOFF documents it as load-bearing) and 'no Mathlib, so nothing needs the network'. Rewrite README around Core + DSL + binaries with the superseded table demoted under a history banner; fix the flake comment.
 
 * DONE [#D] Mat lacks a zero matrix: matZero with matAdd unit law, comp_zero/zero_comp
 :PROPERTIES:
@@ -1870,6 +2214,22 @@ Grounded by 3-agent recon 2026-08-12 (pi-claude-bridge source, incite entry poin
 ]
 #+end_src
 
+* TODO [#B] DSL: define macro system is unhygienic — capture, dup, forward-ref, budget, overrides
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-ulu
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-14 Fri 19:00]
+:MODIFIED: [2026-08-14 Fri 19:00]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+From the 2026-08-14 heavy review (7 passes; sources: deep-review, alexey, validated[P1, single-model], comments). (1) CAPTURE: expand (Parse.lean:254-260) rewrites .interp x whenever a define matches, before any scope exists; let/given binder names are never compared against defs, so `define patch = ...` silently turns every later {patch} into constant text. Because the prompt becomes closed, checkAsk emits Plan.askC instead of Plan.ask — the node silently moves from pipeline to batch, revision loops stop transmitting the artefact, and nothing diagnoses it. (2) DUP: parseDefines appends (Parse.lean:506) but expand finds first (Parse.lean:258), so a repeated define is silently first-wins. (3) FORWARD REF: bodies are expanded once against earlier macros only (Parse.lean:503-506), so `define a = "{b}"` before `define b` degrades into an unbound-name error at the wrong position. (4) BUDGET: eager define-on-define expansion is exponential (2^N chunks) with no output budget (validated P1). (5) OVERRIDES: parseWith overrides skip expand/normalize (Parse.lean:503-505), contradicting the docstring's 'nothing downstream can tell an overridden program from one written that way'. (6) parseDefines fuel-zero returns .ok (Parse.lean:496) where every sibling fuel-zero branch errors — contradicts Parse.lean:24-26 and DslFlagship.lean:422-424. Fixes: refuse define/binder collisions, duplicate defines, and unexpanded forward refs with CheckErrors; budget expansion; run overrides through the same pipeline; make the fuel branch error. NOTE: the surface-level cure (visibly distinct macro syntax vs answer splice) belongs to the redesign [[acat-k28]].
+
 * DONE [#C] Semantic width: a consultations-in-flight fold with peak t <= widthT t
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -1936,6 +2296,22 @@ Probe P8: w(join)=sup, w(par)=+, w(scale n)=n*max 1 w — Frag is ENat encoded f
 ]
 #+end_src
 
+* TODO [#C] DSL: revise given x, x accepted — artefact silently shadows the objection binder
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-vq9
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-14 Fri 19:00]
+:MODIFIED: [2026-08-14 Fri 19:00]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+deep-review + validated (both medium). Parse.lean:447-451 reads the two idents with no distinctness check; Check.lean:443-446 lists the artefact first and Bindings.find? is head-first, so with av == wv every {x} is the artefact and the rendered verdict is unreachable under any spelling: the program checks and runs, and the reviser is never told what it is answering. Over a non-text artefact the same source is rejected, so behaviour also depends on the subject's kind. Fix: reject av == wv at the second expectIdent with a CheckError naming the duplicate. (The wider binder-spelling confusion is the redesign's subject, [[acat-k28]].)
+
 * TODO [#C] Footprints + disjointness-licensed exchange: the world-threaded layer where premonoidality degrades
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -1969,6 +2345,22 @@ Probe P8: w(join)=sup, w(par)=+, w(scale n)=n*max 1 w — Frag is ENat encoded f
   }
 ]
 #+end_src
+
+* TODO [#D] dsl-guide.html: headline rules false, samples abridged and wrong, decoder claim inverted, ack undocumented
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-x8j
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-14 Fri 19:00]
+:MODIFIED: [2026-08-14 Fri 19:00]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+deep-review + alexey + comments + dead-code. (1) Line 118's two headline rules are false: braces are not always scopes (four uses; two are pure grouping, one is a single-expression clause), and define does not bind an answer (it binds parse-time text, and the difference decides the rung — line 191 same error). (2) The agent-cat plan sample (lines 278-288) is not what the tool prints: mode= axis dropped on two lines, a prompt line lost, banner and five legend lines silently elided; the cost sample drops the two leaf-bills lines with no ellipsis. Regenerate from the binary. (3) Line 361 'decoders are deliberately strict... aborts the run' inverts Exec.lean:153-188: refusal decoding is deliberately lenient, verdict decoding is total, and an unreadable reply is re-asked before any failure. (4) ask..for ack — per dsl-chosen.md the only non-terminal effect — appears in neither user document, so 'an act is terminal' reads as a language property the language does not have (moot if the redesign refuses ack, see the over-engineering issue). (5) Line 398's 'Five more words' arithmetic only works if revision(s) counts twice. Rewrite alongside the redesign [[acat-k28]] rather than before it.
 
 * TODO [#C] panelT: n-ary panel primitive with reducer monoid + augmentation fan-in
 :PROPERTIES:
