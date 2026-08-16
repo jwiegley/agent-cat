@@ -1460,7 +1460,7 @@ Owner request: the artifact §VII example as REAL compiling Lean — Op signatur
 :LABELS:   []
 :ISSUE_TYPE: question
 :CREATED:  [2026-08-16 Sun 10:38]
-:MODIFIED: [2026-08-16 Sun 11:20]
+:MODIFIED: [2026-08-16 Sun 11:39]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -1479,6 +1479,13 @@ Owner question (2026-08-16): the round-17/18 surface converges on Haskell. What 
     "author": "johnw",
     "text": "Workflow complete (6 agents, ~810k tokens): autopsy + inventory + prior art -> design draft -> two attacks (47 findings, 6 fatal). Headlines: (1) agent-functor is NOT the owner's project (Isaac Shapira / platonic.systems) — a deep-embedded profunctor optic (Flow i o: Category/Profunctor/Strong/Choice/Traversing, deliberately no Monad and no arr), mandatory declared bounds instead of a level lattice, skeleton-level statics only (leaves, worst-case cost; no question texts, no min bills, no path counts), and NO workflow quasi-quoter (promptFile + string-interpolate only); agentic-denotation is an empty scaffold. (2) The draft recommended the hybrid (Haskell surface -> .wf IR -> Lean kernel) but the comparison attacker found the option set rigged by omission: the draft's own strongest argument (r18 spends ~11 days reimplementing beta/fixities/normalization GHC already has) argues against THE CALCULUS, not the DSL — so option (d) 'ship the do-core, descope the calculus' must enter the comparison, and the recommendation must be re-derived from corrected costs (r17 has NOT shipped; census figures unsourced; runner costs double-counted against (b); auditability-of-the-approved-artifact row missing — the dimension (a)/(d) win). (3) Design-side fatals repaired in synthesis: bindable multi-step helpers via a Codensity wrapper; Discardable-based statement discipline with monomorphic ask exports; sharing restated as Ω-is-a-function-of-the-question (identical questions share answers; repetition multiplies events); rule 6 under HOAS becomes a SILENT MEANING CHANGE (shadowing unrecoverable — new row, priced); runPlan must consume Checked; Liquid Haskell cannot prove totality over HOAS; the brace-escaping fidelity bug + round-trip property; {v3}-not-{patch} readability loss of emitted .wf; frontend-first maxQuestions refusal with Haskell positions. (4) Pro-Haskell note kept: .wf questions reached through calls can never be closed (params are Exprs, fn-import-attack A3), while Haskell signatures restore closedness — the one place the embedding strictly beats the landed design. Synthesis into haskell-question.md in progress; recommendation to be re-derived, owner decides.",
     "created_at": "2026-08-16T18:20:48Z"
+  },
+  {
+    "id": 101,
+    "issue_id": "acat-haskell-surface-ygy",
+    "author": "johnw",
+    "text": "Report of record landed: doc/research/dsl-redesign/haskell-question.md (76aa962; pre-attack draft banner-superseded). Four options priced with methods disclosed; recommendation (d): ship the do-core (~2 days), descope the calculus, spend the returned ~8-9 days + the ~5-6-day shared floor on the runner (content-addressed leaf store, fork/resume, typed backend pairing, preflight), hand-write the three iteration workflows against a named trigger (unknown-n iteration is the one capability .wf cannot express at any price), and if the trigger fires build the .wf PRINTER (2-3 days + pins), not the typed builder (26-32 days, redundant with the Lean checker per §5.2). Dissent stated fully (run round 18 now — the only attacked estimate — revisit in six months); the narrow real difference: whether the calculus is worth 8-9 days now, a fact about the owner's next two months. Census corrected with commands (26,155 Lean lines / 867 theorems — the draft under-counted the (b) write-off in its own favour). Nine §6.3 invariants recorded under every option; the served-by checker gap filed as acat-served-by-check-gap-i5d. Owner decides; the r18 campaign stays gated.",
+    "created_at": "2026-08-16T18:39:30Z"
   }
 ]
 #+end_src
@@ -1572,7 +1579,7 @@ Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 18:34]
-:MODIFIED: [2026-08-15 Sat 23:29]
+:MODIFIED: [2026-08-16 Sun 11:39]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -1770,6 +1777,13 @@ Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is
     "author": "johnw",
     "text": "Round-18 synthesis complete and pushed (f6e1133): doc/research/dsl-redesign/calculus-design.md (3074 lines) is the design of record CANDIDATE, superseding the draft (banner applied). All 60 attack findings absorbed; the three fatals repaired (grammar restored with sources at runtime positions and app ::= head { arg }; the vacuity refusal C31 instead of reopening Raw; node-budget fuel as maxNormNodes). Load-bearing shape: two levels, one arrow; function/let strata (FnEntry unchanged; lets synthesized at their header, stored closed, inlined per site, base-kind lets refused at '=' naming '<-'); hoisting inside beta, positional post-order, hoists annotated, zero-use hoists become acts; minting keyed on the inlining chain; lambda binders minted at parse so shadowing is vacuous; holes in lambda prompts taken (interp-renaming at mint; expand_* untouched); the dot as an ident-branch lexer rule (a.b.c stays refused); fenceCloses widened for operator followers; >>=/=<< added per ruling 9, >=>/<=< identified with >>>/<<< (one category), the operator set named as the one sanctioned multi-spelling region; trace-level spelling pins (Raw.shape recorded as the stronger alternative, not taken); harden.wf byte-identical, every theorem carried, checked against the proof scripts. Questions for the owner: NONE (§12). The campaign acat-r18-campaign-2s9 gates on the owner approving this page.",
     "created_at": "2026-08-16T06:29:24Z"
+  },
+  {
+    "id": 102,
+    "issue_id": "acat-k28",
+    "author": "johnw",
+    "text": "The strategic fork is documented: doc/research/dsl-redesign/haskell-question.md (see acat-haskell-surface-ygy). Its recommendation would replace the r18 campaign with: r17 do-core only (~2 days), runner investment, and a conditional .wf printer behind a named unknown-n trigger — with the full dissent (run r18 now) stated for choosing. calculus-design.md stays the design of record for the calculus either way; it does not rot.",
+    "created_at": "2026-08-16T18:39:30Z"
   }
 ]
 #+end_src
@@ -2468,6 +2482,22 @@ From acat-ozh: both carriers are complete-because-suprema-attained with parallel
 :END:
 
 Observed during the heavy review's validated pass: every mcp__pal__chat call fails at the provider layer — OpenAI 401 with an UNEXPANDED shell placeholder (${OPENAI*****KEY}), Gemini 400 API_KEY_INVALID, Anthropic 401 invalid x-api-key — while listmodels reports all three as configured. Fix lives in the pal MCP daemon environment, not this repo; recorded here so the next multi-model review pass is not silently degraded.
+
+* TODO [#C] Check.lean admits "served by" on a tool/person via hand-built Raw — the parser refuses it, the checker does not
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-served-by-check-gap-i5d
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-08-16 Sun 11:38]
+:MODIFIED: [2026-08-16 Sun 11:39]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Found by the haskell-question analysis (§6.3 item 8, acat-haskell-surface-ygy): RawAsk.model is Option String and askShape applies atModel unconditionally when it is some, so a hand-built Raw with model := some m on a tool or person addressee elaborates instead of being refused — the surface invariant ('served by names the model that serves a model addressee') is parser-only. One site: askShape or a checkBlock-side guard, plus a hand-built battery case in the exception-2 style (check_panel_nil precedent). Notable because it is the ONLY thing the hypothetical Haskell type discipline would catch that the Lean checker does not — closing it makes the redundancy argument unconditional.
 
 * TODO [#C] Tooling: PAL cross-model verification unavailable — OpenAI key unexpanded, Gemini key invalid, gemini CLI absent
 :PROPERTIES:
