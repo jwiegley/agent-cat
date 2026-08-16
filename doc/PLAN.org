@@ -1542,7 +1542,7 @@ Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 18:34]
-:MODIFIED: [2026-08-15 Sat 23:00]
+:MODIFIED: [2026-08-15 Sat 23:29]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -1733,6 +1733,13 @@ Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is
     "author": "johnw",
     "text": "Round-18 attack pass complete: 60 findings across three agents (theorems/architecture 16, parsing/grammar 21, types/normalization 23). Three FATAL: the draft's expression grammar could not derive bare sources (its own primings/panels/revising were underivable); normal forms with no Raw spelling (a bare name or literal at a rhs — repaired by the Phase-C0 vacuity refusal at the SOURCE position, not by reopening Raw); a step-counted fuel bound exponentially dishonest against by-name substitution (repaired: node budget, maxNormNodes). The north star was CONFIRMED against the actual proof scripts: no theorem inspects the parser's output, so normal forms landing in unchanged Raw preserves all fourteen level lemmas, the guard theorems, and every DslFlagship item; harden.wf stays byte-identical. Load-bearing adjudications for the synthesis (in progress): hoisted temporaries always annotated with their synthesized kind (zero-use hoists become acts); lets keep point-free bodies with types SYNTHESIZED at their own header and bodies stored closed/qualified (a base-kind let refused at the '=' naming '<-'); minting keyed on the inlining chain; lambda binders minted to temps at parse (shadowing vacuous by construction); >>= and =<< added per owner ruling 9 (>=>/<=< are >>>/<<< in a one-category language — stated, not duplicated); holes in lambda-body prompts TAKEN (the way a static function builds a prompt from its parameter); fenceCloses widened for operator followers; the dot implemented as a lexer branch so a.b.c stays refused. Page lands as calculus-design.md; campaign acat-r18-campaign-2s9 still gates on owner approval.",
     "created_at": "2026-08-16T06:00:38Z"
+  },
+  {
+    "id": 99,
+    "issue_id": "acat-k28",
+    "author": "johnw",
+    "text": "Round-18 synthesis complete and pushed (f6e1133): doc/research/dsl-redesign/calculus-design.md (3074 lines) is the design of record CANDIDATE, superseding the draft (banner applied). All 60 attack findings absorbed; the three fatals repaired (grammar restored with sources at runtime positions and app ::= head { arg }; the vacuity refusal C31 instead of reopening Raw; node-budget fuel as maxNormNodes). Load-bearing shape: two levels, one arrow; function/let strata (FnEntry unchanged; lets synthesized at their header, stored closed, inlined per site, base-kind lets refused at '=' naming '<-'); hoisting inside beta, positional post-order, hoists annotated, zero-use hoists become acts; minting keyed on the inlining chain; lambda binders minted at parse so shadowing is vacuous; holes in lambda prompts taken (interp-renaming at mint; expand_* untouched); the dot as an ident-branch lexer rule (a.b.c stays refused); fenceCloses widened for operator followers; >>=/=<< added per ruling 9, >=>/<=< identified with >>>/<<< (one category), the operator set named as the one sanctioned multi-spelling region; trace-level spelling pins (Raw.shape recorded as the stronger alternative, not taken); harden.wf byte-identical, every theorem carried, checked against the proof scripts. Questions for the owner: NONE (§12). The campaign acat-r18-campaign-2s9 gates on the owner approving this page.",
+    "created_at": "2026-08-16T06:29:24Z"
   }
 ]
 #+end_src
