@@ -1474,7 +1474,7 @@ Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 18:34]
-:MODIFIED: [2026-08-15 Sat 19:58]
+:MODIFIED: [2026-08-15 Sat 20:50]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -1623,6 +1623,13 @@ Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is
     "author": "johnw",
     "text": "Round 17 candidate (owner objection, 2026-08-15): `x <- src` followed by `answer x` is pure boilerplate in the common one-ask body — by right identity (`x <- foo; ret x ≡ foo`), and in fact more strongly: since binders are de Bruijn in the term, both spellings elaborate to the *identical* Plan (`bindForm src (Plan.ret ⟨0⟩)`), so the required name is a surface choice with no representational footing. Every value function in example/library.wf is this pattern.\n\nProposed resolution: **`answer` accepts a source** — `answer ask model … / answer panel, … [ … ] / answer f x y` — i.e. make `answer` a clause position at the imposed kind `= the declared result`, exactly like `revising`'s review/amend clauses. NOT a bare tail ask: statement-position `ask` already means the act in every block including `-> receipt` bodies, so an unmarked trailing ask would flip meaning (discard vs return) on the function's declared kind alone; the keyword keeps the exit lexical.\n\nWhy it is small and safe: parse dispatch after `answer` is already deterministic (a binder may not spell a statement word or a function, so ask/panel/fn-name ⇒ source, else name); elaboration is `bindForm src (Plan.ret ⟨0⟩)`, the same term the two-step form builds, so `bindForm_level_le` covers the level proof with no new content; `bodyAsks` gains `rhsAsks` of the answer source; kind inference is untouched (the kind is imposed). Battery: a handful of positive cases, one trace pin that the two spellings are one program (§10c-style), and negative cases for a source of the wrong kind at `answer` (the rhsPlan mismatch diagnosis already exists).\n\nAwaiting the owner's word before implementing.\n",
     "created_at": "2026-08-16T02:58:10Z"
+  },
+  {
+    "id": 92,
+    "issue_id": "acat-k28",
+    "author": "johnw",
+    "text": "Round 17 design of record CANDIDATE: doc/research/dsl-redesign/expr-design.md (695e510). Supersedes this issue's earlier `answer <source>` note — the owner rejected that spelling and directed the do-notation + Idris-bang route with a general Haskell/Idris noise audit.\n\nThe page carries 21 numbered decisions. Headlines: blocks are officially do-blocks over Plan (last statement is the result; `answer` deleted with a one-release migration diagnosis); `!(source)` stands exactly where a name may stand and lifts post-order to the head of its statement, never across a brace; two divergences from Idris stated as language rules (two identical bangs are one answer — `independent draw` is the resample; a bang in an arm stays in the arm); receipt bodies do not lift (same plan, same Raw); parameter annotations default to `text`; the fence-close drift (`)` and `--` after a closing fence) is fixed as a second lexer change; the every-feature showcase is the library.wf + harden-imported.wf pair, with the modernize-the-flagship alternative priced (a day of re-transcription) and recommended against.\n\nTheorem survival, checked against the proof scripts by the attack pass: parser-level desugar into today's Raw means every existing theorem — fourteen level lemmas, the six guard/projection theorems, Check's rfl theorems, Explain's seven, all of DslFlagship including the nine decide +kernel proofs — survives verbatim, because example/harden.wf is byte-identical and no theorem inspects the parser except through an opaque result.\n\nThe attack pass (two agents, 42 findings) killed two fatal draft claims: the drafted grammar did not derive branch-terminal blocks (i.e. refused the pinned flagship), and every bang-ending-in-a-fence example failed to lex before D19. Both repairs are in the page, with battery pins named.\n\nAwaiting the owner on three questions (§9): Q1 the trailing-binding refusal in workflow blocks/arms (recommended: take it); Q2 assertion transparency — a block ending in `known here` must say `stop` (recommended: take it now or defer explicitly); Q3 the migration diagnosis lifetime (recommended: one release). Implementation estimate: three focused days, risk concentrated in Parse.lean.\n",
+    "created_at": "2026-08-16T03:50:27Z"
   }
 ]
 #+end_src
