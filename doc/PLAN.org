@@ -998,15 +998,17 @@ PMonoid/CMonoid -> Monoid/CommMonoid (or Add* where additive); IdemCMonoid + its
 
 Both now carry + * 0 1 via NSemiring but theorems still spell matAdd/comp/conv; make comp_assoc/id_comp/comp_id wrappers of mul_assoc/one_mul/mul_one. Deferred in acat-ci8 to keep names stable.
 
-* TODO [#C] DSL: state the guard-correctness and projection theorems the battery only samples
+* DONE [#C] DSL: state the guard-correctness and projection theorems the battery only samples
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-dsl-guard-theorems-dqz
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-15 Sat 17:21]
-:MODIFIED: [2026-08-15 Sat 17:21]
+:MODIFIED: [2026-08-15 Sat 18:12]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-15 Sat 18:12]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -1026,6 +1028,20 @@ The tests-vs-theorems analysis (comment on acat-k28 pending) found ~10 cheap, co
 Also the test-robustness repairs the same analysis surfaced: three assertions in test/DslSmoke.lean pass vacuously when evsOf swallows a check failure into [] (the two evs.all checks and the CRLF decide-equality); guard each with a nonemptiness conjunct. And §10g throws instead of failing a named check when run outside the repo root.
 
 Discipline: mutation testing showed the theorems complement the string pins (a ∀-theorem survives swapped diagnoses that the pins catch), so nothing is deleted except where a theorem strictly subsumes a hand-built fixture.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 89,
+    "issue_id": "acat-dsl-guard-theorems-dqz",
+    "author": "johnw",
+    "text": "Implemented and pushed (4014be3). Twelve theorems, all compiling with standard axioms only ([propext, Classical.choice, Quot.sound] at most — no native_decide, no lexer in the kernel), placed where their subjects live:\n\n- Agentic/Core/Dsl.lean: overRevised_sound, checkProgram_overRevised, checkProgram_oversized, checkProgram_of_within (the guards decide, they never distort), checkBlock_caseVerdict_arms, askShape_draw.\n- Agentic/Core/Dsl/Check.lean: check_panel_nil (beside `check`; freshName is private), checkArgs_too_few, checkArgs_too_many (kept distinct, diagnoses pinned in the statements).\n- Agentic/Core/Dsl/Parse.lean: expand_lit, expand_interp_hit, expand_append (beside the private `expand`).\n- Agentic/Core/Plan.lean: Verdict.tag_object (@[simp], the classifier's third leg).\n- Agentic/Core/Explain.lean: bindForm_ask_head_draw (speaks of Plan.trace, so it lives downstream of Denote).\n\nTest robustness, same commit: five assertions in test/DslSmoke.lean that could pass vacuously when evsOf swallows a check failure into [] (9i, 9j, 9o, 10b, 10c) now carry nonemptiness guards; the two example-file reads in 10g fail as named checks instead of throwing outside the repo root; the two comments claiming \"no theorem constrains the VTag mapping\" are corrected to name checkBlock_caseVerdict_arms.\n\nDeliberately NOT deleted: every battery pin stays. Mutation testing during verification showed the pins carry the diagnosis-quality content (swap two messages and every ∀-theorem still compiles; the pins catch it), so the theorems add the ∀ — no fixture can make a guard silently dead — and the pins keep the words.\n\nWhole suite green after: 201 battery cases + discovery + round-16 pins, coverage audit over 129 sites, cli_smoke, mcp_smoke. The corrected meaning-function signature and re-costed route (the with-effort remainder: §9/§10 semantic pins as corollaries) are filed on acat-22m.\n",
+    "created_at": "2026-08-16T01:12:22Z"
+  }
+]
+#+end_src
 
 * DONE [#B] Adopt Mathlib: infrastructure — dependency, version pin for Lean 4.30, olean cache
 :PROPERTIES:
