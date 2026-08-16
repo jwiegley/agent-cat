@@ -525,6 +525,16 @@ theorem Verdict.approve_ne_declined : Verdict.approve ≠ Verdict.declined :=
 @[simp] theorem Verdict.tag_approve : Verdict.tag Verdict.approve = .approve := by
   simp [Verdict.tag, Verdict.approve_ne_declined]
 
+/-- …and every nonempty product of objections to `object` — the third leg of
+the classifier, so that all three tags are reached by name. -/
+@[simp] theorem Verdict.tag_object (ob : Objection) (obs : List Objection) :
+    Verdict.tag (Verdict.object (ob :: obs)) = .object := by
+  have h1 : Verdict.object (ob :: obs) ≠ Verdict.declined :=
+    Verdict.object_ne_declined _
+  have h2 : Verdict.object (ob :: obs) ≠ Verdict.approve := fun h =>
+    List.cons_ne_nil ob obs ((Verdict.approved_object_iff (ob :: obs)).mp h)
+  simp [Verdict.tag, h1, h2]
+
 /-- The tag says `approve` exactly when the verdict approves — the classifier is
 faithful about the only distinction a panel's reducer makes. -/
 theorem Verdict.tag_eq_approve_iff (v : Verdict) :

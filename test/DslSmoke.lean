@@ -31,8 +31,9 @@ Two layers, and what "complete" means for each.
 
 * **The semantic sections** — what a table of sources cannot say: that the
   flagship parses to the `Raw` the kernel proofs are about; that the verdict
-  arms reach *distinct* arms (no theorem constrains the `VTag` mapping — a
-  permutation type-checks); what a `{v}` hole splices in each of a verdict's
+  arms reach *distinct* arms through parsed source (the ∀-statement is
+  `Dsl.checkBlock_caseVerdict_arms`; this is its fixture witness, and the one
+  that would catch the arms' *words* drifting); what a `{v}` hole splices in each of a verdict's
   three states; that an `--define` override changes exactly the words it names
   and refuses a name the program never defined; that a source-chosen recursion
   depth is affordable at the bound (with a wall clock, because the exponential
@@ -906,8 +907,9 @@ def main : IO UInt32 := do
        | .ok _ => "ok"
        | .error e => toString e)
 
-    -- 3. The verdict arms reach distinct arms: nothing constrains the `VTag`
-    -- mapping, so it is pinned by running the plan.
+    -- 3. The verdict arms reach distinct arms — `Dsl.checkBlock_caseVerdict_arms`
+    -- is the ∀-statement; running the plan here is the fixture witness through
+    -- the parser, which the theorem does not touch.
     match parseAndCheckE srcCaseVerdict with
     | .error e => throw <| IO.userError s!"FAIL the case program does not check: {e}"
     | .ok p =>
@@ -1103,7 +1105,7 @@ def main : IO UInt32 := do
       "text,verdict,receipt" (codesOf evs)
     check "…which says so" "unsettled" (promptAt evs 2)
     checkTrue "…and no amend question was ever put"
-      (evs.all fun e => !(e.q.prompt.startsWith "fix"))
+      (!evs.isEmpty && evs.all (fun e => !(e.q.prompt.startsWith "fix")))
     let evs := evsOf (world) semSrc8
     check "zero amendments, approving: settled with the original" "settled draft"
       (promptAt evs 2)
@@ -1120,7 +1122,7 @@ def main : IO UInt32 := do
     check "an objecting world exhausts through two flag amendments"
       "flag,verdict,flag,verdict,flag,verdict" (codesOf evs)
     checkTrue "…and ships nothing"
-      (evs.all fun e => e.q.prompt != "ship it")
+      (!evs.isEmpty && evs.all (fun e => e.q.prompt != "ship it"))
 
     -- 9k. Two define holes in one prompt splice in place.
     let evs := evsOf (world) semSrc10
@@ -1148,7 +1150,8 @@ def main : IO UInt32 := do
 
     -- 9o. CRLF block content equals its LF spelling.
     checkTrue "CRLF and LF spell one program"
-      (decide (evsOf (world) semSrc14 = evsOf (world) (semSrc14.replace "\r" "")))
+      (decide (evsOf (world) semSrc14 ≠ [] ∧
+        evsOf (world) semSrc14 = evsOf (world) (semSrc14.replace "\r" "")))
     check "…with no carriage return in the prompt" "line one\nline two"
       (promptAt (evsOf (world) semSrc14) 0)
 
@@ -1198,13 +1201,13 @@ def main : IO UInt32 := do
     let callSrc := fnsPre ++ "workflow { x <- mk \"the goal\"\n ask tool \"t\" \"use {x}\" }"
     let inlSrc := "workflow { x <- ask model \"author\" \"draft: the goal\"\n ask tool \"t\" \"use {x}\" }"
     checkTrue "a call and its hand-inlining are one trace"
-      (decide (evsOf wEcho callSrc = evsOf wEcho inlSrc))
+      (decide (evsOf wEcho callSrc ≠ [] ∧ evsOf wEcho callSrc = evsOf wEcho inlSrc))
 
     -- 10c. Three spellings of one argument are one program.
     let trailSrc := fnsPre ++ "workflow {\n  x <- mk ```\n      the goal\n  ```\n  ask tool \"t\" \"use {x}\"\n}"
     let lblSrc := fnsPre ++ "workflow {\n  x <- mk $goal\n  ```goal\n      the goal\n  ```\n  ask tool \"t\" \"use {x}\"\n}"
     checkTrue "a short argument, a trailing block and a $label are one trace"
-      (decide (evsOf wEcho callSrc = evsOf wEcho trailSrc
+      (decide (evsOf wEcho callSrc ≠ [] ∧ evsOf wEcho callSrc = evsOf wEcho trailSrc
         ∧ evsOf wEcho trailSrc = evsOf wEcho lblSrc))
 
     -- 10d. A procedure's acts run in order, between the caller's statements.
@@ -1229,8 +1232,16 @@ def main : IO UInt32 := do
       "use <style guide> swapped" (promptAt e16f 1)
 
     -- 10g. The examples on disk.
-    let libFile ← IO.FS.readFile "example/library.wf"
-    let progFile ← IO.FS.readFile "example/harden-imported.wf"
+    let libFile ← try
+        IO.FS.readFile "example/library.wf"
+      catch e =>
+        throw <| IO.userError s!"FAIL example/library.wf is not readable — \
+                                run from the repository root: {e}"
+    let progFile ← try
+        IO.FS.readFile "example/harden-imported.wf"
+      catch e =>
+        throw <| IO.userError s!"FAIL example/harden-imported.wf is not readable — \
+                                run from the repository root: {e}"
     check "example/harden-imported.wf checks against example/library.wf" "ok"
       (outcomeM [("library", libFile)] progFile)
     let e16g := evsOfM wEcho [] [("library", libFile)] progFile

@@ -242,7 +242,7 @@ alexey, low. parseAndCheckRawWith and RawBlock.revisionBounds are defined in Exp
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 19:00]
-:MODIFIED: [2026-08-14 Fri 19:00]
+:MODIFIED: [2026-08-15 Sat 17:22]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -250,6 +250,20 @@ alexey, low. parseAndCheckRawWith and RawBlock.revisionBounds are defined in Exp
 :END:
 
 abstraction pass, high; converges with deep-review's proof-scope observation. The DSL is the only stratum with no [[.]]: Syntax.lean:199/189/174 describe layout, not mathematical objects, and no theorem anywhere relates check's output to denote (nothing states `denote (check ...) = ...`). With no equation for what a construct means, surface shape was settled by rubric — which is how a case came to be spelled as two sibling clauses. Fix: write [[RawBlock]] : Bindings G -> Option (Env G -> Dlg Unit) (i.e. denote . check), prove one equation per construct using the Plan.Denotes machinery already in Denote.lean, and state the accepted fragment (an inductive predicate on Plan that check's image inhabits) plus the missing adequacy direction in Dsl.lean's 'where the proofs stop'. Constrains and is partially subsumed by the redesign [[acat-k28]].
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 88,
+    "issue_id": "acat-22m",
+    "author": "johnw",
+    "text": "Corrected signature and re-costed route, from the adversarially-verified tests-vs-theorems analysis (see acat-dsl-guard-theorems-dqz for the cheap extractions).\n\n**The signature as originally sketched does not typecheck against the round-16 checker.** `[[RawBlock]] : Bindings Γ → Option (Env Γ → Dlg Unit)` is missing three things the real `checkBlock` carries (Check.lean:514-515): the function table and the pending loop result are required arguments (both `Type 1`), and the monad is `Except CheckError`, not `Option`. The composite to prove is\n\n    ∀ (fns : Fns) (Γ : Ctx) (S : Bindings Γ) (pend : Option (Pend Γ))\n      (b : RawBlock) (p : Plan Γ Unit),\n      checkBlock fns Γ S pend b = .ok p →\n      ∀ γ : Env Γ, denote p γ = ⟦b⟧ fns S pend γ\n\nwith `⟦·⟧` supplied independently — and note there is **no `.revising` clause equation**: `.bind _ _ (.revising …) rest` emits nothing by itself; the loop's meaning appears at the consuming `.caseResult` (Check.lean:628-631, 669-683), so the meaning function must carry the pending result exactly as the checker does.\n\n**Effort re-costing, both directions.** Cheaper than feared: `denotes_revising` already exists (Denote.lean:493) with `reviseLoop` and the Acceptance theorems, and the three continuation obligations — `Plan.Denotes (checkCont chk) …`, likewise `reviseCont`, `finishCont` — each discharge in ~2 lines by `denote_sub` (each is `Plan.sub` of one plan, Check.lean:458-477). Dearer than hoped: the uncosted work is stating `⟦RawBlock⟧` itself, and the equations quantify away the checker's prompt/kind computation — either they take `Prompt.expr`/`bindKind` results as hypotheses (then they say nothing about the rendered words) or `⟦·⟧` re-implements those functions (then the agreement diffs two copies of one algorithm).\n\n**Consequence for the battery.** 28 of the 45 §9 discovery pins read a concrete rendered prompt through `promptAt`; those stay even after this issue closes. The honest end state is *thinning §9 to roughly one pin per construct as the fixture witness*, with the per-construct equations carrying the ∀-content — not deleting the section. The flagship's universal trace agreement (DslFlagship \"What is not proved\" §2) additionally needs the bespoke per-clause agreement with the hand-written `Harden.demo`, which no meaning function supplies.\n",
+    "created_at": "2026-08-16T00:22:04Z"
+  }
+]
+#+end_src
 
 * TODO [#B] Certification residue: three violations, then the thesis is simply true
 :PROPERTIES:
@@ -983,6 +997,35 @@ PMonoid/CMonoid -> Monoid/CommMonoid (or Add* where additive); IdemCMonoid + its
 :END:
 
 Both now carry + * 0 1 via NSemiring but theorems still spell matAdd/comp/conv; make comp_assoc/id_comp/comp_id wrappers of mul_assoc/one_mul/mul_one. Deferred in acat-ci8 to keep names stable.
+
+* TODO [#C] DSL: state the guard-correctness and projection theorems the battery only samples
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-dsl-guard-theorems-dqz
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-15 Sat 17:21]
+:MODIFIED: [2026-08-15 Sat 17:21]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The tests-vs-theorems analysis (comment on acat-k28 pending) found ~10 cheap, compile-verified theorems whose content the battery checks only at fixtures. Add them where their subjects live:
+
+- checkProgram_overRevised / checkProgram_oversized / checkProgram_of_within — the program front end's three guards fire on exactly their conditions, at the pinned position/excerpt/count, for every program (one-unfold proofs).
+- overRevised_sound — a bound the pre-scan reports really exceeds maxRevisions (structural induction, ~28 lines).
+- check_panel_nil — an empty panel is refused with the exact diagnosis over every Γ, S, annotation and position, through Dsl.check (must live in Check.lean; freshName is private).
+- checkArgs_too_few / checkArgs_too_many — the two arity refusals, kept distinct, message pinned, by rfl.
+- checkBlock_caseVerdict_arms — a checked case lands approve/object/declined on the three DISTINCT checked arms (this refutes the battery's own comment that 'no theorem constrains the VTag mapping'; update that comment).
+- Verdict.tag_object — nonempty objections tag as .object.
+- askShape_draw + bindForm_ask_head_draw — the source-written draw index reaches the question record, for every ask.
+- expand_lit / expand_interp_hit / expand_append — the define expansion is a monoid map hitting the found body (must live in Parse.lean; expand is private).
+
+Also the test-robustness repairs the same analysis surfaced: three assertions in test/DslSmoke.lean pass vacuously when evsOf swallows a check failure into [] (the two evs.all checks and the CRLF decide-equality); guard each with a nonemptiness conjunct. And §10g throws instead of failing a named check when run outside the repo root.
+
+Discipline: mutation testing showed the theorems complement the string pins (a ∀-theorem survives swapped diagnoses that the pins catch), so nothing is deleted except where a theorem strictly subsumes a hand-built fixture.
 
 * DONE [#B] Adopt Mathlib: infrastructure — dependency, version pin for Lean 4.30, olean cache
 :PROPERTIES:

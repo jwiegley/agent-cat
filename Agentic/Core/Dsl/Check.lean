@@ -382,6 +382,22 @@ def checkArgs {Δ : Ctx} (S : Bindings Δ) (fname : String) :
   | [], _ :: _, _, _ =>
     .error ⟨⟨0, 0⟩, s!"`{fname}` is applied to too many arguments", fname⟩
 
+/-- The arity refusals, held for every table and scope — and held *apart*: a
+parameter with no argument is refused as too few, with exactly this
+diagnosis… -/
+theorem checkArgs_too_few {Δ : Ctx} (S : Bindings Δ) (fname pn : String)
+    (c : Code) (ps : List (String × Code)) (acc : Ctx) (σ : Sub acc Δ) :
+    checkArgs S fname ((pn, c) :: ps) [] acc σ
+      = .error ⟨⟨0, 0⟩, s!"`{fname}` is applied to too few arguments", fname⟩ :=
+  rfl
+
+/-- …and an argument with no parameter as too many. -/
+theorem checkArgs_too_many {Δ : Ctx} (S : Bindings Δ) (fname : String)
+    (a : RawArg) (args : List RawArg) (acc : Ctx) (σ : Sub acc Δ) :
+    checkArgs S fname [] (a :: args) acc σ
+      = .error ⟨⟨0, 0⟩, s!"`{fname}` is applied to too many arguments", fname⟩ :=
+  rfl
+
 /-- A call, as the plan it substitutes to: the function's plan, read through
 the argument list. -/
 def callPlan {Δ : Ctx} (S : Bindings Δ) (fns : Fns) (f : String)
@@ -693,6 +709,18 @@ def checkBlock (fns : Fns) : (Γ : Ctx) → Bindings Γ → Option (Pend Γ) →
 ill-typed plan is not an inhabitant of `Plan Γ Unit`. -/
 def check (Γ : Ctx) (S : Bindings Γ) (r : Raw) : Except CheckError (Plan Γ Unit) :=
   checkBlock [] Γ S none r
+
+/-- **An empty panel is refused, with exactly this diagnosis** — for every
+scope, annotation, continuation and pair of positions, at the entry point that
+exists for hand-built `Raw`s (no source text can write `panel []`; the parser
+demands a member). Stated here because `freshName` is private. -/
+theorem check_panel_nil {Γ : Ctx} (S : Bindings Γ) (x : String) (ann : Option Code)
+    (rest : RawBlock) (ppos bpos : Pos) (hx : Bindings.find? S x = none) :
+    check Γ S (.bind x ann (.rhs (.panel [] ppos)) rest bpos)
+      = .error ⟨ppos, "a panel needs at least one member", "panel"⟩ := by
+  unfold check checkBlock freshName
+  rw [hx]
+  rfl
 
 /-! ## Function bodies
 

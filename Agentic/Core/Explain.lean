@@ -348,6 +348,26 @@ theorem parseAndCheckRaw_level_le (s : String) (r : Raw) (p : Plan [] Unit)
 
 /-! ### The one thing the term does not hold -/
 
+/-- **The draw index reaches the question** — for every ask the surface can
+write, not just the battery's `independent draw 2` fixture: whatever plan a
+binding's ask elaborates to, the first event of any run of it carries the
+source-written draw. Stated here rather than in `Dsl.lean` because it speaks
+of `Plan.trace`. -/
+theorem bindForm_ask_head_draw {A : Type} {Γ : Ctx} (fns : Fns) (c : Code)
+    (S : Bindings Γ) (a : RawAsk) (form : Plan (c :: Γ) A → Plan Γ A)
+    (h : bindForm fns c S (.ask a) = .ok form)
+    (k : Plan (c :: Γ) A) (ω : Ω) (γ : Env Γ) :
+    ((Plan.trace ω (form k) γ).head?).map (fun e => e.q.draw)
+      = some a.target.draw := by
+  simp only [bindForm] at h
+  cases hc : Prompt.closed a.prompt with
+  | none =>
+    rw [hc] at h
+    cases he : Prompt.expr S a.pos a.prompt with
+    | error e => rw [he] at h; exact absurd h (by simp)
+    | ok e => rw [he] at h; cases h; simp [askShape_draw]
+  | some w => rw [hc] at h; cases h; simp [askShape_draw]
+
 /-- `[[b.revisionBounds]]` = every `revising … at most n amendments` written in
 `b`, with where it is written.
 

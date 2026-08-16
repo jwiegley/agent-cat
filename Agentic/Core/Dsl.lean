@@ -601,4 +601,166 @@ theorem parseAndCheck_level_le (s : String) (p : Plan [] Unit) (h : parseAndChec
   rw [parseAndCheck_ok_iff] at h
   exact parseAndCheckProgramWith_level_le [] [] s p h
 
+/-! ## The guards of the front end, as theorems
+
+The battery reaches each of these at fixtures; the statements below hold them
+for every program. They complement the battery's string pins rather than
+replace them: a mutation that swaps two diagnoses or moves a position survives
+any ∀-statement that does not spell the strings, and spelling the strings is
+what the pins already do. What a theorem adds is the ∀ — no fixture, and no
+future surface change, can make one of these guards silently dead. -/
+
+/-- What the pre-scan reports really is over the bound: `overRevised` never
+invents a hostile numeral. -/
+theorem overRevised_sound :
+    ∀ (r : Raw) {pos : Pos} {n : Nat},
+      overRevised r = some (pos, n) → maxRevisions < n := by
+  intro r
+  induction r with
+  | empty p =>
+    intro pos n h
+    simp [overRevised] at h
+  | knownHere names rest p ih =>
+    intro pos n h
+    simp only [overRevised] at h
+    exact ih h
+  | act a rest p ih =>
+    intro pos n h
+    simp only [overRevised] at h
+    exact ih h
+  | callStmt f args rest p ih =>
+    intro pos n h
+    simp only [overRevised] at h
+    exact ih h
+  | bind x ann src rest p ih =>
+    intro pos n h
+    cases src with
+    | rhs r' =>
+      simp only [overRevised] at h
+      exact ih h
+    | revising subj carrier m rname rann review amend rpos =>
+      simp only [overRevised] at h
+      split at h
+      · rename_i hlt
+        simp only [Option.some.injEq, Prod.mk.injEq] at h
+        exact h.2 ▸ hlt
+      · exact ih h
+  | ifFlag x yb nb p ihy ihn =>
+    intro pos n h
+    simp only [overRevised] at h
+    cases hy : overRevised yb with
+    | some v =>
+      rw [hy] at h
+      simp only [Option.orElse, Option.some.injEq] at h
+      exact ihy (h ▸ hy)
+    | none =>
+      rw [hy] at h
+      simp only [Option.orElse] at h
+      exact ihn h
+  | caseVerdict x ab ob db p iha iho ihd =>
+    intro pos n h
+    simp only [overRevised] at h
+    cases ha : overRevised ab with
+    | some v =>
+      rw [ha] at h
+      simp only [Option.orElse, Option.some.injEq] at h
+      exact iha (h ▸ ha)
+    | none =>
+      rw [ha] at h
+      simp only [Option.orElse] at h
+      cases ho : overRevised ob with
+      | some v =>
+        rw [ho] at h
+        simp only [Option.some.injEq] at h
+        exact iho (h ▸ ho)
+      | none =>
+        rw [ho] at h
+        exact ihd h
+  | caseResult x sname sb ub p ihs ihu =>
+    intro pos n h
+    simp only [overRevised] at h
+    cases hs : overRevised sb with
+    | some v =>
+      rw [hs] at h
+      simp only [Option.orElse, Option.some.injEq] at h
+      exact ihs (h ▸ hs)
+    | none =>
+      rw [hs] at h
+      simp only [Option.orElse] at h
+      exact ihu h
+
+/-- A hostile revising bound is refused at its own line, with exactly this
+diagnosis — for every program whose table checks, not just the battery's. -/
+theorem checkProgram_overRevised {prog : RawProgram} {fns : Fns} {rpos : Pos} {n : Nat}
+    (hf : checkFnsList [] prog.fns = .ok fns)
+    (h : overRevised prog.main = some (rpos, n)) :
+    checkProgram prog
+      = .error ⟨rpos, s!"a bounded revision is unrolled into the term it writes, \
+                        so its bound may name at most {maxRevisions} amendments",
+                s!"at most {n} amendments"⟩ := by
+  unfold checkProgram
+  rw [hf, h]
+
+/-- An elaboration over the question budget is refused with the actual count —
+likewise for every program. -/
+theorem checkProgram_oversized {prog : RawProgram} {fns : Fns}
+    (hf : checkFnsList [] prog.fns = .ok fns)
+    (hr : overRevised prog.main = none)
+    (h : maxQuestions < blockAsks fns prog.main) :
+    checkProgram prog
+      = .error ⟨⟨0, 0⟩, s!"this program elaborates to \
+                          {blockAsks fns prog.main} questions, and the bound \
+                          is {maxQuestions}", ""⟩ := by
+  unfold checkProgram
+  rw [hf, hr]
+  simp [h]
+
+/-- …and within both bounds, the program front end **is** the block checker:
+the guards decide, they never distort. -/
+theorem checkProgram_of_within {prog : RawProgram} {fns : Fns}
+    (hf : checkFnsList [] prog.fns = .ok fns)
+    (hr : overRevised prog.main = none)
+    (h : ¬ maxQuestions < blockAsks fns prog.main) :
+    checkProgram prog = checkBlock fns [] [] none prog.main := by
+  unfold checkProgram
+  rw [hf, hr]
+  simp [h]
+
+/-- **A checked `case` lands each verdict on its own arm.** The term is
+`Plan.caseV` of exactly the three checked blocks, approve to the `approved`
+text, object to `objected`, declined to `no answer` — so the `VTag` mapping is
+constrained by theorem, and a permutation no longer type-checks silently. -/
+theorem checkBlock_caseVerdict_arms {fns : Fns} {Γ : Ctx} {S : Bindings Γ}
+    {x : String} {a o d : RawBlock} {pos : Pos} {p : Plan Γ Unit}
+    (h : checkBlock fns Γ S none (.caseVerdict x a o d pos) = .ok p) :
+    ∃ (e : Expr Γ Verdict) (a' o' d' : Plan Γ Unit),
+      checkBlock fns Γ S none a = .ok a' ∧
+      checkBlock fns Γ S none o = .ok o' ∧
+      checkBlock fns Γ S none d = .ok d' ∧
+      p = Plan.caseV e (fun t => match t with
+            | .approve => a' | .object => o' | .declined => d') := by
+  simp only [checkBlock] at h
+  split at h
+  · exact absurd h (by simp)
+  · split at h
+    · exact absurd h (by simp)
+    · rename_i e _
+      split at h
+      · exact absurd h (by simp)
+      · rename_i a' ha'
+        split at h
+        · exact absurd h (by simp)
+        · rename_i o' ho'
+          split at h
+          · exact absurd h (by simp)
+          · rename_i d' hd'
+            cases h
+            exact ⟨e, a', o', d', ha', ho', hd', rfl⟩
+
+/-- The source-written draw index survives shape elaboration: `served by`
+relabels the server and touches nothing else. -/
+theorem askShape_draw (m : Option String) (c : Code) (t : RawTarget) :
+    (askShape m c t).draw = t.draw := by
+  cases m <;> rfl
+
 end Agentic.Core.Dsl

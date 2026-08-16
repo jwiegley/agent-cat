@@ -562,6 +562,32 @@ private def expand (env : PEnv) : Prompt → Prompt
 private def prompt (env : PEnv) (p : Prompt) : Prompt :=
   Prompt.normalize (expand env p)
 
+/-! ### The define expansion is a monoid map
+
+Stated here because `expand` is private. These carry the ∀-content of the
+battery's override pins: a literal survives every table, a hole becomes
+exactly the found body, and expansion distributes over concatenation — for
+every prompt, not just the fixtures. The bridge from `--define` to the entry
+`find?` retrieves is `parseModuleSrc`'s header loop, which stays pinned by
+the battery: these lemmas are its two ends. -/
+
+theorem expand_lit (env : PEnv) (s : String) (rest : Prompt) :
+    expand env (.lit s :: rest) = .lit s :: expand env rest := rfl
+
+theorem expand_interp_hit (env : PEnv) (nm : String) (rest : Prompt)
+    (d : String × Prompt)
+    (h : env.defs.find? (fun d => d.1 == env.q nm) = some d) :
+    expand env (.interp nm :: rest) = d.2 ++ expand env rest := by
+  simp [expand, h]
+
+theorem expand_append (env : PEnv) (p q : Prompt) :
+    expand env (p ++ q) = expand env p ++ expand env q := by
+  induction p with
+  | nil => rfl
+  | cons ch rest ih =>
+    cases ch <;> simp [expand, ih]
+    split <;> simp
+
 /-! ## The grammar -/
 
 /-- `ask ::= "ask" ("model" | "tool" | "person") name ["served" "by" name]
