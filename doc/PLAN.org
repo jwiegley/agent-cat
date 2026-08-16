@@ -1542,7 +1542,7 @@ Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 18:34]
-:MODIFIED: [2026-08-15 Sat 22:17]
+:MODIFIED: [2026-08-15 Sat 23:00]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -1712,6 +1712,27 @@ Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is
     "author": "johnw",
     "text": "Round 17 implementation HALTED at the owner's direction, three lexer edits reverted (recorded in expr-design.md; they return with the campaign). The owner expanded the round mid-implementation (verbatim intents):\n\n1. Kleisli composition: `y <- f x; z <- g y; ret z` ≡ `f x >>> g` ≡ `g <<< f x`.\n2. Function composition: `f (g x)` ≡ `(f . g) x` ≡ `f . g $ x` — \"follow Haskell's syntax for all of these constructions.\"\n3. Anonymous lambdas: `(\\x -> g x) y` ≡ `g y` — \"follow Haskell's conventions for functions, currying, lambdas, functions as values, function types, receiving functions as arguments, returning functions, etc. The whole deal.\"\n4. \"We're basically creating a simplified version of Haskell here, optimized around writing textually-oriented agentic workflows with a very limited typing discipline and set of keywords.\"\n\nThree rulings taken through the question interface:\n- STATIC functions: a simply-typed lambda-calculus layer over the four kinds that fully normalizes at elaboration — function types never exist at run time; every program still elaborates to today's finite Plan; recursion stays refused, so normalization terminates. Runtime closures (= Plan.dyn) rejected.\n- DESIGN EVERYTHING FIRST: one coherent design covering the round-17 core (do-notation result rule, answer deletion, default-text params, trailing-bind refusal, fence fix — all decisions of expr-design.md stand as inputs) plus the whole calculus, attacked and approved, then one implementation campaign. The bang's fate is decided inside this design.\n- Haskell's dot rule: `lib.f` (no spaces) qualifies, `f . g` (spaces) composes.\n\nRound 18 design workflow launching: draft + three adversarial passes (parsing/corners, theorems/architecture, type-system/normalization-termination). The architectural north star the attackers must test: normalize parser-side into today's unchanged Raw, so every theorem survives a third time — with the known hard fork being higher-order parameters (a body with a function-typed parameter cannot be checked once into the table; it becomes a template elaborated per call site, or HOF params are restricted).\n\nAlso filed separately at the owner's direction: acat-agent-deck-engine-vv6 (agent-deck as a payload engine — the live-session observation path ACP cannot provide).\n",
     "created_at": "2026-08-16T05:17:13Z"
+  },
+  {
+    "id": 96,
+    "issue_id": "acat-k28",
+    "author": "johnw",
+    "text": "Round-18 ruling (owner): >>> is bind-shaped Kleisli composition, not Control.Arrow-on-functions — (f . g) x == f (g x) for value functions only; (f >>> g) x == f x >>= g == y <- f x; g y; effect-on-the-left types as the degenerate arrow (f x >>> g == bind). <<< flips both.  over questions refused, naming >>>. Both normalize to bind chains at elaboration, so the static/theorem story is unchanged. The synthesis adjudicates the draft's Kleisli section against this ruling. Open question for the page: whether >>= / >=> also enter the surface (recommendation: no — do-notation + >>> covers it within the keyword budget).",
+    "created_at": "2026-08-16T05:36:19Z"
+  },
+  {
+    "id": 97,
+    "issue_id": "acat-k28",
+    "author": "johnw",
+    "text": "Round-18 posture (owner): syntactic questions are answered by reading Haskell's syntax — the design derives from the Report as the default (>>=, >=>, and the standard operator set included by default, within the limited-keywords optimization); only genuine collisions with this language's commitments (whitespace-dot, $label, byte-literal fenced prompts, braces-not-layout) return to the owner as questions.",
+    "created_at": "2026-08-16T05:36:57Z"
+  },
+  {
+    "id": 98,
+    "issue_id": "acat-k28",
+    "author": "johnw",
+    "text": "Round-18 attack pass complete: 60 findings across three agents (theorems/architecture 16, parsing/grammar 21, types/normalization 23). Three FATAL: the draft's expression grammar could not derive bare sources (its own primings/panels/revising were underivable); normal forms with no Raw spelling (a bare name or literal at a rhs — repaired by the Phase-C0 vacuity refusal at the SOURCE position, not by reopening Raw); a step-counted fuel bound exponentially dishonest against by-name substitution (repaired: node budget, maxNormNodes). The north star was CONFIRMED against the actual proof scripts: no theorem inspects the parser's output, so normal forms landing in unchanged Raw preserves all fourteen level lemmas, the guard theorems, and every DslFlagship item; harden.wf stays byte-identical. Load-bearing adjudications for the synthesis (in progress): hoisted temporaries always annotated with their synthesized kind (zero-use hoists become acts); lets keep point-free bodies with types SYNTHESIZED at their own header and bodies stored closed/qualified (a base-kind let refused at the '=' naming '<-'); minting keyed on the inlining chain; lambda binders minted to temps at parse (shadowing vacuous by construction); >>= and =<< added per owner ruling 9 (>=>/<=< are >>>/<<< in a one-category language — stated, not duplicated); holes in lambda-body prompts TAKEN (the way a static function builds a prompt from its parameter); fenceCloses widened for operator followers; the dot implemented as a lexer branch so a.b.c stays refused. Page lands as calculus-design.md; campaign acat-r18-campaign-2s9 still gates on owner approval.",
+    "created_at": "2026-08-16T06:00:38Z"
   }
 ]
 #+end_src
