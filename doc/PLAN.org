@@ -1453,6 +1453,36 @@ Owner request: the artifact §VII example as REAL compiling Lean — Op signatur
 ]
 #+end_src
 
+* TODO [#B] Strategic: continue the .wf DSL, or make Haskell the surface (agent-functor-style QQ + typed workflow library + verified evaluator)?
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-haskell-surface-ygy
+:LABELS:   []
+:ISSUE_TYPE: question
+:CREATED:  [2026-08-16 Sun 10:38]
+:MODIFIED: [2026-08-16 Sun 11:20]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Owner question (2026-08-16): the round-17/18 surface converges on Haskell. What would a Haskell library look like that offers a type for constructing these workflows plus a verified evaluator against a backend agent? Would it look like agent-functor (~/src/agent-functor: quasi-quoter for interpolating large strings into expression arguments), or can that design be improved? Deliverable: a deep-dive report (workflow: agent-functor autopsy + agent-cat guarantees inventory + prior-art sweep -> best-possible Haskell design + three-way comparison -> adversarial pass) informing whether to (a) continue the DSL project (round-18 campaign acat-r18-campaign-2s9 is gated and waiting), (b) switch to Haskell as surface syntax + typing discipline with QQ prompts, or (c) a hybrid (Haskell EDSL frontend elaborating to the Lean-verified kernel). Key theory to weigh: Applicative/Selective/Monad maps onto batch/branch/dynamic rungs (Mokhov's selective functors; Build Systems a la Carte's applicative-vs-monadic tasks = the level lattice); pipeline (static shape, value-dependent prompts) fits none of the classes directly and is where the Lean formers earn their keep; Haskell cannot restrict >>='s continuation, so Monad = dyn; 'verified evaluator' in pure Haskell is property-tested at best, so the honest options are Liquid Haskell, extraction pairings, or keeping Lean as the kernel. The recommendation is the owner's decision; the report must be honest about what each path loses.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 100,
+    "issue_id": "acat-haskell-surface-ygy",
+    "author": "johnw",
+    "text": "Workflow complete (6 agents, ~810k tokens): autopsy + inventory + prior art -> design draft -> two attacks (47 findings, 6 fatal). Headlines: (1) agent-functor is NOT the owner's project (Isaac Shapira / platonic.systems) — a deep-embedded profunctor optic (Flow i o: Category/Profunctor/Strong/Choice/Traversing, deliberately no Monad and no arr), mandatory declared bounds instead of a level lattice, skeleton-level statics only (leaves, worst-case cost; no question texts, no min bills, no path counts), and NO workflow quasi-quoter (promptFile + string-interpolate only); agentic-denotation is an empty scaffold. (2) The draft recommended the hybrid (Haskell surface -> .wf IR -> Lean kernel) but the comparison attacker found the option set rigged by omission: the draft's own strongest argument (r18 spends ~11 days reimplementing beta/fixities/normalization GHC already has) argues against THE CALCULUS, not the DSL — so option (d) 'ship the do-core, descope the calculus' must enter the comparison, and the recommendation must be re-derived from corrected costs (r17 has NOT shipped; census figures unsourced; runner costs double-counted against (b); auditability-of-the-approved-artifact row missing — the dimension (a)/(d) win). (3) Design-side fatals repaired in synthesis: bindable multi-step helpers via a Codensity wrapper; Discardable-based statement discipline with monomorphic ask exports; sharing restated as Ω-is-a-function-of-the-question (identical questions share answers; repetition multiplies events); rule 6 under HOAS becomes a SILENT MEANING CHANGE (shadowing unrecoverable — new row, priced); runPlan must consume Checked; Liquid Haskell cannot prove totality over HOAS; the brace-escaping fidelity bug + round-trip property; {v3}-not-{patch} readability loss of emitted .wf; frontend-first maxQuestions refusal with Haskell positions. (4) Pro-Haskell note kept: .wf questions reached through calls can never be closed (params are Exprs, fn-import-attack A3), while Haskell signatures restore closedness — the one place the embedding strictly beats the landed design. Synthesis into haskell-question.md in progress; recommendation to be re-derived, owner decides.",
+    "created_at": "2026-08-16T18:20:48Z"
+  }
+]
+#+end_src
+
 * DONE [#C] Shortest-list 7: newtype the polluted carriers; one join-as-monoid synonym
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
