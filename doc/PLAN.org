@@ -816,6 +816,42 @@ alexey pass, high. Check.lean:422-423 is the only place the approve/object/decli
 
 From acat-ubt: non-commutative K forcing non-commutative conv is shown at one carrier only; the generic converse needs (1:S) != 0 (no Nontrivial-style class exists) + delta injectivity, then conv_comm iff CMonoid K.
 
+* TODO [#C] ACP: attach a run to an existing/live session — session/load client support and whatever the protocol allows
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-acp-live-session-99n
+:LABELS:   []
+:ISSUE_TYPE: feature
+:CREATED:  [2026-08-15 Sat 20:27]
+:MODIFIED: [2026-08-15 Sat 20:40]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Owner directive (2026-08-15): find out whether ACP can talk to running, live sessions; if it can, add that infrastructure to agent-cat, so a workflow run can be observed interactively (the motivating case: an agent-deck session named agent-cat hosting the owner's interactive Claude, watching example/harden.wf run).
+
+Facts already established from our side: agent-cat's ACP client speaks session/new only (Acp.newSession; no session/load anywhere); Adapter.ofName knows stub/claude/codex; --adapter-arg passes argv through verbatim; person questions already reach the operator's keyboard on live runs (Exec.Settings.askPersonOnStdin := !stubbed). A Claude session is owned by one process, so 'attach to the pane's session' may be impossible regardless of protocol support — the research must distinguish resume-into-new-process (fork?) from true live attach.
+
+Research running (workflow wf_709221dd-563): (1) ACP spec semantics of session/load + loadSession capability + any non-stdio transport that reaches an already-running agent + multi-client/observer modes; (2) claude-agent-acp 0.66.0's loadSession behavior and resume/fork semantics under contention; (3) Claude Code/SDK resume semantics and any supported live-attach path.
+
+Scope once research lands: at minimum, client-side session/load (capability-gated), a --session <id> flag on agent-cat run, and honest diagnoses for what cannot be attached; more if the protocol offers more.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 91,
+    "issue_id": "acat-acp-live-session-99n",
+    "author": "johnw",
+    "text": "Research complete (workflow wf_709221dd-563, three sweeps, findings verified against normative spec text, the shipped 0.66.0 adapter tarball, and live checks on this machine).\n\nVERDICT: ACP cannot talk to a live session. Three layers, all confirmed:\n\n1. PROTOCOL. `session/load` is sequential handoff — the agent (a subprocess this client spawned) restores context and MUST replay the whole history as session/update notifications, then the client continues \"as if the session was never interrupted\". stdio-subprocess is the only defined transport (\"The client launches the agent as a subprocess\"; Streamable HTTP is a draft RFD). 1:1 client:session by assumption. The exact missing thing has an open RFD — \"Multi-Client Session Attach\" (PR #533, proposal stage since 2026-02: \"There is no mechanism for a second client to 'attach' to a live, in-progress session\"). Correction recorded: ACP versions are integers (current stable 1, which Acp.lean already sends); \"2025-11-25\" is our MCP revision, not ACP.\n\n2. ADAPTER (@agentclientprotocol/claude-agent-acp 0.66.0 — note the zed-industries name is deprecated). Advertises agentCapabilities.loadSession: true AND sessionCapabilities {additionalDirectories, close, delete, fork, list, resume}. session/load = SDK query with {resume: sessionId}, which CONTINUES IN PLACE (appends to the same session file; fork is a separate explicit path). No lock, no attach mode, always spawns its own claude binary; the entire argv surface is --cli/--version/--hide-claude-auth, so --adapter-arg buys nothing here.\n\n3. PRODUCT. \"A session started by running `claude` directly is tied to that terminal\" — not attachable. Live-attach exists only for opt-in surfaces: background sessions under the supervisor daemon (claude --bg; attach/logs/peek; wire protocol undocumented), Remote Control (Anthropic-mediated, no local API), the per-session messaging socket (inject-only, verified live here), channels (launch-time, research preview). agent-deck itself drives sessions by tmux send-keys (extracted from the installed binary).\n\nWHAT IS BUILDABLE AND WORTH IT (proposal, awaiting owner word):\n`agent-cat run --session <id>` via client-side session/load — sequential handoff. Motivating flow: exit the deck pane's claude, run the workflow with --session <that session's id> — it continues inside that transcript with all its context, person questions still arrive on the operator's keyboard — then `claude --resume <id>` afterwards shows the entire workflow in the session history. Implementation: capture agentCapabilities at initialize (refuse --session when loadSession is absent, naming the adapter), Conn.loadSession sending {sessionId, cwd, mcpServers: []} and draining replay updates until the response (accept null or object), CLI flag + a documented two-writers hazard (\"close the interactive owner first\" — continue-in-place has no lock, and agent-cat cannot detect a live writer). Optional follow-up: --fork-session via sessionCapabilities.fork for the context-without-mutation variant. Concurrent observation remains out of scope for ACP; nearest sanctioned paths are the messaging socket (notify-only) and transcript tailing (unsupported, six documented hazards).\n",
+    "created_at": "2026-08-16T03:40:37Z"
+  }
+]
+#+end_src
+
 * DONE [#E] Alternative: make bounded 0 unrepresentable (normalize to static)
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
