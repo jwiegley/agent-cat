@@ -62,6 +62,23 @@ statement word, a function, or an imported module's name — each such name is
 refused where it is written, so every name in a program means exactly one
 thing.
 
+Round seventeen (owner, approved 2026-08-15): **the do-notation reading, bang
+lifting, and the noise audit — design of record: `expr-design.md` beside this
+file, which supersedes the grammar below where they disagree.** Blocks are
+officially do-blocks over `Plan`: the last statement of a function body is its
+answer and the `answer` keyword is deleted — cold, with no migration clause,
+because no agent-cat scripts exist in the wild and `answer` leaving the
+statement words is the purer "no reserved words" outcome. `!(source)` stands
+exactly where a name may stand and lifts post-order to the head of its
+statement, never across a brace; two divergences from Idris are language rules
+(two identical bangs are one answer — `independent draw` resamples; a bang in
+an arm is asked on that path only). Parameter annotations default to `text`.
+Receipt bodies do not lift. Trailing bindings are refused in blocks, arms and
+bodies (not in a library's priming); any Unit-valued statement may end a block,
+assertions included — the requirement is the type, not a closing word. The
+fence-close drift is fixed: `)` and a trailing `--` comment may follow a
+closing fence, as `block-syntax.md` rule 2 always said.
+
 ## Grammar
 
 Braces delimit; indentation means nothing. Comments run `--` to end of line.

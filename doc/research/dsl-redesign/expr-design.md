@@ -58,9 +58,9 @@ each repair carries its own battery pin.
 | D15 | `!` inside a `revising` clause (the review source, the `amend` source, or any argument of a call standing in either) | **Refused.** A clause is one question asked once per round, not a do-block: there is no lifting site, and lifting out of the loop would change what is asked (§2.1). |
 | D16 | Parameter annotations | **`param ::= name [":" kind]`, defaulting to `text`.** Only a `verdict` parameter annotates; `flag` and `receipt` parameters stay refused. The result arrow stays explicit (§3.13). |
 | D17 | `-> receipt` bodies | **Do not lift.** The terminal stays `.act`/`.callS` with `answer := none`: same plan, same `Raw`, byte-identical (§1.3). |
-| D18 | A trailing **binding** | **Refused** in a workflow block, in an arm, and in a body — and **not** in a library's priming, which has no final position (§1.4). The block/arm half is an owner question (§9, Q1). |
+| D18 | A trailing **binding** | **Refused** in a workflow block, in an arm, and in a body — and **not** in a library's priming, which has no final position (§1.4). Both halves taken (owner, §9 Q1). |
 | D19 | The fence-close drift | **Fixed as part of round 17**: a closing fence may be followed by `)` and by a `--` comment, as `block-syntax.md` rule 2 already specifies. A second lexer change, with its own pin (§2.5). |
-| D20 | The `answer` migration | `parseFnBody` keeps one clause at the word: *"`answer` is deleted: the last statement of a body is its answer — drop this line."* Staged for one release (§9, Q3 asks how long). |
+| D20 | The `answer` migration | **No migration clause** (owner, §9 Q3): there are no agent-cat scripts in the wild, every in-repo `.wf` migrates in the same commit, and `answer` leaves `stmtWords` entirely — the word becomes an ordinary name again, which is the purer "no reserved words" outcome. |
 | D21 | The every-feature showcase | **`library.wf` + `harden-imported.wf`.** `example/harden.wf` stays byte-identical, because it is the kernel pin (§8.2). |
 
 ---
@@ -297,17 +297,16 @@ each arm's terminal exactly as §4 imposes kinds everywhere else, and `Plan.case
 already has the type. The sugar is forward-compatible with the one extension
 the surface is most likely to want.
 
-**The assertion nit, demoted to a question.** The draft proposed that
-assertions be transparent to the rule, so a block whose last step is a
-`known here:` would have to end with `stop`. That is a behavior change, not a
-nit: `parseBlockFrom`'s `knownHere` clause recurses with `first := false`
-(`Parse.lean:880–889`), so `known here: x }` is accepted today and elaborates to
-`ret`, and `test/DslSmoke.lean:511–513` pins exactly that shape as `"ok"`. It is
-put to the owner as Q2 (§9) with its churn priced, not taken here. If it is
-taken, the diagnosis is *"a `known here` asserts and does nothing; a block that
-does nothing says `stop`"*, and the fixture becomes
-`if ok { known here: ok  stop } else { stop }` with a new refusal case beside
-it.
+**The assertion nit, resolved: REJECTED (owner, 2026-08-15).** The draft
+proposed that assertions be transparent to the rule, so a block whose last step
+is a `known here:` would have to end with `stop`. The owner's ruling, with the
+better principle: *both `stop` and assertions effectively return a unit type,
+and this is the only requirement for a do-block with no explicit binding.* A
+block is a do-block at `Unit`; every statement form is Unit-valued; therefore
+any of them — an act, a call, a branching, `stop`, or a `known here:` — may
+stand last. The requirement is the type, not a closing word. Nothing changes:
+`known here: x }` stays accepted (`test/DslSmoke.lean:511–513` keeps its
+`"ok"`), and the grammar's `blockfinal` already derives it.
 
 ---
 
@@ -1957,10 +1956,15 @@ it.
 
 ---
 
-## 9. Questions for the owner
+## 9. Questions for the owner — RESOLVED (owner, 2026-08-15)
 
-Three decisions in this document are not the author's to make. Each is stated in
-two sentences, with a recommendation.
+All three were put to the owner and answered; the page above reflects the
+rulings. Q1: **taken** — trailing bindings are refused in blocks, arms and
+bodies alike. Q2: **rejected** — any Unit-valued statement may end a block,
+assertions included; the requirement is the type, not a closing word (§1.5).
+Q3: **no courtesy clause** — there are no agent-cat scripts in the wild, so
+`answer` is deleted cold, leaves `stmtWords`, and every in-repo file migrates
+in the same commit. The original questions follow, for the record.
 
 **Q1 — the trailing-binding refusal in workflow blocks and arms (D18).** For
 function bodies the refusal is settled: nothing downstream exists at all, so

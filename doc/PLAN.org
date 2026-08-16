@@ -1474,7 +1474,7 @@ Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 18:34]
-:MODIFIED: [2026-08-15 Sat 20:50]
+:MODIFIED: [2026-08-15 Sat 22:03]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -1630,6 +1630,13 @@ Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is
     "author": "johnw",
     "text": "Round 17 design of record CANDIDATE: doc/research/dsl-redesign/expr-design.md (695e510). Supersedes this issue's earlier `answer <source>` note — the owner rejected that spelling and directed the do-notation + Idris-bang route with a general Haskell/Idris noise audit.\n\nThe page carries 21 numbered decisions. Headlines: blocks are officially do-blocks over Plan (last statement is the result; `answer` deleted with a one-release migration diagnosis); `!(source)` stands exactly where a name may stand and lifts post-order to the head of its statement, never across a brace; two divergences from Idris stated as language rules (two identical bangs are one answer — `independent draw` is the resample; a bang in an arm stays in the arm); receipt bodies do not lift (same plan, same Raw); parameter annotations default to `text`; the fence-close drift (`)` and `--` after a closing fence) is fixed as a second lexer change; the every-feature showcase is the library.wf + harden-imported.wf pair, with the modernize-the-flagship alternative priced (a day of re-transcription) and recommended against.\n\nTheorem survival, checked against the proof scripts by the attack pass: parser-level desugar into today's Raw means every existing theorem — fourteen level lemmas, the six guard/projection theorems, Check's rfl theorems, Explain's seven, all of DslFlagship including the nine decide +kernel proofs — survives verbatim, because example/harden.wf is byte-identical and no theorem inspects the parser except through an opaque result.\n\nThe attack pass (two agents, 42 findings) killed two fatal draft claims: the drafted grammar did not derive branch-terminal blocks (i.e. refused the pinned flagship), and every bang-ending-in-a-fence example failed to lex before D19. Both repairs are in the page, with battery pins named.\n\nAwaiting the owner on three questions (§9): Q1 the trailing-binding refusal in workflow blocks/arms (recommended: take it); Q2 assertion transparency — a block ending in `known here` must say `stop` (recommended: take it now or defer explicitly); Q3 the migration diagnosis lifetime (recommended: one release). Implementation estimate: three focused days, risk concentrated in Parse.lean.\n",
     "created_at": "2026-08-16T03:50:27Z"
+  },
+  {
+    "id": 93,
+    "issue_id": "acat-k28",
+    "author": "johnw",
+    "text": "Round 17 APPROVED (owner, 2026-08-15), with the three §9 questions resolved:\n\nQ1 TAKEN — trailing bindings refused in workflow blocks, arms and bodies alike (primings exempt: a priming has no final position).\nQ2 REJECTED — the owner's principle is better than the proposal's: both `stop` and assertions effectively return a unit type, and that is the only requirement for a do-block with no explicit binding. Any Unit-valued statement may end a block; `known here:` included; DslSmoke:511 keeps its \"ok\"; §1.5 updated.\nQ3 NO COURTESY CLAUSE — there are no agent-cat scripts in the wild (owner's statement), so `answer` is deleted cold, leaves stmtWords entirely (the word becomes an ordinary name again), and every in-repo .wf migrates in the same commit. D20 replaced accordingly.\n\nGRAMMAR.md carries the approval note; expr-design.md is the design of record for the round. Implementation begins now, in the order: lexer (bang punct + fence-close drift), params/answer/final rules, the lifting pass, the checker sweep, examples, battery, docs, full suite. The ACP --session handoff (acat-acp-live-session-99n) is queued behind it by the owner's word.\n",
+    "created_at": "2026-08-16T05:03:20Z"
   }
 ]
 #+end_src
