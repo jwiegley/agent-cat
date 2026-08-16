@@ -823,7 +823,7 @@ From acat-ubt: non-commutative K forcing non-commutative conv is shown at one ca
 :LABELS:   []
 :ISSUE_TYPE: feature
 :CREATED:  [2026-08-15 Sat 20:27]
-:MODIFIED: [2026-08-15 Sat 20:40]
+:MODIFIED: [2026-08-15 Sat 22:20]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -838,6 +838,22 @@ Research running (workflow wf_709221dd-563): (1) ACP spec semantics of session/l
 
 Scope once research lands: at minimum, client-side session/load (capability-gated), a --session <id> flag on agent-cat run, and honest diagnoses for what cannot be attached; more if the protocol offers more.
 
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-acp-live-session-99n",
+    "depends_on_id": "acat-r18-campaign-2s9",
+    "type": "blocks",
+    "created_at": "2026-08-16T05:20:20.317022Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 ** Comments
 
 #+begin_src json
@@ -848,6 +864,58 @@ Scope once research lands: at minimum, client-side session/load (capability-gate
     "author": "johnw",
     "text": "Research complete (workflow wf_709221dd-563, three sweeps, findings verified against normative spec text, the shipped 0.66.0 adapter tarball, and live checks on this machine).\n\nVERDICT: ACP cannot talk to a live session. Three layers, all confirmed:\n\n1. PROTOCOL. `session/load` is sequential handoff — the agent (a subprocess this client spawned) restores context and MUST replay the whole history as session/update notifications, then the client continues \"as if the session was never interrupted\". stdio-subprocess is the only defined transport (\"The client launches the agent as a subprocess\"; Streamable HTTP is a draft RFD). 1:1 client:session by assumption. The exact missing thing has an open RFD — \"Multi-Client Session Attach\" (PR #533, proposal stage since 2026-02: \"There is no mechanism for a second client to 'attach' to a live, in-progress session\"). Correction recorded: ACP versions are integers (current stable 1, which Acp.lean already sends); \"2025-11-25\" is our MCP revision, not ACP.\n\n2. ADAPTER (@agentclientprotocol/claude-agent-acp 0.66.0 — note the zed-industries name is deprecated). Advertises agentCapabilities.loadSession: true AND sessionCapabilities {additionalDirectories, close, delete, fork, list, resume}. session/load = SDK query with {resume: sessionId}, which CONTINUES IN PLACE (appends to the same session file; fork is a separate explicit path). No lock, no attach mode, always spawns its own claude binary; the entire argv surface is --cli/--version/--hide-claude-auth, so --adapter-arg buys nothing here.\n\n3. PRODUCT. \"A session started by running `claude` directly is tied to that terminal\" — not attachable. Live-attach exists only for opt-in surfaces: background sessions under the supervisor daemon (claude --bg; attach/logs/peek; wire protocol undocumented), Remote Control (Anthropic-mediated, no local API), the per-session messaging socket (inject-only, verified live here), channels (launch-time, research preview). agent-deck itself drives sessions by tmux send-keys (extracted from the installed binary).\n\nWHAT IS BUILDABLE AND WORTH IT (proposal, awaiting owner word):\n`agent-cat run --session <id>` via client-side session/load — sequential handoff. Motivating flow: exit the deck pane's claude, run the workflow with --session <that session's id> — it continues inside that transcript with all its context, person questions still arrive on the operator's keyboard — then `claude --resume <id>` afterwards shows the entire workflow in the session history. Implementation: capture agentCapabilities at initialize (refuse --session when loadSession is absent, naming the adapter), Conn.loadSession sending {sessionId, cwd, mcpServers: []} and draining replay updates until the response (accept null or object), CLI flag + a documented two-writers hazard (\"close the interactive owner first\" — continue-in-place has no lock, and agent-cat cannot detect a live writer). Optional follow-up: --fork-session via sessionCapabilities.fork for the context-without-mutation variant. Concurrent observation remains out of scope for ACP; nearest sanctioned paths are the messaging socket (notify-only) and transcript tailing (unsupported, six documented hazards).\n",
     "created_at": "2026-08-16T03:40:37Z"
+  },
+  {
+    "id": 95,
+    "issue_id": "acat-acp-live-session-99n",
+    "author": "johnw",
+    "text": "Re-sequenced by the owner's design-first ruling: the --session handoff now queues behind the round-18 campaign (acat-r18-campaign), not round 17 (whose implementation was folded into that campaign). The plan in the previous comment is unchanged.",
+    "created_at": "2026-08-16T05:20:13Z"
+  }
+]
+#+end_src
+
+* TODO [#C] Engine: agent-deck as a payload transport beside the ACP adapters — send/output into live sessions
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-agent-deck-engine-vv6
+:LABELS:   []
+:ISSUE_TYPE: feature
+:CREATED:  [2026-08-15 Sat 22:16]
+:MODIFIED: [2026-08-15 Sat 22:20]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Owner directive (2026-08-15): add agent-deck as another ENGINE for delivering and working with payloads, alongside claude and codex — and able to talk to claude and codex via agent-deck.
+
+Why this matters beyond parity: it is the answer to the live-session question acat-acp-live-session-99n closed negatively. ACP cannot reach a live session at any layer; agent-deck can — `agent-deck session send <id> <message>` delivers into any running pane (Claude, Codex, Pi, OpenCode) and `session output` polls the last response, sidestepping the single-writer rollout hazard entirely. A deck engine therefore gives `agent-cat run` the interactive-observation mode the owner originally asked for: the workflow's questions land in a live, watched pane, and answers come back from it.
+
+Scope sketch (agent-cat side):
+- A new engine beside the ACP adapters, with a different transport: not stdio ACP but the agent-deck CLI — send a rendered prompt via `agent-deck session send`, poll `session output` for the reply, decode with the existing per-kind Decode. Turn boundaries and timeouts need design (deck output is text, not structured stop reasons); `session approve` maps to the permission axis for codex targets.
+- CLI surface: something like `agent-cat run program.wf --engine deck --session <deck-session>`; person questions can stay on the operator's stdin, or be routed into the same pane — design choice.
+- The primitives to build on, verified in the owner's probe notes: send, output, approve, fork, handoff, parent/child links, -assert-done sentinels, transition notifications, codex-hooks/gemini-hooks.
+- Safety rules to encode, from the owner's architecture note: never ACP-loadSession a thread whose TUI is live (single writer per rollout) — the deck's send is the safe path to a live session; one writer per worktree.
+- Relation to the three-planes doctrine (repo = data plane, deck = control plane, ACP = embedding layer for headless/IDE): the deck engine is agent-cat's control-plane citizenship; the ACP adapters remain the headless path, and the parked --session/loadSession feature (99n) remains the headless-handoff path.
+
+The owner's full architecture note is preserved below for the design round.
+---
+[Three planes: 1. repository as data plane (AGENTS.md + CLAUDE.md symlink, .agents/skills, obr/PLAN.org as vendor-neutral ledger; doctrine: work is handed off via issues and commits, chat channels only signal). 2. agent-deck as control plane (session send/output/approve/fork/handoff, parent-child links, -assert-done, transition notifications, codex-hooks/gemini-hooks; launch through agent-deck launch; name decks after lanes; use send/output/handoff as the inter-vendor mailbox instead of raw ACP). 3. ACP adapters as embedding layer (IDE hosting and headless programmatic control; Claude-hosted ACP sessions appear in Claude's peer registry, codex's do not; Claude↔Claude native, Claude↔codex via deck (live) or ACP session/new-loadSession (headless); never loadSession a live codex thread. Roles: Claude Code orchestrator/reviewer; Codex heads-down implementer in isolated worktree; Pi third opinion; one writer per worktree; checkpoint self-sync (obr sync --import-only + deck messages + labels) in AGENTS.md; Nix hygiene: pin adapter+CLI pairs together via CLAUDE_CODE_EXECUTABLE/CODEX_PATH.]
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-agent-deck-engine-vv6",
+    "depends_on_id": "acat-r18-campaign-2s9",
+    "type": "blocks",
+    "created_at": "2026-08-16T05:20:20.568038Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src
@@ -1474,7 +1542,7 @@ Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 18:34]
-:MODIFIED: [2026-08-15 Sat 22:03]
+:MODIFIED: [2026-08-15 Sat 22:17]
 :CREATED_BY: johnw
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
@@ -1637,6 +1705,13 @@ Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is
     "author": "johnw",
     "text": "Round 17 APPROVED (owner, 2026-08-15), with the three §9 questions resolved:\n\nQ1 TAKEN — trailing bindings refused in workflow blocks, arms and bodies alike (primings exempt: a priming has no final position).\nQ2 REJECTED — the owner's principle is better than the proposal's: both `stop` and assertions effectively return a unit type, and that is the only requirement for a do-block with no explicit binding. Any Unit-valued statement may end a block; `known here:` included; DslSmoke:511 keeps its \"ok\"; §1.5 updated.\nQ3 NO COURTESY CLAUSE — there are no agent-cat scripts in the wild (owner's statement), so `answer` is deleted cold, leaves stmtWords entirely (the word becomes an ordinary name again), and every in-repo .wf migrates in the same commit. D20 replaced accordingly.\n\nGRAMMAR.md carries the approval note; expr-design.md is the design of record for the round. Implementation begins now, in the order: lexer (bang punct + fence-close drift), params/answer/final rules, the lifting pass, the checker sweep, examples, battery, docs, full suite. The ACP --session handoff (acat-acp-live-session-99n) is queued behind it by the owner's word.\n",
     "created_at": "2026-08-16T05:03:20Z"
+  },
+  {
+    "id": 94,
+    "issue_id": "acat-k28",
+    "author": "johnw",
+    "text": "Round 17 implementation HALTED at the owner's direction, three lexer edits reverted (recorded in expr-design.md; they return with the campaign). The owner expanded the round mid-implementation (verbatim intents):\n\n1. Kleisli composition: `y <- f x; z <- g y; ret z` ≡ `f x >>> g` ≡ `g <<< f x`.\n2. Function composition: `f (g x)` ≡ `(f . g) x` ≡ `f . g $ x` — \"follow Haskell's syntax for all of these constructions.\"\n3. Anonymous lambdas: `(\\x -> g x) y` ≡ `g y` — \"follow Haskell's conventions for functions, currying, lambdas, functions as values, function types, receiving functions as arguments, returning functions, etc. The whole deal.\"\n4. \"We're basically creating a simplified version of Haskell here, optimized around writing textually-oriented agentic workflows with a very limited typing discipline and set of keywords.\"\n\nThree rulings taken through the question interface:\n- STATIC functions: a simply-typed lambda-calculus layer over the four kinds that fully normalizes at elaboration — function types never exist at run time; every program still elaborates to today's finite Plan; recursion stays refused, so normalization terminates. Runtime closures (= Plan.dyn) rejected.\n- DESIGN EVERYTHING FIRST: one coherent design covering the round-17 core (do-notation result rule, answer deletion, default-text params, trailing-bind refusal, fence fix — all decisions of expr-design.md stand as inputs) plus the whole calculus, attacked and approved, then one implementation campaign. The bang's fate is decided inside this design.\n- Haskell's dot rule: `lib.f` (no spaces) qualifies, `f . g` (spaces) composes.\n\nRound 18 design workflow launching: draft + three adversarial passes (parsing/corners, theorems/architecture, type-system/normalization-termination). The architectural north star the attackers must test: normalize parser-side into today's unchanged Raw, so every theorem survives a third time — with the known hard fork being higher-order parameters (a body with a function-typed parameter cannot be checked once into the table; it becomes a template elaborated per call site, or HOF params are restricted).\n\nAlso filed separately at the owner's direction: acat-agent-deck-engine-vv6 (agent-deck as a payload engine — the live-session observation path ACP cannot provide).\n",
+    "created_at": "2026-08-16T05:17:13Z"
   }
 ]
 #+end_src
@@ -2196,6 +2271,49 @@ choiceT is binary; verdict enums re-encode as nested Sums. A caseT over a finite
 :END:
 
 From the full-treatment verification (commit d845ba0). MEDIUM: (1) Denote.lean:383 run_panel_perm requires CommMonoid (El c) which nothing in the Code universe satisfies (Verdict's FreeMonoid is noncommutative) — restate the panel scheduling licence at the Approved projection or at Multiset of events, or add a commutative code; (2) Cost.lean:899 no_finite_bill_set_at_dyn docstring + summary tables overclaim rung-level universality (the theorem is one witness, correct; prose must say so). LOW: duplicate propositions no_static_bill_at_dyn/at_branch; run_terminates is a Unit-subsingleton triviality (keep, but label); Inhabited Verdict defaults unrecorded reviews to approve in worldOf/ωDefault — dangerous default for certificates, consider requiring coverage instead; World.lean docstrings reference exec/certify before they exist; Plan.mapP/zipWith/pairP/seq should be Functor/Applicative-fragment instances per completion test 4 (mapP_id/comp ARE the LawfulFunctor laws). REPRESENTATION CHANGE (analysis stage recommendation, edits Plan): split ask into term-level Shape + answer-dependent prompt expr — makes ShapeStatic structural, C2 loses its hypothesis, shape becomes projection not predicate (matches attack-adequacy §7). Do this BEFORE the runtime freezes the node shape.
+
+* TODO [#B] Round 18 campaign: implement the do-core + static function calculus once the page is approved
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-r18-campaign-2s9
+:LABELS:   []
+:ISSUE_TYPE: epic
+:CREATED:  [2026-08-15 Sat 22:20]
+:MODIFIED: [2026-08-15 Sat 22:20]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+GATE: owner approval of doc/research/dsl-redesign/calculus-design.md (being synthesized from workflow wf_ad728f9e-272's draft + three attack passes; supersedes-in-part expr-design.md whose D1-D21 are approved inputs).
+
+The full checklist, so nothing lives only in a session:
+1. Lexer: '!' if the bang survives the design; fence-close drift ()/-- (D19); the whitespace-dot rule (lib.f qualifies, f . g composes); '\' and operator tokens (. $ >>> <<<) outside strings; $label vs $-operator lexical split.
+2. Parser: expression grammar with Haskell precedences (application > . (infixr 9) > >>>/<<< (infixr 1) > $ (infixr 0)); lambdas; normalization pass (STLC, fuel-bounded, refusal with count) landing in unchanged Raw if the north star holds; do-core rules: answer deleted cold (no stmtWords entry, no migration clause), last-statement-is-result, receipt bodies do not lift, trailing-bind refusals (primings exempt), default-text params.
+3. Checker: isTemp/showName sweep at the seven quoting sites; checkFn terminal reworded do-style; bodyBindKind hint; knownHere temp filter; whatever the HOF fork decision requires (template table vs restriction).
+4. Examples: library.wf + harden-imported.wf as the every-feature pair incl. calculus idioms; ill-typed.wf appended act; harden.wf byte-identical (kernel pin — re-verify).
+5. Battery: fixture migration drop-binder-in-place (fnsPre 11 lines, libOk 6, chain 5n-5 geometry); probe-first cases for every new refusal + changed diagnosis; semantic pins (post-order trace order, bang-in-arm scope if bang survives, composition/Kleisli equivalences as trace equalities, two-bangs-one-answer vs independent draw); coverage_audit green.
+6. Docs: GRAMMAR.md implemented note; dsl-guide.html (answer removed, do-reading, calculus section, default params, the (verdict) quirk).
+7. Full suite: ONE lake build at a time; dsl_smoke/cli_smoke/mcp_smoke/audit; flagship parse pin unmoved; commit with trailers; obr close-out per AGENTS.md session protocol.
+
+Prior session context: three round-17 lexer edits were made and reverted (recorded in expr-design.md and on acat-k28) pending this campaign.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-r18-campaign-2s9",
+    "depends_on_id": "acat-k28",
+    "type": "blocks",
+    "created_at": "2026-08-16T05:20:19.938320Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
 
 * DONE [#B] Star repair: decouple star from commutativity so matrices can carry it
 :PROPERTIES:
