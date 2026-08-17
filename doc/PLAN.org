@@ -1935,15 +1935,17 @@ static <= bounded 0 in the order, but scale n static = bounded n while scale n (
 ]
 #+end_src
 
-* TODO [#B] Connection research: extractor vs FFI vs subprocess vs bisimulation — how the Haskell program meets the Lean proofs
+* DONE [#B] Connection research: extractor vs FFI vs subprocess vs bisimulation — how the Haskell program meets the Lean proofs
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-lean-haskell-connection-lhi
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-16 Sun 18:02]
-:MODIFIED: [2026-08-16 Sun 19:08]
+:MODIFIED: [2026-08-16 Sun 19:18]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-16 Sun 19:18]
+:CLOSE_REASON: Research complete: connection.md is the corrected recommendation of record (reimplement + conformance over a Lean oracle process, boundary inverted at the typed builder). Phase 2 (the harness) gates on the owner.
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
