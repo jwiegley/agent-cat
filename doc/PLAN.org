@@ -1629,6 +1629,36 @@ Owner question (2026-08-16): the round-17/18 surface converges on Haskell. What 
 
 Found by the connection-research attack pass (acat-lean-haskell-connection-lhi): heardMatchesReplay is decide (r.trace = rep.transcript) where r.trace = r.heard.map (.event) — deliver appends one Heard per SURFACED question and Dlg.resume walks past questions the table already answers, so arrivals are memo-deduped — while rep.transcript = Plan.trace (worldOf table) p Env.nil replays EVERY event including repeats. On a run with any repeated question (billMemo < billFresh), the check is an assertion of falsehood. Repair options: compare heard against the dedup of the replay (respecting Lean dedup keeping the LAST occurrence), or record the intended invariant differently. Add an McpSmoke case with a repeated question to pin whichever is chosen.
 
+* DONE [#B] Runnable example: corpus-pinned harden in Haskell, IO runner, agent-deck adapter, live run
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-hs-runnable-ugr
+:LABELS:   []
+:ISSUE_TYPE: feature
+:CREATED:  [2026-08-17 Mon 10:23]
+:MODIFIED: [2026-08-17 Mon 10:23]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-17 Mon 10:23]
+:CLOSE_REASON: done
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 112,
+    "issue_id": "acat-hs-runnable-ugr",
+    "author": "johnw",
+    "text": "The runnable layer, owner-requested 2026-08-17 (\"do I have a fully worked\nexample, and how do I run it against a working agent-deck session?\").\n\nLean side (agent-cat 014ec2e): corpus-gen now walks example/*.wf - the\nflagship freezes at level branch / size 36 / askNodes 19; 128 entries.\n\nHaskell side (agentic-hs 5de20cb): Example.Harden (harden+hello rebuilt in\nthe Builder, one compiled value shared by tier1 and the CLI - tier1 21/21\npins the flagship's printed Raw and whole reply); Agentic.Exec (Dlg.execM\nas a runnable fold, memo key = billMemo's EventKey, Exec.attempt's retry\nand abandonment wording byte for byte); Agentic.AgentDeck (send / poll\nshow --json / output with a staleness guard, answerSpec appended verbatim,\nfive named transport failures); agentic-run plan|cost|run\n[--scripted|--session]; test/stub-deck.sh + ci/deck.sh (7 transport\nscenarios). Bills agree four independent ways (corpus, tier1, scripted IO,\nstub transport).\n\nLIVE RUN (exit 0): agentic-run run harden --session harden-world against a\nfresh scratch Claude session (~/src/tries/2026-08-17-harden-world). The\nrun took the flagship's REFUSAL path, honestly: the live model declined to\nfabricate a diff for an empty directory, all three reviewers approved that\ntext, the owner-gate flag answered no, and the apply act was never put -\nbillFresh 6 / billMemo 6, the exact bill_refuse_demo shape. The semantics\nheld under an uncooperative world: nothing fabricated, the gate gated.\n",
+    "created_at": "2026-08-17T17:23:24Z"
+  }
+]
+#+end_src
+
 * DONE [#B] Haskell weeks 2-5: typed Plan core, builder parity, generators, live Tier 1
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
