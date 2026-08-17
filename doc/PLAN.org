@@ -882,7 +882,7 @@ Scope once research lands: at minimum, client-side session/load (capability-gate
 :LABELS:   []
 :ISSUE_TYPE: feature
 :CREATED:  [2026-08-15 Sat 22:16]
-:MODIFIED: [2026-08-15 Sat 22:20]
+:MODIFIED: [2026-08-16 Sun 18:02]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -908,6 +908,15 @@ The owner's full architecture note is preserved below for the design round.
 
 #+begin_src json
 [
+  {
+    "issue_id": "acat-agent-deck-engine-vv6",
+    "depends_on_id": "acat-acp-live-session-99n",
+    "type": "blocks",
+    "created_at": "2026-08-17T01:02:49.746120Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  },
   {
     "issue_id": "acat-agent-deck-engine-vv6",
     "depends_on_id": "acat-r18-campaign-2s9",
@@ -1453,15 +1462,42 @@ Owner request: the artifact §VII example as REAL compiling Lean — Op signatur
 ]
 #+end_src
 
-* TODO [#B] Strategic: continue the .wf DSL, or make Haskell the surface (agent-functor-style QQ + typed workflow library + verified evaluator)?
+* TODO [#B] The Haskell program: typed workflow library + evaluator/runner, Lean retained as the proven specification
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-haskell-program-xgw
+:LABELS:   []
+:ISSUE_TYPE: epic
+:CREATED:  [2026-08-16 Sun 18:02]
+:MODIFIED: [2026-08-16 Sun 18:02]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Program of record per the owner's resolution of acat-haskell-surface-ygy (2026-08-16). Haskell is the production implementation: the typed workflow library of haskell-question.md Part 1 (the attacked design — first-order Tmpl prompts via quasi-quoter, variable tokens not answers, Codensity-bindable helpers, Discardable statement discipline, Checked-consuming runPlan, positional verdict arms, lazy-stream budgets turning recursive builders into refusals) as the authoring surface, plus the evaluator/runner (backends, content-addressed leaf store with fork/resume, typed backend/model pairing, preflight — the §6.3 invariants: acts never cacheable, hits are Cached never Done, keys salted with backend+model, verify runs checks itself vs agentVerify trusting a claim). The Lean formalization is retained in full as the mathematical anchor (meaning = Ω → (A × Trace), proven); no .wf in production (surface frozen at round 16; r17/r18 pages remain design records with reopening conditions).
+
+Phases:
+1. CONNECTION RESEARCH (first gate): the four mechanisms — bespoke Lean→Haskell extractor for this first-order fragment; FFI-linking the Lean-compiled C core; Lean as a subprocess semantic engine; reimplementation + bisimulation — 2026 tooling reality, real costs, recommendation to the owner.
+2. MOCK AGENT + BISIMULATION HARNESS (built regardless of 1): a shared scripted world both sides operate against; property tests (generated programs and worlds) comparing traces and bills between Lean's denote/trace and the Haskell evaluator; the harness is the permanent conformance boundary.
+3. THE LIBRARY per Part 1, amended by phase 1's outcome (if extraction/FFI wins, the semantic core is generated/linked rather than written).
+4. THE RUNNER (the shared floor + the store).
+5. The serialized checked-term format for the MCP/agent-authoring surface (the prose surface stops being .wf; the replacement is the serialized first-order format checked by checkPlan — priced in the report).
+
+The Lean-side queue (99n --session, then vv6 deck engine) proceeds against the existing agent-cat CLI as spec/test runner; their production equivalents land in phase 4.
+
+* DONE [#B] Strategic: continue the .wf DSL, or make Haskell the surface (agent-functor-style QQ + typed workflow library + verified evaluator)?
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-haskell-surface-ygy
 :LABELS:   []
 :ISSUE_TYPE: question
 :CREATED:  [2026-08-16 Sun 10:38]
-:MODIFIED: [2026-08-16 Sun 11:39]
+:MODIFIED: [2026-08-16 Sun 18:02]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-16 Sun 18:02]
+:CLOSE_REASON: Answered by the owner: option (e) — Haskell operational implementation + retained Lean formalization + bisimulation/extraction connection; see final comment
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -1486,6 +1522,13 @@ Owner question (2026-08-16): the round-17/18 surface converges on Haskell. What 
     "author": "johnw",
     "text": "Report of record landed: doc/research/dsl-redesign/haskell-question.md (76aa962; pre-attack draft banner-superseded). Four options priced with methods disclosed; recommendation (d): ship the do-core (~2 days), descope the calculus, spend the returned ~8-9 days + the ~5-6-day shared floor on the runner (content-addressed leaf store, fork/resume, typed backend pairing, preflight), hand-write the three iteration workflows against a named trigger (unknown-n iteration is the one capability .wf cannot express at any price), and if the trigger fires build the .wf PRINTER (2-3 days + pins), not the typed builder (26-32 days, redundant with the Lean checker per §5.2). Dissent stated fully (run round 18 now — the only attacked estimate — revisit in six months); the narrow real difference: whether the calculus is worth 8-9 days now, a fact about the owner's next two months. Census corrected with commands (26,155 Lean lines / 867 theorems — the draft under-counted the (b) write-off in its own favour). Nine §6.3 invariants recorded under every option; the served-by checker gap filed as acat-served-by-check-gap-i5d. Owner decides; the r18 campaign stays gated.",
     "created_at": "2026-08-16T18:39:30Z"
+  },
+  {
+    "id": 103,
+    "issue_id": "acat-haskell-surface-ygy",
+    "author": "johnw",
+    "text": "RESOLVED by the owner (2026-08-16), via the question interface, with a fifth option of their own:\n\n\"I want a pure Haskell implementation of the operational workflow terms and their evaluator/runner, but I want to retain the full Lean formalization, along with a bisimulation of that Lean implementation against a mock agent that the Haskell can also operate against; ensure via property tests that the Haskell implementation truly does implement the Lean representation which was proven to map correctly into the mathematical object. This way the Lean and the Haskell are connected — albeit through testing — unless you can find a way to connect them more directly, for example by extraction from Lean to Haskell instead of re-implementing directly in Haskell.\" (verbatim intent)\n\nThree shaping decisions, also the owner's:\n1. BOUNDARY: Haskell builds terms natively — the typed library (haskell-question.md Part 1, the attacked design) is the authoring surface; no .wf in production. The .wf surface and the Lean front end become specification-and-test artifacts.\n2. CONNECTION: research pass first over the four mechanisms (bespoke Lean->Haskell extractor for this first-order fragment; FFI-linking the Lean-compiled core; Lean as a subprocess semantic engine; reimplementation + bisimulation), then choose. The bisimulation harness is built regardless — even extracted/FFI'd code wants boundary conformance tests.\n3. SURFACE: frozen as-is at round 16 (`answer` and all). Round 17's do-core and round 18's calculus remain approved-and-designed pages, unimplemented; their reopening conditions stand.\n\nAlso decided in the same session: the served-by checker gap (acat-served-by-check-gap-i5d) is fixed NOW; the queued Lean-side features run --session (99n) first, then the deck engine (vv6), noting both have natural Haskell-runner equivalents under the new program.\n\nProgram epic: acat-haskell-program (to be created). This issue closes as answered.\n",
+    "created_at": "2026-08-17T01:02:00Z"
   }
 ]
 #+end_src
@@ -1572,15 +1615,17 @@ From acat-ruz: Mat.CostBounded and starTrunc_le_star are Cost-only for lack of i
 
 Review: highest-consequence gap. pureT admits copy, so parT (prim q) (prim q) is ambiguous between one consultation reused and two spent — a distinction Env.share_ne_dup proves is extensional. Must be settled before the meaning fold picks a convention silently. Design §6a.
 
-* DOING [#B] Redesign the textual DSL surface: review findings + new grammar reflecting the Lean expression's clarity
+* DONE [#B] Redesign the textual DSL surface: review findings + new grammar reflecting the Lean expression's clarity
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-k28
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 18:34]
-:MODIFIED: [2026-08-16 Sun 11:39]
+:MODIFIED: [2026-08-16 Sun 18:02]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-16 Sun 18:02]
+:CLOSE_REASON: Design work complete through round 18 (pages of record: GRAMMAR.md + expr-design.md + calculus-design.md); implementation frozen by the owner in favor of the Haskell program — see acat-haskell-surface-ygy's resolution
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
 :END:
@@ -1850,6 +1895,22 @@ static <= bounded 0 in the order, but scale n static = bounded n while scale n (
   }
 ]
 #+end_src
+
+* TODO [#B] Connection research: extractor vs FFI vs subprocess vs bisimulation — how the Haskell program meets the Lean proofs
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-lean-haskell-connection-lhi
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-16 Sun 18:02]
+:MODIFIED: [2026-08-16 Sun 18:02]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Phase 1 gate of acat-haskell-program-xgw. Research the four mechanisms with 2026 tooling reality and real costs: (i) a bespoke Lean metaprogram emitting Haskell for exactly this codebase's first-order core (Plan/denote/Dlg/decode are small structural recursions over inductives — feasible? auditable? maintenance cost as the core moves?); (ii) FFI: link the Lean-compiled C core into the Haskell runner via Lean's C API (the verified artifact itself executes; runtime init, boxed-object marshalling, build-system reality under Nix); (iii) Lean as a subprocess semantic engine the Haskell shell steps per question (zero reimplementation; latency trivial next to an LLM call; process-lifecycle and serialization costs); (iv) reimplementation + bisimulation property tests (the baseline — two implementations forever, drift caught only as often as the generators are good). Deliverable: recommendation to the owner with honest costs; the bisimulation harness (phase 2) is built regardless of the winner.
 
 * TODO [#D] Rendering homomorphism out of the term algebra
 :PROPERTIES:
@@ -2344,15 +2405,17 @@ choiceT is binary; verdict enums re-encode as nested Sums. A caseT over a finite
 
 From the full-treatment verification (commit d845ba0). MEDIUM: (1) Denote.lean:383 run_panel_perm requires CommMonoid (El c) which nothing in the Code universe satisfies (Verdict's FreeMonoid is noncommutative) — restate the panel scheduling licence at the Approved projection or at Multiset of events, or add a commutative code; (2) Cost.lean:899 no_finite_bill_set_at_dyn docstring + summary tables overclaim rung-level universality (the theorem is one witness, correct; prose must say so). LOW: duplicate propositions no_static_bill_at_dyn/at_branch; run_terminates is a Unit-subsingleton triviality (keep, but label); Inhabited Verdict defaults unrecorded reviews to approve in worldOf/ωDefault — dangerous default for certificates, consider requiring coverage instead; World.lean docstrings reference exec/certify before they exist; Plan.mapP/zipWith/pairP/seq should be Functor/Applicative-fragment instances per completion test 4 (mapP_id/comp ARE the LawfulFunctor laws). REPRESENTATION CHANGE (analysis stage recommendation, edits Plan): split ask into term-level Shape + answer-dependent prompt expr — makes ShapeStatic structural, C2 loses its hypothesis, shape becomes projection not predicate (matches attack-adequacy §7). Do this BEFORE the runtime freezes the node shape.
 
-* TODO [#B] Round 18 campaign: implement the do-core + static function calculus once the page is approved
+* DONE [#B] Round 18 campaign: implement the do-core + static function calculus once the page is approved
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-r18-campaign-2s9
 :LABELS:   []
 :ISSUE_TYPE: epic
 :CREATED:  [2026-08-15 Sat 22:20]
-:MODIFIED: [2026-08-15 Sat 22:20]
+:MODIFIED: [2026-08-16 Sun 18:02]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-16 Sun 18:02]
+:CLOSE_REASON: Owner froze the .wf surface as-is (2026-08-16): the campaign will not run. expr-design.md and calculus-design.md remain approved design records with reopening conditions; the abstraction need is answered by the Haskell program (acat-haskell-program-xgw)
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
