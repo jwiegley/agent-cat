@@ -2544,7 +2544,7 @@ Until then: the 'in module' prefix is the attribution, and the CLI's caret is be
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-17 Mon 12:56]
-:MODIFIED: [2026-08-17 Mon 14:10]
+:MODIFIED: [2026-08-17 Mon 16:21]
 :CREATED_BY: johnw
 :FINISHED: [2026-08-17 Mon 14:10]
 :CLOSE_REASON: done
@@ -2565,6 +2565,13 @@ Owner directive 2026-08-17: think about profunctors improving the design, term l
     "author": "johnw",
     "text": "Research complete, committed. Document of record: doc/research/profunctor-design.md (~700 lines, 4 working papers). Verdict: representability + initial-algebra fold + ordered-monoid interpretations beat the profunctor tower on this codebase. P1-P8 adopt-now (compiled probes, additive, zero corpus impact); P9-P12 gated (spec regeneration / measured diffs); P13-P16 refused (tower, optics-of-revising, Flow re-indexing = two-core hazard, final-tagless surface) with reopen conditions. Implementation of P1-P8 awaits owner approval; note P7 (value-carrying handle) must sequence after the pure-surface rework to avoid colliding in Builder.hs/Workflow.hs.",
     "created_at": "2026-08-17T21:10:21Z"
+  },
+  {
+    "id": 116,
+    "issue_id": "acat-profunctor-design-l47",
+    "author": "johnw",
+    "text": "P1-P8 implemented and committed (841e816). Lean: new Agentic/Core/Alg.lean + additive touches across Plan/Denote/Cost/Level/Morphism/HardenPatch — representability layer landed and spent (Denotes hypotheses replaced; Plan.lean now mentions Denotes zero times), PlanAlg fold with level/denote-as-fold theorems, factorization lemmas, Dlg monoid with panel = List.prod, syntactic functor laws, six docstrings, conformance three-surfaces record. Axioms clean (propext/Quot.sound; Classical.choice only where inherited from level's baseline). Haskell P7: one name-resolution mechanism instead of two (WF.hs's nameless twin discovered and unified into Builder). Bonus: coverage_audit.py had been red since the DslCases split - repaired, 115/115 audited sites exercised. Every gate green on both sides; corpus shasum unchanged.",
+    "created_at": "2026-08-17T23:21:35Z"
   }
 ]
 #+end_src
