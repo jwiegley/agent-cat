@@ -214,7 +214,30 @@ def main : IO Unit := do
     "served by on a tool hand-built"
   count := count + 1
 
-  -- 5. The string layer (D12): the frozen vector table.
+  -- 5. The example programs, walked and frozen (connection.md §3.4c: the
+  -- curated cases are "not optional", and the import walk happens HERE, on
+  -- the Lean side — the boundary is RawProgram-in, so the importing program
+  -- is frozen as the single walked RawProgram the Haskell side rebuilds).
+  -- `ill-typed.wf` is deliberately absent: it refuses at the typing judgment
+  -- ("other"), which test/CliSmoke.lean already pins three ways.
+  let librarySrc ← IO.FS.readFile "example/library.wf"
+  let examples : List (String × String × List (String × String)) :=
+    [ ("the flagship, single-file", "example/harden.wf", [])
+    , ("hello", "example/hello.wf", [])
+    , ("the flagship, written against a library", "example/harden-imported.wf",
+        [("library", librarySrc)])
+    , ("a library runs alone: its priming, then nothing", "example/library.wf", []) ]
+  i := 0
+  for (name, path, mods) in examples do
+    let src ← IO.FS.readFile path
+    match Dsl.parseProgramWith [] mods src with
+    | .ok prog =>
+      writeEntry dir i "example" (programEntry name prog [echoW]) name
+      count := count + 1
+    | .error e => throw <| IO.userError s!"example corpus source refused: {path}: {e.render}"
+    i := i + 1
+
+  -- 6. The string layer (D12): the frozen vector table.
   let strings : List (String × String × Option String × String) :=
     [ ("norm ascii mixed case", "norm", none, "  HeLLo World  ")
     , ("norm turkish dotted capital", "norm", none, "İstanbul")
