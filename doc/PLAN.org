@@ -1942,7 +1942,7 @@ static <= bounded 0 in the order, but scale n static = bounded n while scale n (
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-16 Sun 18:02]
-:MODIFIED: [2026-08-16 Sun 18:02]
+:MODIFIED: [2026-08-16 Sun 19:08]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -1950,6 +1950,20 @@ static <= bounded 0 in the order, but scale n static = bounded n while scale n (
 :END:
 
 Phase 1 gate of acat-haskell-program-xgw. Research the four mechanisms with 2026 tooling reality and real costs: (i) a bespoke Lean metaprogram emitting Haskell for exactly this codebase's first-order core (Plan/denote/Dlg/decode are small structural recursions over inductives — feasible? auditable? maintenance cost as the core moves?); (ii) FFI: link the Lean-compiled C core into the Haskell runner via Lean's C API (the verified artifact itself executes; runtime init, boxed-object marshalling, build-system reality under Nix); (iii) Lean as a subprocess semantic engine the Haskell shell steps per question (zero reimplementation; latency trivial next to an LLM call; process-lifecycle and serialization costs); (iv) reimplementation + bisimulation property tests (the baseline — two implementations forever, drift caught only as often as the generators are good). Deliverable: recommendation to the owner with honest costs; the bisimulation harness (phase 2) is built regardless of the winner.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 105,
+    "issue_id": "acat-lean-haskell-connection-lhi",
+    "author": "johnw",
+    "text": "Research complete, attacked (19 findings, 2 fatal), corrected, and pushed: doc/research/dsl-redesign/connection.md. Verdict: D1 reimplement; D2 no extraction (nothing exists — lean4export is proof-export, Peregrine/lambda-box has no Haskell backend and an unverified frontend); D3 no FFI (dead branch, not a deferred upgrade — heap ownership and unstable ABI); D4 the Lean side becomes a conformance-oracle lean_exe (NOT the MCP server, which steps runs but does not emit the observation record); D5 the boundary inverts — the typed builder emits serialized Raw for the oracle and elaborates natively, so the Haskell owns neither parser (D10) nor checker (D11); D6 two CI tiers (frozen vectors / live differential); D7 refusal parity by oracle-assigned code over four guards; D9 the third tier is coverage (certify is rfl-true at Plan [] Unit); D12 string-layer oracle requests (the top-ranked divergence risk); D13 timeout is an observation, not a failure. Dissents recorded with reopen conditions (split-the-boundary; curated corpus). Week one: the oracle exe + Tier-0 vectors + the Raw-level comparands only. Two repo bugs discovered and filed: acat-heard-matches-replay-memo-v55, acat-dup-function-check-gap-kys. Recommendation awaits the owner; phase 2 (the harness) starts on their word.",
+    "created_at": "2026-08-17T02:08:37Z"
+  }
+]
+#+end_src
 
 * TODO [#D] Rendering homomorphism out of the term algebra
 :PROPERTIES:
