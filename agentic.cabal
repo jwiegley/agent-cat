@@ -1,0 +1,46 @@
+cabal-version:   3.0
+name:            agentic
+version:         0.1.0.0
+synopsis:        A Haskell port of agent-cat's raw syntax, guards and string layer
+description:
+  Week one of the port of the Lean 4 formalization at agent-cat: the @Raw@
+  AST and its JSON codec, the five term-level guards, the two ask counts, and
+  the string layer. Conformance is decided by the frozen corpus at
+  @agent-cat\/test\/corpus@, replayed by the @tier0@ executable.
+
+build-type:      Simple
+license:         MIT
+author:          John Wiegley
+maintainer:      jwiegley@positron.ai
+
+common settings
+  ghc-options:      -Wall
+  default-language: Haskell2010
+
+  -- The full agreed dependency list, on both targets. Four implementers are
+  -- writing the modules independently; a shared list means no one's module
+  -- fails to build over a missing `build-depends` entry someone else owns.
+  build-depends:
+    , aeson
+    , base
+    , bytestring
+    , containers
+    , directory
+    , filepath
+    , scientific
+    , text
+    , vector
+
+library
+  import:          settings
+  hs-source-dirs:  src
+  exposed-modules:
+    Agentic.Guards
+    Agentic.Raw
+    Agentic.Text
+
+executable tier0
+  import:          settings
+  hs-source-dirs:  tier0
+  main-is:         Main.hs
+  build-depends:   agentic
