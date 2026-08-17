@@ -40,6 +40,8 @@ module Cases (cases) where
 
 import Data.List.NonEmpty (NonEmpty (..))
 
+import Example.Harden (hardenProgram, helloProgram)
+
 import Agentic.Builder
   ( Args (ANil, (:>)),
     Code (..),
@@ -118,7 +120,13 @@ cases =
       semantic004
     ),
     ("semantic-005-a-declined-verdict-and-a-prompteq-flag.json", semantic005),
-    ("semantic-006-a-constant-text-world.json", semantic006)
+    ("semantic-006-a-constant-text-world.json", semantic006),
+    -- The last two are the walked examples, and they are the only cases here
+    -- whose program is not written in this module: they are shared with the
+    -- @agentic-run@ executable, which plans, prices and runs them. See the note
+    -- at case 20.
+    ("example-000-the-flagship-single-file.json", hardenProgram),
+    ("example-001-hello.json", helloProgram)
   ]
 
 -- ---------------------------------------------------------------------------
@@ -735,3 +743,50 @@ semantic005 =
 -- longer trace even though every answer in it would be identical.
 semantic006 :: Program
 semantic006 = semantic000
+
+-- ---------------------------------------------------------------------------
+-- 20 and 21. example-000 and example-001 — the walked examples
+-- ---------------------------------------------------------------------------
+
+-- $examples
+--
+-- 'Example.Harden.hardenProgram' and 'Example.Harden.helloProgram' are the
+-- only cases in this list whose program is written somewhere else, and the
+-- exception is deliberate: they are the two programs the @agentic-run@
+-- executable plans, prices and /runs/, so they live in a module both
+-- executables import. Pinning them here is what makes running them
+-- trustworthy — the value the CLI hands to the interpreter is the same value
+-- the oracle has already agreed with, printed Raw and whole reply, rather than
+-- a second transcription of the same @.wf@ file that could drift from it.
+--
+-- They are worth pinning on their own account too. @harden@ is the corpus's
+-- only program that:
+--
+--   * __reviews with a panel__. Every other @revising@ here — 'semantic001',
+--     'vector002', 'battery121', 'battery120', 'battery090' — reviews with a
+--     single question, so the panel's right fold from the unit of the verdict
+--     monoid has never before been under a loop's @caseB@, replicated once per
+--     round of the unroll;
+--
+--   * __reuses one name for the carrier and the settled binder__. Both are
+--     @patch@, which is legal because they are binders in disjoint scopes and
+--     'Agentic.Builder.revisingCase' checks each for freshness against the
+--     enclosing scope alone. Nothing else in the corpus exercises that;
+--
+--   * __holes a name bound outside the loop from inside both clauses__.
+--     @{guide}@ is read by two of the three panel members and by the
+--     amendment, so every round re-reads it through the accumulated
+--     substitutions. A graft that re-asked instead of re-reading would still
+--     produce a well-typed term and would show up here as a longer trace and a
+--     larger fresh bill.
+--
+-- @hello@ is the opposite end, and it is here for the runner rather than for
+-- the folds: @pipeline@, size 4, one path, @minFold == maxFold == 3@ and both
+-- bills 3 — a program whose whole cost the analysis knows exactly. It shares
+-- that shape with 'semantic000' and 'battery137', and adds nothing to the
+-- lattice; what it adds is a subject the CLI can run in three events, so a
+-- scripted or live run that produces any other number is wrong without anyone
+-- having to read a bound.
+
+-- (The two programs themselves are in "Example.Harden"; the list at the head
+-- of this module names them directly.)

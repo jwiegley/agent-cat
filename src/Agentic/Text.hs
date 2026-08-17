@@ -21,6 +21,15 @@
 module Agentic.Text
   ( Verdict (..)
   , stringOp
+
+    -- * The decode/say surface, exported for the IO runner and the adapter
+    -- ("Agentic.Exec", "Agentic.AgentDeck"): the trusted string base exists
+    -- once, here, and consumers import it rather than copying it.
+  , norm
+  , decodeFlag
+  , decodeVerdict
+  , sayFlag
+  , sayVerdict
   ) where
 
 import Data.Aeson (Value, object, toJSON, (.=))

@@ -22,6 +22,14 @@ description:
   subprocess (@Agentic.Oracle@), and the @bisim@ executable, which draws
   programs, worlds and string-layer inputs and holds each one against a live
   @conformance-oracle@ rather than against a frozen file.
+  .
+  Week five makes the library runnable: an @IO@ interpreter with the Lean
+  runner's memo discipline and its decode\/re-ask loop (@Agentic.Exec@), an
+  adapter that puts every question — model, tool and person alike — to one live
+  @agent-deck@ session (@Agentic.AgentDeck@), the flagship and the smallest
+  program rebuilt in the builder as a shared internal library (@Example.Harden@,
+  the @examples@ library), and the @agentic-run@ executable, which plans, prices
+  and runs them.
 
 build-type:      Simple
 license:         MIT
@@ -58,7 +66,9 @@ library
   import:          settings
   hs-source-dirs:  src
   exposed-modules:
+    Agentic.AgentDeck
     Agentic.Builder
+    Agentic.Exec
     Agentic.Gen
     Agentic.Guards
     Agentic.Observe
@@ -67,6 +77,25 @@ library
     Agentic.Raw
     Agentic.Text
     Agentic.World
+
+-- The worked examples, written in the production surface: the flagship of
+-- `agent-cat/example/harden.wf` and the smallest program of `hello.wf`.
+--
+-- An internal library rather than a directory shared by two `other-modules`
+-- lists, because two components are meant to see the same `Example.Harden` and
+-- not two separately compiled copies of it: `tier1` pins the rebuilt flagship
+-- against the frozen corpus entry, and `agentic-run` runs the very program
+-- that was pinned. Compiling it twice would let the two drift under a
+-- conditional or a flag and read as agreement anyway.
+--
+-- The module is `Example.Harden` and cabal resolves a module name to a path, so
+-- the file is `example/Example/Harden.hs` — not `example/Harden.hs`, which
+-- builds here on a case-insensitive filesystem and on no Linux at all.
+library examples
+  import:          settings
+  hs-source-dirs:  example
+  exposed-modules: Example.Harden
+  build-depends:   agentic
 
 executable tier0
   import:          settings
@@ -79,7 +108,25 @@ executable tier1
   hs-source-dirs:  tier1
   main-is:         Main.hs
   other-modules:   Cases
-  build-depends:   agentic
+  build-depends:
+    , agentic
+    , agentic:examples
+
+-- The runnable surface: plan an example, price it, or run it — against the
+-- scripted transport or against a live agent-deck session.
+executable agentic-run
+  import:          settings
+  hs-source-dirs:  run
+  main-is:         Main.hs
+  build-depends:
+    , agentic
+    , agentic:examples
+
+  -- Same reason `bisim` is threaded, one layer out. `Agentic.AgentDeck` bounds
+  -- every turn with a wall clock and drains a subprocess's stderr on a second
+  -- thread; a wedged session must produce a named failure rather than a hung
+  -- run.
+  ghc-options:     -threaded
 
 executable bisim
   import:          settings
@@ -87,9 +134,10 @@ executable bisim
   main-is:         Main.hs
   build-depends:   agentic
 
-  -- The one place a flag departs from tier0 and tier1. `Agentic.Oracle` guards
-  -- every read from the subprocess with `System.Timeout.timeout`, and a
-  -- wedged oracle must produce a named failure rather than a hung run; the
-  -- threaded runtime is what makes that interruption reliable rather than
-  -- something that happens to work on this pipe on this platform.
+  -- The same departure from tier0 and tier1 that `agentic-run` makes, for the
+  -- same reason one layer down. `Agentic.Oracle` guards every read from the
+  -- subprocess with `System.Timeout.timeout`, and a wedged oracle must produce
+  -- a named failure rather than a hung run; the threaded runtime is what makes
+  -- that interruption reliable rather than something that happens to work on
+  -- this pipe on this platform.
   ghc-options:     -threaded
