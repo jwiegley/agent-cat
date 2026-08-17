@@ -360,13 +360,17 @@ theorem bindForm_ask_head_draw {A : Type} {Γ : Ctx} (fns : Fns) (c : Code)
     ((Plan.trace ω (form k) γ).head?).map (fun e => e.q.draw)
       = some a.target.draw := by
   simp only [bindForm] at h
-  cases hc : Prompt.closed a.prompt with
-  | none =>
-    rw [hc] at h
-    cases he : Prompt.expr S a.pos a.prompt with
-    | error e => rw [he] at h; exact absurd h (by simp)
-    | ok e => rw [he] at h; cases h; simp [askShape_draw]
-  | some w => rw [hc] at h; cases h; simp [askShape_draw]
+  cases hg : askGuard a with
+  | error e => rw [hg] at h; exact absurd h (by simp)
+  | ok u =>
+    rw [hg] at h
+    cases hc : Prompt.closed a.prompt with
+    | none =>
+      rw [hc] at h
+      cases he : Prompt.expr S a.pos a.prompt with
+      | error e => rw [he] at h; exact absurd h (by simp)
+      | ok e => rw [he] at h; cases h; simp [askShape_draw]
+    | some w => rw [hc] at h; cases h; simp [askShape_draw]
 
 /-- `[[b.revisionBounds]]` = every `revising … at most n amendments` written in
 `b`, with where it is written.

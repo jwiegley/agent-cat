@@ -1288,6 +1288,17 @@ def main : IO UInt32 := do
       "2:1: no function answers to this name (functions are declared above their first use) at `nosuch`"
       (hbOutcome (RawBlock.callStmt "nosuch" []
         (RawBlock.empty { line := 3, col := 1 }) { line := 2, col := 1 }))
+    -- The parser refuses `served by` on a tool; `askGuard` is the same refusal
+    -- at the checker, so a hand-built `Raw` cannot smuggle a serving model
+    -- onto an addressee that is not one (acat-served-by-check-gap-i5d).
+    check "…and a hand-built `served by` on a tool"
+      "2:3: `served by` names the model that serves a model addressee; a tool or a person is not served by one at `served`"
+      (match Dsl.check [] [] (RawBlock.act
+          ⟨some "deep", ⟨Addressee.tool "t", 0⟩, Prompt.normalize [.lit "w"],
+           { line := 2, col := 3 }⟩
+          (RawBlock.empty { line := 3, col := 1 }) { line := 2, col := 1 }) with
+       | .ok _ => "ok"
+       | .error e => e.render)
 
     IO.println "round sixteen pins: done"
 

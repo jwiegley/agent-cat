@@ -314,10 +314,24 @@ def fnSigsOf (fns : Fns) : List (String × List (String × Code) × Code) :=
 
 /-! ## Elaborating questions at an imposed kind -/
 
+/-- `served by` names the model that serves a **model** addressee. The parser
+refuses the other spellings; this is the same refusal for a hand-built `Raw`,
+so the invariant belongs to the checker and not merely to the grammar. -/
+def askGuard (a : RawAsk) : Except CheckError Unit :=
+  match a.model, a.target.addressee with
+  | some _, .model _ => .ok ()
+  | some _, _ =>
+    .error ⟨a.pos, "`served by` names the model that serves a model addressee; \
+                   a tool or a person is not served by one", "served"⟩
+  | none, _ => .ok ()
+
 /-- One question at the kind its position or its binder fixed: `Plan.askC1`
 where the words are in the term, `Plan.ask1` where they are computed. -/
 def askPlan {Γ : Ctx} (c : Code) (S : Bindings Γ) (a : RawAsk) :
     Except CheckError (Plan Γ (El c)) :=
+  match askGuard a with
+  | .error err => .error err
+  | .ok _ =>
   let s := askShape a.model c a.target
   match Prompt.closed a.prompt with
   | some words => .ok (Plan.askC1 c (s.withPrompt words))
@@ -446,6 +460,9 @@ def bindForm {A : Type} {Γ : Ctx} (fns : Fns) (c : Code) (S : Bindings Γ) (r :
     Except CheckError (Plan (c :: Γ) A → Plan Γ A) :=
   match r with
   | .ask a =>
+    match askGuard a with
+    | .error err => .error err
+    | .ok _ =>
     let s := askShape a.model c a.target
     match Prompt.closed a.prompt with
     | some words => .ok (fun k => Plan.askC c (s.withPrompt words) k)

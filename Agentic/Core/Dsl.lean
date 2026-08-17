@@ -127,10 +127,12 @@ theorem askPlan_level_le {Γ : Ctx} (c : Code) (S : Bindings Γ) (a : RawAsk)
     (p : Plan Γ (El c)) (h : askPlan c S a = .ok p) : level p ≤ Level.pipeline := by
   unfold askPlan at h
   split at h
-  · cases h; exact le_trans (le_of_eq (level_askC1 ..)) bot_le
+  · exact absurd h (by simp)
   · split at h
-    · exact absurd h (by simp)
-    · cases h; exact le_of_eq (level_ask1 ..)
+    · cases h; exact le_trans (le_of_eq (level_askC1 ..)) bot_le
+    · split at h
+      · exact absurd h (by simp)
+      · cases h; exact le_of_eq (level_ask1 ..)
 
 /-- Panel members, one at a time: each is a question, so each is at `pipeline`
 at worst. -/
@@ -225,12 +227,14 @@ theorem bindForm_level_le {A : Type} {Γ : Ctx} {fns : Fns} (hf : FnLevel fns)
   | ask a =>
     simp only [bindForm] at h
     split at h
-    · cases h
-      exact le_trans (le_of_eq (level_askC ..)) hk
+    · exact absurd h (by simp)
     · split at h
-      · exact absurd h (by simp)
       · cases h
-        exact le_trans (le_of_eq (level_ask ..)) (max_le hp hk)
+        exact le_trans (le_of_eq (level_askC ..)) hk
+      · split at h
+        · exact absurd h (by simp)
+        · cases h
+          exact le_trans (le_of_eq (level_ask ..)) (max_le hp hk)
   | panel ms pos =>
     simp only [bindForm] at h
     split at h
