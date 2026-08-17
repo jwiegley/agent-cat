@@ -43,7 +43,7 @@ traces and folds comparable to the frozen corpus.
 | the reply JSON tier1 reproduces | `conformance/Conformance.lean` |
 | the surface sources of the rebuilt cases | `test/DslCases.lean`, `test/CorpusGen.lean` |
 
-All paths are relative to `/Users/johnw/src/agent-cat`. Never write there.
+Lean paths are relative to the repository root. Never write outside `haskell/`.
 
 ### 0.2 What `Builder.hs` imports from `Agentic.Plan` / `Agentic.World`
 
@@ -1012,7 +1012,7 @@ For each rebuilt case, holding the corpus entry's `reply` as the expectation:
 
 A case fails loudly with the entry name, which check failed, and the first
 differing element. `tier1` takes the corpus dir as `argv[1]`, defaulting to
-`/Users/johnw/src/agent-cat/test/corpus`, and exits non-zero on any failure.
+`test/corpus`, and exits non-zero on any failure.
 
 `Cases.hs` exports `cases :: [(FilePath, Program)]` — the corpus file's basename
 paired with the rebuilt program — and nothing else; `Main.hs` owns the

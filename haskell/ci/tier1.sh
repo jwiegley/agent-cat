@@ -7,7 +7,7 @@
 # whole conformance program exists to avoid.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-ORACLE="${ORACLE:-/Users/johnw/src/agent-cat/.lake/build/bin/conformance-oracle}"
+ORACLE="${ORACLE:-../.lake/build/bin/conformance-oracle}"
 N="${N:-500}"
 [ -x "$ORACLE" ] || { echo "ci/tier1: oracle binary not found; Tier 1 skipped is NOT green: $ORACLE" >&2; exit 1; }
 nix develop -c cabal build all

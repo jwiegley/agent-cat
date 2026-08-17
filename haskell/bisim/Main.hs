@@ -146,7 +146,7 @@ data Opts = Opts
   }
 
 defaultOracle :: FilePath
-defaultOracle = "/Users/johnw/src/agent-cat/.lake/build/bin/conformance-oracle"
+defaultOracle = "../.lake/build/bin/conformance-oracle"
 
 defaultOpts :: Opts
 defaultOpts = Opts {optOracle = defaultOracle, optN = 200, optSeed = Nothing}

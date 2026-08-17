@@ -3,7 +3,7 @@
 # Requires NO Lean: the corpus is read as committed data. This is the PR gate.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-CORPUS="${1:-/Users/johnw/src/agent-cat/test/corpus}"
+CORPUS="${1:-../test/corpus}"
 [ -d "$CORPUS" ] || { echo "ci/tier0: corpus directory not found: $CORPUS" >&2; exit 1; }
 nix develop -c cabal build all
 nix develop -c cabal run -v0 tier0 -- "$CORPUS"

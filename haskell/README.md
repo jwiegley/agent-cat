@@ -1,16 +1,17 @@
-# agentic-hs
+# haskell/ — the Haskell implementation
 
-The Haskell implementation of the operational terms of `agent-cat`
-(`/Users/johnw/src/agent-cat`, a Lean 4 formalization of agentic workflows) —
-the raw syntax of the agentic DSL, its JSON codec, the term-level guards, the
-ask counts and the string layer, and above them the typed `Plan`, its meaning
-in a world and the production surface that builds one — kept honest by
-replaying a frozen corpus produced by the Lean formalization.
+The Haskell implementation of agent-cat's operational terms, living beside
+the Lean formalization it implements (the repository root) — the raw syntax
+of the agentic DSL, its JSON codec, the term-level guards, the ask counts and
+the string layer, and above them the typed `Plan`, its meaning in a world and
+the production surface that builds one — kept honest by replaying a frozen
+corpus produced by the Lean formalization.
 
-Lean is normative. This repository does not ask to be believed on its own
+Lean is normative. This directory does not ask to be believed on its own
 authority: every claim it makes about the language is checked against 128
-request/reply pairs the Lean oracle emitted, and the check is two programs you
-can run in one command each.
+request/reply pairs the Lean oracle emitted (`../test/corpus`), and the check
+is two programs you can run in one command each. All commands below run from
+`haskell/`.
 
 ```
 nix develop -c cabal run tier0
@@ -51,7 +52,7 @@ by Git` after adding files, either track them or route around git with
 `nix develop path:. -c …`.)
 
 Both runners take an optional corpus directory and otherwise read
-`/Users/johnw/src/agent-cat/test/corpus`:
+`../test/corpus` (the frozen corpus at the repository root):
 
 ```sh
 nix develop -c cabal run tier0 -- /path/to/some/other/corpus
@@ -382,17 +383,17 @@ PORTING2-elab.md        week two: the elaboration, Agentic.Builder, tier1
 * **The design** — why there is a Haskell implementation at all, and why it is
   connected to Lean by reimplementation-plus-conformance rather than by
   extraction, FFI or a subprocess oracle —
-  `/Users/johnw/src/agent-cat/doc/research/dsl-redesign/connection.md`. That
+  `doc/research/dsl-redesign/connection.md`. That
   page is the design of record for this repository.
 * **The port** — [`PORTING.md`](PORTING.md),
   [`PORTING2-core.md`](PORTING2-core.md) and
   [`PORTING2-elab.md`](PORTING2-elab.md), which every module here is written
   against.
 * **The wire format** —
-  `/Users/johnw/src/agent-cat/doc/conformance-schema.md`.
-* **The arbiter** — `/Users/johnw/src/agent-cat/test/corpus/*.json`. Where
+  `doc/conformance-schema.md`.
+* **The arbiter** — `test/corpus/*.json`. Where
   `PORTING.md` and the corpus disagree, the corpus wins; where `PORTING.md` and
   the Lean source disagree, Lean wins.
 
-Nothing under `/Users/johnw/src/agent-cat` is ever edited from here. It is read,
+Nothing outside `haskell/` is ever edited from here. The Lean side is read,
 and it is obeyed.

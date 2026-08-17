@@ -2,11 +2,11 @@
 
 *What four implementers must agree on without reading each other's work.*
 
-The Lean side at `/Users/johnw/src/agent-cat` is normative. The frozen corpus at
-`/Users/johnw/src/agent-cat/test/corpus/*.json` (121 entries) is the arbiter:
+The Lean side at the repository root is normative. The frozen corpus at
+`test/corpus/*.json` (121 entries) is the arbiter:
 where this document and the corpus disagree, **the corpus wins** and this
 document is wrong. Where this document and the Lean source disagree, the Lean
-source wins. Never edit anything under `/Users/johnw/src/agent-cat`.
+source wins. Never edit anything outside `haskell/`.
 
 Week-one scope is exactly four things:
 
@@ -23,7 +23,7 @@ weeks and the corpus fields carrying them are simply not compared yet.
 
 ## 1 Layout and API
 
-Agreed repository layout for `/Users/johnw/src/agentic-hs`. Do not create other
+Agreed repository layout for `haskell/`. Do not create other
 top-level paths.
 
 ```
@@ -71,15 +71,15 @@ Haskell field and constructor names may be idiomatic — the JSON is what must
 match, and comparison is on `Data.Aeson.Value`, so **object key order is free**.
 
 `tier0` usage: `tier0 [corpusDir]`, defaulting to
-`/Users/johnw/src/agent-cat/test/corpus`.
+`test/corpus`.
 
 ---
 
 ## 2 The Raw types
 
-Source of record: `/Users/johnw/src/agent-cat/Agentic/Core/Dsl/Syntax.lean`,
+Source of record: `Agentic/Core/Dsl/Syntax.lean`,
 with `Code` and `Addressee` from
-`/Users/johnw/src/agent-cat/Agentic/Core/Question.lean`.
+`Agentic/Core/Question.lean`.
 
 ### 2.1 `Code` and `Addressee` (Question.lean)
 
@@ -211,7 +211,7 @@ Two derived accessors exist in Lean (`RawRhs.pos`, `RawSource.pos`,
 
 ### 3.1 The rules, verbatim from Lean
 
-`/Users/johnw/src/agent-cat/conformance/Conformance.lean` derives every codec
+`conformance/Conformance.lean` derives every codec
 standalone:
 
 ```lean
@@ -485,7 +485,7 @@ Abridged (full file is the normative copy):
 
 ## 4 The guards and the counts
 
-Source of record: `/Users/johnw/src/agent-cat/Agentic/Core/Dsl/Check.lean` and
+Source of record: `Agentic/Core/Dsl/Check.lean` and
 the classifier in `Conformance.lean`.
 
 ### 4.1 The classifier and the compared fields

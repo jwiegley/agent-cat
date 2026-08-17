@@ -11,10 +11,10 @@ modules:
 
 Everything below is pinned against the Lean sources of truth, quoted inline,
 and — where a number is claimed — against the frozen corpus at
-`/Users/johnw/src/agent-cat/test/corpus`, checked mechanically. §6 records what
+`test/corpus`, checked mechanically. §6 records what
 was checked, and where the mechanical check disagreed with a first reading.
 
-Build, as always: `cd /Users/johnw/src/agentic-hs && nix develop -c cabal build`.
+Build, as always: `cd haskell/ && nix develop -c cabal build`.
 GHC 9.10.3. No new dependencies: `base`, `aeson`, `text`, `containers` are
 already in the shared `build-depends` list of `agentic.cabal`.
 

@@ -87,7 +87,7 @@ import Cases (cases)
 -- ---------------------------------------------------------------------------
 
 defaultCorpus :: FilePath
-defaultCorpus = "/Users/johnw/src/agent-cat/test/corpus"
+defaultCorpus = "../test/corpus"
 
 main :: IO ()
 main = do

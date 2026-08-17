@@ -1,13 +1,13 @@
 -- | Tier 0: the conformance runner.
 --
 -- Replays the frozen corpus produced by the Lean oracle
--- (@/Users/johnw/src/agent-cat/test/corpus/*.json@) against this
+-- (@test/corpus/*.json@ at the repository root) against this
 -- implementation, and reports every divergence. The comparison rules are
 -- @PORTING.md@ §6; week one compares the JSON codec, the five term-level
 -- guards, the two ask counts and the string layer, and nothing else.
 --
 -- Usage: @tier0 [corpusDir]@, defaulting to
--- @/Users/johnw/src/agent-cat/test/corpus@. Exit status is 0 iff nothing
+-- @../test/corpus@ (this executable runs from @haskell/@). Exit status is 0 iff nothing
 -- failed.
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -76,7 +76,7 @@ bad k msg = Report [msg] k
 -- ---------------------------------------------------------------------------
 
 defaultCorpus :: FilePath
-defaultCorpus = "/Users/johnw/src/agent-cat/test/corpus"
+defaultCorpus = "../test/corpus"
 
 main :: IO ()
 main = do
