@@ -2546,15 +2546,17 @@ From acat-ozh: both carriers are complete-because-suprema-attained with parallel
 
 Observed during the heavy review's validated pass: every mcp__pal__chat call fails at the provider layer — OpenAI 401 with an UNEXPANDED shell placeholder (${OPENAI*****KEY}), Gemini 400 API_KEY_INVALID, Anthropic 401 invalid x-api-key — while listmodels reports all three as configured. Fix lives in the pal MCP daemon environment, not this repo; recorded here so the next multi-model review pass is not silently degraded.
 
-* TODO [#C] Check.lean admits "served by" on a tool/person via hand-built Raw — the parser refuses it, the checker does not
+* DONE [#C] Check.lean admits "served by" on a tool/person via hand-built Raw — the parser refuses it, the checker does not
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-served-by-check-gap-i5d
 :LABELS:   []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-08-16 Sun 11:38]
-:MODIFIED: [2026-08-16 Sun 11:39]
+:MODIFIED: [2026-08-16 Sun 18:34]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-16 Sun 18:34]
+:CLOSE_REASON: Fixed: askGuard in Check.lean, wired into askPlan and bindForm; three proofs updated; hand-built battery case; audit green over 130 sites
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
