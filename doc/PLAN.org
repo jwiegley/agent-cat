@@ -1156,15 +1156,17 @@ Discipline: mutation testing showed the theorems complement the string pins (a �
 ]
 #+end_src
 
-* DOING [#C] checkFnsList admits duplicate function names via hand-built RawProgram — Fns.find? is first-wins, the parser refuses but the checker does not
+* DONE [#C] checkFnsList admits duplicate function names via hand-built RawProgram — Fns.find? is first-wins, the parser refuses but the checker does not
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-dup-function-check-gap-kys
 :LABELS:   []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-08-16 Sun 18:51]
-:MODIFIED: [2026-08-16 Sun 21:29]
+:MODIFIED: [2026-08-16 Sun 21:38]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-16 Sun 21:38]
+:CLOSE_REASON: Fixed: checkFnsList refuses duplicates; checkFnsList_fnLevel updated; hand-built battery case; audit green over 131 sites
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -1556,15 +1558,17 @@ Owner question (2026-08-16): the round-17/18 surface converges on Haskell. What 
 ]
 #+end_src
 
-* DOING [#C] Mcp.heardMatchesReplay is false on any run with a memo hit — arrivals are deduped, the replay is not
+* DONE [#C] Mcp.heardMatchesReplay is false on any run with a memo hit — arrivals are deduped, the replay is not
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-heard-matches-replay-memo-v55
 :LABELS:   []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-08-16 Sun 18:51]
-:MODIFIED: [2026-08-16 Sun 21:29]
+:MODIFIED: [2026-08-16 Sun 21:38]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-16 Sun 21:38]
+:CLOSE_REASON: Fixed: replayArrivals first-occurrence comparison; McpSmoke 2b pins the memo-hit run
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
