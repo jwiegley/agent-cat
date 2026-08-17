@@ -36,7 +36,7 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 
-module Cases (cases) where
+module Cases (cases, alphaNamed) where
 
 import Data.List.NonEmpty (NonEmpty (..))
 
@@ -127,6 +127,30 @@ cases =
     -- at case 20.
     ("example-000-the-flagship-single-file.json", hardenProgram),
     ("example-001-hello.json", helloProgram)
+  ]
+
+-- | The cases whose __printed program__ is compared up to alpha, and the whole
+-- list of them: the two walked examples, and nothing else.
+--
+-- They are written in "Agentic.Workflow", which cannot read a Haskell binder's
+-- spelling — nothing but Template Haskell can, and the surface uses none — so
+-- it /generates/ the name each binding prints from the binding's depth: the
+-- flagship's @guide@ prints as @b0@, its carrier and settled binder as @b2@,
+-- its revision's result as @r2@. That is a different program text from the
+-- frozen one and the same program: @tier1/Main.hs@ canonicalizes the binders
+-- of both sides before comparing, so the pin is that the two agree on
+-- everything except the spelling of names, including which binding every hole,
+-- every scrutinee and every subject reads.
+--
+-- __The other nineteen keep their exact comparison.__ They are written in
+-- "Agentic.Builder" with explicit names, and there is nothing about them to
+-- weaken. Every non-program comparand — the folds, the ask counts, the worlds,
+-- the traces and the bills — stays exact for all twenty-one; a trace never
+-- carries a binder's name.
+alphaNamed :: [FilePath]
+alphaNamed =
+  [ "example-000-the-flagship-single-file.json",
+    "example-001-hello.json"
   ]
 
 -- ---------------------------------------------------------------------------

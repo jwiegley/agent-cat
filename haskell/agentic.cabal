@@ -32,16 +32,18 @@ description:
   and runs them.
   .
   Week six replaces what a human /writes/, and nothing under it: @Agentic.WF@'s
-  @[wf|…|]@ prompt quoter and @Agentic.Workflow@'s indexed block — with its
-  three @do@ grammars in @Agentic.Workflow.Do@ and @Agentic.Workflow.Revision@ —
-  are sugar whose every combinator is an application of an @Agentic.Builder@
-  entry point, so a program written in them prints and elaborates through the
-  one pairing tier1 already pins. @Agentic.Notation@ removes the surface's one
-  tax — a name written twice — by taking each printed name off the Haskell
-  binder that is already there: @$(workflow [| … |])@ is a splice that rewrites
-  a quoted block into that same surface, and invents no vocabulary of its own.
-  @Example.Harden@ is written that way, and is the proof: the same two frozen
-  entries, statement for statement with @example\/harden.wf@.
+  @[wf|…|]@ prompt quoter and @Agentic.Workflow@'s indexed block — whose one
+  @do@ grammar is @Agentic.Workflow.Do@ — are sugar whose every combinator is
+  an application of an @Agentic.Builder@ entry point, so a program written in
+  them prints and elaborates through the one pairing tier1 already pins. A
+  program is ordinary Haskell: no splice, no bracket, no label. Since a library
+  cannot read a Haskell binder's spelling, the surface carries no names at the
+  type level and generates the name each binding prints from its depth, which
+  an author may override with @named@; a @{hole}@ prints the name its handle
+  carries, so binder and hole agree by construction. @Example.Harden@ is
+  written that way, and is the proof: the same two frozen entries, statement
+  for statement with @example\/harden.wf@, their printed programs pinned up to
+  alpha.
 
 build-type:      Simple
 license:         MIT
@@ -84,7 +86,6 @@ library
     Agentic.Exec
     Agentic.Gen
     Agentic.Guards
-    Agentic.Notation
     Agentic.Observe
     Agentic.Oracle
     Agentic.Plan
@@ -93,7 +94,6 @@ library
     Agentic.WF
     Agentic.Workflow
     Agentic.Workflow.Do
-    Agentic.Workflow.Revision
     Agentic.World
 
 -- The worked examples, written in the authoring surface — `Agentic.Workflow`,

@@ -4,7 +4,6 @@
 {-# LANGUAGE EmptyCase #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -33,49 +32,76 @@
 --
 -- An authoring module says exactly this:
 --
--- > {-# LANGUAGE BlockArguments, DataKinds, OverloadedLabels,
--- >              OverloadedStrings, QualifiedDo, QuasiQuotes #-}
+-- > {-# LANGUAGE BlockArguments, OverloadedStrings, QualifiedDo, QuasiQuotes #-}
 -- >
 -- > import Agentic.Workflow
 -- > import qualified Agentic.Workflow.Do as W
--- > import qualified Agentic.Workflow.Revision as R   -- only if it revises
 --
--- and then writes:
+-- and then writes ordinary Haskell:
 --
 -- > harden :: Program
 -- > harden = workflow W.do
--- >   guide <- #guide =: ask (tool "cat")
--- >     [wf|Write out the house style guide, at most four short lines.|]
--- >
--- >   #result =: revising draft #patch (atMost 2) \patch -> R.do
--- >     verdict <- #verdict =: panel [ ask (model "reviewer-correct") [wf|{guide}…{patch}|] ]
--- >     amend (ask (model "author" `servedBy` "deep") [wf|…{verdict}…|])
--- >
--- >   caseResult #patch (\patch -> W.do …) stop
+-- >     guide <- ask (tool "cat") [wf|Write out the house style guide.|]
+-- >     result <- revising draft (atMost 2) \patch -> W.do
+-- >         verdict <- panel [ ask (model "reviewer") [wf|{guide}…{patch}|] ]
+-- >         amend (ask (model "author") [wf|…{patch}…{verdict}|])
+-- >     caseResult result (\patch -> W.do …) stop
 --
--- __Two names, on purpose.__ The label is the name the /program/ prints; the
--- Haskell binder is the name /the module/ reads. They are spelled the same by
--- convention and nothing enforces it, because enforcing it would mean reading
--- the author's Haskell with Template Haskell — a second surface language
--- living inside a bracket. A label that disagrees with its binder prints a
--- name the reader did not expect; it cannot make the program mean something
--- else.
+-- There is no splice, no bracket and no label: a statement is a statement, a
+-- binder is a Haskell binder, and @W.do@ is @QualifiedDo@ — a plain extension
+-- that rebinds nothing beyond the block it is written on.
 --
--- __Three block grammars, three @do@ qualifiers.__ The language has three, and
--- each refuses what its 'Agentic.Raw.Raw' cannot express: a workflow block
--- branches and ends in a terminal ("Agentic.Workflow.Do"); a bounded revision
--- has exactly one review and exactly one amendment
--- ("Agentic.Workflow.Revision"); a function body is a straight line with no
--- branch and no loop. @QualifiedDo@ is per-block, so an authoring module still
--- has ordinary @do@, @if@ and numeric literals for everything else.
+-- == The one thing a library cannot read: a binder's spelling
+--
+-- A Haskell binder's name is not available to a library. Only Template
+-- Haskell can read it, and program-level Template Haskell is out. So this
+-- layer does not carry names at the type level at all — no @Symbol@, no
+-- labels, no @'Fresh'@ over spellings — and it __generates__ the name each
+-- binding prints:
+--
+--   * a binding made at depth @d@ (there are @d@ live bindings around it)
+--     prints @b\<d\>@ — @b0@, @b1@, …;
+--   * so does the carrier of a bounded revision, which is bound at the
+--     enclosing depth, and so does the settled binder of its @case@, which is
+--     bound at the same depth in a disjoint scope; the revision's own review
+--     binding is one deeper;
+--   * a bounded revision's /result/ — printed twice, in the @bind@ and in the
+--     @caseResult@, and never in scope — prints @r\<d\>@, which no binding can
+--     collide with.
+--
+-- Every generated name is a function of the program's shape alone, so a
+-- program prints the same names on every machine and in every build. They are
+-- fresh by construction: at depth @d@ the live names are exactly
+-- @b0 … b(d-1)@.
+--
+-- 'named' overrides one, for an author who wants a program that reads well
+-- when printed:
+--
+-- > guide <- named "guide" (ask (tool "cat") [wf|…|])
+--
+-- It is never required, and the walked examples do not use it.
+--
+-- __A hole prints the handle's name.__ @{guide}@ in a @[wf|…|]@ resolves to
+-- the Haskell /value/ @guide@, and the chunk it writes carries that value's
+-- own name — the very 'Text' its binder printed. Binder and hole agree by
+-- construction, which is what the labelled surface could only ask for by
+-- convention.
+--
+-- == Two block grammars, one @do@ qualifier
+--
+-- The language has three block shapes, and each refuses what its
+-- 'Agentic.Raw.Raw' cannot express: a workflow block branches and ends in a
+-- terminal; a bounded revision has exactly one review and exactly one
+-- amendment; a function body is a straight line with no branch and no loop.
+-- The first two are both written in @W.do@ ("Agentic.Workflow.Do"), because
+-- the /stage/ index already tells them apart: inside a revision only a review
+-- may stand, and after it only 'amend'.
 --
 -- == What must not compile
 --
 -- GHC has no negative-test harness here, so the refusals are recorded as the
 -- messages they produce. Each is the design and not an accident:
 --
---   * a second bind of a live name —
---     @this name is already in scope, and a live name is not introduced twice@;
 --   * a statement after @stop@, @if@ or @case@ —
 --     @nothing follows a terminal: `stop`, `if` and `case` end a block@;
 --   * a block that does not end in a terminal —
@@ -84,12 +110,16 @@
 --     @Couldn't match type ‘IsTool’ with ‘IsModel’@;
 --   * a flag spliced into a prompt —
 --     @only a text or a verdict answer interpolates into a prompt@;
---   * a name read where it is not live — @unbound name; nothing in scope
---     answers to that name@ (the type-level half) or GHC's own
---     @Variable not in scope@ (the Haskell half);
---   * a revision with two reviews, or none —
---     @a bounded revision reviews first … and then amends, and has no other
---     statement@;
+--   * a handle read where its binding is not live —
+--     @this binding is not live here; nothing in scope answers to it@ (the
+--     type-level half) or GHC's own @Variable not in scope@ (the Haskell
+--     half);
+--   * a revision with two reviews, or none, or a statement between the review
+--     and the amendment — @a bounded revision reviews first … and then
+--     amends, and has no other statement@;
+--   * a statement standing where a bounded revision's @case@ must —
+--     @a bounded revision's result is consumed by `caseResult`, and by
+--     nothing else@;
 --   * a workflow left pending its @case@, or a @caseResult@ with no revision
 --     before it — neither has a stage the other can meet.
 module Agentic.Workflow
@@ -103,13 +133,17 @@ module Agentic.Workflow
     Words,
     Piece,
     lit,
-    hole,
 
-    -- * Names
-    Label,
+    -- * Handles, and the names a program prints
     V,
-    Named,
-    (=:),
+    named,
+    Nm,
+    An,
+    KnownDepth (..),
+    genName,
+    resultName,
+    Live,
+    KnownIx,
 
     -- * Questions
     PartyK (..),
@@ -137,6 +171,7 @@ module Agentic.Workflow
     NoFollow,
     Step (..),
     runW,
+    runRev,
     bindW,
     thenW,
 
@@ -147,6 +182,7 @@ module Agentic.Workflow
     ifFlag,
     caseVerdict,
     caseResult,
+    Settled,
 
     -- * The bounded revision
     Bound,
@@ -156,16 +192,11 @@ module Agentic.Workflow
     Clauses,
     Amendment,
     amend,
-    ReviewSrc (..),
-    bindR,
 
-    -- * The scope, as the block grammars' signatures need it
+    -- * The scope, as the block grammar's signatures need it
     Code (..),
     Scope,
-    Fresh,
-    LookupC,
-    KnownVar,
-    KnownScope,
+    Entry,
     Blk,
     Rhs,
   )
@@ -175,61 +206,85 @@ import Agentic.Builder
   ( Ask (..),
     Blk,
     Code (..),
-    Fresh,
-    KnownScope,
-    KnownVar (..),
-    LookupC,
+    Entry,
     Piece,
     Program,
     Rhs,
     Scope,
     Words,
-    hole,
     lit,
   )
 import qualified Agentic.Builder as B
 import Agentic.Plan (KnownCode, SCode, sCode)
 import Agentic.Raw (Addressee (..))
-import Agentic.WF (Says (..), V (..), wf)
+import Agentic.WF (KnownIx (..), Says (..), V (..), wf)
 import Data.Kind (Constraint, Type)
 import qualified Data.List.NonEmpty as NE
-import Data.Proxy (Proxy (..))
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
-import GHC.OverloadedLabels (IsLabel (..))
 -- The @ErrorMessage@ constructors are imported qualified, and only there:
 -- @GHC.TypeLits@ spells its literal message @Text@, which is exactly the name
 -- 'Answer' gives to the kind @text@, and one of the two has to give way.
-import GHC.TypeLits (KnownSymbol, Symbol, TypeError, symbolVal)
+import GHC.TypeLits (TypeError)
 import qualified GHC.TypeLits as TL
 
 -- ---------------------------------------------------------------------------
--- Names: labels, handles, and (=:)
+-- The scope, and the names it generates
 -- ---------------------------------------------------------------------------
 
--- | The author's name for a binding, written @#guide@. The phantom is the
--- whole value: a label carries no runtime content, and becomes a 'Text'
--- exactly once, in the 'Step' instance that prints it.
-data Label (n :: Symbol) = Label
+-- | One anonymous scope entry.
+--
+-- "Agentic.Builder" indexes everything by a 'Scope' of @(name, code)@ pairs,
+-- because /it/ resolves names at the type level. This layer resolves nothing
+-- by name, so every entry it pushes carries the same empty symbol and a scope
+-- here is its list of codes and nothing else. (It is spelled as a 'Scope'
+-- rather than as a bare @Ctx@ because @Codes@ is not injective: the builder's
+-- types are the ones that must line up, and they are indexed by scopes.)
+type An (c :: Code) = '("", c)
 
--- | The equality-in-the-context form, so that @#guide@ /unifies with/ an
--- expected @Label n@ rather than demanding one.
-instance n ~ n' => IsLabel n (Label n') where
-  fromLabel = Label
+-- | How many bindings are live — the length of the scope, and the depth every
+-- generated name is a function of.
+class KnownDepth (s :: Scope) where
+  depthOf :: Int
 
--- | @#x =: source@ — a statement awaiting the block's @>>=@.
-data Named (n :: Symbol) src = Named src
+instance KnownDepth '[] where
+  depthOf = 0
 
--- | Name a source. The label is what the program prints; what the statement
--- /is/ is decided by the source, through 'Step'.
-(=:) :: Label n -> src -> Named n src
-_ =: src = Named src
+instance KnownDepth s => KnownDepth (e ': s) where
+  depthOf = 1 + depthOf @s
 
-infix 1 =:
+-- | The name a binding made at depth @d@ prints: @b\<d\>@.
+--
+-- Fresh by construction — at depth @d@ the live names are exactly
+-- @b0 … b(d-1)@ — and a function of the program's shape alone, so a printed
+-- program is reproducible.
+genName :: forall s. KnownDepth s => Text
+genName = T.pack ('b' : show (depthOf @s))
 
--- | The name, as the printer writes it.
-nameText :: forall n. KnownSymbol n => Text
-nameText = T.pack (symbolVal (Proxy @n))
+-- | The name a bounded revision's /result/ prints: @r\<d\>@.
+--
+-- A result is not a binding: it is printed in the @bind@ and in the
+-- @caseResult@ that consumes it, and it never enters a scope. Its own letter
+-- keeps it clear of the carrier, which /is/ a binding at the very same depth.
+resultName :: forall s. KnownDepth s => Text
+resultName = T.pack ('r' : show (depthOf @s))
+
+-- ---------------------------------------------------------------------------
+-- Naming a binding by hand
+-- ---------------------------------------------------------------------------
+
+-- | A statement whose binding prints a name the author chose.
+data Nm st = Nm Text st
+
+-- | @named "guide" (ask (tool "cat") [wf|…|])@ — the name this statement's
+-- binding prints, in place of the generated one.
+--
+-- Never required, and nothing reads it but the printer: a program means
+-- exactly what it meant before, and holes still print whatever their handle
+-- carries, which is now this. A statement that binds nothing ignores it.
+named :: Text -> st -> Nm st
+named = Nm
 
 -- ---------------------------------------------------------------------------
 -- Parties and questions
@@ -283,6 +338,11 @@ ask p w =
     }
 
 -- | A yes\/no question: the binding an @if@ can decide on.
+--
+-- A bare 'ask' in binding position is a /text/ question — that is
+-- @usePrompt@'s "a name whose only use is being spliced is a text question"
+-- (@Check.lean:207@) made structural — so the kind of anything else has to be
+-- said, and this is how a flag says it.
 confirm :: Party p -> Words s -> Rhs s 'CodeFlag
 confirm p w = B.one (ask p w)
 
@@ -336,28 +396,69 @@ data Ann (s :: Scope) (c :: Code) = Ann (SCode c) (Rhs s c)
 -- The block: an indexed CPS monad over a Stage
 -- ---------------------------------------------------------------------------
 
--- | Lean's @Pend Γ@ (@Check.lean:527@), at the type level: after a bounded
--- revision a block is /pending/ its @case@, and no other statement may stand
--- there.
-data Stage = Open Scope | Pending Code Scope
+-- | Where a block stands. Two of the four are Lean's, and two are this
+-- surface's way of holding a revision's two clauses apart:
+--
+--   * @'Open' s@ — an ordinary block over the live bindings @s@;
+--   * @'Pending' c s@ — Lean's @Pend Γ@ (@Check.lean:527@): after a bounded
+--     revision a block is /pending/ its @case@, and no other statement may
+--     stand there;
+--   * @'Review' c s@ — inside a revision, awaiting its one review, with the
+--     candidate live at index @0@;
+--   * @'Amending' c s@ — the same revision, awaiting its one amendment, with
+--     the verdict live too.
+data Stage
+  = Open Scope
+  | Pending Code Scope
+  | Review Code Scope
+  | Amending Code Scope
 
--- | What a block at a given stage /is/. The family is injective because @Blk@
--- and @Arms@ are distinct type constructors — and it has to be, or unwrapping
--- a 'W' could not recover its indices and @>>=@ would not typecheck at all.
+-- | What a block at a given stage /is/. The family is injective because its
+-- four results are distinct type constructors — and it has to be, or
+-- unwrapping a 'W' could not recover its indices and @>>=@ would not typecheck
+-- at all.
 type family Res (i :: Stage) = (r :: Type) | r -> i where
   Res ('Open s) = Blk s
   Res ('Pending c s) = Arms c s
+  Res ('Review c s) = Clauses c s
+  Res ('Amending c s) = Amendment c s
 
--- | The two arms a pending @case result@ still owes. The settled binder's
--- symbol is existential, exactly as 'B.revisingCaseI' leaves it free.
-data Arms (c :: Code) (s :: Scope) where
-  Arms :: Text -> Blk ('(ns, c) ': s) -> Blk s -> Arms c s
+-- | The two arms a pending @case result@ still owes, and the name its settled
+-- binder prints.
+data Arms (c :: Code) (s :: Scope)
+  = Arms Text (Blk (An c ': s)) (Blk s)
 
--- | A block, in continuation-passing style over the stage index: /given what
--- follows, the whole block/. It is the shape of every builder block
--- combinator, all of which take the rest of the block as their last argument,
--- so the desugaring below is a re-association and nothing more.
-newtype W (i :: Stage) (j :: Stage) a = W {unW :: (a -> Res j) -> Res i}
+-- | A revision's two clauses: the review binding's name, what it prints as its
+-- annotation, the review, and the amendment.
+data Clauses (c :: Code) (s :: Scope)
+  = Clauses
+      Text
+      (Maybe Code)
+      (Rhs (An c ': s) 'CodeVerdict)
+      (Rhs (An 'CodeVerdict ': An c ': s) c)
+
+-- | The second clause of a revision, which sees the verdict at index @0@ and
+-- the candidate at @1@.
+newtype Amendment (c :: Code) (s :: Scope)
+  = Amendment (Rhs (An 'CodeVerdict ': An c ': s) c)
+
+-- | The live names, innermost first — what a block knows about itself that its
+-- type does not.
+--
+-- The scope index says how many bindings are live and at which kinds; it
+-- cannot say what they are /called/, because 'named' may have overridden a
+-- generated name. Exactly one construct needs to know: @known here@, which
+-- prints the live names. So a block is handed them, every binding conses its
+-- own onto the list, and @knownHere@ reads it — rather than recomputing names
+-- from the depth, which would print @b0@ for a binding the author named
+-- @guide@.
+type Live = [Text]
+
+-- | A block, in continuation-passing style over the stage index: /given the
+-- live names and what follows, the whole block/. It is the shape of every
+-- builder block combinator, all of which take the rest of the block as their
+-- last argument, so the desugaring below is a re-association and nothing more.
+newtype W (i :: Stage) (j :: Stage) a = W {unW :: Live -> (a -> Res j) -> Res i}
 
 -- | Uninhabited: a terminal has no value.
 data Term
@@ -373,70 +474,204 @@ type family NoFollow a :: Constraint where
       ('TL.Text "nothing follows a terminal: `stop`, `if` and `case` end a block")
   NoFollow a = ()
 
--- | The block a workflow's @do@ finally is.
-runW :: W ('Open s) j Term -> Blk s
-runW (W f) = f absurdTerm
+-- | The block a workflow's @do@ finally is, under the names live at its head.
+runW :: Live -> W ('Open s) j Term -> Blk s
+runW live (W f) = f live absurdTerm
+
+-- | The two clauses a revision's @do@ finally is.
+runRev :: Live -> W ('Review c s) ('Amending c s) Term -> Clauses c s
+runRev live (W f) = f live absurdTerm
 
 -- | What a statement does to a block: which stage it takes, which stage it
 -- leaves, and what it binds.
 --
--- The functional dependency is not decoration. Without it the stage of a
--- statement is only determined once the /previous/ statement's instance is
--- solved, so inside a @case@ arm the scope is still a metavariable and the
--- constraints from a hole float apart into ambiguity. With it, the improvement
--- is eager: as soon as a statement's type is known, its two stages and its
--- bound value are known.
-class Step st (i :: Stage) (j :: Stage) a | st -> i j a where
-  step :: st -> (a -> Res j) -> Res i
+-- __Every instance dispatches on two heads and nothing else__ — the
+-- statement's type constructor and the stage's — and states the rest as
+-- equalities in its context. That is what keeps inference eager: a statement's
+-- scope, its outgoing stage and the handle it binds are /improved/ from the
+-- stage the block is already at, so a prompt with no hole in it still knows
+-- which scope it is written in, and a @case@ arm is not a metavariable waiting
+-- on the arm after it.
+--
+-- The 'Maybe' 'Text' is the name the binding prints: 'Nothing' at an ordinary
+-- statement, which generates one from the depth, and @Just@ under 'named'.
+-- The 'Live' names are the block's, and the continuation is handed them with
+-- whatever this statement bound consed on.
+class Step st (i :: Stage) (j :: Stage) a where
+  step :: Maybe Text -> Live -> st -> (a -> Live -> Res j) -> Res i
 
 -- | A statement that is already a block: an 'act', a 'knownHere', a terminal.
-instance Step (W i j a) i j a where
-  step = unW
+-- It binds nothing, so the names it leaves behind are the names it was given.
+instance (i ~ i', j ~ j', a ~ a') => Step (W i' j' a') i j a where
+  step _ live (W f) k = f live (`k` live)
 
--- | @x <- #x =: ask …@ — a bare question in binding position __is__ a text
+-- | @named "x" statement@ — the same statement, printing the given name.
+instance Step st i j a => Step (Nm st) i j a where
+  step _ live (Nm x st) = step (Just x) live st
+
+-- | @x <- ask …@ — a bare question in binding position __is__ a text
 -- question, which is @usePrompt@'s "a name whose only use is being spliced is
 -- a text question" (@Check.lean:207@) made structural.
 instance
-  (KnownSymbol n, Fresh n s) =>
-  Step (Named n (Ask s)) ('Open s) ('Open ('(n, 'CodeText) ': s)) (V n 'CodeText)
+  ( s' ~ s,
+    KnownDepth s,
+    j ~ 'Open (An 'CodeText ': s),
+    a ~ V (An 'CodeText ': s) 'CodeText
+  ) =>
+  Step (Ask s') ('Open s) j a
   where
-  step (Named a) k = B.bindI (nameText @n) (B.one @'CodeText a) (k V)
+  step mn live q k = B.bindI x (B.one @'CodeText q) (k (V x) (x : live))
+    where
+      x = fromMaybe (genName @s) mn
 
--- | @x <- #x =: panel […]@, @… =: confirm …@, @… =: ask … \`answering\` c@ —
--- the kind comes from the source, and the annotation stays @null@.
+-- | @x <- panel […]@, @x <- confirm …@, @x <- ask … \`answering\` c@ — the
+-- kind comes from the source, and the annotation stays @null@.
 instance
-  (KnownSymbol n, Fresh n s) =>
-  Step (Named n (Rhs s c)) ('Open s) ('Open ('(n, c) ': s)) (V n c)
+  ( s' ~ s,
+    KnownDepth s,
+    j ~ 'Open (An c ': s),
+    a ~ V (An c ': s) c
+  ) =>
+  Step (Rhs s' c) ('Open s) j a
   where
-  step (Named r) k = B.bindI (nameText @n) r (k V)
+  step mn live r k = B.bindI x r (k (V x) (x : live))
+    where
+      x = fromMaybe (genName @s) mn
 
--- | @x <- #x =: ask … \`annotated\` c@ — the same elaboration, and the kind is
+-- | @x <- ask … \`annotated\` c@ — the same elaboration, and the kind is
 -- printed: @x : c <- …@.
 instance
-  (KnownSymbol n, Fresh n s) =>
-  Step (Named n (Ann s c)) ('Open s) ('Open ('(n, c) ': s)) (V n c)
+  ( s' ~ s,
+    KnownDepth s,
+    j ~ 'Open (An c ': s),
+    a ~ V (An c ': s) c
+  ) =>
+  Step (Ann s' c) ('Open s) j a
   where
-  step (Named (Ann c r)) k = B.bindAsI c (nameText @n) r (k V)
+  step mn live (Ann sc r) k = B.bindAsI sc x r (k (V x) (x : live))
+    where
+      x = fromMaybe (genName @s) mn
 
--- | @#result =: revising …@ — the block becomes pending its @case@, and binds
--- nothing: the loop's result is not a value.
+-- | @result <- revising …@ — the block becomes pending its @case@, and what
+-- it binds is not a value but the witness that one is owed.
 instance
-  KnownSymbol n =>
-  Step (Named n (Loop c s)) ('Open s) ('Pending c s) ()
+  ( s' ~ s,
+    c' ~ c,
+    KnownDepth s,
+    j ~ 'Pending c s,
+    a ~ Settled c s
+  ) =>
+  Step (Loop c' s') ('Open s) j a
   where
-  step (Named lp) k = loopRun lp (nameText @n) (k ())
+  step mn live lp k = loopRun lp live (fromMaybe (resultName @s) mn) (k Settled live)
 
--- | The workflow block's bind. See "Agentic.Workflow.Do", which is where an
--- author meets it.
+-- | @verdict <- ask …@ inside a revision: the review, elaborated at @verdict@
+-- by position, exactly as @checkMembers@ does.
+instance
+  ( s' ~ (An c ': s),
+    KnownDepth s,
+    j ~ 'Amending c s,
+    a ~ V (An 'CodeVerdict ': An c ': s) 'CodeVerdict
+  ) =>
+  Step (Ask s') ('Review c s) j a
+  where
+  step mn live q k = clausesOf mn live (Nothing @Code) (B.one @'CodeVerdict q) k
+
+-- | @verdict <- panel […]@ inside a revision — a panel, or a call, or a
+-- question whose kind is already said.
+instance
+  ( s' ~ (An c ': s),
+    c' ~ 'CodeVerdict,
+    KnownDepth s,
+    j ~ 'Amending c s,
+    a ~ V (An 'CodeVerdict ': An c ': s) 'CodeVerdict
+  ) =>
+  Step (Rhs s' c') ('Review c s) j a
+  where
+  step mn live r k = clausesOf mn live (Nothing @Code) r k
+
+-- | @verdict <- panel […] \`annotated\` Verdict@ — the review with its kind
+-- printed.
+instance
+  ( s' ~ (An c ': s),
+    c' ~ 'CodeVerdict,
+    KnownDepth s,
+    j ~ 'Amending c s,
+    a ~ V (An 'CodeVerdict ': An c ': s) 'CodeVerdict
+  ) =>
+  Step (Ann s' c') ('Review c s) j a
+  where
+  step mn live (Ann _ r) k = clausesOf mn live (Just CodeVerdict) r k
+
+-- | The review clause, whichever source wrote it: its name, its printed
+-- annotation, itself, and the amendment the rest of the block is.
+clausesOf ::
+  forall c s.
+  KnownDepth s =>
+  Maybe Text ->
+  Live ->
+  Maybe Code ->
+  Rhs (An c ': s) 'CodeVerdict ->
+  (V (An 'CodeVerdict ': An c ': s) 'CodeVerdict -> Live -> Amendment c s) ->
+  Clauses c s
+clausesOf mn live annot review k = case k (V x) (x : live) of
+  Amendment am -> Clauses x annot review am
+  where
+    x = fromMaybe (genName @(An c ': s)) mn
+
+-- | A second statement in a revision, which the grammar has no room for.
+instance
+  TypeError
+    ( 'TL.Text "a bounded revision reviews first — `verdict <- panel […]` — \
+               \and then amends, and has no other statement"
+    ) =>
+  Step (Ask s') ('Amending c s) j a
+  where
+  step = error "Step (Ask s) ('Amending c s): unreachable, the instance is a TypeError"
+
+-- | As above, for a source that is not a bare question.
+instance
+  TypeError
+    ( 'TL.Text "a bounded revision reviews first — `verdict <- panel […]` — \
+               \and then amends, and has no other statement"
+    ) =>
+  Step (Rhs s' c') ('Amending c s) j a
+  where
+  step = error "Step (Rhs s c) ('Amending c s): unreachable, the instance is a TypeError"
+
+-- | A statement standing where a bounded revision's @case@ must. Lean refuses
+-- every other statement by name while a @Pend Γ@ is open (@Check.lean:527@);
+-- here it is the stage, and this is the message.
+instance
+  TypeError
+    ( 'TL.Text "a bounded revision's result is consumed by `caseResult`, and \
+               \by nothing else: no statement may stand between the two"
+    ) =>
+  Step (Ask s') ('Pending c s) j a
+  where
+  step = error "Step (Ask s) ('Pending c s): unreachable, the instance is a TypeError"
+
+-- | As above, for a source that is not a bare question.
+instance
+  TypeError
+    ( 'TL.Text "a bounded revision's result is consumed by `caseResult`, and \
+               \by nothing else: no statement may stand between the two"
+    ) =>
+  Step (Rhs s' c') ('Pending c s) j a
+  where
+  step = error "Step (Rhs s c) ('Pending c s): unreachable, the instance is a TypeError"
+
+-- | The block's bind. See "Agentic.Workflow.Do", which is where an author
+-- meets it.
 bindW ::
   forall st i j a k b.
   (Step st i j a, NoFollow a) =>
   st ->
   (a -> W j k b) ->
   W i k b
-bindW m f = W (\kk -> step m (\a -> unW (f a) kk))
+bindW m f = W (\live kk -> step Nothing live m (\a live' -> unW (f a) live' kk))
 
--- | The workflow block's sequencing.
+-- | The block's sequencing.
 thenW ::
   forall st i j a k b.
   (Step st i j a, NoFollow a) =>
@@ -451,49 +686,54 @@ thenW m n = bindW @st @i @j @a m (\_ -> n)
 
 -- | @stop@ — the end of a block.
 stop :: W ('Open s) j Term
-stop = W (\_ -> B.stop)
+stop = W (\_ _ -> B.stop)
 
 -- | A statement-position question: it binds nothing, and its answer is a
 -- receipt. The scope is unchanged; the plan is weakened past the slot.
 act :: Party p -> Words s -> W ('Open s) ('Open s) ()
-act p w = W (\k -> B.act (ask p w) (k ()))
+act p w = W (\_ k -> B.act (ask p w) (k ()))
 
--- | @known here: …@ — an assertion, and no node at all. The names are
--- computed from the type-level scope, so this cannot print a wrong one.
-knownHere :: forall s. KnownScope s => W ('Open s) ('Open s) ()
-knownHere = W (\k -> B.knownHere @s (k ()))
+-- | @known here: …@ — an assertion, and no node at all. The names are the
+-- ones the block is carrying, innermost first, so this prints what the
+-- bindings actually print — generated or 'named' — and cannot print a wrong
+-- one.
+knownHere :: W ('Open s) ('Open s) ()
+knownHere = W (\live k -> B.knownHereI live (k ()))
 
 -- | @if x { … } else { … }@ — a terminal. The flag's kind comes from the
 -- handle, so a question that is not a 'confirm' cannot be decided on.
 ifFlag ::
-  forall n s j.
-  (KnownSymbol n, KnownVar n s, LookupC n s ~ 'CodeFlag) =>
-  V n 'CodeFlag ->
+  forall h s j.
+  KnownIx h s 'CodeFlag =>
+  V h 'CodeFlag ->
   W ('Open s) j Term ->
   W ('Open s) j Term ->
   W ('Open s) j Term
-ifFlag _ yes no =
-  W (\_ -> B.ifFlagI (nameText @n) (varOf @n @s) (runW yes) (runW no))
+ifFlag v yes no =
+  W
+    ( \live _ ->
+        B.ifFlagI (vName v) (ixOf @h @s @'CodeFlag) (runW live yes) (runW live no)
+    )
 
 -- | @case x { approved … objected … no answer … }@ — a terminal, its arms
 -- positional, in Lean's order.
 caseVerdict ::
-  forall n s j.
-  (KnownSymbol n, KnownVar n s, LookupC n s ~ 'CodeVerdict) =>
-  V n 'CodeVerdict ->
+  forall h s j.
+  KnownIx h s 'CodeVerdict =>
+  V h 'CodeVerdict ->
   W ('Open s) j Term ->
   W ('Open s) j Term ->
   W ('Open s) j Term ->
   W ('Open s) j Term
-caseVerdict _ approved objected noAnswer =
+caseVerdict v approved objected noAnswer =
   W
-    ( \_ ->
+    ( \live _ ->
         B.caseVerdictI
-          (nameText @n)
-          (varOf @n @s)
-          (runW approved)
-          (runW objected)
-          (runW noAnswer)
+          (vName v)
+          (ixOf @h @s @'CodeVerdict)
+          (runW live approved)
+          (runW live objected)
+          (runW live noAnswer)
     )
 
 -- ---------------------------------------------------------------------------
@@ -509,77 +749,29 @@ atMost :: Integer -> Bound
 atMost = Bound
 
 -- | The loop, awaiting the two things its statement cannot give it: the
--- result's name, from the label, and the two arms of the @case@ that must
--- consume it.
+-- result's name, and the two arms of the @case@ that must consume it.
 newtype Loop (c :: Code) (s :: Scope) = Loop
-  {loopRun :: Text -> Arms c s -> Blk s}
+  {loopRun :: Live -> Text -> Arms c s -> Blk s}
 
--- | The review and the amendment. The review binding's symbol is existential,
--- exactly the freedom 'B.revisingCaseI' already leaves in its @nr@.
-data Clauses (nc :: Symbol) (c :: Code) (s :: Scope) where
-  Clauses ::
-    Text ->
-    Maybe Code ->
-    Rhs ('(nc, c) ': s) 'CodeVerdict ->
-    Rhs ('(nr, 'CodeVerdict) ': '(nc, c) ': s) c ->
-    Clauses nc c s
-
--- | The second clause of a revision, which sees the verdict at index @0@ and
--- the candidate at @1@.
-newtype Amendment (nc :: Symbol) (nr :: Symbol) (c :: Code) (s :: Scope)
-  = Amendment (Rhs ('(nr, 'CodeVerdict) ': '(nc, c) ': s) c)
+-- | What a bounded revision binds: not a value — a revision's result is not
+-- one — but the witness that a @caseResult@ is owed, and at which kind. It is
+-- what makes @caseResult result@ a real use of @result@ and
+-- @caseResult guide@ a type error.
+data Settled (c :: Code) (s :: Scope) = Settled
 
 -- | @amend patch { … }@ — at the candidate's kind, reading the verdict beside
 -- it.
 amend ::
   KnownCode c =>
-  Ask ('(nr, 'CodeVerdict) ': '(nc, c) ': s) ->
-  Amendment nc nr c s
-amend = Amendment . B.one
+  Ask (An 'CodeVerdict ': An c ': s) ->
+  W ('Amending c s) j Term
+amend q = W (\_ _ -> Amendment (B.one q))
 
--- | What may review: a question (elaborated at @verdict@ by position, as
--- @checkMembers@ does), a panel or a call, or either with the kind printed.
-class ReviewSrc src (s :: Scope) where
-  -- | The review, at @verdict@.
-  reviewRhs :: src -> Rhs s 'CodeVerdict
-
-  -- | What the review prints as its annotation.
-  reviewAnn :: src -> Maybe Code
-
-instance s ~ s' => ReviewSrc (Ask s') s where
-  reviewRhs = B.one
-  reviewAnn _ = Nothing
-
-instance (s ~ s', c ~ 'CodeVerdict) => ReviewSrc (Rhs s' c) s where
-  reviewRhs r = r
-  reviewAnn _ = Nothing
-
-instance (s ~ s', c ~ 'CodeVerdict) => ReviewSrc (Ann s' c) s where
-  reviewRhs (Ann _ r) = r
-  reviewAnn _ = Just CodeVerdict
-
--- | The revision block's bind: exactly one review, then exactly one
--- amendment. See "Agentic.Workflow.Revision", which is where an author meets
--- it, and which has no @>>@ at all.
-bindR ::
-  forall nr src nc c s.
-  (KnownSymbol nr, Fresh nr ('(nc, c) ': s), ReviewSrc src ('(nc, c) ': s)) =>
-  Named nr src ->
-  (V nr 'CodeVerdict -> Amendment nc nr c s) ->
-  Clauses nc c s
-bindR (Named src) f = case f V of
-  Amendment am ->
-    Clauses
-      (nameText @nr)
-      (reviewAnn @src @('(nc, c) ': s) src)
-      (reviewRhs @src @('(nc, c) ': s) src)
-      am
-
--- | @result <- revising draft as patch, at most n amendments { … }@.
+-- | @result <- revising draft (atMost n) \\patch -> W.do …@.
 --
--- The candidate's kind is the __subject's__ kind, so it is looked up and not
--- chosen; the carrier's label names both the printed carrier and the handle
--- the clauses are handed, so the two cannot disagree.
+-- The candidate's kind is the __subject's__ kind, so it is read off the
+-- handle and not chosen; the carrier is bound by the clauses' lambda, and the
+-- name it prints is the generated one for the enclosing depth.
 --
 -- What this /returns/ is a loop and not a block: a bounded revision's result
 -- is not a value, and the very next statement must consume it. That is Lean's
@@ -587,47 +779,47 @@ bindR (Named src) f = case f V of
 -- a 'Step' at a @Pending@ stage, 'caseResult' alone is ill-typed because
 -- nothing else produces one, and 'workflow' wants an @Open@ block at the end.
 revising ::
-  forall subj carrier c s.
-  ( KnownSymbol subj,
-    KnownSymbol carrier,
-    KnownVar subj s,
-    c ~ LookupC subj s,
-    KnownCode c,
-    Fresh carrier s
-  ) =>
-  V subj c ->
-  Label carrier ->
+  forall h c s.
+  (KnownIx h s c, KnownCode c, KnownDepth s) =>
+  V h c ->
   Bound ->
-  (V carrier c -> Clauses carrier c s) ->
+  (V (An c ': s) c -> W ('Review c s) ('Amending c s) Term) ->
   Loop c s
-revising _ _ (Bound n) clauses = Loop $ \resultName arms ->
-  case (clauses V, arms) of
+revising subj (Bound n) clauses = Loop $ \live result arms ->
+  case (runRev (carrier : live) (clauses (V carrier)), arms) of
     (Clauses revName revAnn review am, Arms settledName settled unsettled) ->
-      B.revisingCaseI @c @carrier
-        (nameText @subj)
-        (varOf @subj @s)
-        (nameText @carrier)
+      B.revisingCaseI @c
+        (vName subj)
+        (ixOf @h @s @c)
+        carrier
         revName
         settledName
-        resultName
+        result
         n
         revAnn
         review
         am
         settled
         unsettled
+  where
+    carrier = genName @s
 
 -- | @case result { settled p { … } unsettled { … } }@ — a terminal, and the
 -- only statement a pending block accepts.
 caseResult ::
-  forall sname c s j.
-  (KnownSymbol sname, Fresh sname s) =>
-  Label sname ->
-  (V sname c -> W ('Open ('(sname, c) ': s)) j Term) ->
+  forall c s j.
+  KnownDepth s =>
+  Settled c s ->
+  (V (An c ': s) c -> W ('Open (An c ': s)) j Term) ->
   W ('Open s) j Term ->
   W ('Pending c s) j Term
 caseResult _ settled unsettled =
-  W (\_ -> Arms (nameText @sname) (runW (settled V)) (runW unsettled))
+  W
+    ( \live _ ->
+        Arms x (runW (x : live) (settled (V x))) (runW live unsettled)
+    )
+  where
+    x = genName @s
 
 -- ---------------------------------------------------------------------------
 -- Programs
@@ -636,4 +828,4 @@ caseResult _ settled unsettled =
 -- | A whole program: the block, over the empty scope, at the empty function
 -- table.
 workflow :: W ('Open '[]) ('Open '[]) Term -> Program
-workflow b = B.program [] (runW b)
+workflow b = B.program [] (runW [] b)

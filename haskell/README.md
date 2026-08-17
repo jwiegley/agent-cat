@@ -75,12 +75,11 @@ and only if nothing failed, so both are usable directly as CI gates.
 | `Agentic.World` | `WorldSpec` and `toWorld`, the `trace` of a plan through a world, the fresh and memo bills, and the oracle's event JSON |
 | `Agentic.Builder` | the production surface: typed combinators that both print a `RawProgram` and elaborate to the `Plan` the Lean checker elaborates the same construct to |
 | `Agentic.WF` | the `[wf\|…\|]` prompt quoter — prose with `{name}` holes, laid out as the `.wf` fence lays it out and chunked as Lean's `Prompt.normalize` chunks it — and `Says`, which decides whether a hole is a binding or a `define` |
-| `Agentic.Workflow` (+ `.Do`, `.Revision`) | the **authoring** surface: an indexed block in which a bind is a Haskell bind, `#label` is the name the program prints, and every combinator is an application of an `Agentic.Builder` entry point |
-| `Agentic.Notation` | the **notation** over that surface: `$(workflow [\| do … \|])`, a splice that takes each printed name off the Haskell binder already there, so a name is written once. It emits the surface above and nothing else — no vocabulary of its own — and re-exports it |
+| `Agentic.Workflow` (+ `.Do`) | the **authoring** surface: an indexed block, written in ordinary Haskell under `W.do`, in which a bind is a Haskell bind and every combinator is an application of an `Agentic.Builder` entry point. It carries no names at the type level — a library cannot read a Haskell binder — so it generates the name each binding prints from that binding's depth, `named` overrides one, and a `{hole}` prints the name its handle carries |
 | `Agentic.Gen`, `Agentic.Observe`, `Agentic.Oracle` | the bisimulation surface: generators, the reply assembly both runners share, and the line-delimited JSON client for the Lean oracle subprocess |
 | `Agentic.Exec` | the interpreter in `IO` — the memoizing fold of `Exec.lean`'s `Dlg.execM`, its decode/re-ask loop, and the scripted answering service |
 | `Agentic.AgentDeck` | one live `agent-deck` session as an answering service: the three CLI commands, the poll loop, the staleness guard and five named transport failures |
-| `Example.Harden` | the walked examples (`harden`, `hello`), written in `Agentic.Notation` and shared by `tier1` and `agentic-run` |
+| `Example.Harden` | the walked examples (`harden`, `hello`), written in `Agentic.Workflow` and shared by `tier1` and `agentic-run` |
 | `tier0/`, `tier1/`, `bisim/`, `run/` | the four runners |
 
 **Not** in scope, and deliberately absent: the parser, and the typing judgment.
@@ -109,7 +108,7 @@ a failure:
 
 | front | rule |
 | --- | --- |
-| the printed program | `toJSON (progRawOut built)` against `request.program`, positions zeroed on both sides, and the print decoded back and re-encoded so a print no reader accepts fails here |
+| the printed program | `toJSON (progRawOut built)` against `request.program`, positions zeroed on both sides, and the print decoded back and re-encoded so a print no reader accepts fails here. Nineteen cases match name for name; the two walked examples match **up to alpha**, both sides' binders canonically renamed first, because the authoring surface generates the names it prints (see below). The renaming is scope-aware — a canonical name is the *level* of the binder that introduced it — so which binding every hole, scrutinee and subject reads stays pinned exactly |
 | the static folds | `level`, `size`, `askNodes`, `codes`, `costSummary` folded from the elaborated `Plan` |
 | the ask counts | `Agentic.Guards.askCounts` on the *printed* program — week-one code, which is what makes this a cross-check of the builder rather than a second reading of the same term |
 | each world | per `request.worlds` in order: the world re-serialized, its trace event by event (`code`, `addressee`, `scope`, `prompt`, `draw`, `answer`), and `billFresh` / `billMemo` |
@@ -132,71 +131,81 @@ one and the executed one drift and still read as agreement.
 They are also **what the authoring surface is for**. `tier1/Cases.hs` stays in
 `Agentic.Builder`'s index-level spelling — those nineteen are conformance
 fixtures, not prose — but a program a human writes is written in
-`Agentic.Notation`, and this is that program, verbatim from
+`Agentic.Workflow`, and this is that program, verbatim from
 `example/Example/Harden.hs`, whole but for two of the three panel members:
 
 ```haskell
 hardenProgram :: Program
-hardenProgram =
-  $( workflow
-       [|
-         do
-           guide <- ask (tool "cat")
-             [wf|Write out the house style guide, at most four short lines.|]
+hardenProgram = workflow W.do
+    guide <- ask (tool "cat") [wf|Write out the house style guide, at most four short lines.|]
 
-           draft <- ask (model "author" `servedBy` "deep") [wf|
-               Draft a patch satisfying:
-               {spec}
-               Reply with a unified diff only.|]
+    draft <- ask (model "author" `servedBy` "deep") [wf|
+        Draft a patch satisfying:
+        {spec}
+        Reply with a unified diff only.|]
 
-           result <- revising draft (atMost 2) \patch -> do
-             verdict <- panel
-               [ ask (model "reviewer-correct") [wf|
-                   {guide}
-                   Is this patch correct?
-                   {patch}
-                   {verdictSpec}|]
-               ]
-             amend (ask (model "author" `servedBy` "deep") [wf|
-                 {guide}
-                 Revise this patch:
-                 {patch}
-                 {verdict}
-                 Reply with the revised diff only.|])
+    result <- revising draft (atMost 2) \patch -> W.do
+        verdict <- panel
+          [ ask (model "reviewer-correct") [wf|
+              {guide}
+              Is this patch correct?
+              {patch}
+              {verdictSpec}|]
+          ]
+        amend (ask (model "author" `servedBy` "deep") [wf|
+            {guide}
+            Revise this patch:
+            {patch}
+            {verdict}
+            Reply with the revised diff only.|])
 
-           caseResult result
-             -- settled patch { … }
-             ( \patch -> do
-                 ok <- confirm (person "owner") [wf|
-                     Apply this patch?
-                     {patch}
-                     {flagSpec}|]
+    caseResult result
+      -- settled patch { … }
+      ( \patch -> W.do
+          ok <- confirm (person "owner") [wf|
+              Apply this patch?
+              {patch}
+              {flagSpec}|]
 
-                 ifFlag ok
-                   ( do
-                       act (tool "apply") [wf|
-                           Apply:
-                           {patch}
-                           Write the patched file here, then reply DONE.|]
-                       stop )
-                   stop )
-             -- unsettled { stop }
-             stop
-         |]
-   )
+          ifFlag ok
+            ( W.do
+                act (tool "apply") [wf|
+                    Apply:
+                    {patch}
+                    Write the patched file here, then reply DONE.|]
+                stop )
+            stop )
+      -- unsettled { stop }
+      stop
 ```
 
-Statement for statement with `harden.wf`: a bind is a Haskell bind, a fenced
-prompt is a `[wf|…|]` with the same `{name}` holes and the same layout rule, a
-`define` is a Haskell binding (`spec`, `verdictSpec`, `flagSpec` above), and
-there is no type application anywhere in the program. **Every name the program
-prints is a binder in that source** — `guide`, `draft`, `result`, `ok`, the two
-`patch` lambdas, `verdict` — because `$(workflow [| … |])` reads it off the
-binder rather than off a second spelling beside it. The surface underneath is
-unchanged and still exported: an author who prefers to see the names the
-program prints writes them, imports `Agentic.Workflow` directly, and gets
-`guide <- #guide =: ask …` with `W.do` and `R.do` as before. That is what the
-splice emits.
+Ordinary Haskell: no splice, no bracket, no label, and no type application
+anywhere in the program. Statement for statement with `harden.wf` — a bind is a
+Haskell bind, a fenced prompt is a `[wf|…|]` with the same `{name}` holes and
+the same layout rule, a `define` is a Haskell binding (`spec`, `verdictSpec`,
+`flagSpec` above), and `W.do` is `QualifiedDo`, which rebinds nothing beyond
+the block it is written on.
+
+**The names this program prints are not the names above.** A library cannot
+read a Haskell binder's spelling — only Template Haskell can, and the surface
+uses none — so each binding prints a name generated from its depth: `b0` is
+`guide`, `b1` is `draft`, `b2` is the carrier and the settled binder, `b3` is
+the review and the owner's flag, `r2` is the revision's result. A `{hole}`
+prints the name its *handle* carries, so a binder and the holes that read it
+cannot disagree, and tier1 compares this program against `example-000` up to
+alpha. An author who wants the printed program to read as this source does
+writes `named "guide" (ask …)`; the flagship deliberately does not.
+
+That is the whole price of the ruling, stated plainly: a printed program says
+`b0` where the `.wf` says `guide` unless someone writes `named`, and two of
+twenty-one tier1 cases compare their printed program loosely in exactly one
+respect — the spelling of binders. Nothing else is loosened. The nineteen
+builder-written cases still match name for name, every non-program comparand
+(the folds, the ask counts, the worlds, the traces, the bills) is exact for all
+twenty-one, and because the canonicalizer renames by binder level rather than
+by position, pointing a hole at the wrong binding of the right kind still
+fails: splicing `{guide}` where the flagship splices `{patch}` is caught as
+`prompt[2].interp.name: expected "c3", actual "c0"`.
 
 Comparison is on `Data.Aeson.Value`, never on bytes, so object key order and
 number formatting are free. `refused.pos`, `.excerpt` and `.message` are
@@ -222,7 +231,7 @@ nix develop -c cabal run agentic-run -- run  harden --session my-session
 ```
 
 `<example>` is `harden` or `hello`: the two walked programs of
-`agent-cat/example/`, written in `Agentic.Notation` as `Example.Harden`. **They
+`agent-cat/example/`, written in `Agentic.Workflow` as `Example.Harden`. **They
 are the same values `tier1` pins against the frozen corpus** — nothing is
 rebuilt, adapted or trimmed for execution — which is what makes a run evidence
 about the language rather than about this executable.
@@ -432,16 +441,14 @@ src/Agentic/Plan.hs     the typed Plan and its static folds
 src/Agentic/World.hs    WorldSpec, toWorld, trace, the bills, the event JSON
 src/Agentic/Builder.hs  the production surface and its elaboration
 src/Agentic/WF.hs       the [wf|…|] prompt quoter, and what a {hole} may name
-src/Agentic/Workflow.hs the authoring surface: labels, questions, the indexed block
-src/Agentic/Workflow/Do.hs        W.do — the workflow block's grammar
-src/Agentic/Workflow/Revision.hs  R.do — review once, amend once, and no more
-src/Agentic/Notation.hs the notation: $(workflow [| do … |]), names off the binders
+src/Agentic/Workflow.hs the authoring surface: handles, questions, the indexed block
+src/Agentic/Workflow/Do.hs        W.do — the one block grammar, workflow and revision
 src/Agentic/Gen.hs      the generators the bisimulation draws from
 src/Agentic/Observe.hs  the reply assembly both runners share
 src/Agentic/Oracle.hs   the line-delimited JSON client for the Lean oracle
 src/Agentic/Exec.hs     the IO interpreter: the memoizing fold and the decode loop
 src/Agentic/AgentDeck.hs  one agent-deck session as an answering service
-example/Example/Harden.hs the walked examples, written in the notation
+example/Example/Harden.hs the walked examples, written in the authoring surface
 tier0/Main.hs           the corpus runner
 tier1/Cases.hs          the rebuilt cases, each quoting its surface source
 tier1/Main.hs           the rebuilt-case runner; it owns every comparison

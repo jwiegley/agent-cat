@@ -1,3 +1,4 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -6,6 +7,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskellQuotes #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -45,11 +47,19 @@
 -- another beside it, and an empty literal never reaches the term.
 --
 -- __What a hole may name__ is the 'Says' class: a live binding ('V'), which
--- splices as an @interp@ chunk under its own name, or a @define@ — a plain
--- 'Text' or a @Words@ value — which splices as the literal chunks it is. That
--- is what makes @{spec}@ and @{patch}@ look identical in the source and mean
--- different things, exactly as the @.wf@ parser decides by whether the name is
--- a @define@.
+-- splices as an @interp@ chunk under the name that binding /prints/, or a
+-- @define@ — a plain 'Text' or a @Words@ value — which splices as the literal
+-- chunks it is. That is what makes @{spec}@ and @{patch}@ look identical in
+-- the source and mean different things, exactly as the @.wf@ parser decides by
+-- whether the name is a @define@.
+--
+-- __The printed name comes from the handle, never from the source.__ A hole
+-- names a Haskell variable, and a Haskell variable's spelling is not readable
+-- without Template Haskell — which the surface no longer uses. So @{guide}@
+-- resolves to the /value/ @guide@, and what the chunk prints is the name that
+-- value carries ('vName'), which is the same 'Text' the binder printed. Binder
+-- and hole therefore agree by construction rather than by convention, and the
+-- one class of bug the labelled surface allowed has no spelling here.
 --
 -- __Staging.__ A hole emits @'varE' ('mkName' n)@, an /unqualified/ name that
 -- resolves in the ordinary lexical scope at the splice site — lambda binders,
@@ -66,25 +76,29 @@ module Agentic.WF
     -- * What a hole may name
     V (..),
     Says (..),
+
+    -- * Finding a handle's binding
+    ScopeEq,
+    KnownIx (..),
   )
 where
 
 import Agentic.Builder
   ( Code,
-    KnownVar,
-    LookupC,
+    Codes,
     Piece,
     Scope,
     Spliceable,
     Words,
-    hole,
+    holeI,
     lit,
   )
+import Agentic.Plan (Var (..))
 import Data.Char (isAlphaNum, isSpace)
 import Data.List (dropWhileEnd)
 import Data.Text (Text)
 import qualified Data.Text as T
-import GHC.TypeLits (KnownSymbol, Symbol)
+import GHC.TypeLits (ErrorMessage (..), TypeError)
 import Language.Haskell.TH (Exp (ListE), ExpQ, Q, litE, mkName, stringL, varE)
 import Language.Haskell.TH.Quote (QuasiQuoter (..))
 
@@ -92,10 +106,58 @@ import Language.Haskell.TH.Quote (QuasiQuoter (..))
 -- What a hole may name
 -- ---------------------------------------------------------------------------
 
--- | A live binding: the name it prints under, and the kind of answer it stands
--- for. Its constructor is library-private — a handle can only come from a
--- bind, so the only names in play are the ones the author introduced.
-data V (n :: Symbol) (c :: Code) = V
+-- | A live binding: the name it prints under, and the scope it was bound
+-- into — itself at index @0@, so @h@ is @c ': (whatever was live)@.
+--
+-- __The scope is the whole type-level content.__ This layer has no names at
+-- the type level, so what identifies a binding is /where/ it sits and not what
+-- it is called; the name is ordinary runtime data, generated at the bind or
+-- given by 'Agentic.Workflow.named', and carried here so that every hole
+-- prints it. The constructor is library-private in effect: only
+-- "Agentic.Workflow" applies it, so a handle can only come from a bind.
+data V (h :: Scope) (c :: Code) = V {vName :: Text}
+
+-- | Structural equality of scopes, as a closed family, so a hole can find its
+-- binding without overlapping instances.
+--
+-- The nameless twin of "Agentic.Builder"'s @SymEq@: a scope grows by one entry
+-- per binding, so two live bindings never share a scope and equality here is
+-- exactly identity of bindings.
+type family ScopeEq (a :: Scope) (b :: Scope) :: Bool where
+  ScopeEq a a = 'True
+  ScopeEq a b = 'False
+
+-- | The de Bruijn index that reads, at the use site's scope @s@, the binding
+-- whose own scope is @h@.
+--
+-- The nameless twin of "Agentic.Builder"'s @KnownVar@, and the same walk:
+-- one 'VThere' per entry bound since, until the scopes coincide. Lean:
+-- @Bindings.push@'s repeated @Sub.wk@ (@Check.lean:94@).
+class KnownIx (h :: Scope) (s :: Scope) (c :: Code) where
+  ixOf :: Var (Codes s) c
+
+-- | The boolean-dispatched worker of 'KnownIx'.
+class KnownIx' (eq :: Bool) (h :: Scope) (s :: Scope) (c :: Code) where
+  ixOf' :: Var (Codes s) c
+
+instance KnownIx' (ScopeEq h s) h s c => KnownIx h s c where
+  ixOf = ixOf' @(ScopeEq h s) @h @s @c
+
+instance (h ~ s, s ~ ('(n, c) ': s')) => KnownIx' 'True h s c where
+  ixOf' = VHere
+
+instance KnownIx h s c => KnownIx' 'False h ('(n, d) ': s) c where
+  ixOf' = VThere (ixOf @h @s @c)
+
+-- | The refusal @unbound@ becomes here: a handle read where its binding is no
+-- longer live. Lean: @Check.lean:99@.
+instance
+  TypeError
+    ( 'Text "this binding is not live here; nothing in scope answers to it"
+    ) =>
+  KnownIx' 'False h '[] c
+  where
+  ixOf' = error "KnownIx' 'False h '[]: unreachable, the instance is a TypeError"
 
 -- | Anything a @{…}@ may name.
 --
@@ -106,14 +168,14 @@ class Says a (s :: Scope) where
   -- | The chunks this value contributes, in place.
   says :: a -> Words s
 
--- | A live binding: one @interp@ chunk, under the binding's own name. The
+-- | A live binding: one @interp@ chunk, under the name the binding prints. The
 -- kind must have a text of its own, so a flag hole is refused here exactly as
 -- @usePrompt@ refuses it.
 instance
-  (KnownSymbol n, KnownVar n s, Spliceable (LookupC n s), LookupC n s ~ c) =>
-  Says (V n c) s
+  (KnownIx h s c, Spliceable c) =>
+  Says (V h c) s
   where
-  says _ = [hole @n]
+  says v = [holeI @c @s (vName v) (ixOf @h @s @c)]
 
 -- | A @define@: one literal chunk, never fused with the literals beside it.
 instance Says Text s where

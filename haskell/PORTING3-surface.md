@@ -459,6 +459,9 @@ example entries rebuilt through the notation, printed `Raw` value-equal under
 `zeroPos` and whole reply equal), tier0 128/128, and
 `agentic-run run harden --scripted` 7/7 questions, exit 0.
 
+**This ruling has in turn been superseded: the splice is gone, and with it the
+names. See §2.2-REVISED-2, at the end of this document.**
+
 ### 2.3 Sketch C — a Flow-flavoured indexed category
 
 agent-functor's taste, transplanted as far as §1.3 permits (prompts stay data;
@@ -1463,3 +1466,184 @@ the two example entries.
 4. The refusal cases of `PORTING3-proto/{Bad,Bad2}.hs` promoted to a
    `should-not-compile` note in the surface module's haddock — GHC has no
    negative-test harness here, and the messages are the design.
+
+---
+
+## 2.2-REVISED-2 — the second ruling: no Template Haskell, and no names
+
+*(Appended after the landing of §2.2-REVISED. It supersedes §2.2-REVISED,
+§3.3, §5.2, §5.4 and §5.5, and the module list of §3.1; everything else in this
+document stands.)*
+
+### The ruling
+
+The owner, on the landed notation:
+
+> I do NOT like using `$(workflow [| do`. This should not rely on Template
+> Haskell in this way, but just be regular Haskell.
+
+So `Agentic.Notation` is **deleted** — module, cabal entry, README mentions —
+and with it the last program-level splice. What survives from the two earlier
+landings is exactly what the owner has praised or accepted: bare binds
+(§2.2-REVISED), `QualifiedDo`'s `W.do`, which is a plain extension, and the
+`[wf|…|]` quoter, whose interpolation is the part of agent-functor the owner
+asked for. **The objection is to program-level Template Haskell, not to
+quasiquotation**: a prompt is data, and a quoter that produces data is not a
+second surface language.
+
+### The forced trade
+
+A Haskell binder's spelling is not readable by a library. Only Template
+Haskell can read it. So dropping the splice drops the names, and the surface
+has to be honest about which of the three it gives up:
+
+| | keeps binder names | no second spelling | no Template Haskell |
+|---|---|---|---|
+| §2.1 Sketch A — `#guide =: …` | ✓ | ✗ | ✓ |
+| §2.2-REVISED — `$(workflow [| … |])` | ✓ | ✓ | ✗ |
+| **this landing** | **✗** | ✓ | ✓ |
+
+The third column is the ruling and the second is the previous ruling, so the
+first is what goes.
+
+### What went
+
+`Agentic.Workflow` no longer carries names at the type level **at all**. The
+`Symbol`-keyed `Scope`, `SymEq`, `LookupC`, `Fresh`, `KnownVar`,
+`KnownScope`, `OverloadedLabels`, `Label`, `Named` and `(=:)` are gone from
+this layer; so are `Agentic.Notation` and `Agentic.Workflow.Revision` (see
+"two adjustments" below). `Agentic.Builder` keeps every one of them, untouched:
+the nineteen Builder-written tier1 cases, `Agentic.Gen` and the corpus pins all
+depend on the named API, and this landing does not touch a line of it.
+
+The block's index is the list of live **codes** and nothing else. It is still
+spelled as the Builder's `Scope`, with every entry carrying the empty symbol
+(`type An c = '("", c)`), because `Codes` is not injective and it is the
+Builder's types — `Blk s`, `Rhs s c`, `Words s` — that have to line up. That is
+a spelling, not a second meaning: nothing in this layer ever reads the symbol.
+
+### What replaced it
+
+**A handle is a position, not a name.** `V h c` records the scope it was bound
+into, itself at index 0; a use at scope `s` walks `h` down to `s`, one `VThere`
+per binding made since, dispatched on `ScopeEq` exactly as the Builder's
+`KnownVar` dispatches on `SymEq`. A scope grows by one entry per binding, so
+two live bindings never share a scope and scope equality *is* identity of
+bindings. Reading a handle whose binding is no longer live is the same refusal
+it always was, and still a type error:
+`this binding is not live here; nothing in scope answers to it`.
+
+**The printed name is generated from the depth.** A binding made with `d`
+bindings live prints `b<d>`; so does a revision's carrier (bound at the
+enclosing depth) and the settled binder of its `case` (same depth, disjoint
+scope); the review binding is one deeper; and the revision's *result* — printed
+twice, never in scope — prints `r<d>`, which no binding can collide with. Every
+name is therefore a function of the program's shape alone, reproducible across
+machines and builds, and fresh by construction: at depth `d` the live names are
+exactly `b0 … b(d-1)`.
+
+**A block carries its live names.** The scope index says how many bindings are
+live and at which kinds; it cannot say what they are *called*, and one
+construct needs to know — `known here`, which prints them. So `W` is
+`Live -> (a -> Res j) -> Res i`: each binding conses the name it printed onto
+the list and `knownHere` prints the list, rather than recomputing names from
+the depth, which would print `b0` for a binding the author named `guide`. That
+was a real bug in the first cut of this landing, caught by exercising the
+surface the two examples do not reach (`knownHere`, `named`, `annotated`,
+`drawing`, a single-question review, `caseVerdict`).
+
+**`named` overrides one**, for an author who wants a printed program that reads
+well:
+
+```haskell
+guide <- named "guide" (ask (tool "cat") [wf|…|])
+```
+
+It is never required and the flagship does not use it.
+
+**A hole prints the handle's name.** `{guide}` resolves to the Haskell *value*
+`guide` — `mkName`, in the ordinary lexical scope at the splice, as before —
+and the chunk it writes carries `vName` of that value, which is the very `Text`
+its binder printed. Binder and hole agree **by construction**; the labelled
+surface could only ask for it by convention. Two consequences worth naming:
+the class of bug §2.2's table worried about (`#drafted` beside a binder called
+`draft`) has no spelling at all, and `-Wno-unused-matches` is gone from
+`Example.Harden` — a binding read only by a hole is now genuinely read, because
+there is no bracket for the renamer to lose it in.
+
+### Two adjustments the target text needed
+
+The flagship was specified verbatim and compiles as specified but for these,
+each recorded here because each is a design consequence and not a typo:
+
+1. **`ok <- confirm (person "owner") …`, not `ok <- ask …`.** A bare `ask` in
+   binding position is a *text* question — Lean's "a name whose only use is
+   being spliced is a text question" (`Check.lean:207`) made structural. Making
+   it kind-polymorphic instead would leave `guide`'s and `draft`'s kind
+   determined by nothing at all (a hole constrains `Spliceable`, which both
+   `text` and `verdict` satisfy), so every prompt-only binding in the language
+   becomes an ambiguous type. `confirm` is the surface's existing way to say
+   "a yes/no question", and `ifFlag` accepts nothing else.
+
+2. **The revision's clauses are written in `W.do`, not `R.do`.** The target
+   text asked for `W.do`, and it works, because the *stage* index already tells
+   the two grammars apart: at `Review c s` only a review may stand, and after
+   it only `amend` — a second statement there is the same refusal as before,
+   `a bounded revision reviews first … and then amends, and has no other
+   statement`, now an instance of `Step` rather than of a second `>>`. So
+   `Agentic.Workflow.Revision` has nothing left to do and is deleted. One `do`
+   qualifier, one grammar to explain.
+
+### The alpha pin, and its exact scope
+
+Generated names are not the frozen corpus's names, so **two** of tier1's
+twenty-one cases — `example-000` and `example-001`, listed in
+`Cases.alphaNamed` — compare **one field**, `request.program`, up to alpha.
+Nothing else moves anywhere:
+
+* the other nineteen cases keep their exact, name-for-name program comparison;
+* every non-program comparand stays exact for all twenty-one — `level`, `size`,
+  `askNodes`, `codes`, `costSummary`, `blockAsks`, `fnAsks`, and per world the
+  world's re-serialization, its trace event by event and both bills. A trace
+  never carries a binder's name;
+* the printed program's round-trip through the codec stays exact, because it
+  compares the print with itself.
+
+`canonProgram` (`tier1/Main.hs`) is a total structural rename over
+`RawProgram`, applied to **both** sides, scope-aware rather than a flat
+substitution: a canonical name is the *level* of the binder that introduced it,
+so binders in disjoint scopes may share one (the flagship's carrier and settled
+binder do, on both sides) and a free name is left exactly as written. The
+traversal order, which is the order levels are handed out and therefore the
+whole definition:
+
+1. the function table, each function alone: parameters take levels `0…n-1` in
+   declaration order, then body statements in order — a `bind` takes the next
+   level, its right-hand side read *before* that name is live — then `answer`;
+2. the main block from level 0, down the `rest` spine: a `bind` takes the
+   current level, its source is read in the scope before it, the rest continues
+   one level deeper;
+3. inside a `revising`: the subject is read in the enclosing scope, the carrier
+   takes the level after the result's, the review binding the one after that,
+   and the review and amendment are read in those scopes;
+4. a `caseResult`'s settled binder takes the current level and is live in the
+   settled arm only; the arms of an `if` and of a `case` are read in the same
+   scope, in constructor order;
+5. within a question, its prompt left to right, an `interp` chunk being a read
+   like any other.
+
+What survives the weakening is everything a name is not — including **which
+binding every hole, scrutinee and subject reads**. That is not a claim on
+paper: swapping `{guide}` for `{draft}` in the flagship's first review, a
+program that still compiles and still holes a live text binding, fails tier1 at
+`$.main.bind.rest.bind.rest.bind.src.revising.review.panel.members[0].prompt[0].interp.name:
+expected "c0", actual "c1"` (and, separately, in the trace).
+
+### Gates, at this landing
+
+`cabal build all` from a clean build directory, every target, zero warnings at
+`-Wall`; tier0 128/128; tier1 21/21 (nineteen exact, two alpha);
+`agentic-run plan harden` → `branch`, size 36, 19 ask nodes, 9 paths folding
+between 5 and 15 — the folds are name-independent and did not move;
+`agentic-run run harden --scripted` → 7 events, `billFresh 7`, `billMemo 7`,
+exit 0.
