@@ -4,8 +4,9 @@ The Haskell implementation of agent-cat's operational terms, living beside
 the Lean formalization it implements (the repository root) — the raw syntax
 of the agentic DSL, its JSON codec, the term-level guards, the ask counts and
 the string layer, and above them the typed `Plan`, its meaning in a world and
-the production surface that builds one — kept honest by replaying a frozen
-corpus produced by the Lean formalization.
+the production surface that builds one, and above *that* the authoring surface
+a human actually writes — kept honest by replaying a frozen corpus produced by
+the Lean formalization.
 
 Lean is normative. This directory does not ask to be believed on its own
 authority: every claim it makes about the language is checked against 128
@@ -25,8 +26,9 @@ tier1: 21 passed, 0 failed, of 21 cases
 ```
 
 `tier0` replays every entry through the codec, the guards and the string layer.
-`tier1` **rebuilds** twenty-one of the checked entries in the production surface
-and holds the rebuilt program against the frozen one on both fronts: the
+`tier1` **rebuilds** twenty-one of the checked entries — nineteen in the
+production surface, and the two walked examples in the authoring surface above
+it — and holds each rebuilt program against the frozen one on both fronts: the
 program it prints, and the whole reply — folds, counts, and one trace and two
 bills per world.
 
@@ -72,10 +74,12 @@ and only if nothing failed, so both are usable directly as CI gates.
 | `Agentic.Plan` | the typed `Plan` — five formers, `DataKinds` codes, de Bruijn `Expr` — and its static folds `level`, `size`, `askNodes`, `codes`, `costSummary` |
 | `Agentic.World` | `WorldSpec` and `toWorld`, the `trace` of a plan through a world, the fresh and memo bills, and the oracle's event JSON |
 | `Agentic.Builder` | the production surface: typed combinators that both print a `RawProgram` and elaborate to the `Plan` the Lean checker elaborates the same construct to |
+| `Agentic.WF` | the `[wf\|…\|]` prompt quoter — prose with `{name}` holes, laid out as the `.wf` fence lays it out and chunked as Lean's `Prompt.normalize` chunks it — and `Says`, which decides whether a hole is a binding or a `define` |
+| `Agentic.Workflow` (+ `.Do`, `.Revision`) | the **authoring** surface: an indexed block in which a bind is a Haskell bind, `#label` is the name the program prints, and every combinator is an application of an `Agentic.Builder` entry point |
 | `Agentic.Gen`, `Agentic.Observe`, `Agentic.Oracle` | the bisimulation surface: generators, the reply assembly both runners share, and the line-delimited JSON client for the Lean oracle subprocess |
 | `Agentic.Exec` | the interpreter in `IO` — the memoizing fold of `Exec.lean`'s `Dlg.execM`, its decode/re-ask loop, and the scripted answering service |
 | `Agentic.AgentDeck` | one live `agent-deck` session as an answering service: the three CLI commands, the poll loop, the staleness guard and five named transport failures |
-| `Example.Harden` | the walked examples (`harden`, `hello`) rebuilt in the builder, shared by `tier1` and `agentic-run` |
+| `Example.Harden` | the walked examples (`harden`, `hello`), written in `Agentic.Workflow` and shared by `tier1` and `agentic-run` |
 | `tier0/`, `tier1/`, `bisim/`, `run/` | the four runners |
 
 **Not** in scope, and deliberately absent: the parser, and the typing judgment.
@@ -118,11 +122,71 @@ the fresh one. The five guard vectors and the refused entries are
 **unrepresentable** in the builder by design; tier0 covers them.
 
 The last two are the **walked examples** — `example-000`, the flagship of
-`agent-cat/example/harden.wf`, and `example-001`, `hello.wf` — rebuilt in
+`agent-cat/example/harden.wf`, and `example-001`, `hello.wf` — written in
 `Example.Harden` rather than in `tier1/Cases.hs`. They live in their own
 (internal) library because two components must see the same value: tier1 pins
 it, and `agentic-run` runs it. Compiling the program twice would let the pinned
 one and the executed one drift and still read as agreement.
+
+They are also **what the authoring surface is for**. `tier1/Cases.hs` stays in
+`Agentic.Builder`'s index-level spelling — those nineteen are conformance
+fixtures, not prose — but a program a human writes is written in
+`Agentic.Workflow`, and this is that program, verbatim from
+`example/Example/Harden.hs`, whole but for two of the three panel members:
+
+```haskell
+hardenProgram :: Program
+hardenProgram = workflow W.do
+  guide <- #guide =: ask (tool "cat")
+    [wf|Write out the house style guide, at most four short lines.|]
+
+  draft <- #draft =: ask (model "author" `servedBy` "deep") [wf|
+      Draft a patch satisfying:
+      {spec}
+      Reply with a unified diff only.|]
+
+  #result =: revising draft #patch (atMost 2) \patch -> R.do
+    verdict <- #verdict =: panel
+      [ ask (model "reviewer-correct") [wf|
+          {guide}
+          Is this patch correct?
+          {patch}
+          {verdictSpec}|]
+      ]
+    amend (ask (model "author" `servedBy` "deep") [wf|
+        {guide}
+        Revise this patch:
+        {patch}
+        {verdict}
+        Reply with the revised diff only.|])
+
+  caseResult #patch
+    -- settled patch { … }
+    ( \patch -> W.do
+        ok <- #ok =: confirm (person "owner") [wf|
+            Apply this patch?
+            {patch}
+            {flagSpec}|]
+
+        ifFlag ok
+          ( W.do
+              act (tool "apply") [wf|
+                  Apply:
+                  {patch}
+                  Write the patched file here, then reply DONE.|]
+              stop )
+          stop )
+    -- unsettled { stop }
+    stop
+```
+
+Statement for statement with `harden.wf`: a bind is a Haskell bind, a fenced
+prompt is a `[wf|…|]` with the same `{name}` holes and the same layout rule, a
+`define` is a Haskell binding (`spec`, `verdictSpec`, `flagSpec` above), and
+there is no type application anywhere in the program. The `#label` is the name
+the *program* prints; the Haskell binder is the name *the module* reads. They
+are spelled the same by convention, and nothing but the corpus enforces that —
+which is exactly why these two programs are pinned.
 
 Comparison is on `Data.Aeson.Value`, never on bytes, so object key order and
 number formatting are free. `refused.pos`, `.excerpt` and `.message` are
@@ -148,7 +212,7 @@ nix develop -c cabal run agentic-run -- run  harden --session my-session
 ```
 
 `<example>` is `harden` or `hello`: the two walked programs of
-`agent-cat/example/`, rebuilt in `Agentic.Builder` as `Example.Harden`. **They
+`agent-cat/example/`, written in `Agentic.Workflow` as `Example.Harden`. **They
 are the same values `tier1` pins against the frozen corpus** — nothing is
 rebuilt, adapted or trimmed for execution — which is what makes a run evidence
 about the language rather than about this executable.
@@ -357,12 +421,16 @@ src/Agentic/Text.hs     stringOp, Verdict — the trusted string base
 src/Agentic/Plan.hs     the typed Plan and its static folds
 src/Agentic/World.hs    WorldSpec, toWorld, trace, the bills, the event JSON
 src/Agentic/Builder.hs  the production surface and its elaboration
+src/Agentic/WF.hs       the [wf|…|] prompt quoter, and what a {hole} may name
+src/Agentic/Workflow.hs the authoring surface: labels, questions, the indexed block
+src/Agentic/Workflow/Do.hs        W.do — the workflow block's grammar
+src/Agentic/Workflow/Revision.hs  R.do — review once, amend once, and no more
 src/Agentic/Gen.hs      the generators the bisimulation draws from
 src/Agentic/Observe.hs  the reply assembly both runners share
 src/Agentic/Oracle.hs   the line-delimited JSON client for the Lean oracle
 src/Agentic/Exec.hs     the IO interpreter: the memoizing fold and the decode loop
 src/Agentic/AgentDeck.hs  one agent-deck session as an answering service
-example/Example/Harden.hs the walked examples, rebuilt in the builder
+example/Example/Harden.hs the walked examples, written in the authoring surface
 tier0/Main.hs           the corpus runner
 tier1/Cases.hs          the rebuilt cases, each quoting its surface source
 tier1/Main.hs           the rebuilt-case runner; it owns every comparison
@@ -376,6 +444,8 @@ PORTING.md              week one: the types, the encoding, the guard order,
                         the string layer, the comparison rules
 PORTING2-core.md        week two: Agentic.Plan and Agentic.World
 PORTING2-elab.md        week two: the elaboration, Agentic.Builder, tier1
+PORTING3-surface.md     week six: the authoring surface — why an indexed block,
+                        what the corpus fixes about it, and what it desugars to
 ```
 
 ## Sources of record
@@ -386,9 +456,10 @@ PORTING2-elab.md        week two: the elaboration, Agentic.Builder, tier1
   `doc/research/dsl-redesign/connection.md`. That
   page is the design of record for this repository.
 * **The port** — [`PORTING.md`](PORTING.md),
-  [`PORTING2-core.md`](PORTING2-core.md) and
-  [`PORTING2-elab.md`](PORTING2-elab.md), which every module here is written
-  against.
+  [`PORTING2-core.md`](PORTING2-core.md),
+  [`PORTING2-elab.md`](PORTING2-elab.md) and
+  [`PORTING3-surface.md`](PORTING3-surface.md), which every module here is
+  written against.
 * **The wire format** —
   `doc/conformance-schema.md`.
 * **The arbiter** — `test/corpus/*.json`. Where

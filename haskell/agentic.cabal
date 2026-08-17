@@ -30,6 +30,15 @@ description:
   program rebuilt in the builder as a shared internal library (@Example.Harden@,
   the @examples@ library), and the @agentic-run@ executable, which plans, prices
   and runs them.
+  .
+  Week six replaces what a human /writes/, and nothing under it: @Agentic.WF@'s
+  @[wf|…|]@ prompt quoter and @Agentic.Workflow@'s indexed block — with its
+  three @do@ grammars in @Agentic.Workflow.Do@ and @Agentic.Workflow.Revision@ —
+  are sugar whose every combinator is an application of an @Agentic.Builder@
+  entry point, so a program written in them prints and elaborates through the
+  one pairing tier1 already pins. @Example.Harden@ is written that way, and is
+  the proof: the same two frozen entries, statement for statement with
+  @example\/harden.wf@.
 
 build-type:      Simple
 license:         MIT
@@ -59,6 +68,7 @@ common settings
     , process
     , QuickCheck
     , scientific
+    , template-haskell
     , text
     , vector
 
@@ -76,9 +86,14 @@ library
     Agentic.Plan
     Agentic.Raw
     Agentic.Text
+    Agentic.WF
+    Agentic.Workflow
+    Agentic.Workflow.Do
+    Agentic.Workflow.Revision
     Agentic.World
 
--- The worked examples, written in the production surface: the flagship of
+-- The worked examples, written in the authoring surface — `Agentic.Workflow`,
+-- which is sugar over the production one: the flagship of
 -- `agent-cat/example/harden.wf` and the smallest program of `hello.wf`.
 --
 -- An internal library rather than a directory shared by two `other-modules`

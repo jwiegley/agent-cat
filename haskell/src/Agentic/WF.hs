@@ -1,0 +1,237 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskellQuotes #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE UndecidableInstances #-}
+
+-- |
+-- Module      : Agentic.WF
+-- Description : The @[wf|…|]@ prompt quoter, and what a @{hole}@ may name.
+--
+-- A prompt in the @.wf@ language is prose in a fence with @{name}@ holes in
+-- it. This module is that fence, as a quasiquoter, and nothing else: it is not
+-- a parser of the language (@connection.md@ D10), and the only production it
+-- knows is the hole.
+--
+-- __The grammar.__ The only metacharacter is @{@.
+--
+--   * @{name}@, where @name@ is a Haskell variable identifier, is a hole.
+--   * @{{@ is a literal @{@.
+--   * @}@ is always literal and is never doubled, so a prompt full of JSON
+--     braces needs no escaping on the closing side.
+--   * A @{@ that is neither of the above is a compile error quoting the
+--     fragment. A mistyped hole is the one failure mode that would change a
+--     prompt without saying so, and prompts are what the corpus compares.
+--
+-- __The layout__ is @string-interpolate@'s @[__i|…|]@ rule, which is also what
+-- the @.wf@ fence does: CRLF becomes LF, leading and trailing whitespace-only
+-- lines are dropped, the longest common leading-whitespace prefix of the
+-- remaining non-blank lines is stripped from every line, the lines are joined
+-- with @\\n@, and there is __no trailing newline__. A prompt that must end in
+-- one is spelled @[wf|…|] '<>' ['Agentic.Builder.lit' "\\n"]@; the @.wf@ fence
+-- cannot write one either.
+--
+-- __Chunking is normative.__ Lean's @Prompt.normalize@
+-- (@Agentic\/Core\/Dsl\/Syntax.lean:152@) drops empty literals and
+-- __deliberately does not fuse adjacent literals__, so a @define@ spliced into
+-- a prompt contributes /its own chunk/: @example-000@'s drafting prompt is
+-- three chunks and not one. This quoter reproduces exactly that — the
+-- contiguous literal run between two holes is one chunk, a spliced 'Text' is
+-- another beside it, and an empty literal never reaches the term.
+--
+-- __What a hole may name__ is the 'Says' class: a live binding ('V'), which
+-- splices as an @interp@ chunk under its own name, or a @define@ — a plain
+-- 'Text' or a @Words@ value — which splices as the literal chunks it is. That
+-- is what makes @{spec}@ and @{patch}@ look identical in the source and mean
+-- different things, exactly as the @.wf@ parser decides by whether the name is
+-- a @define@.
+--
+-- __Staging.__ A hole emits @'varE' ('mkName' n)@, an /unqualified/ name that
+-- resolves in the ordinary lexical scope at the splice site — lambda binders,
+-- @where@ bindings and top-level bindings alike. That is what lets @{patch}@
+-- mean the carrier inside a revision and the settled binder inside the arm,
+-- two different values with the same spelling, correct in both places, and it
+-- is what makes a typo a plain @Variable not in scope: guiide@ rather than a
+-- type-level puzzle. @lit@ and @says@ are emitted as statically resolved
+-- names, so an author who shadows @lit@ locally cannot thereby break a prompt.
+module Agentic.WF
+  ( -- * The quoter
+    wf,
+
+    -- * What a hole may name
+    V (..),
+    Says (..),
+  )
+where
+
+import Agentic.Builder
+  ( Code,
+    KnownVar,
+    LookupC,
+    Piece,
+    Scope,
+    Spliceable,
+    Words,
+    hole,
+    lit,
+  )
+import Data.Char (isAlphaNum, isSpace)
+import Data.List (dropWhileEnd)
+import Data.Text (Text)
+import qualified Data.Text as T
+import GHC.TypeLits (KnownSymbol, Symbol)
+import Language.Haskell.TH (Exp (ListE), ExpQ, Q, litE, mkName, stringL, varE)
+import Language.Haskell.TH.Quote (QuasiQuoter (..))
+
+-- ---------------------------------------------------------------------------
+-- What a hole may name
+-- ---------------------------------------------------------------------------
+
+-- | A live binding: the name it prints under, and the kind of answer it stands
+-- for. Its constructor is library-private — a handle can only come from a
+-- bind, so the only names in play are the ones the author introduced.
+data V (n :: Symbol) (c :: Code) = V
+
+-- | Anything a @{…}@ may name.
+--
+-- The three instances are the three things the @.wf@ language lets a hole
+-- resolve to, and no more: a name in scope, a @define@ that is a string, and a
+-- @define@ that is itself a fence.
+class Says a (s :: Scope) where
+  -- | The chunks this value contributes, in place.
+  says :: a -> Words s
+
+-- | A live binding: one @interp@ chunk, under the binding's own name. The
+-- kind must have a text of its own, so a flag hole is refused here exactly as
+-- @usePrompt@ refuses it.
+instance
+  (KnownSymbol n, KnownVar n s, Spliceable (LookupC n s), LookupC n s ~ c) =>
+  Says (V n c) s
+  where
+  says _ = [hole @n]
+
+-- | A @define@: one literal chunk, never fused with the literals beside it.
+instance Says Text s where
+  says t = [lit t]
+
+-- | A @define@ written as a fence, or one that holes an earlier define: its
+-- own chunks, spliced in place.
+instance s ~ s' => Says [Piece s'] s where
+  says = id
+
+-- ---------------------------------------------------------------------------
+-- The quoter
+-- ---------------------------------------------------------------------------
+
+-- | A prompt: prose, with @{name}@ holes.
+--
+-- > [wf|
+-- >     {guide}
+-- >     Is this patch correct?
+-- >     {patch}
+-- >     {verdictSpec}|]
+--
+-- is, after layout and the hole scan,
+--
+-- > concat [ says guide
+-- >        , [lit (T.pack "\nIs this patch correct?\n")]
+-- >        , says patch
+-- >        , [lit (T.pack "\n")]
+-- >        , says verdictSpec ]
+--
+-- — five chunks where @guide@ and @patch@ are bindings and @verdictSpec@ is a
+-- @define@, which is @example-000@'s first panel member, chunk for chunk.
+wf :: QuasiQuoter
+wf =
+  QuasiQuoter
+    { quoteExp = wfExp,
+      quotePat = const (fail "[wf|…|] is a prompt, and a prompt is an expression"),
+      quoteType = const (fail "[wf|…|] is a prompt, and a prompt is an expression"),
+      quoteDec = const (fail "[wf|…|] is a prompt, and a prompt is an expression")
+    }
+
+-- | One piece of the quoted text, before staging.
+data Frag = FLit String | FHole String
+  deriving (Eq, Show)
+
+wfExp :: String -> Q Exp
+wfExp raw = do
+  frags <- either fail pure (parseWf raw)
+  pieces <- mapM piece frags
+  [|concat $(pure (ListE pieces))|]
+  where
+    piece :: Frag -> ExpQ
+    piece (FLit t) = [|[lit (T.pack $(litE (stringL t)))]|]
+    piece (FHole n) = [|says $(varE (mkName n))|]
+
+-- ---------------------------------------------------------------------------
+-- The rule
+-- ---------------------------------------------------------------------------
+
+-- | Layout, then holes, then @normalize@.
+parseWf :: String -> Either String [Frag]
+parseWf = fmap normalize . holes . layout
+
+-- | @[__i|…|]@'s rule: CRLF is LF, surrounding blank lines go, the common
+-- leading whitespace of the remaining lines goes, line breaks stay, and there
+-- is no trailing newline.
+layout :: String -> String
+layout =
+  joinLines
+    . dedent
+    . dropWhileEnd blank
+    . dropWhile blank
+    . lines
+    . crlf
+  where
+    crlf ('\r' : '\n' : r) = '\n' : crlf r
+    crlf (c : r) = c : crlf r
+    crlf [] = []
+
+    blank = all isSpace
+
+    joinLines [] = ""
+    joinLines xs = foldr1 (\a b -> a ++ '\n' : b) xs
+
+    dedent ls = map (drop (length pre)) ls
+      where
+        pre = case map (takeWhile isSpace) (filter (not . blank) ls) of
+          [] -> ""
+          (p : ps) -> foldl common p ps
+        common a b = map fst (takeWhile (uncurry (==)) (zip a b))
+
+-- | The only syntax: @{name}@ is a hole, @{{@ is a literal brace, @}@ is
+-- always literal. A @{@ that is neither is an error naming the fragment.
+holes :: String -> Either String [Frag]
+holes = go ""
+  where
+    go acc [] = Right [FLit (reverse acc)]
+    go acc ('{' : '{' : r) = go ('{' : acc) r
+    go acc ('{' : r) =
+      case span identChar r of
+        (nm@(c0 : _), '}' : r')
+          | startChar c0 ->
+              (\rest -> FLit (reverse acc) : FHole nm : rest) <$> go "" r'
+        _ ->
+          Left
+            ( "[wf|…|]: `{` starts a hole, which is `{name}` for a name in \
+              \scope; write `{{` for a literal brace. At: `"
+                ++ take 24 ('{' : r)
+                ++ "`"
+            )
+    go acc (c : r) = go (c : acc) r
+
+    startChar c = c == '_' || (c >= 'a' && c <= 'z')
+    identChar c = isAlphaNum c || c == '_' || c == '\''
+
+-- | Lean's @Prompt.normalize@: an empty literal says nothing and is dropped.
+-- Adjacent chunks are deliberately __not__ fused — @Prompt.expr@ is a
+-- left-associated @++@, and the flagship's transcript agreements are
+-- computations rather than appeals to @String.append_assoc@.
+normalize :: [Frag] -> [Frag]
+normalize = filter (/= FLit "")
