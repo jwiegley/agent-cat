@@ -1494,7 +1494,7 @@ The Lean-side queue (99n --session, then vv6 deck engine) proceeds against the e
 :LABELS:   []
 :ISSUE_TYPE: question
 :CREATED:  [2026-08-16 Sun 10:38]
-:MODIFIED: [2026-08-16 Sun 18:02]
+:MODIFIED: [2026-08-16 Sun 18:38]
 :CREATED_BY: johnw
 :FINISHED: [2026-08-16 Sun 18:02]
 :CLOSE_REASON: Answered by the owner: option (e) — Haskell operational implementation + retained Lean formalization + bisimulation/extraction connection; see final comment
@@ -1529,6 +1529,13 @@ Owner question (2026-08-16): the round-17/18 surface converges on Haskell. What 
     "author": "johnw",
     "text": "RESOLVED by the owner (2026-08-16), via the question interface, with a fifth option of their own:\n\n\"I want a pure Haskell implementation of the operational workflow terms and their evaluator/runner, but I want to retain the full Lean formalization, along with a bisimulation of that Lean implementation against a mock agent that the Haskell can also operate against; ensure via property tests that the Haskell implementation truly does implement the Lean representation which was proven to map correctly into the mathematical object. This way the Lean and the Haskell are connected — albeit through testing — unless you can find a way to connect them more directly, for example by extraction from Lean to Haskell instead of re-implementing directly in Haskell.\" (verbatim intent)\n\nThree shaping decisions, also the owner's:\n1. BOUNDARY: Haskell builds terms natively — the typed library (haskell-question.md Part 1, the attacked design) is the authoring surface; no .wf in production. The .wf surface and the Lean front end become specification-and-test artifacts.\n2. CONNECTION: research pass first over the four mechanisms (bespoke Lean->Haskell extractor for this first-order fragment; FFI-linking the Lean-compiled core; Lean as a subprocess semantic engine; reimplementation + bisimulation), then choose. The bisimulation harness is built regardless — even extracted/FFI'd code wants boundary conformance tests.\n3. SURFACE: frozen as-is at round 16 (`answer` and all). Round 17's do-core and round 18's calculus remain approved-and-designed pages, unimplemented; their reopening conditions stand.\n\nAlso decided in the same session: the served-by checker gap (acat-served-by-check-gap-i5d) is fixed NOW; the queued Lean-side features run --session (99n) first, then the deck engine (vv6), noting both have natural Haskell-runner equivalents under the new program.\n\nProgram epic: acat-haskell-program (to be created). This issue closes as answered.\n",
     "created_at": "2026-08-17T01:02:00Z"
+  },
+  {
+    "id": 104,
+    "issue_id": "acat-haskell-surface-ygy",
+    "author": "johnw",
+    "text": "Post-resolution note: the served-by checker gap (§6.3 item 8) is fixed and shipped — the redundancy argument of §5.2 is now unconditional: nothing the hypothetical typed builder catches escapes the Lean checker.",
+    "created_at": "2026-08-17T01:38:15Z"
   }
 ]
 #+end_src
