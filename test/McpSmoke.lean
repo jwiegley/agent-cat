@@ -247,6 +247,32 @@ def scriptOne : IO Unit := do
   checkTrue "…and the refusal names the inlining escape"
     (((field (structured frames 10) ["error", "message"]).splitOn "inline").length > 1)
 
+/-! ## 2b. A run with a memo hit: heard is the replay's first occurrences
+
+The same question asked twice surfaces once — the table answers the repeat —
+so the replay holds three events while the server heard two, and
+`heardMatchesReplay` must compare against the first-occurrence subsequence
+(acat-heard-matches-replay-memo-v55). -/
+
+def memoSource : String :=
+  "workflow { a : text <- ask tool \"t\" \"same words\"\n" ++
+  "           b : text <- ask tool \"t\" \"same words\"\n" ++
+  "           ask tool \"log\" \"{a} {b}\" }"
+
+def scriptTwoB : IO Unit := do
+  let frames ← runScript
+    [ initLine 1 false
+    , initializedLine
+    , call 2 "workflow_start" [("source", Json.str memoSource)]
+    , answerLine 3 "r-1" "hello"
+    , answerLine 4 "r-1" "ok" ]
+  let done := structured frames 4
+  check "a repeated question is billed at every occurrence" "3"
+    (field done ["report", "bill", "fresh"])
+  check "…and memoized once" "2" (field done ["report", "bill", "memo"])
+  check "…and what the server heard is the replay's first occurrences" "true"
+    (field done ["report", "heardMatchesReplay"])
+
 /-! ## 2. A whole run, to the refuse path -/
 
 def scriptTwo : IO Unit := do
@@ -416,6 +442,8 @@ def main : IO Unit := do
   scriptOne
   IO.println "--- 2. a whole run, to the refuse path ---"
   scriptTwo
+  IO.println "--- 2b. a memo hit: heard is the replay's first occurrences ---"
+  scriptTwoB
   IO.println "--- 3. a declined elicitation is not a `no` ---"
   scriptThree
   IO.println "--- 4. an accepted elicitation is an answer ---"

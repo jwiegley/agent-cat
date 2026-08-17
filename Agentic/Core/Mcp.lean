@@ -1174,17 +1174,26 @@ def caveats (r : Run) : List String :=
       process, not here; what it was asked to do is in the transcript, what it \
       did is not, and no theorem in this package covers the difference."] else [])
 
+/-- The replay with every later repeat of an event removed. What a server
+*hears* is each question's first occurrence: `deliver` surfaces a question
+once, and `Dlg.resume` walks past its repeats because the table answers them.
+Spelled out because Lean's `List.dedup` keeps the *last* occurrence, which is
+the wrong end of a trace. -/
+def replayArrivals (t : Trace) : Trace :=
+  (t.foldl (fun acc e => if acc.contains e then acc else e :: acc) []).reverse
+
 /-- `[[reportJson r]]` = the finished run.
 
 The transcript is `RunReport.of`'s — replayed from the log by the plan's own
 meaning — and the bills are folds of that replay, not counters this server kept.
-`heardMatchesReplay` compares the replay with what actually arrived; it is a
-check on this server and, under `covered`, `Plan.certify_sound_of_covered` says
-it cannot fail. -/
+`heardMatchesReplay` compares what actually arrived with the replay's
+first-occurrence subsequence — a repeated question is replayed at every
+occurrence but *heard* only once, at its first — so a divergence here is a
+bookkeeping bug in this server, never in the plan. -/
 def reportJson (r : Run) : Json :=
   let rep := r.report r.table
   let cert := rep.certified
-  let agrees := decide (r.trace = rep.transcript)
+  let agrees := decide (r.trace = replayArrivals rep.transcript)
   let render :=
     [ "--- transcript (addressee | scope | code | prompt | answer) ---" ]
       ++ Trace.render rep.transcript

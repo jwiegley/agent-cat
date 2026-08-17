@@ -565,13 +565,15 @@ theorem checkFnsList_fnLevel :
     · exact absurd h (by simp)
     · split at h
       · exact absurd h (by simp)
-      · rename_i fe hfe
-        refine ih _ ?_ fns h
-        intro g hg
-        rcases List.mem_append.mp hg with hg | hg
-        · exact hacc g hg
-        · rcases List.mem_singleton.mp hg with rfl
-          exact checkFn_level_le hacc f fe hfe
+      · split at h
+        · exact absurd h (by simp)
+        · rename_i fe hfe
+          refine ih _ ?_ fns h
+          intro g hg
+          rcases List.mem_append.mp hg with hg | hg
+          · exact hacc g hg
+          · rcases List.mem_singleton.mp hg with rfl
+            exact checkFn_level_le hacc f fe hfe
 
 /-- **The program claim.** Everything `checkProgram` accepts is at or below the
 branch rung: the table is at `pipeline`, and the spliced block is bounded by

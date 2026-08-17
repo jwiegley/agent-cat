@@ -913,6 +913,12 @@ it. -/
 def checkFnsList (acc : Fns) : List RawFn → Except CheckError Fns
   | [] => .ok acc
   | f :: rest =>
+    -- The parser refuses a duplicate name at the declaration; this is the same
+    -- refusal for a hand-built table, because `Fns.find?` answers with the
+    -- first match and a silent first-wins resolution is a wrong body running.
+    if acc.any (fun fe => fe.name == f.name) then
+      .error ⟨f.pos, "two functions answer to one name; rename one", f.name⟩
+    else
     let n := bodyAsks acc f.body
     if maxQuestions < n then
       .error ⟨f.pos, s!"`{f.name}` elaborates to {n} questions, and the \

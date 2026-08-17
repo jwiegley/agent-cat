@@ -1156,14 +1156,14 @@ Discipline: mutation testing showed the theorems complement the string pins (a �
 ]
 #+end_src
 
-* TODO [#C] checkFnsList admits duplicate function names via hand-built RawProgram — Fns.find? is first-wins, the parser refuses but the checker does not
+* DOING [#C] checkFnsList admits duplicate function names via hand-built RawProgram — Fns.find? is first-wins, the parser refuses but the checker does not
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-dup-function-check-gap-kys
 :LABELS:   []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-08-16 Sun 18:51]
-:MODIFIED: [2026-08-16 Sun 18:51]
+:MODIFIED: [2026-08-16 Sun 21:29]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -1556,14 +1556,14 @@ Owner question (2026-08-16): the round-17/18 surface converges on Haskell. What 
 ]
 #+end_src
 
-* TODO [#C] Mcp.heardMatchesReplay is false on any run with a memo hit — arrivals are deduped, the replay is not
+* DOING [#C] Mcp.heardMatchesReplay is false on any run with a memo hit — arrivals are deduped, the replay is not
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-heard-matches-replay-memo-v55
 :LABELS:   []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-08-16 Sun 18:51]
-:MODIFIED: [2026-08-16 Sun 18:51]
+:MODIFIED: [2026-08-16 Sun 21:29]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat

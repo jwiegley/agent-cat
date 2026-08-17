@@ -1288,6 +1288,15 @@ def main : IO UInt32 := do
       "2:1: no function answers to this name (functions are declared above their first use) at `nosuch`"
       (hbOutcome (RawBlock.callStmt "nosuch" []
         (RawBlock.empty { line := 3, col := 1 }) { line := 2, col := 1 }))
+    -- The parser refuses a duplicate function name at its declaration;
+    -- `checkFnsList` is the same refusal for a hand-built table, because
+    -- `Fns.find?` answers with the first match and a silent first-wins
+    -- resolution runs the wrong body (acat-dup-function-check-gap-kys).
+    check "…and two functions answering one name"
+      "1:1: two functions answer to one name; rename one at `f`"
+      (match checkProgram ⟨[hbFn, hbFn], RawBlock.empty { line := 1, col := 1 }⟩ with
+       | .ok _ => "ok"
+       | .error e => e.render)
     -- The parser refuses `served by` on a tool; `askGuard` is the same refusal
     -- at the checker, so a hand-built `Raw` cannot smuggle a serving model
     -- onto an addressee that is not one (acat-served-by-check-gap-i5d).
