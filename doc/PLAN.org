@@ -1627,7 +1627,7 @@ Found by the connection-research attack pass (acat-lean-haskell-connection-lhi):
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-16 Sun 22:44]
-:MODIFIED: [2026-08-16 Sun 22:44]
+:MODIFIED: [2026-08-17 Mon 00:29]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -1654,6 +1654,20 @@ shape per connection.md D6 (one Lean build), docs, epic close-out.
 
 Owner directive 2026-08-16: continue by workflow until all Haskell-related
 work is finished.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 109,
+    "issue_id": "acat-hs-weeks-2-5-n3x",
+    "author": "johnw",
+    "text": "Week two is done (agentic-hs 840e7bd; agent-cat 02dbdef). The typed core is\nported: Agentic.Plan (five-former GADT, closed Tag set Bool/VTag - the only\ncase types the elaboration emits), Agentic.World (WorldSpec/toWorld/trace/\nbills/eventJson), Agentic.Builder (typed combinators that print RawProgram\nand elaborate to the checker's Plan; scope as a type-level assoc list with\nTypeError refusals). Both PORTING2 specs were mechanically validated in\npython against the corpus BEFORE implementation (59/59 fold records, 63/63\nworld blocks). tier1 rebuilds 16 checked entries and compares printed Raw\n(pos zeroed) + the whole reply including per-world traces and bills;\nmutation-tested on both fronts. The verifier found a corpus coverage gap -\nno frozen world used byPrefix/const/promptEq or answered declined - closed\non the Lean side by three new semantic entries (124 total now), including\nthe corpus's first genuine mid-loop settle. Both sides green:\ntier0 124/124, tier1 16/16. Next: week 3-4 - generators (Arbitrary over the\nbuilder; backwards-from-rules Raw for the refusal path; generatesWithin) and\nthe live bisimulation against lake exe conformance-oracle.\n",
+    "created_at": "2026-08-17T07:29:35Z"
+  }
+]
+#+end_src
 
 * DONE [#C] Shortest-list 7: newtype the polluted carriers; one join-as-monoid synonym
 :PROPERTIES:
