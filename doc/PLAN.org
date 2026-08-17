@@ -1604,6 +1604,41 @@ Owner question (2026-08-16): the round-17/18 surface converges on Haskell. What 
 
 Found by the connection-research attack pass (acat-lean-haskell-connection-lhi): heardMatchesReplay is decide (r.trace = rep.transcript) where r.trace = r.heard.map (.event) — deliver appends one Heard per SURFACED question and Dlg.resume walks past questions the table already answers, so arrivals are memo-deduped — while rep.transcript = Plan.trace (worldOf table) p Env.nil replays EVERY event including repeats. On a run with any repeated question (billMemo < billFresh), the check is an assertion of falsehood. Repair options: compare heard against the dedup of the replay (respecting Lean dedup keeping the LAST occurrence), or record the intended invariant differently. Add an McpSmoke case with a repeated question to pin whichever is chosen.
 
+* TODO [#B] Haskell weeks 2-5: typed Plan core, builder parity, generators, live Tier 1
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-hs-weeks-2-5-n3x
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-16 Sun 22:44]
+:MODIFIED: [2026-08-16 Sun 22:44]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The remaining milestones of acat-haskell-program-xgw after week one closed
+(tier0 121/121, no Lean in the loop; agentic-hs commit bfaff57):
+
+Week 2 (workflow agentic-hs-week-two running now): src/Agentic/Plan.hs (the
+five-former GADT + level/size/askNodes/codes/costSummary folds),
+World.hs (WorldSpec/toWorld/trace/bills/eventJson), Builder.hs (typed
+combinators elaborating to the same Plan the Lean checker builds, printer to
+RawProgram with pos zeroed), tier1 (10-12 rebuilt curated cases: printed-Raw
+equality modulo pos + full-record equality: level/size/askNodes/codes/
+costSummary/blockAsks/fnAsks/traces/bills per world). Both PORTING2 specs are
+mechanically validated against the corpus before implementation.
+
+Week 3-4: generators - (b) Arbitrary over the builder (primary, full record
+vs LIVE lake exe conformance-oracle: property oracle(print b) == observe
+(elaborate b)); (a) backwards-from-rules Raw generator for the refusal path
+(guards + counts only); generatesWithin termination property. Week 5: CI
+shape per connection.md D6 (one Lean build), docs, epic close-out.
+
+Owner directive 2026-08-16: continue by workflow until all Haskell-related
+work is finished.
+
 * DONE [#C] Shortest-list 7: newtype the polluted carriers; one join-as-monoid synonym
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
