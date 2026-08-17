@@ -1,7 +1,7 @@
 -- | Tier 1: the rebuilt-case runner.
 --
 -- Where tier0 replays the frozen corpus through the codec, the guards and the
--- string layer, tier1 rebuilds twelve of its /checked/ entries in the
+-- string layer, tier1 rebuilds nineteen of its /checked/ entries in the
 -- production surface ("Agentic.Builder", see "Cases") and holds the rebuilt
 -- program against the oracle on two fronts (@PORTING2-elab.md@ §4.1):
 --
@@ -25,6 +25,11 @@
 --
 -- A divergence is reported as the JSON path where the two values first part
 -- company, with both fragments.
+--
+-- Both sides of that comparison — the printed program, the position-zeroing
+-- rule and the assembled reply — come from "Agentic.Observe", which the live
+-- bisimulation uses too. What is left here is the driver and the diff: reading
+-- the frozen entries, deciding what counts as a failure, and saying where.
 --
 -- Usage: @tier1 [corpusDir]@, defaulting to
 -- @\/Users\/johnw\/src\/agent-cat\/test\/corpus@. Exit status is 0 iff nothing
@@ -50,9 +55,7 @@ import Data.Aeson
     Value (..),
     eitherDecodeStrict',
     fromJSON,
-    object,
     toJSON,
-    (.=),
   )
 import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
@@ -72,19 +75,11 @@ import System.Environment (getArgs)
 import System.Exit (exitFailure, exitSuccess)
 import System.FilePath ((</>))
 
-import Agentic.Builder (Program, progPlan, progRawOut)
-import Agentic.Guards (askCounts)
-import Agentic.Plan
-  ( Level (..),
-    askNodes,
-    codes,
-    costSummary,
-    level,
-    levelName,
-    size,
-  )
-import Agentic.Raw (RawProgram, codeName)
-import Agentic.World (WorldSpec, worldObservation)
+import Agentic.Builder (Program, progPlan)
+import Agentic.Observe (observeValue, printedValue, zeroPosValue)
+import Agentic.Plan (Level (..), level)
+import Agentic.Raw (RawProgram)
+import Agentic.World (WorldSpec)
 
 import Cases (cases)
 
@@ -184,7 +179,7 @@ programCheck :: Value -> Program -> [Text]
 programCheck expected prog =
   concat
     [ [ "printed program differs at " <> d
-      | Just d <- [firstDiff (zeroPos expected) (zeroPos printed)]
+      | Just d <- [firstDiff (zeroPosValue expected) (zeroPosValue printed)]
       ],
       case fromJSON printed :: Result RawProgram of
         Error err ->
@@ -195,10 +190,10 @@ programCheck expected prog =
           ]
     ]
   where
-    printed = toJSON (progRawOut prog)
+    printed = printedValue prog
 
--- | §4.1(2)-(4): the whole reply, assembled from the folds, the guards' ask
--- counts and one observation per world.
+-- | §4.1(2)-(4): the whole reply, assembled by 'observeValue' from the folds,
+-- the guards' ask counts and one observation per world.
 replyCheck :: Value -> [WorldSpec] -> Program -> [Text]
 replyCheck reply ws prog
   -- `costSummary` is defined only below the dynamic rung; the builder cannot
@@ -206,53 +201,9 @@ replyCheck reply ws prog
   | level (progPlan prog) > Branch =
       ["the elaborated plan reaches the dynamic rung, which no reply describes"]
   | otherwise =
-      ["reply differs at " <> d | Just d <- [firstDiff reply (observe prog ws)]]
-
--- | The checked reply of @Conformance.lean:240@'s @observe@, over a rebuilt
--- program: the five static folds, the two ask counts, and one observation per
--- world.
-observe :: Program -> [WorldSpec] -> Value
-observe prog ws =
-  object
-    [ "level" .= levelName (level p),
-      "size" .= size p,
-      "askNodes" .= askNodes p,
-      -- `codes` is written with `codeName`, so the fourth code is "receipt".
-      "codes" .= maybe Null (toJSON . map codeName) (codes p),
-      "costSummary"
-        .= object ["minFold" .= mn, "maxFold" .= mx, "paths" .= paths],
-      "blockAsks" .= blockAsks,
-      "fnAsks" .= fnAsks,
-      "worlds" .= map (worldObservation p) ws
-    ]
-  where
-    p = progPlan prog
-    (mn, mx, paths) = costSummary p
-    -- The counts are taken from the PRINTED program, not from the plan: that
-    -- is what makes them a cross-check of the builder rather than a second
-    -- reading of the same term.
-    (blockAsks, fnAsks) = askCounts (progRawOut prog)
-
--- ---------------------------------------------------------------------------
--- Positions, zeroed
--- ---------------------------------------------------------------------------
-
--- | Every @pos@ and @answerPos@ of a program value, set to @0:0@.
---
--- Applied to both sides of the printed-program comparison: the builder has no
--- way to represent a position and prints @0:0@ everywhere, and @pos@ is
--- oracle-only for this whole program, exactly like @message@ and @excerpt@.
--- Structural and total, so it cannot mask a difference in anything else.
-zeroPos :: Value -> Value
-zeroPos = \case
-  Object o -> Object (KM.mapWithKey field' o)
-  Array a -> Array (V.map zeroPos a)
-  v -> v
-  where
-    field' k v
-      | k == "pos" || k == "answerPos" = origin
-      | otherwise = zeroPos v
-    origin = object ["line" .= (0 :: Integer), "col" .= (0 :: Integer)]
+      [ "reply differs at " <> d
+      | Just d <- [firstDiff reply (observeValue prog ws)]
+      ]
 
 -- ---------------------------------------------------------------------------
 -- Value inspection

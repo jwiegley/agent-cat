@@ -67,6 +67,7 @@ module Agentic.Builder
     Words,
     lit,
     hole,
+    holeI,
     Spliceable (..),
     wordsRaw,
     wordsExpr,
@@ -93,6 +94,7 @@ module Agentic.Builder
     -- * Arguments and functions
     Arg (..),
     argName,
+    argNameI,
     argWords,
     Args (..),
     ParamCtx,
@@ -106,23 +108,32 @@ module Agentic.Builder
     -- * Function bodies
     Body (..),
     bindB,
+    bindBI,
     bindAsB,
+    bindAsBI,
     actB,
     callSB,
     answerB,
+    answerBI,
     endB,
 
     -- * Blocks
     Blk (..),
     stop,
     bind,
+    bindI,
     bindAs,
+    bindAsI,
     act,
     callStmt,
     ifFlag,
+    ifFlagI,
     caseVerdict,
+    caseVerdictI,
     knownHere,
+    knownHereI,
     revisingCase,
+    revisingCaseI,
 
     -- * Programs
     Program (..),
@@ -356,7 +367,13 @@ hole ::
   forall n s.
   (KnownSymbol n, KnownVar n s, Spliceable (LookupC n s)) =>
   Piece s
-hole = Piece (Interp (nameText @n)) (splice @(LookupC n s) . nameExpr @n @s)
+hole = holeI @(LookupC n s) @s (nameText @n) (varOf @n @s)
+
+-- | 'hole' at an index rather than at a name: the name as it is /printed/, and
+-- the de Bruijn index that /reads/ it. See the note on index-level entry points
+-- at the foot of this module.
+holeI :: forall c s. Spliceable c => Text -> Var (Codes s) c -> Piece s
+holeI x v = Piece (Interp x) (splice @c . varGet v)
 
 -- | The kinds of answer that have a text of their own.
 class Spliceable (c :: Code) where
@@ -581,7 +598,11 @@ data Arg (s :: Scope) (c :: Code) = Arg
 -- (@battery-180@). The kind is the name's, and the caller's parameter list is
 -- what has to agree with it.
 argName :: forall n s. (KnownSymbol n, KnownVar n s) => Arg s (LookupC n s)
-argName = Arg (ArgName (nameText @n) pos0) (nameExpr @n @s)
+argName = argNameI @(LookupC n s) @s (nameText @n) (varOf @n @s)
+
+-- | 'argName' at an index rather than at a name.
+argNameI :: forall c s. Text -> Var (Codes s) c -> Arg s c
+argNameI x v = Arg (ArgName x pos0) (varGet v)
 
 -- | Words, which fill a @text@ parameter and are elaborated in the /caller's/
 -- bindings — so a hole here reads the caller's names.
@@ -730,9 +751,19 @@ bindB ::
   Rhs s c ->
   Body ('(n, c) ': s) r ->
   Body s r
-bindB rhs rest =
+bindB rhs rest = bindBI @n (nameText @n) rhs rest
+
+-- | 'bindB' at an index: the name as it is printed, the scope entry it pushes
+-- left to the continuation's type.
+bindBI ::
+  forall n c s r.
+  Text ->
+  Rhs s c ->
+  Body ('(n, c) ': s) r ->
+  Body s r
+bindBI x rhs rest =
   Body
-    { bodyRaw = BodyBind (nameText @n) Nothing (rhsRaw rhs) pos0 : bodyRaw rest,
+    { bodyRaw = BodyBind x Nothing (rhsRaw rhs) pos0 : bodyRaw rest,
       bodyAnswer = bodyAnswer rest,
       bodyPlan = rhsForm rhs (bodyPlan rest)
     }
@@ -744,10 +775,20 @@ bindAsB ::
   Rhs s c ->
   Body ('(n, c) ': s) r ->
   Body s r
-bindAsB rhs rest =
+bindAsB rhs rest = bindAsBI @n (sCode @c) (nameText @n) rhs rest
+
+-- | 'bindAsB' at an index. The 'SCode' is what the annotation prints.
+bindAsBI ::
+  forall n c s r.
+  SCode c ->
+  Text ->
+  Rhs s c ->
+  Body ('(n, c) ': s) r ->
+  Body s r
+bindAsBI c x rhs rest =
   Body
     { bodyRaw =
-        BodyBind (nameText @n) (Just (fromSCode (sCode @c))) (rhsRaw rhs) pos0
+        BodyBind x (Just (fromSCode c)) (rhsRaw rhs) pos0
           : bodyRaw rest,
       bodyAnswer = bodyAnswer rest,
       bodyPlan = rhsForm rhs (bodyPlan rest)
@@ -778,11 +819,16 @@ callSB f as rest =
 -- The declared result /is/ the name's kind, which is @checkFn@'s @b.at?
 -- f.result@ made structural.
 answerB :: forall n s. (KnownSymbol n, KnownVar n s) => Body s (LookupC n s)
-answerB =
+answerB = answerBI @(LookupC n s) @s (nameText @n) (varOf @n @s)
+
+-- | 'answerB' at an index: the name as it is printed, and the index that reads
+-- it. The function's result kind is that index's kind.
+answerBI :: forall c s. Text -> Var (Codes s) c -> Body s c
+answerBI x v =
   Body
     { bodyRaw = [],
-      bodyAnswer = Just (nameText @n),
-      bodyPlan = PRet (nameExpr @n @s)
+      bodyAnswer = Just x,
+      bodyPlan = PRet (varGet v)
     }
 
 -- | The end of a @-> receipt@ body: @PRet (const ())@, and no @answer@.
@@ -821,9 +867,14 @@ bind ::
   Rhs s c ->
   Blk ('(n, c) ': s) ->
   Blk s
-bind rhs rest =
+bind rhs rest = bindI @n (nameText @n) rhs rest
+
+-- | 'bind' at an index: the name as it is printed, the scope entry it pushes
+-- left to the continuation's type.
+bindI :: forall n c s. Text -> Rhs s c -> Blk ('(n, c) ': s) -> Blk s
+bindI x rhs rest =
   Blk
-    (RawBind (nameText @n) Nothing (SrcRhs (rhsRaw rhs)) (blkRaw rest) pos0)
+    (RawBind x Nothing (SrcRhs (rhsRaw rhs)) (blkRaw rest) pos0)
     (rhsForm rhs (blkPlan rest))
 
 -- | @x : c <- …@; prints @ann = c@. Same elaboration as 'bind' — an
@@ -834,11 +885,15 @@ bindAs ::
   Rhs s c ->
   Blk ('(n, c) ': s) ->
   Blk s
-bindAs rhs rest =
+bindAs rhs rest = bindAsI @n (sCode @c) (nameText @n) rhs rest
+
+-- | 'bindAs' at an index. The 'SCode' is what the annotation prints.
+bindAsI :: forall n c s. SCode c -> Text -> Rhs s c -> Blk ('(n, c) ': s) -> Blk s
+bindAsI c x rhs rest =
   Blk
     ( RawBind
-        (nameText @n)
-        (Just (fromSCode (sCode @c)))
+        x
+        (Just (fromSCode c))
         (SrcRhs (rhsRaw rhs))
         (blkRaw rest)
         pos0
@@ -885,10 +940,14 @@ ifFlag ::
   Blk s ->
   Blk s ->
   Blk s
-ifFlag yes no =
+ifFlag yes no = ifFlagI (nameText @n) (varOf @n @s) yes no
+
+-- | 'ifFlag' at an index.
+ifFlagI :: forall s. Text -> Var (Codes s) 'CodeFlag -> Blk s -> Blk s -> Blk s
+ifFlagI x v yes no =
   Blk
-    (RawIfFlag (nameText @n) (blkRaw yes) (blkRaw no) pos0)
-    (caseB (nameExpr @n @s) (blkPlan yes) (blkPlan no))
+    (RawIfFlag x (blkRaw yes) (blkRaw no) pos0)
+    (caseB (varGet v) (blkPlan yes) (blkPlan no))
 
 -- | @case x { approved … objected … no answer … }@.
 --
@@ -903,15 +962,27 @@ caseVerdict ::
   Blk s ->
   Blk s
 caseVerdict approved objected noAnswer =
+  caseVerdictI (nameText @n) (varOf @n @s) approved objected noAnswer
+
+-- | 'caseVerdict' at an index.
+caseVerdictI ::
+  forall s.
+  Text ->
+  Var (Codes s) 'CodeVerdict ->
+  Blk s ->
+  Blk s ->
+  Blk s ->
+  Blk s
+caseVerdictI x v approved objected noAnswer =
   Blk
     ( RawCaseVerdict
-        (nameText @n)
+        x
         (blkRaw approved)
         (blkRaw objected)
         (blkRaw noAnswer)
         pos0
     )
-    (caseV (nameExpr @n @s) arms)
+    (caseV (varGet v) arms)
   where
     arms = \case
       VApprove -> blkPlan approved
@@ -926,8 +997,15 @@ caseVerdict approved objected noAnswer =
 -- the type-level scope, innermost first, so a rebuilt case cannot print a
 -- wrong one. @known here: nothing@ is what an empty scope computes.
 knownHere :: forall s. KnownScope s => Blk s -> Blk s
-knownHere rest =
-  Blk (RawKnownHere (scopeNames @s) (blkRaw rest) pos0) (blkPlan rest)
+knownHere rest = knownHereI (scopeNames @s) rest
+
+-- | 'knownHere' at an index. __The names are not checked against anything__:
+-- at the type level they are computed from the scope and cannot be wrong,
+-- here they are the caller's assertion, and Lean refuses a wrong one. Pass the
+-- live names, innermost first.
+knownHereI :: forall s. [Text] -> Blk s -> Blk s
+knownHereI names rest =
+  Blk (RawKnownHere names (blkRaw rest) pos0) (blkPlan rest)
 
 -- ---------------------------------------------------------------------------
 -- The bounded revision
@@ -1025,28 +1103,91 @@ revisingCase ::
   -- | the unsettled arm
   Blk s ->
   Blk s
-revisingCase resultName n reviewAnn review amend settled unsettled
-  | n < 0 || n > 64 =
-      error
-        ( "revisingCase: a bounded revision is unrolled into the term it \
-          \writes, so its bound may name at most 64 amendments, and not "
-            ++ show n
-        )
-  | reviewAnn `notElem` [Nothing, Just CodeVerdict] =
-      error
-        "revisingCase: a review answers `verdict`, not anything else: the loop \
-        \settles when it approves"
-  | otherwise = Blk raw plan
+revisingCase resultName n reviewAnn review amend settled unsettled =
+  revisingCaseI @c @carrier @rev @settled @s
+    (nameText @subj)
+    (varOf @subj @s)
+    (nameText @carrier)
+    (nameText @rev)
+    (nameText @settled)
+    resultName
+    n
+    reviewAnn
+    review
+    amend
+    settled
+    unsettled
+
+-- | 'revisingCase' at an index: the four names as they are /printed/, and the
+-- de Bruijn index that reads the subject. Every scope entry the clauses see is
+-- left to their types, so the phantom symbols @nc@, @nr@ and @ns@ are free —
+-- an index-level caller threads its own name supply and its own freshness.
+--
+-- The two @error@ guards are 'revisingCase'\'s, unchanged: a bound outside
+-- @0 <= n <= 64@ and a review annotation other than @verdict@ are refusals, not
+-- programs.
+revisingCaseI ::
+  forall c nc nr ns s.
+  KnownCode c =>
+  -- | the subject's name, as printed
+  Text ->
+  -- | the index that reads the subject
+  Var (Codes s) c ->
+  -- | the carrier's name
+  Text ->
+  -- | the review binding's name
+  Text ->
+  -- | the settled binder's name
+  Text ->
+  -- | the loop result's name, printed only
+  Text ->
+  -- | the bound: @0 <= n <= 64@ (Lean's @maxRevisions@)
+  Integer ->
+  -- | the review's printed annotation: 'Nothing' or @Just 'CodeVerdict'@
+  Maybe Code ->
+  -- | the review, at @verdict@, seeing the candidate as the carrier
+  Rhs ('(nc, c) ': s) 'CodeVerdict ->
+  -- | the amend, at the candidate's kind, seeing the verdict and the candidate
+  Rhs ('(nr, 'CodeVerdict) ': '(nc, c) ': s) c ->
+  -- | the settled arm, with the artefact bound
+  Blk ('(ns, c) ': s) ->
+  -- | the unsettled arm
+  Blk s ->
+  Blk s
+revisingCaseI
+  subjName
+  subjVar
+  carrierName
+  revName
+  settledName
+  resultName
+  n
+  reviewAnn
+  review
+  amend
+  settled
+  unsettled
+    | n < 0 || n > 64 =
+        error
+          ( "revisingCase: a bounded revision is unrolled into the term it \
+            \writes, so its bound may name at most 64 amendments, and not "
+              ++ show n
+          )
+    | reviewAnn `notElem` [Nothing, Just CodeVerdict] =
+        error
+          "revisingCase: a review answers `verdict`, not anything else: the loop \
+          \settles when it approves"
+    | otherwise = Blk raw plan
   where
     raw =
       RawBind
         resultName
         Nothing
         ( SrcRevising
-            (nameText @subj)
-            (nameText @carrier)
+            subjName
+            carrierName
             n
-            (nameText @rev)
+            revName
             reviewAnn
             (rhsRaw review)
             (rhsRaw amend)
@@ -1054,7 +1195,7 @@ revisingCase resultName n reviewAnn review amend settled unsettled
         )
         ( RawCaseResult
             resultName
-            (nameText @settled)
+            settledName
             (blkRaw settled)
             (blkRaw unsettled)
             pos0
@@ -1074,7 +1215,7 @@ revisingCase resultName n reviewAnn review amend settled unsettled
       runCont
         (revising @c @(Codes s) (checkCont (rhsPlan review)) (reviseCont (rhsPlan amend)) n)
         subId
-        (nameExpr @subj @s)
+        (varGet subjVar)
 
     plan = graft loop (finishCont (blkPlan settled) (blkPlan unsettled))
 
@@ -1099,3 +1240,39 @@ program fns b =
     { progRawOut = RawProgram [fnRaw f | SomeFn f <- fns] (blkRaw b),
       progPlan = blkPlan b
     }
+
+-- ---------------------------------------------------------------------------
+-- A note on the index-level entry points
+-- ---------------------------------------------------------------------------
+
+-- $indexLevel
+--
+-- Every combinator above that mentions a name mentions it as a 'Symbol', and
+-- the type-level machinery — 'LookupC', 'KnownVar', 'Fresh', 'KnownScope' —
+-- turns that symbol into exactly three runtime things and nothing else: the
+-- 'Text' the printer writes, the 'Var' the plan reads, and, at @known here@,
+-- the list of live names. The constraints produce no evidence at all; they
+-- refuse programs at compile time.
+--
+-- A /runtime/ producer of programs — the property generators of
+-- @Agentic.Gen@ — cannot conjure a 'Symbol', and cannot discharge 'Fresh' or
+-- 'KnownVar' for one it conjured. So each such combinator has an @I@-suffixed
+-- twin that takes the 'Text' and the 'Var' directly and leaves the scope entry
+-- it pushes as a free type variable: 'bindI', 'bindAsI', 'bindBI', 'bindAsBI',
+-- 'answerBI', 'holeI', 'argNameI', 'ifFlagI', 'caseVerdictI', 'knownHereI',
+-- 'revisingCaseI'.
+--
+-- __The twin is the definition and the named form is the wrapper__, in every
+-- case: @hole@ /is/ @holeI@ applied to @nameText@ and @varOf@, @bind@ /is/
+-- @bindI@ applied to @nameText@, and so on down the list. There is therefore
+-- one elaboration in this module and not two, and a property that drives the
+-- @I@ forms is testing the same print-and-elaborate linkage that tier1 drives
+-- through the named forms.
+--
+-- __What the caller now owes.__ The @I@ forms trade compile-time refusals for
+-- obligations: names must be fresh along a path ('Fresh'), @known here@ must
+-- list the live names innermost first ('KnownScope'), and a bound name must be
+-- read at the kind it was bound at (that one survives, in the 'Var'\'s index).
+-- Lean still checks all three, so a generator that breaks one produces a
+-- program the oracle refuses and the Haskell side accepts — a divergence
+-- report about the generator rather than about the port.

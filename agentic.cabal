@@ -15,6 +15,13 @@ description:
   (@Agentic.Builder@). The @tier1@ executable rebuilds curated corpus cases in
   that surface and holds both the printed program and the whole reply against
   the frozen entries.
+  .
+  Weeks three and four add the live bisimulation: property generators over the
+  builder and over raw syntax (@Agentic.Gen@), the reply assembly both runners
+  share (@Agentic.Observe@), a line-delimited JSON client for the Lean oracle
+  subprocess (@Agentic.Oracle@), and the @bisim@ executable, which draws
+  programs, worlds and string-layer inputs and holds each one against a live
+  @conformance-oracle@ rather than against a frozen file.
 
 build-type:      Simple
 license:         MIT
@@ -25,9 +32,15 @@ common settings
   ghc-options:      -Wall
   default-language: Haskell2010
 
-  -- The full agreed dependency list, on both targets. Four implementers are
+  -- The full agreed dependency list, on every target. Several implementers are
   -- writing the modules independently; a shared list means no one's module
   -- fails to build over a missing `build-depends` entry someone else owns.
+  --
+  -- `QuickCheck` and `process` arrive with week three: the first for
+  -- `Agentic.Gen`'s generators, the second for `Agentic.Oracle`'s subprocess
+  -- pipes. Both are library dependencies rather than executable-only ones,
+  -- because both modules live in the library — the generators and the oracle
+  -- client are the conformance surface, and `bisim` is only their driver.
   build-depends:
     , aeson
     , base
@@ -35,6 +48,8 @@ common settings
     , containers
     , directory
     , filepath
+    , process
+    , QuickCheck
     , scientific
     , text
     , vector
@@ -44,7 +59,10 @@ library
   hs-source-dirs:  src
   exposed-modules:
     Agentic.Builder
+    Agentic.Gen
     Agentic.Guards
+    Agentic.Observe
+    Agentic.Oracle
     Agentic.Plan
     Agentic.Raw
     Agentic.Text
@@ -62,3 +80,16 @@ executable tier1
   main-is:         Main.hs
   other-modules:   Cases
   build-depends:   agentic
+
+executable bisim
+  import:          settings
+  hs-source-dirs:  bisim
+  main-is:         Main.hs
+  build-depends:   agentic
+
+  -- The one place a flag departs from tier0 and tier1. `Agentic.Oracle` guards
+  -- every read from the subprocess with `System.Timeout.timeout`, and a
+  -- wedged oracle must produce a named failure rather than a hung run; the
+  -- threaded runtime is what makes that interruption reliable rather than
+  -- something that happens to work on this pipe on this platform.
+  ghc-options:     -threaded

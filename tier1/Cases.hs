@@ -11,6 +11,13 @@
 -- different program. Positions are not transcribed: the builder prints @0:0@
 -- everywhere and tier1 zeroes both sides (@PORTING2-elab.md@ §3).
 --
+-- __Worlds are not written here.__ A case is a program; the worlds it is run
+-- against are read from the entry's @request.worlds@ by the runner. That is
+-- why three entries below rebuild to a program another entry already rebuilds:
+-- the corpus pairs one program with several worlds to reach several paths
+-- through "Agentic.World", and duplicating the program text here would let the
+-- two copies drift apart while both stayed green.
+--
 -- == What is deliberately absent
 --
 -- The five guard vectors and every refused battery entry are /unrepresentable/
@@ -101,7 +108,17 @@ cases =
     -- Two cases beyond the spec's list, added because §4.2's twelve leave the
     -- bottom of the level lattice and the empty term untested. See each note.
     ("battery-137-empty-prompts-and-an-empty-define.json", battery137),
-    ("battery-147-a-function-may-answer-a-flag-the-caller-branches.json", battery147)
+    ("battery-147-a-function-may-answer-a-flag-the-caller-branches.json", battery147),
+    -- The last three are the corpus's newest entries, and they are here for
+    -- their __worlds__: between them they are the only reach into 'byPrefix',
+    -- into a 'Agentic.World.Declined' verdict, into 'promptEq' and into a
+    -- constant text world, and the only mid-loop settle in the corpus. Their
+    -- programs are two of the programs already above (see each note).
+    ( "semantic-004-a-loop-that-truly-settles-at-round-two-byprefix-objects-to-the-first-draft-only.json",
+      semantic004
+    ),
+    ("semantic-005-a-declined-verdict-and-a-prompteq-flag.json", semantic005),
+    ("semantic-006-a-constant-text-world.json", semantic006)
   ]
 
 -- ---------------------------------------------------------------------------
@@ -614,3 +631,107 @@ fnF =
 -- the reachable term.
 battery147 :: Program
 battery147 = program [SomeFn fnF] stop
+
+-- ---------------------------------------------------------------------------
+-- 17. semantic-004 — the same loop, under a byPrefix world that objects once
+-- ---------------------------------------------------------------------------
+
+-- | @semSrc1@ again — byte for byte the program of 'semantic001', which is why
+-- this is an alias and not a second transcription. What is new is the entry's
+-- single world, and it is the only place the corpus reaches three things at
+-- once:
+--
+--   * __'Agentic.World.ByPrefix'__, the only prompt-sensitive verdict oracle.
+--     Its table has one row, @\"review draft\"@, and its default is
+--     @approve@ — so the /first/ check objects and every later one approves.
+--     A verdict oracle that matched on equality rather than on prefix, or that
+--     consulted the default first, would answer this world differently at the
+--     very first event.
+--
+--   * __a genuine mid-loop settle__. 'semantic001' pins only the two ends of
+--     its bound-3 unroll: its approving world settles at the first check (3
+--     events) and its objecting world exhausts the bound (9 events). Here the
+--     loop objects once and settles on the second check — 5 events, the middle
+--     of the ladder — so an unroll that mis-sequenced "check first, revise in
+--     the recursive call" could still hit both of 'semantic001''s worlds and
+--     cannot hit this one.
+--
+--   * __an objecting verdict rendered into a later prompt__. The amendment's
+--     @{v}@ hole renders @Object [\"too plain\"]@, so the third event's prompt
+--     is @\"amend draft given too plain\"@ and the fourth's is
+--     @\"review amend draft given too plain\"@ — the objection is carried
+--     forward through 'Agentic.Plan.verdictRender' and through the echo text
+--     world, and a wrong rendering shows up as a wrong prompt two events later
+--     rather than as a wrong answer.
+semantic004 :: Program
+semantic004 = semantic001
+
+-- ---------------------------------------------------------------------------
+-- 18. semantic-005 — a declined verdict, and a flag that reads its own prompt
+-- ---------------------------------------------------------------------------
+
+-- |
+-- > workflow {
+-- >   t : text <- ask tool "reader" "read"
+-- >   v : verdict <- ask model "judge" "judge"
+-- >   f : flag <- ask person "owner" "yes or no?"
+-- >   ask tool "recorder" "record {t} and {v}"
+-- >   if f { ask tool "t" "went-yes" } else { ask tool "t" "went-no" }
+-- > }
+--
+-- All three bindings are annotated, so all three are 'bindAs' — including
+-- @f@, which 'semantic003' leaves to the @if@ to fix. One straight line of
+-- three questions, an act, and a branch: size 9, two paths, both folding to 5.
+--
+-- The entry's single world is why this case is here. It is the corpus's only
+-- reach into two world constructors:
+--
+--   * __a @const \"declined\"@ verdict__, the one 'Agentic.Plan.Verdict' no
+--     other world produces. It matters twice over: 'Agentic.Plan.verdictRender'
+--     sends @Declined@ to the /empty string/, so the recorded prompt is
+--     @\"record read and \"@ with a trailing space and nothing after it — a
+--     renderer that spelled the tag out, or that treated @declined@ like
+--     @objected@, would be caught by that one prompt.
+--
+--   * __a @promptEq@ flag__, the only flag oracle that looks at the question
+--     instead of answering a constant. It answers @true@ exactly when the
+--     prompt is @\"yes or no?\"@; the owner's prompt is, so the trace takes
+--     the @yes@ arm and ends on @\"went-yes\"@. Point the same world at any
+--     other prompt and it says @false@, which is what makes it a test of the
+--     prompt the plan actually asks with rather than of the arm the plan
+--     happens to prefer.
+semantic005 :: Program
+semantic005 =
+  program [] $
+    bindAs @"t" @'CodeText (one (askTool "reader" [lit "read"])) $
+      bindAs @"v" @'CodeVerdict (one (askModel "judge" [lit "judge"])) $
+        bindAs @"f" @'CodeFlag (one (askPerson "owner" [lit "yes or no?"])) $
+          act
+            ( askTool
+                "recorder"
+                [lit "record ", hole @"t", lit " and ", hole @"v"]
+            )
+            $ ifFlag @"f"
+              (act (askTool "t" [lit "went-yes"]) stop)
+              (act (askTool "t" [lit "went-no"]) stop)
+
+-- ---------------------------------------------------------------------------
+-- 19. semantic-006 — the same three acts, under a constant text world
+-- ---------------------------------------------------------------------------
+
+-- | @semSrc0@ again — byte for byte the program of 'semantic000', aliased for
+-- the same reason 'semantic004' is. The entry's single world is the corpus's
+-- only @const@ /text/ oracle: every question, whatever its prompt, is answered
+-- @\"fixed answer\"@.
+--
+-- That is a sharper test of the sharing than either of 'semantic000''s worlds.
+-- @echo@ and @wrap@ both answer a function of the prompt, so a plan that asked
+-- the wrong question would be caught by the answer it got back; a constant
+-- world answers the same thing either way, and the only surviving evidence is
+-- the __prompt each later act builds from the shared binding__ —
+-- @\"fixed answer||fixed answer\"@ and @\"seen: fixed answer\"@. The one
+-- binding is still holed three times and still asked once (@billFresh 3@,
+-- @billMemo 3@), so a term that re-asked @cat@ per hole would show up as a
+-- longer trace even though every answer in it would be identical.
+semantic006 :: Program
+semantic006 = semantic000
