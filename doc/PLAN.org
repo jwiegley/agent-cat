@@ -1480,15 +1480,17 @@ Owner request: the artifact §VII example as REAL compiling Lean — Op signatur
 ]
 #+end_src
 
-* TODO [#B] The Haskell program: typed workflow library + evaluator/runner, Lean retained as the proven specification
+* DONE [#B] The Haskell program: typed workflow library + evaluator/runner, Lean retained as the proven specification
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-haskell-program-xgw
 :LABELS:   []
 :ISSUE_TYPE: epic
 :CREATED:  [2026-08-16 Sun 18:02]
-:MODIFIED: [2026-08-16 Sun 22:44]
+:MODIFIED: [2026-08-17 Mon 01:48]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-17 Mon 01:48]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -1545,6 +1547,13 @@ The Lean-side queue (99n --session, then vv6 deck engine) proceeds against the e
     "author": "johnw",
     "text": "Week one is done. Days 4-5 (commit bfaff57 in ~/src/agentic-hs): a\nsix-agent workflow wrote PORTING.md from the Lean sources, then four\nindependent implementers produced Agentic.Raw (hand-written aeson codec\nmatching Lean's derived encoding; 99/99 program entries round-trip to\nbyte-identical Values), Agentic.Guards (five guards in the checker's own\nfiring order + the ask-count recurrences incl. the revising graft), and\nAgentic.Text (ASCII-only norm and friends), plus the tier0 corpus runner.\nIntegration needed zero fixes. Definition of done met:\n\n  tier0: 121 passed, 0 failed, 35 other-refusals (codec-only), of 121 files\n\nwith no Lean in the loop, confirmed by three independent harnesses and by\nmutation-testing the runner on all four comparison axes. Next: week two -\nthe typed builder (Plan GADT), denote/trace/bills, printer to Raw, and\nfull-observation parity on rebuilt curated cases.\n",
     "created_at": "2026-08-17T05:40:56Z"
+  },
+  {
+    "id": 111,
+    "issue_id": "acat-haskell-program-xgw",
+    "author": "johnw",
+    "text": "Weeks three, four and five are done, and with them the whole program of\nrecord (connection.md phase 2, weeks 1-5).\n\nWeeks 3-4 (agentic-hs 7516a85): Agentic.Gen - QuickCheck generators THROUGH\nthe builder (the eleven index-level entry points are now the definitions,\nthe type-level-name forms wrappers, so the print/elaborate pairing exists\nonce); a refusal-biased raw generator; trap-text strings; a generatesWithin\nself-test. Agentic.Oracle - the Lean oracle as a byte-clean subprocess with\nids checked, timeouts named, desync poisoned. bisim - four properties\nagainst the LIVE oracle; ~19,000 comparisons green across six seeds\nincluding n=1000; negative controls (askCounts+1, Unicode toLower,\nperturbed cases) each went loudly red first. P3 other-rate ~18-22%, far\nunder the retune threshold.\n\nWeek 5 (agentic-hs a2cf554; agent-cat flake fix): the firstDiff plumbing\ndeduplicated into Agentic.Observe; ci/tier0.sh (every commit, no Lean) and\nci/tier1.sh (nightly, prebuilt oracle, fails loudly when missing) encode\nSection 3.9's lanes; agent-cat's flake comment stopped claiming there is no\nlean-toolchain and no Mathlib.\n\nFinal state: tier0 124/124, tier1 19/19, bisim 0 failures at every seed\ntried. The owner's brief is delivered: pure Haskell implementation of the\noperational terms with an evaluator (runPlan/trace), bisimulated against\nmock agents (WorldSpec worlds) both sides operate against, property-tested\nagainst the Lean representation, with Lean retained as the full\nformalization and the normative oracle.\n\nExplicitly NOT built (boundary, not debt): a Haskell IO runner against real\nagents (ACP adapters) - the Lean side keeps the production runner; watched\nand never reproduced: one transient $.size off-by-one seen only against a\nmid-edit file snapshot, absent across ~20k live comparisons.\n",
+    "created_at": "2026-08-17T08:48:21Z"
   }
 ]
 #+end_src
@@ -1620,15 +1629,17 @@ Owner question (2026-08-16): the round-17/18 surface converges on Haskell. What 
 
 Found by the connection-research attack pass (acat-lean-haskell-connection-lhi): heardMatchesReplay is decide (r.trace = rep.transcript) where r.trace = r.heard.map (.event) — deliver appends one Heard per SURFACED question and Dlg.resume walks past questions the table already answers, so arrivals are memo-deduped — while rep.transcript = Plan.trace (worldOf table) p Env.nil replays EVERY event including repeats. On a run with any repeated question (billMemo < billFresh), the check is an assertion of falsehood. Repair options: compare heard against the dedup of the replay (respecting Lean dedup keeping the LAST occurrence), or record the intended invariant differently. Add an McpSmoke case with a repeated question to pin whichever is chosen.
 
-* TODO [#B] Haskell weeks 2-5: typed Plan core, builder parity, generators, live Tier 1
+* DONE [#B] Haskell weeks 2-5: typed Plan core, builder parity, generators, live Tier 1
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-hs-weeks-2-5-n3x
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-16 Sun 22:44]
-:MODIFIED: [2026-08-17 Mon 00:29]
+:MODIFIED: [2026-08-17 Mon 01:48]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-17 Mon 01:48]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -1665,6 +1676,13 @@ work is finished.
     "author": "johnw",
     "text": "Week two is done (agentic-hs 840e7bd; agent-cat 02dbdef). The typed core is\nported: Agentic.Plan (five-former GADT, closed Tag set Bool/VTag - the only\ncase types the elaboration emits), Agentic.World (WorldSpec/toWorld/trace/\nbills/eventJson), Agentic.Builder (typed combinators that print RawProgram\nand elaborate to the checker's Plan; scope as a type-level assoc list with\nTypeError refusals). Both PORTING2 specs were mechanically validated in\npython against the corpus BEFORE implementation (59/59 fold records, 63/63\nworld blocks). tier1 rebuilds 16 checked entries and compares printed Raw\n(pos zeroed) + the whole reply including per-world traces and bills;\nmutation-tested on both fronts. The verifier found a corpus coverage gap -\nno frozen world used byPrefix/const/promptEq or answered declined - closed\non the Lean side by three new semantic entries (124 total now), including\nthe corpus's first genuine mid-loop settle. Both sides green:\ntier0 124/124, tier1 16/16. Next: week 3-4 - generators (Arbitrary over the\nbuilder; backwards-from-rules Raw for the refusal path; generatesWithin) and\nthe live bisimulation against lake exe conformance-oracle.\n",
     "created_at": "2026-08-17T07:29:35Z"
+  },
+  {
+    "id": 110,
+    "issue_id": "acat-hs-weeks-2-5-n3x",
+    "author": "johnw",
+    "text": "Weeks three, four and five are done, and with them the whole program of\nrecord (connection.md phase 2, weeks 1-5).\n\nWeeks 3-4 (agentic-hs 7516a85): Agentic.Gen - QuickCheck generators THROUGH\nthe builder (the eleven index-level entry points are now the definitions,\nthe type-level-name forms wrappers, so the print/elaborate pairing exists\nonce); a refusal-biased raw generator; trap-text strings; a generatesWithin\nself-test. Agentic.Oracle - the Lean oracle as a byte-clean subprocess with\nids checked, timeouts named, desync poisoned. bisim - four properties\nagainst the LIVE oracle; ~19,000 comparisons green across six seeds\nincluding n=1000; negative controls (askCounts+1, Unicode toLower,\nperturbed cases) each went loudly red first. P3 other-rate ~18-22%, far\nunder the retune threshold.\n\nWeek 5 (agentic-hs a2cf554; agent-cat flake fix): the firstDiff plumbing\ndeduplicated into Agentic.Observe; ci/tier0.sh (every commit, no Lean) and\nci/tier1.sh (nightly, prebuilt oracle, fails loudly when missing) encode\nSection 3.9's lanes; agent-cat's flake comment stopped claiming there is no\nlean-toolchain and no Mathlib.\n\nFinal state: tier0 124/124, tier1 19/19, bisim 0 failures at every seed\ntried. The owner's brief is delivered: pure Haskell implementation of the\noperational terms with an evaluator (runPlan/trace), bisimulated against\nmock agents (WorldSpec worlds) both sides operate against, property-tested\nagainst the Lean representation, with Lean retained as the full\nformalization and the normative oracle.\n\nExplicitly NOT built (boundary, not debt): a Haskell IO runner against real\nagents (ACP adapters) - the Lean side keeps the production runner; watched\nand never reproduced: one transient $.size off-by-one seen only against a\nmid-edit file snapshot, absent across ~20k live comparisons.\n",
+    "created_at": "2026-08-17T08:48:20Z"
   }
 ]
 #+end_src
