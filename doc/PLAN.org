@@ -1156,6 +1156,22 @@ Discipline: mutation testing showed the theorems complement the string pins (a �
 ]
 #+end_src
 
+* TODO [#C] checkFnsList admits duplicate function names via hand-built RawProgram — Fns.find? is first-wins, the parser refuses but the checker does not
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-dup-function-check-gap-kys
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-08-16 Sun 18:51]
+:MODIFIED: [2026-08-16 Sun 18:51]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Found by the connection-research attack pass (acat-lean-haskell-connection-lhi): the parser's freshOfTables refuses a function name that spells an earlier function, but checkFnsList (Check.lean) never checks the accumulating table for a duplicate name, and Fns.find? / fnSigsOf are first-wins list lookups — so a hand-built RawProgram with two  entries (different arity or different bodies) checks, with every call silently resolving to the FIRST and bodyAsks pricing against it. Same shape as the served-by gap (acat-served-by-check-gap-i5d, fixed): mirror the parser's refusal in checkFnsList with the existing diagnosis wording, one hand-built battery case in the check_panel_nil style, audit the new site.
+
 * DONE [#B] Adopt Mathlib: infrastructure — dependency, version pin for Lean 4.30, olean cache
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -1539,6 +1555,22 @@ Owner question (2026-08-16): the round-17/18 surface converges on Haskell. What 
   }
 ]
 #+end_src
+
+* TODO [#C] Mcp.heardMatchesReplay is false on any run with a memo hit — arrivals are deduped, the replay is not
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-heard-matches-replay-memo-v55
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-08-16 Sun 18:51]
+:MODIFIED: [2026-08-16 Sun 18:51]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Found by the connection-research attack pass (acat-lean-haskell-connection-lhi): heardMatchesReplay is decide (r.trace = rep.transcript) where r.trace = r.heard.map (.event) — deliver appends one Heard per SURFACED question and Dlg.resume walks past questions the table already answers, so arrivals are memo-deduped — while rep.transcript = Plan.trace (worldOf table) p Env.nil replays EVERY event including repeats. On a run with any repeated question (billMemo < billFresh), the check is an assertion of falsehood. Repair options: compare heard against the dedup of the replay (respecting Lean dedup keeping the LAST occurrence), or record the intended invariant differently. Add an McpSmoke case with a repeated question to pin whichever is chosen.
 
 * DONE [#C] Shortest-list 7: newtype the polluted carriers; one join-as-monoid synonym
 :PROPERTIES:
