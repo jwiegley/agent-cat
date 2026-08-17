@@ -1,6 +1,6 @@
 name = "agentic"
 version = "0.1.0"
-defaultTargets = ["Agentic", "Pollution", "HardenPatch", "acp_smoke", "exec_smoke", "harden_demo", "dsl_smoke", "workflow_mcp", "mcp_smoke", "mcp_client_smoke", "agent-cat", "cli_smoke"]
+defaultTargets = ["Agentic", "Pollution", "HardenPatch", "acp_smoke", "exec_smoke", "harden_demo", "dsl_smoke", "workflow_mcp", "mcp_smoke", "mcp_client_smoke", "agent-cat", "cli_smoke", "conformance-oracle"]
 
 # The root module and every `Agentic/Core/*` module. The glob is explicit
 # because the runtime stratum is deliberately NOT imported by the root:
@@ -159,6 +159,19 @@ root = "McpClientSmoke"
 name = "agent-cat"
 srcDir = "cli"
 root = "AgentCat"
+
+# The conformance oracle (conformance/ConformanceOracle.lean):
+# `lake exe conformance-oracle`. The Lean side of the bisimulation with the
+# Haskell implementation (doc/research/dsl-redesign/connection.md, D4): a
+# line-delimited JSON process that checks and observes RawPrograms, so the
+# frozen corpus under test/corpus/ is this executable's output committed. A
+# test dependency and only ever a test dependency — the production runner
+# never speaks to it. It imports Agentic.Core.{Explain,Mcp} and *not*
+# Agentic.Core.DslFlagship, so it builds in seconds, not minutes.
+[[lean_exe]]
+name = "conformance-oracle"
+srcDir = "conformance"
+root = "ConformanceOracle"
 
 # The command line's test (test/CliSmoke.lean): `lake exe cli_smoke`, from the
 # repository root. It drives the built `agent-cat` binary over both example
