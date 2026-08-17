@@ -29,15 +29,10 @@ nix develop -c cabal build          # build the library and the runner
 nix develop -c cabal run tier0      # replay the frozen corpus
 ```
 
-A flake in a git working tree is read *through git*, so `flake.nix` and
-`flake.lock` must be tracked — `git add flake.nix flake.lock` — or Nix refuses
-with `Path 'flake.nix' … is not tracked by Git`. To enter the shell without
-consulting git at all, name the directory through the `path:` fetcher, which
-copies it verbatim:
-
-```sh
-nix develop path:. -c cabal build
-```
+(A flake in a git working tree is read *through git*, so `flake.nix` and
+`flake.lock` are tracked; if you ever see `Path 'flake.nix' … is not tracked
+by Git` after adding files, either track them or route around git with
+`nix develop path:. -c …`.)
 
 `tier0` takes an optional corpus directory and otherwise reads
 `/Users/johnw/src/agent-cat/test/corpus`:
