@@ -1487,7 +1487,7 @@ Owner request: the artifact §VII example as REAL compiling Lean — Op signatur
 :LABELS:   []
 :ISSUE_TYPE: epic
 :CREATED:  [2026-08-16 Sun 18:02]
-:MODIFIED: [2026-08-16 Sun 21:47]
+:MODIFIED: [2026-08-16 Sun 22:04]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -1515,6 +1515,13 @@ The Lean-side queue (99n --session, then vv6 deck engine) proceeds against the e
     "author": "johnw",
     "text": "Week one, days 1-2 shipped: conformance-oracle builds and answers all three request kinds (program observation with refusal classification / string layer / ping); doc/conformance-schema.md v1 is the format of record. First live smoke already exhibits the top-ranked divergence vector (ASCII-only norm vs Unicode toLower on İ). Next: day 3, the frozen Tier-0 corpus (examples + semSrc pins + refusal table + the three named vectors), then days 4-5, the Haskell scaffold with Raw codecs and the Raw-level comparands.",
     "created_at": "2026-08-17T04:47:01Z"
+  },
+  {
+    "id": 107,
+    "issue_id": "acat-haskell-program-xgw",
+    "author": "johnw",
+    "text": "Day 3 done (commit a0bd2a4): the Tier-0 corpus is frozen. 121 request/reply\npairs under test/corpus/ — 87 battery, 2 module, 4 semantically-worlded, 22\nstring-layer, 6 named vectors — with all five guard identities pinned\n(questionBudget carries n=8193 from the chain-13 source; panelEmpty and\nservedBy hand-built, since the parser refuses their spellings). The oracle\nsplit into lib (conformance/Conformance.lean) + exe, and the case tables\nmoved to test/DslCases.lean so corpus-gen imports them without an\nexecutable's main. Next: days 4-5, the Haskell scaffold (owner directive:\nproceed by workflow until the Haskell program is finished).\n",
+    "created_at": "2026-08-17T05:04:52Z"
   }
 ]
 #+end_src
