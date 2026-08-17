@@ -1,0 +1,38 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"bind":
+    {"x": "d",
+     "src":
+     {"rhs":
+      {"r":
+       {"ask":
+        {"a":
+         {"target": {"draw": 0, "addressee": {"model": {"id": "a"}}},
+          "prompt": [{"lit": {"s": "draft"}}],
+          "pos": {"line": 1, "col": 24},
+          "model": null}}}}},
+     "rest":
+     {"caseVerdict":
+      {"x": "d",
+       "pos": {"line": 2, "col": 12},
+       "objected": {"empty": {"pos": {"line": 2, "col": 50}}},
+       "noAnswer": {"empty": {"pos": {"line": 2, "col": 69}}},
+       "approved": {"empty": {"pos": {"line": 2, "col": 32}}}}},
+     "pos": {"line": 1, "col": 12},
+     "ann": "text"}},
+   "fns": []}},
+ "reply":
+ {"refused":
+  {"pos": {"line": 2, "col": 12},
+   "n": null,
+   "message":
+   "the arms `approved`, `objected` and `no answer` branch on a `verdict`, but `d` answers `text`",
+   "guard": "other",
+   "excerpt": "d"}},
+ "oracleVersion": 1,
+ "name": "a case on a text answer"}

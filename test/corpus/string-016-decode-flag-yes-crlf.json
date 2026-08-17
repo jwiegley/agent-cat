@@ -1,0 +1,4 @@
+{"request": {"string": {"text": "Yes\r\n", "op": "decode", "code": "flag"}},
+ "reply": {"result": {"answer": true}},
+ "oracleVersion": 1,
+ "name": "decode flag Yes crlf"}

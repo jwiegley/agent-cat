@@ -1,0 +1,4 @@
+{"request": {"string": {"text": "İstanbul", "op": "norm"}},
+ "reply": {"result": "İstanbul"},
+ "oracleVersion": 1,
+ "name": "norm turkish dotted capital"}

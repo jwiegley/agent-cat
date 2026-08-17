@@ -1,0 +1,38 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"bind":
+    {"x": "g",
+     "src":
+     {"rhs":
+      {"r":
+       {"ask":
+        {"a":
+         {"target": {"draw": 0, "addressee": {"tool": {"id": "cat"}}},
+          "prompt": [{"lit": {"s": "hi"}}],
+          "pos": {"line": 1, "col": 24},
+          "model": null}}}}},
+     "rest":
+     {"caseResult":
+      {"x": "g",
+       "unsettled": {"empty": {"pos": {"line": 2, "col": 52}}},
+       "settledName": "x",
+       "settled": {"empty": {"pos": {"line": 2, "col": 33}}},
+       "pos": {"line": 2, "col": 12}}},
+     "pos": {"line": 1, "col": 12},
+     "ann": "text"}},
+   "fns": []}},
+ "reply":
+ {"refused":
+  {"pos": {"line": 2, "col": 12},
+   "n": null,
+   "message":
+   "`case g { settled … }` consumes a revising result, and `g` is not one: it is bound by `g <- revising …` as the statement before its `case`",
+   "guard": "other",
+   "excerpt": "g"}},
+ "oracleVersion": 1,
+ "name": "a settled case on a name that is not a result"}

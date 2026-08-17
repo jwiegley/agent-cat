@@ -1,0 +1,4 @@
+{"request": {"string": {"text": "DONE", "op": "decode", "code": "receipt"}},
+ "reply": {"result": {"answer": null}},
+ "oracleVersion": 1,
+ "name": "decode receipt anything"}

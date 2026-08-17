@@ -1,0 +1,4 @@
+{"request": {"string": {"text": "\n\n  approve  \n\n", "op": "norm"}},
+ "reply": {"result": "approve"},
+ "oracleVersion": 1,
+ "name": "norm blank lines"}

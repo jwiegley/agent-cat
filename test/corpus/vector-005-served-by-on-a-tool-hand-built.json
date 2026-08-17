@@ -1,0 +1,26 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"act":
+    {"rest": {"empty": {"pos": {"line": 1, "col": 1}}},
+     "pos": {"line": 1, "col": 1},
+     "a":
+     {"target": {"draw": 0, "addressee": {"tool": {"id": "t"}}},
+      "prompt": [{"lit": {"s": "w"}}],
+      "pos": {"line": 1, "col": 1},
+      "model": "deep"}}},
+   "fns": []}},
+ "reply":
+ {"refused":
+  {"pos": {"line": 1, "col": 1},
+   "n": null,
+   "message":
+   "`served by` names the model that serves a model addressee; a tool or a person is not served by one",
+   "guard": "servedBy",
+   "excerpt": "served"}},
+ "oracleVersion": 1,
+ "name": "served by on a tool, hand-built"}

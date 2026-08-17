@@ -1,0 +1,4 @@
+{"request": {"string": {"text": "approve", "op": "decodeVerdict"}},
+ "reply": {"result": {"tag": "approve"}},
+ "oracleVersion": 1,
+ "name": "decodeVerdict approve lowercase"}

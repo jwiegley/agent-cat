@@ -1,0 +1,146 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"bind":
+    {"x": "d",
+     "src":
+     {"rhs":
+      {"r":
+       {"ask":
+        {"a":
+         {"target": {"draw": 0, "addressee": {"model": {"id": "a"}}},
+          "prompt": [{"lit": {"s": "draft"}}],
+          "pos": {"line": 1, "col": 24},
+          "model": null}}}}},
+     "rest":
+     {"bind":
+      {"x": "r",
+       "src":
+       {"revising":
+        {"subject": "d",
+         "reviewName": "v",
+         "reviewAnn": null,
+         "review":
+         {"ask":
+          {"a":
+           {"target": {"draw": 0, "addressee": {"model": {"id": "m"}}},
+            "prompt": [{"lit": {"s": "review "}}, {"interp": {"name": "c"}}],
+            "pos": {"line": 3, "col": 19},
+            "model": null}}},
+         "pos": {"line": 2, "col": 17},
+         "carrier": "c",
+         "bound": 1,
+         "amend":
+         {"ask":
+          {"a":
+           {"target": {"draw": 0, "addressee": {"model": {"id": "a"}}},
+            "prompt":
+            [{"lit": {"s": "fix "}},
+             {"interp": {"name": "c"}},
+             {"lit": {"s": " "}},
+             {"interp": {"name": "v"}}],
+            "pos": {"line": 4, "col": 24},
+            "model": null}}}}},
+       "rest":
+       {"caseResult":
+        {"x": "r",
+         "unsettled": {"empty": {"pos": {"line": 14, "col": 26}}},
+         "settledName": "x",
+         "settled":
+         {"bind":
+          {"x": "r2",
+           "src":
+           {"revising":
+            {"subject": "x",
+             "reviewName": "w",
+             "reviewAnn": null,
+             "review":
+             {"ask":
+              {"a":
+               {"target": {"draw": 0, "addressee": {"model": {"id": "m"}}},
+                "prompt": [{"lit": {"s": "again "}}, {"interp": {"name": "y"}}],
+                "pos": {"line": 9, "col": 23},
+                "model": null}}},
+             "pos": {"line": 8, "col": 22},
+             "carrier": "y",
+             "bound": 1,
+             "amend":
+             {"ask":
+              {"a":
+               {"target": {"draw": 0, "addressee": {"model": {"id": "a"}}},
+                "prompt":
+                [{"lit": {"s": "more "}},
+                 {"interp": {"name": "y"}},
+                 {"lit": {"s": " "}},
+                 {"interp": {"name": "w"}}],
+                "pos": {"line": 10, "col": 28},
+                "model": null}}}}},
+           "rest":
+           {"caseResult":
+            {"x": "r2",
+             "unsettled": {"empty": {"pos": {"line": 12, "col": 73}}},
+             "settledName": "z",
+             "settled":
+             {"act":
+              {"rest": {"empty": {"pos": {"line": 12, "col": 36}}},
+               "pos": {"line": 12, "col": 38},
+               "a":
+               {"target": {"draw": 0, "addressee": {"tool": {"id": "log"}}},
+                "prompt": [{"interp": {"name": "z"}}],
+                "pos": {"line": 12, "col": 38},
+                "model": null}}},
+             "pos": {"line": 12, "col": 16}}},
+           "pos": {"line": 8, "col": 16},
+           "ann": null}},
+         "pos": {"line": 6, "col": 12}}},
+       "pos": {"line": 2, "col": 12},
+       "ann": null}},
+     "pos": {"line": 1, "col": 12},
+     "ann": "text"}},
+   "fns": []}},
+ "reply":
+ {"worlds":
+  [{"world":
+    {"verdict": {"const": {"v": "approve"}},
+     "text": "echo",
+     "flag": {"const": {"b": true}}},
+    "trace":
+    [{"scope": {"model": null, "mode": null},
+      "prompt": "draft",
+      "draw": 0,
+      "code": "text",
+      "answer": "draft",
+      "addressee": {"model": {"id": "a"}}},
+     {"scope": {"model": null, "mode": null},
+      "prompt": "review draft",
+      "draw": 0,
+      "code": "verdict",
+      "answer": {"tag": "approve"},
+      "addressee": {"model": {"id": "m"}}},
+     {"scope": {"model": null, "mode": null},
+      "prompt": "again draft",
+      "draw": 0,
+      "code": "verdict",
+      "answer": {"tag": "approve"},
+      "addressee": {"model": {"id": "m"}}},
+     {"scope": {"model": null, "mode": null},
+      "prompt": "draft",
+      "draw": 0,
+      "code": "receipt",
+      "answer": null,
+      "addressee": {"tool": {"id": "log"}}}],
+    "billMemo": 4,
+    "billFresh": 4}],
+  "size": 33,
+  "level": "branch",
+  "fnAsks": [],
+  "costSummary": {"paths": 10, "minFold": 2, "maxFold": 8},
+  "codes": null,
+  "blockAsks": 14,
+  "askNodes": 14},
+ "oracleVersion": 1,
+ "name": "a loop nested in a settled arm"}

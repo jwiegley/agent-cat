@@ -1,0 +1,87 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"bind":
+    {"x": "a",
+     "src":
+     {"rhs":
+      {"r":
+       {"ask":
+        {"a":
+         {"target": {"draw": 0, "addressee": {"tool": {"id": "c"}}},
+          "prompt": [{"lit": {"s": "a"}}],
+          "pos": {"line": 1, "col": 24},
+          "model": null}}}}},
+     "rest":
+     {"bind":
+      {"x": "b",
+       "src":
+       {"rhs":
+        {"r":
+         {"ask":
+          {"a":
+           {"target": {"draw": 0, "addressee": {"tool": {"id": "c"}}},
+            "prompt": [{"lit": {"s": "b "}}, {"interp": {"name": "a"}}],
+            "pos": {"line": 2, "col": 24},
+            "model": null}}}}},
+       "rest":
+       {"knownHere":
+        {"rest":
+         {"act":
+          {"rest": {"empty": {"pos": {"line": 1, "col": 10}}},
+           "pos": {"line": 4, "col": 12},
+           "a":
+           {"target": {"draw": 0, "addressee": {"tool": {"id": "log"}}},
+            "prompt":
+            [{"interp": {"name": "a"}},
+             {"lit": {"s": " "}},
+             {"interp": {"name": "b"}}],
+            "pos": {"line": 4, "col": 12},
+            "model": null}}},
+         "pos": {"line": 3, "col": 12},
+         "names": ["b", "a"]}},
+       "pos": {"line": 2, "col": 12},
+       "ann": "text"}},
+     "pos": {"line": 1, "col": 12},
+     "ann": "text"}},
+   "fns": []}},
+ "reply":
+ {"worlds":
+  [{"world":
+    {"verdict": {"const": {"v": "approve"}},
+     "text": "echo",
+     "flag": {"const": {"b": true}}},
+    "trace":
+    [{"scope": {"model": null, "mode": null},
+      "prompt": "a",
+      "draw": 0,
+      "code": "text",
+      "answer": "a",
+      "addressee": {"tool": {"id": "c"}}},
+     {"scope": {"model": null, "mode": null},
+      "prompt": "b a",
+      "draw": 0,
+      "code": "text",
+      "answer": "b a",
+      "addressee": {"tool": {"id": "c"}}},
+     {"scope": {"model": null, "mode": null},
+      "prompt": "a b a",
+      "draw": 0,
+      "code": "receipt",
+      "answer": null,
+      "addressee": {"tool": {"id": "log"}}}],
+    "billMemo": 3,
+    "billFresh": 3}],
+  "size": 4,
+  "level": "pipeline",
+  "fnAsks": [],
+  "costSummary": {"paths": 1, "minFold": 3, "maxFold": 3},
+  "codes": ["text", "text", "receipt"],
+  "blockAsks": 3,
+  "askNodes": 3},
+ "oracleVersion": 1,
+ "name": "known here, innermost first"}

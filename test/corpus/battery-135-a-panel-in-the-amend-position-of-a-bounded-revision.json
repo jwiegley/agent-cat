@@ -1,0 +1,66 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"bind":
+    {"x": "d",
+     "src":
+     {"rhs":
+      {"r":
+       {"ask":
+        {"a":
+         {"target": {"draw": 0, "addressee": {"model": {"id": "a"}}},
+          "prompt": [{"lit": {"s": "draft"}}],
+          "pos": {"line": 1, "col": 24},
+          "model": null}}}}},
+     "rest":
+     {"bind":
+      {"x": "r",
+       "src":
+       {"revising":
+        {"subject": "d",
+         "reviewName": "v",
+         "reviewAnn": null,
+         "review":
+         {"ask":
+          {"a":
+           {"target": {"draw": 0, "addressee": {"model": {"id": "m"}}},
+            "prompt": [{"lit": {"s": "review "}}, {"interp": {"name": "c"}}],
+            "pos": {"line": 3, "col": 19},
+            "model": null}}},
+         "pos": {"line": 2, "col": 17},
+         "carrier": "c",
+         "bound": 1,
+         "amend":
+         {"panel":
+          {"pos": {"line": 4, "col": 24},
+           "members":
+           [{"target": {"draw": 0, "addressee": {"model": {"id": "z"}}},
+             "prompt": [{"lit": {"s": "fix "}}, {"interp": {"name": "c"}}],
+             "pos": {"line": 4, "col": 50},
+             "model": null}]}}}},
+       "rest":
+       {"caseResult":
+        {"x": "r",
+         "unsettled": {"empty": {"pos": {"line": 6, "col": 52}}},
+         "settledName": "x",
+         "settled": {"empty": {"pos": {"line": 6, "col": 33}}},
+         "pos": {"line": 6, "col": 12}}},
+       "pos": {"line": 2, "col": 12},
+       "ann": null}},
+     "pos": {"line": 1, "col": 12},
+     "ann": "text"}},
+   "fns": []}},
+ "reply":
+ {"refused":
+  {"pos": {"line": 4, "col": 24},
+   "n": null,
+   "message":
+   "the `amend` of a bounded revision: a panel combines its members in the verdict monoid, so it answers `verdict`, not `text`",
+   "guard": "other",
+   "excerpt": "panel"}},
+ "oracleVersion": 1,
+ "name": "a panel in the amend position of a bounded revision"}

@@ -168,10 +168,37 @@ root = "AgentCat"
 # test dependency and only ever a test dependency — the production runner
 # never speaks to it. It imports Agentic.Core.{Explain,Mcp} and *not*
 # Agentic.Core.DslFlagship, so it builds in seconds, not minutes.
+# Its library half (conformance/Conformance.lean): the codecs, the WorldSpec
+# DSL, the observation record and the refusal classifier — importable by the
+# corpus generator and by any future harness tooling.
+[[lean_lib]]
+name = "Conformance"
+srcDir = "conformance"
+
 [[lean_exe]]
 name = "conformance-oracle"
 srcDir = "conformance"
 root = "ConformanceOracle"
+
+# The corpus generator (test/CorpusGen.lean): `lake exe corpus-gen`, from the
+# repository root. It runs the conformance library's `observe` over the curated
+# case tables of test/DslSmoke.lean plus the named vectors of connection.md §7,
+# and (re)writes test/corpus/*.json — the frozen Tier-0 corpus the Haskell side
+# must reproduce with no Lean in the loop. NOT in defaultTargets, deliberately:
+# regenerating the corpus is an explicit, reviewed act (the diff is a change to
+# the specification), not a side effect of building. It imports DslCases for
+# the source tables and Conformance for `observe` — not the flagship.
+[[lean_exe]]
+name = "corpus-gen"
+srcDir = "test"
+root = "CorpusGen"
+
+# The DSL's case tables (test/DslCases.lean): pure string data — the battery,
+# the module cases, the semantic sources — split out of DslSmoke so that
+# corpus-gen can import the tables without importing an executable's `main`.
+[[lean_lib]]
+name = "DslCases"
+srcDir = "test"
 
 # The command line's test (test/CliSmoke.lean): `lake exe cli_smoke`, from the
 # repository root. It drives the built `agent-cat` binary over both example

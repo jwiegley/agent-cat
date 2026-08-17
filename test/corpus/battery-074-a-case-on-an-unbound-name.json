@@ -1,0 +1,23 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"caseVerdict":
+    {"x": "v",
+     "pos": {"line": 1, "col": 12},
+     "objected": {"empty": {"pos": {"line": 1, "col": 50}}},
+     "noAnswer": {"empty": {"pos": {"line": 1, "col": 69}}},
+     "approved": {"empty": {"pos": {"line": 1, "col": 32}}}}},
+   "fns": []}},
+ "reply":
+ {"refused":
+  {"pos": {"line": 1, "col": 12},
+   "n": null,
+   "message": "unbound name; nothing in scope answers to it",
+   "guard": "other",
+   "excerpt": "v"}},
+ "oracleVersion": 1,
+ "name": "a case on an unbound name"}

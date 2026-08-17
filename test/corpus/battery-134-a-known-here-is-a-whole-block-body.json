@@ -1,0 +1,55 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"bind":
+    {"x": "ok",
+     "src":
+     {"rhs":
+      {"r":
+       {"ask":
+        {"a":
+         {"target": {"draw": 0, "addressee": {"person": {"id": "o"}}},
+          "prompt": [{"lit": {"s": "go ahead?"}}],
+          "pos": {"line": 2, "col": 16},
+          "model": null}}}}},
+     "rest":
+     {"ifFlag":
+      {"yes":
+       {"knownHere":
+        {"rest": {"empty": {"pos": {"line": 3, "col": 9}}},
+         "pos": {"line": 3, "col": 11},
+         "names": ["ok"]}},
+       "x": "ok",
+       "pos": {"line": 3, "col": 3},
+       "no": {"empty": {"pos": {"line": 3, "col": 35}}}}},
+     "pos": {"line": 2, "col": 3},
+     "ann": "flag"}},
+   "fns": []}},
+ "reply":
+ {"worlds":
+  [{"world":
+    {"verdict": {"const": {"v": "approve"}},
+     "text": "echo",
+     "flag": {"const": {"b": true}}},
+    "trace":
+    [{"scope": {"model": null, "mode": null},
+      "prompt": "go ahead?",
+      "draw": 0,
+      "code": "flag",
+      "answer": true,
+      "addressee": {"person": {"id": "o"}}}],
+    "billMemo": 1,
+    "billFresh": 1}],
+  "size": 4,
+  "level": "branch",
+  "fnAsks": [],
+  "costSummary": {"paths": 2, "minFold": 1, "maxFold": 1},
+  "codes": null,
+  "blockAsks": 1,
+  "askNodes": 1},
+ "oracleVersion": 1,
+ "name": "a known here is a whole block body"}

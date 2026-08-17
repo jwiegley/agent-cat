@@ -1,0 +1,127 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"bind":
+    {"x": "j",
+     "src":
+     {"rhs":
+      {"r":
+       {"ask":
+        {"a":
+         {"target": {"draw": 0, "addressee": {"model": {"id": "judge"}}},
+          "prompt": [{"lit": {"s": "Judge the draft; object with reasons."}}],
+          "pos": {"line": 2, "col": 18},
+          "model": null}}}}},
+     "rest":
+     {"bind":
+      {"x": "r",
+       "src":
+       {"revising":
+        {"subject": "j",
+         "reviewName": "v",
+         "reviewAnn": null,
+         "review":
+         {"ask":
+          {"a":
+           {"target": {"draw": 0, "addressee": {"model": {"id": "meta"}}},
+            "prompt":
+            [{"lit": {"s": "Is this judgment fair?\n"}},
+             {"interp": {"name": "c"}}],
+            "pos": {"line": 4, "col": 10},
+            "model": null}}},
+         "pos": {"line": 3, "col": 8},
+         "carrier": "c",
+         "bound": 1,
+         "amend":
+         {"ask":
+          {"a":
+           {"target": {"draw": 0, "addressee": {"model": {"id": "judge"}}},
+            "prompt":
+            [{"lit": {"s": "Rejudge, given: "}},
+             {"interp": {"name": "c"}},
+             {"lit": {"s": " and "}},
+             {"interp": {"name": "v"}}],
+            "pos": {"line": 5, "col": 15},
+            "model": null}}}}},
+       "rest":
+       {"caseResult":
+        {"x": "r",
+         "unsettled": {"empty": {"pos": {"line": 11, "col": 17}}},
+         "settledName": "p",
+         "settled":
+         {"caseVerdict":
+          {"x": "p",
+           "pos": {"line": 8, "col": 17},
+           "objected":
+           {"act":
+            {"rest": {"empty": {"pos": {"line": 9, "col": 35}}},
+             "pos": {"line": 9, "col": 37},
+             "a":
+             {"target": {"draw": 0, "addressee": {"tool": {"id": "log"}}},
+              "prompt": [{"lit": {"s": "went-objected"}}],
+              "pos": {"line": 9, "col": 37},
+              "model": null}}},
+           "noAnswer":
+           {"act":
+            {"rest": {"empty": {"pos": {"line": 10, "col": 36}}},
+             "pos": {"line": 10, "col": 38},
+             "a":
+             {"target": {"draw": 0, "addressee": {"tool": {"id": "log"}}},
+              "prompt": [{"lit": {"s": "went-noanswer"}}],
+              "pos": {"line": 10, "col": 38},
+              "model": null}}},
+           "approved":
+           {"act":
+            {"rest": {"empty": {"pos": {"line": 8, "col": 35}}},
+             "pos": {"line": 8, "col": 37},
+             "a":
+             {"target": {"draw": 0, "addressee": {"tool": {"id": "log"}}},
+              "prompt": [{"lit": {"s": "went-approved"}}],
+              "pos": {"line": 8, "col": 37},
+              "model": null}}}}},
+         "pos": {"line": 7, "col": 3}}},
+       "pos": {"line": 3, "col": 3},
+       "ann": null}},
+     "pos": {"line": 2, "col": 3},
+     "ann": "verdict"}},
+   "fns": []}},
+ "reply":
+ {"worlds":
+  [{"world":
+    {"verdict": {"const": {"v": "approve"}},
+     "text": "echo",
+     "flag": {"const": {"b": true}}},
+    "trace":
+    [{"scope": {"model": null, "mode": null},
+      "prompt": "Judge the draft; object with reasons.",
+      "draw": 0,
+      "code": "verdict",
+      "answer": {"tag": "approve"},
+      "addressee": {"model": {"id": "judge"}}},
+     {"scope": {"model": null, "mode": null},
+      "prompt": "Is this judgment fair?\n",
+      "draw": 0,
+      "code": "verdict",
+      "answer": {"tag": "approve"},
+      "addressee": {"model": {"id": "meta"}}},
+     {"scope": {"model": null, "mode": null},
+      "prompt": "went-approved",
+      "draw": 0,
+      "code": "receipt",
+      "answer": null,
+      "addressee": {"tool": {"id": "log"}}}],
+    "billMemo": 3,
+    "billFresh": 3}],
+  "size": 23,
+  "level": "branch",
+  "fnAsks": [],
+  "costSummary": {"paths": 8, "minFold": 2, "maxFold": 5},
+  "codes": null,
+  "blockAsks": 10,
+  "askNodes": 10},
+ "oracleVersion": 1,
+ "name": "a revising subject of kind verdict"}

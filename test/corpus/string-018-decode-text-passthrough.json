@@ -1,0 +1,5 @@
+{"request":
+ {"string": {"text": "  anything at all  ", "op": "decode", "code": "text"}},
+ "reply": {"result": {"answer": "  anything at all  "}},
+ "oracleVersion": 1,
+ "name": "decode text passthrough"}

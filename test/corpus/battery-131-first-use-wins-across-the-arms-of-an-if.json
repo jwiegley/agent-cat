@@ -1,0 +1,63 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"bind":
+    {"x": "ok",
+     "src":
+     {"rhs":
+      {"r":
+       {"ask":
+        {"a":
+         {"target": {"draw": 0, "addressee": {"person": {"id": "o"}}},
+          "prompt": [{"lit": {"s": "ready?"}}],
+          "pos": {"line": 2, "col": 16},
+          "model": null}}}}},
+     "rest":
+     {"bind":
+      {"x": "g",
+       "src":
+       {"rhs":
+        {"r":
+         {"ask":
+          {"a":
+           {"target": {"draw": 0, "addressee": {"tool": {"id": "c"}}},
+            "prompt": [{"lit": {"s": "hi"}}],
+            "pos": {"line": 3, "col": 8},
+            "model": null}}}}},
+       "rest":
+       {"ifFlag":
+        {"yes":
+         {"act":
+          {"rest": {"empty": {"pos": {"line": 4, "col": 9}}},
+           "pos": {"line": 4, "col": 11},
+           "a":
+           {"target": {"draw": 0, "addressee": {"tool": {"id": "log"}}},
+            "prompt": [{"interp": {"name": "g"}}],
+            "pos": {"line": 4, "col": 11},
+            "model": null}}},
+         "x": "ok",
+         "pos": {"line": 4, "col": 3},
+         "no":
+         {"ifFlag":
+          {"yes": {"empty": {"pos": {"line": 5, "col": 17}}},
+           "x": "g",
+           "pos": {"line": 5, "col": 10},
+           "no": {"empty": {"pos": {"line": 5, "col": 31}}}}}}},
+       "pos": {"line": 3, "col": 3},
+       "ann": null}},
+     "pos": {"line": 2, "col": 3},
+     "ann": "flag"}},
+   "fns": []}},
+ "reply":
+ {"refused":
+  {"pos": {"line": 5, "col": 10},
+   "n": null,
+   "message": "an `if` branches on a flag, but `g` answers `text`",
+   "guard": "other",
+   "excerpt": "g"}},
+ "oracleVersion": 1,
+ "name": "first-use-wins across the arms of an if"}

@@ -1,0 +1,4 @@
+{"request": {"string": {"text": "  two   words \u0009 here ", "op": "words"}},
+ "reply": {"result": ["two", "words", "here"]},
+ "oracleVersion": 1,
+ "name": "words splits on runs"}

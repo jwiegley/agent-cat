@@ -1,0 +1,4 @@
+{"request": {"string": {"text": "yes\r\n", "op": "norm"}},
+ "reply": {"result": "yes"},
+ "oracleVersion": 1,
+ "name": "norm crlf"}

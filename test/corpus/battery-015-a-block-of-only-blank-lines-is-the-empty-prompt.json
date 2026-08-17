@@ -1,0 +1,40 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"act":
+    {"rest": {"empty": {"pos": {"line": 1, "col": 10}}},
+     "pos": {"line": 2, "col": 3},
+     "a":
+     {"target": {"draw": 0, "addressee": {"tool": {"id": "t"}}},
+      "prompt": [],
+      "pos": {"line": 2, "col": 3},
+      "model": null}}},
+   "fns": []}},
+ "reply":
+ {"worlds":
+  [{"world":
+    {"verdict": {"const": {"v": "approve"}},
+     "text": "echo",
+     "flag": {"const": {"b": true}}},
+    "trace":
+    [{"scope": {"model": null, "mode": null},
+      "prompt": "",
+      "draw": 0,
+      "code": "receipt",
+      "answer": null,
+      "addressee": {"tool": {"id": "t"}}}],
+    "billMemo": 1,
+    "billFresh": 1}],
+  "size": 2,
+  "level": "batch",
+  "fnAsks": [],
+  "costSummary": {"paths": 1, "minFold": 1, "maxFold": 1},
+  "codes": ["receipt"],
+  "blockAsks": 1,
+  "askNodes": 1},
+ "oracleVersion": 1,
+ "name": "a block of only blank lines is the empty prompt"}

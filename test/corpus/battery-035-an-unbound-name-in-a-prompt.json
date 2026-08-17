@@ -1,0 +1,31 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"bind":
+    {"x": "g",
+     "src":
+     {"rhs":
+      {"r":
+       {"ask":
+        {"a":
+         {"target": {"draw": 0, "addressee": {"tool": {"id": "cat"}}},
+          "prompt": [{"lit": {"s": "read "}}, {"interp": {"name": "nowhere"}}],
+          "pos": {"line": 1, "col": 24},
+          "model": null}}}}},
+     "rest": {"empty": {"pos": {"line": 1, "col": 10}}},
+     "pos": {"line": 1, "col": 12},
+     "ann": "text"}},
+   "fns": []}},
+ "reply":
+ {"refused":
+  {"pos": {"line": 1, "col": 24},
+   "n": null,
+   "message": "unbound name; nothing in scope answers to it",
+   "guard": "other",
+   "excerpt": "nowhere"}},
+ "oracleVersion": 1,
+ "name": "an unbound name in a prompt"}

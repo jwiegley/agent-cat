@@ -1,0 +1,113 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"bind":
+    {"x": "d",
+     "src":
+     {"rhs":
+      {"r":
+       {"ask":
+        {"a":
+         {"target": {"draw": 0, "addressee": {"tool": {"id": "t"}}},
+          "prompt": [{"lit": {"s": "w"}}],
+          "pos": {"line": 12, "col": 24},
+          "model": null}}}}},
+     "rest":
+     {"bind":
+      {"x": "r",
+       "src":
+       {"revising":
+        {"subject": "d",
+         "reviewName": "v",
+         "reviewAnn": null,
+         "review":
+         {"call":
+          {"pos": {"line": 14, "col": 8},
+           "fn": "mk",
+           "args": [{"name": {"x": "c", "pos": {"line": 14, "col": 11}}}]}},
+         "pos": {"line": 13, "col": 7},
+         "carrier": "c",
+         "bound": 1,
+         "amend":
+         {"ask":
+          {"a":
+           {"target": {"draw": 0, "addressee": {"model": {"id": "a"}}},
+            "prompt": [{"lit": {"s": "f "}}, {"interp": {"name": "v"}}],
+            "pos": {"line": 15, "col": 13},
+            "model": null}}}}},
+       "rest":
+       {"caseResult":
+        {"x": "r",
+         "unsettled": {"empty": {"pos": {"line": 16, "col": 42}}},
+         "settledName": "x",
+         "settled": {"empty": {"pos": {"line": 16, "col": 23}}},
+         "pos": {"line": 16, "col": 2}}},
+       "pos": {"line": 13, "col": 2},
+       "ann": null}},
+     "pos": {"line": 12, "col": 12},
+     "ann": "text"}},
+   "fns":
+   [{"result": "text",
+     "pos": {"line": 1, "col": 1},
+     "params": [["goal", "text"]],
+     "name": "mk",
+     "body":
+     [{"bind":
+       {"x": "d",
+        "rhs":
+        {"ask":
+         {"a":
+          {"target": {"draw": 0, "addressee": {"model": {"id": "author"}}},
+           "prompt": [{"lit": {"s": "draft: "}}, {"interp": {"name": "goal"}}],
+           "pos": {"line": 2, "col": 8},
+           "model": null}}},
+        "pos": {"line": 2, "col": 3},
+        "ann": null}}],
+     "answerPos": {"line": 3, "col": 3},
+     "answer": "d"},
+    {"result": "verdict",
+     "pos": {"line": 5, "col": 1},
+     "params": [["patch", "text"]],
+     "name": "judged",
+     "body":
+     [{"bind":
+       {"x": "v",
+        "rhs":
+        {"ask":
+         {"a":
+          {"target": {"draw": 0, "addressee": {"model": {"id": "judge"}}},
+           "prompt": [{"lit": {"s": "judge: "}}, {"interp": {"name": "patch"}}],
+           "pos": {"line": 6, "col": 8},
+           "model": null}}},
+        "pos": {"line": 6, "col": 3},
+        "ann": null}}],
+     "answerPos": {"line": 7, "col": 3},
+     "answer": "v"},
+    {"result": "ack",
+     "pos": {"line": 9, "col": 1},
+     "params": [["patch", "text"]],
+     "name": "applied",
+     "body":
+     [{"act":
+       {"pos": {"line": 10, "col": 3},
+        "a":
+        {"target": {"draw": 0, "addressee": {"tool": {"id": "apply"}}},
+         "prompt": [{"lit": {"s": "apply: "}}, {"interp": {"name": "patch"}}],
+         "pos": {"line": 10, "col": 3},
+         "model": null}}}],
+     "answerPos": {"line": 11, "col": 1},
+     "answer": null}]}},
+ "reply":
+ {"refused":
+  {"pos": {"line": 14, "col": 8},
+   "n": null,
+   "message":
+   "the review of a bounded revision: `mk` answers `text`, not `verdict`",
+   "guard": "other",
+   "excerpt": "mk"}},
+ "oracleVersion": 1,
+ "name": "a review answering the wrong kind through a call"}

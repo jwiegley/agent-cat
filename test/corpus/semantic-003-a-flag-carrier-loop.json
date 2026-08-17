@@ -1,0 +1,109 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}},
+   {"verdict":
+    {"const": {"v": {"object": {"objections": ["not good enough"]}}}},
+    "text": "echo",
+    "flag": {"const": {"b": false}}}],
+  "program":
+  {"main":
+   {"bind":
+    {"x": "d",
+     "src":
+     {"rhs":
+      {"r":
+       {"ask":
+        {"a":
+         {"target": {"draw": 0, "addressee": {"tool": {"id": "t"}}},
+          "prompt": [{"lit": {"s": "w"}}],
+          "pos": {"line": 1, "col": 24},
+          "model": null}}}}},
+     "rest":
+     {"bind":
+      {"x": "ok",
+       "src":
+       {"rhs":
+        {"r":
+         {"ask":
+          {"a":
+           {"target": {"draw": 0, "addressee": {"person": {"id": "o"}}},
+            "prompt": [{"lit": {"s": "go?"}}],
+            "pos": {"line": 2, "col": 9},
+            "model": null}}}}},
+       "rest":
+       {"ifFlag":
+        {"yes":
+         {"act":
+          {"rest": {"empty": {"pos": {"line": 3, "col": 9}}},
+           "pos": {"line": 3, "col": 11},
+           "a":
+           {"target": {"draw": 0, "addressee": {"tool": {"id": "a"}}},
+            "prompt": [{"lit": {"s": "went "}}, {"interp": {"name": "d"}}],
+            "pos": {"line": 3, "col": 11},
+            "model": null}}},
+         "x": "ok",
+         "pos": {"line": 3, "col": 3},
+         "no": {"empty": {"pos": {"line": 3, "col": 44}}}}},
+       "pos": {"line": 2, "col": 3},
+       "ann": null}},
+     "pos": {"line": 1, "col": 12},
+     "ann": "text"}},
+   "fns": []}},
+ "reply":
+ {"worlds":
+  [{"world":
+    {"verdict": {"const": {"v": "approve"}},
+     "text": "echo",
+     "flag": {"const": {"b": true}}},
+    "trace":
+    [{"scope": {"model": null, "mode": null},
+      "prompt": "w",
+      "draw": 0,
+      "code": "text",
+      "answer": "w",
+      "addressee": {"tool": {"id": "t"}}},
+     {"scope": {"model": null, "mode": null},
+      "prompt": "go?",
+      "draw": 0,
+      "code": "flag",
+      "answer": true,
+      "addressee": {"person": {"id": "o"}}},
+     {"scope": {"model": null, "mode": null},
+      "prompt": "went w",
+      "draw": 0,
+      "code": "receipt",
+      "answer": null,
+      "addressee": {"tool": {"id": "a"}}}],
+    "billMemo": 3,
+    "billFresh": 3},
+   {"world":
+    {"verdict":
+     {"const": {"v": {"object": {"objections": ["not good enough"]}}}},
+     "text": "echo",
+     "flag": {"const": {"b": false}}},
+    "trace":
+    [{"scope": {"model": null, "mode": null},
+      "prompt": "w",
+      "draw": 0,
+      "code": "text",
+      "answer": "w",
+      "addressee": {"tool": {"id": "t"}}},
+     {"scope": {"model": null, "mode": null},
+      "prompt": "go?",
+      "draw": 0,
+      "code": "flag",
+      "answer": false,
+      "addressee": {"person": {"id": "o"}}}],
+    "billMemo": 2,
+    "billFresh": 2}],
+  "size": 6,
+  "level": "branch",
+  "fnAsks": [],
+  "costSummary": {"paths": 2, "minFold": 2, "maxFold": 3},
+  "codes": null,
+  "blockAsks": 3,
+  "askNodes": 3},
+ "oracleVersion": 1,
+ "name": "a flag carrier loop"}

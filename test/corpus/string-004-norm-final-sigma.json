@@ -1,0 +1,4 @@
+{"request": {"string": {"text": "ΟΔΥΣΣΕΥΣ οδυσσεύς", "op": "norm"}},
+ "reply": {"result": "ΟΔΥΣΣΕΥΣ οδυσσεύς"},
+ "oracleVersion": 1,
+ "name": "norm final sigma"}

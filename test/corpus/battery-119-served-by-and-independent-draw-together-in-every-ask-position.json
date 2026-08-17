@@ -1,0 +1,107 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"bind":
+    {"x": "a",
+     "src":
+     {"rhs":
+      {"r":
+       {"ask":
+        {"a":
+         {"target": {"draw": 2, "addressee": {"model": {"id": "author"}}},
+          "prompt": [{"lit": {"s": "draft it"}}],
+          "pos": {"line": 2, "col": 15},
+          "model": "deep"}}}}},
+     "rest":
+     {"act":
+      {"rest":
+       {"bind":
+        {"x": "p",
+         "src":
+         {"rhs":
+          {"r":
+           {"panel":
+            {"pos": {"line": 4, "col": 8},
+             "members":
+             [{"target": {"draw": 3, "addressee": {"model": {"id": "one"}}},
+               "prompt": [{"lit": {"s": "review "}}, {"interp": {"name": "a"}}],
+               "pos": {"line": 5, "col": 5},
+               "model": "deep"},
+              {"target": {"draw": 1, "addressee": {"tool": {"id": "lint"}}},
+               "prompt": [{"lit": {"s": "lint "}}, {"interp": {"name": "a"}}],
+               "pos": {"line": 6, "col": 5},
+               "model": null},
+              {"target": {"draw": 2, "addressee": {"person": {"id": "owner"}}},
+               "prompt": [{"lit": {"s": "ok? "}}, {"interp": {"name": "a"}}],
+               "pos": {"line": 7, "col": 5},
+               "model": null}]}}}},
+         "rest":
+         {"caseVerdict":
+          {"x": "p",
+           "pos": {"line": 9, "col": 3},
+           "objected": {"empty": {"pos": {"line": 9, "col": 41}}},
+           "noAnswer": {"empty": {"pos": {"line": 9, "col": 60}}},
+           "approved": {"empty": {"pos": {"line": 9, "col": 23}}}}},
+         "pos": {"line": 4, "col": 3},
+         "ann": null}},
+       "pos": {"line": 3, "col": 3},
+       "a":
+       {"target": {"draw": 1, "addressee": {"model": {"id": "logger"}}},
+        "prompt": [{"lit": {"s": "note "}}, {"interp": {"name": "a"}}],
+        "pos": {"line": 3, "col": 3},
+        "model": "cheap"}}},
+     "pos": {"line": 2, "col": 3},
+     "ann": "text"}},
+   "fns": []}},
+ "reply":
+ {"worlds":
+  [{"world":
+    {"verdict": {"const": {"v": "approve"}},
+     "text": "echo",
+     "flag": {"const": {"b": true}}},
+    "trace":
+    [{"scope": {"model": "deep", "mode": null},
+      "prompt": "draft it",
+      "draw": 2,
+      "code": "text",
+      "answer": "draft it",
+      "addressee": {"model": {"id": "author"}}},
+     {"scope": {"model": "cheap", "mode": null},
+      "prompt": "note draft it",
+      "draw": 1,
+      "code": "receipt",
+      "answer": null,
+      "addressee": {"model": {"id": "logger"}}},
+     {"scope": {"model": "deep", "mode": null},
+      "prompt": "review draft it",
+      "draw": 3,
+      "code": "verdict",
+      "answer": {"tag": "approve"},
+      "addressee": {"model": {"id": "one"}}},
+     {"scope": {"model": null, "mode": null},
+      "prompt": "lint draft it",
+      "draw": 1,
+      "code": "verdict",
+      "answer": {"tag": "approve"},
+      "addressee": {"tool": {"id": "lint"}}},
+     {"scope": {"model": null, "mode": null},
+      "prompt": "ok? draft it",
+      "draw": 2,
+      "code": "verdict",
+      "answer": {"tag": "approve"},
+      "addressee": {"person": {"id": "owner"}}}],
+    "billMemo": 5,
+    "billFresh": 5}],
+  "size": 9,
+  "level": "branch",
+  "fnAsks": [],
+  "costSummary": {"paths": 3, "minFold": 5, "maxFold": 5},
+  "codes": null,
+  "blockAsks": 5,
+  "askNodes": 5},
+ "oracleVersion": 1,
+ "name": "served by and independent draw together, in every ask position"}

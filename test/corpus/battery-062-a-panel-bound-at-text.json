@@ -1,0 +1,33 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"bind":
+    {"x": "p",
+     "src":
+     {"rhs":
+      {"r":
+       {"panel":
+        {"pos": {"line": 1, "col": 24},
+         "members":
+         [{"target": {"draw": 0, "addressee": {"model": {"id": "a"}}},
+           "prompt": [{"lit": {"s": "x"}}],
+           "pos": {"line": 1, "col": 50},
+           "model": null}]}}}},
+     "rest": {"empty": {"pos": {"line": 1, "col": 10}}},
+     "pos": {"line": 1, "col": 12},
+     "ann": "text"}},
+   "fns": []}},
+ "reply":
+ {"refused":
+  {"pos": {"line": 1, "col": 24},
+   "n": null,
+   "message":
+   "this binding: a panel combines its members in the verdict monoid, so it answers `verdict`, not `text`",
+   "guard": "other",
+   "excerpt": "panel"}},
+ "oracleVersion": 1,
+ "name": "a panel bound at text"}

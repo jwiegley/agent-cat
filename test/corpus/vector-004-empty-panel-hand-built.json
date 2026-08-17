@@ -1,0 +1,24 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"bind":
+    {"x": "p",
+     "src":
+     {"rhs": {"r": {"panel": {"pos": {"line": 1, "col": 1}, "members": []}}}},
+     "rest": {"empty": {"pos": {"line": 1, "col": 1}}},
+     "pos": {"line": 1, "col": 1},
+     "ann": null}},
+   "fns": []}},
+ "reply":
+ {"refused":
+  {"pos": {"line": 1, "col": 1},
+   "n": null,
+   "message": "a panel needs at least one member",
+   "guard": "panelEmpty",
+   "excerpt": "panel"}},
+ "oracleVersion": 1,
+ "name": "an empty panel, hand-built"}

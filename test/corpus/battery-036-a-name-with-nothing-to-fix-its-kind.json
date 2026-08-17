@@ -1,0 +1,32 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"bind":
+    {"x": "g",
+     "src":
+     {"rhs":
+      {"r":
+       {"ask":
+        {"a":
+         {"target": {"draw": 0, "addressee": {"tool": {"id": "cat"}}},
+          "prompt": [{"lit": {"s": "hi"}}],
+          "pos": {"line": 1, "col": 17},
+          "model": null}}}}},
+     "rest": {"empty": {"pos": {"line": 1, "col": 10}}},
+     "pos": {"line": 1, "col": 12},
+     "ann": null}},
+   "fns": []}},
+ "reply":
+ {"refused":
+  {"pos": {"line": 1, "col": 12},
+   "n": null,
+   "message":
+   "nothing fixes what kind of answer `g` names: use it (a hole, an `if`, a `case`), or annotate it — `g : text <- …`",
+   "guard": "other",
+   "excerpt": "g"}},
+ "oracleVersion": 1,
+ "name": "a name with nothing to fix its kind"}

@@ -1,0 +1,4 @@
+{"request": {"string": {"text": "OBJECTION: too long", "op": "decodeVerdict"}},
+ "reply": {"result": {"tag": "object", "objections": ["OBJECTION: too long"]}},
+ "oracleVersion": 1,
+ "name": "decodeVerdict objection"}

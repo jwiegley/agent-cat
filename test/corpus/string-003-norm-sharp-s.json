@@ -1,0 +1,4 @@
+{"request": {"string": {"text": "STRASSE straße", "op": "norm"}},
+ "reply": {"result": "strasse straße"},
+ "oracleVersion": 1,
+ "name": "norm sharp s"}

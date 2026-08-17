@@ -1,0 +1,43 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"act":
+    {"rest": {"empty": {"pos": {"line": 3, "col": 10}}},
+     "pos": {"line": 3, "col": 12},
+     "a":
+     {"target": {"draw": 0, "addressee": {"tool": {"id": "t"}}},
+      "prompt":
+      [{"lit": {"s": "Harden "}},
+       {"lit": {"s": "the parser"}},
+       {"lit": {"s": ", briefly."}}],
+      "pos": {"line": 3, "col": 12},
+      "model": null}}},
+   "fns": []}},
+ "reply":
+ {"worlds":
+  [{"world":
+    {"verdict": {"const": {"v": "approve"}},
+     "text": "echo",
+     "flag": {"const": {"b": true}}},
+    "trace":
+    [{"scope": {"model": null, "mode": null},
+      "prompt": "Harden the parser, briefly.",
+      "draw": 0,
+      "code": "receipt",
+      "answer": null,
+      "addressee": {"tool": {"id": "t"}}}],
+    "billMemo": 1,
+    "billFresh": 1}],
+  "size": 2,
+  "level": "batch",
+  "fnAsks": [],
+  "costSummary": {"paths": 1, "minFold": 1, "maxFold": 1},
+  "codes": ["receipt"],
+  "blockAsks": 1,
+  "askNodes": 1},
+ "oracleVersion": 1,
+ "name": "an override reaches a later define that holes it"}

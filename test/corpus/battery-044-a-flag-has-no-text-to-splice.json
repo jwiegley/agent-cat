@@ -1,0 +1,46 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"bind":
+    {"x": "ok",
+     "src":
+     {"rhs":
+      {"r":
+       {"ask":
+        {"a":
+         {"target": {"draw": 0, "addressee": {"person": {"id": "o"}}},
+          "prompt": [{"lit": {"s": "hi"}}],
+          "pos": {"line": 1, "col": 25},
+          "model": null}}}}},
+     "rest":
+     {"bind":
+      {"x": "g",
+       "src":
+       {"rhs":
+        {"r":
+         {"ask":
+          {"a":
+           {"target": {"draw": 0, "addressee": {"tool": {"id": "cat"}}},
+            "prompt": [{"lit": {"s": "quoting "}}, {"interp": {"name": "ok"}}],
+            "pos": {"line": 2, "col": 24},
+            "model": null}}}}},
+       "rest": {"empty": {"pos": {"line": 1, "col": 10}}},
+       "pos": {"line": 2, "col": 12},
+       "ann": "text"}},
+     "pos": {"line": 1, "col": 12},
+     "ann": "flag"}},
+   "fns": []}},
+ "reply":
+ {"refused":
+  {"pos": {"line": 2, "col": 24},
+   "n": null,
+   "message":
+   "only a text or a verdict answer interpolates into a prompt — a verdict splices as its objections — but `ok` answers `flag`, which has no text of its own",
+   "guard": "other",
+   "excerpt": "ok"}},
+ "oracleVersion": 1,
+ "name": "a flag has no text to splice"}

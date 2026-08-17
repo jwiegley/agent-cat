@@ -1,0 +1,50 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"bind":
+    {"x": "g",
+     "src":
+     {"rhs":
+      {"r":
+       {"ask":
+        {"a":
+         {"target": {"draw": 0, "addressee": {"tool": {"id": "cat"}}},
+          "prompt": [{"lit": {"s": "hi"}}],
+          "pos": {"line": 1, "col": 17},
+          "model": null}}}}},
+     "rest":
+     {"bind":
+      {"x": "n",
+       "src":
+       {"rhs":
+        {"r":
+         {"ask":
+          {"a":
+           {"target": {"draw": 0, "addressee": {"tool": {"id": "t"}}},
+            "prompt": [{"interp": {"name": "g"}}],
+            "pos": {"line": 2, "col": 24},
+            "model": null}}}}},
+       "rest":
+       {"ifFlag":
+        {"yes": {"empty": {"pos": {"line": 3, "col": 19}}},
+         "x": "g",
+         "pos": {"line": 3, "col": 12},
+         "no": {"empty": {"pos": {"line": 3, "col": 33}}}}},
+       "pos": {"line": 2, "col": 12},
+       "ann": "text"}},
+     "pos": {"line": 1, "col": 12},
+     "ann": null}},
+   "fns": []}},
+ "reply":
+ {"refused":
+  {"pos": {"line": 3, "col": 12},
+   "n": null,
+   "message": "an `if` branches on a flag, but `g` answers `text`",
+   "guard": "other",
+   "excerpt": "g"}},
+ "oracleVersion": 1,
+ "name": "the first use fixes the kind; a later if disagrees"}

@@ -1,0 +1,31 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main": {"empty": {"pos": {"line": 1, "col": 1}}},
+   "fns":
+   [{"result": "text",
+     "pos": {"line": 1, "col": 1},
+     "params": [["p", "text"]],
+     "name": "f",
+     "body": [],
+     "answerPos": {"line": 1, "col": 1},
+     "answer": "p"},
+    {"result": "text",
+     "pos": {"line": 1, "col": 1},
+     "params": [["p", "text"]],
+     "name": "f",
+     "body": [],
+     "answerPos": {"line": 1, "col": 1},
+     "answer": "p"}]}},
+ "reply":
+ {"refused":
+  {"pos": {"line": 1, "col": 1},
+   "n": null,
+   "message": "two functions answer to one name; rename one",
+   "guard": "dupFunction",
+   "excerpt": "f"}},
+ "oracleVersion": 1,
+ "name": "duplicate function names, hand-built"}

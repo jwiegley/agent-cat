@@ -1,0 +1,4 @@
+{"request": {"string": {"text": "ı vs I", "op": "norm"}},
+ "reply": {"result": "ı vs i"},
+ "oracleVersion": 1,
+ "name": "norm turkish dotless"}

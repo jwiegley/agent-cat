@@ -1,0 +1,131 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"bind":
+    {"x": "d",
+     "src":
+     {"rhs":
+      {"r":
+       {"ask":
+        {"a":
+         {"target": {"draw": 0, "addressee": {"model": {"id": "a"}}},
+          "prompt": [{"lit": {"s": "draft"}}],
+          "pos": {"line": 2, "col": 15},
+          "model": null}}}}},
+     "rest":
+     {"bind":
+      {"x": "note",
+       "src":
+       {"rhs":
+        {"r":
+         {"ask":
+          {"a":
+           {"target": {"draw": 0, "addressee": {"tool": {"id": "c"}}},
+            "prompt": [{"lit": {"s": "notes"}}],
+            "pos": {"line": 3, "col": 11},
+            "model": null}}}}},
+       "rest":
+       {"knownHere":
+        {"rest":
+         {"bind":
+          {"x": "r",
+           "src":
+           {"revising":
+            {"subject": "d",
+             "reviewName": "v",
+             "reviewAnn": null,
+             "review":
+             {"ask":
+              {"a":
+               {"target": {"draw": 0, "addressee": {"model": {"id": "m"}}},
+                "prompt":
+                [{"lit": {"s": "review "}}, {"interp": {"name": "c"}}],
+                "pos": {"line": 6, "col": 10},
+                "model": null}}},
+             "pos": {"line": 5, "col": 8},
+             "carrier": "c",
+             "bound": 1,
+             "amend":
+             {"ask":
+              {"a":
+               {"target": {"draw": 0, "addressee": {"model": {"id": "a"}}},
+                "prompt":
+                [{"lit": {"s": "fix "}},
+                 {"interp": {"name": "c"}},
+                 {"lit": {"s": " "}},
+                 {"interp": {"name": "v"}}],
+                "pos": {"line": 7, "col": 15},
+                "model": null}}}}},
+           "rest":
+           {"caseResult":
+            {"x": "r",
+             "unsettled": {"empty": {"pos": {"line": 10, "col": 24}}},
+             "settledName": "x",
+             "settled":
+             {"act":
+              {"rest": {"empty": {"pos": {"line": 9, "col": 22}}},
+               "pos": {"line": 9, "col": 24},
+               "a":
+               {"target": {"draw": 0, "addressee": {"tool": {"id": "log"}}},
+                "prompt":
+                [{"interp": {"name": "x"}},
+                 {"lit": {"s": " and "}},
+                 {"interp": {"name": "note"}}],
+                "pos": {"line": 9, "col": 24},
+                "model": null}}},
+             "pos": {"line": 9, "col": 3}}},
+           "pos": {"line": 5, "col": 3},
+           "ann": null}},
+         "pos": {"line": 4, "col": 3},
+         "names": ["note", "d"]}},
+       "pos": {"line": 3, "col": 3},
+       "ann": null}},
+     "pos": {"line": 2, "col": 3},
+     "ann": "text"}},
+   "fns": []}},
+ "reply":
+ {"worlds":
+  [{"world":
+    {"verdict": {"const": {"v": "approve"}},
+     "text": "echo",
+     "flag": {"const": {"b": true}}},
+    "trace":
+    [{"scope": {"model": null, "mode": null},
+      "prompt": "draft",
+      "draw": 0,
+      "code": "text",
+      "answer": "draft",
+      "addressee": {"model": {"id": "a"}}},
+     {"scope": {"model": null, "mode": null},
+      "prompt": "notes",
+      "draw": 0,
+      "code": "text",
+      "answer": "notes",
+      "addressee": {"tool": {"id": "c"}}},
+     {"scope": {"model": null, "mode": null},
+      "prompt": "review draft",
+      "draw": 0,
+      "code": "verdict",
+      "answer": {"tag": "approve"},
+      "addressee": {"model": {"id": "m"}}},
+     {"scope": {"model": null, "mode": null},
+      "prompt": "draft and notes",
+      "draw": 0,
+      "code": "receipt",
+      "answer": null,
+      "addressee": {"tool": {"id": "log"}}}],
+    "billMemo": 4,
+    "billFresh": 4}],
+  "size": 14,
+  "level": "branch",
+  "fnAsks": [],
+  "costSummary": {"paths": 4, "minFold": 3, "maxFold": 6},
+  "codes": null,
+  "blockAsks": 7,
+  "askNodes": 7},
+ "oracleVersion": 1,
+ "name": "a kind fixed on the far side of a known here and a graft"}

@@ -1,0 +1,4 @@
+{"request": {"string": {"text": "approve kind of", "op": "decodeVerdict"}},
+ "reply": {"result": {"tag": "object", "objections": ["approve kind of"]}},
+ "oracleVersion": 1,
+ "name": "decodeVerdict multiword is not approve"}

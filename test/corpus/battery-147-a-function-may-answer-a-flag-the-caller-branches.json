@@ -1,0 +1,44 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main": {"empty": {"pos": {"line": 5, "col": 12}}},
+   "fns":
+   [{"result": "flag",
+     "pos": {"line": 1, "col": 1},
+     "params": [["p", "text"]],
+     "name": "f",
+     "body":
+     [{"bind":
+       {"x": "x",
+        "rhs":
+        {"ask":
+         {"a":
+          {"target": {"draw": 0, "addressee": {"model": {"id": "m"}}},
+           "prompt": [{"interp": {"name": "p"}}],
+           "pos": {"line": 2, "col": 8},
+           "model": null}}},
+        "pos": {"line": 2, "col": 3},
+        "ann": null}}],
+     "answerPos": {"line": 3, "col": 3},
+     "answer": "x"}]}},
+ "reply":
+ {"worlds":
+  [{"world":
+    {"verdict": {"const": {"v": "approve"}},
+     "text": "echo",
+     "flag": {"const": {"b": true}}},
+    "trace": [],
+    "billMemo": 0,
+    "billFresh": 0}],
+  "size": 1,
+  "level": "batch",
+  "fnAsks": [["f", 1]],
+  "costSummary": {"paths": 1, "minFold": 0, "maxFold": 0},
+  "codes": [],
+  "blockAsks": 0,
+  "askNodes": 0},
+ "oracleVersion": 1,
+ "name": "a function may answer a flag; the caller branches"}

@@ -1,0 +1,4 @@
+{"request": {"string": {"text": "maybe", "op": "decode", "code": "flag"}},
+ "reply": {"result": {"answer": null}},
+ "oracleVersion": 1,
+ "name": "decode flag maybe"}

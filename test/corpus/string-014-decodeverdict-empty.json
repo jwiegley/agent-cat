@@ -1,0 +1,4 @@
+{"request": {"string": {"text": "", "op": "decodeVerdict"}},
+ "reply": {"result": {"tag": "declined"}},
+ "oracleVersion": 1,
+ "name": "decodeVerdict empty"}

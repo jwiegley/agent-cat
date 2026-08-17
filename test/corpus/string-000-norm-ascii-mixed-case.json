@@ -1,0 +1,4 @@
+{"request": {"string": {"text": "  HeLLo World  ", "op": "norm"}},
+ "reply": {"result": "hello world"},
+ "oracleVersion": 1,
+ "name": "norm ascii mixed case"}

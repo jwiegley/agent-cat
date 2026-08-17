@@ -1,0 +1,59 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"bind":
+    {"x": "x",
+     "src":
+     {"rhs":
+      {"r":
+       {"call":
+        {"pos": {"line": 5, "col": 17},
+         "fn": "g",
+         "args":
+         [{"lit":
+           {"pos": {"line": 5, "col": 19},
+            "p": [{"lit": {"s": "words"}}]}}]}}}},
+     "rest":
+     {"act":
+      {"rest": {"empty": {"pos": {"line": 5, "col": 10}}},
+       "pos": {"line": 6, "col": 2},
+       "a":
+       {"target": {"draw": 0, "addressee": {"tool": {"id": "t"}}},
+        "prompt": [{"lit": {"s": "use "}}, {"interp": {"name": "x"}}],
+        "pos": {"line": 6, "col": 2},
+        "model": null}}},
+     "pos": {"line": 5, "col": 12},
+     "ann": null}},
+   "fns":
+   [{"result": "text",
+     "pos": {"line": 1, "col": 1},
+     "params": [["v", "verdict"]],
+     "name": "g",
+     "body":
+     [{"bind":
+       {"x": "d",
+        "rhs":
+        {"ask":
+         {"a":
+          {"target": {"draw": 0, "addressee": {"model": {"id": "m"}}},
+           "prompt": [{"lit": {"s": "about "}}, {"interp": {"name": "v"}}],
+           "pos": {"line": 2, "col": 8},
+           "model": null}}},
+        "pos": {"line": 2, "col": 3},
+        "ann": null}}],
+     "answerPos": {"line": 3, "col": 3},
+     "answer": "d"}]}},
+ "reply":
+ {"refused":
+  {"pos": {"line": 5, "col": 19},
+   "n": null,
+   "message":
+   "words fill a `text` parameter, and `g`'s parameter `v` takes `verdict`; pass a name that answers it",
+   "guard": "other",
+   "excerpt": "g"}},
+ "oracleVersion": 1,
+ "name": "words passed to a verdict parameter"}

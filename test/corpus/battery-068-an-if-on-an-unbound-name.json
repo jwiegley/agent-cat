@@ -1,0 +1,22 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"ifFlag":
+    {"yes": {"empty": {"pos": {"line": 1, "col": 20}}},
+     "x": "ok",
+     "pos": {"line": 1, "col": 12},
+     "no": {"empty": {"pos": {"line": 1, "col": 34}}}}},
+   "fns": []}},
+ "reply":
+ {"refused":
+  {"pos": {"line": 1, "col": 12},
+   "n": null,
+   "message": "unbound name; nothing in scope answers to it",
+   "guard": "other",
+   "excerpt": "ok"}},
+ "oracleVersion": 1,
+ "name": "an if on an unbound name"}

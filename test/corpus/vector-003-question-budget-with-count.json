@@ -1,0 +1,375 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"bind":
+    {"x": "a",
+     "src":
+     {"rhs":
+      {"r":
+       {"call":
+        {"pos": {"line": 65, "col": 17},
+         "fn": "f13",
+         "args":
+         [{"lit":
+           {"pos": {"line": 65, "col": 21}, "p": [{"lit": {"s": "x"}}]}}]}}}},
+     "rest":
+     {"bind":
+      {"x": "b",
+       "src":
+       {"rhs":
+        {"r":
+         {"call":
+          {"pos": {"line": 66, "col": 7},
+           "fn": "f13",
+           "args":
+           [{"lit":
+             {"pos": {"line": 66, "col": 11}, "p": [{"lit": {"s": "y"}}]}}]}}}},
+       "rest":
+       {"act":
+        {"rest": {"empty": {"pos": {"line": 65, "col": 10}}},
+         "pos": {"line": 67, "col": 2},
+         "a":
+         {"target": {"draw": 0, "addressee": {"tool": {"id": "t"}}},
+          "prompt":
+          [{"interp": {"name": "a"}},
+           {"lit": {"s": " "}},
+           {"interp": {"name": "b"}}],
+          "pos": {"line": 67, "col": 2},
+          "model": null}}},
+       "pos": {"line": 66, "col": 2},
+       "ann": null}},
+     "pos": {"line": 65, "col": 12},
+     "ann": null}},
+   "fns":
+   [{"result": "text",
+     "pos": {"line": 1, "col": 1},
+     "params": [["p", "text"]],
+     "name": "f1",
+     "body":
+     [{"bind":
+       {"x": "d",
+        "rhs":
+        {"ask":
+         {"a":
+          {"target": {"draw": 0, "addressee": {"model": {"id": "m"}}},
+           "prompt": [{"lit": {"s": "1: "}}, {"interp": {"name": "p"}}],
+           "pos": {"line": 2, "col": 8},
+           "model": null}}},
+        "pos": {"line": 2, "col": 3},
+        "ann": null}}],
+     "answerPos": {"line": 3, "col": 3},
+     "answer": "d"},
+    {"result": "text",
+     "pos": {"line": 5, "col": 1},
+     "params": [["p", "text"]],
+     "name": "f2",
+     "body":
+     [{"bind":
+       {"x": "a",
+        "rhs":
+        {"call":
+         {"pos": {"line": 6, "col": 8},
+          "fn": "f1",
+          "args": [{"name": {"x": "p", "pos": {"line": 6, "col": 11}}}]}},
+        "pos": {"line": 6, "col": 3},
+        "ann": null}},
+      {"bind":
+       {"x": "b",
+        "rhs":
+        {"call":
+         {"pos": {"line": 7, "col": 8},
+          "fn": "f1",
+          "args": [{"name": {"x": "a", "pos": {"line": 7, "col": 11}}}]}},
+        "pos": {"line": 7, "col": 3},
+        "ann": null}}],
+     "answerPos": {"line": 8, "col": 3},
+     "answer": "b"},
+    {"result": "text",
+     "pos": {"line": 10, "col": 1},
+     "params": [["p", "text"]],
+     "name": "f3",
+     "body":
+     [{"bind":
+       {"x": "a",
+        "rhs":
+        {"call":
+         {"pos": {"line": 11, "col": 8},
+          "fn": "f2",
+          "args": [{"name": {"x": "p", "pos": {"line": 11, "col": 11}}}]}},
+        "pos": {"line": 11, "col": 3},
+        "ann": null}},
+      {"bind":
+       {"x": "b",
+        "rhs":
+        {"call":
+         {"pos": {"line": 12, "col": 8},
+          "fn": "f2",
+          "args": [{"name": {"x": "a", "pos": {"line": 12, "col": 11}}}]}},
+        "pos": {"line": 12, "col": 3},
+        "ann": null}}],
+     "answerPos": {"line": 13, "col": 3},
+     "answer": "b"},
+    {"result": "text",
+     "pos": {"line": 15, "col": 1},
+     "params": [["p", "text"]],
+     "name": "f4",
+     "body":
+     [{"bind":
+       {"x": "a",
+        "rhs":
+        {"call":
+         {"pos": {"line": 16, "col": 8},
+          "fn": "f3",
+          "args": [{"name": {"x": "p", "pos": {"line": 16, "col": 11}}}]}},
+        "pos": {"line": 16, "col": 3},
+        "ann": null}},
+      {"bind":
+       {"x": "b",
+        "rhs":
+        {"call":
+         {"pos": {"line": 17, "col": 8},
+          "fn": "f3",
+          "args": [{"name": {"x": "a", "pos": {"line": 17, "col": 11}}}]}},
+        "pos": {"line": 17, "col": 3},
+        "ann": null}}],
+     "answerPos": {"line": 18, "col": 3},
+     "answer": "b"},
+    {"result": "text",
+     "pos": {"line": 20, "col": 1},
+     "params": [["p", "text"]],
+     "name": "f5",
+     "body":
+     [{"bind":
+       {"x": "a",
+        "rhs":
+        {"call":
+         {"pos": {"line": 21, "col": 8},
+          "fn": "f4",
+          "args": [{"name": {"x": "p", "pos": {"line": 21, "col": 11}}}]}},
+        "pos": {"line": 21, "col": 3},
+        "ann": null}},
+      {"bind":
+       {"x": "b",
+        "rhs":
+        {"call":
+         {"pos": {"line": 22, "col": 8},
+          "fn": "f4",
+          "args": [{"name": {"x": "a", "pos": {"line": 22, "col": 11}}}]}},
+        "pos": {"line": 22, "col": 3},
+        "ann": null}}],
+     "answerPos": {"line": 23, "col": 3},
+     "answer": "b"},
+    {"result": "text",
+     "pos": {"line": 25, "col": 1},
+     "params": [["p", "text"]],
+     "name": "f6",
+     "body":
+     [{"bind":
+       {"x": "a",
+        "rhs":
+        {"call":
+         {"pos": {"line": 26, "col": 8},
+          "fn": "f5",
+          "args": [{"name": {"x": "p", "pos": {"line": 26, "col": 11}}}]}},
+        "pos": {"line": 26, "col": 3},
+        "ann": null}},
+      {"bind":
+       {"x": "b",
+        "rhs":
+        {"call":
+         {"pos": {"line": 27, "col": 8},
+          "fn": "f5",
+          "args": [{"name": {"x": "a", "pos": {"line": 27, "col": 11}}}]}},
+        "pos": {"line": 27, "col": 3},
+        "ann": null}}],
+     "answerPos": {"line": 28, "col": 3},
+     "answer": "b"},
+    {"result": "text",
+     "pos": {"line": 30, "col": 1},
+     "params": [["p", "text"]],
+     "name": "f7",
+     "body":
+     [{"bind":
+       {"x": "a",
+        "rhs":
+        {"call":
+         {"pos": {"line": 31, "col": 8},
+          "fn": "f6",
+          "args": [{"name": {"x": "p", "pos": {"line": 31, "col": 11}}}]}},
+        "pos": {"line": 31, "col": 3},
+        "ann": null}},
+      {"bind":
+       {"x": "b",
+        "rhs":
+        {"call":
+         {"pos": {"line": 32, "col": 8},
+          "fn": "f6",
+          "args": [{"name": {"x": "a", "pos": {"line": 32, "col": 11}}}]}},
+        "pos": {"line": 32, "col": 3},
+        "ann": null}}],
+     "answerPos": {"line": 33, "col": 3},
+     "answer": "b"},
+    {"result": "text",
+     "pos": {"line": 35, "col": 1},
+     "params": [["p", "text"]],
+     "name": "f8",
+     "body":
+     [{"bind":
+       {"x": "a",
+        "rhs":
+        {"call":
+         {"pos": {"line": 36, "col": 8},
+          "fn": "f7",
+          "args": [{"name": {"x": "p", "pos": {"line": 36, "col": 11}}}]}},
+        "pos": {"line": 36, "col": 3},
+        "ann": null}},
+      {"bind":
+       {"x": "b",
+        "rhs":
+        {"call":
+         {"pos": {"line": 37, "col": 8},
+          "fn": "f7",
+          "args": [{"name": {"x": "a", "pos": {"line": 37, "col": 11}}}]}},
+        "pos": {"line": 37, "col": 3},
+        "ann": null}}],
+     "answerPos": {"line": 38, "col": 3},
+     "answer": "b"},
+    {"result": "text",
+     "pos": {"line": 40, "col": 1},
+     "params": [["p", "text"]],
+     "name": "f9",
+     "body":
+     [{"bind":
+       {"x": "a",
+        "rhs":
+        {"call":
+         {"pos": {"line": 41, "col": 8},
+          "fn": "f8",
+          "args": [{"name": {"x": "p", "pos": {"line": 41, "col": 11}}}]}},
+        "pos": {"line": 41, "col": 3},
+        "ann": null}},
+      {"bind":
+       {"x": "b",
+        "rhs":
+        {"call":
+         {"pos": {"line": 42, "col": 8},
+          "fn": "f8",
+          "args": [{"name": {"x": "a", "pos": {"line": 42, "col": 11}}}]}},
+        "pos": {"line": 42, "col": 3},
+        "ann": null}}],
+     "answerPos": {"line": 43, "col": 3},
+     "answer": "b"},
+    {"result": "text",
+     "pos": {"line": 45, "col": 1},
+     "params": [["p", "text"]],
+     "name": "f10",
+     "body":
+     [{"bind":
+       {"x": "a",
+        "rhs":
+        {"call":
+         {"pos": {"line": 46, "col": 8},
+          "fn": "f9",
+          "args": [{"name": {"x": "p", "pos": {"line": 46, "col": 11}}}]}},
+        "pos": {"line": 46, "col": 3},
+        "ann": null}},
+      {"bind":
+       {"x": "b",
+        "rhs":
+        {"call":
+         {"pos": {"line": 47, "col": 8},
+          "fn": "f9",
+          "args": [{"name": {"x": "a", "pos": {"line": 47, "col": 11}}}]}},
+        "pos": {"line": 47, "col": 3},
+        "ann": null}}],
+     "answerPos": {"line": 48, "col": 3},
+     "answer": "b"},
+    {"result": "text",
+     "pos": {"line": 50, "col": 1},
+     "params": [["p", "text"]],
+     "name": "f11",
+     "body":
+     [{"bind":
+       {"x": "a",
+        "rhs":
+        {"call":
+         {"pos": {"line": 51, "col": 8},
+          "fn": "f10",
+          "args": [{"name": {"x": "p", "pos": {"line": 51, "col": 12}}}]}},
+        "pos": {"line": 51, "col": 3},
+        "ann": null}},
+      {"bind":
+       {"x": "b",
+        "rhs":
+        {"call":
+         {"pos": {"line": 52, "col": 8},
+          "fn": "f10",
+          "args": [{"name": {"x": "a", "pos": {"line": 52, "col": 12}}}]}},
+        "pos": {"line": 52, "col": 3},
+        "ann": null}}],
+     "answerPos": {"line": 53, "col": 3},
+     "answer": "b"},
+    {"result": "text",
+     "pos": {"line": 55, "col": 1},
+     "params": [["p", "text"]],
+     "name": "f12",
+     "body":
+     [{"bind":
+       {"x": "a",
+        "rhs":
+        {"call":
+         {"pos": {"line": 56, "col": 8},
+          "fn": "f11",
+          "args": [{"name": {"x": "p", "pos": {"line": 56, "col": 12}}}]}},
+        "pos": {"line": 56, "col": 3},
+        "ann": null}},
+      {"bind":
+       {"x": "b",
+        "rhs":
+        {"call":
+         {"pos": {"line": 57, "col": 8},
+          "fn": "f11",
+          "args": [{"name": {"x": "a", "pos": {"line": 57, "col": 12}}}]}},
+        "pos": {"line": 57, "col": 3},
+        "ann": null}}],
+     "answerPos": {"line": 58, "col": 3},
+     "answer": "b"},
+    {"result": "text",
+     "pos": {"line": 60, "col": 1},
+     "params": [["p", "text"]],
+     "name": "f13",
+     "body":
+     [{"bind":
+       {"x": "a",
+        "rhs":
+        {"call":
+         {"pos": {"line": 61, "col": 8},
+          "fn": "f12",
+          "args": [{"name": {"x": "p", "pos": {"line": 61, "col": 12}}}]}},
+        "pos": {"line": 61, "col": 3},
+        "ann": null}},
+      {"bind":
+       {"x": "b",
+        "rhs":
+        {"call":
+         {"pos": {"line": 62, "col": 8},
+          "fn": "f12",
+          "args": [{"name": {"x": "a", "pos": {"line": 62, "col": 12}}}]}},
+        "pos": {"line": 62, "col": 3},
+        "ann": null}}],
+     "answerPos": {"line": 63, "col": 3},
+     "answer": "b"}]}},
+ "reply":
+ {"refused":
+  {"pos": {"line": 0, "col": 0},
+   "n": 8193,
+   "message":
+   "this program elaborates to 8193 questions, and the bound is 4096",
+   "guard": "questionBudget",
+   "excerpt": ""}},
+ "oracleVersion": 1,
+ "name": "a program over the question budget, with the count"}

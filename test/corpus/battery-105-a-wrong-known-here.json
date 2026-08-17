@@ -1,0 +1,36 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"bind":
+    {"x": "g",
+     "src":
+     {"rhs":
+      {"r":
+       {"ask":
+        {"a":
+         {"target": {"draw": 0, "addressee": {"tool": {"id": "c"}}},
+          "prompt": [{"lit": {"s": "a"}}],
+          "pos": {"line": 1, "col": 24},
+          "model": null}}}}},
+     "rest":
+     {"knownHere":
+      {"rest": {"empty": {"pos": {"line": 3, "col": 12}}},
+       "pos": {"line": 2, "col": 12},
+       "names": []}},
+     "pos": {"line": 1, "col": 12},
+     "ann": "text"}},
+   "fns": []}},
+ "reply":
+ {"refused":
+  {"pos": {"line": 2, "col": 12},
+   "n": null,
+   "message":
+   "`known here` asserts the names in scope, innermost first, and they are: g",
+   "guard": "other",
+   "excerpt": ""}},
+ "oracleVersion": 1,
+ "name": "a wrong known here"}

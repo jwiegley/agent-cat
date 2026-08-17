@@ -1,0 +1,4 @@
+{"request": {"string": {"text": "no", "op": "say", "code": "flag"}},
+ "reply": {"result": "no"},
+ "oracleVersion": 1,
+ "name": "say flag no"}
