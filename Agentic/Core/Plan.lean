@@ -165,7 +165,20 @@ Semantic rather than syntactic, and that is not a shortcut: `Expr` is already a
 function of environments, so a renaming of variables has nothing to act on
 except environments. Weakening, exchange, contraction and genuine substitution
 are all inhabitants of this one type, and the substitution lemma
-(`denote_sub`) is one line as a result. -/
+(`denote_sub`) is one line as a result.
+
+**And it is what makes the arrow reading of the `pipeline` rung exact here.**
+Atkey's "What is a categorical model of arrows?" declines the folklore
+equivalence between arrows and Freyd categories — his own abstract says it "is
+more subtle than that" — and derives *indexed* Freyd categories instead, with a
+further condition for an indexed one to be an ordinary one; the differentiating
+point is how much structure a computation's inputs carry. Because `Sub Γ Δ` is
+an arbitrary *function* `Env Δ → Env Γ`, this package lands in the degenerate,
+maximally-structured case: every pure map between environment types is
+available, weakening, exchange, contraction and substitution are one operation,
+and the Freyd reading of `pipeline` is exact rather than approximate. It would
+stop being exact the moment anyone replaced `Sub` with a syntactic category of
+renamings, which is one more reason not to. -/
 abbrev Sub (Γ Δ : Ctx) : Type := Expr Δ (Env Γ)
 
 namespace Sub
@@ -210,7 +223,30 @@ functoriality of `Plan.sub` needs. -/
     (lift (comp σ τ) : Sub (c :: Γ) (c :: Θ)) = comp (lift σ) (lift τ) := rfl
 
 /-- Weakening is natural: reading past a fresh binding is the same whether the
-context morphism is applied before or after. -/
+context morphism is applied before or after.
+
+**What these three are, in the vocabulary of strength.** On environments,
+`Env (c :: Γ) ≅ El c × Env Γ` (`Env.cons_head_tail`), and under that
+isomorphism the three declarations above are the strength of the context
+extension functor and its projection:
+
+```
+Sub.lift σ  =  id_{El c} × σ  =  second' σ        (Strong's `second'`, at `(→)`)
+Sub.wk      =  π₂
+wk_lift     =  the naturality square of π₂
+```
+
+Three `rfl`s, and naming them is not free of content: the seed question that
+produced this note asked whether `Plan` wanted profunctor-optic machinery, and
+the answer is that the *only* piece of it the package uses is this strength,
+which is `id × −` at `(→)` and needs no `Strong` class, no Tambara module and no
+profunctor composition to state. Running the coherence checklist that the name
+`second'` generates is what turned up the one square this package was missing —
+`Morphism.sub_mapP`, the bifunctor law, which follows in one line and was stated
+nowhere. Vocabulary that generates a completeness checklist earns its keep even
+when every entry it finds is a `rfl`; a vocabulary that generates a second
+development does not, which is why nothing else from that direction was
+taken. -/
 @[simp] theorem wk_lift (σ : Sub Γ Δ) :
     comp (wk (c := c)) (lift σ) = comp σ (wk (c := c)) := rfl
 

@@ -291,6 +291,40 @@ def Kreview : El .text → Env [.text] → Dlg Verdict := fun patch γ => panelD
 def Kredraft : El .text × Verdict → Env [.text] → Dlg (El .text) :=
   fun av γ => redraftD γ.head av.1 av.2
 
+/-! ### Why all four `Denotes` obligations are still discharged by hand
+
+`Cont.denotes_ofPlan` (`Agentic/Core/Denote.lean`) discharges the coherence a
+`Cont` owes whenever the continuation is `Cont.ofPlan` of a plan and the
+semantic continuation is *read off that plan*. Neither half is free here, and the
+four theorems below are the four different reasons, which is worth recording
+because each is a fact about this workload rather than about the mathematics.
+
+* `denotes_review` — `review` sits at the answer type `El .text`, so the Yoneda
+  form applies in principle. It does not shorten anything: `Kreview` is written
+  independently, against the dialogue-level `panelD`, so the residual obligation
+  would be `∀ a γ, denote reviewPlan (Env.cons a γ) = Kreview a γ` — the same
+  panel computation as below — *plus* a proof that `review = Cont.ofPlan
+  reviewPlan`, which is not `rfl` because `Plan.sub` does not distribute over
+  `Plan.panel` definitionally. Strictly more work for the same theorem.
+* `denotes_redraft` — `redraft` sits at `El .text × Verdict`, a **product** of
+  answer types. A context extension `c :: Γ` represents one answer; the
+  two-variable Yoneda that would represent a pair is a separate theorem and is
+  not taken (see `denotes_revising`).
+* `denotes_finishK` — `finishK` sits at `Option (El .text)`, which is **not an
+  answer type at all**, because `Plan.revising` returns `Option (El c)`. No
+  context represents it and the collapse simply does not apply. This is the one
+  place the language leaves the answers-only universe, and the Yoneda theorem
+  locates it exactly; closing it is a change to the specification (it moves
+  `Plan.size`, `Cost.costSummary.paths` and `Explain.planLines`) and not a
+  change to this file.
+* `denotes_bodyK` — `bodyK` grafts `finishK` onto `revising`, so it inherits
+  both obstructions above, and its proof is two rewrites against theorems that
+  already exist.
+
+The general `Denotes`-carrying squares in `Agentic/Core/Morphism.lean` are what
+these four use, and they stay for the same reasons. What the layer buys this
+module is the classification, not a shorter proof. -/
+
 /-- **The panel square, at this workload.** -/
 theorem denotes_review : Plan.Denotes review Kreview := by
   intro Δ σ e δ

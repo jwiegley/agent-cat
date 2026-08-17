@@ -22,7 +22,7 @@
 -- "Agentic.Builder" is correct and stays. What this module replaces is the
 -- thing a /human writes/: where the builder spells the flagship as
 --
--- > bind @"guide" @'CodeText (one (askTool "cat" [lit "…"])) $ …
+-- > bind @"guide" @'CodeText (one (askTool "cat" [lit "…"])) $ \guide -> …
 --
 -- it should read as @example\/harden.wf@ reads — a block of statements, binds
 -- that are binds, prompts that are prose. Every combinator here is sugar: it
@@ -215,9 +215,9 @@ import Agentic.Builder
     lit,
   )
 import qualified Agentic.Builder as B
-import Agentic.Plan (KnownCode, SCode, sCode)
+import Agentic.Plan (KnownCode, SCode, Var (VHere), sCode)
 import Agentic.Raw (Addressee (..))
-import Agentic.WF (KnownIx (..), Says (..), V (..), wf)
+import Agentic.WF (KnownIx, Says (..), V (..), wf)
 import Data.Kind (Constraint, Type)
 import qualified Data.List.NonEmpty as NE
 import Data.Maybe (fromMaybe)
@@ -520,7 +520,7 @@ instance
   ) =>
   Step (Ask s') ('Open s) j a
   where
-  step mn live q k = B.bindI x (B.one @'CodeText q) (k (V x) (x : live))
+  step mn live q k = B.bindI x (B.one @'CodeText q) (k (V x VHere) (x : live))
     where
       x = fromMaybe (genName @s) mn
 
@@ -534,7 +534,7 @@ instance
   ) =>
   Step (Rhs s' c) ('Open s) j a
   where
-  step mn live r k = B.bindI x r (k (V x) (x : live))
+  step mn live r k = B.bindI x r (k (V x VHere) (x : live))
     where
       x = fromMaybe (genName @s) mn
 
@@ -548,7 +548,7 @@ instance
   ) =>
   Step (Ann s' c) ('Open s) j a
   where
-  step mn live (Ann sc r) k = B.bindAsI sc x r (k (V x) (x : live))
+  step mn live (Ann sc r) k = B.bindAsI sc x r (k (V x VHere) (x : live))
     where
       x = fromMaybe (genName @s) mn
 
@@ -614,7 +614,7 @@ clausesOf ::
   Rhs (An c ': s) 'CodeVerdict ->
   (V (An 'CodeVerdict ': An c ': s) 'CodeVerdict -> Live -> Amendment c s) ->
   Clauses c s
-clausesOf mn live annot review k = case k (V x) (x : live) of
+clausesOf mn live annot review k = case k (V x VHere) (x : live) of
   Amendment am -> Clauses x annot review am
   where
     x = fromMaybe (genName @(An c ': s)) mn
@@ -704,7 +704,7 @@ knownHere = W (\live k -> B.knownHereI live (k ()))
 -- handle, so a question that is not a 'confirm' cannot be decided on.
 ifFlag ::
   forall h s j.
-  KnownIx h s 'CodeFlag =>
+  KnownIx h s =>
   V h 'CodeFlag ->
   W ('Open s) j Term ->
   W ('Open s) j Term ->
@@ -712,14 +712,14 @@ ifFlag ::
 ifFlag v yes no =
   W
     ( \live _ ->
-        B.ifFlagI (vName v) (ixOf @h @s @'CodeFlag) (runW live yes) (runW live no)
+        B.ifFlag @h @s v (runW live yes) (runW live no)
     )
 
 -- | @case x { approved … objected … no answer … }@ — a terminal, its arms
 -- positional, in Lean's order.
 caseVerdict ::
   forall h s j.
-  KnownIx h s 'CodeVerdict =>
+  KnownIx h s =>
   V h 'CodeVerdict ->
   W ('Open s) j Term ->
   W ('Open s) j Term ->
@@ -728,9 +728,8 @@ caseVerdict ::
 caseVerdict v approved objected noAnswer =
   W
     ( \live _ ->
-        B.caseVerdictI
-          (vName v)
-          (ixOf @h @s @'CodeVerdict)
+        B.caseVerdict @h @s
+          v
           (runW live approved)
           (runW live objected)
           (runW live noAnswer)
@@ -780,17 +779,17 @@ amend q = W (\_ _ -> Amendment (B.one q))
 -- nothing else produces one, and 'workflow' wants an @Open@ block at the end.
 revising ::
   forall h c s.
-  (KnownIx h s c, KnownCode c, KnownDepth s) =>
+  (KnownIx h s, KnownCode c, KnownDepth s) =>
   V h c ->
   Bound ->
   (V (An c ': s) c -> W ('Review c s) ('Amending c s) Term) ->
   Loop c s
 revising subj (Bound n) clauses = Loop $ \live result arms ->
-  case (runRev (carrier : live) (clauses (V carrier)), arms) of
+  case (runRev (carrier : live) (clauses (V carrier VHere)), arms) of
     (Clauses revName revAnn review am, Arms settledName settled unsettled) ->
       B.revisingCaseI @c
         (vName subj)
-        (ixOf @h @s @c)
+        (B.readV @h @s subj)
         carrier
         revName
         settledName
@@ -816,7 +815,7 @@ caseResult ::
 caseResult _ settled unsettled =
   W
     ( \live _ ->
-        Arms x (runW (x : live) (settled (V x))) (runW live unsettled)
+        Arms x (runW (x : live) (settled (V x VHere))) (runW live unsettled)
     )
   where
     x = genName @s

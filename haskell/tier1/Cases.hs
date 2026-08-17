@@ -170,9 +170,9 @@ alphaNamed =
 semantic000 :: Program
 semantic000 =
   program [] $
-    bind @"g" @'CodeText (one (askTool "cat" [lit "read the file"])) $
-      act (askTool "log" [hole @"g", lit "||", hole @"g"]) $
-        act (askTool "audit" [lit "seen: ", hole @"g"]) $
+    bind @"g" @'CodeText (one (askTool "cat" [lit "read the file"])) $ \g ->
+      act (askTool "log" [hole g, lit "||", hole g]) $
+        act (askTool "audit" [lit "seen: ", hole g]) $
           stop
 
 -- ---------------------------------------------------------------------------
@@ -197,19 +197,21 @@ semantic000 =
 semantic001 :: Program
 semantic001 =
   program [] $
-    bindAs @"d" @'CodeText (one (askModel "author" [lit "draft"])) $
-      revisingCase @"d" @"patch" @"v" @"final"
+    bindAs @"d" @'CodeText (one (askModel "author" [lit "draft"])) $ \d ->
+      revisingCase @"patch" @"v" @"final"
+        d
         "r"
         3
         Nothing
-        (one (askModel "critic" [lit "review ", hole @"patch"]))
-        ( one
-            ( askModel
-                "author"
-                [lit "amend ", hole @"patch", lit " given ", hole @"v"]
-            )
+        (\patch -> one (askModel "critic" [lit "review ", hole patch]))
+        ( \patch v ->
+            one
+              ( askModel
+                  "author"
+                  [lit "amend ", hole patch, lit " given ", hole v]
+              )
         )
-        (act (askTool "apply" [lit "apply ", hole @"final"]) stop)
+        (\final -> act (askTool "apply" [lit "apply ", hole final]) stop)
         (act (askTool "log" [lit "gave up"]) stop)
 
 -- ---------------------------------------------------------------------------
@@ -226,9 +228,9 @@ semantic001 =
 semantic002 :: Program
 semantic002 =
   program [] $
-    bindAs @"a" @'CodeText (one (askModel "m" [lit "one"])) $
-      bindAs @"b" @'CodeText (one (draw 1 (askModel "m" [lit "one"]))) $
-        act (askTool "t" [hole @"a", lit " ", hole @"b"]) $
+    bindAs @"a" @'CodeText (one (askModel "m" [lit "one"])) $ \a ->
+      bindAs @"b" @'CodeText (one (draw 1 (askModel "m" [lit "one"]))) $ \b ->
+        act (askTool "t" [hole a, lit " ", hole b]) $
           stop
 
 -- ---------------------------------------------------------------------------
@@ -246,10 +248,11 @@ semantic002 =
 semantic003 :: Program
 semantic003 =
   program [] $
-    bindAs @"d" @'CodeText (one (askTool "t" [lit "w"])) $
-      bind @"ok" @'CodeFlag (one (askPerson "o" [lit "go?"])) $
-        ifFlag @"ok"
-          (act (askTool "a" [lit "went ", hole @"d"]) stop)
+    bindAs @"d" @'CodeText (one (askTool "t" [lit "w"])) $ \d ->
+      bind @"ok" @'CodeFlag (one (askPerson "o" [lit "go?"])) $ \ok ->
+        ifFlag
+          ok
+          (act (askTool "a" [lit "went ", hole d]) stop)
           stop
 
 -- ---------------------------------------------------------------------------
@@ -281,11 +284,13 @@ battery113 =
                  ]
           )
       )
-      $ act (askTool "log" [lit "objections: ", hole @"p"])
-      $ caseVerdict @"p"
-        (act (askTool "t" [lit "went-approved"]) stop)
-        (act (askTool "t" [lit "went-objected"]) stop)
-        (act (askTool "t" [lit "went-noanswer"]) stop)
+      $ \p ->
+        act (askTool "log" [lit "objections: ", hole p]) $
+          caseVerdict
+            p
+            (act (askTool "t" [lit "went-approved"]) stop)
+            (act (askTool "t" [lit "went-objected"]) stop)
+            (act (askTool "t" [lit "went-noanswer"]) stop)
 
 -- ---------------------------------------------------------------------------
 -- 6. battery-117 — two draws of one prompt are two questions
@@ -305,10 +310,10 @@ battery113 =
 battery117 :: Program
 battery117 =
   program [] $
-    bind @"a" @'CodeText (one (askModel "oracle" [lit "same words"])) $
-      bind @"b" @'CodeText (one (askModel "oracle" [lit "same words"])) $
-        bind @"c" @'CodeText (one (draw 1 (askModel "oracle" [lit "same words"]))) $
-          act (askTool "log" [hole @"a", lit "|", hole @"b", lit "|", hole @"c"]) $
+    bind @"a" @'CodeText (one (askModel "oracle" [lit "same words"])) $ \a ->
+      bind @"b" @'CodeText (one (askModel "oracle" [lit "same words"])) $ \b ->
+        bind @"c" @'CodeText (one (draw 1 (askModel "oracle" [lit "same words"]))) $ \c ->
+          act (askTool "log" [hole a, lit "|", hole b, lit "|", hole c]) $
             stop
 
 -- ---------------------------------------------------------------------------
@@ -336,16 +341,17 @@ battery119 =
   program [] $
     bindAs @"a" @'CodeText
       (one (draw 2 (askModelServed "author" "deep" [lit "draft it"])))
-      $ act (draw 1 (askModelServed "logger" "cheap" [lit "note ", hole @"a"]))
-      $ bind @"p" @'CodeVerdict
-        ( panel
-            ( draw 3 (askModelServed "one" "deep" [lit "review ", hole @"a"])
-                :| [ draw 1 (askTool "lint" [lit "lint ", hole @"a"]),
-                     draw 2 (askPerson "owner" [lit "ok? ", hole @"a"])
-                   ]
+      $ \a ->
+        act (draw 1 (askModelServed "logger" "cheap" [lit "note ", hole a])) $
+          bind @"p" @'CodeVerdict
+            ( panel
+                ( draw 3 (askModelServed "one" "deep" [lit "review ", hole a])
+                    :| [ draw 1 (askTool "lint" [lit "lint ", hole a]),
+                         draw 2 (askPerson "owner" [lit "ok? ", hole a])
+                       ]
+                )
             )
-        )
-      $ caseVerdict @"p" stop stop stop
+            $ \p -> caseVerdict p stop stop stop
 
 -- ---------------------------------------------------------------------------
 -- 8. battery-107 — known here, innermost first
@@ -362,10 +368,10 @@ battery119 =
 battery107 :: Program
 battery107 =
   program [] $
-    bindAs @"a" @'CodeText (one (askTool "c" [lit "a"])) $
-      bindAs @"b" @'CodeText (one (askTool "c" [lit "b ", hole @"a"])) $
+    bindAs @"a" @'CodeText (one (askTool "c" [lit "a"])) $ \a ->
+      bindAs @"b" @'CodeText (one (askTool "c" [lit "b ", hole a])) $ \b ->
         knownHere $
-          act (askTool "log" [hole @"a", lit " ", hole @"b"]) $
+          act (askTool "log" [hole a, lit " ", hole b]) $
             stop
 
 -- ---------------------------------------------------------------------------
@@ -376,9 +382,9 @@ battery107 =
 -- "draft: {goal}"; answer d }@ — the library function after the import walk.
 libDrafted :: Fn '[ 'CodeText] 'CodeText
 libDrafted =
-  function "lib.drafted" (param @"goal" @'CodeText noParams) $
-    bindB @"d" @'CodeText (one (askModel "author" [lit "draft: ", hole @"goal"])) $
-      answerB @"d"
+  function "lib.drafted" (param @"goal" @'CodeText noParams) $ \(goal, ()) ->
+    bindB @"d" @'CodeText (one (askModel "author" [lit "draft: ", hole goal])) $ \d ->
+      answerB d
 
 -- |
 -- > import lib
@@ -396,9 +402,9 @@ libDrafted =
 module000 :: Program
 module000 =
   program [SomeFn libDrafted] $
-    bindAs @"lib.guide" @'CodeText (one (askTool "cat" [lit "style guide"])) $
-      bind @"x" @'CodeText (callV libDrafted (argName @"lib.guide" :> ANil)) $
-        act (askTool "t" [lit "use ", hole @"x", lit " ", lit "hello"]) $
+    bindAs @"lib.guide" @'CodeText (one (askTool "cat" [lit "style guide"])) $ \guide ->
+      bind @"x" @'CodeText (callV libDrafted (argName guide :> ANil)) $ \x ->
+        act (askTool "t" [lit "use ", hole x, lit " ", lit "hello"]) $
           stop
 
 -- ---------------------------------------------------------------------------
@@ -408,23 +414,23 @@ module000 =
 -- | @function mk (goal : text) -> text@ — declared, never called.
 fnMk :: Fn '[ 'CodeText] 'CodeText
 fnMk =
-  function "mk" (param @"goal" @'CodeText noParams) $
-    bindB @"d" @'CodeText (one (askModel "author" [lit "draft: ", hole @"goal"])) $
-      answerB @"d"
+  function "mk" (param @"goal" @'CodeText noParams) $ \(goal, ()) ->
+    bindB @"d" @'CodeText (one (askModel "author" [lit "draft: ", hole goal])) $ \d ->
+      answerB d
 
 -- | @function judged (patch : text) -> verdict@ — declared, never called.
 fnJudged :: Fn '[ 'CodeText] 'CodeVerdict
 fnJudged =
-  function "judged" (param @"patch" @'CodeText noParams) $
-    bindB @"v" @'CodeVerdict (one (askModel "judge" [lit "judge: ", hole @"patch"])) $
-      answerB @"v"
+  function "judged" (param @"patch" @'CodeText noParams) $ \(patch, ()) ->
+    bindB @"v" @'CodeVerdict (one (askModel "judge" [lit "judge: ", hole patch])) $ \v ->
+      answerB v
 
 -- | @function applied (patch : text) -> receipt@ — a body that is a single
 -- act and whose printed @answer@ is @null@.
 fnApplied :: Fn '[ 'CodeText] 'CodeAck
 fnApplied =
-  function "applied" (param @"patch" @'CodeText noParams) $
-    actB (askTool "apply" [lit "apply: ", hole @"patch"]) endB
+  function "applied" (param @"patch" @'CodeText noParams) $ \(patch, ()) ->
+    actB (askTool "apply" [lit "apply: ", hole patch]) endB
 
 -- |
 -- > workflow { d : text <- ask tool "t" "w"
@@ -435,8 +441,8 @@ fnApplied =
 battery144 :: Program
 battery144 =
   program [SomeFn fnMk, SomeFn fnJudged, SomeFn fnApplied] $
-    bindAs @"d" @'CodeText (one (askTool "t" [lit "w"])) $
-      callStmt fnApplied (argName @"d" :> ANil) $
+    bindAs @"d" @'CodeText (one (askTool "t" [lit "w"])) $ \d ->
+      callStmt fnApplied (argName d :> ANil) $
         stop
 
 -- ---------------------------------------------------------------------------
@@ -466,21 +472,24 @@ battery144 =
 vector002 :: Program
 vector002 =
   program [] $
-    bindAs @"d" @'CodeText (one (askModel "a" [lit "draft"])) $
-      revisingCase @"d" @"c" @"v" @"x"
+    bindAs @"d" @'CodeText (one (askModel "a" [lit "draft"])) $ \d ->
+      revisingCase @"c" @"v" @"x"
+        d
         "r"
         2
         Nothing
-        (one (askModel "m" [lit "review ", hole @"c"]))
-        (one (askModel "a" [lit "fix ", hole @"c", lit " ", hole @"v"]))
-        ( revisingCase @"x" @"c2" @"v2" @"y"
-            "r2"
-            3
-            Nothing
-            (one (askModel "m2" [lit "review again ", hole @"c2"]))
-            (one (askModel "a" [lit "refix ", hole @"c2", lit " ", hole @"v2"]))
-            (act (askTool "t" [lit "apply ", hole @"y"]) stop)
-            stop
+        (\c -> one (askModel "m" [lit "review ", hole c]))
+        (\c v -> one (askModel "a" [lit "fix ", hole c, lit " ", hole v]))
+        ( \x ->
+            revisingCase @"c2" @"v2" @"y"
+              x
+              "r2"
+              3
+              Nothing
+              (\c2 -> one (askModel "m2" [lit "review again ", hole c2]))
+              (\c2 v2 -> one (askModel "a" [lit "refix ", hole c2, lit " ", hole v2]))
+              (\y -> act (askTool "t" [lit "apply ", hole y]) stop)
+              stop
         )
         stop
 
@@ -508,14 +517,16 @@ battery121 :: Program
 battery121 =
   program [] $
     bindAs @"ready" @'CodeFlag (one (askPerson "owner" [lit "is the release ready?"])) $
-      revisingCase @"ready" @"cand" @"v" @"done"
-        "r"
-        2
-        Nothing
-        (one (askModel "m" [lit "does the release look ready?"]))
-        (one (askPerson "owner" [lit "is it ready now?"]))
-        (ifFlag @"done" (act (askTool "ship" [lit "ship it"]) stop) stop)
-        stop
+      \ready ->
+        revisingCase @"cand" @"v" @"done"
+          ready
+          "r"
+          2
+          Nothing
+          (\_cand -> one (askModel "m" [lit "does the release look ready?"]))
+          (\_cand _v -> one (askPerson "owner" [lit "is it ready now?"]))
+          (\done -> ifFlag done (act (askTool "ship" [lit "ship it"]) stop) stop)
+          stop
 
 -- ---------------------------------------------------------------------------
 -- 13. battery-120 — a revision bounded at zero amendments
@@ -539,14 +550,15 @@ battery121 =
 battery120 :: Program
 battery120 =
   program [] $
-    bindAs @"d" @'CodeText (one (askModel "a" [lit "draft"])) $
-      revisingCase @"d" @"c" @"v" @"x"
+    bindAs @"d" @'CodeText (one (askModel "a" [lit "draft"])) $ \d ->
+      revisingCase @"c" @"v" @"x"
+        d
         "r"
         0
         Nothing
-        (one (askModel "m" [lit "review ", hole @"c"]))
-        (one (askModel "a" [lit "fix ", hole @"c", lit " ", hole @"v"]))
-        (act (askTool "log" [lit "settled ", hole @"x"]) stop)
+        (\c -> one (askModel "m" [lit "review ", hole c]))
+        (\c v -> one (askModel "a" [lit "fix ", hole c, lit " ", hole v]))
+        (\x -> act (askTool "log" [lit "settled ", hole x]) stop)
         (act (askTool "log" [lit "unsettled"]) stop)
 
 -- ---------------------------------------------------------------------------
@@ -578,21 +590,24 @@ battery120 =
 battery090 :: Program
 battery090 =
   program [] $
-    bindAs @"d" @'CodeText (one (askModel "a" [lit "draft"])) $
-      revisingCase @"d" @"c" @"v" @"x"
+    bindAs @"d" @'CodeText (one (askModel "a" [lit "draft"])) $ \d ->
+      revisingCase @"c" @"v" @"x"
+        d
         "r"
         1
         Nothing
-        (one (askModel "m" [lit "review ", hole @"c"]))
-        (one (askModel "a" [lit "fix ", hole @"c", lit " ", hole @"v"]))
-        ( revisingCase @"x" @"y" @"w" @"z"
-            "r2"
-            1
-            Nothing
-            (one (askModel "m" [lit "again ", hole @"y"]))
-            (one (askModel "a" [lit "more ", hole @"y", lit " ", hole @"w"]))
-            (act (askTool "log" [hole @"z"]) stop)
-            stop
+        (\c -> one (askModel "m" [lit "review ", hole c]))
+        (\c v -> one (askModel "a" [lit "fix ", hole c, lit " ", hole v]))
+        ( \x ->
+            revisingCase @"y" @"w" @"z"
+              x
+              "r2"
+              1
+              Nothing
+              (\y -> one (askModel "m" [lit "again ", hole y]))
+              (\y w -> one (askModel "a" [lit "more ", hole y, lit " ", hole w]))
+              (\z -> act (askTool "log" [hole z]) stop)
+              stop
         )
         stop
 
@@ -642,9 +657,9 @@ battery137 =
 -- declared result, which here is the type-level result of the 'Fn'.
 fnF :: Fn '[ 'CodeText] 'CodeFlag
 fnF =
-  function "f" (param @"p" @'CodeText noParams) $
-    bindB @"x" @'CodeFlag (one (askModel "m" [hole @"p"])) $
-      answerB @"x"
+  function "f" (param @"p" @'CodeText noParams) $ \(p, ()) ->
+    bindB @"x" @'CodeFlag (one (askModel "m" [hole p])) $ \x ->
+      answerB x
 
 -- |
 -- > function f (p : text) -> flag {
@@ -735,15 +750,16 @@ semantic004 = semantic001
 semantic005 :: Program
 semantic005 =
   program [] $
-    bindAs @"t" @'CodeText (one (askTool "reader" [lit "read"])) $
-      bindAs @"v" @'CodeVerdict (one (askModel "judge" [lit "judge"])) $
-        bindAs @"f" @'CodeFlag (one (askPerson "owner" [lit "yes or no?"])) $
+    bindAs @"t" @'CodeText (one (askTool "reader" [lit "read"])) $ \t ->
+      bindAs @"v" @'CodeVerdict (one (askModel "judge" [lit "judge"])) $ \v ->
+        bindAs @"f" @'CodeFlag (one (askPerson "owner" [lit "yes or no?"])) $ \f ->
           act
             ( askTool
                 "recorder"
-                [lit "record ", hole @"t", lit " and ", hole @"v"]
+                [lit "record ", hole t, lit " and ", hole v]
             )
-            $ ifFlag @"f"
+            $ ifFlag
+              f
               (act (askTool "t" [lit "went-yes"]) stop)
               (act (askTool "t" [lit "went-no"]) stop)
 

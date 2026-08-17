@@ -43,9 +43,18 @@
 -- __The context is a type-level association list.__ @Bindings Γ@
 -- (@Check.lean:67@) is a list from name to code, extended by @Bindings.push@,
 -- with shadowing refused by @freshName@; 'Scope' is that list at the type
--- level, 'Fresh' is @freshName@, 'LookupC' is @Bindings.find?@ and 'KnownVar'
--- is the @Expr.var@ that @push@'s repeated @Sub.wk@ leaves behind — one
--- 'VThere' per entry stepped over. No weakening is ever written by hand.
+-- level and 'Fresh' is @freshName@.
+--
+-- __A binding is a value, not a name to be looked up.__ @Binding Γ@'s three
+-- fields are the name it prints, the kind it answers and the @Expr.var@ that
+-- reads it, and that is exactly what a 'V' carries: the 'Text' and the 'Var'.
+-- A binder /hands/ its handle to the rest of the block, so every mention of a
+-- binding is an ordinary Haskell variable, a typo is GHC's own
+-- @Variable not in scope@, and there is no name resolution at the type level
+-- at all. The one thing a handle cannot carry is how many binders will be
+-- pushed after it, so reading one at depth is 'readV' — @push@'s repeated
+-- @Sub.wk@, one 'VThere' per entry stepped over. No weakening is ever written
+-- by hand.
 module Agentic.Builder
   ( -- * The four answer kinds
     -- | Re-exported from "Agentic.Raw" so that a module of rebuilt cases needs
@@ -56,9 +65,10 @@ module Agentic.Builder
     Entry,
     Scope,
     Codes,
-    LookupC,
-    KnownVar (..),
-    nameExpr,
+    V (..),
+    ScopeEq,
+    KnownIx (..),
+    readV,
     Fresh,
     KnownScope (..),
 
@@ -164,7 +174,7 @@ import Agentic.Raw
     RawSource (..),
     RawTarget (..),
   )
-import Data.Kind (Constraint)
+import Data.Kind (Constraint, Type)
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
 import Data.Maybe (fromMaybe, isJust)
@@ -185,8 +195,8 @@ import GHC.TypeLits
 
 -- | One live binding: the author's name, and the kind of answer it stands for.
 --
--- Lean: @Binding Γ@ (@Check.lean:67@) minus its @val@ field, which 'KnownVar'
--- recovers from the position of the entry in the list.
+-- Lean: @Binding Γ@ (@Check.lean:67@) minus its @val@ field, which the 'V' the
+-- binder hands out carries.
 type Entry = (Symbol, Code)
 
 -- | The names in scope, innermost first. Lean: @Bindings Γ@.
@@ -200,55 +210,72 @@ type family Codes (s :: Scope) :: Ctx where
   Codes '[] = '[]
   Codes ('(n, c) ': s) = c ': Codes s
 
--- | Symbol equality as a closed family, so name resolution can dispatch on it
--- without overlapping instances. Two distinct literals are apart, which is all
--- a concrete program needs.
-type family SymEq (n :: Symbol) (m :: Symbol) :: Bool where
-  SymEq n n = 'True
-  SymEq n m = 'False
-
--- | The kind a name stands for. Innermost wins, by the non-linear first
--- clause; an unbound name is a type error that names it.
+-- | One live binding, as a value: the name it prints, and the index that reads
+-- it __at the scope it was bound into__ — itself at index @0@, so @h@ is
+-- @'(n, c) ': (whatever was live)@.
 --
--- Lean: @Bindings.find?@ (@Check.lean:89@, @List.find?@ so innermost-first)
--- plus the @unbound@ diagnosis (@Check.lean:99@).
-type family LookupC (n :: Symbol) (s :: Scope) :: Code where
-  LookupC n ('(n, c) ': s) = c
-  LookupC n ('(m, d) ': s) = LookupC n s
-  LookupC n '[] =
-    TypeError
-      ( 'Text "unbound name; nothing in scope answers to `"
-          ':<>: 'Text n
-          ':<>: 'Text "`"
-      )
+-- Lean: @Binding Γ@ (@Check.lean:67@) whole — @name@, @code@ and @val@. The
+-- name is ordinary runtime data and the index is ordinary runtime data; the
+-- scope index @h@ is what says /which/ binding this is, and it is the only
+-- thing left at the type level. Every binder below hands one to the rest of
+-- the block, so nothing here ever resolves a name.
+data V (h :: Scope) (c :: Code) = V
+  { -- | what the printer writes for this binding
+    vName :: Text,
+    -- | the de Bruijn index at the binding's own scope, i.e. 'VHere'
+    vIx :: Var (Codes h) c
+  }
 
--- | The de Bruijn index that reads a name.
+-- | Structural equality of scopes as a closed family, so 'readV' can dispatch
+-- on it without overlapping instances. A scope grows by one entry per binding,
+-- so two live bindings never share a scope and equality here is exactly
+-- identity of bindings.
+type family ScopeEq (a :: Scope) (b :: Scope) :: Bool where
+  ScopeEq a a = 'True
+  ScopeEq a b = 'False
+
+-- | Weakening a handle's index from the scope it was bound into to the scope
+-- it is read at.
 --
--- Lean: @Bindings.push@ (@Check.lean:94@) gives the new name @Expr.var .here@
--- and renames every older one along @Sub.wk@; the instance walk below is that
--- renaming, one 'VThere' per entry stepped over.
-class KnownVar (n :: Symbol) (s :: Scope) where
-  varOf :: Var (Codes s) (LookupC n s)
+-- Lean: @Bindings.push@ (@Check.lean:94@) gives the new binding
+-- @Expr.var .here@ and renames every older one along @Sub.wk@; the instance
+-- walk below is that renaming, one 'VThere' per entry bound since. It is the
+-- one thing a handle cannot carry — a binding does not know what will be bound
+-- after it — and it is the whole of what the type level still decides.
+class KnownIx (h :: Scope) (s :: Scope) where
+  wkIx :: Var (Codes h) c -> Var (Codes s) c
 
--- | The boolean-dispatched worker of 'KnownVar'.
-class KnownVar' (eq :: Bool) (n :: Symbol) (s :: Scope) where
-  varOf' :: Var (Codes s) (LookupC n s)
+-- | The boolean-dispatched worker of 'KnownIx'.
+class KnownIx' (eq :: Bool) (h :: Scope) (s :: Scope) where
+  wkIx' :: Var (Codes h) c -> Var (Codes s) c
 
-instance (m ~ n, LookupC n ('(m, c) ': s) ~ c) => KnownVar' 'True n ('(m, c) ': s) where
-  varOf' = VHere
+instance KnownIx' (ScopeEq h s) h s => KnownIx h s where
+  wkIx = wkIx' @(ScopeEq h s) @h @s
 
+instance h ~ s => KnownIx' 'True h s where
+  wkIx' = id
+
+instance KnownIx h s => KnownIx' 'False h ('(n, d) ': s) where
+  wkIx' v = VThere (wkIx @h @s v)
+
+-- | The refusal @unbound@ (@Check.lean:99@) becomes this: a handle read where
+-- its binding is no longer live.
 instance
-  (KnownVar n s, LookupC n ('(m, d) ': s) ~ LookupC n s) =>
-  KnownVar' 'False n ('(m, d) ': s)
+  TypeError
+    ( 'Text "this binding is not live here; nothing in scope answers to it"
+    ) =>
+  KnownIx' 'False h '[]
   where
-  varOf' = VThere (varOf @n @s)
+  wkIx' = error "KnownIx' 'False h '[]: unreachable, the instance is a TypeError"
 
-instance KnownVar' (SymEq n m) n ('(m, d) ': s) => KnownVar n ('(m, d) ': s) where
-  varOf = varOf' @(SymEq n m) @n @('(m, d) ': s)
+-- | Reading a binding at the scope in hand. Lean: @Binding.val@ under
+-- @push@'s accumulated weakening.
+readV :: forall h s c. KnownIx h s => V h c -> Var (Codes s) c
+readV v = wkIx @h @s (vIx v)
 
--- | Reading a name, as an expression. Lean: @Binding.val@.
-nameExpr :: forall n s. KnownVar n s => Expr (Codes s) (El (LookupC n s))
-nameExpr = varGet (varOf @n @s)
+-- | The handle a binder hands out: its printed name, at index @0@.
+hereV :: forall n c s. KnownSymbol n => V ('(n, c) ': s) c
+hereV = V (nameText @n) VHere
 
 -- | The name, as the printer writes it.
 nameText :: forall n. KnownSymbol n => Text
@@ -356,7 +383,8 @@ type Words (s :: Scope) = [Piece s]
 lit :: Text -> Piece s
 lit t = Piece (Lit t) (const t)
 
--- | A hole: the answer a name stands for, spliced /as text/.
+-- | A hole: the answer a binding stands for, spliced /as text/, under the name
+-- that binding prints.
 --
 -- Lean: @chunkExpr@'s @.interp@ clause. A @text@ answer splices itself; a
 -- @verdict@ splices @Verdict.render@ — its objections joined by @"; "@, so
@@ -364,10 +392,11 @@ lit t = Piece (Lit t) (const t)
 -- text of its own and is refused, here by 'Spliceable' having no instance for
 -- it but a 'TypeError'.
 hole ::
-  forall n s.
-  (KnownSymbol n, KnownVar n s, Spliceable (LookupC n s)) =>
+  forall h s c.
+  (KnownIx h s, Spliceable c) =>
+  V h c ->
   Piece s
-hole = holeI @(LookupC n s) @s (nameText @n) (varOf @n @s)
+hole v = holeI @c @s (vName v) (readV @h @s v)
 
 -- | 'hole' at an index rather than at a name: the name as it is /printed/, and
 -- the de Bruijn index that /reads/ it. See the note on index-level entry points
@@ -593,12 +622,12 @@ data Arg (s :: Scope) (c :: Code) = Arg
     argExpr :: Expr (Codes s) (El c)
   }
 
--- | A name in scope, which must answer the parameter's kind __exactly__ — no
--- silent rendering, so a verdict does not fill a @text@ parameter
--- (@battery-180@). The kind is the name's, and the caller's parameter list is
+-- | A binding in scope, which must answer the parameter's kind __exactly__ —
+-- no silent rendering, so a verdict does not fill a @text@ parameter
+-- (@battery-180@). The kind is the handle's, and the caller's parameter list is
 -- what has to agree with it.
-argName :: forall n s. (KnownSymbol n, KnownVar n s) => Arg s (LookupC n s)
-argName = argNameI @(LookupC n s) @s (nameText @n) (varOf @n @s)
+argName :: forall h s c. KnownIx h s => V h c -> Arg s c
+argName v = argNameI @c @s (vName v) (readV @h @s v)
 
 -- | 'argName' at an index rather than at a name.
 argNameI :: forall c s. Text -> Var (Codes s) c -> Arg s c
@@ -652,37 +681,49 @@ type family ParamCtxGo (ps :: [Code]) (acc :: Ctx) :: Ctx where
 -- | @paramCtx@ itself.
 type ParamCtx (ps :: [Code]) = ParamCtxGo ps '[]
 
--- | A parameter list: the codes @ps@ in __source__ order, and the 'Scope' they
--- push onto @acc@ — which, by the same left fold, is their reverse.
+-- | A parameter list: the codes @ps@ in __source__ order, the 'Scope' they push
+-- onto @acc@ — which, by the same left fold, is their reverse — and @hs@, the
+-- handles the body reads them through, nested in source order and ending in
+-- @()@.
 --
 -- Lean: @paramBindings@ (@Check.lean:750@), which pushes the parameters in
--- source order so that the last one is de Bruijn @0@.
-data Params (ps :: [Code]) (acc :: Scope) (s :: Scope) where
-  PNil :: Params '[] acc acc
+-- source order so that the last one is de Bruijn @0@. A parameter is a binding
+-- like any other, so it hands the body a 'V' like any other; @hs@ is that
+-- tuple of handles, computed by the very fold that computes the scope.
+data Params (ps :: [Code]) (acc :: Scope) (s :: Scope) (hs :: Type) where
+  PNil :: Params '[] acc acc ()
   PCons ::
     (KnownSymbol n, KnownCode c, Fresh n acc) =>
     Proxy n ->
     SCode c ->
-    Params cs ('(n, c) ': acc) s ->
-    Params (c ': cs) acc s
+    Params cs ('(n, c) ': acc) s hs ->
+    Params (c ': cs) acc s (V ('(n, c) ': acc) c, hs)
 
 -- | The end of a parameter list.
-noParams :: Params '[] acc acc
+noParams :: Params '[] acc acc ()
 noParams = PNil
 
 -- | One parameter, named and kinded: @param \@"goal" \@'CodeText noParams@.
 param ::
-  forall n c cs acc s.
+  forall n c cs acc s hs.
   (KnownSymbol n, KnownCode c, Fresh n acc) =>
-  Params cs ('(n, c) ': acc) s ->
-  Params (c ': cs) acc s
+  Params cs ('(n, c) ': acc) s hs ->
+  Params (c ': cs) acc s (V ('(n, c) ': acc) c, hs)
 param = PCons (Proxy @n) (sCode @c)
 
 -- | The parameters as printed: @[name, code]@ pairs in source order.
-paramsRaw :: Params ps acc s -> [(Text, Code)]
+paramsRaw :: Params ps acc s hs -> [(Text, Code)]
 paramsRaw = \case
   PNil -> []
   PCons p c rest -> (T.pack (symbolVal p), fromSCode c) : paramsRaw rest
+
+-- | The handles the parameters bind, in source order: each at its own scope,
+-- at index @0@, printing the name the list declared. The body reads them with
+-- 'hole', 'argName' or 'answerB' exactly as it reads a binding of its own.
+paramHandles :: Params ps acc s hs -> hs
+paramHandles = \case
+  PNil -> ()
+  PCons p _ rest -> (V (T.pack (symbolVal p)) VHere, paramHandles rest)
 
 -- | A checked function: what it prints, and its plan over exactly its
 -- parameters. Lean: @FnEntry@ (@Check.lean:292@).
@@ -699,16 +740,22 @@ data Fn (ps :: [Code]) (r :: Code) = Fn
 -- __once__, over exactly its parameters, and "a body cannot see the caller" is
 -- the type and not a rule.
 --
+-- The body is a function of the parameters' handles, in source order:
+--
+-- > function "lib.drafted" (param @"goal" @'CodeText noParams) $ \(goal, ()) ->
+-- >   bindB @"d" @'CodeText (one (askModel "author" [lit "draft: ", hole goal])) $ \d ->
+-- >     answerB d
+--
 -- The name is a plain 'Text' because it is /printed/ and nothing else: the
 -- call sites below name a 'Fn' value, not a string.
 function ::
-  forall ps r s.
+  forall ps r s hs.
   (KnownCode r, Codes s ~ ParamCtx ps) =>
   Text ->
-  Params ps '[] s ->
-  Body s r ->
+  Params ps '[] s hs ->
+  (hs -> Body s r) ->
   Fn ps r
-function nm ps b =
+function nm ps body =
   Fn
     { fnRaw =
         RawFn
@@ -722,6 +769,8 @@ function nm ps b =
           },
       fnPlan = bodyPlan b
     }
+  where
+    b = body (paramHandles ps)
 
 -- | A call's plan: the callee's, read through its arguments.
 callPlanOf :: forall ps r s. Fn ps r -> Args s ps -> Plan (Codes s) (El r)
@@ -744,14 +793,15 @@ data Body (s :: Scope) (r :: Code) = Body
     bodyPlan :: Plan (Codes s) (El r)
   }
 
--- | @x <- …@ in a body; prints @ann = null@.
+-- | @x <- …@ in a body; prints @ann = null@. The rest of the body is a
+-- function of the handle this binding hands it.
 bindB ::
   forall n c s r.
   (KnownSymbol n, Fresh n s, KnownCode c) =>
   Rhs s c ->
-  Body ('(n, c) ': s) r ->
+  (V ('(n, c) ': s) c -> Body ('(n, c) ': s) r) ->
   Body s r
-bindB rhs rest = bindBI @n (nameText @n) rhs rest
+bindB rhs rest = bindBI @n (nameText @n) rhs (rest (hereV @n))
 
 -- | 'bindB' at an index: the name as it is printed, the scope entry it pushes
 -- left to the continuation's type.
@@ -773,9 +823,9 @@ bindAsB ::
   forall n c s r.
   (KnownSymbol n, Fresh n s, KnownCode c) =>
   Rhs s c ->
-  Body ('(n, c) ': s) r ->
+  (V ('(n, c) ': s) c -> Body ('(n, c) ': s) r) ->
   Body s r
-bindAsB rhs rest = bindAsBI @n (sCode @c) (nameText @n) rhs rest
+bindAsB rhs rest = bindAsBI @n (sCode @c) (nameText @n) rhs (rest (hereV @n))
 
 -- | 'bindAsB' at an index. The 'SCode' is what the annotation prints.
 bindAsBI ::
@@ -816,10 +866,10 @@ callSB f as rest =
     }
 
 -- | @answer x@: 'PRet' of @x@'s expression, at the kind the function declares.
--- The declared result /is/ the name's kind, which is @checkFn@'s @b.at?
+-- The declared result /is/ the handle's kind, which is @checkFn@'s @b.at?
 -- f.result@ made structural.
-answerB :: forall n s. (KnownSymbol n, KnownVar n s) => Body s (LookupC n s)
-answerB = answerBI @(LookupC n s) @s (nameText @n) (varOf @n @s)
+answerB :: forall h s c. KnownIx h s => V h c -> Body s c
+answerB v = answerBI @c @s (vName v) (readV @h @s v)
 
 -- | 'answerB' at an index: the name as it is printed, and the index that reads
 -- it. The function's result kind is that index's kind.
@@ -865,9 +915,9 @@ bind ::
   forall n c s.
   (KnownSymbol n, Fresh n s, KnownCode c) =>
   Rhs s c ->
-  Blk ('(n, c) ': s) ->
+  (V ('(n, c) ': s) c -> Blk ('(n, c) ': s)) ->
   Blk s
-bind rhs rest = bindI @n (nameText @n) rhs rest
+bind rhs rest = bindI @n (nameText @n) rhs (rest (hereV @n))
 
 -- | 'bind' at an index: the name as it is printed, the scope entry it pushes
 -- left to the continuation's type.
@@ -883,9 +933,9 @@ bindAs ::
   forall n c s.
   (KnownSymbol n, Fresh n s, KnownCode c) =>
   Rhs s c ->
-  Blk ('(n, c) ': s) ->
+  (V ('(n, c) ': s) c -> Blk ('(n, c) ': s)) ->
   Blk s
-bindAs rhs rest = bindAsI @n (sCode @c) (nameText @n) rhs rest
+bindAs rhs rest = bindAsI @n (sCode @c) (nameText @n) rhs (rest (hereV @n))
 
 -- | 'bindAs' at an index. The 'SCode' is what the annotation prints.
 bindAsI :: forall n c s. SCode c -> Text -> Rhs s c -> Blk ('(n, c) ': s) -> Blk s
@@ -935,12 +985,13 @@ callStmt f as rest =
 -- __same__ names. No binder is added — the flag is read through the existing
 -- variable.
 ifFlag ::
-  forall n s.
-  (KnownSymbol n, KnownVar n s, LookupC n s ~ 'CodeFlag) =>
+  forall h s.
+  KnownIx h s =>
+  V h 'CodeFlag ->
   Blk s ->
   Blk s ->
   Blk s
-ifFlag yes no = ifFlagI (nameText @n) (varOf @n @s) yes no
+ifFlag v yes no = ifFlagI (vName v) (readV @h @s v) yes no
 
 -- | 'ifFlag' at an index.
 ifFlagI :: forall s. Text -> Var (Codes s) 'CodeFlag -> Blk s -> Blk s -> Blk s
@@ -955,14 +1006,15 @@ ifFlagI x v yes no =
 -- is @Verdict.tag@ of the name. The verdict itself stays readable in every arm
 -- — the tag decides the shape, the objections ride in the environment.
 caseVerdict ::
-  forall n s.
-  (KnownSymbol n, KnownVar n s, LookupC n s ~ 'CodeVerdict) =>
+  forall h s.
+  KnownIx h s =>
+  V h 'CodeVerdict ->
   Blk s ->
   Blk s ->
   Blk s ->
   Blk s
-caseVerdict approved objected noAnswer =
-  caseVerdictI (nameText @n) (varOf @n @s) approved objected noAnswer
+caseVerdict v approved objected noAnswer =
+  caseVerdictI (vName v) (readV @h @s v) approved objected noAnswer
 
 -- | 'caseVerdict' at an index.
 caseVerdictI ::
@@ -1051,8 +1103,8 @@ finishCont acc exh =
 --
 -- Elaboration (@Check.lean:611@ and @702@, @Plan.lean:621@):
 --
--- * the candidate's kind is the __subject's__ kind, so it is 'LookupC' of the
---   subject and not a choice;
+-- * the candidate's kind is the __subject's__ kind, so it is the subject
+--   handle's and not a choice;
 -- * the review is elaborated at @verdict@ with the candidate at index @0@
 --   under the carrier's name; it may be an ask, a panel or a call;
 -- * the amend is elaborated at the candidate's kind with the review's verdict
@@ -1076,18 +1128,18 @@ finishCont acc exh =
 -- innermost. This builder refuses that program instead of resolving it
 -- differently: @Fresh rev ('(carrier, c) ': s)@. No corpus entry writes one.
 revisingCase ::
-  forall subj carrier rev settled s c.
-  ( KnownSymbol subj,
-    KnownSymbol carrier,
+  forall carrier rev settled h s c.
+  ( KnownSymbol carrier,
     KnownSymbol rev,
     KnownSymbol settled,
-    KnownVar subj s,
-    c ~ LookupC subj s,
+    KnownIx h s,
     KnownCode c,
     Fresh carrier s,
     Fresh rev ('(carrier, c) ': s),
     Fresh settled s
   ) =>
+  -- | the subject, whose kind the candidate's is
+  V h c ->
   -- | the loop result's name, printed only
   Text ->
   -- | the bound: @0 <= n <= 64@ (Lean's @maxRevisions@)
@@ -1095,28 +1147,37 @@ revisingCase ::
   -- | the review's printed annotation: 'Nothing' or @Just 'CodeVerdict'@
   Maybe Code ->
   -- | the review, at @verdict@, seeing the candidate as the carrier
-  Rhs ('(carrier, c) ': s) 'CodeVerdict ->
+  ( V ('(carrier, c) ': s) c ->
+    Rhs ('(carrier, c) ': s) 'CodeVerdict
+  ) ->
   -- | the amend, at the candidate's kind, seeing the verdict and the candidate
-  Rhs ('(rev, 'CodeVerdict) ': '(carrier, c) ': s) c ->
+  ( V ('(carrier, c) ': s) c ->
+    V ('(rev, 'CodeVerdict) ': '(carrier, c) ': s) 'CodeVerdict ->
+    Rhs ('(rev, 'CodeVerdict) ': '(carrier, c) ': s) c
+  ) ->
   -- | the settled arm, with the artefact bound
-  Blk ('(settled, c) ': s) ->
+  ( V ('(settled, c) ': s) c ->
+    Blk ('(settled, c) ': s)
+  ) ->
   -- | the unsettled arm
   Blk s ->
   Blk s
-revisingCase resultName n reviewAnn review amend settled unsettled =
+revisingCase subj resultName n reviewAnn review amend settled unsettled =
   revisingCaseI @c @carrier @rev @settled @s
-    (nameText @subj)
-    (varOf @subj @s)
+    (vName subj)
+    (readV @h @s subj)
     (nameText @carrier)
     (nameText @rev)
     (nameText @settled)
     resultName
     n
     reviewAnn
-    review
-    amend
-    settled
+    (review carrierV)
+    (amend carrierV (hereV @rev))
+    (settled (hereV @settled))
     unsettled
+  where
+    carrierV = hereV @carrier @c @s
 
 -- | 'revisingCase' at an index: the four names as they are /printed/, and the
 -- de Bruijn index that reads the subject. Every scope entry the clauses see is
@@ -1247,31 +1308,31 @@ program fns b =
 
 -- $indexLevel
 --
--- Every combinator above that mentions a name mentions it as a 'Symbol', and
--- the type-level machinery — 'LookupC', 'KnownVar', 'Fresh', 'KnownScope' —
--- turns that symbol into exactly three runtime things and nothing else: the
--- 'Text' the printer writes, the 'Var' the plan reads, and, at @known here@,
--- the list of live names. The constraints produce no evidence at all; they
--- refuse programs at compile time.
+-- A /binder/ above still names its binding as a 'Symbol' — that is what
+-- 'Fresh' compares and what 'KnownScope' lists — and turns it into exactly two
+-- runtime things: the 'Text' the printer writes and the 'V' it hands the rest
+-- of the block. A /mention/ names nothing at the type level at all: it is the
+-- handle, and a mistyped one is GHC's own @Variable not in scope@ at the site
+-- that wrote it.
 --
 -- A /runtime/ producer of programs — the property generators of
--- @Agentic.Gen@ — cannot conjure a 'Symbol', and cannot discharge 'Fresh' or
--- 'KnownVar' for one it conjured. So each such combinator has an @I@-suffixed
--- twin that takes the 'Text' and the 'Var' directly and leaves the scope entry
--- it pushes as a free type variable: 'bindI', 'bindAsI', 'bindBI', 'bindAsBI',
--- 'answerBI', 'holeI', 'argNameI', 'ifFlagI', 'caseVerdictI', 'knownHereI',
--- 'revisingCaseI'.
+-- @Agentic.Gen@ — cannot conjure a 'Symbol', and cannot discharge 'Fresh' for
+-- one it conjured. So each binder has an @I@-suffixed twin that takes the
+-- 'Text' directly and leaves the scope entry it pushes as a free type
+-- variable, and each mention has one that takes the 'Text' and the 'Var'
+-- directly: 'bindI', 'bindAsI', 'bindBI', 'bindAsBI', 'answerBI', 'holeI',
+-- 'argNameI', 'ifFlagI', 'caseVerdictI', 'knownHereI', 'revisingCaseI'.
 --
 -- __The twin is the definition and the named form is the wrapper__, in every
--- case: @hole@ /is/ @holeI@ applied to @nameText@ and @varOf@, @bind@ /is/
+-- case: @hole@ /is/ @holeI@ applied to a handle's two fields, @bind@ /is/
 -- @bindI@ applied to @nameText@, and so on down the list. There is therefore
 -- one elaboration in this module and not two, and a property that drives the
 -- @I@ forms is testing the same print-and-elaborate linkage that tier1 drives
--- through the named forms.
+-- through the handle forms.
 --
 -- __What the caller now owes.__ The @I@ forms trade compile-time refusals for
 -- obligations: names must be fresh along a path ('Fresh'), @known here@ must
--- list the live names innermost first ('KnownScope'), and a bound name must be
+-- list the live names innermost first ('KnownScope'), and a binding must be
 -- read at the kind it was bound at (that one survives, in the 'Var'\'s index).
 -- Lean still checks all three, so a generator that breaks one produces a
 -- program the oracle refuses and the Haskell side accepts — a divergence

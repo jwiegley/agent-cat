@@ -134,3 +134,65 @@ frozen by running the oracle once and committing its output. Tier 0 is the
 Haskell side reproducing every `reply` from every `request` with **no Lean in
 the loop**; regenerating the corpus is the explicit, reviewed act of changing
 the specification.
+
+## What is actually pinned: three surfaces, not one
+
+*Recorded because every working paper in `doc/research/profunctor-design/`
+listed one or two of the three, and two of them named a field that is pinned by
+nothing. Counted in this checkout, over the 128 files as they stand.*
+
+**Surface 1 — the frozen reply record, and it has exactly eight keys.** A
+checked reply is `level`, `size`, `askNodes`, `codes`, `costSummary`,
+`blockAsks`, `fnAsks`, `worlds`, and nothing else; the Haskell producer is
+`Agentic.Observe.observeValue`, whose own docstring calls them "the five static
+folds, the two ask counts, and one observation per world". Of the 128 files, 66
+carry a checked reply, 40 a `refused` reply and 22 a `result` from the string
+layer.
+
+**`shapes` and `asks` are on no wire and in no file** — `grep '"shapes"'` and
+`grep '"asks"'` return zero hits across all 128. The record specified in
+`connection.md` §3.1 lists them and the implemented record does not; that
+discrepancy is the note under "Checked" above, and its effect is to *loosen* the
+constraint rather than to tighten it. `Cost.shapes` and `Cost.asks` may be
+reorganised freely — as `Agentic/Core/Cost.lean`'s `shapes_eq_map_asks` and
+`codes_eq_map_shapes` reorganise them — without a corpus regeneration. What is
+pinned of that family is `codes`, and only `codes`.
+
+**Surface 2 — the printed `RawProgram`.** The `request.program` of each vector
+is the Lean datatype `Agentic.Core.Dsl.RawProgram` under Lean's derived JSON
+encoding, so the *term's encoding* is frozen alongside its observations: a
+change to a constructor name, a field name or a field order is a corpus
+regeneration even when every number in every reply is unmoved. The one field
+this surface does not compare is position: the corpus stores real `line`/`col`
+(1,059 of 1,061 `pos` occurrences are non-zero), and `Agentic.Observe.zeroPosValue`
+sets `pos` and `answerPos` to `0:0` on **both** sides of a printed-program
+comparison, because the Haskell builder has no way to represent a position.
+`pos` is oracle-only for a whole program in the same sense `message` and
+`excerpt` are oracle-only for a refusal.
+
+**Surface 3 — `Explain.planLines`, pinned byte-for-byte outside the corpus.**
+`test/CliSmoke.lean` checks that `agent-cat plan example/harden.wf` prints
+exactly `Explain.planLines Dsl.flagshipPlan ++ Explain.revisionLines
+Dsl.flagshipRaw`, and that `agent-cat cost` prints exactly
+`Explain.costLines Dsl.flagshipPlan`, string for string. This surface is named
+in no working paper and it is the strictest of the three, because `planLines`
+prints things no reply record contains: `askC` and `ask` as **distinct
+keywords**, the shape line, `binds #{Γ.length}`, the prompt evaluated at
+`Env.probe Γ`, and for a `case` the literal arm count *in the enumeration order
+of the tag type the term carries*. Three consequences worth stating once:
+
+* any presentation that identifies `askC` with `ask` — as every free-structure
+  presentation of the `pipeline` fragment does, `Denote.askC_coherent` being the
+  identification — changes the CLI output while preserving every corpus number;
+* closing the `case` tag universe must reproduce `FinEnum.toList` order **and**
+  `ts.length`, so its gate is a `cli_smoke` run and not a `corpus-gen` diff;
+* `binds #{Γ.length}` is a function of `Ctx` being a `List Code`. Any
+  re-indexing of the term language that drops contexts has no `Γ.length` to
+  print.
+
+Two further checks are pinned and are unreachable from all three surfaces:
+`Agentic/Core/Certify.lean`'s two `#guard_msgs`, of which `certify_sound`'s is
+the claim that it depends on no axioms. They are build failures rather than
+comments, so the discipline is self-enforcing: an additive theorem layer is safe
+with respect to them exactly when it does not change the definitions of `Plan`,
+`denote`, `worldOf`, `lookup`, `Q` or `El`.

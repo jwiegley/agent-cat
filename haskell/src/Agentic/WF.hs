@@ -1,4 +1,3 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -7,9 +6,12 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskellQuotes #-}
 {-# LANGUAGE TypeApplications #-}
+-- @TypeFamilies@ is not for a family of this module's own — there is none left
+-- here — but for the @MonoLocalBinds@ it implies, which is what keeps a
+-- 'KnownIx' constraint in an instance head out of
+-- @-Wsimplifiable-class-constraints@.
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE UndecidableInstances #-}
 
 -- |
 -- Module      : Agentic.WF
@@ -74,90 +76,38 @@ module Agentic.WF
     wf,
 
     -- * What a hole may name
+    --
+    -- | The handle itself is "Agentic.Builder"'s, and is re-exported here so
+    -- that a prompt and the block it is written in need one import between
+    -- them.
     V (..),
     Says (..),
 
     -- * Finding a handle's binding
-    ScopeEq,
-    KnownIx (..),
+    KnownIx,
   )
 where
 
 import Agentic.Builder
-  ( Code,
-    Codes,
+  ( KnownIx,
     Piece,
     Scope,
     Spliceable,
+    V (..),
     Words,
-    holeI,
+    hole,
     lit,
   )
-import Agentic.Plan (Var (..))
 import Data.Char (isAlphaNum, isSpace)
 import Data.List (dropWhileEnd)
 import Data.Text (Text)
 import qualified Data.Text as T
-import GHC.TypeLits (ErrorMessage (..), TypeError)
 import Language.Haskell.TH (Exp (ListE), ExpQ, Q, litE, mkName, stringL, varE)
 import Language.Haskell.TH.Quote (QuasiQuoter (..))
 
 -- ---------------------------------------------------------------------------
 -- What a hole may name
 -- ---------------------------------------------------------------------------
-
--- | A live binding: the name it prints under, and the scope it was bound
--- into — itself at index @0@, so @h@ is @c ': (whatever was live)@.
---
--- __The scope is the whole type-level content.__ This layer has no names at
--- the type level, so what identifies a binding is /where/ it sits and not what
--- it is called; the name is ordinary runtime data, generated at the bind or
--- given by 'Agentic.Workflow.named', and carried here so that every hole
--- prints it. The constructor is library-private in effect: only
--- "Agentic.Workflow" applies it, so a handle can only come from a bind.
-data V (h :: Scope) (c :: Code) = V {vName :: Text}
-
--- | Structural equality of scopes, as a closed family, so a hole can find its
--- binding without overlapping instances.
---
--- The nameless twin of "Agentic.Builder"'s @SymEq@: a scope grows by one entry
--- per binding, so two live bindings never share a scope and equality here is
--- exactly identity of bindings.
-type family ScopeEq (a :: Scope) (b :: Scope) :: Bool where
-  ScopeEq a a = 'True
-  ScopeEq a b = 'False
-
--- | The de Bruijn index that reads, at the use site's scope @s@, the binding
--- whose own scope is @h@.
---
--- The nameless twin of "Agentic.Builder"'s @KnownVar@, and the same walk:
--- one 'VThere' per entry bound since, until the scopes coincide. Lean:
--- @Bindings.push@'s repeated @Sub.wk@ (@Check.lean:94@).
-class KnownIx (h :: Scope) (s :: Scope) (c :: Code) where
-  ixOf :: Var (Codes s) c
-
--- | The boolean-dispatched worker of 'KnownIx'.
-class KnownIx' (eq :: Bool) (h :: Scope) (s :: Scope) (c :: Code) where
-  ixOf' :: Var (Codes s) c
-
-instance KnownIx' (ScopeEq h s) h s c => KnownIx h s c where
-  ixOf = ixOf' @(ScopeEq h s) @h @s @c
-
-instance (h ~ s, s ~ ('(n, c) ': s')) => KnownIx' 'True h s c where
-  ixOf' = VHere
-
-instance KnownIx h s c => KnownIx' 'False h ('(n, d) ': s) c where
-  ixOf' = VThere (ixOf @h @s @c)
-
--- | The refusal @unbound@ becomes here: a handle read where its binding is no
--- longer live. Lean: @Check.lean:99@.
-instance
-  TypeError
-    ( 'Text "this binding is not live here; nothing in scope answers to it"
-    ) =>
-  KnownIx' 'False h '[] c
-  where
-  ixOf' = error "KnownIx' 'False h '[]: unreachable, the instance is a TypeError"
 
 -- | Anything a @{…}@ may name.
 --
@@ -172,10 +122,10 @@ class Says a (s :: Scope) where
 -- kind must have a text of its own, so a flag hole is refused here exactly as
 -- @usePrompt@ refuses it.
 instance
-  (KnownIx h s c, Spliceable c) =>
+  (KnownIx h s, Spliceable c) =>
   Says (V h c) s
   where
-  says v = [holeI @c @s (vName v) (ixOf @h @s @c)]
+  says v = [hole @h @s @c v]
 
 -- | A @define@: one literal chunk, never fused with the literals beside it.
 instance Says Text s where

@@ -141,6 +141,40 @@ variable {Γ Δ : Ctx} {A B C : Type}
 @[simp] theorem level_dyn {B : Type} (e : Expr Γ B) (f : B → Plan Γ A) :
     level (Plan.dyn e f) = .dynamic := rfl
 
+/-! ### Why this fold survives `case` when an exact bill does not
+
+The `case` clause is a `Finset.sup` and every other analysis in the package that
+crosses a branch is *not*, so it is worth saying exactly what the difference is —
+because the obvious answer is wrong.
+
+**It is not idempotence.** The tempting statement is "a `Const M`-valued analysis
+survives `case` iff `M`'s combination is idempotent, which `max` is and a product
+is not". Two folds in this repository refute it: `Plan.size` and
+`Plan.askNodes` (`Agentic/Core/Explain.lean`) are total across `case`, which they
+interpret as a *sum* over `FinEnum.toList` in `(ℕ, +)` — a monoid that is not
+idempotent. What makes the sum an admissible reading of a branch is that a run
+walks one arm and every node on that arm is a node of the term, so the arm's
+count is bounded by the total; `Plan.length_trace_eq_askNodes` states the tight
+half of that, at `≤ pipeline`, where there is no branch to bound. (The
+over-approximation at `branch` itself is not formalized here; what is formalized
+is that no *exact* analysis exists there, in `Agentic/Core/Cost.lean`.)
+
+**The condition is order-theoretic: the interpretation of the copair must
+dominate each arm.** `(ℕ, +, 0)` qualifies because it is *positively ordered*
+(`0 ≤ n`, so every arm is `≤` the sum) and monotone in each argument; `sup` — the
+`level_case` clause above — qualifies as the special case where the bound is
+tight arm by arm;
+a monoid with inverses does not qualify at all. So the honest statement of the
+`branch` rung is not that a `Const M` analysis is impossible there but that an
+**exact** one is: `Cost.no_static_bill_at_branch` is a witness (`coinBranch`
+costs `ofAdd 2` under one world and `ofAdd 1` under another), and
+`Cost.costTree` exists because exactness, not soundness, is what a branch
+destroys.
+
+`level` itself is the tight case, which is why `level_case` needs no side
+condition and why the analysis-availability theorems can take `level p ≤ ℓ` as
+their only hypothesis. -/
+
 /-! ## The elimination lemmas the analyses run on
 
 Each says what a bound on a term's level says about its subterms: this is the

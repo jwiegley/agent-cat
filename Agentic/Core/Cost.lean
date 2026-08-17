@@ -138,7 +138,20 @@ not on its prompt text.
 
 The hypothesis `attack-simplicity` I1 and `attack-adequacy` §7 both identify as
 missing from all four proposals, and the difference between an exact bill and a
-bounded one. -/
+bounded one.
+
+**What it is, categorically: object-blindness of the target.** A `Const M`-valued
+interpretation of the term language has no argument position — the carrier is
+`fun _ _ => M`, so nothing an answer could flow into is available to it. An
+interpretation of the `ask` generator into such a target is therefore exactly a
+function of the generator's *label*, and at `pipeline` the label an `ask` node
+carries is its shape (`Q.Shape c`) and not its whole question, because the words
+are an `Expr` computed from answers in scope. `PricesByShape` is that fact
+written as a condition on the price: it is not an assumption about terms, it is
+the statement that the target is a `Const`. The one rung where it is not needed
+is `batch`, where the generator is nullary (`Plan.askC` carries a whole `Q c`)
+and every function `Key → M` is a legitimate interpretation — see
+`bill_exact_batch`. -/
 def PricesByShape (price : Price S) : Prop :=
   ∀ (c : Code) (q q' : Q c), q.shape = q'.shape → price c q = price c q'
 
@@ -332,7 +345,20 @@ An environment is needed because an `ask` builds its *words* from the answers in
 scope; `default` stands in for those answers, and the two theorems below say
 exactly when that substitution is harmless: exactly at `batch` (there are no
 `ask` nodes), and up to shape at `pipeline` — where "up to shape" is now free,
-since the shape is written in the term. -/
+since the shape is written in the term.
+
+**Not a static analysis: this is the semantics, evaluated at one world.**
+`asks_eq_default` below is the proof, and it should be read as a
+*classification* rather than a convenience — at `level p ≤ pipeline`,
+`asks p γ = some ((Plan.trace ωDefault p γ).map Event.key)`, so `asks` is the
+question list of a *run*, in the world that answers everything with `default`.
+That it can be computed by structural recursion on the term is a consequence of
+the pipeline bound, not evidence that it is a fold of the term alone: it is not
+one, and the environment argument is the visible sign. The genuine folds of the
+term alone are `codes` and `shapes`, which take no environment, and
+`shapes_eq_map_asks` says precisely what `Key.shape` throws away to get from one
+to the other — the words, which is exactly the data `default` was standing in
+for. -/
 def asks : {Γ : Ctx} → {A : Type} → Plan Γ A → Env Γ → Option (List Key)
   | _, _, .ret _, _ => some []
   | _, _, .askC c q k, γ => (⟨c, q⟩ :: ·) <$> asks k (.cons default γ)
@@ -352,30 +378,64 @@ def asksBill [Monoid S] (price : Price S) {Γ : Ctx} {A : Type} (p : Plan Γ A) 
 
 variable {Γ Δ : Ctx} {A B : Type}
 
-/-- **C5, first half.** The question fold is total on the pipeline fragment: the
-level being `≤ pipeline` is not a side condition on the analysis, it is the
-statement that the analysis is defined. -/
-theorem asks_isSome_of_le_pipeline (p : Plan Γ A) (h : level p ≤ Level.pipeline) (γ : Env Γ) :
-    (asks p γ).isSome := by
-  induction p with
-  | ret e => simp [asks]
-  | askC c q k ih => simpa [asks, Option.isSome_map] using ih h _
-  | ask c s e k ih => simpa [asks, Option.isSome_map] using ih (le_of_ask h).2 _
-  | case e arms _ => exact absurd (le_of_case h).1 (by decide)
-  | dyn e f _ => exact absurd h (by simp only [level_dyn]; decide)
+/-! ### The three folds are one fold, read through two projections
 
-/-- The code fold is total there too. -/
-theorem codes_isSome_of_le_pipeline (p : Plan Γ A) (h : level p ≤ Level.pipeline) :
-    (codes p).isSome := by
-  induction p with
-  | ret e => simp [codes]
-  | askC c q k ih => simpa [codes, Option.isSome_map] using ih h
-  | ask c s e k ih => simpa [codes, Option.isSome_map] using ih (le_of_ask h).2
-  | case e arms _ => exact absurd (le_of_case h).1 (by decide)
-  | dyn e f _ => exact absurd h (by simp only [level_dyn]; decide)
+`codes`, `shapes` and `asks` are not three analyses. They are one analysis and
+two forgetful maps — `Shape.code : Shape → Code` and `Key.shape : Key → Shape` —
+and the two equations below say so, **with no level hypothesis at all**. They are
+true at `branch` and `dynamic` too, where all three sides are `none`.
 
-/-- And so is the shape fold — which under the old `ask` node it could not have
-been, because there was no shape in the term to fold over. -/
+That is the right shape for the statement, and the package used to entangle two
+different things: the level bound belongs to *totality* (is the analysis
+defined?) and not to *factorisation* (do the three agree where they are?). The
+axiom footprints make the point cleanly — both fusions are `[propext]`, where
+`codes_eq_of_le_pipeline` and `shapes_eq_trace_of_le_pipeline` are
+`[propext, Classical.choice, Quot.sound]`: factorisation does not need the order
+theory, only totality does. -/
+
+/-- **Fusion 1.** `codes` is `shapes` read through `Shape.code`. No level
+hypothesis, and none is available to want: at `branch` and `dynamic` both sides
+are `none`. -/
+theorem codes_eq_map_shapes (p : Plan Γ A) :
+    codes p = (shapes p).map (List.map Shape.code) := by
+  induction p with
+  | ret e => rfl
+  | askC c q k ih => simp [codes, shapes, ih, Option.map_map, Function.comp_def, Shape.code]
+  | ask c s e k ih => simp [codes, shapes, ih, Option.map_map, Function.comp_def, Shape.code]
+  | case e arms _ => rfl
+  | dyn e f _ => rfl
+
+/-- **Fusion 2, and in *every* environment.** `shapes` is `asks` read through
+`Key.shape`: the environment `asks` needs is exactly the data `Key.shape` throws
+away.
+
+This is a sharper statement of "the shape is a projection of the syntax" than
+`shapes_eq_of_le_pipeline` below, because it needs no world, no level bound and
+no choice of `γ` — the left-hand side does not mention one, so the right-hand
+side's value is independent of it, which is the content. -/
+theorem shapes_eq_map_asks : ∀ {Γ : Ctx} {A : Type} (p : Plan Γ A) (γ : Env Γ),
+    shapes p = (asks p γ).map (List.map Key.shape) := by
+  intro Γ A p
+  induction p with
+  | ret e => intro γ; rfl
+  | askC c q k ih =>
+      intro γ
+      simp [shapes, asks, ih (Env.cons default γ), Option.map_map, Function.comp_def, Key.shape]
+  | ask c s e k ih =>
+      intro γ
+      simp [shapes, asks, ih (Env.cons default γ), Option.map_map, Function.comp_def, Key.shape]
+  | case e arms _ => intro γ; rfl
+  | dyn e f _ => intro γ; rfl
+
+/-- **C5, first half — and the one induction the three totality theorems now
+share.** The shape fold is total on the pipeline fragment: the level being
+`≤ pipeline` is not a side condition on the analysis, it is the statement that
+the analysis is defined.
+
+Stated at `shapes` rather than at `asks` because `shapes` is the fold of the
+term alone, and under the old `ask` node it could not have been proved at all —
+there was no shape in the term to fold over. The other two follow from it by the
+two fusions, and their `absurd … decide` tails go with them. -/
 theorem shapes_isSome_of_le_pipeline (p : Plan Γ A) (h : level p ≤ Level.pipeline) :
     (shapes p).isSome := by
   induction p with
@@ -384,6 +444,19 @@ theorem shapes_isSome_of_le_pipeline (p : Plan Γ A) (h : level p ≤ Level.pipe
   | ask c s e k ih => simpa [shapes, Option.isSome_map] using ih (le_of_ask h).2
   | case e arms _ => exact absurd (le_of_case h).1 (by decide)
   | dyn e f _ => exact absurd h (by simp only [level_dyn]; decide)
+
+/-- The code fold is total there too — a corollary of `codes_eq_map_shapes`, not
+a second induction. -/
+theorem codes_isSome_of_le_pipeline (p : Plan Γ A) (h : level p ≤ Level.pipeline) :
+    (codes p).isSome := by
+  rw [codes_eq_map_shapes]; simpa using shapes_isSome_of_le_pipeline p h
+
+/-- …and so is the question fold, in every environment — a corollary of
+`shapes_eq_map_asks` read backwards: `Option.map` reflects `isSome`, so the
+environment cannot affect whether the analysis is defined. -/
+theorem asks_isSome_of_le_pipeline (p : Plan Γ A) (h : level p ≤ Level.pipeline) (γ : Env Γ) :
+    (asks p γ).isSome := by
+  simpa [shapes_eq_map_asks p γ] using shapes_isSome_of_le_pipeline p h
 
 /-! ## C1 — BATCH: the exact question list, independent of world and environment -/
 
@@ -421,7 +494,21 @@ theorem asked_multiset_eq_of_le_batch (p : Plan Γ A) (h : level p ≤ Level.bat
 /-- **The bill is exact at `batch`, with no hypothesis on the price at all.**
 Content-dependent pricing is fine here: the content is in the term. This is the
 guarantee `askC` exists to record, and the only guarantee `batch` has over
-`pipeline` (kernel open question 3). -/
+`pipeline` (kernel open question 3).
+
+**Kernel open question 3, answered: `askC` buys a nullary generator.** The
+question is what `batch` has that `pipeline` does not, given that both are
+`Const`-analysable. The answer is the arity of the generator. `Plan.askC c q k`
+carries the *whole* question `q : Q c` as term-level data, so the batch
+signature is `{ g_{c,q} : 1 ⇝ El c }` — one nullary generator per element of
+`Cost.Key` — and an interpretation into a monoid `M` is any function
+`Key → M` whatsoever. `Plan.ask c s e k` carries only the shape, its words being
+an `Expr` over the answers in scope, so the pipeline signature is
+`{ g_{c,s} : String ⇝ El c }` — unary generators labelled by `Cost.Shape` — and
+an interpretation must be constant in the argument it cannot see. That is the
+whole of the asymmetry between this theorem's hypothesis list and
+`bill_exact_pipeline`'s, and it is why content-dependent pricing (per-token, say)
+is a legitimate analysis exactly here and nowhere above. -/
 theorem bill_exact_batch [Monoid S] (price : Price S) (p : Plan Γ A)
     (h : level p ≤ Level.batch) (γ : Env Γ) (ω : Ω) :
     asksBill price p γ = some (billFresh price (Plan.trace ω p γ)) := by

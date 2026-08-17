@@ -181,6 +181,17 @@ import Agentic.Core.Cost
 -- is *not* an invariant of that kernel — which is what "the fold classifies
 -- terms, not meanings" means.
 import Agentic.Core.Morphism
+-- The initial algebra, stated once: `PlanAlg` is the signature of the five
+-- formers, `PlanAlg.fold` the homomorphism it induces out of the syntax, and
+-- `PlanAlg.fold_unique` initiality — so the structural inductions the package
+-- writes one per analysis are all the same induction, and `denote_unique` is
+-- the uniqueness half the kernel's morphism obligations assume and never state.
+-- Additive on purpose: `level` and `denote` keep their own recursions and their
+-- own equation lemmas, and `level_eq_fold`/`denote_eq_fold` say what they are.
+-- Replacing the recursion bodies is a separate change gated on kernel-reduction
+-- timing, not on line count — nineteen `decide +kernel` proofs in
+-- `Agentic/Core/DslFlagship.lean` reduce through those definitions.
+import Agentic.Core.Alg
 -- The flagship workload, Stage 5: `example/HardenPatch.lean`'s twelve lines as
 -- a `Plan` — guide, a deep-model draft, three review-and-revise rounds over a
 -- shared guide, human consent and a gated act — with its meaning written first

@@ -2,9 +2,15 @@
 """Refusal-site coverage audit for the DSL.
 
 Every `.error` site in Agentic/Core/Dsl/{Parse,Check}.lean must be exercised by
-test/DslSmoke.lean: this script extracts the message fragment of each site and
+the smoke test: this script extracts the message fragment of each site and
 requires it to appear among the diagnoses the smoke test asserts. A new refusal
 added without a test fails this audit, which is the point.
+
+The asserted diagnoses live in *two* files, and both must be read. The case
+tables moved to test/DslCases.lean so that `corpus-gen` could import them
+without importing an executable's `main`; test/DslSmoke.lean kept the
+assertions written inline beside the checks that use them. Reading only one of
+the two makes this audit fail vacuously.
 
 Two classes of site are exempt, each for a stated reason:
   * messages beginning "internal:" — the six fuel branches, unreachable by the
@@ -23,7 +29,10 @@ SOURCES = [
     "Agentic/Core/Dsl/Parse.lean",
     "Agentic/Core/Dsl/Check.lean",
 ]
-SMOKE = "test/DslSmoke.lean"
+SMOKE = [
+    "test/DslCases.lean",
+    "test/DslSmoke.lean",
+]
 
 ALLOW = {
     # `unexpected` builds "expected {what}" from a caller-supplied phrase; the
@@ -99,7 +108,7 @@ def fragments(path):
 def main():
     # The smoke test spells expected strings with Lean escapes; comparison is
     # over backslash-free text on both sides.
-    smoke = open(SMOKE).read().replace("\\", "")
+    smoke = "".join(open(p).read() for p in SMOKE).replace("\\", "")
     missing = []
     total = exempt = 0
     for path in SOURCES:
@@ -120,7 +129,8 @@ def main():
         for path, msg in missing:
             print(f"  {path}: {msg[:100]}", file=sys.stderr)
         sys.exit(1)
-    print("coverage audit: every audited refusal site is exercised by test/DslSmoke.lean")
+    print("coverage audit: every audited refusal site is exercised by "
+          + " + ".join(SMOKE))
 
 
 if __name__ == "__main__":

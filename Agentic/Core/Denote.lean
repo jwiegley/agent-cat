@@ -212,6 +212,128 @@ binding, and it is the hypothesis of every equation below that grafts. -/
 def Plan.Denotes {Γ : Ctx} {A B : Type} (k : Cont Γ A B) (K : A → Env Γ → Dlg B) : Prop :=
   ∀ (Δ : Ctx) (σ : Sub Γ Δ) (e : Expr Δ A) (δ : Env Δ), denote (k Δ σ e) δ = K (e δ) (σ δ)
 
+/-! ## The Yoneda collapse: a natural `Cont` at an answer type *is* a plan
+
+An additive layer, and a representability fact about context extension rather
+than a proposal. `Env (c :: Γ) ≅ El c × Env Γ` (`Env.cons_head_tail`) says that,
+naturally in `Δ`,
+
+```
+Sub (c :: Γ) Δ  =  Env Δ → Env (c :: Γ)
+                ≅  (Env Δ → El c) × (Env Δ → Env Γ)
+                =  Expr Δ (El c) × Sub Γ Δ
+```
+
+so the context `c :: Γ` **represents** the functor `Δ ↦ Expr Δ (El c) × Sub Γ Δ`,
+with universal element `(Sub.wk, Expr.var .here)` — weakening paired with the
+variable just bound. Covariant Yoneda then reads
+
+> `{k : Cont Γ (El c) B // Cont.Natural k}  ≅  Plan (c :: Γ) B`
+
+and the two halves of the bijection are `Cont.ofPlan` and `Cont.toPlan` below.
+One round trip holds unconditionally; **the other round trip *is* the naturality
+condition**, which is what makes `Cont.Natural` the right notion rather than a
+guess, and is why `Morphism.sub_graft_not_natural`'s counterexample stays: it is
+the witness that the hypothesis is not vacuous.
+
+Nothing here replaces anything. `Plan.revising`'s definition, `graft`'s
+recursion and `Plan.Denotes` are all untouched; what the layer adds is that a
+continuation written as `ofPlan` of a plan discharges its coherence obligation
+for free (`Cont.denotes_ofPlan`), which is the Lean counterpart of the
+parametricity Haskell's rank-2 `forall` would have given away — and that is why
+`Denotes` exists on this side and has no Haskell counterpart.
+
+`Cont.Natural`'s other consumer is `Morphism.sub_graft_of_natural`, the fourth
+presheaf law, which is stated there beside the counterexample it repairs.
+
+**Where the collapse stops is a fact about the design, not about the
+mathematics.** `A` must be an answer type — `El c` for a code `c` — because a
+context is a list of codes and nothing else. `Plan.revising` returns
+`Option (El c)`, so its consuming continuation (`Harden.finishK`) sits at an `A`
+no context represents, and that is exactly the one place the language leaves the
+answers-only universe. The theorem *locates* that; removing it is a change to
+the specification and not to this file. -/
+
+/-- `[[Cont.Natural k]]` = the continuation family is natural in the context it
+lands in: what it builds at `Δ` and then renames along `ρ` is what it builds at
+`Ξ` directly.
+
+The condition `Cont`'s *type* does not impose and that `Morphism.wobbly`
+violates — `wobbly` reads the *length* of the context it lands in, which is
+precisely the data a natural family may not see. Purely syntactic: no `denote`,
+no world, no environment. -/
+def Cont.Natural {Γ : Ctx} {A B : Type} (k : Cont Γ A B) : Prop :=
+  ∀ (Δ Ξ : Ctx) (τ : Sub Γ Δ) (e : Expr Δ A) (ρ : Sub Δ Ξ),
+    Plan.sub (k Δ τ e) ρ = k Ξ (Sub.comp τ ρ) (fun ξ => e (ρ ξ))
+
+/-- `[[Cont.reindex k σ]]` = the continuation `k`, written against `Γ`, read
+against `Δ`. This is what `graft`'s `askC` and `ask` clauses do to their
+continuation at each binder — `Cont.reindex k Sub.wk` is "rebuild the
+continuation with one more weakening" — and naming it is what lets
+`sub_graft_of_natural` state the square at all. -/
+def Cont.reindex {Γ Δ : Ctx} {A B : Type} (k : Cont Γ A B) (σ : Sub Γ Δ) : Cont Δ A B :=
+  fun Θ τ e => k Θ (Sub.comp σ τ) e
+
+/-- Reindexing preserves naturality, which is what makes the induction in
+`Morphism.sub_graft_of_natural` go under a binder. -/
+theorem Cont.reindex_natural {Γ Δ : Ctx} {A B : Type} {k : Cont Γ A B}
+    (hk : Cont.Natural k) (σ : Sub Γ Δ) : Cont.Natural (Cont.reindex k σ) := by
+  intro Θ Ξ τ e ρ
+  exact hk Θ Ξ (Sub.comp σ τ) e ρ
+
+/-- **Yoneda, one way**: a plan in the extended context *is* a continuation.
+Substitute the leaf's value for the variable just bound and the leaf's reach-back
+for the rest. -/
+def Cont.ofPlan {Γ : Ctx} {B : Type} {c : Code} (q : Plan (c :: Γ) B) : Cont Γ (El c) B :=
+  fun _ σ e => Plan.sub q (fun δ => Env.cons (e δ) (σ δ))
+
+/-- **Yoneda, the other way**: evaluate the family at the universal element
+`(Sub.wk, Expr.var .here)`. -/
+def Cont.toPlan {Γ : Ctx} {B : Type} {c : Code} (k : Cont Γ (El c) B) : Plan (c :: Γ) B :=
+  k (c :: Γ) Sub.wk (Expr.var .here)
+
+/-- A continuation that comes from a plan is natural, by `sub_comp` alone. -/
+theorem Cont.ofPlan_natural {Γ : Ctx} {B : Type} {c : Code} (q : Plan (c :: Γ) B) :
+    Cont.Natural (Cont.ofPlan q) := by
+  intro Δ Ξ τ e ρ
+  simp only [Cont.ofPlan, Plan.sub_comp]
+
+/-- **Round trip one, with no hypothesis at all.** `Env.cons_head_tail` and
+`Plan.sub_id` are the whole proof: substituting the variable just bound for
+itself is the identity substitution. -/
+theorem Cont.toPlan_ofPlan {Γ : Ctx} {B : Type} {c : Code} (q : Plan (c :: Γ) B) :
+    Cont.toPlan (Cont.ofPlan q) = q := by
+  simp only [Cont.toPlan, Cont.ofPlan]
+  have h : (fun δ : Env (c :: Γ) => Env.cons (Expr.var (Var.here) δ) (Sub.wk δ)) = Sub.id := by
+    funext δ; exact Env.cons_head_tail δ
+  rw [h, Plan.sub_id]
+
+/-- **Round trip two: exactly naturality, and nothing more.** The hypothesis is
+not a convenience — the round trip *is* the naturality condition, which is the
+categorical content of the collapse stated as a Lean proof obligation. -/
+theorem Cont.ofPlan_toPlan {Γ : Ctx} {B : Type} {c : Code} (k : Cont Γ (El c) B)
+    (hk : Cont.Natural k) : Cont.ofPlan (Cont.toPlan k) = k := by
+  funext Δ σ e
+  simp only [Cont.ofPlan, Cont.toPlan]
+  rw [hk (c :: Γ) Δ Sub.wk (Expr.var .here) (fun δ => Env.cons (e δ) (σ δ))]
+  rfl
+
+/-- **`Plan.Denotes` stops being a hypothesis** — for a continuation that comes
+from a plan, which is the shape every author-written `Cont` in this package has.
+The proof is `denote_sub` and one `simp only`: substituting into the leaf and
+then reading the meaning is reading the meaning in the extended environment.
+
+This is the whole return on the layer. Its `K` is forced — `fun a γ => denote q
+(Env.cons a γ)` and nothing else — so where the semantic continuation is
+*written independently* (as `Harden.Kreview` and `Harden.Kredraft` are, against
+a dialogue-level recursion) the residual obligation is the identification of the
+two, and this lemma does not discharge that. What it does discharge is the
+context-polymorphic half, which is the half nothing else can do. -/
+theorem Cont.denotes_ofPlan {Γ : Ctx} {B : Type} {c : Code} (q : Plan (c :: Γ) B) :
+    Plan.Denotes (Cont.ofPlan q) (fun a γ => denote q (Env.cons a γ)) := by
+  intro Δ σ e δ
+  simp only [Cont.ofPlan, denote_sub]
+
 /-- **Morphism equation for `graft`.** If the continuation means the semantic
 continuation `K`, then grafting means binding:
 
@@ -252,6 +374,20 @@ theorem denote_graft {B : Type} {A : Type} {Γ : Ctx} (p : Plan Γ A) :
     intro K k hk γ
     simp only [Plan.graft, denote_dyn]
     exact ih _ K k hk γ
+
+/-- **The master square with the hypothesis spent.** At a continuation that comes
+from a plan there is no coherence left to state: grafting `q` onto `p`'s leaves
+means binding `q`'s meaning in the extended environment.
+
+The general form above **stays**, and must: `A` there is an arbitrary `Type` and
+`k` an arbitrary family, and `Morphism.sub_graft_not_natural` exhibits a `Cont`
+that is not `ofPlan` of anything. This corollary is the shape an author reaches
+for; the theorem is the shape the induction needs. -/
+theorem denote_graft_ofPlan {Γ : Ctx} {B : Type} {c : Code}
+    (p : Plan Γ (El c)) (q : Plan (c :: Γ) B) (γ : Env Γ) :
+    denote (Plan.graft p (Cont.ofPlan q)) γ
+      = Dlg.bind (denote p γ) (fun a => denote q (Env.cons a γ)) :=
+  denote_graft p _ _ (Cont.denotes_ofPlan q) γ
 
 /-! ## The derived forms, each against its equation -/
 
@@ -357,32 +493,121 @@ theorem trace_dup (ω : Ω) (c : Code) (q : Q c) :
       = [⟨c, q, ω c q⟩, ⟨c, q, ω c q⟩] := by
   simp [Plan.trace]
 
-/-! ## Panels -/
+/-! ## Panels
+
+### `Dlg` carries monoids to monoids, so a panel has no fold of its own
+
+`Dlg` is a lax monoidal functor: a monoid on `M` induces one on `Dlg M`, with
+`1 = done 1` and `x * y = liftA2 (*) x y`. Under that instance `Plan.panel` — a
+`List.foldr (zipWith (·*·)) (ret 1)` — denotes `List.prod`, and the two morphism
+equations below are `MonoidHom.map_list_prod` at the two homomorphisms out of a
+dialogue (`runHom`, `traceHom`) instead of two inductions.
+
+**The test of whether an abstraction is the right one is that it must not
+quietly make the false thing provable, and this one passes.** The product on
+`Dlg M` is *sequential in the transcript* by construction — `liftA2` at `Dlg`'s
+own `bind`, left then right — so `Morphism.trace_panel_not_perm_invariant` stays
+true and stays the honest statement. What the monoid buys is the two equations;
+what it does not buy, and must not, is commutativity.
+
+Day convolution is the right name for *why* the applicative structure exists at
+all (an applicative is a monoid in `[Set,Set]` under Day) and the wrong name for
+this fold, which is ordinary `foldMap`. The statement wanted is the elementary
+one: a lax monoidal functor carries monoid objects to monoid objects. -/
+
+/-- **`Dlg` carries monoids to monoids.** `scoped`, because a `Monoid` instance
+is a claim about a type and a claim should be made only where the package's
+vocabulary has been opened — the discipline `instFinEnumBool` follows in
+`Agentic/Core/Plan.lean` and `test/Pollution.lean` polices. `Dlg` is this
+package's own type, so nothing here is imposed on anyone else's. -/
+scoped instance dlgMonoid {M : Type} [Monoid M] : Monoid (Dlg M) where
+  one := Dlg.done 1
+  mul x y := Dlg.bind x (fun a => Dlg.bind y (fun b => Dlg.done (a * b)))
+  one_mul x := by
+    show Dlg.bind (Dlg.done (1 : M)) _ = x
+    simp only [Dlg.bind_eq_bind, Dlg.done_eq_pure, pure_bind, one_mul, bind_pure]
+  mul_one x := by
+    show Dlg.bind x (fun a => Dlg.bind (Dlg.done (1 : M)) _) = x
+    simp only [Dlg.bind_eq_bind, Dlg.done_eq_pure, pure_bind, mul_one, bind_pure]
+  mul_assoc x y z := by
+    show Dlg.bind (Dlg.bind x _) _ = Dlg.bind x (fun a => Dlg.bind (Dlg.bind y _) _)
+    simp only [Dlg.bind_eq_bind, Dlg.done_eq_pure, bind_assoc, pure_bind, mul_assoc]
+
+/-- `[[runHom ω]]` = `Dlg.run ω` as a monoid homomorphism. One of the two
+morphisms that *are* the meaning (`Agentic/Core/Dlg.lean`), now with its
+multiplicative structure named. -/
+def runHom {M : Type} [Monoid M] (ω : Ω) : Dlg M →* M where
+  toFun := Dlg.run ω
+  map_one' := rfl
+  map_mul' x y := by
+    show Dlg.run ω (Dlg.bind x (fun a => Dlg.bind y (fun b => Dlg.done (a * b)))) = _
+    rw [Dlg.bind_eq_bind, Dlg.run_bind', Dlg.bind_eq_bind, Dlg.run_bind']
+    rfl
+
+/-- `[[traceHom ω]]` = `Dlg.trace ω` as a monoid homomorphism into the free
+monoid on events. The transcript's concatenation *is* the multiplication, which
+is the sentence every bill theorem in `Agentic/Core/Cost.lean` relies on. -/
+def traceHom {M : Type} [Monoid M] (ω : Ω) : Dlg M →* FreeMonoid Event where
+  toFun := fun x => FreeMonoid.ofList (Dlg.trace ω x)
+  map_one' := rfl
+  map_mul' x y := by
+    show FreeMonoid.ofList (Dlg.trace ω (Dlg.bind x (fun a => Dlg.bind y _))) = _
+    rw [Dlg.bind_eq_bind, Dlg.trace_bind', Dlg.bind_eq_bind, Dlg.trace_bind']
+    show FreeMonoid.ofList (Dlg.trace ω x ++ (Dlg.trace ω y ++ [])) = _
+    rw [List.append_nil, FreeMonoid.ofList_append]
+
+/-- **`panel` is `List.prod` in `Dlg (El c)`.** The panel former has no fold of
+its own; it is the monoid's product, read through the meaning. -/
+theorem denote_panel_prod [Monoid (El c)] (ps : List (Plan Γ (El c))) (γ : Env Γ) :
+    denote (Plan.panel ps) γ = (ps.map (fun p => denote p γ)).prod := by
+  induction ps with
+  | nil => rfl
+  | cons p ps ih =>
+      simp only [Plan.panel_cons, List.map_cons, List.prod_cons, denote_zipWith, ih]
+      rfl
 
 /-- **Morphism equation for `panel`, on values**: the answer is the `foldMap` of
 the members' answers into the monoid. Quorum, "everyone approved" and the
-objection product are all this one equation at three monoids. -/
+objection product are all this one equation at three monoids.
+
+Proved as `(runHom ω).map_list_prod` — a monoid homomorphism applied to a
+product — rather than by induction on the list. -/
 @[simp] theorem run_panel [Monoid (El c)] (ω : Ω) (ps : List (Plan Γ (El c))) (γ : Env Γ) :
     Plan.run ω (Plan.panel ps) γ = (ps.map (fun p => Plan.run ω p γ)).prod := by
-  induction ps with
-  | nil => simp [Plan.run]
-  | cons p ps ih =>
-    simp only [Plan.panel_cons, Plan.run, denote_zipWith, Dlg.run_bind, List.map_cons,
-      List.prod_cons]
-    simpa [Plan.run] using congrArg (fun x => Dlg.run ω (denote p γ) * x) ih
+  show Dlg.run ω (denote (Plan.panel ps) γ) = _
+  have hm : (ps.map fun p => Plan.run ω p γ)
+      = (ps.map fun p => denote p γ).map (Dlg.run ω) := by
+    simp [List.map_map, Plan.run, Function.comp_def]
+  rw [denote_panel_prod, hm]
+  exact (runHom ω).map_list_prod _
 
 /-- **Morphism equation for `panel`, on transcripts**: the transcript is the
 concatenation of the members' transcripts, in the order written. A panel is not
 "parallel" in the meaning; parallelism is a fact about a runtime, licensed by a
-theorem about the term. -/
+theorem about the term.
+
+Proved as `(traceHom ω).map_list_prod`, read back through `FreeMonoid.toList`. -/
 @[simp] theorem trace_panel [Monoid (El c)] (ω : Ω) (ps : List (Plan Γ (El c))) (γ : Env Γ) :
     Plan.trace ω (Plan.panel ps) γ = (ps.map (fun p => Plan.trace ω p γ)).flatten := by
-  induction ps with
-  | nil => simp [Plan.trace]
-  | cons p ps ih =>
-    simp only [Plan.panel_cons, Plan.trace, denote_zipWith, Dlg.trace_bind,
-      List.map_cons, List.flatten_cons]
-    simpa [Plan.trace] using congrArg (fun x => Dlg.trace ω (denote p γ) ++ x) ih
+  show Dlg.trace ω (denote (Plan.panel ps) γ) = _
+  have h := (traceHom (M := El c) ω).map_list_prod (ps.map (fun p => denote p γ))
+  have hm : (ps.map fun p => Plan.trace ω p γ)
+      = (ps.map fun p => denote p γ).map (Dlg.trace ω) := by
+    simp [List.map_map, Plan.trace, Function.comp_def]
+  have hf : ∀ l : List (List Event),
+      FreeMonoid.toList (l.map FreeMonoid.ofList).prod = l.flatten := by
+    intro l; induction l with
+    | nil => rfl
+    | cons a l ih =>
+        show a ++ FreeMonoid.toList (l.map FreeMonoid.ofList).prod = _
+        rw [ih]; rfl
+  rw [denote_panel_prod, hm]
+  have hc := congrArg FreeMonoid.toList h
+  simp only [traceHom, MonoidHom.coe_mk, OneHom.coe_mk, List.map_map, Function.comp_def] at hc
+  refine hc.trans ?_
+  have := hf (ps.map fun p => Dlg.trace ω (denote p γ))
+  simp only [List.map_map, Function.comp_def] at this
+  simp [List.map_map, Function.comp_def]
 
 /-- `Verdict.approved_prod` at the `El .verdict` presentation of the verdict
 monoid. Stated because instance search does not unfold `El`, so a `rw` against
@@ -401,7 +626,27 @@ whose product is concatenation of objection lists, and an objection list is a
 was a theorem with no instances, which is a way of saying nothing.
 
 Two statements say what a scheduler may actually be given, and both have
-inhabited hypotheses. -/
+inhabited hypotheses.
+
+**What these theorems are, in one word: the centre.** `Plan.zipWith` chooses
+left-then-right sequentialization — `denote_zipWith` binds `p` and then `q` —
+so the tensor a panel is built from is **premonoidal** in Power and Robinson's
+sense: `− ⊗ q` and `p ⊗ −` are functors, but the interchange law that would make
+the two orders agree is exactly what a transcript refuses. In a premonoidal
+category the *centre* is the subcategory of maps for which interchange does
+hold, and the four scheduling-licence theorems of this package —
+`approved_panel_perm` here, `trace_panel_perm` and `trace_panel_perm_multiset`
+below, and `Cost.billFresh_panel_perm` — are each a measurement of how far a
+component is from being central: the transcript is not central as a list, is
+central as a multiset, and the approval decision and the bill in a commutative
+carrier are central outright.
+
+They do not merge, and the temptation to merge them should be resisted:
+`approved_panel_perm` is a monoid morphism into `(Prop, ∧)`, `trace_panel_perm`
+is `List.Perm.flatten`, `trace_panel_perm_multiset` is a multiset coercion, and
+`billFresh_panel_perm` needs a `CommMonoid`. Four theorems stay four theorems;
+what the vocabulary adds is a name for what they are all instances of, and the
+reason there cannot be a fifth that makes the aggregate verdict reorderable. -/
 
 /-- **The licence on values, at the projection a policy reads.** `Approved` is
 the monoid morphism into conjunction (`Verdict.approved_mul`), and conjunction
@@ -420,16 +665,15 @@ theorem approved_panel_perm (ω : Ω) {ps ps' : List (Plan Γ (El .verdict))}
 
 /-- Concatenating a permuted list of lists permutes the concatenation. The
 scheduler's freedom, before any of it is about workflows: the order of the
-blocks may change, the contents may not. -/
+blocks may change, the contents may not.
+
+Mathlib's own lemma, once the statement is named the way Mathlib names it
+(`List.Perm.flatten`); the eight-line `List.Perm` induction this used to carry
+was a re-proof. Kept as a name, and kept here rather than inlined, because it is
+the general fact `trace_panel_perm` below is an instance of and the sentence
+above is worth having somewhere. -/
 theorem flatten_perm {α : Type} {L L' : List (List α)} (h : L.Perm L') :
-    L.flatten.Perm L'.flatten := by
-  induction h with
-  | nil => exact .refl _
-  | cons l _ ih => exact ih.append_left l
-  | swap l₁ l₂ L =>
-    simp only [List.flatten_cons, ← List.append_assoc]
-    exact List.perm_append_comm.append_right _
-  | trans _ _ ih₁ ih₂ => exact ih₁.trans ih₂
+    L.flatten.Perm L'.flatten := h.flatten
 
 /-- **The licence on transcripts.** Reordering a panel reorders its events —
 `Morphism.trace_panel_not_perm_invariant` says the transcript *as a list* is
@@ -489,7 +733,17 @@ loop, for every fuel.
 is `n + 1` checks and at most `n` revisions, each revision preceded by the check
 that asked for it and followed by the check that judges it — and there is no
 truncated star, no fuel index in the syntax and no `ℕ∞` anywhere, because the
-meaning of a bounded loop is its unrolling (§3 q5). -/
+meaning of a bounded loop is its unrolling (§3 q5).
+
+**Why the two `Denotes` hypotheses stay, after the Yoneda collapse.** `hc` could
+go: `check : Cont Γ (El c) Verdict` sits at an answer type, so `Cont.ofPlan` and
+`Cont.denotes_ofPlan` discharge it. `hr` cannot: `revise` sits at
+`El c × Verdict`, a *product* of answer types, and `c :: Γ` represents one
+extension and not two. A two-variable Yoneda — `Plan (c :: .verdict :: Γ) B ≅
+{k : Cont Γ (El c × Verdict) B // Natural k}` — would close it, and it is a real
+theorem rather than a one-line corollary of the one above, so it is not taken
+here. Discharging one hypothesis of two and leaving the statement asymmetric
+would be worse than leaving both, so both stay. -/
 theorem denotes_revising {Γ : Ctx} {c : Code}
     {check : Cont Γ (El c) Verdict} {revise : Cont Γ (El c × Verdict) (El c)}
     {Kc : El c → Env Γ → Dlg Verdict} {Kr : El c × Verdict → Env Γ → Dlg (El c)}

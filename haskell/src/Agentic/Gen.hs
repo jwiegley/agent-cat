@@ -39,13 +39,13 @@
 --
 -- == How a runtime generator drives a type-level-name-directed builder
 --
--- "Agentic.Builder"\'s surface is directed by 'GHC.TypeLits.Symbol' literals
--- and by closed type families over them, so nothing here can call @bind \@"x"@:
--- a name drawn at runtime is not a 'GHC.TypeLits.Symbol', and 'Fresh' and
--- 'KnownVar' cannot be discharged for one that is. The generators drive the
--- builder's @I@-suffixed /index-level/ entry points instead — 'bindI',
--- 'holeI', 'revisingCaseI' and the rest — which take the printed 'Data.Text.Text'
--- and the de Bruijn 'Var' directly. Those are the builder's own definitions
+-- "Agentic.Builder"\'s /binders/ are directed by 'GHC.TypeLits.Symbol'
+-- literals, so nothing here can call @bind \@"x"@: a name drawn at runtime is
+-- not a 'GHC.TypeLits.Symbol', and 'Fresh' cannot be discharged for one that
+-- is. The generators drive the builder's @I@-suffixed /index-level/ entry
+-- points instead — 'bindI', 'holeI', 'revisingCaseI' and the rest — which take
+-- the printed 'Data.Text.Text' and the de Bruijn 'Var' directly, rather than a
+-- handle at a scope the type level has to line up. Those are the builder's own definitions
 -- (the named forms are wrappers over them), so this module tests the builder's
 -- print-and-elaborate linkage and not a parallel one.
 --
@@ -220,9 +220,9 @@ bindableCodes = [CodeText, CodeVerdict, CodeFlag]
 -- | One live name, at a scope the type records: what the printer writes, the
 -- kind it answers, and the de Bruijn index that reads it.
 --
--- This is exactly what @Agentic.Builder@\'s type-level scope produces at
--- runtime — 'Agentic.Builder.LookupC' and 'Agentic.Builder.KnownVar' compute
--- the second and third components, and the first is 'GHC.TypeLits.symbolVal'.
+-- This is exactly what @Agentic.Builder@\'s binders hand out at runtime — a
+-- 'Agentic.Builder.V' carries the first and the third components, and
+-- 'Agentic.Builder.readV' is the walk that keeps the third current.
 data Bound (s :: Scope) where
   Bound :: KnownCode c => Text -> SCode c -> Var (Codes s) c -> Bound s
 
@@ -237,7 +237,7 @@ liveNames :: Live s -> [Text]
 liveNames = map boundName
 
 -- | Read a live name under one more binding: the 'VThere' that
--- 'Agentic.Builder.KnownVar'\'s instance walk inserts, one per entry stepped
+-- 'Agentic.Builder.readV'\'s instance walk inserts, one per entry stepped
 -- over.
 wkBound :: forall n c s. Bound s -> Bound ('(n, c) ': s)
 wkBound (Bound y d v) = Bound y d (VThere v)
@@ -275,7 +275,7 @@ data SomeParams where
   SomeParams ::
     (Codes s ~ ParamCtx ps) =>
     PList ps ->
-    Params ps '[] s ->
+    Params ps '[] s hs ->
     Live s ->
     SomeParams
 
@@ -543,7 +543,7 @@ genFn fns name = do
     SomeParams pl ps live -> do
       fuel <- choose (1 :: Int, 4)
       SomeBody r b <- genBody fns fuel live
-      pure (GFn name pl r (function name ps b))
+      pure (GFn name pl r (function name ps (const b)))
 
 -- ---------------------------------------------------------------------------
 -- Blocks

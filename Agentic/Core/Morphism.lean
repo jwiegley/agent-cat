@@ -291,6 +291,53 @@ theorem trace_graft (ω : Ω) (p : Plan Γ A) (K : A → Env Γ → Dlg B) (k : 
   rw [Agentic.Core.denote_graft p K k hk γ]
   exact Dlg.trace_bind ω _ _
 
+/-! ### The same four squares with the `Denotes` hypothesis spent
+
+`Cont.denotes_ofPlan` (`Agentic/Core/Denote.lean`) says that a continuation of
+the form `Cont.ofPlan q` discharges its coherence obligation for free, and that
+its semantic continuation is forced: `fun a γ => denote q (Env.cons a γ)`. So at
+an *answer type* — `A = El c`, which is where a context extension lives — each
+square below loses its hypothesis and its `K` argument and becomes a statement
+with nothing left to check.
+
+**The hypothesis-carrying forms above stay, and must.** Three reasons, each
+independently sufficient. `A` there is an arbitrary `Type`, and the four squares
+are instantiated at `A = Unit` (`seq`), at `A × B` (`zipWith`, `pairP`) and at
+whatever `bindP`'s answer type is; `Cont Γ A B` there is an arbitrary family, and
+`sub_graft_not_natural`'s `wobbly` exhibits one that is `ofPlan` of nothing; and
+`denote_graft`'s own induction consumes the hypothesis under a binder, where the
+`ofPlan` form is not the shape available. These are the author-facing corollaries
+of the general theorems, not replacements for them. -/
+
+/-- `denote_graft` at a continuation that comes from a plan: no hypothesis, and
+the semantic continuation is read off `q`. -/
+theorem denote_graft_ofPlan {c : Code} (p : Plan Γ (El c)) (q : Plan (c :: Γ) B) (γ : Env Γ) :
+    denote (Plan.graft p (Cont.ofPlan q)) γ
+      = denote p γ >>= fun a => denote q (Env.cons a γ) :=
+  Agentic.Core.denote_graft_ofPlan p q γ
+
+/-- `denote_graft_assoc` at two such continuations. Two answer types, two context
+extensions, no coherence obligations. -/
+theorem denote_graft_assoc_ofPlan {c d : Code} (p : Plan Γ (El c)) (q : Plan (c :: Γ) (El d))
+    (r : Plan (d :: Γ) D) (γ : Env Γ) :
+    denote (Plan.graft (Plan.graft p (Cont.ofPlan q)) (Cont.ofPlan r)) γ
+      = denote p γ >>= fun a => denote q (Env.cons a γ) >>= fun b => denote r (Env.cons b γ) :=
+  denote_graft_assoc p _ _ _ _ (Cont.denotes_ofPlan q) (Cont.denotes_ofPlan r) γ
+
+/-- `run_graft` at a continuation that comes from a plan. -/
+theorem run_graft_ofPlan {c : Code} (ω : Ω) (p : Plan Γ (El c)) (q : Plan (c :: Γ) B)
+    (γ : Env Γ) :
+    Plan.run ω (Plan.graft p (Cont.ofPlan q)) γ
+      = Dlg.run ω (denote q (Env.cons (Plan.run ω p γ) γ)) :=
+  run_graft ω p _ _ (Cont.denotes_ofPlan q) γ
+
+/-- `trace_graft` at a continuation that comes from a plan. -/
+theorem trace_graft_ofPlan {c : Code} (ω : Ω) (p : Plan Γ (El c)) (q : Plan (c :: Γ) B)
+    (γ : Env Γ) :
+    Plan.trace ω (Plan.graft p (Cont.ofPlan q)) γ
+      = Plan.trace ω p γ ++ Dlg.trace ω (denote q (Env.cons (Plan.run ω p γ) γ)) :=
+  trace_graft ω p _ _ (Cont.denotes_ofPlan q) γ
+
 /-! ### …and the one square that does **not** close: grafting is not natural
 
 The three laws above are unconditional, and the fourth law one would expect of a
@@ -330,6 +377,68 @@ theorem sub_graft_not_natural :
     congrArg (fun p => (Plan.trace ωDefault p (Env.cons (c := Code.ack) () Env.nil)).length) h
   revert hlen
   decide
+
+/-! ### …and the repair, which makes the pair matched rather than a wart
+
+The square fails because `Cont` is an arbitrary family, and `Cont.Natural`
+(`Agentic/Core/Denote.lean`) is exactly the condition that says it is not. With
+that hypothesis the fourth law closes, unconditionally in the plan and in the
+context morphism, and `sub_graft_not_natural` above stops being an isolated
+defect and becomes the witness that the hypothesis is not vacuous:
+`wobbly Δ _ _ = ticks Δ.length` reads the *length of the context it lands in*,
+which is precisely the data a natural family may not see.
+
+The two together are the house style of this module — a square and its
+counterexample, stated side by side — and the classification is the content: the
+presheaf `Δ ↦ Sub Γ Δ × Expr Δ A` has non-natural sections, and grafting
+commutes with renaming on exactly the natural ones. -/
+
+/-- **Grafting commutes with renaming, for a natural continuation.** The fourth
+law of the presheaf, with the hypothesis the counterexample above forces.
+
+Note what the induction needs and does not need: `Cont.reindex k σ` is the
+continuation read against the new context, the `askC`/`ask` cases are
+`Cont.reindex … Sub.wk` at each binder — which is what `graft`'s own recursion
+does to its continuation — and nothing appeals to `denote`. This is a theorem
+about the syntax. -/
+theorem sub_graft_of_natural {B : Type} :
+    ∀ {Γ : Ctx} {A : Type} (p : Plan Γ A) {Δ : Ctx} (σ : Sub Γ Δ) (k : Cont Γ A B),
+      Cont.Natural k →
+      Plan.sub (Plan.graft p k) σ = Plan.graft (Plan.sub p σ) (Cont.reindex k σ) := by
+  intro Γ A p
+  induction p with
+  | ret e => intro Δ σ k hk; exact hk _ _ Sub.id e σ
+  | askC c q k ih =>
+      intro Δ σ k₁ hk
+      simp only [Plan.graft, Plan.sub]
+      exact congrArg _ (ih (Sub.lift σ) _ (fun Θ Ξ τ e ρ => hk Θ Ξ _ e ρ))
+  | ask c s e k ih =>
+      intro Δ σ k₁ hk
+      simp only [Plan.graft, Plan.sub]
+      exact congrArg _ (ih (Sub.lift σ) _ (fun Θ Ξ τ e ρ => hk Θ Ξ _ e ρ))
+  | case e arms ih =>
+      intro Δ σ k₁ hk
+      simp only [Plan.graft, Plan.sub]
+      exact congrArg _ (funext fun t => ih t σ _ hk)
+  | dyn e f ih =>
+      intro Δ σ k₁ hk
+      simp only [Plan.graft, Plan.sub]
+      exact congrArg _ (funext fun b => ih b σ _ hk)
+
+/-- **The bifunctor coherence square**, which this package stated nowhere and
+which follows in one line: `Plan` is a functor in *both* variables at the syntax,
+covariantly in the answer type by `mapP` and contravariantly in the context by
+`sub`, and the two actions commute.
+
+The continuation `mapP` grafts is `fun _ _ e => ret (f ∘ e)`, which ignores its
+context morphism entirely and is therefore natural by `rfl` — so the one-line
+proof is `sub_graft_of_natural` at the trivial naturality witness. Worth having
+in its own right: `sub_mapP` is what says a rendering or an analysis may map over
+a plan before or after weakening it and get the same *term*, which
+`Morphism.mapP_id`/`mapP_comp`'s `≈ᵖ` versions cannot say. -/
+theorem sub_mapP {Γ Δ : Ctx} {A B : Type} (f : A → B) (p : Plan Γ A) (σ : Sub Γ Δ) :
+    Plan.sub (Plan.mapP f p) σ = Plan.mapP f (Plan.sub p σ) :=
+  sub_graft_of_natural p σ _ (fun _ _ _ _ _ => rfl)
 
 /-! ## The derived forms, each against its equation
 
@@ -457,7 +566,12 @@ fuel and at every artefact — two independently written definitions, one a
 `Nat.rec` over plans and one a `Nat.rec` over dialogues, agreeing.
 
 Stated at the root (`Sub.id`), which is where an author writes it; the
-context-polymorphic form the induction needs is `denotes_revising`. -/
+context-polymorphic form the induction needs is `denotes_revising`.
+
+Its two `Denotes` hypotheses survive the Yoneda collapse, and the reason is
+recorded at `denotes_revising`: `check` sits at an answer type and could be
+written `Cont.ofPlan`, but `revise` sits at `El c × Verdict`, a *product* of
+answer types, and a context extension represents one answer and not two. -/
 theorem denote_revising {check : Cont Γ (El c) Verdict} {revise : Cont Γ (El c × Verdict) (El c)}
     {Kc : El c → Env Γ → Dlg Verdict} {Kr : El c × Verdict → Env Γ → Dlg (El c)}
     (hc : Denotes check Kc) (hr : Denotes revise Kr) (n : Nat) (a : Expr Γ (El c))
@@ -594,6 +708,38 @@ theorem mapP_comp (f : A → B) (g : B → C) (p : Plan Γ A) :
     Plan.mapP (g ∘ f) p ≈ᵖ Plan.mapP g (Plan.mapP f p) := by
   intro γ
   rw [denote_mapP, denote_mapP, denote_mapP, comp_map]
+
+/-! ### …and the same two laws at the syntax, which is strictly stronger
+
+`mapP_id` and `mapP_comp` above are stated up to `≈ᵖ`, i.e. through `denote`, and
+they descend from `Dlg`'s `LawfulFunctor` — which is the right way to *derive*
+them and the wrong way to *state* them, because they are in fact true on the
+nose. The two below are equalities of **terms**.
+
+**Which is stronger, and why both exist.** `≈ᵖ` is the kernel of `denote`
+(`Plan.Equiv`), so a term equality implies the `≈ᵖ` version and not conversely,
+and the gap is not academic here: `Plan.size`, `Plan.askNodes`,
+`Cost.costSummary` and `Explain.planLines` are **not** `≈ᵖ`-invariant
+(`level_not_equiv_invariant` below exhibits the failure for `level`), and all
+four are pinned — by the frozen corpus and, for `planLines`, byte-for-byte by
+`test/CliSmoke.lean`. A rewriting pass licensed only by the `≈ᵖ` laws may move a
+frozen number; one licensed by the syntactic laws cannot.
+
+The `≈ᵖ` versions stay because they are the ones that sit in the table of
+descended monad laws, alongside `bindP_pure` and `bindP_assoc`, which are *only*
+true up to `≈ᵖ` — `bindP` inserts a `dyn` node, so no term equality is available
+there. Keeping the pair side by side is what makes the asymmetry visible. -/
+
+/-- **Functor identity, at the syntax.** `Morphism.graft_pure` is the whole
+proof: `mapP id` grafts the leaf-preserving continuation. -/
+theorem mapP_id' (p : Plan Γ A) : Plan.mapP id p = p := graft_pure p
+
+/-- **Functor composition, at the syntax.** `graft_assoc` and `rfl`: the composed
+continuation of two leaf rewrites is the leaf rewrite of the composite. -/
+theorem mapP_comp' (f : A → B) (g : B → C) (p : Plan Γ A) :
+    Plan.mapP g (Plan.mapP f p) = Plan.mapP (g ∘ f) p := by
+  rw [Plan.mapP, Plan.mapP, graft_assoc]
+  rfl
 
 /-- **Left unit.** Binding a pure leaf applies the continuation at the leaf's
 value. Not statable as `≈ᵖ` between two fixed plans, because the continuation's
