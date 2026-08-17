@@ -1487,7 +1487,7 @@ Owner request: the artifact §VII example as REAL compiling Lean — Op signatur
 :LABELS:   []
 :ISSUE_TYPE: epic
 :CREATED:  [2026-08-16 Sun 18:02]
-:MODIFIED: [2026-08-16 Sun 22:40]
+:MODIFIED: [2026-08-16 Sun 22:44]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -1504,6 +1504,22 @@ Phases:
 5. The serialized checked-term format for the MCP/agent-authoring surface (the prose surface stops being .wf; the replacement is the serialized first-order format checked by checkPlan — priced in the report).
 
 The Lean-side queue (99n --session, then vv6 deck engine) proceeds against the existing agent-cat CLI as spec/test runner; their production equivalents land in phase 4.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-haskell-program-xgw",
+    "depends_on_id": "acat-hs-weeks-2-5-n3x",
+    "type": "blocks",
+    "created_at": "2026-08-17T05:44:35.422174Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
 
 ** Comments
 
