@@ -1487,7 +1487,7 @@ Owner request: the artifact §VII example as REAL compiling Lean — Op signatur
 :LABELS:   []
 :ISSUE_TYPE: epic
 :CREATED:  [2026-08-16 Sun 18:02]
-:MODIFIED: [2026-08-16 Sun 22:04]
+:MODIFIED: [2026-08-16 Sun 22:40]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -1522,6 +1522,13 @@ The Lean-side queue (99n --session, then vv6 deck engine) proceeds against the e
     "author": "johnw",
     "text": "Day 3 done (commit a0bd2a4): the Tier-0 corpus is frozen. 121 request/reply\npairs under test/corpus/ — 87 battery, 2 module, 4 semantically-worlded, 22\nstring-layer, 6 named vectors — with all five guard identities pinned\n(questionBudget carries n=8193 from the chain-13 source; panelEmpty and\nservedBy hand-built, since the parser refuses their spellings). The oracle\nsplit into lib (conformance/Conformance.lean) + exe, and the case tables\nmoved to test/DslCases.lean so corpus-gen imports them without an\nexecutable's main. Next: days 4-5, the Haskell scaffold (owner directive:\nproceed by workflow until the Haskell program is finished).\n",
     "created_at": "2026-08-17T05:04:52Z"
+  },
+  {
+    "id": 108,
+    "issue_id": "acat-haskell-program-xgw",
+    "author": "johnw",
+    "text": "Week one is done. Days 4-5 (commit bfaff57 in ~/src/agentic-hs): a\nsix-agent workflow wrote PORTING.md from the Lean sources, then four\nindependent implementers produced Agentic.Raw (hand-written aeson codec\nmatching Lean's derived encoding; 99/99 program entries round-trip to\nbyte-identical Values), Agentic.Guards (five guards in the checker's own\nfiring order + the ask-count recurrences incl. the revising graft), and\nAgentic.Text (ASCII-only norm and friends), plus the tier0 corpus runner.\nIntegration needed zero fixes. Definition of done met:\n\n  tier0: 121 passed, 0 failed, 35 other-refusals (codec-only), of 121 files\n\nwith no Lean in the loop, confirmed by three independent harnesses and by\nmutation-testing the runner on all four comparison axes. Next: week two -\nthe typed builder (Plan GADT), denote/trace/bills, printer to Raw, and\nfull-observation parity on rebuilt curated cases.\n",
+    "created_at": "2026-08-17T05:40:56Z"
   }
 ]
 #+end_src
