@@ -1636,7 +1636,7 @@ Found by the connection-research attack pass (acat-lean-haskell-connection-lhi):
 :LABELS:   []
 :ISSUE_TYPE: feature
 :CREATED:  [2026-08-17 Mon 10:23]
-:MODIFIED: [2026-08-17 Mon 10:23]
+:MODIFIED: [2026-08-17 Mon 13:06]
 :CREATED_BY: johnw
 :FINISHED: [2026-08-17 Mon 10:23]
 :CLOSE_REASON: done
@@ -1655,6 +1655,13 @@ Found by the connection-research attack pass (acat-lean-haskell-connection-lhi):
     "author": "johnw",
     "text": "The runnable layer, owner-requested 2026-08-17 (\"do I have a fully worked\nexample, and how do I run it against a working agent-deck session?\").\n\nLean side (agent-cat 014ec2e): corpus-gen now walks example/*.wf - the\nflagship freezes at level branch / size 36 / askNodes 19; 128 entries.\n\nHaskell side (agentic-hs 5de20cb): Example.Harden (harden+hello rebuilt in\nthe Builder, one compiled value shared by tier1 and the CLI - tier1 21/21\npins the flagship's printed Raw and whole reply); Agentic.Exec (Dlg.execM\nas a runnable fold, memo key = billMemo's EventKey, Exec.attempt's retry\nand abandonment wording byte for byte); Agentic.AgentDeck (send / poll\nshow --json / output with a staleness guard, answerSpec appended verbatim,\nfive named transport failures); agentic-run plan|cost|run\n[--scripted|--session]; test/stub-deck.sh + ci/deck.sh (7 transport\nscenarios). Bills agree four independent ways (corpus, tier1, scripted IO,\nstub transport).\n\nLIVE RUN (exit 0): agentic-run run harden --session harden-world against a\nfresh scratch Claude session (~/src/tries/2026-08-17-harden-world). The\nrun took the flagship's REFUSAL path, honestly: the live model declined to\nfabricate a diff for an empty directory, all three reviewers approved that\ntext, the owner-gate flag answered no, and the apply act was never put -\nbillFresh 6 / billMemo 6, the exact bill_refuse_demo shape. The semantics\nheld under an uncooperative world: nothing fabricated, the gate gated.\n",
     "created_at": "2026-08-17T17:23:24Z"
+  },
+  {
+    "id": 113,
+    "issue_id": "acat-hs-runnable-ugr",
+    "author": "johnw",
+    "text": "The authoring surface, three landings (owner-driven iteration):\n\n1. b4029a2 - Agentic.Workflow (indexed CPS block, QualifiedDo,\n   OverloadedLabels) + Agentic.WF ([wf|...|] quoter, {name} holes,\n   Prompt.normalize-exact chunking). Example.Harden rewritten; design of\n   record PORTING3-surface.md (three sketches judged) + compiled prototype.\n   Owner rejected the label doubling (draft <- #draft =: ask).\n2. 39343aa - Agentic.Notation: $(workflow [| do ... |]) name-injecting\n   splice; bare binds (guide <- ask ...); names flow FROM Haskell binders\n   (bind labels, revising carrier, caseResult settled - three shapes,\n   nothing else). The label/binder disagreement class is now unwritable\n   (proven by mutation: renaming the binder moves revising.subject).\n   Splice-time refusal for non-VarP binds quotes the author's source.\n   Costs measured: prompt-typo caret lands on the splice; terminal misuse\n   prints the designed sentence then a TH dump; frame pays 4 lines of\n   ceremony; case arms positional with comments.\n3. Empirical unblock recorded: quasiquotes inside TH brackets compile on\n   GHC 9.10.3 (two-module proof), voiding the design doc's nesting\n   objection.\n\nAll gates green at every landing: tier0 128/128, tier1 21/21 (bare-bind\nflagship prints the frozen Raw), bisim, ci/deck 7/7.\n",
+    "created_at": "2026-08-17T20:06:30Z"
   }
 ]
 #+end_src
@@ -2522,6 +2529,22 @@ Round 16 gave the front end modules (import), so a CheckError can now point into
 The design of record (doc/research/dsl-redesign/fn-import-design.md, 'The one tax that is not local') prescribes the fix: add module : String := "" to Dsl.Pos, stamped by the parser per module, printed by ToString CheckError, added to Mcp.checkErrorJson. Defaulted so structure-instance literals are unchanged, but the ~25 anonymous constructors in Parse.lean need a Pos.at helper, and flagshipRaw/battery position pins recompute.
 
 Until then: the 'in module' prefix is the attribution, and the CLI's caret is best-effort. Acceptance: a syntax error inside an imported library renders with its own file's line quoted (or no caret), never the program's.
+
+* TODO [#B] Profunctor design research: term language and evaluator
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-profunctor-design-l47
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-17 Mon 12:56]
+:MODIFIED: [2026-08-17 Mon 12:56]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Owner directive 2026-08-17: think about profunctors improving the design, term language, and evaluator. Workflow profunctor-design running: three analysts (categorical frame incl. level-lattice = idiom/arrow/monad hierarchy via Rivas-Jaskelioff monoids-in-Prof; Haskell class-polymorphic interpreter with levels-as-constraints; Lean formalization feasibility) + adversarial attack + synthesis into doc/research/profunctor-design.md. Conformance regime is a hard constraint: proposals must be observation-preserving or explicitly flagged as spec-regenerating. Key seed insights: revising = lens (review=get, amend=put, Tambara-threaded); Plan is a profunctor in (Ctx-op, Type); analyses = monoid morphisms existing iff target has the rung's structure.
 
 * TODO [#C] Kill the condemned stratum; re-point the surface at Plan; example verbatim-stable
 :PROPERTIES:
