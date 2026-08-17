@@ -267,6 +267,198 @@ question, and the Haskell variable is the Haskell variable. They are written
 the same by convention (§5.5), and the surface is never in the business of
 reading Haskell.
 
+**This rejection has been overruled. See §2.2-REVISED.**
+
+### 2.2-REVISED — the owner's ruling
+
+The owner, twice, on the landed flagship:
+
+> `guide <- #guide =: ask` is pretty bizarre, when it could just be `guide <-`
+
+> i mean, `guide <- ask`
+
+So B2 ships, as `Agentic.Notation` (`src/Agentic/Notation.hs`), and
+`Example.Harden` is written in it. Sketch A is not withdrawn: it is what B2
+*compiles to*, it stays exported in full, and an author who wants the labels
+written out writes them and imports `Agentic.Workflow` directly. What changed
+is which of the two a human is expected to write.
+
+**Two of §2.2's four objections were void by the time the ruling landed.**
+
+*Nesting.* "Nested quasiquotes inside a bracket … need the splice to be careful
+in ways that no test can enumerate" was a guess, and it is wrong on this
+compiler: a `[wf|…|]` inside a `[| … |]` compiles under GHC 9.10.3, and the
+flagship is now the test — eleven quasiquotes inside two brackets, `where`-bound
+`define`s and all, printing the frozen chunks.
+
+What the bracket actually does is worth writing down, because it is the whole
+implementation. A binder inside `[| … |]` is renamed to a unique before the
+splice sees it (`BindS (VarP draft_a3GP) …`, and `nameBase` is `"draft"`), while
+a hole the quoter expanded *in* that bracket stays dynamically bound — `mkName
+"draft"`, resolved in the ordinary lexical scope at the splice site. The two
+halves would never meet, so every rebuilt binder is an **as-pattern**,
+`draft_a3GP@draft`: the unique half receives the uses the author wrote in the
+bracket (`revising draft`), the `mkName` half receives the uses the quoter wrote
+(`{draft}`), and they are one value. That is the only trick in the module, and
+it is why no substitution pass over the author's expressions is needed.
+
+*The label's own hazard.* The mutation test on the landed module showed that
+`#drafted =:` beside a binder called `draft` compiles clean, and that **only the
+frozen corpus catches it** — §5.5's "the failure mode is a program that prints a
+name the reader did not expect" is real, and it is invisible without the corpus.
+With every name taken from the binder, that whole class is unrepresentable:
+there is no second spelling of a name anywhere in `Example.Harden`, and no
+string in `example-000`'s program that is not a binder in the source.
+
+**The remaining two objections are answered by the shape of the transformer,
+not waved away.**
+
+*"The surface stops being a library and becomes a macro."* It does not, because
+the splice is a **name-injector** and its output is the landed surface,
+verbatim. Here is what `$(workflow [| … |])` produced for a four-statement
+program, as GHC printed it back in an error:
+
+```haskell
+bindW ((=:) #guide (ask (tool "cat") (concat [[lit (pack "g")]])))
+  (\ guide_a3GO@guide ->
+     bindW ((=:) #draft (ask (model "a") …))
+       (\ draft_a3GP@draft ->
+          bindW ((=:) #result (revising draft_a3GP #patch (atMost 2)
+                                 (\ patch_a3GR@patch ->
+                                    bindR ((=:) #verdict (panel [...]))
+                                      (\ verdict_a3GS@verdict -> amend …))))
+            (\ result_a3GQ@result ->
+               (\ () -> caseResult #patch (\ patch_a3GT@patch -> …) stop)
+                 result_a3GQ)))
+```
+
+Every name in it — `bindW`, `bindR`, `thenW`, `=:`, `#label`, `revising`,
+`caseResult` — is an `Agentic.Workflow` export, applied exactly as declared.
+Nothing was invented, nothing was elaborated, and the `Raw` this builds is the
+`Raw` the builder builds.
+
+*"`as`/`atMost`/`patch` in the quote are not identifiers of anything — a second
+surface language living inside a bracket."* That was a fair objection to the
+sketch, which invented `` `as` `` and infix `` `atMost` ``. The shipped notation
+invents nothing: **every function inside the bracket is an ordinary
+`Agentic.Workflow` export**, `revising` and `caseResult` included, and the
+transformer knows only where their *lambdas* are. The recognised set is closed
+at **three binding shapes**, and they are the three places the printed `Raw`
+needs a name the author chose:
+
+1. a statement bind `x <- e`, anywhere in the block including a nested one,
+   which becomes `bindW (#x =: e) (\x -> …)`;
+2. the carrier lambda of `revising` — `revising draft (atMost 2) \patch -> do …`
+   — whose binder names the carrier and restores the `#patch` argument the
+   surface declares;
+3. the settled lambda of `caseResult` — `caseResult result (\patch -> do …) stop`
+   — whose binder names the settled binding and likewise restores its `#patch`.
+
+Everything else passes through verbatim. `do` is rewritten (the splice emits the
+chain itself, so there is no `QualifiedDo` at the use site and no
+`RebindableSyntax` anywhere), and the walk descends only through application and
+parentheses — enough to find the `do`s that are block arms, and not enough to
+look inside a prompt, a panel or a list. The transformer does not know what
+`ask`, `panel`, `amend`, `ifFlag`, `act` or `stop` are.
+
+**Where each printed name comes from now**, replacing §3.3's table for the
+notation (the surface's own table stands unchanged, since it is still the
+compilation target):
+
+| printed field | value | taken from |
+|---|---|---|
+| `bind.x` | `guide`, `draft`, `ok`, `verdict`, `subject`, `greeting` | the statement's own binder (shape 1) |
+| `bind.x` of the loop, and `caseResult.x` — one name, printed twice | `result` | the binder of the statement that revises (shape 1) |
+| `revising.subject` | `draft` | the handle passed to `revising`, whose symbol is the `draft <-` binder |
+| `revising.carrier` | `patch` | the carrier lambda's binder (shape 2) |
+| `revising.reviewName` | `verdict` | the review's binder inside the revision block (shape 1) |
+| `caseResult.settledName` | `patch` | the settled lambda's binder (shape 3) |
+| `ifFlag.x` | `ok` | the handle passed to `ifFlag`, whose symbol is the `ok <-` binder |
+
+`caseResult`'s **scrutinee prints nothing** — `revisingCaseI` is handed the
+result name once, from the bind — so `caseResult result` could have been dropped
+on the floor. It is not: a revision binds `()`, and the splice emits the arms
+under a `\() -> …` applied to the author's scrutinee, which makes `result` a
+real use (a typo is `Variable not in scope`) and a wrong name a type error.
+Observed, for `caseResult guide (…) stop`:
+
+```
+• Couldn't match type ‘V "guide" CodeText’ with ‘()’
+```
+
+**The one objection that stands, and its measured size.** Errors that belong to
+the *generated* half are now reported at the splice, with the generated
+expression quoted. `stop` followed by a statement, which §3.2 observed at the
+statement, is now:
+
+```
+Bad2.hs:14:4: error: [GHC-64725]
+    • nothing follows a terminal: `stop`, `if` and `case` end a block
+    • In the expression:
+        thenW stop (thenW (act (tool "t") (concat [says guide])) stop)
+```
+
+— the rule still names itself, and the quoted expression is readable, but the
+caret is on the splice and not on the offending line. Against that: the
+notation's *own* refusals are splice-time failures that quote the source and
+name the rule, which the surface could not do at all. A revision with two
+reviews:
+
+```
+Bad3.hs:14:4: error: [GHC-39584]
+    • a bounded revision reviews first — `verdict <- panel […]` — and then
+      amends, and has no other statement.
+    • In the untyped splice: $(workflow [| do draft <- ask (model "a") …
+```
+
+and likewise for a block that is not a `do`, a bind whose pattern is not a plain
+variable, a lambda that does not name its carrier, and a qualified `do` inside
+the bracket. Errors in the *author's* half — a mistyped hole, `served by` on a
+tool, a flag spliced into a prompt, a name read where it is not live — are
+unchanged, because those expressions are passed through untouched.
+
+**One new cost, which §2.2 did not foresee.** An authoring module needs
+`{-# OPTIONS_GHC -Wno-unused-matches #-}`. A binding whose only reader is a
+`{hole}` — `guide`, `verdict`, both `patch`es, `subject`, `greeting` — is
+invisible to the renamer that walks the bracket, because the hole resolves at
+the splice; GHC reports fourteen `Defined but not used` warnings on the flagship
+without it, half at the bracket's statements and half at the splice. The pragma
+is one line, in the module header, next to the sentence that explains it.
+
+**The final notation** — `example/Example/Harden.hs`, which is the deliverable
+§4 now describes only as a compilation target (its prompt text remains the
+byte-accurate reference):
+
+```haskell
+hardenProgram :: Program
+hardenProgram = $(workflow [| do
+    guide  <- ask (tool "cat") [wf|Write out the house style guide, at most four short lines.|]
+    draft  <- ask (model "author" `servedBy` "deep") [wf|
+        Draft a patch satisfying:
+        {spec}
+        Reply with a unified diff only.|]
+    result <- revising draft (atMost 2) \patch -> do
+        verdict <- panel [ ask (model "reviewer-correct") [wf|{guide}…{patch}…|], … ]
+        amend (ask (model "author" `servedBy` "deep") [wf|{guide}…{patch}…{verdict}…|])
+    caseResult result
+      (\patch -> do
+          ok <- confirm (person "owner") [wf|…{patch}…{flagSpec}|]
+          ifFlag ok (do act (tool "apply") [wf|…{patch}…|]; stop) stop)
+      stop |])
+```
+
+Four extensions at the use site — `BlockArguments`, `OverloadedStrings`,
+`QuasiQuotes`, `TemplateHaskell` — and `DataKinds`, `OverloadedLabels` and
+`QualifiedDo` are gone from the authoring module along with the three `do`
+qualifiers and the imports that carried them: an authoring module now says
+`import Agentic.Notation`, which re-exports the surface, and nothing else.
+There is no `@`, no `#`, and no `=:` in the flagship.
+
+Gates, at the ruling: `cabal build all` clean at `-Wall`, tier1 21/21 (both
+example entries rebuilt through the notation, printed `Raw` value-equal under
+`zeroPos` and whole reply equal), tier0 128/128, and
+`agentic-run run harden --scripted` 7/7 questions, exit 0.
+
 ### 2.3 Sketch C — a Flow-flavoured indexed category
 
 agent-functor's taste, transplanted as far as §1.3 permits (prompts stay data;
@@ -342,6 +534,10 @@ by §1.3.
 
 **Winner: A.** It is the only one of the three in which a bind is a bind, and
 it is the closest to the file the owner points at.
+
+*(And then B2, on the owner's ruling — §2.2-REVISED. A stays: it is what B2
+compiles to, and the row above that reads "identical, minus `#labels`" is what
+shipped.)*
 
 ---
 
@@ -913,8 +1109,11 @@ latter, and the quoter finds it).
 
 ## 4. The target text: `example/Example/Harden.hs`
 
-This is the deliverable. The implementer's job is to make this text compile
-unchanged and to keep tier1 at 21/21.
+This *was* the deliverable, and it compiles unchanged with tier1 at 21/21. It is
+now the **compilation target**: since §2.2-REVISED the module a human reads has
+bare binds and no labels, and this text is what `$(workflow [| … |])` emits. Its
+prompts are still the byte-accurate reference — the chunk-for-chunk agreement
+with `example-000` and `example-001` is pinned here.
 
 ```haskell
 -- |

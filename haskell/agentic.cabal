@@ -36,9 +36,12 @@ description:
   three @do@ grammars in @Agentic.Workflow.Do@ and @Agentic.Workflow.Revision@ —
   are sugar whose every combinator is an application of an @Agentic.Builder@
   entry point, so a program written in them prints and elaborates through the
-  one pairing tier1 already pins. @Example.Harden@ is written that way, and is
-  the proof: the same two frozen entries, statement for statement with
-  @example\/harden.wf@.
+  one pairing tier1 already pins. @Agentic.Notation@ removes the surface's one
+  tax — a name written twice — by taking each printed name off the Haskell
+  binder that is already there: @$(workflow [| … |])@ is a splice that rewrites
+  a quoted block into that same surface, and invents no vocabulary of its own.
+  @Example.Harden@ is written that way, and is the proof: the same two frozen
+  entries, statement for statement with @example\/harden.wf@.
 
 build-type:      Simple
 license:         MIT
@@ -81,6 +84,7 @@ library
     Agentic.Exec
     Agentic.Gen
     Agentic.Guards
+    Agentic.Notation
     Agentic.Observe
     Agentic.Oracle
     Agentic.Plan

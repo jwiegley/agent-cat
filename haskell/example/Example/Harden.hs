@@ -6,8 +6,9 @@
 -- fixtures but /prose/: the flagship @harden.wf@, which the language guide
 -- walks line by line, and @hello.wf@, the smallest thing that is still a
 -- workflow. Both are frozen in the corpus (@example-000@ and @example-001@),
--- and both are written here in "Agentic.Workflow" — the sugar layer over
--- "Agentic.Builder", whose combinators these statements are.
+-- and both are written here in "Agentic.Notation" — bare binds over
+-- "Agentic.Workflow", which is itself sugar over "Agentic.Builder", whose
+-- combinators these statements are.
 --
 -- Two callers share these programs:
 --
@@ -21,12 +22,23 @@
 --
 -- == How to read this against @harden.wf@
 --
--- Statement for statement. @x <- ask …@ is @guide <- #guide =: ask …@: the
--- label is the name the /program/ prints, the Haskell binder is the name /this
--- module/ reads, and they are written the same on purpose. A @```fence```@ is
--- a @[wf|…|]@, with the same @{name}@ holes and the same layout rule —
--- surrounding blank lines dropped, common indentation stripped, line breaks
--- kept, no trailing newline. A @define@ is a Haskell binding.
+-- Statement for statement. @x <- ask …@ is @x <- ask …@: the Haskell binder is
+-- the name the /program/ prints, because @$('workflow' [| … |])@ reads it off
+-- the binder — there is no second spelling of a name anywhere in this module,
+-- and no name in the printed program that is not a binder here. A
+-- @```fence```@ is a @[wf|…|]@, with the same @{name}@ holes and the same
+-- layout rule — surrounding blank lines dropped, common indentation stripped,
+-- line breaks kept, no trailing newline. A @define@ is a Haskell binding.
+--
+-- The two names that are not binds are the two /lambdas/, and they are binders
+-- too: @\\patch -> …@ under 'revising' is the carrier, and @\\patch -> …@ under
+-- 'caseResult' is the settled binding. The @.wf@ writes them
+-- @revising draft as patch@ and @settled patch@.
+--
+-- @-Wno-unused-matches@ is the one cost of that: a binding read only by a
+-- @{hole}@ — @guide@, @verdict@, both @patch@es — is invisible to the renamer
+-- that walks the quoted block, because a hole resolves at the splice and not in
+-- the bracket. "Agentic.Notation" says why in full.
 --
 -- == What the transcription still pins
 --
@@ -49,12 +61,11 @@
 --
 --   * __@served by \"deep\"@ appears twice__, on the draft and on the
 --     amendment.
+{-# OPTIONS_GHC -Wno-unused-matches #-}
 {-# LANGUAGE BlockArguments #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE QualifiedDo #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module Example.Harden
   ( -- * The programs
@@ -68,9 +79,7 @@ module Example.Harden
   )
 where
 
-import Agentic.Workflow
-import qualified Agentic.Workflow.Do as W
-import qualified Agentic.Workflow.Revision as R
+import Agentic.Notation
 import Data.Text (Text)
 
 -- ---------------------------------------------------------------------------
@@ -103,57 +112,62 @@ flagSpec = "Reply with exactly yes or no."
 -- @codes@ is @null@: a program that branches has no single sequence of answer
 -- kinds, which is exactly what separates the flagship from 'helloProgram'.
 hardenProgram :: Program
-hardenProgram = workflow W.do
-  guide <- #guide =: ask (tool "cat")
-    [wf|Write out the house style guide, at most four short lines.|]
+hardenProgram =
+  $( workflow
+       [|
+         do
+           guide <- ask (tool "cat")
+             [wf|Write out the house style guide, at most four short lines.|]
 
-  draft <- #draft =: ask (model "author" `servedBy` "deep") [wf|
-      Draft a patch satisfying:
-      {spec}
-      Reply with a unified diff only.|]
+           draft <- ask (model "author" `servedBy` "deep") [wf|
+               Draft a patch satisfying:
+               {spec}
+               Reply with a unified diff only.|]
 
-  #result =: revising draft #patch (atMost 2) \patch -> R.do
-    verdict <- #verdict =: panel
-      [ ask (model "reviewer-correct") [wf|
-          {guide}
-          Is this patch correct?
-          {patch}
-          {verdictSpec}|],
-        ask (model "reviewer-secure") [wf|
-          {guide}
-          Is this patch secure?
-          {patch}
-          {verdictSpec}|],
-        ask (model "reviewer-simple") [wf|
-          Could this patch be simpler?
-          {patch}
-          {verdictSpec}|]
-      ]
-    amend (ask (model "author" `servedBy` "deep") [wf|
-        {guide}
-        Revise this patch:
-        {patch}
-        {verdict}
-        Reply with the revised diff only.|])
+           result <- revising draft (atMost 2) \patch -> do
+             verdict <- panel
+               [ ask (model "reviewer-correct") [wf|
+                   {guide}
+                   Is this patch correct?
+                   {patch}
+                   {verdictSpec}|],
+                 ask (model "reviewer-secure") [wf|
+                   {guide}
+                   Is this patch secure?
+                   {patch}
+                   {verdictSpec}|],
+                 ask (model "reviewer-simple") [wf|
+                   Could this patch be simpler?
+                   {patch}
+                   {verdictSpec}|]
+               ]
+             amend (ask (model "author" `servedBy` "deep") [wf|
+                 {guide}
+                 Revise this patch:
+                 {patch}
+                 {verdict}
+                 Reply with the revised diff only.|])
 
-  caseResult #patch
-    -- settled patch { … }
-    ( \patch -> W.do
-        ok <- #ok =: confirm (person "owner") [wf|
-            Apply this patch?
-            {patch}
-            {flagSpec}|]
+           caseResult result
+             -- settled patch { … }
+             ( \patch -> do
+                 ok <- confirm (person "owner") [wf|
+                     Apply this patch?
+                     {patch}
+                     {flagSpec}|]
 
-        ifFlag ok
-          ( W.do
-              act (tool "apply") [wf|
-                  Apply:
-                  {patch}
-                  Write the patched file here, then reply DONE.|]
-              stop )
-          stop )
-    -- unsettled { stop }
-    stop
+                 ifFlag ok
+                   ( do
+                       act (tool "apply") [wf|
+                           Apply:
+                           {patch}
+                           Write the patched file here, then reply DONE.|]
+                       stop )
+                   stop )
+             -- unsettled { stop }
+             stop
+         |]
+   )
 
 -- ---------------------------------------------------------------------------
 -- The small one
@@ -167,23 +181,29 @@ hardenProgram = workflow W.do
 -- bounds.
 --
 -- @brief@ is a @define@ — here a @where@ binding, which the @[wf|…|]@ holes
--- find in the ordinary lexical scope — so it contributes a chunk of its own to
--- each of the first two prompts, unfused with the literal beside it.
+-- find in the ordinary lexical scope /at the splice/, exactly as they find the
+-- block's own binders — so it contributes a chunk of its own to each of the
+-- first two prompts, unfused with the literal beside it.
 helloProgram :: Program
-helloProgram = workflow W.do
-  subject <- #subject =: ask (tool "cat") [wf|
-      Name one thing worth greeting.
-      {brief}|]
+helloProgram =
+  $( workflow
+       [|
+         do
+           subject <- ask (tool "cat") [wf|
+               Name one thing worth greeting.
+               {brief}|]
 
-  greeting <- #greeting =: ask (model "greeter") [wf|
-      Write a greeting for this, and nothing else:
-      {subject}
-      {brief}|]
+           greeting <- ask (model "greeter") [wf|
+               Write a greeting for this, and nothing else:
+               {subject}
+               {brief}|]
 
-  act (tool "say") [wf|
-      Say it:
-      {greeting}|]
-  stop
+           act (tool "say") [wf|
+               Say it:
+               {greeting}|]
+           stop
+         |]
+   )
   where
     -- @define brief = "Reply in one short line."@
     brief :: Text
