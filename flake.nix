@@ -13,11 +13,14 @@
       in {
         devShells.default = pkgs.mkShell {
           buildInputs = [
-            # Lean 4 (compiler + lake), from nixpkgs rather than elan: the
-            # toolchain is exactly this derivation, `lake` runs with the Lean
-            # it ships beside, and there is deliberately no lean-toolchain
-            # file for elan to consult. The package is self-contained (no
-            # Mathlib), so nothing here needs the network after this shell.
+            # Lean 4 (compiler + lake), from nixpkgs rather than elan. The
+            # repository DOES carry a lean-toolchain file (v4.30.0, which this
+            # derivation must match) and lakefile.toml requires Mathlib at the
+            # same tag, so a cold build needs the network once — `lake exe
+            # cache get` for Mathlib's objects, or hours of elaboration on a
+            # cache miss. After that, everything is local. (This comment once
+            # claimed the opposite on both counts; connection.md §3.9 filed
+            # the correction.)
             pkgs.lean4
           ];
         };
