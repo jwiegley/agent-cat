@@ -7,6 +7,14 @@ description:
   AST and its JSON codec, the five term-level guards, the two ask counts, and
   the string layer. Conformance is decided by the frozen corpus at
   @agent-cat\/test\/corpus@, replayed by the @tier0@ executable.
+  .
+  Week two adds the semantic core: the typed @Plan@ and its static folds
+  (@Agentic.Plan@), its meaning in a world — traces and bills — (@Agentic.World@),
+  and the production surface whose combinators elaborate to the same @Plan@ the
+  Lean checker elaborates the corresponding surface construct to
+  (@Agentic.Builder@). The @tier1@ executable rebuilds curated corpus cases in
+  that surface and holds both the printed program and the whole reply against
+  the frozen entries.
 
 build-type:      Simple
 license:         MIT
@@ -35,12 +43,22 @@ library
   import:          settings
   hs-source-dirs:  src
   exposed-modules:
+    Agentic.Builder
     Agentic.Guards
+    Agentic.Plan
     Agentic.Raw
     Agentic.Text
+    Agentic.World
 
 executable tier0
   import:          settings
   hs-source-dirs:  tier0
   main-is:         Main.hs
+  build-depends:   agentic
+
+executable tier1
+  import:          settings
+  hs-source-dirs:  tier1
+  main-is:         Main.hs
+  other-modules:   Cases
   build-depends:   agentic
