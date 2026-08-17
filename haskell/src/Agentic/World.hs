@@ -1,0 +1,516 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+
+-- |
+-- Module      : Agentic.World
+-- Description : The world as data, the trace, the bills, and the oracle's JSON.
+--
+-- The port of the /meaning/: @Agentic\/Core\/Denote.lean@'s @denote@ and
+-- @Plan.trace@ fused into one fold, @Agentic\/Core\/Dlg.lean@'s @Event@ and
+-- @Trace@, @Agentic\/Core\/Cost.lean@'s @billFresh@\/@billMemo@ at the counting
+-- price @tick@, and the whole of @conformance\/Conformance.lean@'s world DSL
+-- ('WorldSpec', 'toWorld') and event serialization ('eventJson',
+-- 'worldObservation').
+--
+-- == What is not here
+--
+-- No @Dlg@: @Plan.trace ω p γ = Dlg.trace ω (denote p γ)@, and the composite's
+-- clauses are exactly the @simp@ lemmas at @Denote.lean:123@–@:141@, so the
+-- fused fold ('traceIn') /is/ the definition rather than a shortcut.
+--
+-- No memo table, no @pin@, no @worldOf@, no @Price@ polymorphism, no
+-- @billOfKeys@ — the oracle serializes only the two tick bills, so the port is
+-- monomorphic in the carrier. No 'Agentic.Raw.Pos' anywhere: a 'Q' has no
+-- position, because positions are oracle-only, like @message@ and @excerpt@.
+--
+-- The enclosing observation record — @level@, @size@, @askNodes@, @codes@,
+-- @costSummary@, @blockAsks@, @fnAsks@, @worlds@ (@Conformance.lean:240@
+-- @observe@) — belongs to tier1, which assembles it from "Agentic.Plan"'s
+-- folds, "Agentic.Guards"' ask counts and 'worldObservation'. That is why this
+-- module depends on neither @Agentic.Guards@ nor @Agentic.Raw@'s program type.
+module Agentic.World
+  ( -- * The world, as data
+    VLit (..),
+    vLitToVerdict,
+    TextSpec (..),
+    VerdictSpec (..),
+    FlagSpec (..),
+    WorldSpec (..),
+    defaultWorldSpec,
+    World (..),
+    toWorld,
+
+    -- * The meaning
+    Event (..),
+    Trace,
+    trace,
+    traceIn,
+    runPlan,
+    runIn,
+
+    -- * The bills
+    EventKey (..),
+    eventKey,
+    billFresh,
+    billMemo,
+
+    -- * The oracle's JSON
+    verdictJson,
+    answerJson,
+    scopeJson,
+    eventJson,
+    worldObservation,
+  )
+where
+
+import Agentic.Plan
+  ( El,
+    Env (ECons, ENil),
+    Plan (PAsk, PAskC, PCase, PDyn, PRet),
+    Q (..),
+    QScope (..),
+    SCode (SAck, SFlag, SText, SVerdict),
+    VTag (VApprove, VDeclined, VObject),
+    Verdict (Approve, Declined, Object),
+    fromSCode,
+    verdictObject,
+    verdictTag,
+    withPrompt,
+  )
+import Agentic.Raw
+  ( Addressee (AddrModel, AddrPerson, AddrTool),
+    Code,
+    codeName,
+    ctorObj,
+    unknownCtor,
+    withCtor,
+    (.::),
+  )
+import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:?), (.=))
+import qualified Data.Aeson as A
+import qualified Data.Aeson.Key as K
+import Data.Aeson.Types (Parser)
+import Data.List (find)
+import Data.Maybe (fromMaybe)
+import qualified Data.Set as Set
+import Data.Text (Text)
+import qualified Data.Text as T
+
+-- ---------------------------------------------------------------------------
+-- The world, specified as data (Conformance.lean:73-:116)
+-- ---------------------------------------------------------------------------
+
+-- | @Conformance.lean:73@ — a verdict, as a literal.
+--
+-- > inductive VLit where
+-- >   | approve
+-- >   | declined
+-- >   | object (objections : List String)
+data VLit
+  = VLitApprove
+  | VLitDeclined
+  | VLitObject [Text]
+  deriving (Eq, Show)
+
+-- | @VLit.toVerdict@. Built through 'verdictObject', so the Lean invariant
+-- @Verdict.object [] = Verdict.approve@ survives a @{"object":{"objections":[]}}@
+-- written by hand.
+vLitToVerdict :: VLit -> Verdict
+vLitToVerdict = \case
+  VLitApprove -> Approve
+  VLitDeclined -> Declined
+  VLitObject os -> verdictObject os
+
+-- | @Conformance.lean:85@ — how the world answers @text@ questions.
+--
+-- 'TWrap' carries @pre@ then @post@, in Lean's argument order.
+data TextSpec
+  = -- | the answer is the prompt itself
+    TEcho
+  | -- | the prompt in brackets: the echo that makes splices visible
+    TWrap !Text !Text
+  | TConst !Text
+  | -- | @"draw:" ++ toString q.draw@, which tells resamplings apart
+    TByDraw
+  | -- | first entry whose key is a prefix of the prompt wins; else the default
+    TByPrefix [(Text, Text)] !Text
+  deriving (Eq, Show)
+
+-- | @Conformance.lean:99@ — how the world answers @verdict@ questions.
+data VerdictSpec
+  = VConst !VLit
+  | VByPrefix [(Text, VLit)] !VLit
+  deriving (Eq, Show)
+
+-- | @Conformance.lean:105@ — how the world answers @flag@ questions.
+data FlagSpec
+  = FConst !Bool
+  | -- | @q.prompt == s@, exact and unnormalized
+    FPromptEq !Text
+  | FByPrefix [(Text, Bool)] !Bool
+  deriving (Eq, Show)
+
+-- | @Conformance.lean:112@. A structure, so it travels as a bare object of its
+-- three fields with no constructor tag.
+--
+-- There is no @ack@ field: a receipt is @()@ and the spec is never consulted
+-- for one.
+data WorldSpec = WorldSpec
+  { wsText :: !TextSpec,
+    wsVerdict :: !VerdictSpec,
+    wsFlag :: !FlagSpec
+  }
+  deriving (Eq, Show)
+
+-- | The Lean structure's field defaults: @echo@, @const approve@, @const true@.
+-- A decoded 'WorldSpec' falls back to these field by field, exactly as Lean's
+-- derived @FromJson@ does.
+defaultWorldSpec :: WorldSpec
+defaultWorldSpec = WorldSpec TEcho (VConst VLitApprove) (FConst True)
+
+-- ---------------------------------------------------------------------------
+-- The world DSL's codec
+-- ---------------------------------------------------------------------------
+
+-- | Decode a Lean sum some of whose constructors are nullary.
+--
+-- A nullary constructor is /written/ as the bare string of its name
+-- (@"echo"@), which is what Lean's derived @ToJson@ emits and what all 63
+-- corpus world blocks contain; on input the one-key object form Lean's
+-- @Json.getTag?@ also admits (@{"echo": {}}@) is accepted too. Every
+-- non-nullary constructor of this DSL names all of its arguments, so it takes
+-- the named-field object form of @PORTING.md@ §3.1 without exception.
+sumJSON :: String -> [(Text, a)] -> (K.Key -> A.Object -> Parser a) -> Value -> Parser a
+sumJSON ty nullaries ctors = \case
+  A.String s -> case lookup s nullaries of
+    Just a -> pure a
+    Nothing -> fail $ ty ++ ": unknown constructor " ++ show s
+  v -> flip (withCtor ty) v $ \tag o ->
+    case lookup (K.toText tag) nullaries of
+      Just a -> pure a
+      Nothing -> ctors tag o
+
+instance ToJSON VLit where
+  toJSON = \case
+    VLitApprove -> "approve"
+    VLitDeclined -> "declined"
+    VLitObject os -> ctorObj "object" ["objections" .= os]
+
+instance FromJSON VLit where
+  parseJSON = sumJSON "VLit" [("approve", VLitApprove), ("declined", VLitDeclined)] $
+    \tag o -> case tag of
+      "object" -> VLitObject <$> o .:: "objections"
+      _ -> unknownCtor "VLit" tag
+
+instance ToJSON TextSpec where
+  toJSON = \case
+    TEcho -> "echo"
+    TByDraw -> "byDraw"
+    TWrap pre post -> ctorObj "wrap" ["pre" .= pre, "post" .= post]
+    TConst s -> ctorObj "const" ["s" .= s]
+    TByPrefix table d -> ctorObj "byPrefix" ["table" .= table, "default" .= d]
+
+instance FromJSON TextSpec where
+  parseJSON = sumJSON "TextSpec" [("echo", TEcho), ("byDraw", TByDraw)] $
+    \tag o -> case tag of
+      "wrap" -> TWrap <$> o .:: "pre" <*> o .:: "post"
+      "const" -> TConst <$> o .:: "s"
+      "byPrefix" -> TByPrefix <$> o .:: "table" <*> o .:: "default"
+      _ -> unknownCtor "TextSpec" tag
+
+instance ToJSON VerdictSpec where
+  toJSON = \case
+    VConst v -> ctorObj "const" ["v" .= v]
+    VByPrefix table d -> ctorObj "byPrefix" ["table" .= table, "default" .= d]
+
+instance FromJSON VerdictSpec where
+  parseJSON = sumJSON "VerdictSpec" [] $ \tag o -> case tag of
+    "const" -> VConst <$> o .:: "v"
+    "byPrefix" -> VByPrefix <$> o .:: "table" <*> o .:: "default"
+    _ -> unknownCtor "VerdictSpec" tag
+
+instance ToJSON FlagSpec where
+  toJSON = \case
+    FConst b -> ctorObj "const" ["b" .= b]
+    FPromptEq s -> ctorObj "promptEq" ["s" .= s]
+    FByPrefix table d -> ctorObj "byPrefix" ["table" .= table, "default" .= d]
+
+instance FromJSON FlagSpec where
+  parseJSON = sumJSON "FlagSpec" [] $ \tag o -> case tag of
+    "const" -> FConst <$> o .:: "b"
+    "promptEq" -> FPromptEq <$> o .:: "s"
+    "byPrefix" -> FByPrefix <$> o .:: "table" <*> o .:: "default"
+    _ -> unknownCtor "FlagSpec" tag
+
+-- | Strict out: all three fields, always. The checked reply's @"world"@ is a
+-- re-serialization of the request's world spec and must come back equal at the
+-- 'Value' level.
+instance ToJSON WorldSpec where
+  toJSON (WorldSpec t v f) = object ["text" .= t, "verdict" .= v, "flag" .= f]
+
+-- | Liberal in: a missing field — and, for good measure, an explicit @null@ —
+-- reads as the Lean structure's default for it ('defaultWorldSpec').
+instance FromJSON WorldSpec where
+  parseJSON = withObject "WorldSpec" $ \o ->
+    WorldSpec
+      <$> (fromMaybe (wsText defaultWorldSpec) <$> o .:? "text")
+      <*> (fromMaybe (wsVerdict defaultWorldSpec) <$> o .:? "verdict")
+      <*> (fromMaybe (wsFlag defaultWorldSpec) <$> o .:? "flag")
+
+-- ---------------------------------------------------------------------------
+-- toWorld
+-- ---------------------------------------------------------------------------
+
+-- | @Agentic\/Core\/World.lean:47@: @Ω = (c : Code) → Q c → El c@.
+--
+-- A rank-2 newtype, because the answer type depends on the code. A world is a
+-- /function/, which is the property the memo bill leans on: equal questions
+-- have equal answers, so the answer is no part of an 'EventKey'.
+newtype World = World {worldAnswer :: forall (c :: Code). SCode c -> Q c -> El c}
+
+-- | @WorldSpec.toWorld@ (@Conformance.lean:118@), clause for clause.
+--
+-- Three details the corpus does not exercise but the Lean does fix:
+-- 'TByPrefix'\/'VByPrefix'\/'FByPrefix' are __first match wins__ over the table
+-- in order, testing the key as a /prefix/ of the prompt; 'FPromptEq' is exact
+-- equality on the whole prompt with no normalization; and @ack@ is @()@ without
+-- consulting the spec at all.
+toWorld :: WorldSpec -> World
+toWorld w = World answer
+  where
+    answer :: SCode c -> Q c -> El c
+    answer SText q = case wsText w of
+      TEcho -> qPrompt q
+      TWrap pre post -> pre <> qPrompt q <> post
+      TConst s -> s
+      TByDraw -> "draw:" <> T.pack (show (qDraw q))
+      TByPrefix table d -> byPrefix table d (qPrompt q)
+    answer SVerdict q = case wsVerdict w of
+      VConst v -> vLitToVerdict v
+      VByPrefix table d -> vLitToVerdict (byPrefix table d (qPrompt q))
+    answer SFlag q = case wsFlag w of
+      FConst b -> b
+      FPromptEq s -> qPrompt q == s
+      FByPrefix table d -> byPrefix table d (qPrompt q)
+    answer SAck _ = ()
+
+-- | @table.find? (fun e => e.1.isPrefixOf q.prompt)@, defaulting.
+byPrefix :: [(Text, a)] -> a -> Text -> a
+byPrefix table d s = maybe d snd (find (\e -> fst e `T.isPrefixOf` s) table)
+
+-- ---------------------------------------------------------------------------
+-- Event, Trace, and the fused fold
+-- ---------------------------------------------------------------------------
+
+-- | @Agentic\/Core\/Dlg.lean:112@ — one thing said and its reply, @Σ c, Q c × El c@.
+--
+-- The code is a 'SCode' rather than a 'Code' because the answer's type depends
+-- on it; erasing it to 'Code' is what 'eventKey' does, where the answer is
+-- forgotten.
+data Event where
+  Event :: SCode c -> Q c -> El c -> Event
+
+-- | @Agentic\/Core\/Dlg.lean:124@ — the transcript: the free monoid on 'Event'.
+-- Concatenation is @++@ and the empty transcript is @[]@, which is what makes
+-- 'billFresh' a monoid morphism out of it.
+type Trace = [Event]
+
+-- | @Plan.trace ω p Env.nil@ — what a closed plan consults, in order, in the
+-- world @ω@. The one tier1 calls.
+trace :: World -> Plan '[] a -> Trace
+trace w = traceIn w ENil
+
+-- | @Plan.trace@ in an arbitrary context: @Dlg.trace ω (denote p γ)@, fused.
+--
+-- > traceIn _ _ (PRet _)         = []
+-- > traceIn w y (PAskC c q k)    = Event c q a : traceIn w (ECons a y) k
+-- > traceIn w y (PAsk c s e k)   = Event c q a : traceIn w (ECons a y) k
+-- > traceIn w y (PCase _ e arms) = traceIn w y (arms (e y))
+-- > traceIn w y (PDyn e f)       = traceIn w y (f (e y))
+--
+-- Three things this fold has to get right, all of which the corpus catches:
+--
+-- * the answer is computed once and both recorded in the event /and/ pushed
+--   onto the environment;
+-- * an ask node's question is @s.withPrompt (e γ)@ — the prompt is evaluated in
+--   the environment __before__ the answer is bound, so a splice reads what was
+--   already answered and never what this question will answer;
+-- * @case@ and @dyn@ record nothing. The branch taken is the whole of their
+--   contribution (@Denote.lean:58@: the two share a meaning clause on purpose).
+traceIn :: World -> Env g -> Plan g a -> Trace
+traceIn _ _ (PRet _) = []
+traceIn w y (PAskC c q k) =
+  let a = worldAnswer w c q
+   in Event c q a : traceIn w (ECons a y) k
+traceIn w y (PAsk c s e k) =
+  let q = withPrompt s (e y)
+      a = worldAnswer w c q
+   in Event c q a : traceIn w (ECons a y) k
+traceIn w y (PCase _ e arms) = traceIn w y (arms (e y))
+traceIn w y (PDyn e f) = traceIn w y (f (e y))
+
+-- | @Plan.run@ in the empty context — the answer rather than the transcript.
+-- No part of the oracle's record, but free from the same fold and useful in a
+-- tier1 assertion.
+runPlan :: World -> Plan '[] a -> a
+runPlan w = runIn w ENil
+
+-- | @Plan.run ω p γ@ (@Denote.lean:104@), fused through @denote@ the same way
+-- 'traceIn' is.
+runIn :: World -> Env g -> Plan g a -> a
+runIn _ y (PRet e) = e y
+runIn w y (PAskC c q k) =
+  let a = worldAnswer w c q
+   in runIn w (ECons a y) k
+runIn w y (PAsk c s e k) =
+  let q = withPrompt s (e y)
+      a = worldAnswer w c q
+   in runIn w (ECons a y) k
+runIn w y (PCase _ e arms) = runIn w y (arms (e y))
+runIn w y (PDyn e f) = runIn w y (f (e y))
+
+-- ---------------------------------------------------------------------------
+-- The bills
+-- ---------------------------------------------------------------------------
+
+-- | Lean's @Key = (c : Code) × Q c@ (@Cost.lean:90@), flattened to first-order
+-- data so that it can be compared.
+--
+-- Equality is on all five components and on nothing else. In particular the
+-- __answer is not part of the key__ (a world is a function, so equal questions
+-- have equal answers anyway), and there is no position and no site: two
+-- syntactically distinct asks that say the same words, to the same addressee,
+-- in the same scope, at the same draw, are __one question__.
+data EventKey = EventKey
+  { ekCode :: !Code,
+    ekAddressee :: !Addressee,
+    ekScope :: !QScope,
+    ekPrompt :: !Text,
+    ekDraw :: !Integer
+  }
+  deriving (Eq, Show)
+
+-- | Hand-written rather than derived only because @Agentic.Raw.Addressee@
+-- carries no 'Ord' instance and this module may not add an orphan one. It
+-- agrees with the derived 'Eq' — the addressee's constructor index and
+-- identifier decide it — so it is a lawful total order, which is all
+-- 'billMemo' needs of it.
+instance Ord EventKey where
+  compare a b = compare (ordKey a) (ordKey b)
+    where
+      ordKey k =
+        ( ekCode k,
+          addresseeOrd (ekAddressee k),
+          (scopeModelAxis (ekScope k), scopeModeAxis (ekScope k)),
+          ekPrompt k,
+          ekDraw k
+        )
+      addresseeOrd :: Addressee -> (Int, Text)
+      addresseeOrd = \case
+        AddrModel i -> (0, i)
+        AddrTool i -> (1, i)
+        AddrPerson i -> (2, i)
+
+-- | @Event.key@ (@Cost.lean:110@): the question an event put, forgetting the
+-- answer.
+eventKey :: Event -> EventKey
+eventKey (Event c q _) =
+  EventKey (fromSCode c) (qAddressee q) (qScope q) (qPrompt q) (qDraw q)
+
+-- | @Multiplicative.toAdd (billFresh tick t)@, which @Cost.lean:263@
+-- (@billFresh_tick@) proves is @t.length@: __charge every event__.
+billFresh :: Trace -> Integer
+billFresh = fromIntegral . length
+
+-- | @Multiplicative.toAdd (billMemo tick t)@: __charge each distinct question
+-- once__, distinctness being 'EventKey' equality.
+--
+-- @battery-117-two-draws-of-one-prompt-are-two-questions@ is the entry that
+-- pins the boundary: three identical prompts to one model, drawn at @0@, @0@
+-- and @1@, bill @4@ fresh and @3@ memoized — the two draw-@0@ questions
+-- collapse and the draw-@1@ one does not, which is @Q.draw@'s entire reason for
+-- existing. (@battery-137-empty-prompts-and-an-empty-define@ is the only other
+-- corpus entry where the two bills differ; @vector-001-billmemo-below-billfresh@,
+-- despite its name, reports @3@ and @3@.)
+--
+-- __One subtlety, harmless here and dangerous if generalized.__ Lean's
+-- @List.dedup@ keeps the /last/ occurrence of each key where a set-based (or
+-- @nub@-based) dedup keeps the first. The two agree on cardinality, which is
+-- all @billMemo@ at @tick@ observes; anything that ever needs the deduplicated
+-- key /list/ — a non-commutative price carrier would — must reproduce Lean's
+-- last-wins order instead.
+billMemo :: Trace -> Integer
+billMemo = fromIntegral . Set.size . Set.fromList . map eventKey
+
+-- ---------------------------------------------------------------------------
+-- The oracle's JSON (Conformance.lean:152-:238)
+-- ---------------------------------------------------------------------------
+
+-- | @Conformance.lean:152@ — a verdict as data: its tag, and the objections
+-- where the tag carries any.
+--
+-- @{"tag":"approve"}@ and @{"tag":"declined"}@ have __no__ @objections@ key;
+-- only the @object@ case carries the array. The dispatch is 'verdictTag', so
+-- the unit @Object []@ serializes as approval however it was built.
+verdictJson :: Verdict -> Value
+verdictJson v = case verdictTag v of
+  VApprove -> object ["tag" .= ("approve" :: Text)]
+  VDeclined -> object ["tag" .= ("declined" :: Text)]
+  VObject -> object ["tag" .= ("object" :: Text), "objections" .= objectionsOf v]
+  where
+    objectionsOf :: Verdict -> [Text]
+    objectionsOf (Object os) = os
+    objectionsOf _ = []
+
+-- | @Conformance.lean:163@ — an answer, at its code. A receipt is an explicit
+-- JSON @null@, never an omitted key.
+answerJson :: SCode c -> El c -> Value
+answerJson SText s = A.String s
+answerJson SVerdict v = verdictJson v
+answerJson SFlag b = A.Bool b
+answerJson SAck _ = A.Null
+
+-- | @Conformance.lean:169@ — the two scope axes, __both keys always present__,
+-- @null@ where the axis is silent. The second key is @mode@; nothing in this
+-- language ever sets it, and it exists because the scope monoid has two axes.
+scopeJson :: QScope -> Value
+scopeJson s =
+  object
+    [ "model" .= maybe A.Null A.String (scopeModelAxis s),
+      "mode" .= maybe A.Null A.String (scopeModeAxis s)
+    ]
+
+-- | @Conformance.lean:174@ — one event of the reply's @"trace"@ array.
+--
+-- The @code@ field is 'codeName', so a receipt prints as @"receipt"@ and never
+-- as @"ack"@: this is the reply-side half of @PORTING.md@ §3.4's trap, the
+-- @ack@ spelling being confined to the inside of a @RawProgram@. The @prompt@
+-- is the /evaluated/ words, not the chunk list.
+eventJson :: Event -> Value
+eventJson (Event c q a) =
+  object
+    [ "code" .= codeName (fromSCode c),
+      "addressee" .= qAddressee q,
+      "scope" .= scopeJson (qScope q),
+      "prompt" .= qPrompt q,
+      "draw" .= qDraw q,
+      "answer" .= answerJson c a
+    ]
+
+-- | @Conformance.lean:232@ — one entry of a checked reply's @"worlds"@ array.
+-- Argument order is Lean's: the plan, then the spec.
+worldObservation :: Plan '[] () -> WorldSpec -> Value
+worldObservation p w =
+  object
+    [ "world" .= w,
+      "trace" .= map eventJson t,
+      "billFresh" .= billFresh t,
+      "billMemo" .= billMemo t
+    ]
+  where
+    t = trace (toWorld w) p

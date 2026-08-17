@@ -1,0 +1,398 @@
+# agentic-hs
+
+The Haskell implementation of the operational terms of `agent-cat`
+(`/Users/johnw/src/agent-cat`, a Lean 4 formalization of agentic workflows) —
+the raw syntax of the agentic DSL, its JSON codec, the term-level guards, the
+ask counts and the string layer, and above them the typed `Plan`, its meaning
+in a world and the production surface that builds one — kept honest by
+replaying a frozen corpus produced by the Lean formalization.
+
+Lean is normative. This repository does not ask to be believed on its own
+authority: every claim it makes about the language is checked against 128
+request/reply pairs the Lean oracle emitted, and the check is two programs you
+can run in one command each.
+
+```
+nix develop -c cabal run tier0
+nix develop -c cabal run tier1
+```
+
+```
+tier0: kinds: 22 string, 5 guard, 35 other, 66 checked, 0 ping, 0 unclassified
+tier0: 128 passed, 0 failed, 35 other-refusals (codec-only), of 128 files
+tier1: 21 passed, 0 failed, of 21 cases
+```
+
+`tier0` replays every entry through the codec, the guards and the string layer.
+`tier1` **rebuilds** twenty-one of the checked entries in the production surface
+and holds the rebuilt program against the frozen one on both fronts: the
+program it prints, and the whole reply — folds, counts, and one trace and two
+bills per world.
+
+And the library **runs**: `agentic-run` plans, prices and executes the walked
+examples, against a table of canned replies or against a live `agent-deck`
+session. See [Running a workflow](#running-a-workflow).
+
+## Running it
+
+The flake devShell is the only environment; nothing is installed globally.
+
+```sh
+nix develop -c cabal build all      # build the library, the examples and all four runners
+nix develop -c cabal run tier0      # replay the frozen corpus
+nix develop -c cabal run tier1      # rebuild the curated cases and compare
+nix develop -c cabal run bisim      # draw programs and worlds against the live Lean oracle
+nix develop -c cabal run agentic-run -- plan harden   # and see Running a workflow
+```
+
+(A flake in a git working tree is read *through git*, so `flake.nix` and
+`flake.lock` are tracked; if you ever see `Path 'flake.nix' … is not tracked
+by Git` after adding files, either track them or route around git with
+`nix develop path:. -c …`.)
+
+Both runners take an optional corpus directory and otherwise read
+`/Users/johnw/src/agent-cat/test/corpus`:
+
+```sh
+nix develop -c cabal run tier0 -- /path/to/some/other/corpus
+```
+
+Each prints one line per failure — naming the file, what was compared, the
+expected value and the actual one — then its summary line. Each exits `0` if
+and only if nothing failed, so both are usable directly as CI gates.
+
+## What is covered
+
+| module | what it is |
+| --- | --- |
+| `Agentic.Raw` | the `Raw` AST and a codec byte-compatible with Lean's derived `ToJson`/`FromJson` |
+| `Agentic.Guards` | the five term-level guards, in firing order, and the two ask counts |
+| `Agentic.Text` | the string layer — `norm`, `words`, `decodeVerdict`, `decodeFlag`, `say` — ASCII-only, as Lean core is |
+| `Agentic.Plan` | the typed `Plan` — five formers, `DataKinds` codes, de Bruijn `Expr` — and its static folds `level`, `size`, `askNodes`, `codes`, `costSummary` |
+| `Agentic.World` | `WorldSpec` and `toWorld`, the `trace` of a plan through a world, the fresh and memo bills, and the oracle's event JSON |
+| `Agentic.Builder` | the production surface: typed combinators that both print a `RawProgram` and elaborate to the `Plan` the Lean checker elaborates the same construct to |
+| `Agentic.Gen`, `Agentic.Observe`, `Agentic.Oracle` | the bisimulation surface: generators, the reply assembly both runners share, and the line-delimited JSON client for the Lean oracle subprocess |
+| `Agentic.Exec` | the interpreter in `IO` — the memoizing fold of `Exec.lean`'s `Dlg.execM`, its decode/re-ask loop, and the scripted answering service |
+| `Agentic.AgentDeck` | one live `agent-deck` session as an answering service: the three CLI commands, the poll loop, the staleness guard and five named transport failures |
+| `Example.Harden` | the walked examples (`harden`, `hello`) rebuilt in the builder, shared by `tier1` and `agentic-run` |
+| `tier0/`, `tier1/`, `bisim/`, `run/` | the four runners |
+
+**Not** in scope, and deliberately absent: the parser, and the typing judgment.
+The builder gets well-formedness from Haskell's own types instead — an unbound
+name, a kind mismatch, a duplicate function name, an empty panel and `served
+by` on a tool are type errors or are unrepresentable — so the refusals those
+rules produce are reachable only through `Agentic.Guards`, which is what tier0
+already replays. Positions are oracle-only throughout, like `message` and
+`excerpt`: the builder prints `0:0` and tier1 zeroes both sides.
+
+## What tier0 compares
+
+| entry | rule |
+| --- | --- |
+| `request.string` (22) | `stringOp op code text` must equal the whole reply value |
+| `request.program` (106) | decode, re-encode, and match the request's `program` value |
+| refused with one of the five (5) | `guardCheck` must return that guard and its `n` |
+| refused `other` (35) | the codec round-trip and nothing else — the typing judgment decided these, and it is not ported |
+| checked (66) | `guardCheck` must fire nothing, and `askCounts` must equal `(blockAsks, fnAsks)` |
+
+## What tier1 compares
+
+Twenty-one checked entries, rebuilt from their surface source in
+`Agentic.Builder` and compared whole — no field skipped, a missing or extra key
+a failure:
+
+| front | rule |
+| --- | --- |
+| the printed program | `toJSON (progRawOut built)` against `request.program`, positions zeroed on both sides, and the print decoded back and re-encoded so a print no reader accepts fails here |
+| the static folds | `level`, `size`, `askNodes`, `codes`, `costSummary` folded from the elaborated `Plan` |
+| the ask counts | `Agentic.Guards.askCounts` on the *printed* program — week-one code, which is what makes this a cross-check of the builder rather than a second reading of the same term |
+| each world | per `request.worlds` in order: the world re-serialized, its trace event by event (`code`, `addressee`, `scope`, `prompt`, `draw`, `answer`), and `billFresh` / `billMemo` |
+
+Nineteen are chosen to reach every rung and every corner the corpus fixes: all
+three reachable levels (`batch`, `pipeline`, `branch`), all four answer codes,
+all three parties, draws 0–3, both scope states, `codes` as `null`, `[]` and a
+list, bounded revisions at 0, 1, 2 and 3 amendments including two nested inside
+a settled arm, and both of the only two entries where the memo bill falls below
+the fresh one. The five guard vectors and the refused entries are
+**unrepresentable** in the builder by design; tier0 covers them.
+
+The last two are the **walked examples** — `example-000`, the flagship of
+`agent-cat/example/harden.wf`, and `example-001`, `hello.wf` — rebuilt in
+`Example.Harden` rather than in `tier1/Cases.hs`. They live in their own
+(internal) library because two components must see the same value: tier1 pins
+it, and `agentic-run` runs it. Compiling the program twice would let the pinned
+one and the executed one drift and still read as agreement.
+
+Comparison is on `Data.Aeson.Value`, never on bytes, so object key order and
+number formatting are free. `refused.pos`, `.excerpt` and `.message` are
+oracle-only and are never compared: they are functions of written characters and
+of the checker's wording, neither of which this side has.
+
+Values in failure messages are printed with every non-ASCII and non-printing
+character escaped. The corpus turns on differences that are invisible in a
+terminal — U+00A0 against a space, `İ` against `i`, a stripped `\r` — and a
+diagnostic that hides them would be worse than none.
+
+## Running a workflow
+
+A program in this language is a value, and `agentic-run` is the three things
+you can do to one: read it, price it, run it.
+
+```sh
+nix develop -c cabal build all              # library, examples, all four executables
+nix develop -c cabal run agentic-run -- plan harden
+nix develop -c cabal run agentic-run -- cost harden
+nix develop -c cabal run agentic-run -- run  harden --scripted
+nix develop -c cabal run agentic-run -- run  harden --session my-session
+```
+
+`<example>` is `harden` or `hello`: the two walked programs of
+`agent-cat/example/`, rebuilt in `Agentic.Builder` as `Example.Harden`. **They
+are the same values `tier1` pins against the frozen corpus** — nothing is
+rebuilt, adapted or trimmed for execution — which is what makes a run evidence
+about the language rather than about this executable.
+
+### `plan` — what the program is, before anyone is asked anything
+
+```
+$ agentic-run plan harden
+harden, as elaborated:
+
+  level     branch
+  size      36
+  askNodes  19
+  codes     (none — the program branches, so no one sequence of answer kinds)
+  cost      minFold 5, maxFold 15, over 9 paths
+  (--raw prints the program itself)
+```
+
+Every line is a static fold of the elaborated `Plan`, and every one of them is
+in the frozen corpus entry for `harden`. `--raw` additionally prints the program
+as the builder prints it.
+
+### `cost` — what it can cost to run
+
+```
+$ agentic-run cost harden
+harden, priced:
+
+  costSummary   minFold 5, maxFold 15, over 9 paths
+
+  no path through this program consults fewer than 5 addressees,
+  and none consults more than 15.
+
+  the fold, path by path (9 in all):
+    5, 6, 7, 9, 10, 11, 13, 14, 15
+```
+
+Nine paths, nine prices, decided before the first question goes out. A run whose
+`billFresh` is not one of these nine numbers is a run of a different program.
+
+### `run --scripted` — execute against a table, and ask nobody
+
+```
+$ agentic-run run harden --scripted
+running harden against the scripted table (8 canned replies)
+
+  text -> tool cat: Write out the house style guide, at most four short lines.
+    <- House style: two-space indent, no tabs, every public name documented, …
+  text -> model author: Draft a patch satisfying: harden the parser …
+    <- --- a/src/parse.c +++ b/src/parse.c @@ …
+  verdict -> model reviewer-correct: … Is this patch correct? …
+    <- approve
+  verdict -> model reviewer-secure: … Is this patch secure? …
+    <- approve
+  verdict -> model reviewer-simple: Could this patch be simpler? …
+    <- approve
+  flag -> person owner: Apply this patch? …
+    <- yes
+  ack -> tool apply: Apply: … Write the patched file here, then reply DONE.
+    <- done
+
+  the run is over.
+    answer      () — a workflow's value is the unit; what it did is the trace
+    billFresh   7 (consultations the run reached)
+    billMemo    7 (distinct questions, which is what was put)
+```
+
+The canned replies are `agent-cat/test/stub_adapter.py`'s, keyed **by prefix**
+rather than by substring: a substring key can match a prompt through an answer
+that was spliced into it, and a patch that happened to contain the words
+`correct?` would otherwise answer the reviewers' question. They are *bytes*, not
+answers — `"yes"` goes through `Agentic.Text.decodeFlag` like any live reply, so
+the scripted world has no private channel to the answer type.
+
+### `run --session` — execute against a live agent-deck session
+
+```sh
+agentic-run run harden --session <id|title> \
+    [--binary PATH] [--poll MS] [--timeout MS] [--verbose]
+```
+
+| option | what it is | default |
+| --- | --- | --- |
+| `--session` | the session id or title every question is put to | — |
+| `--binary` | the `agent-deck` executable | `agent-deck`, found on `PATH` |
+| `--poll` | milliseconds between two checks of the session's status | `1000` |
+| `--timeout` | milliseconds one turn may take before it is abandoned | `600000` (= `agent-deck session send`'s own `-timeout` default) |
+| `--verbose` | narrate the transport — every command, every poll — on stderr | off |
+
+One question is one turn, and a turn is three commands:
+
+1. `agent-deck session output <id> --json` — *before* sending, to learn the
+   timestamp of the reply already there. Without this the window between
+   "submitted" and "the agent has begun" reads as idle, and the **previous**
+   turn's text is recorded as this question's answer.
+2. `agent-deck session send <id> <message>` — the rendered question.
+3. `agent-deck session show <id> --json`, every `--poll` milliseconds, until
+   `status` is no longer `running`; then `session output <id> --json` again,
+   accepted only once its `timestamp` differs from the one taken in step 1.
+
+The whole turn is bounded by `--timeout`, re-asks included (a second attempt is
+a second turn, and charging it what the first one spent would make a slow answer
+unaskable twice). Exit `0` is a completed run, `1` a usage error, `2` a
+transport failure, `3` a run abandoned because an answer could not be read.
+
+#### Everything goes to the one session
+
+The language has three kinds of addressee — `model "reviewer-secure"`,
+`tool "apply"`, `person "owner"` — and **this adapter sends all three to the
+same `--session`.** That is a ruling about this transport, not about the
+semantics: a world in `Agentic/Core/World.lean` is a function of the question,
+and this one is a function of the question that happens to route every question
+to the same place.
+
+The addressee is not lost. It is the first thing the rendered question says, so
+the agent knows whose part it is being asked to play:
+
+```
+[question for model author
+model: deep
+answer (text): Reply with the text itself and nothing else.]
+
+Draft a patch satisfying:
+harden the parser
+Reply with a unified diff only.
+```
+
+#### The format line, and why it is adapter behaviour
+
+The header's last line is `Agentic.Exec.answerSpec` — for a `flag`, `Reply with
+exactly yes or no.`; for a `verdict`, `Reply with exactly APPROVE if acceptable,
+or OBJECTION: <one line> if not.` It is there because the trusted base is narrow
+on purpose and a live model cannot be expected to guess it.
+
+**This is adapter behaviour and not language semantics.** Nothing in
+`Agentic/Core/Question.lean` says a question carries its own answer format; what
+the language says is that a `flag`'s answer set is `Bool`. A different transport
+may say it differently — or select it over a protocol, which is what
+`Exec.renderQ`'s `Selected` argument is for and what the `agent-deck` CLI has no
+call for — and the program means the same thing. The wording is imported from
+`Agentic.Exec` and never re-phrased locally, because an addressee told two
+different formats in one prompt obeys neither.
+
+If a reply still cannot be read, `Agentic.Exec` re-asks **once**, appending a
+nudge that quotes the unreadable words back, and then abandons the run rather
+than recording an answer nobody gave — a defaulted table cell is
+indistinguishable from a real one, and no check further down could recover the
+difference.
+
+### Testing the transport without a live session
+
+`ci/deck.sh` runs `agentic-run` against `test/stub-deck.sh`, a fake `agent-deck`
+implementing exactly the three commands the adapter uses and refusing every
+other one loudly. No Lean, no network, no session:
+
+```sh
+./ci/deck.sh
+```
+
+```
+ci/deck: happy: settled in 7 turns, exit 0
+ci/deck: objects: 13 ask nodes, 6 questions put, exit 0
+ci/deck: undecodable: re-asked once, then abandoned, exit 3
+ci/deck: stopped: named as a transport failure, exit 2
+ci/deck: hang: bounded by the turn budget, exit 2
+ci/deck: stale: the previous turn's text was refused, exit 2
+ci/deck: missing: named as a transport failure, exit 2
+ci/deck: 7 scenarios passed, 0 failed
+```
+
+The second scenario is the one worth naming. Every reviewer objects and every
+revision answers with the *same* patch, so the second and third review rounds
+put questions that were already answered: the run walks **13** ask nodes and the
+session is sent **6** messages. That gap is the memo table, observed from
+outside the process — a memoized question is a message the session never
+received — and 13/6 is exactly what the pure `Agentic.World` fold gives for the
+same program at the same world.
+
+## The CI shape
+
+Two lanes, per the one-build rule (connection.md §3.9 — one Lean build at a
+time, machine-wide, so Lean builds must be rare, not merely serialized):
+
+```sh
+./ci/tier0.sh      # every commit: tier0 + tier1 against the frozen corpus — no Lean at all
+./ci/deck.sh       # every commit: the transport, against test/stub-deck.sh — no Lean, no session
+./ci/tier1.sh      # nightly / semantic-core changes: bisim against the PREBUILT oracle
+```
+
+`ci/tier1.sh` takes the oracle path from `$ORACLE` (defaulting to agent-cat's
+`.lake/build/bin/conformance-oracle`), the iteration count from `$N` and an
+optional `$SEED`; it **fails loudly** when the binary is missing rather than
+degrading to Tier 0. It never runs `lake build`: the oracle is a build
+artifact of the *spec*, produced when the spec changes, not when the Haskell
+changes. Divergences found live land as ordinary reviewed corpus commits on
+the Lean side, not as bot pushes.
+
+## Layout
+
+```
+flake.nix          the devShell: one GHC with aeson and QuickCheck, plus cabal-install
+agentic.cabal      library (src) + internal library examples (example) + four executables
+src/Agentic/Raw.hs      the Raw AST and its JSON codec
+src/Agentic/Guards.hs   guardCheck, askCounts
+src/Agentic/Text.hs     stringOp, Verdict — the trusted string base
+src/Agentic/Plan.hs     the typed Plan and its static folds
+src/Agentic/World.hs    WorldSpec, toWorld, trace, the bills, the event JSON
+src/Agentic/Builder.hs  the production surface and its elaboration
+src/Agentic/Gen.hs      the generators the bisimulation draws from
+src/Agentic/Observe.hs  the reply assembly both runners share
+src/Agentic/Oracle.hs   the line-delimited JSON client for the Lean oracle
+src/Agentic/Exec.hs     the IO interpreter: the memoizing fold and the decode loop
+src/Agentic/AgentDeck.hs  one agent-deck session as an answering service
+example/Example/Harden.hs the walked examples, rebuilt in the builder
+tier0/Main.hs           the corpus runner
+tier1/Cases.hs          the rebuilt cases, each quoting its surface source
+tier1/Main.hs           the rebuilt-case runner; it owns every comparison
+bisim/Main.hs           the live differential against the Lean oracle
+run/Main.hs             agentic-run: plan, cost, run
+test/stub-deck.sh       a fake agent-deck, for testing the transport
+ci/tier0.sh             the PR gate: tier0 + tier1
+ci/deck.sh              the PR gate: the transport, seven scenarios
+ci/tier1.sh             the nightly gate: bisim against the prebuilt oracle
+PORTING.md              week one: the types, the encoding, the guard order,
+                        the string layer, the comparison rules
+PORTING2-core.md        week two: Agentic.Plan and Agentic.World
+PORTING2-elab.md        week two: the elaboration, Agentic.Builder, tier1
+```
+
+## Sources of record
+
+* **The design** — why there is a Haskell implementation at all, and why it is
+  connected to Lean by reimplementation-plus-conformance rather than by
+  extraction, FFI or a subprocess oracle —
+  `/Users/johnw/src/agent-cat/doc/research/dsl-redesign/connection.md`. That
+  page is the design of record for this repository.
+* **The port** — [`PORTING.md`](PORTING.md),
+  [`PORTING2-core.md`](PORTING2-core.md) and
+  [`PORTING2-elab.md`](PORTING2-elab.md), which every module here is written
+  against.
+* **The wire format** —
+  `/Users/johnw/src/agent-cat/doc/conformance-schema.md`.
+* **The arbiter** — `/Users/johnw/src/agent-cat/test/corpus/*.json`. Where
+  `PORTING.md` and the corpus disagree, the corpus wins; where `PORTING.md` and
+  the Lean source disagree, Lean wins.
+
+Nothing under `/Users/johnw/src/agent-cat` is ever edited from here. It is read,
+and it is obeyed.

@@ -1,0 +1,143 @@
+cabal-version:   3.0
+name:            agentic
+version:         0.1.0.0
+synopsis:        A Haskell port of agent-cat's raw syntax, guards and string layer
+description:
+  Week one of the port of the Lean 4 formalization at agent-cat: the @Raw@
+  AST and its JSON codec, the five term-level guards, the two ask counts, and
+  the string layer. Conformance is decided by the frozen corpus at
+  @agent-cat\/test\/corpus@, replayed by the @tier0@ executable.
+  .
+  Week two adds the semantic core: the typed @Plan@ and its static folds
+  (@Agentic.Plan@), its meaning in a world — traces and bills — (@Agentic.World@),
+  and the production surface whose combinators elaborate to the same @Plan@ the
+  Lean checker elaborates the corresponding surface construct to
+  (@Agentic.Builder@). The @tier1@ executable rebuilds curated corpus cases in
+  that surface and holds both the printed program and the whole reply against
+  the frozen entries.
+  .
+  Weeks three and four add the live bisimulation: property generators over the
+  builder and over raw syntax (@Agentic.Gen@), the reply assembly both runners
+  share (@Agentic.Observe@), a line-delimited JSON client for the Lean oracle
+  subprocess (@Agentic.Oracle@), and the @bisim@ executable, which draws
+  programs, worlds and string-layer inputs and holds each one against a live
+  @conformance-oracle@ rather than against a frozen file.
+  .
+  Week five makes the library runnable: an @IO@ interpreter with the Lean
+  runner's memo discipline and its decode\/re-ask loop (@Agentic.Exec@), an
+  adapter that puts every question — model, tool and person alike — to one live
+  @agent-deck@ session (@Agentic.AgentDeck@), the flagship and the smallest
+  program rebuilt in the builder as a shared internal library (@Example.Harden@,
+  the @examples@ library), and the @agentic-run@ executable, which plans, prices
+  and runs them.
+
+build-type:      Simple
+license:         MIT
+author:          John Wiegley
+maintainer:      jwiegley@positron.ai
+
+common settings
+  ghc-options:      -Wall
+  default-language: Haskell2010
+
+  -- The full agreed dependency list, on every target. Several implementers are
+  -- writing the modules independently; a shared list means no one's module
+  -- fails to build over a missing `build-depends` entry someone else owns.
+  --
+  -- `QuickCheck` and `process` arrive with week three: the first for
+  -- `Agentic.Gen`'s generators, the second for `Agentic.Oracle`'s subprocess
+  -- pipes. Both are library dependencies rather than executable-only ones,
+  -- because both modules live in the library — the generators and the oracle
+  -- client are the conformance surface, and `bisim` is only their driver.
+  build-depends:
+    , aeson
+    , base
+    , bytestring
+    , containers
+    , directory
+    , filepath
+    , process
+    , QuickCheck
+    , scientific
+    , text
+    , vector
+
+library
+  import:          settings
+  hs-source-dirs:  src
+  exposed-modules:
+    Agentic.AgentDeck
+    Agentic.Builder
+    Agentic.Exec
+    Agentic.Gen
+    Agentic.Guards
+    Agentic.Observe
+    Agentic.Oracle
+    Agentic.Plan
+    Agentic.Raw
+    Agentic.Text
+    Agentic.World
+
+-- The worked examples, written in the production surface: the flagship of
+-- `agent-cat/example/harden.wf` and the smallest program of `hello.wf`.
+--
+-- An internal library rather than a directory shared by two `other-modules`
+-- lists, because two components are meant to see the same `Example.Harden` and
+-- not two separately compiled copies of it: `tier1` pins the rebuilt flagship
+-- against the frozen corpus entry, and `agentic-run` runs the very program
+-- that was pinned. Compiling it twice would let the two drift under a
+-- conditional or a flag and read as agreement anyway.
+--
+-- The module is `Example.Harden` and cabal resolves a module name to a path, so
+-- the file is `example/Example/Harden.hs` — not `example/Harden.hs`, which
+-- builds here on a case-insensitive filesystem and on no Linux at all.
+library examples
+  import:          settings
+  hs-source-dirs:  example
+  exposed-modules: Example.Harden
+  build-depends:   agentic
+
+executable tier0
+  import:          settings
+  hs-source-dirs:  tier0
+  main-is:         Main.hs
+  build-depends:   agentic
+
+executable tier1
+  import:          settings
+  hs-source-dirs:  tier1
+  main-is:         Main.hs
+  other-modules:   Cases
+  build-depends:
+    , agentic
+    , agentic:examples
+
+-- The runnable surface: plan an example, price it, or run it — against the
+-- scripted transport or against a live agent-deck session.
+executable agentic-run
+  import:          settings
+  hs-source-dirs:  run
+  main-is:         Main.hs
+  build-depends:
+    , agentic
+    , agentic:examples
+
+  -- Same reason `bisim` is threaded, one layer out. `Agentic.AgentDeck` bounds
+  -- every turn with a wall clock and drains a subprocess's stderr on a second
+  -- thread; a wedged session must produce a named failure rather than a hung
+  -- run.
+  ghc-options:     -threaded
+
+executable bisim
+  import:          settings
+  hs-source-dirs:  bisim
+  main-is:         Main.hs
+  build-depends:   agentic
+
+  -- The same departure from tier0 and tier1 that `agentic-run` makes, for the
+  -- same reason one layer down. `Agentic.Oracle` guards every read from the
+  -- subprocess with `System.Timeout.timeout`, and a wedged oracle must produce
+  -- a named failure rather than a hung run; the threaded runtime is what makes
+  -- that interruption reliable rather than something that happens to work on
+  -- this pipe on this platform.
+  ghc-options:     -threaded
