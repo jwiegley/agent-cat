@@ -84,19 +84,14 @@ import Control.Monad (forM_, unless)
 import Data.Aeson (Value (..), object, toJSON, (.=))
 import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
-import Data.Bits (shiftR, (.&.))
 import qualified Data.ByteString as BS
-import Data.Char (ord)
-import Data.List (sort, sortOn)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
-import Data.Maybe (catMaybes, fromMaybe)
+import Data.Maybe (fromMaybe)
 import Data.Scientific (floatingOrInteger)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
-import qualified Data.Vector as V
-import Numeric (showHex)
 import System.CPUTime (getCPUTime)
 import System.Environment (getArgs, getProgName)
 import System.Exit (exitFailure, exitSuccess, exitWith, ExitCode (..))
@@ -120,7 +115,13 @@ import Agentic.Gen
     selfTest,
   )
 import Agentic.Guards (Guard (..), askCounts, guardCheck)
-import Agentic.Observe (observeValue, printedValue)
+import Agentic.Observe
+  ( firstDiffWith,
+    observeValue,
+    printedValue,
+    render,
+    tshow,
+  )
 import Agentic.Oracle
   ( Oracle,
     OracleError,
@@ -337,7 +338,7 @@ propBuilder oracle seed n =
               "the generated program elaborates to the dynamic rung, \
               \which no reply describes"
               [("request", req)]
-        | Just d <- firstDiff reply ourReply ->
+        | Just d <- firstDiffWith "oracle" "haskell" reply ourReply ->
             Diverged
               ("reply differs at " <> d)
               [("request", req), ("oracle", reply), ("haskell", ourReply)]
@@ -366,7 +367,7 @@ propString oracle seed n =
       Left err ->
         Diverged ("this implementation raised: " <> err) [("request", ask op mcode text)]
       Right ourReply
-        | Just d <- firstDiff reply ourReply ->
+        | Just d <- firstDiffWith "oracle" "haskell" reply ourReply ->
             Diverged
               (label op mcode <> " differs at " <> d)
               [("request", ask op mcode text), ("oracle", reply), ("haskell", ourReply)]
@@ -453,7 +454,7 @@ checkedCase req reply raw
             <> renderGuard (Just fired)
         )
         [("request", req), ("oracle", reply)]
-  | Just d <- firstDiff theirs ours =
+  | Just d <- firstDiffWith "oracle" "haskell" theirs ours =
       Diverged
         ("ask counts differ at " <> d)
         [("request", req), ("oracle", theirs), ("haskell", ours)]
@@ -612,121 +613,7 @@ intOf (Number s) = case floatingOrInteger s :: Either Double Integer of
   Left _ -> Nothing
 intOf _ = Nothing
 
--- ---------------------------------------------------------------------------
--- Structural diffing: the first place two values part company
--- ---------------------------------------------------------------------------
 
--- | @firstDiff expected actual@ names the first divergence as a JSON path plus
--- the two offending fragments, so a mismatch points at its own field —
--- @$.worlds[1].trace[3].prompt@ — rather than leaving a reader to compare two
--- pages of JSON by eye.
---
--- The same function lives in @tier1\/Main.hs@; the two runners are owned by
--- different implementers this phase, and it belongs in the library the moment
--- one person owns both. Until then the duplication is deliberate and noted
--- rather than papered over by a hasty shared module.
-firstDiff :: Value -> Value -> Maybe Text
-firstDiff = go "$"
-  where
-    go path expected actual = case (expected, actual) of
-      (Object a, Object b)
-        | not (null missing) -> Just (path <> ": missing key(s) " <> keyList missing)
-        | not (null extra) -> Just (path <> ": unexpected key(s) " <> keyList extra)
-        | otherwise ->
-            firstJust
-              [ go (path <> "." <> K.toText k) va vb
-                | k <- sort (KM.keys a),
-                  Just va <- [KM.lookup k a],
-                  Just vb <- [KM.lookup k b]
-              ]
-        where
-          missing = sort [k | k <- KM.keys a, not (KM.member k b)]
-          extra = sort [k | k <- KM.keys b, not (KM.member k a)]
-      (Array a, Array b)
-        | V.length a /= V.length b ->
-            Just $
-              path
-                <> ": array length: oracle "
-                <> tshow (V.length a)
-                <> ", haskell "
-                <> tshow (V.length b)
-        | otherwise ->
-            firstJust
-              [ go (path <> "[" <> tshow i <> "]") x y
-                | (i, (x, y)) <- zip [(0 :: Int) ..] (zip (V.toList a) (V.toList b))
-              ]
-      _
-        | expected == actual -> Nothing
-        | otherwise ->
-            Just $
-              path
-                <> ": oracle "
-                <> clip (render expected)
-                <> ", haskell "
-                <> clip (render actual)
-
-    keyList ks = T.intercalate ", " (map (render . String . K.toText) ks)
-
-firstJust :: [Maybe a] -> Maybe a
-firstJust xs = case catMaybes xs of
-  (x : _) -> Just x
-  [] -> Nothing
-
--- ---------------------------------------------------------------------------
--- Rendering: canonical, one line, and ASCII-safe
--- ---------------------------------------------------------------------------
-
--- | Keys sorted so two renderings are comparable by eye, and every
--- non-printable or non-ASCII character escaped — a prompt that differs by an
--- invisible character must not read as identical. The whole point of this
--- runner is that the trap texts contain exactly such characters.
-render :: Value -> Text
-render = \case
-  Null -> "null"
-  Bool True -> "true"
-  Bool False -> "false"
-  Number n -> case floatingOrInteger n :: Either Double Integer of
-    Right i -> tshow i
-    Left d -> tshow d
-  String s -> renderString s
-  Array xs -> "[" <> T.intercalate "," (map render (V.toList xs)) <> "]"
-  Object o ->
-    "{"
-      <> T.intercalate
-        ","
-        [ renderString (K.toText k) <> ":" <> render v
-          | (k, v) <- sortOn fst (KM.toList o)
-        ]
-      <> "}"
-
-renderString :: Text -> Text
-renderString t = "\"" <> T.concatMap esc t <> "\""
-  where
-    esc c = case c of
-      '"' -> "\\\""
-      '\\' -> "\\\\"
-      '\n' -> "\\n"
-      '\r' -> "\\r"
-      '\t' -> "\\t"
-      _
-        | ord c < 0x20 || ord c > 0x7e -> uni (ord c)
-        | otherwise -> T.singleton c
-    uni n
-      | n <= 0xffff = hex4 n
-      | otherwise =
-          let n' = n - 0x10000
-           in hex4 (0xd800 + (n' `shiftR` 10)) <> hex4 (0xdc00 + (n' .&. 0x3ff))
-    hex4 n = "\\u" <> T.justifyRight 4 '0' (T.pack (showHex n ""))
-
--- | Keep a diff headline to one line, however large the offending value. The
--- values themselves are printed whole, underneath it.
-clip :: Text -> Text
-clip t
-  | T.length t > 400 = T.take 400 t <> "..."
-  | otherwise = t
-
+-- | One failure reason on one line, whatever whitespace it arrived with.
 squash :: Text -> Text
 squash = T.unwords . T.words
-
-tshow :: (Show a) => a -> Text
-tshow = T.pack . show

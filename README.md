@@ -115,6 +115,24 @@ character escaped. The corpus turns on differences that are invisible in a
 terminal — U+00A0 against a space, `İ` against `i`, a stripped `\r` — and a
 diagnostic that hides them would be worse than none.
 
+## The CI shape
+
+Two lanes, per the one-build rule (connection.md §3.9 — one Lean build at a
+time, machine-wide, so Lean builds must be rare, not merely serialized):
+
+```sh
+./ci/tier0.sh      # every commit: tier0 + tier1 against the frozen corpus — no Lean at all
+./ci/tier1.sh      # nightly / semantic-core changes: bisim against the PREBUILT oracle
+```
+
+`ci/tier1.sh` takes the oracle path from `$ORACLE` (defaulting to agent-cat's
+`.lake/build/bin/conformance-oracle`), the iteration count from `$N` and an
+optional `$SEED`; it **fails loudly** when the binary is missing rather than
+degrading to Tier 0. It never runs `lake build`: the oracle is a build
+artifact of the *spec*, produced when the spec changes, not when the Haskell
+changes. Divergences found live land as ordinary reviewed corpus commits on
+the Lean side, not as bot pushes.
+
 ## Layout
 
 ```

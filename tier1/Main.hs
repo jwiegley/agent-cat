@@ -59,24 +59,23 @@ import Data.Aeson
   )
 import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
-import Data.Bits (shiftR, (.&.))
 import qualified Data.ByteString as BS
-import Data.Char (ord)
-import Data.List (sort, sortOn)
-import Data.Maybe (catMaybes)
-import Data.Scientific (floatingOrInteger)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
-import qualified Data.Vector as V
-import Numeric (showHex)
 import System.Directory (doesDirectoryExist, doesFileExist)
 import System.Environment (getArgs)
 import System.Exit (exitFailure, exitSuccess)
 import System.FilePath ((</>))
 
 import Agentic.Builder (Program, progPlan)
-import Agentic.Observe (observeValue, printedValue, zeroPosValue)
+import Agentic.Observe
+  ( firstDiff,
+    observeValue,
+    printedValue,
+    tshow,
+    zeroPosValue,
+  )
 import Agentic.Plan (Level (..), level)
 import Agentic.Raw (RawProgram)
 import Agentic.World (WorldSpec)
@@ -215,113 +214,6 @@ field k (Object o) = case KM.lookup (K.fromText k) o of
   other -> other
 field _ _ = Nothing
 
--- ---------------------------------------------------------------------------
--- Structural diffing: the first place two values part company
--- ---------------------------------------------------------------------------
-
--- | @firstDiff expected actual@ names the first divergence as a JSON path plus
--- the two offending fragments, so a mismatch points at its own field —
--- @$.worlds[1].trace[3].prompt@ — rather than dumping a whole reply.
-firstDiff :: Value -> Value -> Maybe Text
-firstDiff = go "$"
-  where
-    go path expected actual = case (expected, actual) of
-      (Object a, Object b)
-        | not (null missing) -> Just (path <> ": missing key(s) " <> keyList missing)
-        | not (null extra) -> Just (path <> ": unexpected key(s) " <> keyList extra)
-        | otherwise ->
-            firstJust
-              [ go (path <> "." <> K.toText k) va vb
-              | k <- sort (KM.keys a)
-              , Just va <- [KM.lookup k a]
-              , Just vb <- [KM.lookup k b]
-              ]
-        where
-          missing = sort [k | k <- KM.keys a, not (KM.member k b)]
-          extra = sort [k | k <- KM.keys b, not (KM.member k a)]
-      (Array a, Array b)
-        | V.length a /= V.length b ->
-            Just $
-              path
-                <> ": array length: expected "
-                <> tshow (V.length a)
-                <> ", actual "
-                <> tshow (V.length b)
-        | otherwise ->
-            firstJust
-              [ go (path <> "[" <> tshow i <> "]") x y
-              | (i, (x, y)) <- zip [(0 :: Int) ..] (zip (V.toList a) (V.toList b))
-              ]
-      _
-        | expected == actual -> Nothing
-        | otherwise ->
-            Just $
-              path
-                <> ": expected "
-                <> clip (render expected)
-                <> ", actual "
-                <> clip (render actual)
-
-    keyList ks = T.intercalate ", " (map (render . String . K.toText) ks)
-
-firstJust :: [Maybe a] -> Maybe a
-firstJust xs = case catMaybes xs of
-  (x : _) -> Just x
-  [] -> Nothing
-
--- ---------------------------------------------------------------------------
--- Rendering: canonical, one line, and ASCII-safe
--- ---------------------------------------------------------------------------
-
--- | Keys sorted so two renderings are comparable by eye, and every
--- non-printable or non-ASCII character escaped — a prompt that differs by an
--- invisible character must not read as identical.
-render :: Value -> Text
-render = \case
-  Null -> "null"
-  Bool True -> "true"
-  Bool False -> "false"
-  Number n -> case floatingOrInteger n :: Either Double Integer of
-    Right i -> tshow i
-    Left d -> tshow d
-  String s -> renderString s
-  Array xs -> "[" <> T.intercalate "," (map render (V.toList xs)) <> "]"
-  Object o ->
-    "{"
-      <> T.intercalate
-        ","
-        [ renderString (K.toText k) <> ":" <> render v
-        | (k, v) <- sortOn fst (KM.toList o)
-        ]
-      <> "}"
-
-renderString :: Text -> Text
-renderString t = "\"" <> T.concatMap esc t <> "\""
-  where
-    esc c = case c of
-      '"' -> "\\\""
-      '\\' -> "\\\\"
-      '\n' -> "\\n"
-      '\r' -> "\\r"
-      '\t' -> "\\t"
-      _
-        | ord c < 0x20 || ord c > 0x7e -> uni (ord c)
-        | otherwise -> T.singleton c
-    uni n
-      | n <= 0xffff = hex4 n
-      | otherwise =
-          let n' = n - 0x10000
-           in hex4 (0xd800 + (n' `shiftR` 10)) <> hex4 (0xdc00 + (n' .&. 0x3ff))
-    hex4 n = "\\u" <> T.justifyRight 4 '0' (T.pack (showHex n ""))
-
--- | Keep every failure to one line, however large the offending value.
-clip :: Text -> Text
-clip t
-  | T.length t > 400 = T.take 400 t <> "..."
-  | otherwise = t
-
+-- | One failure reason on one line, whatever whitespace it arrived with.
 squash :: Text -> Text
 squash = T.unwords . T.words
-
-tshow :: (Show a) => a -> Text
-tshow = T.pack . show
