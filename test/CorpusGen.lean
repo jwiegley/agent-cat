@@ -138,7 +138,22 @@ def main : IO Unit := do
         "workflow { d : text <- ask tool \"t\" \"w\"\n" ++
         "  ok <- ask person \"o\" \"go?\"\n" ++
         "  if ok { ask tool \"a\" \"went {d}\" } else { stop } }",
-        [echoW, objectingW]) ]
+        [echoW, objectingW])
+      -- The three worlds no earlier entry instantiates, so the conformance
+      -- side has something to falsify its byPrefix/const/promptEq and
+      -- declined-tag paths against (found as a coverage gap by the Haskell
+      -- week-two verifier: every prior world block answers verdicts by
+      -- const-approve or const-object, text by echo/wrap/byDraw, flags by
+      -- const true/false).
+    , ("a loop that truly settles at round two: byPrefix objects to the first draft only",
+        semSrc1,
+        [{ verdict := .byPrefix [("review draft", .object ["too plain"])] .approve }])
+    , ("a declined verdict and a promptEq flag",
+        semSrc5,
+        [{ verdict := .const .declined, flag := .promptEq "yes or no?" }])
+    , ("a constant text world",
+        semSrc0,
+        [{ text := .const "fixed answer" }]) ]
   i := 0
   for (name, src, worlds) in semantic do
     match Dsl.parseProgramWith [] [] src with
