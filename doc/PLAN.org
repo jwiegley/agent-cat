@@ -1668,7 +1668,7 @@ Found by the connection-research attack pass (acat-lean-haskell-connection-lhi):
 :LABELS:   []
 :ISSUE_TYPE: feature
 :CREATED:  [2026-08-17 Mon 10:23]
-:MODIFIED: [2026-08-17 Mon 14:32]
+:MODIFIED: [2026-08-18 Tue 12:42]
 :CREATED_BY: johnw
 :FINISHED: [2026-08-17 Mon 10:23]
 :CLOSE_REASON: done
@@ -1701,6 +1701,13 @@ Found by the connection-research attack pass (acat-lean-haskell-connection-lhi):
     "author": "johnw",
     "text": "Third surface landing (09a6388), owner-ruled: NO Template Haskell in program structure. Agentic.Notation deleted; Workflow.hs drops the whole type-level Symbol scope; hardenProgram = workflow W.do ... is an ordinary value (extensions: BlockArguments, OverloadedStrings, QualifiedDo, QuasiQuotes-for-prompts-only). Names generated (binder level) with optional named override; two authored pins compare alpha-canonically (scope-aware, binder-level names), nineteen Builder pins stay exact, reply comparison structurally cannot be loose. Mutation (d) proved the alpha pin non-vacuous as sole detector of a wrong-binder splice invisible to every semantic comparand. All gates green: tier0 128/128, tier1 21/21, bisim, ci/deck 7/7, plan harden unmoved branch/36/19.",
     "created_at": "2026-08-17T21:32:50Z"
+  },
+  {
+    "id": 123,
+    "issue_id": "acat-hs-runnable-ugr",
+    "author": "johnw",
+    "text": "ACP engine landed (ab65bfe, pushed): Agentic.Acp mirrors Acp.lean clause for clause (integer protocolVersion both directions, answering-true/false chunk discipline, permission axis, stop reasons giving verified act completion the deck cannot promise). agentic-run --engine acp --adapter stub|claude|codex|PATH; ci/acp.sh gates 12 scenarios against the unmodified stub. LIVE SMOKE via claude-agent-acp: exit 0, refusal path, billFresh 6 / billMemo 6 - the live model declined to fabricate a diff for an empty scratch dir, reviewers approved the text, the person-gate said no, the act never went out. Harden.hs now runs in all five owner scenarios: pure plan, pure cost, Codex ACP, Claude Agent ACP, live agent-deck.",
+    "created_at": "2026-08-18T19:42:41Z"
   }
 ]
 #+end_src
