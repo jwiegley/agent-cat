@@ -199,8 +199,8 @@ import Agentic.Core.Morphism
 -- `Agentic/Core/DslFlagship.lean` reduce through these definitions; its
 -- elaboration was measured before and after and did not move.
 import Agentic.Core.Alg
--- The flagship workload, Stage 5: `example/HardenPatch.lean`'s twelve lines as
--- a `Plan` — guide, a deep-model draft, three review-and-revise rounds over a
+-- The flagship workload, Stage 5: the owner's workflow as a `Plan` — guide, a
+-- deep-model draft, three review-and-revise rounds over a
 -- shared guide, human consent and a gated act — with its meaning written first
 -- as an ordinary `Dlg` recursion and joined to the term by one morphism
 -- equation. Six theorems in the meaning space: consent gates the act (no `.ack`

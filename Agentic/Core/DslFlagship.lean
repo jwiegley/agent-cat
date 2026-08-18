@@ -4,41 +4,67 @@ import Agentic.Core.HardenPatch
 /-!
 # The flagship program, and what kernel reduction proves about it
 
-Stage 3, part four (b): `example/harden.wf` — `Harden.demo` written in the
-language — together with everything that is true of *that one program* rather
-than of the language. `Agentic/Core/Dsl.lean` holds part four (a), the theorems
-about the checker, and is imported here; nothing in this module is needed to
-state or prove any of them.
+Stage 3, part four (b): the flagship workload as a `RawProgram` — together with
+everything that is true of *that one program* rather than of the elaboration.
+`Agentic/Core/Dsl.lean` holds part four (a), the theorems about the checker, and
+is imported here; nothing in this module is needed to state or prove any of them.
+
+## The term of record, and the parser that is gone
+
+`flagshipRaw` used to be a *frozen copy* of what a parser read out of
+`example/harden.wf`, checked against the file at run time. There is no parser and
+no `.wf` file any more: the conformance boundary is `RawProgram`-in
+(`doc/research/connection.md`, D10), so the term below **is** the
+flagship, and the file it agrees with is `test/corpus/example-000-the-flagship-
+single-file.json` — whose `request.program` is `flagshipProgram` and whose
+`reply` carries the very numbers proved here (`level = branch`, `paths = 9`,
+`minFold = 5`, `maxFold = 15`). That agreement is not asserted in this module: it
+is the corpus's, re-observed by `lake exe corpus-gen` and reproduced by the
+Haskell implementation with no Lean in the loop. What died with the parser is
+exactly one theorem, `parseAndCheck_flagship`, whose hypothesis was that a parser
+read a string as this term.
+
+## The transcript agreements survive
+
+`Agentic/Core/HardenPatch.lean` is **kept**. It is not `.wf` machinery: it
+imports `Agentic.Core.Morphism` and nothing of the DSL, it is the root module's
+Stage-5 worked example of the meaning space (consent gates the act, the guide is
+read once, the level is `branch`, at most three drafts, nine leaves with min 5
+and max 15, `run` total), and it predates the language whose flagship agrees with
+it. Nothing in the elaboration imports it, so it was free to go by import graph
+alone — and it stays because the four `Plan.trace … flagshipPlan = Plan.trace …
+Harden.demo` equations below are the *strongest* anchor the `Raw` term has: they
+say this program consults exactly the same questions, in the same order, hearing
+the same answers, as a workload whose properties are proved in the meaning space.
+Those equations never mentioned the parser.
 
 ## What this module costs, and why it is worth paying
 
-**This module takes minutes of wall clock to elaborate, and several gigabytes
-of memory.** Almost all of it is nine `decide +kernel` proofs, four of them at
+**This module takes minutes of wall clock to elaborate, and several gigabytes of
+memory.** Almost all of it is nine `decide +kernel` proofs, four of them at
 `maxRecDepth 1000000`. That is not accidental expense and it is not a
 proof-engineering failure: it is the price of the statements being true *by
 computation* rather than by assertion. `level flagshipPlan = Level.branch`,
 `Multiset.card (costM …) = 9`, `minFold = 5`, `maxFold = 15` and the four
-`Plan.trace … flagshipPlan = Plan.trace … Harden.demo` equations are proved by
-the kernel running the checker, the cost algebra, and the interpreter on this
-concrete program in these concrete worlds, and reporting the answer — including
-on `ωEcho`, the longest path the workload has.
+`Plan.trace` equations are proved by the kernel running the checker, the cost
+algebra and the interpreter on this concrete program in these concrete worlds,
+and reporting the answer — including on `ωEcho`, the longest path the workload
+has.
 
 **What the split buys.** Because this module is separate, that cost is paid only
-by the things that actually want the flagship: `test/DslSmoke.lean`,
-`test/CliSmoke.lean`, `test/McpSmoke.lean` and the `Agentic` aggregate. The
-three executables (`agent-cat`, `workflow_mcp`, `harden_demo`) reach
-`Dsl.parseAndCheck_level_le` through `Agentic/Core/Dsl.lean` and never import
-this file, so `lake exe agent-cat` builds in seconds and editing
-`example/harden.wf` does not invalidate it. Keep it that way.
+by things that actually want the flagship. `Agentic/Core/Explain.lean` and
+`conformance/Conformance.lean` reach `Dsl.checkProgram_level_le` through
+`Agentic/Core/Dsl.lean` and never import this file, so `lake exe
+conformance-oracle` builds in seconds. Keep it that way.
 
 ## What is here
 
-* `flagshipSource`, the text of `example/harden.wf`, included rather than
-  copied; `flagshipRaw`, its raw syntax written out; `flagshipPlan`, the plan it
-  checks to.
-* `render_eq_harden_render`, the one-line `rfl` that says the language
+* `flagshipRaw`, the term of record; `flagshipProgram`, it with an empty function
+  table; `flagshipPlan`, the plan it checks to.
+* `render_eq_harden_render`, the one-line `rfl` that says the elaboration
   introduced no second convention for what a verdict says.
-* The rung computed exactly (`level_flagshipPlan`), the cost tree
+* The checker's acceptance (`flagshipRaw_accepted`, `checkProgram_flagship`), the
+  rung computed exactly (`level_flagshipPlan`), the cost tree
   (`card_leaves_flagship`, `minFold_flagship`, `maxFold_flagship`), the four
   transcript agreements, the four bills transferred rather than recomputed, and
   the budget type the program inhabits at fifteen (`flagshipUpTo`).
@@ -51,49 +77,36 @@ open Agentic.Core
 
 /-! ## `Verdict.render` is `Harden.render`
 
-The DSL needed a renderer for a verdict spliced into a prompt and the frozen
-flagship module already had one. They are the same function, so the language introduces
-no second convention about what a verdict says. -/
+The elaboration needed a renderer for a verdict spliced into a prompt and the
+frozen flagship module already had one. They are the same function, so the
+elaboration introduces no second convention about what a verdict says. -/
 
 /-- The two spellings are one function, by `rfl`. -/
 theorem render_eq_harden_render (v : Verdict) : Verdict.render v = Harden.render v := rfl
 
-/-! ## The flagship, in the language
+/-! ## The flagship, as raw syntax
 
 `Harden.demo` — read the house style guide, draft under the deep model, review
-and amend up to twice, ask the owner, apply if and only if the owner
-consented — written in the concrete syntax approved in round ten of the
-redesign (doc/research/dsl-redesign/). -/
+and amend up to twice, ask the owner, apply if and only if the owner consented —
+written as the first-order syntax the checker takes. -/
 
-/-- `[[flagshipSource]]` = the owner's workflow, in the DSL — **the file
-`example/harden.wf`**, included here rather than copied.
+/-- `[[flagshipRaw]]` = **the flagship, and the definition of record**: read the
+house style guide, draft under the deep model, review by a panel and amend up to
+twice, ask the owner, apply if and only if the owner consented.
 
-One text in one place, and the place is the file: `agent-cat run
-example/harden.wf` and every theorem below are about the same characters, so
-there is no second copy to drift.
+This term is corpus entry `test/corpus/example-000-the-flagship-single-file.json`
+— it is that file's `request.program.main`, position for position, and the file's
+`request.program.fns` is the empty table `flagshipProgram` writes. The corpus
+entry's `reply` is `Conformance.observe` of exactly this program, so every number
+proved below is also a byte the Haskell implementation must reproduce.
 
-**What the inclusion cannot do, and where that is caught.** Lake's build trace
-records the module's imports and its own source, not the files a term elaborator
-reads, so editing `example/harden.wf` alone does not rebuild this module: the
-`.olean` would then hold a text that is no longer on disk. `test/CliSmoke.lean`
-reads the file at run time and compares it with this constant, which is the
-check the inclusion cannot arrange for itself. -/
-def flagshipSource : String := include_str "../../example/harden.wf"
-
-/-- `[[flagshipRaw]]` = the raw syntax of `flagshipSource`: the same workflow
-after lexing, block dedenting, define expansion and parsing.
-
-**Written out rather than computed, and the reason is a measurement.** Kernel
-reduction of the lexer is quadratic in the character count, so a theorem stated
-about `parseAndCheck flagshipSource` would have to run the lexer in the kernel,
-and `native_decide` is forbidden here because it would put `Lean.ofReduceBool`
-into the axiom set `Agentic/Core/Certify.lean` pins. So the *checker* is
-exercised in the kernel, where it is cheap, and the *parser* is exercised at
-runtime, in `test/DslSmoke.lean`, which checks
-`parseProgramWith [] [] flagshipSource = .ok flagshipProgram` by `decide` on a
-`DecidableEq` of first-order data. This constant was generated by that very parser and then
-frozen, so a drift between the file and this term fails that check and nothing
-else — which is exactly where it should fail. -/
+**Why it is written out rather than computed.** It always was, and the reason
+outlived the parser it was written for: kernel reduction of a lexer is quadratic
+in the character count, and `native_decide` is forbidden here because it would put
+`Lean.ofReduceBool` into the axiom set `Agentic/Core/Certify.lean` pins at
+*empty*. The checker, the cost algebra and the interpreter are cheap in the
+kernel; a front end over characters is not. So the term is the artifact and the
+theorems reduce on it. -/
 def flagshipRaw : Raw :=
   RawBlock.bind
     "guide"
@@ -220,7 +233,7 @@ def accepted {ε : Type} {α : Type u} (x : Except ε α) : Bool :=
 
 set_option maxRecDepth 20000 in
 /-- **The flagship checks.** By kernel reduction of the checker on
-`flagshipRaw`; nothing about the parser is involved. -/
+`flagshipRaw`. -/
 theorem flagshipRaw_accepted : accepted (check [] [] flagshipRaw) = true := by decide +kernel
 
 /-- …and `flagshipPlan` is what it checks to. The `.error` branch of
@@ -235,23 +248,9 @@ theorem check_flagshipRaw : check [] [] flagshipRaw = .ok flagshipPlan := by
     rw [h] at hb
     exact absurd hb (by simp [accepted])
 
-/-- The front end is the parser and the checker, and nothing else: a source the
-parser reads as `prog` checks exactly as `prog` does.
-
-Stated generally on purpose. Instantiating it at `flagshipSource` inside a
-tactic proof makes the elaborator whnf `parseAndCheckE flagshipSource`, which
-runs the lexer in the kernel; applied as a lemma it costs nothing. -/
-theorem parseAndCheck_of_parseProgram {s : String} {prog : RawProgram} {p : Plan [] Unit}
-    (h : parseProgramWith [] [] s = .ok prog) (hc : checkProgram prog = .ok p) :
-    parseAndCheck s = .ok p := by
-  rw [parseAndCheck_ok_iff]
-  unfold parseAndCheckE parseAndCheckProgramWith
-  rw [h]
-  exact hc
-
-/-- The flagship, as the program the parser reads: no functions, one block.
-Since round sixteen the parse pin names the *program* — a source's function
-table is part of what it says, so `main` alone would under-pin it. -/
+/-- The flagship as a whole program: no functions, one block. A program's
+function table is part of what it says, so `main` alone would under-pin it — which
+is why the corpus freezes the `RawProgram` and not the `RawBlock`. -/
 def flagshipProgram : RawProgram := ⟨[], flagshipRaw⟩
 
 /-- The program front end accepts the flagship exactly as the block checker
@@ -262,20 +261,11 @@ theorem checkProgram_flagship : checkProgram flagshipProgram = .ok flagshipPlan 
   rw [h]
   exact check_flagshipRaw
 
-/-- **The two halves join.** Given that the parser reads `flagshipSource` as
-`flagshipProgram` — the fact `test/DslSmoke.lean` checks, and the one thing
-about the string layer that is checked rather than proved — the front end
-returns `flagshipPlan`. -/
-theorem parseAndCheck_flagship
-    (h : parseProgramWith [] [] flagshipSource = .ok flagshipProgram) :
-    parseAndCheck flagshipSource = .ok flagshipPlan :=
-  parseAndCheck_of_parseProgram h checkProgram_flagship
-
 /-! ### What the flagship costs -/
 
 set_option maxRecDepth 20000 in
 /-- **The rung, exactly.** `level flagshipPlan = branch`, computed rather than
-bounded: `parseAndCheck_level_le` gives `≤ branch` for every program, and this
+bounded: `checkProgram_level_le` gives `≤ branch` for every program, and this
 says the flagship attains it — the consent gate and the loop's outcome are
 `case`s, so it is not `pipeline`, and nothing is a `dyn`, so it is not
 `dynamic`. -/
@@ -313,8 +303,9 @@ theorem maxFold_flagship :
 /-! ### The flagship elaborates to the hand-written flagship, world by world
 
 `Agentic/Core/HardenPatch.lean` fixes four worlds and prices the workload in
-each. The four equations below say the DSL program consults **exactly** the same
-questions, in the same order, and hears the same answers, in each of them —
+each. The four equations below say the checked `Raw` term consults **exactly**
+the same questions, in the same order, and hears the same answers, in each of
+them —
 including `ωEcho`, the world that reads prompt text and drives the loop to its
 dearest leaf, so the agreement is checked on the longest path the workload has
 and not only on the short ones.
@@ -404,35 +395,29 @@ theorem minFold_flagship_le_bill (ω : Ω) :
 
 /-! ## What is not proved
 
-Three statements a reader might expect, and what actually stands in the way of
-each. None of them is weakened into a form that closes.
+Two statements a reader might expect, and what actually stands in the way of
+each. Neither is weakened into a form that closes.
 
-**1. `parseProgramWith [] [] flagshipSource = .ok flagshipProgram`.** True, and
-checked — at run time, in `test/DslSmoke.lean`, on `DecidableEq RawProgram`
-(the *program*, because since round sixteen a source's function table is part
-of what it says, and `main` alone would under-pin it). It is not a *theorem*
-because kernel reduction of the lexer is quadratic in the character count;
-`native_decide` closes it in milliseconds and is forbidden, because it puts
-`Lean.ofReduceBool` into the axiom set, and `Agentic/Core/Certify.lean` pins
-`certify_sound` at *no* axioms with a `#guard_msgs`.
-`parseAndCheck_flagship` therefore takes the equation as a hypothesis, which is
-the honest shape: everything downstream of the parser is proved, and the parser
-itself is tested.
-
-**2. `∀ ω, Plan.trace ω flagshipPlan Env.nil = Plan.trace ω Harden.demo Env.nil`.**
+**1. `∀ ω, Plan.trace ω flagshipPlan Env.nil = Plan.trace ω Harden.demo Env.nil`.**
 The four named worlds are proved above, `ωEcho` among them. The universally
 quantified form needs the `Plan.Denotes` route rather than reduction — general
 coherence lemmas for `checkCont`, `reviseCont` and `finishCont`, then
 `denotes_revising` and `denote_graft`, then a per-clause agreement with
 `Harden`'s own continuations — and it needs the checker's output *named*, which
-means writing out by hand the plan the checker builds; that is the work not
-done here.
+means writing out by hand the plan the checker builds; that is the work not done
+here.
 
-**3. The lexer's and parser's budgets are never exhausted.** Both recurse on a
-`Nat` budget seeded with the input's length, and every step consumes at least
-one item, so the exhausted branch is unreachable — a fact about the code that is
-not proved, because a proof of it buys nothing that the diagnosis in that branch
-does not already give: an exhausted budget is a rejected program, not an unsound
-one. -/
+**2. That `flagshipRaw` is the term the corpus holds.** It is, and it is checked
+rather than proved: `lake exe corpus-gen` re-observes
+`test/corpus/example-000-the-flagship-single-file.json`'s frozen request through
+`Conformance.observe` and rewrites the reply, so a drift between this term and
+that file shows up as a corpus diff on the same commit. A theorem would have to
+run a JSON decoder in the kernel, which is the same quadratic bargain the parser
+was refused.
+
+**What is no longer here.** `parseAndCheck_flagship` and its hypothesis
+`parseProgramWith [] [] flagshipSource = .ok flagshipProgram` — the one thing
+about the string layer that was ever checked rather than proved. There is no
+string layer. -/
 
 end Agentic.Core.Dsl

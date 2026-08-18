@@ -24,8 +24,9 @@
 --
 -- > bind @"guide" @'CodeText (one (askTool "cat" [lit "…"])) $ \guide -> …
 --
--- it should read as @example\/harden.wf@ reads — a block of statements, binds
--- that are binds, prompts that are prose. Every combinator here is sugar: it
+-- it should read as prose reads — a block of statements, binds that are binds,
+-- prompts that are prose (@Example.Harden@ is that program, and is the
+-- authoring surface's text of record). Every combinator here is sugar: it
 -- is an application of a "Agentic.Builder" entry point, so elaboration and
 -- printing remain the single proven pairing and this layer cannot mean
 -- anything the builder does not already mean.
@@ -153,7 +154,7 @@
 -- Where the two do differ, they differ in the /accepting/ direction and not in
 -- what a program means. An author who writes a statement between the bind and
 -- the @case@ is not refused here; the statement stands in __both__ arms, which
--- is a program the @.wf@ language can also write — by writing it twice — and
+-- is the same term an author reaches by writing that statement twice — and
 -- an author who ignores the result altogether has an unused binding and hears
 -- so from @-Wunused-matches@.
 --
@@ -426,7 +427,7 @@ confirm p w = B.one (ask p w)
 -- | @panel, all must approve […]@ — a verdict, positionally, folded right in
 -- the noncommutative verdict monoid.
 --
--- A plain list, so that the literal reads like the @.wf@'s bracket list. Its
+-- A plain list, so that the literal reads as a bracketed list of members. Its
 -- emptiness is refused at the value level rather than by 'NE.NonEmpty',
 -- because the language's own refusal for an empty panel belongs to tier0
 -- (@vector-004@) and not to this layer; the @error@ sits on a CAF, so it fires
@@ -840,7 +841,7 @@ ifFlag v yes no =
 -- print them __twice__, once in each arm: the program a reader met would not
 -- be the program the author wrote, and a long tail after a short @when@ would
 -- print at double length. So this one seals its body with the implicit @stop@
--- that a @.wf@ arm block's closing brace is, and its result type is the
+-- that an arm block's end is, and its result type is the
 -- terminal: a statement written after a @when@ is the same
 -- @nothing follows a terminal@ error a statement after @stop@ or after an @if@
 -- already is.
@@ -863,10 +864,10 @@ when v body = ifThenElse v (thenW body stop) stop
 -- __The flag is not negated; the arms are swapped.__ There is no negation to
 -- reach for: 'Agentic.Raw.RawIfFlag' branches on a flag /binding/ and neither
 -- the @Raw@ nor the @Plan@ has a @not@, so inventing one here would be a
--- construct the @.wf@ language cannot print. What this prints is the same
+-- construct neither of them can express. What this prints is the same
 -- @ifFlag@ 'when' prints with its two arms exchanged — the body in the else
--- arm, the empty block in the then arm — which is a program a @.wf@ author can
--- write by hand today.
+-- arm, the empty block in the then arm — which is a program the two-armed
+-- 'ifThenElse' prints too.
 unless ::
   forall h s s' j.
   KnownIx h s =>

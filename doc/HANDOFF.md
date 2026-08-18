@@ -1,5 +1,43 @@
 # agent-cat: research record and handoff
 
+> **2026-08-18 — the retirement of the `.wf` language.** The owner ruled: *"I
+> don't intend to ever use the DSL or the `.wf` files anymore, I will only use
+> the Haskell surface. Remove all of the rest, including their related
+> documentation, example, supporting code, planning documents, etc."*
+>
+> **What went.** The `.wf` language and its parser (`Dsl/Parse.lean`), the
+> `agent-cat` command line, the Lean ACP and `agent-deck` transports and their
+> JSON-RPC plumbing, the MCP server, the artifact layer, `harden_demo`, all of
+> `example/`, and the seven Lean smoke targets. On the documentation side:
+> `doc/dsl-guide.html`, and the whole of `doc/research/dsl-redesign/` — the
+> grammar page, the calculus and expression designs, the Haskell-question
+> dossier, the survey and the rounds records — except `connection.md`, which
+> moved up to `doc/research/connection.md` and remains the design of record for
+> the conformance program.
+>
+> **What survived — the verification spine.** The `Raw` types
+> (`Dsl/Syntax.lean`); `checkProgram`, the proven elaboration, and
+> `Dsl.checkProgram_level_le` with it; `Exec.lean`, whose `Decode`/norm/attempt
+> and `answerSpec` semantics are corpus-pinned and are the cited reference for
+> the Haskell port; `Certify.lean`, the axiom-free certificate layer; `Explain`
+> and `Report`; the conformance oracle and `corpus-gen`; the frozen corpus, all
+> **128 vectors, byte-identical across the excision**; and the flagship kernel
+> theorems, **re-anchored to the `Raw` term** — the parse-agreement half of them
+> died with the parser, the rest are as they were. `agentic-run` in `haskell/` is
+> the only runner, and `test/stub_adapter.py` and `haskell/test/stub-deck.sh`
+> were kept because `haskell/ci/acp.sh` and `ci/deck.sh` drive them.
+>
+> **How to read the rest of this file.** `README.md` is current; **this document
+> is not, and is not meant to be.** It is a record of how the project reached its
+> shape, and much of what it describes below no longer exists. Every command
+> block in §0 that names a deleted target has been corrected in place; §§3.5–3.7
+> and the standing-work list in §7, which presented the retired surface as
+> current, carry a *(retired 2026-08-18)* note above the unaltered text; and the
+> repository map and document list in §6 describe the tree as it now is. The
+> reasoning everywhere else in §§1–9 is left exactly as written — a research
+> record edited to agree with the present has stopped being a record. Read it as
+> history.
+
 *Written 2026-08-14 at commit `0f65ec4`. This document exists so that the work can
 be picked up on another machine, or by another agent, without the conversation
 that produced it. It records what the project is for, how it arrived at its
@@ -22,8 +60,8 @@ provides the dev shell; `direnv` wires it up. From inside the repository:
 
 ```bash
 direnv allow .                       # once
-direnv exec . lake build             # everything (~2115 jobs)
-direnv exec . lake exe agent-cat plan example/harden.wf
+direnv exec . lake build             # everything (~2083 jobs)
+direnv exec . lake exe corpus-gen    # re-observe the frozen corpus; expect no diff
 ```
 
 `lean-toolchain` pins `leanprover/lean4:v4.30.0`. It is inert under nix but
@@ -36,12 +74,12 @@ required by lake's dependency check, and it must match the nix Lean exactly.
    the checker on a real program inside the kernel. Two concurrent elaborations
    exhausted 48 GB of RAM on the development machine, and the wall clock inflated
    to ~350 seconds under the paging that resulted. A single build is fine.
-2. **The binaries do not depend on that module.** Building `agent-cat` from cold
-   takes 5.8 seconds. If a build of the CLI appears to hang for minutes,
+2. **The executables do not depend on that module.** `conformance-oracle` and
+   `corpus-gen` build in seconds. If either appears to hang for minutes,
    something has re-coupled the dependency and that is the bug.
 
-**ACP adapters** (only needed for live runs). Built from the nixpkgs revision
-that `agent-functor` pins:
+**ACP adapters** (only needed for live runs, which are now Haskell's — see
+`haskell/`). Built from the nixpkgs revision that `agent-functor` pins:
 
 ```bash
 NIXPKGS_ALLOW_UNFREE=1 nix build --impure \
@@ -55,11 +93,17 @@ this repository holds credentials or provider configuration.
 **Sanity battery**, each run one at a time:
 
 ```
-lake exe dsl_smoke   lake exe cli_smoke   lake exe mcp_smoke
-lake exe exec_smoke  lake exe acp_smoke   lake exe mcp_client_smoke
-lake exe harden_demo            # and --refuse, --sloppy-apply
-lake exe agent-cat plan|cost|run example/harden.wf
+lake build                      # Pollution and the two Certify #guard_msgs are build failures
+lake exe corpus-gen             # then: git status --short test/corpus  (must be empty)
+lake exe conformance-oracle     # {"id":1,"ping":true} on stdin
 ```
+
+The Lean smoke tests (`dsl_smoke`, `cli_smoke`, `mcp_smoke`, `exec_smoke`,
+`acp_smoke`, `mcp_client_smoke`, `deck_smoke`, `harden_demo`) tested the runtime
+and are gone with it. The live gates are Haskell's: `haskell/ci/tier0.sh`,
+`tier1.sh`, `acp.sh` and `deck.sh` — the last two still drive
+`test/stub_adapter.py` and `haskell/test/stub-deck.sh`, which is why those two
+fixtures were kept.
 
 ---
 
@@ -278,6 +322,10 @@ reindexing of the world), `denote_revising` (check-then-revise unrolling).
 
 ### 3.5 The runtime
 
+*(Partly retired 2026-08-18. `Acp.lean` is gone; its work is `Agentic.Acp` in
+`haskell/` now. `Exec.lean` and `Certify.lean` stand exactly as described — they
+are the surviving trusted base, and the theorems quoted below are unchanged.)*
+
 Three thin modules. `Acp.lean` speaks line-delimited JSON-RPC over a child
 process's stdio and makes no semantic claim. `Exec.lean` is the memoising
 interpreter, factored so the whole of `IO` is one oracle; the answer table *is* a
@@ -300,7 +348,14 @@ drift and to contradict itself. `certify` replays a run's own log as a world and
 compares; both axiom claims are pinned by `#guard_msgs`, so drift is a build
 failure.
 
-### 3.6 The surface: a textual language
+### 3.6 The surface: a textual language *(retired 2026-08-18)*
+
+*(`Parse.lean` and the text below it are gone. `Syntax.lean` and `Check.lean`
+survive: `Raw` is now written directly — in Lean for the flagship, in the
+Haskell builder for everything else — and the checker's soundness-by-type
+argument in the next sentence is unaffected by the loss of the parser. The
+program shown here is preserved only to show what the language looked like; the
+same workload as it is written today is `haskell/example/Example/Harden.hs`.)*
 
 `Agentic/Core/Dsl/{Syntax,Parse,Check}.lean`. The checker's *type* is its
 soundness statement — it returns a well-typed `Plan` or a `CheckError`, with no
@@ -332,7 +387,15 @@ workflow {
 Braces delimit every scope; indentation means nothing. `given` *receives* and
 never declares. Doing nothing is `{ }`.
 
-### 3.7 The tools
+### 3.7 The tools *(retired 2026-08-18)*
+
+*(Every tool in this subsection is gone: the `agent-cat` CLI, both engines as
+Lean code, `workflow_mcp` and `harden_demo`. `agentic-run` in `haskell/` is the
+only runner now — same three verbs, the same two engines, the same distinction
+between owning the pipe and joining somebody else's session, and the same
+`--session` hazard; `README.md` documents it. The operational findings recorded
+below and in §4.5 are about live agents, not about the deleted code, so they
+still hold.)*
 
 - **`agent-cat plan|cost|run <program>`** — one front end (`withProgram`), so a
   type error reads identically from all three and exits 2;
@@ -526,43 +589,44 @@ Agentic/Core/
   Morphism.lean   859   the 55 commuting squares
   HardenPatch.lean 1025 the flagship as a Plan, and its theorems
   Dsl/Syntax.lean 367   Raw, Prompt, CheckError
-  Dsl/Parse.lean 1316   lexer + recursive descent, no dependencies
-  Dsl/Check.lean 1002   check : … → Except CheckError (Plan Γ Unit)
-  Dsl.lean        772   level theorems about the checker (cheap; binaries need this)
-  DslFlagship.lean 438  the flagship program's decide-proofs (~110 s; binaries do NOT)
-  Rpc.lean        155   shared JSON-RPC framing
-  Acp.lean       1417   the ACP transport, model catalogue resolution, permissions
-  Deck.lean       652   the agent-deck transport: a live pane, polled
-  Exec.lean      1463   the memoising interpreter; decoders; the one oracle
-  Certify.lean    269   adequacy and the certificate
-  Report.lean     701   RunReport, transcript rendering, coverage
-  Artifact.lean   673   scratch dirs, workspace seeding, fingerprints
-  Explain.lean    648   the folds `plan` and `cost` print
-  Mcp.lean       1688   the MCP server: a dialogue stepped by tool call
-cli/AgentCat.lean       agent-cat plan|cost|run
-mcp/WorkflowMcp.lean    workflow_mcp
-demo/Main.lean          harden_demo, with the workload-specific assertions
-example/                harden.wf, hello.wf, ill-typed.wf, harden.d/parse.c,
-                        HardenPatch.lean (the approved Lean surface, pre-Core)
-test/                   seven smoke targets + stub_adapter.py + mcp_client.py
-doc/                    this file; the two HTML artifacts; mcp.md; PLAN.org; research/
+  Dsl/Check.lean  1002  check : … → Except CheckError (Plan Γ Unit)
+  Dsl.lean        751   level theorems about the checker (cheap; the oracle needs this)
+  DslFlagship.lean 424  the flagship program's decide-proofs (~120 s; the oracle does NOT)
+  Exec.lean        995  the memoising interpreter; the trusted base; the retry discipline
+  Certify.lean     264  adequacy and the certificate
+  Report.lean      557  coverage, the bill as a number, transcript rendering
+  Explain.lean     551  the folds a report prints
+conformance/            Conformance.lean (codecs, worlds, observe) + the oracle
+test/                   Pollution.lean, CorpusGen.lean, corpus/ (128 vectors),
+                        stub_adapter.py (kept: haskell/ci/acp.sh drives it)
+doc/                    this file; the three HTML artifacts; PLAN.org; research/
 ```
+
+*(The table above is post-excision. What stood here and is gone:
+`Dsl/Parse.lean` 1316, `Rpc.lean` 155, `Acp.lean` 1417, `Deck.lean` 652,
+`Artifact.lean` 673, `Mcp.lean` 1688, `cli/AgentCat.lean`, `mcp/WorkflowMcp.lean`,
+`demo/Main.lean`, all of `example/`, and seven smoke targets. `HardenPatch.lean`
+was kept: it imports nothing of the elaboration and is the anchor the flagship
+`Raw` term's four transcript-agreement theorems are stated against.)*
 
 Roughly 18,200 lines and 640 theorems in `Agentic/Core`, zero `sorry`, zero
 `native_decide`, zero declared axioms. Every result lies within `{propext, Classical.choice,
 Quot.sound}`, and `certify_sound` within none of them.
 
 **Documents.** `doc/meaning-and-representation.html` (what the two layers are
-and how the proofs bind them), `doc/dsl-guide.html` (the language, taught),
-`doc/mcp.md` (the server), `doc/research/` (the re-derivation: three blind
+and how the proofs bind them), `doc/research/connection.md` (the design of record
+for the two implementations and their boundary — the one research page that is
+still live), and the rest of `doc/research/` (the re-derivation: three blind
 derivations, the contamination ledger, three adversarial attacks, the compiled
 Lean probes, and the three DSL grammar proposals). `doc/design.html` and
 `doc/walkthrough.html` predate the re-derivation and describe the **superseded**
-`Term` calculus — keep for history, do not follow.
+`Term` calculus — keep for history, do not follow. `doc/dsl-guide.html` and
+`doc/research/dsl-redesign/` went in the retirement.
 
 **The superseded stratum.** `Agentic/*.lean` outside `Core/` (Term, Frag,
 Meaning, the WEqR quotient, Surface) is the pre-re-derivation library. It still
-builds and `example/HardenPatch.lean` still uses it. Retiring it is obr
+builds; its one consumer, `example/HardenPatch.lean`, went in the excision, so
+nothing uses it now. Retiring it is obr
 `acat-q1i`; roughly 4,700 lines die, and the mathematics worth keeping
 (semirings, matrices, Kleene star, the scope monoid, convolution) has largely
 been re-derived in `Core` already.
@@ -570,6 +634,12 @@ been re-derived in `Core` already.
 ---
 
 ## 7. Where the work stands, and what to do next
+
+*(Written 2026-08-14; overtaken in part on 2026-08-18. Three items in the
+"done" list — the textual language, the MCP server and the `agent-cat` CLI —
+were retired rather than carried forward, and the two open questions that name
+the CLI and the MCP server went with them. `doc/PLAN.org` and `obr` are the live
+tracker and are right where this list and they disagree.)*
 
 **Done and verified:** the meaning space; the representation; 55 commuting
 squares; the flagship theorems (consent, the guide asked exactly once, ≤ 3
@@ -628,16 +698,18 @@ Everything needed is in the repository except three things.
 3. **Credentials for live runs** — the operator's own `claude` / `codex` CLIs,
    authenticated on the new machine. Nothing here stores them.
 
-The two HTML artifacts also exist in `~/Documents/` as
-`agent-cat-meaning-and-representation.html` and `agent-cat-dsl-guide.html`;
-`doc/` holds the same files, so the repository copies are authoritative.
+The HTML artifacts also exist in `~/Documents/` as
+`agent-cat-meaning-and-representation.html` and `agent-cat-dsl-guide.html`; the
+second documents the `.wf` language and describes nothing that still exists.
+`doc/` holds the surviving copies, so the repository is authoritative.
 
 A useful first command on the new machine, after `direnv allow .` and one full
 build:
 
 ```bash
-direnv exec . lake exe agent-cat cost example/harden.wf
+direnv exec . lake exe corpus-gen && git status --short test/corpus
 ```
 
-If it prints nine leaves, a cheapest of 5, a dearest of 15, and the paragraph
-explaining that the cheapest may be unattained, the port is good.
+If it reports 128 entries re-observed, all byte-identical, and `git status`
+prints nothing, the whole spine — the elaboration, the cost algebra, the
+interpreter and the trusted base — agrees with the frozen specification.

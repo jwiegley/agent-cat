@@ -1464,7 +1464,9 @@ certificate note :1209–1222, `partialBillJson` :1229, `deliver` :1317–1331,
 `.lake/packages/mathlib/Mathlib/Data/List/Defs.lean:242–249`
 (`dedup` = `pwFilter (· ≠ ·)`, **last occurrence**, `dedup [1,0,2,2,1] = [0,2,1]`) ·
 `.lake/build/bin/agent-cat.rsp` (734 objects, 456 Mathlib) ·
-`doc/research/dsl-redesign/haskell-question.md` §0.3 (26,155 lines; 867 theorems).
+`doc/research/dsl-redesign/haskell-question.md` §0.3 (26,155 lines; 867
+theorems) — that page, and the rest of the redesign round, were deleted with the
+`.wf` language on 2026-08-18 and are in git history.
 
 **External:**
 [Lean reference §12.4 FFI](https://lean-lang.org/doc/reference/latest/Run-Time-Code/Foreign-Function-Interface/) ·

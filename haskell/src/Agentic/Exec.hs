@@ -574,8 +574,8 @@ askDecoding lg retries c q say =
 -- deliberate departure from it, and it is the safer rule, because a substring
 -- key can match a prompt through an answer that was spliced into it. Callers
 -- porting the stub's table must therefore key on what a prompt __starts__ with:
--- @\"Apply this patch?\"@ and @\"Apply:\"@ are already prefixes in
--- @example\/harden.wf@, while @\"correct?\"@ and @\"secure?\"@ are not — and
+-- @\"Apply this patch?\"@ and @\"Apply:\"@ are already prefixes in the
+-- flagship (@example-000@), while @\"correct?\"@ and @\"secure?\"@ are not — and
 -- need not be, because an unmatched @verdict@ approves.
 --
 -- An unmatched prompt is answered by 'scriptedDefault' at its code rather than

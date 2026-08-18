@@ -4,7 +4,7 @@ import Agentic.Core.Report
 /-!
 # The conformance library
 
-Stage: the connection (`doc/research/dsl-redesign/connection.md`, D4).
+Stage: the connection (`doc/research/connection.md`, D4).
 
 The Lean side of the bisimulation: a line-delimited JSON process that checks
 and observes programs so that the Haskell implementation has something exact to

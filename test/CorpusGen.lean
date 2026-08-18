@@ -1,21 +1,48 @@
-import DslCases
 import Conformance
 
 /-!
-# The corpus generator
+# The corpus generator, v2: re-observe what is frozen
 
-Day three of the connection's week one (`doc/research/dsl-redesign/
-connection.md` §7): run the oracle's `observe` once over the curated corpus —
-every battery source that parses, the module cases, a handful of
-semantically-worlded pins, the three named vectors — and freeze the
-request/reply pairs under `test/corpus/`, one pretty-printed JSON file each.
+`lake exe corpus-gen`, from the repository root.
 
-Regenerating the corpus is the explicit, reviewed act of changing the
-specification: `lake exe corpus-gen`, then read the diff.
+## What changed, and why the discipline survived the parser
 
-Parse-time refusals are skipped, deliberately: the conformance boundary is
-`RawProgram`-in (connection.md D10), so a source the parser refuses never
-reaches it — those stay pinned where they always were, in `test/DslSmoke.lean`.
+Version one built the corpus *from sources*: it parsed the battery's string
+table, the module cases, the semantic pins and `example/*.wf`, and wrote a
+request/reply pair per case. There is no parser and there are no `.wf` files any
+more, so a generator that starts from characters cannot exist.
+
+What can exist — and is the whole of the regeneration discipline that mattered —
+is this: **the requests are the specification, and the replies are recomputed
+from them.** Every file under `test/corpus/` already holds a `request` that is
+`RawProgram`-in (the conformance boundary, `doc/research/connection.md` D10) or
+a string-layer operation. This generator reads each file, takes its request
+*verbatim*, puts it back through `Conformance.observe` or
+`Conformance.stringOp` — the same two functions `conformance-oracle` serves —
+and rewrites the file with the fresh reply under the same name, the same
+request and the same schema.
+
+So the gate is unchanged and is now sharper than it was: **regenerating must be
+a no-op.** `lake exe corpus-gen` followed by `git status --short test/corpus`
+printing nothing is the statement that the elaboration, the cost algebra, the
+interpreter and the trusted base all still say exactly what the frozen
+specification says they say. A diff here is a change to the specification and is
+reviewed as one — and during an excision, a diff here means the excision cut
+semantics rather than surface.
+
+## What a request may be
+
+Exactly what `conformance-oracle` accepts, minus `ping`:
+
+* `{"program": <RawProgram>, "worlds": [<WorldSpec>]}` → `observe`;
+* `{"string": {"op": …, "code"?: …, "text": …}}` → `stringOp`.
+
+A file whose request is neither is an error and not a skip: the corpus is
+curated, and a vector nothing can re-observe is a vector nothing is checking.
+
+Requests are never touched. The generator re-emits the parsed `request` value
+unchanged, so a hand-built vector (the empty panel, the duplicate function
+table — shapes no surface would ever write) stays exactly as it was written.
 -/
 
 namespace CorpusGen
@@ -23,251 +50,81 @@ namespace CorpusGen
 open Agentic.Core
 open Agentic.Core.Dsl
 open Agentic.Core.Conformance
-open Lean (Json toJson)
+open Lean (Json toJson fromJson?)
 
-/-- A filename from a case name: lowercase alphanumerics and dashes. -/
-def slug (s : String) : String :=
-  let mapped := s.toList.map fun c =>
-    if c.isAlphanum then c.toLower else '-'
-  let collapsed := (String.ofList mapped).splitOn "-" |>.filter (!·.isEmpty)
-  String.intercalate "-" collapsed
-
-/-- The echo world, spelled fully (a request never relies on decoder
-defaults). -/
-def echoW : WorldSpec := {}
-
-/-- The angle-bracket echo, which makes splices visible. -/
-def wrapW : WorldSpec := { text := .wrap "<" ">" }
-
-/-- Every review objects; every flag refuses. The exhausting world. -/
-def objectingW : WorldSpec :=
-  { verdict := .const (.object ["not good enough"]), flag := .const false }
-
-/-- One corpus entry. -/
-def entry (name : String) (request : Json) (reply : Json) : Json :=
+/-- One corpus entry, in the field order v1 wrote and every frozen file holds. -/
+def entry (name : String) (request : Json) (reply : Json) (oracleVersion : Json) : Json :=
   Json.mkObj
     [ ("name", Json.str name)
     , ("request", request)
     , ("reply", reply)
-    , ("oracleVersion", toJson (1 : Nat)) ]
+    , ("oracleVersion", oracleVersion) ]
 
-def programEntry (name : String) (prog : RawProgram) (worlds : List WorldSpec) : Json :=
-  entry name
-    (Json.mkObj
-      [ ("program", toJson prog)
-      , ("worlds", toJson worlds) ])
-    (observe prog worlds)
+/-- The reply a request earns, recomputed. `Except` rather than a default,
+because a request this cannot read is a corpus file nothing is checking. -/
+def replyFor (request : Json) : Except String Json := do
+  if let .ok sj := request.getObjVal? "string" then
+    let op ← (getStr? sj "op").elim (.error "a string request needs an `op`") .ok
+    let text := (getStr? sj "text").getD ""
+    .ok (stringOp op (getStr? sj "code") text)
+  else if let .ok pj := request.getObjVal? "program" then
+    match fromJson? (α := RawProgram) pj with
+    | .error e => .error s!"bad program: {e}"
+    | .ok prog =>
+      let worlds : List WorldSpec ←
+        match request.getObjVal? "worlds" with
+        | .error _ => .ok [{}]
+        | .ok wj =>
+          match fromJson? (α := List WorldSpec) wj with
+          | .ok ws => .ok ws
+          | .error e => .error s!"bad worlds: {e}"
+      .ok (observe prog worlds)
+  else
+    .error "a request is {program, worlds?} or {string: {op, code?, text}}"
 
-def stringEntry (name op : String) (code : Option String) (text : String) : Json :=
-  entry name
-    (Json.mkObj
-      [ ("string", Json.mkObj
-          ([("op", Json.str op)]
-            ++ (match code with | some c => [("code", Json.str c)] | none => [])
-            ++ [("text", Json.str text)])) ])
-    (stringOp op code text)
-
-def writeEntry (dir : System.FilePath) (idx : Nat) (prefixName : String)
-    (e : Json) (name : String) : IO Unit := do
-  let n := if idx < 10 then s!"00{idx}" else if idx < 100 then s!"0{idx}" else toString idx
-  IO.FS.writeFile (dir / s!"{prefixName}-{n}-{slug name}.json") (e.pretty ++ "\n")
-
-/-- The nested-revising source of the third named vector: the graft arithmetic
-`(n+1)*rev + n*am + (n+1)*(st+un)` at two levels. -/
-def graftDepthSrc : String :=
-  "workflow { d : text <- ask model \"a\" \"draft\"\n" ++
-  "  r <- revising d as c, at most 2 amendments {\n" ++
-  "    v <- ask model \"m\" \"review {c}\"\n" ++
-  "    amend c { ask model \"a\" \"fix {c} {v}\" }\n" ++
-  "  }\n" ++
-  "  case r { settled x {\n" ++
-  "    r2 <- revising x as c2, at most 3 amendments {\n" ++
-  "      v2 <- ask model \"m2\" \"review again {c2}\"\n" ++
-  "      amend c2 { ask model \"a\" \"refix {c2} {v2}\" }\n" ++
-  "    }\n" ++
-  "    case r2 { settled y { ask tool \"t\" \"apply {y}\" }\n" ++
-  "              unsettled { stop } }\n" ++
-  "  } unsettled { stop } }\n}"
-
-/-- The duplicate-function vector, hand-built: the parser refuses this shape,
-so only a constructed table can present it to the checker. -/
-def dupFnProgram : RawProgram :=
-  let f : RawFn :=
-    { name := "f", params := [("p", Code.text)], result := Code.text
-    , body := [], answer := some "p", answerPos := { line := 1, col := 1 }
-    , pos := { line := 1, col := 1 } }
-  ⟨[f, f], RawBlock.empty { line := 1, col := 1 }⟩
+/-- Re-observe one file in place. Returns whether the bytes moved. -/
+def regenerate (path : System.FilePath) : IO Bool := do
+  let old ← IO.FS.readFile path
+  let j ← match Json.parse old with
+    | .error e => throw <| IO.userError s!"{path}: not JSON: {e}"
+    | .ok j => pure j
+  let name ← match getStr? j "name" with
+    | some n => pure n
+    | none => throw <| IO.userError s!"{path}: no `name`"
+  let request ← match j.getObjVal? "request" with
+    | .ok r => pure r
+    | .error _ => throw <| IO.userError s!"{path}: no `request`"
+  let version := (j.getObjVal? "oracleVersion").toOption.getD (toJson (1 : Nat))
+  let reply ← match replyFor request with
+    | .ok r => pure r
+    | .error e => throw <| IO.userError s!"{path}: {e}"
+  let new := (entry name request reply version).pretty ++ "\n"
+  if new == old then
+    return false
+  else
+    IO.FS.writeFile path new
+    return true
 
 def main : IO Unit := do
   let dir : System.FilePath := "test/corpus"
-  IO.FS.createDirAll dir
-  let mut count := 0
-  let mut skipped := 0
-
-  -- 1. The battery, single-file: every source the parser accepts.
-  let mut i := 0
-  for (name, src, _want) in batteryCases do
-    match Dsl.parseProgramWith [] [] src with
-    | .ok prog =>
-      writeEntry dir i "battery" (programEntry name prog [echoW]) name
-      count := count + 1
-    | .error _ => skipped := skipped + 1
-    i := i + 1
-
-  -- 2. The module cases.
-  i := 0
-  for (name, mods, src, _want) in batteryCasesM do
-    match Dsl.parseProgramWith [] mods src with
-    | .ok prog =>
-      writeEntry dir i "module" (programEntry name prog [echoW]) name
-      count := count + 1
-    | .error _ => skipped := skipped + 1
-    i := i + 1
-
-  -- 3. Semantically-worlded pins: the sources the discovery sections read
-  -- through named worlds, frozen under the worlds that discriminate them.
-  let semantic : List (String × String × List WorldSpec) :=
-    [ ("sharing one binding holed three times", semSrc0, [echoW, wrapW])
-    , ("a loop that settles at round two", semSrc1, [echoW, objectingW])
-    , ("draws are distinct questions",
-        "workflow { a : text <- ask model \"m\" \"one\"\n" ++
-        "           b : text <- ask model \"m\" independent draw 1 \"one\"\n" ++
-        "           ask tool \"t\" \"{a} {b}\" }",
-        [{ text := .byDraw }])
-    , ("a flag carrier loop",
-        "workflow { d : text <- ask tool \"t\" \"w\"\n" ++
-        "  ok <- ask person \"o\" \"go?\"\n" ++
-        "  if ok { ask tool \"a\" \"went {d}\" } else { stop } }",
-        [echoW, objectingW])
-      -- The three worlds no earlier entry instantiates, so the conformance
-      -- side has something to falsify its byPrefix/const/promptEq and
-      -- declined-tag paths against (found as a coverage gap by the Haskell
-      -- week-two verifier: every prior world block answers verdicts by
-      -- const-approve or const-object, text by echo/wrap/byDraw, flags by
-      -- const true/false).
-    , ("a loop that truly settles at round two: byPrefix objects to the first draft only",
-        semSrc1,
-        [{ verdict := .byPrefix [("review draft", .object ["too plain"])] .approve }])
-    , ("a declined verdict and a promptEq flag",
-        semSrc5,
-        [{ verdict := .const .declined, flag := .promptEq "yes or no?" }])
-    , ("a constant text world",
-        semSrc0,
-        [{ text := .const "fixed answer" }]) ]
-  i := 0
-  for (name, src, worlds) in semantic do
-    match Dsl.parseProgramWith [] [] src with
-    | .ok prog =>
-      writeEntry dir i "semantic" (programEntry name prog worlds) name
-      count := count + 1
-    | .error e => throw <| IO.userError s!"semantic corpus source refused: {name}: {e.render}"
-    i := i + 1
-
-  -- 4. The three named vectors of connection.md §7.
-  writeEntry dir 0 "vector"
-    (entry "duplicate function names, hand-built"
-      (Json.mkObj [("program", toJson dupFnProgram), ("worlds", toJson [echoW])])
-      (observe dupFnProgram [echoW]))
-    "duplicate function names hand-built"
-  count := count + 1
-  match Dsl.parseProgramWith [] [] semSrc0 with
-  | .ok prog =>
-    writeEntry dir 1 "vector"
-      (programEntry "billMemo strictly below billFresh" prog [echoW])
-      "billmemo below billfresh"
-    count := count + 1
-  | .error e => throw <| IO.userError s!"vector 2 refused: {e.render}"
-  match Dsl.parseProgramWith [] [] graftDepthSrc with
-  | .ok prog =>
-    writeEntry dir 2 "vector"
-      (programEntry "blockAsks graft arithmetic at depth two" prog [echoW, objectingW])
-      "blockasks graft at depth"
-    count := count + 1
-  | .error e => throw <| IO.userError s!"vector 3 refused: {e.render}"
-
-  -- …and one vector per remaining guard, so all five guard identities are in
-  -- the corpus. The budget refusal comes from parseable source (`chain`'s
-  -- doubling makes 2^13 questions of thirteen functions); the other two only
-  -- exist hand-built, because the parser refuses their source spellings.
-  match Dsl.parseProgramWith [] []
-      (chain 13 ++ "workflow { a <- f13 \"x\"\n b <- f13 \"y\"\n ask tool \"t\" \"{a} {b}\" }") with
-  | .ok prog =>
-    writeEntry dir 3 "vector"
-      (programEntry "a program over the question budget, with the count" prog [echoW])
-      "question budget with count"
-    count := count + 1
-  | .error e => throw <| IO.userError s!"vector 4 refused: {e.render}"
-  let p11 : Pos := { line := 1, col := 1 }
-  let emptyPanelProgram : RawProgram :=
-    ⟨[], RawBlock.bind "p" none
-      (RawSource.rhs (RawRhs.panel [] p11)) (RawBlock.empty p11) p11⟩
-  writeEntry dir 4 "vector"
-    (programEntry "an empty panel, hand-built" emptyPanelProgram [echoW])
-    "empty panel hand-built"
-  count := count + 1
-  let servedToolProgram : RawProgram :=
-    ⟨[], RawBlock.act
-      ⟨some "deep", ⟨Addressee.tool "t", 0⟩, Prompt.normalize [.lit "w"], p11⟩
-      (RawBlock.empty p11) p11⟩
-  writeEntry dir 5 "vector"
-    (programEntry "served by on a tool, hand-built" servedToolProgram [echoW])
-    "served by on a tool hand-built"
-  count := count + 1
-
-  -- 5. The example programs, walked and frozen (connection.md §3.4c: the
-  -- curated cases are "not optional", and the import walk happens HERE, on
-  -- the Lean side — the boundary is RawProgram-in, so the importing program
-  -- is frozen as the single walked RawProgram the Haskell side rebuilds).
-  -- `ill-typed.wf` is deliberately absent: it refuses at the typing judgment
-  -- ("other"), which test/CliSmoke.lean already pins three ways.
-  let librarySrc ← IO.FS.readFile "example/library.wf"
-  let examples : List (String × String × List (String × String)) :=
-    [ ("the flagship, single-file", "example/harden.wf", [])
-    , ("hello", "example/hello.wf", [])
-    , ("the flagship, written against a library", "example/harden-imported.wf",
-        [("library", librarySrc)])
-    , ("a library runs alone: its priming, then nothing", "example/library.wf", []) ]
-  i := 0
-  for (name, path, mods) in examples do
-    let src ← IO.FS.readFile path
-    match Dsl.parseProgramWith [] mods src with
-    | .ok prog =>
-      writeEntry dir i "example" (programEntry name prog [echoW]) name
-      count := count + 1
-    | .error e => throw <| IO.userError s!"example corpus source refused: {path}: {e.render}"
-    i := i + 1
-
-  -- 6. The string layer (D12): the frozen vector table.
-  let strings : List (String × String × Option String × String) :=
-    [ ("norm ascii mixed case", "norm", none, "  HeLLo World  ")
-    , ("norm turkish dotted capital", "norm", none, "İstanbul")
-    , ("norm turkish dotless", "norm", none, "ı vs I")
-    , ("norm sharp s", "norm", none, "STRASSE straße")
-    , ("norm final sigma", "norm", none, "ΟΔΥΣΣΕΥΣ οδυσσεύς")
-    , ("norm nbsp", "norm", none, "yes ")
-    , ("norm crlf", "norm", none, "yes\r\n")
-    , ("norm empty", "norm", none, "")
-    , ("norm blank lines", "norm", none, "\n\n  approve  \n\n")
-    , ("words splits on runs", "words", none, "  two   words \t here ")
-    , ("decodeVerdict approve", "decodeVerdict", none, "APPROVE")
-    , ("decodeVerdict approve lowercase", "decodeVerdict", none, "approve")
-    , ("decodeVerdict multiword is not approve", "decodeVerdict", none, "approve kind of")
-    , ("decodeVerdict objection", "decodeVerdict", none, "OBJECTION: too long")
-    , ("decodeVerdict empty", "decodeVerdict", none, "")
-    , ("decode flag yes", "decode", some "flag", "yes")
-    , ("decode flag Yes crlf", "decode", some "flag", "Yes\r\n")
-    , ("decode flag maybe", "decode", some "flag", "maybe")
-    , ("decode text passthrough", "decode", some "text", "  anything at all  ")
-    , ("decode receipt anything", "decode", some "receipt", "DONE")
-    , ("say verdict objection", "say", some "verdict", "OBJECTION: no")
-    , ("say flag no", "say", some "flag", "no") ]
-  i := 0
-  for (name, op, code, text) in strings do
-    writeEntry dir i "string" (stringEntry name op code text) name
-    count := count + 1
-    i := i + 1
-
-  IO.println s!"corpus: {count} entries written to {dir} ({skipped} parse-refused sources skipped: they never reach the boundary)"
+  let entries ← dir.readDir
+  -- Sorted, so the report reads in the order the directory is committed in and
+  -- two runs on two machines print the same lines.
+  let paths := (entries.toList.map (·.path)).filter
+      (fun p => p.extension == some "json")
+    |>.toArray.qsort (fun a b => a.toString < b.toString) |>.toList
+  if paths.isEmpty then
+    throw <| IO.userError s!"{dir} holds no corpus files; refusing to write a corpus from nothing"
+  let mut moved : List String := []
+  for p in paths do
+    if ← regenerate p then
+      moved := p.toString :: moved
+  if moved.isEmpty then
+    IO.println s!"corpus: {paths.length} entries re-observed, all byte-identical"
+  else
+    IO.println s!"corpus: {paths.length} entries re-observed, {moved.length} rewritten:"
+    for m in moved.reverse do
+      IO.println s!"  {m}"
 
 end CorpusGen
 

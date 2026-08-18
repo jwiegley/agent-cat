@@ -1,32 +1,28 @@
 name = "agentic"
 version = "0.1.0"
-defaultTargets = ["Agentic", "Pollution", "HardenPatch", "acp_smoke", "exec_smoke", "deck_smoke", "harden_demo", "dsl_smoke", "workflow_mcp", "mcp_smoke", "mcp_client_smoke", "agent-cat", "cli_smoke", "conformance-oracle"]
+defaultTargets = ["Agentic", "Pollution", "Conformance", "conformance-oracle", "corpus-gen"]
 
-# The root module and every `Agentic/Core/*` module. The glob is explicit
-# because the runtime stratum is deliberately NOT imported by the root:
-# `Agentic.lean` is the mathematical space, and `Agentic/Core/Acp.lean` is a
-# transport that imports no part of it. Without the glob a runtime module would
-# be invisible to `lake build`; with it, one that stops compiling breaks the
-# build like everything else.
+# The root module and every `Agentic/Core/*` module. The glob is explicit rather
+# than implied by the root's imports, because a module the root does not import
+# would otherwise be invisible to `lake build`; with the glob, one that stops
+# compiling breaks the build like everything else.
 #
 # WHERE THE BUILD TIME IS. One module in this glob dominates the whole build:
 # `Agentic/Core/DslFlagship.lean` takes about six minutes and several gigabytes
 # to elaborate, because its nineteen `decide +kernel` proofs make the kernel run
-# the checker, the cost algebra and the interpreter on `example/harden.wf` — the
-# theorems about the flagship are true by computation, not by assertion, and
+# the checker, the cost algebra and the interpreter on the flagship `Raw` term —
+# the theorems about the flagship are true by computation, not by assertion, and
 # that is what computation costs. Never elaborate it twice concurrently; two at
 # once have exhausted 48 GB on a developer machine.
 #
 # It is a separate module from `Agentic/Core/Dsl.lean` for exactly that reason.
 # `Dsl.lean` is the cheap half — the level theorems about the *checker*, about a
-# second and a half — and it is all that `Agentic/Core/Explain.lean`,
-# `Agentic/Core/Mcp.lean` and `cli/AgentCat.lean` need, so none of the three
-# executables below imports the flagship. `lake build agent-cat` from cold for
-# the DSL layer is six seconds rather than the three hundred and forty-five it
-# was when the two halves shared a file, and editing `example/harden.wf` no
-# longer invalidates the command line. Keep it so: if a binary comes to need
-# something proved about the flagship, move the *statement* into the cheap half
-# rather than the import into the binary.
+# second and a half — and it is all that `Agentic/Core/Explain.lean` and, through
+# it, `conformance/Conformance.lean` need, so the conformance oracle and the
+# corpus generator do not import the flagship and build in seconds rather than
+# minutes. Keep it so: if a tool comes to need something proved about the
+# flagship, move the *statement* into the cheap half rather than the import into
+# the tool.
 [[lean_lib]]
 name = "Agentic"
 globs = ["Agentic", "Agentic.Core.+"]
@@ -36,14 +32,6 @@ name = "mathlib"
 git = "https://github.com/leanprover-community/mathlib4"
 rev = "v4.30.0"
 
-# The worked example: the workflow as a user would write it, in the authoring
-# surface (`Agentic.Surface`). In defaultTargets on purpose — it builds against
-# main, not against the commit it was authored on, so a surface that regresses
-# must break the build.
-[[lean_lib]]
-name = "HardenPatch"
-srcDir = "example"
-
 # The instance-pollution probe (test/Pollution.lean): machine-checked assertions
 # that importing this package installs no arithmetic on `Bool`, `Prop` or `ℕ`.
 # In defaultTargets on purpose — a re-polluting instance must break the build.
@@ -51,123 +39,15 @@ srcDir = "example"
 name = "Pollution"
 srcDir = "test"
 
-# The transport's integration test (test/AcpSmoke.lean), which drives
-# `Agentic.Core.Acp` against test/stub_adapter.py over real pipes:
-# `lake exe acp_smoke`, from the repository root. In defaultTargets on purpose —
-# building it is what keeps a test of the transport compiling with it; running
-# it is the separate, explicit step that checks the bytes.
-[[lean_exe]]
-name = "acp_smoke"
-srcDir = "test"
-root = "AcpSmoke"
-
-# The interpreter's integration test (test/ExecSmoke.lean), which drives
-# `Agentic.Core.Exec` — `Decode`, the oracle, the person route and the memo
-# table — against the same stub: `lake exe exec_smoke`, from the repository
-# root. In defaultTargets for the same reason as `acp_smoke`: every theorem
-# about `exec` is stated at `Id`, so the `IO` instantiation has no proof and a
-# test that runs it is the only evidence there is.
-[[lean_exe]]
-name = "exec_smoke"
-srcDir = "test"
-root = "ExecSmoke"
-
-# The whole stack at once (demo/Main.lean): `Agentic.Core.Harden.demo` — the
-# flagship workload — denoted, folded, put to test/stub_adapter.py over real
-# pipes, and checked against the theorems that price it:
-# `lake exe harden_demo` and `lake exe harden_demo --refuse`, from the
-# repository root. In defaultTargets for the reason the two smoke tests are:
-# building it keeps the end-to-end path compiling; running it is the separate,
-# explicit step that checks the bytes, the bill and the certificate.
-[[lean_exe]]
-name = "harden_demo"
-srcDir = "demo"
-root = "Main"
-
-# The DSL's test (test/DslSmoke.lean): `lake exe dsl_smoke`, from the repository
-# root. It checks the two things the DSL modules do not prove — that
-# the parser reads `Dsl.flagshipSource` as `Dsl.flagshipRaw`, which is the
-# hypothesis of `Dsl.parseAndCheck_flagship`, and that every clause of the
-# typing judgment rejects what it says it rejects, message and position
-# included. In defaultTargets for the reason the other two smoke tests are:
-# building it keeps a test of the checker compiling with it; running it is the
-# separate, explicit step that checks the diagnoses.
-# This one *does* import `Agentic.Core.DslFlagship`, so it pays the six minutes;
-# so do `cli_smoke` and `mcp_smoke`, which quote the flagship's proved numbers.
-# The three executables above and below do not.
-[[lean_exe]]
-name = "dsl_smoke"
-srcDir = "test"
-root = "DslSmoke"
-
-# The MCP server (mcp/Main.lean): `lake exe workflow_mcp`, or registered with a
-# client as `.lake/build/bin/workflow_mcp`. It speaks line-delimited JSON-RPC
-# 2.0 on stdin/stdout and offers the four tools of `Agentic/Core/Mcp.lean` over
-# DSL sources. In defaultTargets because a server that stops compiling with the
-# stack it serves must break the build like everything else.
-# (The root is `WorkflowMcp` and not `Main` because module names are global to
-# the package and `demo/Main.lean` already is `Main`; lake refuses two
-# executables with the same root.)
-[[lean_exe]]
-name = "workflow_mcp"
-srcDir = "mcp"
-root = "WorkflowMcp"
-
-# The server's test (test/McpSmoke.lean): `lake exe mcp_smoke`, from the
-# repository root. It drives `Mcp.serve` — the same function the executable
-# runs — over a scripted stream instead of a pipe, and checks the handshake, the
-# tool list, the flagship's quoted cost against the theorems that prove it, a
-# whole run answered question by question, the two safety rules (an answer the
-# trusted base cannot read is not recorded; a declined elicitation is not a
-# `no`), and the final report. In defaultTargets for the reason the other smoke
-# tests are: building it keeps a test of the server compiling with it; running
-# it is the separate, explicit step that checks the frames.
-[[lean_exe]]
-name = "mcp_smoke"
-srcDir = "test"
-root = "McpSmoke"
-
-# The server's other test (test/McpClientSmoke.lean), which starts the built
-# `workflow_mcp` as a child and drives it with test/mcp_client.py — a real MCP
-# client, over a real pipe: `lake exe mcp_client_smoke`, from the repository
-# root. `mcp_smoke` drives `serve` over a list of lines and tests the
-# dispatcher; this one tests the binary, the pipe, the flush, an
-# `elicitation/create` answered by a genuinely concurrent peer, and the clean
-# shutdown that closing stdin is. In defaultTargets for the reason the other
-# smoke tests are: building it keeps the client's expectations about the
-# server's name, version and revision compiling against the server's own
-# constants; running it is the separate, explicit step that speaks the protocol.
-[[lean_exe]]
-name = "mcp_client_smoke"
-srcDir = "test"
-root = "McpClientSmoke"
-
-# The command line (cli/AgentCat.lean): `lake exe agent-cat`, from the repository
-# root. `agent-cat plan|cost|run <program.wf>` is `Agentic/Core/Explain.lean`'s
-# two renderings and `Agentic/Core/Certify.lean`'s `execCertifiedIO` behind one
-# front end (`Dsl.parseAndCheckRaw`, whose parity with `Dsl.parseAndCheckE` is
-# `Dsl.parseAndCheckRaw_eq`). In defaultTargets because a command line that stops
-# compiling with the library it exposes must break the build like everything else.
-# (The root is `AgentCat` and not `Main` for the reason `workflow_mcp`'s is
-# `WorkflowMcp`: module names are global to the package, `demo/Main.lean` is
-# already `Main`, and lake refuses two executables with the same root.)
-# It imports `Agentic.Core.Dsl` (through `Explain`) and *not*
-# `Agentic.Core.DslFlagship`: the front end needs `Dsl.parseAndCheck_level_le`,
-# which is a theorem about the checker, and nothing about `example/harden.wf`.
-# That is why this target builds in seconds; see the note on the `Agentic` lib.
-[[lean_exe]]
-name = "agent-cat"
-srcDir = "cli"
-root = "AgentCat"
-
 # The conformance oracle (conformance/ConformanceOracle.lean):
 # `lake exe conformance-oracle`. The Lean side of the bisimulation with the
-# Haskell implementation (doc/research/dsl-redesign/connection.md, D4): a
+# Haskell implementation (doc/research/connection.md, D4): a
 # line-delimited JSON process that checks and observes RawPrograms, so the
 # frozen corpus under test/corpus/ is this executable's output committed. A
 # test dependency and only ever a test dependency — the production runner
-# never speaks to it. It imports Agentic.Core.{Explain,Mcp} and *not*
-# Agentic.Core.DslFlagship, so it builds in seconds, not minutes.
+# (`agentic-run`, in haskell/) never speaks to it. It imports
+# Agentic.Core.{Explain,Report} and *not* Agentic.Core.DslFlagship, so it builds
+# in seconds, not minutes.
 # Its library half (conformance/Conformance.lean): the codecs, the WorldSpec
 # DSL, the observation record and the refusal classifier — importable by the
 # corpus generator and by any future harness tooling.
@@ -181,54 +61,18 @@ srcDir = "conformance"
 root = "ConformanceOracle"
 
 # The corpus generator (test/CorpusGen.lean): `lake exe corpus-gen`, from the
-# repository root. It runs the conformance library's `observe` over the curated
-# case tables of test/DslSmoke.lean plus the named vectors of connection.md §7,
-# and (re)writes test/corpus/*.json — the frozen Tier-0 corpus the Haskell side
-# must reproduce with no Lean in the loop. NOT in defaultTargets, deliberately:
-# regenerating the corpus is an explicit, reviewed act (the diff is a change to
-# the specification), not a side effect of building. It imports DslCases for
-# the source tables and Conformance for `observe` — not the flagship.
+# repository root. It reads every test/corpus/*.json, takes each file's request
+# verbatim, puts it back through the conformance library's `observe` or
+# `stringOp`, and rewrites the file with the fresh reply. Regenerating is
+# therefore expected to be a *no-op*: `lake exe corpus-gen` followed by an empty
+# `git status --short test/corpus` is the statement that the elaboration, the
+# cost algebra, the interpreter and the trusted base still say what the frozen
+# specification says they say.
+# In defaultTargets so that a generator which stops compiling with the library it
+# regenerates breaks the build; *running* it is the separate, explicit step, and
+# a diff it produces is a change to the specification, reviewed as one. It
+# imports Conformance and not the flagship.
 [[lean_exe]]
 name = "corpus-gen"
 srcDir = "test"
 root = "CorpusGen"
-
-# The DSL's case tables (test/DslCases.lean): pure string data — the battery,
-# the module cases, the semantic sources — split out of DslSmoke so that
-# corpus-gen can import the tables without importing an executable's `main`.
-[[lean_lib]]
-name = "DslCases"
-srcDir = "test"
-
-# The deck engine's test (test/DeckSmoke.lean): `lake exe deck_smoke`, from the
-# repository root. It drives `Agentic/Core/Deck.lean` — the *other* transport,
-# which reaches an agent by shelling out to `agent-deck` rather than by owning a
-# pipe — against `haskell/test/stub-deck.sh`, the same fake `haskell/ci/deck.sh`
-# runs against the Haskell implementation of the same transport. One fixture for
-# two implementations is the point: two fakes would let the two agree with their
-# own fake and not with `agent-deck`. The scenarios are the poll loop, the
-# staleness guard, the re-ask and the four named transport failures, plus the
-# memo table observed from *outside* the process as the gap between the ask nodes
-# a run walked and the messages the session was sent — and then the command line
-# twice, to pin the routing rule (`--all-to-session`) as a difference in that same
-# count. In defaultTargets for the reason the other smoke tests are: building it
-# keeps a test of the engine compiling with it; running it is the separate,
-# explicit step that spawns the fake. It imports `Agentic.Core.Deck` and *not*
-# `Agentic.Core.DslFlagship`, so it builds in seconds; the flagship it runs
-# through the command line is a file path and not an import.
-[[lean_exe]]
-name = "deck_smoke"
-srcDir = "test"
-root = "DeckSmoke"
-
-# The command line's test (test/CliSmoke.lean): `lake exe cli_smoke`, from the
-# repository root. It drives the built `agent-cat` binary over both example
-# programs and one deliberately ill-typed one, checking the three subcommands, the
-# exit codes and the parity of the diagnosis — and it checks that
-# `example/harden.wf` on disk is byte-for-byte the string `Dsl.flagshipSource`
-# compiled in, which is the one thing `include_str` cannot arrange by itself.
-# In defaultTargets for the reason the other smoke tests are.
-[[lean_exe]]
-name = "cli_smoke"
-srcDir = "test"
-root = "CliSmoke"

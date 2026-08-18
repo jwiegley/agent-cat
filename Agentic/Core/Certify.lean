@@ -40,20 +40,21 @@ can do.
 **What is outside.** The certificate certifies *this* run's value against *this*
 run's table. It does not certify the workflow, the next run, or that the table
 is an honest record of what was said — the log is only as good as the rule that
-`Agentic/Core/Exec.lean`'s oracle is the only path to an answer. Its one real
-gap is in the other direction: `worldOf` totalizes by defaulting, so a cell the
+a runner's `Oracle` is the only path to an answer. Its one real gap is in the
+other direction: `worldOf` totalizes by defaulting, so a cell the
 table never recorded still answers, and a plan can be certified against a world
 the run only partly determined. The check for that is *coverage* — every event
 of the replayed transcript recorded in the table, with the answer the replay
 reads (`Plan.Covered`, in `Agentic/Core/Report.lean`, where
 `Plan.certify_sound_of_covered` turns this module's *some* world into *every*
 world extending the log) — and coverage is meaningful only because
-no cell nobody answered is ever written *into* a table. Two rules keep it that
-way, and both are in `Agentic/Core/Exec.lean`: an answer the trusted base could
-not read aborts the run (`Exec.oracle`), and an *act* — or anything asked of a
-person — whose turn did not complete aborts it too
-(`Exec.requiresCompletedTurn`). Either way the alternative would be a log entry
-indistinguishable, in the table, from one somebody gave.
+no cell nobody answered is ever written *into* a table. The rule that keeps it
+that way is in `Agentic/Core/Exec.lean`: an answer the trusted base could not
+read, after every re-ask the settings allow, aborts the run
+(`Exec.askDecoding`) rather than recording a default. A runner owes the same
+discipline at every other boundary it opens — a turn that did not complete is
+the same case — because the alternative is a log entry indistinguishable, in
+the table, from one somebody gave.
 -/
 
 namespace Agentic.Core
@@ -254,16 +255,14 @@ theorem Plan.runCertified_certified {A : Type} [DecidableEq A] (o : Oracle Id)
     (p : Plan [] A) : (Plan.runCertified o p).2.2 = true :=
   certify_execWith o p
 
-/-- `[[execCertifiedIO st cfg p]]` = `Agentic.Core.execIO` with the warrant
-attached: the plan run against a live adapter, returning the answer, the world
-the run constructed, and whether replaying that world reproduces the answer.
+/-! ## Where the `IO` entry point went
 
-An `IO` definition and not a theorem, like everything else that makes bytes
-happen. What is proved is the `Id` instantiation of the same wrapper
-(`Plan.runCertified_certified`); what this adds is that the check is actually
-performed, on every run, against the log the run kept. -/
-def execCertifiedIO {A : Type} [DecidableEq A] (st : Exec.Settings := {})
-    (cfg : Acp.Config := {}) (p : Plan [] A) : IO (A × Table × Bool) :=
-  Acp.withConn cfg fun conn => Plan.runCertified (Exec.oracle st conn) p
+`execCertifiedIO` stood here: `Agentic.Core.execIO` with the warrant attached.
+It is gone with the transport it opened (`Agentic/Core/Acp.lean`), and nothing
+above it moved — `Plan.runCertified` is monad-polymorphic, so a runner that
+supplies its own `Oracle m` gets the same wrapper and the same warrant. The
+certificate layer is what `agentic-run` on the Haskell side ports; this file is
+its reference, and the two `#print axioms` above are the property being ported.
+-/
 
 end Agentic.Core

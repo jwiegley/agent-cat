@@ -235,15 +235,17 @@ alexey, low. parseAndCheckRawWith and RawBlock.revisionBounds are defined in Exp
 ]
 #+end_src
 
-* TODO [#B] DSL: no meaning function for the surface — state [[RawBlock]] and prove denote-after-check equations
+* DONE [#B] DSL: no meaning function for the surface — state [[RawBlock]] and prove denote-after-check equations
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-22m
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 19:00]
-:MODIFIED: [2026-08-15 Sat 17:22]
+:MODIFIED: [2026-08-18 Tue 13:05]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-18 Tue 13:05]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -261,6 +263,13 @@ abstraction pass, high; converges with deep-review's proof-scope observation. Th
     "author": "johnw",
     "text": "Corrected signature and re-costed route, from the adversarially-verified tests-vs-theorems analysis (see acat-dsl-guard-theorems-dqz for the cheap extractions).\n\n**The signature as originally sketched does not typecheck against the round-16 checker.** `[[RawBlock]] : Bindings Γ → Option (Env Γ → Dlg Unit)` is missing three things the real `checkBlock` carries (Check.lean:514-515): the function table and the pending loop result are required arguments (both `Type 1`), and the monad is `Except CheckError`, not `Option`. The composite to prove is\n\n    ∀ (fns : Fns) (Γ : Ctx) (S : Bindings Γ) (pend : Option (Pend Γ))\n      (b : RawBlock) (p : Plan Γ Unit),\n      checkBlock fns Γ S pend b = .ok p →\n      ∀ γ : Env Γ, denote p γ = ⟦b⟧ fns S pend γ\n\nwith `⟦·⟧` supplied independently — and note there is **no `.revising` clause equation**: `.bind _ _ (.revising …) rest` emits nothing by itself; the loop's meaning appears at the consuming `.caseResult` (Check.lean:628-631, 669-683), so the meaning function must carry the pending result exactly as the checker does.\n\n**Effort re-costing, both directions.** Cheaper than feared: `denotes_revising` already exists (Denote.lean:493) with `reviseLoop` and the Acceptance theorems, and the three continuation obligations — `Plan.Denotes (checkCont chk) …`, likewise `reviseCont`, `finishCont` — each discharge in ~2 lines by `denote_sub` (each is `Plan.sub` of one plan, Check.lean:458-477). Dearer than hoped: the uncosted work is stating `⟦RawBlock⟧` itself, and the equations quantify away the checker's prompt/kind computation — either they take `Prompt.expr`/`bindKind` results as hypotheses (then they say nothing about the rendered words) or `⟦·⟧` re-implements those functions (then the agreement diffs two copies of one algorithm).\n\n**Consequence for the battery.** 28 of the 45 §9 discovery pins read a concrete rendered prompt through `promptAt`; those stay even after this issue closes. The honest end state is *thinning §9 to roughly one pin per construct as the fixture witness*, with the per-construct equations carrying the ∀-content — not deleting the section. The flagship's universal trace agreement (DslFlagship \"What is not proved\" §2) additionally needs the bespoke per-clause agreement with the hand-written `Harden.demo`, which no meaning function supplies.\n",
     "created_at": "2026-08-16T00:22:04Z"
+  },
+  {
+    "id": 124,
+    "issue_id": "acat-22m",
+    "author": "johnw",
+    "text": "Closed by the .wf retirement: the .wf surface is retired (owner ruling 2026-08-18, Haskell surface only); a meaning function for a surface that no longer exists has no subject",
+    "created_at": "2026-08-18T20:05:37Z"
   }
 ]
 #+end_src
@@ -331,21 +340,37 @@ From acat-ozh: acat-jmm's first hard consumer. At SqZero Prop Prop / Cost / Prob
 
 From acat-5b7's honest scope: retryT/fanT need an n-ary Key.splice (provable, unproved); bindT needs a uniformly-chosen relabelling; shareT is different in kind (gate-erasure genuinely false under rel bases — may need its own equivalence layer). Until then Workflow quotients the seq/par/sum/choice/gate/scope sub-algebra only.
 
-* TODO [#C] DSL checker: Theta(k^2) Bindings plumbing on the MCP path, which accepts unbounded remote source
+* DONE [#C] DSL checker: Theta(k^2) Bindings plumbing on the MCP path, which accepts unbounded remote source
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-3wq
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 19:00]
-:MODIFIED: [2026-08-14 Fri 19:00]
+:MODIFIED: [2026-08-18 Tue 13:05]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-18 Tue 13:05]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
 deep-review, medium. Bindings.rename remaps the whole table in closures at every binder (Check.lean:80-91), so k lets cost Theta(k^2) closure allocations and each variable read walks a compose chain; the revising clause pays a double rename (Check.lean:446). Mcp.runCheck (Mcp.lean:1117-1124) type-checks source straight from a tool call with no length limit. Fix: store a de Bruijn index in Binding and build the Expr at lookup (push becomes cons, rename disappears), or cap source size on the MCP entry.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 129,
+    "issue_id": "acat-3wq",
+    "author": "johnw",
+    "text": "Closed by the .wf retirement: the MCP path that accepted unbounded remote source is removed with the MCP server",
+    "created_at": "2026-08-18T20:05:38Z"
+  }
+]
+#+end_src
 
 * TODO [#C] Atkey-parameterise Term with the context index
 :PROPERTIES:
@@ -456,21 +481,37 @@ Term hard-codes the const-e collapse by omission — the exact symptom §9 diagn
 ]
 #+end_src
 
-* TODO [#C] DSL tooling: pre-run floor/ceiling cost report (Over/Under fold) with dry-run presentation and machine diagnostics
+* DONE [#C] DSL tooling: pre-run floor/ceiling cost report (Over/Under fold) with dry-run presentation and machine diagnostics
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-455
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 20:22]
-:MODIFIED: [2026-08-14 Fri 20:22]
+:MODIFIED: [2026-08-18 Tue 13:05]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-18 Tue 13:05]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
 Adopted from the 2026-08-14 web survey (comparison judge, acat-k28 phase C). (1) Add a second fold over the existing finite cost tree computing the selective-functors Over/Under pair: the UNDER set is the questions asked in every world (the floor — exactly the panel dispatchable immediately); the OVER set is every question any world can ask (the ceiling). No former, no shape change; sources: Mokhov et al Selective Applicative Functors (static.tex in github.com/snowleopard/selective), Haxl/ApplicativeDo as the cautionary tale (never recover the rung by a heuristic desugarer — GHC's own manual admits ApplicativeDo 'might miss an opportunity'; ours is syntax, {$x} vs {x}). (2) Presentation modeled on Snakemake --dry-run job tables + a --why column naming the binding that forced each question (Snakemake -r). (3) A machine-readable validate mode shaped like AWS ValidateStateMachineDefinition: result OK|FAIL plus diagnostics {code, message, severity, location}, pitched for CI/pre-commit, with the stated stability discipline (rely on result, not on message wording). (4) LlamaIndex framing for docs: the same declarations serve two moments — before a run (every possible path) and after (what happened); our cost tree IS the picture and a transcript is a sub-tree of it.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 127,
+    "issue_id": "acat-455",
+    "author": "johnw",
+    "text": "Closed by the .wf retirement: agentic-run cost is the surviving pre-run cost report; the .wf CLI it was filed against is removed",
+    "created_at": "2026-08-18T20:05:38Z"
+  }
+]
+#+end_src
 
 * TODO [#C] Mathlib bridge: PMF for the edge measure, ENNReal/Tropical csum instances, Stoch for the kernel category
 :PROPERTIES:
@@ -1293,18 +1334,34 @@ Deliberately not a constructor; castGrade covers =. The <= case is a structural 
 
 From acat-ozh: Mat Prop is the only matrix star; at Prob the csum-of-powers construction may work BECAUSE suprema are attained — plausibly the cheapest second matrix star, sidestepping acat-9ml's missing reindexing law at this carrier.
 
-* TODO [#C] DSL: implement 'panel, at least n must approve' (quorum read-out) with its three required theorems
+* DONE [#C] DSL: implement 'panel, at least n must approve' (quorum read-out) with its three required theorems
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-f10
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 22:27]
-:MODIFIED: [2026-08-14 Fri 22:27]
+:MODIFIED: [2026-08-18 Tue 13:05]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-18 Tue 13:05]
+:CLOSE_REASON: done
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
 :END:
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 126,
+    "issue_id": "acat-f10",
+    "author": "johnw",
+    "text": "Closed by the .wf retirement: panel quorum was a .wf surface feature; the surface is retired - if quorum is wanted it will be a new Agentic.Workflow feature with its own issue",
+    "created_at": "2026-08-18T20:05:37Z"
+  }
+]
+#+end_src
 
 * DONE [#B] Carriers via Mathlib: ENat/Tropical for Cost, ENNReal/PMF for probability and expectation
 :PROPERTIES:
@@ -2556,15 +2613,17 @@ HIGH (deep/alexey): SqZero has no CompleteCSemiring and no PMod P M beyond the d
 
 scale n (scale 0 f) = bounded n while scale (n*0) f = bounded 0: the composite over-approximates (sound as upper bound; a fan of a 0-fan runs nothing). Any future fanT-fusion/normalization rule holds as scale (n*m) f <= scale n (scale m f), not equality. Record before a normalization pass assumes it.
 
-* TODO [#C] DSL: a diagnosis inside a library carets the program's text — Pos has no module field
+* DONE [#C] DSL: a diagnosis inside a library carets the program's text — Pos has no module field
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-pos-module-attribution-oxq
 :LABELS:   []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-08-15 Sat 15:05]
-:MODIFIED: [2026-08-15 Sat 15:05]
+:MODIFIED: [2026-08-18 Tue 13:05]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-18 Tue 13:05]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -2575,6 +2634,20 @@ Round 16 gave the front end modules (import), so a CheckError can now point into
 The design of record (doc/research/dsl-redesign/fn-import-design.md, 'The one tax that is not local') prescribes the fix: add module : String := "" to Dsl.Pos, stamped by the parser per module, printed by ToString CheckError, added to Mcp.checkErrorJson. Defaulted so structure-instance literals are unchanged, but the ~25 anonymous constructors in Parse.lean need a Pos.at helper, and flagshipRaw/battery position pins recompute.
 
 Until then: the 'in module' prefix is the attribution, and the CLI's caret is best-effort. Acceptance: a syntax error inside an imported library renders with its own file's line quoted (or no caret), never the program's.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 128,
+    "issue_id": "acat-pos-module-attribution-oxq",
+    "author": "johnw",
+    "text": "Closed by the .wf retirement: Pos module attribution was a parser/import-walk diagnostic; both are removed",
+    "created_at": "2026-08-18T20:05:38Z"
+  }
+]
+#+end_src
 
 * DONE [#B] Profunctor design research: term language and evaluator
 :PROPERTIES:
@@ -3070,15 +3143,17 @@ Grounded by 3-agent recon 2026-08-12 (pi-claude-bridge source, incite entry poin
 ]
 #+end_src
 
-* TODO [#B] DSL: define macro system is unhygienic — capture, dup, forward-ref, budget, overrides
+* DONE [#B] DSL: define macro system is unhygienic — capture, dup, forward-ref, budget, overrides
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-ulu
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 19:00]
-:MODIFIED: [2026-08-14 Fri 23:23]
+:MODIFIED: [2026-08-18 Tue 13:05]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-18 Tue 13:05]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -3096,6 +3171,13 @@ From the 2026-08-14 heavy review (7 passes; sources: deep-review, alexey, valida
     "author": "johnw",
     "text": "Implementation (round eleven): capture is now unwritable ({$x} vs {x} with collision refusals), duplicates and forward references are refused, define bodies must expand to literals, and a binder may not spell a define — all pinned in DslSmoke. REMAINING: the expansion budget. All-literal bodies prevent hole nesting but not text doubling: define d1 = \"{$d0}{$d0}\" still squares the text per layer, so N defines can still materialise 2^N characters at parse time. A cumulative character budget in parseDefines is still owed.",
     "created_at": "2026-08-15T06:23:06Z"
+  },
+  {
+    "id": 125,
+    "issue_id": "acat-ulu",
+    "author": "johnw",
+    "text": "Closed by the .wf retirement: the define macro system died with the parser in the .wf retirement",
+    "created_at": "2026-08-18T20:05:37Z"
   }
 ]
 #+end_src

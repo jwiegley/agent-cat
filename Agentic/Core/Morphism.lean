@@ -721,9 +721,9 @@ nose. The two below are equalities of **terms**.
 and the gap is not academic here: `Plan.size`, `Plan.askNodes`,
 `Cost.costSummary` and `Explain.planLines` are **not** `≈ᵖ`-invariant
 (`level_not_equiv_invariant` below exhibits the failure for `level`), and all
-four are pinned — by the frozen corpus and, for `planLines`, byte-for-byte by
-`test/CliSmoke.lean`. A rewriting pass licensed only by the `≈ᵖ` laws may move a
-frozen number; one licensed by the syntactic laws cannot.
+four are pinned by the frozen corpus under `test/corpus/`. A rewriting pass
+licensed only by the `≈ᵖ` laws may move a frozen number; one licensed by the
+syntactic laws cannot.
 
 The `≈ᵖ` versions stay because they are the ones that sit in the table of
 descended monad laws, alongside `bindP_pure` and `bindP_assoc`, which are *only*

@@ -17,10 +17,10 @@
 -- Module      : Agentic.WF
 -- Description : The @[wf|…|]@ prompt quoter, and what a @{hole}@ may name.
 --
--- A prompt in the @.wf@ language is prose in a fence with @{name}@ holes in
--- it. This module is that fence, as a quasiquoter, and nothing else: it is not
--- a parser of the language (@connection.md@ D10), and the only production it
--- knows is the hole.
+-- A prompt in this language is prose in a fence with @{name}@ holes in it.
+-- This module is that fence, as a quasiquoter, and nothing else: it is not a
+-- parser of the language (@connection.md@ D10) — there is no concrete syntax
+-- to parse, here or in Lean — and the only production it knows is the hole.
 --
 -- __The grammar.__ The only metacharacter is @{@.
 --
@@ -32,13 +32,13 @@
 --     fragment. A mistyped hole is the one failure mode that would change a
 --     prompt without saying so, and prompts are what the corpus compares.
 --
--- __The layout__ is @string-interpolate@'s @[__i|…|]@ rule, which is also what
--- the @.wf@ fence does: CRLF becomes LF, leading and trailing whitespace-only
--- lines are dropped, the longest common leading-whitespace prefix of the
--- remaining non-blank lines is stripped from every line, the lines are joined
--- with @\\n@, and there is __no trailing newline__. A prompt that must end in
--- one is spelled @[wf|…|] '<>' ['Agentic.Builder.lit' "\\n"]@; the @.wf@ fence
--- cannot write one either.
+-- __The layout__ is @string-interpolate@'s @[__i|…|]@ rule, which is the rule
+-- the frozen prompts were laid out under: CRLF becomes LF, leading and
+-- trailing whitespace-only lines are dropped, the longest common
+-- leading-whitespace prefix of the remaining non-blank lines is stripped from
+-- every line, the lines are joined with @\\n@, and there is __no trailing
+-- newline__. A prompt that must end in one is spelled
+-- @[wf|…|] '<>' ['Agentic.Builder.lit' "\\n"]@.
 --
 -- __Chunking is normative.__ Lean's @Prompt.normalize@
 -- (@Agentic\/Core\/Dsl\/Syntax.lean:152@) drops empty literals and
@@ -52,8 +52,8 @@
 -- splices as an @interp@ chunk under the name that binding /prints/, or a
 -- @define@ — a plain 'Text' or a @Words@ value — which splices as the literal
 -- chunks it is. That is what makes @{spec}@ and @{patch}@ look identical in
--- the source and mean different things, exactly as the @.wf@ parser decides by
--- whether the name is a @define@.
+-- the source and mean different things: the /type/ of what the name resolves
+-- to decides, and nothing in the fence has to be told which it is.
 --
 -- __The printed name comes from the handle, never from the source.__ A hole
 -- names a Haskell variable, and a Haskell variable's spelling is not readable
@@ -111,8 +111,8 @@ import Language.Haskell.TH.Quote (QuasiQuoter (..))
 
 -- | Anything a @{…}@ may name.
 --
--- The three instances are the three things the @.wf@ language lets a hole
--- resolve to, and no more: a name in scope, a @define@ that is a string, and a
+-- The three instances are the three things a hole may resolve to, and no
+-- more: a name in scope, a @define@ that is a string, and a
 -- @define@ that is itself a fence.
 class Says a (s :: Scope) where
   -- | The chunks this value contributes, in place.

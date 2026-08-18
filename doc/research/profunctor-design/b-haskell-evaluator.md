@@ -1217,4 +1217,4 @@ Precise where I am confident; flagged where I am not.
 Repository references are by file and line as of the working tree this document was
 written against: `Agentic/Core/{Plan,Level,Cost,Denote}.lean`,
 `haskell/src/Agentic/{Plan,World,Exec,Builder,Workflow,WF,Notation,Observe}.hs`,
-`doc/research/dsl-redesign/connection.md` §0.1, §3.1, §3.5.
+`doc/research/connection.md` §0.1, §3.1, §3.5.

@@ -8,10 +8,10 @@ import Mathlib.Data.Multiset.Sort
 The reporting layer of the analyses: two renderings, `Explain.planLines` and
 `Explain.costLines`, that say what `Agentic/Core/Level.lean`,
 `Agentic/Core/Cost.lean` and `Agentic/Core/Report.lean` already know about a
-`Plan [] Unit`, and nothing else. `agent-cat plan` and `agent-cat cost` are these
-two functions with a file read in front of them, and `Agentic/Core/Mcp.lean`'s
-`workflow_check` is `Explain.costSummary` with a JSON encoder in front of it. One
-fold, one set of numbers, three surfaces.
+`Plan [] Unit`, and nothing else. `Explain.costSummary` with a JSON encoder in
+front of it is what `conformance/Conformance.lean` serializes into every
+program entry of the frozen corpus, so these numbers are also what the Haskell
+implementation is held to. One fold, one set of numbers.
 
 **Three things here are decisions rather than transcriptions.**
 
@@ -269,8 +269,7 @@ kind, its addressee, its two scope axes and its draw.
 
 `Q.axes` reads the axes off a *question*, and a shape is a question with its words
 forgotten (`Q.withPrompt_shape`), so asking a shape for its own axes is asking the
-question with the empty prompt — the move `Mcp.shapeJson` makes for the same
-reason. -/
+question with the empty prompt. -/
 def shapeLine (c : Code) (s : Q.Shape c) : String :=
   let q := s.withPrompt ""
   s!"{pad 8 (Exec.Code.name c)}{pad 24 (Exec.Addressee.render s.addressee)}\
@@ -302,7 +301,7 @@ def Plan.explainAlg : PlanAlg (fun _ _ => Nat → List String) where
   dyn _ _ _ := fun d =>
       [ s!"{Explain.indent d}dyn     a plan computed from an answer: its continuations are \
            indexed by an unbounded answer, so there is no finite term below this line. This is \
-           the dynamic rung, and no source text reaches it (Dsl.parseAndCheck_level_le)." ]
+           the dynamic rung, and no checked program reaches it (Dsl.checkProgram_level_le)." ]
 
 /-- `[[Plan.explain d p]]` = the term at depth `d`, as lines.
 `Plan.explainAlg.fold`. -/
@@ -344,118 +343,19 @@ theorem explain_dyn {Γ : Ctx} {A : Type} (d : Nat) (b : Code) (e : Expr Γ (El 
     Plan.explain d (Plan.dyn b e f)
       = [ s!"{Explain.indent d}dyn     a plan computed from an answer: its continuations are \
              indexed by an unbounded answer, so there is no finite term below this line. This \
-             is the dynamic rung, and no source text reaches it \
-             (Dsl.parseAndCheck_level_le)." ] := rfl
+             is the dynamic rung, and no checked program reaches it \
+             (Dsl.checkProgram_level_le)." ] := rfl
 
 end Plan
 
-/-! ## The front end, with the source syntax kept
-
-`Dsl.parseAndCheckE` reads a text and returns the plan. A tool that also wants to
-say something about what was *written* — and the one thing the term does not hold
-is the `up to n revisions` of a bounded revision — needs the raw syntax as well,
-and must not get it by parsing twice. -/
-
 namespace Dsl
-
-/-- `[[parseAndCheckRawProgramWith ov mods s]]` = the front end, keeping the
-raw syntax of the block it ran: the same parse — imports resolved from `mods`,
-functions checked into the table — the same check, the same diagnosis. The raw
-kept is the *spliced main block*, because that is the one whose source-level
-facts (the `at most n amendments` bounds) a rendering wants; a function body
-cannot hold a bounded revision, so nothing is lost to the table.
-
-`parseAndCheckRawProgramWith_eq` is the statement that this is not a second
-front end. -/
-def parseAndCheckRawProgramWith (ov : List (String × Prompt))
-    (mods : List (String × String)) (s : String) :
-    Except CheckError (Raw × Plan [] Unit) :=
-  match parseProgramWith ov mods s with
-  | .error e => .error e
-  | .ok prog =>
-    match checkProgram prog with
-    | .error e => .error e
-    | .ok p => .ok (prog.main, p)
-
-/-- The moduleless spelling: a single file, keeping its raw syntax. -/
-def parseAndCheckRawWith (ov : List (String × Prompt)) (s : String) :
-    Except CheckError (Raw × Plan [] Unit) :=
-  parseAndCheckRawProgramWith ov [] s
-
-/-- The front end with no runtime parameters, which is the front end: `parse` is
-`parseWith []` (`Dsl.parse_eq_parseWith_nil`), so this is not a second reading
-of a program but the same one with an empty list of overrides. -/
-def parseAndCheckRaw (s : String) : Except CheckError (Raw × Plan [] Unit) :=
-  parseAndCheckRawWith [] s
-
-/-- **A program loaded with no overrides is the program.** The obligation
-`--define` carries: the default path must produce the identical term, so that
-every theorem proved about `parse`'s output is a theorem about what the command
-line actually ran. -/
-theorem parseAndCheckRaw_eq_with_nil (s : String) :
-    parseAndCheckRaw s = parseAndCheckRawWith [] s := rfl
-
-/-- **One front end.** Forgetting the raw syntax gives
-`Dsl.parseAndCheckProgramWith` back on the nose — the same plan on success and
-the same `CheckError` on failure — so a tool built on this one diagnoses what a
-tool built on that one diagnoses. This is the parity of `agent-cat
-run|cost|plan` discharged by construction rather than by three call sites
-agreeing. -/
-theorem parseAndCheckRawProgramWith_eq (ov : List (String × Prompt))
-    (mods : List (String × String)) (s : String) :
-    (parseAndCheckRawProgramWith ov mods s).map Prod.snd
-      = parseAndCheckProgramWith ov mods s := by
-  cases hp : parseProgramWith ov mods s with
-  | error e =>
-    simp [parseAndCheckRawProgramWith, parseAndCheckProgramWith, Except.map, hp]
-  | ok prog =>
-    cases hc : checkProgram prog with
-    | error e =>
-      simp [parseAndCheckRawProgramWith, parseAndCheckProgramWith, Except.map, hp, hc]
-    | ok p =>
-      simp [parseAndCheckRawProgramWith, parseAndCheckProgramWith, Except.map, hp, hc]
-
-/-- …and hence every program the *overriding, importing* front end accepts is
-at or below the branch rung too: forgetting the raw syntax lands in
-`Dsl.parseAndCheckProgramWith`, whose bound is `Dsl.checkProgram_level_le`'s. -/
-theorem parseAndCheckRawProgramWith_level_le (ov : List (String × Prompt))
-    (mods : List (String × String)) (s : String)
-    (r : Raw) (p : Plan [] Unit)
-    (h : parseAndCheckRawProgramWith ov mods s = .ok (r, p)) :
-    level p ≤ Level.branch := by
-  refine parseAndCheckProgramWith_level_le ov mods s p ?_
-  rw [← parseAndCheckRawProgramWith_eq, h]
-  rfl
-
-/-- The moduleless spelling of the bound, which is what a single-file tool
-holds. -/
-theorem parseAndCheckRawWith_level_le (ov : List (String × Prompt)) (s : String)
-    (r : Raw) (p : Plan [] Unit) (h : parseAndCheckRawWith ov s = .ok (r, p)) :
-    level p ≤ Level.branch :=
-  parseAndCheckRawProgramWith_level_le ov [] s r p h
-
-/-- …and the moduleless, overrideless spelling of the parity, stated against
-`parseAndCheckE`, which is `parseAndCheckProgramWith [] []` by definition. -/
-theorem parseAndCheckRaw_eq (s : String) :
-    (parseAndCheckRaw s).map Prod.snd = parseAndCheckE s :=
-  parseAndCheckRawProgramWith_eq [] [] s
-
-/-- …and hence every program this front end accepts is at or below the branch
-rung, which is what makes a cost report over a source file compile
-(`Dsl.parseAndCheck_level_le`). -/
-theorem parseAndCheckRaw_level_le (s : String) (r : Raw) (p : Plan [] Unit)
-    (h : parseAndCheckRaw s = .ok (r, p)) : level p ≤ Level.branch := by
-  refine parseAndCheck_level_le s p ((parseAndCheck_ok_iff s p).mpr ?_)
-  rw [← parseAndCheckRaw_eq, h]
-  rfl
 
 /-! ### The one thing the term does not hold -/
 
-/-- **The draw index reaches the question** — for every ask the surface can
-write, not just the battery's `independent draw 2` fixture: whatever plan a
-binding's ask elaborates to, the first event of any run of it carries the
-source-written draw. Stated here rather than in `Dsl.lean` because it speaks
-of `Plan.trace`. -/
+/-- **The draw index reaches the question** — for every ask a surface can build,
+not just one fixture: whatever plan a binding's ask elaborates to, the first
+event of any run of it carries the draw the `RawAsk` was written with. Stated
+here rather than in `Dsl.lean` because it speaks of `Plan.trace`. -/
 theorem bindForm_ask_head_draw {A : Type} {Γ : Ctx} (fns : Fns) (c : Code)
     (S : Bindings Γ) (a : RawAsk) (form : Plan (c :: Γ) A → Plan Γ A)
     (h : bindForm fns c S (.ask a) = .ok form)
@@ -541,7 +441,7 @@ def revisionLines (b : Dsl.Raw) : List String :=
 paths, from `Cost.costM`.
 
 `h : level p ≤ Level.branch` is the argument `costM` demands, which is why
-`Dsl.parseAndCheck_level_le` is the term every tool over source files is built on.
+`Dsl.checkProgram_level_le` is the term every tool over programs is built on.
 The folds are `Cost.minFold` and `Cost.maxFold` at `tick`, so the numbers
 are consultations — and they are **bounds**: `Cost.minFold_not_attained` exhibits a
 plan whose `minFold` no world pays.
@@ -598,9 +498,9 @@ Three regimes, and the output says which one it is in.
 * `level = dynamic`: there is no cost tree of any shape and no finite set of bills
   at all (`Cost.no_finite_bill_set_at_dyn`, `Cost.no_cost_tree_at_dyn`), so the
   non-existence statement is printed where a number would go. Unreachable from a
-  source file — `Dsl.parseAndCheck_level_le` says the language cannot write a
-  `dyn` — and written out because this function is defined on plans, not on
-  files. -/
+  checked program — `Dsl.checkProgram_level_le` says the elaboration cannot emit
+  a `dyn` — and written out because this function is defined on plans, not on
+  programs. -/
 def costLines {A : Type} (p : Plan [] A) : List String :=
   let hdr :=
     [ s!"level: {levelName (level p)}   consultations written in the term: {p.askNodes}   \

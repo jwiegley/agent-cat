@@ -2,12 +2,14 @@
 -- Module      : Example.Harden
 -- Description : The walked examples, written in the authoring surface.
 --
--- @agent-cat@ ships two programs under @example\/@ that are not corpus
--- fixtures but /prose/: the flagship @harden.wf@, which the language guide
--- walks line by line, and @hello.wf@, the smallest thing that is still a
--- workflow. Both are frozen in the corpus (@example-000@ and @example-001@),
--- and both are written here in "Agentic.Workflow" — ordinary Haskell values,
--- sugar over "Agentic.Builder", whose combinators these statements are.
+-- Two of @agent-cat@'s frozen corpus entries are not conformance fixtures but
+-- /prose/: @example-000@, the flagship, which the documentation walks line by
+-- line, and @example-001@, the smallest thing that is still a workflow. This
+-- module /is/ those two programs, written in "Agentic.Workflow" — ordinary
+-- Haskell values, sugar over "Agentic.Builder", whose combinators these
+-- statements are. (Both frozen terms were emitted from @.wf@ sources when the
+-- repository still had a concrete syntax; the terms did not move when it went,
+-- and this module is the text of record for them now.)
 --
 -- Two callers share these programs:
 --
@@ -19,28 +21,27 @@
 -- executes is the same value the conformance runner has already held against
 -- the oracle.
 --
--- == How to read this against @harden.wf@
+-- == How to read this against @example-000@
 --
--- Statement for statement. @x <- ask …@ is @x <- ask …@, a bind that is a
--- Haskell bind; @W.do@ is @QualifiedDo@ and nothing more. A @```fence```@ is a
--- @[wf|…|]@, with the same @{name}@ holes and the same layout rule —
--- surrounding blank lines dropped, common indentation stripped, line breaks
--- kept, no trailing newline. A @define@ is a Haskell binding, spliced by a
--- hole that names it.
+-- Statement for statement with the frozen term. @x <- ask …@ is a bind that
+-- prints a bind; @W.do@ is @QualifiedDo@ and nothing more. A prompt is a
+-- @[wf|…|]@ fence, with the @{name}@ holes and the layout rule the frozen
+-- prompts were written under — surrounding blank lines dropped, common
+-- indentation stripped, line breaks kept, no trailing newline. A @define@ is a
+-- Haskell binding, spliced by a hole that names it.
 --
 -- The two names that are not binds are a /lambda/ and a /pattern/, and they
 -- are bindings too: @\\patch -> …@ under 'revising' is the carrier, and the
--- @patch@ of @Settled patch@ is the settled binding. The @.wf@ writes them
--- @revising draft as patch@ and @settled patch@.
+-- @patch@ of @Settled patch@ is the settled binding. Both print as bindings of
+-- the frozen program, which calls both @patch@.
 --
 -- The two branches are Haskell's own. @case result of@ is a regular @case@ on
 -- a regular data type, its arms @W.do@ blocks; the flag's branch is written
 -- @when ok $ W.do …@, which is 'Agentic.Workflow.when' — the one-armed @if@,
--- sealing its body with the @stop@ that the @.wf@ arm block's closing brace is
--- and printing the very same @ifFlag@ node, whose else arm is empty. The @.wf@
--- spells it @if ok { act … } else { }@ and this spells it in one arm, because
--- an author who has nothing to say in the other arm should not have to write
--- it twice.
+-- sealing its body with the implicit @stop@ an arm block ends in, and printing
+-- the very same @ifFlag@ node the frozen entry has, whose else arm is empty.
+-- Two arms are spelled here in one, because an author who has nothing to say
+-- in the other arm should not have to write it twice.
 --
 -- Nothing follows a @when@: it is a terminal, like the @if@ it sugars, so it
 -- ends the block exactly as the @stop@ it replaced did.
@@ -135,9 +136,9 @@ flagSpec = "Reply with exactly yes or no."
 -- The flagship
 -- ---------------------------------------------------------------------------
 
--- | @example\/harden.wf@: read the house style, draft a patch, review it by a
--- three-model panel under a bounded revision, and — if the owner says so —
--- apply it.
+-- | The flagship, corpus entry @example-000@: read the house style, draft a
+-- patch, review it by a three-model panel under a bounded revision, and — if
+-- the owner says so — apply it.
 --
 -- Level @branch@, size 36, 19 ask nodes, 9 paths folding between 5 and 15.
 -- @codes@ is @null@: a program that branches has no single sequence of answer
@@ -193,7 +194,7 @@ hardenProgram = workflow W.do
 -- The small one
 -- ---------------------------------------------------------------------------
 
--- | @example\/hello.wf@: two questions and an act.
+-- | The small one, corpus entry @example-001@: two questions and an act.
 --
 -- Level @pipeline@, size 4, one path, @codes [text, text, receipt]@ and both
 -- bills 3. It exists so that the CLI has a subject that is not the flagship:

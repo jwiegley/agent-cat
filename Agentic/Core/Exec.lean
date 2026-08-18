@@ -1,5 +1,4 @@
 import Agentic.Core.Denote
-import Agentic.Core.Acp
 
 /-!
 # The interpreter: the fold at the execution monad, and the one place `IO` enters
@@ -22,10 +21,11 @@ order is the point.
    history-dependent, lying, drifting strategy and adequacy holds with **no
    hypothesis about it**; at `m := Id` with the oracle `fun c q _ => pure (ω c q)`
    it computes `Dlg.run ω`, which is the factorization theorem.
-3. **`Exec.oracle`** — the `IO` answering service over `Agentic.Core.Acp`. It is
-   an `Oracle IO`, and *no declaration the theorems are about mentions `IO`*:
-   the interpreter at `m := IO` is the interpreter at `m := Id`, instantiated.
-   `exec` is one line and every part of it is from layers 1–3.
+3. **The retry discipline** (`Exec.renderQ`, `Exec.attemptWith`,
+   `Exec.askDecoding`) — how a question becomes bytes and how an unreadable
+   reply is handled. It is parameterized by a `Say`, a transport reduced to a
+   function, and *no declaration the theorems are about mentions `IO`*: the
+   interpreter at `m := IO` is the interpreter at `m := Id`, instantiated.
 
 **What is proved, exactly.**
 
@@ -47,32 +47,25 @@ order is the point.
   `exec` with the oracle removed *is* `run ω ∘ denote`, and the table it leaves
   behind is a world agreeing with `ω` on the transcript.
 
-**What is `IO`, and is therefore definitions and not theorems.** `Exec.oracle`
-and everything it calls. It opens a session per question where the runtime was
-told to (`Settings.freshSessionPerQuestion`, which is this layer's approximation
-of "a world is a function of the question"), routes a question put to a *person*
-to the keyboard where the runtime was told to (`Settings.askPersonOnStdin`:
-stderr out, stdin in, so a supervised run and a piped one are one run), selects
-the scope over the protocol where the adapter takes it, renders a question into
-a prompt, **says whether a tool call arriving during that question may write**
-(`Settings.permission`, whose default `permissionByCode` grants an act and denies
-an ask — the transport has no `Code` and so cannot decide this itself), sends it
-over the transport, reports how the turn ended, how long
-it took and what it was permitted (`Settings.onTurn`, `Settings.onPermission` —
-latency is not part of a meaning, which is why it
-is reported and never recorded), decodes the reply, re-asks on a decode failure,
-and **fails the run** in the two cases where there is no answer to record: when no attempt could be read
-(`Exec.oracle`), and when the turn that would have answered an *act* — or any
-question put to a person — did not complete (`Exec.say`, via
-`Exec.requiresCompletedTurn`). The one thing an answering service must never do
-is record an answer nobody gave, and an act nobody performed is a case of that. No declaration in this file is an
-`axiom`; the trust boundary is *documented*, never asserted as a proposition. An
-adapter that lies merely exhibits a different world, and `execM_adequacy`
-quantifies over all of them. Since none of that has a proof, it has a test
-instead: `test/ExecSmoke.lean` (`lake exe exec_smoke`) drives `exec` against
-`test/stub_adapter.py` and checks, among other things, that a plan asking one
-question twice prompts the adapter once, and that an unreadable answer aborts
-the run rather than entering the table.
+**What is `IO`, and is therefore definitions and not theorems.** Everything from
+`Exec.answerSpec` down. It renders a question into a prompt naming everything
+that determines the reply (`renderQ`), hands it to a transport supplied as a
+function (`Say`), decodes the reply through the trusted base, re-asks with a
+`nudge` on a decode failure, and **fails the run** in the one case where there is
+no answer to record: when no attempt could be read (`askDecoding`). The one thing
+an answering service must never do is record an answer nobody gave, and the
+docstring there says at length why a default is not an option. No declaration in
+this file is an `axiom`; the trust boundary is *documented*, never asserted as a
+proposition. An adapter that lies merely exhibits a different world, and
+`execM_adequacy` quantifies over all of them.
+
+**Where the transport went.** The Lean ACP and `agent-deck` transports, the
+`Oracle IO` over them (`Exec.oracle`) and the entry points `exec`/`execIO` are
+gone: `agentic-run` on the Haskell side is the runner, and this module is the
+reference its `Decode`, `norm`, `attempt` and `answerSpec` are ported from. What
+is pinned by `test/corpus/` — through `conformance/Conformance.lean`'s string
+layer — is exactly the trusted base: `norm`, `words`, `decodeVerdict` and
+`Decode` at each code.
 -/
 
 namespace Agentic.Core
@@ -780,7 +773,6 @@ same interpreter. -/
 
 namespace Exec
 
-open Agentic.Core.Acp
 
 /-- How a code names itself in a prompt header. -/
 def Code.name : Code → String
@@ -875,453 +867,40 @@ def nudge (c : Code) (reply : String) : String :=
   s!"\n\n[Your previous reply could not be read as a {Code.name c}: \
      {reply.trimAscii.toString}\n{answerSpec c}]"
 
-/-! ### May the addressee of *this* question write to the workspace?
-
-`Agentic/Core/Acp.lean` answers `session/request_permission` with the
-`Acp.Permission` it was handed for the question under way, and this is what
-hands it one. The transport cannot make this decision — it has no `Code`, no
-`Q`, and by construction no way of acquiring either — so the decision is made
-here, where a question is a thing.
--/
-
-/-- `[[permissionByCode c a]]` = whether a tool call the adapter asks for
-*during this question* is authorized.
-
-**An act may write; an ask may not.** `.ack` is the code whose whole point is an
-effect — the question does not ask what somebody thinks, it asks them to do
-something and say when it is done — so a tool call inside the session's working
-directory is what it was put for, and it is granted on the standing assumption
-`Acp.Permission` states. `.text`, `.verdict` and `.flag` are questions whose
-value is their *answer*: drafting a patch, reviewing one, or consenting to one
-requires nothing to be written, so a tool call arriving during one is denied.
-
-**Why this exists** (`acat-08l`). The transport used to hold one connection-wide
-`Permission` that nothing ever set, so `pickAllow` answered `allow_once` to
-every request whatever the question. A measured refusing run — the owner
-answered `no`, the transcript held six turns, no act was put, the bill was six,
-and `Harden.no_ack_of_refused` was satisfied — nevertheless ended with the
-scratch `parse.c` replaced by a hardened version, written during the *author's*
-draft turn. Nothing in the semantics was violated: the theorem is about
-acknowledgements, and the bytes were written by an editing tool the permission
-layer could not tell from a consented act. This function is the distinction the
-permission layer was missing.
-
-**What denial costs, measured, because it is not free.** A refused permission
-does not end the turn. The tool call fails, the model retries — sometimes with a
-different tool — apologises in prose, and the turn completes with `end_turn`;
-`test/stub_adapter.py`'s `APOLOGY` is a real transcript of it. So a denial buys
-its safety with tokens (ninety-odd thousand in the measured case) and produces
-*no protocol-level signal at all*: what arrives is an ordinary answer, which
-`Decode` will read as one. That is tolerable exactly where it is applied — an
-ask's answer is prose either way, and an apology for not writing a file is a
-truthful answer to a question that never wanted a file written — and it would
-not be tolerable for an act, which is why an act is granted.
-
-The addressee is an argument and is not read: who is asked does not change
-whether the question wanted an effect. It is there because a caller overriding
-`Settings.permission` may well want it — "this tool, never" is a policy about an
-addressee — and a policy that had to be rewritten to see one would be a policy
-nobody overrides. -/
-def permissionByCode (c : Code) (_a : Addressee) : Acp.Permission :=
-  match c with
-  | .ack => .grant
-  | .text | .verdict | .flag => .cancel
-
-/-- **Clause equation.** An act is granted, whoever is asked to perform it. -/
-@[simp] theorem permissionByCode_ack (a : Addressee) :
-    permissionByCode .ack a = .grant := rfl
-
-/-- **…and every ask is denied**: the three codes whose value is their answer
-get `.cancel`, whoever is asked. -/
-theorem permissionByCode_of_ne_ack {c : Code} (hc : c ≠ .ack) (a : Addressee) :
-    permissionByCode c a = .cancel := by
-  cases c <;> simp_all [permissionByCode]
-
-/-- **An ask selects no allow option, whatever the adapter offered.** The
-composition that matters: `Acp.permissionChoice` under this policy, at any code
-but `.ack`, is `none` — so no `options` array a permission request can carry
-can win a write to the workspace for a question that only wanted an answer. -/
-theorem permissionChoice_ask {c : Code} (hc : c ≠ .ack) (a : Addressee)
-    (params : Lean.Json) :
-    Acp.permissionChoice (permissionByCode c a) params = none := by
-  rw [permissionByCode_of_ne_ack hc a]; rfl
-
-/-- `[[Settings]]` = the policy an `IO` run needs and the semantics does not:
-how many times to re-ask, whether a person is at a keyboard, whether the mode
-axis goes over the protocol, which questions may write, and where warnings go.
+/-- `[[Settings]]` = the policy the retry discipline needs and the semantics
+does not: how many times to re-ask a reply the trusted base could not read, and
+where a warning about it goes.
 
 The value represents *this runtime's choices*. Nothing here is visible to any
 theorem: two runs with different `Settings` exhibit two worlds, and every result
-in this file quantifies over all of them. -/
+in this file quantifies over all of them.
+
+**What used to be here.** This structure carried a second half — a permission
+policy, protocol-level scope selection, model aliases, a fresh session per
+question, per-turn reporting — and every field of it was a policy about a *wire*
+that this package no longer owns. The Lean ACP and `agent-deck` transports are
+gone; `agentic-run` on the Haskell side is the runner. What is left below is the
+part that was never about a wire: render the question, read the reply, and if the
+trusted base cannot read it, say so and ask again — and if it still cannot,
+abandon the run rather than invent an answer. A transport supplies the bytes
+through `Say` and can be read back by nothing here. -/
 structure Settings where
   /-- How many times to re-ask after a reply the trusted base could not read.
   Only a `flag` can trigger this (`Decode_eq_none`). -/
   retries : Nat := 1
-  /-- Route `Addressee.person` questions to this process's stdin instead of the
-  adapter. Off by default, so an unattended run never blocks on a keyboard and
-  the adapter's stub answers for the human. -/
-  askPersonOnStdin : Bool := false
-  /-- Send the scope's mode axis as `session/set_mode`. Off makes the mode a
-  prompt header instead, for an adapter that does not implement the call. An
-  adapter that *refuses* the call needs no setting: the refusal is a value
-  (`Conn.setMode`), and the header carries the axis instead. -/
-  useSessionMode : Bool := true
-  /-- Send the scope's model axis as `session/set_config_option` with
-  `configId := "model"`. On by default because both real adapters implement it;
-  refusal falls back to the header exactly as the mode axis does. -/
-  useConfigOptionModel : Bool := true
-  /-- What an author's model name means to *this* adapter, given as pairs.
-
-  **Why an alias is a separate thing from resolution.** `Acp.resolveValue`
-  matches an author's name against the values the adapter advertises, and it is
-  deliberately unable to invent one (`Acp.resolveValue_value_mem`). The flagship
-  writes `model "deep"`, and claude advertises `default`, `opus[1m]`,
-  `claude-fable-5`, `sonnet` and `haiku`: `deep` is not a misspelling of any of
-  them, it is a *role*, and no matcher can bridge a role to a product name
-  without guessing. So the bridge is stated by whoever knows it —
-  `--model deep=opus` on the command line — and the guess is never made.
-
-  An alias is resolved before matching, not instead of it, so `deep=opus` still
-  goes through `resolveValue` and comes out as the advertised `opus[1m]`.
-
-  Empty by default, and the empty list is the identity (`aliasFor_nil`), so a
-  run that gives no alias behaves exactly as it did. -/
-  modelAliases : List (String × String) := []
-  /-- Open a **new session** (`session/new`) before every question the adapter
-  is asked.
-
-  Off by default, because it costs one round trip per question and a stub has
-  nothing to forget. On, it is the runtime's half of the semantics' central
-  assumption: a world is a function of the *question* (`Agentic/Core/World.lean`
-  — `Ω := (c : Code) → Q c → El c`, a function of the question and nothing
-  else), so an answer must not depend on what was asked before it. A single
-  session carries conversation history, and an agent that has just written a
-  patch is not the same answerer as one asked to review a patch cold; the memo
-  table, not the agent's memory, is where this runtime keeps what was said
-  (`Dlg.execM`). A fresh session is the closest a real adapter comes to that
-  discipline, and it is stated as a setting because it is a *policy*, not a
-  theorem: nothing here can force an agent to forget.
-
-  **It is the alternative to a handoff, and not a companion to one.** A run
-  configured with `Acp.Config.session := .load id` is *inside* somebody else's
-  transcript on purpose (`agent-cat run --session`), and opening a new session
-  before each question would throw that transcript away at the first question. So
-  a caller sets one or the other: the handoff buys context and continuity in the
-  session an operator is watching, and what it gives up is exactly this
-  approximation. `cli/AgentCat.lean` makes the choice where the flags are read. -/
-  freshSessionPerQuestion : Bool := false
-  /-- Which questions may write: what a `session/request_permission` arriving
-  during a question is answered with.
-
-  `permissionByCode` by default — an act is granted, an ask is denied — and that
-  default is the point of the field's existence (`acat-08l`). A caller who
-  genuinely wants the old connection-wide grant asks for it in as many words:
-
-  ```
-  { permission := fun _ _ => .grant }
-  ```
-
-  which is a sentence somebody has to write, and which a reader of a run's
-  configuration can see. -/
-  permission : Code → Addressee → Acp.Permission := permissionByCode
-  /-- Called once per permission decision, with the question it arrived during,
-  the tool it was about and whether it was granted.
-
-  Reporting, like `onTurn`, and it defaults to stderr rather than to nothing: a
-  run that denied an agent the workspace and paid a retry for it must not look
-  identical to one nobody asked anything of. A harness that wants the decisions
-  in its report collects them here (`RunReport.permissions`). -/
-  onPermission : Acp.PermissionDecision → IO Unit :=
-    fun d => do (← IO.getStderr).putStrLn s!"agentic: {d.render}"
-  /-- Where a warning goes: a turn that ended oddly, a reply being re-asked.
-  Warnings report what the run is *about* to do about something it noticed; they
-  are never a substitute for doing it, which is why an answer that could not be
-  read at all is an error and not a log line. -/
+  /-- Where a warning goes: a reply being re-asked. Warnings report what the run
+  is *about* to do about something it noticed; they are never a substitute for
+  doing it, which is why an answer that could not be read at all is an error and
+  not a log line. -/
   log : String → IO Unit := fun msg => do (← IO.getStderr).putStrLn s!"agentic: {msg}"
-  /-- Called once per *turn* — not per question, since a question that had to be
-  re-asked took two — with the code asked for, who was asked, how the turn
-  ended, and how many milliseconds it took.
-
-  Reporting and nothing else: the interpreter does not read it back, and a
-  `Settings` that drops every call runs identically. It exists because a live
-  run's latency and stop reasons are facts about the `IO` layer that no theorem
-  mentions and no transcript records, and an operator watching a workflow spend
-  real money is owed both. -/
-  onTurn : (c : Code) → Addressee → Acp.StopReason → Nat → IO Unit :=
-    fun _ _ _ _ => pure ()
-
-/-- Put the question to the person at the keyboard.
-
-**The prompt goes to stderr and the answer is read from stdin**, so that a
-supervised run and a piped one are the same run: `printf 'yes\n' | …` answers
-the owner's question, and stdout stays the transcript alone. One line, because a
-transport that needed a terminator would need a protocol, and this is a
-convenience for supervised runs rather than an interface. -/
-def askPersonStdin (who : String) (text : String) : IO String := do
-  let err ← IO.getStderr
-  err.putStrLn s!"\n--- question for {who} ---"
-  err.putStrLn text
-  err.putStr "> "
-  err.flush
-  let line ← (← IO.getStdin).getLine
-  return line.trimAscii.toString
-
-/-- `[[st.aliasFor m]]` = what this runtime calls the author's model `m`, or `m`
-itself where it has nothing to say. -/
-def Settings.aliasFor (st : Settings) (m : String) : String :=
-  match st.modelAliases.find? (fun a => a.1 == m) with
-  | some a => a.2
-  | none => m
-
-/-- **No aliases is no change.** The default path is the identity on the name
-the author wrote, so every run that gives no `--model NAME=REAL` sends what it
-sent before. -/
-theorem Settings.aliasFor_nil (st : Settings) (h : st.modelAliases = []) (m : String) :
-    st.aliasFor m = m := by simp [Settings.aliasFor, h]
-
-/-- Say something once per connection, under `key`. -/
-private def logOnce (st : Settings) (conn : Conn) (key : String) (msg : String) : IO Unit := do
-  if ← conn.firstWarning key then st.log msg
-
-/-- Put the model axis to the adapter as `session/set_config_option`, against
-the values the adapter itself advertised.
-
-**The failure this replaces.** A live run of the flagship against claude printed
-`warn session/set_config_option model='deep' was refused (Invalid value for
-config option model: deep); the model axis goes in the prompt header instead`,
-forty-odd times, and nothing said what claude *would* have taken. The adapter
-publishes exactly that at `session/new`, in `configOptions`; this reads it
-(`Conn.optionValues`) and resolves against it (`Acp.resolveValue`), so an author
-who writes a name the adapter spells differently gets the model they asked for
-and an author who writes a name it does not have is told the list.
-
-**Four outcomes, and each one is honest about what happened.**
-
-* The adapter published no catalogue at all — codex — so there is nothing to
-  resolve against and the value goes as written, which is what this code did
-  before. "It did not say" is not "it said no".
-* The name resolves. It is sent; if the match was not literal, the run is told
-  once which real model it got, because a run that quietly substituted a model
-  would be spending the owner's money on an addressee they did not name.
-* The name is ambiguous, or matches nothing. Nothing is sent, the fallback is
-  the prompt header exactly as before, and the warning **names the values the
-  adapter advertised** — once per connection, not once per question.
-* The call is sent and the adapter refuses it anyway. The header again, and the
-  adapter's own error quoted.
-
-The header fallback is honest — the addressee is still told which model was
-asked for, in words — but it must not be silent, because a silent fallback is
-how the axis came to mean nothing at all. -/
-def selectModel (st : Settings) (conn : Conn) (m : String) : IO Bool := do
-  let want := st.aliasFor m
-  let said := if want == m then s!"model='{m}'" else s!"model='{m}' (aliased to '{want}')"
-  let advertised ← conn.optionValues "model"
-  let send (v : String) : IO Bool := do
-    match ← conn.setConfigOption "model" v with
-    | .ok _ => pure true
-    | .error e => do
-      logOnce st conn s!"model:refused:{m}"
-        s!"session/set_config_option {said} was refused ({e.compress}); \
-           the model axis goes in the prompt header instead"
-      pure false
-  if advertised.isEmpty then
-    -- Nothing published: send it as written, as this did before there was a
-    -- catalogue to read.
-    send want
-  else
-    match Acp.resolveValue advertised want with
-    | .exact v => send v
-    | .fuzzy v how => do
-      logOnce st conn s!"model:resolved:{m}"
-        s!"the model axis {said} resolved {how} to '{v}', which is what this run is asking"
-      send v
-    | .ambiguous cs => do
-      logOnce st conn s!"model:ambiguous:{m}"
-        s!"the model axis {said} names {cs.length} of the models \
-           '{conn.prog}' offers ({String.intercalate ", " cs}); an ambiguous choice is not \
-           made for you, so the model axis goes in the prompt header instead"
-      pure false
-    | .unknown => do
-      logOnce st conn s!"model:unknown:{m}"
-        s!"the model axis {said} is none of the models '{conn.prog}' offers \
-           ({String.intercalate ", " advertised}); name one of those, or map yours onto one \
-           with --model {m}=NAME. Until then the model axis goes in the prompt header instead"
-      pure false
-
-/-- Send both axes of the scope over the protocol, where the adapter accepts
-them, and report which ones it took. A refusal is a *value* from
-`Conn.setMode`/`Conn.setConfigOption`, not an exception, and it is logged and
-then said in the prompt header instead (`renderQ`): claude refuses no axis,
-codex refuses the mode axis, and the stub refuses whichever the test tells it
-to, so all three must be one code path. -/
-def selectScope (st : Settings) (conn : Conn) {c : Code} (q : Q c) : IO Selected := do
-  let mode ← match modeAxis q, st.useSessionMode with
-    | some m, true => do
-      match ← conn.setMode m with
-      | .ok _ => pure true
-      | .error e => do
-        logOnce st conn s!"mode:refused:{m}"
-          s!"session/set_mode '{m}' was refused ({e.compress}); \
-             the mode axis goes in the prompt header instead"
-        pure false
-    | _, _ => pure false
-  let model ← match modelAxis q, st.useConfigOptionModel with
-    | some m, true => selectModel st conn m
-    | _, _ => pure false
-  return { mode, model }
-
-/-- `[[requiresCompletedTurn c a]]` = may an answer to this question be recorded
-from a turn the agent did **not** finish?
-
-`false` is *refusal is an answer* (§3 q8): a `text`, `verdict` or `flag` from a
-model or a tool is read as given even if the turn was cut short, because a
-review that stopped mid-sentence is still a review with objections in it, and
-because `Decode` is total on two of those three codes by design.
-
-`true` is the case that argument does not cover, and there are two of them:
-
-* **`.ack` — an acknowledgement.** An `ack` question does not ask what somebody
-  thinks; it asks them to *do* something and say when it is done. A turn that was
-  cancelled, refused, or truncated is precisely the case where the act did not
-  happen, and `Decode .ack` is total, so nothing downstream could ever tell the
-  difference: `Table.cons .ack q () t` is the same term whether the tool acted or
-  was killed halfway. Recording it would be recording an act nobody performed,
-  which is the same fault as recording an answer nobody gave, and it gets the
-  same answer — the run is abandoned. (Kernel §5's trust boundary; ticket
-  `acat-fuk`.)
-* **A person.** A person-addressed question whose turn was cancelled or refused
-  was not answered *by that person*; the adapter standing in for them stopped.
-  Nobody answered, so there is nothing to record.
-
-Both are decisions about what bytes are allowed to mean, so both are stated as a
-function with equations rather than buried in an `if` inside an `IO` block. -/
-def requiresCompletedTurn (c : Code) (a : Addressee) : Bool :=
-  match c, a with
-  | .ack, _ => true
-  | _, .person _ => true
-  | _, _ => false
-
-/-- **Clause equation.** An act always requires a completed turn, whoever is
-asked to perform it. -/
-@[simp] theorem requiresCompletedTurn_ack (a : Addressee) :
-    requiresCompletedTurn .ack a = true := rfl
-
-/-- **Clause equation.** A person always requires a completed turn, whatever
-they were asked for. -/
-@[simp] theorem requiresCompletedTurn_person (c : Code) (id : String) :
-    requiresCompletedTurn c (.person id) = true := by cases c <;> rfl
-
-/-- **…and nowhere else**: refusal is still an answer for everything a model or
-a tool is asked that is not an act. -/
-theorem requiresCompletedTurn_eq_false {c : Code} {a : Addressee} (hc : c ≠ .ack)
-    (ha : ∀ id, a ≠ .person id) : requiresCompletedTurn c a = false := by
-  cases a <;> cases c <;> simp_all [requiresCompletedTurn]
-
-/-- `[[toKeyboard st a]]` = does a question addressed to `a` go to the person at
-*this process's* keyboard rather than out over a transport?
-
-**This is `askHuman`'s routing rule**, as a function: a `Addressee.person`
-question goes to stdin when `Settings.askPersonOnStdin` is set, and otherwise to
-the transport, which is what makes an unattended run possible (the stub answers
-for the human) without a second interpreter. Nobody else is ever routed — a
-`model` or a `tool` is not a person however the run was configured.
-
-It is a named function rather than a `let` inside one interpreter because there
-are now **two** transports that must route identically: `Exec.oracle` over an
-`Acp.Conn`, and `Deck.oracle` over a live `agent-deck` session
-(`Agentic/Core/Deck.lean`), where the operator watching the pane *is* the person.
-A routing rule stated twice is a routing rule that will eventually differ.
-`agent-cat --all-to-session` is the command line clearing `askPersonOnStdin` for
-a deck run, so that the person is asked in the pane with everybody else; that is
-a setting, and this is the rule it feeds. -/
-def toKeyboard (st : Settings) (a : Addressee) : Bool :=
-  match a with
-  | .person _ => st.askPersonOnStdin
-  | _ => false
-
-/-- **Clause equation.** A model is never the person at the keyboard. -/
-@[simp] theorem toKeyboard_model (st : Settings) (id : String) :
-    toKeyboard st (.model id) = false := rfl
-
-/-- **Clause equation.** Neither is a tool. -/
-@[simp] theorem toKeyboard_tool (st : Settings) (id : String) :
-    toKeyboard st (.tool id) = false := rfl
-
-/-- **Clause equation.** A person goes to the keyboard exactly when the runtime
-was told there is one there: the setting is the whole of the rule. -/
-@[simp] theorem toKeyboard_person (st : Settings) (id : String) :
-    toKeyboard st (.person id) = st.askPersonOnStdin := rfl
-
-/-- Put one question and return the whole turn — over the transport, or to the
-keyboard when `toKeyboard` says a person is there.
-
-A line typed at the keyboard is a completed turn by construction: the person
-pressed return, which is the whole of what `end_turn` means here. -/
-def sayTurn (st : Settings) (conn : Conn) (c : Code) (q : Q c) (sent : Selected)
-    (extra : String) : IO Turn := do
-  let text := renderQ c q sent ++ extra
-  match q.addressee, toKeyboard st q.addressee with
-  | .person who, true =>
-      return { text := ← askPersonStdin who text, stopReason := .endTurn }
-  | _, _ => conn.promptTurn text
-
-/-- `[[say st conn c q sent extra]]` = put the question and return the bytes,
-**having first insisted that the bytes are somebody's answer**.
-
-**The permission policy is set here**, immediately before the prompt goes out,
-because "the question under way" is a fact this function has and the transport
-does not (`Acp.Conn.underQuestion`, `Settings.permission`). Every decision the
-turn provoked is reported afterwards through `Settings.onPermission`, in arrival
-order: a denial is the reason a turn cost what it cost, and an operator reading
-a long turn is owed the reason.
-
-Every turn that did not end in `end_turn` is logged, whatever the code, because
-an operator is owed the fact that the agent was cut off; and a turn that did not
-end in `end_turn` where `requiresCompletedTurn` says one was needed abandons the
-run, quoting the stop reason, the addressee and the words. That is the same
-policy as decode exhaustion in `Exec.oracle` and for the same reason: the table
-records a code, a question and an answer and nothing else, so a cell entered
-from an interrupted turn is indistinguishable from one an addressee gave, and no
-check further down can recover the difference. -/
-def say (st : Settings) (conn : Conn) (c : Code) (q : Q c) (sent : Selected)
-    (extra : String) : IO String := do
-  let t₀ ← IO.monoMsNow
-  let decidedBefore ← conn.decisionCount
-  conn.underQuestion s!"the {Code.name c} question put to {Addressee.render q.addressee}"
-    (st.permission c q.addressee)
-  let turn ← sayTurn st conn c q sent extra
-  for d in ← conn.decisionsFrom decidedBefore do st.onPermission d
-  st.onTurn c q.addressee turn.stopReason ((← IO.monoMsNow) - t₀)
-  if turn.stopReason.completed then return turn.text
-  st.log s!"turn for a {Code.name c} from {Addressee.render q.addressee} ended \
-            '{turn.stopReason.render}', not 'end_turn'"
-  if requiresCompletedTurn c q.addressee then
-    throw <| IO.userError s!"the turn that would have answered a \
-      {Code.name c} from {Addressee.render q.addressee} ended \
-      '{turn.stopReason.render}' rather than completing (prompt: '{q.prompt}'; \
-      what arrived: '{turn.text.trimAscii.toString}'). The run is abandoned: \
-      an unfinished turn did not perform the act it was asked to perform, and a \
-      recorded acknowledgement of it would be indistinguishable, in the table, \
-      from one that did."
-  return turn.text
-
-/-! ### The retry discipline, over any transport
-
-`Exec.say` above is *one* way to turn a question into bytes: the ACP connection.
-There is a second — `Deck.say`, an `agent-deck` session driven by its command
-line (`Agentic/Core/Deck.lean`) — and there will be others. What must not be
-duplicated is what happens to the bytes afterwards: which reply is readable, how
-many times an unreadable one is put again, what the nudge says, and that
-exhaustion abandons the run rather than inventing an answer. Those are the trust
-boundary, and they exist once, below, quantified over the transport.
--/
 
 /-- `[[Say]]` = a transport, reduced to exactly what the retry discipline needs
 of one: put this question with this much appended, and give back the bytes.
 
 Deliberately *not* a class and not a structure: it is a function, so a transport
 is supplied by writing one, and nothing about a transport can be read back by the
-discipline. `fun c q extra => say st conn c q sent extra` is the ACP one. -/
+discipline. A runner writes one; nothing here can read anything back out of
+it. -/
 abbrev Say : Type := (c : Code) → Q c → String → IO String
 
 /-- `[[attemptWith st put c q n extra]]` = ask, decode, and on a failure to
@@ -1383,10 +962,9 @@ built, since `StateT Table IO` drops its state on an exception. That is the
 price of refusing to fabricate, and a caller who wants the partial log can catch
 the error at the boundary it chooses.
 
-It takes a `Say` rather than a `Conn` so that **every** transport in this package
-abandons a run in the same words for the same reason: a run against the ACP stub
-and a run against an `agent-deck` session fail identically, because there is one
-function here and not two. -/
+It takes a `Say` rather than a connection so that **every** transport abandons a
+run in the same words for the same reason: there is one function here and not
+one per transport. -/
 def askDecoding (st : Settings) (put : Say) (c : Code) (q : Q c) : IO (El c) := do
   match ← attemptWith st put c q st.retries "" with
   | .ok a => return a
@@ -1397,67 +975,17 @@ def askDecoding (st : Settings) (put : Say) (c : Code) (q : Q c) : IO (El c) := 
         The run is abandoned: recording an answer nobody gave would be \
         indistinguishable, in the table, from one they did."
 
-/-- `[[Exec.oracle st conn]]` = the answering service that puts questions to a
-live adapter: select the scope the protocol can express, then hand the question
-to `askDecoding`, which renders it, prompts, decodes, re-asks on a decode
-failure, and abandons the run if every attempt was unreadable.
+/-! ## Where the entry points went
 
-Two things are this function's own, and everything else it does is
-`askDecoding`'s:
-
-* **the scope calls**, made once per question and not once per attempt, because
-  a re-ask is the same question put again and not a different mode;
-* **`Settings.freshSessionPerQuestion`**, which opens a new session first — this
-  layer's approximation of "a world is a function of the question"; see the
-  field's own docstring, and note that it is an approximation and not a proof.
-
-The *other* way a run is abandoned is one layer down, in `Exec.say`: a turn that
-did not end in `end_turn` where `Exec.requiresCompletedTurn` says one was needed.
-That rule and `askDecoding`'s are the same rule at two codes — do not record what
-did not happen — and they are stated separately because the evidence differs:
-there the bytes could not be read, here the bytes were never finished.
-
-Note what this function is *not*: it is not proved to do anything. It is an
-`Oracle IO`, the argument the theorems above quantify over, and an adapter that
-lies through it merely exhibits a different world. What is ruled out here is not
-lying — no runtime can rule that out — but *this* runtime lying on the
-addressee's behalf. -/
-def oracle (st : Settings) (conn : Conn) : Oracle IO := fun c q _ => do
-  -- A question the keyboard answers needs neither a session nor a scope call:
-  -- the person is not the adapter, and telling the adapter about a mode it will
-  -- not be asked anything under is a round trip that buys nothing.
-  let sent ← if toKeyboard st q.addressee then pure ({} : Selected) else do
-    if st.freshSessionPerQuestion then discard <| conn.newSession
-    selectScope st conn q
-  -- `sent` is this question's, and `attemptWith` puts this question and no
-  -- other, so the closure's arguments are always the `c` and `q` above.
-  askDecoding st (fun c q extra => say st conn c q sent extra) c q
+`Agentic.Core.exec`, `execIO` and `Exec.oracle` stood here: the fold at `IO`
+with a live ACP connection as its answering service. They are gone with the
+transport (`Agentic/Core/Acp.lean`, `Agentic/Core/Deck.lean`), and nothing is
+lost from the mathematics by their going — every theorem in this file is stated
+at an arbitrary `Oracle m`, and `Plan.execWith` is the fold itself. A runner
+supplies an `Oracle` and calls `Plan.execWith`; that is all an entry point ever
+was.
+-/
 
 end Exec
-
-/-! ## The entry points -/
-
-/-- `[[exec st conn p]]` = the plan, run for real: the fold of
-`Agentic/Core/Denote.lean` at the execution monad, with the live adapter as its
-answering service.
-
-One line, and every part of it is elsewhere: `denote` is the meaning,
-`Dlg.execM` is the memoizing fold and its theorems, `Exec.oracle` is the trust
-boundary. There is no fourth thing, which is the point of §5(i). -/
-def exec {A : Type} (st : Exec.Settings) (conn : Acp.Conn) (p : Plan [] A) : OracleM A :=
-  StateT.mk (Plan.execWith (Exec.oracle st conn) p Env.nil)
-
-/-- The same, spelled out: the `IO` interpreter is the fold, and the oracle is
-the only argument that is not. -/
-theorem exec_eq {A : Type} (st : Exec.Settings) (conn : Acp.Conn) (p : Plan [] A)
-    (t : Table) : exec st conn p t = Dlg.execM (Exec.oracle st conn) (denote p Env.nil) t :=
-  rfl
-
-/-- Run a closed plan against a fresh adapter and return the answer together
-with the world the run constructed. The `Table` is the run's warrant: it is what
-a certificate is checked against. -/
-def execIO {A : Type} (st : Exec.Settings := {}) (cfg : Acp.Config := {})
-    (p : Plan [] A) : IO (A × Table) :=
-  Acp.withConn cfg fun conn => Plan.execWith (Exec.oracle st conn) p Env.nil Table.nil
 
 end Agentic.Core

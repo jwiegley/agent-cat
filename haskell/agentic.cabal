@@ -41,14 +41,14 @@ description:
   type level and generates the name each binding prints from its depth, which
   an author may override with @named@; a @{hole}@ prints the name its handle
   carries, so binder and hole agree by construction. @Example.Harden@ is
-  written that way, and is the proof: the same two frozen entries, statement
-  for statement with @example\/harden.wf@, their printed programs pinned up to
+  written that way, and is the proof: the two frozen entries @example-000@ and
+  @example-001@, statement for statement, their printed programs pinned up to
   alpha.
   .
   Week seven adds the second transport: @Agentic.Acp@ starts an Agent Client
-  Protocol adapter of its own — Claude's or Codex's, or the deterministic double
-  the Lean runtime is tested with — and speaks line-delimited JSON-RPC 2.0 to it
-  over a pipe this process owns. It is the transport that can check what the
+  Protocol adapter of its own — Claude's or Codex's, or the deterministic
+  double at @agent-cat\/test\/stub_adapter.py@ — and speaks line-delimited
+  JSON-RPC 2.0 to it over a pipe this process owns. It is the transport that can check what the
   @agent-deck@ one cannot: a prompt is answered with a stop reason, so an act
   whose turn did not complete abandons the run rather than recording a receipt
   for something that did not happen. @agentic-run run EXAMPLE --engine acp@ is
@@ -108,8 +108,8 @@ library
     Agentic.World
 
 -- The worked examples, written in the authoring surface — `Agentic.Workflow`,
--- which is sugar over the production one: the flagship of
--- `agent-cat/example/harden.wf` and the smallest program of `hello.wf`.
+-- which is sugar over the production one: the flagship (corpus entry
+-- `example-000`) and the smallest program (`example-001`).
 --
 -- An internal library rather than a directory shared by two `other-modules`
 -- lists, because two components are meant to see the same `Example.Harden` and

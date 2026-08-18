@@ -2,16 +2,21 @@
 
 The Haskell implementation of agent-cat's operational terms, living beside
 the Lean formalization it implements (the repository root) — the raw syntax
-of the agentic DSL, its JSON codec, the term-level guards, the ask counts and
-the string layer, and above them the typed `Plan`, its meaning in a world and
-the production surface that builds one, and above *that* the authoring surface
-a human actually writes — kept honest by replaying a frozen corpus produced by
-the Lean formalization.
+of the agentic language, its JSON codec, the term-level guards, the ask counts
+and the string layer, and above them the typed `Plan`, its meaning in a world
+and the production surface that builds one, and above *that* the authoring
+surface a human actually writes — kept honest by replaying a frozen corpus
+produced by the Lean formalization.
 
 Lean is normative. This directory does not ask to be believed on its own
 authority: every claim it makes about the language is checked against 128
 request/reply pairs the Lean oracle emitted (`../test/corpus`), and the check
-is two programs you can run in one command each. All commands below run from
+is two programs you can run in one command each. That corpus is the frozen
+conformance record: each request carries either a `RawProgram` — the same raw
+term this library encodes and decodes — or a string operation, and each reply
+is what the Lean oracle answered for it. (The request terms were emitted from
+`.wf` sources back when the repository had a concrete syntax and a parser;
+they are terms now, and they have not moved.) All commands below run from
 `haskell/`.
 
 ```
@@ -75,7 +80,7 @@ and only if nothing failed, so both are usable directly as CI gates.
 | `Agentic.Plan` | the typed `Plan` — five formers, `DataKinds` codes, de Bruijn `Expr` — and its static folds `level`, `size`, `askNodes`, `codes`, `costSummary` |
 | `Agentic.World` | `WorldSpec` and `toWorld`, the `trace` of a plan through a world, the fresh and memo bills, and the oracle's event JSON |
 | `Agentic.Builder` | the production surface: typed combinators that both print a `RawProgram` and elaborate to the `Plan` the Lean checker elaborates the same construct to |
-| `Agentic.WF` | the `[wf\|…\|]` prompt quoter — prose with `{name}` holes, laid out as the `.wf` fence lays it out and chunked as Lean's `Prompt.normalize` chunks it — and `Says`, which decides whether a hole is a binding or a `define` |
+| `Agentic.WF` | the `[wf\|…\|]` prompt quoter — prose with `{name}` holes, laid out by the fence rule the frozen prompts were written under (blank edge lines dropped, common indentation stripped, no trailing newline) and chunked as Lean's `Prompt.normalize` chunks it — and `Says`, which decides whether a hole is a binding or a `define` |
 | `Agentic.Workflow` (+ `.Do`) | the **authoring** surface: an indexed block, written in ordinary Haskell under `W.do`, in which a bind is a Haskell bind, a branch on a revision's result is a Haskell `case` and a branch on a flag is a Haskell `if` — `guide <- ask (tool "cat") [wf\|…\|]`, then `case result of Settled patch -> W.do …; Unsettled -> stop`, then `when ok $ W.do …`. The `case` is real pattern matching on the exported data type `Outcome`, which the revision's bind forks into; the `if` is Haskell's, reaching the exported `ifThenElse` because the **authoring module** enables `RebindableSyntax` — which costs that module its implicit `Prelude` (import it, and `Data.String (fromString)` beside it under `OverloadedStrings`) and costs a `W.do` block nothing, `QualifiedDo` and `RebindableSyntax` rebinding disjoint syntax. The library itself enables neither. There is no `#label`, no `=:` and no splice anywhere in the surface: `ifFlag` stays exported as the combinator the `if` compiles *to* — machinery, and a name in the printed `Raw`, not a statement anyone writes — and `when`/`unless` are that same `if` with only one arm to say — terminal, sealing the body with the implicit `stop` an arm block's end is, and printing the identical `ifFlag` node with an empty other arm; the `case` compiles to `Agentic.Builder`'s `revisingCase`, which `revising` applies; `caseVerdict` stays a combinator here, a verdict being a value that may be acted past. It carries no names at the type level — a library cannot read a Haskell binder — so it generates the name each binding prints from that binding's depth, `named` overrides one, and a `{hole}` prints the name its handle carries |
 | `Agentic.Gen`, `Agentic.Observe`, `Agentic.Oracle` | the bisimulation surface: generators, the reply assembly both runners share, and the line-delimited JSON client for the Lean oracle subprocess |
 | `Agentic.Exec` | the interpreter in `IO` — the memoizing fold of `Exec.lean`'s `Dlg.execM`, its decode/re-ask loop, and the scripted answering service |
@@ -84,7 +89,11 @@ and only if nothing failed, so both are usable directly as CI gates.
 | `Example.Harden` | the walked examples (`harden`, `hello`), written in `Agentic.Workflow` and shared by `tier1` and `agentic-run` |
 | `tier0/`, `tier1/`, `bisim/`, `run/` | the four runners |
 
-**Not** in scope, and deliberately absent: the parser, and the typing judgment.
+**Not** in scope, and deliberately absent: a parser, and the typing judgment.
+There is no parser *anywhere* — not here and not in Lean. By the owner's
+ruling the authoring surface is Haskell and nothing else, so there is no
+concrete syntax left for anything to read; a program is a value, written in
+`Agentic.Workflow` and elaborated by `Agentic.Builder`.
 The builder gets well-formedness from Haskell's own types instead — an unbound
 name, a kind mismatch, a duplicate function name, an empty panel and `served
 by` on a tool are type errors or are unrepresentable — so the refusals those
@@ -123,9 +132,12 @@ a settled arm, and both of the only two entries where the memo bill falls below
 the fresh one. The five guard vectors and the refused entries are
 **unrepresentable** in the builder by design; tier0 covers them.
 
-The last two are the **walked examples** — `example-000`, the flagship of
-`agent-cat/example/harden.wf`, and `example-001`, `hello.wf` — written in
-`Example.Harden` rather than in `tier1/Cases.hs`. They live in their own
+The last two are the **walked examples** — `example-000`, the flagship, and
+`example-001`, the smallest thing that is still a workflow. Those two frozen
+entries are not conformance fixtures but *prose*: they are the programs the
+documentation walks. They are written in `Example.Harden` rather than in
+`tier1/Cases.hs`, and that module is now the text of record for both. They
+live in their own
 (internal) library because two components must see the same value: tier1 pins
 it, and `agentic-run` runs it. Compiling the program twice would let the pinned
 one and the executed one drift and still read as agreement.
@@ -177,11 +189,11 @@ hardenProgram = workflow W.do
 ```
 
 Ordinary Haskell: no splice, no bracket, no label, and no type application
-anywhere in the program. Statement for statement with `harden.wf` — a bind is a
-Haskell bind, a fenced prompt is a `[wf|…|]` with the same `{name}` holes and
-the same layout rule, a `define` is a Haskell binding (`spec`, `verdictSpec`,
-`flagSpec` above), and `W.do` is `QualifiedDo`, which rebinds nothing beyond
-the block it is written on.
+anywhere in the program. Statement for statement with the frozen `example-000`
+— a bind is a Haskell bind, a fenced prompt is a `[wf|…|]` whose `{name}` holes
+and layout rule are the ones the frozen prompts were written under, a `define`
+is a Haskell binding (`spec`, `verdictSpec`, `flagSpec` above), and `W.do` is
+`QualifiedDo`, which rebinds nothing beyond the block it is written on.
 
 **Both branches are Haskell's own, and they get there by different routes.**
 `case result of` is a regular `case` on the regular data type `Outcome`, its
@@ -192,16 +204,16 @@ be a `case` because a revision's bind *forks*: it runs the rest of the block
 twice, once under `Settled` and once under `Unsettled`, and the two blocks that
 come back are the arms it prints. That is exact because Lean refuses every
 statement between a revision's bind and its `case` (`Check.lean:537`), so the
-two runs can differ only in the arms. Where the surface and the `.wf` do differ
-they differ in the *accepting* direction: an author who writes a statement
-there is not refused here, and it stands in **both** arms — a program the `.wf`
-can also write, by writing it twice, and one the oracle accepts and observes
-exactly as `Agentic.Observe` does (checked on an `act`, a `known here`, a bind
-and a second revision).
+two runs can differ only in the arms. Where this surface and Lean's checker do
+differ they differ in the *accepting* direction: an author who writes a
+statement there is not refused here, and it stands in **both** arms — the same
+term an author reaches by writing that statement twice, one the checker accepts
+and the oracle observes exactly as `Agentic.Observe` does (checked on an `act`,
+a `known here`, a bind and a second revision).
 
 `when ok $ W.do …` is the flag's branch with only one arm to say: it is
-`ifThenElse` with both terminals supplied — the body sealed by the `stop` that
-a `.wf` arm block's closing brace is, and the empty block for the other arm —
+`ifThenElse` with both terminals supplied — the body sealed by the implicit
+`stop` an arm block ends in, and the empty block for the other arm —
 and it prints the very same `ifFlag` node the two-armed spelling prints, `else
 { }` and all. **It is terminal**, and deliberately not `Control.Monad`'s
 continuing `when`: every branching in this language is terminal, each arm being
@@ -233,7 +245,7 @@ alpha. An author who wants the printed program to read as this source does
 writes `named "guide" (ask …)`; the flagship deliberately does not.
 
 That is the whole price of the ruling, stated plainly: a printed program says
-`b0` where the `.wf` says `guide` unless someone writes `named`, and two of
+`b0` where the frozen entry says `guide` unless someone writes `named`, and two of
 twenty-one tier1 cases compare their printed program loosely in exactly one
 respect — the spelling of binders. Nothing else is loosened. The nineteen
 builder-written cases still match name for name, every non-program comparand
@@ -267,8 +279,8 @@ nix develop -c cabal run agentic-run -- run  harden --session my-session
 nix develop -c cabal run agentic-run -- run  harden --engine acp --adapter stub
 ```
 
-`<example>` is `harden` or `hello`: the two walked programs of
-`agent-cat/example/`, written in `Agentic.Workflow` as `Example.Harden`. **They
+`<example>` is `harden` or `hello`: the two walked programs, written in
+`Agentic.Workflow` as `Example.Harden`. **They
 are the same values `tier1` pins against the frozen corpus** — nothing is
 rebuilt, adapted or trimmed for execution — which is what makes a run evidence
 about the language rather than about this executable.
@@ -505,8 +517,9 @@ time, machine-wide, so Lean builds must be rare, not merely serialized):
 ./ci/tier1.sh      # nightly / semantic-core changes: bisim against the PREBUILT oracle
 ```
 
-`ci/acp.sh` is twelve scenarios against the *same* stub adapter the Lean
-runtime is tested with — real ACP over real pipes, and never a real agent. Five
+`ci/acp.sh` is twelve scenarios against the deterministic stub adapter,
+`agent-cat/test/stub_adapter.py` — real ACP over real pipes, and never a real
+agent. Five
 of them are the transport's named failures; the two that matter most are
 `cancelled-act`, where an act's turn is interrupted and the run is abandoned
 rather than credited, and `write-on-ask`, where the adapter asks to edit the
@@ -570,7 +583,7 @@ PORTING3-surface.md     week six: the authoring surface — why an indexed block
 * **The design** — why there is a Haskell implementation at all, and why it is
   connected to Lean by reimplementation-plus-conformance rather than by
   extraction, FFI or a subprocess oracle —
-  `doc/research/dsl-redesign/connection.md`. That
+  `doc/research/connection.md`. That
   page is the design of record for this repository.
 * **The port** — [`PORTING.md`](PORTING.md),
   [`PORTING2-core.md`](PORTING2-core.md),

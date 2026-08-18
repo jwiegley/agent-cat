@@ -9,9 +9,9 @@ plan means the value the run returned (`certify_sound`), and its own header name
 the one gap in that claim: `worldOf` totalizes by defaulting, so a cell the table
 never recorded still answers, and a plan can be certified against a world the run
 only partly determined. This module closes that gap — the notion is `Covered`,
-and the theorem is `Plan.certify_sound_of_covered` — and then packages what a run
-produced into one value, `RunReport`, so that the demo harness and any other
-consumer read the same object rather than two copies of the same arithmetic.
+and the theorem is `Plan.certify_sound_of_covered` — and then gives the bill as a
+number and the transcript as lines, so that a harness and a serialiser read the
+same arithmetic rather than two copies of it.
 
 **Three kinds of thing live here, and the file is ordered by how much they
 claim.**
@@ -27,23 +27,17 @@ claim.**
    through `Multiplicative ℕ ≅ ℕ` so that it can be printed and compared. Each of
    the two definitions carries the equation that says it is not a second count.
 
-3. **Rendering and the report**, which claim almost nothing and say so. A
-   rendering is total and one-line-per-item (`Trace.length_render`,
-   `Table.length_render`); it is *not* injective, because `head` truncates and
-   `pad` pads, and a reader who wants the answer back has the `Table` for that.
-   `RunReport` records what a run produced, marking which fields are meaning
-   (the transcript, the bills, coverage — all recomputed from the plan and the
-   log) and which are observation (the value, the table, the run's own
-   certificate, the per-turn stop reasons and latencies, which no theorem
-   mentions because `Ω` is a function of the question and not of the clock).
+3. **Rendering**, which claims almost nothing and says so. A rendering is total
+   and one-line-per-item (`Trace.length_render`, `Table.length_render`); it is
+   *not* injective, because `head` truncates and `pad` pads, and a reader who
+   wants the answer back has the `Table` for that. `sayAnswer` is the shipped
+   spelling of an answer, and is pinned by the frozen corpus through
+   `conformance/Conformance.lean`'s `say` string op — which is why it is here
+   and not in a harness.
 
-**What is deliberately not here.** `check`/`checkTrue` — a failing assertion that
-throws an `IO.userError` and a passing one that prints `ok` — stay in
-`demo/Main.lean`. They are a command-line harness's exit protocol, not a
-statement about runs: a second consumer (an MCP server answering
-`workflow_check`) has to *return* a failure as a value rather than throw it, and
-would use `RunReport` and none of that scaffolding. Promoting them would be
-promoting `IO.println`.
+**What is deliberately not here.** A run report. `Turn` and `RunReport` stood at
+the foot of this file until the Lean runtime went; the note where they stood says
+what replaced them, and why nothing above that line moved.
 -/
 
 namespace Agentic.Core
@@ -195,7 +189,8 @@ compares.
 
 What is still outside, and no theorem can reach: that the log is an honest
 record of what was said. Coverage says a replayed event is *in* the table; the
-rule that nothing enters a table unanswered is `Exec.oracle`'s, in `IO`. -/
+rule that nothing enters a table unanswered is a runner's, in `IO`
+(`Exec.askDecoding`). -/
 theorem Plan.certify_sound_of_covered {A : Type} [DecidableEq A] (p : Plan [] A) (t : Table)
     (a : A) (hcov : Plan.Covered t p) (hcert : certify p t a = true) :
     ∀ ω, Extends ω t →
@@ -540,162 +535,21 @@ def Table.render (t : Table) : List String :=
 @[simp] theorem Table.length_render (t : Table) : (Table.render t).length = Table.size t :=
   List.length_map _
 
-/-! ## The report
+/-! ## Where the run report went
 
-One value holding what a run produced, so that a harness printing it and a
-server serialising it are reading the same object.
+`Turn` and `RunReport` stood here: one value holding what an `IO` run produced —
+its value, its log, the replayed transcript, the certificate, the coverage
+verdict, and the per-turn and per-permission observations the `IO` layer made.
+Every consumer of it was the Lean runtime (the command line, the MCP server, the
+demo), and two of its fields were typed in `Agentic/Core/Acp.lean`, which is
+gone. `agentic-run` on the Haskell side reports its own runs.
+
+Nothing above this line moved, and the report was never more than a record of
+things proved above it: the transcript is `Plan.trace (worldOf table) p Env.nil`,
+the coverage verdict is `Plan.coveredB`, the certificate is `certify`, and the
+warrant the report used to carry in a theorem of its own is
+`Plan.certify_sound_of_covered`, stated in full generality above. A harness that
+wants a report builds one out of those four.
 -/
-
-/-- `[[Turn]]` = one exchange with an adapter, as the `IO` layer saw it: what was
-asked for, of whom, how the turn ended and how long it took.
-
-**No theorem mentions any of this, and none can.** `Ω` is a function of the
-question (`Agentic/Core/World.lean`), so a stop reason and a latency are not part
-of what a run *means* — which is exactly why a report has to carry them: they are
-the facts about the run that the transcript, being semantic, cannot hold. -/
-structure Turn where
-  /-- The kind of answer that was asked for. -/
-  code : Code
-  /-- Who was asked. -/
-  addressee : Addressee
-  /-- How the adapter ended the turn. -/
-  stop : Acp.StopReason
-  /-- Wall-clock milliseconds. -/
-  ms : Nat
-
-/-- `[[Turn.render t]]` = one turn as one line. -/
-def Turn.render (t : Turn) : String :=
-  s!"  {pad 10 (Exec.Code.name t.code)}{pad 24 (Exec.Addressee.render t.addressee)}\
-     {pad 18 t.stop.render}{t.ms}ms"
-
-/-- `[[RunReport A]]` = everything one run of a closed plan produced: its answer,
-the log it left, the transcript that log replays, whether it certifies, whether
-the log covers the replay, and what each turn cost in wall-clock time.
-
-**Which fields are meaning and which are observation**, because the distinction
-is the whole reason this is one structure rather than a print statement.
-
-* `value`, `table`, `turns`, `permissions` and `certified` are **observations**:
-  what the `IO`
-  layer returned. `certified` in particular is the `Bool` the run itself computed
-  (`Plan.runCertified`); at `Id` it is provably `true`
-  (`Plan.runCertified_certified`), so in `IO` it is a check on the trust
-  boundary and is recorded rather than recomputed.
-* `transcript` and `covered` are **meaning**, recomputed by `RunReport.of` from
-  the plan and the table alone: the transcript is
-  `Plan.trace (worldOf table) p Env.nil`, the transcript the *meaning* has in the
-  world the log denotes, and `covered` is `Plan.coveredB` of that. Neither can
-  disagree with the run, because neither is told what the run saw.
-* the bills (`RunReport.billFresh`, `RunReport.billMemo`) are **derived**, and so
-  are defined as functions of the report rather than stored in it: a field could
-  be wrong, a fold of the transcript cannot.
-
-What the report warrants, when `covered` holds and `certify` agrees, is
-`Plan.certify_sound_of_covered`: every world consistent with the log gives the
-plan this value and this transcript. -/
-structure RunReport (A : Type) where
-  /-- What the run answered. -/
-  value : A
-  /-- The log it left behind. -/
-  table : Table
-  /-- The transcript that log replays: `Plan.trace (worldOf table) p Env.nil`. -/
-  transcript : Trace
-  /-- The run's own certificate. -/
-  certified : Bool
-  /-- Whether the log covers the replay (`Plan.coveredB`). -/
-  covered : Bool
-  /-- What the `IO` layer saw, turn by turn. -/
-  turns : List Turn
-  /-- What the run authorized, request by request: an observation, like `turns`,
-  and for the same reason — a permission is a fact about the `IO` layer, and `Ω`
-  is a function of the question, so no theorem can mention one. It is here
-  because it is the evidence for the one claim a refusing run wants to make:
-  that nothing was allowed to write. -/
-  permissions : List Acp.PermissionDecision := []
-
-namespace RunReport
-
-variable {A : Type}
-
-/-- `[[RunReport.of p a t cert turns]]` = the report of a run of `p` that
-answered `a`, left the log `t`, computed the certificate `cert`, and took these
-turns.
-
-The transcript and the coverage verdict are computed here, from `p` and `t`, and
-are not arguments: a caller cannot report a transcript the log does not denote. -/
-def of (p : Plan [] A) (value : A) (table : Table) (certified : Bool)
-    (turns : List Turn := []) (permissions : List Acp.PermissionDecision := []) :
-    RunReport A :=
-  { value := value
-  , table := table
-  , transcript := Plan.trace (worldOf table) p Env.nil
-  , certified := certified
-  , covered := Plan.coveredB table p
-  , turns := turns
-  , permissions := permissions }
-
-@[simp] theorem of_transcript (p : Plan [] A) (a : A) (t : Table) (cert : Bool)
-    (turns : List Turn) :
-    (RunReport.of p a t cert turns).transcript = Plan.trace (worldOf t) p Env.nil := rfl
-
-/-- **The reported coverage is coverage.** -/
-@[simp] theorem of_covered_eq_true_iff (p : Plan [] A) (a : A) (t : Table) (cert : Bool)
-    (turns : List Turn) :
-    (RunReport.of p a t cert turns).covered = true ↔ Plan.Covered t p :=
-  Plan.coveredB_eq_true_iff
-
-/-- **What a covered report warrants.** `Plan.certify_sound_of_covered`, read
-through the report: given the report's own coverage verdict and a certificate
-recomputed from the log, every world agreeing with the log assigns the plan the
-reported value and the reported transcript.
-
-The certificate is a hypothesis rather than the `certified` field because the
-field is an observation of the `IO` layer; recomputing `certify p r.table
-r.value` is what a consumer that does not trust the field does, and it is the
-same function `Plan.runCertified` applied. -/
-theorem warrants [DecidableEq A] (p : Plan [] A) (a : A) (t : Table) (cert : Bool)
-    (turns : List Turn) (hcov : (RunReport.of p a t cert turns).covered = true)
-    (hcert : certify p t a = true) (ω : Ω) (hω : Extends ω t) :
-    Plan.run ω p Env.nil = (RunReport.of p a t cert turns).value ∧
-      Plan.trace ω p Env.nil = (RunReport.of p a t cert turns).transcript :=
-  Plan.certify_sound_of_covered p t a ((of_covered_eq_true_iff p a t cert turns).mp hcov)
-    hcert ω hω
-
-/-- The bill this run ran up: one unit per consultation. -/
-def billFresh (r : RunReport A) : Nat := billNat r.transcript
-
-/-- …and what it would have come to had every distinct question been asked once,
-which is the number of entries the run's table must hold. -/
-def billMemo (r : RunReport A) : Nat := memoNat r.transcript
-
-/-- How many answers the log holds. -/
-def tableSize (r : RunReport A) : Nat := Table.size r.table
-
-/-- The wall-clock time the turns took, which no theorem mentions. -/
-def totalMs (r : RunReport A) : Nat := r.turns.foldl (fun acc t => acc + t.ms) 0
-
-/-- **The bill is the length of the transcript**, so a consumer may print either.
-`billFresh_tick`, at the report. -/
-@[simp] theorem billFresh_eq_length (r : RunReport A) : r.billFresh = r.transcript.length :=
-  billNat_eq_length _
-
-/-- `[[RunReport.render r]]` = the report as lines: the transcript, the turns and
-the bill. Presentation, and total — `Trace.length_render` and
-`Table.length_render` are all that is claimed of it. -/
-def render (r : RunReport A) : List String :=
-  ["--- transcript (addressee | scope | code | prompt | answer) ---"]
-    ++ Trace.render r.transcript
-    ++ ["---", "--- turns (code | addressee | stop reason | latency) ---"]
-    ++ r.turns.map Turn.render
-    ++ [s!"  {r.turns.length} turns, {r.totalMs}ms in total", "---",
-        "--- permissions (what was asked for, during which question) ---"]
-    ++ (if r.permissions.isEmpty then
-          ["  none: no tool call asked this run for permission to act"]
-        else r.permissions.map (fun d => s!"  {d.render}"))
-    ++ ["---",
-        s!"bill: {r.billFresh} consultations fresh, {r.billMemo} memoized \
-           (tick: one unit per consultation)"]
-
-end RunReport
 
 end Agentic.Core

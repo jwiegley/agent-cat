@@ -1,8 +1,8 @@
 # The conformance wire format
 
 *Version 1. The format of record for the Lean↔Haskell conformance boundary
-(`doc/research/dsl-redesign/connection.md`, D5): what `lake exe
-conformance-oracle` reads and writes, and what the frozen corpus under
+(`doc/research/connection.md`, D5): what `lake exe conformance-oracle` reads
+and writes, and what the frozen corpus under
 `test/corpus/` contains. The Haskell side's generators and comparison read this
 page; a change here is a version bump and a corpus regeneration, in one
 commit.*
@@ -118,9 +118,11 @@ where a naive Haskell `toLower` is Unicode.
 ## What is never on the wire
 
 A `Plan`, a `Dlg`, an `Ω` as a function, a `Table` holding anything but data,
-or `.wf` text. `RawProgram` is the post-import-walk object: the import walk,
-module resolution and the parser are outside this boundary entirely
-(connection.md D10).
+or source text of any kind. `RawProgram` is the post-import-walk object: the
+import walk, module resolution and any parser are outside this boundary entirely
+(connection.md D10) — and since the Lean excision there is no parser on the Lean
+side at all, which makes the boundary the *only* way a program reaches the
+oracle.
 
 ## The corpus
 
@@ -170,22 +172,25 @@ comparison, because the Haskell builder has no way to represent a position.
 `pos` is oracle-only for a whole program in the same sense `message` and
 `excerpt` are oracle-only for a refusal.
 
-**Surface 3 — `Explain.planLines`, pinned byte-for-byte outside the corpus.**
-`test/CliSmoke.lean` checks that `agent-cat plan example/harden.wf` prints
-exactly `Explain.planLines Dsl.flagshipPlan ++ Explain.revisionLines
-Dsl.flagshipRaw`, and that `agent-cat cost` prints exactly
-`Explain.costLines Dsl.flagshipPlan`, string for string. This surface is named
-in no working paper and it is the strictest of the three, because `planLines`
-prints things no reply record contains: `askC` and `ask` as **distinct
+**Surface 3 — `Explain.planLines`, which is no longer pinned anywhere.**
+`test/CliSmoke.lean` used to check that `agent-cat plan example/harden.wf`
+printed exactly `Explain.planLines Dsl.flagshipPlan ++ Explain.revisionLines
+Dsl.flagshipRaw`, string for string. The command line and that test went with
+the Lean excision; `Explain.planLines` and `Explain.revisionLines` survive as
+library functions with **no gate on their output**. That is a deliberate loss and
+is recorded here rather than papered over: it was the strictest of the three
+surfaces, because `planLines` prints things no reply record contains: `askC` and `ask` as **distinct
 keywords**, the shape line, `binds #{Γ.length}`, the prompt evaluated at
 `Env.probe Γ`, and for a `case` the literal arm count *in the enumeration order
 of the tag type the term carries*. Three consequences worth stating once:
 
 * any presentation that identifies `askC` with `ask` — as every free-structure
   presentation of the `pipeline` fragment does, `Denote.askC_coherent` being the
-  identification — changes the CLI output while preserving every corpus number;
+  identification — changes `planLines` output while preserving every corpus
+  number;
 * closing the `case` tag universe must reproduce `FinEnum.toList` order **and**
-  `ts.length`, so its gate is a `cli_smoke` run and not a `corpus-gen` diff;
+  `ts.length`, and nothing now checks that it does — `corpus-gen` would not see
+  it, and the run that would have is gone;
 * `binds #{Γ.length}` is a function of `Ctx` being a `List Code`. Any
   re-indexing of the term language that drops contexts has no `Γ.length` to
   print.

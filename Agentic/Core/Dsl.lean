@@ -1,10 +1,20 @@
 import Agentic.Core.Dsl.Check
 
 /-!
-# The DSL, and what is provable about it
+# The elaboration, and what is provable about it
 
-Stage 3, part four: the front end and the theorem the language exists to make
-true.
+Stage 3, part four: the checker's front end (`checkProgram`) and the theorem
+the elaboration exists to make true.
+
+## Where the parser went
+
+There is no parser here any more, and there is no concrete syntax: the
+conformance boundary is `RawProgram`-in
+(`doc/research/connection.md`, D10), and the authoring surface
+that builds a `RawProgram` is the Haskell one. What survives in Lean is the
+*verification spine* — the `Raw` types, this elaboration, and what is proved
+about it — which is exactly the half every statement below was ever about:
+none of these inductions ever mentioned a character of source text.
 
 ## Where the flagship went
 
@@ -16,19 +26,18 @@ Everything about the flagship program itself lives in
 build.
 
 The division is not tidiness. `Cost.costM` takes `level p ≤ Level.branch` as
-an *argument*, so `parseAndCheck_level_le` below is the term that makes every
-tool over source files compile: `Agentic/Core/Explain.lean`, and through it
-`cli/AgentCat.lean` and `Agentic/Core/Mcp.lean`. Those three want the theorem
-and have no use whatever for the flagship, so they import this file and not the
-other one.
+an *argument*, so `checkProgram_level_le` below is the term that makes every
+tool over programs compile: `Agentic/Core/Explain.lean`, and through it
+`conformance/Conformance.lean`. Those want the theorem and have no use whatever
+for the flagship, so they import this file and not the other one.
 
 ## What "well-typed by construction" is and is not
 
-`Dsl.check` and `Dsl.parseAndCheck` state their own soundness *in their types*:
+`Dsl.check` and `Dsl.checkProgram` state their own soundness *in their types*:
 neither "the result type-checks" nor "the result is closed" is a theorem here —
 both are readings of the signature. What is **not** free, and is proved below,
-is the fact that makes the language worth having: `parseAndCheck_level_le` —
-*every* program in the language sits at or below the branch rung, so every
+is the fact that makes the elaboration worth having: `checkProgram_level_le` —
+*every* program the checker accepts sits at or below the branch rung, so every
 program has a finite cost tree. The induction carries one extra invariant the
 redesigned checker introduced: a pending loop result's plan is itself at or
 below the branch rung (`PendLevel`), which is exactly what the consuming
@@ -42,9 +51,9 @@ open Plan
 /-! ## Equality of transcripts is decidable
 
 What lets the flagship's agreement with `Agentic/Core/HardenPatch.lean` be a
-`decide` in each of the named worlds, and what lets `Mcp.reportJson` decide
-whether the transcript it heard is the one the replay reconstructs — so it
-stays on the cheap side of the split. -/
+`decide` in each of the named worlds, and what lets a harness decide whether
+the transcript it heard is the one the replay reconstructs — so it stays on the
+cheap side of the split. -/
 
 /-- An `Event` as the dependent pair it is. -/
 def Event.toSigma (e : Event) : (c : Code) × (Q c × El c) := ⟨e.c, e.q, e.a⟩
@@ -591,21 +600,6 @@ theorem checkProgram_level_le (prog : RawProgram) (p : Plan [] Unit)
       · exact checkBlock_level_le
           (checkFnsList_fnLevel prog.fns [] (fun _ hg => absurd hg (by simp)) fns hfns)
           _ [] [] none trivial p h
-
-/-- …and hence of every source text the front end accepts, modules and all. -/
-theorem parseAndCheckProgramWith_level_le (ov : List (String × Prompt))
-    (mods : List (String × String)) (main : String) (p : Plan [] Unit)
-    (h : parseAndCheckProgramWith ov mods main = .ok p) : level p ≤ Level.branch := by
-  unfold parseAndCheckProgramWith at h
-  split at h
-  · exact absurd h (by simp)
-  · exact checkProgram_level_le _ p h
-
-/-- …and of the single-file spelling in particular. -/
-theorem parseAndCheck_level_le (s : String) (p : Plan [] Unit) (h : parseAndCheck s = .ok p) :
-    level p ≤ Level.branch := by
-  rw [parseAndCheck_ok_iff] at h
-  exact parseAndCheckProgramWith_level_le [] [] s p h
 
 /-! ## The guards of the front end, as theorems
 

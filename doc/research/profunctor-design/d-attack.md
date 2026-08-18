@@ -12,7 +12,7 @@ it wrong. Where I could not check something I say so.*
 Read in full: `Agentic/Core/{Plan,Level,Cost,Denote,Morphism,Explain,Question}.lean`
 (the relevant sections), `Agentic/Core/Dsl/Check.lean:485–530`,
 `haskell/src/Agentic/{Plan,World,Exec,Builder,Workflow,Observe}.hs`,
-`doc/research/dsl-redesign/connection.md` §0–§3.1, `test/CliSmoke.lean`, and the
+`doc/research/connection.md` §0–§3.1, `test/CliSmoke.lean`, and the
 128 frozen vectors in `test/corpus/`.
 
 **Re-run, not taken on trust.** Document C's probe file compiles. I ran it:

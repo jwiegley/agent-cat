@@ -1,4 +1,4 @@
-import Agentic.Core.Dsl.Parse
+import Agentic.Core.Dsl.Syntax
 import Agentic.Core.Level
 
 /-!
@@ -49,8 +49,8 @@ Four points where the elaboration is a decision rather than a transcription.
 * **A closed prompt is a closed question.** A prompt that mentions no name has
   its words in the term, so the node emitted is `Plan.askC` and the plan starts
   at the `batch` rung; one that mentions a name is `Plan.ask`. Every hole that
-  named a define was expanded by the parser into literal text, so a question is
-  closed exactly when every hole it wrote named a define.
+  named a define is expanded into literal text before `Raw` is built, so a
+  question is closed exactly when every hole it wrote named a define.
 
 No clause emits `Plan.dyn`. That is not an accident of this implementation but
 the point of the language, and `Agentic/Core/Dsl.lean` proves it.
@@ -314,9 +314,9 @@ def fnSigsOf (fns : Fns) : List (String × List (String × Code) × Code) :=
 
 /-! ## Elaborating questions at an imposed kind -/
 
-/-- `served by` names the model that serves a **model** addressee. The parser
-refuses the other spellings; this is the same refusal for a hand-built `Raw`,
-so the invariant belongs to the checker and not merely to the grammar. -/
+/-- `served by` names the model that serves a **model** addressee. An authoring
+surface may refuse the other spellings earlier; this is the refusal *every*
+`Raw` meets, so the invariant belongs to the checker and not to any grammar. -/
 def askGuard (a : RawAsk) : Except CheckError Unit :=
   match a.model, a.target.addressee with
   | some _, .model _ => .ok ()
@@ -513,9 +513,9 @@ def finishCont {Γ : Ctx} {c : Code} (acc : Plan (c :: Γ) Unit) (exh : Plan Γ 
 
 /-- `[[maxRevisions]]` = the largest `n` an `at most n amendments` may name.
 A resource limit and not a judgment, so it is refused with the same
-`CheckError` as every other refusal. **Here and not in the parser**, because it
-is the *elaboration* that unrolls: `Dsl.check` applied to a hand-built `Raw`
-runs the same `Nat.rec` as one applied to parsed text. -/
+`CheckError` as every other refusal. **Here and not in an authoring surface**,
+because it is the *elaboration* that unrolls: `Dsl.check` runs the same
+`Nat.rec` on every `Raw`, however that `Raw` was built. -/
 def maxRevisions : Nat := 64
 
 /-! ## The pending result of a bound loop -/
@@ -729,8 +729,9 @@ def check (Γ : Ctx) (S : Bindings Γ) (r : Raw) : Except CheckError (Plan Γ Un
 
 /-- **An empty panel is refused, with exactly this diagnosis** — for every
 scope, annotation, continuation and pair of positions, at the entry point that
-exists for hand-built `Raw`s (no source text can write `panel []`; the parser
-demands a member). Stated here because `freshName` is private. -/
+exists for every `Raw` (an authoring surface is expected to demand a member;
+this is what happens when one does not). Stated here because `freshName` is
+private. -/
 theorem check_panel_nil {Γ : Ctx} (S : Bindings Γ) (x : String) (ann : Option Code)
     (rest : RawBlock) (ppos bpos : Pos) (hx : Bindings.find? S x = none) :
     check Γ S (.bind x ann (.rhs (.panel [] ppos)) rest bpos)
@@ -913,8 +914,8 @@ it. -/
 def checkFnsList (acc : Fns) : List RawFn → Except CheckError Fns
   | [] => .ok acc
   | f :: rest =>
-    -- The parser refuses a duplicate name at the declaration; this is the same
-    -- refusal for a hand-built table, because `Fns.find?` answers with the
+    -- An authoring surface may refuse a duplicate name at the declaration; this
+    -- is the refusal every table meets, because `Fns.find?` answers with the
     -- first match and a silent first-wins resolution is a wrong body running.
     if acc.any (fun fe => fe.name == f.name) then
       .error ⟨f.pos, "two functions answer to one name; rename one", f.name⟩
@@ -968,35 +969,5 @@ def checkProgram (prog : RawProgram) : Except CheckError (Plan [] Unit) :=
                           bound is {maxQuestions}", ""⟩
       else
         checkBlock fns [] [] none prog.main
-
-/-- `[[parseAndCheckProgramWith ov mods main]]` = the whole front end: modules,
-functions, splice, check. -/
-def parseAndCheckProgramWith (ov : List (String × Prompt))
-    (mods : List (String × String)) (main : String) :
-    Except CheckError (Plan [] Unit) :=
-  match parseProgramWith ov mods main with
-  | .error e => .error e
-  | .ok prog => checkProgram prog
-
-/-- `[[parseAndCheckE s]]` = the closed workflow `s` denotes, or the reason it
-denotes none, with a position and an excerpt. -/
-def parseAndCheckE (s : String) : Except CheckError (Plan [] Unit) :=
-  parseAndCheckProgramWith [] [] s
-
-/-- `[[parseAndCheck s]]` = the closed workflow `s` denotes, or the reason it
-denotes none. -/
-def parseAndCheck (s : String) : Except String (Plan [] Unit) :=
-  match parseAndCheckE s with
-  | .ok p => .ok p
-  | .error e => .error e.render
-
-/-- The two spellings agree: the `String` front end is the structured one with
-its diagnosis rendered, and nothing is decided twice. -/
-theorem parseAndCheck_ok_iff (s : String) (p : Plan [] Unit) :
-    parseAndCheck s = .ok p ↔ parseAndCheckE s = .ok p := by
-  unfold parseAndCheck
-  cases h : parseAndCheckE s with
-  | ok q => simp
-  | error e => simp
 
 end Agentic.Core.Dsl

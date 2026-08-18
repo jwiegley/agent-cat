@@ -1,19 +1,27 @@
 import Agentic.Core.Plan
 
 /-!
-# The raw syntax: the unchecked text of a workflow
+# The raw syntax: the unchecked term of a workflow
 
-Stage 3, part one. This module is the *first-order* half of the DSL: a term
-language of names, strings and numbers that mentions no `Plan`, no `Env` and no
-`Expr`, so that parsing is a total function into ordinary data and every
-question of well-typedness is deferred to `Agentic/Core/Dsl/Check.lean`.
+Stage 3, part one, and **the conformance boundary itself**. This module is the
+*first-order* half of the language: a term language of names, strings and
+numbers that mentions no `Plan`, no `Env` and no `Expr`, so that building one is
+a total function into ordinary data and every question of well-typedness is
+deferred to `Agentic/Core/Dsl/Check.lean`.
 
-This is the **redesigned** surface (doc/research/dsl-redesign/GRAMMAR.md, obr
-acat-k28): bindings are `name <- source` with the kind usually inferred;
-branching is `if`/`else` on a flag and `case` on a verdict or on a bounded
-revision's settled-or-not result; the loop is `revising s as c, at most n
-amendments { v <- review-source  amend c { source } }`; a statement-position
-`ask` is the act. Three shapes here are decisions rather than conveniences.
+A `RawProgram` is exactly what crosses between the two implementations
+(`doc/research/connection.md`, D10): it is what `test/corpus/`
+freezes, what `conformance-oracle` accepts, and what the Haskell authoring
+surface builds. Nothing upstream of it is shared, and since the Lean excision
+nothing upstream of it exists on this side at all.
+
+The shapes are the redesign's (obr acat-k28; its grammar page went with the
+`.wf` language and is in git history): bindings are a name and a source with
+the kind usually inferred; branching is on a flag, on a verdict, or on a
+bounded revision's settled-or-not result; the loop is a bounded revision of a
+subject by an
+amendment; a statement-position ask is the act. Three shapes here are decisions
+rather than conveniences.
 
 * **A branching is one constructor per tag type, and its arms are fields.**
   `Plan.case` demands a `Tag`, hence *total* arms, so each branching the
@@ -35,10 +43,12 @@ amendments { v <- review-source  amend c { source } }`; a statement-position
   infer from. The annotation is carried in the syntax so that the refusal can
   say exactly where one would go.
 
-`define` does not appear below. It is textual and the parser expands it — a
-hole names a define or a binding, and the two namespaces are disjoint by
-construction — so a `Raw` mentions only names a checker can be asked to
-resolve.
+`define` does not appear below. It is textual and an authoring surface expands
+it before building a `Raw` — a hole names a define or a binding, and the two
+namespaces are disjoint by construction — so a `Raw` mentions only names a
+checker can be asked to resolve. The corpus pins that expansion having happened:
+`battery-026`, `-027`, `-122` and `-123` are frozen `Raw`s in which every define
+is already literal text.
 -/
 
 namespace Agentic.Core
@@ -77,7 +87,9 @@ namespace Dsl
 
 /-! ## Positions and diagnoses -/
 
-/-- `[[Pos]]` = a point of the source text, one-based, as a reader counts. -/
+/-- `[[Pos]]` = a point of an authoring surface's source text, one-based, as a
+reader counts. Carried through the boundary so that a diagnosis can name a
+place; the checker never interprets it. -/
 structure Pos where
   /-- Line number, counting from one. -/
   line : Nat
@@ -85,13 +97,18 @@ structure Pos where
   col : Nat
   deriving Repr, DecidableEq, Inhabited
 
-/-- `[[CheckError]]` = why a source text denotes no workflow: where, what was
-wrong, and the fragment it was wrong at.
+/-- `[[CheckError]]` = why a program denotes no workflow: where, what was wrong,
+and the fragment it was wrong at.
 
-A structure and not a bare `String` because three consumers must report the same
-thing the same way — the `agent-cat run|cost|plan` front end, the checker's own
-tests, and any tool surface that hands a diagnosis back for self-correction —
-and a message is only identical across three call sites if it is built once. -/
+A structure and not a bare `String` because more than one consumer must report
+the same thing the same way — the conformance oracle, which serializes it, and
+any tool surface that hands a diagnosis back for self-correction — and a message
+is only identical across call sites if it is built once.
+
+The corpus compares the *classification* and not these strings
+(`Conformance.classify`, `refusedJson`): `pos`, `excerpt` and `message` are
+oracle-only fields, so a rewording is a one-line edit to the classifier and not a
+break of the Haskell side. -/
 structure CheckError where
   /-- Where the offending construct begins. -/
   pos : Pos
@@ -116,8 +133,8 @@ def CheckError.render (e : CheckError) : String := toString e
 The interpolation `{x}` is a `Chunk` and not a general expression because the
 language has no expressions: a prompt is a concatenation of things said and
 things heard, and nothing else can appear in one. A hole that names a define
-never reaches this type: the parser expands it, so a `Raw`'s prompts hold only
-literals and answer-holes. -/
+never reaches this type: an authoring surface expands it, so a `Raw`'s prompts
+hold only literals and answer-holes. -/
 inductive Chunk where
   /-- Text written in the source. -/
   | lit (s : String)
@@ -145,8 +162,8 @@ def Prompt.closed : Prompt → Option String
 
 /-- `[[Prompt.normalize p]]` = `p` with empty literals dropped.
 
-Applied by the parser after `define` expansion, where a macro that expands to
-nothing would otherwise leave a chunk that says nothing.
+Applied by an authoring surface after `define` expansion, where a macro that
+expands to nothing would otherwise leave a chunk that says nothing.
 
 **Adjacent literals are deliberately *not* fused.** Fusing them is the obvious
 tidying and it is wrong here: `Prompt.expr` emits the concatenation of the
@@ -179,8 +196,8 @@ annotation or inference, from the position (a panel member and a review binding
 answer `verdict`; a statement ask answers `receipt`), and the checker imposes
 it. -/
 structure RawAsk where
-  /-- The `served by "s"` override, if any; legal only on a model addressee,
-  which the parser enforces. -/
+  /-- The model override, if any; legal only on a model addressee, which
+  `Check.askGuard` enforces on every `Raw` however it was built. -/
   model : Option String
   /-- Whom to ask. -/
   target : RawTarget
@@ -190,10 +207,10 @@ structure RawAsk where
   pos : Pos
   deriving Repr, DecidableEq, Inhabited
 
-/-- `[[RawArg]]` = one argument at a call site, after the parser has resolved
-defines and `$label` fences: the name of something in scope, or literal words
-(a quoted string, a fenced block, an expanded define, or a labelled fence's
-content — the checker cannot tell, which is the point). -/
+/-- `[[RawArg]]` = one argument at a call site, after an authoring surface has
+resolved defines and labelled fences: the name of something in scope, or literal
+words (a quoted string, a fenced block, an expanded define, or a labelled
+fence's content — the checker cannot tell, which is the point). -/
 inductive RawArg where
   /-- A name in scope, passed at the parameter's kind. -/
   | name (x : String) (pos : Pos)
@@ -337,8 +354,9 @@ def RawSource.pos : RawSource → Pos
 
 /-! ## The names of the answer kinds
 
-Spelled once, so that the parser's keywords and the checker's diagnoses cannot
-drift apart. -/
+Spelled once, so that an authoring surface's keywords, the checker's diagnoses
+and the corpus's `code` fields cannot drift apart. `codeOfName` is the inverse
+the conformance oracle reads a string request's `code` with. -/
 
 /-- `[[codeName c]]` = the keyword that writes the code `c`. -/
 def codeName : Code → String

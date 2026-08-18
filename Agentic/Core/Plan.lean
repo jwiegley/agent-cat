@@ -67,11 +67,10 @@ What changes is what it costs to read index `0`. A `Sub Γ Δ` is a *function*
 environment — even for an expression that reads nothing but the answer just
 bound. In `Plan.revising` the artefact expression at round `i+1` is exactly such
 a read, and it is read twice per round (once on its own, once inside the
-verdict), so the cost of an expression doubled with every round: measured on
-`revising d up to n revisions`, `Mcp.costSummary` took 3 ms at `n = 2`, 121 ms at 14, 1.9 s
-at 18 and 122 s at 24 — while the tree it prices has `2n + 2` leaves. Delaying
-the tail makes reading index `0` a projection again; the same measurements are
-in `test/DslSmoke.lean`.
+verdict), so the cost of an expression doubled with every round: measured on a
+bounded revision of `n` amendments, `Explain.costSummary` took 3 ms at `n = 2`,
+121 ms at 14, 1.9 s at 18 and 122 s at 24 — while the tree it prices has
+`2n + 2` leaves. Delaying the tail makes reading index `0` a projection again.
 
 It is not free, and the price is paid in the kernel: reducing `Env.tail` now
 costs one β-step more, and the module that reduces the most of them,

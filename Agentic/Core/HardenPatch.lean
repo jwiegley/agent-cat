@@ -3,10 +3,15 @@ import Agentic.Core.Morphism
 /-!
 # `hardenPatch`, as a `Plan`, and six theorems about its meaning
 
-Stage 5. `example/HardenPatch.lean` writes the owner's workflow in twelve lines
-of authoring surface; this module writes the *same* workflow as a term of the
-first-order syntax `Plan` and proves, **in the meaning space**, the six things
-the kernel promises about it.
+Stage 5. This module writes the owner's workflow as a term of the first-order
+syntax `Plan` and proves, **in the meaning space**, the six things the kernel
+promises about it.
+
+It is the anchor the flagship `Raw` term of `Agentic/Core/DslFlagship.lean` is
+held to: four `Plan.trace` equations there say the checker's output consults the
+same questions, in the same order, hearing the same answers, as `Harden.demo`.
+Nothing here imports anything of the elaboration, and nothing here ever mentioned
+a concrete syntax.
 
 Nothing here is a statement about the shape of a term. Every theorem quantifies
 over worlds and speaks of `run` or `trace` of `⟦hardenPatch⟧`, except the one
@@ -46,8 +51,8 @@ what an addressee can say, and a question that does not say which words it wants
 is a question a real model answers in prose.
 
 They are *the same words* `Exec.answerSpec` puts in the header of every question
-(`demo/Main.lean` proves the two agree, by `rfl`, in the one module that imports
-both): a prompt telling an addressee two different formats is a prompt that
+(the two agree by `rfl`, and a runner that imports both may check it in one
+line): a prompt telling an addressee two different formats is a prompt that
 gets neither. -/
 
 /-- `[[verdictSpec]]` = how a reviewer must answer. `APPROVE` is the unit of the
@@ -155,8 +160,8 @@ def applyShape : Q.Shape .ack := { addressee := .tool "apply", scope := 1, draw 
 
 /-- `[[applyText patch]]` = what is said to it: the patch, and the act itself
 spelled out — write the file, *here*, and say so. "Here" is the session's
-working directory, which `demo/Main.lean` makes a fresh scratch directory for a
-live run, so the act is confined to somewhere nobody minds. -/
+working directory, which a live run is expected to make a fresh scratch directory,
+so the act is confined to somewhere nobody minds. -/
 def applyText (patch : String) : String :=
   "Apply:\n" ++ patch ++ "\nWrite the patched file here, then reply DONE."
 
