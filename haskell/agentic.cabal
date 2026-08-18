@@ -44,6 +44,16 @@ description:
   written that way, and is the proof: the same two frozen entries, statement
   for statement with @example\/harden.wf@, their printed programs pinned up to
   alpha.
+  .
+  Week seven adds the second transport: @Agentic.Acp@ starts an Agent Client
+  Protocol adapter of its own — Claude's or Codex's, or the deterministic double
+  the Lean runtime is tested with — and speaks line-delimited JSON-RPC 2.0 to it
+  over a pipe this process owns. It is the transport that can check what the
+  @agent-deck@ one cannot: a prompt is answered with a stop reason, so an act
+  whose turn did not complete abandons the run rather than recording a receipt
+  for something that did not happen. @agentic-run run EXAMPLE --engine acp@ is
+  the surface, and @ci\/acp.sh@ is the gate — against the stub adapter, and
+  never against a real agent.
 
 build-type:      Simple
 license:         MIT
@@ -81,6 +91,7 @@ library
   import:          settings
   hs-source-dirs:  src
   exposed-modules:
+    Agentic.Acp
     Agentic.AgentDeck
     Agentic.Builder
     Agentic.Exec
@@ -132,7 +143,8 @@ executable tier1
     , agentic:examples
 
 -- The runnable surface: plan an example, price it, or run it — against the
--- scripted transport or against a live agent-deck session.
+-- scripted transport, against a live agent-deck session, or against an ACP
+-- adapter it starts itself (`--engine acp`).
 executable agentic-run
   import:          settings
   hs-source-dirs:  run
@@ -144,7 +156,10 @@ executable agentic-run
   -- Same reason `bisim` is threaded, one layer out. `Agentic.AgentDeck` bounds
   -- every turn with a wall clock and drains a subprocess's stderr on a second
   -- thread; a wedged session must produce a named failure rather than a hung
-  -- run.
+  -- run. `Agentic.Acp` needs it for the sharper version of the same claim: its
+  -- turn budget is `System.Timeout.timeout` around a request that is blocked
+  -- reading the adapter's pipe, and a read is interruptible by an asynchronous
+  -- exception only under the threaded runtime.
   ghc-options:     -threaded
 
 executable bisim

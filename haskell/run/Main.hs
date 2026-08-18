@@ -9,12 +9,22 @@
 -- > agentic-run run  harden --scripted
 -- > agentic-run run  harden --session <id> [--binary PATH] [--poll MS]
 -- >                                        [--timeout MS] [--verbose]
+-- > agentic-run run  harden --engine acp [--adapter stub|claude|codex|PATH]
+-- >                                      [--adapter-arg ARG]... [--scratch DIR]
+-- >                                      [--timeout MS] [--verbose]
 --
 -- @plan@ and @cost@ read the elaborated 'Agentic.Plan.Plan' and say nothing a
 -- run could contradict: they are the /static/ folds, decided before anybody is
 -- asked anything. @run@ executes, through "Agentic.Exec"'s memoizing
--- interpreter, against one of two answering services — a table of canned
--- replies, or a live @agent-deck@ session by way of "Agentic.AgentDeck".
+-- interpreter, against one of three answering services — a table of canned
+-- replies, a live @agent-deck@ session by way of "Agentic.AgentDeck", or an ACP
+-- adapter this process starts and speaks the protocol to ("Agentic.Acp").
+--
+-- The two live engines differ in who owns the process on the other end, which
+-- is the whole of what @--engine@ says: @acp@ starts an adapter of its own and
+-- owns the pipe; @deck@ sends into a session somebody else started and is
+-- watching. Both end at "Agentic.Exec"'s decode loop, so a run means the same
+-- thing either way and fails in the same words.
 --
 -- __The program is the same value tier1 pins.__ Nothing here rebuilds, adapts
 -- or trims a program for execution; @agentic-run run harden@ runs the exact
@@ -25,11 +35,13 @@
 -- == Exit codes
 --
 -- @0@ a completed run (or a printed plan or price); @1@ a usage error; @2@ a
--- transport failure — the session is stopped, the binary is missing, the turn
--- outran its budget; @3@ a run abandoned because an answer could not be read
--- after "Agentic.Exec"'s re-asks. The last two are kept apart because they ask
--- different things of the operator: @2@ is something to fix about the session,
--- @3@ is something that was said.
+-- transport failure — the session is stopped, the binary or the adapter is
+-- missing, the turn outran its budget; @3@ a run abandoned over what arrived:
+-- an answer "Agentic.Exec" could not read after its re-asks, or (over ACP) a
+-- turn that did not complete where an act needed one to. The last two are kept
+-- apart because they ask different things of the operator: @2@ is something to
+-- fix about the transport, @3@ is something that was said, or not finished
+-- being said.
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -37,16 +49,21 @@
 module Main (main) where
 
 import Control.Exception (Handler (..), catches)
+import Control.Monad (unless)
 import Data.Aeson (Value (..))
 import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
 import Data.List (sort, sortOn)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified Data.Vector as V
+import GHC.Clock (getMonotonicTimeNSec)
+import System.Directory (createDirectoryIfMissing, getTemporaryDirectory)
 import System.Environment (getArgs)
 import System.Exit (ExitCode (..), exitSuccess, exitWith)
+import System.FilePath ((</>))
 import System.IO
   ( BufferMode (LineBuffering),
     hSetBuffering,
@@ -58,6 +75,15 @@ import System.IO
 import System.IO.Error (ioeGetErrorString, isUserError)
 import Text.Read (readMaybe)
 
+import Agentic.Acp
+  ( AcpConfig (..),
+    AcpError,
+    adapterArgv,
+    defaultAcpConfig,
+    renderAcpError,
+    withAcp,
+    worldOfAcp,
+  )
 import Agentic.AgentDeck
   ( DeckConfig (..),
     DeckError,
@@ -100,6 +126,30 @@ data Target
     Scripted
   | -- | A live @agent-deck@ session.
     Live !DeckConfig
+  | -- | An ACP adapter this process starts.
+    Adapter !AcpTarget
+
+-- | What @--engine acp@ was told, before the run has a directory.
+--
+-- The working directory is settled in 'runCmd' and not in the parser, because a
+-- run without @--scratch@ makes one — an act may write, and
+-- 'Agentic.Acp.permissionByCode' authorizes a tool call in the session's
+-- working directory, so a run that had not been given one of its own would be
+-- authorizing writes into whatever directory it was started from.
+data AcpTarget = AcpTarget
+  { atConfig :: !AcpConfig,
+    -- | @--scratch DIR@, or 'Nothing' for a fresh one.
+    atScratch :: !(Maybe FilePath),
+    -- | The word @--adapter@ took, for the header and for a diagnosis: an
+    -- operator must be able to act on a message by retyping the name it
+    -- contains (@Acp.Adapter.ofName_name@).
+    atName :: !Text,
+    -- | Whether @--adapter@ was /given/, as against left at its default. The
+    -- name alone cannot say — @stub@ is both a thing to type and what a silent
+    -- command line means — and the run announces the default rather than
+    -- taking it silently.
+    atGiven :: !Bool
+  }
 
 main :: IO ()
 main = do
@@ -116,6 +166,7 @@ main = do
     Right cmd ->
       execute cmd
         `catches` [ Handler $ \(e :: DeckError) -> die 2 ("transport: " <> renderDeckError e),
+                    Handler $ \(e :: AcpError) -> die 2 ("transport: " <> renderAcpError e),
                     Handler $ \(e :: IOError) ->
                       die 3 $
                         if isUserError e
@@ -259,27 +310,57 @@ renderSummary (mn, mx, paths) =
 -- the printed lines are @billMemo@ many, and the trace they summarize is
 -- @billFresh@ many. Seeing the two differ is seeing the memo table work.
 runCmd :: Text -> Target -> Program -> IO ()
-runCmd name target prog = do
-  world <- announce
-  say ""
-  (_, tr) <- runPlanIO (announcingWorld (say . ("  " <>)) world) (progPlan prog)
-  say ""
-  report tr
+runCmd name target prog = case target of
+  Scripted -> do
+    say $
+      "running "
+        <> name
+        <> " against the scripted table ("
+        <> tshow (length (scriptFor name))
+        <> " canned replies)"
+    walk (scriptedWorld (scriptFor name))
+  Live cfg -> do
+    say $ "running " <> name <> " against agent-deck session " <> deckSession cfg
+    say $
+      "  polling every "
+        <> tshow (deckPollMs cfg)
+        <> "ms, "
+        <> tshow (deckTimeoutMs cfg)
+        <> "ms to a turn; every addressee — model, tool and person — is this one session"
+    walk (worldOfDeck cfg)
+  Adapter at -> do
+    dir <- maybe freshScratch pure (atScratch at)
+    createDirectoryIfMissing True dir
+    let cfg = (atConfig at) {acpCwd = dir}
+    say $
+      "running "
+        <> name
+        <> " against the "
+        <> atName at
+        <> " adapter: "
+        <> T.unwords (map T.pack (acpCommand cfg))
+    -- A default that was not typed is announced rather than assumed: `stub` is
+    -- both a word an operator can write and what a silent command line means,
+    -- and the difference is the difference between a run that answers itself
+    -- and one that reaches a real agent.
+    unless (atGiven at) $
+      say "  no --adapter given, so the stub answers — the same default agent-cat's own CLI takes"
+    say $
+      "  cwd "
+        <> T.pack dir
+        <> ", "
+        <> tshow (acpTurnTimeoutMs cfg)
+        <> "ms to a turn, "
+        <> (if acpFreshPerQuestion cfg then "a new session per question" else "one session for the run")
+        <> "; every addressee — model, tool and person — is this one adapter"
+    withAcp cfg (walk . worldOfAcp cfg)
   where
-    announce :: IO WorldIO
-    announce = case target of
-      Scripted -> do
-        say $ "running " <> name <> " against the scripted table (" <> tshow (length (scriptFor name)) <> " canned replies)"
-        pure (scriptedWorld (scriptFor name))
-      Live cfg -> do
-        say $ "running " <> name <> " against agent-deck session " <> deckSession cfg
-        say $
-          "  polling every "
-            <> tshow (deckPollMs cfg)
-            <> "ms, "
-            <> tshow (deckTimeoutMs cfg)
-            <> "ms to a turn; every addressee — model, tool and person — is this one session"
-        pure (worldOfDeck cfg)
+    walk :: WorldIO -> IO ()
+    walk world = do
+      say ""
+      (_, tr) <- runPlanIO (announcingWorld (say . ("  " <>)) world) (progPlan prog)
+      say ""
+      report tr
 
     report :: Trace -> IO ()
     report tr = do
@@ -287,6 +368,19 @@ runCmd name target prog = do
       say "    answer      () — a workflow's value is the unit; what it did is the trace"
       say $ "    billFresh   " <> tshow (billFresh tr) <> " (consultations the run reached)"
       say $ "    billMemo    " <> tshow (billMemo tr) <> " (distinct questions, which is what was put)"
+
+-- | A directory of this run's own, under the system temporary directory, for a
+-- @--engine acp@ run that named none.
+--
+-- Every run acts somewhere: a workflow may end in an act that writes, and
+-- 'Agentic.Acp.permissionByCode' authorizes a tool call /in the session's
+-- working directory/. Making one per run is what keeps the answer to "where may
+-- this agent write?" from being "wherever you happened to be standing".
+freshScratch :: IO FilePath
+freshScratch = do
+  tmp <- getTemporaryDirectory
+  stamp <- getMonotonicTimeNSec
+  pure (tmp </> ("agentic-run-" <> show stamp))
 
 -- ---------------------------------------------------------------------------
 -- The canned answers
@@ -364,30 +458,127 @@ parseCommand = \case
   where
     verbs = ["plan", "cost", "run"]
 
--- | The @run@ options. Two mutually exclusive worlds, and four knobs that
--- belong to the live one alone.
+-- | What the @run@ options say, before it has been decided whether they say
+-- anything coherent.
+--
+-- One record rather than a fold of positional accumulators, because the flags
+-- now belong to three answerers and the refusals below are about which
+-- /combinations/ name one answerer: a flag's engine is a fact about the flag,
+-- and reading it off an argument position is how a flag comes to be silently
+-- accepted by the transport it means nothing to.
+data RunOpts = RunOpts
+  { roScripted :: !Bool,
+    roEngine :: !(Maybe Text),
+    roSession :: !(Maybe Text),
+    roBinary :: !(Maybe Text),
+    roPollMs :: !(Maybe Int),
+    roTimeoutMs :: !(Maybe Int),
+    roVerbose :: !Bool,
+    roAdapter :: !(Maybe Text),
+    -- | In the order given, which is the order they reach the child's @argv@.
+    roAdapterArgs :: ![Text],
+    roScratch :: !(Maybe Text)
+  }
+
+noRunOpts :: RunOpts
+noRunOpts = RunOpts False Nothing Nothing Nothing Nothing Nothing False Nothing [] Nothing
+
+-- | The @run@ options: three mutually exclusive answerers, and the knobs that
+-- belong to one of them alone.
 parseTarget :: [Text] -> Either Text Target
-parseTarget = go Nothing (defaultDeckConfig "") False
+parseTarget args = go noRunOpts args >>= chooseTarget
   where
-    go :: Maybe Text -> DeckConfig -> Bool -> [Text] -> Either Text Target
-    go sess cfg scripted = \case
-      [] -> case (scripted, sess) of
-        (True, Nothing) -> Right Scripted
-        (False, Just s) -> Right (Live cfg {deckSession = s})
-        (True, Just _) -> Left "--scripted and --session name two different answerers; pick one"
-        (False, Nothing) -> Left ("run needs --scripted or --session <id>\n\n" <> usage)
-      ("--scripted" : rest) -> go sess cfg True rest
-      ("--verbose" : rest) -> go sess cfg {deckVerbose = True} scripted rest
-      ("--session" : v : rest) -> go (Just v) cfg scripted rest
-      ("--binary" : v : rest) -> go sess cfg {deckBinary = T.unpack v} scripted rest
-      ("--poll" : v : rest) -> withMs "--poll" v $ \n -> go sess cfg {deckPollMs = n} scripted rest
-      ("--timeout" : v : rest) -> withMs "--timeout" v $ \n -> go sess cfg {deckTimeoutMs = n} scripted rest
+    go :: RunOpts -> [Text] -> Either Text RunOpts
+    go o = \case
+      [] -> Right o
+      ("--scripted" : rest) -> go o {roScripted = True} rest
+      ("--verbose" : rest) -> go o {roVerbose = True} rest
+      ("--engine" : v : rest)
+        | v `elem` ["acp", "deck"] -> go o {roEngine = Just v} rest
+        | otherwise ->
+            Left $
+              "unknown engine '"
+                <> v
+                <> "': --engine takes acp (start an adapter and speak the protocol to it) "
+                <> "or deck (send to a live agent-deck session)"
+      ("--session" : v : rest) -> go o {roSession = Just v} rest
+      ("--binary" : v : rest) -> go o {roBinary = Just v} rest
+      ("--adapter" : v : rest) -> go o {roAdapter = Just v} rest
+      ("--adapter-arg" : v : rest) -> go o {roAdapterArgs = roAdapterArgs o <> [v]} rest
+      ("--scratch" : v : rest) -> go o {roScratch = Just v} rest
+      ("--poll" : v : rest) -> withMs "--poll" v (\n -> go o {roPollMs = Just n} rest)
+      ("--timeout" : v : rest) -> withMs "--timeout" v (\n -> go o {roTimeoutMs = Just n} rest)
       (flag : _) -> Left ("no option '" <> flag <> "' for run\n\n" <> usage)
 
-    withMs :: Text -> Text -> (Int -> Either Text Target) -> Either Text Target
+    withMs :: Text -> Text -> (Int -> Either Text a) -> Either Text a
     withMs flag v k = case readMaybe (T.unpack v) of
       Just n | n >= 0 -> k n
       _ -> Left (flag <> " takes a number of milliseconds, not '" <> v <> "'")
+
+-- | Which answerer the options name — or a refusal saying which two of them
+-- were named at once.
+--
+-- Every combination refused here is one where a flag would otherwise mean
+-- nothing to the transport that was chosen, which is how a run comes to be
+-- configured by a line nobody read.
+chooseTarget :: RunOpts -> Either Text Target
+chooseTarget o = case (roScripted o, roEngine o, roSession o) of
+  (True, Just e, _) -> Left ("--scripted answers from a table and --engine " <> e <> " reaches an agent; pick one")
+  (True, _, Just _) -> Left "--scripted and --session name two different answerers; pick one"
+  (True, _, _) -> onlyScripted
+  (_, Just "acp", Just _) ->
+    Left
+      "--engine acp starts an adapter of its own, and --session sends to an agent-deck \
+      \session somebody else started; pick one"
+  (_, Just "acp", _) -> adapter
+  (_, Just "deck", Nothing) -> Left "--engine deck needs the session to send to: give --session <id> as well"
+  (_, _, Just s) -> deck s
+  _ -> Left ("run needs --scripted, --engine acp, or --session <id>\n\n" <> usage)
+  where
+    -- The flags of the two engines this run is not, refused by name.
+    forbid :: Text -> [(Text, Bool)] -> Either Text ()
+    forbid engine = \case
+      ((flag, True) : _) -> Left (flag <> " is not " <> engine <> "'s to take")
+      (_ : rest) -> forbid engine rest
+      [] -> Right ()
+
+    acpFlags = [("--adapter", isJust (roAdapter o)), ("--adapter-arg", not (null (roAdapterArgs o))), ("--scratch", isJust (roScratch o))]
+    deckFlags = [("--binary", isJust (roBinary o)), ("--poll", isJust (roPollMs o))]
+    liveFlags = acpFlags <> deckFlags <> [("--timeout", isJust (roTimeoutMs o)), ("--verbose", roVerbose o)]
+
+    onlyScripted = Scripted <$ forbid "--scripted" liveFlags
+
+    deck s = do
+      -- `--adapter` names a child this run starts, and the deck engine starts
+      -- none: there the answering agent is the one already in the session.
+      forbid "the deck engine" acpFlags
+      let base = defaultDeckConfig s
+      pure . Live $
+        base
+          { deckBinary = maybe (deckBinary base) T.unpack (roBinary o),
+            deckPollMs = fromMaybe (deckPollMs base) (roPollMs o),
+            deckTimeoutMs = fromMaybe (deckTimeoutMs base) (roTimeoutMs o),
+            deckVerbose = roVerbose o
+          }
+
+    adapter = do
+      forbid "the acp engine" deckFlags
+      -- The default is `stub`, which is agent-cat's own (`cli/AgentCat.lean`'s
+      -- `Options.adapter`): a command line that named no adapter must not spawn
+      -- a real agent, spend a token or touch an account.
+      let name = fromMaybe "stub" (roAdapter o)
+          base = defaultAcpConfig (adapterArgv name <> map T.unpack (roAdapterArgs o))
+      pure . Adapter $
+        AcpTarget
+          { atConfig =
+              base
+                { acpTurnTimeoutMs = fromMaybe (acpTurnTimeoutMs base) (roTimeoutMs o),
+                  acpVerbose = roVerbose o
+                },
+            atScratch = T.unpack <$> roScratch o,
+            atName = name,
+            atGiven = isJust (roAdapter o)
+          }
 
 usage :: Text
 usage =
@@ -400,16 +591,32 @@ usage =
       "  agentic-run run  <example> --scripted",
       "  agentic-run run  <example> --session <id> [--binary PATH] [--poll MS]",
       "                                            [--timeout MS] [--verbose]",
+      "  agentic-run run  <example> --engine acp [--adapter stub|claude|codex|PATH]",
+      "                                          [--adapter-arg ARG]... [--scratch DIR]",
+      "                                          [--timeout MS] [--verbose]",
       "",
       "  <example> is " <> T.intercalate " or " exampleNames,
       "",
-      "  --scripted   answer from a table of canned replies, and ask nobody",
-      "  --session    put every question — model, tool and person alike — to this",
-      "               agent-deck session",
-      "  --binary     the agent-deck executable (default: agent-deck, found on PATH)",
-      "  --poll       milliseconds between two checks of the session's status",
-      "  --timeout    milliseconds one turn may take before it is abandoned",
-      "  --verbose    narrate the transport on stderr"
+      "  --scripted     answer from a table of canned replies, and ask nobody",
+      "  --engine       acp starts an ACP adapter of its own and speaks the protocol",
+      "                 to it over a pipe it owns; deck sends to a live agent-deck",
+      "                 session somebody else started (which --session alone selects)",
+      "  --session      put every question — model, tool and person alike — to this",
+      "                 agent-deck session",
+      "  --binary       the agent-deck executable (default: agent-deck, found on PATH)",
+      "  --poll         milliseconds between two checks of the session's status",
+      "  --adapter      the answering program (default: stub, the deterministic double",
+      "                 at ../test/stub_adapter.py); claude and codex are looked for on",
+      "                 PATH and then at their machine-local pins; anything else is a",
+      "                 path. --engine acp only",
+      "  --adapter-arg  one argument for the adapter's argv; repeatable.",
+      "                 `--adapter-arg --refuse` is how the stub is told to answer *no*",
+      "                 to a person's yes/no question. --engine acp only",
+      "  --scratch      run in DIR instead of a fresh temporary directory: where the",
+      "                 adapter is started, and the only place an act may write.",
+      "                 --engine acp only",
+      "  --timeout      milliseconds one turn may take before it is abandoned",
+      "  --verbose      narrate the transport on stderr"
     ]
 
 -- ---------------------------------------------------------------------------

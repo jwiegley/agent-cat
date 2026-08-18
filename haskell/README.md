@@ -33,8 +33,9 @@ program it prints, and the whole reply — folds, counts, and one trace and two
 bills per world.
 
 And the library **runs**: `agentic-run` plans, prices and executes the walked
-examples, against a table of canned replies or against a live `agent-deck`
-session. See [Running a workflow](#running-a-workflow).
+examples, against a table of canned replies, against a live `agent-deck`
+session, or against an ACP adapter it starts and speaks the protocol to. See
+[Running a workflow](#running-a-workflow).
 
 ## Running it
 
@@ -79,6 +80,7 @@ and only if nothing failed, so both are usable directly as CI gates.
 | `Agentic.Gen`, `Agentic.Observe`, `Agentic.Oracle` | the bisimulation surface: generators, the reply assembly both runners share, and the line-delimited JSON client for the Lean oracle subprocess |
 | `Agentic.Exec` | the interpreter in `IO` — the memoizing fold of `Exec.lean`'s `Dlg.execM`, its decode/re-ask loop, and the scripted answering service |
 | `Agentic.AgentDeck` | one live `agent-deck` session as an answering service: the three CLI commands, the poll loop, the staleness guard and five named transport failures |
+| `Agentic.Acp` | an ACP adapter this process starts, as an answering service: the handshake, a session per question, the permission policy per question, the stop reason — which is what lets this transport refuse a receipt from a turn that did not finish — and six named transport failures |
 | `Example.Harden` | the walked examples (`harden`, `hello`), written in `Agentic.Workflow` and shared by `tier1` and `agentic-run` |
 | `tier0/`, `tier1/`, `bisim/`, `run/` | the four runners |
 
@@ -262,6 +264,7 @@ nix develop -c cabal run agentic-run -- plan harden
 nix develop -c cabal run agentic-run -- cost harden
 nix develop -c cabal run agentic-run -- run  harden --scripted
 nix develop -c cabal run agentic-run -- run  harden --session my-session
+nix develop -c cabal run agentic-run -- run  harden --engine acp --adapter stub
 ```
 
 `<example>` is `harden` or `hello`: the two walked programs of
@@ -415,6 +418,52 @@ than recording an answer nobody gave — a defaulted table cell is
 indistinguishable from a real one, and no check further down could recover the
 difference.
 
+### `run --engine acp` — execute against an adapter this run starts
+
+```sh
+agentic-run run harden --engine acp [--adapter stub|claude|codex|PATH] \
+    [--adapter-arg ARG]... [--scratch DIR] [--timeout MS] [--verbose]
+```
+
+| option | what it is | default |
+| --- | --- | --- |
+| `--engine acp` | start an ACP adapter and speak line-delimited JSON-RPC 2.0 to it over a pipe this process owns | — |
+| `--adapter` | the answering program: `stub` (`agent-cat/test/stub_adapter.py`, under `python3`), `claude` and `codex` (looked for on `PATH`, then at their machine-local nix-store pins), or a path | `stub`, announced when it was not typed |
+| `--adapter-arg` | one argument appended to the adapter's `argv`; repeatable — `--adapter-arg --refuse` is how the stub is told to answer *no* to the owner | — |
+| `--scratch` | the adapter's working directory, and the only place an act is authorized to write | a fresh temporary directory, printed |
+| `--timeout` | milliseconds one request may take before the child is killed and the question named | `900000` |
+| `--verbose` | narrate the transport on stderr | off |
+
+The honest paragraph. **This transport can promise one thing the `agent-deck`
+one cannot.** `session/prompt` answers with a `stopReason`, and exactly one of
+ACP's five words — `end_turn` — means the agent finished; so when
+`Agentic.Exec.requiresCompletedTurn` says an answer needs a completed turn (an
+`act`, whose `Decode .ack` is total and would accept any bytes at all, or
+anything asked of a `person`), this adapter can check it and does: a cancelled
+act abandons the run with exit `3` rather than recording a receipt for something
+that did not happen. `Agentic.AgentDeck` says in as many words that it cannot
+make that check, because the CLI it drives reports no stop reason. Everything
+else is the same runtime: the question is rendered by the same `renderQ` with
+the same `Agentic.Exec.answerSpec` line, decoded by the same trusted base,
+re-asked once by the same loop, and abandoned in the same words. What is
+*not* here is Lean's `--session`/`--fork-session` handoff, its
+`session/set_mode` and `session/set_config_option` scope calls (both axes travel
+in the prompt header instead, exactly as they do for the deck), and its second
+clock: one `--timeout` bounds a whole request, and a wedged pipe is a wedged
+request.
+
+Two policies are worth reading before pointing this at a directory you care
+about. Each question gets a **new session** (`Exec.Settings.freshSessionPerQuestion`),
+because a world is a function of the question and a session is a memory of the
+ones before it — an approximation, and a policy rather than a theorem. And a
+tool permission the agent asks for is granted **only during an act**
+(`Exec.permissionByCode`): an ask — text, verdict or flag — is declined in the
+schema's own `{"outcome":"cancelled"}`, so an agent cannot rewrite the workspace
+during a turn that asked it only to think. Every decision is printed. The grant
+is still an assumption and it is stated rather than proved: the runtime is
+speaking to an adapter it started, in a directory it chose, and a tool call
+inside that directory is authorized by a question that asked for one.
+
 ### Testing the transport without a live session
 
 `ci/deck.sh` runs `agentic-run` against `test/stub-deck.sh`, a fake `agent-deck`
@@ -451,9 +500,18 @@ time, machine-wide, so Lean builds must be rare, not merely serialized):
 
 ```sh
 ./ci/tier0.sh      # every commit: tier0 + tier1 against the frozen corpus — no Lean at all
-./ci/deck.sh       # every commit: the transport, against test/stub-deck.sh — no Lean, no session
+./ci/deck.sh       # every commit: the deck transport, against test/stub-deck.sh — no Lean, no session
+./ci/acp.sh        # every commit: the ACP transport, against agent-cat/test/stub_adapter.py
 ./ci/tier1.sh      # nightly / semantic-core changes: bisim against the PREBUILT oracle
 ```
+
+`ci/acp.sh` is twelve scenarios against the *same* stub adapter the Lean
+runtime is tested with — real ACP over real pipes, and never a real agent. Five
+of them are the transport's named failures; the two that matter most are
+`cancelled-act`, where an act's turn is interrupted and the run is abandoned
+rather than credited, and `write-on-ask`, where the adapter asks to edit the
+workspace during a draft turn, is denied, and the run's directory is checked
+afterwards to prove nothing was written.
 
 `ci/tier1.sh` takes the oracle path from `$ORACLE` (defaulting to agent-cat's
 `.lake/build/bin/conformance-oracle`), the iteration count from `$N` and an
@@ -482,15 +540,19 @@ src/Agentic/Observe.hs  the reply assembly both runners share
 src/Agentic/Oracle.hs   the line-delimited JSON client for the Lean oracle
 src/Agentic/Exec.hs     the IO interpreter: the memoizing fold and the decode loop
 src/Agentic/AgentDeck.hs  one agent-deck session as an answering service
+src/Agentic/Acp.hs      an ACP adapter this process starts, as an answering service
 example/Example/Harden.hs the walked examples, written in the authoring surface
 tier0/Main.hs           the corpus runner
 tier1/Cases.hs          the rebuilt cases, each quoting its surface source
 tier1/Main.hs           the rebuilt-case runner; it owns every comparison
 bisim/Main.hs           the live differential against the Lean oracle
 run/Main.hs             agentic-run: plan, cost, run
-test/stub-deck.sh       a fake agent-deck, for testing the transport
+test/stub-deck.sh       a fake agent-deck, for testing the deck transport
+test/acp-misbehave.sh   an ACP adapter that babbles or wedges, for the two failures
+                        a conforming stub cannot produce
 ci/tier0.sh             the PR gate: tier0 + tier1
-ci/deck.sh              the PR gate: the transport, seven scenarios
+ci/deck.sh              the PR gate: the deck transport, seven scenarios
+ci/acp.sh               the PR gate: the ACP transport, twelve scenarios
 ci/tier1.sh             the nightly gate: bisim against the prebuilt oracle
 PORTING.md              week one: the types, the encoding, the guard order,
                         the string layer, the comparison rules
