@@ -45,11 +45,22 @@
 -- >     result <- revising draft (atMost 2) \patch -> W.do
 -- >         verdict <- panel [ ask (model "reviewer") [wf|{guide}…{patch}|] ]
 -- >         amend (ask (model "author") [wf|…{patch}…{verdict}|])
--- >     caseResult result (\patch -> W.do …) stop
+-- >     case result of
+-- >       Settled patch -> W.do
+-- >         ok <- confirm (person "owner") [wf|Apply this?…{patch}|]
+-- >         if ok
+-- >           then W.do
+-- >             act (tool "apply") [wf|Apply: {patch}|]
+-- >             stop
+-- >           else stop
+-- >       Unsettled -> stop
 --
 -- There is no splice, no bracket and no label: a statement is a statement, a
--- binder is a Haskell binder, and @W.do@ is @QualifiedDo@ — a plain extension
--- that rebinds nothing beyond the block it is written on.
+-- binder is a Haskell binder, a branch is a @case@ and a @case@ is a @case@.
+-- @W.do@ is @QualifiedDo@ — a plain extension that rebinds nothing beyond the
+-- block it is written on — and the @if@ is Haskell's own @if@, reaching
+-- 'ifThenElse' under @RebindableSyntax@ (see \"Two branches, two
+-- mechanisms\").
 --
 -- == The one thing a library cannot read: a binder's spelling
 --
@@ -66,8 +77,15 @@
 --     bound at the same depth in a disjoint scope; the revision's own review
 --     binding is one deeper;
 --   * a bounded revision's /result/ — printed twice, in the @bind@ and in the
---     @caseResult@, and never in scope — prints @r\<d\>@, which no binding can
---     collide with.
+--     'Agentic.Raw.RawCaseResult' that consumes it, and never in scope —
+--     prints @r\<d\>@, which no binding can collide with.
+--
+-- The depth a name is generated from is the length of the 'Live' list the
+-- block is carrying, which every binding conses its own name onto — /not/ the
+-- length of the scope index. The two agree everywhere but in one place, and
+-- that place is the reason: a fork's unsettled arm is /typed/ at the settled
+-- arm's scope (see 'Outcome') and /checked/ at the enclosing one, so only the
+-- names it was handed say where it really stands.
 --
 -- Every generated name is a function of the program's shape alone, so a
 -- program prints the same names on every machine and in every build. They are
@@ -97,6 +115,50 @@
 -- the /stage/ index already tells them apart: inside a revision only a review
 -- may stand, and after it only 'amend'.
 --
+-- == Two branches, two mechanisms
+--
+-- A workflow branches twice, and the two branches are spelled with Haskell's
+-- own @if@ and Haskell's own @case@ — but they reach the block by different
+-- routes, and the difference is forced by the language, not chosen.
+--
+-- __@if@ forks at the @if@.__ 'ifThenElse' is an ordinary function of a flag
+-- handle and two blocks, which @RebindableSyntax@ is what @if@ means. It has
+-- to be: a flag may be bound, /acted past/, and only then branched on.
+-- @battery-043@ in the frozen corpus does exactly that — it binds @f@ from a
+-- person, binds another name after it, @act@s, and only on the next line
+-- writes @if f { } else { }@ — so a fork at the flag's __bind__ would sweep
+-- every statement in between into both arms and print a different program.
+--
+-- __@case@ forks at the bind.__ A bounded revision's result is not a value and
+-- cannot be spliced, so there is nothing for 'Outcome' to /be/ except the
+-- branch itself: 'revising'\''s bind runs the rest of the block twice, once
+-- under @Settled@ with a fresh settled handle and once under @Unsettled@, and
+-- hands the two blocks to "Agentic.Builder"\'s @revisingCase@ as the arms of
+-- the @case result@ it prints. That is observationally the combinator it
+-- replaces, because Lean refuses every statement between the two: while a
+-- result is pending, @checkBlock@ answers @.empty@, @knownHere@, @act@,
+-- @bind@, @callStmt@, @ifFlag@ and @caseVerdict@ alike with
+--
+-- > the revising result `x` is not yet consumed: `case x { settled …
+-- > unsettled … }` is the next statement, and nothing else touches it
+--
+-- (@Check.lean:537@'s @pendingErr@, raised at @550@, @558@, @566@, @567@,
+-- @568@, @680@ and @701@ — every statement form but @.caseResult@), so there
+-- is nothing an author could legally have written between the bind and its
+-- @case@ for the fork to swallow.
+--
+-- Where the two do differ, they differ in the /accepting/ direction and not in
+-- what a program means. An author who writes a statement between the bind and
+-- the @case@ is not refused here; the statement stands in __both__ arms, which
+-- is a program the @.wf@ language can also write — by writing it twice — and
+-- an author who ignores the result altogether has an unused binding and hears
+-- so from @-Wunused-matches@.
+--
+-- 'caseVerdict' takes neither route and stays a combinator: a verdict /is/ a
+-- value, it may be bound, spliced, acted past and branched on many statements
+-- later, exactly as a flag may, and its three arms are positional rather than
+-- a Haskell constructor's.
+--
 -- == What must not compile
 --
 -- GHC has no negative-test harness here, so the refusals are recorded as the
@@ -117,11 +179,13 @@
 --   * a revision with two reviews, or none, or a statement between the review
 --     and the amendment — @a bounded revision reviews first … and then
 --     amends, and has no other statement@;
---   * a statement standing where a bounded revision's @case@ must —
---     @a bounded revision's result is consumed by `caseResult`, and by
---     nothing else@;
---   * a workflow left pending its @case@, or a @caseResult@ with no revision
---     before it — neither has a stage the other can meet.
+--   * a @case@ on anything but an 'Outcome' where a revision's result stands,
+--     or an 'Outcome' pattern where no revision bound one — GHC's own
+--     @Couldn't match type@ on the scrutinee, because @Settled@ and
+--     @Unsettled@ are the constructors of one data type and nothing else
+--     produces it;
+--   * a revision's settled handle read in the unsettled arm — GHC's own
+--     @Variable not in scope@, because the pattern binds it in one arm only.
 module Agentic.Workflow
   ( -- * Programs
     Program,
@@ -139,7 +203,6 @@ module Agentic.Workflow
     named,
     Nm,
     An,
-    KnownDepth (..),
     genName,
     resultName,
     Live,
@@ -179,15 +242,15 @@ module Agentic.Workflow
     stop,
     act,
     knownHere,
+    ifThenElse,
     ifFlag,
     caseVerdict,
-    caseResult,
-    Settled,
 
     -- * The bounded revision
     Bound,
     atMost,
     revising,
+    Outcome (..),
     Loop,
     Clauses,
     Amendment,
@@ -204,7 +267,7 @@ where
 
 import Agentic.Builder
   ( Ask (..),
-    Blk,
+    Blk (..),
     Code (..),
     Entry,
     Piece,
@@ -215,7 +278,16 @@ import Agentic.Builder
     lit,
   )
 import qualified Agentic.Builder as B
-import Agentic.Plan (KnownCode, SCode, Var (VHere), sCode)
+import Agentic.Plan
+  ( KnownCode,
+    SCode,
+    Var (VHere),
+    defaultEl,
+    sCode,
+    subCons,
+    subId,
+    subP,
+  )
 import Agentic.Raw (Addressee (..))
 import Agentic.WF (KnownIx, Says (..), V (..), wf)
 import Data.Kind (Constraint, Type)
@@ -243,32 +315,26 @@ import qualified GHC.TypeLits as TL
 -- types are the ones that must line up, and they are indexed by scopes.)
 type An (c :: Code) = '("", c)
 
--- | How many bindings are live — the length of the scope, and the depth every
--- generated name is a function of.
-class KnownDepth (s :: Scope) where
-  depthOf :: Int
-
-instance KnownDepth '[] where
-  depthOf = 0
-
-instance KnownDepth s => KnownDepth (e ': s) where
-  depthOf = 1 + depthOf @s
-
--- | The name a binding made at depth @d@ prints: @b\<d\>@.
+-- | The name a binding made at depth @d@ prints: @b\<d\>@, where @d@ is the
+-- number of names the block is carrying.
 --
 -- Fresh by construction — at depth @d@ the live names are exactly
 -- @b0 … b(d-1)@ — and a function of the program's shape alone, so a printed
 -- program is reproducible.
-genName :: forall s. KnownDepth s => Text
-genName = T.pack ('b' : show (depthOf @s))
+--
+-- The depth is read off the 'Live' names rather than off the scope index,
+-- which is what makes a fork's unsettled arm print at the depth it is
+-- /checked/ at rather than at the one it is /typed/ at. See 'Outcome'.
+genName :: Live -> Text
+genName live = T.pack ('b' : show (length live))
 
 -- | The name a bounded revision's /result/ prints: @r\<d\>@.
 --
 -- A result is not a binding: it is printed in the @bind@ and in the
--- @caseResult@ that consumes it, and it never enters a scope. Its own letter
+-- @case result@ that consumes it, and it never enters a scope. Its own letter
 -- keeps it clear of the carrier, which /is/ a binding at the very same depth.
-resultName :: forall s. KnownDepth s => Text
-resultName = T.pack ('r' : show (depthOf @s))
+resultName :: Live -> Text
+resultName live = T.pack ('r' : show (length live))
 
 -- ---------------------------------------------------------------------------
 -- Naming a binding by hand
@@ -396,37 +462,42 @@ data Ann (s :: Scope) (c :: Code) = Ann (SCode c) (Rhs s c)
 -- The block: an indexed CPS monad over a Stage
 -- ---------------------------------------------------------------------------
 
--- | Where a block stands. Two of the four are Lean's, and two are this
+-- | Where a block stands. One of the three is Lean's, and two are this
 -- surface's way of holding a revision's two clauses apart:
 --
 --   * @'Open' s@ — an ordinary block over the live bindings @s@;
---   * @'Pending' c s@ — Lean's @Pend Γ@ (@Check.lean:527@): after a bounded
---     revision a block is /pending/ its @case@, and no other statement may
---     stand there;
 --   * @'Review' c s@ — inside a revision, awaiting its one review, with the
 --     candidate live at index @0@;
 --   * @'Amending' c s@ — the same revision, awaiting its one amendment, with
 --     the verdict live too.
+--
+-- Lean's fourth state, @Pend Γ@ (@Check.lean:527@) — a block /pending/ the
+-- @case@ that consumes a bounded revision's result — has no stage here,
+-- because the fork happens at the bind and the arms are ordinary open blocks.
+-- Its refusal is not lost: see \"Two branches, two mechanisms\".
 data Stage
   = Open Scope
-  | Pending Code Scope
   | Review Code Scope
   | Amending Code Scope
 
 -- | What a block at a given stage /is/. The family is injective because its
--- four results are distinct type constructors — and it has to be, or
+-- three results are distinct type constructors — and it has to be, or
 -- unwrapping a 'W' could not recover its indices and @>>=@ would not typecheck
 -- at all.
 type family Res (i :: Stage) = (r :: Type) | r -> i where
   Res ('Open s) = Blk s
-  Res ('Pending c s) = Arms c s
   Res ('Review c s) = Clauses c s
   Res ('Amending c s) = Amendment c s
 
--- | The two arms a pending @case result@ still owes, and the name its settled
--- binder prints.
+-- | The two arms of a @case result@ as the fork produces them: the name the
+-- settled binder prints, and the two blocks the rest of the workflow is.
+--
+-- __Both are at the settled arm's scope__, because both are the one
+-- continuation run twice — the second run simply had no @Settled@ handle to
+-- bind. 'revising' is where the second is put back at the scope Lean checks it
+-- in; see 'unsettledArm'.
 data Arms (c :: Code) (s :: Scope)
-  = Arms Text (Blk (An c ': s)) (Blk s)
+  = Arms Text (Blk (An c ': s)) (Blk (An c ': s))
 
 -- | A revision's two clauses: the review binding's name, what it prints as its
 -- annotation, the review, and the amendment.
@@ -514,7 +585,6 @@ instance Step st i j a => Step (Nm st) i j a where
 -- a text question" (@Check.lean:207@) made structural.
 instance
   ( s' ~ s,
-    KnownDepth s,
     j ~ 'Open (An 'CodeText ': s),
     a ~ V (An 'CodeText ': s) 'CodeText
   ) =>
@@ -522,13 +592,12 @@ instance
   where
   step mn live q k = B.bindI x (B.one @'CodeText q) (k (V x VHere) (x : live))
     where
-      x = fromMaybe (genName @s) mn
+      x = fromMaybe (genName live) mn
 
 -- | @x <- panel […]@, @x <- confirm …@, @x <- ask … \`answering\` c@ — the
 -- kind comes from the source, and the annotation stays @null@.
 instance
   ( s' ~ s,
-    KnownDepth s,
     j ~ 'Open (An c ': s),
     a ~ V (An c ': s) c
   ) =>
@@ -536,13 +605,12 @@ instance
   where
   step mn live r k = B.bindI x r (k (V x VHere) (x : live))
     where
-      x = fromMaybe (genName @s) mn
+      x = fromMaybe (genName live) mn
 
 -- | @x <- ask … \`annotated\` c@ — the same elaboration, and the kind is
 -- printed: @x : c <- …@.
 instance
   ( s' ~ s,
-    KnownDepth s,
     j ~ 'Open (An c ': s),
     a ~ V (An c ': s) c
   ) =>
@@ -550,26 +618,38 @@ instance
   where
   step mn live (Ann sc r) k = B.bindAsI sc x r (k (V x VHere) (x : live))
     where
-      x = fromMaybe (genName @s) mn
+      x = fromMaybe (genName live) mn
 
--- | @result <- revising …@ — the block becomes pending its @case@, and what
--- it binds is not a value but the witness that one is owed.
+-- | @result <- revising …@ — __the fork__. What this binds is not a value but
+-- the branch itself, and the rest of the block is run twice: once under
+-- @Settled@, with the settled binder live and its name consed onto the block's
+-- own, and once under @Unsettled@, with neither. The two blocks that come back
+-- are the arms of the @case result@ 'revising' prints.
+--
+-- The outgoing stage is the settled arm's, which is what lets one @case@ have
+-- two arms in Haskell: a Haskell @case@ has one type, and the arm that binds
+-- nothing is the arm that can stand at either scope.
 instance
   ( s' ~ s,
     c' ~ c,
-    KnownDepth s,
-    j ~ 'Pending c s,
-    a ~ Settled c s
+    j ~ 'Open (An c ': s),
+    a ~ Outcome c s
   ) =>
   Step (Loop c' s') ('Open s) j a
   where
-  step mn live lp k = loopRun lp live (fromMaybe (resultName @s) mn) (k Settled live)
+  step mn live lp k =
+    loopRun
+      lp
+      live
+      (fromMaybe (resultName live) mn)
+      (Arms x (k (Settled (V x VHere)) (x : live)) (k Unsettled live))
+    where
+      x = genName live
 
 -- | @verdict <- ask …@ inside a revision: the review, elaborated at @verdict@
 -- by position, exactly as @checkMembers@ does.
 instance
   ( s' ~ (An c ': s),
-    KnownDepth s,
     j ~ 'Amending c s,
     a ~ V (An 'CodeVerdict ': An c ': s) 'CodeVerdict
   ) =>
@@ -582,7 +662,6 @@ instance
 instance
   ( s' ~ (An c ': s),
     c' ~ 'CodeVerdict,
-    KnownDepth s,
     j ~ 'Amending c s,
     a ~ V (An 'CodeVerdict ': An c ': s) 'CodeVerdict
   ) =>
@@ -595,7 +674,6 @@ instance
 instance
   ( s' ~ (An c ': s),
     c' ~ 'CodeVerdict,
-    KnownDepth s,
     j ~ 'Amending c s,
     a ~ V (An 'CodeVerdict ': An c ': s) 'CodeVerdict
   ) =>
@@ -607,7 +685,6 @@ instance
 -- annotation, itself, and the amendment the rest of the block is.
 clausesOf ::
   forall c s.
-  KnownDepth s =>
   Maybe Text ->
   Live ->
   Maybe Code ->
@@ -617,7 +694,7 @@ clausesOf ::
 clausesOf mn live annot review k = case k (V x VHere) (x : live) of
   Amendment am -> Clauses x annot review am
   where
-    x = fromMaybe (genName @(An c ': s)) mn
+    x = fromMaybe (genName live) mn
 
 -- | A second statement in a revision, which the grammar has no room for.
 instance
@@ -638,28 +715,6 @@ instance
   Step (Rhs s' c') ('Amending c s) j a
   where
   step = error "Step (Rhs s c) ('Amending c s): unreachable, the instance is a TypeError"
-
--- | A statement standing where a bounded revision's @case@ must. Lean refuses
--- every other statement by name while a @Pend Γ@ is open (@Check.lean:527@);
--- here it is the stage, and this is the message.
-instance
-  TypeError
-    ( 'TL.Text "a bounded revision's result is consumed by `caseResult`, and \
-               \by nothing else: no statement may stand between the two"
-    ) =>
-  Step (Ask s') ('Pending c s) j a
-  where
-  step = error "Step (Ask s) ('Pending c s): unreachable, the instance is a TypeError"
-
--- | As above, for a source that is not a bare question.
-instance
-  TypeError
-    ( 'TL.Text "a bounded revision's result is consumed by `caseResult`, and \
-               \by nothing else: no statement may stand between the two"
-    ) =>
-  Step (Rhs s' c') ('Pending c s) j a
-  where
-  step = error "Step (Rhs s c) ('Pending c s): unreachable, the instance is a TypeError"
 
 -- | The block's bind. See "Agentic.Workflow.Do", which is where an author
 -- meets it.
@@ -700,8 +755,41 @@ act p w = W (\_ k -> B.act (ask p w) (k ()))
 knownHere :: W ('Open s) ('Open s) ()
 knownHere = W (\live k -> B.knownHereI live (k ()))
 
--- | @if x { … } else { … }@ — a terminal. The flag's kind comes from the
+-- | Haskell's @if@, over a flag handle and two blocks — which is what
+--
+-- > if ok
+-- >   then W.do
+-- >     act (tool "apply") [wf|Apply: {patch}|]
+-- >     stop
+-- >   else stop
+--
+-- means in an authoring module, because such a module enables
+-- @RebindableSyntax@ and this is the @ifThenElse@ it then finds. There is no
+-- @ifFlag ok (…) (…)@ to write and no combinator to remember: an @if@ is an
+-- @if@, its two branches are blocks, and the flag's kind comes from the
 -- handle, so a question that is not a 'confirm' cannot be decided on.
+--
+-- __It forks here, at the @if@__, and not at the flag's bind — because a flag
+-- may be bound, acted past, and only then branched on. See \"Two branches, two
+-- mechanisms\".
+--
+-- @RebindableSyntax@ costs an authoring module its implicit @Prelude@ (import
+-- it, and @Data.String (fromString)@ beside it if the module also enables
+-- @OverloadedStrings@) and costs a @W.do@ block nothing at all: @QualifiedDo@
+-- rebinds the block it is written on, and @RebindableSyntax@ rebinds only
+-- unqualified syntax.
+ifThenElse ::
+  forall h s j.
+  KnownIx h s =>
+  V h 'CodeFlag ->
+  W ('Open s) j Term ->
+  W ('Open s) j Term ->
+  W ('Open s) j Term
+ifThenElse = ifFlag
+
+-- | @if x { … } else { … }@ — a terminal, and the combinator 'ifThenElse' is.
+-- Exported because it is the desugaring and a reader of a printed program
+-- should be able to find it by name; an author writes the @if@.
 ifFlag ::
   forall h s j.
   KnownIx h s =>
@@ -717,6 +805,13 @@ ifFlag v yes no =
 
 -- | @case x { approved … objected … no answer … }@ — a terminal, its arms
 -- positional, in Lean's order.
+--
+-- __This one stays a combinator__, where a revision's result became a Haskell
+-- @case@ and a flag became a Haskell @if@. A verdict is a value: it may be
+-- bound, spliced into a later prompt, acted past, and branched on many
+-- statements after its bind, so nothing may fork at its binding — and its
+-- three arms are Lean's three tags in Lean's order rather than the
+-- constructors of any Haskell type, so nothing may fork at a pattern either.
 caseVerdict ::
   forall h s j.
   KnownIx h s =>
@@ -736,7 +831,7 @@ caseVerdict v approved objected noAnswer =
     )
 
 -- ---------------------------------------------------------------------------
--- The bounded revision, and the pending case
+-- The bounded revision, and the case that consumes it
 -- ---------------------------------------------------------------------------
 
 -- | @at most n amendments@.
@@ -748,15 +843,65 @@ atMost :: Integer -> Bound
 atMost = Bound
 
 -- | The loop, awaiting the two things its statement cannot give it: the
--- result's name, and the two arms of the @case@ that must consume it.
+-- result's name, and the two arms of the @case@ that consumes it.
 newtype Loop (c :: Code) (s :: Scope) = Loop
   {loopRun :: Live -> Text -> Arms c s -> Blk s}
 
--- | What a bounded revision binds: not a value — a revision's result is not
--- one — but the witness that a @caseResult@ is owed, and at which kind. It is
--- what makes @caseResult result@ a real use of @result@ and
--- @caseResult guide@ a type error.
-data Settled (c :: Code) (s :: Scope) = Settled
+-- | What a bounded revision binds, and the one thing a workflow's @case@ is
+-- written on:
+--
+-- > result <- revising draft (atMost 2) \patch -> W.do …
+-- > case result of
+-- >   Settled patch -> W.do …
+-- >   Unsettled     -> stop
+--
+-- A regular data type, matched by a regular pattern, whose arms happen to be
+-- @W.do@ blocks. @Settled@ carries the artefact the loop settled on — a handle
+-- like any other, live in that arm and in no other, so a hole that splices it
+-- in the @Unsettled@ arm is GHC's own @Variable not in scope@ and not a rule
+-- this library has to state.
+--
+-- __The bind forks.__ There is no value here to case on at run time: the
+-- @case@ is the branch, and 'revising'\''s 'Step' runs the rest of the block
+-- twice — once under @Settled@ and once under @Unsettled@ — to obtain the two
+-- arms it prints. That is exact, because Lean refuses every statement between
+-- a revision's bind and its @case@ (@Check.lean:537@), so the two runs can
+-- differ only in the arms themselves.
+--
+-- __Both runs are typed at the settled arm's scope__, which is the price a
+-- Haskell @case@ charges: its arms have one type. The @Unsettled@ arm has no
+-- handle to the settled slot — the pattern binds it in the other arm — so it
+-- is exactly the block that would have been written one scope out, weakened;
+-- 'unsettledArm' is where that weakening is undone, and 'genName' reads the
+-- depth off the 'Live' names so that the arm prints the depth it is /checked/
+-- at rather than the one it is /typed/ at.
+data Outcome (c :: Code) (s :: Scope)
+  = -- | the loop settled, and this is what it settled on
+    Settled (V (An c ': s) c)
+  | -- | the bound ran out
+    Unsettled
+
+-- | The unsettled arm, put back at the scope Lean checks it in.
+--
+-- The fork hands both arms back at the settled arm's scope, so this one has a
+-- slot at index @0@ that it cannot name and never reads: the only handle to it
+-- is the @Settled@ pattern's binder, which is not in scope here. Every read it
+-- /does/ make is of a name live one scope out, and @KnownIx h ('(n, c) ': s)@
+-- is @VThere@ of @KnownIx h s@ — so this block is, index for index, the
+-- weakening of the block that would have been built at @s@.
+--
+-- Closing the slot with the kind's default undoes exactly that weakening:
+-- @subP (subP p subWk) (subCons d subId) = subP p (subWk . subCons d subId) =
+-- subP p subId = p@. What reaches @revisingCase@ is therefore the very
+-- @Plan (Codes s) ()@ Lean's @checkBlock fns Γ S none unsettled@ elaborates,
+-- and the @Raw@ — which carries names and not indices — is untouched.
+--
+-- Deliberately not exported, and deliberately not in "Agentic.Builder": at
+-- this one call site the premise is a theorem of Haskell's scoping, and
+-- anywhere else it would be an unguarded @Blk (e ': s) -> Blk s@.
+unsettledArm :: forall c s. KnownCode c => Blk (An c ': s) -> Blk s
+unsettledArm (Blk raw plan) =
+  Blk raw (subP plan (subCons (const (defaultEl (sCode @c))) subId))
 
 -- | @amend patch { … }@ — at the candidate's kind, reading the verdict beside
 -- it.
@@ -766,59 +911,45 @@ amend ::
   W ('Amending c s) j Term
 amend q = W (\_ _ -> Amendment (B.one q))
 
--- | @result <- revising draft (atMost n) \\patch -> W.do …@.
+-- | @result <- revising draft (atMost n) \\patch -> W.do …@, and the
+-- @case result of@ that follows it.
 --
 -- The candidate's kind is the __subject's__ kind, so it is read off the
 -- handle and not chosen; the carrier is bound by the clauses' lambda, and the
--- name it prints is the generated one for the enclosing depth.
+-- name it prints is the generated one for the enclosing depth — the same name
+-- the settled binder prints, one scope over, exactly as the flagship calls
+-- both @patch@.
 --
--- What this /returns/ is a loop and not a block: a bounded revision's result
--- is not a value, and the very next statement must consume it. That is Lean's
--- @Pend Γ@, and here it is the stage index — no statement but 'caseResult' has
--- a 'Step' at a @Pending@ stage, 'caseResult' alone is ill-typed because
--- nothing else produces one, and 'workflow' wants an @Open@ block at the end.
+-- What this /returns/ is a loop and not a block, because a bounded revision
+-- and the @case@ that consumes it are __one__ node: the intermediate has type
+-- @Plan Γ (Option (El c))@ and @Ctx@ has no code for "settled-or-not". Lean
+-- carries it as a @Pend Γ@ that the next statement must consume
+-- (@Check.lean:527@); here the 'Step' at 'Loop' forks the rest of the block
+-- into the two arms and this closes over both. See 'Outcome'.
 revising ::
   forall h c s.
-  (KnownIx h s, KnownCode c, KnownDepth s) =>
+  (KnownIx h s, KnownCode c) =>
   V h c ->
   Bound ->
   (V (An c ': s) c -> W ('Review c s) ('Amending c s) Term) ->
   Loop c s
 revising subj (Bound n) clauses = Loop $ \live result arms ->
-  case (runRev (carrier : live) (clauses (V carrier VHere)), arms) of
-    (Clauses revName revAnn review am, Arms settledName settled unsettled) ->
-      B.revisingCaseI @c
-        (vName subj)
-        (B.readV @h @s subj)
-        carrier
-        revName
-        settledName
-        result
-        n
-        revAnn
-        review
-        am
-        settled
-        unsettled
-  where
-    carrier = genName @s
-
--- | @case result { settled p { … } unsettled { … } }@ — a terminal, and the
--- only statement a pending block accepts.
-caseResult ::
-  forall c s j.
-  KnownDepth s =>
-  Settled c s ->
-  (V (An c ': s) c -> W ('Open (An c ': s)) j Term) ->
-  W ('Open s) j Term ->
-  W ('Pending c s) j Term
-caseResult _ settled unsettled =
-  W
-    ( \live _ ->
-        Arms x (runW (x : live) (settled (V x VHere))) (runW live unsettled)
-    )
-  where
-    x = genName @s
+  let carrier = genName live
+   in case (runRev (carrier : live) (clauses (V carrier VHere)), arms) of
+        (Clauses revName revAnn review am, Arms settledName settled unsettled) ->
+          B.revisingCaseI @c
+            (vName subj)
+            (B.readV @h @s subj)
+            carrier
+            revName
+            settledName
+            result
+            n
+            revAnn
+            review
+            am
+            settled
+            (unsettledArm @c unsettled)
 
 -- ---------------------------------------------------------------------------
 -- Programs

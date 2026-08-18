@@ -1647,3 +1647,233 @@ expected "c0", actual "c1"` (and, separately, in the trace).
 between 5 and 15 — the folds are name-independent and did not move;
 `agentic-run run harden --scripted` → 7 events, `billFresh 7`, `billMemo 7`,
 exit 0.
+
+## 2.2-REVISED-3 — the third ruling: a `case` is a `case`, an `if` is an `if`
+
+*(Appended after the landing of §2.2-REVISED-2. It supersedes §3.7 and the
+branching half of §3.8, and the target text of §4; everything else in this
+document, including all of §2.2-REVISED-2, stands.)*
+
+### The ruling
+
+The owner, on the landed surface:
+
+> I also don't like the caseResult syntax. That should just be a regular case
+> expression, with regular pattern matches, whose arms happen to be do-blocks.
+> There also shouldn't be a special ifFlag, that should just be a regular if.
+
+Both are now literal. The flagship's tail reads:
+
+```haskell
+    result <- revising draft (atMost 2) \patch -> W.do
+        verdict <- panel [ … ]
+        amend (ask (model "author") [wf|…|])
+
+    case result of
+      Settled patch -> W.do
+        ok <- confirm (person "owner") [wf|
+            Apply this patch?
+            {patch}
+            {flagSpec}|]
+
+        if ok
+          then W.do
+            act (tool "apply") [wf|Apply: {patch}|]
+            stop
+          else stop
+      Unsettled -> stop
+```
+
+### The `case`: why the bind may fork
+
+`Outcome c s` is an ordinary two-constructor data type — `Settled (V (An c ': s) c)`
+and `Unsettled` — and the `case` on it is an ordinary `case`. Nothing is
+scrutinised at run time: `revising`'s `Step` instance runs the **rest of the
+block twice**, once applied to `Settled` with a fresh settled handle and the
+settled name consed onto the block's `Live`, and once applied to `Unsettled`
+with neither, and hands the two blocks to `Agentic.Builder.revisingCaseI` as
+the arms of the `case result` it prints. The printed `Raw` is unchanged:
+`RawCaseResult` with the result's name, the settled binder's name, and two
+blocks, exactly as before.
+
+**The legality argument is Lean's own adjacency rule.** A fork at the bind is
+observationally the combinator it replaces if and only if nothing may stand
+between the bind and its `case` — and nothing may. `Check.lean` carries the
+loop's result as a `Pend Γ` (`Check.lean:527`) and refuses every statement but
+the consuming `case` with one message, verbatim:
+
+```lean
+/-- The refusal every statement other than the consuming `case` gets while a
+result is pending. -/
+private def pendingErr (pos : Pos) (x : String) : CheckError :=
+  ⟨pos, s!"the revising result `{x}` is not yet consumed: `case {x} \{ settled … \
+          unsettled … }` is the next statement, and nothing else touches it", x⟩
+```
+
+— `Check.lean:535–539`. It is raised at every statement form there is:
+`.empty` (`:550`), `.knownHere` (`:558`), `.act` (`:566`), `.bind` (`:567`),
+`.callStmt` (`:568`), `.ifFlag` (`:680`) and `.caseVerdict` (`:701`). The only
+form with a `some pd` equation that is *not* a refusal is `.caseResult`
+(`:702`), and even that one checks the name:
+
+```lean
+  | Γ, S, some pd, .caseResult x sname settled unsettled pos =>
+    if x != pd.name then
+      .error ⟨pos, s!"the pending revising result is `{pd.name}`, and it is \
+                     consumed first", x⟩
+```
+
+So there is nothing an author could legally have written between the two runs'
+common prefix, and the two runs can differ only in the arms themselves.
+
+Where the two do differ, they differ in the *accepting* direction. A statement
+written between the bind and the `case` is no longer refused here; it stands in
+**both** arms — which is a program the `.wf` language can also write, by
+writing it twice — and an author who ignores the result entirely has an unused
+binding and hears so from `-Wunused-matches`, which `-Wall` turns on and this
+build's zero-warning gate makes binding.
+
+That last claim was checked rather than asserted. Four programs were written in
+the surface with a statement standing between the bind and the `case` — an
+`act`, a `known here`, a bind whose hole is read in both arms, and a second
+`revising` whose own result is never matched — printed, and put to
+`conformance-oracle` beside `Agentic.Observe`'s reading of the same program,
+under a world that settles and a world that exhausts. All four are **accepted**
+by the checker and the two replies are equal as `Value`s, whole. The printed
+`Raw` shows why: the statement is duplicated into the two arms and the
+bind/`caseResult` pair is adjacent as always, so the adjacency rule is never
+reached. The duplication is per-arm correct where it could not be blind — the
+`known here` prints `["b1","b0"]` in the settled arm and `["b0"]` in the
+unsettled one, and the intervening bind prints `b2` in the settled arm and `b1`
+in the unsettled one, each fresh at the depth Lean *checks* it at. So the
+surface accepts a spelling the `.wf` grammar refuses, and prints no program the
+`.wf` checker refuses. The refusal that is *kept* is the one
+that matters: `Settled` and `Unsettled` are the constructors of one type that
+only `revising` produces, so a `case` on anything else where a result stands,
+or an `Outcome` pattern where no revision bound one, is GHC's own
+`Couldn't match type`.
+
+### The forced adjustment: both arms are typed at the settled arm's scope
+
+A Haskell `case` has one result type, and its two arms want two: the settled
+arm is a block over `An c ': s` and the unsettled arm one over `s`. The exact
+encoding — a GADT `Outcome c s t` indexed by the stage, consumed by a rank-2
+continuation `forall t. Outcome c s t -> W t k b` — needs `W.>>=` to take a
+*polytype* argument for this one statement and a monotype for every other, and
+GHC 9.10.3 closes both doors:
+
+* a closed type family returning it —
+  `Kont (Loop c s) a j k b = forall t. Outcome c s t -> W t k b` —
+  is `[GHC-91510] Illegal polymorphic type … In the equations for closed type
+  family ‘Kont’`;
+* a class parameter holding it —
+  `instance Bnd (Loop c s) ('Open s) (forall t. Outcome c s t -> Res t)` —
+  is the same `[GHC-91510]`, `In the instance declaration`.
+
+(Both were compiled, minimised, and read; `ImpredicativeTypes` changes
+neither.) So the arms share the settled arm's type — `revising`'s `Step`
+improves the outgoing stage to `'Open (An c ': s)` eagerly, so there is no
+ambiguity to resolve and `stop`, which is scope-polymorphic, stands in the
+`Unsettled` arm unchanged. Two consequences, and both are paid in full:
+
+**1. Names come off the `Live` list, not off the scope index.** `genName` and
+`resultName` were `KnownDepth s => Text`; they are now `Live -> Text`, reading
+the depth as `length live`. Everywhere else the two agree — every binding
+conses its own name, which is the `Live` docstring's invariant — and in the
+unsettled arm they do not, which is the point: the arm is *typed* one scope
+deeper than it is *checked*, and only the names it was handed say where it
+really stands. `KnownDepth`/`depthOf` are gone, and with them a constraint from
+five `Step` instances, `clausesOf` and `revising`.
+
+**2. The unsettled arm is put back at its own scope by `unsettledArm`.** The
+arm has a slot at index `0` that it cannot name — the only handle to it is the
+`Settled` pattern's binder, which Haskell scopes to the other arm — and every
+read it *does* make is of a name live one scope out, where
+`KnownIx h ('(n, c) ': s)` is `VThere` of `KnownIx h s`. So the block is, index
+for index, the weakening of the block that would have been built at `s`, and
+closing the slot with the kind's default undoes exactly that weakening:
+
+```
+subP (subP p subWk) (subCons d subId)
+  = subP p (subWk . subCons d subId)
+  = subP p subId
+  = p
+```
+
+What reaches `revisingCase` is therefore the `Plan (Codes s) ()` that
+`checkBlock fns Γ S none unsettled` elaborates, and the `Raw` — which carries
+names, not indices — is untouched. `unsettledArm` is private to
+`Agentic.Workflow` and deliberately not an `Agentic.Builder` entry point: at
+this one call site the premise is a theorem of Haskell's scoping, and anywhere
+else it would be an unguarded `Blk (e ': s) -> Blk s`.
+
+This was checked against the oracle rather than argued only on paper. A program
+whose unsettled arm is *not* `stop` — `known here`, a bind, a hole reading a
+name bound outside the loop, an act — was written in the surface, printed, and
+put to `.lake/build/bin/conformance-oracle` beside the same program's
+observation from `Agentic.Observe`, under two worlds chosen to reach each arm
+(every review objecting; every review approving). The two replies are **equal
+as `Value`s**, whole: `level`, `size`, `askNodes`, `codes`, `costSummary`,
+every trace event and both bills, on both worlds. The printed program's
+unsettled arm prints `known here b0` and binds `b1` at the outer depth, and its
+`{d}` hole splices the outer answer and not the kind's default.
+
+### The `if`: why the flag forks at the site and not at the bind
+
+`ifThenElse` is exported from `Agentic.Workflow` with `ifFlag`'s type and
+`ifFlag`'s definition, and an authoring module enables `RebindableSyntax`, so
+`if ok then … else …` *is* the combinator. `ifFlag` stays exported and
+documented as the desugaring, so a reader of a printed program can find it by
+name; the README and the example show only the `if`.
+
+A flag must **not** fork at its bind. A flag is a value: it may be bound,
+spliced, acted past, and branched on many statements later, and the frozen
+corpus witnesses exactly that. `battery-043-every-kind-may-be-annotated`
+binds `f` from `person c` at line 3, binds `r` from `tool d` at line 4, `act`s
+at line 5, and only at line 6 writes `if f { } else { }`. A fork at the flag's
+bind would sweep the bind and the act into both arms and print a different
+program. A bounded revision's result has no such freedom — that is the
+adjacency rule above — which is why the two branches reach the block by
+different routes, and why that difference is not an inconsistency.
+
+`caseVerdict` takes neither route and stays a combinator, for both reasons at
+once: a verdict is a value with the same freedom a flag has, so nothing may
+fork at its binding; and its three arms are Lean's three tags in Lean's order
+(`Check.lean:681`) rather than the constructors of any Haskell type, so nothing
+may fork at a pattern either. Its docstring says so.
+
+### What went from `Agentic.Workflow`
+
+* `Stage`'s `Pending` constructor, `Res`'s `Pending` equation, the `Settled c s`
+  witness type, the `caseResult` combinator, and the two `TypeError` `Step`
+  instances that refused a statement at a `Pending` stage. `Arms c s` stays,
+  now holding **both** arms at the settled arm's scope, as the loop's argument.
+* `KnownDepth (..)` — class, instances, and export.
+
+Added: `Outcome (..)`, `ifThenElse`, and the private `unsettledArm`.
+
+### Two adjustments the target text needed
+
+1. **`RebindableSyntax` costs the implicit `Prelude`.** `Example.Harden` now
+   carries `import Prelude` and, because it also enables `OverloadedStrings`
+   and `RebindableSyntax` makes `fromString` a name that must be *in scope*,
+   `import Data.String (fromString)`. Both are used and neither draws
+   `-Wunused-imports`. `atMost 2` still elaborates through `Prelude`'s
+   `fromInteger`, and every `[wf|…|]` still elaborates unchanged: the quoter
+   emits `concat`, `lit`, `says` and `T.pack` from inside a Template Haskell
+   quote, so they resolve at the quoter's definition site and not at the splice
+   site, and only a `{hole}`'s own name is looked up where it is written.
+2. **`W.do` is untouched by any of it.** `QualifiedDo` rebinds the block it is
+   written on; `RebindableSyntax` rebinds only unqualified syntax. The two
+   coexist in `Example.Harden` with no interaction, which the build and the
+   alpha pin both confirm.
+
+### Gates, at this landing
+
+`nix develop path:./. -c cabal build all`, every target, zero warnings at
+`-Wall`; tier0 128/128; tier1 21/21 (nineteen exact, two alpha — the flagship
+prints the same `Raw` it printed before, `case result` and `if` included);
+`agentic-run run harden --scripted` → 7 events, `billFresh 7`, `billMemo 7`,
+exit 0; `agentic-run run hello --scripted` → 3 events, `billFresh 3`,
+`billMemo 3`, exit 0. Plus the out-of-band oracle agreement above, on a fork
+whose unsettled arm the flagship does not exercise.

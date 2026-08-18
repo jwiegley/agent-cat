@@ -28,10 +28,16 @@
 -- kept, no trailing newline. A @define@ is a Haskell binding, spliced by a
 -- hole that names it.
 --
--- The two names that are not binds are the two /lambdas/, and they are
--- bindings too: @\\patch -> …@ under 'revising' is the carrier, and
--- @\\patch -> …@ under 'caseResult' is the settled binding. The @.wf@ writes
--- them @revising draft as patch@ and @settled patch@.
+-- The two names that are not binds are a /lambda/ and a /pattern/, and they
+-- are bindings too: @\\patch -> …@ under 'revising' is the carrier, and the
+-- @patch@ of @Settled patch@ is the settled binding. The @.wf@ writes them
+-- @revising draft as patch@ and @settled patch@.
+--
+-- The two branches are Haskell's own. @case result of@ is a regular @case@ on
+-- a regular data type, its arms @W.do@ blocks; @if ok then … else …@ is a
+-- regular @if@, which reaches 'Agentic.Workflow.ifThenElse' because this
+-- module enables @RebindableSyntax@ — hence the explicit @Prelude@ import, and
+-- the @fromString@ beside it that @OverloadedStrings@ then needs by name.
 --
 -- == The names this prints are not these names
 --
@@ -75,6 +81,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QualifiedDo #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE RebindableSyntax #-}
 
 module Example.Harden
   ( -- * The programs
@@ -90,7 +97,9 @@ where
 
 import Agentic.Workflow
 import qualified Agentic.Workflow.Do as W
+import Data.String (fromString)
 import Data.Text (Text)
+import Prelude
 
 -- ---------------------------------------------------------------------------
 -- The defines, once
@@ -154,24 +163,22 @@ hardenProgram = workflow W.do
             {verdict}
             Reply with the revised diff only.|])
 
-    caseResult result
-      -- settled patch { … }
-      ( \patch -> W.do
-          ok <- confirm (person "owner") [wf|
-              Apply this patch?
-              {patch}
-              {flagSpec}|]
+    case result of
+      Settled patch -> W.do
+        ok <- confirm (person "owner") [wf|
+            Apply this patch?
+            {patch}
+            {flagSpec}|]
 
-          ifFlag ok
-            ( W.do
-                act (tool "apply") [wf|
-                    Apply:
-                    {patch}
-                    Write the patched file here, then reply DONE.|]
-                stop )
-            stop )
-      -- unsettled { stop }
-      stop
+        if ok
+          then W.do
+            act (tool "apply") [wf|
+                Apply:
+                {patch}
+                Write the patched file here, then reply DONE.|]
+            stop
+          else stop
+      Unsettled -> stop
 
 -- ---------------------------------------------------------------------------
 -- The small one
