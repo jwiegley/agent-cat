@@ -2576,7 +2576,7 @@ Until then: the 'in module' prefix is the attribution, and the CLI's caret is be
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-17 Mon 12:56]
-:MODIFIED: [2026-08-18 Tue 06:07]
+:MODIFIED: [2026-08-18 Tue 06:11]
 :CREATED_BY: johnw
 :FINISHED: [2026-08-17 Mon 14:10]
 :CLOSE_REASON: done
@@ -2611,6 +2611,13 @@ Owner directive 2026-08-17: think about profunctors improving the design, term l
     "author": "johnw",
     "text": "Gated tier complete (c0a6e0b). P10 ADOPTED: closed Tag + dyn-carries-a-Code, Plan in Type 0 via PlanF; ZERO corpus/CliSmoke diff (FinEnum order/counts reproduced, machine-checked). P11 ADOPTED: CostTree -> Cost.costM Multiset; corpus-gen byte-empty; certify_sound axiom-free kernel-enforced; the syntax's transitive graph now has no Fintype/Finset/FinEnum at all. P12 ADOPTED: eleven of twelve recursions are PlanAlg.fold (costM excluded, reason recorded); flagship elaboration 113.24s -> 112.43s, 0.7% improvement. P9 REFUSED BY ITS OWN GATE: fusion moved askNodes 16->13 on the three revising-loop entries while every trace/bill/level/code/count held - it changes the enumerable question tree, unpredicted by the working papers; reverted; the P9 row records the refutation and its reopen condition. Independent verification: all 128 corpus entries byte-identical across HEAD~/HEAD/worktree/regeneration; every gate green both sides. The profunctor program is now fully executed: P1-P8 adopted, P10-P12 adopted, P9 refused with evidence, P13-P16 refused by design.",
     "created_at": "2026-08-18T13:07:20Z"
+  },
+  {
+    "id": 121,
+    "issue_id": "acat-profunctor-design-l47",
+    "author": "johnw",
+    "text": "Correction + upgrade to the P12 record (post-c0a6e0b): the verifier's relaunched re-timing DID complete (the commit message's 'killed mid-run' is true of the first attempt only). DslFlagship alone, warm oleans, loadavg 7-10: real 184.35s (not comparable, contended), USER CPU 109.22s vs the phase's 112.43s after / 113.24s baseline - a 3.5% improvement on the contention-immune measure, same direction as the phase's 0.7%. P12's adoption is therefore independently REPRODUCED, no longer a coordinator attestation. Also closed: deck_smoke re-certified against the post-edit binary (strings-verified, 56 ok); corpus re-verified byte-identical against the true pre-tier baseline commit.",
+    "created_at": "2026-08-18T13:11:55Z"
   }
 ]
 #+end_src
