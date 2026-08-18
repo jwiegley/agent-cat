@@ -1,7 +1,8 @@
 -- | @agentic-run@ — plan an example, price it, or run it.
 --
 -- Three verbs over the programs of "Example.Harden", which are the walked
--- examples of @agent-cat\/example@ rebuilt in "Agentic.Builder":
+-- examples of @agent-cat\/example@ rebuilt in "Agentic.Workflow" — the
+-- authoring surface, whose 'Agentic.Builder.Program' this module reads:
 --
 -- > agentic-run plan harden [--raw]
 -- > agentic-run cost harden

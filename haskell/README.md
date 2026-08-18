@@ -75,7 +75,7 @@ and only if nothing failed, so both are usable directly as CI gates.
 | `Agentic.World` | `WorldSpec` and `toWorld`, the `trace` of a plan through a world, the fresh and memo bills, and the oracle's event JSON |
 | `Agentic.Builder` | the production surface: typed combinators that both print a `RawProgram` and elaborate to the `Plan` the Lean checker elaborates the same construct to |
 | `Agentic.WF` | the `[wf\|…\|]` prompt quoter — prose with `{name}` holes, laid out as the `.wf` fence lays it out and chunked as Lean's `Prompt.normalize` chunks it — and `Says`, which decides whether a hole is a binding or a `define` |
-| `Agentic.Workflow` (+ `.Do`) | the **authoring** surface: an indexed block, written in ordinary Haskell under `W.do`, in which a bind is a Haskell bind, a branch on a revision's result is a Haskell `case` and a branch on a flag is a Haskell `if`. The `case` is real pattern matching on the exported data type `Outcome`, which the revision's bind forks into; the `if` is Haskell's, reaching the exported `ifThenElse` because the **authoring module** enables `RebindableSyntax` — which costs that module its implicit `Prelude` (import it, and `Data.String (fromString)` beside it under `OverloadedStrings`) and costs a `W.do` block nothing, `QualifiedDo` and `RebindableSyntax` rebinding disjoint syntax. The library itself enables neither. `ifFlag` stays exported as the combinator the `if` compiles to, and `when`/`unless` are that same `if` with only one arm to say — terminal, sealing the body with the implicit `stop` an arm block's end is, and printing the identical `ifFlag` node with an empty other arm; the `case` compiles to `Agentic.Builder`'s `revisingCase`, which `revising` applies; `caseVerdict` stays a combinator here, a verdict being a value that may be acted past. It carries no names at the type level — a library cannot read a Haskell binder — so it generates the name each binding prints from that binding's depth, `named` overrides one, and a `{hole}` prints the name its handle carries |
+| `Agentic.Workflow` (+ `.Do`) | the **authoring** surface: an indexed block, written in ordinary Haskell under `W.do`, in which a bind is a Haskell bind, a branch on a revision's result is a Haskell `case` and a branch on a flag is a Haskell `if` — `guide <- ask (tool "cat") [wf\|…\|]`, then `case result of Settled patch -> W.do …; Unsettled -> stop`, then `when ok $ W.do …`. The `case` is real pattern matching on the exported data type `Outcome`, which the revision's bind forks into; the `if` is Haskell's, reaching the exported `ifThenElse` because the **authoring module** enables `RebindableSyntax` — which costs that module its implicit `Prelude` (import it, and `Data.String (fromString)` beside it under `OverloadedStrings`) and costs a `W.do` block nothing, `QualifiedDo` and `RebindableSyntax` rebinding disjoint syntax. The library itself enables neither. There is no `#label`, no `=:` and no splice anywhere in the surface: `ifFlag` stays exported as the combinator the `if` compiles *to* — machinery, and a name in the printed `Raw`, not a statement anyone writes — and `when`/`unless` are that same `if` with only one arm to say — terminal, sealing the body with the implicit `stop` an arm block's end is, and printing the identical `ifFlag` node with an empty other arm; the `case` compiles to `Agentic.Builder`'s `revisingCase`, which `revising` applies; `caseVerdict` stays a combinator here, a verdict being a value that may be acted past. It carries no names at the type level — a library cannot read a Haskell binder — so it generates the name each binding prints from that binding's depth, `named` overrides one, and a `{hole}` prints the name its handle carries |
 | `Agentic.Gen`, `Agentic.Observe`, `Agentic.Oracle` | the bisimulation surface: generators, the reply assembly both runners share, and the line-delimited JSON client for the Lean oracle subprocess |
 | `Agentic.Exec` | the interpreter in `IO` — the memoizing fold of `Exec.lean`'s `Dlg.execM`, its decode/re-ask loop, and the scripted answering service |
 | `Agentic.AgentDeck` | one live `agent-deck` session as an answering service: the three CLI commands, the poll loop, the staleness guard and five named transport failures |
@@ -102,9 +102,9 @@ already replays. Positions are oracle-only throughout, like `message` and
 
 ## What tier1 compares
 
-Twenty-one checked entries, rebuilt from their surface source in
-`Agentic.Builder` and compared whole — no field skipped, a missing or extra key
-a failure:
+Twenty-one checked entries, rebuilt from their surface source — nineteen in
+`Agentic.Builder`, and the two walked examples in `Agentic.Workflow` above it —
+and compared whole: no field skipped, a missing or extra key a failure.
 
 | front | rule |
 | --- | --- |
@@ -497,7 +497,10 @@ PORTING.md              week one: the types, the encoding, the guard order,
 PORTING2-core.md        week two: Agentic.Plan and Agentic.World
 PORTING2-elab.md        week two: the elaboration, Agentic.Builder, tier1
 PORTING3-surface.md     week six: the authoring surface — why an indexed block,
-                        what the corpus fixes about it, and what it desugars to
+                        what the corpus fixes about it, and what it desugars to.
+                        A design record: the four §2.2-REVISED sections at its
+                        end are the surface as it stands, and they supersede the
+                        sketches and target text of the body
 ```
 
 ## Sources of record
@@ -511,7 +514,14 @@ PORTING3-surface.md     week six: the authoring surface — why an indexed block
   [`PORTING2-core.md`](PORTING2-core.md),
   [`PORTING2-elab.md`](PORTING2-elab.md) and
   [`PORTING3-surface.md`](PORTING3-surface.md), which every module here is
-  written against.
+  written against. The first three are week-one and week-two specs for `Raw`,
+  `Guards`, `Text`, `Plan`, `World` and `Builder`, and they still describe those
+  modules as they are — `caseResult` and `ifFlag` appear there as `Raw` node
+  names and `Builder` combinators, which is what they still are.
+  `PORTING3-surface.md` is a design record that accumulates rulings: only its
+  four `§2.2-REVISED` sections describe the **authoring** surface as it stands,
+  and for that surface the text of record is the live
+  [`example/Example/Harden.hs`](example/Example/Harden.hs), quoted above.
 * **The wire format** —
   `doc/conformance-schema.md`.
 * **The arbiter** — `test/corpus/*.json`. Where

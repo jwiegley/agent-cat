@@ -1,3 +1,32 @@
+> **CURRENT SURFACE.** This file is a design record, not a manual: it
+> accumulates rulings in the order they were made, and its early sections
+> specify surfaces that were later ruled out. The surface that exists today is
+> pure `W.do` (`QualifiedDo`) with **bare binds** — `guide <- ask (tool "cat")
+> [wf|…|]` — `[wf|…{name}…|]` prompt quasiquotes, a **literal `case`** on the
+> exported `Outcome` (`Settled patch -> …` / `Unsettled -> stop`), a **literal
+> `if ok then … else …`** reaching `ifThenElse` because the authoring module
+> enables `RebindableSyntax`, and a **terminal `when ok $ W.do …`** (or
+> `unless`) where there is only one arm to say. There are no `#labels`, no
+> `=:`, no `$(workflow [| … |])` splice, and no `caseResult`/`ifFlag`
+> statements to write: those two names survive only as `Agentic.Raw` node
+> names and as `Agentic.Builder` combinators this layer applies.
+>
+> The four rulings that arrived at it each supersede by name what they replace:
+> **§2.2-REVISED** (bare binds, no labels), which stands in place in §2, and
+> then, appended in order at the end of this file,
+> **§2.2-REVISED-2** (no Template Haskell, and therefore no names —
+> the surface generates the name each binding prints), **§2.2-REVISED-3** (a
+> `case` is a `case`, an `if` is an `if`) and **§2.2-REVISED-4** (a one-armed
+> `if` is a `when`, and it is terminal). Read them before the body.
+>
+> **The text of record is the live `example/Example/Harden.hs`.** Quote the
+> surface from that file, never from a fragment printed here: the sketches of
+> §2, the labels and `=:` of §3.3, the pending `case` of §3.7–§3.8 and the
+> target text of §4 all print spellings that no longer compile. What the body
+> still owns unrevised is §1 (what the corpus fixes about any surface), the
+> block monad of §3.2, the questions of §3.4, the quoter of §3.5–§3.6 and the
+> hazards of §5.
+
 # PORTING3 — the monadic surface
 
 *The design of record for the authoring surface of the Haskell port. It

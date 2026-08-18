@@ -1,55 +1,156 @@
-# agent-cat — the denotational design, in Lean 4
+# agent-cat — a denotational design for agentic workflows
 
-This repository formalizes the mathematical space of *A Denotational Design
-for Agentic Workflows* (Revision 2.1, 2026-08-11): the types, constructions,
-and operations of the semantics. A workflow syntax is here too — the graded
-term language of `Agentic.Term`, carrying its fragment grade in its type —
-together with its two meaning functions (`Agentic.Meaning`): the quantitative
-fold into matrices and the site-keyed extensional fold whose kernel *is*
-workflow equality. That ordering is the design's, not an accident: the
-meanings came first, the syntax is downstream of them, and the folds are
-downstream of both.
+Meaning first. A workflow is given a mathematical meaning, and everything else is
+derived from it: the language a person writes, the folds that classify and price a
+program, the interpreter that runs it against a live agent, and a second
+implementation in another language held to the first by conformance. The method is
+Conal Elliott's denotational design, taken literally.
 
-Self-contained: no Mathlib dependency. Lean comes from the Nix devShell
-(`pkgs.lean4` in ./flake.nix); enter it with `nix develop` or direnv and run
-`lake build`, or from outside: `direnv exec ~/src/agent-cat lake build`.
-The algebra classes are defined locally (they are small, and the design's
-complete semiring with a star is not in Mathlib in this shape anyway). An
-upgrade path to Mathlib exists — `PMF` for the edge measure,
-`ProbabilityTheory.Kernel`/`Stoch` for the kernel category, `Tropical` for
-latency — and taking it would change interfaces, not theorems. It is recorded
-here, in this paragraph; in the source only `Agentic/Semiring.lean` says
-anything about the relationship to Mathlib, and no module names its own
-replacement.
+The formalization is Lean 4.30.0 with Mathlib v4.30.0. `Agentic.lean` is the
+mathematical space and imports only mathematics: the resource algebra, panels,
+traces and scopes, and the rederivation kernel under `Agentic.Core` — the question
+space and its worlds (`Question`, `World`, `Dlg`), the representation (`Plan`), its
+meaning (`Denote`), the folds that classify and price a term (`Level`, `Cost`), the
+commuting squares between the two (`Morphism`, `Alg`). The runtime stratum — the
+checked language (`Core.Dsl.*`), the interpreter and its per-run certificate
+(`Exec`, `Certify`), two transports (`Acp`, `Deck`), the renderings (`Explain`), the
+MCP server (`Mcp`) — is outside the root, because a transport is not semantics.
 
-Issue tracking is `obr` (prefix `acat`; see AGENTS.md and PLAN.org).
+The flagship is kernel-checked. `Agentic/Core/DslFlagship.lean` includes
+`example/harden.wf` from the file rather than copying it and proves by
+`decide +kernel` that the checker accepts it, that its level is `branch`, that its
+cost tree has nine leaves with a minimum of 5 and a maximum of 15, and that its
+transcript in four named worlds is the hand-written `Harden.demo`'s — true by
+computation rather than by assertion.
 
-| Module | Formalizes | Artifact section |
-|---|---|---|
-| `Agentic.Monoid`     | the package's one monoid, now Mathlib's — `Monoid`/`CommMonoid` (the scheduler's licence) and `Std.IdempotentOp (· * ·)` (the duplication licence), with the induced order `SemilatticeSup` + `OrderBot`; the monoid's two actions on a reader, which scoping and the Brzozowski derivative *are* (the survivor: `DomMulAct` supplies one of the two, behind a `MulOpposite` synonym); and `SupMon α`, the join-as-monoid synonym (`* = ⊔`, `1 = ⊥`) that `Width` and `Race` both are — an upstream candidate, since Mathlib carries the join's laws but no monoid at a join | §2, §5.1, §5.3 |
-| `Agentic.Semiring`   | semirings — a non-commutative base (`NSemiring`, which matrices and panel convolution instantiate) and its commutative strengthening (`CSemiring`, which the carriers instantiate); complete semirings whose `csum` aggregates over an *arbitrary* index type, with Fubini and two-point agreement (`csum` of a pair is `+`, whence aggregation is additive); the canonical additive order `x ≤+ y` iff `x + y = y`, a partial order exactly under `IdemAdd` and provably the induced join order of `Agentic.Monoid`; `StarSemiring` — a star over the **non-commutative** base, assuming one unrolling law `x* = 1 + x·x*` and neither the Conway identities nor leastness (`ConwayStar` is the former name, kept resolving) — and `KleeneStar`, which adds idempotent `+` and left-handed Kleene induction `b + a·x ≤+ x → a*·b ≤+ x`, so that the star is the *least* solution and not merely a solution; and the **one star construction** — `CsumIsSup` (aggregation *is* the lattice supremum) plus `KleeneAlgebra.ofSupDistrib` (a complete idempotent semiring is a Kleene algebra, `x* = ⨆ₙ xⁿ`, both inductions proved separately so that non-commutative carriers are covered) | §2 |
-| `Agentic.Instances`  | The four carriers, three of them now Mathlib's: the `Prop` semiring with iteration (`p* = True`), `scoped` in `Agentic.Possibility` so that importing this package installs no arithmetic on propositions (`test/Pollution.lean` asserts it); worst-case cost `Cost` = max-plus on `Multiplicative (WithBot ℕ∞)` — the genuine ⊥ the audit demanded is `WithBot`'s, the order and the completeness are Mathlib's `CompleteLinearOrder`, and aggregation is `iSup`, so the two hundred lines that built a supremum by hand are gone; consensus weight `Prob` = the design's Viterbi semiring `([0,1], max, ×)` read off Mathlib's `ℝ≥0∞` — real probabilities, `Prob.exp2 n` being the number `2⁻ⁿ`, aggregation `iSup`, and the infinitary distributive law Mathlib's `ENNReal.mul_iSup`, with `[0,1]` appearing as the hypothesis `≤ 1` on the theorems that need it (`star_prob`, `retry_prob`); all three idempotent and all three Kleene algebras — by *one* construction, each carrier contributing only the one-line `CsumIsSup` instance, with the closed form `if x ≤ 1 then 1 else ⊤` a read-out (`Cost.kstar_eq`, `Prob.kstar_eq`) rather than a definition proved twice; the expectation semiring `P ⋉ M` = Mathlib's `TrivSqZeroExt P M` (the eleven hand-proved semiring laws are now `TrivSqZeroExt.commSemiring`, reached through a low-priority `Module Pᵐᵒᵖ M` for commutative `P`), still **complete** — `CompletePMod` supplies the aggregation of moments and the six `CompleteCSemiring` axioms are proved componentwise, so `Mat.comp` elaborates over it — with `PMod` beyond the diagonal (the product module `M × N`) and a star `⟨p*, p* m p*⟩` proved to answer the unrolling law; it carries **no** `KleeneStar`, because the `+` of the intended moment module is not idempotent, so leastness there waits on the ordered-carrier class (acat-jmm) | §2 |
-| `Agentic.Matrix`     | `S`-matrices over arbitrary index types: identity, zero, composition, Kronecker; category laws — which are the semiring laws, since square matrices are an `NSemiring`; the **matrix Kleene star** `M* = ⨆ₙ Mⁿ` over every carrier whose aggregation is a supremum, both Kleene inductions included though composition does not commute; the truncated star (fuel); **value-dependent sequencing = composition** (the monadic structure of the meaning space); the combinators the meaning fold reads its rows off — `pointMat` (a plain function as a 0-1 transition, with `idMat` a special case and Transform fusion a theorem), `caseMat` (branching on a coproduct, with its composition and injection laws) and `fanMat` (the **truncating** fan: no output longer than the bound carries weight, and a `0`-fan is the constant `[]`) | §3–4 |
-| `Agentic.Env`        | consultations, environments `ε : I → Outcome`, pinning `ε[q ↦ a]`, the extensional meaning space; `share` vs `dup`; caching-as-identity | §3, §6a,d |
-| `Agentic.Panel`      | the monoid semiring `S⟨K⟩` (convolution and keywise alternation) — an `NSemiring`, which is what a non-commutative `*` is for; the augmentation as a semiring homomorphism (`0`, `1`, `+`, `⋆`); **the panel's meaning is the weighting, not the list** — point masses `δ k` with §5.1's collapse `δ a ⋆ δ b = δ (a ⋄ b)` as a theorem, and the two licences stated *about the weighting*: `conv_comm` (commutative keys ⇒ convolution factors, i.e. members, may be exchanged) and `conv_delta_idem` (idempotent keys ⇒ a certain member may be duplicated); the bridges from a list representation — `panelOf` (weighted contributions, whose reordering is free with **no** hypothesis on the keys, since alternation is pointwise `+`) and `convFold` (certain members, whose fold is the point mass at `foldPanel`, whence the denotational forms of both scheduler licences) | §5.1 |
-| `Agentic.Keys`       | inhabitants for the panel keys: the free monoid on names, `Tally` as `Multiplicative ℕ`, and the two join reducers — `Width` (`max` on ℕ) and `Race` (`or` on `Bool`, the speculate/race witness) — both of them the one `SupMon` synonym of `Agentic.Monoid`, so that neither `ℕ`'s arithmetic nor `Bool`'s is decided on anyone else's behalf | §2, §5.1 |
-| `Agentic.Trace`      | Mazurkiewicz traces as a genuine quotient, and as a key monoid; sessions `Trace → S`; the Brzozowski derivative (fork/resume) — the monoid's left action on a reader (`actL`) | §2, §6b |
-| `Agentic.Scope`      | per-axis `Last` monoids; scoping as precomposition — the monoid's right action on a reader (`actR`); innermost-wins and axis independence as theorems | §5.3 |
-| `Agentic.Gate`       | gating as scalar action; refusal = 0 annihilates downstream; nesting intersects | §2, §4 |
-| `Agentic.Context`    | information-ordered context; compaction as interior operator; the parameterised index and the `const ε` collapse | §6e |
-| `Agentic.Star`       | the retry solve `(M_A·d)* · M_B` and its loop equation, stated over a non-commutative carrier and therefore **at matrices**, not only at scalars; `retry_least` — under `KleeneStar` the solve is the *least* answer to `L = M_A·(d·L) + M_B`, which is what turns the equation from something the loop satisfies into what the loop means (the multiplicity it repairs is kept as a theorem: at `Cost`, `fin 3`, `fin 5` and `inf` all answer one loop, and leastness picks `fin 3`); reachability at possibility as the *read-out* of the general matrix star, its reflexive–transitive-closure facts read off the Kleene laws rather than proved by induction on a path, with the same leastness holding at `Prob`- and `Cost`-matrices; the read-outs — termination possibility at `Prop` with the loop equation's solutions collapsing to `True`, `checkBounds` at `Cost` with its two cases of the unrolling equation, Viterbi absorption at `Prob` (the most probable run of a loop is the immediate exit), and at expectation the design's `p* m p*` as a theorem together with the projection that commutes with the solve (the probability factor of a loop is the loop of the probability factors); fuel as truncation, with the fueled *retry matrix* bounded by `n·k + k` over a uniformly bounded body, and the scalar bound derived from it at the one-point index | §5.2 |
-| `Agentic.Pareto`     | the Pareto preorder on resource factors; incomparability witness | §2 |
-| `Agentic.Frag`       | the fragment grade, which **is** Mathlib's `ℕ∞`: `static = 0 = ⊥`, `bounded n = (n : ℕ∞)`, `monadic = ⊤`, sequencing joins by `⊔`, a tensor adds by `+`, and the order, its decidability and every law of the two operations are Mathlib's. What remains ours is one operation the shelf has no name for — `scale n f = n * max 1 f`, the fan (multiplicities multiply, the written shape counting as one copy of itself, `Frag.copies`) — and with the arithmetic done in `ℕ∞` a zero-fan of an opaque body grades `static`, which is the review's finding 1 repaired: `0 * ⊤ = 0` | §4 |
-| `Agentic.Term`       | the syntax stratum: workflow terms as an inductive family indexed by `Frag`, semiring-free; **consultation identity is written, not inferred** — every occurrence of `prim` is a distinct site (identity is positional, so `parT (prim q) (prim q)` spends two consultations) and sharing is the explicit, labeled `shareT l t`, whose sites are keyed by `(l, site-within-t)` so that equal labels over equal bodies name one site; duplication is the default because `Env.share_ne_dup` makes the two readings extensionally different and only duplication never silently correlates two draws | §4, §6a |
+## The language
 
-| `Agentic.Meaning`    | the meaning stratum, design §3–§4: **two folds out of one syntax**. `muS` — the quantitative meaning, a fold into `Mat S`, each clause one row of the §4 type-class-morphism table (`comp`/`kron`/`matAdd`/`caseMat`/`gate`/`retryTrunc`/`fanMat`/`dependentSeq`), so the TCM equations are `rfl`; scoping is the reader (`withScope` = `actR`), fuel is the **truncated** star and never the unbounded one, and a fan truncates its input at `n` so `fanT 0` denotes the constant `[]`. `peak` — the *semantic* width, the consultation sites a run can have in flight, anchored to `muExt` (`muExt_indep_of_peak_eq_zero`) rather than to the grade's arithmetic, together with the bound the grade actually supports, `peak t ≤ writtenSites t * Frag.copies f`, tight at both of the witnesses that refute the naive `peak t ≤ f` (`peak_not_le_grade`, `peak_lt_grade_fanT_pureT`). The old `widthT` fold, which re-ran the grade's arithmetic over the term and checked it against the index, is gone: with the grade collapsed onto `ℕ∞` the fold *is* `Term.grade`. `muExt` — the extensional meaning, keyed by `Site`/`Key`: every `prim` occurrence is a distinct positional site, `shareT l` *rebases* the key (so equal labels build equal keys and no `DecidableEq L` is demanded), retry trips and fan copies are part of the key, refusal is `none`, and alternation is leftmost-defined (the documented departure from `⊕`'s symmetry in `muS`). Sharing made observable: `muExt_dupPair_ne_sharedPair` separates `Agentic.Term`'s memorialized pair under an `Env`-backed runner, `muExt_dupPair_eq_sharedPair_of_const` recovers agreement at key-blind sample points. `WEq` — extensional equality over all runners, scopes and keys — and `WEqR`, its coarsening **up to a relabelling of consultation sites**: absolute sites may be renamed by any finite path rewrite, labelled (`shareT`) keys may not. One induction (`muExt_transport`) buys the laws `WEq` could not have — an open gate, an empty scope and both units of sequencing are erased, sequencing is associative, and `seqT`/`parT`/`sumT`/`choiceT`/`gateT`/`scopeT` are congruences — so the quotient `Workflow` carries its algebra, and on the `static` fragment it **is** a `CategoryTheory.Category` (`Workflow.staticCategory`). The coarsening is strict (`WEqR_strictly_coarser`) and still refuses to erase sharing (`WEqR_dupPair_ne_sharedPair`). The two meanings remain genuinely two: `one_add_one_of_muS_respects_WEq` (a quantitative meaning respecting extensional equality would force `1 + 1 = 1`) one way, and `muS_dupPair_eq_sharedPair` — the same matrix for terms the quotient separates — the other | §3, §4, §6a |
+A `.wf` program binds answers from addressees — `model`, `tool`, `person` — under a
+checker that refuses more than it accepts. A fenced prompt splices earlier answers
+by `{name}`, `define` names a literal, `panel` puts one question to several models
+and folds their verdicts, `revising … at most n amendments` is a bounded review loop
+that settles or does not, and `case`, `if` and `stop` are terminal, each arm being
+the rest of the workflow. The level fold (`batch ≤ pipeline ≤ branch ≤ dynamic`)
+says which analyses apply; the cost fold prices every path before a question goes
+out. From `example/harden.wf`:
 
-Countability has no module. `csum` aggregates over an arbitrary index type, so
-the design's countable-index hypothesis (§2) is a remark about the models and
-not a premise of the meanings; the reasoning is recorded in the
-`CompleteCSemiring` docstring, where the decision lives.
+````
+workflow {
 
-Design rules for this code: every declaration carries a docstring saying what
-it *means* — for a type that is usually the form "a `T` is a representation of
-…", and for an operation it is what the operation does to meanings; laws are
-theorems, not comments; no `sorry`.
+  guide <- ask tool "cat"
+      "Write out the house style guide, at most four short lines."
+
+  draft <- ask model "author" served by "deep" ```
+      Draft a patch satisfying:
+      {spec}
+      Reply with a unified diff only.
+  ```
+
+  result <- revising draft as patch, at most 2 amendments {
+````
+
+`doc/dsl-guide.html` walks that program line by line; `example/` also holds
+`hello.wf`, an imported-module pair, and one deliberately ill-typed program.
+
+## The command line
+
+One front end, so no subcommand can diagnose a program differently from another,
+and none computes anything of its own: `plan` and `cost` are `Explain`'s two
+renderings and `run` is `Certify`'s `execCertifiedIO`.
+
+```sh
+lake exe agent-cat plan example/harden.wf
+lake exe agent-cat cost example/harden.wf
+lake exe agent-cat run  example/harden.wf --adapter-arg --refuse
+printf 'yes\n' | lake exe agent-cat run example/harden.wf --adapter claude
+lake exe agent-cat run  example/harden.wf --engine deck --session <id|title>
+```
+
+`--engine acp` (the default) starts an ACP adapter of its own — `stub`, `claude`,
+`codex` or a path — and speaks the protocol to it; `--engine deck` sends to a live
+`agent-deck` session somebody else started and is watching. `--session ID` is the
+existing session a run happens in, and what an ID names is the engine's business:
+under `acp` the transcript is continued **in place**, with no lock, so close its
+interactive owner first — `--fork-session` reads it and never writes. Every run is
+certified against its own logged table and its bill checked to be a leaf of the tree
+`cost` printed. `lake exe workflow_mcp` is the same stack behind four MCP tools.
+
+## The Haskell implementation
+
+`haskell/` is the operational half: the `Raw` syntax and its codec, the guards, the
+string layer, a typed `Plan` with the same static folds, worlds and their two bills,
+the builder, the `IO` interpreter, an `agent-deck` transport, and above them the
+authoring surface a human writes. That surface is ordinary Haskell — no splice, no
+bracket, no label. A bind is a Haskell bind, a fenced prompt is a `[wf|…|]` with the
+same `{name}` holes and layout rule, a `define` is a Haskell binding, `W.do` is
+`QualifiedDo`, and `result <- revising draft (atMost 2) \patch -> W.do` opens the
+review loop. Both branches are Haskell's own — a `case` on the exported `Outcome`,
+and an `if` reaching `ifThenElse` because an authoring module enables
+`RebindableSyntax`. The end of `haskell/example/Example/Harden.hs`:
+
+```haskell
+    case result of
+      Settled patch -> W.do
+        ok <- confirm (person "owner") [wf|
+            Apply this patch?
+            {patch}
+            {flagSpec}|]
+
+        when ok $ W.do
+          act (tool "apply") [wf|
+              Apply:
+              {patch}
+              Write the patched file here, then reply DONE.|]
+      Unsettled -> stop
+```
+
+`when` is the one-armed `if`: terminal, sealed by the `stop` a `.wf` arm block's
+closing brace is, and printing the identical `ifFlag` node.
+
+**Conformance.** Lean is normative, and the Haskell asks to be believed on no
+authority of its own. `lake exe conformance-oracle` emitted 128 request/reply
+vectors, frozen under `test/corpus/`; `tier0` replays every one with no Lean in the
+loop, `tier1` rebuilds twenty-one checked entries from their surface source and
+compares the whole reply — printed program, folds, ask counts, one trace and two
+bills per world — and `bisim` draws fresh programs and worlds against the live
+oracle. Regenerating the corpus is an explicit, reviewed act: the diff is a change to
+the specification. The gates run no Lean at all, which is the one-build rule
+(`connection.md` §3.9 — one Lean build at a time, machine-wide).
+
+## Building
+
+The nix devShell is the only environment; `direnv allow .` wires it up.
+
+```sh
+nix develop                 # or: direnv exec . <command>
+lake exe cache get          # Mathlib's objects — a cold miss is hours of elaboration
+lake build                  # everything in defaultTargets
+lake exe dsl_smoke          # and cli_smoke, mcp_smoke, exec_smoke, acp_smoke, deck_smoke
+```
+
+**Never run two Lean builds at once.** `Agentic/Core/DslFlagship.lean` dominates the
+build — minutes of wall clock and several gigabytes, the kernel running the checker,
+the cost algebra and the interpreter on a real program — and two at once have
+exhausted 48 GB. Nothing else costs that: no executable imports the flagship, so
+`lake exe agent-cat` builds from cold in seconds, and a CLI build that hangs for
+minutes is the bug. The Haskell side is independent, from `haskell/`:
+
+```sh
+nix develop -c cabal build all
+nix develop -c cabal run tier0   # and tier1; ./ci/tier0.sh and ./ci/deck.sh are the gates
+nix develop -c cabal run agentic-run -- run harden --scripted
+```
+
+## The documents
+
+* `doc/HANDOFF.md` — the research record: what the project is for, how it reached its
+  shape, what was decided, and what turned out false. The papers are `design.html`,
+  `meaning-and-representation.html`, `walkthrough.html` and `dsl-guide.html` beside
+  it; the MCP server is `doc/mcp.md`.
+* `doc/conformance-schema.md` — the wire format, and what the corpus pins on each of
+  its three surfaces. `haskell/README.md` and `haskell/PORTING*.md` are the port.
+* `doc/research/` — the design records, the dossiers that condemned the first
+  calculus included; `doc/research/dsl-redesign/connection.md` is the design of
+  record for the connection between the two implementations.
+
+Issue tracking is `obr` (prefix `acat`; see `AGENTS.md` and `doc/PLAN.org`).
