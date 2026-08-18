@@ -339,6 +339,13 @@ never declares. Doing nothing is `{ }`.
   `parseAndCheckRaw_eq` proves it is the same front end the MCP server and the
   test suite use. `cost` reports what kind of statement each number is, and says
   when a bound is sound but unattained rather than presenting it as a price.
+  `run --session ID` runs the workflow inside a session the client did not open
+  (ACP `session/load`: the adapter restores the transcript, replays it, and the
+  run continues in it), capability-gated and refused by name where the adapter
+  never advertised the call. It **continues in place** — no lock, no attach, and
+  no way for this process to see a second writer — so the operator must close the
+  session's interactive owner first; `--fork-session` is the variant that reads
+  the original and writes a copy.
 - **`workflow_mcp`** — an MCP server. A dialogue is already ask-and-continue, so
   the server holds `(Dlg, Table)` per run and steps it by tool call: the calling
   agent is the oracle.

@@ -121,6 +121,36 @@ CLIs. Where the two disagree, both readings are handled.
 * `session/cancel` — a notification; the outstanding `session/prompt` then
   answers `{"stopReason":"cancelled"}`, and the session remains usable
   afterwards.
+* `session/load` — `{sessionId, cwd (absolute), mcpServers}`, all three required
+  by the schema. Claude advertises it (`agentCapabilities.loadSession: true` in
+  0.66.0) and codex 0.13.0 does not, which is why `Conn.loadSession` asks before
+  it sends. **It is a sequential handoff and not an attach**: the adapter this
+  client spawned restores the transcript from disk, replays the whole of it as
+  `session/update` notifications, and only then answers — the response is
+  `{modes?, configOptions?}` with no `sessionId` in it, or `null`. Both readings
+  are handled, and every update arriving before the response is history rather
+  than an answer (`Conn.tryRequest`'s `answering`). Afterwards the connection is in that
+  transcript and prompts continue it.
+* `session/fork` — `{sessionId, cwd (absolute), mcpServers}`, answered with a
+  **new** `sessionId` (plus the same optional `modes`/`configOptions`). Marked
+  UNSTABLE in the 0.66.0 schema and advertised under
+  `agentCapabilities.sessionCapabilities.fork` rather than at the top level,
+  which is why the two capabilities are read from two places. A fork reads the
+  named transcript and writes a copy, so it is the variant with no hazard below.
+
+**The two-writers hazard, which nothing here can detect.** `session/load`
+continues a transcript *in place*: the adapter appends this run's turns to the
+same session file the interactive owner of that session is appending to. ACP has
+no lock, no lease and no attach — a second client "attaching" to a live session
+is an open proposal and not a protocol — so two writers produce one interleaved
+rollout and neither of them is told. This client cannot detect the other writer:
+it speaks to an adapter *it* started, and that adapter reports nothing about who
+else has the file open. The rule is therefore an operator's rule and is stated
+rather than enforced: **close the interactive owner of a session before
+continuing it**, and prefer `session/fork` when the original must stay live.
+`Conn.loadSession` says so again where a caller reads it, and `agent-cat run
+--session` says so a third time to the person who typed the flag, because the
+one place the fact can still do any good is before the command runs.
 * **Ids.** The agent's own request ids are small integers from a counter that
   starts at `0` — the same numbers ours start at. They cannot be confused,
   because `Msg.ofLine` splits on the presence of `method` before it looks at
@@ -181,6 +211,32 @@ def Adapter.ofName (s : String) : Adapter :=
   else if s == "claude" then .claude
   else if s == "codex" then .codex
   else .path s
+
+/-- `[[a.name]]` = what a caller calls this adapter — the word `Adapter.ofName`
+would read back, and a path for an adapter that was given as one.
+
+For diagnoses, and for diagnoses only: a refusal an operator has to act on must
+name the adapter the *command line* named, not the program a store path resolved
+to, and `Conn.prog` is the latter. `Adapter.ofName_name` is the round trip. -/
+def Adapter.name : Adapter → String
+  | .stub _ => "stub"
+  | .claude => "claude"
+  | .codex => "codex"
+  | .path prog => prog
+
+/-- **A named adapter is named back**, whatever the name was. The word in a
+diagnosis is the word that would produce the adapter it is about, so an operator
+can act on the message by retyping the name it contains — including the path
+case, where the name is the program. -/
+theorem Adapter.ofName_name (s : String) : (Adapter.ofName s).name = s := by
+  unfold Adapter.ofName
+  split
+  · next h => exact (eq_of_beq h).symm
+  split
+  · next h => exact (eq_of_beq h).symm
+  split
+  · next h => exact (eq_of_beq h).symm
+  rfl
 
 /-- The first entry of `PATH` holding a non-directory of this name, if any. -/
 private def searchPath (name : String) : IO (Option String) := do
@@ -280,6 +336,86 @@ def PermissionDecision.render (d : PermissionDecision) : String :=
   s!"permission {if d.granted then "granted" else "DENIED "} to '{d.tool}' \
      during {d.question}"
 
+/-! ## What the agent says it will do, and which session a run happens in -/
+
+/-- `[[Capabilities]]` = what the agent advertised at `initialize`, in the two
+words this client acts on, plus everything it said.
+
+**Why this is read at all.** `initialize` answers with an `agentCapabilities`
+object and this client used to look at `protocolVersion` and nothing else, which
+was honest while the only session call was `session/new` — a baseline every
+conforming agent must implement. `session/load` and `session/fork` are *not*
+baseline: claude 0.66.0 offers both and codex 0.13.0 offers neither, so a client
+that sent one without asking would earn a `-32601` from a conforming adapter and
+have no better account of it than "the adapter said no to something". Asking
+first turns that into a refusal that names the adapter and says what to do
+instead, before a session is opened or a token is spent.
+
+The two flags are read from two places because the schema keeps them in two:
+`loadSession` is a top-level boolean (the 0.66.0 schema notes the inconsistency
+and promises to unify it later), while `fork` is a *presence* under
+`sessionCapabilities` — `{}` means yes, absent or `null` mean no. `raw` is the
+whole object, kept because a caller who wants a capability this client has never
+heard of should not need this module edited to see it. -/
+structure Capabilities where
+  /-- `agentCapabilities.loadSession`: `session/load` is offered. -/
+  loadSession : Bool := false
+  /-- `agentCapabilities.sessionCapabilities.fork`: `session/fork` is offered. -/
+  forkSession : Bool := false
+  /-- The `agentCapabilities` object verbatim, or `null` if there was none. -/
+  raw : Json := Json.null
+  deriving Inhabited
+
+/-- `[[capabilitiesOf init]]` = the `initialize` result, read for the two calls
+this client will ask for.
+
+Total and forgiving in the direction that costs nothing: a result with no
+`agentCapabilities`, a `loadSession` that is not a boolean, or a
+`sessionCapabilities` that is not an object all read as *not advertised*, which
+is the reading that makes the client ask before it sends. Nothing here reads an
+absence as a promise. -/
+def capabilitiesOf (init : Json) : Capabilities :=
+  let agent := (init.getObjVal? "agentCapabilities").toOption.getD Json.null
+  { loadSession := (agent.getObjVal? "loadSession" >>= Json.getBool?).toOption.getD false
+  , forkSession :=
+      match agent.getObjVal? "sessionCapabilities" >>= (·.getObjVal? "fork") with
+      | .ok Json.null => false
+      | .ok _ => true
+      | .error _ => false
+  , raw := agent }
+
+/-- **An agent that said nothing advertised nothing.** The default is refusal on
+both axes, so a handshake this client could not read cannot be mistaken for
+permission to try either call. -/
+theorem capabilitiesOf_null :
+    (capabilitiesOf Json.null).loadSession = false
+      ∧ (capabilitiesOf Json.null).forkSession = false :=
+  ⟨rfl, rfl⟩
+
+/-- `[[SessionStart]]` = which session a connection's prompts go into.
+
+Three ways in, and the difference between them is *whose transcript this run
+appends to*:
+
+* `fresh` — `session/new`: a session of this run's own, and the only one every
+  conforming adapter offers. The default, because it is the only one that is
+  nobody else's.
+* `load id` — `session/load`: the run continues the named transcript **in
+  place**. This is the sequential handoff described in the module header, and the
+  two-writers hazard is its price: close the interactive owner first.
+* `fork id` — `session/fork`: the run happens in a *copy* of the named
+  transcript. The original is read and never written, so the hazard does not
+  arise; what is lost is that the work does not show up in the session the
+  operator is watching. -/
+inductive SessionStart where
+  /-- Open a session of this run's own (`session/new`). -/
+  | fresh
+  /-- Continue an existing session in place (`session/load`). -/
+  | load (sessionId : String)
+  /-- Run in a copy of an existing session (`session/fork`). -/
+  | fork (sessionId : String)
+  deriving DecidableEq, Repr, Inhabited
+
 /-! ## Configuration -/
 
 /-- `[[Config]]` = the recipe for starting one adapter process: which program,
@@ -303,6 +439,16 @@ structure Config where
   args : Array String := #[]
   /-- The session's working directory; sent to `session/new` made absolute. -/
   cwd : System.FilePath := "."
+  /-- Which session `connect` opens: one of this run's own, or somebody else's
+  continued or forked. `.fresh` by default, because a run that was told nothing
+  about a session must not be able to write into one.
+
+  Read once, by `Conn.startSession`, and it is a `Config` field rather than an
+  argument to `connect` because a caller who continues a session continues it for
+  the whole connection: `Exec.Settings.freshSessionPerQuestion` would open a new
+  session per question and throw the continued transcript away, so the two are
+  alternatives and a run must be configured with one of them. -/
+  session : SessionStart := .fresh
   /-- How a `session/request_permission` request arriving while **no question is
   under way** is answered — before the first prompt, and for the whole run of a
   caller that never calls `Conn.underQuestion`. The interpreter sets a policy per
@@ -488,8 +634,15 @@ structure Conn where
   child : IO.Process.Child pipes
   /-- The next JSON-RPC request id; ids are ours alone and strictly increase. -/
   nextId : IO.Ref Nat
-  /-- The session opened by `Conn.newSession`, if one has been. -/
+  /-- The session this connection's prompts go to — opened by `Conn.newSession`,
+  continued by `Conn.loadSession` or created by `Conn.forkSession` — if one of
+  the three has run. -/
   sessionId : IO.Ref (Option String)
+  /-- What the agent advertised at `initialize`, as `Conn.handshake` read it.
+  Empty until the handshake has happened, which is the same thing as "nothing is
+  advertised yet": `connect` shakes hands before it asks for a session, so no
+  session call can consult this ref before it is set. -/
+  caps : IO.Ref Capabilities
   /-- What the adapter published at `session/new`: for each config option, the
   values it says it will accept. Empty for an adapter that publishes no
   catalogue, which is a fact about the adapter and not a refusal. -/
@@ -851,9 +1004,21 @@ Two fuels bound this loop and they are both real: `fuel` counts messages, so an
 adapter that chatters without answering stops being listened to, and `deadline`
 (a monotone-clock reading in milliseconds, or `none`) bounds the wall time of the
 whole request, so an adapter that chatters *slowly* does too. The message fuel is
-what makes the recursion structural. -/
+what makes the recursion structural.
+
+`answering` says whether the updates arriving belong to *this* request. During a
+`session/prompt` they do, and an `agent_message_chunk` that is not text is a
+protocol violation this client reports rather than drops, because dropping it
+would lose an answer. During a session lifecycle call — `session/new`,
+`session/load`, `session/fork` — they do not: what arrives there is the
+adapter's own bookkeeping and, on a load, a *replay of somebody else's
+transcript*, which this client discards by construction (the default `onChunk`
+ignores it). A malformed chunk in a replayed history is therefore not an answer
+that was lost; refusing the handoff over an image somebody sent last Tuesday
+would be refusing for no reason, so with `answering := false` such a chunk is
+passed over. -/
 private def pump (conn : Conn) (wantId : Nat) (onChunk : String → IO Unit)
-    (deadline : Option Nat) (fuel : Nat) : IO (Except Json Json) := do
+    (answering : Bool) (deadline : Option Nat) (fuel : Nat) : IO (Except Json Json) := do
   match fuel with
   | 0 =>
     throw <| IO.userError
@@ -870,7 +1035,7 @@ private def pump (conn : Conn) (wantId : Nat) (onChunk : String → IO Unit)
       throw <| IO.userError
         s!"acp: '{conn.prog}' closed its output while request {wantId} was outstanding"
     else if line.all Char.isWhitespace then
-      pump conn wantId onChunk deadline n
+      pump conn wantId onChunk answering deadline n
     else
       match Msg.ofLine line with
       | .error e => fail line e
@@ -881,17 +1046,17 @@ private def pump (conn : Conn) (wantId : Nat) (onChunk : String → IO Unit)
         if mine then
           return payload
         else
-          pump conn wantId onChunk deadline n
+          pump conn wantId onChunk answering deadline n
       | .ok (.request id method params) =>
         conn.answerAgentRequest id method params
-        pump conn wantId onChunk deadline n
+        pump conn wantId onChunk answering deadline n
       | .ok (.notification method params) =>
         if method == "session/update" then
           match chunkText params with
-          | .error e => fail line e
+          | .error e => if answering then fail line e else pure ()
           | .ok (some txt) => onChunk txt
           | .ok none => pure ()
-        pump conn wantId onChunk deadline n
+        pump conn wantId onChunk answering deadline n
   termination_by fuel
 
 /-! ### The calls -/
@@ -905,22 +1070,29 @@ exception, because that is the conversation ending rather than the agent
 declining. This distinction is not fussiness — `session/set_mode` answers `{}`
 on claude and `-32602` on codex, so a caller that could not tell "this adapter
 does not offer that" from "the adapter is gone" would have to choose between
-failing on one conforming adapter and ignoring a dead pipe on the other. -/
+failing on one conforming adapter and ignoring a dead pipe on the other.
+
+`answering` says whether the `session/update`s arriving while this request is
+outstanding are its *answer*. True for a prompt and false for a session lifecycle
+call, where what arrives is bookkeeping — or, on `session/load`, a replay of
+somebody else's transcript; `pump` says what the difference buys. -/
 def tryRequest (conn : Conn) (method : String) (params : Json)
-    (onChunk : String → IO Unit := fun _ => pure ()) : IO (Except Json Json) := do
+    (onChunk : String → IO Unit := fun _ => pure ())
+    (answering : Bool := true) : IO (Except Json Json) := do
   let id ← conn.nextId.modifyGet (fun n => (n, n + 1))
   let deadline ← match conn.cfg.turnTimeoutMs with
     | none => pure none
     | some ms => do let now ← IO.monoMsNow; pure (some (now + ms))
   writeJson conn <| Rpc.request ((id : Nat) : Json) method params
-  pump conn id onChunk deadline conn.cfg.maxMessages
+  pump conn id onChunk answering deadline conn.cfg.maxMessages
 
 /-- Send a request and return its `result`, raising the agent's error if it sent
 one. Public because it *is* the transport: anything an adapter offers beyond the
 calls below is reachable from here without extending this module. -/
 def request (conn : Conn) (method : String) (params : Json)
-    (onChunk : String → IO Unit := fun _ => pure ()) : IO Json := do
-  match ← conn.tryRequest method params onChunk with
+    (onChunk : String → IO Unit := fun _ => pure ())
+    (answering : Bool := true) : IO Json := do
+  match ← conn.tryRequest method params onChunk answering with
   | .ok result => return result
   | .error e =>
     throw <| IO.userError
@@ -937,9 +1109,13 @@ We advertise no filesystem and no terminal capability, so a conforming agent
 sends us no `fs/*` or `terminal/*` request. `session/request_permission` is not
 capability-gated and arrives anyway; `Config.permission` is the answer to it.
 
-The negotiated `protocolVersion` is the one field this client reads, and it
-insists on `1`: the shapes above are v1's, and an agent announcing anything else
-is not the addressee this code was written for. -/
+`protocolVersion` is *checked* — it insists on `1`, since the shapes above are
+v1's and an agent announcing anything else is not the addressee this code was
+written for — and `agentCapabilities` is *recorded*, on the connection, where
+`Conn.capabilities` reads it. Recorded rather than merely returned because the
+caller who needs it is not always the caller who shook hands: `connect` does the
+handshake and `Conn.loadSession` is the one that must not ask for a call the
+agent never offered. -/
 def handshake (conn : Conn) : IO Json := do
   let res ← conn.request "initialize" <| Json.mkObj
     [ ("protocolVersion", (1 : Nat))
@@ -949,7 +1125,9 @@ def handshake (conn : Conn) : IO Json := do
     , ("clientInfo", Json.mkObj
         [ ("name", Json.str "agentic-lean"), ("version", Json.str "0.1.0") ]) ]
   match res.getObjVal? "protocolVersion" >>= Json.getNat? with
-  | .ok 1 => return res
+  | .ok 1 =>
+    conn.caps.set (capabilitiesOf res)
+    return res
   | .ok v =>
     throw <| IO.userError
       s!"acp: '{conn.prog}' speaks ACP protocol version {v}; this client implements 1"
@@ -968,14 +1146,106 @@ reads as "published nothing"; a caller who wants the rest can have the whole
 result from `Conn.request`. -/
 def newSession (conn : Conn) : IO String := do
   let dir ← IO.FS.realPath conn.cfg.cwd
-  let res ← conn.request "session/new" <| Json.mkObj
-    [ ("cwd", Json.str dir.toString), ("mcpServers", Json.arr #[]) ]
+  let res ← conn.request "session/new"
+    (Json.mkObj [ ("cwd", Json.str dir.toString), ("mcpServers", Json.arr #[]) ])
+    (answering := false)
   conn.configValues.set (configCatalogue res)
   match res.getObjVal? "sessionId" >>= Json.getStr? with
   | .ok sid => conn.sessionId.set (some sid); return sid
   | .error e =>
     throw <| IO.userError
       s!"acp: session/new returned no sessionId ({e}): {Json.compress res}"
+
+/-- `[[conn.capabilities]]` = what the agent advertised at `initialize`, as
+`Conn.handshake` recorded it. Nothing before the handshake advertises anything
+(`capabilitiesOf_null`). -/
+def capabilities (conn : Conn) : IO Capabilities := conn.caps.get
+
+/-- Continue an existing session (`session/load`) instead of opening one, and
+remember that this is now the session prompts go to.
+
+**What the call is.** `{sessionId, cwd, mcpServers}` — all three required by the
+schema, `cwd` absolute for the reason `session/new`'s is. The adapter restores
+the transcript, **replays the whole of it as `session/update` notifications**, and
+answers only when the replay is done; the answer carries `modes` and
+`configOptions` (recorded here, exactly as after `session/new`) or is `null`, and
+both are accepted, because the useful part of a handoff is the session and not
+its catalogue. The replay is drained by the same pump every request uses, with
+`answering := false`: those chunks are somebody else's history and this client
+neither returns them nor lets a malformed one abort the handoff. After this the
+connection is in that transcript and `promptTurn` continues it.
+
+**Asked for, not assumed.** `agentCapabilities.loadSession` is a capability
+claude advertises and codex does not, so an adapter that never offered the call
+is refused here — naming the adapter as the command line named it, and naming the
+flag to drop, because the reader of this message is the operator who typed it.
+
+**The two-writers hazard.** This appends to a transcript that may already have a
+writer: an interactive `claude` sitting in the session, a second `agent-cat`, a
+pane in a session manager. ACP has no lock and no attach, and this client cannot
+detect the other writer — it can see only the adapter it started. Two writers
+produce one interleaved rollout and neither is told. **Close the interactive owner
+of a session before continuing it**; when the original must stay live, use
+`Conn.forkSession`, which writes a copy. Stated here, in the flag's help and in
+the module header, and enforced nowhere, because nothing in this process is in a
+position to enforce it. -/
+def loadSession (conn : Conn) (sid : String) : IO String := do
+  unless (← conn.capabilities).loadSession do
+    throw <| IO.userError
+      s!"acp: adapter {conn.cfg.adapter.name} does not advertise loadSession; \
+         run without --session"
+  let dir ← IO.FS.realPath conn.cfg.cwd
+  let res ← conn.request "session/load"
+    (Json.mkObj
+      [ ("sessionId", Json.str sid)
+      , ("cwd", Json.str dir.toString)
+      , ("mcpServers", Json.arr #[]) ])
+    (answering := false)
+  conn.configValues.set (configCatalogue res)
+  conn.sessionId.set (some sid)
+  return sid
+
+/-- Fork an existing session (`session/fork`) and make the fork the session this
+connection prompts: the named transcript is read, a new one continues it, and the
+original is not written.
+
+The call is `session/load`'s with a different name, and the answer differs in the
+one field that matters: a fork has a **new** `sessionId`, which is required by
+the schema and is what this connection uses from here on. `session/fork` is
+marked UNSTABLE in the 0.66.0 schema and is advertised under
+`sessionCapabilities.fork` rather than at the top level; an adapter that does not
+offer it is refused by name, as with `loadSession`.
+
+This is the variant with no two-writers hazard — the original session gains
+nothing and loses nothing — and the trade is equally plain: the work does not
+appear in the transcript the operator is watching. -/
+def forkSession (conn : Conn) (sid : String) : IO String := do
+  unless (← conn.capabilities).forkSession do
+    throw <| IO.userError
+      s!"acp: adapter {conn.cfg.adapter.name} does not advertise session/fork; \
+         run without --fork-session"
+  let dir ← IO.FS.realPath conn.cfg.cwd
+  let res ← conn.request "session/fork"
+    (Json.mkObj
+      [ ("sessionId", Json.str sid)
+      , ("cwd", Json.str dir.toString)
+      , ("mcpServers", Json.arr #[]) ])
+    (answering := false)
+  conn.configValues.set (configCatalogue res)
+  match res.getObjVal? "sessionId" >>= Json.getStr? with
+  | .ok fid => conn.sessionId.set (some fid); return fid
+  | .error e =>
+    throw <| IO.userError
+      s!"acp: session/fork returned no sessionId ({e}): {Json.compress res}"
+
+/-- `[[conn.startSession]]` = the session `Config.session` asked for, opened,
+continued or forked — the one place the three ways in are chosen between, so that
+`connect` has one call and no policy. -/
+def startSession (conn : Conn) : IO String :=
+  match conn.cfg.session with
+  | .fresh => conn.newSession
+  | .load sid => conn.loadSession sid
+  | .fork sid => conn.forkSession sid
 
 /-- `[[conn.optionValues id]]` = the values the adapter published for config
 option `id`, or `[]` if it published none. -/
@@ -1075,9 +1345,11 @@ end Conn
 
 /-! ## Opening one -/
 
-/-- Spawn the adapter, shake hands, open a session. On any failure the child is
+/-- Spawn the adapter, shake hands, and get into a session — a new one, or the
+one `Config.session` named, continued or forked. On any failure the child is
 closed before the error is re-thrown, so a failed `connect` leaves no process
-behind. -/
+behind; a `--session` refused for want of a capability is one of those failures,
+and it happens before a prompt is sent or a token is spent. -/
 def connect (cfg : Config := {}) : IO Conn := do
   -- Flush first: `spawn` forks, and a fork inherits the parent's *unflushed*
   -- stdout buffer, which the child would then deliver into the pipe we are
@@ -1089,6 +1361,9 @@ def connect (cfg : Config := {}) : IO Conn := do
     { toStdioConfig := pipes, cmd := prog, args := baseArgs ++ cfg.args, cwd := some cfg.cwd }
   let nextId ← IO.mkRef 0
   let sessionId ← IO.mkRef none
+  -- Before the handshake nothing is advertised, which is the reading that makes
+  -- every session call ask first (`capabilitiesOf_null`).
+  let caps ← IO.mkRef ({} : Capabilities)
   let configValues ← IO.mkRef []
   let warned ← IO.mkRef []
   -- Before any question there is no question, and the connection-wide policy is
@@ -1097,10 +1372,10 @@ def connect (cfg : Config := {}) : IO Conn := do
   let asked ← IO.mkRef ("no question (the handshake, or a caller that set none)", cfg.permission)
   let decisions ← IO.mkRef #[]
   let conn : Conn :=
-    { cfg, prog, child, nextId, sessionId, configValues, warned, asked, decisions }
+    { cfg, prog, child, nextId, sessionId, caps, configValues, warned, asked, decisions }
   try
     discard <| conn.handshake
-    discard <| conn.newSession
+    discard <| conn.startSession
   catch e =>
     conn.close
     throw e

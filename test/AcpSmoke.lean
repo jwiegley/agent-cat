@@ -32,7 +32,13 @@ assertions below are assertions about the **real** protocol:
   of five times as much noise, including one 39 KB line;
 * an agent-initiated `session/request_permission` with an **integer** id is
   answered by policy: granting it lets the act happen, and cancelling it gets
-  the real adapter's measured behaviour instead — an apology, and `end_turn`.
+  the real adapter's measured behaviour instead — an apology, and `end_turn`;
+* the **session handoff**: `initialize`'s capabilities are read rather than
+  discarded, `session/load` drains a replayed transcript and leaves the
+  connection prompting the loaded session, a `null` result is as good as an
+  object, `session/fork` moves the connection to the *new* id it answered with,
+  and an adapter that advertised neither call refuses each by name — before a
+  session is opened or a prompt is sent.
 
 The `--adapter` mode spends real tokens: two short turns, in a temporary
 directory, to check that the handshake, a prompt and the permission grant work
@@ -214,6 +220,104 @@ def modeRefused (cfg : Config) : IO Unit := do
     check "…and the session still answers" guideText
       (← conn.prompt "Write out the house style guide, at most four short lines.")
 
+/-! ## The handoff: a session this client did not open
+
+Everything below is `Acp.Conn`'s three ways into a session, driven against the
+stub's reproduction of the 0.66.0 shapes. The facts being checked are the two an
+operator can act on — *the run is in the session it named*, and *none of that
+session's history was read as an answer* — plus the two refusals, which are the
+whole reason `initialize`'s capabilities are now read instead of discarded. -/
+
+/-- The session the handoff tests continue. Deliberately **not** the stub's own
+`SESSION_ID`: the point of a handoff is that the client asks for a session it
+never opened, and the stub adopts the id it is given, exactly as the real
+adapter's `getOrCreateSession` does. -/
+def handoffId : String := "handoff-0001"
+
+/-- The prompt whose canned answer is the guide; the first turn of every run. -/
+def guidePrompt : String := "Write out the house style guide, at most four short lines."
+
+/-- What the adapter said it would do, read off the handshake rather than
+assumed. Both facts are gates: `loadSession` is a top-level boolean and `fork` is
+a presence under `sessionCapabilities`, so a client that looked in one place
+would have got one of them wrong. -/
+def advertised (cfg : Config) : IO Unit := do
+  withConn cfg fun conn => do
+    let caps ← conn.capabilities
+    checkTrue "initialize advertises loadSession, and it was recorded" caps.loadSession
+    checkTrue "…and session/fork, which lives under sessionCapabilities" caps.forkSession
+    checkTrue "…and the whole agentCapabilities object is kept for a caller who wants more"
+      (match caps.raw.getObjVal? "promptCapabilities" with
+       | .ok _ => true | .error _ => false)
+
+/-- `session/load`: the run continues a transcript somebody else started.
+
+The stub replays four canned updates before answering — a user chunk, an agent
+chunk *saying `DONE`*, a tool call, and a chunk carrying an image — so this
+checks three things at once: that the replay is drained rather than mistaken for
+a reply, that a content type the answer-reader would refuse does not abort the
+handoff, and that the connection afterwards prompts the **loaded** session (the
+stub answers `-32602` to a prompt naming any other). -/
+def loading (cfg : Config) : IO Unit := do
+  withConn { cfg with session := .load handoffId } fun conn => do
+    check "session/load leaves the connection in the session it asked for"
+      handoffId ((← conn.sessionId.get).getD "<no session>")
+    checkTrue "…and the loaded session's config catalogue was recorded, as after session/new"
+      ((← conn.optionValues "model").length > 0)
+    check "…and nothing replayed leaked into the next turn's answer" guideText
+      (← conn.prompt guidePrompt)
+
+/-- The same handoff against an adapter that answers `session/load` with `null`.
+The schema requires no field of a `LoadSessionResponse`, so this is conforming,
+and a client that demanded an object would refuse a session it could have had —
+the catalogue is then empty, which `optionValues` already reads as "said
+nothing" rather than "said no". -/
+def loadingNull (cfg : Config) : IO Unit := do
+  withConn { cfg with args := cfg.args.push "--load-null", session := .load handoffId }
+    fun conn => do
+      check "a null session/load result is a loaded session all the same"
+        handoffId ((← conn.sessionId.get).getD "<no session>")
+      check "…with no catalogue, which is not a refusal" "0"
+        (toString (← conn.optionValues "model").length)
+      check "…and the session answers" guideText (← conn.prompt guidePrompt)
+
+/-- An adapter that never advertised `loadSession` — codex's position — refuses
+the handoff *before* it is attempted, naming the adapter the caller named and the
+flag to drop. -/
+def loadRefused (cfg : Config) : IO Unit := do
+  let complaint ← IO.mkRef ""
+  try
+    withConn { cfg with args := cfg.args.push "--no-load-session", session := .load handoffId }
+      fun _ => pure ()
+  catch e => complaint.set (toString e)
+  let said ← complaint.get
+  checkTrue s!"an adapter without loadSession refuses --session, by name (said: '{said}')"
+    ((said.splitOn "adapter stub does not advertise loadSession").length > 1
+      && (said.splitOn "run without --session").length > 1)
+
+/-- `session/fork`: the run happens in a copy, and the copy has an id of its own.
+That the connection moves to the **new** id is the whole difference from a load —
+a client that kept the old one would be writing into the transcript a fork exists
+to leave alone. -/
+def forking (cfg : Config) : IO Unit := do
+  withConn { cfg with session := .fork handoffId } fun conn => do
+    check "session/fork leaves the connection in the NEW session it answered with"
+      s!"{handoffId}-fork-1" ((← conn.sessionId.get).getD "<no session>")
+    check "…and the fork answers" guideText (← conn.prompt guidePrompt)
+
+/-- …and an adapter whose `sessionCapabilities` has no `fork` key refuses that
+one, by name, in the same way. -/
+def forkRefused (cfg : Config) : IO Unit := do
+  let complaint ← IO.mkRef ""
+  try
+    withConn { cfg with args := cfg.args.push "--no-fork-session", session := .fork handoffId }
+      fun _ => pure ()
+  catch e => complaint.set (toString e)
+  let said ← complaint.get
+  checkTrue s!"an adapter without session/fork refuses --fork-session, by name (said: '{said}')"
+    ((said.splitOn "adapter stub does not advertise session/fork").length > 1
+      && (said.splitOn "run without --fork-session").length > 1)
+
 /-! ## Against a real adapter -/
 
 /-- Two short turns against a live adapter, in a fresh temporary directory: one
@@ -269,6 +373,12 @@ def main (argv : List String) : IO UInt32 := do
         cancelling cfg
         cancelled cfg
         modeRefused cfg
+        advertised cfg
+        loading cfg
+        loadingNull cfg
+        loadRefused cfg
+        forking cfg
+        forkRefused cfg
       finally
         discard <| IO.Process.run { cmd := "rm", args := #["-rf", dir] }
     else

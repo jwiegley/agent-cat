@@ -823,7 +823,7 @@ From acat-ubt: non-commutative K forcing non-commutative conv is shown at one ca
 :LABELS:   []
 :ISSUE_TYPE: feature
 :CREATED:  [2026-08-15 Sat 20:27]
-:MODIFIED: [2026-08-15 Sat 22:20]
+:MODIFIED: [2026-08-17 Mon 18:41]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -871,6 +871,13 @@ Scope once research lands: at minimum, client-side session/load (capability-gate
     "author": "johnw",
     "text": "Re-sequenced by the owner's design-first ruling: the --session handoff now queues behind the round-18 campaign (acat-r18-campaign), not round 17 (whose implementation was folded into that campaign). The plan in the previous comment is unchanged.",
     "created_at": "2026-08-16T05:20:13Z"
+  },
+  {
+    "id": 117,
+    "issue_id": "acat-acp-live-session-99n",
+    "author": "johnw",
+    "text": "INCIDENT during implementation (2026-08-17 ~16:00 local): 82 tracked files were deleted from the working tree by an unidentified process - test/DslCases.lean, conformance/{Conformance,ConformanceOracle}.lean, doc/research/dsl-redesign/connection.md, and 78 of 128 test/corpus entries. Detected by the 99n implementer (its lake build failed on missing registered sources); no rm/destructive command found in any active workflow transcript; suspects include unrelated peer sessions on this machine. All restored via git checkout from HEAD - nothing was lost (every file was committed). Corpus verified back at 128. Note for the future: the corpus shasum check in verify phases is what bounds this class of damage; consider a pre-commit corpus-count guard.",
+    "created_at": "2026-08-18T01:41:58Z"
   }
 ]
 #+end_src

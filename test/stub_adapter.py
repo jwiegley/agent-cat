@@ -2,9 +2,9 @@
 """A deterministic ACP adapter, for testing the transport and nothing else.
 
 Line-delimited JSON-RPC 2.0 on stdin/stdout, implementing exactly the calls
-`Agentic/Core/Acp.lean` makes: `initialize`, `session/new`, `session/set_mode`,
-`session/set_config_option`, `session/prompt`, and the `session/cancel`
-notification.
+`Agentic/Core/Acp.lean` makes: `initialize`, `session/new`, `session/load`,
+`session/fork`, `session/set_mode`, `session/set_config_option`,
+`session/prompt`, and the `session/cancel` notification.
 
 **The wire shapes here are copied from real transcripts**, not invented. Every
 response body, every `session/update` kind, the integer ids of agent-initiated
@@ -84,6 +84,36 @@ path:
                       fingerprinted before and after: this is the negative
                       control for that check, and a refusing run against this
                       flag must FAIL with the unauthorised-write message.
+  --no-load-session   `agentCapabilities.loadSession` is advertised as false and
+                      `session/load` answers -32601: codex 0.13.0's position,
+                      and the negative control for `--session`. A client that
+                      read the capability must refuse before it sends anything;
+                      the -32601 is what it would have got if it had not.
+  --no-fork-session   the same for `session/fork`, which is advertised as a
+                      presence under `sessionCapabilities` rather than as a
+                      boolean — so this flag *removes the key* rather than
+                      setting it false, which is the shape the schema actually
+                      uses for "not offered".
+  --load-null         `session/load` answers `null` instead of
+                      `{modes, configOptions}`. Both are legal — the schema's
+                      LoadSessionResponse has no required field, so an adapter
+                      that publishes no catalogue on load has nothing to send —
+                      and a client that demanded an object would work against
+                      one conforming adapter and not the other.
+
+**`session/load` is a handoff and this stub reproduces its shape.** The real
+adapter (claude-agent-acp 0.66.0) restores the transcript, replays the whole of
+it as `session/update` notifications, and only *then* answers the request: the
+client must drain the replay, treat none of it as an answer to anything, and
+carry on in the loaded session. So this stub replays four canned updates — a
+user chunk, an agent chunk, a tool call and an agent chunk carrying an image —
+and then answers. The image is the one shape here that was NOT measured: it is
+included because a transcript may legitimately hold content the client's
+answer-reader would refuse (`Acp.chunkText`), and refusing a handoff over
+somebody else's old picture is a defect, so the tolerant path needs a test.
+Afterwards the loaded id *is* the session — the real adapter's `session/load`
+resumes the session named, so a client that kept prompting the old one is
+broken, and `session/prompt` here answers -32602 for any other id.
 
 Diagnostics go to stderr, which the client inherits; stdout carries protocol
 and nothing else.
@@ -138,6 +168,12 @@ WRITE_ON_ASK = "--write-on-ask" in ARGV
 WRITE_ANYWAY = "--write-anyway" in ARGV
 REFUSE_SET_MODE = "--refuse-set-mode" in ARGV
 REFUSE_SET_CONFIG = "--refuse-set-config" in ARGV
+# Which of the two session-handoff calls this adapter admits to having, and
+# what `session/load` answers with. Both default to advertised, because claude
+# 0.66.0 advertises both.
+LOAD_SESSION = "--no-load-session" not in ARGV
+FORK_SESSION = "--no-fork-session" not in ARGV
+LOAD_NULL = "--load-null" in ARGV
 
 # (substring, answer), most specific first.
 ANSWERS = [
@@ -431,6 +467,15 @@ FIRST_PROMPT = True
 
 def handle_prompt(rid, params):
     global FIRST_PROMPT
+    # Which session a prompt is for. A real adapter holds many and answers for
+    # the one named; this stub holds one, and the check is here because it is the
+    # only evidence that a client which loaded or forked a session went on to
+    # prompt THAT session rather than the one it first opened.
+    if params.get("sessionId") != SESSION_ID:
+        error(rid, -32602, "Invalid params",
+              {"_errors": [],
+               "sessionId": {"_errors": ["Unknown session: %r" % (params.get("sessionId"),)]}})
+        return
     text = prompt_text(params)
     key, reply = answer_for(text)
     note("prompt matched %r" % (key,))
@@ -493,6 +538,86 @@ def handle_prompt(rid, params):
                  "usage": {"inputTokens": 2, "outputTokens": 42,
                            "cachedReadTokens": 14057, "cachedWriteTokens": 18299,
                            "totalTokens": 32400}})
+
+
+def replay_history():
+    """The transcript a `session/load` restores, as the wire carries it.
+
+    Four notifications, sent BEFORE the response, exactly as the real adapter
+    sends them: the client has to drain them, and it must read none of them as
+    an answer — the agent chunk here says APPROVE-shaped things on purpose, so a
+    client that let replayed text leak into the next turn's answer would fail
+    the smoke test rather than pass it quietly.
+    """
+    update({
+        "sessionUpdate": "user_message_chunk",
+        "content": {"type": "text", "text": "Harden the parser in src/parse.c."},
+        "messageId": "msg_stub_hist_0001",
+    })
+    chunk("I read src/parse.c earlier and found one unchecked strcpy. DONE",
+          "msg_stub_hist_0002")
+    tool_call("completed", {"rawOutput": "Read src/parse.c"})
+    # Content a client's answer-reader is entitled to refuse, in a message it is
+    # not reading for an answer: see the module docstring.
+    update({
+        "sessionUpdate": "agent_message_chunk",
+        "content": {"type": "image", "mimeType": "image/png", "data": "iVBORw0KGgo="},
+        "messageId": "msg_stub_hist_0003",
+    })
+
+
+def handle_load(rid, params):
+    """`session/load`: adopt the named session, replay its history, then answer.
+
+    The order is the protocol's and it is the whole point of the call — the
+    response is what tells the client the replay is over. `getOrCreateSession`
+    is what the real adapter does with an id it has not seen, so an unknown one
+    is not an error here either.
+    """
+    global SESSION_ID
+    if not LOAD_SESSION:
+        error(rid, -32601, '"Method not found": session/load',
+              {"method": "session/load"})
+        return
+    sid = params.get("sessionId")
+    if not isinstance(sid, str):
+        error(rid, -32602, "Invalid params",
+              {"_errors": [],
+               "sessionId": {"_errors": ["Invalid input: expected string, received undefined"]}})
+        return
+    note("loading session " + sid + " in " + str(params.get("cwd")))
+    SESSION_ID = sid
+    replay_history()
+    if LOAD_NULL:
+        result(rid, None)
+        return
+    result(rid, {"modes": MODES, "configOptions": CONFIG_OPTIONS})
+
+
+def handle_fork(rid, params):
+    """`session/fork`: a NEW session with the named one's context.
+
+    The response carries a `sessionId` and it is not the one that was asked
+    for — that is the whole difference from `session/load`, and a client that
+    kept prompting the original would be writing into the transcript a fork
+    exists to leave alone. No replay: a fork starts a session rather than
+    restoring one, and the real adapter sends its history nowhere.
+    """
+    global SESSION_ID
+    if not FORK_SESSION:
+        error(rid, -32601, '"Method not found": session/fork',
+              {"method": "session/fork"})
+        return
+    sid = params.get("sessionId")
+    if not isinstance(sid, str):
+        error(rid, -32602, "Invalid params",
+              {"_errors": [],
+               "sessionId": {"_errors": ["Invalid input: expected string, received undefined"]}})
+        return
+    SESSION_ID = sid + "-fork-1"
+    note("forked session " + sid + " as " + SESSION_ID)
+    result(rid, {"sessionId": SESSION_ID, "modes": MODES,
+                 "configOptions": CONFIG_OPTIONS})
 
 
 def handle_set_mode(rid, params):
@@ -566,8 +691,15 @@ def main():
                     "mcpCapabilities": {"http": False, "sse": False},
                     "auth": {"logout": {}},
                     "providers": {},
-                    "loadSession": False,
-                    "sessionCapabilities": {"close": {}, "list": {}},
+                    # Claude 0.66.0 advertises both; codex advertises neither.
+                    # `loadSession` is a boolean at the top level and `fork` is a
+                    # presence under `sessionCapabilities`, which is why the two
+                    # flags below turn them off in two different ways.
+                    "loadSession": LOAD_SESSION,
+                    "sessionCapabilities": dict(
+                        {"close": {}, "list": {}},
+                        **({"fork": {}} if FORK_SESSION else {})
+                    ),
                 },
                 "agentInfo": {"name": "stub_adapter", "title": "Stub Agent",
                               "version": "2.0.0"},
@@ -578,6 +710,10 @@ def main():
             note("cwd " + str(params.get("cwd")))
             result(rid, {"sessionId": SESSION_ID, "modes": MODES,
                          "configOptions": CONFIG_OPTIONS})
+        elif method == "session/load":
+            handle_load(rid, params)
+        elif method == "session/fork":
+            handle_fork(rid, params)
         elif method == "session/set_mode":
             handle_set_mode(rid, params)
         elif method == "session/set_config_option":

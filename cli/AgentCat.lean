@@ -34,7 +34,7 @@ command line, the scratch directory, the exit protocol, and the checks a run is
 subjected to; each of the latter names the theorem it shadows, exactly as
 `demo/Main.lean` does for the flagship workload.
 
-**Five decisions about the command line, and the reason for each.**
+**Six decisions about the command line, and the reason for each.**
 
 * **A run is given something to act on.** `--workspace DIR` copies `DIR`'s
   contents into the run's fresh directory before the first question, and never
@@ -64,6 +64,23 @@ subjected to; each of the latter names the theorem it shadows, exactly as
   analysis (`Agentic/Core/Mcp.lean`), through the same `Explain.costSummary` this
   file's `cost` prints, so a JSON surface exists and adding a second one here
   would be a second encoder to keep true. The renderings here are for a reader.
+
+* **A run may continue a session somebody else started, and the hazard is
+  stated rather than guarded.** `--session ID` runs the workflow inside an
+  existing agent session: the adapter restores that transcript, replays it, and
+  the run goes on inside it, so afterwards the whole workflow is in the session's
+  own history where `claude --resume ID` will show it. This is
+  `Acp.Conn.loadSession`, it is capability-gated — an adapter that never
+  advertised `loadSession` is refused by name, before a token is spent — and it
+  **continues in place**: there is no lock, and `agent-cat` cannot detect a second
+  writer, so the operator must close the interactive owner of the session first.
+  The flag's help text says so, the run header says so again, and `--fork-session`
+  is the variant with no hazard (the original transcript is read and never
+  written). Two consequences worth naming: with `--session` the run's directory is
+  what `session/load` is told, so `--scratch DIR` is how a run happens in the
+  session's own directory; and the per-question fresh session is off, because
+  continuing a transcript and forgetting it after every question are alternatives
+  and a run must be one of them.
 
 * **The person is asked at the keyboard only where a person is answering.**
   Against the stub the stub answers every addressee, which is what makes an
@@ -136,6 +153,22 @@ def usage : String :=
    \x20 --no-workspace                     start empty, ignoring the `.d` convention\n\
    \x20 --model NAME=REAL                  what a scope's `model \"NAME\"` means to this\n\
    \x20                                    adapter, e.g. `--model deep=opus`; repeatable\n\
+   \x20 --session ID                       run inside an existing agent session instead of\n\
+   \x20                                    a new one: the adapter restores that transcript,\n\
+   \x20                                    replays it, and the run continues in it, so the\n\
+   \x20                                    workflow is afterwards part of that session's own\n\
+   \x20                                    history. Refused, by name, when the adapter does\n\
+   \x20                                    not advertise loadSession.\n\
+   \x20                                    TWO WRITERS: this continues the session IN PLACE\n\
+   \x20                                    and there is no lock — close the session's\n\
+   \x20                                    interactive owner first (agent-cat cannot detect\n\
+   \x20                                    a live writer, and two writers make one\n\
+   \x20                                    interleaved transcript). Pass --scratch DIR to\n\
+   \x20                                    run in the session's own directory.\n\
+   \x20 --fork-session                     with --session, run in a FORK of it: the named\n\
+   \x20                                    transcript is read and never written, so the\n\
+   \x20                                    hazard above does not arise — and the work does\n\
+   \x20                                    not appear in the session being watched\n\
    \x20 --scratch DIR                      run in DIR instead of a fresh mktemp directory\n\
    \x20 --quiet                            print the verdict and what failed, and no more\n\
    \n\
@@ -176,6 +209,12 @@ structure Options where
   workspace : WorkspaceChoice := .auto
   /-- What a scope's model name means to this adapter. -/
   modelAliases : List (String × String) := []
+  /-- An existing agent session to run inside, if the caller named one. -/
+  session : Option String := none
+  /-- Whether that session is forked rather than continued in place. Meaningless
+  without `session`, and `Options.checked` refuses the pair rather than letting a
+  flag that changes nothing look as though it did. -/
+  forkSession : Bool := false
   /-- `define`s the caller replaced, as name and the literal words. -/
   defines : List (String × String) := []
   /-- Print the verdict and the failures, and nothing else. -/
@@ -194,11 +233,26 @@ def parseOptions : List String → Except String Options
   | "--model" :: a :: rest => do
       let kv ← splitPair "--model" a
       (parseOptions rest).map (fun o => { o with modelAliases := kv :: o.modelAliases })
+  | "--session" :: s :: rest => (parseOptions rest).map ({ · with session := some s })
+  | "--fork-session" :: rest => (parseOptions rest).map ({ · with forkSession := true })
   | "--define" :: a :: rest => do
       let kv ← splitPair "--define" a
       (parseOptions rest).map (fun o => { o with defines := kv :: o.defines })
   | "--quiet" :: rest => (parseOptions rest).map ({ · with quiet := true })
   | a :: _ => .error s!"unknown option or missing argument: {a}"
+
+/-- `[[o.checked]]` = the options, once the combinations that mean nothing are
+refused.
+
+One rule so far, and it is a rule about a *pair* rather than about either flag,
+which is why it cannot live in `parseOptions`: `--fork-session` says what to do
+with the session `--session` named, so without one there is nothing to fork.
+Ignoring it would leave a caller who meant to continue a session believing they
+had, which is exactly the mistake the two-writers hazard punishes. -/
+def Options.checked (o : Options) : Except String Options :=
+  if o.forkSession && o.session.isNone then
+    .error "--fork-session needs a session to fork: give --session ID as well"
+  else .ok o
 
 /-- The `--define`s of a `plan` or `cost`, which take no other option. -/
 def parseDefineOptions : List String → Except String (List (String × String))
@@ -391,10 +445,19 @@ def runCmd (path : String) (p : Plan [] Unit) (h : level p ≤ Level.branch) (o 
     catch e =>
       IO.eprintln s!"agent-cat: {e}"
       IO.Process.exit 2
+  -- Which session the run happens in. `--session ID` continues that transcript in
+  -- place (the two-writers hazard, stated at the flag and printed in the header
+  -- below); `--fork-session` runs in a copy of it instead. The refusal when the
+  -- adapter never advertised the call is `Acp.Conn.loadSession`'s, raised at
+  -- `connect` before a prompt is sent, and it names this adapter and this flag.
+  let sessionStart : Acp.SessionStart := match o.session with
+    | none => .fresh
+    | some sid => if o.forkSession then .fork sid else .load sid
   let cfg : Acp.Config :=
     { adapter
     , args := o.adapterArgs
     , cwd := dir
+    , session := sessionStart
     , readTimeoutMs := if stubbed then some 20000 else ({} : Acp.Config).readTimeoutMs
     , turnTimeoutMs := if stubbed then some 60000 else ({} : Acp.Config).turnTimeoutMs
       -- What a permission request arriving while *no question is under way*
@@ -415,8 +478,13 @@ def runCmd (path : String) (p : Plan [] Unit) (h : level p ≤ Level.branch) (o 
       askPersonOnStdin := !stubbed
       -- One session per question, live: a world is a function of the question
       -- (`Agentic/Core/World.lean`), and a session is a memory of the ones before
-      -- it.
-      freshSessionPerQuestion := !stubbed
+      -- it. Off when the caller named a session: continuing (or forking) one and
+      -- then opening a new session before every question are alternatives, and
+      -- the flag says which the run is. The cost is stated rather than hidden —
+      -- inside a handoff every question is asked of an agent that remembers the
+      -- ones before it, so the approximation of "a world is a function of the
+      -- question" is the one thing `--session` gives up.
+      freshSessionPerQuestion := !stubbed && o.session.isNone
     , retries := if stubbed then 1 else 2
       -- What the author's model names mean to *this* adapter. Empty unless
       -- `--model NAME=REAL` was given, and empty is the identity
@@ -436,6 +504,17 @@ def runCmd (path : String) (p : Plan [] Unit) (h : level p ≤ Level.branch) (o 
     unless o.quiet do
       let argsShown := String.intercalate " " cfg.args.toList
       IO.println s!"run: {path} against {o.adapter} {argsShown} (cwd {dir})"
+      -- Which session this run is in, and — when it is somebody else's — the
+      -- hazard, printed where the operator is looking rather than only in the
+      -- help they have already read past.
+      match sessionStart with
+      | .fresh => pure ()
+      | .fork sid =>
+        IO.println s!"session: forking {sid}; the fork takes the questions and the \
+                      original transcript is read, never written"
+      | .load sid =>
+        IO.println s!"session: continuing {sid} in place; close its interactive owner \
+                      first — there is no lock, and agent-cat cannot detect a second writer"
       -- What the agent can see, named and sized. `Seeded.render_ne_nil`: this
       -- always says something, so an empty directory is a stated fact and not
       -- an omission.
@@ -524,7 +603,7 @@ def main (argv : List String) : IO UInt32 := do
         return 1
       | .ok ds => costCmd path ds
     | "run" =>
-      match parseOptions rest with
+      match parseOptions rest >>= Options.checked with
       | .error m => do
         IO.eprintln s!"agent-cat: {m}"
         IO.eprint usage

@@ -72,6 +72,18 @@ no proof in the package can make a statement about.
   removed: a refusing run whose `parse.c` was replaced during the author's draft
   turn while every semantic check passed.
 
+* **That a run can be handed an existing session, and that it is refused when it
+  cannot.** `--session ID` runs the workflow inside a session the client did not
+  open (`Acp.Conn.loadSession`): the stub replays a canned transcript, adopts the
+  id, and answers only prompts naming it, so a run that passes is a run that
+  drained the replay and continued in the right session. The header must say, in
+  words, that the session is being continued *in place* and that its interactive
+  owner must be closed first — the two-writers hazard is a fact only the operator
+  can act on, so it is checked here like any other output. `--fork-session` is
+  the same against a copy; the three refusals — an adapter that advertises
+  neither call, and `--fork-session` with nothing to fork — are exit codes and
+  named diagnoses, checked byte for byte.
+
 * **That `--define` changes what it says it changes and nothing else.** Two
   statements, and the second is the load-bearing one: overriding a `define` with
   *the same words the program wrote* produces output byte-identical to giving no
@@ -146,6 +158,68 @@ def cli (args : List String) : IO Ran := do
 /-- The library's own rendering, as the lines the binary should have printed. -/
 def rendered (banner : String) (ls : List String) : List String :=
   (banner :: ls).flatMap fun l => (l.splitOn "\n").filter (fun x => !x.isEmpty)
+
+/-- **The session handoff**, as its own function rather than as more of `main`:
+the checks below start the binary eleven times, and a `do` block that long is one
+the elaborator declines to read (`maximum recursion depth`). The grouping is the
+subject's anyway — every line here is about which session a run happens in.
+
+`--session ID` runs the workflow inside a session this client did not open. The
+stub replays a canned transcript before answering the load, adopts the id it was
+given, and then answers `-32602` to a prompt naming any other session, so a run
+that bills its three consultations is a run that drained the replay and went on
+in the loaded session — which is the whole of what a handoff is. -/
+def sessionHandoff : IO Unit := do
+  let handedOff ← cli ["run", helloPath, "--session", "handoff-0001", "--quiet"]
+  check "a --session run exits 0" "0" (toString handedOff.code)
+  checkTrue "…and bills the three consultations, so it prompted the session it loaded"
+    (handedOff.out.any fun l => (l.splitOn "agent-cat: 3 consultations").length > 1)
+  -- The hazard, where the operator is looking. Nothing in this process can
+  -- detect a second writer, so saying so is the whole of the mitigation.
+  let handedLoud ← cli ["run", helloPath, "--session", "handoff-0001"]
+  check "…and a loud one exits 0 too" "0" (toString handedLoud.code)
+  checkTrue "…and its header says the session is continued in place, and what to do first"
+    (handedLoud.out.any fun l =>
+      (l.splitOn "session: continuing handoff-0001 in place").length > 1
+        && (l.splitOn "close its interactive owner first").length > 1
+        && (l.splitOn "cannot detect a second writer").length > 1)
+
+  -- A fork runs in a copy: the original transcript is read and never written,
+  -- which is the variant with no hazard — and the header says that instead.
+  let forked ← cli ["run", helloPath, "--session", "handoff-0001", "--fork-session"]
+  check "a --fork-session run exits 0" "0" (toString forked.code)
+  checkTrue "…and its header says the original is read and never written"
+    (forked.out.any fun l =>
+      (l.splitOn "session: forking handoff-0001").length > 1
+        && (l.splitOn "read, never written").length > 1)
+  checkTrue "…and it bills the same three consultations in the fork"
+    (forked.out.any fun l => (l.splitOn "agent-cat: 3 consultations").length > 1)
+
+  -- The three refusals. An adapter that never advertised the call is refused
+  -- before a prompt is sent, naming the adapter as the command line named it
+  -- and the flag to drop; a fork with nothing to fork never starts an adapter
+  -- at all.
+  let noLoad ← cli ["run", helloPath, "--session", "handoff-0001",
+                    "--adapter-arg", "--no-load-session"]
+  check "--session against an adapter without loadSession exits 1" "1" (toString noLoad.code)
+  check "…with the diagnosis naming the adapter and the flag, byte for byte"
+    "agent-cat: acp: adapter stub does not advertise loadSession; run without --session\n"
+    noLoad.err
+  let noFork ← cli ["run", helloPath, "--session", "handoff-0001", "--fork-session",
+                    "--adapter-arg", "--no-fork-session"]
+  check "--fork-session against an adapter without session/fork exits 1" "1"
+    (toString noFork.code)
+  check "…and its diagnosis names that call and that flag"
+    "agent-cat: acp: adapter stub does not advertise session/fork; run without --fork-session\n"
+    noFork.err
+  let bareFork ← cli ["run", helloPath, "--fork-session"]
+  check "--fork-session with no --session is refused" "1" (toString bareFork.code)
+  checkTrue "…saying what is missing rather than forking nothing"
+    ((bareFork.err.splitOn "--fork-session needs a session to fork").length > 1)
+  -- …and a run option handed to `plan` is a mistake here as everywhere else:
+  -- which session a run happens in is nothing a rendering can be about.
+  let planSession ← cli ["plan", helloPath, "--session", "handoff-0001"]
+  check "plan takes no --session" "1" (toString planSession.code)
 
 def main : IO UInt32 := do
   IO.println "cli smoke: the three subcommands, against the library and against the stub"
@@ -394,6 +468,8 @@ def main : IO UInt32 := do
       ((wrote.err.splitOn "the workspace changed: parse.c").length > 1)
     checkTrue "…and the run's own checks are not what failed"
       (wrote.out.all fun l => (l.splitOn "FAIL").length == 1)
+
+    sessionHandoff
 
     IO.println "cli smoke: all checks passed"
     return (0 : UInt32)
