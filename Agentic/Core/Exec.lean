@@ -1000,7 +1000,15 @@ structure Settings where
   table, not the agent's memory, is where this runtime keeps what was said
   (`Dlg.execM`). A fresh session is the closest a real adapter comes to that
   discipline, and it is stated as a setting because it is a *policy*, not a
-  theorem: nothing here can force an agent to forget. -/
+  theorem: nothing here can force an agent to forget.
+
+  **It is the alternative to a handoff, and not a companion to one.** A run
+  configured with `Acp.Config.session := .load id` is *inside* somebody else's
+  transcript on purpose (`agent-cat run --session`), and opening a new session
+  before each question would throw that transcript away at the first question. So
+  a caller sets one or the other: the handoff buys context and continuity in the
+  session an operator is watching, and what it gives up is exactly this
+  approximation. `cli/AgentCat.lean` makes the choice where the flags are read. -/
   freshSessionPerQuestion : Bool := false
   /-- Which questions may write: what a `session/request_permission` arriving
   during a question is answered with.
@@ -1209,25 +1217,53 @@ theorem requiresCompletedTurn_eq_false {c : Code} {a : Addressee} (hc : c ≠ .a
     (ha : ∀ id, a ≠ .person id) : requiresCompletedTurn c a = false := by
   cases a <;> cases c <;> simp_all [requiresCompletedTurn]
 
-/-- Put one question and return the whole turn — over the transport, or to the
-keyboard when the addressee is a person and the runtime was told a person is
-there.
+/-- `[[toKeyboard st a]]` = does a question addressed to `a` go to the person at
+*this process's* keyboard rather than out over a transport?
 
-**This is `askHuman`'s routing rule**, and it is one `match`: a
-`Addressee.person` question goes to stdin when `Settings.askPersonOnStdin` is
-set, and otherwise to the adapter, which is what makes an unattended run
-possible (the stub answers for the human) without a second interpreter. A line
-typed at the keyboard is a completed turn by construction: the person pressed
-return, which is the whole of what `end_turn` means here. -/
+**This is `askHuman`'s routing rule**, as a function: a `Addressee.person`
+question goes to stdin when `Settings.askPersonOnStdin` is set, and otherwise to
+the transport, which is what makes an unattended run possible (the stub answers
+for the human) without a second interpreter. Nobody else is ever routed — a
+`model` or a `tool` is not a person however the run was configured.
+
+It is a named function rather than a `let` inside one interpreter because there
+are now **two** transports that must route identically: `Exec.oracle` over an
+`Acp.Conn`, and `Deck.oracle` over a live `agent-deck` session
+(`Agentic/Core/Deck.lean`), where the operator watching the pane *is* the person.
+A routing rule stated twice is a routing rule that will eventually differ.
+`agent-cat --all-to-session` is the command line clearing `askPersonOnStdin` for
+a deck run, so that the person is asked in the pane with everybody else; that is
+a setting, and this is the rule it feeds. -/
+def toKeyboard (st : Settings) (a : Addressee) : Bool :=
+  match a with
+  | .person _ => st.askPersonOnStdin
+  | _ => false
+
+/-- **Clause equation.** A model is never the person at the keyboard. -/
+@[simp] theorem toKeyboard_model (st : Settings) (id : String) :
+    toKeyboard st (.model id) = false := rfl
+
+/-- **Clause equation.** Neither is a tool. -/
+@[simp] theorem toKeyboard_tool (st : Settings) (id : String) :
+    toKeyboard st (.tool id) = false := rfl
+
+/-- **Clause equation.** A person goes to the keyboard exactly when the runtime
+was told there is one there: the setting is the whole of the rule. -/
+@[simp] theorem toKeyboard_person (st : Settings) (id : String) :
+    toKeyboard st (.person id) = st.askPersonOnStdin := rfl
+
+/-- Put one question and return the whole turn — over the transport, or to the
+keyboard when `toKeyboard` says a person is there.
+
+A line typed at the keyboard is a completed turn by construction: the person
+pressed return, which is the whole of what `end_turn` means here. -/
 def sayTurn (st : Settings) (conn : Conn) (c : Code) (q : Q c) (sent : Selected)
     (extra : String) : IO Turn := do
   let text := renderQ c q sent ++ extra
-  match q.addressee with
-  | .person who =>
-      if st.askPersonOnStdin then
-        return { text := ← askPersonStdin who text, stopReason := .endTurn }
-      conn.promptTurn text
-  | _ => conn.promptTurn text
+  match q.addressee, toKeyboard st q.addressee with
+  | .person who, true =>
+      return { text := ← askPersonStdin who text, stopReason := .endTurn }
+  | _, _ => conn.promptTurn text
 
 /-- `[[say st conn c q sent extra]]` = put the question and return the bytes,
 **having first insisted that the bytes are somebody's answer**.
@@ -1269,32 +1305,51 @@ def say (st : Settings) (conn : Conn) (c : Code) (q : Q c) (sent : Selected)
       from one that did."
   return turn.text
 
-/-- `[[attempt st conn c q sent n extra]]` = ask, decode, and on a failure to
+/-! ### The retry discipline, over any transport
+
+`Exec.say` above is *one* way to turn a question into bytes: the ACP connection.
+There is a second — `Deck.say`, an `agent-deck` session driven by its command
+line (`Agentic/Core/Deck.lean`) — and there will be others. What must not be
+duplicated is what happens to the bytes afterwards: which reply is readable, how
+many times an unreadable one is put again, what the nudge says, and that
+exhaustion abandons the run rather than inventing an answer. Those are the trust
+boundary, and they exist once, below, quantified over the transport.
+-/
+
+/-- `[[Say]]` = a transport, reduced to exactly what the retry discipline needs
+of one: put this question with this much appended, and give back the bytes.
+
+Deliberately *not* a class and not a structure: it is a function, so a transport
+is supplied by writing one, and nothing about a transport can be read back by the
+discipline. `fun c q extra => say st conn c q sent extra` is the ACP one. -/
+abbrev Say : Type := (c : Code) → Q c → String → IO String
+
+/-- `[[attemptWith st put c q n extra]]` = ask, decode, and on a failure to
 decode ask again — structurally, `n + 1` attempts in all.
 
 `.ok a` is the answer the trusted base read. `.error reply` is the **last
 unreadable reply, verbatim**: it is returned rather than discarded because it is
 the only evidence the caller has of what was actually said, and the caller's job
 is to report it, never to replace it with an answer of its own. -/
-def attempt (st : Settings) (conn : Conn) (c : Code) (q : Q c) (sent : Selected) :
+def attemptWith (st : Settings) (put : Say) (c : Code) (q : Q c) :
     Nat → String → IO (Except String (El c))
   | 0, extra => do
-      let reply ← say st conn c q sent extra
+      let reply ← put c q extra
       return match Decode c reply with
         | some a => .ok a
         | none => .error reply
   | n + 1, extra => do
-      let reply ← say st conn c q sent extra
+      let reply ← put c q extra
       match Decode c reply with
       | some a => return .ok a
       | none =>
           st.log s!"could not read a {Code.name c} from '{reply.trimAscii.toString}'; re-asking"
-          attempt st conn c q sent n (nudge c reply)
+          attemptWith st put c q n (nudge c reply)
 
-/-- `[[Exec.oracle st conn]]` = the answering service that puts questions to a
-live adapter: select the scope the protocol can express, render, prompt, decode,
-re-ask on a decode failure, and — if every attempt was unreadable — **abandon the
-run** with an `IO.userError` quoting the words that could not be read.
+/-- `[[askDecoding st put c q]]` = the whole of the trusted base's discipline at
+one question: `st.retries + 1` attempts through `put`, and — if every one of them
+was unreadable — **abandon the run** with an `IO.userError` quoting the words that
+could not be read.
 
 **Why exhaustion is an error and not a default** (`acat-qzl`, LOW #4, and the
 repair of it). Every `El c` is inhabited, which is what makes total worlds exist
@@ -1315,17 +1370,9 @@ the run either has an answer somebody gave, or it has no run.
 * Only `.flag` can fail to decode at all (`Decode_eq_none`), so this path is one
   code wide: `.verdict` is total, and *refusal is an answer* — an unreadable
   review reads as objections and never as approval.
-* The *other* way a run is abandoned is one layer down, in `Exec.say`: a turn
-  that did not end in `end_turn` where `Exec.requiresCompletedTurn` says one was
-  needed. The two rules are the same rule at two codes — do not record what did
-  not happen — and they are stated separately because the evidence differs: here
-  the bytes could not be read, there the bytes were never finished.
 * `Settings.retries` says how many times to re-ask first, and each failed
   attempt is logged with the words that failed, so the error is the end of a
   visible sequence rather than a surprise.
-* `Settings.freshSessionPerQuestion` opens a new session first, which is this
-  layer's approximation of "a world is a function of the question" — see the
-  field's own docstring, and note that it is an approximation and not a proof.
 * The error names the code, the addressee, the attempt count, the prompt and the
   last reply — trimmed of surrounding whitespace and otherwise untouched —
   because that reply is the only record of what was said and it is about to be
@@ -1336,6 +1383,40 @@ built, since `StateT Table IO` drops its state on an exception. That is the
 price of refusing to fabricate, and a caller who wants the partial log can catch
 the error at the boundary it chooses.
 
+It takes a `Say` rather than a `Conn` so that **every** transport in this package
+abandons a run in the same words for the same reason: a run against the ACP stub
+and a run against an `agent-deck` session fail identically, because there is one
+function here and not two. -/
+def askDecoding (st : Settings) (put : Say) (c : Code) (q : Q c) : IO (El c) := do
+  match ← attemptWith st put c q st.retries "" with
+  | .ok a => return a
+  | .error reply =>
+      throw <| IO.userError s!"no readable {Code.name c} from \
+        {Addressee.render q.addressee} after {st.retries + 1} attempts; \
+        last reply: '{reply.trimAscii.toString}' (prompt: '{q.prompt}'). \
+        The run is abandoned: recording an answer nobody gave would be \
+        indistinguishable, in the table, from one they did."
+
+/-- `[[Exec.oracle st conn]]` = the answering service that puts questions to a
+live adapter: select the scope the protocol can express, then hand the question
+to `askDecoding`, which renders it, prompts, decodes, re-asks on a decode
+failure, and abandons the run if every attempt was unreadable.
+
+Two things are this function's own, and everything else it does is
+`askDecoding`'s:
+
+* **the scope calls**, made once per question and not once per attempt, because
+  a re-ask is the same question put again and not a different mode;
+* **`Settings.freshSessionPerQuestion`**, which opens a new session first — this
+  layer's approximation of "a world is a function of the question"; see the
+  field's own docstring, and note that it is an approximation and not a proof.
+
+The *other* way a run is abandoned is one layer down, in `Exec.say`: a turn that
+did not end in `end_turn` where `Exec.requiresCompletedTurn` says one was needed.
+That rule and `askDecoding`'s are the same rule at two codes — do not record what
+did not happen — and they are stated separately because the evidence differs:
+there the bytes could not be read, here the bytes were never finished.
+
 Note what this function is *not*: it is not proved to do anything. It is an
 `Oracle IO`, the argument the theorems above quantify over, and an adapter that
 lies through it merely exhibits a different world. What is ruled out here is not
@@ -1345,20 +1426,12 @@ def oracle (st : Settings) (conn : Conn) : Oracle IO := fun c q _ => do
   -- A question the keyboard answers needs neither a session nor a scope call:
   -- the person is not the adapter, and telling the adapter about a mode it will
   -- not be asked anything under is a round trip that buys nothing.
-  let toKeyboard := match q.addressee with
-    | .person _ => st.askPersonOnStdin
-    | _ => false
-  let sent ← if toKeyboard then pure ({} : Selected) else do
+  let sent ← if toKeyboard st q.addressee then pure ({} : Selected) else do
     if st.freshSessionPerQuestion then discard <| conn.newSession
     selectScope st conn q
-  match ← attempt st conn c q sent st.retries "" with
-  | .ok a => return a
-  | .error reply =>
-      throw <| IO.userError s!"no readable {Code.name c} from \
-        {Addressee.render q.addressee} after {st.retries + 1} attempts; \
-        last reply: '{reply.trimAscii.toString}' (prompt: '{q.prompt}'). \
-        The run is abandoned: recording an answer nobody gave would be \
-        indistinguishable, in the table, from one they did."
+  -- `sent` is this question's, and `attemptWith` puts this question and no
+  -- other, so the closure's arguments are always the `c` and `q` above.
+  askDecoding st (fun c q extra => say st conn c q sent extra) c q
 
 end Exec
 

@@ -1,6 +1,6 @@
 name = "agentic"
 version = "0.1.0"
-defaultTargets = ["Agentic", "Pollution", "HardenPatch", "acp_smoke", "exec_smoke", "harden_demo", "dsl_smoke", "workflow_mcp", "mcp_smoke", "mcp_client_smoke", "agent-cat", "cli_smoke", "conformance-oracle"]
+defaultTargets = ["Agentic", "Pollution", "HardenPatch", "acp_smoke", "exec_smoke", "deck_smoke", "harden_demo", "dsl_smoke", "workflow_mcp", "mcp_smoke", "mcp_client_smoke", "agent-cat", "cli_smoke", "conformance-oracle"]
 
 # The root module and every `Agentic/Core/*` module. The glob is explicit
 # because the runtime stratum is deliberately NOT imported by the root:
@@ -199,6 +199,27 @@ root = "CorpusGen"
 [[lean_lib]]
 name = "DslCases"
 srcDir = "test"
+
+# The deck engine's test (test/DeckSmoke.lean): `lake exe deck_smoke`, from the
+# repository root. It drives `Agentic/Core/Deck.lean` — the *other* transport,
+# which reaches an agent by shelling out to `agent-deck` rather than by owning a
+# pipe — against `haskell/test/stub-deck.sh`, the same fake `haskell/ci/deck.sh`
+# runs against the Haskell implementation of the same transport. One fixture for
+# two implementations is the point: two fakes would let the two agree with their
+# own fake and not with `agent-deck`. The scenarios are the poll loop, the
+# staleness guard, the re-ask and the four named transport failures, plus the
+# memo table observed from *outside* the process as the gap between the ask nodes
+# a run walked and the messages the session was sent — and then the command line
+# twice, to pin the routing rule (`--all-to-session`) as a difference in that same
+# count. In defaultTargets for the reason the other smoke tests are: building it
+# keeps a test of the engine compiling with it; running it is the separate,
+# explicit step that spawns the fake. It imports `Agentic.Core.Deck` and *not*
+# `Agentic.Core.DslFlagship`, so it builds in seconds; the flagship it runs
+# through the command line is a file path and not an import.
+[[lean_exe]]
+name = "deck_smoke"
+srcDir = "test"
+root = "DeckSmoke"
 
 # The command line's test (test/CliSmoke.lean): `lake exe cli_smoke`, from the
 # repository root. It drives the built `agent-cat` binary over both example

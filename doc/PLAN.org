@@ -816,15 +816,17 @@ alexey pass, high. Check.lean:422-423 is the only place the approve/object/decli
 
 From acat-ubt: non-commutative K forcing non-commutative conv is shown at one carrier only; the generic converse needs (1:S) != 0 (no Nontrivial-style class exists) + delta injectivity, then conv_comm iff CMonoid K.
 
-* TODO [#C] ACP: attach a run to an existing/live session — session/load client support and whatever the protocol allows
+* DONE [#C] ACP: attach a run to an existing/live session — session/load client support and whatever the protocol allows
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-acp-live-session-99n
 :LABELS:   []
 :ISSUE_TYPE: feature
 :CREATED:  [2026-08-15 Sat 20:27]
-:MODIFIED: [2026-08-17 Mon 18:41]
+:MODIFIED: [2026-08-17 Mon 18:46]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-17 Mon 18:46]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -878,6 +880,13 @@ Scope once research lands: at minimum, client-side session/load (capability-gate
     "author": "johnw",
     "text": "INCIDENT during implementation (2026-08-17 ~16:00 local): 82 tracked files were deleted from the working tree by an unidentified process - test/DslCases.lean, conformance/{Conformance,ConformanceOracle}.lean, doc/research/dsl-redesign/connection.md, and 78 of 128 test/corpus entries. Detected by the 99n implementer (its lake build failed on missing registered sources); no rm/destructive command found in any active workflow transcript; suspects include unrelated peer sessions on this machine. All restored via git checkout from HEAD - nothing was lost (every file was committed). Corpus verified back at 128. Note for the future: the corpus shasum check in verify phases is what bounds this class of damage; consider a pre-commit corpus-count guard.",
     "created_at": "2026-08-18T01:41:58Z"
+  },
+  {
+    "id": 118,
+    "issue_id": "acat-acp-live-session-99n",
+    "author": "johnw",
+    "text": "Implemented and committed (15afa33). Capabilities read at initialize (loadSession + session/fork + raw object); Conn.loadSession with lenient replay drain (image-chunk negative control) and the answering flag so replay cannot become an answer; Conn.forkSession returning the new id; agent-cat run --session (continue in place, two-writers hazard stated in seven places incl. the run header) and --fork-session (the no-hazard variant, ~20 lines once capabilities existed); --session disables freshSessionPerQuestion with the trade stated at the setting. Stub serves load/fork with negative-control modes; acp_smoke +13 checks (43 total); cli_smoke pins the three refusals and both run headers byte-for-byte. All gates green; corpus untouched at 128.",
+    "created_at": "2026-08-18T01:46:59Z"
   }
 ]
 #+end_src

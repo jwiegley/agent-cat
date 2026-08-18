@@ -151,6 +151,14 @@ continuing it**, and prefer `session/fork` when the original must stay live.
 `Conn.loadSession` says so again where a caller reads it, and `agent-cat run
 --session` says so a third time to the person who typed the flag, because the
 one place the fact can still do any good is before the command runs.
+
+**Never `session/load` a thread whose TUI is live**, and when one must be reached
+anyway, this file is the wrong door: `Agentic/Core/Deck.lean` sends into a live
+session through `agent-deck`, which owns the pane and arbitrates between its
+writers. One writer per rollout — the deck's `send` is the safe path to a live
+session, and `session/load` is the safe path only to a session nobody is
+watching. That is the whole division of labour between the two transports, and
+it is stated on both sides of it.
 * **Ids.** The agent's own request ids are small integers from a counter that
   starts at `0` — the same numbers ours start at. They cannot be confused,
   because `Msg.ofLine` splits on the presence of `method` before it looks at
@@ -238,8 +246,16 @@ theorem Adapter.ofName_name (s : String) : (Adapter.ofName s).name = s := by
   · next h => exact (eq_of_beq h).symm
   rfl
 
-/-- The first entry of `PATH` holding a non-directory of this name, if any. -/
-private def searchPath (name : String) : IO (Option String) := do
+/-- The first entry of `PATH` holding a non-directory of this name, if any.
+
+Not `private`, because it is not about adapters: `Agentic/Core/Deck.lean` resolves
+the `agent-deck` executable with it for the same reason `Adapter.resolve` resolves
+an adapter with it — a program that is not there must be an error naming the
+program and the place looked in, and never an `ENOENT` from `spawn` naming
+neither. (On macOS it would not even be that: `IO.Process.spawn` succeeds and the
+child exits 255, so without this the diagnosis for "the tool is not installed" is
+an exit code.) -/
+def searchPath (name : String) : IO (Option String) := do
   let some path ← IO.getEnv "PATH" | return none
   for dir in path.splitOn ":" do
     if !dir.isEmpty then
@@ -906,12 +922,16 @@ def permissionTool (params : Json) : String :=
 Everything taking a `Conn` lives in the `Conn` namespace, so that a caller
 writes `conn.prompt "…"`. -/
 
-namespace Conn
-
 /-- Poll a task at most `fuel` times, sleeping `pollMs` between looks; `none`
 means it never finished. Structural in `fuel`, which is why this file needs no
-`partial`. -/
-private def awaitTask {α : Type} (t : Task (Except IO.Error α)) (pollMs : Nat) :
+`partial`.
+
+Outside `Conn` and not `private`, because it is not about a connection: it is how
+*any* transport in this package bounds a blocking operation without a `partial`
+loop and without a signal handler. `Agentic/Core/Deck.lean` waits on an
+`agent-deck` subprocess with it, so the two transports time out by one mechanism
+rather than by two spellings of one. -/
+def awaitTask {α : Type} (t : Task (Except IO.Error α)) (pollMs : Nat) :
     Nat → IO (Option α)
   | 0 => pure none
   | n + 1 => do
@@ -922,6 +942,8 @@ private def awaitTask {α : Type} (t : Task (Except IO.Error α)) (pollMs : Nat)
     else
       IO.sleep pollMs.toUInt32
       awaitTask t pollMs n
+
+namespace Conn
 
 /-- Run one blocking pipe operation on a dedicated task, bounded by
 `cfg.readTimeoutMs`, so that a wedged adapter is an error rather than a hung
@@ -1188,7 +1210,12 @@ produce one interleaved rollout and neither is told. **Close the interactive own
 of a session before continuing it**; when the original must stay live, use
 `Conn.forkSession`, which writes a copy. Stated here, in the flag's help and in
 the module header, and enforced nowhere, because nothing in this process is in a
-position to enforce it. -/
+position to enforce it.
+
+**Never call this on a thread whose TUI is live.** A live pane is reached by
+`Agentic/Core/Deck.lean` instead — `agent-deck session send`, which goes through
+the process that owns the pane — and that, not this call, is the safe path to a
+session somebody is watching. -/
 def loadSession (conn : Conn) (sid : String) : IO String := do
   unless (← conn.capabilities).loadSession do
     throw <| IO.userError

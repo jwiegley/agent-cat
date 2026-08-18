@@ -84,6 +84,16 @@ no proof in the package can make a statement about.
   neither call, and `--fork-session` with nothing to fork — are exit codes and
   named diagnoses, checked byte for byte.
 
+* **That the two engines cannot be confused for one another.** `--engine deck`
+  reaches an agent by sending into a live `agent-deck` session
+  (`Agentic/Core/Deck.lean`) instead of by starting an adapter, and the flags that
+  belong to one engine mean nothing to the other. Every such pair is a named
+  refusal here, byte for byte, on the principle `--fork-session` established: a
+  flag that would change nothing must not be accepted as though it had. A
+  *successful* deck run is not here — it needs a fake `agent-deck` on `PATH`, and
+  that is `test/DeckSmoke.lean`'s business — but every way of asking for one
+  wrongly is.
+
 * **That `--define` changes what it says it changes and nothing else.** Two
   statements, and the second is the load-bearing one: overriding a `define` with
   *the same words the program wrote* produces output byte-identical to giving no
@@ -220,6 +230,69 @@ def sessionHandoff : IO Unit := do
   -- which session a run happens in is nothing a rendering can be about.
   let planSession ← cli ["plan", helloPath, "--session", "handoff-0001"]
   check "plan takes no --session" "1" (toString planSession.code)
+
+/-- **The two engines**, and every way of confusing them, refused by name.
+
+None of these starts a process: each is a pair of flags `Options.checked` refuses
+before a program is even read, so the diagnoses are pinned byte for byte and cost
+nothing to check. A deck run that *works* is `test/DeckSmoke.lean`'s, where the
+fake `agent-deck` lives. -/
+def engineFlags : IO Unit := do
+  let unknown ← cli ["run", helloPath, "--engine", "tmux"]
+  check "an engine nobody implements is refused by name" "1" (toString unknown.code)
+  checkTrue "…saying what the two engines are"
+    (unknown.err.startsWith
+      "agent-cat: unknown engine `tmux`: --engine takes `acp` (start an adapter and \
+       speak the protocol to it) or `deck` (send to a live agent-deck session)\n")
+  -- The deck engine is a destination: with nothing to send to there is no run.
+  let bare ← cli ["run", helloPath, "--engine", "deck"]
+  check "--engine deck with no session is refused" "1" (toString bare.code)
+  checkTrue "…naming the flag that is missing and how to find its argument"
+    ((bare.err.splitOn "--engine deck needs the session to send to: give --session ID as \
+                        well (`agent-deck session list` names them)").length > 1)
+  -- …and the flags each engine has that the other has not.
+  let deckFork ← cli ["run", helloPath, "--engine", "deck", "--session", "d1", "--fork-session"]
+  check "--fork-session under --engine deck is refused" "1" (toString deckFork.code)
+  checkTrue "…because the agent-deck command line has no such verb"
+    ((deckFork.err.splitOn "--fork-session is the ACP call session/fork and the agent-deck \
+                            command line has none").length > 1)
+  -- `--adapter` is the same mistake one flag earlier, and the one a caller is
+  -- likeliest to make: naming the agent they think will answer, when the agent
+  -- that answers is whoever is already in the pane. Refused only when given —
+  -- the field's default is `stub`, which is also a word a caller can type, so
+  -- the parser's `adapterGiven` and not the string is what is read here.
+  let deckAdapter ← cli ["run", helloPath, "--engine", "deck", "--session", "d1",
+                         "--adapter", "claude"]
+  check "--adapter under --engine deck is refused" "1" (toString deckAdapter.code)
+  checkTrue "…because the answering agent is the one already in the session"
+    ((deckAdapter.err.splitOn "--adapter names an adapter this run starts, and --engine deck \
+                               starts none: the agent that answers is the one already running \
+                               in the session").length > 1)
+  let deckArg ← cli ["run", helloPath, "--engine", "deck", "--session", "d1",
+                     "--adapter-arg", "--refuse"]
+  check "--adapter-arg under --engine deck is refused" "1" (toString deckArg.code)
+  checkTrue "…because that engine starts no adapter to pass argv to"
+    ((deckArg.err.splitOn "--engine deck starts none: it sends to a session somebody else \
+                           started").length > 1)
+  let acpPoll ← cli ["run", helloPath, "--poll-ms", "20"]
+  check "--poll-ms without --engine deck is refused" "1" (toString acpPoll.code)
+  checkTrue "…as the deck engine's clock"
+    ((acpPoll.err.splitOn "--poll-ms is the deck engine's clock").length > 1)
+  let acpTurn ← cli ["run", helloPath, "--turn-timeout-ms", "800"]
+  check "--turn-timeout-ms without --engine deck is refused" "1" (toString acpTurn.code)
+  checkTrue "…likewise"
+    ((acpTurn.err.splitOn "--turn-timeout-ms is the deck engine's clock").length > 1)
+  let acpAll ← cli ["run", helloPath, "--all-to-session"]
+  check "--all-to-session without --engine deck is refused" "1" (toString acpAll.code)
+  checkTrue "…as that engine's routing switch"
+    ((acpAll.err.splitOn "--all-to-session says where the deck engine puts a person's \
+                          questions").length > 1)
+  -- A clock that silently became zero is worse than one that was refused.
+  let badMs ← cli ["run", helloPath, "--engine", "deck", "--session", "d1", "--poll-ms", "1,000"]
+  check "a millisecond count that is not a number is refused" "1" (toString badMs.code)
+  checkTrue "…quoting the flag and the word"
+    ((badMs.err.splitOn "--poll-ms takes a whole number of milliseconds, and `1,000` is \
+                         not one").length > 1)
 
 def main : IO UInt32 := do
   IO.println "cli smoke: the three subcommands, against the library and against the stub"
@@ -470,6 +543,7 @@ def main : IO UInt32 := do
       (wrote.out.all fun l => (l.splitOn "FAIL").length == 1)
 
     sessionHandoff
+    engineFlags
 
     IO.println "cli smoke: all checks passed"
     return (0 : UInt32)

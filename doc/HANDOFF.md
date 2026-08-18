@@ -346,6 +346,27 @@ never declares. Doing nothing is `{ }`.
   no way for this process to see a second writer — so the operator must close the
   session's interactive owner first; `--fork-session` is the variant that reads
   the original and writes a copy.
+- **`agent-cat run --engine deck --session <deck-id>`** — the answer to the
+  negative half of that verdict. ACP cannot attach to a live session; `agent-deck`
+  can, because it is the control plane that owns the pane. `Agentic/Core/Deck.lean`
+  drives the `agent-deck` command line — `session send`, then `session show`
+  polled until the session is idle, then `session output` — with a **staleness
+  guard** (`send` returns before the agent starts, so the reply's timestamp must
+  differ from the one taken before the send, or the previous turn's text is read
+  as this question's answer), a per-turn budget, and five named failures. It is
+  not an adapter: `Acp.Adapter.ofName` still knows only `stub`, `claude` and
+  `codex`, because a deck session is a conversation to join and not a program to
+  spawn. Decoding, the re-ask and the abandonment are `Exec.askDecoding`, shared
+  with the ACP engine, so the two fail in the same words.
+  **The two `--session`s are opposites and one flag carries both**: `--engine acp
+  --session` must never be aimed at a thread whose TUI is live, and `--engine deck
+  --session` is precisely how such a thread is reached safely. The flag's help
+  text and the run header say so where the operator is looking. `person` questions
+  go to this terminal by default — the operator watching the pane *is* the person
+  — and `--all-to-session` sends them into the pane instead; `--poll-ms` and
+  `--turn-timeout-ms` are the engine's clocks. `test/DeckSmoke.lean` drives it
+  against `haskell/test/stub-deck.sh`, the same fixture `haskell/ci/deck.sh` runs
+  against the Haskell implementation of the same transport.
 - **`workflow_mcp`** — an MCP server. A dialogue is already ask-and-continue, so
   the server holds `(Dlg, Table)` per run and steps it by tool call: the calling
   agent is the oracle.

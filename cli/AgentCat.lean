@@ -1,5 +1,6 @@
 import Agentic.Core.Explain
 import Agentic.Core.Artifact
+import Agentic.Core.Deck
 
 /-!
 # `agent-cat`: run a workflow, price it, or print it
@@ -34,7 +35,16 @@ command line, the scratch directory, the exit protocol, and the checks a run is
 subjected to; each of the latter names the theorem it shadows, exactly as
 `demo/Main.lean` does for the flagship workload.
 
-**Six decisions about the command line, and the reason for each.**
+**Seven decisions about the command line, and the reason for each.**
+
+* **There are two ways to reach an agent, and one flag says which.** `--engine
+  acp` (the default) starts an adapter of its own and speaks the protocol to it
+  (`Agentic/Core/Acp.lean`); `--engine deck` sends to a live `agent-deck` session
+  somebody else started (`Agentic/Core/Deck.lean`). They are not two adapters —
+  `Acp.Adapter.ofName` still knows `stub`, `claude` and `codex` and knows nothing
+  about the deck — because a deck session is not a program to spawn but a
+  conversation to join. The engine is what makes the two reachable from one
+  command line without either pretending to be the other.
 
 * **A run is given something to act on.** `--workspace DIR` copies `DIR`'s
   contents into the run's fresh directory before the first question, and never
@@ -81,6 +91,19 @@ subjected to; each of the latter names the theorem it shadows, exactly as
   session's own directory; and the per-question fresh session is off, because
   continuing a transcript and forgetting it after every question are alternatives
   and a run must be one of them.
+
+* **`--session` is one flag whose meaning is the engine's, and that is a
+  decision, not an oversight.** An ACP session id and an `agent-deck` session id
+  are drawn from different registries and carry opposite advice — never
+  `--engine acp --session` a thread whose TUI is live; *always* `--engine deck
+  --session` such a thread — so a second flag (`--deck-session`) was considered
+  and rejected. The flag answers one question, "which existing session does this
+  run happen in", and the engine already answers "who resolves that id". Two
+  flags would make `--engine acp --deck-session X` expressible, which is nonsense
+  that would then need its own refusal; and a reader would have to know what an
+  engine is before knowing which of two flags to reach for. What one flag costs is
+  that its help text must carry both meanings and both hazards, which it does,
+  under `--engine`, where the reader is already looking.
 
 * **The person is asked at the keyboard only where a person is answering.**
   Against the stub the stub answers every addressee, which is what makes an
@@ -144,7 +167,14 @@ def usage : String :=
    \x20                                    instead; repeatable, and taken literally\n\
    \n\
    run options:\n\
-   \x20 --adapter stub|claude|codex|PATH   the answering program (default: stub)\n\
+   \x20 --engine acp|deck                  how the run reaches an agent (default: acp).\n\
+   \x20                                    acp starts an adapter of its own and speaks the\n\
+   \x20                                    protocol to it; deck sends to a live agent-deck\n\
+   \x20                                    session somebody else started and is watching\n\
+   \x20 --adapter stub|claude|codex|PATH   the answering program (default: stub); --engine\n\
+   \x20                                    acp only, and refused under --engine deck, which\n\
+   \x20                                    starts nothing: there the answering agent is the\n\
+   \x20                                    one already running in the session\n\
    \x20 --adapter-arg ARG                  one argument for the adapter's argv; repeatable.\n\
    \x20                                    `--adapter-arg --refuse` is how the stub is told\n\
    \x20                                    to answer *no* to a person's yes/no question\n\
@@ -153,22 +183,39 @@ def usage : String :=
    \x20 --no-workspace                     start empty, ignoring the `.d` convention\n\
    \x20 --model NAME=REAL                  what a scope's `model \"NAME\"` means to this\n\
    \x20                                    adapter, e.g. `--model deep=opus`; repeatable\n\
-   \x20 --session ID                       run inside an existing agent session instead of\n\
-   \x20                                    a new one: the adapter restores that transcript,\n\
-   \x20                                    replays it, and the run continues in it, so the\n\
-   \x20                                    workflow is afterwards part of that session's own\n\
-   \x20                                    history. Refused, by name, when the adapter does\n\
-   \x20                                    not advertise loadSession.\n\
-   \x20                                    TWO WRITERS: this continues the session IN PLACE\n\
-   \x20                                    and there is no lock — close the session's\n\
-   \x20                                    interactive owner first (agent-cat cannot detect\n\
-   \x20                                    a live writer, and two writers make one\n\
-   \x20                                    interleaved transcript). Pass --scratch DIR to\n\
-   \x20                                    run in the session's own directory.\n\
-   \x20 --fork-session                     with --session, run in a FORK of it: the named\n\
-   \x20                                    transcript is read and never written, so the\n\
-   \x20                                    hazard above does not arise — and the work does\n\
-   \x20                                    not appear in the session being watched\n\
+   \x20 --session ID                       the existing session this run happens in. What an\n\
+   \x20                                    ID names, and the hazard, belong to the engine:\n\
+   \x20                                    · --engine acp — an ACP session id. The adapter\n\
+   \x20                                      restores that transcript, replays it, and the\n\
+   \x20                                      run continues IN PLACE, so the workflow is\n\
+   \x20                                      afterwards part of that session's own history.\n\
+   \x20                                      Refused, by name, when the adapter does not\n\
+   \x20                                      advertise loadSession.\n\
+   \x20                                      TWO WRITERS: there is no lock — close the\n\
+   \x20                                      session's interactive owner first (agent-cat\n\
+   \x20                                      cannot detect a live writer, and two writers\n\
+   \x20                                      make one interleaved transcript). Pass\n\
+   \x20                                      --scratch DIR to run in its own directory.\n\
+   \x20                                    · --engine deck — an agent-deck session id or\n\
+   \x20                                      title (`agent-deck session list`). Questions go\n\
+   \x20                                      through `agent-deck session send`, which is the\n\
+   \x20                                      SAFE way into a session whose pane is live: the\n\
+   \x20                                      deck owns the pane and arbitrates, and this run\n\
+   \x20                                      opens nothing. Never aim --engine acp --session\n\
+   \x20                                      at a thread whose TUI is open; send to it with\n\
+   \x20                                      --engine deck instead.\n\
+   \x20 --fork-session                     with --engine acp --session, run in a FORK of it:\n\
+   \x20                                    the named transcript is read and never written,\n\
+   \x20                                    so the hazard above does not arise — and the work\n\
+   \x20                                    does not appear in the session being watched\n\
+   \x20 --poll-ms N                        --engine deck: how often to ask the session\n\
+   \x20                                    whether it has finished (default 1000)\n\
+   \x20 --turn-timeout-ms N                --engine deck: how long one question may take\n\
+   \x20                                    before it is abandoned by name (default 600000)\n\
+   \x20 --all-to-session                   --engine deck: send `person` questions into the\n\
+   \x20                                    session too. By default they are asked here, on\n\
+   \x20                                    stderr and stdin, because the operator watching\n\
+   \x20                                    the pane IS the person the workflow means\n\
    \x20 --scratch DIR                      run in DIR instead of a fresh mktemp directory\n\
    \x20 --quiet                            print the verdict and what failed, and no more\n\
    \n\
@@ -191,6 +238,29 @@ def splitPair (what : String) (s : String) : Except String (String × String) :=
     if k.isEmpty then .error s!"{what} takes NAME=VALUE, and the name is empty in `{s}`"
     else .ok (k, String.intercalate "=" rest)
 
+/-- `[[Engine]]` = how a run reaches an agent at all.
+
+Two, and they differ in *who owns the process on the other end*. `acp` starts an
+adapter of its own and speaks the protocol to it over a pipe it owns
+(`Agentic/Core/Acp.lean`); `deck` shells out to `agent-deck` to send into a
+session somebody else started and is watching (`Agentic/Core/Deck.lean`). Both
+end at `Exec.askDecoding`, so a run means the same thing either way and fails in
+the same words; what differs is the bytes' route and the hazard. -/
+inductive Engine where
+  /-- Start an ACP adapter and speak the protocol to it. -/
+  | acp
+  /-- Send to a live `agent-deck` session. -/
+  | deck
+  deriving DecidableEq, Repr, Inhabited
+
+/-- `[[Engine.ofName s]]` = the engine that word names, or a refusal naming both
+words rather than a list of what was not matched. -/
+def Engine.ofName : String → Except String Engine
+  | "acp" => .ok .acp
+  | "deck" => .ok .deck
+  | s => .error s!"unknown engine `{s}`: --engine takes `acp` (start an adapter and \
+                   speak the protocol to it) or `deck` (send to a live agent-deck session)"
+
 /-- `[[Options]]` = everything the command line can say about a run.
 
 `defines` is the only field the *loader* reads; the rest describe a run. That is
@@ -198,8 +268,15 @@ why `plan` and `cost` accept `--define` and nothing else — the three subcomman
 must be talking about the same program, and an option that changes the program
 belongs to all three or to none. -/
 structure Options where
-  /-- The answering program: `stub`, a known name, or a path. -/
+  /-- How the run reaches an agent. -/
+  engine : Engine := .acp
+  /-- The answering program: `stub`, a known name, or a path. `--engine acp`
+  only. -/
   adapter : String := "stub"
+  /-- Whether `--adapter` was *given*, as against left at its default. The name
+  alone cannot say: `stub` is both a thing to type and what a silent command line
+  means, and `Options.checked` must refuse only the one that was typed. -/
+  adapterGiven : Bool := false
   /-- Arguments appended to the adapter's argv, in the order given. -/
   adapterArgs : Array String := #[]
   /-- Where the run happens; a fresh directory when absent. -/
@@ -209,22 +286,48 @@ structure Options where
   workspace : WorkspaceChoice := .auto
   /-- What a scope's model name means to this adapter. -/
   modelAliases : List (String × String) := []
-  /-- An existing agent session to run inside, if the caller named one. -/
+  /-- An existing session to run inside, if the caller named one. Which registry
+  the id is drawn from is `engine`'s: an ACP session id, or an `agent-deck`
+  session id or title. -/
   session : Option String := none
   /-- Whether that session is forked rather than continued in place. Meaningless
   without `session`, and `Options.checked` refuses the pair rather than letting a
   flag that changes nothing look as though it did. -/
   forkSession : Bool := false
+  /-- `--engine deck`: milliseconds between two `agent-deck session show` calls;
+  the engine's own default when absent. -/
+  pollMs : Option Nat := none
+  /-- `--engine deck`: milliseconds one question may take; the engine's own
+  default when absent. -/
+  turnTimeoutMs : Option Nat := none
+  /-- `--engine deck`: send `person` questions into the session as well, instead
+  of asking at this terminal. Off by default — the operator watching the pane is
+  the person, and asking them where they already are costs no tokens and cannot
+  be answered by an agent playing their part. -/
+  allToSession : Bool := false
   /-- `define`s the caller replaced, as name and the literal words. -/
   defines : List (String × String) := []
   /-- Print the verdict and the failures, and nothing else. -/
   quiet : Bool := false
 
+/-- `[[readMs what s]]` = a millisecond count read from the command line, or a
+refusal naming the flag and the word. A clock that silently became zero because
+somebody typed `1,000` would make a run that never waits look like a run that
+timed out. -/
+def readMs (what : String) (s : String) : Except String Nat :=
+  match s.toNat? with
+  | some n => .ok n
+  | none => .error s!"{what} takes a whole number of milliseconds, and `{s}` is not one"
+
 /-- The options a `run` was given, or the first thing on the command line that is
 not one. -/
 def parseOptions : List String → Except String Options
   | [] => .ok {}
-  | "--adapter" :: a :: rest => (parseOptions rest).map ({ · with adapter := a })
+  | "--engine" :: e :: rest => do
+      let eng ← Engine.ofName e
+      (parseOptions rest).map ({ · with engine := eng })
+  | "--adapter" :: a :: rest =>
+      (parseOptions rest).map ({ · with adapter := a, adapterGiven := true })
   | "--adapter-arg" :: a :: rest =>
       (parseOptions rest).map (fun o => { o with adapterArgs := #[a] ++ o.adapterArgs })
   | "--scratch" :: d :: rest => (parseOptions rest).map ({ · with scratch := some d })
@@ -235,6 +338,13 @@ def parseOptions : List String → Except String Options
       (parseOptions rest).map (fun o => { o with modelAliases := kv :: o.modelAliases })
   | "--session" :: s :: rest => (parseOptions rest).map ({ · with session := some s })
   | "--fork-session" :: rest => (parseOptions rest).map ({ · with forkSession := true })
+  | "--poll-ms" :: n :: rest => do
+      let ms ← readMs "--poll-ms" n
+      (parseOptions rest).map ({ · with pollMs := some ms })
+  | "--turn-timeout-ms" :: n :: rest => do
+      let ms ← readMs "--turn-timeout-ms" n
+      (parseOptions rest).map ({ · with turnTimeoutMs := some ms })
+  | "--all-to-session" :: rest => (parseOptions rest).map ({ · with allToSession := true })
   | "--define" :: a :: rest => do
       let kv ← splitPair "--define" a
       (parseOptions rest).map (fun o => { o with defines := kv :: o.defines })
@@ -244,14 +354,52 @@ def parseOptions : List String → Except String Options
 /-- `[[o.checked]]` = the options, once the combinations that mean nothing are
 refused.
 
-One rule so far, and it is a rule about a *pair* rather than about either flag,
-which is why it cannot live in `parseOptions`: `--fork-session` says what to do
-with the session `--session` named, so without one there is nothing to fork.
-Ignoring it would leave a caller who meant to continue a session believing they
-had, which is exactly the mistake the two-writers hazard punishes. -/
+Every rule here is about a *pair* of flags, which is why none of them can live in
+`parseOptions`: a parser sees one flag at a time. The principle they share is the
+one `--fork-session` established — **a flag that would change nothing must not be
+accepted as though it had**, because a caller who believed they had continued a
+session, or aimed a run at a deck pane, or set a timeout, and had not, is the
+caller the hazards in this file are about.
+
+* `--fork-session` says what to do with the session `--session` named, so without
+  one there is nothing to fork.
+* `--engine deck` is a *destination*: the deck engine opens nothing and starts
+  nothing, so a run with no session named has nowhere to go.
+* `--fork-session` is `session/fork`, an ACP call. The `agent-deck` command line
+  has no such verb, and forking is the opposite of what the deck engine is for.
+* `--adapter` names a child this run starts, and under `--engine deck` this run
+  starts none: the agent that answers is whichever one is already running in the
+  session, which nothing on this command line can change. Refused only when the
+  flag was *given* (`adapterGiven`), because the field's default is a word a
+  caller can also type and a silent command line has asked for nothing.
+* `--adapter-arg` is argv for a child this run starts, and under `--engine deck`
+  this run starts none.
+* `--poll-ms`, `--turn-timeout-ms` and `--all-to-session` are the deck engine's
+  clocks and its routing switch; the ACP engine's clocks are `Acp.Config`'s and
+  are not on the command line. -/
 def Options.checked (o : Options) : Except String Options :=
+  let deck := o.engine == .deck
   if o.forkSession && o.session.isNone then
     .error "--fork-session needs a session to fork: give --session ID as well"
+  else if deck && o.session.isNone then
+    .error "--engine deck needs the session to send to: give --session ID as well \
+            (`agent-deck session list` names them)"
+  else if deck && o.forkSession then
+    .error "--fork-session is the ACP call session/fork and the agent-deck command line \
+            has none; drop it, or drop --engine deck"
+  else if deck && o.adapterGiven then
+    .error "--adapter names an adapter this run starts, and --engine deck starts none: \
+            the agent that answers is the one already running in the session"
+  else if deck && !o.adapterArgs.isEmpty then
+    .error "--adapter-arg is argv for an adapter this run starts, and --engine deck \
+            starts none: it sends to a session somebody else started"
+  else if !deck && o.pollMs.isSome then
+    .error "--poll-ms is the deck engine's clock: give --engine deck as well"
+  else if !deck && o.turnTimeoutMs.isSome then
+    .error "--turn-timeout-ms is the deck engine's clock: give --engine deck as well"
+  else if !deck && o.allToSession then
+    .error "--all-to-session says where the deck engine puts a person's questions: \
+            give --engine deck as well"
   else .ok o
 
 /-- The `--define`s of a `plan` or `cost`, which take no other option. -/
@@ -424,7 +572,11 @@ out of bytes. It comes from `Dsl.parseAndCheckRaw_level_le`, so a program that
 reached this function has it. -/
 def runCmd (path : String) (p : Plan [] Unit) (h : level p ≤ Level.branch) (o : Options) :
     IO UInt32 := do
-  let stubbed := o.adapter == "stub"
+  -- Whether the *answering program* is the scripted stub: a fact about the ACP
+  -- engine only, because the deck engine starts no program at all. It is what
+  -- decides whether a person is asked at a keyboard and how patient the clocks
+  -- are, so a deck run must not inherit it by accident.
+  let stubbed := o.engine == .acp && o.adapter == "stub"
   -- The child is spawned in the run's own directory, so a relative path to the
   -- stub would no longer name it.
   let stubPath ← if stubbed then (fun q => q.toString) <$> IO.FS.realPath Acp.stubScript
@@ -465,6 +617,15 @@ def runCmd (path : String) (p : Plan [] Unit) (h : level p ≤ Level.branch) (o 
       -- authorized; the per-question policy is `Exec.Settings.permission`, which
       -- `Exec.say` sets before every prompt.
     , permission := .cancel }
+  -- …and, for the other engine, which live session the questions are sent to and
+  -- how patiently. Built for either engine and used by one: `Options.checked` has
+  -- already refused every flag combination that would make this a lie, and the
+  -- engine's own defaults stand where the command line said nothing.
+  let deckBase : Deck.Config := { session := o.session.getD "" }
+  let deckCfg : Deck.Config :=
+    { deckBase with
+      pollMs := o.pollMs.getD deckBase.pollMs
+      turnTimeoutMs := o.turnTimeoutMs.getD deckBase.turnTimeoutMs }
   -- What the run was given, stamped, before the first question is put. The
   -- comparison at the end of the run is against exactly this.
   let before ← fingerprint dir
@@ -475,7 +636,13 @@ def runCmd (path : String) (p : Plan [] Unit) (h : level p ≤ Level.branch) (o 
     { -- Live, a person is asked at the keyboard and the adapter never answers for
       -- them; against the stub the stub answers, which is what makes an
       -- unattended run possible.
-      askPersonOnStdin := !stubbed
+      -- The deck engine's default is the other way round and for a better
+      -- reason: the operator watching the pane *is* the person the workflow
+      -- names, so they are asked here unless `--all-to-session` says to put the
+      -- question into the pane with everybody else's.
+      askPersonOnStdin := match o.engine with
+        | .acp => !stubbed
+        | .deck => !o.allToSession
       -- One session per question, live: a world is a function of the question
       -- (`Agentic/Core/World.lean`), and a session is a memory of the ones before
       -- it. Off when the caller named a session: continuing (or forking) one and
@@ -502,19 +669,36 @@ def runCmd (path : String) (p : Plan [] Unit) (h : level p ≤ Level.branch) (o 
         unless o.quiet do IO.println s!"perm {d.render}" }
   try
     unless o.quiet do
-      let argsShown := String.intercalate " " cfg.args.toList
-      IO.println s!"run: {path} against {o.adapter} {argsShown} (cwd {dir})"
-      -- Which session this run is in, and — when it is somebody else's — the
-      -- hazard, printed where the operator is looking rather than only in the
-      -- help they have already read past.
-      match sessionStart with
-      | .fresh => pure ()
-      | .fork sid =>
-        IO.println s!"session: forking {sid}; the fork takes the questions and the \
-                      original transcript is read, never written"
-      | .load sid =>
-        IO.println s!"session: continuing {sid} in place; close its interactive owner \
-                      first — there is no lock, and agent-cat cannot detect a second writer"
+      -- Which agent this run reaches, and how. Both engines print a `run:` line
+      -- and then say what is true of *their* session; nothing about one engine's
+      -- session is printed for the other, because the hazards are opposite.
+      match o.engine with
+      | .acp =>
+        let argsShown := String.intercalate " " cfg.args.toList
+        IO.println s!"run: {path} against {o.adapter} {argsShown} (cwd {dir})"
+        -- Which session this run is in, and — when it is somebody else's — the
+        -- hazard, printed where the operator is looking rather than only in the
+        -- help they have already read past.
+        match sessionStart with
+        | .fresh => pure ()
+        | .fork sid =>
+          IO.println s!"session: forking {sid}; the fork takes the questions and the \
+                        original transcript is read, never written"
+        | .load sid =>
+          IO.println s!"session: continuing {sid} in place; close its interactive owner \
+                        first — there is no lock, and agent-cat cannot detect a second writer"
+      | .deck =>
+        IO.println s!"run: {path} against the agent-deck session {deckCfg.session} (cwd {dir})"
+        -- The safety fact, at the place the operator is looking. It is the exact
+        -- converse of the `--session` line above, and saying so is the whole of
+        -- what keeps the two `--session` meanings apart in a live terminal.
+        IO.println s!"session: sending to {deckCfg.session} through agent-deck, which owns \
+                      the pane; this is the safe way into a session whose TUI is live, and \
+                      the one --engine acp --session must never be aimed at"
+        IO.println s!"session: {deckCfg.pollMs}ms between polls and {deckCfg.turnTimeoutMs}ms \
+                      for one question; the agent works in the deck session's own directory, \
+                      so the workspace check below observes this run's directory and not \
+                      what the agent wrote"
       -- What the agent can see, named and sized. `Seeded.render_ne_nil`: this
       -- always says something, so an empty directory is a stated fact and not
       -- an omission.
@@ -522,7 +706,9 @@ def runCmd (path : String) (p : Plan [] Unit) (h : level p ≤ Level.branch) (o 
       -- What the analysis quoted, before anything is spent. The check after the
       -- run is against these very numbers.
       for l in Explain.costLines p do IO.println l
-    let res ← execCertifiedIO (st := st) (cfg := cfg) p
+    let res ← match o.engine with
+      | .acp => execCertifiedIO (st := st) (cfg := cfg) p
+      | .deck => Deck.execCertifiedIO (cfg := deckCfg) (st := st) p
     let report :=
       RunReport.of p res.1 res.2.1 res.2.2 (← turns.get).toList (← permissions.get).toList
     unless o.quiet do for l in report.render do IO.println l
