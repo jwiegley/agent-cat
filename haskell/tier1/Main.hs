@@ -3,12 +3,12 @@
 -- Where tier0 replays the frozen corpus through the codec, the guards and the
 -- string layer, tier1 rebuilds nineteen of its /checked/ entries in the
 -- production surface ("Agentic.Builder", see "Cases") and holds the rebuilt
--- program against the oracle on two fronts (@PORTING2-elab.md@ §4.1):
+-- program against the oracle on two fronts:
 --
 -- 1. the __printed Raw__ — @toJSON@ of the builder's 'RawProgram' against the
 --    entry's @request.program@, with every position zeroed on /both/ sides,
 --    because positions are not representable in the builder and are
---    oracle-only throughout this program (§3). The printed program is also
+--    oracle-only throughout this program. The printed program is also
 --    decoded back and re-encoded, so a print that no reader accepts fails here
 --    rather than silently.
 --
@@ -181,7 +181,7 @@ forced fs = do
       | otherwise -> pure ["implementation raised: " <> squash (tshow e)]
 
 -- ---------------------------------------------------------------------------
--- The comparison rules (PORTING2-elab.md §4.1)
+-- The comparison rules (the two fronts of the module header)
 -- ---------------------------------------------------------------------------
 
 checkCase :: NameRule -> Value -> Program -> [Text]
@@ -208,7 +208,7 @@ worldsOf req = case field "worlds" req of
     Error err -> Left ("request.worlds does not decode: " <> squash (T.pack err))
     Success ws -> Right ws
 
--- | §4.1(1): the printed program, positions zeroed on both sides — and a
+-- | Front 1: the printed program, positions zeroed on both sides — and a
 -- round-trip of the print, since the builder is the only writer of Raw that
 -- the codec has not already been proved against.
 --
@@ -245,7 +245,7 @@ programCheck rule expected prog =
   where
     printed = printedValue prog
 
--- | §4.1(2)-(4): the whole reply, assembled by 'observeValue' from the folds,
+-- | Front 2: the whole reply, assembled by 'observeValue' from the folds,
 -- the guards' ask counts and one observation per world.
 replyCheck :: Value -> [WorldSpec] -> Program -> [Text]
 replyCheck reply ws prog

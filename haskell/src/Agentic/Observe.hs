@@ -22,7 +22,8 @@
 -- == What this module deliberately does not do
 --
 -- It does not check that the program stays below the dynamic rung.
--- @costSummary@ is defined only there and below (@PORTING2-core.md@ §6), so a
+-- @costSummary@ is defined only there and below (see
+-- 'Agentic.Plan.costSummary'), so a
 -- reply for a plan at 'Agentic.Plan.Dynamic' would carry a meaningless
 -- summary — but the builder cannot construct such a plan at all, and a caller
 -- that wants to say so plainly rather than trust that fact should test
@@ -122,8 +123,9 @@ printedValue = toJSON . progRawOut
 --
 -- Applied to /both/ sides of a printed-program comparison: the builder has no
 -- way to represent a position and prints @0:0@ everywhere, and @pos@ is
--- oracle-only for this whole program, exactly like @message@ and @excerpt@
--- (@PORTING2-elab.md@ §3). Structural and total, so it cannot mask a
+-- oracle-only for this whole program, exactly like the @message@ and
+-- @excerpt@ of a refusal: all three are functions of written characters, which
+-- this side never has. Structural and total, so it cannot mask a
 -- difference in anything else — it rewrites two named fields and recurses
 -- everywhere, rather than pruning or reordering.
 zeroPosValue :: Value -> Value

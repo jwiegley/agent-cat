@@ -124,7 +124,10 @@ library
 library examples
   import:          settings
   hs-source-dirs:  example
-  exposed-modules: Example.Harden
+  exposed-modules:
+    Example.Harden
+    Example.Isaac
+
   build-depends:   agentic
 
 executable tier0

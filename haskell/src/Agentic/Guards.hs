@@ -2,8 +2,8 @@
 -- Module      : Agentic.Guards
 --
 -- The five term-level guards and the two ask counts, ported from
--- @\/Users\/johnw\/src\/agent-cat\/Agentic\/Core\/Dsl\/Check.lean@ per
--- @PORTING.md@ §4.
+-- @\/Users\/johnw\/src\/agent-cat\/Agentic\/Core\/Dsl\/Check.lean@, which is
+-- the source of record for both.
 --
 -- Two things live here and nothing else:
 --
@@ -15,12 +15,15 @@
 -- The typing judgment is deliberately /not/ ported. Guards fire during Lean's
 -- typed traversal, so a program that is ill-typed earlier in traversal order
 -- refuses as @other@ before a guard is reached, and without the judgment this
--- module cannot tell which came first. The contract (PORTING.md §4.6) is
--- therefore only:
+-- module cannot tell which came first. The whole contract this module is held
+-- to — and all that tier0 enforces — is therefore:
 --
--- * the five guard vectors get their guard (and @vector-003@ its @n = 8193@),
--- * every @checked@ entry gets 'Nothing',
--- * entries refused @other@ are unconstrained.
+-- * the five guard vectors get their guard, one entry per guard:
+--   @vector-000@ 'DupFunction', @vector-003@ 'QuestionBudget' with
+--   @n = 8193@, @vector-004@ 'PanelEmpty', @vector-005@ 'ServedBy',
+--   @battery-110@ 'RevisionBound';
+-- * every @checked@ entry gets 'Nothing' — a false positive there is a bug;
+-- * entries refused @other@ are unconstrained, and tier0 does not look.
 --
 -- The algorithm below was checked mechanically against all 121 corpus entries:
 -- 5\/5 guard vectors, 59\/59 checked entries 'Nothing' with matching counts,

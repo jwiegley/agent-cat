@@ -530,7 +530,7 @@ afterwards to prove nothing was written.
 `.lake/build/bin/conformance-oracle`), the iteration count from `$N` and an
 optional `$SEED`; it **fails loudly** when the binary is missing rather than
 degrading to Tier 0. It never runs `lake build`: the oracle is a build
-artifact of the *spec*, produced when the spec changes, not when the Haskell
+artifact of the *Lean side*, produced when Lean changes, not when the Haskell
 changes. Divergences found live land as ordinary reviewed corpus commits on
 the Lean side, not as bot pushes.
 
@@ -567,15 +567,6 @@ ci/tier0.sh             the PR gate: tier0 + tier1
 ci/deck.sh              the PR gate: the deck transport, seven scenarios
 ci/acp.sh               the PR gate: the ACP transport, twelve scenarios
 ci/tier1.sh             the nightly gate: bisim against the prebuilt oracle
-PORTING.md              week one: the types, the encoding, the guard order,
-                        the string layer, the comparison rules
-PORTING2-core.md        week two: Agentic.Plan and Agentic.World
-PORTING2-elab.md        week two: the elaboration, Agentic.Builder, tier1
-PORTING3-surface.md     week six: the authoring surface — why an indexed block,
-                        what the corpus fixes about it, and what it desugars to.
-                        A design record: the four §2.2-REVISED sections at its
-                        end are the surface as it stands, and they supersede the
-                        sketches and target text of the body
 ```
 
 ## Sources of record
@@ -585,23 +576,18 @@ PORTING3-surface.md     week six: the authoring surface — why an indexed block
   extraction, FFI or a subprocess oracle —
   `doc/research/connection.md`. That
   page is the design of record for this repository.
-* **The port** — [`PORTING.md`](PORTING.md),
-  [`PORTING2-core.md`](PORTING2-core.md),
-  [`PORTING2-elab.md`](PORTING2-elab.md) and
-  [`PORTING3-surface.md`](PORTING3-surface.md), which every module here is
-  written against. The first three are week-one and week-two specs for `Raw`,
-  `Guards`, `Text`, `Plan`, `World` and `Builder`, and they still describe those
-  modules as they are — `caseResult` and `ifFlag` appear there as `Raw` node
-  names and `Builder` combinators, which is what they still are.
-  `PORTING3-surface.md` is a design record that accumulates rulings: only its
-  four `§2.2-REVISED` sections describe the **authoring** surface as it stands,
-  and for that surface the text of record is the live
+* **The port** — the modules themselves. Every rule each one obeys is stated in
+  its own header: the codec in `Agentic.Raw`, the guard order and the contract
+  it is held to in `Agentic.Guards`, the folds in `Agentic.Plan`, the trace and
+  the bills in `Agentic.World`, the elaboration in `Agentic.Builder`, and the
+  comparison rules in `tier0/Main.hs` and `tier1/Main.hs`. For the **authoring**
+  surface the text of record is the live
   [`example/Example/Harden.hs`](example/Example/Harden.hs), quoted above.
 * **The wire format** —
   `doc/conformance-schema.md`.
-* **The arbiter** — `test/corpus/*.json`. Where
-  `PORTING.md` and the corpus disagree, the corpus wins; where `PORTING.md` and
-  the Lean source disagree, Lean wins.
+* **The arbiter** — `test/corpus/*.json`. Where a module here and the corpus
+  disagree, the corpus wins; where the corpus and the Lean source disagree,
+  Lean wins.
 
 Nothing outside `haskell/` is ever edited from here. The Lean side is read,
 and it is obeyed.

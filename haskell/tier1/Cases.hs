@@ -1,15 +1,15 @@
 -- | Tier 1: the rebuilt corpus cases.
 --
 -- Each case below is one /checked/ corpus entry, rebuilt in the combinators of
--- "Agentic.Builder" (@PORTING2-elab.md@ §2.2) and paired with the basename of
+-- "Agentic.Builder" and paired with the basename of
 -- the frozen entry it must reproduce. This module owns nothing but that list:
--- @tier1/Main.hs@ owns every comparison (@PORTING2-elab.md@ §4.1).
+-- @tier1/Main.hs@ owns every comparison.
 --
 -- The surface source of each case is quoted above it, transcribed from the
 -- corpus entry's @request.program@ rather than invented, so that a reading
 -- disagreement shows up as a printed-Raw mismatch and not as a silently
 -- different program. Positions are not transcribed: the builder prints @0:0@
--- everywhere and tier1 zeroes both sides (@PORTING2-elab.md@ §3).
+-- everywhere and tier1 zeroes both sides.
 --
 -- __Worlds are not written here.__ A case is a program; the worlds it is run
 -- against are read from the entry's @request.worlds@ by the runner. That is
@@ -101,13 +101,14 @@ cases =
     ("battery-144-a-statement-call-of-a-procedure.json", battery144),
     ("vector-002-blockasks-graft-at-depth.json", vector002),
     ("battery-121-a-bounded-revision-whose-candidate-is-not-text.json", battery121),
-    -- The thirteenth is §4.2's first "cheap extra": the bound-zero loop, whose
-    -- unroll is the @| 0 =>@ clause and nothing else.
+    -- The thirteenth is the first of two cheap extras beyond the twelve this
+    -- runner was first scoped to: the bound-zero loop, whose unroll is the
+    -- @| 0 =>@ clause and nothing else.
     ("battery-120-a-revision-bounded-at-zero-amendments.json", battery120),
-    -- §4.2's second "cheap extra": the parsed-surface twin of case 11, at
+    -- The second cheap extra: the parsed-surface twin of case 11, at
     -- bound 1 in both loops rather than 2 and 3.
     ("battery-090-a-loop-nested-in-a-settled-arm.json", battery090),
-    -- Two cases beyond the spec's list, added because §4.2's twelve leave the
+    -- Two cases beyond that list, added because those twelve leave the
     -- bottom of the level lattice and the empty term untested. See each note.
     ("battery-137-empty-prompts-and-an-empty-define.json", battery137),
     ("battery-147-a-function-may-answer-a-flag-the-caller-branches.json", battery147),
@@ -234,8 +235,9 @@ semantic002 =
           stop
 
 -- ---------------------------------------------------------------------------
--- 4. semantic-003 — an if on a flag (the entry's name says "loop"; §5 says why
---    that is the corpus's mistake and not this case's)
+-- 4. semantic-003 — an if on a flag (the entry's name says "loop", and the
+--    corpus's own program has none: the flag-carrier loop the name describes
+--    is the one frozen as @battery-121@, which case 12 takes)
 -- ---------------------------------------------------------------------------
 
 -- |
@@ -541,7 +543,7 @@ battery121 =
 -- >   case r { settled x { ask tool "log" "settled {x}" }
 -- >            unsettled { ask tool "log" "unsettled" } } }
 --
--- The spec's first cheap extra (§4.2), and the only shape where the unroll is
+-- The first cheap extra, and the only shape where the unroll is
 -- the @| 0 =>@ clause /as the whole loop/: one check, then a @ret@, with no
 -- per-round @caseB@ and no amendment at all. The amend clause is still
 -- elaborated — it is a clause of the term, not of the trace — but no path
@@ -582,7 +584,7 @@ battery120 =
 -- >     unsettled { stop } }
 -- > }
 --
--- §4.2's second cheap extra, and the parsed-surface twin of 'vector002': the
+-- The second cheap extra, and the parsed-surface twin of 'vector002': the
 -- same nesting at bound 1 in both loops instead of 2 and 3, which is a
 -- different arithmetic on the same unroll — size 33 and 10 paths against 92 and
 -- 27. A graft that replicated the inner loop the wrong number of times could
@@ -621,7 +623,7 @@ battery090 =
 -- >            ask tool "t" "{empty}"
 -- >            ask tool "t" "pre{empty}post" }
 --
--- Beyond §4.2's list, for three things the twelve never reach:
+-- Beyond the twelve, for three things they never reach:
 --
 --   * the __bottom of the level lattice__ — every case above is @pipeline@ or
 --     @branch@, and nothing pins @batch@, which is what a program of nothing
@@ -631,8 +633,8 @@ battery090 =
 --     print as @[]@ and render as @""@ (the expansion contributes no chunk,
 --     rather than an empty @lit@);
 --   * @billMemo@ __strictly below__ @billFresh@ /at receipt/ — 2 against 3.
---     The corpus has only two entries where the bills differ at all
---     (@PORTING2-elab.md@ §5); 'battery117' is the other, and there the
+--     The corpus has only two entries where the bills differ at all;
+--     'battery117' (4 against 3) is the other, and there the
 --     collapsing pair is two @text@ questions distinguished by draw. Here it is
 --     the two empty-prompt receipts to the same tool, which are the same
 --     question in every component of the memo key.
@@ -668,7 +670,7 @@ fnF =
 -- > }
 -- > workflow { stop }
 --
--- Beyond §4.2's list, for the __empty term__: @stop@ alone elaborates to a bare
+-- Beyond the twelve, for the __empty term__: @stop@ alone elaborates to a bare
 -- @ret@, so this is the corpus's only entry at size 1 with @askNodes 0@,
 -- @codes []@ (the empty list, which is not @null@ — a batch program with no
 -- questions), @costSummary (0, 0, 1)@ and an __empty trace__ billing @(0, 0)@.

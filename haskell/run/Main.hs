@@ -106,6 +106,7 @@ import Agentic.Plan
 import Agentic.Raw (codeName)
 import Agentic.World (Trace, billFresh, billMemo)
 import Example.Harden (exampleNames, lookupExample)
+import Example.Isaac (isaacScript)
 
 -- ---------------------------------------------------------------------------
 -- What was asked for
@@ -419,7 +420,11 @@ scriptFor "hello" =
     ("Write a greeting for this, and nothing else:", "Good morning, sunrise."),
     ("Say it:", "DONE")
   ]
-scriptFor _ = []
+-- "Example.Isaac"'s five carry their own table, in their own module, because
+-- its keys /are/ the prompt defines those programs are written from: a key
+-- there is a prefix by construction rather than by proofreading, which is what
+-- a table living beside a program in another file cannot promise.
+scriptFor name = isaacScript name
 
 -- | @stub_adapter.py:100@'s @GUIDE@.
 guideText :: Text

@@ -112,6 +112,7 @@ import Agentic.Workflow
 import qualified Agentic.Workflow.Do as W
 import Data.String (fromString)
 import Data.Text (Text)
+import Example.Isaac (isaacExamples)
 import Prelude
 
 -- ---------------------------------------------------------------------------
@@ -230,11 +231,19 @@ helloProgram = workflow W.do
 -- ---------------------------------------------------------------------------
 
 -- | The named programs, in the order the CLI lists them.
+--
+-- The two walked examples first, because they are the ones tier1 pins against
+-- the frozen corpus and the ones the documentation walks. After them,
+-- "Example.Isaac"'s five — Isaac Shapira's @incite@ workflows written in this
+-- surface, which are an /experiment/ about what the language can express and
+-- not conformance fixtures: nothing pins them, and each carries in its haddock
+-- the places where the original did not fit.
 examples :: [(Text, Program)]
 examples =
   [ ("harden", hardenProgram),
     ("hello", helloProgram)
   ]
+    <> isaacExamples
 
 -- | The keys of 'examples', for a usage message or an error.
 exampleNames :: [Text]

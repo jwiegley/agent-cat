@@ -203,8 +203,7 @@ history holds the rest.
   `doc/design.html` and `doc/walkthrough.html`, which describe the superseded
   `Term` calculus.
 * `doc/conformance-schema.md` — the wire format, and what the corpus pins on each
-  of its three surfaces. `haskell/README.md` and `haskell/PORTING*.md` are the
-  port.
+  of its three surfaces. `haskell/README.md` is the port.
 * `doc/research/connection.md` — the design of record for the connection between
   the two implementations: why reimplementation-plus-conformance rather than
   extraction, FFI or a subprocess oracle, and, in §3, the boundary, the request

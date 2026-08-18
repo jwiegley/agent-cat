@@ -143,8 +143,9 @@ unknownCtor ty tag =
 
 -- | Read a field the way Lean's @getObjValD@ does: a missing key is @null@.
 --
--- For a @Maybe@ field that means a missing key decodes as 'Nothing', which is
--- the liberality §3.1 of the porting spec asks for; for any other field it
+-- For a @Maybe@ field that means a missing key decodes as 'Nothing' — the
+-- codec is liberal on input and strict on output, always emitting the explicit
+-- @null@ the corpus carries; for any other field it
 -- means the field's own parser gets a @null@ and fails there, naming itself.
 (.::) :: (FromJSON a) => Object -> K.Key -> Parser a
 o .:: key = parseJSON (fromMaybe Null (KM.lookup key o)) <?> Key key

@@ -183,8 +183,11 @@ defaultWorldSpec = WorldSpec TEcho (VConst VLitApprove) (FConst True)
 -- (@"echo"@), which is what Lean's derived @ToJson@ emits and what all 63
 -- corpus world blocks contain; on input the one-key object form Lean's
 -- @Json.getTag?@ also admits (@{"echo": {}}@) is accepted too. Every
--- non-nullary constructor of this DSL names all of its arguments, so it takes
--- the named-field object form of @PORTING.md@ §3.1 without exception.
+-- non-nullary constructor of this DSL names all of its arguments, so every one
+-- of them takes Lean's named-field object form,
+-- @{"ctor": {"arg1": …, "argN": …}}@, without exception — including the
+-- one-argument ones. There are no positional arrays anywhere in this
+-- encoding.
 sumJSON :: String -> [(Text, a)] -> (K.Key -> A.Object -> Parser a) -> Value -> Parser a
 sumJSON ty nullaries ctors = \case
   A.String s -> case lookup s nullaries of
@@ -488,8 +491,13 @@ scopeJson s =
 -- | @Conformance.lean:174@ — one event of the reply's @"trace"@ array.
 --
 -- The @code@ field is 'codeName', so a receipt prints as @"receipt"@ and never
--- as @"ack"@: this is the reply-side half of @PORTING.md@ §3.4's trap, the
--- @ack@ spelling being confined to the inside of a @RawProgram@. The @prompt@
+-- as @"ack"@: this is the reply side of the two spellings a 'Code' has on the
+-- wire. The derived constructor names, whose receipt is @"ack"@, are confined
+-- to the inside of a @RawProgram@ (the @ann@, @reviewAnn@ and @result@ fields
+-- and the second component of a @params@ pair); everywhere else — a @string@
+-- request's @code@, a trace event's @code@, the checked reply's @codes@ — the
+-- spelling is 'codeName' \/ @codeOfName@, whose receipt is @"receipt"@. The
+-- @prompt@
 -- is the /evaluated/ words, not the chunk list.
 eventJson :: Event -> Value
 eventJson (Event c q a) =

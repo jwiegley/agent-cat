@@ -20,7 +20,7 @@
 --   this implementation prints it/ and compare the oracle's whole checked
 --   reply against @observeValue@. A __refusal is a failure here__, not a
 --   skip. The builder's types are supposed to make a refusable term
---   unrepresentable (@PORTING2-elab.md@), so a refusal is either a hole in
+--   unrepresentable, so a refusal is either a hole in
 --   that claim or a bug in the printer, and both are findings. Positions
 --   never appear in a checked reply, so nothing is zeroed on this path: the
 --   comparison is of two replies, not of two programs.

@@ -2,9 +2,41 @@
 --
 -- Replays the frozen corpus produced by the Lean oracle
 -- (@test/corpus/*.json@ at the repository root) against this
--- implementation, and reports every divergence. The comparison rules are
--- @PORTING.md@ §6; week one compares the JSON codec, the five term-level
--- guards, the two ask counts and the string layer, and nothing else.
+-- implementation, and reports every divergence. Week one compares the JSON
+-- codec, the five term-level guards, the two ask counts and the string layer,
+-- and nothing else.
+--
+-- == The comparison rules
+--
+-- Each corpus file is @{"name", "request", "reply", "oracleVersion": 1}@, and
+-- the request classifies the entry. Every comparison is on a
+-- 'Data.Aeson.Value', so object key order and number formatting are free; raw
+-- bytes are never compared.
+--
+-- [R1 — a string entry] @request.string@: @'stringOp' op code text@ against
+--   the /whole/ reply value, nothing excluded.
+--
+-- [R2 — every program entry] @request.program@ must decode to a 'RawProgram'
+--   and re-encode to the request's value exactly. A decode failure is a
+--   failure, never a skip.
+--
+-- [R3 — a program refused with one of the five guards] R2, and 'guardCheck'
+--   must name that guard and carry its @n@ (@null@ for four of them, @8193@
+--   for the question budget). @reply.refused.pos@, @.excerpt@ and @.message@
+--   are oracle-only and are never compared.
+--
+-- [R4 — a program refused @other@] R2 and nothing else. These are refused by
+--   the typing judgment, which is not ported, so no refusal field and neither
+--   count is a comparand.
+--
+-- [R5 — a checked program] R2, 'guardCheck' 'Nothing', and 'askCounts' equal
+--   to @reply.blockAsks@ and @reply.fnAsks@ — the latter an /ordered/ list of
+--   @["name", n]@ pairs in table order, not a map. @level@, @size@,
+--   @askNodes@, @codes@, @costSummary@ and @worlds@ need the @Plan@
+--   denotation and belong to tier1; this runner ignores them.
+--
+-- The expected tally is 121 entries: 22 string, and 99 program of which 5 are
+-- guard refusals (one per guard), 35 are @other@, and 59 are checked.
 --
 -- Usage: @tier0 [corpusDir]@, defaulting to
 -- @../test/corpus@ (this executable runs from @haskell/@). Exit status is 0 iff nothing
@@ -51,7 +83,7 @@ import Agentic.Text (stringOp)
 -- Entry classification and results
 -- ---------------------------------------------------------------------------
 
--- | What kind of corpus entry this was, for the tally of PORTING.md §6.6.
+-- | What kind of corpus entry this was, for the tally in the module header.
 data Kind
   = KString    -- ^ @request.string@ (22 expected)
   | KGuard     -- ^ @request.program@, refused with one of the five (5)
@@ -150,7 +182,7 @@ runFile path = do
           | otherwise -> pure r {repFails = ["implementation raised: " <> squash (tshow e)]}
 
 -- ---------------------------------------------------------------------------
--- The comparison rules (PORTING.md §6)
+-- The comparison rules (R1-R5 of the module header)
 -- ---------------------------------------------------------------------------
 
 checkEntry :: Value -> Report
@@ -163,7 +195,7 @@ checkEntry entry =
       | otherwise -> bad KBroken "request has none of string, program, ping"
     _ -> bad KBroken "entry lacks a request or a reply"
 
--- | §6.1 — a string entry compares the whole reply value.
+-- | R1 — a string entry compares the whole reply value.
 checkString :: Value -> Value -> Report
 checkString s reply =
   case (field "op" s >>= asText, field "text" s >>= asText) of
@@ -181,7 +213,7 @@ checkString s reply =
                   <> clip (render actual)
     _ -> bad KString "request.string lacks a textual op or text"
 
--- | §6.2–§6.5 — a program entry always round-trips the codec, and then
+-- | R2–R5 — a program entry always round-trips the codec, and then
 -- compares whatever its reply class licenses.
 checkProgram :: Value -> Value -> Report
 checkProgram pv reply =
@@ -191,7 +223,7 @@ checkProgram pv reply =
   where
     kind = classOf reply
 
-    -- §6.2: re-encoding must reproduce the request's program value exactly.
+    -- R2: re-encoding must reproduce the request's program value exactly.
     codec p = case firstDiff pv (toJSON p) of
       Nothing -> []
       Just d -> ["codec round-trip differs at " <> d]
@@ -199,7 +231,7 @@ checkProgram pv reply =
     semantics p = case kind of
       KGuard -> guardChecks p
       KChecked -> checkedChecks p
-      KOther -> [] -- §6.4: an `other` refusal is codec-only.
+      KOther -> [] -- R4: an `other` refusal is codec-only.
       -- A reply the rules do not classify is a failure, never a quiet pass:
       -- a runner that skips what it does not recognise cannot go red when
       -- the corpus moves under it.
@@ -210,7 +242,7 @@ checkProgram pv reply =
           ]
         Nothing -> ["reply is neither a refusal nor a checked result (no `level`)"]
 
-    -- §6.3: the guard and its n must match; pos/excerpt/message never do.
+    -- R3: the guard and its n must match; pos/excerpt/message never do.
     guardChecks p =
       let expected = do
             r <- field "refused" reply
@@ -221,7 +253,7 @@ checkProgram pv reply =
           | expected /= actual
           ]
 
-    -- §6.5: a checked program raises no guard and its counts must match.
+    -- R5: a checked program raises no guard and its counts must match.
     checkedChecks p =
       let (blockA, fnsA) = askCounts p
           blockE = field "blockAsks" reply >>= asInteger
