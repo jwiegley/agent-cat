@@ -2928,21 +2928,37 @@ From acat-vbl: muExt_indep_of_peak_eq_zero anchors the count semantically only a
 
 Owner 2026-08-13, after the DSL/MCP work: (1) reconstruct the hardenPatch Lean example as a PROGRAM TEXT in the DSL — a file in the repo (examples/harden.wf or similar), not just a string constant in a test; (2) a single executable 'agent-cat' with three subcommands over that file: 'agent-cat run <program>' parses, type-checks, and EXECUTES the plan against a live agent (ACP adapter as in harden_demo; --adapter stub|claude|codex), printing the transcript, bill and certificate; 'agent-cat cost <program>' parses, type-checks and prints the COST analysis without executing — level, shape sequence, cost tree leaves, min/max, and the reachable-bill set where the level permits it, stating plainly when a bound is sound but unattained; 'agent-cat plan <program>' parses, type-checks and PRINTS THE PLAN — a readable rendering of the checked term (structure, questions with addressee/scope, binders, branches, revision bounds), i.e. what the author wrote as the library understands it. All three share one parseAndCheck front end and must report type errors identically with position and message. Exit nonzero on type error. Keep harden_demo working or fold it into 'agent-cat run' with the demo's assertions behind a flag. Depends on the DSL landing (workflow wlkbf4jne).
 
-* TODO [#C] Front-door docs describe a repository two re-derivations old: README and flake.nix
+* DONE [#C] Front-door docs describe a repository two re-derivations old: README and flake.nix
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-tvy
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 19:00]
-:MODIFIED: [2026-08-14 Fri 19:00]
+:MODIFIED: [2026-08-18 Tue 10:44]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-18 Tue 10:44]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
 dead-code pass, medium, two signals each. README.md:13-23 claims 'no Mathlib dependency' while lakefile.toml:34-36 requires mathlib v4.30.0 and 30+ modules import it; README's module table (28-45) ends at the superseded Term/Meaning stratum and names no Agentic/Core module, no DSL, no agent-cat binary, no .wf program. flake.nix:16-20 claims 'there is deliberately no lean-toolchain file' (one exists and HANDOFF documents it as load-bearing) and 'no Mathlib, so nothing needs the network'. Rewrite README around Core + DSL + binaries with the superseded table demoted under a history banner; fix the flake comment.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 122,
+    "issue_id": "acat-tvy",
+    "author": "johnw",
+    "text": "Both halves done: flake.nix comment corrected at a30613b (lean-toolchain exists, Mathlib required); README.md rewritten at HEAD (the Agentic.Term/Meaning era description replaced with the current tree: formalization + flagship, .wf language, CLI with both engines and session handoff, Haskell implementation with the final surface, conformance, build discipline, doc map). Pushed.",
+    "created_at": "2026-08-18T17:44:38Z"
+  }
+]
+#+end_src
 
 * DONE [#D] Mat lacks a zero matrix: matZero with matAdd unit law, comp_zero/zero_comp
 :PROPERTIES:
