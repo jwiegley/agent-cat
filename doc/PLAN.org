@@ -1834,6 +1834,22 @@ work is finished.
 ]
 #+end_src
 
+* TODO [#B] Isaac-review decisions D1-D11: surface calls, panelText, revisingYielding, failure vocabulary, citation regate
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-isaac-decisions-vtt
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-18 Tue 15:55]
+:MODIFIED: [2026-08-18 Tue 15:55]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+doc/research/isaac-workflows.md §6 holds ten yes/no decisions from the incite/agent-functor expressibility review (commit 7b0edd9), awaiting owner answers. Recommended-first: D1 expose function/callStmt/callV through Agentic.Workflow (zero oracle exposure, mitigates G1 rejoin, closes G2 sub-flow); D2 panelText; D3 revisingYielding; D5 exit-code policy in writing; D6 agent-functor failure vocabulary as Exec policy; D9 unpinned-ask guard; D10 cost/plan regression pin over the five Isaac examples. D11 is a DEFECT, not a decision: the .wf retirement left 57/220 Lean line citations in haskell/ stale (Exec.lean/Explain.lean resized) - re-derive and gate them.
+
 * DONE [#C] Shortest-list 7: newtype the polluted carriers; one join-as-monoid synonym
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
