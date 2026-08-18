@@ -75,7 +75,7 @@ and only if nothing failed, so both are usable directly as CI gates.
 | `Agentic.World` | `WorldSpec` and `toWorld`, the `trace` of a plan through a world, the fresh and memo bills, and the oracle's event JSON |
 | `Agentic.Builder` | the production surface: typed combinators that both print a `RawProgram` and elaborate to the `Plan` the Lean checker elaborates the same construct to |
 | `Agentic.WF` | the `[wf\|…\|]` prompt quoter — prose with `{name}` holes, laid out as the `.wf` fence lays it out and chunked as Lean's `Prompt.normalize` chunks it — and `Says`, which decides whether a hole is a binding or a `define` |
-| `Agentic.Workflow` (+ `.Do`) | the **authoring** surface: an indexed block, written in ordinary Haskell under `W.do`, in which a bind is a Haskell bind, a branch on a revision's result is a Haskell `case` and a branch on a flag is a Haskell `if`. The `case` is real pattern matching on the exported data type `Outcome`, which the revision's bind forks into; the `if` is Haskell's, reaching the exported `ifThenElse` because the **authoring module** enables `RebindableSyntax` — which costs that module its implicit `Prelude` (import it, and `Data.String (fromString)` beside it under `OverloadedStrings`) and costs a `W.do` block nothing, `QualifiedDo` and `RebindableSyntax` rebinding disjoint syntax. The library itself enables neither. `ifFlag` stays exported as the combinator the `if` compiles to, and the `case` compiles to `Agentic.Builder`'s `revisingCase`, which `revising` applies; `caseVerdict` stays a combinator here, a verdict being a value that may be acted past. It carries no names at the type level — a library cannot read a Haskell binder — so it generates the name each binding prints from that binding's depth, `named` overrides one, and a `{hole}` prints the name its handle carries |
+| `Agentic.Workflow` (+ `.Do`) | the **authoring** surface: an indexed block, written in ordinary Haskell under `W.do`, in which a bind is a Haskell bind, a branch on a revision's result is a Haskell `case` and a branch on a flag is a Haskell `if`. The `case` is real pattern matching on the exported data type `Outcome`, which the revision's bind forks into; the `if` is Haskell's, reaching the exported `ifThenElse` because the **authoring module** enables `RebindableSyntax` — which costs that module its implicit `Prelude` (import it, and `Data.String (fromString)` beside it under `OverloadedStrings`) and costs a `W.do` block nothing, `QualifiedDo` and `RebindableSyntax` rebinding disjoint syntax. The library itself enables neither. `ifFlag` stays exported as the combinator the `if` compiles to, and `when`/`unless` are that same `if` with only one arm to say — terminal, sealing the body with the implicit `stop` an arm block's end is, and printing the identical `ifFlag` node with an empty other arm; the `case` compiles to `Agentic.Builder`'s `revisingCase`, which `revising` applies; `caseVerdict` stays a combinator here, a verdict being a value that may be acted past. It carries no names at the type level — a library cannot read a Haskell binder — so it generates the name each binding prints from that binding's depth, `named` overrides one, and a `{hole}` prints the name its handle carries |
 | `Agentic.Gen`, `Agentic.Observe`, `Agentic.Oracle` | the bisimulation surface: generators, the reply assembly both runners share, and the line-delimited JSON client for the Lean oracle subprocess |
 | `Agentic.Exec` | the interpreter in `IO` — the memoizing fold of `Exec.lean`'s `Dlg.execM`, its decode/re-ask loop, and the scripted answering service |
 | `Agentic.AgentDeck` | one live `agent-deck` session as an answering service: the three CLI commands, the poll loop, the staleness guard and five named transport failures |
@@ -166,14 +166,11 @@ hardenProgram = workflow W.do
             {patch}
             {flagSpec}|]
 
-        if ok
-          then W.do
-            act (tool "apply") [wf|
-                Apply:
-                {patch}
-                Write the patched file here, then reply DONE.|]
-            stop
-          else stop
+        when ok $ W.do
+          act (tool "apply") [wf|
+              Apply:
+              {patch}
+              Write the patched file here, then reply DONE.|]
       Unsettled -> stop
 ```
 
@@ -200,7 +197,20 @@ can also write, by writing it twice, and one the oracle accepts and observes
 exactly as `Agentic.Observe` does (checked on an `act`, a `known here`, a bind
 and a second revision).
 
-`if ok then … else …` is a regular `if`, which reaches `ifThenElse` because the
+`when ok $ W.do …` is the flag's branch with only one arm to say: it is
+`ifThenElse` with both terminals supplied — the body sealed by the `stop` that
+a `.wf` arm block's closing brace is, and the empty block for the other arm —
+and it prints the very same `ifFlag` node the two-armed spelling prints, `else
+{ }` and all. **It is terminal**, and deliberately not `Control.Monad`'s
+continuing `when`: every branching in this language is terminal, each arm being
+the rest of the workflow, so a continuing `when` would have to duplicate the
+statements after it into both printed arms. Nothing follows a `when`, and a
+statement that tries is the same `nothing follows a terminal` error a statement
+after `stop` is. `unless` is the same with the arms exchanged — the flag is not
+negated, because neither the `Raw` nor the `Plan` has a negation to reach for.
+
+With two arms to say, an author writes `if ok then … else …`, a regular `if`,
+which reaches `ifThenElse` because the
 authoring module enables `RebindableSyntax` — hence its explicit `import
 Prelude` and the `Data.String (fromString)` beside it that `OverloadedStrings`
 then needs by name. A flag forks at the `if` and **not** at its bind, because a

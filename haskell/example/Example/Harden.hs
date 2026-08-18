@@ -34,10 +34,22 @@
 -- @revising draft as patch@ and @settled patch@.
 --
 -- The two branches are Haskell's own. @case result of@ is a regular @case@ on
--- a regular data type, its arms @W.do@ blocks; @if ok then … else …@ is a
--- regular @if@, which reaches 'Agentic.Workflow.ifThenElse' because this
--- module enables @RebindableSyntax@ — hence the explicit @Prelude@ import, and
--- the @fromString@ beside it that @OverloadedStrings@ then needs by name.
+-- a regular data type, its arms @W.do@ blocks; the flag's branch is written
+-- @when ok $ W.do …@, which is 'Agentic.Workflow.when' — the one-armed @if@,
+-- sealing its body with the @stop@ that the @.wf@ arm block's closing brace is
+-- and printing the very same @ifFlag@ node, whose else arm is empty. The @.wf@
+-- spells it @if ok { act … } else { }@ and this spells it in one arm, because
+-- an author who has nothing to say in the other arm should not have to write
+-- it twice.
+--
+-- Nothing follows a @when@: it is a terminal, like the @if@ it sugars, so it
+-- ends the block exactly as the @stop@ it replaced did.
+--
+-- This module still enables @RebindableSyntax@ — hence the explicit @Prelude@
+-- import, and the @fromString@ beside it that @OverloadedStrings@ then needs
+-- by name — because that is what an authoring module is: write @if ok then …
+-- else …@ here, with two arms to say, and it reaches
+-- 'Agentic.Workflow.ifThenElse' rather than @Prelude@'s @Bool@.
 --
 -- == The names this prints are not these names
 --
@@ -170,14 +182,11 @@ hardenProgram = workflow W.do
             {patch}
             {flagSpec}|]
 
-        if ok
-          then W.do
-            act (tool "apply") [wf|
-                Apply:
-                {patch}
-                Write the patched file here, then reply DONE.|]
-            stop
-          else stop
+        when ok $ W.do
+          act (tool "apply") [wf|
+              Apply:
+              {patch}
+              Write the patched file here, then reply DONE.|]
       Unsettled -> stop
 
 -- ---------------------------------------------------------------------------

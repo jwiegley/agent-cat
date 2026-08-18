@@ -1877,3 +1877,129 @@ prints the same `Raw` it printed before, `case result` and `if` included);
 exit 0; `agentic-run run hello --scripted` → 3 events, `billFresh 3`,
 `billMemo 3`, exit 0. Plus the out-of-band oracle agreement above, on a fork
 whose unsettled arm the flagship does not exercise.
+
+## 2.2-REVISED-4 — the fourth ruling: a one-armed `if` is a `when`, and it is terminal
+
+*(Appended after the landing of §2.2-REVISED-3. It revises the flagship's tail
+as that section prints it; everything else in this document, including all of
+§2.2-REVISED-3, stands.)*
+
+### The ruling
+
+The owner, on the landed flagship:
+
+> change
+>
+> ```haskell
+> if ok
+>   then W.do
+>     act (tool "apply") [wf|…|]
+>     stop
+>   else stop
+> ```
+>
+> into
+>
+> ```haskell
+> when ok $ W.do
+>   act (tool "apply") [wf|…|]
+> ```
+
+That is now what `Example.Harden` and the README fragment read.
+
+### A terminal `when`, and why it cannot be `Control.Monad`'s
+
+`Control.Monad.when` *continues*: `when b m >> rest` runs `rest` either way.
+That shape has no meaning here. This language's branchings are terminal — a
+`.wf` arm block runs to a terminal and each arm **is** the rest of the
+workflow — so there is no continuation for two arms to share. A continuing
+`when` could only be built by taking the statements after it and printing them
+**twice**, once in each arm: the program a reader met would not be the program
+the author wrote, and a long tail after a short `when` would print at double
+length. (That is precisely the duplication `Step (Loop c s)` is *allowed* to do
+at a revision's bind, and allowed only because Lean's adjacency rule proves the
+duplicated prefix is empty — §2.2-REVISED-3. No such rule protects an `if`: a
+flag may be bound, acted past, and branched on many statements later.)
+
+So `when` seals its body with the implicit `stop` a `.wf` arm block's closing
+brace already is, and its result type is the terminal:
+
+```haskell
+when ::
+  forall h s s' j.
+  KnownIx h s =>
+  V h 'CodeFlag ->
+  W ('Open s) ('Open s') () ->
+  W ('Open s) j Term
+when v body = ifThenElse v (thenW body stop) stop
+
+unless ::
+  forall h s s' j.
+  KnownIx h s =>
+  V h 'CodeFlag ->
+  W ('Open s) ('Open s') () ->
+  W ('Open s) j Term
+unless v body = ifThenElse v stop (thenW body stop)
+```
+
+Three things fall out of those types rather than being stated:
+
+* **Nothing follows a `when`.** The result is `W ('Open s) j Term`, so a
+  statement after it hits the existing `NoFollow Term` — *nothing follows a
+  terminal: `stop`, `if` and `case` end a block* — which is the same error a
+  statement after `stop` or after an `if` already gets. No new refusal was
+  written.
+* **The body is an arm block minus its terminal.** It is unit-valued and
+  open-to-open — `W ('Open s) ('Open s') ()` — so acts, binds and `known here`
+  stand in it, and a body that ends in `stop`, an `if` or a `case` does not
+  typecheck: that block is already whole and belongs to the `if` this sugars.
+  The outgoing scope `s'` is free precisely because a body may bind.
+* **It is sugar over sugar.** `when` is `ifThenElse` — the very function the
+  `if` reaches — with both terminals supplied, and `thenW` is the block's own
+  sequencing. Nothing new reaches `Agentic.Builder`.
+
+### `unless` swaps the arms; it does not negate the flag
+
+There is no negation to reach for and none was invented. `RawIfFlag` branches
+on a flag *binding* and neither the `Raw` nor the elaborated `Plan` has a
+`not` — a `.wf` author writes `if f { } else { … }` — so `unless` is `when`
+with its two arms exchanged: the empty block in the then arm, the sealed body
+in the else arm. What it prints is a program the `.wf` grammar can write by
+hand today.
+
+### Naming
+
+`when` and `unless` are `Control.Monad`'s names, not `Prelude`'s, so neither
+shadows anything an authoring module has in scope (`Example.Harden` imports
+`Prelude` explicitly, `RebindableSyntax` having taken the implicit one, and
+imports no `Control.Monad`). The export list says so where they stand, and both
+docstrings open by saying the sense is terminal.
+
+### The printed `Raw` is unchanged, byte for byte
+
+The claim to check was that `when ok (act …)` prints exactly what
+`if ok then { act …; stop } else stop` printed: `ifFlag` with `x = "b3"`,
+`yes` the act followed by the empty block, and `no` the empty block. It was
+checked two ways, not assumed.
+
+1. **A direct `Value` diff of `progRawOut`.**
+   `Agentic.Observe.zeroPosValue (printedValue hardenProgram)` was encoded to
+   JSON before the edit and again after it, from the same build of the same
+   internal library: **2992 bytes each, `cmp`-identical**. The node reads
+   `"ifFlag": {"no": {"empty": …}, "x": "b3", "yes": {"act": …}}`, which is the
+   two-armed spelling's own printing.
+2. **tier1's own comparison**, which is the standing gate: 21/21, nineteen
+   exact and the two examples up to alpha, so the flagship still agrees with
+   frozen `example-000` on everything a name is not — including which binding
+   the `if`'s scrutinee reads.
+
+No pin was touched, and none needed to be.
+
+### Gates, at this landing
+
+`nix develop path:./. -c cabal build all`, every target, zero warnings at
+`-Wall`; tier0 128/128 (0 failed, 35 codec-only other-refusals), exit 0; tier1
+21/21, exit 0; `agentic-run run harden --scripted` → 7 events, `billFresh 7`,
+`billMemo 7`, exit 0; `agentic-run run hello --scripted` → 3 events,
+`billFresh 3`, `billMemo 3`, exit 0; `agentic-run plan harden` → level
+`branch`, size 36, 19 ask nodes, minFold 5 / maxFold 15 over 9 paths, exit 0.

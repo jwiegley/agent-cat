@@ -48,12 +48,15 @@
 -- >     case result of
 -- >       Settled patch -> W.do
 -- >         ok <- confirm (person "owner") [wf|Apply this?…{patch}|]
--- >         if ok
--- >           then W.do
--- >             act (tool "apply") [wf|Apply: {patch}|]
--- >             stop
--- >           else stop
+-- >         when ok $ W.do
+-- >           act (tool "apply") [wf|Apply: {patch}|]
 -- >       Unsettled -> stop
+--
+-- That @when@ is the two-armed @if@ with both terminals supplied — 'ifThenElse'
+-- with the body sealed by the implicit @stop@ an arm block's end is, and the
+-- empty block for the other arm — and it prints the same @ifFlag@ node. An
+-- author who wants both arms writes Haskell's own @if@, which is what 'when'
+-- is written in.
 --
 -- There is no splice, no bracket and no label: a statement is a statement, a
 -- binder is a Haskell binder, a branch is a @case@ and a @case@ is a @case@.
@@ -164,8 +167,11 @@
 -- GHC has no negative-test harness here, so the refusals are recorded as the
 -- messages they produce. Each is the design and not an accident:
 --
---   * a statement after @stop@, @if@ or @case@ —
+--   * a statement after @stop@, @if@, @when@, @unless@ or @case@ —
 --     @nothing follows a terminal: `stop`, `if` and `case` end a block@;
+--   * a @when@ body that ends in a terminal — @Couldn't match type ‘Term’ with
+--     ‘()’@, because a body is an arm block /minus/ its terminal and 'when'
+--     supplies that;
 --   * a block that does not end in a terminal —
 --     @Couldn't match type ‘()’ with ‘Term’@;
 --   * @served by@ on a tool or a person —
@@ -244,6 +250,11 @@ module Agentic.Workflow
     knownHere,
     ifThenElse,
     ifFlag,
+    -- `when` and `unless` are not Prelude's: they are @Control.Monad@'s, which
+    -- an authoring module does not import, so these two shadow nothing. They
+    -- are also not that `when` — see their docstrings: these are terminal.
+    when,
+    unless,
     caseVerdict,
 
     -- * The bounded revision
@@ -802,6 +813,67 @@ ifFlag v yes no =
     ( \live _ ->
         B.ifFlag @h @s v (runW live yes) (runW live no)
     )
+
+-- | @when ok $ W.do …@ — the one-armed @if@, for the shape an author writes
+-- most often:
+--
+-- > when ok $ W.do
+-- >     act (tool "apply") [wf|Apply: {patch}|]
+--
+-- which is exactly
+--
+-- > if ok
+-- >   then W.do
+-- >     act (tool "apply") [wf|Apply: {patch}|]
+-- >     stop
+-- >   else stop
+--
+-- and prints the very same 'Agentic.Raw.RawIfFlag' — an @ifFlag@ whose else
+-- arm is the empty block, and whose then arm is the body followed by the same
+-- empty block. Nothing is added to the language: this is 'ifThenElse' with
+-- both terminals supplied.
+--
+-- __It is terminal, and that is not Haskell's @when@.__ In this language every
+-- branching is terminal — each arm /is/ the rest of the workflow — so there is
+-- no continuation for the two arms to share. A continuing @when@, the one
+-- @Control.Monad@ exports, would have to take the statements after it and
+-- print them __twice__, once in each arm: the program a reader met would not
+-- be the program the author wrote, and a long tail after a short @when@ would
+-- print at double length. So this one seals its body with the implicit @stop@
+-- that a @.wf@ arm block's closing brace is, and its result type is the
+-- terminal: a statement written after a @when@ is the same
+-- @nothing follows a terminal@ error a statement after @stop@ or after an @if@
+-- already is.
+--
+-- The body is what an @if@ arm may hold /minus/ its terminal — acts, binds,
+-- @known here@ — and it is unit-valued, so a body that ends in @stop@ or in a
+-- branch does not typecheck here: that block is already whole, and it belongs
+-- to the @if@ this sugars.
+when ::
+  forall h s s' j.
+  KnownIx h s =>
+  V h 'CodeFlag ->
+  W ('Open s) ('Open s') () ->
+  W ('Open s) j Term
+when v body = ifThenElse v (thenW body stop) stop
+
+-- | @unless ok $ W.do …@ — 'when' on the other arm, and terminal for the same
+-- reason.
+--
+-- __The flag is not negated; the arms are swapped.__ There is no negation to
+-- reach for: 'Agentic.Raw.RawIfFlag' branches on a flag /binding/ and neither
+-- the @Raw@ nor the @Plan@ has a @not@, so inventing one here would be a
+-- construct the @.wf@ language cannot print. What this prints is the same
+-- @ifFlag@ 'when' prints with its two arms exchanged — the body in the else
+-- arm, the empty block in the then arm — which is a program a @.wf@ author can
+-- write by hand today.
+unless ::
+  forall h s s' j.
+  KnownIx h s =>
+  V h 'CodeFlag ->
+  W ('Open s) ('Open s') () ->
+  W ('Open s) j Term
+unless v body = ifThenElse v stop (thenW body stop)
 
 -- | @case x { approved … objected … no answer … }@ — a terminal, its arms
 -- positional, in Lean's order.
