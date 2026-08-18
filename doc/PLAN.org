@@ -891,15 +891,17 @@ Scope once research lands: at minimum, client-side session/load (capability-gate
 ]
 #+end_src
 
-* TODO [#C] Engine: agent-deck as a payload transport beside the ACP adapters — send/output into live sessions
+* DONE [#C] Engine: agent-deck as a payload transport beside the ACP adapters — send/output into live sessions
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-agent-deck-engine-vv6
 :LABELS:   []
 :ISSUE_TYPE: feature
 :CREATED:  [2026-08-15 Sat 22:16]
-:MODIFIED: [2026-08-16 Sun 18:02]
+:MODIFIED: [2026-08-17 Mon 19:52]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-17 Mon 19:52]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -941,6 +943,20 @@ The owner's full architecture note is preserved below for the design round.
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 119,
+    "issue_id": "acat-agent-deck-engine-vv6",
+    "author": "johnw",
+    "text": "Implemented and committed (c943a1b). Agentic/Core/Deck.lean: send / poll show --json (deck 1.11.0 vocabulary, unknown-reads-as-busy) / output --json with the staleness guard; closed Error inductive rendered as next-action sentences, JSON error field before stderr; decode/nudge/abandonment are Exec's own discipline verbatim. CLI: --engine deck --session ID [--poll-ms] [--turn-timeout-ms] [--all-to-session]; persons default to operator stdin; refusals named before any spawn. deck_smoke (56 checks) drives the SAME stub as the Haskell adapter tests (haskell/test/stub-deck.sh unmoved) - one fake, two implementations kept honest. Adversarial: stopped names the state in 1s; staleness abandons rather than misreading turn 1's text; unreadable flag nudged twice then Exec's exact sentence. All smokes green; haskell ci/deck.sh unmoved; corpus 128 untouched. The three-planes doctrine is now code: repo data plane, deck control plane (this engine), ACP embedding layer (99n's --session/--fork-session for headless handoff).",
+    "created_at": "2026-08-18T02:52:32Z"
   }
 ]
 #+end_src
