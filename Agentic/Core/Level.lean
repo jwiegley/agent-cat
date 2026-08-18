@@ -20,7 +20,7 @@ a totality theorem, and that is the shape used here and in
 `Agentic/Core/Cost.lean`: `level` is a function of a finished term, the analyses
 are `Option`-valued folds, and "the analysis applies at this rung" is a theorem
 (`asks_isSome_of_le_pipeline`) or, where the fold's result is a tree, the *type*
-of the fold (`costTree` takes the level bound as an argument) — never a typing
+of the fold (`costM` takes the level bound as an argument) — never a typing
 discipline on the family.
 
 **The fold classifies terms, not meanings, and that is why it is sound.** A
@@ -48,7 +48,7 @@ One rung per *recognized class*, and the entry in the last column is what
 |---|---|---|---|
 | `batch` | only `askC` and `ret` | free `Applicative` | the exact question list, world-independent; exact bill |
 | `pipeline` | `ask` allowed; no `case`, no `dyn` | static arrow | the exact count, code sequence and question *shapes*; exact bill under `PricesByShape` |
-| `branch` | `case` allowed; no `dyn` | `Selective.branch` | a finite `CostTree` containing every run's bill (`bill_mem_leaves`); sound bounds, and the best and worst *achievable* bills attained by worlds |
+| `branch` | `case` allowed; no `dyn` | `Selective.branch` | a finite `Multiset` of bills containing every run's own (`bill_mem_leaves`); sound bounds, and the best and worst *achievable* bills attained by worlds |
 | `dynamic` | `dyn` present | `Monad` | nothing survives: a `dyn` plan is exhibited (`unbounded`) for which **no finite set of bills exists at all** (`no_finite_bill_set_at_dyn`), hence no cost tree of any shape. The claim is a witness at this rung, not a universal over its inhabitants — a `dyn` whose function is constant costs what its body costs | -/
 inductive Level where
   /-- Every question is closed: the term names its whole question list. -/
@@ -99,10 +99,9 @@ instance instOrderTopLevel : OrderTop Level where
 
 /-! ## The fold -/
 
-/-- `[[level p]]` = the least rung of the chain at which `p`'s term shape sits.
+/-- The grading, as an algebra. `level` just below is its fold.
 
-A **fold**, defined by structural recursion on the finished term, never an
-index on the family:
+A **fold**, over the finished term, never an index on the family:
 
 ```
 level (ret e)        = batch
@@ -116,13 +115,23 @@ Each clause is the rung its former forces, joined with what the subterms force �
 which is the "join along the structure" of kernel §3 q4, and is Mathlib's `max`
 and `Finset.sup` rather than a bespoke semilattice. The five equations are
 `level_ret`, `level_askC`, `level_ask`, `level_case` and `level_dyn` below,
-each a `rfl`. -/
-def level {A : Type} : {Γ : Ctx} → Plan Γ A → Level
-  | _, .ret _ => .batch
-  | _, .askC _ _ k => level k
-  | _, .ask _ _ _ k => max .pipeline (level k)
-  | _, @Plan.case _ _ _ _ _ _ arms => max .branch (Finset.univ.sup fun t => level (arms t))
-  | _, .dyn _ _ => .dynamic
+each a `rfl`.
+
+The carrier is `Const Level` — no argument position at all, which is what "the
+level is a fact about the term" means — and the `case` clause is the join, which
+is the tight case of the domination condition recorded beside it. -/
+def levelAlg : PlanAlg (fun _ _ => Level) where
+  ret _ := .batch
+  askC _ _ l := l
+  ask _ _ _ l := max .pipeline l
+  case := fun _ _ arms => max .branch (Finset.univ.sup fun x => arms x)
+  dyn _ _ _ := .dynamic
+
+/-- `[[level p]]` = the lowest rung of the grading at which `p` sits.
+
+`levelAlg.fold`; the five equations below are its clauses, each still a `rfl`. -/
+def level {A : Type} : {Γ : Ctx} → Plan Γ A → Level :=
+  fun p => levelAlg.fold p
 
 variable {Γ Δ : Ctx} {A B C : Type}
 
@@ -134,12 +143,11 @@ variable {Γ Δ : Ctx} {A B C : Type}
 @[simp] theorem level_ask (c : Code) (s : Q.Shape c) (e : Expr Γ String) (k : Plan (c :: Γ) A) :
     level (Plan.ask c s e k) = max .pipeline (level k) := rfl
 
-@[simp] theorem level_case {T : Type} [FinEnum T] [DecidableEq T]
-    (e : Expr Γ T) (arms : T → Plan Γ A) :
-    level (Plan.case e arms) = max .branch (Finset.univ.sup fun t => level (arms t)) := rfl
+@[simp] theorem level_case (t : Tag) (e : Expr Γ t.El) (arms : t.El → Plan Γ A) :
+    level (Plan.case t e arms) = max .branch (Finset.univ.sup fun x => level (arms x)) := rfl
 
-@[simp] theorem level_dyn {B : Type} (e : Expr Γ B) (f : B → Plan Γ A) :
-    level (Plan.dyn e f) = .dynamic := rfl
+@[simp] theorem level_dyn (b : Code) (e : Expr Γ (El b)) (f : El b → Plan Γ A) :
+    level (Plan.dyn b e f) = .dynamic := rfl
 
 /-! ### Why this fold survives `case` when an exact bill does not
 
@@ -168,7 +176,7 @@ a monoid with inverses does not qualify at all. So the honest statement of the
 `branch` rung is not that a `Const M` analysis is impossible there but that an
 **exact** one is: `Cost.no_static_bill_at_branch` is a witness (`coinBranch`
 costs `ofAdd 2` under one world and `ofAdd 1` under another), and
-`Cost.costTree` exists because exactness, not soundness, is what a branch
+`Cost.costM` exists because exactness, not soundness, is what a branch
 destroys.
 
 `level` itself is the tight case, which is why `level_case` needs no side
@@ -193,19 +201,19 @@ theorem le_of_ask {ℓ : Level} {c : Code} {s : Q.Shape c} {e : Expr Γ String}
 
 /-- A `case` forces `branch` and bounds every arm — *every* arm, because both
 arms are in the term, which is exactly what makes the cost a finite tree. -/
-theorem le_of_case {ℓ : Level} {T : Type} [FinEnum T] [DecidableEq T]
-    {e : Expr Γ T} {arms : T → Plan Γ A} (h : level (Plan.case e arms) ≤ ℓ) :
-    Level.branch ≤ ℓ ∧ ∀ t, level (arms t) ≤ ℓ := by
+theorem le_of_case {ℓ : Level} {t : Tag}
+    {e : Expr Γ t.El} {arms : t.El → Plan Γ A} (h : level (Plan.case t e arms) ≤ ℓ) :
+    Level.branch ≤ ℓ ∧ ∀ x, level (arms x) ≤ ℓ := by
   obtain ⟨hb, hs⟩ := max_le_iff.mp h
-  exact ⟨hb, fun t => le_trans (Finset.le_sup (f := fun t => level (arms t))
-    (Finset.mem_univ t)) hs⟩
+  exact ⟨hb, fun x => le_trans (Finset.le_sup (f := fun x => level (arms x))
+    (Finset.mem_univ x)) hs⟩
 
 /-- A `dyn` is at the top, so no bound below `dynamic` admits one. This is the
 lemma that discharges the `dyn` case of every analysis: the fragment is not
 described by a side condition, it is described by the level. -/
-theorem not_le_of_dyn {ℓ : Level} {B : Type} {e : Expr Γ B} {f : B → Plan Γ A}
-    (hlt : ℓ < Level.dynamic) (h : level (Plan.dyn e f) ≤ ℓ) : False :=
-  absurd (level_dyn e f ▸ h) (not_le_of_gt hlt)
+theorem not_le_of_dyn {ℓ : Level} {b : Code} {e : Expr Γ (El b)} {f : El b → Plan Γ A}
+    (hlt : ℓ < Level.dynamic) (h : level (Plan.dyn b e f) ≤ ℓ) : False :=
+  absurd (level_dyn b e f ▸ h) (not_le_of_gt hlt)
 
 theorem pipeline_lt_dynamic : Level.pipeline < Level.dynamic := by decide
 
@@ -224,16 +232,16 @@ transformation out of the presheaf `Γ ↦ Plan Γ A` to the constant presheaf. 
 @[simp] theorem level_sub (p : Plan Γ A) : ∀ {Δ : Ctx} (σ : Sub Γ Δ), level (Plan.sub p σ) = level p := by
   induction p with
   | ret e => intro Δ σ; rfl
-  | askC c q k ih => intro Δ σ; simpa [Plan.sub] using ih _
+  | askC c q k ih => intro Δ σ; simpa [Plan.sub_askC] using ih _
   | ask c s e k ih =>
     intro Δ σ
-    simp only [Plan.sub, level_ask]
+    simp only [Plan.sub_ask, level_ask]
     exact congrArg _ (ih (Sub.lift σ))
-  | case e arms ih =>
+  | case t e arms ih =>
     intro Δ σ
-    simp only [Plan.sub, level_case]
+    simp only [Plan.sub_case, level_case]
     exact congrArg _ (Finset.sup_congr rfl fun t _ => ih t σ)
-  | dyn e f ih => intro Δ σ; rfl
+  | dyn b e f ih => intro Δ σ; rfl
 
 /-- **Morphism equation.** Scope does not move the rung either: `under σ`
 relabels questions and leaves the shape of the term alone, so the analyses
@@ -241,14 +249,14 @@ licensed at a rung are licensed at every scope. -/
 @[simp] theorem level_under (σ : Sig) (p : Plan Γ A) : level (Plan.under σ p) = level p := by
   induction p with
   | ret e => rfl
-  | askC c q k ih => simpa [Plan.under] using ih
+  | askC c q k ih => simpa [Plan.under_askC] using ih
   | ask c s e k ih =>
-    simp only [Plan.under, level_ask]
+    simp only [Plan.under_ask, level_ask]
     exact congrArg _ ih
-  | case e arms ih =>
-    simp only [Plan.under, level_case]
+  | case t e arms ih =>
+    simp only [Plan.under_case, level_case]
     exact congrArg _ (Finset.sup_congr rfl fun t _ => ih t)
-  | dyn e f ih => rfl
+  | dyn b e f ih => rfl
 
 /-! ## The derived forms, and where the rung actually moves
 
@@ -268,23 +276,23 @@ theorem level_graft_le {B : Type} {ℓ₀ : Level} (p : Plan Γ A) :
   | ret e => intro k hk; exact le_trans (hk _ Sub.id e) (le_max_right _ _)
   | askC c q k ih =>
     intro k' hk
-    simpa [Plan.graft] using ih _ (fun Δ σ e => hk Δ _ e)
+    simpa [Plan.graft_askC] using ih _ (fun Δ σ e => hk Δ _ e)
   | ask c s e k ih =>
     intro k' hk
-    simp only [Plan.graft, level_ask, level_ask, max_le_iff]
+    simp only [Plan.graft_ask, level_ask, level_ask, max_le_iff]
     refine ⟨le_trans (le_max_left _ _) (le_max_left _ _), ?_⟩
     refine le_trans (ih _ (fun Δ σ e => hk Δ _ e)) ?_
     exact max_le_max (le_max_right _ _) le_rfl
-  | case e arms ih =>
+  | case t e arms ih =>
     intro k hk
-    simp only [Plan.graft, level_case, max_le_iff, Finset.sup_le_iff]
+    simp only [Plan.graft_case, level_case, max_le_iff, Finset.sup_le_iff]
     refine ⟨le_trans (le_max_left _ _) (le_max_left _ _), fun t _ => ?_⟩
     refine le_trans (ih t k hk) (max_le_max ?_ le_rfl)
     exact le_trans (Finset.le_sup (f := fun t => level (arms t)) (Finset.mem_univ t))
       (le_max_right _ _)
-  | dyn e f ih =>
+  | dyn b e f ih =>
     intro k hk
-    simp only [Plan.graft, level_dyn]
+    simp only [Plan.graft_dyn, level_dyn]
     exact le_trans le_top (le_max_left _ _)
 
 /-- **Grafting pure leaves is exact.** When the continuation is itself `batch`
@@ -295,16 +303,16 @@ theorem level_graft_of_batch {B : Type} (p : Plan Γ A) :
       level (Plan.graft p k) = level p := by
   induction p with
   | ret e => intro k hk; exact (hk _ Sub.id e).trans rfl
-  | askC c q k ih => intro k' hk; simpa [Plan.graft] using ih _ (fun Δ σ e => hk Δ _ e)
+  | askC c q k ih => intro k' hk; simpa [Plan.graft_askC] using ih _ (fun Δ σ e => hk Δ _ e)
   | ask c s e k ih =>
     intro k' hk
-    simp only [Plan.graft, level_ask]
+    simp only [Plan.graft_ask, level_ask]
     exact congrArg _ (ih _ (fun Δ σ e => hk Δ _ e))
-  | case e arms ih =>
+  | case t e arms ih =>
     intro k hk
-    simp only [Plan.graft, level_case]
+    simp only [Plan.graft_case, level_case]
     exact congrArg _ (Finset.sup_congr rfl fun t _ => ih t k hk)
-  | dyn e f ih => intro k hk; rfl
+  | dyn b e f ih => intro k hk; rfl
 
 /-- **`mapP` does not move the rung.** The functorial action of a plan is free
 of the analysis, which is the first half of `Plan.lean`'s asymmetry claim. -/
@@ -342,7 +350,7 @@ theorem level_panel_le [Monoid (El c)] (ps : List (Plan Γ (El c))) :
 `dyn` at every leaf, so the one derived form the domain does *not* need is the
 one that costs the quarantine. Stated at a `ret`, which is the leaf every
 non-degenerate plan has. -/
-@[simp] theorem level_bindP_ret (e : Expr Γ A) (k : A → Plan Γ B) :
+@[simp] theorem level_bindP_ret {c : Code} (e : Expr Γ (El c)) (k : El c → Plan Γ B) :
     level (Plan.bindP (Plan.ret e) k) = .dynamic := rfl
 
 /-! ## The four rungs are inhabited, and the authoring forms sit where they say -/

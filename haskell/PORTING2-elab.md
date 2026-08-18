@@ -1,3 +1,10 @@
+> **HISTORY NOTE (2026-08-18).** This spec predates the P10–P12 landing: the
+> `PCase :: (FinEnum t, Eq t)` signatures and every `CostTree` mention below
+> describe the tree as it was when tier1 was built. The landed forms are the
+> closed `Tag` (Plan in `Type 0`) and `Cost.costM : … → Multiset` — see
+> `PORTING2-core.md`'s ADDENDUM 2, which is the record for the re-port.
+> Where this file disagrees with the tree, the tree wins.
+
 # PORTING2-elab.md — the week-two elaboration spec: `Agentic.Builder` and the rebuilt cases
 
 Companion to `PORTING.md` (week one: `Agentic.Raw`, `Agentic.Text`,

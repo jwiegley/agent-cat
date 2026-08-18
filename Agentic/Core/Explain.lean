@@ -41,11 +41,11 @@ fold, one set of numbers, three surfaces.
   `(final δ).getD default`, which is the artefact exactly when the loop approved —
   and the probe, which approves nothing, shows the `default` there. That is the
   term's own computation at the probe's answers, and it is the same
-  arm-independence that makes `Cost.costTree` price an unreachable leaf; the legend
+  arm-independence that makes `Cost.costM` price an unreachable path; the legend
   `planLines` prints says so where a reader will meet it.
 
-* **A bound that no world attains is printed as a bound.** `CostTree.minFold` and
-  `CostTree.maxFold` are sound over every world (`Cost.minFold_le_bill`,
+* **A bound that no world attains is printed as a bound.** `Cost.minFold` and
+  `Cost.maxFold` are sound over every world (`Cost.minFold_le_bill`,
   `Cost.bill_le_maxFold`) and are *not* claimed to be attained: a `case` prices its
   arms independently while a world correlates them, and `Cost.minFold_not_attained`
   exhibits a tree whose minimum no world pays. So `costLines` prints the leaf bills
@@ -93,11 +93,12 @@ and each enumerates the way the source text reads. -/
 /-- The arms of a flag branching, in `FinEnum` order: the `false` arm first.
 `Plan.caseB t f` is `cond`, so that is the `else` block of `if x { … } else
 { … }`. -/
-theorem finEnum_toList_bool : FinEnum.toList Bool = [false, true] := by decide
+theorem finEnum_toList_bool : FinEnum.toList (Tag.El .bool) = [false, true] := by decide
 
 /-- …and of a verdict branching: `approve`, `object`, `declined`, which is the
 order `case v { approve … object … declined … }` writes them in. -/
-theorem finEnum_toList_vtag : FinEnum.toList VTag = [.approve, .object, .declined] := by decide
+theorem finEnum_toList_vtag :
+    FinEnum.toList (Tag.El .vtag) = [VTag.approve, .object, .declined] := by decide
 
 /-! ## Probe environments: showing a prompt where its answers go -/
 
@@ -130,35 +131,90 @@ def Env.probe : (Γ : Ctx) → Env Γ
 
 /-! ## Two folds a rendering needs -/
 
-/-- `[[Plan.size p]]` = how many nodes the term has, a `dyn` counting as one.
+/-- The node count, as an algebra. `Plan.size` just below is its fold: how many
+nodes the term has, a `dyn` counting as one.
 
 A `dyn` node's continuations are indexed by an answer, of which there are
 unboundedly many, so "the number of nodes below it" is not a number — the same
 fact as `Cost.no_finite_bill_set_at_dyn`, counted instead of priced. Every other
 former's subterms are in the term, and a `case`'s arms are summed over its finite
 tag type. -/
-def Plan.size : {Γ : Ctx} → {A : Type} → Plan Γ A → Nat
-  | _, _, .ret _ => 1
-  | _, _, .askC _ _ k => 1 + Plan.size k
-  | _, _, .ask _ _ _ k => 1 + Plan.size k
-  | _, _, @Plan.case _ _ T _ _ _ arms =>
-      1 + (FinEnum.toList T).foldl (fun acc t => acc + Plan.size (arms t)) 0
-  | _, _, .dyn _ _ => 1
+def Plan.sizeAlg : PlanAlg (fun _ _ => Nat) where
+  ret _ := 1
+  askC _ _ n := 1 + n
+  ask _ _ _ n := 1 + n
+  case := fun t _ arms =>
+    1 + (FinEnum.toList t.El).foldl (fun acc x => acc + arms x) 0
+  dyn _ _ _ := 1
 
-/-- `[[Plan.askNodes p]]` = how many consultations are *written* in the term, both
-arms of every branching counted.
+/-- `[[Plan.size p]]` = how many nodes the term has, a `dyn` counting as one.
+`Plan.sizeAlg.fold`. -/
+def Plan.size : {Γ : Ctx} → {A : Type} → Plan Γ A → Nat :=
+  fun p => Plan.sizeAlg.fold p
+
+/-! ### The five defining equations of `Plan.size`, each a `rfl` -/
+
+namespace Plan
+
+theorem size_ret {Γ : Ctx} {A : Type} (e : Expr Γ A) : Plan.size (Plan.ret e) = 1 := rfl
+
+theorem size_askC {Γ : Ctx} {A : Type} (c : Code) (q : Q c) (k : Plan (c :: Γ) A) :
+    Plan.size (Plan.askC c q k) = 1 + Plan.size k := rfl
+
+theorem size_ask {Γ : Ctx} {A : Type} (c : Code) (s : Q.Shape c) (e : Expr Γ String)
+    (k : Plan (c :: Γ) A) : Plan.size (Plan.ask c s e k) = 1 + Plan.size k := rfl
+
+theorem size_case {Γ : Ctx} {A : Type} (t : Tag) (e : Expr Γ t.El) (arms : t.El → Plan Γ A) :
+    Plan.size (Plan.case t e arms)
+      = 1 + (FinEnum.toList t.El).foldl (fun acc x => acc + Plan.size (arms x)) 0 := rfl
+
+theorem size_dyn {Γ : Ctx} {A : Type} (b : Code) (e : Expr Γ (El b)) (f : El b → Plan Γ A) :
+    Plan.size (Plan.dyn b e f) = 1 := rfl
+
+end Plan
+
+/-- The consultation count, as an algebra. `Plan.askNodes` just below is its
+fold: how many consultations are *written* in the term, both arms of every
+branching counted.
 
 Not a bill: a run pays for the questions on the path it takes, and that is what
-`Cost.costTree`'s leaves count. This is the other number — how many questions the
+`Cost.costM`'s bag counts. This is the other number — how many questions the
 author wrote — and the two coincide exactly where there is no branching, which is
 `Plan.length_trace_eq_askNodes` below. -/
-def Plan.askNodes : {Γ : Ctx} → {A : Type} → Plan Γ A → Nat
-  | _, _, .ret _ => 0
-  | _, _, .askC _ _ k => 1 + Plan.askNodes k
-  | _, _, .ask _ _ _ k => 1 + Plan.askNodes k
-  | _, _, @Plan.case _ _ T _ _ _ arms =>
-      (FinEnum.toList T).foldl (fun acc t => acc + Plan.askNodes (arms t)) 0
-  | _, _, .dyn _ _ => 0
+def Plan.askNodesAlg : PlanAlg (fun _ _ => Nat) where
+  ret _ := 0
+  askC _ _ n := 1 + n
+  ask _ _ _ n := 1 + n
+  case := fun t _ arms =>
+    (FinEnum.toList t.El).foldl (fun acc x => acc + arms x) 0
+  dyn _ _ _ := 0
+
+/-- `[[Plan.askNodes p]]` = how many consultations are written in the term.
+`Plan.askNodesAlg.fold`. -/
+def Plan.askNodes : {Γ : Ctx} → {A : Type} → Plan Γ A → Nat :=
+  fun p => Plan.askNodesAlg.fold p
+
+/-! ### The five defining equations of `Plan.askNodes`, each a `rfl` -/
+
+namespace Plan
+
+theorem askNodes_ret {Γ : Ctx} {A : Type} (e : Expr Γ A) : Plan.askNodes (Plan.ret e) = 0 := rfl
+
+theorem askNodes_askC {Γ : Ctx} {A : Type} (c : Code) (q : Q c) (k : Plan (c :: Γ) A) :
+    Plan.askNodes (Plan.askC c q k) = 1 + Plan.askNodes k := rfl
+
+theorem askNodes_ask {Γ : Ctx} {A : Type} (c : Code) (s : Q.Shape c) (e : Expr Γ String)
+    (k : Plan (c :: Γ) A) : Plan.askNodes (Plan.ask c s e k) = 1 + Plan.askNodes k := rfl
+
+theorem askNodes_case {Γ : Ctx} {A : Type} (t : Tag) (e : Expr Γ t.El)
+    (arms : t.El → Plan Γ A) :
+    Plan.askNodes (Plan.case t e arms)
+      = (FinEnum.toList t.El).foldl (fun acc x => acc + Plan.askNodes (arms x)) 0 := rfl
+
+theorem askNodes_dyn {Γ : Ctx} {A : Type} (b : Code) (e : Expr Γ (El b))
+    (f : El b → Plan Γ A) : Plan.askNodes (Plan.dyn b e f) = 0 := rfl
+
+end Plan
 
 /-- **At or below `pipeline`, the questions written are the questions asked** —
 in every world, with no hypothesis on the price.
@@ -172,17 +228,17 @@ theorem Plan.length_trace_eq_askNodes {Γ : Ctx} {A : Type} (p : Plan Γ A)
     (h : level p ≤ Level.pipeline) :
     ∀ (γ : Env Γ) (ω : Ω), (Plan.trace ω p γ).length = p.askNodes := by
   induction p with
-  | ret e => intro γ ω; simp [Plan.trace, Plan.askNodes]
+  | ret e => intro γ ω; simp [Plan.trace, Plan.askNodes_ret]
   | askC c q k ih =>
     intro γ ω
-    rw [Plan.trace_askC, List.length_cons, ih h (.cons (ω c q) γ) ω, Plan.askNodes]
+    rw [Plan.trace_askC, List.length_cons, ih h (.cons (ω c q) γ) ω, Plan.askNodes_askC]
     omega
   | ask c s e k ih =>
     intro γ ω
-    rw [Plan.trace_ask, List.length_cons, ih (le_of_ask h).2 _ ω, Plan.askNodes]
+    rw [Plan.trace_ask, List.length_cons, ih (le_of_ask h).2 _ ω, Plan.askNodes_ask]
     omega
-  | case e arms _ => exact absurd (le_of_case h).1 (by decide)
-  | dyn e f _ => exact absurd h (by simp only [level_dyn]; decide)
+  | case t e arms _ => exact absurd (le_of_case h).1 (by decide)
+  | dyn b e f _ => exact absurd h (by simp only [level_dyn]; decide)
 
 /-- **…and the term is one node wider than it is deep.** The two folds differ by
 the leaf, which is the sense in which `askNodes` counts questions and `size`
@@ -191,10 +247,10 @@ theorem Plan.size_eq_askNodes_succ {Γ : Ctx} {A : Type} (p : Plan Γ A)
     (h : level p ≤ Level.pipeline) : p.size = p.askNodes + 1 := by
   induction p with
   | ret e => rfl
-  | askC c q k ih => rw [Plan.size, Plan.askNodes, ih h]; omega
-  | ask c s e k ih => rw [Plan.size, Plan.askNodes, ih (le_of_ask h).2]; omega
-  | case e arms _ => exact absurd (le_of_case h).1 (by decide)
-  | dyn e f _ => exact absurd h (by simp only [level_dyn]; decide)
+  | askC c q k ih => rw [Plan.size_askC, Plan.askNodes_askC, ih h]; omega
+  | ask c s e k ih => rw [Plan.size_ask, Plan.askNodes_ask, ih (le_of_ask h).2]; omega
+  | case t e arms _ => exact absurd (le_of_case h).1 (by decide)
+  | dyn b e f _ => exact absurd h (by simp only [level_dyn]; decide)
 
 namespace Explain
 
@@ -222,29 +278,76 @@ def shapeLine (c : Code) (s : Q.Shape c) : String :=
 
 end Explain
 
-/-- `[[Plan.explain d p]]` = the term at depth `d`, as lines.
+/-- The rendering, as an algebra, at the carrier `P Γ A = Nat → List String` —
+the depth is the accumulator, and the `case` clause is the only one that moves
+it. `Plan.explain` just below is its fold.
 
 A rendering of the **representation**: every line is read off the `Plan`
 constructor it names, and nothing is recovered from the source text, which the
 term does not contain. -/
-def Plan.explain : {Γ : Ctx} → {A : Type} → Nat → Plan Γ A → List String
-  | _, _, d, .ret _ => [s!"{Explain.indent d}ret     (a leaf: the block is over)"]
-  | Γ, _, d, .askC c q k =>
+def Plan.explainAlg : PlanAlg (fun _ _ => Nat → List String) where
+  ret _ := fun d => [s!"{Explain.indent d}ret     (a leaf: the block is over)"]
+  askC := fun {Γ} {_} c q k => fun d =>
       (s!"{Explain.indent d}askC    {Explain.shapeLine c q.shape}  binds #{Γ.length}"
-        :: Explain.quoted (d + 1) q.prompt) ++ Plan.explain d k
-  | Γ, _, d, .ask c s e k =>
+        :: Explain.quoted (d + 1) q.prompt) ++ k d
+  ask := fun {Γ} {_} c s e k => fun d =>
       (s!"{Explain.indent d}ask     {Explain.shapeLine c s}  binds #{Γ.length}"
-        :: Explain.quoted (d + 1) (e (Env.probe Γ))) ++ Plan.explain d k
-  | _, _, d, @Plan.case _ _ T _ _ _ arms =>
-      let ts := FinEnum.toList T
+        :: Explain.quoted (d + 1) (e (Env.probe Γ))) ++ k d
+  case := fun t _ arms => fun d =>
+      let ts := FinEnum.toList t.El
       s!"{Explain.indent d}case    {ts.length} arms, in the enumeration order of the tag type \
          the term carries"
         :: (ts.zipIdx.flatMap fun ti =>
-              s!"{Explain.indent (d + 1)}arm {ti.2}:" :: Plan.explain (d + 2) (arms ti.1))
-  | _, _, d, .dyn _ _ =>
+              s!"{Explain.indent (d + 1)}arm {ti.2}:" :: arms ti.1 (d + 2))
+  dyn _ _ _ := fun d =>
       [ s!"{Explain.indent d}dyn     a plan computed from an answer: its continuations are \
            indexed by an unbounded answer, so there is no finite term below this line. This is \
            the dynamic rung, and no source text reaches it (Dsl.parseAndCheck_level_le)." ]
+
+/-- `[[Plan.explain d p]]` = the term at depth `d`, as lines.
+`Plan.explainAlg.fold`. -/
+def Plan.explain : {Γ : Ctx} → {A : Type} → Nat → Plan Γ A → List String :=
+  fun d p => Plan.explainAlg.fold p d
+
+/-! ### The five defining equations of `Plan.explain`, each a `rfl` -/
+
+namespace Plan
+
+theorem explain_ret {Γ : Ctx} {A : Type} (d : Nat) (e : Expr Γ A) :
+    Plan.explain d (Plan.ret e)
+      = [s!"{Explain.indent d}ret     (a leaf: the block is over)"] := rfl
+
+theorem explain_askC {Γ : Ctx} {A : Type} (d : Nat) (c : Code) (q : Q c)
+    (k : Plan (c :: Γ) A) :
+    Plan.explain d (Plan.askC c q k)
+      = (s!"{Explain.indent d}askC    {Explain.shapeLine c q.shape}  binds #{Γ.length}"
+          :: Explain.quoted (d + 1) q.prompt) ++ Plan.explain d k := rfl
+
+theorem explain_ask {Γ : Ctx} {A : Type} (d : Nat) (c : Code) (s : Q.Shape c)
+    (e : Expr Γ String) (k : Plan (c :: Γ) A) :
+    Plan.explain d (Plan.ask c s e k)
+      = (s!"{Explain.indent d}ask     {Explain.shapeLine c s}  binds #{Γ.length}"
+          :: Explain.quoted (d + 1) (e (Env.probe Γ))) ++ Plan.explain d k := rfl
+
+theorem explain_case {Γ : Ctx} {A : Type}
+    (d : Nat) (t : Tag) (e : Expr Γ t.El) (arms : t.El → Plan Γ A) :
+    Plan.explain d (Plan.case t e arms)
+      = (let ts := FinEnum.toList t.El
+         s!"{Explain.indent d}case    {ts.length} arms, in the enumeration order of the tag \
+            type the term carries"
+           :: (ts.zipIdx.flatMap fun ti =>
+                 s!"{Explain.indent (d + 1)}arm {ti.2}:" :: Plan.explain (d + 2) (arms ti.1))) :=
+  rfl
+
+theorem explain_dyn {Γ : Ctx} {A : Type} (d : Nat) (b : Code) (e : Expr Γ (El b))
+    (f : El b → Plan Γ A) :
+    Plan.explain d (Plan.dyn b e f)
+      = [ s!"{Explain.indent d}dyn     a plan computed from an answer: its continuations are \
+             indexed by an unbounded answer, so there is no finite term below this line. This \
+             is the dynamic rung, and no source text reaches it \
+             (Dsl.parseAndCheck_level_le)." ] := rfl
+
+end Plan
 
 /-! ## The front end, with the source syntax kept
 
@@ -435,22 +538,26 @@ def revisionLines (b : Dsl.Raw) : List String :=
            {pn.2 + 1} reviews, at most {pn.2} amendments, written out into the term"
 
 /-- `[[costSummary p h]]` = the cheapest bill, the dearest bill and the number of
-paths, from `Cost.costTree`.
+paths, from `Cost.costM`.
 
-`h : level p ≤ Level.branch` is the argument `costTree` demands, which is why
+`h : level p ≤ Level.branch` is the argument `costM` demands, which is why
 `Dsl.parseAndCheck_level_le` is the term every tool over source files is built on.
-The folds are `CostTree.minFold` and `CostTree.maxFold` at `tick`, so the numbers
+The folds are `Cost.minFold` and `Cost.maxFold` at `tick`, so the numbers
 are consultations — and they are **bounds**: `Cost.minFold_not_attained` exhibits a
-plan whose `minFold` no world pays. -/
+plan whose `minFold` no world pays.
+
+`paths` is `Multiset.card`, so it counts paths *with multiplicity*: two arms that
+cost the same are two paths, which is what a reader of `leafBills` below is
+being shown. -/
 def costSummary {A : Type} (p : Plan [] A) (h : level p ≤ Level.branch) :
     Option Nat × Option Nat × Nat :=
-  let τ := costTree tick p h Env.nil
-  ( τ.minFold.recTopCoe none (fun s => some (Multiplicative.toAdd s))
-  , τ.maxFold.recBotCoe none (fun s => some (Multiplicative.toAdd s))
-  , Multiset.card τ.leaves )
+  let τ := costM tick p h Env.nil
+  ( (minFold τ).recTopCoe none (fun s => some (Multiplicative.toAdd s))
+  , (maxFold τ).recBotCoe none (fun s => some (Multiplicative.toAdd s))
+  , Multiset.card τ )
 
-/-- `[[leafBills p h]]` = the bill at every path of the cost tree, with
-repetitions: `costTree`'s leaves read through `Multiplicative ℕ ≅ ℕ`
+/-- `[[leafBills p h]]` = the bill at every path of the cost analysis, with
+repetitions: `costM`'s bag read through `Multiplicative ℕ ≅ ℕ`
 (`Report.billNat`'s isomorphism) and sorted, because a multiset has no order of
 its own to report.
 
@@ -458,7 +565,7 @@ What this list is *not* is the set of bills a run can produce; see `costLines` f
 what is printed about that, and `Cost.minFold_not_attained` for why the
 distinction is not pedantry. -/
 def leafBills {A : Type} (p : Plan [] A) (h : level p ≤ Level.branch) : List Nat :=
-  Multiset.sort ((costTree tick p h Env.nil).leaves.map fun s => Multiplicative.toAdd s)
+  Multiset.sort ((costM tick p h Env.nil).map fun s => Multiplicative.toAdd s)
     (· ≤ ·)
 
 /-- `[[sayNats l]]` = a list of numbers, as a set is written. -/

@@ -16,7 +16,7 @@ amendments { v <- review-source  amend c { source } }`; a statement-position
 `ask` is the act. Three shapes here are decisions rather than conveniences.
 
 * **A branching is one constructor per tag type, and its arms are fields.**
-  `Plan.case` demands a `FinEnum`, hence *total* arms, so each branching the
+  `Plan.case` demands a `Tag`, hence *total* arms, so each branching the
   surface writes — two-valued (`El .flag`), three-valued (`VTag`), and the
   two-valued settled-or-not of a loop result — is a constructor whose arms are
   ordinary recursive fields. A nested `List (String × RawBlock)` would force

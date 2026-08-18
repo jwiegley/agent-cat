@@ -109,17 +109,17 @@ theorem denote_ask (c : Code) (s : Q.Shape c) (e : Expr Γ String) (k : Plan (c 
 
 /-- **`case` is selection in the environment.** Both arms are in the term; the
 meaning takes the one the tag names. -/
-theorem denote_case {T : Type} [FinEnum T] [DecidableEq T] (e : Expr Γ T)
-    (arms : T → Plan Γ A) (γ : Env Γ) :
-    denote (Plan.case e arms) γ = denote (arms (e γ)) γ := rfl
+theorem denote_case (t : Tag) (e : Expr Γ t.El)
+    (arms : t.El → Plan Γ A) (γ : Env Γ) :
+    denote (Plan.case t e arms) γ = denote (arms (e γ)) γ := rfl
 
 /-- **`dyn` has the same clause as `case`** — and that is the point. The two
 formers are distinguished by what can be *analysed* about them (`case`'s tag is
 a `Fintype` and its arms are all in the term), never by what they mean; the
 distinction is recorded in the syntax precisely because the meaning does not
 record it. -/
-theorem denote_dyn {B : Type} (e : Expr Γ B) (f : B → Plan Γ A) (γ : Env Γ) :
-    denote (Plan.dyn e f) γ = denote (f (e γ)) γ := rfl
+theorem denote_dyn (b : Code) (e : Expr Γ (El b)) (f : El b → Plan Γ A) (γ : Env Γ) :
+    denote (Plan.dyn b e f) γ = denote (f (e γ)) γ := rfl
 
 /-- **C0, the one admitted redundancy, is coherent.** A closed question asked by
 `askC` and the same question asked by `ask` at a constant expression are one
@@ -199,7 +199,7 @@ theorem level_under (σ : Sig) (p : Plan Γ A) : level (Plan.under σ p) = level
 the continuation, with the identity context morphism: there is nothing between
 the root and the leaf to reach past. -/
 theorem graft_ret (e : Expr Γ A) (k : Cont Γ A B) :
-    Plan.graft (Plan.ret e) k = k Γ Sub.id e := rfl
+    Plan.graft (Plan.ret e) k = k Γ Sub.id e := Plan.graft_ret e k
 
 /-- **Right unit, at the syntax.** Grafting the leaf-preserving continuation
 changes nothing: `graft p ret = p`. -/
@@ -208,10 +208,10 @@ theorem graft_pure : ∀ {Γ : Ctx} {A : Type} (p : Plan Γ A),
   intro Γ A p
   induction p with
   | ret e => rfl
-  | askC c q p ih => simp only [Plan.graft]; exact congrArg _ ih
-  | ask c s d p ih => simp only [Plan.graft]; exact congrArg _ ih
-  | case d arms ih => simp only [Plan.graft]; exact congrArg _ (funext fun t => ih t)
-  | dyn d f ih => simp only [Plan.graft]; exact congrArg _ (funext fun b => ih b)
+  | askC c q p ih => simp only [Plan.graft_askC]; exact congrArg _ ih
+  | ask c s d p ih => simp only [Plan.graft_ask]; exact congrArg _ ih
+  | case t d arms ih => simp only [Plan.graft_case]; exact congrArg _ (funext fun x => ih x)
+  | dyn b d f ih => simp only [Plan.graft_dyn]; exact congrArg _ (funext fun x => ih x)
 
 /-- **Associativity, at the syntax — and it holds on the nose.** Grafting twice
 is grafting once with the composed continuation, as an equality of *terms*, with
@@ -232,12 +232,12 @@ theorem graft_assoc {B D : Type} : ∀ {Γ : Ctx} {A : Type} (p : Plan Γ A)
   intro Γ A p
   induction p with
   | ret e => intro k k'; rfl
-  | askC c q p ih => intro k k'; simp only [Plan.graft]; exact congrArg _ (ih _ _)
-  | ask c s d p ih => intro k k'; simp only [Plan.graft]; exact congrArg _ (ih _ _)
-  | case d arms ih =>
-    intro k k'; simp only [Plan.graft]; exact congrArg _ (funext fun t => ih t _ _)
-  | dyn d f ih =>
-    intro k k'; simp only [Plan.graft]; exact congrArg _ (funext fun b => ih b _ _)
+  | askC c q p ih => intro k k'; simp only [Plan.graft_askC]; exact congrArg _ (ih _ _)
+  | ask c s d p ih => intro k k'; simp only [Plan.graft_ask]; exact congrArg _ (ih _ _)
+  | case t d arms ih =>
+    intro k k'; simp only [Plan.graft_case]; exact congrArg _ (funext fun x => ih x _ _)
+  | dyn b d f ih =>
+    intro k k'; simp only [Plan.graft_dyn]; exact congrArg _ (funext fun x => ih x _ _)
 
 /-- **The multiplication law — the master square.** If the continuation means
 the semantic continuation `K`, then
@@ -410,19 +410,19 @@ theorem sub_graft_of_natural {B : Type} :
   | ret e => intro Δ σ k hk; exact hk _ _ Sub.id e σ
   | askC c q k ih =>
       intro Δ σ k₁ hk
-      simp only [Plan.graft, Plan.sub]
+      simp only [Plan.graft_askC, Plan.sub_askC]
       exact congrArg _ (ih (Sub.lift σ) _ (fun Θ Ξ τ e ρ => hk Θ Ξ _ e ρ))
   | ask c s e k ih =>
       intro Δ σ k₁ hk
-      simp only [Plan.graft, Plan.sub]
+      simp only [Plan.graft_ask, Plan.sub_ask]
       exact congrArg _ (ih (Sub.lift σ) _ (fun Θ Ξ τ e ρ => hk Θ Ξ _ e ρ))
-  | case e arms ih =>
+  | case t e arms ih =>
       intro Δ σ k₁ hk
-      simp only [Plan.graft, Plan.sub]
+      simp only [Plan.graft_case, Plan.sub_case]
       exact congrArg _ (funext fun t => ih t σ _ hk)
-  | dyn e f ih =>
+  | dyn b e f ih =>
       intro Δ σ k₁ hk
-      simp only [Plan.graft, Plan.sub]
+      simp only [Plan.graft_dyn, Plan.sub_dyn]
       exact congrArg _ (funext fun b => ih b σ _ hk)
 
 /-- **The bifunctor coherence square**, which this package stated nowhere and
@@ -473,7 +473,7 @@ the kernel's `den (p ≫= k) γ = den p γ >>= fun a => den (k a) γ`, which hol
 and holds of a term containing a `dyn`. That the equation closes only through
 the quarantined former is the honest statement that general value-sequencing is
 the dynamic rung. -/
-theorem denote_bindP (p : Plan Γ A) (k : A → Plan Γ B) (γ : Env Γ) :
+theorem denote_bindP {c : Code} (p : Plan Γ (El c)) (k : El c → Plan Γ B) (γ : Env Γ) :
     denote (Plan.bindP p k) γ = denote p γ >>= fun a => denote (k a) γ :=
   Agentic.Core.denote_bindP p k γ
 
@@ -638,12 +638,12 @@ theorem shape_projects_from_ask (ω : Ω) (c : Code) (s : Q.Shape c) (e : Expr �
     (k : Plan (c :: Γ) A) (γ : Env Γ) :
     ((Plan.trace ω (Plan.ask c s e k) γ).head?).map Event.shape = some ⟨c, s⟩ := rfl
 
-/-- **`branch` is sound**: the bill of every run is a leaf of the finite tree
-the term determines. Both arms are in the term, so the tree exists; the one
+/-- **`branch` is sound**: the bill of every run is one of the finite bag of
+bills the term determines. Both arms are in the term, so the bag exists; the one
 hypothesis is the one `pipeline` needs. -/
 theorem level_sound_branch [CommMonoid S] {price : Price S} (hp : PricesByShape price)
     (p : Plan Γ A) (h : level p ≤ Level.branch) (γ : Env Γ) (ω : Ω) :
-    billFresh price (Plan.trace ω p γ) ∈ (costTree price p h γ).leaves :=
+    billFresh price (Plan.trace ω p γ) ∈ costM price p h γ :=
   bill_mem_leaves hp p h γ γ ω
 
 /-- **…and at `dynamic` there is nothing to be sound about**: the rung admits a
@@ -745,32 +745,34 @@ theorem mapP_comp' (f : A → B) (g : B → C) (p : Plan Γ A) :
 value. Not statable as `≈ᵖ` between two fixed plans, because the continuation's
 argument is a function of the environment — which is the syntax being honest
 about what a leaf is. -/
-theorem bindP_ret (e : Expr Γ A) (k : A → Plan Γ B) (γ : Env Γ) :
+theorem bindP_ret {c : Code} (e : Expr Γ (El c)) (k : El c → Plan Γ B) (γ : Env Γ) :
     denote (Plan.bindP (Plan.ret e) k) γ = denote (k (e γ)) γ := by
   rw [denote_bindP, denote_ret]
   exact pure_bind _ _
 
 /-- **Right unit.** `bindP p ret ≈ p`. -/
-theorem bindP_pure (p : Plan Γ A) : Plan.bindP p (fun a => Plan.ret (fun _ => a)) ≈ᵖ p := by
+theorem bindP_pure {c : Code} (p : Plan Γ (El c)) :
+    Plan.bindP p (fun a => Plan.ret (fun _ => a)) ≈ᵖ p := by
   intro γ
   rw [denote_bindP]
   exact bind_pure _
 
 /-- **Associativity.** The monad law, descended to plans as a lemma from the
 denotation rather than asserted about the syntax. -/
-theorem bindP_assoc (p : Plan Γ A) (k : A → Plan Γ B) (h : B → Plan Γ D) :
+theorem bindP_assoc {c c' : Code} (p : Plan Γ (El c)) (k : El c → Plan Γ (El c'))
+    (h : El c' → Plan Γ D) :
     Plan.bindP (Plan.bindP p k) h ≈ᵖ Plan.bindP p (fun a => Plan.bindP (k a) h) :=
   fun γ => denote_bindP_assoc p k h γ
 
 /-- **`seq` is `bindP` at a constant continuation** — in *meaning*. The two
 terms are not interchangeable, and the next theorem says why. -/
-theorem seq_equiv_bindP (p : Plan Γ A) (q : Plan Γ B) :
+theorem seq_equiv_bindP {c : Code} (p : Plan Γ (El c)) (q : Plan Γ B) :
     Plan.seq p q ≈ᵖ Plan.bindP p (fun _ => q) := by
   intro γ
   rw [denote_seq, denote_bindP]
 
 /-- **`mapP` is `bindP` at a pure continuation** — again in meaning only. -/
-theorem mapP_equiv_bindP (f : A → B) (p : Plan Γ A) :
+theorem mapP_equiv_bindP {c : Code} (f : El c → B) (p : Plan Γ (El c)) :
     Plan.mapP f p ≈ᵖ Plan.bindP p (fun a => Plan.ret (fun _ => f a)) := by
   intro γ
   rw [denote_mapP, denote_bindP]
@@ -790,10 +792,10 @@ This is why every cost theorem in this development is stated about a term, and
 why `attack-simplicity`'s Test 3 kills the alternative — a level defined as a
 predicate on traces makes the pipeline theorem false. -/
 theorem level_not_equiv_invariant :
-    ∃ p p' : Plan [] Nat, p ≈ᵖ p' ∧ level p ≠ level p' := by
-  refine ⟨Plan.ret (fun _ => 0), Plan.bindP (Plan.ret (fun _ => 0))
+    ∃ p p' : Plan [] (El .ack), p ≈ᵖ p' ∧ level p ≠ level p' := by
+  refine ⟨Plan.ret (fun _ => default), Plan.bindP (c := .ack) (Plan.ret (fun _ => default))
     (fun a => Plan.ret (fun _ => a)), fun γ => ?_, by decide⟩
-  rw [(bindP_ret (fun _ => (0 : Nat)) (fun a => Plan.ret (fun _ => a)) γ)]
+  rw [(bindP_ret (c := .ack) (fun _ => default) (fun a => Plan.ret (fun _ => a)) γ)]
 
 /-! ## …and the Forcing Lemma fails at the syntax too
 

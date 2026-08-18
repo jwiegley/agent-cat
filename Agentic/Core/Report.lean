@@ -355,7 +355,7 @@ theorem memoNat_eq_dedup (tr : Trace) : memoNat tr = ((tr.map Event.key).dedup).
 /-- `[[Trace.billIn bs tr]]` = is this transcript's bill one of the numbers a
 cost analysis proved possible?
 
-The runtime form of a `CostTree` membership: `Agentic/Core/Cost.lean` proves the
+The runtime form of a `Cost.costM` membership: `Agentic/Core/Cost.lean` proves the
 bill of every run lies in a finite set (`bill_mem_leaves`), a workload proves the
 list of lengths its plan admits, and this is the check a report makes against
 that list. -/
@@ -367,7 +367,7 @@ theorem Trace.billIn_eq_true_iff (bs : List Nat) (tr : Trace) :
 
 /-- **The membership check against a proved set cannot fail on a replay.** If
 every world's transcript has one of the lengths `bs` — the shape of
-`Harden.length_trace_hardenPatch`, and of anything read off a `CostTree` — then
+`Harden.length_trace_hardenPatch`, and of anything read off `Cost.costM` — then
 the replay of any table has a bill in `bs`, because `worldOf t` is a world.
 
 Which is exactly how much such a check is worth, and it is worth saying: the

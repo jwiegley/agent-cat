@@ -19,7 +19,7 @@
 -- folds the oracle's reply record reports: 'level' (@Agentic/Core/Level.lean@),
 -- 'size' and 'askNodes' (@Agentic/Core/Explain.lean@), 'codes'
 -- (@Agentic/Core/Cost.lean@) and 'costSummary' (@Agentic/Core/Explain.lean@
--- over @Agentic/Core/Cost.lean@'s @CostTree@).
+-- over @Agentic/Core/Cost.lean@'s @costM@).
 --
 -- __What is not here.__ No parser, no typing judgment, no @CheckError@, no
 -- positions. A 'Q' carries no position and a 'Plan' carries no position;
@@ -116,9 +116,7 @@ module Agentic.Plan
     size,
     askNodes,
     codes,
-    CostTree (..),
-    costTree,
-    costLeaves,
+    costM,
     costSummary,
   )
 where
@@ -241,7 +239,7 @@ verdictMul Declined _ = Declined
 verdictMul _ Declined = Declined
 verdictMul a b = verdictObject (objectionsOf a ++ objectionsOf b)
 
--- | @Verdict.approvedB@ (@Agentic/Core/Plan.lean:551@): @decide (v = approve)@,
+-- | @Verdict.approvedB@ (@Agentic/Core/Plan.lean:887@): @decide (v = approve)@,
 -- the 'Bool' a 'caseB' branches on inside 'revising'.
 --
 -- Tests the normalized form, so a stray @Object []@ that escaped
@@ -265,7 +263,7 @@ verdictRender = \case
   Approve -> T.empty
   Object os -> T.intercalate "; " os
 
--- | @Agentic/Core/Plan.lean:495@ — the finite classifier of a verdict: the
+-- | @Agentic/Core/Plan.lean:290@ — the finite classifier of a verdict: the
 -- three answers a @case@ can branch on, while the objections themselves ride in
 -- the environment into the arm that was taken.
 data VTag
@@ -274,7 +272,7 @@ data VTag
   | VDeclined
   deriving (Eq, Ord, Show, Enum, Bounded)
 
--- | @Verdict.tag@ (@Agentic/Core/Plan.lean:515@):
+-- | @Verdict.tag@ (@Agentic/Core/Plan.lean:851@):
 --
 -- > if v = Verdict.declined then .declined else if v = Verdict.approve then .approve else .object
 --
@@ -418,25 +416,25 @@ exprVar = varGet
 exprConst :: a -> Expr g a
 exprConst a = \_ -> a
 
--- | @Sub Γ Δ@ (@:169@) — a context morphism, semantically: a way of reading a
+-- | @Sub Γ Δ@ (@:182@) — a context morphism, semantically: a way of reading a
 -- @Γ@-environment out of a @Δ@-environment. Weakening, exchange, contraction
 -- and genuine substitution are all inhabitants of this one type.
 type Sub (g :: Ctx) (d :: Ctx) = Env d -> Env g
 
--- | @Sub.id@ (@:176@).
+-- | @Sub.id@ (@:189@).
 subId :: Sub g g
 subId = id
 
--- | @Sub.comp@ (@:180@): @\\e -> s (t e)@, going @Γ → Δ → Ε@ on contexts and
+-- | @Sub.comp@ (@:193@): @\\e -> s (t e)@, going @Γ → Δ → Ε@ on contexts and
 -- @Env Ε → Env Δ → Env Γ@ on environments.
 subComp :: Sub g d -> Sub d e -> Sub g e
 subComp s t = \e -> s (t e)
 
--- | @Sub.wk@ (@:183@): forget the most recently bound answer. This is 'envTail'.
+-- | @Sub.wk@ (@:196@): forget the most recently bound answer. This is 'envTail'.
 subWk :: Sub g (c ': g)
 subWk = envTail
 
--- | @Sub.lift@ (@:191@): going under a binder — keep the new answer, act with
+-- | @Sub.lift@ (@:204@): going under a binder — keep the new answer, act with
 -- the substitution on the rest.
 subLift :: Sub g d -> Sub (c ': g) (c ': d)
 subLift s = \d -> ECons (envHead d) (s (envTail d))
@@ -460,35 +458,53 @@ subCons e s = \d -> ECons (e d) (s d)
 -- * @case v { approved … objected … no answer … }@ — @Check.lean:699@,
 --   @Plan.caseV@ at 'VTag'.
 -- * the @revising@ unroll and its @settled@/@unsettled@ exit —
---   @Plan.lean:630@ and @Check.lean:508@, @Plan.caseB@ at 'Bool' again.
+--   @Plan.lean:966@ and @Check.lean:508@, @Plan.caseB@ at 'Bool' again.
 --
 -- Nothing else; and @Check.lean:55@ records that no clause emits @Plan.dyn@, so
--- the DSL never reaches the dynamic rung. Lean's @FinEnum@ instance is
--- 'tagValues'.
+-- the DSL never reaches the dynamic rung.
+--
+-- __Lean now writes the same type.__ It used to quantify @case@ over an
+-- arbitrary @[FinEnum T] [DecidableEq T]@ and this port was the closure read
+-- off the elaborator by hand; @Agentic/Core/Plan.lean:318@ closes it there too,
+-- so 'Tag' and @Tag.El@ (@:328@) are the two signatures transliterated rather
+-- than one signature and one reading of it. That closure is what puts Lean's
+-- @Plan@ in @Type 0@, and it is why its @case@ node mentions no enumeration at
+-- all: the enumeration is @Tag.values@, and it lives in the analyses.
 data Tag t where
   TBool :: Tag Bool
   TVTag :: Tag VTag
 
--- | Lean's @FinEnum.toList@, in Lean's order:
+-- | @Tag.values@ (@Agentic/Core/Plan.lean:351@), in Lean's order:
 --
--- > scoped instance instFinEnumBool : FinEnum Bool := FinEnum.ofList [false, true]
--- > instance instFinEnumVTag : FinEnum VTag := FinEnum.ofList [.approve, .object, .declined]
+-- > def Tag.values : (t : Tag) → List t.El
+-- >   | .bool => [false, true]
+-- >   | .vtag => [.approve, .object, .declined]
+--
+-- Lean's @Tag.finEnum_toList@ (@:358@) is the machine-checked statement that
+-- this hand-written order /is/ the order @FinEnum.toList@ enumerates each tag
+-- in, which is what keeps @Explain.planLines@ byte-identical across the
+-- closure.
 --
 -- The order is unobservable in every fold ported here — 'size' and 'askNodes'
--- sum over it, 'level' joins over it, 'costLeaves' is read only through
--- @minimum@, @maximum@ and @length@. It is Lean's order anyway; keep it.
+-- sum over it, 'level' joins over it, 'costM' is read only through @minimum@,
+-- @maximum@ and @length@. It is Lean's order anyway; keep it.
 tagValues :: Tag t -> [t]
 tagValues TBool = [False, True]
 tagValues TVTag = [VApprove, VObject, VDeclined]
 
--- | The five formers of @Agentic/Core/Plan.lean:238@.
+-- | The five formers of @Agentic/Core/Plan.lean:387@.
 --
--- > inductive Plan : Ctx → Type → Type 1 where
--- >   | ret  (e : Expr Γ A) : Plan Γ A
--- >   | askC (c : Code) (q : Q c) (k : Plan (c :: Γ) A) : Plan Γ A
--- >   | ask  (c : Code) (s : Q.Shape c) (e : Expr Γ String) (k : Plan (c :: Γ) A) : Plan Γ A
--- >   | case [FinEnum T] [DecidableEq T] (e : Expr Γ T) (arms : T → Plan Γ A) : Plan Γ A
--- >   | dyn  (e : Expr Γ B) (f : B → Plan Γ A) : Plan Γ A
+-- > inductive PlanF (A : Type) : Ctx → Type where
+-- >   | ret  (e : Expr Γ A) : PlanF A Γ
+-- >   | askC (c : Code) (q : Q c) (k : PlanF A (c :: Γ)) : PlanF A Γ
+-- >   | ask  (c : Code) (s : Q.Shape c) (e : Expr Γ String) (k : PlanF A (c :: Γ)) : PlanF A Γ
+-- >   | case (t : Tag) (e : Expr Γ t.El) (arms : t.El → PlanF A Γ) : PlanF A Γ
+-- >   | dyn  (b : Code) (e : Expr Γ (El b)) (f : El b → PlanF A Γ) : PlanF A Γ
+--
+-- @abbrev Plan (Γ : Ctx) (A : Type) : Type := PlanF A Γ@ (@:445@) is the name
+-- the package writes; the answer type is a /parameter/ there for a universe
+-- reason that has no Haskell counterpart, and the argument order is Lean's
+-- spelling of the same five formers.
 --
 -- 'PAskC' is a __closed__ question: its words are written down, so it needs no
 -- environment to put. 'PAsk' computes its words from what is known, which is
@@ -496,7 +512,11 @@ tagValues TVTag = [VApprove, VObject, VDeclined]
 --
 -- 'PDyn' is present for fidelity with the fifth former and to give 'level' a
 -- 'Dynamic' to return. @Agentic.Builder@ cannot construct one and tier1 never
--- sees one; 'bindP' is the only thing here that makes one.
+-- sees one; 'bindP' is the only thing here that makes one. Its answer type is a
+-- 'Code' and not an existential 'Type': Lean closed it for the same universe
+-- reason it closed @case@'s tag, and nothing is lost, because @El 'CodeText@ is
+-- 'Text' and is already unbounded — which is the whole content of
+-- @Cost.no_finite_bill_set_at_dyn@ (@Agentic/Core/Cost.lean:1033@).
 --
 -- No 'Eq', 'Ord' or 'Show': every former but 'PRet' holds a function.
 data Plan (g :: Ctx) a where
@@ -504,9 +524,9 @@ data Plan (g :: Ctx) a where
   PAskC :: SCode c -> Q c -> Plan (c ': g) a -> Plan g a
   PAsk :: SCode c -> Shape c -> Expr g Text -> Plan (c ': g) a -> Plan g a
   PCase :: Tag t -> Expr g t -> (t -> Plan g a) -> Plan g a
-  PDyn :: Expr g b -> (b -> Plan g a) -> Plan g a
+  PDyn :: SCode b -> Expr g (El b) -> (El b -> Plan g a) -> Plan g a
 
--- | @Plan.sub@ (@Agentic/Core/Plan.lean:309@): act on a term by a context
+-- | @Plan.sub@ (@Agentic/Core/Plan.lean:597@): act on a term by a context
 -- morphism. Substitution is not a constructor — it is a fold that rewrites
 -- every expression in the term and lifts under every binder.
 subP :: Plan g a -> Sub g d -> Plan d a
@@ -515,7 +535,7 @@ subP p s = case p of
   PAskC c q k -> PAskC c q (subP k (subLift s))
   PAsk c sh e k -> PAsk c sh (e . s) (subP k (subLift s))
   PCase t e arms -> PCase t (e . s) (\x -> subP (arms x) s)
-  PDyn e f -> PDyn (e . s) (\b -> subP (f b) s)
+  PDyn b e f -> PDyn b (e . s) (\x -> subP (f x) s)
 
 -- | @subP p subWk@: read a plan under one more binding.
 --
@@ -525,7 +545,7 @@ subP p s = case p of
 weakenP :: Plan g a -> Plan (c ': g) a
 weakenP p = subP p subWk
 
--- | @Cont Γ A B@ (@Agentic/Core/Plan.lean:410@) — a continuation that can be
+-- | @Cont Γ A B@ (@Agentic/Core/Plan.lean:736@) — a continuation that can be
 -- grafted onto every leaf of a @Γ@-plan.
 --
 -- Context-polymorphic because the leaves of a plan do not all sit in @Γ@: each
@@ -540,7 +560,7 @@ weakenP p = subP p subWk
 newtype Cont (g :: Ctx) a b = Cont
   {runCont :: forall (d :: Ctx). Sub g d -> Expr d a -> Plan d b}
 
--- | @Plan.graft@ (@Agentic/Core/Plan.lean:421@): @p@ with every 'PRet' leaf
+-- | @Plan.graft@ (@Agentic/Core/Plan.lean:763@): @p@ with every 'PRet' leaf
 -- replaced by the continuation at that leaf.
 --
 -- This is sequencing, and it is substitution rather than a constructor. Under
@@ -553,14 +573,14 @@ graft p k = case p of
   PAskC c q p' -> PAskC c q (graft p' (Cont (\s e -> runCont k (subComp subWk s) e)))
   PAsk c sh d p' -> PAsk c sh d (graft p' (Cont (\s e -> runCont k (subComp subWk s) e)))
   PCase t d arms -> PCase t d (\x -> graft (arms x) k)
-  PDyn d f -> PDyn d (\b -> graft (f b) k)
+  PDyn b d f -> PDyn b d (\x -> graft (f x) k)
 
--- | @Plan.mapP@ (@:432@): the functorial action, derived from 'graft' and — the
+-- | @Plan.mapP@ (@:791@): the functorial action, derived from 'graft' and — the
 -- point — without 'PDyn', so mapping a plan does not move its rung.
 mapP :: (a -> b) -> Plan g a -> Plan g b
 mapP f p = graft p (Cont (\_ e -> PRet (f . e)))
 
--- | @Plan.zipWith@ (@:442@): the applicative action, again without 'PDyn'. The
+-- | @Plan.zipWith@ (@:801@): the applicative action, again without 'PDyn'. The
 -- second plan is moved under the first's binders by 'subP', which is the sense
 -- in which two questions that do not mention each other's variables are
 -- independent.
@@ -574,16 +594,16 @@ zipWithP f p q =
         )
     )
 
--- | @Plan.pairP@ (@:446@).
+-- | @Plan.pairP@ (@:805@).
 pairP :: Plan g a -> Plan g b -> Plan g (a, b)
 pairP = zipWithP (,)
 
--- | @Plan.seq@ (@:450@): run the first, discard its answer, run the second. No
+-- | @Plan.seq@ (@:809@): run the first, discard its answer, run the second. No
 -- 'PDyn', because the answer is discarded.
 seqP :: Plan g a -> Plan g b -> Plan g b
 seqP p q = graft p (Cont (\s _ -> subP q s))
 
--- | @Plan.bindP@ (@:462@): monadic sequencing, and the __only__ derived form
+-- | @Plan.bindP@ (@:821@): monadic sequencing, and the __only__ derived form
 -- that needs 'PDyn'.
 --
 -- That it needs 'PDyn' is the content, not an implementation accident: the
@@ -592,38 +612,43 @@ seqP p q = graft p (Cont (\s _ -> subP q s))
 -- rung. Everything the domain actually does with an answer — putting it into the
 -- next prompt ('PAsk'), branching on a finite classifier of it ('PCase'),
 -- folding a panel of them ('zipWithP') — is available without it.
-bindP :: Plan g a -> (a -> Plan g b) -> Plan g b
-bindP p k = graft p (Cont (\s e -> PDyn e (\a -> subP (k a) s)))
+--
+-- The 'SCode' argument is Lean's @{c : Code}@: since 'PDyn' names the code of
+-- the answer it branches on, so does the only thing that builds one. It is what
+-- bounds this form to an /answer/ rather than to any Haskell value, which is the
+-- sense in which the quarantine is a node of the syntax and not a hole in it.
+bindP :: SCode c -> Plan g (El c) -> (El c -> Plan g b) -> Plan g b
+bindP c p k = graft p (Cont (\s e -> PDyn c e (\a -> subP (k a) s)))
 
--- | @Plan.askC1@ (@:469@): put a closed question and answer with the reply.
+-- | @Plan.askC1@ (@:828@): put a closed question and answer with the reply.
 askC1 :: SCode c -> Q c -> Plan g (El c)
 askC1 c q = PAskC c q (PRet (exprVar VHere))
 
--- | @Plan.ask1@ (@:473@): put the question of this shape whose words are built
+-- | @Plan.ask1@ (@:832@): put the question of this shape whose words are built
 -- from what is known, and answer with the reply.
 ask1 :: SCode c -> Shape c -> Expr g Text -> Plan g (El c)
 ask1 c s e = PAsk c s e (PRet (exprVar VHere))
 
--- | @Plan.caseB@ (@:479@): @.case e (fun b => cond b t f)@.
+-- | @Plan.caseB@ (@:838@): @.case e (fun b => cond b t f)@.
 --
 -- Note the arm order — 'True' takes the first plan. Both arms are in the term.
 caseB :: Expr g Bool -> Plan g a -> Plan g a -> Plan g a
 caseB e t f = PCase TBool e (\b -> if b then t else f)
 
--- | @Plan.caseV@ (@:563@): @.case (fun γ => Verdict.tag (e γ)) arms@ — branching
+-- | @Plan.caseV@ (@:899@): @.case (fun γ => Verdict.tag (e γ)) arms@ — branching
 -- on the finite classifier, with the verdict itself still available to every arm
 -- as an expression.
 caseV :: Expr g Verdict -> (VTag -> Plan g a) -> Plan g a
 caseV e arms = PCase TVTag (verdictTag . e) arms
 
--- | @Plan.panel@ (@:595@): ask each member and combine the replies with the
+-- | @Plan.panel@ (@:931@): ask each member and combine the replies with the
 -- monoid.
 --
 -- > def panel [Monoid (El c)] (ps : List (Plan Γ (El c))) : Plan Γ (El c) :=
 -- >   ps.foldr (zipWith (· * ·)) (.ret (fun _ => 1))
 --
 -- Lean states this at any code carrying a @Monoid (El c)@ and installs that
--- instance __only__ at @.verdict@ (@Plan.lean:572@); @Check.lean:438@ admits a
+-- instance __only__ at @.verdict@ (@Plan.lean:908@); @Check.lean:438@ admits a
 -- panel only at @Code.verdict@. So the port is monomorphic and needs no class.
 --
 -- @panel [] = PRet (const verdictApprove)@ — Lean's @1@. The checker refuses an
@@ -632,7 +657,7 @@ caseV e arms = PCase TVTag (verdictTag . e) arms
 panel :: [Plan g Verdict] -> Plan g Verdict
 panel = foldr (zipWithP verdictMul) (PRet (exprConst verdictApprove))
 
--- | @Plan.revising@ (@Agentic/Core/Plan.lean:621@): check the artefact; if it is
+-- | @Plan.revising@ (@Agentic/Core/Plan.lean:957@): check the artefact; if it is
 -- approved, stop with it; otherwise revise it and go again, at most @n@ times;
 -- if the last check still objects, give up with 'Nothing'.
 --
@@ -718,14 +743,22 @@ levelName = \case
   Branch -> "branch"
   Dynamic -> "dynamic"
 
--- | @level@ (@Agentic/Core/Level.lean:120@): each clause is the rung its former
+-- | @level@ (@Agentic/Core/Level.lean:133@): each clause is the rung its former
 -- forces, joined with what the subterms force.
 --
--- > | .ret _ => .batch
--- > | .askC _ _ k => level k
--- > | .ask _ _ _ k => max .pipeline (level k)
--- > | .case _ arms => max .branch (Finset.univ.sup fun t => level (arms t))
--- > | .dyn _ _ => .dynamic
+-- Lean writes it as an algebra and takes the fold (@levelAlg@, @Level.lean:123@),
+-- so the recursive positions arrive already folded — @l@ below /is/ @level k@:
+--
+-- > def levelAlg : PlanAlg (fun _ _ => Level) where
+-- >   ret _ := .batch
+-- >   askC _ _ l := l
+-- >   ask _ _ _ l := max .pipeline l
+-- >   case := fun _ _ arms => max .branch (Finset.univ.sup fun x => arms x)
+-- >   dyn _ _ _ := .dynamic
+--
+-- The port keeps the direct recursion: there is one @Plan@ here and no theorem
+-- to state about it, so the algebra record would buy nothing that
+-- @PlanAlg.fold_unique@ buys in Lean.
 --
 -- __'PAskC' is @level k@, not @max Batch (level k)@__ — a closed question adds
 -- nothing. The two are equal ('Batch' is @⊥@), but writing the join invites
@@ -741,9 +774,9 @@ level = \case
   PAskC _ _ k -> level k
   PAsk _ _ _ k -> max Pipeline (level k)
   PCase t _ arms -> foldr (max . level . arms) Branch (tagValues t)
-  PDyn _ _ -> Dynamic
+  PDyn {} -> Dynamic
 
--- | @Plan.size@ (@Agentic/Core/Explain.lean:140@): how many nodes the term has,
+-- | @Plan.size@ (@Agentic/Core/Explain.lean:152@): how many nodes the term has,
 -- a 'PDyn' counting as one because the number of nodes below it is not a number.
 --
 -- A @case@ __counts itself__ (the @1 +@); compare 'askNodes', which does not.
@@ -755,13 +788,13 @@ size = \case
   PAskC _ _ k -> 1 + size k
   PAsk _ _ _ k -> 1 + size k
   PCase t _ arms -> 1 + sum (map (size . arms) (tagValues t))
-  PDyn _ _ -> 1
+  PDyn {} -> 1
 
--- | @Plan.askNodes@ (@Agentic/Core/Explain.lean:155@): how many consultations
+-- | @Plan.askNodes@ (@Agentic/Core/Explain.lean:194@): how many consultations
 -- are /written/ in the term, both arms of every branching counted.
 --
 -- Not a bill — a run pays for the questions on the path it takes, and that is
--- what 'costTree'\'s leaves count. The two coincide exactly where there is no
+-- what 'costM'\'s bag counts. The two coincide exactly where there is no
 -- branching (@Plan.length_trace_eq_askNodes@). A @case@ contributes only its
 -- arms, and a 'PDyn' contributes nothing.
 askNodes :: Plan g a -> Integer
@@ -770,9 +803,9 @@ askNodes = \case
   PAskC _ _ k -> 1 + askNodes k
   PAsk _ _ _ k -> 1 + askNodes k
   PCase t _ arms -> sum (map (askNodes . arms) (tagValues t))
-  PDyn _ _ -> 0
+  PDyn {} -> 0
 
--- | @codes@ (@Agentic/Core/Cost.lean:304@): the sequence of answer codes the
+-- | @codes@ (@Agentic/Core/Cost.lean:329@): the sequence of answer codes the
 -- term will ask for, if that sequence is fixed by the term.
 --
 -- 'Nothing' at a 'PCase' and at a 'PDyn' — those are the two places the
@@ -793,61 +826,58 @@ codes = \case
 -- costSummary
 -- ---------------------------------------------------------------------------
 
--- | @Cost.CostTree@ (@Agentic/Core/Cost.lean:610@) at the counting price, with
--- three simplifications, each licensed and each load-bearing:
+-- | @Cost.costM@ (@Agentic/Core/Cost.lean:803@) at the counting price: the
+-- finite __bag__ of every bill the term can run up, one element per path
+-- through its branchings.
 --
--- 1. The price is always @tick@ (@Cost.lean:258@), and @tick@ ignores its
---    question. So the @Env@/@default@ threading of Lean's @costTree@ is dead:
---    nothing in the tick tree depends on the environment, and neither
---    @s.withPrompt (e γ)@ nor a @case@ scrutinee is ever evaluated. 'costTree'
+-- > costM (ret e)       γ = {1}
+-- > costM (askC c q k)  γ = map (price c q *)                    (costM k γ)
+-- > costM (ask c s e k) γ = map (price c (s.withPrompt (e γ)) *) (costM k γ)
+-- > costM (case _ arms) γ = Finset.univ.val.bind (fun t => costM (arms t) γ)
+--
+-- A bag and not a tree: Lean used to build a @CostTree@ and read its @leaves@,
+-- and what the tree was /for/ was the bag at its leaves —
+-- @Cost.bill_mem_leaves@ quantifies the path existentially, so the branch
+-- structure was never read. The two intermediate types are gone on both sides.
+--
+-- Three simplifications carry over, each licensed and each load-bearing:
+--
+-- 1. The price is always @tick@ (@Cost.lean:272@), and @tick@ ignores its
+--    question. So the @Env@/@default@ threading of Lean's @costM@ is dead:
+--    nothing in the tick bag depends on the environment, and neither
+--    @s.withPrompt (e γ)@ nor a @case@ scrutinee is ever evaluated. 'costM'
 --    therefore takes no environment and works in any context.
 -- 2. @Multiplicative Nat@ read through @Multiplicative.toAdd@ is ordinary
---    addition: @leaf 1@ is additive @0@, and each ask adds @1@. So a leaf is an
---    'Integer' and the tree's leaf bill is a count of consultations.
--- 3. @Multiset@ is only ever read through @min@, @max@ and @card@, so a list in
---    leaf order is faithful.
-data CostTree
-  = CostLeaf !Integer
-  | CostNode [CostTree]
-  deriving (Eq, Show)
-
--- | The tick cost tree of a term (@Agentic/Core/Cost.lean:668@).
+--    addition: @{1}@ is the singleton bag of additive @0@, and each ask adds
+--    @1@ to every element. So a bill is an 'Integer' and it counts
+--    consultations.
+-- 3. @Multiset@ is only ever read through @min@, @max@ and @card@ — and
+--    @Explain.leafBills@ sorts it before printing — so a list is faithful.
 --
--- @'CostNode' []@ at a 'PDyn': that is the position where Lean has @absurd@,
--- because @costTree@ is defined only at @level p ≤ branch@. An arm-less node
--- admits no bill, which is exactly what Lean's @WithTop@/@WithBot@ folds report
--- for it, so 'costSummary' stays total and honest instead of partial.
--- @Agentic.Builder@ cannot produce a 'PDyn', and a caller must assert
--- @'level' p <= 'Branch'@ before printing a summary.
-costTree :: Plan g a -> CostTree
-costTree = \case
-  PRet _ -> CostLeaf 0
-  PAskC _ _ k -> bump (costTree k)
-  PAsk _ _ _ k -> bump (costTree k)
-  PCase t _ arms -> CostNode (map (costTree . arms) (tagValues t))
-  PDyn _ _ -> CostNode []
-  where
-    -- Lean's `CostTree.map (price c q * ·)`, at a price that is always one tick.
-    bump (CostLeaf n) = CostLeaf (n + 1)
-    bump (CostNode ts) = CostNode (map bump ts)
+-- The empty bag at a 'PDyn' is the position where Lean has @absurd@, because
+-- @costM@ is defined only at @level p ≤ branch@. It admits no bill, which is
+-- exactly what Lean's @WithTop@\/@WithBot@ folds report for it, so 'costSummary'
+-- stays total and honest instead of partial. @Agentic.Builder@ cannot produce a
+-- 'PDyn', and a caller must assert @'level' p <= 'Branch'@ before printing a
+-- summary.
+costM :: Plan g a -> [Integer]
+costM = \case
+  PRet _ -> [0]
+  PAskC _ _ k -> map (+ 1) (costM k)
+  PAsk _ _ _ k -> map (+ 1) (costM k)
+  PCase t _ arms -> concatMap (costM . arms) (tagValues t)
+  PDyn {} -> []
 
--- | @CostTree.leaves@ (@Agentic/Core/Cost.lean:631@) as a list in leaf order:
--- the bill at every path, __with repetitions__.
-costLeaves :: CostTree -> [Integer]
-costLeaves = \case
-  CostLeaf n -> [n]
-  CostNode ts -> concatMap costLeaves ts
-
--- | @costSummary@ (@Agentic/Core/Explain.lean:445@): the cheapest bill, the
--- dearest bill and the number of paths, from 'costTree' at @tick@.
+-- | @costSummary@ (@Agentic/Core/Explain.lean:552@): the cheapest bill, the
+-- dearest bill and the number of paths, from 'costM' at @tick@.
 --
--- The first two are @CostTree.minFold@ and @CostTree.maxFold@ read through
--- @WithTop@/@WithBot@, so they are 'Nothing' exactly when the leaf bag is empty
--- — Lean's @⊤@/@⊥@, which cannot arise from an elaborated program. They are
--- __bounds__: @Cost.minFold_not_attained@ exhibits a plan whose @minFold@ no
--- world pays.
+-- The first two are @Cost.minFold@ and @Cost.maxFold@ (@Cost.lean:864@,
+-- @:870@) read through @WithTop@/@WithBot@, so they are 'Nothing' exactly when
+-- the bag is empty — Lean's @⊤@/@⊥@, which cannot arise from an elaborated
+-- program. They are __bounds__: @Cost.minFold_not_attained@ exhibits a plan
+-- whose @minFold@ no world pays.
 --
--- The third is @Multiset.card@, not @Finset.card@: the leaf count with
+-- The third is @Multiset.card@, not @Finset.card@: the bill count with
 -- repetitions, not the number of distinct bills. @battery-042@ has @paths 2@
 -- with @minFold = maxFold = 3@ — two paths at the same price.
 costSummary :: Plan g a -> (Maybe Integer, Maybe Integer, Integer)
@@ -857,4 +887,4 @@ costSummary p =
     toInteger (length ls)
   )
   where
-    ls = costLeaves (costTree p)
+    ls = costM p

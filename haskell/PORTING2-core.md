@@ -1399,3 +1399,70 @@ Cases.hs imports `Agentic.Builder` alone (it re-exports `Code (..)`);
 Main.hs imports Agentic.Plan and Agentic.Raw with explicit lists —
 `Agentic.Builder.panel` shadows `Agentic.Plan.panel`, and `Agentic.Raw`'s
 field accessor `askModel` shadows the `askModel` combinator.
+
+---
+
+## ADDENDUM 2 (the P10–P12 re-port — binding, supersedes §2.5 and §2.8)
+
+The Lean side landed the gated tier's P10 (close `case`'s tag universe and
+`dyn`'s answer type), P11 (a `Multiset`-valued cost fold in place of
+`CostTree`) and P12 (`PlanAlg.fold` as the definition of the structural
+recursions). Every observation is unchanged — the frozen corpus at
+`test/corpus` is untouched and `DslFlagship`'s pinned numbers did not move — so
+this addendum is
+about the *signatures* the two sides now share, and about the two names that no
+longer exist on the normative side. Where it disagrees with §2.5 or §2.8, this
+addendum wins.
+
+**1. `case`'s tag is closed in Lean too (P10).** `Plan.case` no longer
+quantifies over `[FinEnum T] [DecidableEq T]`; it takes a `Tag`, an inhabitant
+of a two-constructor universe with `Tag.El : Tag → Type`
+(`Agentic/Core/Plan.lean:318`, `:328`). §2.5's warning that this port's `Tag`
+GADT is a hand-read closure of an open quantification is discharged: the two
+declarations are now transliterations of each other, and `Tag.values` (`:351`)
+is `tagValues`, with `Tag.finEnum_toList` (`:358`) the machine-checked
+statement that the hand-written order is the enumeration's. Nothing in
+`Plan.hs` changed for this.
+
+**2. `dyn` carries its answer's code (P10).** `Plan.dyn (b : Code)
+(e : Expr Γ (El b)) (f : El b → Plan Γ A)`, so the port's constructor is
+
+```haskell
+PDyn :: SCode b -> Expr g (El b) -> (El b -> Plan g a) -> Plan g a
+```
+
+and `bindP` — the only thing that builds one — takes the singleton:
+`bindP :: SCode c -> Plan g (El c) -> (El c -> Plan g b) -> Plan g b`, which is
+Lean's `bindP {c : Code}`. The pattern sites gain a wildcard: `Plan.subP`,
+`Plan.graft`, `World.traceIn`, `World.runIn`, `Exec.execIn` and
+`Gen.planSizeAtMost`. No observable consequence: `Agentic.Builder` cannot
+produce a `PDyn` and the DSL never elaborates to one.
+
+**3. `CostTree` is gone; the analysis is the bag (P11).** `Cost.costM`
+(`Agentic/Core/Cost.lean:803`) folds straight to `Multiset S` — the tree was
+only ever read through its leaves, and `bill_mem_leaves` quantifies the path
+existentially. §2.8's `data CostTree`, `costTree` and `costLeaves` are replaced
+by one fold:
+
+```haskell
+costM :: Plan g a -> [Integer]
+```
+
+with `costSummary` reading it through `minimum`/`maximum`/`length` exactly as
+before, and `run/Main.hs` sorting it for the path-by-path line. The three
+simplifications §2.8 licensed (tick ignores the environment; `Multiplicative
+Nat` is addition; a `Multiset` read through min/max/card is a list) all carry
+over unchanged. `Cost.minFold` and `Cost.maxFold` are now free functions on a
+`Multiset` (`:864`, `:870`) rather than `CostTree` methods.
+
+**4. `PlanAlg` is deliberately not ported (P12).** Lean now defines `level`,
+`size`, `askNodes`, `codes`, `denote`, `sub`, `graft` and the rest as folds of
+one `PlanAlg` record, keeping the old clauses as `@[simp]` theorems, because
+`PlanAlg.fold_unique` turns one structural induction per analysis into one
+fusion argument. There is no theorem to state here, so the port keeps the
+direct recursions and quotes the algebra in the Haddock where the Lean source
+it pairs with is now written that way.
+
+**5. Every `File.lean:line` reference in `Plan.hs`, `World.hs`, `Exec.hs` and
+`Builder.hs` was re-pointed** at the moved definitions and re-checked
+mechanically, anchor by anchor, against the tree as of this addendum.

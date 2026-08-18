@@ -41,12 +41,12 @@ nothing an interpreter would do.
 ## What each tool means
 
 * `workflow_check(source)` — parse and type-check, run nothing. On success:
-  the rung (`Level`), the cost interval read off `Cost.costTree`, the number of
+  the rung (`Level`), the cost interval read off `Cost.costM`, the number of
   paths, and the code/shape sequences where the rung admits them. On failure a
   *tool execution error* (`isError`), because an ill-typed source is actionable
   by the caller: it carries line, column, message and excerpt from
   `Dsl.CheckError` and nothing else.
-  The cost interval is not decoration. `Cost.costTree` takes
+  The cost interval is not decoration. `Cost.costM` takes
   `level p ≤ Level.branch` **as an argument**, so this tool cannot be written
   without `Dsl.parseAndCheck_level_le`; the theorem is the term that makes it
   compile.
@@ -558,8 +558,9 @@ structure Heard where
 /-- `[[Reporter]]` = a plan's residual meaning as a *report of a log*:
 `fun t => RunReport.of p () t (certify p t ())`.
 
-**Why a closure and not the plan.** `Plan` lives in `Type 1` — its `case` node
-stores the arms as a function of a `FinEnum` tag — and `IO α` requires
+**Why a closure and not the plan.** `Plan` used to live in `Type 1` — its
+`case` node stored the arms as a function of a quantified `FinEnum` tag — and
+`IO α` requires
 `α : Type`, so a server that threads its state through `IO` cannot carry a plan
 at all. It does not need to: everything it wanted the plan for is *this
 function*, the plan's meaning applied to a log. `RunReport.of` recomputes the
@@ -1051,7 +1052,7 @@ def errObj (kind : String) (message : String) (extra : List (String × Json) := 
 /-! ## `workflow_check` -/
 
 /-! The cost quoted here is `Explain.costSummary` — the cheapest bill, the
-dearest bill and the number of paths, from `Cost.costTree` — and not a second
+dearest bill and the number of paths, from `Cost.costM` — and not a second
 fold: what a client is quoted over the wire and what `agent-cat cost` prints for
 a reader are the same three numbers out of the same tree. -/
 

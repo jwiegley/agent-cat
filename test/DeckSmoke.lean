@@ -322,11 +322,15 @@ def main : IO UInt32 := do
 
     -- 4. The staleness guard.
     let stale ← install root "stale" "stale"
-    let staleRun ← (Deck.execCertifiedIO (cfg := cfgOf stale (turnTimeoutMs := 1500))
+    -- 8000ms, not 1500: the assertion is about the GUARD, not the clock, and a
+    -- loaded machine once starved the 1500ms budget before the first send went
+    -- out (0 sends observed where the guard's 2 were expected). The scenario is
+    -- still bounded — the stub never re-stamps, so the run always abandons.
+    let staleRun ← (Deck.execCertifiedIO (cfg := cfgOf stale (turnTimeoutMs := 8000))
       (st := settings warnings) smoke).toBaseIO
     check "a session that never re-stamps its reply is not read twice from one turn"
       "abandoned" (outcome staleRun)
-    checkHas "…and says which budget it outran" "did not answer within 1500ms" (said staleRun)
+    checkHas "…and says which budget it outran" "did not answer within 8000ms" (said staleRun)
     -- The sharp one: without the guard the previous turn's text answers every
     -- question, all three sends go out and the run exits 0.
     check "…having stopped at the second question rather than reading the first one's text again"

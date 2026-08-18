@@ -337,8 +337,8 @@ theorem denotes_review : Plan.Denotes review Kreview := by
 /-- **The revision square, at this workload.** -/
 theorem denotes_redraft : Plan.Denotes redraft Kredraft := by
   intro Δ σ e δ
-  simp [redraft, Kredraft, redraftD, reviseQ, Plan.ask1, Dlg.ask1, Plan.under, denote,
-    Sig.onQ]
+  simp [redraft, Kredraft, redraftD, reviseQ, Plan.ask1, Dlg.ask1, Plan.under_ask,
+    Plan.under_ret, Sig.onQ]
 
 /-- **The loop square.** `revising`'s semantic loop, instantiated here, *is*
 `loopD` — two independently written recursions agreeing at every fuel. -/
@@ -845,11 +845,11 @@ theorem tick_pricesByShape : PricesByShape tick := fun _ _ _ _ => rfl
 `tick` charges one unit per consultation, so a bill is a transcript length and
 the two readings agree. The numbers below are computed, not asserted. -/
 
-/-! The membership form of C3 — `bill ∈ (costTree …).leaves` — is *true* of this
+/-! The membership form of C3 — `bill ∈ costM …` — is *true* of this
 workload and is exactly `Cost.bill_mem_leaves` instantiated, but checking that
 instantiation costs Lean about a minute: `∈` on a `Multiset` is `Quot.liftOn`,
 so `isDefEq` tries to iota-reduce the quotient and therefore to evaluate the
-whole fifteen-consultation cost tree. The two order forms below say the usable
+whole fifteen-consultation cost analysis. The two order forms below say the usable
 half at no cost — `≤` on `WithTop`/`WithBot` forces no reduction — and
 `bill_hardenPatch` below is strictly sharper than membership anyway: it names
 the seven bills a world can actually produce, where the tree has nine leaves. -/
@@ -858,12 +858,12 @@ the seven bills a world can actually produce, where the tree has nine leaves. -/
 theorem bill_le_maxFold_hardenPatch (spec : String) (ω : Ω) :
     ((billFresh tick (Plan.trace ω (hardenPatch spec) Env.nil) : Multiplicative Nat) :
         WithBot (Multiplicative Nat))
-      ≤ (costTree tick (hardenPatch spec) (level_le_branch spec) Env.nil).maxFold :=
+      ≤ maxFold (costM tick (hardenPatch spec) (level_le_branch spec) Env.nil) :=
   bill_le_maxFold (S := Multiplicative Nat) (price := tick) tick_pricesByShape
     (hardenPatch spec) (level_le_branch spec) Env.nil ω
 
 theorem minFold_le_bill_hardenPatch (spec : String) (ω : Ω) :
-    (costTree tick (hardenPatch spec) (level_le_branch spec) Env.nil).minFold
+    minFold (costM tick (hardenPatch spec) (level_le_branch spec) Env.nil)
       ≤ ((billFresh tick (Plan.trace ω (hardenPatch spec) Env.nil) : Multiplicative Nat) :
           WithTop (Multiplicative Nat)) :=
   minFold_le_bill (S := Multiplicative Nat) (price := tick) tick_pricesByShape
@@ -892,14 +892,14 @@ set_option maxRecDepth 10000 in
 /-- **The cost tree has nine leaves**: three ways out of the revision loop
 (approve at round 1, 2 or 3) times three ways through the tail (no patch; a
 patch refused; a patch applied). -/
-theorem card_leaves_demo : Multiset.card (costTree tick demo level_demo Env.nil).leaves = 9 := by
+theorem card_leaves_demo : Multiset.card (costM tick demo level_demo Env.nil) = 9 := by
   decide
 
 set_option maxRecDepth 10000 in
 /-- **The cheapest leaf is 5 consultations** — and no world pays it; see
 `minFold_not_attained_demo`. -/
 theorem minFold_demo :
-    (costTree tick demo level_demo Env.nil).minFold
+    minFold (costM tick demo level_demo Env.nil)
       = ((Multiplicative.ofAdd 5 : Multiplicative Nat) : WithTop (Multiplicative Nat)) := by
   decide
 
@@ -907,7 +907,7 @@ set_option maxRecDepth 10000 in
 /-- **The dearest leaf is 15 consultations**, and that one *is* paid; see
 `bill_echo_demo`. -/
 theorem maxFold_demo :
-    (costTree tick demo level_demo Env.nil).maxFold
+    maxFold (costM tick demo level_demo Env.nil)
       = ((Multiplicative.ofAdd 15 : Multiplicative Nat) : WithBot (Multiplicative Nat)) := by
   decide
 

@@ -17,7 +17,7 @@ of memory.** Almost all of it is nine `decide +kernel` proofs, four of them at
 `maxRecDepth 1000000`. That is not accidental expense and it is not a
 proof-engineering failure: it is the price of the statements being true *by
 computation* rather than by assertion. `level flagshipPlan = Level.branch`,
-`Multiset.card … .leaves = 9`, `minFold = 5`, `maxFold = 15` and the four
+`Multiset.card (costM …) = 9`, `minFold = 5`, `maxFold = 15` and the four
 `Plan.trace … flagshipPlan = Plan.trace … Harden.demo` equations are proved by
 the kernel running the checker, the cost algebra, and the interpreter on this
 concrete program in these concrete worlds, and reporting the answer — including
@@ -213,7 +213,7 @@ def flagshipPlan : Plan [] Unit :=
 A `Bool` and not a `Prop`, because the fact that the flagship checks is
 established by kernel reduction and `decide` on a `Bool` needs only the *head*
 constructor of the result. -/
-def accepted {ε : Type} {α : Type 1} (x : Except ε α) : Bool :=
+def accepted {ε : Type} {α : Type u} (x : Except ε α) : Bool :=
   match x with
   | .ok _ => true
   | .error _ => false
@@ -281,7 +281,7 @@ says the flagship attains it — the consent gate and the loop's outcome are
 `dynamic`. -/
 theorem level_flagshipPlan : level flagshipPlan = Level.branch := by decide +kernel
 
-/-- …hence the C3 cost theorems apply to it, which is what `Cost.costTree` asks
+/-- …hence the C3 cost theorems apply to it, which is what `Cost.costM` asks
 for as an argument. -/
 theorem level_flagshipPlan_le : level flagshipPlan ≤ Level.branch :=
   le_of_eq level_flagshipPlan
@@ -291,7 +291,7 @@ set_option maxRecDepth 20000 in
 does (`Harden.card_leaves_demo`): three ways out of the revision loop times
 three ways through the tail. -/
 theorem card_leaves_flagship :
-    Multiset.card (costTree tick flagshipPlan level_flagshipPlan_le Env.nil).leaves = 9 := by
+    Multiset.card (costM tick flagshipPlan level_flagshipPlan_le Env.nil) = 9 := by
   decide +kernel
 
 set_option maxRecDepth 20000 in
@@ -299,14 +299,14 @@ set_option maxRecDepth 20000 in
 `Harden.minFold_not_attained_demo` again, transported by the trace
 agreements. -/
 theorem minFold_flagship :
-    (costTree tick flagshipPlan level_flagshipPlan_le Env.nil).minFold
+    minFold (costM tick flagshipPlan level_flagshipPlan_le Env.nil)
       = ((Multiplicative.ofAdd 5 : Multiplicative Nat) : WithTop (Multiplicative Nat)) := by
   decide +kernel
 
 set_option maxRecDepth 20000 in
 /-- **The dearest leaf is 15 consultations**, and that one is paid. -/
 theorem maxFold_flagship :
-    (costTree tick flagshipPlan level_flagshipPlan_le Env.nil).maxFold
+    maxFold (costM tick flagshipPlan level_flagshipPlan_le Env.nil)
       = ((Multiplicative.ofAdd 15 : Multiplicative Nat) : WithBot (Multiplicative Nat)) := by
   decide +kernel
 
@@ -396,7 +396,7 @@ theorem flagship_bill_le (ω : Ω) :
 /-- …and at least the cheapest achievable one: `minFold_flagship` is `5`, and no
 world attains it, exactly as on the hand-written flagship. -/
 theorem minFold_flagship_le_bill (ω : Ω) :
-    (costTree tick flagshipPlan level_flagshipPlan_le Env.nil).minFold
+    minFold (costM tick flagshipPlan level_flagshipPlan_le Env.nil)
       ≤ ((billFresh tick (Plan.trace ω flagshipPlan Env.nil) : Multiplicative Nat) :
           WithTop (Multiplicative Nat)) :=
   minFold_le_bill (S := Multiplicative Nat) (price := tick) Harden.tick_pricesByShape

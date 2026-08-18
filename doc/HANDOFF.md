@@ -260,7 +260,7 @@ contains the compiled probe).
 |---|---|---|
 | `batch` | closed questions only | the exact question list; the bill is world-independent |
 | `pipeline` | words built from answers | the shape sequence is a projection of the syntax; exact bill under `PricesByShape` |
-| `branch` | `case`, hence `revising` | a finite `CostTree`; every world's bill is one of its leaves |
+| `branch` | `case`, hence `revising` | a finite `Multiset` of possible bills (`Cost.costM`); every world's bill is one of them |
 | `dynamic` | `dyn` | a non-existence theorem, with a witness whose bills are unbounded |
 
 The textual language has **no syntax for `dyn`**, so every program anyone can
@@ -517,36 +517,39 @@ Agentic/Core/
   Question.lean   478   Code, El, Q, Q.Shape, Verdict (WithZero (FreeMonoid Objection))
   World.lean      242   Ω, Table, Extends, worldOf, pin (= Function.update)
   Dlg.lean        455   the dialogue carrier; run/trace; LawfulMonad; Obs
-  Plan.lean       627   the representation: five formers, de Bruijn contexts
-  Denote.lean     709   denote, the fold; Plan.run / Plan.trace
-  Level.lean      334   the rung fold
-  Cost.lean      1036   CostTree, bills, PricesByShape, C0–C5
-  Morphism.lean   711   the 55 commuting squares
-  HardenPatch.lean 991  the flagship as a Plan, and its theorems
-  Dsl/Syntax.lean 274   Raw, Prompt, CheckError
-  Dsl/Parse.lean  555   lexer + recursive descent, no dependencies
-  Dsl/Check.lean  575   check : … → Except CheckError (Plan Γ Unit)
-  Dsl.lean        369   level theorems about the checker (cheap; binaries need this)
-  DslFlagship.lean 427  the flagship program's decide-proofs (~100 s; binaries do NOT)
+  Plan.lean       973   the representation: five formers, de Bruijn contexts,
+                        the closed `Tag` universe, and `PlanAlg` + `PlanAlg.fold`
+  Alg.lean        120   the fold's equations: level/denote/sub as one recursion
+  Denote.lean     971   denote, the fold; Plan.run / Plan.trace
+  Level.lean      376   the rung fold
+  Cost.lean      1170   `costM` (the bill bag), bills, PricesByShape, C0–C5
+  Morphism.lean   859   the 55 commuting squares
+  HardenPatch.lean 1025 the flagship as a Plan, and its theorems
+  Dsl/Syntax.lean 367   Raw, Prompt, CheckError
+  Dsl/Parse.lean 1316   lexer + recursive descent, no dependencies
+  Dsl/Check.lean 1002   check : … → Except CheckError (Plan Γ Unit)
+  Dsl.lean        772   level theorems about the checker (cheap; binaries need this)
+  DslFlagship.lean 438  the flagship program's decide-proofs (~110 s; binaries do NOT)
   Rpc.lean        155   shared JSON-RPC framing
-  Acp.lean       1115   the ACP transport, model catalogue resolution, permissions
-  Exec.lean      1390   the memoising interpreter; decoders; the one oracle
+  Acp.lean       1417   the ACP transport, model catalogue resolution, permissions
+  Deck.lean       652   the agent-deck transport: a live pane, polled
+  Exec.lean      1463   the memoising interpreter; decoders; the one oracle
   Certify.lean    269   adequacy and the certificate
   Report.lean     701   RunReport, transcript rendering, coverage
   Artifact.lean   673   scratch dirs, workspace seeding, fingerprints
-  Explain.lean    527   the folds `plan` and `cost` print
-  Mcp.lean       1649   the MCP server: a dialogue stepped by tool call
+  Explain.lean    648   the folds `plan` and `cost` print
+  Mcp.lean       1688   the MCP server: a dialogue stepped by tool call
 cli/AgentCat.lean       agent-cat plan|cost|run
 mcp/WorkflowMcp.lean    workflow_mcp
 demo/Main.lean          harden_demo, with the workload-specific assertions
 example/                harden.wf, hello.wf, ill-typed.wf, harden.d/parse.c,
                         HardenPatch.lean (the approved Lean surface, pre-Core)
-test/                   six smoke targets + stub_adapter.py + mcp_client.py
+test/                   seven smoke targets + stub_adapter.py + mcp_client.py
 doc/                    this file; the two HTML artifacts; mcp.md; PLAN.org; research/
 ```
 
-Roughly 14,300 lines and 540 theorems in `Agentic/Core`, zero `sorry`, zero
-declared axioms. Every result lies within `{propext, Classical.choice,
+Roughly 18,200 lines and 640 theorems in `Agentic/Core`, zero `sorry`, zero
+`native_decide`, zero declared axioms. Every result lies within `{propext, Classical.choice,
 Quot.sound}`, and `certify_sound` within none of them.
 
 **Documents.** `doc/meaning-and-representation.html` (what the two layers are

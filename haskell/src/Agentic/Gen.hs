@@ -1584,7 +1584,7 @@ planSizeAtMost lim p0 = go lim p0 >= 0
     go n (PAsk _ _ _ k) = go (n - 1) k
     go n (PCase t _ arms) =
       foldl (\m x -> if m < 0 then -1 else go m (arms x)) (n - 1) (tagValues t)
-    go n (PDyn _ _) = n - 1
+    go n PDyn {} = n - 1
 
 -- | Cardano's @generatesWithin@, concretely: 100 'GenCase's, 100
 -- 'genRawProgram's and 200 'genTrapText's, forced, inside a 30-second wall

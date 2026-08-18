@@ -212,7 +212,7 @@ stops elaborating.
 
 **Zero axioms for the certificate.** `certify_sound` reaches `Plan`, `denote`,
 `worldOf`, `lookup`, `Q` and `El` and nothing else, none of which is a quotient
-or a choice — which is what `Agentic/Core/Plan.lean`'s `FinEnum` and
+or a choice — which is what `Agentic/Core/Plan.lean`'s closed `Tag` and
 `Agentic/Core/Question.lean`'s `Verdict.instInhabited` are each written for.
 
 **Adequacy is `propext`-only**, which is the class the probe

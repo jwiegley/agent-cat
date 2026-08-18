@@ -15,7 +15,7 @@ Everything about the flagship program itself lives in
 `Agentic/Core/DslFlagship.lean`, which imports this module and dominates the
 build.
 
-The division is not tidiness. `Cost.costTree` takes `level p ≤ Level.branch` as
+The division is not tidiness. `Cost.costM` takes `level p ≤ Level.branch` as
 an *argument*, so `parseAndCheck_level_le` below is the term that makes every
 tool over source files compile: `Agentic/Core/Explain.lean`, and through it
 `cli/AgentCat.lean` and `Agentic/Core/Mcp.lean`. Those three want the theorem
@@ -264,7 +264,7 @@ def PendLevel {Γ : Ctx} : Option (Pend Γ) → Prop
 branch rung — no clause emits `Plan.dyn`, and the language has no syntax that
 could.
 
-Not decoration: `Cost.costTree` takes this bound as an argument, so a cost
+Not decoration: `Cost.costM` takes this bound as an argument, so a cost
 report over a source file is not writable without it. -/
 theorem checkBlock_level_le {fns : Fns} (hf : FnLevel fns) :
     ∀ (b : RawBlock) (Γ : Ctx) (S : Bindings Γ) (pend : Option (Pend Γ)),

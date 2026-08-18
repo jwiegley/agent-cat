@@ -1,184 +1,88 @@
 import Agentic.Core.Level
 
 /-!
-# The initial algebra: one recursion for twelve analyses
+# The initial algebra, spent: what the twelve analyses now share
 
 `Agentic/Core/Plan.lean`'s five formers are a signature, and every analysis in
-this package is a homomorphism out of the syntax for that signature. This module
-says so once: `PlanAlg` is the signature's algebra, `PlanAlg.fold` is the
-homomorphism it induces, and `PlanAlg.fold_unique` is initiality — the fold is
-the *only* homomorphism, so the structural inductions the package writes one per
-analysis are all the same induction.
+this package is a homomorphism out of the syntax for that signature.
+`Agentic/Core/Plan.lean` says so where the syntax is: `PlanAlg` is the
+signature's algebra, `PlanAlg.fold` is the homomorphism it induces, and
+`PlanAlg.fold_unique` is initiality — the fold is the *only* homomorphism.
 
-**Additive, and deliberately so.** `level` and `denote` keep their own recursive
-definitions and their own `@[simp]` equation lemmas; what is proved here is that
-each *equals* the corresponding fold (`level_eq_fold`, `denote_eq_fold`).
-Replacing the twelve recursion bodies with `fold` is a different change with a
-different risk, and the risk is not line count: `Level.lean`'s
-`level_upToTwice` is `by decide`, `Denote.lean`'s `trace_upToTwice_stubborn` and
-`run_upToTwice_stubborn` are `by rfl`, `Cost.lean`'s `bill_constBranch` is
-`rfl`, and `Agentic/Core/DslFlagship.lean` carries nineteen `decide +kernel`
-proofs. Routing a definition through `fold` puts `Plan.brecOn` and a structure
-projection between the kernel and every one of those, and *kernel reduction*,
-not elaboration, is the thing that would break. So this module proves the
-equations and changes no definition; the substitution waits on a measured timing
-diff.
+**And now it is spent, not merely stated.** Eleven of the twelve structural
+recursions in this package *are* `PlanAlg.fold` at an algebra, by definition and
+not up to a proved equation:
 
-**Universe polymorphism is what makes one record serve every carrier.** The
-package's analysis targets live at different universes — `Level` and
-`Env Γ → Dlg A` are `Type 0`, `Cost.CostTree S` is `Type 1` — and `Plan.rec` is
-universe-polymorphic in its motive, so `PlanAlg` is stated at `Type v` and one
-structure covers all of them.
+| recursion | module | algebra | carrier |
+|---|---|---|---|
+| `Plan.sub` | `Plan.lean` | `Plan.subAlg` | `∀ Δ, Sub Γ Δ → Plan Δ A` |
+| `Plan.under σ` | `Plan.lean` | `Plan.underAlg σ` | `Plan Γ A` |
+| `Plan.graft` | `Plan.lean` | `Plan.graftAlg B` | `Cont Γ A B → Plan Γ B` |
+| `denote` | `Denote.lean` | `denoteAlg` | `Env Γ → Dlg A` |
+| `level` | `Level.lean` | `levelAlg` | `Level` |
+| `codes` | `Cost.lean` | `codesAlg` | `Option (List Code)` |
+| `shapes` | `Cost.lean` | `shapesAlg` | `Option (List Shape)` |
+| `asks` | `Cost.lean` | `asksAlg` | `Env Γ → Option (List Key)` |
+| `Plan.size` | `Explain.lean` | `Plan.sizeAlg` | `Nat` |
+| `Plan.askNodes` | `Explain.lean` | `Plan.askNodesAlg` | `Nat` |
+| `Plan.explain` | `Explain.lean` | `Plan.explainAlg` | `Nat → List String` |
 
-**Which recursions fit.** Ten fit at the obvious carrier (`denote`, `level`,
-`codes`, `shapes`, `asks`, `Plan.size`, `Plan.askNodes`, `Plan.explain`, and
-`Plan.under` at `P Γ A = Plan Γ A`). Two fit at a function-space carrier, which
-is the ordinary fold-with-accumulator move: `Plan.sub` is the fold at
-`P Γ A = ∀ Δ, Sub Γ Δ → Plan Δ A`, and `Plan.graft` is the fold at
-`P Γ A = Cont Γ A B → Plan Γ B`, whose `askC` clause is
-`fun rec k => .askC c q (rec (Cont.reindex k Sub.wk))` — so "rebuild the
-continuation with one more weakening" is literally the algebra acting on its
-accumulator. **One does not fit**: `Cost.costTree`, whose signature absorbs the
-level bound (`(p : Plan Γ A) → level p ≤ Level.branch → …`) and an algebra
-carrier may not mention `p`. That is the deliberate decision recorded at
-`Cost.lean`'s cost-tree section — "the analysis applies at this rung is the
-*type* of the fold rather than a side condition" — so the honest count is eleven
-of twelve.
+Each keeps its five defining equations, as named theorems proved by `rfl`
+(`sub_askC`, `level_case`, `denote_ask`, `codes_askC`, …), so the proofs that
+used to unfold the recursion still say exactly what they said; what has gone is
+eleven separate structural recursions and the eleven separate inductions that
+would justify them. Three carriers are function spaces (`sub`, `graft`, `asks`,
+and `explain`'s accumulator is its depth) — the ordinary fold-with-accumulator
+move, and worth naming because it is the part that is not obvious.
+
+**One does not fit**: `Cost.costM`, whose signature absorbs the level bound
+(`(p : Plan Γ A) → level p ≤ Level.branch → …`) and an algebra carrier may not
+mention `p`. That is the deliberate decision recorded at `Cost.lean`'s C3
+section — "the analysis applies at this rung is the *type* of the fold rather
+than a side condition" — so the honest count is eleven of twelve.
+
+**Universe polymorphism is what makes one record serve every carrier**, and it
+is now polymorphism with nothing to do: every carrier in the table is `Type 0`,
+because closing `case`'s tag and `dyn`'s answer type — and making the answer
+type `PlanF`'s *parameter* rather than an index — put `Plan` and `Cont` there
+too. `PlanAlg` stays stated at `Type v` all the same: `Plan.rec` is
+universe-polymorphic in its motive, the statement costs nothing, and an analysis
+into a large carrier remains writable.
+
+**What is left in this module** is what the substitution makes cheap: the
+`X = fold XAlg` equations, now `rfl` rather than inductions, and the *uniqueness*
+statements that follow from `fold_unique` — of which `denote_unique` is the one
+the kernel's C-obligations assume and never state.
 -/
 
 namespace Agentic.Core
 
 open Plan
 
-universe v
+/-! ## The two equations that used to be inductions -/
 
-/-- `[[PlanAlg P]]` = an algebra for the `Plan` signature, indexed the way `Plan`
-is: one field per former, with the recursive positions replaced by the carrier.
-
-The five fields *are* the structure a target must carry for an interpretation to
-exist — in this package's own vocabulary, and not in a hierarchy of profunctor
-classes. `ret` is the pure part, `askC` a nullary generator's binding, `ask` a
-unary generator's, `case` the finite copair and `dyn` the one higher-order
-former. -/
-structure PlanAlg (P : Ctx → Type → Type v) where
-  /-- What a pure leaf becomes. -/
-  ret  : {Γ : Ctx} → {A : Type} → Expr Γ A → P Γ A
-  /-- What a closed question and its binding become. -/
-  askC : {Γ : Ctx} → {A : Type} → (c : Code) → Q c → P (c :: Γ) A → P Γ A
-  /-- What an open question — shape in the term, words computed — and its
-  binding become. -/
-  ask  : {Γ : Ctx} → {A : Type} → (c : Code) → Q.Shape c → Expr Γ String → P (c :: Γ) A → P Γ A
-  /-- What a finite branch becomes: the copair over the tag type. -/
-  case : {Γ : Ctx} → {A : Type} → {T : Type} → [FinEnum T] → [DecidableEq T] →
-           Expr Γ T → (T → P Γ A) → P Γ A
-  /-- What the quarantined dynamic former becomes. -/
-  dyn  : {Γ : Ctx} → {A B : Type} → Expr Γ B → (B → P Γ A) → P Γ A
-
-namespace PlanAlg
-
-variable {P : Ctx → Type → Type v} (alg : PlanAlg P)
-
-/-- `[[alg.fold p]]` = the homomorphism out of the syntax. **One** structural
-recursion, in place of one per analysis. -/
-def fold : {Γ : Ctx} → {A : Type} → Plan Γ A → P Γ A
-  | _, _, .ret e => alg.ret e
-  | _, _, .askC c q k => alg.askC c q (fold k)
-  | _, _, .ask c s e k => alg.ask c s e (fold k)
-  | _, _, @Plan.case _ _ T _ _ e arms => alg.case (T := T) e (fun t => fold (arms t))
-  | _, _, .dyn e f => alg.dyn e (fun b => fold (f b))
-
-@[simp] theorem fold_ret {Γ : Ctx} {A : Type} (e : Expr Γ A) :
-    alg.fold (Plan.ret e) = alg.ret e := rfl
-
-@[simp] theorem fold_askC {Γ : Ctx} {A : Type} (c : Code) (q : Q c) (k : Plan (c :: Γ) A) :
-    alg.fold (Plan.askC c q k) = alg.askC c q (alg.fold k) := rfl
-
-@[simp] theorem fold_ask {Γ : Ctx} {A : Type} (c : Code) (s : Q.Shape c) (e : Expr Γ String)
-    (k : Plan (c :: Γ) A) :
-    alg.fold (Plan.ask c s e k) = alg.ask c s e (alg.fold k) := rfl
-
-@[simp] theorem fold_case {Γ : Ctx} {A T : Type} [FinEnum T] [DecidableEq T]
-    (e : Expr Γ T) (arms : T → Plan Γ A) :
-    alg.fold (Plan.case e arms) = alg.case e (fun t => alg.fold (arms t)) := rfl
-
-@[simp] theorem fold_dyn {Γ : Ctx} {A B : Type} (e : Expr Γ B) (f : B → Plan Γ A) :
-    alg.fold (Plan.dyn e f) = alg.dyn e (fun b => alg.fold (f b)) := rfl
-
-/-- **Initiality: the fold is the only homomorphism.** Anything that satisfies
-the five equations *is* the fold.
-
-This is the theorem the package has been proving one instance at a time. Given
-it, a new analysis costs an algebra record and its five equations — which are
-`rfl` if the analysis was written as a recursion — and every invariance result
-about it is a fusion argument rather than a fresh induction. -/
-theorem fold_unique (h : {Γ : Ctx} → {A : Type} → Plan Γ A → P Γ A)
-    (hret : ∀ {Γ A} (e : Expr Γ A), h (.ret e) = alg.ret e)
-    (haskC : ∀ {Γ A} c q (k : Plan (c :: Γ) A), h (.askC c q k) = alg.askC c q (h k))
-    (hask : ∀ {Γ A} c s e (k : Plan (c :: Γ) A), h (.ask c s e k) = alg.ask c s e (h k))
-    (hcase : ∀ {Γ A T} [FinEnum T] [DecidableEq T] (e : Expr Γ T) (arms : T → Plan Γ A),
-       h (.case e arms) = alg.case e (fun t => h (arms t)))
-    (hdyn : ∀ {Γ A B} (e : Expr Γ B) (f : B → Plan Γ A),
-       h (.dyn e f) = alg.dyn e (fun b => h (f b))) :
-    ∀ {Γ : Ctx} {A : Type} (p : Plan Γ A), h p = alg.fold p := by
-  intro Γ A p
-  induction p with
-  | ret e => exact hret e
-  | askC c q k ih => rw [haskC, ih]; rfl
-  | ask c s e k ih => rw [hask, ih]; rfl
-  | case e arms ih => rw [hcase]; exact congrArg _ (funext fun t => ih t)
-  | dyn e f ih => rw [hdyn]; exact congrArg _ (funext fun b => ih b)
-
-end PlanAlg
-
-/-! ## The two instances that matter, at opposite ends of the package -/
-
-/-- `Agentic/Core/Level.lean`'s `level`, as an algebra. The carrier is
-`Const Level` — no argument position at all, which is what "the level is a fact
-about the term" means — and the `case` clause is the join, which is the tight
-case of the domination condition recorded beside `level`. -/
-def levelAlg : PlanAlg (fun _ _ => Level) where
-  ret _ := .batch
-  askC _ _ l := l
-  ask _ _ _ l := max .pipeline l
-  case := fun {_} {_} {_} _ _ _ arms => max .branch (Finset.univ.sup fun t => arms t)
-  dyn _ _ := .dynamic
-
-/-- **`level` is a fold.** Its definition stays; this says what it is. -/
-theorem level_eq_fold {Γ : Ctx} {A : Type} (p : Plan Γ A) : level p = levelAlg.fold p := by
-  induction p with
-  | ret e => rfl
-  | askC c q k ih => exact ih
-  | ask c s e k ih => exact congrArg _ ih
-  | case e arms ih => exact congrArg _ (Finset.sup_congr rfl fun t _ => ih t)
-  | dyn e f _ => rfl
-
-/-- `Agentic/Core/Denote.lean`'s `denote`, as an algebra, at the function-space
-carrier `P Γ A = Env Γ → Dlg A`. The meaning is a fold like every other analysis;
-what distinguishes it is the carrier, not the shape of the recursion. -/
-def denoteAlg : PlanAlg (fun Γ A => Env Γ → Dlg A) where
-  ret e := fun γ => Dlg.done (e γ)
-  askC c q k := fun γ => Dlg.ask c q (fun x => k (Env.cons x γ))
-  ask c s e k := fun γ => Dlg.ask c (s.withPrompt (e γ)) (fun x => k (Env.cons x γ))
-  case := fun e arms γ => arms (e γ) γ
-  dyn := fun e f γ => f (e γ) γ
+/-- **`level` is a fold** — now by definition. Kept as a theorem because the
+statement is the content: `levelAlg`'s five fields are the five clauses. -/
+theorem level_eq_fold {Γ : Ctx} {A : Type} (p : Plan Γ A) : level p = levelAlg.fold p := rfl
 
 /-- **`denote` is a fold**, and the five clauses of `denoteAlg` are the kernel's
-five morphism equations read as an algebra. Its definition stays. -/
-theorem denote_eq_fold : ∀ {Γ : Ctx} {A : Type} (p : Plan Γ A) (γ : Env Γ),
-    denote p γ = denoteAlg.fold p γ := by
-  intro Γ A p
-  induction p with
-  | ret e => intro γ; rfl
-  | askC c q k ih =>
-      intro γ
-      show Dlg.ask c q (fun x => denote k (Env.cons x γ)) = _
-      exact congrArg _ (funext fun x => ih _)
-  | ask c s e k ih =>
-      intro γ
-      show Dlg.ask c (s.withPrompt (e γ)) (fun x => denote k (Env.cons x γ)) = _
-      exact congrArg _ (funext fun x => ih _)
-  | case e arms ih => intro γ; exact ih (e γ) γ
-  | dyn e f ih => intro γ; exact ih (e γ) γ
+five morphism equations read as an algebra. Now by definition. -/
+theorem denote_eq_fold {Γ : Ctx} {A : Type} (p : Plan Γ A) (γ : Env Γ) :
+    denote p γ = denoteAlg.fold p γ := rfl
+
+/-- **`sub` is a fold**, at the function-space carrier. -/
+theorem sub_eq_fold {Γ Δ : Ctx} {A : Type} (p : Plan Γ A) (σ : Sub Γ Δ) :
+    Plan.sub p σ = Plan.subAlg.fold p Δ σ := rfl
+
+/-- **`under σ` is a fold**, back into the syntax. -/
+theorem under_eq_fold {Γ : Ctx} {A : Type} (σ : Sig) (p : Plan Γ A) :
+    Plan.under σ p = (Plan.underAlg σ).fold p := rfl
+
+/-- **`graft` is a fold**, at the continuation-accumulating carrier. -/
+theorem graft_eq_fold {Γ : Ctx} {A B : Type} (p : Plan Γ A) (k : Cont Γ A B) :
+    Plan.graft p k = (Plan.graftAlg B).fold p k := rfl
+
+/-! ## Uniqueness, which is what initiality buys -/
 
 /-- …and `denote` is *the* homomorphism into that carrier: anything satisfying
 the five morphism equations is `denote`. `fold_unique` at `denoteAlg`, which is
@@ -189,12 +93,28 @@ theorem denote_unique (h : {Γ : Ctx} → {A : Type} → Plan Γ A → Env Γ �
        h (.askC c q k) = fun γ => Dlg.ask c q (fun x => h k (Env.cons x γ)))
     (hask : ∀ {Γ A} c s e (k : Plan (c :: Γ) A),
        h (.ask c s e k) = fun γ => Dlg.ask c (s.withPrompt (e γ)) (fun x => h k (Env.cons x γ)))
-    (hcase : ∀ {Γ A T} [FinEnum T] [DecidableEq T] (e : Expr Γ T) (arms : T → Plan Γ A),
-       h (.case e arms) = fun γ => h (arms (e γ)) γ)
-    (hdyn : ∀ {Γ A B} (e : Expr Γ B) (f : B → Plan Γ A),
-       h (.dyn e f) = fun γ => h (f (e γ)) γ) :
+    (hcase : ∀ {Γ A} (t : Tag) (e : Expr Γ t.El) (arms : t.El → Plan Γ A),
+       h (.case t e arms) = fun γ => h (arms (e γ)) γ)
+    (hdyn : ∀ {Γ A} (b : Code) (e : Expr Γ (El b)) (f : El b → Plan Γ A),
+       h (.dyn b e f) = fun γ => h (f (e γ)) γ) :
     ∀ {Γ : Ctx} {A : Type} (p : Plan Γ A) (γ : Env Γ), h p γ = denote p γ := by
   intro Γ A p γ
   rw [denoteAlg.fold_unique h hret haskC hask hcase hdyn p, ← denote_eq_fold]
+
+/-- Likewise for the grading: anything satisfying `level`'s five equations *is*
+`level`. The statement the package's `level_*` simp lemmas amount to, said
+once. -/
+theorem level_unique (h : {Γ : Ctx} → {A : Type} → Plan Γ A → Level)
+    (hret : ∀ {Γ A} (e : Expr Γ A), h (.ret e) = Level.batch)
+    (haskC : ∀ {Γ A} c q (k : Plan (c :: Γ) A), h (.askC c q k) = h k)
+    (hask : ∀ {Γ A} c s e (k : Plan (c :: Γ) A),
+       h (.ask c s e k) = max Level.pipeline (h k))
+    (hcase : ∀ {Γ A} (t : Tag) (e : Expr Γ t.El) (arms : t.El → Plan Γ A),
+       h (.case t e arms) = max Level.branch (Finset.univ.sup fun x => h (arms x)))
+    (hdyn : ∀ {Γ A} (b : Code) (e : Expr Γ (El b)) (f : El b → Plan Γ A),
+       h (.dyn b e f) = Level.dynamic) :
+    ∀ {Γ : Ctx} {A : Type} (p : Plan Γ A), h p = level p := by
+  intro Γ A p
+  rw [levelAlg.fold_unique h hret haskC hask hcase hdyn p, ← level_eq_fold]
 
 end Agentic.Core

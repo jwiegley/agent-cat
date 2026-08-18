@@ -193,13 +193,15 @@
 
 <p>A meaning of this kind cannot be examined. The continuation inside a dialogue is a function from an answer type that is not finite, so its branches cannot be enumerated, its questions cannot be listed, and its cost cannot be priced. That is the right posture for a specification and an unusable one for a tool. The representation exists in order to be read, analysed, and executed.</p>
 
-<pre><code><span class="kw">inductive</span> Plan : Ctx → Type → Type 1 <span class="kw">where</span>
-  | ret  (e : Expr Γ A)                                                 <span class="cm">-- answer with a pure function of what is known</span>
-  | askC (c) (q : Q c)                          (k : Plan (c :: Γ) A)   <span class="cm">-- a closed question</span>
-  | ask  (c) (s : Q.Shape c) (e : Expr Γ String) (k : Plan (c :: Γ) A)  <span class="cm">-- words built from earlier answers</span>
-  | case (e : Expr Γ T) (arms : T → Plan Γ A)                           <span class="cm">-- finite branching, every arm present</span>
-  | dyn  (e : Expr Γ (El c)) (f : El c → Plan Γ A)                      <span class="cm">-- a plan computed from an unbounded answer</span>
-<span class="cm">-- Agentic/Core/Plan.lean:197</span></code></pre>
+<pre><code><span class="kw">inductive</span> PlanF (A : Type) : Ctx → Type <span class="kw">where</span>
+  | ret  (e : Expr Γ A)                                                  <span class="cm">-- answer with a pure function of what is known</span>
+  | askC (c) (q : Q c)                          (k : PlanF A (c :: Γ))   <span class="cm">-- a closed question</span>
+  | ask  (c) (s : Q.Shape c) (e : Expr Γ String) (k : PlanF A (c :: Γ))  <span class="cm">-- words built from earlier answers</span>
+  | case (t : Tag) (e : Expr Γ t.El) (arms : t.El → PlanF A Γ)           <span class="cm">-- finite branching, every arm present</span>
+  | dyn  (b : Code) (e : Expr Γ (El b)) (f : El b → PlanF A Γ)           <span class="cm">-- a plan computed from an unbounded answer</span>
+
+<span class="kw">abbrev</span> Plan (Γ : Ctx) (A : Type) : Type := PlanF A Γ
+<span class="cm">-- Agentic/Core/Plan.lean:387, :445</span></code></pre>
 
 <p>Each node binds the answer it obtains, so a plan reads as a sequence of bindings and the context <code>Γ</code> lists the answers in scope. Two decisions in this type do the work.</p>
 

@@ -252,6 +252,113 @@ taken. -/
 
 end Sub
 
+/-! ## The closed tag universe a branching may name
+
+`case` branches on a *finite* tag, and the elaborator has only ever emitted two
+of them (`Agentic/Core/Dsl/Check.lean`'s three `case` sites: a flag, a verdict's
+classifier, and a loop's settled-or-not). So the tag is written as a closed
+two-constructor object rather than as a quantified `[FinEnum T] [DecidableEq T]`,
+which is what the Haskell port already does (`data Tag t where TBool; TVTag`,
+`haskell/src/Agentic/Plan.hs:468`).
+
+Three things follow, and each is the reason the closure is worth its churn.
+
+* **`Plan` lands in `Type 0`.** A constructor that quantifies over `Type` forces
+  the inductive up a universe; `Tag` and `Code` are ordinary data, so neither
+  `case` nor `dyn` does. (That is *necessary* and not sufficient — see the note
+  on `PlanF` below, where the third cause is recorded.)
+* **No `FinEnum` in the syntax at all.** The hygiene note that used to live on
+  the `case` constructor is discharged rather than argued: `Agentic/Core/Certify.lean`'s
+  zero-axiom claim is about `Plan`'s whole transitive graph, and after the
+  closure that graph contains no enumeration, no `Fintype` and no `Finset`. The
+  enumerations move to the *analyses*, where a `Finset.univ` was always
+  admissible.
+* **The two signatures become literally the same.** `Tag`, `Tag.El` and
+  `Tag.values` are `Plan.hs`'s `Tag`, its type index and `tagValues`, and
+  `tagValues` was written by hand to reproduce this package's `FinEnum` order.
+  `Tag.finEnum_toList` below is the machine-checked statement that it does. -/
+
+/-- `[[VTag]]` = the finite classifier of a verdict: the three answers that a
+`case` can branch on.
+
+The classifier and not the verdict itself, because `Verdict` is
+`WithZero (FreeMonoid Objection)` and is infinite: what a workflow branches on
+is *whether* there were objections, while the objections themselves ride in the
+environment into the arm that was taken. That split — a finite tag decides the
+shape, the unbounded payload flows on — is the whole of why the domain sits
+below the monadic rung. -/
+inductive VTag where
+  /-- Nothing was objected to. -/
+  | approve
+  /-- Objections were raised. -/
+  | object
+  /-- The addressee would not answer. -/
+  | declined
+  deriving DecidableEq, Repr, Inhabited
+
+/-- The three tags, enumerated. Written out rather than derived because there is
+no `deriving FinEnum`; `Fintype VTag` comes back from Mathlib's
+`FinEnum`-to-`Fintype` instance, so every `Finset.univ` in
+`Agentic/Core/Level.lean` and `Agentic/Core/Cost.lean` is unchanged. -/
+instance instFinEnumVTag : FinEnum VTag :=
+  FinEnum.ofList [.approve, .object, .declined] (by intro t; cases t <;> simp)
+
+/-- The two-element tag type, enumerated. Mathlib has `Fintype Bool` but no
+`FinEnum Bool`.
+
+**`scoped`, because `Bool` is not this package's type.** `test/Pollution.lean`
+exists to keep this package from making claims about `Bool`, `Prop` and `ℕ` on
+everyone who transitively imports it; a `scoped` instance is a claim made only
+where the package's vocabulary has been opened. -/
+scoped instance instFinEnumBool : FinEnum Bool :=
+  FinEnum.ofList [false, true] (by decide)
+
+/-- `[[Tag]]` = the tags a branching may name. Two, and the elaborator emits
+exactly these two. -/
+inductive Tag where
+  /-- A yes/no branching — `Plan.caseB`, and the surface's `if`. -/
+  | bool
+  /-- A verdict's three-way classifier — `Plan.caseV`, and the surface's
+  `approved`/`objected`/`no answer`. -/
+  | vtag
+  deriving DecidableEq, Repr, Inhabited
+
+/-- `[[Tag.El t]]` = the type the tag names. A `def` and not an `abbrev`, so
+that nothing here installs a `FinEnum` on `Bool` by unification. -/
+def Tag.El : Tag → Type
+  | .bool => Bool
+  | .vtag => VTag
+
+/-- Each tag's type is enumerated — in the *analyses*, which is where an
+enumeration was always allowed to live. -/
+instance instFinEnumTagEl : (t : Tag) → FinEnum t.El
+  | .bool => instFinEnumBool
+  | .vtag => instFinEnumVTag
+
+/-- …and has decidable equality. -/
+instance instDecidableEqTagEl : (t : Tag) → DecidableEq t.El
+  | .bool => inferInstanceAs (DecidableEq Bool)
+  | .vtag => inferInstanceAs (DecidableEq VTag)
+
+/-- …and is inhabited, which a probe rendering needs. -/
+instance instInhabitedTagEl : (t : Tag) → Inhabited t.El
+  | .bool => inferInstanceAs (Inhabited Bool)
+  | .vtag => inferInstanceAs (Inhabited VTag)
+
+/-- `[[Tag.values t]]` = the tag's inhabitants in enumeration order — the list
+every analysis that crosses a branching folds over, and `Plan.hs`'s `tagValues`
+transliterated. -/
+def Tag.values : (t : Tag) → List t.El
+  | .bool => [false, true]
+  | .vtag => [.approve, .object, .declined]
+
+/-- **The hand-written order is the enumeration's order**, at both tags. This is
+what keeps `Explain.planLines` byte-identical across the closure, and what the
+Haskell's `tagValues` is checked against. -/
+@[simp] theorem Tag.finEnum_toList : ∀ t : Tag, FinEnum.toList t.El = t.values
+  | .bool => by decide
+  | .vtag => by decide
+
 /-! ## The five term formers -/
 
 /-- `[[Plan Γ A]] = Env Γ → Dlg A`: a first-order, intrinsically-typed term
@@ -268,17 +375,23 @@ denote (case e arms)  γ = denote (arms (e γ)) γ
 denote (dyn  e f)     γ = denote (f (e γ))    γ
 ```
 
-`Type 1` because `case` and `dyn` quantify over a `Type`; `A` itself is a
-`Type`, so `denote` lands in `Dlg A : Type` and nothing about the meaning moves
-up a universe. -/
-inductive Plan : Ctx → Type → Type 1 where
+**`Type 0`, and it took three closures to get there.** The two the design
+papers name are `case`'s tag and `dyn`'s answer type: a constructor that
+quantifies over `Type` forces the inductive up a universe, and both did. The
+third is not in any of them and is the reason this declaration is written with
+the *answer type as a parameter*: `A` was an **index**, bound afresh in every
+constructor, and a constructor argument whose type is `Type` forces `Type 1` by
+itself — closing `case` and `dyn` alone leaves `Plan` exactly where it was. `A`
+is constant across all five formers, so it can be a parameter, and `Plan Γ A`
+below is the package's spelling of `PlanF A Γ`, unchanged at every use site. -/
+inductive PlanF (A : Type) : Ctx → Type where
   /-- The unit: answer with a pure function of what is known. -/
-  | ret {Γ : Ctx} {A : Type} (e : Expr Γ A) : Plan Γ A
+  | ret {Γ : Ctx} (e : Expr Γ A) : PlanF A Γ
   /-- **Ask a closed question and bind the answer.** The generator, and the only
   effect. Its question mentions nothing in scope, which is what gives a
   `Const S`-valued analysis a domain — the batch rung is recorded in the term or
   it is not well defined (kernel §2.3, `attack-adequacy` F1). -/
-  | askC {Γ : Ctx} {A : Type} (c : Code) (q : Q c) (k : Plan (c :: Γ) A) : Plan Γ A
+  | askC {Γ : Ctx} (c : Code) (q : Q c) (k : PlanF A (c :: Γ)) : PlanF A Γ
   /-- **Ask a question whose *words* are built from the answers so far, and bind
   the answer.** The node the domain forces: the guide's text goes into the
   reviewer's prompt, the draft into the review, the objections into the
@@ -292,44 +405,166 @@ inductive Plan : Ctx → Type → Type 1 where
   term says so, but because there is no place in the node for it to flow. The
   shape sequence of a `pipeline` plan is therefore a *projection of the syntax*
   (`shapes_eq_of_le_pipeline`, which carries no hypothesis). -/
-  | ask {Γ : Ctx} {A : Type} (c : Code) (s : Q.Shape c) (e : Expr Γ String)
-      (k : Plan (c :: Γ) A) : Plan Γ A
+  | ask {Γ : Ctx} (c : Code) (s : Q.Shape c) (e : Expr Γ String)
+      (k : PlanF A (c :: Γ)) : PlanF A Γ
   /-- **Finite-tag branching, both arms in the term.** `Selective.branch`, with
-  the payload riding in the context into whichever arm is taken. `T` is a
-  `FinEnum`, so the branch structure is a genuine finite tree and the cost of
-  the not-taken arm is enumerable rather than lost.
+  the payload riding in the context into whichever arm is taken. The tag is a
+  `Tag` — an inhabitant of the closed two-element universe above, not a
+  quantified `Type` — so the branch structure is a genuine finite tree, the cost
+  of the not-taken arm is enumerable rather than lost, and the *syntax* mentions
+  no enumeration at all.
 
-  **`FinEnum` and not `Fintype`, for one reason and it is recorded here.**
-  Mathlib's `Fintype` holds a `Finset`, a `Finset` holds a `Multiset`, and a
-  `Multiset` is a quotient — so a syntax whose `case` node mentions `Fintype`
-  depends on `propext` and `Quot.sound` *as a type*, before any theorem about it
-  is stated. `Agentic/Core/Certify.lean` claims an empty axiom set for
-  `certify_sound`, and that claim is about the whole transitive graph, of which
-  this constructor is a part. `FinEnum` says the same thing — a bijection with
-  `Fin n` — out of `Fin`, `Equiv` and `List`, none of which is a quotient, and
-  Mathlib derives `Fintype` from it (priority 100), so every `Finset.univ` in
-  `Agentic/Core/Level.lean` and `Agentic/Core/Cost.lean` is unchanged. The
-  enumeration adds an order that the semantics does not read; nothing below
-  branches on it. -/
-  | case {Γ : Ctx} {A : Type} {T : Type} [FinEnum T] [DecidableEq T]
-      (e : Expr Γ T) (arms : T → Plan Γ A) : Plan Γ A
+  **What the closure discharges.** Mathlib's `Fintype` holds a `Finset`, a
+  `Finset` holds a `Multiset`, and a `Multiset` is a quotient — so a syntax
+  whose `case` node mentions `Fintype` depends on `propext` and `Quot.sound`
+  *as a type*, before any theorem about it is stated, and
+  `Agentic/Core/Certify.lean`'s empty axiom set for `certify_sound` is a claim
+  about this constructor's whole transitive graph. The package used to answer
+  that with `FinEnum`, which is a bijection with `Fin n` built out of `Fin`,
+  `Equiv` and `List` and is quotient-free. `Tag` answers it more simply: there
+  is nothing to be hygienic about, because there is nothing there. The
+  enumeration `Tag.values` lives in the analyses, where a `Finset.univ` was
+  always admissible. -/
+  | case {Γ : Ctx} (t : Tag) (e : Expr Γ t.El) (arms : t.El → PlanF A Γ) : PlanF A Γ
   /-- **Quarantined: a plan computed from an unbounded answer.** The one
   higher-order node, kept because directive (1) asks for it and no finite tag
   can reach it. Its presence is what makes a plan dynamic, and the absence of an
   analysis homomorphism here is a theorem to be proved rather than a hole to be
-  papered over. -/
-  | dyn {Γ : Ctx} {A : Type} {B : Type} (e : Expr Γ B) (f : B → Plan Γ A) : Plan Γ A
+  papered over.
 
-/-- The two-element tag type, enumerated, so that `Plan.caseB` is `Plan.case` at
-`Bool` and nothing new. Mathlib has `Fintype Bool` but no `FinEnum Bool`.
+  Its answer type is a `Code` and not a quantified `Type`, for the universe
+  reason above. Nothing is lost: `El .text` is `String`, which is infinite, and
+  `Cost.no_finite_bill_set_at_dyn` — the witness that no finite bill set
+  describes a dynamic plan — is stated at exactly that former. -/
+  | dyn {Γ : Ctx} (b : Code) (e : Expr Γ (El b)) (f : El b → PlanF A Γ) : PlanF A Γ
 
-**`scoped`, because `Bool` is not this package's type.** `test/Pollution.lean`
-exists to keep this package from making claims about `Bool`, `Prop` and `ℕ` on
-everyone who transitively imports it; a `scoped` instance is a claim made only
-where the package's vocabulary has been opened, which is the smallest scope in
-which `caseB` can be written at all. -/
-scoped instance instFinEnumBool : FinEnum Bool :=
-  FinEnum.ofList [false, true] (by decide)
+/-- `[[Plan Γ A]]` = `PlanF A Γ`: the package's spelling, context first. The
+answer type is `PlanF`'s parameter because a `Type`-valued *index* would put the
+syntax back in `Type 1` (see `PlanF`'s docstring); it is constant across the
+five formers, so nothing is given up by fixing it. -/
+abbrev Plan (Γ : Ctx) (A : Type) : Type := PlanF A Γ
+
+namespace Plan
+
+/-! The five formers under the name the package writes them by. Aliases and not
+wrappers: `Plan.ret` *is* `PlanF.ret`, so a `simp` set keyed on one fires on the
+other and every `rfl` that used to close still does. -/
+export PlanF (ret askC ask case dyn)
+
+end Plan
+
+/-! ## The initial algebra: one recursion, and every analysis is an instance of it
+
+`Plan`'s five formers are a signature; every analysis in this package is a
+homomorphism out of the syntax for that signature. `PlanAlg` is that signature's
+algebra, `PlanAlg.fold` the homomorphism it induces, and `PlanAlg.fold_unique`
+initiality — the fold is the *only* homomorphism, so the structural inductions
+the package used to write one per analysis are all the same induction.
+
+It lives here, immediately below the inductive, because it is the recursion
+scheme *of* the inductive: `sub`, `under` and `graft` below are already
+instances of it, and so are `denote` (`Agentic/Core/Denote.lean`), `level`
+(`Agentic/Core/Level.lean`), `codes`, `shapes`, `asks` (`Agentic/Core/Cost.lean`)
+and `size`, `askNodes`, `explain` (`Agentic/Core/Explain.lean`).
+`Agentic/Core/Alg.lean` is where the *equations* between them are stated.
+
+**Universe polymorphism is what makes one record serve every carrier**, and it
+is now polymorphism with nothing to do: every carrier in the table is `Type 0`,
+because closing `case`'s tag and `dyn`'s answer type — and making the answer
+type `PlanF`'s *parameter* rather than an index — put `Plan` and `Cont` there
+too. `PlanAlg` stays stated at `Type v` all the same: `Plan.rec` is
+universe-polymorphic in its motive, the statement costs nothing, and an analysis
+into a large carrier remains writable.
+
+**One analysis does not fit**: `Cost.costM`, whose signature absorbs the level
+bound (`(p : Plan Γ A) → level p ≤ Level.branch → …`) and an algebra carrier may
+not mention `p`. That is the deliberate decision recorded at `Cost.lean`'s C3
+section — "the analysis applies at this rung is the *type* of the fold rather
+than a side condition" — so the honest count is eleven of twelve. -/
+
+universe v
+
+/-- `[[PlanAlg P]]` = an algebra for the `Plan` signature, indexed the way `Plan`
+is: one field per former, with the recursive positions replaced by the carrier.
+
+The five fields *are* the structure a target must carry for an interpretation to
+exist — in this package's own vocabulary, and not in a hierarchy of profunctor
+classes. `ret` is the pure part, `askC` a nullary generator's binding, `ask` a
+unary generator's, `case` the finite copair and `dyn` the one higher-order
+former. -/
+structure PlanAlg (P : Ctx → Type → Type v) where
+  /-- What a pure leaf becomes. -/
+  ret  : {Γ : Ctx} → {A : Type} → Expr Γ A → P Γ A
+  /-- What a closed question and its binding become. -/
+  askC : {Γ : Ctx} → {A : Type} → (c : Code) → Q c → P (c :: Γ) A → P Γ A
+  /-- What an open question — shape in the term, words computed — and its
+  binding become. -/
+  ask  : {Γ : Ctx} → {A : Type} → (c : Code) → Q.Shape c → Expr Γ String → P (c :: Γ) A → P Γ A
+  /-- What a finite branch becomes: the copair over the tag's type. -/
+  case : {Γ : Ctx} → {A : Type} → (t : Tag) → Expr Γ t.El → (t.El → P Γ A) → P Γ A
+  /-- What the quarantined dynamic former becomes. -/
+  dyn  : {Γ : Ctx} → {A : Type} → (b : Code) → Expr Γ (El b) → (El b → P Γ A) → P Γ A
+
+namespace PlanAlg
+
+variable {P : Ctx → Type → Type v} (alg : PlanAlg P)
+
+/-- `[[alg.fold p]]` = the homomorphism out of the syntax. **One** structural
+recursion, in place of one per analysis.
+
+`{A : Type}` is bound before the recursion because it is `PlanF`'s parameter:
+the recursion is on the `Ctx` index at a fixed answer type, which is what every
+one of the twelve analyses does anyway. -/
+def fold {A : Type} : {Γ : Ctx} → Plan Γ A → P Γ A
+  | _, .ret e => alg.ret e
+  | _, .askC c q k => alg.askC c q (fold k)
+  | _, .ask c s e k => alg.ask c s e (fold k)
+  | _, .case t e arms => alg.case t e (fun x => fold (arms x))
+  | _, .dyn b e f => alg.dyn b e (fun x => fold (f x))
+
+@[simp] theorem fold_ret {Γ : Ctx} {A : Type} (e : Expr Γ A) :
+    alg.fold (Plan.ret e) = alg.ret e := rfl
+
+@[simp] theorem fold_askC {Γ : Ctx} {A : Type} (c : Code) (q : Q c) (k : Plan (c :: Γ) A) :
+    alg.fold (Plan.askC c q k) = alg.askC c q (alg.fold k) := rfl
+
+@[simp] theorem fold_ask {Γ : Ctx} {A : Type} (c : Code) (s : Q.Shape c) (e : Expr Γ String)
+    (k : Plan (c :: Γ) A) :
+    alg.fold (Plan.ask c s e k) = alg.ask c s e (alg.fold k) := rfl
+
+@[simp] theorem fold_case {Γ : Ctx} {A : Type} (t : Tag) (e : Expr Γ t.El)
+    (arms : t.El → Plan Γ A) :
+    alg.fold (Plan.case t e arms) = alg.case t e (fun x => alg.fold (arms x)) := rfl
+
+@[simp] theorem fold_dyn {Γ : Ctx} {A : Type} (b : Code) (e : Expr Γ (El b))
+    (f : El b → Plan Γ A) :
+    alg.fold (Plan.dyn b e f) = alg.dyn b e (fun x => alg.fold (f x)) := rfl
+
+/-- **Initiality: the fold is the only homomorphism.** Anything that satisfies
+the five equations *is* the fold.
+
+This is the theorem the package used to prove one instance at a time. Given it,
+a new analysis costs an algebra record and its five equations — which are `rfl`
+if the analysis was written as a fold — and every invariance result about it is
+a fusion argument rather than a fresh induction. -/
+theorem fold_unique (h : {Γ : Ctx} → {A : Type} → Plan Γ A → P Γ A)
+    (hret : ∀ {Γ A} (e : Expr Γ A), h (.ret e) = alg.ret e)
+    (haskC : ∀ {Γ A} c q (k : Plan (c :: Γ) A), h (.askC c q k) = alg.askC c q (h k))
+    (hask : ∀ {Γ A} c s e (k : Plan (c :: Γ) A), h (.ask c s e k) = alg.ask c s e (h k))
+    (hcase : ∀ {Γ A} (t : Tag) (e : Expr Γ t.El) (arms : t.El → Plan Γ A),
+       h (.case t e arms) = alg.case t e (fun x => h (arms x)))
+    (hdyn : ∀ {Γ A} (b : Code) (e : Expr Γ (El b)) (f : El b → Plan Γ A),
+       h (.dyn b e f) = alg.dyn b e (fun x => h (f x))) :
+    ∀ {Γ : Ctx} {A : Type} (p : Plan Γ A), h p = alg.fold p := by
+  intro Γ A p
+  induction p with
+  | ret e => exact hret e
+  | askC c q k ih => rw [haskC, ih]; rfl
+  | ask c s e k ih => rw [hask, ih]; rfl
+  | case t e arms ih => rw [hcase]; exact congrArg _ (funext fun x => ih x)
+  | dyn b e f ih => rw [hdyn]; exact congrArg _ (funext fun x => ih x)
+
+end PlanAlg
 
 namespace Plan
 
@@ -337,63 +572,118 @@ variable {Γ Δ Θ : Ctx} {A B C : Type}
 
 /-! ## Renaming and substitution: `Plan` is a presheaf on contexts -/
 
+/-- Renaming, as an algebra.
+
+Its carrier is the *function space* `∀ Δ, Sub Γ Δ → Plan Δ A` — the ordinary
+fold-with-accumulator move, and the reason `Sub.lift` appears in the `askC` and
+`ask` clauses: the algebra's action on its accumulator is "reach past one more
+binder". -/
+def subAlg : PlanAlg (fun Γ A => ∀ Δ : Ctx, Sub Γ Δ → Plan Δ A) where
+  ret e := fun _ σ => .ret (fun δ => e (σ δ))
+  askC c q k := fun _ σ => .askC c q (k _ (Sub.lift σ))
+  ask c s e k := fun _ σ => .ask c s (fun δ => e (σ δ)) (k _ (Sub.lift σ))
+  case t e arms := fun _ σ => .case t (fun δ => e (σ δ)) (fun x => arms x _ σ)
+  dyn b e f := fun _ σ => .dyn b (fun δ => e (σ δ)) (fun x => f x _ σ)
+
 /-- `[[sub p σ]]` = `p` read in a bigger (or otherwise related) context.
 
 **Morphism equation** (`denote_sub`, proved in `Denote.lean`):
 `denote (sub p σ) δ = denote p (σ δ)`. Weakening and substitution are the same
-operation here, because a context morphism is a function on environments. -/
-def sub {A : Type} : {Γ Δ : Ctx} → Plan Γ A → Sub Γ Δ → Plan Δ A
-  | _, _, .ret e, σ => .ret (fun δ => e (σ δ))
-  | _, _, .askC c q k, σ => .askC c q (sub k (Sub.lift σ))
-  | _, _, .ask c s e k, σ => .ask c s (fun δ => e (σ δ)) (sub k (Sub.lift σ))
-  | _, _, @Plan.case _ _ T fT dT e arms, σ =>
-      @Plan.case _ _ T fT dT (fun δ => e (σ δ)) (fun t => sub (arms t) σ)
-  | _, _, .dyn e f, σ => .dyn (fun δ => e (σ δ)) (fun b => sub (f b) σ)
+operation here, because a context morphism is a function on environments.
+
+`subAlg.fold` and not a recursion of its own: there is one structural recursion
+on `Plan` in this package, and the five equations below say what this instance
+of it does. -/
+def sub {A : Type} : {Γ Δ : Ctx} → Plan Γ A → Sub Γ Δ → Plan Δ A :=
+  fun p σ => subAlg.fold p _ σ
+
+/-! ### The five defining equations of `sub`, each a `rfl` -/
+
+theorem sub_ret {Γ Δ : Ctx} (e : Expr Γ A) (σ : Sub Γ Δ) :
+    sub (Plan.ret e) σ = .ret (fun δ => e (σ δ)) := rfl
+
+theorem sub_askC {Γ Δ : Ctx} (c : Code) (q : Q c) (k : Plan (c :: Γ) A) (σ : Sub Γ Δ) :
+    sub (Plan.askC c q k) σ = .askC c q (sub k (Sub.lift σ)) := rfl
+
+theorem sub_ask {Γ Δ : Ctx} (c : Code) (s : Q.Shape c) (e : Expr Γ String)
+    (k : Plan (c :: Γ) A) (σ : Sub Γ Δ) :
+    sub (Plan.ask c s e k) σ = .ask c s (fun δ => e (σ δ)) (sub k (Sub.lift σ)) := rfl
+
+theorem sub_case {Γ Δ : Ctx} (t : Tag) (e : Expr Γ t.El) (arms : t.El → Plan Γ A) (σ : Sub Γ Δ) :
+    sub (Plan.case t e arms) σ = .case t (fun δ => e (σ δ)) (fun x => sub (arms x) σ) := rfl
+
+theorem sub_dyn {Γ Δ : Ctx} (b : Code) (e : Expr Γ (El b)) (f : El b → Plan Γ A) (σ : Sub Γ Δ) :
+    sub (Plan.dyn b e f) σ = .dyn b (fun δ => e (σ δ)) (fun x => sub (f x) σ) := rfl
 
 /-- Renaming along the identity is the identity: the first functor law of the
 presheaf `Γ ↦ Plan Γ A`. -/
 @[simp] theorem sub_id (p : Plan Γ A) : sub p Sub.id = p := by
   induction p with
   | ret e => rfl
-  | askC c q k ih => simp only [sub, Sub.lift_id, ih]
-  | ask c s e k ih => simp only [sub, Sub.lift_id, ih]
-  | case e arms ih => simp only [sub]; exact congrArg _ (funext fun t => ih t)
-  | dyn e f ih => simp only [sub]; exact congrArg _ (funext fun b => ih b)
+  | askC c q k ih => simp only [sub_askC, Sub.lift_id, ih]
+  | ask c s e k ih => simp only [sub_ask, Sub.lift_id, ih]
+  | case t e arms ih => simp only [sub_case]; exact congrArg _ (funext fun x => ih x)
+  | dyn b e f ih => simp only [sub_dyn]; exact congrArg _ (funext fun x => ih x)
 
 /-- Renaming composes: the second functor law. -/
 theorem sub_comp (p : Plan Γ A) (σ : Sub Γ Δ) (τ : Sub Δ Θ) :
     sub (sub p σ) τ = sub p (Sub.comp σ τ) := by
   induction p generalizing Δ Θ with
   | ret e => rfl
-  | askC c q k ih => simp only [sub, Sub.lift_comp]; exact congrArg _ (ih _ _)
-  | ask c s e k ih => simp only [sub, Sub.lift_comp]; exact congrArg _ (ih _ _)
-  | case e arms ih => simp only [sub]; exact congrArg _ (funext fun t => ih t _ _)
-  | dyn e f ih => simp only [sub]; exact congrArg _ (funext fun b => ih b _ _)
+  | askC c q k ih => simp only [sub_askC, Sub.lift_comp]; exact congrArg _ (ih _ _)
+  | ask c s e k ih => simp only [sub_ask, Sub.lift_comp]; exact congrArg _ (ih _ _)
+  | case t e arms ih => simp only [sub_case]; exact congrArg _ (funext fun x => ih x _ _)
+  | dyn b e f ih => simp only [sub_dyn]; exact congrArg _ (funext fun x => ih x _ _)
 
 /-! ## Scope: `under σ` is a fold and a monoid action -/
 
-/-- `[[under σ p]]` = `p` with every question relabelled by `σ`.
+/-- Relabelling, as an algebra: what `under σ` (just below) does at each former.
 
 **Morphism equation** (`denote_under`, proved in `Denote.lean`):
 `denote (under σ p) γ = Dlg.under σ (denote p γ)` — the plan-level scope
 operator is the dialogue-level one, transported along the meaning. A *fold*,
 defined where the recursion's target lives, and not a constructor: the
-package's own no-weakening-constructor rule is what condemns `scopeT`. -/
-def under {A : Type} (σ : Sig) : {Γ : Ctx} → Plan Γ A → Plan Γ A
-  | _, .ret e => .ret e
-  | _, .askC c q k => .askC c (σ.onQ c q) (under σ k)
-  | _, .ask c s e k => .ask c (σ c s) e (under σ k)
-  | _, @Plan.case _ _ T fT dT e arms => @Plan.case _ _ T fT dT e (fun t => under σ (arms t))
-  | _, .dyn e f => .dyn e (fun b => under σ (f b))
+package's own no-weakening-constructor rule is what condemns `scopeT`.
+
+`PlanAlg` at the carrier `P Γ A = Plan Γ A`, which is what "a fold back into the
+syntax" means: only the two question formers do anything, and each does the one
+thing `σ` says. -/
+def underAlg (σ : Sig) : PlanAlg (fun Γ A => Plan Γ A) where
+  ret e := .ret e
+  askC c q k := .askC c (σ.onQ c q) k
+  ask c s e k := .ask c (σ c s) e k
+  case t e arms := .case t e arms
+  dyn b e f := .dyn b e f
+
+/-- `[[under σ p]]` = `p` with every question relabelled by `σ`. -/
+def under {A : Type} (σ : Sig) : {Γ : Ctx} → Plan Γ A → Plan Γ A :=
+  fun p => (underAlg σ).fold p
+
+/-! ### The five defining equations of `under`, each a `rfl` -/
+
+theorem under_ret (σ : Sig) (e : Expr Γ A) : under σ (Plan.ret e) = .ret e := rfl
+
+theorem under_askC (σ : Sig) (c : Code) (q : Q c) (k : Plan (c :: Γ) A) :
+    under σ (Plan.askC c q k) = .askC c (σ.onQ c q) (under σ k) := rfl
+
+theorem under_ask (σ : Sig) (c : Code) (s : Q.Shape c) (e : Expr Γ String)
+    (k : Plan (c :: Γ) A) :
+    under σ (Plan.ask c s e k) = .ask c (σ c s) e (under σ k) := rfl
+
+theorem under_case (σ : Sig) (t : Tag) (e : Expr Γ t.El) (arms : t.El → Plan Γ A) :
+    under σ (Plan.case t e arms) = .case t e (fun x => under σ (arms x)) := rfl
+
+theorem under_dyn (σ : Sig) (b : Code) (e : Expr Γ (El b)) (f : El b → Plan Γ A) :
+    under σ (Plan.dyn b e f) = .dyn b e (fun x => under σ (f x)) := rfl
 
 /-- **Action law 1**: `under 1 = id`. -/
 @[simp] theorem under_idSig (p : Plan Γ A) : under idSig p = p := by
   induction p with
   | ret e => rfl
-  | askC c q k ih => simp only [under, idSig_onQ, ih]
-  | ask c s e k ih => simp only [under, idSig, ih]
-  | case e arms ih => simp only [under]; exact congrArg _ (funext fun t => ih t)
-  | dyn e f ih => simp only [under]; exact congrArg _ (funext fun b => ih b)
+  | askC c q k ih => simp only [under_askC, idSig_onQ, ih]
+  | ask c s e k ih => simp only [under_ask, idSig, ih]
+  | case t e arms ih => simp only [under_case]; exact congrArg _ (funext fun x => ih x)
+  | dyn b e f ih => simp only [under_dyn]; exact congrArg _ (funext fun x => ih x)
 
 /-- **Action law 2**: `under σ ∘ under τ = under (σ ∘ τ)`. With `under_idSig`
 this says relabellings act on plans; it is `Agentic.actR_compose` at this
@@ -402,10 +692,10 @@ theorem under_under (σ τ : Sig) (p : Plan Γ A) :
     under σ (under τ p) = under (compSig σ τ) p := by
   induction p with
   | ret e => rfl
-  | askC c q k ih => simp only [under, compSig_onQ, ih]
-  | ask c s e k ih => simp only [under, compSig, ih]
-  | case e arms ih => simp only [under]; exact congrArg _ (funext fun t => ih t)
-  | dyn e f ih => simp only [under]; exact congrArg _ (funext fun b => ih b)
+  | askC c q k ih => simp only [under_askC, compSig_onQ, ih]
+  | ask c s e k ih => simp only [under_ask, compSig, ih]
+  | case t e arms ih => simp only [under_case]; exact congrArg _ (funext fun x => ih x)
+  | dyn b e f ih => simp only [under_dyn]; exact congrArg _ (funext fun x => ih x)
 
 /-- **Innermost wins, at the operator the author actually writes.** Nesting one
 model scope inside another — what the surface writes
@@ -427,10 +717,10 @@ theorem under_sub (σ : Sig) (p : Plan Γ A) (τ : Sub Γ Δ) :
     under σ (sub p τ) = sub (under σ p) τ := by
   induction p generalizing Δ with
   | ret e => rfl
-  | askC c q k ih => simp only [sub, under]; exact congrArg _ (ih _)
-  | ask c s e k ih => simp only [sub, under]; exact congrArg _ (ih _)
-  | case e arms ih => simp only [sub, under]; exact congrArg _ (funext fun t => ih t _)
-  | dyn e f ih => simp only [sub, under]; exact congrArg _ (funext fun b => ih b _)
+  | askC c q k ih => simp only [sub_askC, under_askC]; exact congrArg _ (ih _)
+  | ask c s e k ih => simp only [sub_ask, under_ask]; exact congrArg _ (ih _)
+  | case t e arms ih => simp only [sub_case, under_case]; exact congrArg _ (funext fun x => ih x _)
+  | dyn b e f ih => simp only [sub_dyn, under_dyn]; exact congrArg _ (funext fun x => ih x _)
 
 /-! ## Sequencing is grafting -/
 
@@ -443,9 +733,9 @@ Context-polymorphic because the leaves of a plan do *not* all sit in `Γ`: each
 how a continuation written against `Γ` reaches the leaf, and the `Expr Δ A` is
 the value the leaf produced — as an expression, not as a value, which is
 precisely why grafting need not go through `dyn`. -/
-abbrev Cont (Γ : Ctx) (A B : Type) : Type 1 := ∀ Δ : Ctx, Sub Γ Δ → Expr Δ A → Plan Δ B
+abbrev Cont (Γ : Ctx) (A B : Type) : Type := ∀ Δ : Ctx, Sub Γ Δ → Expr Δ A → Plan Δ B
 
-/-- `[[graft p k]]` = `p` with every `ret` leaf replaced by `k` at that leaf.
+/-- Sequencing, as an algebra: what `graft` (just below) does at each former.
 
 **This is sequencing, and it is substitution, not a constructor** (kernel §2.4:
 "`>>=` is substitution"). Its morphism equation is `denote_graft` in
@@ -453,14 +743,47 @@ abbrev Cont (Γ : Ctx) (A B : Type) : Type 1 := ∀ Δ : Ctx, Sub Γ Δ → Expr
 leaf, then `denote (graft p k) γ = denote p γ >>= fun a => K a γ`. Grafting is
 strictly more general than `bind`, because the leaf's continuation may also read
 the answers bound between the root and the leaf — which is what `bind` cannot
-see and what makes a plan a *term* rather than a tree of closures. -/
-def graft {B : Type} : {Γ : Ctx} → {A : Type} → Plan Γ A → Cont Γ A B → Plan Γ B
-  | _, _, .ret e, k => k _ Sub.id e
-  | _, _, .askC c q p, k => .askC c q (graft p (fun Δ σ e => k Δ (Sub.comp Sub.wk σ) e))
-  | _, _, .ask c s d p, k => .ask c s d (graft p (fun Δ σ e => k Δ (Sub.comp Sub.wk σ) e))
-  | _, _, @Plan.case _ _ T fT dT d arms, k =>
-      @Plan.case _ _ T fT dT d (fun t => graft (arms t) k)
-  | _, _, .dyn d f, k => .dyn d (fun b => graft (f b) k)
+see and what makes a plan a *term* rather than a tree of closures.
+
+Its carrier is the function space `P Γ A = Cont Γ A B → Plan Γ B`, the same
+fold-with-accumulator move `subAlg` makes. The `askC` clause is
+`fun rec k => .askC c q (rec (fun Δ σ e => k Δ (Sub.comp Sub.wk σ) e))` — so
+"rebuild the continuation with one more weakening" is literally the algebra
+acting on its accumulator, which is a better account of the bookkeeping than any
+comment about it. -/
+def graftAlg (B : Type) : PlanAlg (fun Γ A => Cont Γ A B → Plan Γ B) where
+  ret e := fun k => k _ Sub.id e
+  askC c q rec := fun k => .askC c q (rec (fun Δ σ e => k Δ (Sub.comp Sub.wk σ) e))
+  ask c s d rec := fun k => .ask c s d (rec (fun Δ σ e => k Δ (Sub.comp Sub.wk σ) e))
+  case t d arms := fun k => .case t d (fun x => arms x k)
+  dyn b d f := fun k => .dyn b d (fun x => f x k)
+
+/-- `[[graft p k]]` = `p` with every `ret` leaf replaced by `k` at that leaf.
+`graftAlg B`'s fold; the five equations below are its clauses. -/
+def graft {B : Type} : {Γ : Ctx} → {A : Type} → Plan Γ A → Cont Γ A B → Plan Γ B :=
+  fun p k => (graftAlg B).fold p k
+
+/-! ### The five defining equations of `graft`, each a `rfl` -/
+
+theorem graft_ret {B : Type} (e : Expr Γ A) (k : Cont Γ A B) :
+    graft (Plan.ret e) k = k _ Sub.id e := rfl
+
+theorem graft_askC {B : Type} (c : Code) (q : Q c) (p : Plan (c :: Γ) A) (k : Cont Γ A B) :
+    graft (Plan.askC c q p) k
+      = .askC c q (graft p (fun Δ σ e => k Δ (Sub.comp Sub.wk σ) e)) := rfl
+
+theorem graft_ask {B : Type} (c : Code) (s : Q.Shape c) (d : Expr Γ String)
+    (p : Plan (c :: Γ) A) (k : Cont Γ A B) :
+    graft (Plan.ask c s d p) k
+      = .ask c s d (graft p (fun Δ σ e => k Δ (Sub.comp Sub.wk σ) e)) := rfl
+
+theorem graft_case {B : Type} (t : Tag) (d : Expr Γ t.El) (arms : t.El → Plan Γ A)
+    (k : Cont Γ A B) :
+    graft (Plan.case t d arms) k = .case t d (fun x => graft (arms x) k) := rfl
+
+theorem graft_dyn {B : Type} (b : Code) (d : Expr Γ (El b)) (f : El b → Plan Γ A)
+    (k : Cont Γ A B) :
+    graft (Plan.dyn b d f) k = .dyn b d (fun x => graft (f x) k) := rfl
 
 /-- `[[mapP f p]] = f <$> [[p]]`: the functorial action, derived from `graft`
 and — the point — **without `dyn`**, so mapping a plan does not move its rung.
@@ -495,8 +818,8 @@ from an answer, which is the definition of the dynamic rung. Everything the
 domain actually does with an answer — putting it into the next prompt
 (`ask`), branching on a finite classifier of it (`case`), folding a panel of
 them (`zipWith`) — is available without it. -/
-def bindP (p : Plan Γ A) (k : A → Plan Γ B) : Plan Γ B :=
-  graft p (fun _ σ e => .dyn e (fun a => sub (k a) σ))
+def bindP {c : Code} (p : Plan Γ (El c)) (k : El c → Plan Γ B) : Plan Γ B :=
+  graft p (fun _ σ e => .dyn c e (fun a => sub (k a) σ))
 
 /-! ## Authoring forms -/
 
@@ -513,36 +836,13 @@ def ask1 (c : Code) (s : Q.Shape c) (e : Expr Γ String) : Plan Γ (El c) :=
 `Bool` is the two-element `Fintype`, so this is `case` and nothing new; the
 incumbent's `gateT` is this with `f = ret ()`. -/
 def caseB (e : Expr Γ Bool) (t f : Plan Γ A) : Plan Γ A :=
-  .case e (fun b => cond b t f)
+  .case .bool e (fun b => cond b t f)
 
 end Plan
 
-/-! ## The finite classifier of a verdict -/
+/-! ## The finite classifier of a verdict
 
-/-- `[[VTag]]` = the finite classifier of a verdict: the three answers that a
-`case` can branch on.
-
-The classifier and not the verdict itself, because `Verdict` is
-`WithZero (FreeMonoid Objection)` and is infinite: what a workflow branches on
-is *whether* there were objections, while the objections themselves ride in the
-environment into the arm that was taken. That split — a finite tag decides the
-shape, the unbounded payload flows on — is the whole of why the domain sits
-below the monadic rung. -/
-inductive VTag where
-  /-- Nothing was objected to. -/
-  | approve
-  /-- Objections were raised. -/
-  | object
-  /-- The addressee would not answer. -/
-  | declined
-  deriving DecidableEq, Repr, Inhabited
-
-/-- The three tags, enumerated. Written out rather than derived because `case`
-asks for a `FinEnum` and there is no `deriving FinEnum`; `Fintype VTag` comes
-back from Mathlib's `FinEnum`-to-`Fintype` instance, so nothing downstream
-notices. -/
-instance instFinEnumVTag : FinEnum VTag :=
-  FinEnum.ofList [.approve, .object, .declined] (by intro t; cases t <;> simp)
+`VTag` itself is declared above, beside `Tag`, because `Plan.case` names it. -/
 
 /-- **Morphism equation.** `[[Verdict.tag]]` is the classifying map onto the
 three-element tag set: refusal to `declined`, the unit to `approve`, and every
@@ -597,7 +897,7 @@ variable {Γ Δ : Ctx} {A B C : Type}
 /-- Branching on a verdict's tag: `case` at the finite classifier, with the
 verdict itself still available to every arm as an expression. -/
 def caseV (e : Expr Γ Verdict) (arms : VTag → Plan Γ A) : Plan Γ A :=
-  .case (fun γ => Verdict.tag (e γ)) arms
+  .case .vtag (fun γ => Verdict.tag (e γ)) arms
 
 /-! ## Panels -/
 

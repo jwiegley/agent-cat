@@ -20,7 +20,7 @@
 -- == What is not here
 --
 -- No @Dlg@: @Plan.trace ω p γ = Dlg.trace ω (denote p γ)@, and the composite's
--- clauses are exactly the @simp@ lemmas at @Denote.lean:123@–@:141@, so the
+-- clauses are exactly the @simp@ lemmas at @Denote.lean:131@–@:149@, so the
 -- fused fold ('traceIn') /is/ the definition rather than a shortcut.
 --
 -- No memo table, no @pin@, no @worldOf@, no @Price@ polymorphism, no
@@ -331,7 +331,7 @@ trace w = traceIn w ENil
 -- > traceIn w y (PAskC c q k)    = Event c q a : traceIn w (ECons a y) k
 -- > traceIn w y (PAsk c s e k)   = Event c q a : traceIn w (ECons a y) k
 -- > traceIn w y (PCase _ e arms) = traceIn w y (arms (e y))
--- > traceIn w y (PDyn e f)       = traceIn w y (f (e y))
+-- > traceIn w y (PDyn _ e f)     = traceIn w y (f (e y))
 --
 -- Three things this fold has to get right, all of which the corpus catches:
 --
@@ -341,7 +341,7 @@ trace w = traceIn w ENil
 --   the environment __before__ the answer is bound, so a splice reads what was
 --   already answered and never what this question will answer;
 -- * @case@ and @dyn@ record nothing. The branch taken is the whole of their
---   contribution (@Denote.lean:58@: the two share a meaning clause on purpose).
+--   contribution (@Denote.lean:60@: the two share a meaning clause on purpose).
 traceIn :: World -> Env g -> Plan g a -> Trace
 traceIn _ _ (PRet _) = []
 traceIn w y (PAskC c q k) =
@@ -352,7 +352,7 @@ traceIn w y (PAsk c s e k) =
       a = worldAnswer w c q
    in Event c q a : traceIn w (ECons a y) k
 traceIn w y (PCase _ e arms) = traceIn w y (arms (e y))
-traceIn w y (PDyn e f) = traceIn w y (f (e y))
+traceIn w y (PDyn _ e f) = traceIn w y (f (e y))
 
 -- | @Plan.run@ in the empty context — the answer rather than the transcript.
 -- No part of the oracle's record, but free from the same fold and useful in a
@@ -360,7 +360,7 @@ traceIn w y (PDyn e f) = traceIn w y (f (e y))
 runPlan :: World -> Plan '[] a -> a
 runPlan w = runIn w ENil
 
--- | @Plan.run ω p γ@ (@Denote.lean:104@), fused through @denote@ the same way
+-- | @Plan.run ω p γ@ (@Denote.lean:114@), fused through @denote@ the same way
 -- 'traceIn' is.
 runIn :: World -> Env g -> Plan g a -> a
 runIn _ y (PRet e) = e y
@@ -372,13 +372,13 @@ runIn w y (PAsk c s e k) =
       a = worldAnswer w c q
    in runIn w (ECons a y) k
 runIn w y (PCase _ e arms) = runIn w y (arms (e y))
-runIn w y (PDyn e f) = runIn w y (f (e y))
+runIn w y (PDyn _ e f) = runIn w y (f (e y))
 
 -- ---------------------------------------------------------------------------
 -- The bills
 -- ---------------------------------------------------------------------------
 
--- | Lean's @Key = (c : Code) × Q c@ (@Cost.lean:90@), flattened to first-order
+-- | Lean's @Key = (c : Code) × Q c@ (@Cost.lean:91@), flattened to first-order
 -- data so that it can be compared.
 --
 -- Equality is on all five components and on nothing else. In particular the
@@ -416,13 +416,13 @@ instance Ord EventKey where
         AddrTool i -> (1, i)
         AddrPerson i -> (2, i)
 
--- | @Event.key@ (@Cost.lean:110@): the question an event put, forgetting the
+-- | @Event.key@ (@Cost.lean:111@): the question an event put, forgetting the
 -- answer.
 eventKey :: Event -> EventKey
 eventKey (Event c q _) =
   EventKey (fromSCode c) (qAddressee q) (qScope q) (qPrompt q) (qDraw q)
 
--- | @Multiplicative.toAdd (billFresh tick t)@, which @Cost.lean:263@
+-- | @Multiplicative.toAdd (billFresh tick t)@, which @Cost.lean:277@
 -- (@billFresh_tick@) proves is @t.length@: __charge every event__.
 billFresh :: Trace -> Integer
 billFresh = fromIntegral . length

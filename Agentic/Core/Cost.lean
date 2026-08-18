@@ -6,6 +6,7 @@ import Mathlib.Data.Finset.Lattice.Fold
 import Mathlib.Data.Finset.Max
 import Mathlib.Data.List.Dedup
 import Mathlib.Data.Multiset.Bind
+import Mathlib.Data.Multiset.Lattice
 import Mathlib.Data.Set.Finite.Basic
 
 /-!
@@ -26,7 +27,7 @@ is graded by `Agentic.Core.level`:
 |---|---|---|
 | `batch` | the exact question list, independent of world *and* of environment | `asks_eq_of_le_batch` |
 | `pipeline` | the exact count and code sequence, and the exact sequence of question *shapes* as a fold of the term alone; and, under `PricesByShape`, the exact bill | `codes_eq_of_le_pipeline`, `shapes_eq_trace_of_le_pipeline`, `bill_exact_pipeline` |
-| `branch` | a finite `CostTree` containing the bill; bounds; best and worst *achievable* case attained | `bill_mem_leaves`, `minFold_le_bill`, `exists_min_bill` |
+| `branch` | a finite `Multiset` of possible bills containing the bill; bounds; best and worst *achievable* case attained | `bill_mem_leaves`, `minFold_le_bill`, `exists_min_bill` |
 | `dynamic` | nothing, and a witness says so: at `unbounded` no finite set of bills exists at all | `no_finite_bill_set_at_dyn` |
 
 ## Three corrections to the kernel, each machine-checked
@@ -59,8 +60,8 @@ is graded by `Agentic.Core.level`:
    `Φ : Plan → S` returns the bill" is true at `dynamic` but is equally true at
    `branch` (`no_static_bill_at_branch`), so it does not separate the rungs. The
    statement that does is `no_finite_bill_set_at_dyn`: a `dyn` plan is
-   *exhibited* whose possible bills form no finite set, hence which admits no
-   `CostTree` of any shape — precisely the negation of C3, and the honest
+   *exhibited* whose possible bills form no finite set, hence for which no
+   `costM` of any shape exists — precisely the negation of C3, and the honest
    replacement for `Frag`. Note the quantifier: this is a witness at the rung,
    not a claim about every term the rung contains. A `dyn` whose function is
    constant costs exactly what its body costs; what `dynamic` says is that the
@@ -309,20 +310,44 @@ analysis is defined everywhere, returns `none` outside its fragment, and the
 theorem `…_isSome_of_le_…` is the totality statement that the level fold is
 sound. No type index, no dependent elimination, no `Frag`. -/
 
+/-- The code sequence, as an algebra. `codes` just below is its fold.
+
+`none` at `case` and `dyn` — where the sequence is not fixed by the term — and a
+fold of the term *alone* elsewhere: no environment, no world.
+
+`Const (Option (List Code))` is the carrier, and the two `none`
+clauses are where the analysis stops. -/
+def codesAlg : PlanAlg (fun _ _ => Option (List Code)) where
+  ret _ := some []
+  askC c _ k := (c :: ·) <$> k
+  ask c _ _ k := (c :: ·) <$> k
+  case := fun _ _ _ => none
+  dyn _ _ _ := none
+
 /-- `[[codes p]]` = the sequence of answer codes `p` will ask for, if that
-sequence is fixed by the term.
+sequence is fixed by the term. -/
+def codes : {Γ : Ctx} → {A : Type} → Plan Γ A → Option (List Code) :=
+  fun p => codesAlg.fold p
 
-`none` at `case` and `dyn` — where it is not — and a fold of the term *alone*
-elsewhere: no environment, no world. -/
-def codes : {Γ : Ctx} → {A : Type} → Plan Γ A → Option (List Code)
-  | _, _, .ret _ => some []
-  | _, _, .askC c _ k => (c :: ·) <$> codes k
-  | _, _, .ask c _ _ k => (c :: ·) <$> codes k
-  | _, _, @Plan.case _ _ _ _ _ _ _ => none
-  | _, _, .dyn _ _ => none
+/-! ### The five defining equations of `codes`, each a `rfl` -/
 
-/-- `[[shapes p]]` = the sequence of question *shapes* `p` will put — who is
-asked, under what scope, at which draw — if that sequence is fixed by the term.
+theorem codes_ret {Γ : Ctx} {A : Type} (e : Expr Γ A) : codes (Plan.ret e) = some [] := rfl
+
+theorem codes_askC {Γ : Ctx} {A : Type} (c : Code) (q : Q c) (k : Plan (c :: Γ) A) :
+    codes (Plan.askC c q k) = (c :: ·) <$> codes k := rfl
+
+theorem codes_ask {Γ : Ctx} {A : Type} (c : Code) (s : Q.Shape c) (e : Expr Γ String)
+    (k : Plan (c :: Γ) A) : codes (Plan.ask c s e k) = (c :: ·) <$> codes k := rfl
+
+theorem codes_case {Γ : Ctx} {A : Type} (t : Tag) (e : Expr Γ t.El) (arms : t.El → Plan Γ A) :
+    codes (Plan.case t e arms) = none := rfl
+
+theorem codes_dyn {Γ : Ctx} {A : Type} (b : Code) (e : Expr Γ (El b)) (f : El b → Plan Γ A) :
+    codes (Plan.dyn b e f) = none := rfl
+
+/-- The shape sequence, as an algebra. `shapes` just below is its fold: the
+sequence of question *shapes* `p` will put — who is asked, under what scope, at
+which draw — if that sequence is fixed by the term.
 
 **No environment and no world.** This fold is the payoff of the representation
 repair: an `ask` node carries `s : Q.Shape c` as data, so its shape can be read
@@ -331,15 +356,35 @@ was an `Expr Γ (Q c)`, no such fold could exist — the best available was `ask
 which substitutes `default` answers and is exact only up to shape.
 
 `none` at `case` and `dyn`, where the sequence is not fixed by the term. -/
-def shapes : {Γ : Ctx} → {A : Type} → Plan Γ A → Option (List Shape)
-  | _, _, .ret _ => some []
-  | _, _, .askC c q k => (⟨c, q.shape⟩ :: ·) <$> shapes k
-  | _, _, .ask c s _ k => (⟨c, s⟩ :: ·) <$> shapes k
-  | _, _, @Plan.case _ _ _ _ _ _ _ => none
-  | _, _, .dyn _ _ => none
+def shapesAlg : PlanAlg (fun _ _ => Option (List Shape)) where
+  ret _ := some []
+  askC c q k := (⟨c, q.shape⟩ :: ·) <$> k
+  ask c s _ k := (⟨c, s⟩ :: ·) <$> k
+  case := fun _ _ _ => none
+  dyn _ _ _ := none
 
-/-- `[[asks p γ]]` = the list of questions `p` will put, evaluated with the
-least informative answers.
+/-- `[[shapes p]]` = the sequence of question shapes `p` will put, if that
+sequence is fixed by the term. `shapesAlg.fold`. -/
+def shapes : {Γ : Ctx} → {A : Type} → Plan Γ A → Option (List Shape) :=
+  fun p => shapesAlg.fold p
+
+/-! ### The five defining equations of `shapes`, each a `rfl` -/
+
+theorem shapes_ret {Γ : Ctx} {A : Type} (e : Expr Γ A) : shapes (Plan.ret e) = some [] := rfl
+
+theorem shapes_askC {Γ : Ctx} {A : Type} (c : Code) (q : Q c) (k : Plan (c :: Γ) A) :
+    shapes (Plan.askC c q k) = (⟨c, q.shape⟩ :: ·) <$> shapes k := rfl
+
+theorem shapes_ask {Γ : Ctx} {A : Type} (c : Code) (s : Q.Shape c) (e : Expr Γ String)
+    (k : Plan (c :: Γ) A) : shapes (Plan.ask c s e k) = (⟨c, s⟩ :: ·) <$> shapes k := rfl
+
+theorem shapes_case {Γ : Ctx} {A : Type} (t : Tag) (e : Expr Γ t.El) (arms : t.El → Plan Γ A) :
+    shapes (Plan.case t e arms) = none := rfl
+
+theorem shapes_dyn {Γ : Ctx} {A : Type} (b : Code) (e : Expr Γ (El b)) (f : El b → Plan Γ A) :
+    shapes (Plan.dyn b e f) = none := rfl
+
+/-- The question list, as an algebra. `asks` just below is its fold.
 
 An environment is needed because an `ask` builds its *words* from the answers in
 scope; `default` stands in for those answers, and the two theorems below say
@@ -358,13 +403,41 @@ one, and the environment argument is the visible sign. The genuine folds of the
 term alone are `codes` and `shapes`, which take no environment, and
 `shapes_eq_map_asks` says precisely what `Key.shape` throws away to get from one
 to the other — the words, which is exactly the data `default` was standing in
-for. -/
-def asks : {Γ : Ctx} → {A : Type} → Plan Γ A → Env Γ → Option (List Key)
-  | _, _, .ret _, _ => some []
-  | _, _, .askC c q k, γ => (⟨c, q⟩ :: ·) <$> asks k (.cons default γ)
-  | _, _, .ask c s e k, γ => (⟨c, s.withPrompt (e γ)⟩ :: ·) <$> asks k (.cons default γ)
-  | _, _, @Plan.case _ _ _ _ _ _ _, _ => none
-  | _, _, .dyn _ _, _ => none
+for.
+
+`asksAlg.fold`, at the function-space carrier `P Γ A = Env Γ → Option (List Key)`
+— the environment is the accumulator, and `Env.cons default` is the algebra's
+action on it. -/
+def asksAlg : PlanAlg (fun Γ _ => Env Γ → Option (List Key)) where
+  ret _ := fun _ => some []
+  askC c q k := fun γ => (⟨c, q⟩ :: ·) <$> k (.cons default γ)
+  ask c s e k := fun γ => (⟨c, s.withPrompt (e γ)⟩ :: ·) <$> k (.cons default γ)
+  case := fun _ _ _ => fun _ => none
+  dyn _ _ _ := fun _ => none
+
+/-- `[[asks p γ]]` = the list of questions `p` will put, evaluated with the
+least informative answers. `asksAlg.fold`. -/
+def asks : {Γ : Ctx} → {A : Type} → Plan Γ A → Env Γ → Option (List Key) :=
+  fun p => asksAlg.fold p
+
+/-! ### The five defining equations of `asks`, each a `rfl` -/
+
+theorem asks_ret {Γ : Ctx} {A : Type} (e : Expr Γ A) (γ : Env Γ) :
+    asks (Plan.ret e) γ = some [] := rfl
+
+theorem asks_askC {Γ : Ctx} {A : Type} (c : Code) (q : Q c) (k : Plan (c :: Γ) A) (γ : Env Γ) :
+    asks (Plan.askC c q k) γ = (⟨c, q⟩ :: ·) <$> asks k (.cons default γ) := rfl
+
+theorem asks_ask {Γ : Ctx} {A : Type} (c : Code) (s : Q.Shape c) (e : Expr Γ String)
+    (k : Plan (c :: Γ) A) (γ : Env Γ) :
+    asks (Plan.ask c s e k) γ
+      = (⟨c, s.withPrompt (e γ)⟩ :: ·) <$> asks k (.cons default γ) := rfl
+
+theorem asks_case {Γ : Ctx} {A : Type} (t : Tag) (e : Expr Γ t.El) (arms : t.El → Plan Γ A)
+    (γ : Env Γ) : asks (Plan.case t e arms) γ = none := rfl
+
+theorem asks_dyn {Γ : Ctx} {A : Type} (b : Code) (e : Expr Γ (El b)) (f : El b → Plan Γ A)
+    (γ : Env Γ) : asks (Plan.dyn b e f) γ = none := rfl
 
 /-- `[[asksBill price p γ]]` = the bill read off the term, without running it.
 
@@ -400,10 +473,10 @@ theorem codes_eq_map_shapes (p : Plan Γ A) :
     codes p = (shapes p).map (List.map Shape.code) := by
   induction p with
   | ret e => rfl
-  | askC c q k ih => simp [codes, shapes, ih, Option.map_map, Function.comp_def, Shape.code]
-  | ask c s e k ih => simp [codes, shapes, ih, Option.map_map, Function.comp_def, Shape.code]
-  | case e arms _ => rfl
-  | dyn e f _ => rfl
+  | askC c q k ih => simp [codes_askC, shapes_askC, ih, Option.map_map, Function.comp_def, Shape.code]
+  | ask c s e k ih => simp [codes_ask, shapes_ask, ih, Option.map_map, Function.comp_def, Shape.code]
+  | case t e arms _ => rfl
+  | dyn b e f _ => rfl
 
 /-- **Fusion 2, and in *every* environment.** `shapes` is `asks` read through
 `Key.shape`: the environment `asks` needs is exactly the data `Key.shape` throws
@@ -420,12 +493,12 @@ theorem shapes_eq_map_asks : ∀ {Γ : Ctx} {A : Type} (p : Plan Γ A) (γ : Env
   | ret e => intro γ; rfl
   | askC c q k ih =>
       intro γ
-      simp [shapes, asks, ih (Env.cons default γ), Option.map_map, Function.comp_def, Key.shape]
+      simp [shapes_askC, asks_askC, ih (Env.cons default γ), Option.map_map, Function.comp_def, Key.shape]
   | ask c s e k ih =>
       intro γ
-      simp [shapes, asks, ih (Env.cons default γ), Option.map_map, Function.comp_def, Key.shape]
-  | case e arms _ => intro γ; rfl
-  | dyn e f _ => intro γ; rfl
+      simp [shapes_ask, asks_ask, ih (Env.cons default γ), Option.map_map, Function.comp_def, Key.shape]
+  | case t e arms _ => intro γ; rfl
+  | dyn b e f _ => intro γ; rfl
 
 /-- **C5, first half — and the one induction the three totality theorems now
 share.** The shape fold is total on the pipeline fragment: the level being
@@ -439,11 +512,11 @@ two fusions, and their `absurd … decide` tails go with them. -/
 theorem shapes_isSome_of_le_pipeline (p : Plan Γ A) (h : level p ≤ Level.pipeline) :
     (shapes p).isSome := by
   induction p with
-  | ret e => simp [shapes]
-  | askC c q k ih => simpa [shapes, Option.isSome_map] using ih h
-  | ask c s e k ih => simpa [shapes, Option.isSome_map] using ih (le_of_ask h).2
-  | case e arms _ => exact absurd (le_of_case h).1 (by decide)
-  | dyn e f _ => exact absurd h (by simp only [level_dyn]; decide)
+  | ret e => simp [shapes_ret]
+  | askC c q k ih => simpa [shapes_askC, Option.isSome_map] using ih h
+  | ask c s e k ih => simpa [shapes_ask, Option.isSome_map] using ih (le_of_ask h).2
+  | case t e arms _ => exact absurd (le_of_case h).1 (by decide)
+  | dyn b e f _ => exact absurd h (by simp only [level_dyn]; decide)
 
 /-- The code fold is total there too — a corollary of `codes_eq_map_shapes`, not
 a second induction. -/
@@ -470,14 +543,14 @@ to flow into. -/
 theorem asks_eq_of_le_batch (p : Plan Γ A) (h : level p ≤ Level.batch) :
     ∀ (γ γ' : Env Γ) (ω : Ω), asks p γ = some ((Plan.trace ω p γ').map Event.key) := by
   induction p with
-  | ret e => intro γ γ' ω; simp [asks, Plan.trace]
+  | ret e => intro γ γ' ω; simp [asks_ret, Plan.trace]
   | askC c q k ih =>
     intro γ γ' ω
-    rw [asks, ih h (.cons default γ) (.cons (ω c q) γ') ω]
+    rw [asks_askC, ih h (.cons default γ) (.cons (ω c q) γ') ω]
     simp [Plan.trace_askC, Event.key]
   | ask c s e k _ => exact absurd (le_of_ask h).1 (by decide)
-  | case e arms _ => exact absurd (le_of_case h).1 (by decide)
-  | dyn e f _ => exact absurd h (by simp only [level_dyn]; decide)
+  | case t e arms _ => exact absurd (le_of_case h).1 (by decide)
+  | dyn b e f _ => exact absurd h (by simp only [level_dyn]; decide)
 
 /-- The multiset the kernel names, as an immediate corollary: at `batch` the
 multiset of asked questions is world-independent. (The list equality above says
@@ -528,17 +601,17 @@ node carried its shape. -/
 theorem codes_eq_of_le_pipeline (p : Plan Γ A) (h : level p ≤ Level.pipeline) :
     ∀ (γ : Env Γ) (ω : Ω), codes p = some ((Plan.trace ω p γ).map Event.c) := by
   induction p with
-  | ret e => intro γ ω; simp [codes, Plan.trace]
+  | ret e => intro γ ω; simp [codes_ret, Plan.trace]
   | askC c q k ih =>
     intro γ ω
-    rw [codes, ih h (.cons (ω c q) γ) ω]
+    rw [codes_askC, ih h (.cons (ω c q) γ) ω]
     simp [Plan.trace_askC]
   | ask c s e k ih =>
     intro γ ω
-    rw [codes, ih (le_of_ask h).2 (.cons (ω c (s.withPrompt (e γ))) γ) ω]
+    rw [codes_ask, ih (le_of_ask h).2 (.cons (ω c (s.withPrompt (e γ))) γ) ω]
     simp [Plan.trace_ask]
-  | case e arms _ => exact absurd (le_of_case h).1 (by decide)
-  | dyn e f _ => exact absurd h (by simp only [level_dyn]; decide)
+  | case t e arms _ => exact absurd (le_of_case h).1 (by decide)
+  | dyn b e f _ => exact absurd h (by simp only [level_dyn]; decide)
 
 /-- **`#asks` is constant across worlds at `pipeline`** — the count the owner
 asks for, before the run, with no hypothesis on the price. -/
@@ -598,17 +671,17 @@ node. -/
 theorem shapes_eq_trace_of_le_pipeline (p : Plan Γ A) (h : level p ≤ Level.pipeline) :
     ∀ (γ : Env Γ) (ω : Ω), shapes p = some ((Plan.trace ω p γ).map Event.shape) := by
   induction p with
-  | ret e => intro γ ω; simp [shapes, Plan.trace]
+  | ret e => intro γ ω; simp [shapes_ret, Plan.trace]
   | askC c q k ih =>
     intro γ ω
-    rw [shapes, ih h (.cons (ω c q) γ) ω]
+    rw [shapes_askC, ih h (.cons (ω c q) γ) ω]
     simp [Plan.trace_askC, Event.shape]
   | ask c s e k ih =>
     intro γ ω
-    rw [shapes, ih (le_of_ask h).2 (.cons (ω c (s.withPrompt (e γ))) γ) ω]
+    rw [shapes_ask, ih (le_of_ask h).2 (.cons (ω c (s.withPrompt (e γ))) γ) ω]
     simp [Plan.trace_ask, Event.shape]
-  | case e arms _ => exact absurd (le_of_case h).1 (by decide)
-  | dyn e f _ => exact absurd h (by simp only [level_dyn]; decide)
+  | case t e arms _ => exact absurd (le_of_case h).1 (by decide)
+  | dyn b e f _ => exact absurd h (by simp only [level_dyn]; decide)
 
 /-- …and the world-independence the kernel actually wrote, as its immediate
 corollary: two runs of a `pipeline` plan, in any two worlds and under any two
@@ -661,17 +734,17 @@ in which `asks` is computable from the term. -/
 theorem asks_eq_default (p : Plan Γ A) (h : level p ≤ Level.pipeline) :
     ∀ (γ : Env Γ), asks p γ = some ((Plan.trace ωDefault p γ).map Event.key) := by
   induction p with
-  | ret e => intro γ; simp [asks, Plan.trace]
+  | ret e => intro γ; simp [asks_ret, Plan.trace]
   | askC c q k ih =>
     intro γ
-    rw [asks, ih h (.cons default γ)]
+    rw [asks_askC, ih h (.cons default γ)]
     simp [Plan.trace_askC, Event.key]
   | ask c s e k ih =>
     intro γ
-    rw [asks, ih (le_of_ask h).2 (.cons default γ)]
+    rw [asks_ask, ih (le_of_ask h).2 (.cons default γ)]
     simp [Plan.trace_ask, Event.key]
-  | case e arms _ => exact absurd (le_of_case h).1 (by decide)
-  | dyn e f _ => exact absurd h (by simp only [level_dyn]; decide)
+  | case t e arms _ => exact absurd (le_of_case h).1 (by decide)
+  | dyn b e f _ => exact absurd h (by simp only [level_dyn]; decide)
 
 /-- **Kernel obligation C2's bill, exact and unconditional beyond the price.**
 At `level ≤ pipeline`, with a shape-factoring price, the bill is computed from
@@ -686,90 +759,68 @@ theorem bill_exact_pipeline [Monoid S] {price : Price S} (hp : PricesByShape pri
   rw [asksBill, asks_eq_default p h γ]
   exact congrArg _ (bill_indep_of_le_pipeline hp p h γ γ ωDefault ω)
 
-/-! ## C3 — BRANCH: a finite tree of possible bills -/
+/-! ## C3 — BRANCH: a finite bag of possible bills -/
 
-/-- `[[CostTree S]]` = the branch structure of a plan with **both arms present**,
-its leaves priced: a finite tree, `leaf s ∣ node T f` with `T` a `Fintype`.
+/-- `[[costM price p h γ]]` = the finite bag of every bill `p` can run up: one
+element per path through the branch structure with **both arms present**, priced.
+
+The target is a **monoid semiring** and not a bespoke tree of leaves: `Multiset S`
+is `ℕ⟨S⟩`, the natural-number-weighted formal sums over the price monoid, which
+is the construction `Agentic/Panel.lean` writes `S⟨K⟩` with the coefficient and
+key roles exchanged. The three non-`dyn` clauses are that semiring's operations:
+`{1}` is the multiplicative unit (the point mass at `1`), an `ask` multiplies by
+the point mass at its price, and a `case` is the *sum* — `Multiset.bind` over the
+tag type, which on `ℕ⟨S⟩` is addition of the arms' weightings.
+
+What a cost tree was for is the bag it had at its leaves; the fold produces that
+bag directly, and `Multiset.card` counts the paths — a `Multiset` and not a
+`List` or a `Finset` because the order of a branch's arms is not part of what a
+cost analysis says while the *multiplicity* of a bill is (`Explain.leafBills`
+prints it under that word, and two paths that cost the same are two paths).
 
 Finite because `case`'s tag type is, which is the whole reason `case` is a
-former and `dyn` is quarantined. `Type 1` for the same reason `Plan` is: the
-node quantifies over a `Type`. -/
-inductive CostTree (S : Type) : Type 1 where
-  /-- A path with its bill. -/
-  | leaf : S → CostTree S
-  /-- A branch, with an arm for every tag. -/
-  | node (T : Type) (inst : Fintype T) (f : T → CostTree S) : CostTree S
-
-namespace CostTree
-
-variable {S' : Type}
-
-/-- Repricing every leaf. `[[map g τ]]` = `τ` with `g` applied at each leaf. -/
-def map (g : S → S') : CostTree S → CostTree S'
-  | .leaf s => .leaf (g s)
-  | .node T inst f => .node T inst (fun t => (f t).map g)
-
-/-- `[[leaves τ]]` = the bag of bills the tree admits. Finite by construction,
-which is exactly what `dyn` destroys.
-
-A `Multiset` and not a `List`: the order of a branch's arms is not part of what
-a cost tree says, and `Finset.toList` is noncomputable while `Multiset.bind`
-is not — so the bag is both the honest object and the computable one. -/
-def leaves : CostTree S → Multiset S
-  | .leaf s => {s}
-  | .node T inst f => (@Finset.univ T inst).val.bind (fun t => (f t).leaves)
-
-@[simp] theorem leaves_leaf (s : S) : (CostTree.leaf s).leaves = {s} := rfl
-
-/-- **Morphism equation.** `leaves` is natural in the repricing: repricing the
-tree is repricing its leaves. -/
-@[simp] theorem leaves_map (g : S → S') (τ : CostTree S) :
-    (τ.map g).leaves = τ.leaves.map g := by
-  induction τ with
-  | leaf s => rfl
-  | node T inst f ih =>
-    simp only [map, leaves, Multiset.map_bind]
-    exact congrArg _ (funext fun t => ih t)
-
-end CostTree
-
-/-- `[[costTree price p h γ]]` = the finite tree of every bill `p` can run up.
+former and `dyn` is quarantined; `no_cost_tree_at_dyn` is that finiteness
+failing at `dynamic`.
 
 Defined **only** where it exists: the level bound is an argument, so "the
 analysis applies at this rung" is the type of the fold rather than a side
 condition on a theorem — the `dyn` clause is discharged by `absurd`, not by a
 `none`. This is `E_grade_as_fold_works.lean`'s repair with the totality theorem
-absorbed into the signature.
+absorbed into the signature, and it is why `costM` is the one analysis in this
+package that is not a `PlanAlg.fold`: an algebra carrier may not mention `p`.
 
 ```
-costTree (ret e)       γ = leaf 1
-costTree (askC c q k)  γ = map (price c q *)     (costTree k γ)
-costTree (ask c s e k) γ = map (price c (s.withPrompt (e γ)) *) (costTree k γ)
-costTree (case _ arms) γ = node T (fun t => costTree (arms t) γ)
+costM (ret e)       γ = {1}
+costM (askC c q k)  γ = map (price c q *)                     (costM k γ)
+costM (ask c s e k) γ = map (price c (s.withPrompt (e γ)) *)  (costM k γ)
+costM (case _ arms) γ = Finset.univ.val.bind (fun t => costM (arms t) γ)
 ```
 
 The continuation is analysed under `default` answers. That is harmless because
 an `ask` node writes its shape in the term: the *question* the analysis reads
 may differ from the run's in its words, and a `PricesByShape` price cannot see
 the difference. `bill_mem_leaves` is that argument. -/
-def costTree [CommMonoid S] (price : Price S) :
-    {Γ : Ctx} → {A : Type} → (p : Plan Γ A) → level p ≤ Level.branch → Env Γ → CostTree S
-  | _, _, .ret _, _, _ => .leaf 1
-  | _, _, .askC c q k, h, γ => (costTree price k h (.cons default γ)).map (price c q * ·)
-  | _, _, .ask c s e k, h, γ =>
-      (costTree price k (le_of_ask h).2 (.cons default γ)).map (price c (s.withPrompt (e γ)) * ·)
-  | _, _, @Plan.case _ _ T _ _ _ arms, h, γ =>
-      -- `case` carries a `FinEnum`; the tree carries the `Fintype` Mathlib
-      -- derives from it, which is the same finite set with the order forgotten.
-      .node T inferInstance (fun t => costTree price (arms t) ((le_of_case h).2 t) γ)
-  | _, _, .dyn _ _, h, _ => absurd h (by simp only [level_dyn]; decide)
+def costM [CommMonoid S] (price : Price S) {A : Type} :
+    {Γ : Ctx} → (p : Plan Γ A) → level p ≤ Level.branch → Env Γ → Multiset S
+  | _, .ret _, _, _ => {1}
+  | _, .askC c q k, h, γ => (costM price k h (.cons default γ)).map (price c q * ·)
+  | _, .ask c s e k, h, γ =>
+      (costM price k (le_of_ask h).2 (.cons default γ)).map (price c (s.withPrompt (e γ)) * ·)
+  | _, .case _ _ arms, h, γ =>
+      -- The tag's type is enumerated in the analyses; the bag sums over the
+      -- `Fintype` Mathlib derives from that enumeration, which is the same
+      -- finite set with the order forgotten.
+      Finset.univ.val.bind (fun x => costM price (arms x) ((le_of_case h).2 x) γ)
+  | _, .dyn _ _ _, h, _ => absurd h (by simp only [level_dyn]; decide)
 
 /-- **Kernel obligation C3.** At `level ≤ branch`, with the one hypothesis that
-`pipeline` needs, the bill of *every* run is a leaf of the tree.
+`pipeline` needs, the bill of *every* run is one of the bag's elements.
 
 The kernel writes this as `bill = evalTree (costTree p) (decisions p γ ω)`;
-membership is that statement with the path existentially quantified, and it is
-what the bounds and the budget subtype are proved from.
+membership is that statement with the path existentially quantified — and the
+existential is the whole reason the branch structure need not be carried, which
+is why `costM` returns the bag and not a tree. It is what the bounds and the
+budget subtype are proved from.
 
 The `ask` case is where the shape repair pays: the analysis prices
 `s.withPrompt (e γ')` and the run pays for `s.withPrompt (e γ)`, two questions
@@ -778,25 +829,25 @@ condition on the term. -/
 theorem bill_mem_leaves [CommMonoid S] {price : Price S} (hp : PricesByShape price) :
     ∀ {Γ : Ctx} {A : Type} (p : Plan Γ A) (h : level p ≤ Level.branch),
       ∀ (γ γ' : Env Γ) (ω : Ω),
-        billFresh price (Plan.trace ω p γ) ∈ (costTree price p h γ').leaves := by
+        billFresh price (Plan.trace ω p γ) ∈ costM price p h γ' := by
   intro Γ A p
   induction p with
-  | ret e => intro h γ γ' ω; simp [costTree, Plan.trace]
+  | ret e => intro h γ γ' ω; simp [costM, Plan.trace]
   | askC c q k ih =>
     intro h γ γ' ω
-    simp only [costTree, CostTree.leaves_map, Plan.trace_askC, billFresh_cons]
+    simp only [costM, Plan.trace_askC, billFresh_cons]
     exact Multiset.mem_map_of_mem _ (ih h _ _ ω)
   | ask c s e k ih =>
     intro h γ γ' ω
-    simp only [costTree, CostTree.leaves_map, Plan.trace_ask, billFresh_cons]
+    simp only [costM, Plan.trace_ask, billFresh_cons]
     rw [hp c (s.withPrompt (e γ)) (s.withPrompt (e γ')) rfl]
     exact Multiset.mem_map_of_mem _ (ih (le_of_ask h).2 _ _ ω)
-  | case e arms ih =>
+  | case t e arms ih =>
     intro h γ γ' ω
     rw [Plan.trace, denote_case]
     refine Multiset.mem_bind.mpr ⟨e γ, Finset.mem_univ_val _, ?_⟩
     exact ih (e γ) ((le_of_case h).2 _) γ γ' ω
-  | dyn e f hdyn => intro h; exact absurd h (by simp only [level_dyn]; decide)
+  | dyn b e f hdyn => intro h; exact absurd h (by simp only [level_dyn]; decide)
 
 /-! ### The tropical folds, and the bounds they give -/
 
@@ -804,59 +855,46 @@ section Tropical
 
 variable [CommMonoid S] [LinearOrder S]
 
-/-- `[[minFold τ]]` = the cheapest bill the tree admits: the fold at the
-min-plus tropical semiring, in `WithTop S` because an arm-less branch admits
-none. -/
-def CostTree.minFold : CostTree S → WithTop S
-  | .leaf s => (s : WithTop S)
-  | .node T inst f => (@Finset.univ T inst).inf (fun t => (f t).minFold)
+/-- `[[minFold m]]` = the cheapest bill the bag admits: the fold at the min-plus
+tropical semiring, in `WithTop S` because an arm-less branch admits none — and
+`Multiset.inf ∅ = ⊤` is exactly that "none", printed `—` by `Explain.sayNat?`.
 
-/-- `[[maxFold τ]]` = the dearest bill the tree admits: the fold at the max-plus
+`Multiset.inf` and not `Finset.inf`: the bag is not a set, but `inf` does not
+care about multiplicity, so the two agree wherever both are defined. -/
+def minFold (m : Multiset S) : WithTop S :=
+  Multiset.inf (m.map (fun s : S => (s : WithTop S)))
+
+/-- `[[maxFold m]]` = the dearest bill the bag admits: the fold at the max-plus
 tropical semiring. The pair `(minFold, maxFold)` is the fold at their product,
 which is the interval the doctrine's toolbox row asks for. -/
-def CostTree.maxFold : CostTree S → WithBot S
-  | .leaf s => (s : WithBot S)
-  | .node T inst f => (@Finset.univ T inst).sup (fun t => (f t).maxFold)
+def maxFold (m : Multiset S) : WithBot S :=
+  Multiset.sup (m.map (fun s : S => (s : WithBot S)))
 
 omit [CommMonoid S] in
-theorem CostTree.minFold_le_of_mem (τ : CostTree S) {s : S} (hs : s ∈ τ.leaves) :
-    τ.minFold ≤ (s : WithTop S) := by
-  induction τ with
-  | leaf s' =>
-    rw [CostTree.leaves_leaf, Multiset.mem_singleton] at hs
-    subst hs; exact le_rfl
-  | node T inst f ih =>
-    obtain ⟨t, _, ht⟩ := Multiset.mem_bind.mp hs
-    refine le_trans ?_ (ih t ht)
-    exact Finset.inf_le (f := fun t => (f t).minFold) (Finset.mem_univ t)
+theorem minFold_le_of_mem (m : Multiset S) {s : S} (hs : s ∈ m) :
+    minFold m ≤ (s : WithTop S) :=
+  Multiset.inf_le (Multiset.mem_map_of_mem _ hs)
 
 omit [CommMonoid S] in
-theorem CostTree.le_maxFold_of_mem (τ : CostTree S) {s : S} (hs : s ∈ τ.leaves) :
-    (s : WithBot S) ≤ τ.maxFold := by
-  induction τ with
-  | leaf s' =>
-    rw [CostTree.leaves_leaf, Multiset.mem_singleton] at hs
-    subst hs; exact le_rfl
-  | node T inst f ih =>
-    obtain ⟨t, _, ht⟩ := Multiset.mem_bind.mp hs
-    refine le_trans (ih t ht) ?_
-    exact Finset.le_sup (f := fun t => (f t).maxFold) (Finset.mem_univ t)
+theorem le_maxFold_of_mem (m : Multiset S) {s : S} (hs : s ∈ m) :
+    (s : WithBot S) ≤ maxFold m :=
+  Multiset.le_sup (Multiset.mem_map_of_mem _ hs)
 
-/-- **The bounds are sound**: every run's bill lies in the tree's interval. -/
+/-- **The bounds are sound**: every run's bill lies in the bag's interval. -/
 theorem minFold_le_bill {price : Price S} (hp : PricesByShape price) (p : Plan Γ A)
     (h : level p ≤ Level.branch) (γ : Env Γ) (ω : Ω) :
-    (costTree price p h γ).minFold ≤ ((billFresh price (Plan.trace ω p γ) : S) : WithTop S) :=
-  CostTree.minFold_le_of_mem _ (bill_mem_leaves hp p h γ γ ω)
+    minFold (costM price p h γ) ≤ ((billFresh price (Plan.trace ω p γ) : S) : WithTop S) :=
+  minFold_le_of_mem _ (bill_mem_leaves hp p h γ γ ω)
 
 theorem bill_le_maxFold {price : Price S} (hp : PricesByShape price) (p : Plan Γ A)
     (h : level p ≤ Level.branch) (γ : Env Γ) (ω : Ω) :
-    ((billFresh price (Plan.trace ω p γ) : S) : WithBot S) ≤ (costTree price p h γ).maxFold :=
-  CostTree.le_maxFold_of_mem _ (bill_mem_leaves hp p h γ γ ω)
+    ((billFresh price (Plan.trace ω p γ) : S) : WithBot S) ≤ maxFold (costM price p h γ) :=
+  le_maxFold_of_mem _ (bill_mem_leaves hp p h γ γ ω)
 
 /-- **Best and worst case are attained** — by *worlds*, which is what a budget
 argument needs and what the kernel asks for.
 
-Note what does the work: the tree makes the set of achievable bills finite, and
+Note what does the work: the bag makes the set of achievable bills finite, and
 a nonempty finite set in a linear order has a least element. The kernel's
 version of this theorem attains `minFold`, and that is false
 (`minFold_not_attained`); this is the true statement in its place. -/
@@ -865,7 +903,7 @@ theorem exists_min_bill {price : Price S} (hp : PricesByShape price) (p : Plan �
     ∃ ω₀ : Ω, ∀ ω : Ω,
       billFresh price (Plan.trace ω₀ p γ) ≤ billFresh price (Plan.trace ω p γ) := by
   set f : Ω → S := fun ω => billFresh price (Plan.trace ω p γ) with hf
-  have hsub : Set.range f ⊆ {x | x ∈ (costTree price p h γ).leaves} := by
+  have hsub : Set.range f ⊆ {x | x ∈ costM price p h γ} := by
     rintro _ ⟨ω, rfl⟩
     exact bill_mem_leaves hp p h γ γ ω
   have hfin : (Set.range f).Finite :=
@@ -881,7 +919,7 @@ theorem exists_max_bill {price : Price S} (hp : PricesByShape price) (p : Plan �
     ∃ ω₁ : Ω, ∀ ω : Ω,
       billFresh price (Plan.trace ω p γ) ≤ billFresh price (Plan.trace ω₁ p γ) := by
   set f : Ω → S := fun ω => billFresh price (Plan.trace ω p γ) with hf
-  have hsub : Set.range f ⊆ {x | x ∈ (costTree price p h γ).leaves} := by
+  have hsub : Set.range f ⊆ {x | x ∈ costM price p h γ} := by
     rintro _ ⟨ω, rfl⟩
     exact bill_mem_leaves hp p h γ γ ω
   have hfin : (Set.range f).Finite :=
@@ -910,9 +948,9 @@ theorem level_constBranch : level constBranch ≤ Level.branch := by decide
 theorem bill_constBranch (ω : Ω) :
     billFresh tick (Plan.trace ω constBranch Env.nil) = Multiplicative.ofAdd 1 := rfl
 
-/-- The unreachable arm's bill is a leaf all the same. -/
+/-- The unreachable arm's bill is in the bag all the same. -/
 theorem one_mem_leaves_constBranch :
-    (1 : Multiplicative Nat) ∈ (costTree tick constBranch level_constBranch Env.nil).leaves := by
+    (1 : Multiplicative Nat) ∈ costM tick constBranch level_constBranch Env.nil := by
   decide
 
 /-- **The kernel's attainment claim is false.** The tree's minimum is not
@@ -924,11 +962,11 @@ is that they are tight.
 attained — and the gap between the two is precisely the reachability analysis
 that this kernel does not do (kernel open question 1). -/
 theorem minFold_not_attained (ω : Ω) :
-    (costTree tick constBranch level_constBranch Env.nil).minFold
+    minFold (costM tick constBranch level_constBranch Env.nil)
       ≠ ((billFresh tick (Plan.trace ω constBranch Env.nil) :
           Multiplicative Nat) : WithTop (Multiplicative Nat)) := by
   intro heq
-  have hle := CostTree.minFold_le_of_mem _ one_mem_leaves_constBranch
+  have hle := minFold_le_of_mem _ one_mem_leaves_constBranch
   rw [heq, bill_constBranch] at hle
   revert hle
   decide
@@ -956,7 +994,7 @@ def sizeQ : Q .text := { addressee := .tool "ls", scope := 1, prompt := "how man
 *computed from* the answer: the residue `case` cannot reach, and the reason
 `dyn` is quarantined rather than deleted. -/
 def unbounded : Plan [] Unit :=
-  .askC .text sizeQ (.dyn (fun γ => γ.head.length) (fun n => ticks n))
+  .askC .text sizeQ (.dyn .text (fun γ => γ.head) (fun s => ticks s.length))
 
 theorem level_unbounded : level unbounded = Level.dynamic := rfl
 
@@ -978,7 +1016,7 @@ theorem bill_unbounded (n : Nat) :
 
 /-- **Kernel obligation C4, strengthened — and stated as the witness it is.**
 For the plan `unbounded` there is no finite set of possible bills, so for that
-plan there is no `CostTree`, no interval and no static bill: the answer chooses
+plan there is no `costM`, no interval and no static bill: the answer chooses
 how much work there is, and answers are unbounded.
 
 Read the quantifier carefully. This is a theorem about *one* `dyn` plan, not a
@@ -1005,18 +1043,24 @@ theorem no_finite_bill_set_at_dyn :
     simpa using hab
   exact Set.infinite_range_of_injective hinj (Set.Finite.subset (List.finite_toSet _) hsub)
 
-/-- **Hence C3 does not extend**: no cost tree of any shape describes *this*
-`dyn` plan, because a tree has finitely many leaves. The tree is not merely
-*uncomputable* for it; it does not exist. And a `costTree` defined at `dynamic`
-would have to cover this plan, which is why the fold's signature stops at
-`branch`. -/
+/-- **Hence C3 does not extend**: no cost analysis of any shape describes *this*
+`dyn` plan, because `costM` returns a `Multiset` and a `Multiset` is finite. The
+bag is not merely *uncomputable* for it; it does not exist. And a `costM`
+defined at `dynamic` would have to cover this plan, which is why the fold's
+signature stops at `branch`.
+
+Quantifying over `Multiset` rather than over the cost *tree* this package used
+to carry is a strengthening, not a weakening: a tree's leaves were a `Multiset`,
+so a tree meeting the old statement supplies a bag meeting this one. What the
+old formulation added was the branch structure, and no step of the argument ever
+looked at it — finiteness of the leaf bag is the whole content. -/
 theorem no_cost_tree_at_dyn :
-    ¬ ∃ τ : CostTree (Multiplicative Nat),
-        ∀ ω : Ω, billFresh tick (Plan.trace ω unbounded Env.nil) ∈ τ.leaves := by
-  rintro ⟨τ, hτ⟩
+    ¬ ∃ m : Multiset (Multiplicative Nat),
+        ∀ ω : Ω, billFresh tick (Plan.trace ω unbounded Env.nil) ∈ m := by
+  rintro ⟨m, hm⟩
   refine no_finite_bill_set_at_dyn ?_
   classical
-  exact ⟨τ.leaves.toList, fun ω => Multiset.mem_toList.mpr (hτ ω)⟩
+  exact ⟨m.toList, fun ω => Multiset.mem_toList.mpr (hm ω)⟩
 
 /-- `[[StaticBill price]]` = there is a function of the term alone that returns
 the bill of every run of it. This is the property the kernel's C4 denies at
@@ -1071,18 +1115,21 @@ theorem no_static_bill_at_branch : ¬ StaticBill tick := by
 
 Kernel §4's closing claim — "budgets as types follow from C1–C3 without new
 machinery" — machine-checked. Unlike a budget over a HOAS carrier, the defining
-function exists: `maxFold ∘ costTree` is a computable fold of a first-order
+function exists: `maxFold ∘ costM` is a computable fold of a first-order
 term, needing no `Fintype (El c)` and therefore defined for free-text answers
 (`G_cost_needs_fintype.lean` is what happens otherwise). -/
 
 /-- `[[PlanUpTo price β A]]` = the plans that cannot cost more than `β`: a
-closed plan at or below `branch` whose cost tree's worst leaf is within budget.
+closed plan at or below `branch` whose dearest path is within budget.
 
 Two conditions where there used to be three: "the answers flow only into
-prompts" was the third, and it is now the type of the `ask` node. -/
-def PlanUpTo [CommMonoid S] [LinearOrder S] (price : Price S) (β : S) (A : Type) : Type 1 :=
+prompts" was the third, and it is now the type of the `ask` node.
+
+`Type 0`, like everything else here, since the closed tag universe put `Plan`
+there: the analysis carrier is `Multiset S`, which was always `Type 0`. -/
+def PlanUpTo [CommMonoid S] [LinearOrder S] (price : Price S) (β : S) (A : Type) : Type :=
   { p : Plan [] A // ∃ h : level p ≤ Level.branch,
-      (costTree price p h Env.nil).maxFold ≤ (β : WithBot S) }
+      maxFold (costM price p h Env.nil) ≤ (β : WithBot S) }
 
 /-- **And the budget is honoured, in every world.** The subtype's defining
 condition is about the term; the conclusion is about every run. -/

@@ -70,9 +70,8 @@ import Agentic.Observe (printedValue, render, renderString)
 import Agentic.Plan
   ( askNodes,
     codes,
-    costLeaves,
+    costM,
     costSummary,
-    costTree,
     level,
     levelName,
     size,
@@ -183,12 +182,15 @@ planCmd name raw prog = do
 
 -- | The cost summary, and the fold it is a summary of.
 --
--- @costSummary@ is @(minFold, maxFold, paths)@ over the leaves of the cost
--- tree: one leaf per path through the program, each leaf the number of
--- consultations that path pays for. The two bounds are what a run can be held
--- against — a run whose @billFresh@ falls outside them is a run of a different
--- program — and when they coincide the program has one price rather than a
--- range.
+-- @costSummary@ is @(minFold, maxFold, paths)@ over @costM@'s bag of bills:
+-- one element per path through the program, each the number of consultations
+-- that path pays for. The two bounds are what a run can be held against — a run
+-- whose @billFresh@ falls outside them is a run of a different program — and
+-- when they coincide the program has one price rather than a range.
+--
+-- The bag is sorted before it is printed, because a multiset has no order of
+-- its own to report; @Explain.leafBills@ sorts the same one for the same
+-- reason.
 costCmd :: Text -> Program -> IO ()
 costCmd name prog = do
   say $ name <> ", priced:"
@@ -212,7 +214,7 @@ costCmd name prog = do
   where
     p = progPlan prog
     (mn, mx, paths) = costSummary p
-    leaves = costLeaves (costTree p)
+    leaves = costM p
 
     renderRun (n, k)
       | k == (1 :: Int) = tshow n

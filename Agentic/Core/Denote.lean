@@ -41,11 +41,12 @@ open Plan
 
 /-! ## The fold -/
 
-/-- `[[denote p]] : Env Γ → Dlg A` — **the** meaning function.
+/-- The meaning, as an algebra, at the function-space carrier
+`P Γ A = Env Γ → Dlg A`. `denote` just below is its fold.
 
-Compositional by construction: one clause per former, each of which is the
+Compositional by construction: one field per former, each of which is the
 morphism equation of kernel §2.2, so the equations below are the specification
-and this definition is their solved form.
+and this algebra is their solved form.
 
 ```
 denote (ret e)        γ = .done (e γ)
@@ -61,32 +62,39 @@ both in the term, so the two nodes are distinguished by what can be *analysed*
 about them, not by what they mean. Recording the distinction in the syntax is
 exactly `attack-adequacy` F1's requirement, and it is available here precisely
 because the meaning does not record it. -/
-def denote {A : Type} : {Γ : Ctx} → Plan Γ A → Env Γ → Dlg A
-  | _, .ret e, γ => .done (e γ)
-  | _, .askC c q k, γ => .ask c q (fun x => denote k (.cons x γ))
-  | _, .ask c s e k, γ => .ask c (s.withPrompt (e γ)) (fun x => denote k (.cons x γ))
-  | _, @Plan.case _ _ _ _ _ e arms, γ => denote (arms (e γ)) γ
-  | _, .dyn e f, γ => denote (f (e γ)) γ
+def denoteAlg : PlanAlg (fun Γ A => Env Γ → Dlg A) where
+  ret e := fun γ => Dlg.done (e γ)
+  askC c q k := fun γ => Dlg.ask c q (fun x => k (Env.cons x γ))
+  ask c s e k := fun γ => Dlg.ask c (s.withPrompt (e γ)) (fun x => k (Env.cons x γ))
+  case := fun _ e arms γ => arms (e γ) γ
+  dyn := fun _ e f γ => f (e γ) γ
+
+/-- `[[denote p γ]]` = the dialogue `p` is, under the environment `γ`.
+
+`denoteAlg.fold`: the meaning is the fold like every other analysis, and the
+five clauses of `denoteAlg` are the kernel's five morphism equations read as an
+algebra. The equations below are `rfl` and stay `@[simp]`. -/
+def denote {A : Type} : {Γ : Ctx} → Plan Γ A → Env Γ → Dlg A :=
+  fun p => denoteAlg.fold p
 
 variable {Γ Δ Θ : Ctx} {A B C : Type}
 
 @[simp] theorem denote_ret (e : Expr Γ A) (γ : Env Γ) :
-    denote (Plan.ret e) γ = .done (e γ) := by simp [denote]
+    denote (Plan.ret e) γ = .done (e γ) := rfl
 
 @[simp] theorem denote_askC (c : Code) (q : Q c) (k : Plan (c :: Γ) A) (γ : Env Γ) :
-    denote (Plan.askC c q k) γ = .ask c q (fun x => denote k (.cons x γ)) := by simp [denote]
+    denote (Plan.askC c q k) γ = .ask c q (fun x => denote k (.cons x γ)) := rfl
 
 @[simp] theorem denote_ask (c : Code) (s : Q.Shape c) (e : Expr Γ String) (k : Plan (c :: Γ) A)
     (γ : Env Γ) :
     denote (Plan.ask c s e k) γ
-      = .ask c (s.withPrompt (e γ)) (fun x => denote k (.cons x γ)) := by simp [denote]
+      = .ask c (s.withPrompt (e γ)) (fun x => denote k (.cons x γ)) := rfl
 
-@[simp] theorem denote_case {T : Type} [FinEnum T] [DecidableEq T]
-    (e : Expr Γ T) (arms : T → Plan Γ A) (γ : Env Γ) :
-    denote (Plan.case e arms) γ = denote (arms (e γ)) γ := by simp [denote]
+@[simp] theorem denote_case (t : Tag) (e : Expr Γ t.El) (arms : t.El → Plan Γ A) (γ : Env Γ) :
+    denote (Plan.case t e arms) γ = denote (arms (e γ)) γ := rfl
 
-@[simp] theorem denote_dyn {B : Type} (e : Expr Γ B) (f : B → Plan Γ A) (γ : Env Γ) :
-    denote (Plan.dyn e f) γ = denote (f (e γ)) γ := by simp [denote]
+@[simp] theorem denote_dyn (b : Code) (e : Expr Γ (El b)) (f : El b → Plan Γ A) (γ : Env Γ) :
+    denote (Plan.dyn b e f) γ = denote (f (e γ)) γ := rfl
 
 /-- `Dlg.bind` is the `Monad` instance's `>>=`. A `rfl`, stated so that the
 class morphism equations below can be written in the standard vocabulary. -/
@@ -159,17 +167,17 @@ plan in another context is precomposing its meaning. -/
 @[simp] theorem denote_sub (p : Plan Γ A) :
     ∀ {Δ : Ctx} (σ : Sub Γ Δ) (δ : Env Δ), denote (Plan.sub p σ) δ = denote p (σ δ) := by
   induction p with
-  | ret e => intro Δ σ δ; simp [Plan.sub]
+  | ret e => intro Δ σ δ; simp [Plan.sub_ret]
   | askC c q k ih =>
     intro Δ σ δ
-    simp only [Plan.sub, denote_askC, Dlg.ask.injEq, heq_eq_eq, true_and]
+    simp only [Plan.sub_askC, denote_askC, Dlg.ask.injEq, heq_eq_eq, true_and]
     exact funext fun x => ih (Sub.lift σ) (.cons x δ)
   | ask c s e k ih =>
     intro Δ σ δ
-    simp only [Plan.sub, denote_ask, Dlg.ask.injEq, heq_eq_eq, true_and]
+    simp only [Plan.sub_ask, denote_ask, Dlg.ask.injEq, heq_eq_eq, true_and]
     exact funext fun x => ih (Sub.lift σ) (.cons x δ)
-  | case e arms ih => intro Δ σ δ; simp only [Plan.sub, denote_case]; exact ih _ σ δ
-  | dyn e f ih => intro Δ σ δ; simp only [Plan.sub, denote_dyn]; exact ih _ σ δ
+  | case t e arms ih => intro Δ σ δ; simp only [Plan.sub_case, denote_case]; exact ih _ σ δ
+  | dyn b e f ih => intro Δ σ δ; simp only [Plan.sub_dyn, denote_dyn]; exact ih _ σ δ
 
 /-! ## Scope -/
 
@@ -181,16 +189,16 @@ the meaning; with `Plan.under_idSig` and `Plan.under_under` it says relabellings
 @[simp] theorem denote_under (σ : Sig) (p : Plan Γ A) (γ : Env Γ) :
     denote (Plan.under σ p) γ = Dlg.under σ (denote p γ) := by
   induction p with
-  | ret e => simp [Plan.under]
+  | ret e => simp [Plan.under_ret]
   | askC c q k ih =>
-    simp only [Plan.under, denote_askC, Dlg.under_ask, Dlg.ask.injEq, heq_eq_eq, true_and]
+    simp only [Plan.under_askC, denote_askC, Dlg.under_ask, Dlg.ask.injEq, heq_eq_eq, true_and]
     exact funext fun x => ih _
   | ask c s e k ih =>
-    simp only [Plan.under, denote_ask, Dlg.under_ask, Sig.onQ_withPrompt, Dlg.ask.injEq,
+    simp only [Plan.under_ask, denote_ask, Dlg.under_ask, Sig.onQ_withPrompt, Dlg.ask.injEq,
       heq_eq_eq, true_and]
     exact funext fun x => ih _
-  | case e arms ih => simp only [Plan.under, denote_case]; exact ih _ _
-  | dyn e f ih => simp only [Plan.under, denote_dyn]; exact ih _ _
+  | case t e arms ih => simp only [Plan.under_case, denote_case]; exact ih _ _
+  | dyn b e f ih => simp only [Plan.under_dyn, denote_dyn]; exact ih _ _
 
 /-- Relabelling a plan is precomposition on worlds, at the plan level. -/
 theorem run_under (ω : Ω) (σ : Sig) (p : Plan Γ A) (γ : Env Γ) :
@@ -354,25 +362,25 @@ theorem denote_graft {B : Type} {A : Type} {Γ : Ctx} (p : Plan Γ A) :
   induction p with
   | ret e =>
     intro K k hk γ
-    simp only [Plan.graft, denote_ret, Dlg.bind_done]
+    simp only [Plan.graft_ret, denote_ret, Dlg.bind_done]
     exact hk _ Sub.id e γ
   | askC c q p ih =>
     intro K k hk γ
-    simp only [Plan.graft, denote_askC, Dlg.bind_ask, Dlg.ask.injEq, heq_eq_eq, true_and]
+    simp only [Plan.graft_askC, denote_askC, Dlg.bind_ask, Dlg.ask.injEq, heq_eq_eq, true_and]
     exact funext fun x =>
       ih (fun a δ => K a δ.tail) _ (fun Δ σ e δ => hk Δ _ e δ) (.cons x γ)
   | ask c s d p ih =>
     intro K k hk γ
-    simp only [Plan.graft, denote_ask, Dlg.bind_ask, Dlg.ask.injEq, heq_eq_eq, true_and]
+    simp only [Plan.graft_ask, denote_ask, Dlg.bind_ask, Dlg.ask.injEq, heq_eq_eq, true_and]
     exact funext fun x =>
       ih (fun a δ => K a δ.tail) _ (fun Δ σ e δ => hk Δ _ e δ) (.cons x γ)
-  | case d arms ih =>
+  | case t d arms ih =>
     intro K k hk γ
-    simp only [Plan.graft, denote_case]
+    simp only [Plan.graft_case, denote_case]
     exact ih _ K k hk γ
-  | dyn d f ih =>
+  | dyn b d f ih =>
     intro K k hk γ
-    simp only [Plan.graft, denote_dyn]
+    simp only [Plan.graft_dyn, denote_dyn]
     exact ih _ K k hk γ
 
 /-- **The master square with the hypothesis spent.** At a continuation that comes
@@ -441,15 +449,15 @@ theorem denote_zipWith' (f : A → B → C) (p : Plan Γ A) (q : Plan Γ B) (γ 
 kernel's `den (p ≫= k) γ = den p γ >>= fun a => den (k a) γ`. It holds, and the
 term it holds of contains a `dyn`, which is the honest statement that general
 value-sequencing is the dynamic rung. -/
-@[simp] theorem denote_bindP (p : Plan Γ A) (k : A → Plan Γ B) (γ : Env Γ) :
+@[simp] theorem denote_bindP {c : Code} (p : Plan Γ (El c)) (k : El c → Plan Γ B) (γ : Env Γ) :
     denote (Plan.bindP p k) γ = Dlg.bind (denote p γ) (fun a => denote (k a) γ) := by
   refine denote_graft p (fun a γ' => denote (k a) γ') _ ?_ γ
   intro Δ σ e δ; simp
 
 /-- Sequencing associates, because binding does — the monad law, transported to
 plans as a lemma from the denotation rather than asserted about the syntax. -/
-theorem denote_bindP_assoc {D : Type} (p : Plan Γ A) (k : A → Plan Γ B) (h : B → Plan Γ D)
-    (γ : Env Γ) :
+theorem denote_bindP_assoc {c c' : Code} {D : Type} (p : Plan Γ (El c))
+    (k : El c → Plan Γ (El c')) (h : El c' → Plan Γ D) (γ : Env Γ) :
     denote (Plan.bindP (Plan.bindP p k) h) γ
       = denote (Plan.bindP p (fun a => Plan.bindP (k a) h)) γ := by
   simp [Dlg.bind_assoc]

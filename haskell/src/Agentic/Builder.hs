@@ -577,7 +577,7 @@ one a =
 --
 -- Lean: @checkMembers@ (@Check.lean:345@) elaborates every member at
 -- @.verdict@ — positionally, never by inference — and @Plan.panel@
--- (@Plan.lean:595@) folds them right, from the unit, in member order:
+-- (@Plan.lean:931@) folds them right, from the unit, in member order:
 -- @v₁ * (v₂ * (… * (vₙ * 1)))@ in the verdict monoid, where @declined@
 -- annihilates, @approve@ is the unit and objection lists concatenate. The
 -- monoid is noncommutative on purpose, so the fold's direction is normative.
@@ -1101,7 +1101,7 @@ finishCont acc exh =
 -- every other statement by name while it is pending; here the pairing is the
 -- combinator's shape.
 --
--- Elaboration (@Check.lean:611@ and @702@, @Plan.lean:621@):
+-- Elaboration (@Check.lean:611@ and @702@, @Plan.lean:957@):
 --
 -- * the candidate's kind is the __subject's__ kind, so it is the subject
 --   handle's and not a choice;

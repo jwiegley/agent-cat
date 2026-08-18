@@ -126,7 +126,7 @@ flagship workload:
 | no act ran, and nothing was written    | *none — it is not a theorem*    |
 
 The fourth is the cost report, checked: `agent-cat cost` prints the leaves of
-`Cost.costTree`, and `Cost.bill_mem_leaves` says the bill of every run is one of
+`Cost.costM`, and `Cost.bill_mem_leaves` says the bill of every run is one of
 them, so a run whose bill is not one of them is a run the `IO` layer produced and
 no world can.
 
@@ -489,7 +489,7 @@ A file that cannot be read is refused the same way and with the same code: the
 question `agent-cat` answers is "is there a workflow here", and "there is no file"
 is one of the ways the answer is no.
 
-Continuation-passing, and not by taste: `Plan [] Unit` is a `Type 1` and `IO` is a
+Continuation-passing, and not by taste: `Plan [] Unit` used to be a `Type 1` and `IO` is a
 `Type`-valued monad, so a checked plan cannot be *returned* from `IO` — it is
 passed to what needs it. What `k` is handed with it is the proof
 `level p ≤ Level.branch`, which `Dsl.parseAndCheckRawProgramWith_level_le`

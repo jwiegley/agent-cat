@@ -253,9 +253,9 @@ def main : IO UInt32 := do
     | .ok p =>
       let h := parseAndCheck_level_le _ p ((parseAndCheck_ok_iff _ p).mpr hb)
       let t0 ← IO.monoMsNow
-      let τ := costTree tick p h Env.nil
-      let leaves := Multiset.card τ.leaves
-      let priced := decide (τ.maxFold ≠ ⊥)
+      let τ := costM tick p h Env.nil
+      let leaves := Multiset.card τ
+      let priced := decide (maxFold τ ≠ ⊥)
       let t1 ← IO.monoMsNow
       check s!"the cost tree has 2n+2 leaves at n={maxRevisions}"
         (toString (2 * maxRevisions + 2)) (toString leaves)

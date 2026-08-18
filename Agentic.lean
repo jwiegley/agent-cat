@@ -160,7 +160,7 @@ import Agentic.Core.Level
 -- `batch`, the exact count, code sequence and question *shapes* at `pipeline`
 -- and the exact bill there under `PricesByShape` alone (the kernel's C2 holds
 -- unconditionally now that the `ask` node carries its shape; the side predicate
--- that used to repair it is deleted), a finite `CostTree` at `branch` with sound
+-- that used to repair it is deleted), a finite `Multiset` of bills at `branch` with sound
 -- bounds and attained best/worst achievable bills (the kernel's attainment claim
 -- is refuted as written), and at `dynamic` an exhibited plan admitting no finite
 -- set of bills at all. Plus the scheduling licence at the bill: reordering a
@@ -181,16 +181,23 @@ import Agentic.Core.Cost
 -- is *not* an invariant of that kernel — which is what "the fold classifies
 -- terms, not meanings" means.
 import Agentic.Core.Morphism
--- The initial algebra, stated once: `PlanAlg` is the signature of the five
--- formers, `PlanAlg.fold` the homomorphism it induces out of the syntax, and
--- `PlanAlg.fold_unique` initiality — so the structural inductions the package
--- writes one per analysis are all the same induction, and `denote_unique` is
--- the uniqueness half the kernel's morphism obligations assume and never state.
--- Additive on purpose: `level` and `denote` keep their own recursions and their
--- own equation lemmas, and `level_eq_fold`/`denote_eq_fold` say what they are.
--- Replacing the recursion bodies is a separate change gated on kernel-reduction
--- timing, not on line count — nineteen `decide +kernel` proofs in
--- `Agentic/Core/DslFlagship.lean` reduce through those definitions.
+-- The initial algebra, spent. `PlanAlg` is the signature of the five formers,
+-- `PlanAlg.fold` the homomorphism it induces out of the syntax and
+-- `PlanAlg.fold_unique` initiality — all three stated in `Agentic/Core/Plan.lean`,
+-- next to the inductive whose recursion scheme they are. Eleven of the twelve
+-- structural recursions in this package *are* that fold at an algebra, by
+-- definition: `sub`, `under`, `graft`, `denote`, `level`, `codes`, `shapes`,
+-- `asks`, `size`, `askNodes`, `explain`. Each keeps its five defining equations
+-- as named `rfl` theorems, so the proofs that used to unfold the recursion still
+-- say what they said; `Cost.costM` is the one that does not fit, because its
+-- signature absorbs the level bound and an algebra carrier may not mention `p`.
+-- This module holds what the substitution makes cheap: the `X = fold XAlg`
+-- equations, now `rfl` rather than inductions, and the uniqueness statements —
+-- `denote_unique` being the half the kernel's morphism obligations assume and
+-- never state. The substitution was gated on kernel reduction and not on line
+-- count, because nineteen `decide +kernel` proofs in
+-- `Agentic/Core/DslFlagship.lean` reduce through these definitions; its
+-- elaboration was measured before and after and did not move.
 import Agentic.Core.Alg
 -- The flagship workload, Stage 5: `example/HardenPatch.lean`'s twelve lines as
 -- a `Plan` — guide, a deep-model draft, three review-and-revise rounds over a

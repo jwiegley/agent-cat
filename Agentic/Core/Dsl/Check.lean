@@ -289,7 +289,7 @@ def paramCtx (l : List Code) : Ctx := l.foldl (fun Γ c => c :: Γ) []
 
 /-- One checked function: its parameters, its result, its plan — and the number
 of questions its plan holds, pre-computed for the size guard. -/
-structure FnEntry : Type 1 where
+structure FnEntry : Type where
   /-- The full (possibly dotted) name. -/
   name : String
   /-- The parameters, in source order. -/
@@ -302,7 +302,7 @@ structure FnEntry : Type 1 where
   asks : Nat
 
 /-- The table, in stratified order. -/
-abbrev Fns : Type 1 := List FnEntry
+abbrev Fns : Type := List FnEntry
 
 /-- Look a call head up. -/
 def Fns.find? (fns : Fns) (x : String) : Option FnEntry :=
@@ -524,7 +524,7 @@ def maxRevisions : Nat := 64
 must consume: the name it was bound to, the candidate's kind, and the loop's
 plan. Not a `Binding` — `Ctx` has no code for an `Option` — which is exactly
 why it is carried here instead. -/
-structure Pend (Γ : Ctx) : Type 1 where
+structure Pend (Γ : Ctx) : Type where
   /-- The name the loop was bound to. -/
   name : String
   /-- The candidate's kind. -/

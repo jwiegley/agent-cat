@@ -242,13 +242,13 @@ data Memo = Memo
 -- > PAskC c q k  -- ask-or-memo, then continue with the answer consed on
 -- > PAsk c s e k -- the same, at the question 'withPrompt' builds from what is known
 -- > PCase _ e f  -- select the arm; nothing is asked and nothing is recorded
--- > PDyn e f     -- likewise, and it is here only for totality
+-- > PDyn _ e f   -- likewise, and it is here only for totality
 --
 -- 'PDyn' cannot be reached from @Agentic.Builder@ (no combinator makes one) and
 -- the DSL never elaborates to one (@Check.lean:55@), but it is a former of the
 -- language and this fold is total on the language, so it takes the same clause
 -- @denote@ gives it — the two share a meaning clause on purpose
--- (@Denote.lean:58@).
+-- (@Denote.lean:60@).
 --
 -- __The prompt is evaluated before the answer is bound__, so a splice reads
 -- what was already answered and never what this question will answer. Getting
@@ -273,7 +273,7 @@ execIn w y pl m = case pl of
     (a, m') <- askOrMemo w c q m
     execIn w (ECons a y) k m'
   PCase _ e arms -> execIn w y (arms (e y)) m
-  PDyn e f -> execIn w y (f (e y)) m
+  PDyn _ e f -> execIn w y (f (e y)) m
 
 -- | @Exec.lean:531@ (@execM_ask_hit@) and @:538@ (@execM_ask_miss@), the two
 -- clauses of the @ask@ case, plus the transcript entry both of them make.
