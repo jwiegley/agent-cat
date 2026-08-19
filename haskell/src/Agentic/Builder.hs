@@ -1237,9 +1237,10 @@ exitCont t arms =
 --   @n@ amendments, each round's @caseB@ testing @Verdict.approvedB@ —
 --   approval /exactly/, so a refusal is not a settlement — and the last round
 --   has no @caseB@ and no amend at all;
--- * the whole loop is grafted with 'finishCont', which replicates both arms
---   once per exit of the unroll. That replication is the @(n+1)*(st+un)@ term
---   of @blockAsks@ and the reason @vector-002@ reaches size 92.
+-- * the whole loop is grafted with 'exitCont' at 'TBool', which replicates
+--   both arms once per exit of the unroll. That replication is the
+--   @(n+1)*(st+un)@ term of @blockAsks@ and the reason @vector-002@ reaches
+--   size 92.
 --
 -- The 'Text' argument is the loop result's name: it is printed in the
 -- 'RawBind' and in the 'RawCaseResult' and appears nowhere else, the result

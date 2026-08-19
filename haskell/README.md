@@ -9,7 +9,7 @@ surface a human actually writes — kept honest by replaying a frozen corpus
 produced by the Lean formalization.
 
 Lean is normative. This directory does not ask to be believed on its own
-authority: every claim it makes about the language is checked against 188
+authority: every claim it makes about the language is checked against 189
 request/reply pairs the Lean oracle emitted (`../test/corpus`), and the check
 is two programs you can run in one command each. That corpus is the frozen
 conformance record: each request carries either a `RawProgram` — the same raw
@@ -25,18 +25,18 @@ nix develop -c cabal run tier1
 ```
 
 ```
-tier0: kinds: 44 string, 9 guard, 43 other, 92 checked, 0 ping, 0 unclassified
-tier0: 188 passed, 0 failed, 43 other-refusals (codec-only), of 188 files
-tier1: 28 passed, 0 failed, of 28 cases
+tier0: kinds: 44 string, 9 guard, 43 other, 93 checked, 0 ping, 0 unclassified
+tier0: 189 passed, 0 failed, 43 other-refusals (codec-only), of 189 files
+tier1: 29 passed, 0 failed, of 29 cases
 ```
 
 `tier0` replays every entry through the codec, the guards and the string layer.
-`tier1` **rebuilds** twenty-five of the checked entries, in twenty-eight cases
-— twenty-three in the production surface, the two walked examples in the
-authoring surface above it, and three of the twenty-three a second time in that
-authoring surface — and holds each rebuilt program against the frozen one on
-both fronts: the program it prints, and the whole reply — folds, counts, and one
-trace and two bills per world.
+`tier1` **rebuilds** twenty-six of the checked entries, in twenty-nine cases
+— twenty-three in the production surface, three in the authoring surface above
+it (the two walked examples and the yield vector), and three of the twenty-three
+a second time in that authoring surface — and holds each rebuilt program against
+the frozen one on both fronts: the program it prints, and the whole reply —
+folds, counts, and one trace and two bills per world.
 
 And the library **runs**: `agentic-run` plans, prices and executes the walked
 examples, against a table of canned replies, against a live `agent-deck`
@@ -109,27 +109,29 @@ already replays. Positions are oracle-only throughout, like `message` and
 | entry | rule |
 | --- | --- |
 | `request.string` (44) | `stringOpOf` of the **whole request object** must equal the whole reply value — the object and not three fields, because `fence` takes a `name`, `matchGlob` a `pattern` and `decide` a `decider` and its `needles` |
-| `request.program` (144) | decode, re-encode, and match the request's `program` value |
+| `request.program` (145) | decode, re-encode, and match the request's `program` value |
 | refused with one of the six (9) | `guardCheck` must return that guard and its `n` |
-| refused `other` (43) | the codec round-trip and nothing else — the typing judgment decided these, and it is not ported |
-| checked (92) | `guardCheck` must fire nothing, and `askCounts` must equal `(blockAsks, fnAsks)` |
+| refused `other` (43) | the codec round-trip and nothing else — the typing judgment decided these, and it is not ported. **Read the count honestly:** these 43 entries are checked here as *bytes*, not as refusals. That each is refused at all, and the wording of every message, is held by Lean alone — including the traps the wave-three design named, the shadowing unsettled binder among them — and no Haskell code disagrees with Lean about them because none has an opinion. That is the documented boundary of the no-typing-judgment ruling (`doc/research/connection.md` D10/D11), not a gap this table is hiding |
+| checked (93) | `guardCheck` must fire nothing, and `askCounts` must equal `(blockAsks, fnAsks)` |
 
 ## What tier1 compares
 
-Twenty-five checked entries in twenty-eight cases, rebuilt from their surface
-source — twenty-three in `Agentic.Builder`, the two walked examples in
-`Agentic.Workflow` above it, and three of the twenty-three (`module-000`,
-`battery-144`, `battery-147`) written a second time in `Agentic.Workflow` too —
-and compared whole: no field skipped, a missing or extra key a failure.
+Twenty-six checked entries in twenty-nine cases, rebuilt from their surface
+source — twenty-three in `Agentic.Builder`, three in `Agentic.Workflow` above it
+(the two walked examples and the yield vector), and three of the twenty-three
+(`module-000`, `battery-144`, `battery-147`) written a second time in
+`Agentic.Workflow` too — and compared whole: no field skipped, a missing or
+extra key a failure.
 
 | front | rule |
 | --- | --- |
-| the printed program | `toJSON (progRawOut built)` against `request.program`, positions zeroed on both sides, and the print decoded back and re-encoded so a print no reader accepts fails here. Nineteen cases match name for name; the other five — the two walked examples and the three call vectors rewritten in the authoring surface — match **up to alpha**, both sides' binders canonically renamed first, because the authoring surface generates the names it prints (see below). Function and parameter names are a different namespace and are never renamed, so those five still match them exactly. The renaming is scope-aware — a canonical name is the *level* of the binder that introduced it — so which binding every hole, scrutinee and subject reads stays pinned exactly |
+| the printed program | `toJSON (progRawOut built)` against `request.program`, positions zeroed on both sides, and the print decoded back and re-encoded so a print no reader accepts fails here. Twenty-three cases match name for name; the other six — the two walked examples, the yield vector, and the three call vectors rewritten in the authoring surface — match **up to alpha**, both sides' binders canonically renamed first, because the authoring surface generates the names it prints (see below). Function and parameter names are a different namespace and are never renamed, so those six still match them exactly. The renaming is scope-aware — a canonical name is the *level* of the binder that introduced it — so which binding every hole, scrutinee and subject reads stays pinned exactly |
 | the static folds | `level`, `size`, `askNodes`, `codes`, `costSummary` folded from the elaborated `Plan` |
 | the ask counts | `Agentic.Guards.askCounts` on the *printed* program — week-one code, which is what makes this a cross-check of the builder rather than a second reading of the same term |
 | each world | per `request.worlds` in order: the world re-serialized, its trace event by event (`code`, `addressee`, `scope`, `prompt`, `draw`, `answer`), and `billFresh` / `billMemo` |
 
-Nineteen are chosen to reach every rung and every corner the corpus fixes: all
+The builder-written ones are chosen to reach every rung and every corner the
+corpus fixes: all
 three reachable levels (`batch`, `pipeline`, `branch`), all four answer codes,
 all three parties, draws 0–3, both scope states, `codes` as `null`, `[]` and a
 list, bounded revisions at 0, 1, 2 and 3 amendments including two nested inside
@@ -137,7 +139,8 @@ a settled arm, and both of the only two entries where the memo bill falls below
 the fresh one. The five guard vectors and the refused entries are
 **unrepresentable** in the builder by design; tier0 covers them.
 
-The last two are the **walked examples** — `example-000`, the flagship, and
+Two of the three written in the authoring surface are the **walked examples** —
+`example-000`, the flagship, and
 `example-001`, the smallest thing that is still a workflow. Those two frozen
 entries are not conformance fixtures but *prose*: they are the programs the
 documentation walks. They are written in `Example.Harden` rather than in
@@ -148,7 +151,7 @@ it, and `agentic-run` runs it. Compiling the program twice would let the pinned
 one and the executed one drift and still read as agreement.
 
 They are also **what the authoring surface is for**. `tier1/Cases.hs` stays in
-`Agentic.Builder`'s index-level spelling — those nineteen are conformance
+`Agentic.Builder`'s index-level spelling — those twenty-three are conformance
 fixtures, not prose — but a program a human writes is written in
 `Agentic.Workflow`, and this is that program, verbatim from
 `example/Example/Harden.hs`, whole but for two of the three panel members:
@@ -208,7 +211,10 @@ constructors carry the candidate**: `Settled` the artefact a review approved and
 live in its own arm and in no other, so splicing one arm's binder in the other
 is GHC's own `Variable not in scope`. (`hardenProgram` writes `Unsettled _`
 because it has nothing to say about a patch nobody approved; a program that
-means to *yield* what the capped trips produced now can.) It can be a `case`
+means to *yield* what the capped trips produced now can, and one does — the
+**yield vector**, `tier1/LoopVectors.hs`, the third case tier1 writes in this
+surface, whose unsettled arm logs the candidate at a bound where that candidate
+is the last *amendment* and no longer the first draft.) It can be a `case`
 because a revision's bind *forks*: it runs the rest of the block twice, once
 under `Settled` and once under `Unsettled`, and the two blocks that come back
 are the arms it prints.

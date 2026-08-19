@@ -1841,7 +1841,7 @@ work is finished.
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-18 Tue 15:55]
-:MODIFIED: [2026-08-18 Tue 23:55]
+:MODIFIED: [2026-08-19 Wed 05:20]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -1902,6 +1902,13 @@ doc/research/isaac-workflows.md §6 holds ten yes/no decisions from the incite/a
     "author": "johnw",
     "text": "WAVE 2 COMPLETE and pushed (e47c4c1 + 5f22d09). Fess audit FINDINGS(4), all omissions not falsehoods, all folded; two verification gaps became permanent gates: the three frozen call vectors are tier1 cases now (24/24) and the surface refusals are policy probes (11 checks). Independent verifier corroborated D1's pricing rule via its own oracle probe and rewrote the call vectors in the new surface (up-to-alpha SAME, replies whole SAME). review-lite re-pinned with the movement predicted then verified twice (D1 moves nothing; D8 removes exactly the fetch leaf). WAVE 3 dispatching: the single regeneration event - D3 (revising's yielding Unsettled, refreeze), D4 (revisingOn), D2 (panelText), D7 (four deciders), D5 (world-authored receipts), D6 fail-over - from the three reviewed designs, Lean first, regenerate ONCE, movement gated by d3-d4's predicted table. Attempt counters: none active.",
     "created_at": "2026-08-19T06:55:58Z"
+  },
+  {
+    "id": 138,
+    "issue_id": "acat-isaac-decisions-vtt",
+    "author": "johnw",
+    "text": "WAVE 3 audit: FINDINGS(4), no false claims - the central zero-residual movement claim reproduced at byte level by the auditor (30 entries, 27+5-2, replies moved on 0 of 128; DslFlagship re-pins empty as predicted). Findings folding now (single-owner agent): F1 MEDIUM - D3's yield semantics Lean-proved but never cross-compared (no tier1 case reads the unsettled binder at bound>=1 under objection) -> one new fixture + tier1 29/29; F2 three present-tense finishCont references; F3 one overstating docstring clause in Plan.lean; F4 one honest clause on tier0's codec-only rule for refused-other. Auditor also recorded: zero-warning builds are discipline not gate (-Wall without -Werror), tier0's sixGuards hardening, Shell.hs security review clean (proc never sh -c, program-authored argv, no fabricated answers). Wave-3 commit d63deb9 unpushed pending the fold.",
+    "created_at": "2026-08-19T12:20:00Z"
   }
 ]
 #+end_src

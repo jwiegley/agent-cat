@@ -266,7 +266,11 @@ which is what the Haskell port already does (`data Tag t where TBool; TVTag`,
 the universe was closed at two, and adding it cost exactly what the closure
 promised: one `El` clause, one `values` clause, three instances, one
 `finEnum_toList` case, and nothing at all in `Level`, `Cost` or `Explain`, which
-fold over `Tag.values` generically.
+fold over `Tag.values` generically. `Explain` did gain clauses, and they are the
+closure working rather than an exception to it: `Dsl.RawBlock.revisionBounds`
+traverses the *raw syntax*, so it pays for a new bounded-revision **form** — the
+`revisingOn` source and the `caseEnding` block — and not for the tag that form's
+exit branches on.
 
 Three things follow, and each is the reason the closure is worth its churn.
 

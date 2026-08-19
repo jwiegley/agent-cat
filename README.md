@@ -49,7 +49,7 @@ applies to every program there is.
 ## The conformance boundary
 
 `lake exe conformance-oracle` is a line-delimited JSON process that checks and
-observes `RawProgram`s and exercises the string layer. `test/corpus/` is 188 of
+observes `RawProgram`s and exercises the string layer. `test/corpus/` is 189 of
 its request/reply pairs, committed — so Tier 0 runs with no Lean in the loop.
 
 The corpus is **frozen**, and the requests in it are the specification.

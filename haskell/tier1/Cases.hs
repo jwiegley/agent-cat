@@ -6,6 +6,12 @@
 -- and one more, 'callVectorsW', which rebuilds three of the same entries in
 -- the /authoring/ surface instead: @tier1/Main.hs@ owns every comparison.
 --
+-- One row of the list is not written here and not written in the builder
+-- either: the yield vector's program is 'LoopVectors.semantic008W', in the
+-- authoring surface, because @RebindableSyntax@ is module-wide and this module
+-- is not an authoring module. It is a row of 'cases' rather than of
+-- 'callVectorsW' because its entry is one no other case takes.
+--
 -- The surface source of each case is quoted above it, transcribed from the
 -- corpus entry's @request.program@ rather than invented, so that a reading
 -- disagreement shows up as a printed-Raw mismatch and not as a silently
@@ -54,6 +60,7 @@ import Data.List.NonEmpty (NonEmpty (..))
 
 import CallVectors (battery144W, battery147W, module000W)
 import Example.Harden (hardenProgram, helloProgram)
+import LoopVectors (semantic008W)
 
 import Agentic.Builder
   ( Args (ANil, (:>)),
@@ -153,13 +160,21 @@ cases =
     ("battery-193-a-three-way-revision-settles-amends-or-abandons.json", battery193),
     ("battery-198-a-text-panel-fences-its-members-in-order.json", battery198),
     ("battery-205-a-decider-reads-the-last-non-empty-line.json", battery205),
-    ("battery-219-two-commands-at-one-tool-are-two-questions.json", battery219)
+    ("battery-219-two-commands-at-one-tool-are-two-questions.json", battery219),
+    -- The one case here whose program is written in "Agentic.Workflow" and is
+    -- not a second rebuild of an entry another case already takes: the yield
+    -- vector, whose /unsettled/ arm reads the candidate an exhausted loop
+    -- handed it. See "LoopVectors" for why it is a module of its own and why
+    -- the reading is worth a new entry rather than a rewritten arm.
+    ( "semantic-008-an-exhausted-loop-yields-the-last-amendment-not-the-first-draft.json",
+      semantic008W
+    )
   ]
 
 -- | Which of 'cases' have their __printed program__ compared up to alpha: the
--- two walked examples, and nothing else. ('callVectorsW' is compared that way
--- too, and is not listed here — every entry of that list is, by construction,
--- so there is nothing to select.)
+-- two walked examples and the yield vector, and nothing else. ('callVectorsW'
+-- is compared that way too, and is not listed here — every entry of that list
+-- is, by construction, so there is nothing to select.)
 --
 -- They are written in "Agentic.Workflow", which cannot read a Haskell binder's
 -- spelling — nothing but Template Haskell can, and the surface uses none — so
@@ -174,12 +189,15 @@ cases =
 -- __The other twenty-three keep their exact comparison.__ They are written in
 -- "Agentic.Builder" with explicit names, and there is nothing about them to
 -- weaken. Every non-program comparand — the folds, the ask counts, the worlds,
--- the traces and the bills — stays exact for all twenty-eight; a trace never
--- carries a binder's name.
+-- the traces and the bills — stays exact for all twenty-nine; a trace never
+-- carries a binder's name, which is why the yield vector's whole point — the
+-- prompt @\"yielded: fix draft: thin\"@ in its unsettled arm — is pinned
+-- exactly even though its binders are not.
 alphaNamed :: [FilePath]
 alphaNamed =
   [ "example-000-the-flagship-single-file.json",
-    "example-001-hello.json"
+    "example-001-hello.json",
+    "semantic-008-an-exhausted-loop-yields-the-last-amendment-not-the-first-draft.json"
   ]
 
 -- | The three frozen __call vectors__ a second time, rebuilt in
@@ -602,7 +620,7 @@ battery121 =
 -- per-round @caseB@ and no amendment at all. The amend clause is still
 -- elaborated — it is a clause of the term, not of the trace — but no path
 -- reaches it, which is why the term is size 7 with two paths and the only
--- branch is @finishCont@'s.
+-- branch is @exitCont@'s.
 battery120 :: Program
 battery120 =
   program [] $

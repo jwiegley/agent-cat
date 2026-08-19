@@ -597,7 +597,7 @@ Agentic/Core/
   Report.lean      557  coverage, the bill as a number, transcript rendering
   Explain.lean     551  the folds a report prints
 conformance/            Conformance.lean (codecs, worlds, observe) + the oracle
-test/                   Pollution.lean, CorpusGen.lean, corpus/ (188 vectors),
+test/                   Pollution.lean, CorpusGen.lean, corpus/ (189 vectors),
                         stub_adapter.py (kept: haskell/ci/acp.sh drives it)
 doc/                    this file; the three HTML artifacts; PLAN.org; research/
 ```
@@ -710,6 +710,6 @@ build:
 direnv exec . lake exe corpus-gen && git status --short test/corpus
 ```
 
-If it reports 188 entries re-observed, all byte-identical, and `git status`
+If it reports 189 entries re-observed, all byte-identical, and `git status`
 prints nothing, the whole spine — the elaboration, the cost algebra, the
 interpreter and the trusted base — agrees with the frozen specification.

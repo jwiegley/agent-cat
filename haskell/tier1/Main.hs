@@ -1,11 +1,13 @@
 -- | Tier 1: the rebuilt-case runner.
 --
 -- Where tier0 replays the frozen corpus through the codec, the guards and the
--- string layer, tier1 rebuilds twenty-five of its /checked/ entries in the
--- production surface ("Agentic.Builder", see "Cases") — and three of those
--- twenty-five a second time in the /authoring/ surface
--- ("Agentic.Workflow", see "CallVectors"), twenty-eight cases in all — and
--- holds each rebuilt program against the oracle on two fronts:
+-- string layer, tier1 rebuilds twenty-six of its /checked/ entries — twenty-three
+-- in the production surface ("Agentic.Builder", see "Cases") and three in the
+-- /authoring/ surface ("Agentic.Workflow": the two walked examples of
+-- "Example.Harden" and the yield vector of "LoopVectors") — and three of the
+-- twenty-three a second time in the authoring surface too ("CallVectors"),
+-- twenty-nine cases in all, and holds each rebuilt program against the oracle
+-- on two fronts:
 --
 -- 1. the __printed Raw__ — @toJSON@ of the builder's 'RawProgram' against the
 --    entry's @request.program@, with every position zeroed on /both/ sides,
@@ -14,11 +16,12 @@
 --    decoded back and re-encoded, so a print that no reader accepts fails here
 --    rather than silently.
 --
---    Five of the twenty-eight cases compare this one field __up to alpha__:
---    the two walked examples of "Example.Harden" (named by
---    @Cases.alphaNamed@) and the three call vectors of "CallVectors" (all of
---    @Cases.callVectorsW@). They are written in "Agentic.Workflow", which
---    cannot read a Haskell binder's spelling and therefore generates the name
+--    Six of the twenty-nine cases compare this one field __up to alpha__:
+--    the two walked examples of "Example.Harden" and the yield vector of
+--    "LoopVectors" (named by @Cases.alphaNamed@), and the three call vectors
+--    of "CallVectors" (all of @Cases.callVectorsW@). They are written in
+--    "Agentic.Workflow", which cannot read a Haskell binder's spelling and
+--    therefore generates the name
 --    each binding prints; 'canonProgram' below renames the binders of /both/
 --    sides to @c0, c1, …@ in one traversal before they are compared, so what
 --    is pinned is that the two programs agree on everything a name is not —

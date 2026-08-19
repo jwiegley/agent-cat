@@ -154,14 +154,18 @@ executable tier1
   hs-source-dirs:  tier1
   main-is:         Main.hs
 
-  -- `CallVectors` is tier1's alone, and deliberately not in the `examples`
-  -- internal library: the three programs in it are conformance fixtures for
-  -- the authoring surface's `function`/`call`, not things anybody would run,
-  -- and a module `agentic-run` cannot see is a module its example registry
-  -- cannot grow a row for.
+  -- `CallVectors` and `LoopVectors` are tier1's alone, and deliberately not in
+  -- the `examples` internal library: the programs in them are conformance
+  -- fixtures for the authoring surface — `function`/`call` in the first, an
+  -- unsettled arm that reads its binder in the second — not things anybody
+  -- would run, and a module `agentic-run` cannot see is a module its example
+  -- registry cannot grow a row for. They are two modules and not one because
+  -- each is named for what it holds; `Cases` can hold neither, `RebindableSyntax`
+  -- being module-wide.
   other-modules:
     CallVectors
     Cases
+    LoopVectors
 
   build-depends:
     , agentic

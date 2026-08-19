@@ -405,7 +405,7 @@ each. Neither is weakened into a form that closes.
 **1. `∀ ω, Plan.trace ω flagshipPlan Env.nil = Plan.trace ω Harden.demo Env.nil`.**
 The four named worlds are proved above, `ωEcho` among them. The universally
 quantified form needs the `Plan.Denotes` route rather than reduction — general
-coherence lemmas for `checkCont`, `reviseCont` and `finishCont`, then
+coherence lemmas for `checkCont`, `reviseCont` and `exitCont`, then
 `denotes_revising` and `denote_graft`, then a per-clause agreement with
 `Harden`'s own continuations — and it needs the checker's output *named*, which
 means writing out by hand the plan the checker builds; that is the work not done

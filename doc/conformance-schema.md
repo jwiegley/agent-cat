@@ -215,18 +215,18 @@ the specification.
 
 *Recorded because every working paper in `doc/research/profunctor-design/`
 listed one or two of the three, and two of them named a field that is pinned by
-nothing. Counted in this checkout, over the 188 files as they stand.*
+nothing. Counted in this checkout, over the 189 files as they stand.*
 
 **Surface 1 — the frozen reply record, and it has exactly eight keys.** A
 checked reply is `level`, `size`, `askNodes`, `codes`, `costSummary`,
 `blockAsks`, `fnAsks`, `worlds`, and nothing else; the Haskell producer is
 `Agentic.Observe.observeValue`, whose own docstring calls them "the five static
-folds, the two ask counts, and one observation per world". Of the 188 files, 92
+folds, the two ask counts, and one observation per world". Of the 189 files, 93
 carry a checked reply, 52 a `refused` reply and 44 a `result` from the string
 layer.
 
 **`shapes` and `asks` are on no wire and in no file** — `grep '"shapes"'` and
-`grep '"asks"'` return zero hits across all 188. The record specified in
+`grep '"asks"'` return zero hits across all 189. The record specified in
 `connection.md` §3.1 lists them and the implemented record does not; that
 discrepancy is the note under "Checked" above, and its effect is to *loosen* the
 constraint rather than to tighten it. `Cost.shapes` and `Cost.asks` may be
