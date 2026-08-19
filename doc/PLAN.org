@@ -1332,6 +1332,22 @@ Deliberately not a constructor; castGrade covers =. The <= case is a structural 
 ]
 #+end_src
 
+* TODO [#B] Engine: party→backend routing, so one run can span adapters (PAL-consensus parity)
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-engine-party-routing-hcx
+:LABELS:   []
+:ISSUE_TYPE: feature
+:CREATED:  [2026-08-19 Wed 12:17]
+:MODIFIED: [2026-08-19 Wed 12:17]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Today both live engines bind EVERY addressee to one backend per run — run/Main.hs prints it as the contract: 'every addressee — model, tool and person — is this one adapter/session' (:590, :622). The Plan semantics already distinguish parties and servedBy alternates already record who answered, so a cross-model panel (gpt-5.5-pro AND gemini-3.1-pro judging the same patch in ONE run) is expressible but not executable. This is the single capability PAL MCP has that agent-cat cannot yet execute (doc/research/pal-vs-agent-cat.md). Design sketch: a party→backend routing table on the run (e.g. --route 'reviewer-secure=acp:codex' --route 'reviewer-simple=deck:PANE', default route for the rest), engine header naming every route, trace scope unchanged (it already records the answering party). Fail-over alternates then become cross-backend for free. With this landed, PAL MCP is fully subsumed by workflows + engine config.
+
 * DONE [#D] Matrix star at Prob: attained suprema may make aggregate-of-powers go through
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -3054,21 +3070,37 @@ Observed during the heavy review's validated pass: every mcp__pal__chat call fai
 
 Found by the haskell-question analysis (§6.3 item 8, acat-haskell-surface-ygy): RawAsk.model is Option String and askShape applies atModel unconditionally when it is some, so a hand-built Raw with model := some m on a tool or person addressee elaborates instead of being refused — the surface invariant ('served by names the model that serves a model addressee') is parser-only. One site: askShape or a checkBlock-side guard, plus a hand-built battery case in the exception-2 style (check_panel_nil precedent). Notable because it is the ONLY thing the hypothetical Haskell type discipline would catch that the Lean checker does not — closing it makes the redundancy argument unconditional.
 
-* TODO [#C] Tooling: PAL cross-model verification unavailable — OpenAI key unexpanded, Gemini key invalid, gemini CLI absent
+* DONE [#C] Tooling: PAL cross-model verification unavailable — OpenAI key unexpanded, Gemini key invalid, gemini CLI absent
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-slj
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 19:00]
-:MODIFIED: [2026-08-14 Fri 19:00]
+:MODIFIED: [2026-08-19 Wed 12:17]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-19 Wed 12:17]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
 Meta-finding from the validated review pass, which ABORTED per its attestation contract: mcp__pal__listmodels succeeded, but the OpenAI key is an unexpanded ${OPENAI...KEY} template, the Gemini key is invalid, and the gemini CLI is absent, so only one non-Anthropic model (GPT-5 via clink/codex) was reachable and no finding could be verified by a second model. Until fixed, any validated-code-review run degrades to single-model review. Fix the PAL server env or add a second reachable provider.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 140,
+    "issue_id": "acat-slj",
+    "author": "johnw",
+    "text": "Re-verified 2026-08-19: mcp__pal__version reports Google Gemini ✅ and OpenAI ✅ configured; listmodels returns 127 models across three providers (gemini-3.1-pro-preview, gpt-5.5-pro et al. reachable). The unexpanded OpenAI key and invalid Gemini key are fixed, so PAL cross-model verification is available again. gemini CLI remains absent, so clink-gemini still fails, but direct-API access makes it non-blocking for validated review.",
+    "created_at": "2026-08-19T19:17:12Z"
+  }
+]
+#+end_src
 
 * DONE [#C] Vendor the design document (Revision 2.1) into doc/ as the normative reference each module cites
 :PROPERTIES:
