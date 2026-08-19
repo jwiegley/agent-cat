@@ -9,7 +9,7 @@ surface a human actually writes — kept honest by replaying a frozen corpus
 produced by the Lean formalization.
 
 Lean is normative. This directory does not ask to be believed on its own
-authority: every claim it makes about the language is checked against 128
+authority: every claim it makes about the language is checked against 188
 request/reply pairs the Lean oracle emitted (`../test/corpus`), and the check
 is two programs you can run in one command each. That corpus is the frozen
 conformance record: each request carries either a `RawProgram` — the same raw
@@ -25,18 +25,18 @@ nix develop -c cabal run tier1
 ```
 
 ```
-tier0: kinds: 22 string, 5 guard, 35 other, 66 checked, 0 ping, 0 unclassified
-tier0: 128 passed, 0 failed, 35 other-refusals (codec-only), of 128 files
-tier1: 24 passed, 0 failed, of 24 cases
+tier0: kinds: 44 string, 9 guard, 43 other, 92 checked, 0 ping, 0 unclassified
+tier0: 188 passed, 0 failed, 43 other-refusals (codec-only), of 188 files
+tier1: 28 passed, 0 failed, of 28 cases
 ```
 
 `tier0` replays every entry through the codec, the guards and the string layer.
-`tier1` **rebuilds** twenty-one of the checked entries, in twenty-four cases —
-nineteen in the production surface, the two walked examples in the authoring
-surface above it, and three of the nineteen a second time in that authoring
-surface — and holds each rebuilt program against the frozen one on both fronts: the
-program it prints, and the whole reply — folds, counts, and one trace and two
-bills per world.
+`tier1` **rebuilds** twenty-five of the checked entries, in twenty-eight cases
+— twenty-three in the production surface, the two walked examples in the
+authoring surface above it, and three of the twenty-three a second time in that
+authoring surface — and holds each rebuilt program against the frozen one on
+both fronts: the program it prints, and the whole reply — folds, counts, and one
+trace and two bills per world.
 
 And the library **runs**: `agentic-run` plans, prices and executes the walked
 examples, against a table of canned replies, against a live `agent-deck`
@@ -76,15 +76,17 @@ and only if nothing failed, so both are usable directly as CI gates.
 | module | what it is |
 | --- | --- |
 | `Agentic.Raw` | the `Raw` AST and a codec byte-compatible with Lean's derived `ToJson`/`FromJson` |
-| `Agentic.Guards` | the five term-level guards, in firing order, and the two ask counts |
-| `Agentic.Text` | the string layer — `norm`, `words`, `decodeVerdict`, `decodeFlag`, `say` — ASCII-only, as Lean core is |
+| `Agentic.Guards` | the six term-level guards, in firing order, and the two ask counts |
+| `Agentic.Text` | the string layer — `norm`, `words`, `decodeVerdict`, `decodeFlag`, `say`, and since wave three the four **deciders** (`lastNonEmptyLineIs`, `containsLine`, `anyLineStartsWith`, `anyPathMatches`) with the primitives they are composed from (`bare`, `fields`, `headerPaths`, `matchGlob`) and the **fence** a text panel folds into (`block`, `escapeClose`, `validLabel`) — ASCII-only throughout, as Lean core is |
 | `Agentic.Plan` | the typed `Plan` — five formers, `DataKinds` codes, de Bruijn `Expr` — and its static folds `level`, `size`, `askNodes`, `codes`, `costSummary` |
 | `Agentic.World` | `WorldSpec` and `toWorld`, the `trace` of a plan through a world, the fresh and memo bills, and the oracle's event JSON |
 | `Agentic.Builder` | the production surface: typed combinators that both print a `RawProgram` and elaborate to the `Plan` the Lean checker elaborates the same construct to |
 | `Agentic.WF` | the `[wf\|…\|]` prompt quoter — prose with `{name}` holes, laid out by the fence rule the frozen prompts were written under (blank edge lines dropped, common indentation stripped, no trailing newline) and chunked as Lean's `Prompt.normalize` chunks it — and `Says`, which decides whether a hole is a binding or a `define` |
-| `Agentic.Workflow` (+ `.Do`) | the **authoring** surface: an indexed block, written in ordinary Haskell under `W.do`, in which a bind is a Haskell bind, a branch on a revision's result is a Haskell `case` and a branch on a flag is a Haskell `if` — `guide <- ask (tool "cat") [wf\|…\|]`, then `case result of Settled patch -> W.do …; Unsettled -> stop`, then `when ok $ W.do …`. The `case` is real pattern matching on the exported data type `Outcome`, which the revision's bind forks into; the `if` is Haskell's, reaching the exported `ifThenElse` because the **authoring module** enables `RebindableSyntax` — which costs that module its implicit `Prelude` (import it, and `Data.String (fromString)` beside it under `OverloadedStrings`) and costs a `W.do` block nothing, `QualifiedDo` and `RebindableSyntax` rebinding disjoint syntax. The library itself enables neither. There is no `#label`, no `=:` and no splice anywhere in the surface: `ifFlag` stays exported as the combinator the `if` compiles *to* — machinery, and a name in the printed `Raw`, not a statement anyone writes — and `when`/`unless` are that same `if` with only one arm to say — terminal, sealing the body with the implicit `stop` an arm block's end is, and printing the identical `ifFlag` node with an empty other arm; the `case` compiles to `Agentic.Builder`'s `revisingCase`, which `revising` applies; `caseVerdict` stays a combinator here, a verdict being a value that may be acted past. It carries no names at the type level — a library cannot read a Haskell binder — so it generates the name each binding prints from that binding's depth, `named` overrides one, and a `{hole}` prints the name its handle carries |
+| `Agentic.Workflow` (+ `.Do`) | the **authoring** surface: an indexed block, written in ordinary Haskell under `W.do`, in which a bind is a Haskell bind, a branch on a revision's result is a Haskell `case` and a branch on a flag is a Haskell `if` — `guide <- ask (tool "cat") [wf\|…\|]`, then `case result of Settled patch -> W.do …; Unsettled patch -> stop`, then `when ok $ W.do …`. The `case` is real pattern matching on the exported data type `Outcome`, which the revision's bind forks into; the `if` is Haskell's, reaching the exported `ifThenElse` because the **authoring module** enables `RebindableSyntax` — which costs that module its implicit `Prelude` (import it, and `Data.String (fromString)` beside it under `OverloadedStrings`) and costs a `W.do` block nothing, `QualifiedDo` and `RebindableSyntax` rebinding disjoint syntax. The library itself enables neither. There is no `#label`, no `=:` and no splice anywhere in the surface: `ifFlag` stays exported as the combinator the `if` compiles *to* — machinery, and a name in the printed `Raw`, not a statement anyone writes — and `when`/`unless` are that same `if` with only one arm to say — terminal, sealing the body with the implicit `stop` an arm block's end is, and printing the identical `ifFlag` node with an empty other arm; the `case` compiles to `Agentic.Builder`'s `revisingCase`, which `revising` applies; `caseVerdict` stays a combinator here, a verdict being a value that may be acted past. It carries no names at the type level — a library cannot read a Haskell binder — so it generates the name each binding prints from that binding's depth, `named` overrides one, and a `{hole}` prints the name its handle carries |
 | `Agentic.Gen`, `Agentic.Observe`, `Agentic.Oracle` | the bisimulation surface: generators, the reply assembly both runners share, and the line-delimited JSON client for the Lean oracle subprocess |
-| `Agentic.Exec` | the interpreter in `IO` — the memoizing fold of `Exec.lean`'s `Dlg.execM`, its decode/re-ask loop, and the scripted answering service |
+| `Agentic.Exec` | the interpreter in `IO` — the memoizing fold of `Exec.lean`'s `Dlg.execM`, its decode/re-ask loop, the failure vocabulary and its budgets, and the **fail-over walk**: a pinned question is put to the models its chain names, in order, and the trace records the one that actually answered |
+| `Agentic.Chains` | one traversal of a printed program into the chain table the runner walks — `primary -> alternates`, ill-definedness refused before the run starts |
+| `Agentic.Shell` | the world that answers a `toolExec` question by **running its command**: no shell, the prompt on the child's stdin, a per-command timeout, and one answer per code — an exit code where the answer type can express failure, an abandoned run where it cannot |
 | `Agentic.AgentDeck` | one live `agent-deck` session as an answering service: the three CLI commands, the poll loop, the staleness guard and five named transport failures |
 | `Agentic.Acp` | an ACP adapter this process starts, as an answering service: the handshake, a session per question, the permission policy per question, the stop reason — which is what lets this transport refuse a receipt from a turn that did not finish — and six named transport failures |
 | `Example.Harden` | the walked examples (`harden`, `hello`), written in `Agentic.Workflow` and shared by `tier1` and `agentic-run` |
@@ -106,17 +108,17 @@ already replays. Positions are oracle-only throughout, like `message` and
 
 | entry | rule |
 | --- | --- |
-| `request.string` (22) | `stringOp op code text` must equal the whole reply value |
-| `request.program` (106) | decode, re-encode, and match the request's `program` value |
-| refused with one of the five (5) | `guardCheck` must return that guard and its `n` |
-| refused `other` (35) | the codec round-trip and nothing else — the typing judgment decided these, and it is not ported |
-| checked (66) | `guardCheck` must fire nothing, and `askCounts` must equal `(blockAsks, fnAsks)` |
+| `request.string` (44) | `stringOpOf` of the **whole request object** must equal the whole reply value — the object and not three fields, because `fence` takes a `name`, `matchGlob` a `pattern` and `decide` a `decider` and its `needles` |
+| `request.program` (144) | decode, re-encode, and match the request's `program` value |
+| refused with one of the six (9) | `guardCheck` must return that guard and its `n` |
+| refused `other` (43) | the codec round-trip and nothing else — the typing judgment decided these, and it is not ported |
+| checked (92) | `guardCheck` must fire nothing, and `askCounts` must equal `(blockAsks, fnAsks)` |
 
 ## What tier1 compares
 
-Twenty-one checked entries in twenty-four cases, rebuilt from their surface
-source — nineteen in `Agentic.Builder`, the two walked examples in
-`Agentic.Workflow` above it, and three of the nineteen (`module-000`,
+Twenty-five checked entries in twenty-eight cases, rebuilt from their surface
+source — twenty-three in `Agentic.Builder`, the two walked examples in
+`Agentic.Workflow` above it, and three of the twenty-three (`module-000`,
 `battery-144`, `battery-147`) written a second time in `Agentic.Workflow` too —
 and compared whole: no field skipped, a missing or extra key a failure.
 
@@ -188,7 +190,7 @@ hardenProgram = workflow W.do
               Apply:
               {patch}
               Write the patched file here, then reply DONE.|]
-      Unsettled -> stop
+      Unsettled _ -> stop
 ```
 
 Ordinary Haskell: no splice, no bracket, no label, and no type application
@@ -200,13 +202,29 @@ is a Haskell binding (`spec`, `verdictSpec`, `flagSpec` above), and `W.do` is
 
 **Both branches are Haskell's own, and they get there by different routes.**
 `case result of` is a regular `case` on the regular data type `Outcome`, its
-arms `W.do` blocks — there is no `caseResult` combinator to remember, and the
-settled artefact is bound by the pattern, live in that arm and in no other, so
-splicing it in the `Unsettled` arm is GHC's own `Variable not in scope`. It can
-be a `case` because a revision's bind *forks*: it runs the rest of the block
-twice, once under `Settled` and once under `Unsettled`, and the two blocks that
-come back are the arms it prints. That is exact because Lean refuses every
-statement between a revision's bind and its `case` (`Check.lean:537`), so the
+arms `W.do` blocks — there is no `caseResult` combinator to remember. **Both
+constructors carry the candidate**: `Settled` the artefact a review approved and
+`Unsettled` the one the loop ran out holding, each bound by its own pattern,
+live in its own arm and in no other, so splicing one arm's binder in the other
+is GHC's own `Variable not in scope`. (`hardenProgram` writes `Unsettled _`
+because it has nothing to say about a patch nobody approved; a program that
+means to *yield* what the capped trips produced now can.) It can be a `case`
+because a revision's bind *forks*: it runs the rest of the block twice, once
+under `Settled` and once under `Unsettled`, and the two blocks that come back
+are the arms it prints.
+
+Beside it, `revisingOn` is the same loop reading its review's verdict **three**
+ways rather than one predicate two ways — approval settles, an objection amends,
+a refusal *abandons* — and its `case` is over `Ending`, whose three
+constructors are `SettledOn`, `UnsettledOn` and `AbandonedOn`. (They take the
+suffix their loop carries because Haskell has one constructor namespace per
+module and `Outcome` already spells the first two; a reader who sees
+`UnsettledOn` knows which loop it belongs to.) Its price is arithmetic and is
+worth knowing before writing one: the exit is replicated `2n+1` times rather
+than `n+1`, so a `revisingOn` with a long tail is a term-size cost a `revising`
+is not, and the answer when it bites is to put the tail in a `function` and call
+it once per arm. That is exact because Lean refuses every
+statement between a revision's bind and its `case` (`Check.lean:653`), so the
 two runs can differ only in the arms. Where this surface and Lean's checker do
 differ they differ in the *accepting* direction: an author who writes a
 statement there is not refused here, and it stands in **both** arms — the same
@@ -719,6 +737,20 @@ of them are the transport's named failures; the two that matter most are
 rather than credited, and `write-on-ask`, where the adapter asks to edit the
 workspace during a draft turn, is denied, and the run's directory is checked
 afterwards to prove nothing was written.
+
+`ci/policies.sh` is nineteen checks, and since wave three it pins **fail-over**
+as well as the loud arm, the standing answer, the retry budgets and the
+surface's own refusals: a question pinned `deep or broad`, a world that raises a
+gap at `deep` and answers at `broad`, and four assertions — the run settles on
+the spare, the trace names the model that *actually* answered, the fall-back is
+narrated on the way, and, with no chain declared, the very same world and
+program abandon in exactly the words they always did. That last one is the
+acceptance criterion the design states, and it is what makes fail-over
+free at every existing call site. Four more pin the executing world: a
+`toolExec` act running `true` answers yes and pays for what follows, one
+running `false` answers no and does not, two commands at one tool id are two
+questions, and a command that cannot be run is a named gap rather than an
+answer.
 
 `ci/examples.sh` is the third no-Lean lane, and the one that watches the
 programs the corpus does not. It reads the registry out of the binary — an

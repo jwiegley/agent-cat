@@ -1,0 +1,9 @@
+{"request":
+ {"string":
+  {"text": "✗ one failed\n",
+   "op": "decide",
+   "needles": ["✗ "],
+   "decider": "anyLineStartsWith"}},
+ "reply": {"result": true},
+ "oracleVersion": 1,
+ "name": "decide: the same needle against a line that does carry the space"}

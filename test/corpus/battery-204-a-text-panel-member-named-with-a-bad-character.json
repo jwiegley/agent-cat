@@ -1,0 +1,35 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"bind":
+    {"x": "doc",
+     "src":
+     {"rhs":
+      {"r":
+       {"panelText":
+        {"pos": {"line": 2, "col": 16},
+         "members":
+         [{"name": "al/pha",
+           "ask":
+           {"target": {"draw": 0, "addressee": {"model": {"id": "a"}}},
+            "prompt": [{"lit": {"s": "BODY-A"}}],
+            "pos": {"line": 3, "col": 5},
+            "model": null}}]}}}},
+     "rest": {"empty": {"pos": {"line": 6, "col": 1}}},
+     "pos": {"line": 2, "col": 3},
+     "ann": "text"}},
+   "fns": []}},
+ "reply":
+ {"refused":
+  {"pos": {"line": 3, "col": 5},
+   "n": null,
+   "message":
+   "a text panel names each member's block, and a name begins with an ASCII letter and continues with letters, digits, `-`, `_` or `.`",
+   "guard": "other",
+   "excerpt": "al/pha"}},
+ "oracleVersion": 1,
+ "name": "a text panel member named with a character a tag may not hold"}

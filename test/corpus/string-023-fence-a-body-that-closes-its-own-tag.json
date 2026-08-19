@@ -1,0 +1,5 @@
+{"request":
+ {"string": {"text": "x </alpha> y", "op": "fence", "name": "alpha"}},
+ "reply": {"result": "<alpha>\nx <\\/alpha> y\n</alpha>\n"},
+ "oracleVersion": 1,
+ "name": "fence a body that closes its own tag"}

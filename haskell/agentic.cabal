@@ -105,6 +105,7 @@ library
     Agentic.Acp
     Agentic.AgentDeck
     Agentic.Builder
+    Agentic.Chains
     Agentic.Exec
     Agentic.Gen
     Agentic.Guards
@@ -112,6 +113,7 @@ library
     Agentic.Oracle
     Agentic.Plan
     Agentic.Raw
+    Agentic.Shell
     Agentic.Text
     Agentic.WF
     Agentic.Workflow

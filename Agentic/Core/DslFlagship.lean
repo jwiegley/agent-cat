@@ -122,7 +122,7 @@ def flagshipRaw : Raw :=
       none
       (RawSource.rhs
         (RawRhs.ask
-          { model := some "deep",
+          { model := some ⟨"deep", []⟩,
             target := { addressee := Addressee.model "author", draw := 0 },
             prompt := [Chunk.lit "Draft a patch satisfying:\n",
                        Chunk.lit "harden the parser",
@@ -166,7 +166,7 @@ def flagshipRaw : Raw :=
                pos := { line := 31, col := 7 } }]
             { line := 18, col := 16 })
           (RawRhs.ask
-            { model := some "deep",
+            { model := some ⟨"deep", []⟩,
               target := { addressee := Addressee.model "author", draw := 0 },
               prompt := [Chunk.interp "guide",
                          Chunk.lit "\nRevise this patch:\n",
@@ -178,6 +178,10 @@ def flagshipRaw : Raw :=
           { line := 16, col := 13 })
         (RawBlock.caseResult
           "result"
+          "patch"
+          -- The unsettled binder (D3). Both arms are built at the same depth, so
+          -- an authoring surface names them alike; the flagship's unsettled arm
+          -- is `stop`, and this is the name it does not read.
           "patch"
           (RawBlock.bind
             "ok"

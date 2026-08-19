@@ -3,13 +3,13 @@
 -- |
 -- Module      : Agentic.Guards
 --
--- The five term-level guards and the two ask counts, ported from
+-- The six term-level guards and the two ask counts, ported from
 -- @\/Users\/johnw\/src\/agent-cat\/Agentic\/Core\/Dsl\/Check.lean@, which is
 -- the source of record for both.
 --
 -- Two things live here and nothing else:
 --
--- * 'guardCheck' — which of the five guards Lean's @checkProgram@ fires
+-- * 'guardCheck' — which of the six guards Lean's @checkProgram@ fires
 --   /first/, and the count carried by a budget refusal.
 -- * 'askCounts' — @blockAsks@ of @main@ under the priced function table,
 --   together with that table.
@@ -20,23 +20,25 @@
 -- module cannot tell which came first. The whole contract this module is held
 -- to — and all that tier0 enforces — is therefore:
 --
--- * the five guard vectors get their guard, one entry per guard:
+-- * the guard vectors get their guard, one entry per guard:
 --   @vector-000@ 'DupFunction', @vector-003@ 'QuestionBudget' with
 --   @n = 8193@, @vector-004@ 'PanelEmpty', @vector-005@ 'ServedBy',
---   @battery-110@ 'RevisionBound';
+--   @battery-110@ 'RevisionBound', @battery-212@\/@battery-213@
+--   'DeciderEmpty', @battery-202@ 'PanelEmpty' at a /text/ panel;
 -- * every @checked@ entry gets 'Nothing' — a false positive there is a bug;
 -- * entries refused @other@ are unconstrained, and tier0 does not look.
 --
--- The algorithm below was checked mechanically against all 121 corpus entries:
--- 5\/5 guard vectors, 59\/59 checked entries 'Nothing' with matching counts,
--- and — a bonus, not a contract — 'Nothing' on all 35 @other@ entries too.
+-- The algorithm below is checked mechanically against every corpus entry by
+-- @ci\/tier0.sh@ — each guard vector gets its guard, every checked entry gets
+-- 'Nothing' with matching counts, and — a bonus, not a contract — 'Nothing' on
+-- the @other@ entries too.
 --
--- One more guard lives here and is not one of the five: 'guardUnpinnedAsk',
+-- One more guard lives here and is not one of the six: 'guardUnpinnedAsk',
 -- which is __opt-in__, Haskell-side only, and part of no conformance contract.
 -- It is kept in this module because this is where a refusal over the shape of a
 -- program belongs, and kept out of 'guardCheck' because @checkProgram@ does not
--- fire it and a port that added a sixth guard to that answer would be a port of
--- a different checker.
+-- fire it and a port that added a seventh guard to that answer would be a port
+-- of a different checker.
 module Agentic.Guards
   ( Guard (..)
   , guardCheck
@@ -47,6 +49,7 @@ module Agentic.Guards
 import Control.Applicative ((<|>))
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
+import qualified Data.Text as T
 
 import Agentic.Raw
   ( Addressee (..)
@@ -58,28 +61,31 @@ import Agentic.Raw
   , RawRhs (..)
   , RawSource (..)
   , RawTarget (..)
+  , TextMember (..)
   )
 
 -- * The constants
 
--- | @Check.lean:519@. The comparison is @maxRevisions < n@, so the bound is
+-- | @Check.lean:631@. The comparison is @maxRevisions < n@, so the bound is
 -- inclusive: @n = 64@ is accepted and @n = 65@ refused.
 maxRevisions :: Integer
 maxRevisions = 64
 
--- | @Check.lean:875@. Likewise @maxQuestions < n@: @4096@ accepted, @4097@
+-- | @Check.lean:1104@. Likewise @maxQuestions < n@: @4096@ accepted, @4097@
 -- refused.
 maxQuestions :: Integer
 maxQuestions = 4096
 
 -- * The guards
 
--- | The five term-level guards, in the spelling of the oracle's classifier
--- (@Conformance.lean@'s @classify@). The oracle's sixth tag, @other@, is
+-- | The six term-level guards, in the spelling of the oracle's classifier
+-- (@Conformance.lean@'s @classify@). The oracle's seventh tag, @other@, is
 -- everything the typing judgment refuses and is not represented here — this
 -- module answers 'Nothing' for it.
 data Guard
-  = -- | @"a panel needs at least one member"@
+  = -- | @"a panel needs at least one member"@ — and, since D2,
+    -- @"a text panel needs at least one member"@ too: it means \"a fan with no
+    -- members\" whichever monoid the fan folds into, so it is one guard.
     PanelEmpty
   | -- | @"at most 64 amendments"@
     RevisionBound
@@ -89,6 +95,11 @@ data Guard
     ServedBy
   | -- | @"two functions answer to one name"@
     DupFunction
+  | -- | @"a decider needs …"@ — both degeneracies of a decider (D7), no needle
+    -- at all and a needle that says nothing, because they are one mistake: a
+    -- test that is constantly false, or constantly true, with nothing in the
+    -- source to show it.
+    DeciderEmpty
   deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | A refusal: the guard, and the question count when the guard is
@@ -127,6 +138,10 @@ fnTable = go []
 rhsAsks :: Fns -> RawRhs -> Integer
 rhsAsks _ (RhsAsk _) = 1
 rhsAsks _ (RhsPanel ms _) = fromIntegral (length ms)
+rhsAsks _ (RhsPanelText ms _) = fromIntegral (length ms)
+-- A decider asks nothing: its value is a `.ret`, and `Plan.graft_ret` leaves no
+-- node at all.
+rhsAsks _ (RhsDecide _ _ _ _) = 0
 rhsAsks fns (RhsCall f _ _) = callAsks fns f
 
 -- | @bodyAsks@, verbatim. @callS@ is priced as @rhsAsks fns (.call f [] ⟨0,0⟩)@
@@ -162,15 +177,27 @@ blockAsks fns (RawCallStmt f _ r _) = callAsks fns f + blockAsks fns r
 blockAsks fns (RawBind _ _ (SrcRhs rhs) r _) = rhsAsks fns rhs + blockAsks fns r
 blockAsks fns (RawBind _ _ (SrcRevising _ _ n _ _ rev am _) rest _) =
   case rest of
-    RawCaseResult _ _ st un _ ->
+    RawCaseResult _ _ _ st un _ ->
       loop + (n + 1) * (blockAsks fns st + blockAsks fns un)
+    _ -> loop + blockAsks fns rest
+  where
+    loop = (n + 1) * rhsAsks fns rev + n * rhsAsks fns am
+-- The three-way loop's unroll has @2n+1@ @ret@ leaves — the approve-@ret@ and
+-- the declined-@ret@ per round above the base, plus the base's — and the exit is
+-- replicated once per leaf. The loop's own contribution is @revising@'s.
+blockAsks fns (RawBind _ _ (SrcRevisingOn _ _ n _ _ rev am _) rest _) =
+  case rest of
+    RawCaseEnding _ _ _ _ st un ab _ ->
+      loop + (2 * n + 1) * (blockAsks fns st + blockAsks fns un + blockAsks fns ab)
     _ -> loop + blockAsks fns rest
   where
     loop = (n + 1) * rhsAsks fns rev + n * rhsAsks fns am
 blockAsks fns (RawIfFlag _ y n _) = blockAsks fns y + blockAsks fns n
 blockAsks fns (RawCaseVerdict _ a o d _) =
   blockAsks fns a + blockAsks fns o + blockAsks fns d
-blockAsks fns (RawCaseResult _ _ st un _) = blockAsks fns st + blockAsks fns un
+blockAsks fns (RawCaseResult _ _ _ st un _) = blockAsks fns st + blockAsks fns un
+blockAsks fns (RawCaseEnding _ _ _ _ st un ab _) =
+  blockAsks fns st + blockAsks fns un + blockAsks fns ab
 
 -- | @(blockAsks of main under the priced table, the table in declaration
 -- order)@ — exactly the corpus reply's @blockAsks@ and @fnAsks@.
@@ -181,7 +208,7 @@ askCounts prog = (blockAsks table (progMain prog), table)
 
 -- * The two traversal guards
 
--- | @askGuard@ (@Check.lean:320@): a @served by@ override names the model that
+-- | @askGuard@ (@Check.lean:340@): a @served by@ override names the model that
 -- serves a /model/ addressee, so it fires exactly when the override is present
 -- and the addressee is a tool or a person.
 askGuard :: RawAsk -> Maybe Refusal
@@ -191,15 +218,29 @@ askGuard (RawAsk (Just _) (RawTarget adr _) _ _) =
     _ -> Just (ServedBy, Nothing)
 askGuard _ = Nothing
 
--- | @rhsPlan@ (@Check.lean:431@). The emptiness test precedes the kind test,
+-- | @rhsPlan@ (@Check.lean:478@). The emptiness test precedes the kind test,
 -- so an empty panel bound at @text@ still refuses 'PanelEmpty'; a /non-empty/
 -- panel bound at @text@ refuses @other@, which is not ours to report. Members
 -- are then checked left to right (@checkMembers@). A call raises neither
 -- guard.
+--
+-- The two D2\/D7 clauses follow the same rule. An empty @panelText@ is
+-- 'PanelEmpty' — the oracle's @classify@ maps @"a text panel needs at least one
+-- member"@ there, because it is a fan with no members whichever monoid it folds
+-- into — and a degenerate decider is 'DeciderEmpty', which @rhsPlan@ refuses
+-- before it elaborates anything, so it precedes the kind test exactly as the
+-- empty panel does. A @panelText@'s /label/ refusals (an invalid character, two
+-- members answering to one name) are @CheckError@s and classify as @other@,
+-- which is not ours to report.
 rhsGuard :: RawRhs -> Maybe Refusal
 rhsGuard (RhsAsk a) = askGuard a
 rhsGuard (RhsPanel [] _) = Just (PanelEmpty, Nothing)
 rhsGuard (RhsPanel ms _) = firstOf (map askGuard ms)
+rhsGuard (RhsPanelText [] _) = Just (PanelEmpty, Nothing)
+rhsGuard (RhsPanelText ms _) = firstOf (map (askGuard . tmAsk) ms)
+rhsGuard (RhsDecide _ _ ws _)
+  | null ws || any T.null ws = Just (DeciderEmpty, Nothing)
+  | otherwise = Nothing
 rhsGuard RhsCall {} = Nothing
 
 -- | @checkBody@: statement by statement, each statement's own guards before
@@ -222,9 +263,13 @@ blockGuard (RawCallStmt _ _ rest _) = blockGuard rest
 blockGuard (RawBind _ _ (SrcRhs r) rest _) = rhsGuard r <|> blockGuard rest
 blockGuard (RawBind _ _ (SrcRevising _ _ _ _ _ rev am _) rest _) =
   rhsGuard rev <|> rhsGuard am <|> blockGuard rest
+blockGuard (RawBind _ _ (SrcRevisingOn _ _ _ _ _ rev am _) rest _) =
+  rhsGuard rev <|> rhsGuard am <|> blockGuard rest
 blockGuard (RawIfFlag _ y n _) = blockGuard y <|> blockGuard n
 blockGuard (RawCaseVerdict _ a o d _) = blockGuard a <|> blockGuard o <|> blockGuard d
-blockGuard (RawCaseResult _ _ st un _) = blockGuard st <|> blockGuard un
+blockGuard (RawCaseResult _ _ _ st un _) = blockGuard st <|> blockGuard un
+blockGuard (RawCaseEnding _ _ _ _ st un ab _) =
+  blockGuard st <|> blockGuard un <|> blockGuard ab
 
 -- * The revision pre-pass
 
@@ -243,9 +288,16 @@ overRevised (RawBind _ _ (SrcRhs _) r _) = overRevised r
 overRevised (RawBind _ _ (SrcRevising _ _ n _ _ _ _ _) r _)
   | maxRevisions < n = Just n
   | otherwise = overRevised r
+-- A `revising on` is a bounded revision too: it is refused above `maxRevisions`
+-- by the same pre-scan and printed by the same report.
+overRevised (RawBind _ _ (SrcRevisingOn _ _ n _ _ _ _ _) r _)
+  | maxRevisions < n = Just n
+  | otherwise = overRevised r
 overRevised (RawIfFlag _ y n _) = overRevised y <|> overRevised n
 overRevised (RawCaseVerdict _ a o d _) = overRevised a <|> overRevised o <|> overRevised d
-overRevised (RawCaseResult _ _ s u _) = overRevised s <|> overRevised u
+overRevised (RawCaseResult _ _ _ s u _) = overRevised s <|> overRevised u
+overRevised (RawCaseEnding _ _ _ _ s u a _) =
+  overRevised s <|> overRevised u <|> overRevised a
 
 -- * The entry point
 
@@ -350,9 +402,15 @@ firstOf = foldr (<|>) Nothing
 -- == What it does and does not look at
 --
 -- Only /model/ addressees, because only a model ask can carry a @served by@ at
--- all: the same override on a tool or a person is already refused outright by
--- 'ServedBy', so a program that reaches this check has no pinnable tool ask in
--- it to miss.
+-- all: the same override on a tool or a person — a @running@ tool included — is
+-- already refused outright by 'ServedBy', so a program that reaches this check
+-- has no pinnable tool ask in it to miss.
+--
+-- __An alternates list counts as pinned__, and that needs no clause: pinned is
+-- @isJust askModel@, and a chain names, exhaustively and in the program text,
+-- every model that may answer. The guard's property — that no question reaches
+-- whatever model the runner happens to be pointed at — is preserved by a chain,
+-- since every alternate is itself a model name.
 --
 -- The traversal is @checkProgram@'s: every function body in declaration order,
 -- statement by statement, and then @main@ — each statement's own asks before
@@ -399,6 +457,9 @@ askUnpinned (RawAsk override (RawTarget adr _) _ _) = case (override, adr) of
 rhsUnpinned :: RawRhs -> Maybe Text
 rhsUnpinned (RhsAsk a) = askUnpinned a
 rhsUnpinned (RhsPanel ms _) = firstOf (map askUnpinned ms)
+rhsUnpinned (RhsPanelText ms _) = firstOf (map (askUnpinned . tmAsk) ms)
+-- A decider asks nobody, so there is no question here to leave unpinned.
+rhsUnpinned RhsDecide {} = Nothing
 rhsUnpinned RhsCall {} = Nothing
 
 -- | 'bodyGuard'\'s traversal, at this test.
@@ -418,7 +479,11 @@ blockUnpinned (RawCallStmt _ _ rest _) = blockUnpinned rest
 blockUnpinned (RawBind _ _ (SrcRhs r) rest _) = rhsUnpinned r <|> blockUnpinned rest
 blockUnpinned (RawBind _ _ (SrcRevising _ _ _ _ _ rev am _) rest _) =
   rhsUnpinned rev <|> rhsUnpinned am <|> blockUnpinned rest
+blockUnpinned (RawBind _ _ (SrcRevisingOn _ _ _ _ _ rev am _) rest _) =
+  rhsUnpinned rev <|> rhsUnpinned am <|> blockUnpinned rest
 blockUnpinned (RawIfFlag _ y n _) = blockUnpinned y <|> blockUnpinned n
 blockUnpinned (RawCaseVerdict _ a o d _) =
   blockUnpinned a <|> blockUnpinned o <|> blockUnpinned d
-blockUnpinned (RawCaseResult _ _ st un _) = blockUnpinned st <|> blockUnpinned un
+blockUnpinned (RawCaseResult _ _ _ st un _) = blockUnpinned st <|> blockUnpinned un
+blockUnpinned (RawCaseEnding _ _ _ _ st un ab _) =
+  blockUnpinned st <|> blockUnpinned un <|> blockUnpinned ab

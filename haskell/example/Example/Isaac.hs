@@ -88,7 +88,13 @@
 --      become a question here, or be dropped. 'reviewLite',
 --      'shipFeatureLiteProgram'.
 --   3. __A check is a question, never an exit code.__ 'shipFeatureLiteProgram'.
---   4. __@Unsettled@ carries nothing.__ 'shipFeatureLiteProgram'.
+--   4. __@Unsettled@ carries nothing.__ /Closed (D3)./ Both exits of a bounded
+--      revision now bind the candidate the loop was holding, so an exhausted
+--      loop can yield rather than abort. The programs below still write
+--      @Unsettled _ -> stop@ — the mechanism landed in one commit and the
+--      programs move in the next, one at a time, so that a moved number in
+--      @ci\/examples.sh@ is attributable to the program that moved it.
+--      'shipFeatureLiteProgram'.
 --   5. __A bounded revision has two endings and its body has two clauses.__
 --      'shipFeatureLiteProgram', 'stackPRsProgram'.
 --   6. __A sub-flow is a straight line.__ /Was:/ no sub-flow at all.
@@ -1231,19 +1237,25 @@ reviewLite = taking (input "subject" noInputs) \subject ->
 --   * __Gap: there is no second budget.__ @TripBudget@ threads fuel and a
 --     violation count /beside/ the carrier, so the worker only ever sees its
 --     own summary. A revision carries one artefact and one bound.
---   * __Gap: @Unsettled@ carries nothing.__ This is the sharpest one. The whole
---     designed trade of the @lite@ tier is that exhaustion __yields__: the tree
---     keeps every edit the three trips made, and the last summary — the one
---     that asked for a fourth trip — is what the panel reads. Here the
---     unsettled arm has no handle to the candidate the loop had in hand, so the
---     only arm that can be written is @stop@. Exhaustion is an abort, and the
---     three trips' work reaches nothing.
+--   * __Closed (D3): @Unsettled@ carried nothing, and now carries the
+--     candidate.__ This was the sharpest gap. The whole designed trade of the
+--     @lite@ tier is that exhaustion __yields__: the tree keeps every edit the
+--     three trips made, and the last summary — the one that asked for a fourth
+--     trip — is what the panel reads. The unsettled arm had no handle to the
+--     candidate the loop had in hand, so the only arm that could be written was
+--     @stop@; it now binds that candidate, and the yield is writable.
+--     __This program has not been rewritten to take it__, deliberately: the
+--     mechanism and the program move in separate commits, because a
+--     @ci\/examples.sh@ row that moved for two reasons at once is a row nobody
+--     can attribute. The arm below is still @stop@ and the numbers below are
+--     still the ones this file has always published.
 --
 -- Where the language is /ahead/: @completionGate@ is a stage @incite@ had to
 -- add, a pure @error@ that halts the run unless the yield declares completion,
 -- because a block or a spent violation budget must not buy a review panel and a
--- pull request gate. Here that gate is the @Unsettled -> stop@ arm, which the
--- author cannot forget to write, because the @case@ is total.
+-- pull request gate. Here that gate is the @Unsettled _ -> stop@ arm, which the
+-- author cannot forget to write, because the @case@ is total — and which is now
+-- a /choice/ of arm rather than the only arm writable.
 --
 -- === The green gate
 --
@@ -1260,7 +1272,10 @@ reviewLite = taking (input "subject" noInputs) \subject ->
 -- names for exactly this reason. What is written below is @agentVerify@, and
 -- 'greenGateBrief' says so. The /polarity/, at least, carries over exactly: the
 -- gate is a second 'revising' whose @Unsettled@ arm is @stop@, which is
--- abort-on-exhaustion, and the repair budget is its bound.
+-- abort-on-exhaustion, and the repair budget is its bound. (D5 closes the
+-- other half: @tool \"green\" \`running\` (\"nix\", [\"flake\",\"check\"])@ is a
+-- check the runner performs and whose exit code /is/ the answer. This program
+-- is not rewritten to take it, for the reason above.)
 --
 -- === What could not be shared
 --
@@ -1342,11 +1357,14 @@ shipFeatureLiteProgram = workflow W.do
           -- opposite polarity to the worker loop is the whole argument:
           -- a worker declares its own ending, and a tree is asked whether it
           -- still fails.
-          Unsettled -> stop
-      -- The gap, spelled: `orchestrateWith` YIELDS here, and the panel reads
-      -- the summary that asked for a fourth trip. `Unsettled` carries nothing,
-      -- so this arm cannot reach the work the three trips did.
-      Unsettled -> stop
+          Unsettled _ -> stop
+      -- `orchestrateWith` YIELDS here, and the panel reads the summary that
+      -- asked for a fourth trip. Since D3 the binder this arm ignores IS that
+      -- summary, so the yield is writable — and is deliberately not written in
+      -- the commit that landed the mechanism: rewriting it moves `size`,
+      -- `askNodes`, `costSummary` and both bills on this row, and a table that
+      -- moved for two reasons at once is unattributable.
+      Unsettled _ -> stop
 
 -- ---------------------------------------------------------------------------
 -- 4. grind-tests
@@ -1509,8 +1527,8 @@ grindTestsProgram = workflow W.do
                 ask_ (tool "write-audit") [wf|
                     Write the closing account under `docs/audits/`, then reply DONE.
                     {delta}|]
-              Unsettled -> stop
-          Unsettled -> stop
+              Unsettled _ -> stop
+          Unsettled _ -> stop
       -- `FACTS PATHS UNRESOLVED`: the run ends before any fixer acts. There is
       -- no way to say WHY it ended.
       else stop
@@ -1668,9 +1686,9 @@ stackPRsProgram = workflow W.do
                               {stackPromoteBrief}
                               {state}|]
                       else stop
-                  Unsettled -> stop
+                  Unsettled _ -> stop
               else stop
-          Unsettled -> stop
+          Unsettled _ -> stop
       else stop
 
 -- ---------------------------------------------------------------------------

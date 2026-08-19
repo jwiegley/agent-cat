@@ -1,0 +1,5 @@
+{"request":
+ {"string": {"text": "diff --git a/Foo.hs b/Foo.hs", "op": "fields"}},
+ "reply": {"result": ["diff", "--git", "a/Foo.hs", "b/Foo.hs"]},
+ "oracleVersion": 1,
+ "name": "fields does not shatter a path the way words would"}

@@ -1,4 +1,5 @@
 import Agentic.Core.Dlg
+import Agentic.Core.Text
 import Mathlib.Data.FinEnum
 
 /-!
@@ -253,12 +254,19 @@ end Sub
 
 /-! ## The closed tag universe a branching may name
 
-`case` branches on a *finite* tag, and the elaborator has only ever emitted two
-of them (`Agentic/Core/Dsl/Check.lean`'s three `case` sites: a flag, a verdict's
-classifier, and a loop's settled-or-not). So the tag is written as a closed
-two-constructor object rather than as a quantified `[FinEnum T] [DecidableEq T]`,
+`case` branches on a *finite* tag, and the elaborator emits exactly three of
+them (`Agentic/Core/Dsl/Check.lean`'s `case` sites: a flag, a verdict's
+classifier, a bounded revision's settled-or-not, and — since D4 — a three-way
+bounded revision's ending). So the tag is written as a closed
+three-constructor object rather than as a quantified `[FinEnum T] [DecidableEq T]`,
 which is what the Haskell port already does (`data Tag t where TBool; TVTag`,
 `haskell/src/Agentic/Plan.hs:468`).
+
+**A tag is added, not opened.** `Ending` (D4) was the first constructor since
+the universe was closed at two, and adding it cost exactly what the closure
+promised: one `El` clause, one `values` clause, three instances, one
+`finEnum_toList` case, and nothing at all in `Level`, `Cost` or `Explain`, which
+fold over `Tag.values` generically.
 
 Three things follow, and each is the reason the closure is worth its churn.
 
@@ -312,14 +320,45 @@ where the package's vocabulary has been opened. -/
 scoped instance instFinEnumBool : FinEnum Bool :=
   FinEnum.ofList [false, true] (by decide)
 
-/-- `[[Tag]]` = the tags a branching may name. Two, and the elaborator emits
-exactly these two. -/
+/-- `[[Ending]]` = how a three-way bounded revision left off (D4).
+
+The exit tag of `Plan.revisingOn`: a review's verdict tag decides the fate
+rather than a single approval predicate, so a refusal ends the loop instead of
+buying it another trip. Ordinary data, so adding a fourth ending later is a
+local, total, kernel-checked edit — and see `revisingOn`'s docstring for why the
+*classifier* does not extend for free. -/
+inductive Ending where
+  /-- A review approved. -/
+  | settled
+  /-- The bound ran out with an objection outstanding. -/
+  | unsettled
+  /-- A review declined: no answer, and no more trips. -/
+  | abandoned
+  deriving DecidableEq, Repr, Inhabited
+
+/-- `[[Ending.ofVTag t]]` = the fate a verdict tag names at the last round:
+approval settles, an objection leaves the loop unsettled, a refusal abandons
+it. Total today, and deliberately so (D4 §3.6). -/
+def Ending.ofVTag : VTag → Ending
+  | .approve => .settled
+  | .object => .unsettled
+  | .declined => .abandoned
+
+/-- The three endings, enumerated, in the order `Tag.values` writes them. -/
+instance instFinEnumEnding : FinEnum Ending :=
+  FinEnum.ofList [.settled, .unsettled, .abandoned] (by intro t; cases t <;> simp)
+
+/-- `[[Tag]]` = the tags a branching may name. Three, and the elaborator emits
+exactly these three. -/
 inductive Tag where
   /-- A yes/no branching — `Plan.caseB`, and the surface's `if`. -/
   | bool
   /-- A verdict's three-way classifier — `Plan.caseV`, and the surface's
   `approved`/`objected`/`no answer`. -/
   | vtag
+  /-- A three-way bounded revision's exit — `Plan.revisingOn`, and the surface's
+  `settled`/`unsettled`/`abandoned`. -/
+  | ending
   deriving DecidableEq, Repr, Inhabited
 
 /-- `[[Tag.El t]]` = the type the tag names. A `def` and not an `abbrev`, so
@@ -327,22 +366,26 @@ that nothing here installs a `FinEnum` on `Bool` by unification. -/
 def Tag.El : Tag → Type
   | .bool => Bool
   | .vtag => VTag
+  | .ending => Ending
 
 /-- Each tag's type is enumerated — in the *analyses*, which is where an
 enumeration was always allowed to live. -/
 instance instFinEnumTagEl : (t : Tag) → FinEnum t.El
   | .bool => instFinEnumBool
   | .vtag => instFinEnumVTag
+  | .ending => instFinEnumEnding
 
 /-- …and has decidable equality. -/
 instance instDecidableEqTagEl : (t : Tag) → DecidableEq t.El
   | .bool => inferInstanceAs (DecidableEq Bool)
   | .vtag => inferInstanceAs (DecidableEq VTag)
+  | .ending => inferInstanceAs (DecidableEq Ending)
 
 /-- …and is inhabited, which a probe rendering needs. -/
 instance instInhabitedTagEl : (t : Tag) → Inhabited t.El
   | .bool => inferInstanceAs (Inhabited Bool)
   | .vtag => inferInstanceAs (Inhabited VTag)
+  | .ending => inferInstanceAs (Inhabited Ending)
 
 /-- `[[Tag.values t]]` = the tag's inhabitants in enumeration order — the list
 every analysis that crosses a branching folds over, and `Plan.hs`'s `tagValues`
@@ -350,13 +393,15 @@ transliterated. -/
 def Tag.values : (t : Tag) → List t.El
   | .bool => [false, true]
   | .vtag => [.approve, .object, .declined]
+  | .ending => [.settled, .unsettled, .abandoned]
 
-/-- **The hand-written order is the enumeration's order**, at both tags. This is
+/-- **The hand-written order is the enumeration's order**, at every tag. This is
 what keeps `Explain.planLines` byte-identical across the closure, and what the
 Haskell's `tagValues` is checked against. -/
 @[simp] theorem Tag.finEnum_toList : ∀ t : Tag, FinEnum.toList t.El = t.values
   | .bool => by decide
   | .vtag => by decide
+  | .ending => by decide
 
 /-! ## The five term formers -/
 
@@ -408,7 +453,7 @@ inductive PlanF (A : Type) : Ctx → Type where
       (k : PlanF A (c :: Γ)) : PlanF A Γ
   /-- **Finite-tag branching, both arms in the term.** `Selective.branch`, with
   the payload riding in the context into whichever arm is taken. The tag is a
-  `Tag` — an inhabitant of the closed two-element universe above, not a
+  `Tag` — an inhabitant of the closed universe above, not a
   quantified `Type` — so the branch structure is a genuine finite tree, the cost
   of the not-taken arm is enumerable rather than lost, and the *syntax* mentions
   no enumeration at all.
@@ -936,11 +981,60 @@ def panel [Monoid (El c)] (ps : List (Plan Γ (El c))) : Plan Γ (El c) :=
 @[simp] theorem panel_cons [Monoid (El c)] (p : Plan Γ (El c)) (ps : List (Plan Γ (El c))) :
     panel (p :: ps) = zipWith (· * ·) p (panel ps) := rfl
 
+/-- `[[panelText parts]]` = `panel`'s twin at `.text`: the same fan-out, the same
+one question per member, the same trace, and a different fold. `panel` folds
+into the verdict monoid; `panelText` folds into the free monoid over **fenced
+blocks**, in member order, so the result is a document whose reader can tell
+which member said what.
+
+The monoid is `(String, ++, "")` *after* each member's answer has been wrapped
+by `Dsl.block`. Associative, non-commutative, and — the property that matters,
+and the one `panel` also has — `doc (ms ++ ns) = doc ms ++ doc ns`, so a fan
+split in two and folded separately folds to the same document.
+
+**No `Monoid (El .text)` instance is installed**, and for a sharper reason than
+`panel`'s docstring gives at `.flag`: an instance at `.text` would make
+`Plan.panel` typecheck at `.text` and fold member answers *unfenced*, giving the
+language two ways to fold a text fan, one of which throws away the names.
+`panelText` is written out so that there is exactly one.
+
+Derived from `zipWith`, so it is `graft`-based, reaches no `dyn`, and is
+invisible to `Level`, `Cost` and `Explain` — it is ordinary nodes by the time
+any fold sees it. With *n* members: `askNodes` is *n*, `size` is *n + 1*, the
+rung is `batch` if every member's prompt is closed, and the path count does not
+move. The **trace** holds *n* events carrying each member's raw reply verbatim,
+and the fenced document appears nowhere in it: the trace is what was asked and
+what was answered; the document is what the program then computed. -/
+def panelText (parts : List (String × Plan Γ (El .text))) : Plan Γ (El .text) :=
+  parts.foldr
+    (fun p acc => zipWith (fun a rest => String.append (Dsl.block p.1 a) rest) p.2 acc)
+    (.ret (fun _ => ""))
+
+@[simp] theorem panelText_nil :
+    panelText ([] : List (String × Plan Γ (El .text))) = .ret (fun _ => "") := rfl
+
+@[simp] theorem panelText_cons (p : String × Plan Γ (El .text))
+    (ps : List (String × Plan Γ (El .text))) :
+    panelText (p :: ps)
+      = zipWith (fun a rest => String.append (Dsl.block p.1 a) rest) p.2 (panelText ps) := rfl
+
 /-! ## Bounded revision -/
 
 /-- `[[revising check revise n a]]` = check the artefact `a`; if it is approved,
 stop with it; otherwise revise it and go again, at most `n` times; if the last
-check still objects, give up with `none`.
+check still objects, hand back the candidate it ran out holding, marked
+unsettled.
+
+**The ending carries the candidate** (D3). The result is `El c × Bool` — *the
+candidate always, and whether it settled* — and not `Option (El c)`: on
+exhaustion the loop is holding the artefact the `n`-th amendment produced and
+the `n+1`-th review objected to, and the `Option` threw it away. It is not the
+candidate that *would have been* produced by amending in response to the final
+objection, which was never asked for and must not be invented. A product of an
+answer and a tag costs nothing structurally, because `A` is `PlanF`'s parameter
+rather than an index, and `Bool` is already a `Tag`; so not one term node moves
+against the `Option` spelling, and `size`, `askNodes` and `costM` cannot see the
+change.
 
 **Check first, revise in the recursive call** (kernel §3 q5, `attack-adequacy`
 A1). `revising … n` performs `n + 1` checks and at most `n` revisions, and never
@@ -956,16 +1050,50 @@ so a revision knows what it is answering. -/
 def revising {Γ : Ctx} {c : Code}
     (check : Cont Γ (El c) Verdict)
     (revise : Cont Γ (El c × Verdict) (El c)) :
-    Nat → Cont Γ (El c) (Option (El c))
+    Nat → Cont Γ (El c) (El c × Bool)
   | 0 => fun _ σ a =>
       graft (check _ σ a) fun _ τ v =>
-        .ret (fun θ => if Verdict.approvedB (v θ) then some (a (τ θ)) else none)
+        .ret (fun θ => (a (τ θ), Verdict.approvedB (v θ)))
   | n + 1 => fun _ σ a =>
       graft (check _ σ a) fun _ τ v =>
         caseB (fun θ => Verdict.approvedB (v θ))
-          (.ret (fun θ => some (a (τ θ))))
+          (.ret (fun θ => (a (τ θ), true)))
           (graft (revise _ (Sub.comp σ τ) (fun θ => (a (τ θ), v θ))) fun _ ρ a' =>
             revising check revise n _ (Sub.comp (Sub.comp σ τ) ρ) a')
+
+/-- `[[revisingOn check revise n a]]` = the same bounded revision, whose round
+reads the review's **verdict tag** three ways rather than one predicate two
+ways: approval settles, an objection buys another trip (or, at the last round,
+leaves the loop unsettled), and a refusal **abandons** it at once.
+
+`revising` tests `Verdict.approvedB`, so `object` and `declined` are the same
+thing to it — a refusal buys a trip it should end. `revisingOn` branches on
+`Verdict.tag`, the finite classifier `caseV` already uses, and maps its three
+values onto three fates.
+
+Note the base clause needs **no** `case`: the ending is a pure function of the
+verdict, so round `n` is one `ret`, exactly as `revising`'s is. What the extra
+exit edge costs is leaves: `L 0 = 1` and `L (k+1) = L k + 2` — the approve-`ret`
+and the declined-`ret` — so an unrolled `revisingOn … n` has **`2n+1`** leaves
+against `revising`'s `n+1`, and the consuming exit is replicated once per leaf.
+`maxQuestions` is checked against that count, so a `revisingOn` with a wide tail
+reaches the budget refusal at roughly half the bound a `revising` does. -/
+def revisingOn {Γ : Ctx} {c : Code}
+    (check : Cont Γ (El c) Verdict)
+    (revise : Cont Γ (El c × Verdict) (El c)) :
+    Nat → Cont Γ (El c) (El c × Ending)
+  | 0 => fun _ σ a =>
+      graft (check _ σ a) fun _ τ v =>
+        .ret (fun θ => (a (τ θ), Ending.ofVTag (Verdict.tag (v θ))))
+  | n + 1 => fun _ σ a =>
+      graft (check _ σ a) fun _ τ v =>
+        caseV v (fun t =>
+          match t with
+          | .approve => .ret (fun θ => (a (τ θ), Ending.settled))
+          | .declined => .ret (fun θ => (a (τ θ), Ending.abandoned))
+          | .object =>
+              graft (revise _ (Sub.comp σ τ) (fun θ => (a (τ θ), v θ))) fun _ ρ a' =>
+                revisingOn check revise n _ (Sub.comp (Sub.comp σ τ) ρ) a')
 
 end Plan
 

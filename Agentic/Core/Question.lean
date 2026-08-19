@@ -55,6 +55,21 @@ inductive Addressee where
   | tool (id : String)
   /-- A person, named. -/
   | person (id : String)
+  /-- A tool whose answer the *runner* obtains by running a program-authored
+  command, so that a check can be an exit code rather than a model's claim about
+  one (D5).
+
+  **The argv rides in the addressee**, and that is the decision the whole design
+  turns on: `Q.Shape` is the addressee, the scope and the draw, so a command in
+  the addressee is in the question, in its `EventKey` and in its trace event for
+  free — and two acts saying the same words to the same tool id with *different*
+  commands are two questions rather than one, which is what keeps a gate run
+  twice from being answered from the memo table without running. `cmd` is
+  separate from `args`, so "an argv naming no command" is unrepresentable and no
+  term-level guard is owed. Both are `String`s and never a `Prompt`: there is no
+  interpolation syntax at an argv, so there is no path from any answer to any
+  command line, which is why no capability lattice is needed here. -/
+  | toolExec (id : String) (cmd : String) (args : List String)
   deriving DecidableEq, Repr, Inhabited
 
 /-- `DecidableEq` transported through the `LastOpt` synonym, so that a scope —

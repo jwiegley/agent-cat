@@ -1,3 +1,5 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
@@ -16,8 +18,26 @@
 --   * @esLoudArm = Just False@: the other arm, the act skipped (billFresh 6);
 --   * @esStandingAnswer = Just "no"@: the person is answered from settings
 --     (billFresh 6) with the standing-answer warning;
---   * @esRecover = const FailOver@: refused by name, wave three's sentence;
+--   * @esRecover = const FailOver@: no re-ask at all (the policy did not answer
+--     'Agentic.Exec.RetryHere'), and then, with no spare declared, exactly the
+--     abandonment the run would have raised with no chain at all — which is why
+--     it says \"after 1 attempts\" where the default policy's says two;
 --   * @esRetryUndecodable = 3@: four attempts before the abandonment.
+--
+-- A third section pins __fail-over itself__ (D6), which is the one policy that
+-- needs a chain and a world that refuses: a question pinned @deep or broad@, a
+-- world that raises a gap at @deep@ and answers at @broad@, and three
+-- assertions — the run settles, the trace names __the model that actually
+-- answered__, and the narration says what it was about to do. Its fourth
+-- assertion is the acceptance criterion the design states: __with no alternates
+-- declared, the same world and the same program abandon in exactly the words
+-- they always did.
+--
+-- A fourth pins D5's __executing world__: a @toolExec@ act whose command exits
+-- 0 answers yes and pays for the act, one that exits nonzero answers no and
+-- does not, two commands at one tool id are two questions, and a command that
+-- cannot be run is a named gap rather than an answer. @true@ and @false@ and
+-- nothing else.__
 --
 -- The probes assert on bills, on thrown wording, and on logged wording — the
 -- three places a policy can lie.
@@ -32,14 +52,38 @@
 module Main (main) where
 
 import Agentic.Exec
-import Agentic.World (billFresh, billMemo)
+import Agentic.Plan
+  ( El,
+    Q (qAddressee, qPrompt, qScope),
+    QScope (scopeModelAxis),
+    SCode (SAck, SFlag, SText, SVerdict),
+    fromSCode,
+    verdictApprove,
+  )
+import Agentic.Shell (ShellConfig (shellCwd), defaultShellConfig, executingWorld)
+import Agentic.World (Event (Event), Trace, billFresh, billMemo)
 import Control.Exception (ErrorCall, SomeException, evaluate, try)
 import Data.IORef
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import Example.Harden (hardenProgram)
-import Agentic.Builder (Program, progPlan)
+import Agentic.Builder
+  ( Code (CodeFlag),
+    Program,
+    act,
+    askModelFallingBack,
+    askTool,
+    askToolRunning,
+    bindAs,
+    ifFlag,
+    lit,
+    one,
+    program,
+    progPlan,
+    stop,
+  )
+import qualified Data.Map.Strict as Map
 import Agentic.Observe (printedValue)
 import System.Exit (exitFailure)
 
@@ -141,6 +185,106 @@ refusal failures name prog needle = do
         )
       modifyIORef' failures (+ 1)
 
+-- ---------------------------------------------------------------------------
+-- Fail-over (D6)
+-- ---------------------------------------------------------------------------
+
+-- | One flag question, pinned to @deep@ with @broad@ behind it, and an act on
+-- the yes arm. The smallest program in which a fail-over is observable at all:
+-- the chain is on the question, the answer decides a branch, and the act is
+-- what makes the bills say whether the run got an answer.
+failOverProgram :: Program
+failOverProgram =
+  program [] $
+    bindAs @"ok" @'CodeFlag
+      (one (askModelFallingBack "r" "deep" ["broad"] [lit "ready?"]))
+      $ \ok -> ifFlag ok (act (askTool "log" [lit "yes"]) stop) stop
+
+-- | A world that will not answer for one model and will for anyone else.
+--
+-- It raises a __gap__ rather than an ordinary error, which is the whole
+-- distinction the fail-over walk turns on: a gap is \"nothing usable came
+-- back\" and may be put to another model; anything else is a defect and is
+-- rethrown untouched, because re-running broken work on a second, pricier model
+-- bills twice for hiding it.
+refusingWorld :: Text -> WorldIO
+refusingWorld bad = WorldIO $ \c q ->
+  if scopeModelAxis (qScope q) == Just bad
+    then
+      raiseGap
+        GapTransportRefusal
+        (bad <> " is not answering")
+        (userError ("no readable flag from model r after 1 attempts"))
+    else pure (answerAt c q)
+  where
+    answerAt :: SCode c -> Q c -> El c
+    answerAt SFlag _ = True
+    answerAt SAck _ = ()
+    answerAt SText q = qPrompt q
+    answerAt SVerdict _ = verdictApprove
+
+-- | The model each event's scope names, in trace order.
+answerers :: [Event] -> [Maybe Text]
+answerers tr = [scopeModelAxis (qScope q) | Event _ q _ <- tr]
+
+-- ---------------------------------------------------------------------------
+-- The executing world (D5)
+-- ---------------------------------------------------------------------------
+
+-- | A world that answers nothing, so that a @toolExec@ question answered by
+-- anything but the executing layer is a loud failure rather than a quiet pass.
+noWorld :: WorldIO
+noWorld = WorldIO $ \c q ->
+  ioError
+    ( userError
+        ( "the executing layer did not take a "
+            <> T.unpack (codeWord (fromSCode c))
+            <> " question put to "
+            <> T.unpack (addresseeWord (qAddressee q))
+        )
+    )
+
+-- | One @toolExec@ act at a chosen code, running a chosen command.
+runningProgram :: Text -> [Text] -> Program
+runningProgram cmd args =
+  program [] $
+    bindAs @"g" @'CodeFlag (one (askToolRunning "green" cmd args [lit "check"])) $
+      -- The yes arm is a `toolExec` too, so that __every__ question in this
+      -- program is the executing layer's and `noWorld` can stay strict: a
+      -- question that reached the world beneath would be a routing bug, and
+      -- here it is a raised error rather than a quiet pass.
+      \g -> ifFlag g (act (askToolRunning "log" "true" ["green"] [lit "note"]) stop) stop
+
+-- | Two commands at one tool id, same words: __two questions__, which is why
+-- the argv rides in the addressee.
+twoCommandsProgram :: Program
+twoCommandsProgram =
+  program [] $
+    act (askToolRunning "green" "true" ["one"] [lit "gate"]) $
+      act (askToolRunning "green" "true" ["two"] [lit "gate"]) stop
+
+execProbe :: IORef Int -> String -> Program -> (Trace -> Bool) -> IO ()
+execProbe failures name prog want = do
+  let cfg = defaultShellConfig {shellCwd = "."}
+  out <- try (runPlanIO (executingWorld cfg noWorld) (progPlan prog))
+  case out :: Either SomeException ((), Trace) of
+    Left e -> do
+      TIO.putStrLn ("FAIL " <> T.pack name <> ": threw " <> T.pack (show e))
+      modifyIORef' failures (+ 1)
+    Right (_, tr)
+      | want tr -> TIO.putStrLn ("ok   " <> T.pack name)
+      | otherwise -> do
+          TIO.putStrLn
+            ( "FAIL "
+                <> T.pack name
+                <> ": bills ("
+                <> T.pack (show (billFresh tr))
+                <> ","
+                <> T.pack (show (billMemo tr))
+                <> ")"
+            )
+          modifyIORef' failures (+ 1)
+
 main :: IO ()
 main = do
   failures <- newIORef (0 :: Int)
@@ -156,8 +300,12 @@ main = do
     d {esLoudArm = Just False} "that safety is the operator's"
   probe failures "standing answer 'no' never asks the person (6/6)"
     d {esStandingAnswer = Just "no"} (Right (6, 6))
-  probe failures "FailOver refuses naming wave three"
-    d {esRecover = const FailOver} (Left "fail-over")
+  -- With no spare declared, a policy that asks for fail-over gets the
+  -- abandonment the run would have raised with no chain at all: the layer that
+  -- knows whether there is anywhere to go is `askOrMemo`, and it degrades a
+  -- fail-over with nowhere to go rather than inventing an answer.
+  probe failures "FailOver with no spare abandons in the old words"
+    d {esRecover = const FailOver} (Left "after 1 attempts")
   probe failures "retry budget 3 means 4 attempts"
     d {esRetryUndecodable = 3} (Left "after 4 attempts")
 
@@ -170,6 +318,97 @@ main = do
     namedIsReserved "`b1` is a name this surface generates for itself"
   refusal failures "takes refuses a generated name"
     takesIsReserved "`b1` is a name this surface generates for itself"
+
+  -- The fail-over itself: the run settles, the trace names who answered, the
+  -- narration says what it was about to do, and — the acceptance criterion —
+  -- with no chain the very same world and program abandon in the old words.
+  do
+    logged <- newIORef []
+    let chains =
+          chainsOf
+            (\t -> modifyIORef' logged (t :))
+            (Map.fromList [("deep", ["broad"])])
+    out <- try (runPlanWith chains (refusingWorld "deep") (progPlan failOverProgram))
+    msgs <- readIORef logged
+    case out :: Either SomeException ((), [Event]) of
+      Left e -> do
+        TIO.putStrLn ("FAIL fail-over settles: threw " <> T.pack (show e))
+        modifyIORef' failures (+ 1)
+      Right (_, tr)
+        | billFresh tr == 2 && billMemo tr == 2 ->
+            TIO.putStrLn "ok   fail-over settles on the spare (2/2)"
+        | otherwise -> do
+            TIO.putStrLn
+              ( "FAIL fail-over settles: bills ("
+                  <> T.pack (show (billFresh tr))
+                  <> ","
+                  <> T.pack (show (billMemo tr))
+                  <> ") wanted (2,2)"
+              )
+            modifyIORef' failures (+ 1)
+    case out of
+      Right (_, tr)
+        | take 1 (answerers tr) == [Just "broad"] ->
+            TIO.putStrLn "ok   …and the trace names the model that answered"
+        | otherwise -> do
+            TIO.putStrLn
+              ( "FAIL the trace names the answerer: got "
+                  <> T.pack (show (take 1 (answerers tr)))
+              )
+            modifyIORef' failures (+ 1)
+      _ -> pure ()
+    if any ("falling back to broad" `T.isInfixOf`) msgs
+      then TIO.putStrLn "ok   …and the fall-back is narrated"
+      else do
+        TIO.putStrLn "FAIL nothing narrated the fall-back"
+        mapM_ (TIO.putStrLn . ("  log: " <>)) (reverse msgs)
+        modifyIORef' failures (+ 1)
+
+  do
+    out <- try (runPlanIO (refusingWorld "deep") (progPlan failOverProgram))
+    case out :: Either SomeException ((), [Event]) of
+      Left e
+        | "no readable flag from model r" `T.isInfixOf` T.pack (show e) ->
+            TIO.putStrLn "ok   …and with no chain it abandons in the old words"
+        | otherwise -> do
+            TIO.putStrLn ("FAIL no-chain abandonment: " <> T.pack (show e))
+            modifyIORef' failures (+ 1)
+      Right _ -> do
+        TIO.putStrLn "FAIL no-chain abandonment: the run completed"
+        modifyIORef' failures (+ 1)
+
+  -- D5: the exit status is the answer. `true` takes the yes arm and pays for
+  -- the act; `false` takes the no arm and does not. Nothing but the executing
+  -- layer may answer these, which `noWorld` enforces by raising.
+  execProbe failures "a command that exits 0 answers yes (2/2)"
+    (runningProgram "true" []) (\tr -> billFresh tr == 2 && billMemo tr == 2)
+  execProbe failures "…and one that exits nonzero answers no (1/1)"
+    (runningProgram "false" []) (\tr -> billFresh tr == 1 && billMemo tr == 1)
+  -- The most important D5 assertion: two commands at one tool id, saying the
+  -- same words, are two questions. Were the argv anywhere outside the
+  -- addressee the second would be answered from the memo table without running.
+  execProbe failures "two commands at one tool are two questions (2/2)"
+    twoCommandsProgram (\tr -> billFresh tr == 2 && billMemo tr == 2)
+  -- A command that cannot be run is a __gap__, not an answer, and it is named
+  -- so an operator can tell "the gate said no" from "the gate could not be run".
+  do
+    let cfg = defaultShellConfig {shellCwd = "."}
+    out <-
+      try
+        ( runPlanIO
+            (executingWorld cfg noWorld)
+            (progPlan (runningProgram "no-such-gate-command" []))
+        )
+    case out :: Either SomeException ((), Trace) of
+      Left e
+        | "did not run" `T.isInfixOf` T.pack (show e) ->
+            TIO.putStrLn "ok   …and a command that cannot be run is named, not answered"
+        | otherwise -> do
+            TIO.putStrLn ("FAIL the missing command: " <> T.pack (show e))
+            modifyIORef' failures (+ 1)
+      Right _ -> do
+        TIO.putStrLn "FAIL the missing command: the run completed"
+        modifyIORef' failures (+ 1)
 
   n <- readIORef failures
   if n == 0

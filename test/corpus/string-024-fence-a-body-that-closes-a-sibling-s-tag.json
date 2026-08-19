@@ -1,0 +1,4 @@
+{"request": {"string": {"text": "x </beta> y", "op": "fence", "name": "alpha"}},
+ "reply": {"result": "<alpha>\nx </beta> y\n</alpha>\n"},
+ "oracleVersion": 1,
+ "name": "fence a body that closes a sibling's tag"}

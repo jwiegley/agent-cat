@@ -1,0 +1,64 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"act":
+    {"rest":
+     {"act":
+      {"rest": {"empty": {"pos": {"line": 3, "col": 1}}},
+       "pos": {"line": 3, "col": 3},
+       "a":
+       {"target":
+        {"draw": 0,
+         "addressee":
+         {"toolExec":
+          {"id": "green", "cmd": "nix", "args": ["flake", "check"]}}},
+        "prompt": [{"lit": {"s": "gate"}}],
+        "pos": {"line": 3, "col": 3},
+        "model": null}}},
+     "pos": {"line": 2, "col": 3},
+     "a":
+     {"target":
+      {"draw": 0,
+       "addressee":
+       {"toolExec": {"id": "green", "cmd": "nix", "args": ["flake", "check"]}}},
+      "prompt": [{"lit": {"s": "gate"}}],
+      "pos": {"line": 2, "col": 3},
+      "model": null}}},
+   "fns": []}},
+ "reply":
+ {"worlds":
+  [{"world":
+    {"verdict": {"const": {"v": "approve"}},
+     "text": "echo",
+     "flag": {"const": {"b": true}}},
+    "trace":
+    [{"scope": {"model": null, "mode": null},
+      "prompt": "gate",
+      "draw": 0,
+      "code": "receipt",
+      "answer": null,
+      "addressee":
+      {"toolExec": {"id": "green", "cmd": "nix", "args": ["flake", "check"]}}},
+     {"scope": {"model": null, "mode": null},
+      "prompt": "gate",
+      "draw": 0,
+      "code": "receipt",
+      "answer": null,
+      "addressee":
+      {"toolExec": {"id": "green", "cmd": "nix", "args": ["flake", "check"]}}}],
+    "billMemo": 1,
+    "billFresh": 2}],
+  "size": 3,
+  "level": "batch",
+  "fnAsks": [],
+  "costSummary": {"paths": 1, "minFold": 2, "maxFold": 2},
+  "codes": ["receipt", "receipt"],
+  "blockAsks": 2,
+  "askNodes": 2},
+ "oracleVersion": 1,
+ "name":
+ "one command at one tool, asked twice with the same words, is one question"}

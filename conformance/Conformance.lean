@@ -53,7 +53,10 @@ deriving instance FromJson, ToJson for Pos
 deriving instance FromJson, ToJson for Chunk
 deriving instance FromJson, ToJson for Addressee
 deriving instance FromJson, ToJson for RawTarget
+deriving instance FromJson, ToJson for Served
+deriving instance FromJson, ToJson for Decider
 deriving instance FromJson, ToJson for RawAsk
+deriving instance FromJson, ToJson for TextMember
 deriving instance FromJson, ToJson for RawArg
 deriving instance FromJson, ToJson for RawRhs
 deriving instance FromJson, ToJson for RawSource
@@ -195,15 +198,24 @@ inductive Guard where
   | questionBudget
   | servedBy
   | dupFunction
+  | deciderEmpty
   | other
   deriving ToJson
 
 def classify (msg : String) : Guard :=
   if (msg.splitOn "a panel needs at least one member").length > 1 then .panelEmpty
+  -- A text panel's empty fan is the same mistake in the same family, so it is
+  -- the same guard: `PanelEmpty` means "a fan with no members" whichever monoid
+  -- it folds into.
+  else if (msg.splitOn "a text panel needs at least one member").length > 1 then .panelEmpty
   else if (msg.splitOn "at most 64 amendments").length > 1 then .revisionBound
   else if (msg.splitOn "elaborates to").length > 1 then .questionBudget
   else if (msg.splitOn "`served by` names the model").length > 1 then .servedBy
   else if (msg.splitOn "two functions answer to one name").length > 1 then .dupFunction
+  -- Both degeneracies of a decider — no needle at all, and a needle that says
+  -- nothing — are one guard, because they are one mistake: a test that is
+  -- constantly false, or constantly true, with nothing in the source to show it.
+  else if (msg.splitOn "a decider needs").length > 1 then .deciderEmpty
   else .other
 
 /-- The computed `n` of a `maxQuestions` refusal — read back out of the
@@ -269,6 +281,7 @@ ASCII-only where Haskell's `toLower` is Unicode — and the only Tier-0 coverage
 it can get, because on a program-in/world-out boundary nothing ever calls
 `Decode`. -/
 
+/-- The three original ops, unchanged in shape and in meaning. -/
 def stringOp (op : String) (code : Option String) (text : String) : Json :=
   let wrap (j : Json) : Json := Json.mkObj [("result", j)]
   match op with
@@ -290,6 +303,48 @@ def stringOp (op : String) (code : Option String) (text : String) : Json :=
       | none => Json.mkObj [("result", Json.null)]
     | none => Json.mkObj [("error", Json.str "say takes a code")]
   | _ => Json.mkObj [("error", Json.str s!"unknown string op `{op}`")]
+
+def getStrField (j : Json) (k : String) : Option String :=
+  (j.getObjVal? k).toOption.bind (·.getStr?.toOption)
+
+/-- The string layer, dispatched off the whole `{"string": …}` object because
+the new ops (D2's fence, D7's deciders) carry fields the three original ones did
+not. **The extension is additive**: `{"op", "code"?, "text"}` still means exactly
+what it meant, and an old oracle meeting a new request answers
+`{"error": "unknown string op …"}`, which is a loud failure and not a silent one.
+
+The four low-level ops (`bare`, `fields`, `headerPaths`, `matchGlob`) exist so
+that a divergence is *localizable*: a `decide` mismatch with all four green is a
+composition bug, and with one of them red is that function's bug. Same reason
+`norm` and `words` are pinned apart from `decode`. -/
+def stringOpOf (sj : Json) : Json :=
+  let op := (getStrField sj "op").getD ""
+  let code := getStrField sj "code"
+  let text := (getStrField sj "text").getD ""
+  let wrap (j : Json) : Json := Json.mkObj [("result", j)]
+  match op with
+  | "bare" => wrap (Json.str (Exec.bare text))
+  | "fields" => wrap (toJson (Exec.fields text))
+  | "headerPaths" => wrap (toJson (Exec.headerPaths text))
+  | "matchGlob" =>
+    match getStrField sj "pattern" with
+    | some pat => wrap (Json.bool (Exec.matchGlob pat text))
+    | none => Json.mkObj [("error", Json.str "matchGlob takes a `pattern`")]
+  | "fence" =>
+    match getStrField sj "name" with
+    | some n => wrap (Json.str (Dsl.block n text))
+    | none => Json.mkObj [("error", Json.str "fence takes a `name`")]
+  | "decide" =>
+    match (getStrField sj "decider").bind deciderOfName with
+    | none =>
+      Json.mkObj [("error", Json.str "decide takes a decider: lastNonEmptyLineIs, \
+                                     containsLine, anyLineStartsWith or anyPathMatches")]
+    | some d =>
+      match (sj.getObjVal? "needles").toOption.bind
+          (fun nj => (fromJson? (α := List String) nj).toOption) with
+      | none => Json.mkObj [("error", Json.str "decide takes `needles`, a list of strings")]
+      | some ws => wrap (Json.bool (Decider.run d ws text))
+  | _ => stringOp op code text
 
 /-! ## The loop -/
 

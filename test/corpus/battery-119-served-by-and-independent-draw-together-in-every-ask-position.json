@@ -15,7 +15,7 @@
          {"target": {"draw": 2, "addressee": {"model": {"id": "author"}}},
           "prompt": [{"lit": {"s": "draft it"}}],
           "pos": {"line": 2, "col": 15},
-          "model": "deep"}}}}},
+          "model": {"primary": "deep", "alternates": []}}}}}},
      "rest":
      {"act":
       {"rest":
@@ -30,7 +30,7 @@
              [{"target": {"draw": 3, "addressee": {"model": {"id": "one"}}},
                "prompt": [{"lit": {"s": "review "}}, {"interp": {"name": "a"}}],
                "pos": {"line": 5, "col": 5},
-               "model": "deep"},
+               "model": {"primary": "deep", "alternates": []}},
               {"target": {"draw": 1, "addressee": {"tool": {"id": "lint"}}},
                "prompt": [{"lit": {"s": "lint "}}, {"interp": {"name": "a"}}],
                "pos": {"line": 6, "col": 5},
@@ -53,7 +53,7 @@
        {"target": {"draw": 1, "addressee": {"model": {"id": "logger"}}},
         "prompt": [{"lit": {"s": "note "}}, {"interp": {"name": "a"}}],
         "pos": {"line": 3, "col": 3},
-        "model": "cheap"}}},
+        "model": {"primary": "cheap", "alternates": []}}}},
      "pos": {"line": 2, "col": 3},
      "ann": "text"}},
    "fns": []}},

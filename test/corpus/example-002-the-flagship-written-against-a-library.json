@@ -80,10 +80,11 @@
                    {"interp": {"name": "why"}},
                    {"lit": {"s": "\nReply with the revised diff only."}}],
                   "pos": {"line": 26, "col": 7},
-                  "model": "deep"}}}}},
+                  "model": {"primary": "deep", "alternates": []}}}}}},
              "rest":
              {"caseResult":
               {"x": "result",
+               "unsettledName": "patch",
                "unsettled": {"empty": {"pos": {"line": 66, "col": 17}}},
                "settledName": "patch",
                "settled":
@@ -189,7 +190,7 @@
             {"interp": {"name": "shape"}},
             {"lit": {"s": "\nReply with a unified diff only."}}],
            "pos": {"line": 12, "col": 8},
-           "model": "deep"}}},
+           "model": {"primary": "deep", "alternates": []}}}},
         "pos": {"line": 12, "col": 3},
         "ann": null}}],
      "answerPos": {"line": 19, "col": 3},

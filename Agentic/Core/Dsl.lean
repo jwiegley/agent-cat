@@ -100,6 +100,17 @@ theorem level_panel_le' {c : Code} [Monoid (El c)] (ps : List (Plan Γ (El c)))
     refine le_trans (level_zipWith_le _ p (Plan.panel ps))
       (max_le (h p (List.mem_cons_self ..)) (ih fun q hq => h q (List.mem_cons_of_mem _ hq)))
 
+/-- …and so is a text panel, for the same reason and by the same fold: the fence
+lives in the `Expr` at the leaf and never in a node. -/
+theorem level_panelText_le' (ps : List (String × Plan Γ (El .text)))
+    (h : ∀ p ∈ ps, level p.2 ≤ ℓ) : level (Plan.panelText ps) ≤ ℓ := by
+  induction ps with
+  | nil => exact bot_le
+  | cons p ps ih =>
+    rw [Plan.panelText_cons]
+    refine le_trans (level_zipWith_le _ p.2 (Plan.panelText ps))
+      (max_le (h p (List.mem_cons_self ..)) (ih fun q hq => h q (List.mem_cons_of_mem _ hq)))
+
 /-- **Bounded revision does not leave the branch rung.** `Plan.revising` is
 `Nat.rec` over `graft` and `caseB`, so this is those two bounds iterated. -/
 theorem level_revising_le {c : Code} {check : Cont Γ (El c) Verdict}
@@ -120,6 +131,31 @@ theorem level_revising_le {c : Code} {check : Cont Γ (El c) Verdict}
     refine level_caseB_le _ _ _ hb (le_trans (le_of_eq (level_ret _)) bot_le) ?_
     refine le_trans (level_graft_le (ℓ₀ := ℓ) _ _ fun _ _ _ => ih _ _ _)
       (max_le (hr Ξ _ _) le_rfl)
+
+/-- **Nor does the three-way bounded revision.** `Plan.revisingOn` is the same
+`Nat.rec` over `graft` with a three-armed `caseV` in place of the `caseB`, so
+this is those bounds iterated one arm wider. -/
+theorem level_revisingOn_le {c : Code} {check : Cont Γ (El c) Verdict}
+    {revise : Cont Γ (El c × Verdict) (El c)} (hb : Level.branch ≤ ℓ)
+    (hc : ∀ (Θ : Ctx) (τ : Sub Γ Θ) (a : Expr Θ (El c)), level (check Θ τ a) ≤ ℓ)
+    (hr : ∀ (Θ : Ctx) (τ : Sub Γ Θ) (a : Expr Θ (El c × Verdict)), level (revise Θ τ a) ≤ ℓ) :
+    ∀ (n : Nat) (Θ : Ctx) (τ : Sub Γ Θ) (a : Expr Θ (El c)),
+      level (Plan.revisingOn check revise n Θ τ a) ≤ ℓ := by
+  intro n
+  induction n with
+  | zero =>
+    intro Θ τ a
+    refine le_trans (level_graft_le (ℓ₀ := ℓ) _ _ fun _ _ _ => ?_) (max_le (hc Θ τ a) le_rfl)
+    exact le_trans (le_of_eq (level_ret _)) bot_le
+  | succ n ih =>
+    intro Θ τ a
+    refine le_trans (level_graft_le (ℓ₀ := ℓ) _ _ fun Ξ ρ v => ?_) (max_le (hc Θ τ a) le_rfl)
+    refine level_caseV_le _ _ hb fun t => ?_
+    cases t
+    · exact le_trans (le_of_eq (level_ret _)) bot_le
+    · refine le_trans (level_graft_le (ℓ₀ := ℓ) _ _ fun _ _ _ => ih _ _ _)
+        (max_le (hr Ξ _ _) le_rfl)
+    · exact le_trans (le_of_eq (level_ret _)) bot_le
 
 end Agentic.Core
 
@@ -164,6 +200,33 @@ theorem checkMembers_level_le {Γ : Ctx} (S : Bindings Γ) :
         rcases List.mem_cons.mp hp with rfl | hp'
         · exact askPlan_level_le _ S a p hq
         · exact ih qs hqs p hp'
+
+/-- Text-panel members, one at a time: each is a question, so each is at
+`pipeline` at worst. -/
+theorem checkMembersText_level_le {Γ : Ctx} (S : Bindings Γ) :
+    ∀ (l : List TextMember) (seen : List String)
+      (ps : List (String × Plan Γ (El .text))),
+      checkMembersText S seen l = .ok ps → ∀ p ∈ ps, level p.2 ≤ Level.pipeline := by
+  intro l
+  induction l with
+  | nil => intro seen ps hps p hp; cases hps; exact absurd hp (by simp)
+  | cons m as ih =>
+    intro seen ps hps p hp
+    simp only [checkMembersText] at hps
+    split at hps
+    · exact absurd hps (by simp)
+    · split at hps
+      · exact absurd hps (by simp)
+      · split at hps
+        · exact absurd hps (by simp)
+        · rename_i q hq
+          split at hps
+          · exact absurd hps (by simp)
+          · rename_i qs hqs
+            cases hps
+            rcases List.mem_cons.mp hp with rfl | hp'
+            · exact askPlan_level_le _ S m.ask q hq
+            · exact ih _ qs hqs p hp'
 
 /-- The invariant of the function table: every entry's plan is at or below the
 pipeline rung — a body is a sequence of questions, and a call's rung is the
@@ -210,6 +273,34 @@ theorem rhsPlan_level_le {Γ : Ctx} {fns : Fns} (hf : FnLevel fns)
           cases h
           exact level_panel_le' _ (checkMembers_level_le S ms ps hps)
       · exact absurd h (by simp)
+  | panelText ms pos =>
+    simp only [rhsPlan] at h
+    split at h
+    · exact absurd h (by simp)
+    · split at h
+      · rename_i hc
+        split at h
+        · exact absurd h (by simp)
+        · rename_i ps hps
+          cases h
+          exact level_panelText_le' _ (checkMembersText_level_le S ms [] ps hps)
+      · exact absurd h (by simp)
+  | decide d x ws pos =>
+    -- A decider is a `.ret`: it reaches no rung at all.
+    simp only [rhsPlan] at h
+    split at h
+    · exact absurd h (by simp)
+    · split at h
+      · exact absurd h (by simp)
+      · split at h
+        · split at h
+          · exact absurd h (by simp)
+          · split at h
+            · rename_i e he
+              cases h
+              exact le_trans (le_of_eq (level_ret _)) bot_le
+            · exact absurd h (by simp)
+        · exact absurd h (by simp)
   | call f args pos =>
     simp only [rhsPlan] at h
     split at h
@@ -253,6 +344,24 @@ theorem bindForm_level_le {A : Type} {Γ : Ctx} {fns : Fns} (hf : FnLevel fns)
       refine le_trans (level_graft_le (ℓ₀ := ℓ) _ _ fun _ σ e => ?_)
         (max_le (le_trans (rhsPlan_level_le hf c S (.panel ms pos) _ v hv) hp) le_rfl)
       exact le_trans (le_of_eq (level_sub _ _)) hk
+  | panelText ms pos =>
+    simp only [bindForm] at h
+    split at h
+    · exact absurd h (by simp)
+    · rename_i v hv
+      cases h
+      refine le_trans (level_graft_le (ℓ₀ := ℓ) _ _ fun _ σ e => ?_)
+        (max_le (le_trans (rhsPlan_level_le hf c S (.panelText ms pos) _ v hv) hp) le_rfl)
+      exact le_trans (le_of_eq (level_sub _ _)) hk
+  | decide d x ws pos =>
+    simp only [bindForm] at h
+    split at h
+    · exact absurd h (by simp)
+    · rename_i v hv
+      cases h
+      refine le_trans (level_graft_le (ℓ₀ := ℓ) _ _ fun _ σ e => ?_)
+        (max_le (le_trans (rhsPlan_level_le hf c S (.decide d x ws pos) _ v hv) hp) le_rfl)
+      exact le_trans (le_of_eq (level_sub _ _)) hk
   | call f args pos =>
     simp only [bindForm] at h
     split at h
@@ -262,6 +371,53 @@ theorem bindForm_level_le {A : Type} {Γ : Ctx} {fns : Fns} (hf : FnLevel fns)
       refine le_trans (level_graft_le (ℓ₀ := ℓ) _ _ fun _ σ e => ?_)
         (max_le (le_trans (rhsPlan_level_le hf c S (.call f args pos) _ v hv) hp) le_rfl)
       exact le_trans (le_of_eq (level_sub _ _)) hk
+/-- The exit continuation of a bounded revision is at the branch rung together
+with its arms — at **either** tag, which is what lets `revising`'s two-armed
+exit and `revising on`'s three-armed one share one lemma as they share one
+definition. -/
+theorem level_exitCont_le {Γ Δ : Ctx} {c : Code} {ℓ : Level} (t : Tag)
+    (arms : t.El → Plan (c :: Γ) Unit) (hb : Level.branch ≤ ℓ)
+    (ha : ∀ x, level (arms x) ≤ ℓ) (σ : Sub Γ Δ) (final : Expr Δ (El c × t.El)) :
+    level (exitCont t arms Δ σ final) ≤ ℓ := by
+  show level (Plan.case t _ _) ≤ ℓ
+  rw [level_case]
+  exact max_le hb (Finset.sup_le fun x _ => le_trans (le_of_eq (level_sub _ _)) (ha x))
+
+/-- The prologue a bounded revision's two forms share leaves both clauses at the
+pipeline rung: each is a `rhsPlan`, and nothing in the language's expression
+layer reaches the branch rung. -/
+theorem checkLoopParts_level {fns : Fns} (hf : FnLevel fns) {Γ : Ctx} {S : Bindings Γ}
+    {x : String} {ann : Option Code} {subj carrier : String} {n : Nat}
+    {rname : String} {rann : Option Code} {review amend : RawRhs} {rpos pos : Pos}
+    {lp : LoopParts Γ}
+    (h : checkLoopParts fns S x ann subj carrier n rname rann review amend rpos pos = .ok lp) :
+    level lp.review ≤ Level.pipeline ∧ level lp.amend ≤ Level.pipeline := by
+  simp only [checkLoopParts] at h
+  split at h
+  · exact absurd h (by simp)
+  · split at h
+    · exact absurd h (by simp)
+    · split at h
+      · exact absurd h (by simp)
+      · split at h
+        · exact absurd h (by simp)
+        · split at h
+          · exact absurd h (by simp)
+          · split at h
+            · exact absurd h (by simp)
+            · split at h
+              · exact absurd h (by simp)
+              · rename_i b hb
+                split at h
+                · exact absurd h (by simp)
+                · rename_i reviewP hreview
+                  split at h
+                  · exact absurd h (by simp)
+                  · rename_i amendP hamend
+                    cases h
+                    exact ⟨rhsPlan_level_le hf _ _ review _ reviewP hreview,
+                           rhsPlan_level_le hf _ _ amend _ amendP hamend⟩
+
 /-- The invariant the pending loop result carries through the induction: its
 plan is at or below the branch rung, which is what the consuming `case`'s
 graft needs. -/
@@ -339,6 +495,9 @@ theorem checkBlock_level_le {fns : Fns} (hf : FnLevel fns) :
       | revising subj carrier n rname rann review amend rpos =>
         simp only [checkBlock] at h
         exact absurd h (by simp)
+      | revisingOn subj carrier n rname rann review amend rpos =>
+        simp only [checkBlock] at h
+        exact absurd h (by simp)
     | none =>
       cases src with
       | rhs r =>
@@ -361,35 +520,24 @@ theorem checkBlock_level_le {fns : Fns} (hf : FnLevel fns) :
         simp only [checkBlock] at h
         split at h
         · exact absurd h (by simp)
-        · split at h
-          · exact absurd h (by simp)
-          · split at h
-            · exact absurd h (by simp)
-            · split at h
-              · exact absurd h (by simp)
-              · split at h
-                · exact absurd h (by simp)
-                · split at h
-                  · exact absurd h (by simp)
-                  · split at h
-                    · exact absurd h (by simp)
-                    · rename_i b hb
-                      split at h
-                      · exact absurd h (by simp)
-                      · rename_i reviewP hreview
-                        split at h
-                        · exact absurd h (by simp)
-                        · rename_i amendP hamend
-                          refine ih _ _ _ ?_ p h
-                          show level _ ≤ Level.branch
-                          refine level_revising_le le_rfl (fun _ _ _ => ?_) (fun _ _ _ => ?_)
-                            n _ _ _
-                          · exact le_trans (le_of_eq (level_sub _ _))
-                              (le_trans (rhsPlan_level_le hf _ _ review _ reviewP hreview)
-                                (by decide))
-                          · exact le_trans (le_of_eq (level_sub _ _))
-                              (le_trans (rhsPlan_level_le hf _ _ amend _ amendP hamend)
-                                (by decide))
+        · rename_i lp hlp
+          obtain ⟨hrev, ham⟩ := checkLoopParts_level hf hlp
+          refine ih _ _ _ ?_ p h
+          show level _ ≤ Level.branch
+          refine level_revising_le le_rfl (fun _ _ _ => ?_) (fun _ _ _ => ?_) n _ _ _
+          · exact le_trans (le_of_eq (level_sub _ _)) (le_trans hrev (by decide))
+          · exact le_trans (le_of_eq (level_sub _ _)) (le_trans ham (by decide))
+      | revisingOn subj carrier n rname rann review amend rpos =>
+        simp only [checkBlock] at h
+        split at h
+        · exact absurd h (by simp)
+        · rename_i lp hlp
+          obtain ⟨hrev, ham⟩ := checkLoopParts_level hf hlp
+          refine ih _ _ _ ?_ p h
+          show level _ ≤ Level.branch
+          refine level_revisingOn_le le_rfl (fun _ _ _ => ?_) (fun _ _ _ => ?_) n _ _ _
+          · exact le_trans (le_of_eq (level_sub _ _)) (le_trans hrev (by decide))
+          · exact le_trans (le_of_eq (level_sub _ _)) (le_trans ham (by decide))
   | ifFlag x y n pos ihy ihn =>
     intro Γ S pend hpend p h
     cases pend with
@@ -434,7 +582,7 @@ theorem checkBlock_level_le {fns : Fns} (hf : FnLevel fns) :
                 · exact iho _ _ none trivial o' ho'
                 · exact ihd _ _ none trivial d' hd'
     | some pd => simp only [checkBlock] at h; exact absurd h (by simp)
-  | caseResult x sname settled unsettled pos ihs ihu =>
+  | caseResult x sname uname settled unsettled pos ihs ihu =>
     intro Γ S pend hpend p h
     cases pend with
     | none => simp only [checkBlock] at h; exact absurd h (by simp)
@@ -443,19 +591,59 @@ theorem checkBlock_level_le {fns : Fns} (hf : FnLevel fns) :
       split at h
       · exact absurd h (by simp)
       · split at h
-        · exact absurd h (by simp)
-        · split at h
+        · rename_i pc pplan
+          split at h
           · exact absurd h (by simp)
-          · rename_i settledP hsettled
-            split at h
+          · split at h
             · exact absurd h (by simp)
-            · rename_i unsettledP hunsettled
-              cases h
-              refine le_trans (level_graft_le (ℓ₀ := Level.branch) _ _ fun _ σ e => ?_)
-                (max_le hpend le_rfl)
-              exact level_caseB_le _ _ _ le_rfl
-                (le_trans (le_of_eq (level_sub _ _)) (ihs _ _ none trivial settledP hsettled))
-                (le_trans (le_of_eq (level_sub _ _)) (ihu _ _ none trivial unsettledP hunsettled))
+            · split at h
+              · exact absurd h (by simp)
+              · rename_i settledP hsettled
+                split at h
+                · exact absurd h (by simp)
+                · rename_i unsettledP hunsettled
+                  cases h
+                  refine le_trans (level_graft_le (ℓ₀ := Level.branch) _ _ fun _ σ e => ?_)
+                    (max_le hpend le_rfl)
+                  refine level_exitCont_le _ _ le_rfl (fun b => ?_) _ _
+                  cases b
+                  · exact ihu _ _ none trivial unsettledP hunsettled
+                  · exact ihs _ _ none trivial settledP hsettled
+        · exact absurd h (by simp)
+  | caseEnding x sname uname aname settled unsettled abandoned pos ihs ihu iha =>
+    intro Γ S pend hpend p h
+    cases pend with
+    | none => simp only [checkBlock] at h; exact absurd h (by simp)
+    | some pd =>
+      simp only [checkBlock] at h
+      split at h
+      · exact absurd h (by simp)
+      · split at h
+        · rename_i pc pplan
+          split at h
+          · exact absurd h (by simp)
+          · split at h
+            · exact absurd h (by simp)
+            · split at h
+              · exact absurd h (by simp)
+              · split at h
+                · exact absurd h (by simp)
+                · rename_i settledP hsettled
+                  split at h
+                  · exact absurd h (by simp)
+                  · rename_i unsettledP hunsettled
+                    split at h
+                    · exact absurd h (by simp)
+                    · rename_i abandonedP habandoned
+                      cases h
+                      refine le_trans (level_graft_le (ℓ₀ := Level.branch) _ _ fun _ σ e => ?_)
+                        (max_le hpend le_rfl)
+                      refine level_exitCont_le _ _ le_rfl (fun t => ?_) _ _
+                      cases t
+                      · exact ihs _ _ none trivial settledP hsettled
+                      · exact ihu _ _ none trivial unsettledP hunsettled
+                      · exact iha _ _ none trivial abandonedP habandoned
+        · exact absurd h (by simp)
 
 /-! ## Function bodies stay at the pipeline rung
 
@@ -645,6 +833,13 @@ theorem overRevised_sound :
         simp only [Option.some.injEq, Prod.mk.injEq] at h
         exact h.2 ▸ hlt
       · exact ih h
+    | revisingOn subj carrier m rname rann review amend rpos =>
+      simp only [overRevised] at h
+      split at h
+      · rename_i hlt
+        simp only [Option.some.injEq, Prod.mk.injEq] at h
+        exact h.2 ▸ hlt
+      · exact ih h
   | ifFlag x yb nb p ihy ihn =>
     intro pos n h
     simp only [overRevised] at h
@@ -676,7 +871,7 @@ theorem overRevised_sound :
       | none =>
         rw [ho] at h
         exact ihd h
-  | caseResult x sname sb ub p ihs ihu =>
+  | caseResult x sname uname sb ub p ihs ihu =>
     intro pos n h
     simp only [overRevised] at h
     cases hs : overRevised sb with
@@ -688,6 +883,25 @@ theorem overRevised_sound :
       rw [hs] at h
       simp only [Option.orElse] at h
       exact ihu h
+  | caseEnding x sname uname aname sb ub ab p ihs ihu iha =>
+    intro pos n h
+    simp only [overRevised] at h
+    cases hs : overRevised sb with
+    | some v =>
+      rw [hs] at h
+      simp only [Option.orElse, Option.some.injEq] at h
+      exact ihs (h ▸ hs)
+    | none =>
+      rw [hs] at h
+      simp only [Option.orElse] at h
+      cases hu : overRevised ub with
+      | some v =>
+        rw [hu] at h
+        simp only [Option.some.injEq] at h
+        exact ihu (h ▸ hu)
+      | none =>
+        rw [hu] at h
+        exact iha h
 
 /-- A hostile revising bound is refused at its own line, with exactly this
 diagnosis — for every program whose table checks, not just the battery's. -/
@@ -756,6 +970,47 @@ theorem checkBlock_caseVerdict_arms {fns : Fns} {Γ : Ctx} {S : Bindings Γ}
           · rename_i d' hd'
             cases h
             exact ⟨e, a', o', d', ha', ho', hd', rfl⟩
+
+/-- **A checked three-way exit lands each ending on its own arm.** The term is
+`Plan.graft` of the loop onto `exitCont .ending` of exactly the three checked
+blocks — settled to the `settled` text, unsettled to `unsettled`, abandoned to
+`abandoned` — so the `Ending` mapping is constrained by theorem and a permuted
+arm list no longer type-checks silently. `checkBlock_caseVerdict_arms`'s sibling,
+for the same reason. -/
+theorem checkBlock_caseEnding_arms {fns : Fns} {Γ : Ctx} {S : Bindings Γ} {pd : Pend Γ}
+    {x sname uname aname : String} {settled unsettled abandoned : RawBlock}
+    {pos : Pos} {p : Plan Γ Unit}
+    (h : checkBlock fns Γ S (some pd)
+          (.caseEnding x sname uname aname settled unsettled abandoned pos) = .ok p) :
+    ∃ (pplan : Plan Γ (El pd.code × Ending)) (s' u' a' : Plan (pd.code :: Γ) Unit),
+      checkBlock fns (pd.code :: Γ) (Bindings.push sname pd.code S) none settled = .ok s' ∧
+      checkBlock fns (pd.code :: Γ) (Bindings.push uname pd.code S) none unsettled = .ok u' ∧
+      checkBlock fns (pd.code :: Γ) (Bindings.push aname pd.code S) none abandoned = .ok a' ∧
+      p = Plan.graft pplan (exitCont .ending (fun e => match e with
+            | .settled => s' | .unsettled => u' | .abandoned => a')) := by
+  simp only [checkBlock] at h
+  split at h
+  · exact absurd h (by simp)
+  · split at h
+    · rename_i _ _ pplan _
+      split at h
+      · exact absurd h (by simp)
+      · split at h
+        · exact absurd h (by simp)
+        · split at h
+          · exact absurd h (by simp)
+          · split at h
+            · exact absurd h (by simp)
+            · rename_i s' hs'
+              split at h
+              · exact absurd h (by simp)
+              · rename_i u' hu'
+                split at h
+                · exact absurd h (by simp)
+                · rename_i a' ha'
+                  cases h
+                  exact ⟨pplan, s', u', a', hs', hu', ha', rfl⟩
+    · exact absurd h (by simp)
 
 /-- The source-written draw index survives shape elaboration: `served by`
 relabels the server and touches nothing else. -/

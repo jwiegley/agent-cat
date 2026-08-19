@@ -3,7 +3,7 @@
 -- Replays the frozen corpus produced by the Lean oracle
 -- (@test/corpus/*.json@ at the repository root) against this
 -- implementation, and reports every divergence. Week one compares the JSON
--- codec, the five term-level guards, the two ask counts and the string layer,
+-- codec, the six term-level guards, the two ask counts and the string layer,
 -- and nothing else.
 --
 -- == The comparison rules
@@ -13,15 +13,19 @@
 -- 'Data.Aeson.Value', so object key order and number formatting are free; raw
 -- bytes are never compared.
 --
--- [R1 — a string entry] @request.string@: @'stringOp' op code text@ against
---   the /whole/ reply value, nothing excluded.
+-- [R1 — a string entry] @request.string@: @'stringOpOf'@ of the /whole/
+--   request object against the /whole/ reply value, nothing excluded. The
+--   object and not three fields, because the wave-three ops (D2's @fence@, D7's
+--   @decide@ and @matchGlob@) carry fields the three original ones did not; the
+--   extension is additive and an unknown op still answers
+--   @{"error": "unknown string op …"}@.
 --
 -- [R2 — every program entry] @request.program@ must decode to a 'RawProgram'
 --   and re-encode to the request's value exactly. A decode failure is a
 --   failure, never a skip.
 --
--- [R3 — a program refused with one of the five guards] R2, and 'guardCheck'
---   must name that guard and carry its @n@ (@null@ for four of them, @8193@
+-- [R3 — a program refused with one of the six guards] R2, and 'guardCheck'
+--   must name that guard and carry its @n@ (@null@ for five of them, @8193@
 --   for the question budget). @reply.refused.pos@, @.excerpt@ and @.message@
 --   are oracle-only and are never compared.
 --
@@ -35,8 +39,11 @@
 --   @askNodes@, @codes@, @costSummary@ and @worlds@ need the @Plan@
 --   denotation and belong to tier1; this runner ignores them.
 --
--- The expected tally is 121 entries: 22 string, and 99 program of which 5 are
--- guard refusals (one per guard), 35 are @other@, and 59 are checked.
+-- The expected tally is the whole of @test\/corpus@: every @string@ entry,
+-- and every @program@ entry, of which the guard refusals are one or more per
+-- guard, the @other@ refusals are codec-only, and the rest are checked. The
+-- runner reads the directory rather than a number, so a corpus that grows is a
+-- corpus this replays.
 --
 -- Usage: @tier0 [corpusDir]@, defaulting to
 -- @../test/corpus@ (this executable runs from @haskell/@). Exit status is 0 iff nothing
@@ -77,7 +84,7 @@ import System.FilePath (takeExtension, (</>))
 
 import Agentic.Guards (Guard (..), askCounts, guardCheck)
 import Agentic.Raw (RawProgram)
-import Agentic.Text (stringOp)
+import Agentic.Text (stringOpOf)
 
 -- ---------------------------------------------------------------------------
 -- Entry classification and results
@@ -85,10 +92,10 @@ import Agentic.Text (stringOp)
 
 -- | What kind of corpus entry this was, for the tally in the module header.
 data Kind
-  = KString    -- ^ @request.string@ (22 expected)
-  | KGuard     -- ^ @request.program@, refused with one of the five (5)
-  | KOther     -- ^ @request.program@, refused @other@ — codec only (35)
-  | KChecked   -- ^ @request.program@, checked (59)
+  = KString    -- ^ @request.string@
+  | KGuard     -- ^ @request.program@, refused with one of the six
+  | KOther     -- ^ @request.program@, refused @other@ — codec only
+  | KChecked   -- ^ @request.program@, checked
   | KPing      -- ^ @request.ping@ — ignored (none exist)
   | KBroken    -- ^ the entry, or its reply, fits none of the rules — always a failure
   deriving (Eq, Show)
@@ -196,11 +203,16 @@ checkEntry entry =
     _ -> bad KBroken "entry lacks a request or a reply"
 
 -- | R1 — a string entry compares the whole reply value.
+--
+-- The whole request object goes to 'stringOpOf', which is what the oracle's own
+-- @stringOpOf@ takes: an op is free to carry fields (@pattern@, @name@,
+-- @decider@, @needles@) the three original ones did not, and a runner that
+-- projected three fields out could not put the wave-three ops at all.
 checkString :: Value -> Value -> Report
 checkString s reply =
-  case (field "op" s >>= asText, field "text" s >>= asText) of
-    (Just op, Just txt) ->
-      let actual = stringOp op (field "code" s >>= asText) txt
+  case field "op" s >>= asText of
+    Just op ->
+      let actual = stringOpOf s
        in if actual == reply
             then ok KString
             else
@@ -211,7 +223,7 @@ checkString s reply =
                   <> clip (render reply)
                   <> ", actual "
                   <> clip (render actual)
-    _ -> bad KString "request.string lacks a textual op or text"
+    _ -> bad KString "request.string lacks a textual op"
 
 -- | R2–R5 — a program entry always round-trips the codec, and then
 -- compares whatever its reply class licenses.
@@ -274,7 +286,7 @@ classOf :: Value -> Kind
 classOf reply = case field "refused" reply of
   Just r -> case field "guard" r >>= asText of
     Just g
-      | g `elem` fiveGuards -> KGuard
+      | g `elem` sixGuards -> KGuard
       | g == "other" -> KOther
     _ -> KBroken
   Nothing
@@ -292,9 +304,13 @@ guardName = \case
   QuestionBudget -> "questionBudget"
   ServedBy -> "servedBy"
   DupFunction -> "dupFunction"
+  DeciderEmpty -> "deciderEmpty"
 
-fiveGuards :: [Text]
-fiveGuards = map guardName [PanelEmpty, RevisionBound, QuestionBudget, ServedBy, DupFunction]
+-- | The guards this runner compares, which are the oracle's @classify@ minus
+-- @other@. Written as a fold over 'Bounded' rather than as a list, so a seventh
+-- guard cannot be added to 'Guard' and forgotten here.
+sixGuards :: [Text]
+sixGuards = map guardName [minBound .. maxBound]
 
 sayGuard :: Maybe (Text, Maybe Integer) -> Text
 sayGuard = \case

@@ -48,11 +48,12 @@
        "rest":
        {"caseResult":
         {"x": "r",
+         "unsettledName": "x",
          "unsettled":
          {"knownHere":
           {"rest": {"empty": {"pos": {"line": 11, "col": 17}}},
            "pos": {"line": 10, "col": 17},
-           "names": ["d"]}},
+           "names": ["x", "d"]}},
          "settledName": "x",
          "settled":
          {"knownHere":

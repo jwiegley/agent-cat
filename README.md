@@ -49,7 +49,7 @@ applies to every program there is.
 ## The conformance boundary
 
 `lake exe conformance-oracle` is a line-delimited JSON process that checks and
-observes `RawProgram`s and exercises the string layer. `test/corpus/` is 128 of
+observes `RawProgram`s and exercises the string layer. `test/corpus/` is 188 of
 its request/reply pairs, committed — so Tier 0 runs with no Lean in the loop.
 
 The corpus is **frozen**, and the requests in it are the specification.
@@ -91,12 +91,50 @@ end of `haskell/example/Example/Harden.hs`:
               Apply:
               {patch}
               Write the patched file here, then reply DONE.|]
-      Unsettled -> stop
+      Unsettled _ -> stop
 ```
 
 `when` is the one-armed `if`: terminal, sealed by a `stop`, and printing the
 identical `ifFlag` node. Two programs are written this way today — `harden`, the
 flagship, and `hello` — and they are the values everything downstream reads.
+
+Four further forms the surface carries, each an ordinary Haskell value:
+
+* **`revisingOn`** — the same bounded revision, reading the review's *verdict
+  tag* three ways rather than one predicate two ways: approval settles, an
+  objection amends, **a refusal abandons**. Its `case` is on `Ending`, whose
+  three constructors are `SettledOn` / `UnsettledOn` / `AbandonedOn` — suffixed
+  because Haskell has one constructor namespace per module and `Outcome` already
+  spells the first two. It is not free: the tail is built three times and the
+  plan replicates it `2n+1` times against `revising`'s `n+1`, so a wide tail
+  reaches the question budget at roughly half the bound.
+* **`panelText`** — `panel`'s twin at `text`: the same fan-out, folded into
+  fenced blocks in member order rather than into the verdict monoid. Each
+  member's answer is wrapped `<name>`…`</name>`, verbatim and untrimmed, with
+  one escape — a body that contains this fence's own `</name>` has it rewritten
+  to `<\/name>`, so a member cannot forge the end of its own block. A sibling's
+  tag passes through untouched, which is what makes the blocks nest.
+* **`decide`** — a closed vocabulary of four pure classifications
+  (`LastNonEmptyLineIs`, `ContainsLine`, `AnyLineStartsWith`, `AnyPathMatches`)
+  over text already in hand, answering a flag. It asks nobody, so writing one
+  where an asked flag stood is **one fewer question on every path, the same
+  number of paths, and the same rung**. Its needles are literal program text and
+  never holes: a needle a model could author is a test a model chooses.
+* **`servedBy` / `fallingBackTo`** — a `served by` pin and the models that may
+  answer in its place. The fail-over is Exec policy and changes no plan, no
+  price and no fold; only a *gap* moves on, and the trace records **the model
+  that actually answered**, with the attempt that failed narrated on stderr
+  instead. With no alternates declared, every diagnostic is byte-identical to
+  what it always was.
+
+``tool "gate" `running` ("nix", ["flake", "check"])`` names a tool whose answer
+the runner obtains by running that argv. The exit status is the answer wherever
+the answer type can express failure — `flag` takes `True`/`False`, `verdict`
+takes the command's own first failing line as its objection — and the run is
+**abandoned** where it cannot, at `receipt` and at `text`, rather than recording
+an answer indistinguishable in the table from one a command that succeeded gave.
+The argv is program text with no interpolation syntax, so no answer can ever
+reach a command line.
 
 ## The runner — `agentic-run`
 

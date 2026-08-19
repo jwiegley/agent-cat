@@ -1,0 +1,7 @@
+{"request":
+ {"string":
+  {"text": "rename from a/Old.hs\nrename to a/New.hs\n", "op": "headerPaths"}},
+ "reply":
+ {"result": ["rename", "from", "a/Old.hs", "rename", "to", "a/New.hs"]},
+ "oracleVersion": 1,
+ "name": "headerPaths reads a rename header"}

@@ -1,0 +1,9 @@
+{"request":
+ {"string":
+  {"text": "   \n\u0009\n",
+   "op": "decide",
+   "needles": ["WORK COMPLETE"],
+   "decider": "lastNonEmptyLineIs"}},
+ "reply": {"result": false},
+ "oracleVersion": 1,
+ "name": "decide: whitespace-only input has no last non-empty line"}

@@ -33,7 +33,7 @@
              {"lit": {"s": "harden the parser"}},
              {"lit": {"s": "\nReply with a unified diff only."}}],
             "pos": {"line": 10, "col": 12},
-            "model": "deep"}}}}},
+            "model": {"primary": "deep", "alternates": []}}}}}},
        "rest":
        {"bind":
         {"x": "result",
@@ -96,10 +96,11 @@
                {"interp": {"name": "verdict"}},
                {"lit": {"s": "\nReply with the revised diff only."}}],
               "pos": {"line": 39, "col": 7},
-              "model": "deep"}}}}},
+              "model": {"primary": "deep", "alternates": []}}}}}},
          "rest":
          {"caseResult":
           {"x": "result",
+           "unsettledName": "patch",
            "unsettled": {"empty": {"pos": {"line": 67, "col": 17}}},
            "settledName": "patch",
            "settled":

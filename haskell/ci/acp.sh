@@ -105,7 +105,7 @@ note "happy: settled in 7 turns, the act wrote applied.c, exit 0"
 # `--refuse` makes the stub answer *no* to the consent question, which is
 # `Harden.no_ack_of_refused`'s hypothesis made of bytes. The apply question is
 # then never put: six consultations instead of seven — `Harden.bill_refuse_demo`
-# (Agentic/Core/HardenPatch.lean:965) — and nothing is written, because no act
+# (Agentic/Core/HardenPatch.lean:969) — and nothing is written, because no act
 # ran to write it.
 # ---------------------------------------------------------------------------
 play refuse run harden --engine acp --adapter stub --adapter-arg --refuse --timeout 60000

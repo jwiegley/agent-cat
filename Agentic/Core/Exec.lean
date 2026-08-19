@@ -90,11 +90,10 @@ form: it says exactly what the parser branches on and leaves the byte-level
 behaviour of `trimAscii`/`toLower` where it belongs, in Lean core. -/
 def norm (s : String) : String := s.trimAscii.toString.toLower
 
-/-- `[[answerLines s]]` = the nonblank lines of `s`, each ASCII-trimmed: the
-objections a reviewer raised, one per line, with the blank lines a model likes
-to emit discarded. -/
-def answerLines (s : String) : List String :=
-  ((s.splitOn "\n").map (fun l => l.trimAscii.toString)).filter (fun l => !l.isEmpty)
+/-! `answerLines` used to be declared here, between `norm` and `words`. It now
+lives in `Agentic/Core/Text.lean`, unchanged and under the same name, because
+the four deciders (D7) are defined from it and must be visible to the checker,
+which sits below this module in the import graph. -/
 
 /-- `[[words s]]` = the reply as lowercase alphanumeric tokens: what a
 word-matching parser actually compares against.
@@ -786,6 +785,7 @@ def Addressee.render : Addressee → String
   | .model id => s!"model {id}"
   | .tool id => s!"tool {id}"
   | .person id => s!"person {id}"
+  | .toolExec id cmd _ => s!"tool {id} ({cmd})"
 
 /-- The model axis of a question's scope, if the author set one.
 `Agentic.Scope.axis₁` at `QScope`; `LastOpt` is `Option`, and the innermost

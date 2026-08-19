@@ -65,8 +65,14 @@ module Agentic.Raw
 
     -- * The term language
     RawTarget (..),
+    Served (..),
+    servedBy1,
     RawAsk (..),
     RawArg (..),
+    TextMember (..),
+    Decider (..),
+    deciderName,
+    deciderOfName,
     RawRhs (..),
     RawSource (..),
     Raw (..),
@@ -108,6 +114,16 @@ import Data.Maybe (fromMaybe)
 import Data.Scientific (floatingOrInteger)
 import Data.Text (Text)
 import qualified Data.Vector as V
+
+-- The decider vocabulary is "Agentic.Text"'s, imported and re-exported rather
+-- than redefined: its four algorithms are string-layer decisions, pinned by
+-- string-layer vectors, and @Agentic.Text@ is self-contained by design and may
+-- not import this module. Lean declares @Decider@ beside the @RawRhs@
+-- constructor that carries it (@Agentic/Core/Dsl/Syntax.lean@) and defines
+-- @Decider.run@ from @Agentic/Core/Text.lean@'s primitives; here the type and
+-- its run travel together and the codec imports them, which is the same one
+-- table with the import arrow the only way round it can go.
+import Agentic.Text (Decider (..), deciderName, deciderOfName)
 
 -- ---------------------------------------------------------------------------
 -- Codec helpers
@@ -279,6 +295,24 @@ data Addressee
   = AddrModel !Text
   | AddrTool !Text
   | AddrPerson !Text
+  | -- | @AddrToolExec id cmd args@ — a tool whose answer the /runner/ obtains
+    -- by running a program-authored command, so that a check can be an exit
+    -- code rather than a model's claim about one (D5,
+    -- @Agentic\/Core\/Question.lean:72@).
+    --
+    -- __The argv rides in the addressee__, and that is the decision the whole
+    -- design turns on: @Q.Shape@ is the addressee, the scope and the draw, so a
+    -- command in the addressee is in the question, in its
+    -- 'Agentic.World.EventKey' and in its trace event for free — and two acts
+    -- saying the same words to the same tool id with /different/ commands are
+    -- two questions rather than one, which is what keeps a gate run twice from
+    -- being answered from the memo table without running (@battery-219@,
+    -- @battery-220@). @cmd@ is separate from @args@, so \"an argv naming no
+    -- command\" is unrepresentable and no term-level guard is owed. Both are
+    -- 'Text' and never a 'Prompt': there is no interpolation syntax at an argv,
+    -- so there is no path from any answer to any command line, which is why no
+    -- capability lattice is needed here.
+    AddrToolExec !Text !Text ![Text]
   deriving (Eq, Show)
 
 instance ToJSON Addressee where
@@ -286,12 +320,15 @@ instance ToJSON Addressee where
     AddrModel i -> ctorObj "model" ["id" .= i]
     AddrTool i -> ctorObj "tool" ["id" .= i]
     AddrPerson i -> ctorObj "person" ["id" .= i]
+    AddrToolExec i cmd args ->
+      ctorObj "toolExec" ["id" .= i, "cmd" .= cmd, "args" .= args]
 
 instance FromJSON Addressee where
   parseJSON = withCtor "Addressee" $ \tag o -> case tag of
     "model" -> AddrModel <$> o .:: "id"
     "tool" -> AddrTool <$> o .:: "id"
     "person" -> AddrPerson <$> o .:: "id"
+    "toolExec" -> AddrToolExec <$> o .:: "id" <*> o .:: "cmd" <*> o .:: "args"
     _ -> unknownCtor "Addressee" tag
 
 -- | Whom a question is put to, and which independent draw it is.
@@ -312,11 +349,42 @@ instance FromJSON RawTarget where
 -- Asks
 -- ---------------------------------------------------------------------------
 
+-- | The models that may answer a pinned question: the one the author named,
+-- and the ones the runner may fall back to, in the order they are tried (D6,
+-- @Agentic\/Core\/Dsl\/Syntax.lean:208@).
+--
+-- A structure and not a @[Text]@, so that \"pinned but empty\" is
+-- unrepresentable and no new guard is owed; and a /payload/ of the existing
+-- 'Maybe', so that @\"model\": null@ still reads as unpinned. A structure
+-- encodes as a bare object of its fields with no tag.
+--
+-- __The alternates are dropped at elaboration__ — @Check.askShape@ takes
+-- @primary@ alone — and that is the formal statement that fail-over is not part
+-- of a program's meaning: two asks differing only in their alternates elaborate
+-- to the same plan, ask the same question and bill the same.
+data Served = Served
+  { srvPrimary :: !Text,
+    srvAlternates :: ![Text]
+  }
+  deriving (Eq, Show)
+
+instance ToJSON Served where
+  toJSON (Served p as) = object ["primary" .= p, "alternates" .= as]
+
+instance FromJSON Served where
+  parseJSON = withObject "Served" $ \o ->
+    Served <$> o .:: "primary" <*> o .:: "alternates"
+
+-- | The one-model chain: @served by "s"@ with no spare, which is what every
+-- frozen entry carries and what 'Agentic.Builder.askModelServed' builds.
+servedBy1 :: Text -> Served
+servedBy1 m = Served m []
+
 -- | One question, as written. The kind is not a field: it comes from the
 -- binder or the position, and the checker imposes it.
 data RawAsk = RawAsk
-  { -- | The @served by "s"@ override, if any.
-    askModel :: !(Maybe Text),
+  { -- | The @served by "s"@ override, if any — with its alternates.
+    askModel :: !(Maybe Served),
     askTarget :: !RawTarget,
     askPrompt :: !Prompt,
     askPos :: !Pos
@@ -366,10 +434,42 @@ rawArgPos = \case
 -- Right-hand sides
 -- ---------------------------------------------------------------------------
 
--- | A clause-position source: one question, a panel of them, or a call.
+-- | One member of a text panel: the name its block is fenced under, and the
+-- question that fills it (@Agentic\/Core\/Dsl\/Syntax.lean:256@).
+--
+-- A named structure and not a @(Text, RawAsk)@ pair, because a pair's derived
+-- codec puts a two-element array on the wire and __the corpus is read by
+-- humans__: a member is @{\"name\": …, \"ask\": …}@. The label comes first
+-- because it is how the source reads.
+data TextMember = TextMember
+  { tmName :: !Text,
+    tmAsk :: !RawAsk
+  }
+  deriving (Eq, Show)
+
+instance ToJSON TextMember where
+  toJSON (TextMember n a) = object ["name" .= n, "ask" .= a]
+
+instance FromJSON TextMember where
+  parseJSON = withObject "TextMember" $ \o ->
+    TextMember <$> o .:: "name" <*> o .:: "ask"
+
+-- | A clause-position source: one question, a panel of them, a text panel, a
+-- decision about text already in hand, or a call of a function.
 data RawRhs
   = RhsAsk !RawAsk
   | RhsPanel ![RawAsk] !Pos
+  | -- | @panel as text [ name: ask, … ]@ (D2): several questions, each
+    -- member's answer fenced under its own name and the blocks concatenated in
+    -- member order. The label is explicit and is /not/ the addressee id: two
+    -- members of one spread routinely share an addressee, and a document whose
+    -- names change when an operator repoints a lens is naming the wrong thing.
+    RhsPanelText ![TextMember] !Pos
+  | -- | @decide d x [w₁, …]@ (D7): a pure classification of the text bound to
+    -- @x@, answering @flag@. It asks nothing, and its needles are __literal
+    -- program text__ — never a 'Prompt' — because a needle a model could author
+    -- is a test a model chooses, which is not a decider.
+    RhsDecide !Decider !Text ![Text] !Pos
   | RhsCall !Text ![RawArg] !Pos
   deriving (Eq, Show)
 
@@ -377,20 +477,47 @@ instance ToJSON RawRhs where
   toJSON = \case
     RhsAsk a -> ctorObj "ask" ["a" .= a]
     RhsPanel ms pos -> ctorObj "panel" ["members" .= ms, "pos" .= pos]
+    RhsPanelText ms pos -> ctorObj "panelText" ["members" .= ms, "pos" .= pos]
+    RhsDecide d x ws pos ->
+      ctorObj
+        "decide"
+        [ "decider" .= deciderName d,
+          "subject" .= x,
+          "needles" .= ws,
+          "pos" .= pos
+        ]
     RhsCall f as pos -> ctorObj "call" ["fn" .= f, "args" .= as, "pos" .= pos]
 
 instance FromJSON RawRhs where
   parseJSON = withCtor "RawRhs" $ \tag o -> case tag of
     "ask" -> RhsAsk <$> o .:: "a"
     "panel" -> RhsPanel <$> o .:: "members" <*> o .:: "pos"
+    "panelText" -> RhsPanelText <$> o .:: "members" <*> o .:: "pos"
+    "decide" ->
+      RhsDecide
+        <$> (deciderField =<< o .:: "decider")
+        <*> o .:: "subject"
+        <*> o .:: "needles"
+        <*> o .:: "pos"
     "call" -> RhsCall <$> o .:: "fn" <*> o .:: "args" <*> o .:: "pos"
     _ -> unknownCtor "RawRhs" tag
+    where
+      deciderField t = case deciderOfName t of
+        Just d -> pure d
+        Nothing ->
+          fail $
+            "RawRhs.decide: unknown decider "
+              ++ show t
+              ++ "; the vocabulary is closed at lastNonEmptyLineIs, \
+                 \containsLine, anyLineStartsWith, anyPathMatches"
 
 -- | Where a right-hand side begins.
 rawRhsPos :: RawRhs -> Pos
 rawRhsPos = \case
   RhsAsk a -> askPos a
   RhsPanel _ p -> p
+  RhsPanelText _ p -> p
+  RhsDecide _ _ _ p -> p
   RhsCall _ _ p -> p
 
 -- ---------------------------------------------------------------------------
@@ -419,14 +546,34 @@ data RawSource
       !RawRhs
       -- ^ amend
       !Pos
+  | -- | @revising on s as c, at most n amendments { … }@ (D4): the same loop,
+    -- whose fork reads the review's verdict three ways — approval settles, an
+    -- objection amends, a refusal abandons.
+    --
+    -- The payload is identical to 'SrcRevising'\'s and only the constructor
+    -- differs, deliberately: __the difference is in how the loop reads its
+    -- verdict, which is a property of the loop and not of its clauses__. Its
+    -- consuming form is 'RawCaseEnding', never 'RawCaseResult'.
+    SrcRevisingOn
+      !Text
+      !Text
+      !Integer
+      !Text
+      !(Maybe Code)
+      !RawRhs
+      !RawRhs
+      !Pos
   deriving (Eq, Show)
 
 instance ToJSON RawSource where
   toJSON = \case
     SrcRhs r -> ctorObj "rhs" ["r" .= r]
     SrcRevising subject carrier bound reviewName reviewAnn review amend pos ->
-      ctorObj
-        "revising"
+      ctorObj "revising" (loopFields subject carrier bound reviewName reviewAnn review amend pos)
+    SrcRevisingOn subject carrier bound reviewName reviewAnn review amend pos ->
+      ctorObj "revisingOn" (loopFields subject carrier bound reviewName reviewAnn review amend pos)
+    where
+      loopFields subject carrier bound reviewName reviewAnn review amend pos =
         [ "subject" .= subject,
           "carrier" .= carrier,
           "bound" .= bound,
@@ -440,23 +587,27 @@ instance ToJSON RawSource where
 instance FromJSON RawSource where
   parseJSON = withCtor "RawSource" $ \tag o -> case tag of
     "rhs" -> SrcRhs <$> o .:: "r"
-    "revising" ->
-      SrcRevising
-        <$> o .:: "subject"
-        <*> o .:: "carrier"
-        <*> natField "RawSource.revising" o "bound"
-        <*> o .:: "reviewName"
-        <*> o .:: "reviewAnn"
-        <*> o .:: "review"
-        <*> o .:: "amend"
-        <*> o .:: "pos"
+    "revising" -> loopOf SrcRevising "RawSource.revising" o
+    "revisingOn" -> loopOf SrcRevisingOn "RawSource.revisingOn" o
     _ -> unknownCtor "RawSource" tag
+    where
+      loopOf ctor ty o =
+        ctor
+          <$> o .:: "subject"
+          <*> o .:: "carrier"
+          <*> natField ty o "bound"
+          <*> o .:: "reviewName"
+          <*> o .:: "reviewAnn"
+          <*> o .:: "review"
+          <*> o .:: "amend"
+          <*> o .:: "pos"
 
 -- | Where a source begins.
 rawSourcePos :: RawSource -> Pos
 rawSourcePos = \case
   SrcRhs r -> rawRhsPos r
   SrcRevising _ _ _ _ _ _ _ p -> p
+  SrcRevisingOn _ _ _ _ _ _ _ p -> p
 
 -- ---------------------------------------------------------------------------
 -- Blocks
@@ -479,8 +630,20 @@ data Raw
     RawIfFlag !Text !Raw !Raw !Pos
   | -- | @RawCaseVerdict x approved objected noAnswer pos@
     RawCaseVerdict !Text !Raw !Raw !Raw !Pos
-  | -- | @RawCaseResult x settledName settled unsettled pos@
-    RawCaseResult !Text !Text !Raw !Raw !Pos
+  | -- | @RawCaseResult x settledName unsettledName settled unsettled pos@ — the
+    -- two outcomes of a bounded revision, the settled artefact bound as the
+    -- first name and the last candidate, the one the final review objected to,
+    -- bound as the second (D3).
+    --
+    -- __The two names may coincide__, because they bind in disjoint arms, and
+    -- an authoring surface that builds both arms at the same depth will always
+    -- make them coincide — which is what every frozen entry carries.
+    RawCaseResult !Text !Text !Text !Raw !Raw !Pos
+  | -- | @RawCaseEnding x settledName unsettledName abandonedName settled
+    -- unsettled abandoned pos@ — the three outcomes of a three-way bounded
+    -- revision, each binding the candidate in hand (D4). Legal only immediately
+    -- after a 'SrcRevisingOn'.
+    RawCaseEnding !Text !Text !Text !Text !Raw !Raw !Raw !Pos
   | -- | @RawKnownHere names rest pos@
     RawKnownHere ![Text] !Raw !Pos
   | -- | @RawCallStmt fn args rest pos@
@@ -510,13 +673,26 @@ instance ToJSON Raw where
           "noAnswer" .= noAnswer,
           "pos" .= pos
         ]
-    RawCaseResult x settledName settled unsettled pos ->
+    RawCaseResult x settledName unsettledName settled unsettled pos ->
       ctorObj
         "caseResult"
         [ "x" .= x,
           "settledName" .= settledName,
+          "unsettledName" .= unsettledName,
           "settled" .= settled,
           "unsettled" .= unsettled,
+          "pos" .= pos
+        ]
+    RawCaseEnding x sname uname aname settled unsettled abandoned pos ->
+      ctorObj
+        "caseEnding"
+        [ "x" .= x,
+          "settledName" .= sname,
+          "unsettledName" .= uname,
+          "abandonedName" .= aname,
+          "settled" .= settled,
+          "unsettled" .= unsettled,
+          "abandoned" .= abandoned,
           "pos" .= pos
         ]
     RawKnownHere names rest pos ->
@@ -546,12 +722,28 @@ instance FromJSON Raw where
         <*> o .:: "objected"
         <*> o .:: "noAnswer"
         <*> o .:: "pos"
+    -- The decoder __demands__ @unsettledName@: a decoder that defaulted a
+    -- missing one to @settledName@ would silently accept an incomplete 'Raw'
+    -- after the single regeneration event, which is a hole in the conformance
+    -- boundary. (@(.::)@ is liberal only where an @Option@ field accepts
+    -- @null@; a 'Text' field's parser fails on it, naming itself.)
     "caseResult" ->
       RawCaseResult
         <$> o .:: "x"
         <*> o .:: "settledName"
+        <*> o .:: "unsettledName"
         <*> o .:: "settled"
         <*> o .:: "unsettled"
+        <*> o .:: "pos"
+    "caseEnding" ->
+      RawCaseEnding
+        <$> o .:: "x"
+        <*> o .:: "settledName"
+        <*> o .:: "unsettledName"
+        <*> o .:: "abandonedName"
+        <*> o .:: "settled"
+        <*> o .:: "unsettled"
+        <*> o .:: "abandoned"
         <*> o .:: "pos"
     "knownHere" ->
       RawKnownHere <$> o .:: "names" <*> o .:: "rest" <*> o .:: "pos"

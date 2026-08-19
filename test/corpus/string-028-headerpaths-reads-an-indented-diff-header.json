@@ -1,0 +1,8 @@
+{"request":
+ {"string":
+  {"text": "    diff --git a/Foo.hs b/Foo.hs\n    +++ b/Foo.hs\n",
+   "op": "headerPaths"}},
+ "reply":
+ {"result": ["diff", "--git", "a/Foo.hs", "b/Foo.hs", "+++", "b/Foo.hs"]},
+ "oracleVersion": 1,
+ "name": "headerPaths reads an indented diff header, where incite's is blind"}

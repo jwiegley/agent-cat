@@ -1,0 +1,5 @@
+{"request":
+ {"string": {"text": "b/src/Bar.hs", "pattern": "*.hs", "op": "matchGlob"}},
+ "reply": {"result": true},
+ "oracleVersion": 1,
+ "name": "matchGlob: a star crosses a slash"}

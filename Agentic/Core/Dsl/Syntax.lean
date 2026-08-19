@@ -18,25 +18,29 @@ nothing upstream of it exists on this side at all.
 The shapes are the redesign's (obr acat-k28; its grammar page went with the
 `.wf` language and is in git history): bindings are a name and a source with
 the kind usually inferred; branching is on a flag, on a verdict, or on a
-bounded revision's settled-or-not result; the loop is a bounded revision of a
+bounded revision's settled-or-not result, or a three-way bounded revision's
+ending; the loop is a bounded revision of a
 subject by an
 amendment; a statement-position ask is the act. Three shapes here are decisions
 rather than conveniences.
 
 * **A branching is one constructor per tag type, and its arms are fields.**
   `Plan.case` demands a `Tag`, hence *total* arms, so each branching the
-  surface writes — two-valued (`El .flag`), three-valued (`VTag`), and the
-  two-valued settled-or-not of a loop result — is a constructor whose arms are
+  surface writes — two-valued (`El .flag`), three-valued (`VTag`), the
+  two-valued settled-or-not of a loop result and the three-valued `Ending` of a
+  `revising on` — is a constructor whose arms are
   ordinary recursive fields. A nested `List (String × RawBlock)` would force
   well-founded recursion on the checker, and `WellFounded.fix` does not reduce
   in the kernel, which the flagship theorems need it to.
 * **A bound loop is a source, and its `case` is the next statement.** `Ctx =
-  List Code`, so the `Option (El c)` a bounded revision produces cannot be a
-  context entry; it is reached by `Plan.graft`, whose continuation is not a
-  binder. The surface writes `x <- revising …` and then `case x { settled p
-  {…} unsettled {…} }`, and the checker requires the `case` to be the very
-  next statement, so the option value never needs a context slot: the pair
-  elaborates to one graft whose continuation is the `caseB` the arms write.
+  List Code`, so the candidate-and-ending pair a bounded revision produces
+  cannot be a context entry; it is reached by `Plan.graft`, whose continuation
+  is not a binder. The surface writes `x <- revising …` and then `case x
+  { settled p {…} unsettled q {…} }`, and the checker requires the `case` to be
+  the very next statement, so the pair never needs a context slot: the two
+  statements elaborate to one graft whose continuation is the `case` the arms
+  write, and **each arm binds the candidate** — the settled one the artefact a
+  review approved, the unsettled one the artefact the final review objected to.
 * **The kind annotation is optional syntax, not optional information.** A
   binder may write `x : text <-`; when it does not, the checker infers the
   kind from the name's first ground use, and refuses a name with no use to
@@ -190,15 +194,34 @@ structure RawTarget where
   draw : Nat
   deriving Repr, DecidableEq, Inhabited
 
+/-- `[[Served]]` = the models that may answer a pinned question: the one the
+author named, and the ones the runner may fall back to, in the order they are
+tried (D6).
+
+A structure and not a `List String`, so that "pinned but empty" is
+unrepresentable and no new guard is owed; and a *payload* of the existing
+`Option`, so that `"model": null` still reads as unpinned. **The alternates are
+dropped at elaboration** — `Check.askShape` takes `primary` alone — and that is
+the formal statement that fail-over is not part of a program's meaning: two asks
+differing only in their alternates elaborate to the same plan, ask the same
+question and bill the same. -/
+structure Served where
+  /-- The model that serves this question. -/
+  primary : String
+  /-- The models that may answer in its place, in the order they are tried. -/
+  alternates : List String
+  deriving Repr, DecidableEq, Inhabited
+
 /-- `[[RawAsk]]` = one question, as written: the addressee, an optional serving
 model, and the words. The **kind is not a field**: it comes from the binder's
 annotation or inference, from the position (a panel member and a review binding
 answer `verdict`; a statement ask answers `receipt`), and the checker imposes
 it. -/
 structure RawAsk where
-  /-- The model override, if any; legal only on a model addressee, which
-  `Check.askGuard` enforces on every `Raw` however it was built. -/
-  model : Option String
+  /-- The model override, if any — with its alternates; legal only on a model
+  addressee, which `Check.askGuard` enforces on every `Raw` however it was
+  built. -/
+  model : Option Served
   /-- Whom to ask. -/
   target : RawTarget
   /-- What to say. -/
@@ -223,9 +246,101 @@ def RawArg.pos : RawArg → Pos
   | .name _ p => p
   | .lit _ p => p
 
-/-- `[[RawRhs]]` = a clause-position source: one question, a panel of them, or
-a call of a function. The loop is not here — a bounded revision's result is not
-a value a clause can hold. -/
+/-- `[[TextMember]]` = one member of a text panel: the name its block is fenced
+under, and the question that fills it.
+
+A named structure and not a `String × RawAsk`, because the pair's derived codec
+puts a two-element array on the wire and **the corpus is read by humans**: a
+member is `{"name": …, "ask": …}`. The label comes first here because it is how
+the source reads. -/
+structure TextMember where
+  /-- The name this member's block is fenced under. -/
+  name : String
+  /-- The question put to this member. -/
+  ask : RawAsk
+  deriving Repr, DecidableEq, Inhabited
+
+/-- `[[Decider]]` = the closed vocabulary of pure classifications (D7).
+
+Four, named in the kernel, held identically in Lean and Haskell, and **closed**:
+a fifth is a language change and is reviewed as one. Each reads the text bound
+to a name and answers `flag`, asking nothing — so a classification that used to
+round-trip through an answerer becomes a fact about the text, and a decider's
+test can never be chosen by a model. -/
+inductive Decider where
+  /-- The last non-empty line is one of the needles. -/
+  | lastNonEmptyLineIs
+  /-- Some line is exactly one of the needles. -/
+  | containsLine
+  /-- Some line begins with one of the needles. -/
+  | anyLineStartsWith
+  /-- Some path named by a diff header matches one of the globs. -/
+  | anyPathMatches
+  deriving Repr, DecidableEq, Inhabited
+
+/-- `[[deciderName d]]` = the keyword that writes the decider `d`. -/
+def deciderName : Decider → String
+  | .lastNonEmptyLineIs => "lastNonEmptyLineIs"
+  | .containsLine => "containsLine"
+  | .anyLineStartsWith => "anyLineStartsWith"
+  | .anyPathMatches => "anyPathMatches"
+
+/-- …and the keyword parsed back, which is the section `deciderName` splits. -/
+def deciderOfName : String → Option Decider
+  | "lastNonEmptyLineIs" => some .lastNonEmptyLineIs
+  | "containsLine" => some .containsLine
+  | "anyLineStartsWith" => some .anyLineStartsWith
+  | "anyPathMatches" => some .anyPathMatches
+  | _ => none
+
+/-- **Morphism equation.** `deciderOfName` is a retraction of `deciderName`, so
+an authoring surface's keyword, the checker's diagnosis and the corpus's field
+are one table — the same discipline `codeOfName_codeName` holds for the four
+answer kinds. -/
+@[simp] theorem deciderOfName_deciderName (d : Decider) :
+    deciderOfName (deciderName d) = some d := by
+  cases d <;> rfl
+
+/-- `[[Decider.run d ws s]]` = the classification `d` makes of the text `s`
+against the needles `ws`. The four total algorithms, in full, each composed from
+`Agentic/Core/Text.lean`'s already-pinned primitives so that the divergence
+surface between the two implementations is exactly what is new and what is new
+is small.
+
+* `lastNonEmptyLineIs` — `getLast?` on `dlines` is literally "the last non-empty
+  line", because `answerLines` has already dropped the blanks. Empty input and
+  whitespace-only input both give `false`, which matches incite's `tripEnding`
+  reporting a protocol violation on empty.
+* `containsLine` — exact line equality, the only exact-match member of the
+  family. It has **no incite ancestor** and is admitted on its own merits: it is
+  what a program wants when the program itself dictated the sentinel ("end with
+  a line that is exactly `READY`"), where a prefix test would admit `READY-ISH`
+  and a decider that admits more than the program asked for is the failure mode
+  this vocabulary exists to remove.
+* `anyLineStartsWith` — reconstructs both `isRed` and `decideFactsResolved` from
+  incite's `Incite/Feature.hs`; prefix, not equality, any line, not the last.
+* `anyPathMatches` — reconstructs `diffNamesHaskell` from incite's
+  `Incite/Review.hs` in one binding: `headerPaths` reproduces its
+  lines-filtered-by-header-prefix-then-words structure, and `matchGlob "*<ext>"`
+  reproduces its suffix test because `*` crosses `/` and the match is anchored
+  at the end. It is the *only* decider that covers it, because the test is
+  two-level — a prefix on the line, then a suffix on each token of that line. -/
+def Decider.run : Decider → List String → String → Bool
+  | .lastNonEmptyLineIs, ws, s =>
+    match (Exec.dlines s).getLast? with
+    | none => false
+    | some l => ws.any (fun w => l == Exec.dneedle w)
+  | .containsLine, ws, s =>
+    (Exec.dlines s).any (fun l => ws.any (fun w => l == Exec.dneedle w))
+  | .anyLineStartsWith, ws, s =>
+    (Exec.dlines s).any (fun l => ws.any (fun w => (Exec.dneedle w).isPrefixOf l))
+  | .anyPathMatches, gs, s =>
+    (Exec.headerPaths s).any (fun p => gs.any (fun g => Exec.matchGlob g p))
+
+/-- `[[RawRhs]]` = a clause-position source: one question, a panel of them, a
+text panel, a decision about text already in hand, or a call of a function. The
+loop is not here — a bounded revision's result is not a value a clause can
+hold. -/
 inductive RawRhs where
   /-- A single question. -/
   | ask (a : RawAsk)
@@ -233,6 +348,17 @@ inductive RawRhs where
   in the verdict monoid — the one rule the menu currently has, named on the
   page. -/
   | panel (members : List RawAsk) (pos : Pos)
+  /-- `panel as text [ name: ask, … ]`: several questions, each member's answer
+  fenced under its own name and the blocks concatenated in member order. The
+  label is explicit and is *not* the addressee id: two members of one spread
+  routinely share an addressee, and a document whose names change when an
+  operator repoints a lens is naming the wrong thing. -/
+  | panelText (members : List TextMember) (pos : Pos)
+  /-- `decide d x [w₁, …]`: a pure classification of the text bound to `x`,
+  answering `flag`. It asks nothing, and its needles are **literal program
+  text** — never a `Prompt` — because a needle a model could author is a test a
+  model chooses, which is not a decider. -/
+  | decide (decider : Decider) (subject : String) (needles : List String) (pos : Pos)
   /-- `f a₁ … aₙ`: a function applied, by juxtaposition, to exactly its arity
   in single-token arguments. The function is a named open plan; the call is
   substitution, so nothing here is a new node. -/
@@ -254,6 +380,18 @@ inductive RawSource where
   the review binding, kept so the checker can refuse a wrong one at its own
   position. -/
   | revising (subject carrier : String) (bound : Nat)
+      (reviewName : String) (reviewAnn : Option Code) (review : RawRhs)
+      (amend : RawRhs) (pos : Pos)
+  /-- `revising on s as c, at most n amendments { v <- review  amend c { source } }`:
+  the same loop, whose fork reads the review's verdict three ways — approval
+  settles, an objection amends, a refusal abandons.
+
+  The payload is identical to `revising`'s and only the constructor differs,
+  deliberately: **the difference is in how the loop reads its verdict, which is
+  a property of the loop and not of its clauses**, so the checker's long
+  prologue is shared verbatim between the two clauses rather than transcribed.
+  Its consuming form is `caseEnding`, never `caseResult`. -/
+  | revisingOn (subject carrier : String) (bound : Nat)
       (reviewName : String) (reviewAnn : Option Code) (review : RawRhs)
       (amend : RawRhs) (pos : Pos)
   deriving Repr, DecidableEq, Inhabited
@@ -278,10 +416,22 @@ inductive RawBlock where
   /-- `case x { approved {…} objected {…} no answer {…} }`: the three values of
   `VTag`, the finite classifier of a verdict. -/
   | caseVerdict (x : String) (approved objected noAnswer : RawBlock) (pos : Pos)
-  /-- `case x { settled p {…} unsettled {…} }`: the two outcomes of a bounded
-  revision, with the settled artefact bound as `p`. Legal only immediately
-  after `x <- revising …`, which the checker enforces. -/
-  | caseResult (x : String) (settledName : String) (settled unsettled : RawBlock) (pos : Pos)
+  /-- `case x { settled p {…} unsettled q {…} }`: the two outcomes of a bounded
+  revision, the settled artefact bound as `p` and the last candidate — the one
+  the final review objected to — bound as `q`. Legal only immediately after
+  `x <- revising …`, which the checker enforces.
+
+  **The two names may coincide**, because they bind in disjoint arms, and an
+  authoring surface that builds both arms at the same depth will always make
+  them coincide. -/
+  | caseResult (x : String) (settledName unsettledName : String)
+      (settled unsettled : RawBlock) (pos : Pos)
+  /-- `case x { settled p {…} unsettled q {…} abandoned t {…} }`: the three
+  outcomes of a three-way bounded revision, each binding the candidate in hand.
+  Legal only immediately after `x <- revising on …`, which the checker
+  enforces. -/
+  | caseEnding (x : String) (settledName unsettledName abandonedName : String)
+      (settled unsettled abandoned : RawBlock) (pos : Pos)
   /-- `known here: a, b, c` (or `known here: nothing`): a checker-verified
   assertion of exactly the names in scope, innermost first. Documentation that
   cannot rot. -/
@@ -345,12 +495,15 @@ structure RawProgram where
 def RawRhs.pos : RawRhs → Pos
   | .ask a => a.pos
   | .panel _ p => p
+  | .panelText _ p => p
+  | .decide _ _ _ p => p
   | .call _ _ p => p
 
 /-- Where a source begins, for diagnoses. -/
 def RawSource.pos : RawSource → Pos
   | .rhs r => r.pos
   | .revising _ _ _ _ _ _ _ p => p
+  | .revisingOn _ _ _ _ _ _ _ p => p
 
 /-! ## The names of the answer kinds
 

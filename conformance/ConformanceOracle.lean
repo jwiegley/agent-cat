@@ -34,10 +34,7 @@ def answer (j : Json) : IO Json := do
   if (j.getObjVal? "ping").toOption.isSome then
     return Json.mkObj [("pong", Json.bool true)]
   else if let .ok sj := j.getObjVal? "string" then
-    let op := (getStr? sj "op").getD ""
-    let code := getStr? sj "code"
-    let text := (getStr? sj "text").getD ""
-    return stringOp op code text
+    return stringOpOf sj
   else if let .ok pj := j.getObjVal? "program" then
     match fromJson? (α := RawProgram) pj with
     | .error e => return Json.mkObj [("error", Json.str s!"bad program: {e}")]

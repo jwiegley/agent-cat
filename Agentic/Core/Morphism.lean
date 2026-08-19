@@ -542,11 +542,11 @@ theorem trace_panel_not_perm_invariant :
 /-! ## Bounded revision: the check-then-revise unrolling -/
 
 /-- The unrolling at fuel `0`: **one check and no revision**, and the artefact
-is kept only if that check approved it. -/
+comes back either way — marked with whether that check approved it. -/
 theorem reviseLoop_zero {Kc : El c → Env Γ → Dlg Verdict}
     {Kr : El c × Verdict → Env Γ → Dlg (El c)} (a : El c) (γ : Env Γ) :
     reviseLoop Kc Kr 0 a γ
-      = Kc a γ >>= fun v => pure (if Verdict.approvedB v then some a else none) := rfl
+      = Kc a γ >>= fun v => pure (a, Verdict.approvedB v) := rfl
 
 /-- The unrolling at fuel `n+1`: **check first**, stop if approved, and only
 otherwise revise — with the verdict threaded into the revision — and go again
@@ -558,7 +558,7 @@ theorem reviseLoop_succ {Kc : El c → Env Γ → Dlg Verdict}
     {Kr : El c × Verdict → Env Γ → Dlg (El c)} (n : Nat) (a : El c) (γ : Env Γ) :
     reviseLoop Kc Kr (n + 1) a γ
       = Kc a γ >>= fun v =>
-          if Verdict.approvedB v then pure (some a)
+          if Verdict.approvedB v then pure (a, true)
           else Kr (a, v) γ >>= fun a' => reviseLoop Kc Kr n a' γ := rfl
 
 /-- **The revision square.** The unrolled plan means the semantic loop, at every

@@ -52,6 +52,7 @@
        "rest":
        {"caseResult":
         {"x": "r",
+         "unsettledName": "x",
          "unsettled": {"empty": {"pos": {"line": 13, "col": 17}}},
          "settledName": "x",
          "settled":
@@ -87,6 +88,7 @@
            "rest":
            {"caseResult":
             {"x": "r2",
+             "unsettledName": "y",
              "unsettled": {"empty": {"pos": {"line": 12, "col": 27}}},
              "settledName": "y",
              "settled":

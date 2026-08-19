@@ -1,0 +1,5 @@
+{"request": {"string": {"text": "ac", "pattern": "a?c", "op": "matchGlob"}},
+ "reply": {"result": false},
+ "oracleVersion": 1,
+ "name":
+ "matchGlob: a question mark matches exactly one character and never none"}

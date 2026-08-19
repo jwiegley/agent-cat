@@ -29,7 +29,7 @@
 -- position, because positions are oracle-only, like @message@ and @excerpt@.
 --
 -- The enclosing observation record — @level@, @size@, @askNodes@, @codes@,
--- @costSummary@, @blockAsks@, @fnAsks@, @worlds@ (@Conformance.lean:240@
+-- @costSummary@, @blockAsks@, @fnAsks@, @worlds@ (@Conformance.lean:252@
 -- @observe@) — belongs to tier1, which assembles it from "Agentic.Plan"'s
 -- folds, "Agentic.Guards"' ask counts and 'worldObservation'. That is why this
 -- module depends on neither @Agentic.Guards@ nor @Agentic.Raw@'s program type.
@@ -83,7 +83,7 @@ import Agentic.Plan
     withPrompt,
   )
 import Agentic.Raw
-  ( Addressee (AddrModel, AddrPerson, AddrTool),
+  ( Addressee (AddrModel, AddrPerson, AddrTool, AddrToolExec),
     Code,
     codeName,
     ctorObj,
@@ -102,10 +102,10 @@ import Data.Text (Text)
 import qualified Data.Text as T
 
 -- ---------------------------------------------------------------------------
--- The world, specified as data (Conformance.lean:73-:116)
+-- The world, specified as data (Conformance.lean:76-:116)
 -- ---------------------------------------------------------------------------
 
--- | @Conformance.lean:73@ — a verdict, as a literal.
+-- | @Conformance.lean:76@ — a verdict, as a literal.
 --
 -- > inductive VLit where
 -- >   | approve
@@ -126,7 +126,7 @@ vLitToVerdict = \case
   VLitDeclined -> Declined
   VLitObject os -> verdictObject os
 
--- | @Conformance.lean:85@ — how the world answers @text@ questions.
+-- | @Conformance.lean:88@ — how the world answers @text@ questions.
 --
 -- 'TWrap' carries @pre@ then @post@, in Lean's argument order.
 data TextSpec
@@ -141,13 +141,13 @@ data TextSpec
     TByPrefix [(Text, Text)] !Text
   deriving (Eq, Show)
 
--- | @Conformance.lean:99@ — how the world answers @verdict@ questions.
+-- | @Conformance.lean:102@ — how the world answers @verdict@ questions.
 data VerdictSpec
   = VConst !VLit
   | VByPrefix [(Text, VLit)] !VLit
   deriving (Eq, Show)
 
--- | @Conformance.lean:105@ — how the world answers @flag@ questions.
+-- | @Conformance.lean:108@ — how the world answers @flag@ questions.
 data FlagSpec
   = FConst !Bool
   | -- | @q.prompt == s@, exact and unnormalized
@@ -155,7 +155,7 @@ data FlagSpec
   | FByPrefix [(Text, Bool)] !Bool
   deriving (Eq, Show)
 
--- | @Conformance.lean:112@. A structure, so it travels as a bare object of its
+-- | @Conformance.lean:115@. A structure, so it travels as a bare object of its
 -- three fields with no constructor tag.
 --
 -- There is no @ack@ field: a receipt is @()@ and the spec is never consulted
@@ -276,7 +276,7 @@ instance FromJSON WorldSpec where
 -- have equal answers, so the answer is no part of an 'EventKey'.
 newtype World = World {worldAnswer :: forall (c :: Code). SCode c -> Q c -> El c}
 
--- | @WorldSpec.toWorld@ (@Conformance.lean:118@), clause for clause.
+-- | @WorldSpec.toWorld@ (@Conformance.lean:121@), clause for clause.
 --
 -- Three details the corpus does not exercise but the Lean does fix:
 -- 'TByPrefix'\/'VByPrefix'\/'FByPrefix' are __first match wins__ over the table
@@ -413,11 +413,17 @@ instance Ord EventKey where
           ekPrompt k,
           ekDraw k
         )
-      addresseeOrd :: Addressee -> (Int, Text)
+      -- The key must mention __every__ field the derived 'Eq' compares, or two
+      -- unequal addressees would order as one and 'billMemo' would conflate
+      -- them. That is the whole reason @toolExec@'s @cmd@ and @args@ are here:
+      -- two commands at one tool id are two questions (D5), and
+      -- @battery-219@\/@battery-220@ pin the pair of bills that says so.
+      addresseeOrd :: Addressee -> (Int, Text, Text, [Text])
       addresseeOrd = \case
-        AddrModel i -> (0, i)
-        AddrTool i -> (1, i)
-        AddrPerson i -> (2, i)
+        AddrModel i -> (0, i, T.empty, [])
+        AddrTool i -> (1, i, T.empty, [])
+        AddrPerson i -> (2, i, T.empty, [])
+        AddrToolExec i cmd args -> (3, i, cmd, args)
 
 -- | @Event.key@ (@Cost.lean:111@): the question an event put, forgetting the
 -- answer.
@@ -451,10 +457,10 @@ billMemo :: Trace -> Integer
 billMemo = fromIntegral . Set.size . Set.fromList . map eventKey
 
 -- ---------------------------------------------------------------------------
--- The oracle's JSON (Conformance.lean:152-:238)
+-- The oracle's JSON (Conformance.lean:155-:238)
 -- ---------------------------------------------------------------------------
 
--- | @Conformance.lean:152@ — a verdict as data: its tag, and the objections
+-- | @Conformance.lean:155@ — a verdict as data: its tag, and the objections
 -- where the tag carries any.
 --
 -- @{"tag":"approve"}@ and @{"tag":"declined"}@ have __no__ @objections@ key;
@@ -470,7 +476,7 @@ verdictJson v = case verdictTag v of
     objectionsOf (Object os) = os
     objectionsOf _ = []
 
--- | @Conformance.lean:163@ — an answer, at its code. A receipt is an explicit
+-- | @Conformance.lean:166@ — an answer, at its code. A receipt is an explicit
 -- JSON @null@, never an omitted key.
 answerJson :: SCode c -> El c -> Value
 answerJson SText s = A.String s
@@ -478,7 +484,7 @@ answerJson SVerdict v = verdictJson v
 answerJson SFlag b = A.Bool b
 answerJson SAck _ = A.Null
 
--- | @Conformance.lean:169@ — the two scope axes, __both keys always present__,
+-- | @Conformance.lean:172@ — the two scope axes, __both keys always present__,
 -- @null@ where the axis is silent. The second key is @mode@; nothing in this
 -- language ever sets it, and it exists because the scope monoid has two axes.
 scopeJson :: QScope -> Value
@@ -488,7 +494,7 @@ scopeJson s =
       "mode" .= maybe A.Null A.String (scopeModeAxis s)
     ]
 
--- | @Conformance.lean:174@ — one event of the reply's @"trace"@ array.
+-- | @Conformance.lean:177@ — one event of the reply's @"trace"@ array.
 --
 -- The @code@ field is 'codeName', so a receipt prints as @"receipt"@ and never
 -- as @"ack"@: this is the reply side of the two spellings a 'Code' has on the
@@ -510,7 +516,7 @@ eventJson (Event c q a) =
       "answer" .= answerJson c a
     ]
 
--- | @Conformance.lean:232@ — one entry of a checked reply's @"worlds"@ array.
+-- | @Conformance.lean:244@ — one entry of a checked reply's @"worlds"@ array.
 -- Argument order is Lean's: the plan, then the spec.
 worldObservation :: Plan '[] () -> WorldSpec -> Value
 worldObservation p w =

@@ -177,6 +177,8 @@ module Agentic.Acp
 
     -- * The answering service
     worldOfAcp,
+    worldOfAcpWith,
+    acpGap,
     sayAcp,
 
     -- * The calls
@@ -219,6 +221,7 @@ import Control.Exception
     IOException,
     SomeException,
     bracket,
+    fromException,
     onException,
     throwIO,
     try,
@@ -264,14 +267,19 @@ import System.Timeout (timeout)
 
 import Agentic.AgentDeck (renderQ)
 import Agentic.Exec
-  ( WorldIO (..),
+  ( ExecSettings (esLog, esRetryUndecodable),
+    TurnGap (GapEmptyOrProtocol, GapTransportRefusal),
+    WorldIO (..),
     addresseeWord,
-    askDecoding,
+    askDecodingWith,
     codeWord,
+    defaultExecSettings,
     defaultRetries,
+    raiseGap,
     requiresCompletedTurn,
     stderrLog,
     trimAscii,
+    withTransportGaps,
   )
 import Agentic.Plan (Q (..), SCode, fromSCode)
 import Agentic.Raw (Addressee, Code (CodeAck))
@@ -1177,9 +1185,35 @@ cancelTurn acp =
 -- connection's copy is the recipe it was started from. Pass the one 'withAcp'
 -- was given and the two are the same object.
 worldOfAcp :: AcpConfig -> Acp -> WorldIO
-worldOfAcp cfg acp = WorldIO $ \c q -> do
+worldOfAcp = worldOfAcpWith settings
+  where
+    settings =
+      defaultExecSettings {esLog = stderrLog, esRetryUndecodable = defaultRetries}
+
+-- | 'worldOfAcp' under an operator's 'Agentic.Exec.ExecSettings'.
+--
+-- __This is where the failure vocabulary meets this transport.__ An 'AcpError'
+-- is a 'GapTransportRefusal' — the adapter died, the pipe closed, the line was
+-- unreadable, the turn outlived its budget — and a turn that ended without
+-- completing where 'requiresCompletedTurn' said one was needed is a
+-- 'GapEmptyOrProtocol', raised by 'sayAcp' as a gap in its own right. That
+-- second one is the distinction this transport can make and
+-- "Agentic.AgentDeck" cannot, which is what @--engine acp@ exists for.
+--
+-- Each is priced by @gapBudget@, answered by @esRecover@, re-asked here while
+-- that answer is @RetryHere@, and otherwise handed to the fail-over walk. With
+-- no chain declared every diagnostic is the one it always was.
+worldOfAcpWith :: ExecSettings -> AcpConfig -> Acp -> WorldIO
+worldOfAcpWith st cfg acp = WorldIO $ \c q -> do
   when (acpFreshPerQuestion cfg) (void (newSession acp))
-  askDecoding stderrLog defaultRetries c q (sayAcp cfg acp c q)
+  withTransportGaps st acpGap c q (askDecodingWith st c q (sayAcp cfg acp c q))
+
+-- | Which gap an 'AcpError' is, and the evidence — @Nothing@ for an exception
+-- that is not this transport's to classify, which is rethrown untouched.
+acpGap :: SomeException -> Maybe (TurnGap, Text)
+acpGap e = case fromException e of
+  Just ae -> Just (GapTransportRefusal, renderAcpError ae)
+  Nothing -> Nothing
 
 -- | Lean's @Say@ (@Exec.lean:904@) at this transport: name the question under
 -- way, set the permission policy for it, prompt, and __insist that the bytes
@@ -1217,8 +1251,14 @@ sayAcp cfg acp c q extra = do
           <> renderStopReason (turnStop turn)
           <> "', not 'end_turn'"
       when (requiresCompletedTurn code (qAddressee q)) $
-        ioError . userError . T.unpack $
-          "the turn that would have answered a "
+        -- A gap, and the one only this transport can name: the turn ended
+        -- cleanly in a way the protocol says is not an answer. Its message is
+        -- kept verbatim as the final abandonment, so a question with no spare
+        -- fails in exactly the words it always did.
+        raiseGap GapEmptyOrProtocol ("the turn ended '" <> renderStopReason (turnStop turn) <> "'")
+          . userError
+          . T.unpack
+          $ "the turn that would have answered a "
             <> codeWord code
             <> " from "
             <> who

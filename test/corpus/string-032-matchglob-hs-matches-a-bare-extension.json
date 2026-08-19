@@ -1,0 +1,4 @@
+{"request": {"string": {"text": ".hs", "pattern": "*.hs", "op": "matchGlob"}},
+ "reply": {"result": true},
+ "oracleVersion": 1,
+ "name": "matchGlob: *.hs matches the bare extension"}

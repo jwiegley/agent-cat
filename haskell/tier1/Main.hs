@@ -1,10 +1,10 @@
 -- | Tier 1: the rebuilt-case runner.
 --
 -- Where tier0 replays the frozen corpus through the codec, the guards and the
--- string layer, tier1 rebuilds twenty-one of its /checked/ entries in the
+-- string layer, tier1 rebuilds twenty-five of its /checked/ entries in the
 -- production surface ("Agentic.Builder", see "Cases") — and three of those
--- twenty-one a second time in the /authoring/ surface
--- ("Agentic.Workflow", see "CallVectors"), twenty-four cases in all — and
+-- twenty-five a second time in the /authoring/ surface
+-- ("Agentic.Workflow", see "CallVectors"), twenty-eight cases in all — and
 -- holds each rebuilt program against the oracle on two fronts:
 --
 -- 1. the __printed Raw__ — @toJSON@ of the builder's 'RawProgram' against the
@@ -14,7 +14,7 @@
 --    decoded back and re-encoded, so a print that no reader accepts fails here
 --    rather than silently.
 --
---    Five of the twenty-four cases compare this one field __up to alpha__:
+--    Five of the twenty-eight cases compare this one field __up to alpha__:
 --    the two walked examples of "Example.Harden" (named by
 --    @Cases.alphaNamed@) and the three call vectors of "CallVectors" (all of
 --    @Cases.callVectorsW@). They are written in "Agentic.Workflow", which
@@ -24,7 +24,7 @@
 --    is pinned is that the two programs agree on everything a name is not —
 --    including which binding every hole, scrutinee and subject reads, and
 --    including every function and parameter name, which are a different
---    namespace and are never renamed. The other nineteen are written in
+--    namespace and are never renamed. The other twenty-three are written in
 --    "Agentic.Builder" with explicit names and are compared exactly.
 --
 -- 2. the __whole reply__ — @level@, @size@, @askNodes@, @codes@ and
@@ -104,6 +104,7 @@ import Agentic.Raw
     RawProgram (..),
     RawRhs (..),
     RawSource (..),
+    TextMember (..),
   )
 import Agentic.World (WorldSpec)
 
@@ -306,9 +307,12 @@ replyCheck reply ws prog
 --    the carrier takes the level after the result's, the review binding the
 --    one after that, and the review and the amendment are read in those
 --    scopes;
--- 4. a @caseResult@'s settled binder takes the current level and is live in
---    the settled arm only; both arms of an @if@ and of a @case@ are read in
---    the same scope, in the order the constructor writes them;
+-- 4. a @caseResult@'s two exit binders __each__ take the current level and are
+--    live in their own arm only — which is why two binders in disjoint scopes
+--    may share a canonical name, and since D3 the two exits of every loop do;
+--    a @caseEnding@'s three are the same at three arms; both arms of an @if@
+--    and of a @case@ are read in the same scope, in the order the constructor
+--    writes them;
 -- 5. within one question, its prompt left to right, an @interp@ chunk being a
 --    read like any other.
 canonProgram :: RawProgram -> RawProgram
@@ -351,12 +355,23 @@ canonRaw env n = \case
       (canonRaw env n objected)
       (canonRaw env n noAnswer)
       pos
-  RawCaseResult x sname settled unsettled pos ->
+  RawCaseResult x sname uname settled unsettled pos ->
     RawCaseResult
       (useName env x)
       (canonName n)
+      (canonName n)
       (canonRaw (bindName env n sname) (n + 1) settled)
-      (canonRaw env n unsettled)
+      (canonRaw (bindName env n uname) (n + 1) unsettled)
+      pos
+  RawCaseEnding x sname uname aname settled unsettled abandoned pos ->
+    RawCaseEnding
+      (useName env x)
+      (canonName n)
+      (canonName n)
+      (canonName n)
+      (canonRaw (bindName env n sname) (n + 1) settled)
+      (canonRaw (bindName env n uname) (n + 1) unsettled)
+      (canonRaw (bindName env n aname) (n + 1) abandoned)
       pos
   RawKnownHere names rest pos ->
     RawKnownHere (map (useName env) names) (canonRaw env n rest) pos
@@ -375,17 +390,32 @@ canonSource env n = \case
       bound
       (canonName (n + 2))
       rann
-      (canonRhs envCarrier review)
-      (canonRhs envReview am)
+      (canonRhs (envCarrier env n carrier) review)
+      (canonRhs (envReview env n carrier rname) am)
       pos
-    where
-      envCarrier = bindName env (n + 1) carrier
-      envReview = bindName envCarrier (n + 2) rname
+  SrcRevisingOn subj carrier bound rname rann review am pos ->
+    SrcRevisingOn
+      (useName env subj)
+      (canonName (n + 1))
+      bound
+      (canonName (n + 2))
+      rann
+      (canonRhs (envCarrier env n carrier) review)
+      (canonRhs (envReview env n carrier rname) am)
+      pos
+  where
+    envCarrier e k carrier = bindName e (k + 1) carrier
+    envReview e k carrier rname = bindName (envCarrier e k carrier) (k + 2) rname
 
 canonRhs :: Names -> RawRhs -> RawRhs
 canonRhs env = \case
   RhsAsk a -> RhsAsk (canonAsk env a)
   RhsPanel ms pos -> RhsPanel (map (canonAsk env) ms) pos
+  RhsPanelText ms pos ->
+    RhsPanelText (map (\m -> m {tmAsk = canonAsk env (tmAsk m)}) ms) pos
+  -- A decider names its subject, and the labels of a text panel are not
+  -- bindings at all: they are the document's keys, and are never renamed.
+  RhsDecide d x ws pos -> RhsDecide d (useName env x) ws pos
   RhsCall f as pos -> RhsCall f (map (canonArg env) as) pos
 
 -- | A question: only its prompt can name anything.

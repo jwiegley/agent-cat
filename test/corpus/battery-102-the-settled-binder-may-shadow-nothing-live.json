@@ -48,6 +48,7 @@
        "rest":
        {"caseResult":
         {"x": "r",
+         "unsettledName": "d",
          "unsettled": {"empty": {"pos": {"line": 6, "col": 52}}},
          "settledName": "d",
          "settled": {"empty": {"pos": {"line": 6, "col": 33}}},

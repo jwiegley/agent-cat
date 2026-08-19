@@ -1,0 +1,49 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"bind":
+    {"x": "t",
+     "src":
+     {"rhs":
+      {"r":
+       {"ask":
+        {"a":
+         {"target": {"draw": 0, "addressee": {"model": {"id": "a"}}},
+          "prompt": [{"lit": {"s": "ready?"}}],
+          "pos": {"line": 2, "col": 12},
+          "model": null}}}}},
+     "rest":
+     {"bind":
+      {"x": "f",
+       "src":
+       {"rhs":
+        {"r":
+         {"decide":
+          {"subject": "t",
+           "pos": {"line": 3, "col": 8},
+           "needles": ["READY"],
+           "decider": "containsLine"}}}},
+       "rest":
+       {"ifFlag":
+        {"yes": {"empty": {"pos": {"line": 4, "col": 3}}},
+         "x": "f",
+         "pos": {"line": 3, "col": 3},
+         "no": {"empty": {"pos": {"line": 5, "col": 3}}}}},
+       "pos": {"line": 3, "col": 3},
+       "ann": null}},
+     "pos": {"line": 2, "col": 3},
+     "ann": "flag"}},
+   "fns": []}},
+ "reply":
+ {"refused":
+  {"pos": {"line": 3, "col": 8},
+   "n": null,
+   "message": "a decider reads `text`, and `t` answers `flag`",
+   "guard": "other",
+   "excerpt": "t"}},
+ "oracleVersion": 1,
+ "name": "a decider whose subject is not text"}

@@ -257,7 +257,7 @@ presheaf law, which is stated there beside the counterexample it repairs.
 **Where the collapse stops is a fact about the design, not about the
 mathematics.** `A` must be an answer type — `El c` for a code `c` — because a
 context is a list of codes and nothing else. `Plan.revising` returns
-`Option (El c)`, so its consuming continuation (`Harden.finishK`) sits at an `A`
+`El c × Bool`, so its consuming continuation (`Harden.finishK`) sits at an `A`
 no context represents, and that is exactly the one place the language leaves the
 answers-only universe. The theorem *locates* that; removing it is a change to
 the specification and not to this file. -/
@@ -720,19 +720,40 @@ theorem approved_panel_cons (ω : Ω) (p : Plan Γ (El .verdict))
 
 /-- `[[reviseLoop Kc Kr n a γ]]` = the meaning of "check the artefact; if it is
 approved, stop with it; otherwise revise and go again, at most `n` more times;
-if the last check still objects, give up with `none`".
+if the last check still objects, hand back the candidate it ran out holding,
+marked unsettled".
 
 Written as an ordinary recursion at the *meaning*, so that
 `denotes_revising` below is a genuine morphism equation between two independent
 definitions rather than an unfolding of one of them. Note the shape: the check
-comes first at every rung, including the last. -/
+comes first at every rung, including the last; and note that **the exhausted
+ending carries the candidate** (D3), which is what the `Option` spelling threw
+away. -/
 def reviseLoop {Γ : Ctx} {c : Code} (Kc : El c → Env Γ → Dlg Verdict)
     (Kr : El c × Verdict → Env Γ → Dlg (El c)) :
-    Nat → El c → Env Γ → Dlg (Option (El c))
-  | 0, a, γ => Dlg.bind (Kc a γ) (fun v => .done (if Verdict.approvedB v then some a else none))
+    Nat → El c → Env Γ → Dlg (El c × Bool)
+  | 0, a, γ => Dlg.bind (Kc a γ) (fun v => .done (a, Verdict.approvedB v))
   | n + 1, a, γ => Dlg.bind (Kc a γ) (fun v =>
-      if Verdict.approvedB v then .done (some a)
+      if Verdict.approvedB v then .done (a, true)
       else Dlg.bind (Kr (a, v) γ) (fun a' => reviseLoop Kc Kr n a' γ))
+
+/-- `[[reviseLoopOn Kc Kr n a γ]]` = the same, reading the review's verdict tag
+three ways: approval settles, an objection buys another trip (or, at the last
+round, leaves the loop unsettled), a refusal abandons it at once (D4).
+
+A second, independently written recursion, so that `denotes_revisingOn` below is
+a genuine morphism equation and not an unfolding — the same discipline
+`reviseLoop` is held to. -/
+def reviseLoopOn {Γ : Ctx} {c : Code} (Kc : El c → Env Γ → Dlg Verdict)
+    (Kr : El c × Verdict → Env Γ → Dlg (El c)) :
+    Nat → El c → Env Γ → Dlg (El c × Ending) := fun n a γ =>
+  match n with
+  | 0 => Dlg.bind (Kc a γ) (fun v => .done (a, Ending.ofVTag (Verdict.tag v)))
+  | n + 1 => Dlg.bind (Kc a γ) (fun v =>
+      match Verdict.tag v with
+      | .approve => .done (a, Ending.settled)
+      | .declined => .done (a, Ending.abandoned)
+      | .object => Dlg.bind (Kr (a, v) γ) (fun a' => reviseLoopOn Kc Kr n a' γ))
 
 /-- **Morphism equation for `revising`**: the unrolled plan means the semantic
 loop, for every fuel.
@@ -762,13 +783,13 @@ theorem denotes_revising {Γ : Ctx} {c : Code}
   | zero =>
     intro Δ σ a δ
     refine (denote_graft (check Δ σ a)
-      (fun v δ' => .done (if Verdict.approvedB v then some (a δ') else none)) _ ?_ δ).trans ?_
+      (fun v δ' => .done (a δ', Verdict.approvedB v)) _ ?_ δ).trans ?_
     · intro Θ τ e θ; simp
     · rw [hc Δ σ a δ]; rfl
   | succ n ih =>
     intro Δ σ a δ
     refine (denote_graft (check Δ σ a)
-      (fun v δ' => if Verdict.approvedB v then .done (some (a δ'))
+      (fun v δ' => if Verdict.approvedB v then .done (a δ', true)
         else Dlg.bind (Kr (a δ', v) (σ δ')) (fun a' => reviseLoop Kc Kr n a' (σ δ'))) _ ?_ δ).trans
       ?_
     · intro Θ τ e θ
@@ -778,6 +799,48 @@ theorem denotes_revising {Γ : Ctx} {c : Code}
       | false =>
         simp only [cond_false, Bool.false_eq_true, if_false]
         refine (denote_graft _ (fun a' θ' => reviseLoop Kc Kr n a' (σ (τ θ'))) _ ?_ θ).trans ?_
+        · intro Ξ ρ e' ξ; exact ih Ξ _ e' ξ
+        · rw [hr Θ (Sub.comp σ τ) (fun θ' => (a (τ θ'), e θ')) θ]
+    · rw [hc Δ σ a δ]; rfl
+
+/-- **Morphism equation for `revisingOn`**: the unrolled three-way plan means
+the semantic three-way loop, for every fuel.
+
+The same shape as `denotes_revising`, one arm wider: the round's `caseV` splits
+on `Verdict.tag`, the approve and declined arms are `ret` leaves, and only the
+`object` arm recurses. The two `Denotes` hypotheses stay for the two reasons
+`denotes_revising`'s docstring gives, unchanged. -/
+theorem denotes_revisingOn {Γ : Ctx} {c : Code}
+    {check : Cont Γ (El c) Verdict} {revise : Cont Γ (El c × Verdict) (El c)}
+    {Kc : El c → Env Γ → Dlg Verdict} {Kr : El c × Verdict → Env Γ → Dlg (El c)}
+    (hc : Plan.Denotes check Kc) (hr : Plan.Denotes revise Kr) :
+    ∀ n : Nat, Plan.Denotes (Plan.revisingOn check revise n) (reviseLoopOn Kc Kr n) := by
+  intro n
+  induction n with
+  | zero =>
+    intro Δ σ a δ
+    refine (denote_graft (check Δ σ a)
+      (fun v δ' => .done (a δ', Ending.ofVTag (Verdict.tag v))) _ ?_ δ).trans ?_
+    · intro Θ τ e θ; simp
+    · rw [hc Δ σ a δ]; rfl
+  | succ n ih =>
+    intro Δ σ a δ
+    refine (denote_graft (check Δ σ a)
+      (fun v δ' =>
+        match Verdict.tag v with
+        | .approve => .done (a δ', Ending.settled)
+        | .declined => .done (a δ', Ending.abandoned)
+        | .object =>
+            Dlg.bind (Kr (a δ', v) (σ δ')) (fun a' => reviseLoopOn Kc Kr n a' (σ δ'))) _ ?_ δ).trans
+      ?_
+    · intro Θ τ e θ
+      simp only [Plan.caseV, denote_case]
+      cases h : Verdict.tag (e θ) with
+      | approve => simp
+      | declined => simp
+      | object =>
+        simp only []
+        refine (denote_graft _ (fun a' θ' => reviseLoopOn Kc Kr n a' (σ (τ θ'))) _ ?_ θ).trans ?_
         · intro Ξ ρ e' ξ; exact ih Ξ _ e' ξ
         · rw [hr Θ (Sub.comp σ τ) (fun θ' => (a (τ θ'), e θ')) θ]
     · rw [hc Δ σ a δ]; rfl
@@ -850,7 +913,7 @@ def agreeable : Ω := fun c =>
   | .ack => fun _ => ()
 
 /-- The plan: revise the draft up to twice. -/
-def upToTwice : Plan [] (Option (El .text)) :=
+def upToTwice : Plan [] (El .text × Bool) :=
   Plan.revising check revise 2 [] Sub.id (fun _ => "draft")
 
 /-- **Check first, revise in the recursive call.** Against an addressee that
@@ -862,8 +925,10 @@ theorem trace_upToTwice_stubborn :
       = [.verdict, .text, .verdict, .text, .verdict] := by
   rfl
 
-/-- And it gives up with an ordinary value, not an exception: `none` (§3 q8). -/
-theorem run_upToTwice_stubborn : Plan.run stubborn upToTwice Env.nil = none := by
+/-- And it gives up with an ordinary value, not an exception (§3 q8) — and the
+value is **the candidate it ran out holding**, marked unsettled, rather than the
+`none` the `Option` spelling threw it away for (D3). -/
+theorem run_upToTwice_stubborn : Plan.run stubborn upToTwice Env.nil = ("revised", false) := by
   rfl
 
 /-- Against an addressee that approves at once there is **one** consultation:
@@ -872,8 +937,8 @@ theorem trace_upToTwice_agreeable :
     (Plan.trace agreeable upToTwice Env.nil).map Event.c = [.verdict] := by
   rfl
 
-/-- …and the answer is the draft, unrevised. -/
-theorem run_upToTwice_agreeable : Plan.run agreeable upToTwice Env.nil = some "draft" := by
+/-- …and the answer is the draft, unrevised, marked settled. -/
+theorem run_upToTwice_agreeable : Plan.run agreeable upToTwice Env.nil = ("draft", true) := by
   rfl
 
 /-! ### The sharing example, at the pipeline rung

@@ -27,6 +27,29 @@ derived JSON encoding (constructors as single-key objects, structures as field
 objects — the corpus files are the normative examples). `worlds` defaults to
 `[{}]`, the echo world.
 
+Three constructor-level changes landed together in the D-slate regeneration, and
+because Surface 2 below freezes the *term's encoding*, each moved requests whose
+replies did not move at all:
+
+* **`caseResult` gained `unsettledName`** (D3), immediately after `settledName`.
+  A bounded revision's two exits now both bind the candidate — the settled
+  artefact, and the last one the final review objected to — so the unsettled arm
+  has a binder where it had none. The two names may coincide, and for every
+  surface-authored program they do, because both arms are built at the same
+  depth. Twenty-seven requests gained the key; one of them, `battery-099`, has no
+  `revising` at all and gained it anyway, because the key belongs to the
+  `caseResult` node and not to the loop.
+* **`revisingOn` and `caseEnding` are new constructors** (D4) — a loop that
+  branches on the review's verdict tag three ways, and the three-armed `case`
+  that consumes it. The codecs tag by constructor name, so nothing frozen
+  carries either and **no existing entry moved for D4**.
+* **`RawAsk.model` became an object** (D6): `"deep"` is now
+  `{"primary": "deep", "alternates": []}`. `null` is unchanged and still means
+  unpinned. Exactly five requests carry a `served by` and so exactly five moved.
+  The *reply* side is untouched — a trace event's `scope.model` is still the bare
+  string of the model that answered, because a pure `World` is total and never
+  fails over.
+
 The reply is one of three shapes:
 
 ### Refused
@@ -34,7 +57,8 @@ The reply is one of three shapes:
 ```json
 {"refused": {
   "guard": "panelEmpty" | "revisionBound" | "questionBudget"
-         | "servedBy" | "dupFunction" | "other",   // COMPARED
+         | "servedBy" | "dupFunction" | "deciderEmpty"
+         | "other",                                 // COMPARED
   "n": <Nat> | null,                                // COMPARED (questionBudget only)
   "pos": {"line": …, "col": …},                     // oracle-only
   "excerpt": "…",                                   // oracle-only
@@ -48,8 +72,17 @@ and, for the question budget, the computed `n` are facts both sides produce;
 checker's wording, which the Haskell side never has. The guard is a
 classification **assigned in the oracle** by total match on the message text —
 `CheckError` carries no code, and adding one would edit literals pinned inside
-theorems. `other` covers every refusal outside the five term-level guards;
+theorems. `other` covers every refusal outside the six term-level guards;
 those are diagnostics, not comparands.
+
+`deciderEmpty` (D7) covers both degeneracies of a decider — no needle at all,
+and a needle that says nothing — because they are one mistake: a test that is
+constantly false, or constantly true, with nothing in the source to show it.
+`panelEmpty` covers an empty `panel` **and** an empty `panelText` (D2), because
+it means "a fan with no members" whichever monoid the fan folds into. A text
+panel's *label* refusals (an invalid character, two members answering to one
+name) are `CheckError`s and classify as `other`: guards are the program-budget
+family and these are well-formedness.
 
 ### Checked
 
@@ -78,7 +111,8 @@ those are diagnostics, not comparands.
 
 ```json
 {"code": "text"|"verdict"|"flag"|"receipt",
- "addressee": {"model"|"tool"|"person": {"id": "…"}},
+ "addressee": {"model"|"tool"|"person": {"id": "…"}}
+            | {"toolExec": {"id": "…", "cmd": "…", "args": ["…", …]}},
  "scope": {"model": "…"|null, "mode": "…"|null},
  "prompt": "…", "draw": <Nat>,
  "answer": <string>                          // text
@@ -92,22 +126,62 @@ those are diagnostics, not comparands.
 Traces are compared **in order, unnormalized**: a trace is a free monoid and
 its order is the observation.
 
+`toolExec` (D5) is a fourth addressee flavour: a tool whose answer the *runner*
+obtains by running a program-authored command. The argv rides in the addressee
+rather than beside it, so it is inside `Q.Shape` and therefore inside the
+question's identity: **two commands at one tool id, with the same words, are two
+questions**, which `battery-219` and `battery-220` pin as `billMemo` 2 and 1.
+The kernel executes nothing — a pure `World` dispatches on the code and never on
+the addressee — so an oracle observation of a `toolExec` program is computed
+exactly as any other.
+
 ## Request 2 — the string layer
 
 ```json
-{"id": …, "string": {"op": "norm"|"words"|"decodeVerdict"|"decode"|"say",
-                     "code": "text"|"verdict"|"flag"|"receipt",  // decode/say only
-                     "text": "…"}}
+{"id": …, "string": {"op": …, "text": "…", …}}
 ```
 
-Reply: `{"result": …}` — a string for `norm`/`say`, a string list for `words`,
-a verdict object for `decodeVerdict`, `{"answer": …|null}` for `decode`.
+| `op` | extra request fields | `result` |
+| --- | --- | --- |
+| `norm` | — | string |
+| `words` | — | array of strings |
+| `decodeVerdict` | — | verdict object |
+| `decode` | `code` | `{"answer": …\|null}` |
+| `say` | `code` | string |
+| `bare` | — | string |
+| `fields` | — | array of strings |
+| `headerPaths` | — | array of strings |
+| `matchGlob` | `pattern` | bool |
+| `decide` | `decider`, `needles` | bool |
+| `fence` | `name` | string |
+
+Reply: `{"result": …}`. The extension is **additive**: `{"op", "code"?, "text"}`
+still means exactly what it meant, and an old oracle meeting a new request
+answers `{"error": "unknown string op `…`"}`, which is a loud failure and not a
+silent one.
+
+`decider` is one of `lastNonEmptyLineIs`, `containsLine`, `anyLineStartsWith`,
+`anyPathMatches` — the closed vocabulary of D7, spelled by the same camel-case
+names the `RawRhs.decide` constructor's `decider` field carries, with
+`deciderName`/`deciderOfName` a machine-checked retraction so that the
+authoring keyword, the diagnosis and the corpus field are one table.
+
+The four low-level ops (`bare`, `fields`, `headerPaths`, `matchGlob`) exist so
+that a divergence is **localizable**: a `decide` mismatch with all four green is
+a composition bug, and with one of them red is that function's bug. The same
+reason `norm` and `words` are pinned apart from `decode`.
 
 This request kind exists because it is the highest-ranked divergence risk and
 the only coverage it can get: on a program-in/world-out boundary nothing ever
 calls `Decode`. The known hazard the vectors freeze: `Exec.norm` lowercases
 **ASCII only** (`"HeLLo İstanbul" → "hello İstanbul"`, the `İ` surviving),
-where a naive Haskell `toLower` is Unicode.
+where a naive Haskell `toLower` is Unicode. Every predicate added for D2 and D7
+is ASCII-only on the same rule, and the vectors freeze the places the two
+implementations could otherwise drift: the CRLF marker line, `**WORK
+COMPLETE**`, whitespace-only input, `İ` through a needle, `"✗"` against `"✗ "`,
+`*.hs` against `x.lhs` / `b/src/Bar.hs` / `.hs` / `/dev/null`, a two-star glob,
+an indented `diff --git` header, a bare markdown rule, and a fenced body that
+closes its own tag or a sibling's.
 
 ## Request 3 — liveness
 
@@ -141,18 +215,18 @@ the specification.
 
 *Recorded because every working paper in `doc/research/profunctor-design/`
 listed one or two of the three, and two of them named a field that is pinned by
-nothing. Counted in this checkout, over the 128 files as they stand.*
+nothing. Counted in this checkout, over the 188 files as they stand.*
 
 **Surface 1 — the frozen reply record, and it has exactly eight keys.** A
 checked reply is `level`, `size`, `askNodes`, `codes`, `costSummary`,
 `blockAsks`, `fnAsks`, `worlds`, and nothing else; the Haskell producer is
 `Agentic.Observe.observeValue`, whose own docstring calls them "the five static
-folds, the two ask counts, and one observation per world". Of the 128 files, 66
-carry a checked reply, 40 a `refused` reply and 22 a `result` from the string
+folds, the two ask counts, and one observation per world". Of the 188 files, 92
+carry a checked reply, 52 a `refused` reply and 44 a `result` from the string
 layer.
 
 **`shapes` and `asks` are on no wire and in no file** — `grep '"shapes"'` and
-`grep '"asks"'` return zero hits across all 128. The record specified in
+`grep '"asks"'` return zero hits across all 188. The record specified in
 `connection.md` §3.1 lists them and the implemented record does not; that
 discrepancy is the note under "Checked" above, and its effect is to *loosen* the
 constraint rather than to tighten it. `Cost.shapes` and `Cost.asks` may be
@@ -166,7 +240,7 @@ encoding, so the *term's encoding* is frozen alongside its observations: a
 change to a constructor name, a field name or a field order is a corpus
 regeneration even when every number in every reply is unmoved. The one field
 this surface does not compare is position: the corpus stores real `line`/`col`
-(1,059 of 1,061 `pos` occurrences are non-zero), and `Agentic.Observe.zeroPosValue`
+(1,455 of 1,457 `pos` occurrences are non-zero), and `Agentic.Observe.zeroPosValue`
 sets `pos` and `answerPos` to `0:0` on **both** sides of a printed-program
 comparison, because the Haskell builder has no way to represent a position.
 `pos` is oracle-only for a whole program in the same sense `message` and

@@ -1,0 +1,44 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"bind":
+    {"x": "t",
+     "src":
+     {"rhs":
+      {"r":
+       {"ask":
+        {"a":
+         {"target": {"draw": 0, "addressee": {"model": {"id": "a"}}},
+          "prompt": [{"lit": {"s": "status"}}],
+          "pos": {"line": 2, "col": 12},
+          "model": null}}}}},
+     "rest":
+     {"bind":
+      {"x": "f",
+       "src":
+       {"rhs":
+        {"r":
+         {"decide":
+          {"subject": "t",
+           "pos": {"line": 3, "col": 8},
+           "needles": ["READY"],
+           "decider": "containsLine"}}}},
+       "rest": {"empty": {"pos": {"line": 4, "col": 1}}},
+       "pos": {"line": 3, "col": 3},
+       "ann": "text"}},
+     "pos": {"line": 2, "col": 3},
+     "ann": "text"}},
+   "fns": []}},
+ "reply":
+ {"refused":
+  {"pos": {"line": 3, "col": 8},
+   "n": null,
+   "message": "this binding: a decider answers `flag`, not `text`",
+   "guard": "other",
+   "excerpt": "decide"}},
+ "oracleVersion": 1,
+ "name": "a decider annotated off flag"}

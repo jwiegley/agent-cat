@@ -1,0 +1,10 @@
+{"request":
+ {"string":
+  {"text": "✗\n",
+   "op": "decide",
+   "needles": ["✗ "],
+   "decider": "anyLineStartsWith"}},
+ "reply": {"result": false},
+ "oracleVersion": 1,
+ "name":
+ "decide: a needle's trailing space survives, so a bare cross is not red"}

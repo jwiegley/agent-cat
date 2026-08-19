@@ -12,7 +12,7 @@
      {"target": {"draw": 0, "addressee": {"tool": {"id": "t"}}},
       "prompt": [{"lit": {"s": "w"}}],
       "pos": {"line": 1, "col": 1},
-      "model": "deep"}}},
+      "model": {"primary": "deep", "alternates": []}}}},
    "fns": []}},
  "reply":
  {"refused":

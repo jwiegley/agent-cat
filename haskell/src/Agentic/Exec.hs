@@ -12,19 +12,19 @@
 -- Description : The interpreter in @IO@: the memoizing fold, and the decode loop.
 --
 -- A port of @Agentic\/Core\/Exec.lean@ from the line where the theorems stop
--- (@Exec.lean:456@, \"the interpreter: a memoizing fold, with the answering
+-- (@Exec.lean:455@, \"the interpreter: a memoizing fold, with the answering
 -- service an argument\") to the line where the transport begins. Three layers,
 -- in Lean's order, and the order is the point:
 --
--- 1. __The trusted base__ — 'decodeEl', @Exec.lean:266@'s @Decode@. It is one
+-- 1. __The trusted base__ — 'decodeEl', @Exec.lean:265@'s @Decode@. It is one
 --    total parser per code and it is not written here: every clause delegates
 --    to "Agentic.Text", which is the byte-faithful port and the /only/ place in
 --    this package that decides what an addressee's bytes mean. A second copy of
---    that decision is exactly what @Exec.lean:249@–@:250@ says must not exist.
--- 2. __The memoizing fold__ — 'runPlanIO', @Exec.lean:504@'s @Dlg.execM@ at
+--    that decision is exactly what @Exec.lean:248@–@:249@ says must not exist.
+-- 2. __The memoizing fold__ — 'runPlanIO', @Exec.lean:503@'s @Dlg.execM@ at
 --    @m := IO@, fused through @denote@ the way "Agentic.World"'s 'traceIn' is
---    (@Exec.lean:725@: @Plan.execWith o p γ t = Dlg.execM o (denote p γ) t@, and
---    @:727@ says that equation is @rfl@ because nothing else was written).
+--    (@Exec.lean:724@: @Plan.execWith o p γ t = Dlg.execM o (denote p γ) t@, and
+--    @:726@ says that equation is @rfl@ because nothing else was written).
 -- 3. __The answering service__ — 'WorldIO', Lean's @Oracle IO@, passed in. The
 --    only 'WorldIO' here is 'scriptedWorld'; the live one is
 --    @Agentic.AgentDeck@'s 'worldOfDeck', and it is built from the same
@@ -39,7 +39,7 @@
 --
 -- * the table is Lean's @Table@ — consulted before asking, extended after
 --   answering, and that pair of lines is the whole of kernel §5's argument
---   (@Exec.lean:508@–@:512@). A question already answered is not put again.
+--   (@Exec.lean:507@–@:511@). A question already answered is not put again.
 -- * the trace is @Plan.trace@ — what the /plan/ consulted, repetitions and all,
 --   so that 'billFresh' and 'billMemo' mean here what they mean in
 --   "Agentic.World". Lean reads its bills off @Plan.trace@ too
@@ -52,14 +52,14 @@
 -- > billMemo  t == the number of times the 'WorldIO' was actually invoked
 --
 -- and, at a pure world ('pureWorldIO', Lean's @pureOracle@ at
--- @Exec.lean:619@), the factorization theorem @Exec.lean:647@ becomes an
+-- @Exec.lean:618@), the factorization theorem @Exec.lean:646@ becomes an
 -- equation anyone can run:
 --
 -- > runPlanIO (pureWorldIO w) p  ==  pure (runPlan w p, trace w p)
 --
 -- == What is deliberately not ported
 --
--- The @Oracle@'s history argument (@Exec.lean:477@: @(c : Code) → Q c → Table →
+-- The @Oracle@'s history argument (@Exec.lean:476@: @(c : Code) → Q c → Table →
 -- m (El c)@) is dropped from 'WorldIO'. Adequacy quantifies over
 -- history-dependent oracles, so an oracle that cannot see the history is a
 -- special case of the ones @execM_adequacy@ covers: dropping the argument
@@ -92,6 +92,16 @@ module Agentic.Exec
 
     -- * The interpreter
     runPlanIO,
+    runPlanWith,
+
+    -- * Fail-over
+    Chains (..),
+    noChains,
+    chainsOf,
+    candidates,
+    TurnGapError (..),
+    raiseGap,
+    withTransportGaps,
 
     -- * The trusted base, at the typed answer
     decodeEl,
@@ -104,7 +114,6 @@ module Agentic.Exec
     GapAsk (..),
     Recover,
     budgetedRecovery,
-    failOverRefusal,
     ExecSettings (..),
     defaultExecSettings,
     gapBudget,
@@ -146,10 +155,11 @@ import Agentic.Plan
     withPrompt,
   )
 import Agentic.Raw
-  ( Addressee (AddrModel, AddrPerson, AddrTool),
+  ( Addressee (AddrModel, AddrPerson, AddrTool, AddrToolExec),
     Code (CodeAck, CodeFlag, CodeText, CodeVerdict),
   )
 import Agentic.Text (decodeFlag, decodeVerdict, sayFlag, sayVerdict)
+import Agentic.Plan (QScope (scopeModelAxis))
 import Agentic.World
   ( Event (Event),
     EventKey,
@@ -157,10 +167,20 @@ import Agentic.World
     World (worldAnswer),
     eventKey,
   )
-import Data.List (find)
+import Control.Exception
+  ( Exception (displayException, toException),
+    SomeAsyncException,
+    SomeException,
+    fromException,
+    throwIO,
+    try,
+  )
+import Data.List (find, nub)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
+import Data.Set (Set)
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Type.Equality ((:~:) (Refl))
@@ -170,7 +190,7 @@ import System.IO (hPutStrLn, stderr)
 -- The answering service
 -- ---------------------------------------------------------------------------
 
--- | @Oracle IO@ (@Exec.lean:477@), less the history argument: given a code and
+-- | @Oracle IO@ (@Exec.lean:476@), less the history argument: given a code and
 -- a question, produce an answer, in @IO@.
 --
 -- A rank-2 newtype for the same reason "Agentic.World"'s 'World' is one — the
@@ -178,7 +198,7 @@ import System.IO (hPutStrLn, stderr)
 -- which is the sense in which the @IO@ layer is /only/ the answering service.
 --
 -- Two things this type says, and they are the reason it is this type
--- (@Exec.lean:462@–@:476@):
+-- (@Exec.lean:461@–@:475@):
 --
 -- * it returns @IO (El c)@ and not @IO (El c, table)@, so an answerer can
 --   invent an answer but cannot forge or delete a recorded one. That is
@@ -188,7 +208,7 @@ import System.IO (hPutStrLn, stderr)
 newtype WorldIO = WorldIO
   {worldAskIO :: forall (c :: Code). SCode c -> Q c -> IO (El c)}
 
--- | @pureOracle ω@ (@Exec.lean:619@): the answering service that /is/ the world
+-- | @pureOracle ω@ (@Exec.lean:618@): the answering service that /is/ the world
 -- @ω@, ignoring the history because a world is a function of the question.
 --
 -- This is the factorization written as a definition. 'runPlanIO' at this
@@ -196,8 +216,8 @@ newtype WorldIO = WorldIO
 --
 -- > runPlanIO (pureWorldIO w) p  ==  pure (runPlan w p, trace w p)
 --
--- which is @Plan.execPure_fst@ (@Exec.lean:748@) and @execM_pure@'s third
--- conclusion (@:647@) at once. The memo table changes nothing here precisely
+-- which is @Plan.execPure_fst@ (@Exec.lean:747@) and @execM_pure@'s third
+-- conclusion (@:646@) at once. The memo table changes nothing here precisely
 -- because a 'World' is a function: a repeated question would have got the same
 -- answer had it been put again.
 pureWorldIO :: World -> WorldIO
@@ -238,25 +258,30 @@ announcingWorld out (WorldIO ask) = WorldIO $ \c q -> do
 -- The table is a 'Map' rather than an association list because @lookup@ is the
 -- only operation on it and Lean's cons-order is unobservable through @lookup@:
 -- a key is inserted only where the lookup said nothing (@World.lean:193@'s
--- @le_cons_of_lookup_none@ is that hypothesis, discharged at @Exec.lean:544@),
+-- @le_cons_of_lookup_none@ is that hypothesis, discharged at @Exec.lean:543@),
 -- so no insert ever overwrites
 -- and \"first wins\" and \"last wins\" coincide.
 data Memo = Memo
   { memoTable :: !(Map EventKey Event),
     -- | most recent first; 'runPlanIO' reverses it once, at the end
-    memoSaid :: [Event]
+    memoSaid :: [Event],
+    -- | the models that reported their allowance spent, which a later question
+    -- pinning one of them skips __without asking__. Threaded through the fold
+    -- rather than held in an 'Data.IORef.IORef', so 'noChains' stays a value
+    -- and @runPlanIO = runPlanWith noChains@ needs no @IO@ to say it.
+    memoSpent :: !(Set Text)
   }
 
--- | @Plan.execWith o p Env.nil Table.nil@ (@Exec.lean:718@; Lean's @execIO@
+-- | @Plan.execWith o p Env.nil Table.nil@ (@Exec.lean:717@; Lean's @execIO@
 -- entry point around it is retired, @Exec.lean:978@): run a closed plan against
 -- an answering service and return the answer together with the transcript.
 --
--- __Look up before asking; record after answering__ (@Exec.lean:491@). A
+-- __Look up before asking; record after answering__ (@Exec.lean:490@). A
 -- question whose 'EventKey' — code, addressee, scope, prompt and draw, which is
 -- exactly what 'billMemo' charges by — has already been answered is answered
 -- from the table and the service is not invoked. That is what makes the run
 -- /functional/ with no hypothesis on the answerer, which is the whole of
--- @execM_adequacy@ (@Exec.lean:578@): one question, one answer, however
+-- @execM_adequacy@ (@Exec.lean:577@): one question, one answer, however
 -- faithless the addressee.
 --
 -- A deliberate resample is not defeated by it: @draw@ is a field of the
@@ -272,7 +297,7 @@ data Memo = Memo
 -- > PDyn _ e f   -- likewise, and it is here only for totality
 --
 -- 'PDyn' cannot be reached from @Agentic.Builder@ (no combinator makes one) and
--- the DSL never elaborates to one (@Check.lean:55@), but it is a former of the
+-- the DSL never elaborates to one (@Check.lean:57@), but it is a former of the
 -- language and this fold is total on the language, so it takes the same clause
 -- @denote@ gives it — the two share a meaning clause on purpose
 -- (@Denote.lean:60@).
@@ -282,40 +307,228 @@ data Memo = Memo
 -- that backwards is the one way this fold can differ from 'traceIn' while still
 -- typechecking.
 runPlanIO :: WorldIO -> Plan '[] a -> IO (a, Trace)
-runPlanIO w p = do
-  (a, m) <- execIn w ENil p (Memo Map.empty [])
+runPlanIO = runPlanWith noChains
+
+-- | 'runPlanIO' under a chain table: the same fold, with 'askOrMemo' walking
+-- the models a pinned question may be answered by rather than the one it names
+-- (D6).
+--
+-- __The factorization survives, definitionally rather than by argument.__ With
+-- an empty chain table and an empty spent set 'candidates' answers @[q]@, the
+-- loop runs one iteration, the lookup and the insert are both at
+-- @questionKey c q@, and the recovery fork is never consulted because no gap
+-- arrives at a pure world. @runPlanWith noChains@ is therefore the 'askOrMemo'
+-- of before, clause for clause, and
+--
+-- > runPlanIO (pureWorldIO w) p  ==  pure (runPlan w p, trace w p)
+--
+-- holds verbatim, with @runPlanIO = runPlanWith noChains@.
+--
+-- __The live trace may disagree with a frozen one, and that is the feature.__
+-- The trace records the model that __actually answered__ — @Event c qi a@ is
+-- built from the candidate that answered, and its scope serializes with no
+-- change whatsoever — so a program whose frozen trace says @deep@ may, on a day
+-- the allowance is spent, produce a live trace that says @broad@. That
+-- divergence is the observation, and it is available to an operator precisely
+-- because a fail-over is not written into the table under the primary's key.
+-- The failed attempt itself is recorded nowhere: an 'Event' carries an answer
+-- and a failed attempt has none, so the trace records the dialogue and
+-- @stderr@ records the attempts.
+runPlanWith :: Chains -> WorldIO -> Plan '[] a -> IO (a, Trace)
+runPlanWith ch w p = do
+  (a, m) <- execIn w ch ENil p (Memo Map.empty [] Set.empty)
   pure (a, reverse (memoSaid m))
 
 -- | The fold proper, in an arbitrary context. Not exported: a plan is run
 -- closed and from the empty table, which is the only case any theorem is
 -- stated at.
-execIn :: WorldIO -> Env g -> Plan g a -> Memo -> IO (a, Memo)
-execIn w y pl m = case pl of
+execIn :: WorldIO -> Chains -> Env g -> Plan g a -> Memo -> IO (a, Memo)
+execIn w ch y pl m = case pl of
   PRet e -> pure (e y, m)
   PAskC c q k -> do
-    (a, m') <- askOrMemo w c q m
-    execIn w (ECons a y) k m'
+    (a, m') <- askOrMemo w ch c q m
+    execIn w ch (ECons a y) k m'
   PAsk c s e k -> do
     let q = withPrompt s (e y)
-    (a, m') <- askOrMemo w c q m
-    execIn w (ECons a y) k m'
-  PCase _ e arms -> execIn w y (arms (e y)) m
-  PDyn _ e f -> execIn w y (f (e y)) m
+    (a, m') <- askOrMemo w ch c q m
+    execIn w ch (ECons a y) k m'
+  PCase _ e arms -> execIn w ch y (arms (e y)) m
+  PDyn _ e f -> execIn w ch y (f (e y)) m
 
--- | @Exec.lean:524@ (@execM_ask_hit@) and @:531@ (@execM_ask_miss@), the two
--- clauses of the @ask@ case, plus the transcript entry both of them make.
+-- | @Exec.lean:523@ (@execM_ask_hit@) and @:530@ (@execM_ask_miss@), the two
+-- clauses of the @ask@ case, plus the transcript entry both of them make — and,
+-- since D6, the walk over the models a pinned question may be answered by.
 --
--- The hit is the identity on the table; the miss asks, records, and only then
--- continues, so the continuation runs in the extended world.
-askOrMemo :: WorldIO -> SCode c -> Q c -> Memo -> IO (El c, Memo)
-askOrMemo w c q m = case memoLookup c key (memoTable m) of
-  Just a -> pure (a, said a m)
-  Nothing -> do
-    a <- worldAskIO w c q
-    pure (a, said a m {memoTable = Map.insert key (Event c q a) (memoTable m)})
+-- In words: __for each live candidate in order, consult the table, then the
+-- wire.__ The hit is the identity on the table; the miss asks, records, and
+-- only then continues, so the continuation runs in the extended world.
+--
+-- Four properties, which are @Agent.Run.overChain@'s four discharged at these
+-- types:
+--
+-- * /the whole action is retried/ — trivially: the action is one question;
+-- * /re-run under the next connection's own recorder/ — the answer is memoized
+--   under @questionKey c qi@, the __answerer's__ key, never the primary's.
+--   Writing it under the primary's would put in the table an answer attributed
+--   to a model that did not give it;
+-- * /the exhaustion never escapes/ — when nothing is left, 'tgeFinal' is raised,
+--   which is exactly what the run would have raised with no chain declared. So
+--   with no alternates anywhere every diagnostic in this package is
+--   byte-identical to the one before fail-over existed;
+-- * /a spent model is not asked again/ — 'memoSpent' is why repetition stays
+--   cheap and consistent. Walk an ask node twice, having lost @deep@ to
+--   exhaustion on the first walk: the second walk's candidate list is
+--   @[broad]@, the lookup at @broad@'s key hits, and nothing is put. The memo
+--   invariant — a question already answered is not put again — survives a
+--   fail-over intact. A __non__-exhaustion gap does not mark the model spent,
+--   so the second walk does re-ask it, and that is right: a turn that failed
+--   once is not a model that is finished.
+--
+-- __@billFresh@ is unchanged by construction__ (one event per ask node walked)
+-- and @billMemo@ is unchanged in the ordinary fail-over, because the dead
+-- attempts record nothing. It rises in exactly one situation — a node answered
+-- by one model early and by another later — and that rise is correct: two
+-- different models said the same words, which by 'EventKey'\'s own definition
+-- is two questions.
+askOrMemo :: WorldIO -> Chains -> SCode c -> Q c -> Memo -> IO (El c, Memo)
+askOrMemo w ch c q m = do
+  let live = candidates ch (memoSpent m) q
+      skipped = [x | x <- chainOf ch q, x `Set.member` memoSpent m]
+  mapM_ (chainLog ch . spentSkip) skipped
+  case live of
+    [] -> abandonAllSpent c q (chainOf ch q)
+    qs -> go qs m
   where
-    key = questionKey c q
-    said a m' = m' {memoSaid = Event c q a : memoSaid m'}
+    said qi a m' = m' {memoSaid = Event c qi a : memoSaid m'}
+
+    go [] _ = abandonAllSpent c q (chainOf ch q)
+    go (qi : rest) m' = case memoLookup c (questionKey c qi) (memoTable m') of
+      Just a -> pure (a, said qi a m')
+      Nothing -> do
+        attempt <- try (worldAskIO w c qi)
+        case attempt of
+          Right a ->
+            pure
+              ( a,
+                said
+                  qi
+                  a
+                  m'
+                    { memoTable =
+                        Map.insert (questionKey c qi) (Event c qi a) (memoTable m')
+                    }
+              )
+          Left (e :: SomeException)
+            -- An interrupt is the operator talking, not a gap.
+            | Just (_ :: SomeAsyncException) <- fromException e -> throwIO e
+            | otherwise -> case fromException e of
+                Nothing -> throwIO e
+                Just tge -> do
+                  let m'' =
+                        if tgeGap tge == GapExhausted
+                          then
+                            m'
+                              { memoSpent = case modelOf qi of
+                                  Just i -> Set.insert i (memoSpent m')
+                                  Nothing -> memoSpent m'
+                              }
+                          else m'
+                  case rest of
+                    (nxt : _) -> do
+                      chainLog ch $
+                        fromMaybe (addresseeWord (qAddressee qi)) (modelOf qi)
+                          <> ": "
+                          <> tgeWhy tge
+                          <> "; falling back to "
+                          <> fromMaybe "the next candidate" (modelOf nxt)
+                      go rest m''
+                    [] -> throwIO (tgeFinal tge)
+
+    spentSkip i =
+      i
+        <> " reported its allowance spent earlier in this run; not asking it \
+           \again"
+
+-- | The model a question's scope names, if it names one.
+modelOf :: Q c -> Maybe Text
+modelOf = scopeModelAxis . qScope
+
+-- | The whole chain a question pins, spent members included: the primary and
+-- its alternates, or nothing at all when the question is unpinned.
+chainOf :: Chains -> Q c -> [Text]
+chainOf ch q = case modelOf q of
+  Nothing -> []
+  Just i -> nub (i : Map.findWithDefault [] i (chainAlternates ch))
+
+-- | The models this question may still be put to, in order, each as the
+-- question relabelled to name it — the __mode axis untouched__.
+--
+-- For an __unpinned__ question this is @[q]@, always: an unpinned question names
+-- no model, so the runner cannot say who answered it and has nothing to fall
+-- back from. Worth saying out loud, because it is an argument for pinning:
+-- __fail-over is a service you get by pinning.__
+candidates :: Chains -> Set Text -> Q c -> [Q c]
+candidates ch spent q = case modelOf q of
+  Nothing -> [q]
+  Just i ->
+    [ q {qScope = (qScope q) {scopeModelAxis = Just x}}
+      | x <- nub (i : Map.findWithDefault [] i (chainAlternates ch)),
+        not (x `Set.member` spent)
+    ]
+
+-- | Every model this question pins has already reported its allowance spent.
+--
+-- The run abandons __without touching the wire__, naming the models, because
+-- asking a model known to be spent is spending a turn on a guess — which is the
+-- one thing an unattended policy must not do.
+abandonAllSpent :: SCode c -> Q c -> [Text] -> IO a
+abandonAllSpent c q chain =
+  ioError . userError . T.unpack $
+    "no model is left to answer the "
+      <> codeWord (fromSCode c)
+      <> " question put to "
+      <> addresseeWord (qAddressee q)
+      <> ": every model it pins ("
+      <> T.intercalate ", " chain
+      <> ") reported its allowance spent earlier in this run (prompt: '"
+      <> oneLine (qPrompt q)
+      <> "'). The run is abandoned rather than asking a model known to be spent, "
+      <> "which would be spending a turn on a guess."
+
+-- | The chain table a run walks, and where a fail-over narrates itself.
+--
+-- __The alternates are not in the question.__ Isaac's own sentence is the
+-- argument (@Agent\/Op.hs@): a fallback \"is not part of that identity\", and
+-- folding it into the identity would key two things off a field neither of them
+-- knows about. At these types: 'Agentic.World.EventKey' includes the scope, so
+-- a chain in the scope would make @served by "deep"@ and
+-- @served by "deep" or "broad"@ — same words, same addressee, same draw — two
+-- questions, splitting the memo table and the bills on a field that says
+-- nothing about what is being asked. So the alternates are Raw-level program
+-- text, and the runner collects them into this table before the run
+-- (@Agentic.Chains@).
+--
+-- The consequence, stated rather than hidden: __the chain is a property of the
+-- model, not of the question.__ A program may not say \"deep or broad\" here
+-- and \"deep or cheap\" there; that is a runner precondition, and
+-- @agentic-run@ refuses to start on an ill-defined table.
+data Chains = Chains
+  { -- | @primary -> alternates@, fixed for the run
+    chainAlternates :: !(Map Text [Text]),
+    -- | where a fail-over says what it is about to do. 'stderrLog' by default:
+    -- the narration is a warning and not a consultation, which is the same
+    -- split 'announcingWorld' and 'stderrLog' already make.
+    chainLog :: Text -> IO ()
+  }
+
+-- | No alternates anywhere, which is what 'runPlanIO' passes and what makes it
+-- the fold it always was.
+noChains :: Chains
+noChains = Chains Map.empty stderrLog
+
+-- | A chain table with an operator's log.
+chainsOf :: (Text -> IO ()) -> Map Text [Text] -> Chains
+chainsOf lg t = Chains t lg
 
 -- | The key a question is memoized under: 'eventKey' of the event it will
 -- become.
@@ -357,7 +570,7 @@ sameCode _ _ = Nothing
 -- The trusted base, at the typed answer
 -- ---------------------------------------------------------------------------
 
--- | @Decode@ (@Exec.lean:266@) — the total function per code taking the bytes
+-- | @Decode@ (@Exec.lean:265@) — the total function per code taking the bytes
 -- an addressee produced to the thing it is thereby taken to have said.
 --
 -- > Decode .text    s = some s                  -- what was said is what was said
@@ -370,7 +583,7 @@ sameCode _ _ = Nothing
 -- 'El', and if it ever grows a clause of its own the package has two answers to
 -- the question of what an addressee said.
 --
--- 'Nothing' is one code wide (@Decode_eq_none@, @Exec.lean:293@): a @flag@ is
+-- 'Nothing' is one code wide (@Decode_eq_none@, @Exec.lean:292@): a @flag@ is
 -- the one code whose answer set is smaller than what an addressee can say, so
 -- it is the one place the runtime has to be prepared to re-ask.
 decodeEl :: SCode c -> Text -> Maybe (El c)
@@ -392,7 +605,7 @@ sayEl SAck _ = "done"
 -- What a question says about itself on the wire
 -- ---------------------------------------------------------------------------
 
--- | @Exec.Code.name@ (@Exec.lean:778@) — how a code names itself in a prompt
+-- | @Exec.Code.name@ (@Exec.lean:777@) — how a code names itself in a prompt
 -- header, a warning and an abandonment message.
 --
 -- __This is not @Agentic.Raw.codeName@.__ That one spells @CodeAck@ as
@@ -408,13 +621,16 @@ codeWord = \case
   CodeFlag -> "flag"
   CodeAck -> "ack"
 
--- | @Addressee.render@ (@Exec.lean:785@) — how an addressee names itself in a
+-- | @Addressee.render@ (@Exec.lean:784@) — how an addressee names itself in a
 -- prompt header and in an error.
 addresseeWord :: Addressee -> Text
 addresseeWord = \case
   AddrModel i -> "model " <> i
   AddrTool i -> "tool " <> i
   AddrPerson i -> "person " <> i
+  -- The command and not its arguments: an operator reading a progress line
+  -- wants to know which gate ran, and the argv is in the printed program.
+  AddrToolExec i cmd _ -> "tool " <> i <> " (" <> cmd <> ")"
 
 -- | @Exec.answerSpec@ (@Exec.lean:807@) — what the addressee must say for
 -- 'decodeEl' to read it, sent with every question because the trusted base is
@@ -521,10 +737,11 @@ stderrLog msg = hPutStrLn stderr ("agentic: " <> T.unpack msg)
 -- constructors over a leaf whose artefact is untyped @Text@:
 --
 -- * 'GapUndecodable' — no counterpart there;
--- * 'GapTransportRefusal' — its @TurnFailed@ /and/ its @TurnExhausted@;
--- * 'GapEmptyOrProtocol' — its @TurnEmpty@.
+-- * 'GapTransportRefusal' — its @TurnFailed@;
+-- * 'GapEmptyOrProtocol' — its @TurnEmpty@;
+-- * 'GapExhausted' — its @TurnExhausted@.
 --
--- Two of those three lines are not one-to-one, and the reasons are the design:
+-- One of those four lines is not one-to-one, and the reason is the design:
 --
 -- * __'GapUndecodable' has no counterpart there and is the only one raised
 --   here.__ A leaf in @agent-functor@ returns @Text@ and there is nothing to
@@ -532,25 +749,27 @@ stderrLog msg = hPutStrLn stderr ("agentic: " <> T.unpack msg)
 --   can arrive, be a perfectly good turn, and still not be an answer. That is
 --   this language's own gap, and it is the one the decode loop is /about/.
 --
--- * __@TurnFailed@ and @TurnExhausted@ arrive as one gap.__ There they are
---   split because @TurnExhausted@ is wire-tagged (@errorKind == \"rate_limit\"@)
---   and is the one gap where the same question put to a /different/ model is
---   expected to succeed — which is fail-over, and fail-over needs a fallback
---   list on @served by@, which changes the printed program and is therefore
---   wave 3's ('failOverRefusal' says so by name). Splitting the gap before the
---   mechanism exists would be inventing a distinction with nothing on the other
---   side of it.
+-- * __@TurnFailed@ and @TurnExhausted@ used to arrive as one gap__, because
+--   what makes them worth telling apart is that the same question put to a
+--   /different/ model is expected to succeed — which is fail-over, and
+--   splitting the gap before that mechanism existed would have been inventing a
+--   distinction with nothing on the other side of it. D6 put something there,
+--   so 'GapExhausted' is now its own constructor: it is the one gap that marks
+--   its model spent for the rest of the run.
 --
--- The last two are the /transport's/ to raise and not the decode loop's, which
--- is why nothing in this module constructs them: \"the adapter refused\" and
--- \"the turn ended with nothing\" are observations about a turn, and by the
--- time bytes reach 'decodeEl' there is no turn left to observe. Nothing wires
--- the transports to these budgets yet: an adapter that can see a stop reason
--- ("Agentic.Acp" can; "Agentic.AgentDeck" cannot) is MEANT to read its budget
--- out of 'gapBudget' and answer with 'esRecover', and that wiring lands with
--- fail-over in wave 3 — recorded here so the vocabulary and its consumer
--- arrive in the order they were designed. Today only the decode loop consumes
--- these budgets.
+-- The last three are the /transport's/ to raise and not the decode loop's,
+-- which is why nothing in this module constructs them: \"the adapter refused\"
+-- and \"the turn ended with nothing\" are observations about a turn, and by the
+-- time bytes reach 'decodeEl' there is no turn left to observe.
+--
+-- __The transports are wired to these budgets__ (D6), through
+-- 'withTransportGaps': an adapter classifies its own named failures, and the
+-- gap is then priced by 'gapBudget', answered by 'esRecover', re-asked there
+-- while that answer is 'RetryHere', and otherwise handed to the fail-over walk.
+-- Which failure is which gap is the transport's to say, and the asymmetry
+-- between the two is real rather than a defect: "Agentic.Acp" can see a stop
+-- reason and so can raise 'GapEmptyOrProtocol'; "Agentic.AgentDeck" cannot, and
+-- names every one of its failures 'GapTransportRefusal'.
 data TurnGap
   = -- | Bytes arrived and 'decodeEl' could not read them at the question's
     -- code. One code wide (@Decode_eq_none@): only a @flag@ can produce it.
@@ -561,6 +780,19 @@ data TurnGap
   | -- | The turn ended cleanly and produced nothing usable, or ended in a way
     -- the protocol says is not an answer ('requiresCompletedTurn').
     GapEmptyOrProtocol
+  | -- | __This model has nothing left to spend.__ Split out of
+    -- 'GapTransportRefusal' by D6, which is when the distinction acquired
+    -- something on the other side of it: it is the one gap that says something
+    -- about the /model/ rather than about the turn, so it is the one that marks
+    -- the model spent for the rest of the run and is never re-asked here.
+    --
+    -- __Nothing raises it today__, and that is the same honesty
+    -- 'RetryHere' ships with: neither transport can see a wire-level rate-limit
+    -- tag (agent-deck reports no stop reason at all, and this client's ACP
+    -- errors carry no @errorKind@), so the constructor is declared, priced at
+    -- zero re-asks and consumed by the fail-over walk, waiting for the
+    -- transport that can tell.
+    GapExhausted
   deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | How a gap names itself in a warning and in a refusal.
@@ -569,21 +801,24 @@ gapWord = \case
   GapUndecodable -> "undecodable"
   GapTransportRefusal -> "transport-refusal"
   GapEmptyOrProtocol -> "empty-or-protocol"
+  GapExhausted -> "exhausted"
 
 -- | What to do about a gap: @agent-functor@'s @Recovery@, at the same three
 -- constructors and for the same reason — there are exactly three things an
 -- operator knows that the runner does not.
 --
--- 'FailOver' is __declared and not implemented__. It is here so the vocabulary
--- is complete where the mechanism waits: a policy may name it, and naming it
--- refuses the run with 'failOverRefusal', which says in as many words that
--- fail-over is wave 3's because a fallback list on @served by@ changes the
--- printed program. A constructor that refuses is honest; a taxonomy with a hole
--- in it is the thing that gets rediscovered expensively.
+-- 'FailOver' is __implemented__ (D6): it hands the gap to 'askOrMemo', which is
+-- the only layer that knows whether the chain has somewhere to go — exactly
+-- @Agent.Run.overChain@'s reading that it \"is the only layer that can answer
+-- it\". With somewhere to go it puts the same question to the next model; with
+-- nowhere to go it raises 'tgeFinal', which is what the run would have raised
+-- with no chain declared. So a policy that answers 'FailOver' at a question
+-- with no spare abandons in exactly the words it always did.
 data Recovery
   = -- | Put the same question again, to the same addressee.
     RetryHere
-  | -- | Put it to the next addressee in a fallback list. __Unimplemented.__
+  | -- | Put it to the next model in the question's chain, if it has one, and
+    -- otherwise stop exactly as 'Abandon' would.
     FailOver
   | -- | Stop. The run has no answer and will not invent one.
     Abandon
@@ -611,37 +846,126 @@ data GapAsk = GapAsk
 -- @RecoverAsk -> IO Recovery@ because its live path opens a modal and asks the
 -- operator; this one is pure, because the only answers this wave can give are
 -- read out of settings the operator wrote before the run started. An
--- interactive one is wave 3's, and it fits here by being an @IO@ of this.
+-- interactive one would fit here by being an @IO@ of this.
 type Recover = GapAsk -> Recovery
 
 -- | The default policy, and the one that reproduces this module's behaviour
--- from before the fork existed: re-ask while the gap's budget holds, then stop.
+-- from before the fork existed: re-ask while the gap's budget holds, then hand
+-- the gap on.
 --
--- Never 'FailOver'. Nothing in this runner can fail over, so nothing in this
--- runner chooses it.
+-- __'FailOver' and not 'Abandon' when the budget is spent__, since D6, and it
+-- is not a change of behaviour: the layer that knows whether there is anywhere
+-- to go is 'askOrMemo', and it degrades a fail-over with nowhere to go to
+-- exactly the abandonment this module has always ended on. That is
+-- @unattendedRecovery@'s own shape — \"fail over if the flow declared somewhere
+-- to fail over to, else halt\" — with the \"else halt\" moved to the one place
+-- that can decide it. An operator who wants a spare /not/ to be tried writes
+-- @const Abandon@.
 budgetedRecovery :: Recover
 budgetedRecovery ga
   | gaSpent ga < gaBudget ga = RetryHere
-  | otherwise = Abandon
+  | otherwise = FailOver
 
--- | The refusal a 'FailOver' answer earns, naming the wave that owes the
--- mechanism.
+-- ---------------------------------------------------------------------------
+-- A gap, as an exception the fail-over walk can read
+-- ---------------------------------------------------------------------------
+
+-- | A gap on its way past 'askOrMemo', carrying __what to raise if there is
+-- nowhere to go__.
 --
--- Not an invented answer and not a silent downgrade to 'Abandon': a policy that
--- asked for fail-over asked for a /different addressee/, and quietly giving it
--- the same one back is exactly the class of substitution the abandonment
--- message spends a paragraph refusing.
-failOverRefusal :: Addressee -> GapAsk -> Text
-failOverRefusal adr ga =
-  "fail-over was chosen for the "
-    <> gapWord (gaGap ga)
-    <> " gap at "
-    <> addresseeWord adr
-    <> ", and this runner cannot fail over: a fallback list on `served by` changes "
-    <> "the printed program, so the mechanism is wave 3's and only the vocabulary "
-    <> "is here. Answer RetryHere or Abandon. (evidence: '"
-    <> trimAscii (gaWhy ga)
-    <> "')"
+-- 'WorldIO' stays exactly as it is — @forall c. SCode c -> Q c -> IO (El c)@ —
+-- because widening it to let the answerer report /which/ model answered would
+-- hand the answerer the power to forge the trace, which is strictly worse than
+-- the forgery the type was designed to prevent. So a gap travels the one way a
+-- value of that type can carry a failure: as an exception. The candidate
+-- sequence stays a pure function of the question and the chain table, computed
+-- by this module, so the world can only answer or fail; it can never name who
+-- it was.
+--
+-- 'tgeFinal' is the whole of the \"exhaustion never escapes\" property: it is
+-- the exception the run would have raised with no chain declared, kept verbatim
+-- and re-raised unchanged when the chain is out of models. __With no alternates
+-- declared anywhere, every diagnostic in this package is byte-identical to the
+-- one before fail-over existed.__
+data TurnGapError = TurnGapError
+  { -- | which gap
+    tgeGap :: !TurnGap,
+    -- | the evidence, for the fail-over warning
+    tgeWhy :: !Text,
+    -- | what to raise when no candidate remains
+    tgeFinal :: !SomeException
+  }
+
+-- | The wrapper is transparent: what a reader sees is the failure itself, so a
+-- 'TurnGapError' that somehow escapes uncaught reads exactly as the error it
+-- carries.
+instance Show TurnGapError where
+  show = show . tgeFinal
+
+instance Exception TurnGapError where
+  displayException = displayException . tgeFinal
+
+-- | Raise a gap: the failure this question produced, and what to raise for it
+-- when the chain has nowhere left to go.
+raiseGap :: TurnGap -> Text -> IOError -> IO a
+raiseGap g why final = throwIO (TurnGapError g why (toException final))
+
+-- | Put a question through a transport under the run policy: a transport-level
+-- failure becomes a gap, is priced by 'gapBudget', answered by 'esRecover', and
+-- re-asked __here__ while that answer is 'RetryHere' — then handed to the
+-- fail-over walk, which either moves to the next model or raises what the
+-- transport itself threw.
+--
+-- This is the wiring the failure vocabulary was declared for and did not have:
+-- before it, an adapter that could see a stop reason abandoned where the
+-- failure was raised and the budgets in 'ExecSettings' described only the
+-- decode loop. A transport passes its own classifier, because only it knows
+-- which of its named failures is which gap — @agent-deck@ reports no stop
+-- reason, so it can name none of them 'GapEmptyOrProtocol', and that asymmetry
+-- is the difference between the two engines rather than a defect of this
+-- function.
+--
+-- An exception the classifier does not claim is __rethrown untouched__: a
+-- failure that is not a gap is not the recovery fork's to answer, and a runner
+-- that swallowed it would re-run broken work on a second, pricier model and
+-- bill twice for hiding the defect.
+withTransportGaps ::
+  forall c a.
+  ExecSettings ->
+  -- | which gap this transport's failure is, and the evidence; 'Nothing' for a
+  -- failure that is not a gap at all
+  (SomeException -> Maybe (TurnGap, Text)) ->
+  SCode c ->
+  Q c ->
+  IO a ->
+  IO a
+withTransportGaps st classify c q act0 = go 0
+  where
+    go :: Int -> IO a
+    go spent =
+      try act0 >>= \case
+        Right a -> pure a
+        Left (e :: SomeException)
+          | Just (_ :: SomeAsyncException) <- fromException e -> throwIO e
+          | Just tge <- fromException e -> throwIO (tge :: TurnGapError)
+          | otherwise -> case classify e of
+              Nothing -> throwIO e
+              Just (g, why) ->
+                let ga = GapAsk g spent (gapBudget st g) why
+                 in case esRecover st ga of
+                      RetryHere -> do
+                        esLog st $
+                          gapWord g
+                            <> " gap at "
+                            <> addresseeWord (qAddressee q)
+                            <> " for a "
+                            <> codeWord (fromSCode c)
+                            <> " ("
+                            <> trimAscii why
+                            <> "); asking again"
+                        go (spent + 1)
+                      Abandon -> throwIO e
+                      FailOver -> throwIO (TurnGapError g why e)
 
 -- ---------------------------------------------------------------------------
 -- The run policy
@@ -725,6 +1049,11 @@ gapBudget st = \case
   GapUndecodable -> max 0 (esRetryUndecodable st)
   GapTransportRefusal -> max 0 (esRetryTransportRefusal st)
   GapEmptyOrProtocol -> max 0 (esRetryEmptyOrProtocol st)
+  -- Not a settings field, and deliberately: re-asking a model that has said it
+  -- has nothing left to spend cannot help, so the budget is zero by
+  -- construction rather than by an operator's choice. What /can/ help is a
+  -- different model, which is the fail-over walk.
+  GapExhausted -> 0
 
 -- | @Exec.attemptWith@ (@Exec.lean:913@): ask, decode, and on a failure to decode
 -- ask again — @n + 1@ attempts in all, the second and later ones carrying the
@@ -844,8 +1173,11 @@ askDecoding lg retries c =
 --    wrote instead of blocking on a person who is not there.
 --
 -- 2. __The recovery fork.__ 'esRecover' decides each gap. 'RetryHere' re-asks
---    inside the loop; 'Abandon' falls through to (3); 'FailOver' refuses the
---    run with 'failOverRefusal', which names wave 3.
+--    inside the loop; 'Abandon' falls through to (3); 'FailOver' also falls
+--    through to (3), and then raises the abandonment as a 'TurnGapError' so
+--    that 'askOrMemo' may put the same question to the next model in its chain
+--    — with nowhere to go it raises the very same 'ioError', which is what
+--    keeps this path byte-identical to the one before fail-over existed.
 --
 -- 3. __The loud arm.__ If 'esLoudArm' is set and the code is @flag@ — the only
 --    code that can be undecodable at all — a spent question takes the
@@ -874,14 +1206,12 @@ askDecodingWith st c q say0 = do
   say <- standingSay
   attemptRecovering st c say >>= \case
     Right a -> pure a
-    Left (ga, answer) -> case answer of
-      FailOver -> ioError . userError . T.unpack $ failOverRefusal (qAddressee q) ga
-      -- 'RetryHere' cannot arrive: 'attemptRecovering' consumes it and asks
-      -- again, so the only answers that leave the loop are the two that end the
-      -- question. Written as a fall-through rather than a partial match,
-      -- because an unreachable branch that abandons a run costs nothing and a
-      -- pattern-match failure in the interpreter costs the run.
-      _ -> spent ga
+    -- 'RetryHere' cannot arrive: 'attemptRecovering' consumes it and asks
+    -- again, so the only answers that leave the loop are the two that end the
+    -- question here. 'FailOver' and 'Abandon' differ only in whether the
+    -- fail-over walk is allowed to try another model, and the loud arm — which
+    -- is an answer, not a gap — is reached before either.
+    Left (ga, answer) -> spent ga answer
   where
     -- The operator's standing answer, in place of the transport, for a person
     -- nobody is standing next to.
@@ -901,9 +1231,14 @@ askDecodingWith st c q say0 = do
 
     -- A question whose re-asks are spent: the loud arm if the operator named
     -- one and the code can take it, else the abandonment this module has always
-    -- ended on.
-    spent :: GapAsk -> IO (El c)
-    spent ga = case (esLoudArm st, c) of
+    -- ended on — raised as a __gap__ when the policy said 'FailOver', so that
+    -- 'askOrMemo' may put the same question to the next model in its chain.
+    -- Decode exhaustion is exactly \"this addressee produced nothing usable and
+    -- asking again did not help\", which is a gap and not a fact about the
+    -- question; its message survives verbatim as 'tgeFinal', so a question with
+    -- no spare abandons in the very words it always did.
+    spent :: GapAsk -> Recovery -> IO (El c)
+    spent ga answer = case (esLoudArm st, c) of
       (Just arm, SFlag) -> do
         esLog st $
           "no readable flag from "
@@ -922,19 +1257,29 @@ askDecodingWith st c q say0 = do
             <> "')."
         pure arm
       _ ->
-        ioError . userError . T.unpack $
-          "no readable "
-            <> codeWord (fromSCode c)
-            <> " from "
-            <> addresseeWord (qAddressee q)
-            <> " after "
-            <> T.pack (show (gaSpent ga + 1))
-            <> " attempts; last reply: '"
-            <> trimAscii (gaWhy ga)
-            <> "' (prompt: '"
-            <> qPrompt q
-            <> "'). The run is abandoned: recording an answer nobody gave would be "
-            <> "indistinguishable, in the table, from one they did."
+        let final =
+              userError . T.unpack $
+                "no readable "
+                  <> codeWord (fromSCode c)
+                  <> " from "
+                  <> addresseeWord (qAddressee q)
+                  <> " after "
+                  <> T.pack (show (gaSpent ga + 1))
+                  <> " attempts; last reply: '"
+                  <> trimAscii (gaWhy ga)
+                  <> "' (prompt: '"
+                  <> qPrompt q
+                  <> "'). The run is abandoned: recording an answer nobody gave would be "
+                  <> "indistinguishable, in the table, from one they did."
+            why =
+              "no readable "
+                <> codeWord (fromSCode c)
+                <> " after "
+                <> T.pack (show (gaSpent ga + 1))
+                <> " attempts"
+         in case answer of
+              FailOver -> raiseGap (gaGap ga) why final
+              _ -> ioError final
 
 -- ---------------------------------------------------------------------------
 -- The scripted world

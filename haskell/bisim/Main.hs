@@ -32,7 +32,7 @@
 --   never calls it.
 --
 -- [P3 — refusal parity] For each generated 'RawProgram': if the oracle
---   refuses with one of the five term-level guards, 'guardCheck' must name
+--   refuses with one of the six term-level guards, 'guardCheck' must name
 --   the same guard and the same @n@; if it accepts, 'guardCheck' must be
 --   'Nothing' and 'askCounts' must match the reply's counts. A refusal
 --   classified @other@ is __not a comparand__ (@connection.md@ §3.6): those
@@ -82,6 +82,7 @@ import Control.Exception
   )
 import Control.Monad (forM_, unless)
 import Data.Aeson (Value (..), object, toJSON, (.=))
+import Data.Aeson.Types (Pair)
 import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString as BS
@@ -128,12 +129,12 @@ import Agentic.Oracle
     oracleErrorText,
     oraclePing,
     oracleProgram,
-    oracleString,
+    oracleStringOf,
     withOracle,
   )
 import Agentic.Plan (Level (..), level)
 import Agentic.Raw (RawProgram)
-import Agentic.Text (stringOp)
+import Agentic.Text (stringOpOf)
 
 -- ---------------------------------------------------------------------------
 -- Options
@@ -348,43 +349,75 @@ propBuilder oracle seed n =
 -- P2 — string parity
 -- ---------------------------------------------------------------------------
 
--- | Every operation the string request kind offers, with every code the two
--- coded operations take: eleven questions per text.
-stringOps :: [(Text, Maybe Text)]
-stringOps =
-  [("norm", Nothing), ("words", Nothing), ("decodeVerdict", Nothing)]
-    ++ [ (op, Just code)
-       | op <- ["decode", "say"],
-         code <- ["text", "verdict", "flag", "receipt"]
+-- | Every string-layer question this property puts about one text, as the
+-- __fields of the request object__ rather than as three arguments.
+--
+-- The object and not a triple, because wave three's ops carry fields the three
+-- original ones did not (D2's @fence@ takes a @name@, D7's @matchGlob@ a
+-- @pattern@ and @decide@ a @decider@ and its @needles@), and because the
+-- oracle dispatches off the whole object. One value is sent to the oracle and
+-- handed to 'stringOpOf' here, so the two sides are answering the very same
+-- question.
+--
+-- Twenty-four per text: the eleven the three original ops and the two coded
+-- ones offer, the three low-level D7 primitives (@bare@, @fields@,
+-- @headerPaths@ — which exist so that a @decide@ divergence is /localizable/),
+-- three globs, three fences and four deciders.
+stringRequests :: [[Pair]]
+stringRequests =
+  [ ["op" .= t "norm"],
+    ["op" .= t "words"],
+    ["op" .= t "decodeVerdict"],
+    ["op" .= t "bare"],
+    ["op" .= t "fields"],
+    ["op" .= t "headerPaths"]
+  ]
+    ++ [ ["op" .= op, "code" .= code]
+       | op <- [t "decode", t "say"],
+         code <- [t "text", t "verdict", t "flag", t "receipt"]
        ]
+    ++ [["op" .= t "matchGlob", "pattern" .= g] | g <- globs]
+    ++ [["op" .= t "fence", "name" .= nm] | nm <- fences]
+    ++ [ ["op" .= t "decide", "decider" .= d, "needles" .= ws]
+       | (d, ws) <- deciders
+       ]
+  where
+    t :: Text -> Text
+    t = id
+    globs = [t "*.hs", t "*", t "a/*/?.hs"]
+    fences = [t "alpha", t "beta", t "a.b-c_d"]
+    deciders =
+      [ (t "lastNonEmptyLineIs", [t "WORK COMPLETE", t "work remains"]),
+        (t "containsLine", [t "WORK COMPLETE"]),
+        (t "anyLineStartsWith", [t "\10007 ", t "FACTS PATHS UNRESOLVED"]),
+        (t "anyPathMatches", [t "*.hs", t "*.lhs", t "*.cabal"])
+      ]
 
 propString :: Oracle -> Int -> Int -> IO Tally
 propString oracle seed n =
-  runProperty "P2" pairs $ \(text, (op, mcode)) -> do
-    reply <- oracleString oracle op mcode text
-    ours <- forced (stringOp op mcode text)
+  runProperty "P2" pairs $ \(text, fields0) -> do
+    let fields = fields0 ++ ["text" .= text]
+        req = object ["string" .= object fields]
+    reply <- oracleStringOf oracle fields
+    ours <- forced (stringOpOf (object fields))
     pure $ case ours of
       Left err ->
-        Diverged ("this implementation raised: " <> err) [("request", ask op mcode text)]
+        Diverged ("this implementation raised: " <> err) [("request", req)]
       Right ourReply
         | Just d <- firstDiffWith "oracle" "haskell" reply ourReply ->
             Diverged
-              (label op mcode <> " differs at " <> d)
-              [("request", ask op mcode text), ("oracle", reply), ("haskell", ourReply)]
+              ("the string layer differs at " <> d)
+              [("request", req), ("oracle", reply), ("haskell", ourReply)]
         | otherwise -> Agreed
   where
-    pairs = [(t, o) | t <- draw seed n maxTextSize genTrapText, o <- stringOps]
-    label op mcode = op <> maybe "" ("/" <>) mcode
-    ask op mcode text =
-      object
-        ["string" .= object (["op" .= op] ++ maybe [] (\c -> ["code" .= c]) mcode ++ ["text" .= text])]
+    pairs = [(x, o) | x <- draw seed n maxTextSize genTrapText, o <- stringRequests]
 
 -- ---------------------------------------------------------------------------
 -- P3 — refusal parity
 -- ---------------------------------------------------------------------------
 
--- | The oracle's spelling of the five term-level guards
--- (@Conformance.lean@'s @classify@). Its sixth tag, @other@, is handled
+-- | The oracle's spelling of the six term-level guards
+-- (@Conformance.lean@'s @classify@). Its seventh tag, @other@, is handled
 -- before this table is consulted.
 guardNames :: [(Text, Guard)]
 guardNames =
@@ -392,7 +425,8 @@ guardNames =
     ("revisionBound", RevisionBound),
     ("questionBudget", QuestionBudget),
     ("servedBy", ServedBy),
-    ("dupFunction", DupFunction)
+    ("dupFunction", DupFunction),
+    ("deciderEmpty", DeciderEmpty)
   ]
 
 propRefusal :: Oracle -> Int -> Int -> IO Tally
@@ -416,7 +450,7 @@ propRefusal oracle seed n =
       Refused r -> refusalCase req r raw
       Checked -> checkedCase req reply raw
 
--- | The oracle refused. Either it named one of the five guards — in which
+-- | The oracle refused. Either it named one of the six guards — in which
 -- case 'guardCheck' owes the same guard and the same @n@ — or it named
 -- @other@, which is a diagnostic of the typing judgment and not a comparand.
 refusalCase :: Value -> Value -> RawProgram -> Verdict
@@ -558,7 +592,7 @@ summarize ts = do
     forM_ (M.toList (tallySkips t)) $ \(reason, k) ->
       TIO.putStrLn ("bisim: " <> tallyName t <> " skipped " <> tshow k <> ": " <> reason)
   -- §3.4's complaint, made out loud: a refusal-path generator whose output is
-  -- almost entirely `other` is not reaching the five guards it exists to test,
+  -- almost entirely `other` is not reaching the six guards it exists to test,
   -- and the coverage it reports is not the coverage anyone wanted. This is a
   -- statement about the generator, not a conformance failure, so it warns
   -- rather than failing.
@@ -574,7 +608,7 @@ summarize ts = do
           <> " of "
           <> tshow n
           <> " draws were refused `other`, over 90% — the generator is too \
-             \wild to reach the five guards, and this property is not \
+             \wild to reach the six guards, and this property is not \
              \testing what it claims"
   if total == 0 then exitSuccess else exitFailure
   where

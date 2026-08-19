@@ -1,0 +1,10 @@
+{"request":
+ {"string":
+  {"text": "İSTANBUL\n",
+   "op": "decide",
+   "needles": ["İSTANBUL"],
+   "decider": "containsLine"}},
+ "reply": {"result": true},
+ "oracleVersion": 1,
+ "name":
+ "decide: the Turkish dotted capital is ASCII-folded on both sides, i.e. not at all"}

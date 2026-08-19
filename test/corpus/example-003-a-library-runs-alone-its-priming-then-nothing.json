@@ -54,7 +54,7 @@
             {"interp": {"name": "shape"}},
             {"lit": {"s": "\nReply with a unified diff only."}}],
            "pos": {"line": 12, "col": 8},
-           "model": "deep"}}},
+           "model": {"primary": "deep", "alternates": []}}}},
         "pos": {"line": 12, "col": 3},
         "ann": null}}],
      "answerPos": {"line": 19, "col": 3},

@@ -53,6 +53,7 @@
        "rest":
        {"caseResult":
         {"x": "r",
+         "unsettledName": "final",
          "unsettled":
          {"act":
           {"rest": {"empty": {"pos": {"line": 8, "col": 22}}},

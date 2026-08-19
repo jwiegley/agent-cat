@@ -111,6 +111,7 @@ module Agentic.AgentDeck
 
     -- * The answering service
     worldOfDeck,
+    worldOfDeckWith,
     sayDeck,
 
     -- * What goes on the wire
@@ -130,12 +131,20 @@ module Agentic.AgentDeck
     -- * Failure
     DeckError (..),
     renderDeckError,
+    deckGap,
   )
 where
 
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
-import Control.Exception (Exception, IOException, throwIO, try)
+import Control.Exception
+  ( Exception,
+    IOException,
+    SomeException,
+    fromException,
+    throwIO,
+    try,
+  )
 import Control.Monad (void, when)
 import Data.Aeson (Value (..))
 import qualified Data.Aeson as A
@@ -161,15 +170,19 @@ import System.Process
 import System.Timeout (timeout)
 
 import Agentic.Exec
-  ( WorldIO (..),
+  ( ExecSettings (esLog, esRetryUndecodable),
+    TurnGap (GapTransportRefusal),
+    WorldIO (..),
     addresseeWord,
     answerSpec,
-    askDecoding,
+    askDecodingWith,
     codeWord,
+    defaultExecSettings,
     defaultRetries,
     oneLine,
     stderrLog,
     trimAscii,
+    withTransportGaps,
   )
 import Agentic.Plan
   ( Q (..),
@@ -434,8 +447,33 @@ renderQ c q =
 -- and that is owed to the operator whether or not they asked for transport
 -- chatter.
 worldOfDeck :: DeckConfig -> WorldIO
-worldOfDeck cfg = WorldIO $ \c q ->
-  askDecoding stderrLog defaultRetries c q (sayDeck cfg c q)
+worldOfDeck = worldOfDeckWith settings
+  where
+    settings =
+      defaultExecSettings {esLog = stderrLog, esRetryUndecodable = defaultRetries}
+
+-- | 'worldOfDeck' under an operator's 'Agentic.Exec.ExecSettings'.
+--
+-- __This is where the failure vocabulary meets this transport.__ Every
+-- 'DeckError' is a 'GapTransportRefusal': the agent-deck CLI reports no stop
+-- reason, so this transport can never name a turn that ended cleanly with
+-- nothing — that distinction is @--engine acp@'s, and the asymmetry is the
+-- difference between the two engines rather than a defect here. The gap is
+-- priced by @gapBudget@, answered by @esRecover@, re-asked here while that
+-- answer is @RetryHere@, and otherwise handed to the fail-over walk, which
+-- either puts the same question to the next model in its chain or raises the
+-- 'DeckError' itself — so with no chain declared a run fails in exactly the
+-- words it always did.
+worldOfDeckWith :: ExecSettings -> DeckConfig -> WorldIO
+worldOfDeckWith st cfg = WorldIO $ \c q ->
+  withTransportGaps st deckGap c q (askDecodingWith st c q (sayDeck cfg c q))
+
+-- | Which gap a 'DeckError' is, and the evidence — @Nothing@ for an exception
+-- that is not this transport's to classify, which is rethrown untouched.
+deckGap :: SomeException -> Maybe (TurnGap, Text)
+deckGap e = case fromException e of
+  Just de -> Just (GapTransportRefusal, renderDeckError de)
+  Nothing -> Nothing
 
 -- | Lean's @Say@ (@Exec.lean:904@) at this transport: render the question,
 -- append what the caller wants appended, send it, wait for the session to

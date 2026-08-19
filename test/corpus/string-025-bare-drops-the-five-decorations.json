@@ -1,0 +1,4 @@
+{"request": {"string": {"text": "**`WORK COMPLETE`.** ", "op": "bare"}},
+ "reply": {"result": "WORK COMPLETE"},
+ "oracleVersion": 1,
+ "name": "bare drops the five decoration characters from both ends"}

@@ -1,0 +1,4 @@
+{"request": {"string": {"text": "x.lhs", "pattern": "*.hs", "op": "matchGlob"}},
+ "reply": {"result": false},
+ "oracleVersion": 1,
+ "name": "matchGlob: *.hs does not match x.lhs"}

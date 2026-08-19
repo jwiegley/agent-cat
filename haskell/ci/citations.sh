@@ -23,7 +23,7 @@
 #   2. `N` is within that file's line count.
 #
 # It checks the *continuation* form too — a bare `@:N@`, which the tree uses
-# for a second line of the file just cited (`@Exec.lean:524@ … and @:531@`).
+# for a second line of the file just cited (`@Exec.lean:523@ … and @:530@`).
 # A continuation resolves against the nearest `X.lean` named before it in the
 # same file, which is how a reader resolves it, and it is the form that rots
 # most quietly: it carries no filename, so a grep for a moved file never sees
@@ -109,7 +109,7 @@ while IFS= read -r hit; do
   [ -n "$hit" ] || continue
   total=$((total + 1))
 
-  # `./src/Agentic/Exec.hs:55:Exec.lean:619` — the last two fields are the
+  # `./src/Agentic/Exec.hs:55:Exec.lean:618` — the last two fields are the
   # citation, everything before them is where it was written.
   cited="${hit##*:}"                     # 619
   rest="${hit%:*}"                       # ./src/Agentic/Exec.hs:55:Exec.lean

@@ -1,0 +1,5 @@
+{"request":
+ {"string": {"text": "---\n+++\n--- a/Foo.hs\n", "op": "headerPaths"}},
+ "reply": {"result": ["---", "a/Foo.hs"]},
+ "oracleVersion": 1,
+ "name": "headerPaths: a bare markdown rule is not a header"}

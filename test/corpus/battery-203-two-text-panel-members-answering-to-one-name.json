@@ -1,0 +1,41 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"bind":
+    {"x": "doc",
+     "src":
+     {"rhs":
+      {"r":
+       {"panelText":
+        {"pos": {"line": 2, "col": 16},
+         "members":
+         [{"name": "alpha",
+           "ask":
+           {"target": {"draw": 0, "addressee": {"model": {"id": "a"}}},
+            "prompt": [{"lit": {"s": "BODY-A"}}],
+            "pos": {"line": 3, "col": 5},
+            "model": null}},
+          {"name": "alpha",
+           "ask":
+           {"target": {"draw": 0, "addressee": {"model": {"id": "b"}}},
+            "prompt": [{"lit": {"s": "BODY-B"}}],
+            "pos": {"line": 4, "col": 5},
+            "model": null}}]}}}},
+     "rest": {"empty": {"pos": {"line": 6, "col": 1}}},
+     "pos": {"line": 2, "col": 3},
+     "ann": "text"}},
+   "fns": []}},
+ "reply":
+ {"refused":
+  {"pos": {"line": 4, "col": 5},
+   "n": null,
+   "message":
+   "two members of a text panel answer to one name, and the names of a fenced document are its key; rename one",
+   "guard": "other",
+   "excerpt": "alpha"}},
+ "oracleVersion": 1,
+ "name": "two text panel members answering to one name"}

@@ -59,6 +59,7 @@ module Agentic.Oracle
     -- * The requests
     oracleProgram,
     oracleString,
+    oracleStringOf,
     oraclePing,
 
     -- * Failure
@@ -260,9 +261,22 @@ oracleProgram o prog ws =
 -- returns whole.
 oracleString :: Oracle -> Text -> Maybe Text -> Text -> IO Value
 oracleString o op mcode text =
-  request o ["string" .= object (["op" .= op] ++ code ++ ["text" .= text])]
+  oracleStringOf o (["op" .= op] ++ code ++ ["text" .= text])
   where
     code = maybe [] (\c -> ["code" .= c]) mcode
+
+-- | Ask one string-layer question written out in full: the fields of the
+-- @{"string": …}@ object, whatever they are.
+--
+-- Wave three's ops carry fields the three original ones did not — @pattern@ for
+-- @matchGlob@, @name@ for @fence@, @decider@ and @needles@ for @decide@ — and
+-- the oracle dispatches off the whole object (@Conformance.stringOpOf@). So the
+-- caller hands over the object, and the Haskell side computes its own answer
+-- with @Agentic.Text.stringOpOf@ from the very same value: __one request, two
+-- readings of it__, which is what makes a divergence a divergence rather than a
+-- disagreement about what was asked.
+oracleStringOf :: Oracle -> [Pair] -> IO Value
+oracleStringOf o fields = request o ["string" .= object fields]
 
 -- | Liveness: 'True' when the oracle answers @{"pong": true}@.
 --

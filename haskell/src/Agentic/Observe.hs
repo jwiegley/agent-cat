@@ -1,6 +1,6 @@
 -- | The observation of a checked program: the oracle's reply, assembled.
 --
--- This is the reply half of @Conformance.lean:240@'s @observe@, lifted out of
+-- This is the reply half of @Conformance.lean:252@'s @observe@, lifted out of
 -- the tier1 runner and into the library so that every consumer of the Lean
 -- oracle — the rebuilt-case runner (@tier1@) and the live bisimulation
 -- (@bisim@) — computes the Haskell side of the comparison in exactly one way.

@@ -64,9 +64,8 @@ def entry (name : String) (request : Json) (reply : Json) (oracleVersion : Json)
 because a request this cannot read is a corpus file nothing is checking. -/
 def replyFor (request : Json) : Except String Json := do
   if let .ok sj := request.getObjVal? "string" then
-    let op ← (getStr? sj "op").elim (.error "a string request needs an `op`") .ok
-    let text := (getStr? sj "text").getD ""
-    .ok (stringOp op (getStr? sj "code") text)
+    let _ ← (getStr? sj "op").elim (.error "a string request needs an `op`") .ok
+    .ok (stringOpOf sj)
   else if let .ok pj := request.getObjVal? "program" then
     match fromJson? (α := RawProgram) pj with
     | .error e => .error s!"bad program: {e}"

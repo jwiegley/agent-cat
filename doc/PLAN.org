@@ -1841,7 +1841,7 @@ work is finished.
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-18 Tue 15:55]
-:MODIFIED: [2026-08-18 Tue 21:24]
+:MODIFIED: [2026-08-18 Tue 23:55]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -1895,6 +1895,13 @@ doc/research/isaac-workflows.md §6 holds ten yes/no decisions from the incite/a
     "author": "johnw",
     "text": "WAVE 1 COMPLETE and pushed (68d6f1b designs, a39c4f3 implementation, b212614 fess fixes). Fess audit: FINDINGS(6), all verified real, all folded - the sixth bare reference (in F4's blind spot), the not-yet-wired transport-budget docstring, 57->58, the citations gate hardened (md/sh scan + 200 floor + swallow removed; 234 checked), the loud-arm warning now owns its safety honestly, and the D6/D7 policies gained ci/policies.sh (7 probes: bills + thrown wording + logged wording). Auditor's method note on the record: it caught and corrected two of its own vacuous checks. WAVE 2 dispatching: D1+D8 from doc/research/dslate-design/d1-d8-calls-and-inputs.md, single-owner briefs per the collision lessons. Attempt counters: none active.",
     "created_at": "2026-08-19T04:24:43Z"
+  },
+  {
+    "id": 137,
+    "issue_id": "acat-isaac-decisions-vtt",
+    "author": "johnw",
+    "text": "WAVE 2 COMPLETE and pushed (e47c4c1 + 5f22d09). Fess audit FINDINGS(4), all omissions not falsehoods, all folded; two verification gaps became permanent gates: the three frozen call vectors are tier1 cases now (24/24) and the surface refusals are policy probes (11 checks). Independent verifier corroborated D1's pricing rule via its own oracle probe and rewrote the call vectors in the new surface (up-to-alpha SAME, replies whole SAME). review-lite re-pinned with the movement predicted then verified twice (D1 moves nothing; D8 removes exactly the fetch leaf). WAVE 3 dispatching: the single regeneration event - D3 (revising's yielding Unsettled, refreeze), D4 (revisingOn), D2 (panelText), D7 (four deciders), D5 (world-authored receipts), D6 fail-over - from the three reviewed designs, Lean first, regenerate ONCE, movement gated by d3-d4's predicted table. Attempt counters: none active.",
+    "created_at": "2026-08-19T06:55:58Z"
   }
 ]
 #+end_src

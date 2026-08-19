@@ -63,6 +63,7 @@
            "rest":
            {"caseResult":
             {"x": "r",
+             "unsettledName": "x",
              "unsettled": {"empty": {"pos": {"line": 10, "col": 24}}},
              "settledName": "x",
              "settled":

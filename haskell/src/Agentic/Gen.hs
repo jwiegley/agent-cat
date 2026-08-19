@@ -113,9 +113,11 @@ import Agentic.Builder
     argNameI,
     argWords,
     askModel,
+    askModelFallingBack,
     askModelServed,
     askPerson,
     askTool,
+    askToolRunning,
     bindAsBI,
     bindAsI,
     bindI,
@@ -123,6 +125,7 @@ import Agentic.Builder
     callStmt,
     callV,
     caseVerdictI,
+    decideI,
     draw,
     endB,
     function,
@@ -133,9 +136,11 @@ import Agentic.Builder
     noParams,
     one,
     panel,
+    panelText,
     param,
     program,
     revisingCaseI,
+    revisingOnCaseI,
     stop,
   )
 import Agentic.Guards (askCounts)
@@ -147,7 +152,7 @@ import Agentic.Plan
     tagValues,
   )
 import Agentic.Raw
-  ( Addressee (AddrModel, AddrPerson, AddrTool),
+  ( Addressee (AddrModel, AddrPerson, AddrTool, AddrToolExec),
     Chunk (Interp, Lit),
     Pos (Pos),
     Prompt,
@@ -157,8 +162,11 @@ import Agentic.Raw
     RawBodyStmt (BodyAct, BodyBind, BodyCallS),
     RawFn (..),
     RawProgram (..),
-    RawRhs (RhsAsk, RhsCall, RhsPanel),
-    RawSource (SrcRevising, SrcRhs),
+    RawRhs (RhsAsk, RhsCall, RhsDecide, RhsPanel, RhsPanelText),
+    Served (Served),
+    TextMember (TextMember),
+    servedBy1,
+    RawSource (SrcRevising, SrcRevisingOn, SrcRhs),
     RawTarget (RawTarget),
   )
 import Agentic.World
@@ -208,7 +216,7 @@ eqCode _ _ = Nothing
 
 -- | The three kinds a generated binding may take. @receipt@ is deliberately
 -- absent: a receipt has no text of its own, nothing branches on one, and a
--- @-> receipt@ function's answer "has nowhere to go" (@Check.lean:582@), so a
+-- @-> receipt@ function's answer "has nowhere to go" (@Check.lean:774@), so a
 -- binding at @ack@ is a shape the language admits and no honest program writes.
 bindableCodes :: [Code]
 bindableCodes = [CodeText, CodeVerdict, CodeFlag]
@@ -377,6 +385,26 @@ toolIds = ["cat", "log", "apply", "lint", "t"]
 personIds :: [Text]
 personIds = ["owner", "reviewer", "o"]
 
+-- | The commands a generated @toolExec@ addressee runs (D5).
+--
+-- Never run by anything the bisimulation touches — the kernel executes nothing,
+-- ever, because a pure @World@ dispatches on the code and never on the
+-- addressee — so what these exercise is the codec, the ordering key and the
+-- memo table: two commands at one tool id are two questions.
+execCmds :: [Text]
+execCmds = ["nix", "true", "false", "cabal", "gh"]
+
+-- | …and the arguments beside them, including the empty argv, which is the
+-- shape a bare command takes.
+genExecArgs :: Gen [Text]
+genExecArgs =
+  frequency
+    [ (2, pure []),
+      (3, pure ["flake", "check"]),
+      (2, pure ["build"]),
+      (1, pure ["pr", "list", "--json", "number"])
+    ]
+
 -- | One question. @served by@ is offered __only__ on a model addressee, which
 -- is 'Agentic.Builder.askModelServed'\'s whole point: @askGuard@\'s refusal is
 -- unrepresentable rather than avoided.
@@ -387,7 +415,23 @@ genAsk ns = do
     frequency
       [ (6, (\i -> askModel i ws) <$> elements modelIds),
         (2, (\i m -> askModelServed i m ws) <$> elements modelIds <*> elements modelIds),
+        -- D6: a pin with a spare. It must reach the typed generator too, or the
+        -- bisimulation never puts a chained `served by` to the oracle.
+        ( 1,
+          (\i m sp -> askModelFallingBack i m [sp] ws)
+            <$> elements modelIds
+            <*> elements modelIds
+            <*> elements modelIds
+        ),
         (4, (\i -> askTool i ws) <$> elements toolIds),
+        -- D5: a tool the runner runs. Priced exactly as a tool, because the
+        -- addressee is priced nowhere.
+        ( 2,
+          (\i cmd args -> askToolRunning i cmd args ws)
+            <$> elements toolIds
+            <*> elements execCmds
+            <*> genExecArgs
+        ),
         (2, (\i -> askPerson i ws) <$> elements personIds)
       ]
   d <- frequency [(6, pure 0), (2, pure 1), (1, pure 2), (1, pure 3)]
@@ -401,7 +445,7 @@ genAsk ns = do
 -- arguments can be filled from this scope.
 --
 -- A @-> receipt@ function is excluded: binding its answer is refused by name
--- (@Check.lean:582@), and it reaches a program only through
+-- (@Check.lean:774@), and it reaches a program only through
 -- 'Agentic.Builder.callStmt' and 'Agentic.Builder.callSB'.
 callAlt :: forall c s. Live s -> SCode c -> GFn -> Maybe (Gen (Rhs s c))
 callAlt ns c (GFn _ pl r f) = case r of
@@ -568,9 +612,10 @@ genBlk fns fuel rd br ns
             : actAlt
             : annotatedBindAlt
             : panelBindAlt
+            : panelTextBindAlt
             : bindThenActAlt
             : knownHereAlt
-            : (branchAlts ++ callAlts)
+            : (branchAlts ++ callAlts ++ decideAlts)
         )
   where
     -- Everything that puts a `case` node in the term. Held back on one draw in
@@ -614,6 +659,39 @@ genBlk fns fuel rd br ns
           rst <- genBlk fns (fuel - 1) rd br (pushLive x SVerdict ns)
           pure (bindI x (panel (neFromList ms)) rst)
       )
+
+    -- A text panel's kind is positional too (D2), and its members carry the
+    -- labels the fence writes. The labels are drawn from a small pool and
+    -- deduplicated, because two members answering to one name is a refusal and
+    -- this generator draws only well-formed programs.
+    panelTextBindAlt =
+      ( 3,
+        do
+          k <- choose (1 :: Int, 3)
+          ms <- vectorOf k (genAsk ns)
+          let x = freshFor "x" ns
+              labels = take k ["alpha", "beta", "gamma"]
+          rst <- genBlk fns (fuel - 1) rd br (pushLive x SText ns)
+          pure (bindI x (panelText (neFromList (zip labels ms))) rst)
+      )
+
+    -- A decider (D7) over a live `text` binding: no question, no node, and a
+    -- flag the rest of the block may branch on. One per live text name.
+    decideAlts = concatMap alt ns
+      where
+        alt (Bound x c v) = case c of
+          SText ->
+            [ ( 3,
+                do
+                  d <- elements [minBound .. maxBound]
+                  k <- choose (1 :: Int, 2)
+                  ws <- neFromList <$> vectorOf k genNeedle
+                  let f = freshFor "f" ns
+                  rst <- genBlk fns (fuel - 1) rd br (pushLive f SFlag ns)
+                  pure (bindI f (decideI d x v ws) rst)
+              )
+            ]
+          _ -> []
 
     -- Unannotated, grounded by the very next statement: a hole reads as `text`.
     bindThenActAlt =
@@ -703,18 +781,24 @@ genBlk fns fuel rd br ns
                       resname = freshFor "r" ns
                       nsC = pushLive carrier sc ns
                       nsR = pushLive rname SVerdict nsC
+                      -- Both exits bind the candidate (D3), and the generator
+                      -- passes the settled name twice — which is what the
+                      -- authoring surface does and what every frozen entry
+                      -- carries, so a generated program stays in the shape the
+                      -- corpus is in.
                       nsS = pushLive sname sc ns
                       sub = max 0 ((fuel - 1) `div` (fromInteger n + 2))
                   review <- genRhs fns nsC SVerdict
                   amend <- genRhs fns nsR sc
                   st <- genBlk fns sub (rd - 1) br nsS
-                  un <- genBlk fns sub (rd - 1) br ns
+                  un <- genBlk fns sub (rd - 1) br nsS
                   pure
                     ( revisingCaseI
                         sx
                         sv
                         carrier
                         rname
+                        sname
                         sname
                         resname
                         n
@@ -724,8 +808,71 @@ genBlk fns fuel rd br ns
                         st
                         un
                     )
+              ),
+              -- The three-way loop (D4), at the same live subject. Its exit is
+              -- replicated `2n+1` times rather than `n+1`, so its fuel is cut
+              -- harder: a generated `revisingOn` with a deep tail is the one
+              -- shape that can reach the affordability refusal by accident.
+              ( 2,
+                do
+                  n <- frequency [(4, pure 0), (3, pure 1), (2, pure 2)]
+                  rann <- frequency [(3, pure Nothing), (1, pure (Just CodeVerdict))]
+                  let carrier = freshFor "c" ns
+                      rname = freshFor "v" ns
+                      sname = freshFor "z" ns
+                      resname = freshFor "r" ns
+                      nsC = pushLive carrier sc ns
+                      nsR = pushLive rname SVerdict nsC
+                      nsS = pushLive sname sc ns
+                      sub = max 0 ((fuel - 1) `div` (2 * fromInteger n + 3))
+                  review <- genRhs fns nsC SVerdict
+                  amend <- genRhs fns nsR sc
+                  st <- genBlk fns sub (rd - 1) br nsS
+                  un <- genBlk fns sub (rd - 1) br nsS
+                  ab <- genBlk fns sub (rd - 1) br nsS
+                  pure
+                    ( revisingOnCaseI
+                        sx
+                        sv
+                        carrier
+                        rname
+                        sname
+                        sname
+                        sname
+                        resname
+                        n
+                        rann
+                        review
+                        amend
+                        st
+                        un
+                        ab
+                    )
               )
             ]
+
+-- | The needles a generated decider tests for.
+--
+-- Program text, always — that is the safety property of the whole vocabulary
+-- and it is bought by the field's type — so the pool is Isaac's own markers and
+-- the globs that reconstruct @diffNamesHaskell@, plus the two boundary cases
+-- the string vectors pin: a needle with a trailing space (@"✗ "@, which is what
+-- makes @anyLineStartsWith@ faithful to @isRed@) and a needle whose case the
+-- ASCII fold moves.
+genNeedle :: Gen Text
+genNeedle =
+  elements
+    [ "WORK COMPLETE",
+      "WORK REMAINS",
+      "WORK BLOCKED",
+      "READY",
+      "FACTS PATHS UNRESOLVED",
+      "\10007 ",
+      "*.hs",
+      "*.cabal",
+      "b/src/*.hs",
+      "done"
+    ]
 
 -- | An addressee for a prompt already built. Kept separate from 'genAsk'
 -- because 'bindThenActAlt' needs the words fixed and the target free.
@@ -735,7 +882,23 @@ withWords _ ws = do
     frequency
       [ (6, (\i -> askModel i ws) <$> elements modelIds),
         (2, (\i m -> askModelServed i m ws) <$> elements modelIds <*> elements modelIds),
+        -- D6: a pin with a spare. It must reach the typed generator too, or the
+        -- bisimulation never puts a chained `served by` to the oracle.
+        ( 1,
+          (\i m sp -> askModelFallingBack i m [sp] ws)
+            <$> elements modelIds
+            <*> elements modelIds
+            <*> elements modelIds
+        ),
         (4, (\i -> askTool i ws) <$> elements toolIds),
+        -- D5: a tool the runner runs. Priced exactly as a tool, because the
+        -- addressee is priced nowhere.
+        ( 2,
+          (\i cmd args -> askToolRunning i cmd args ws)
+            <$> elements toolIds
+            <*> elements execCmds
+            <*> genExecArgs
+        ),
         (2, (\i -> askPerson i ws) <$> elements personIds)
       ]
   d <- frequency [(7, pure 0), (2, pure 1), (1, pure 2)]
@@ -775,17 +938,23 @@ data GenCase = GenCase
 --   bounded revision 4, a statement call 3. So a program with names in scope
 --   branches and revises often, and one without cannot.
 --
--- * __Sources__ (8:3:4): a question, a panel of 1–3 members at @verdict@ only,
---   a call at a matching result.
+-- * __Sources__ (8:4:3:3): a question, a panel of 1–3 members at @verdict@
+--   only, a text panel of 1–3 labelled members at @text@ (D2), a call at a
+--   matching result. A decider (D7) is not a source draw but a per-live-name
+--   alternative, weight 3, once per live @text@ binding — it asks nothing, so
+--   what it exercises is the fold that must /not/ move.
 --
--- * __Questions__: model 6, model @served by@ 2, tool 4, person 2; draw 0 six
---   times in ten, then 1, 2, 3.
+-- * __Questions__: model 6, model @served by@ 2, model @served by … or …@ 1
+--   (D6), tool 4, tool @running@ 2 (D5), person 2; draw 0 six times in ten,
+--   then 1, 2, 3.
 --
 -- * __Words__: 0–4 pieces (1:3:4:2:1), each a literal 3 to a hole 2, with one
 --   literal in eight drawn from 'genTrapText'. Holes are text and verdict only:
 --   a flag and a receipt have no text of their own.
 --
--- * __Revision bounds__ 0–3 (3:3:2:2), nested at most twice.
+-- * __Revision bounds__ 0–3 (3:3:2:2), nested at most twice; a three-way
+--   @revising on@ (D4) at weight 2 against the two-way loop's 4, bounded 0–2
+--   because its exit is replicated @2n+1@ times.
 --
 -- * __Worlds__: one to three, drawn by 'genWorldSpecFor' from the fragments the
 --   program actually writes.
@@ -869,6 +1038,9 @@ programFragments prog =
     rhsPrompts = \case
       RhsAsk (RawAsk _ _ p _) -> [p]
       RhsPanel ms _ -> [p | RawAsk _ _ p _ <- ms]
+      RhsPanelText ms _ -> [p | TextMember _ (RawAsk _ _ p _) <- ms]
+      -- A decider puts no question, so it writes no prompt.
+      RhsDecide {} -> []
       RhsCall _ as _ -> concatMap argPrompts as
 
     blockPrompts = \case
@@ -877,13 +1049,15 @@ programFragments prog =
       RawAct (RawAsk _ _ p _) r _ -> p : blockPrompts r
       RawIfFlag _ y n _ -> blockPrompts y ++ blockPrompts n
       RawCaseVerdict _ a o d _ -> concatMap blockPrompts [a, o, d]
-      RawCaseResult _ _ st un _ -> blockPrompts st ++ blockPrompts un
+      RawCaseResult _ _ _ st un _ -> blockPrompts st ++ blockPrompts un
+      RawCaseEnding _ _ _ _ st un ab _ -> concatMap blockPrompts [st, un, ab]
       RawKnownHere _ r _ -> blockPrompts r
       RawCallStmt _ as r _ -> concatMap argPrompts as ++ blockPrompts r
 
     srcPrompts = \case
       SrcRhs r -> rhsPrompts r
       SrcRevising _ _ _ _ _ rev am _ -> rhsPrompts rev ++ rhsPrompts am
+      SrcRevisingOn _ _ _ _ _ rev am _ -> rhsPrompts rev ++ rhsPrompts am
 
 -- | A world spec whose tables are drawn from the shared literal pool, so it
 -- sometimes matches whatever it is applied to. This is the bare generator the
@@ -952,7 +1126,7 @@ genWorldSpecFor frags =
 pos0 :: Pos
 pos0 = Pos 0 0
 
--- | An unchecked program, biased to the shapes the five term-level guards
+-- | An unchecked program, biased to the shapes the six term-level guards
 -- refuse.
 --
 -- Frequencies: an empty panel 3, a revision bound straddling 64 3, a question
@@ -965,7 +1139,7 @@ pos0 = Pos 0 0
 -- Raw-level ask counts (§3.5 rows 1–3), and both are decided by shape, so
 -- inverting the whole judgment to reach them would buy nothing. The free-form
 -- share is the part that may or may not typecheck in Lean; for it the agreement
--- being tested is "the Haskell's five guards pass" against "Lean did not refuse
+-- being tested is "the Haskell's six guards pass" against "Lean did not refuse
 -- for one of those five reasons", which is agreement about a boolean.
 --
 -- Measured over four hundred draws, 'Agentic.Guards.guardCheck' answers:
@@ -995,7 +1169,7 @@ rawWellFormed = (progRawOut . gcProgram) <$> genCase
 -- | __The base a defacement is written onto is a well-formed program.__
 --
 -- This is the whole difference between a refusal-path generator that reports
--- something and one that reports @other@. Lean's five guards fire /during/ the
+-- something and one that reports @other@. Lean's six guards fire /during/ the
 -- typed traversal, so a program that is ill-typed earlier in traversal order
 -- refuses for the type error and the guard is never reached; and @other@ is
 -- explicitly not a comparand (@connection.md@ §3.6). Defacing a program the
@@ -1090,6 +1264,7 @@ rawRevisionBound = do
                 )
                 ( RawCaseResult
                     "loop"
+                    "done"
                     "done"
                     (RawAct (closedAsk (AddrTool who) [Lit "apply ", Interp "done"]) (RawEmpty pos0) pos0)
                     (RawEmpty pos0)
@@ -1191,7 +1366,7 @@ rawServedBy = do
   d <- frequency [(6, pure 0), (2, pure 1), (1, pure 2)]
   k <- frequency [(1, pure 0), (3, pure 1), (2, pure 2)]
   ws <- map Lit <$> vectorOf k genLit
-  let a = RawAsk (Just m) (RawTarget who d) ws pos0
+  let a = RawAsk (Just (servedBy1 m)) (RawTarget who d) ws pos0
       stmt rest = RawAct a rest pos0
   frequency
     [ (3, (\mn -> p {progMain = mn}) <$> placeStmt stmt (progMain p)),
@@ -1278,10 +1453,19 @@ genRawAsk names = do
     frequency
       [ (5, AddrModel <$> elements modelIds),
         (3, AddrTool <$> elements toolIds),
-        (2, AddrPerson <$> elements personIds)
+        (2, AddrPerson <$> elements personIds),
+        (2, AddrToolExec <$> elements toolIds <*> elements execCmds <*> genExecArgs)
       ]
   d <- frequency [(6, pure 0), (2, pure 1), (1, pure 2), (1, pure 3)]
-  srv <- frequency [(8, pure Nothing), (1, Just <$> elements modelIds)]
+  -- Model 5, tool 3, person 2 as before, plus a `toolExec` — D5's fourth
+  -- flavour — and a `served by` that is sometimes a chain rather than a single
+  -- name (D6). Without both the bisimulation exercises neither codec.
+  srv <-
+    frequency
+      [ (8, pure Nothing),
+        (2, Just . servedBy1 <$> elements modelIds),
+        (1, fmap Just (Served <$> elements modelIds <*> ((: []) <$> elements modelIds)))
+      ]
   pure (RawAsk (guardServed who srv) (RawTarget who d) ws pos0)
   where
     -- A free-form ask keeps `served by` to models; the dedicated generator
@@ -1428,11 +1612,17 @@ placeStmt f b = frequency ((3, pure (f b)) : deeper)
     at g x = g <$> placeStmt f x
 
     deeper = case b of
-      RawBind x a src@(SrcRevising {}) (RawCaseResult cx sn st un cp) p ->
-        [ (1, at (\st' -> RawBind x a src (RawCaseResult cx sn st' un cp) p) st),
-          (1, at (\un' -> RawBind x a src (RawCaseResult cx sn st un' cp) p) un)
+      RawBind x a src@(SrcRevising {}) (RawCaseResult cx sn un0 st un cp) p ->
+        [ (1, at (\st' -> RawBind x a src (RawCaseResult cx sn un0 st' un cp) p) st),
+          (1, at (\un' -> RawBind x a src (RawCaseResult cx sn un0 st un' cp) p) un)
         ]
       RawBind _ _ (SrcRevising {}) _ _ -> []
+      RawBind x a src@(SrcRevisingOn {}) (RawCaseEnding cx sn un0 an st un ab cp) p ->
+        [ (1, at (\st' -> RawBind x a src (RawCaseEnding cx sn un0 an st' un ab cp) p) st),
+          (1, at (\un' -> RawBind x a src (RawCaseEnding cx sn un0 an st un' ab cp) p) un),
+          (1, at (\ab' -> RawBind x a src (RawCaseEnding cx sn un0 an st un ab' cp) p) ab)
+        ]
+      RawBind _ _ (SrcRevisingOn {}) _ _ -> []
       RawBind x a src r p -> [(2, at (\r' -> RawBind x a src r' p) r)]
       RawAct a r p -> [(2, at (\r' -> RawAct a r' p) r)]
       RawKnownHere n r p -> [(2, at (\r' -> RawKnownHere n r' p) r)]
@@ -1446,9 +1636,14 @@ placeStmt f b = frequency ((3, pure (f b)) : deeper)
           (1, at (\v' -> RawCaseVerdict x u v' w p) v),
           (1, at (\w' -> RawCaseVerdict x u v w' p) w)
         ]
-      RawCaseResult x sn st un p ->
-        [ (1, at (\st' -> RawCaseResult x sn st' un p) st),
-          (1, at (\un' -> RawCaseResult x sn st un' p) un)
+      RawCaseResult x sn un0 st un p ->
+        [ (1, at (\st' -> RawCaseResult x sn un0 st' un p) st),
+          (1, at (\un' -> RawCaseResult x sn un0 st un' p) un)
+        ]
+      RawCaseEnding x sn un0 an st un ab p ->
+        [ (1, at (\st' -> RawCaseEnding x sn un0 an st' un ab p) st),
+          (1, at (\un' -> RawCaseEnding x sn un0 an st un' ab p) un),
+          (1, at (\ab' -> RawCaseEnding x sn un0 an st un ab' p) ab)
         ]
       RawEmpty _ -> []
 
@@ -1470,7 +1665,8 @@ shrinkRawProgram (RawProgram fs m) =
       RawCallStmt _ _ r _ -> [r]
       RawIfFlag _ y n _ -> [y, n]
       RawCaseVerdict _ a o d _ -> [a, o, d]
-      RawCaseResult _ _ st un _ -> [st, un]
+      RawCaseResult _ _ _ st un _ -> [st, un]
+      RawCaseEnding _ _ _ _ st un ab _ -> [st, un, ab]
 
 -- ---------------------------------------------------------------------------
 -- The string layer's inputs
@@ -1495,6 +1691,14 @@ shrinkRawProgram (RawProgram fs m) =
 -- * multi-word yes\/no spellings — @saidNo@ fires on a /no/ word anywhere,
 --   @saidYes@ only on a reply that is a /yes/ word and nothing else, and that
 --   asymmetry is the safety property.
+--
+-- Wave three adds the atoms the D2 fence and the D7 deciders turn on, so that
+-- the string-layer property puts something a decider can decide about rather
+-- than an empty document: bolded and backticked markers (@bare@'s five
+-- decorations), a CRLF marker line (the divergence from incite that is a bug
+-- fix), diff headers indented and not, a bare markdown rule (which is __not__ a
+-- header, the trailing space being significant), a path with a space in it, and
+-- a body carrying a closing tag of its own.
 genTrapText :: Gen Text
 genTrapText =
   frequency
@@ -1524,7 +1728,30 @@ genTrapText =
         "ΣΣς",
         "hello world",
         "Plain ASCII text.",
-        "42"
+        "42",
+        -- D7: the markers, decorated and not, and the line endings.
+        "WORK COMPLETE",
+        "**WORK COMPLETE**",
+        "`WORK COMPLETE`",
+        "progress\nWORK COMPLETE\r\n",
+        "one\r\nWORK REMAINS\r\n",
+        "\10007 lint",
+        "\10007",
+        "FACTS PATHS UNRESOLVED: three",
+        -- D7: the diff headers, indented and not, and the rule that is not one.
+        "diff --git a/Foo.hs b/Foo.hs",
+        "    diff --git a/src/Bar.lhs b/src/Bar.lhs",
+        "--- a/x.cabal\n+++ b/x.cabal",
+        "---",
+        "+++",
+        "rename from a/Old.hs\nrename to b/New.hs",
+        "diff --git a/a file.hs b/a file.hs",
+        "--- /dev/null\n+++ b/New.hs",
+        -- D2: a body that closes its own fence, and one that closes a
+        -- sibling's.
+        "x </alpha> y",
+        "x </beta> y",
+        "<alpha>\ninner\n</alpha>\n"
       ]
 
     decisive =

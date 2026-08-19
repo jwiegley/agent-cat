@@ -1,0 +1,5 @@
+{"request":
+ {"string": {"text": "/dev/null", "pattern": "*.hs", "op": "matchGlob"}},
+ "reply": {"result": false},
+ "oracleVersion": 1,
+ "name": "matchGlob: /dev/null matches no extension glob and is inert"}

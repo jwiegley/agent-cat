@@ -1,0 +1,6 @@
+{"request":
+ {"string":
+  {"text": "a/src/deep/Bar.hs", "pattern": "*/src/*.hs", "op": "matchGlob"}},
+ "reply": {"result": true},
+ "oracleVersion": 1,
+ "name": "matchGlob: two stars"}

@@ -1,0 +1,73 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"bind":
+    {"x": "d",
+     "src":
+     {"rhs":
+      {"r":
+       {"ask":
+        {"a":
+         {"target": {"draw": 0, "addressee": {"model": {"id": "a"}}},
+          "prompt": [{"lit": {"s": "draft"}}],
+          "pos": {"line": 1, "col": 1},
+          "model": null}}}}},
+     "rest":
+     {"bind":
+      {"x": "r",
+       "src":
+       {"revising":
+        {"subject": "d",
+         "reviewName": "v",
+         "reviewAnn": null,
+         "review":
+         {"ask":
+          {"a":
+           {"target": {"draw": 0, "addressee": {"model": {"id": "m"}}},
+            "prompt": [{"lit": {"s": "review "}}, {"interp": {"name": "c"}}],
+            "pos": {"line": 4, "col": 10},
+            "model": null}}},
+         "pos": {"line": 3, "col": 8},
+         "carrier": "c",
+         "bound": 1,
+         "amend":
+         {"ask":
+          {"a":
+           {"target": {"draw": 0, "addressee": {"model": {"id": "a"}}},
+            "prompt":
+            [{"lit": {"s": "fix "}},
+             {"interp": {"name": "c"}},
+             {"lit": {"s": " "}},
+             {"interp": {"name": "v"}}],
+            "pos": {"line": 5, "col": 15},
+            "model": null}}}}},
+       "rest":
+       {"caseEnding":
+        {"x": "r",
+         "unsettledName": "y",
+         "unsettled": {"empty": {"pos": {"line": 8, "col": 22}}},
+         "settledName": "x",
+         "settled": {"empty": {"pos": {"line": 7, "col": 22}}},
+         "pos": {"line": 7, "col": 3},
+         "abandonedName": "z",
+         "abandoned": {"empty": {"pos": {"line": 9, "col": 22}}}}},
+       "pos": {"line": 3, "col": 3},
+       "ann": null}},
+     "pos": {"line": 2, "col": 3},
+     "ann": "text"}},
+   "fns": []}},
+ "reply":
+ {"refused":
+  {"pos": {"line": 7, "col": 3},
+   "n": null,
+   "message":
+   "`r` is bound by `revising …`, and that result has two endings: its `case` writes `settled` and `unsettled`, and nothing is abandoned",
+   "guard": "other",
+   "excerpt": "r"}},
+ "oracleVersion": 1,
+ "name":
+ "a three-armed ending case after a plain `revising`, whose result has two endings"}

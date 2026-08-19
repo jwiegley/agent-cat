@@ -189,7 +189,7 @@
 -- > the revising result `x` is not yet consumed: `case x { settled …
 -- > unsettled … }` is the next statement, and nothing else touches it
 --
--- (@Check.lean:537@'s @pendingErr@, raised at @550@, @558@, @566@, @567@,
+-- (@Check.lean:653@'s @pendingErr@, raised at @550@, @558@, @566@, @567@,
 -- @568@, @680@ and @701@ — every statement form but @.caseResult@), so there
 -- is nothing an author could legally have written between the bind and its
 -- @case@ for the fork to swallow.
@@ -299,11 +299,16 @@ module Agentic.Workflow
     tool,
     person,
     servedBy,
+    fallingBackTo,
+    running,
     drawing,
     Ask,
     ask,
     confirm,
     panel,
+    panelText,
+    Decider (..),
+    decide,
     Answer (..),
     answering,
     annotated,
@@ -364,6 +369,10 @@ module Agentic.Workflow
     revising,
     Outcome (..),
     Loop,
+    revisingOn,
+    Ending (..),
+    LoopOn,
+    Arms3,
     Clauses,
     Amendment,
     amend,
@@ -384,6 +393,7 @@ import Agentic.Builder
     Blk (..),
     Code (..),
     Codes,
+    Decider (..),
     Entry,
     Fn,
     Fresh,
@@ -403,11 +413,7 @@ import Agentic.Plan
   ( KnownCode,
     SCode,
     Var (VHere),
-    defaultEl,
     sCode,
-    subCons,
-    subId,
-    subP,
   )
 import Agentic.Raw
   ( Addressee (..),
@@ -417,6 +423,8 @@ import Agentic.Raw
     RawProgram (..),
     RawRhs (..),
     RawSource (..),
+    Served (..),
+    servedBy1,
   )
 import Agentic.WF (KnownIx, Says (..), V (..), wf)
 import Data.Char (isDigit)
@@ -528,7 +536,8 @@ data PartyK = IsModel | IsTool | IsPerson
 -- override, and the draw.
 data Party (p :: PartyK) = Party
   { partyAddr :: Addressee,
-    partyServe :: Maybe Text,
+    -- | the @served by@ chain: the model that serves, and the spares (D6)
+    partyServe :: Maybe Served,
     partyDraw :: Integer
   }
 
@@ -548,7 +557,48 @@ person i = Party (AddrPerson i) Nothing 0
 -- person is not served by one, and here that is a kind error rather than a
 -- check.
 servedBy :: Party 'IsModel -> Text -> Party 'IsModel
-servedBy p m = p {partyServe = Just m}
+servedBy p m = p {partyServe = Just (servedBy1 m)}
+
+-- | @model "r" \`servedBy\` "deep" \`fallingBackTo\` "broad"@ — the models
+-- that may answer in the pinned one's place, appended in the order the runner
+-- tries them (D6).
+--
+-- On a party with no pin this /makes/ the named model the primary, so
+-- @model "r" \`fallingBackTo\` "deep"@ and @model "r" \`servedBy\` "deep"@
+-- agree and no illegal state is reachable without a second kind index.
+--
+-- __An alternate is not part of the question.__ Two asks differing only here
+-- elaborate to the same plan, put the same question and bill the same: the
+-- chain is a property of the /model/ that the runner collects before the run
+-- (@Agentic.Chains@), never a field of @Q.Shape@ — which is Isaac's own reading
+-- that a fallback "is not part of that identity", at our types.
+fallingBackTo :: Party 'IsModel -> Text -> Party 'IsModel
+fallingBackTo p m =
+  p
+    { partyServe = Just $ case partyServe p of
+        Nothing -> servedBy1 m
+        Just (Served pr spares) -> Served pr (spares ++ [m])
+    }
+
+-- | @tool "green" \`running\` ("nix", ["flake", "check"])@ — the command the
+-- runner puts in place of asking (D5), so that a check can be an exit code
+-- rather than a model's claim about one.
+--
+-- A model or a person is not run, and here that is a kind error rather than a
+-- refusal, exactly as 'servedBy' on a tool is.
+--
+-- The words stay the question: the executing world writes them to the child's
+-- standard input, where a splice is data and is harmless. There is no
+-- interpolation syntax at an argv — @cmd@ and its arguments are 'Text', never
+-- 'Words' — and an authoring surface that offered one would reintroduce every
+-- problem a capability lattice exists to bound. Do not write it.
+running :: Party 'IsTool -> (Text, [Text]) -> Party 'IsTool
+running p (cmd, args) = p {partyAddr = retarget (partyAddr p)}
+  where
+    retarget = \case
+      AddrTool i -> AddrToolExec i cmd args
+      AddrToolExec i _ _ -> AddrToolExec i cmd args
+      other -> other
 
 -- | @independent draw n@. Two draws of one prompt are two questions, which is
 -- what the memo bill prices apart.
@@ -571,7 +621,7 @@ ask p w =
 --
 -- A bare 'ask' in binding position is a /text/ question — that is
 -- @usePrompt@'s "a name whose only use is being spliced is a text question"
--- (@Check.lean:207@) made structural — so the kind of anything else has to be
+-- (@Check.lean:213@) made structural — so the kind of anything else has to be
 -- said, and this is how a flag says it.
 confirm :: Party p -> Words s -> Rhs s 'CodeFlag
 confirm p w = B.one (ask p w)
@@ -590,6 +640,54 @@ panel [] =
     "panel: a panel needs at least one member — `panel []` asks no one and \
     \settles nothing"
 panel (m : ms) = B.panel (m NE.:| ms)
+
+-- | @panelText [("alpha", ask …), ("beta", ask …)]@ — 'panel'\'s twin at
+-- @text@ (D2): the same fan-out, the same one question per member, the same
+-- trace, and a different fold. Each member's answer is fenced under its own
+-- name — @\<alpha\>\\n…\\n\<\/alpha\>\\n@ — and the blocks are
+-- concatenated in member order, so the document's reader can tell which member
+-- said what.
+--
+-- __The label is the author's and not the addressee's id.__ Two members of one
+-- spread routinely share an addressee, and a document whose names change when
+-- an operator repoints a lens is naming the wrong thing.
+--
+-- A plain list for the reason 'panel' takes one: the language's own refusal for
+-- an empty fan belongs to tier0, not to this layer.
+panelText :: [(Text, Ask s)] -> Rhs s 'CodeText
+panelText [] =
+  error
+    "panelText: a text panel needs at least one member — `panelText []` asks no \
+    \one and fences nothing"
+panelText (m : ms) = B.panelText (m NE.:| ms)
+
+-- | @decide LastNonEmptyLineIs status ["WORK COMPLETE"]@ — a pure
+-- classification of text already in hand, answering a flag an @if@ can decide
+-- on (D7).
+--
+-- It asks nothing and costs nothing in any fold, so the net effect of writing
+-- one where an asked flag stood is __one fewer question on every path, the same
+-- number of paths, and the same rung__. The needles are literal program text
+-- and never words: a needle a model could author is a test a model chooses,
+-- which is not a decider.
+decide ::
+  forall h s.
+  (KnownIx h s) =>
+  Decider ->
+  V h 'CodeText ->
+  [Text] ->
+  Rhs s 'CodeFlag
+decide _ _ [] =
+  error
+    "decide: a decider needs at least one needle to test for — a decider with \
+    \none is a test that is constantly false, with nothing in the source to \
+    \show it"
+decide d v ws
+  | any T.null ws =
+      error
+        "decide: a decider needs its needles to say something, and the empty \
+        \needle tests nothing"
+  | otherwise = B.decide @h @s d v (NE.fromList ws)
 
 -- | The four answer kinds, as words an author can say. Capitalised because
 -- @verdict@ is a name authors /bind/, and a lower-case singleton would be
@@ -637,7 +735,7 @@ data Ann (s :: Scope) (c :: Code) = Ann (SCode c) (Rhs s c)
 --   * @'Body' r s@ — a function body over its parameters @s@, at the result
 --     kind @r@ the function declares.
 --
--- Lean's fourth state, @Pend Γ@ (@Check.lean:527@) — a block /pending/ the
+-- Lean's fourth state, @Pend Γ@ (@Check.lean:639@) — a block /pending/ the
 -- @case@ that consumes a bounded revision's result — has no stage here,
 -- because the fork happens at the bind and the arms are ordinary open blocks.
 -- Its refusal is not lost: see \"Two branches, two mechanisms\".
@@ -662,14 +760,30 @@ type family Res (i :: Stage) = (r :: Type) | r -> i where
   Res ('Body r s) = B.Body s r
 
 -- | The two arms of a @case result@ as the fork produces them: the name the
--- settled binder prints, and the two blocks the rest of the workflow is.
+-- exit binders print, and the two blocks the rest of the workflow is.
 --
--- __Both are at the settled arm's scope__, because both are the one
--- continuation run twice — the second run simply had no @Settled@ handle to
--- bind. 'revising' is where the second is put back at the scope Lean checks it
--- in; see 'unsettledArm'.
+-- __Both are at the same scope__, because both are the one continuation run
+-- twice — and since D3 that scope is honest at both, each arm binding the
+-- candidate the loop was holding. One name, because both arms are built at one
+-- depth and 'genName' is a function of the depth.
 data Arms (c :: Code) (s :: Scope)
   = Arms Text (Blk (An c ': s)) (Blk (An c ': s))
+
+-- | The three arms of a @case result@ over a @revising on@ (D4), as its fork
+-- produces them: the names the three exit binders print, and the three blocks
+-- the rest of the workflow is.
+--
+-- Three names rather than one, because an index-level caller may thread its own
+-- supply; 'revisingOn' passes 'genName'\'s one answer three times, for the
+-- reason 'Arms' carries one.
+data Arms3 (c :: Code) (s :: Scope)
+  = Arms3
+      Text
+      Text
+      Text
+      (Blk (An c ': s))
+      (Blk (An c ': s))
+      (Blk (An c ': s))
 
 -- | A revision's two clauses: the review binding's name, what it prints as its
 -- annotation, the review, and the amendment.
@@ -758,7 +872,7 @@ instance Step st i j a => Step (Nm st) i j a where
 
 -- | @x <- ask …@ — a bare question in binding position __is__ a text
 -- question, which is @usePrompt@'s "a name whose only use is being spliced is
--- a text question" (@Check.lean:207@) made structural.
+-- a text question" (@Check.lean:213@) made structural.
 instance
   ( s' ~ s,
     j ~ 'Open (An 'CodeText ': s),
@@ -865,7 +979,44 @@ instance
       lp
       live
       (fromMaybe (resultName live) mn)
-      (Arms x (k (Settled (V x VHere)) (x : live)) (k Unsettled live))
+      ( Arms
+          x
+          (k (Settled (V x VHere)) (x : live))
+          (k (Unsettled (V x VHere)) (x : live))
+      )
+    where
+      x = genName live
+
+-- | @result <- revisingOn …@ — __the three-way fork__ (D4). The rest of the
+-- block is run three times, once per ending, each with the candidate bound; the
+-- three blocks that come back are the arms of the @case result@ 'revisingOn'
+-- prints.
+--
+-- It is the same instance as 'Loop'\'s with one more arm, which is the whole
+-- of what D4 costs the surface — and the whole of what it costs a program, at
+-- compile time and in the term, is that the tail is built three times and
+-- replicated @2n+1@ times.
+instance
+  ( s' ~ s,
+    c' ~ c,
+    j ~ 'Open (An c ': s),
+    a ~ Ending c s
+  ) =>
+  Step (LoopOn c' s') ('Open s) j a
+  where
+  step mn live lp k =
+    loopOnRun
+      lp
+      live
+      (fromMaybe (resultName live) mn)
+      ( Arms3
+          x
+          x
+          x
+          (k (SettledOn (V x VHere)) (x : live))
+          (k (UnsettledOn (V x VHere)) (x : live))
+          (k (AbandonedOn (V x VHere)) (x : live))
+      )
     where
       x = genName live
 
@@ -950,6 +1101,18 @@ instance
   Step (Loop c' s') ('Body r s) j a
   where
   step = error "Step (Loop c s) ('Body r s): unreachable, the instance is a TypeError"
+
+-- | A three-way bounded revision inside a function body, which
+-- 'Agentic.Raw.RawBodyStmt' has no constructor for either.
+instance
+  TypeError
+    ( 'TL.Text "a function body is a straight line: it has no bounded \
+               \revision, no branch and no `known here` — those belong to the \
+               \workflow that calls it"
+    ) =>
+  Step (LoopOn c' s') ('Body r s) j a
+  where
+  step = error "Step (LoopOn c s) ('Body r s): unreachable, the instance is a TypeError"
 
 -- | A statement-position question, as a value rather than as a block.
 --
@@ -1257,56 +1420,40 @@ newtype Loop (c :: Code) (s :: Scope) = Loop
 --
 -- > result <- revising draft (atMost 2) \patch -> W.do …
 -- > case result of
--- >   Settled patch -> W.do …
--- >   Unsettled     -> stop
+-- >   Settled   patch -> W.do …
+-- >   Unsettled patch -> stop
 --
 -- A regular data type, matched by a regular pattern, whose arms happen to be
--- @W.do@ blocks. @Settled@ carries the artefact the loop settled on — a handle
--- like any other, live in that arm and in no other, so a hole that splices it
--- in the @Unsettled@ arm is GHC's own @Variable not in scope@ and not a rule
--- this library has to state.
+-- @W.do@ blocks. __Both constructors carry the candidate__ (D3): @Settled@ the
+-- artefact a review approved, @Unsettled@ the one the loop ran out holding —
+-- the artefact the last amendment produced and the final review objected to.
+-- Each is a handle like any other, live in its own arm and in no other, so a
+-- hole that splices one arm's binder in the other is GHC's own
+-- @Variable not in scope@ and not a rule this library has to state.
 --
 -- __The bind forks.__ There is no value here to case on at run time: the
 -- @case@ is the branch, and 'revising'\''s 'Step' runs the rest of the block
 -- twice — once under @Settled@ and once under @Unsettled@ — to obtain the two
 -- arms it prints. That is exact, because Lean refuses every statement between
--- a revision's bind and its @case@ (@Check.lean:537@), so the two runs can
+-- a revision's bind and its @case@ (@Check.lean:653@), so the two runs can
 -- differ only in the arms themselves.
 --
--- __Both runs are typed at the settled arm's scope__, which is the price a
--- Haskell @case@ charges: its arms have one type. The @Unsettled@ arm has no
--- handle to the settled slot — the pattern binds it in the other arm — so it
--- is exactly the block that would have been written one scope out, weakened;
--- 'unsettledArm' is where that weakening is undone, and 'genName' reads the
--- depth off the 'Live' names so that the arm prints the depth it is /checked/
--- at rather than the one it is /typed/ at.
+-- __Both runs are typed at the same scope, and now that scope is honest.__ A
+-- Haskell @case@ has one type, so the fork always built both arms at
+-- @'An' c ': s@; before D3 the unsettled run had no handle to bind there and an
+-- unexported @unsettledArm@ undid the weakening by closing the slot with the
+-- kind's default. The slot is now a binder the arm may read, both arms are
+-- checked at @pd.code :: Γ@ in Lean too, and that function has no reason to
+-- exist. What is left is 'genName', which reads the depth off the 'Live' names
+-- so that both arms print the binder the frozen programs print.
 data Outcome (c :: Code) (s :: Scope)
   = -- | the loop settled, and this is what it settled on
     Settled (V (An c ': s) c)
-  | -- | the bound ran out
-    Unsettled
-
--- | The unsettled arm, put back at the scope Lean checks it in.
---
--- The fork hands both arms back at the settled arm's scope, so this one has a
--- slot at index @0@ that it cannot name and never reads: the only handle to it
--- is the @Settled@ pattern's binder, which is not in scope here. Every read it
--- /does/ make is of a name live one scope out, and @KnownIx h ('(n, c) ': s)@
--- is @VThere@ of @KnownIx h s@ — so this block is, index for index, the
--- weakening of the block that would have been built at @s@.
---
--- Closing the slot with the kind's default undoes exactly that weakening:
--- @subP (subP p subWk) (subCons d subId) = subP p (subWk . subCons d subId) =
--- subP p subId = p@. What reaches @revisingCase@ is therefore the very
--- @Plan (Codes s) ()@ Lean's @checkBlock fns Γ S none unsettled@ elaborates,
--- and the @Raw@ — which carries names and not indices — is untouched.
---
--- Deliberately not exported, and deliberately not in "Agentic.Builder": at
--- this one call site the premise is a theorem of Haskell's scoping, and
--- anywhere else it would be an unguarded @Blk (e ': s) -> Blk s@.
-unsettledArm :: forall c s. KnownCode c => Blk (An c ': s) -> Blk s
-unsettledArm (Blk raw plan) =
-  Blk raw (subP plan (subCons (const (defaultEl (sCode @c))) subId))
+  | -- | the bound ran out, and this is the candidate it ran out holding — the
+    -- artefact the last amendment produced and the final review objected to,
+    -- and not one that would have been produced by amending in response to that
+    -- objection, which was never asked for
+    Unsettled (V (An c ': s) c)
 
 -- | @amend patch { … }@ — at the candidate's kind, reading the verdict beside
 -- it.
@@ -1327,9 +1474,9 @@ amend q = W (\_ _ -> Amendment (B.one q))
 --
 -- What this /returns/ is a loop and not a block, because a bounded revision
 -- and the @case@ that consumes it are __one__ node: the intermediate has type
--- @Plan Γ (Option (El c))@ and @Ctx@ has no code for "settled-or-not". Lean
--- carries it as a @Pend Γ@ that the next statement must consume
--- (@Check.lean:527@); here the 'Step' at 'Loop' forks the rest of the block
+-- @Plan Γ (El c, Bool)@ and @Ctx@ has no code for a candidate-and-ending pair.
+-- Lean carries it as a @Pend Γ@ that the next statement must consume
+-- (@Check.lean:639@); here the 'Step' at 'Loop' forks the rest of the block
 -- into the two arms and this closes over both. See 'Outcome'.
 revising ::
   forall h c s.
@@ -1348,13 +1495,101 @@ revising subj (Bound n) clauses = Loop $ \live result arms ->
             carrier
             revName
             settledName
+            -- The unsettled binder's printed name is the settled one: both arms
+            -- are built at the same depth, so 'genName' answers alike for both,
+            -- and the two are binders in disjoint scopes rather than one binder.
+            -- That is what every frozen entry carries.
+            settledName
             result
             n
             revAnn
             review
             am
             settled
-            (unsettledArm @c unsettled)
+            unsettled
+
+-- ---------------------------------------------------------------------------
+-- The three-way bounded revision
+-- ---------------------------------------------------------------------------
+
+-- | The three-way loop, awaiting the two things its statement cannot give it:
+-- the result's name, and the three arms of the @case@ that consumes it.
+newtype LoopOn (c :: Code) (s :: Scope) = LoopOn
+  {loopOnRun :: Live -> Text -> Arms3 c s -> Blk s}
+
+-- | What a three-way bounded revision binds (D4), and the one thing a
+-- workflow's @case@ over one is written on:
+--
+-- > result <- revisingOn draft (atMost 3) \patch -> W.do …
+-- > case result of
+-- >   SettledOn   patch -> W.do …
+-- >   UnsettledOn patch -> W.do …   -- the bound ran out; the tree keeps the edits
+-- >   AbandonedOn _     -> stop     -- the reviewer would not answer
+--
+-- Each constructor carries the candidate in hand, exactly as 'Outcome'\'s two
+-- do.
+--
+-- __Why the names are not @Settled@ \/ @Unsettled@ \/ @Abandoned@.__ They
+-- would be, and the design writes them that way; but Haskell has one
+-- constructor namespace per module and 'Outcome' already spells the first two.
+-- Renaming 'Outcome'\'s would move the pattern every existing program writes.
+-- So the three-way endings take the suffix their loop already carries, and a
+-- reader who sees @UnsettledOn@ knows it belongs to a @revisingOn@ and not to a
+-- @revising@ — which is the distinction the two spellings exist to keep.
+data Ending (c :: Code) (s :: Scope)
+  = -- | a review approved
+    SettledOn (V (An c ': s) c)
+  | -- | the bound ran out with an objection outstanding
+    UnsettledOn (V (An c ': s) c)
+  | -- | a review declined: no answer, and no more trips
+    AbandonedOn (V (An c ': s) c)
+
+-- | @result \<- revisingOn draft (atMost n) \\patch -> W.do …@, and the
+-- @case result of@ that follows it — the same bounded revision, whose round
+-- reads the review's __verdict tag__ three ways rather than one predicate two
+-- ways (D4).
+--
+-- 'revising' tests approval, so an objection and a refusal are the same thing
+-- to it: a refusal buys a trip it should end. This one maps the verdict's three
+-- tags onto three fates — approval settles, an objection amends (or, at the
+-- last round, leaves the loop unsettled), a refusal abandons — which is
+-- Isaac's @WORK COMPLETE@ \/ @WORK REMAINS@ \/ protocol-violation distinction
+-- made expressible.
+--
+-- __Two prices, both real.__ The rest of the block is built three times at the
+-- Haskell level and the 'Blk' it produces is replicated @2n+1@ times in the
+-- plan, so a @revisingOn@ with a long tail is a compile-time cost and a
+-- term-size cost that a @revising@ is not — and the answer when it bites is to
+-- put the tail in a 'function' and call it once per arm. And @stop@ in an arm
+-- is still an arm the author must write: the @case@ is total, so only the data
+-- is added.
+revisingOn ::
+  forall h c s.
+  (KnownIx h s, KnownCode c) =>
+  V h c ->
+  Bound ->
+  (V (An c ': s) c -> W ('Review c s) ('Amending c s) Term) ->
+  LoopOn c s
+revisingOn subj (Bound n) clauses = LoopOn $ \live result arms ->
+  let carrier = genName live
+   in case (runRev (carrier : live) (clauses (V carrier VHere)), arms) of
+        (Clauses revName revAnn review am, Arms3 sname uname aname st un ab) ->
+          B.revisingOnCaseI @c
+            (vName subj)
+            (B.readV @h @s subj)
+            carrier
+            revName
+            sname
+            uname
+            aname
+            result
+            n
+            revAnn
+            review
+            am
+            st
+            un
+            ab
 
 -- ---------------------------------------------------------------------------
 -- Functions
@@ -1615,6 +1850,7 @@ tableProblem prog =
 
     srcCalls (SrcRhs r) = rhsCalls r
     srcCalls (SrcRevising _ _ _ _ _ review am _) = rhsCalls review ++ rhsCalls am
+    srcCalls (SrcRevisingOn _ _ _ _ _ review am _) = rhsCalls review ++ rhsCalls am
 
     bodyCalls (BodyBind _ _ r _) = rhsCalls r
     bodyCalls (BodyAct _ _) = []
@@ -1626,7 +1862,8 @@ tableProblem prog =
       RawAct _ rest _ -> rawCalls rest
       RawIfFlag _ yes no _ -> rawCalls yes ++ rawCalls no
       RawCaseVerdict _ a o d _ -> rawCalls a ++ rawCalls o ++ rawCalls d
-      RawCaseResult _ _ st un _ -> rawCalls st ++ rawCalls un
+      RawCaseResult _ _ _ st un _ -> rawCalls st ++ rawCalls un
+      RawCaseEnding _ _ _ _ st un ab _ -> rawCalls st ++ rawCalls un ++ rawCalls ab
       RawKnownHere _ rest _ -> rawCalls rest
       RawCallStmt f _ rest _ -> f : rawCalls rest
 

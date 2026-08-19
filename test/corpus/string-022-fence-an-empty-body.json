@@ -1,0 +1,4 @@
+{"request": {"string": {"text": "", "op": "fence", "name": "alpha"}},
+ "reply": {"result": "<alpha>\n\n</alpha>\n"},
+ "oracleVersion": 1,
+ "name": "fence an empty body"}

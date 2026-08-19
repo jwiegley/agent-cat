@@ -193,26 +193,26 @@ def redraftD (guide patch : String) (v : Verdict) : Dlg (El .text) :=
 
 /-- `[[loopD guide n patch]]` = review `patch`; if the panel approves, stop with
 it; otherwise revise and go again, at most `n` more times; if the last review
-still objects, give up with `none`.
+still objects, hand back the candidate it ran out holding, marked unsettled.
 
 **Check first, revise in the recursive call** (kernel §3 q5): `loopD guide n`
 performs `n + 1` panels and at most `n` revisions, and never pays for a revision
 it does not review. -/
-def loopD (guide : String) : Nat → El .text → Dlg (Option (El .text))
-  | 0, a => panelD guide a >>= fun v => pure (if Verdict.approvedB v then some a else none)
+def loopD (guide : String) : Nat → El .text → Dlg (El .text × Bool)
+  | 0, a => panelD guide a >>= fun v => pure (a, Verdict.approvedB v)
   | n + 1, a => panelD guide a >>= fun v =>
-      if Verdict.approvedB v then pure (some a)
+      if Verdict.approvedB v then pure (a, true)
       else redraftD guide a v >>= fun a' => loopD guide n a'
 
-/-- `[[finishD o]]` = if the loop produced a patch, ask the owner and apply only
-if the owner said yes; if it gave up, do nothing. The gate is `case` on a
-`Bool`, so both arms are in the term and the not-taken arm costs nothing on the
-taken path (§3 q8). -/
-def finishD : Option (El .text) → Dlg Unit
-  | none => pure ()
-  | some patch =>
-      Dlg.ask1 .flag (consentQ patch) >>= fun ok =>
-        if ok = true then Dlg.ask1 .ack (applyQ patch) >>= fun _ => pure () else pure ()
+/-- `[[finishD o]]` = if the loop settled on a patch, ask the owner and apply
+only if the owner said yes; if the bound ran out, do nothing with the candidate
+it ran out holding. The gate is `case` on a `Bool`, so both arms are in the term
+and the not-taken arm costs nothing on the taken path (§3 q8). -/
+def finishD (o : El .text × Bool) : Dlg Unit :=
+  if o.2 then
+    Dlg.ask1 .flag (consentQ o.1) >>= fun ok =>
+      if ok = true then Dlg.ask1 .ack (applyQ o.1) >>= fun _ => pure () else pure ()
+  else pure ()
 
 /-- `[[hardenD spec]]` = the workflow. Read the guide; draft under the deep
 model; review-and-revise up to twice; ask the owner; apply if and only if the
@@ -246,20 +246,21 @@ def redraft : Cont [.text] (El .text × Verdict) (El .text) := fun _ σ av =>
   Plan.under deep
     (Plan.ask1 .text authorShape (fun δ => reviseText (σ δ).head (av δ).1 (av δ).2))
 
-/-- `[[patchOf o]]` = the patch the loop produced, or `""` where it produced
-none. Only ever read on the arm where the loop *did* produce one; the fallback
-is unreachable and the two theorems about consent say so. -/
-def patchOf (o : Option (El .text)) : El .text := o.getD ""
+/-- `[[patchOf o]]` = the candidate the loop was holding when it left off.
+Since D3 that is `Prod.fst` and nothing else: the loop hands back the artefact
+on **both** endings, so there is no fallback to invent and no `default` a
+rendering has to apologise for. -/
+def patchOf (o : El .text × Bool) : El .text := o.1
 
 /-- `[[finishK Γ]]` = the tail of the workflow, as a continuation: if the loop
-produced a patch, ask the owner and apply only if the owner consented.
+settled on a patch, ask the owner and apply only if the owner consented.
 
 Context-polymorphic in the trivial way — it reads only the loop's answer, never
 what was bound before it — which is exactly the coherence `Plan.Denotes`
 demands. -/
-def finishK (Γ : Ctx) : Cont Γ (Option (El .text)) Unit := fun _ _ final =>
-  -- if the loop produced a patch …
-  Plan.caseB (fun θ => (final θ).isSome)
+def finishK (Γ : Ctx) : Cont Γ (El .text × Bool) Unit := fun _ _ final =>
+  -- if the loop settled …
+  Plan.caseB (fun θ => (final θ).2)
     -- … ok ← askHuman "Apply this patch?" ; if ok then ask "Apply: …"
     (Plan.ask .flag consentShape (fun θ => consentText (patchOf (final θ)))
       (Plan.caseB (fun θ => θ.head)
@@ -315,13 +316,15 @@ because each is a fact about this workload rather than about the mathematics.
   answer types. A context extension `c :: Γ` represents one answer; the
   two-variable Yoneda that would represent a pair is a separate theorem and is
   not taken (see `denotes_revising`).
-* `denotes_finishK` — `finishK` sits at `Option (El .text)`, which is **not an
-  answer type at all**, because `Plan.revising` returns `Option (El c)`. No
-  context represents it and the collapse simply does not apply. This is the one
-  place the language leaves the answers-only universe, and the Yoneda theorem
-  locates it exactly; closing it is a change to the specification (it moves
-  `Plan.size`, `Cost.costSummary.paths` and `Explain.planLines`) and not a
-  change to this file.
+* `denotes_finishK` — `finishK` sits at `El .text × Bool`, which is **not an
+  answer type at all**, because `Plan.revising` returns a candidate paired with
+  whether it settled. No context represents it and the collapse simply does not
+  apply. This is the one place the language leaves the answers-only universe,
+  and the Yoneda theorem locates it exactly; closing it is a change to the
+  specification (it moves `Plan.size`, `Cost.costSummary.paths` and
+  `Explain.planLines`) and not a change to this file. (D3 changed the noun and
+  not the point: the pair is a product of an answer and a tag, and a product of
+  answer types is exactly what one context extension cannot represent.)
 * `denotes_bodyK` — `bodyK` grafts `finishK` onto `revising`, so it inherits
   both obstructions above, and its proof is two rewrites against theorems that
   already exist.
@@ -367,15 +370,13 @@ theorem denotes_finishK (Γ : Ctx) :
     Plan.Denotes (finishK Γ) (fun o (_ : Env Γ) => finishD o) := by
   intro Δ σ e δ
   show denote (finishK Γ Δ σ e) δ = _
-  cases h : e δ with
-  | none => simp [finishK, finishD, h]; rfl
-  | some patch =>
-    simp only [finishK, denote_caseB, h, Option.isSome_some, if_true, finishD, patchOf,
-      Option.getD_some, denote_ask, Dlg.ask1]
+  cases hb : (e δ).2 with
+  | false => simp [finishK, finishD, hb]; rfl
+  | true =>
+    simp only [finishK, denote_caseB, hb, finishD, if_true, patchOf, denote_ask, Dlg.ask1]
     refine congrArg _ (funext fun ok => ?_)
     by_cases hok : ok = true
-    · simp only [hok, if_true, Env.head_cons, Env.tail_cons, h, Option.getD_some,
-        denote_ret]
+    · simp only [hok, if_true, Env.head_cons, Env.tail_cons, denote_ret]
       rfl
     · simp only [hok, Env.head_cons, denote_ret]
       rfl
@@ -474,7 +475,7 @@ theorem trace_loopD_zero (g : String) (a : El .text) :
 
 theorem run_loopD_zero (g : String) (a : El .text) :
     Dlg.run ω (loopD g 0 a)
-      = if Verdict.approvedB (Dlg.run ω (panelD g a)) then some a else none := by
+      = (a, Verdict.approvedB (Dlg.run ω (panelD g a))) := by
   rw [loopD, Dlg.run_bind']
   rfl
 
@@ -490,19 +491,21 @@ theorem trace_loopD_succ (g : String) (n : Nat) (a : El .text) :
 
 theorem run_loopD_succ (g : String) (n : Nat) (a : El .text) :
     Dlg.run ω (loopD g (n + 1) a)
-      = if Verdict.approvedB (Dlg.run ω (panelD g a)) then some a
+      = if Verdict.approvedB (Dlg.run ω (panelD g a)) then (a, true)
         else Dlg.run ω (loopD g n (Dlg.run ω (redraftD g a (Dlg.run ω (panelD g a))))) := by
   rw [loopD, Dlg.run_bind', apply_ite (Dlg.run ω), Dlg.run_pure, Dlg.run_bind']
   rfl
 
-@[simp] theorem trace_finishD_none : Dlg.trace ω (finishD none) = [] := rfl
+@[simp] theorem trace_finishD_unsettled (p : El .text) :
+    Dlg.trace ω (finishD (p, false)) = [] := rfl
 
-theorem trace_finishD_some (p : El .text) :
-    Dlg.trace ω (finishD (some p))
+theorem trace_finishD_settled (p : El .text) :
+    Dlg.trace ω (finishD (p, true))
       = ⟨.flag, consentQ p, ω .flag (consentQ p)⟩ ::
         (if ω .flag (consentQ p) = true then [⟨.ack, applyQ p, ω .ack (applyQ p)⟩]
          else []) := by
-  rw [finishD, Dlg.trace_bind', Dlg.trace_ask1, Dlg.run_ask1, apply_ite (Dlg.trace ω),
+  show Dlg.trace ω (Dlg.ask1 .flag (consentQ p) >>= _) = _
+  rw [Dlg.trace_bind', Dlg.trace_ask1, Dlg.run_ask1, apply_ite (Dlg.trace ω),
     Dlg.trace_bind', Dlg.trace_ask1, Dlg.trace_pure]
   simp
 
@@ -623,12 +626,12 @@ theorem loopD_countP_draft (g : String) :
 
 /-- **The shape of a run of the loop.** Every world takes the loop through some
 number `k ≤ n` of revisions, spending `4k + 3` consultations — three reviewers
-per round and one revision between rounds — and it gives up (`none`) only when
-it has used every revision it had. -/
+per round and one revision between rounds — and it leaves off unsettled only
+when it has used every revision it had. -/
 theorem loopD_rounds (g : String) :
     ∀ (n : Nat) (a : El .text), ∃ k, k ≤ n
       ∧ (Dlg.trace ω (loopD g n a)).length = 4 * k + 3
-      ∧ (Dlg.run ω (loopD g n a) = none → k = n) := by
+      ∧ ((Dlg.run ω (loopD g n a)).2 = false → k = n) := by
   intro n
   induction n with
   | zero =>
@@ -647,16 +650,16 @@ theorem loopD_rounds (g : String) :
       simp only [List.length_cons, List.length_nil]
       omega
 
-theorem length_trace_finishD_some (p : El .text) :
-    (Dlg.trace ω (finishD (some p))).length = if ω .flag (consentQ p) = true then 2 else 1 := by
-  rw [trace_finishD_some]
+theorem length_trace_finishD_settled (p : El .text) :
+    (Dlg.trace ω (finishD (p, true))).length = if ω .flag (consentQ p) = true then 2 else 1 := by
+  rw [trace_finishD_settled]
   split <;> simp
 
 theorem finishD_key_ne_guide :
-    ∀ (o : Option (El .text)), ∀ e ∈ Dlg.trace ω (finishD o), e.key ≠ guideKey := by
-  rintro (_ | p) e he
+    ∀ (o : El .text × Bool), ∀ e ∈ Dlg.trace ω (finishD o), e.key ≠ guideKey := by
+  rintro ⟨p, (_ | _)⟩ e he
   · exact absurd he (by simp)
-  · rw [trace_finishD_some] at he
+  · rw [trace_finishD_settled] at he
     simp only [List.mem_cons] at he
     rcases he with rfl | he
     · exact key_ne_of_code (by simp)
@@ -665,11 +668,12 @@ theorem finishD_key_ne_guide :
         subst he; exact key_ne_of_code (by simp)
       · exact absurd he (by simp)
 
-theorem finishD_countP_draft (o : Option (El .text)) :
+theorem finishD_countP_draft (o : El .text × Bool) :
     (Dlg.trace ω (finishD o)).countP isDraft = 0 := by
-  rcases o with _ | p
+  obtain ⟨p, b⟩ := o
+  cases b
   · rfl
-  · rw [trace_finishD_some]
+  · rw [trace_finishD_settled]
     split <;> simp [isDraft, consentQ, applyQ, consentShape, applyShape]
 
 end Transcript
@@ -701,10 +705,10 @@ theorem consent_of_ack (e : Event) (he : e ∈ Plan.trace ω (hardenPatch spec) 
   · exact absurd hc (loopD_code_ne_ack ω _ 2 _ e h)
   · revert h
     rcases hfin : Dlg.run ω (loopD (ω .text guideQ) 2
-        (ω .text (deep.onQ .text (draftQ spec)))) with _ | p
+        (ω .text (deep.onQ .text (draftQ spec)))) with ⟨p, (_ | _)⟩
     · intro h; exact absurd h (by simp)
     · intro h
-      rw [trace_finishD_some] at h
+      rw [trace_finishD_settled] at h
       simp only [List.mem_cons] at h
       rcases h with rfl | h
       · exact absurd hc (by simp)
@@ -797,10 +801,10 @@ theorem length_trace_hardenPatch :
     loopD_rounds ω (ω .text guideQ) 2 (ω .text (deep.onQ .text (draftQ spec)))
   simp only [List.length_cons, List.length_append, hlen]
   rcases hfin : Dlg.run ω (loopD (ω .text guideQ) 2
-      (ω .text (deep.onQ .text (draftQ spec)))) with _ | p
-  · rw [hnone hfin]
+      (ω .text (deep.onQ .text (draftQ spec)))) with ⟨p, (_ | _)⟩
+  · rw [hnone (by rw [hfin])]
     simp
-  · rw [length_trace_finishD_some]
+  · rw [length_trace_finishD_settled]
     simp only [List.mem_cons, List.not_mem_nil, or_false]
     split <;> omega
 

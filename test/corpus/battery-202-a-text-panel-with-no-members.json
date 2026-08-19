@@ -1,0 +1,25 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"bind":
+    {"x": "doc",
+     "src":
+     {"rhs":
+      {"r": {"panelText": {"pos": {"line": 2, "col": 16}, "members": []}}}},
+     "rest": {"empty": {"pos": {"line": 6, "col": 1}}},
+     "pos": {"line": 2, "col": 3},
+     "ann": "text"}},
+   "fns": []}},
+ "reply":
+ {"refused":
+  {"pos": {"line": 2, "col": 16},
+   "n": null,
+   "message": "a text panel needs at least one member",
+   "guard": "panelEmpty",
+   "excerpt": "panelText"}},
+ "oracleVersion": 1,
+ "name": "a text panel with no members"}

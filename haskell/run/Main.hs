@@ -117,7 +117,22 @@ import Agentic.AgentDeck
     worldOfDeck,
   )
 import Agentic.Builder (Program, progPlan, progRawOut)
-import Agentic.Exec (WorldIO, announcingWorld, runPlanIO, scriptedWorld)
+import Agentic.Chains (servedChains)
+import qualified Data.Map.Strict as Map
+import Agentic.Exec
+  ( WorldIO,
+    announcingWorld,
+    chainsOf,
+    noChains,
+    runPlanWith,
+    scriptedWorld,
+    stderrLog,
+  )
+import Agentic.Shell
+  ( ShellConfig (shellCwd, shellLog, shellTimeoutMs),
+    defaultShellConfig,
+    executingWorld,
+  )
 import Agentic.Guards (guardUnpinnedAsk)
 import Agentic.Observe (printedValue, render, renderString)
 import Agentic.Plan
@@ -539,6 +554,17 @@ renderSummary (mn, mx, paths) =
 -- answer on the next. __A memo hit prints nothing__, because nothing was asked:
 -- the printed lines are @billMemo@ many, and the trace they summarize is
 -- @billFresh@ many. Seeing the two differ is seeing the memo table work.
+-- __The executing layer (D5) is composed here and nowhere else__, announcing
+-- outermost and executing next, so a @toolExec@ question is answered before
+-- either adapter is consulted: neither @sayAcp@ nor @sayDeck@ ever sees one and
+-- no @session\/prompt@ carries it. It is __not__ installed under @--scripted@,
+-- which keeps that mode's defining property — it reaches nothing and runs
+-- nothing — and is why that arm owes the operator a line saying so.
+--
+-- __The chain table (D6) is built here too__, from the printed program, and an
+-- ill-defined one refuses the run before anything is asked. That is a runner
+-- precondition and not a language refusal: the program is well-formed and its
+-- meaning is unchanged; what is ill-defined is this table.
 runCmd :: Text -> Target -> Program -> [Given] -> IO ()
 runCmd name target prog gs = case target of
   Scripted -> do
@@ -548,7 +574,12 @@ runCmd name target prog gs = case target of
         <> " against the scripted table ("
         <> tshow (length (scriptFor name))
         <> " canned replies)"
-    walk (scriptedWorld (scriptFor name))
+    -- Without this line a green `--scripted` run reads as evidence that the
+    -- gate passed, which is the same class of mistake D5 exists to fix.
+    say
+      "  no command was run; every gate in this program was answered from the \
+      \table"
+    walkWith id (scriptedWorld (scriptFor name))
   Live cfg -> do
     say $ "running " <> name <> " against agent-deck session " <> deckSession cfg
     say $
@@ -557,7 +588,13 @@ runCmd name target prog gs = case target of
         <> "ms, "
         <> tshow (deckTimeoutMs cfg)
         <> "ms to a turn; every addressee — model, tool and person — is this one session"
-    walk (worldOfDeck cfg)
+    -- The deck engine sends into a session somebody else started, so the
+    -- directory a command runs in and the directory that session works in need
+    -- not agree. Announce it rather than assume it.
+    say
+      "  a `running` tool's command runs in this process's directory, which the \
+      \deck session — started by somebody else — need not share"
+    walkWith (executingWorld (shellAt ".")) (worldOfDeck cfg)
   Adapter at -> do
     dir <- maybe freshScratch pure (atScratch at)
     createDirectoryIfMissing True dir
@@ -583,18 +620,47 @@ runCmd name target prog gs = case target of
         <> "ms to a turn, "
         <> (if acpFreshPerQuestion cfg then "a new session per question" else "one session for the run")
         <> "; every addressee — model, tool and person — is this one adapter"
-    withAcp cfg (walk . worldOfAcp cfg)
+    say $ "  a `running` tool's command runs in " <> T.pack dir
+    withAcp cfg (walkWith (executingWorld (shellAt dir)) . worldOfAcp cfg)
   where
-    walk :: WorldIO -> IO ()
-    walk world = do
+    shellAt :: FilePath -> ShellConfig
+    shellAt dir =
+      defaultShellConfig
+        { shellCwd = dir,
+          shellTimeoutMs = 120000,
+          shellLog = say . ("  " <>)
+        }
+
+    walkWith :: (WorldIO -> WorldIO) -> WorldIO -> IO ()
+    walkWith exec world = do
       -- The inputs this run's prompts were built from, announced before the
       -- first question: an operator reading a transcript must be able to see
       -- which subject it was about, and the value itself can be a whole diff.
       mapM_ (say . inputsLine) gs
+      chains <- case servedChains (progRawOut prog) of
+        Left why -> do
+          say ("refusing to start: " <> why)
+          exitWith (ExitFailure 1)
+        Right t
+          | Map.null t -> pure noChains
+          | otherwise -> do
+              mapM_ (say . chainLine) [e | e <- Map.toList t, not (null (snd e))]
+              pure (chainsOf stderrLog t)
       say ""
-      (_, tr) <- runPlanIO (announcingWorld (say . ("  " <>)) world) (progPlan prog)
+      (_, tr) <-
+        runPlanWith
+          chains
+          (announcingWorld (say . ("  " <>)) (exec world))
+          (progPlan prog)
       say ""
       report tr
+
+    chainLine (m, spares) =
+      "  "
+        <> m
+        <> " may be answered instead by "
+        <> T.intercalate ", " spares
+        <> " — a fail-over is narrated on stderr, and the trace records who answered"
 
     report :: Trace -> IO ()
     report tr = do
@@ -634,8 +700,8 @@ freshScratch = do
 -- The answers are the stub's: a fixed guide, a fixed patch, three approvals,
 -- consent, and a receipt. Under them the revision settles in its first round,
 -- so the amendment prompt is never put and the run bills seven consultations —
--- @Harden.bill_apply_demo@ (@Agentic\/Core\/HardenPatch.lean:971@), restated
--- as @Dsl.bill_flagship_apply@ (@Agentic\/Core\/DslFlagship.lean:357@).
+-- @Harden.bill_apply_demo@ (@Agentic\/Core\/HardenPatch.lean:975@), restated
+-- as @Dsl.bill_flagship_apply@ (@Agentic\/Core\/DslFlagship.lean:361@).
 scriptFor :: Text -> [(Text, Text)]
 scriptFor "harden" =
   [ ("Write out the house style guide", guideText),

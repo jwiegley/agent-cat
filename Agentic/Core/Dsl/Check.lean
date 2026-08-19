@@ -39,12 +39,14 @@ Four points where the elaboration is a decision rather than a transcription.
   come from somewhere.
 
 * **A bound loop's result is *pending*, not in scope.** `Ctx = List Code` has
-  no code for "settled-or-not", so `x <- revising …` does not extend the
-  context: the checker carries the loop's plan as a pending obligation that
-  the very next statement — `case x { settled p {…} unsettled {…} }` — must
+  no code for a candidate-and-ending pair, so `x <- revising …` does not extend
+  the context: the checker carries the loop's plan as a pending obligation that
+  the very next statement — `case x { settled p {…} unsettled q {…} }` — must
   consume, and the pair elaborates to one `Plan.graft` whose continuation is
-  the `caseB` the arms write. Any other statement while a result is pending is
-  refused by name.
+  the `case` the arms write. The pend carries its exit **tag**, which is what
+  pairs a `revising` with `caseResult` and a `revising on` with `caseEnding`;
+  the mismatches and every other statement while a result is pending are refused
+  by name.
 
 * **A closed prompt is a closed question.** A prompt that mentions no name has
   its words in the term, so the node emitted is `Plan.askC` and the plan starts
@@ -168,6 +170,10 @@ def Prompt.expr {Γ : Ctx} (S : Bindings Γ) (pos : Pos) :
 the unit of the scope monoid, and the `served by` override — if there is one —
 applied to it. -/
 def askShape (m : Option String) (c : Code) (t : RawTarget) : Q.Shape c :=
+  -- Its argument is the *primary* alone: `RawAsk.model` is an `Option Served`
+  -- and the call sites pass `a.model.map (·.primary)`. **The alternates are
+  -- dropped here**, which is the formal statement that fail-over (D6) is not
+  -- part of the meaning — nothing downstream of this function can see them.
   let s : Q.Shape c := { addressee := t.addressee, scope := 1, draw := t.draw }
   match m with
   | none => s
@@ -230,12 +236,23 @@ private def useKindR (sig : List (String × List (String × Code) × Code))
     (x : String) : RawRhs → Option Code
   | .ask a => usePrompt x a.prompt
   | .panel ms _ => ms.findSome? (fun a => usePrompt x a.prompt)
+  | .panelText ms _ => ms.findSome? (fun m => usePrompt x m.ask.prompt)
+  -- A decider **grounds its subject's kind**: `y <- ask …` with no annotation
+  -- followed by `f <- decide lastNonEmptyLineIs y […]` infers `y : text`, which
+  -- is the ergonomic that makes the vocabulary pleasant to use.
+  | .decide _ x' _ _ => if x' == x then some Code.text else none
   | .call f args _ => useArgs sig x f args
 
 private def useKindS (sig : List (String × List (String × Code) × Code))
     (x : String) : RawSource → Option Code
   | .rhs r => useKindR sig x r
   | .revising subj carrier _ _ _ review amend _ =>
+    firstOf (useKindR sig x review)
+      (firstOf (useKindR sig x amend)
+        (if subj == x then
+          firstOf (useKindR sig carrier review) (useKindR sig carrier amend)
+        else none))
+  | .revisingOn subj carrier _ _ _ review amend _ =>
     firstOf (useKindR sig x review)
       (firstOf (useKindR sig x amend)
         (if subj == x then
@@ -257,8 +274,11 @@ private def useKindB (sig : List (String × List (String × Code) × Code))
   | .caseVerdict x' a o d _ =>
     if x' == x then some Code.verdict
     else firstOf (useKindB sig x a) (firstOf (useKindB sig x o) (useKindB sig x d))
-  | .caseResult _ _ settled unsettled _ =>
+  | .caseResult _ _ _ settled unsettled _ =>
     firstOf (useKindB sig x settled) (useKindB sig x unsettled)
+  | .caseEnding _ _ _ _ settled unsettled abandoned _ =>
+    firstOf (useKindB sig x settled)
+      (firstOf (useKindB sig x unsettled) (useKindB sig x abandoned))
 
 /-- The kind of a binding: its annotation, or its first ground use, or the
 refusal that names the annotation. -/
@@ -332,7 +352,7 @@ def askPlan {Γ : Ctx} (c : Code) (S : Bindings Γ) (a : RawAsk) :
   match askGuard a with
   | .error err => .error err
   | .ok _ =>
-  let s := askShape a.model c a.target
+  let s := askShape (a.model.map (·.primary)) c a.target
   match Prompt.closed a.prompt with
   | some words => .ok (Plan.askC1 c (s.withPrompt words))
   | none =>
@@ -352,6 +372,33 @@ def checkMembers {Γ : Ctx} (S : Bindings Γ) :
       match checkMembers S as with
       | .error err => .error err
       | .ok ps => .ok (p :: ps)
+
+/-- The members of a text panel, each at `.text` — the kind the fence's monoid
+lives at — with the label carried through, checked for validity, and checked
+against the labels already seen.
+
+**Duplicate labels are refused**, in the family of the empty-panel refusal: two
+`<a>` blocks in one document make the names not a key, which defeats the whole
+point of naming them. Both refusals are `CheckError`s and not `Guard`s — guards
+are the program-budget family, and these are well-formedness. -/
+def checkMembersText {Γ : Ctx} (S : Bindings Γ) (seen : List String) :
+    List TextMember → Except CheckError (List (String × Plan Γ (El .text)))
+  | [] => .ok []
+  | m :: as =>
+    if !validLabel m.name then
+      .error ⟨m.ask.pos, s!"a text panel names each member's block, and a name begins \
+                           with an ASCII letter and continues with letters, digits, \
+                           `-`, `_` or `.`", m.name⟩
+    else if seen.contains m.name then
+      .error ⟨m.ask.pos, "two members of a text panel answer to one name, and the \
+                         names of a fenced document are its key; rename one", m.name⟩
+    else
+      match askPlan Code.text S m.ask with
+      | .error err => .error err
+      | .ok p =>
+        match checkMembersText S (m.name :: seen) as with
+        | .error err => .error err
+        | .ok ps => .ok ((m.name, p) :: ps)
 
 /-- One argument, elaborated at the parameter's kind: a name reads its binding
 (at exactly that kind — no silent rendering), and words fill a `text`
@@ -444,6 +491,42 @@ def rhsPlan {Γ : Ctx} (fns : Fns) (c : Code) (S : Bindings Γ) (r : RawRhs) (wh
       | c =>
         .error ⟨pos, s!"{what}: a panel combines its members in the verdict \
                        monoid, so it answers `verdict`, not `{codeName c}`", "panel"⟩
+  | .panelText ms pos =>
+    match ms with
+    | [] => .error ⟨pos, "a text panel needs at least one member", "panelText"⟩
+    | _ =>
+      match c with
+      | .text =>
+        match checkMembersText S [] ms with
+        | .error err => .error err
+        | .ok ps => .ok (Plan.panelText ps)
+      | c =>
+        .error ⟨pos, s!"{what}: a text panel fences its members' answers into a \
+                       document, so it answers `text`, not `{codeName c}`",
+                "panelText"⟩
+  | .decide d x ws pos =>
+    -- Both degeneracies refused before anything is elaborated: an empty needle
+    -- list is a test that is constantly false and an empty needle a test that
+    -- is constantly true, with nothing in the source to show it.
+    if ws.isEmpty then
+      .error ⟨pos, "a decider needs at least one needle to test for", deciderName d⟩
+    else if ws.any (fun w => w.isEmpty) then
+      .error ⟨pos, "a decider needs its needles to say something, and the empty \
+                   needle tests nothing", deciderName d⟩
+    else
+    match c with
+    | .flag =>
+      match lookupBinding S pos x with
+      | .error err => .error err
+      | .ok b =>
+        match b.at? Code.text with
+        | some e => .ok (.ret (fun γ => Decider.run d ws (e γ)))
+        | none =>
+          .error ⟨pos, s!"a decider reads `text`, and `{x}` answers \
+                         `{codeName b.code}`", x⟩
+    | c =>
+      .error ⟨pos, s!"{what}: a decider answers `flag`, not `{codeName c}`",
+              "decide"⟩
   | .call f args pos =>
     match callPlan S fns f args pos with
     | .error err => .error err
@@ -463,7 +546,7 @@ def bindForm {A : Type} {Γ : Ctx} (fns : Fns) (c : Code) (S : Bindings Γ) (r :
     match askGuard a with
     | .error err => .error err
     | .ok _ =>
-    let s := askShape a.model c a.target
+    let s := askShape (a.model.map (·.primary)) c a.target
     match Prompt.closed a.prompt with
     | some words => .ok (fun k => Plan.askC c (s.withPrompt words) k)
     | none =>
@@ -472,6 +555,23 @@ def bindForm {A : Type} {Γ : Ctx} (fns : Fns) (c : Code) (S : Bindings Γ) (r :
       | .ok e => .ok (fun k => Plan.ask c s e k)
   | .panel ms pos =>
     match rhsPlan fns c S (.panel ms pos) "this binding" with
+    | .error err => .error err
+    | .ok v => .ok (fun k =>
+        Plan.graft v (fun _ σ e => Plan.sub k (fun δ => Env.cons (e δ) (σ δ))))
+  | .panelText ms pos =>
+    match rhsPlan fns c S (.panelText ms pos) "this binding" with
+    | .error err => .error err
+    | .ok v => .ok (fun k =>
+        Plan.graft v (fun _ σ e => Plan.sub k (fun δ => Env.cons (e δ) (σ δ))))
+  -- **A decider costs nothing in every fold — including `size`.** Its value is a
+  -- `.ret`, and `Plan.graft_ret` says `graft (ret e) k = k _ Sub.id e`, so this
+  -- form elaborates to `Plan.sub k (Env.cons (e δ) ∘ …)`: the continuation with
+  -- the value substituted in, and **no node at all**. `Plan.sub` preserves
+  -- `size`, `askNodes` and `level`, so the net effect of replacing an asked flag
+  -- with a decider is one fewer question on every path, the same number of
+  -- paths, and the same rung.
+  | .decide d x ws pos =>
+    match rhsPlan fns c S (.decide d x ws pos) "this binding" with
     | .error err => .error err
     | .ok v => .ok (fun k =>
         Plan.graft v (fun _ σ e => Plan.sub k (fun δ => Env.cons (e δ) (σ δ))))
@@ -499,15 +599,27 @@ def reviseCont {Γ : Ctx} {c : Code} (rev : Plan (.verdict :: c :: Γ) (El c)) :
     Plan.Cont Γ (El c × Verdict) (El c) :=
   fun _ σ av => Plan.sub rev (fun δ => Env.cons (av δ).2 (Env.cons (av δ).1 (σ δ)))
 
-/-- The two outcomes: `caseB` on whether the loop produced an artefact, with the
-artefact reaching the `settled` arm as de Bruijn `0`. The `none` arm reads
-`default`, which no run ever sees. -/
-def finishCont {Γ : Ctx} {c : Code} (acc : Plan (c :: Γ) Unit) (exh : Plan Γ Unit) :
-    Plan.Cont Γ (Option (El c)) Unit :=
+/-- The outcomes of a bounded revision, generalised over the exit tag: `case` on
+the ending the loop reports, with **the candidate reaching every arm** as de
+Bruijn `0`.
+
+Written once and instantiated twice — at `.bool` for `revising`'s two endings
+(D3) and at `.ending` for `revisingOn`'s three (D4) — because the two want the
+same continuation at two different tags.
+
+`finishCont acc exh` used to be here and is `exitCont .bool (fun b => cond b acc
+exh)`; since `Plan.caseB e t f = .case .bool e (fun b => cond b t f)`, **the
+emitted node, its tag and its arm order are literally unchanged**, and
+`Tag.values .bool = [false, true]` keeps `arm 0` the unsettled arm and `arm 1`
+the settled one, which is what keeps `Explain.planLines`' arm numbering fixed.
+The one real difference: **both** arms are now `Plan (c :: Γ) Unit` and both are
+substituted with the candidate, where the unsettled arm used to be
+`Plan.sub exh σ` at `Γ` and the settled arm read a `default` no run ever saw. -/
+def exitCont {Γ : Ctx} {c : Code} (t : Tag)
+    (arms : t.El → Plan (c :: Γ) Unit) : Plan.Cont Γ (El c × t.El) Unit :=
   fun _ σ final =>
-    Plan.caseB (fun δ => (final δ).isSome)
-      (Plan.sub acc (fun δ => Env.cons ((final δ).getD default) (σ δ)))
-      (Plan.sub exh σ)
+    Plan.case t (fun δ => (final δ).2)
+      (fun x => Plan.sub (arms x) (fun δ => Env.cons (final δ).1 (σ δ)))
 
 /-! ## How far a bounded revision may be unrolled -/
 
@@ -529,14 +641,94 @@ structure Pend (Γ : Ctx) : Type where
   name : String
   /-- The candidate's kind. -/
   code : Code
-  /-- The loop, as a plan of its settled-or-not result. -/
-  plan : Plan Γ (Option (El code))
+  /-- Which exit tag the loop reports: `.bool` for a `revising` (settled or not)
+  and `.ending` for a `revising on` (settled, unsettled or abandoned). It is
+  what pairs a pend with the one block form that may consume it. -/
+  tag : Tag
+  /-- The loop, as a plan of its candidate and its ending. -/
+  plan : Plan Γ (El code × tag.El)
 
 /-- The refusal every statement other than the consuming `case` gets while a
 result is pending. -/
 private def pendingErr (pos : Pos) (x : String) : CheckError :=
   ⟨pos, s!"the revising result `{x}` is not yet consumed: `case {x} \{ settled … \
           unsettled … }` is the next statement, and nothing else touches it", x⟩
+
+/-! ## The prologue a bounded revision's two forms share -/
+
+/-- `[[LoopParts Γ]]` = everything a bounded revision's prologue produces.
+
+`revising` and `revising on` differ only in **how the loop reads its verdict**,
+which is a property of the loop and not of its clauses — so the bound pre-check,
+the annotation refusals, the three `freshName`s, the subject lookup, the two
+clause contexts and the two `rhsPlan`s are shared verbatim through this record
+rather than transcribed into a second clause that could drift. -/
+structure LoopParts (Γ : Ctx) : Type where
+  /-- The candidate's kind: the subject's, which the carrier shares. -/
+  code : Code
+  /-- How to read the subject out of a `Γ`-environment. -/
+  subject : Expr Γ (El code)
+  /-- The review clause, checked with the candidate as de Bruijn `0` under the
+  carrier's name. -/
+  review : Plan (code :: Γ) (El Code.verdict)
+  /-- The amend clause, checked with the verdict as de Bruijn `0` under the
+  review binding's name and the candidate as `1`. -/
+  amend : Plan (Code.verdict :: code :: Γ) (El code)
+
+/-- The prologue, run once for either loop form. -/
+def checkLoopParts (fns : Fns) {Γ : Ctx} (S : Bindings Γ)
+    (x : String) (ann : Option Code) (subj carrier : String) (n : Nat)
+    (rname : String) (rann : Option Code) (review amend : RawRhs)
+    (rpos pos : Pos) : Except CheckError (LoopParts Γ) :=
+  -- Before anything is elaborated, because `n` is the depth of the elaboration
+  -- itself and not merely the size of its result.
+  if maxRevisions < n then
+    .error ⟨rpos, s!"a bounded revision is unrolled into the term it writes, \
+                    so its bound may name at most {maxRevisions} amendments",
+            s!"at most {n} amendments"⟩
+  else
+  match ann with
+  | some _ =>
+    .error ⟨pos, "a revising result is settled-or-not, which is not one of the \
+                 four kinds; it takes no annotation and is consumed by its \
+                 `case`", x⟩
+  | none =>
+  match (match rann with
+         | none => .ok ()
+         | some Code.verdict => .ok ()
+         | some c =>
+           .error ⟨rpos, s!"a review answers `verdict`, not `{codeName c}`: \
+                          the loop settles when it approves", rname⟩ :
+         Except CheckError Unit) with
+  | .error err => .error err
+  | .ok _ =>
+  match freshName S pos x with
+  | .error err => .error err
+  | .ok _ =>
+  match freshName S rpos carrier with
+  | .error err => .error err
+  | .ok _ =>
+  match freshName S rpos rname with
+  | .error err => .error err
+  | .ok _ =>
+  match lookupBinding S rpos subj with
+  | .error err => .error err
+  | .ok b =>
+  -- The names each clause is handed. The review sees the candidate as de
+  -- Bruijn `0` under the carrier's name; the amend sees the verdict as `0`
+  -- under the review binding's name — at `Code.verdict`, rendered only where
+  -- a hole asks for it as text — and the candidate as `1`.
+  let Swith : Bindings (Code.verdict :: b.code :: Γ) :=
+    ⟨carrier, b.code, fun δ => Env.head (Env.tail δ)⟩ ::
+    ⟨rname, Code.verdict, fun δ => Env.head δ⟩ ::
+    Bindings.rename Sub.wk (Bindings.rename Sub.wk S)
+  match rhsPlan fns Code.verdict (Bindings.push carrier b.code S) review
+      "the review of a bounded revision" with
+  | .error err => .error err
+  | .ok reviewP =>
+  match rhsPlan fns b.code Swith amend "the `amend` of a bounded revision" with
+  | .error err => .error err
+  | .ok amendP => .ok ⟨b.code, b.val, reviewP, amendP⟩
 
 /-! ## The checker -/
 
@@ -589,6 +781,11 @@ def checkBlock (fns : Fns) : (Γ : Ctx) → Bindings Γ → Option (Pend Γ) →
     -- plain ask. A wrong annotation is refused by the positional diagnosis.
     match (match rhs with
            | .panel _ _ => .ok (ann.getD Code.verdict)
+           -- Positional, never inferred: a text panel answers `text` and a
+           -- decider answers `flag`, and a wrong annotation is refused by the
+           -- positional diagnosis in `rhsPlan`.
+           | .panelText _ _ => .ok (ann.getD Code.text)
+           | .decide _ _ _ _ => .ok (ann.getD Code.flag)
            | .call f _ _ =>
              (match fns.find? f with
               | some fe =>
@@ -609,58 +806,20 @@ def checkBlock (fns : Fns) : (Γ : Ctx) → Bindings Γ → Option (Pend Γ) →
       | .error err => .error err
       | .ok k => .ok (form k)
   | Γ, S, none, .bind x ann (.revising subj carrier n rname rann review amend rpos) rest pos =>
-    -- Before anything is elaborated, because `n` is the depth of the
-    -- elaboration itself and not merely the size of its result.
-    if maxRevisions < n then
-      .error ⟨rpos, s!"a bounded revision is unrolled into the term it writes, \
-                      so its bound may name at most {maxRevisions} amendments",
-              s!"at most {n} amendments"⟩
-    else
-    match ann with
-    | some _ =>
-      .error ⟨pos, "a revising result is settled-or-not, which is not one of the \
-                   four kinds; it takes no annotation and is consumed by its \
-                   `case`", x⟩
-    | none =>
-    match (match rann with
-           | none => .ok ()
-           | some Code.verdict => .ok ()
-           | some c =>
-             .error ⟨rpos, s!"a review answers `verdict`, not `{codeName c}`: \
-                            the loop settles when it approves", rname⟩ :
-           Except CheckError Unit) with
+    match checkLoopParts fns S x ann subj carrier n rname rann review amend rpos pos with
     | .error err => .error err
-    | .ok _ =>
-    match freshName S pos x with
-    | .error err => .error err
-    | .ok _ =>
-    match freshName S rpos carrier with
-    | .error err => .error err
-    | .ok _ =>
-    match freshName S rpos rname with
-    | .error err => .error err
-    | .ok _ =>
-    match lookupBinding S rpos subj with
-    | .error err => .error err
-    | .ok b =>
-    -- The names each clause is handed. The review sees the candidate as de
-    -- Bruijn `0` under the carrier's name; the amend sees the verdict as `0`
-    -- under the review binding's name — at `Code.verdict`, rendered only where
-    -- a hole asks for it as text — and the candidate as `1`.
-    let Swith : Bindings (Code.verdict :: b.code :: Γ) :=
-      ⟨carrier, b.code, fun δ => Env.head (Env.tail δ)⟩ ::
-      ⟨rname, Code.verdict, fun δ => Env.head δ⟩ ::
-      Bindings.rename Sub.wk (Bindings.rename Sub.wk S)
-    match rhsPlan fns Code.verdict (Bindings.push carrier b.code S) review
-        "the review of a bounded revision" with
-    | .error err => .error err
-    | .ok reviewP =>
-    match rhsPlan fns b.code Swith amend "the `amend` of a bounded revision" with
-    | .error err => .error err
-    | .ok amendP =>
+    | .ok lp =>
       checkBlock fns Γ S
-        (some ⟨x, b.code,
-          Plan.revising (checkCont reviewP) (reviseCont amendP) n Γ Sub.id b.val⟩)
+        (some ⟨x, lp.code, .bool,
+          Plan.revising (checkCont lp.review) (reviseCont lp.amend) n Γ Sub.id lp.subject⟩)
+        rest
+  | Γ, S, none, .bind x ann (.revisingOn subj carrier n rname rann review amend rpos) rest pos =>
+    match checkLoopParts fns S x ann subj carrier n rname rann review amend rpos pos with
+    | .error err => .error err
+    | .ok lp =>
+      checkBlock fns Γ S
+        (some ⟨x, lp.code, .ending,
+          Plan.revisingOn (checkCont lp.review) (reviseCont lp.amend) n Γ Sub.id lp.subject⟩)
         rest
   | Γ, S, none, .ifFlag x y n pos =>
     match lookupBinding S pos x with
@@ -699,25 +858,78 @@ def checkBlock (fns : Fns) : (Γ : Ctx) → Bindings Γ → Option (Pend Γ) →
       .ok (Plan.caseV e (fun t => match t with
         | .approve => a' | .object => o' | .declined => d'))
   | _, _, some pd, .caseVerdict _ _ _ _ pos => .error (pendingErr pos pd.name)
-  | Γ, S, some pd, .caseResult x sname settled unsettled pos =>
+  | Γ, S, some pd, .caseResult x sname uname settled unsettled pos =>
     if x != pd.name then
       .error ⟨pos, s!"the pending revising result is `{pd.name}`, and it is \
                      consumed first", x⟩
     else
-    match freshName S pos sname with
-    | .error err => .error err
-    | .ok _ =>
-    match checkBlock fns (pd.code :: Γ) (Bindings.push sname pd.code S) none settled with
-    | .error err => .error err
-    | .ok settledP =>
-    match checkBlock fns Γ S none unsettled with
-    | .error err => .error err
-    | .ok unsettledP =>
-      .ok (Plan.graft pd.plan (finishCont settledP unsettledP))
-  | _, _, none, .caseResult x _ _ _ pos =>
+    match pd with
+    | ⟨_, pc, .bool, pplan⟩ =>
+      -- **The unsettled binder is checked for freshness against the enclosing
+      -- scope**, on the same rule and with the same message as the settled one.
+      -- That is what keeps kind inference sound: `useKindB` is structural,
+      -- first-match and deliberately ignorant of shadowing precisely because
+      -- `freshName` refuses shadowing before any inferred kind is acted on, and
+      -- a binder without its check would open that hole in the unsettled arm.
+      match freshName S pos sname with
+      | .error err => .error err
+      | .ok _ =>
+      match freshName S pos uname with
+      | .error err => .error err
+      | .ok _ =>
+      match checkBlock fns (pc :: Γ) (Bindings.push sname pc S) none settled with
+      | .error err => .error err
+      | .ok settledP =>
+      match checkBlock fns (pc :: Γ) (Bindings.push uname pc S) none unsettled with
+      | .error err => .error err
+      | .ok unsettledP =>
+        .ok (Plan.graft pplan (exitCont .bool (fun b => cond b settledP unsettledP)))
+    | _ =>
+      .error ⟨pos, s!"`{x}` is bound by `revising on …`, and that result has \
+                     three endings: its `case` writes `settled`, `unsettled` \
+                     and `abandoned`", x⟩
+  | _, _, none, .caseResult x _ _ _ _ pos =>
     .error ⟨pos, s!"`case {x} \{ settled … }` consumes a revising result, and \
                    `{x}` is not one: it is bound by `{x} <- revising …` as the \
                    statement before its `case`", x⟩
+  | Γ, S, some pd, .caseEnding x sname uname aname settled unsettled abandoned pos =>
+    if x != pd.name then
+      .error ⟨pos, s!"the pending revising result is `{pd.name}`, and it is \
+                     consumed first", x⟩
+    else
+    match pd with
+    | ⟨_, pc, .ending, pplan⟩ =>
+      match freshName S pos sname with
+      | .error err => .error err
+      | .ok _ =>
+      match freshName S pos uname with
+      | .error err => .error err
+      | .ok _ =>
+      match freshName S pos aname with
+      | .error err => .error err
+      | .ok _ =>
+      match checkBlock fns (pc :: Γ) (Bindings.push sname pc S) none settled with
+      | .error err => .error err
+      | .ok settledP =>
+      match checkBlock fns (pc :: Γ) (Bindings.push uname pc S) none unsettled with
+      | .error err => .error err
+      | .ok unsettledP =>
+      match checkBlock fns (pc :: Γ) (Bindings.push aname pc S) none abandoned with
+      | .error err => .error err
+      | .ok abandonedP =>
+        .ok (Plan.graft pplan (exitCont .ending (fun e =>
+          match e with
+          | .settled => settledP
+          | .unsettled => unsettledP
+          | .abandoned => abandonedP)))
+    | _ =>
+      .error ⟨pos, s!"`{x}` is bound by `revising …`, and that result has two \
+                     endings: its `case` writes `settled` and `unsettled`, and \
+                     nothing is abandoned", x⟩
+  | _, _, none, .caseEnding x _ _ _ _ _ _ pos =>
+    .error ⟨pos, s!"`case {x} \{ settled … abandoned … }` consumes a `revising \
+                   on` result, and `{x}` is not one: it is bound by \
+                   `{x} <- revising on …` as the statement before its `case`", x⟩
 
 /-- `[[check Γ S r]]` = the workflow `r` writes, or the reason it writes none.
 
@@ -736,6 +948,18 @@ theorem check_panel_nil {Γ : Ctx} (S : Bindings Γ) (x : String) (ann : Option 
     (rest : RawBlock) (ppos bpos : Pos) (hx : Bindings.find? S x = none) :
     check Γ S (.bind x ann (.rhs (.panel [] ppos)) rest bpos)
       = .error ⟨ppos, "a panel needs at least one member", "panel"⟩ := by
+  unfold check checkBlock freshName
+  rw [hx]
+  rfl
+
+/-- **An empty text panel is refused too**, on the same rule and in the same
+family — `PanelEmpty` means "a fan with no members" whichever monoid it folds
+into. Its own diagnosis, because the two answer different kinds and the
+positional refusal that follows names one of them. -/
+theorem check_panelText_nil {Γ : Ctx} (S : Bindings Γ) (x : String) (ann : Option Code)
+    (rest : RawBlock) (ppos bpos : Pos) (hx : Bindings.find? S x = none) :
+    check Γ S (.bind x ann (.rhs (.panelText [] ppos)) rest bpos)
+      = .error ⟨ppos, "a text panel needs at least one member", "panelText"⟩ := by
   unfold check checkBlock freshName
   rw [hx]
   rfl
@@ -792,6 +1016,11 @@ def checkBody {k : Code} (fns : Fns) (answer : Option String) (result : Code) :
     | .ok _ =>
     match (match rhs with
            | .panel _ _ => .ok (ann.getD Code.verdict)
+           -- Positional, never inferred: a text panel answers `text` and a
+           -- decider answers `flag`, and a wrong annotation is refused by the
+           -- positional diagnosis in `rhsPlan`.
+           | .panelText _ _ => .ok (ann.getD Code.text)
+           | .decide _ _ _ _ => .ok (ann.getD Code.flag)
            | .call f _ _ =>
              (match fns.find? f with
               | some fe =>
@@ -878,6 +1107,10 @@ def maxQuestions : Nat := 4096
 def rhsAsks (fns : Fns) : RawRhs → Nat
   | .ask _ => 1
   | .panel ms _ => ms.length
+  | .panelText ms _ => ms.length
+  -- A decider asks nothing: its value is a `.ret`, and `Plan.graft_ret` leaves
+  -- no node at all.
+  | .decide _ _ _ _ => 0
   | .call f _ _ =>
     match fns.find? f with
     | some fe => fe.asks
@@ -898,14 +1131,24 @@ def blockAsks (fns : Fns) : RawBlock → Nat
   | .act _ r _ => 1 + blockAsks fns r
   | .callStmt f _ r _ => rhsAsks fns (.call f [] ⟨0, 0⟩) + blockAsks fns r
   | .bind _ _ (.rhs rhs) r _ => rhsAsks fns rhs + blockAsks fns r
-  | .bind _ _ (.revising _ _ n _ _ rev am _) (.caseResult _ _ st un _) _ =>
+  | .bind _ _ (.revising _ _ n _ _ rev am _) (.caseResult _ _ _ st un _) _ =>
     (n + 1) * rhsAsks fns rev + n * rhsAsks fns am
       + (n + 1) * (blockAsks fns st + blockAsks fns un)
   | .bind _ _ (.revising _ _ n _ _ rev am _) r _ =>
     (n + 1) * rhsAsks fns rev + n * rhsAsks fns am + blockAsks fns r
+  -- The three-way loop's unroll has `2n+1` `ret` leaves — the approve-`ret` and
+  -- the declined-`ret` per round above the base, plus the base's — and the exit
+  -- is replicated once per leaf. The loop's own contribution is `revising`'s.
+  | .bind _ _ (.revisingOn _ _ n _ _ rev am _) (.caseEnding _ _ _ _ st un ab _) _ =>
+    (n + 1) * rhsAsks fns rev + n * rhsAsks fns am
+      + (2 * n + 1) * (blockAsks fns st + blockAsks fns un + blockAsks fns ab)
+  | .bind _ _ (.revisingOn _ _ n _ _ rev am _) r _ =>
+    (n + 1) * rhsAsks fns rev + n * rhsAsks fns am + blockAsks fns r
   | .ifFlag _ y n _ => blockAsks fns y + blockAsks fns n
   | .caseVerdict _ a o d _ => blockAsks fns a + blockAsks fns o + blockAsks fns d
-  | .caseResult _ _ st un _ => blockAsks fns st + blockAsks fns un
+  | .caseResult _ _ _ st un _ => blockAsks fns st + blockAsks fns un
+  | .caseEnding _ _ _ _ st un ab _ =>
+    blockAsks fns st + blockAsks fns un + blockAsks fns ab
 
 /-- The table, checked in order — each entry **priced before it is built**:
 `bodyAsks` reads the raw body against the table so far, so an entry whose
@@ -944,10 +1187,14 @@ def overRevised : Raw → Option (Pos × Nat)
   | .bind _ _ (.rhs _) r _ => overRevised r
   | .bind _ _ (.revising _ _ n _ _ _ _ rpos) r _ =>
     if maxRevisions < n then some (rpos, n) else overRevised r
+  | .bind _ _ (.revisingOn _ _ n _ _ _ _ rpos) r _ =>
+    if maxRevisions < n then some (rpos, n) else overRevised r
   | .ifFlag _ y n _ => (overRevised y).orElse fun _ => overRevised n
   | .caseVerdict _ a o d _ =>
     ((overRevised a).orElse fun _ => overRevised o).orElse fun _ => overRevised d
-  | .caseResult _ _ s u _ => (overRevised s).orElse fun _ => overRevised u
+  | .caseResult _ _ _ s u _ => (overRevised s).orElse fun _ => overRevised u
+  | .caseEnding _ _ _ _ s u a _ =>
+    ((overRevised s).orElse fun _ => overRevised u).orElse fun _ => overRevised a
 
 /-- `[[checkProgram prog]]` = the plan the whole program writes: the functions
 checked once, the elaboration sized — hostile loop bounds first, at their own

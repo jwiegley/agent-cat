@@ -195,7 +195,7 @@ hardenProgram = workflow W.do
               Apply:
               {patch}
               Write the patched file here, then reply DONE.|]
-      Unsettled -> stop
+      Unsettled _ -> stop
 
 -- ---------------------------------------------------------------------------
 -- The small one

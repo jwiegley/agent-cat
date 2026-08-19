@@ -1,0 +1,9 @@
+{"request":
+ {"string":
+  {"text": "one\n**WORK COMPLETE**\n",
+   "op": "decide",
+   "needles": ["WORK COMPLETE"],
+   "decider": "lastNonEmptyLineIs"}},
+ "reply": {"result": true},
+ "oracleVersion": 1,
+ "name": "decide: a bolded marker line classifies"}

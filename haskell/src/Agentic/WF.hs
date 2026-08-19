@@ -41,7 +41,7 @@
 -- @[wf|…|] '<>' ['Agentic.Builder.lit' "\\n"]@.
 --
 -- __Chunking is normative.__ Lean's @Prompt.normalize@
--- (@Agentic\/Core\/Dsl\/Syntax.lean:175@) drops empty literals and
+-- (@Agentic\/Core\/Dsl\/Syntax.lean:179@) drops empty literals and
 -- __deliberately does not fuse adjacent literals__, so a @define@ spliced into
 -- a prompt contributes /its own chunk/: @example-000@'s drafting prompt is
 -- three chunks and not one. This quoter reproduces exactly that — the

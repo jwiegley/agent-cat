@@ -21,14 +21,25 @@
 --
 -- == What is deliberately absent
 --
--- The five guard vectors and every refused battery entry are /unrepresentable/
--- in the builder, and that is the point — do not "fix" the builder to reach
--- them:
+-- The guard vectors and every refused battery entry are /unrepresentable/ in
+-- the builder, and that is the point — do not "fix" the builder to reach them:
 --
 --   * @vector-000@ (duplicate function names) is a duplicate Haskell binding;
 --   * @vector-003@ (question budget) needs 8192 questions;
---   * @vector-004@ (empty panel) is not a 'Data.List.NonEmpty.NonEmpty';
---   * @vector-005@ (served by on a tool) has no constructor;
+--   * @vector-004@ (empty panel) is not a 'Data.List.NonEmpty.NonEmpty', and
+--     @battery-202@ (an empty /text/ panel) is not one either;
+--   * @vector-005@ (served by on a tool) has no constructor, and neither does
+--     @battery-218@ (served by on a tool that runs a command);
+--   * @battery-212@ and @battery-213@ (a decider with no needles, and with an
+--     empty one) are refused by 'Agentic.Workflow.decide' at the value level
+--     and are not reachable through 'Agentic.Builder.decide'\'s
+--     'Data.List.NonEmpty.NonEmpty' at all;
+--   * @battery-203@ and @battery-204@ (two members of one name, and a label
+--     with a bad character) are label well-formedness, which the builder does
+--     not check — the labels it prints are the author's, and Lean refuses a
+--     bad one;
+--   * @battery-215@ (a decider whose subject is not text) is a type error,
+--     because 'Agentic.Builder.decide' takes a @V h \'CodeText@;
 --   * every @unbound@ / @freshName@ / kind refusal is a type error.
 --
 -- tier0 already replays all of them through "Agentic.Guards".
@@ -58,12 +69,14 @@ import Agentic.Builder
     askModelServed,
     askPerson,
     askTool,
+    askToolRunning,
     bind,
     bindAs,
     bindB,
     callStmt,
     callV,
     caseVerdict,
+    decide,
     draw,
     endB,
     function,
@@ -74,11 +87,14 @@ import Agentic.Builder
     noParams,
     one,
     panel,
+    panelText,
     param,
     program,
     revisingCase,
+    revisingOnCase,
     stop,
   )
+import Agentic.Raw (Decider (LastNonEmptyLineIs))
 
 -- ---------------------------------------------------------------------------
 -- The list
@@ -129,7 +145,15 @@ cases =
     -- @agentic-run@ executable, which plans, prices and runs them. See the note
     -- at case 20.
     ("example-000-the-flagship-single-file.json", hardenProgram),
-    ("example-001-hello.json", helloProgram)
+    ("example-001-hello.json", helloProgram),
+    -- Wave three's four shapes, one case each. tier0 replays their frozen
+    -- entries through the codec, the guards and the two ask counts; only here
+    -- are their /elaborations/ held against the oracle — the folds, the paths
+    -- and, in two of the four, the bills that are the whole point.
+    ("battery-193-a-three-way-revision-settles-amends-or-abandons.json", battery193),
+    ("battery-198-a-text-panel-fences-its-members-in-order.json", battery198),
+    ("battery-205-a-decider-reads-the-last-non-empty-line.json", battery205),
+    ("battery-219-two-commands-at-one-tool-are-two-questions.json", battery219)
   ]
 
 -- | Which of 'cases' have their __printed program__ compared up to alpha: the
@@ -147,10 +171,10 @@ cases =
 -- everything except the spelling of names, including which binding every hole,
 -- every scrutinee and every subject reads.
 --
--- __The other nineteen keep their exact comparison.__ They are written in
+-- __The other twenty-three keep their exact comparison.__ They are written in
 -- "Agentic.Builder" with explicit names, and there is nothing about them to
 -- weaken. Every non-program comparand — the folds, the ask counts, the worlds,
--- the traces and the bills — stays exact for all twenty-four; a trace never
+-- the traces and the bills — stays exact for all twenty-eight; a trace never
 -- carries a binder's name.
 alphaNamed :: [FilePath]
 alphaNamed =
@@ -224,7 +248,7 @@ semantic001 :: Program
 semantic001 =
   program [] $
     bindAs @"d" @'CodeText (one (askModel "author" [lit "draft"])) $ \d ->
-      revisingCase @"patch" @"v" @"final"
+      revisingCase @"patch" @"v" @"final" @"final"
         d
         "r"
         3
@@ -238,7 +262,12 @@ semantic001 =
               )
         )
         (\final -> act (askTool "apply" [lit "apply ", hole final]) stop)
-        (act (askTool "log" [lit "gave up"]) stop)
+        -- The unsettled binder is the settled one repeated, which is what the
+        -- frozen entry carries and what an authoring surface always writes:
+        -- both arms are built at one depth, so one name serves both, and they
+        -- are binders in disjoint scopes rather than one binder. This arm does
+        -- not read it.
+        (\_final -> act (askTool "log" [lit "gave up"]) stop)
 
 -- ---------------------------------------------------------------------------
 -- 3. semantic-002 — draws are distinct questions
@@ -500,7 +529,7 @@ vector002 :: Program
 vector002 =
   program [] $
     bindAs @"d" @'CodeText (one (askModel "a" [lit "draft"])) $ \d ->
-      revisingCase @"c" @"v" @"x"
+      revisingCase @"c" @"v" @"x" @"x"
         d
         "r"
         2
@@ -508,7 +537,7 @@ vector002 =
         (\c -> one (askModel "m" [lit "review ", hole c]))
         (\c v -> one (askModel "a" [lit "fix ", hole c, lit " ", hole v]))
         ( \x ->
-            revisingCase @"c2" @"v2" @"y"
+            revisingCase @"c2" @"v2" @"y" @"y"
               x
               "r2"
               3
@@ -516,9 +545,9 @@ vector002 =
               (\c2 -> one (askModel "m2" [lit "review again ", hole c2]))
               (\c2 v2 -> one (askModel "a" [lit "refix ", hole c2, lit " ", hole v2]))
               (\y -> act (askTool "t" [lit "apply ", hole y]) stop)
-              stop
+              (\_y -> stop)
         )
-        stop
+        (\_x -> stop)
 
 -- ---------------------------------------------------------------------------
 -- 12. battery-121 — a bounded revision whose candidate is a flag
@@ -545,7 +574,7 @@ battery121 =
   program [] $
     bindAs @"ready" @'CodeFlag (one (askPerson "owner" [lit "is the release ready?"])) $
       \ready ->
-        revisingCase @"cand" @"v" @"done"
+        revisingCase @"cand" @"v" @"done" @"done"
           ready
           "r"
           2
@@ -553,7 +582,7 @@ battery121 =
           (\_cand -> one (askModel "m" [lit "does the release look ready?"]))
           (\_cand _v -> one (askPerson "owner" [lit "is it ready now?"]))
           (\done -> ifFlag done (act (askTool "ship" [lit "ship it"]) stop) stop)
-          stop
+          (\_done -> stop)
 
 -- ---------------------------------------------------------------------------
 -- 13. battery-120 — a revision bounded at zero amendments
@@ -578,7 +607,7 @@ battery120 :: Program
 battery120 =
   program [] $
     bindAs @"d" @'CodeText (one (askModel "a" [lit "draft"])) $ \d ->
-      revisingCase @"c" @"v" @"x"
+      revisingCase @"c" @"v" @"x" @"x"
         d
         "r"
         0
@@ -586,7 +615,7 @@ battery120 =
         (\c -> one (askModel "m" [lit "review ", hole c]))
         (\c v -> one (askModel "a" [lit "fix ", hole c, lit " ", hole v]))
         (\x -> act (askTool "log" [lit "settled ", hole x]) stop)
-        (act (askTool "log" [lit "unsettled"]) stop)
+        (\_x -> act (askTool "log" [lit "unsettled"]) stop)
 
 -- ---------------------------------------------------------------------------
 -- 14. battery-090 — a loop nested in a settled arm
@@ -618,7 +647,7 @@ battery090 :: Program
 battery090 =
   program [] $
     bindAs @"d" @'CodeText (one (askModel "a" [lit "draft"])) $ \d ->
-      revisingCase @"c" @"v" @"x"
+      revisingCase @"c" @"v" @"x" @"x"
         d
         "r"
         1
@@ -626,7 +655,7 @@ battery090 =
         (\c -> one (askModel "m" [lit "review ", hole c]))
         (\c v -> one (askModel "a" [lit "fix ", hole c, lit " ", hole v]))
         ( \x ->
-            revisingCase @"y" @"w" @"z"
+            revisingCase @"y" @"w" @"z" @"z"
               x
               "r2"
               1
@@ -634,9 +663,9 @@ battery090 =
               (\y -> one (askModel "m" [lit "again ", hole y]))
               (\y w -> one (askModel "a" [lit "more ", hole y, lit " ", hole w]))
               (\z -> act (askTool "log" [hole z]) stop)
-              stop
+              (\_z -> stop)
         )
-        stop
+        (\_x -> stop)
 
 -- ---------------------------------------------------------------------------
 -- 15. battery-137 — empty prompts and an empty define
@@ -810,6 +839,131 @@ semantic005 =
 -- longer trace even though every answer in it would be identical.
 semantic006 :: Program
 semantic006 = semantic000
+
+-- ---------------------------------------------------------------------------
+-- 22. battery-193 — the three-way loop (D4)
+-- ---------------------------------------------------------------------------
+
+-- |
+-- > workflow { d : text <- ask model "a" "draft"
+-- >   r <- revising on d as c, at most 2 amendments {
+-- >     v <- ask model "m" "review {c}"
+-- >     amend c { ask model "a" "fix {c} {v}" }
+-- >   }
+-- >   case r { settled x { ask tool "log" "settled {x}" }
+-- >            unsettled y { stop }
+-- >            abandoned z { stop } } }
+--
+-- The arithmetic D4 exists to pin, and the reason this case is worth its
+-- weight: the unroll has @2n+1 = 5@ @ret@ leaves rather than @n+1 = 3@ — the
+-- approve-@ret@ and the declined-@ret@ per round above the base — and the
+-- three-armed exit is replicated once per leaf. So @blockAsks@ is
+-- @3·1 + 2·1 + 5·(1+0+0) = 10@, @paths@ is @5·3 = 15@, and @size@ is
+-- @3 + 2 + 2 + 5·5 = 32@ over the loop, plus the leading ask. A graft that
+-- replicated the exit @n+1@ times instead would still typecheck and would show
+-- up here as three numbers at once.
+--
+-- Its three binders are __three different names__ where every frozen
+-- two-way loop repeats one, which is what pins that they are binders in
+-- disjoint scopes rather than one binder read three ways.
+battery193 :: Program
+battery193 =
+  program [] $
+    bindAs @"d" @'CodeText (one (askModel "a" [lit "draft"])) $ \d ->
+      revisingOnCase @"c" @"v" @"x" @"y" @"z"
+        d
+        "r"
+        2
+        Nothing
+        (\c -> one (askModel "m" [lit "review ", hole c]))
+        (\c v -> one (askModel "a" [lit "fix ", hole c, lit " ", hole v]))
+        (\x -> act (askTool "log" [lit "settled ", hole x]) stop)
+        (\_y -> stop)
+        (\_z -> stop)
+
+-- ---------------------------------------------------------------------------
+-- 23. battery-198 — the text panel (D2)
+-- ---------------------------------------------------------------------------
+
+-- |
+-- > workflow { doc : text <- panel as text [ alpha: ask model "a" "BODY-A"
+-- >                                        , beta:  ask model "b" "BODY-B" ]
+-- >            ask tool "log" "{doc}" }
+--
+-- The __document's bytes__, which nothing else pins: the world answers the two
+-- members @one@ and @two@, and the act's prompt — an event of the frozen trace,
+-- compared verbatim — is
+-- @\<alpha\>\\none\\n\<\/alpha\>\\n\<beta\>\\ntwo\\n\<\/beta\>\\n@.
+-- Member order, the fence's newlines and the fold's direction are all in that
+-- one string, and the trace holds the two raw replies beside it: __the trace is
+-- what was asked and what was answered; the document is what the program then
+-- computed.__
+battery198 :: Program
+battery198 =
+  program [] $
+    bindAs @"doc" @'CodeText
+      ( panelText
+          ( ("alpha", askModel "a" [lit "BODY-A"])
+              :| [("beta", askModel "b" [lit "BODY-B"])]
+          )
+      )
+      $ \doc -> act (askTool "log" [hole doc]) stop
+
+-- ---------------------------------------------------------------------------
+-- 24. battery-205 — a decider (D7)
+-- ---------------------------------------------------------------------------
+
+-- |
+-- > workflow { t : text <- ask model "a" "status"
+-- >            f <- decide lastNonEmptyLineIs t ["WORK COMPLETE"]
+-- >            if f { ask tool "log" "yes" } else { ask tool "log" "no" } }
+--
+-- Two worlds, and they are the case: one answers
+-- @"progress\\n**WORK COMPLETE**\\r\\n"@ and the other
+-- @"progress\\nWORK REMAINS\\n"@, so the two traces take the two arms — which
+-- means the decider's own algorithm is being compared against the oracle's
+-- through the /branch it decides/, decorations and CRLF included, and not only
+-- through the string-layer vectors.
+--
+-- What it pins about cost is the other half of D7: @askNodes@ is 3 and not 4,
+-- and @size@ is 6, because a decider's value is a @ret@ and @graft_ret@ leaves
+-- __no node at all__. @vector-006@ and @vector-007@ are the same program with
+-- and without it; this is the one tier1 rebuilds.
+battery205 :: Program
+battery205 =
+  program [] $
+    bindAs @"t" @'CodeText (one (askModel "a" [lit "status"])) $ \t ->
+      bind @"f" @'CodeFlag (decide LastNonEmptyLineIs t ("WORK COMPLETE" :| [])) $ \f ->
+        ifFlag
+          f
+          (act (askTool "log" [lit "yes"]) stop)
+          (act (askTool "log" [lit "no"]) stop)
+
+-- ---------------------------------------------------------------------------
+-- 25. battery-219 — two commands at one tool are two questions (D5)
+-- ---------------------------------------------------------------------------
+
+-- |
+-- > workflow { ask tool "green" running "nix" "flake" "check" "gate"
+-- >            ask tool "green" running "nix" "build" "gate" }
+--
+-- __The most important fixture D5 owes__, and the reason the argv rides in the
+-- addressee rather than beside it: two acts saying the same words to the same
+-- tool id with /different/ commands are __two questions__, so @billMemo@ is 2
+-- and not 1. Were the argv anywhere outside @Q.Shape@ the second command would
+-- be answered from the memo table without running — a gate that silently does
+-- not run while the table reports it did, which is the ordinary case of a gate
+-- run twice in one program and not a corner of it.
+--
+-- The kernel executes nothing here: a pure world dispatches on the /code/ and
+-- never on the addressee, so this observation is computed exactly as any
+-- other. What it is testing is the ordering key, which must mention @cmd@ and
+-- @args@ or the two questions would collapse into one.
+battery219 :: Program
+battery219 =
+  program [] $
+    act (askToolRunning "green" "nix" ["flake", "check"] [lit "gate"]) $
+      act (askToolRunning "green" "nix" ["build"] [lit "gate"]) stop
 
 -- ---------------------------------------------------------------------------
 -- 20 and 21. example-000 and example-001 — the walked examples

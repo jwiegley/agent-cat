@@ -37,10 +37,10 @@ implementation is held to. One fold, one set of numbers.
   silently empty, i.e. a prompt the node does not have.
 
   What a probe cannot do is know which arm it is inside. A term may compute a value
-  from a branch it has already taken — `Plan.revising`'s approved arm reads
-  `(final δ).getD default`, which is the artefact exactly when the loop approved —
-  and the probe, which approves nothing, shows the `default` there. That is the
-  term's own computation at the probe's answers, and it is the same
+  from a branch it has already taken — a bounded revision's exit arms both read the
+  candidate the loop was holding, and the probe, which approves nothing and
+  exhausts nothing, shows its own answers there. That is the term's own
+  computation at the probe's answers, and it is the same
   arm-independence that makes `Cost.costM` price an unreachable path; the legend
   `planLines` prints says so where a reader will meet it.
 
@@ -389,9 +389,14 @@ def RawBlock.revisionBounds : RawBlock → List (Pos × Nat)
   | .callStmt _ _ rest _ => rest.revisionBounds
   | .bind _ _ (.rhs _) rest _ => rest.revisionBounds
   | .bind _ _ (.revising _ _ n _ _ _ _ rpos) rest _ => (rpos, n) :: rest.revisionBounds
+  -- A `revising on` is a bounded revision too: it is refused above
+  -- `maxRevisions` by the same pre-scan and printed by the same report.
+  | .bind _ _ (.revisingOn _ _ n _ _ _ _ rpos) rest _ => (rpos, n) :: rest.revisionBounds
   | .ifFlag _ y n _ => y.revisionBounds ++ n.revisionBounds
   | .caseVerdict _ a o d _ => a.revisionBounds ++ o.revisionBounds ++ d.revisionBounds
-  | .caseResult _ _ s u _ => s.revisionBounds ++ u.revisionBounds
+  | .caseResult _ _ _ s u _ => s.revisionBounds ++ u.revisionBounds
+  | .caseEnding _ _ _ _ s u a _ =>
+    s.revisionBounds ++ u.revisionBounds ++ a.revisionBounds
 
 end Dsl
 
@@ -416,8 +421,8 @@ def planLines {A : Type} (p : Plan [] A) : List String :=
   , "        a bounded revision is not a node: `Plan.revising` is `Nat.rec`, so the term holds \
      its unrolling and the `at most n amendments` that wrote it is a fact about the source;"
   , "        a prompt is shown at a probe environment, which does not know which arm it is \
-     inside — an empty splice under an approved arm is `Plan.revising`'s own \
-     `(final δ).getD default` at a probe that did not approve, and not a prompt a run puts." ]
+     inside, so a splice under either exit arm of a bounded revision shows the probe's own \
+     candidate and not a candidate any run produced." ]
     ++ Plan.explain 1 p
 
 /-- `[[revisionLines b]]` = the `revising … at most n amendments` bounds the

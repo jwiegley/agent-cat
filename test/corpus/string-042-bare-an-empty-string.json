@@ -1,0 +1,4 @@
+{"request": {"string": {"text": "", "op": "bare"}},
+ "reply": {"result": ""},
+ "oracleVersion": 1,
+ "name": "bare an empty string"}
