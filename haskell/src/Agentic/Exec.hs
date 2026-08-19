@@ -544,10 +544,13 @@ stderrLog msg = hPutStrLn stderr ("agentic: " <> T.unpack msg)
 -- The last two are the /transport's/ to raise and not the decode loop's, which
 -- is why nothing in this module constructs them: \"the adapter refused\" and
 -- \"the turn ended with nothing\" are observations about a turn, and by the
--- time bytes reach 'decodeEl' there is no turn left to observe. An adapter that
--- can see a stop reason ("Agentic.Acp" can; "Agentic.AgentDeck" cannot) reads
--- its budget out of 'gapBudget' and answers with 'esRecover' — the same two
--- calls the decode loop makes.
+-- time bytes reach 'decodeEl' there is no turn left to observe. Nothing wires
+-- the transports to these budgets yet: an adapter that can see a stop reason
+-- ("Agentic.Acp" can; "Agentic.AgentDeck" cannot) is MEANT to read its budget
+-- out of 'gapBudget' and answer with 'esRecover', and that wiring lands with
+-- fail-over in wave 3 — recorded here so the vocabulary and its consumer
+-- arrive in the order they were designed. Today only the decode loop consumes
+-- these budgets.
 data TurnGap
   = -- | Bytes arrived and 'decodeEl' could not read them at the question's
     -- code. One code wide (@Decode_eq_none@): only a @flag@ can produce it.
@@ -673,10 +676,14 @@ data ExecSettings = ExecSettings
     -- to abandon.
     --
     -- The arm is the operator's standing answer to \"what does an addressee who
-    -- will not say yes or no mean\", and the honest one is the __loud__ arm —
-    -- the branch that does the visible thing — so that an unreadable flag
-    -- cannot quietly skip work. It is logged whenever it is taken, because it
-    -- is the one place an answer in the memo table came from the settings and
+    -- will not say yes or no mean\". The honest choice is the __loud__ arm —
+    -- the branch that does the visible thing, so an unreadable flag cannot
+    -- quietly skip work — but NOTHING HERE CHECKS THAT: the field is a bare
+    -- answer, the language cannot see which branch of a given @if@ does the
+    -- visible work, and an operator who configures the quiet arm gets exactly
+    -- the quiet skip the loud choice exists to prevent. That safety is the
+    -- operator's, and the log line says so each time the arm is taken —
+    -- the one place an answer in the memo table came from the settings and
     -- not from the addressee.
     esLoudArm :: !(Maybe Bool),
     -- | The standing answer a __person__ question takes in an unattended run:
@@ -903,10 +910,10 @@ askDecodingWith st c q say0 = do
             <> addresseeWord (qAddressee q)
             <> " after "
             <> T.pack (show (gaSpent ga + 1))
-            <> " attempts; taking the loud arm ("
+            <> " attempts; taking the operator-configured arm ("
             <> sayFlag arm
-            <> ") rather than abandoning the run. This answer is the operator's "
-            <> "standing one and not "
+            <> ") rather than abandoning the run — nothing checks that this arm "
+            <> "is the loud one; that safety is the operator's. This answer is not "
             <> addresseeWord (qAddressee q)
             <> "'s (last reply: '"
             <> trimAscii (gaWhy ga)

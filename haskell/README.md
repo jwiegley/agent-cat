@@ -548,6 +548,7 @@ time, machine-wide, so Lean builds must be rare, not merely serialized):
 ./ci/acp.sh        # every commit: the ACP transport, against agent-cat/test/stub_adapter.py
 ./ci/examples.sh   # every commit: every registered example's numbers, against a pinned table — no Lean
 ./ci/citations.sh  # every commit: every `X.lean:N` cited in a docstring still resolves — no Lean
+./ci/policies.sh   # every commit: the Exec policies probed against an unreadable flag — no Lean
 ./ci/tier1.sh      # nightly / semantic-core changes: bisim against the PREBUILT oracle
 ```
 

@@ -9,7 +9,7 @@
 # checks it is the one who is misled. That is not hypothetical. The retirement
 # commit deleted `Agentic/Core/Acp.lean`, `Agentic/Core/Rpc.lean` and
 # `test/AcpSmoke.lean` outright and cut 584 lines from `Agentic/Core/Exec.lean`
-# and 132 from `Agentic/Core/Explain.lean`, and 57 of the 220 citations in
+# and 132 from `Agentic/Core/Explain.lean`, and 58 of the 254 citations in
 # `haskell/` were left naming a file that no longer existed or a line past the
 # end of one — while `Exec.lean:925`, cited for a permission policy, still
 # resolved, to an unrelated retry loop.
@@ -70,7 +70,10 @@ leancount="$(wc -l <"$index" | tr -d ' ')"
 citations="$(mktemp "${TMPDIR:-/tmp}/agentic-cited.XXXXXX")"
 sources="$(mktemp "${TMPDIR:-/tmp}/agentic-sources.XXXXXX")"
 trap 'rm -f "$index" "$citations" "$sources"' EXIT
-find . -name '*.hs' -not -path '*/dist-newstyle/*' | sort >"$sources"
+# F4 (fess wave-1): scan the docs and gate scripts too — the bare-reference
+# class this gate exists to kill has lived in README.md and ci/*.sh before.
+find . \( -name '*.hs' -o -name '*.md' -o -name '*.sh' \) \
+  -not -path '*/dist-newstyle/*' | sort >"$sources"
 
 if [ ! -s "$sources" ]; then
   echo "ci/citations: no Haskell sources found under $(pwd) — wrong directory?" >&2
@@ -95,7 +98,7 @@ awk '
         }
       }
     }
-  ' $(cat "$sources") >"$citations" || true
+  ' $(cat "$sources") >"$citations"
 
 total=0
 failures=0
@@ -149,4 +152,12 @@ if [ "$failures" -gt 0 ]; then
   exit 1
 fi
 
+# F4 (fess wave-1): the floor. A gate that scanned sources and found nothing
+# is a broken gate, not a clean tree — the awk, the find or the format
+# changed under it. 200 is well under the ~254 live today and well over
+# noise; re-derive it if the citation discipline genuinely shrinks.
+if [ "$total" -lt 200 ]; then
+  echo "ci/citations: only $total citations found — below the 200 floor; the scan is broken, not the tree" >&2
+  exit 1
+fi
 echo "ci/citations: every citation resolves"

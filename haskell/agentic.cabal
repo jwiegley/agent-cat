@@ -145,6 +145,17 @@ executable tier1
     , agentic
     , agentic:examples
 
+-- The policy gate (test/PolicyProbe.hs): the six D6/D7 probes the wave-one
+-- audit ran by hand, pinned as a program. `lake`-free and corpus-free; run
+-- by ci/policies.sh.
+executable policy-probe
+  import:          settings
+  hs-source-dirs:  test
+  main-is:         PolicyProbe.hs
+  build-depends:
+    , agentic
+    , agentic:examples
+
 -- The runnable surface: plan an example, price it, or run it — against the
 -- scripted transport, against a live agent-deck session, or against an ACP
 -- adapter it starts itself (`--engine acp`).

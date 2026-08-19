@@ -424,7 +424,8 @@ freshScratch = do
 -- The answers are the stub's: a fixed guide, a fixed patch, three approvals,
 -- consent, and a receipt. Under them the revision settles in its first round,
 -- so the amendment prompt is never put and the run bills seven consultations —
--- @Harden.bill_demo@ in @demo\/Main.lean@.
+-- @Harden.bill_apply_demo@ (@Agentic\/Core\/HardenPatch.lean:971@), restated
+-- as @Dsl.bill_flagship_apply@ (@Agentic\/Core\/DslFlagship.lean:357@).
 scriptFor :: Text -> [(Text, Text)]
 scriptFor "harden" =
   [ ("Write out the house style guide", guideText),
