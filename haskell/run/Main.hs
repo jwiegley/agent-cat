@@ -16,9 +16,12 @@
 -- two gates.
 --
 -- Everything an operator can type, every refusal, every exit code and the whole
--- usage message live in "Agentic.Cli". Nothing about this binary's behaviour
--- moved when the code did: @ci\/examples.sh@, @ci\/acp.sh@ and @ci\/deck.sh@
--- drive it from outside and would have said so.
+-- usage message live in "Agentic.Cli". __The move was not behaviour-neutral__:
+-- it added the @list@ verb — this header said "three verbs" before it — and the
+-- usage message grew a line. What the gates hold unchanged is the three verbs
+-- that predate the move: @ci\/examples.sh@, @ci\/acp.sh@ and @ci\/deck.sh@ drive
+-- @plan@, @cost@ and @run@ from outside and would have said so had any of them
+-- shifted. No gate types @list@, so nothing but its own output covers it.
 module Main (main) where
 
 import Agentic.Cli (cliMain)

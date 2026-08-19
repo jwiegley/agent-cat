@@ -445,11 +445,12 @@ will run.
 
 ## Running a workflow
 
-A program in this language is a value, and `agentic-run` is the three things
-you can do to one: read it, price it, run it.
+A program in this language is a value, and `agentic-run` is the four things you
+can do: list the registered ones, then read, price or run any of them.
 
 ```sh
 nix develop -c cabal build all              # library, examples, all four executables
+nix develop -c cabal run agentic-run -- list
 nix develop -c cabal run agentic-run -- plan harden
 nix develop -c cabal run agentic-run -- cost harden
 nix develop -c cabal run agentic-run -- run  harden --scripted
@@ -804,12 +805,15 @@ src/Agentic/Oracle.hs   the line-delimited JSON client for the Lean oracle
 src/Agentic/Exec.hs     the IO interpreter: the memoizing fold and the decode loop
 src/Agentic/AgentDeck.hs  one agent-deck session as an answering service
 src/Agentic/Acp.hs      an ACP adapter this process starts, as an answering service
+src/Agentic/Cli.hs      the runner as a function of its registry: the four verbs,
+                        the flags, the refusals, the usage message
 example/Example/Harden.hs the walked examples, written in the authoring surface
 tier0/Main.hs           the corpus runner
 tier1/Cases.hs          the rebuilt cases, each quoting its surface source
 tier1/Main.hs           the rebuilt-case runner; it owns every comparison
 bisim/Main.hs           the live differential against the Lean oracle
-run/Main.hs             agentic-run: plan, cost, run
+run/Main.hs             agentic-run: Agentic.Cli's cliMain at the examples
+                        registry, and the argument for the two-registry split
 test/stub-deck.sh       a fake agent-deck, for testing the deck transport
 test/acp-misbehave.sh   an ACP adapter that babbles or wedges, for the two failures
                         a conforming stub cannot produce

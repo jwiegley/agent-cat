@@ -37,16 +37,16 @@
 --     refuse.
 --
 -- So the registry becomes a __value__ ('Registry') and the CLI a __function__
--- of it ('cliMain'). @agentic-run@ is @cliMain examplesRegistry@; @wf@ is
--- @cliMain workflowsRegistry@. Two binaries, two registries, two gates, one
--- argument parser.
+-- of it ('cliMain'). @agentic-run@ is @cliMain examplesRegistry@; @wf@ is that
+-- same function at @Workflows.Registry@'s @registry@, in @agent-workflows@'
+-- @bin\/Main.hs:21@. Two binaries, two registries, two gates, one parser.
 --
--- __The extraction is held by the gates that already existed.__
--- @ci\/examples.sh@ (plan, cost and a scripted run over every example),
--- @ci\/acp.sh@ and @ci\/deck.sh@ all drive the binary from outside; an
--- extraction that moved a byte of @agentic-run@'s behaviour fails them. That is
--- the whole acceptance test for this module, and it is why nothing else about
--- the verbs changed while it was being written.
+-- __What the gates hold, and what they do not.__ The extraction did /not/ leave
+-- behaviour alone: it __added the @list@ verb__, and the usage grew a line. The
+-- three verbs that predate it are what the gates hold unchanged —
+-- @ci\/examples.sh@, @ci\/acp.sh@ and @ci\/deck.sh@ drive @plan@, @cost@ and
+-- @run@ from outside, so a moved byte of any of them fails these. @list@ is
+-- covered by nothing but its own output: no gate types it.
 --
 -- An example may take __inputs__ — @review-lite@ takes the commit it reviews —
 -- and then every verb accepts them, in three spellings:
@@ -718,7 +718,7 @@ runCmd reg name target prog gs = case target of
       \deck session — started by somebody else — need not share"
     walkWith (executingWorld (shellAt ".")) (worldOfDeck cfg)
   Adapter at -> do
-    dir <- maybe freshScratch pure (atScratch at)
+    dir <- maybe (freshScratch reg) pure (atScratch at)
     createDirectoryIfMissing True dir
     let cfg = (atConfig at) {acpCwd = dir}
     say $
@@ -802,12 +802,14 @@ runCmd reg name target prog gs = case target of
 -- Every run acts somewhere: a workflow may end in an act that writes, and
 -- 'Agentic.Acp.permissionByCode' authorizes a tool call /in the session's
 -- working directory/. Making one per run is what keeps the answer to "where may
--- this agent write?" from being "wherever you happened to be standing".
-freshScratch :: IO FilePath
-freshScratch = do
+-- this agent write?" from being "wherever you happened to be standing". The name
+-- is the registry's binary, for the reason every refusal names it too: a @wf@
+-- run whose scratch directory said @agentic-run-@ would name the wrong product.
+freshScratch :: Registry -> IO FilePath
+freshScratch reg = do
   tmp <- getTemporaryDirectory
   stamp <- getMonotonicTimeNSec
-  pure (tmp </> ("agentic-run-" <> show stamp))
+  pure (tmp </> (T.unpack (regBinary reg) <> "-" <> show stamp))
 
 -- ---------------------------------------------------------------------------
 -- The command line

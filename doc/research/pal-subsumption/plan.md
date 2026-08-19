@@ -237,7 +237,7 @@ whole of the compatibility contract and it is checked, not assumed.
 | `ci/tier1.sh` (bisim) | P1 40/40, P2 960/960 | **identical, unedited** |
 | `ci/examples.sh` | 7 registered, 0 failures; `level`, `size`, `askNodes`, `costSummary`, both bills by **equality** | **identical, unedited** |
 | `ci/deck.sh` | 7/7 | **identical, unedited** |
-| `ci/workflows.sh` | every registered row: `level` and `paths` by equality, `costMax` as a ceiling, scripted exit 0 | **identical, unedited** |
+| `agent-workflows/ci/workflows.sh` | every registered row: `level` and `paths` by equality, `costMax` as a ceiling, scripted exit 0 | **identical, unedited** |
 | `ci/citations.sh` | every `X.lean:N` under `haskell/` resolves | **green**; `Route.hs`'s new citations are new obligations it must satisfy |
 
 Two gates move, and only by addition:
@@ -410,8 +410,9 @@ are cheapest.
 
 ### 2.2 What it needs from the ai-config track's foundation
 
-Four things, three of them already in the tree at pushed HEAD, and this is the
-point: **confer is written *out of* `workflows/Workflows/`, never beside it.** A
+Four things, three of them already written and pushed in the toolbox repository,
+and this is the point: **confer is written *out of*
+`agent-workflows/src/Workflows/`, never beside it.** A
 parallel roster type, a second fan-out helper or a private `wfText` is the exact
 shape this repository's own review discipline exists to catch.
 
@@ -481,7 +482,8 @@ or design section it came from — the tree's first house rule.
 wrapper. Not yet registered.
 
 **C3 — registration and the gate.** `confer` and `secondOpinion` into
-`Workflows.Registry`; the canned scripted table beside each; `ci/workflows.sh`
+`Workflows.Registry`; the canned scripted table beside each;
+`agent-workflows/ci/workflows.sh`
 picks them up by reading the registry from the binary rather than by
 transcription, so the gate rows are automatic once the rows exist.
 
@@ -533,7 +535,8 @@ all three, and the fan-out would be untested by the gate that exists to test it.
 **Stage C must assert the three distinct answers, not merely exit 0**, or the
 ordering rule is unenforced.
 
-**Gate C-c — `ci/workflows.sh`, automatically.** Per registered row: `level`
+**Gate C-c — `agent-workflows/ci/workflows.sh`, automatically.** Per registered
+row: `level`
 equality (`pipeline` for confer, `branch` for `conferGate` if it lands here),
 `paths` equality (1, or 3), `costMax` as a **ceiling** (5), scripted exit 0.
 `size`, `askNodes` and the bills are deliberately not pinned — they are exactly
@@ -743,12 +746,16 @@ Two consequences the coordinator must plan for rather than discover:
 ### 4.2 Stage R and Stage C builders must not run concurrently
 
 They touch mostly disjoint trees — `haskell/src/Agentic/`, `haskell/test/`,
-`haskell/ci/acp.sh` versus `workflows/Workflows/`, `haskell/ci/workflows.sh` —
-but they collide in two places that matter:
+`haskell/ci/acp.sh` in `agent-cat` versus `src/Workflows/` and `ci/workflows.sh`
+in `agent-workflows` — but they collide in two places that matter:
 
 - **`haskell/agentic.cabal`.** Stage R adds `Agentic.Route` to the library's
   `exposed-modules` and a paragraph to the description; Stage C adds confer's
-  modules to the `wf` stanza. One file, two writers, and cabal files merge badly.
+  modules to `agent-workflows.cabal`'s library, whose `wf` stanza depends on it.
+  Two cabal files in two repositories, then — but the library Stage R is editing
+  is the one Stage C's build resolves against, so a half-written
+  `exposed-modules` list breaks the other stage's build rather than merging
+  badly.
 - **`dist-newstyle`.** Two concurrent `cabal build`s in one directory is not a
   merge conflict, it is a corrupted build.
 
@@ -812,8 +819,9 @@ it, deprecate it, or plan for its removal.
 **No configuration is edited anywhere.** Not `~/src/nix/config/ai`, which is
 read-only reference for this track and is being written by another. Not the MCP
 server list. Not a skill file, not an agent file, not a settings file. **The
-change list of both stages is `haskell/src/`, `haskell/test/`, `haskell/ci/`,
-`haskell/agentic.cabal`, `workflows/Workflows/`, and this directory. Nothing
+change list of both stages is `agent-cat`'s `haskell/src/`, `haskell/test/`,
+`haskell/ci/`, `haskell/agentic.cabal` and this directory, plus
+`agent-workflows/src/Workflows/` in the separate toolbox repository. Nothing
 else.**
 
 **There is no migration checklist**, because there is no migration. A PAL call

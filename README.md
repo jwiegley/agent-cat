@@ -138,9 +138,10 @@ reach a command line.
 
 ## The runner — `agentic-run`
 
-One executable, three verbs over those programs, from `haskell/`:
+One executable, four verbs over those programs, from `haskell/`:
 
 ```sh
+cabal run agentic-run -- list
 cabal run agentic-run -- plan harden [--raw]
 cabal run agentic-run -- cost harden
 cabal run agentic-run -- run  harden --scripted

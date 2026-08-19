@@ -3,7 +3,9 @@
 *2026-08-19. Written against `agent-cat` at pushed `2f86fda`, reading
 `haskell/src/Agentic/{Workflow,WF,Builder,Plan,Exec,Chains,Text,Cli}.hs`,
 `haskell/example/Example/{Harden,Isaac}.hs` and the toolbox foundation that
-already exists at `workflows/Workflows/`. It executes the second half of
+already exists at `agent-workflows/src/Workflows/` — the owner's separate,
+private repository at `~/src/agent-workflows`, a downstream user of this
+library, not a directory of this one. It executes the second half of
 `doc/research/pal-vs-agent-cat.md` — the workflow-shaped counterpart of PAL's
 `consensus` — and is the sibling of `pal-subsumption/routing-design.md`, whose
 §8.3 says this document is the other half and that neither is blocked on the
@@ -67,7 +69,9 @@ fix.
 
 ### 1.0 What already exists, and is not reinvented here
 
-`workflows/Workflows/` is not empty. It already carries, at pushed HEAD:
+`agent-workflows/src/Workflows/` is not empty. It already carries, at that
+repository's HEAD (its root commit is `587467b`; the paths below are relative to
+`~/src/agent-workflows/src/Workflows/`):
 
 | piece | what it is | where |
 |---|---|---|

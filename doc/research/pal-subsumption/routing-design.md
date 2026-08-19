@@ -2,7 +2,9 @@
 
 *2026-08-19. Written against `agent-cat` at pushed `2f86fda`, reading
 `haskell/src/Agentic/{Cli,Exec,Acp,AgentDeck,Chains,World,Shell}.hs`,
-`haskell/run/Main.hs`, `workflows/Workflows/Parties.hs` and the two live gates
+`haskell/run/Main.hs`, `agent-workflows/src/Workflows/Parties.hs` — from the
+owner's separate, private repository at `~/src/agent-workflows` — and the two
+live gates
 `haskell/ci/{acp,deck}.sh`. This executes the one open item of
 `doc/research/pal-vs-agent-cat.md`: `acat-engine-party-routing-hcx`, "the one
 thing PAL can do that agent-cat's runner cannot yet do — reach two different
@@ -204,8 +206,8 @@ green **unedited**.
 
 ### 2.1 The two namespaces, as the tree already separates them
 
-`workflows/Workflows/Parties.hs` is the argument, written down before this
-design existed:
+`agent-workflows/src/Workflows/Parties.hs` is the argument, written down before
+this design existed:
 
 ```haskell
 -- The serving models: Text, not parties.
@@ -854,7 +856,8 @@ providers answered one program.
 
 The **confer** workflow — roster of parties, stance rubrics, verdict fold,
 synthesis — is the other half of PAL subsumption and belongs in
-`workflows/Workflows/`, not here. It is single-backend-runnable the day it is
+`agent-workflows/src/Workflows/`, not here. It is single-backend-runnable the
+day it is
 written and cross-backend the day step 4 lands, and `Workflows.Parties`'
 `reasoning` / `broad` / `lateral` ladders are already the roster it will draw
 from. Nothing in this design is blocked on it, and it is not blocked on this
