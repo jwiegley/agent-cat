@@ -144,8 +144,13 @@ module Example.Isaac
   )
 where
 
+-- The one thing an authoring module needs that the authoring surface does not
+-- re-export: the way back from a define's pieces to its text. See 'wfText',
+-- which is the only use of it here.
+import Agentic.Builder (wordsClosed)
 import Agentic.Workflow
 import qualified Agentic.Workflow.Do as W
+import Data.Maybe (fromMaybe)
 import Data.String (fromString)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -168,82 +173,106 @@ import Prelude
 tshow :: Int -> Text
 tshow = T.pack . show
 
--- | Lines, joined. Every define below is written as a list of lines rather than
--- as one string literal so that the text a leaf sends can be read in the
--- source at the width it is sent at.
-para :: [Text] -> Text
-para = T.intercalate "\n"
+-- | The text a @[wf|…|]@ define says. Every define below that runs to more than
+-- one line is a fence, so that the text a leaf sends is read in the source at
+-- the width it is sent at, under the same layout rule as the prompts that hole
+-- it — and so that the one place a prompt's shape is decided is the quoter.
+--
+-- __Why these are 'Text' and not the 'Words' the quoter yields.__ A hole-free
+-- fence /is/ a 'Words', and 'Says' splices one into a prompt as happily as it
+-- splices a 'Text' — that instance exists for exactly this, and it is the shape
+-- a @define@ has in the language. Two things ask for the 'Text' anyway, and
+-- both are about not moving a byte:
+--
+--   * 'isaacScript' keys its canned replies on the defines themselves, and a
+--     key is a 'Text' matched as a prefix of a /rendered/ prompt. Defines typed
+--     as 'Words' would be rendered at every one of those rows instead — this
+--     same conversion, written out once per row, in the one place the module
+--     argues should read as \"the key is the define\".
+--   * __Chunking is normative.__ @plan --raw@ prints the chunk list, so a
+--     define that splices as /two/ chunks where it spliced as one is a visible
+--     change even when the prompt's bytes are identical. 'qaFence', 'grindLens'
+--     and 'grindSynthesisBrief' hole a computed count or a derived table; as
+--     'Words' each of those holes would carry a chunk boundary into every
+--     prompt that splices them, and as 'Text' they carry the one @lit@ they
+--     always did.
+--
+-- 'Agentic.Builder.wordsClosed' cannot fail on a define: the scope is empty, so
+-- no piece of one can be an @interp@ — a hole naming a binding needs a live
+-- handle, and at the empty scope there are none. The @""@ is unreachable, and
+-- is written rather than an @error@ so that a define is a value and not a
+-- bottom.
+wfText :: Words '[] -> Text
+wfText = fromMaybe "" . wordsClosed
+
+-- | A roster as the bullet table the two derived briefs hole, one row per
+-- entry. @qaOfCommitOver@ and @grindSynthesisOver@ derive theirs from the very
+-- list the panel is built from, and so do 'qaFence' and 'grindSynthesisBrief'.
+bullets :: [(Text, Text)] -> Text
+bullets rows = T.intercalate "\n" ["- " <> n <> " -- " <> owns | (n, owns) <- rows]
 
 -- The four exploration stances (@prompts\/explore\/*.md@, summarised) --------
 
 -- | @prompts\/explore\/intrepid.md@, summarised. The path, not the risks.
 intrepidStance :: Text
-intrepidStance =
-  para
-    [ "You are bold and ambitious. Your job is the shortest path from here to",
-      "working code in a user's hands. Three other stances cover the risks, the",
-      "design alternatives, and the shape of the tree. Do not repeat their work.",
-      "",
-      "Read the code first and find the seams the codebase already establishes.",
-      "Then sketch the implementation as a concrete, ordered sequence. For each",
-      "move: name the actual identifier, say what changes and what done looks",
-      "like, point at existing code showing the pattern, and order the moves so",
-      "that each works without a later one. Separate what is net-new from what",
-      "follows an existing trail: net-new is where the risk concentrates, so",
-      "flag it for the skeptic.",
-      "",
-      "If the direct path carries a cost, say the cost plainly. Routing around a",
-      "real cost is fine; capitulating to an imagined one is not."
-    ]
+intrepidStance = wfText [wf|
+  You are bold and ambitious. Your job is the shortest path from here to
+  working code in a user's hands. Three other stances cover the risks, the
+  design alternatives, and the shape of the tree. Do not repeat their work.
+
+  Read the code first and find the seams the codebase already establishes.
+  Then sketch the implementation as a concrete, ordered sequence. For each
+  move: name the actual identifier, say what changes and what done looks
+  like, point at existing code showing the pattern, and order the moves so
+  that each works without a later one. Separate what is net-new from what
+  follows an existing trail: net-new is where the risk concentrates, so
+  flag it for the skeptic.
+
+  If the direct path carries a cost, say the cost plainly. Routing around a
+  real cost is fine; capitulating to an imagined one is not.|]
 
 -- | @prompts\/explore\/skeptic.md@, summarised. Its two best sentences are
 -- quoted rather than paraphrased.
 skepticStance :: Text
-skepticStance =
-  para
-    [ "You are the skeptic. Your job is to find what will go wrong, not to",
-      "confirm the idea sounds reasonable. You are reading code, not writing it.",
-      "",
-      "Trace the blast radius before you list a single risk. A risk that you did",
-      "not trace to a concrete mechanism is not a risk -- it is anxiety, and the",
-      "planner will rightly ignore it.",
-      "",
-      "Enumerate: what breaks (name the caller, the format, the version); the",
-      "edge cases this codebase actually hits; and silent failures, your",
-      "highest-value catch -- a wrong answer with a green checkmark is the",
-      "disaster.",
-      "",
-      "Three real risks beat ten plausible-sounding ones."
-    ]
+skepticStance = wfText [wf|
+  You are the skeptic. Your job is to find what will go wrong, not to
+  confirm the idea sounds reasonable. You are reading code, not writing it.
+
+  Trace the blast radius before you list a single risk. A risk that you did
+  not trace to a concrete mechanism is not a risk -- it is anxiety, and the
+  planner will rightly ignore it.
+
+  Enumerate: what breaks (name the caller, the format, the version); the
+  edge cases this codebase actually hits; and silent failures, your
+  highest-value catch -- a wrong answer with a green checkmark is the
+  disaster.
+
+  Three real risks beat ten plausible-sounding ones.|]
 
 -- | @prompts\/explore\/contemplative.md@, summarised. The design options.
 contemplativeStance :: Text
-contemplativeStance =
-  para
-    [ "You are the contemplative stance. Your job is the design space, not the",
-      "path and not the risks. Name two or three shapes this change could take,",
-      "and for each: what it makes easy, what it makes hard, and what it commits",
-      "the tree to that a later change would have to undo.",
-      "",
-      "Prefer the option that makes an illegal state unrepresentable over the",
-      "option that checks for it. Say which option you would take, and why the",
-      "others lose."
-    ]
+contemplativeStance = wfText [wf|
+  You are the contemplative stance. Your job is the design space, not the
+  path and not the risks. Name two or three shapes this change could take,
+  and for each: what it makes easy, what it makes hard, and what it commits
+  the tree to that a later change would have to undo.
+
+  Prefer the option that makes an illegal state unrepresentable over the
+  option that checks for it. Say which option you would take, and why the
+  others lose.|]
 
 -- | @prompts\/explore\/architect.md@, summarised. Reads the tree, not the
 -- request.
 architectStance :: Text
-architectStance =
-  para
-    [ "You are the architect. The other three stances argue about the change;",
-      "none of them was asked what shape it has to land in. Read the tree.",
-      "",
-      "Say where this work belongs: which module owns it, which boundary it",
-      "must not cross, which existing abstraction it extends rather than",
-      "parallels. Name the file that should hold each piece. A change that lands",
-      "beside the abstraction it should have extended is the failure you exist",
-      "to prevent."
-    ]
+architectStance = wfText [wf|
+  You are the architect. The other three stances argue about the change;
+  none of them was asked what shape it has to land in. Read the tree.
+
+  Say where this work belongs: which module owns it, which boundary it
+  must not cross, which existing abstraction it extends rather than
+  parallels. Name the file that should hold each piece. A change that lands
+  beside the abstraction it should have extended is the failure you exist
+  to prevent.|]
 
 -- | @prompts\/plan.md@, summarised: the reduction the four stances narrow into.
 --
@@ -253,98 +282,82 @@ architectStance =
 -- reduction has no combinator here, so the order lives in the prompt instead,
 -- which is the same order and one fewer moving part.
 planBrief :: Text
-planBrief =
-  para
-    [ "Write the implementation plan. Four stances were asked first, and their",
-      "reports follow in narrowing order: what breaks, then the shape it must",
-      "land in, then which design, then the moves. The last block is the request",
-      "itself.",
-      "",
-      "Produce numbered steps. Each step names the file it touches, what changes,",
-      "and how a reader would know it is done. No step may depend on a later one."
-    ]
+planBrief = wfText [wf|
+  Write the implementation plan. Four stances were asked first, and their
+  reports follow in narrowing order: what breaks, then the shape it must
+  land in, then which design, then the moves. The last block is the request
+  itself.
+
+  Produce numbered steps. Each step names the file it touches, what changes,
+  and how a reader would know it is done. No step may depend on a later one.|]
 
 -- The six plan lenses (@editPlan@) -----------------------------------------
 
 -- | @ponytailLadder@, as a plan lens: delete first.
 ponytailLens :: Text
-ponytailLens =
-  para
-    [ "Ponytail lens. Rewrite the plan below, deleting first.",
-      "",
-      "For each step ask, in order: does this need to exist at all; can the",
-      "standard library do it; can an existing abstraction in this tree do it;",
-      "can it be one line instead of fifty. Delete the steps that answer yes.",
-      "Output the plan, not a critique of it."
-    ]
+ponytailLens = wfText [wf|
+  Ponytail lens. Rewrite the plan below, deleting first.
+
+  For each step ask, in order: does this need to exist at all; can the
+  standard library do it; can an existing abstraction in this tree do it;
+  can it be one line instead of fifty. Delete the steps that answer yes.
+  Output the plan, not a critique of it.|]
 
 -- | @prompts\/plan-denotational.md@, summarised.
 denotationalLens :: Text
-denotationalLens =
-  para
-    [ "Denotational lens. Rewrite the plan below so that each step says what the",
-      "thing it builds MEANS before it says how it is built. Where a step",
-      "introduces a type, state its denotation in one line. Where two steps",
-      "introduce two spellings of one meaning, merge them.",
-      "Output the plan."
-    ]
+denotationalLens = wfText [wf|
+  Denotational lens. Rewrite the plan below so that each step says what the
+  thing it builds MEANS before it says how it is built. Where a step
+  introduces a type, state its denotation in one line. Where two steps
+  introduce two spellings of one meaning, merge them.
+  Output the plan.|]
 
 -- | @prompts\/plan-risk.md@, summarised.
 riskLens :: Text
-riskLens =
-  para
-    [ "Risk lens. Rewrite the plan below so that the step whose failure costs",
-      "the most is the step that is verified first. Add the check each risky",
-      "step needs; delete a check that guards nothing.",
-      "Output the plan."
-    ]
+riskLens = wfText [wf|
+  Risk lens. Rewrite the plan below so that the step whose failure costs
+  the most is the step that is verified first. Add the check each risky
+  step needs; delete a check that guards nothing.
+  Output the plan.|]
 
 -- | @prompts\/plan-verification.md@, summarised.
 verificationLens :: Text
-verificationLens =
-  para
-    [ "Verification lens. Rewrite the plan below so that every step names the",
-      "command or the test that decides whether it worked. A step whose done",
-      "condition is a person's opinion is a step that is not planned yet.",
-      "Output the plan."
-    ]
+verificationLens = wfText [wf|
+  Verification lens. Rewrite the plan below so that every step names the
+  command or the test that decides whether it worked. A step whose done
+  condition is a person's opinion is a step that is not planned yet.
+  Output the plan.|]
 
 -- | @lookaheadLens@, summarised: reorder for irreversibility.
 lookaheadLens :: Text
-lookaheadLens =
-  para
-    [ "Lookahead lens. Reorder the plan below so that the irreversible steps",
-      "come last and the steps that teach you something come first. A migration,",
-      "a published artefact, a deleted file: each is a step that cannot be",
-      "walked back, and each should stand behind everything that could still",
-      "change the design.",
-      "Output the plan."
-    ]
+lookaheadLens = wfText [wf|
+  Lookahead lens. Reorder the plan below so that the irreversible steps
+  come last and the steps that teach you something come first. A migration,
+  a published artefact, a deleted file: each is a step that cannot be
+  walked back, and each should stand behind everything that could still
+  change the design.
+  Output the plan.|]
 
 -- | @simpleEnglishLens@, summarised: an ASD-STE100 reword.
 simpleEnglishLens :: Text
-simpleEnglishLens =
-  para
-    [ "Simple English lens. Reword the plan below in Simple Technical English:",
-      "one instruction per sentence, active voice, present tense, no word used",
-      "in two senses. Change no step and drop no step -- only the words.",
-      "Output the plan."
-    ]
+simpleEnglishLens = wfText [wf|
+  Simple English lens. Reword the plan below in Simple Technical English:
+  one instruction per sentence, active voice, present tense, no word used
+  in two senses. Change no step and drop no step -- only the words.
+  Output the plan.|]
 
 -- The review lenses (@review-lite@) ----------------------------------------
 
 -- | The correctness lens, summarised. @claude-agent\/fable@ in @incite@.
 correctnessLens :: Text
-correctnessLens =
-  para
-    [ "Correctness lens. Read the change below and report only defects that are",
-      "wrong on inputs this code will actually see. For each: the location, the",
-      "input that reaches it, and what it produces instead of the right answer.",
-      "Quote the line you are pointing at.",
-      "",
-      "One line per finding, with a severity. If the change is correct, say so",
-      "in one line rather than manufacturing a critique."
-    ]
+correctnessLens = wfText [wf|
+  Correctness lens. Read the change below and report only defects that are
+  wrong on inputs this code will actually see. For each: the location, the
+  input that reaches it, and what it produces instead of the right answer.
+  Quote the line you are pointing at.
+
+  One line per finding, with a severity. If the change is correct, say so
+  in one line rather than manufacturing a critique.|]
 
 -- | The @fess@ honesty rubric, summarised — and the one rule it states twice.
 --
@@ -355,42 +368,36 @@ correctnessLens =
 -- named per question, so the pairing that must not exist is a pairing nobody
 -- wrote.
 fessLens :: Text
-fessLens =
-  para
-    [ "Fess lens. Audit the claims made about this change against the change",
-      "itself. Four shapes, most important first:",
-      "",
-      "- a verification gap: a claim that something was checked, where nothing",
-      "  in the record shows the check running;",
-      "- spec drift: the change does something other than what was asked;",
-      "- scope creep: the change does more than what was asked;",
-      "- a quiet downgrade: a bar that was lowered without saying so.",
-      "",
-      "A claim that a mechanism FIRED is proved by the log line showing it fire",
-      "and by nothing else. The eventual outcome is not the mechanism.",
-      "",
-      "End with a severity-ranked list of the gaps the author did not report."
-    ]
+fessLens = wfText [wf|
+  Fess lens. Audit the claims made about this change against the change
+  itself. Four shapes, most important first:
+
+  - a verification gap: a claim that something was checked, where nothing
+    in the record shows the check running;
+  - spec drift: the change does something other than what was asked;
+  - scope creep: the change does more than what was asked;
+  - a quiet downgrade: a bar that was lowered without saying so.
+
+  A claim that a mechanism FIRED is proved by the log line showing it fire
+  and by nothing else. The eventual outcome is not the mechanism.
+
+  End with a severity-ranked list of the gaps the author did not report.|]
 
 -- | The complexity lens, summarised. Codex in @incite@.
 complexityLens :: Text
-complexityLens =
-  para
-    [ "Complexity lens. What is braided together in this change that should be",
-      "separate? Name each braid: the two concerns, the line where they meet,",
-      "and the seam a reader would cut on. Do not report defects and do not",
-      "report things that should not exist -- other lenses own both."
-    ]
+complexityLens = wfText [wf|
+  Complexity lens. What is braided together in this change that should be
+  separate? Name each braid: the two concerns, the line where they meet,
+  and the seam a reader would cut on. Do not report defects and do not
+  report things that should not exist -- other lenses own both.|]
 
 -- | The ponytail lens over a commit, summarised.
 ponytailReviewLens :: Text
-ponytailReviewLens =
-  para
-    [ "Ponytail lens. What in this change should not exist at all? Reinvented",
-      "standard library, a dependency that buys one function, an abstraction",
-      "with one caller, flexibility nothing asked for. One line per cut: what",
-      "to delete, and what replaces it."
-    ]
+ponytailReviewLens = wfText [wf|
+  Ponytail lens. What in this change should not exist at all? Reinvented
+  standard library, a dependency that buys one function, an abstraction
+  with one caller, flexibility nothing asked for. One line per cut: what
+  to delete, and what replaces it.|]
 
 -- | The lenses @review-lite@ runs BESIDE its qa leaf, each with the question it
 -- owns — @Incite.Review.qaSiblings@.
@@ -413,29 +420,26 @@ qaSiblings =
 -- telling its reader a stale reviewer count, which is prose that nothing goes
 -- red on.
 qaFence :: Text
-qaFence =
-  para $
-    [ "Adversarial QA lens. Yours is the question none of the others asks:",
-      "how does this fail?",
-      "",
-      "You are one of "
-        <> tshow (length qaSiblings + 1)
-        <> " independent reviewers and there is no synthesis",
-      "step behind you, so anything you repeat ships twice. The other "
-        <> tshow (length qaSiblings)
-        <> " own",
-      "the following, under the name each one's block carries:",
-      ""
-    ]
-      <> ["- " <> n <> " -- " <> owns | (n, owns) <- qaSiblings]
-      <> [ "",
-           "Do not report any of those. Look for: a trust boundary this change",
-           "moves or crosses; failure under conditions the happy path never sees;",
-           "an error path that loses what a debugger would need; a contract with",
-           "something outside this change that it alters on one side only.",
-           "",
-           "One line per finding -- location, how it fails, what the failure costs."
-         ]
+qaFence = wfText [wf|
+  Adversarial QA lens. Yours is the question none of the others asks:
+  how does this fail?
+
+  You are one of {reviewers} independent reviewers and there is no synthesis
+  step behind you, so anything you repeat ships twice. The other {siblings} own
+  the following, under the name each one's block carries:
+
+  {roster}
+
+  Do not report any of those. Look for: a trust boundary this change
+  moves or crosses; failure under conditions the happy path never sees;
+  an error path that loses what a debugger would need; a contract with
+  something outside this change that it alters on one side only.
+
+  One line per finding -- location, how it fails, what the failure costs.|]
+  where
+    reviewers = tshow (length qaSiblings + 1)
+    siblings = tshow (length qaSiblings)
+    roster = bullets qaSiblings
 
 -- | The router's whole brief — @Incite.Review.haskellTriage@, adapted to a
 -- yes\/no question.
@@ -445,37 +449,33 @@ qaFence =
 -- with the answer format changed. What does /not/ carry over is the policy
 -- around the word: see 'reviewLite'.
 haskellTriageBrief :: Text
-haskellTriageBrief =
-  para
-    [ "You are a router, not a reviewer. The input below either shows the diff",
-      "or names the change. If it shows the diff, read only the paths its",
-      "headers touch. If it only names a ref, run `git show --name-only` on it",
-      "and read only the path list -- never the full diff.",
-      "",
-      "Answer yes if any touched path ends in `.hs`, `.lhs`, `.hs-boot`, `.hsc`",
-      "or `.cabal`; answer no otherwise.",
-      "",
-      "Do not review the change. Do not report findings. One word."
-    ]
+haskellTriageBrief = wfText [wf|
+  You are a router, not a reviewer. The input below either shows the diff
+  or names the change. If it shows the diff, read only the paths its
+  headers touch. If it only names a ref, run `git show --name-only` on it
+  and read only the path list -- never the full diff.
+
+  Answer yes if any touched path ends in `.hs`, `.lhs`, `.hs-boot`, `.hsc`
+  or `.cabal`; answer no otherwise.
+
+  Do not review the change. Do not report findings. One word.|]
 
 -- | @haskellOfHouse@ — the upstream Haskell rubric plus the house addendum,
 -- summarised. Thirty kilobytes in @incite@, which is why it stands behind a
 -- router.
 haskellHouseLens :: Text
-haskellHouseLens =
-  para
-    [ "Haskell lens. Types, totality, strictness and instances, in that order.",
-      "",
-      "- Types: does a type admit a state the code then has to check for?",
-      "- Totality: a partial function, an incomplete pattern, a `head`, a",
-      "  `fromJust`, a `read` -- name it and say what reaches it.",
-      "- Strictness: a lazy accumulator, a lazy field in a record that is folded",
-      "  over, a space leak with a name.",
-      "- Instances: an orphan, an instance whose laws do not hold, a `Semigroup`",
-      "  that is not associative on the values it will see.",
-      "",
-      "One line per finding, with a severity, quoting the line."
-    ]
+haskellHouseLens = wfText [wf|
+  Haskell lens. Types, totality, strictness and instances, in that order.
+
+  - Types: does a type admit a state the code then has to check for?
+  - Totality: a partial function, an incomplete pattern, a `head`, a
+    `fromJust`, a `read` -- name it and say what reaches it.
+  - Strictness: a lazy accumulator, a lazy field in a record that is folded
+    over, a space leak with a name.
+  - Instances: an orphan, an instance whose laws do not hold, a `Semigroup`
+    that is not associative on the values it will see.
+
+  One line per finding, with a severity, quoting the line.|]
 
 -- | What the fold prints in place of the Haskell block when the router says no
 -- — @routeHaskell@'s @Right@ arm, verbatim.
@@ -490,14 +490,12 @@ noHaskellEdits = "No Haskell edits."
 -- answers here, so the fold is a tool that writes the blocks down in the
 -- narrowing order — which is a leaf @incite@ does not pay for.
 reviewReportBrief :: Text
-reviewReportBrief =
-  para
-    [ "Write the review below to `review-lite.md` in the current directory,",
-      "one block per reviewer, under the heading each reviewer's name gives it,",
-      "in the order the blocks arrive -- correctness, haskell, fess, qa,",
-      "complexity, ponytail. Reconcile nothing and rank nothing: six",
-      "independent opinions are the artefact. Then reply DONE."
-    ]
+reviewReportBrief = wfText [wf|
+  Write the review below to `review-lite.md` in the current directory,
+  one block per reviewer, under the heading each reviewer's name gives it,
+  in the order the blocks arrive -- correctness, haskell, fess, qa,
+  complexity, ponytail. Reconcile nothing and rank nothing: six
+  independent opinions are the artefact. Then reply DONE.|]
 
 -- The acting half ----------------------------------------------------------
 
@@ -508,11 +506,9 @@ reviewReportBrief =
 -- tool. This is a real difference and not a paraphrase: the operator's text
 -- reaches @incite@'s first leaf as data, and reaches this one as an answer.
 readRequest :: Text
-readRequest =
-  para
-    [ "Read the change request for this run and reply with it verbatim,",
-      "and with nothing else."
-    ]
+readRequest = wfText [wf|
+  Read the change request for this run and reply with it verbatim,
+  and with nothing else.|]
 
 -- | @planSteer "implementation"@, verbatim.
 --
@@ -522,36 +518,32 @@ readRequest =
 -- honestly answer in four seconds by pressing enter, and then nothing in the
 -- run states what the change has to clear.
 planSteerBrief :: Text
-planSteerBrief =
-  para
-    [ "Review the plan -- state the acceptance bar this change must clear, and",
-      "any other guidance, before implementation begins."
-    ]
+planSteerBrief = wfText [wf|
+  Review the plan -- state the acceptance bar this change must clear, and
+  any other guidance, before implementation begins.|]
 
 -- | The worker's brief — @Incite.Feature.implementLeaf@, with its two rules of
 -- the record quoted, and a run was lost to each.
 implementBrief :: Text
-implementBrief =
-  para
-    [ "Implement this plan fully in the current repository -- edit the files",
-      "directly.",
-      "",
-      "You are running under an orchestrator that will call you again with your",
-      "own summary as its input, so write the summary for your successor: what",
-      "you changed, what is left, and what it needs to know to continue.",
-      "",
-      "Two rules of the record, and a run was lost to each:",
-      "",
-      "- A claim that a mechanism fired -- terminated, killed, scrubbed, cleaned",
-      "  up -- quotes the log line that shows the firing. The eventual outcome is",
-      "  not the mechanism.",
-      "- Before you claim the last step, run the suites and write the closing",
-      "  counts into the final commit body, and only then write the summary. A",
-      "  green that lives only in a summary is a green nobody can check.",
-      "",
-      "End with a status line, alone on the last line: WORK COMPLETE, WORK",
-      "REMAINS, or WORK BLOCKED."
-    ]
+implementBrief = wfText [wf|
+  Implement this plan fully in the current repository -- edit the files
+  directly.
+
+  You are running under an orchestrator that will call you again with your
+  own summary as its input, so write the summary for your successor: what
+  you changed, what is left, and what it needs to know to continue.
+
+  Two rules of the record, and a run was lost to each:
+
+  - A claim that a mechanism fired -- terminated, killed, scrubbed, cleaned
+    up -- quotes the log line that shows the firing. The eventual outcome is
+    not the mechanism.
+  - Before you claim the last step, run the suites and write the closing
+    counts into the final commit body, and only then write the summary. A
+    green that lives only in a summary is a green nobody can check.
+
+  End with a status line, alone on the last line: WORK COMPLETE, WORK
+  REMAINS, or WORK BLOCKED.|]
 
 -- | The orchestrator's own reading of the worker's last line — @tripEnding@ as
 -- a /question/, because it cannot be a function here.
@@ -561,37 +553,31 @@ implementBrief =
 -- handle and not a value, so the classification is a leaf. Two of the four
 -- endings survive the translation; see 'shipFeatureLiteProgram'.
 tripStatusBrief :: Text
-tripStatusBrief =
-  para
-    [ "You are the orchestrator, not a reviewer. Read ONLY the last non-empty",
-      "line of the summary below.",
-      "",
-      "- If it is WORK COMPLETE, reply with exactly APPROVE.",
-      "- If it is WORK REMAINS, reply OBJECTION: work remains.",
-      "- If it is WORK BLOCKED, reply OBJECTION: blocked, followed by the reason.",
-      "- If it is none of those, reply OBJECTION: status line missing.",
-      "",
-      "Do not judge the work. Read the line."
-    ]
+tripStatusBrief = wfText [wf|
+  You are the orchestrator, not a reviewer. Read ONLY the last non-empty
+  line of the summary below.
+
+  - If it is WORK COMPLETE, reply with exactly APPROVE.
+  - If it is WORK REMAINS, reply OBJECTION: work remains.
+  - If it is WORK BLOCKED, reply OBJECTION: blocked, followed by the reason.
+  - If it is none of those, reply OBJECTION: status line missing.
+
+  Do not judge the work. Read the line.|]
 
 -- | @codeRule@: the artefact rule every code fixer stands under.
 codeRule :: Text
-codeRule =
-  para
-    [ "The code is the artefact and the review is the record. Correct the CODE.",
-      "Never edit the review to make a finding go away, and never weaken a test",
-      "to make a check pass: a weakened assertion is the cheapest way there is",
-      "to turn a real failure into a green one."
-    ]
+codeRule = wfText [wf|
+  The code is the artefact and the review is the record. Correct the CODE.
+  Never edit the review to make a finding go away, and never weaken a test
+  to make a check pass: a weakened assertion is the cheapest way there is
+  to turn a real failure into a green one.|]
 
 -- | @closeWithChanges@, verbatim.
 closeWithChanges :: Text
-closeWithChanges =
-  para
-    [ "Close with what you changed and what you rejected, in one paragraph.",
-      "This leaf runs once and nothing calls it again, so a finding you leave",
-      "open leaves the run with it open."
-    ]
+closeWithChanges = wfText [wf|
+  Close with what you changed and what you rejected, in one paragraph.
+  This leaf runs once and nothing calls it again, so a finding you leave
+  open leaves the run with it open.|]
 
 -- | The green gate's question.
 --
@@ -602,48 +588,40 @@ closeWithChanges =
 -- /answerer/ authored — so this is the second, and it is labelled as such
 -- rather than dressed as the first.
 greenGateBrief :: Text
-greenGateBrief =
-  para
-    [ "Run `nix flake check` in the current repository and read its exit code.",
-      "",
-      "- Exit 0: reply with exactly APPROVE.",
-      "- Anything else: reply OBJECTION: followed by the first failing line.",
-      "",
-      "Report the exit code you saw. Do not report the code you expected."
-    ]
+greenGateBrief = wfText [wf|
+  Run `nix flake check` in the current repository and read its exit code.
+
+  - Exit 0: reply with exactly APPROVE.
+  - Anything else: reply OBJECTION: followed by the first failing line.
+
+  Report the exit code you saw. Do not report the code you expected.|]
 
 -- | The repair leaf under the gate.
 repairBrief :: Text
-repairBrief =
-  para
-    [ "The gate below is red. Fix the tree so that `nix flake check` passes.",
-      "",
-      "Do not silence the check, do not lower a warning level, and do not mark a",
-      "test skipped. There are no pre-existing issues: you branched from a",
-      "passing build."
-    ]
+repairBrief = wfText [wf|
+  The gate below is red. Fix the tree so that `nix flake check` passes.
+
+  Do not silence the check, do not lower a warning level, and do not mark a
+  test skipped. There are no pre-existing issues: you branched from a
+  passing build.|]
 
 -- | The remediation leaf's brief.
 remediateBrief :: Text
-remediateBrief =
-  para
-    [ "Below is a panel's verdict on the work, and then the work itself. Close",
-      "every finding the panel raised, in the code."
-    ]
+remediateBrief = wfText [wf|
+  Below is a panel's verdict on the work, and then the work itself. Close
+  every finding the panel raised, in the code.|]
 
 -- The grind ----------------------------------------------------------------
 
 -- | The facts probe every grind's facts file ends with, and the line it emits
 -- outside the target checkout.
 grindFactsBrief :: Text
-grindFactsBrief =
-  para
-    [ "Read the target checkout's facts file and reply with it verbatim.",
-      "",
-      "Then probe every path it names. If any named path does not exist here,",
-      "reply with the single line FACTS PATHS UNRESOLVED and nothing else: this",
-      "is not the checkout the facts describe."
-    ]
+grindFactsBrief = wfText [wf|
+  Read the target checkout's facts file and reply with it verbatim.
+
+  Then probe every path it names. If any named path does not exist here,
+  reply with the single line FACTS PATHS UNRESOLVED and nothing else: this
+  is not the checkout the facts describe.|]
 
 -- | The lens table @grind-tests@ spreads one per serving model, with the
 -- question each one owns.
@@ -665,17 +643,15 @@ grindLensRoster =
 
 -- | One grind lens's brief, derived from its row of 'grindLensRoster'.
 grindLens :: Text -> Text -> Text
-grindLens name owns =
-  para
-    [ "Test-suite audit, `" <> name <> "` lens. You own " <> owns <> ".",
-      "",
-      "Read the tree named in the facts below. Report only findings of your own",
-      "kind: five other lenses are reading the same tree and anything you repeat",
-      "is ranked twice. For each finding: the file and the test, what is wrong,",
-      "and what it would cost to leave it.",
-      "",
-      "One line per finding, with a severity of critical, high, medium or low."
-    ]
+grindLens name owns = wfText [wf|
+  Test-suite audit, `{name}` lens. You own {owns}.
+
+  Read the tree named in the facts below. Report only findings of your own
+  kind: five other lenses are reading the same tree and anything you repeat
+  is ranked twice. For each finding: the file and the test, what is wrong,
+  and what it would cost to leave it.
+
+  One line per finding, with a severity of critical, high, medium or low.|]
 
 -- | The synthesis brief, with its roster derived from the table it will refuse
 -- on — @grindSynthesisOver@.
@@ -683,28 +659,26 @@ grindLens name owns =
 -- The refusal is the point: an unauthenticated backend returns nothing, and
 -- nothing folded into a ranked list reads exactly like a clean tree.
 grindSynthesisBrief :: Text
-grindSynthesisBrief =
-  para $
-    [ "Synthesise one ranked report from the lens blocks below and write it to",
-      "`docs/audits/grind-tests-<date>.md`.",
-      "",
-      "You were served by exactly "
-        <> tshow (length grindLensRoster)
-        <> " lenses, and they are:",
-      ""
-    ]
-      <> ["- " <> n <> " -- " <> owns | (n, owns) <- grindLensRoster]
-      <> [ "",
-           "If any block above is missing or empty, STOP and say which one. An",
-           "unauthenticated backend returns nothing, and nothing folded into a",
-           "ranked list reads exactly like a clean tree.",
-           "",
-           "If any block carries the line FACTS PATHS UNRESOLVED, repeat that line",
-           "and stop.",
-           "",
-           "Otherwise: de-duplicate, rank by severity, and say for each finding",
-           "which lens raised it."
-         ]
+grindSynthesisBrief = wfText [wf|
+  Synthesise one ranked report from the lens blocks below and write it to
+  `docs/audits/grind-tests-<date>.md`.
+
+  You were served by exactly {lenses} lenses, and they are:
+
+  {roster}
+
+  If any block above is missing or empty, STOP and say which one. An
+  unauthenticated backend returns nothing, and nothing folded into a
+  ranked list reads exactly like a clean tree.
+
+  If any block carries the line FACTS PATHS UNRESOLVED, repeat that line
+  and stop.
+
+  Otherwise: de-duplicate, rank by severity, and say for each finding
+  which lens raised it.|]
+  where
+    lenses = tshow (length grindLensRoster)
+    roster = bullets grindLensRoster
 
 -- | The facts gate — @decideFactsResolved@ behind a fuel-1 @loopUntil@, as a
 -- question.
@@ -713,83 +687,69 @@ grindSynthesisBrief =
 -- in a loop whose exhaustion aborts the run before any fixer acts. Here the
 -- scan is a leaf and the abort is the empty else arm of an @if@.
 factsGateBrief :: Text
-factsGateBrief =
-  para
-    [ "Read the report below. Answer no if it contains the line FACTS PATHS",
-      "UNRESOLVED, or if it says a lens block was missing or empty. Answer yes",
-      "otherwise.",
-      "",
-      "One word. Do not summarise the report."
-    ]
+factsGateBrief = wfText [wf|
+  Read the report below. Answer no if it contains the line FACTS PATHS
+  UNRESOLVED, or if it says a lens block was missing or empty. Answer yes
+  otherwise.
+
+  One word. Do not summarise the report.|]
 
 -- | The grind's artefact rule, spliced with the same facts the audit ran under
 -- — @grindRule gsFacts@ — so no grind can audit under one set of facts and
 -- repair under another.
 grindRule :: Text
-grindRule =
-  para
-    [ "The suite is the artefact and the report is the record. Close the",
-      "findings in the TESTS. Never delete a failing test to close a finding,",
-      "and never weaken an assertion: the cheapest failure a test-suite",
-      "remediation has is a weakened assertion, which a green gate cannot see."
-    ]
+grindRule = wfText [wf|
+  The suite is the artefact and the report is the record. Close the
+  findings in the TESTS. Never delete a failing test to close a finding,
+  and never weaken an assertion: the cheapest failure a test-suite
+  remediation has is a weakened assertion, which a green gate cannot see.|]
 
 -- | @fixerContinuation@, summarised: the closing clause a fixer under an
 -- orchestrator stands under.
 fixerContinuation :: Text
-fixerContinuation =
-  para
-    [ "You are running under an orchestrator that will call you again with your",
-      "own summary as its input, so write the summary for your successor: which",
-      "findings you closed, which you rejected and why, and which are left.",
-      "",
-      "End with a status line, alone on the last line: WORK COMPLETE if every",
-      "finding is closed or rejected with a reason, WORK REMAINS otherwise."
-    ]
+fixerContinuation = wfText [wf|
+  You are running under an orchestrator that will call you again with your
+  own summary as its input, so write the summary for your successor: which
+  findings you closed, which you rejected and why, and which are left.
+
+  End with a status line, alone on the last line: WORK COMPLETE if every
+  finding is closed or rejected with a reason, WORK REMAINS otherwise.|]
 
 -- | The audit panel's brief over the fixer's own change — @asReviewSubject@
 -- pointed at the delta rather than at the report.
 auditOfFixBrief :: Text
-auditOfFixBrief =
-  para
-    [ "Review the fixer's own change, not the report it was working from.",
-      "A test-suite remediation's cheapest failure is a weakened assertion,",
-      "which a green gate cannot see and only a diff shows.",
-      "",
-      "Reply with exactly APPROVE if the change closes its findings honestly, or",
-      "OBJECTION: followed by one line for each place it does not."
-    ]
+auditOfFixBrief = wfText [wf|
+  Review the fixer's own change, not the report it was working from.
+  A test-suite remediation's cheapest failure is a weakened assertion,
+  which a green gate cannot see and only a diff shows.
+
+  Reply with exactly APPROVE if the change closes its findings honestly, or
+  OBJECTION: followed by one line for each place it does not.|]
 
 -- The stack ----------------------------------------------------------------
 
 -- | @stackFacts@, summarised: what the slicing worker is told about the tree.
 stackFactsBrief :: Text
-stackFactsBrief =
-  para
-    [ "Read the repository's stack facts -- the trunk branch, the remote, the",
-      "Graphite configuration and the verification script -- and reply with them",
-      "verbatim. Then reply with `git diff` against trunk."
-    ]
+stackFactsBrief = wfText [wf|
+  Read the repository's stack facts -- the trunk branch, the remote, the
+  Graphite configuration and the verification script -- and reply with them
+  verbatim. Then reply with `git diff` against trunk.|]
 
 -- | The slice plan's brief.
 stackSliceBrief :: Text
-stackSliceBrief =
-  para
-    [ "Cut the diff below into a stack of branches of roughly five hundred lines",
-      "each, on compile-time dependency boundaries: every branch must build on",
-      "its own, with its parent applied and nothing above it.",
-      "",
-      "Write the plan as an ordered list, bottom first. For each branch: what it",
-      "holds, what it defers to a branch above it, and the one sentence its pull",
-      "request body opens with."
-    ]
+stackSliceBrief = wfText [wf|
+  Cut the diff below into a stack of branches of roughly five hundred lines
+  each, on compile-time dependency boundaries: every branch must build on
+  its own, with its parent applied and nothing above it.
+
+  Write the plan as an ordered list, bottom first. For each branch: what it
+  holds, what it defers to a branch above it, and the one sentence its pull
+  request body opens with.|]
 
 -- | The steer at the slice plan.
 stackSteerBrief :: Text
-stackSteerBrief =
-  para
-    [ "Review the slice plan -- every branch, what it holds, and what it defers."
-    ]
+stackSteerBrief = wfText [wf|
+  Review the slice plan -- every branch, what it holds, and what it defers.|]
 
 -- | The first human gate.
 stackBuildGate :: Text
@@ -797,70 +757,58 @@ stackBuildGate = "Build the stack from this plan? Reply yes or no."
 
 -- | The bootstrap worker, which writes the stack's three scripts.
 stackBootstrapBrief :: Text
-stackBootstrapBrief =
-  para
-    [ "Write the stack's tooling to disk before any branch is cut:",
-      "`verify-stack.sh`, which builds every branch in order and exits non-zero",
-      "on the first failure; `ci-budget.sh`, which reports whether the shared",
-      "runner pool has room; and the slice script the plan names. Then reply",
-      "DONE."
-    ]
+stackBootstrapBrief = wfText [wf|
+  Write the stack's tooling to disk before any branch is cut:
+  `verify-stack.sh`, which builds every branch in order and exits non-zero
+  on the first failure; `ci-budget.sh`, which reports whether the shared
+  runner pool has room; and the slice script the plan names. Then reply
+  DONE.|]
 
 -- | The cut worker.
 stackCutBrief :: Text
-stackCutBrief =
-  para
-    [ "Cut the next branch of the stack, bottom first, exactly as the plan",
-      "below describes it. One branch per trip. Rewrite no branch that is",
-      "already approved.",
-      "",
-      "End with a status line, alone on the last line: WORK COMPLETE when the",
-      "last branch in the plan exists, WORK REMAINS otherwise, WORK BLOCKED if",
-      "a branch cannot be cut without rewriting approved history."
-    ]
+stackCutBrief = wfText [wf|
+  Cut the next branch of the stack, bottom first, exactly as the plan
+  below describes it. One branch per trip. Rewrite no branch that is
+  already approved.
+
+  End with a status line, alone on the last line: WORK COMPLETE when the
+  last branch in the plan exists, WORK REMAINS otherwise, WORK BLOCKED if
+  a branch cannot be cut without rewriting approved history.|]
 
 -- | The orchestrator's reading of the cut worker's line, at the stack's three
 -- endings.
 stackStatusBrief :: Text
-stackStatusBrief =
-  para
-    [ "You are the orchestrator. Read ONLY the last non-empty line below.",
-      "",
-      "- WORK COMPLETE: reply with exactly APPROVE.",
-      "- WORK REMAINS: reply OBJECTION: branches remain.",
-      "- WORK BLOCKED: reply OBJECTION: blocked, and repeat the reason verbatim.",
-      "- anything else: reply OBJECTION: status line missing."
-    ]
+stackStatusBrief = wfText [wf|
+  You are the orchestrator. Read ONLY the last non-empty line below.
+
+  - WORK COMPLETE: reply with exactly APPROVE.
+  - WORK REMAINS: reply OBJECTION: branches remain.
+  - WORK BLOCKED: reply OBJECTION: blocked, and repeat the reason verbatim.
+  - anything else: reply OBJECTION: status line missing.|]
 
 -- | The stack's exec gate.
 stackGateBrief :: Text
-stackGateBrief =
-  para
-    [ "Run `./verify-stack.sh` and read its exit code. Exit 0: reply yes.",
-      "Anything else: reply no.",
-      "",
-      "Report the exit code you saw."
-    ]
+stackGateBrief = wfText [wf|
+  Run `./verify-stack.sh` and read its exit code. Exit 0: reply yes.
+  Anything else: reply no.
+
+  Report the exit code you saw.|]
 
 -- | The triage worker, over the review bot's findings.
 stackTriageBrief :: Text
-stackTriageBrief =
-  para
-    [ "Address the panel's findings below, branch by branch, downstack first: a",
-      "fix on a lower branch can moot a finding on a higher one. Restack after",
-      "each fix.",
-      "",
-      "End with a status line, alone on the last line: WORK COMPLETE, WORK",
-      "REMAINS, or WORK BLOCKED."
-    ]
+stackTriageBrief = wfText [wf|
+  Address the panel's findings below, branch by branch, downstack first: a
+  fix on a lower branch can moot a finding on a higher one. Restack after
+  each fix.
+
+  End with a status line, alone on the last line: WORK COMPLETE, WORK
+  REMAINS, or WORK BLOCKED.|]
 
 -- | The second human gate.
 stackPromoteGate :: Text
-stackPromoteGate =
-  para
-    [ "Promote this stack out of draft? Each branch spends a CI run on a shared",
-      "runner. Reply yes or no."
-    ]
+stackPromoteGate = wfText [wf|
+  Promote this stack out of draft? Each branch spends a CI run on a shared
+  runner. Reply yes or no.|]
 
 -- | The consent gate — @test -f .stack-promote-approved@, as a question.
 --
@@ -868,25 +816,21 @@ stackPromoteGate =
 -- auto-answers its gates, so the last thing between a draft stack and a public
 -- one is a file the agent is forbidden to create.
 stackConsentBrief :: Text
-stackConsentBrief =
-  para
-    [ "Run `test -f .stack-promote-approved` and reply yes if it exits 0, no",
-      "otherwise.",
-      "",
-      "You may not create this file. It is a person's consent, and a run that",
-      "writes its own consent has none."
-    ]
+stackConsentBrief = wfText [wf|
+  Run `test -f .stack-promote-approved` and reply yes if it exits 0, no
+  otherwise.
+
+  You may not create this file. It is a person's consent, and a run that
+  writes its own consent has none.|]
 
 -- | The promotion worker.
 stackPromoteBrief :: Text
-stackPromoteBrief =
-  para
-    [ "Promote the stack out of draft, bottom first, one branch at a time. Before",
-      "each branch, re-run `./ci-budget.sh --wait`: a clearance read once and",
-      "reused is a clearance about a queue that has changed.",
-      "",
-      "Then reply DONE."
-    ]
+stackPromoteBrief = wfText [wf|
+  Promote the stack out of draft, bottom first, one branch at a time. Before
+  each branch, re-run `./ci-budget.sh --wait`: a clearance read once and
+  reused is a clearance about a queue that has changed.
+
+  Then reply DONE.|]
 
 -- | The panel's answer format, for every question that answers a verdict.
 verdictSpec :: Text
