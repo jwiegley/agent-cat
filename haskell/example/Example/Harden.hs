@@ -108,17 +108,19 @@ module Example.Harden
     helloProgram,
 
     -- * The registry
+    examplesRegistry,
     examples,
     lookupExample,
     exampleNames,
   )
 where
 
+import Agentic.Cli (Registry (..), Row (..))
 import Agentic.Workflow
 import qualified Agentic.Workflow.Do as W
 import Data.String (fromString)
 import Data.Text (Text)
-import Example.Isaac (isaacExamples)
+import Example.Isaac (isaacBlurb, isaacExamples, isaacScript)
 import Prelude
 
 -- ---------------------------------------------------------------------------
@@ -263,3 +265,93 @@ exampleNames = map fst examples
 -- | 'examples' as a lookup.
 lookupExample :: Text -> Maybe Example
 lookupExample n = lookup n examples
+
+-- | 'examples' as the registry @agentic-run@ is the CLI /of/.
+--
+-- @agentic-run@ is @'Agentic.Cli.cliMain' examplesRegistry@ and nothing else.
+-- The other registry lives in the owner's separate @agent-workflows@
+-- repository, and the two are deliberately not one table: this one
+-- is pinned field by field by @ci\/examples.sh@ because its numbers are
+-- evidence about the language, and a toolbox whose rubrics move weekly cannot
+-- be held to that without the pins being loosened for both. See "Agentic.Cli".
+examplesRegistry :: Registry
+examplesRegistry =
+  Registry
+    { regBinary = "agentic-run",
+      regNoun = "example",
+      regBanner = "list, plan, price and run the worked examples",
+      regRows = [(n, Row ex (blurbFor n) (scriptFor n)) | (n, ex) <- examples]
+    }
+
+-- | The one line @list@ prints beside a name.
+blurbFor :: Text -> Text
+blurbFor "harden" = "the flagship: draft a patch, review it by panel under a bounded revision, apply it"
+blurbFor "hello" = "the smallest thing that is still a workflow: two questions and an act"
+blurbFor n = isaacBlurb n
+
+-- ---------------------------------------------------------------------------
+-- The canned answers
+-- ---------------------------------------------------------------------------
+
+-- | The scripted table for an example: the canned replies of
+-- @agent-cat\/test\/stub_adapter.py@, __keyed by prefix__ rather than by
+-- substring.
+--
+-- The stub matches substrings (@\"correct?\"@, @\"secure?\"@), which
+-- 'Agentic.Exec.scriptedWorld' deliberately does not: a substring key can match
+-- a prompt through an answer that was spliced into it, so a patch that
+-- mentioned @correct?@ would answer the reviewers' question. Prefixes cannot do
+-- that, and the flagship's prompts are already distinguishable by their first
+-- line — two of the three reviews open with the guide, and their second lines
+-- differ.
+--
+-- The answers are the stub's: a fixed guide, a fixed patch, three approvals,
+-- consent, and a receipt. Under them the revision settles in its first round,
+-- so the amendment prompt is never put and the run bills seven consultations —
+-- @Harden.bill_apply_demo@ (@Agentic\/Core\/HardenPatch.lean:975@), restated
+-- as @Dsl.bill_flagship_apply@ (@Agentic\/Core\/DslFlagship.lean:361@).
+--
+-- __It lives beside the programs it answers__, which is where
+-- "Example.Isaac"'s already did and for the reason that module gives: a key is
+-- a prefix of a rendered prompt, and a table kept in the runner is a table that
+-- drifts from the prompts it keys on. Making the registry a value is what let
+-- the last two rows come home.
+scriptFor :: Text -> [(Text, Text)]
+scriptFor "harden" =
+  [ ("Write out the house style guide", guideText),
+    ("Draft a patch satisfying:", patchText),
+    (guideText <> "\nIs this patch correct?", "APPROVE"),
+    (guideText <> "\nIs this patch secure?", "APPROVE"),
+    ("Could this patch be simpler?", "APPROVE"),
+    -- Unreachable while all three reviews approve, and here so that a run with
+    -- an objecting table amends with a patch rather than with prose.
+    (guideText <> "\nRevise this patch:", patchText),
+    ("Apply this patch?", "yes"),
+    ("Apply:", "DONE")
+  ]
+scriptFor "hello" =
+  [ ("Name one thing worth greeting.", "the sunrise"),
+    ("Write a greeting for this, and nothing else:", "Good morning, sunrise."),
+    ("Say it:", "DONE")
+  ]
+-- "Example.Isaac"'s five carry their own table, in their own module, because
+-- its keys /are/ the prompt defines those programs are written from: a key
+-- there is a prefix by construction rather than by proofreading, which is what
+-- a table living beside a program in another file cannot promise.
+scriptFor name = isaacScript name
+
+-- | @stub_adapter.py:100@'s @GUIDE@.
+guideText :: Text
+guideText =
+  "House style: two-space indent, no tabs, every public name documented, \
+  \and failures returned rather than raised."
+
+-- | @stub_adapter.py:105@'s @PATCH@ — a real unified diff, because the act's
+-- prompt wraps it and a run that applied it would have something to apply.
+patchText :: Text
+patchText =
+  "--- a/src/parse.c\n\
+  \+++ b/src/parse.c\n\
+  \@@\n\
+  \-  char buf[64]; strcpy(buf, input);\n\
+  \+  char buf[64]; snprintf(buf, sizeof buf, \"%s\", input);\n"

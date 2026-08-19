@@ -106,6 +106,7 @@ library
     Agentic.AgentDeck
     Agentic.Builder
     Agentic.Chains
+    Agentic.Cli
     Agentic.Exec
     Agentic.Gen
     Agentic.Guards

@@ -136,6 +136,7 @@ module Example.Isaac
 
     -- * The registry, and the canned answers a scripted run needs
     isaacExamples,
+    isaacBlurb,
     isaacScript,
 
     -- * The two pieces of shared machinery
@@ -1653,6 +1654,22 @@ isaacExamples =
     ("grind-tests", Fixed grindTestsProgram),
     ("stack-prs", Fixed stackPRsProgram)
   ]
+
+-- | The one line @agentic-run list@ prints beside each of the five.
+--
+-- Beside the programs rather than in the runner, for 'isaacScript'\'s own
+-- reason one step weaker: a blurb that lived in the CLI would describe a
+-- program it cannot see, and would go stale the first time one of these was
+-- reshaped. The fall-through is a name and not an @error@ so that a registry
+-- row added upstream lists rather than crashes.
+isaacBlurb :: Text -> Text
+isaacBlurb = \case
+  "plan-feature" -> "four exploration stances, a planner, six sequential plan lenses"
+  "review-lite" -> "the per-commit panel, with its Haskell lens behind a cheap router (takes the commit)"
+  "ship-feature-lite" -> "plan, steer, a capped worker loop, the panel, remediation, a green gate"
+  "grind-tests" -> "a lens per serving model, a synthesis that refuses, a facts gate, a fixer loop"
+  "stack-prs" -> "four capped loops, three exec gates, two human gates, a consent file"
+  n -> n
 
 -- | The canned replies a @--scripted@ run of one of these answers from, keyed
 -- by prefix — @Agentic.Exec.scriptedReply@ takes the first entry whose key is a
