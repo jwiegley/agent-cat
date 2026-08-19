@@ -1036,6 +1036,22 @@ From acat-l59: would delete the residual join-slack paragraph and make static/bo
 
 cachedAt := f makes cached_eq a tautology about the identity function; the non-vacuous statement is a first-consult/replay interpretation proved equal, connecting to share_eq_dup_of_agree.
 
+* TODO [#D] bisim: retry the initial ping once before declaring the oracle wedged
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-bisim-ping-retry-4lr
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-19 Wed 06:03]
+:MODIFIED: [2026-08-19 Wed 06:03]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+V4 (wave-2 fess) predicted and wave-3 close-out reproduced it: under machine load (loadavg ~11) the oracle's cold spawn can exceed bisim's 60s ping timeout, producing a phantom transport failure ('the oracle is wedged') on a healthy tree; the immediate direct ping answered instantly and the rerun was clean. Fix: one retry of the initial ping (or a spawn-aware first-ping budget) before declaring the wedge. Evidence on acat-isaac-decisions-vtt.
+
 * TODO [#C] shareT label collision across unequal bodies
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -1834,15 +1850,17 @@ work is finished.
 ]
 #+end_src
 
-* TODO [#B] Isaac-review decisions D1-D11: surface calls, panelText, revisingYielding, failure vocabulary, citation regate
+* DONE [#B] Isaac-review decisions D1-D11: surface calls, panelText, revisingYielding, failure vocabulary, citation regate
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-isaac-decisions-vtt
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-18 Tue 15:55]
-:MODIFIED: [2026-08-19 Wed 05:20]
+:MODIFIED: [2026-08-19 Wed 06:03]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-19 Wed 06:03]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -1909,6 +1927,13 @@ doc/research/isaac-workflows.md §6 holds ten yes/no decisions from the incite/a
     "author": "johnw",
     "text": "WAVE 3 audit: FINDINGS(4), no false claims - the central zero-residual movement claim reproduced at byte level by the auditor (30 entries, 27+5-2, replies moved on 0 of 128; DslFlagship re-pins empty as predicted). Findings folding now (single-owner agent): F1 MEDIUM - D3's yield semantics Lean-proved but never cross-compared (no tier1 case reads the unsettled binder at bound>=1 under objection) -> one new fixture + tier1 29/29; F2 three present-tense finishCont references; F3 one overstating docstring clause in Plan.lean; F4 one honest clause on tier0's codec-only rule for refused-other. Auditor also recorded: zero-warning builds are discipline not gate (-Wall without -Werror), tier0's sixGuards hardening, Shell.hs security review clean (proc never sh -c, program-authored argv, no fabricated answers). Wave-3 commit d63deb9 unpushed pending the fold.",
     "created_at": "2026-08-19T12:20:00Z"
+  },
+  {
+    "id": 139,
+    "issue_id": "acat-isaac-decisions-vtt",
+    "author": "johnw",
+    "text": "D-SLATE COMPLETE. All eleven rulings plus ask_ are in the tree, verified,\naudited, and pushed (waves: a39c4f3+b212614, e47c4c1+5f22d09,\nd63deb9+bd51043; designs 68d6f1b).\n\nThe wiggum Definition of Done, with evidence:\n1. Every ruling implemented - D1 calls/D8 inputs (wave 2), D2 panelText,\n   D3 revising-yields (Raw refreeze spent request-side only; replies\n   moved on 0 of 128), D4 revisingOn, D5 world-authored receipts, D6\n   full incl. fail-over wired to the transports, D7 deciders + loud-arm,\n   D9 pin guard, D10 examples pin + G9 documented, D11 citations\n   re-derived + gated (246 over a 200 floor), ask_ (wave 1).\n2. Full suite green, shown: lake 2085 jobs; corpus-gen idempotent at 189;\n   tier0 189/189; tier1 29/29 (24 exact + 5 alpha incl. the call vectors\n   and the yield gate); bisim clean (P1 40/40, P2 960/960 after one\n   load-phantom retry - see acat-bisim-ping-retry); ci/acp 12/12;\n   ci/deck 7/7; ci/examples 7/0; ci/policies 19; ci/citations resolving.\n3. The last work commit (d63deb9) fess-audited: FINDINGS(4), no false\n   claims, central movement claim reproduced at byte level by the\n   auditor; all findings folded (bd51043), incl. F1 turning D3's Lean\n   theorem into a cross-implementation gate (semantic-008's trace ends\n   \"yielded: fix draft: thin\" - the amendment, not the draft).\n4. No partner observations outstanding (no observations dir).\n5. main == origin/main, clean tree.\nThree audits across the slate: FINDINGS(6)/(4)/(4), every finding an\nomission or gap rather than a falsehood, every one folded. Two\ncoordination incidents (snapshot clobber; resume twins), both resolved,\nlessons in memory. The corpus grew 128 -> 189, every growth additive,\nthe one authorized refreeze spent entirely on request-side fields.\n",
+    "created_at": "2026-08-19T13:03:34Z"
   }
 ]
 #+end_src
