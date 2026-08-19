@@ -16,9 +16,13 @@
 #
 # So for every registered program, this gate runs
 #
-#   agentic-run plan <name>          level, size, askNodes, cost
-#   agentic-run cost <name>          costSummary
-#   agentic-run run  <name> --scripted    exit 0, billFresh, billMemo
+#   agentic-run plan <name> [input]        level, size, askNodes, cost
+#   agentic-run cost <name> [input]        costSummary
+#   agentic-run run  <name> --scripted [input]   exit 0, billFresh, billMemo
+#
+# where `[input]` is the input flag a program that takes one needs (D8) —
+# `review-lite` is the only such program, and `inputsFor` below is where its
+# subject comes from.
 #
 # and holds each field against the table below. Every pinned line cites where
 # the same number is also published; a mismatch here means one of those places
@@ -106,26 +110,55 @@ pin hello             pipeline     4    3    3    3     1     3    3
 # `doc/research/isaac-workflows.md` §3's table. Nothing else pins them — that is
 # what this script is for.
 
-# Isaac.hs:951-954; isaac-workflows §3, `plan-feature` row. The one pipeline of
+# Isaac.hs:957-960; isaac-workflows §3, `plan-feature` row. The one pipeline of
 # the five: one path, so its price is exact and its bill must equal it.
 pin plan-feature      pipeline    14   13   13   13     1    13   13
 
-# Isaac.hs:1071-1073; isaac-workflows §3 and Finding 3.2. The two paths are the
+# Isaac.hs:1127-1129; isaac-workflows §3 and Finding 3.2. The two paths are the
 # router's two outcomes priced apart; the scripted run takes the `yes` arm, so
 # the bill is `maxFold`.
-pin review-lite       branch      13   10    8    9     2     9    9
+#
+# **This row moved in wave 2 (D1 + D8), and here is the arithmetic.** Two
+# changes landed on this program together, and only one of them is visible in
+# these numbers:
+#
+#   * D8 — the opening tool leaf that fetched the commit became an input
+#     (`taking (input "subject" noInputs)`), and an input is a *define*, which
+#     reaches prompts as data and leaves no node behind. That removes one ask
+#     node from the prefix every path shares: size 13 → 12, askNodes 10 → 9,
+#     minFold 8 → 7, maxFold 9 → 8, and the scripted bill 9/9 → 8/8. `paths`
+#     is untouched — the router still decides two — and so is `level`, which
+#     the `if` decides.
+#   * D1 — the closing act, written out once per arm, became one
+#     `review-lite.report` function called from both. That moves **nothing**,
+#     and the prediction was made before the change: a call is priced at the
+#     callee's own `bodyAsks` with the arguments ignored, and `graft` splices
+#     the callee's node at the call site rather than adding one, so `size`,
+#     `askNodes` and every path in `costM` are what they were. The printed
+#     program is what changed: two `act`s became two `callStmt`s and one `fns`
+#     entry.
+#
+# The subject the scripted run is given is the text the deleted script entry
+# used to return (`Example.Isaac.isaacScript`, the `readCommit` row), so the
+# rendered prompts — and therefore the memo table and the bill — are the ones
+# this row pinned before.
+#
+# `doc/research/isaac-workflows.md` §3's review-lite row still carries the old
+# numbers: that file is outside this wave's reach, and it is the one place
+# these numbers are now stale.
+pin review-lite       branch      12    9    7    8     2     8    8
 
-# Isaac.hs:1226-1228; isaac-workflows §3 and Finding 3.3. Two loops, so the
+# Isaac.hs:1288-1290; isaac-workflows §3 and Finding 3.3. Two loops, so the
 # range is real; the scripted world settles on the first check, which is why 12
 # sits well below `maxFold`.
 pin ship-feature-lite branch     149   78    4   24    36    12   12
 
-# Isaac.hs:1359-1361; isaac-workflows §3 and Finding 3.4. The `atMost 4` fixer
+# Isaac.hs:1420-1422; isaac-workflows §3 and Finding 3.4. The `atMost 4` fixer
 # loop is G9's bounded refusal made of numbers: 27 is a bound an operator can
 # read.
 pin grind-tests       branch     144   73    9   27    36    15   15
 
-# Isaac.hs:1530-1532; isaac-workflows §3 and Finding 3.5. The only registered
+# Isaac.hs:1590-1592; isaac-workflows §3 and Finding 3.5. The only registered
 # program whose two bills differ: 16 ask nodes walked, 15 questions put. The
 # gap is the memo table, and it is the same phenomenon ci/deck.sh's `objects`
 # scenario observes from outside the process.
@@ -147,6 +180,32 @@ summaryOf() {
 # such line — which fails the comparison and prints as an absence.
 field() {
   sed -n "s/^  *$2  *//p" "$1" | head -1
+}
+
+# ---------------------------------------------------------------------------
+# The inputs a program takes
+# ---------------------------------------------------------------------------
+#
+# A program may be a program *of its inputs* (D8): `review-lite` takes the
+# commit it reviews, where it used to open by asking a tool for one. `run`
+# requires every input, so the gate has to supply it — and what it supplies is
+# the very text the deleted script entry returned, which is what keeps this
+# row's bill comparable to the one it replaced.
+#
+# It goes through a file rather than through `--input-arg` because the text has
+# a newline in it, and a flag that survives `$(…)` word-splitting is a flag
+# this script can pass without an array. One trailing newline is stripped on
+# the way in (run/Main.hs), so the file's two lines are the two lines the old
+# canned answer was.
+printf '%s\n' \
+  'diff --git a/src/Export.hs b/src/Export.hs' \
+  '+  writeFile path body' > "$work/review-lite.subject"
+
+inputsFor() {
+  case "$1" in
+    review-lite) echo "--input-file subject=$work/review-lite.subject" ;;
+    *) echo "" ;;
+  esac
 }
 
 # ---------------------------------------------------------------------------
@@ -179,9 +238,12 @@ done
 
 for n in "${names[@]}"; do
   want_summary=$(summaryOf "$n")
+  # Unquoted on purpose: the two words of an input flag, or nothing at all.
+  # shellcheck disable=SC2046
+  ins=$(inputsFor "$n")
 
   # plan — the static folds, decided by the elaborated term alone.
-  cat_run plan "$n" > "$work/$n.plan" 2>&1
+  cat_run plan "$n" $ins > "$work/$n.plan" 2>&1
   code=$?
   [ "$code" = 0 ] || bad "$n" "plan exit" 0 "$code"
   [ "$(field "$work/$n.plan" level)" = "${pinLevel[$n]}" ] \
@@ -194,7 +256,7 @@ for n in "${names[@]}"; do
     || bad "$n" "plan cost" "$want_summary" "$(field "$work/$n.plan" cost)"
 
   # cost — the same summary, from the other verb.
-  cat_run cost "$n" > "$work/$n.cost" 2>&1
+  cat_run cost "$n" $ins > "$work/$n.cost" 2>&1
   code=$?
   [ "$code" = 0 ] || bad "$n" "cost exit" 0 "$code"
   [ "$(field "$work/$n.cost" costSummary)" = "$want_summary" ] \
@@ -203,7 +265,7 @@ for n in "${names[@]}"; do
   # run --scripted — the bill actually paid, against the table's pair. stdin is
   # /dev/null: a scripted run asks nobody, and this is what makes that a fact
   # rather than a hope.
-  cat_run run "$n" --scripted < /dev/null > "$work/$n.run" 2>&1
+  cat_run run "$n" --scripted $ins < /dev/null > "$work/$n.run" 2>&1
   code=$?
   [ "$code" = 0 ] || bad "$n" "run --scripted exit" 0 "$code"
   fresh=$(sed -n 's/^ *billFresh  *\([0-9][0-9]*\).*/\1/p' "$work/$n.run" | head -1)
@@ -213,6 +275,37 @@ for n in "${names[@]}"; do
 
   note "$n: ${pinLevel[$n]}, size ${pinSize[$n]}, askNodes ${pinAsks[$n]}, $want_summary; scripted ${pinFresh[$n]}/${pinMemo[$n]}, exit 0"
 done
+
+# ---------------------------------------------------------------------------
+# The folds do not depend on the input
+# ---------------------------------------------------------------------------
+#
+# D8's whole claim, as a check rather than as a sentence: an input reaches the
+# term only as literal chunks inside prompts, and no static fold reads a
+# prompt, so `level`, `size`, `askNodes`, `codes` and `costSummary` are the
+# same for every input — which is what lets `plan` and `cost` answer for a
+# program whose subject is not in hand. Two runs at two different subjects,
+# and the five fold lines compared.
+#
+# It also pins the other half: the printed programs *do* differ, because the
+# subject splices into prompts. A pair that agreed on both would mean the
+# input was reaching nothing.
+
+cat_run plan review-lite --raw --input-arg subject=AAAA > "$work/indep.a" 2>&1
+cat_run plan review-lite --raw --input-arg subject=BBBBBBB > "$work/indep.b" 2>&1
+foldsOf() { grep -E '^  (level|size|askNodes|codes|cost) ' "$1"; }
+
+if [ "$(foldsOf "$work/indep.a")" = "$(foldsOf "$work/indep.b")" ]; then
+  note "review-lite: the folds are the same at two different inputs"
+else
+  bad review-lite "folds under two inputs" "the same five lines" "they moved"
+fi
+
+if diff -q "$work/indep.a" "$work/indep.b" > /dev/null; then
+  bad review-lite "the printed program under two inputs" "different prompts" "identical"
+else
+  note "review-lite: the printed program differs at two different inputs"
+fi
 
 # ---------------------------------------------------------------------------
 

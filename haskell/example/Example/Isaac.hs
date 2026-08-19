@@ -24,10 +24,11 @@
 -- |                          | a planner, six sequential plan lenses.      |
 -- |                          | __Expressed fully.__                        |
 -- +--------------------------+---------------------------------------------+
--- | 'reviewLiteProgram'      | @review-lite@ — the per-commit panel, with  |
+-- | 'reviewLite'             | @review-lite@ — the per-commit panel, with  |
 -- |                          | its conditional Haskell lens behind a       |
--- |                          | cheap router. __Expressed, with the tail    |
--- |                          | duplicated into both arms.__                |
+-- |                          | cheap router. __Expressed: the tail is one  |
+-- |                          | function both arms call, and the commit is  |
+-- |                          | an input.__                                 |
 -- +--------------------------+---------------------------------------------+
 -- | 'shipFeatureLiteProgram' | @ship-feature-lite@ — plan, steer, a capped |
 -- |                          | worker loop, the panel, remediation, a      |
@@ -66,10 +67,13 @@
 --     pin is the absence of the words — 'planFeatureProgram''s six plan lenses
 --     carry none, which is the whole of what @editPlan@'s paragraph asks for.
 --
---   * __Questions are shareable.__ 'reviewPanelOver' is a Haskell function from
---     a handle to a list of 'Ask's, usable at any scope where the handle is
---     live. A /run of statements/ is not shareable (see the gap list), but the
---     questions themselves are.
+--   * __Questions are shareable, and so is a straight run of them.__
+--     'reviewPanelOver' is a Haskell function from a handle to a list of
+--     'Ask's, usable at any scope where the handle is live. 'reviewReport' is
+--     the other half: a @function@, declared in the program's table and called
+--     from both arms of a router, which is how a /run of statements/ is shared.
+--     What is still not shareable is a run that /branches/ — a body is a
+--     straight line (see the gap list).
 --
 -- == The gaps, in the order they cost real coverage
 --
@@ -77,21 +81,29 @@
 -- so that a reader need not hunt.
 --
 --   1. __A branch is terminal, so a conditional stage cannot rejoin.__
---      'reviewLiteProgram'.
+--      'reviewLite'.
 --   2. __An answer is a handle, not a value.__ No Haskell function may look at
 --      one, so every pure decider in @incite@ — @tripEnding@, @isRed@,
 --      @diffNamesHaskell@, @decideFactsResolved@, @routeHaskell@ — has to
---      become a question here, or be dropped. 'reviewLiteProgram',
+--      become a question here, or be dropped. 'reviewLite',
 --      'shipFeatureLiteProgram'.
 --   3. __A check is a question, never an exit code.__ 'shipFeatureLiteProgram'.
 --   4. __@Unsettled@ carries nothing.__ 'shipFeatureLiteProgram'.
 --   5. __A bounded revision has two endings and its body has two clauses.__
 --      'shipFeatureLiteProgram', 'stackPRsProgram'.
---   6. __No sub-flow.__ "Agentic.Builder" has @function@ and @callStmt@;
---      "Agentic.Workflow" exposes neither and 'workflow' elaborates at the
---      empty function table. 'shipFeatureLiteProgram'.
---   7. __A program has no input.__ Every one of these opens by asking a tool
---      for the subject, where @incite@'s @workflowReq@ demands one at the CLI.
+--   6. __A sub-flow is a straight line.__ /Was:/ no sub-flow at all.
+--      "Agentic.Workflow" now has @function@, @call@, @call_@ and @defining@,
+--      and 'reviewReport' is one — so a shared run of /questions/ is a
+--      function, and both arms of a router call it. What a body still cannot
+--      hold is a branch, a loop or a @known here@
+--      ('Agentic.Raw.RawBodyStmt' has three constructors), so
+--      @reviewLiteFlow@'s whole conditional tier is still not one callable
+--      thing. 'shipFeatureLiteProgram'.
+--   7. __A program's input is a define, and only 'reviewLite' takes one.__
+--      /Was:/ a program has no input. @taking@ and @input@ give a program
+--      inputs supplied at the command line, and 'reviewLite' takes its commit
+--      that way. The other four still open by asking a tool for their subject,
+--      which is a conversion each, not a gap.
 --   8. __A fan-out is a static list.__ 'grindTestsProgram'.
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DataKinds #-}
@@ -106,11 +118,12 @@
 {-# LANGUAGE QualifiedDo #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE RebindableSyntax #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Example.Isaac
   ( -- * The programs
     planFeatureProgram,
-    reviewLiteProgram,
+    reviewLite,
     shipFeatureLiteProgram,
     grindTestsProgram,
     stackPRsProgram,
@@ -119,8 +132,9 @@ module Example.Isaac
     isaacExamples,
     isaacScript,
 
-    -- * The one piece of shared machinery
+    -- * The two pieces of shared machinery
     reviewPanelOver,
+    reviewReport,
   )
 where
 
@@ -423,7 +437,7 @@ qaFence =
 -- @incite@ asks for one word and reads it with a substring-free equality;
 -- 'confirm' asks the same question at the flag code, which is the same brief
 -- with the answer format changed. What does /not/ carry over is the policy
--- around the word: see 'reviewLiteProgram'.
+-- around the word: see 'reviewLite'.
 haskellTriageBrief :: Text
 haskellTriageBrief =
   para
@@ -492,14 +506,6 @@ readRequest =
   para
     [ "Read the change request for this run and reply with it verbatim,",
       "and with nothing else."
-    ]
-
--- | The subject under review, for the two workflows that review a commit.
-readCommit :: Text
-readCommit =
-  para
-    [ "Show the commit under review -- `git show` for a commit, `git diff` for",
-      "uncommitted work -- and reply with the diff and nothing else."
     ]
 
 -- | @planSteer "implementation"@, verbatim.
@@ -897,7 +903,7 @@ verdictSpec =
 -- not share is a run of /statements/ — see the gap on 'shipFeatureLiteProgram'.
 --
 -- The sixth reviewer is missing on purpose: it stands behind a router, and a
--- router cannot stand inside a panel. See 'reviewLiteProgram'.
+-- router cannot stand inside a panel. See 'reviewLite'.
 reviewPanelOver :: (KnownIx h s) => V h 'CodeText -> [Ask s]
 reviewPanelOver subject =
   [ ask (model "correctness" `servedBy` "fable") [wf|
@@ -1012,13 +1018,51 @@ planFeatureProgram = workflow W.do
 -- 2. review-lite
 -- ---------------------------------------------------------------------------
 
+-- | @review-lite@'s fold, as a procedure both arms of the router call.
+--
+-- The six blocks are parameters, so the two arms differ in one argument and can
+-- no longer differ in anything else: the report's order, its brief and its tool
+-- are one text now, where they were two. The second argument is the whole of
+-- the difference — a binding in the arm that ran the Haskell lens, and the
+-- 'noHaskellEdits' define in the arm that did not, which reaches a @text@
+-- parameter as an @ArgLit@.
+--
+-- __It costs nothing.__ A call is priced at the callee's own @bodyAsks@ with
+-- the arguments ignored (@Guards.hs:120@), and 'Agentic.Plan.graft' splices
+-- the callee's node at the call site rather than adding one — so @size@,
+-- @askNodes@ and every path in @costM@ are what they were when the act was
+-- written out twice.
+reviewReport ::
+  Fn '[ 'CodeText, 'CodeText, 'CodeText, 'CodeText, 'CodeText, 'CodeText] 'CodeAck
+reviewReport =
+  function
+    "review-lite.report"
+    ( takes @"correctness" Text
+        . takes @"haskell" Text
+        . takes @"claims" Text
+        . takes @"failures" Text
+        . takes @"braids" Text
+        . takes @"cuts" Text
+        $ noParams
+    )
+    \correctness haskell claims failures braids cuts -> W.do
+      act (tool "write-report") [wf|
+          {reviewReportBrief}
+          {correctness}
+          {haskell}
+          {claims}
+          {failures}
+          {braids}
+          {cuts}|]
+      done
+
 -- | @incite@'s @review-lite@: six independent reviewers over one commit, one of
 -- them behind a cheap router, folded by a pure narrowing with no synthesis
 -- leaf. The workflow @incite@ runs most — after every commit, driven by
 -- @post-commit-audit@.
 --
--- __Expressed, with the tail duplicated into both arms.__ Three things had to
--- move, and each names a gap.
+-- __Expressed, with the tail a function both arms call.__ Three things had to
+-- move, and each names a gap — one of which the language has since closed.
 --
 -- === The conditional lens
 --
@@ -1028,12 +1072,13 @@ planFeatureProgram = workflow W.do
 -- blocks.
 --
 -- __Gap: a branch is terminal, so a conditional stage cannot rejoin the main
--- line.__ Every arm of an @if@ /is/ the rest of the workflow. So a lens that
--- runs conditionally and then rejoins its five siblings cannot be written; what
--- is written below is the same program with the closing act spelled twice, once
--- per arm. That is exact — it prints the two arms the language has — and it is
--- the shape that does not survive contact with a fan-out of any width: a
--- workflow with three independent routers would need eight copies of its tail.
+-- line.__ Every arm of an @if@ /is/ the rest of the workflow, so a lens that
+-- runs conditionally and then rejoins its five siblings still cannot be
+-- written. What /has/ changed is the cost of that: the tail the two arms share
+-- is 'reviewReport', one function called from both, so the arms now differ in
+-- exactly one argument and can no longer differ in anything else. The shape
+-- still does not survive a fan-out of any width — a workflow with three
+-- independent routers needs eight arms — but each of the eight is one line.
 --
 -- === The loud default, and the overrule
 --
@@ -1058,22 +1103,33 @@ planFeatureProgram = workflow W.do
 -- unreconciled than one reconciled one.
 --
 -- __Gap: there is no pure combinator over answers.__ A fold is either a
--- question or a hole in a later prompt. Below it is an 'act': the tool writes
--- the six blocks down in the narrowing order and reconciles nothing, which is
--- the same artefact for one leaf more than @incite@ pays.
+-- question or a hole in a later prompt. Below it is an 'act' — inside
+-- 'reviewReport' now, but an act — and the tool writes the six blocks down in
+-- the narrowing order and reconciles nothing, which is the same artefact for
+-- one leaf more than @incite@ pays.
+--
+-- === The subject, which is now an input
+--
+-- This is the one gap of the five that is __closed__. @incite@'s workflows are
+-- @Flow Text Text@ and @workflowReq@ demands an input at the CLI; this program
+-- used to open by asking a tool for the commit, which made the operator's text
+-- an /answer/ where there it is /data/. It is now
+-- @'Agentic.Workflow.taking' ('Agentic.Workflow.input' \"subject\" …)@, and the
+-- subject is a @define@ supplied at run time — @agentic-run … --input
+-- .\/commit.diff@ — spliced into every prompt exactly as a define written in
+-- the source is, including inside the @if@ arms.
 --
 -- Level @branch@, two paths — and its published price in @incite@'s own
--- @docs\/workflows.md@ is 7 leaves, which is these 9 less the two this
--- language has to pay for and that one does not: the tool that fetches the
--- subject, and the tool that folds the six blocks.
+-- @docs\/workflows.md@ is 7 leaves, which is these 8 less the one this
+-- language has to pay for and that one does not: the tool that folds the six
+-- blocks.
 --
--- > level branch, size 13, askNodes 10
--- > cost  minFold 8, maxFold 9, over 2 paths
--- > run --scripted: billFresh 9, billMemo 9 (the router said yes)
-reviewLiteProgram :: Program
-reviewLiteProgram = workflow W.do
-    subject <- ask (tool "git") [wf|{readCommit}|]
-
+-- > level branch, size 12, askNodes 9
+-- > cost  minFold 7, maxFold 8, over 2 paths
+-- > run --scripted: billFresh 8, billMemo 8 (the router said yes)
+reviewLite :: Parameterized
+reviewLite = taking (input "subject" noInputs) \subject ->
+  defining [SomeFn reviewReport] W.do
     correctness <- ask (model "correctness" `servedBy` "fable") [wf|
         {correctnessLens}
         {subject}|]
@@ -1109,23 +1165,29 @@ reviewLiteProgram = workflow W.do
             {haskellHouseLens}
             {subject}|]
 
-        ask_ (tool "write-report") [wf|
-            {reviewReportBrief}
-            {correctness}
-            {haskell}
-            {claims}
-            {failures}
-            {braids}
-            {cuts}|]
+        call_
+          reviewReport
+          ( arg correctness
+              :> arg haskell
+              :> arg claims
+              :> arg failures
+              :> arg braids
+              :> arg cuts
+              :> noArgs
+          )
+        stop
       else W.do
-        ask_ (tool "write-report") [wf|
-            {reviewReportBrief}
-            {correctness}
-            {noHaskellEdits}
-            {claims}
-            {failures}
-            {braids}
-            {cuts}|]
+        call_
+          reviewReport
+          ( arg correctness
+              :> arg noHaskellEdits
+              :> arg claims
+              :> arg failures
+              :> arg braids
+              :> arg cuts
+              :> noArgs
+          )
+        stop
 
 -- ---------------------------------------------------------------------------
 -- 3. ship-feature-lite
@@ -1206,14 +1268,17 @@ reviewLiteProgram = workflow W.do
 -- @ship-feature-lite@ alike, and @incite@'s central discipline is that
 -- workflows cannot drift in anything they share.
 --
--- __Gap: no sub-flow.__ The /questions/ share — 'reviewPanelOver' is used
--- below and is the same list of 'Ask's 'reviewLiteProgram' spells out — but a
--- run of /statements/ does not. "Agentic.Builder" has @function@, @Params@ and
--- @callStmt@; "Agentic.Workflow" exposes none of them and 'workflow'
--- elaborates at the empty function table, so there is no @call@ to write. That
--- is why 'reviewLiteProgram' above binds its five reviewers one at a time and
--- this program panels them: the two spellings of one tier cannot be held
--- together by the language, only by the prompt library they both read.
+-- __Gap: a sub-flow is a straight line.__ The /questions/ share —
+-- 'reviewPanelOver' is used below and is the same list of 'Ask's 'reviewLite'
+-- spells out — and a straight run of statements now shares too: @function@,
+-- @call_@ and @defining@ are in "Agentic.Workflow", and 'reviewReport' is a
+-- function both arms of @review-lite@'s router call. What still does not share
+-- is a run that /branches/: a body is a straight line
+-- ('Agentic.Raw.RawBodyStmt' has three constructors and no branching), and
+-- @reviewLiteFlow@'s tier is a router with two arms. That is why 'reviewLite'
+-- binds its five reviewers one at a time and this program panels them: the two
+-- spellings of one tier are still held together by the prompt library they
+-- both read, and not by the language.
 --
 -- Level @branch@. Two loops, so @costSummary@ has a real range to report —
 -- and the range is the answer to the one number @incite@ quotes for this tier
@@ -1613,13 +1678,18 @@ stackPRsProgram = workflow W.do
 -- ---------------------------------------------------------------------------
 
 -- | The five, in the order they were written.
-isaacExamples :: [(Text, Program)]
+--
+-- Four are whole programs; @review-lite@ is a program of its subject, which is
+-- what @agentic-run … --input@ supplies. The distinction is the registry's and
+-- not the language's: a 'Parameterized' is an ordinary Haskell function to a
+-- 'Program', and every fold the CLI prints is the same for every input.
+isaacExamples :: [(Text, Example)]
 isaacExamples =
-  [ ("plan-feature", planFeatureProgram),
-    ("review-lite", reviewLiteProgram),
-    ("ship-feature-lite", shipFeatureLiteProgram),
-    ("grind-tests", grindTestsProgram),
-    ("stack-prs", stackPRsProgram)
+  [ ("plan-feature", Fixed planFeatureProgram),
+    ("review-lite", Needs reviewLite),
+    ("ship-feature-lite", Fixed shipFeatureLiteProgram),
+    ("grind-tests", Fixed grindTestsProgram),
+    ("stack-prs", Fixed stackPRsProgram)
   ]
 
 -- | The canned replies a @--scripted@ run of one of these answers from, keyed
@@ -1654,9 +1724,11 @@ isaacScript = \case
       (lookaheadLens, "1. Test the two callers. 2. Thread the flag. 3. Ship the golden test last."),
       (simpleEnglishLens, "1. Test the two callers. 2. Add the flag. 3. Add the golden test.")
     ]
+  -- The subject is an @--input@ now and not an answer, so the entry that
+  -- answered the tool leaf which fetched it is gone: the text it returned is
+  -- what @ci\/examples.sh@ passes as @--input-arg subject=…@.
   "review-lite" ->
-    [ (readCommit, "diff --git a/src/Export.hs b/src/Export.hs\n+  writeFile path body"),
-      (correctnessLens, "src/Export.hs:12 -- writeFile is not atomic; a crash truncates the file."),
+    [ (correctnessLens, "src/Export.hs:12 -- writeFile is not atomic; a crash truncates the file."),
       (fessLens, "The message claims the write is atomic. The diff shows writeFile. Verification gap."),
       (complexityLens, "No braids: one concern, one file."),
       (ponytailReviewLens, "Nothing to cut."),

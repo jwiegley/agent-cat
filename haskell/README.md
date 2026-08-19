@@ -227,11 +227,16 @@ A block that ends by asking somebody to do something, and reads no answer, says
 so in one statement: `ask_ (tool "say") [wf|…|]` is `act` and then `stop`, and
 it is *the same term* — both sides are `B.act (ask …) B.stop`, so the printed
 program, the plan, the bills and the generated names are untouched by writing
-one instead of the other. `hello` ends that way, as do five arms across
-`Example.Isaac`; nothing needed refreezing and tier1 stayed byte-identical.
+one instead of the other. `hello` ends that way, as do three arms across
+`Example.Isaac` (two more did until `review-lite`'s pair became a `call_` and a
+`stop`); nothing needed refreezing and tier1 stayed byte-identical.
 The `act` inside a `when` body stays an `act`, because a body is an arm block
 *minus* its terminal and `when` supplies that — an `ask_` there is a type
-error, which is the right refusal.
+error, which is the right refusal. Since `act` became a statement *value* (so
+that one word stands both in a workflow block and in a function body), `when`
+and `unless` take a statement rather than a block — a one-statement `W.do` is
+that statement, and a `W` is a statement too, so both spellings still reach
+them.
 
 With two arms to say, an author writes `if ok then … else …`, a regular `if`,
 which reaches `ifThenElse` because the
@@ -275,6 +280,122 @@ character escaped. The corpus turns on differences that are invisible in a
 terminal — U+00A0 against a space, `İ` against `i`, a stripped `\r` — and a
 diagnostic that hides them would be worse than none.
 
+## Functions, calls, and a program's inputs
+
+Two things a workflow could not say until wave 2, both of which the production
+surface (`Agentic.Builder`) and the Lean checker have always had.
+
+**A function is a name, a parameter list, and a body that is a straight line.**
+It is declared in the program's table, called by value (`call`, which binds) or
+as a statement (`call_`, which does not), and it costs exactly what writing its
+statements out at the call site costs — a call is priced at the callee's own
+ask count with the arguments ignored, and `graft` splices the callee's nodes at
+the call site rather than adding one. `Example.Isaac`'s `review-lite` is the
+worked case: its closing report used to be written out once per arm of the
+Haskell router, and is now one function both arms call.
+
+```haskell
+reviewReport ::
+  Fn '[ 'CodeText, 'CodeText, 'CodeText, 'CodeText, 'CodeText, 'CodeText] 'CodeAck
+reviewReport =
+  function
+    "review-lite.report"
+    ( takes @"correctness" Text
+        . takes @"haskell" Text
+        . takes @"claims" Text
+        . takes @"failures" Text
+        . takes @"braids" Text
+        . takes @"cuts" Text
+        $ noParams
+    )
+    \correctness haskell claims failures braids cuts -> W.do
+      act (tool "write-report") [wf|
+          {reviewReportBrief}
+          {correctness}
+          {haskell}
+          {claims}
+          {failures}
+          {braids}
+          {cuts}|]
+      done
+
+reviewLite :: Parameterized
+reviewLite = taking (input "subject" noInputs) \subject ->
+  defining [SomeFn reviewReport] W.do
+    correctness <- ask (model "correctness" `servedBy` "fable") [wf|
+        {correctnessLens}
+        {subject}|]
+    -- … four more reviewers, then the router …
+    if touchesHaskell
+      then W.do
+        haskell <- ask (model "haskell" `servedBy` "fable") [wf|
+            {haskellHouseLens}
+            {subject}|]
+
+        call_
+          reviewReport
+          ( arg correctness :> arg haskell :> arg claims
+              :> arg failures :> arg braids :> arg cuts :> noArgs
+          )
+        stop
+      else W.do
+        call_
+          reviewReport
+          ( arg correctness :> arg noHaskellEdits :> arg claims
+              :> arg failures :> arg braids :> arg cuts :> noArgs
+          )
+        stop
+```
+
+A parameter is the one place this surface asks for a name at the type level,
+and it asks because a parameter's name is *printed* — in the function's
+signature, and again in every hole of its body — where a binding's is
+generated. `takes @"goal" Text` is that name and its kind; two parameters of
+one name is `Fresh`'s own refusal, and a name the surface generates for itself
+(`b0`, `r0`, …) is refused outright, which is what keeps "fresh by
+construction" exact now that an author can spell one.
+
+An argument is either a binding (`arg correctness`, printed as a *name* and
+passed by reference, which is why `arg` is not `Says`) or a define (`arg
+noHaskellEdits`, printed as literal words). Its kind must be the parameter's
+exactly. `defining` is `workflow` with a table, and it checks on a CAF the two
+things the type level cannot see: no name twice, and every call naming an entry
+declared before it — because an unknown callee is priced at zero and would
+print a program Lean refuses.
+
+**An input is a define supplied at run time.** `taking (input "subject"
+noInputs) \subject -> …` makes the program a Haskell function of its inputs,
+and `{subject}` splices as literal chunks wherever it is written, including
+inside the `if` arms. It is deliberately not `main`'s parameter list:
+`RawProgram` is `fns` and `main`, there is nowhere to print a parameter, and a
+`main` holing a name no printed binder introduces is a program Lean refuses.
+Because an input reaches the term only as literal chunks inside prompts, and no
+static fold reads a prompt, **every fold is the same for every input** — which
+is why `plan` and `cost` answer without one and say so:
+
+```sh
+nix develop -c cabal run agentic-run -- plan review-lite
+nix develop -c cabal run agentic-run -- plan review-lite --input ./commit.diff
+nix develop -c cabal run agentic-run -- run  review-lite --scripted \
+    --input-arg subject='diff --git a/src/Export.hs b/src/Export.hs'
+```
+
+```
+review-lite, as elaborated:
+
+  inputs    subject (text) = 4.1 kB from ./commit.diff
+  level     branch
+  size      12
+  askNodes  9
+```
+
+The `inputs` line names the input, where its text came from and how big it is,
+and never the text itself, which can be a whole diff. `run` requires every
+input; `plan` and `cost` bind a missing one to `""` and say so on that line,
+and under `--raw` a note stands immediately above the printed program, because
+a program printed with an empty subject is a different text from the one that
+will run.
+
 ## Running a workflow
 
 A program in this language is a value, and `agentic-run` is the three things
@@ -298,11 +419,18 @@ it inherits, here who answers is a property of the question, so the guarantee
 over questions *not yet written* is taken by refusing a program rather than by
 wrapping a scope. Opt-in and off by default: no existing program is affected.
 
+All three verbs also take the input flags — `--input FILE`, `--input-file
+NAME=FILE`, `--input-arg NAME=VALUE` — for a program that takes inputs, because
+`plan --raw` prints prompts and an operator pricing a run wants to price the
+run they will make. A program that takes none refuses them by name.
+
 `<example>` is `harden` or `hello`: the two walked programs, written in
 `Agentic.Workflow` as `Example.Harden`. **They
 are the same values `tier1` pins against the frozen corpus** — nothing is
 rebuilt, adapted or trimmed for execution — which is what makes a run evidence
-about the language rather than about this executable.
+about the language rather than about this executable. `Example.Isaac`'s five
+are registered beside them, `review-lite` as a program of its subject; the
+registry entry is `Fixed` or `Needs` accordingly.
 
 ### `plan` — what the program is, before anyone is asked anything
 
@@ -581,7 +709,11 @@ cannot be registered without being priced, and a row naming no program fails
 too. The five Isaac programs are the reason it exists — they are deliberately
 unfrozen (isaac-workflows §6, D10), so their numbers live in haddocks and one
 document and nothing else would notice them going stale. A mismatch prints the
-program, the field, the expected value and the actual one, and exits 1.
+program, the field, the expected value and the actual one, and exits 1. A
+program that takes inputs is given them here too — `review-lite` gets the
+subject that its deleted script entry used to answer with — and the gate ends
+by checking D8's own claim: at two different subjects the five fold lines are
+identical and the printed programs are not.
 
 `ci/tier1.sh` takes the oracle path from `$ORACLE` (defaulting to agent-cat's
 `.lake/build/bin/conformance-oracle`), the iteration count from `$N` and an

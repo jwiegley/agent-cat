@@ -243,10 +243,16 @@ helloProgram = workflow W.do
 -- surface, which are an /experiment/ about what the language can express and
 -- not conformance fixtures: nothing pins them, and each carries in its haddock
 -- the places where the original did not fit.
-examples :: [(Text, Program)]
+--
+-- __An entry is a program or a program of its inputs__
+-- ('Agentic.Workflow.Example'). These two are 'Fixed', and stay so: they are
+-- the frozen corpus entries, and a program that took an input would be a
+-- different text from the one tier0 replays. @review-lite@ is the one entry
+-- that 'Needs' something, and what it needs is the commit it reviews.
+examples :: [(Text, Example)]
 examples =
-  [ ("harden", hardenProgram),
-    ("hello", helloProgram)
+  [ ("harden", Fixed hardenProgram),
+    ("hello", Fixed helloProgram)
   ]
     <> isaacExamples
 
@@ -255,5 +261,5 @@ exampleNames :: [Text]
 exampleNames = map fst examples
 
 -- | 'examples' as a lookup.
-lookupExample :: Text -> Maybe Program
+lookupExample :: Text -> Maybe Example
 lookupExample n = lookup n examples

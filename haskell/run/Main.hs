@@ -13,6 +13,20 @@
 -- >                                      [--adapter-arg ARG]... [--scratch DIR]
 -- >                                      [--timeout MS] [--verbose]
 --
+-- An example may take __inputs__ — @review-lite@ takes the commit it reviews —
+-- and then every verb accepts them, in three spellings:
+--
+-- > agentic-run plan review-lite --input ./commit.diff
+-- > agentic-run cost review-lite --input-file subject=./commit.diff
+-- > agentic-run run  review-lite --scripted --input-arg subject='diff --git …'
+--
+-- An input is a @define@ supplied at run time ('Agentic.Workflow.taking'), so
+-- it reaches prompts as data rather than as an answer, and __the folds do not
+-- depend on it__: every fold in "Agentic.Plan" is structural over the term and
+-- none reads a prompt, so @plan@ and @cost@ answer for a program whose subject
+-- is not yet in hand and say on the @inputs@ line that they did. @run@ requires
+-- every input.
+--
 -- @plan@ and @cost@ read the elaborated 'Agentic.Plan.Plan' and say nothing a
 -- run could contradict: they are the /static/ folds, decided before anybody is
 -- asked anything. @run@ executes, through "Agentic.Exec"'s memoizing
@@ -50,18 +64,22 @@
 
 module Main (main) where
 
-import Control.Exception (Handler (..), catches)
+import Control.Exception (Handler (..), IOException, catches, try)
 import Control.Monad (unless)
 import Data.Aeson (Value (..))
 import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
-import Data.List (sort, sortOn)
-import Data.Maybe (fromMaybe, isJust)
+import qualified Data.ByteString as BS
+import Data.List (sort, sortOn, tails)
+import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Encoding (decodeUtf8With, encodeUtf8)
+import Data.Text.Encoding.Error (lenientDecode)
 import qualified Data.Text.IO as TIO
 import qualified Data.Vector as V
 import GHC.Clock (getMonotonicTimeNSec)
+import Numeric (showFFloat)
 import System.Directory (createDirectoryIfMissing, getTemporaryDirectory)
 import System.Environment (getArgs)
 import System.Exit (ExitCode (..), exitSuccess, exitWith)
@@ -107,6 +125,7 @@ import Agentic.Plan
     size,
   )
 import Agentic.Raw (codeName)
+import Agentic.Workflow (Example (..), inputNames, supply)
 import Agentic.World (Trace, billFresh, billMemo)
 import Example.Harden (exampleNames, lookupExample)
 import Example.Isaac (isaacScript)
@@ -121,15 +140,41 @@ import Example.Isaac (isaacScript)
 -- fact about the /program/ rather than about the verb or the transport, and so
 -- is checked in 'withExample' where the program is first in hand — before a
 -- plan is printed and before an adapter is started.
+--
+-- The input flags ride on all three verbs, because @plan --raw@ prints prompts
+-- and an operator pricing a run wants to price the run they will make.
 data Command
   = -- | The static folds, the printed program when the first 'Bool', and
     -- @--require-pinned@ in the second.
-    Plan !Text !Bool !Bool
+    Plan !Text !Bool !Bool ![InputFlag]
   | -- | The cost summary and the fold it summarizes.
-    Cost !Text
+    Cost !Text ![InputFlag]
   | -- | Execute, against one of the three answering services, under
     -- @--require-pinned@ when the 'Bool'.
-    Run !Text !Target !Bool
+    Run !Text !Target !Bool ![InputFlag]
+
+-- | One input flag, as written.
+--
+-- @--input FILE@ is the common case and takes no @NAME=@, so a path containing
+-- @=@ is never misread; the two named forms split on the first @=@, and no
+-- declared name contains one.
+data InputFlag
+  = -- | @--input FILE@ — the sole input, read from a file
+    SoleFile !FilePath
+  | -- | @--input-file NAME=FILE@
+    NamedFile !Text !FilePath
+  | -- | @--input-arg NAME=VALUE@
+    NamedArg !Text !Text
+
+-- | One of a program's inputs, once the command line has been read: its name,
+-- the text it was given (or 'Nothing', which only @plan@ and @cost@ allow),
+-- and where that text came from — which is what is printed, never the value,
+-- since a value can be a whole diff.
+data Given = Given
+  { givenName :: !Text,
+    givenText :: !(Maybe Text),
+    givenWhence :: !Text
+  }
 
 -- | Who answers.
 data Target
@@ -187,33 +232,164 @@ main = do
 
 execute :: Command -> IO ()
 execute = \case
-  Plan name raw pinned -> withExample pinned name (planCmd name raw)
-  Cost name -> withExample False name (costCmd name)
-  Run name target pinned -> withExample pinned name (runCmd name target)
+  Plan name raw pinned ins -> withExample pinned False name ins (planCmd name raw)
+  Cost name ins -> withExample False False name ins (costCmd name)
+  Run name target pinned ins -> withExample pinned True name ins (runCmd name target)
 
--- | Look the example up, or fail naming the ones there are — and, under
--- @--require-pinned@, refuse a program that leaves a model ask without a
+-- | Look the example up, bind its inputs, or fail naming what is wrong — and,
+-- under @--require-pinned@, refuse a program that leaves a model ask without a
 -- @served by@.
 --
--- __The check runs before the verb does__, so a refused program prints no plan,
+-- __The checks run before the verb does__, so a refused program prints no plan,
 -- starts no adapter and spends nothing. That is the whole value of an opt-in
 -- guard over a program: it is a statement about the text, and the text is
 -- available before anybody is asked anything.
 --
--- Exit @1@, with the guard's own words. It is a usage exit and not a run exit
--- because nothing ran: the operator asked for a guarantee this program does not
--- carry, and the two ways out are to pin the ask or to drop the flag.
-withExample :: Bool -> Text -> (Program -> IO ()) -> IO ()
-withExample pinned name k = case lookupExample name of
-  Just prog
-    | pinned, Just why <- guardUnpinnedAsk (progRawOut prog) -> die 1 ("refused: " <> why)
-    | otherwise -> k prog >> exitSuccess
+-- Exit @1@ throughout, with the guard's own words or the input resolution's. It
+-- is a usage exit and not a run exit because nothing ran: the operator asked
+-- for something this program does not offer, and the way out is another command
+-- line.
+--
+-- The second 'Bool' is whether every input is required, which is @run@ and only
+-- @run@: a static fold does not read a prompt (@Plan.hs@'s folds are all
+-- @Plan g a -> …@), so @plan@ and @cost@ answer for a program whose subject is
+-- not yet in hand and say on the @inputs@ line that they did.
+withExample :: Bool -> Bool -> Text -> [InputFlag] -> (Program -> [Given] -> IO ()) -> IO ()
+withExample pinned needsAll name ins k = case lookupExample name of
   Nothing ->
     die 1 $
       "no example named '"
         <> name
         <> "'; there is "
         <> T.intercalate " and " exampleNames
+  Just ex -> do
+    resolved <- resolveInputs name needsAll ex ins
+    case resolved of
+      Left why -> die 1 why
+      Right (prog, bs)
+        | pinned, Just why <- guardUnpinnedAsk (progRawOut prog) -> die 1 ("refused: " <> why)
+        | otherwise -> k prog bs >> exitSuccess
+
+-- ---------------------------------------------------------------------------
+-- The inputs
+-- ---------------------------------------------------------------------------
+
+-- | Bind a program's inputs from the command line, or say exactly what is
+-- wrong with the line.
+--
+-- Every refusal here is a usage error, and each names the one thing to change.
+-- The order is the order an operator meets them: a program that takes nothing,
+-- a bare @--input@ where a name is needed, a name the program does not have,
+-- a name given twice, a file that will not read, and — at @run@ — an input
+-- nobody gave.
+resolveInputs ::
+  Text ->
+  Bool ->
+  Example ->
+  [InputFlag] ->
+  IO (Either Text (Program, [Given]))
+resolveInputs name needsAll ex ins = case ex of
+  Fixed prog
+    | null ins -> pure (Right (prog, []))
+    | otherwise -> pure (Left (name <> " takes no input"))
+  Needs par -> case traverse (named (inputNames par)) ins of
+    Left why -> pure (Left why)
+    Right pairs -> case duplicate (map fst pairs) of
+      Just n -> pure (Left ("input '" <> n <> "' was given twice"))
+      Nothing -> do
+        read' <- traverse (\(n, src) -> fmap ((,) n) <$> text src) pairs
+        pure $ do
+          given <- sequence read'
+          bounds <- traverse (bind given) (inputNames par)
+          prog <- supply par (map (fromMaybe "" . givenText) bounds)
+          pure (prog, bounds)
+  where
+    -- Which input a flag names. `--input` names one by being the only one.
+    named :: [Text] -> InputFlag -> Either Text (Text, InputFlag)
+    named ns f = case f of
+      SoleFile _ -> case ns of
+        [n] -> Right (n, f)
+        _ ->
+          Left
+            ( name
+                <> " takes "
+                <> tshow (length ns)
+                <> (if length ns == 1 then " input (" else " inputs (")
+                <> T.intercalate ", " ns
+                <> "); name them with --input-arg or --input-file"
+            )
+      NamedFile n _ -> known ns n f
+      NamedArg n _ -> known ns n f
+
+    known ns n f
+      | n `elem` ns = Right (n, f)
+      | otherwise =
+          Left
+            ( name
+                <> " has no input named '"
+                <> n
+                <> "'; it takes "
+                <> T.intercalate ", " ns
+            )
+
+    duplicate ns = listToMaybe [n | (n, rest) <- zip ns (drop 1 (tails ns)), n `elem` rest]
+
+    -- The text, and where it came from. A file's contents are read as UTF-8
+    -- and one trailing newline is stripped, so that an input from a file
+    -- splices like a define written in the source: `[wf|…|]` produces no
+    -- trailing newline either, and a silent blank line in a prompt is the kind
+    -- of difference this repository exists to prevent.
+    text :: InputFlag -> IO (Either Text (Text, Text))
+    text = \case
+      NamedArg _ v -> pure (Right (v, sizeOf v <> " given with --input-arg"))
+      SoleFile p -> ofFile p
+      NamedFile _ p -> ofFile p
+
+    ofFile p = do
+      got <- try (BS.readFile p)
+      pure $ case got :: Either IOException BS.ByteString of
+        Left e -> Left ("could not read " <> T.pack p <> ": " <> T.pack (ioeGetErrorString e))
+        Right bytes ->
+          let t = decodeUtf8With lenientDecode bytes
+              t' = fromMaybe t (T.stripSuffix "\n" t)
+           in Right (t', sizeOf t' <> " from " <> T.pack p)
+
+    bind given n = case lookup n given of
+      Just (t, whence) -> Right (Given n (Just t) whence)
+      Nothing
+        | needsAll -> Left ("run needs every input: '" <> n <> "' was not given")
+        | otherwise -> Right (Given n Nothing "")
+
+-- | A text's size in bytes, as an operator reads it.
+sizeOf :: Text -> Text
+sizeOf t
+  | n < 1000 = tshow n <> " B"
+  | otherwise = T.pack (showFFloat (Just 1) (fromIntegral n / 1000 :: Double) "") <> " kB"
+  where
+    n = BS.length (encodeUtf8 t)
+
+-- | The note @plan --raw@ prints above a program some of whose inputs are
+-- empty, and nothing at all when every one was given.
+emptyNote :: [Given] -> [Text]
+emptyNote gs = case [givenName g | g <- gs, givenText g == Nothing] of
+  [] -> []
+  ns ->
+    [ "  note: " <> T.intercalate ", " ns <> " was not given, so the program",
+      "  below prints with it empty — which is a different text from the one",
+      "  a run would put.",
+      ""
+    ]
+
+-- | The @inputs@ line: the name, the kind, and where the text came from —
+-- never the text, which can be a whole diff.
+inputsLine :: Given -> Text
+inputsLine b =
+  "  inputs    "
+    <> givenName b
+    <> " (text) "
+    <> case givenText b of
+      Nothing -> "— not given; the folds below do not depend on it"
+      Just _ -> "= " <> givenWhence b
 
 -- ---------------------------------------------------------------------------
 -- plan
@@ -226,10 +402,11 @@ withExample pinned name k = case lookupExample name of
 -- @askNodes@ counts the ask nodes /written/, which is not what any run will
 -- put: a branch is not taken and a loop is unrolled, so the number to compare a
 -- run's bill against is the cost fold below and not this one.
-planCmd :: Text -> Bool -> Program -> IO ()
-planCmd name raw prog = do
+planCmd :: Text -> Bool -> Program -> [Given] -> IO ()
+planCmd name raw prog gs = do
   say $ name <> ", as elaborated:"
   say ""
+  mapM_ (say . inputsLine) gs
   say $ "  level     " <> levelName (level p)
   say $ "  size      " <> tshow (size p)
   say $ "  askNodes  " <> tshow (askNodes p)
@@ -238,6 +415,10 @@ planCmd name raw prog = do
   if raw
     then do
       say ""
+      -- The note stands immediately above the program, because a program
+      -- printed with an empty subject is a different text from the one that
+      -- will run and the operator must not have to infer that.
+      mapM_ say (emptyNote gs)
       say "  the program, as the builder prints it:"
       say ""
       say (indentBy 2 (prettyJson 0 (printedValue prog)))
@@ -267,10 +448,11 @@ planCmd name raw prog = do
 -- The bag is sorted before it is printed, because a multiset has no order of
 -- its own to report; @Explain.leafBills@ sorts the same one for the same
 -- reason.
-costCmd :: Text -> Program -> IO ()
-costCmd name prog = do
+costCmd :: Text -> Program -> [Given] -> IO ()
+costCmd name prog gs = do
   say $ name <> ", priced:"
   say ""
+  mapM_ (say . inputsLine) gs
   say $ "  costSummary   " <> renderSummary (costSummary p)
   say ""
   case (mn, mx) of
@@ -333,8 +515,8 @@ renderSummary (mn, mx, paths) =
 -- answer on the next. __A memo hit prints nothing__, because nothing was asked:
 -- the printed lines are @billMemo@ many, and the trace they summarize is
 -- @billFresh@ many. Seeing the two differ is seeing the memo table work.
-runCmd :: Text -> Target -> Program -> IO ()
-runCmd name target prog = case target of
+runCmd :: Text -> Target -> Program -> [Given] -> IO ()
+runCmd name target prog gs = case target of
   Scripted -> do
     say $
       "running "
@@ -381,6 +563,10 @@ runCmd name target prog = case target of
   where
     walk :: WorldIO -> IO ()
     walk world = do
+      -- The inputs this run's prompts were built from, announced before the
+      -- first question: an operator reading a transcript must be able to see
+      -- which subject it was about, and the value itself can be a whole diff.
+      mapM_ (say . inputsLine) gs
       say ""
       (_, tr) <- runPlanIO (announcingWorld (say . ("  " <>)) world) (progPlan prog)
       say ""
@@ -475,30 +661,60 @@ parseCommand :: [Text] -> Either Text Command
 parseCommand = \case
   [] -> Left usage
   [verb] | verb `elem` verbs -> Left (verb <> " needs an example: " <> T.intercalate " or " exampleNames)
-  ("plan" : name : rest) -> planOpts name False False rest
-  ("cost" : name : rest)
-    | null rest -> Right (Cost name)
-    | otherwise -> Left ("cost takes an example and nothing else\n\n" <> usage)
-  ("run" : name : rest) -> (\(t, p) -> Run name t p) <$> parseTarget rest
+  ("plan" : name : rest) -> planOpts name False False [] rest
+  ("cost" : name : rest) -> costOpts name [] rest
+  ("run" : name : rest) -> (\(t, p, ins) -> Run name t p ins) <$> parseTarget rest
   (verb : _) -> Left ("no verb '" <> verb <> "'\n\n" <> usage)
   where
     verbs = ["plan", "cost", "run"]
 
     -- Two independent flags, so they are folded rather than enumerated: the
     -- pair spelled in the other order is the same request.
-    planOpts :: Text -> Bool -> Bool -> [Text] -> Either Text Command
-    planOpts name raw pinned = \case
-      [] -> Right (Plan name raw pinned)
-      ("--raw" : more) -> planOpts name True pinned more
-      ("--require-pinned" : more) -> planOpts name raw True more
+    planOpts :: Text -> Bool -> Bool -> [InputFlag] -> [Text] -> Either Text Command
+    planOpts name raw pinned ins args = case args of
+      [] -> Right (Plan name raw pinned ins)
+      ("--raw" : more) -> planOpts name True pinned ins more
+      ("--require-pinned" : more) -> planOpts name raw True ins more
+      _
+        | Just taken <- takeInput args ->
+            taken >>= \(f, more) -> planOpts name raw pinned (ins <> [f]) more
       (flag : _) ->
         Left
           ( "no option '"
               <> flag
-              <> "' for plan, which takes an example and, at most, --raw and "
-              <> "--require-pinned\n\n"
+              <> "' for plan, which takes an example and, at most, --raw, "
+              <> "--require-pinned and the input flags\n\n"
               <> usage
           )
+
+    costOpts :: Text -> [InputFlag] -> [Text] -> Either Text Command
+    costOpts name ins args = case args of
+      [] -> Right (Cost name ins)
+      _
+        | Just taken <- takeInput args ->
+            taken >>= \(f, more) -> costOpts name (ins <> [f]) more
+      _ -> Left ("cost takes an example and its inputs, and nothing else\n\n" <> usage)
+
+-- | One input flag at the head of the arguments, if that is what stands there:
+-- the flag, and what is left. 'Nothing' when the head is something else, which
+-- is what lets all three verbs share the three flags without sharing a parser.
+takeInput :: [Text] -> Maybe (Either Text (InputFlag, [Text]))
+takeInput args = case args of
+  ("--input" : v : rest) -> Just (Right (SoleFile (T.unpack v), rest))
+  ("--input-file" : v : rest) ->
+    Just ((\(n, f) -> (NamedFile n (T.unpack f), rest)) <$> splitNamed "--input-file" "NAME=FILE" v)
+  ("--input-arg" : v : rest) ->
+    Just ((\(n, t) -> (NamedArg n t, rest)) <$> splitNamed "--input-arg" "NAME=VALUE" v)
+  [flag]
+    | flag `elem` ["--input", "--input-file", "--input-arg"] ->
+        Just (Left (flag <> " takes a value, and was given none"))
+  _ -> Nothing
+  where
+    -- The first `=`, and no other: a value may contain as many as it likes.
+    splitNamed flag shape v = case T.breakOn "=" v of
+      (n, r)
+        | not (T.null n), Just val <- T.stripPrefix "=" r -> Right (n, val)
+      _ -> Left (flag <> " takes " <> shape <> ", not '" <> v <> "'")
 
 -- | What the @run@ options say, before it has been decided whether they say
 -- anything coherent.
@@ -523,26 +739,34 @@ data RunOpts = RunOpts
     -- | @--require-pinned@. Belongs to no engine — it is a question about the
     -- program's text, which is the same text whoever answers it — so it is the
     -- one flag 'chooseTarget' neither forbids nor consumes.
-    roRequirePinned :: !Bool
+    roRequirePinned :: !Bool,
+    -- | The input flags, in the order given. They belong to no engine either:
+    -- an input is data the /program/ is written from, and every answerer sees
+    -- the same program.
+    roInputs :: ![InputFlag]
   }
 
 noRunOpts :: RunOpts
-noRunOpts = RunOpts False Nothing Nothing Nothing Nothing Nothing False Nothing [] Nothing False
+noRunOpts = RunOpts False Nothing Nothing Nothing Nothing Nothing False Nothing [] Nothing False []
 
 -- | The @run@ options: three mutually exclusive answerers, the knobs that
--- belong to one of them alone, and @--require-pinned@, which belongs to none.
-parseTarget :: [Text] -> Either Text (Target, Bool)
+-- belong to one of them alone, and @--require-pinned@ and the input flags,
+-- which belong to none.
+parseTarget :: [Text] -> Either Text (Target, Bool, [InputFlag])
 parseTarget args = do
   o <- go noRunOpts args
   t <- chooseTarget o
-  pure (t, roRequirePinned o)
+  pure (t, roRequirePinned o, roInputs o)
   where
     go :: RunOpts -> [Text] -> Either Text RunOpts
-    go o = \case
+    go o rest0 = case rest0 of
       [] -> Right o
       ("--scripted" : rest) -> go o {roScripted = True} rest
       ("--verbose" : rest) -> go o {roVerbose = True} rest
       ("--require-pinned" : rest) -> go o {roRequirePinned = True} rest
+      _
+        | Just taken <- takeInput rest0 ->
+            taken >>= \(f, rest) -> go o {roInputs = roInputs o <> [f]} rest
       ("--engine" : v : rest)
         | v `elem` ["acp", "deck"] -> go o {roEngine = Just v} rest
         | otherwise ->
@@ -637,9 +861,9 @@ usage =
     "\n"
     [ "agentic-run — plan, price and run the worked examples",
       "",
-      "  agentic-run plan <example> [--raw] [--require-pinned]",
-      "  agentic-run cost <example>",
-      "  agentic-run run  <example> --scripted",
+      "  agentic-run plan <example> [--raw] [--require-pinned] [<input>...]",
+      "  agentic-run cost <example> [<input>...]",
+      "  agentic-run run  <example> --scripted [<input>...]",
       "  agentic-run run  <example> --session <id> [--binary PATH] [--poll MS]",
       "                                            [--timeout MS] [--verbose]",
       "  agentic-run run  <example> --engine acp [--adapter stub|claude|codex|PATH]",
@@ -648,6 +872,22 @@ usage =
       "",
       "  <example> is " <> T.intercalate " or " exampleNames,
       "",
+      "  <input> is one of the three input flags below. A program that takes",
+      "  inputs is a program of them: an input is a define supplied at run time,",
+      "  spliced into prompts as data and never asked of anybody. plan and cost",
+      "  answer without one — no static fold reads a prompt — and say so on the",
+      "  inputs line; run requires every input.",
+      "",
+      "  --input FILE   the sole input of a program that takes exactly one, read",
+      "                 from a file. Takes no NAME=, so a path containing = is",
+      "                 never misread",
+      "  --input-file NAME=FILE",
+      "                 that input, read from a file. Repeatable",
+      "  --input-arg NAME=VALUE",
+      "                 that input, inline. Repeatable",
+      "                 (a file's contents are read as UTF-8 and one trailing",
+      "                 newline is stripped, so a file splices like a define",
+      "                 written in the source)",
       "  --scripted     answer from a table of canned replies, and ask nobody",
       "  --engine       acp starts an ACP adapter of its own and speaks the protocol",
       "                 to it over a pipe it owns; deck sends to a live agent-deck",

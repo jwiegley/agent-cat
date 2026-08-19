@@ -54,6 +54,17 @@ description:
   for something that did not happen. @agentic-run run EXAMPLE --engine acp@ is
   the surface, and @ci\/acp.sh@ is the gate — against the stub adapter, and
   never against a real agent.
+  .
+  Week eight gives the authoring surface the two things the production one
+  always had and it did not: a @function@ — a name, a parameter list and a
+  straight-line body — with @call@, @call_@ and @defining@'s table, and a
+  program's @input@s, which are @define@s supplied at the command line rather
+  than answers asked of a tool. Neither reaches below @Agentic.Workflow@:
+  @Agentic.Builder@ is byte-identical, and a call costs exactly what writing
+  the callee's statements at the call site costs. @Example.Isaac@'s
+  @review-lite@ is the worked case — its duplicated closing act is one function
+  both arms of the router call, and the commit it reviews arrives as
+  @agentic-run … --input@.
 
 build-type:      Simple
 license:         MIT

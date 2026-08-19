@@ -6,7 +6,9 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
@@ -109,15 +111,56 @@
 -- construction, which is what the labelled surface could only ask for by
 -- convention.
 --
--- == Two block grammars, one @do@ qualifier
+-- == Three block grammars, one @do@ qualifier
 --
 -- The language has three block shapes, and each refuses what its
 -- 'Agentic.Raw.Raw' cannot express: a workflow block branches and ends in a
 -- terminal; a bounded revision has exactly one review and exactly one
 -- amendment; a function body is a straight line with no branch and no loop.
--- The first two are both written in @W.do@ ("Agentic.Workflow.Do"), because
--- the /stage/ index already tells them apart: inside a revision only a review
--- may stand, and after it only 'amend'.
+-- All three are written in @W.do@ ("Agentic.Workflow.Do"), because the /stage/
+-- index already tells them apart: inside a revision only a review may stand,
+-- and after it only 'amend'; inside a body there is no branch to write, and
+-- the block ends at 'answer' or 'done' rather than at 'stop'.
+--
+-- A statement that stands at more than one stage — 'act', 'call_' — is a
+-- __value__ with one 'Step' instance per stage ('Acting', 'Calling'), never a
+-- class over stages, so every instance still dispatches on two heads and
+-- nothing else.
+--
+-- == Functions, calls, and a program's inputs
+--
+-- A 'function' is a name, a parameter list and a body:
+--
+-- > libDrafted :: Fn '[ 'CodeText] 'CodeText
+-- > libDrafted = function "lib.drafted" (takes @"goal" Text noParams) \goal -> W.do
+-- >     d <- ask (model "author") [wf|draft: {goal}|]
+-- >     answer d
+-- >
+-- > module000 :: Program
+-- > module000 = defining [SomeFn libDrafted] W.do
+-- >     guide <- ask (tool "cat") [wf|style guide|] `annotated` Text
+-- >     x     <- call libDrafted (arg guide :> noArgs)
+-- >     act (tool "t") [wf|use {x}|]
+-- >     stop
+--
+-- 'takes' is the one place this surface asks an author for a name at the type
+-- level, and it asks because a parameter's name is /printed/ — in the
+-- signature, and again in every hole of the body — where a binding's is
+-- generated. 'defining' is 'workflow' with a table, and it checks what the
+-- type level cannot see (see there).
+--
+-- A __call__ costs what writing the callee's statements at the call site
+-- costs: @rhsAsks@ prices it at the callee's own @bodyAsks@ with the arguments
+-- ignored, and @graft@ splices the callee's nodes in rather than adding one.
+-- What can move is 'Agentic.Plan.level': a prompt that was closed inline
+-- becomes open when the literal it held becomes a parameter, and an open
+-- prompt joins @pipeline@.
+--
+-- An __input__ ('taking', 'input') is a @define@ supplied at run time, so a
+-- program with inputs is an ordinary Haskell function of them and nothing
+-- type-level is needed: a define never enters a scope and cannot collide with
+-- a binding. See 'Parameterized' for why @main@'s parameters are not the
+-- mechanism.
 --
 -- == Two branches, two mechanisms
 --
@@ -193,10 +236,44 @@
 --     produces it;
 --   * a revision's settled handle read in the unsettled arm — GHC's own
 --     @Variable not in scope@, because the pattern binds it in one arm only.
+--
+-- And, with functions and calls:
+--
+--   * a branch, a loop or a @known here@ in a function body — @a function body
+--     is a straight line: it has no bounded revision, no branch and no
+--     `known here` — those belong to the workflow that calls it@ (the loop's
+--     own message; @if@, @caseVerdict@, @knownHere@ and @stop@ stay typed at
+--     @'Open'@ and give GHC's own @Couldn't match ‘Open’ with ‘Body’@);
+--   * an @act@ or a @call_@ inside a bounded revision — @a bounded revision
+--     reviews first … and then amends, and has no other statement@;
+--   * two parameters of one name — "Agentic.Builder"'s @Fresh@: @this name is
+--     already in scope, and a live name is not introduced twice@;
+--   * a parameter or a 'named' binding taking a name the surface generates for
+--     itself — 'reserved', on a CAF;
+--   * 'done' in a value-returning body — @Couldn't match ‘'CodeText’ with
+--     ‘'CodeAck’@; a body with no terminal — @Couldn't match ‘()’ with ‘Term’@;
+--     a statement after @answer@ or @done@ — @nothing follows a terminal@;
+--   * a value function standing as a statement call — @Couldn't match
+--     ‘'CodeText’ with ‘'CodeAck’@ on 'call_'\''s first argument;
+--   * an argument of the wrong kind — @Couldn't match ‘'CodeVerdict’ with
+--     ‘'CodeText’@; the wrong number of arguments — @Couldn't match
+--     ‘Args s '[]’ with ‘Args s '[ 'CodeText]’@;
+--   * two functions of one name, or a call naming a function 'defining' was
+--     not given or was given later — value-level refusals on a CAF, because
+--     the /list/ is what says when a function was declared.
 module Agentic.Workflow
   ( -- * Programs
     Program,
     workflow,
+    defining,
+
+    -- * A program's inputs
+    Parameterized (..),
+    Ins,
+    noInputs,
+    input,
+    taking,
+    Example (..),
 
     -- * Prompts
     wf,
@@ -248,6 +325,7 @@ module Agentic.Workflow
     -- * Statements and terminals
     stop,
     act,
+    Acting,
     ask_,
     knownHere,
     ifThenElse,
@@ -258,6 +336,27 @@ module Agentic.Workflow
     when,
     unless,
     caseVerdict,
+
+    -- * Functions
+    Fn,
+    SomeFn (..),
+    Params,
+    noParams,
+    takes,
+    function,
+    answer,
+    done,
+    runBody,
+    Curries (..),
+
+    -- * Calls
+    call,
+    call_,
+    Calling,
+    Arg,
+    Args ((:>), ANil),
+    noArgs,
+    Gives (..),
 
     -- * The bounded revision
     Bound,
@@ -279,16 +378,25 @@ module Agentic.Workflow
 where
 
 import Agentic.Builder
-  ( Ask (..),
+  ( Arg,
+    Args (ANil, (:>)),
+    Ask (..),
     Blk (..),
     Code (..),
+    Codes,
     Entry,
+    Fn,
+    Fresh,
+    ParamCtx,
+    Params (..),
     Piece,
     Program,
     Rhs,
     Scope,
+    SomeFn (..),
     Words,
     lit,
+    noParams,
   )
 import qualified Agentic.Builder as B
 import Agentic.Plan
@@ -301,17 +409,27 @@ import Agentic.Plan
     subId,
     subP,
   )
-import Agentic.Raw (Addressee (..))
+import Agentic.Raw
+  ( Addressee (..),
+    Raw (..),
+    RawBodyStmt (..),
+    RawFn (fnBody, fnName),
+    RawProgram (..),
+    RawRhs (..),
+    RawSource (..),
+  )
 import Agentic.WF (KnownIx, Says (..), V (..), wf)
+import Data.Char (isDigit)
 import Data.Kind (Constraint, Type)
 import qualified Data.List.NonEmpty as NE
-import Data.Maybe (fromMaybe)
+import Data.Maybe (catMaybes, fromMaybe, listToMaybe)
+import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import qualified Data.Text as T
 -- The @ErrorMessage@ constructors are imported qualified, and only there:
 -- @GHC.TypeLits@ spells its literal message @Text@, which is exactly the name
 -- 'Answer' gives to the kind @text@, and one of the two has to give way.
-import GHC.TypeLits (TypeError)
+import GHC.TypeLits (KnownSymbol, TypeError, symbolVal)
 import qualified GHC.TypeLits as TL
 
 -- ---------------------------------------------------------------------------
@@ -349,6 +467,35 @@ genName live = T.pack ('b' : show (length live))
 resultName :: Live -> Text
 resultName live = T.pack ('r' : show (length live))
 
+-- | The names this surface generates for itself, which an author may not take:
+-- @b0, b1, …@ for bindings and @r0, r1, …@ for a bounded revision's result.
+--
+-- \"Fresh by construction\" is a claim about /generated/ names — at depth @d@
+-- the live ones are exactly @b0 … b(d-1)@ — and there are two places an author
+-- can spell a name of their own: 'named', and a function parameter, whose
+-- symbol is what the body's holes and the printed signature carry. Neither
+-- passes through 'Fresh' (a body binds through the index-level
+-- 'Agentic.Builder.bindBI', which has none), so a parameter called @b2@ would
+-- be accepted here and refused by Lean, at the depth-2 binding that then
+-- shadows it. Both callers ask this first, so the claim stays exact.
+reserved :: Text -> Bool
+reserved t = case T.uncons t of
+  Just (c, ds) -> (c == 'b' || c == 'r') && not (T.null ds) && T.all isDigit ds
+  Nothing -> False
+
+-- | The refusal both callers of 'reserved' make, in one place so they make it
+-- in the same words. It sits on a CAF, like 'panel'\''s.
+reservedError :: Text -> Text -> a
+reservedError what x =
+  error
+    ( T.unpack what
+      <> ": `"
+      <> T.unpack x
+      <> "` is a name this surface generates for itself — `b0`, `b1`, … for a "
+      <> "binding and `r0`, `r1`, … for a bounded revision's result — and a "
+      <> "generated name is fresh by construction only while no author takes one"
+    )
+
 -- ---------------------------------------------------------------------------
 -- Naming a binding by hand
 -- ---------------------------------------------------------------------------
@@ -362,8 +509,12 @@ data Nm st = Nm Text st
 -- Never required, and nothing reads it but the printer: a program means
 -- exactly what it meant before, and holes still print whatever their handle
 -- carries, which is now this. A statement that binds nothing ignores it.
+--
+-- A 'reserved' name is refused: see there.
 named :: Text -> st -> Nm st
-named = Nm
+named x st
+  | reserved x = reservedError "named" x
+  | otherwise = Nm x st
 
 -- ---------------------------------------------------------------------------
 -- Parties and questions
@@ -482,25 +633,33 @@ data Ann (s :: Scope) (c :: Code) = Ann (SCode c) (Rhs s c)
 --   * @'Review' c s@ — inside a revision, awaiting its one review, with the
 --     candidate live at index @0@;
 --   * @'Amending' c s@ — the same revision, awaiting its one amendment, with
---     the verdict live too.
+--     the verdict live too;
+--   * @'Body' r s@ — a function body over its parameters @s@, at the result
+--     kind @r@ the function declares.
 --
 -- Lean's fourth state, @Pend Γ@ (@Check.lean:527@) — a block /pending/ the
 -- @case@ that consumes a bounded revision's result — has no stage here,
 -- because the fork happens at the bind and the arms are ordinary open blocks.
 -- Its refusal is not lost: see \"Two branches, two mechanisms\".
+--
+-- __The naming.__ The promoted @'Body'@ and "Agentic.Builder"\'s type @Body@
+-- would clash in the type namespace, so Builder's is written @B.Body@ here,
+-- which is how every other Builder entry point is written in this module.
 data Stage
   = Open Scope
   | Review Code Scope
   | Amending Code Scope
+  | Body Code Scope
 
 -- | What a block at a given stage /is/. The family is injective because its
--- three results are distinct type constructors — and it has to be, or
+-- four results are distinct type constructors — and it has to be, or
 -- unwrapping a 'W' could not recover its indices and @>>=@ would not typecheck
 -- at all.
 type family Res (i :: Stage) = (r :: Type) | r -> i where
   Res ('Open s) = Blk s
   Res ('Review c s) = Clauses c s
   Res ('Amending c s) = Amendment c s
+  Res ('Body r s) = B.Body s r
 
 -- | The two arms of a @case result@ as the fork produces them: the name the
 -- settled binder prints, and the two blocks the rest of the workflow is.
@@ -566,6 +725,10 @@ runW live (W f) = f live absurdTerm
 runRev :: Live -> W ('Review c s) ('Amending c s) Term -> Clauses c s
 runRev live (W f) = f live absurdTerm
 
+-- | The body a function's @do@ finally is, under the names its parameters are.
+runBody :: Live -> W ('Body r s) j Term -> B.Body s r
+runBody live (W f) = f live absurdTerm
+
 -- | What a statement does to a block: which stage it takes, which stage it
 -- leaves, and what it binds.
 --
@@ -630,6 +793,53 @@ instance
   Step (Ann s' c) ('Open s) j a
   where
   step mn live (Ann sc r) k = B.bindAsI sc x r (k (V x VHere) (x : live))
+    where
+      x = fromMaybe (genName live) mn
+
+-- | @x <- ask …@ in a function body: a bare question is a text question, here
+-- as there. The three instances that follow are the exact mirrors of their
+-- @'Open'@ twins above, with 'Agentic.Builder.bindI' and
+-- 'Agentic.Builder.bindAsI' replaced by 'Agentic.Builder.bindBI' and
+-- 'Agentic.Builder.bindAsBI'.
+--
+-- The index-level Builder forms are what let a body push an anonymous @'An' c@
+-- entry onto a scope whose /parameter/ entries carry real symbols: 'Fresh' is
+-- not consulted there, and must not be, since a parameter's name and a
+-- generated binding name live in one namespace. 'reserved' is what keeps that
+-- namespace clean.
+instance
+  ( s' ~ s,
+    j ~ 'Body r (An 'CodeText ': s),
+    a ~ V (An 'CodeText ': s) 'CodeText
+  ) =>
+  Step (Ask s') ('Body r s) j a
+  where
+  step mn live q k = B.bindBI x (B.one @'CodeText q) (k (V x VHere) (x : live))
+    where
+      x = fromMaybe (genName live) mn
+
+-- | @x <- panel […]@, @x <- confirm …@, @x <- call f …@,
+-- @x <- ask … \`answering\` c@, in a body.
+instance
+  ( s' ~ s,
+    j ~ 'Body r (An c ': s),
+    a ~ V (An c ': s) c
+  ) =>
+  Step (Rhs s' c) ('Body r s) j a
+  where
+  step mn live r k = B.bindBI x r (k (V x VHere) (x : live))
+    where
+      x = fromMaybe (genName live) mn
+
+-- | @x : c <- …@ in a body.
+instance
+  ( s' ~ s,
+    j ~ 'Body r (An c ': s),
+    a ~ V (An c ': s) c
+  ) =>
+  Step (Ann s' c) ('Body r s) j a
+  where
+  step mn live (Ann sc r) k = B.bindAsBI sc x r (k (V x VHere) (x : live))
     where
       x = fromMaybe (genName live) mn
 
@@ -729,6 +939,91 @@ instance
   where
   step = error "Step (Rhs s c) ('Amending c s): unreachable, the instance is a TypeError"
 
+-- | A bounded revision inside a function body, which
+-- 'Agentic.Raw.RawBodyStmt' has no constructor for.
+instance
+  TypeError
+    ( 'TL.Text "a function body is a straight line: it has no bounded \
+               \revision, no branch and no `known here` — those belong to the \
+               \workflow that calls it"
+    ) =>
+  Step (Loop c' s') ('Body r s) j a
+  where
+  step = error "Step (Loop c s) ('Body r s): unreachable, the instance is a TypeError"
+
+-- | A statement-position question, as a value rather than as a block.
+--
+-- 'act' is written once and stands at two stages — a workflow block and a
+-- function body — and the way this module says that is one statement value per
+-- construct with one 'Step' instance per stage, never a class over stages.
+-- Every instance still dispatches on two heads and nothing else.
+newtype Acting (s :: Scope) = Acting (Ask s)
+
+-- | A statement-position call. Only a @-> receipt@ function may stand here,
+-- which is the type, and — unlike an 'act' — it adds __no__ context slot. That
+-- contrast is what @battery-144@ pins.
+data Calling (s :: Scope) where
+  Calling :: Fn ps 'CodeAck -> Args s ps -> Calling s
+
+-- | @act …@ in a workflow block.
+instance (s' ~ s, j ~ 'Open s, a ~ ()) => Step (Acting s') ('Open s) j a where
+  step _ live (Acting q) k = B.act q (k () live)
+
+-- | @act …@ in a function body — @battery-144@'s @applied@ is a body that /is/
+-- one act.
+instance (s' ~ s, j ~ 'Body r s, a ~ ()) => Step (Acting s') ('Body r s) j a where
+  step _ live (Acting q) k = B.actB q (k () live)
+
+-- | @call_ f …@ in a workflow block.
+instance (s' ~ s, j ~ 'Open s, a ~ ()) => Step (Calling s') ('Open s) j a where
+  step _ live (Calling f as) k = B.callStmt f as (k () live)
+
+-- | @call_ f …@ in a function body.
+instance (s' ~ s, j ~ 'Body r s, a ~ ()) => Step (Calling s') ('Body r s) j a where
+  step _ live (Calling f as) k = B.callSB f as (k () live)
+
+-- | An act inside a bounded revision, which 'Agentic.Raw.RawRhs' cannot
+-- express.
+instance
+  TypeError
+    ( 'TL.Text "a bounded revision reviews first — `verdict <- panel […]` — \
+               \and then amends, and has no other statement"
+    ) =>
+  Step (Acting s') ('Review c s) j a
+  where
+  step = error "Step (Acting s) ('Review c s): unreachable, the instance is a TypeError"
+
+-- | As above, after the review.
+instance
+  TypeError
+    ( 'TL.Text "a bounded revision reviews first — `verdict <- panel […]` — \
+               \and then amends, and has no other statement"
+    ) =>
+  Step (Acting s') ('Amending c s) j a
+  where
+  step = error "Step (Acting s) ('Amending c s): unreachable, the instance is a TypeError"
+
+-- | A statement call inside a bounded revision, refused for 'Acting'\''s
+-- reason: a revision's two clauses are sources, and a statement is not one.
+instance
+  TypeError
+    ( 'TL.Text "a bounded revision reviews first — `verdict <- panel […]` — \
+               \and then amends, and has no other statement"
+    ) =>
+  Step (Calling s') ('Review c s) j a
+  where
+  step = error "Step (Calling s) ('Review c s): unreachable, the instance is a TypeError"
+
+-- | As above, after the review.
+instance
+  TypeError
+    ( 'TL.Text "a bounded revision reviews first — `verdict <- panel […]` — \
+               \and then amends, and has no other statement"
+    ) =>
+  Step (Calling s') ('Amending c s) j a
+  where
+  step = error "Step (Calling s) ('Amending c s): unreachable, the instance is a TypeError"
+
 -- | The block's bind. See "Agentic.Workflow.Do", which is where an author
 -- meets it.
 bindW ::
@@ -758,8 +1053,11 @@ stop = W (\_ _ -> B.stop)
 
 -- | A statement-position question: it binds nothing, and its answer is a
 -- receipt. The scope is unchanged; the plan is weakened past the slot.
-act :: Party p -> Words s -> W ('Open s) ('Open s) ()
-act p w = W (\_ k -> B.act (ask p w) (k ()))
+--
+-- It is an 'Acting' and not a block, which is what lets the same word stand in
+-- a workflow block and in a function body; see 'Acting'.
+act :: Party p -> Words s -> Acting s
+act p w = Acting (ask p w)
 
 -- | @ask_ party words@ — the terminal, answer-discarding question: 'act' and
 -- then 'stop', said once.
@@ -878,13 +1176,19 @@ ifFlag v yes no =
 -- @known here@ — and it is unit-valued, so a body that ends in @stop@ or in a
 -- branch does not typecheck here: that block is already whole, and it belongs
 -- to the @if@ this sugars.
+--
+-- __The body is a statement, not a block__, because a one-statement @W.do@
+-- /is/ that statement: @QualifiedDo@ leaves a block's last statement alone, so
+-- @when ok $ W.do act …@ hands this an 'Acting' and never a 'W'. A 'W' is a
+-- statement too (its 'Step' instance is the first one above), so a body of two
+-- statements or twenty reaches this by the same door.
 when ::
-  forall h s s' j.
-  KnownIx h s =>
+  forall h s s' st j.
+  (KnownIx h s, Step st ('Open s) ('Open s') ()) =>
   V h 'CodeFlag ->
-  W ('Open s) ('Open s') () ->
+  st ->
   W ('Open s) j Term
-when v body = ifThenElse v (thenW body stop) stop
+when v body = ifThenElse v (thenW @st @('Open s) @('Open s') @() body stop) stop
 
 -- | @unless ok $ W.do …@ — 'when' on the other arm, and terminal for the same
 -- reason.
@@ -897,12 +1201,12 @@ when v body = ifThenElse v (thenW body stop) stop
 -- arm, the empty block in the then arm — which is a program the two-armed
 -- 'ifThenElse' prints too.
 unless ::
-  forall h s s' j.
-  KnownIx h s =>
+  forall h s s' st j.
+  (KnownIx h s, Step st ('Open s) ('Open s') ()) =>
   V h 'CodeFlag ->
-  W ('Open s) ('Open s') () ->
+  st ->
   W ('Open s) j Term
-unless v body = ifThenElse v stop (thenW body stop)
+unless v body = ifThenElse v stop (thenW @st @('Open s) @('Open s') @() body stop)
 
 -- | @case x { approved … objected … no answer … }@ — a terminal, its arms
 -- positional, in Lean's order.
@@ -1053,10 +1357,362 @@ revising subj (Bound n) clauses = Loop $ \live result arms ->
             (unsettledArm @c unsettled)
 
 -- ---------------------------------------------------------------------------
+-- Functions
+-- ---------------------------------------------------------------------------
+
+-- | The handles a parameter list hands its body, as a curried function.
+--
+-- "Agentic.Builder" hands a body its handles as a nested tuple ending in @()@
+-- (@paramHandles@), and a six-parameter tuple pattern is not something to ask
+-- an author for. @hs@ is concrete the moment the parameter list is written, so
+-- @'Curried' hs r@ reduces before the body is elaborated and each lambda
+-- binder's type is known — which is what keeps a @[wf|{goal}|]@ hole's
+-- inference eager, exactly as the 'Step' instances' head-dispatch discipline
+-- does elsewhere in this module.
+--
+-- The instance head is @(V h c, hs)@ rather than @(a, hs)@ so that the family
+-- reduces only on a real handle tuple, and so that an input list's tuple of
+-- 'Text's takes its own instance rather than this one.
+class Curries (hs :: Type) where
+  -- | @r@, behind one arrow per element of @hs@.
+  type Curried hs (r :: Type) :: Type
+
+  -- | Feed the tuple to the curried function, left to right.
+  applyTo :: Curried hs r -> hs -> r
+
+instance Curries () where
+  type Curried () r = r
+  applyTo r () = r
+
+instance Curries hs => Curries (V h c, hs) where
+  type Curried (V h c, hs) r = V h c -> Curried hs r
+  applyTo f (v, hs) = applyTo (f v) hs
+
+-- | One parameter, named and kinded: @takes \@"goal" Text@.
+--
+-- The name is a type-level 'GHC.TypeLits.Symbol' because that is what makes
+-- two parameters of one name a compile error (@Fresh@), and it is the very
+-- 'Text' the printed signature and every hole in the body carry. This is the
+-- one place the authoring surface asks an author for a name at the type level,
+-- and it asks because a parameter's name is /printed/ — in @params@, and again
+-- in every hole of the body — where a binding's is generated.
+--
+-- A parameter list is a function from /the rest of the list/ to /the whole
+-- list/, so lists compose with @(.)@ and end at 'noParams':
+--
+-- > (takes @"correctness" Text . takes @"haskell" Text) noParams
+takes ::
+  forall n c cs acc s hs.
+  (KnownSymbol n, Fresh n acc) =>
+  Answer c ->
+  Params cs ('(n, c) ': acc) s hs ->
+  Params (c ': cs) acc s (V ('(n, c) ': acc) c, hs)
+takes a rest
+  | reserved nm = reservedError "takes" nm
+  | otherwise = withAnswer a (B.param @n @c rest)
+  where
+    nm = T.pack (symbolVal (Proxy @n))
+
+-- | The parameter names, in source order.
+--
+-- "Agentic.Builder" computes the same list for the printed signature;
+-- walking the GADT here is what keeps that module untouched. A body has no
+-- @known here@ — 'Agentic.Raw.RawBodyStmt' has no such constructor — so the
+-- only thing these names are is 'genName'\''s depth.
+paramNames :: Params ps acc s hs -> [Text]
+paramNames PNil = []
+paramNames (PCons p _ rest) = T.pack (symbolVal p) : paramNames rest
+
+-- | A function: a name, a parameter list, and a body that is a straight-line
+-- @W.do@ block over exactly those parameters.
+--
+-- > libDrafted :: Fn '[ 'CodeText] 'CodeText
+-- > libDrafted = function "lib.drafted" (takes @"goal" Text noParams) \goal -> W.do
+-- >     d <- ask (model "author") [wf|draft: {goal}|]
+-- >     answer d
+--
+-- The result kind is read off the body's terminal — @answer x@ at @x@'s kind,
+-- 'done' at @receipt@ — so nothing has to be said twice.
+--
+-- @Codes s ~ ParamCtx ps@ is "Agentic.Builder"\'s own constraint; both sides
+-- reduce to the same concrete list once the parameter list is written, so it
+-- discharges by reduction and never appears in an author's error.
+function ::
+  forall r ps s hs.
+  (KnownCode r, Codes s ~ ParamCtx ps, Curries hs) =>
+  Text ->
+  Params ps '[] s hs ->
+  Curried hs (W ('Body r s) ('Body r s) Term) ->
+  Fn ps r
+function nm ps body =
+  B.function nm ps $ \hs ->
+    runBody
+      (reverse (paramNames ps))
+      (applyTo body hs :: W ('Body r s) ('Body r s) Term)
+
+-- | @answer x@ — the body's value, at the kind the handle carries, which is
+-- the function's declared result.
+answer :: forall h s c j. KnownIx h s => V h c -> W ('Body c s) j Term
+answer v = W (\_ _ -> B.answerB @h @s v)
+
+-- | The end of a @-> receipt@ body: it answers nothing, and the caller gets a
+-- receipt.
+--
+-- Not 'stop': a block that stops ends the workflow, and a body that is done
+-- hands control back to its caller. Overloading one word for the two would
+-- make it mean two things in two places; here a @done@ written in a workflow
+-- block is @Couldn't match ‘Open’ with ‘Body’@ and a @stop@ written in a body
+-- is the same error the other way, and a @done@ in a value-returning body is
+-- @Couldn't match ‘CodeAck’ with ‘CodeText’@, which is the right refusal.
+done :: W ('Body 'CodeAck s) j Term
+done = W (\_ _ -> B.endB)
+
+-- ---------------------------------------------------------------------------
+-- Calls
+-- ---------------------------------------------------------------------------
+
+-- | A value call: the callee's questions, inlined at the call site in body
+-- order, with the caller's arguments in their prompts. __No node is added.__
+--
+-- It is an 'Rhs', so it binds wherever an 'Rhs' binds — in a workflow block, in
+-- a function body, and as a bounded revision's /review/, which is what makes a
+-- shared review tier one 'Fn' that several workflows call.
+call :: Fn ps r -> Args s ps -> Rhs s r
+call = B.callV
+
+-- | A statement call: @call_ f args@, where @f@ answers a receipt.
+--
+-- @X@ binds and @X_@ stands as a statement, which is 'ask_'\''s convention and
+-- @mapM_@'s.
+call_ :: Fn ps 'CodeAck -> Args s ps -> Calling s
+call_ = Calling
+
+-- | The end of an argument list, for symmetry with 'noParams'.
+noArgs :: Args s '[]
+noArgs = ANil
+
+-- | What may stand as one argument at a call site.
+--
+-- __Not 'Says'.__ A handle passed as an argument prints as a /name/
+-- (@{"name": {"x": "b1"}}@), where the same handle in a prompt prints as an
+-- @interp@ chunk. The two classes therefore differ in exactly the instance
+-- that matters, and reusing 'Says' here would silently pass a binding by its
+-- rendered text instead of by reference.
+--
+-- The kind equalities sit in the context rather than in the head, so an
+-- argument of the wrong kind is @Couldn't match ‘'CodeVerdict’ with
+-- ‘'CodeText’@ rather than a missing instance.
+class Gives a (s :: Scope) (c :: Code) where
+  -- | This value, as an argument at the parameter's kind.
+  arg :: a -> Arg s c
+
+-- | A binding in scope, which must answer the parameter's kind exactly — no
+-- silent rendering, so a verdict does not fill a @text@ parameter.
+instance (KnownIx h s, c' ~ c) => Gives (V h c') s c where
+  arg = B.argName
+
+-- | A @define@ written as a fence, elaborated in the /caller's/ bindings, so a
+-- hole in it reads the caller's names.
+instance (s ~ s', c ~ 'CodeText) => Gives [Piece s'] s c where
+  arg = B.argWords
+
+-- | A @define@ that is a string. It prints as an @ArgLit@, which is the only
+-- non-name argument 'Agentic.Raw.RawArg' has.
+instance c ~ 'CodeText => Gives Text s c where
+  arg t = B.argWords [lit t]
+
+-- ---------------------------------------------------------------------------
 -- Programs
 -- ---------------------------------------------------------------------------
 
--- | A whole program: the block, over the empty scope, at the empty function
--- table.
+-- | A whole program: the function table in declaration order, and the
+-- workflow.
+--
+-- > reviewLite = defining [SomeFn reviewReport] W.do …
+--
+-- __What this checks, and why it is here.__ A 'Fn' is a Haskell value, so a
+-- /call/ cannot name something that does not exist. Two things about the
+-- /table/ are not decidable from the call sites, and both print a program the
+-- language refuses while GHC is content: a duplicate name, and a callee that
+-- is not declared strictly earlier — @callAsks@ answers @0@ for a name it does
+-- not find (@Guards.hs:101@), so such a program silently prices wrong and Lean
+-- refuses it as @unbound@. 'tableProblem' is both, on a CAF, so it fires the
+-- first time anything touches the program — the idiom 'panel' already uses.
+defining :: [SomeFn] -> W ('Open '[]) ('Open '[]) Term -> Program
+defining fns b = case tableProblem prog of
+  Just msg -> error (T.unpack msg)
+  Nothing -> prog
+  where
+    prog = B.program fns (runW [] b)
+
+-- | A whole program with no functions — 'defining' at the empty table, which
+-- is what it has always been.
 workflow :: W ('Open '[]) ('Open '[]) Term -> Program
-workflow b = B.program [] (runW [] b)
+workflow = defining []
+
+-- | 'Nothing' if the table is one the language accepts: no name twice, and
+-- every call naming an entry that precedes it.
+--
+-- Neither is decidable from the 'Fn' values — a call names a Haskell binding,
+-- and the /list/ is what says when it was declared — so this walks the printed
+-- program instead: every 'RhsCall', 'BodyCallS' and 'RawCallStmt', through
+-- every arm, and through both clauses of a bounded revision.
+--
+-- @guardCheck@ is deliberately not called here: it answers a different
+-- question (which of five refusals @checkProgram@ fires first), and an empty
+-- panel is already an @error@ at its own site.
+tableProblem :: Program -> Maybe Text
+tableProblem prog =
+  firstOf
+    [ dup names,
+      firstOf
+        [ badCall (Just (fnName f)) (take i names) callee
+        | (i, f) <- zip [0 ..] fns,
+          callee <- concatMap bodyCalls (fnBody f)
+        ],
+      firstOf [badCall Nothing names callee | callee <- rawCalls (progMain raw)]
+    ]
+  where
+    raw = B.progRawOut prog
+    fns = progFns raw
+    names = map fnName fns
+
+    firstOf = listToMaybe . catMaybes
+
+    dup (x : xs)
+      | x `elem` xs = Just ("two functions answer to one name: \"" <> x <> "\"")
+      | otherwise = dup xs
+    dup [] = Nothing
+
+    -- `earlier` is what the caller may name: the entries declared before it,
+    -- or the whole table for the workflow, which is checked last.
+    badCall caller earlier callee
+      | callee `elem` earlier = Nothing
+      | callee `elem` names,
+        Just from <- caller =
+          Just
+            ( "\""
+                <> from
+                <> "\" calls \""
+                <> callee
+                <> "\", which defining lists after it — a function may call \
+                   \only a function declared before it, so that the table can \
+                   \be priced"
+            )
+      | otherwise =
+          Just
+            ( who
+                <> " calls \""
+                <> callee
+                <> "\", which defining was not given — list it, or the printed \
+                   \program names a function that does not exist"
+            )
+      where
+        who = maybe "the workflow" (\f -> "\"" <> f <> "\"") caller
+
+    rhsCalls (RhsCall f _ _) = [f]
+    rhsCalls _ = []
+
+    srcCalls (SrcRhs r) = rhsCalls r
+    srcCalls (SrcRevising _ _ _ _ _ review am _) = rhsCalls review ++ rhsCalls am
+
+    bodyCalls (BodyBind _ _ r _) = rhsCalls r
+    bodyCalls (BodyAct _ _) = []
+    bodyCalls (BodyCallS f _ _) = [f]
+
+    rawCalls = \case
+      RawEmpty _ -> []
+      RawBind _ _ src rest _ -> srcCalls src ++ rawCalls rest
+      RawAct _ rest _ -> rawCalls rest
+      RawIfFlag _ yes no _ -> rawCalls yes ++ rawCalls no
+      RawCaseVerdict _ a o d _ -> rawCalls a ++ rawCalls o ++ rawCalls d
+      RawCaseResult _ _ st un _ -> rawCalls st ++ rawCalls un
+      RawKnownHere _ rest _ -> rawCalls rest
+      RawCallStmt f _ rest _ -> f : rawCalls rest
+
+-- ---------------------------------------------------------------------------
+-- A program's inputs
+-- ---------------------------------------------------------------------------
+
+-- | A program that needs inputs before it is a program.
+--
+-- __An input is a @define@ supplied at run time.__ The language already has a
+-- construct for author-supplied text that reaches a prompt as data and leaves
+-- no node behind, and that is the @define@ — so a program with inputs is an
+-- ordinary Haskell function of them, and needs no type-level machinery at all:
+-- a define never enters a scope, is never @Fresh@-checked, cannot be shadowed
+-- and cannot collide with a binding name.
+--
+-- __Why not @main@'s parameters.__ 'Agentic.Raw.RawProgram' is @progFns@ and
+-- @progMain@, and there is nowhere to print @main@'s parameters; a @main@
+-- whose prompts hole a name no printed binder introduces is a program Lean
+-- refuses. Making it legal is a change to 'Agentic.Raw', which is not this
+-- surface's to make.
+--
+-- __Inputs are text__, because 'Agentic.Raw.RawArg' has no other literal and
+-- because a define is spliced by @Says Text@. An author who wants to select
+-- between two /programs/ on a boolean writes an ordinary Haskell function.
+data Parameterized = Parameterized
+  { -- | the names, in source order, that the CLI binds by
+    inputNames :: [Text],
+    -- | the program, given one text per name in that order
+    supply :: [Text] -> Either Text Program
+  }
+
+-- | The inputs a program takes. The type index counts them, so the body may be
+-- an ordinary curried Haskell function.
+data Ins (hs :: Type) where
+  INil :: Ins ()
+  ICons :: Text -> Ins hs -> Ins (Text, hs)
+
+-- | The end of an input list.
+noInputs :: Ins ()
+noInputs = INil
+
+-- | One input, by the name a command line binds it under.
+input :: Text -> Ins hs -> Ins (Text, hs)
+input = ICons
+
+instance Curries hs => Curries (Text, hs) where
+  type Curried (Text, hs) r = Text -> Curried hs r
+  applyTo f (t, hs) = applyTo (f t) hs
+
+-- | @taking (input "subject" noInputs) \\subject -> workflow W.do …@
+taking :: forall hs. Curries hs => Ins hs -> Curried hs Program -> Parameterized
+taking ins k =
+  Parameterized
+    { inputNames = insNames ins,
+      supply = \ts -> applyTo k <$> insTuple ins ts
+    }
+  where
+    insNames :: Ins hs' -> [Text]
+    insNames INil = []
+    insNames (ICons n rest) = n : insNames rest
+
+    -- The CLI is the only caller, and it has already refused every wrong
+    -- count by name; this is what makes that a fact rather than a comment.
+    insTuple :: Ins hs' -> [Text] -> Either Text hs'
+    insTuple INil [] = Right ()
+    insTuple INil _ = Left tooMany
+    insTuple (ICons _ rest) (t : ts) = (,) t <$> insTuple rest ts
+    insTuple (ICons _ _) [] = Left tooMany
+
+    tooMany =
+      "this program takes "
+        <> T.pack (show (length (insNames ins)))
+        <> " input(s), named "
+        <> T.intercalate ", " (insNames ins)
+        <> ", and was given a different number of texts"
+
+-- | What a registry holds: a program, or a program that needs its inputs
+-- first.
+--
+-- It lives here rather than beside a registry because both registries in this
+-- repository would otherwise have to import each other: the sum is the union
+-- of two of this module's own types, and naming it here is what keeps
+-- @Example.Harden@ and @Example.Isaac@ able to list programs of either kind.
+data Example
+  = -- | a program, whole
+    Fixed Program
+  | -- | a program, once its inputs are given
+    Needs Parameterized
