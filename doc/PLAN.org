@@ -1841,7 +1841,7 @@ work is finished.
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-18 Tue 15:55]
-:MODIFIED: [2026-08-18 Tue 15:55]
+:MODIFIED: [2026-08-18 Tue 20:01]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -1849,6 +1849,48 @@ work is finished.
 :END:
 
 doc/research/isaac-workflows.md §6 holds ten yes/no decisions from the incite/agent-functor expressibility review (commit 7b0edd9), awaiting owner answers. Recommended-first: D1 expose function/callStmt/callV through Agentic.Workflow (zero oracle exposure, mitigates G1 rejoin, closes G2 sub-flow); D2 panelText; D3 revisingYielding; D5 exit-code policy in writing; D6 agent-functor failure vocabulary as Exec policy; D9 unpinned-ask guard; D10 cost/plan regression pin over the five Isaac examples. D11 is a DEFECT, not a decision: the .wf retirement left 57/220 Lean line citations in haskell/ stale (Exec.lean/Explain.lean resized) - re-derive and gate them.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 131,
+    "issue_id": "acat-isaac-decisions-vtt",
+    "author": "johnw",
+    "text": "OWNER RULINGS (walked through via Q/A, 2026-08-18): D1 YES-first (functions/calls through the surface); D2 YES-second (panelText); D3 YES beyond recommendation - change revising ITSELF (Unsettled carries the candidate; full corpus refreeze accepted); D4 YES beyond recommendation - revisingOn as a variant NOW; D5 world-authored receipts (tool argv, World writes the receipt); D6 YES beyond recommendation - failure vocabulary INCLUDING fail-over (servedBy fallback lists, printed-program change accepted); D7 four deciders + loud-arm policy; D8 YES folded into D1 (inputs); D9 YES (unpinned-ask guard, builder-side); D10 keep-out-of-corpus + regression pin + G9 documented with Isaac's number; D11 re-derive + CI gate. PLUS a new surface ruling: ask_ (underscore convention) = terminal answer-discarding ask replacing act+stop at block ends; same printed Raw. EXECUTION PLAN: wave 1 = no-Raw items (ask_, D6 taxonomy/budgets, D7 loud-arm, D9, D10, D11); wave 2 = surface-only D1+D8; wave 3 = ONE regeneration event batching every Raw/kernel change (D2 panelText Rhs, D3 revising binder, D4 revisingOn, D5 argv receipts, D6 fail-over alternates) with one corpus refreeze, one flagship re-pin, one Haskell re-port - the P9/P10 lesson: regenerate a spec exactly once.",
+    "created_at": "2026-08-19T02:17:13Z"
+  },
+  {
+    "id": 132,
+    "issue_id": "acat-isaac-decisions-vtt",
+    "author": "johnw",
+    "text": "WIGGUM loop engaged (owner /wiggum, 2026-08-19). Durable state: this issue = frozen plan + handoff; task #26 = wave tracker. Parent-history isolation probe PASSED per the parallelize contract: sentinel wg7-kx2mqp9-vb4tzn8-e5rjw3c planted in-conversation, fresh probe agent returned PARENT_HISTORY_ABSENT, verify-history-isolation.py exit 0 - subagent dispatches in this runner config are history-isolated, so fess audits count as independent. No doc/observations/ dir exists (partner lane empty). PAL viability to be checked at next real decision point (acat-slj recorded keys broken). Loop state: wave-1 workflow implementing (verifier mid-build observed); four wave-2/3 design agents drafting in isolated namespaces. Attempt counters: none active.",
+    "created_at": "2026-08-19T02:32:09Z"
+  },
+  {
+    "id": 133,
+    "issue_id": "acat-isaac-decisions-vtt",
+    "author": "johnw",
+    "text": "WAVE-1 INCIDENT (coordination, mine): the D11 citations brief granted docstring edits across src/** while the D6/D7 policy brief owned Exec.hs - overlapping write sets. The citations agent's cp-snapshot restore (after proving its gate can fail) clobbered four newer definitions (defaultExecSettings, gapBudget, askDecodingWith, scriptedWorldWith); export list intact, so cabal fails on exactly four not-in-scope errors. Repair routed to the policy agent (sole holder of the definitions) with a no-wholesale-revert rule so the ~25 citation fixes in the same file survive; citations agent stood down from Exec.hs permanently; wave-1 verify phase not yet started, so no third writer. LESSON for waves 2-3 briefs: disjoint file ownership absolute; docstring-only edits route through the file's owner. Attempt counter: Exec.hs repair, attempt 1.",
+    "created_at": "2026-08-19T02:36:45Z"
+  },
+  {
+    "id": 134,
+    "issue_id": "acat-isaac-decisions-vtt",
+    "author": "johnw",
+    "text": "WAVE-1 INCIDENT 2 (same root as incident 1, sharper form): my Exec.hs-repair resume of the policy agent re-executed its ENTIRE brief from transcript - reimplementing D9 in Guards.hs, racing its tracked twin's Exec.hs edits (TurnGap section dropped once), and racing cabal builds in shared dist-newstyle (renamePath). State-keyed stand-down sent: repair instance stops (four definitions confirmed present), tracked instance is sole owner and finishes. LESSON amended into memory: a SendMessage resume re-runs the WHOLE original brief - a repair request must explicitly say 'do only X; nothing else from your task'. Exec.hs repair attempt counter: resolved pending the tracked instance's gate re-run.",
+    "created_at": "2026-08-19T02:43:55Z"
+  },
+  {
+    "id": 135,
+    "issue_id": "acat-isaac-decisions-vtt",
+    "author": "johnw",
+    "text": "Wave-1 loop state: citations agent stood down clean - D11 done (57 stale citations -> 0; ci/citations.sh green at 225, proven fallible; wrong-text fixes: WF.hs Syntax.lean:152->:175, Gen.hs Check.lean:576->:582, Exec.lean proof lines re-derived, Acp.hs permissionByCode citation rewritten as the stated rule). FLAGGED for coordinator integration: five bare refs to deleted files (run/Main.hs:404,571 and ci/acp.sh:84,108,191 naming demo/Main.lean and cli/AgentCat.lean) - I fix these at the wave-1 integration commit. Twin process trees killed (86506+11808 and descendants); tracked policy agent has exclusive dist-newstyle and is re-running its three final gates. Exec.hs repair counter: RESOLVED.",
+    "created_at": "2026-08-19T03:01:14Z"
+  }
+]
+#+end_src
 
 * DONE [#C] Shortest-list 7: newtype the polluted carriers; one join-as-monoid synonym
 :PROPERTIES:

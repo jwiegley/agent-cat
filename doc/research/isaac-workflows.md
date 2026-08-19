@@ -220,6 +220,11 @@ each matched its haddock exactly.
 (For reference, the two pinned examples: `harden` is branch/36/19, 5..15 over 9
 paths; `hello` is pipeline/4/3, one path at 3, `codes [text, text, receipt]`.)
 
+Every number in this table is now pinned by `haskell/ci/examples.sh`, which runs
+`plan`, `cost` and `run --scripted` over all seven registered programs on every
+commit and fails on any field that moves — the D10 regression pin, so this
+section can no longer go quietly stale against the binary.
+
 **Finding 3.1 — `plan-feature` is expressed fully, and it is the cleanest
 result in the phase.** Four stances, four serving models named on the four
 questions; a planner; six sequential lenses that carry no `servedBy`, which is
@@ -540,9 +545,15 @@ the repository's own documentation calls a number "no operator can read anything
 from". `stackFuel`, `liteFuel`, `grindTestsReviewFuel`, `repairFuel` and
 `budgetFuel` were every one of them introduced afterwards as named finite
 constants and fenced as such. That is the same lesson arrived at from the other
-side, and it belongs in agent-cat's documentation with his numbers attached.
+side, and this paragraph — his number included — is where agent-cat's
+documentation records it.
 
-**Proposal.** No language change. Write it down.
+**Adopted (D10, second half).** No language change, now or later: refusing the
+unbounded case is the language's position and not a gap awaiting a fix, and
+`4611686018427387927` is the evidence on the record for it. What a bounded
+program costs is a number an operator can read, and `ci/examples.sh` pins
+`grind-tests`'s 9..27 over 36 paths on every commit — the bound is checked, not
+merely asserted.
 
 ### G10. Runner-side gaps, listed and not proposed
 *Bites: everything, eventually.*

@@ -248,6 +248,7 @@ module Agentic.Workflow
     -- * Statements and terminals
     stop,
     act,
+    ask_,
     knownHere,
     ifThenElse,
     ifFlag,
@@ -759,6 +760,33 @@ stop = W (\_ _ -> B.stop)
 -- receipt. The scope is unchanged; the plan is weakened past the slot.
 act :: Party p -> Words s -> W ('Open s) ('Open s) ()
 act p w = W (\_ k -> B.act (ask p w) (k ()))
+
+-- | @ask_ party words@ — the terminal, answer-discarding question: 'act' and
+-- then 'stop', said once.
+--
+-- The underscore is Haskell's own convention and means here what it means in
+-- @mapM_@: the answer is discarded. The difference from 'act' is where it may
+-- stand — 'act' is a statement with a block after it, @ask_@ /is/ the end of
+-- one — and the two are the same term:
+--
+-- > ask_ p w  ≡  W.do { act p w; stop }
+--
+-- literally, not merely observationally: both sides are @B.act (ask p w)
+-- B.stop@, because 'act' hands the builder its continuation and the only
+-- continuation @stop@ makes is @B.stop@. So the printed 'Agentic.Raw.Raw', the
+-- elaborated 'Agentic.Plan.Plan', the bills and the generated names are
+-- unchanged by rewriting one into the other — @ask_@ buys a line and costs a
+-- program nothing. Nothing needed refreezing when the walked examples took it.
+--
+-- __Where it does not go.__ A @when@ or @unless@ body is an arm block /minus/
+-- its terminal (those combinators supply it), so a body ends in 'act' and an
+-- @ask_@ there is a type error — @Couldn't match type ‘Term’ with ‘()’@ — which
+-- is the right refusal and not a limitation to work around. Mid-block, where
+-- statements follow, 'act' is likewise the only thing that typechecks. @ask_@
+-- is for the one shape it names: the block whose last statement is a question
+-- nobody reads the answer to.
+ask_ :: Party p -> Words s -> W ('Open s) j Term
+ask_ p w = W (\_ _ -> B.act (ask p w) B.stop)
 
 -- | @known here: …@ — an assertion, and no node at all. The names are the
 -- ones the block is carrying, innermost first, so this prints what the

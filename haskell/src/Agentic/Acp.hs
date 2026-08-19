@@ -4,20 +4,33 @@
 -- a child process that speaks the Agent Client Protocol — line-delimited
 -- JSON-RPC 2.0 over its stdio — so that a program written in
 -- "Agentic.Builder" can be executed by Claude's or Codex's ACP adapter. It is
--- the Haskell counterpart of @Agentic\/Core\/Acp.lean@ (the transport) driven
--- by @Agentic\/Core\/Exec.lean@'s @Exec.oracle@ (the discipline), and it is the
--- sibling of "Agentic.AgentDeck", which reaches an agent the other way: through
--- the @agent-deck@ command line, into a session somebody else started.
+-- the sibling of "Agentic.AgentDeck", which reaches an agent the other way:
+-- through the @agent-deck@ command line, into a session somebody else started.
+--
+-- == There is no Lean counterpart to this file, and there was
+--
+-- The transport stood in Lean as @Agentic\/Core\/Acp.lean@ with
+-- @Agentic\/Core\/Rpc.lean@ under it, driven by an @Exec.oracle@ in
+-- @Agentic\/Core\/Exec.lean@. All three are retired: @Exec.lean:62@ (\"Where
+-- the transport went\") records that the Lean ACP and @agent-deck@ transports,
+-- the @Oracle IO@ over them and the entry points @exec@\/@execIO@ are gone and
+-- that @agentic-run@ on the Haskell side is the runner, and @Exec.lean:978@
+-- says the same of the entry points from the other end. What survives in Lean
+-- is the part that was never about a wire — @Decode@, @Dlg.execM@, @renderQ@,
+-- @answerSpec@, @nudge@, @askDecoding@ — and this module is now the /only/
+-- statement of the ACP wire in the repository. Every rule below that once
+-- carried a Lean line number is therefore stated here rather than cited: read
+-- it as the definition, not as a paraphrase of one.
 --
 -- == What this transport can promise that the deck cannot
 --
--- @Exec.requiresCompletedTurn@ (@Exec.lean:1190@, ported as
--- 'requiresCompletedTurn') says that an @ack@ — or /any/ answer from a person —
--- may not be recorded from a turn the agent did not finish: @Decode .ack@ is
--- total, so a receipt from an interrupted turn is the same term in the table as
--- one from a completed act, and recording it would be recording an act nobody
--- performed. "Agentic.AgentDeck" says in as many words that it __cannot__ apply
--- that rule, because the @agent-deck@ CLI reports no stop reason.
+-- 'Agentic.Exec.requiresCompletedTurn' says that an @ack@ — or /any/ answer
+-- from a person — may not be recorded from a turn the agent did not finish:
+-- @Decode .ack@ is total, so a receipt from an interrupted turn is the same
+-- term in the table as one from a completed act, and recording it would be
+-- recording an act nobody performed. "Agentic.AgentDeck" says in as many words
+-- that it __cannot__ apply that rule, because the @agent-deck@ CLI reports no
+-- stop reason.
 --
 -- __ACP does.__ @session\/prompt@ answers with a @stopReason@, one of five
 -- words of which exactly one — @end_turn@ — means the agent finished
@@ -57,20 +70,22 @@
 --
 -- A question carries an 'Agentic.Raw.Addressee' — @model \"reviewer-secure\"@,
 -- @tool \"apply\"@, @person \"owner\"@ — and all three kinds are prompted here,
--- the person included. Lean has a second route for that one
--- (@Settings.askPersonOnStdin@, a question printed on stderr and a line read
--- from stdin) and its CLI turns it on for a /live/ adapter and off for the
--- stub, which answers for the human; this port has only the off position, which
--- is the stub's, and a run against a live adapter therefore lets the agent play
--- the owner. That is a limitation of this version and is named rather than
--- hidden: the addressee is not lost — it is the first thing 'renderQ' says — but
+-- the person included. Lean had a second route for that one — an
+-- @askPersonOnStdin@ setting, a question printed on stderr and a line read from
+-- stdin, turned on for a /live/ adapter and off for the stub, which answers for
+-- the human — and it went with the rest of the wire policy (@Exec.lean:878@).
+-- This port has only the off position, which is the stub's, and a run against a
+-- live adapter therefore lets the agent play the owner. That is a limitation of
+-- this version and is named rather than hidden: the addressee is not lost — it is the first thing 'renderQ' says — but
 -- nothing here asks a human anything.
 --
 -- == Which questions may write
 --
--- 'permissionByCode' is @Exec.permissionByCode@ (@Exec.lean:925@): a tool call
--- requested during an __act__ is granted, and one requested during an ask —
--- text, verdict or flag — is declined in the schema's own words
+-- 'permissionByCode' is this package's own rule, stated in Haskell and in no
+-- Lean file (the @Settings@ that carried a permission policy kept it as a
+-- policy about a wire, and shed it with the transport — @Exec.lean:878@): a
+-- tool call requested during an __act__ is granted, and one requested during
+-- an ask — text, verdict or flag — is declined in the schema's own words
 -- (@{\"outcome\":\"cancelled\"}@). The policy is a function of the /question/
 -- and not of the connection, which is the repair of a measured defect: with one
 -- connection-wide @grant@, an agent drafting a patch could rewrite the
@@ -78,22 +93,22 @@
 -- policy immediately before each prompt, because "the question under way" is a
 -- fact it has and the pump does not.
 --
--- Every decision is announced on stderr through 'Agentic.Exec.stderrLog', which
--- is @Settings.onPermission@'s default (@Exec.lean:1034@): a run that denied an
--- agent the workspace and paid a retry for it must not look identical to one
--- nobody asked anything of.
+-- Every decision is announced on stderr through 'Agentic.Exec.stderrLog',
+-- unconditionally: a run that denied an agent the workspace and paid a retry
+-- for it must not look identical to one nobody asked anything of. (Lean had
+-- this as @Settings.onPermission@ and retired it with the rest of the wire
+-- policy, @Exec.lean:878@.)
 --
 -- == A question forgets its predecessors
 --
--- 'acpFreshPerQuestion' defaults to 'True' and is @Settings.freshSessionPerQuestion@
--- (@Exec.lean:1012@): a new @session\/new@ before every question, because a
--- world is a function of the /question/ (@World.lean@ — @Ω := (c : Code) → Q c
--- → El c@) and a single session is a memory of the ones before it. It is an
--- approximation and it is a policy, not a theorem: nothing here can make an
--- agent forget. Where a run continues somebody else's transcript the two are
--- alternatives rather than companions — which is why Lean turns it off under
--- @--session@; this port has no @--session@ (see the departures below), so the
--- rule reduces to "always fresh".
+-- 'acpFreshPerQuestion' defaults to 'True': a new @session\/new@ before every
+-- question, because a world is a function of the /question/
+-- (@Agentic\/Core\/World.lean:47@ — @Ω := (c : Code) → Q c → El c@) and a
+-- single session is a memory of the ones before it. It is an approximation and
+-- it is a policy, not a theorem: nothing here can make an agent forget. Lean
+-- had the same knob as @Settings.freshSessionPerQuestion@ and shed it with the
+-- transport (@Exec.lean:878@); this port has no @--session@ (see the
+-- departures below), so the rule reduces to "always fresh".
 --
 -- == What is not here
 --
@@ -101,31 +116,39 @@
 -- ('askDecoding'), exactly as in "Agentic.AgentDeck", so a run against an
 -- adapter and a run against a table fail in the same words. The rendered
 -- question is 'renderQ' — imported from "Agentic.AgentDeck", never re-worded,
--- because @Exec.renderQ@ is one function in Lean and two copies of a prompt
--- header is how two transports come to tell an addressee two different answer
--- formats.
+-- because @Exec.renderQ@ (@Exec.lean:853@) is one function in Lean and two
+-- copies of a prompt header is how two transports come to tell an addressee two
+-- different answer formats.
 --
--- == Deliberate departures from @Agentic\/Core\/Acp.lean@
+-- == Departures from the Lean transport, kept as a record of what was decided
 --
--- * __One clock, not two.__ Lean bounds a single pipe operation
+-- These four say what this client does /and/ what the retired
+-- @Agentic\/Core\/Acp.lean@ did differently. That file is gone, so nothing
+-- here can be checked against it; the paragraphs are kept because the reasons
+-- are the substance and a reason survives its citation.
+--
+-- * __One clock, not two.__ Lean bounded a single pipe operation
 --   (@readTimeoutMs@) /and/ a whole request (@turnTimeoutMs@). Here
 --   'acpTurnTimeoutMs' bounds the whole request and nothing else: a blocked
 --   read happens inside a request, so the request's budget already interrupts
 --   it, and one clock is one number for an operator to set.
--- * __No message fuel.__ Lean's @maxMessages@ exists so that no loop in that
---   file is @partial@; Haskell needs no such argument, and a chattering adapter
---   is bounded by the wall clock, which is the bound that was doing the work.
--- * __A foreign response id is an error__ ('AcpIdMismatch'), where Lean skips
---   it and keeps pumping. This client has at most one request outstanding and
+-- * __No message fuel.__ Lean's @maxMessages@ existed so that no loop in that
+--   file was @partial@; Haskell needs no such argument, and a chattering
+--   adapter is bounded by the wall clock, which is the bound that was doing the
+--   work.
+-- * __A foreign response id is an error__ ('AcpIdMismatch'), where Lean skipped
+--   it and kept pumping. This client has at most one request outstanding and
 --   answers the agent's requests with the agent's own ids, so a @result@ whose
 --   id is not the one in flight is a desynchronized stream, and continuing to
 --   read one is how a reply gets attributed to the wrong question.
 -- * __No @session\/load@, no @session\/fork@, no scope calls.__ v1 opens
 --   sessions of its own; the model and mode axes travel in 'renderQ'\'s header,
---   which is the fallback @Exec.lean@ documents for a transport with no call
---   for them (it is what "Agentic.AgentDeck" does, for want of any call at
---   all). Capabilities are still read at the handshake, because that is what a
---   client that later wants to ask for a handoff must not skip.
+--   which is the fallback @renderQ@ itself documents for a transport with no
+--   call for them (@Exec.lean:842@: \"select via the protocol where the
+--   protocol says how, otherwise say it in words\"; it is what
+--   "Agentic.AgentDeck" does, for want of any call at all). Capabilities are
+--   still read at the handshake, because that is what a client that later wants
+--   to ask for a handoff must not skip.
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
@@ -286,10 +309,10 @@ data AcpConfig = AcpConfig
   }
   deriving (Eq, Show)
 
--- | The configuration for an @argv@, with Lean's own defaults: the current
--- directory, fifteen minutes to a turn (@Acp.Config.turnTimeoutMs@,
--- @Acp.lean:482@ — a real turn that writes code can legitimately run for
--- minutes), and a session per question.
+-- | The configuration for an @argv@, with the defaults the retired Lean
+-- transport carried: the current directory, fifteen minutes to a turn — a real
+-- turn that writes code can legitimately run for minutes — and a session per
+-- question.
 defaultAcpConfig :: [String] -> AcpConfig
 defaultAcpConfig argv =
   AcpConfig
@@ -304,13 +327,14 @@ defaultAcpConfig argv =
 -- Which program is the adapter
 -- ---------------------------------------------------------------------------
 
--- | Where the test double lives, relative to this directory. @Acp.lean:193@
--- names it relative to the repository root; @haskell\/@ is one level down, so
--- the path is one @..@ longer and names the same file.
+-- | Where the test double lives, relative to this directory. The name is
+-- written relative to the repository root everywhere else in the tree;
+-- @haskell\/@ is one level down, so the path is one @..@ longer and names the
+-- same file.
 stubScript :: FilePath
 stubScript = "../test/stub_adapter.py"
 
--- | The machine-local pin for the claude adapter (@Acp.lean:186@), used only
+-- | The machine-local pin for the claude adapter, used only
 -- when @claude-agent-acp@ is not on @PATH@. A store path is machine-local by
 -- construction; naming it is what makes an unconfigured run work on the owner's
 -- machine without making it a dependency anywhere else.
@@ -318,19 +342,17 @@ claudePin :: FilePath
 claudePin =
   "/nix/store/vhmm2z9psm5vcwgl8p6sa4c99y4chn0m-claude-agent-acp-0.64.0/bin/claude-agent-acp"
 
--- | The machine-local pin for the codex adapter (@Acp.lean:190@); see
--- 'claudePin'.
+-- | The machine-local pin for the codex adapter; see 'claudePin'.
 codexPin :: FilePath
 codexPin = "/nix/store/i0wl19lx66n2093bv9g4g3lsxj16f9ry-codex-acp-0.13.0/bin/codex-acp"
 
--- | @Acp.Adapter.ofName@ (@Acp.lean:217@) and the pure half of
--- @Adapter.resolve@: the @argv@ a command line's word names.
+-- | The pure half of adapter resolution: the @argv@ a command line's word
+-- names.
 --
--- Three names and a fallback, exactly as Lean has them — @stub@ is the
--- deterministic double run under @python3@, @claude@ and @codex@ are the two
--- real adapters by the names they install themselves under, and anything else
--- is read as a path, so a caller can point at an adapter this module has never
--- heard of.
+-- Three names and a fallback — @stub@ is the deterministic double run under
+-- @python3@, @claude@ and @codex@ are the two real adapters by the names they
+-- install themselves under, and anything else is read as a path, so a caller
+-- can point at an adapter this module has never heard of.
 --
 -- What is /not/ decided here is where those two programs are: that is
 -- 'resolveArgv', because it is a question about this machine.
@@ -341,10 +363,9 @@ adapterArgv name
   | name == "codex" = ["codex-acp"]
   | otherwise = [T.unpack name]
 
--- | @Acp.Adapter.resolve@ (@Acp.lean:285@) in @IO@: the @argv@ that will
--- actually be executed.
+-- | Adapter resolution in @IO@: the @argv@ that will actually be executed.
 --
--- Two things happen, and both are Lean's:
+-- Two things happen:
 --
 -- * __the program__ — a bare name with a machine-local pin is looked for on
 --   @PATH@ first and at the pin second, and being in neither place is an error
@@ -355,8 +376,7 @@ adapterArgv name
 --   and a path is taken as given;
 -- * __the arguments__ — one that names a file relative to /this/ directory is
 --   made absolute, because the child is started in the run's own working
---   directory, where @..\/test\/stub_adapter.py@ names nothing
---   (@AcpSmoke.lean:355@ does the same by hand, and for the same reason).
+--   directory, where @..\/test\/stub_adapter.py@ names nothing.
 resolveArgv :: [String] -> IO [String]
 resolveArgv [] = throwIO (AcpAdapterMissing "" "an empty argv names no program")
 resolveArgv (prog : args) = (:) <$> resolveProgram prog <*> traverse absolutize args
@@ -397,7 +417,7 @@ adapterPin = \case
   "codex-acp" -> Just codexPin
   _ -> Nothing
 
--- | The first entry of @PATH@ holding a file of this name (@Acp.lean:258@).
+-- | The first entry of @PATH@ holding a file of this name.
 searchPath :: String -> IO (Maybe FilePath)
 searchPath name =
   lookupEnv "PATH" >>= \case
@@ -493,8 +513,8 @@ renderAcpError = \case
 -- What the agent advertised
 -- ---------------------------------------------------------------------------
 
--- | @Acp.Capabilities@ (@Acp.lean:376@): what the agent said at @initialize@,
--- in the two words a client acts on, plus everything it said.
+-- | What the agent said at @initialize@, in the two words a client acts on,
+-- plus everything it said.
 --
 -- The two flags are read from two places because the schema keeps them in two:
 -- @loadSession@ is a top-level boolean and @fork@ is a /presence/ under
@@ -509,8 +529,8 @@ data Capabilities = Capabilities
   }
   deriving (Eq, Show)
 
--- | @Acp.capabilitiesOf@ (@Acp.lean:393@). Total and forgiving in the direction
--- that costs nothing: anything unreadable reads as /not advertised/, so an
+-- | Reading 'Capabilities' off the @initialize@ result. Total and forgiving in
+-- the direction that costs nothing: anything unreadable reads as /not advertised/, so an
 -- agent that said nothing advertised nothing.
 capabilitiesOf :: Value -> Capabilities
 capabilitiesOf initResult =
@@ -529,8 +549,7 @@ capabilitiesOf initResult =
 -- How a turn ended
 -- ---------------------------------------------------------------------------
 
--- | @Acp.StopReason@ (@Acp.lean:691@): the protocol's account of why a turn
--- stopped. ACP v1 defines five words and this is them, plus 'StopOther' for a
+-- | The protocol's account of why a turn stopped. ACP v1 defines five words and this is them, plus 'StopOther' for a
 -- word a future adapter invents, kept verbatim rather than flattened.
 --
 -- The distinction is not decoration: 'StopEndTurn' is the only one of the five
@@ -551,7 +570,7 @@ data StopReason
     StopOther !Text
   deriving (Eq, Show)
 
--- | @StopReason.ofString@ (@Acp.lean:709@).
+-- | The five words ACP v1 defines, and anything else kept verbatim.
 stopReasonOfText :: Text -> StopReason
 stopReasonOfText = \case
   "end_turn" -> StopEndTurn
@@ -561,11 +580,12 @@ stopReasonOfText = \case
   "cancelled" -> StopCancelled
   s -> StopOther s
 
--- | @StopReason.render@ (@Acp.lean:718@). Lean proves this a left inverse of
--- 'stopReasonOfText' (@render_ofString@) — losslessly, because the refusal to
--- credit an incomplete turn is only as good as the reading of the word
--- @end_turn@, and an operator reading a log is owed what /arrived/ rather than
--- what was understood.
+-- | The inverse of 'stopReasonOfText', and a left inverse on the nose:
+-- @stopReasonOfText . renderStopReason == id@, by cases, because 'StopOther'
+-- keeps the word it did not recognize. That is the property worth having and
+-- not decoration — the refusal to credit an incomplete turn is only as good as
+-- the reading of the word @end_turn@, and an operator reading a log is owed
+-- what /arrived/ rather than what was understood.
 renderStopReason :: StopReason -> Text
 renderStopReason = \case
   StopEndTurn -> "end_turn"
@@ -575,16 +595,14 @@ renderStopReason = \case
   StopCancelled -> "cancelled"
   StopOther s -> s
 
--- | @StopReason.completed@ (@Acp.lean:759@): exactly one stop reason says the
--- agent finished, so a caller enforcing "the turn must have completed" is
+-- | Exactly one stop reason says the agent finished, so a caller enforcing "the turn must have completed" is
 -- enforcing one protocol word and not a heuristic.
 stopCompleted :: StopReason -> Bool
 stopCompleted StopEndTurn = True
 stopCompleted _ = False
 
--- | @Acp.Turn@ (@Acp.lean:779@): what one @session\/prompt@ produced — every
--- @agent_message_chunk@ concatenated in arrival order, and the reason the turn
--- ended.
+-- | What one @session\/prompt@ produced — every @agent_message_chunk@
+-- concatenated in arrival order, and the reason the turn ended.
 --
 -- The stop reason is kept rather than dropped because @refusal@ and @cancelled@
 -- are turns with (usually) empty text, and an interpreter that could not tell
@@ -600,8 +618,7 @@ data Turn = Turn
 -- Which questions may write
 -- ---------------------------------------------------------------------------
 
--- | @Acp.Permission@ (@Acp.lean:326@): what this client answers a
--- @session\/request_permission@ request with.
+-- | What this client answers a @session\/request_permission@ request with.
 --
 -- 'Grant' selects the agent's own least-standing-authority allow option
 -- ('pickAllow'). The assumption is stated and proved nowhere: the runtime is
@@ -611,16 +628,20 @@ data Turn = Turn
 --
 -- 'Cancel' answers in the schema's own vocabulary — @{\"outcome\":\"cancelled\"}@
 -- — which is the documented way to decline, and unlike a @-32601@ it tells the
--- agent that the request was understood and denied. (Lean measured the
--- alternative: a refused method makes the model retry with another tool and end
+-- agent that the request was understood and denied. (The alternative was
+-- measured on the real wire: a refused method makes the model retry with another tool and end
 -- the turn with an apology, which is prose the decoder will read as an answer.)
 data Permission = Grant | Cancel
   deriving (Eq, Show)
 
--- | @Exec.permissionByCode@ (@Exec.lean:925@): an act may write and an ask may
--- not.
+-- | An act may write and an ask may not.
 --
--- This is a decision about /questions/, which is why it is a function of the
+-- __Stated here, and in no Lean file.__ Lean's @Settings@ carried a permission
+-- policy and shed it with the transport, because every field of it was a policy
+-- about a wire this package no longer owns (@Exec.lean:878@). So this is the
+-- definition rather than a port of one.
+--
+-- It is a decision about /questions/, which is why it is a function of the
 -- code and not a field of the connection. A connection-wide grant made @ask@
 -- and @act@ indistinguishable to the permission layer, so a draft turn could
 -- write to the workspace with the same authority as a consented act; that is
@@ -630,8 +651,7 @@ permissionByCode :: Code -> Addressee -> Permission
 permissionByCode CodeAck _ = Grant
 permissionByCode _ _ = Cancel
 
--- | @Acp.pickAllow@ (@Acp.lean:857@): the option selected when a request is
--- granted — @allow_once@ if the agent offered one, else @allow_always@, else
+-- | The option selected when a request is granted — @allow_once@ if the agent offered one, else @allow_always@, else
 -- the first option of any kind, else nothing at all.
 --
 -- Least standing authority first, deliberately: @allow_once@ makes the agent
@@ -652,14 +672,14 @@ pickAllow params = case field "options" params of
     optionId o = field "optionId" o >>= textOf
     firstJust = foldr (\x acc -> maybe acc Just x) Nothing
 
--- | @Acp.permissionChoice@ (@Acp.lean:878@): nothing at all under 'Cancel', and
--- 'pickAllow'\'s option under 'Grant'. Separated from the response it becomes
--- because the /decision/ is what a caller asserts about.
+-- | Nothing at all under 'Cancel', and 'pickAllow'\'s option under 'Grant'.
+-- Separated from the response it becomes because the /decision/ is what a
+-- caller asserts about.
 permissionChoice :: Permission -> Value -> Maybe Text
 permissionChoice Cancel _ = Nothing
 permissionChoice Grant params = pickAllow params
 
--- | @Acp.permissionResponse@ (@Acp.lean:898@): the schema's own two shapes.
+-- | The schema's own two shapes.
 -- Neither is an error, because a permission request is a question and not a
 -- call the client failed to implement.
 permissionResponse :: Maybe Text -> Value
@@ -668,16 +688,15 @@ permissionResponse = \case
   Just i ->
     object ["outcome" .= object ["outcome" .= ("selected" :: Text), "optionId" .= i]]
 
--- | @Acp.permissionTool@ (@Acp.lean:915@): the title of the tool call a request
--- is about. Total and forgiving — a decision that was made must be recorded
--- whether or not the agent described what it was for.
+-- | The title of the tool call a request is about. Total and forgiving — a
+-- decision that was made must be recorded whether or not the agent described
+-- what it was for.
 permissionTool :: Value -> Text
 permissionTool params =
   maybe "an unnamed tool call" id (field "toolCall" params >>= field "title" >>= textOf)
 
--- | @Acp.PermissionDecision@ (@Acp.lean:341@): one request, answered — the
--- question that was under way, the tool call it asked for, and whether this
--- client granted it.
+-- | One request, answered — the question that was under way, the tool call it
+-- asked for, and whether this client granted it.
 data PermissionDecision = PermissionDecision
   { decisionQuestion :: !Text,
     decisionTool :: !Text,
@@ -685,8 +704,8 @@ data PermissionDecision = PermissionDecision
   }
   deriving (Eq, Show)
 
--- | @PermissionDecision.render@ (@Acp.lean:351@), verbatim including the pad
--- that keeps the two words the same width.
+-- | One decision as one stderr line, padded so the two words are the same
+-- width and a column of them reads as a column.
 renderPermissionDecision :: PermissionDecision -> Text
 renderPermissionDecision d =
   "permission "
@@ -700,8 +719,8 @@ renderPermissionDecision d =
 -- What an update says
 -- ---------------------------------------------------------------------------
 
--- | @Acp.chunkText@ (@Acp.lean:825@): the text of a @session\/update@ when that
--- update is an @agent_message_chunk@, and 'Nothing' for every other kind.
+-- | The text of a @session\/update@ when that update is an
+-- @agent_message_chunk@, and 'Nothing' for every other kind.
 --
 -- The six other kinds measured on the real wire are progress, not answer, and
 -- this client is entitled to ignore them and does. An @agent_message_chunk@
@@ -749,7 +768,8 @@ data Acp = Acp
     acpSession :: !(IORef (Maybe Text)),
     acpCaps :: !(IORef Capabilities),
     -- | The question under way and how a permission request arriving during it
-    -- is answered (@Acp.Conn.asked@, @Acp.lean:675@).
+    -- is answered. 'sayAcp' sets it immediately before each prompt, because
+    -- "the question under way" is a fact it has and the pump does not.
     acpAsked :: !(IORef (Text, Permission))
   }
 
@@ -761,8 +781,8 @@ acpCapabilities = readIORef . acpCaps
 acpSessionId :: Acp -> IO (Maybe Text)
 acpSessionId = readIORef . acpSession
 
--- | @Acp.withConn@ (@Acp.lean:1413@): one live conversation for the duration of
--- @k@, closed on every exit path, success or exception.
+-- | One live conversation for the duration of @k@, closed on every exit path,
+-- success or exception.
 --
 -- The bracket is the form callers should use. 'connectAcp' spawns, shakes hands
 -- and opens a session; a failure in any of the three closes the child before
@@ -819,12 +839,12 @@ connectAcp cfg = do
 -- failure, because this runs on exit paths — including failing ones, where a
 -- second error would hide the first.
 --
--- __Where this differs from Lean.__ @Acp.Conn.close@ (@Acp.lean:1366@) cancels,
--- kills and reaps. Here the turn in flight is cancelled, then __stdin is
--- closed__ and the child is given 'graceMs' to exit of its own accord — EOF on
--- stdin is how a conforming adapter is told the conversation is over, and one
--- that takes it exits @0@ and needs no signal. The kill is what happens when it
--- does not.
+-- __Why stdin is closed before the kill.__ The retired Lean transport
+-- cancelled, killed and reaped. Here the turn in flight is cancelled, then
+-- __stdin is closed__ and the child is given 'graceMs' to exit of its own
+-- accord — EOF on stdin is how a conforming adapter is told the conversation
+-- is over, and one that takes it exits @0@ and needs no signal. The kill is
+-- what happens when it does not.
 closeAcp :: Acp -> IO ()
 closeAcp acp = do
   quietly (cancelTurn acp)
@@ -867,7 +887,7 @@ waitFor ph ms
 -- The three shapes a line can have
 -- ---------------------------------------------------------------------------
 
--- | @Rpc.Msg@ (@Rpc.lean:52@): one decoded line of the wire.
+-- | One decoded line of the wire.
 --
 -- Ids stay raw 'Value' because a request from the agent must be answered with
 -- the id it chose, unchanged: codex echoes a string id verbatim and claude uses
@@ -878,7 +898,7 @@ data Msg
   | MsgRequest !Value !Text !Value
   | MsgNotification !Text !Value
 
--- | @Rpc.Msg.ofLine@ (@Rpc.lean:62@). Failure carries the reason; the caller
+-- | One line of the wire, decoded. Failure carries the reason; the caller
 -- still has the line.
 --
 -- It takes the bytes rather than the 'Text' they decode to, because the line is
@@ -929,9 +949,9 @@ readJsonLine acp what = do
 -- The request loop
 -- ---------------------------------------------------------------------------
 
--- | @Acp.Conn.pump@ (@Acp.lean:1042@): read messages until the reply to request
--- @wantId@ arrives, feeding every @agent_message_chunk@ to @onChunk@ on the way
--- and answering every request the agent makes of us as it comes.
+-- | Read messages until the reply to request @wantId@ arrives, feeding every
+-- @agent_message_chunk@ to @onChunk@ on the way and answering every request the
+-- agent makes of us as it comes.
 --
 -- @answering@ says whether the updates arriving belong to /this/ request. During
 -- a @session\/prompt@ they do, and a chunk that is not text is a protocol
@@ -981,17 +1001,16 @@ answerAgentRequest acp i method params
                 decisionTool = permissionTool params,
                 decisionGranted = maybe False (const True) choice
               }
-      -- Reported unconditionally, which is `Settings.onPermission`'s default
-      -- (`Exec.lean:1034`): granting an act is the run working, and denying one
-      -- is why a turn cost what it cost.
+      -- Reported unconditionally: granting an act is the run working, and
+      -- denying one is why a turn cost what it cost.
       stderrLog (renderPermissionDecision decision)
       writeJson acp (rpcResult i (permissionResponse choice))
   | otherwise =
       writeJson acp . rpcErrorFrame i methodNotFound $
         method <> ": this client advertised no such capability"
 
--- | @Acp.Conn.tryRequest@ (@Acp.lean:1101@): send a request and hand back
--- __either__ the agent's @result@ __or__ the agent's @error@ object, as a value.
+-- | Send a request and hand back __either__ the agent's @result@ __or__ the
+-- agent's @error@ object, as a value.
 --
 -- The 'Either' is the protocol's own error/result split and nothing else: a
 -- transport failure is still an exception, because that is the conversation
@@ -1035,7 +1054,7 @@ notify acp method params = writeJson acp (rpcNotification method params)
 -- The calls
 -- ---------------------------------------------------------------------------
 
--- | @Acp.Conn.handshake@ (@Acp.lean:1141@).
+-- | The @initialize@ call.
 --
 -- We advertise no filesystem and no terminal capability, so a conforming agent
 -- sends us no @fs\/*@ or @terminal\/*@ request; @session\/request_permission@ is
@@ -1070,9 +1089,8 @@ handshake acp = do
       throwIO . AcpProtocol (T.pack (acpProgram acp)) $
         "initialize returned no protocolVersion: " <> clipText (compact res)
 
--- | @Acp.Conn.newSession@ (@Acp.lean:1169@): open a session in 'acpCwd' — made
--- absolute, because the protocol requires an absolute path — and remember its
--- id.
+-- | Open a session in 'acpCwd' — made absolute, because the protocol requires
+-- an absolute path — and remember its id.
 --
 -- The @session\/update@ notifications that may arrive while this call is
 -- outstanding are the adapter's own bookkeeping, not an answer, which is what
@@ -1097,9 +1115,9 @@ newSession acp = do
       throwIO . AcpProtocol (T.pack (acpProgram acp)) $
         "session/new returned no sessionId: " <> clipText (compact res)
 
--- | @Acp.Conn.promptTurn@ (@Acp.lean:1306@): send one text prompt and collect
--- the turn. Chunks accumulate in arrival order; the request's own reply is what
--- ends the turn, so no heuristic decides when the agent has finished speaking.
+-- | Send one text prompt and collect the turn. Chunks accumulate in arrival
+-- order; the request's own reply is what ends the turn, so no heuristic decides
+-- when the agent has finished speaking.
 promptTurn :: Acp -> Text -> Text -> IO Turn
 promptTurn acp what text = do
   sid <-
@@ -1127,8 +1145,8 @@ promptTurn acp what text = do
       throwIO . AcpProtocol (T.pack (acpProgram acp)) $
         "session/prompt returned no stopReason: " <> clipText (compact res)
 
--- | @Acp.Conn.cancel@ (@Acp.lean:1358@): cancel the turn in flight, if there is
--- a session at all. A notification, so it does not wait.
+-- | Cancel the turn in flight, if there is a session at all. A notification,
+-- so it does not wait.
 cancelTurn :: Acp -> IO ()
 cancelTurn acp =
   readIORef (acpSession acp) >>= \case
@@ -1142,8 +1160,9 @@ cancelTurn acp =
 -- | The adapter, as a 'WorldIO': open this question's session, put it, read
 -- what came back, and re-ask once if the trusted base could not read it.
 --
--- This is @Exec.oracle@ (@Exec.lean:1425@) with the scope calls left out (the
--- header carries both axes) and the session policy kept: 'acpFreshPerQuestion'
+-- This is the @Oracle IO@ Lean retired with its transports (@Exec.lean:62@),
+-- with the scope calls left out (the header carries both axes) and the session
+-- policy kept: 'acpFreshPerQuestion'
 -- opens a session __once per question and not once per attempt__, because a
 -- re-ask is the same question put again and not a different world.
 --
@@ -1162,7 +1181,7 @@ worldOfAcp cfg acp = WorldIO $ \c q -> do
   when (acpFreshPerQuestion cfg) (void (newSession acp))
   askDecoding stderrLog defaultRetries c q (sayAcp cfg acp c q)
 
--- | @Exec.say@ (@Exec.lean:1286@) at this transport: name the question under
+-- | Lean's @Say@ (@Exec.lean:904@) at this transport: name the question under
 -- way, set the permission policy for it, prompt, and __insist that the bytes
 -- are somebody's answer__.
 --
@@ -1216,30 +1235,30 @@ sayAcp cfg acp c q extra = do
   where
     code = fromSCode c
     who = addresseeWord (qAddressee q)
-    -- How the record and the diagnosis name this question, and what
-    -- `Acp.Conn.underQuestion` is handed (`Exec.lean:1290`), word for word.
+    -- How the record and the diagnosis name this question, and what is stored
+    -- in `acpAsked` for a permission request to be reported against.
     what = "the " <> codeWord code <> " question put to " <> who
 
 -- ---------------------------------------------------------------------------
 -- The four frames one can write
 -- ---------------------------------------------------------------------------
 
--- | @Rpc.request@ (@Rpc.lean:86@). Our own ids are always numeric.
+-- | A request frame. Our own ids are always numeric.
 rpcRequest :: Int -> Text -> Value -> Value
 rpcRequest i method params =
   object ["jsonrpc" .= ("2.0" :: Text), "id" .= i, "method" .= method, "params" .= params]
 
--- | @Rpc.notification@ (@Rpc.lean:91@).
+-- | A notification frame: no id, so no reply is expected.
 rpcNotification :: Text -> Value -> Value
 rpcNotification method params =
   object ["jsonrpc" .= ("2.0" :: Text), "method" .= method, "params" .= params]
 
--- | @Rpc.result@ (@Rpc.lean:95@), carrying the id of the request it answers —
+-- | A result frame, carrying the id of the request it answers —
 -- the agent's own id, unchanged, whatever shape it had.
 rpcResult :: Value -> Value -> Value
 rpcResult i payload = object ["jsonrpc" .= ("2.0" :: Text), "id" .= i, "result" .= payload]
 
--- | @Rpc.errorFrame@ (@Rpc.lean:104@).
+-- | An error frame.
 rpcErrorFrame :: Value -> Int -> Text -> Value
 rpcErrorFrame i code message =
   object
@@ -1248,8 +1267,8 @@ rpcErrorFrame i code message =
       "error" .= object ["code" .= code, "message" .= message]
     ]
 
--- | The method does not exist, or is not available on this peer
--- (@Rpc.lean:115@).
+-- | The method does not exist, or is not available on this peer — JSON-RPC
+-- 2.0's own code for it.
 methodNotFound :: Int
 methodNotFound = -32601
 

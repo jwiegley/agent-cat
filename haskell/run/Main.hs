@@ -4,7 +4,7 @@
 -- examples of @agent-cat\/example@ rebuilt in "Agentic.Workflow" — the
 -- authoring surface, whose 'Agentic.Builder.Program' this module reads:
 --
--- > agentic-run plan harden [--raw]
+-- > agentic-run plan harden [--raw] [--require-pinned]
 -- > agentic-run cost harden
 -- > agentic-run run  harden --scripted
 -- > agentic-run run  harden --session <id> [--binary PATH] [--poll MS]
@@ -34,7 +34,9 @@
 --
 -- == Exit codes
 --
--- @0@ a completed run (or a printed plan or price); @1@ a usage error; @2@ a
+-- @0@ a completed run (or a printed plan or price); @1@ a usage error, which
+-- includes a program refused by @--require-pinned@ — nothing was started, so
+-- nothing is a run failure; @2@ a
 -- transport failure — the session is stopped, the binary or the adapter is
 -- missing, the turn outran its budget; @3@ a run abandoned over what arrived:
 -- an answer "Agentic.Exec" could not read after its re-asks, or (over ACP) a
@@ -91,8 +93,9 @@ import Agentic.AgentDeck
     renderDeckError,
     worldOfDeck,
   )
-import Agentic.Builder (Program, progPlan)
+import Agentic.Builder (Program, progPlan, progRawOut)
 import Agentic.Exec (WorldIO, announcingWorld, runPlanIO, scriptedWorld)
+import Agentic.Guards (guardUnpinnedAsk)
 import Agentic.Observe (printedValue, render, renderString)
 import Agentic.Plan
   ( askNodes,
@@ -113,13 +116,20 @@ import Example.Isaac (isaacScript)
 -- ---------------------------------------------------------------------------
 
 -- | The command line, once it has been understood.
+--
+-- The trailing 'Bool' on 'Plan' and 'Run' is @--require-pinned@, which is a
+-- fact about the /program/ rather than about the verb or the transport, and so
+-- is checked in 'withExample' where the program is first in hand — before a
+-- plan is printed and before an adapter is started.
 data Command
-  = -- | The static folds, and the printed program when 'True'.
-    Plan !Text !Bool
+  = -- | The static folds, the printed program when the first 'Bool', and
+    -- @--require-pinned@ in the second.
+    Plan !Text !Bool !Bool
   | -- | The cost summary and the fold it summarizes.
     Cost !Text
-  | -- | Execute, against one of the two answering services.
-    Run !Text !Target
+  | -- | Execute, against one of the three answering services, under
+    -- @--require-pinned@ when the 'Bool'.
+    Run !Text !Target !Bool
 
 -- | Who answers.
 data Target
@@ -177,14 +187,27 @@ main = do
 
 execute :: Command -> IO ()
 execute = \case
-  Plan name raw -> withExample name (planCmd name raw)
-  Cost name -> withExample name (costCmd name)
-  Run name target -> withExample name (runCmd name target)
+  Plan name raw pinned -> withExample pinned name (planCmd name raw)
+  Cost name -> withExample False name (costCmd name)
+  Run name target pinned -> withExample pinned name (runCmd name target)
 
--- | Look the example up, or fail naming the ones there are.
-withExample :: Text -> (Program -> IO ()) -> IO ()
-withExample name k = case lookupExample name of
-  Just prog -> k prog >> exitSuccess
+-- | Look the example up, or fail naming the ones there are — and, under
+-- @--require-pinned@, refuse a program that leaves a model ask without a
+-- @served by@.
+--
+-- __The check runs before the verb does__, so a refused program prints no plan,
+-- starts no adapter and spends nothing. That is the whole value of an opt-in
+-- guard over a program: it is a statement about the text, and the text is
+-- available before anybody is asked anything.
+--
+-- Exit @1@, with the guard's own words. It is a usage exit and not a run exit
+-- because nothing ran: the operator asked for a guarantee this program does not
+-- carry, and the two ways out are to pin the ask or to drop the flag.
+withExample :: Bool -> Text -> (Program -> IO ()) -> IO ()
+withExample pinned name k = case lookupExample name of
+  Just prog
+    | pinned, Just why <- guardUnpinnedAsk (progRawOut prog) -> die 1 ("refused: " <> why)
+    | otherwise -> k prog >> exitSuccess
   Nothing ->
     die 1 $
       "no example named '"
@@ -451,17 +474,30 @@ parseCommand :: [Text] -> Either Text Command
 parseCommand = \case
   [] -> Left usage
   [verb] | verb `elem` verbs -> Left (verb <> " needs an example: " <> T.intercalate " or " exampleNames)
-  ("plan" : name : rest) -> case rest of
-    [] -> Right (Plan name False)
-    ["--raw"] -> Right (Plan name True)
-    _ -> Left ("plan takes an example and, at most, --raw\n\n" <> usage)
+  ("plan" : name : rest) -> planOpts name False False rest
   ("cost" : name : rest)
     | null rest -> Right (Cost name)
     | otherwise -> Left ("cost takes an example and nothing else\n\n" <> usage)
-  ("run" : name : rest) -> Run name <$> parseTarget rest
+  ("run" : name : rest) -> (\(t, p) -> Run name t p) <$> parseTarget rest
   (verb : _) -> Left ("no verb '" <> verb <> "'\n\n" <> usage)
   where
     verbs = ["plan", "cost", "run"]
+
+    -- Two independent flags, so they are folded rather than enumerated: the
+    -- pair spelled in the other order is the same request.
+    planOpts :: Text -> Bool -> Bool -> [Text] -> Either Text Command
+    planOpts name raw pinned = \case
+      [] -> Right (Plan name raw pinned)
+      ("--raw" : more) -> planOpts name True pinned more
+      ("--require-pinned" : more) -> planOpts name raw True more
+      (flag : _) ->
+        Left
+          ( "no option '"
+              <> flag
+              <> "' for plan, which takes an example and, at most, --raw and "
+              <> "--require-pinned\n\n"
+              <> usage
+          )
 
 -- | What the @run@ options say, before it has been decided whether they say
 -- anything coherent.
@@ -482,22 +518,30 @@ data RunOpts = RunOpts
     roAdapter :: !(Maybe Text),
     -- | In the order given, which is the order they reach the child's @argv@.
     roAdapterArgs :: ![Text],
-    roScratch :: !(Maybe Text)
+    roScratch :: !(Maybe Text),
+    -- | @--require-pinned@. Belongs to no engine — it is a question about the
+    -- program's text, which is the same text whoever answers it — so it is the
+    -- one flag 'chooseTarget' neither forbids nor consumes.
+    roRequirePinned :: !Bool
   }
 
 noRunOpts :: RunOpts
-noRunOpts = RunOpts False Nothing Nothing Nothing Nothing Nothing False Nothing [] Nothing
+noRunOpts = RunOpts False Nothing Nothing Nothing Nothing Nothing False Nothing [] Nothing False
 
--- | The @run@ options: three mutually exclusive answerers, and the knobs that
--- belong to one of them alone.
-parseTarget :: [Text] -> Either Text Target
-parseTarget args = go noRunOpts args >>= chooseTarget
+-- | The @run@ options: three mutually exclusive answerers, the knobs that
+-- belong to one of them alone, and @--require-pinned@, which belongs to none.
+parseTarget :: [Text] -> Either Text (Target, Bool)
+parseTarget args = do
+  o <- go noRunOpts args
+  t <- chooseTarget o
+  pure (t, roRequirePinned o)
   where
     go :: RunOpts -> [Text] -> Either Text RunOpts
     go o = \case
       [] -> Right o
       ("--scripted" : rest) -> go o {roScripted = True} rest
       ("--verbose" : rest) -> go o {roVerbose = True} rest
+      ("--require-pinned" : rest) -> go o {roRequirePinned = True} rest
       ("--engine" : v : rest)
         | v `elem` ["acp", "deck"] -> go o {roEngine = Just v} rest
         | otherwise ->
@@ -568,9 +612,10 @@ chooseTarget o = case (roScripted o, roEngine o, roSession o) of
 
     adapter = do
       forbid "the acp engine" deckFlags
-      -- The default is `stub`, which is agent-cat's own (`cli/AgentCat.lean`'s
-      -- `Options.adapter`): a command line that named no adapter must not spawn
-      -- a real agent, spend a token or touch an account.
+      -- The default is `stub`, the deterministic double: a command line that
+      -- named no adapter must not spawn a real agent, spend a token or touch
+      -- an account. (The retired Lean CLI kept the same default, for the same
+      -- reason.)
       let name = fromMaybe "stub" (roAdapter o)
           base = defaultAcpConfig (adapterArgv name <> map T.unpack (roAdapterArgs o))
       pure . Adapter $
@@ -591,7 +636,7 @@ usage =
     "\n"
     [ "agentic-run — plan, price and run the worked examples",
       "",
-      "  agentic-run plan <example> [--raw]",
+      "  agentic-run plan <example> [--raw] [--require-pinned]",
       "  agentic-run cost <example>",
       "  agentic-run run  <example> --scripted",
       "  agentic-run run  <example> --session <id> [--binary PATH] [--poll MS]",
@@ -621,7 +666,11 @@ usage =
       "                 adapter is started, and the only place an act may write.",
       "                 --engine acp only",
       "  --timeout      milliseconds one turn may take before it is abandoned",
-      "  --verbose      narrate the transport on stderr"
+      "  --verbose      narrate the transport on stderr",
+      "  --require-pinned",
+      "                 refuse the program unless every model ask names the model",
+      "                 that serves it (`servedBy`). Checked before anything is",
+      "                 printed, started or spent; plan and run, any engine"
     ]
 
 -- ---------------------------------------------------------------------------

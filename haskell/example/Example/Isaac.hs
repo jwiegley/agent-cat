@@ -1004,10 +1004,9 @@ planFeatureProgram = workflow W.do
         {simpleEnglishLens}
         {ordered}|]
 
-    act (tool "write-plan") [wf|
+    ask_ (tool "write-plan") [wf|
         Write this plan to `docs/plans/` under a dated name, then reply DONE.
         {worded}|]
-    stop
 
 -- ---------------------------------------------------------------------------
 -- 2. review-lite
@@ -1110,7 +1109,7 @@ reviewLiteProgram = workflow W.do
             {haskellHouseLens}
             {subject}|]
 
-        act (tool "write-report") [wf|
+        ask_ (tool "write-report") [wf|
             {reviewReportBrief}
             {correctness}
             {haskell}
@@ -1118,9 +1117,8 @@ reviewLiteProgram = workflow W.do
             {failures}
             {braids}
             {cuts}|]
-        stop
       else W.do
-        act (tool "write-report") [wf|
+        ask_ (tool "write-report") [wf|
             {reviewReportBrief}
             {correctness}
             {noHaskellEdits}
@@ -1128,7 +1126,6 @@ reviewLiteProgram = workflow W.do
             {failures}
             {braids}
             {cuts}|]
-        stop
 
 -- ---------------------------------------------------------------------------
 -- 3. ship-feature-lite
@@ -1273,10 +1270,9 @@ shipFeatureLiteProgram = workflow W.do
 
         case gated of
           Settled tree -> W.do
-            act (tool "write-report") [wf|
+            ask_ (tool "write-report") [wf|
                 Write the run's account to `ship-feature-lite.md`, then reply DONE.
                 {tree}|]
-            stop
           -- Abort. Three repair trips did not make the tree green, and the
           -- opposite polarity to the worker loop is the whole argument:
           -- a worker declares its own ending, and a tree is asked whether it
@@ -1445,10 +1441,9 @@ grindTestsProgram = workflow W.do
 
             case closed of
               Settled delta -> W.do
-                act (tool "write-audit") [wf|
+                ask_ (tool "write-audit") [wf|
                     Write the closing account under `docs/audits/`, then reply DONE.
                     {delta}|]
-                stop
               Unsettled -> stop
           Unsettled -> stop
       -- `FACTS PATHS UNRESOLVED`: the run ends before any fixer acts. There is

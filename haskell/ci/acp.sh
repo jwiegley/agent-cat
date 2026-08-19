@@ -81,8 +81,8 @@ want_no_file() {
 #
 # Seven ask nodes, seven distinct questions, seven prompts: the same bills the
 # frozen corpus records for example-000 (billFresh 7, billMemo 7), reached over
-# a real protocol instead of by the pure fold. `demo/Main.lean`'s
-# `expectedApply` is the same 7, and it is `Dsl.bill_flagship_apply` restated.
+# a real protocol instead of by the pure fold. The same 7 is what the kernel
+# proves of the flagship's apply path (Agentic/Core/DslFlagship.lean).
 #
 # `applied.c` is the sharp assertion, not the bill: `Decode .ack` is total, so a
 # receipt proves only that something replied. The stub's `Apply:` turn asks
@@ -104,8 +104,8 @@ note "happy: settled in 7 turns, the act wrote applied.c, exit 0"
 #
 # `--refuse` makes the stub answer *no* to the consent question, which is
 # `Harden.no_ack_of_refused`'s hypothesis made of bytes. The apply question is
-# then never put: six consultations instead of seven — `Harden.bill_refuse_demo`,
-# `demo/Main.lean`'s `expectedRefuse` — and nothing is written, because no act
+# then never put: six consultations instead of seven — `Harden.bill_refuse_demo`
+# (Agentic/Core/HardenPatch.lean:965) — and nothing is written, because no act
 # ran to write it.
 # ---------------------------------------------------------------------------
 play refuse run harden --engine acp --adapter stub --adapter-arg --refuse --timeout 60000
@@ -188,8 +188,8 @@ note "cancelled-ask: warned, recorded and settled, exit 0"
 # ---------------------------------------------------------------------------
 # 7. A command line that named no adapter.
 #
-# The default is the stub — agent-cat's own (`cli/AgentCat.lean`'s
-# `Options.adapter`) — and it is *announced*, because `stub` is both a word an
+# The default is the stub — the deterministic double, the same default the
+# retired Lean CLI kept — and it is *announced*, because `stub` is both a word an
 # operator can type and what a silent command line means, and a run that reached
 # a real agent by default would spend somebody's tokens without saying so.
 # ---------------------------------------------------------------------------

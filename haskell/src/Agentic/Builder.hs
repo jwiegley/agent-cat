@@ -41,7 +41,7 @@
 -- program, exactly like @message@ and @excerpt@.
 --
 -- __The context is a type-level association list.__ @Bindings Γ@
--- (@Check.lean:67@) is a list from name to code, extended by @Bindings.push@,
+-- (@Check.lean:76@) is a list from name to code, extended by @Bindings.push@,
 -- with shadowing refused by @freshName@; 'Scope' is that list at the type
 -- level and 'Fresh' is @freshName@.
 --
@@ -444,7 +444,7 @@ wordsExpr ps d = T.concat (map (\p -> pieceExpr p d) ps)
 
 -- | The words where the prompt mentions no name, and 'Nothing' where it does.
 --
--- Lean: @Prompt.closed@ (@Syntax.lean:140@). __The decision is made on the
+-- Lean: @Prompt.closed@ (@Syntax.lean:157@). __The decision is made on the
 -- chunks, never on the 'Expr'__: closed-versus-open is exactly what separates
 -- 'PAskC' from 'PAsk', hence @batch@ from @pipeline@ in the @level@ fold. The
 -- empty prompt is closed, at @""@.
@@ -521,7 +521,7 @@ askShapeH _ a =
    in maybe s (\m -> atModelShape m s) (askServe a)
 
 -- | A question in binding position: __one__ node, because 'PAsk' /is/
--- ask-and-bind. Lean: @bindForm@'s @.ask@ branch (@Check.lean:468@).
+-- ask-and-bind. Lean: @bindForm@ (@Check.lean:459@), its @.ask@ branch at @:468@.
 askNode :: forall c s a. KnownCode c => Ask s -> Plan (c ': Codes s) a -> Plan (Codes s) a
 askNode a k = case wordsClosed (askWords a) of
   Just w -> PAskC c (withPrompt (askShapeH c a) w) k
@@ -577,7 +577,7 @@ one a =
 --
 -- Lean: @checkMembers@ (@Check.lean:345@) elaborates every member at
 -- @.verdict@ — positionally, never by inference — and @Plan.panel@
--- (@Plan.lean:931@) folds them right, from the unit, in member order:
+-- (@Plan.lean:930@) folds them right, from the unit, in member order:
 -- @v₁ * (v₂ * (… * (vₙ * 1)))@ in the verdict monoid, where @declined@
 -- annihilates, @approve@ is the unit and objection lists concatenate. The
 -- monoid is noncommutative on purpose, so the fold's direction is normative.
@@ -686,7 +686,7 @@ type ParamCtx (ps :: [Code]) = ParamCtxGo ps '[]
 -- handles the body reads them through, nested in source order and ending in
 -- @()@.
 --
--- Lean: @paramBindings@ (@Check.lean:750@), which pushes the parameters in
+-- Lean: @paramBindings@ (@Check.lean:751@), which pushes the parameters in
 -- source order so that the last one is de Bruijn @0@. A parameter is a binding
 -- like any other, so it hands the body a 'V' like any other; @hs@ is that
 -- tuple of handles, computed by the very fold that computes the scope.
@@ -736,7 +736,7 @@ data Fn (ps :: [Code]) (r :: Code) = Fn
     fnPlan :: Plan (ParamCtx ps) (El r)
   }
 
--- | One function. Lean: @checkFn@ (@Check.lean:836@) — a body is checked
+-- | One function. Lean: @checkFn@ (@Check.lean:837@) — a body is checked
 -- __once__, over exactly its parameters, and "a body cannot see the caller" is
 -- the type and not a rule.
 --
@@ -781,7 +781,7 @@ callPlanOf f as = subP (fnPlan f) (argSub as (const ENil :: Sub '[] (Codes s)))
 -- ---------------------------------------------------------------------------
 
 -- | A function body: the statements it prints, the @answer@ it names, and the
--- plan it elaborates to. Lean: @checkBody@ (@Check.lean:783@).
+-- plan it elaborates to. Lean: @checkBody@ (@Check.lean:784@).
 --
 -- A body has no branching and no loop — @RawBodyStmt@ has no such
 -- constructors, and neither has this type. A function is a reusable sequence

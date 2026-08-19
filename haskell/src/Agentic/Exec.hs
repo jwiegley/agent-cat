@@ -12,19 +12,19 @@
 -- Description : The interpreter in @IO@: the memoizing fold, and the decode loop.
 --
 -- A port of @Agentic\/Core\/Exec.lean@ from the line where the theorems stop
--- (@Exec.lean:463@, \"the interpreter: a memoizing fold, with the answering
+-- (@Exec.lean:456@, \"the interpreter: a memoizing fold, with the answering
 -- service an argument\") to the line where the transport begins. Three layers,
 -- in Lean's order, and the order is the point:
 --
--- 1. __The trusted base__ — 'decodeEl', @Exec.lean:273@'s @Decode@. It is one
+-- 1. __The trusted base__ — 'decodeEl', @Exec.lean:266@'s @Decode@. It is one
 --    total parser per code and it is not written here: every clause delegates
 --    to "Agentic.Text", which is the byte-faithful port and the /only/ place in
 --    this package that decides what an addressee's bytes mean. A second copy of
---    that decision is exactly what @Exec.lean:249@–@:259@ says must not exist.
--- 2. __The memoizing fold__ — 'runPlanIO', @Exec.lean:511@'s @Dlg.execM@ at
+--    that decision is exactly what @Exec.lean:249@–@:250@ says must not exist.
+-- 2. __The memoizing fold__ — 'runPlanIO', @Exec.lean:504@'s @Dlg.execM@ at
 --    @m := IO@, fused through @denote@ the way "Agentic.World"'s 'traceIn' is
 --    (@Exec.lean:725@: @Plan.execWith o p γ t = Dlg.execM o (denote p γ) t@, and
---    @:732@ says that equation is @rfl@ because nothing else was written).
+--    @:727@ says that equation is @rfl@ because nothing else was written).
 -- 3. __The answering service__ — 'WorldIO', Lean's @Oracle IO@, passed in. The
 --    only 'WorldIO' here is 'scriptedWorld'; the live one is
 --    @Agentic.AgentDeck@'s 'worldOfDeck', and it is built from the same
@@ -39,7 +39,7 @@
 --
 -- * the table is Lean's @Table@ — consulted before asking, extended after
 --   answering, and that pair of lines is the whole of kernel §5's argument
---   (@Exec.lean:500@–@:510@). A question already answered is not put again.
+--   (@Exec.lean:508@–@:512@). A question already answered is not put again.
 -- * the trace is @Plan.trace@ — what the /plan/ consulted, repetitions and all,
 --   so that 'billFresh' and 'billMemo' mean here what they mean in
 --   "Agentic.World". Lean reads its bills off @Plan.trace@ too
@@ -52,14 +52,14 @@
 -- > billMemo  t == the number of times the 'WorldIO' was actually invoked
 --
 -- and, at a pure world ('pureWorldIO', Lean's @pureOracle@ at
--- @Exec.lean:626@), the factorization theorem @Exec.lean:654@ becomes an
+-- @Exec.lean:619@), the factorization theorem @Exec.lean:647@ becomes an
 -- equation anyone can run:
 --
 -- > runPlanIO (pureWorldIO w) p  ==  pure (runPlan w p, trace w p)
 --
 -- == What is deliberately not ported
 --
--- The @Oracle@'s history argument (@Exec.lean:484@: @(c : Code) → Q c → Table →
+-- The @Oracle@'s history argument (@Exec.lean:477@: @(c : Code) → Q c → Table →
 -- m (El c)@) is dropped from 'WorldIO'. Adequacy quantifies over
 -- history-dependent oracles, so an oracle that cannot see the history is a
 -- special case of the ones @execM_adequacy@ covers: dropping the argument
@@ -67,13 +67,23 @@
 -- neither the stub nor a CLI transport has a use for the table — and an argument
 -- nobody reads invites somebody to start reading it.
 --
--- @Exec.Settings@ is not ported as a record either. Two of its fields are
--- semantics-adjacent and appear here as arguments ('askDecoding' takes the log
--- and the retry count); the rest — session policy, permission policy, ACP scope
--- selection, turn reporting — are facts about a transport this runner does not
--- have, and belong to whichever adapter does. 'requiresCompletedTurn' is here
--- because it is a decision about what bytes may mean and an adapter that can
--- observe how a turn ended owes it.
+-- Only the /semantics-adjacent/ half of @Exec.Settings@ is ported. Lean's
+-- record carries two fields — @retries@ and @log@ — and 'ExecSettings' carries
+-- both, under those meanings, plus the run policy this port owes an operator
+-- ('TurnGap', the per-gap budgets, the recovery fork, the loud arm and the
+-- standing unattended answer). What is /not/ ported is the transport half —
+-- session policy, permission policy, ACP scope selection, turn reporting —
+-- because those are facts about a transport this runner does not have, and
+-- belong to whichever adapter does. 'requiresCompletedTurn' is here because it
+-- is a decision about what bytes may mean and an adapter that can observe how a
+-- turn ended owes it.
+--
+-- __Every default in 'defaultExecSettings' reproduces the behaviour this module
+-- had before it existed.__ The two settings-taking entry points
+-- ('askDecodingWith', 'scriptedWorldWith') at 'defaultExecSettings' are the two
+-- that do not take settings ('askDecoding' at 'defaultRetries',
+-- 'scriptedWorld'), question for question and byte for byte in the log; the
+-- policy is opt-in or it is not policy.
 module Agentic.Exec
   ( -- * The answering service
     WorldIO (..),
@@ -87,9 +97,22 @@ module Agentic.Exec
     decodeEl,
     sayEl,
 
+    -- * The failure vocabulary, and the run policy
+    TurnGap (..),
+    gapWord,
+    Recovery (..),
+    GapAsk (..),
+    Recover,
+    budgetedRecovery,
+    failOverRefusal,
+    ExecSettings (..),
+    defaultExecSettings,
+    gapBudget,
+
     -- * The decode loop
     attemptDecoding,
     askDecoding,
+    askDecodingWith,
     defaultRetries,
     stderrLog,
 
@@ -102,6 +125,7 @@ module Agentic.Exec
 
     -- * The scripted world
     scriptedWorld,
+    scriptedWorldWith,
     scriptedReply,
     scriptedDefault,
 
@@ -146,7 +170,7 @@ import System.IO (hPutStrLn, stderr)
 -- The answering service
 -- ---------------------------------------------------------------------------
 
--- | @Oracle IO@ (@Exec.lean:484@), less the history argument: given a code and
+-- | @Oracle IO@ (@Exec.lean:477@), less the history argument: given a code and
 -- a question, produce an answer, in @IO@.
 --
 -- A rank-2 newtype for the same reason "Agentic.World"'s 'World' is one — the
@@ -154,7 +178,7 @@ import System.IO (hPutStrLn, stderr)
 -- which is the sense in which the @IO@ layer is /only/ the answering service.
 --
 -- Two things this type says, and they are the reason it is this type
--- (@Exec.lean:469@–@:483@):
+-- (@Exec.lean:462@–@:476@):
 --
 -- * it returns @IO (El c)@ and not @IO (El c, table)@, so an answerer can
 --   invent an answer but cannot forge or delete a recorded one. That is
@@ -164,7 +188,7 @@ import System.IO (hPutStrLn, stderr)
 newtype WorldIO = WorldIO
   {worldAskIO :: forall (c :: Code). SCode c -> Q c -> IO (El c)}
 
--- | @pureOracle ω@ (@Exec.lean:626@): the answering service that /is/ the world
+-- | @pureOracle ω@ (@Exec.lean:619@): the answering service that /is/ the world
 -- @ω@, ignoring the history because a world is a function of the question.
 --
 -- This is the factorization written as a definition. 'runPlanIO' at this
@@ -172,8 +196,8 @@ newtype WorldIO = WorldIO
 --
 -- > runPlanIO (pureWorldIO w) p  ==  pure (runPlan w p, trace w p)
 --
--- which is @Plan.execPure_fst@ (@Exec.lean:755@) and @execM_pure@'s third
--- conclusion (@:654@) at once. The memo table changes nothing here precisely
+-- which is @Plan.execPure_fst@ (@Exec.lean:748@) and @execM_pure@'s third
+-- conclusion (@:647@) at once. The memo table changes nothing here precisely
 -- because a 'World' is a function: a repeated question would have got the same
 -- answer had it been put again.
 pureWorldIO :: World -> WorldIO
@@ -187,8 +211,10 @@ pureWorldIO w = WorldIO (\c q -> pure (worldAnswer w c q))
 -- lines, not 'billFresh' many. A caller that wants every ask /node/ instead
 -- should print the 'Trace' 'runPlanIO' returns.
 --
--- Reporting only. Removing it changes no answer, exactly as @Settings.onTurn@
--- (@Exec.lean:1042@) changes none.
+-- Reporting only. Removing it changes no answer. Lean once carried the same
+-- knob as @Settings.onTurn@ and retired it with the rest of the wire policy
+-- (@Exec.lean:878@, \"What used to be here\"); the property it had is the one
+-- this has — a reporting hook is visible to no theorem.
 announcingWorld :: (Text -> IO ()) -> WorldIO -> WorldIO
 announcingWorld out (WorldIO ask) = WorldIO $ \c q -> do
   out $
@@ -211,8 +237,9 @@ announcingWorld out (WorldIO ask) = WorldIO $ \c q -> do
 --
 -- The table is a 'Map' rather than an association list because @lookup@ is the
 -- only operation on it and Lean's cons-order is unobservable through @lookup@:
--- a key is inserted only where the lookup said nothing (@Exec.lean:551@'s
--- @le_cons_of_lookup_none@ is that hypothesis), so no insert ever overwrites
+-- a key is inserted only where the lookup said nothing (@World.lean:193@'s
+-- @le_cons_of_lookup_none@ is that hypothesis, discharged at @Exec.lean:544@),
+-- so no insert ever overwrites
 -- and \"first wins\" and \"last wins\" coincide.
 data Memo = Memo
   { memoTable :: !(Map EventKey Event),
@@ -220,16 +247,16 @@ data Memo = Memo
     memoSaid :: [Event]
   }
 
--- | @Plan.execWith o p Env.nil Table.nil@ (@Exec.lean:725@, @:1386@'s
--- @execIO@): run a closed plan against an answering service and return the
--- answer together with the transcript.
+-- | @Plan.execWith o p Env.nil Table.nil@ (@Exec.lean:718@; Lean's @execIO@
+-- entry point around it is retired, @Exec.lean:978@): run a closed plan against
+-- an answering service and return the answer together with the transcript.
 --
--- __Look up before asking; record after answering__ (@Exec.lean:500@). A
+-- __Look up before asking; record after answering__ (@Exec.lean:491@). A
 -- question whose 'EventKey' — code, addressee, scope, prompt and draw, which is
 -- exactly what 'billMemo' charges by — has already been answered is answered
 -- from the table and the service is not invoked. That is what makes the run
 -- /functional/ with no hypothesis on the answerer, which is the whole of
--- @execM_adequacy@ (@Exec.lean:585@): one question, one answer, however
+-- @execM_adequacy@ (@Exec.lean:578@): one question, one answer, however
 -- faithless the addressee.
 --
 -- A deliberate resample is not defeated by it: @draw@ is a field of the
@@ -275,7 +302,7 @@ execIn w y pl m = case pl of
   PCase _ e arms -> execIn w y (arms (e y)) m
   PDyn _ e f -> execIn w y (f (e y)) m
 
--- | @Exec.lean:531@ (@execM_ask_hit@) and @:538@ (@execM_ask_miss@), the two
+-- | @Exec.lean:524@ (@execM_ask_hit@) and @:531@ (@execM_ask_miss@), the two
 -- clauses of the @ask@ case, plus the transcript entry both of them make.
 --
 -- The hit is the identity on the table; the miss asks, records, and only then
@@ -330,7 +357,7 @@ sameCode _ _ = Nothing
 -- The trusted base, at the typed answer
 -- ---------------------------------------------------------------------------
 
--- | @Decode@ (@Exec.lean:273@) — the total function per code taking the bytes
+-- | @Decode@ (@Exec.lean:266@) — the total function per code taking the bytes
 -- an addressee produced to the thing it is thereby taken to have said.
 --
 -- > Decode .text    s = some s                  -- what was said is what was said
@@ -343,7 +370,7 @@ sameCode _ _ = Nothing
 -- 'El', and if it ever grows a clause of its own the package has two answers to
 -- the question of what an addressee said.
 --
--- 'Nothing' is one code wide (@Decode_eq_none@, @Exec.lean:300@): a @flag@ is
+-- 'Nothing' is one code wide (@Decode_eq_none@, @Exec.lean:293@): a @flag@ is
 -- the one code whose answer set is smaller than what an addressee can say, so
 -- it is the one place the runtime has to be prepared to re-ask.
 decodeEl :: SCode c -> Text -> Maybe (El c)
@@ -365,7 +392,7 @@ sayEl SAck _ = "done"
 -- What a question says about itself on the wire
 -- ---------------------------------------------------------------------------
 
--- | @Exec.Code.name@ (@Exec.lean:786@) — how a code names itself in a prompt
+-- | @Exec.Code.name@ (@Exec.lean:778@) — how a code names itself in a prompt
 -- header, a warning and an abandonment message.
 --
 -- __This is not @Agentic.Raw.codeName@.__ That one spells @CodeAck@ as
@@ -381,7 +408,7 @@ codeWord = \case
   CodeFlag -> "flag"
   CodeAck -> "ack"
 
--- | @Addressee.render@ (@Exec.lean:793@) — how an addressee names itself in a
+-- | @Addressee.render@ (@Exec.lean:785@) — how an addressee names itself in a
 -- prompt header and in an error.
 addresseeWord :: Addressee -> Text
 addresseeWord = \case
@@ -389,14 +416,14 @@ addresseeWord = \case
   AddrTool i -> "tool " <> i
   AddrPerson i -> "person " <> i
 
--- | @Exec.answerSpec@ (@Exec.lean:816@) — what the addressee must say for
+-- | @Exec.answerSpec@ (@Exec.lean:807@) — what the addressee must say for
 -- 'decodeEl' to read it, sent with every question because the trusted base is
 -- narrow on purpose and an addressee cannot be expected to guess it.
 --
 -- These four sentences are the exact bytes Lean sends, and an adapter that
 -- appends a format line to a prompt should append one of these rather than a
 -- paraphrase: an addressee told two different formats in one prompt obeys
--- neither (@Exec.lean:812@).
+-- neither (@Exec.lean:804@).
 answerSpec :: Code -> Text
 answerSpec = \case
   CodeText -> "Reply with the text itself and nothing else."
@@ -404,7 +431,7 @@ answerSpec = \case
   CodeFlag -> "Reply with exactly yes or no."
   CodeAck -> "Do what was asked, then reply with exactly DONE."
 
--- | @Exec.nudge@ (@Exec.lean:874@) — what to append when a reply could not be
+-- | @Exec.nudge@ (@Exec.lean:866@) — what to append when a reply could not be
 -- read, so the second attempt is not a verbatim repeat of the first.
 --
 -- > "\n\n[Your previous reply could not be read as a {code}: {reply}\n{answerSpec}]"
@@ -421,8 +448,15 @@ nudge c reply =
     <> answerSpec (fromSCode c)
     <> "]"
 
--- | @Exec.requiresCompletedTurn@ (@Exec.lean:1190@) — may an answer to this
--- question be recorded from a turn the agent did __not__ finish?
+-- | May an answer to this question be recorded from a turn the agent did
+-- __not__ finish?
+--
+-- __This rule is stated here and nowhere else.__ Lean carried a
+-- @Exec.requiresCompletedTurn@ beside its own ACP transport; that transport and
+-- everything that was a policy about a wire are retired (@Exec.lean:62@,
+-- @:878@), so the rule below is not a port of a surviving definition — it is
+-- the definition, and a transport that changes it changes the meaning of a
+-- receipt.
 --
 -- 'False' is /refusal is an answer/ (§3 q8): a @text@, @verdict@ or @flag@ from
 -- a model or a tool is read as given even if the turn was cut short, because a
@@ -452,7 +486,7 @@ requiresCompletedTurn _ _ = False
 -- The decode loop
 -- ---------------------------------------------------------------------------
 
--- | @Settings.retries@'s default (@Exec.lean:960@): re-ask once, so a question
+-- | @Settings.retries@'s default (@Exec.lean:890@): re-ask once, so a question
 -- is put at most twice.
 --
 -- Only a @flag@ can trigger a re-ask at all (@Decode_eq_none@), so this is not
@@ -461,7 +495,7 @@ requiresCompletedTurn _ _ = False
 defaultRetries :: Int
 defaultRetries = 1
 
--- | @Settings.log@'s default (@Exec.lean:1032@): a warning goes to stderr,
+-- | @Settings.log@'s default (@Exec.lean:895@): a warning goes to stderr,
 -- prefixed @agentic:@.
 --
 -- Warnings report what the run is /about/ to do about something it noticed;
@@ -470,7 +504,222 @@ defaultRetries = 1
 stderrLog :: Text -> IO ()
 stderrLog msg = hPutStrLn stderr ("agentic: " <> T.unpack msg)
 
--- | @Exec.attempt@ (@Exec.lean:1279@): ask, decode, and on a failure to decode
+-- ---------------------------------------------------------------------------
+-- The failure vocabulary
+-- ---------------------------------------------------------------------------
+
+-- | __Why__ a question produced no answer — named by what came back, never by
+-- what the runner will do about it.
+--
+-- @agent-functor@ bought this taxonomy with two dead @ship-feature@ runs and a
+-- twenty-leaf fan-out (@isaac-workflows@ §G10, D6), and it transfers as
+-- vocabulary before it transfers as code: the three constructors are declared
+-- and priced here in this wave, and only the first is /raised/ here, because
+-- only the first is something this module can observe.
+--
+-- The mapping to @~\/src\/agent-functor@'s @Agent.Run.TurnGap@, which is three
+-- constructors over a leaf whose artefact is untyped @Text@:
+--
+-- * 'GapUndecodable' — no counterpart there;
+-- * 'GapTransportRefusal' — its @TurnFailed@ /and/ its @TurnExhausted@;
+-- * 'GapEmptyOrProtocol' — its @TurnEmpty@.
+--
+-- Two of those three lines are not one-to-one, and the reasons are the design:
+--
+-- * __'GapUndecodable' has no counterpart there and is the only one raised
+--   here.__ A leaf in @agent-functor@ returns @Text@ and there is nothing to
+--   decode; here the trusted base is narrow on purpose ('decodeEl'), so bytes
+--   can arrive, be a perfectly good turn, and still not be an answer. That is
+--   this language's own gap, and it is the one the decode loop is /about/.
+--
+-- * __@TurnFailed@ and @TurnExhausted@ arrive as one gap.__ There they are
+--   split because @TurnExhausted@ is wire-tagged (@errorKind == \"rate_limit\"@)
+--   and is the one gap where the same question put to a /different/ model is
+--   expected to succeed — which is fail-over, and fail-over needs a fallback
+--   list on @served by@, which changes the printed program and is therefore
+--   wave 3's ('failOverRefusal' says so by name). Splitting the gap before the
+--   mechanism exists would be inventing a distinction with nothing on the other
+--   side of it.
+--
+-- The last two are the /transport's/ to raise and not the decode loop's, which
+-- is why nothing in this module constructs them: \"the adapter refused\" and
+-- \"the turn ended with nothing\" are observations about a turn, and by the
+-- time bytes reach 'decodeEl' there is no turn left to observe. An adapter that
+-- can see a stop reason ("Agentic.Acp" can; "Agentic.AgentDeck" cannot) reads
+-- its budget out of 'gapBudget' and answers with 'esRecover' — the same two
+-- calls the decode loop makes.
+data TurnGap
+  = -- | Bytes arrived and 'decodeEl' could not read them at the question's
+    -- code. One code wide (@Decode_eq_none@): only a @flag@ can produce it.
+    GapUndecodable
+  | -- | The transport named a failure — the adapter died mid-turn, the pipe
+    -- closed, the provider answered 5xx, the model's allowance is spent.
+    GapTransportRefusal
+  | -- | The turn ended cleanly and produced nothing usable, or ended in a way
+    -- the protocol says is not an answer ('requiresCompletedTurn').
+    GapEmptyOrProtocol
+  deriving (Eq, Ord, Show, Enum, Bounded)
+
+-- | How a gap names itself in a warning and in a refusal.
+gapWord :: TurnGap -> Text
+gapWord = \case
+  GapUndecodable -> "undecodable"
+  GapTransportRefusal -> "transport-refusal"
+  GapEmptyOrProtocol -> "empty-or-protocol"
+
+-- | What to do about a gap: @agent-functor@'s @Recovery@, at the same three
+-- constructors and for the same reason — there are exactly three things an
+-- operator knows that the runner does not.
+--
+-- 'FailOver' is __declared and not implemented__. It is here so the vocabulary
+-- is complete where the mechanism waits: a policy may name it, and naming it
+-- refuses the run with 'failOverRefusal', which says in as many words that
+-- fail-over is wave 3's because a fallback list on @served by@ changes the
+-- printed program. A constructor that refuses is honest; a taxonomy with a hole
+-- in it is the thing that gets rediscovered expensively.
+data Recovery
+  = -- | Put the same question again, to the same addressee.
+    RetryHere
+  | -- | Put it to the next addressee in a fallback list. __Unimplemented.__
+    FailOver
+  | -- | Stop. The run has no answer and will not invent one.
+    Abandon
+  deriving (Eq, Ord, Show, Enum, Bounded)
+
+-- | What a recovery policy is told about the gap it must answer for:
+-- @agent-functor@'s @RecoverAsk@, less the fields only a fallback chain has
+-- (its @raNext@ is the next model's label, and there is no chain to name).
+--
+-- Pure and 'Eq', so a policy is a total function testable without a transport,
+-- which is the whole reason the fork is data rather than a branch in the loop.
+data GapAsk = GapAsk
+  { -- | Which gap.
+    gaGap :: !TurnGap,
+    -- | Re-asks already spent on __this question__, zero at the first gap.
+    gaSpent :: !Int,
+    -- | This gap's budget, as 'gapBudget' read it out of the settings.
+    gaBudget :: !Int,
+    -- | The evidence: the last unreadable reply, or the transport's words.
+    gaWhy :: !Text
+  }
+  deriving (Eq, Show)
+
+-- | How a gap is answered. @agent-functor@'s @Recover@ is
+-- @RecoverAsk -> IO Recovery@ because its live path opens a modal and asks the
+-- operator; this one is pure, because the only answers this wave can give are
+-- read out of settings the operator wrote before the run started. An
+-- interactive one is wave 3's, and it fits here by being an @IO@ of this.
+type Recover = GapAsk -> Recovery
+
+-- | The default policy, and the one that reproduces this module's behaviour
+-- from before the fork existed: re-ask while the gap's budget holds, then stop.
+--
+-- Never 'FailOver'. Nothing in this runner can fail over, so nothing in this
+-- runner chooses it.
+budgetedRecovery :: Recover
+budgetedRecovery ga
+  | gaSpent ga < gaBudget ga = RetryHere
+  | otherwise = Abandon
+
+-- | The refusal a 'FailOver' answer earns, naming the wave that owes the
+-- mechanism.
+--
+-- Not an invented answer and not a silent downgrade to 'Abandon': a policy that
+-- asked for fail-over asked for a /different addressee/, and quietly giving it
+-- the same one back is exactly the class of substitution the abandonment
+-- message spends a paragraph refusing.
+failOverRefusal :: Addressee -> GapAsk -> Text
+failOverRefusal adr ga =
+  "fail-over was chosen for the "
+    <> gapWord (gaGap ga)
+    <> " gap at "
+    <> addresseeWord adr
+    <> ", and this runner cannot fail over: a fallback list on `served by` changes "
+    <> "the printed program, so the mechanism is wave 3's and only the vocabulary "
+    <> "is here. Answer RetryHere or Abandon. (evidence: '"
+    <> trimAscii (gaWhy ga)
+    <> "')"
+
+-- ---------------------------------------------------------------------------
+-- The run policy
+-- ---------------------------------------------------------------------------
+
+-- | @Exec.Settings@ (@Exec.lean:887@)'s two fields, plus the run policy this
+-- port owes an operator.
+--
+-- Neither 'Eq' nor 'Show': two of its fields are functions, exactly as Lean's
+-- @log@ is. The parts that /are/ decidable — the budgets, and what a policy
+-- answers — are pure functions over 'TurnGap' and 'GapAsk' and are testable on
+-- their own ('gapBudget', 'budgetedRecovery').
+data ExecSettings = ExecSettings
+  { -- | @Settings.log@. Default 'stderrLog'.
+    esLog :: Text -> IO (),
+    -- | @Settings.retries@: re-asks after the first attempt at a reply the
+    -- trusted base could not read. __Default 1__, which is 'defaultRetries'.
+    esRetryUndecodable :: !Int,
+    -- | Re-asks after a transport refusal. __Default 0__ — today a transport
+    -- failure abandons where it is raised, and this field records that as a
+    -- number rather than as a fact about the code.
+    esRetryTransportRefusal :: !Int,
+    -- | Re-asks after a turn that ended with nothing usable. __Default 0__, for
+    -- the same reason. (@agent-functor@ runs 2 \/ 1 \/ 0 across its own three;
+    -- adopting its numbers would change what a run costs, so the numbers are
+    -- the operator's and only the vocabulary is ours.)
+    esRetryEmptyOrProtocol :: !Int,
+    -- | How a gap is answered once it is raised. Default 'budgetedRecovery'.
+    esRecover :: Recover,
+    -- | D7's cheap half: the arm an unreadable @flag@ takes once its re-asks
+    -- are spent, instead of abandoning the run. __Default 'Nothing'__, which is
+    -- to abandon.
+    --
+    -- The arm is the operator's standing answer to \"what does an addressee who
+    -- will not say yes or no mean\", and the honest one is the __loud__ arm —
+    -- the branch that does the visible thing — so that an unreadable flag
+    -- cannot quietly skip work. It is logged whenever it is taken, because it
+    -- is the one place an answer in the memo table came from the settings and
+    -- not from the addressee.
+    esLoudArm :: !(Maybe Bool),
+    -- | The standing answer a __person__ question takes in an unattended run:
+    -- the bytes an operator wrote before the run started, instead of a
+    -- transport blocking on a person who is not there. __Default 'Nothing'__,
+    -- which is to ask.
+    --
+    -- Bytes and not an answer: they go through 'decodeEl' like anything else,
+    -- so an unreadable standing answer exhausts its budget and abandons rather
+    -- than becoming a value nobody said. It is announced through 'esLog' every
+    -- time it is taken.
+    --
+    -- This is @agent-functor@'s @unattendedRecovery@ discipline at the one
+    -- place we have for it: \"honouring it here is reading an instruction, not
+    -- guessing\". A run with no standing answer and nobody watching still waits
+    -- on the transport, which is the right outcome for a program that asked a
+    -- person a question in a room with no person in it.
+    esStandingAnswer :: !(Maybe Text)
+  }
+
+-- | Every field at the value that makes the settings-taking entry points
+-- behave exactly as the ones that predate them.
+defaultExecSettings :: ExecSettings
+defaultExecSettings =
+  ExecSettings
+    { esLog = stderrLog,
+      esRetryUndecodable = defaultRetries,
+      esRetryTransportRefusal = 0,
+      esRetryEmptyOrProtocol = 0,
+      esRecover = budgetedRecovery,
+      esLoudArm = Nothing,
+      esStandingAnswer = Nothing
+    }
+
+-- | This gap's re-ask budget, never negative — the one place the three fields
+-- are read, so a caller cannot pick the wrong one for a gap.
+gapBudget :: ExecSettings -> TurnGap -> Int
+gapBudget st = \case
+  GapUndecodable -> max 0 (esRetryUndecodable st)
+  GapTransportRefusal -> max 0 (esRetryTransportRefusal st)
+  GapEmptyOrProtocol -> max 0 (esRetryEmptyOrProtocol st)
+
+-- | @Exec.attemptWith@ (@Exec.lean:913@): ask, decode, and on a failure to decode
 -- ask again — @n + 1@ attempts in all, the second and later ones carrying the
 -- 'nudge' that quotes back what could not be read.
 --
@@ -484,6 +733,11 @@ stderrLog msg = hPutStrLn stderr ("agentic: " <> T.unpack msg)
 -- that came back. A caller that ignores the @extra@ (a scripted world does)
 -- will simply be handed the same unreadable reply again and exhaust the budget,
 -- which is the honest behaviour for an addressee that repeats itself.
+--
+-- Written in terms of 'attemptRecovering' at 'defaultExecSettings', so this
+-- function and 'askDecodingWith' cannot hold two opinions about when a question
+-- is put again. At that policy the only answer that ever ends the loop is
+-- 'Abandon', so the @Left@ here is what it always was.
 attemptDecoding ::
   forall (c :: Code).
   -- | @Settings.log@
@@ -494,29 +748,56 @@ attemptDecoding ::
   -- | @say extra@
   (Text -> IO Text) ->
   IO (Either Text (El c))
-attemptDecoding lg retries c say = go (max 0 retries) T.empty
+attemptDecoding lg retries c say =
+  attemptRecovering settings c say >>= \case
+    Right a -> pure (Right a)
+    Left (ga, _) -> pure (Left (gaWhy ga))
   where
-    go :: Int -> Text -> IO (Either Text (El c))
-    go n extra = do
+    settings =
+      defaultExecSettings {esLog = lg, esRetryUndecodable = retries}
+
+-- | The decode loop proper, over 'ExecSettings': ask, decode, and on a failure
+-- to decode consult 'esRecover' — re-asking with the 'nudge' while it answers
+-- 'RetryHere', and handing back the unanswered 'GapAsk' with whatever it
+-- answered instead.
+--
+-- Not exported. It settles /whether/ to ask again and never /what to do
+-- instead/, because the two callers report a spent question differently and
+-- only one of them ('askDecodingWith') has the question in hand to report it
+-- with.
+attemptRecovering ::
+  forall (c :: Code).
+  ExecSettings ->
+  SCode c ->
+  (Text -> IO Text) ->
+  IO (Either (GapAsk, Recovery) (El c))
+attemptRecovering st c say = go 0 T.empty
+  where
+    budget = gapBudget st GapUndecodable
+
+    go :: Int -> Text -> IO (Either (GapAsk, Recovery) (El c))
+    go spent extra = do
       reply <- say extra
       case decodeEl c reply of
         Just a -> pure (Right a)
-        Nothing
-          | n <= 0 -> pure (Left reply)
-          | otherwise -> do
-              lg $
-                "could not read a "
-                  <> codeWord (fromSCode c)
-                  <> " from '"
-                  <> trimAscii reply
-                  <> "'; re-asking"
-              go (n - 1) (nudge c reply)
+        Nothing ->
+          let ga = GapAsk GapUndecodable spent budget reply
+           in case esRecover st ga of
+                RetryHere -> do
+                  esLog st $
+                    "could not read a "
+                      <> codeWord (fromSCode c)
+                      <> " from '"
+                      <> trimAscii reply
+                      <> "'; re-asking"
+                  go (spent + 1) (nudge c reply)
+                answer -> pure (Left (ga, answer))
 
--- | @Exec.oracle@'s decode half (@Exec.lean:1344@): 'attemptDecoding', and — if
+-- | @Exec.askDecoding@ (@Exec.lean:968@): 'attemptDecoding', and — if
 -- every attempt was unreadable — __abandon the run__ with an 'ioError' quoting
 -- the words that could not be read.
 --
--- __Why exhaustion is an error and not a default__ (@Exec.lean:1299@). Every
+-- __Why exhaustion is an error and not a default__ (@Exec.lean:933@). Every
 -- @El c@ is inhabited, so @pure (defaultEl c)@ typechecks here and would be
 -- wrong. A memo entry carries a code, a question and an answer and /nothing
 -- else/, so a defaulted cell is definitionally identical to one an addressee
@@ -540,23 +821,113 @@ askDecoding ::
   -- | @say extra@
   (Text -> IO Text) ->
   IO (El c)
-askDecoding lg retries c q say =
-  attemptDecoding lg retries c say >>= \case
+askDecoding lg retries c =
+  askDecodingWith defaultExecSettings {esLog = lg, esRetryUndecodable = retries} c
+
+-- | 'askDecoding' over 'ExecSettings', and the entry point every policy field
+-- is read at.
+--
+-- Three things happen here that 'askDecoding' at 'defaultExecSettings' does
+-- not see, because all three are off by default:
+--
+-- 1. __The standing unattended answer.__ If 'esStandingAnswer' is set and the
+--    addressee is a person, the transport is not consulted at all: the
+--    operator's bytes are announced through 'esLog' and then decoded like any
+--    other reply. A run with nobody watching takes the instruction its operator
+--    wrote instead of blocking on a person who is not there.
+--
+-- 2. __The recovery fork.__ 'esRecover' decides each gap. 'RetryHere' re-asks
+--    inside the loop; 'Abandon' falls through to (3); 'FailOver' refuses the
+--    run with 'failOverRefusal', which names wave 3.
+--
+-- 3. __The loud arm.__ If 'esLoudArm' is set and the code is @flag@ — the only
+--    code that can be undecodable at all — a spent question takes the
+--    configured arm with a warning instead of abandoning. Everything else, and
+--    every code but @flag@, abandons exactly as before.
+--
+-- __Why the loud arm is not the defaulting this module refuses.__ The
+-- abandonment message spends a paragraph on why @pure (defaultEl c)@ is wrong,
+-- and it still is: an invented answer is indistinguishable in the table from
+-- one an addressee gave. What is different here is who invented it. A defaulted
+-- cell is the /runner/ answering for the addressee, silently and always; the
+-- loud arm is the /operator/ answering, once, in writing, before the run
+-- started, having been told which arm is which — and it is announced every time
+-- it is taken. That is the same distinction @agent-functor@ draws between
+-- guessing and reading an instruction, and it is why the field is 'Maybe' and
+-- empty by default rather than a 'Bool' with a sensible value.
+askDecodingWith ::
+  forall (c :: Code).
+  ExecSettings ->
+  SCode c ->
+  Q c ->
+  -- | @say extra@
+  (Text -> IO Text) ->
+  IO (El c)
+askDecodingWith st c q say0 = do
+  say <- standingSay
+  attemptRecovering st c say >>= \case
     Right a -> pure a
-    Left reply ->
-      ioError . userError . T.unpack $
-        "no readable "
-          <> codeWord (fromSCode c)
-          <> " from "
-          <> addresseeWord (qAddressee q)
-          <> " after "
-          <> T.pack (show (max 0 retries + 1))
-          <> " attempts; last reply: '"
-          <> trimAscii reply
-          <> "' (prompt: '"
-          <> qPrompt q
-          <> "'). The run is abandoned: recording an answer nobody gave would be "
-          <> "indistinguishable, in the table, from one they did."
+    Left (ga, answer) -> case answer of
+      FailOver -> ioError . userError . T.unpack $ failOverRefusal (qAddressee q) ga
+      -- 'RetryHere' cannot arrive: 'attemptRecovering' consumes it and asks
+      -- again, so the only answers that leave the loop are the two that end the
+      -- question. Written as a fall-through rather than a partial match,
+      -- because an unreachable branch that abandons a run costs nothing and a
+      -- pattern-match failure in the interpreter costs the run.
+      _ -> spent ga
+  where
+    -- The operator's standing answer, in place of the transport, for a person
+    -- nobody is standing next to.
+    standingSay :: IO (Text -> IO Text)
+    standingSay = case (esStandingAnswer st, qAddressee q) of
+      (Just canned, AddrPerson i) -> do
+        esLog st $
+          "unattended: person "
+            <> i
+            <> " is not being asked; the standing answer '"
+            <> trimAscii canned
+            <> "' is taken instead (prompt: '"
+            <> oneLine (qPrompt q)
+            <> "')"
+        pure (\_extra -> pure canned)
+      _ -> pure say0
+
+    -- A question whose re-asks are spent: the loud arm if the operator named
+    -- one and the code can take it, else the abandonment this module has always
+    -- ended on.
+    spent :: GapAsk -> IO (El c)
+    spent ga = case (esLoudArm st, c) of
+      (Just arm, SFlag) -> do
+        esLog st $
+          "no readable flag from "
+            <> addresseeWord (qAddressee q)
+            <> " after "
+            <> T.pack (show (gaSpent ga + 1))
+            <> " attempts; taking the loud arm ("
+            <> sayFlag arm
+            <> ") rather than abandoning the run. This answer is the operator's "
+            <> "standing one and not "
+            <> addresseeWord (qAddressee q)
+            <> "'s (last reply: '"
+            <> trimAscii (gaWhy ga)
+            <> "', prompt: '"
+            <> oneLine (qPrompt q)
+            <> "')."
+        pure arm
+      _ ->
+        ioError . userError . T.unpack $
+          "no readable "
+            <> codeWord (fromSCode c)
+            <> " from "
+            <> addresseeWord (qAddressee q)
+            <> " after "
+            <> T.pack (show (gaSpent ga + 1))
+            <> " attempts; last reply: '"
+            <> trimAscii (gaWhy ga)
+            <> "' (prompt: '"
+            <> qPrompt q
+            <> "'). The run is abandoned: recording an answer nobody gave would be "
+            <> "indistinguishable, in the table, from one they did."
 
 -- ---------------------------------------------------------------------------
 -- The scripted world
@@ -587,8 +958,25 @@ askDecoding lg retries c q say =
 -- 'defaultRetries' + 1 attempts. That is not a defect of the stub — it is the
 -- decode-exhaustion path, on the tested path.
 scriptedWorld :: [(Text, Text)] -> WorldIO
-scriptedWorld table = WorldIO $ \c q ->
-  askDecoding stderrLog defaultRetries c q (\_extra -> pure (scriptedReply table c q))
+scriptedWorld = scriptedWorldWith defaultExecSettings
+
+-- | 'scriptedWorld' under an operator's 'ExecSettings'.
+--
+-- The table is the transport and the settings are the policy, which makes this
+-- the one place a run policy can be exercised end to end without an agent: a
+-- canned @\"maybe\"@ at a @flag@ is unreadable however it arrived, so the
+-- budget, the fork, the loud arm and the standing answer are all reachable from
+-- a list of pairs. That is how all four were exercised for this wave, at
+-- @harden@'s @person owner@ flag, which a canned @\"maybe\"@ makes unreadable.
+--
+-- __No gate pins that yet.__ Nothing under @ci\/@ builds an 'ExecSettings' other
+-- than 'defaultExecSettings', so what the gates cover is the defaults
+-- reproducing the behaviour this module had before the policy existed — and
+-- nothing about the policy itself. A scripted case under a non-default policy
+-- is what would close that, and it is not in this wave.
+scriptedWorldWith :: ExecSettings -> [(Text, Text)] -> WorldIO
+scriptedWorldWith st table = WorldIO $ \c q ->
+  askDecodingWith st c q (\_extra -> pure (scriptedReply table c q))
 
 -- | The bytes the scripted table answers a question with: the first entry whose
 -- key is a prefix of the prompt, else 'scriptedDefault'.

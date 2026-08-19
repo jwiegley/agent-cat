@@ -223,6 +223,16 @@ statement that tries is the same `nothing follows a terminal` error a statement
 after `stop` is. `unless` is the same with the arms exchanged — the flag is not
 negated, because neither the `Raw` nor the `Plan` has a negation to reach for.
 
+A block that ends by asking somebody to do something, and reads no answer, says
+so in one statement: `ask_ (tool "say") [wf|…|]` is `act` and then `stop`, and
+it is *the same term* — both sides are `B.act (ask …) B.stop`, so the printed
+program, the plan, the bills and the generated names are untouched by writing
+one instead of the other. `hello` ends that way, as do five arms across
+`Example.Isaac`; nothing needed refreezing and tier1 stayed byte-identical.
+The `act` inside a `when` body stays an `act`, because a body is an arm block
+*minus* its terminal and `when` supplies that — an `ask_` there is a type
+error, which is the right refusal.
+
 With two arms to say, an author writes `if ok then … else …`, a regular `if`,
 which reaches `ifThenElse` because the
 authoring module enables `RebindableSyntax` — hence its explicit `import
@@ -278,6 +288,15 @@ nix develop -c cabal run agentic-run -- run  harden --scripted
 nix develop -c cabal run agentic-run -- run  harden --session my-session
 nix develop -c cabal run agentic-run -- run  harden --engine acp --adapter stub
 ```
+
+`plan` and `run` both take `--require-pinned`, which refuses the program —
+before it is planned, before an adapter is started, before anything is spent —
+if any question put to a *model* does not say `served by` which model serves it
+(`Agentic.Guards.guardUnpinnedAsk`, exit `1`). It is this language's answer to
+`agent-functor`'s `stackPin`: there a pin wraps a subtree and everything under
+it inherits, here who answers is a property of the question, so the guarantee
+over questions *not yet written* is taken by refusing a program rather than by
+wrapping a scope. Opt-in and off by default: no existing program is affected.
 
 `<example>` is `harden` or `hello`: the two walked programs, written in
 `Agentic.Workflow` as `Example.Harden`. **They
@@ -430,6 +449,19 @@ than recording an answer nobody gave — a defaulted table cell is
 indistinguishable from a real one, and no check further down could recover the
 difference.
 
+That policy is now written down as data rather than as a branch in a loop:
+`Agentic.Exec.ExecSettings` carries a re-ask budget per `TurnGap`
+(`GapUndecodable` 1, `GapTransportRefusal` 0, `GapEmptyOrProtocol` 0 — the
+taxonomy is `agent-functor`'s, the numbers are today's behaviour), the
+`RetryHere | FailOver | Abandon` fork as a pure `Recover` function, an
+`esLoudArm` under which an unreadable *flag* takes an operator-configured arm
+with a warning instead of abandoning, and an `esStandingAnswer` a person
+question falls back on in an unattended run instead of waiting on somebody who
+is not there. `FailOver` is declared and refuses by name: a fallback list on
+`served by` changes the printed program, so the mechanism is a later wave's and
+only the vocabulary is here. **Every field defaults to what this section
+already describes**, so nothing above changes unless an operator asks.
+
 ### `run --engine acp` — execute against an adapter this run starts
 
 ```sh
@@ -514,8 +546,18 @@ time, machine-wide, so Lean builds must be rare, not merely serialized):
 ./ci/tier0.sh      # every commit: tier0 + tier1 against the frozen corpus — no Lean at all
 ./ci/deck.sh       # every commit: the deck transport, against test/stub-deck.sh — no Lean, no session
 ./ci/acp.sh        # every commit: the ACP transport, against agent-cat/test/stub_adapter.py
+./ci/examples.sh   # every commit: every registered example's numbers, against a pinned table — no Lean
+./ci/citations.sh  # every commit: every `X.lean:N` cited in a docstring still resolves — no Lean
 ./ci/tier1.sh      # nightly / semantic-core changes: bisim against the PREBUILT oracle
 ```
+
+`ci/citations.sh` checks that every `X.lean:N` written in a docstring under
+`haskell/` names a file that exists and a line within it — including the bare
+`@:N@` continuation form, resolved against the file named above it — because a
+citation is how this package claims to be a port rather than a rewrite, and a
+stale one is worse than none: when the Lean transport was retired, 57 of the
+220 citations here named a vanished file or a line past the end, and
+`Exec.lean:925` went on resolving, to an unrelated retry loop.
 
 `ci/acp.sh` is twelve scenarios against the deterministic stub adapter,
 `agent-cat/test/stub_adapter.py` — real ACP over real pipes, and never a real
@@ -525,6 +567,20 @@ of them are the transport's named failures; the two that matter most are
 rather than credited, and `write-on-ask`, where the adapter asks to edit the
 workspace during a draft turn, is denied, and the run's directory is checked
 afterwards to prove nothing was written.
+
+`ci/examples.sh` is the third no-Lean lane, and the one that watches the
+programs the corpus does not. It reads the registry out of the binary — an
+unknown name is refused with the list of them — and for each of the seven runs
+`plan`, `cost` and `run --scripted`, holding `level`, `size`, `askNodes`,
+`costSummary` and the `billFresh`/`billMemo` pair against a table pinned in the
+script itself, with each row citing where the same number is also published.
+`harden` and `hello` are pinned three times over by the frozen corpus and are
+here anyway, so that the gate is a statement about the *registry*: a program
+cannot be registered without being priced, and a row naming no program fails
+too. The five Isaac programs are the reason it exists — they are deliberately
+unfrozen (isaac-workflows §6, D10), so their numbers live in haddocks and one
+document and nothing else would notice them going stale. A mismatch prints the
+program, the field, the expected value and the actual one, and exits 1.
 
 `ci/tier1.sh` takes the oracle path from `$ORACLE` (defaulting to agent-cat's
 `.lake/build/bin/conformance-oracle`), the iteration count from `$N` and an
@@ -566,6 +622,7 @@ test/acp-misbehave.sh   an ACP adapter that babbles or wedges, for the two failu
 ci/tier0.sh             the PR gate: tier0 + tier1
 ci/deck.sh              the PR gate: the deck transport, seven scenarios
 ci/acp.sh               the PR gate: the ACP transport, twelve scenarios
+ci/citations.sh         the PR gate: every cited Lean line still resolves
 ci/tier1.sh             the nightly gate: bisim against the prebuilt oracle
 ```
 

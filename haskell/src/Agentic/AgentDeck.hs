@@ -3,10 +3,13 @@
 -- "Agentic.Exec" runs a plan against a 'WorldIO'; this module builds one out of
 -- a live @agent-deck@ session, so that a program written in "Agentic.Builder"
 -- can be executed by a real agent instead of by a table. It is the Haskell
--- counterpart of @Agentic\/Core\/Exec.lean@'s @Exec.oracle@ over
--- @Agentic\/Core\/Acp.lean@'s @Conn@ — with one difference named up front: Lean
--- speaks ACP over a pipe it owns, and this speaks the @agent-deck@ /command
--- line/ against a session somebody else started.
+-- counterpart of the @Oracle IO@ Lean once stood over its own transports. Both
+-- are retired there — @Agentic\/Core\/Exec.lean:62@, \"Where the transport
+-- went\", records that the Lean ACP and @agent-deck@ transports, the
+-- @Oracle IO@ over them and the entry points @exec@\/@execIO@ are gone and that
+-- @agentic-run@ on the Haskell side is the runner. What Lean still states, and
+-- what this module is held to, is the trusted base and the retry discipline
+-- around it: @Decode@, @renderQ@, @nudge@, @askDecoding@.
 --
 -- == Everything goes to the one session
 --
@@ -61,7 +64,7 @@
 --
 -- == What is sent, and the format line
 --
--- 'renderQ' is @Exec.renderQ@ (@Exec.lean:861@) verbatim, with @Selected@ empty:
+-- 'renderQ' is @Exec.renderQ@ (@Exec.lean:853@) verbatim, with @Selected@ empty:
 -- a header naming the addressee, the scope axes, the draw when it is not the
 -- first, and the answer format, then a blank line, then the prompt. Both scope
 -- axes are said /in words/ because this transport has no call for either — that
@@ -78,20 +81,22 @@
 -- program means the same thing.
 --
 -- Decoding, re-asking and abandonment are __not__ here: 'worldOfDeck' hands the
--- transport to "Agentic.Exec"'s 'askDecoding', which is @Exec.attempt@ and
--- @Exec.oracle@'s error, so the retry wording and the exhaustion message exist
--- once in this package.
+-- transport to "Agentic.Exec"'s 'askDecoding', which is @Exec.attemptWith@
+-- (@Exec.lean:913@) and @Exec.askDecoding@'s error (@Exec.lean:968@), so the
+-- retry wording and the exhaustion message exist once in this package.
 --
 -- == One rule this transport cannot apply
 --
--- @Exec.requiresCompletedTurn@ (@Exec.lean:1190@) says a receipt, or any answer
--- from a person, may not be recorded from a turn the agent did not finish. The
--- @agent-deck@ CLI reports no stop reason — @session output@ returns text and
+-- 'Agentic.Exec.requiresCompletedTurn' says a receipt, or any answer from a
+-- person, may not be recorded from a turn the agent did not finish — the rule
+-- is Haskell's own, because the Lean transport that once carried it is retired
+-- (@Exec.lean:62@). The @agent-deck@ CLI reports no stop reason —
+-- @session output@ returns text and
 -- @session show@ returns a status, and neither says whether the agent ended its
 -- turn or was cut off — so this adapter __cannot__ enforce that rule, and does
 -- not pretend to. An @ack@ read here is evidence that something replied; a run
 -- that needs more than that needs the ACP transport, or a check on the
--- workspace of the kind @demo\/Main.lean@ makes.
+-- workspace itself.
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
@@ -183,7 +188,7 @@ import Agentic.Raw (Code)
 -- @deckPollMs@ is the gap between two @session show@ calls and @deckTimeoutMs@
 -- is the budget for a whole turn — send, poll and read. There is deliberately
 -- no retry knob: how many times an unreadable answer is re-asked is
--- 'Agentic.Exec.defaultRetries', which is @Settings.retries@ (@Exec.lean:960@),
+-- 'Agentic.Exec.defaultRetries', which is @Settings.retries@ (@Exec.lean:890@),
 -- and it is a fact about the language's trusted base rather than about this
 -- transport.
 data DeckConfig = DeckConfig
@@ -223,7 +228,7 @@ defaultDeckConfig sess =
 -- longer.
 --
 -- Decode exhaustion is __not__ here: an answer that arrived and could not be
--- read is "Agentic.Exec"'s error (@Exec.oracle@, @Exec.lean:1344@), thrown by
+-- read is "Agentic.Exec"'s error (@askDecoding@, @Exec.lean:968@), thrown by
 -- 'askDecoding' with the wording Lean uses. The split is the useful one — these
 -- are failures to /obtain/ an answer, that one is a failure to /read/ one.
 data DeckError
@@ -371,7 +376,7 @@ parseReply raw = do
 -- What goes on the wire
 -- ---------------------------------------------------------------------------
 
--- | @Exec.renderQ c q {}@ (@Exec.lean:861@): the question as bytes, with a
+-- | @Exec.renderQ c q {}@ (@Exec.lean:853@): the question as bytes, with a
 -- header carrying everything that determines the reply, then the words.
 --
 -- > [question for model author
@@ -417,9 +422,9 @@ renderQ c q =
 -- | The session, as a 'WorldIO': ask it, read what it said, and re-ask once if
 -- the trusted base could not read it.
 --
--- This is @Exec.oracle@ (@Exec.lean:1338@) with the ACP connection replaced by
--- 'sayDeck' and the two protocol scope calls replaced by the header 'renderQ'
--- writes. Everything else — 'askDecoding', 'defaultRetries', the warning, the
+-- This is the @Oracle IO@ Lean retired with its transports (@Exec.lean:62@),
+-- with the connection replaced by 'sayDeck' and the two protocol scope calls
+-- replaced by the header 'renderQ' writes. Everything else — 'askDecoding', 'defaultRetries', the warning, the
 -- abandonment message — is imported from "Agentic.Exec", so a run against a
 -- live session and a run against 'Agentic.Exec.scriptedWorld' fail in the same
 -- words for the same reason.
@@ -432,7 +437,7 @@ worldOfDeck :: DeckConfig -> WorldIO
 worldOfDeck cfg = WorldIO $ \c q ->
   askDecoding stderrLog defaultRetries c q (sayDeck cfg c q)
 
--- | @Exec.say@ (@Exec.lean:1251@) at this transport: render the question,
+-- | Lean's @Say@ (@Exec.lean:904@) at this transport: render the question,
 -- append what the caller wants appended, send it, wait for the session to
 -- finish, and return the bytes.
 --

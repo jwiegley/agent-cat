@@ -46,6 +46,12 @@
 -- Nothing follows a @when@: it is a terminal, like the @if@ it sugars, so it
 -- ends the block exactly as the @stop@ it replaced did.
 --
+-- 'helloProgram' ends the other way a block can, and says it in one statement:
+-- @'Agentic.Workflow.ask_' (tool \"say\") …@ is @act@ and then @stop@ — the same
+-- term, so the printed program did not move when it was written this way. The
+-- @act@ inside @hardenProgram@'s @when@ stays an @act@, because a @when@ body
+-- is an arm block minus its terminal and @when@ supplies that.
+--
 -- This module still enables @RebindableSyntax@ — hence the explicit @Prelude@
 -- import, and the @fromString@ beside it that @OverloadedStrings@ then needs
 -- by name — because that is what an authoring module is: write @if ok then …
@@ -217,10 +223,9 @@ helloProgram = workflow W.do
         {subject}
         {brief}|]
 
-    act (tool "say") [wf|
+    ask_ (tool "say") [wf|
         Say it:
         {greeting}|]
-    stop
   where
     -- @define brief = "Reply in one short line."@
     brief :: Text

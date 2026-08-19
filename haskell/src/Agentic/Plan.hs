@@ -239,7 +239,7 @@ verdictMul Declined _ = Declined
 verdictMul _ Declined = Declined
 verdictMul a b = verdictObject (objectionsOf a ++ objectionsOf b)
 
--- | @Verdict.approvedB@ (@Agentic/Core/Plan.lean:887@): @decide (v = approve)@,
+-- | @Verdict.approvedB@ (@Agentic/Core/Plan.lean:886@): @decide (v = approve)@,
 -- the 'Bool' a 'caseB' branches on inside 'revising'.
 --
 -- Tests the normalized form, so a stray @Object []@ that escaped
@@ -250,7 +250,7 @@ verdictApproved = \case
   Object [] -> True
   _ -> False
 
--- | @Verdict.render@ (@Agentic/Core/Dsl/Syntax.lean:63@):
+-- | @Verdict.render@ (@Agentic/Core/Dsl/Syntax.lean:73@):
 --
 -- > String.intercalate "; " (if h : v = 0 then [] else FreeMonoid.toList (WithZero.unzero h))
 --
@@ -263,7 +263,7 @@ verdictRender = \case
   Approve -> T.empty
   Object os -> T.intercalate "; " os
 
--- | @Agentic/Core/Plan.lean:290@ — the finite classifier of a verdict: the
+-- | @Agentic/Core/Plan.lean:289@ — the finite classifier of a verdict: the
 -- three answers a @case@ can branch on, while the objections themselves ride in
 -- the environment into the arm that was taken.
 data VTag
@@ -272,7 +272,7 @@ data VTag
   | VDeclined
   deriving (Eq, Ord, Show, Enum, Bounded)
 
--- | @Verdict.tag@ (@Agentic/Core/Plan.lean:851@):
+-- | @Verdict.tag@ (@Agentic/Core/Plan.lean:850@):
 --
 -- > if v = Verdict.declined then .declined else if v = Verdict.approve then .approve else .object
 --
@@ -371,14 +371,14 @@ atModelShape m s = s {shScope = scopeMul (scopeFst m) (shScope s)}
 -- received answer.
 type Ctx = [Code]
 
--- | @Env Γ@ (@Agentic/Core/Plan.lean:81@): one actual answer for each code the
+-- | @Env Γ@ (@Agentic/Core/Plan.lean:80@): one actual answer for each code the
 -- context records, innermost first.
 --
 -- Lean delays its tail (@consBy@) to keep reading de Bruijn @0@ a projection; in
 -- Haskell the constructor field is lazy by default, so the plain constructor
 -- already has that property and no @consBy@ is needed. __Do not add strictness
 -- annotations here__: the @2^n@ blow-up documented on
--- @Agentic/Core/Plan.lean:81@ is exactly what a strict tail costs, and
+-- @Agentic/Core/Plan.lean:80@ is exactly what a strict tail costs, and
 -- 'revising' is where it is paid.
 data Env (g :: Ctx) where
   ENil :: Env '[]
@@ -392,18 +392,18 @@ envHead (ECons x _) = x
 envTail :: Env (c ': g) -> Env g
 envTail (ECons _ g) = g
 
--- | @Agentic/Core/Plan.lean:128@ — a de Bruijn index: membership as data, which
+-- | @Agentic/Core/Plan.lean:127@ — a de Bruijn index: membership as data, which
 -- is the same thing as a projection out of an 'Env'.
 data Var (g :: Ctx) (c :: Code) where
   VHere :: Var (c ': g) c
   VThere :: Var g c -> Var (c' ': g) c
 
--- | @Var.get@ (@:137@): the projection a variable names.
+-- | @Var.get@ (@:136@): the projection a variable names.
 varGet :: Var g c -> Env g -> El c
 varGet VHere g = envHead g
 varGet (VThere v) g = varGet v (envTail g)
 
--- | @Expr Γ A@ (@:151@) — a pure function of what is known. Prompt construction
+-- | @Expr Γ A@ (@:150@) — a pure function of what is known. Prompt construction
 -- is ordinary data, so nothing about building a question is an effect, and a
 -- question's words may mention every answer in scope.
 type Expr (g :: Ctx) a = Env g -> a
@@ -416,25 +416,25 @@ exprVar = varGet
 exprConst :: a -> Expr g a
 exprConst a = \_ -> a
 
--- | @Sub Γ Δ@ (@:182@) — a context morphism, semantically: a way of reading a
+-- | @Sub Γ Δ@ (@:181@) — a context morphism, semantically: a way of reading a
 -- @Γ@-environment out of a @Δ@-environment. Weakening, exchange, contraction
 -- and genuine substitution are all inhabitants of this one type.
 type Sub (g :: Ctx) (d :: Ctx) = Env d -> Env g
 
--- | @Sub.id@ (@:189@).
+-- | @Sub.id@ (@:188@).
 subId :: Sub g g
 subId = id
 
--- | @Sub.comp@ (@:193@): @\\e -> s (t e)@, going @Γ → Δ → Ε@ on contexts and
+-- | @Sub.comp@ (@:192@): @\\e -> s (t e)@, going @Γ → Δ → Ε@ on contexts and
 -- @Env Ε → Env Δ → Env Γ@ on environments.
 subComp :: Sub g d -> Sub d e -> Sub g e
 subComp s t = \e -> s (t e)
 
--- | @Sub.wk@ (@:196@): forget the most recently bound answer. This is 'envTail'.
+-- | @Sub.wk@ (@:195@): forget the most recently bound answer. This is 'envTail'.
 subWk :: Sub g (c ': g)
 subWk = envTail
 
--- | @Sub.lift@ (@:204@): going under a binder — keep the new answer, act with
+-- | @Sub.lift@ (@:203@): going under a binder — keep the new answer, act with
 -- the substitution on the rest.
 subLift :: Sub g d -> Sub (c ': g) (c ': d)
 subLift s = \d -> ECons (envHead d) (s (envTail d))
@@ -458,7 +458,7 @@ subCons e s = \d -> ECons (e d) (s d)
 -- * @case v { approved … objected … no answer … }@ — @Check.lean:699@,
 --   @Plan.caseV@ at 'VTag'.
 -- * the @revising@ unroll and its @settled@/@unsettled@ exit —
---   @Plan.lean:966@ and @Check.lean:508@, @Plan.caseB@ at 'Bool' again.
+--   @Plan.lean:965@ and @Check.lean:508@, @Plan.caseB@ at 'Bool' again.
 --
 -- Nothing else; and @Check.lean:55@ records that no clause emits @Plan.dyn@, so
 -- the DSL never reaches the dynamic rung.
@@ -466,7 +466,7 @@ subCons e s = \d -> ECons (e d) (s d)
 -- __Lean now writes the same type.__ It used to quantify @case@ over an
 -- arbitrary @[FinEnum T] [DecidableEq T]@ and this port was the closure read
 -- off the elaborator by hand; @Agentic/Core/Plan.lean:318@ closes it there too,
--- so 'Tag' and @Tag.El@ (@:328@) are the two signatures transliterated rather
+-- so 'Tag' and @Tag.El@ (@:327@) are the two signatures transliterated rather
 -- than one signature and one reading of it. That closure is what puts Lean's
 -- @Plan@ in @Type 0@, and it is why its @case@ node mentions no enumeration at
 -- all: the enumeration is @Tag.values@, and it lives in the analyses.
@@ -474,13 +474,13 @@ data Tag t where
   TBool :: Tag Bool
   TVTag :: Tag VTag
 
--- | @Tag.values@ (@Agentic/Core/Plan.lean:351@), in Lean's order:
+-- | @Tag.values@ (@Agentic/Core/Plan.lean:350@), in Lean's order:
 --
 -- > def Tag.values : (t : Tag) → List t.El
 -- >   | .bool => [false, true]
 -- >   | .vtag => [.approve, .object, .declined]
 --
--- Lean's @Tag.finEnum_toList@ (@:358@) is the machine-checked statement that
+-- Lean's @Tag.finEnum_toList@ (@:357@) is the machine-checked statement that
 -- this hand-written order /is/ the order @FinEnum.toList@ enumerates each tag
 -- in, which is what keeps @Explain.planLines@ byte-identical across the
 -- closure.
@@ -501,7 +501,7 @@ tagValues TVTag = [VApprove, VObject, VDeclined]
 -- >   | case (t : Tag) (e : Expr Γ t.El) (arms : t.El → PlanF A Γ) : PlanF A Γ
 -- >   | dyn  (b : Code) (e : Expr Γ (El b)) (f : El b → PlanF A Γ) : PlanF A Γ
 --
--- @abbrev Plan (Γ : Ctx) (A : Type) : Type := PlanF A Γ@ (@:445@) is the name
+-- @abbrev Plan (Γ : Ctx) (A : Type) : Type := PlanF A Γ@ (@:444@) is the name
 -- the package writes; the answer type is a /parameter/ there for a universe
 -- reason that has no Haskell counterpart, and the argument order is Lean's
 -- spelling of the same five formers.
@@ -526,7 +526,7 @@ data Plan (g :: Ctx) a where
   PCase :: Tag t -> Expr g t -> (t -> Plan g a) -> Plan g a
   PDyn :: SCode b -> Expr g (El b) -> (El b -> Plan g a) -> Plan g a
 
--- | @Plan.sub@ (@Agentic/Core/Plan.lean:597@): act on a term by a context
+-- | @Plan.sub@ (@Agentic/Core/Plan.lean:596@): act on a term by a context
 -- morphism. Substitution is not a constructor — it is a fold that rewrites
 -- every expression in the term and lifts under every binder.
 subP :: Plan g a -> Sub g d -> Plan d a
@@ -545,7 +545,7 @@ subP p s = case p of
 weakenP :: Plan g a -> Plan (c ': g) a
 weakenP p = subP p subWk
 
--- | @Cont Γ A B@ (@Agentic/Core/Plan.lean:736@) — a continuation that can be
+-- | @Cont Γ A B@ (@Agentic/Core/Plan.lean:735@) — a continuation that can be
 -- grafted onto every leaf of a @Γ@-plan.
 --
 -- Context-polymorphic because the leaves of a plan do not all sit in @Γ@: each
@@ -560,7 +560,7 @@ weakenP p = subP p subWk
 newtype Cont (g :: Ctx) a b = Cont
   {runCont :: forall (d :: Ctx). Sub g d -> Expr d a -> Plan d b}
 
--- | @Plan.graft@ (@Agentic/Core/Plan.lean:763@): @p@ with every 'PRet' leaf
+-- | @Plan.graft@ (@Agentic/Core/Plan.lean:762@): @p@ with every 'PRet' leaf
 -- replaced by the continuation at that leaf.
 --
 -- This is sequencing, and it is substitution rather than a constructor. Under
@@ -575,12 +575,12 @@ graft p k = case p of
   PCase t d arms -> PCase t d (\x -> graft (arms x) k)
   PDyn b d f -> PDyn b d (\x -> graft (f x) k)
 
--- | @Plan.mapP@ (@:791@): the functorial action, derived from 'graft' and — the
+-- | @Plan.mapP@ (@:790@): the functorial action, derived from 'graft' and — the
 -- point — without 'PDyn', so mapping a plan does not move its rung.
 mapP :: (a -> b) -> Plan g a -> Plan g b
 mapP f p = graft p (Cont (\_ e -> PRet (f . e)))
 
--- | @Plan.zipWith@ (@:801@): the applicative action, again without 'PDyn'. The
+-- | @Plan.zipWith@ (@:800@): the applicative action, again without 'PDyn'. The
 -- second plan is moved under the first's binders by 'subP', which is the sense
 -- in which two questions that do not mention each other's variables are
 -- independent.
@@ -594,16 +594,16 @@ zipWithP f p q =
         )
     )
 
--- | @Plan.pairP@ (@:805@).
+-- | @Plan.pairP@ (@:804@).
 pairP :: Plan g a -> Plan g b -> Plan g (a, b)
 pairP = zipWithP (,)
 
--- | @Plan.seq@ (@:809@): run the first, discard its answer, run the second. No
+-- | @Plan.seq@ (@:808@): run the first, discard its answer, run the second. No
 -- 'PDyn', because the answer is discarded.
 seqP :: Plan g a -> Plan g b -> Plan g b
 seqP p q = graft p (Cont (\s _ -> subP q s))
 
--- | @Plan.bindP@ (@:821@): monadic sequencing, and the __only__ derived form
+-- | @Plan.bindP@ (@:820@): monadic sequencing, and the __only__ derived form
 -- that needs 'PDyn'.
 --
 -- That it needs 'PDyn' is the content, not an implementation accident: the
@@ -620,35 +620,35 @@ seqP p q = graft p (Cont (\s _ -> subP q s))
 bindP :: SCode c -> Plan g (El c) -> (El c -> Plan g b) -> Plan g b
 bindP c p k = graft p (Cont (\s e -> PDyn c e (\a -> subP (k a) s)))
 
--- | @Plan.askC1@ (@:828@): put a closed question and answer with the reply.
+-- | @Plan.askC1@ (@:827@): put a closed question and answer with the reply.
 askC1 :: SCode c -> Q c -> Plan g (El c)
 askC1 c q = PAskC c q (PRet (exprVar VHere))
 
--- | @Plan.ask1@ (@:832@): put the question of this shape whose words are built
+-- | @Plan.ask1@ (@:831@): put the question of this shape whose words are built
 -- from what is known, and answer with the reply.
 ask1 :: SCode c -> Shape c -> Expr g Text -> Plan g (El c)
 ask1 c s e = PAsk c s e (PRet (exprVar VHere))
 
--- | @Plan.caseB@ (@:838@): @.case e (fun b => cond b t f)@.
+-- | @Plan.caseB@ (@:837@): @.case e (fun b => cond b t f)@.
 --
 -- Note the arm order — 'True' takes the first plan. Both arms are in the term.
 caseB :: Expr g Bool -> Plan g a -> Plan g a -> Plan g a
 caseB e t f = PCase TBool e (\b -> if b then t else f)
 
--- | @Plan.caseV@ (@:899@): @.case (fun γ => Verdict.tag (e γ)) arms@ — branching
+-- | @Plan.caseV@ (@:898@): @.case (fun γ => Verdict.tag (e γ)) arms@ — branching
 -- on the finite classifier, with the verdict itself still available to every arm
 -- as an expression.
 caseV :: Expr g Verdict -> (VTag -> Plan g a) -> Plan g a
 caseV e arms = PCase TVTag (verdictTag . e) arms
 
--- | @Plan.panel@ (@:931@): ask each member and combine the replies with the
+-- | @Plan.panel@ (@:930@): ask each member and combine the replies with the
 -- monoid.
 --
 -- > def panel [Monoid (El c)] (ps : List (Plan Γ (El c))) : Plan Γ (El c) :=
 -- >   ps.foldr (zipWith (· * ·)) (.ret (fun _ => 1))
 --
 -- Lean states this at any code carrying a @Monoid (El c)@ and installs that
--- instance __only__ at @.verdict@ (@Plan.lean:908@); @Check.lean:438@ admits a
+-- instance __only__ at @.verdict@ (@Plan.lean:907@); @Check.lean:438@ admits a
 -- panel only at @Code.verdict@. So the port is monomorphic and needs no class.
 --
 -- @panel [] = PRet (const verdictApprove)@ — Lean's @1@. The checker refuses an
@@ -657,7 +657,7 @@ caseV e arms = PCase TVTag (verdictTag . e) arms
 panel :: [Plan g Verdict] -> Plan g Verdict
 panel = foldr (zipWithP verdictMul) (PRet (exprConst verdictApprove))
 
--- | @Plan.revising@ (@Agentic/Core/Plan.lean:957@): check the artefact; if it is
+-- | @Plan.revising@ (@Agentic/Core/Plan.lean:956@): check the artefact; if it is
 -- approved, stop with it; otherwise revise it and go again, at most @n@ times;
 -- if the last check still objects, give up with 'Nothing'.
 --
@@ -665,7 +665,7 @@ panel = foldr (zipWithP verdictMul) (PRet (exprConst verdictApprove))
 -- @n + 1@ checks and at most @n@ amendments, and never pays for a revision it
 -- does not check — which is what \"revise up to twice\" means in English.
 -- @n <= 0@ is the base clause. The checker refuses @n > 64@
--- (@Check.lean:520 maxRevisions@) before elaborating, so no bound on @n@ is
+-- (@Check.lean:519 maxRevisions@) before elaborating, so no bound on @n@ is
 -- enforced here.
 --
 -- The objections are threaded: @rev@ receives the artefact /and/ the verdict, so
@@ -868,7 +868,7 @@ costM = \case
   PCase t _ arms -> concatMap (costM . arms) (tagValues t)
   PDyn {} -> []
 
--- | @costSummary@ (@Agentic/Core/Explain.lean:552@): the cheapest bill, the
+-- | @costSummary@ (@Agentic/Core/Explain.lean:452@): the cheapest bill, the
 -- dearest bill and the number of paths, from 'costM' at @tick@.
 --
 -- The first two are @Cost.minFold@ and @Cost.maxFold@ (@Cost.lean:864@,
