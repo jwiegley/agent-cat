@@ -50,7 +50,9 @@ supports it as well as `agent-functor` does; and "who answers" is said per
 question rather than by wrapping a scope, which deletes the nine site-by-site
 arguments incite has to carry about which leaves may inherit `--backend`.
 What does not carry is five things: a **branch is terminal**, so a conditional
-lens cannot rejoin its siblings and `review-lite` spells its tail twice;
+lens cannot rejoin its siblings — `review-lite`'s two arms now end by calling
+one function rather than by rejoining (wave 2's D1; before it, the tail was
+spelled twice);
 **an answer is a handle, not a value**, so every pure decider Isaac spends
 nothing on — `tripEnding`, `isRed`, `diffNamesHaskell`, `decideFactsResolved` —
 becomes a paid leaf here; **a check is a question, never an exit code**, so
@@ -212,7 +214,7 @@ each matched its haddock exactly.
 | Program | level | size | askNodes | cost (min/max/paths) | `run --scripted` |
 |---|---|---:|---:|---|---|
 | `plan-feature` | pipeline | 14 | 13 | 13 / 13 / **1 path** | billFresh 13, billMemo 13, exit 0 |
-| `review-lite` | branch | 13 | 10 | 8 / 9 / **2 paths** | billFresh 9, billMemo 9, exit 0 |
+| `review-lite` | branch | 12 | 9 | 7 / 8 / **2 paths** | billFresh 8, billMemo 8, exit 0 |
 | `ship-feature-lite` | branch | 149 | 78 | 4 / 24 / **36 paths** | billFresh 12, billMemo 12, exit 0 |
 | `grind-tests` | branch | 144 | 73 | 9 / 27 / **36 paths** | billFresh 15, billMemo 15, exit 0 |
 | `stack-prs` | branch | 155 | 70 | 4 / 24 / **43 paths** | billFresh 16, **billMemo 15**, exit 0 |
@@ -238,15 +240,20 @@ is a *list* there, which a test can assert against; here the narrowing order is
 the order of the holes in the planner's prompt, which is the same order, one
 fewer moving part, and one fewer thing a test can read.
 
-**Finding 3.2 — `review-lite` is expressed with its tail duplicated, and the
-duplication is exact rather than approximate.** Five reviewers, then a `confirm`
-router pinned to the cheapest model, then a two-armed `if` in which each arm
-writes the report — with the Haskell block in one and the literal
-`"No Haskell edits."` in the other, which is `routeHaskell`'s `Right` arm
-verbatim. Nine leaves against incite's published seven; the two extra are the
-subject fetch (G7) and the fold, which is a paid `act` here and a pure
-`hierarchical` there (G3). `costSummary` says 8..9 over 2 paths, which is the
-router's two outcomes priced apart — a thing incite cannot say at all.
+**Finding 3.2 — `review-lite` was expressed with its tail duplicated, and the
+duplication was exact rather than approximate; wave 2's function call removed
+it.** Five reviewers, then a `confirm` router pinned to the cheapest model, then
+a two-armed `if` in which each arm writes the report — with the Haskell block in
+one and the literal `"No Haskell edits."` in the other, which is
+`routeHaskell`'s `Right` arm verbatim. That tail was written out once per arm
+until D1 landed; it is now one `review-lite.report` function both arms call, and
+a call costs what writing the callee's statements at the call site costs, so the
+numbers did not move for it — see `ci/examples.sh`'s `review-lite` row, which
+shows the arithmetic. Eight leaves against incite's published seven; the one
+extra is the fold, which is a paid `act` here and a pure `hierarchical` there
+(G3) — the subject fetch that used to be the second extra is now an input (D8),
+and a define leaves no node behind. `costSummary` says 7..8 over 2 paths, which
+is the router's two outcomes priced apart — a thing incite cannot say at all.
 
 **Finding 3.3 — `ship-feature-lite` is the most valuable of the five, because it
 is the one that forces four gaps at once.** It puts a **person in the middle**:
@@ -602,7 +609,7 @@ should not be claimed as a win.
 
 **I1. It prices a branching program before running it.** `costSummary` returns
 cheapest bill, dearest bill, and **number of paths**. `ship-feature-lite` is
-**4..24 over 36 paths**; `stack-prs` is 4..24 over 43; `review-lite` is 8..9
+**4..24 over 36 paths**; `stack-prs` is 4..24 over 43; `review-lite` is 7..8
 over 2, which is the router's two outcomes priced apart. `worstCaseCost` is one
 number, and a `Choice` node sums both arms because a static fold cannot know
 which is taken. incite's `docs/workflows.md` quotes *one* finite number for

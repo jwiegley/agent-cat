@@ -1,9 +1,11 @@
 -- | Tier 1: the rebuilt-case runner.
 --
 -- Where tier0 replays the frozen corpus through the codec, the guards and the
--- string layer, tier1 rebuilds nineteen of its /checked/ entries in the
--- production surface ("Agentic.Builder", see "Cases") and holds the rebuilt
--- program against the oracle on two fronts:
+-- string layer, tier1 rebuilds twenty-one of its /checked/ entries in the
+-- production surface ("Agentic.Builder", see "Cases") — and three of those
+-- twenty-one a second time in the /authoring/ surface
+-- ("Agentic.Workflow", see "CallVectors"), twenty-four cases in all — and
+-- holds each rebuilt program against the oracle on two fronts:
 --
 -- 1. the __printed Raw__ — @toJSON@ of the builder's 'RawProgram' against the
 --    entry's @request.program@, with every position zeroed on /both/ sides,
@@ -12,15 +14,18 @@
 --    decoded back and re-encoded, so a print that no reader accepts fails here
 --    rather than silently.
 --
---    Two of the twenty-one cases — the walked examples of "Example.Harden",
---    named by @Cases.alphaNamed@ — compare this one field __up to alpha__.
---    They are written in "Agentic.Workflow", which cannot read a Haskell
---    binder's spelling and therefore generates the name each binding prints;
---    'canonProgram' below renames the binders of /both/ sides to @c0, c1, …@
---    in one traversal before they are compared, so what is pinned is that the
---    two programs agree on everything a name is not — including which binding
---    every hole, scrutinee and subject reads. The other nineteen are written
---    in "Agentic.Builder" with explicit names and are compared exactly.
+--    Five of the twenty-four cases compare this one field __up to alpha__:
+--    the two walked examples of "Example.Harden" (named by
+--    @Cases.alphaNamed@) and the three call vectors of "CallVectors" (all of
+--    @Cases.callVectorsW@). They are written in "Agentic.Workflow", which
+--    cannot read a Haskell binder's spelling and therefore generates the name
+--    each binding prints; 'canonProgram' below renames the binders of /both/
+--    sides to @c0, c1, …@ in one traversal before they are compared, so what
+--    is pinned is that the two programs agree on everything a name is not —
+--    including which binding every hole, scrutinee and subject reads, and
+--    including every function and parameter name, which are a different
+--    namespace and are never renamed. The other nineteen are written in
+--    "Agentic.Builder" with explicit names and are compared exactly.
 --
 -- 2. the __whole reply__ — @level@, @size@, @askNodes@, @codes@ and
 --    @costSummary@ folded from the elaborated 'Agentic.Plan.Plan';
@@ -102,7 +107,7 @@ import Agentic.Raw
   )
 import Agentic.World (WorldSpec)
 
-import Cases (alphaNamed, cases)
+import Cases (alphaNamed, callVectorsW, cases)
 
 -- ---------------------------------------------------------------------------
 -- Driver
@@ -121,8 +126,8 @@ main = do
   unless present $ do
     TIO.putStrLn ("tier1: no such corpus directory: " <> T.pack dir)
     exitFailure
-  results <- forM cases $ \(name, prog) ->
-    (,) name <$> runCase (dir </> name) (nameRule name) prog
+  results <- forM scheduled $ \(label, name, rule, prog) ->
+    (,) label <$> runCase (dir </> name) rule prog
   mapM_ report results
   let total = length results
       failed = length [() | (_, fs) <- results, not (null fs)]
@@ -137,8 +142,22 @@ main = do
       <> " cases"
   if failed == 0 then exitSuccess else exitFailure
   where
-    report (name, fs) =
-      mapM_ (\f -> TIO.putStrLn ("FAIL " <> T.pack name <> ": " <> f)) fs
+    report (label, fs) =
+      mapM_ (\f -> TIO.putStrLn ("FAIL " <> label <> ": " <> f)) fs
+
+-- | Every case to run, in order: what to call it in a report, the corpus entry
+-- it rebuilds, how its names are compared, and the program.
+--
+-- Three entries are rebuilt __twice__ — once in "Agentic.Builder" and once in
+-- "Agentic.Workflow" ('Cases.callVectorsW') — so a label is not the entry's
+-- name alone; the surface the case is written in is what tells the two apart
+-- in a failure line.
+scheduled :: [(Text, FilePath, NameRule, Program)]
+scheduled =
+  [(T.pack name, name, nameRule name, prog) | (name, prog) <- cases]
+    ++ [ (T.pack name <> " (W surface)", name, Alpha, prog)
+       | (name, prog) <- callVectorsW
+       ]
 
 -- | How a case's __names__ are compared, which is the only thing about a case
 -- that is ever compared loosely. See 'Cases.alphaNamed' for which cases are

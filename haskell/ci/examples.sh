@@ -43,7 +43,10 @@
 # table. Runs on every commit, beside ci/tier0.sh, ci/deck.sh and ci/acp.sh.
 # Exits 0 only if every field below matched exactly.
 set -uo pipefail
-cd "$(dirname "$0")/.."
+# `|| exit` and not `set -e`: this gate counts failures rather than stopping at
+# the first one, so nothing else exits for it. Everything below is relative to
+# the package root, and a gate that ran somewhere else would report on nothing.
+cd "$(dirname "$0")/.." || exit 1
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/agentic-examples.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
@@ -143,9 +146,9 @@ pin plan-feature      pipeline    14   13   13   13     1    13   13
 # rendered prompts — and therefore the memo table and the bill — are the ones
 # this row pinned before.
 #
-# `doc/research/isaac-workflows.md` §3's review-lite row still carries the old
-# numbers: that file is outside this wave's reach, and it is the one place
-# these numbers are now stale.
+# `doc/research/isaac-workflows.md` was updated with this re-pin: §3's
+# review-lite row, Finding 3.2 and §5's I1 all carry the numbers below, and
+# Finding 3.2 states the duplicated tail in the past tense.
 pin review-lite       branch      12    9    7    8     2     8    8
 
 # Isaac.hs:1288-1290; isaac-workflows §3 and Finding 3.3. Two loops, so the
@@ -193,18 +196,26 @@ field() {
 # row's bill comparable to the one it replaced.
 #
 # It goes through a file rather than through `--input-arg` because the text has
-# a newline in it, and a flag that survives `$(…)` word-splitting is a flag
-# this script can pass without an array. One trailing newline is stripped on
-# the way in (run/Main.hs), so the file's two lines are the two lines the old
-# canned answer was.
+# a newline in it. One trailing newline is stripped on the way in
+# (run/Main.hs), so the file's two lines are the two lines the old canned
+# answer was.
 printf '%s\n' \
   'diff --git a/src/Export.hs b/src/Export.hs' \
   '+  writeFile path body' > "$work/review-lite.subject"
 
+# The flags are carried in an __array__ rather than echoed as a string, because
+# the value of `--input-file` is a path under $TMPDIR, and a $TMPDIR with a
+# space in it is one this gate must still work under. A string would have to be
+# left unquoted at the call sites to split into two words, and then the split
+# would fall wherever the spaces happen to be; an array says "two words" and
+# means it, whatever is inside either one. Empty stays empty: `"${ins[@]}"` of
+# an empty array expands to no words at all, which is what a program that takes
+# no input needs.
+ins=()
 inputsFor() {
   case "$1" in
-    review-lite) echo "--input-file subject=$work/review-lite.subject" ;;
-    *) echo "" ;;
+    review-lite) ins=(--input-file "subject=$work/review-lite.subject") ;;
+    *) ins=() ;;
   esac
 }
 
@@ -238,12 +249,10 @@ done
 
 for n in "${names[@]}"; do
   want_summary=$(summaryOf "$n")
-  # Unquoted on purpose: the two words of an input flag, or nothing at all.
-  # shellcheck disable=SC2046
-  ins=$(inputsFor "$n")
+  inputsFor "$n"
 
   # plan — the static folds, decided by the elaborated term alone.
-  cat_run plan "$n" $ins > "$work/$n.plan" 2>&1
+  cat_run plan "$n" "${ins[@]}" > "$work/$n.plan" 2>&1
   code=$?
   [ "$code" = 0 ] || bad "$n" "plan exit" 0 "$code"
   [ "$(field "$work/$n.plan" level)" = "${pinLevel[$n]}" ] \
@@ -256,7 +265,7 @@ for n in "${names[@]}"; do
     || bad "$n" "plan cost" "$want_summary" "$(field "$work/$n.plan" cost)"
 
   # cost — the same summary, from the other verb.
-  cat_run cost "$n" $ins > "$work/$n.cost" 2>&1
+  cat_run cost "$n" "${ins[@]}" > "$work/$n.cost" 2>&1
   code=$?
   [ "$code" = 0 ] || bad "$n" "cost exit" 0 "$code"
   [ "$(field "$work/$n.cost" costSummary)" = "$want_summary" ] \
@@ -265,7 +274,7 @@ for n in "${names[@]}"; do
   # run --scripted — the bill actually paid, against the table's pair. stdin is
   # /dev/null: a scripted run asks nobody, and this is what makes that a fact
   # rather than a hope.
-  cat_run run "$n" --scripted $ins < /dev/null > "$work/$n.run" 2>&1
+  cat_run run "$n" --scripted "${ins[@]}" < /dev/null > "$work/$n.run" 2>&1
   code=$?
   [ "$code" = 0 ] || bad "$n" "run --scripted exit" 0 "$code"
   fresh=$(sed -n 's/^ *billFresh  *\([0-9][0-9]*\).*/\1/p' "$work/$n.run" | head -1)

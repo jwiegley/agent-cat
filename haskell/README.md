@@ -27,13 +27,14 @@ nix develop -c cabal run tier1
 ```
 tier0: kinds: 22 string, 5 guard, 35 other, 66 checked, 0 ping, 0 unclassified
 tier0: 128 passed, 0 failed, 35 other-refusals (codec-only), of 128 files
-tier1: 21 passed, 0 failed, of 21 cases
+tier1: 24 passed, 0 failed, of 24 cases
 ```
 
 `tier0` replays every entry through the codec, the guards and the string layer.
-`tier1` **rebuilds** twenty-one of the checked entries — nineteen in the
-production surface, and the two walked examples in the authoring surface above
-it — and holds each rebuilt program against the frozen one on both fronts: the
+`tier1` **rebuilds** twenty-one of the checked entries, in twenty-four cases —
+nineteen in the production surface, the two walked examples in the authoring
+surface above it, and three of the nineteen a second time in that authoring
+surface — and holds each rebuilt program against the frozen one on both fronts: the
 program it prints, and the whole reply — folds, counts, and one trace and two
 bills per world.
 
@@ -113,13 +114,15 @@ already replays. Positions are oracle-only throughout, like `message` and
 
 ## What tier1 compares
 
-Twenty-one checked entries, rebuilt from their surface source — nineteen in
-`Agentic.Builder`, and the two walked examples in `Agentic.Workflow` above it —
+Twenty-one checked entries in twenty-four cases, rebuilt from their surface
+source — nineteen in `Agentic.Builder`, the two walked examples in
+`Agentic.Workflow` above it, and three of the nineteen (`module-000`,
+`battery-144`, `battery-147`) written a second time in `Agentic.Workflow` too —
 and compared whole: no field skipped, a missing or extra key a failure.
 
 | front | rule |
 | --- | --- |
-| the printed program | `toJSON (progRawOut built)` against `request.program`, positions zeroed on both sides, and the print decoded back and re-encoded so a print no reader accepts fails here. Nineteen cases match name for name; the two walked examples match **up to alpha**, both sides' binders canonically renamed first, because the authoring surface generates the names it prints (see below). The renaming is scope-aware — a canonical name is the *level* of the binder that introduced it — so which binding every hole, scrutinee and subject reads stays pinned exactly |
+| the printed program | `toJSON (progRawOut built)` against `request.program`, positions zeroed on both sides, and the print decoded back and re-encoded so a print no reader accepts fails here. Nineteen cases match name for name; the other five — the two walked examples and the three call vectors rewritten in the authoring surface — match **up to alpha**, both sides' binders canonically renamed first, because the authoring surface generates the names it prints (see below). Function and parameter names are a different namespace and are never renamed, so those five still match them exactly. The renaming is scope-aware — a canonical name is the *level* of the binder that introduced it — so which binding every hole, scrutinee and subject reads stays pinned exactly |
 | the static folds | `level`, `size`, `askNodes`, `codes`, `costSummary` folded from the elaborated `Plan` |
 | the ask counts | `Agentic.Guards.askCounts` on the *printed* program — week-one code, which is what makes this a cross-check of the builder rather than a second reading of the same term |
 | each world | per `request.worlds` in order: the world re-serialized, its trace event by event (`code`, `addressee`, `scope`, `prompt`, `draw`, `answer`), and `billFresh` / `billMemo` |
@@ -257,18 +260,38 @@ the review and the owner's flag, `r2` is the revision's result. A `{hole}`
 prints the name its *handle* carries, so a binder and the holes that read it
 cannot disagree, and tier1 compares this program against `example-000` up to
 alpha. An author who wants the printed program to read as this source does
-writes `named "guide" (ask …)`; the flagship deliberately does not.
+writes `named "guide" (ask …)`; the flagship deliberately does not. What
+`named` will not accept is a name of the shape the surface generates for itself
+— `b0`, `b1`, … for a binding and `r0`, `r1`, … for a bounded revision's result
+— because those are fresh by construction only while no author claims one, and
+a hand-written `b2` sitting anywhere but depth 2 would print the same name as
+the binding at that depth: two different bindings reading alike in the printed
+program.
 
 That is the whole price of the ruling, stated plainly: a printed program says
-`b0` where the frozen entry says `guide` unless someone writes `named`, and two of
-twenty-one tier1 cases compare their printed program loosely in exactly one
+`b0` where the frozen entry says `guide` unless someone writes `named`, and five of
+twenty-four tier1 cases compare their printed program loosely in exactly one
 respect — the spelling of binders. Nothing else is loosened. The nineteen
 builder-written cases still match name for name, every non-program comparand
 (the folds, the ask counts, the worlds, the traces, the bills) is exact for all
-twenty-one, and because the canonicalizer renames by binder level rather than
+twenty-four, and because the canonicalizer renames by binder level rather than
 by position, pointing a hole at the wrong binding of the right kind still
 fails: splicing `{guide}` where the flagship splices `{patch}` is caught as
 `prompt[2].interp.name: expected "c3", actual "c0"`.
+
+**The three call vectors are written twice, on purpose.** `module-000`,
+`battery-144` and `battery-147` are the corpus's function-and-call entries, and
+`tier1/Cases.hs` rebuilds all three in `Agentic.Builder`. `tier1/CallVectors.hs`
+rebuilds the same three in `Agentic.Workflow` — `function`, `takes`, `call`,
+`call_` and `defining` — because those combinators arrived with nothing frozen
+behind them: `Example.Harden` exercises the block, and no pinned case exercised
+a *call* written in the authoring surface at all. What the second writing pins
+that an alpha-compared example cannot is the half of a program whose names are
+**not** generated: `lib.drafted`, `goal`, `applied`, `patch` and the argument
+each call passes are matched name for name, because a function's namespace is
+not a binder's. They live in tier1 and not in the `examples` internal library —
+they are conformance fixtures, and a module `agentic-run` cannot see is a module
+its example registry cannot grow a row for.
 
 Comparison is on `Data.Aeson.Value`, never on bytes, so object key order and
 number formatting are free. `refused.pos`, `.excerpt` and `.message` are

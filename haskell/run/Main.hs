@@ -74,8 +74,13 @@ import Data.List (sort, sortOn, tails)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.Encoding (decodeUtf8With, encodeUtf8)
-import Data.Text.Encoding.Error (lenientDecode)
+import Data.Text.Encoding (decodeUtf8', encodeUtf8)
+-- `text`'s own internal module, for one thing and only in a message: the
+-- length of a byte string's longest valid UTF-8 prefix, which is the offset an
+-- operator needs to find the byte. `UnicodeException` names the offending
+-- *byte* and not where it is, and the accept/reject decision below is
+-- `decodeUtf8'`'s alone — this only sharpens the refusal.
+import Data.Text.Internal.Encoding (validateUtf8Chunk)
 import qualified Data.Text.IO as TIO
 import qualified Data.Vector as V
 import GHC.Clock (getMonotonicTimeNSec)
@@ -339,6 +344,13 @@ resolveInputs name needsAll ex ins = case ex of
     -- splices like a define written in the source: `[wf|…|]` produces no
     -- trailing newline either, and a silent blank line in a prompt is the kind
     -- of difference this repository exists to prevent.
+    --
+    -- The decode is *strict*: a file that is not UTF-8 refuses the run. A
+    -- lenient decode would turn each undecodable byte into U+FFFD and carry
+    -- on, and the operator would learn nothing — the substitution happens
+    -- inside a prompt, which is where this repository is least willing to be
+    -- approximate. A binary file given as a subject is a mistake worth
+    -- hearing about at the command line rather than in a model's answer.
     text :: InputFlag -> IO (Either Text (Text, Text))
     text = \case
       NamedArg _ v -> pure (Right (v, sizeOf v <> " given with --input-arg"))
@@ -349,10 +361,22 @@ resolveInputs name needsAll ex ins = case ex of
       got <- try (BS.readFile p)
       pure $ case got :: Either IOException BS.ByteString of
         Left e -> Left ("could not read " <> T.pack p <> ": " <> T.pack (ioeGetErrorString e))
-        Right bytes ->
-          let t = decodeUtf8With lenientDecode bytes
-              t' = fromMaybe t (T.stripSuffix "\n" t)
-           in Right (t', sizeOf t' <> " from " <> T.pack p)
+        Right bytes -> case decodeUtf8' bytes of
+          Left e ->
+            Left
+              ( T.pack p
+                  <> " is not UTF-8, at byte "
+                  <> tshow (fst (validateUtf8Chunk bytes))
+                  <> " of "
+                  <> tshow (BS.length bytes)
+                  <> ": "
+                  <> T.pack (show e)
+                  <> "; an input is spliced into prompts as text, so bytes that"
+                  <> " are not UTF-8 refuse the run"
+              )
+          Right t ->
+            let t' = fromMaybe t (T.stripSuffix "\n" t)
+             in Right (t', sizeOf t' <> " from " <> T.pack p)
 
     bind given n = case lookup n given of
       Just (t, whence) -> Right (Given n (Just t) whence)
@@ -885,9 +909,10 @@ usage =
       "                 that input, read from a file. Repeatable",
       "  --input-arg NAME=VALUE",
       "                 that input, inline. Repeatable",
-      "                 (a file's contents are read as UTF-8 and one trailing",
-      "                 newline is stripped, so a file splices like a define",
-      "                 written in the source)",
+      "                 (a file's contents are read as UTF-8 — bytes that are",
+      "                 not UTF-8 refuse the run — and one trailing newline is",
+      "                 stripped, so a file splices like a define written in",
+      "                 the source)",
       "  --scripted     answer from a table of canned replies, and ask nobody",
       "  --engine       acp starts an ACP adapter of its own and speaks the protocol",
       "                 to it over a pipe it owns; deck sends to a live agent-deck",

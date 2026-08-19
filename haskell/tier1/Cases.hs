@@ -2,8 +2,9 @@
 --
 -- Each case below is one /checked/ corpus entry, rebuilt in the combinators of
 -- "Agentic.Builder" and paired with the basename of
--- the frozen entry it must reproduce. This module owns nothing but that list:
--- @tier1/Main.hs@ owns every comparison.
+-- the frozen entry it must reproduce. This module owns nothing but that list —
+-- and one more, 'callVectorsW', which rebuilds three of the same entries in
+-- the /authoring/ surface instead: @tier1/Main.hs@ owns every comparison.
 --
 -- The surface source of each case is quoted above it, transcribed from the
 -- corpus entry's @request.program@ rather than invented, so that a reading
@@ -36,10 +37,11 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 
-module Cases (cases, alphaNamed) where
+module Cases (cases, alphaNamed, callVectorsW) where
 
 import Data.List.NonEmpty (NonEmpty (..))
 
+import CallVectors (battery144W, battery147W, module000W)
 import Example.Harden (hardenProgram, helloProgram)
 
 import Agentic.Builder
@@ -130,8 +132,10 @@ cases =
     ("example-001-hello.json", helloProgram)
   ]
 
--- | The cases whose __printed program__ is compared up to alpha, and the whole
--- list of them: the two walked examples, and nothing else.
+-- | Which of 'cases' have their __printed program__ compared up to alpha: the
+-- two walked examples, and nothing else. ('callVectorsW' is compared that way
+-- too, and is not listed here — every entry of that list is, by construction,
+-- so there is nothing to select.)
 --
 -- They are written in "Agentic.Workflow", which cannot read a Haskell binder's
 -- spelling — nothing but Template Haskell can, and the surface uses none — so
@@ -146,12 +150,33 @@ cases =
 -- __The other nineteen keep their exact comparison.__ They are written in
 -- "Agentic.Builder" with explicit names, and there is nothing about them to
 -- weaken. Every non-program comparand — the folds, the ask counts, the worlds,
--- the traces and the bills — stays exact for all twenty-one; a trace never
+-- the traces and the bills — stays exact for all twenty-four; a trace never
 -- carries a binder's name.
 alphaNamed :: [FilePath]
 alphaNamed =
   [ "example-000-the-flagship-single-file.json",
     "example-001-hello.json"
+  ]
+
+-- | The three frozen __call vectors__ a second time, rebuilt in
+-- "Agentic.Workflow" instead of in "Agentic.Builder" (see "CallVectors").
+--
+-- They are a separate list rather than three more rows of 'cases' because a
+-- row of 'cases' is keyed by the entry it rebuilds, and these three rebuild
+-- entries that are already there: putting them in 'cases' would have meant
+-- either naming the same entry twice — and then 'alphaNamed', which selects by
+-- that name, would have loosened the builder-written twin along with the new
+-- one — or inventing a second key. Two lists cost one line in @tier1/Main.hs@
+-- and keep every existing pin exactly as strong as it was.
+--
+-- Each is run against the same frozen entry its builder-written twin is run
+-- against, and against the same worlds; only the /rule for names/ differs, and
+-- it is the up-to-alpha one for all three, because the surface generates them.
+callVectorsW :: [(FilePath, Program)]
+callVectorsW =
+  [ ("module-000-an-import-a-dotted-call-a-dotted-define-in-a-hole.json", module000W),
+    ("battery-144-a-statement-call-of-a-procedure.json", battery144W),
+    ("battery-147-a-function-may-answer-a-flag-the-caller-branches.json", battery147W)
   ]
 
 -- ---------------------------------------------------------------------------

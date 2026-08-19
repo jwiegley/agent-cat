@@ -2,8 +2,8 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
--- | The D6/D7 policy gate (`lake`-free, corpus-free): the six probes the
--- wave-one audit ran by hand, pinned as a program so the tree rather than a
+-- | The D6/D7 policy gate (`lake`-free, corpus-free): the six policies the
+-- wave-one audit probed by hand, pinned as a program so the tree rather than a
 -- transcript holds them (fess wave-1, finding F6).
 --
 -- Each probe runs 'Example.Harden.hardenProgram' against a scripted world
@@ -21,18 +21,34 @@
 --
 -- The probes assert on bills, on thrown wording, and on logged wording — the
 -- three places a policy can lie.
+--
+-- A second section pins the __surface's own refusals__ (fess wave-2, gap V3):
+-- the three mistakes 'Agentic.Workflow' answers with an @error@ rather than
+-- with a type error, forced out of the four bottoms in "SurfaceRefusals". They
+-- are here rather than in @tier1@ because a refusal has no corpus entry to be
+-- pinned against — there is no program, so there is nothing to freeze — and
+-- because what is worth pinning about them is the /wording/, which is the only
+-- thing the author ever sees.
 module Main (main) where
 
 import Agentic.Exec
 import Agentic.World (billFresh, billMemo)
-import Control.Exception (SomeException, try)
+import Control.Exception (ErrorCall, SomeException, evaluate, try)
 import Data.IORef
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import Example.Harden (hardenProgram)
-import Agentic.Builder (progPlan)
+import Agentic.Builder (Program, progPlan)
+import Agentic.Observe (printedValue)
 import System.Exit (exitFailure)
+
+import SurfaceRefusals
+  ( callsAnUnlistedFunction,
+    namedIsReserved,
+    takesIsReserved,
+    twoOfOneName,
+  )
 
 -- The flagship's scripted answers with the flag made unreadable.
 maybeScript :: [(Text, Text)]
@@ -91,6 +107,40 @@ probeLogged failures name st needle = do
       mapM_ (TIO.putStrLn . ("  log: " <>)) (reverse msgs)
       modifyIORef' failures (+ 1)
 
+-- | One surface refusal: force the program's /printed/ value — which is what
+-- every caller of a 'Program' does first, and what runs the surface's checks —
+-- and assert that it raised an 'ErrorCall' containing this fragment.
+--
+-- 'ErrorCall' rather than 'SomeException' on purpose: these are @error@ calls,
+-- and a program that failed some other way (a pattern match, an arithmetic
+-- fault) must not read as the refusal under test. @show@ of the printed value
+-- is what forces it past weak head normal form, so a refusal buried in one
+-- function of a table is reached as surely as one at the top.
+refusal :: IORef Int -> String -> Program -> Text -> IO ()
+refusal failures name prog needle = do
+  out <- try (evaluate (length (show (printedValue prog))))
+  case out :: Either ErrorCall Int of
+    Left e
+      | needle `T.isInfixOf` T.pack (show e) ->
+          TIO.putStrLn ("ok   " <> T.pack name)
+      | otherwise -> do
+          TIO.putStrLn
+            ( "FAIL "
+                <> T.pack name
+                <> ": refused, but not with: "
+                <> needle
+            )
+          TIO.putStrLn ("  said: " <> T.pack (show e))
+          modifyIORef' failures (+ 1)
+    Right _ -> do
+      TIO.putStrLn
+        ( "FAIL "
+            <> T.pack name
+            <> ": the program printed, and should have been refused with: "
+            <> needle
+        )
+      modifyIORef' failures (+ 1)
+
 main :: IO ()
 main = do
   failures <- newIORef (0 :: Int)
@@ -110,6 +160,16 @@ main = do
     d {esRecover = const FailOver} (Left "fail-over")
   probe failures "retry budget 3 means 4 attempts"
     d {esRetryUndecodable = 3} (Left "after 4 attempts")
+
+  -- The surface's own refusals: what an author is told, in the author's words.
+  refusal failures "two functions of one name are refused"
+    twoOfOneName "two functions answer to one name"
+  refusal failures "a call of a function defining was not given is refused"
+    callsAnUnlistedFunction "which defining was not given"
+  refusal failures "named refuses a generated name"
+    namedIsReserved "`b1` is a name this surface generates for itself"
+  refusal failures "takes refuses a generated name"
+    takesIsReserved "`b1` is a name this surface generates for itself"
 
   n <- readIORef failures
   if n == 0
