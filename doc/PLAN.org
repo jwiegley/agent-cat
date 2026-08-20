@@ -1332,21 +1332,37 @@ Deliberately not a constructor; castGrade covers =. The <= case is a structural 
 ]
 #+end_src
 
-* TODO [#B] Engine: party→backend routing, so one run can span adapters (PAL-consensus parity)
+* DONE [#B] Engine: party→backend routing, so one run can span adapters (PAL-consensus parity)
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-engine-party-routing-hcx
 :LABELS:   []
 :ISSUE_TYPE: feature
 :CREATED:  [2026-08-19 Wed 12:17]
-:MODIFIED: [2026-08-19 Wed 12:17]
+:MODIFIED: [2026-08-19 Wed 19:30]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-19 Wed 19:30]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
 Today both live engines bind EVERY addressee to one backend per run — run/Main.hs prints it as the contract: 'every addressee — model, tool and person — is this one adapter/session' (:590, :622). The Plan semantics already distinguish parties and servedBy alternates already record who answered, so a cross-model panel (gpt-5.5-pro AND gemini-3.1-pro judging the same patch in ONE run) is expressible but not executable. This is the single capability PAL MCP has that agent-cat cannot yet execute (doc/research/pal-vs-agent-cat.md). Design sketch: a party→backend routing table on the run (e.g. --route 'reviewer-secure=acp:codex' --route 'reviewer-simple=deck:PANE', default route for the rest), engine header naming every route, trace scope unchanged (it already records the answering party). Fail-over alternates then become cross-backend for free. With this landed, PAL MCP is fully subsumed by workflows + engine config.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 141,
+    "issue_id": "acat-engine-party-routing-hcx",
+    "author": "johnw",
+    "text": "Landed and pushed at 521d759. Agentic.Route (pure, 11 probe rows, 4 mutation-killing), --route NAME=BACKEND with five refusals, acp 15/15 with scenarios 1-12 byte-unedited, all conformance gates unmoved (tier0 189/189, tier1 29/29, bisim fresh-seed clean, examples 7/0, corpus untouched). Live evidence committed at doc/research/pal-subsumption/route-live-log.txt: ci/route-live.sh 3/3 — one harden run with codex drafting and claude reviewing (2 backends configured, 2 answered), including a real ReDoS objection, a permission-axis denial mid-review, and the revise loop resolving three objections, all inside the priced 5..15. The confer roster splits across providers with program text unchanged (agent-workflows 989e472). PAL MCP remains configured per the owner's ruling; this issue was the one capability between expressible and executable, and it is now executable.",
+    "created_at": "2026-08-20T02:30:25Z"
+  }
+]
+#+end_src
 
 * DONE [#D] Matrix star at Prob: attained suprema may make aggregate-of-powers go through
 :PROPERTIES:
