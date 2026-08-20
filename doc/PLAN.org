@@ -20,15 +20,17 @@
 
 Found by the live run on 2026-08-14 (workflow w5sz6gul7, live stage). SYMPTOM: in the REFUSING run (owner answered no, transcript has six turns and no 'tool apply' line, bill 6) the scratch parse.c was nevertheless replaced with the hardened 823-byte version (seed is 323 bytes, md5 f18314ef... -> 8e856c16...). Timestamps place the write inside the AUTHOR's draft turn (dir birth 12:03:34, file birth 12:04:08, author turn spans ~12:03:49-12:04:23), and it is a birth not a modification: write-and-rename, the signature of an editing tool. CAUSE: Agentic/Core/Acp.lean:271 'permission : Permission := .grant' is a single connection-wide policy that nothing sets; pickAllow answers allow_once to every session/request_permission regardless of the question's Code. To the permission layer, 'ask text model author' and 'act tool apply' are the same thing, so the program's ask/act distinction and the case ok { no -> done } consent branch are unenforceable against a live agent. Harden.no_ack_of_refused still holds — it is about acknowledgements, not bytes — which is exactly the point: there is no theorem and no runtime check saying 'a refused run leaves the workspace as it found it'. FIX (two parts): (1) make the permission decision a function of the QUESTION, not of the connection: grant only for the act (.ack), deny for every ask, and document the known consequence of denial (the turn completes with prose in place of an act, ~97k tokens, no protocol signal); thread the current question through Exec into Acp; log each decision in the transcript. (2) Add the empirical counterpart of the consent theorem: fingerprint the workspace before and after a run, report changes, and fail the run when no act was performed and the workspace changed. Cover both with stub tests. ALSO from the same run, separate issues: the adapter substituted claude-opus-4-8 (not in its advertised catalogue) after claude-fable-5 declined on policy grounds, reporting it only as prose inside the answer — so Conn.configValues is not a complete account of what may answer; and all three reviewers approved a draft that was a policy-refusal banner plus prose plus a fenced diff rather than 'a unified diff only'.
 
-* TODO [#C] shareT under retryT/fanT: iteration and fan indices in the site key, or ask-once semantics
+* DONE [#C] shareT under retryT/fanT: iteration and fan indices in the site key, or ask-once semantics
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-0vv
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-12 Wed 00:06]
-:MODIFIED: [2026-08-12 Wed 00:06]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -36,15 +38,31 @@ Found by the live run on 2026-08-14 (workflow w5sz6gul7, live stage). SYMPTOM: i
 
 From acat-jyw (sharpest unresolved): with key (l, site-within-t) and no trip index, a labeled retry body reads the same answer every iteration — the loop equation holds but the meaning is constant. Decide per combinator: fold trip/fan index into the key, or declare ask-once-reuse as the intended combinator. Interacts with the width-fold soundness owed on acat-444.
 
-* TODO [#D] Session: drop unused csum constraint; add the trace-monoid product
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 176,
+    "issue_id": "acat-0vv",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:42Z"
+  }
+]
+#+end_src
+
+* DONE [#D] Session: drop unused csum constraint; add the trace-monoid product
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-135
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-11 Tue 21:41]
-:MODIFIED: [2026-08-11 Tue 21:41]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -64,6 +82,20 @@ Session demands CompleteCSemiring that no proof uses (probe: class-free restatem
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 190,
+    "issue_id": "acat-135",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:48Z"
   }
 ]
 #+end_src
@@ -189,15 +221,17 @@ README table omits Keys/Frag/Term; 'not the workflow syntax' now false; Countabl
 ]
 #+end_src
 
-* TODO [#D] Layering: the CLI front end lives in Explain.lean and the parity claim cites the wrong theorem
+* DONE [#D] Layering: the CLI front end lives in Explain.lean and the parity claim cites the wrong theorem
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-1t1
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 19:00]
-:MODIFIED: [2026-08-20 Thu 10:12]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -215,19 +249,28 @@ alexey, low. parseAndCheckRawWith and RawBlock.revisionBounds are defined in Exp
     "author": "johnw",
     "text": "Triage 2026-08-20, scope narrowed: the parity half is OBSOLETE with parseAndCheckRaw (two obituaries in DslFlagship.lean). Live residue (~1h): RawBlock.revisionBounds still lives in Core/Explain.lean:385-399 while its type and constant live in Dsl/; the maxRevisions obligation is unstated in Plan.revising's docstring (Plan.lean:1027-1060).",
     "created_at": "2026-08-20T17:12:10Z"
+  },
+  {
+    "id": 172,
+    "issue_id": "acat-1t1",
+    "author": "johnw",
+    "text": "Closed by commit 4aed549 ('The condemned stratum retires; its results stay'), executing the owner-approved hybrid of 2026-08-20: the no-consumer stratum excised (16 files, 9,931 lines; Agentic/ is now Core/ + Scope.lean), the results preserved with exact citations in doc/research/term-algebra-results.md, this ticket's residue folded in the same pass (see the commit message), all gates green (lake 1490 jobs, corpus-gen 189 byte-identical, tier0 189/189, tier1 29/29, bisim clean, examples 7/0, acp 15/15, deck 7/7, citations 249/249), independently verified and fess-audited before push.",
+    "created_at": "2026-08-20T18:42:28Z"
   }
 ]
 #+end_src
 
-* TODO [#D] zeroT: the additive unit
+* DONE [#D] zeroT: the additive unit
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-1xo
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-11 Tue 19:56]
-:MODIFIED: [2026-08-12 Wed 00:42]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -245,6 +288,13 @@ alexey, low. parseAndCheckRawWith and RawBlock.revisionBounds are defined in Exp
     "author": "johnw",
     "text": "acat-444's review (finding 6): the missing Additive zero is now visible in the meaning stratum too — no zero constructor means the 0-row of §4 is half-implemented at the fold.",
     "created_at": "2026-08-12T07:42:00Z"
+  },
+  {
+    "id": 197,
+    "issue_id": "acat-1xo",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:50Z"
   }
 ]
 #+end_src
@@ -288,21 +338,37 @@ abstraction pass, high; converges with deep-review's proof-scope observation. Th
 ]
 #+end_src
 
-* TODO [#B] Certification residue: three violations, then the thesis is simply true
+* DONE [#B] Certification residue: three violations, then the thesis is simply true
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-2q8
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-12 Wed 15:45]
-:MODIFIED: [2026-08-12 Wed 15:45]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
 Certify verdict: NOT yet certified; 25 declarations. V1: Mat.powSum/sumPow ARE Mathlib's geom_sum (probe-proved verbatim via Algebra.Ring.GeomSum; square-only so no rectangular excuse) — delete 6 decls, one import. V2: Env.pin + 5 laws ARE Function.update + its 5 (self-confessed docstring; 4 laws have zero consumers) — keep pin/pin_same as thin uses, delete the rest. V3: the 13 @[deprecated] aliases are justified ONLY by doc/walkthrough.html still speaking the retired vocabulary — rewrite walkthrough sections I/II/V/VIII to Mathlib names, then delete all 13. Below-bar: extComp_none_right = Option.bind_fun_none (phase-2 claim falsified); ~10 dead Cost decls. One small pass + one doc edit; certification re-run after.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 167,
+    "issue_id": "acat-2q8",
+    "author": "johnw",
+    "text": "Closed by commit 4aed549 ('The condemned stratum retires; its results stay'), executing the owner-approved hybrid of 2026-08-20: the no-consumer stratum excised (16 files, 9,931 lines; Agentic/ is now Core/ + Scope.lean), the results preserved with exact citations in doc/research/term-algebra-results.md, this ticket's residue folded in the same pass (see the commit message), all gates green (lake 1490 jobs, corpus-gen 189 byte-identical, tier0 189/189, tier1 29/29, bisim clean, examples 7/0, acp 15/15, deck 7/7, citations 249/249), independently verified and fess-audited before push.",
+    "created_at": "2026-08-20T18:42:26Z"
+  }
+]
+#+end_src
 
 * DONE [#C] Shortest-list 8: the three missing what-Mathlib-lacks docstrings
 :PROPERTIES:
@@ -322,15 +388,17 @@ Certify verdict: NOT yet certified; 25 declarations. V1: Mat.powSum/sumPow ARE M
 
 Mat vs Matrix (Fintype-bound HMul), MSemiring vs MonoidAlgebra (finite support), Env/Ext vs Option Kleisli — absences real, nowhere stated. After steps 1-7 the survivor registry is checkable by eye.
 
-* TODO [#D] Leastness at expectation: SqZero star has no order; IdemAdd (SqZero P M) derivable when M's accumulation is idempotent
+* DONE [#D] Leastness at expectation: SqZero star has no order; IdemAdd (SqZero P M) derivable when M's accumulation is idempotent
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-3ov
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-11 Tue 23:50]
-:MODIFIED: [2026-08-11 Tue 23:50]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -338,21 +406,51 @@ Mat vs Matrix (Fintype-bound HMul), MSemiring vs MonoidAlgebra (finite support),
 
 From acat-ozh: acat-jmm's first hard consumer. At SqZero Prop Prop / Cost / Prob the derived IdemAdd may make leastness provable; untried.
 
-* TODO [#C] Extend WEqR congruence beyond the 6/12 sub-algebra
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 186,
+    "issue_id": "acat-3ov",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:46Z"
+  }
+]
+#+end_src
+
+* DONE [#C] Extend WEqR congruence beyond the 6/12 sub-algebra
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-3tu
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-12 Wed 13:31]
-:MODIFIED: [2026-08-12 Wed 13:31]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
 From acat-5b7's honest scope: retryT/fanT need an n-ary Key.splice (provable, unproved); bindT needs a uniformly-chosen relabelling; shareT is different in kind (gate-erasure genuinely false under rel bases — may need its own equivalence layer). Until then Workflow quotients the seq/par/sum/choice/gate/scope sub-algebra only.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 183,
+    "issue_id": "acat-3tu",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:45Z"
+  }
+]
+#+end_src
 
 * DONE [#C] DSL checker: Theta(k^2) Bindings plumbing on the MCP path, which accepts unbounded remote source
 :PROPERTIES:
@@ -386,21 +484,37 @@ deep-review, medium. Bindings.rename remaps the whole table in closures at every
 ]
 #+end_src
 
-* TODO [#C] Atkey-parameterise Term with the context index
+* DONE [#C] Atkey-parameterise Term with the context index
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-41c
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-11 Tue 19:56]
-:MODIFIED: [2026-08-11 Tue 19:56]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
 Term hard-codes the const-e collapse by omission — the exact symptom §9 diagnoses in agent-functor. Needs Term k k' f i o composing when indices meet (cf. Context.Ctx).
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 179,
+    "issue_id": "acat-41c",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:43Z"
+  }
+]
+#+end_src
 
 * DONE [#C] Meaning functions ext/S as structural folds; workflow equality as Quotient (Setoid.ker ext); TCM equations as theorems
 :PROPERTIES:
@@ -677,15 +791,17 @@ Owner 2026-08-12, verbatim: 'I need theorems in the mathematical space of ⟦har
 
 Review FIX-NOW on acat-444 (machine-checked probes): WEq quantifies keys inside the comparison, so gateT true A, scopeT unit A, seq-assoc and seq-unit ALL fail to be WEq — the quotient has one operation and no laws, and deleting a no-op counts as a semantic change. Fix direction per review: key-renaming/site-relabelling invariance (a groupoid quotient on keys FIRST); naive outside-quantification still fails associativity because the two shapes assign different site-sets. Blocks any real use of Workflow; also the prerequisite for pi (the folds are incomparable until this lands: muS does not respect WEq and WEq does not respect muS — one_add_one_of_muS_respects_WEq + probes).
 
-* TODO [#E] Note: Tally/Width deriving DecidableEq now unconsumed; Cost.add_mono deleted with its only consumer
+* DONE [#E] Note: Tally/Width deriving DecidableEq now unconsumed; Cost.add_mono deleted with its only consumer
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-5ly
 :LABELS:   []
 :ISSUE_TYPE: chore
 :CREATED:  [2026-08-11 Tue 22:14]
-:MODIFIED: [2026-08-20 Thu 10:12]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -703,6 +819,13 @@ Two small residues of acat-192/acat-9kn: prune the deriving clauses if nothing w
     "author": "johnw",
     "text": "Triage 2026-08-20, scope narrowed: the deriving half is DONE by the migration (no deriving clauses left in Keys/Instances). Live residue is one line — Cost.add_mono's re-home — and its right home is acat-jmm's ordered-carrier class; recommend folding there and closing this.",
     "created_at": "2026-08-20T17:12:10Z"
+  },
+  {
+    "id": 202,
+    "issue_id": "acat-5ly",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:52Z"
   }
 ]
 #+end_src
@@ -725,21 +848,37 @@ Two small residues of acat-192/acat-9kn: prune the deriving clauses if nothing w
 
 Transform matrices need DecidableEq o (Classical.propDecidable) while Mat/Panel take instance hypotheses; two Decidable instances are propositionally but not definitionally equal — law proofs will need Subsingleton (Decidable _) congruence unless one convention is fixed up front.
 
-* TODO [#D] gateT: generalize Bool to a grant-lattice parameter
+* DONE [#D] gateT: generalize Bool to a grant-lattice parameter
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-755
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-11 Tue 19:56]
-:MODIFIED: [2026-08-11 Tue 19:56]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
 scopeT is parameterised (G) but gateT hard-wires Bool; §2/§9 want the Grant lattice acting through {0,1} with nested grants intersecting in the lattice.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 196,
+    "issue_id": "acat-755",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:50Z"
+  }
+]
+#+end_src
 
 * DONE [#E] Frag.meet: complete the grade lattice
 :PROPERTIES:
@@ -773,21 +912,37 @@ join exists; 'lowest fragment that expresses the job' as an infimum wants meet +
 ]
 #+end_src
 
-* TODO [#E] Note: finite-index aggregation law (csum over Fin n / lists) derivable from csum_pair + csum_zero by induction
+* DONE [#E] Note: finite-index aggregation law (csum over Fin n / lists) derivable from csum_pair + csum_zero by induction
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-80z
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-11 Tue 22:14]
-:MODIFIED: [2026-08-11 Tue 22:14]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
 Any later n-ary-panel-equals-fold theorem wants it; record before it is rediscovered.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 192,
+    "issue_id": "acat-80z",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:48Z"
+  }
+]
+#+end_src
 
 * TODO [#C] DSL: panel with a declined member annihilates objections — revise receives an empty why
 :PROPERTIES:
@@ -819,15 +974,17 @@ validated pass (P1, single-model; verified against source by the pass agent). Ve
 ]
 #+end_src
 
-* TODO [#D] DSL docstring corrections: binder account, under_askC1 routing, expectKwSaying scope, render spellings, n+1 checks
+* DONE [#D] DSL docstring corrections: binder account, under_askC1 routing, expectKwSaying scope, render spellings, n+1 checks
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-8zf
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 19:00]
-:MODIFIED: [2026-08-20 Thu 10:12]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -845,6 +1002,13 @@ alexey + comments + abstraction. (1) Check.lean:28-33: 'three binders are not co
     "author": "johnw",
     "text": "Triage 2026-08-20, scope narrowed: items 1-4 DONE (Check.lean:20-27 now states the de Bruijn story correctly; askShape replaced checkAsk; expectKwSaying died with Parse.lean; Syntax.lean:64 fixed). Live residue (~30m): items 5-6.",
     "created_at": "2026-08-20T17:12:10Z"
+  },
+  {
+    "id": 173,
+    "issue_id": "acat-8zf",
+    "author": "johnw",
+    "text": "Closed by commit 4aed549 ('The condemned stratum retires; its results stay'), executing the owner-approved hybrid of 2026-08-20: the no-consumer stratum excised (16 files, 9,931 lines; Agentic/ is now Core/ + Scope.lean), the results preserved with exact citations in doc/research/term-algebra-results.md, this ticket's residue folded in the same pass (see the commit message), all gates green (lake 1490 jobs, corpus-gen 189 byte-identical, tier0 189/189, tier1 29/29, bisim clean, examples 7/0, acp 15/15, deck 7/7, citations 249/249), independently verified and fess-audited before push.",
+    "created_at": "2026-08-20T18:42:28Z"
   }
 ]
 #+end_src
@@ -931,21 +1095,37 @@ From acat-ruz: reach = csum of powers is carrier-generic except star_eq_left nee
 
 alexey pass, high. Check.lean:422-423 is the only place the approve/object/declined -> arm assignment exists. checkBlock_level_le discharges all three arms with the same bound and checkBlock_bounded is permutation-invariant; the flagship uses ifFlag, not caseVerdict, so none of the nine kernel proofs touch it. A transposition of arms miscompiles every case-using program and passes every test and theorem. Fix: extend srcCaseVerdict in test/DslSmoke.lean to run the plan under three worlds (approve / object ['no'] / declined) and assert a distinct arm-identifying act fires in each. Also from deep-review (medium): the lexer/macro/override region has zero test coverage — no define test, no scanString failure test, no --define override test; each is a two-line addition to the existing rejects harness (test/DslSmoke.lean:240-297).
 
-* TODO [#E] conv_comm converse: needs a Nontrivial fence and delta_injective
+* DONE [#E] conv_comm converse: needs a Nontrivial fence and delta_injective
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-ab7
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-11 Tue 23:24]
-:MODIFIED: [2026-08-11 Tue 23:24]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
 From acat-ubt: non-commutative K forcing non-commutative conv is shown at one carrier only; the generic converse needs (1:S) != 0 (no Nontrivial-style class exists) + delta injectivity, then conv_comm iff CMonoid K.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 191,
+    "issue_id": "acat-ab7",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:48Z"
+  }
+]
+#+end_src
 
 * DONE [#C] ACP: attach a run to an existing/live session — session/load client support and whatever the protocol allows
 :PROPERTIES:
@@ -1110,21 +1290,37 @@ The owner's full architecture note is preserved below for the design round.
 
 From acat-l59: would delete the residual join-slack paragraph and make static/bounded-0 indistinguishable outright; larger index-type change interacting with fanT 0. Candidate simplification, weigh against the definitional-reduction discipline.
 
-* TODO [#C] Give cachedAt content: a replay construction proved equal to f
+* DONE [#C] Give cachedAt content: a replay construction proved equal to f
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-bf8
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-11 Tue 21:41]
-:MODIFIED: [2026-08-11 Tue 21:41]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
 cachedAt := f makes cached_eq a tautology about the identity function; the non-vacuous statement is a first-consult/replay interpretation proved equal, connecting to share_eq_dup_of_agree.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 199,
+    "issue_id": "acat-bf8",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:51Z"
+  }
+]
+#+end_src
 
 * TODO [#D] bisim: retry the initial ping once before declaring the oracle wedged
 :PROPERTIES:
@@ -1142,15 +1338,17 @@ cachedAt := f makes cached_eq a tautology about the identity function; the non-v
 
 V4 (wave-2 fess) predicted and wave-3 close-out reproduced it: under machine load (loadavg ~11) the oracle's cold spawn can exceed bisim's 60s ping timeout, producing a phantom transport failure ('the oracle is wedged') on a healthy tree; the immediate direct ping answered instantly and the rerun was clean. Fix: one retry of the initial ping (or a spawn-aware first-ping budget) before declaring the wedge. Evidence on acat-isaac-decisions-vtt.
 
-* TODO [#C] shareT label collision across unequal bodies
+* DONE [#C] shareT label collision across unequal bodies
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-bmc
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-12 Wed 00:06]
-:MODIFIED: [2026-08-12 Wed 00:42]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -1168,6 +1366,13 @@ From acat-jyw: shareT l (prim q1) beside shareT l (prim q2) keys both to (l, roo
     "author": "johnw",
     "text": "acat-444's review sharpened this with machine-checked evidence: muExt (envRunner e) (shareT 0 (prim q1)) = same at q2 for ALL e with q1 != q2 — the fold rebases on label alone while Term.lean promises same-label-AND-same-body; sharing is also scope-blind (same label under model=A and model=B hits one index). Options per review: key by (label, body-hash), DecidableEq on a term skeleton, or let-bound restriction.",
     "created_at": "2026-08-12T07:42:00Z"
+  },
+  {
+    "id": 175,
+    "issue_id": "acat-bmc",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:42Z"
   }
 ]
 #+end_src
@@ -1229,21 +1434,37 @@ deep-review + alexey + validated. (1) End-of-input errors report 0:0 (Parse.lean
 
 Discovered during acat-9kn: CSemiring's mul_comm blocks both the monoid semiring (MSemiring is a genuine semiring with non-commutative conv, currently exhibited by equations instead of instantiated) and the matrix star (acat-ruz needs star over a non-commutative carrier). One base class (semiring, no mul_comm) with CSemiring extending it lets total be a homomorphism of structures and lets Mat/MSemiring join the hierarchy. Touches acat-ruz, acat-ubt, acat-47y.
 
-* TODO [#D] shareT nesting: prove the innermost/outermost/compose rule as a theorem
+* DONE [#D] shareT nesting: prove the innermost/outermost/compose rule as a theorem
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-d1t
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-12 Wed 00:06]
-:MODIFIED: [2026-08-12 Wed 00:06]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
 From acat-jyw: shareT l (shareT l' t) unspecified; Scope sets the precedent (innermost-wins proved, not interpreted). The analogue is owed at the fold.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 200,
+    "issue_id": "acat-d1t",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:52Z"
+  }
+]
+#+end_src
 
 * DONE [#B] Shortest-list 1+2+3: delete 89 dead wrappers, retire the 31 live aliases, make CompleteCSemiring a mixin
 :PROPERTIES:
@@ -1401,15 +1622,17 @@ Owner directive 2026-08-12: use the standard libraries as much as possible; do n
 ]
 #+end_src
 
-* TODO [#D] Weakening fold: Term f -> Term g for f <= g
+* DONE [#D] Weakening fold: Term f -> Term g for f <= g
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-ejy
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-11 Tue 19:56]
-:MODIFIED: [2026-08-11 Tue 21:41]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -1427,6 +1650,13 @@ Deliberately not a constructor; castGrade covers =. The <= case is a structural 
     "author": "johnw",
     "text": "Review: Term.toMonadic already violates the no-weakening rationale it sits under — it relabels via an opaque bindT (inexact, PUnit-only, blinds every fold). Prefer the structural <= fold here, or a grade-existential continuation (g : Frag) x Term Op G g PUnit o for heterogeneous planners; delete toMonadic when either lands.",
     "created_at": "2026-08-12T04:41:33Z"
+  },
+  {
+    "id": 193,
+    "issue_id": "acat-ejy",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:49Z"
   }
 ]
 #+end_src
@@ -1558,21 +1788,37 @@ Adopted from the web survey (comparison judge). (1) CONTRACT: name the checker's
 ]
 #+end_src
 
-* TODO [#D] sumT extensional bias: relational layer, choice function, or priority in the syntax
+* DONE [#D] sumT extensional bias: relational layer, choice function, or priority in the syntax
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-frb
 :LABELS:   []
 :ISSUE_TYPE: question
 :CREATED:  [2026-08-12 Wed 00:42]
-:MODIFIED: [2026-08-12 Wed 00:42]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
 Design question from acat-444: sumT is symmetric in muS (matAdd_comm) but leftmost-defined in muExt (documented). Decide the honest reconciliation.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 178,
+    "issue_id": "acat-frb",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:43Z"
+  }
+]
+#+end_src
 
 * TODO [#C] Runtime follow-ups: completed-turn discipline for ack/text decodes; stopReason on person-addressed turns; Settings.log unused
 :PROPERTIES:
@@ -1611,15 +1857,17 @@ From the runtime adversarial pass (commit 71a212a). MEDIUM: (1) Exec.say logs bu
 ]
 #+end_src
 
-* TODO [#C] Prose refuted by code: HANDOFF 4.6 elaboration claim, 'nineteen' kernel proofs, stale cost figures
+* DONE [#C] Prose refuted by code: HANDOFF 4.6 elaboration claim, 'nineteen' kernel proofs, stale cost figures
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-gdk
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 19:00]
-:MODIFIED: [2026-08-14 Fri 19:00]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -1627,21 +1875,51 @@ From the runtime adversarial pass (commit 71a212a). MEDIUM: (1) Exec.say logs bu
 
 alexey (high) + comments + dead-code. (1) HANDOFF.md:447-450 claims the grammar revision is 'proved to elaborate to the plan the old text did' — unfalsifiable as stated: flagshipPlan is DEFINED as the checker's output (DslFlagship.lean:187-190) and check_flagshipRaw checks only the head constructor (accepted, line 199-206). State instead what is true: the four trace_flagship_* equations still close, so the revised text consults the same questions in the same order in the named worlds. (2) 'nineteen decide +kernel proofs' appears at DslFlagship.lean:16, Dsl.lean:15, lakefile.toml:14 (and research docs); there are nine (206,249,262,271,278,306,312,319,326). (3) HANDOFF.md:33-35 and :502 say ~100 s for DslFlagship; the module (line 15) and lakefile.toml:13 say five-six minutes. (4) DslFlagship.lean:33's 'only ... DslSmoke, CliSmoke and the aggregate' omits test/McpSmoke.lean (lakefile.toml contradicts it explicitly). (5) Syntax.lean:151-153 justifies non-fusing by a theorem (Dsl.denote_flagshipPlan) that exists nowhere in the repository.
 
-* TODO [#D] Deliberate-diamond decision: CSemiring/IdemAdd instances on MSemiring
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 169,
+    "issue_id": "acat-gdk",
+    "author": "johnw",
+    "text": "Closed by commit 4aed549 ('The condemned stratum retires; its results stay'), executing the owner-approved hybrid of 2026-08-20: the no-consumer stratum excised (16 files, 9,931 lines; Agentic/ is now Core/ + Scope.lean), the results preserved with exact citations in doc/research/term-algebra-results.md, this ticket's residue folded in the same pass (see the commit message), all gates green (lake 1490 jobs, corpus-gen 189 byte-identical, tier0 189/189, tier1 29/29, bisim clean, examples 7/0, acp 15/15, deck 7/7, citations 249/249), independently verified and fess-audited before push.",
+    "created_at": "2026-08-20T18:42:27Z"
+  }
+]
+#+end_src
+
+* DONE [#D] Deliberate-diamond decision: CSemiring/IdemAdd instances on MSemiring
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-gl8
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-11 Tue 23:24]
-:MODIFIED: [2026-08-11 Tue 23:24]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
 From acat-ubt: CSemiring (MSemiring S K) under [CMonoid K] is now provable ({instNSemiring with mul_comm := conv_comm}) but undeclared — second semiring instance on one carrier wants deliberate design; same for IdemAdd from msAdd_idem.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 189,
+    "issue_id": "acat-gl8",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:47Z"
+  }
+]
+#+end_src
 
 * DONE [#C] Inhabit MSemiring: supply the panel key monoid instance (convolution algebra currently uninhabited in-package)
 :PROPERTIES:
@@ -2117,15 +2395,17 @@ doc/research/isaac-workflows.md §6 holds ten yes/no decisions from the incite/a
 
 Probe P7: importing Agentic installs (1:Bool)=false, (0:Prop)=False, NatCast Prop package-globally — and Bool is the gateT type, so the collision surface is real. Race := Bool newtype; pin Prop behind a synonym or scoped instance. Fold Keys.Width + Race + Frag.join into ONE synonym over [SemilatticeSup a][OrderBot a] (confirmed absent from Mathlib; upstreamable).
 
-* TODO [#C] Verdict.render/objections defined three times across strata — close the library gap in Question.lean
+* DONE [#C] Verdict.render/objections defined three times across strata — close the library gap in Question.lean
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-j61
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 19:00]
-:MODIFIED: [2026-08-14 Fri 19:00]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -2133,15 +2413,31 @@ Probe P7: importing Agentic installs (1:Bool)=false, (0:Prop)=False, NatCast Pro
 
 alexey + ponytail (both medium). Verdict.render (Dsl/Syntax.lean:62-63), Harden.objections/render (HardenPatch.lean:87-91), Verdict.objections (Report.lean:453-454) are the same expressions, glued by render_eq_harden_render (DslFlagship.lean:74), an rfl theorem asserting two definitions are one function. House rule 7 names this exactly. Fix: define objections/render once in Agentic/Core/Question.lean beside the verdict algebra; delete the copies and the reconciliation theorem.
 
-* TODO [#D] Ordered-carrier class: resource semiring with monotone +,*,csum
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 170,
+    "issue_id": "acat-j61",
+    "author": "johnw",
+    "text": "Closed by commit 4aed549 ('The condemned stratum retires; its results stay'), executing the owner-approved hybrid of 2026-08-20: the no-consumer stratum excised (16 files, 9,931 lines; Agentic/ is now Core/ + Scope.lean), the results preserved with exact citations in doc/research/term-algebra-results.md, this ticket's residue folded in the same pass (see the commit message), all gates green (lake 1490 jobs, corpus-gen 189 byte-identical, tier0 189/189, tier1 29/29, bisim clean, examples 7/0, acp 15/15, deck 7/7, citations 249/249), independently verified and fess-audited before push.",
+    "created_at": "2026-08-20T18:42:27Z"
+  }
+]
+#+end_src
+
+* DONE [#D] Ordered-carrier class: resource semiring with monotone +,*,csum
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-jmm
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-11 Tue 22:52]
-:MODIFIED: [2026-08-11 Tue 23:50]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -2159,6 +2455,13 @@ From acat-ruz: Mat.CostBounded and starTrunc_le_star are Cost-only for lack of i
     "author": "johnw",
     "text": "acat-ozh delivered your first hard consumer: SqZero has a star and no order — leastness at expectation is unstatable until this class exists.",
     "created_at": "2026-08-12T06:50:01Z"
+  },
+  {
+    "id": 184,
+    "issue_id": "acat-jmm",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:45Z"
   }
 ]
 #+end_src
@@ -2549,15 +2852,17 @@ The design names three homomorphisms: extensional, quantitative, rendering. Term
 ]
 #+end_src
 
-* TODO [#E] Prove the classical Kleene-algebra identities now that KleeneStar makes them theorems
+* DONE [#E] Prove the classical Kleene-algebra identities now that KleeneStar makes them theorems
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-n8m
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-11 Tue 23:12]
-:MODIFIED: [2026-08-20 Thu 10:12]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -2575,6 +2880,13 @@ From acat-zms: star_star, sliding a(ba)* = (ab)*a, denesting, (a+b)* are now pro
     "author": "johnw",
     "text": "Triage 2026-08-20, scope narrowed: star_star and six siblings are now free from Mathlib's Kleene (kstar_idem etc.) at every carrier. Genuinely unproved: sliding, denesting, (a+b)*. No consumer today; on the condemned stratum — fate follows acat-q1i.",
     "created_at": "2026-08-20T17:12:11Z"
+  },
+  {
+    "id": 201,
+    "issue_id": "acat-n8m",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:52Z"
   }
 ]
 #+end_src
@@ -2586,7 +2898,7 @@ From acat-zms: star_star, sliding a(ba)* = (ab)*a, denesting, (a+b)* are now pro
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-20 Thu 10:15]
-:MODIFIED: [2026-08-20 Thu 10:56]
+:MODIFIED: [2026-08-20 Thu 11:43]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -2605,6 +2917,13 @@ FROZEN PLAN (owner-approved 2026-08-20, artifact e949eac0): Step 1 housekeeping 
     "author": "johnw",
     "text": "SCOPE NARROWED (owner directive 2026-08-20): Step 3 reduces to TWO foundation items — (1) acat-owa PART 1 ONLY (narration corrupting answers; parts 2-3 out of scope: instrumentation, and part 3 already done per triage), (2) awork-runner-supplied-facts implemented as RESERVED INPUTS the runner binds (extending the existing taking/input abstraction — no new facts subsystem; abstraction-review applied). EXPLICITLY DEFERRED, not dropped: acat-fuk residue fixture, acat-qzl three lows, acat-bisim-ping-retry, acat-f8e re-scoped page, acat-88m live half. The confer-dogfooding idea for owa's ruling is also dropped as ceremony — the ruling will be made directly from the issue's three options and recorded. Session goal: sound and stable foundation, nothing more.",
     "created_at": "2026-08-20T17:56:40Z"
+  },
+  {
+    "id": 204,
+    "issue_id": "acat-next-step-handoff-8t7",
+    "author": "johnw",
+    "text": "Step 2 COMPLETE: excision landed at 4aed549 (fess-audited, three findings folded pre-push), 38 tickets closed on evidence (8 folded + 30 graveyard). Tracker at 7 open. Step 3 begins: acat-owa part 1 + awork-runner-supplied-facts as reserved inputs; acceptance = wiggum, review-heavy, partner-reviewer sound for daily use. Attempt counters reset.",
+    "created_at": "2026-08-20T18:43:23Z"
   }
 ]
 #+end_src
@@ -2648,21 +2967,37 @@ validated pass (P1, attribution corrected by the pass itself). example/harden.wf
 ]
 #+end_src
 
-* TODO [#D] msSmul semimodule laws, so panels compose with gating
+* DONE [#D] msSmul semimodule laws, so panels compose with gating
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-nka
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-11 Tue 23:24]
-:MODIFIED: [2026-08-11 Tue 23:24]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
 From acat-ubt: only total_msSmul exists; S<K> deserves Gate's set (msSmul s (msSmul t f) = msSmul (s*t) f; conv (msSmul s f) g = msSmul s (conv f g)) — what lets panelOf compose with gate.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 188,
+    "issue_id": "acat-nka",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:47Z"
+  }
+]
+#+end_src
 
 * DONE [#B] Combinator stratum for Term: the vocabulary workflows are written in
 :PROPERTIES:
@@ -2717,21 +3052,37 @@ Owner feedback on the first worked example (1103 lines): WAY too much complexity
 ]
 #+end_src
 
-* TODO [#C] Context repair: Preorder, connect Interior to Ctx, restore third consequence
+* DONE [#C] Context repair: Preorder, connect Interior to Ctx, restore third consequence
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-npb
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-11 Tue 21:41]
-:MODIFIED: [2026-08-11 Tue 21:41]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
 Interior sits on a lawless LE (Interior.id must take refl as an argument); it is never applied to Ctx; the design's third collapse consequence (finite-dimensional in the prompt) was silently replaced. A Preorder class also deletes Pareto's hand-passed law arguments and Cost's hand-rolled order lemmas.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 198,
+    "issue_id": "acat-npb",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:51Z"
+  }
+]
+#+end_src
 
 * DONE [#B] Shortest-list 6: ONE star — CsumIsSup mixin, kstar x := csum (x ^ .)
 :PROPERTIES:
@@ -2797,15 +3148,17 @@ Owner, 2026-08-12, after four rounds of example feedback: 'I feel like you haven
 ]
 #+end_src
 
-* TODO [#C] DSL over-engineering: ~230 deletable lines (bounded chain, duplicated helpers, identity pass, unused theorems)
+* DONE [#C] DSL over-engineering: ~230 deletable lines (bounded chain, duplicated helpers, identity pass, unused theorems)
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-o5o
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 19:00]
-:MODIFIED: [2026-08-20 Thu 10:12]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -2830,6 +3183,13 @@ ponytail pass, corroborated by dead-code. (1) RawBlock.bounded / checkBlock_boun
     "author": "johnw",
     "text": "Triage 2026-08-20, scope narrowed: items 1,2,4,5,11,12,13 are gone with the excision (zero hits for RawBlock.bounded, checkAskAt, parseAndCheckRaw*, expectKw*, parseBracedRhs, isIdentCont). Live residue (~2h): Prompt.normalize (Dsl/Syntax.lean:179, zero consumers, and Raw.hs:284 forbids porting it), CheckError.render (Syntax.lean:131, no call site), Plan.size_eq_askNodes_succ (Explain.lean:246, no call site). Fold into the q1i excision pass.",
     "created_at": "2026-08-20T17:12:10Z"
+  },
+  {
+    "id": 171,
+    "issue_id": "acat-o5o",
+    "author": "johnw",
+    "text": "Closed by commit 4aed549 ('The condemned stratum retires; its results stay'), executing the owner-approved hybrid of 2026-08-20: the no-consumer stratum excised (16 files, 9,931 lines; Agentic/ is now Core/ + Scope.lean), the results preserved with exact citations in doc/research/term-algebra-results.md, this ticket's residue folded in the same pass (see the commit message), all gates green (lake 1490 jobs, corpus-gen 189 byte-identical, tier0 189/189, tier1 29/29, bisim clean, examples 7/0, acp 15/15, deck 7/7, citations 249/249), independently verified and fess-audited before push.",
+    "created_at": "2026-08-20T18:42:28Z"
   }
 ]
 #+end_src
@@ -2873,21 +3233,37 @@ Owner directive 2026-08-12, verbatim core: 'your observation that agent-functor 
 ]
 #+end_src
 
-* TODO [#D] Weighted convolution fold: the n-ary panel bridge
+* DONE [#D] Weighted convolution fold: the n-ary panel bridge
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-od5
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-11 Tue 23:24]
-:MODIFIED: [2026-08-11 Tue 23:24]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
 From acat-ubt: convFold handles certain members only; the general List (MSemiring S K) -> MSemiring S K reducer + perm invariance (needs conv_left_comm) is what the panelT syntax combinator (acat-x9v) will be built on. Also: §5.1's necessity claims (R must be a monoid; unit = empty panel) remain prose — formalize with it.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 187,
+    "issue_id": "acat-od5",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:47Z"
+  }
+]
+#+end_src
 
 * TODO [#C] Adapter narration corrupts answers; usage data discarded; denial cost unmeasured
 :PROPERTIES:
@@ -2972,21 +3348,37 @@ HIGH (deep/alexey): SqZero has no CompleteCSemiring and no PMod P M beyond the d
 ]
 #+end_src
 
-* TODO [#E] fanT fusion holds only laxly at m=0 after the l59 repair
+* DONE [#E] fanT fusion holds only laxly at m=0 after the l59 repair
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-pjg
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-11 Tue 23:58]
-:MODIFIED: [2026-08-11 Tue 23:58]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
 scale n (scale 0 f) = bounded n while scale (n*0) f = bounded 0: the composite over-approximates (sound as upper bound; a fan of a 0-fan runs nothing). Any future fanT-fusion/normalization rule holds as scale (n*m) f <= scale n (scale m f), not equality. Record before a normalization pass assumes it.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 203,
+    "issue_id": "acat-pjg",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:53Z"
+  }
+]
+#+end_src
 
 * DONE [#C] DSL: a diagnosis inside a library carets the program's text — Pos has no module field
 :PROPERTIES:
@@ -3077,15 +3469,17 @@ Owner directive 2026-08-17: think about profunctors improving the design, term l
 ]
 #+end_src
 
-* TODO [#C] Kill the condemned stratum; re-point the surface at Plan; example verbatim-stable
+* DONE [#C] Kill the condemned stratum; re-point the surface at Plan; example verbatim-stable
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-q1i
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-12 Wed 21:00]
-:MODIFIED: [2026-08-12 Wed 21:00]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -3093,21 +3487,51 @@ Owner directive 2026-08-17: think about profunctors improving the design, term l
 
 After the Plan flagship lands: re-point Agentic/Surface.lean internals (W/ask/askHuman/model/panel/revising) at the Plan carrier so example/HardenPatch.lean stays byte-identical (kernel risk #1: two known elaboration constraints — ask's alpha at interpolation-only binders needs ascription discipline; if-on-askHuman pins Bool; castGrade noncomputability lesson); then execute the kernel KILL LIST (~4700 lines: Term.lean, Frag.lean, Meaning.lean incl. Step/Site/Key/Runner/WEqR, Env Ext stratum, fanMat/retryTrunc/starTrunc, 2/3 of Panel) and keep the SURVIVE list (~4000: Semiring, Instances, Matrix, Gate, Star off-path, Keys, Monoid, LastOpt, Panel convolution, Env.pin re-derived); six negative results preserved as doc/ diagnostics. Full build green at every step.
 
-* TODO [#C] pi after coarsening: relate muS and muExt over the coarsened quotient
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 166,
+    "issue_id": "acat-q1i",
+    "author": "johnw",
+    "text": "Closed by commit 4aed549 ('The condemned stratum retires; its results stay'), executing the owner-approved hybrid of 2026-08-20: the no-consumer stratum excised (16 files, 9,931 lines; Agentic/ is now Core/ + Scope.lean), the results preserved with exact citations in doc/research/term-algebra-results.md, this ticket's residue folded in the same pass (see the commit message), all gates green (lake 1490 jobs, corpus-gen 189 byte-identical, tier0 189/189, tier1 29/29, bisim clean, examples 7/0, acp 15/15, deck 7/7, citations 249/249), independently verified and fess-audited before push.",
+    "created_at": "2026-08-20T18:42:24Z"
+  }
+]
+#+end_src
+
+* DONE [#C] pi after coarsening: relate muS and muExt over the coarsened quotient
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-qtv
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-12 Wed 00:42]
-:MODIFIED: [2026-08-12 Wed 00:42]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
 Folds report item 1 + review finding 5: no theorem relates the two meanings; needs the edge measure and the WEq coarsening first. Include muExt_parT's left-short-circuit (review finding 9) as a latent obstruction to record when stating it.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 174,
+    "issue_id": "acat-qtv",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:41Z"
+  }
+]
+#+end_src
 
 * DONE [#C] Replace bespoke order/topology-adjacent pieces with Mathlib counterparts
 :PROPERTIES:
@@ -3127,21 +3551,37 @@ Folds report item 1 + review finding 5: no theorem relates the two meanings; nee
 
 Interior -> ClosureOperator on the order dual; Pareto -> Mathlib's Prod Preorder/PartialOrder instances + Set.Pareto? (check); LastOpt -> check Mathlib Option algebra; Env.pin -> Function.update; FreeMonoid for panel keys. Trace/Mazurkiewicz likely stays (verify Mathlib lacks trace monoids; FreeMonoid + Con(gruence) machinery may still simplify the quotient).
 
-* TODO [#D] caseT: k-ary verdict branching
+* DONE [#D] caseT: k-ary verdict branching
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-qx8
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-11 Tue 19:56]
-:MODIFIED: [2026-08-11 Tue 19:56]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
 choiceT is binary; verdict enums re-encode as nested Sums. A caseT over a finite verdict type (and the lens-by-backend grid of §5.1) has no direct form.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 194,
+    "issue_id": "acat-qx8",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:49Z"
+  }
+]
+#+end_src
 
 * TODO [#C] Core follow-ups from the adversarial pass (2 medium, 5 low) + the ask-node representation change
 :PROPERTIES:
@@ -3395,21 +3835,37 @@ Meta-finding from the validated review pass, which ABORTED per its attestation c
 :ORIGINAL_SIZE: 0
 :END:
 
-* TODO [#D] Generalize the peak semantic anchor beyond peak = 0
+* DONE [#D] Generalize the peak semantic anchor beyond peak = 0
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-ti2
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-12 Wed 13:31]
-:MODIFIED: [2026-08-12 Wed 13:31]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
 From acat-vbl: muExt_indep_of_peak_eq_zero anchors the count semantically only at zero; parT=+ / seqT=max remain postulated readings. A per-run trace of consulted sites with |in-flight| <= peak is the real anchor; the module header should not say 'semantic width' until it exists (review finding 11).
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 177,
+    "issue_id": "acat-ti2",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:43Z"
+  }
+]
+#+end_src
 
 * DONE [#C] agent-cat CLI: run | cost | plan over DSL program files, with hardenPatch reconstructed as a program
 :PROPERTIES:
@@ -3648,15 +4104,17 @@ Review finding 2: widthT re-runs the grade arithmetic, so widthT_eq_width is a h
 
 Probe P8: w(join)=sup, w(par)=+, w(scale n)=n*max 1 w — Frag is ENat encoded four times (Frag, Option Nat width, ENat widthE, Keys.Width). Collapse: static=0, bounded n=n, monadic=T, join=sup, par=+, scale n=n*max 1. Fixes FIX-NOW 1 (scale 0 monadic = monadic contradicts the proved peak=0 — the grade lies about a provable constant); deletes the Frag order development and the ofWidth case-bashes; removes grade casts from Workflow.seq_assoc. Cost: join noncomputable (decide still closes goals). Subsumes acat-b22 and retires the l59 max-1 patch story.
 
-* TODO [#C] pinT/forkT: syntax above Env.pin and the Brzozowski derivative
+* DONE [#C] pinT/forkT: syntax above Env.pin and the Brzozowski derivative
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-vgz
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-11 Tue 19:56]
-:MODIFIED: [2026-08-12 Wed 00:06]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -3674,6 +4132,13 @@ Probe P8: w(join)=sup, w(par)=+, w(scale n)=n*max 1 w — Frag is ENat encoded f
     "author": "johnw",
     "text": "From acat-jyw: pinT should name sites by the SAME L, not a fresh scheme (a second identity scheme for one notion is the duplication just removed). Caveats: pinT also carries the pinned answer whose type is the site's o (signature not a straight copy); if pins name only labeled sites, say so as discipline, else positional site naming reopens path syntax.",
     "created_at": "2026-08-12T07:06:23Z"
+  },
+  {
+    "id": 180,
+    "issue_id": "acat-vgz",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:44Z"
   }
 ]
 #+end_src
@@ -3696,15 +4161,17 @@ Probe P8: w(join)=sup, w(par)=+, w(scale n)=n*max 1 w — Frag is ENat encoded f
 
 deep-review + validated (both medium). Parse.lean:447-451 reads the two idents with no distinctness check; Check.lean:443-446 lists the artefact first and Bindings.find? is head-first, so with av == wv every {x} is the artefact and the rendered verdict is unreachable under any spelling: the program checks and runs, and the reviser is never told what it is answering. Over a non-text artefact the same source is rejected, so behaviour also depends on the subject's kind. Fix: reject av == wv at the second expectIdent with a CheckError naming the duplicate. (The wider binder-spelling confusion is the redesign's subject, [[acat-k28]].)
 
-* TODO [#C] Footprints + disjointness-licensed exchange: the world-threaded layer where premonoidality degrades
+* DONE [#C] Footprints + disjointness-licensed exchange: the world-threaded layer where premonoidality degrades
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-w7l
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-11 Tue 19:02]
-:MODIFIED: [2026-08-12 Wed 00:06]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
 :END:
@@ -3726,6 +4193,13 @@ deep-review + validated (both medium). Parse.lean:447-451 reads the two idents w
     "author": "johnw",
     "text": "From acat-jyw: a footprint is nearly a site key by another name — align the footprint identity with the L/positional convention when this lands.",
     "created_at": "2026-08-12T07:06:23Z"
+  },
+  {
+    "id": 182,
+    "issue_id": "acat-w7l",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:45Z"
   }
 ]
 #+end_src
@@ -3748,15 +4222,17 @@ deep-review + validated (both medium). Parse.lean:447-451 reads the two idents w
 
 deep-review + alexey + comments + dead-code. (1) Line 118's two headline rules are false: braces are not always scopes (four uses; two are pure grouping, one is a single-expression clause), and define does not bind an answer (it binds parse-time text, and the difference decides the rung — line 191 same error). (2) The agent-cat plan sample (lines 278-288) is not what the tool prints: mode= axis dropped on two lines, a prompt line lost, banner and five legend lines silently elided; the cost sample drops the two leaf-bills lines with no ellipsis. Regenerate from the binary. (3) Line 361 'decoders are deliberately strict... aborts the run' inverts Exec.lean:153-188: refusal decoding is deliberately lenient, verdict decoding is total, and an unreadable reply is re-asked before any failure. (4) ask..for ack — per dsl-chosen.md the only non-terminal effect — appears in neither user document, so 'an act is terminal' reads as a language property the language does not have (moot if the redesign refuses ack, see the over-engineering issue). (5) Line 398's 'Five more words' arithmetic only works if revision(s) counts twice. Rewrite alongside the redesign [[acat-k28]] rather than before it.
 
-* TODO [#C] panelT: n-ary panel primitive with reducer monoid + augmentation fan-in
+* DONE [#C] panelT: n-ary panel primitive with reducer monoid + augmentation fan-in
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-x9v
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-11 Tue 19:56]
-:MODIFIED: [2026-08-12 Wed 00:06]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -3781,19 +4257,28 @@ parT is the tensor skeleton only; §7 says the panel is a primitive, not derivab
     "author": "johnw",
     "text": "From acat-jyw: panelT must state its own site-identity rule — an n-ary panel has n sites, not one. Do not fork the positional convention silently.",
     "created_at": "2026-08-12T07:06:23Z"
+  },
+  {
+    "id": 181,
+    "issue_id": "acat-x9v",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:44Z"
   }
 ]
 #+end_src
 
-* TODO [#B] Purity campaign
+* DONE [#B] Purity campaign
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-xlh
 :LABELS:   []
 :ISSUE_TYPE: epic
 :CREATED:  [2026-08-12 Wed 10:16]
-:MODIFIED: [2026-08-12 Wed 15:45]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -3839,6 +4324,13 @@ Drive the design to its simplest, purest form: coarsen WEq so Workflow is a cate
     "author": "johnw",
     "text": "Closing arc COMPLETE: all probes pass (diamond gone, pollution build-guarded, Frag IS ENat by instance-identity, kstar = iSup of powers by rfl, quotient laws alive, dupPair/sharedPair distinguishable at muExt and WEqR while muS collapses them, peak strict). Verdict: NOT YET certified — the residue issue carries the exact 25-declaration path; the blocker is mostly a documentation rewrite. Epic closes when the residue does.",
     "created_at": "2026-08-12T22:45:06Z"
+  },
+  {
+    "id": 168,
+    "issue_id": "acat-xlh",
+    "author": "johnw",
+    "text": "Closed by commit 4aed549 ('The condemned stratum retires; its results stay'), executing the owner-approved hybrid of 2026-08-20: the no-consumer stratum excised (16 files, 9,931 lines; Agentic/ is now Core/ + Scope.lean), the results preserved with exact citations in doc/research/term-algebra-results.md, this ticket's residue folded in the same pass (see the commit message), all gates green (lake 1490 jobs, corpus-gen 189 byte-identical, tier0 189/189, tier1 29/29, bisim clean, examples 7/0, acp 15/15, deck 7/7, citations 249/249), independently verified and fess-audited before push.",
+    "created_at": "2026-08-20T18:42:26Z"
   }
 ]
 #+end_src
@@ -3875,15 +4367,17 @@ bindT discards both sub-grades (monadic outright); toMonadic is the only route f
 ]
 #+end_src
 
-* TODO [#D] Pareto: n-ary axes, strict dominance, frontier, tie to Cost
+* DONE [#D] Pareto: n-ary axes, strict dominance, frontier, tie to Cost
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-yad
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-11 Tue 19:56]
-:MODIFIED: [2026-08-11 Tue 19:56]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -3891,21 +4385,51 @@ bindT discards both sub-grades (monadic outright); toMonadic is the only route f
 
 Binary-only and disconnected from the package's own carriers; the promised frontier is not defined; Tier-as-region (§2) has no formal counterpart.
 
-* TODO [#D] raceT/unamb: first-past-the-post over idempotent reducers
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 185,
+    "issue_id": "acat-yad",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:46Z"
+  }
+]
+#+end_src
+
+* DONE [#D] raceT/unamb: first-past-the-post over idempotent reducers
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-ylz
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-11 Tue 19:56]
-:MODIFIED: [2026-08-11 Tue 19:56]
+:MODIFIED: [2026-08-20 Thu 11:42]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 11:42]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
 §6c: reducers monotone in the information order, first-past-the-post as unamb. Unblocked once the idempotent reducer witness lands (Keys rework).
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 195,
+    "issue_id": "acat-ylz",
+    "author": "johnw",
+    "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
+    "created_at": "2026-08-20T18:42:50Z"
+  }
+]
+#+end_src
 
 * DONE [#B] Shortest-list 4: delete the four standard-library replications
 :PROPERTIES:
