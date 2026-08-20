@@ -341,6 +341,12 @@ scriptFor "hello" =
 scriptFor name = isaacScript name
 
 -- | @stub_adapter.py:100@'s @GUIDE@.
+--
+-- A string-gap literal on purpose, not an oversight of the @wft@ sweep: its
+-- gaps join /without/ newlines — the text is one line — and a fence joins
+-- lines with @\n@, so converting it would move bytes. The same holds for
+-- 'patchText'. Only a gap literal whose intended text really carries the
+-- newlines may become @[wft|…|]@, and each needs its bytes compared.
 guideText :: Text
 guideText =
   "House style: two-space indent, no tabs, every public name documented, \

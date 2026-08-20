@@ -1,3 +1,4 @@
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -15,7 +16,8 @@
 
 -- |
 -- Module      : Agentic.WF
--- Description : The @[wf|…|]@ prompt quoter, and what a @{hole}@ may name.
+-- Description : The @[wf|…|]@ and @[wft|…|]@ prompt quoters, and what a
+--               @{hole}@ may name.
 --
 -- A prompt in this language is prose in a fence with @{name}@ holes in it.
 -- This module is that fence, as a quasiquoter, and nothing else: it is not a
@@ -56,6 +58,13 @@
 -- spliced 'Text' is another beside it, and an empty literal never reaches the
 -- term.
 --
+-- __Two quoters, one rule.__ A prompt is 'Words' and a @define@ is a 'Text',
+-- and both are written at this fence: 'wf' yields the first, 'wft' the second.
+-- They are two applications of one @promptQuoter@ over one @parseFence@ — same
+-- layout, same hole scan, same @normalize@ — differing only in what a fragment
+-- is staged as. That is the whole cost of having two, and it is why a block
+-- moved from @wfText [wf|…|]@ to @[wft|…|]@ cannot move a byte.
+--
 -- __What a hole may name__ is the 'Says' class: a live binding ('V'), which
 -- splices as an @interp@ chunk under the name that binding /prints/, or a
 -- @define@ — a plain 'Text' or a @Words@ value — which splices as the literal
@@ -78,10 +87,12 @@
 -- two different values with the same spelling, correct in both places, and it
 -- is what makes a typo a plain @Variable not in scope: guiide@ rather than a
 -- type-level puzzle. @lit@ and @says@ are emitted as statically resolved
--- names, so an author who shadows @lit@ locally cannot thereby break a prompt.
+-- names, so an author who shadows @lit@ locally cannot thereby break a prompt,
+-- and so is the 'saysText' a @[wft|…|]@ hole goes through.
 module Agentic.WF
-  ( -- * The quoter
+  ( -- * The quoters
     wf,
+    wft,
 
     -- * What a hole may name
     --
@@ -90,6 +101,8 @@ module Agentic.WF
     -- them.
     V (..),
     Says (..),
+    saysText,
+    Scopeless,
 
     -- * Finding a handle's binding
     KnownIx,
@@ -105,11 +118,15 @@ import Agentic.Builder
     Words,
     hole,
     lit,
+    wordsClosed,
   )
 import Data.Char (isAlphaNum, isSpace)
+import Data.Kind (Constraint, Type)
 import Data.List (dropWhileEnd)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
+import GHC.TypeLits (ErrorMessage (Text), TypeError)
 import Language.Haskell.TH (Exp (ListE), ExpQ, Q, litE, mkName, stringL, varE)
 import Language.Haskell.TH.Quote (QuasiQuoter (..))
 
@@ -144,8 +161,43 @@ instance Says Text s where
 instance s ~ s' => Says [Piece s'] s where
   says = id
 
+-- | What a hole says, as the 'Text' it is: 'says' at the empty scope, read back
+-- by 'Agentic.Builder.wordsClosed'.
+--
+-- This is the /same/ path a @define@ hole takes in a @[wf|…|]@ prompt and not a
+-- second one, which is what makes @{name}@ mean one thing in both fences: a
+-- 'Text' says itself, a @define@ written as a fence says the chunks it is, and
+-- 'T.concat' of those chunks is what @wfText [wf|…|]@ always computed.
+--
+-- The @""@ is unreachable: at the empty scope no piece can be an @interp@,
+-- because a hole naming a binding needs a live handle and there are none. It is
+-- written rather than an @error@ so that a define is a value and not a bottom.
+saysText :: forall a. (Scopeless a, Says a '[]) => a -> Text
+saysText = fromMaybe T.empty . wordsClosed . says @a @'[]
+
+-- | The constraint a @[wft|…|]@ hole stands under: whatever it names must be a
+-- @define@, because a 'Text' has no scope for a binding to be live in.
+--
+-- 'Says' refuses a handle here anyway — @KnownIx h '[]@ is exactly the \"this
+-- binding is not live here\" refusal, at the empty scope — but it refuses it as
+-- a scope walk that ran out, which is not what the author did wrong. This one
+-- fires first, at the hole, and says what to do instead; the 'KnownIx' refusal
+-- stays behind it as the backstop it always was.
+--
+-- It is a /compile/ error, so it cannot be a case in a suite that has to
+-- compile; the wording is pinned by being written here and nowhere else.
+type family Scopeless (a :: Type) :: Constraint where
+  Scopeless (V h c) =
+    TypeError
+      ( 'Text "a hole in a [wft|…|] prompt names a define — a value in Haskell \
+              \scope — and never a binding, because the text it yields has no \
+              \scope for one to be live in. Write the prompt as [wf|…|] in the \
+              \block where that handle is live, and splice this text into it."
+      )
+  Scopeless _ = ()
+
 -- ---------------------------------------------------------------------------
--- The quoter
+-- The quoters
 -- ---------------------------------------------------------------------------
 
 -- | A prompt: prose, with @{name}@ holes.
@@ -167,35 +219,81 @@ instance s ~ s' => Says [Piece s'] s where
 -- — five chunks where @guide@ and @patch@ are bindings and @verdictSpec@ is a
 -- @define@, which is @example-000@'s first panel member, chunk for chunk.
 wf :: QuasiQuoter
-wf =
+wf = promptQuoter "[wf|…|]" chunks (\es -> [|concat $(pure (ListE es))|])
+  where
+    chunks (FLit t) = [|[lit (T.pack $(litE (stringL t)))]|]
+    chunks (FHole n) = [|says $(varE (mkName n))|]
+
+-- | A prompt's __text__: the same fence, the same layout, the same holes, read
+-- straight off as the 'Text' they say.
+--
+-- > correctnessLens :: Text
+-- > correctnessLens = [wft|
+-- >     Correctness lens. Read the change below and report only defects that
+-- >     are wrong on inputs this code will actually see.|]
+--
+-- __Why there are two of these.__ A @define@ is a 'Text', and a define worth
+-- reading at the width it is sent at is written at this fence — so until 'wft'
+-- there was one way to write one, and it was to write the prompt and then
+-- convert it: @wfText [wf|…|]@, in front of every define in every authoring
+-- module, with a copy of the conversion in each of them. The owner's ruling on
+-- that was \"I don't like repeating things that I don't have to repeat\", and
+-- the conversion is now written once, here, and named in the brackets.
+--
+-- __It is the same fence, and that is load-bearing.__ 'wft' and 'wf' are two
+-- applications of one @promptQuoter@ over one @parseFence@: one layout rule,
+-- one hole scan, one @normalize@. They differ in what a fragment is staged as
+-- and in nothing else — 'wf' stages a literal as a @lit@ chunk and a hole as its
+-- 'says' chunks; 'wft' stages the same literal as the 'Text' it is and the same
+-- hole as the text that hole 'saysText'. So @[wft|…|]@ is 'T.concat' of exactly
+-- the texts @wfText [wf|…|]@ concatenated, in order, and a block moved from one
+-- spelling to the other cannot move a byte. A copied layout function would have
+-- made that a claim to be tested; a shared one makes it a fact about the two
+-- expressions.
+--
+-- __A hole here names a define.__ There is no scope around a 'Text', so there
+-- is no binding to be live in one, and every @{name}@ resolves through
+-- 'saysText' — the define half of 'Says', unchanged. A hole naming a handle is
+-- refused at the hole by 'Scopeless', in those words.
+wft :: QuasiQuoter
+wft = promptQuoter "[wft|…|]" saying (\es -> [|T.concat $(pure (ListE es))|])
+  where
+    saying (FLit t) = [|T.pack $(litE (stringL t))|]
+    saying (FHole n) = [|saysText $(varE (mkName n))|]
+
+-- | A fence, given a name to refuse under, what to stage each fragment as, and
+-- how to join the staged list.
+--
+-- Everything both quoters have in common is here or in @parseFence@, which is
+-- everything except those last two arguments. A quoter is an expression and
+-- three refusals, and the refusals are one sentence written once.
+promptQuoter :: String -> (Frag -> ExpQ) -> ([Exp] -> ExpQ) -> QuasiQuoter
+promptQuoter name frag join =
   QuasiQuoter
-    { quoteExp = wfExp,
-      quotePat = const (fail "[wf|…|] is a prompt, and a prompt is an expression"),
-      quoteType = const (fail "[wf|…|] is a prompt, and a prompt is an expression"),
-      quoteDec = const (fail "[wf|…|] is a prompt, and a prompt is an expression")
+    { quoteExp = \raw ->
+        either fail pure (parseFence name raw) >>= mapM frag >>= join,
+      quotePat = notAnExpression,
+      quoteType = notAnExpression,
+      quoteDec = notAnExpression
     }
+  where
+    notAnExpression :: String -> Q a
+    notAnExpression =
+      const (fail (name ++ " is a prompt, and a prompt is an expression"))
 
 -- | One piece of the quoted text, before staging.
 data Frag = FLit String | FHole String
   deriving (Eq, Show)
 
-wfExp :: String -> Q Exp
-wfExp raw = do
-  frags <- either fail pure (parseWf raw)
-  pieces <- mapM piece frags
-  [|concat $(pure (ListE pieces))|]
-  where
-    piece :: Frag -> ExpQ
-    piece (FLit t) = [|[lit (T.pack $(litE (stringL t)))]|]
-    piece (FHole n) = [|says $(varE (mkName n))|]
-
 -- ---------------------------------------------------------------------------
 -- The rule
 -- ---------------------------------------------------------------------------
 
--- | Layout, then holes, then @normalize@.
-parseWf :: String -> Either String [Frag]
-parseWf = fmap normalize . holes . layout
+-- | Layout, then holes, then @normalize@ — the rule itself, which both quoters
+-- run and neither owns. The name is the fence's own spelling, and is used only
+-- to say which fence a malformed hole was found in.
+parseFence :: String -> String -> Either String [Frag]
+parseFence name = fmap normalize . holes name . layout
 
 -- | @[__i|…|]@'s rule: CRLF is LF, surrounding blank lines go, the common
 -- leading whitespace of the remaining lines goes, line breaks stay, and there
@@ -227,8 +325,8 @@ layout =
 
 -- | The only syntax: @{name}@ is a hole, @{{@ is a literal brace, @}@ is
 -- always literal. A @{@ that is neither is an error naming the fragment.
-holes :: String -> Either String [Frag]
-holes = go ""
+holes :: String -> String -> Either String [Frag]
+holes name = go ""
   where
     go acc [] = Right [FLit (reverse acc)]
     go acc ('{' : '{' : r) = go ('{' : acc) r
@@ -239,8 +337,9 @@ holes = go ""
               (\rest -> FLit (reverse acc) : FHole nm : rest) <$> go "" r'
         _ ->
           Left
-            ( "[wf|…|]: `{` starts a hole, which is `{name}` for a name in \
-              \scope; write `{{` for a literal brace. At: `"
+            ( name
+                ++ ": `{` starts a hole, which is `{name}` for a name in \
+                   \scope; write `{{` for a literal brace. At: `"
                 ++ take 24 ('{' : r)
                 ++ "`"
             )

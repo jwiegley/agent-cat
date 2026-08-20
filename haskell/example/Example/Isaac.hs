@@ -145,13 +145,11 @@ module Example.Isaac
   )
 where
 
--- The one thing an authoring module needs that the authoring surface does not
--- re-export: the way back from a define's pieces to its text. See 'wfText',
--- which is the only use of it here.
-import Agentic.Builder (wordsClosed)
+-- One import, and it is the authoring surface. There used to be a second — the
+-- way back from a define's pieces to its text, which every define in this
+-- module was written through — and 'wft' is that way back, inside the quoter.
 import Agentic.Workflow
 import qualified Agentic.Workflow.Do as W
-import Data.Maybe (fromMaybe)
 import Data.String (fromString)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -168,28 +166,23 @@ import Prelude
 -- Isaac's own words where a rubric is short, a faithful summary where it is a
 -- page, and in every case the /first chunk/ of the leaf that uses it, which is
 -- what lets 'isaacScript' key on it.
-
--- | A number as prompt text, for the two briefs that tell a leaf how many
--- blocks it is one of. @Incite.Review.count@.
-tshow :: Int -> Text
-tshow = T.pack . show
-
--- | The text a @[wf|…|]@ define says. Every define below that runs to more than
--- one line is a fence, so that the text a leaf sends is read in the source at
--- the width it is sent at, under the same layout rule as the prompts that hole
--- it — and so that the one place a prompt's shape is decided is the quoter.
 --
--- __Why these are 'Text' and not the 'Words' the quoter yields.__ A hole-free
--- fence /is/ a 'Words', and 'Says' splices one into a prompt as happily as it
--- splices a 'Text' — that instance exists for exactly this, and it is the shape
--- a @define@ has in the language. Two things ask for the 'Text' anyway, and
--- both are about not moving a byte:
+-- Every define below that runs to more than one line is written at the fence,
+-- so that the text a leaf sends is read in the source at the width it is sent
+-- at, under the same layout rule as the prompts that hole it — and so that the
+-- one place a prompt's shape is decided is the quoter.
+--
+-- __Why these are 'Text' and not the 'Words' a prompt is.__ A hole-free fence
+-- /is/ a 'Words', and 'Says' splices one into a prompt as happily as it splices
+-- a 'Text' — that instance exists for exactly this, and it is the shape a
+-- @define@ has in the language. Two things ask for the 'Text' anyway, and both
+-- are about not moving a byte:
 --
 --   * 'isaacScript' keys its canned replies on the defines themselves, and a
 --     key is a 'Text' matched as a prefix of a /rendered/ prompt. Defines typed
---     as 'Words' would be rendered at every one of those rows instead — this
---     same conversion, written out once per row, in the one place the module
---     argues should read as \"the key is the define\".
+--     as 'Words' would be rendered at every one of those rows instead — one
+--     conversion, written out once per row, in the one place the module argues
+--     should read as \"the key is the define\".
 --   * __Chunking is normative.__ @plan --raw@ prints the chunk list, so a
 --     define that splices as /two/ chunks where it spliced as one is a visible
 --     change even when the prompt's bytes are identical. 'qaFence', 'grindLens'
@@ -198,13 +191,22 @@ tshow = T.pack . show
 --     prompt that splices them, and as 'Text' they carry the one @lit@ they
 --     always did.
 --
--- 'Agentic.Builder.wordsClosed' cannot fail on a define: the scope is empty, so
--- no piece of one can be an @interp@ — a hole naming a binding needs a live
--- handle, and at the empty scope there are none. The @""@ is unreachable, and
--- is written rather than an @error@ so that a define is a value and not a
--- bottom.
-wfText :: Words '[] -> Text
-wfText = fromMaybe "" . wordsClosed
+-- So both fences are here, each spelled in its own brackets: @[wft|…|]@ for a
+-- define, whose value is the text, and @[wf|…|]@ for a leaf's prompt, whose
+-- value is the chunks. This module used to write the first as @wfText [wf|…|]@
+-- — in front of every define below, with a local function and an import of
+-- @wordsClosed@ to carry it — and that repetition is what 'wft' exists to end.
+-- Not one byte moved when they were swapped. The sharing argument says none
+-- could — the two quoters share the parser, the layout rule and the
+-- empty-literal drop, and differ only in what they stage a fragment as — and
+-- because that equality is the whole safety argument for the sweep,
+-- @ci\/policies.sh@ checks it as two expressions rather than trusting the
+-- argument (the probe row that keeps the tree's last @wfText@).
+
+-- | A number as prompt text, for the two briefs that tell a leaf how many
+-- blocks it is one of. @Incite.Review.count@.
+tshow :: Int -> Text
+tshow = T.pack . show
 
 -- | A roster as the bullet table the two derived briefs hole, one row per
 -- entry. @qaOfCommitOver@ and @grindSynthesisOver@ derive theirs from the very
@@ -216,7 +218,7 @@ bullets rows = T.intercalate "\n" ["- " <> n <> " -- " <> owns | (n, owns) <- ro
 
 -- | @prompts\/explore\/intrepid.md@, summarised. The path, not the risks.
 intrepidStance :: Text
-intrepidStance = wfText [wf|
+intrepidStance = [wft|
   You are bold and ambitious. Your job is the shortest path from here to
   working code in a user's hands. Three other stances cover the risks, the
   design alternatives, and the shape of the tree. Do not repeat their work.
@@ -235,7 +237,7 @@ intrepidStance = wfText [wf|
 -- | @prompts\/explore\/skeptic.md@, summarised. Its two best sentences are
 -- quoted rather than paraphrased.
 skepticStance :: Text
-skepticStance = wfText [wf|
+skepticStance = [wft|
   You are the skeptic. Your job is to find what will go wrong, not to
   confirm the idea sounds reasonable. You are reading code, not writing it.
 
@@ -252,7 +254,7 @@ skepticStance = wfText [wf|
 
 -- | @prompts\/explore\/contemplative.md@, summarised. The design options.
 contemplativeStance :: Text
-contemplativeStance = wfText [wf|
+contemplativeStance = [wft|
   You are the contemplative stance. Your job is the design space, not the
   path and not the risks. Name two or three shapes this change could take,
   and for each: what it makes easy, what it makes hard, and what it commits
@@ -265,7 +267,7 @@ contemplativeStance = wfText [wf|
 -- | @prompts\/explore\/architect.md@, summarised. Reads the tree, not the
 -- request.
 architectStance :: Text
-architectStance = wfText [wf|
+architectStance = [wft|
   You are the architect. The other three stances argue about the change;
   none of them was asked what shape it has to land in. Read the tree.
 
@@ -283,7 +285,7 @@ architectStance = wfText [wf|
 -- reduction has no combinator here, so the order lives in the prompt instead,
 -- which is the same order and one fewer moving part.
 planBrief :: Text
-planBrief = wfText [wf|
+planBrief = [wft|
   Write the implementation plan. Four stances were asked first, and their
   reports follow in narrowing order: what breaks, then the shape it must
   land in, then which design, then the moves. The last block is the request
@@ -296,7 +298,7 @@ planBrief = wfText [wf|
 
 -- | @ponytailLadder@, as a plan lens: delete first.
 ponytailLens :: Text
-ponytailLens = wfText [wf|
+ponytailLens = [wft|
   Ponytail lens. Rewrite the plan below, deleting first.
 
   For each step ask, in order: does this need to exist at all; can the
@@ -306,7 +308,7 @@ ponytailLens = wfText [wf|
 
 -- | @prompts\/plan-denotational.md@, summarised.
 denotationalLens :: Text
-denotationalLens = wfText [wf|
+denotationalLens = [wft|
   Denotational lens. Rewrite the plan below so that each step says what the
   thing it builds MEANS before it says how it is built. Where a step
   introduces a type, state its denotation in one line. Where two steps
@@ -315,7 +317,7 @@ denotationalLens = wfText [wf|
 
 -- | @prompts\/plan-risk.md@, summarised.
 riskLens :: Text
-riskLens = wfText [wf|
+riskLens = [wft|
   Risk lens. Rewrite the plan below so that the step whose failure costs
   the most is the step that is verified first. Add the check each risky
   step needs; delete a check that guards nothing.
@@ -323,7 +325,7 @@ riskLens = wfText [wf|
 
 -- | @prompts\/plan-verification.md@, summarised.
 verificationLens :: Text
-verificationLens = wfText [wf|
+verificationLens = [wft|
   Verification lens. Rewrite the plan below so that every step names the
   command or the test that decides whether it worked. A step whose done
   condition is a person's opinion is a step that is not planned yet.
@@ -331,7 +333,7 @@ verificationLens = wfText [wf|
 
 -- | @lookaheadLens@, summarised: reorder for irreversibility.
 lookaheadLens :: Text
-lookaheadLens = wfText [wf|
+lookaheadLens = [wft|
   Lookahead lens. Reorder the plan below so that the irreversible steps
   come last and the steps that teach you something come first. A migration,
   a published artefact, a deleted file: each is a step that cannot be
@@ -341,7 +343,7 @@ lookaheadLens = wfText [wf|
 
 -- | @simpleEnglishLens@, summarised: an ASD-STE100 reword.
 simpleEnglishLens :: Text
-simpleEnglishLens = wfText [wf|
+simpleEnglishLens = [wft|
   Simple English lens. Reword the plan below in Simple Technical English:
   one instruction per sentence, active voice, present tense, no word used
   in two senses. Change no step and drop no step -- only the words.
@@ -351,7 +353,7 @@ simpleEnglishLens = wfText [wf|
 
 -- | The correctness lens, summarised. @claude-agent\/fable@ in @incite@.
 correctnessLens :: Text
-correctnessLens = wfText [wf|
+correctnessLens = [wft|
   Correctness lens. Read the change below and report only defects that are
   wrong on inputs this code will actually see. For each: the location, the
   input that reaches it, and what it produces instead of the right answer.
@@ -369,7 +371,7 @@ correctnessLens = wfText [wf|
 -- named per question, so the pairing that must not exist is a pairing nobody
 -- wrote.
 fessLens :: Text
-fessLens = wfText [wf|
+fessLens = [wft|
   Fess lens. Audit the claims made about this change against the change
   itself. Four shapes, most important first:
 
@@ -386,7 +388,7 @@ fessLens = wfText [wf|
 
 -- | The complexity lens, summarised. Codex in @incite@.
 complexityLens :: Text
-complexityLens = wfText [wf|
+complexityLens = [wft|
   Complexity lens. What is braided together in this change that should be
   separate? Name each braid: the two concerns, the line where they meet,
   and the seam a reader would cut on. Do not report defects and do not
@@ -394,7 +396,7 @@ complexityLens = wfText [wf|
 
 -- | The ponytail lens over a commit, summarised.
 ponytailReviewLens :: Text
-ponytailReviewLens = wfText [wf|
+ponytailReviewLens = [wft|
   Ponytail lens. What in this change should not exist at all? Reinvented
   standard library, a dependency that buys one function, an abstraction
   with one caller, flexibility nothing asked for. One line per cut: what
@@ -421,7 +423,7 @@ qaSiblings =
 -- telling its reader a stale reviewer count, which is prose that nothing goes
 -- red on.
 qaFence :: Text
-qaFence = wfText [wf|
+qaFence = [wft|
   Adversarial QA lens. Yours is the question none of the others asks:
   how does this fail?
 
@@ -450,7 +452,7 @@ qaFence = wfText [wf|
 -- with the answer format changed. What does /not/ carry over is the policy
 -- around the word: see 'reviewLite'.
 haskellTriageBrief :: Text
-haskellTriageBrief = wfText [wf|
+haskellTriageBrief = [wft|
   You are a router, not a reviewer. The input below either shows the diff
   or names the change. If it shows the diff, read only the paths its
   headers touch. If it only names a ref, run `git show --name-only` on it
@@ -465,7 +467,7 @@ haskellTriageBrief = wfText [wf|
 -- summarised. Thirty kilobytes in @incite@, which is why it stands behind a
 -- router.
 haskellHouseLens :: Text
-haskellHouseLens = wfText [wf|
+haskellHouseLens = [wft|
   Haskell lens. Types, totality, strictness and instances, in that order.
 
   - Types: does a type admit a state the code then has to check for?
@@ -491,7 +493,7 @@ noHaskellEdits = "No Haskell edits."
 -- answers here, so the fold is a tool that writes the blocks down in the
 -- narrowing order — which is a leaf @incite@ does not pay for.
 reviewReportBrief :: Text
-reviewReportBrief = wfText [wf|
+reviewReportBrief = [wft|
   Write the review below to `review-lite.md` in the current directory,
   one block per reviewer, under the heading each reviewer's name gives it,
   in the order the blocks arrive -- correctness, haskell, fess, qa,
@@ -507,7 +509,7 @@ reviewReportBrief = wfText [wf|
 -- tool. This is a real difference and not a paraphrase: the operator's text
 -- reaches @incite@'s first leaf as data, and reaches this one as an answer.
 readRequest :: Text
-readRequest = wfText [wf|
+readRequest = [wft|
   Read the change request for this run and reply with it verbatim,
   and with nothing else.|]
 
@@ -519,14 +521,14 @@ readRequest = wfText [wf|
 -- honestly answer in four seconds by pressing enter, and then nothing in the
 -- run states what the change has to clear.
 planSteerBrief :: Text
-planSteerBrief = wfText [wf|
+planSteerBrief = [wft|
   Review the plan -- state the acceptance bar this change must clear, and
   any other guidance, before implementation begins.|]
 
 -- | The worker's brief — @Incite.Feature.implementLeaf@, with its two rules of
 -- the record quoted, and a run was lost to each.
 implementBrief :: Text
-implementBrief = wfText [wf|
+implementBrief = [wft|
   Implement this plan fully in the current repository -- edit the files
   directly.
 
@@ -554,7 +556,7 @@ implementBrief = wfText [wf|
 -- handle and not a value, so the classification is a leaf. Two of the four
 -- endings survive the translation; see 'shipFeatureLiteProgram'.
 tripStatusBrief :: Text
-tripStatusBrief = wfText [wf|
+tripStatusBrief = [wft|
   You are the orchestrator, not a reviewer. Read ONLY the last non-empty
   line of the summary below.
 
@@ -567,7 +569,7 @@ tripStatusBrief = wfText [wf|
 
 -- | @codeRule@: the artefact rule every code fixer stands under.
 codeRule :: Text
-codeRule = wfText [wf|
+codeRule = [wft|
   The code is the artefact and the review is the record. Correct the CODE.
   Never edit the review to make a finding go away, and never weaken a test
   to make a check pass: a weakened assertion is the cheapest way there is
@@ -575,7 +577,7 @@ codeRule = wfText [wf|
 
 -- | @closeWithChanges@, verbatim.
 closeWithChanges :: Text
-closeWithChanges = wfText [wf|
+closeWithChanges = [wft|
   Close with what you changed and what you rejected, in one paragraph.
   This leaf runs once and nothing calls it again, so a finding you leave
   open leaves the run with it open.|]
@@ -589,7 +591,7 @@ closeWithChanges = wfText [wf|
 -- /answerer/ authored — so this is the second, and it is labelled as such
 -- rather than dressed as the first.
 greenGateBrief :: Text
-greenGateBrief = wfText [wf|
+greenGateBrief = [wft|
   Run `nix flake check` in the current repository and read its exit code.
 
   - Exit 0: reply with exactly APPROVE.
@@ -599,7 +601,7 @@ greenGateBrief = wfText [wf|
 
 -- | The repair leaf under the gate.
 repairBrief :: Text
-repairBrief = wfText [wf|
+repairBrief = [wft|
   The gate below is red. Fix the tree so that `nix flake check` passes.
 
   Do not silence the check, do not lower a warning level, and do not mark a
@@ -608,7 +610,7 @@ repairBrief = wfText [wf|
 
 -- | The remediation leaf's brief.
 remediateBrief :: Text
-remediateBrief = wfText [wf|
+remediateBrief = [wft|
   Below is a panel's verdict on the work, and then the work itself. Close
   every finding the panel raised, in the code.|]
 
@@ -617,7 +619,7 @@ remediateBrief = wfText [wf|
 -- | The facts probe every grind's facts file ends with, and the line it emits
 -- outside the target checkout.
 grindFactsBrief :: Text
-grindFactsBrief = wfText [wf|
+grindFactsBrief = [wft|
   Read the target checkout's facts file and reply with it verbatim.
 
   Then probe every path it names. If any named path does not exist here,
@@ -644,7 +646,7 @@ grindLensRoster =
 
 -- | One grind lens's brief, derived from its row of 'grindLensRoster'.
 grindLens :: Text -> Text -> Text
-grindLens name owns = wfText [wf|
+grindLens name owns = [wft|
   Test-suite audit, `{name}` lens. You own {owns}.
 
   Read the tree named in the facts below. Report only findings of your own
@@ -660,7 +662,7 @@ grindLens name owns = wfText [wf|
 -- The refusal is the point: an unauthenticated backend returns nothing, and
 -- nothing folded into a ranked list reads exactly like a clean tree.
 grindSynthesisBrief :: Text
-grindSynthesisBrief = wfText [wf|
+grindSynthesisBrief = [wft|
   Synthesise one ranked report from the lens blocks below and write it to
   `docs/audits/grind-tests-<date>.md`.
 
@@ -688,7 +690,7 @@ grindSynthesisBrief = wfText [wf|
 -- in a loop whose exhaustion aborts the run before any fixer acts. Here the
 -- scan is a leaf and the abort is the empty else arm of an @if@.
 factsGateBrief :: Text
-factsGateBrief = wfText [wf|
+factsGateBrief = [wft|
   Read the report below. Answer no if it contains the line FACTS PATHS
   UNRESOLVED, or if it says a lens block was missing or empty. Answer yes
   otherwise.
@@ -699,7 +701,7 @@ factsGateBrief = wfText [wf|
 -- — @grindRule gsFacts@ — so no grind can audit under one set of facts and
 -- repair under another.
 grindRule :: Text
-grindRule = wfText [wf|
+grindRule = [wft|
   The suite is the artefact and the report is the record. Close the
   findings in the TESTS. Never delete a failing test to close a finding,
   and never weaken an assertion: the cheapest failure a test-suite
@@ -708,7 +710,7 @@ grindRule = wfText [wf|
 -- | @fixerContinuation@, summarised: the closing clause a fixer under an
 -- orchestrator stands under.
 fixerContinuation :: Text
-fixerContinuation = wfText [wf|
+fixerContinuation = [wft|
   You are running under an orchestrator that will call you again with your
   own summary as its input, so write the summary for your successor: which
   findings you closed, which you rejected and why, and which are left.
@@ -719,7 +721,7 @@ fixerContinuation = wfText [wf|
 -- | The audit panel's brief over the fixer's own change — @asReviewSubject@
 -- pointed at the delta rather than at the report.
 auditOfFixBrief :: Text
-auditOfFixBrief = wfText [wf|
+auditOfFixBrief = [wft|
   Review the fixer's own change, not the report it was working from.
   A test-suite remediation's cheapest failure is a weakened assertion,
   which a green gate cannot see and only a diff shows.
@@ -731,14 +733,14 @@ auditOfFixBrief = wfText [wf|
 
 -- | @stackFacts@, summarised: what the slicing worker is told about the tree.
 stackFactsBrief :: Text
-stackFactsBrief = wfText [wf|
+stackFactsBrief = [wft|
   Read the repository's stack facts -- the trunk branch, the remote, the
   Graphite configuration and the verification script -- and reply with them
   verbatim. Then reply with `git diff` against trunk.|]
 
 -- | The slice plan's brief.
 stackSliceBrief :: Text
-stackSliceBrief = wfText [wf|
+stackSliceBrief = [wft|
   Cut the diff below into a stack of branches of roughly five hundred lines
   each, on compile-time dependency boundaries: every branch must build on
   its own, with its parent applied and nothing above it.
@@ -749,7 +751,7 @@ stackSliceBrief = wfText [wf|
 
 -- | The steer at the slice plan.
 stackSteerBrief :: Text
-stackSteerBrief = wfText [wf|
+stackSteerBrief = [wft|
   Review the slice plan -- every branch, what it holds, and what it defers.|]
 
 -- | The first human gate.
@@ -758,7 +760,7 @@ stackBuildGate = "Build the stack from this plan? Reply yes or no."
 
 -- | The bootstrap worker, which writes the stack's three scripts.
 stackBootstrapBrief :: Text
-stackBootstrapBrief = wfText [wf|
+stackBootstrapBrief = [wft|
   Write the stack's tooling to disk before any branch is cut:
   `verify-stack.sh`, which builds every branch in order and exits non-zero
   on the first failure; `ci-budget.sh`, which reports whether the shared
@@ -767,7 +769,7 @@ stackBootstrapBrief = wfText [wf|
 
 -- | The cut worker.
 stackCutBrief :: Text
-stackCutBrief = wfText [wf|
+stackCutBrief = [wft|
   Cut the next branch of the stack, bottom first, exactly as the plan
   below describes it. One branch per trip. Rewrite no branch that is
   already approved.
@@ -779,7 +781,7 @@ stackCutBrief = wfText [wf|
 -- | The orchestrator's reading of the cut worker's line, at the stack's three
 -- endings.
 stackStatusBrief :: Text
-stackStatusBrief = wfText [wf|
+stackStatusBrief = [wft|
   You are the orchestrator. Read ONLY the last non-empty line below.
 
   - WORK COMPLETE: reply with exactly APPROVE.
@@ -789,7 +791,7 @@ stackStatusBrief = wfText [wf|
 
 -- | The stack's exec gate.
 stackGateBrief :: Text
-stackGateBrief = wfText [wf|
+stackGateBrief = [wft|
   Run `./verify-stack.sh` and read its exit code. Exit 0: reply yes.
   Anything else: reply no.
 
@@ -797,7 +799,7 @@ stackGateBrief = wfText [wf|
 
 -- | The triage worker, over the review bot's findings.
 stackTriageBrief :: Text
-stackTriageBrief = wfText [wf|
+stackTriageBrief = [wft|
   Address the panel's findings below, branch by branch, downstack first: a
   fix on a lower branch can moot a finding on a higher one. Restack after
   each fix.
@@ -807,7 +809,7 @@ stackTriageBrief = wfText [wf|
 
 -- | The second human gate.
 stackPromoteGate :: Text
-stackPromoteGate = wfText [wf|
+stackPromoteGate = [wft|
   Promote this stack out of draft? Each branch spends a CI run on a shared
   runner. Reply yes or no.|]
 
@@ -817,7 +819,7 @@ stackPromoteGate = wfText [wf|
 -- auto-answers its gates, so the last thing between a draft stack and a public
 -- one is a file the agent is forbidden to create.
 stackConsentBrief :: Text
-stackConsentBrief = wfText [wf|
+stackConsentBrief = [wft|
   Run `test -f .stack-promote-approved` and reply yes if it exits 0, no
   otherwise.
 
@@ -826,7 +828,7 @@ stackConsentBrief = wfText [wf|
 
 -- | The promotion worker.
 stackPromoteBrief :: Text
-stackPromoteBrief = wfText [wf|
+stackPromoteBrief = [wft|
   Promote the stack out of draft, bottom first, one branch at a time. Before
   each branch, re-run `./ci-budget.sh --wait`: a clearance read once and
   reused is a clearance about a queue that has changed.

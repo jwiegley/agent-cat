@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -75,6 +76,15 @@
 -- Pure throughout: routing reads one field the interpreter has already
 -- computed, so a probe of it needs no process, no network and no transport.
 --
+-- A sixth pins the __two prompt quoters__ ("Agentic.WF"): that @[wft|…|]@ and
+-- @wfText [wf|…|]@ are the same bytes, hole for hole. That equality is what
+-- made the sweep of @Example.Isaac@ safe, and it is a claim about two
+-- expressions rather than about a program, so it is checked as two
+-- expressions — the same block written both ways, with a hole naming a 'Text'
+-- and a hole naming a fence. The rows that assert the /layout/ are there so
+-- that two identically broken values cannot pass: a fence's text is dedented,
+-- opens at its first word, and ends without a newline.
+--
 -- A second section pins the __surface's own refusals__ (fess wave-2, gap V3):
 -- the three mistakes 'Agentic.Workflow' answers with an @error@ rather than
 -- with a type error, forced out of the four bottoms in "SurfaceRefusals". They
@@ -107,11 +117,12 @@ import Agentic.Route
     routes,
   )
 import Agentic.Shell (ShellConfig (shellCwd), defaultShellConfig, executingWorld)
-import Agentic.Workflow (sessionPolicy, sharesOneSession)
+import Agentic.Workflow (Words, sessionPolicy, sharesOneSession, wf, wft)
 import Agentic.World (Event (Event), Trace, World (World), billFresh, billMemo, eventJson)
 import Control.Exception (ErrorCall, SomeException, evaluate, try)
 import Data.IORef
 import Data.List (nub, sort)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -130,6 +141,7 @@ import Agentic.Builder
     program,
     progPlan,
     stop,
+    wordsClosed,
   )
 import qualified Data.Map.Strict as Map
 import Agentic.Observe (printedValue)
@@ -313,6 +325,65 @@ twoCommandsProgram =
       act (askToolRunning "green" "true" ["two"] [lit "gate"]) stop
 
 -- ---------------------------------------------------------------------------
+-- The two prompt quoters (Agentic.WF)
+-- ---------------------------------------------------------------------------
+
+-- | The conversion every define in this tree used to be written through.
+--
+-- Spelled out here rather than imported: @Example.Isaac@ carried a copy of it
+-- and applied it forty-six times, and the sweep to 'wft' deleted both the copy
+-- and every application. This is the /old/ side of the comparison, so it has to
+-- go on being spelled the old way — and nothing else in the tree may.
+--
+-- It lives in this module and not in "SurfaceRefusals" because it needs no
+-- @RebindableSyntax@, which is the one reason that module exists.
+wfText :: Words '[] -> Text
+wfText = fromMaybe "" . wordsClosed
+
+-- | A define written as a fence and left as one, so that a hole below names a
+-- 'Words' rather than a 'Text': the second of the two @define@ shapes 'Says'
+-- knows, and the one whose splice is a list of chunks rather than one chunk.
+verdictFence :: Words '[]
+verdictFence = [wf|Reply with exactly APPROVE if you find nothing, or OBJECTION: <one line> for each finding.|]
+
+-- | A hole-free define, both ways.
+lensOldWay, lensNewWay :: Text
+lensOldWay = wfText [wf|
+  Correctness lens. Read the change below and report only defects that are
+  wrong on inputs this code will actually see.
+
+  For each: the location, the input that reaches it, and what it produces
+  instead of the right answer.|]
+lensNewWay = [wft|
+  Correctness lens. Read the change below and report only defects that are
+  wrong on inputs this code will actually see.
+
+  For each: the location, the input that reaches it, and what it produces
+  instead of the right answer.|]
+
+-- | A define that holes a computed count and a fence, both ways — @qaFence@'s
+-- shape, which is the shape that would break first if the two quoters splice a
+-- hole differently.
+holedOldWay, holedNewWay :: Text
+holedOldWay = wfText [wf|
+  You are one of {reviewers} independent reviewers and there is no synthesis
+  step behind you, so anything you repeat ships twice. The other {siblings}
+  own the rest.
+
+  {verdictFence}|]
+holedNewWay = [wft|
+  You are one of {reviewers} independent reviewers and there is no synthesis
+  step behind you, so anything you repeat ships twice. The other {siblings}
+  own the rest.
+
+  {verdictFence}|]
+
+-- | The two counts the holes above name, derived as @qaFence@ derives its own.
+reviewers, siblings :: Text
+reviewers = "6"
+siblings = "5"
+
+-- ---------------------------------------------------------------------------
 -- Routing (Agentic.Route)
 -- ---------------------------------------------------------------------------
 
@@ -492,6 +563,28 @@ main = do
   -- is only exercised by giving the flag.
   refusal failures "input refuses a misspelled run fact"
     inputIsMisspelledRunFact "is under the `run.` prefix"
+
+  -- The two quoters say the same bytes. `wft` was added so that a define need
+  -- not be written as a prompt and then converted, and the only thing anybody
+  -- had to be sure of before rewriting every define in `Example.Isaac` was
+  -- this: that the conversion moving inside the quoter moves no text. The first
+  -- two rows are that equality at the two hole shapes; the last three keep it
+  -- from being an agreement between two equally wrong values, by pinning what
+  -- the shared layout rule did to the block — the first blank line dropped, the
+  -- common indentation gone, and no trailing newline.
+  --
+  -- The half of `wft` that is NOT here is its refusal: a hole naming a live
+  -- binding is `Agentic.WF.Scopeless`, and that is a *type* error, which cannot
+  -- be a case in a probe that has to compile. Writing the mistake is the one
+  -- thing this file may not do, so the wording is pinned by living at the
+  -- definition and nowhere else.
+  pureProbe failures "[wft|…|] is wfText [wf|…|], byte for byte"
+    [ ("a hole-free define", lensNewWay == lensOldWay),
+      ("a define holing a count and a fence", holedNewWay == holedOldWay),
+      ("the fence opens at its first word", "Correctness lens. Read" `T.isPrefixOf` lensNewWay),
+      ("the holes said what they name", "one of 6 independent reviewers" `T.isInfixOf` holedNewWay),
+      ("and no fence ends in a newline", not (any ("\n" `T.isSuffixOf`) [lensNewWay, holedNewWay]))
+    ]
 
   -- The fail-over itself: the run settles, the trace names who answered, the
   -- narration says what it was about to do, and — the acceptance criterion —

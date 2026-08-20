@@ -62,7 +62,16 @@
 # loop when the predicate holds, and a reworded phrase would switch that gate off
 # without failing anything.
 #
-# No Lean, no corpus; every commit may run it. Thirty-three checks, and one
+# And the two prompt quoters (`Agentic.WF`): that `[wft|…|]` and the
+# `wfText [wf|…|]` it replaced are the same bytes, hole for hole — the same
+# block written both ways, once with no hole and once holing a count and a
+# fence, plus three rows on the layout so that two identically broken values
+# cannot agree their way past it. That equality is the whole safety argument for
+# the sweep that rewrote every define in `Example.Isaac`, and it is a claim
+# about two expressions, so it is checked as two expressions rather than
+# inferred from a program's numbers.
+#
+# No Lean, no corpus; every commit may run it. Thirty-four checks, and one
 # command line.
 set -euo pipefail
 cd "$(dirname "$0")/.."

@@ -193,8 +193,9 @@ executable tier1
 
 -- The policy gate (test/PolicyProbe.hs): the seven D6/D7 probes the wave-one
 -- audit ran by hand, four surface refusals, D5's executing world, D6's
--- fail-over, and routing's grammar and resolution rule, pinned as a program.
--- `lake`-free and corpus-free; run by ci/policies.sh.
+-- fail-over, routing's grammar and resolution rule, and the byte identity of
+-- the two prompt quoters, pinned as a program. `lake`-free and corpus-free;
+-- run by ci/policies.sh.
 --
 -- `SurfaceRefusals` is its own module because the four programs in it are
 -- written in the authoring surface, and `RebindableSyntax` — which is what an

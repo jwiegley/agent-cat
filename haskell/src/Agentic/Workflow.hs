@@ -300,6 +300,7 @@ module Agentic.Workflow
 
     -- * Prompts
     wf,
+    wft,
     Says (..),
     Words,
     Piece,
@@ -449,7 +450,7 @@ import Agentic.Raw
     Served (..),
     servedBy1,
   )
-import Agentic.WF (KnownIx, Says (..), V (..), wf)
+import Agentic.WF (KnownIx, Says (..), V (..), wf, wft)
 import Data.Char (isDigit)
 import Data.Kind (Constraint, Type)
 import qualified Data.List.NonEmpty as NE
