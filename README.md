@@ -271,3 +271,19 @@ live sources before they went. Cite that page rather than the module names.
   closed with the code, and §5 where the mathematics went that earned its place.
 
 Issue tracking is `obr` (prefix `acat`; see `AGENTS.md` and `doc/PLAN.org`).
+
+## Acknowledgements
+
+This work owes a real debt to **Isaac Shapira** and two projects of his:
+[agent-functor](https://github.com/jwiegley/agent-functor) and
+[incite](https://github.com/jwiegley/incite). agent-functor showed what a
+typed, lawful account of agent interaction could look like as working
+Haskell, and incite's workflows — the review ladders, the rosters of
+deliberately-partial reviewers, the grind loops that treat verification as
+a separate party — are the direct ancestors of this repository's authoring
+surface and of several of its worked examples (`Example.Isaac` carries five
+of them, ported and priced). More than the code, the *stance* carried over:
+that a workflow is a value worth reasoning about before it runs, and that
+an intelligent reviewer is built, not prompted. The design conversations
+recorded in `doc/research/isaac-workflows.md` trace what was taken, what
+was adapted, and where this project chose differently.

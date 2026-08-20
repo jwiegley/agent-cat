@@ -2891,15 +2891,17 @@ From acat-zms: star_star, sliding a(ba)* = (ab)*a, denesting, (a+b)* are now pro
 ]
 #+end_src
 
-* TODO [#B] Handoff: the next-step program (triage -> excision -> live runtime work)
+* DONE [#B] Handoff: the next-step program (triage -> excision -> live runtime work)
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-next-step-handoff-8t7
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-20 Thu 10:15]
-:MODIFIED: [2026-08-20 Thu 11:43]
+:MODIFIED: [2026-08-20 Thu 15:01]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-20 Thu 15:01]
+:CLOSE_REASON: done
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -2924,6 +2926,13 @@ FROZEN PLAN (owner-approved 2026-08-20, artifact e949eac0): Step 1 housekeeping 
     "author": "johnw",
     "text": "Step 2 COMPLETE: excision landed at 4aed549 (fess-audited, three findings folded pre-push), 38 tickets closed on evidence (8 folded + 30 graveyard). Tracker at 7 open. Step 3 begins: acat-owa part 1 + awork-runner-supplied-facts as reserved inputs; acceptance = wiggum, review-heavy, partner-reviewer sound for daily use. Attempt counters reset.",
     "created_at": "2026-08-20T18:43:23Z"
+  },
+  {
+    "id": 206,
+    "issue_id": "acat-next-step-handoff-8t7",
+    "author": "johnw",
+    "text": "Step 3 COMPLETE: agent-cat 74a8b61 + agent-workflows 6a35ccc pushed, fess-audited (safe-to-push verdict, all folds landed), flake relocked, two-session guide committed (057c36b). Deferred on the record: owa part 2 + hard-wrap banner test; freshSentinel uniqueness test; fuk fixture; qzl lows; bisim ping retry; f8e. The frozen plan's three steps are done.",
+    "created_at": "2026-08-20T22:01:20Z"
   }
 ]
 #+end_src
@@ -3272,7 +3281,7 @@ From acat-ubt: convFold handles certain members only; the general List (MSemirin
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 12:55]
-:MODIFIED: [2026-08-14 Fri 18:34]
+:MODIFIED: [2026-08-20 Thu 15:01]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -3298,6 +3307,13 @@ From the live re-test at 3b2ab57. (1) claude-agent-acp prepends model-fallback n
     "author": "johnw",
     "text": "Suspended 2026-08-14: owner redirected to a full DSL surface redesign (heavy review + new surface design) before adapter work. Version-drift note above still stands.",
     "created_at": "2026-08-15T01:34:34Z"
+  },
+  {
+    "id": 205,
+    "issue_id": "acat-owa",
+    "author": "johnw",
+    "text": "Part 1 CLOSED at 74a8b61: transport narration separated at the wire (turnNarration/turnText), announced unconditionally, downstream prompts receive the answer — proven by ci/acp.sh scenario 16 against a narrating stub; ruling and rejected options in the Acp haddock; 0.70.0 observation recorded. Part 3 was already done (triage 2026-08-20). REMAINING, deferred as instrumentation per the owner's foundation directive: part 2 (usage data discarded) and the audit's hard-wrapped-banner gap (two-line banner only half-separated, untested).",
+    "created_at": "2026-08-20T22:01:19Z"
   }
 ]
 #+end_src
