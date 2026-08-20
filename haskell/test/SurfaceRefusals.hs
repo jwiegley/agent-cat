@@ -27,13 +27,18 @@ module SurfaceRefusals
     callsAnUnlistedFunction,
     namedIsReserved,
     takesIsReserved,
+    inputIsMisspelledRunFact,
   )
 where
 
 -- As in @tier1/CallVectors.hs@: `RebindableSyntax` costs this module its
 -- implicit `Prelude`, and `OverloadedStrings` then needs `fromString` by name.
+import Data.Either (Either (..))
+import Data.Function (const)
+import Data.List (map)
 import Data.String (fromString)
-import Data.Text (Text)
+import Data.Text (Text, unpack)
+import GHC.Err (error)
 
 import Agentic.Workflow
 import qualified Agentic.Workflow.Do as W
@@ -88,3 +93,24 @@ reservedParam = function "shadowing" (takes @"b1" Text noParams) \p -> W.do
 -- | 'reservedParam', in a table, which is where it is first forced.
 takesIsReserved :: Program
 takesIsReserved = defining [SomeFn reservedParam] stop
+
+-- | An 'input' under the runner's own prefix, misspelled.
+--
+-- @run.backends@ is a fact the runner binds; @run.backend@ is nothing at all,
+-- and a program declaring it would elaborate, price and print perfectly well
+-- and then refuse every @run@ of itself — because @run@ needs every input and
+-- the runner has no such fact to give. So the refusal belongs where the name is
+-- written, which is here.
+--
+-- It is forced the way the runner forces it: 'inputNames' is the first thing a
+-- command line reads, and a program is what the harness knows how to force, so
+-- the inputs are read and then supplied empty.
+inputIsMisspelledRunFact :: Program
+inputIsMisspelledRunFact =
+  case supply par (map (const "") (inputNames par)) of
+    Right p -> p
+    Left why -> error (unpack why)
+  where
+    par = taking (input "run.backend" :> noInputs) \b -> workflow W.do
+      act (tool "t") [wf|reach: {b}|]
+      stop

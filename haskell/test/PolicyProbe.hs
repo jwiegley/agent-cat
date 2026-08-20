@@ -99,6 +99,7 @@ import Agentic.Route
   ( Backend (BackendAcp, BackendDeck),
     Routes,
     backendFor,
+    backendSpelling,
     parseBackend,
     parseRoute,
     routeBackends,
@@ -106,6 +107,7 @@ import Agentic.Route
     routes,
   )
 import Agentic.Shell (ShellConfig (shellCwd), defaultShellConfig, executingWorld)
+import Agentic.Workflow (sessionPolicy, sharesOneSession)
 import Agentic.World (Event (Event), Trace, World (World), billFresh, billMemo, eventJson)
 import Control.Exception (ErrorCall, SomeException, evaluate, try)
 import Data.IORef
@@ -135,6 +137,7 @@ import System.Exit (exitFailure)
 
 import SurfaceRefusals
   ( callsAnUnlistedFunction,
+    inputIsMisspelledRunFact,
     namedIsReserved,
     takesIsReserved,
     twoOfOneName,
@@ -484,6 +487,11 @@ main = do
     namedIsReserved "`b1` is a name this surface generates for itself"
   refusal failures "takes refuses a generated name"
     takesIsReserved "`b1` is a name this surface generates for itself"
+  -- The author's half of the run facts. The operator's half is a command line
+  -- and is typed in `ci/policies.sh`, because a refusal `resolveInputs` makes
+  -- is only exercised by giving the flag.
+  refusal failures "input refuses a misspelled run fact"
+    inputIsMisspelledRunFact "is under the `run.` prefix"
 
   -- The fail-over itself: the run settles, the trace names who answered, the
   -- narration says what it was about to do, and — the acceptance criterion —
@@ -617,6 +625,55 @@ main = do
       ( "a blank name takes the shape refusal",
         either ("--route takes NAME=BACKEND" `T.isInfixOf`) (const False) (parseRoute " =acp:codex")
       )
+    ]
+  -- The law `backendSpelling`'s haddock asserts and nothing checked:
+  -- `parseBackend . backendSpelling == Right`. It is the reason a caller may
+  -- name a backend in one word without inventing `acp:` for itself — the run's
+  -- header, `run.backends` and every refusal that quotes a backend all go
+  -- through it — so a spelling the parser could not read back would be a
+  -- second grammar wearing the first one's name. Over the shapes the parser can
+  -- produce, including the two the round trip could plausibly lose: a path with
+  -- slashes and dots, and a deck id containing the very colon the parser splits
+  -- on.
+  pureProbe failures "backendSpelling round-trips through parseBackend"
+    [ (T.unpack (backendSpelling b), parseBackend (backendSpelling b) == Right b)
+      | b <-
+          [ BackendAcp "stub",
+            BackendAcp "claude",
+            BackendAcp "codex",
+            BackendAcp "/opt/bin/my-adapter",
+            BackendAcp "./adapters/local.sh",
+            BackendDeck "gemini-pane",
+            BackendDeck "notes: monday",
+            BackendDeck "3"
+          ]
+    ]
+  -- `run.engine`'s two halves are built from `sessionPolicy`
+  -- (`Agentic.Cli.runFactsOf`) so that a program can gate on them
+  -- (`sharesOneSession`), and that is a contract between a printed sentence and
+  -- a predicate. Asserted here because the two live in different repositories:
+  -- `agent-workflows`' `wiggum` refuses to start a loop when this predicate
+  -- holds, and a reworded phrase would turn that gate off without failing
+  -- anything.
+  --
+  -- The mixed arm is the one worth stating: a run that is half `acp:` and half
+  -- `deck:` shares a conversation with SOME of its answerers, and a gate that
+  -- read that as independence would be reading the half that suits it.
+  pureProbe failures "run.engine says its session policy in one matchable phrase"
+    [ ("a fresh session per question is not one session", not (sharesOneSession ("acp: " <> sessionPolicy True))),
+      ("one session for the run is", sharesOneSession ("acp: " <> sessionPolicy False)),
+      ("a deck pane is, by construction", sharesOneSession ("deck: " <> sessionPolicy False)),
+      ( "and a mixed run is, on the strength of its shared half",
+        sharesOneSession ("acp: " <> sessionPolicy True <> "; deck: " <> sessionPolicy False)
+      ),
+      -- What `plan` and `cost` hole, where no run is being made.
+      ("an unbound fact is not a claim of sharing", not (sharesOneSession "")),
+      -- The scripted target reaches no session at all, and its own words must
+      -- not be read as either policy.
+      ( "and neither is a scripted table",
+        not (sharesOneSession "scripted: a canned table, no process and no session")
+      ),
+      ("the two policies are different sentences", sessionPolicy True /= sessionPolicy False)
     ]
   pureProbe failures "parseRoute splits NAME=BACKEND on the first ="
     [ ("deep=acp:codex", parseRoute "deep=acp:codex" == Right ("deep", BackendAcp "codex")),

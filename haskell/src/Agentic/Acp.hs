@@ -66,6 +66,88 @@
 -- method — is answered @-32601@, honestly, because the handshake advertised no
 -- such capability.
 --
+-- == The transport's own voice is not the answer
+--
+-- __The ruling.__ A leading /transport banner/ — a line the adapter writes about
+-- itself into the answer stream — is separated from the answer __here, at the
+-- transport boundary__ ('promptTurn'), kept verbatim beside it as
+-- 'turnNarration', and announced on stderr through 'Agentic.Exec.stderrLog' on
+-- every turn that carries one. What the trusted base reads, what the table
+-- records and what travels into every later prompt is 'turnText': what the
+-- /addressee/ said. The pattern is 'Agentic.Exec.transportBanners' — one
+-- measured literal, exact, anchored at the head of the turn — and there is no
+-- knob.
+--
+-- __The measurement.__ @claude-agent-acp@ put
+--
+-- > **Model fallback:** claude-fable-5 declined this request (cyber); retried
+-- > with claude-opus-4-8. The session will continue on claude-opus-4-8.
+--
+-- at the head of a turn as an ordinary @agent_message_chunk@, and it cost twice.
+-- __At the reading__: @decodeVerdict@ approves only when approval is the /whole/
+-- reply — the fail-closed rule — so a reviewer's @APPROVE@ under that banner
+-- decoded as an objection and bought a revision round nobody asked for. __At the
+-- travelling__: the banner was part of the recorded answer, so it rode verbatim
+-- into every prompt that quoted that answer — three reviewer prompts and the
+-- revise prompt — where a sentence about a retry sits inside the patch under
+-- review, and every model downstream reads it as the author's words.
+--
+-- __The three house rules this obeys.__ The record never lies: the banner is
+-- kept, verbatim, in the field named for it. What travels is the answer, not the
+-- transport's narration about itself. And nothing is dropped silently: a
+-- separated banner is announced unconditionally, through 'Agentic.Exec.stderrLog'
+-- and not through 'chat', because a run that edited what an addressee appears to
+-- have said must not look identical to one that had nothing to edit.
+--
+-- __Why the answer is the right thing to change, not the decoder.__ The banner
+-- is the adapter's sentence about its own routing. It was never the addressee's,
+-- so recording it as the addressee's answer is the falsehood — and stripping it
+-- is not editing what somebody said, it is declining to attribute to them
+-- something they did not say. The issue's own objection to separation (\"it is
+-- the adapter's text not the model's\") is therefore the argument /for/ it; what
+-- it warns about is fragility, and fragility is bounded two ways: the pattern is
+-- one measured literal rather than a shape (see
+-- 'Agentic.Exec.transportBanners'), and the separated text is kept and printed,
+-- so a wrong separation is visible in the run's own output rather than lost.
+--
+-- __The options rejected.__
+--
+-- * /Leave decoding strict and only surface the narration in the transcript./
+--   It fixes nothing that matters. The verdict still flips, the revision round
+--   is still bought, and — the half a transcript cannot reach — the banner still
+--   rides into every downstream prompt as the author's words. A reader who can
+--   see why the run went wrong is not a run that went right.
+-- * /Record it as a turn annotation and leave the answer as it arrived./ Half of
+--   what is done here, and the half that costs nothing: an annotation nobody
+--   subtracts from the answer leaves both defects standing.
+-- * /Separate it and say nothing./ Rejected as silent dropping: the operator
+--   would have no way to tell a turn whose answer was edited from one that was
+--   not, and the pattern is a judgement about somebody else's bytes, which is
+--   exactly the kind of judgement that must be printed.
+-- * /Widen the decoder instead — let @decodeVerdict@ approve a reply whose
+--   approval is not the whole of it./ That is the fail-closed rule, and it is
+--   load-bearing: an @APPROVE@ with a sentence after it is a reviewer with a
+--   reservation, and this repository's whole panel semantics rests on not
+--   guessing which. The trusted base is also byte-faithful to Lean and pinned by
+--   the frozen corpus; a transport's misbehaviour is not a reason to move it.
+-- * /A policy knob — @acpStripNarration@, or a @--narration@ flag./ Rejected,
+--   and this is the one to defend: there is no run for which recording the
+--   transport's self-description as the addressee's answer is the right answer.
+--   A knob would exist only so that the wrong setting could be chosen, and it
+--   would double the paths every scenario in @ci\/acp.sh@ has to cover. Zero new
+--   configuration.
+-- * /Ask the adapter not to do it, or read the substitution off a protocol
+--   field./ There is no such field: a model substitution is not in the ACP
+--   schema anywhere, which is precisely why the adapter is reduced to saying it
+--   in prose in the answer stream. If a later protocol version carries it, the
+--   pattern here retires and the annotation stays.
+--
+-- One thing this does __not__ repair, and it is the other half of the same
+-- measurement: the substituted model (@claude-opus-4-8@) is not in the adapter's
+-- advertised catalogue, so @Conn.configValues@ is not a complete account of what
+-- may answer a question. The banner is the /only/ evidence a run gets of that,
+-- which is a second reason to keep it and print it rather than drop it.
+--
 -- == Every addressee is this adapter
 --
 -- A question carries an 'Agentic.Raw.Addressee' — @model \"reviewer-secure\"@,
@@ -276,8 +358,10 @@ import Agentic.Exec
     codeWord,
     defaultExecSettings,
     defaultRetries,
+    oneLine,
     raiseGap,
     requiresCompletedTurn,
+    splitTransportNarration,
     stderrLog,
     trimAscii,
     withTransportGaps,
@@ -611,7 +695,20 @@ stopCompleted StopEndTurn = True
 stopCompleted _ = False
 
 -- | What one @session\/prompt@ produced — every @agent_message_chunk@
--- concatenated in arrival order, and the reason the turn ended.
+-- concatenated in arrival order and then cut into the two voices that arrived
+-- on the one wire, plus the reason the turn ended.
+--
+-- __Two texts and not one.__ 'turnNarration' is what the /adapter/ said about
+-- itself — the leading transport banners
+-- 'Agentic.Exec.splitTransportNarration' recognizes, verbatim — and 'turnText'
+-- is what the /addressee/ said, byte for byte as it arrived under them. Nothing
+-- is discarded: the turn is @turnNarration@ then @turnText@, in the order the
+-- chunks came, and 'sayAcp' announces a non-empty 'turnNarration' on stderr
+-- every single time. A turn no banner led is @turnNarration == \"\"@ and a
+-- 'turnText' identical to the concatenation — which is every turn from every
+-- adapter that keeps its own commentary off the answer stream. The ruling this
+-- field implements, and the options it was chosen over, are in the module
+-- header.
 --
 -- The stop reason is kept rather than dropped because @refusal@ and @cancelled@
 -- are turns with (usually) empty text, and an interpreter that could not tell
@@ -619,6 +716,7 @@ stopCompleted _ = False
 -- gave.
 data Turn = Turn
   { turnText :: !Text,
+    turnNarration :: !Text,
     turnStop :: !StopReason
   }
   deriving (Eq, Show)
@@ -736,10 +834,15 @@ renderPermissionDecision d =
 -- whose content is /not/ text is a protocol violation and is reported as one:
 -- dropping it silently would lose an answer.
 --
--- What this cannot do is tell an answer from the adapter's own narration — codex
--- was measured prefixing a turn with "Model metadata … not found" as a genuine
--- @agent_message_chunk@ — which is one more reason the trusted base downstream
--- is narrow.
+-- What this cannot do is tell an answer from the adapter's own narration, and it
+-- does not try: a chunk is text or it is a protocol violation, and /whose/ text
+-- it is is decided once, over the assembled turn, by 'promptTurn' — one
+-- judgement about one whole reply instead of a guess per fragment, which matters
+-- because a banner arrives split across chunks like everything else. The
+-- recognized family and the ruling are 'Agentic.Exec.transportBanners' and the
+-- module header; codex's measured @Model metadata … not found@ prefix is
+-- outside it, un-separated and visible, which is one more reason the trusted
+-- base downstream is narrow.
 chunkText :: Value -> Either Text (Maybe Text)
 chunkText params = case field "update" params >>= field "sessionUpdate" >>= textOf of
   Nothing -> Left "a session/update carried no update.sessionUpdate string"
@@ -1153,6 +1256,12 @@ newSession acp = do
 -- | Send one text prompt and collect the turn. Chunks accumulate in arrival
 -- order; the request's own reply is what ends the turn, so no heuristic decides
 -- when the agent has finished speaking.
+--
+-- The one thing that happens to the bytes on the way out is
+-- 'Agentic.Exec.splitTransportNarration': the two voices on the wire are told
+-- apart /here/, where the wire is, and both halves are handed on. That is the
+-- whole of the transport-banner ruling's mechanism — see 'Turn' and the module
+-- header for what it is and why.
 promptTurn :: Acp -> Text -> Text -> IO Turn
 promptTurn acp what text = do
   sid <-
@@ -1174,8 +1283,9 @@ promptTurn acp what text = do
       (\chunk -> atomicModifyIORef' acc (\cs -> (chunk : cs, ())))
       True
   said <- T.concat . reverse <$> readIORef acc
+  let (narration, answer) = splitTransportNarration said
   case field "stopReason" res >>= textOf of
-    Just stop -> pure (Turn said (stopReasonOfText stop))
+    Just stop -> pure (Turn answer narration (stopReasonOfText stop))
     Nothing ->
       throwIO . AcpProtocol (T.pack (acpProgram acp)) $
         "session/prompt returned no stopReason: " <> clipText (compact res)
@@ -1259,6 +1369,15 @@ acpGap e = case fromException e of
 -- from an interrupted turn is indistinguishable from one an addressee gave, and
 -- no check further down can recover the difference. That is the same policy as
 -- decode exhaustion, at the other kind of evidence.
+--
+-- A turn whose answer arrived under a transport banner is reported before
+-- anything else is done with it, through 'Agentic.Exec.stderrLog' and never
+-- through 'chat': the separation is the run editing what an addressee /appears/
+-- to have said, and an operator who cannot see that happen cannot audit it. The
+-- banner is printed whole; the answer under it is what the rest of this function
+-- and everything downstream sees. (The abandonment message below therefore
+-- quotes the answer, not the banner — the banner is on the line above it, in
+-- every run that had one.)
 sayAcp :: forall (c :: Code). AcpConfig -> Acp -> SCode c -> Q c -> Text -> IO Text
 sayAcp cfg acp c q extra = do
   writeIORef (acpAsked acp) (what, permissionByCode code (qAddressee q))
@@ -1266,6 +1385,14 @@ sayAcp cfg acp c q extra = do
   chat cfg ("put " <> what <> " (" <> tshow (T.length message) <> " characters)")
   turn <- promptTurn acp what message
   chat cfg ("turn ended " <> renderStopReason (turnStop turn))
+  when (not (T.null (turnNarration turn))) $
+    stderrLog $
+      "transport narration separated from the answer to "
+        <> what
+        <> ": '"
+        <> oneLine (turnNarration turn)
+        <> "' — the adapter's own words about itself, kept out of the answer, "
+        <> "which is what the trusted base reads and what every later prompt quotes"
   if stopCompleted (turnStop turn)
     then pure (turnText turn)
     else do

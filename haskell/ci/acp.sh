@@ -23,6 +23,11 @@
 # stubs and never a real agent, here as everywhere in this gate — the two
 # backends are told apart by *outcome*, not by a flag.
 #
+# And, since acat-owa, the part of it that decides *whose voice* a turn was in:
+# an adapter that writes the measured model-fallback banner into the answer
+# stream, and a client that separates it from the answer, announces the
+# separation, and puts a clean answer into every prompt that quotes it (16).
+#
 # Runs on every commit, beside ci/deck.sh. Exits 0 only if every scenario
 # behaved exactly as written below.
 set -uo pipefail
@@ -401,10 +406,59 @@ want_no_line "billFresh"
 note "route-usage: four refusals, each before anything was spawned, exit 1"
 
 # ---------------------------------------------------------------------------
+# 16. An adapter that narrates itself into the answer stream.
+#
+# `test/acp-narrator.py` is the stub behind a proxy that writes the measured
+# `claude-agent-acp` model-fallback banner into the head of every turn as an
+# ordinary `agent_message_chunk` — in the model's voice, because the ACP schema
+# has no field for a model substitution — and inspects every prompt going the
+# other way for it. Both halves are the defect of `acat-owa`: the banner was
+# part of the recorded answer, so a reviewer's APPROVE under it decoded as an
+# objection (approval must be the WHOLE reply, the fail-closed rule), and the
+# banner rode verbatim into every prompt that quoted that answer.
+#
+# `Exec.splitTransportNarration` separates it at the transport boundary, so:
+# every one of the seven prompts is clean *as the adapter sees it*, which is the
+# assertion no client-side log can make; the run bills 7/7 like scenario 1,
+# because the verdicts are read as the approvals they are; and each separation
+# is announced through `stderrLog`, unconditionally — the run must not be able
+# to edit what an addressee appears to have said in silence.
+#
+# The negative control is not a flag but a measurement, taken by hand at
+# `transportBanners = []` on this same command line: the banner rode into
+# prompts 3 through 10, all three verdicts read as objections, the revision
+# round it bought re-drafted the patch into the stub's "nothing canned for that"
+# refusal, the panel objected again, and the run ended Unsettled — billFresh 13,
+# billMemo 10, `applied.c` never written, exit 0. A run that quietly did
+# nothing, which is why 7/7 here is the assertion and not the exit code.
+# ---------------------------------------------------------------------------
+play narrating-adapter run harden --engine acp --adapter test/acp-narrator.py --timeout 60000
+want_code 0
+# Every prompt clean, at the far end of the pipe: the first that quotes an
+# answer, and the last, which quotes the patch the act is about to write.
+want_line "acp-narrator: prompt 3 carried no transport banner"
+want_line "acp-narrator: prompt 7 carried no transport banner"
+want_no_line "CARRIED THE TRANSPORT BANNER"
+# The banner did arrive — the separation was real work and not a vacuous pass —
+# and it is named where the operator reads it, on a verdict, which is the
+# question the defect was measured on.
+want_line "agentic: transport narration separated from the answer to the verdict question put to model reviewer-correct: '**Model fallback:** claude-fable-5 declined this request (cyber)"
+# Scenario 1's bills and scenario 1's artifact: a narrating adapter costs a run
+# nothing once the narration is not part of the answer.
+want_bills 7 7
+want_file applied.c
+grep -qF 'snprintf(buf, sizeof buf' "$state/applied.c" \
+  || bad "applied.c does not hold the line the patch adds"
+# And the run's own transcript: no recorded answer begins with the banner, which
+# is the same fact from the other end — what the table holds is what travels.
+want_no_line "<- **Model fallback:**"
+note "narrating-adapter: the banner was separated and announced, 7/7 clean prompts, exit 0"
+
+# ---------------------------------------------------------------------------
 
 scenario=summary
 if [ "$failures" = 0 ]; then
-  echo "ci/acp: 15 scenarios passed, 0 failed"
+  echo "ci/acp: 16 scenarios passed, 0 failed"
 else
   echo "ci/acp: $failures scenario assertion(s) failed" >&2
 fi

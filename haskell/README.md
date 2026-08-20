@@ -443,6 +443,25 @@ and under `--raw` a note stands immediately above the printed program, because
 a program printed with an empty subject is a different text from the one that
 will run.
 
+**Three input names are the runner's and not the command line's.** An input
+under the `run.` prefix is a *run fact* — `run.backends`, `run.engine`,
+`run.sentinel` (`Agentic.Workflow.runFacts`) — and `run` binds every one of them
+from the run it is making: how many answerers this run reaches and which,
+whether each question gets a session of its own or they all share one, and a
+line generated for this run and put in no other place than the prompts that hole
+it. So `run` still requires every input, but two parties supply them, and the
+one that supplies these three is not you: `--input-arg run.engine=acp` is
+refused, naming who binds it rather than sending you looking for a typo, because
+a command line cannot say what a run did. Nothing else changes — a run fact
+arrives at `Given` by the same door as any other input, prints on the same
+`inputs` line, and is spliced as the same literal chunks — so every count and
+every list an operator is shown names only their own inputs, and a program
+declaring `subject` and `run.engine` takes *one* input as far as `--input FILE`
+is concerned. Declaring a `run.` name that is not one of the three is the
+author's mistake and is refused on a CAF, since the runner would have no such
+fact to bind. `plan` and `cost` make no run, so they leave all three unbound
+at `""` like any other absent input.
+
 ## Running a workflow
 
 A program in this language is a value, and `agentic-run` is the four things you
@@ -470,7 +489,9 @@ wrapping a scope. Opt-in and off by default: no existing program is affected.
 All three verbs also take the input flags — `--input FILE`, `--input-file
 NAME=FILE`, `--input-arg NAME=VALUE` — for a program that takes inputs, because
 `plan --raw` prints prompts and an operator pricing a run wants to price the
-run they will make. A program that takes none refuses them by name.
+run they will make. A program that takes none refuses them by name, and so does
+a flag naming one of the three run facts — those are `run`'s to bind, and the
+refusal says so.
 
 `<example>` is `harden` or `hello`: the two walked programs, written in
 `Agentic.Workflow` as `Example.Harden`. **They

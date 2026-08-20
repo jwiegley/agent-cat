@@ -163,7 +163,9 @@
 -- program with inputs is an ordinary Haskell function of them and nothing
 -- type-level is needed: a define never enters a scope and cannot collide with
 -- a binding. See 'Parameterized' for why @main@'s parameters are not the
--- mechanism.
+-- mechanism. Three input names are the __runner's__ to bind rather than the
+-- command line's — what the run reached, under which engine, and the line it
+-- generated for itself — and they are inputs like any other: see 'runFacts'.
 --
 -- == Two branches, two mechanisms
 --
@@ -253,6 +255,8 @@
 --     already in scope, and a live name is not introduced twice@;
 --   * a parameter or a 'named' binding taking a name the surface generates for
 --     itself — 'reserved', on a CAF;
+--   * an 'input' under the @run.@ prefix that is not one of the runner's own
+--     facts — 'runFacts', on a CAF;
 --   * 'done' in a value-returning body — @Couldn't match ‘'CodeText’ with
 --     ‘'CodeAck’@; a body with no terminal — @Couldn't match ‘()’ with ‘Term’@;
 --     a statement after @answer@ or @done@ — @nothing follows a terminal@;
@@ -278,6 +282,17 @@ module Agentic.Workflow
     input,
     taking,
     Example (..),
+
+    -- ** The facts the runner supplies
+    runFacts,
+    runFactBackends,
+    runFactEngine,
+    runFactSentinel,
+    reservedInput,
+    runFactRefusal,
+    sessionPolicy,
+    oneSessionPhrase,
+    sharesOneSession,
 
     -- * The chain both lists are written with
     Chain,
@@ -1985,12 +2000,175 @@ noInputs = INil
 -- | One input's name, on its way into an input list. 'input' makes one, and
 -- nothing else does; see 'Chain' for why the name is wrapped rather than
 -- passed as the 'Text' it is.
-newtype In = In Text
+--
+-- A @data@ and not a @newtype@, with the field strict: 'input' refuses a
+-- misspelled run fact, and a newtype's pattern match is a coercion that forces
+-- nothing — so the refusal would have waited until somebody looked at the name,
+-- which on a good day is a printed plan and on a bad one is a run that already
+-- started. Boxed, @'chainCons'@'s own pattern match is what raises it, at the
+-- @:>@ where the mistake was typed.
+data In = In !Text
 
 -- | One input, by the name a command line binds it under:
 -- @input "request" :> input "base" :> noInputs@.
+--
+-- A name under the @run.@ prefix is a __run fact__ and is not the command
+-- line's to bind: see 'runFacts'. One that is not one of the three is refused
+-- here, on a CAF, exactly as 'reserved' refuses a generated binding name — a
+-- program declaring @input \"run.whatever\"@ would otherwise elaborate fine and
+-- then refuse every @run@ of itself, because the runner has no such fact to
+-- bind and @run@ needs every input.
 input :: Text -> In
-input = In
+input n
+  | reservedInput n, n `notElem` runFacts =
+      error
+        ( "input: `"
+            <> T.unpack n
+            <> "` is under the `run.` prefix, which names the facts the runner "
+            <> "supplies about the run it is making, and the facts there are "
+            <> T.unpack (T.intercalate ", " runFacts)
+        )
+  | otherwise = In n
+
+-- | Whether an input name is under the prefix the runner owns.
+--
+-- The prefix and not the list, because the two refusals differ: an /author/ who
+-- writes an unknown @run.@ name has misspelled a fact ('input' says so), and an
+-- /operator/ who supplies a known one has misunderstood who binds it
+-- ('runFactRefusal' says so).
+reservedInput :: Text -> Bool
+reservedInput = T.isPrefixOf "run."
+
+-- | __The facts a runner supplies about the run it is making__, as the names a
+-- program declares them under and a prompt holes them by.
+--
+-- These are inputs and nothing else: a @define@ supplied at run time, spliced
+-- into prompts as literal chunks, invisible to every static fold. What makes
+-- them different from @subject@ or @base@ is only /who binds them/ — the runner
+-- always does, and no command line may ('runFactRefusal') — because each is a
+-- fact about the run rather than about the work:
+--
+--   * @run.backends@ — how many answerers this run reaches, and which. The
+--     roster line the run's header prints, in one line.
+--   * @run.engine@ — the engine and its session policy: a canned table, a new
+--     session per question, or one session for the whole run. This is the fact
+--     that decides whether two answers were reached independently, and it is
+--     the runner's to state.
+--   * @run.sentinel@ — a line this run generated for itself and put in no other
+--     place than the prompts that hole it. An independence probe that asserts
+--     such a line without one having been generated asserts nothing; this is
+--     what makes the premise true.
+--
+-- __Why a closed set.__ An open one would be a configuration language: every
+-- program would declare its own facts, the runner would grow a flag per fact,
+-- and a prompt could come to depend on something the runner learns only
+-- halfway through a run. These three are known before the first question is
+-- put — they are properties of the command line and of the clock — which is
+-- what lets them be /inputs/, bound once, at the moment the program is built.
+--
+-- __A run fact a program only holes moves no fold.__ An input reaches the term
+-- only as literal chunks inside prompts ('Agentic.Plan.level',
+-- 'Agentic.Plan.size', 'Agentic.Plan.askNodes' and 'Agentic.Plan.costM' read no
+-- prompt), so a program that splices a run fact prices exactly as it did before
+-- — which is why @plan@ and @cost@, where no run is being made, leave them
+-- unbound and still answer.
+--
+-- __A program may also branch on one in Haskell, and then the shape is the
+-- value's.__ 'supply' builds the 'Agentic.Builder.Program' after the inputs are
+-- known, so a run fact is available to ordinary Haskell before there is a
+-- program to fold — which is the cheapest tier there is: zero questions and zero
+-- paths, because the arm not taken is not in the term at all. 'sharesOneSession'
+-- exists for exactly that, and the honest reading of an unbound fact is what
+-- makes it safe: @plan@ and @cost@ print the shape a run with an unknown engine
+-- would take, which is the shape that keeps every check the fact was going to
+-- gate.
+runFacts :: [Text]
+runFacts = [runFactBackends, runFactEngine, runFactSentinel]
+
+-- | @run.backends@ — the roster line, in the words the header prints.
+runFactBackends :: Text
+runFactBackends = "run.backends"
+
+-- | @run.engine@ — the engine and its session policy.
+runFactEngine :: Text
+runFactEngine = "run.engine"
+
+-- | @run.sentinel@ — the line this run generated for itself.
+runFactSentinel :: Text
+runFactSentinel = "run.sentinel"
+
+-- | __Whether a question is put in a session of its own__, in the one wording
+-- every reader of that fact shares.
+--
+-- It is here and not in "Agentic.Cli" for 'runFactRefusal''s reason: this is a
+-- statement about what @run.engine@ /means/, and the runner that prints it, the
+-- header that announces it and the program that branches on it must be reading
+-- one sentence. Three readers, one spelling — the run's header
+-- (@Agentic.Cli.sayBackends@), the fact itself (@Agentic.Cli.runFactsOf@), and
+-- any program that gates on 'sharesOneSession'.
+--
+-- The argument is the policy and not a transport config, because the two
+-- transports arrive at it differently and must not each get a wording: an
+-- @acp:@ backend reads @Agentic.Acp.acpFreshPerQuestion@, and a @deck:@ backend
+-- is 'False' by construction — it sends into a session somebody else started,
+-- so there is no per-question session for it to open.
+sessionPolicy :: Bool -> Text
+sessionPolicy freshPerQuestion
+  | freshPerQuestion = "a new session per question"
+  | otherwise = oneSessionPhrase
+
+-- | The words 'sessionPolicy' says when every question of a run shares one
+-- conversation.
+--
+-- Named because it is matched as well as printed: 'sharesOneSession' is the
+-- match, and a phrase spelled twice would be a gate that stopped agreeing with
+-- the header the moment either was reworded.
+oneSessionPhrase :: Text
+oneSessionPhrase = "one session for the run"
+
+-- | __Does this @run.engine@ value say that some answerer shares one
+-- conversation with the rest of the run?__
+--
+-- The one machine-readable question a program may ask of that fact, and the
+-- reason it is answerable at all is that both halves of the fact are built from
+-- 'sessionPolicy'.
+--
+-- __It is an @isInfixOf@ and not an equality, on purpose.__ A mixed run states
+-- both policies in one value (@\"acp: a new session per question; deck: one
+-- session for the run\"@), and the honest reading of that is 'True': one of the
+-- answerers this run reaches has read everything else it was asked, and a
+-- program that needs a separate evaluator cannot tell which of them it got.
+--
+-- __An unbound fact is 'False'__, which is 'T.isInfixOf''s own answer at the
+-- empty text and the right one: @plan@ and @cost@ leave the run facts unbound
+-- because no run is being made, and a program priced against a run that does
+-- not exist must price the run that might. A gate on this predicate therefore
+-- costs a static fold nothing — it is decided in Haskell before the
+-- 'Agentic.Builder.Program' exists, so it adds no question and no path — and
+-- @cost@ prints the shape a run with an unknown engine would take.
+sharesOneSession :: Text -> Bool
+sharesOneSession = T.isInfixOf oneSessionPhrase
+
+-- | The refusal an operator gets for naming a run fact on the command line,
+-- and 'Nothing' for every name that is theirs to give.
+--
+-- It is here rather than in "Agentic.Cli" because it is a statement about what
+-- an input /is/, and because a second runner over a second registry must refuse
+-- it in the same words. The wording names who binds it, because the operator's
+-- next move depends on that: there is no flag to fix, and the fact will be
+-- there.
+runFactRefusal :: Text -> Maybe Text
+runFactRefusal n
+  | n `elem` runFacts =
+      Just
+        ( "input '"
+            <> n
+            <> "' is a run fact: the runner binds it from the run it is making, "
+            <> "and a command line cannot say what a run did. The facts are "
+            <> T.intercalate ", " runFacts
+            <> ", and every one of them is bound for you"
+        )
+  | otherwise = Nothing
 
 -- | One input, onto the rest of an input list. The index gains a @Text@,
 -- which is what 'taking' curries the body over.

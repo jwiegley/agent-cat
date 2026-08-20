@@ -81,6 +81,7 @@ module Agentic.Route
     -- * What the command line said
     parseBackend,
     parseRoute,
+    backendSpelling,
 
     -- * The table
     Routes (..),
@@ -194,6 +195,24 @@ parseBackend spec = case T.breakOn ":" spec of
           <> spec
           <> "' in --route: a backend is acp:<adapter> (start an adapter of \
              \this run's own) or deck:<id> (send to a live agent-deck session)"
+
+-- | A backend as the operator would have written it: the printed inverse of
+-- 'parseBackend'.
+--
+-- @'parseBackend' ('backendSpelling' b) == Right b@ for every backend
+-- 'parseBackend' can produce, which is what makes this the grammar's own
+-- spelling rather than a second one: it lives beside the parser so the two
+-- cannot drift, and a caller that wants a backend named in one word does not
+-- invent @acp:@ for itself.
+--
+-- It is deliberately __not__ what the run's header prints for a single backend.
+-- That line carries the adapter's whole argv, because an operator reading a
+-- header wants to know which program was started; a caller naming a backend
+-- inside a sentence wants the word they typed.
+backendSpelling :: Backend -> Text
+backendSpelling = \case
+  BackendAcp w -> "acp:" <> w
+  BackendDeck s -> "deck:" <> s
 
 -- | @NAME=BACKEND@, split on the first @=@.
 --

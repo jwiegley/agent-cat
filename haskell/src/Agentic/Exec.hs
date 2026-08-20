@@ -132,6 +132,10 @@ module Agentic.Exec
     nudge,
     requiresCompletedTurn,
 
+    -- * Whose words a reply is
+    transportBanners,
+    splitTransportNarration,
+
     -- * The scripted world
     scriptedWorld,
     scriptedWorldWith,
@@ -697,6 +701,114 @@ requiresCompletedTurn :: Code -> Addressee -> Bool
 requiresCompletedTurn CodeAck _ = True
 requiresCompletedTurn _ (AddrPerson _) = True
 requiresCompletedTurn _ _ = False
+
+-- ---------------------------------------------------------------------------
+-- Whose words a reply is
+-- ---------------------------------------------------------------------------
+
+-- | The markers a __transport banner__ begins with: a line a transport writes
+-- about /itself/ into the answer stream, in the addressee's voice, because the
+-- wire it owns gave it no other channel to say it on.
+--
+-- One entry, and it is the one that was measured. @claude-agent-acp@ 0.64.0 put
+--
+-- > **Model fallback:** claude-fable-5 declined this request (cyber); retried
+-- > with claude-opus-4-8. The session will continue on claude-opus-4-8.
+--
+-- at the head of a turn as an ordinary @agent_message_chunk@ — a sentence about
+-- the transport's own routing, arriving on the wire as if the model had said
+-- it. "Agentic.Acp" is where that costs something and where the ruling about it
+-- is written down; this is the pattern the ruling is anchored on.
+--
+-- __0.64.0 is the version it was seen on.__ If a successor re-words the banner,
+-- this marker stops matching and the failure is /under/-separation: the banner
+-- travels again, visibly, in the transcript and in the prompts, exactly as it
+-- did before this function existed. It cannot become over-separation, because
+-- the only thing an unmatched pattern can do is nothing. That asymmetry is why
+-- the list holds a literal rather than a shape, and it is what makes adding a
+-- marker later a safe change and guessing one now an unsafe one.
+--
+-- __0.70.0: not reproduced, and the pattern is retained for the transcripts that
+-- carry it.__ One live run on that version —
+-- @agentic-run run harden --engine acp --adapter claude --timeout 180000@, the
+-- fixture whose @cyber@-flagged content drew the fallback on 0.64.0 — put all six
+-- questions, ended every turn @end_turn@, and produced no banner: no
+-- @**Model fallback:**@ and no @declined@ anywhere in the trace or on stderr, on
+-- an adapter that opened a fresh session per question. That is evidence about
+-- one run's routing and not about the wording, since a fallback that does not
+-- happen says nothing about how it would be announced — so the marker is
+-- unchanged. A recorded transcript from 0.64.0 still separates correctly, which
+-- is what the pattern is for and why deleting it on this evidence would be
+-- trading a known-good separation for an unmeasured guess.
+--
+-- __Why one literal and not a shape.__ The list is matched as an exact
+-- case-sensitive prefix of a trimmed line, and it holds a marker that has been
+-- seen on a wire rather than a family that might exist. A rule like \"any
+-- leading @**Label:**@\" or \"any leading paragraph in bold\" would separate a
+-- model's own emphasis from its own answer the first time a reviewer opened
+-- with @**Objection:**@ — and an answer edited by a pattern nobody measured is
+-- exactly the failure this function exists to prevent, with the blame moved.
+-- Adding a marker here is cheap; a marker that is wrong is not.
+--
+-- Codex's measured @Model metadata … not found@ prefix (see
+-- 'Agentic.Acp.chunkText') is deliberately __absent__: no record in this
+-- repository holds its exact wording, so any pattern for it would be a guess
+-- about bytes, and under-separating a text answer costs prose in a prompt where
+-- over-separating costs the answer itself.
+transportBanners :: [Text]
+transportBanners = ["**Model fallback:**"]
+
+-- | Separate a reply's leading transport banners from the answer underneath:
+-- @(narration, answer)@.
+--
+-- Leading lines whose trimmed form begins with one of 'transportBanners' are
+-- the narration; a blank line between a banner and an answer is the banner's
+-- paragraph break and is consumed — it lands in neither half, which is the
+-- one whitespace the round trip below excuses. Everything from the first
+-- line that is neither is the
+-- answer, __byte for byte as it arrived__: nothing inside it is rewritten, and
+-- the concatenation of the two halves is the reply again but for that
+-- whitespace.
+--
+-- Three properties, and they are the whole contract:
+--
+-- 1. __No banner, nothing moves.__ @splitTransportNarration r == (\"\", r)@
+--    whenever @r@\'s first line is not a banner — including when a banner
+--    appears further down, which is left alone on purpose: a banner in the
+--    middle of a turn cannot be told from a model quoting one, and the measured
+--    defect is at the head.
+-- 2. __Nothing is discarded.__ The narration is returned, not dropped, so a
+--    caller can record it; a caller that drops it is answerable for that, and
+--    'Agentic.Acp.sayAcp' does not.
+-- 3. __A reply that was only narration answers nothing.__ The answer is then
+--    empty, which is the truth — the addressee said nothing — and the trusted
+--    base reads it as it reads any empty turn: @declined@ for a verdict,
+--    unreadable for a flag, empty for a text.
+--
+-- Here rather than in "Agentic.Text" because this is not a decision about what
+-- an addressee's bytes /mean/ — that decision exists once, in the byte-faithful
+-- port, and this module may not grow a second copy of it. It is the question
+-- underneath: __whose bytes they are__. The trusted base is handed the
+-- addressee's, which is the same base and the same reading it always had.
+--
+-- Exported for the same reason 'requiresCompletedTurn' is: a transport whose
+-- adapter narrates itself owes its reader this separation, and there is more
+-- than one transport. "Agentic.Acp" applies it; "Agentic.AgentDeck" has not been
+-- measured emitting a banner, and adopting it there is this one call when it is.
+splitTransportNarration :: Text -> (Text, Text)
+splitTransportNarration reply = peel [] (T.splitOn "\n" reply)
+  where
+    peel :: [Text] -> [Text] -> (Text, Text)
+    peel seen ls = case ls of
+      (l : rest)
+        | isBanner l -> peel (l : seen) rest
+        -- Only *after* a banner, which is what makes property (1) hold: with
+        -- nothing seen yet a blank first line is part of the answer.
+        | not (null seen) && T.null (trimAscii l) -> peel seen rest
+      _ -> (T.intercalate "\n" (reverse seen), T.intercalate "\n" ls)
+
+    isBanner :: Text -> Bool
+    isBanner l = any (`T.isPrefixOf` trimAscii l) transportBanners
 
 -- ---------------------------------------------------------------------------
 -- The decode loop

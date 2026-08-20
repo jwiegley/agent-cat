@@ -48,7 +48,56 @@
 # spare is declared. Pure throughout: no process, no network, because routing
 # reads one field the interpreter has already computed.
 #
-# No Lean, no corpus; every commit may run it. Thirty checks.
+# And the two laws that were asserted in a haddock and checked by nobody. First,
+# `backendSpelling`'s round trip: `parseBackend . backendSpelling == Right` over
+# every shape the parser can produce, including the two the trip could plausibly
+# lose — an adapter given as a path, and a deck id containing the very colon the
+# parser splits on. Second, `run.engine`'s session policy, which is a contract
+# between a printed sentence and a predicate: both halves of the fact are built
+# from `Agentic.Workflow.sessionPolicy` so that `sharesOneSession` can read them,
+# a fresh-per-question run is not sharing, a deck pane is, and a MIXED run is —
+# on the strength of its shared half, because a gate that read the other half
+# would be reading the one that suits it. That pair lives in different
+# repositories from its consumer: `agent-workflows`' `wiggum` refuses to start a
+# loop when the predicate holds, and a reworded phrase would switch that gate off
+# without failing anything.
+#
+# No Lean, no corpus; every commit may run it. Thirty-three checks, and one
+# command line.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 nix develop path:./. -c cabal run -v0 policy-probe
+
+# ---------------------------------------------------------------------------
+# The one refusal that is the command line's
+# ---------------------------------------------------------------------------
+#
+# The run facts (`Agentic.Workflow.runFacts`) are inputs the RUNNER binds, and
+# `--input-arg run.engine=…` is an operator claiming to know what a run did.
+# `Agentic.Cli.resolveInputs` refuses it, and the only way to exercise a refusal
+# a command line earns is to type the command line: the probe above covers the
+# author's half (an `input` under `run.` that is not a fact), which is an
+# `error` on a CAF and reachable from Haskell.
+#
+# `plan` and not `run`, deliberately: the refusal must arrive before anything is
+# started, and `plan` starts nothing even when it succeeds — so a green row here
+# is evidence about the resolution and not about a transport. Exit 1, because
+# nothing ran: it is a usage error, and the way out is another command line.
+refusal=$(nix develop path:./. -c cabal run -v0 agentic-run -- \
+            plan review-lite --input-arg run.engine=acp 2>&1) && code=0 || code=$?
+
+if [ "$code" != 1 ]; then
+  echo "ci/policies: FAIL --input-arg run.engine: expected exit 1, actual $code" >&2
+  echo "$refusal" >&2
+  exit 1
+fi
+case "$refusal" in
+  *"is a run fact: the runner binds it"*)
+    echo "policy probe: --input-arg run.engine is refused, and names who binds it"
+    ;;
+  *)
+    echo "ci/policies: FAIL --input-arg run.engine: refused, but not as a run fact" >&2
+    echo "$refusal" >&2
+    exit 1
+    ;;
+esac

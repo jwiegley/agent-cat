@@ -72,6 +72,16 @@
 -- is not yet in hand and say on the @inputs@ line that they did. @run@ requires
 -- every input.
 --
+-- __Three inputs are the runner\'s and not the operator\'s__
+-- ('Agentic.Workflow.runFacts'): @run.backends@, @run.engine@ and
+-- @run.sentinel@ are facts about the run being made, and @run@ binds all three
+-- from the command line it was given and from the clock. A flag naming one is
+-- refused ('resolveInputs'), because there is nothing for the operator to fix
+-- and the fact will be there; @plan@ and @cost@ leave them unbound, because
+-- they are making no run. They are inputs like any other in every other
+-- respect — a define, spliced as literal chunks, invisible to every fold — and
+-- 'runFactsOf' is where they come from.
+--
 -- @plan@ and @cost@ read the elaborated 'Agentic.Plan.Plan' and say nothing a
 -- run could contradict: they are the /static/ folds, decided before anybody is
 -- asked anything. @run@ executes, through "Agentic.Exec"'s memoizing
@@ -186,6 +196,7 @@ import Agentic.Route
   ( Backend (BackendAcp, BackendDeck),
     Routes,
     Scheme (SchemeAcp, SchemeDeck),
+    backendSpelling,
     parseRoute,
     routeBackends,
     routeByModel,
@@ -215,7 +226,18 @@ import Agentic.Plan
     size,
   )
 import Agentic.Raw (codeName)
-import Agentic.Workflow (Example (..), inputNames, supply)
+import Agentic.Workflow
+  ( Example (..),
+    inputNames,
+    reservedInput,
+    runFactBackends,
+    runFactEngine,
+    runFactRefusal,
+    runFactSentinel,
+    runFacts,
+    sessionPolicy,
+    supply,
+  )
 import Agentic.World (Trace, billFresh, billMemo)
 
 -- ---------------------------------------------------------------------------
@@ -389,13 +411,24 @@ cliMain reg = do
                           else T.pack (show e)
                   ]
 
+-- | Which verb, and — for @run@ — the facts the run supplies about itself.
+--
+-- __Only @run@ binds a run fact__, and that is not an omission. A run fact is a
+-- statement about a run that is being made ('Agentic.Workflow.runFacts'), and
+-- @plan@ and @cost@ are making none: there is no backend, no engine and no
+-- session to describe, and a number bound there would be a claim about a run
+-- nobody asked for. So the two static verbs leave them unbound, exactly as they
+-- leave a subject nobody gave unbound, and the @inputs@ line says so — which
+-- costs them nothing, because no static fold reads a prompt and a program
+-- therefore prices identically bound or not.
 execute :: Registry -> Command -> IO ()
 execute reg = \case
   List -> listCmd reg >> exitSuccess
-  Plan name raw pinned ins -> withExample reg pinned False noRefusal name ins (planCmd name raw)
-  Cost name ins -> withExample reg False False noRefusal name ins (costCmd name)
-  Run name target pinned ins ->
-    withExample reg pinned True (routeRefusal reg target) name ins (runCmd reg name target)
+  Plan name raw pinned ins -> withExample reg pinned False noRefusal name [] ins (planCmd name raw)
+  Cost name ins -> withExample reg False False noRefusal name [] ins (costCmd name)
+  Run name target pinned ins -> do
+    facts <- runFactsOf reg name target
+    withExample reg pinned True (routeRefusal reg target) name facts ins (runCmd reg name target)
 
 -- | The verb owes the program no precondition of its own — @plan@ and @cost@,
 -- which read no flag that is a claim about the program's text.
@@ -465,16 +498,22 @@ routeRefusal reg (Routed rr) prog = case servedChains (progRawOut prog) of
 -- program is in hand, which is before a plan is printed and before an adapter
 -- is started. @run@ passes 'routeRefusal'; the two static verbs pass
 -- 'noRefusal', because neither reads a flag that is a claim about the text.
+--
+-- The fifth argument is the runner's own bindings — the run facts, empty on the
+-- two static verbs (see 'execute') — and it is threaded here rather than read
+-- inside 'runCmd' because an input is bound when the /program is built/, which
+-- is before the verb has a program to run.
 withExample ::
   Registry ->
   Bool ->
   Bool ->
   (Program -> Maybe Text) ->
   Text ->
+  [(Text, Text)] ->
   [InputFlag] ->
   (Program -> [Given] -> IO ()) ->
   IO ()
-withExample reg pinned needsAll refuses name ins k = case regLookup reg name of
+withExample reg pinned needsAll refuses name facts ins k = case regLookup reg name of
   Nothing ->
     die reg 1 $
       "no "
@@ -484,7 +523,7 @@ withExample reg pinned needsAll refuses name ins k = case regLookup reg name of
         <> "'; there is "
         <> T.intercalate " and " (regNames reg)
   Just row -> do
-    resolved <- resolveInputs name needsAll (rowExample row) ins
+    resolved <- resolveInputs name needsAll facts (rowExample row) ins
     case resolved of
       Left why -> die reg 1 why
       Right (prog, bs)
@@ -501,20 +540,37 @@ withExample reg pinned needsAll refuses name ins k = case regLookup reg name of
 --
 -- Every refusal here is a usage error, and each names the one thing to change.
 -- The order is the order an operator meets them: a program that takes nothing,
--- a bare @--input@ where a name is needed, a name the program does not have,
--- a name given twice, a file that will not read, and — at @run@ — an input
--- nobody gave.
+-- a run fact the command line tried to supply, a bare @--input@ where a name is
+-- needed, a name the program does not have, a name given twice, a file that
+-- will not read, and — at @run@ — an input nobody gave.
+--
+-- __A run fact is bound here and refused here__, both because this is the one
+-- place an input acquires a value. The refusal is
+-- 'Agentic.Workflow.runFactRefusal''s wording, because what it says is a
+-- statement about inputs and not about this command line; the binding comes
+-- from the third argument, which only @run@ fills. So the operator's own inputs
+-- and the runner's arrive at 'Given' by the same door, print on the same
+-- @inputs@ line, and differ in exactly one visible respect: where the text came
+-- from.
+--
+-- __Every list an operator is shown names only their own inputs.__ A program
+-- that declares @subject@ and @run.engine@ takes /one/ input as far as a
+-- command line is concerned, so @--input FILE@ still means @subject@ and the
+-- \"it takes …\" refusals still list what there is to give. A count that
+-- included the runner's facts would be telling the operator to supply
+-- something this function is about to refuse them.
 resolveInputs ::
   Text ->
   Bool ->
+  [(Text, Text)] ->
   Example ->
   [InputFlag] ->
   IO (Either Text (Program, [Given]))
-resolveInputs name needsAll ex ins = case ex of
+resolveInputs name needsAll facts ex ins = case ex of
   Fixed prog
     | null ins -> pure (Right (prog, []))
     | otherwise -> pure (Left (name <> " takes no input"))
-  Needs par -> case traverse (named (inputNames par)) ins of
+  Needs par -> case traverse (named (operatorNames (inputNames par))) ins of
     Left why -> pure (Left why)
     Right pairs -> case firstDuplicate (map fst pairs) of
       Just n -> pure (Left ("input '" <> n <> "' was given twice"))
@@ -526,6 +582,11 @@ resolveInputs name needsAll ex ins = case ex of
           prog <- supply par (map (fromMaybe "" . givenText) bounds)
           pure (prog, bounds)
   where
+    -- The inputs a command line may speak about: every declared name that is
+    -- not the runner's.
+    operatorNames :: [Text] -> [Text]
+    operatorNames = filter (not . reservedInput)
+
     -- Which input a flag names. `--input` names one by being the only one.
     named :: [Text] -> InputFlag -> Either Text (Text, InputFlag)
     named ns f = case f of
@@ -543,7 +604,12 @@ resolveInputs name needsAll ex ins = case ex of
       NamedFile n _ -> known ns n f
       NamedArg n _ -> known ns n f
 
+    -- The run-fact refusal comes first, because it is the more specific
+    -- mistake: `--input-arg run.engine=acp` is not a name this program lacks,
+    -- it is a name nobody may give, and "has no input named" would send the
+    -- operator looking for a typo.
     known ns n f
+      | Just why <- runFactRefusal n = Left why
       | n `elem` ns = Right (n, f)
       | otherwise =
           Left
@@ -593,11 +659,30 @@ resolveInputs name needsAll ex ins = case ex of
             let t' = fromMaybe t (T.stripSuffix "\n" t)
              in Right (t', sizeOf t' <> " from " <> T.pack p)
 
-    bind given n = case lookup n given of
-      Just (t, whence) -> Right (Given n (Just t) whence)
-      Nothing
-        | needsAll -> Left ("run needs every input: '" <> n <> "' was not given")
-        | otherwise -> Right (Given n Nothing "")
+    -- The runner's facts first: a run fact cannot be in `given` — `known`
+    -- refused it — so the two lookups can never disagree about one name. On
+    -- `plan` and `cost` `facts` is empty and a run fact falls through to the
+    -- unbound arm, which is the honest answer there: no run was made.
+    bind given n = case lookup n facts of
+      Just t -> Right (Given n (Just t) (sizeOf t <> " supplied by the runner"))
+      Nothing -> case lookup n given of
+        Just (t, whence) -> Right (Given n (Just t) whence)
+        Nothing
+          | needsAll, reservedInput n -> Left (runFactUnbound n)
+          | needsAll -> Left ("run needs every input: '" <> n <> "' was not given")
+          | otherwise -> Right (Given n Nothing "")
+
+    -- Unreachable by construction and named anyway: `input` refuses every
+    -- `run.` name that is not a fact, and `execute` binds all three on `run`.
+    -- It is a refusal rather than an `error` because the operator could still
+    -- act on it — the run has not started, nothing was spawned, and a runner
+    -- over a second registry is the one thing that could get here.
+    runFactUnbound n =
+      "'"
+        <> n
+        <> "' is a run fact and this runner bound none; the facts a run supplies \
+           \are "
+        <> T.intercalate ", " runFacts
 
 -- | The first element that appears again later, if one does.
 --
@@ -617,26 +702,75 @@ sizeOf t
     n = BS.length (encodeUtf8 t)
 
 -- | The note @plan --raw@ prints above a program some of whose inputs are
--- empty, and nothing at all when every one was given.
+-- empty, and nothing at all when every one was bound.
+--
+-- __Two clauses, because there are two reasons an input is empty here.__ One the
+-- operator did not give; a run fact nobody could have, because @plan@ is making
+-- no run. Both make the printed program a different text from the one a run
+-- would put, which is the whole point of the note — but only one of them is
+-- something the reader can do anything about.
 emptyNote :: [Given] -> [Text]
-emptyNote gs = case [givenName g | g <- gs, givenText g == Nothing] of
+emptyNote gs = case clauses of
   [] -> []
-  ns ->
-    [ "  note: " <> T.intercalate ", " ns <> " was not given, so the program",
-      "  below prints with it empty — which is a different text from the one",
-      "  a run would put.",
+  cs ->
+    [ "  note: " <> T.intercalate "; " cs <> ", so the program below prints",
+      "  with them empty — which is a different text from the one a run",
+      "  would put.",
       ""
     ]
+  where
+    unbound p = [givenName g | g <- gs, givenText g == Nothing, p (givenName g)]
+
+    clauses =
+      [ c
+      | Just c <-
+          [ clauseOf (unbound (not . reservedInput)) " was not given" " were not given",
+            clauseOf
+              (unbound reservedInput)
+              " is a run fact, and only run binds it"
+              " are run facts, and only run binds them"
+          ]
+      ]
+
+    -- Both numbers, because one unbound input is the common case and a list
+    -- followed by a singular verb reads as a gate nobody proofread.
+    clauseOf ns one many = case ns of
+      [] -> Nothing
+      [n] -> Just (n <> one)
+      _ -> Just (T.intercalate ", " ns <> many)
 
 -- | The @inputs@ line: the name, the kind, and where the text came from —
 -- never the text, which can be a whole diff.
+--
+-- An unbound __run fact__ gets its own words. \"Not given\" is what an operator
+-- did; a run fact was never theirs to give, and on @plan@ and @cost@ it is
+-- unbound because there is no run to describe, which is a different sentence
+-- and a different thing to know.
+--
+-- __What an unbound value says about the folds, exactly.__ Both arms used to
+-- close \"the folds below do not depend on it\", and that is true of the common
+-- case and not of all of them: an input reaches /prompts/ as literal chunks that
+-- no static fold reads, but 'Agentic.Workflow.supply' builds the program
+-- __after__ the inputs are known, so an author may branch on one in ordinary
+-- Haskell — and then the folds are the folds of the program that value built.
+-- @agent-workflows@ does it twice over: @review-deep@ selects a reviewer roster
+-- from its @paths@, and @wiggum@ refuses to start a loop whose engine shares one
+-- conversation with the work. This function cannot tell the two kinds apart and
+-- must not guess, so it states what it does know: which program these numbers
+-- are the numbers of.
 inputsLine :: Given -> Text
 inputsLine b =
   "  inputs    "
     <> givenName b
     <> " (text) "
     <> case givenText b of
-      Nothing -> "— not given; the folds below do not depend on it"
+      Nothing
+        | reservedInput (givenName b) ->
+            "— a run fact, and this verb is making no run; the folds below are \
+            \those of the program an unbound one builds"
+        | otherwise ->
+            "— not given; the folds below are those of the program an empty \
+            \value builds"
       Just _ -> "= " <> givenWhence b
 
 -- ---------------------------------------------------------------------------
@@ -871,28 +1005,6 @@ runCmd reg name target prog gs = case target of
           WorldIO $ \_ _ ->
             ioError (userError ("no connection was made for the backend acp:" <> T.unpack w))
 
-    -- The per-run knobs, applied to a backend of the scheme they belong to.
-    -- Nothing new is decided here: `adapterArgv` and `defaultDeckConfig`
-    -- already turn a word into a backend.
-    acpConfigFor :: RunRoutes -> FilePath -> Text -> AcpConfig
-    acpConfigFor rr dir w =
-      let base = defaultAcpConfig (adapterArgv w <> rrAdapterArgs rr)
-       in base
-            { acpCwd = dir,
-              acpTurnTimeoutMs = fromMaybe (acpTurnTimeoutMs base) (rrTimeoutMs rr),
-              acpVerbose = rrVerbose rr
-            }
-
-    deckConfigFor :: RunRoutes -> Text -> DeckConfig
-    deckConfigFor rr s =
-      let base = defaultDeckConfig s
-       in base
-            { deckBinary = fromMaybe (deckBinary base) (rrBinary rr),
-              deckPollMs = fromMaybe (deckPollMs base) (rrPollMs rr),
-              deckTimeoutMs = fromMaybe (deckTimeoutMs base) (rrTimeoutMs rr),
-              deckVerbose = rrVerbose rr
-            }
-
     -- The header: *who answers what, under what policy, before a token moves* —
     -- and never a claim that anybody answered anything, which is the trace's to
     -- say and only afterwards.
@@ -925,7 +1037,7 @@ runCmd reg name target prog gs = case target of
             <> ", "
             <> tshow (acpTurnTimeoutMs cfg)
             <> "ms to a turn, "
-            <> (if acpFreshPerQuestion cfg then "a new session per question" else "one session for the run")
+            <> acpSessionPolicy cfg
             <> "; every addressee — model, tool and person — is this one adapter"
         say $ "  a `running` tool's command runs in " <> T.pack dir
       [BackendDeck s] -> do
@@ -936,7 +1048,9 @@ runCmd reg name target prog gs = case target of
             <> tshow (deckPollMs cfg)
             <> "ms, "
             <> tshow (deckTimeoutMs cfg)
-            <> "ms to a turn; every addressee — model, tool and person — is this one session"
+            <> "ms to a turn, "
+            <> deckSessionPolicy
+            <> "; every addressee — model, tool and person — is this one session"
         -- The deck engine sends into a session somebody else started, so the
         -- directory a command runs in and the directory that session works in
         -- need not agree. Announce it rather than assume it.
@@ -974,7 +1088,7 @@ runCmd reg name target prog gs = case target of
                   <> ", "
                   <> tshow (acpTurnTimeoutMs cfg)
                   <> "ms to a turn, "
-                  <> (if acpFreshPerQuestion cfg then "a new session per question" else "one session for the run")
+                  <> acpSessionPolicy cfg
       case [s | BackendDeck s <- bs] of
         [] -> pure ()
         (s : _) ->
@@ -984,7 +1098,8 @@ runCmd reg name target prog gs = case target of
                   <> tshow (deckPollMs cfg)
                   <> "ms, "
                   <> tshow (deckTimeoutMs cfg)
-                  <> "ms to a turn"
+                  <> "ms to a turn, "
+                  <> deckSessionPolicy
       say $ "  a `running` tool's command runs in " <> T.pack dir
       where
         route (m, b) = do
@@ -1061,6 +1176,166 @@ runCmd reg name target prog gs = case target of
       say "    answer      () — a workflow's value is the unit; what it did is the trace"
       say $ "    billFresh   " <> tshow (billFresh tr) <> " (consultations the run reached)"
       say $ "    billMemo    " <> tshow (billMemo tr) <> " (distinct questions, which is what was put)"
+
+-- ---------------------------------------------------------------------------
+-- The transport configurations, and the facts they are read for
+-- ---------------------------------------------------------------------------
+
+-- | The per-run knobs, applied to a backend of the scheme they belong to.
+--
+-- Nothing new is decided here: 'adapterArgv' and 'defaultDeckConfig' already
+-- turn a word into a backend.
+--
+-- It stands at the top level rather than inside 'runCmd' because 'runFactsOf'
+-- reads it too, before there is a program to run — and the alternative was a
+-- second derivation of the same policy, which is exactly how a header and a
+-- fact come to disagree about one run.
+acpConfigFor :: RunRoutes -> FilePath -> Text -> AcpConfig
+acpConfigFor rr dir w =
+  let base = defaultAcpConfig (adapterArgv w <> rrAdapterArgs rr)
+   in base
+        { acpCwd = dir,
+          acpTurnTimeoutMs = fromMaybe (acpTurnTimeoutMs base) (rrTimeoutMs rr),
+          acpVerbose = rrVerbose rr
+        }
+
+-- | The @deck:@ half of 'acpConfigFor'.
+--
+-- It stands here for one of 'acpConfigFor''s two reasons and not both: nothing
+-- new is decided, because 'Agentic.AgentDeck.defaultDeckConfig' already turns a
+-- word into a backend. Its callers are all inside 'runCmd' — the world for a
+-- @deck:@ backend and the two header arms that name one — because
+-- @run.engine@'s @deck:@ half needs no config at all: a deck session's policy is
+-- @'Agentic.Workflow.sessionPolicy' False@ by construction, and the poll and
+-- timeout knobs this function applies are not part of it.
+deckConfigFor :: RunRoutes -> Text -> DeckConfig
+deckConfigFor rr s =
+  let base = defaultDeckConfig s
+   in base
+        { deckBinary = fromMaybe (deckBinary base) (rrBinary rr),
+          deckPollMs = fromMaybe (deckPollMs base) (rrPollMs rr),
+          deckTimeoutMs = fromMaybe (deckTimeoutMs base) (rrTimeoutMs rr),
+          deckVerbose = rrVerbose rr
+        }
+
+-- | The policy of an @acp:@ backend, in 'Agentic.Workflow.sessionPolicy''s
+-- words: the one field that decides it, read once.
+--
+-- The header says it, twice, and @run.engine@ says it to the prompts. A second
+-- spelling would be a run whose header and whose provenance paragraph described
+-- different transports, which is the failure this whole mechanism exists to
+-- remove — so the wording is not this module's, and a program that gates on it
+-- ('Agentic.Workflow.sharesOneSession') matches the same bytes the operator
+-- read.
+acpSessionPolicy :: AcpConfig -> Text
+acpSessionPolicy = sessionPolicy . acpFreshPerQuestion
+
+-- | The policy of a @deck:@ backend, which is not a field but a consequence.
+--
+-- A 'DeckConfig' has no @freshPerQuestion@ to read and could not have one: the
+-- engine sends into a live @agent-deck@ pane that somebody else started, so
+-- there is no @session\/new@ for it to open and every question of the run lands
+-- in the same conversation. That is 'Agentic.Workflow.sessionPolicy' at 'False',
+-- and it is a CAF rather than a literal so the header and @run.engine@ cannot
+-- come to describe one pane two ways.
+deckSessionPolicy :: Text
+deckSessionPolicy = sessionPolicy False
+
+-- | __The facts this run knows about itself before it puts a question__, as the
+-- texts 'Agentic.Workflow.runFacts' binds.
+--
+-- All three are properties of the command line and of the clock, which is what
+-- lets them be inputs: an input is bound when the program is built, and nothing
+-- here has to wait for an adapter to start or a question to be answered. The
+-- working directory is deliberately not among them — it is settled in 'runCmd',
+-- after this — and 'acpSessionPolicy' does not read it, which is why passing
+-- @\".\"@ to 'acpConfigFor' below states the same policy the run will state.
+--
+-- __What each one is worth to a prompt.__ @run.backends@ and @run.engine@ are
+-- the two facts a reporting model was previously told to leave as conditionals,
+-- because the run's header is terminal output and no party receives it; bound
+-- here, a provenance paragraph can say what happened instead of what cannot be
+-- known from inside it. @run.sentinel@ is the premise an independence probe was
+-- asserting without anybody having established it: a line generated for this run
+-- and put nowhere the runner does not put it.
+--
+-- __@run.engine@ is read as well as printed__, which is why both its halves come
+-- from 'Agentic.Workflow.sessionPolicy' and neither is a literal here: a program
+-- gates on 'Agentic.Workflow.sharesOneSession', and the value it matches has to
+-- be the value the operator saw in the header. Before that, the @deck:@ half was
+-- a sentence written in this function and the header's @deck:@ arm was a
+-- different one, so one pane had two descriptions and only one of them could be
+-- matched.
+runFactsOf :: Registry -> Text -> Target -> IO [(Text, Text)]
+runFactsOf reg name target = do
+  sentinel <- freshSentinel
+  pure
+    [ (runFactBackends, backendsFact),
+      (runFactEngine, engineFact),
+      (runFactSentinel, sentinel)
+    ]
+  where
+    backendsFact = case target of
+      -- No colon in this arm, and one in the other two: a fact is spliced after
+      -- a label a prompt wrote ("Backends: …"), and "Backends: no backend: …"
+      -- reads as a mistake. The count leads in every arm, which is what a
+      -- reader is looking for.
+      Scripted ->
+        "no backend at all -- every question is answered from this program's own \
+        \table of "
+          <> tshow (length (maybe [] rowScript (regLookup reg name)))
+          <> " canned replies, and nothing is reached"
+      Routed rr -> case routeBackends (rrRoutes rr) of
+        [b] -> "1 backend: " <> backendSpelling b
+        bs ->
+          tshow (length bs)
+            <> " backends: "
+            <> T.intercalate ", " (map backendSpelling bs)
+
+    -- Derived from the very fields the header prints, and from nothing else.
+    -- The mixed table earns its own arm rather than a hedge: a run that is half
+    -- `acp:` and half `deck:` has two session policies, and a prompt told only
+    -- one of them would be told a falsehood about half its answers.
+    engineFact = case target of
+      Scripted -> "scripted: a canned table, no process and no session"
+      Routed rr ->
+        let bs = routeBackends (rrRoutes rr)
+            acps = [w | BackendAcp w <- bs]
+            decks = [s | BackendDeck s <- bs]
+            acpWords = case acps of
+              (w : _) -> "acp: " <> acpSessionPolicy (acpConfigFor rr "." w)
+              [] -> ""
+            -- The session id is deliberately not spliced: what a prompt is
+            -- owed is the policy, and a pane's title is neither a policy nor
+            -- something a report should be repeating.
+            deckWords = "deck: " <> deckSessionPolicy
+         in case (acps, decks) of
+              (_ : _, []) -> acpWords
+              ([], _ : _) -> deckWords
+              (_ : _, _ : _) -> acpWords <> "; " <> deckWords
+              -- `routeBackends` always has the default, so this is
+              -- unreachable; it is written rather than left to a partial
+              -- pattern match.
+              ([], []) -> "no engine: this run reaches nothing"
+
+-- | The line this run generates for itself, and puts nowhere else.
+--
+-- __The claim it supports is run-uniqueness__, and the clock is what makes it
+-- true: 'getMonotonicTimeNSec' is strictly increasing while the host is up, so
+-- no two runs on this machine read the same value, and nothing that has not been
+-- shown the line can produce it — an uptime to the nanosecond is not something
+-- a model knows. It is the same clock 'freshScratch' reads, for the same reason,
+-- and reading a second source of uniqueness would be two answers to one
+-- question.
+--
+-- __It is not a secret and does not need to be.__ Nothing is authorized by it.
+-- What it is for is a probe that can only be answered by an answerer that has
+-- seen it, which makes \"I have not seen this before\" a statement with content
+-- where before there was nothing to have seen.
+freshSentinel :: IO Text
+freshSentinel = do
+  stamp <- getMonotonicTimeNSec
+  pure ("PARENT_HISTORY_SENTINEL=" <> tshow stamp)
 
 -- | A directory of this run's own, under the system temporary directory, for a
 -- @--engine acp@ run that named none.
@@ -1359,6 +1634,11 @@ usage reg =
       "  spliced into prompts as data and never asked of anybody. plan and cost",
       "  answer without one — no static fold reads a prompt — and say so on the",
       "  inputs line; run requires every input.",
+      "",
+      "  An input named run.<something> is a RUN FACT and is not yours to give:",
+      "  run binds it from the run it is making and no flag can. There are three",
+      "  — run.backends, run.engine and run.sentinel — and a program that takes",
+      "  one still takes it from run, so the flags below name only your own.",
       "",
       "  --input FILE   the sole input of a program that takes exactly one, read",
       "                 from a file. Takes no NAME=, so a path containing = is",
