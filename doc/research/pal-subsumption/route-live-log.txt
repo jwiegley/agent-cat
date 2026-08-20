@@ -1,0 +1,6 @@
+ci/route-live: two-providers: codex drafted, claude reviewed, the owner said yes, exit 0
+ci/route-live: unrouted: today's header, the owner said yes, exit 0
+ci/route-live: route-a-party: refused before anything was spawned, exit 1
+ci/route-live: 3 scenarios passed, 0 failed
+ci/route-live: 2 backends were configured and 2 answered — a route on a
+ci/route-live: spare would have been configured and not reached.

@@ -138,6 +138,16 @@ unknown backend 'grpc:x' in --route: a backend is acp:<adapter>
 agent-deck session)
 ```
 
+**Surrounding whitespace belongs to neither half, and is stripped from both the
+`NAME` and the `value` before either is read.** This is a refusal and not a
+convenience: no adapter is named `" "` and no session is addressed by a blank, so
+a value that is only whitespace is a value the operator did not give. Untrimmed
+it is one character rather than none, and `--route 'deep=acp: '` therefore passed
+every check above and every refusal of §1.5, printed a header naming an adapter
+with no name, **started one**, and was discovered by `posix_spawnp` — after the
+spawn the whole of §1.5 exists to happen before. Trimmed, it takes exactly the
+refusal `acp:` takes, in the place every other malformed shape is refused.
+
 ### 1.4 The knobs a route does not take
 
 `--timeout`, `--verbose`, `--scratch`, `--binary`, `--poll` and `--adapter-arg`
@@ -661,6 +671,23 @@ on every commit in `ci/policies.sh` beside the rest.
 The last one is the probe that proves the capability without a process: two
 `WorldIO`s *are* two backends as far as `routedWorld` is concerned.
 
+**Two of these are weaker than they read, and shipped stronger.** Behind one
+shared `w`, the invisibility probe's two traces are equal *however* the questions
+were dispatched — including by a dispatcher that ignored the table — and a
+program whose every question is a command never reaches routing at all, so
+neither probe as tabled above can catch a wrong dispatcher. As shipped, the
+invisibility probe's four backends are **distinct worlds that answer alike**,
+each noting that it was consulted, so the same rows also say where the questions
+went; and the `toolExec` probe is two commands around a **pinned ask**, at a
+table whose default raises and whose one route answers, so a command that reached
+routing and an ask that reached the default fail in two different places. The
+shipped section also gains three probes this table does not name: that
+surrounding whitespace is part of neither half of a route — `acp: ` is a blank
+adapter, and untrimmed it survived every refusal and was found out by
+`posix_spawnp` *after* a spawn — that `routeBackends` is the distinct backends
+with the default first, and that connecting the table with `fmap` moves no
+question. Eleven probes in total; the gate's stated count is thirty.
+
 ### 7.2 `test/SurfaceRefusals.hs` — **nothing**, and that is the right answer
 
 `SurfaceRefusals` holds programs the *authoring surface* refuses to make — four
@@ -763,14 +790,25 @@ Assertions, in the order they discriminate:
 2. two adapter processes exist during the run and **none after it** — the
    `pgrep` check `ci/acp.sh` scenario 11 already uses, at the bracket instead of
    at the timeout;
-3. `billFresh 7`, `billMemo 7` — **the flagship's frozen numbers, unchanged**,
-   which is §4.2 observed on the real wire rather than argued;
+3. **the flagship's frozen numbers, unchanged on whichever branch the owner
+   chose**, which is §4.2 observed on the real wire rather than argued — see the
+   grading note below;
 4. the announced consultations name the parties, and the draft is visibly a
    different voice from the reviews — the only assertion here a single-backend
    run could not also satisfy;
-5. `applied.c` exists and holds what the patch adds, in the one shared
-   directory that both providers were pointed at (§3.4);
-6. exit `0`.
+5. exit `0`.
+
+**How assertion 3 is graded, and why it is not `7/7`.** The flagship ends by
+asking a **person** whether to apply the patch, and in a live run that person is
+a real one behind a real adapter. Both answers are correct: *yes* is seven
+consultations and a written `applied.c` in the one shared directory both
+providers were pointed at (§3.4); *no* is six and nothing written — `ci/acp.sh`
+scenario 2 pins that branch as right behaviour and `Harden.bill_refuse_demo` is
+the theorem it comes from. Nothing this script controls decides which comes back.
+So the assertion is that the run landed **squarely on one branch** — `7/7` with
+`applied.c`, or `6/6` without it, and never a mixture — and an earlier draft of
+this list, which asked for `7/7` and a written `applied.c` as two separate
+assertions, would have failed a well-behaved *no*.
 
 Two negative controls it buys for free:
 

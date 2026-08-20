@@ -65,6 +65,24 @@ description:
   @review-lite@ is the worked case — its duplicated closing act is one function
   both arms of the router call, and the commit it reviews arrives as
   @agentic-run … --input@.
+  .
+  Week nine reaches more than one model backend inside a single run.
+  @Agentic.Route@ is a table of answerers — a default, and refinements of it
+  keyed by __serving model__ — and one function, @routedWorld@, which is a
+  @WorldIO@ built from @WorldIO@s and installed exactly where the one adapter's
+  world stood. A question is routed by @scopeModelAxis@, the field the
+  interpreter already computes, already relabels on a fail-over and already
+  records in the trace, so a @served by … falling back to …@ ladder crosses
+  providers with no change to @Agentic.Exec@ at all, and @--route
+  NAME=BACKEND@ on @agentic-run run@ is the whole surface. __The semantics do
+  not move__, by construction rather than by argument: routing is substitution
+  at one type, no field of an @EventKey@ or an @eventJson@ names a backend, and
+  the conformance executables import no @WorldIO@ at all. There is deliberately
+  no backend-level fail-over — one pin tried at two backends would be one
+  @EventKey@ put twice, which the memo table cannot see — so a route whose
+  backend is dead is a dead question, and recovery goes through the pin ladder
+  that relabels the key. @ci\/acp.sh@ gains three scenarios at two stub
+  adapters; @ci\/route-live.sh@ is the manual smoke at two real ones.
 
 build-type:      Simple
 license:         MIT
@@ -114,6 +132,7 @@ library
     Agentic.Oracle
     Agentic.Plan
     Agentic.Raw
+    Agentic.Route
     Agentic.Shell
     Agentic.Text
     Agentic.WF
@@ -173,7 +192,8 @@ executable tier1
     , agentic:examples
 
 -- The policy gate (test/PolicyProbe.hs): the seven D6/D7 probes the wave-one
--- audit ran by hand, plus four surface refusals, pinned as a program.
+-- audit ran by hand, four surface refusals, D5's executing world, D6's
+-- fail-over, and routing's grammar and resolution rule, pinned as a program.
 -- `lake`-free and corpus-free; run by ci/policies.sh.
 --
 -- `SurfaceRefusals` is its own module because the four programs in it are

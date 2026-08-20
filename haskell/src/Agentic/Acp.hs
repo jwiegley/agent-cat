@@ -171,6 +171,7 @@ module Agentic.Acp
     -- * The connection
     Acp,
     withAcp,
+    withAcps,
     acpProgram,
     acpCapabilities,
     acpSessionId,
@@ -797,6 +798,32 @@ acpSessionId = readIORef . acpSession
 -- the error leaves, so a failed connect leaves no process behind.
 withAcp :: AcpConfig -> (Acp -> IO a) -> IO a
 withAcp cfg = bracket (connectAcp cfg) closeAcp
+
+-- | Several conversations at once: every adapter live for the duration of the
+-- continuation, each labelled by whatever the caller keyed it under, and every
+-- one closed on every exit path.
+--
+-- __No new machinery — it is a fold of 'withAcp'__, and the nesting is what
+-- gives it three properties rather than a policy that has to be maintained:
+--
+--   * shutdown is LIFO, last connected first closed;
+--   * a mid-run exception unwinds every adapter, because each is inside the
+--     previous one's bracket;
+--   * __a failure to start the /n/-th closes the /n−1/ already open__, for the
+--     same reason.
+--
+-- The connections are made left to right, so a caller that puts the one every
+-- question needs at the head fails before spawning anything else if that one
+-- will not start. 'closeAcp' is already best-effort and swallows its own
+-- failures so that a second error cannot hide the first — which matters more
+-- with four adapters than with one.
+--
+-- The key is polymorphic because this module has no opinion about what
+-- distinguishes two adapters in a run: that is the caller's, and the caller is
+-- @Agentic.Cli@ under @Agentic.Route@'s deduplicated backend list.
+withAcps :: [(k, AcpConfig)] -> ([(k, Acp)] -> IO a) -> IO a
+withAcps [] k = k []
+withAcps ((n, cfg) : rest) k = withAcp cfg $ \a -> withAcps rest (k . ((n, a) :))
 
 -- | Spawn the adapter, shake hands, and open a session.
 connectAcp :: AcpConfig -> IO Acp

@@ -5,15 +5,15 @@
 `doc/research/pal-vs-agent-cat.md`, which is the analysis this whole track
 executes, and against `agent-cat` at pushed `2f86fda` with every gate green.*
 
-> **One document this plan could not read.** `parity-matrix.md` had not been
-> written to disk when this plan was composed (the directory held
-> `routing-design.md` and `confer-design.md` and nothing else, polled over nine
-> minutes). §3's acceptance runs are therefore derived **directly from
-> `pal-vs-agent-cat.md`'s own feature-by-feature correspondence** — which is the
-> matrix's source as well as this plan's — one row per PAL tool family, and a
-> reconciliation rule is stated at the head of §3. **When the matrix lands, §3
-> is reconciled against it and this note is deleted.** Every other section of
-> this plan reads the two designs that exist and is unaffected.
+> **The matrix has landed and §3 is reconciled against it.** The reconciliation
+> is written down in `parity-matrix.md` §3 — two amendments, one promotion, four
+> wording rulings in §3's favour, and no capability of §3 overturned — and both
+> amendments have been applied to this document: A10 gains the four already-green
+> citations (§3.1(b)) and the residual list is now **four** (§3.1(a)). §3's
+> acceptance runs were derived directly from `pal-vs-agent-cat.md`'s own
+> feature-by-feature correspondence, which is the matrix's source as well as this
+> plan's; where the two differ, the rule at the head of §3 decides, and it has
+> been applied per row rather than in general.
 
 *The owner's ruling, stated once at the top because it governs every section
 below: **PAL MCP stays configured.** There is no removal activity, no config
@@ -244,7 +244,7 @@ Two gates move, and only by addition:
 
 | gate | before | after |
 |---|---|---|
-| `ci/policies.sh` | 19 checks | **19 + the eight probe rows** of `routing-design.md` §7.1 (ten probes if the three unpinned-addressee cases are counted apart); the header's stated count is edited to match, and that edit is the *only* edit to an existing assertion in this stage |
+| `ci/policies.sh` | 19 checks | **30** — the 19 unmoved, plus eleven routing probes: the eight of `routing-design.md` §7.1, with the three unpinned-addressee cases folded into one probe rather than three, plus the whitespace refusal and the two table probes §1.3's amendment names. The header's stated count is edited to match, and that edit is the *only* edit to an existing assertion in this stage |
 | `ci/acp.sh` | 12/12 | **15/15** — scenarios 13 (two adapters, dispatch by pin), 14 (dead route, nothing spent), 15 (the four usage refusals). Scenarios 1–12 **unedited** |
 
 `test/SurfaceRefusals.hs` gains **nothing**, and that is the correct answer: a
@@ -266,13 +266,12 @@ network, no Lean, no corpus, so they run on every commit beside the rest:
 5. `backendFor`, unpinned: `Nothing` takes the default — one case each for
    `AddrModel`, `AddrTool`, `AddrPerson`.
 6. **Routing is invisible to the fold**: `hardenProgram` twice through
-   `routedWorld` over a table whose every backend is `pureWorldIO w` for the
-   *same* `w`, once empty and once with three routes; **the two traces are equal
-   event for event and both bills agree.** This is §1.4's invariant made
-   executable at the unit level.
-7. **Routing does not intercept `toolExec`**: `executingWorld sh (routedWorld
-   rs)` where every routed backend raises on consultation; a `toolExec` program
-   settles, proving no question reached routing.
+   `routedWorld`, once at an empty table and once at three routes; **the two
+   traces are equal event for event and both bills agree.** This is §1.4's
+   invariant made executable at the unit level.
+7. **Routing does not intercept `toolExec`**: a program-authored command is
+   answered by `executingWorld` before the world beneath it is consulted, so it
+   reaches no backend.
 8. **Cross-backend fail-over**: `deep or broad`, two *distinct* worlds, `deep`'s
    raising a gap and `broad`'s answering — the run settles, the trace names
    `broad`, the narration keeps the existing wording, and *with no alternates
@@ -280,6 +279,33 @@ network, no Lean, no corpus, so they run on every commit beside the rest:
 
 Case 8 is the one that proves the capability without a process: two `WorldIO`s
 *are* two backends as far as `routedWorld` is concerned.
+
+**Amended by what shipped, and by the audit that read it.** The gate is thirty
+checks, and four of the cases above are stronger than this list describes:
+
+- Cases 6 and 7 as written above are **untestable as stated**. Behind one shared
+  world, case 6's two traces are equal however the questions were dispatched —
+  including by a dispatcher that ignored the table entirely; and a program whose
+  every question is a command never reaches routing, so case 7 cannot catch a
+  wrong dispatcher either. As shipped, case 6's four backends are *distinct*
+  worlds that answer alike and each note that they were consulted, so the same
+  rows also say where the questions went; and case 7 is two commands around a
+  **pinned ask**, at a table whose default raises and whose one route answers, so
+  the command reaching routing and the ask reaching the wrong backend fail in two
+  different places.
+- **A whitespace case joins 1 and 2.** `--route 'deep=acp: '` is a blank adapter,
+  and until the value was trimmed it survived every refusal, printed a header
+  naming it, and was found out by `posix_spawnp` *after the run had spawned*.
+  Trimmed, it is refused where `acp:` is.
+- **Two cases pin the table itself**, which nothing pinned before:
+  `routeBackends` is the distinct backends with the default first — the header
+  counts processes and not route lines — and connecting the table with `fmap`
+  moves no question, which is why the header naming the backends is a true
+  statement about where questions go.
+
+The measure that earned the amendment: with `backendFor` replaced by
+`const routeDefault`, the list above catches the mutation in **two** of its ten
+probes; the shipped gate catches it in **four** of eleven.
 
 **The two-backend live smoke** (`ci/route-live.sh`, `routing-design.md` §7.4) —
 manual only, because it spends real money on real accounts, which is the same
@@ -289,15 +315,26 @@ reason `ci/tier1.sh` is nightly and fails loudly rather than degrading:
 agentic-run run harden --engine acp --adapter claude --route 'deep=acp:codex'
 ```
 
-Six assertions in the order they discriminate: (1) the header names **2
+Five assertions in the order they discriminate: (1) the header names **2
 backends**, one `claude-agent-acp` and one `codex-acp`, with `deep` on the codex
 line; (2) two adapter processes during the run and **none after** — the `pgrep`
 check scenario 11 already uses, at the bracket instead of at the timeout;
-(3) `billFresh 7`, `billMemo 7` — **the flagship's frozen numbers, unchanged**,
-which is §1.4 observed on the wire rather than argued; (4) the announced
+(3) **the flagship's frozen numbers, unchanged on whichever branch the owner
+chose**, which is §1.4 observed on the wire rather than argued; (4) the announced
 consultations name the parties and the draft is visibly a different voice from
-the reviews; (5) `applied.c` exists and holds what the patch adds, in the one
-shared directory both providers were pointed at; (6) exit `0`.
+the reviews; (5) exit `0`.
+
+**Assertion 3 is graded either-branch, and this list once said otherwise.** The
+flagship's last question goes to a **person**, and here that person is a real
+one: *yes* is `billFresh 7` / `billMemo 7` with `applied.c` written into the one
+shared directory both providers were pointed at, *no* is `6/6` with it absent —
+`ci/acp.sh` scenario 2 pins the second branch as right behaviour and
+`Harden.bill_refuse_demo` is the theorem it comes from. Nothing this script
+controls decides which comes back, so what is pinned is that the run landed
+squarely on one branch and that the bills and the act agree
+(`want_owner_branch`, `ci/route-live.sh:79`–`:106`). A criterion of `7/7` plus a
+written `applied.c` — which is what this list asked for, as two separate
+assertions — would fail a well-behaved *no*.
 
 Plus two negative controls it buys free: the same command with `--route` removed
 is today's behaviour, today's header, today's bills; and
@@ -525,7 +562,9 @@ The variants' numbers, for the same paste:
 | `secondOpinion` | 2 | 3 | pipeline | 2, 1 path | text, receipt |
 | `conferGate` | 6 | 10 | **branch** | 4, **3 paths** | none — it branches |
 
-**Gate C-b — the scripted run.** `wf run confer --scripted` exits 0, bills
+**Gate C-b — the scripted run.** `wf run confer --scripted`, **given both
+inputs** — `run` requires every input and refuses without them, so a bare
+scripted line tests that refusal instead of the fan-out — exits 0, bills
 `billFresh 5` / `billMemo 5`, and — the assertion that matters — **the three
 seats receive three different canned answers.** This works only because the
 shared `challengeRubric` comes *after* each seat's stance in its prompt: a
@@ -616,9 +655,14 @@ what the run must show.
 ### A1 — `chat` → an ask. *(Stage C)*
 
 ```
-wf run secondOpinion --engine acp --adapter claude \
+wf run second-opinion --engine acp --adapter claude \
   --input-arg decision='…' --input-file context=./…
 ```
+
+*The row name is `second-opinion`; `secondOpinion` is the Haskell binding, and
+`wf` refuses it by name. Corrected here rather than in the matrix alone, so that
+`parity-matrix.md` §3.4's "their command lines are §3's" stays true of a line
+that runs.*
 
 Shows: two questions, a `second-opinion-<date>.md` on disk, a bill of 2, and the
 party pinned through `lateral` — a second opinion from somewhere other than the
@@ -648,9 +692,10 @@ refactor's own control.
 agentic-run run harden --engine acp --adapter claude --route 'deep=acp:codex'
 ```
 
-Shows: `ci/route-live.sh`'s six assertions (§1.3). **This run is the evidence
-that `acat-engine-party-routing-hcx` is closed**, and its transcript belongs in
-the issue.
+Shows: `ci/route-live.sh`'s five assertions (§1.3), the bills graded
+either-branch. **This run is the evidence that
+`acat-engine-party-routing-hcx` is closed**; its committed log,
+`doc/research/pal-subsumption/route-live-log.txt`, is what goes in the issue.
 
 ### A5 — `consensus` → confer, at one backend. *(Stage C)*
 
@@ -703,7 +748,16 @@ on this track's reviewers: **this track has invented no workflow named after a
 PAL tool.** `confer` is named for the shape and for the owner's own word in
 `heavy`/`wiggum`, not for `consensus`.
 
-### The three residuals, restated as accepted rather than closed
+*Added by the reconciliation (`parity-matrix.md` §3.1(b)); the criterion above is
+unchanged.* Four of the seven already have registered, gated counterparts in
+`agent-workflows` today — `debug` → the `green` family, `codereview` → the
+`review` ladder, `analyze` (audit) → `fess`, `precommit` → the `commit` and
+`stack` families — whose acceptance is a citation of `ci/workflows.sh` and not a
+new run. Three do not: `thinkdeep`'s step-numbered form, `planner` and
+`refactor`. This adds no work to the track; it adds four citations, without which
+the ledger's "green before this wave" column is unevidenced.
+
+### The four residuals, restated as accepted rather than closed
 
 1. **Inline images.** PAL's `chat` takes base64 screenshots; asks are text. The
    working answer is that adapter sessions have a working directory and the
@@ -714,9 +768,16 @@ PAL tool.** `confer` is named for the shape and for the owner's own word in
 3. **Per-call temperature and effort knobs.** Configuration, not capability;
    reachable through adapter arguments today, and through a two-line wrapper
    script per route after Stage R. **Accepted.**
+4. **Attested returned model identity.** *Added by the reconciliation
+   (`parity-matrix.md` §3.1(a) and row P1b).* PAL's `chat` returns
+   `metadata.model_used` and the owner's `validated-code-review` skill aborts on
+   a mismatch. agent-cat's trace carries no backend field by design
+   (`routing-design.md` §4.2 tables the structures; §4.4 gives the reason), so
+   the run can attest the pin and the configured backend but not the answering
+   weights. That skill keeps PAL. **Accepted.**
 
 **Done, stated once:** A1 through A9 executed with evidence recorded, A10
-verified as a negative, the three residuals acknowledged in writing, every gate
+verified as a negative, the four residuals acknowledged in writing, every gate
 of §1.2 green at its stated numbers, and Check C of §1.4 observed rather than
 argued.
 

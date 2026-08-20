@@ -10,10 +10,20 @@
 -- > <binary> cost  NAME
 -- > <binary> run   NAME --scripted
 -- > <binary> run   NAME --session <id> [--binary PATH] [--poll MS]
+-- >                                    [--route NAME=BACKEND]...
 -- >                                    [--timeout MS] [--verbose]
 -- > <binary> run   NAME --engine acp [--adapter stub|claude|codex|PATH]
 -- >                                  [--adapter-arg ARG]... [--scratch DIR]
+-- >                                  [--route NAME=BACKEND]...
 -- >                                  [--timeout MS] [--verbose]
+--
+-- @--engine acp --adapter X@ and @--session S@ name a run's __default
+-- answerer__, and @--route@ refines it: a run reaches several model backends at
+-- once, dispatching each question by the serving model its @served by@ pin
+-- names. That is execution policy and nothing below it — @plan@ and @cost@ do
+-- not read a route, and a price that varied with a route table would be the
+-- first time in this language that who answers changed what a program costs.
+-- See "Agentic.Route".
 --
 -- This module /was/ @run\/Main.hs@, whole. What moved it here is that a second
 -- table of named programs now exists — the owner's toolbox in the separate,
@@ -113,7 +123,7 @@ import Data.Aeson (Value (..))
 import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString as BS
-import Data.List (sort, sortOn, tails)
+import Data.List (nub, sort, sortOn, tails)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -144,12 +154,13 @@ import System.IO.Error (ioeGetErrorString, isUserError)
 import Text.Read (readMaybe)
 
 import Agentic.Acp
-  ( AcpConfig (..),
+  ( Acp,
+    AcpConfig (..),
     AcpError,
     adapterArgv,
     defaultAcpConfig,
     renderAcpError,
-    withAcp,
+    withAcps,
     worldOfAcp,
   )
 import Agentic.AgentDeck
@@ -163,7 +174,7 @@ import Agentic.Builder (Program, progPlan, progRawOut)
 import Agentic.Chains (servedChains)
 import qualified Data.Map.Strict as Map
 import Agentic.Exec
-  ( WorldIO,
+  ( WorldIO (WorldIO),
     announcingWorld,
     chainsOf,
     noChains,
@@ -171,6 +182,22 @@ import Agentic.Exec
     scriptedWorld,
     stderrLog,
   )
+import Agentic.Route
+  ( Backend (BackendAcp, BackendDeck),
+    Routes,
+    Scheme (SchemeAcp, SchemeDeck),
+    parseRoute,
+    routeBackends,
+    routeByModel,
+    routeDefault,
+    routeNamed,
+    routedWorld,
+    routes,
+    schemeOf,
+    schemeWord,
+  )
+import Data.Set (Set)
+import qualified Data.Set as Set
 import Agentic.Shell
   ( ShellConfig (shellCwd, shellLog, shellTimeoutMs),
     defaultShellConfig,
@@ -289,34 +316,53 @@ data Given = Given
   }
 
 -- | Who answers.
+--
+-- Two arms and not three, and that is the whole of what routing changed here: a
+-- live run is a __table of backends__ rather than a choice between two engines,
+-- and the run that names one backend is the run whose table has one entry.
+-- @--engine acp --adapter X@ and @--session S@ do not become something else;
+-- they become the __default route__, with no change in spelling and no change
+-- in meaning, and a command line with no @--route@ prints the same header and
+-- reaches the same transport it always did.
 data Target
   = -- | The canned table of the row's 'rowScript'.
     Scripted
-  | -- | A live @agent-deck@ session.
-    Live !DeckConfig
-  | -- | An ACP adapter this process starts.
-    Adapter !AcpTarget
+  | -- | Live backends: the default, and the routes that refine it.
+    Routed !RunRoutes
 
--- | What @--engine acp@ was told, before the run has a directory.
+-- | A run's answerers, and the knobs that belong to the /run/ rather than to
+-- any one of them.
+--
+-- @--timeout@, @--verbose@, @--scratch@, @--binary@, @--poll@ and
+-- @--adapter-arg@ are per-run and apply to every route of the scheme they
+-- belong to. Two reasons, and the second is the operative one: a turn budget is
+-- a statement about how long /this run/ will wait and not about which provider
+-- it waited on; and __a per-route adapter argument is a two-line wrapper
+-- script__, because 'adapterArgv' falls through to a bare path for any word it
+-- does not know, while a flag is forever.
 --
 -- The working directory is settled in 'runCmd' and not in the parser, because a
 -- run without @--scratch@ makes one — an act may write, and
 -- 'Agentic.Acp.permissionByCode' authorizes a tool call in the session's
 -- working directory, so a run that had not been given one of its own would be
 -- authorizing writes into whatever directory it was started from.
-data AcpTarget = AcpTarget
-  { atConfig :: !AcpConfig,
+data RunRoutes = RunRoutes
+  { -- | The default, and the routes that refine it.
+    rrRoutes :: !(Routes Backend),
     -- | @--scratch DIR@, or 'Nothing' for a fresh one.
-    atScratch :: !(Maybe FilePath),
-    -- | The word @--adapter@ took, for the header and for a diagnosis: an
-    -- operator must be able to act on a message by retyping the name it
-    -- contains (@Acp.Adapter.ofName_name@).
-    atName :: !Text,
+    rrScratch :: !(Maybe FilePath),
+    -- | @--adapter-arg@, in the order given, for every @acp:@ backend.
+    rrAdapterArgs :: ![String],
+    -- | @--binary PATH@, for every @deck:@ backend.
+    rrBinary :: !(Maybe FilePath),
+    rrPollMs :: !(Maybe Int),
+    rrTimeoutMs :: !(Maybe Int),
+    rrVerbose :: !Bool,
     -- | Whether @--adapter@ was /given/, as against left at its default. The
     -- name alone cannot say — @stub@ is both a thing to type and what a silent
     -- command line means — and the run announces the default rather than
     -- taking it silently.
-    atGiven :: !Bool
+    rrAdapterGiven :: !Bool
   }
 
 -- | The runner, over the registry it serves.
@@ -346,9 +392,53 @@ cliMain reg = do
 execute :: Registry -> Command -> IO ()
 execute reg = \case
   List -> listCmd reg >> exitSuccess
-  Plan name raw pinned ins -> withExample reg pinned False name ins (planCmd name raw)
-  Cost name ins -> withExample reg False False name ins (costCmd name)
-  Run name target pinned ins -> withExample reg pinned True name ins (runCmd reg name target)
+  Plan name raw pinned ins -> withExample reg pinned False noRefusal name ins (planCmd name raw)
+  Cost name ins -> withExample reg False False noRefusal name ins (costCmd name)
+  Run name target pinned ins ->
+    withExample reg pinned True (routeRefusal reg target) name ins (runCmd reg name target)
+
+-- | The verb owes the program no precondition of its own — @plan@ and @cost@,
+-- which read no flag that is a claim about the program's text.
+noRefusal :: Program -> Maybe Text
+noRefusal = const Nothing
+
+-- | __A @--route@ naming a model this program never pins has configured
+-- nothing, and its operator believes otherwise.__
+--
+-- The refusal is defended for the reason 'chooseTarget''s existing refusals
+-- are: a flag silently accepted by the transport it means nothing to is a run
+-- configured by a line nobody read. The check is cheap and exact —
+-- 'servedChains' already returns @primary -> alternates@ for the whole program,
+-- and the set of pinnable names is its keys plus every alternate, because an
+-- alternate is a model name and is routed like any other.
+--
+-- The converse is __not__ an error: a pinned model no @--route@ names takes the
+-- default, and the header says so. An exhaustive route table would make
+-- @--route@ unusable on any program with more than two pins, and the whole
+-- point of a default is to be the answer for everything unremarkable.
+--
+-- An ill-defined chain table is passed over in silence here, because the run is
+-- about to refuse it in its own words with the two spellings named — and a
+-- table that cannot be built cannot say which models this program pins either.
+routeRefusal :: Registry -> Target -> Program -> Maybe Text
+routeRefusal _ Scripted _ = Nothing
+routeRefusal reg (Routed rr) prog = case servedChains (progRawOut prog) of
+  Left _ -> Nothing
+  Right t ->
+    let pinnable = sort (nub (Map.keys t <> concat (Map.elems t)))
+     in listToMaybe
+          [ "--route names the model '"
+              <> m
+              <> "', which this "
+              <> regNoun reg
+              <> " never pins; "
+              <> ( if null pinnable
+                     then "it pins no model at all"
+                     else "the models it pins are: " <> T.intercalate ", " pinnable
+                 )
+          | (m, _) <- routeNamed (rrRoutes rr),
+            m `notElem` pinnable
+          ]
 
 -- | Look the example up, bind its inputs, or fail naming what is wrong — and,
 -- under @--require-pinned@, refuse a program that leaves a model ask without a
@@ -368,15 +458,23 @@ execute reg = \case
 -- @run@: a static fold does not read a prompt (@Plan.hs@'s folds are all
 -- @Plan g a -> …@), so @plan@ and @cost@ answer for a program whose subject is
 -- not yet in hand and say on the @inputs@ line that they did.
+--
+-- The third argument is the verb's own precondition on the program's text, and
+-- it is here rather than inside the verb for the reason @--require-pinned@ is:
+-- a claim the command line makes about a program is checkable the moment the
+-- program is in hand, which is before a plan is printed and before an adapter
+-- is started. @run@ passes 'routeRefusal'; the two static verbs pass
+-- 'noRefusal', because neither reads a flag that is a claim about the text.
 withExample ::
   Registry ->
   Bool ->
   Bool ->
+  (Program -> Maybe Text) ->
   Text ->
   [InputFlag] ->
   (Program -> [Given] -> IO ()) ->
   IO ()
-withExample reg pinned needsAll name ins k = case regLookup reg name of
+withExample reg pinned needsAll refuses name ins k = case regLookup reg name of
   Nothing ->
     die reg 1 $
       "no "
@@ -391,6 +489,7 @@ withExample reg pinned needsAll name ins k = case regLookup reg name of
       Left why -> die reg 1 why
       Right (prog, bs)
         | pinned, Just why <- guardUnpinnedAsk (progRawOut prog) -> die reg 1 ("refused: " <> why)
+        | Just why <- refuses prog -> die reg 1 why
         | otherwise -> k prog bs >> exitSuccess
 
 -- ---------------------------------------------------------------------------
@@ -417,7 +516,7 @@ resolveInputs name needsAll ex ins = case ex of
     | otherwise -> pure (Left (name <> " takes no input"))
   Needs par -> case traverse (named (inputNames par)) ins of
     Left why -> pure (Left why)
-    Right pairs -> case duplicate (map fst pairs) of
+    Right pairs -> case firstDuplicate (map fst pairs) of
       Just n -> pure (Left ("input '" <> n <> "' was given twice"))
       Nothing -> do
         read' <- traverse (\(n, src) -> fmap ((,) n) <$> text src) pairs
@@ -454,8 +553,6 @@ resolveInputs name needsAll ex ins = case ex of
                 <> "'; it takes "
                 <> T.intercalate ", " ns
             )
-
-    duplicate ns = listToMaybe [n | (n, rest) <- zip ns (drop 1 (tails ns)), n `elem` rest]
 
     -- The text, and where it came from. A file's contents are read as UTF-8
     -- and one trailing newline is stripped, so that an input from a file
@@ -501,6 +598,15 @@ resolveInputs name needsAll ex ins = case ex of
       Nothing
         | needsAll -> Left ("run needs every input: '" <> n <> "' was not given")
         | otherwise -> Right (Given n Nothing "")
+
+-- | The first element that appears again later, if one does.
+--
+-- Two callers who mean the same thing by it: an input named twice on one
+-- command line, and a model routed twice. Both are the operator saying two
+-- things about one name, and neither has a resolution that would make what they
+-- believe about the run true.
+firstDuplicate :: (Eq a) => [a] -> Maybe a
+firstDuplicate ns = listToMaybe [n | (n, rest) <- zip ns (drop 1 (tails ns)), n `elem` rest]
 
 -- | A text's size in bytes, as an operator reads it.
 sizeOf :: Text -> Text
@@ -702,48 +808,38 @@ runCmd reg name target prog gs = case target of
       "  no command was run; every gate in this program was answered from the \
       \table"
     walkWith id (scriptedWorld script)
-  Live cfg -> do
-    say $ "running " <> name <> " against agent-deck session " <> deckSession cfg
-    say $
-      "  polling every "
-        <> tshow (deckPollMs cfg)
-        <> "ms, "
-        <> tshow (deckTimeoutMs cfg)
-        <> "ms to a turn; every addressee — model, tool and person — is this one session"
-    -- The deck engine sends into a session somebody else started, so the
-    -- directory a command runs in and the directory that session works in need
-    -- not agree. Announce it rather than assume it.
-    say
-      "  a `running` tool's command runs in this process's directory, which the \
-      \deck session — started by somebody else — need not share"
-    walkWith (executingWorld (shellAt ".")) (worldOfDeck cfg)
-  Adapter at -> do
-    dir <- maybe (freshScratch reg) pure (atScratch at)
-    createDirectoryIfMissing True dir
-    let cfg = (atConfig at) {acpCwd = dir}
-    say $
-      "running "
-        <> name
-        <> " against the "
-        <> atName at
-        <> " adapter: "
-        <> T.unwords (map T.pack (acpCommand cfg))
-    -- A default that was not typed is announced rather than assumed: `stub` is
-    -- both a word an operator can write and what a silent command line means,
-    -- and the difference is the difference between a run that answers itself
-    -- and one that reaches a real agent.
-    unless (atGiven at) $
-      say "  no --adapter given, so the stub answers — the same default agent-cat's own CLI takes"
-    say $
-      "  cwd "
-        <> T.pack dir
-        <> ", "
-        <> tshow (acpTurnTimeoutMs cfg)
-        <> "ms to a turn, "
-        <> (if acpFreshPerQuestion cfg then "a new session per question" else "one session for the run")
-        <> "; every addressee — model, tool and person — is this one adapter"
-    say $ "  a `running` tool's command runs in " <> T.pack dir
-    withAcp cfg (walkWith (executingWorld (shellAt dir)) . worldOfAcp cfg)
+  Routed rr -> do
+    let rs = rrRoutes rr
+        backends = routeBackends rs
+    -- __The run has a directory of its own exactly when it starts an adapter of
+    -- its own__, and there is one of them however many backends there are
+    -- (§3.4). Every `acp:` route gets it as its `acpCwd` and `executingWorld`
+    -- gets it as its `shellCwd`, because a `toolExec` gate that checked a build
+    -- in a directory the act did not write to is a gate that always passes. A
+    -- run that is all `deck:` starts nothing and keeps the answer it always
+    -- had: this process's directory, which the session need not share.
+    --
+    -- The obvious objection — concurrent writes from several adapters — does
+    -- not arise: `execIn` is a sequential fold, so there is never more than one
+    -- turn in flight in a run.
+    dir <-
+      if any isAcp backends
+        then do
+          d <- maybe (freshScratch reg) pure (rrScratch rr)
+          createDirectoryIfMissing True d
+          pure d
+        else pure "."
+    sayBackends rr dir backends
+    -- Startup is __eager__ and the default is first. Eager because the header
+    -- must be true before the first question is put — one that promised three
+    -- backends and then failed to start the third mid-run would have been a
+    -- false statement at the moment it was read — and because it costs nothing:
+    -- `session/new` carries no prompt and spends no tokens, and a `deck:` route
+    -- holds no connection at all. The default first because every run needs it,
+    -- so a run whose default will not start fails before spawning anything
+    -- else.
+    withAcps [(b, acpConfigFor rr dir w) | b@(BackendAcp w) <- backends] $ \live ->
+      walkWith (executingWorld (shellAt dir)) (routedWorld (fmap (worldOf rr dir live) rs))
   where
     -- The canned table is the row's own, which is why `run` looks the row up
     -- again rather than being handed a program: a script that lived anywhere
@@ -757,6 +853,176 @@ runCmd reg name target prog gs = case target of
           shellTimeoutMs = 120000,
           shellLog = say . ("  " <>)
         }
+
+    isAcp b = schemeOf b == SchemeAcp
+
+    -- The answering service of one backend. Every backend the table names is in
+    -- `live` if it is an `acp:` one, because `live` is keyed by exactly the
+    -- `acp:` members of `routeBackends` and `fmap` asks about nothing else; the
+    -- fourth case is therefore unreachable, and it is a raising 'WorldIO'
+    -- rather than an `error` so that a bug here would be a named run failure at
+    -- the question that hit it and not a bottom in the middle of a fold.
+    worldOf :: RunRoutes -> FilePath -> [(Backend, Acp)] -> Backend -> WorldIO
+    worldOf rr dir live b = case b of
+      BackendDeck s -> worldOfDeck (deckConfigFor rr s)
+      BackendAcp w -> case lookup b live of
+        Just acp -> worldOfAcp (acpConfigFor rr dir w) acp
+        Nothing ->
+          WorldIO $ \_ _ ->
+            ioError (userError ("no connection was made for the backend acp:" <> T.unpack w))
+
+    -- The per-run knobs, applied to a backend of the scheme they belong to.
+    -- Nothing new is decided here: `adapterArgv` and `defaultDeckConfig`
+    -- already turn a word into a backend.
+    acpConfigFor :: RunRoutes -> FilePath -> Text -> AcpConfig
+    acpConfigFor rr dir w =
+      let base = defaultAcpConfig (adapterArgv w <> rrAdapterArgs rr)
+       in base
+            { acpCwd = dir,
+              acpTurnTimeoutMs = fromMaybe (acpTurnTimeoutMs base) (rrTimeoutMs rr),
+              acpVerbose = rrVerbose rr
+            }
+
+    deckConfigFor :: RunRoutes -> Text -> DeckConfig
+    deckConfigFor rr s =
+      let base = defaultDeckConfig s
+       in base
+            { deckBinary = fromMaybe (deckBinary base) (rrBinary rr),
+              deckPollMs = fromMaybe (deckPollMs base) (rrPollMs rr),
+              deckTimeoutMs = fromMaybe (deckTimeoutMs base) (rrTimeoutMs rr),
+              deckVerbose = rrVerbose rr
+            }
+
+    -- The header: *who answers what, under what policy, before a token moves* —
+    -- and never a claim that anybody answered anything, which is the trace's to
+    -- say and only afterwards.
+    --
+    -- At one backend it is today's header, word for word, including "every
+    -- addressee — model, tool and person — is this one adapter". That sentence
+    -- is not a hedge and not a lie: it is a lie when there are two backends and
+    -- true when there is one, so the run that names one prints it and the run
+    -- that names several prints the table instead.
+    sayBackends :: RunRoutes -> FilePath -> [Backend] -> IO ()
+    sayBackends rr dir = \case
+      [BackendAcp w] -> do
+        let cfg = acpConfigFor rr dir w
+        say $
+          "running "
+            <> name
+            <> " against the "
+            <> w
+            <> " adapter: "
+            <> T.unwords (map T.pack (acpCommand cfg))
+        -- A default that was not typed is announced rather than assumed: `stub`
+        -- is both a word an operator can write and what a silent command line
+        -- means, and the difference is the difference between a run that
+        -- answers itself and one that reaches a real agent.
+        unless (rrAdapterGiven rr) $
+          say "  no --adapter given, so the stub answers — the same default agent-cat's own CLI takes"
+        say $
+          "  cwd "
+            <> T.pack dir
+            <> ", "
+            <> tshow (acpTurnTimeoutMs cfg)
+            <> "ms to a turn, "
+            <> (if acpFreshPerQuestion cfg then "a new session per question" else "one session for the run")
+            <> "; every addressee — model, tool and person — is this one adapter"
+        say $ "  a `running` tool's command runs in " <> T.pack dir
+      [BackendDeck s] -> do
+        let cfg = deckConfigFor rr s
+        say $ "running " <> name <> " against agent-deck session " <> deckSession cfg
+        say $
+          "  polling every "
+            <> tshow (deckPollMs cfg)
+            <> "ms, "
+            <> tshow (deckTimeoutMs cfg)
+            <> "ms to a turn; every addressee — model, tool and person — is this one session"
+        -- The deck engine sends into a session somebody else started, so the
+        -- directory a command runs in and the directory that session works in
+        -- need not agree. Announce it rather than assume it.
+        say
+          "  a `running` tool's command runs in this process's directory, which the \
+          \deck session — started by somebody else — need not share"
+      bs -> sayManyBackends rr dir bs
+
+    -- The table, when there is more than one backend to name. Six things it
+    -- owes the operator, each earned: the backends __deduplicated__, so the
+    -- count is processes and not route lines; the default named first and what
+    -- falls to it said out loud, because the remainder is the part an operator
+    -- cannot compute from the flag list; the pinned models this program has
+    -- that no route claims, on their own line, so that a mistyped route reads
+    -- as a mistyped route and not as an absent one; the working-directory
+    -- lines, unchanged because the fact is unchanged; the chain lines, which
+    -- `walkWith` prints a moment later and which are more worth printing when a
+    -- ladder crosses providers, not less; and no claim that any backend
+    -- answered anything.
+    sayManyBackends :: RunRoutes -> FilePath -> [Backend] -> IO ()
+    sayManyBackends rr dir bs = do
+      say $ "running " <> name <> " against " <> tshow (length bs) <> " backends:"
+      say $ pad "default" <> backendWords rr (routeDefault (rrRoutes rr))
+      say $ pad "" <> "— every unpinned ask, every tool and every person"
+      mapM_ route (routeNamed (rrRoutes rr))
+      unless (null unclaimed) $
+        say $ pad (T.intercalate ", " unclaimed) <> "the default (no --route names them)"
+      case [w | BackendAcp w <- bs] of
+        [] -> pure ()
+        (w : _) ->
+          let cfg = acpConfigFor rr dir w
+           in say $
+                "  cwd "
+                  <> T.pack dir
+                  <> ", "
+                  <> tshow (acpTurnTimeoutMs cfg)
+                  <> "ms to a turn, "
+                  <> (if acpFreshPerQuestion cfg then "a new session per question" else "one session for the run")
+      case [s | BackendDeck s <- bs] of
+        [] -> pure ()
+        (s : _) ->
+          let cfg = deckConfigFor rr s
+           in say $
+                "  polling every "
+                  <> tshow (deckPollMs cfg)
+                  <> "ms, "
+                  <> tshow (deckTimeoutMs cfg)
+                  <> "ms to a turn"
+      say $ "  a `running` tool's command runs in " <> T.pack dir
+      where
+        route (m, b) = do
+          say $ pad m <> backendWords rr b
+          -- §5.3: the deck arm's directory caveat is per route and not per run,
+          -- because with a mixed table it holds of the `deck:` routes and is
+          -- false of the `acp:` ones.
+          case b of
+            BackendDeck _ ->
+              say $
+                pad ""
+                  <> "— its working directory is its own; this run's tools run in "
+                  <> T.pack dir
+            BackendAcp _ -> pure ()
+
+        -- Every model this program pins — the `served by` primaries and their
+        -- spares — that no route claims. `servedChains` has the set in hand;
+        -- an ill-defined table is about to be refused by `walkWith` in its own
+        -- words, and until then there is nothing honest to print.
+        unclaimed =
+          [ m
+          | m <- either (const []) pinnable (servedChains (progRawOut prog)),
+            not (m `Map.member` routeByModel (rrRoutes rr))
+          ]
+        pinnable t = sort (nub (Map.keys t <> concat (Map.elems t)))
+
+        labels = "default" : map fst (routeNamed (rrRoutes rr)) <> [T.intercalate ", " unclaimed]
+        width = maximum (1 : map T.length labels)
+        pad l = "  " <> T.justifyLeft (width + 2) ' ' l
+
+    -- How a backend names itself in the header: the words today's one-backend
+    -- header uses, so that reading a routed run's table is reading the same
+    -- sentence several times.
+    backendWords :: RunRoutes -> Backend -> Text
+    backendWords rr = \case
+      BackendAcp w ->
+        "the " <> w <> " adapter: " <> T.unwords (map T.pack (acpCommand (acpConfigFor rr "." w)))
+      BackendDeck s -> "agent-deck session " <> s
 
     walkWith :: (WorldIO -> WorldIO) -> WorldIO -> IO ()
     walkWith exec world = do
@@ -904,6 +1170,10 @@ data RunOpts = RunOpts
     roAdapter :: !(Maybe Text),
     -- | In the order given, which is the order they reach the child's @argv@.
     roAdapterArgs :: ![Text],
+    -- | @--route NAME=BACKEND@, in the order given — which is the order the run
+    -- starts them and the order the header prints them, so that an operator can
+    -- read the header against their own command line.
+    roRoutes :: ![Text],
     roScratch :: !(Maybe Text),
     -- | @--require-pinned@. Belongs to no engine — it is a question about the
     -- program's text, which is the same text whoever answers it — so it is the
@@ -916,7 +1186,7 @@ data RunOpts = RunOpts
   }
 
 noRunOpts :: RunOpts
-noRunOpts = RunOpts False Nothing Nothing Nothing Nothing Nothing False Nothing [] Nothing False []
+noRunOpts = RunOpts False Nothing Nothing Nothing Nothing Nothing False Nothing [] [] Nothing False []
 
 -- | The @run@ options: three mutually exclusive answerers, the knobs that
 -- belong to one of them alone, and @--require-pinned@ and the input flags,
@@ -948,6 +1218,7 @@ parseTarget reg args = do
       ("--binary" : v : rest) -> go o {roBinary = Just v} rest
       ("--adapter" : v : rest) -> go o {roAdapter = Just v} rest
       ("--adapter-arg" : v : rest) -> go o {roAdapterArgs = roAdapterArgs o <> [v]} rest
+      ("--route" : v : rest) -> go o {roRoutes = roRoutes o <> [v]} rest
       ("--scratch" : v : rest) -> go o {roScratch = Just v} rest
       ("--poll" : v : rest) -> withMs "--poll" v (\n -> go o {roPollMs = Just n} rest)
       ("--timeout" : v : rest) -> withMs "--timeout" v (\n -> go o {roTimeoutMs = Just n} rest)
@@ -973,12 +1244,24 @@ chooseTarget reg o = case (roScripted o, roEngine o, roSession o) of
     Left
       "--engine acp starts an adapter of its own, and --session sends to an agent-deck \
       \session somebody else started; pick one"
-  (_, Just "acp", _) -> adapter
+  -- The default is `stub`, the deterministic double: a command line that named
+  -- no adapter must not spawn a real agent, spend a token or touch an account.
+  -- (The retired Lean CLI kept the same default, for the same reason.)
+  (_, Just "acp", _) -> live (BackendAcp (fromMaybe "stub" (roAdapter o)))
   (_, Just "deck", Nothing) -> Left "--engine deck needs the session to send to: give --session <id> as well"
-  (_, _, Just s) -> deck s
+  (_, _, Just s) -> live (BackendDeck s)
+  -- A route refines a default answerer, so a run that named no default has
+  -- nowhere to put the questions no route claims — every unpinned ask, every
+  -- tool and every person — and saying so is more use than the general refusal
+  -- that follows it.
+  _
+    | not (null (roRoutes o)) ->
+        Left
+          "--route refines this run's default answerer, and there is none: \
+          \give --engine acp or --session <id> as well"
   _ -> Left ("run needs --scripted, --engine acp, or --session <id>\n\n" <> usage reg)
   where
-    -- The flags of the two engines this run is not, refused by name.
+    -- A flag this run's answerer has no use for, refused by name.
     forbid :: Text -> [(Text, Bool)] -> Either Text ()
     forbid engine = \case
       ((flag, True) : _) -> Left (flag <> " is not " <> engine <> "'s to take")
@@ -989,39 +1272,66 @@ chooseTarget reg o = case (roScripted o, roEngine o, roSession o) of
     deckFlags = [("--binary", isJust (roBinary o)), ("--poll", isJust (roPollMs o))]
     liveFlags = acpFlags <> deckFlags <> [("--timeout", isJust (roTimeoutMs o)), ("--verbose", roVerbose o)]
 
-    onlyScripted = Scripted <$ forbid "--scripted" liveFlags
+    -- `--route` is refused here rather than left inert. Routes *would* be inert
+    -- under `--scripted` — `scriptedReply` reads `qPrompt` and nothing else, so
+    -- it cannot see the scope routing dispatches on, and a route table could
+    -- not change a canned answer even if one were permitted — and a flag that
+    -- is silently inert is the defect this whole function exists to prevent.
+    onlyScripted
+      | not (null (roRoutes o)) =
+          Left "--route names live backends and --scripted answers from a table; pick one"
+      | otherwise = Scripted <$ forbid "--scripted" liveFlags
 
-    deck s = do
-      -- `--adapter` names a child this run starts, and the deck engine starts
-      -- none: there the answering agent is the one already in the session.
-      forbid "the deck engine" acpFlags
-      let base = defaultDeckConfig s
-      pure . Live $
-        base
-          { deckBinary = maybe (deckBinary base) T.unpack (roBinary o),
-            deckPollMs = fromMaybe (deckPollMs base) (roPollMs o),
-            deckTimeoutMs = fromMaybe (deckTimeoutMs base) (roTimeoutMs o),
-            deckVerbose = roVerbose o
-          }
+    flagsOf :: Scheme -> [(Text, Bool)]
+    flagsOf = \case
+      SchemeAcp -> acpFlags
+      SchemeDeck -> deckFlags
 
-    adapter = do
-      forbid "the acp engine" deckFlags
-      -- The default is `stub`, the deterministic double: a command line that
-      -- named no adapter must not spawn a real agent, spend a token or touch
-      -- an account. (The retired Lean CLI kept the same default, for the same
-      -- reason.)
-      let name = fromMaybe "stub" (roAdapter o)
-          base = defaultAcpConfig (adapterArgv name <> map T.unpack (roAdapterArgs o))
-      pure . Adapter $
-        AcpTarget
-          { atConfig =
-              base
-                { acpTurnTimeoutMs = fromMaybe (acpTurnTimeoutMs base) (roTimeoutMs o),
-                  acpVerbose = roVerbose o
-                },
-            atScratch = T.unpack <$> roScratch o,
-            atName = name,
-            atGiven = isJust (roAdapter o)
+    -- The flags of the schemes this run's route table never reaches.
+    --
+    -- The generalization of the per-engine refusal to *the set of schemes the
+    -- table uses*, default included. At one scheme it is the predicate that
+    -- exists today, refusal wording and all: exactly one scheme is foreign, and
+    -- the run's own is the only one there is to name, so `--adapter` under a
+    -- deck run is still "not the deck engine's to take". At two it refuses
+    -- nothing, which is the whole of what a route makes newly meaningful — with
+    -- a `deck:` route under an `acp` default, `--binary` and `--poll` are the
+    -- run's to take after all.
+    forbidForeign :: Set Scheme -> Either Text ()
+    forbidForeign used =
+      mapM_
+        (forbid (T.intercalate " and " (map schemeWord (Set.toAscList used))) . flagsOf)
+        [s | s <- [minBound .. maxBound], not (s `Set.member` used)]
+
+    -- One default and the routes that refine it. `--engine acp --adapter X`
+    -- and `--session S` *become* the default route with no change in spelling
+    -- and no change in meaning: today they name the one backend every question
+    -- reaches, and after this they name the backend every question reaches that
+    -- no route claims.
+    live def = do
+      -- A malformed route first, because it is the most local mistake and the
+      -- one whose message the operator can act on by retyping one word.
+      named <- traverse parseRoute (roRoutes o)
+      case firstDuplicate (map fst named) of
+        Just m ->
+          Left
+            ( "--route names the model '"
+                <> m
+                <> "' twice; a model has one backend in a run"
+            )
+        Nothing -> Right ()
+      let table = routes def named
+      forbidForeign (Set.fromList (map schemeOf (routeBackends table)))
+      pure . Routed $
+        RunRoutes
+          { rrRoutes = table,
+            rrScratch = T.unpack <$> roScratch o,
+            rrAdapterArgs = map T.unpack (roAdapterArgs o),
+            rrBinary = T.unpack <$> roBinary o,
+            rrPollMs = roPollMs o,
+            rrTimeoutMs = roTimeoutMs o,
+            rrVerbose = roVerbose o,
+            rrAdapterGiven = isJust (roAdapter o)
           }
 
 usage :: Registry -> Text
@@ -1035,9 +1345,11 @@ usage reg =
       "  " <> bin <> " cost <" <> noun <> "> [<input>...]",
       "  " <> bin <> " run  <" <> noun <> "> --scripted [<input>...]",
       runLead <> "--session <id> [--binary PATH] [--poll MS]",
+      under (runLead <> "--session <id> ") <> "[--route NAME=BACKEND]...",
       under (runLead <> "--session <id> ") <> "[--timeout MS] [--verbose]",
       runLead <> "--engine acp [--adapter stub|claude|codex|PATH]",
       under (runLead <> "--engine acp ") <> "[--adapter-arg ARG]... [--scratch DIR]",
+      under (runLead <> "--engine acp ") <> "[--route NAME=BACKEND]...",
       under (runLead <> "--engine acp ") <> "[--timeout MS] [--verbose]",
       "",
       "  <" <> noun <> "> is " <> T.intercalate " or " (regNames reg),
@@ -1077,6 +1389,16 @@ usage reg =
       "  --scratch      run in DIR instead of a fresh temporary directory: where the",
       "                 adapter is started, and the only place an act may write.",
       "                 --engine acp only",
+      "  --route        NAME=BACKEND — put the questions this run pins to the model",
+      "                 NAME to BACKEND instead of to the default answerer.",
+      "                 Repeatable, at most once per NAME. BACKEND is",
+      "                 acp:stub|claude|codex|PATH (start an adapter of this run's",
+      "                 own) or deck:<id> (send to a live agent-deck session).",
+      "                 NAME is a *serving model* — a `served by` pin or one of its",
+      "                 spares — and not a party: routing the pin is what makes a",
+      "                 fail-over ladder cross providers. A pinned model no --route",
+      "                 names, every unpinned ask, and every tool and person take",
+      "                 the default. Refuses a NAME this program never pins",
       "  --timeout      milliseconds one turn may take before it is abandoned",
       "  --verbose      narrate the transport on stderr",
       "  --require-pinned",

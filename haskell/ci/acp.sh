@@ -16,6 +16,13 @@
 # question*, the stop reason (which is the thing this transport can promise and
 # `ci/deck.sh`'s cannot), and the five named transport failures.
 #
+# And, since routing, the part of it that reaches *two* adapters: one program,
+# two stub processes, each question dispatched by the serving model its
+# `served by` pin names (13); eager startup, so a dead route costs nothing (14);
+# and the usage refusals that keep a route from being silently inert (15). Two
+# stubs and never a real agent, here as everywhere in this gate — the two
+# backends are told apart by *outcome*, not by a flag.
+#
 # Runs on every commit, beside ci/deck.sh. Exits 0 only if every scenario
 # behaved exactly as written below.
 set -uo pipefail
@@ -264,10 +271,140 @@ want_no_line "billFresh"
 note "crossed-flags: refused before anything was spawned, exit 1"
 
 # ---------------------------------------------------------------------------
+# 13. Two adapters in one run, and each question went to the right one.
+#
+# THE routing scenario, and it needs no new fixture: the flagship already
+# contains one distinct pin (`model author served by "deep"`), three
+# *deliberately unpinned* model asks (the three reviewers, so the lenses stay
+# comparable), a tool, a person and an act — the `Just` case and the `Nothing`
+# case of the resolution rule in one program, with the tool question asked
+# *before* the routed one so that ordering is observable.
+#
+# The two backends are both stubs, distinguished by *outcome* rather than by a
+# flag. `deep` is routed to a two-line wrapper script that runs the same stub
+# under `--write-on-ask` — which is scenario 4's measured defect: the adapter
+# asks permission to rewrite `parse.c` during a turn that was only asked a
+# question, and `permissionByCode` denies it. So the routed stub announces
+# itself, by denial, on exactly the questions it answered.
+#
+# That the wrapper suffices is the whole of the argument against a `--route-arg`
+# flag: `adapterArgv` falls through to a bare path for any word it does not
+# know, so a per-route adapter argument is a shell script and a flag is forever.
+#
+# The pair of want_line/want_no_line assertions is the resolution rule proved
+# end to end: one program, two processes, dispatch by pin, with no new fixture,
+# no new flag and no edited assertion elsewhere.
+# ---------------------------------------------------------------------------
+stubabs="$(cd .. && pwd)/test/stub_adapter.py"
+mkdir -p "$work/two-adapters/bin"
+cat > "$work/two-adapters/bin/stub-writing" <<EOF
+#!/bin/sh
+exec python3 "$stubabs" --write-on-ask "\$@"
+EOF
+chmod +x "$work/two-adapters/bin/stub-writing"
+
+play two-adapters run harden --engine acp --adapter stub \
+  --route "deep=acp:$work/two-adapters/bin/stub-writing" --timeout 60000
+want_code 0
+# The routed adapter answered the author, which is the pinned ask …
+want_line "permission DENIED  to 'edit parse.c while answering' during the text question put to model author"
+# … and the unpinned reviewers went to the default, which never asks to write.
+want_no_line "during the text question put to model reviewer-correct"
+want_no_line "during the verdict question put to model reviewer-secure"
+# The denial held, and the act still ran — on the default adapter, in the one
+# shared directory both backends were pointed at.
+want_no_file parse.c
+want_file applied.c
+# Identical to scenario 1, because routing changes no bill: no field of an
+# EventKey names a backend, so a route table cannot move a number.
+want_bills 7 7
+want_line "running harden against 2 backends:"
+want_line "— every unpinned ask, every tool and every person"
+grep -qE '^  deep +the .*stub-writing adapter: ' "$out" \
+  || bad "the header does not put deep on its own line with its own adapter"
+note "two-adapters: the pin went to the routed stub, everything else to the default, 7/7, exit 0"
+
+# ---------------------------------------------------------------------------
+# 14. A route to a dead adapter fails before anything is spent.
+#
+# `/usr/bin/false` starts and exits, so the pipe reaches EOF with the handshake
+# outstanding — scenario 8's failure, reached through a route instead of through
+# `--adapter`. What this scenario pins that scenario 8 cannot is *eager
+# startup*: every routed backend is connected before the first question, so a
+# run whose third backend will not start fails before its first backend answers
+# anything. Under lazy startup this same command line would answer the `cat`
+# question first and *then* fail, and `billFresh` would appear. Asserting its
+# absence is asserting the startup order.
+#
+# It is also where the header is held to being *true before the first question
+# is put*: `deep` and the program it was routed to are named in it, printed
+# before the connect that failed, which is what lets an operator read a
+# transport failure against their own command line.
+# ---------------------------------------------------------------------------
+play dead-route run harden --engine acp --adapter stub \
+  --route 'deep=acp:/usr/bin/false' --timeout 10000
+want_code 2
+want_line "closed its output while the initialize handshake was outstanding"
+want_line "/usr/bin/false"
+grep -qE '^  deep +the /usr/bin/false adapter: ' "$out" \
+  || bad "the header did not name the pin the dead backend was routed for"
+want_no_line "billFresh"
+note "dead-route: eager startup failed before anything was spent, exit 2"
+
+# …and the other half of a true header: the pins this program has that no
+# --route claims are printed on their own line, so that a mistyped route reads
+# as a mistyped route and not as an absent one. `grind-tests` pins four models,
+# which is why it is the fixture here and the flagship is not; the run dies at
+# the same connect, so this costs no turns.
+play unclaimed-pins run grind-tests --engine acp --adapter stub \
+  --route 'opus=acp:/usr/bin/false' --timeout 10000
+want_code 2
+want_line "fable, gpt-5.5-xhigh, opencode  the default (no --route names them)"
+want_no_line "billFresh"
+note "unclaimed-pins: the header names the pins no route claims, exit 2"
+
+# ---------------------------------------------------------------------------
+# 15. The four usage refusals, none of which spawns anything.
+#
+# The same shape as scenario 12, which must itself stay green unedited: a flag
+# silently accepted by the transport it means nothing to is a run configured by
+# a line nobody read. Exit 1 in every case, before an adapter is spawned or a
+# token is spent, and each asserted on its wording — which is the only part of a
+# usage error anybody reads.
+#
+# The fifth refusal of the design — a malformed BACKEND — is `parseBackend`'s
+# own and is pinned on its wording in ci/policies.sh, where it costs no process.
+# ---------------------------------------------------------------------------
+play route-scripted run harden --scripted --route 'deep=acp:codex'
+want_code 1
+want_line "--route names live backends and --scripted answers from a table; pick one"
+want_no_line "billFresh"
+
+play route-no-default run harden --route 'deep=acp:codex'
+want_code 1
+want_line "--route refines this run's default answerer, and there is none"
+want_no_line "billFresh"
+
+# The one worth defending: a route naming a model the program never pins has
+# configured nothing, and its operator believes otherwise. `author` is a *party*
+# and `deep` is what serves it — the resolution rule defended at the command
+# line, where an operator will actually make the mistake.
+play route-unpinned run harden --engine acp --route 'author=acp:codex'
+want_code 1
+want_line "--route names the model 'author', which this example never pins; the models it pins are: deep"
+want_no_line "billFresh"
+
+play route-twice run harden --engine acp --route 'deep=acp:codex' --route 'deep=acp:claude'
+want_code 1
+want_line "--route names the model 'deep' twice; a model has one backend in a run"
+want_no_line "billFresh"
+note "route-usage: four refusals, each before anything was spawned, exit 1"
+
+# ---------------------------------------------------------------------------
 
 scenario=summary
 if [ "$failures" = 0 ]; then
-  echo "ci/acp: 12 scenarios passed, 0 failed"
+  echo "ci/acp: 15 scenarios passed, 0 failed"
 else
   echo "ci/acp: $failures scenario assertion(s) failed" >&2
 fi

@@ -25,7 +25,30 @@
 # rather than an answer. `true` and `false` and nothing else; the whole program
 # is `toolExec`, so a question reaching the world beneath is a raised error.
 #
-# No Lean, no corpus; every commit may run it. Nineteen checks.
+# And routing (`Agentic.Route`): the backend grammar an operator types — both
+# schemes, the first-colon split, the `NAME=BACKEND` split, the refusal wordings
+# and the trimming, a blank value being refused where `acp:` is rather than
+# becoming an adapter with no name — and the resolution rule itself, which is
+# that a question is routed by its model axis and `Nothing` takes the default: a
+# pinned question reaches its route, an unrouted pin and every question with no
+# axis reach the default. Then the two facts the run's header rests on:
+# `routeBackends` is the distinct backends with the default first, so the header
+# counts processes and not route lines, and connecting the table with `fmap`
+# moves no question, so nothing is answered by a backend the header did not
+# name. Then the three claims routing rests on: that it is *invisible to the
+# fold* — the flagship run twice, once at an empty route table and once at four
+# distinct backends that answer alike, giving byte-identical traces and
+# identical bills, which is the whole compatibility argument made executable,
+# with each backend noting that it was consulted so that the same rows say where
+# the questions went; that it never intercepts a `toolExec`, two commands around
+# a pinned ask settling at a table whose default raises and whose one route
+# answers; and that a fail-over *crosses* backends, two distinct worlds being
+# two backends as far as `routedWorld` is concerned — with, as the acceptance
+# criterion, the same two backends abandoning in exactly the old words when no
+# spare is declared. Pure throughout: no process, no network, because routing
+# reads one field the interpreter has already computed.
+#
+# No Lean, no corpus; every commit may run it. Thirty checks.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 nix develop path:./. -c cabal run -v0 policy-probe
