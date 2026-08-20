@@ -281,9 +281,11 @@ instance FromJSON Chunk where
 
 -- | Everything said in one question, as written: chunks read left to right.
 --
--- @Prompt.normalize@ is /not/ ported and must not be applied on either side of
--- the codec: a corpus prompt may legitimately hold two adjacent 'Lit' chunks,
--- and re-encoding must reproduce it verbatim.
+-- The authoring surface's empty-literal drop ('Agentic.WF.normalize') must not
+-- be applied on either side of this codec: a corpus prompt may legitimately hold
+-- two adjacent 'Lit' chunks, and re-encoding must reproduce it verbatim. (Lean
+-- used to state that rule as @Dsl.Prompt.normalize@; obr @acat-o5o@ deleted the
+-- statement, since nothing in Lean applied it, and left it where it runs.)
 type Prompt = [Chunk]
 
 -- ---------------------------------------------------------------------------
@@ -351,7 +353,7 @@ instance FromJSON RawTarget where
 
 -- | The models that may answer a pinned question: the one the author named,
 -- and the ones the runner may fall back to, in the order they are tried (D6,
--- @Agentic\/Core\/Dsl\/Syntax.lean:208@).
+-- @Agentic\/Core\/Dsl\/Syntax.lean:189@).
 --
 -- A structure and not a @[Text]@, so that \"pinned but empty\" is
 -- unrepresentable and no new guard is owed; and a /payload/ of the existing
@@ -435,7 +437,7 @@ rawArgPos = \case
 -- ---------------------------------------------------------------------------
 
 -- | One member of a text panel: the name its block is fenced under, and the
--- question that fills it (@Agentic\/Core\/Dsl\/Syntax.lean:256@).
+-- question that fills it (@Agentic\/Core\/Dsl\/Syntax.lean:237@).
 --
 -- A named structure and not a @(Text, RawAsk)@ pair, because a pair's derived
 -- codec puts a two-element array on the wire and __the corpus is read by

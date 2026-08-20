@@ -144,8 +144,8 @@ private def chunkExpr {Γ : Ctx} (S : Bindings Γ) (pos : Pos) :
                          of its own", nm⟩
 
 /-- The chunks after the first, appended to what is already built.
-**Left-associated, and that is the decision** — see `Prompt.normalize`'s
-docstring for what it buys. -/
+**Left-associated, and that is the decision** — see the "chunking is the
+author's" note in `Agentic/Core/Dsl/Syntax.lean` for what it buys. -/
 private def Prompt.exprFrom {Γ : Ctx} (S : Bindings Γ) (pos : Pos) (acc : Expr Γ String) :
     Prompt → Except CheckError (Expr Γ String)
   | [] => .ok acc
@@ -718,10 +718,16 @@ def checkLoopParts (fns : Fns) {Γ : Ctx} (S : Bindings Γ)
   -- Bruijn `0` under the carrier's name; the amend sees the verdict as `0`
   -- under the review binding's name — at `Code.verdict`, rendered only where
   -- a hole asks for it as text — and the candidate as `1`.
+  --
+  -- Built with `Bindings.push` and `Bindings.rename`, so `Sub` owns every de
+  -- Bruijn projection here, as the module docstring says it does: the carrier
+  -- is pushed and then weakened past the verdict, which is what shifts it to
+  -- `1`. The review binding is consed by hand because it is the one entry whose
+  -- `Expr` is not a plain variable read — see the docstring above — and it is
+  -- introduced last, so it reads de Bruijn `0`.
   let Swith : Bindings (Code.verdict :: b.code :: Γ) :=
-    ⟨carrier, b.code, fun δ => Env.head (Env.tail δ)⟩ ::
-    ⟨rname, Code.verdict, fun δ => Env.head δ⟩ ::
-    Bindings.rename Sub.wk (Bindings.rename Sub.wk S)
+    ⟨rname, Code.verdict, Expr.var .here⟩ ::
+    Bindings.rename Sub.wk (Bindings.push carrier b.code S)
   match rhsPlan fns Code.verdict (Bindings.push carrier b.code S) review
       "the review of a bounded revision" with
   | .error err => .error err
@@ -1195,6 +1201,36 @@ def overRevised : Raw → Option (Pos × Nat)
   | .caseResult _ _ _ s u _ => (overRevised s).orElse fun _ => overRevised u
   | .caseEnding _ _ _ _ s u a _ =>
     ((overRevised s).orElse fun _ => overRevised u).orElse fun _ => overRevised a
+
+/-- `[[b.revisionBounds]]` = every `revising … at most n amendments` written in
+`b`, with where it is written.
+
+The reporting half of `overRevised`: the same walk over the same numerals, one
+refusing the numerals that are too large and one listing the ones that stood.
+They must agree about where a bound is written and what it says, so they are
+adjacent — and both are here, in the module that owns `maxRevisions`, rather
+than in the report that prints them (obr `acat-1t1`).
+
+First-order in the syntax: a `RawRhs` has no block inside it, so the recursion
+is `RawBlock`'s own, with one step into a binding's source. Every bound it
+returns is one the checker allowed, because `checkProgram` runs `overRevised`
+and `checkLoopParts` refuses any numeral above `maxRevisions` before it
+elaborates anything. -/
+def RawBlock.revisionBounds : RawBlock → List (Pos × Nat)
+  | .empty _ => []
+  | .knownHere _ rest _ => rest.revisionBounds
+  | .act _ rest _ => rest.revisionBounds
+  | .callStmt _ _ rest _ => rest.revisionBounds
+  | .bind _ _ (.rhs _) rest _ => rest.revisionBounds
+  | .bind _ _ (.revising _ _ n _ _ _ _ rpos) rest _ => (rpos, n) :: rest.revisionBounds
+  -- A `revising on` is a bounded revision too: it is refused above
+  -- `maxRevisions` by the same pre-scan and printed by the same report.
+  | .bind _ _ (.revisingOn _ _ n _ _ _ _ rpos) rest _ => (rpos, n) :: rest.revisionBounds
+  | .ifFlag _ y n _ => y.revisionBounds ++ n.revisionBounds
+  | .caseVerdict _ a o d _ => a.revisionBounds ++ o.revisionBounds ++ d.revisionBounds
+  | .caseResult _ _ _ s u _ => s.revisionBounds ++ u.revisionBounds
+  | .caseEnding _ _ _ _ s u a _ =>
+    s.revisionBounds ++ u.revisionBounds ++ a.revisionBounds
 
 /-- `[[checkProgram prog]]` = the plan the whole program writes: the functions
 checked once, the elaboration sized — hostile loop bounds first, at their own

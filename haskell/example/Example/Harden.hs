@@ -308,8 +308,8 @@ blurbFor n = isaacBlurb n
 -- The answers are the stub's: a fixed guide, a fixed patch, three approvals,
 -- consent, and a receipt. Under them the revision settles in its first round,
 -- so the amendment prompt is never put and the run bills seven consultations —
--- @Harden.bill_apply_demo@ (@Agentic\/Core\/HardenPatch.lean:975@), restated
--- as @Dsl.bill_flagship_apply@ (@Agentic\/Core\/DslFlagship.lean:361@).
+-- @Harden.bill_apply_demo@ (@Agentic\/Core\/HardenPatch.lean:973@), restated
+-- as @Dsl.bill_flagship_apply@ (@Agentic\/Core\/DslFlagship.lean:353@).
 --
 -- __It lives beside the programs it answers__, which is where
 -- "Example.Isaac"'s already did and for the reason that module gives: a key is

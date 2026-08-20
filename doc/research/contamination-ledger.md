@@ -1,5 +1,14 @@
 # Contamination Ledger
 
+> **Historical — the code audited here no longer exists (2026-08-20).** This page
+> audits the pre-re-derivation stratum: `Agentic/*.lean` outside `Core/` — the `Term`
+> calculus, its two meaning functions, the `WEqR` quotient and the resource algebra
+> under them. All of it was excised under obr `acat-q1i`, so every `file:line` below
+> that names one of those modules resolves in git history only. The results that
+> stratum established are transcribed in `doc/research/term-algebra-results.md`; read
+> that page for *what was proved*, and this one for the reasoning that condemned it.
+> Nothing here describes the code as it stands.
+
 **A row-by-row audit of `/Users/johnw/src/agent-cat` against `/Users/johnw/src/agent-functor`, under Conal Elliott's denotational design discipline.**
 
 Prepared 2026-08-12. Auditor role: ledger, not kernel. Every claim carries a `file:line`.
@@ -34,9 +43,9 @@ Before the ledger, the specification's own denotations, restated in the doctrine
 [[Term Op G L f i o]]_S   = Scoped G (Mat S i o)        -- Meaning.lean:175
 [[Term Op G L f i o]]_ext = Runner → G → Key L → i ⇀ o  -- Meaning.lean:832
 [[Mat S ι κ]]             = ι → κ → S                   -- Matrix.lean (Mat)
-[[Scoped G R]]            = G → R                       -- Scope.lean:179
+[[Scoped G R]]            = G → R                       -- Scope.lean:252
 [[Frag]]                  = ℕ∞                          -- Frag.lean:119
-[[LastOpt α]]             = Option α, right-zero + unit -- Scope.lean:71
+[[LastOpt α]]             = Option α, right-zero + unit -- Scope.lean:86
 [[Key L]]                 = abs Site ⊎ rel L Site       -- Meaning.lean:535
 [[Env C O]]               = C → O                       -- Env.lean:64
 [[Workflow]]              = Term / WEqR                 -- Meaning.lean:2498
@@ -236,12 +245,12 @@ Consequence worth flagging for anyone acting on `doc/PLAN.org:1290`, which propo
 
 | # | Spec element | agent-functor precedent | Verdict |
 |---|---|---|---|
-| F1 | `Scoped G R := G → R`; `withScope g f = actR g f` — `Scope.lean:179,189` | The interpreter threads `Scope` as its only context — `Interpret.hs:173` | **FORCED** |
-| F2 | `LastOpt α := Option α` with right-wins `*` — `Scope.lean:71–124`; `Scope μ α` the product of axes — `:143` | `applyScope (ModeScope m) sc = sc {scopeMode = m}` — `Op.hs:222–224`, "Innermost wins, __per axis__" | **INDIFFERENT** |
+| F1 | `Scoped G R := G → R`; `withScope g f = actR g f` — `Scope.lean:252,262` | The interpreter threads `Scope` as its only context — `Interpret.hs:173` | **FORCED** |
+| F2 | `LastOpt α := Option α` with right-wins `*` — `Scope.lean:86–139`; `Scope μ α` the product of axes — `:158` | `applyScope (ModeScope m) sc = sc {scopeMode = m}` — `Op.hs:222–224`, "Innermost wins, __per axis__" | **INDIFFERENT** |
 | F3 | `scopeT` as a *constructor* — `Term.lean:178` | `WithScope` as a *constructor* — `Flow.hs:119` | **INHERITED** |
-| F4 | `innermost_wins`, `axis_independence` as theorems — `Scope.lean:225,240` | `applyScope`'s per-axis record update, asserted in a docstring | **FORCED** |
+| F4 | `innermost_wins`, `axis_independence` as theorems — `Scope.lean:298,313` | `applyScope`'s per-axis record update, asserted in a docstring | **FORCED** |
 
-The Reader account is right and the theorems are real wins: innermost-wins is the `Last` monoid rather than an interpreter rule, and axis-independence is bifunctoriality of the product (`Scope.lean:14–22, 240`). `Scope.lean`'s survivor note — Mathlib has `WithOne` but no right-zero semigroup to feed it — is the correct discipline. F2 is INDIFFERENT: the mathematics permits any monoid of scope-updates (the maximally general choice is the monoid of endomorphisms of the environment, of which `LastOpt`-per-axis is a submonoid); `Term` correctly leaves `G` abstract with no structure demanded (`Term.lean:20–24`), so nothing is over-committed.
+The Reader account is right and the theorems are real wins: innermost-wins is the `Last` monoid rather than an interpreter rule, and axis-independence is bifunctoriality of the product (`Scope.lean:29–37, 313`). `Scope.lean`'s survivor note — Mathlib has `WithOne` but no right-zero semigroup to feed it — is the correct discipline. F2 is INDIFFERENT: the mathematics permits any monoid of scope-updates (the maximally general choice is the monoid of endomorphisms of the environment, of which `LastOpt`-per-axis is a submonoid); `Term` correctly leaves `G` abstract with no structure demanded (`Term.lean:20–24`), so nothing is over-committed.
 
 F3 is the inherited row, and the argument against it is the specification's own. `Term.lean:92–100` refuses a weakening constructor on the ground that "if a later stratum wants `Term f i o → Term g i o`… that is a **fold** over the term, defined where the recursion's target lives, not a constructor. Adding it here would put a second term with the same meaning into the syntax and make every fold prove it respects the relabelling, for no gain." Every word of that applies to `scopeT`. Pushing a scope inward is a fold: `muS (scopeT h t) g = muS t (g * h)` (`:253`) says precisely that scoping distributes into every clause, so `scopeT h t` has the same meaning as the term with `h` composed into each leaf's scope. If the leaf signature carries its addressee — and `doc/design.html:84` already says it should: "Command / Skill / Agent / Sub-agent — **not types**: a scoped leaf; a context transformer; a scoped leaf at reset index… four domain nouns, zero new objects" — then `under g` is surface sugar over that fold, and `Step.scope`, the `scope` clause of both meanings, the `g * h` threading, and `WEqR_scopeT_unit` all go away.
 
@@ -450,7 +459,7 @@ Ranked by the number of declarations and design decisions that would change if t
 `Meaning.lean:1965, 2004, 2498, 2713`; precedent, in spirit, `Normalize.hs:60` (`render` structural equality) and `Flow.hs:220` (normalising `seq'` making "Category laws hold on the nose"). Infects: ~900 lines, including `muExt_transport`, `WEqR.of_shift`, every congruence, and the `Category` instance. Exists solely because positional keys make `WEq` too fine to be a congruence — i.e. it is entirely a consequence of row 2. Note the hazard for `doc/PLAN.org:1290`'s proposal to make this quotient author-facing: `one_add_one_of_muS_respects_WEq` (`Meaning.lean:2814`) proves no cost fold descends to it.
 
 **7. `scopeT` as a constructor, and `Scoped` as a wrapper around every meaning.**
-`Term.lean:178`, `Scope.lean:179`; precedent `Flow.hs:119`, `Op.hs:222`. Infects: the target type of `muS` (`Scoped G (Mat S i o)` rather than `Mat S i o`), the scope argument of `Interp` and `Runner`, `Step.scope`, both folds' scope clauses, and `WEqR_scopeT_unit`. Violates the specification's own no-weakening-constructor rule (`Term.lean:92–100`): `scopeT` is a fold. Alternative: the leaf carries its addressee, as `doc/design.html:84` already prescribes.
+`Term.lean:178`, `Scope.lean:252`; precedent `Flow.hs:119`, `Op.hs:222`. Infects: the target type of `muS` (`Scoped G (Mat S i o)` rather than `Mat S i o`), the scope argument of `Interp` and `Runner`, `Step.scope`, both folds' scope clauses, and `WEqR_scopeT_unit`. Violates the specification's own no-weakening-constructor rule (`Term.lean:92–100`): `scopeT` is a fold. Alternative: the leaf carries its addressee, as `doc/design.html:84` already prescribes.
 
 **8. `muExt` into `Option`, with left-first and leftmost-defined biases.**
 `Meaning.lean:832, 890`; precedent `Interpret.hs:100–101` (fail-fast, cancel siblings). Infects: the symmetry of `sumT` (broken against `Mat.matAdd_comm`), the symmetry of `parT`, and the possibility of a projection between the two meanings. Diagnostic: the doctrine's "a bias or ordering silently lost ⇒ the element type is wrong". Alternative: a relational meaning `i → Set o`, which *is* the quantitative meaning at the Boolean carrier, collapsing two meaning functions into one meaning at two carriers.

@@ -488,9 +488,11 @@ its members' meanings:
 
 There is no `panelT`, no `parT` and no reducer argument: the reducer is the
 `Monoid` instance, and the shape of the combination is `Dlg`'s own applicative.
-This is the equation that makes `Agentic/Panel.lean`'s convolution — the
-distribution of a panel's aggregate verdict as a product in the monoid semiring
-`S⟨K⟩` — reachable from a written plan (`acat-x9v`). -/
+This is the equation the retired panel-convolution stratum wanted reachable
+from a written plan — a panel's aggregate as a product in a monoid semiring
+`S⟨K⟩`. That stratum is gone (`acat-q1i`; its results are preserved in
+`doc/research/term-algebra-results.md` §1.5), and the panel that ships is
+this one: the `Monoid` fold, not convolution over an arbitrary key monoid. -/
 theorem denote_panel [Monoid (El c)] (ps : List (Plan Γ (El c))) (γ : Env Γ) :
     denote (Plan.panel ps) γ
       = (ps.map (fun p => denote p γ)).foldr (fun x y => (· * ·) <$> x <*> y) (pure 1) := by
@@ -550,9 +552,10 @@ theorem reviseLoop_zero {Kc : El c → Env Γ → Dlg Verdict}
 
 /-- The unrolling at fuel `n+1`: **check first**, stop if approved, and only
 otherwise revise — with the verdict threaded into the revision — and go again
-with one less fuel. `revising … n` therefore performs `n + 1` checks and at most
-`n` revisions, and never pays for a revision it does not check. Three
-independent derivations in the dossier wrote this backwards
+with one less fuel. `revising … n` therefore *writes* `n + 1` checks and `n`
+revisions, and never pays for a revision it does not check; the `if` above is
+why a run performs between one and `n + 1` of those checks rather than all of
+them. Three independent derivations in the dossier wrote this backwards
 (`attack-adequacy` A1); this is the shape the English asks for. -/
 theorem reviseLoop_succ {Kc : El c → Env Γ → Dlg Verdict}
     {Kr : El c × Verdict → Env Γ → Dlg (El c)} (n : Nat) (a : El c) (γ : Env Γ) :

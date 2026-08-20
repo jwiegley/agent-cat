@@ -1041,16 +1041,34 @@ against the `Option` spelling, and `size`, `askNodes` and `costM` cannot see the
 change.
 
 **Check first, revise in the recursive call** (kernel §3 q5, `attack-adequacy`
-A1). `revising … n` performs `n + 1` checks and at most `n` revisions, and never
-pays for a revision it does not check — which is what "revise up to twice"
-means in English and what three independent derivations in the dossier got
-backwards. `Acceptance.trace_upToTwice_stubborn` in `Denote.lean` is the
-machine-checked statement of the resulting transcript.
+A1). `revising … n` **writes** `n + 1` checks and `n` revisions into the term,
+and never pays for a revision it does not check — which is what "revise up to
+twice" means in English and what three independent derivations in the dossier
+got backwards. What a *run* performs is a range and not a number: the loop
+reviews first and stops the moment a review approves, so a run performs between
+**one** and `n + 1` checks and at most `n` revisions. Approval on the first
+round performs exactly one — read it off the `n + 1` clause below, whose
+`caseB` takes the `.ret` arm without reaching the recursive call.
+`Acceptance.trace_upToTwice_stubborn` in `Denote.lean` is the machine-checked
+statement of the transcript at the other end of that range, where no review ever
+approves.
 
 Derived: `Nat.rec` in the metalanguage building an unrolled plan, so the meaning
 of a bounded loop is its unrolling — no fuel index, no truncated star, no `ℕ∞`.
 The objections are threaded: `revise` receives the artefact *and* the verdict,
-so a revision knows what it is answering. -/
+so a revision knows what it is answering.
+
+**The `n` is a bound on the elaboration, and this definition does not enforce
+one.** `Nat.rec` here is unguarded: `revising check revise n` builds a term
+whose size grows with `n`, so an `n` a hostile source names is an *elaboration*
+cost and not merely a large result, and nothing in this module refuses it. The
+obligation is discharged one layer up and only there: `Dsl.maxRevisions`
+(`Agentic/Core/Dsl/Check.lean`) caps it at 64, `Dsl.checkLoopParts` refuses a
+larger numeral **before** elaborating anything, and `Dsl.checkProgram` runs
+`Dsl.overRevised` over the raw syntax first so the refusal lands at the
+offending line. A caller that applies `revising` directly — a hand-built `Plan`,
+a future surface — inherits that obligation and gets no guard from here (obr
+`acat-1t1`). -/
 def revising {Γ : Ctx} {c : Code}
     (check : Cont Γ (El c) Verdict)
     (revise : Cont Γ (El c × Verdict) (El c)) :

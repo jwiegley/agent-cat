@@ -15,7 +15,7 @@
 -- one program to hold against it.
 --
 -- __What the pairing pins.__ Lean proves the semantics — @run_upToTwice_stubborn@
--- (@Agentic/Core/Denote.lean:931@) states that an exhausted loop hands back the
+-- (@Agentic/Core/Denote.lean:933@) states that an exhausted loop hands back the
 -- candidate it ran out /holding/. What no cross-implementation check exercised
 -- was an arm that /reads/ that candidate at a bound above zero, where the held
 -- artefact is no longer the first draft. Under the objecting world of the

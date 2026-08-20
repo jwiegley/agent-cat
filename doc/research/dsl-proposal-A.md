@@ -1,5 +1,20 @@
 # Proposal A — the block-structured reading
 
+> **Note (2026-08-20).** Where this page says the package "already owns" a piece of
+> vocabulary in `Agentic/Star.lean`, `Agentic/Panel.lean`, `Agentic/Meaning.lean`,
+> `Agentic/Trace.lean` or `Agentic/Surface.lean`, it no longer does: those modules
+> were excised under obr `acat-q1i`, and what they established is recorded in
+> `doc/research/term-algebra-results.md` rather than in code. A proposal here that
+> leans on one of them as an existing asset must re-derive it in `Agentic/Core/**`
+> instead. The rest of the page, which is about `Agentic/Core/**`, stands — with the
+> ordinary caveat that `Core/**` has moved on since it was written: the same pass that
+> retired the stratum also deleted `Plan.size_eq_askNodes_succ`, `CheckError.render`,
+> `Dsl.Prompt.normalize` and `DslFlagship.render_eq_harden_render`, and folded
+> `Verdict.render`/`Verdict.objections` into `Agentic/Core/Question.lean` and
+> `Dsl.RawBlock.revisionBounds` into `Agentic/Core/Dsl/Check.lean` (obr `acat-j61`,
+> `acat-o5o`, `acat-1t1`). An inventory below that lists one of those is an inventory
+> of the tree as it then stood.
+
 *A surface for `Agentic/Core/Dsl`. Same language, same elaborator, same plan; a
 different set of words and one structural rule: **a scope is a pair of braces,
 and a name comes into being in a head that looks like a binding.***
@@ -499,7 +514,7 @@ Surface only; no theorem statement moves.
 | `Agentic/Core/Dsl/Parse.lean` | `parseBlock` consumes its own braces and takes an optional tail; new keywords; `Token.arrow` and `'@'` removed from the lexer; three messages from §9. Net: shorter. |
 | `Agentic/Core/Dsl/Check.lean` | `cv/av/pv → art`, `wv → why`, `.done → .empty` in `checkBlock`, `RawBlock.bounded` and the `checkBlock_bounded` induction (case names only). |
 | `Agentic/Core/Explain.lean` | `.done → .empty` in `RawBlock.revisionBounds` and its induction; `revisionLines` prints `up to n revisions` so that it quotes the source. |
-| `Agentic/Core/DslFlagship.lean` | `flagshipRaw` as in §8; one docstring sentence; the nineteen kernel proofs re-run unchanged. |
+| `Agentic/Core/DslFlagship.lean` | `flagshipRaw` as in §8; one docstring sentence; the nine kernel proofs re-run unchanged. |
 | `example/harden.wf`, `example/hello.wf` | §4, §5. |
 | `test/DslSmoke.lean` | Eleven embedded sources and ten expected diagnoses (positions and wording). |
 | `test/McpSmoke.lean`, `test/CliSmoke.lean` | The hostile `upto 1000000000` source; `splitOn "upto 2"` → `"up to 2 revisions"`. |
@@ -543,7 +558,7 @@ Off limits and untouched by this proposal: `Agentic/Surface.lean`,
 ## 12. Honest residue
 
 * **Not built.** This document is a design; the Lean edits in §10 are specified,
-  not applied, and the nineteen kernel proofs have not been re-run. The evidence
+  not applied, and the nine kernel proofs have not been re-run. The evidence
   for §8 is a faithful port of the lexer and both parsers (`/tmp/wfcheck.py`),
   not the Lean elaborator.
 * **Position-independence of the plan is argued by inspection, not proved.**

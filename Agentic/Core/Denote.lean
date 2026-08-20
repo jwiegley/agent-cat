@@ -759,10 +759,12 @@ def reviseLoopOn {Γ : Ctx} {c : Code} (Kc : El c → Env Γ → Dlg Verdict)
 loop, for every fuel.
 
 `attack-adequacy` A1 in positive form. The meaning of "revise up to `n` times"
-is `n + 1` checks and at most `n` revisions, each revision preceded by the check
-that asked for it and followed by the check that judges it — and there is no
-truncated star, no fuel index in the syntax and no `ℕ∞` anywhere, because the
-meaning of a bounded loop is its unrolling (§3 q5).
+is a term holding `n + 1` checks and `n` revisions, each revision preceded by
+the check that asked for it and followed by the check that judges it — and there
+is no truncated star, no fuel index in the syntax and no `ℕ∞` anywhere, because
+the meaning of a bounded loop is its unrolling (§3 q5). `n + 1` is what the term
+*writes*, not what a run performs: the loop stops at the first approving review,
+so a run performs between one and `n + 1` checks (`Plan.revising`'s docstring).
 
 **Why the two `Denotes` hypotheses stay, after the Yoneda collapse.** `hc` could
 go: `check : Cont Γ (El c) Verdict` sits at an answer type, so `Cont.ofPlan` and

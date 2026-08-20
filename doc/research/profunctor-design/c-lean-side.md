@@ -1,5 +1,20 @@
 # C — The Lean side: what profunctors buy the formalization
 
+> **Note (2026-08-20).** Where this page says the package "already owns" a piece of
+> vocabulary in `Agentic/Star.lean`, `Agentic/Panel.lean`, `Agentic/Meaning.lean`,
+> `Agentic/Trace.lean` or `Agentic/Surface.lean`, it no longer does: those modules
+> were excised under obr `acat-q1i`, and what they established is recorded in
+> `doc/research/term-algebra-results.md` rather than in code. A proposal here that
+> leans on one of them as an existing asset must re-derive it in `Agentic/Core/**`
+> instead. The rest of the page, which is about `Agentic/Core/**`, stands — with the
+> ordinary caveat that `Core/**` has moved on since it was written: the same pass that
+> retired the stratum also deleted `Plan.size_eq_askNodes_succ`, `CheckError.render`,
+> `Dsl.Prompt.normalize` and `DslFlagship.render_eq_harden_render`, and folded
+> `Verdict.render`/`Verdict.objections` into `Agentic/Core/Question.lean` and
+> `Dsl.RawBlock.revisionBounds` into `Agentic/Core/Dsl/Check.lean` (obr `acat-j61`,
+> `acat-o5o`, `acat-1t1`). An inventory below that lists one of those is an inventory
+> of the tree as it then stood.
+
 **Scope.** What a profunctor-flavoured layer would buy `Agentic/Core/*.lean`,
 priced against Mathlib as it actually exists at `leanprover/lean4:v4.30.0` /
 `mathlib4 @ v4.30.0` (the pin in `lean-toolchain` and `lake-manifest.json`).
@@ -480,7 +495,7 @@ the real work), L6–L8 half a day. **3–5 focused days.**
 
 **The real cost is not the proofs, it is the loop.** Any change to `Plan`,
 `Sub`, `graft` or `revising` re-elaborates `Agentic/Core/DslFlagship.lean`
-(438 lines, **249 s**, nineteen `decide +kernel` proofs — `lakefile.toml` warns
+(438 lines, **249 s**, nine `decide +kernel` proofs — `lakefile.toml` warns
 that two concurrent elaborations have exhausted 48 GB) and
 `Agentic/Core/HardenPatch.lean` (991 lines, 75 s). At ~6 minutes a full check
 and five `Denotes` rewrites in `HardenPatch`, budget the L5 day as *two*. This
@@ -649,7 +664,7 @@ the comparison of traces".
 |---|---|
 | L1–L4, L6–L8 | **none.** Additive: new statements about unchanged definitions. `PlanAlg` proves `level = levelAlg.fold` rather than replacing `level`. |
 | L5 as *theorems* (`Cont.Natural`, the Yoneda pair, `sub_graft_of_natural`, `Denotes` corollaries) | **none.** Purely additive. |
-| L5 as a *refactor* of `revising`'s definition (§7.1) | ⚠️ **must be validated.** `revising` currently threads `Sub.comp (Sub.comp σ τ) ρ` explicitly (`Plan.lean:632–633`); a Yoneda-form version builds the same grafts differently. I expect the resulting term to be identical, hence `size`/`askNodes`/`trace` unchanged — because `sub` and `graft` are folds, not constructors, so neither adds nodes — but I have **not** verified it, and `Plan.size` being pinned means the check is a run of `corpus-gen` and a diff, plus `DslFlagship`'s nineteen `decide +kernel` numbers. **Owner decision.** |
+| L5 as a *refactor* of `revising`'s definition (§7.1) | ⚠️ **must be validated.** `revising` currently threads `Sub.comp (Sub.comp σ τ) ρ` explicitly (`Plan.lean:632–633`); a Yoneda-form version builds the same grafts differently. I expect the resulting term to be identical, hence `size`/`askNodes`/`trace` unchanged — because `sub` and `graft` are folds, not constructors, so neither adds nodes — but I have **not** verified it, and `Plan.size` being pinned means the check is a run of `corpus-gen` and a diff, plus `DslFlagship`'s nine `decide +kernel` numbers. **Owner decision.** |
 | §7.2 (`CostTree` → `Multiset`) | **none, by argument.** `costSummary` reports `(minFold, maxFold, Multiset.card leaves)` and `leafBills` sorts `leaves`; the Multiset fold produces the same multiset, so the same three numbers. The empty-arm case agrees too: an arm-less `case` gives `Finset.univ.inf … = ⊤` today and `Multiset.inf ∅ = ⊤` after, both printed `—` by `sayNat?`. ⚠️ reasoned, not compiled. |
 
 **Standing rule for this work:** an additive theorem layer cannot move the

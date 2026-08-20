@@ -11,8 +11,10 @@ Expect no output. This file is NOT in any `lean_lib` glob (`["Agentic",
 changes nothing about the package.
 
 It imports nothing that `Agentic/Core/` does not already import:
-`Mathlib.CategoryTheory.Category.Basic` is imported by `Agentic/Meaning.lean`,
 `Mathlib.Algebra.BigOperators.Group.List.Basic` by `Agentic/Core/Denote.lean`.
+(`Mathlib.CategoryTheory.Category.Basic` used to be justified by
+`Agentic/Meaning.lean`, which the `acat-q1i` excision removed on 2026-08-20; this
+file is outside every `lake` target, so nothing depends on the claim either way.)
 
 Contents, keyed to the page:
 

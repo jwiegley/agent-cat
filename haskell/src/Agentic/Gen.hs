@@ -216,7 +216,7 @@ eqCode _ _ = Nothing
 
 -- | The three kinds a generated binding may take. @receipt@ is deliberately
 -- absent: a receipt has no text of its own, nothing branches on one, and a
--- @-> receipt@ function's answer "has nowhere to go" (@Check.lean:774@), so a
+-- @-> receipt@ function's answer "has nowhere to go" (@Check.lean:780@), so a
 -- binding at @ack@ is a shape the language admits and no honest program writes.
 bindableCodes :: [Code]
 bindableCodes = [CodeText, CodeVerdict, CodeFlag]
@@ -445,7 +445,7 @@ genAsk ns = do
 -- arguments can be filled from this scope.
 --
 -- A @-> receipt@ function is excluded: binding its answer is refused by name
--- (@Check.lean:774@), and it reaches a program only through
+-- (@Check.lean:780@), and it reaches a program only through
 -- 'Agentic.Builder.callStmt' and 'Agentic.Builder.callSB'.
 callAlt :: forall c s. Live s -> SCode c -> GFn -> Maybe (Gen (Rhs s c))
 callAlt ns c (GFn _ pl r f) = case r of

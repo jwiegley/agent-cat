@@ -765,9 +765,10 @@ theorem bill_exact_pipeline [Monoid S] {price : Price S} (hp : PricesByShape pri
 element per path through the branch structure with **both arms present**, priced.
 
 The target is a **monoid semiring** and not a bespoke tree of leaves: `Multiset S`
-is `ℕ⟨S⟩`, the natural-number-weighted formal sums over the price monoid, which
-is the construction `Agentic/Panel.lean` writes `S⟨K⟩` with the coefficient and
-key roles exchanged. The three non-`dyn` clauses are that semiring's operations:
+is `ℕ⟨S⟩`, the natural-number-weighted formal sums over the price monoid — the
+same construction the retired panel stratum wrote as `S⟨K⟩` with the
+coefficient and key roles exchanged (preserved in
+`doc/research/term-algebra-results.md` §1.5). The three non-`dyn` clauses are that semiring's operations:
 `{1}` is the multiplicative unit (the point mass at `1`), an `ask` multiplies by
 the point mass at its price, and a `case` is the *sum* — `Multiset.bind` over the
 tag type, which on `ℕ⟨S⟩` is addition of the arms' weightings.

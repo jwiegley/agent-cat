@@ -442,35 +442,26 @@ theorem sayFlag_injective : Function.Injective sayFlag := by
   intro b b' h
   cases b <;> cases b' <;> simp_all [sayFlag]
 
-/-- `[[Verdict.objections v]]` = the reasons a verdict gave; `[]` if it declined.
-The projection a renderer needs, and the one `Verdict`'s own algebra does not
-provide: `WithZero.unzero` needs the proof that the verdict is not the zero. -/
-def Verdict.objections (v : Verdict) : List Objection :=
-  if h : v = 0 then [] else FreeMonoid.toList (WithZero.unzero h)
-
 /-- `[[sayVerdict v]]` = a verdict as text a reader can take in, in the three
 cases `Plan.caseV` branches on and `Exec.tag_decodeVerdict` classifies, because
-those are the only three there are. -/
+those are the only three there are.
+
+`Verdict.render` is the package's one renderer for a verdict
+(`Agentic/Core/Question.lean`), *called* here and not copied: this module used to
+define its own `Verdict.objections` and inline the join (obr `acat-j61`). What is
+this module's own is the **three-case** presentation — approval and refusal
+*named* rather than both collapsing to `""` — which is what a reader of a log
+needs and what the prompt-side renderer deliberately does not do, since a
+revision is told it was not approved by being asked again. Below the two named
+cases there is nothing left to decide, so the third arm is `render` itself. -/
 def sayVerdict (v : Verdict) : String :=
   if Verdict.approvedB v then "approve"
   else if v = Verdict.declined then "declined"
-  else String.intercalate "; " (Verdict.objections v)
+  else Verdict.render v
 
 @[simp] theorem sayVerdict_approve : sayVerdict Verdict.approve = "approve" := rfl
 
 @[simp] theorem sayVerdict_declined : sayVerdict Verdict.declined = "declined" := rfl
-
-/-- **The projection recovers the objections**, which is the equation that makes
-it the right projection: `Verdict.object` is injective on its list. -/
-@[simp] theorem Verdict.objections_object (os : List Objection) :
-    Verdict.objections (Verdict.object os) = os := by
-  have hne : Verdict.object os ≠ 0 := Verdict.object_ne_declined os
-  rw [Verdict.objections, dif_neg hne]
-  have hcoe : WithZero.unzero hne = FreeMonoid.ofList os := by
-    rw [← WithZero.coe_inj, WithZero.coe_unzero]
-    rfl
-  rw [hcoe]
-  rfl
 
 /-- The three cases are distinguished, which is as much as a renderer of an
 infinite type can promise: approval and refusal are told apart, and an objecting
@@ -480,8 +471,8 @@ theorem sayVerdict_object {os : List Objection} (h : os ≠ []) :
   have hne : ¬ Verdict.Approved (Verdict.object os) := fun hc =>
     h ((Verdict.approved_object_iff os).mp hc)
   have hdec : Verdict.object os ≠ Verdict.declined := Verdict.object_ne_declined os
-  rw [sayVerdict, if_neg (by simpa [Verdict.approvedB_eq_true_iff] using hne), if_neg hdec,
-    Verdict.objections_object]
+  rw [sayVerdict, if_neg (by simpa [Verdict.approvedB_eq_true_iff] using hne), if_neg hdec]
+  simp only [Verdict.render, Verdict.objections_object]
 
 /-- `[[sayAnswer c a]]` = the answer `Decode` read, written back out in the
 vocabulary of its code — for a reader, not for the interpreter, which is why it

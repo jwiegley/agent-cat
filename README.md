@@ -232,6 +232,21 @@ kernel theorems still hold — re-anchored to the `RawProgram` term, which is no
 where the program is written down rather than a thing a parser produced. Git
 history holds the rest.
 
+On 2026-08-20 the **pre-re-derivation stratum** went the same way, under obr
+`acat-q1i`. Every `Agentic/*.lean` outside `Core/` except `Agentic/Scope.lean` —
+`Term`, `Frag`, `Meaning`, `Surface`, `Panel`, `Semiring`, `Instances`, `Matrix`,
+`Star`, `Keys`, `Trace`, `Gate`, `Pareto`, `Env`, `Context`, `Monoid`, roughly
+9,900 lines — was excised. It was the project's first attempt at the whole
+problem (a graded syntax of workflows, two meaning functions over it, the `WEqR`
+quotient, the resource algebra underneath), it was superseded by `Agentic/Core/**`
+in the 2026-08 re-derivation, and by the end it had **no consumer anywhere**: the
+last one died with `example/HardenPatch.lean`, and the certified spine read
+exactly one line of it (`Agentic/Core/Question.lean:1`, `import Agentic.Scope`,
+which is why that one file stays). What it *established* is not lost and is not
+in git: it is written down as `doc/research/term-algebra-results.md`, which
+transcribes the theorems — mostly negative results, the expensive kind — from the
+live sources before they went. Cite that page rather than the module names.
+
 ## The documents
 
 * `doc/HANDOFF.md` — the research record: what the project is for, how it reached
@@ -248,5 +263,11 @@ history holds the rest.
   extraction, FFI or a subprocess oracle, and, in §3, the boundary, the request
   schema and the corpus that are live today. The rest of `doc/research/` is the
   re-derivation and the dossiers that condemned the first calculus.
+* `doc/research/term-algebra-results.md` — the permanent record of what the
+  condemned stratum proved, written from the live sources before the 2026-08-20
+  excision removed them. Read it instead of `git show` when you want to know
+  whether a question about the `Term` calculus has already been answered: §2 is
+  the results, §3 the six theory threads nobody closed, §4 the tracker items that
+  closed with the code, and §5 where the mathematics went that earned its place.
 
 Issue tracking is `obr` (prefix `acat`; see `AGENTS.md` and `doc/PLAN.org`).

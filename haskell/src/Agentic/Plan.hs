@@ -136,7 +136,7 @@ import qualified Data.Text as T
 -- The answer universe
 -- ---------------------------------------------------------------------------
 
--- | @Agentic/Core/Question.lean:243@'s @El@ — the set of things an addressee
+-- | @Agentic/Core/Question.lean:302@'s @El@ — the set of things an addressee
 -- can say in reply to a question of kind @c@ — as a closed type family over
 -- 'Agentic.Raw.Code', promoted with @DataKinds@:
 --
@@ -185,7 +185,7 @@ instance KnownCode 'CodeFlag where sCode = SFlag
 
 instance KnownCode 'CodeAck where sCode = SAck
 
--- | @Agentic/Core/Question.lean:252@, @instInhabitedEl@: every answer type is
+-- | @Agentic/Core/Question.lean:311@, @instInhabitedEl@: every answer type is
 -- inhabited, which is what lets an analysis substitute an answer it does not
 -- have. @""@, approval, 'False', @()@.
 --
@@ -255,13 +255,21 @@ verdictApproved = \case
   Object [] -> True
   _ -> False
 
--- | @Verdict.render@ (@Agentic/Core/Dsl/Syntax.lean:77@):
+-- | @Verdict.render@ (@Agentic/Core/Question.lean:269@), over
+-- @Verdict.objections@ (@:244@):
 --
--- > String.intercalate "; " (if h : v = 0 then [] else FreeMonoid.toList (WithZero.unzero h))
+-- > def objections (v : Verdict) : List Objection :=
+-- >   if h : v = 0 then [] else FreeMonoid.toList (WithZero.unzero h)
+-- > def render (v : Verdict) : String := String.intercalate "; " (objections v)
 --
 -- The objections joined by @"; "@. Approval and refusal both render as the
 -- empty string — @Verdict.render_declined@ says so on purpose, and the two
 -- collapse. This is what a @{v}@ prompt hole at a verdict means.
+--
+-- One definition on each side. Lean used to carry three copies of this pair —
+-- in @Dsl/Syntax.lean@, @HardenPatch.lean@ and @Report.lean@ — glued by an
+-- @rfl@ theorem; obr @acat-j61@ folded them into the verdict algebra's own
+-- module, which is where this citation now points.
 verdictRender :: Verdict -> Text
 verdictRender = \case
   Declined -> T.empty
@@ -308,7 +316,7 @@ data QScope = QScope
 scopeUnit :: QScope
 scopeUnit = QScope Nothing Nothing
 
--- | The product of @Agentic/Scope.lean:86@, axis by axis.
+-- | The product of @Agentic/Scope.lean:101@, axis by axis.
 --
 -- Per axis: the __right__ operand wins when it is set, else the left survives
 -- (@LastOpt.set_overrides@ / @LastOpt.unset_defers@). Read right-to-left as
@@ -319,12 +327,12 @@ scopeMul :: QScope -> QScope -> QScope
 scopeMul (QScope m1 d1) (QScope m2 d2) =
   QScope (maybe m1 Just m2) (maybe d1 Just d2)
 
--- | @Scope.fst m@ (@Agentic/Scope.lean:160@): the model axis set, the mode axis
+-- | @Scope.fst m@ (@Agentic/Scope.lean:175@): the model axis set, the mode axis
 -- silent.
 scopeFst :: Text -> QScope
 scopeFst m = QScope (Just m) Nothing
 
--- | @Q.Shape c@ (@Agentic/Core/Question.lean:304@) — everything that fixes a
+-- | @Q.Shape c@ (@Agentic/Core/Question.lean:363@) — everything that fixes a
 -- question except its words: who is asked, under what standing conditions, and
 -- which independent draw it is.
 --
@@ -337,7 +345,7 @@ data Shape (c :: Code) = Shape
   }
   deriving (Eq, Show)
 
--- | @Q c@ (@Agentic/Core/Question.lean:278@) — the shape and the words.
+-- | @Q c@ (@Agentic/Core/Question.lean:337@) — the shape and the words.
 --
 -- @Q c ≅ Q.Shape c × String@, witnessed by 'shapeOf' and 'withPrompt'.
 data Q (c :: Code) = Q
@@ -348,16 +356,16 @@ data Q (c :: Code) = Q
   }
   deriving (Eq, Show)
 
--- | @Q.shape@ (@:316@): the question with its words forgotten.
+-- | @Q.shape@ (@:375@): the question with its words forgotten.
 shapeOf :: Q c -> Shape c
 shapeOf q = Shape (qAddressee q) (qScope q) (qDraw q)
 
--- | @Q.Shape.withPrompt@ (@:319@): the question of this shape whose words are
+-- | @Q.Shape.withPrompt@ (@:378@): the question of this shape whose words are
 -- the given text.
 withPrompt :: Shape c -> Text -> Q c
 withPrompt s p = Q (shAddressee s) (shScope s) p (shDraw s)
 
--- | @atModel m c s@ of @Agentic/Core/Question.lean:440@, at a single shape:
+-- | @atModel m c s@ of @Agentic/Core/Question.lean:499@, at a single shape:
 --
 -- > scope := Agentic.Scope.fst m * s.scope
 --
@@ -491,13 +499,13 @@ endingOfVTag = \case
 -- @Agentic/Core/Dsl/Check.lean@ end to end, there are four sites that build a
 -- @case@ node and three tag types between them:
 --
--- * @if x { … } else { … }@ — @Check.lean:824@, @Plan.caseB@ at 'Bool'.
--- * @case v { approved … objected … no answer … }@ — @Check.lean:840@,
+-- * @if x { … } else { … }@ — @Check.lean:830@, @Plan.caseB@ at 'Bool'.
+-- * @case v { approved … objected … no answer … }@ — @Check.lean:846@,
 --   @Plan.caseV@ at 'VTag'.
 -- * the @revising@ unroll and its @settled@/@unsettled@ exit —
---   @Plan.lean:1050@ and @Check.lean:618@, @Plan.caseB@ at 'Bool' again.
+--   @Plan.lean:1056@ and @Check.lean:618@, @Plan.caseB@ at 'Bool' again.
 -- * the @revising on@ unroll's @caseV@ and its three-way exit —
---   @Plan.lean:1081@ and @Check.lean:618@, at 'VTag' and at 'Ending'.
+--   @Plan.lean:1099@ and @Check.lean:618@, at 'VTag' and at 'Ending'.
 --
 -- Nothing else; and @Check.lean:57@ records that no clause emits @Plan.dyn@, so
 -- the DSL never reaches the dynamic rung.
@@ -588,7 +596,7 @@ subP p s = case p of
 -- | @subP p subWk@: read a plan under one more binding.
 --
 -- This is what an @act@ statement does with its continuation
--- (@Check.lean:757@: @form (Plan.sub k Sub.wk)@) — the receipt is bound and then
+-- (@Check.lean:763@: @form (Plan.sub k Sub.wk)@) — the receipt is bound and then
 -- ignored, which still shifts every de Bruijn index after it.
 weakenP :: Plan g a -> Plan (c ': g) a
 weakenP p = subP p subWk
@@ -745,7 +753,7 @@ panelText =
     (\(n, p) acc -> zipWithP (\a rest -> block n a <> rest) p acc)
     (PRet (exprConst T.empty))
 
--- | @Plan.revising@ (@Agentic/Core/Plan.lean:1050@): check the artefact; if it
+-- | @Plan.revising@ (@Agentic/Core/Plan.lean:1056@): check the artefact; if it
 -- is approved, stop with it; otherwise revise it and go again, at most @n@
 -- times; if the last check still objects, hand back the candidate it ran out
 -- holding, marked unsettled.
@@ -812,7 +820,7 @@ revising chk rev n
               )
         )
 
--- | @Plan.revisingOn@ (@Agentic/Core/Plan.lean:1081@) — the same bounded
+-- | @Plan.revisingOn@ (@Agentic/Core/Plan.lean:1099@) — the same bounded
 -- revision, whose round reads the review's __verdict tag__ three ways rather
 -- than one predicate two ways: approval settles, an objection buys another trip
 -- (or, at the last round, leaves the loop unsettled), and a refusal
@@ -1025,7 +1033,7 @@ costM = \case
   PCase t _ arms -> concatMap (costM . arms) (tagValues t)
   PDyn {} -> []
 
--- | @costSummary@ (@Agentic/Core/Explain.lean:457@): the cheapest bill, the
+-- | @costSummary@ (@Agentic/Core/Explain.lean:422@): the cheapest bill, the
 -- dearest bill and the number of paths, from 'costM' at @tick@.
 --
 -- The first two are @Cost.minFold@ and @Cost.maxFold@ (@Cost.lean:864@,

@@ -40,13 +40,21 @@
 -- newline__. A prompt that must end in one is spelled
 -- @[wf|…|] '<>' ['Agentic.Builder.lit' "\\n"]@.
 --
--- __Chunking is normative.__ Lean's @Prompt.normalize@
--- (@Agentic\/Core\/Dsl\/Syntax.lean:179@) drops empty literals and
--- __deliberately does not fuse adjacent literals__, so a @define@ spliced into
--- a prompt contributes /its own chunk/: @example-000@'s drafting prompt is
--- three chunks and not one. This quoter reproduces exactly that — the
--- contiguous literal run between two holes is one chunk, a spliced 'Text' is
--- another beside it, and an empty literal never reaches the term.
+-- __Chunking is normative, and this quoter is where the rule lives.__ Two
+-- halves. (1) __Adjacent literals are deliberately not fused__, so a @define@
+-- spliced into a prompt contributes /its own chunk/: @example-000@'s drafting
+-- prompt is three chunks and not one. That half is Lean's, enforced by
+-- construction: @Prompt.expr@ (@Agentic\/Core\/Dsl\/Check.lean:159@) emits the
+-- chunks left-associated, so a prompt chunked the way an author would write the
+-- same string in Lean elaborates to the very same @Expr@ — which is what makes
+-- the flagship's transcript agreements computations rather than appeals to
+-- @String.append_assoc@. (2) __An empty literal is dropped__, because it says
+-- nothing. That half is this quoter's own: Lean carried a @Prompt.normalize@
+-- stating it, no Lean code ever applied it, and obr @acat-o5o@ retired the
+-- statement in favour of the implementation — @normalize@ below. This quoter
+-- reproduces both: the contiguous literal run between two holes is one chunk, a
+-- spliced 'Text' is another beside it, and an empty literal never reaches the
+-- term.
 --
 -- __What a hole may name__ is the 'Says' class: a live binding ('V'), which
 -- splices as an @interp@ chunk under the name that binding /prints/, or a
@@ -241,9 +249,16 @@ holes = go ""
     startChar c = c == '_' || (c >= 'a' && c <= 'z')
     identChar c = isAlphaNum c || c == '_' || c == '\''
 
--- | Lean's @Prompt.normalize@: an empty literal says nothing and is dropped.
--- Adjacent chunks are deliberately __not__ fused — @Prompt.expr@ is a
--- left-associated @++@, and the flagship's transcript agreements are
--- computations rather than appeals to @String.append_assoc@.
+-- | An empty literal says nothing and is dropped. __The authoring surface owns
+-- this rule and nothing downstream may repeat it__: @Agentic.Raw.Prompt@ is a
+-- codec type and must round-trip a corpus prompt verbatim, adjacent @Lit@s
+-- included. Lean stated the rule as @Dsl.Prompt.normalize@ and never applied it;
+-- obr @acat-o5o@ deleted the statement and left the implementation here, where
+-- it runs.
+--
+-- Adjacent chunks are deliberately __not__ fused — @Prompt.expr@
+-- (@Agentic\/Core\/Dsl\/Check.lean:159@) is a left-associated @++@, and the
+-- flagship's transcript agreements are computations rather than appeals to
+-- @String.append_assoc@.
 normalize :: [Frag] -> [Frag]
 normalize = filter (/= FLit "")

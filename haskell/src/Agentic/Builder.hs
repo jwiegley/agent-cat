@@ -463,7 +463,7 @@ wordsExpr ps d = T.concat (map (\p -> pieceExpr p d) ps)
 
 -- | The words where the prompt mentions no name, and 'Nothing' where it does.
 --
--- Lean: @Prompt.closed@ (@Syntax.lean:161@). __The decision is made on the
+-- Lean: @Prompt.closed@ (@Syntax.lean:137@). __The decision is made on the
 -- chunks, never on the 'Expr'__: closed-versus-open is exactly what separates
 -- 'PAskC' from 'PAsk', hence @batch@ from @pipeline@ in the @level@ fold. The
 -- empty prompt is closed, at @""@.
@@ -805,7 +805,7 @@ type ParamCtx (ps :: [Code]) = ParamCtxGo ps '[]
 -- handles the body reads them through, nested in source order and ending in
 -- @()@.
 --
--- Lean: @paramBindings@ (@Check.lean:975@), which pushes the parameters in
+-- Lean: @paramBindings@ (@Check.lean:981@), which pushes the parameters in
 -- source order so that the last one is de Bruijn @0@. A parameter is a binding
 -- like any other, so it hands the body a 'V' like any other; @hs@ is that
 -- tuple of handles, computed by the very fold that computes the scope.
@@ -855,7 +855,7 @@ data Fn (ps :: [Code]) (r :: Code) = Fn
     fnPlan :: Plan (ParamCtx ps) (El r)
   }
 
--- | One function. Lean: @checkFn@ (@Check.lean:1066@) — a body is checked
+-- | One function. Lean: @checkFn@ (@Check.lean:1072@) — a body is checked
 -- __once__, over exactly its parameters, and "a body cannot see the caller" is
 -- the type and not a rule.
 --
@@ -900,7 +900,7 @@ callPlanOf f as = subP (fnPlan f) (argSub as (const ENil :: Sub '[] (Codes s)))
 -- ---------------------------------------------------------------------------
 
 -- | A function body: the statements it prints, the @answer@ it names, and the
--- plan it elaborates to. Lean: @checkBody@ (@Check.lean:1008@).
+-- plan it elaborates to. Lean: @checkBody@ (@Check.lean:1014@).
 --
 -- A body has no branching and no loop — @RawBodyStmt@ has no such
 -- constructors, and neither has this type. A function is a reusable sequence
@@ -1023,7 +1023,7 @@ stop = Blk (RawEmpty pos0) (PRet (const ()))
 
 -- | @x <- …@; prints @ann = null@.
 --
--- Lean (@Check.lean:776@): __one__ node at the imposed kind, whose
+-- Lean (@Check.lean:782@): __one__ node at the imposed kind, whose
 -- continuation is the rest of the block checked with @x@ pushed at index @0@.
 -- Nothing else. Where Lean infers the kind from the first ground use
 -- (@bindKind@ / @useKindB@), the author supplies it at the type level; the
@@ -1071,7 +1071,7 @@ bindAsI c x rhs rest =
 
 -- | The act: a statement-position ask.
 --
--- Lean (@Check.lean:751@): an ask at @Code.ack@ whose answer occupies a
+-- Lean (@Check.lean:757@): an ask at @Code.ack@ whose answer occupies a
 -- context slot that the continuation immediately weakens past — the rest of
 -- the block is checked in @Γ@ and then read into @ack :: Γ@ by @Sub.wk@. So
 -- the act binds nothing /and/ still adds one binder to the de Bruijn spine.
@@ -1088,7 +1088,7 @@ act a rest =
     (askNode @'CodeAck a (weakenP (blkPlan rest)))
 
 -- | A statement call: @Plan.graft p (fun _ σ _ => Plan.sub k σ)@
--- (@Check.lean:772@). The answer is discarded and __no__ context slot is
+-- (@Check.lean:778@). The answer is discarded and __no__ context slot is
 -- added — the contrast with 'act' is deliberate and is what @battery-144@
 -- pins. Only a @-> receipt@ function may stand here, which is the type.
 callStmt :: Fn ps 'CodeAck -> Args s ps -> Blk s -> Blk s
@@ -1099,7 +1099,7 @@ callStmt f as rest =
 
 -- | @if x { … } else { … }@.
 --
--- Lean (@Check.lean:824@): one @case@ at 'Bool' via @caseB@, both arms in the
+-- Lean (@Check.lean:830@): one @case@ at 'Bool' via @caseB@, both arms in the
 -- term, each arm the rest of the workflow in the __same__ context with the
 -- __same__ names. No binder is added — the flag is read through the existing
 -- variable.
@@ -1121,7 +1121,7 @@ ifFlagI x v yes no =
 
 -- | @case x { approved … objected … no answer … }@.
 --
--- Lean (@Check.lean:840@): one @case@ at @VTag@ via @caseV@, whose scrutinee
+-- Lean (@Check.lean:846@): one @case@ at @VTag@ via @caseV@, whose scrutinee
 -- is @Verdict.tag@ of the name. The verdict itself stays readable in every arm
 -- — the tag decides the shape, the objections ride in the environment.
 caseVerdict ::
@@ -1162,7 +1162,7 @@ caseVerdictI x v approved objected noAnswer =
 
 -- | @known here: …@ — an assertion, and __no node at all__.
 --
--- Lean (@Check.lean:743@): a checked @known here@ elaborates to the rest of
+-- Lean (@Check.lean:749@): a checked @known here@ elaborates to the rest of
 -- the block, unchanged, in the same context; it contributes no binder, no
 -- event, and does not appear in @size@. The names it prints are computed from
 -- the type-level scope, innermost first, so a rebuilt case cannot print a
@@ -1229,7 +1229,7 @@ exitCont t arms =
 -- every other statement by name while it is pending; here the pairing is the
 -- combinator's shape.
 --
--- Elaboration (@Check.lean:808@ and @702@, @Plan.lean:1050@):
+-- Elaboration (@Check.lean:814@ and @702@, @Plan.lean:1056@):
 --
 -- * the candidate's kind is the __subject's__ kind, so it is the subject
 --   handle's and not a choice;

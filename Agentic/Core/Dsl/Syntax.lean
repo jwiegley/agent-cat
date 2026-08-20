@@ -59,33 +59,12 @@ namespace Agentic.Core
 
 /-! ## Rendering a verdict as text
 
-The one library function the DSL needs that the stack did not already have.
-`Agentic/Core/HardenPatch.lean` has the same function under `Harden.render`;
-`Agentic/Core/DslFlagship.lean` proves the two spellings are one function, by
-`rfl`, so nothing here is a second convention. -/
-
-namespace Verdict
-
-/-- `[[render v]]` = a verdict as text an addressee can read: its objections,
-separated by `"; "`, and nothing where it declined — a refusal has no objection
-list to show.
-
-This is what a `{v}` hole means at a verdict: a verdict has exactly one way to
-be text — this one — so the hole elaborates to `render ∘ ·`, an
-`Expr Γ String`, totally and canonically, with nothing for the author to
-choose and therefore nothing for the surface to say. -/
-def render (v : Verdict) : String :=
-  String.intercalate "; " (if h : v = 0 then [] else FreeMonoid.toList (WithZero.unzero h))
-
-/-- Approval renders as nothing: there was nothing to say. -/
-@[simp] theorem render_approve : render Verdict.approve = "" := rfl
-
-/-- A refusal renders as nothing either — `declined = 0` annihilates, and there
-is no objection list under it. That the two collapse is why a revision is told
-*that* it was not approved by being asked again, not by reading this string. -/
-@[simp] theorem render_declined : render Verdict.declined = "" := rfl
-
-end Verdict
+The DSL needs one, for a `{v}` hole at a verdict binding, and it does **not**
+define one: `Verdict.render` and `Verdict.objections` are stated once in
+`Agentic/Core/Question.lean`, beside the verdict algebra they read, and this
+module re-uses them. There used to be a copy here and a second copy in
+`Agentic/Core/HardenPatch.lean` with an `rfl` theorem gluing the two; obr
+`acat-j61` names that pattern and the single definition is the repair. -/
 
 namespace Dsl
 
@@ -127,9 +106,6 @@ instance : ToString CheckError where
     let at_ := if e.excerpt.isEmpty then "" else s!" at `{e.excerpt}`"
     s!"{e.pos.line}:{e.pos.col}: {e.message}{at_}"
 
-/-- The diagnosis, as the `Except String` the top-level front end returns. -/
-def CheckError.render (e : CheckError) : String := toString e
-
 /-! ## Prompts -/
 
 /-- `[[Chunk]]` = one piece of a prompt: literal text, or the value of a name.
@@ -164,22 +140,27 @@ def Prompt.closed : Prompt → Option String
   | .lit s :: rest => (Prompt.closed rest).map (s ++ ·)
   | .interp _ :: _ => none
 
-/-- `[[Prompt.normalize p]]` = `p` with empty literals dropped.
+/-! ### Chunking is the author's, not the checker's
 
-Applied by an authoring surface after `define` expansion, where a macro that
-expands to nothing would otherwise leave a chunk that says nothing.
-
-**Adjacent literals are deliberately *not* fused.** Fusing them is the obvious
-tidying and it is wrong here: `Prompt.expr` emits the concatenation of the
+**Adjacent literals are deliberately *not* fused, and no pass here rewrites a
+`Prompt`.** Fusing adjacent literals is the obvious tidying and it is wrong:
+`Prompt.expr` (`Agentic/Core/Dsl/Check.lean`) emits the concatenation of the
 chunks *left-associated*, exactly as `a ++ b ++ c` parses in Lean, so a prompt
 whose chunks are written the way an author would write the same string in Lean
 elaborates to the very same `Expr` — which is what keeps the flagship's
 transcript agreements with `Agentic/Core/HardenPatch.lean` computations rather
-than proofs about `String.append_assoc`. -/
-def Prompt.normalize : Prompt → Prompt
-  | [] => []
-  | .lit "" :: rest => Prompt.normalize rest
-  | ch :: rest => ch :: Prompt.normalize rest
+than proofs about `String.append_assoc`. A `define` spliced into a prompt
+therefore contributes *its own chunk*, and two adjacent `lit`s in a corpus
+prompt are legitimate and must round-trip verbatim.
+
+This module used to carry a `Prompt.normalize` — empty literals dropped — as a
+*statement* of what an authoring surface should do after `define` expansion.
+Nothing in Lean ever applied it, and the authoring surface is now Haskell's
+`[wf|…|]` quoter, where the rule is applied and stated (`Agentic.WF.normalize`);
+a specification with no implementation on its own side is a claim, so it went
+with obr `acat-o5o`. What is normative here is the non-fusion above, which
+`Prompt.expr` enforces by construction.
+-/
 
 /-! ## The unchecked term language -/
 

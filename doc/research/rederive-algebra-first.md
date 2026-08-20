@@ -1,5 +1,14 @@
 # Re-derivation, Algebra First: A Kernel for Agentic Workflows
 
+> **Historical — the code audited here no longer exists (2026-08-20).** This page
+> audits the pre-re-derivation stratum: `Agentic/*.lean` outside `Core/` — the `Term`
+> calculus, its two meaning functions, the `WEqR` quotient and the resource algebra
+> under them. All of it was excised under obr `acat-q1i`, so every `file:line` below
+> that names one of those modules resolves in git history only. The results that
+> stratum established are transcribed in `doc/research/term-algebra-results.md`; read
+> that page for *what was proved*, and this one for the reasoning that condemned it.
+> Nothing here describes the code as it stands.
+
 **Status.** Written under a blinding rule: nothing in `agent-functor`, `incite`, or
 `agent-cat` was read before §11. §11 is the single permitted comparison, added after
 the derivation was closed. Where §11 reports convergence, the convergence is a

@@ -61,8 +61,6 @@ conformance-oracle` builds in seconds. Keep it that way.
 
 * `flagshipRaw`, the term of record; `flagshipProgram`, it with an empty function
   table; `flagshipPlan`, the plan it checks to.
-* `render_eq_harden_render`, the one-line `rfl` that says the elaboration
-  introduced no second convention for what a verdict says.
 * The checker's acceptance (`flagshipRaw_accepted`, `checkProgram_flagship`), the
   rung computed exactly (`level_flagshipPlan`), the cost tree
   (`card_leaves_flagship`, `minFold_flagship`, `maxFold_flagship`), the four
@@ -74,15 +72,6 @@ conformance-oracle` builds in seconds. Keep it that way.
 namespace Agentic.Core.Dsl
 
 open Agentic.Core
-
-/-! ## `Verdict.render` is `Harden.render`
-
-The elaboration needed a renderer for a verdict spliced into a prompt and the
-frozen flagship module already had one. They are the same function, so the
-elaboration introduces no second convention about what a verdict says. -/
-
-/-- The two spellings are one function, by `rfl`. -/
-theorem render_eq_harden_render (v : Verdict) : Verdict.render v = Harden.render v := rfl
 
 /-! ## The flagship, as raw syntax
 
@@ -316,9 +305,12 @@ and not only on the short ones.
 
 That the prompts agree is where the left-associated `Prompt.expr` earns its
 keep — the elaborated prompts are `Harden`'s `++`-chains on the nose — and
-where the `{verdict}` hole earns its keep: at a verdict binding it elaborates
-to the same `Verdict.render ∘ ·` expression the old surface installed at the
-binder, so moving the renderer to the use site moved no term.
+where the `{verdict}` hole earns its keep: at a verdict binding it elaborates to
+`Verdict.render ∘ ·`, and `Verdict.render` is the *same definition*
+`Harden.reviseText` quotes objections with (`Agentic/Core/Question.lean`). There
+is one renderer in the package, so the agreement is a computation and not an
+appeal to a theorem that two renderers coincide — which is what the deleted
+`render_eq_harden_render` used to be (obr `acat-j61`).
 
 The **universally quantified** form is not proved; see the "not proved" section
 below. -/

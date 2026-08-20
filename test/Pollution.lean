@@ -7,36 +7,42 @@ An instance is a claim about a type, not about a file. `instance : CommMonoid
 Bool` does not mean "in this package `*` on `Bool` is `or`"; it means "for
 everyone who transitively imports this package, `*` on `Bool` is `or`, `1` is
 `false`, and `(37 : Bool)` elaborates". The review's probe P7 found three such
-claims being made by this package about types it does not own — `Bool` (which
-is the type of `Term.gateT`'s condition and of every `decide`) and `Prop`
-(which is the sort of every proposition in Lean).
+claims being made by this package about types it does not own — `Bool` (the type
+of every `decide` and of the retired `Term.gateT`'s condition), `Prop` (the sort
+of every proposition in Lean), and `ℕ`.
 
 They were removed in two different ways, because the two carriers wanted
-different remedies (`Agentic.Keys.Race` is a synonym; the possibility semiring
-is a scope — each is argued where it is declared). This file is the check that
-they *stay* removed, and it is in `defaultTargets`, so `lake build` fails if a
-later instance re-pollutes either type.
+different remedies: the join reducers became a type synonym, and the possibility
+semiring became a `scoped` namespace. Both of those carriers have since gone
+altogether — they lived in the pre-re-derivation stratum, which the `acat-q1i`
+excision removed on 2026-08-20 (`doc/research/term-algebra-results.md`) — so the
+negations below are no longer *repairs* of anything. They are a **standing
+guard**: this file is in `defaultTargets`, so `lake build` fails the moment a
+future module installs arithmetic on a type this package does not own. That is
+the property worth pinning, and it does not depend on who once broke it.
 
 **How the assertions work.** `fail_if_success have : C := inferInstance` succeeds
 exactly when the instance `C` cannot be synthesized, so each `example` below is a
-machine-checked *absence*. The file deliberately does **not** `open Agentic`
-and deliberately does **not** `open scoped Agentic.Possibility`: it is a
-faithful stand-in for a downstream user who writes `import Agentic` and then
+machine-checked *absence*. The file deliberately does **not** `open Agentic`: it
+is a faithful stand-in for a downstream user who writes `import Agentic` and then
 gets on with their own algebra.
 
 The positive controls at the end matter as much as the negations: an absence
 proved by breaking the thing is worthless, so the same file checks that the
-package's own carriers still have the instances they are supposed to have.
+carriers the package *does* own still have the algebra they are supposed to have.
+Those carriers are now the scope monoid (`Agentic.LastOpt`, `Agentic.Scope`) and
+the verdict monoid (`Agentic.Core.Verdict`), which is the whole of the algebra
+the surviving package installs.
 -/
 
 namespace Agentic.Test
 
 /-! ## `Bool` is nobody's monoid
 
-`Bool` is the condition of `Term.gateT`, the result of every `decide`, and the
-index of every two-point matrix in the package. A `CommMonoid Bool` reaches all
-of those, and `(1 : Bool)` — which under the race reducer means `false` — is
-the collision that made the probe alarming rather than theoretical. -/
+`Bool` is the result of every `decide`, the tag `Plan.caseB` branches on, and the
+second component of what a bounded revision returns. A `CommMonoid Bool` reaches
+all of those, and `(1 : Bool)` — which under a race reducer would mean `false` —
+is the collision that made the probe alarming rather than theoretical. -/
 
 /-- No multiplication is installed on `Bool`. -/
 example : True := by
@@ -61,10 +67,8 @@ example : True := by
 
 /-! ## `Prop` carries no arithmetic
 
-The possibility semiring is real and is used throughout `Agentic.Star`, but it
-is `scoped` in `Agentic.Possibility`, so a reader who has not asked to read
-propositions as resources is not given `0 = False`, `1 = True`, `2 = True` and
-a `NatCast`. -/
+A reader who has not asked to read propositions as resources is not given
+`0 = False`, `1 = True`, `2 = True` and a `NatCast`. -/
 
 /-- No addition on propositions. -/
 example : True := by
@@ -86,58 +90,58 @@ example : True := by
   fail_if_success have : Semiring Prop := inferInstance
   trivial
 
-/-- Not even the aggregation class, which is this package's own: the whole
-possibility carrier is behind the scope, not merely its arithmetic. -/
-example : True := by
-  fail_if_success have : CompleteCSemiring Prop := inferInstance
-  trivial
-
 /-! ## `ℕ` keeps its own arithmetic
 
-The tally and width reducers are both natural-number folds, and neither is
-allowed to decide what `*` on `ℕ` means. This is the assertion that the
-wrappers did their job in the *other* direction: `ℕ`'s multiplication is still
-multiplication. -/
+This is the assertion in the *other* direction: whatever the package does with
+counting, `ℕ`'s multiplication is still multiplication and its `1` is still
+one. -/
 
 /-- `1 * 2 = 2` on `ℕ` means what it has always meant. -/
 example : (1 : Nat) * 2 = 2 := by decide
 
-/-- And `ℕ`'s `1` is `1`, not the width fold's unit `0`. -/
+/-- And `ℕ`'s `1` is `1`, not some fold's unit `0`. -/
 example : (1 : Nat) ≠ 0 := by decide
 
 /-! ## The positive controls
 
-Each carrier the package *does* own still has its algebra, reached through the
-synonym or the scope that now guards it. -/
+The two carriers the package owns, reached exactly as a downstream user would
+reach them. -/
 
-/-- The race reducer is a commutative monoid — on `Race`, which is a type this
-package owns. -/
-example : CommMonoid Race := inferInstance
+/-- The scope axis is a monoid — on `Agentic.LastOpt`, which is a type this
+package owns, and not on `Option`. -/
+example : Monoid (Agentic.LastOpt Nat) := inferInstance
 
-/-- Racing is `or`, with `false` as the unit, exactly as before the synonym:
-`Race.of true * Race.of false` is a yes. -/
-example : Race.of true * Race.of false = Race.of true := rfl
-
-/-- The unit of the race is "nobody answered". -/
-example : (1 : Race) = Race.of false := rfl
-
-/-- The width fold is a commutative monoid on `Width`. -/
-example : CommMonoid Width := inferInstance
-
-/-- The width fold is still `max` with `0` for the unit. -/
-example : Width.mk 2 * Width.mk 5 = Width.mk 5 := rfl
-
-/-- Both are idempotent, so the speculate/race licence is still available. -/
-example : Std.IdempotentOp (α := Race) (· * ·) := inferInstance
-
-/-- The free key monoid is untouched: concatenation on `List` is the one bare
-instance the package keeps, and it is argued for in `Agentic.Keys`. -/
-example : (1 : List Nat) = [] := rfl
-
-/-- And the possibility semiring is one `open scoped` away, with nothing else
-changed. -/
+/-- …and it is **not** commutative, which is not an omission: the failure of
+commutativity *is* innermost-wins (`Agentic.LastOpt.set_overrides`). This
+negation is the one absence in this file that the package asserts on purpose
+about a type it does own. -/
 example : True := by
-  open scoped Agentic.Possibility in
-  exact (fun (_ : CompleteCSemiring Prop) => trivial) inferInstance
+  fail_if_success have : CommMonoid (Agentic.LastOpt Nat) := inferInstance
+  trivial
+
+/-- Combining two settings of one axis keeps the right one: the inner scope has
+the last word. -/
+example :
+    Agentic.LastOpt.set 2 * Agentic.LastOpt.set 5 = (Agentic.LastOpt.set 5 : Agentic.LastOpt Nat) :=
+  rfl
+
+/-- The unit of a scope axis is saying nothing. -/
+example : (1 : Agentic.LastOpt Nat) = Agentic.LastOpt.unset := rfl
+
+/-- Several axes are the product monoid, which is Mathlib's and not this
+package's. -/
+example : Monoid (Agentic.Scope Nat Bool) := inferInstance
+
+/-- The verdict monoid is a `MonoidWithZero`, with refusal as the zero: the
+algebra a panel folds with, and Mathlib's rather than a private structure. -/
+example : MonoidWithZero Agentic.Core.Verdict := inferInstance
+
+/-- Approval is the right unit — `v * approve = v`, here at `v = declined`.
+(Annihilation, `declined * v = declined` for arbitrary `v`, is the
+`MonoidWithZero` fact above; this example witnesses only the unit law.) -/
+example :
+    Agentic.Core.Verdict.declined * Agentic.Core.Verdict.approve
+      = Agentic.Core.Verdict.declined :=
+  Agentic.Core.Verdict.mul_approve _
 
 end Agentic.Test

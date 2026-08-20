@@ -240,18 +240,6 @@ theorem Plan.length_trace_eq_askNodes {Γ : Ctx} {A : Type} (p : Plan Γ A)
   | case t e arms _ => exact absurd (le_of_case h).1 (by decide)
   | dyn b e f _ => exact absurd h (by simp only [level_dyn]; decide)
 
-/-- **…and the term is one node wider than it is deep.** The two folds differ by
-the leaf, which is the sense in which `askNodes` counts questions and `size`
-counts syntax. -/
-theorem Plan.size_eq_askNodes_succ {Γ : Ctx} {A : Type} (p : Plan Γ A)
-    (h : level p ≤ Level.pipeline) : p.size = p.askNodes + 1 := by
-  induction p with
-  | ret e => rfl
-  | askC c q k ih => rw [Plan.size_askC, Plan.askNodes_askC, ih h]; omega
-  | ask c s e k ih => rw [Plan.size_ask, Plan.askNodes_ask, ih (le_of_ask h).2]; omega
-  | case t e arms _ => exact absurd (le_of_case h).1 (by decide)
-  | dyn b e f _ => exact absurd h (by simp only [level_dyn]; decide)
-
 namespace Explain
 
 /-! ## Presentation -/
@@ -374,29 +362,6 @@ theorem bindForm_ask_head_draw {A : Type} {Γ : Ctx} (fns : Fns) (c : Code)
       | error e => rw [he] at h; exact absurd h (by simp)
       | ok e => rw [he] at h; cases h; simp [askShape_draw]
     | some w => rw [hc] at h; cases h; simp [askShape_draw]
-
-/-- `[[b.revisionBounds]]` = every `revising … at most n amendments` written in
-`b`, with where it is written.
-
-First-order in the syntax: a `RawRhs` has no block inside it, so the recursion
-is `RawBlock`'s own, with one step into a binding's source. The bound printed
-is one the checker allowed, because `checkBlock` refuses any numeral above
-`maxRevisions` before it elaborates anything. -/
-def RawBlock.revisionBounds : RawBlock → List (Pos × Nat)
-  | .empty _ => []
-  | .knownHere _ rest _ => rest.revisionBounds
-  | .act _ rest _ => rest.revisionBounds
-  | .callStmt _ _ rest _ => rest.revisionBounds
-  | .bind _ _ (.rhs _) rest _ => rest.revisionBounds
-  | .bind _ _ (.revising _ _ n _ _ _ _ rpos) rest _ => (rpos, n) :: rest.revisionBounds
-  -- A `revising on` is a bounded revision too: it is refused above
-  -- `maxRevisions` by the same pre-scan and printed by the same report.
-  | .bind _ _ (.revisingOn _ _ n _ _ _ _ rpos) rest _ => (rpos, n) :: rest.revisionBounds
-  | .ifFlag _ y n _ => y.revisionBounds ++ n.revisionBounds
-  | .caseVerdict _ a o d _ => a.revisionBounds ++ o.revisionBounds ++ d.revisionBounds
-  | .caseResult _ _ _ s u _ => s.revisionBounds ++ u.revisionBounds
-  | .caseEnding _ _ _ _ s u a _ =>
-    s.revisionBounds ++ u.revisionBounds ++ a.revisionBounds
 
 end Dsl
 

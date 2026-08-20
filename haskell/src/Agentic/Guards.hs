@@ -71,7 +71,7 @@ import Agentic.Raw
 maxRevisions :: Integer
 maxRevisions = 64
 
--- | @Check.lean:1104@. Likewise @maxQuestions < n@: @4096@ accepted, @4097@
+-- | @Check.lean:1110@. Likewise @maxQuestions < n@: @4096@ accepted, @4097@
 -- refused.
 maxQuestions :: Integer
 maxQuestions = 4096

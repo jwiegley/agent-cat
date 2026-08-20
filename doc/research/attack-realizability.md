@@ -1,5 +1,14 @@
 # Attack: Lean-4 Realizability and the Adherence Proof
 
+> **Historical — the code audited here no longer exists (2026-08-20).** This page
+> audits the pre-re-derivation stratum: `Agentic/*.lean` outside `Core/` — the `Term`
+> calculus, its two meaning functions, the `WEqR` quotient and the resource algebra
+> under them. All of it was excised under obr `acat-q1i`, so every `file:line` below
+> that names one of those modules resolves in git history only. The results that
+> stratum established are transcribed in `doc/research/term-algebra-results.md`; read
+> that page for *what was proved*, and this one for the reasoning that condemned it.
+> Nothing here describes the code as it stands.
+
 **Lens.** Every proposal is judged as a Lean 4 + Mathlib artifact. Three questions are asked of
 each: do the structures it names exist, or must they be hand-rolled; can the meaning-as-fold
 actually be *defined* (termination, universes, elimination); and what exact Lean proposition is

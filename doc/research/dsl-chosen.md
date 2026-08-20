@@ -1,5 +1,20 @@
 # The chosen grammar
 
+> **Note (2026-08-20).** Where this page says the package "already owns" a piece of
+> vocabulary in `Agentic/Star.lean`, `Agentic/Panel.lean`, `Agentic/Meaning.lean`,
+> `Agentic/Trace.lean` or `Agentic/Surface.lean`, it no longer does: those modules
+> were excised under obr `acat-q1i`, and what they established is recorded in
+> `doc/research/term-algebra-results.md` rather than in code. A proposal here that
+> leans on one of them as an existing asset must re-derive it in `Agentic/Core/**`
+> instead. The rest of the page, which is about `Agentic/Core/**`, stands — with the
+> ordinary caveat that `Core/**` has moved on since it was written: the same pass that
+> retired the stratum also deleted `Plan.size_eq_askNodes_succ`, `CheckError.render`,
+> `Dsl.Prompt.normalize` and `DslFlagship.render_eq_harden_render`, and folded
+> `Verdict.render`/`Verdict.objections` into `Agentic/Core/Question.lean` and
+> `Dsl.RawBlock.revisionBounds` into `Agentic/Core/Dsl/Check.lean` (obr `acat-j61`,
+> `acat-o5o`, `acat-1t1`). An inventory below that lists one of those is an inventory
+> of the tree as it then stood.
+
 *A surface for `Agentic/Core/Dsl`. One structural rule — **a scope is a pair of
 braces, and a name is introduced by a word that says a name is being
 introduced** — and one obligation: the elaborated plan does not move.*
@@ -512,7 +527,7 @@ same order with the same values; every `Chunk` list is character-identical; ever
 **What still has to be run, and in what order.** Never two at once.
 
 ```
-direnv exec . lake build Agentic.Core.DslFlagship   # the nineteen kernel proofs
+direnv exec . lake build Agentic.Core.DslFlagship   # the nine kernel proofs
 direnv exec . lake exe dsl_smoke                    # parse flagshipSource = flagshipRaw
 direnv exec . lake exe cli_smoke                    # the file on disk is the constant
 ```
@@ -549,7 +564,7 @@ Surface only; no theorem statement moves.
 | `Agentic/Core/Dsl/Parse.lean` | the grammar of §3: `parseBlock` consumes its own braces and takes an optional tail; `parseAsk` reads target, then `using model`, then `for`, then the kind; `if`/`else`; `case` loses `->`; `revising`'s clause words; `Token.arrow`, `@`, `(` and `)` leave the lexer; the messages of §9. Net: shorter. |
 | `Agentic/Core/Dsl/Check.lean` | two constructor names, and two message strings (``the `with` clause`` → ``the `revise` clause``; the `if` kind error). The `revising` clause itself is unchanged. |
 | `Agentic/Core/Explain.lean` | two constructor names in `RawBlock.revisionBounds` and its induction; `revisionLines` prints `up to n revisions → n+1 checks` so that it quotes the source. |
-| `Agentic/Core/DslFlagship.lean` | `flagshipRaw` as in §8; the nineteen kernel proofs re-run unchanged. |
+| `Agentic/Core/DslFlagship.lean` | `flagshipRaw` as in §8; the nine kernel proofs re-run unchanged. |
 | `example/harden.wf`, `example/hello.wf`, `example/ill-typed.wf` | §4, §5, and in the third the two ask phrases reordered and the trailing `done` deleted; it is refused for the same reason at a new position. |
 | `test/DslSmoke.lean` | eleven embedded sources and the expected diagnoses (positions and wording). |
 | `test/CliSmoke.lean`, `test/McpSmoke.lean` | the hostile `upto 1000000000` source; `splitOn "upto 2"` → `"up to 2 revisions"`. |
@@ -621,7 +636,7 @@ and `Explain`, so it needs no edit).
 ## 12. Honest residue
 
 1. **Not built.** This is a design. The Lean edits of §10 are specified, not
-   applied, and the nineteen kernel proofs have not been re-run. The evidence
+   applied, and the nine kernel proofs have not been re-run. The evidence
    for §8 is a faithful port of the lexer and both parsers, not the elaborator.
 2. **The tail sits one level in.** `approved given patch { … }` indents the
    consent gate and the act, which is the one place this surface reads less like

@@ -1,5 +1,20 @@
 # Profunctors and agent-cat
 
+> **Note (2026-08-20).** Where this page says the package "already owns" a piece of
+> vocabulary in `Agentic/Star.lean`, `Agentic/Panel.lean`, `Agentic/Meaning.lean`,
+> `Agentic/Trace.lean` or `Agentic/Surface.lean`, it no longer does: those modules
+> were excised under obr `acat-q1i`, and what they established is recorded in
+> `doc/research/term-algebra-results.md` rather than in code. A proposal here that
+> leans on one of them as an existing asset must re-derive it in `Agentic/Core/**`
+> instead. The rest of the page, which is about `Agentic/Core/**`, stands — with the
+> ordinary caveat that `Core/**` has moved on since it was written: the same pass that
+> retired the stratum also deleted `Plan.size_eq_askNodes_succ`, `CheckError.render`,
+> `Dsl.Prompt.normalize` and `DslFlagship.render_eq_harden_render`, and folded
+> `Verdict.render`/`Verdict.objections` into `Agentic/Core/Question.lean` and
+> `Dsl.RawBlock.revisionBounds` into `Agentic/Core/Dsl/Check.lean` (obr `acat-j61`,
+> `acat-o5o`, `acat-1t1`). An inventory below that lists one of those is an inventory
+> of the tree as it then stood.
+
 *A decision page for the owner, answering the question "think about profunctors and
 how they might be used to improve the design and the term language and evaluator."
 Four commissioned working papers sit in `doc/research/profunctor-design/`: **A**
@@ -640,7 +655,7 @@ concurrent elaborations have exhausted 48 GB) and not the thing that would actua
 break. `level_upToTwice` is `by decide` (`Level.lean:332`);
 `trace_upToTwice_stubborn` and `run_upToTwice_stubborn` are `by rfl`
 (`Denote.lean:598`, `:604`); `bill_constBranch` is `rfl` (`Cost.lean:824`); the
-flagship carries nineteen `decide +kernel` proofs. Routing `level`, `size` and
+flagship carries nine `decide +kernel` proofs. Routing `level`, `size` and
 `askNodes` *through* `PlanAlg.fold` puts `Plan.brecOn` and a structure projection
 between the kernel and every one of those. That is why P2 is additive and P12 is
 gated: `PlanAlg` proves `level = levelAlg.fold` rather than replacing `level`.
@@ -867,7 +882,7 @@ pinned numbers through `minFold`/`maxFold`/`card`; it is argued corpus-safe and 
 **P12 — replace the twelve recursion bodies with `PlanAlg.fold`.** C is internally
 inconsistent here: §4.1's table says L3 "deletes 11 recursion bodies (~130)" while
 §5.3 says `PlanAlg` proves `level = levelAlg.fold` *rather than replacing* `level`.
-Only the additive version is P2. **Gate:** a timing diff on `DslFlagship`'s nineteen
+Only the additive version is P2. **Gate:** a timing diff on `DslFlagship`'s nine
 `decide +kernel` proofs, `Level.lean:332`'s `by decide` and `Denote.lean:598`/`:604`'s
 `by rfl` — kernel reduction is the un-priced risk (§3.1), not elaboration.
 

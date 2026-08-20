@@ -1,5 +1,20 @@
 # A categorical frame for agent-cat
 
+> **Note (2026-08-20).** Where this page says the package "already owns" a piece of
+> vocabulary in `Agentic/Star.lean`, `Agentic/Panel.lean`, `Agentic/Meaning.lean`,
+> `Agentic/Trace.lean` or `Agentic/Surface.lean`, it no longer does: those modules
+> were excised under obr `acat-q1i`, and what they established is recorded in
+> `doc/research/term-algebra-results.md` rather than in code. A proposal here that
+> leans on one of them as an existing asset must re-derive it in `Agentic/Core/**`
+> instead. The rest of the page, which is about `Agentic/Core/**`, stands — with the
+> ordinary caveat that `Core/**` has moved on since it was written: the same pass that
+> retired the stratum also deleted `Plan.size_eq_askNodes_succ`, `CheckError.render`,
+> `Dsl.Prompt.normalize` and `DslFlagship.render_eq_harden_render`, and folded
+> `Verdict.render`/`Verdict.objections` into `Agentic/Core/Question.lean` and
+> `Dsl.RawBlock.revisionBounds` into `Agentic/Core/Dsl/Check.lean` (obr `acat-j61`,
+> `acat-o5o`, `acat-1t1`). An inventory below that lists one of those is an inventory
+> of the tree as it then stood.
+
 *The mathematics, made exact. Every claim below is checked against
 `Agentic/Core/{Plan,Denote,Level,Cost,Explain,Question,Dlg}.lean` and
 `haskell/src/Agentic/{Plan,Builder,Workflow,Exec}.hs` as they stand. Where I

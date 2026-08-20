@@ -70,10 +70,13 @@ required by lake's dependency check, and it must match the nix Lean exactly.
 **Two operational facts that will otherwise cost an afternoon.**
 
 1. **Never run two Lean builds at once.** `Agentic/Core/DslFlagship.lean` costs
-   roughly 100 seconds and several gigabytes: it proves its theorems by running
-   the checker on a real program inside the kernel. Two concurrent elaborations
-   exhausted 48 GB of RAM on the development machine, and the wall clock inflated
-   to ~350 seconds under the paging that resulted. A single build is fine.
+   about six minutes and several gigabytes: it proves its theorems by running
+   the checker on a real program inside the kernel. (`lakefile.toml`'s comment on
+   the `Agentic` library says the same figure, and is the one to keep in step
+   with reality; this page used to say "roughly 100 seconds", which was measured
+   before the language grew and is what obr `acat-gdk` was filed about.) Two
+   concurrent elaborations exhausted 48 GB of RAM on the development machine and
+   paged for the rest of the afternoon. A single build is fine.
 2. **The executables do not depend on that module.** `conformance-oracle` and
    `corpus-gen` build in seconds. If either appears to hang for minutes,
    something has re-coupled the dependency and that is the bug.
@@ -532,10 +535,26 @@ artefact three times in what looked like argument lists, and turned on two words
 (`exhausted`, `done`) a reader had to be taught. The revision made scope
 syntactic, made receiving distinct from declaring (`given`), replaced the two
 opaque words with `approved` / `never approved` and `{ }`, and made a question
-read as one sentence. **The elaborated plan did not move**: every theorem block
-in `DslFlagship.lean` is byte-identical, statement and proof, and
-`check_flagshipRaw` still closes by kernel evaluation, so the new text is
-*proved* to elaborate to the plan the old text did.
+read as one sentence.
+
+**What survived the revision, stated so that it can be checked.** The four
+`trace_flagship_*` theorems in `Agentic/Core/DslFlagship.lean` still close by
+kernel reduction, in all four of `Harden.ωRefuse`, `ωApply`, `ωStubborn` and
+`ωEcho` — including `ωEcho`, the longest path the workload has. Each says
+`Plan.trace ω flagshipPlan Env.nil = Plan.trace ω Harden.demo Env.nil`: the
+revised text consults **exactly the same questions, in the same order, hearing
+the same answers**, as a workload whose properties are proved independently in
+the meaning space. Those are the kernel facts, and they are the anchor.
+
+Earlier revisions of this page said the new text was "*proved* to elaborate to
+the plan the old text did", citing `check_flagshipRaw`. That claim is not
+falsifiable as it was stated and has been withdrawn (obr `acat-gdk`):
+`flagshipPlan` is *defined* as whatever the checker returns on `flagshipRaw`, so
+`check_flagshipRaw` is `rfl` on a constructor once `flagshipRaw_accepted` has
+discharged the `.error` branch — it says the checker succeeded, not that it
+succeeded with the *old* text's answer, and no copy of the old text survives to
+compare against. The transcript agreements above are the statement that does the
+work the withdrawn one claimed.
 
 ---
 
@@ -623,13 +642,20 @@ Lean probes, and the three DSL grammar proposals). `doc/design.html` and
 `Term` calculus — keep for history, do not follow. `doc/dsl-guide.html` and
 `doc/research/dsl-redesign/` went in the retirement.
 
-**The superseded stratum.** `Agentic/*.lean` outside `Core/` (Term, Frag,
-Meaning, the WEqR quotient, Surface) is the pre-re-derivation library. It still
-builds; its one consumer, `example/HardenPatch.lean`, went in the excision, so
-nothing uses it now. Retiring it is obr
-`acat-q1i`; roughly 4,700 lines die, and the mathematics worth keeping
-(semirings, matrices, Kleene star, the scope monoid, convolution) has largely
-been re-derived in `Core` already.
+**The superseded stratum is gone.** `Agentic/*.lean` outside `Core/` (Term,
+Frag, Meaning, the WEqR quotient, Surface, and the resource algebra under them)
+was the pre-re-derivation library. Its last consumer, `example/HardenPatch.lean`,
+went in the `75c277c` excision, after which nothing in the tree read it except
+one import into the spine. On **2026-08-20**, under obr `acat-q1i`, all of it was
+deleted — sixteen files, roughly 9,900 lines — leaving `Agentic/Scope.lean`
+alone, because `Agentic/Core/Question.lean:1` imports it for the last-wins scope
+monoid that Mathlib does not carry. The mathematics worth keeping (semirings,
+matrices, Kleene star, the scope monoid, convolution) had already been re-derived
+in `Core`; what the stratum *established*, which is mostly a body of negative
+results, is transcribed in `doc/research/term-algebra-results.md` and that page
+is what to cite. The dossiers listed above audit the deleted code and are
+historical for that reason; their `file:line` citations resolve only in git
+history.
 
 ---
 
@@ -657,9 +683,14 @@ language with its checker; the MCP server; the `agent-cat` CLI.
    deliberately: strip a recognised narration block before decoding, or annotate
    the turn and leave decoding strict. Capturing `usage` also settles the
    unmeasured claim about what denial costs.
-2. **`acat-q1i`** — retire the superseded `Term` stratum and re-point
+2. ~~**`acat-q1i`** — retire the superseded `Term` stratum and re-point
    `Agentic/Surface.lean` at `Plan`, keeping `example/HardenPatch.lean`
-   byte-identical (two elaboration constraints are recorded on `acat-nx8`).
+   byte-identical (two elaboration constraints are recorded on `acat-nx8`).~~
+   **Done 2026-08-20, and the re-pointing half was overtaken rather than done:**
+   `example/HardenPatch.lean` had already gone in the `75c277c` excision, so
+   `Agentic/Surface.lean` had nothing left to keep byte-identical and was deleted
+   with the rest of the stratum. See §6 and
+   `doc/research/term-algebra-results.md`.
 3. **`acat-fuk`, `acat-zbx`, `acat-qzl`** — the accumulated medium and low
    findings from three adversarial passes, each with its reproduction.
 4. **Reachability** — the cost tree over-approximates because a `case` prices its

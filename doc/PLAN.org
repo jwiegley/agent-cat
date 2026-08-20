@@ -2579,6 +2579,36 @@ From acat-zms: star_star, sliding a(ba)* = (ab)*a, denesting, (a+b)* are now pro
 ]
 #+end_src
 
+* TODO [#B] Handoff: the next-step program (triage -> excision -> live runtime work)
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-next-step-handoff-8t7
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-20 Thu 10:15]
+:MODIFIED: [2026-08-20 Thu 10:56]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+FROZEN PLAN (owner-approved 2026-08-20, artifact e949eac0): Step 1 housekeeping — DONE (14 closures + 9 narrowings on triage evidence, pushed b98e25f). Step 2 acat-q1i hybrid excision — IN FLIGHT (workflow wf_564f0648: preserve results doc -> excise no-consumer stratum + fold 2q8/j61/gdk/o5o/1t1/8zf residues -> verify; gates: lake build green, corpus-gen no-op 189 byte-identical, full Haskell battery, toolbox still builds). On completion: coordinator commits, fess audit, push, close q1i+2q8+xlh+gdk+j61+o5o+1t1+8zf and the ~30 stratum tickets citing doc/research/term-algebra-results.md. Step 3 live runtime work — QUEUED: acat-owa (narration; design ruling via a live wf run confer — dogfooding), awork-runner-supplied-facts (agent-cat CLI feature + toolbox swap), acat-fuk residue (completed-turn fixture), acat-qzl three lows, acat-bisim-ping-retry. Stop-and-escalate counters: excision attempt 1 of 3, no failures yet. Wiggum discipline: coordinator-only git, fess audit per work commit, one Lean build machine-wide.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 165,
+    "issue_id": "acat-next-step-handoff-8t7",
+    "author": "johnw",
+    "text": "SCOPE NARROWED (owner directive 2026-08-20): Step 3 reduces to TWO foundation items — (1) acat-owa PART 1 ONLY (narration corrupting answers; parts 2-3 out of scope: instrumentation, and part 3 already done per triage), (2) awork-runner-supplied-facts implemented as RESERVED INPUTS the runner binds (extending the existing taking/input abstraction — no new facts subsystem; abstraction-review applied). EXPLICITLY DEFERRED, not dropped: acat-fuk residue fixture, acat-qzl three lows, acat-bisim-ping-retry, acat-f8e re-scoped page, acat-88m live half. The confer-dogfooding idea for owa's ruling is also dropped as ceremony — the ruling will be made directly from the issue's three options and recorded. Session goal: sound and stable foundation, nothing more.",
+    "created_at": "2026-08-20T17:56:40Z"
+  }
+]
+#+end_src
+
 * DONE [#C] Flagship divergence: never-approved arm gives up in Plan/DSL but asks the owner in the approved do-block
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17

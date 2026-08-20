@@ -1,5 +1,14 @@
 # Attack: Simplicity and Purity
 
+> **Historical — the code audited here no longer exists (2026-08-20).** This page
+> audits the pre-re-derivation stratum: `Agentic/*.lean` outside `Core/` — the `Term`
+> calculus, its two meaning functions, the `WEqR` quotient and the resource algebra
+> under them. All of it was excised under obr `acat-q1i`, so every `file:line` below
+> that names one of those modules resolves in git history only. The results that
+> stratum established are transcribed in `doc/research/term-algebra-results.md`; read
+> that page for *what was proved*, and this one for the reasoning that condemned it.
+> Nothing here describes the code as it stands.
+
 *An adversarial reading of the four re-derivations under Elliott's four completion tests and ten
 anti-patterns. The lens is simplicity and purity only: bespoke vocabulary where a standard class
 exists, constructors that should be derived forms, meanings chosen for computability rather than

@@ -1,4 +1,4 @@
-import Agentic.Monoid
+import Mathlib.Algebra.Group.Prod
 
 /-!
 # Scoping as precomposition
@@ -46,6 +46,21 @@ combination of scopes as it is the combination of everything else, and `1` is
 the empty scope. What is a real distinction — that a scope
 monoid must *not* be commutative — survives as the absence of a `CommMonoid`
 instance and as `LastOpt.set_overrides`.
+
+**This module is the whole of the pre-re-derivation tree that survives.** Under
+obr `acat-q1i` every other `Agentic/*.lean` outside `Core/` was excised on
+2026-08-20 — roughly 9,900 lines with no consumer at all — and what those files
+established is preserved as `doc/research/term-algebra-results.md`, which is the
+record to read and cite; git history is the archive of the code. This file
+survives because `Agentic/Core/Question.lean:1` imports it: the certified spine's
+scope algebra is the `Last` monoid below, and Mathlib has no right-zero
+semigroup to build it from. `Agentic/Monoid.lean` went with the rest, so the one
+thing the spine used out of it — the monoid's **right action on a reader**, which
+is what entering a scope *is* — is stated here, in the one module that acts by
+it. Its left-hand twin (`actL`, the Brzozowski derivative's action) went with
+`Agentic/Trace.lean`, which was its only consumer; so did `SupMon`, the join
+presented as a monoid, whose consumers were `Agentic/Keys.lean` and
+`Agentic/Panel.lean`.
 -/
 
 namespace Agentic
@@ -170,22 +185,80 @@ theorem axis_comm (m : μ) (a : α) :
 
 end Scope
 
+/-! ## The action a scope acts by
+
+A meaning awaiting its scope is a function out of the monoid, and entering a
+scope is the monoid's **right action** on that function. The definition and its
+two laws are three lines and they are here, beside the only thing in the package
+that acts by them; they used to live in `Agentic/Monoid.lean`, which the
+`acat-q1i` excision removed.
+
+**Exactly what Mathlib lacks.** Mathlib's reader-precomposition action is
+`DomMulAct` (`Mathlib/GroupTheory/GroupAction/DomAct/Basic.lean`): for
+`[SMul M α]` it puts `SMul Mᵈᵐᵃ (α → β)` by `(c • f) a = f (mk.symm c • a)`, and
+at `α := M` with the self-action that smul is the *left* action, with
+`MulAction.mul_smul` its composition law. `Mᵈᵐᵃ` is a synonym for
+`MulOpposite M`, so every scope element would have to be written
+`DomMulAct.mk g` at the use site — and `withScope` below takes a bare element of
+the monoid, which is the whole point of "a scope is an element, not a map".
+`actR` is the same construction over `Mᵐᵒᵖ`, so getting it from Mathlib means a
+second synonym and a translation at every equation, with the covariance the
+composition law records hidden inside the synonyms rather than stated.
+-/
+
+section Actions
+
+variable {G R : Type} [Monoid G]
+
+/-- Acting on the *right*: `actR g f` is the reader that extends whatever
+arrives from outside with `g` and then consults `f`. This is entering a scope —
+the ambient element `h` was fixed first, and `g` is appended after it, which is
+what puts `g` innermost.
+
+Survivor: see the section docstring for what Mathlib's `DomMulAct` supplies and
+what it does not. -/
+def actR (g : G) (f : G → R) : G → R :=
+  fun h => f (h * g)
+
+/-- The empty element acts trivially on the right. -/
+theorem actR_unit (f : G → R) : actR (1 : G) f = f := by
+  funext h
+  show f (h * 1) = f h
+  rw [mul_one]
+
+/-- **The right action composes covariantly**: acting by `g₂` and then by `g₁`
+is acting by `g₁ * g₂`, with the operand order *preserved*.
+
+The order is forced and getting it wrong is the classic error. The ambient
+element meets `g₁` first and `g₂` last, so `g₂` ends up rightmost; stating the
+law with the operands exchanged type-checks and is false as soon as `*` is
+non-commutative. -/
+theorem actR_compose (g₁ g₂ : G) (f : G → R) :
+    actR g₁ (actR g₂ f) = actR (g₁ * g₂) f := by
+  funext h
+  show f (h * g₁ * g₂) = f (h * (g₁ * g₂))
+  rw [mul_assoc]
+
+end Actions
+
 /-! ## Meanings awaiting a scope -/
 
 /-- A `Scoped G R` is a representation of *a meaning awaiting its scope*: give
 it the scope in force and it yields the meaning there. It is the reader
-functor, and nothing about it is specific to `R` — the meanings this wraps are
-the matrices of `Agentic.Mat`, but the scoping laws never look inside. -/
+functor, and nothing about it is specific to `R`: the scoping laws never look
+inside. (The meanings it used to wrap were the resource matrices of the retired
+`Agentic/Matrix.lean` — `doc/research/term-algebra-results.md` §1.2 — and their
+absence changes not one line here, which was the claim.) -/
 def Scoped (G R : Type) : Type := G → R
 
 /-- Entering the scope `g`: precompose with "and also `g`". The scope already
 in force, `h`, arrives from outside and is extended on the right, because `g`
 is inside `h` and the inner setting is the one that wins.
 
-**Entering a scope IS the right action of a monoid on a reader** — `actR` of
-`Agentic.Monoid`, at no distance whatever. The two laws below are that action's
-two laws, and they are imported rather than reproved; what is specific to
-scoping is not the action but the monoid it acts by, and that is `LastOpt`. -/
+**Entering a scope IS the right action of a monoid on a reader** — `actR`
+above, at no distance whatever. The two laws below are that action's two laws,
+and they are re-used rather than reproved; what is specific to scoping is not
+the action but the monoid it acts by, and that is `LastOpt`. -/
 def withScope {G R : Type} [Monoid G] (g : G) (f : Scoped G R) :
     Scoped G R :=
   actR g f

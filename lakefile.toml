@@ -9,7 +9,7 @@ defaultTargets = ["Agentic", "Pollution", "Conformance", "conformance-oracle", "
 #
 # WHERE THE BUILD TIME IS. One module in this glob dominates the whole build:
 # `Agentic/Core/DslFlagship.lean` takes about six minutes and several gigabytes
-# to elaborate, because its nineteen `decide +kernel` proofs make the kernel run
+# to elaborate, because its nine `decide +kernel` proofs make the kernel run
 # the checker, the cost algebra and the interpreter on the flagship `Raw` term —
 # the theorems about the flagship are true by computation, not by assertion, and
 # that is what computation costs. Never elaborate it twice concurrently; two at

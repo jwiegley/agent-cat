@@ -1,5 +1,20 @@
 # D — The attack
 
+> **Note (2026-08-20).** Where this page says the package "already owns" a piece of
+> vocabulary in `Agentic/Star.lean`, `Agentic/Panel.lean`, `Agentic/Meaning.lean`,
+> `Agentic/Trace.lean` or `Agentic/Surface.lean`, it no longer does: those modules
+> were excised under obr `acat-q1i`, and what they established is recorded in
+> `doc/research/term-algebra-results.md` rather than in code. A proposal here that
+> leans on one of them as an existing asset must re-derive it in `Agentic/Core/**`
+> instead. The rest of the page, which is about `Agentic/Core/**`, stands — with the
+> ordinary caveat that `Core/**` has moved on since it was written: the same pass that
+> retired the stratum also deleted `Plan.size_eq_askNodes_succ`, `CheckError.render`,
+> `Dsl.Prompt.normalize` and `DslFlagship.render_eq_harden_render`, and folded
+> `Verdict.render`/`Verdict.objections` into `Agentic/Core/Question.lean` and
+> `Dsl.RawBlock.revisionBounds` into `Agentic/Core/Dsl/Check.lean` (obr `acat-j61`,
+> `acat-o5o`, `acat-1t1`). An inventory below that lists one of those is an inventory
+> of the tree as it then stood.
+
 *An adversarial pass over `a-categorical-frame.md`, `b-haskell-evaluator.md` and
 `c-lean-side.md`, checked against the sources rather than against the seed brief.
 Every claim below that says a document is wrong names the file and line that makes
@@ -68,7 +83,7 @@ document C §4.1 or the `DslFlagship` 249 s figure; and I did not chase the LWY
 | 1 | **A-§4.2 / C-§7.1: fuse `revising` with its consuming `case`, deleting `Option (El c)`** | Correctly flagged by A: each loop exit today is `ret (some a)`/`ret none` plus a grafted two-armed `caseB`; fused, `Plan.size` and `costSummary.paths` both move on every `revising` entry. Also moves `Plan.explain` output, hence `test/CliSmoke.lean:181` — which no document mentions. |
 | 2 | **A-§2.6 / C-§5.2(2): close the `case` tag universe (and `dyn`'s `B`), demote `Plan` to `Type 0`** | Real capability, but **A's "corpus impact: none" is wrong**: `Plan.explain` prints `FinEnum.toList T` arm counts in enumeration order (`Explain.lean:230–243`) and `CliSmoke` pins the rendering byte-for-byte. C flags this; A does not. Also verify `Cost.unbounded` survives (`Cost.lean:871` needs `B = Nat`; `B = El .text` works). |
 | 3 | **C-§7.2(3): replace `CostTree` with a `Multiset`-valued fold** | Argued corpus-safe, **not compiled** (C's own ⚠️). It touches `costSummary`'s three pinned numbers through `minFold`/`maxFold`/`card`; gate on a `corpus-gen` diff, not on the argument. |
-| 4 | **C-L3 as a *replacement* of the twelve recursion bodies** | C is internally inconsistent here: §4.1's table says L3 "deletes 11 recursion bodies (~130)" while §5.3 says "`PlanAlg` proves `level = levelAlg.fold` rather than replacing `level`", i.e. additive. Replacing them routes `level`, `size`, `askNodes` through `brecOn`, and the package has `level_upToTwice := by decide` (`Level.lean:332`), `trace_upToTwice_stubborn := by rfl` (`Denote.lean:598`) and nineteen `decide +kernel` proofs in a 249 s module. Kernel-reduction cost is un-priced and is the actual risk. |
+| 4 | **C-L3 as a *replacement* of the twelve recursion bodies** | C is internally inconsistent here: §4.1's table says L3 "deletes 11 recursion bodies (~130)" while §5.3 says "`PlanAlg` proves `level = levelAlg.fold` rather than replacing `level`", i.e. additive. Replacing them routes `level`, `size`, `askNodes` through `brecOn`, and the package has `level_upToTwice := by decide` (`Level.lean:332`), `trace_upToTwice_stubborn := by rfl` (`Denote.lean:598`) and nine `decide +kernel` proofs in a 249 s module. Kernel-reduction cost is un-priced and is the actual risk. |
 
 ### (iii) Beautiful, not load-bearing
 
@@ -371,7 +386,7 @@ it.
   is `by decide` (`Level.lean:332`), `trace_upToTwice_stubborn` and
   `run_upToTwice_stubborn` are `by rfl` (`Denote.lean:598`, `:604`),
   `bill_constBranch` is `rfl` (`Cost.lean:824`), `one_mem_leaves_constBranch` is
-  `by decide`, and the flagship carries nineteen `decide +kernel` proofs. Routing
+  `by decide`, and the flagship carries nine `decide +kernel` proofs. Routing
   `level`/`size`/`askNodes` through `PlanAlg.fold` puts `Plan.brecOn` and a structure
   projection between the kernel and every one of those. Adopt L2/L3 **additively**
   (verdict (i)#5) and treat replacement as verdict (ii)#4 gated on a timing diff.

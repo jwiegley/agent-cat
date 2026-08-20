@@ -1,5 +1,14 @@
 # Rederive / Decontaminate — an adversarial reconstruction of the agentic kernel
 
+> **Historical — the code audited here no longer exists (2026-08-20).** This page
+> audits the pre-re-derivation stratum: `Agentic/*.lean` outside `Core/` — the `Term`
+> calculus, its two meaning functions, the `WEqR` quotient and the resource algebra
+> under them. All of it was excised under obr `acat-q1i`, so every `file:line` below
+> that names one of those modules resolves in git history only. The results that
+> stratum established are transcribed in `doc/research/term-algebra-results.md`; read
+> that page for *what was proved*, and this one for the reasoning that condemned it.
+> Nothing here describes the code as it stands.
+
 **Status.** Independent reconstruction. Read: `agent-cat` (`Term.lean`, `Frag.lean`,
 `Meaning.lean`, `Scope.lean`, `Panel.lean`, `Semiring.lean`, `Keys.lean`, `Env.lean`) and the
 seed it may be contaminated by (`agent-functor` `Flow.hs`, `Op.hs`, `Interpret.hs`). No other

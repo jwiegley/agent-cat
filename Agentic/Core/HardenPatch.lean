@@ -86,19 +86,17 @@ def draftText (spec : String) : String :=
 /-- `[[draftQ spec]]` = ask the author for a first patch meeting `spec`. -/
 def draftQ (spec : String) : Q .text := authorShape.withPrompt (draftText spec)
 
-/-- `[[objections v]]` = the reasons a verdict gave; `[]` if it declined. The
-projection that lets a revision be told *what* was wrong (kernel §3 q5, and
-`attack-adequacy` §2.3's second correction to the incumbent). -/
-def objections (v : Verdict) : List Objection :=
-  if h : v = 0 then [] else FreeMonoid.toList (WithZero.unzero h)
-
-/-- `[[render v]]` = a verdict as text an addressee can read. -/
-def render (v : Verdict) : String := String.intercalate "; " (objections v)
-
 /-- `[[reviseText guide patch v]]` = the words of a revision request: the guide,
-the patch and what the reviewers objected to. Everything an answer reaches. -/
+the patch and what the reviewers objected to. Everything an answer reaches.
+
+`Verdict.render` is the package's one renderer for a verdict
+(`Agentic/Core/Question.lean`), re-used and not redefined: this module used to
+carry its own `objections`/`render` pair, identical to it, with an `rfl` theorem
+in `Agentic/Core/DslFlagship.lean` asserting the two were one function. Sharing
+the definition is what makes the flagship's transcript agreements computations
+rather than appeals to that theorem (obr `acat-j61`). -/
 def reviseText (guide patch : String) (v : Verdict) : String :=
-  guide ++ "\nRevise this patch:\n" ++ patch ++ "\n" ++ render v ++
+  guide ++ "\nRevise this patch:\n" ++ patch ++ "\n" ++ Verdict.render v ++
     "\nReply with the revised diff only."
 
 /-- `[[reviseQ guide patch v]]` = ask the author to revise `patch`, quoting the

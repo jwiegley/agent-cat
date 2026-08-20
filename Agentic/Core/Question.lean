@@ -216,6 +216,65 @@ theorem approved_prod (vs : List Verdict) : Approved vs.prod ↔ ∀ v ∈ vs, A
   | cons v vs ih => simp only [List.prod_cons, approved_mul, ih, List.mem_cons,
       forall_eq_or_imp]
 
+/-! ### Reading a verdict back out
+
+The two projections **every** consumer of a verdict needs, and the one place
+they are defined. `Verdict`'s own algebra does not supply them:
+`WithZero.unzero` demands a proof that the verdict is not the zero, so getting
+the objections out is a `dif` and not a field access, and a `dif` written twice
+is a convention invented twice.
+
+House rule 3, negatively confirmed. These lived in three places at once —
+`Agentic/Core/Dsl/Syntax.lean` (`Verdict.render`, for a `{v}` hole),
+`Agentic/Core/HardenPatch.lean` (`Harden.objections`/`Harden.render`, for a
+revision prompt) and `Agentic/Core/Report.lean` (`Verdict.objections`, for
+`sayVerdict`) — glued by a `rfl` theorem in `Agentic/Core/DslFlagship.lean`
+asserting that two of the three definitions were one function. An `rfl` bridge
+between two definitions is the diagnosis, not the repair (obr `acat-j61`); the
+repair is one definition, here, beside the algebra it reads. -/
+
+/-- `[[objections v]]` = the reasons a verdict gave; `[]` if it declined.
+
+The projection that lets a revision be told *what* was wrong (kernel §3 q5, and
+`attack-adequacy` §2.3's second correction to the incumbent), and the one a
+renderer needs. Refusal and approval both give `[]`, which is not a defect: a
+refusal has no objection list to show, and that the two collapse here is why a
+revision is told *that* it was not approved by being asked again rather than by
+reading this list. -/
+def objections (v : Verdict) : List Objection :=
+  if h : v = 0 then [] else FreeMonoid.toList (WithZero.unzero h)
+
+/-- **The projection recovers the objections**, which is the equation that makes
+it the right projection: `object` is injective on its list. -/
+@[simp] theorem objections_object (os : List Objection) :
+    objections (object os) = os := by
+  have hne : object os ≠ 0 := object_ne_declined os
+  rw [objections, dif_neg hne]
+  have hcoe : WithZero.unzero hne = FreeMonoid.ofList os := by
+    rw [← WithZero.coe_inj, WithZero.coe_unzero]
+    rfl
+  rw [hcoe]
+  rfl
+
+/-- `[[render v]]` = a verdict as text an addressee can read: its objections,
+separated by `"; "`, and nothing where it declined.
+
+This is what a `{v}` hole means at a verdict: a verdict has exactly one way to
+be text — this one — so the hole elaborates to `render ∘ ·`, an
+`Expr Γ String`, totally and canonically, with nothing for the author to choose
+and therefore nothing for the surface to say. It is also the renderer
+`Agentic/Core/HardenPatch.lean`'s revision prompts quote objections with, which
+is why the flagship's transcript agreements are computations: the two uses are
+the same function and not two functions proved equal. -/
+def render (v : Verdict) : String := String.intercalate "; " (objections v)
+
+/-- Approval renders as nothing: there was nothing to say. -/
+@[simp] theorem render_approve : render approve = "" := rfl
+
+/-- A refusal renders as nothing either — `declined = 0` annihilates, and there
+is no objection list under it. -/
+@[simp] theorem render_declined : render declined = "" := rfl
+
 end Verdict
 
 /-! ## The answer universe -/
