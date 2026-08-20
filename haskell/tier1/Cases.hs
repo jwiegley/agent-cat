@@ -63,7 +63,7 @@ import Example.Harden (hardenProgram, helloProgram)
 import LoopVectors (semantic008W)
 
 import Agentic.Builder
-  ( Args (ANil, (:>)),
+  ( Args (ACons, ANil),
     Code (..),
     Fn,
     Program,
@@ -477,7 +477,7 @@ module000 :: Program
 module000 =
   program [SomeFn libDrafted] $
     bindAs @"lib.guide" @'CodeText (one (askTool "cat" [lit "style guide"])) $ \guide ->
-      bind @"x" @'CodeText (callV libDrafted (argName guide :> ANil)) $ \x ->
+      bind @"x" @'CodeText (callV libDrafted (ACons (argName guide) ANil)) $ \x ->
         act (askTool "t" [lit "use ", hole x, lit " ", lit "hello"]) $
           stop
 
@@ -516,7 +516,7 @@ battery144 :: Program
 battery144 =
   program [SomeFn fnMk, SomeFn fnJudged, SomeFn fnApplied] $
     bindAs @"d" @'CodeText (one (askTool "t" [lit "w"])) $ \d ->
-      callStmt fnApplied (argName d :> ANil) $
+      callStmt fnApplied (ACons (argName d) ANil) $
         stop
 
 -- ---------------------------------------------------------------------------

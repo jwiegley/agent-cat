@@ -367,7 +367,7 @@ reviewReport =
       done
 
 reviewLite :: Parameterized
-reviewLite = taking (input "subject" noInputs) \subject ->
+reviewLite = taking (input "subject" :> noInputs) \subject ->
   defining [SomeFn reviewReport] W.do
     correctness <- ask (model "correctness" `servedBy` "fable") [wf|
         {correctnessLens}

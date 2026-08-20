@@ -4,11 +4,13 @@
 {-# LANGUAGE EmptyCase #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
@@ -16,6 +18,7 @@
 {-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ViewPatterns #-}
 
 -- |
 -- Module      : Agentic.Workflow
@@ -271,9 +274,14 @@ module Agentic.Workflow
     Parameterized (..),
     Ins,
     noInputs,
+    In,
     input,
     taking,
     Example (..),
+
+    -- * The chain both lists are written with
+    Chain,
+    pattern (:>),
 
     -- * Prompts
     wf,
@@ -359,7 +367,7 @@ module Agentic.Workflow
     call_,
     Calling,
     Arg,
-    Args ((:>), ANil),
+    Args (ANil),
     noArgs,
     Gives (..),
 
@@ -388,7 +396,7 @@ where
 
 import Agentic.Builder
   ( Arg,
-    Args (ANil, (:>)),
+    Args (ACons, ANil),
     Ask (..),
     Blk (..),
     Code (..),
@@ -1703,6 +1711,74 @@ done :: W ('Body 'CodeAck s) j Term
 done = W (\_ _ -> B.endB)
 
 -- ---------------------------------------------------------------------------
+-- The chain both lists are written with
+-- ---------------------------------------------------------------------------
+
+-- | The cons of a chain — @x :> rest@ — at both of the chains this surface
+-- has: a call's arguments, @arg guide :> arg goal :> noArgs@, and a program's
+-- inputs, @input "request" :> input "base" :> noInputs@.
+--
+-- __One spelling, because they are one shape__: an element, the rest, and an
+-- end that names itself ('noArgs', 'noInputs'). An author who has written the
+-- one has written the other, and neither reads as what the inputs chain used
+-- to read as — a function applied to its own tail, nesting to the right in
+-- parentheses while the argument list beside it stayed flat.
+--
+-- The result is __determined__ by the element and the tail, which is what lets
+-- a chain of any length infer with no annotation of any kind: an end is a
+-- concrete type, so each link fixes the link above it, out to the type the
+-- call site or 'taking' expects.
+--
+-- __Why 'In' exists.__ That determination reads the element's type, so an
+-- element must have one. An argument has one — 'arg' answers an 'Arg'
+-- whatever it was given — and a name written as a literal does not: under
+-- @OverloadedStrings@ a bare @"request"@ is any string type at all, and an
+-- element of unknown type is a link this class cannot close. 'input' is what
+-- gives a name its type, and is the only thing that makes an 'In'.
+--
+-- The methods are not exported: an author writes @:>@, and the two chains
+-- this module defines are the two there are.
+class Chain e t r | e t -> r where
+  -- | @x :> rest@, built.
+  chainCons :: e -> t -> r
+
+  -- | @x :> rest@, read back. It is total at each instance — a chain whose
+  -- type says it has a head cannot be the empty one — and it exists because
+  -- Haskell requires an explicitly bidirectional synonym to carry a matcher
+  -- for @:>@ to stand in expressions at all. Matching through @:>@ is /not/
+  -- supported surface: the fundep runs @e t -> r@ only, so a match is
+  -- ambiguous without annotations on both bound variables — an annotation
+  -- burden construction never has, and nothing in either repository matches
+  -- a chain. Chains are built, and read back by the elaborator through the
+  -- constructors.
+  chainUncons :: r -> (e, t)
+
+-- | The element, onto the rest of the chain: 'Chain'\'s cons, at both chains.
+--
+-- __It is a pattern synonym because it has to be.__ An operator that begins
+-- with @:@ /is/ a constructor name in Haskell, so an overloaded @:>@ cannot be
+-- a class method — the one thing a constructor name may also be is a pattern
+-- synonym, and a pattern synonym may carry a class context. That context is
+-- 'Chain', so @:>@ means at each use exactly what the instance chosen there
+-- means, and means nothing anywhere else.
+pattern (:>) :: Chain e t r => e -> t -> r
+pattern x :> rest <-
+  (chainUncons -> (x, rest))
+  where
+    x :> rest = chainCons x rest
+
+infixr 5 :>
+
+-- | One argument, onto the rest of an argument list.
+--
+-- The scope equality sits in the context rather than in the head, as it does
+-- in 'Gives': the link is chosen on the shape alone and /then/ says the two
+-- scopes are one, rather than waiting to be told that they already are.
+instance s ~ s' => Chain (Arg s c) (Args s' ps) (Args s' (c ': ps)) where
+  chainCons = ACons
+  chainUncons (ACons a as) = (a, as)
+
+-- ---------------------------------------------------------------------------
 -- Calls
 -- ---------------------------------------------------------------------------
 
@@ -1906,15 +1982,27 @@ data Ins (hs :: Type) where
 noInputs :: Ins ()
 noInputs = INil
 
--- | One input, by the name a command line binds it under.
-input :: Text -> Ins hs -> Ins (Text, hs)
-input = ICons
+-- | One input's name, on its way into an input list. 'input' makes one, and
+-- nothing else does; see 'Chain' for why the name is wrapped rather than
+-- passed as the 'Text' it is.
+newtype In = In Text
+
+-- | One input, by the name a command line binds it under:
+-- @input "request" :> input "base" :> noInputs@.
+input :: Text -> In
+input = In
+
+-- | One input, onto the rest of an input list. The index gains a @Text@,
+-- which is what 'taking' curries the body over.
+instance Chain In (Ins hs) (Ins (Text, hs)) where
+  chainCons (In n) ins = ICons n ins
+  chainUncons (ICons n ins) = (In n, ins)
 
 instance Curries hs => Curries (Text, hs) where
   type Curried (Text, hs) r = Text -> Curried hs r
   applyTo f (t, hs) = applyTo (f t) hs
 
--- | @taking (input "subject" noInputs) \\subject -> workflow W.do …@
+-- | @taking (input "subject" :> noInputs) \\subject -> workflow W.do …@
 taking :: forall hs. Curries hs => Ins hs -> Curried hs Program -> Parameterized
 taking ins k =
   Parameterized

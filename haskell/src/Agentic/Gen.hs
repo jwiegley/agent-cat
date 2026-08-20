@@ -92,7 +92,7 @@ where
 
 import Agentic.Builder
   ( Arg,
-    Args (ANil, (:>)),
+    Args (ACons, ANil),
     Ask,
     Blk,
     Body,
@@ -472,7 +472,7 @@ genArgs _ PLNil = Just (pure ANil)
 genArgs ns (PLCons c cs) = do
   gh <- genArg ns c
   gt <- genArgs ns cs
-  pure ((:>) <$> gh <*> gt)
+  pure (ACons <$> gh <*> gt)
 
 genArg :: forall c s. Live s -> SCode c -> Maybe (Gen (Arg s c))
 genArg ns c = case c of

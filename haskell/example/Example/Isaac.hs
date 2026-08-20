@@ -1065,7 +1065,7 @@ reviewReport =
 -- @Flow Text Text@ and @workflowReq@ demands an input at the CLI; this program
 -- used to open by asking a tool for the commit, which made the operator's text
 -- an /answer/ where there it is /data/. It is now
--- @'Agentic.Workflow.taking' ('Agentic.Workflow.input' \"subject\" …)@, and the
+-- @'Agentic.Workflow.taking' ('Agentic.Workflow.input' \"subject\" :> …)@, and the
 -- subject is a @define@ supplied at run time — @agentic-run … --input
 -- .\/commit.diff@ — spliced into every prompt exactly as a define written in
 -- the source is, including inside the @if@ arms.
@@ -1079,7 +1079,7 @@ reviewReport =
 -- > cost  minFold 7, maxFold 8, over 2 paths
 -- > run --scripted: billFresh 8, billMemo 8 (the router said yes)
 reviewLite :: Parameterized
-reviewLite = taking (input "subject" noInputs) \subject ->
+reviewLite = taking (input "subject" :> noInputs) \subject ->
   defining [SomeFn reviewReport] W.do
     correctness <- ask (model "correctness" `servedBy` "fable") [wf|
         {correctnessLens}

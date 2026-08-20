@@ -754,16 +754,20 @@ argWords :: Words s -> Arg s 'CodeText
 argWords ws = Arg (ArgLit (wordsRaw ws) pos0) (wordsExpr ws)
 
 -- | The arguments of one call, in source order.
+--
+-- The cons is a named constructor and not an operator because the authoring
+-- surface spells it @:>@ — 'Agentic.Workflow.Chain', one overloaded cons for
+-- this chain and for a program's inputs — and an operator here would be a
+-- second thing of that name. Everything below the surface builds and reads
+-- 'ACons' itself.
 data Args (s :: Scope) (ps :: [Code]) where
   ANil :: Args s '[]
-  (:>) :: Arg s c -> Args s cs -> Args s (c ': cs)
-
-infixr 5 :>
+  ACons :: Arg s c -> Args s cs -> Args s (c ': cs)
 
 argsRaw :: Args s ps -> [RawArg]
 argsRaw = \case
   ANil -> []
-  a :> as -> argRaw a : argsRaw as
+  ACons a as -> argRaw a : argsRaw as
 
 -- | The calling convention, verbatim: Lean's @checkArgs@ (@Check.lean:433@)
 -- folds the arguments left to right into the substitution the call runs along,
@@ -779,7 +783,7 @@ argSub ::
   Sub acc (Codes s) ->
   Sub (ParamCtxGo ps acc) (Codes s)
 argSub ANil sigma = sigma
-argSub ((a :: Arg s c) :> as) sigma =
+argSub (ACons (a :: Arg s c) as) sigma =
   argSub as (subCons (argExpr a) sigma :: Sub (c ': acc) (Codes s))
 
 -- ---------------------------------------------------------------------------
