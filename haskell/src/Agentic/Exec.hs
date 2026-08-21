@@ -3,6 +3,7 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
@@ -164,6 +165,7 @@ import Agentic.Raw
   )
 import Agentic.Text (decodeFlag, decodeVerdict, sayFlag, sayVerdict)
 import Agentic.Plan (QScope (scopeModelAxis))
+import Agentic.WF (wft)
 import Agentic.World
   ( Event (Event),
     EventKey,
@@ -450,8 +452,7 @@ askOrMemo w ch c q m = do
 
     spentSkip i =
       i
-        <> " reported its allowance spent earlier in this run; not asking it \
-           \again"
+        <> " " <> [wft|reported its allowance spent earlier in this run; not asking it again|]
 
 -- | The model a question's scope names, if it names one.
 modelOf :: Q c -> Maybe Text
@@ -496,8 +497,7 @@ abandonAllSpent c q chain =
       <> T.intercalate ", " chain
       <> ") reported its allowance spent earlier in this run (prompt: '"
       <> oneLine (qPrompt q)
-      <> "'). The run is abandoned rather than asking a model known to be spent, "
-      <> "which would be spending a turn on a guess."
+      <> [wft|'). The run is abandoned rather than asking a model known to be spent, which would be spending a turn on a guess.|]
 
 -- | The chain table a run walks, and where a fail-over narrates itself.
 --
@@ -1359,8 +1359,7 @@ askDecodingWith st c q say0 = do
             <> T.pack (show (gaSpent ga + 1))
             <> " attempts; taking the operator-configured arm ("
             <> sayFlag arm
-            <> ") rather than abandoning the run — nothing checks that this arm "
-            <> "is the loud one; that safety is the operator's. This answer is not "
+            <> [wft|) rather than abandoning the run — nothing checks that this arm is the loud one; that safety is the operator's. This answer is not |]
             <> addresseeWord (qAddressee q)
             <> "'s (last reply: '"
             <> trimAscii (gaWhy ga)
@@ -1381,8 +1380,7 @@ askDecodingWith st c q say0 = do
                   <> trimAscii (gaWhy ga)
                   <> "' (prompt: '"
                   <> qPrompt q
-                  <> "'). The run is abandoned: recording an answer nobody gave would be "
-                  <> "indistinguishable, in the table, from one they did."
+                  <> [wft|'). The run is abandoned: recording an answer nobody gave would be indistinguishable, in the table, from one they did.|]
             why =
               "no readable "
                 <> codeWord (fromSCode c)

@@ -569,6 +569,7 @@ stringOpOf sj = case op of
   "decide" -> case str "decider" >>= deciderOfName of
     Nothing ->
       err
+        -- Not a [wft|...|]: Agentic.WF imports Agentic.Builder, which imports this module — the quoter is unreachable from here.
         "decide takes a decider: lastNonEmptyLineIs, containsLine, \
         \anyLineStartsWith or anyPathMatches"
     Just d -> case needles of

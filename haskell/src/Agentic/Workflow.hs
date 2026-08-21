@@ -11,6 +11,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
@@ -527,9 +528,7 @@ reservedError what x =
     ( T.unpack what
       <> ": `"
       <> T.unpack x
-      <> "` is a name this surface generates for itself — `b0`, `b1`, … for a "
-      <> "binding and `r0`, `r1`, … for a bounded revision's result — and a "
-      <> "generated name is fresh by construction only while no author takes one"
+      <> T.unpack [wft|` is a name this surface generates for itself — `b0`, `b1`, … for a binding and `r0`, `r1`, … for a bounded revision's result — and a generated name is fresh by construction only while no author takes one|]
     )
 
 -- ---------------------------------------------------------------------------
@@ -665,8 +664,7 @@ confirm p w = B.one (ask p w)
 panel :: [Ask s] -> Rhs s 'CodeVerdict
 panel [] =
   error
-    "panel: a panel needs at least one member — `panel []` asks no one and \
-    \settles nothing"
+    (T.unpack [wft|panel: a panel needs at least one member — `panel []` asks no one and settles nothing|])
 panel (m : ms) = B.panel (m NE.:| ms)
 
 -- | @panelText [("alpha", ask …), ("beta", ask …)]@ — 'panel'\'s twin at
@@ -685,8 +683,7 @@ panel (m : ms) = B.panel (m NE.:| ms)
 panelText :: [(Text, Ask s)] -> Rhs s 'CodeText
 panelText [] =
   error
-    "panelText: a text panel needs at least one member — `panelText []` asks no \
-    \one and fences nothing"
+    (T.unpack [wft|panelText: a text panel needs at least one member — `panelText []` asks no one and fences nothing|])
 panelText (m : ms) = B.panelText (m NE.:| ms)
 
 -- | @decide LastNonEmptyLineIs status ["WORK COMPLETE"]@ — a pure
@@ -707,14 +704,11 @@ decide ::
   Rhs s 'CodeFlag
 decide _ _ [] =
   error
-    "decide: a decider needs at least one needle to test for — a decider with \
-    \none is a test that is constantly false, with nothing in the source to \
-    \show it"
+    (T.unpack [wft|decide: a decider needs at least one needle to test for — a decider with none is a test that is constantly false, with nothing in the source to show it|])
 decide d v ws
   | any T.null ws =
       error
-        "decide: a decider needs its needles to say something, and the empty \
-        \needle tests nothing"
+        (T.unpack [wft|decide: a decider needs its needles to say something, and the empty needle tests nothing|])
   | otherwise = B.decide @h @s d v (NE.fromList ws)
 
 -- | The four answer kinds, as words an author can say. Capitalised because
@@ -1101,6 +1095,7 @@ clausesOf mn live annot review k = case k (V x VHere) (x : live) of
 -- | A second statement in a revision, which the grammar has no room for.
 instance
   TypeError
+    -- Not a [wft|...|]: this text is a Symbol in a type, and the quoter refuses a type ("a prompt is an expression").
     ( 'TL.Text "a bounded revision reviews first — `verdict <- panel […]` — \
                \and then amends, and has no other statement"
     ) =>
@@ -1111,6 +1106,7 @@ instance
 -- | As above, for a source that is not a bare question.
 instance
   TypeError
+    -- Not a [wft|...|]: this text is a Symbol in a type, and the quoter refuses a type ("a prompt is an expression").
     ( 'TL.Text "a bounded revision reviews first — `verdict <- panel […]` — \
                \and then amends, and has no other statement"
     ) =>
@@ -1122,6 +1118,7 @@ instance
 -- 'Agentic.Raw.RawBodyStmt' has no constructor for.
 instance
   TypeError
+    -- Not a [wft|...|]: this text is a Symbol in a type, and the quoter refuses a type ("a prompt is an expression").
     ( 'TL.Text "a function body is a straight line: it has no bounded \
                \revision, no branch and no `known here` — those belong to the \
                \workflow that calls it"
@@ -1134,6 +1131,7 @@ instance
 -- 'Agentic.Raw.RawBodyStmt' has no constructor for either.
 instance
   TypeError
+    -- Not a [wft|...|]: this text is a Symbol in a type, and the quoter refuses a type ("a prompt is an expression").
     ( 'TL.Text "a function body is a straight line: it has no bounded \
                \revision, no branch and no `known here` — those belong to the \
                \workflow that calls it"
@@ -1177,6 +1175,7 @@ instance (s' ~ s, j ~ 'Body r s, a ~ ()) => Step (Calling s') ('Body r s) j a wh
 -- express.
 instance
   TypeError
+    -- Not a [wft|...|]: this text is a Symbol in a type, and the quoter refuses a type ("a prompt is an expression").
     ( 'TL.Text "a bounded revision reviews first — `verdict <- panel […]` — \
                \and then amends, and has no other statement"
     ) =>
@@ -1187,6 +1186,7 @@ instance
 -- | As above, after the review.
 instance
   TypeError
+    -- Not a [wft|...|]: this text is a Symbol in a type, and the quoter refuses a type ("a prompt is an expression").
     ( 'TL.Text "a bounded revision reviews first — `verdict <- panel […]` — \
                \and then amends, and has no other statement"
     ) =>
@@ -1198,6 +1198,7 @@ instance
 -- reason: a revision's two clauses are sources, and a statement is not one.
 instance
   TypeError
+    -- Not a [wft|...|]: this text is a Symbol in a type, and the quoter refuses a type ("a prompt is an expression").
     ( 'TL.Text "a bounded revision reviews first — `verdict <- panel […]` — \
                \and then amends, and has no other statement"
     ) =>
@@ -1208,6 +1209,7 @@ instance
 -- | As above, after the review.
 instance
   TypeError
+    -- Not a [wft|...|]: this text is a Symbol in a type, and the quoter refuses a type ("a prompt is an expression").
     ( 'TL.Text "a bounded revision reviews first — `verdict <- panel […]` — \
                \and then amends, and has no other statement"
     ) =>
@@ -1926,17 +1928,14 @@ tableProblem prog =
                 <> from
                 <> "\" calls \""
                 <> callee
-                <> "\", which defining lists after it — a function may call \
-                   \only a function declared before it, so that the table can \
-                   \be priced"
+                <> [wft|", which defining lists after it — a function may call only a function declared before it, so that the table can be priced|]
             )
       | otherwise =
           Just
             ( who
                 <> " calls \""
                 <> callee
-                <> "\", which defining was not given — list it, or the printed \
-                   \program names a function that does not exist"
+                <> [wft|", which defining was not given — list it, or the printed program names a function that does not exist|]
             )
       where
         who = maybe "the workflow" (\f -> "\"" <> f <> "\"") caller
@@ -2029,8 +2028,7 @@ input n
       error
         ( "input: `"
             <> T.unpack n
-            <> "` is under the `run.` prefix, which names the facts the runner "
-            <> "supplies about the run it is making, and the facts there are "
+            <> T.unpack [wft|` is under the `run.` prefix, which names the facts the runner supplies about the run it is making, and the facts there are |]
             <> T.unpack (T.intercalate ", " runFacts)
         )
   | otherwise = In n
@@ -2234,8 +2232,7 @@ runFactRefusal n
       Just
         ( "input '"
             <> n
-            <> "' is a run fact: the runner binds it from the run it is making, "
-            <> "and a command line cannot say what a run did. The facts are "
+            <> [wft|' is a run fact: the runner binds it from the run it is making, and a command line cannot say what a run did. The facts are |]
             <> T.intercalate ", " runFacts
             <> ", and every one of them is bound for you"
         )

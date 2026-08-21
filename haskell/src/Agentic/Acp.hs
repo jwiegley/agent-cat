@@ -235,6 +235,7 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
@@ -368,6 +369,7 @@ import Agentic.Exec
   )
 import Agentic.Plan (Q (..), SCode, fromSCode)
 import Agentic.Raw (Addressee, Code (CodeAck))
+import Agentic.WF (wft)
 
 -- ---------------------------------------------------------------------------
 -- The configuration
@@ -586,8 +588,7 @@ renderAcpError = \case
       <> got
       <> " while request "
       <> wanted
-      <> " was the one in flight; the stream is out of step and no reply can be "
-      <> "attributed to a question"
+      <> " " <> [wft|was the one in flight; the stream is out of step and no reply can be attributed to a question|]
   AcpProtocol prog why ->
     "'" <> prog <> "' is not speaking ACP v1 as this client implements it: " <> why
   AcpRefused prog method err ->
@@ -599,8 +600,7 @@ renderAcpError = \case
       <> what
       <> " within "
       <> tshow ms
-      <> "ms; it was killed. The question was abandoned rather than answered by "
-      <> "this runtime"
+      <> [wft|ms; it was killed. The question was abandoned rather than answered by this runtime|]
 
 -- ---------------------------------------------------------------------------
 -- What the agent advertised
@@ -1391,8 +1391,7 @@ sayAcp cfg acp c q extra = do
         <> what
         <> ": '"
         <> oneLine (turnNarration turn)
-        <> "' — the adapter's own words about itself, kept out of the answer, "
-        <> "which is what the trusted base reads and what every later prompt quotes"
+        <> [wft|' — the adapter's own words about itself, kept out of the answer, which is what the trusted base reads and what every later prompt quotes|]
   if stopCompleted (turnStop turn)
     then pure (turnText turn)
     else do
@@ -1422,9 +1421,7 @@ sayAcp cfg acp c q extra = do
             <> qPrompt q
             <> "'; what arrived: '"
             <> trimAscii (turnText turn)
-            <> "'). The run is abandoned: an unfinished turn did not perform the act "
-            <> "it was asked to perform, and a recorded acknowledgement of it would be "
-            <> "indistinguishable, in the table, from one that did."
+            <> [wft|'). The run is abandoned: an unfinished turn did not perform the act it was asked to perform, and a recorded acknowledgement of it would be indistinguishable, in the table, from one that did.|]
       pure (turnText turn)
   where
     code = fromSCode c

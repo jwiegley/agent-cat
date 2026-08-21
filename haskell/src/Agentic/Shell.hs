@@ -3,6 +3,7 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
@@ -91,6 +92,7 @@ import Agentic.Plan
     verdictObject,
   )
 import Agentic.Raw (Addressee (AddrToolExec), Code)
+import Agentic.WF (wft)
 import Control.Exception (Exception, IOException, try)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -302,11 +304,8 @@ answerByRunning cfg c q cmd args = do
           <> addresseeWord (qAddressee q)
           <> ", and a "
           <> codeWord (fromSCode c)
-          <> " has no value that says so: the run is abandoned rather than "
-          <> "recording an answer indistinguishable, in the table, from one a "
-          <> "command that succeeded gave. (prompt: '"
+          <> " " <> [wft|has no value that says so: the run is abandoned rather than recording an answer indistinguishable, in the table, from one a command that succeeded gave. (prompt: '|]
           <> oneLine (qPrompt q)
           <> "'; it said: '"
           <> oneLine (T.take 400 (err <> out))
-          <> "'). Ask it as a `flag` or a `verdict` if a nonzero exit is an "
-          <> "answer here."
+          <> [wft|'). Ask it as a `flag` or a `verdict` if a nonzero exit is an answer here.|]

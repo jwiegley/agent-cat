@@ -510,6 +510,7 @@ instance FromJSON RawRhs where
           fail $
             "RawRhs.decide: unknown decider "
               ++ show t
+              -- Not a [wft|...|]: Agentic.WF imports Agentic.Builder, which imports this module — the quoter is unreachable from here.
               ++ "; the vocabulary is closed at lastNonEmptyLineIs, \
                  \containsLine, anyLineStartsWith, anyPathMatches"
 

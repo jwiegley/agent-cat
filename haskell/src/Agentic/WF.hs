@@ -42,6 +42,30 @@
 -- newline__. A prompt that must end in one is spelled
 -- @[wf|…|] '<>' ['Agentic.Builder.lit' "\\n"]@.
 --
+-- __Every multi-line string in this tree is written at this fence.__ The
+-- owner's ruling of 2026-08-21 is total, and it has no fixture exception: a
+-- canned diff, a usage line and a refusal a gate greps are all @[wft|…|]@,
+-- and the pass that made them so proved each one byte for byte against the
+-- literal it replaced. Three consequences an author meets. A text that carries
+-- __no__ newline has exactly one spelling here — one line of source, however
+-- wide it comes out — because the fence joins its lines with @\\n@ and cannot
+-- be talked out of it. A __trailing__ newline is @[wft|…|] '<>' "\\n"@, for
+-- the same reason. And whitespace at the very __edge__ of the text — a leading
+-- space, a blank first or last line — cannot ride the fence edge, because
+-- 'layout' drops blank edge lines and strips the common margin; splice it with
+-- a hole or with @'<>'@.
+--
+-- __Three things, and only three, leave a gap literal standing__, and each
+-- names itself in a comment where it stands. A text that is a @Symbol@ in a
+-- /type/ cannot be a fence at all: the quoters are expression quoters and
+-- their @quoteType@ says so, in those words. A module at or below this one in
+-- the import graph — "Agentic.Builder", which this module imports, and
+-- "Agentic.Raw" and "Agentic.Text" beneath it — cannot import the quoter
+-- without a module cycle. And this module itself cannot quote with the quoter
+-- it defines: the Template Haskell stage restriction. Nineteen literals in
+-- this tree are of one of the three kinds; every other multi-line string is a
+-- fence.
+--
 -- __Chunking is normative, and this quoter is where the rule lives.__ Two
 -- halves. (1) __Adjacent literals are deliberately not fused__, so a @define@
 -- spliced into a prompt contributes /its own chunk/: @example-000@'s drafting
@@ -189,6 +213,7 @@ saysText = fromMaybe T.empty . wordsClosed . says @a @'[]
 type family Scopeless (a :: Type) :: Constraint where
   Scopeless (V h c) =
     TypeError
+      -- Not a [wft|...|] twice over: a Symbol in a type, and the text itself carries |], which is what ends a fence.
       ( 'Text "a hole in a [wft|…|] prompt names a define — a value in Haskell \
               \scope — and never a binding, because the text it yields has no \
               \scope for one to be live in. Write the prompt as [wf|…|] in the \
@@ -338,6 +363,7 @@ holes name = go ""
         _ ->
           Left
             ( name
+                -- Not a [wft|...|]: this module defines the quoter, and cannot quote with itself.
                 ++ ": `{` starts a hole, which is `{name}` for a name in \
                    \scope; write `{{` for a literal brace. At: `"
                 ++ take 24 ('{' : r)

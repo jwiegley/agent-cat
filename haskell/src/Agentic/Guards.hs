@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
 
 -- |
 -- Module      : Agentic.Guards
@@ -63,6 +64,7 @@ import Agentic.Raw
   , RawTarget (..)
   , TextMember (..)
   )
+import Agentic.WF (wft)
 
 -- * The constants
 
@@ -437,13 +439,9 @@ guardUnpinnedAsk prog =
         <> i
         <> "` is asked in "
         <> whereAt
-        <> " without `served by`, and this program was checked with the pin \
-           \required: every model ask must name the model that serves it. \
-           \Write `ask (model \""
+        <> " " <> [wft|without `served by`, and this program was checked with the pin required: every model ask must name the model that serves it. Write `ask (model "|]
         <> i
-        <> "\" `servedBy` \"…\") …`, or run without the requirement. Who \
-           \answers is a property of the question here, so an unpinned ask is \
-           \a question nobody has said who answers."
+        <> [wft|" `servedBy` "…") …`, or run without the requirement. Who answers is a property of the question here, so an unpinned ask is a question nobody has said who answers.|]
 
 -- | The first unpinned model ask of an 'RawAsk', which is the whole of the
 -- test: an override that is present pins, and an addressee that is not a model

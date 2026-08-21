@@ -173,6 +173,7 @@
 -- being said.
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Agentic.Cli
@@ -289,6 +290,7 @@ import Agentic.Plan
     size,
   )
 import Agentic.Raw (codeName)
+import Agentic.WF (wft)
 import Agentic.Workflow
   ( Example (..),
     inputNames,
@@ -773,8 +775,7 @@ resolveInputs name needsAll facts ex ins = case ex of
                   <> tshow (BS.length bytes)
                   <> ": "
                   <> T.pack (show e)
-                  <> "; an input is spliced into prompts as text, so bytes that"
-                  <> " are not UTF-8 refuse the run"
+                  <> [wft|; an input is spliced into prompts as text, so bytes that are not UTF-8 refuse the run|]
               )
           Right t ->
             let t' = fromMaybe t (T.stripSuffix "\n" t)
@@ -801,8 +802,7 @@ resolveInputs name needsAll facts ex ins = case ex of
     runFactUnbound n =
       "'"
         <> n
-        <> "' is a run fact and this runner bound none; the facts a run supplies \
-           \are "
+        <> [wft|' is a run fact and this runner bound none; the facts a run supplies are |]
         <> T.intercalate ", " runFacts
 
 -- | The first element that appears again later, if one does.
@@ -887,11 +887,9 @@ inputsLine b =
     <> case givenText b of
       Nothing
         | reservedInput (givenName b) ->
-            "— a run fact, and this verb is making no run; the folds below are \
-            \those of the program an unbound one builds"
+            [wft|— a run fact, and this verb is making no run; the folds below are those of the program an unbound one builds|]
         | otherwise ->
-            "— not given; the folds below are those of the program an empty \
-            \value builds"
+            [wft|— not given; the folds below are those of the program an empty value builds|]
       Just _ -> "= " <> givenWhence b
 
 -- ---------------------------------------------------------------------------
@@ -1234,8 +1232,7 @@ runCmd reg name target prog gs = case target of
     -- Without this line a green `--scripted` run reads as evidence that the
     -- gate passed, which is the same class of mistake D5 exists to fix.
     say
-      "  no command was run; every gate in this program was answered from the \
-      \table"
+      ("  " <> [wft|no command was run; every gate in this program was answered from the table|])
     walkWith id (scriptedWorld script)
   Routed rr -> do
     let rs = rrRoutes rr
@@ -1350,8 +1347,7 @@ runCmd reg name target prog gs = case target of
         -- directory a command runs in and the directory that session works in
         -- need not agree. Announce it rather than assume it.
         say
-          "  a `running` tool's command runs in this process's directory, which the \
-          \deck session — started by somebody else — need not share"
+          ("  " <> [wft|a `running` tool's command runs in this process's directory, which the deck session — started by somebody else — need not share|])
       bs -> sayManyBackends rr dir bs
 
     -- The table, when there is more than one backend to name. Six things it
@@ -1596,8 +1592,7 @@ runFactsOf reg name target = do
       -- reads as a mistake. The count leads in every arm, which is what a
       -- reader is looking for.
       Scripted ->
-        "no backend at all -- every question is answered from this program's own \
-        \table of "
+        [wft|no backend at all -- every question is answered from this program's own table of |]
           <> tshow (length (maybe [] rowScript (regLookup reg name)))
           <> " canned replies, and nothing is reached"
       Routed rr -> case routeBackends (rrRoutes rr) of
@@ -1761,8 +1756,7 @@ parseCommand reg = \case
               <> flag
               <> "' for plan, which takes "
               <> article
-              <> " and, at most, --raw, "
-              <> "--require-pinned, --json and the input flags\n\n"
+              <> " " <> [wft|and, at most, --raw, --require-pinned, --json and the input flags|] <> "\n\n"
               <> usage reg
           )
 
@@ -1856,8 +1850,7 @@ parseTarget reg args = do
             Left $
               "unknown engine '"
                 <> v
-                <> "': --engine takes acp (start an adapter and speak the protocol to it) "
-                <> "or deck (send to a live agent-deck session)"
+                <> [wft|': --engine takes acp (start an adapter and speak the protocol to it) or deck (send to a live agent-deck session)|]
       ("--session" : v : rest) -> go o {roSession = Just v} rest
       ("--binary" : v : rest) -> go o {roBinary = Just v} rest
       ("--adapter" : v : rest) -> go o {roAdapter = Just v} rest
@@ -1871,8 +1864,7 @@ parseTarget reg args = do
       -- object would be this runner inventing one.
       ("--json" : _) ->
         Left
-          "run takes no --json: a run's record is the trace it prints as it happens, \
-          \and there is no summary of one this runner would not be inventing"
+          [wft|run takes no --json: a run's record is the trace it prints as it happens, and there is no summary of one this runner would not be inventing|]
       ("--poll" : v : rest) -> withMs "--poll" v (\n -> go o {roPollMs = Just n} rest)
       ("--timeout" : v : rest) -> withMs "--timeout" v (\n -> go o {roTimeoutMs = Just n} rest)
       (flag : _) -> Left ("no option '" <> flag <> "' for run\n\n" <> usage reg)
@@ -1895,8 +1887,7 @@ chooseTarget reg o = case (roScripted o, roEngine o, roSession o) of
   (True, _, _) -> onlyScripted
   (_, Just "acp", Just _) ->
     Left
-      "--engine acp starts an adapter of its own, and --session sends to an agent-deck \
-      \session somebody else started; pick one"
+      [wft|--engine acp starts an adapter of its own, and --session sends to an agent-deck session somebody else started; pick one|]
   -- The default is `stub`, the deterministic double: a command line that named
   -- no adapter must not spawn a real agent, spend a token or touch an account.
   -- (The retired Lean CLI kept the same default, for the same reason.)
@@ -1910,8 +1901,7 @@ chooseTarget reg o = case (roScripted o, roEngine o, roSession o) of
   _
     | not (null (roRoutes o)) ->
         Left
-          "--route refines this run's default answerer, and there is none: \
-          \give --engine acp or --session <id> as well"
+          [wft|--route refines this run's default answerer, and there is none: give --engine acp or --session <id> as well|]
   _ -> Left ("run needs --scripted, --engine acp, or --session <id>\n\n" <> usage reg)
   where
     -- A flag this run's answerer has no use for, refused by name.

@@ -340,24 +340,35 @@ scriptFor "hello" =
 -- a table living beside a program in another file cannot promise.
 scriptFor name = isaacScript name
 
--- | @stub_adapter.py:100@'s @GUIDE@.
+-- | @stub_adapter.py:131@'s @GUIDE@, byte for byte.
 --
--- A string-gap literal on purpose, not an oversight of the @wft@ sweep: its
--- gaps join /without/ newlines — the text is one line — and a fence joins
--- lines with @\n@, so converting it would move bytes. The same holds for
--- 'patchText'. Only a gap literal whose intended text really carries the
--- newlines may become @[wft|…|]@, and each needs its bytes compared.
+-- __Written on one line of source, and that is not an accident.__ These two
+-- texts are documented twins of the stub adapter's @GUIDE@ and @PATCH@, and
+-- @ci/acp.sh@ greps their wording, so their bytes may not move. The owner's
+-- ruling of 2026-08-21 is total — every multi-line string in this tree is a
+-- @[wft|…|]@ — and a fence joins its lines with @\n@, so a text that carries
+-- no newline has exactly one spelling at the fence: one line, however wide.
+-- The width is the price of the ruling and is paid here on purpose. The
+-- adapter is Python and is outside the ruling; the sync claim holds because
+-- nothing on this side moved.
+--
+-- 'patchText' is the same rule the other way. Its text /does/ carry the
+-- newlines, so it is a block fence written with its own margin at the minimum
+-- — the @---@, @+++@, @\@\@@, @-@ and @+@ columns — which is what leaves the
+-- diff's two-space body indentation standing after the common strip. The
+-- trailing newline is @'<>' "\\n"@, because a fence never ends in one.
 guideText :: Text
 guideText =
-  "House style: two-space indent, no tabs, every public name documented, \
-  \and failures returned rather than raised."
+  [wft|House style: two-space indent, no tabs, every public name documented, and failures returned rather than raised.|]
 
--- | @stub_adapter.py:105@'s @PATCH@ — a real unified diff, because the act's
+-- | @stub_adapter.py:136@'s @PATCH@ — a real unified diff, because the act's
 -- prompt wraps it and a run that applied it would have something to apply.
 patchText :: Text
 patchText =
-  "--- a/src/parse.c\n\
-  \+++ b/src/parse.c\n\
-  \@@\n\
-  \-  char buf[64]; strcpy(buf, input);\n\
-  \+  char buf[64]; snprintf(buf, sizeof buf, \"%s\", input);\n"
+  [wft|
+    --- a/src/parse.c
+    +++ b/src/parse.c
+    @@
+    -  char buf[64]; strcpy(buf, input);
+    +  char buf[64]; snprintf(buf, sizeof buf, "%s", input);|]
+    <> "\n"

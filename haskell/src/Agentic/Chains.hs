@@ -1,5 +1,6 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
 
 -- |
 -- Module      : Agentic.Chains
@@ -48,6 +49,7 @@ import Agentic.Raw
     Served (..),
     TextMember (..),
   )
+import Agentic.WF (wft)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
@@ -81,9 +83,7 @@ servedChains prog =
                   <> spell as'
                   <> " and once as "
                   <> spell as
-                  <> ". A chain is a property of the model and not of the \
-                     \question, so a run cannot hold both; write one spelling \
-                     \everywhere, or drop the spares."
+                  <> [wft|. A chain is a property of the model and not of the question, so a run cannot hold both; write one spelling everywhere, or drop the spares.|]
 
     spell [] = "`served by \"" <> "…" <> "\"` with no spare"
     spell as = "`or " <> T.intercalate ", " as <> "`"

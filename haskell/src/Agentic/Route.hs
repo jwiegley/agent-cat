@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE RankNTypes #-}
 
 -- |
@@ -96,6 +97,7 @@ where
 
 import Agentic.Exec (WorldIO (WorldIO), worldAskIO)
 import Agentic.Plan (Q (qScope), QScope (scopeModelAxis))
+import Agentic.WF (wft)
 import Data.List (nub)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -193,8 +195,7 @@ parseBackend spec = case T.breakOn ":" spec of
       Left $
         "unknown backend '"
           <> spec
-          <> "' in --route: a backend is acp:<adapter> (start an adapter of \
-             \this run's own) or deck:<id> (send to a live agent-deck session)"
+          <> [wft|' in --route: a backend is acp:<adapter> (start an adapter of this run's own) or deck:<id> (send to a live agent-deck session)|]
 
 -- | A backend as the operator would have written it: the printed inverse of
 -- 'parseBackend'.

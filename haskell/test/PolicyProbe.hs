@@ -722,9 +722,7 @@ main = do
       ( "unknown scheme names both shapes",
         parseBackend "grpc:x"
           == Left
-            "unknown backend 'grpc:x' in --route: a backend is acp:<adapter> \
-            \(start an adapter of this run's own) or deck:<id> (send to a live \
-            \agent-deck session)"
+            [wft|unknown backend 'grpc:x' in --route: a backend is acp:<adapter> (start an adapter of this run's own) or deck:<id> (send to a live agent-deck session)|]
       ),
       ("no colon at all", either ("unknown backend 'codex'" `T.isInfixOf`) (const False) (parseBackend "codex")),
       ("a scheme with no value", either ("unknown backend 'acp:'" `T.isInfixOf`) (const False) (parseBackend "acp:"))

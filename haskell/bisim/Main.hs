@@ -67,6 +67,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Main (main) where
@@ -135,6 +136,7 @@ import Agentic.Oracle
 import Agentic.Plan (Level (..), level)
 import Agentic.Raw (RawProgram)
 import Agentic.Text (stringOpOf)
+import Agentic.WF (wft)
 
 -- ---------------------------------------------------------------------------
 -- Options
@@ -221,9 +223,7 @@ run opts = do
   green <- selfTest
   unless green $ do
     TIO.putStrLn
-      "FAIL P0: the generator self-test failed \
-      \(see Agentic.Gen's diagnostics above); \
-      \aborting before any oracle traffic"
+      [wft|FAIL P0: the generator self-test failed (see Agentic.Gen's diagnostics above); aborting before any oracle traffic|]
     exitFailure
   TIO.putStrLn "bisim: P0 generator self-test ok"
 
@@ -320,8 +320,7 @@ propBuilder oracle seed n =
         Skipped ("the oracle ran out of budget at " <> ms <> "ms")
       (Refused r, _) ->
         Diverged
-          "the oracle REFUSED a program the builder built; \
-          \a refusable term is supposed to be unrepresentable here"
+          [wft|the oracle REFUSED a program the builder built; a refusable term is supposed to be unrepresentable here|]
           [("request", req), ("refusal", r)]
       (Errored msg, _) ->
         Diverged
@@ -336,8 +335,7 @@ propBuilder oracle seed n =
         -- reached it would be compared against a meaningless summary.
         | level (progPlan prog) > Branch ->
             Diverged
-              "the generated program elaborates to the dynamic rung, \
-              \which no reply describes"
+              [wft|the generated program elaborates to the dynamic rung, which no reply describes|]
               [("request", req)]
         | Just d <- firstDiffWith "oracle" "haskell" reply ourReply ->
             Diverged
@@ -607,9 +605,7 @@ summarize ts = do
           <> tshow others
           <> " of "
           <> tshow n
-          <> " draws were refused `other`, over 90% — the generator is too \
-             \wild to reach the six guards, and this property is not \
-             \testing what it claims"
+          <> " " <> [wft|draws were refused `other`, over 90% — the generator is too wild to reach the six guards, and this property is not testing what it claims|]
   if total == 0 then exitSuccess else exitFailure
   where
     total = sum (map tallyFailed ts)

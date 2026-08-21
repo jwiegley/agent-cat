@@ -299,6 +299,7 @@ type family Fresh (n :: Symbol) (s :: Scope) :: Constraint where
   Fresh n '[] = ()
   Fresh n ('(n, c) ': s) =
     TypeError
+      -- Not a [wft|...|] twice over: this text is a Symbol in a type, and Agentic.WF imports this module (a cycle).
       ( 'Text "this name is already in scope, and a live name is not \
               \introduced twice; rename one of the two: "
           ':<>: 'Text n
@@ -435,6 +436,7 @@ instance Spliceable 'CodeVerdict where
 
 instance
   TypeError
+    -- Not a [wft|...|] twice over: this text is a Symbol in a type, and Agentic.WF imports this module (a cycle).
     ( 'Text "only a text or a verdict answer interpolates into a prompt \
             \— a flag has no text of its own"
     ) =>
@@ -444,6 +446,7 @@ instance
 
 instance
   TypeError
+    -- Not a [wft|...|] twice over: this text is a Symbol in a type, and Agentic.WF imports this module (a cycle).
     ( 'Text "only a text or a verdict answer interpolates into a prompt \
             \— a receipt has no text of its own"
     ) =>
@@ -1367,12 +1370,14 @@ revisingCaseI
   unsettled
     | n < 0 || n > 64 =
         error
+          -- Not a [wft|...|]: Agentic.WF imports this module, so importing the quoter here is a module cycle.
           ( "revisingCase: a bounded revision is unrolled into the term it \
             \writes, so its bound may name at most 64 amendments, and not "
               ++ show n
           )
     | reviewAnn `notElem` [Nothing, Just CodeVerdict] =
         error
+          -- Not a [wft|...|]: Agentic.WF imports this module, so importing the quoter here is a module cycle.
           "revisingCase: a review answers `verdict`, not anything else: the loop \
           \settles when it approves"
     | otherwise = Blk raw plan
@@ -1529,12 +1534,14 @@ revisingOnCaseI
   abandoned
     | n < 0 || n > 64 =
         error
+          -- Not a [wft|...|]: Agentic.WF imports this module, so importing the quoter here is a module cycle.
           ( "revisingOnCase: a bounded revision is unrolled into the term it \
             \writes, so its bound may name at most 64 amendments, and not "
               ++ show n
           )
     | reviewAnn `notElem` [Nothing, Just CodeVerdict] =
         error
+          -- Not a [wft|...|]: Agentic.WF imports this module, so importing the quoter here is a module cycle.
           "revisingOnCase: a review answers `verdict`, not anything else: the \
           \loop reads its three tags"
     | otherwise = Blk raw plan
