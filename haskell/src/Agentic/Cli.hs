@@ -5,8 +5,8 @@
 -- Four verbs over a table of named programs: 'list' them, 'plan' one, price it,
 -- or run it.
 --
--- > <binary> list
--- > <binary> plan  NAME [--raw] [--require-pinned]
+-- > <binary> list  [--json]
+-- > <binary> plan  NAME [--raw] [--require-pinned] [--json]
 -- > <binary> cost  NAME
 -- > <binary> run   NAME --scripted
 -- > <binary> run   NAME --session <id> [--binary PATH] [--poll MS]
@@ -101,6 +101,54 @@
 -- corpus entry, print and reply alike. That is what makes a run evidence about
 -- the language rather than about this executable.
 --
+-- == The machine-readable rendering
+--
+-- @list@ and @plan@ take @--json@ and print, instead of their prose, the object
+-- below — one per row for @list@ (in a JSON array, in listing order), one for
+-- @plan@. It exists for a program that drives this CLI: the owner's Emacs
+-- interface picks a workflow out of @wf list --json@ and prompts for the inputs
+-- it names, and __the prose is not a contract__ — a reworded blurb or a widened
+-- column must not break a reader.
+--
+-- __The key names below are an interface. Renaming one is a breaking change__,
+-- as is dropping one or changing what it holds; adding a key is not. The order
+-- they are emitted in is the encoder's and is promised to nobody, a JSON object
+-- being unordered; the order /within/ @inputs@ is declaration order and is
+-- promised. Both renderings are computed from one 'Facts', so there is no
+-- arrangement in which the number this prints and the number the prose prints
+-- disagree.
+--
+-- > {"name":"wiggum"
+-- > ,"blurb":"…"                one line, the row's own
+-- > ,"level":"batch"|"pipeline"|"branch"|"loop"     'Agentic.Plan.levelName'
+-- > ,"size":31                  'Agentic.Plan.size'
+-- > ,"askNodes":9               'Agentic.Plan.askNodes', the asks *written*
+-- > ,"minFold":9                least consultations on any path, null if no path
+-- > ,"maxFold":9                greatest, null if no path
+-- > ,"paths":1                  how many paths the cost fold has
+-- > ,"inputs":["plan","base"]   the OPERATOR's inputs, in declaration order
+-- > ,"runFacts":["run.engine"]  the run facts this program declares
+-- > ,"codes":["text","verdict"] plan only; null when the program branches
+-- > ,"fold":[{"consults":9,"paths":1}]      plan only; the histogram cost prints
+-- > ,"program":{…}              plan --json --raw only; 'Agentic.Observe.printedValue'
+-- > }
+--
+-- @inputs@ is exactly the list the @has no input named@ refusal names
+-- ('operatorInputs'), so a caller that offers a field per element offers
+-- exactly the fields @run@ will accept; the runner's facts are under
+-- @runFacts@, where nothing can mistake them for something to fill in. @codes@
+-- and @fold@ are @plan@'s because they are per-program detail a listing does
+-- not need; @cost@ takes no @--json@ because @plan --json@ already carries both
+-- of the numbers it prints. @run@ takes none either: its record is the trace it
+-- prints as it happens.
+--
+-- __A refusal is not JSON.__ Every one of them goes to stderr in the words
+-- below, under the exit codes below, @--json@ or no @--json@ — so a caller
+-- reads the exit code first and parses stdout only at @0@, and gets the same
+-- sentence an operator would have got. A second, machine-readable spelling of
+-- every refusal in this module is a second thing to keep true, and the exit
+-- code already carries the only distinction a caller can act on.
+--
 -- == Exit codes
 --
 -- @0@ a completed run (or a printed plan or price); @1@ a usage error, which
@@ -129,15 +177,17 @@ where
 
 import Control.Exception (Handler (..), IOException, catches, try)
 import Control.Monad (unless)
-import Data.Aeson (Value (..))
+import Data.Aeson (Value (..), encode, object, toJSON, (.=))
 import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
+import Data.Aeson.Types (Pair)
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as BL
 import Data.List (nub, sort, sortOn, tails)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.Encoding (decodeUtf8', encodeUtf8)
+import Data.Text.Encoding (decodeUtf8', decodeUtf8Lenient, encodeUtf8)
 -- `text`'s own internal module, for one thing and only in a message: the
 -- length of a byte string's longest valid UTF-8 prefix, which is the offset an
 -- operator needs to find the byte. `UnicodeException` names the offending
@@ -304,15 +354,30 @@ regLookup reg n = lookup n (regRows reg)
 -- make.
 data Command
   = -- | The registry itself: every name, with its one line.
-    List
+    List !Render
   | -- | The static folds, the printed program when the first 'Bool', and
     -- @--require-pinned@ in the second.
-    Plan !Text !Bool !Bool ![InputFlag]
+    Plan !Text !Render !Bool !Bool ![InputFlag]
   | -- | The cost summary and the fold it summarizes.
     Cost !Text ![InputFlag]
   | -- | Execute, against one of the three answering services, under
     -- @--require-pinned@ when the 'Bool'.
     Run !Text !Target !Bool ![InputFlag]
+
+-- | Who the output is for: an operator reading it, or a program parsing it.
+--
+-- It rides on the two verbs whose whole output is a statement about the
+-- registry — and on neither of the other two, for reasons that are about those
+-- verbs and not about this flag: @cost@ prints nothing @plan --json@ does not
+-- carry, and a run's record is its trace.
+--
+-- The two renderings share a 'Facts' rather than a code path, which is what
+-- makes @--json@ a second /rendering/ and not a second /answer/.
+data Render
+  = -- | the prose, for a person
+    Human
+  | -- | the object documented in this module's haddock, for a program
+    Json
 
 -- | One input flag, as written.
 --
@@ -423,12 +488,12 @@ cliMain reg = do
 -- therefore prices identically bound or not.
 execute :: Registry -> Command -> IO ()
 execute reg = \case
-  List -> listCmd reg >> exitSuccess
-  Plan name raw pinned ins -> withExample reg pinned False noRefusal name [] ins (planCmd name raw)
-  Cost name ins -> withExample reg False False noRefusal name [] ins (costCmd name)
+  List r -> listCmd reg r >> exitSuccess
+  Plan name r raw pinned ins -> withExample reg pinned False noRefusal name [] ins (planCmd r raw)
+  Cost name ins -> withExample reg False False noRefusal name [] ins (\f _ -> costCmd f)
   Run name target pinned ins -> do
     facts <- runFactsOf reg name target
-    withExample reg pinned True (routeRefusal reg target) name facts ins (runCmd reg name target)
+    withExample reg pinned True (routeRefusal reg target) name facts ins (const (runCmd reg name target))
 
 -- | The verb owes the program no precondition of its own — @plan@ and @cost@,
 -- which read no flag that is a claim about the program's text.
@@ -503,6 +568,11 @@ routeRefusal reg (Routed rr) prog = case servedChains (progRawOut prog) of
 -- two static verbs (see 'execute') — and it is threaded here rather than read
 -- inside 'runCmd' because an input is bound when the /program is built/, which
 -- is before the verb has a program to run.
+--
+-- The continuation is handed the row's 'Facts' as well as the program, because
+-- every static verb says some of them and only this function has the row and
+-- the program at once. 'Facts' is lazy throughout, so @run@ — which passes
+-- 'const' and says none of them — prices nothing to say nothing.
 withExample ::
   Registry ->
   Bool ->
@@ -511,7 +581,7 @@ withExample ::
   Text ->
   [(Text, Text)] ->
   [InputFlag] ->
-  (Program -> [Given] -> IO ()) ->
+  (Facts -> Program -> [Given] -> IO ()) ->
   IO ()
 withExample reg pinned needsAll refuses name facts ins k = case regLookup reg name of
   Nothing ->
@@ -529,11 +599,52 @@ withExample reg pinned needsAll refuses name facts ins k = case regLookup reg na
       Right (prog, bs)
         | pinned, Just why <- guardUnpinnedAsk (progRawOut prog) -> die reg 1 ("refused: " <> why)
         | Just why <- refuses prog -> die reg 1 why
-        | otherwise -> k prog bs >> exitSuccess
+        | otherwise -> k (factsOf name row prog) prog bs >> exitSuccess
 
 -- ---------------------------------------------------------------------------
 -- The inputs
 -- ---------------------------------------------------------------------------
+
+-- | Every input a program declares, in declaration order — the runner's facts
+-- among them.
+--
+-- The order is the one 'Agentic.Workflow.supply' expects, so this is also the
+-- order 'buildProgram' binds in.
+declaredInputs :: Example -> [Text]
+declaredInputs = \case
+  Fixed _ -> []
+  Needs par -> inputNames par
+
+-- | The inputs a command line may speak about: every declared name that is not
+-- the runner's.
+--
+-- __One function and not two lists.__ It is what the @has no input named@
+-- refusal enumerates, what @--input@ counts when it decides a program has
+-- exactly one, and what @--json@ publishes under @inputs@ — so a caller that
+-- offers a field per element offers exactly the fields @run@ will accept. Three
+-- readers of one definition; a second one written beside it is how a listing
+-- comes to advertise an input the runner is about to refuse.
+operatorInputs :: Example -> [Text]
+operatorInputs = filter (not . reservedInput) . declaredInputs
+
+-- | The rest of them: the run facts this program declares, which are the
+-- runner's to bind and nobody else's ('Agentic.Workflow.runFacts').
+runFactInputs :: Example -> [Text]
+runFactInputs = filter reservedInput . declaredInputs
+
+-- | The program these bindings build — an unbound input being the empty text,
+-- which is what a static verb answers about when nobody gave one.
+--
+-- The one place a 'Given' becomes a 'Program', so @plan@, @cost@ and @list
+-- --json@ cannot disagree about which program they are the numbers of.
+buildProgram :: Example -> [Given] -> Either Text Program
+buildProgram ex gs = case ex of
+  Fixed prog -> Right prog
+  Needs par -> supply par (map (fromMaybe "" . givenText) gs)
+
+-- | Every declared input, unbound: what a verb that was given nothing binds.
+unboundInputs :: Example -> [Given]
+unboundInputs ex = [Given n Nothing "" | n <- declaredInputs ex]
 
 -- | Bind a program's inputs from the command line, or say exactly what is
 -- wrong with the line.
@@ -570,7 +681,7 @@ resolveInputs name needsAll facts ex ins = case ex of
   Fixed prog
     | null ins -> pure (Right (prog, []))
     | otherwise -> pure (Left (name <> " takes no input"))
-  Needs par -> case traverse (named (operatorNames (inputNames par))) ins of
+  Needs _ -> case traverse (named (operatorInputs ex)) ins of
     Left why -> pure (Left why)
     Right pairs -> case firstDuplicate (map fst pairs) of
       Just n -> pure (Left ("input '" <> n <> "' was given twice"))
@@ -578,15 +689,10 @@ resolveInputs name needsAll facts ex ins = case ex of
         read' <- traverse (\(n, src) -> fmap ((,) n) <$> text src) pairs
         pure $ do
           given <- sequence read'
-          bounds <- traverse (bind given) (inputNames par)
-          prog <- supply par (map (fromMaybe "" . givenText) bounds)
+          bounds <- traverse (bind given) (declaredInputs ex)
+          prog <- buildProgram ex bounds
           pure (prog, bounds)
   where
-    -- The inputs a command line may speak about: every declared name that is
-    -- not the runner's.
-    operatorNames :: [Text] -> [Text]
-    operatorNames = filter (not . reservedInput)
-
     -- Which input a flag names. `--input` names one by being the only one.
     named :: [Text] -> InputFlag -> Either Text (Text, InputFlag)
     named ns f = case f of
@@ -774,110 +880,82 @@ inputsLine b =
       Just _ -> "= " <> givenWhence b
 
 -- ---------------------------------------------------------------------------
--- list
+-- What a rendering renders
 -- ---------------------------------------------------------------------------
 
--- | The registry, as the operator reads it: one row per name, with its line.
+-- | Everything the static verbs say about one registered row, in one value.
 --
--- It falls out of making the registry a value and is worth having on both
--- binaries: a table nobody can print is a table that goes stale, and the
--- toolbox is a table whose whole point is being browsed.
-listCmd :: Registry -> IO ()
-listCmd reg = do
-  say $ regBinary reg <> " — " <> tshow (length rows) <> " registered:"
-  say ""
-  mapM_ line rows
-  where
-    rows = regRows reg
-    width = maximum (1 : map (T.length . fst) rows)
-    line (n, row) = say $ "  " <> T.justifyLeft width ' ' n <> "  " <> rowDoc row
-
--- ---------------------------------------------------------------------------
--- plan
--- ---------------------------------------------------------------------------
-
--- | The five static folds the oracle reports, and — with @--raw@ — the program
--- as "Agentic.Builder" prints it.
+-- __One truth, two renderings.__ @plan@'s prose, @cost@'s prose and both
+-- @--json@ objects read their numbers here and nowhere else, so the arrangement
+-- in which the object and the paragraph disagree about a program's price does
+-- not exist. It is a record and not a class of separate helpers because that is
+-- what makes the sharing checkable: a field a rendering forgets is a field the
+-- other still has, and a number derived twice would have to be written twice
+-- here to differ.
 --
--- Every line here is decided by the elaborated term alone. In particular
--- @askNodes@ counts the ask nodes /written/, which is not what any run will
--- put: a branch is not taken and a loop is unrolled, so the number to compare a
--- run's bill against is the cost fold below and not this one.
-planCmd :: Text -> Bool -> Program -> [Given] -> IO ()
-planCmd name raw prog gs = do
-  say $ name <> ", as elaborated:"
-  say ""
-  mapM_ (say . inputsLine) gs
-  say $ "  level     " <> levelName (level p)
-  say $ "  size      " <> tshow (size p)
-  say $ "  askNodes  " <> tshow (askNodes p)
-  say $ "  codes     " <> renderCodes
-  say $ "  cost      " <> renderSummary (costSummary p)
-  if raw
-    then do
-      say ""
-      -- The note stands immediately above the program, because a program
-      -- printed with an empty subject is a different text from the one that
-      -- will run and the operator must not have to infer that.
-      mapM_ say (emptyNote gs)
-      say "  the program, as the builder prints it:"
-      say ""
-      say (indentBy 2 (prettyJson 0 (printedValue prog)))
-    else say "  (--raw prints the program itself)"
-  where
-    p = progPlan prog
+-- __No field is strict, deliberately.__ The human @list@ prints two of them per
+-- row, and a strict record would price seventy-one programs to print
+-- seventy-one lines; @run@ takes a 'Facts' it never looks at at all
+-- ('withExample'). Laziness is what lets the one record serve every verb
+-- without any of them paying for the fields it does not say.
+data Facts = Facts
+  { factName :: Text,
+    -- | 'rowDoc' — the row's one line
+    factBlurb :: Text,
+    factLevel :: Text,
+    factSize :: Integer,
+    factAskNodes :: Integer,
+    -- | @(minFold, maxFold, paths)@, as 'renderSummary' prints it
+    factSummary :: (Maybe Integer, Maybe Integer, Integer),
+    -- | 'Nothing' when the program branches, so no one sequence of answer kinds
+    factCodes :: Maybe [Text],
+    -- | the cost fold as runs — @(consultations, how many paths pay it)@
+    factFold :: [(Integer, Int)],
+    -- | 'operatorInputs'
+    factInputs :: [Text],
+    -- | 'runFactInputs'
+    factRunFacts :: [Text]
+  }
 
-    -- @null@ and @[]@ are different answers: no single sequence of answer kinds
-    -- exists (the program branches), against a program that asks nothing.
-    renderCodes = case codes p of
-      Nothing -> "(none — the program branches, so no one sequence of answer kinds)"
-      Just [] -> "[] (nothing is asked)"
-      Just cs -> T.intercalate ", " (map codeName cs)
-
--- ---------------------------------------------------------------------------
--- cost
--- ---------------------------------------------------------------------------
-
--- | The cost summary, and the fold it is a summary of.
+-- | The facts of one row, at the program its inputs built.
 --
--- @costSummary@ is @(minFold, maxFold, paths)@ over @costM@'s bag of bills:
--- one element per path through the program, each the number of consultations
--- that path pays for. The two bounds are what a run can be held against — a run
--- whose @billFresh@ falls outside them is a run of a different program — and
--- when they coincide the program has one price rather than a range.
---
--- The bag is sorted before it is printed, because a multiset has no order of
--- its own to report; @Explain.leafBills@ sorts the same one for the same
--- reason.
-costCmd :: Text -> Program -> [Given] -> IO ()
-costCmd name prog gs = do
-  say $ name <> ", priced:"
-  say ""
-  mapM_ (say . inputsLine) gs
-  say $ "  costSummary   " <> renderSummary (costSummary p)
-  say ""
-  case (mn, mx) of
-    (Just lo, Just hi)
-      | lo == hi ->
-          say $
-            "  every path consults "
-              <> tshow lo
-              <> " times, so this program has one price and not a range."
-      | otherwise -> do
-          say $ "  no path through this program consults fewer than " <> tshow lo <> " addressees,"
-          say $ "  and none consults more than " <> tshow hi <> "."
-    _ -> say "  the program has no paths, which is a program that cannot be run."
-  say ""
-  say $ "  the fold, path by path (" <> tshow paths <> " in all):"
-  say $ "    " <> T.intercalate ", " (map renderRun (runLengths (sort leaves)))
+-- The program is the caller's because it is the caller who knows which one:
+-- @plan review-lite --input ./commit.diff@ is answering about the program that
+-- diff builds, and 'listFacts' about the one an empty value builds. Both are
+-- 'buildProgram''s work, and this reads the folds off whichever it is given.
+factsOf :: Text -> Row -> Program -> Facts
+factsOf n row prog =
+  Facts
+    { factName = n,
+      factBlurb = rowDoc row,
+      factLevel = levelName (level p),
+      factSize = size p,
+      factAskNodes = askNodes p,
+      factSummary = costSummary p,
+      factCodes = map codeName <$> codes p,
+      -- Sorted before it is grouped, because a multiset has no order of its own
+      -- to report; @Explain.leafBills@ sorts the same one for the same reason.
+      factFold = runLengths (sort (costM p)),
+      factInputs = operatorInputs (rowExample row),
+      factRunFacts = runFactInputs (rowExample row)
+    }
   where
     p = progPlan prog
-    (mn, mx, paths) = costSummary p
-    leaves = costM p
 
-    renderRun (n, k)
-      | k == (1 :: Int) = tshow n
-      | otherwise = tshow n <> " (×" <> tshow k <> ")"
+-- | The facts of a row nobody gave anything: the numbers of the program an
+-- empty value builds, which is exactly what @plan@ and @cost@ answer with when
+-- no @--input@ was passed.
+--
+-- __That is a real qualification and not a formality__ ('inputsLine' has the
+-- long version): an input reaches prompts as literal chunks no fold reads, but
+-- 'Agentic.Workflow.supply' builds the program /after/ the inputs are known, so
+-- an author may branch on one — and then a listing's numbers are the numbers of
+-- the program the empty value built. The 'Left' is 'supply''s own words and
+-- cannot arise from here, one text per declared name being what it asks for.
+listFacts :: Text -> Row -> Either Text Facts
+listFacts n row = factsOf n row <$> buildProgram ex (unboundInputs ex)
+  where
+    ex = rowExample row
 
 -- | A sorted list as its runs, so nine paths that cost five things do not print
 -- as nine fives.
@@ -904,6 +982,182 @@ renderSummary (mn, mx, paths) =
     <> (if paths == 1 then " path" else " paths")
   where
     bound = maybe "—" tshow
+
+-- | The fields every @--json@ object carries.
+--
+-- __These key names are an interface.__ The owner's Emacs interface reads them;
+-- renaming one, dropping one or changing what it holds is a breaking change,
+-- and adding one is not. @minFold@ and @maxFold@ are @null@ exactly when the
+-- program has no path — the bound that does not exist is absent rather than
+-- zero, which would be a claim about a program that consults nothing.
+--
+-- The /order/ the keys come out in is the encoder's and is not part of it: a
+-- JSON object is unordered, and a reader that depended on the order would be
+-- depending on @aeson@'s key map. The one order that is promised is @inputs@',
+-- which is declaration order, because that is the order an interface should ask
+-- for them in.
+factFields :: Facts -> [Pair]
+factFields f =
+  [ "name" .= factName f,
+    "blurb" .= factBlurb f,
+    "level" .= factLevel f,
+    "size" .= factSize f,
+    "askNodes" .= factAskNodes f,
+    "minFold" .= mn,
+    "maxFold" .= mx,
+    "paths" .= paths,
+    "inputs" .= factInputs f,
+    "runFacts" .= factRunFacts f
+  ]
+  where
+    (mn, mx, paths) = factSummary f
+
+-- | The two @plan@ adds: the codes when the program is a straight line, and the
+-- per-path fold @cost@ prints as a row of runs.
+--
+-- A run becomes @{"consults":n,"paths":k}@ rather than a pair, because a
+-- two-element array is a shape a reader has to be told how to read and a
+-- named field is one they can. They are @plan@'s and not @list@'s for the
+-- reason the prose splits the same way: a listing is a table of what there is,
+-- and these are detail about one program.
+planFields :: Facts -> [Pair]
+planFields f =
+  factFields f
+    <> [ "codes" .= factCodes f,
+         "fold" .= [object ["consults" .= n, "paths" .= k] | (n, k) <- factFold f]
+       ]
+
+-- ---------------------------------------------------------------------------
+-- list
+-- ---------------------------------------------------------------------------
+
+-- | The registry, as the operator reads it: one row per name, with its line —
+-- or, under @--json@, as a program reads it: an array of 'factFields' objects,
+-- in listing order.
+--
+-- It falls out of making the registry a value and is worth having on both
+-- binaries: a table nobody can print is a table that goes stale, and the
+-- toolbox is a table whose whole point is being browsed. @--json@ is that same
+-- argument for a browser that is not a person — the owner's Emacs interface
+-- offers a workflow and then a field per element of @inputs@ — and it prints
+-- more per row than the prose because a chooser wants the price beside the
+-- name, where a person reading a screenful wants the line that says what it is
+-- for.
+--
+-- Each row is priced at the program its inputs' empty values build
+-- ('listFacts'), and one that cannot be built stops the listing rather than
+-- being skipped: a listing missing a row is a listing nobody can act on, and
+-- this is 'Agentic.Workflow.supply' failing at a call that gives it one text
+-- per declared name, which is a bug and not a workflow's business.
+listCmd :: Registry -> Render -> IO ()
+listCmd reg = \case
+  Human -> do
+    say $ regBinary reg <> " — " <> tshow (length rows) <> " registered:"
+    say ""
+    mapM_ line rows
+  Json -> case traverse (uncurry listFacts) rows of
+    Left why -> die reg 1 why
+    Right fs -> sayJson (toJSON [object (factFields f) | f <- fs])
+  where
+    rows = regRows reg
+    width = maximum (1 : map (T.length . fst) rows)
+    line (n, row) = say $ "  " <> T.justifyLeft width ' ' n <> "  " <> rowDoc row
+
+-- ---------------------------------------------------------------------------
+-- plan
+-- ---------------------------------------------------------------------------
+
+-- | The five static folds the oracle reports, and — with @--raw@ — the program
+-- as "Agentic.Builder" prints it.
+--
+-- Every line here is decided by the elaborated term alone. In particular
+-- @askNodes@ counts the ask nodes /written/, which is not what any run will
+-- put: a branch is not taken and a loop is unrolled, so the number to compare a
+-- run's bill against is the cost fold below and not this one.
+--
+-- Under @--json@ it is 'planFields', and @--raw@ still means what it means:
+-- the same 'Agentic.Observe.printedValue' the prose indents, under @program@.
+-- The @inputs@ lines have no @--json@ counterpart naming /where/ each value
+-- came from, and want none — a caller that passed the flags knows what it
+-- passed, and @inputs@ names the fields there are to pass.
+planCmd :: Render -> Bool -> Facts -> Program -> [Given] -> IO ()
+planCmd rendering raw f prog gs = case rendering of
+  Json -> sayJson (object (planFields f <> [("program", printedValue prog) | raw]))
+  Human -> do
+    say $ factName f <> ", as elaborated:"
+    say ""
+    mapM_ (say . inputsLine) gs
+    say $ "  level     " <> factLevel f
+    say $ "  size      " <> tshow (factSize f)
+    say $ "  askNodes  " <> tshow (factAskNodes f)
+    say $ "  codes     " <> renderCodes
+    say $ "  cost      " <> renderSummary (factSummary f)
+    if raw
+      then do
+        say ""
+        -- The note stands immediately above the program, because a program
+        -- printed with an empty subject is a different text from the one that
+        -- will run and the operator must not have to infer that.
+        mapM_ say (emptyNote gs)
+        say "  the program, as the builder prints it:"
+        say ""
+        say (indentBy 2 (prettyJson 0 (printedValue prog)))
+      else say "  (--raw prints the program itself)"
+  where
+    -- @null@ and @[]@ are different answers: no single sequence of answer kinds
+    -- exists (the program branches), against a program that asks nothing.
+    renderCodes = case factCodes f of
+      Nothing -> "(none — the program branches, so no one sequence of answer kinds)"
+      Just [] -> "[] (nothing is asked)"
+      Just cs -> T.intercalate ", " cs
+
+-- ---------------------------------------------------------------------------
+-- cost
+-- ---------------------------------------------------------------------------
+
+-- | The cost summary, and the fold it is a summary of.
+--
+-- @costSummary@ is @(minFold, maxFold, paths)@ over @costM@'s bag of bills:
+-- one element per path through the program, each the number of consultations
+-- that path pays for. The two bounds are what a run can be held against — a run
+-- whose @billFresh@ falls outside them is a run of a different program — and
+-- when they coincide the program has one price rather than a range.
+--
+-- The bag is sorted before it is grouped ('factsOf'), because a multiset has no
+-- order of its own to report; @Explain.leafBills@ sorts the same one for the
+-- same reason.
+--
+-- __It takes no @--json@__, and that is not an omission: @plan --json@ carries
+-- both of the things this prints — @minFold@\/@maxFold@\/@paths@ and the same
+-- @fold@ — so a second object saying a subset of the first would be a second
+-- contract to keep honest for nothing.
+costCmd :: Facts -> [Given] -> IO ()
+costCmd f gs = do
+  say $ factName f <> ", priced:"
+  say ""
+  mapM_ (say . inputsLine) gs
+  say $ "  costSummary   " <> renderSummary (factSummary f)
+  say ""
+  case (mn, mx) of
+    (Just lo, Just hi)
+      | lo == hi ->
+          say $
+            "  every path consults "
+              <> tshow lo
+              <> " times, so this program has one price and not a range."
+      | otherwise -> do
+          say $ "  no path through this program consults fewer than " <> tshow lo <> " addressees,"
+          say $ "  and none consults more than " <> tshow hi <> "."
+    _ -> say "  the program has no paths, which is a program that cannot be run."
+  say ""
+  say $ "  the fold, path by path (" <> tshow paths <> " in all):"
+  say $ "    " <> T.intercalate ", " (map renderRun (factFold f))
+  where
+    (mn, mx, paths) = factSummary f
+
+    renderRun (n, k)
+      | k == (1 :: Int) = tshow n
+      | otherwise = tshow n <> " (×" <> tshow k <> ")"
 
 -- ---------------------------------------------------------------------------
 -- run
@@ -1360,12 +1614,13 @@ freshScratch reg = do
 parseCommand :: Registry -> [Text] -> Either Text Command
 parseCommand reg = \case
   [] -> Left (usage reg)
-  ["list"] -> Right List
-  ("list" : _) -> Left ("list takes nothing else\n\n" <> usage reg)
+  ["list"] -> Right (List Human)
+  ["list", "--json"] -> Right (List Json)
+  ("list" : _) -> Left ("list takes nothing but --json\n\n" <> usage reg)
   [verb]
     | verb `elem` verbs ->
         Left (verb <> " needs " <> article <> ": " <> T.intercalate " or " (regNames reg))
-  ("plan" : name : rest) -> planOpts name False False [] rest
+  ("plan" : name : rest) -> planOpts name Human False False [] rest
   ("cost" : name : rest) -> costOpts name [] rest
   ("run" : name : rest) -> (\(t, p, ins) -> Run name t p ins) <$> parseTarget reg rest
   (verb : _) -> Left ("no verb '" <> verb <> "'\n\n" <> usage reg)
@@ -1376,16 +1631,20 @@ parseCommand reg = \case
       | T.any (`elem` ("aeiou" :: String)) (T.take 1 (regNoun reg)) = "an " <> regNoun reg
       | otherwise = "a " <> regNoun reg
 
-    -- Two independent flags, so they are folded rather than enumerated: the
-    -- pair spelled in the other order is the same request.
-    planOpts :: Text -> Bool -> Bool -> [InputFlag] -> [Text] -> Either Text Command
-    planOpts name raw pinned ins args = case args of
-      [] -> Right (Plan name raw pinned ins)
-      ("--raw" : more) -> planOpts name True pinned ins more
-      ("--require-pinned" : more) -> planOpts name raw True ins more
+    -- Three independent flags, so they are folded rather than enumerated: the
+    -- same three spelled in any other order are the same request. In particular
+    -- `--raw --json` is a request for both and gets both, the printed program
+    -- arriving under `program` — the flag says which program to print and
+    -- `--json` says who is reading, and neither answers the other's question.
+    planOpts :: Text -> Render -> Bool -> Bool -> [InputFlag] -> [Text] -> Either Text Command
+    planOpts name rendering raw pinned ins args = case args of
+      [] -> Right (Plan name rendering raw pinned ins)
+      ("--raw" : more) -> planOpts name rendering True pinned ins more
+      ("--require-pinned" : more) -> planOpts name rendering raw True ins more
+      ("--json" : more) -> planOpts name Json raw pinned ins more
       _
         | Just taken <- takeInput args ->
-            taken >>= \(f, more) -> planOpts name raw pinned (ins <> [f]) more
+            taken >>= \(f, more) -> planOpts name rendering raw pinned (ins <> [f]) more
       (flag : _) ->
         Left
           ( "no option '"
@@ -1393,7 +1652,7 @@ parseCommand reg = \case
               <> "' for plan, which takes "
               <> article
               <> " and, at most, --raw, "
-              <> "--require-pinned and the input flags\n\n"
+              <> "--require-pinned, --json and the input flags\n\n"
               <> usage reg
           )
 
@@ -1495,6 +1754,15 @@ parseTarget reg args = do
       ("--adapter-arg" : v : rest) -> go o {roAdapterArgs = roAdapterArgs o <> [v]} rest
       ("--route" : v : rest) -> go o {roRoutes = roRoutes o <> [v]} rest
       ("--scratch" : v : rest) -> go o {roScratch = Just v} rest
+      -- Refused by name rather than by the fallthrough below, because the
+      -- operator asking for it is asking a coherent question with a real
+      -- answer: a run's machine-readable record is the trace it prints as it
+      -- happens — every question, every answer, both bills — and a summary
+      -- object would be this runner inventing one.
+      ("--json" : _) ->
+        Left
+          "run takes no --json: a run's record is the trace it prints as it happens, \
+          \and there is no summary of one this runner would not be inventing"
       ("--poll" : v : rest) -> withMs "--poll" v (\n -> go o {roPollMs = Just n} rest)
       ("--timeout" : v : rest) -> withMs "--timeout" v (\n -> go o {roTimeoutMs = Just n} rest)
       (flag : _) -> Left ("no option '" <> flag <> "' for run\n\n" <> usage reg)
@@ -1615,8 +1883,8 @@ usage reg =
     "\n"
     [ bin <> " — " <> regBanner reg,
       "",
-      "  " <> bin <> " list",
-      "  " <> bin <> " plan <" <> noun <> "> [--raw] [--require-pinned] [<input>...]",
+      "  " <> bin <> " list [--json]",
+      "  " <> bin <> " plan <" <> noun <> "> [--raw] [--require-pinned] [--json] [<input>...]",
       "  " <> bin <> " cost <" <> noun <> "> [<input>...]",
       "  " <> bin <> " run  <" <> noun <> "> --scripted [<input>...]",
       runLead <> "--session <id> [--binary PATH] [--poll MS]",
@@ -1651,6 +1919,13 @@ usage reg =
       "                 not UTF-8 refuse the run — and one trailing newline is",
       "                 stripped, so a file splices like a define written in",
       "                 the source)",
+      "  --json         print one object per row (list) or one object (plan)",
+      "                 instead of the prose, for a program that drives this CLI.",
+      "                 The key names are an interface and are documented in the",
+      "                 Agentic.Cli haddock; `inputs` names exactly the inputs a",
+      "                 command line may give. cost takes none (plan --json has",
+      "                 both of its numbers) and neither does run (its record is",
+      "                 the trace). With --raw, plan --json adds the program",
       "  --scripted     answer from a table of canned replies, and ask nobody",
       "  --engine       acp starts an ACP adapter of its own and speaks the protocol",
       "                 to it over a pipe it owns; deck sends to a live agent-deck",
@@ -1703,6 +1978,22 @@ usage reg =
 
 say :: Text -> IO ()
 say = TIO.putStrLn
+
+-- | One JSON document, on one line, and nothing else on the stream.
+--
+-- __Encoded by @aeson@ and not by 'prettyJson'__, which is this module's other
+-- renderer of a 'Value' and is the wrong one here: it is a /human/ rendering,
+-- indented for reading beside a plan, and its string escape is
+-- "Agentic.Observe"'s, which spells a character outside the basic plane as a
+-- single five-digit @\\u@ escape no JSON parser will read back. A blurb is
+-- prose and prose acquires an emoji eventually. The contract is that this
+-- parses, so the encoder is the one that guarantees it.
+--
+-- Decoded back to 'Text' rather than written as bytes so that every line this
+-- executable prints goes out through 'say' and one handle configuration;
+-- 'encode' emits UTF-8, so the lenient decode never substitutes anything.
+sayJson :: Value -> IO ()
+sayJson = say . decodeUtf8Lenient . BL.toStrict . encode
 
 -- | Print the message on stderr and stop with this code.
 die :: Registry -> Int -> Text -> IO a
