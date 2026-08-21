@@ -58,6 +58,28 @@ want_sends() {
 want_line() {
   grep -qF -- "$1" "$out" || bad "no line containing '$1'; output was:$(printf '\n  %s' "$(cat "$out")")"
 }
+# The two-pane assertions (scenario 8). A pane's transcript is the witness from
+# *outside* the process: the shim gives each session its own state directory, so
+# `prompts` is exactly what that pane was sent and nothing else.
+saw() {
+  grep -qF -- "$2" "$state/$1/prompts" \
+    || bad "pane $1 was never sent '$2'"
+}
+saw_not() {
+  grep -qF -- "$2" "$state/$1/prompts" \
+    && bad "pane $1 was sent '$2', which belongs to the other pane"
+}
+# The counts must partition: neither pane idle, and the two summing to the run's
+# own bill, so a question cannot have been dropped or sent twice.
+want_sends_split() {
+  local a b total
+  a=$( [ -f "$state/$1/sends" ] && cat "$state/$1/sends" || echo 0 )
+  b=$( [ -f "$state/$2/sends" ] && cat "$state/$2/sends" || echo 0 )
+  total=$((a + b))
+  [ "$a" = "$4" ] || bad "pane $1 was sent $a messages, wanted $4"
+  [ "$b" = "$5" ] || bad "pane $2 was sent $b messages, wanted $5"
+  [ "$total" = "$3" ] || bad "the two panes were sent $total messages between them, wanted $3"
+}
 
 # ---------------------------------------------------------------------------
 # 1. The flagship settles.
@@ -178,10 +200,106 @@ want_sends 0
 note "missing: named as a transport failure, exit 2"
 
 # ---------------------------------------------------------------------------
+# 8. One program, two panes: the routed pin answered in one and everything else
+#    in the other.
+#
+# THE two-pane scenario, and the deck twin of `ci/acp.sh`'s scenario 13. The
+# claim under test is a transport claim — one run, two live deck sessions, each
+# question answered in the pane its pin names — so it belongs here, where the
+# deck engine, the stub and the seven scenarios above already live. It is also
+# the executable half of `run.routes`: the fact carries this run's table to the
+# prompts, and what makes the fact worth carrying is that the table is *true*.
+#
+# The fixture needs one thing the stub was not written for. `test/stub-deck.sh`
+# keys `reply`, `seq`, `sends` and `prompts` off `DECK_STUB_STATE` alone and uses
+# the session id only as an echoed JSON field, so two `deck:` routes would share
+# one reply and answer each other's questions. The stub is *not* edited for this:
+# a shim installed as `agent-deck` derives the state directory from the session
+# id — which is `$3` in every command the stub implements — and execs it. Two
+# instances of one fixture, one per pane, and the seven scenarios above are
+# untouched by construction because none of them installs the shim.
+#
+# `harden` needs no new fixture either: it pins exactly one model (`author served
+# by "deep"`) and leaves the three reviewers deliberately unpinned, so the `Just`
+# and `Nothing` cases of the resolution rule are both in one program — which is
+# why `ci/acp.sh` routes `deep` too.
+#
+# Under `happy` all three reviewers approve, so the revision settles in its first
+# round and the amendment — the second `served by "deep"` — is never put. One
+# question is the pin's, six are not, and 1 + 6 is scenario 1's own 7.
+# ---------------------------------------------------------------------------
+scenario=two-panes
+state="$work/$scenario"
+mkdir -p "$state/bin"
+cp test/stub-deck.sh "$state/stub-deck.sh"
+chmod +x "$state/stub-deck.sh"
+cat > "$state/bin/agent-deck" <<EOF
+#!/bin/sh
+# \$3 is the session id in every command this stub implements, so each pane gets
+# a state directory — a reply, a stamp, a send count and a transcript — of its
+# own, which is the whole of what two panes need that one did not.
+DECK_STUB_STATE="$state/\$3" exec "$state/stub-deck.sh" "\$@"
+EOF
+chmod +x "$state/bin/agent-deck"
+
+out="$state/out"
+DECK_STUB_MODE=happy PATH="$state/bin:$PATH" \
+  nix develop -c cabal run -v0 agentic-run -- \
+    run harden --session pane-a --route 'deep=deck:pane-b' --poll 20 --timeout 30000 \
+    > "$out" 2>&1
+code=$?
+
+want_code 0
+# Routing changes no bill: no field of an `EventKey` names a backend, so the
+# numbers are scenario 1's exactly.
+want_line "billFresh   7"
+want_line "billMemo    7"
+
+# The header, before the first question — and these two lines are `run.routes`'
+# two lines, from the same `routeDefault`-then-`routeNamed` walk of the same
+# table. `agentic-run`'s own rows declare no run fact, so the fact's text is not
+# observable from a transport gate; what is observable is the table it is
+# derived from, and `ci/policies.sh` holds `routesFact` at this very table
+# against the bytes `(default) = deck:pane-a` / `deep = deck:pane-b`.
+want_line "running harden against 2 backends:"
+want_line "(default)  agent-deck session pane-a"
+grep -qE '^  deep +agent-deck session pane-b$' "$out" \
+  || bad "the header did not put deep on its own line with its own pane"
+
+# The first witness: the run's own narration, which names the addressee and the
+# code of every consultation it paid for. It says the questions were put; it does
+# not say where, because no field of a question names a backend.
+want_line "text -> model author: Draft a patch satisfying:"
+want_line "text -> tool cat: Write out the house style guide"
+
+# The second, and the one that is the gate: each pane's own transcript. The
+# routed pin's question is in the routed pane and in no other, and everything
+# with no axis to route by — the tool, the reviewers, the person, the act — is in
+# the default's. The two negative pairs are what a run that sent both questions
+# to both panes would fail.
+saw     pane-b 'question for model author'
+saw     pane-b 'model: deep'
+saw_not pane-a 'question for model author'
+saw_not pane-a 'model: deep'
+
+saw     pane-a 'question for tool cat'
+saw     pane-a 'question for model reviewer-correct'
+saw     pane-a 'question for person owner'
+saw_not pane-b 'question for tool cat'
+saw_not pane-b 'question for model reviewer-correct'
+saw_not pane-b 'question for person owner'
+
+# Neither pane idle, and the two summing to the run's own bill: 1 for the pin,
+# 6 for everything else. The amendment is the second `served by "deep"` and is
+# never put, because `happy` settles the revision in its first round.
+want_sends_split pane-a pane-b 7 6 1
+note "two-panes: one run, two sessions, the pin in its own pane, 6+1 of 7, exit 0"
+
+# ---------------------------------------------------------------------------
 
 scenario=summary
 if [ "$failures" = 0 ]; then
-  echo "ci/deck: 7 scenarios passed, 0 failed"
+  echo "ci/deck: 8 scenarios passed, 0 failed"
 else
   echo "ci/deck: $failures scenario assertion(s) failed" >&2
 fi

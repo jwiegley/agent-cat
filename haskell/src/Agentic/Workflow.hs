@@ -163,9 +163,10 @@
 -- program with inputs is an ordinary Haskell function of them and nothing
 -- type-level is needed: a define never enters a scope and cannot collide with
 -- a binding. See 'Parameterized' for why @main@'s parameters are not the
--- mechanism. Three input names are the __runner's__ to bind rather than the
--- command line's — what the run reached, under which engine, and the line it
--- generated for itself — and they are inputs like any other: see 'runFacts'.
+-- mechanism. Four input names are the __runner's__ to bind rather than the
+-- command line's — what the run reached, under which engine, which pin reached
+-- which of them, and the line it generated for itself — and they are inputs
+-- like any other: see 'runFacts'.
 --
 -- == Two branches, two mechanisms
 --
@@ -287,12 +288,15 @@ module Agentic.Workflow
     runFacts,
     runFactBackends,
     runFactEngine,
+    runFactRoutes,
     runFactSentinel,
     reservedInput,
     runFactRefusal,
     sessionPolicy,
     oneSessionPhrase,
     sharesOneSession,
+    routeDefaultLabel,
+    routedBackend,
 
     -- * The chain both lists are written with
     Chain,
@@ -2014,7 +2018,7 @@ data In = In !Text
 -- @input "request" :> input "base" :> noInputs@.
 --
 -- A name under the @run.@ prefix is a __run fact__ and is not the command
--- line's to bind: see 'runFacts'. One that is not one of the three is refused
+-- line's to bind: see 'runFacts'. One that is not one of the four is refused
 -- here, on a CAF, exactly as 'reserved' refuses a generated binding name — a
 -- program declaring @input \"run.whatever\"@ would otherwise elaborate fine and
 -- then refuse every @run@ of itself, because the runner has no such fact to
@@ -2055,6 +2059,17 @@ reservedInput = T.isPrefixOf "run."
 --     session per question, or one session for the whole run. This is the fact
 --     that decides whether two answers were reached independently, and it is
 --     the runner's to state.
+--   * @run.routes@ — the run's route table as the runner resolved it, one line
+--     per answerer: the label, @\" = \"@, and the backend's own spelling, with
+--     'routeDefaultLabel' first. @run.backends@ is the /roster/, deduplicated
+--     and nameless; this is the /mapping/, and no arithmetic over the roster
+--     can answer which pin reaches which answerer. Nor can it be derived from
+--     @run.engine@, or the other way about: __@run.routes@ says where a
+--     question goes and @run.engine@ says whether going there means sharing__ —
+--     two pins routed to one @acp:@ adapter share a process and not a
+--     conversation. A gate that must know its evaluator is somewhere its
+--     workers are not needs both facts, and 'routedBackend' is how it reads
+--     this one.
 --   * @run.sentinel@ — a line this run generated for itself and put in no other
 --     place than the prompts that hole it. An independence probe that asserts
 --     such a line without one having been generated asserts nothing; this is
@@ -2063,9 +2078,11 @@ reservedInput = T.isPrefixOf "run."
 -- __Why a closed set.__ An open one would be a configuration language: every
 -- program would declare its own facts, the runner would grow a flag per fact,
 -- and a prompt could come to depend on something the runner learns only
--- halfway through a run. These three are known before the first question is
+-- halfway through a run. These four are known before the first question is
 -- put — they are properties of the command line and of the clock — which is
 -- what lets them be /inputs/, bound once, at the moment the program is built.
+-- The set is one larger than it was and the argument is unchanged, which is the
+-- membership test a fifth will have to pass against a longer list.
 --
 -- __A run fact a program only holes moves no fold.__ An input reaches the term
 -- only as literal chunks inside prompts ('Agentic.Plan.level',
@@ -2084,7 +2101,7 @@ reservedInput = T.isPrefixOf "run."
 -- would take, which is the shape that keeps every check the fact was going to
 -- gate.
 runFacts :: [Text]
-runFacts = [runFactBackends, runFactEngine, runFactSentinel]
+runFacts = [runFactBackends, runFactEngine, runFactRoutes, runFactSentinel]
 
 -- | @run.backends@ — the roster line, in the words the header prints.
 runFactBackends :: Text
@@ -2093,6 +2110,10 @@ runFactBackends = "run.backends"
 -- | @run.engine@ — the engine and its session policy.
 runFactEngine :: Text
 runFactEngine = "run.engine"
+
+-- | @run.routes@ — the route table, in the words the header prints.
+runFactRoutes :: Text
+runFactRoutes = "run.routes"
 
 -- | @run.sentinel@ — the line this run generated for itself.
 runFactSentinel :: Text
@@ -2127,6 +2148,17 @@ sessionPolicy freshPerQuestion
 oneSessionPhrase :: Text
 oneSessionPhrase = "one session for the run"
 
+-- | The label the answerer every unclaimed question takes goes under, in
+-- @run.routes@ and in the run's own header.
+--
+-- Named for 'oneSessionPhrase''s reason — it is matched as well as printed, by
+-- 'routedBackend' — and __parenthesised__ because a route @NAME@ is a serving
+-- model and a bare @default@ could in principle be one. No @--route@ the CLI
+-- accepts can produce this line for a program that does not pin a model
+-- literally called @(default)@, and it reads as a label rather than as a name.
+routeDefaultLabel :: Text
+routeDefaultLabel = "(default)"
+
 -- | __Does this @run.engine@ value say that some answerer shares one
 -- conversation with the rest of the run?__
 --
@@ -2149,6 +2181,44 @@ oneSessionPhrase = "one session for the run"
 -- @cost@ prints the shape a run with an unknown engine would take.
 sharesOneSession :: Text -> Bool
 sharesOneSession = T.isInfixOf oneSessionPhrase
+
+-- | __The backend a pin reaches__, from a @run.routes@ value: the line that
+-- names it, else the default line, else the empty text when the table is empty.
+--
+-- The fact's one machine-readable question, and it is here for
+-- 'sessionPolicy''s reason — __three readers, one spelling__. The runner that
+-- prints the fact (@Agentic.Cli.routesFact@), the header that announces the
+-- same table (@Agentic.Cli.sayBackends@) and the program that gates on it are
+-- reading one sentence; a workflow that wrote its own line-splitter would be a
+-- gate that stopped agreeing with the header the moment the separator was
+-- reworded.
+--
+-- __The separator is the first @=@__, both halves trimmed, which is
+-- @Agentic.Route.parseRoute@'s own rule and for its reason: a backend value may
+-- contain an @=@ (a path) and a label never does.
+--
+-- __The empty answer is honest and is not a failure.__ @plan@, @cost@ and
+-- @--scripted@ have no table at all, and a gate over an unbound fact must
+-- decide the shape a run with an unknown table would take — which is the shape
+-- that keeps every check the fact was going to gate, exactly as
+-- 'sharesOneSession' reads an unbound engine as 'False'.
+--
+-- __Falling through to the default is the whole point of the default__, and it
+-- is why the fact carries that line even on a run with no @--route@ at all: a
+-- pin no route claims is answered by the default answerer, so a gate asking
+-- where two pins land must be told, and told in one place, that both landed
+-- there.
+routedBackend :: Text -> Text -> Text
+routedBackend table name = case lookup name rows of
+  Just b -> b
+  Nothing -> fromMaybe "" (lookup routeDefaultLabel rows)
+  where
+    rows =
+      [ (T.strip l, T.strip (T.drop 1 r))
+      | ln <- T.lines table,
+        let (l, r) = T.breakOn "=" ln,
+        not (T.null r)
+      ]
 
 -- | The refusal an operator gets for naming a run fact on the command line,
 -- and 'Nothing' for every name that is theirs to give.

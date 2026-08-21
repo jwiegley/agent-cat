@@ -443,24 +443,43 @@ and under `--raw` a note stands immediately above the printed program, because
 a program printed with an empty subject is a different text from the one that
 will run.
 
-**Three input names are the runner's and not the command line's.** An input
+**Four input names are the runner's and not the command line's.** An input
 under the `run.` prefix is a *run fact* — `run.backends`, `run.engine`,
-`run.sentinel` (`Agentic.Workflow.runFacts`) — and `run` binds every one of them
-from the run it is making: how many answerers this run reaches and which,
-whether each question gets a session of its own or they all share one, and a
-line generated for this run and put in no other place than the prompts that hole
-it. So `run` still requires every input, but two parties supply them, and the
-one that supplies these three is not you: `--input-arg run.engine=acp` is
-refused, naming who binds it rather than sending you looking for a typo, because
-a command line cannot say what a run did. Nothing else changes — a run fact
-arrives at `Given` by the same door as any other input, prints on the same
-`inputs` line, and is spliced as the same literal chunks — so every count and
-every list an operator is shown names only their own inputs, and a program
-declaring `subject` and `run.engine` takes *one* input as far as `--input FILE`
-is concerned. Declaring a `run.` name that is not one of the three is the
-author's mistake and is refused on a CAF, since the runner would have no such
-fact to bind. `plan` and `cost` make no run, so they leave all three unbound
-at `""` like any other absent input.
+`run.routes`, `run.sentinel` (`Agentic.Workflow.runFacts`) — and `run` binds
+every one of them from the run it is making: how many answerers this run reaches
+and which, whether each question gets a session of its own or they all share
+one, which pin reaches which answerer, and a line generated for this run and put
+in no other place than the prompts that hole it. So `run` still requires every
+input, but two parties supply them, and the one that supplies these four is not
+you: `--input-arg run.engine=acp` is refused, naming who binds it rather than
+sending you looking for a typo, because a command line cannot say what a run
+did. Nothing else changes — a run fact arrives at `Given` by the same door as
+any other input, prints on the same `inputs` line, and is spliced as the same
+literal chunks — so every count and every list an operator is shown names only
+their own inputs, and a program declaring `subject` and `run.engine` takes *one*
+input as far as `--input FILE` is concerned. Declaring a `run.` name that is not
+one of the four is the author's mistake and is refused on a CAF, since the
+runner would have no such fact to bind. `plan` and `cost` make no run, so they
+leave all four unbound at `""` like any other absent input.
+
+`run.routes` is the roster's counterpart and neither derives the other:
+`run.backends` is deduplicated and nameless, so no arithmetic over it says
+*which pin reaches which*, and `run.engine` says whether going somewhere means
+sharing a conversation but never where anything went. One line per answerer,
+the default first under the label `(default)`, each right-hand side in the
+grammar's own spelling, and empty exactly when there is no table at all:
+
+```
+(default) = deck:0f3a91c2-codex
+partner = deck:7b2e40aa-claude
+```
+
+The default line is there on every live run, `--route` or no `--route`, and that
+is deliberate: it is the one line that tells a run whose every question falls to
+one session apart from a run where one pin was routed away. A program reads the
+fact with `Agentic.Workflow.routedBackend`, which is the header's own spelling
+read back — three readers, one sentence, exactly as `run.engine` and
+`sharesOneSession` are.
 
 ## Running a workflow
 
@@ -490,7 +509,7 @@ All three verbs also take the input flags — `--input FILE`, `--input-file
 NAME=FILE`, `--input-arg NAME=VALUE` — for a program that takes inputs, because
 `plan --raw` prints prompts and an operator pricing a run wants to price the
 run they will make. A program that takes none refuses them by name, and so does
-a flag naming one of the three run facts — those are `run`'s to bind, and the
+a flag naming one of the four run facts — those are `run`'s to bind, and the
 refusal says so.
 
 `<example>` is `harden` or `hello`: the two walked programs, written in
@@ -721,9 +740,10 @@ ci/deck: objects: 13 ask nodes, 6 questions put, exit 0
 ci/deck: undecodable: re-asked once, then abandoned, exit 3
 ci/deck: stopped: named as a transport failure, exit 2
 ci/deck: hang: bounded by the turn budget, exit 2
-ci/deck: stale: the previous turn's text was refused, exit 2
+ci/deck: stale: the previous turn's text was refused on the second question, exit 2
 ci/deck: missing: named as a transport failure, exit 2
-ci/deck: 7 scenarios passed, 0 failed
+ci/deck: two-panes: one run, two sessions, the pin in its own pane, 6+1 of 7, exit 0
+ci/deck: 8 scenarios passed, 0 failed
 ```
 
 The second scenario is the one worth naming. Every reviewer objects and every
@@ -733,6 +753,16 @@ session is sent **6** messages. That gap is the memo table, observed from
 outside the process — a memoized question is a message the session never
 received — and 13/6 is exactly what the pure `Agentic.World` fold gives for the
 same program at the same world.
+
+The eighth is the two-pane one, and it is what makes `run.routes` worth
+carrying. One `run harden --session pane-a --route 'deep=deck:pane-b'` against
+**two** instances of the stub — a four-line shim installed as `agent-deck`
+derives each pane's state directory from the session id, so the stub itself is
+unedited — and the assertion is a *partition*: the pinned question is in
+`pane-b`'s transcript and in no other, everything with no axis to route by is in
+`pane-a`'s, and the two send counts are 1 and 6 against the run's own bill of 7.
+The two negative greps are the gate; everything else could be true of a run that
+sent both questions to both panes.
 
 ## The CI shape
 
@@ -839,8 +869,8 @@ test/stub-deck.sh       a fake agent-deck, for testing the deck transport
 test/acp-misbehave.sh   an ACP adapter that babbles or wedges, for the two failures
                         a conforming stub cannot produce
 ci/tier0.sh             the PR gate: tier0 + tier1
-ci/deck.sh              the PR gate: the deck transport, seven scenarios
-ci/acp.sh               the PR gate: the ACP transport, twelve scenarios
+ci/deck.sh              the PR gate: the deck transport, eight scenarios
+ci/acp.sh               the PR gate: the ACP transport, sixteen scenarios
 ci/citations.sh         the PR gate: every cited Lean line still resolves
 ci/tier1.sh             the nightly gate: bisim against the prebuilt oracle
 ```

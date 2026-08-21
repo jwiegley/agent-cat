@@ -94,6 +94,9 @@
 -- thing the author ever sees.
 module Main (main) where
 
+-- The runner, for one function: `run.routes` is derived there and read in
+-- `Agentic.Workflow`, and the pair is one contract.
+import Agentic.Cli (routesFact)
 import Agentic.Exec
 import Agentic.Plan
   ( El,
@@ -113,11 +116,21 @@ import Agentic.Route
     parseBackend,
     parseRoute,
     routeBackends,
+    routeDefault,
+    routeNamed,
     routedWorld,
     routes,
   )
 import Agentic.Shell (ShellConfig (shellCwd), defaultShellConfig, executingWorld)
-import Agentic.Workflow (Words, sessionPolicy, sharesOneSession, wf, wft)
+import Agentic.Workflow
+  ( Words,
+    routeDefaultLabel,
+    routedBackend,
+    sessionPolicy,
+    sharesOneSession,
+    wf,
+    wft,
+  )
 import Agentic.World (Event (Event), Trace, World (World), billFresh, billMemo, eventJson)
 import Control.Exception (ErrorCall, SomeException, evaluate, try)
 import Data.IORef
@@ -417,6 +430,23 @@ namedRoutes = namedTable "default" [("gemini", "gemini-backend"), ("opus", "opus
 -- expression rather than one expression and an annotation.
 namedTable :: Text -> [(Text, Text)] -> Routes Text
 namedTable = routes
+
+-- | __The owner's two-pane split__ — @--session CODEX --route
+-- partner=deck:CLAUDE@ — as the tables @run.routes@ is written from.
+--
+-- At 'Backend' and not at the naming type, unlike 'namedRoutes': what the
+-- @run.routes@ group checks is the /spelling/, and the spelling is
+-- @Agentic.Route.backendSpelling@'s, which only a real backend has.
+ownersSplit, inverted, sharedPane, pathBackend :: Routes Backend
+ownersSplit = routes (BackendDeck "CODEX") [("partner", BackendDeck "CLAUDE")]
+-- The same two panes, the other flag routed: it looks like the split, and it
+-- leaves everything the program did not pin itself in the pane that is about to
+-- judge it.
+inverted = routes (BackendDeck "CLAUDE") [("worker", BackendDeck "CODEX")]
+-- Two pins on one pane, which is what a table that deduplicated would hide.
+sharedPane = routes (BackendDeck "PANE") [("partner", BackendDeck "PANE"), ("deep", BackendAcp "codex")]
+-- A backend containing the very character the fact's lines are split on.
+pathBackend = routes (BackendAcp "stub") [("deep", BackendAcp "/opt/a=b/adapter")]
 
 -- | The five shapes of question a table must place: a pin it names, a pin it
 -- does not, an unpinned model ask, and the two addressees that are not models.
@@ -768,6 +798,112 @@ main = do
       ),
       ("the two policies are different sentences", sessionPolicy True /= sessionPolicy False)
     ]
+  -- `run.routes` is the fourth run fact and it is the same *kind* of contract
+  -- the group above pins: a printed table on one side, a predicate on the other,
+  -- and the two in different repositories. `Agentic.Cli.routesFact` writes it,
+  -- `Agentic.Workflow.routedBackend` reads it, and `agent-workflows`' gate on
+  -- "is the judge somewhere the work is not" is decided from what it reads — so
+  -- a reworded separator, a dropped default line or a deduplicated table would
+  -- switch that gate off without failing anything else.
+  --
+  -- Two groups and not one, per `pureProbe`'s own rule: the spelling and the
+  -- reading are two rules, and a group whose rows were spellings of both would
+  -- report one fact where there are two.
+  --
+  -- The spelling is asserted VERBATIM, which no other fact here is, because this
+  -- one is read back by a machine as well as by an operator: it is the run's own
+  -- header table restated for the prompts, and the operator is meant to be able
+  -- to lay the three side by side — command line, header, fact.
+  pureProbe failures "run.routes is the route table in the header's own words"
+    [ ( "the owner's split, verbatim",
+        routesFact (Just ownersSplit) == "(default) = deck:CODEX\npartner = deck:CLAUDE\n"
+      ),
+      ( "the default is the first line, and is labelled rather than named",
+        take 1 (T.lines (routesFact (Just ownersSplit)))
+          == [routeDefaultLabel <> " = " <> backendSpelling (BackendDeck "CODEX")]
+      ),
+      ( "the routes follow in the order they were typed",
+        drop 1 (T.lines (routesFact (Just ownersSplit)))
+          == ["partner = " <> backendSpelling (BackendDeck "CLAUDE")]
+      ),
+      -- An unrouted live run is NOT an empty fact, and that is the whole reason
+      -- the default line exists: it is the one line that tells a run whose judge
+      -- and workers both fall to the default apart from the split where only the
+      -- judge was routed away. Omit it and the two read alike.
+      ( "an unrouted live run still has a table, and it is the default's line",
+        routesFact (Just (routes (BackendDeck "PANE") [])) == "(default) = deck:PANE\n"
+      ),
+      -- `routeBackends` deduplicates because a header that counted route lines
+      -- would overstate how many agents a run started. This is the mapping, and
+      -- two pins on one backend is precisely what a gate over it must see.
+      ( "it does not deduplicate: two pins on one pane are two lines",
+        length (T.lines (routesFact (Just sharedPane))) == 3
+      ),
+      -- The table `ci/deck.sh`'s eighth scenario runs one program against, whose
+      -- two header lines that gate asserts. The header's two lines and the
+      -- fact's two lines are one walk of one table, and they are held together
+      -- here because the transport gate can see the header while no
+      -- `agentic-run` row holes this fact for it to see.
+      ( "the two-stub scenario's table, verbatim",
+        routesFact (Just (routes (BackendDeck "pane-a") [("deep", BackendDeck "pane-b")]))
+          == "(default) = deck:pane-a\ndeep = deck:pane-b\n"
+      ),
+      -- What `plan`, `cost` and `--scripted` hole, where there is no table at
+      -- all. Empty means NO TABLE, not "no --route".
+      ("no table is the empty text", routesFact Nothing == ""),
+      ( "and a table is never empty, so the two cannot be confused",
+        not (T.null (routesFact (Just (routes (BackendAcp "stub") []))))
+      )
+    ]
+  -- The reader. The round trip is the load-bearing row: every right-hand side is
+  -- `backendSpelling`, which is documented as the printed inverse of
+  -- `parseBackend`, so a gate that reads this fact is reading the operator's own
+  -- word rather than a second rendering of it.
+  pureProbe failures "routedBackend reads a run.routes table back"
+    ( [ ( "round trip: " <> T.unpack (backendSpelling (routeDefault t)) <> "/" <> T.unpack n,
+          routedBackend (routesFact (Just t)) n == backendSpelling b
+        )
+        | t <- [ownersSplit, sharedPane, pathBackend],
+          (n, b) <- routeNamed t
+      ]
+        <> [ -- The default is reachable under its own label, which is how a gate
+             -- asks "and where does everything else go?".
+             ( "the label reads as the default",
+               routedBackend (routesFact (Just ownersSplit)) routeDefaultLabel == "deck:CODEX"
+             ),
+             -- Not an error, and the point of having a default at all: this row
+             -- is `backendFor`'s "an unrouted pin takes the default", restated
+             -- over the fact so that the program reads what the runtime does.
+             ( "a pin no route names takes the default",
+               routedBackend (routesFact (Just ownersSplit)) "worker" == "deck:CODEX"
+             ),
+             -- The pair of rows a gate exists for. Under the split the judge's
+             -- pin is somewhere the default is not; under the inversion — the
+             -- same two panes, the other flag routed — it is the default, so
+             -- everything the program did not pin itself lands in the pane that
+             -- is about to judge it. The fact distinguishes them; nothing else
+             -- the runner binds does.
+             ( "the split puts the routed pin somewhere the default is not",
+               routedBackend (routesFact (Just ownersSplit)) "partner"
+                 /= routedBackend (routesFact (Just ownersSplit)) routeDefaultLabel
+             ),
+             ( "and its inversion leaves it on the default, which is not the same run",
+               routedBackend (routesFact (Just inverted)) "partner"
+                 == routedBackend (routesFact (Just inverted)) routeDefaultLabel
+             ),
+             -- The separator is the first `=`, both halves trimmed, which is
+             -- `parseRoute`'s own rule: a backend may contain an `=` (a path)
+             -- and a label never does.
+             ( "the split is on the first =, so a path-valued backend survives",
+               routedBackend (routesFact (Just pathBackend)) "deep" == "acp:/opt/a=b/adapter"
+             ),
+             -- An unbound fact, which is what `plan` and `cost` hole. The empty
+             -- answer is the honest one: a gate over it must decide the shape a
+             -- run with an unknown table would take.
+             ("an empty table answers nothing, for every pin", routedBackend "" "partner" == ""),
+             ("and nothing under the default's label either", routedBackend "" routeDefaultLabel == "")
+           ]
+    )
   pureProbe failures "parseRoute splits NAME=BACKEND on the first ="
     [ ("deep=acp:codex", parseRoute "deep=acp:codex" == Right ("deep", BackendAcp "codex")),
       -- The first `=`, for the reason `--input-file` splits on the first `=`:

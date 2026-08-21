@@ -72,9 +72,9 @@
 -- is not yet in hand and say on the @inputs@ line that they did. @run@ requires
 -- every input.
 --
--- __Three inputs are the runner\'s and not the operator\'s__
--- ('Agentic.Workflow.runFacts'): @run.backends@, @run.engine@ and
--- @run.sentinel@ are facts about the run being made, and @run@ binds all three
+-- __Four inputs are the runner\'s and not the operator\'s__
+-- ('Agentic.Workflow.runFacts'): @run.backends@, @run.engine@, @run.routes@ and
+-- @run.sentinel@ are facts about the run being made, and @run@ binds all four
 -- from the command line it was given and from the clock. A flag naming one is
 -- refused ('resolveInputs'), because there is nothing for the operator to fix
 -- and the fact will be there; @plan@ and @cost@ leave them unbound, because
@@ -128,6 +128,7 @@
 -- > ,"paths":1                  how many paths the cost fold has
 -- > ,"inputs":["plan","base"]   the OPERATOR's inputs, in declaration order
 -- > ,"runFacts":["run.engine"]  the run facts this program declares
+-- > ,"pins":["partner","worker"]            the models --route may name, sorted
 -- > ,"codes":["text","verdict"] plan only; null when the program branches
 -- > ,"fold":[{"consults":9,"paths":1}]      plan only; the histogram cost prints
 -- > ,"program":{…}              plan --json --raw only; 'Agentic.Observe.printedValue'
@@ -136,11 +137,20 @@
 -- @inputs@ is exactly the list the @has no input named@ refusal names
 -- ('operatorInputs'), so a caller that offers a field per element offers
 -- exactly the fields @run@ will accept; the runner's facts are under
--- @runFacts@, where nothing can mistake them for something to fill in. @codes@
--- and @fold@ are @plan@'s because they are per-program detail a listing does
--- not need; @cost@ takes no @--json@ because @plan --json@ already carries both
--- of the numbers it prints. @run@ takes none either: its record is the trace it
--- prints as it happens.
+-- @runFacts@, where nothing can mistake them for something to fill in.
+--
+-- @pins@ is the other half of what a caller needs to /configure/ a run rather
+-- than only to start one: @inputs@ says what to prompt for, and @pins@ says
+-- which @--route@ names this program will accept — the one fact a front end
+-- needs in order to offer a backend per pin. It is 'pinnedModels', which is the
+-- same set 'routeRefusal' checks a @--route@ against, so a caller that offers a
+-- field per element offers exactly the routes @run@ will accept: the promise
+-- @inputs@ makes, made about routing.
+--
+-- @codes@ and @fold@ are @plan@'s because they are per-program detail a listing
+-- does not need; @cost@ takes no @--json@ because @plan --json@ already carries
+-- both of the numbers it prints. @run@ takes none either: its record is the
+-- trace it prints as it happens.
 --
 -- __A refusal is not JSON.__ Every one of them goes to stderr in the words
 -- below, under the exit codes below, @--json@ or no @--json@ — so a caller
@@ -172,6 +182,9 @@ module Agentic.Cli
 
     -- * The runner
     cliMain,
+
+    -- * One fact, for the gate that holds it against its reader
+    routesFact,
   )
 where
 
@@ -280,9 +293,11 @@ import Agentic.Workflow
   ( Example (..),
     inputNames,
     reservedInput,
+    routeDefaultLabel,
     runFactBackends,
     runFactEngine,
     runFactRefusal,
+    runFactRoutes,
     runFactSentinel,
     runFacts,
     sessionPolicy,
@@ -522,8 +537,8 @@ routeRefusal :: Registry -> Target -> Program -> Maybe Text
 routeRefusal _ Scripted _ = Nothing
 routeRefusal reg (Routed rr) prog = case servedChains (progRawOut prog) of
   Left _ -> Nothing
-  Right t ->
-    let pinnable = sort (nub (Map.keys t <> concat (Map.elems t)))
+  Right _ ->
+    let pinnable = pinnedModels prog
      in listToMaybe
           [ "--route names the model '"
               <> m
@@ -914,7 +929,12 @@ data Facts = Facts
     -- | 'operatorInputs'
     factInputs :: [Text],
     -- | 'runFactInputs'
-    factRunFacts :: [Text]
+    factRunFacts :: [Text],
+    -- | Every model this program pins — the @served by@ primaries and their
+    -- spares — sorted, and @[]@ on a chain table that is ill-defined, which the
+    -- run is about to refuse in its own words ('routeRefusal' passes the same
+    -- case over in the same silence).
+    factPins :: [Text]
   }
 
 -- | The facts of one row, at the program its inputs built.
@@ -937,10 +957,30 @@ factsOf n row prog =
       -- to report; @Explain.leafBills@ sorts the same one for the same reason.
       factFold = runLengths (sort (costM p)),
       factInputs = operatorInputs (rowExample row),
-      factRunFacts = runFactInputs (rowExample row)
+      factRunFacts = runFactInputs (rowExample row),
+      factPins = pinnedModels prog
     }
   where
     p = progPlan prog
+
+-- | Every model a program pins, as @--route@ may name them: the @served by@
+-- primaries and their spares, sorted and deduplicated.
+--
+-- __One function and not three lists.__ 'routeRefusal' refuses a @--route@
+-- naming anything outside it, the run's header prints the members no @--route@
+-- claimed, and @--json@ publishes it under @pins@ — so a caller that offers a
+-- field per element offers exactly the routes @run@ will accept, which is the
+-- promise 'operatorInputs' makes about @inputs@.
+--
+-- An alternate is a model name and is routed like any other, which is why it is
+-- the keys /and/ the values. An ill-defined table is @[]@ rather than a refusal:
+-- the run is about to refuse it in its own words with both spellings named, and
+-- until then a table that cannot be built cannot say which models are pinned
+-- either.
+pinnedModels :: Program -> [Text]
+pinnedModels prog = case servedChains (progRawOut prog) of
+  Left _ -> []
+  Right t -> sort (nub (Map.keys t <> concat (Map.elems t)))
 
 -- | The facts of a row nobody gave anything: the numbers of the program an
 -- empty value builds, which is exactly what @plan@ and @cost@ answer with when
@@ -1007,7 +1047,8 @@ factFields f =
     "maxFold" .= mx,
     "paths" .= paths,
     "inputs" .= factInputs f,
-    "runFacts" .= factRunFacts f
+    "runFacts" .= factRunFacts f,
+    "pins" .= factPins f
   ]
   where
     (mn, mx, paths) = factSummary f
@@ -1327,7 +1368,11 @@ runCmd reg name target prog gs = case target of
     sayManyBackends :: RunRoutes -> FilePath -> [Backend] -> IO ()
     sayManyBackends rr dir bs = do
       say $ "running " <> name <> " against " <> tshow (length bs) <> " backends:"
-      say $ pad "default" <> backendWords rr (routeDefault (rrRoutes rr))
+      -- The label is `Agentic.Workflow.routeDefaultLabel` and not a literal, for
+      -- `deckSessionPolicy`'s reason: `run.routes` carries this same table to
+      -- the prompts, and a header that named the default answerer one way while
+      -- the fact named it another would be one run described twice.
+      say $ pad routeDefaultLabel <> backendWords rr (routeDefault (rrRoutes rr))
       say $ pad "" <> "— every unpinned ask, every tool and every person"
       mapM_ route (routeNamed (rrRoutes rr))
       unless (null unclaimed) $
@@ -1370,17 +1415,17 @@ runCmd reg name target prog gs = case target of
             BackendAcp _ -> pure ()
 
         -- Every model this program pins — the `served by` primaries and their
-        -- spares — that no route claims. `servedChains` has the set in hand;
+        -- spares — that no route claims. `pinnedModels` has the set in hand and
+        -- is the same one `routeRefusal` checks against and `--json` publishes;
         -- an ill-defined table is about to be refused by `walkWith` in its own
         -- words, and until then there is nothing honest to print.
         unclaimed =
           [ m
-          | m <- either (const []) pinnable (servedChains (progRawOut prog)),
+          | m <- pinnedModels prog,
             not (m `Map.member` routeByModel (rrRoutes rr))
           ]
-        pinnable t = sort (nub (Map.keys t <> concat (Map.elems t)))
 
-        labels = "default" : map fst (routeNamed (rrRoutes rr)) <> [T.intercalate ", " unclaimed]
+        labels = routeDefaultLabel : map fst (routeNamed (rrRoutes rr)) <> [T.intercalate ", " unclaimed]
         width = maximum (1 : map T.length labels)
         pad l = "  " <> T.justifyLeft (width + 2) ' ' l
 
@@ -1498,7 +1543,7 @@ deckSessionPolicy = sessionPolicy False
 -- | __The facts this run knows about itself before it puts a question__, as the
 -- texts 'Agentic.Workflow.runFacts' binds.
 --
--- All three are properties of the command line and of the clock, which is what
+-- All four are properties of the command line and of the clock, which is what
 -- lets them be inputs: an input is bound when the program is built, and nothing
 -- here has to wait for an adapter to start or a question to be answered. The
 -- working directory is deliberately not among them — it is settled in 'runCmd',
@@ -1513,6 +1558,15 @@ deckSessionPolicy = sessionPolicy False
 -- asserting without anybody having established it: a line generated for this run
 -- and put nowhere the runner does not put it.
 --
+-- __@run.routes@ is worth what neither of the other two can say__: /which/
+-- answerer a given pin reached. @run.backends@ is deduplicated and carries no
+-- names, so no arithmetic over it distinguishes a run whose evaluator sits in a
+-- pane of its own from one where evaluator and workers share the pane; and
+-- @run.engine@ says only whether /some/ answerer shares a conversation, never
+-- which. A program that must assert "the judge is somewhere the work is not"
+-- reads both, through 'Agentic.Workflow.routedBackend' and
+-- 'Agentic.Workflow.sharesOneSession', and neither fact derives the other.
+--
 -- __@run.engine@ is read as well as printed__, which is why both its halves come
 -- from 'Agentic.Workflow.sessionPolicy' and neither is a literal here: a program
 -- gates on 'Agentic.Workflow.sharesOneSession', and the value it matches has to
@@ -1526,9 +1580,16 @@ runFactsOf reg name target = do
   pure
     [ (runFactBackends, backendsFact),
       (runFactEngine, engineFact),
+      (runFactRoutes, routesFact tableOf),
       (runFactSentinel, sentinel)
     ]
   where
+    -- The table, or the absence of one. `routesFact` takes this rather than the
+    -- `Target` so that the fact cannot come to depend on `--poll`.
+    tableOf = case target of
+      Scripted -> Nothing
+      Routed rr -> Just (rrRoutes rr)
+
     backendsFact = case target of
       -- No colon in this arm, and one in the other two: a fact is spliced after
       -- a label a prompt wrote ("Backends: …"), and "Backends: no backend: …"
@@ -1571,6 +1632,55 @@ runFactsOf reg name target = do
               -- unreachable; it is written rather than left to a partial
               -- pattern match.
               ([], []) -> "no engine: this run reaches nothing"
+
+-- | @run.routes@ — __the route table as this run resolved it__, one line per
+-- answerer: the label, @\" = \"@, and 'backendSpelling'.
+--
+-- > (default) = deck:0f3a91c2-codex
+-- > partner = deck:7b2e40aa-claude
+--
+-- Derived from the very table the header prints and from nothing else: the same
+-- 'routeDefault'-then-'routeNamed' order 'routeBackends' and @sayManyBackends@
+-- use, so an operator can read the fact against the header against their own
+-- command line, and 'backendSpelling' for every right-hand side, which is
+-- documented as the printed inverse of 'parseBackend' — so the fact round-trips
+-- and a gate reading it is reading the operator's own word rather than a second
+-- rendering of it.
+--
+-- __It does not deduplicate.__ 'routeBackends' does, because a header that
+-- counted route lines would overstate how many agents a run started; this fact
+-- is the /mapping/, and two pins on one backend is precisely the thing a gate
+-- over it must be able to see.
+--
+-- __The default line is present on every live run, @--route@ or no @--route@.__
+-- That is the one thing that makes the fact decidable where it matters: a run
+-- with @--session A@ and nothing else still has an answerer, and
+-- @(default) = deck:A@ is the single line that distinguishes it from the split
+-- where a judge's pin is routed away. Omit it and the two read alike, and the
+-- refusal that should have fired would not.
+--
+-- __It is empty exactly when there is no table__ — @--scripted@, and the two
+-- static verbs, which bind no run fact at all. Empty means /no table/, not /no
+-- @--route@/, and 'Agentic.Workflow.routedBackend' reads it as the empty text
+-- for the reason 'Agentic.Workflow.sharesOneSession' reads an unbound engine as
+-- 'False'.
+--
+-- It stands at the top level, exported, and takes the /table/ rather than the
+-- 'Target', for two reasons. The first is 'acpConfigFor''s second reason: the
+-- policy gate holds it against 'Agentic.Workflow.routedBackend' — the fact and
+-- its one reader, checked as one contract, exactly as @run.engine@ and
+-- 'Agentic.Workflow.sharesOneSession' are, and a fact whose derivation lived
+-- inside a @where@ could only be checked through a transport. The second is that
+-- the argument is then exactly what the fact depends on: @'Nothing'@ is /no
+-- table/, and nothing here can come to depend on @--poll@.
+routesFact :: Maybe (Routes Backend) -> Text
+routesFact = \case
+  Nothing -> ""
+  Just rs ->
+    T.unlines
+      [ label <> " = " <> backendSpelling b
+      | (label, b) <- (routeDefaultLabel, routeDefault rs) : routeNamed rs
+      ]
 
 -- | The line this run generates for itself, and puts nowhere else.
 --
@@ -1904,9 +2014,9 @@ usage reg =
       "  inputs line; run requires every input.",
       "",
       "  An input named run.<something> is a RUN FACT and is not yours to give:",
-      "  run binds it from the run it is making and no flag can. There are three",
-      "  — run.backends, run.engine and run.sentinel — and a program that takes",
-      "  one still takes it from run, so the flags below name only your own.",
+      "  run binds it from the run it is making and no flag can. There are four —",
+      "  run.backends, run.engine, run.routes and run.sentinel — and a program that",
+      "  takes one still takes it from run, so the flags below name only your own.",
       "",
       "  --input FILE   the sole input of a program that takes exactly one, read",
       "                 from a file. Takes no NAME=, so a path containing = is",

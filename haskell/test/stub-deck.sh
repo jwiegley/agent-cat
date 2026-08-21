@@ -15,8 +15,13 @@
 #
 # The shapes it answers with are the ones `Agentic.AgentDeck` parses:
 # `{"status":…,"substate":…}` from `show` (the two fields `agent-deck list
-# --json` really carries per session, checked against agent-deck 1.11.0) and
+# --json` really carries per session, checked against agent-deck 1.13.0) and
 # `{"content":…,"timestamp":…}` from `output`.
+#
+# The three verbs still read as they do above at 1.13.0, and each takes
+# `<id|title>` rather than an id alone — `session send <id|title> <message>`,
+# `session show [id|title]`, `session output [id|title]` — which is why a gate
+# comparing backend spellings cannot know two names for one pane are one pane.
 #
 # Everything it does is driven by two environment variables:
 #

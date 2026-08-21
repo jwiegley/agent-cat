@@ -62,6 +62,22 @@
 # loop when the predicate holds, and a reworded phrase would switch that gate off
 # without failing anything.
 #
+# And `run.routes`, the fourth run fact, which is the same kind of contract in two
+# groups: the SPELLING — the owner's two-pane split asserted verbatim, the default
+# labelled `(default)` and printed first, the routes after it in the order they
+# were typed, an unrouted live run still carrying the default's line because that
+# is the one line that tells it apart from a split, two pins on one pane staying
+# two lines because this fact is the mapping and not the roster, and the empty
+# text meaning NO TABLE rather than no `--route` — and the READING, which is
+# `Agentic.Workflow.routedBackend`: the round trip through `backendSpelling` for
+# every route of three tables, the default reachable under its own label, a pin no
+# route names falling through to it, a backend containing the very `=` the lines
+# are split on surviving, and — the pair a gate exists for — the split putting the
+# routed pin somewhere the default is not while its inversion leaves it on the
+# default, which is a different run. The consumer is again in another repository,
+# and again it is a gate: this is what lets a program say that its evaluator is
+# somewhere its workers are not.
+#
 # And the two prompt quoters (`Agentic.WF`): that `[wft|…|]` and the
 # `wfText [wf|…|]` it replaced are the same bytes, hole for hole — the same
 # block written both ways, once with no hole and once holing a count and a
@@ -71,14 +87,14 @@
 # about two expressions, so it is checked as two expressions rather than
 # inferred from a program's numbers.
 #
-# No Lean, no corpus; every commit may run it. Thirty-four checks, and one
-# command line.
+# No Lean, no corpus; every commit may run it. Thirty-six checks, and two
+# command lines.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 nix develop path:./. -c cabal run -v0 policy-probe
 
 # ---------------------------------------------------------------------------
-# The one refusal that is the command line's
+# The refusals that are the command line's
 # ---------------------------------------------------------------------------
 #
 # The run facts (`Agentic.Workflow.runFacts`) are inputs the RUNNER binds, and
@@ -92,21 +108,33 @@ nix develop path:./. -c cabal run -v0 policy-probe
 # started, and `plan` starts nothing even when it succeeds — so a green row here
 # is evidence about the resolution and not about a transport. Exit 1, because
 # nothing ran: it is a usage error, and the way out is another command line.
-refusal=$(nix develop path:./. -c cabal run -v0 agentic-run -- \
-            plan review-lite --input-arg run.engine=acp 2>&1) && code=0 || code=$?
+#
+# Two facts and one check, run twice: the refusal's wording is built from
+# `runFacts` itself, so the interesting question is not whether it can be worded
+# but whether a NEWLY ADDED fact is in the list the resolution reads. `run.routes`
+# is the newest, and it is the one whose value an operator is most likely to
+# believe is theirs to set — it is a table they typed on the same command line.
+refuses_fact() {
+  local fact="$1" refusal code
+  refusal=$(nix develop path:./. -c cabal run -v0 agentic-run -- \
+              plan review-lite --input-arg "$fact=" 2>&1) && code=0 || code=$?
 
-if [ "$code" != 1 ]; then
-  echo "ci/policies: FAIL --input-arg run.engine: expected exit 1, actual $code" >&2
-  echo "$refusal" >&2
-  exit 1
-fi
-case "$refusal" in
-  *"is a run fact: the runner binds it"*)
-    echo "policy probe: --input-arg run.engine is refused, and names who binds it"
-    ;;
-  *)
-    echo "ci/policies: FAIL --input-arg run.engine: refused, but not as a run fact" >&2
+  if [ "$code" != 1 ]; then
+    echo "ci/policies: FAIL --input-arg $fact: expected exit 1, actual $code" >&2
     echo "$refusal" >&2
     exit 1
-    ;;
-esac
+  fi
+  case "$refusal" in
+    *"is a run fact: the runner binds it"*)
+      echo "policy probe: --input-arg $fact is refused, and names who binds it"
+      ;;
+    *)
+      echo "ci/policies: FAIL --input-arg $fact: refused, but not as a run fact" >&2
+      echo "$refusal" >&2
+      exit 1
+      ;;
+  esac
+}
+
+refuses_fact run.engine
+refuses_fact run.routes
