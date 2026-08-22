@@ -3,9 +3,12 @@
 -- Description : The runner, as a function of the registry it serves.
 --
 -- Four verbs over a table of named programs: 'list' them, 'plan' one, price it,
--- or run it.
+-- or run it — and a fifth that answers for one of them and spends nothing.
 --
 -- > <binary> list  [--json]
+-- > <binary> help  NAME
+-- > <binary> NAME  --help
+-- > <binary> --help
 -- > <binary> plan  NAME [--raw] [--require-pinned] [--json]
 -- > <binary> cost  NAME
 -- > <binary> run   NAME --scripted
@@ -101,6 +104,52 @@
 -- corpus entry, print and reply alike. That is what makes a run evidence about
 -- the language rather than about this executable.
 --
+-- == @help@, the verb that spends nothing
+--
+-- The owner's ruling of 2026-08-22: __for every registered program there is a
+-- page saying which arguments and patterns are useful for actually using it__,
+-- and @\<binary\> NAME --help@ shows it. So 'rowHelp' is a field of the row and
+-- not a 'Maybe': a registry literal that omits it fails to compile, by arity,
+-- at every construction site — which is the only place the omission can be
+-- caught before an operator meets it, since a registry is a value and this CLI
+-- a function of that value.
+--
+-- Three spellings reach one renderer, and they are byte-identical because there
+-- is one of it: @help NAME@ (verb-first, like every other verb here) and
+-- @NAME --help@ (the ruling's own, and the one a hand types). @--help@ alone is
+-- the usage message on __stdout__ at exit @0@, where bare @\<binary\>@ stays
+-- what it was — the usage on stderr at exit @1@. The asymmetry is the point: a
+-- command line that asked for nothing is not a request that was answered.
+--
+-- @NAME@ alone — a registered name with no verb — is __refused__, naming the
+-- verbs. It is ambiguous between /tell me about it/ and /do it/, and guessing
+-- is the one thing a runner whose next line could start spending must not do.
+--
+-- __A verb in head position always wins.__ Every new arm is placed after the
+-- verbs, so a row named @plan@ or @help@ is unreachable /by name/ rather than
+-- ambiguous — which is a thing a gate should shout about, and both gates do,
+-- against @list@'s own output rather than against a transcription of it.
+-- @'parseCommand'@ is exported for the probe that holds the policy over a
+-- synthetic colliding registry, as against the fact about today's two tables.
+--
+-- __What the page is.__ The row's line, then the numbers 'listFacts' computes —
+-- @level@, @cost@, @inputs@, @runFacts@, @pins@, every label printed and an
+-- empty list as @—@ — then 'rowHelp' verbatim, then one footer this module
+-- owns. __A help text carries no price__: the number here and the number
+-- @list --json@ publishes are one 'Facts', so they cannot come to disagree, and
+-- an author who would have hand-copied one writes a caveat pointing at @cost@
+-- instead. @help@ takes the name and nothing else — it builds the program at
+-- every input empty, asks nobody, starts no adapter, and exits @0@.
+--
+-- __It joins no @--json@__, and there is no @help --json@. @list --json@ is a
+-- /chooser's/ table and would make every reader parse the whole toolbox's prose
+-- to pick one row; @plan --json@ is per-program detail, and a @help@ key there
+-- would be a second spelling of bytes that already have a door. Prose is not a
+-- contract in this module (see the refusals below), and a text has no structure
+-- to lose: __the machine-readable form of a help text is the help text__. What
+-- @help@ promises a program is what every verb here promises — exit @0@, the
+-- whole page on stdout, the refusal on stderr under exit @1@.
+--
 -- == The machine-readable rendering
 --
 -- @list@ and @plan@ take @--json@ and print, instead of their prose, the object
@@ -186,6 +235,18 @@ module Agentic.Cli
 
     -- * One fact, for the gate that holds it against its reader
     routesFact,
+
+    -- * The parse, for the gate that holds the dispatch's own policy
+    --
+    -- | A verb in head position beats a row of the same name, and that is
+    -- decided here rather than by either registry happening not to collide.
+    -- The probe reads it over a /synthetic/ registry every one of whose rows is
+    -- named after a verb — @run@, @plan@, @cost@, @list@, @help@ — plus one that
+    -- is not, which is the only way to state the policy as against the fact
+    -- about today's two tables; 'Command' is exported with it because a parse
+    -- nobody can look at is a parse nobody can hold.
+    Command (..),
+    parseCommand,
   )
 where
 
@@ -311,8 +372,8 @@ import Agentic.World (Trace, billFresh, billMemo)
 -- The registry
 -- ---------------------------------------------------------------------------
 
--- | One registered program, and the two things every verb needs from it beside
--- the program itself.
+-- | One registered program, and the three things every verb needs from it
+-- beside the program itself.
 --
 -- The row is the unit, so a program cannot be registered without them. In
 -- particular the canned table travels __beside the program__ rather than in a
@@ -320,11 +381,32 @@ import Agentic.World (Trace, billFresh, billMemo)
 -- argument for @isaacScript@ ("the keys /are/ the prompt defines those programs
 -- are written from", so a key is a prefix by construction rather than by
 -- proofreading) applied to every registry alike.
+--
+-- __'rowHelp' is 'Text' and not @Maybe Text@__, and it is a field and not a
+-- @helpFor :: Text -> Text@ dispatch, for one reason with two halves. A
+-- registered program nobody can be told how to use is not a thing this table
+-- should be able to hold; and a 'Maybe' would oblige the CLI to have an arm
+-- that prints /there is no help for this row/ — a sentence its reader can do
+-- nothing about, printed by a binary that could have refused to build instead.
+-- Every construction site in both registries is positional, so an omitted field
+-- is a @Text -> Row@ where a 'Row' is wanted: a type error, at the site, in
+-- every tree that builds. A @Text@-keyed dispatch would have made it a
+-- pattern-match failure at run time for the one row somebody added and did not
+-- document, which is the failure this field exists to remove.
+--
+-- The two prose fields sit together — one line, then the page — and the script
+-- stays last, where the paragraph above still reads: it is the row's answering
+-- table and not its documentation.
 data Row = Row
   { -- | the program, or the program of its inputs
     rowExample :: !Example,
     -- | one line, for @list@ and for the usage message
     rowDoc :: !Text,
+    -- | the page @help@ prints under the computed header: what this row is
+    -- for, what its inputs mean, which transport it wants, one worked command
+    -- line, one rehearsal, and its caveats. Never a price — the header above
+    -- it is the one 'Facts' every verb reads
+    rowHelp :: !Text,
     -- | the canned replies @--scripted@ answers from, keyed by prefix
     rowScript :: ![(Text, Text)]
   }
@@ -370,7 +452,16 @@ regLookup reg n = lookup n (regRows reg)
 -- prints prompts and an operator pricing a run wants to price the run they will
 -- make.
 data Command
-  = -- | The registry itself: every name, with its one line.
+  = -- | The usage message, asked for: stdout, exit @0@. Bare @\<binary\>@ is
+    -- not this — it is a 'Left' carrying the same text, on stderr under exit
+    -- @1@, because a command line that asked for nothing was not answered.
+    Usage
+  | -- | One row's page: its line, the computed header, its 'rowHelp', the
+    -- footer. Reached from @help NAME@ and from @NAME --help@ alike, and
+    -- unconditional in the name, so a misspelling gets the list of rows rather
+    -- than @no verb@.
+    Help !Text
+  | -- | The registry itself: every name, with its one line.
     List !Render
   | -- | The static folds, the printed program when the first 'Bool', and
     -- @--require-pinned@ in the second.
@@ -503,8 +594,14 @@ cliMain reg = do
 -- leave a subject nobody gave unbound, and the @inputs@ line says so — which
 -- costs them nothing, because no static fold reads a prompt and a program
 -- therefore prices identically bound or not.
+-- __The two static-est verbs come first and neither builds anything__:
+-- 'Usage' prints a text that is a function of the registry's four fields, and
+-- 'Help' builds one program at every input empty, which is what @list@ already
+-- does for every row.
 execute :: Registry -> Command -> IO ()
 execute reg = \case
+  Usage -> say (usage reg) >> exitSuccess
+  Help name -> helpCmd reg name >> exitSuccess
   List r -> listCmd reg r >> exitSuccess
   Plan name r raw pinned ins -> withExample reg pinned False noRefusal name [] ins (planCmd r raw)
   Cost name ins -> withExample reg False False noRefusal name [] ins (\f _ -> costCmd f)
@@ -601,14 +698,7 @@ withExample ::
   (Facts -> Program -> [Given] -> IO ()) ->
   IO ()
 withExample reg pinned needsAll refuses name facts ins k = case regLookup reg name of
-  Nothing ->
-    die reg 1 $
-      "no "
-        <> regNoun reg
-        <> " named '"
-        <> name
-        <> "'; there is "
-        <> T.intercalate " and " (regNames reg)
+  Nothing -> die reg 1 (noSuchRow reg name)
   Just row -> do
     resolved <- resolveInputs name needsAll facts (rowExample row) ins
     case resolved of
@@ -617,6 +707,57 @@ withExample reg pinned needsAll refuses name facts ins k = case regLookup reg na
         | pinned, Just why <- guardUnpinnedAsk (progRawOut prog) -> die reg 1 ("refused: " <> why)
         | Just why <- refuses prog -> die reg 1 why
         | otherwise -> k (factsOf name row prog) prog bs >> exitSuccess
+
+-- | The refusal a name no row answers to earns, from whichever verb was asking.
+--
+-- __A function because there are now two askers__, and the bytes are load
+-- bearing: @ci\/examples.sh@ recovers the whole registry from this sentence
+-- (@sed -e 's\/^.*there is \/\/'@) rather than transcribing it, so a new
+-- program cannot be registered without being priced, and @agent-workflows@'
+-- gate greps @no workflow named@ as its evidence that two registries share one
+-- CLI. The wording did not move when @help@ arrived — only the place it is
+-- assembled, which is exactly what a second caller is allowed to cost.
+noSuchRow :: Registry -> Text -> Text
+noSuchRow reg name =
+  "no "
+    <> regNoun reg
+    <> " named '"
+    <> name
+    <> "'; there is "
+    <> T.intercalate " and " (regNames reg)
+
+-- | The refusal a __registered__ name with no verb earns.
+--
+-- Not @print the help@ and not @run it@: a bare name is ambiguous between /tell
+-- me about it/ and /do it/, and a runner whose next line could start spending
+-- must not guess which. So it costs the operator one command line and teaches
+-- the four things there are to do with a row. Exit @1@ is the usage code —
+-- nothing ran, and the way out is another command line.
+bareRow :: Registry -> Text -> Text
+bareRow reg name =
+  "'"
+    <> name
+    <> "' is "
+    <> article reg
+    <> " and not a verb; try "
+    <> T.intercalate ", " [bin <> " " <> v <> " " <> name | v <- ["help", "plan", "cost"]]
+    <> ", or "
+    <> bin
+    <> " run "
+    <> name
+    <> " --scripted"
+  where
+    bin = regBinary reg
+
+-- | @a workflow@ | @an example@ — the registry's noun with the article its
+-- first letter asks for.
+--
+-- One function because three refusals say it and a fourth would have made it
+-- four spellings of one agreement about which table was searched.
+article :: Registry -> Text
+article reg
+  | T.any (`elem` ("aeiou" :: String)) (T.take 1 (regNoun reg)) = "an " <> regNoun reg
+  | otherwise = "a " <> regNoun reg
 
 -- ---------------------------------------------------------------------------
 -- The inputs
@@ -1065,6 +1206,76 @@ planFields f =
     <> [ "codes" .= factCodes f,
          "fold" .= [object ["consults" .= n, "paths" .= k] | (n, k) <- factFold f]
        ]
+
+-- ---------------------------------------------------------------------------
+-- help
+-- ---------------------------------------------------------------------------
+
+-- | One row's page: its line, the numbers, its own text, the footer.
+--
+-- __Half of it is computed and half of it is authored, and the split is the
+-- design.__ The header is 'listFacts' — the very 'Facts' @list@, @list --json@
+-- and (at empty inputs) @plan@ read — so the number an operator reads here and
+-- the number a gate pins cannot disagree; 'rowHelp' is what no fold can say,
+-- and it is printed verbatim, because a renderer that reflowed it would be a
+-- second thing to keep true about prose. Every label is printed even when its
+-- list is empty, as @—@: that a row pins no model is a fact worth seeing,
+-- because it says @--route@ will refuse every name.
+--
+-- __It takes the name and nothing else — no input flags.__ The numbers are the
+-- row at every input empty, which is the price @list@ publishes; a header that
+-- moved with a flag would be teaching by a number the reader did not ask for,
+-- and @cost NAME [\<input\>...]@ is the verb whose whole job is that question.
+-- The footer says so, once, rather than in one text per row.
+--
+-- A row whose program will not build at empty inputs stops here rather than
+-- printing a page with a hole in it, for 'listCmd''s reason: that is
+-- 'Agentic.Workflow.supply' failing at a call that gives it one text per
+-- declared name, which is a bug and not a workflow's business.
+helpCmd :: Registry -> Text -> IO ()
+helpCmd reg name = case regLookup reg name of
+  Nothing -> die reg 1 (noSuchRow reg name)
+  Just row -> case listFacts name row of
+    Left why -> die reg 1 why
+    Right f -> do
+      say $ factName f <> " — " <> factBlurb f
+      say ""
+      say $ headed "level" (factLevel f)
+      say $ headed "cost" (renderSummary (factSummary f))
+      say $ headed "inputs" (orDash (factInputs f))
+      say $ headed "runFacts" (orDash (factRunFacts f))
+      say $ headed "pins" (orDash (factPins f))
+      say ""
+      say (rowHelp row)
+      say ""
+      say (helpFooter reg)
+  where
+    -- `plan`'s own column, so that two pages describing one program indent
+    -- their numbers alike.
+    headed label v = "  " <> T.justifyLeft 8 ' ' label <> "  " <> v
+
+    orDash [] = "—"
+    orDash xs = T.intercalate ", " xs
+
+-- | The last paragraph of every page, in this module and never once per row.
+--
+-- It carries the three facts that are true of __every__ row and that a help
+-- text must therefore not restate: where the shared flags are documented, that
+-- the numbers above are the empty invocation's, and which verb answers the
+-- question a number that moves with an input actually asks.
+helpFooter :: Registry -> Text
+helpFooter reg =
+  indentBy 2 $
+    [wft|
+      {bin} --help lists the flags every row shares. The numbers above are this row at
+      every input empty — the price {bin} list publishes; an input that shapes a roster
+      or bounds a loop prices differently, and {bin} cost <{noun}> [<input>...] is the
+      verb that answers that. {bin} plan <{noun}> --raw prints the program these numbers
+      are the numbers of.
+    |]
+  where
+    bin = regBinary reg
+    noun = regNoun reg
 
 -- ---------------------------------------------------------------------------
 -- list
@@ -1716,25 +1927,46 @@ freshScratch reg = do
 -- ---------------------------------------------------------------------------
 
 -- | Parse the arguments, or say what is wrong together with the usage.
+--
+-- __The order of the arms is the whole of the collision policy.__ Every arm
+-- @help@ added stands where a verb in head position has already been decided,
+-- so a row named @plan@, @cost@, @run@, @list@ or @help@ is unreachable /by
+-- name/ rather than ambiguous — and unreachable-but-registered is a thing a
+-- gate can shout about, which both gates do, against @list@'s own output. The
+-- four verbs that predate this are untouched: @list --help@ still says @list
+-- takes nothing but --json@, and @plan --help@ still refuses @--help@ as a name
+-- and lists the rows. Both are verb arms, both already answer usefully, and
+-- touching either would touch a verb three shell gates read.
+--
+-- The last two arms are the new ones that are /not/ a verb: @NAME --help@,
+-- which is unconditional in the name (so @harden --help@ and @hardne --help@
+-- both reach 'Help', and the second gets the list of rows rather than @no
+-- verb@), and a bare registered name, which is refused.
 parseCommand :: Registry -> [Text] -> Either Text Command
 parseCommand reg = \case
   [] -> Left (usage reg)
+  ["--help"] -> Right Usage
+  ["help"] -> Right Usage
+  ["help", name] -> Right (Help name)
+  ("help" : _) ->
+    Left ("help takes one " <> regNoun reg <> " and nothing else\n\n" <> usage reg)
   ["list"] -> Right (List Human)
   ["list", "--json"] -> Right (List Json)
   ("list" : _) -> Left ("list takes nothing but --json\n\n" <> usage reg)
   [verb]
     | verb `elem` verbs ->
-        Left (verb <> " needs " <> article <> ": " <> T.intercalate " or " (regNames reg))
+        Left (verb <> " needs " <> article reg <> ": " <> T.intercalate " or " (regNames reg))
   ("plan" : name : rest) -> planOpts name Human False False [] rest
   ("cost" : name : rest) -> costOpts name [] rest
   ("run" : name : rest) -> (\(t, p, ins) -> Run name t p ins) <$> parseTarget reg rest
+  [name, "--help"] -> Right (Help name)
+  [name] | isJust (regLookup reg name) -> Left (bareRow reg name)
   (verb : _) -> Left ("no verb '" <> verb <> "'\n\n" <> usage reg)
   where
+    -- Still three. `help` is not among them because `help` alone is a request
+    -- that has an answer — the usage — where `plan` alone is a verb missing its
+    -- subject.
     verbs = ["plan", "cost", "run"]
-
-    article
-      | T.any (`elem` ("aeiou" :: String)) (T.take 1 (regNoun reg)) = "an " <> regNoun reg
-      | otherwise = "a " <> regNoun reg
 
     -- Three independent flags, so they are folded rather than enumerated: the
     -- same three spelled in any other order are the same request. In particular
@@ -1755,7 +1987,7 @@ parseCommand reg = \case
           ( "no option '"
               <> flag
               <> "' for plan, which takes "
-              <> article
+              <> article reg
               <> " " <> [wft|and, at most, --raw, --require-pinned, --json and the input flags|] <> "\n\n"
               <> usage reg
           )
@@ -1766,7 +1998,7 @@ parseCommand reg = \case
       _
         | Just taken <- takeInput args ->
             taken >>= \(f, more) -> costOpts name (ins <> [f]) more
-      _ -> Left ("cost takes " <> article <> " and its inputs, and nothing else\n\n" <> usage reg)
+      _ -> Left ("cost takes " <> article reg <> " and its inputs, and nothing else\n\n" <> usage reg)
 
 -- | One input flag at the head of the arguments, if that is what stands there:
 -- the flag, and what is left. 'Nothing' when the head is something else, which
@@ -1984,6 +2216,8 @@ usage reg =
     [ bin <> " — " <> regBanner reg,
       "",
       "  " <> bin <> " list [--json]",
+      "  " <> bin <> " help <" <> noun <> ">",
+      "  " <> bin <> " <" <> noun <> "> --help",
       "  " <> bin <> " plan <" <> noun <> "> [--raw] [--require-pinned] [--json] [<input>...]",
       "  " <> bin <> " cost <" <> noun <> "> [<input>...]",
       "  " <> bin <> " run  <" <> noun <> "> --scripted [<input>...]",
@@ -1996,6 +2230,12 @@ usage reg =
       under (runLead <> "--engine acp ") <> "[--timeout MS] [--verbose]",
       "",
       "  <" <> noun <> "> is " <> T.intercalate " or " (regNames reg),
+      "",
+      "  help prints one " <> noun <> "'s own page: what it is for, what each of",
+      "  its inputs means, which transport it wants, a worked command line and a",
+      "  rehearsal. It spends nothing and asks nobody. Both spellings above print",
+      "  the same page; a bare <" <> noun <> "> with no verb is refused, because it",
+      "  is ambiguous between telling you about it and doing it.",
       "",
       "  <input> is one of the three input flags below. A program that takes",
       "  inputs is a program of them: an input is a define supplied at run time,",
@@ -2014,7 +2254,11 @@ usage reg =
       "  --input-file NAME=FILE",
       "                 that input, read from a file. Repeatable",
       "  --input-arg NAME=VALUE",
-      "                 that input, inline. Repeatable",
+      "                 that input, inline. Repeatable. A tilde straight after the",
+      "                 = is expanded by bash and left as the character ~ by zsh,",
+      "                 so what arrives depends on the shell — write \"$HOME/...\"",
+      "                 when you mean your home directory and it arrives the same",
+      "                 either way",
       "                 (a file's contents are read as UTF-8 — bytes that are",
       "                 not UTF-8 refuse the run — and one trailing newline is",
       "                 stripped, so a file splices like a define written in",
@@ -2043,7 +2287,9 @@ usage reg =
       "                 to a person's yes/no question. --engine acp only",
       "  --scratch      run in DIR instead of a fresh temporary directory: where the",
       "                 adapter is started, and the only place an act may write.",
-      "                 --engine acp only",
+      "                 Give --scratch \"$PWD\" whenever the run is meant to touch",
+      "                 your own tree — without it the acts land in a temporary",
+      "                 directory and your tree is untouched. --engine acp only",
       "  --route        NAME=BACKEND — put the questions this run pins to the model",
       "                 NAME to BACKEND instead of to the default answerer.",
       "                 Repeatable, at most once per NAME. BACKEND is",

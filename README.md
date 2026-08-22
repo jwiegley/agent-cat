@@ -138,16 +138,23 @@ reach a command line.
 
 ## The runner — `agentic-run`
 
-One executable, four verbs over those programs, from `haskell/`:
+One executable, five verbs over those programs, from `haskell/`:
 
 ```sh
 cabal run agentic-run -- list
+cabal run agentic-run -- help harden          # or: agentic-run harden --help
 cabal run agentic-run -- plan harden [--raw]
 cabal run agentic-run -- cost harden
 cabal run agentic-run -- run  harden --scripted
 cabal run agentic-run -- run  harden --engine acp [--adapter stub|claude|codex|PATH]
 cabal run agentic-run -- run  harden --session <deck-id> [--binary PATH] [--poll MS]
 ```
+
+`help` prints one program's page — what it is for, what each of its inputs means,
+which transport it wants, one worked command line and one rehearsal — under a
+header computed from the same folds `list --json` publishes, so the numbers on a
+page and the numbers a gate pins cannot come to disagree. It spends nothing, asks
+nobody, and starts no adapter. `<name> --help` is the same page.
 
 `plan` and `cost` say nothing a run could contradict: they are the *static* folds
 — level, size, ask nodes, answer codes, and the cost summary — decided before

@@ -28,6 +28,14 @@
 # the same number is also published; a mismatch here means one of those places
 # is now lying, and the fix is to find out which.
 #
+# And, since the help feature, every program's PAGE — `agentic-run help <name>`
+# and `<name> --help`, which are one renderer and must stay byte-identical; the
+# live line and the rehearsal printed on it, both RUN; the refusals a name earns
+# bare and unknown; `--help` on stdout at exit 0; that no registered name is one
+# of the five verbs; and the two sentences of flag advice in the usage text,
+# which nothing else reads. The pins above are the evidence that a help text is
+# prose ABOUT a program rather than part of one: not one of them may move.
+#
 # The pinned numbers are not this script's invention. `harden` and `hello` are
 # the two frozen corpus entries, so their static folds are already pinned twice
 # over (tier0 replays them, tier1 rebuilds them from the very values this script
@@ -284,6 +292,196 @@ for n in "${names[@]}"; do
 
   note "$n: ${pinLevel[$n]}, size ${pinSize[$n]}, askNodes ${pinAsks[$n]}, $want_summary; scripted ${pinFresh[$n]}/${pinMemo[$n]}, exit 0"
 done
+
+# ---------------------------------------------------------------------------
+# Every program's page
+# ---------------------------------------------------------------------------
+#
+# `doc/research/help-design.md` §6, phase 1. `agentic-run help <name>` is HALF
+# COMPUTED AND HALF AUTHORED: the header comes off the same `Agentic.Plan.Facts`
+# the table above pins, and `Agentic.Cli.Row.rowHelp` is the rest. The pins are
+# the evidence that a help text is prose ABOUT a program and not part of one —
+# if any of them moved, the work stops — and this block is the evidence that the
+# prose is true.
+#
+# The seven pages here are dispatched by `Text` in `Example.Harden.helpFor` and
+# `Example.Isaac.isaacHelp`, neither of which is exhaustiveness-checked, so a
+# row added and not documented is a RUNTIME error. Running all seven is the only
+# thing that catches it.
+#
+# The binary is resolved once. Everything above goes through `cat_run`, which is
+# `nix develop … cabal run` and costs about eighteen seconds a call; that is
+# affordable for three calls a row and not for the four more this block wants.
+# It is the same binary either way — `cabal run` builds it and then executes it.
+bin=$(nix develop path:./. -c cabal list-bin exe:agentic-run 2>/dev/null | tail -1)
+[ -x "$bin" ] || { echo "ci/examples: no agentic-run binary: '$bin'" >&2; exit 1; }
+
+# NO REGISTERED NAME IS A VERB. `Agentic.Cli.parseCommand` decides a verb in
+# head position before a row name is ever looked up, so a row named `plan` would
+# not be ambiguous — it would be unreachable BY NAME, which is exactly the kind
+# of thing a gate should shout about rather than a thing to discover. Checked
+# against the registry read from the binary, not against a literal transcribed
+# from it. The policy itself — as against this fact about today's table — is
+# `test/PolicyProbe.hs`'s synthetic colliding registry, under ci/policies.sh.
+for n in $registered; do
+  case "$n" in
+    list | plan | cost | run | help)
+      bad "$n" "the reserved verbs" "a name that is not a verb" "$n"
+      ;;
+  esac
+done
+
+# A row name no registry holds, for the live-line check below.
+sentinel="ci-no-such-example-and-never-will-be"
+echo "$registered" | grep -qx "$sentinel" && {
+  # Not a `bad`: were this name ever registered, the check below would RUN a
+  # program live, which is the one thing no gate here may do by accident.
+  echo "ci/examples: '$sentinel' is a registered example; pick another sentinel" >&2
+  exit 1
+}
+
+# The authored half of a page: below the computed header, above the footer.
+# Both ends are `Agentic.Cli`'s and neither is a row's.
+helpBody() { sed -e '1,/^  pins /d' -e '/^  agentic-run --help lists the flags/,$d' "$1"; }
+
+# A fenced block as ONE line: trailing backslashes dropped, newlines closed up
+# — what the shell does with a continuation, and therefore what a reader who
+# pasted the block would get.
+fenceLine() {
+  tail -n +"$(($2 + 1))" "$1" | sed -n '1,/^```$/p' | sed '$d' \
+    | sed -e 's/[[:space:]]*\\$//' | tr '\n' ' '
+}
+
+for n in "${names[@]}"; do
+  "$bin" help "$n" > "$work/$n.help" 2>&1
+  code=$?
+  [ "$code" = 0 ] || bad "$n" "help exit" 0 "$code"
+  [ -s "$work/$n.help" ] || bad "$n" "help" "a page" "empty"
+
+  # The ruling's own spelling and the verb-first one are one renderer. Two
+  # spellings that could differ would be two things to keep true.
+  "$bin" "$n" --help > "$work/$n.help.alt" 2>&1
+  cmp -s "$work/$n.help" "$work/$n.help.alt" \
+    || bad "$n" "help $n against $n --help" "byte-identical" "they differ"
+
+  # A bare registered name is refused, naming the verbs — not run, and not
+  # answered with the page. It is ambiguous between telling you about it and
+  # doing it, and guessing is the one thing a runner whose next line could start
+  # spending must not do.
+  "$bin" "$n" > "$work/$n.bare" 2>&1
+  code=$?
+  [ "$code" = 1 ] || bad "$n" "a bare name" "exit 1" "$code"
+  grep -q "and not a verb" "$work/$n.bare" \
+    || bad "$n" "a bare name" "refused, naming the verbs" "$(head -1 "$work/$n.bare")"
+
+  helpBody "$work/$n.help" > "$work/$n.helpbody"
+
+  # THE PRINTED LIVE LINE, RUN — against the sentinel name, so that it stops.
+  #
+  # `Agentic.Cli.parseCommand` chooses the run's TARGET while it is still
+  # parsing: `chooseTarget` decides which of the three transports a combination
+  # of flags names and refuses every combination that names two — `--scratch`
+  # under `--session`, `--adapter` under a deck run. Only after that does the
+  # command look the row up. So a live line typed with a name no registry holds
+  # is driven through every one of those refusals and then stops at `no example
+  # named`, having started no adapter, opened no session and spent nothing.
+  #
+  # `eval`, because the page is quoted the way a command line is (`--scratch
+  # "$PWD"`), and word-splitting would tear that apart. Two things are done to
+  # the line first, and both are the difference between reading a command
+  # line's SHAPE and obeying it: every command substitution becomes a
+  # placeholder — a substitution is a hole the reader fills, and what is under
+  # test is which transport the FLAGS name — and what is left must be a plain
+  # command line, or the row fails here rather than being run.
+  first=$(grep -n '^```sh$' "$work/$n.helpbody" | head -1 | cut -d: -f1)
+  last=$(grep -n '^```sh$' "$work/$n.helpbody" | tail -1 | cut -d: -f1)
+  if [ -z "$first" ] || [ "$first" = "$last" ]; then
+    bad "$n" "the page's blocks" "a live line and a rehearsal" "fewer than two"
+  else
+    live=$(fenceLine "$work/$n.helpbody" "$first" \
+             | sed -e 's/\$([^)]*)/SUBSTITUTION/g' -e 's/`[^`]*`/SUBSTITUTION/g')
+    case "$live" in
+      *';'* | *'|'* | *'&'* | *'`'* | *'$('* | *'>'* | *'<'*)
+        bad "$n" "the page's live line" "a plain command line" "a shell metacharacter" ;;
+      "agentic-run run $n "*)
+        out=$(eval "$(printf '%q' "$bin") run $(printf '%q' "$sentinel") ${live#agentic-run run $n }" \
+                < /dev/null 2>&1)
+        code=$?
+        if [ "$code" != 1 ]; then
+          bad "$n" "the page's live line, parsed" "exit 1 at the registry" "$code"
+        elif ! echo "$out" | grep -q "no example named"; then
+          # It reached a transport refusal, so the flags on the page do not name
+          # a transport this CLI will take. The refusal says which.
+          bad "$n" "the page's live line" "a transport the CLI takes" "$(echo "$out" | head -1)"
+        fi
+        # The one flag on the line that is the ROW's and not the transport's.
+        # `--require-pinned` refuses the program unless every model ask names
+        # the model that serves it, which is a fact about this program — and
+        # exactly what the sentinel cannot see, because it stops before the row
+        # is looked up. `plan` answers it, before anything is started or spent.
+        # `hello` is the row that omits the flag deliberately and says so on its
+        # own page: it is asked nothing here, because its line does not claim it.
+        case "$live" in
+          *--require-pinned*)
+            "$bin" plan "$n" --require-pinned > /dev/null 2>&1 \
+              || bad "$n" "the page's live line" "--require-pinned, which this program satisfies" "the program is refused under it"
+            ;;
+        esac
+        ;;
+      *)
+        bad "$n" "the page's live line" "agentic-run run $n …" "$live" ;;
+    esac
+
+    # The printed REHEARSAL, run as printed. Every value on it is empty, so the
+    # block splits into words on whitespace and no `eval` is wanted. stdin is
+    # /dev/null for the reason the priced runs above have it.
+    rehearsal=$(fenceLine "$work/$n.helpbody" "$last")
+    case "$rehearsal" in
+      "agentic-run run $n --scripted"*)
+        read -r -a words <<< "$rehearsal"
+        "$bin" "${words[@]:1}" < /dev/null > "$work/$n.rehearsal" 2>&1
+        code=$?
+        [ "$code" = 0 ] || {
+          bad "$n" "the page's rehearsal, run as printed" "exit 0" "$code"
+          tail -5 "$work/$n.rehearsal" >&2
+        }
+        ;;
+      *)
+        bad "$n" "the page's rehearsal" "agentic-run run $n --scripted …" "$rehearsal" ;;
+    esac
+  fi
+done
+
+# An unknown name is the EXISTING refusal, verbatim. It is built in `noSuchRow`
+# and shared with the other verbs, so the wording moving here would mean it
+# moved everywhere.
+"$bin" help no-such-example > "$work/help.unknown" 2>&1
+code=$?
+[ "$code" = 1 ] || bad help "an unknown name" "exit 1" "$code"
+grep -q "no example named 'no-such-example'" "$work/help.unknown" \
+  || bad help "an unknown name" "the existing refusal" "$(head -1 "$work/help.unknown")"
+
+# `--help` bare: the usage, on STDOUT, exit 0. Bare `agentic-run` stays what it
+# was — the usage on stderr under exit 1 — and the asymmetry is the point: a
+# command line that asked for nothing is not a request that was answered.
+"$bin" --help > "$work/usage.out" 2> "$work/usage.err"
+code=$?
+[ "$code" = 0 ] || bad "--help" "exit" 0 "$code"
+[ -s "$work/usage.out" ] || bad "--help" "the usage" "on stdout" "stdout was empty"
+[ -s "$work/usage.err" ] && bad "--help" "the usage" "nothing on stderr" "$(head -1 "$work/usage.err")"
+
+# THE TWO SENTENCES OF ADVICE IN THE USAGE TEXT, PINNED. Both were added with
+# the help feature and neither belongs to a row: they are facts about a FLAG, so
+# `doc/research/help-design.md` §3 puts them here and nowhere else. Nothing else
+# reads them, which is exactly why they could be deleted in a tidy-up without
+# anything going red — so this is what watches them. The bytes are quoted from
+# `Agentic.Cli.usage`.
+grep -q 'is expanded by bash and left as the character' "$work/usage.out" \
+  || bad "--help" "the --input-arg entry" "the tilde is not expanded by the shell" "absent"
+grep -q 'Give --scratch "\$PWD" whenever the run is meant to touch' "$work/usage.out" \
+  || bad "--help" "the --scratch entry" "give it when the run should touch your tree" "absent"
+
+note "help: ${#names[@]} page(s) checked — both spellings, both printed command lines run, no name is a verb"
 
 # ---------------------------------------------------------------------------
 # The folds do not depend on the input

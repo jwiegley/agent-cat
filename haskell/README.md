@@ -856,7 +856,7 @@ src/Agentic/Oracle.hs   the line-delimited JSON client for the Lean oracle
 src/Agentic/Exec.hs     the IO interpreter: the memoizing fold and the decode loop
 src/Agentic/AgentDeck.hs  one agent-deck session as an answering service
 src/Agentic/Acp.hs      an ACP adapter this process starts, as an answering service
-src/Agentic/Cli.hs      the runner as a function of its registry: the four verbs,
+src/Agentic/Cli.hs      the runner as a function of its registry: the five verbs,
                         the flags, the refusals, the usage message
 example/Example/Harden.hs the walked examples, written in the authoring surface
 tier0/Main.hs           the corpus runner

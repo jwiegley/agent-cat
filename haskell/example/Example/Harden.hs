@@ -120,7 +120,7 @@ import Agentic.Workflow
 import qualified Agentic.Workflow.Do as W
 import Data.String (fromString)
 import Data.Text (Text)
-import Example.Isaac (isaacBlurb, isaacExamples, isaacScript)
+import Example.Isaac (isaacBlurb, isaacExamples, isaacHelp, isaacScript)
 import Prelude
 
 -- ---------------------------------------------------------------------------
@@ -280,7 +280,7 @@ examplesRegistry =
     { regBinary = "agentic-run",
       regNoun = "example",
       regBanner = "list, plan, price and run the worked examples",
-      regRows = [(n, Row ex (blurbFor n) (scriptFor n)) | (n, ex) <- examples]
+      regRows = [(n, Row ex (blurbFor n) (helpFor n) (scriptFor n)) | (n, ex) <- examples]
     }
 
 -- | The one line @list@ prints beside a name.
@@ -288,6 +288,120 @@ blurbFor :: Text -> Text
 blurbFor "harden" = "the flagship: draft a patch, review it by panel under a bounded revision, apply it"
 blurbFor "hello" = "the smallest thing that is still a workflow: two questions and an act"
 blurbFor n = isaacBlurb n
+
+-- ---------------------------------------------------------------------------
+-- The pages
+-- ---------------------------------------------------------------------------
+
+-- | The page @agentic-run help \<name\>@ prints under the computed header
+-- ('Agentic.Cli.rowHelp').
+--
+-- __Six sections, and the CLI supplies none of them.__ What this row is, what
+-- each of its inputs /means/, which transport it wants, one command line that
+-- would really run it, one rehearsal that consults nobody, and the caveats a
+-- price cannot state. The header above it already carries @level@, @cost@,
+-- @inputs@, @runFacts@ and @pins@, so __no text below names a number__: a
+-- hand-copied price is drift with a schedule, and the one place a page may talk
+-- about cost is a caveat pointing at @agentic-run cost@.
+--
+-- These seven are the reference implementation the seventy-two in
+-- @agent-workflows@ are written against, which is why each of them says the
+-- same six things in the same order even where a row could have said less.
+--
+-- Keyed by 'Text' and therefore not exhaustiveness-checked, exactly as
+-- 'blurbFor' and 'scriptFor' are — so @ci\/examples.sh@ runs @help@ for every
+-- registered name, because a missing case here is a fall-through and not a
+-- build failure.
+helpFor :: Text -> Text
+helpFor "harden" = hardenHelp
+helpFor "hello" = helloHelp
+helpFor n = isaacHelp n
+
+-- | 'hardenProgram''s page.
+hardenHelp :: Text
+hardenHelp =
+  [wft|
+    Corpus entry `example-000` as a program: read the house style guide from a
+    tool, draft a patch against it, review the draft by a three-model panel
+    under a bounded revision, and — if the owner says yes — apply it. It is the
+    same value tier1 rebuilds and tier0 replays, so what a run of it demonstrates
+    is the language rather than this executable.
+
+    **Inputs.** none. What it hardens is a `define` written in the source
+    (`Example.Harden.spec`, "harden the parser") and not a flag: the frozen
+    corpus entry has no input, and a program that took one would be a different
+    text from the one tier0 compares against.
+
+    **Transport.** An adapter of the run's own, and a scratch directory you are
+    willing to have written in — the last statement is an act that writes the
+    patched file, and `--scratch` names the only place an act may write. The
+    question before that act is put to a *person*; under `--engine acp` the
+    adapter answers for them, so an unattended run applies the patch unless the
+    adapter is told to refuse.
+
+    ```sh
+    agentic-run run harden --engine acp --adapter claude --scratch "$PWD" \
+       --route deep=acp:claude
+    ```
+
+    **Rehearsal.** Every question answered from the row's own canned table,
+    consulting nobody and running nothing:
+
+    ```sh
+    agentic-run run harden --scripted
+    ```
+
+    **Caveats.**
+
+    * It refuses `--require-pinned`. The three panel reviewers are asked of
+      `model` with no `served by`, deliberately, because the frozen entry pins
+      only the author's two asks — so `deep` is the one name `--route` accepts,
+      and every other question takes the default answerer.
+    * The two cheapest endings never reach the act, and neither touches your
+      tree: the owner answering `no` skips it, and a revision that has not
+      settled after its two rounds stops instead.
+    * `--adapter-arg --refuse` is how the stub adapter is told to answer *no* to
+      the owner's question, which is how the skipping arm is exercised without a
+      person in the loop.
+  |]
+
+-- | 'helloProgram''s page.
+helloHelp :: Text
+helloHelp =
+  [wft|
+    Corpus entry `example-001`, and the smallest thing that is still a workflow:
+    ask a tool for something worth greeting, ask a model to greet it, say it.
+    It exists so that the CLI has a subject that is not the flagship.
+
+    **Inputs.** none.
+
+    **Transport.** Fine anywhere. It asks no person and it writes no file of
+    yours, so a live `agent-deck` pane you are watching answers it as well as an
+    adapter of the run's own, and `--scratch` changes nothing about what it
+    means.
+
+    ```sh
+    agentic-run run hello --engine acp --adapter claude
+    ```
+
+    **Rehearsal.** Three canned replies, and nobody consulted:
+
+    ```sh
+    agentic-run run hello --scripted
+    ```
+
+    **Caveats.**
+
+    * It pins no model at all — the `pins` line above is `—`, and what that is
+      telling you is that `--route` will refuse every name you could give it.
+    * It has one path, so the two bounds above coincide and this program has a
+      price rather than a range: a run that billed anything else is a run of a
+      different program. For the same reason — nothing branches — `agentic-run
+      plan hello` prints a `codes` line that is a full sequence rather than
+      `null`. It shares that with `plan-feature`, the table's other pipeline;
+      the five branching rows print `null`.
+    * It refuses `--require-pinned`: `greeter` is asked with no `served by`.
+  |]
 
 -- ---------------------------------------------------------------------------
 -- The canned answers

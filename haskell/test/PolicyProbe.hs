@@ -95,8 +95,16 @@
 module Main (main) where
 
 -- The runner, for one function: `run.routes` is derived there and read in
--- `Agentic.Workflow`, and the pair is one contract.
-import Agentic.Cli (routesFact)
+-- `Agentic.Workflow`, and the pair is one contract. And for the parse, whose
+-- arm order IS the collision policy — read below over a registry that collides
+-- with every verb, which neither real table does.
+import Agentic.Cli
+  ( Command (..),
+    Registry (..),
+    Row (..),
+    parseCommand,
+    routesFact,
+  )
 import Agentic.Exec
 import Agentic.Plan
   ( El,
@@ -123,7 +131,8 @@ import Agentic.Route
   )
 import Agentic.Shell (ShellConfig (shellCwd), defaultShellConfig, executingWorld)
 import Agentic.Workflow
-  ( Words,
+  ( Example (Fixed),
+    Words,
     routeDefaultLabel,
     routedBackend,
     sessionPolicy,
@@ -406,6 +415,48 @@ siblings = "5"
 -- Rows rather than one assertion each because "Agentic.Route"'s grammar is a
 -- handful of spellings of one rule, and a gate that printed a line per spelling
 -- would report six facts where there is one.
+-- | A registry every one of whose rows is named after a verb.
+--
+-- Both shell gates check today's two tables against the reserved set, and a
+-- green run of either is a fact about /those tables/ — it would stay green if
+-- the parse changed. This is the policy instead: 'Agentic.Cli.parseCommand'
+-- decides a verb in head position before a row name is ever looked up, so these
+-- rows are unreachable __by name__ rather than ambiguous, which is exactly what
+-- makes unreachable-but-registered a thing a gate can shout about.
+--
+-- No program here is ever run. The parse is a pure function of the arguments
+-- and the registry's /names/, so the flagship stands in for six programs and
+-- the rows differ in nothing but what they are called.
+collidingRegistry :: Registry
+collidingRegistry =
+  Registry
+    { regBinary = "wf",
+      regNoun = "workflow",
+      regBanner = "a table that collides with its own verbs",
+      regRows = [(n, row) | n <- ["run", "plan", "cost", "list", "help", "ordinary"]]
+    }
+  where
+    row = Row (Fixed hardenProgram) "one line" "a page" []
+
+-- | What a parse came back as, in one word plus the name it settled on.
+--
+-- The policy is about which /arm/ answered, so it is stated as an equality on
+-- that rather than as a pattern match written once per case. The two refusals
+-- that matter are told apart by their wording, which is the same wording an
+-- operator reads.
+parsedAs :: [Text] -> String
+parsedAs args = case parseCommand collidingRegistry args of
+  Right Usage -> "usage"
+  Right (Help n) -> "help " <> T.unpack n
+  Right (List _) -> "list"
+  Right (Plan n _ _ _ _) -> "plan " <> T.unpack n
+  Right (Cost n _) -> "cost " <> T.unpack n
+  Right (Run n _ _ _) -> "run " <> T.unpack n
+  Left t
+    | "and not a verb" `T.isInfixOf` t -> "bare-row"
+    | "no verb '" `T.isInfixOf` t -> "no-verb"
+    | otherwise -> "refused"
+
 pureProbe :: IORef Int -> String -> [(String, Bool)] -> IO ()
 pureProbe failures name cases = case [c | (c, ok) <- cases, not ok] of
   [] -> TIO.putStrLn ("ok   " <> T.pack name)
@@ -1091,6 +1142,34 @@ main = do
         ("the narration keeps its wording", any ("falling back to broad" `T.isInfixOf`) msgs),
         ("with no chain the same two backends abandon in the old words", abandons)
       ]
+
+  -- __A verb in head position beats a row of the same name.__ Over
+  -- 'collidingRegistry', where every verb is also a row: the verb answers every
+  -- time, the rows named after it are reachable through `help NAME` and through
+  -- nothing else, and the one row that is not a verb keeps both of the answers
+  -- an ordinary row has.
+  --
+  -- `run` is the row the ruling's stop condition is about — it is the verb that
+  -- could start spending — so it is asked in all three of its spellings. The
+  -- last two rows are the control: strike the collision and the same command
+  -- lines mean the row.
+  pureProbe failures "a verb in head position beats a row of the same name"
+    [ ("run NAME is the verb", parsedAs ["run", "ordinary", "--scripted"] == "run ordinary"),
+      ("a bare `run` is the verb wanting a subject", parsedAs ["run"] == "refused"),
+      ("`run --help` is the verb too, and refuses", parsedAs ["run", "--help"] == "refused"),
+      ("plan NAME is the verb", parsedAs ["plan", "ordinary"] == "plan ordinary"),
+      ("cost NAME is the verb", parsedAs ["cost", "ordinary"] == "cost ordinary"),
+      ("`list` is the verb", parsedAs ["list"] == "list"),
+      ("`help` alone is the usage", parsedAs ["help"] == "usage"),
+      -- The one door left open, and it is enough: a row named after a verb can
+      -- still be READ about, which is what makes the situation a thing to fix
+      -- rather than a thing to discover.
+      ("`help run` reaches the row named run", parsedAs ["help", "run"] == "help run"),
+      ("`help help` reaches the row named help", parsedAs ["help", "help"] == "help help"),
+      ("an ordinary row is refused bare, naming the verbs", parsedAs ["ordinary"] == "bare-row"),
+      ("…and answers NAME --help", parsedAs ["ordinary", "--help"] == "help ordinary"),
+      ("an unregistered name is still no verb", parsedAs ["ordinarie"] == "no-verb")
+    ]
 
   n <- readIORef failures
   if n == 0

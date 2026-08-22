@@ -87,7 +87,21 @@
 # about two expressions, so it is checked as two expressions rather than
 # inferred from a program's numbers.
 #
-# No Lean, no corpus; every commit may run it. Thirty-six checks, and two
+# And the collision policy the fifth verb rests on (`Agentic.Cli.parseCommand`,
+# exported for exactly this): a SYNTHETIC registry every one of whose rows is
+# named after a verb — `run`, `plan`, `cost`, `list`, `help` — plus one that is
+# not. Both shell gates check today's two tables against that reserved set, and
+# a green run of either is a fact about those tables that would stay green if
+# the parse changed; this is the policy. The verb answers every spelling,
+# `run NAME` most of all because it is the verb that could start spending; a row
+# named after a verb is reachable through `help NAME` and through nothing else,
+# which is what makes unreachable-but-registered a thing a gate can shout about
+# rather than a thing to discover; and the row that is NOT a verb keeps both
+# answers an ordinary row has, which is the control. Pure: the parse is a
+# function of the arguments and the registry's names, and no program in the
+# synthetic table is ever run.
+#
+# No Lean, no corpus; every commit may run it. Thirty-seven checks, and two
 # command lines.
 set -euo pipefail
 cd "$(dirname "$0")/.."
