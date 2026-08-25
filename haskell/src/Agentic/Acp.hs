@@ -354,6 +354,7 @@ import Agentic.AgentDeck (renderQ)
 import Agentic.Exec
   ( ExecSettings (esLog, esRetryUndecodable),
     TurnGap (GapEmptyOrProtocol, GapTransportRefusal),
+    TurnLane,
     WorldIO (..),
     addresseeWord,
     askDecodingWith,
@@ -367,6 +368,7 @@ import Agentic.Exec
     stderrLog,
     trimAscii,
     withTransportGaps,
+    newTurnLaneIO,
   )
 import Agentic.Plan (Q (..), SCode (SAck), fromSCode)
 import Agentic.Raw (Addressee, Code, SomeCode (..))
@@ -883,7 +885,9 @@ data Acp = Acp
     -- | The question under way and how a permission request arriving during it
     -- is answered. 'sayAcp' sets it immediately before each prompt, because
     -- "the question under way" is a fact it has and the pump does not.
-    acpAsked :: !(IORef (Text, Permission))
+    acpAsked :: !(IORef (Text, Permission)),
+    -- | Plan-ordered turns on this one JSON-RPC pipe.
+    acpTurnLane :: !TurnLane
   }
 
 -- | What the agent advertised at @initialize@, as the handshake read it.
@@ -969,6 +973,7 @@ connectAcp cfg = do
       <*> newIORef Nothing
       <*> newIORef (Capabilities False False Null)
       <*> newIORef ("no question (the handshake, or a caller that set none)", Cancel)
+      <*> newTurnLaneIO
   flip onException (closeAcp acp) $ do
     handshake acp
     void (newSession acp)
@@ -1342,9 +1347,13 @@ worldOfAcp = worldOfAcpWith settings
 -- that answer is @RetryHere@, and otherwise handed to the fail-over walk. With
 -- no chain declared every diagnostic is the one it always was.
 worldOfAcpWith :: ExecSettings -> AcpConfig -> Acp -> WorldIO
-worldOfAcpWith st cfg acp = WorldIO $ \c q -> do
-  when (acpFreshPerQuestion cfg) (void (newSession acp))
-  withTransportGaps st acpGap c q (askDecodingWith st c q (sayAcp cfg acp c q))
+worldOfAcpWith st cfg acp =
+  WorldIO
+    { worldAskIO = \c q -> do
+        when (acpFreshPerQuestion cfg) (void (newSession acp))
+        withTransportGaps st acpGap c q (askDecodingWith st c q (sayAcp cfg acp c q)),
+      worldTurnLane = \_ _ -> Just (acpTurnLane acp)
+    }
 
 -- | Which gap an 'AcpError' is, and the evidence — @Nothing@ for an exception
 -- that is not this transport's to classify, which is rethrown untouched.

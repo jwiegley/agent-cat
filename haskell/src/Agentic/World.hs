@@ -77,6 +77,7 @@ import Agentic.Plan
     SCode (SAck, SFlag, SStructured, SText, SVerdict),
     VTag (VApprove, VDeclined, VObject),
     Verdict (Approve, Declined, Object),
+    evalExpr,
     fromSCode,
     verdictObject,
     verdictTag,
@@ -362,11 +363,11 @@ traceIn w y (PAskC c q k) =
   let a = worldAnswer w c q
    in Event c q a : traceIn w (ECons a y) k
 traceIn w y (PAsk c s e k) =
-  let q = withPrompt s (e y)
+  let q = withPrompt s (evalExpr e y)
       a = worldAnswer w c q
    in Event c q a : traceIn w (ECons a y) k
-traceIn w y (PCase _ e arms) = traceIn w y (arms (e y))
-traceIn w y (PDyn _ e f) = traceIn w y (f (e y))
+traceIn w y (PCase _ e arms) = traceIn w y (arms (evalExpr e y))
+traceIn w y (PDyn _ e f) = traceIn w y (f (evalExpr e y))
 
 -- | @Plan.run@ in the empty context — the answer rather than the transcript.
 -- No part of the oracle's record, but free from the same fold and useful in a
@@ -377,16 +378,16 @@ runPlan w = runIn w ENil
 -- | @Plan.run ω p γ@ (@Denote.lean:114@), fused through @denote@ the same way
 -- 'traceIn' is.
 runIn :: World -> Env g -> Plan g a -> a
-runIn _ y (PRet e) = e y
+runIn _ y (PRet e) = evalExpr e y
 runIn w y (PAskC c q k) =
   let a = worldAnswer w c q
    in runIn w (ECons a y) k
 runIn w y (PAsk c s e k) =
-  let q = withPrompt s (e y)
+  let q = withPrompt s (evalExpr e y)
       a = worldAnswer w c q
    in runIn w (ECons a y) k
-runIn w y (PCase _ e arms) = runIn w y (arms (e y))
-runIn w y (PDyn _ e f) = runIn w y (f (e y))
+runIn w y (PCase _ e arms) = runIn w y (arms (evalExpr e y))
+runIn w y (PDyn _ e f) = runIn w y (f (evalExpr e y))
 
 -- ---------------------------------------------------------------------------
 -- The bills

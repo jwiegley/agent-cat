@@ -12,10 +12,9 @@
 -- One run, several model backends. A route is a pair @NAME=BACKEND@ where
 -- @NAME@ is a __serving model__ — a @served by@ pin, or one of its
 -- @falling back to@ spares — and @BACKEND@ is a transport to start or to send
--- to. The whole of the runtime is 'routedWorld', a 'WorldIO' that dispatches to
--- other 'WorldIO's on a value the interpreter has already computed:
---
--- > routedWorld rs = WorldIO $ \c q -> worldAskIO (backendFor rs q) c q
+-- to. The whole runtime is 'routedWorld', a 'WorldIO' that dispatches both the
+-- eventual consultation and its prompt-independent turn lane to the backend
+-- selected by the question's model axis.
 --
 -- __The resolution rule, stated once.__ /A question is routed by its model
 -- axis; 'Nothing' takes the default./ Four things follow, and the first is why
@@ -95,8 +94,8 @@ module Agentic.Route
   )
 where
 
-import Agentic.Exec (WorldIO (WorldIO), worldAskIO)
-import Agentic.Plan (Q (qScope), QScope (scopeModelAxis))
+import Agentic.Exec (WorldIO (..))
+import Agentic.Plan (Q (qScope), QScope (scopeModelAxis), withPrompt)
 import Agentic.WF (wft)
 import Data.List (nub)
 import Data.Map.Strict (Map)
@@ -318,11 +317,12 @@ routeBackends rs = nub (routeDefault rs : map snd (routeNamed rs))
 -- Installed at exactly the position one @worldOfAcp cfg acp@ occupies today, so
 -- that @runPlanWith@, the memo table, the chain walk, @billFresh@, @billMemo@
 -- and every field of @EventKey@ are untouched __by construction rather than by
--- argument__: a 'WorldIO' is @forall c. SCode c -> Q c -> IO (El c)@, a
--- 'routedWorld' is a 'WorldIO' built from 'WorldIO's, and — exactly as
--- "Agentic.Exec" requires of any answerer — it can answer or fail but cannot
--- name who it was, cannot forge an event and cannot delete one. __Routing is
--- substitution at the same type.__ That is the argument in full.
+-- argument__: a 'WorldIO' carries an answerer and a prompt-independent lane
+-- selector; 'routedWorld' maps both through the same backend table. Exactly as
+-- "Agentic.Exec" requires, it can answer or fail but cannot forge or delete an
+-- event, while the selected lane lets the scheduler preserve that backend's
+-- plan order before prompt dependencies are ready. __Routing is substitution at
+-- the same type.__ That is the argument in full.
 --
 -- Three consequences follow from the position rather than from care:
 --
@@ -339,4 +339,10 @@ routeBackends rs = nub (routeDefault rs : map snd (routeNamed rs))
 --     table, consults the memo, and only then calls @worldAskIO@. Routing is
 --     what happens /inside/ that call.
 routedWorld :: Routes WorldIO -> WorldIO
-routedWorld rs = WorldIO $ \c q -> worldAskIO (backendFor rs q) c q
+routedWorld rs =
+  WorldIO
+    { worldAskIO = \c q -> worldAskIO (backendFor rs q) c q,
+      worldTurnLane = \c shape ->
+        let backend = backendFor rs (withPrompt shape T.empty)
+         in worldTurnLane backend c shape
+    }

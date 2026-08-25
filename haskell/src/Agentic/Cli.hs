@@ -309,8 +309,9 @@ import Agentic.Builder (Program, progPlan, progRawOut)
 import Agentic.Chains (servedChains)
 import qualified Data.Map.Strict as Map
 import Agentic.Exec
-  ( WorldIO (WorldIO),
+  ( WorldIO,
     announcingWorld,
+    concurrentWorld,
     chainsOf,
     noChains,
     runPlanWith,
@@ -1456,9 +1457,10 @@ runCmd reg name target prog gs = case target of
     -- run that is all `deck:` starts nothing and keeps the answer it always
     -- had: this process's directory, which the session need not share.
     --
-    -- The obvious objection — concurrent writes from several adapters — does
-    -- not arise: `execIn` is a sequential fold, so there is never more than one
-    -- turn in flight in a run.
+    -- Independent read-only turns may overlap. Each ACP pipe, deck session and
+    -- write-effect lane reserves work in plan order before dependencies are ready,
+    -- so later ready work cannot overtake an earlier blocked turn on that lane;
+    -- distinct read-only backends remain concurrent.
     dir <-
       if any isAcp backends
         then do
@@ -1475,8 +1477,20 @@ runCmd reg name target prog gs = case target of
     -- holds no connection at all. The default first because every run needs it,
     -- so a run whose default will not start fails before spawning anything
     -- else.
-    withAcps [(b, acpConfigFor rr dir w) | b@(BackendAcp w) <- backends] $ \live ->
-      walkWith (executingWorld (shellAt dir)) (routedWorld (fmap (worldOf rr dir live) rs))
+    withAcps [(b, acpConfigFor rr dir w) | b@(BackendAcp w) <- backends] $ \live -> do
+      services <-
+        traverse
+          ( \b -> do
+              service <- worldOf rr dir live b
+              pure (b, service)
+          )
+          backends
+      let connected b = case lookup b services of
+            Just service -> service
+            Nothing ->
+              concurrentWorld $ \_ _ ->
+                ioError (userError ("no answering service was made for backend " <> show b))
+      walkWith (executingWorld (shellAt dir)) (routedWorld (fmap connected rs))
   where
     -- The canned table is the row's own, which is why `run` looks the row up
     -- again rather than being handed a program: a script that lived anywhere
@@ -1499,14 +1513,16 @@ runCmd reg name target prog gs = case target of
     -- fourth case is therefore unreachable, and it is a raising 'WorldIO'
     -- rather than an `error` so that a bug here would be a named run failure at
     -- the question that hit it and not a bottom in the middle of a fold.
-    worldOf :: RunRoutes -> FilePath -> [(Backend, Acp)] -> Backend -> WorldIO
+    worldOf :: RunRoutes -> FilePath -> [(Backend, Acp)] -> Backend -> IO WorldIO
     worldOf rr dir live b = case b of
       BackendDeck s -> worldOfDeck (deckConfigFor rr s)
       BackendAcp w -> case lookup b live of
-        Just acp -> worldOfAcp (acpConfigFor rr dir w) acp
+        Just acp -> pure (worldOfAcp (acpConfigFor rr dir w) acp)
         Nothing ->
-          WorldIO $ \_ _ ->
-            ioError (userError ("no connection was made for the backend acp:" <> T.unpack w))
+          pure
+            ( concurrentWorld
+                (\_ _ -> ioError (userError ("no connection was made for the backend acp:" <> T.unpack w)))
+            )
 
     -- The header: *who answers what, under what policy, before a token moves* —
     -- and never a claim that anybody answered anything, which is the trace's to

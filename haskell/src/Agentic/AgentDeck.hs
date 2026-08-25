@@ -173,6 +173,7 @@ import Agentic.Exec
   ( ExecSettings (esLog, esRetryUndecodable),
     TurnGap (GapTransportRefusal),
     WorldIO (..),
+    newTurnLaneIO,
     addresseeWord,
     answerSpec,
     askDecodingWith,
@@ -446,7 +447,7 @@ renderQ c q =
 -- reason a question was put twice and a bill therefore looks the way it does,
 -- and that is owed to the operator whether or not they asked for transport
 -- chatter.
-worldOfDeck :: DeckConfig -> WorldIO
+worldOfDeck :: DeckConfig -> IO WorldIO
 worldOfDeck = worldOfDeckWith settings
   where
     settings =
@@ -464,9 +465,15 @@ worldOfDeck = worldOfDeckWith settings
 -- either puts the same question to the next model in its chain or raises the
 -- 'DeckError' itself — so with no chain declared a run fails in exactly the
 -- words it always did.
-worldOfDeckWith :: ExecSettings -> DeckConfig -> WorldIO
-worldOfDeckWith st cfg = WorldIO $ \c q ->
-  withTransportGaps st deckGap c q (askDecodingWith st c q (sayDeck cfg c q))
+worldOfDeckWith :: ExecSettings -> DeckConfig -> IO WorldIO
+worldOfDeckWith st cfg = do
+  lane <- newTurnLaneIO
+  pure
+    WorldIO
+      { worldAskIO = \c q ->
+          withTransportGaps st deckGap c q (askDecodingWith st c q (sayDeck cfg c q)),
+        worldTurnLane = \_ _ -> Just lane
+      }
 
 -- | Which gap a 'DeckError' is, and the evidence — @Nothing@ for an exception
 -- that is not this transport's to classify, which is rethrown untouched.

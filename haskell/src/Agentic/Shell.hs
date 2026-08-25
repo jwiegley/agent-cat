@@ -31,13 +31,14 @@
 --
 -- > runPlanIO (pureWorldIO w) p  ==  pure (runPlan w p, trace w p)
 --
--- and D5 does not touch it, for a structural reason rather than an argued one:
--- 'executingWorld' is a @WorldIO -> WorldIO@, and @pureWorldIO w@ is not it.
--- Nothing in @runPlanIO@, @execIn@, @askOrMemo@, @questionKey@ or @memoLookup@
--- changes for D5. A pure 'Agentic.World.World' answers a @toolExec@ question
--- from its 'Agentic.World.WorldSpec' like any other question — @toWorld@
--- dispatches on the /code/, never on the addressee — so __the kernel executes
--- nothing, ever__, and the oracle's observation of a program full of
+-- D5 does not move that equation: 'executingWorld' is a @WorldIO -> WorldIO@,
+-- and @pureWorldIO w@ is not wrapped in it. The concurrent interpreter does
+-- recognize receipts and @toolExec@ questions as write-capable so that their
+-- live effects reserve one plan-ordered lane, but that ordering changes no
+-- answer and executes nothing itself. A pure 'Agentic.World.World' still answers a @toolExec@
+-- question from its 'Agentic.World.WorldSpec' like any other question —
+-- @toWorld@ dispatches on the /code/, never on the addressee — so __the kernel
+-- executes nothing, ever__, and the oracle's observation of a program full of
 -- @toolExec@ asks is computed exactly as today.
 --
 -- == Why no capability lattice
@@ -86,6 +87,7 @@ import Agentic.Exec
 import Agentic.Plan
   ( El,
     Q (..),
+    Shape (shAddressee),
     SCode (SAck, SFlag, SStructured, SText, SVerdict),
     fromSCode,
     verdictApprove,
@@ -182,9 +184,15 @@ renderShellError = \case
 -- @session\/prompt@ carries it, and ACP's permission handler is not the path by
 -- which anything runs.
 executingWorld :: ShellConfig -> WorldIO -> WorldIO
-executingWorld cfg inner = WorldIO $ \c q -> case qAddressee q of
-  AddrToolExec _ cmd args -> answerByRunning cfg c q cmd args
-  _ -> worldAskIO inner c q
+executingWorld cfg inner =
+  WorldIO
+    { worldAskIO = \c q -> case qAddressee q of
+        AddrToolExec _ cmd args -> answerByRunning cfg c q cmd args
+        _ -> worldAskIO inner c q,
+      worldTurnLane = \c shape -> case shAddressee shape of
+        AddrToolExec {} -> Nothing
+        _ -> worldTurnLane inner c shape
+    }
 
 -- | The answer table, per code.
 --

@@ -10,7 +10,7 @@
 
 -- |
 -- Module      : Agentic.Exec
--- Description : The interpreter in @IO@: the memoizing fold, and the decode loop.
+-- Description : The interpreter in @IO@: STM dependency scheduling, memoization, and decoding.
 --
 -- A port of @Agentic\/Core\/Exec.lean@ from the line where the theorems stop
 -- (@Exec.lean:455@, \"the interpreter: a memoizing fold, with the answering
@@ -22,10 +22,13 @@
 --    to "Agentic.Text", which is the byte-faithful port and the /only/ place in
 --    this package that decides what an addressee's bytes mean. A second copy of
 --    that decision is exactly what @Exec.lean:248@–@:249@ says must not exist.
--- 2. __The memoizing fold__ — 'runPlanIO', @Exec.lean:503@'s @Dlg.execM@ at
---    @m := IO@, fused through @denote@ the way "Agentic.World"'s 'traceIn' is
---    (@Exec.lean:724@: @Plan.execWith o p γ t = Dlg.execM o (denote p γ) t@, and
---    @:726@ says that equation is @rfl@ because nothing else was written).
+-- 2. __The memoizing interpreter__ — 'runPlanIO' realizes @Exec.lean:503@'s
+--    @Dlg.execM@ observable while scheduling dependency-ready asks concurrently.
+--    Prompt support is carried by 'Expr'; STM answer cells block only consumers,
+--    memo reservations ensure equal questions race to one consultation, and trace
+--    tickets restore plan order. This is no longer Lean's sequential @rfl@
+--    implementation at @IO@, so the claim retained here is the executable pure
+--    factorization below, not definitional equality of operational steps.
 -- 3. __The answering service__ — 'WorldIO', Lean's @Oracle IO@, passed in. The
 --    only 'WorldIO' here is 'scriptedWorld'; the live one is
 --    @Agentic.AgentDeck@'s 'worldOfDeck', and it is built from the same
@@ -38,8 +41,9 @@
 -- transcript are two objects here where Lean makes them one, and the split is
 -- deliberate:
 --
--- * the table is Lean's @Table@ — consulted before asking, extended after
---   answering, and that pair of lines is the whole of kernel §5's argument
+-- * the table is Lean's @Table@ — consulted before asking and extended after
+--   answering. The check, in-flight reservation and insertion are one STM state
+--   transition, so two equal ready questions still invoke the service once.
 --   (@Exec.lean:507@–@:511@). A question already answered is not put again.
 -- * the trace is @Plan.trace@ — what the /plan/ consulted, repetitions and all,
 --   so that 'billFresh' and 'billMemo' mean here what they mean in
@@ -50,7 +54,10 @@
 -- Hence the invariant a caller may lean on, and which a test should pin:
 --
 -- > billFresh t == the number of ask nodes the run walked
--- > billMemo  t == the number of times the 'WorldIO' was actually invoked
+-- > billMemo  t == the number of distinct successfully answered questions in t
+
+-- Failed transport attempts and decode retries are operational work but have no
+-- 'Event', so neither bill pretends to count them.
 --
 -- and, at a pure world ('pureWorldIO', Lean's @pureOracle@ at
 -- @Exec.lean:618@), the factorization theorem @Exec.lean:646@ becomes an
@@ -88,6 +95,9 @@
 module Agentic.Exec
   ( -- * The answering service
     WorldIO (..),
+    concurrentWorld,
+    TurnLane,
+    newTurnLaneIO,
     pureWorldIO,
     announcingWorld,
 
@@ -152,11 +162,16 @@ where
 import Agentic.Plan
   ( El,
     Env (ECons, ENil),
+    Expr,
     Plan (PAsk, PAskC, PCase, PDyn, PRet),
     Q (..),
+    Shape (..),
     SCode (SAck, SFlag, SStructured, SText, SVerdict),
     defaultEl,
+    evalExpr,
+    exprUses,
     fromSCode,
+    shapeOf,
     withPrompt,
   )
 import Agentic.Raw
@@ -176,18 +191,44 @@ import Agentic.World
     World (worldAnswer),
     eventKey,
   )
+import Control.Concurrent (ThreadId, forkFinally, killThread)
+import Control.Concurrent.STM
+  ( STM,
+    TMVar,
+    TVar,
+    atomically,
+    modifyTVar',
+    newEmptyTMVar,
+    newEmptyTMVarIO,
+    newTMVarIO,
+    newTVarIO,
+    orElse,
+    putTMVar,
+    readTMVar,
+    readTVar,
+    throwSTM,
+    tryPutTMVar,
+    tryReadTMVar,
+    writeTVar,
+  )
 import Control.Exception
   ( Exception (displayException, toException),
     SomeAsyncException,
     SomeException,
     fromException,
+    mask,
+    onException,
     throwIO,
     try,
   )
+import Control.Monad (void)
+import Data.Foldable (traverse_)
+import Data.IntSet (IntSet)
+import qualified Data.IntSet as IntSet
 import Data.List (find, nub)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -199,23 +240,29 @@ import System.IO (hPutStrLn, stderr)
 -- The answering service
 -- ---------------------------------------------------------------------------
 
--- | @Oracle IO@ (@Exec.lean:476@), less the history argument: given a code and
--- a question, produce an answer, in @IO@.
---
--- A rank-2 newtype for the same reason "Agentic.World"'s 'World' is one — the
--- answer's type depends on the code — and the two differ in exactly the monad,
--- which is the sense in which the @IO@ layer is /only/ the answering service.
---
--- Two things this type says, and they are the reason it is this type
--- (@Exec.lean:461@–@:475@):
---
--- * it returns @IO (El c)@ and not @IO (El c, table)@, so an answerer can
---   invent an answer but cannot forge or delete a recorded one. That is
---   structural, not a discipline the code follows;
--- * it is where @IO@ is quarantined. No other declaration in this module is
---   effectful except 'runPlanIO', which only runs this one.
-newtype WorldIO = WorldIO
-  {worldAskIO :: forall (c :: Code). SCode c -> Q c -> IO (El c)}
+-- | A stateful answering lane. Reservations are linked in plan order: each
+-- node waits for its predecessor's completion cell, while different lanes and
+-- worlds with no lane remain concurrent.
+newtype TurnLane = TurnLane (TVar (TMVar ()))
+  deriving (Eq)
+
+newTurnLaneIO :: IO TurnLane
+newTurnLaneIO = do
+  completed <- newTMVarIO ()
+  TurnLane <$> newTVarIO completed
+
+-- | @Oracle IO@ plus the stateful lane, if any, selected from a question's
+-- prompt-independent shape. The answerer can invent an answer but cannot forge
+-- an event; the lane lets the interpreter reserve transport order before a
+-- prompt's dependencies are ready.
+data WorldIO = WorldIO
+  { worldAskIO :: forall (c :: Code). SCode c -> Q c -> IO (El c),
+    worldTurnLane :: forall (c :: Code). SCode c -> Shape c -> Maybe TurnLane
+  }
+
+-- | An answering service whose calls need no ordering beyond data dependencies.
+concurrentWorld :: (forall (c :: Code). SCode c -> Q c -> IO (El c)) -> WorldIO
+concurrentWorld ask = WorldIO ask (\_ _ -> Nothing)
 
 -- | @pureOracle ω@ (@Exec.lean:618@): the answering service that /is/ the world
 -- @ω@, ignoring the history because a world is a function of the question.
@@ -230,7 +277,7 @@ newtype WorldIO = WorldIO
 -- because a 'World' is a function: a repeated question would have got the same
 -- answer had it been put again.
 pureWorldIO :: World -> WorldIO
-pureWorldIO w = WorldIO (\c q -> pure (worldAnswer w c q))
+pureWorldIO w = concurrentWorld (\c q -> pure (worldAnswer w c q))
 
 -- | Wrap an answering service so that every question it is actually put — and
 -- the answer that came back — is announced, one line each.
@@ -245,217 +292,334 @@ pureWorldIO w = WorldIO (\c q -> pure (worldAnswer w c q))
 -- (@Exec.lean:878@, \"What used to be here\"); the property it had is the one
 -- this has — a reporting hook is visible to no theorem.
 announcingWorld :: (Text -> IO ()) -> WorldIO -> WorldIO
-announcingWorld out (WorldIO ask) = WorldIO $ \c q -> do
-  out $
-    codeWord (fromSCode c)
-      <> " -> "
-      <> addresseeWord (qAddressee q)
-      <> ": "
-      <> oneLine (qPrompt q)
-  a <- ask c q
-  out $ "  <- " <> oneLine (sayEl c a)
-  pure a
+announcingWorld out inner =
+  WorldIO
+    { worldAskIO = \c q -> do
+        out $
+          codeWord (fromSCode c)
+            <> " -> "
+            <> addresseeWord (qAddressee q)
+            <> ": "
+            <> oneLine (qPrompt q)
+        a <- worldAskIO inner c q
+        out $ "  <- " <> oneLine (sayEl c a)
+        pure a,
+      worldTurnLane = worldTurnLane inner
+    }
 
 -- ---------------------------------------------------------------------------
--- The interpreter: the memoizing fold
+-- The concurrent memoizing interpreter
 -- ---------------------------------------------------------------------------
 
--- | What the fold threads: Lean's @Table@ (@World.lean:118@, a list of
--- @⟨c, q, a⟩@) as a map keyed by the answer-forgetting projection of that
--- triple, plus the transcript in reverse.
---
--- The table is a 'Map' rather than an association list because @lookup@ is the
--- only operation on it and Lean's cons-order is unobservable through @lookup@:
--- a key is inserted only where the lookup said nothing (@World.lean:193@'s
--- @le_cons_of_lookup_none@ is that hypothesis, discharged at @Exec.lean:543@),
--- so no insert ever overwrites
--- and \"first wins\" and \"last wins\" coincide.
+-- | The shared state of one run. Completed answers, in-flight reservations
+-- and spent-model knowledge move in one 'TVar', so every claim observes one
+-- atomic snapshot. A prompt already in flight may finish after a model becomes
+-- spent; only work that has not started is skipped.
 data Memo = Memo
   { memoTable :: !(Map EventKey Event),
-    -- | most recent first; 'runPlanIO' reverses it once, at the end
-    memoSaid :: [Event],
-    -- | the models that reported their allowance spent, which a later question
-    -- pinning one of them skips __without asking__. Threaded through the fold
-    -- rather than held in an 'Data.IORef.IORef', so 'noChains' stays a value
-    -- and @runPlanIO = runPlanWith noChains@ needs no @IO@ to say it.
+    memoPending :: !(Map EventKey (TMVar (Either SomeException Event))),
     memoSpent :: !(Set Text)
   }
 
--- | @Plan.execWith o p Env.nil Table.nil@ (@Exec.lean:717@; Lean's @execIO@
--- entry point around it is retired, @Exec.lean:978@): run a closed plan against
--- an answering service and return the answer together with the transcript.
+-- | One scheduled ask node: its typed answer and the event occupying that node's
+-- position in the eventual trace.
+data NodeResult (c :: Code) = NodeResult (El c) Event
+
+type NodeCell c = TMVar (Either SomeException (NodeResult c))
+
+-- | An execution environment whose answers may still be in flight.
+data Pending (g :: [Code]) where
+  PendingNil :: Pending '[]
+  PendingCons :: NodeCell c -> Pending g -> Pending (c ': g)
+
+data Ticket where
+  Ticket :: NodeCell c -> Ticket
+
+data Scheduler = Scheduler
+  { schedulerMemo :: !(TVar Memo),
+    schedulerThreads :: !(TVar [ThreadId]),
+    schedulerFailed :: !(TMVar SomeException),
+    schedulerEffects :: !TurnLane
+  }
+
+data Claim
+  = ClaimCached Event
+  | ClaimWait (TMVar (Either SomeException Event))
+  | ClaimOwner (TMVar (Either SomeException Event))
+
+-- | One FIFO link: wait for the predecessor, then publish this node's completion.
+data Reservation = Reservation !(TMVar ()) !(TMVar ())
+
+-- | @Plan.execWith o p Env.nil Table.nil@, with independent ask nodes allowed
+-- to overlap. Every prompt expression carries the de Bruijn indices it reads;
+-- a worker waits in STM for exactly those answer cells, so a shared earlier
+-- answer blocks every consumer while sibling prompts that do not read one
+-- another start together. Stateful transport lanes and the write-effect lane
+-- reserve FIFO links during this traversal, before workers await dependencies;
+-- every possible fail-over backend is reserved, so later ready work cannot
+-- overtake an earlier blocked node on any lane it may use.
 --
--- __Look up before asking; record after answering__ (@Exec.lean:490@). A
--- question whose 'EventKey' — code, addressee, scope, prompt and draw, which is
--- exactly what 'billMemo' charges by — has already been answered is answered
--- from the table and the service is not invoked. That is what makes the run
--- /functional/ with no hypothesis on the answerer, which is the whole of
--- @execM_adequacy@ (@Exec.lean:577@): one question, one answer, however
--- faithless the addressee.
---
--- A deliberate resample is not defeated by it: @draw@ is a field of the
--- question, so a second draw is a different question and misses the table by
--- construction (§3 q1).
---
--- The five clauses are @denote@'s fold in @IO@ and nothing more:
---
--- > PRet e       -- the answer, from what is known
--- > PAskC c q k  -- ask-or-memo, then continue with the answer consed on
--- > PAsk c s e k -- the same, at the question 'withPrompt' builds from what is known
--- > PCase _ e f  -- select the arm; nothing is asked and nothing is recorded
--- > PDyn _ e f   -- likewise, and it is here only for totality
---
--- 'PDyn' cannot be reached from @Agentic.Builder@ (no combinator makes one) and
--- the DSL never elaborates to one (@Check.lean:57@), but it is a former of the
--- language and this fold is total on the language, so it takes the same clause
--- @denote@ gives it — the two share a meaning clause on purpose
--- (@Denote.lean:60@).
---
--- __The prompt is evaluated before the answer is bound__, so a splice reads
--- what was already answered and never what this question will answer. Getting
--- that backwards is the one way this fold can differ from 'traceIn' while still
--- typechecking.
+-- The observable remains the sequential meaning: the result is evaluated from
+-- the same answers, and tickets are collected in plan order rather than worker
+-- completion order. A case schedules only the selected arm. A concurrent memo
+-- reservation preserves "one question, one answer" when equal questions race.
 runPlanIO :: WorldIO -> Plan '[] a -> IO (a, Trace)
 runPlanIO = runPlanWith noChains
 
--- | 'runPlanIO' under a chain table: the same fold, with 'askOrMemo' walking
--- the models a pinned question may be answered by rather than the one it names
--- (D6).
---
--- __The factorization survives, definitionally rather than by argument.__ With
--- an empty chain table and an empty spent set 'candidates' answers @[q]@, the
--- loop runs one iteration, the lookup and the insert are both at
--- @questionKey c q@, and the recovery fork is never consulted because no gap
--- arrives at a pure world. @runPlanWith noChains@ is therefore the 'askOrMemo'
--- of before, clause for clause, and
---
--- > runPlanIO (pureWorldIO w) p  ==  pure (runPlan w p, trace w p)
---
--- holds verbatim, with @runPlanIO = runPlanWith noChains@.
---
--- __The live trace may disagree with a frozen one, and that is the feature.__
--- The trace records the model that __actually answered__ — @Event c qi a@ is
--- built from the candidate that answered, and its scope serializes with no
--- change whatsoever — so a program whose frozen trace says @deep@ may, on a day
--- the allowance is spent, produce a live trace that says @broad@. That
--- divergence is the observation, and it is available to an operator precisely
--- because a fail-over is not written into the table under the primary's key.
--- The failed attempt itself is recorded nowhere: an 'Event' carries an answer
--- and a failed attempt has none, so the trace records the dialogue and
--- @stderr@ records the attempts.
+-- | 'runPlanIO' under a fail-over chain table. The spent-model set is checked
+-- atomically before each attempt; it is scheduling knowledge, not a lock, so
+-- dependency-independent questions remain concurrent even at one model pin.
 runPlanWith :: Chains -> WorldIO -> Plan '[] a -> IO (a, Trace)
-runPlanWith ch w p = do
-  (a, m) <- execIn w ch ENil p (Memo Map.empty [] Set.empty)
-  pure (a, reverse (memoSaid m))
+runPlanWith ch w p = mask $ \restore -> do
+  memo <- newTVarIO (Memo Map.empty Map.empty Set.empty)
+  threads <- newTVarIO []
+  failed <- newEmptyTMVarIO
+  effects <- newTurnLaneIO
+  let scheduler = Scheduler memo threads failed effects
+      run = do
+        (a, tickets) <- execIn scheduler w ch PendingNil p
+        trace <- traverse (awaitTicket scheduler) tickets
+        pure (a, trace)
+  restore run `onException` cancelWorkers scheduler
 
--- | The fold proper, in an arbitrary context. Not exported: a plan is run
--- closed and from the empty table, which is the only case any theorem is
--- stated at.
-execIn :: WorldIO -> Chains -> Env g -> Plan g a -> Memo -> IO (a, Memo)
-execIn w ch y pl m = case pl of
-  PRet e -> pure (e y, m)
+-- | Schedule the fixed spine immediately. Prompt and branch expressions wait
+-- only for the answer cells named by their dependency metadata.
+execIn :: Scheduler -> WorldIO -> Chains -> Pending g -> Plan g a -> IO (a, [Ticket])
+execIn scheduler w ch y pl = case pl of
+  PRet e -> do
+    a <- awaitExpr scheduler e y
+    pure (a, [])
   PAskC c q k -> do
-    (a, m') <- askOrMemo w ch c q m
-    execIn w ch (ECons a y) k m'
-  PAsk c s e k -> do
-    let q = withPrompt s (e y)
-    (a, m') <- askOrMemo w ch c q m
-    execIn w ch (ECons a y) k m'
-  PCase _ e arms -> execIn w ch y (arms (e y)) m
-  PDyn _ e f -> execIn w ch y (f (e y)) m
+    cell <- spawn scheduler (reserveQuestion scheduler w ch c (shapeOf q)) $ do
+      (a, event) <- askOrMemo scheduler w ch c q
+      pure (NodeResult a event)
+    (result, tickets) <- execIn scheduler w ch (PendingCons cell y) k
+    pure (result, Ticket cell : tickets)
+  PAsk c shape prompt k -> do
+    cell <- spawn scheduler (reserveQuestion scheduler w ch c shape) $ do
+      words' <- awaitExpr scheduler prompt y
+      (a, event) <- askOrMemo scheduler w ch c (withPrompt shape words')
+      pure (NodeResult a event)
+    (result, tickets) <- execIn scheduler w ch (PendingCons cell y) k
+    pure (result, Ticket cell : tickets)
+  PCase _ e arms -> do
+    tag <- awaitExpr scheduler e y
+    execIn scheduler w ch y (arms tag)
+  PDyn _ e f -> do
+    a <- awaitExpr scheduler e y
+    execIn scheduler w ch y (f a)
 
--- | @Exec.lean:523@ (@execM_ask_hit@) and @:530@ (@execM_ask_miss@), the two
--- clauses of the @ask@ case, plus the transcript entry both of them make — and,
--- since D6, the walk over the models a pinned question may be answered by.
---
--- In words: __for each live candidate in order, consult the table, then the
--- wire.__ The hit is the identity on the table; the miss asks, records, and
--- only then continues, so the continuation runs in the extended world.
---
--- Four properties, which are @Agent.Run.overChain@'s four discharged at these
--- types:
---
--- * /the whole action is retried/ — trivially: the action is one question;
--- * /re-run under the next connection's own recorder/ — the answer is memoized
---   under @questionKey c qi@, the __answerer's__ key, never the primary's.
---   Writing it under the primary's would put in the table an answer attributed
---   to a model that did not give it;
--- * /the exhaustion never escapes/ — when nothing is left, 'tgeFinal' is raised,
---   which is exactly what the run would have raised with no chain declared. So
---   with no alternates anywhere every diagnostic in this package is
---   byte-identical to the one before fail-over existed;
--- * /a spent model is not asked again/ — 'memoSpent' is why repetition stays
---   cheap and consistent. Walk an ask node twice, having lost @deep@ to
---   exhaustion on the first walk: the second walk's candidate list is
---   @[broad]@, the lookup at @broad@'s key hits, and nothing is put. The memo
---   invariant — a question already answered is not put again — survives a
---   fail-over intact. A __non__-exhaustion gap does not mark the model spent,
---   so the second walk does re-ask it, and that is right: a turn that failed
---   once is not a model that is finished.
---
--- __@billFresh@ is unchanged by construction__ (one event per ask node walked)
--- and @billMemo@ is unchanged in the ordinary fail-over, because the dead
--- attempts record nothing. It rises in exactly one situation — a node answered
--- by one model early and by another later — and that rise is correct: two
--- different models said the same words, which by 'EventKey'\'s own definition
--- is two questions.
-askOrMemo :: WorldIO -> Chains -> SCode c -> Q c -> Memo -> IO (El c, Memo)
-askOrMemo w ch c q m = do
-  let live = candidates ch (memoSpent m) q
-      skipped = [x | x <- chainOf ch q, x `Set.member` memoSpent m]
-  mapM_ (chainLog ch . spentSkip) skipped
-  case live of
-    [] -> abandonAllSpent c q (chainOf ch q)
-    qs -> go qs m
+reserveQuestion :: Scheduler -> WorldIO -> Chains -> SCode c -> Shape c -> IO [Reservation]
+reserveQuestion scheduler w ch c shape = atomically (traverse reserveLane (nub lanes))
   where
-    said qi a m' = m' {memoSaid = Event c qi a : memoSaid m'}
+    q = withPrompt shape T.empty
+    transportLanes =
+      mapMaybe
+        (\candidate -> worldTurnLane w c (shapeOf candidate))
+        (candidates ch Set.empty q)
+    lanes =
+      (if writes then [schedulerEffects scheduler] else []) <> transportLanes
+    writes = case c of
+      SAck -> True
+      _ -> case shAddressee shape of
+        AddrToolExec {} -> True
+        _ -> False
 
-    go [] _ = abandonAllSpent c q (chainOf ch q)
-    go (qi : rest) m' = case memoLookup c (questionKey c qi) (memoTable m') of
-      Just a -> pure (a, said qi a m')
-      Nothing -> do
-        attempt <- try (worldAskIO w c qi)
-        case attempt of
-          Right a ->
-            pure
-              ( a,
-                said
-                  qi
-                  a
-                  m'
-                    { memoTable =
-                        Map.insert (questionKey c qi) (Event c qi a) (memoTable m')
+reserveLane :: TurnLane -> STM Reservation
+reserveLane (TurnLane tailCell) = do
+  previous <- readTVar tailCell
+  completed <- newEmptyTMVar
+  writeTVar tailCell completed
+  pure (Reservation previous completed)
+
+spawn :: Scheduler -> IO [Reservation] -> IO a -> IO (TMVar (Either SomeException a))
+spawn scheduler reserve action = mask $ \restore -> do
+  reservations <- reserve
+  cell <- newEmptyTMVarIO
+  tid <-
+    forkFinally
+      (restore (awaitReservations reservations >> abortIfFailed scheduler >> action))
+      (\outcome ->
+        atomically $ do
+          traverse_ completeReservation reservations
+          putTMVar cell outcome
+          case outcome of
+            Left e -> void (tryPutTMVar (schedulerFailed scheduler) e)
+            Right _ -> pure ()
+      )
+      `onException` releaseReservations reservations
+  atomically (modifyTVar' (schedulerThreads scheduler) (tid :))
+  pure cell
+
+releaseReservations :: [Reservation] -> IO ()
+releaseReservations = atomically . traverse_ completeReservation
+
+abortIfFailed :: Scheduler -> IO ()
+abortIfFailed scheduler =
+  atomically $ do
+    failed <- tryReadTMVar (schedulerFailed scheduler)
+    maybe (pure ()) throwSTM failed
+
+awaitReservations :: [Reservation] -> IO ()
+awaitReservations = atomically . traverse_ awaitReservation
+
+awaitReservation :: Reservation -> STM ()
+awaitReservation (Reservation previous _) = void (readTMVar previous)
+
+completeReservation :: Reservation -> STM ()
+completeReservation (Reservation _ completed) = void (tryPutTMVar completed ())
+
+cancelWorkers :: Scheduler -> IO ()
+cancelWorkers scheduler =
+  atomically (readTVar (schedulerThreads scheduler)) >>= mapM_ killThread
+
+awaitTicket :: Scheduler -> Ticket -> IO Event
+awaitTicket scheduler (Ticket cell) = do
+  NodeResult _ event <- awaitCell scheduler cell
+  pure event
+
+awaitCell :: Scheduler -> TMVar (Either SomeException a) -> IO a
+awaitCell scheduler cell =
+  atomically $
+    (readTMVar cell >>= either throwSTM pure)
+      `orElse` (readTMVar (schedulerFailed scheduler) >>= throwSTM)
+
+awaitExpr :: Scheduler -> Expr g a -> Pending g -> IO a
+awaitExpr scheduler expr pending = do
+  env <-
+    atomically $
+      pendingEnv (exprUses expr) pending
+        `orElse` (readTMVar (schedulerFailed scheduler) >>= throwSTM)
+  pure (evalExpr expr env)
+
+pendingEnv :: IntSet -> Pending g -> STM (Env g)
+pendingEnv uses PendingNil
+  | IntSet.null uses = pure ENil
+  | otherwise = throwSTM (userError "expression dependency points outside its context")
+pendingEnv uses (PendingCons cell rest) = do
+  value <-
+    if 0 `IntSet.member` uses
+      then do
+        NodeResult a _ <- readTMVar cell >>= either throwSTM pure
+        pure a
+      else pure unavailable
+  tailEnv <- pendingEnv (dropHead uses) rest
+  pure (ECons value tailEnv)
+  where
+    unavailable = error "Agentic.Exec: expression dependency metadata omitted a value it read"
+
+dropHead :: IntSet -> IntSet
+dropHead = IntSet.mapMonotonic (subtract 1) . IntSet.delete 0
+
+-- | Consult a chain against the concurrent memo. A failed reservation is
+-- removed after publishing its exception, preserving the old rule that a later
+-- occurrence retries a transient gap; simultaneous occurrences still share the
+-- one attempt they raced on.
+askOrMemo :: Scheduler -> WorldIO -> Chains -> SCode c -> Q c -> IO (El c, Event)
+askOrMemo scheduler w ch c q = go (candidates ch Set.empty q)
+  where
+    go [] = abandonAllSpent c q (chainOf ch q)
+    go (qi : rest) = do
+      available <- atomically (candidateAvailable scheduler qi)
+      if not available
+        then chainLog ch (spentSkip qi) >> go rest
+        else do
+          outcome <- try (consult scheduler w c qi) :: IO (Either SomeException Event)
+          case outcome of
+            Left e
+              | Just tge <- fromException e,
+                tgeGap tge == GapExhausted -> markSpent scheduler qi
+            _ -> pure ()
+          case outcome of
+            Right event -> case eventAnswer c event of
+              Just a -> pure (a, event)
+              Nothing -> ioError (userError "memoized event has a different answer code from its key")
+            Left e
+              -- An interrupt is the operator talking, not a gap.
+              | Just (_ :: SomeAsyncException) <- fromException e -> throwIO e
+              | otherwise -> case fromException e of
+                  Nothing -> throwIO e
+                  Just tge -> do
+                    next <- nextLive scheduler rest
+                    case next of
+                      Just qi' -> do
+                        chainLog ch $
+                          fromMaybe (addresseeWord (qAddressee qi)) (modelOf qi)
+                            <> ": "
+                            <> tgeWhy tge
+                            <> "; falling back to "
+                            <> fromMaybe "the next candidate" (modelOf qi')
+                        go rest
+                      Nothing -> throwIO (tgeFinal tge)
+
+    spentSkip qi =
+      fromMaybe (addresseeWord (qAddressee qi)) (modelOf qi)
+        <> " " <> [wft|reported its allowance spent earlier in this run; not asking it again|]
+
+
+candidateAvailable :: Scheduler -> Q c -> STM Bool
+candidateAvailable scheduler q = do
+  spent <- memoSpent <$> readTVar (schedulerMemo scheduler)
+  pure (maybe True (`Set.notMember` spent) (modelOf q))
+
+markSpent :: Scheduler -> Q c -> IO ()
+markSpent scheduler q = case modelOf q of
+  Nothing -> pure ()
+  Just model ->
+    atomically $
+      modifyTVar'
+        (schedulerMemo scheduler)
+        (\memo -> memo {memoSpent = Set.insert model (memoSpent memo)})
+
+nextLive :: Scheduler -> [Q c] -> IO (Maybe (Q c))
+nextLive scheduler qs = atomically $ do
+  spent <- memoSpent <$> readTVar (schedulerMemo scheduler)
+  pure (find (maybe True (`Set.notMember` spent) . modelOf) qs)
+
+consult :: Scheduler -> WorldIO -> SCode c -> Q c -> IO Event
+consult scheduler w c q = mask $ \restore -> do
+  let key = questionKey c q
+  claim <- atomically (claimQuestion scheduler key)
+  case claim of
+    ClaimCached event -> pure event
+    ClaimWait slot -> atomically (readTMVar slot >>= either throwSTM pure)
+    ClaimOwner slot -> do
+      outcome <- try (restore (worldAskIO w c q))
+      case outcome of
+        Right a -> do
+          let event = Event c q a
+          atomically $ do
+            modifyTVar'
+              (schedulerMemo scheduler)
+              ( \memo ->
+                  memo
+                    { memoTable = Map.insert key event (memoTable memo),
+                      memoPending = Map.delete key (memoPending memo)
                     }
               )
-          Left (e :: SomeException)
-            -- An interrupt is the operator talking, not a gap.
-            | Just (_ :: SomeAsyncException) <- fromException e -> throwIO e
-            | otherwise -> case fromException e of
-                Nothing -> throwIO e
-                Just tge -> do
-                  let m'' =
-                        if tgeGap tge == GapExhausted
-                          then
-                            m'
-                              { memoSpent = case modelOf qi of
-                                  Just i -> Set.insert i (memoSpent m')
-                                  Nothing -> memoSpent m'
-                              }
-                          else m'
-                  case rest of
-                    (nxt : _) -> do
-                      chainLog ch $
-                        fromMaybe (addresseeWord (qAddressee qi)) (modelOf qi)
-                          <> ": "
-                          <> tgeWhy tge
-                          <> "; falling back to "
-                          <> fromMaybe "the next candidate" (modelOf nxt)
-                      go rest m''
-                    [] -> throwIO (tgeFinal tge)
+            putTMVar slot (Right event)
+          pure event
+        Left (e :: SomeException) -> do
+          atomically $ do
+            modifyTVar'
+              (schedulerMemo scheduler)
+              (\memo -> memo {memoPending = Map.delete key (memoPending memo)})
+            putTMVar slot (Left e)
+          throwIO e
 
-    spentSkip i =
-      i
-        <> " " <> [wft|reported its allowance spent earlier in this run; not asking it again|]
+claimQuestion :: Scheduler -> EventKey -> STM Claim
+claimQuestion scheduler key = do
+  memo <- readTVar (schedulerMemo scheduler)
+  case Map.lookup key (memoTable memo) of
+    Just event -> pure (ClaimCached event)
+    Nothing -> case Map.lookup key (memoPending memo) of
+      Just slot -> pure (ClaimWait slot)
+      Nothing -> do
+        slot <- newEmptyTMVar
+        writeTVar
+          (schedulerMemo scheduler)
+          memo {memoPending = Map.insert key slot (memoPending memo)}
+        pure (ClaimOwner slot)
 
 -- | The model a question's scope names, if it names one.
 modelOf :: Q c -> Maybe Text
@@ -548,20 +712,14 @@ chainsOf lg t = Chains t lg
 questionKey :: SCode c -> Q c -> EventKey
 questionKey c q = eventKey (Event c q (defaultEl c))
 
--- | @lookup t c q@ (@World.lean:134@). The stored event carries its own code
--- witness, so recovering the answer at the caller's code is a matching of two
--- singletons.
---
--- The 'Nothing' of the inner match is unreachable — 'ekCode' is part of the key,
--- so a hit is at the same code — and it is written rather than @error@'d
--- because an unreachable branch that asks nobody a question costs nothing and a
--- partial function in the interpreter costs a run.
-memoLookup :: SCode c -> EventKey -> Map EventKey Event -> Maybe (El c)
-memoLookup c key tbl = case Map.lookup key tbl of
+-- | Recover the typed answer from the existential event stored at a memo key.
+-- The impossible mismatch remains 'Nothing' rather than introducing a partial
+-- function into the interpreter.
+
+eventAnswer :: SCode c -> Event -> Maybe (El c)
+eventAnswer c (Event c' _ a) = case sameCode c c' of
+  Just Refl -> Just a
   Nothing -> Nothing
-  Just (Event c' _ a) -> case sameCode c c' of
-    Just Refl -> Just a
-    Nothing -> Nothing
 
 
 -- ---------------------------------------------------------------------------
@@ -1432,7 +1590,7 @@ scriptedWorld = scriptedWorldWith defaultExecSettings
 -- nothing about the policy itself. A scripted case under a non-default policy
 -- is what would close that, and it is not in this wave.
 scriptedWorldWith :: ExecSettings -> [(Text, Text)] -> WorldIO
-scriptedWorldWith st table = WorldIO $ \c q ->
+scriptedWorldWith st table = concurrentWorld $ \c q ->
   askDecodingWith st c q (\_extra -> pure (scriptedReply table c q))
 
 -- | The bytes the scripted table answers a question with: the first entry whose

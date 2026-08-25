@@ -78,18 +78,18 @@ and only if nothing failed, so both are usable directly as CI gates.
 | `Agentic.Raw` | the `Raw` AST and a codec byte-compatible with Lean's derived `ToJson`/`FromJson` |
 | `Agentic.Guards` | the six term-level guards, in firing order, and the two ask counts |
 | `Agentic.Text` | the string layer — `norm`, `words`, `decodeVerdict`, `decodeFlag`, `say`, and since wave three the four **deciders** (`lastNonEmptyLineIs`, `containsLine`, `anyLineStartsWith`, `anyPathMatches`) with the primitives they are composed from (`bare`, `fields`, `headerPaths`, `matchGlob`) and the **fence** a text panel folds into (`block`, `escapeClose`, `validLabel`) — ASCII-only throughout, as Lean core is |
-| `Agentic.Plan` | the typed `Plan` — five formers, `DataKinds` codes, de Bruijn `Expr` — and its static folds `level`, `size`, `askNodes`, `codes`, `costSummary` |
+| `Agentic.Plan` | the typed `Plan` — five formers, `DataKinds` codes, de Bruijn `Expr` with finite dependency support — and its static folds `level`, `size`, `askNodes`, `codes`, `costSummary` |
 | `Agentic.World` | `WorldSpec` and `toWorld`, the `trace` of a plan through a world, the fresh and memo bills, and the oracle's event JSON |
 | `Agentic.Builder` | the production surface: typed combinators that both print a `RawProgram` and elaborate to the `Plan` the Lean checker elaborates the same construct to |
 | `Agentic.Schema` (+ `.Json`, `.TH`) | format-independent `SchemaEl`, `HasSchema` conversion, strict JSON representation, and `deriveSchema`, which derives a record's schema, witness, and total nested-product conversion |
 | `Agentic.WF` | the `[wf\|…\|]` prompt quoter — prose with `{name}` holes, laid out by the fence rule the frozen prompts were written under (blank edge lines dropped, common indentation stripped, no trailing newline) and chunked as the elaborator's left-associated `Prompt.expr` requires — adjacent literals never fused, empty literals dropped — and `Says`, which decides whether a hole is a binding or a `define`; and `[wft\|…\|]`, the same fence yielding a define's `Text` rather than a prompt's chunks, so that a define need not be written as a prompt and converted. One `parseFence` under both, so the two spellings of a block cannot differ by a byte |
 | `Agentic.Workflow` (+ `.Do`) | the **authoring** surface: an indexed block, written in ordinary Haskell under `W.do`, in which a bind is a Haskell bind, a branch on a revision's result is a Haskell `case` and a branch on a flag is a Haskell `if` — `guide <- ask (tool "cat") [wf\|…\|]`, then `case result of Settled patch -> W.do …; Unsettled patch -> stop`, then `when ok $ W.do …`. The `case` is real pattern matching on the exported data type `Outcome`, which the revision's bind forks into; the `if` is Haskell's, reaching the exported `ifThenElse` because the **authoring module** enables `RebindableSyntax` — which costs that module its implicit `Prelude` (import it, and `Data.String (fromString)` beside it under `OverloadedStrings`) and costs a `W.do` block nothing, `QualifiedDo` and `RebindableSyntax` rebinding disjoint syntax. The library itself enables neither. There is no `#label`, no `=:` and no splice anywhere in the surface: `ifFlag` stays exported as the combinator the `if` compiles *to* — machinery, and a name in the printed `Raw`, not a statement anyone writes — and `when`/`unless` are that same `if` with only one arm to say — terminal, sealing the body with the implicit `stop` an arm block's end is, and printing the identical `ifFlag` node with an empty other arm; the `case` compiles to `Agentic.Builder`'s `revisingCase`, which `revising` applies; `caseVerdict` stays a combinator here, a verdict being a value that may be acted past. It carries no names at the type level — a library cannot read a Haskell binder — so it generates the name each binding prints from that binding's depth, `named` overrides one, and a `{hole}` prints the name its handle carries |
 | `Agentic.Gen`, `Agentic.Observe`, `Agentic.Oracle` | the bisimulation surface: generators, the reply assembly both runners share, and the line-delimited JSON client for the Lean oracle subprocess |
-| `Agentic.Exec` | the interpreter in `IO` — the memoizing fold of `Exec.lean`'s `Dlg.execM`, its decode/re-ask loop, the failure vocabulary and its budgets, and the **fail-over walk**: a pinned question is put to the models its chain names, in order, and the trace records the one that actually answered |
+| `Agentic.Exec` | the interpreter in `IO` — STM-scheduled dependency-ready asks, plan-time FIFO reservations for ordered lanes, concurrent memo reservations, plan-ordered traces, the decode/re-ask loop, failure budgets, and the **fail-over walk** |
 | `Agentic.Chains` | one traversal of a printed program into the chain table the runner walks — `primary -> alternates`, ill-definedness refused before the run starts |
 | `Agentic.Shell` | the world that answers a `toolExec` question by **running its command**: no shell, the prompt on the child's stdin, a per-command timeout, and one answer per code — an exit code where the answer type can express failure, an abandoned run where it cannot |
-| `Agentic.AgentDeck` | one live `agent-deck` session as an answering service: the three CLI commands, the poll loop, the staleness guard and five named transport failures |
-| `Agentic.Acp` | an ACP adapter this process starts, as an answering service: the handshake, a session per question, the permission policy per question, the stop reason — which is what lets this transport refuse a receipt from a turn that did not finish — and six named transport failures |
+| `Agentic.AgentDeck` | one live `agent-deck` session as an answering service: the three CLI commands, poll loop, staleness guard, five named failures, and one plan-ordered turn lane |
+| `Agentic.Acp` | an ACP adapter this process starts, as an answering service: handshake, session per question, permission policy, stop reason, six named failures, and one plan-ordered lane for its JSON-RPC pipe and request context |
 | `Example.Harden` | the walked examples (`harden`, `hello`), written in `Agentic.Workflow` and shared by `tier1` and `agentic-run` |
 | `Example.Structured` | a model-generated JSON object validated under a carried schema, decoded into `SchemaEl`, and consumed as an ordinary Haskell record |
 | `tier0/`, `tier1/`, `bisim/`, `run/` | the four runners |
@@ -498,6 +498,15 @@ nix develop -c cabal run agentic-run -- run  harden --session my-session
 nix develop -c cabal run agentic-run -- run  harden --engine acp --adapter stub
 ```
 
+Execution is dependency-driven. Every ask node is scheduled as soon as the
+de Bruijn support of its prompt expression is available, so siblings that read
+the same earlier answers overlap even when they share a serving-model pin.
+Branches schedule only the selected arm; equal questions racing share one memo
+reservation; and the returned trace remains in plan order, not completion
+order. Progress lines may therefore interleave. Stateful ACP/deck lanes and the
+write-effect lane reserve FIFO positions during plan traversal, before prompt
+dependencies are ready; a later ready node cannot overtake an earlier blocked
+one on the same lane. Distinct read-only backends remain concurrent.
 `plan` and `run` both take `--require-pinned`, which refuses the program —
 before it is planned, before an adapter is started, before anything is spent —
 if any question put to a *model* does not say `served by` which model serves it
@@ -822,19 +831,21 @@ rather than credited, and `write-on-ask`, where the adapter asks to edit the
 workspace during a draft turn, is denied, and the run's directory is checked
 afterwards to prove nothing was written.
 
-`ci/policies.sh` is nineteen checks, and since wave three it pins **fail-over**
-as well as the loud arm, the standing answer, the retry budgets and the
-surface's own refusals: a question pinned `deep or broad`, a world that raises a
-gap at `deep` and answers at `broad`, and four assertions — the run settles on
-the spare, the trace names the model that *actually* answered, the fall-back is
-narrated on the way, and, with no chain declared, the very same world and
-program abandon in exactly the words they always did. That last one is the
-acceptance criterion the design states, and it is what makes fail-over
-free at every existing call site. Four more pin the executing world: a
-`toolExec` act running `true` answers yes and pays for what follows, one
-running `false` answers no and does not, two commands at one tool id are two
-questions, and a command that cannot be run is a named gap rather than an
-answer.
+`ci/policies.sh` is 43 executable checks plus two command-line refusals. Six
+of those checks pin the concurrent executor directly: dependency-independent
+prompts at one model overlap while the trace stays in plan order; prompts
+sharing an earlier answer remain blocked until it arrives and then overlap;
+equal questions racing for the memo are put once but occupy both trace nodes;
+actual write effects and stateful transport calls retain plan order across
+dependency waits; and one prompt's failure cancels a blocked sibling and runs
+its cleanup. The gate also pins **fail-over**
+as well as the loud arm, standing answers, retry budgets, routing, the authoring
+surface's refusals, and the executing world. Its fail-over acceptance criterion
+is that a question pinned `deep or broad` settles on `broad`, attributes that
+answer in the trace, narrates the transition, and still abandons in the old
+words when no chain is declared. Its executing-world rows assert that `true`
+and `false` command exits become typed answers, two commands at one tool id are
+two questions, and an unspawnable command is a named gap rather than an answer.
 
 `ci/examples.sh` is the third no-Lean lane, and the one that watches the
 programs the corpus does not. It reads the registry out of the binary — an
@@ -884,7 +895,7 @@ src/Agentic/Workflow/Do.hs        W.do — the one block grammar, workflow and r
 src/Agentic/Gen.hs      the generators the bisimulation draws from
 src/Agentic/Observe.hs  the reply assembly both runners share
 src/Agentic/Oracle.hs   the line-delimited JSON client for the Lean oracle
-src/Agentic/Exec.hs     the IO interpreter: the memoizing fold and the decode loop
+src/Agentic/Exec.hs     the IO interpreter: STM dependency scheduling, memoization and decode
 src/Agentic/AgentDeck.hs  one agent-deck session as an answering service
 src/Agentic/Acp.hs      an ACP adapter this process starts, as an answering service
 src/Agentic/Cli.hs      the runner as a function of its registry: the five verbs,

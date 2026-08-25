@@ -2,6 +2,24 @@
 #+SEQ_TODO: TODO DOING DRAFT WAIT DEFER NOTE | DONE CANCELED
 #+ISSUE_PREFIX: acat
 
+* DONE [#C] Run dependency-independent prompts concurrently via STM
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-00m
+:LABELS:   []
+:ISSUE_TYPE: feature
+:CREATED:  [2026-08-25 Tue 12:36]
+:MODIFIED: [2026-08-25 Tue 14:01]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-25 Tue 14:01]
+:CLOSE_REASON: Implemented STM dependency scheduling with plan-time FIFO reservations for write and stateful transport lanes, atomic memo races, plan-ordered traces, failure cleanup, and deterministic overtaking regressions; all declared gates pass.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Allow prompts whose dependencies are satisfied to execute in parallel, while coordinating readiness, completion, failure, and dependent unblocking atomically with STM. Add deterministic regression coverage.
+
 * DONE [#C] The consent gate is decorative against a live adapter: permission is granted per connection, not per question
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17

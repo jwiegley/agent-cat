@@ -405,7 +405,7 @@ type Words (s :: Scope) = [Piece s]
 
 -- | Words written in the source. Lean: @chunkExpr@'s @.lit@ clause.
 lit :: Text -> Piece s
-lit t = Piece (Lit t) (const t)
+lit t = Piece (Lit t) (exprConst t)
 
 -- | A hole: the answer a binding stands for, spliced /as text/, under the name
 -- that binding prints.
@@ -426,7 +426,7 @@ hole v = holeI @c @s (vName v) (readV @h @s v)
 -- the de Bruijn index that /reads/ it. See the note on index-level entry points
 -- at the foot of this module.
 holeI :: forall c s. Spliceable c => Text -> Var (Codes s) c -> Piece s
-holeI x v = Piece (Interp x) (splice @c . varGet v)
+holeI x v = Piece (Interp x) (fmap (splice @c) (exprVar v))
 
 -- | The kinds of answer that have a text of their own.
 class Spliceable (c :: Code) where
@@ -466,7 +466,7 @@ wordsRaw = map pieceRaw
 -- (@Check.lean:159@), whose fold is left-associated; 'T.concat' is that same
 -- string, associativity being a theorem about @++@ and not an observable.
 wordsExpr :: Words s -> Expr (Codes s) Text
-wordsExpr ps d = T.concat (map (\p -> pieceExpr p d) ps)
+wordsExpr ps = T.concat <$> traverse pieceExpr ps
 
 -- | The words where the prompt mentions no name, and 'Nothing' where it does.
 --
@@ -722,7 +722,7 @@ decideI d x v ws =
     }
   where
     needles = NE.toList ws
-    value = PRet (\g -> runDecider d needles (varGet v g))
+    value = PRet (fmap (runDecider d needles) (exprVar v))
 
 -- | A value call. Lean: @callPlan@ (@Check.lean:464@) — @Plan.sub@ of the
 -- callee's plan along the argument list, so the callee's questions appear
@@ -758,7 +758,7 @@ argName v = argNameI @c @s (vName v) (readV @h @s v)
 
 -- | 'argName' at an index rather than at a name.
 argNameI :: forall c s. Text -> Var (Codes s) c -> Arg s c
-argNameI x v = Arg (ArgName x pos0) (varGet v)
+argNameI x v = Arg (ArgName x pos0) (exprVar v)
 
 -- | Words, which fill a @text@ parameter and are elaborated in the /caller's/
 -- bindings — so a hole here reads the caller's names.
@@ -923,7 +923,7 @@ functionAt resultCode nm ps body =
 
 -- | A call's plan: the callee's, read through its arguments.
 callPlanOf :: forall ps r s. Fn ps r -> Args s ps -> Plan (Codes s) (El r)
-callPlanOf f as = subP (fnPlan f) (argSub as (const ENil :: Sub '[] (Codes s)))
+callPlanOf f as = subP (fnPlan f) (argSub as (subNil :: Sub '[] (Codes s)))
 
 -- ---------------------------------------------------------------------------
 -- Function bodies
@@ -1027,12 +1027,12 @@ answerBI x v =
   Body
     { bodyRaw = [],
       bodyAnswer = Just x,
-      bodyPlan = PRet (varGet v)
+      bodyPlan = PRet (exprVar v)
     }
 
 -- | The end of a @-> receipt@ body: @PRet (const ())@, and no @answer@.
 endB :: Body s 'CodeAck
-endB = Body {bodyRaw = [], bodyAnswer = Nothing, bodyPlan = PRet (const ())}
+endB = Body {bodyRaw = [], bodyAnswer = Nothing, bodyPlan = PRet (exprConst ())}
 
 -- ---------------------------------------------------------------------------
 -- Blocks
@@ -1049,7 +1049,7 @@ data Blk (s :: Scope) = Blk
 
 -- | @stop@, and the end of a block. Lean: @.empty _ => .ok (.ret fun _ => ())@.
 stop :: Blk s
-stop = Blk (RawEmpty pos0) (PRet (const ()))
+stop = Blk (RawEmpty pos0) (PRet (exprConst ()))
 
 -- | @x <- …@; prints @ann = null@.
 --
@@ -1147,7 +1147,7 @@ ifFlagI :: forall s. Text -> Var (Codes s) 'CodeFlag -> Blk s -> Blk s -> Blk s
 ifFlagI x v yes no =
   Blk
     (RawIfFlag x (blkRaw yes) (blkRaw no) pos0)
-    (caseB (varGet v) (blkPlan yes) (blkPlan no))
+    (caseB (exprVar v) (blkPlan yes) (blkPlan no))
 
 -- | @case x { approved … objected … no answer … }@.
 --
@@ -1183,7 +1183,7 @@ caseVerdictI x v approved objected noAnswer =
         (blkRaw noAnswer)
         pos0
     )
-    (caseV (varGet v) arms)
+    (caseV (exprVar v) arms)
   where
     arms = \case
       VApprove -> blkPlan approved
@@ -1221,7 +1221,7 @@ checkCont chk = Cont (\sigma a -> subP chk (subCons a sigma))
 -- the candidate is @1@. Lean: @reviseCont@ (@Check.lean:598@).
 reviseCont :: Plan ('CodeVerdict ': c ': g) (El c) -> Cont g (El c, Verdict) (El c)
 reviseCont rev =
-  Cont (\sigma av -> subP rev (subCons (snd . av) (subCons (fst . av) sigma)))
+  Cont (\sigma av -> subP rev (subCons (fmap snd av) (subCons (fmap fst av) sigma)))
 
 -- | The outcomes of a bounded revision, generalised over the exit tag: a @case@
 -- on the ending the loop reports, with __the candidate reaching every arm__ as
@@ -1247,7 +1247,7 @@ exitCont ::
 exitCont t arms =
   Cont
     ( \sigma final ->
-        PCase t (snd . final) (\x -> subP (arms x) (subCons (fst . final) sigma))
+        PCase t (fmap snd final) (\x -> subP (arms x) (subCons (fmap fst final) sigma))
     )
 
 -- | @x <- revising subj as carrier, at most n amendments { … }@ together with
@@ -1446,7 +1446,7 @@ revisingCaseI
       runCont
         (revising @c @(Codes s) (checkCont (rhsPlan review)) (reviseCont (rhsPlan amend)) n)
         subId
-        (varGet subjVar)
+        (exprVar subjVar)
 
     plan =
       graft
@@ -1608,7 +1608,7 @@ revisingOnCaseI
             n
         )
         subId
-        (varGet subjVar)
+        (exprVar subjVar)
 
     plan =
       graft

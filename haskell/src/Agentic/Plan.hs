@@ -80,9 +80,12 @@ module Agentic.Plan
     Var (..),
     varGet,
     Expr,
+    evalExpr,
+    exprUses,
     exprVar,
     exprConst,
     Sub,
+    subNil,
     subId,
     subComp,
     subWk,
@@ -139,6 +142,8 @@ import Agentic.Schema
     fromSCode,
   )
 import Agentic.Text (Verdict (..), block)
+import Data.IntSet (IntSet)
+import qualified Data.IntSet as IntSet
 import Data.Text (Text)
 import qualified Data.Text as T
 
@@ -363,46 +368,104 @@ varGet :: Var g c -> Env g -> El c
 varGet VHere g = envHead g
 varGet (VThere v) g = varGet v (envTail g)
 
--- | @Expr Γ A@ (@:151@) — a pure function of what is known. Prompt construction
--- is ordinary data, so nothing about building a question is an effect, and a
--- question's words may mention every answer in scope.
-type Expr (g :: Ctx) a = Env g -> a
+-- | @Expr Γ A@ (@:151@) — a pure function of what is known, paired with the
+-- de Bruijn indices its syntax reads. The function is still the denotation; the
+-- finite support is operational metadata used only to decide when a runtime may
+-- evaluate it. 'Functor' and 'Applicative' preserve that support structurally.
+data Expr (g :: Ctx) a = Expr (Env g -> a) !IntSet
+
+instance Functor (Expr g) where
+  fmap f (Expr e uses) = Expr (f . e) uses
+
+instance Applicative (Expr g) where
+  pure a = Expr (const a) IntSet.empty
+  Expr f fUses <*> Expr x xUses =
+    Expr (\g -> f g (x g)) (IntSet.union fUses xUses)
+
+-- | Evaluate an expression in an ordinary environment.
+evalExpr :: Expr g a -> Env g -> a
+evalExpr (Expr e _) = e
+
+-- | The zero-based de Bruijn indices an expression may read.
+exprUses :: Expr g a -> IntSet
+exprUses (Expr _ uses) = uses
 
 -- | @Expr.var@: the expression that reads a variable.
 exprVar :: Var g c -> Expr g (El c)
-exprVar = varGet
+exprVar v = Expr (varGet v) (IntSet.singleton (varIndex v))
+  where
+    varIndex :: Var h b -> Int
+    varIndex VHere = 0
+    varIndex (VThere w) = 1 + varIndex w
 
 -- | @Expr.const@: the expression that ignores what is known.
 exprConst :: a -> Expr g a
-exprConst a = \_ -> a
+exprConst = pure
 
--- | @Sub Γ Δ@ (@:182@) — a context morphism, semantically: a way of reading a
--- @Γ@-environment out of a @Δ@-environment. Weakening, exchange, contraction
--- and genuine substitution are all inhabitants of this one type.
-type Sub (g :: Ctx) (d :: Ctx) = Env d -> Env g
+-- | @Sub Γ Δ@ (@:182@) — a context morphism, semantically a way of reading a
+-- @Γ@-environment out of a @Δ@-environment, together with its action on finite
+-- supports. Keeping those two actions together makes dependency information
+-- survive the same weakening, contraction and substitution as the expression.
+data Sub (g :: Ctx) (d :: Ctx) =
+  Sub (Env d -> Env g) (IntSet -> IntSet)
+
+applySub :: Sub g d -> Env d -> Env g
+applySub (Sub s _) = s
+
+mapSubUses :: Sub g d -> IntSet -> IntSet
+mapSubUses (Sub _ f) = f
+
+subExpr :: Expr g a -> Sub g d -> Expr d a
+subExpr (Expr e uses) s =
+  Expr (e . applySub s) (mapSubUses s uses)
+
+-- | The unique substitution out of the empty context.
+subNil :: Sub '[] g
+subNil = Sub (const ENil) (const IntSet.empty)
 
 -- | @Sub.id@ (@:189@).
 subId :: Sub g g
-subId = id
+subId = Sub id id
 
--- | @Sub.comp@ (@:193@): @\\e -> s (t e)@, going @Γ → Δ → Ε@ on contexts and
+-- | @Sub.comp@ (@:193@): @\e -> s (t e)@, going @Γ → Δ → Ε@ on contexts and
 -- @Env Ε → Env Δ → Env Γ@ on environments.
 subComp :: Sub g d -> Sub d e -> Sub g e
-subComp s t = \e -> s (t e)
+subComp s t =
+  Sub
+    (applySub s . applySub t)
+    (mapSubUses t . mapSubUses s)
 
 -- | @Sub.wk@ (@:196@): forget the most recently bound answer. This is 'envTail'.
 subWk :: Sub g (c ': g)
-subWk = envTail
+subWk = Sub envTail shiftUses
 
 -- | @Sub.lift@ (@:204@): going under a binder — keep the new answer, act with
 -- the substitution on the rest.
 subLift :: Sub g d -> Sub (c ': g) (c ': d)
-subLift s = \d -> ECons (envHead d) (s (envTail d))
+subLift s =
+  Sub
+    (\d -> ECons (envHead d) (applySub s (envTail d)))
+    ( \uses ->
+        (if 0 `IntSet.member` uses then IntSet.singleton 0 else IntSet.empty)
+          `IntSet.union` shiftUses (mapSubUses s (tailUses uses))
+    )
 
 -- | The idiom @fun δ => Env.cons (e δ) (σ δ)@, which @Dsl/Check.lean@ writes at
 -- every binding, every call argument and every revision continuation.
 subCons :: Expr d (El c) -> Sub g d -> Sub (c ': g) d
-subCons e s = \d -> ECons (e d) (s d)
+subCons e s =
+  Sub
+    (\d -> ECons (evalExpr e d) (applySub s d))
+    ( \uses ->
+        (if 0 `IntSet.member` uses then exprUses e else IntSet.empty)
+          `IntSet.union` mapSubUses s (tailUses uses)
+    )
+
+shiftUses :: IntSet -> IntSet
+shiftUses = IntSet.mapMonotonic (+ 1)
+
+tailUses :: IntSet -> IntSet
+tailUses = IntSet.mapMonotonic (subtract 1) . IntSet.delete 0
 
 -- ---------------------------------------------------------------------------
 -- The term language
@@ -534,11 +597,11 @@ data Plan (g :: Ctx) a where
 -- every expression in the term and lifts under every binder.
 subP :: Plan g a -> Sub g d -> Plan d a
 subP p s = case p of
-  PRet e -> PRet (e . s)
+  PRet e -> PRet (subExpr e s)
   PAskC c q k -> PAskC c q (subP k (subLift s))
-  PAsk c sh e k -> PAsk c sh (e . s) (subP k (subLift s))
-  PCase t e arms -> PCase t (e . s) (\x -> subP (arms x) s)
-  PDyn b e f -> PDyn b (e . s) (\x -> subP (f x) s)
+  PAsk c sh e k -> PAsk c sh (subExpr e s) (subP k (subLift s))
+  PCase t e arms -> PCase t (subExpr e s) (\x -> subP (arms x) s)
+  PDyn b e f -> PDyn b (subExpr e s) (\x -> subP (f x) s)
 
 -- | @subP p subWk@: read a plan under one more binding.
 --
@@ -581,7 +644,7 @@ graft p k = case p of
 -- | @Plan.mapP@ (@:835@): the functorial action, derived from 'graft' and — the
 -- point — without 'PDyn', so mapping a plan does not move its rung.
 mapP :: (a -> b) -> Plan g a -> Plan g b
-mapP f p = graft p (Cont (\_ e -> PRet (f . e)))
+mapP f p = graft p (Cont (\_ e -> PRet (fmap f e)))
 
 -- | @Plan.zipWith@ (@:845@): the applicative action, again without 'PDyn'. The
 -- second plan is moved under the first's binders by 'subP', which is the sense
@@ -593,7 +656,9 @@ zipWithP f p q =
     p
     ( Cont
         ( \s e ->
-            graft (subP q s) (Cont (\t e' -> PRet (\th -> f (e (t th)) (e' th))))
+            graft
+              (subP q s)
+              (Cont (\t e' -> PRet ((f <$> subExpr e t) <*> e')))
         )
     )
 
@@ -642,7 +707,7 @@ caseB e t f = PCase TBool e (\b -> if b then t else f)
 -- on the finite classifier, with the verdict itself still available to every arm
 -- as an expression.
 caseV :: Expr g Verdict -> (VTag -> Plan g a) -> Plan g a
-caseV e arms = PCase TVTag (verdictTag . e) arms
+caseV e arms = PCase TVTag (fmap verdictTag e) arms
 
 -- | Branching on an 'Ending': @.case .ending e arms@, the node
 -- @Check.exitCont@ emits at 'TEnding' for a @revising on@'s three-way exit.
@@ -740,7 +805,7 @@ revising chk rev n
         ( \s a ->
             graft
               (runCont chk s a)
-              (Cont (\t v -> PRet (\th -> (a (t th), verdictApproved (v th)))))
+              (Cont (\t v -> PRet ((\x verdict -> (x, verdictApproved verdict)) <$> subExpr a t <*> v)))
         )
   | otherwise =
       Cont
@@ -750,10 +815,10 @@ revising chk rev n
               ( Cont
                   ( \t v ->
                       caseB
-                        (verdictApproved . v)
-                        (PRet (\th -> (a (t th), True)))
+                        (fmap verdictApproved v)
+                        (PRet (fmap (\x -> (x, True)) (subExpr a t)))
                         ( graft
-                            (runCont rev (subComp s t) (\th -> (a (t th), v th)))
+                            (runCont rev (subComp s t) ((,) <$> subExpr a t <*> v))
                             ( Cont
                                 ( \r a' ->
                                     runCont
@@ -800,7 +865,11 @@ revisingOn chk rev n
               (runCont chk s a)
               ( Cont
                   ( \t v ->
-                      PRet (\th -> (a (t th), endingOfVTag (verdictTag (v th))))
+                      PRet
+                        ( (\x verdict -> (x, endingOfVTag (verdictTag verdict)))
+                            <$> subExpr a t
+                            <*> v
+                        )
                   )
               )
         )
@@ -814,11 +883,11 @@ revisingOn chk rev n
                       caseV
                         v
                         ( \tag -> case tag of
-                            VApprove -> PRet (\th -> (a (t th), EndSettled))
-                            VDeclined -> PRet (\th -> (a (t th), EndAbandoned))
+                            VApprove -> PRet (fmap (\x -> (x, EndSettled)) (subExpr a t))
+                            VDeclined -> PRet (fmap (\x -> (x, EndAbandoned)) (subExpr a t))
                             VObject ->
                               graft
-                                (runCont rev (subComp s t) (\th -> (a (t th), v th)))
+                                (runCont rev (subComp s t) ((,) <$> subExpr a t <*> v))
                                 ( Cont
                                     ( \r a' ->
                                         runCont

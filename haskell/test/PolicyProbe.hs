@@ -85,6 +85,13 @@
 -- that two identically broken values cannot pass: a fence's text is dedented,
 -- opens at its first word, and ends without a newline.
 --
+-- A seventh section pins the __concurrent interpreter__: independent prompt
+-- overlap at one model with plan-ordered traces, exact blocking on shared input,
+-- one owner for a memo key under a race, plan-ordered write effects and stateful
+-- transport turns, and failure propagation that cancels and cleans up an
+-- independent blocked worker. Every row synchronizes on events rather than
+-- comparing elapsed runtimes.
+--
 -- A second section pins the __surface's own refusals__ (fess wave-2, gap V3):
 -- the three mistakes 'Agentic.Workflow' answers with an @error@ rather than
 -- with a type error, forced out of the four bottoms in "SurfaceRefusals". They
@@ -107,12 +114,19 @@ import Agentic.Cli
   )
 import Agentic.Exec
 import Agentic.Plan
-  ( El,
+  ( Cont (..),
+    El,
+    Plan,
     Q (..),
     QScope (..),
     SCode (SAck, SFlag, SStructured, SText, SVerdict),
+    Shape (..),
+    ask1,
+    askC1,
     defaultEl,
     fromSCode,
+    graft,
+    pairP,
     scopeUnit,
     verdictApprove,
   )
@@ -142,7 +156,22 @@ import Agentic.Workflow
     wft,
   )
 import Agentic.World (Event (Event), Trace, World (World), billFresh, billMemo, eventJson)
-import Control.Exception (ErrorCall, SomeException, evaluate, try)
+import Control.Concurrent (forkFinally, killThread)
+import Control.Concurrent.STM
+  ( TMVar,
+    atomically,
+    check,
+    modifyTVar',
+    newEmptyTMVarIO,
+    newTVarIO,
+    putTMVar,
+    readTVar,
+    retry,
+    takeTMVar,
+    tryPutTMVar,
+  )
+import Control.Exception (ErrorCall, SomeException, evaluate, finally, try)
+import Control.Monad (void)
 import Data.IORef
 import Data.List (nub, sort)
 import Data.Maybe (fromMaybe)
@@ -151,7 +180,7 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import Example.Harden (hardenProgram)
 import Agentic.Builder
-  ( Code (CodeFlag, CodeText),
+  ( Code (CodeAck, CodeFlag, CodeText),
     Program,
     act,
     askModelFallingBack,
@@ -169,6 +198,7 @@ import Agentic.Builder
 import qualified Data.Map.Strict as Map
 import Agentic.Observe (printedValue)
 import System.Exit (exitFailure)
+import System.Timeout (timeout)
 
 import SurfaceRefusals
   ( callsAnUnlistedFunction,
@@ -292,7 +322,7 @@ failOverProgram =
 -- rethrown untouched, because re-running broken work on a second, pricier model
 -- bills twice for hiding it.
 refusingWorld :: Text -> WorldIO
-refusingWorld bad = WorldIO $ \c q ->
+refusingWorld bad = concurrentWorld $ \c q ->
   if scopeModelAxis (qScope q) == Just bad
     then
       raiseGap
@@ -319,7 +349,7 @@ answerers tr = [scopeModelAxis (qScope q) | Event _ q _ <- tr]
 -- | A world that answers nothing, so that a @toolExec@ question answered by
 -- anything but the executing layer is a loud failure rather than a quiet pass.
 noWorld :: WorldIO
-noWorld = WorldIO $ \c q ->
+noWorld = concurrentWorld $ \c q ->
   ioError
     ( userError
         ( "the executing layer did not take a "
@@ -534,7 +564,7 @@ connected = ("live:" <>)
 -- traces differ for a reason that is not routing. This is both at once —
 -- identical answers, and a record of who gave them.
 tellingWorld :: IORef [Text] -> Text -> WorldIO
-tellingWorld seen name = WorldIO $ \c q -> do
+tellingWorld seen name = concurrentWorld $ \c q -> do
   modifyIORef' seen (name :)
   worldAskIO (pureWorldIO plainWorld) c q
 
@@ -558,7 +588,7 @@ plainWorld = World answerAt
 -- usable came back" — rather than an ordinary error, so that the question may
 -- be put to the next rung of its ladder.
 deadBackend :: WorldIO
-deadBackend = WorldIO $ \_ _ ->
+deadBackend = concurrentWorld $ \_ _ ->
   raiseGap
     GapTransportRefusal
     "the backend deep was routed to is not answering"
@@ -609,6 +639,345 @@ execProbe failures name prog want = do
             )
           modifyIORef' failures (+ 1)
 
+-- The executor's concurrency contract, synchronized rather than timed: a
+-- blocked first ask can complete only if its independent sibling starts; an
+-- independent sentinel proves the scheduler has passed two dependent workers
+-- while their shared source remains blocked; and a later failure must cancel
+-- an earlier worker that is blocked forever.
+textQuestion :: Text -> Q 'CodeText
+textQuestion prompt = Q (AddrModel prompt) scopeUnit prompt 0
+
+ackQuestion :: Text -> Q 'CodeAck
+ackQuestion prompt = Q (AddrModel prompt) scopeUnit prompt 0
+
+statefulQuestion :: Text -> Q 'CodeText
+statefulQuestion prompt = Q (AddrModel "stateful") scopeUnit prompt 0
+
+servedQuestion :: Text -> Text -> Q 'CodeText
+servedQuestion model prompt = Q (AddrModel prompt) (QScope (Just model) Nothing) prompt 0
+
+textShape :: Text -> Shape 'CodeText
+textShape party = Shape (AddrModel party) scopeUnit 0
+
+ackShape :: Text -> Shape 'CodeAck
+ackShape party = Shape (AddrModel party) scopeUnit 0
+
+tracePrompts :: Trace -> [Text]
+tracePrompts = map (\(Event _ q _) -> qPrompt q)
+
+newSignal :: IO (TMVar ())
+newSignal = newEmptyTMVarIO
+
+overlapProbe :: IORef Int -> IO ()
+overlapProbe failures = do
+  firstStarted <- newSignal
+  secondStarted <- newSignal
+  let plan = pairP (askC1 SText (servedQuestion "shared" "first")) (askC1 SText (servedQuestion "shared" "second"))
+      world = concurrentWorld $ \c q -> case c of
+        SText -> case qPrompt q of
+          "first" -> do
+            atomically (putTMVar firstStarted ())
+            atomically (takeTMVar secondStarted)
+            pure "first-answer"
+          "second" -> do
+            atomically (putTMVar secondStarted ())
+            atomically (takeTMVar firstStarted)
+            pure "second-answer"
+          _ -> pure "unexpected"
+        _ -> pure (defaultEl c)
+  out <- timeout 2000000 (try @SomeException (runPlanIO world plan))
+  pureProbe failures "independent prompts overlap at one model and retain trace order" $ case out of
+    Just (Right (answer, tr)) ->
+      [ ("both asks rendezvoused before either completed", answer == ("first-answer", "second-answer")),
+        ("trace order is plan order, not completion order", tracePrompts tr == ["first", "second"])
+      ]
+    Just (Left e) -> [("the run threw: " <> show e, False)]
+    Nothing -> [("the independent pair deadlocked", False)]
+
+effectOrderProbe :: IORef Int -> IO ()
+effectOrderProbe failures = do
+  sourceStarted <- newSignal
+  releaseSource <- newSignal
+  sentinelStarted <- newSignal
+  firstEffectStarted <- newSignal
+  releaseFirstEffect <- newSignal
+  effects <- newTVarIO ([] :: [Text])
+  done <- newEmptyTMVarIO
+  let plan :: Plan '[] (((), ()), Text)
+      plan =
+        graft
+          (askC1 SText (textQuestion "effect-source"))
+          ( Cont $ \_ source ->
+              pairP
+                ( pairP
+                    (ask1 SAck (ackShape "writer") (("write-one:" <>) <$> source))
+                    (askC1 SAck (ackQuestion "write-two"))
+                )
+                (askC1 SText (textQuestion "effect-sentinel"))
+          )
+      world = concurrentWorld $ \c q -> case c of
+        SText -> case qPrompt q of
+          "effect-source" -> do
+            atomically (putTMVar sourceStarted ())
+            atomically (takeTMVar releaseSource)
+            pure "seed"
+          "effect-sentinel" -> atomically (putTMVar sentinelStarted ()) >> pure "sentinel-answer"
+          _ -> pure "unexpected"
+        SAck -> do
+          atomically (modifyTVar' effects (<> [qPrompt q]))
+          if qPrompt q == "write-one:seed"
+            then do
+              atomically (putTMVar firstEffectStarted ())
+              atomically (takeTMVar releaseFirstEffect)
+            else pure ()
+        _ -> pure (defaultEl c)
+  tid <- forkFinally (runPlanIO world plan) (atomically . putTMVar done)
+  ready <-
+    timeout 2000000 . atomically $ do
+      takeTMVar sourceStarted
+      takeTMVar sentinelStarted
+  beforeSource <- atomically (readTVar effects)
+  case ready of
+    Nothing -> killThread tid
+    Just () -> atomically (putTMVar releaseSource ())
+  firstReady <- case ready of
+    Nothing -> pure Nothing
+    Just () -> timeout 2000000 (atomically (takeTMVar firstEffectStarted))
+  duringFirst <- atomically (readTVar effects)
+  case firstReady of
+    Nothing -> killThread tid
+    Just () -> atomically (putTMVar releaseFirstEffect ())
+  finished <- case firstReady of
+    Nothing -> pure Nothing
+    Just () -> timeout 2000000 (atomically (takeTMVar done))
+  after <- atomically (readTVar effects)
+  pureProbe failures "write effects keep plan order across dependency waits" $
+    [ ("the later ready write did not overtake the blocked first write", null beforeSource),
+      ("the second write did not overlap the first", duringFirst == ["write-one:seed"]),
+      ("actual effect order is plan order", after == ["write-one:seed", "write-two"])
+    ]
+      ++ case finished of
+        Just (Right (_, tr)) -> [("the trace has the same order", tracePrompts tr == ["effect-source", "write-one:seed", "write-two", "effect-sentinel"])]
+        Just (Left e) -> [("the run threw: " <> show e, False)]
+        Nothing -> [("the ordered effects did not finish", False)]
+
+statefulTurnOrderProbe :: IORef Int -> IO ()
+statefulTurnOrderProbe failures = do
+  lane <- newTurnLaneIO
+  sourceStarted <- newSignal
+  releaseSource <- newSignal
+  sentinelStarted <- newSignal
+  firstTurnStarted <- newSignal
+  releaseFirstTurn <- newSignal
+  turns <- newTVarIO ([] :: [Text])
+  done <- newEmptyTMVarIO
+  let plan :: Plan '[] ((Text, Text), Text)
+      plan =
+        graft
+          (askC1 SText (textQuestion "turn-source"))
+          ( Cont $ \_ source ->
+              pairP
+                ( pairP
+                    (ask1 SText (textShape "stateful") (("turn-one:" <>) <$> source))
+                    (askC1 SText (statefulQuestion "turn-two"))
+                )
+                (askC1 SText (textQuestion "turn-sentinel"))
+          )
+      world =
+        WorldIO
+          { worldAskIO = \c q -> case c of
+              SText -> case qPrompt q of
+                "turn-source" -> do
+                  atomically (putTMVar sourceStarted ())
+                  atomically (takeTMVar releaseSource)
+                  pure "seed"
+                "turn-sentinel" -> atomically (putTMVar sentinelStarted ()) >> pure "sentinel-answer"
+                prompt
+                  | "turn-" `T.isPrefixOf` prompt -> do
+                      atomically (modifyTVar' turns (<> [prompt]))
+                      if prompt == "turn-one:seed"
+                        then do
+                          atomically (putTMVar firstTurnStarted ())
+                          atomically (takeTMVar releaseFirstTurn)
+                        else pure ()
+                      pure prompt
+                  | otherwise -> pure "unexpected"
+              _ -> pure (defaultEl c),
+            worldTurnLane = \_ shape -> case shAddressee shape of
+              AddrModel party | party == "stateful" -> Just lane
+              _ -> Nothing
+          }
+  tid <- forkFinally (runPlanIO world plan) (atomically . putTMVar done)
+  ready <-
+    timeout 2000000 . atomically $ do
+      takeTMVar sourceStarted
+      takeTMVar sentinelStarted
+  beforeSource <- atomically (readTVar turns)
+  case ready of
+    Nothing -> killThread tid
+    Just () -> atomically (putTMVar releaseSource ())
+  firstReady <- case ready of
+    Nothing -> pure Nothing
+    Just () -> timeout 2000000 (atomically (takeTMVar firstTurnStarted))
+  duringFirst <- atomically (readTVar turns)
+  case firstReady of
+    Nothing -> killThread tid
+    Just () -> atomically (putTMVar releaseFirstTurn ())
+  finished <- case firstReady of
+    Nothing -> pure Nothing
+    Just () -> timeout 2000000 (atomically (takeTMVar done))
+  after <- atomically (readTVar turns)
+  pureProbe failures "stateful turns keep plan order across dependency waits" $
+    [ ("the later ready turn did not overtake the blocked first turn", null beforeSource),
+      ("the second turn did not overlap the first", duringFirst == ["turn-one:seed"]),
+      ("actual session order is plan order", after == ["turn-one:seed", "turn-two"])
+    ]
+      ++ case finished of
+        Just (Right (_, tr)) -> [("the trace has the same order", tracePrompts tr == ["turn-source", "turn-one:seed", "turn-two", "turn-sentinel"])]
+        Just (Left e) -> [("the run threw: " <> show e, False)]
+        Nothing -> [("the ordered turns did not finish", False)]
+
+dependencyProbe :: IORef Int -> IO ()
+dependencyProbe failures = do
+  sourceStarted <- newSignal
+  releaseSource <- newSignal
+  sentinelStarted <- newSignal
+  dependents <- newTVarIO ([] :: [Text])
+  done <- newEmptyTMVarIO
+  let plan :: Plan '[] ((Text, Text), Text)
+      plan =
+        graft
+          (askC1 SText (textQuestion "source"))
+          ( Cont $ \_ source ->
+              pairP
+                ( pairP
+                    (ask1 SText (textShape "left") (("left:" <>) <$> source))
+                    (ask1 SText (textShape "right") (("right:" <>) <$> source))
+                )
+                (askC1 SText (textQuestion "sentinel"))
+          )
+      world = concurrentWorld $ \c q -> case c of
+        SText -> case qPrompt q of
+          "source" -> do
+            atomically (putTMVar sourceStarted ())
+            atomically (takeTMVar releaseSource)
+            pure "seed"
+          "sentinel" -> atomically (putTMVar sentinelStarted ()) >> pure "sentinel-answer"
+          prompt
+            | "left:" `T.isPrefixOf` prompt || "right:" `T.isPrefixOf` prompt -> do
+                atomically (modifyTVar' dependents (prompt :))
+                atomically $ do
+                  seen <- readTVar dependents
+                  check (all (`elem` seen) ["left:seed", "right:seed"])
+                pure prompt
+            | otherwise -> pure "unexpected"
+        _ -> pure (defaultEl c)
+  tid <- forkFinally (runPlanIO world plan) (atomically . putTMVar done)
+  ready <-
+    timeout 2000000 . atomically $ do
+      takeTMVar sourceStarted
+      takeTMVar sentinelStarted
+  (beforeRelease, finished) <- case ready of
+    Nothing -> do
+      killThread tid
+      pure (["scheduler did not reach the sentinel"], Nothing)
+    Just () -> do
+      blocked <- atomically (readTVar dependents)
+      atomically (putTMVar releaseSource ())
+      result <- timeout 2000000 (atomically (takeTMVar done))
+      case result of
+        Nothing -> killThread tid
+        Just _ -> pure ()
+      pure (blocked, result)
+  pureProbe failures "prompt dependencies block only their consumers" $
+    [ ("the independent sentinel ran while the source was blocked", ready == Just ()),
+      ("both source consumers stayed blocked", null beforeRelease)
+    ]
+      ++ case finished of
+        Just (Right (answer, tr)) ->
+          [ ("the consumers overlapped after the source arrived", answer == (("left:seed", "right:seed"), "sentinel-answer")),
+            ("the trace retains plan order", tracePrompts tr == ["source", "left:seed", "right:seed", "sentinel"])
+          ]
+        Just (Left e) -> [("the run threw: " <> show e, False)]
+        Nothing -> [("the run did not finish after unblocking the source", False)]
+
+memoConcurrencyProbe :: IORef Int -> IO ()
+memoConcurrencyProbe failures = do
+  entered <- newSignal
+  release <- newSignal
+  sentinelStarted <- newSignal
+  calls <- newTVarIO (0 :: Int)
+  done <- newEmptyTMVarIO
+  let repeated = askC1 SText (textQuestion "same")
+      plan = pairP (pairP repeated repeated) (askC1 SText (textQuestion "memo-sentinel"))
+      world = concurrentWorld $ \c q -> case c of
+        SText -> case qPrompt q of
+          "same" -> do
+            atomically $ do
+              modifyTVar' calls (+ 1)
+              void (tryPutTMVar entered ())
+            atomically (takeTMVar release)
+            pure "one-answer"
+          "memo-sentinel" -> atomically (putTMVar sentinelStarted ()) >> pure "sentinel-answer"
+          _ -> pure "unexpected"
+        _ -> pure (defaultEl c)
+  tid <- forkFinally (runPlanIO world plan) (atomically . putTMVar done)
+  ready <-
+    timeout 2000000 . atomically $ do
+      takeTMVar entered
+      takeTMVar sentinelStarted
+  beforeRelease <- atomically (readTVar calls)
+  case ready of
+    Nothing -> killThread tid
+    Just () -> atomically (putTMVar release ())
+  finished <- case ready of
+    Nothing -> pure Nothing
+    Just () -> do
+      result <- timeout 2000000 (atomically (takeTMVar done))
+      case result of
+        Nothing -> killThread tid
+        Just _ -> pure ()
+      pure result
+  afterRelease <- atomically (readTVar calls)
+  pureProbe failures "concurrent memo reservations ask an equal question once" $
+    [ ("one consultation owned the in-flight key", beforeRelease == 1),
+      ("no waiter re-asked after publication", afterRelease == 1)
+    ]
+      ++ case finished of
+        Just (Right (answer, tr)) ->
+          [ ("both nodes received the one answer", answer == (("one-answer", "one-answer"), "sentinel-answer")),
+            ("both nodes remain in the trace", tracePrompts tr == ["same", "same", "memo-sentinel"]),
+            ("the bills distinguish nodes from questions", (billFresh tr, billMemo tr) == (3, 2))
+          ]
+        Just (Left e) -> [("the run threw: " <> show e, False)]
+        Nothing -> [("the memoized run did not finish", False)]
+
+failureConcurrencyProbe :: IORef Int -> IO ()
+failureConcurrencyProbe failures = do
+  blockedStarted <- newSignal
+  cleaned <- newSignal
+  let plan = pairP (askC1 SText (textQuestion "blocked")) (askC1 SText (textQuestion "boom"))
+      world = concurrentWorld $ \c q -> case c of
+        SText -> case qPrompt q of
+          "blocked" -> do
+            atomically (putTMVar blockedStarted ())
+            atomically retry `finally` atomically (void (tryPutTMVar cleaned ()))
+          "boom" -> do
+            atomically (takeTMVar blockedStarted)
+            ioError (userError "concurrent boom")
+          _ -> pure "unexpected"
+        _ -> pure (defaultEl c)
+  out <- timeout 2000000 (try @SomeException (runPlanIO world plan))
+  cleanup <- timeout 2000000 (atomically (takeTMVar cleaned))
+  pureProbe failures "a prompt failure cancels independent workers"
+    [ ( "the failure propagated instead of waiting on the earlier trace node",
+        case out of
+          Just (Left e) -> "concurrent boom" `T.isInfixOf` T.pack (show e)
+          _ -> False
+      ),
+      ("the blocked sibling ran its cleanup", cleanup == Just ())
+    ]
+
 main :: IO ()
 main = do
   failures <- newIORef (0 :: Int)
@@ -632,6 +1001,13 @@ main = do
     d {esRecover = const FailOver} (Left "after 1 attempts")
   probe failures "retry budget 3 means 4 attempts"
     d {esRetryUndecodable = 3} (Left "after 4 attempts")
+
+  overlapProbe failures
+  effectOrderProbe failures
+  statefulTurnOrderProbe failures
+  dependencyProbe failures
+  memoConcurrencyProbe failures
+  failureConcurrencyProbe failures
 
   -- The surface's own refusals: what an author is told, in the author's words.
   refusal failures "two functions of one name are refused"

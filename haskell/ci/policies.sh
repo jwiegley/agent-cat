@@ -101,7 +101,13 @@
 # function of the arguments and the registry's names, and no program in the
 # synthetic table is ever run.
 #
-# No Lean, no corpus; every commit may run it. Thirty-seven checks, and two
+# The concurrent executor adds six synchronized checks: independent overlap at
+# one model with plan-ordered traces; shared-input blocking followed by sibling
+# overlap; one in-flight memo owner for equal questions; plan-ordered write
+# effects; plan-ordered stateful transport turns; and prompt failure propagation
+# that cancels and cleans up a blocked sibling.
+#
+# No Lean, no corpus; every commit may run it. Forty-three checks, and two
 # command lines.
 set -euo pipefail
 cd "$(dirname "$0")/.."

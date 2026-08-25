@@ -112,6 +112,7 @@ common settings
     , process
     , QuickCheck
     , scientific
+    , stm
     , template-haskell
     , text
     , vector
