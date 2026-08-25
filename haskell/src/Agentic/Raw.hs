@@ -40,12 +40,10 @@
 -- == The @ack@ \/ @receipt@ trap
 --
 -- Inside a 'RawProgram' — the @ann@, @reviewAnn@ and @result@ fields and the
--- second component of a @params@ pair — 'Code' uses the /derived constructor
--- names/, so the fourth one is spelled @"ack"@. That is what the 'ToJSON' and
--- 'FromJSON' instances of 'Code' do. Everywhere else on the wire (the @code@
--- of a @string@ request, a trace event, a checked reply's @codes@) it is
--- spelled @"receipt"@; that spelling is 'codeName' and 'codeOfName', which are
--- exported for @Agentic.Text@ and are deliberately /not/ the instances.
+-- second component of a @params@ pair — 'SomeCode' uses constructor names, so
+-- the fourth built-in is spelled @"ack"@ and the structured family uses a
+-- @"json"@ wire tag carrying its schema. Everywhere else, the acknowledgement
+-- is spelled @"receipt"@; 'codeName' handles that diagnostic spelling.
 --
 -- == Tag collisions
 --
@@ -57,6 +55,7 @@ module Agentic.Raw
   ( -- * Positions, codes, prompts
     Pos (..),
     Code (..),
+    SomeCode (..),
     codeName,
     codeOfName,
     Chunk (..),
@@ -104,7 +103,6 @@ import Data.Aeson
     withArray,
     withObject,
     withScientific,
-    withText,
     (.=),
   )
 import qualified Data.Aeson.Key as K
@@ -123,6 +121,8 @@ import qualified Data.Vector as V
 -- @Decider.run@ from @Agentic/Core/Text.lean@'s primitives; here the type and
 -- its run travel together and the codec imports them, which is the same one
 -- table with the import arrow the only way round it can go.
+import Agentic.Schema (Code (..), SomeCode (..), codeName, codeOfName)
+import Agentic.Schema.Json (codeFromJson, codeToJson)
 import Agentic.Text (Decider (..), deciderName, deciderOfName)
 
 -- ---------------------------------------------------------------------------
@@ -186,6 +186,13 @@ natField ty o key =
   parseNat (ty ++ "." ++ K.toString key) (fromMaybe Null (KM.lookup key o))
     <?> Key key
 
+maybeCodeToJson :: Maybe SomeCode -> Value
+maybeCodeToJson = maybe Null codeToJson
+
+parseMaybeCode :: Value -> Parser (Maybe SomeCode)
+parseMaybeCode Null = pure Nothing
+parseMaybeCode value = Just <$> codeFromJson value
+
 -- ---------------------------------------------------------------------------
 -- Positions
 -- ---------------------------------------------------------------------------
@@ -207,56 +214,9 @@ instance FromJSON Pos where
     Pos <$> natField "Pos" o "line" <*> natField "Pos" o "col"
 
 -- ---------------------------------------------------------------------------
--- Codes
+-- Codes are defined in Agentic.Schema: promoted `Code` for type indices and
+-- existential `SomeCode` for this first-order syntax.
 -- ---------------------------------------------------------------------------
-
--- | The four answer kinds. The fourth is /named/ @ack@ and /written/
--- @receipt@; see the module header. The instances below are the @ack@
--- spelling, which is the one a 'RawProgram' uses.
-data Code
-  = CodeText
-  | CodeVerdict
-  | CodeFlag
-  | CodeAck
-  deriving (Eq, Ord, Show, Enum, Bounded)
-
-instance ToJSON Code where
-  toJSON = \case
-    CodeText -> "text"
-    CodeVerdict -> "verdict"
-    CodeFlag -> "flag"
-    CodeAck -> "ack"
-
-instance FromJSON Code where
-  parseJSON = withText "Code" $ \case
-    "text" -> pure CodeText
-    "verdict" -> pure CodeVerdict
-    "flag" -> pure CodeFlag
-    "ack" -> pure CodeAck
-    other ->
-      fail $
-        "Code: expected one of \"text\", \"verdict\", \"flag\", \"ack\", but found "
-          ++ show other
-
--- | The keyword that /writes/ a code: Lean's @codeName@. Note @receipt@.
---
--- This is not the 'ToJSON' instance. It is the spelling used by the @code@
--- field of a @string@ request and by trace events.
-codeName :: Code -> Text
-codeName = \case
-  CodeText -> "text"
-  CodeVerdict -> "verdict"
-  CodeFlag -> "flag"
-  CodeAck -> "receipt"
-
--- | The keyword parsed back: Lean's @codeOfName@, a retraction of 'codeName'.
-codeOfName :: Text -> Maybe Code
-codeOfName = \case
-  "text" -> Just CodeText
-  "verdict" -> Just CodeVerdict
-  "flag" -> Just CodeFlag
-  "receipt" -> Just CodeAck
-  _ -> Nothing
 
 -- ---------------------------------------------------------------------------
 -- Prompts
@@ -542,7 +502,7 @@ data RawSource
       -- ^ bound: how many amendments at most
       !Text
       -- ^ reviewName
-      !(Maybe Code)
+      !(Maybe SomeCode)
       -- ^ reviewAnn
       !RawRhs
       -- ^ review
@@ -562,7 +522,7 @@ data RawSource
       !Text
       !Integer
       !Text
-      !(Maybe Code)
+      !(Maybe SomeCode)
       !RawRhs
       !RawRhs
       !Pos
@@ -581,7 +541,7 @@ instance ToJSON RawSource where
           "carrier" .= carrier,
           "bound" .= bound,
           "reviewName" .= reviewName,
-          "reviewAnn" .= reviewAnn,
+          "reviewAnn" .= maybeCodeToJson reviewAnn,
           "review" .= review,
           "amend" .= amend,
           "pos" .= pos
@@ -600,7 +560,7 @@ instance FromJSON RawSource where
           <*> o .:: "carrier"
           <*> natField ty o "bound"
           <*> o .:: "reviewName"
-          <*> o .:: "reviewAnn"
+          <*> (parseMaybeCode =<< (o .:: "reviewAnn" :: Parser Value))
           <*> o .:: "review"
           <*> o .:: "amend"
           <*> o .:: "pos"
@@ -626,7 +586,7 @@ rawSourcePos = \case
 data Raw
   = RawEmpty !Pos
   | -- | @RawBind x ann src rest pos@
-    RawBind !Text !(Maybe Code) !RawSource !Raw !Pos
+    RawBind !Text !(Maybe SomeCode) !RawSource !Raw !Pos
   | -- | @RawAct a rest pos@
     RawAct !RawAsk !Raw !Pos
   | -- | @RawIfFlag x yes no pos@
@@ -662,7 +622,7 @@ instance ToJSON Raw where
     RawBind x ann src rest pos ->
       ctorObj
         "bind"
-        ["x" .= x, "ann" .= ann, "src" .= src, "rest" .= rest, "pos" .= pos]
+        ["x" .= x, "ann" .= maybeCodeToJson ann, "src" .= src, "rest" .= rest, "pos" .= pos]
     RawAct a rest pos ->
       ctorObj "act" ["a" .= a, "rest" .= rest, "pos" .= pos]
     RawIfFlag x yes no pos ->
@@ -711,7 +671,7 @@ instance FromJSON Raw where
     "bind" ->
       RawBind
         <$> o .:: "x"
-        <*> o .:: "ann"
+        <*> (parseMaybeCode =<< (o .:: "ann" :: Parser Value))
         <*> o .:: "src"
         <*> o .:: "rest"
         <*> o .:: "pos"
@@ -771,7 +731,7 @@ instance FromJSON Raw where
 -- type.
 data RawBodyStmt
   = -- | @BodyBind x ann rhs pos@
-    BodyBind !Text !(Maybe Code) !RawRhs !Pos
+    BodyBind !Text !(Maybe SomeCode) !RawRhs !Pos
   | -- | @BodyAct a pos@
     BodyAct !RawAsk !Pos
   | -- | @BodyCallS fn args pos@
@@ -781,7 +741,7 @@ data RawBodyStmt
 instance ToJSON RawBodyStmt where
   toJSON = \case
     BodyBind x ann rhs pos ->
-      ctorObj "bind" ["x" .= x, "ann" .= ann, "rhs" .= rhs, "pos" .= pos]
+      ctorObj "bind" ["x" .= x, "ann" .= maybeCodeToJson ann, "rhs" .= rhs, "pos" .= pos]
     BodyAct a pos -> ctorObj "act" ["a" .= a, "pos" .= pos]
     BodyCallS f as pos ->
       ctorObj "callS" ["fn" .= f, "args" .= as, "pos" .= pos]
@@ -789,7 +749,7 @@ instance ToJSON RawBodyStmt where
 instance FromJSON RawBodyStmt where
   parseJSON = withCtor "RawBodyStmt" $ \tag o -> case tag of
     "bind" ->
-      BodyBind <$> o .:: "x" <*> o .:: "ann" <*> o .:: "rhs" <*> o .:: "pos"
+      BodyBind <$> o .:: "x" <*> (parseMaybeCode =<< (o .:: "ann" :: Parser Value)) <*> o .:: "rhs" <*> o .:: "pos"
     "act" -> BodyAct <$> o .:: "a" <*> o .:: "pos"
     "callS" -> BodyCallS <$> o .:: "fn" <*> o .:: "args" <*> o .:: "pos"
     _ -> unknownCtor "RawBodyStmt" tag
@@ -800,12 +760,12 @@ instance FromJSON RawBodyStmt where
 
 -- | @(String × Code)@ is a Lean @Prod@, which encodes as a two-element array:
 -- @["p", "text"]@.
-paramToJSON :: (Text, Code) -> Value
-paramToJSON (p, c) = toJSON [toJSON p, toJSON c]
+paramToJSON :: (Text, SomeCode) -> Value
+paramToJSON (p, c) = toJSON [toJSON p, codeToJson c]
 
-paramParseJSON :: Value -> Parser (Text, Code)
+paramParseJSON :: Value -> Parser (Text, SomeCode)
 paramParseJSON = withArray "RawFn.params" $ \arr -> case V.toList arr of
-  [p, c] -> (,) <$> (parseJSON p <?> Key "0") <*> (parseJSON c <?> Key "1")
+  [p, c] -> (,) <$> (parseJSON p <?> Key "0") <*> (codeFromJson c <?> Key "1")
   xs ->
     fail $
       "RawFn.params: expected a two-element [name, code] array, but found "
@@ -816,8 +776,8 @@ paramParseJSON = withArray "RawFn.params" $ \arr -> case V.toList arr of
 -- Lean's declaration order.
 data RawFn = RawFn
   { fnName :: !Text,
-    fnParams :: ![(Text, Code)],
-    fnResult :: !Code,
+    fnParams :: ![(Text, SomeCode)],
+    fnResult :: !SomeCode,
     fnBody :: ![RawBodyStmt],
     -- | @answer x@ for a value function; 'Nothing' for @-> receipt@.
     fnAnswer :: !(Maybe Text),
@@ -831,7 +791,7 @@ instance ToJSON RawFn where
     object
       [ "name" .= fnName f,
         "params" .= map paramToJSON (fnParams f),
-        "result" .= fnResult f,
+        "result" .= codeToJson (fnResult f),
         "body" .= fnBody f,
         "answer" .= fnAnswer f,
         "answerPos" .= fnAnswerPos f,
@@ -843,7 +803,7 @@ instance FromJSON RawFn where
     RawFn
       <$> o .:: "name"
       <*> (traverse paramParseJSON =<< (o .:: "params") <?> Key "params")
-      <*> o .:: "result"
+      <*> (codeFromJson =<< (o .:: "result" :: Parser Value))
       <*> o .:: "body"
       <*> o .:: "answer"
       <*> o .:: "answerPos"

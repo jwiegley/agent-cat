@@ -925,6 +925,7 @@ def ωRefuse : Ω := fun c => match c with
   | .verdict => fun _ => Verdict.approve
   | .flag => fun _ => false
   | .ack => fun _ => ()
+  | .structured _ => fun _ => default
 
 /-- `[[ωApply]]` = the world in which the panel approves at once and the owner
 applies. -/
@@ -933,6 +934,7 @@ def ωApply : Ω := fun c => match c with
   | .verdict => fun _ => Verdict.approve
   | .flag => fun _ => true
   | .ack => fun _ => ()
+  | .structured _ => fun _ => default
 
 /-- `[[ωStubborn]]` = the world in which the panel never approves: the loop
 exhausts its two revisions, gives up with `none`, and the owner is never
@@ -942,6 +944,7 @@ def ωStubborn : Ω := fun c => match c with
   | .verdict => fun _ => Verdict.object ["needs work"]
   | .flag => fun _ => true
   | .ack => fun _ => ()
+  | .structured _ => fun _ => default
 
 /-- `[[ωEcho]]` = the world that echoes every prompt back and whose reviewers
 approve only a patch long enough to have been revised twice: it objects at
@@ -962,6 +965,7 @@ def ωEcho : Ω := fun c => match c with
   | .verdict => fun q => if 400 ≤ q.prompt.length then Verdict.approve else Verdict.object ["no"]
   | .flag => fun _ => true
   | .ack => fun _ => ()
+  | .structured _ => fun _ => default
 
 set_option maxRecDepth 20000 in
 theorem bill_refuse_demo :

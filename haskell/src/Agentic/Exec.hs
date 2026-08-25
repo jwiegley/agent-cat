@@ -154,15 +154,18 @@ import Agentic.Plan
     Env (ECons, ENil),
     Plan (PAsk, PAskC, PCase, PDyn, PRet),
     Q (..),
-    SCode (SAck, SFlag, SText, SVerdict),
+    SCode (SAck, SFlag, SStructured, SText, SVerdict),
     defaultEl,
     fromSCode,
     withPrompt,
   )
 import Agentic.Raw
   ( Addressee (AddrModel, AddrPerson, AddrTool, AddrToolExec),
-    Code (CodeAck, CodeFlag, CodeText, CodeVerdict),
+    Code,
+    SomeCode (..),
   )
+import Agentic.Schema (sameCode)
+import Agentic.Schema.Json (decode, render, renderSchema)
 import Agentic.Text (decodeFlag, decodeVerdict, sayFlag, sayVerdict)
 import Agentic.Plan (QScope (scopeModelAxis))
 import Agentic.WF (wft)
@@ -560,15 +563,6 @@ memoLookup c key tbl = case Map.lookup key tbl of
     Just Refl -> Just a
     Nothing -> Nothing
 
--- | Two code witnesses are the same code, with the type-level evidence. @El@ is
--- not injective, so this is the only way an answer comes back out of the table
--- at the type it went in.
-sameCode :: SCode c -> SCode c' -> Maybe (c :~: c')
-sameCode SText SText = Just Refl
-sameCode SVerdict SVerdict = Just Refl
-sameCode SFlag SFlag = Just Refl
-sameCode SAck SAck = Just Refl
-sameCode _ _ = Nothing
 
 -- ---------------------------------------------------------------------------
 -- The trusted base, at the typed answer
@@ -582,19 +576,15 @@ sameCode _ _ = Nothing
 -- > Decode .verdict s = some (decodeVerdict s)  -- total: refusal is an answer
 -- > Decode .ack     s = some ()                 -- an acknowledgement carries nothing
 --
--- Every clause but the first and last is "Agentic.Text"'s. __Nothing here
--- decides anything__: this function is a re-indexing of the trusted base at
--- 'El', and if it ever grows a clause of its own the package has two answers to
--- the question of what an addressee said.
---
--- 'Nothing' is one code wide (@Decode_eq_none@, @Exec.lean:292@): a @flag@ is
--- the one code whose answer set is smaller than what an addressee can say, so
--- it is the one place the runtime has to be prepared to re-ask.
+-- Built-in decoding lives in "Agentic.Text"; structured decoding lives in the
+-- JSON representation, "Agentic.Schema.Json". Both return the semantic `El`.
+-- Flags and schema-indexed answers may be unreadable, so both can re-ask.
 decodeEl :: SCode c -> Text -> Maybe (El c)
 decodeEl SText s = Just s
 decodeEl SVerdict s = Just (decodeVerdict s)
 decodeEl SFlag s = decodeFlag s
 decodeEl SAck _ = Just ()
+decodeEl (SStructured schema) text = decode schema text
 
 -- | @Report.sayAnswer@ — an answer as the one word or line a report prints. The
 -- inverse direction of 'decodeEl', and like it, all of the deciding lives in
@@ -604,6 +594,8 @@ sayEl SText s = s
 sayEl SVerdict v = sayVerdict v
 sayEl SFlag b = sayFlag b
 sayEl SAck _ = "done"
+sayEl (SStructured schema) value =
+  fromMaybe "<not representable as finite JSON>" (render schema value)
 
 -- ---------------------------------------------------------------------------
 -- What a question says about itself on the wire
@@ -618,12 +610,13 @@ sayEl SAck _ = "done"
 -- re-ask nudge and in both error messages, so this port does too; a run's
 -- diagnostics are compared against Lean's by eye and by test, and \"receipt\"
 -- here would be a silent divergence in the one text a stuck operator reads.
-codeWord :: Code -> Text
-codeWord = \case
-  CodeText -> "text"
-  CodeVerdict -> "verdict"
-  CodeFlag -> "flag"
-  CodeAck -> "ack"
+codeWord :: SomeCode -> Text
+codeWord (SomeCode code) = case code of
+  SText -> "text"
+  SVerdict -> "verdict"
+  SFlag -> "flag"
+  SAck -> "ack"
+  SStructured _ -> "structured"
 
 -- | @Addressee.render@ (@Exec.lean:784@) — how an addressee names itself in a
 -- prompt header and in an error.
@@ -640,16 +633,18 @@ addresseeWord = \case
 -- 'decodeEl' to read it, sent with every question because the trusted base is
 -- narrow on purpose and an addressee cannot be expected to guess it.
 --
--- These four sentences are the exact bytes Lean sends, and an adapter that
--- appends a format line to a prompt should append one of these rather than a
--- paraphrase: an addressee told two different formats in one prompt obeys
--- neither (@Exec.lean:804@).
-answerSpec :: Code -> Text
+-- These sentences are the exact bytes Lean sends. A structured code includes its
+-- standard JSON Schema, so the addressee receives the same validator the decoder
+-- uses.
+answerSpec :: SCode c -> Text
 answerSpec = \case
-  CodeText -> "Reply with the text itself and nothing else."
-  CodeVerdict -> "Reply with exactly APPROVE if acceptable, or OBJECTION: <one line> if not."
-  CodeFlag -> "Reply with exactly yes or no."
-  CodeAck -> "Do what was asked, then reply with exactly DONE."
+  SText -> "Reply with the text itself and nothing else."
+  SVerdict -> "Reply with exactly APPROVE if acceptable, or OBJECTION: <one line> if not."
+  SFlag -> "Reply with exactly yes or no."
+  SAck -> "Do what was asked, then reply with exactly DONE."
+  SStructured schema ->
+    "Reply with exactly one JSON value matching this schema and nothing else: "
+      <> renderSchema schema
 
 -- | @Exec.nudge@ (@Exec.lean:866@) — what to append when a reply could not be
 -- read, so the second attempt is not a verbatim repeat of the first.
@@ -665,7 +660,7 @@ nudge c reply =
     <> ": "
     <> trimAscii reply
     <> "\n"
-    <> answerSpec (fromSCode c)
+    <> answerSpec c
     <> "]"
 
 -- | May an answer to this question be recorded from a turn the agent did
@@ -697,8 +692,8 @@ nudge c reply =
 -- reason. A transport that /cannot/ observe one — the agent-deck CLI does not
 -- report why a turn ended — cannot apply this rule and owes its reader that
 -- fact in as many words.
-requiresCompletedTurn :: Code -> Addressee -> Bool
-requiresCompletedTurn CodeAck _ = True
+requiresCompletedTurn :: SomeCode -> Addressee -> Bool
+requiresCompletedTurn (SomeCode SAck) _ = True
 requiresCompletedTurn _ (AddrPerson _) = True
 requiresCompletedTurn _ _ = False
 
@@ -884,7 +879,7 @@ stderrLog msg = hPutStrLn stderr ("agentic: " <> T.unpack msg)
 -- names every one of its failures 'GapTransportRefusal'.
 data TurnGap
   = -- | Bytes arrived and 'decodeEl' could not read them at the question's
-    -- code. One code wide (@Decode_eq_none@): only a @flag@ can produce it.
+    -- code. Flags and schema-indexed answers can produce it.
     GapUndecodable
   | -- | The transport named a failure — the adapter died mid-turn, the pipe
     -- closed, the provider answered 5xx, the model's allowance is spent.
@@ -1291,10 +1286,10 @@ askDecoding lg retries c =
 --    — with nowhere to go it raises the very same 'ioError', which is what
 --    keeps this path byte-identical to the one before fail-over existed.
 --
--- 3. __The loud arm.__ If 'esLoudArm' is set and the code is @flag@ — the only
---    code that can be undecodable at all — a spent question takes the
---    configured arm with a warning instead of abandoning. Everything else, and
---    every code but @flag@, abandons exactly as before.
+-- 3. __The loud arm.__ If 'esLoudArm' is set and the code is @flag@, a spent
+--    question takes the configured arm with a warning instead of abandoning.
+--    Structured questions can also be undecodable, but have no operator-supplied
+--    Boolean arm; they and every other code abandon exactly as before.
 --
 -- __Why the loud arm is not the defaulting this module refuses.__ The
 -- abandonment message spends a paragraph on why @pure (defaultEl c)@ is wrong,
@@ -1462,6 +1457,8 @@ scriptedDefault SText q = qPrompt q
 scriptedDefault SFlag _ = "yes"
 scriptedDefault SVerdict _ = "APPROVE"
 scriptedDefault SAck _ = "DONE"
+scriptedDefault code@(SStructured schema) _ =
+  fromMaybe "null" (render schema (defaultEl code))
 
 -- ---------------------------------------------------------------------------
 -- Rendering helpers

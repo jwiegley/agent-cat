@@ -74,7 +74,7 @@ import Agentic.Plan
     Plan (PAsk, PAskC, PCase, PDyn, PRet),
     Q (..),
     QScope (..),
-    SCode (SAck, SFlag, SText, SVerdict),
+    SCode (SAck, SFlag, SStructured, SText, SVerdict),
     VTag (VApprove, VDeclined, VObject),
     Verdict (Approve, Declined, Object),
     fromSCode,
@@ -82,10 +82,13 @@ import Agentic.Plan
     verdictTag,
     withPrompt,
   )
+import Agentic.Schema (defaultEl)
+import Agentic.Schema.Conformance (SomeAnswer, encodeExact, lookupAnswer, uniqueAnswers)
+import Agentic.Schema.Json (codeJson)
 import Agentic.Raw
   ( Addressee (AddrModel, AddrPerson, AddrTool, AddrToolExec),
     Code,
-    codeName,
+    SomeCode,
     ctorObj,
     unknownCtor,
     withCtor,
@@ -155,23 +158,21 @@ data FlagSpec
   | FByPrefix [(Text, Bool)] !Bool
   deriving (Eq, Show)
 
--- | @Conformance.lean:115@. A structure, so it travels as a bare object of its
--- three fields with no constructor tag.
---
--- There is no @ack@ field: a receipt is @()@ and the spec is never consulted
--- for one.
+-- | @Conformance.lean@'s world DSL: three built-in answer policies plus optional
+-- exact schema/value pairs. There is no @ack@ field: a receipt is @()@ and the
+-- spec is never consulted for one.
 data WorldSpec = WorldSpec
   { wsText :: !TextSpec,
     wsVerdict :: !VerdictSpec,
-    wsFlag :: !FlagSpec
+    wsFlag :: !FlagSpec,
+    wsSchema :: ![SomeAnswer]
   }
   deriving (Eq, Show)
 
--- | The Lean structure's field defaults: @echo@, @const approve@, @const true@.
--- A decoded 'WorldSpec' falls back to these field by field, exactly as Lean's
--- derived @FromJson@ does.
+-- | Built-in fields keep their old defaults; exact schema answers default to
+-- the empty table.
 defaultWorldSpec :: WorldSpec
-defaultWorldSpec = WorldSpec TEcho (VConst VLitApprove) (FConst True)
+defaultWorldSpec = WorldSpec TEcho (VConst VLitApprove) (FConst True) []
 
 -- ---------------------------------------------------------------------------
 -- The world DSL's codec
@@ -180,8 +181,8 @@ defaultWorldSpec = WorldSpec TEcho (VConst VLitApprove) (FConst True)
 -- | Decode a Lean sum some of whose constructors are nullary.
 --
 -- A nullary constructor is /written/ as the bare string of its name
--- (@"echo"@), which is what Lean's derived @ToJson@ emits and what all 63
--- corpus world blocks contain; on input the one-key object form Lean's
+-- (@"echo"@), which is what Lean's derived @ToJson@ emits and what existing
+-- corpus worlds contain; on input the one-key object form Lean's
 -- @Json.getTag?@ also admits (@{"echo": {}}@) is accepted too. Every
 -- non-nullary constructor of this DSL names all of its arguments, so every one
 -- of them takes Lean's named-field object form,
@@ -250,20 +251,25 @@ instance FromJSON FlagSpec where
     "byPrefix" -> FByPrefix <$> o .:: "table" <*> o .:: "default"
     _ -> unknownCtor "FlagSpec" tag
 
--- | Strict out: all three fields, always. The checked reply's @"world"@ is a
--- re-serialization of the request's world spec and must come back equal at the
--- 'Value' level.
+-- | Existing worlds retain their three fields; exact schema answers are added
+-- only when present.
 instance ToJSON WorldSpec where
-  toJSON (WorldSpec t v f) = object ["text" .= t, "verdict" .= v, "flag" .= f]
+  toJSON (WorldSpec text verdict flag schema) =
+    object $
+      ["text" .= text, "verdict" .= verdict, "flag" .= flag]
+        ++ if null schema then [] else ["schema" .= schema]
 
 -- | Liberal in: a missing field — and, for good measure, an explicit @null@ —
 -- reads as the Lean structure's default for it ('defaultWorldSpec').
 instance FromJSON WorldSpec where
-  parseJSON = withObject "WorldSpec" $ \o ->
-    WorldSpec
-      <$> (fromMaybe (wsText defaultWorldSpec) <$> o .:? "text")
-      <*> (fromMaybe (wsVerdict defaultWorldSpec) <$> o .:? "verdict")
-      <*> (fromMaybe (wsFlag defaultWorldSpec) <$> o .:? "flag")
+  parseJSON = withObject "WorldSpec" $ \o -> do
+    text <- fromMaybe (wsText defaultWorldSpec) <$> o .:? "text"
+    verdict <- fromMaybe (wsVerdict defaultWorldSpec) <$> o .:? "verdict"
+    flag <- fromMaybe (wsFlag defaultWorldSpec) <$> o .:? "flag"
+    schema <- fromMaybe [] <$> o .:? "schema"
+    if uniqueAnswers schema
+      then pure (WorldSpec text verdict flag schema)
+      else fail "WorldSpec.schema contains two answers for one schema"
 
 -- ---------------------------------------------------------------------------
 -- toWorld
@@ -287,12 +293,7 @@ toWorld :: WorldSpec -> World
 toWorld w = World answer
   where
     answer :: SCode c -> Q c -> El c
-    answer SText q = case wsText w of
-      TEcho -> qPrompt q
-      TWrap pre post -> pre <> qPrompt q <> post
-      TConst s -> s
-      TByDraw -> "draw:" <> T.pack (show (qDraw q))
-      TByPrefix table d -> byPrefix table d (qPrompt q)
+    answer SText q = textAnswer q
     answer SVerdict q = case wsVerdict w of
       VConst v -> vLitToVerdict v
       VByPrefix table d -> vLitToVerdict (byPrefix table d (qPrompt q))
@@ -301,6 +302,16 @@ toWorld w = World answer
       FPromptEq s -> qPrompt q == s
       FByPrefix table d -> byPrefix table d (qPrompt q)
     answer SAck _ = ()
+    answer code@(SStructured schema) _ =
+      fromMaybe (defaultEl code) (lookupAnswer (wsSchema w) schema)
+
+    textAnswer :: Q d -> Text
+    textAnswer q = case wsText w of
+      TEcho -> qPrompt q
+      TWrap pre post -> pre <> qPrompt q <> post
+      TConst s -> s
+      TByDraw -> "draw:" <> T.pack (show (qDraw q))
+      TByPrefix table d -> byPrefix table d (qPrompt q)
 
 -- | @table.find? (fun e => e.1.isPrefixOf q.prompt)@, defaulting.
 byPrefix :: [(Text, a)] -> a -> Text -> a
@@ -390,7 +401,7 @@ runIn w y (PDyn _ e f) = runIn w y (f (e y))
 -- syntactically distinct asks that say the same words, to the same addressee,
 -- in the same scope, at the same draw, are __one question__.
 data EventKey = EventKey
-  { ekCode :: !Code,
+  { ekCode :: !SomeCode,
     ekAddressee :: !Addressee,
     ekScope :: !QScope,
     ekPrompt :: !Text,
@@ -483,6 +494,7 @@ answerJson SText s = A.String s
 answerJson SVerdict v = verdictJson v
 answerJson SFlag b = A.Bool b
 answerJson SAck _ = A.Null
+answerJson (SStructured schema) value = encodeExact schema value
 
 -- | @Conformance.lean:172@ — the two scope axes, __both keys always present__,
 -- @null@ where the axis is silent. The second key is @mode@; nothing in this
@@ -496,19 +508,14 @@ scopeJson s =
 
 -- | @Conformance.lean:177@ — one event of the reply's @"trace"@ array.
 --
--- The @code@ field is 'codeName', so a receipt prints as @"receipt"@ and never
--- as @"ack"@: this is the reply side of the two spellings a 'Code' has on the
--- wire. The derived constructor names, whose receipt is @"ack"@, are confined
--- to the inside of a @RawProgram@ (the @ann@, @reviewAnn@ and @result@ fields
--- and the second component of a @params@ pair); everywhere else — a @string@
--- request's @code@, a trace event's @code@, the checked reply's @codes@ — the
--- spelling is 'codeName' \/ @codeOfName@, whose receipt is @"receipt"@. The
--- @prompt@
--- is the /evaluated/ words, not the chunk list.
+-- Built-ins retain the old strings (`receipt`, never `ack`); a schema-indexed
+-- code is an object carrying the schema that is part of question identity. The
+-- prompt is the evaluated words, not the chunk list.
+
 eventJson :: Event -> Value
 eventJson (Event c q a) =
   object
-    [ "code" .= codeName (fromSCode c),
+    [ "code" .= codeJson (fromSCode c),
       "addressee" .= qAddressee q,
       "scope" .= scopeJson (qScope q),
       "prompt" .= qPrompt q,

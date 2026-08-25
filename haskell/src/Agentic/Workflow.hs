@@ -339,6 +339,19 @@ module Agentic.Workflow
     Decider (..),
     decide,
     Answer (..),
+    structured,
+    Schema (..),
+    HasSchema (..),
+    KnownSchema (..),
+    SchemaWitness,
+    schemaNull,
+    schemaBoolean,
+    schemaInteger,
+    schemaNumber,
+    schemaString,
+    schemaArray,
+    schemaObject,
+    schemaProperty,
     answering,
     annotated,
     Ann,
@@ -440,9 +453,23 @@ import Agentic.Builder
 import qualified Agentic.Builder as B
 import Agentic.Plan
   ( KnownCode,
-    SCode,
+    SCode (..),
     Var (VHere),
-    sCode,
+    fromSCode,
+  )
+import Agentic.Schema
+  ( HasSchema (..),
+    KnownSchema (..),
+    Schema (..),
+    SchemaWitness,
+    schemaArray,
+    schemaBoolean,
+    schemaInteger,
+    schemaNull,
+    schemaNumber,
+    schemaObject,
+    schemaProperty,
+    schemaString,
   )
 import Agentic.Raw
   ( Addressee (..),
@@ -453,6 +480,7 @@ import Agentic.Raw
     RawRhs (..),
     RawSource (..),
     Served (..),
+    SomeCode,
     servedBy1,
   )
 import Agentic.WF (KnownIx, Says (..), V (..), wf, wft)
@@ -711,32 +739,36 @@ decide d v ws
         (T.unpack [wft|decide: a decider needs its needles to say something, and the empty needle tests nothing|])
   | otherwise = B.decide @h @s d v (NE.fromList ws)
 
--- | The four answer kinds, as words an author can say. Capitalised because
--- @verdict@ is a name authors /bind/, and a lower-case singleton would be
--- shadowed by it. The data constructor @Text@ is in a different namespace from
--- the type @Data.Text.Text@ and does not clash with it.
+-- | Answer kinds as evidence. A structured answer carries the schema singleton
+-- that indexes its result type.
 data Answer (c :: Code) where
   Text :: Answer 'CodeText
   Flag :: Answer 'CodeFlag
   Verdict :: Answer 'CodeVerdict
   Receipt :: Answer 'CodeAck
+  Structured :: SchemaWitness schema -> Answer ('CodeStructured schema)
 
--- | The kind, as evidence.
-withAnswer :: forall c r. Answer c -> (KnownCode c => r) -> r
-withAnswer a k = case a of
-  Text -> k
-  Flag -> k
-  Verdict -> k
-  Receipt -> k
+-- | Structured answer evidence derived from its destination Haskell type.
+structured :: forall value. HasSchema value => Answer ('CodeStructured (SchemaOf value))
+structured = Structured (schemaOf @value)
+
+-- | The kind, as an explicit singleton.
+withAnswer :: Answer c -> (SCode c -> r) -> r
+withAnswer kind k = case kind of
+  Text -> k SText
+  Flag -> k SFlag
+  Verdict -> k SVerdict
+  Receipt -> k SAck
+  Structured schema -> k (SStructured schema)
 
 -- | @ask … \`answering\` Verdict@: the kind, stated where nothing else fixes
 -- it. Prints nothing — @ann@ stays @null@.
 answering :: Ask s -> Answer c -> Rhs s c
-answering a c = withAnswer c (B.one a)
+answering a c = withAnswer c (\code -> B.oneAt code a)
 
 -- | @ask … \`annotated\` Verdict@: the kind, printed — @x : verdict <- …@.
 annotated :: Ask s -> Answer c -> Ann s c
-annotated a c = withAnswer c (Ann sCode (B.one a))
+annotated a c = withAnswer c (\code -> Ann code (B.oneAt code a))
 
 -- | A source with its kind written out, which is the one thing that prints an
 -- annotation.
@@ -812,7 +844,7 @@ data Arms3 (c :: Code) (s :: Scope)
 data Clauses (c :: Code) (s :: Scope)
   = Clauses
       Text
-      (Maybe Code)
+      (Maybe SomeCode)
       (Rhs (An c ': s) 'CodeVerdict)
       (Rhs (An 'CodeVerdict ': An c ': s) c)
 
@@ -1051,7 +1083,7 @@ instance
   ) =>
   Step (Ask s') ('Review c s) j a
   where
-  step mn live q k = clausesOf mn live (Nothing @Code) (B.one @'CodeVerdict q) k
+  step mn live q k = clausesOf mn live (Nothing @SomeCode) (B.one @'CodeVerdict q) k
 
 -- | @verdict <- panel […]@ inside a revision — a panel, or a call, or a
 -- question whose kind is already said.
@@ -1063,7 +1095,7 @@ instance
   ) =>
   Step (Rhs s' c') ('Review c s) j a
   where
-  step mn live r k = clausesOf mn live (Nothing @Code) r k
+  step mn live r k = clausesOf mn live (Nothing @SomeCode) r k
 
 -- | @verdict <- panel […] \`annotated\` Verdict@ — the review with its kind
 -- printed.
@@ -1075,7 +1107,7 @@ instance
   ) =>
   Step (Ann s' c') ('Review c s) j a
   where
-  step mn live (Ann _ r) k = clausesOf mn live (Just CodeVerdict) r k
+  step mn live (Ann _ r) k = clausesOf mn live (Just (fromSCode SVerdict)) r k
 
 -- | The review clause, whichever source wrote it: its name, its printed
 -- annotation, itself, and the amendment the rest of the block is.
@@ -1083,7 +1115,7 @@ clausesOf ::
   forall c s.
   Maybe Text ->
   Live ->
-  Maybe Code ->
+  Maybe SomeCode ->
   Rhs (An c ': s) 'CodeVerdict ->
   (V (An 'CodeVerdict ': An c ': s) 'CodeVerdict -> Live -> Amendment c s) ->
   Clauses c s
@@ -1493,6 +1525,7 @@ amend ::
   W ('Amending c s) j Term
 amend q = W (\_ _ -> Amendment (B.one q))
 
+
 -- | @result <- revising draft (atMost n) \\patch -> W.do …@, and the
 -- @case result of@ that follows it.
 --
@@ -1674,7 +1707,7 @@ takes ::
   Params (c ': cs) acc s (V ('(n, c) ': acc) c, hs)
 takes a rest
   | reserved nm = reservedError "takes" nm
-  | otherwise = withAnswer a (B.param @n @c rest)
+  | otherwise = withAnswer a (\code -> B.paramAt @n code rest)
   where
     nm = T.pack (symbolVal (Proxy @n))
 
@@ -1714,6 +1747,7 @@ function nm ps body =
     runBody
       (reverse (paramNames ps))
       (applyTo body hs :: W ('Body r s) ('Body r s) Term)
+
 
 -- | @answer x@ — the body's value, at the kind the handle carries, which is
 -- the function's declared result.

@@ -56,9 +56,8 @@
 -- @Sub.wk@, one 'VThere' per entry stepped over. No weakening is ever written
 -- by hand.
 module Agentic.Builder
-  ( -- * The four answer kinds
-    -- | Re-exported from "Agentic.Raw" so that a module of rebuilt cases needs
-    -- no other import: every combinator below is applied at a promoted 'Code'.
+  ( -- * The answer-code universe
+    -- | Re-exported so rebuilt cases need no second type-level import.
     Code (..),
 
     -- * The typed scope
@@ -95,11 +94,14 @@ module Agentic.Builder
     askRaw,
     askShapeH,
     askNode,
+    askNodeWith,
     askAt,
+    askAtWith,
 
     -- * Clause-position sources
     Rhs (..),
     one,
+    oneAt,
     panel,
     panelText,
     Decider (..),
@@ -118,6 +120,7 @@ module Agentic.Builder
     Params (..),
     noParams,
     param,
+    paramAt,
     Fn (..),
     function,
 
@@ -170,6 +173,7 @@ import Agentic.Raw
   ( Addressee (..),
     Chunk (..),
     Code (..),
+    SomeCode,
     Decider (..),
     Pos (..),
     Prompt,
@@ -576,20 +580,22 @@ askShapeH _ a =
 -- | A question in binding position: __one__ node, because 'PAsk' /is/
 -- ask-and-bind. Lean: @bindForm@ (@Check.lean:542@), its @.ask@ branch at @:551@.
 askNode :: forall c s a. KnownCode c => Ask s -> Plan (c ': Codes s) a -> Plan (Codes s) a
-askNode a k = case wordsClosed (askWords a) of
+askNode = askNodeWith (sCode @c)
+
+askNodeWith :: SCode c -> Ask s -> Plan (c ': Codes s) a -> Plan (Codes s) a
+askNodeWith c a k = case wordsClosed (askWords a) of
   Just w -> PAskC c (withPrompt (askShapeH c a) w) k
   Nothing -> PAsk c (askShapeH c a) (wordsExpr (askWords a)) k
-  where
-    c = sCode @c
 
 -- | A question as a value. Lean: @askPlan@ (@Check.lean:350@), i.e. @askC1@
 -- where the words are in the term and @ask1@ where they are computed.
 askAt :: forall c s. KnownCode c => Ask s -> Plan (Codes s) (El c)
-askAt a = case wordsClosed (askWords a) of
+askAt = askAtWith (sCode @c)
+
+askAtWith :: SCode c -> Ask s -> Plan (Codes s) (El c)
+askAtWith c a = case wordsClosed (askWords a) of
   Just w -> askC1 c (withPrompt (askShapeH c a) w)
   Nothing -> ask1 c (askShapeH c a) (wordsExpr (askWords a))
-  where
-    c = sCode @c
 
 -- ---------------------------------------------------------------------------
 -- Clause-position sources
@@ -619,11 +625,14 @@ graftForm v k = graft v (Cont (\sigma e -> subP k (subCons e sigma)))
 
 -- | One question, at the imposed kind.
 one :: forall c s. KnownCode c => Ask s -> Rhs s c
-one a =
+one = oneAt (sCode @c)
+
+oneAt :: SCode c -> Ask s -> Rhs s c
+oneAt c a =
   Rhs
     { rhsRaw = RhsAsk (askRaw a),
-      rhsPlan = askAt @c a,
-      rhsForm = \k -> askNode @c a k
+      rhsPlan = askAtWith c a,
+      rhsForm = \k -> askNodeWith c a k
     }
 
 -- | @panel, all must approve […]@.
@@ -815,7 +824,7 @@ type ParamCtx (ps :: [Code]) = ParamCtxGo ps '[]
 data Params (ps :: [Code]) (acc :: Scope) (s :: Scope) (hs :: Type) where
   PNil :: Params '[] acc acc ()
   PCons ::
-    (KnownSymbol n, KnownCode c, Fresh n acc) =>
+    (KnownSymbol n, Fresh n acc) =>
     Proxy n ->
     SCode c ->
     Params cs ('(n, c) ': acc) s hs ->
@@ -831,10 +840,18 @@ param ::
   (KnownSymbol n, KnownCode c, Fresh n acc) =>
   Params cs ('(n, c) ': acc) s hs ->
   Params (c ': cs) acc s (V ('(n, c) ': acc) c, hs)
-param = PCons (Proxy @n) (sCode @c)
+param = paramAt @n (sCode @c)
+
+paramAt ::
+  forall n c cs acc s hs.
+  (KnownSymbol n, Fresh n acc) =>
+  SCode c ->
+  Params cs ('(n, c) ': acc) s hs ->
+  Params (c ': cs) acc s (V ('(n, c) ': acc) c, hs)
+paramAt code = PCons (Proxy @n) code
 
 -- | The parameters as printed: @[name, code]@ pairs in source order.
-paramsRaw :: Params ps acc s hs -> [(Text, Code)]
+paramsRaw :: Params ps acc s hs -> [(Text, SomeCode)]
 paramsRaw = \case
   PNil -> []
   PCons p c rest -> (T.pack (symbolVal p), fromSCode c) : paramsRaw rest
@@ -877,13 +894,23 @@ function ::
   Params ps '[] s hs ->
   (hs -> Body s r) ->
   Fn ps r
-function nm ps body =
+function = functionAt (sCode @r)
+
+functionAt ::
+  forall ps r s hs.
+  (Codes s ~ ParamCtx ps) =>
+  SCode r ->
+  Text ->
+  Params ps '[] s hs ->
+  (hs -> Body s r) ->
+  Fn ps r
+functionAt resultCode nm ps body =
   Fn
     { fnRaw =
         RawFn
           { fnName = nm,
             fnParams = paramsRaw ps,
-            fnResult = fromSCode (sCode @r),
+            fnResult = fromSCode resultCode,
             fnBody = bodyRaw b,
             fnAnswer = bodyAnswer b,
             fnAnswerPos = pos0,
@@ -1278,7 +1305,7 @@ revisingCase ::
   -- | the bound: @0 <= n <= 64@ (Lean's @maxRevisions@)
   Integer ->
   -- | the review's printed annotation: 'Nothing' or @Just 'CodeVerdict'@
-  Maybe Code ->
+  Maybe SomeCode ->
   -- | the review, at @verdict@, seeing the candidate as the carrier
   ( V ('(carrier, c) ': s) c ->
     Rhs ('(carrier, c) ': s) 'CodeVerdict
@@ -1344,7 +1371,7 @@ revisingCaseI ::
   -- | the bound: @0 <= n <= 64@ (Lean's @maxRevisions@)
   Integer ->
   -- | the review's printed annotation: 'Nothing' or @Just 'CodeVerdict'@
-  Maybe Code ->
+  Maybe SomeCode ->
   -- | the review, at @verdict@, seeing the candidate as the carrier
   Rhs ('(nc, c) ': s) 'CodeVerdict ->
   -- | the amend, at the candidate's kind, seeing the verdict and the candidate
@@ -1375,7 +1402,7 @@ revisingCaseI
             \writes, so its bound may name at most 64 amendments, and not "
               ++ show n
           )
-    | reviewAnn `notElem` [Nothing, Just CodeVerdict] =
+    | reviewAnn `notElem` [Nothing, Just (fromSCode SVerdict)] =
         error
           -- Not a [wft|...|]: Agentic.WF imports this module, so importing the quoter here is a module cycle.
           "revisingCase: a review answers `verdict`, not anything else: the loop \
@@ -1459,7 +1486,7 @@ revisingOnCase ::
   -- | the bound: @0 <= n <= 64@
   Integer ->
   -- | the review's printed annotation
-  Maybe Code ->
+  Maybe SomeCode ->
   -- | the review, at @verdict@, seeing the candidate as the carrier
   ( V ('(carrier, c) ': s) c ->
     Rhs ('(carrier, c) ': s) 'CodeVerdict
@@ -1509,7 +1536,7 @@ revisingOnCaseI ::
   Text ->
   Text ->
   Integer ->
-  Maybe Code ->
+  Maybe SomeCode ->
   Rhs ('(nc, c) ': s) 'CodeVerdict ->
   Rhs ('(nr, 'CodeVerdict) ': '(nc, c) ': s) c ->
   Blk ('(ns, c) ': s) ->
@@ -1539,7 +1566,7 @@ revisingOnCaseI
             \writes, so its bound may name at most 64 amendments, and not "
               ++ show n
           )
-    | reviewAnn `notElem` [Nothing, Just CodeVerdict] =
+    | reviewAnn `notElem` [Nothing, Just (fromSCode SVerdict)] =
         error
           -- Not a [wft|...|]: Agentic.WF imports this module, so importing the quoter here is a module cycle.
           "revisingOnCase: a review answers `verdict`, not anything else: the \

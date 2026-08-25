@@ -1,3 +1,4 @@
+import Agentic.Core.Schema
 import Agentic.Scope
 import Mathlib.Algebra.FreeMonoid.Basic
 import Mathlib.Algebra.GroupWithZero.WithZero
@@ -295,6 +296,8 @@ inductive Code where
   | flag
   /-- An acknowledgement carrying no information. -/
   | ack
+  /-- A structured value whose type is described by this schema. -/
+  | structured (schema : Schema)
   deriving DecidableEq, Repr, Inhabited
 
 /-- `[[El c]]` = the set of things an addressee can say in reply to a question of
@@ -304,6 +307,7 @@ def El : Code → Type
   | .verdict => Verdict
   | .flag => Bool
   | .ack => Unit
+  | .structured schema => Schema.El schema
 
 /-- Every answer type is inhabited: an addressee always says *something*. This
 is what makes total worlds exist, and hence what makes the defaulting
@@ -313,6 +317,7 @@ instance instInhabitedEl : (c : Code) → Inhabited (El c)
   | .verdict => inferInstanceAs (Inhabited Verdict)
   | .flag => inferInstanceAs (Inhabited Bool)
   | .ack => inferInstanceAs (Inhabited Unit)
+  | .structured schema => inferInstanceAs (Inhabited (Schema.El schema))
 
 /-- Every answer type has decidable equality, which is what makes the per-run
 certificate a `Bool` rather than a proposition. -/
@@ -321,6 +326,7 @@ instance instDecidableEqEl : (c : Code) → DecidableEq (El c)
   | .verdict => inferInstanceAs (DecidableEq Verdict)
   | .flag => inferInstanceAs (DecidableEq Bool)
   | .ack => inferInstanceAs (DecidableEq Unit)
+  | .structured schema => inferInstanceAs (DecidableEq (Schema.El schema))
 
 /-! ## Questions -/
 

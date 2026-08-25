@@ -276,7 +276,7 @@ def deciderOfName : String → Option Decider
 
 /-- **Morphism equation.** `deciderOfName` is a retraction of `deciderName`, so
 an authoring surface's keyword, the checker's diagnosis and the corpus's field
-are one table — the same discipline `codeOfName_codeName` holds for the four
+are one table — the same discipline `codeOfName` holds for the four built-in
 answer kinds. -/
 @[simp] theorem deciderOfName_deciderName (d : Decider) :
     deciderOfName (deciderName d) = some d := by
@@ -488,9 +488,9 @@ def RawSource.pos : RawSource → Pos
 
 /-! ## The names of the answer kinds
 
-Spelled once, so that an authoring surface's keywords, the checker's diagnoses
-and the corpus's `code` fields cannot drift apart. `codeOfName` is the inverse
-the conformance oracle reads a string request's `code` with. -/
+Spelled once for diagnostics and for the four built-in string-layer codes.
+A schema-indexed code is structural data and cannot be reconstructed from this
+one-word diagnostic name. -/
 
 /-- `[[codeName c]]` = the keyword that writes the code `c`. -/
 def codeName : Code → String
@@ -498,8 +498,9 @@ def codeName : Code → String
   | .verdict => "verdict"
   | .flag => "flag"
   | .ack => "receipt"
+  | .structured _ => "structured"
 
-/-- …and the keyword parsed back, which is the section `codeName` splits. -/
+/-- Parse a built-in code name. A structured code also needs its schema. -/
 def codeOfName : String → Option Code
   | "text" => some .text
   | "verdict" => some .verdict
@@ -507,12 +508,10 @@ def codeOfName : String → Option Code
   | "receipt" => some .ack
   | _ => none
 
-/-- **Morphism equation.** `codeOfName` is a retraction of `codeName`: every
-answer kind is written by exactly one keyword and read back as itself, so the
-two tables above are one table. (`.ack` is *written* `receipt`, because what an
-act hands back is a receipt and carries no information.) -/
-@[simp] theorem codeOfName_codeName (c : Code) : codeOfName (codeName c) = some c := by
-  cases c <;> rfl
+@[simp] theorem codeOfName_text : codeOfName "text" = some .text := rfl
+@[simp] theorem codeOfName_verdict : codeOfName "verdict" = some .verdict := rfl
+@[simp] theorem codeOfName_flag : codeOfName "flag" = some .flag := rfl
+@[simp] theorem codeOfName_receipt : codeOfName "receipt" = some .ack := rfl
 
 end Dsl
 

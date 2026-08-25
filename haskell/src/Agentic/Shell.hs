@@ -86,11 +86,12 @@ import Agentic.Exec
 import Agentic.Plan
   ( El,
     Q (..),
-    SCode (SAck, SFlag, SText, SVerdict),
+    SCode (SAck, SFlag, SStructured, SText, SVerdict),
     fromSCode,
     verdictApprove,
     verdictObject,
   )
+import Agentic.Schema.Json (decode)
 import Agentic.Raw (Addressee (AddrToolExec), Code)
 import Agentic.WF (wft)
 import Control.Exception (Exception, IOException, try)
@@ -279,6 +280,15 @@ answerByRunning cfg c q cmd args = do
       SVerdict -> case code of
         ExitSuccess -> pure verdictApprove
         ExitFailure n -> pure (verdictObject [objection n out err])
+      SStructured schema -> case code of
+        ExitFailure n -> abandon n out err
+        ExitSuccess -> case decode schema out of
+          Just value -> pure value
+          Nothing ->
+            raiseGap
+              GapTransportRefusal
+              "command produced no structured answer matching its schema"
+              (userError "command produced no structured answer matching its schema")
 
     -- The command's own first failing line, which is what a model was being
     -- asked to reproduce faithfully and was not.

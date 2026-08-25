@@ -132,6 +132,10 @@ library
     Agentic.Oracle
     Agentic.Plan
     Agentic.Raw
+    Agentic.Schema
+    Agentic.Schema.Conformance
+    Agentic.Schema.Json
+    Agentic.Schema.TH
     Agentic.Route
     Agentic.Shell
     Agentic.Text

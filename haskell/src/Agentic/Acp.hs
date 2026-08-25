@@ -232,6 +232,7 @@
 --   still read at the handshake, because that is what a client that later wants
 --   to ask for a handoff must not skip.
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -367,8 +368,8 @@ import Agentic.Exec
     trimAscii,
     withTransportGaps,
   )
-import Agentic.Plan (Q (..), SCode, fromSCode)
-import Agentic.Raw (Addressee, Code (CodeAck))
+import Agentic.Plan (Q (..), SCode (SAck), fromSCode)
+import Agentic.Raw (Addressee, Code, SomeCode (..))
 import Agentic.WF (wft)
 
 -- ---------------------------------------------------------------------------
@@ -754,8 +755,8 @@ data Permission = Grant | Cancel
 -- write to the workspace with the same authority as a consented act; that is
 -- the defect this replaces, and @test\/stub_adapter.py --write-on-ask@ is its
 -- negative control.
-permissionByCode :: Code -> Addressee -> Permission
-permissionByCode CodeAck _ = Grant
+permissionByCode :: SomeCode -> Addressee -> Permission
+permissionByCode (SomeCode SAck) _ = Grant
 permissionByCode _ _ = Cancel
 
 -- | The option selected when a request is granted — @allow_once@ if the agent offered one, else @allow_always@, else

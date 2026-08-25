@@ -110,7 +110,8 @@ import Agentic.Plan
   ( El,
     Q (..),
     QScope (..),
-    SCode (SAck, SFlag, SText, SVerdict),
+    SCode (SAck, SFlag, SStructured, SText, SVerdict),
+    defaultEl,
     fromSCode,
     scopeUnit,
     verdictApprove,
@@ -305,6 +306,7 @@ refusingWorld bad = WorldIO $ \c q ->
     answerAt SAck _ = ()
     answerAt SText q = qPrompt q
     answerAt SVerdict _ = verdictApprove
+    answerAt code@(SStructured _) _ = defaultEl code
 
 -- | The model each event's scope names, in trace order.
 answerers :: [Event] -> [Maybe Text]
@@ -550,6 +552,7 @@ plainWorld = World answerAt
     answerAt SAck _ = ()
     answerAt SText q = qPrompt q
     answerAt SVerdict _ = verdictApprove
+    answerAt code@(SStructured _) _ = defaultEl code
 
 -- | A backend that will not answer anything, raising a __gap__ — "nothing
 -- usable came back" — rather than an ordinary error, so that the question may

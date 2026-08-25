@@ -147,9 +147,10 @@ import Agentic.Guards (askCounts)
 import Agentic.Plan
   ( KnownCode,
     Plan (PAsk, PAskC, PCase, PDyn, PRet),
-    SCode (SAck, SFlag, SText, SVerdict),
+    SCode (SAck, SFlag, SStructured, SText, SVerdict),
     Var (VHere, VThere),
     tagValues,
+    fromSCode,
   )
 import Agentic.Raw
   ( Addressee (AddrModel, AddrPerson, AddrTool, AddrToolExec),
@@ -166,6 +167,7 @@ import Agentic.Raw
     Served (Served),
     TextMember (TextMember),
     servedBy1,
+    SomeCode,
     RawSource (SrcRevising, SrcRevisingOn, SrcRhs),
     RawTarget (RawTarget),
   )
@@ -203,6 +205,14 @@ withCode CodeText k = k SText
 withCode CodeVerdict k = k SVerdict
 withCode CodeFlag k = k SFlag
 withCode CodeAck k = k SAck
+withCode (CodeStructured _) _ = error "generated codes are built-in only"
+
+someCode :: Code -> SomeCode
+someCode code = withCode code fromSCode
+
+isAck :: Code -> Bool
+isAck CodeAck = True
+isAck _ = False
 
 -- | Decidable equality of promoted codes. 'Agentic.Plan.El' is not injective,
 -- so this is how an argument or a hole is matched to the kind its position
@@ -350,6 +360,7 @@ holePieces = foldr (\b acc -> maybe acc (: acc) (holeOf b)) []
       SVerdict -> Just (holeI x v)
       SFlag -> Nothing
       SAck -> Nothing
+      SStructured _ -> Nothing
 
 genPiece :: forall s. Live s -> Gen (Piece s)
 genPiece ns = case holePieces ns of
@@ -774,7 +785,7 @@ genBlk fns fuel rd br ns
                   n <-
                     frequency
                       [(3, pure 0), (3, pure 1), (2, pure 2), (2, pure 3)]
-                  rann <- frequency [(3, pure Nothing), (1, pure (Just CodeVerdict))]
+                  rann <- frequency [(3, pure Nothing), (1, pure (Just (someCode CodeVerdict)))]
                   let carrier = freshFor "c" ns
                       rname = freshFor "v" ns
                       sname = freshFor "z" ns
@@ -816,7 +827,7 @@ genBlk fns fuel rd br ns
               ( 2,
                 do
                   n <- frequency [(4, pure 0), (3, pure 1), (2, pure 2)]
-                  rann <- frequency [(3, pure Nothing), (1, pure (Just CodeVerdict))]
+                  rann <- frequency [(3, pure Nothing), (1, pure (Just (someCode CodeVerdict)))]
                   let carrier = freshFor "c" ns
                       rname = freshFor "v" ns
                       sname = freshFor "z" ns
@@ -1071,7 +1082,7 @@ genWorldSpec = genWorldSpecFor litPool
 -- 'VerdictSpec' ones and all three 'FlagSpec' ones are reachable.
 genWorldSpecFor :: [Text] -> Gen WorldSpec
 genWorldSpecFor frags =
-  WorldSpec <$> genTextSpec <*> genVerdictSpec <*> genFlagSpec
+  WorldSpec <$> genTextSpec <*> genVerdictSpec <*> genFlagSpec <*> pure []
   where
     key
       | null frags = elements junkKeys
@@ -1190,7 +1201,7 @@ rawBase = rawWellFormed
 rawEmptyPanel :: Gen RawProgram
 rawEmptyPanel = do
   p <- rawBase
-  ann <- elements [Nothing, Just CodeVerdict, Just CodeText]
+  ann <- elements [Nothing, Just (someCode CodeVerdict), Just (someCode CodeText)]
   let stmt rest = RawBind "bad" ann (SrcRhs (RhsPanel [] pos0)) rest pos0
   frequency
     [ (3, (\m -> p {progMain = m}) <$> placeStmt stmt (progMain p)),
@@ -1202,7 +1213,7 @@ rawEmptyPanel = do
                   ++ [ RawFn
                          { fnName = "withEmptyPanel",
                            fnParams = [],
-                           fnResult = CodeVerdict,
+                           fnResult = someCode CodeVerdict,
                            fnBody = [BodyBind "bad" ann (RhsPanel [] pos0) pos0],
                            fnAnswer = Just "bad",
                            fnAnswerPos = pos0,
@@ -1237,7 +1248,7 @@ rawRevisionBound = do
         []
         ( RawBind
             "d"
-            (Just CodeText)
+            (Just (someCode CodeText))
             (SrcRhs (RhsAsk (closedAsk (AddrModel "author") [Lit "draft"])))
             ( RawBind
                 "loop"
@@ -1314,7 +1325,7 @@ rawBudget = do
       RawFn
         { fnName = nm,
           fnParams = [],
-          fnResult = CodeAck,
+          fnResult = someCode CodeAck,
           fnBody = replicate (fromInteger k) (BodyAct plainAsk pos0),
           fnAnswer = Nothing,
           fnAnswerPos = pos0,
@@ -1325,7 +1336,7 @@ rawBudget = do
       RawFn
         { fnName = nm,
           fnParams = [],
-          fnResult = CodeAck,
+          fnResult = someCode CodeAck,
           fnBody =
             replicate k (BodyCallS callee [] pos0)
               ++ replicate (fromInteger extra) (BodyAct plainAsk pos0),
@@ -1378,7 +1389,7 @@ rawServedBy = do
                   ++ [ RawFn
                          { fnName = "served",
                            fnParams = [],
-                           fnResult = CodeAck,
+                           fnResult = someCode CodeAck,
                            fnBody = [BodyAct a pos0],
                            fnAnswer = Nothing,
                            fnAnswerPos = pos0,
@@ -1411,7 +1422,7 @@ rawDupFunction = do
       RawFn
         { fnName = "twice",
           fnParams = [],
-          fnResult = CodeAck,
+          fnResult = someCode CodeAck,
           fnBody =
             [BodyAct (RawAsk Nothing (RawTarget (AddrTool "t") 0) [Lit "tick"] pos0) pos0],
           fnAnswer = Nothing,
@@ -1513,7 +1524,7 @@ genRawBlock fnNames fuel names
             ( 6,
               do
                 x <- elements ["a", "b", "c", "d"]
-                ann <- frequency [(3, pure Nothing), (2, Just <$> elements [CodeText, CodeVerdict, CodeFlag])]
+                ann <- frequency [(3, pure Nothing), (2, Just . someCode <$> elements [CodeText, CodeVerdict, CodeFlag])]
                 r <- genRawRhs fnNames names
                 RawBind x ann (SrcRhs r)
                   <$> genRawBlock fnNames (fuel - 1) (x : names)
@@ -1561,14 +1572,14 @@ genRawFn fnNames nm = do
   body <- vectorOf nb (genRawBodyStmt earlier (map fst ps))
   res <- elements [CodeText, CodeVerdict, CodeFlag, CodeAck]
   ans <-
-    if res == CodeAck
+    if isAck res
       then pure Nothing
       else frequency [(3, pure (Just "r")), (1, pure Nothing)]
   pure
     RawFn
       { fnName = nm,
-        fnParams = ps,
-        fnResult = res,
+        fnParams = [(name, someCode code) | (name, code) <- ps],
+        fnResult = someCode res,
         fnBody = body,
         fnAnswer = ans,
         fnAnswerPos = pos0,
@@ -1580,7 +1591,7 @@ genRawBodyStmt fnNames names =
   frequency
     ( [ ( 5,
           do
-            ann <- frequency [(2, pure Nothing), (3, Just <$> elements bindableCodes)]
+            ann <- frequency [(2, pure Nothing), (3, Just . someCode <$> elements bindableCodes)]
             r <- genRawRhs fnNames names
             pure (BodyBind "r" ann r pos0)
         ),

@@ -62,9 +62,10 @@ import qualified Data.Vector as V
 
 import Agentic.Builder (Program, progPlan, progRawOut)
 import Agentic.Guards (askCounts)
-import Agentic.Plan (askNodes, codes, costSummary, level, levelName, size)
-import Agentic.Raw (codeName)
-import Agentic.World (WorldSpec, worldObservation)
+import Agentic.Plan (askNodes, codes, costSummary, level, levelName, schemaRequirements, size)
+import Agentic.Schema.Conformance (coversAnswer)
+import Agentic.Schema.Json (codeJson)
+import Agentic.World (WorldSpec (..), worldObservation)
 
 -- ---------------------------------------------------------------------------
 -- The reply
@@ -81,25 +82,29 @@ import Agentic.World (WorldSpec, worldObservation)
 -- second reading of the same term, whereas reading them off the print holds
 -- week one's guards against week two's builder.
 --
--- @codes@ is written with 'codeName', so the receipt kind prints as
--- @\"receipt\"@ rather than as its constructor; a plan whose paths disagree on
+-- Built-in codes retain their existing strings; a schema code carries the schema
+-- that is part of its identity. A plan whose paths disagree on
 -- their answer kinds has no @codes@ at all and the field is @null@ — which is
 -- a different thing from the empty list a question-free batch program yields.
 observeValue :: Program -> [WorldSpec] -> Value
-observeValue prog ws =
-  object
-    [ "level" .= levelName (level p),
-      "size" .= size p,
-      "askNodes" .= askNodes p,
-      "codes" .= maybe Null (toJSON . map codeName) (codes p),
-      "costSummary"
-        .= object ["minFold" .= mn, "maxFold" .= mx, "paths" .= paths],
-      "blockAsks" .= blockAsks,
-      "fnAsks" .= fnAsks,
-      "worlds" .= map (worldObservation p) ws
-    ]
+observeValue prog ws
+  | not (all (\world -> all (coversAnswer (wsSchema world)) requirements) ws) =
+      object ["error" .= ("world is missing an answer for a queried structured schema" :: Text)]
+  | otherwise =
+      object
+        [ "level" .= levelName (level p),
+          "size" .= size p,
+          "askNodes" .= askNodes p,
+          "codes" .= maybe Null (toJSON . map codeJson) (codes p),
+          "costSummary"
+            .= object ["minFold" .= mn, "maxFold" .= mx, "paths" .= paths],
+          "blockAsks" .= blockAsks,
+          "fnAsks" .= fnAsks,
+          "worlds" .= map (worldObservation p) ws
+        ]
   where
     p = progPlan prog
+    requirements = schemaRequirements p
     (mn, mx, paths) = costSummary p
     (blockAsks, fnAsks) = askCounts (progRawOut prog)
 

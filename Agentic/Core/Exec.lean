@@ -1,4 +1,5 @@
 import Agentic.Core.Denote
+import Agentic.Core.Schema.Json
 
 /-!
 # The interpreter: the fold at the execution monad, and the one place `IO` enters
@@ -241,32 +242,25 @@ open Exec in
 /-- `[[Decode]]` = **the trusted base**: for each code, the total function taking
 the bytes an addressee produced to the thing it is thereby taken to have said.
 
-*Say it plainly.* Nothing in this package proves that these four clauses are the
-right reading of an addressee's words. They cannot be proved; they are the
-definition of what the words *mean to us*, and kernel §5 names them as the
-entire remaining trust boundary once refusal is an answer. What the package does
-instead of proving them is (a) make them total, (b) make them the *only* such
-decision — no other function in the repository turns a `String` into an `El c` —
-and (c) prove everything downstream against an arbitrary world, so that a
-misparse is a different world and not a broken theorem.
-
-The four clauses:
+*Say it plainly.* Nothing in this package proves that these decoding clauses are
+the right reading of an addressee's words. They cannot be proved; they define
+what the words mean to us. The structured clause is indexed by its schema:
 
 ```
-Decode .text    s = some s                     -- what was said is what was said
-Decode .flag    s = decodeFlag s               -- yes/no/true/false…, or none
-Decode .verdict s = some (decodeVerdict s)     -- total: refusal is an answer
-Decode .ack     s = some ()                    -- an acknowledgement carries nothing
+Decode (.structured schema) s = Schema.Json.decode schema s
 ```
 
-`Option`-valued because exactly one code can fail to parse (`Decode_eq_none`);
-the runtime's response to that failure — re-ask, then default — is
-`Exec.oracle`, and it is `IO`, not a theorem. -/
+Malformed JSON and schema mismatches are unreadable answers, never values. The
+other four clauses retain their existing meanings.
+
+`Option`-valued because flags and schema-indexed JSON may be unreadable; the
+runtime re-asks and then abandons rather than inventing an answer. -/
 def Decode : (c : Code) → String → Option (El c)
   | .text, s => some s
   | .flag, s => decodeFlag s
   | .verdict, s => some (decodeVerdict s)
   | .ack, _ => some ()
+  | .structured schema, s => Schema.Json.decode schema s
 
 /-- **Clause equation.** Free text is returned verbatim: the trusted base does
 not paraphrase. -/
@@ -283,25 +277,21 @@ at all acknowledges. -/
 /-- **Clause equation.** -/
 @[simp] theorem Decode_flag (s : String) : Decode .flag s = Exec.decodeFlag s := rfl
 
-/-- **The failure surface is one code wide.** If the trusted base cannot read an
-answer, the question asked for a `flag`; `text`, `verdict` and `ack` are total.
+/-- **Clause equation.** Structured replies parse exactly when they are valid JSON
+matching the code's schema. -/
+@[simp] theorem Decode_structured (schema : Schema) (s : String) :
+    Decode (.structured schema) s = Schema.Json.decode schema s := rfl
 
-This is why the re-ask loop in `Exec.oracle` is not a general error-handling
-layer: it exists for the single code whose answer set is smaller than what an
-addressee can say. -/
-theorem Decode_eq_none {c : Code} {s : String} (h : Decode c s = none) : c = .flag := by
+/-- **The failure surface.** Only flags and schema-indexed JSON may be unreadable.
+Text, verdicts and acknowledgements are total. -/
+theorem Decode_eq_none {c : Code} {s : String} (h : Decode c s = none) :
+    c = .flag ∨ ∃ schema, c = .structured schema := by
   cases c with
   | text => exact absurd h (by simp)
   | verdict => exact absurd h (by simp)
+  | flag => exact Or.inl rfl
   | ack => exact absurd h (by simp)
-  | flag => rfl
-
-/-- …and the contrapositive in the form the interpreter uses: every code but
-`flag` answers. -/
-theorem Decode_isSome {c : Code} (s : String) (h : c ≠ .flag) : (Decode c s).isSome := by
-  cases hc : Decode c s with
-  | none => exact absurd (Decode_eq_none hc) h
-  | some _ => rfl
+  | structured schema => exact Or.inr ⟨schema, rfl⟩
 
 namespace Exec
 
@@ -779,6 +769,7 @@ def Code.name : Code → String
   | .verdict => "verdict"
   | .flag => "flag"
   | .ack => "ack"
+  | .structured _ => "structured"
 
 /-- How an addressee names itself in a prompt header. -/
 def Addressee.render : Addressee → String
@@ -809,6 +800,8 @@ def answerSpec : Code → String
   | .verdict => "Reply with exactly APPROVE if acceptable, or OBJECTION: <one line> if not."
   | .flag => "Reply with exactly yes or no."
   | .ack => "Do what was asked, then reply with exactly DONE."
+  | .structured schema =>
+      s!"Reply with exactly one JSON value matching this schema and nothing else: {Schema.Json.renderSchema schema}"
 
 /-- `[[Selected]]` = which axes of a question's scope the *protocol* carried, so
 that the prompt header can say the rest and neither axis is said twice.
@@ -886,7 +879,7 @@ abandon the run rather than invent an answer. A transport supplies the bytes
 through `Say` and can be read back by nothing here. -/
 structure Settings where
   /-- How many times to re-ask after a reply the trusted base could not read.
-  Only a `flag` can trigger this (`Decode_eq_none`). -/
+  Flags and schema-indexed JSON can trigger this (`Decode_eq_none`). -/
   retries : Nat := 1
   /-- Where a warning goes: a reply being re-asked. Warnings report what the run
   is *about* to do about something it noticed; they are never a substitute for
@@ -946,9 +939,8 @@ check is destroyed at the moment of the `cons`.
 So the invented answer is never made. What survives is the boundary as stated:
 the run either has an answer somebody gave, or it has no run.
 
-* Only `.flag` can fail to decode at all (`Decode_eq_none`), so this path is one
-  code wide: `.verdict` is total, and *refusal is an answer* — an unreadable
-  review reads as objections and never as approval.
+* `.flag` and `.structured schema` can fail to decode (`Decode_eq_none`); both are
+  re-asked. `.verdict` remains total because refusal is an answer.
 * `Settings.retries` says how many times to re-ask first, and each failed
   attempt is logged with the words that failed, so the error is the end of a
   visible sequence rather than a surprise.

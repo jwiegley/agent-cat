@@ -1,5 +1,6 @@
 import Agentic.Core.Explain
 import Agentic.Core.Report
+import Agentic.Core.Schema.Conformance
 
 /-!
 # The conformance library
@@ -48,7 +49,6 @@ open Lean (Json ToJson FromJson toJson fromJson?)
 
 Standalone `deriving instance`, so no file under `Agentic/Core` is touched. -/
 
-deriving instance FromJson, ToJson for Code
 deriving instance FromJson, ToJson for Pos
 deriving instance FromJson, ToJson for Chunk
 deriving instance FromJson, ToJson for Addressee
@@ -116,19 +116,43 @@ structure WorldSpec where
   text : TextSpec := .echo
   verdict : VerdictSpec := .const .approve
   flag : FlagSpec := .const true
-  deriving FromJson, ToJson
+  schema : List Schema.Conformance.Answer := []
 
-def WorldSpec.toWorld (w : WorldSpec) : Ω
-  | .text, q =>
-    match w.text with
-    | .echo => q.prompt
-    | .wrap pre post => pre ++ q.prompt ++ post
-    | .const s => s
-    | .byDraw => "draw:" ++ toString q.draw
-    | .byPrefix table d =>
+private def worldFieldD {α : Type} [FromJson α] (json : Json) (name : String)
+    (fallback : α) : Except String α :=
+  match json.getObjVal? name with
+  | .error _ => return fallback
+  | .ok value => if value.isNull then return fallback else fromJson? value
+
+instance : FromJson WorldSpec where
+  fromJson? json := do
+    let text ← worldFieldD json "text" TextSpec.echo
+    let verdict ← worldFieldD json "verdict" (VerdictSpec.const .approve)
+    let flag ← worldFieldD json "flag" (FlagSpec.const true)
+    let schema ← worldFieldD json "schema" []
+    if Schema.Conformance.Answer.uniqueSchemas schema then return { text, verdict, flag, schema }
+    else throw "WorldSpec.schema contains two answers for one schema"
+
+instance : ToJson WorldSpec where
+  toJson world :=
+    let fields : List (String × Json) :=
+      [("text", toJson world.text), ("verdict", toJson world.verdict), ("flag", toJson world.flag)]
+    Json.mkObj <| if world.schema.isEmpty then fields else
+      fields ++ [("schema", toJson world.schema)]
+
+def TextSpec.answer {c : Code} (spec : TextSpec) (q : Q c) : String :=
+  match spec with
+  | .echo => q.prompt
+  | .wrap pre post => pre ++ q.prompt ++ post
+  | .const s => s
+  | .byDraw => "draw:" ++ toString q.draw
+  | .byPrefix table d =>
       match table.find? (fun e => e.1.isPrefixOf q.prompt) with
       | some e => e.2
       | none => d
+
+def WorldSpec.toWorld (w : WorldSpec) : Ω
+  | .text, q => w.text.answer q
   | .verdict, q =>
     match w.verdict with
     | .const v => v.toVerdict
@@ -145,6 +169,7 @@ def WorldSpec.toWorld (w : WorldSpec) : Ω
       | some e => e.2
       | none => d
   | .ack, _ => ()
+  | .structured schema, _ => (Schema.Conformance.Answer.lookup w.schema schema).getD default
 
 /-! ## Serializing observations
 
@@ -168,15 +193,46 @@ def answerJson : (c : Code) → El c → Json
   | .verdict, v => verdictJson v
   | .flag, b => Json.bool b
   | .ack, _ => Json.null
+  | .structured schema, value => Schema.Conformance.encodeShape schema.1 value
 
 def scopeJson (s : QScope) : Json :=
   Json.mkObj
     [ ("model", match s.1 with | some m => Json.str m | none => Json.null)
     , ("mode", match s.2 with | some m => Json.str m | none => Json.null) ]
 
+/-- A code on the observation wire. Built-ins retain their strings; structured
+codes carry the schema that is part of their identity. The `json` tag belongs
+only to this JSON wire representation. -/
+def codeJson : Code → Json
+  | .text => "text"
+  | .verdict => "verdict"
+  | .flag => "flag"
+  | .ack => "receipt"
+  | .structured schema => Json.mkObj [("json", Json.mkObj [("schema", toJson schema)])]
+
+def codeSchemas : Code → List Schema
+  | .structured schema => [schema]
+  | .text => []
+  | .verdict => []
+  | .flag => []
+  | .ack => []
+
+def schemaCodesAlg : PlanAlg (fun _ _ => List Schema) where
+  ret _ := []
+  askC code _ rest := codeSchemas code ++ rest
+  ask code _ _ rest := codeSchemas code ++ rest
+  case := fun tag _ arms => tag.values.flatMap arms
+  dyn _ _ _ := []
+
+def planSchemas {Γ : Ctx} {A : Type} (plan : Plan Γ A) : List Schema :=
+  schemaCodesAlg.fold plan
+
+def WorldSpec.covers (world : WorldSpec) (schemas : List Schema) : Bool :=
+  schemas.all fun schema => (Schema.Conformance.Answer.lookup world.schema schema).isSome
+
 def eventJson (e : Event) : Json :=
   Json.mkObj
-    [ ("code", Json.str (codeName e.c))
+    [ ("code", codeJson e.c)
     , ("addressee", toJson e.q.addressee)
     , ("scope", scopeJson e.q.scope)
     , ("prompt", Json.str e.q.prompt)
@@ -253,26 +309,29 @@ def observe (prog : RawProgram) (worlds : List WorldSpec) : Json :=
   match h : checkProgram prog with
   | .error e => refusedJson e
   | .ok p =>
-    let hl : level p ≤ Level.branch := checkProgram_level_le prog p h
-    let (lo, hi, paths) := Explain.costSummary p hl
-    let fns := match checkFnsList [] prog.fns with
-      | .ok fns => fns
-      | .error _ => []   -- unreachable: checkProgram checked the table first
-    Json.mkObj
-      [ ("level", Json.str (levelName (level p)))
-      , ("size", toJson (Plan.size p))
-      , ("askNodes", toJson (Plan.askNodes p))
-      , ("codes", match codes p with
-          | some cs => Json.arr (cs.map (fun c => Json.str (codeName c))).toArray
-          | none => Json.null)
-      , ("costSummary", Json.mkObj
-          [ ("minFold", match lo with | some n => toJson n | none => Json.null)
-          , ("maxFold", match hi with | some n => toJson n | none => Json.null)
-          , ("paths", toJson paths) ])
-      , ("blockAsks", toJson (blockAsks fns prog.main))
-      , ("fnAsks", Json.arr (fns.map (fun fe =>
-          Json.arr #[Json.str fe.name, toJson fe.asks])).toArray)
-      , ("worlds", Json.arr (worlds.map (worldObservation p)).toArray) ]
+    if worlds.all (fun world => WorldSpec.covers world (planSchemas p)) then
+      let hl : level p ≤ Level.branch := checkProgram_level_le prog p h
+      let (lo, hi, paths) := Explain.costSummary p hl
+      let fns := match checkFnsList [] prog.fns with
+        | .ok fns => fns
+        | .error _ => []   -- unreachable: checkProgram checked the table first
+      Json.mkObj
+        [ ("level", Json.str (levelName (level p)))
+        , ("size", toJson (Plan.size p))
+        , ("askNodes", toJson (Plan.askNodes p))
+        , ("codes", match codes p with
+            | some cs => Json.arr (cs.map codeJson).toArray
+            | none => Json.null)
+        , ("costSummary", Json.mkObj
+            [ ("minFold", match lo with | some n => toJson n | none => Json.null)
+            , ("maxFold", match hi with | some n => toJson n | none => Json.null)
+            , ("paths", toJson paths) ])
+        , ("blockAsks", toJson (blockAsks fns prog.main))
+        , ("fnAsks", Json.arr (fns.map (fun fe =>
+            Json.arr #[Json.str fe.name, toJson fe.asks])).toArray)
+        , ("worlds", Json.arr (worlds.map (worldObservation p)).toArray) ]
+    else
+      Json.mkObj [("error", "world is missing an answer for a queried structured schema")]
 
 /-! ## The string layer (D12)
 

@@ -6,9 +6,13 @@
 -- a semigroup but has no right-zero semigroup to adjoin it to, so the last-wins
 -- monoid is genuinely ours.
 import Agentic.Scope
+-- The schema universe: format-independent structured values (`Schema.El`) built
+-- from lists and products. JSON is a representation in `Schema.Json`, outside
+-- this mathematical root.
+import Agentic.Core.Schema
 -- The rederivation kernel's mathematical space, Stage 1 (dossier
--- rederivation-kernel.md §1–§3): question space — the small universe of answer
--- types `El`, the question `Q c` that carries everything determining the reply
+-- rederivation-kernel.md §1–§3): question space — the answer universe `El`,
+-- including the schema-indexed structured family, and the question `Q c` that carries everything determining the reply
 -- (scope included, so `under` is a fold and not a constructor), its
 -- factorization `Q c ≅ Q.Shape c × String` into what is asked of whom and what
 -- is said (which is what `Plan`'s `ask` node splits, and hence why the kernel's

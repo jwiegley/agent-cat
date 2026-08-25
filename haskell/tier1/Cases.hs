@@ -78,6 +78,7 @@ import Agentic.Builder
     askTool,
     askToolRunning,
     bind,
+    bindAsI,
     bindAs,
     bindB,
     callStmt,
@@ -93,6 +94,7 @@ import Agentic.Builder
     lit,
     noParams,
     one,
+    oneAt,
     panel,
     panelText,
     param,
@@ -102,6 +104,15 @@ import Agentic.Builder
     stop,
   )
 import Agentic.Raw (Decider (LastNonEmptyLineIs))
+import Agentic.Schema
+  ( SCode (SStructured),
+    Schema (SchemaInteger, SchemaObject, SchemaProperty, SchemaString),
+    SchemaWitness,
+    schemaInteger,
+    schemaObject,
+    schemaProperty,
+    schemaString,
+  )
 
 -- ---------------------------------------------------------------------------
 -- The list
@@ -116,6 +127,7 @@ cases =
     ("semantic-001-a-loop-that-settles-at-round-two.json", semantic001),
     ("semantic-002-draws-are-distinct-questions.json", semantic002),
     ("semantic-003-a-flag-carrier-loop.json", semantic003),
+    ("schema-000-structured-answer.json", schema000),
     ("battery-113-three-panel-members-answered-differently.json", battery113),
     ("battery-117-two-draws-of-one-prompt-are-two-questions.json", battery117),
     ( "battery-119-served-by-and-independent-draw-together-in-every-ask-position.json",
@@ -170,6 +182,27 @@ cases =
       semantic008W
     )
   ]
+
+type StructuredSchema =
+  'SchemaProperty
+    "count"
+    'SchemaInteger
+    ('SchemaProperty "name" 'SchemaString 'SchemaObject)
+
+structuredTail :: SchemaWitness ('SchemaProperty "name" 'SchemaString 'SchemaObject)
+structuredTail = schemaProperty @"name" schemaString schemaObject
+
+structuredSchema :: SchemaWitness StructuredSchema
+structuredSchema = schemaProperty @"count" schemaInteger structuredTail
+
+-- | A schema-indexed question whose semantic answer is the nested product
+-- `(Integer, (Text, ()))`; the JSON bytes exist only in the corpus world.
+schema000 :: Program
+schema000 =
+  program [] $
+    bindAsI (SStructured structuredSchema) "value"
+      (oneAt (SStructured structuredSchema) (askModel "structured" [lit "answer structurally"])) $
+      act (askTool "sink" [lit "done"]) stop
 
 -- | Which of 'cases' have their __printed program__ compared up to alpha: the
 -- two walked examples and the yield vector, and nothing else. ('callVectorsW'

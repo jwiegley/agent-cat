@@ -121,83 +121,30 @@ module Agentic.Plan
     size,
     askNodes,
     codes,
+    schemaRequirements,
     costM,
     costSummary,
   )
 where
 
-import Agentic.Raw (Addressee, Code (..))
+import Agentic.Raw (Addressee)
+import Agentic.Schema
+  ( Code (..),
+    El,
+    KnownCode (..),
+    SCode (..),
+    SomeCode,
+    SomeSchema (..),
+    defaultEl,
+    fromSCode,
+  )
 import Agentic.Text (Verdict (..), block)
-import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
 
 -- ---------------------------------------------------------------------------
--- The answer universe
+-- The answer universe lives in Agentic.Schema and is re-exported here.
 -- ---------------------------------------------------------------------------
-
--- | @Agentic/Core/Question.lean:302@'s @El@ — the set of things an addressee
--- can say in reply to a question of kind @c@ — as a closed type family over
--- 'Agentic.Raw.Code', promoted with @DataKinds@:
---
--- > def El : Code → Type
--- >   | .text => String
--- >   | .verdict => Verdict
--- >   | .flag => Bool
--- >   | .ack => Unit
---
--- 'Code' is not redefined here; it is @Agentic.Raw@'s, so one @Code@ serves the
--- codec, the guards and the term language alike.
-type family El (c :: Code) :: Type where
-  El 'CodeText = Text
-  El 'CodeVerdict = Verdict
-  El 'CodeFlag = Bool
-  El 'CodeAck = ()
-
--- | The value-level witness of a promoted 'Code'. Lean writes @(c : Code)@ and
--- matches on it — @denote@, @eventJson@ and @answerJson@ all dispatch on the
--- code — and this is that argument. 'El' is not injective, so nothing else can
--- recover @c@ from an answer.
-data SCode (c :: Code) where
-  SText :: SCode 'CodeText
-  SVerdict :: SCode 'CodeVerdict
-  SFlag :: SCode 'CodeFlag
-  SAck :: SCode 'CodeAck
-
--- | Forget the index: the singleton as ordinary data.
-fromSCode :: SCode c -> Code
-fromSCode = \case
-  SText -> CodeText
-  SVerdict -> CodeVerdict
-  SFlag -> CodeFlag
-  SAck -> CodeAck
-
--- | Recovering the singleton from the type, so a builder combinator whose code
--- is fixed by its result type need not be handed one.
-class KnownCode (c :: Code) where
-  sCode :: SCode c
-
-instance KnownCode 'CodeText where sCode = SText
-
-instance KnownCode 'CodeVerdict where sCode = SVerdict
-
-instance KnownCode 'CodeFlag where sCode = SFlag
-
-instance KnownCode 'CodeAck where sCode = SAck
-
--- | @Agentic/Core/Question.lean:311@, @instInhabitedEl@: every answer type is
--- inhabited, which is what lets an analysis substitute an answer it does not
--- have. @""@, approval, 'False', @()@.
---
--- The 'Verdict' default is Lean's @Inhabited Verdict = Option.some []@, which
--- @Verdict.default_eq_approve@ proves is @approve@ — so this is 'Approve', not
--- 'Declined'.
-defaultEl :: SCode c -> El c
-defaultEl = \case
-  SText -> T.empty
-  SVerdict -> verdictApprove
-  SFlag -> False
-  SAck -> ()
 
 -- ---------------------------------------------------------------------------
 -- Verdicts
@@ -976,16 +923,27 @@ askNodes = \case
 -- 'Nothing' at a 'PCase' and at a 'PDyn' — those are the two places the
 -- sequence is not fixed. A fold of the term alone: no environment, no world.
 --
--- The reply serializes this with 'Agentic.Raw.codeName', so 'CodeAck' prints as
--- @"receipt"@ (@Conformance.lean:266@). The fold stores the 'Code' itself;
--- whoever prints it owes the @receipt@ spelling.
-codes :: Plan g a -> Maybe [Code]
+-- The reply serializes each existential `SomeCode`; built-ins retain their old
+-- strings and schema-indexed codes carry the schema that is part of their identity.
+codes :: Plan g a -> Maybe [SomeCode]
 codes = \case
   PRet _ -> Just []
   PAskC c _ k -> (fromSCode c :) <$> codes k
   PAsk c _ _ k -> (fromSCode c :) <$> codes k
   PCase {} -> Nothing
   PDyn {} -> Nothing
+
+schemaRequirements :: Plan g a -> [SomeSchema]
+schemaRequirements = \case
+  PRet _ -> []
+  PAskC code _ rest -> at code ++ schemaRequirements rest
+  PAsk code _ _ rest -> at code ++ schemaRequirements rest
+  PCase tag _ arms -> concatMap (schemaRequirements . arms) (tagValues tag)
+  PDyn {} -> []
+  where
+    at :: SCode c -> [SomeSchema]
+    at (SStructured schema) = [SomeSchema schema]
+    at _ = []
 
 -- ---------------------------------------------------------------------------
 -- costSummary

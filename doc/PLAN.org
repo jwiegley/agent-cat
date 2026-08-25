@@ -4220,6 +4220,24 @@ deep-review + validated (both medium). Parse.lean:447-451 reads the two idents w
 ]
 #+end_src
 
+* DONE [#C] Add schema-indexed structured JSON answers
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-x1n
+:LABELS:   []
+:ISSUE_TYPE: feature
+:CREATED:  [2026-08-23 Sun 12:13]
+:MODIFIED: [2026-08-23 Sun 17:10]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-23 Sun 17:10]
+:CLOSE_REASON: Implemented schema-indexed structured answers with format-independent Lean/Haskell semantics, total static authoring, explicit strict JSON codecs, exact fail-closed conformance, and cross-language regression coverage.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Introduce an algebraic Schema universe whose interpretation is the answer type for schema-coded questions; add total JSON validation/decoding, Lean/Haskell parity, authoring support, conformance vectors, and documentation.
+
 * DONE [#D] dsl-guide.html: headline rules false, samples abridged and wrong, decoder claim inverted, ack undocumented
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17

@@ -630,11 +630,13 @@ def coinQ : Q .flag := { addressee := .tool "coin", scope := 1, prompt := "heads
 
 /-- The world that says heads. -/
 def heads : Ω := fun c => match c with
-  | .text => fun _ => "" | .verdict => fun _ => 1 | .flag => fun _ => true | .ack => fun _ => ()
+  | .text => fun _ => "" | .verdict => fun _ => 1 | .flag => fun _ => true
+  | .ack => fun _ => () | .structured _ => fun _ => default
 
 /-- The world that says tails. -/
 def tails : Ω := fun c => match c with
-  | .text => fun _ => "" | .verdict => fun _ => 1 | .flag => fun _ => false | .ack => fun _ => ()
+  | .text => fun _ => "" | .verdict => fun _ => 1 | .flag => fun _ => false
+  | .ack => fun _ => () | .structured _ => fun _ => default
 
 /-- A price that charges by addressee — per-call pricing with two vendors. It
 satisfies `PricesByShape` exactly because the addressee is part of the shape,
@@ -1005,6 +1007,7 @@ def sayLong (n : Nat) : Ω := fun c => match c with
   | .verdict => fun _ => 1
   | .flag => fun _ => false
   | .ack => fun _ => ()
+  | .structured _ => fun _ => default
 
 theorem bill_unbounded (n : Nat) :
     billFresh tick (Plan.trace (sayLong n) unbounded Env.nil) = Multiplicative.ofAdd (n + 1) := by

@@ -115,6 +115,7 @@ def probeAnswer : (c : Code) → Nat → El c
   | .verdict, n => Verdict.object ["{#" ++ toString n ++ "}"]
   | .flag, _ => default
   | .ack, _ => default
+  | .structured _, _ => default
 
 /-- `[[Env.probe Γ]]` = the environment in which every answer is the name of its
 own binder, counted from the root: in a context of length `d`, de Bruijn index `i`

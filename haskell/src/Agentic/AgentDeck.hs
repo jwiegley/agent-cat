@@ -416,7 +416,7 @@ renderQ c q =
     <> "answer ("
     <> codeWord (fromSCode c)
     <> "): "
-    <> answerSpec (fromSCode c)
+    <> answerSpec c
     <> "]\n\n"
     <> qPrompt q
   where

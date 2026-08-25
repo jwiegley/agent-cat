@@ -905,6 +905,7 @@ def stubborn : Ω := fun c =>
   | .verdict => fun _ => Verdict.object ["needs work"]
   | .flag => fun _ => false
   | .ack => fun _ => ()
+  | .structured _ => fun _ => default
 
 /-- The world in which the reviewer approves at once. -/
 def agreeable : Ω := fun c =>
@@ -913,6 +914,7 @@ def agreeable : Ω := fun c =>
   | .verdict => fun _ => Verdict.approve
   | .flag => fun _ => true
   | .ack => fun _ => ()
+  | .structured _ => fun _ => default
 
 /-- The plan: revise the draft up to twice. -/
 def upToTwice : Plan [] (El .text × Bool) :=

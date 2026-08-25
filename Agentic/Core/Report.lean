@@ -482,6 +482,8 @@ def sayAnswer : (c : Code) → El c → String
   | .verdict, v => sayVerdict v
   | .flag, b => sayFlag b
   | .ack, _ => "done"
+  | .structured schema, value =>
+      (Schema.Json.render? schema value).getD "<not representable as finite JSON>"
 
 /-- `[[Q.axes q]]` = the question's scope, as the two axes the interpreter reads
 off it: the model axis (`session/set_config_option`) and the mode axis
