@@ -9,7 +9,7 @@ surface a human actually writes — kept honest by replaying a frozen corpus
 produced by the Lean formalization.
 
 Lean is normative. This directory does not ask to be believed on its own
-authority: every claim it makes about the language is checked against 189
+authority: every claim it makes about the language is checked against 190
 request/reply pairs the Lean oracle emitted (`../test/corpus`), and the check
 is two programs you can run in one command each. That corpus is the frozen
 conformance record: each request carries either a `RawProgram` — the same raw
@@ -25,15 +25,15 @@ nix develop -c cabal run tier1
 ```
 
 ```
-tier0: kinds: 44 string, 9 guard, 43 other, 93 checked, 0 ping, 0 unclassified
-tier0: 189 passed, 0 failed, 43 other-refusals (codec-only), of 189 files
-tier1: 29 passed, 0 failed, of 29 cases
+tier0: kinds: 44 string, 9 guard, 43 other, 94 checked, 0 ping, 0 unclassified
+tier0: 190 passed, 0 failed, 43 other-refusals (codec-only), of 190 files
+tier1: 30 passed, 0 failed, of 30 cases
 ```
 
 `tier0` replays every entry through the codec, the guards and the string layer.
-`tier1` **rebuilds** twenty-six of the checked entries, in twenty-nine cases
-— twenty-three in the production surface, three in the authoring surface above
-it (the two walked examples and the yield vector), and three of the twenty-three
+`tier1` **rebuilds** twenty-seven of the checked entries, in thirty cases
+— twenty-four in the production surface, three in the authoring surface above
+it (the two walked examples and the yield vector), and three of the twenty-four
 a second time in that authoring surface — and holds each rebuilt program against
 the frozen one on both fronts: the program it prints, and the whole reply —
 folds, counts, and one trace and two bills per world.
@@ -81,6 +81,7 @@ and only if nothing failed, so both are usable directly as CI gates.
 | `Agentic.Plan` | the typed `Plan` — five formers, `DataKinds` codes, de Bruijn `Expr` — and its static folds `level`, `size`, `askNodes`, `codes`, `costSummary` |
 | `Agentic.World` | `WorldSpec` and `toWorld`, the `trace` of a plan through a world, the fresh and memo bills, and the oracle's event JSON |
 | `Agentic.Builder` | the production surface: typed combinators that both print a `RawProgram` and elaborate to the `Plan` the Lean checker elaborates the same construct to |
+| `Agentic.Schema` (+ `.Json`, `.TH`) | format-independent `SchemaEl`, `HasSchema` conversion, strict JSON representation, and `deriveSchema`, which derives a record's schema, witness, and total nested-product conversion |
 | `Agentic.WF` | the `[wf\|…\|]` prompt quoter — prose with `{name}` holes, laid out by the fence rule the frozen prompts were written under (blank edge lines dropped, common indentation stripped, no trailing newline) and chunked as the elaborator's left-associated `Prompt.expr` requires — adjacent literals never fused, empty literals dropped — and `Says`, which decides whether a hole is a binding or a `define`; and `[wft\|…\|]`, the same fence yielding a define's `Text` rather than a prompt's chunks, so that a define need not be written as a prompt and converted. One `parseFence` under both, so the two spellings of a block cannot differ by a byte |
 | `Agentic.Workflow` (+ `.Do`) | the **authoring** surface: an indexed block, written in ordinary Haskell under `W.do`, in which a bind is a Haskell bind, a branch on a revision's result is a Haskell `case` and a branch on a flag is a Haskell `if` — `guide <- ask (tool "cat") [wf\|…\|]`, then `case result of Settled patch -> W.do …; Unsettled patch -> stop`, then `when ok $ W.do …`. The `case` is real pattern matching on the exported data type `Outcome`, which the revision's bind forks into; the `if` is Haskell's, reaching the exported `ifThenElse` because the **authoring module** enables `RebindableSyntax` — which costs that module its implicit `Prelude` (import it, and `Data.String (fromString)` beside it under `OverloadedStrings`) and costs a `W.do` block nothing, `QualifiedDo` and `RebindableSyntax` rebinding disjoint syntax. The library itself enables neither. There is no `#label`, no `=:` and no splice anywhere in the surface: `ifFlag` stays exported as the combinator the `if` compiles *to* — machinery, and a name in the printed `Raw`, not a statement anyone writes — and `when`/`unless` are that same `if` with only one arm to say — terminal, sealing the body with the implicit `stop` an arm block's end is, and printing the identical `ifFlag` node with an empty other arm; the `case` compiles to `Agentic.Builder`'s `revisingCase`, which `revising` applies; `caseVerdict` stays a combinator here, a verdict being a value that may be acted past. It carries no names at the type level — a library cannot read a Haskell binder — so it generates the name each binding prints from that binding's depth, `named` overrides one, and a `{hole}` prints the name its handle carries |
 | `Agentic.Gen`, `Agentic.Observe`, `Agentic.Oracle` | the bisimulation surface: generators, the reply assembly both runners share, and the line-delimited JSON client for the Lean oracle subprocess |
@@ -90,6 +91,7 @@ and only if nothing failed, so both are usable directly as CI gates.
 | `Agentic.AgentDeck` | one live `agent-deck` session as an answering service: the three CLI commands, the poll loop, the staleness guard and five named transport failures |
 | `Agentic.Acp` | an ACP adapter this process starts, as an answering service: the handshake, a session per question, the permission policy per question, the stop reason — which is what lets this transport refuse a receipt from a turn that did not finish — and six named transport failures |
 | `Example.Harden` | the walked examples (`harden`, `hello`), written in `Agentic.Workflow` and shared by `tier1` and `agentic-run` |
+| `Example.Structured` | a model-generated JSON object validated under a carried schema, decoded into `SchemaEl`, and consumed as an ordinary Haskell record |
 | `tier0/`, `tier1/`, `bisim/`, `run/` | the four runners |
 
 **Not** in scope, and deliberately absent: a parser, and the typing judgment.
@@ -109,31 +111,31 @@ already replays. Positions are oracle-only throughout, like `message` and
 | entry | rule |
 | --- | --- |
 | `request.string` (44) | `stringOpOf` of the **whole request object** must equal the whole reply value — the object and not three fields, because `fence` takes a `name`, `matchGlob` a `pattern` and `decide` a `decider` and its `needles` |
-| `request.program` (145) | decode, re-encode, and match the request's `program` value |
+| `request.program` (146) | decode, re-encode, and match the request's `program` value |
 | refused with one of the six (9) | `guardCheck` must return that guard and its `n` |
 | refused `other` (43) | the codec round-trip and nothing else — the typing judgment decided these, and it is not ported. **Read the count honestly:** these 43 entries are checked here as *bytes*, not as refusals. That each is refused at all, and the wording of every message, is held by Lean alone — including the traps the wave-three design named, the shadowing unsettled binder among them — and no Haskell code disagrees with Lean about them because none has an opinion. That is the documented boundary of the no-typing-judgment ruling (`doc/research/connection.md` D10/D11), not a gap this table is hiding |
-| checked (93) | `guardCheck` must fire nothing, and `askCounts` must equal `(blockAsks, fnAsks)` |
+| checked (94) | `guardCheck` must fire nothing, and `askCounts` must equal `(blockAsks, fnAsks)` |
 
 ## What tier1 compares
 
-Twenty-six checked entries in twenty-nine cases, rebuilt from their surface
-source — twenty-three in `Agentic.Builder`, three in `Agentic.Workflow` above it
-(the two walked examples and the yield vector), and three of the twenty-three
+Twenty-seven checked entries in thirty cases, rebuilt from their surface
+source — twenty-four in `Agentic.Builder`, three in `Agentic.Workflow` above it
+(the two walked examples and the yield vector), and three of the twenty-four
 (`module-000`, `battery-144`, `battery-147`) written a second time in
 `Agentic.Workflow` too — and compared whole: no field skipped, a missing or
 extra key a failure.
 
 | front | rule |
 | --- | --- |
-| the printed program | `toJSON (progRawOut built)` against `request.program`, positions zeroed on both sides, and the print decoded back and re-encoded so a print no reader accepts fails here. Twenty-three cases match name for name; the other six — the two walked examples, the yield vector, and the three call vectors rewritten in the authoring surface — match **up to alpha**, both sides' binders canonically renamed first, because the authoring surface generates the names it prints (see below). Function and parameter names are a different namespace and are never renamed, so those six still match them exactly. The renaming is scope-aware — a canonical name is the *level* of the binder that introduced it — so which binding every hole, scrutinee and subject reads stays pinned exactly |
+| the printed program | `toJSON (progRawOut built)` against `request.program`, positions zeroed on both sides, and the print decoded back and re-encoded so a print no reader accepts fails here. Twenty-four cases match name for name; the other six — the two walked examples, the yield vector, and the three call vectors rewritten in the authoring surface — match **up to alpha**, both sides' binders canonically renamed first, because the authoring surface generates the names it prints (see below). Function and parameter names are a different namespace and are never renamed, so those six still match them exactly. The renaming is scope-aware — a canonical name is the *level* of the binder that introduced it — so which binding every hole, scrutinee and subject reads stays pinned exactly |
 | the static folds | `level`, `size`, `askNodes`, `codes`, `costSummary` folded from the elaborated `Plan` |
 | the ask counts | `Agentic.Guards.askCounts` on the *printed* program — week-one code, which is what makes this a cross-check of the builder rather than a second reading of the same term |
 | each world | per `request.worlds` in order: the world re-serialized, its trace event by event (`code`, `addressee`, `scope`, `prompt`, `draw`, `answer`), and `billFresh` / `billMemo` |
 
 The builder-written ones are chosen to reach every rung and every corner the
 corpus fixes: all
-three reachable levels (`batch`, `pipeline`, `branch`), all four answer codes,
-all three parties, draws 0–3, both scope states, `codes` as `null`, `[]` and a
+three reachable levels (`batch`, `pipeline`, `branch`), the four built-in answer
+codes plus the schema-indexed family, all three parties, draws 0–3, both scope states, `codes` as `null`, `[]` and a
 list, bounded revisions at 0, 1, 2 and 3 amendments including two nested inside
 a settled arm, and both of the only two entries where the memo bill falls below
 the fresh one. The five guard vectors and the refused entries are
@@ -512,13 +514,37 @@ run they will make. A program that takes none refuses them by name, and so does
 a flag naming one of the four run facts — those are `run`'s to bind, and the
 refusal says so.
 
-`<example>` is `harden` or `hello`: the two walked programs, written in
-`Agentic.Workflow` as `Example.Harden`. **They
-are the same values `tier1` pins against the frozen corpus** — nothing is
-rebuilt, adapted or trimmed for execution — which is what makes a run evidence
-about the language rather than about this executable. `Example.Isaac`'s five
-are registered beside them, `review-lite` as a program of its subject; the
-registry entry is `Fixed` or `Needs` accordingly.
+The two walked programs are `harden` and `hello`, written in
+`Agentic.Workflow` as `Example.Harden`. **They are the same values `tier1` pins
+against the frozen corpus** — nothing is rebuilt, adapted or trimmed for
+execution — which is what makes a run evidence about the language rather than
+about this executable. `Example.Structured` is registered beside them as the
+worked representation-boundary example; `Example.Isaac`'s five follow, with
+`review-lite` as a program of its subject. Registry entries are `Fixed` or
+`Needs` accordingly.
+
+### Structured JSON answers
+
+`structured` asks a model for a closed object with `title`, `priority`, and
+`steps`. One splice derives the carried schema, witness, and both conversions
+from the record declaration; no type-level schema or nested tuple appears in
+the example:
+
+```haskell
+data ReleasePlan = ReleasePlan { title :: Text, priority :: Integer, steps :: [Text] }
+$(deriveSchema ''ReleasePlan)
+
+consumeModelJson :: Text -> Maybe ReleasePlan
+consumeModelJson = decodeAs @ReleasePlan
+```
+
+The derived schema is both runtime validator and type index.
+`summarizeReleasePlan` consumes every decoded field.
+
+```sh
+agentic-run run structured --scripted
+# <- {"priority":1,"steps":["decode JSON","consume typed fields"],"title":"Ship structured answers"}
+```
 
 ### `plan` — what the program is, before anyone is asked anything
 
@@ -840,11 +866,16 @@ the Lean side, not as bot pushes.
 
 ```
 flake.nix          the devShell: one GHC with aeson and QuickCheck, plus cabal-install
-agentic.cabal      library (src) + internal library examples (example) + four executables
+agentic.cabal      library (src) + internal library examples (example) + executables
 src/Agentic/Raw.hs      the Raw AST and its JSON codec
 src/Agentic/Guards.hs   guardCheck, askCounts
 src/Agentic/Text.hs     stringOp, Verdict — the trusted string base
-src/Agentic/Plan.hs     the typed Plan and its static folds
+src/Agentic/Schema.hs   the format-independent SchemaEl algebra and code singletons
+src/Agentic/Schema/Json.hs       user-facing Aeson codec + JSON Schema
+src/Agentic/Schema/Conformance.hs exact semantic-value wire codec for tests
+src/Agentic/Schema.hs   the format-independent SchemaEl algebra and HasSchema conversion
+src/Agentic/Schema/Json.hs strict JSON codecs and record-level decodeAs/renderAs helpers
+src/Agentic/Schema/TH.hs Template Haskell derivation from record declarations
 src/Agentic/World.hs    WorldSpec, toWorld, trace, the bills, the event JSON
 src/Agentic/Builder.hs  the production surface and its elaboration
 src/Agentic/WF.hs       the [wf|…|] and [wft|…|] prompt quoters, and what a {hole} may name
@@ -858,7 +889,9 @@ src/Agentic/AgentDeck.hs  one agent-deck session as an answering service
 src/Agentic/Acp.hs      an ACP adapter this process starts, as an answering service
 src/Agentic/Cli.hs      the runner as a function of its registry: the five verbs,
                         the flags, the refusals, the usage message
-example/Example/Harden.hs the walked examples, written in the authoring surface
+example/Example/Harden.hs the walked examples and the examples registry
+example/Example/Structured.hs model JSON decoded into typed Haskell fields
+test/SchemaProbe.hs     schema algebra, codec and decode/re-ask regression probe
 tier0/Main.hs           the corpus runner
 tier1/Cases.hs          the rebuilt cases, each quoting its surface source
 tier1/Main.hs           the rebuilt-case runner; it owns every comparison

@@ -1,11 +1,8 @@
 # The conformance wire format
 
-*Version 1. The format of record for the Lean↔Haskell conformance boundary
-(`doc/research/connection.md`, D5): what `lake exe conformance-oracle` reads
-and writes, and what the frozen corpus under
-`test/corpus/` contains. The Haskell side's generators and comparison read this
-page; a change here is a version bump and a corpus regeneration, in one
-commit.*
+*Version 2. The format of record for the Lean↔Haskell conformance boundary
+(`doc/research/connection.md`, D5). Version 2 adds schema-indexed codes and their
+structured-answer representation; every Version 1 request remains byte-for-byte valid.*
 
 The oracle speaks line-delimited JSON on stdin/stdout: one request per line,
 one reply per line, `id` echoed verbatim when the request carries one. EOF on
@@ -25,7 +22,11 @@ asymmetry must be recordable as an asymmetry.
 `RawProgram` is the Lean datatype `Agentic.Core.Dsl.RawProgram` under Lean's
 derived JSON encoding (constructors as single-key objects, structures as field
 objects — the corpus files are the normative examples). `worlds` defaults to
-`[{}]`, the echo world.
+`[{}]`, the echo world. A world may add exact structured answers as
+`"schema": [{"schema": <Schema>, "value": <SchemaValue>}, …]`. Each entry
+is validated while the request is decoded; malformed fixtures are rejected
+rather than silently defaulted. A world missing any schema the checked plan may
+query is rejected before evaluation; schemas the plan never asks for may be omitted.
 
 Three constructor-level changes landed together in the D-slate regeneration, and
 because Surface 2 below freezes the *term's encoding*, each moved requests whose
@@ -89,7 +90,7 @@ family and these are well-formedness.
 ```json
 {"level": "batch" | "pipeline" | "branch" | "dynamic",
  "size": <Nat>, "askNodes": <Nat>,
- "codes": ["text", …] | null,          // null on any branching program
+ "codes": [<Code>, …] | null,             // null on any branching program
  "costSummary": {"minFold": <Nat>|null, "maxFold": <Nat>|null, "paths": <Nat>},
  "blockAsks": <Nat>,
  "fnAsks": [["name", <Nat>], …],
@@ -110,7 +111,7 @@ family and these are well-formedness.
 * An `Event` is data, never a rendering:
 
 ```json
-{"code": "text"|"verdict"|"flag"|"receipt",
+{"code": <Code>,
  "addressee": {"model"|"tool"|"person": {"id": "…"}}
             | {"toolExec": {"id": "…", "cmd": "…", "args": ["…", …]}},
  "scope": {"model": "…"|null, "mode": "…"|null},
@@ -120,8 +121,34 @@ family and these are well-formedness.
          | {"tag": "declined"}
          | {"tag": "object", "objections": ["…", …]}
          | <bool>                            // flag
-         | null}                             // receipt
+         | null                              // receipt
+         | <SchemaValue>}                    // schema-indexed value, encoded exactly
 ```
+
+`<Code>` is one of the four existing strings or the structured family:
+
+```json
+"text" | "verdict" | "flag" | "receipt"
+| {"json": {"schema": <Schema>}}
+```
+
+`json` is a wire tag only; the semantic constructor is `Code.structured` /
+`CodeStructured`, and diagnostics call it `structured`.
+
+`<Schema>` is the algebraic wire form: the five primitive strings (`null`,
+`boolean`, `integer`, `number`, `string`), `{"array":{"items":<Schema>}}`,
+`"object"`, or
+`{"property":{"name":"…","schema":<Schema>,"rest":<Schema>}}`.
+
+The semantic answer is **not JSON**: Lean's `Schema.El` and Haskell's
+`SchemaEl` interpret primitives as ordinary values, arrays as lists, and records
+as nested products. `<SchemaValue>` is a total exact boundary representation:
+unit/null, booleans, integers and strings use their direct JSON forms; lists and
+records recurse; exact rationals use
+`{"numerator": <Int>, "denominator": <Nat>}`. This is not the user-facing
+JSON codec, and no two semantic values collapse here. The user-facing JSON
+representation rejects duplicate object members (including escape-equivalent
+keys) and exponents whose magnitude exceeds 4096 before numeric expansion.
 
 Traces are compared **in order, unnormalized**: a trace is a free monoid and
 its order is the observation.
@@ -215,18 +242,18 @@ the specification.
 
 *Recorded because every working paper in `doc/research/profunctor-design/`
 listed one or two of the three, and two of them named a field that is pinned by
-nothing. Counted in this checkout, over the 189 files as they stand.*
+nothing. Counted in this checkout, over the 190 files as they stand.*
 
 **Surface 1 — the frozen reply record, and it has exactly eight keys.** A
 checked reply is `level`, `size`, `askNodes`, `codes`, `costSummary`,
 `blockAsks`, `fnAsks`, `worlds`, and nothing else; the Haskell producer is
 `Agentic.Observe.observeValue`, whose own docstring calls them "the five static
-folds, the two ask counts, and one observation per world". Of the 189 files, 93
+folds, the two ask counts, and one observation per world". Of the 190 files, 94
 carry a checked reply, 52 a `refused` reply and 44 a `result` from the string
 layer.
 
 **`shapes` and `asks` are on no wire and in no file** — `grep '"shapes"'` and
-`grep '"asks"'` return zero hits across all 189. The record specified in
+`grep '"asks"'` return zero hits across all 190. The record specified in
 `connection.md` §3.1 lists them and the implemented record does not; that
 discrepancy is the note under "Checked" above, and its effect is to *loosen* the
 constraint rather than to tighten it. `Cost.shapes` and `Cost.asks` may be

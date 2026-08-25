@@ -19,16 +19,16 @@ tree, never a string — and it is frozen, byte for byte, in `test/corpus/`.
 Lean 4.30.0 with Mathlib v4.30.0. `Agentic.lean` is the mathematical space and
 imports only mathematics: the resource algebra, panels, traces and scopes, the
 authoring words of `Surface`, and the rederivation kernel under `Agentic.Core` —
-the question space and its worlds (`Question`, `World`, `Dlg`), the representation
-(`Plan`), its meaning (`Denote`), the folds that classify and price a term
+the schema-indexed structured values (`Schema`), question space and its worlds
+(`Question`, `World`, `Dlg`), the representation (`Plan`), its meaning (`Denote`), the folds that classify and price a term
 (`Level`, `Cost`), the commuting squares between the two (`Morphism`, `Alg`), and
 the flagship workload (`HardenPatch`) with six theorems about its meaning.
 
 Outside the root sit the things that are about a *program* rather than about the
 space: the raw syntax and its elaboration (`Core.Dsl.Syntax`, `Core.Dsl.Check`,
-`Core.Dsl`), the trusted base and the interpreter (`Exec`), the per-run
-certificate (`Certify`), coverage and the bill as a number (`Report`), and the
-renderings (`Explain`).
+`Core.Dsl`), the JSON representation of structured values (`Core.Schema.Json`),
+the trusted base and interpreter (`Exec`), the per-run certificate (`Certify`),
+coverage and the bill as a number (`Report`), and the renderings (`Explain`).
 
 There is **no parser, no concrete syntax and no runtime here.** What Lean keeps
 is what can be proved and what the port is measured against; the authoring
@@ -49,7 +49,7 @@ applies to every program there is.
 ## The conformance boundary
 
 `lake exe conformance-oracle` is a line-delimited JSON process that checks and
-observes `RawProgram`s and exercises the string layer. `test/corpus/` is 189 of
+observes `RawProgram`s and exercises the string layer. `test/corpus/` is 190 of
 its request/reply pairs, committed — so Tier 0 runs with no Lean in the loop.
 
 The corpus is **frozen**, and the requests in it are the specification.
@@ -98,7 +98,7 @@ end of `haskell/example/Example/Harden.hs`:
 identical `ifFlag` node. Two programs are written this way today — `harden`, the
 flagship, and `hello` — and they are the values everything downstream reads.
 
-Four further forms the surface carries, each an ordinary Haskell value:
+Five further forms the surface carries, each an ordinary Haskell value:
 
 * **`revisingOn`** — the same bounded revision, reading the review's *verdict
   tag* three ways rather than one predicate two ways: approval settles, an
@@ -114,6 +114,19 @@ Four further forms the surface carries, each an ordinary Haskell value:
   one escape — a body that contains this fence's own `</name>` has it rewritten
   to `<\/name>`, so a member cannot forge the end of its own block. A sibling's
   tag passes through untouched, which is what makes the blocks nest.
+* **Schema-indexed answers** — `Schema.El` in Lean and `SchemaEl` in Haskell
+  interpret a schema as ordinary algebraic structure: lists and nested products
+  over unit, booleans, integers, exact rationals and strings. The semantic code
+  is `Code.structured schema` / `CodeStructured schema`; an author writes
+  ``ask … `annotated` Structured schema``. Static schemas provide `KnownSchema`,
+  so the existing `one`, `function`, `revising` and `amend` vocabulary remains
+  the only authoring path. For Haskell records, `$(deriveSchema ''T)` derives
+  `SchemaOf T`, its witness, and total conversion automatically. JSON is not the
+  answer's meaning:
+  `Schema.Json` / `Agentic.Schema.Json` are one representation layer, responsible
+  for parsing, finite-decimal encoding and the standard JSON Schema instruction.
+  `haskell/example/Example/Structured.hs` is the runnable worked example: its
+  record declaration and one splice are all the schema author writes.
 * **`decide`** — a closed vocabulary of four pure classifications
   (`LastNonEmptyLineIs`, `ContainsLine`, `AnyLineStartsWith`, `AnyPathMatches`)
   over text already in hand, answering a flag. It asks nobody, so writing one
@@ -131,8 +144,8 @@ Four further forms the surface carries, each an ordinary Haskell value:
 the runner obtains by running that argv. The exit status is the answer wherever
 the answer type can express failure — `flag` takes `True`/`False`, `verdict`
 takes the command's own first failing line as its objection — and the run is
-**abandoned** where it cannot, at `receipt` and at `text`, rather than recording
-an answer indistinguishable in the table from one a command that succeeded gave.
+**abandoned** where it cannot, at `receipt`, `text`, and schema-indexed answers,
+rather than recording an answer indistinguishable in the table from one a command that succeeded gave.
 The argv is program text with no interpolation syntax, so no answer can ever
 reach a command line.
 
