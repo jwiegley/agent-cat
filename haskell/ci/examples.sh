@@ -5,10 +5,11 @@
 #
 #     ./ci/examples.sh
 #
-# `Example.Harden.examples` is seven programs: the two walked ones the frozen
-# corpus holds, and "Example.Isaac"'s five, which are an *experiment* about what
-# the language can express and are deliberately **not** frozen (isaac-workflows
-# §6, D10: "keep them out of the frozen corpus, and pin their numbers anyway").
+# `Example.Harden.examples` is eight programs: the two walked ones the frozen
+# corpus holds, `Example.Structured` as the representation-boundary example, and
+# "Example.Isaac"'s five, which are an *experiment* about what the language can
+# express and are deliberately **not** frozen (isaac-workflows §6, D10: "keep
+# them out of the frozen corpus, and pin their numbers anyway").
 # That decision leaves the five with numbers published in three places — each
 # program's haddock, isaac-workflows §3's table, and this script — and nothing
 # but this script to stop the first two going stale. tier0 and tier1 cannot: the
@@ -40,8 +41,8 @@
 # the two frozen corpus entries, so their static folds are already pinned twice
 # over (tier0 replays them, tier1 rebuilds them from the very values this script
 # runs); repeating them here is what makes this gate a statement about *the
-# registry* rather than about the five unfrozen programs alone — a sixth Isaac
-# program, or a change that moved the flagship, has to come through this table.
+# registry* rather than about the six unfrozen programs alone — another Isaac
+# program, or a change that moved any existing row, has to come through this table.
 #
 # The registry itself is read from the binary rather than transcribed: an
 # example name the table does not carry, or a table row naming no example, is a
@@ -80,9 +81,8 @@ cat_run() { nix develop path:./. -c cabal run -v0 agentic-run -- "$@"; }
 #   pin <name> <level> <size> <askNodes> <minFold> <maxFold> <paths> \
 #              <billFresh> <billMemo>
 #
-# `codes` is not pinned here: it is `null` on six of the seven (they branch),
-# and `hello`'s is pinned by the frozen corpus, which is a stronger place for it
-# than this file.
+# `codes` is not pinned here: it is `null` on six of the eight (they branch);
+# `hello` and `structured` are pinned more strongly by their focused fixtures.
 
 names=()
 declare -A pinLevel pinSize pinAsks pinMin pinMax pinPaths pinFresh pinMemo
@@ -115,6 +115,10 @@ pin harden            branch      36   19    5   15     9     7    7
 # haddock on `Example.Harden.helloProgram`, and ci/acp.sh's `hello` for the
 # bill.
 pin hello             pipeline     4    3    3    3     1     3    3
+
+# The structured representation-boundary example. One closed model question,
+# decoded under its carried schema, then stop.
+pin structured        batch        2    1    1    1     1     1    1
 
 # The five Isaac programs. Each number below is published twice more: in the
 # program's own haddock in `example/Example/Isaac.hs`, and in
@@ -304,9 +308,9 @@ done
 # if any of them moved, the work stops — and this block is the evidence that the
 # prose is true.
 #
-# The seven pages here are dispatched by `Text` in `Example.Harden.helpFor` and
+# The eight pages here are dispatched by `Text` in `Example.Harden.helpFor` and
 # `Example.Isaac.isaacHelp`, neither of which is exhaustiveness-checked, so a
-# row added and not documented is a RUNTIME error. Running all seven is the only
+# row added and not documented is a RUNTIME error. Running all eight is the only
 # thing that catches it.
 #
 # The binary is resolved once. Everything above goes through `cat_run`, which is

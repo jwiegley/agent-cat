@@ -146,24 +146,25 @@ library
 
 -- The worked examples, written in the authoring surface — `Agentic.Workflow`,
 -- which is sugar over the production one: the flagship (corpus entry
--- `example-000`) and the smallest program (`example-001`).
+-- `example-000`), the smallest program (`example-001`), and the structured
+-- representation-boundary example.
 --
--- An internal library rather than a directory shared by two `other-modules`
--- lists, because two components are meant to see the same `Example.Harden` and
--- not two separately compiled copies of it: `tier1` pins the rebuilt flagship
--- against the frozen corpus entry, and `agentic-run` runs the very program
--- that was pinned. Compiling it twice would let the two drift under a
--- conditional or a flag and read as agreement anyway.
+-- An internal library rather than separately compiled `other-modules` lists:
+-- `tier1` pins the rebuilt flagship, `agentic-run` runs the same registry, and
+-- `schema-probe` checks the structured example's host-side consumer. Compiling
+-- these modules per executable would let the values drift under a conditional
+-- or a flag and read as agreement anyway.
 --
--- The module is `Example.Harden` and cabal resolves a module name to a path, so
--- the file is `example/Example/Harden.hs` — not `example/Harden.hs`, which
--- builds here on a case-insensitive filesystem and on no Linux at all.
+-- Cabal resolves module names to paths below `example`, hence
+-- `Example.Structured` lives at `example/Example/Structured.hs`; the shorter
+-- `example/Structured.hs` works on a case-insensitive machine and not on Linux.
 library examples
   import:          settings
   hs-source-dirs:  example
   exposed-modules:
     Example.Harden
     Example.Isaac
+    Example.Structured
 
   build-depends:   agentic
 
@@ -210,6 +211,15 @@ executable policy-probe
   hs-source-dirs:  test
   main-is:         PolicyProbe.hs
   other-modules:   SurfaceRefusals
+  build-depends:
+    , agentic
+    , agentic:examples
+
+-- Focused schema algebra/JSON-representation regression probe.
+executable schema-probe
+  import:          settings
+  hs-source-dirs:  test
+  main-is:         SchemaProbe.hs
   build-depends:
     , agentic
     , agentic:examples

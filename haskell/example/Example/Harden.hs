@@ -121,6 +121,12 @@ import qualified Agentic.Workflow.Do as W
 import Data.String (fromString)
 import Data.Text (Text)
 import Example.Isaac (isaacBlurb, isaacExamples, isaacHelp, isaacScript)
+import Example.Structured
+  ( structuredBlurb,
+    structuredHelp,
+    structuredProgram,
+    structuredScript,
+  )
 import Prelude
 
 -- ---------------------------------------------------------------------------
@@ -240,7 +246,8 @@ helloProgram = workflow W.do
 -- | The named programs, in the order the CLI lists them.
 --
 -- The two walked examples first, because they are the ones tier1 pins against
--- the frozen corpus and the ones the documentation walks. After them,
+-- the frozen corpus and the ones the documentation walks. The structured row
+-- follows as the worked representation-boundary example. After it,
 -- "Example.Isaac"'s five — Isaac Shapira's @incite@ workflows written in this
 -- surface, which are an /experiment/ about what the language can express and
 -- not conformance fixtures: nothing pins them, and each carries in its haddock
@@ -254,7 +261,8 @@ helloProgram = workflow W.do
 examples :: [(Text, Example)]
 examples =
   [ ("harden", Fixed hardenProgram),
-    ("hello", Fixed helloProgram)
+    ("hello", Fixed helloProgram),
+    ("structured", Fixed structuredProgram)
   ]
     <> isaacExamples
 
@@ -287,6 +295,7 @@ examplesRegistry =
 blurbFor :: Text -> Text
 blurbFor "harden" = "the flagship: draft a patch, review it by panel under a bounded revision, apply it"
 blurbFor "hello" = "the smallest thing that is still a workflow: two questions and an act"
+blurbFor "structured" = structuredBlurb
 blurbFor n = isaacBlurb n
 
 -- ---------------------------------------------------------------------------
@@ -304,8 +313,8 @@ blurbFor n = isaacBlurb n
 -- hand-copied price is drift with a schedule, and the one place a page may talk
 -- about cost is a caveat pointing at @agentic-run cost@.
 --
--- These seven are the reference implementation the seventy-two in
--- @agent-workflows@ are written against, which is why each of them says the
+-- These eight are the reference implementation the downstream rows in
+-- @agent-workflows@ are written against, which is why each says the
 -- same six things in the same order even where a row could have said less.
 --
 -- Keyed by 'Text' and therefore not exhaustiveness-checked, exactly as
@@ -315,6 +324,7 @@ blurbFor n = isaacBlurb n
 helpFor :: Text -> Text
 helpFor "harden" = hardenHelp
 helpFor "hello" = helloHelp
+helpFor "structured" = structuredHelp
 helpFor n = isaacHelp n
 
 -- | 'hardenProgram''s page.
@@ -448,6 +458,7 @@ scriptFor "hello" =
     ("Write a greeting for this, and nothing else:", "Good morning, sunrise."),
     ("Say it:", "DONE")
   ]
+scriptFor "structured" = structuredScript
 -- "Example.Isaac"'s five carry their own table, in their own module, because
 -- its keys /are/ the prompt defines those programs are written from: a key
 -- there is a prefix by construction rather than by proofreading, which is what

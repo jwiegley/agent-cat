@@ -2024,6 +2024,24 @@ Owner request: the artifact §VII example as REAL compiling Lean — Op signatur
 ]
 #+end_src
 
+* DONE [#C] Add structured model-answer worked example
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-h9m
+:LABELS:   []
+:ISSUE_TYPE: feature
+:CREATED:  [2026-08-23 Sun 23:25]
+:MODIFIED: [2026-08-24 Mon 00:28]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-24 Mon 00:28]
+:CLOSE_REASON: Added Example.Structured with Template Haskell-derived HasSchema, record-level JSON helpers, registered execution, and regression coverage.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Add Example.Structured under haskell/example/Example, register it with agentic-run, and derive its schema, witness, and SchemaEl conversion mechanically from the Haskell record with Template Haskell.
+
 * DONE [#B] The Haskell program: typed workflow library + evaluator/runner, Lean retained as the proven specification
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17

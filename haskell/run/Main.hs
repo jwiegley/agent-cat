@@ -10,7 +10,7 @@
 -- is the same function applied to the other. The
 -- argument for the split is in "Agentic.Cli"'s haddock, and in one line it is
 -- this: @ci\/examples.sh@ pins every registered program's numbers __by
--- equality__, which is right for seven fixtures that are evidence about the
+-- equality__, which is right for eight fixtures that are evidence about the
 -- language and wrong for a toolbox whose rubrics are edited on a Tuesday. So
 -- the registry is a value and the parser is shared; the two tables are held to
 -- two gates.
