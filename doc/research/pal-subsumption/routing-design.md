@@ -1,5 +1,11 @@
 # Party→backend routing: the implementable design
 
+> **Superseded refinement (2026-08-26).** Routing remains execution policy.
+> Annotated requests carry `consult | observe | effect`; `permissionByIntent`
+> grants only effects. Routing and failover preserve the authored request while
+> recording selected targets separately. Bare-Q meaning does not move. References
+> below to code-based permission describe implementation at document date.
+
 *2026-08-19. Written against `agent-cat` at pushed `2f86fda`, reading
 `haskell/src/Agentic/{Cli,Exec,Acp,AgentDeck,Chains,World,Shell}.hs`,
 `haskell/run/Main.hs`, `agent-workflows/src/Workflows/Parties.hs` — from the

@@ -141,6 +141,18 @@
   </p>
 </header>
 
+<div class="callout">
+  <strong>Superseded on August 26, 2026.</strong> This page records an exploratory
+  design and is not the package specification. Current architecture uses the
+  bare-question world <code>&Omega; = (c : Code) &rarr; Q c &rarr; El c</code>,
+  the intent-erasing denotation of the five-form annotated Lean
+  <code>Plan</code>, and the Haskell production runtime.
+  <code>Request = Q &times; Intent</code> records executable
+  <code>consult | observe | effect</code> policy; reuse, ordering, permission,
+  routing, retries, timeouts and transport remain below meaning.
+  See <a href="meaning-and-representation.html">Meaning and representation</a>.
+</div>
+
 <main>
 
 <nav class="toc">

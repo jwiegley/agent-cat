@@ -8,6 +8,13 @@
 > stratum established are transcribed in `doc/research/term-algebra-results.md`; read
 > that page for *what was proved*, and this one for the reasoning that condemned it.
 > Nothing here describes the code as it stands.
+>
+> **2026-08-26 placement ruling (`acat-cvx`).** The surviving K1 remains bare-Q:
+> `Ω = (c : Code) → Q c → El c`, with dialogues, traces, tables and semantic prices
+> over questions. The five-form `Plan` carries `Request = Q × Intent` as an
+> executable annotation; `denote` erases it. Consult/observe reuse, effect
+> occurrence policy, permission and v3 lockstep live below meaning. This preserves
+> the kernel rather than enriching its generator.
 
 *The kernel that survives the three attacks. Decided, not averaged: where the four proposals
 conflict, one wins on Elliott's simplicity criteria and the owner's two directives, and the loser is

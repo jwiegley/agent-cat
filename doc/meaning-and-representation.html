@@ -122,21 +122,20 @@
 
 <h2><span class="num">Part I</span> The meaning</h2>
 
-<p>The design starts from a sentence in the language of the domain: a workflow puts questions to parties that answer, and uses the replies to decide what to ask next. Turning that sentence into mathematics takes two steps. The first fixes where answers come from. The second fixes what a workflow denotes.</p>
+<p>The design begins with a domain sentence: a workflow puts questions to parties, receives typed replies, and uses them to decide which question to put next. Execution intent is deliberately absent from this identity.</p>
 
 <h3>Worlds</h3>
 
-<p>A <em>world</em> is a total answer sheet: a function holding a reply for every question that could be put.</p>
+<p>A <em>world</em> is a total answer sheet: one reply for every question.</p>
 
-<pre><code><span class="kw">abbrev</span> Ω : Type := (c : Code) → Q c → El c
-<span class="cm">-- Agentic/Core/World.lean:47</span></code></pre>
+<pre><code><span class="kw">abbrev</span> Ω : Type := (c : Code) → Q c → El c</code></pre>
 
-<p>Here <code>Code</code> names the kinds of answer a question may seek — free text, a review verdict, a yes or no, an acknowledgement — and <code>El</code> gives the type of each. A world is therefore indexed by the question itself, not by any position in a program, and three properties of the domain follow at once.</p>
+<p><code>Code</code> names reply type. <code>Q c</code> contains addressee, scope, prompt and draw; together these form principal answer identity. <code>Request c = Q c × Intent c</code> appears later, in the executable representation.</p>
 
 <ul>
-  <li>Asking the same question twice yields the same answer. Sharing one consultation among several consumers needs no label, no key, and no dedicated operator.</li>
-  <li>Memoisation is not an optimisation. It is how a runtime builds the world that the semantics quantifies over.</li>
-  <li>A deliberate resample is a different question, distinguished by an index the author writes. A best-of-five is five questions, not one question asked five times.</li>
+  <li>Equal questions have one answer in every world.</li>
+  <li>Two authored occurrences remain two semantic trace events, whether execution reuses an answer or not.</li>
+  <li>A deliberate resample changes the question's draw and therefore its identity; changing only execution intent does not.</li>
 </ul>
 
 <h3>What a workflow denotes</h3>
@@ -145,18 +144,18 @@
 
 <pre><code>⟦ a workflow ⟧  :  Ω → (A × Trace)</code></pre>
 
-<p>For each world, an answer together with the transcript of consultations that produced it. That is the whole of the meaning space. A cost is read off a transcript; a claim such as <em>the guide is consulted once</em> is a claim about a transcript; and both are therefore claims about the denotation rather than remarks about logging.</p>
+<p>For each world, the meaning returns an answer together with the ordered transcript of bare questions that produced it. Physical execution, permission, memoization, and intent attribution are not observations of this object.</p>
 
 <h3>Where the meaning is defined</h3>
 
 <p>Such a function cannot be defined by cases on a workflow, because a workflow is not yet a mathematical object at this stage. It is defined instead on an intermediate carrier, the dialogue, on which structural recursion is available.</p>
 
 <pre><code><span class="kw">inductive</span> Dlg (A : Type) : Type <span class="kw">where</span>
-  | done : A → Dlg A                                 <span class="cm">-- the consultation is complete</span>
+  | done : A → Dlg A                                 <span class="cm">-- dialogue complete</span>
   | ask  : (c : Code) → Q c → (El c → Dlg A) → Dlg A  <span class="cm">-- put this, and continue from the reply</span>
 <span class="cm">-- Agentic/Core/Dlg.lean:50</span></code></pre>
 
-<p>A dialogue is either finished, or a question paired with a continuation for every possible reply. This is the free monad on the question signature, and it is the object known in the semantics literature as a dialogue <span class="cite">(Escardó, <em>Continuity of Gödel's system T definable functionals</em>)</span>. Two folds now define the meaning, one for each component of the pair:</p>
+<p>A dialogue is either finished, or a bare question paired with a continuation for every possible reply. It is the free monad on the question signature. Two folds define result and exact semantic trace:</p>
 
 <pre><code><span class="kw">def</span> run (ω : Ω) : Dlg A → A
   | .done a    => a
@@ -195,8 +194,8 @@
 
 <pre><code><span class="kw">inductive</span> PlanF (A : Type) : Ctx → Type <span class="kw">where</span>
   | ret  (e : Expr Γ A)                                                  <span class="cm">-- answer with a pure function of what is known</span>
-  | askC (c) (q : Q c)                          (k : PlanF A (c :: Γ))   <span class="cm">-- a closed question</span>
-  | ask  (c) (s : Q.Shape c) (e : Expr Γ String) (k : PlanF A (c :: Γ))  <span class="cm">-- words built from earlier answers</span>
+  | askC (c) (q : Request c)                                  (k : PlanF A (c :: Γ))
+  | ask  (c) (s : Request.Shape c) (e : Expr Γ String)        (k : PlanF A (c :: Γ))
   | case (t : Tag) (e : Expr Γ t.El) (arms : t.El → PlanF A Γ)           <span class="cm">-- finite branching, every arm present</span>
   | dyn  (b : Code) (e : Expr Γ (El b)) (f : El b → PlanF A Γ)           <span class="cm">-- a plan computed from an unbounded answer</span>
 
@@ -211,11 +210,11 @@
 
 <h3>The shape is written, and only the words are computed</h3>
 
-<p>A question divides into two parts. Its <em>shape</em> is everything except the words: who is asked, under which standing conditions, and which draw this is. In an <code>ask</code> node the shape is a term the author writes, and only the prompt is an expression of earlier answers.</p>
+<p>An annotated request divides into question shape, execution intent, and words. Only words are computed from earlier answers. Intent remains statically visible for runtime analysis, but denotation erases it.</p>
 
-<pre><code>Q c  ≅  Q.Shape c × String        <span class="cm">-- Agentic/Core/Question.lean:289</span></code></pre>
+<pre><code>Request c  ≅  Request.Shape c × String</code></pre>
 
-<p>It follows that the sequence of question shapes in a run is a projection of the syntax rather than a property to be checked of each workflow: an answer cannot select an addressee, because the node gives it nowhere to go. The benefit is that the cost theorem at the pipeline level carries no hypothesis. The trade-off is that a workflow which genuinely routes to a different addressee on the strength of an answer must say so with a <code>case</code>, where both arms stand in the term and both are priced.</p>
+<p>The semantic question-shape sequence is therefore a projection of syntax after erasure. Scope relabelling changes the question and preserves the execution annotation. A genuinely answer-selected question shape must use <code>case</code>, where all arms remain visible and priced.</p>
 
 <h2><span class="num">Part III</span> The relation</h2>
 
@@ -223,8 +222,8 @@
 
 <pre><code><span class="kw">def</span> denote : Plan Γ A → Env Γ → Dlg A
   | .ret e,       γ => .done (e γ)
-  | .askC c q k,  γ => .ask c q                     (fun x => denote k (x ∷ γ))
-  | .ask c s e k, γ => .ask c (s.withPrompt (e γ))  (fun x => denote k (x ∷ γ))
+  | .askC c r k,  γ => .ask c r.question                     (fun x => denote k (x ∷ γ))
+  | .ask c s e k, γ => .ask c (s.question.withPrompt (e γ))  (fun x => denote k (x ∷ γ))
   | .case e arms, γ => denote (arms (e γ)) γ
   | .dyn e f,     γ => denote (f (e γ)) γ
 <span class="cm">-- Agentic/Core/Denote.lean:64</span></code></pre>
@@ -309,7 +308,7 @@
 
 <table>
   <tr><th>Level</th><th>Mark in the term</th><th>What is established about cost</th></tr>
-  <tr><td><code>batch</code></td><td>closed questions only</td><td>The question list is fixed by the term; the bill is exact and the same in every world.</td></tr>
+  <tr><td><code>batch</code></td><td>closed requests only</td><td>The request list is fixed by the term; the bill is exact and the same in every world.</td></tr>
   <tr><td><code>pipeline</code></td><td>words built from answers</td><td>The shape sequence is a projection of the syntax; the bill is exact when prices depend on shape.</td></tr>
   <tr><td><code>branch</code></td><td>finite branching</td><td>A finite cost tree exists; every world's bill is one of its leaves, and folds give the extremes.</td></tr>
   <tr><td><code>dynamic</code></td><td>a plan from an unbounded answer</td><td>A non-existence theorem, witnessed by a plan whose bills are unbounded.</td></tr>
@@ -319,19 +318,25 @@
 
 <h2><span class="num">Part V</span> Execution, and three statements of correctness</h2>
 
-<p>The runtime is a third layer and is deliberately thin. One module speaks line-delimited JSON-RPC over the streams of a child process to an adapter of the Agent Client Protocol, which drives an agent under the operator's own credentials; it makes no semantic claim. A second is the memoising interpreter, factored so that the whole of <code>IO</code> in the construction is one oracle.</p>
+<p>Production execution remains Haskell. Lean separates two layers: <code>SemanticExec</code> proves the bare-question memo interpreter against <code>denote</code>; <code>AnnotatedExec</code> and Haskell interpret intent for reuse, ordering, permission and attribution. Version 3 compares this annotated representation and carries <code>semanticTrace</code>, its erasure.</p>
 
-<pre><code>oracle : (c : Code) → Q c → IO (El c)      <span class="cm">-- render, put the question, decode the reply</span>
-exec   : Plan [] A → StateT Table IO A      <span class="cm">-- the fold, carrying a table of answers</span></code></pre>
+<pre><code>semanticOracle : (c : Code) → Q c → Table → m (El c)
+execOracle     : (c : Code) → Request c → Table → m (El c)</code></pre>
 
-<p>The table is not a cache attached to an interpreter. It is a finite world under construction, and recording an answer is proved to be the same operation as pinning a cell of a world. Correctness is then carried by three statements, in decreasing strength and increasing contact with reality.</p>
+<p>The semantic table is a finite bare-question answer sheet. The executable memo stores typed answers under bare <code>Q</code>; each Plan occurrence constructs its own annotated event. Consult and observe may reuse one answer. Effects neither read nor populate reusable memo and enter the ordered effect lane. These policies do not alter principal meaning.</p>
 
 <div class="panel">
   <h4>First · the interpreter is the fold</h4>
 <pre><code><span class="th">theorem</span> Plan.execWith_eq_execM_denote :
     execWith o p γ t = execM o (denote p γ) t
-<span class="cm">-- proof: rfl.  axioms: none</span></code></pre>
-  <p>The interpreter does not agree with the semantics; it is the semantics, supplied with an oracle. Nothing is proved here because nothing was ever distinct.</p>
+<span class="cm">-- bare-question semantic interpreter; proof: rfl</span>
+
+<span class="th">theorem</span> Plan.execAnnotated_correct (ht : Extends ω t) :
+    let r := execAnnotated ω p γ t
+    r.value = Plan.run ω p γ ∧ Extends ω r.table ∧
+      map forgetEvent r.trace = Plan.trace ω p γ
+<span class="cm">-- actual K5 executor commutes by erasure</span></code></pre>
+  <p>The first theorem is semantic factorization. The second is the K6 representation square. Haskell scheduling and physical effects remain empirical realizations rather than consequences of either theorem.</p>
 </div>
 
 <div class="panel">
@@ -366,12 +371,12 @@ exec   : Plan [] A → StateT Table IO A      <span class="cm">-- the fold, carr
     <td>The denotation of the written workflow is a particular dialogue, given independently. Every meaning theorem below is proved by rewriting with this equation and then reasoning in the meaning space alone.</td>
   </tr>
   <tr>
-    <td><code>consent_of_ack</code></td><td><span class="tag mean">meaning</span></td>
-    <td>Should any acknowledgement appear in the transcript, in any world, the owner answered affirmatively concerning some patch.</td>
+    <td><code>consent_of_ack</code> / <code>no_ack_of_refused</code></td><td><span class="tag mean">meaning</span></td>
+    <td>The concrete apply question can occur only after affirmative consent; refusal removes every acknowledgement question.</td>
   </tr>
   <tr>
-    <td><code>ack_quotes_consented_patch</code></td><td><span class="tag mean">meaning</span></td>
-    <td>The patch acknowledged is the patch consented to; the two are the same patch, not merely both present.</td>
+    <td><code>consent_of_effect</code> / <code>no_effect_of_refused</code></td><td><span class="tag bridge">bridge</span></td>
+    <td>The pure annotated execution trace classifies that apply occurrence as an effect; the proof factors through <code>ExecEvent.forget</code>.</td>
   </tr>
   <tr>
     <td><code>guide_once</code></td><td><span class="tag mean">meaning</span></td>
@@ -386,16 +391,16 @@ exec   : Plan [] A → StateT Table IO A      <span class="cm">-- the fold, carr
     <td>The level fold returns <code>branch</code>, by reflexivity. A fact about the term, and of interest only because the soundness theorems attach cost results to that level.</td>
   </tr>
   <tr>
-    <td><code>card_leaves</code>, <code>minFold</code>, <code>maxFold</code></td><td><span class="tag rep">representation</span></td>
-    <td>The cost tree computed from the term has nine leaves, with extremes 5 and 15, decided by evaluation.</td>
+    <td><code>card_leaves_demo</code>, <code>minFold_demo</code>, <code>maxFold_demo</code></td><td><span class="tag rep">representation</span></td>
+    <td>The cost tree computed from the term has nine leaves, with extremes 5 and 15 request occurrences, decided by evaluation.</td>
   </tr>
   <tr>
     <td><code>bill_hardenPatch</code></td><td><span class="tag mean">meaning</span></td>
     <td>In every world the bill read from the transcript is one of {6, 7, 10, 11, 13, 14, 15}, with a world exhibited for each end of the range.</td>
   </tr>
   <tr>
-    <td><code>minFold_not_attained</code></td><td><span class="tag mean">meaning</span></td>
-    <td>No world attains the tree's minimum of 5. The computed bound is sound and slack by one consultation, and the slack is recorded rather than elided.</td>
+    <td><code>minFold_not_attained_demo</code></td><td><span class="tag mean">meaning</span></td>
+    <td>No world attains the tree's minimum of 5. Computed bound is sound and slack by one request occurrence.</td>
   </tr>
 </table>
 
@@ -403,22 +408,22 @@ exec   : Plan [] A → StateT Table IO A      <span class="cm">-- the fold, carr
 
 <h3>Execution against a live agent</h3>
 
-<p>The same plan executes against Claude Code through an Agent Client Protocol adapter, in a scratch directory, with the consent question routed to the keyboard. One run consumed seven consultations over roughly eighty-four seconds:</p>
+<p>The same plan executes against Claude Code through an Agent Client Protocol adapter, in a scratch directory, with the consent question routed to the keyboard. One run consumed six consultations and one effect over roughly eighty-four seconds:</p>
 
-<pre><code>tool cat                 (text)     Write out the house style guide…   -> Lead with the outcome…
-model author   model=deep (text)    Draft a patch satisfying…          -> a unified diff, bounds-checked
-model reviewer-correct   (verdict)  …is this patch correct?            -> approve
-model reviewer-secure    (verdict)  …is this patch secure?             -> approve
-model reviewer-simple    (verdict)  Could this patch be simpler?       -> approve
-person owner             (flag)     Apply this patch?                  -> yes
-tool apply               (ack)      Apply: …                           -> done
+<pre><code>consult  tool cat                 (text)     Write out the house style guide…   -> Lead with the outcome…
+consult  model author   model=deep (text)    Draft a patch satisfying…          -> a unified diff, bounds-checked
+consult  model reviewer-correct   (verdict)  …is this patch correct?            -> approve
+consult  model reviewer-secure    (verdict)  …is this patch secure?             -> approve
+consult  model reviewer-simple    (verdict)  Could this patch be simpler?       -> approve
+consult  person owner             (flag)     Apply this patch?                  -> yes
+effect   tool apply               (ack)      Apply: …                           -> done
 
-bill: 7 consultations        ok  bill ∈ [6,7,10,11,13,14,15]
-ok  the guide was read exactly once         ok  at most three drafts
-ok  consent ⇔ the apply question was put    ok  the act wrote the consented patch
+bill: 7 request occurrences   ok  bill ∈ [6,7,10,11,13,14,15]
+ok  guide consulted exactly once          ok  at most three drafts
+ok  consent gates every effect             ok  observed effect wrote patch
 ok  the run certifies</code></pre>
 
-<p>The replies of a live model constitute one world among many, which is why the theorems transfer to it without weakening. Had a reviewer objected, the run would have taken a revision round and landed on a different member of the same proved set. The file left in the scratch directory was hardened in fact: the parsing routine now accepts buffer sizes and bounds every copy. A second run, differing only in the answer to the consent question, consumed six consultations, produced no acknowledgement, and left the file untouched.</p>
+<p>The replies of a live model constitute one world among many, which is why the theorems transfer to it without weakening. Had a reviewer objected, the run would have taken a revision round and landed on a different member of the same proved set. The file left in the scratch directory was hardened in fact: the parsing routine now accepts buffer sizes and bounds every copy. A second run, differing only in the answer to the consent request, consumed six reusable requests, produced no effect occurrence, and left the file untouched.</p>
 
 <h2><span class="num">Part VII</span> The boundary of proof</h2>
 

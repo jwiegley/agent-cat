@@ -38,6 +38,31 @@ a second time in that authoring surface — and holds each rebuilt program again
 the frozen one on both fronts: the program it prints, and the whole reply —
 folds, counts, and one trace and two bills per world.
 
+## Intent in the executable Plan representation
+
+The Haskell mirror carries the same typed Plan annotation as Lean:
+
+```haskell
+data Request c = Request (Q c) (Intent c)
+data Intent c where
+  Consult :: Intent c
+  Observe :: Intent c
+  Effect  :: Intent CodeAck
+```
+
+Bare `Q` is semantic answer identity. `Request = Q × Intent` annotates one Plan
+occurrence: ordinary value asks consult, value `running` observes, and statement
+`act` effects. Denotation forgets annotation. Runtime interprets it: consult and
+observe memoize by bare Q; effects neither read nor populate memo, reserve the
+ordered lane, execute and bill per occurrence; ACP grants only `Effect`. Failover
+preserves the authored
+request and records its dispatched target separately. Tags state execution policy,
+not physical success; `Observe` cannot prove an argv read-only.
+
+The frozen corpus remains version 2 bare-question semantics. Live `bisim` requests
+version 3, comparing annotated events and `semanticTrace`, their erasure. Passing
+this boundary proves representation parity, not intent as meaning.
+
 And the library **runs**: `agentic-run` plans, prices and executes the walked
 examples, against a table of canned replies, against a live `agent-deck`
 session, or against an ACP adapter it starts and speaks the protocol to. See
@@ -78,16 +103,16 @@ and only if nothing failed, so both are usable directly as CI gates.
 | `Agentic.Raw` | the `Raw` AST and a codec byte-compatible with Lean's derived `ToJson`/`FromJson` |
 | `Agentic.Guards` | the six term-level guards, in firing order, and the two ask counts |
 | `Agentic.Text` | the string layer — `norm`, `words`, `decodeVerdict`, `decodeFlag`, `say`, and since wave three the four **deciders** (`lastNonEmptyLineIs`, `containsLine`, `anyLineStartsWith`, `anyPathMatches`) with the primitives they are composed from (`bare`, `fields`, `headerPaths`, `matchGlob`) and the **fence** a text panel folds into (`block`, `escapeClose`, `validLabel`) — ASCII-only throughout, as Lean core is |
-| `Agentic.Plan` | the typed `Plan` — five formers, `DataKinds` codes, de Bruijn `Expr` with finite dependency support — and its static folds `level`, `size`, `askNodes`, `codes`, `costSummary` |
-| `Agentic.World` | `WorldSpec` and `toWorld`, the `trace` of a plan through a world, the fresh and memo bills, and the oracle's event JSON |
+| `Agentic.Plan` | `Q`, indexed `Intent`, `Request`, and the typed five-form `Plan`; de Bruijn expressions and static folds |
+| `Agentic.World` | bare-question `WorldSpec` semantics and trace; annotated execution traces, operational memo bills, and v2/v3 JSON projections |
 | `Agentic.Builder` | the production surface: typed combinators that both print a `RawProgram` and elaborate to the `Plan` the Lean checker elaborates the same construct to |
 | `Agentic.Schema` (+ `.Json`, `.TH`) | format-independent `SchemaEl`, `HasSchema` conversion, strict JSON representation, and `deriveSchema`, which derives a record's schema, witness, and total nested-product conversion |
 | `Agentic.WF` | the `[wf\|…\|]` prompt quoter — prose with `{name}` holes, laid out by the fence rule the frozen prompts were written under (blank edge lines dropped, common indentation stripped, no trailing newline) and chunked as the elaborator's left-associated `Prompt.expr` requires — adjacent literals never fused, empty literals dropped — and `Says`, which decides whether a hole is a binding or a `define`; and `[wft\|…\|]`, the same fence yielding a define's `Text` rather than a prompt's chunks, so that a define need not be written as a prompt and converted. One `parseFence` under both, so the two spellings of a block cannot differ by a byte |
 | `Agentic.Workflow` (+ `.Do`) | the **authoring** surface: an indexed block, written in ordinary Haskell under `W.do`, in which a bind is a Haskell bind, a branch on a revision's result is a Haskell `case` and a branch on a flag is a Haskell `if` — `guide <- ask (tool "cat") [wf\|…\|]`, then `case result of Settled patch -> W.do …; Unsettled patch -> stop`, then `when ok $ W.do …`. The `case` is real pattern matching on the exported data type `Outcome`, which the revision's bind forks into; the `if` is Haskell's, reaching the exported `ifThenElse` because the **authoring module** enables `RebindableSyntax` — which costs that module its implicit `Prelude` (import it, and `Data.String (fromString)` beside it under `OverloadedStrings`) and costs a `W.do` block nothing, `QualifiedDo` and `RebindableSyntax` rebinding disjoint syntax. The library itself enables neither. There is no `#label`, no `=:` and no splice anywhere in the surface: `ifFlag` stays exported as the combinator the `if` compiles *to* — machinery, and a name in the printed `Raw`, not a statement anyone writes — and `when`/`unless` are that same `if` with only one arm to say — terminal, sealing the body with the implicit `stop` an arm block's end is, and printing the identical `ifFlag` node with an empty other arm; the `case` compiles to `Agentic.Builder`'s `revisingCase`, which `revising` applies; `caseVerdict` stays a combinator here, a verdict being a value that may be acted past. It carries no names at the type level — a library cannot read a Haskell binder — so it generates the name each binding prints from that binding's depth, `named` overrides one, and a `{hole}` prints the name its handle carries |
 | `Agentic.Gen`, `Agentic.Observe`, `Agentic.Oracle` | the bisimulation surface: generators, the reply assembly both runners share, and the line-delimited JSON client for the Lean oracle subprocess |
-| `Agentic.Exec` | the interpreter in `IO` — STM-scheduled dependency-ready asks, plan-time FIFO reservations for ordered lanes, concurrent memo reservations, plan-ordered traces, the decode/re-ask loop, failure budgets, and the **fail-over walk** |
+| `Agentic.Exec` | IO realization of annotated Plan: bare-Q memo answers, per-node authored events, dispatched-source attribution, effect lanes, decode/re-ask and fail-over |
 | `Agentic.Chains` | one traversal of a printed program into the chain table the runner walks — `primary -> alternates`, ill-definedness refused before the run starts |
-| `Agentic.Shell` | the world that answers a `toolExec` question by **running its command**: no shell, the prompt on the child's stdin, a per-command timeout, and one answer per code — an exit code where the answer type can express failure, an abandoned run where it cannot |
+| `Agentic.Shell` | executes a `toolExec` observation/effect argv without a shell; prompt on stdin, timeout and typed exit-status answer |
 | `Agentic.AgentDeck` | one live `agent-deck` session as an answering service: the three CLI commands, poll loop, staleness guard, five named failures, and one plan-ordered turn lane |
 | `Agentic.Acp` | an ACP adapter this process starts, as an answering service: handshake, session per question, permission policy, stop reason, six named failures, and one plan-ordered lane for its JSON-RPC pipe and request context |
 | `Example.Harden` | the walked examples (`harden`, `hello`), written in `Agentic.Workflow` and shared by `tier1` and `agentic-run` |
@@ -130,7 +155,11 @@ extra key a failure.
 | the printed program | `toJSON (progRawOut built)` against `request.program`, positions zeroed on both sides, and the print decoded back and re-encoded so a print no reader accepts fails here. Twenty-four cases match name for name; the other six — the two walked examples, the yield vector, and the three call vectors rewritten in the authoring surface — match **up to alpha**, both sides' binders canonically renamed first, because the authoring surface generates the names it prints (see below). Function and parameter names are a different namespace and are never renamed, so those six still match them exactly. The renaming is scope-aware — a canonical name is the *level* of the binder that introduced it — so which binding every hole, scrutinee and subject reads stays pinned exactly |
 | the static folds | `level`, `size`, `askNodes`, `codes`, `costSummary` folded from the elaborated `Plan` |
 | the ask counts | `Agentic.Guards.askCounts` on the *printed* program — week-one code, which is what makes this a cross-check of the builder rather than a second reading of the same term |
-| each world | per `request.worlds` in order: the world re-serialized, its trace event by event (`code`, `addressee`, `scope`, `prompt`, `draw`, `answer`), and `billFresh` / `billMemo` |
+| each world | frozen v2 projection: world, event fields `code/addressee/scope/prompt/draw/answer`, legacy bills |
+
+`bisim` strengthens this boundary live with version 3: it compares intent-bearing
+Plan events, their bare-question `semanticTrace` erasure, and operational memo
+billing.
 
 The builder-written ones are chosen to reach every rung and every corner the
 corpus fixes: all
@@ -501,12 +530,11 @@ nix develop -c cabal run agentic-run -- run  harden --engine acp --adapter stub
 Execution is dependency-driven. Every ask node is scheduled as soon as the
 de Bruijn support of its prompt expression is available, so siblings that read
 the same earlier answers overlap even when they share a serving-model pin.
-Branches schedule only the selected arm; equal questions racing share one memo
-reservation; and the returned trace remains in plan order, not completion
-order. Progress lines may therefore interleave. Stateful ACP/deck lanes and the
-write-effect lane reserve FIFO positions during plan traversal, before prompt
-dependencies are ready; a later ready node cannot overtake an earlier blocked
-one on the same lane. Distinct read-only backends remain concurrent.
+Branches schedule only the selected arm; equal consultation/observation requests
+racing share one memo reservation; effects never do and execute once per
+occurrence. Returned traces stay in plan order. Stateful ACP/deck lanes and the
+intent-selected effect lane reserve FIFO positions during traversal, so a later
+ready effect cannot overtake an earlier blocked effect.
 `plan` and `run` both take `--require-pinned`, which refuses the program —
 before it is planned, before an adapter is started, before anything is spent —
 if any question put to a *model* does not say `served by` which model serves it
@@ -597,25 +625,25 @@ Nine paths, nine prices, decided before the first question goes out. A run whose
 $ agentic-run run harden --scripted
 running harden against the scripted table (8 canned replies)
 
-  text -> tool cat: Write out the house style guide, at most four short lines.
+  consult text -> tool cat: Write out the house style guide, at most four short lines.
     <- House style: two-space indent, no tabs, every public name documented, …
-  text -> model author: Draft a patch satisfying: harden the parser …
+  consult text -> model author: Draft a patch satisfying: harden the parser …
     <- --- a/src/parse.c +++ b/src/parse.c @@ …
-  verdict -> model reviewer-correct: … Is this patch correct? …
+  consult verdict -> model reviewer-correct: … Is this patch correct? …
     <- approve
-  verdict -> model reviewer-secure: … Is this patch secure? …
+  consult verdict -> model reviewer-secure: … Is this patch secure? …
     <- approve
-  verdict -> model reviewer-simple: Could this patch be simpler? …
+  consult verdict -> model reviewer-simple: Could this patch be simpler? …
     <- approve
-  flag -> person owner: Apply this patch? …
+  consult flag -> person owner: Apply this patch? …
     <- yes
-  ack -> tool apply: Apply: … Write the patched file here, then reply DONE.
+  effect ack -> tool apply: Apply: … Write the patched file here, then reply DONE.
     <- done
 
   the run is over.
     answer      () — a workflow's value is the unit; what it did is the trace
-    billFresh   7 (consultations the run reached)
-    billMemo    7 (distinct questions, which is what was put)
+    billFresh   7 (request occurrences reached)
+    billMemo    7 (reusable requests deduplicated; every effect occurrence kept)
 ```
 
 The canned replies are `agent-cat/test/stub_adapter.py`'s, keyed **by prefix**
@@ -661,15 +689,15 @@ transport failure, `3` a run abandoned because an answer could not be read.
 The language has three kinds of addressee — `model "reviewer-secure"`,
 `tool "apply"`, `person "owner"` — and **this adapter sends all three to the
 same `--session`.** That is a ruling about this transport, not about the
-semantics: a world in `Agentic/Core/World.lean` is a function of the question,
-and this one is a function of the question that happens to route every question
-to the same place.
+semantics: a world is a function of bare questions. The annotated transport
+happens to send every authored request to one session.
 
 The addressee is not lost. It is the first thing the rendered question says, so
 the agent knows whose part it is being asked to play:
 
 ```
 [question for model author
+intent: consult
 model: deep
 answer (text): Reply with the text itself and nothing else.]
 
@@ -733,9 +761,8 @@ The honest paragraph. **This transport can promise one thing the `agent-deck`
 one cannot.** `session/prompt` answers with a `stopReason`, and exactly one of
 ACP's five words — `end_turn` — means the agent finished; so when
 `Agentic.Exec.requiresCompletedTurn` says an answer needs a completed turn (an
-`act`, whose `Decode .ack` is total and would accept any bytes at all, or
-anything asked of a `person`), this adapter can check it and does: a cancelled
-act abandons the run with exit `3` rather than recording a receipt for something
+semantic `effect`, or anything addressed to a person), this adapter checks it:
+a cancelled effect abandons the run with exit `3` rather than recording a receipt
 that did not happen. `Agentic.AgentDeck` says in as many words that it cannot
 make that check, because the CLI it drives reports no stop reason. Everything
 else is the same runtime: the question is rendered by the same `renderQ` with
@@ -748,16 +775,12 @@ clock: one `--timeout` bounds a whole request, and a wedged pipe is a wedged
 request.
 
 Two policies are worth reading before pointing this at a directory you care
-about. Each question gets a **new session** (`Exec.Settings.freshSessionPerQuestion`),
-because a world is a function of the question and a session is a memory of the
-ones before it — an approximation, and a policy rather than a theorem. And a
-tool permission the agent asks for is granted **only during an act**
-(`Exec.permissionByCode`): an ask — text, verdict or flag — is declined in the
-schema's own `{"outcome":"cancelled"}`, so an agent cannot rewrite the workspace
-during a turn that asked it only to think. Every decision is printed. The grant
-is still an assumption and it is stated rather than proved: the runtime is
-speaking to an adapter it started, in a directory it chose, and a tool call
-inside that directory is authorized by a question that asked for one.
+about. Each request gets a **new session** because a semantic world is a function
+of the bare question while a session remembers predecessors — an approximation,
+not a theorem. Tool permission is granted only when `permissionByIntent` sees
+`Effect`; consultations and observations are declined. Thus answer code no longer
+stands in for authority, and every decision is printed. The grant remains an
+assumption about the adapter, directory and requested tool call.
 
 ### Testing the transport without a live session
 
@@ -785,9 +808,8 @@ The second scenario is the one worth naming. Every reviewer objects and every
 revision answers with the *same* patch, so the second and third review rounds
 put questions that were already answered: the run walks **13** ask nodes and the
 session is sent **6** messages. That gap is the memo table, observed from
-outside the process — a memoized question is a message the session never
-received — and 13/6 is exactly what the pure `Agentic.World` fold gives for the
-same program at the same world.
+outside the process — a memoized reusable request is a message never received —
+and 13/6 matches the pure `Agentic.World` fold for this effect-free repetition.
 
 The eighth is the two-pane one, and it is what makes `run.routes` worth
 carrying. One `run harden --session pane-a --route 'deep=deck:pane-b'` against
@@ -820,7 +842,7 @@ time, machine-wide, so Lean builds must be rare, not merely serialized):
 citation is how this package claims to be a port rather than a rewrite, and a
 stale one is worse than none: when the Lean transport was retired, 57 of the
 220 citations here named a vanished file or a line past the end, and
-`Exec.lean:925` went on resolving, to an unrelated retry loop.
+an old citation to line 925 of `Exec.lean` went on resolving to an unrelated retry loop.
 
 `ci/acp.sh` is twelve scenarios against the deterministic stub adapter,
 `agent-cat/test/stub_adapter.py` — real ACP over real pipes, and never a real
@@ -835,8 +857,8 @@ afterwards to prove nothing was written.
 of those checks pin the concurrent executor directly: dependency-independent
 prompts at one model overlap while the trace stays in plan order; prompts
 sharing an earlier answer remain blocked until it arrives and then overlap;
-equal questions racing for the memo are put once but occupy both trace nodes;
-actual write effects and stateful transport calls retain plan order across
+equal reusable requests racing for memo ownership execute once but occupy both
+trace nodes; equal effects instead execute and bill twice;
 dependency waits; and one prompt's failure cancels a blocked sibling and runs
 its cleanup. The gate also pins **fail-over**
 as well as the loud arm, standing answers, retry budgets, routing, the authoring

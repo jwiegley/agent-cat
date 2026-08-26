@@ -19,10 +19,12 @@ tree, never a string — and it is frozen, byte for byte, in `test/corpus/`.
 Lean 4.30.0 with Mathlib v4.30.0. `Agentic.lean` is the mathematical space and
 imports only mathematics: the resource algebra, panels, traces and scopes, the
 authoring words of `Surface`, and the rederivation kernel under `Agentic.Core` —
-the schema-indexed structured values (`Schema`), question space and its worlds
-(`Question`, `World`, `Dlg`), the representation (`Plan`), its meaning (`Denote`), the folds that classify and price a term
-(`Level`, `Cost`), the commuting squares between the two (`Morphism`, `Alg`), and
-the flagship workload (`HardenPatch`) with six theorems about its meaning.
+the schema-indexed values (`Schema`), principal question identity (`Question`),
+annotated executable requests (`Request`), bare-question worlds/dialogues, the
+five-form representation (`Plan`), its intent-erasing denotation (`Denote`),
+static semantic folds (`Level`, `Cost`), operational reference layers
+(`SemanticExec`, `AnnotatedExec`, `ExecCost`), commuting squares (`Morphism`,
+`Alg`), and flagship (`HardenPatch`).
 
 Outside the root sit the things that are about a *program* rather than about the
 space: the raw syntax and its elaboration (`Core.Dsl.Syntax`, `Core.Dsl.Check`,
@@ -46,11 +48,43 @@ The theorem the elaboration exists to make true is `Dsl.checkProgram_level_le`:
 program has a finite cost tree, and every analysis downstream of the level fold
 applies to every program there is.
 
+## Intent annotates execution; questions determine meaning
+
+A question says who, scope, words and draw; this is semantic answer identity.
+The executable `Plan` additionally records how one occurrence is to run:
+
+```lean
+inductive Intent : Code → Type
+  | consult : Intent c
+  | observe : Intent c
+  | effect  : Intent .ack
+
+structure Request (c : Code) where
+  question : Q c
+  intent   : Intent c
+```
+
+Thus `Ω = (c : Code) → Q c → El c`; semantic dialogue, event, table, key, and
+price erase intent. The same five-form `Plan` retains `Request = Q × Intent` as
+an intermediate annotation. Source lowering is fixed: ordinary value asks
+consult, value-position `running` observes, and statement-position `act` effects.
+
+At execution, consult and observe share answers by bare `Q`; effects neither read
+nor populate reusable memo, reserve the effect lane, and remain billable per
+occurrence. Permission follows
+intent. These are realization policies, not principal meaning. Annotated events
+forget to semantic events by a proved trace square. Tags state authored policy,
+not physical outcome; `observe` cannot prove an argv read-only.
+
 ## The conformance boundary
 
 `lake exe conformance-oracle` is a line-delimited JSON process that checks and
 observes `RawProgram`s and exercises the string layer. `test/corpus/` is 190 of
-its request/reply pairs, committed — so Tier 0 runs with no Lean in the loop.
+its version-2 request/reply pairs, committed — so Tier 0 runs with no Lean in the
+loop. Version 2 remains byte-identical semantic observation. Live differential
+requests version 3, comparing annotated Plan events while also returning
+`semanticTrace`, their bare-question erasure. This proves representation parity,
+not semantic inequality of intents or physical effect success.
 
 The corpus is **frozen**, and the requests in it are the specification.
 `lake exe corpus-gen` reads each file, takes its request *verbatim*, puts it back
@@ -67,8 +101,8 @@ one.
 ## The Haskell half — the authoring surface
 
 `haskell/` holds the `Raw` syntax and its codec, the guards, the string layer, a
-typed `Plan` with the same static folds, worlds and their two bills, the builder,
-the `IO` interpreter, the ACP and `agent-deck` transports, and above them the
+typed annotated `Plan` with the same static folds, bare-question worlds, semantic
+fresh bills, operational memo bills, the Builder,
 authoring surface a human writes. **That surface is ordinary Haskell** — no
 splice, no bracket, no label, and no file format of its own. A bind is a Haskell
 bind, a fenced prompt is a `[wf|…|]` with `{name}` holes and a layout rule, a
@@ -140,14 +174,12 @@ Five further forms the surface carries, each an ordinary Haskell value:
   instead. With no alternates declared, every diagnostic is byte-identical to
   what it always was.
 
-``tool "gate" `running` ("nix", ["flake", "check"])`` names a tool whose answer
-the runner obtains by running that argv. The exit status is the answer wherever
-the answer type can express failure — `flag` takes `True`/`False`, `verdict`
-takes the command's own first failing line as its objection — and the run is
-**abandoned** where it cannot, at `receipt`, `text`, and schema-indexed answers,
-rather than recording an answer indistinguishable in the table from one a command that succeeded gave.
-The argv is program text with no interpolation syntax, so no answer can ever
-reach a command line.
+``tool "gate" `running` ("nix", ["flake", "check"])`` in value position is an
+observation whose answer comes from that argv. In statement position the same
+`running` form is an occurrence-sensitive effect. The exit status is the answer
+wherever the answer type can express failure — `flag` takes `True`/`False`,
+`verdict` takes the command's first failing line — and the run is abandoned where
+it cannot. The argv is program text with no interpolation syntax.
 
 ## The runner — `agentic-run`
 
@@ -269,6 +301,8 @@ live sources before they went. Cite that page rather than the module names.
 
 ## The documents
 
+* `doc/request-intent-representation.md` — foundational K1–K6 placement: bare-Q
+  meaning, annotated Plan, erasing denotation, runtime policies and evidence ceilings.
 * `doc/HANDOFF.md` — the research record: what the project is for, how it reached
   its shape, what was decided, and what turned out false. It is a record and not
   a description of the present; its banner says which parts the retirement

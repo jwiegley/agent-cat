@@ -38,6 +38,21 @@
 > record edited to agree with the present has stopped being a record. Read it as
 > history.
 
+> **2026-08-26 — request intent placement corrected (`acat-cvx`).** The owner
+> superseded the earlier `acat-2ls` K1 placement after denotational review. Principal
+> answer identity remains `Q`: `Ω = (c : Code) → Q c → El c`; semantic dialogue,
+> event, table, key and price are bare-question objects. `Request = Q × Intent` is
+> the typed annotation of the existing five-form executable `Plan`, and `denote`
+> erases it. Haskell and Lean interpret intent for reuse, ordering, permission,
+> completion, rendering and v3 representation lockstep. Effects execute and bill
+> per occurrence; consult and observe reuse by bare Q. Version 2 stays frozen;
+> version 3 also carries `semanticTrace`, the proved erasure. Neither tag nor gate
+> proves physical mutation or faithful observation. The historical bare-Q formulas
+> below remain current; former Request-indexed claims are superseded.
+>
+> **The Lean-only runtime strategy was not adopted.** Haskell remains production;
+> the existing five-form `Plan` and one `Plan.denote` meaning remain in force.
+
 *Written 2026-08-14 at commit `0f65ec4`. This document exists so that the work can
 be picked up on another machine, or by another agent, without the conversation
 that produced it. It records what the project is for, how it arrived at its

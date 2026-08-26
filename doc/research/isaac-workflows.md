@@ -1,5 +1,10 @@
 # Isaac's workflows, in agent-cat
 
+> **Execution refinement (2026-08-26).** Read-only/effect authority follows typed
+> Plan intent, not answer code: `consult` and `observe` cancel tool permission;
+> `effect` grants. This is realization policy over bare-question meaning.
+> Historical measurements and comparisons remain.
+
 *The document of record for the owner's question: can `agent-cat` fully support
 the workflows Isaac Shapira has built in `~/src/agent-functor` and
 `~/src/incite`, and where does it improve on them. Two review passes over those

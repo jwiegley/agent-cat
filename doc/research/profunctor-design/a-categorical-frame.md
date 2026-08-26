@@ -1,5 +1,10 @@
 # A categorical frame for agent-cat
 
+> **Placement ruling (2026-08-26).** Bare-question keys `Σ c, Q c` remain current
+> semantic definitions. `Request = Q × Intent` belongs to the executable Plan
+> representation and erases to these keys; annotation-preserving relabelling is a
+> representation law.
+
 > **Note (2026-08-20).** Where this page says the package "already owns" a piece of
 > vocabulary in `Agentic/Star.lean`, `Agentic/Panel.lean`, `Agentic/Meaning.lean`,
 > `Agentic/Trace.lean` or `Agentic/Surface.lean`, it no longer does: those modules

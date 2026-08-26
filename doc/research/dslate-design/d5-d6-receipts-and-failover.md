@@ -1,5 +1,11 @@
 # D5 and D6-failover: the world authors the receipt, and the pin has a spare
 
+> **Superseded refinement (2026-08-26).** This implementation record predates
+> typed execution intent. Value `toolExec` is annotated `observe`; `act` is
+> `effect`; permission follows annotation rather than `.ack`. Failover preserves
+> the authored request and records a separate dispatched target. Bare-Q meaning
+> remains unchanged. Historical design below is unaltered.
+
 Implementation design for wave 3. Owner-ruled decisions D5 (`doc/research/isaac-workflows.md`
 §6) and the deferred half of D6 (fail-over), designed against G4 and G5's evidence and against
 the mechanism Isaac actually built.

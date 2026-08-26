@@ -1,8 +1,9 @@
 # The conformance wire format
 
-*Version 2. The format of record for the Lean↔Haskell conformance boundary
-(`doc/research/connection.md`, D5). Version 2 adds schema-indexed codes and their
-structured-answer representation; every Version 1 request remains byte-for-byte valid.*
+*Version 3. Program requests accept `"version": 2 | 3`; omission means 2.
+Version 2 remains byte-identical semantic observation. Version 3 compares
+intent-bearing Plan events and includes `semanticTrace`, their bare-question
+erasure. Its occurrence-sensitive memo bill is operational evidence, not K1.*
 
 The oracle speaks line-delimited JSON on stdin/stdout: one request per line,
 one reply per line, `id` echoed verbatim when the request carries one. EOF on
@@ -16,7 +17,7 @@ asymmetry must be recordable as an asymmetry.
 ## Request 1 — observe a program
 
 ```json
-{"id": …, "program": <RawProgram>, "worlds": [<WorldSpec>, …], "budgetMs": …}
+{"id": …, "version": 2|3, "program": <RawProgram>, "worlds": [<WorldSpec>, …], "budgetMs": …}
 ```
 
 `RawProgram` is the Lean datatype `Agentic.Core.Dsl.RawProgram` under Lean's
@@ -96,7 +97,8 @@ family and these are well-formedness.
  "fnAsks": [["name", <Nat>], …],
  "worlds": [
    {"world": <WorldSpec>,
-    "trace": [<Event>, …],
+    "trace": [<SemanticEventV2>|<ExecEventV3>, …],
+    "semanticTrace": [<SemanticEventV2>, …],     // version 3 only
     "billFresh": <Nat>, "billMemo": <Nat>}, …]}
 ```
 
@@ -108,10 +110,13 @@ family and these are well-formedness.
   the leaf count. `minFold`/`maxFold` are null only at the empty tree edge.
 * `blockAsks`/`fnAsks` are the Raw-level ask counts — the week-one comparands,
   computable on both sides with no `Plan`.
-* An `Event` is data, never a rendering:
+* Version 2 `trace` contains semantic bare-question events. Version 3 `trace`
+  contains annotated execution events and `semanticTrace` contains the same
+  occurrences after intent erasure. Both are data, never renderings:
 
 ```json
 {"code": <Code>,
+ "intent": "consult" | "observe" | "effect",        // v3 trace only
  "addressee": {"model"|"tool"|"person": {"id": "…"}}
             | {"toolExec": {"id": "…", "cmd": "…", "args": ["…", …]}},
  "scope": {"model": "…"|null, "mode": "…"|null},
@@ -150,17 +155,19 @@ JSON codec, and no two semantic values collapse here. The user-facing JSON
 representation rejects duplicate object members (including escape-equivalent
 keys) and exponents whose magnitude exceeds 4096 before numeric expansion.
 
-Traces are compared **in order, unnormalized**: a trace is a free monoid and
-its order is the observation.
+Both traces are compared **in order, unnormalized**. Semantic event identity is
+code plus complete `Q`; version-3 intent is representation annotation. Routes,
+retries, timeouts and selected backends remain execution metadata and do not
+rewrite the authored question in `semanticTrace`.
 
-`toolExec` (D5) is a fourth addressee flavour: a tool whose answer the *runner*
-obtains by running a program-authored command. The argv rides in the addressee
-rather than beside it, so it is inside `Q.Shape` and therefore inside the
-question's identity: **two commands at one tool id, with the same words, are two
-questions**, which `battery-219` and `battery-220` pin as `billMemo` 2 and 1.
-The kernel executes nothing — a pure `World` dispatches on the code and never on
-the addressee — so an oracle observation of a `toolExec` program is computed
-exactly as any other.
+`toolExec` remains the addressee carrying a program-authored argv. Source
+position supplies intent: value-position commands are observations;
+statement-position acts are effects. Two different commands remain different
+questions. Version 2 deduplicates bare questions, preserving historical billing
+(`battery-220` has `billMemo = 1`). Version 3 operational billing shares consult
+and observe answers by bare `Q` while retaining every effect occurrence. The pure
+oracle executes nothing. Passing v3 establishes Lean/Haskell annotation and
+erasure parity; it does not establish semantic inequality or physical success.
 
 ## Request 2 — the string layer
 

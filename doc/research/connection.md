@@ -95,7 +95,9 @@ evidence about tooling, not on this fact.
 | **D10** | **The Haskell parser is not written.** `.wf` parsing stays Lean-only and stays tested where it already is. | §1.4, §6.5 |
 | **D11** | **The Haskell does not implement `checkProgram` either.** The ~630-line checker, its 36 `.error` sites, `Bindings`/kind inference and the import walk stay Lean-only. The Haskell's only static obligations are the four guards (§3.6 A) and the Raw-level ask counts `blockAsks`/`bodyAsks`/`rhsAsks`. The alternative — port it — is priced and rejected at §6.12. | §3.1, §6.12 |
 | **D12** | **A second oracle request kind for the string layer.** `norm`, `words`, `decodeVerdict`, `Decode` per code, and the report-side `sayAnswer`, frozen as a Tier-0 vector table. It is the surface this page ranks highest-risk and the only one that needs no `Plan` at all. | §3.2, §3.5 |
-| **D13** | **The oracle carries a per-request wall-clock budget, and `timeout` is a distinct observation value**, not a comparison failure. The two implementations have different asymptotics on the same program (`Env.consBy`, §1.4), so an asymmetry must be recordable as an asymmetry. | §3.2, §1.4 |
+| **D13** | **The oracle carries a per-request wall-clock budget, and `timeout` is a distinct observation value**, not a comparison failure. | §3.2, §1.4 |
+| **D14 (superseded)** | Request intent was initially promoted into semantic identity. Denotational review found that the justification came from memo, permission and scheduling defects, while `effect` had no state-transition meaning. | Superseded by D15 / `acat-cvx` |
+| **D15** | **Intent is shared executable-Plan annotation, not answer identity.** `Ω`, `Dlg`, semantic `Event`, table, key and price use bare `Q`; the five-form `Plan` carries `Request = Q × Intent`; `denote` erases intent. Runtime reuse is bare-Q, effects remain per-occurrence, and v3 compares annotated trace plus `semanticTrace` erasure. | `doc/request-intent-representation.md`, goal `mtafl3rl-yomsmb` |
 
 ### 0.2 What the sweeps changed about the plan as briefed
 
@@ -602,12 +604,11 @@ Four changes from the draft's record, each with its reason:
   are pipeline-only comparands and are labelled as such.
 - **`timeout` is a third alternative of the record** (D13), not an error.
 
-`Event = ⟨c, q, a⟩` and `Trace = List Event` are first-order and carry
-`DecidableEq` (`Dlg.lean:112`, `:124`; `Dsl.lean:59`), and `Event.toSigma`
-(`Dsl.lean:50–61`) is the Σ-shape to serialize — which is what makes the comparison
-a comparison rather than a normalization exercise. Note that this is **not** what
-the MCP server emits: `reportJson`'s `"replay"` is `Trace.render`, a string list
-(§1.3).
+Semantic `Event = ⟨c, question, answer⟩` and `Trace = List Event` are first-order.
+Version 2 serializes these and preserves all 190 frozen vectors. Version 3
+serializes `ExecEvent = ⟨authored Request, answer source, answer⟩`, plus
+`semanticTrace = map forgetEvent trace`; live differential therefore checks
+annotation and erasure parity without promoting either into K1.
 
 Never on the wire: a `Plan`, a `Dlg`, an `Ω`, a `Table` containing anything but
 data. Never on the *generated* path: `.wf` text (D10 — the parser is not shipping,
@@ -683,22 +684,16 @@ dependency and only ever a test dependency. That is D4 exactly.
 
 ### 3.3 The mock agent
 
-`Ω = (c : Code) → Q c → El c`. `test/DslSmoke.lean:765` already builds worlds this
-way. Three consequences make this the easy part:
+`Ω = (c : Code) → Q c → El c`. Three consequences keep the semantic mock world
+small:
 
-1. **A world is a function, not a script.** No history, no state, no "next
-   answer." Determinism and "the same question twice is the same answer" are
-   consequences of the *type* (`Question.lean`, §3 q1), not of harness discipline.
-2. **Therefore the world must be specified as data**, not serialized as a
-   function. A small closed `WorldSpec` DSL shared by both sides:
-   `Echo | Const v | ByDraw | ByPromptPrefix [(Text, El c)] | Approve | Object [Text]`,
-   plus a default per code. Ten combinators cover the entire existing pin suite —
-   `DslSmoke`'s own worlds are exactly these shapes (`fun q => "draw" ++ toString q.draw`,
-   `fun q => q.prompt == "is it ready now?"`, `fun _ => Verdict.object ["too long"]`).
-3. **`Q` carries scope and draw**, so a world keyed on `q.draw` distinguishes
-   resamplings. `semSrc6`/`semSrc7` in `DslSmoke.lean` already pin the two hard
-   cases — two draws are two questions; a `define`-holed prompt is the same event
-   in disagreeing worlds — and they are the highest-value seeds in the corpus.
+1. **A world is a function, not a script.** Equal questions have equal answers;
+   repeated authored occurrences remain repeated semantic events.
+2. **The world is specified as data** through `WorldSpec`, whose clauses inspect
+   question content only.
+3. **Question carries scope and draw.** Changing draw distinguishes resampling.
+   `Request = Q × Intent` belongs to the annotated Plan representation; v3 compares
+   that annotation and also returns its bare-Q `semanticTrace` erasure.
 
 ### 3.4 Generators, ranked — reordered by D5
 
