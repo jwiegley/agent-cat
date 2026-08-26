@@ -193,11 +193,10 @@ structure Served where
   alternates : List String
   deriving Repr, DecidableEq, Inhabited
 
-/-- `[[RawAsk]]` = one question, as written: the addressee, an optional serving
-model, and the words. The **kind is not a field**: it comes from the binder's
-annotation or inference, from the position (a panel member and a review binding
-answer `verdict`; a statement ask answers `receipt`), and the checker imposes
-it. -/
+/-- `[[RawAsk]]` = one question as written: addressee, optional serving model,
+words and position. Answer kind and execution intent are occurrence properties,
+not Raw fields. Binder/panel position fixes kind; source form fixes the annotated
+Plan intent. The checker preserves the version-2 Raw wire. -/
 structure RawAsk where
   /-- The model override, if any — with its alternates; legal only on a model
   addressee, which `Check.askGuard` enforces on every `Raw` however it was
@@ -389,8 +388,8 @@ inductive RawBlock where
   source is a `revising`, the rest must begin with `case x { settled …
   unsettled … }`, which the checker enforces. -/
   | bind (x : String) (ann : Option Code) (src : RawSource) (rest : RawBlock) (pos : Pos)
-  /-- A statement-position `ask`: the act. It binds nothing and asks for
-  nothing back (`.ack`), and the block continues after it. -/
+  /-- A statement-position ask: an occurrence-sensitive `Intent.effect` at
+  `.ack`. It binds nothing, and the block continues after it. -/
   | act (a : RawAsk) (rest : RawBlock) (pos : Pos)
   /-- `if x {…} else {…}`: the two values of `El .flag`, both arms written. -/
   | ifFlag (x : String) (yes no : RawBlock) (pos : Pos)

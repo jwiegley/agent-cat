@@ -22,7 +22,7 @@ The method is the doctrine's: **the meaning is written first** (`hardenD`, an
 ordinary recursion over `Dlg`), the plan second, and the two are joined by one
 morphism equation (`denote_hardenPatch`). Every subsequent proof is about
 `hardenD`, which is a five-line dialogue, and not about the unrolled term, which
-is fifteen consultations deep.
+is fifteen request occurrences deep.
 -/
 
 namespace Agentic.Core
@@ -74,7 +74,8 @@ def guideQ : Q .text :=
 /-- `[[authorShape]]` = whom a patch is asked of, and under what: the shape
 shared by the first draft and every revision. Written in the term at both
 nodes, which is what makes "at most three drafts" a statement about shapes. -/
-def authorShape : Q.Shape .text := { addressee := .model "author", scope := 1, draw := 0 }
+def authorShape : Request.Shape .text :=
+  .consult { addressee := .model "author", scope := 1, draw := 0 }
 
 /-- `[[draftText spec]]` = the words of the first draft request: the
 specification, and the format the answer must take — a patch, and only a patch,
@@ -84,7 +85,8 @@ def draftText (spec : String) : String :=
   "Draft a patch satisfying:\n" ++ spec ++ "\nReply with a unified diff only."
 
 /-- `[[draftQ spec]]` = ask the author for a first patch meeting `spec`. -/
-def draftQ (spec : String) : Q .text := authorShape.withPrompt (draftText spec)
+def draftQ (spec : String) : Q .text :=
+  authorShape.question.withPrompt (draftText spec)
 
 /-- `[[reviseText guide patch v]]` = the words of a revision request: the guide,
 the patch and what the reviewers objected to. Everything an answer reaches.
@@ -102,11 +104,11 @@ def reviseText (guide patch : String) (v : Verdict) : String :=
 /-- `[[reviseQ guide patch v]]` = ask the author to revise `patch`, quoting the
 guide **and the objections**. -/
 def reviseQ (guide patch : String) (v : Verdict) : Q .text :=
-  authorShape.withPrompt (reviseText guide patch v)
+  authorShape.question.withPrompt (reviseText guide patch v)
 
 /-- `[[correctShape]]` = whom the correctness review goes to. -/
-def correctShape : Q.Shape .verdict :=
-  { addressee := .model "reviewer-correct", scope := 1, draw := 0 }
+def correctShape : Request.Shape .verdict :=
+  .consult { addressee := .model "reviewer-correct", scope := 1, draw := 0 }
 
 /-- `[[correctText guide patch]]` = what is said to the correctness reviewer. -/
 def correctText (guide patch : String) : String :=
@@ -114,11 +116,11 @@ def correctText (guide patch : String) : String :=
 
 /-- `[[correctQ guide patch]]` = the correctness reviewer, quoting the guide. -/
 def correctQ (guide patch : String) : Q .verdict :=
-  correctShape.withPrompt (correctText guide patch)
+  correctShape.question.withPrompt (correctText guide patch)
 
 /-- `[[secureShape]]` = whom the security review goes to. -/
-def secureShape : Q.Shape .verdict :=
-  { addressee := .model "reviewer-secure", scope := 1, draw := 0 }
+def secureShape : Request.Shape .verdict :=
+  .consult { addressee := .model "reviewer-secure", scope := 1, draw := 0 }
 
 /-- `[[secureText guide patch]]` = what is said to the security reviewer. -/
 def secureText (guide patch : String) : String :=
@@ -126,11 +128,11 @@ def secureText (guide patch : String) : String :=
 
 /-- `[[secureQ guide patch]]` = the security reviewer, quoting the same guide. -/
 def secureQ (guide patch : String) : Q .verdict :=
-  secureShape.withPrompt (secureText guide patch)
+  secureShape.question.withPrompt (secureText guide patch)
 
 /-- `[[simplerShape]]` = whom the simplicity review goes to. -/
-def simplerShape : Q.Shape .verdict :=
-  { addressee := .model "reviewer-simple", scope := 1, draw := 0 }
+def simplerShape : Request.Shape .verdict :=
+  .consult { addressee := .model "reviewer-simple", scope := 1, draw := 0 }
 
 /-- `[[simplerText patch]]` = what is said to the simplicity reviewer, who does
 not need the guide. -/
@@ -139,22 +141,26 @@ def simplerText (patch : String) : String :=
 
 /-- `[[simplerQ patch]]` = the simplicity reviewer, who does not need the
 guide. -/
-def simplerQ (patch : String) : Q .verdict := simplerShape.withPrompt (simplerText patch)
+def simplerQ (patch : String) : Q .verdict :=
+  simplerShape.question.withPrompt (simplerText patch)
 
 /-- `[[consentShape]]` = whom consent is asked of. A person is an addressee like
 any other (§3 q7); nothing about this node is a construct. -/
-def consentShape : Q.Shape .flag := { addressee := .person "owner", scope := 1, draw := 0 }
+def consentShape : Request.Shape .flag :=
+  .consult { addressee := .person "owner", scope := 1, draw := 0 }
 
 /-- `[[consentText patch]]` = what the owner is shown. -/
 def consentText (patch : String) : String :=
   "Apply this patch?\n" ++ patch ++ "\n" ++ flagSpec
 
 /-- `[[consentQ patch]]` = ask the owner whether to apply. -/
-def consentQ (patch : String) : Q .flag := consentShape.withPrompt (consentText patch)
+def consentQ (patch : String) : Q .flag :=
+  consentShape.question.withPrompt (consentText patch)
 
 /-- `[[applyShape]]` = the addressee of the terminal act: the tool that applies
 the patch. -/
-def applyShape : Q.Shape .ack := { addressee := .tool "apply", scope := 1, draw := 0 }
+def applyShape : Request.Shape .ack :=
+  .effect { addressee := .tool "apply", scope := 1, draw := 0 }
 
 /-- `[[applyText patch]]` = what is said to it: the patch, and the act itself
 spelled out — write the file, *here*, and say so. "Here" is the session's
@@ -163,10 +169,10 @@ so the act is confined to somewhere nobody minds. -/
 def applyText (patch : String) : String :=
   "Apply:\n" ++ patch ++ "\nWrite the patched file here, then reply DONE."
 
-/-- `[[applyQ patch]]` = the terminal act, addressed to the tool that applies
-it. The only `.ack` question in the workflow, which is what makes "the apply
-question was not put" a statement about codes. -/
-def applyQ (patch : String) : Q .ack := applyShape.withPrompt (applyText patch)
+/-- `[[applyQ patch]]` = semantic acknowledgement question addressed to applying
+tool. `applyShape` carries the workflow's sole effect execution annotation. -/
+def applyQ (patch : String) : Q .ack :=
+  applyShape.question.withPrompt (applyText patch)
 
 /-! ## The meaning, written first
 
@@ -278,9 +284,10 @@ def bodyK : Cont [.text] (El .text) Unit := fun Δ σ draft =>
 **Morphism equation** (`denote_hardenPatch`): `⟦hardenPatch spec⟧ · = hardenD spec`. -/
 def hardenPatch (spec : String) : Plan [] Unit :=
   -- guide ← ask "Write out the house style guide."
-  .askC .text guideQ <|
+  .askC .text (Request.consult guideQ) <|
     -- draft ← model "deep" <| ask "Draft a patch satisfying: …"
-    Plan.graft (Plan.under deep (Plan.askC1 .text (draftQ spec))) bodyK
+    Plan.graft (Plan.under deep
+      (Plan.askC1 .text (Request.consult (draftQ spec)))) bodyK
 
 /-! ## The morphism equation: the plan means the dialogue
 
@@ -343,8 +350,8 @@ theorem denotes_review : Plan.Denotes review Kreview := by
 /-- **The revision square, at this workload.** -/
 theorem denotes_redraft : Plan.Denotes redraft Kredraft := by
   intro Δ σ e δ
-  simp [redraft, Kredraft, redraftD, reviseQ, Plan.ask1, Dlg.ask1, Plan.under_ask,
-    Plan.under_ret, Sig.onQ]
+  simp [redraft, Kredraft, redraftD, reviseQ, Plan.ask1, Dlg.ask1,
+    Plan.under_ask, Plan.under_ret, Sig.onRequestShape]
 
 /-- **The loop square.** `revising`'s semantic loop, instantiated here, *is*
 `loopD` — two independently written recursions agreeing at every fuel. -/
@@ -400,7 +407,8 @@ the meaning side of it. -/
 theorem denote_hardenPatch (spec : String) :
     denote (hardenPatch spec) Env.nil = hardenD spec := by
   have key : ∀ guide : El .text,
-      denote (Plan.graft (Plan.under deep (Plan.askC1 .text (draftQ spec))) bodyK)
+      denote (Plan.graft (Plan.under deep
+        (Plan.askC1 .text (Request.consult (draftQ spec)))) bodyK)
           (Env.cons guide Env.nil)
         = (Dlg.ask1 .text (deep.onQ .text (draftQ spec)) >>= fun draft =>
             loopD guide 2 draft >>= fun final => finishD final) := by
@@ -408,7 +416,8 @@ theorem denote_hardenPatch (spec : String) :
     rw [Agentic.Core.denote_graft _ Kbody bodyK denotes_bodyK (Env.cons guide Env.nil)]
     rfl
   show Dlg.ask .text guideQ
-      (fun guide => denote (Plan.graft (Plan.under deep (Plan.askC1 .text (draftQ spec))) bodyK)
+      (fun guide => denote (Plan.graft (Plan.under deep
+        (Plan.askC1 .text (Request.consult (draftQ spec)))) bodyK)
         (Env.cons guide Env.nil))
     = Dlg.ask .text guideQ (fun guide =>
         Dlg.ask1 .text (deep.onQ .text (draftQ spec)) >>= fun draft =>
@@ -461,10 +470,12 @@ what `x` consults. A `Functor`-level restatement of `trace_bind`. -/
 
 @[simp] theorem trace_redraftD (g a : String) (v : Verdict) :
     Dlg.trace ω (redraftD g a v)
-      = [⟨.text, deep.onQ .text (reviseQ g a v), ω .text (deep.onQ .text (reviseQ g a v))⟩] := rfl
+      = [⟨.text, deep.onQ .text (reviseQ g a v),
+          ω .text (deep.onQ .text (reviseQ g a v))⟩] := rfl
 
 @[simp] theorem run_redraftD (g a : String) (v : Verdict) :
-    Dlg.run ω (redraftD g a v) = ω .text (deep.onQ .text (reviseQ g a v)) := rfl
+    Dlg.run ω (redraftD g a v) =
+      ω .text (deep.onQ .text (reviseQ g a v)) := rfl
 
 theorem trace_loopD_zero (g : String) (a : El .text) :
     Dlg.trace ω (loopD g 0 a) = Dlg.trace ω (panelD g a) := by
@@ -512,11 +523,14 @@ tail. Everything the six theorems say is read off this line. -/
 theorem trace_hardenD (spec : String) :
     Dlg.trace ω (hardenD spec)
       = ⟨.text, guideQ, ω .text guideQ⟩
-        :: ⟨.text, deep.onQ .text (draftQ spec), ω .text (deep.onQ .text (draftQ spec))⟩
-        :: (Dlg.trace ω (loopD (ω .text guideQ) 2 (ω .text (deep.onQ .text (draftQ spec))))
+        :: ⟨.text, deep.onQ .text (draftQ spec),
+             ω .text (deep.onQ .text (draftQ spec))⟩
+        :: (Dlg.trace ω (loopD (ω .text guideQ) 2
+              (ω .text (deep.onQ .text (draftQ spec))))
             ++ Dlg.trace ω
                 (finishD (Dlg.run ω
-                  (loopD (ω .text guideQ) 2 (ω .text (deep.onQ .text (draftQ spec))))))) := by
+                  (loopD (ω .text guideQ) 2
+                    (ω .text (deep.onQ .text (draftQ spec))))))) := by
   simp only [hardenD, Dlg.trace_bind', Dlg.trace_ask1, Dlg.run_ask1,
     List.cons_append, List.nil_append]
 
@@ -617,7 +631,8 @@ theorem loopD_countP_draft (g : String) :
     · rw [List.countP_append, trace_redraftD]
       have hrev : (List.countP isDraft
           [(⟨.text, deep.onQ .text (reviseQ g a (Dlg.run ω (panelD g a))),
-             ω .text (deep.onQ .text (reviseQ g a (Dlg.run ω (panelD g a))))⟩ : Event)]) = 1 := by
+             ω .text (deep.onQ .text
+               (reviseQ g a (Dlg.run ω (panelD g a))))⟩ : Event)]) = 1 := by
         simp [isDraft, deep, atModel, reviseQ, authorShape]
       rw [hrev, Nat.add_comm]
       exact Nat.succ_le_succ (ih _)
@@ -715,6 +730,35 @@ theorem consent_of_ack (e : Event) (he : e ∈ Plan.trace ω (hardenPatch spec) 
         rw [if_neg hne] at h
         exact absurd h (by simp)
 
+/-- Representation-level form: every authored effect annotation in the pure
+execution trace follows owner consent. Its semantic content is obtained through
+`ExecEvent.forget`. -/
+theorem consent_of_effect (e : ExecEvent)
+    (he : e ∈ Plan.execTrace ω (hardenPatch spec) Env.nil)
+    (hi : e.authored.isEffect = true) :
+    ∃ p : El .text, ω .flag (consentQ p) = true := by
+  have hforget : e.forget ∈ Plan.trace ω (hardenPatch spec) Env.nil := by
+    rw [← Plan.execTrace_forget]
+    exact List.mem_map_of_mem he
+  rcases e with ⟨c, ⟨q, intent⟩, source, a⟩
+  cases intent with
+  | consult => simp [Request.isEffect, Intent.isEffect] at hi
+  | observe => simp [Request.isEffect, Intent.isEffect] at hi
+  | effect => exact consent_of_ack ω spec _ hforget rfl
+
+/-- Refusing consent removes every effect annotation from pure execution trace. -/
+theorem no_effect_of_refused
+    (h : ∀ p : El .text, ω .flag (consentQ p) = false) :
+    ∀ e ∈ Plan.execTrace ω (hardenPatch spec) Env.nil,
+      e.authored.isEffect = false := by
+  intro e he
+  cases hi : e.authored.isEffect with
+  | false => rfl
+  | true =>
+      obtain ⟨p, hp⟩ := consent_of_effect ω spec e he hi
+      rw [h p] at hp
+      exact absurd hp (by simp)
+
 /-- **Kernel theorem 1, as asked.** In a world where the owner refuses consent,
 the apply question is never put: no `.ack` event occurs in the transcript at
 all. -/
@@ -773,7 +817,8 @@ theorem draft_count_le_three :
   have hd : isDraft ⟨.text, deep.onQ .text (draftQ spec),
       ω .text (deep.onQ .text (draftQ spec))⟩ = true := by
     simp [isDraft, deep, atModel, draftQ, authorShape]
-  have hloop := loopD_countP_draft ω (ω .text guideQ) 2 (ω .text (deep.onQ .text (draftQ spec)))
+  have hloop := loopD_countP_draft ω (ω .text guideQ) 2
+    (ω .text (deep.onQ .text (draftQ spec)))
   simp only [hg, hd, if_true, Bool.false_eq_true, if_false, Nat.add_zero]
   omega
 
@@ -788,15 +833,15 @@ theorem run_terminates : Plan.run ω (hardenPatch spec) Env.nil = () := rfl
 
 /-! ### The length of a transcript, exactly -/
 
-/-- **What every run costs, in consultations.** Seven possibilities and no
-others: `4k + 6` or `4k + 7` for `k ≤ 2` revisions when a patch survives review
-(the owner is asked, and applies or does not), and `13` when the loop exhausts
-its revisions and gives up — in which case the owner is never troubled. -/
+/-- **Every possible trace length.** Seven values: `4k + 6` or `4k + 7` for
+`k ≤ 2` revisions when a patch survives review (owner asked; effect skipped or
+performed), and `13` when revision exhausts before owner. -/
 theorem length_trace_hardenPatch :
     (Plan.trace ω (hardenPatch spec) Env.nil).length ∈ [6, 7, 10, 11, 13, 14, 15] := by
   rw [trace_hardenPatch, trace_hardenD]
   obtain ⟨k, hk, hlen, hnone⟩ :=
-    loopD_rounds ω (ω .text guideQ) 2 (ω .text (deep.onQ .text (draftQ spec)))
+    loopD_rounds ω (ω .text guideQ) 2
+      (ω .text (deep.onQ .text (draftQ spec)))
   simp only [List.length_cons, List.length_append, hlen]
   rcases hfin : Dlg.run ω (loopD (ω .text guideQ) 2
       (ω .text (deep.onQ .text (draftQ spec)))) with ⟨p, (_ | _)⟩
@@ -806,7 +851,7 @@ theorem length_trace_hardenPatch :
     simp only [List.mem_cons, List.not_mem_nil, or_false]
     split <;> omega
 
-/-- Hence the bill of any run is at least six consultations… -/
+/-- Hence every run has at least six request occurrences… -/
 theorem six_le_length : 6 ≤ (Plan.trace ω (hardenPatch spec) Env.nil).length := by
   have := length_trace_hardenPatch ω spec
   simp only [List.mem_cons, List.not_mem_nil, or_false] at this
@@ -843,20 +888,18 @@ theorem level_hardenPatch (spec : String) : level (hardenPatch spec) = Level.bra
 theorem level_le_branch (spec : String) : level (hardenPatch spec) ≤ Level.branch :=
   le_of_eq (level_hardenPatch spec)
 
-/-- The counting price prices by shape, vacuously: it does not look at the
-question at all. -/
+/-- Counting price is shape-invariant because it ignores every request field. -/
 theorem tick_pricesByShape : PricesByShape tick := fun _ _ _ _ => rfl
 
 /-! ### 5. The bill
 
-`tick` charges one unit per consultation, so a bill is a transcript length and
-the two readings agree. The numbers below are computed, not asserted. -/
+`tick` charges one unit per request occurrence, so bill is trace length. -/
 
 /-! The membership form of C3 — `bill ∈ costM …` — is *true* of this
 workload and is exactly `Cost.bill_mem_leaves` instantiated, but checking that
 instantiation costs Lean about a minute: `∈` on a `Multiset` is `Quot.liftOn`,
 so `isDefEq` tries to iota-reduce the quotient and therefore to evaluate the
-whole fifteen-consultation cost analysis. The two order forms below say the usable
+whole fifteen-request cost analysis. The two order forms below say the usable
 half at no cost — `≤` on `WithTop`/`WithBot` forces no reduction — and
 `bill_hardenPatch` below is strictly sharper than membership anyway: it names
 the seven bills a world can actually produce, where the tree has nine leaves. -/
@@ -903,7 +946,7 @@ theorem card_leaves_demo : Multiset.card (costM tick demo level_demo Env.nil) = 
   decide
 
 set_option maxRecDepth 10000 in
-/-- **The cheapest leaf is 5 consultations** — and no world pays it; see
+/-- **Cheapest leaf is 5 request occurrences** and unattainable; see
 `minFold_not_attained_demo`. -/
 theorem minFold_demo :
     minFold (costM tick demo level_demo Env.nil)
@@ -911,8 +954,7 @@ theorem minFold_demo :
   decide
 
 set_option maxRecDepth 10000 in
-/-- **The dearest leaf is 15 consultations**, and that one *is* paid; see
-`bill_echo_demo`. -/
+/-- **Dearest leaf is 15 request occurrences**, attained by `bill_echo_demo`. -/
 theorem maxFold_demo :
     maxFold (costM tick demo level_demo Env.nil)
       = ((Multiplicative.ofAdd 15 : Multiplicative Nat) : WithBot (Multiplicative Nat)) := by
@@ -987,8 +1029,8 @@ theorem bill_stubborn_demo :
 
 set_option maxRecDepth 100000 in
 set_option maxHeartbeats 1000000 in
-/-- **The maximum is attained.** Fifteen consultations: guide, draft, three
-panel rounds of three, two revisions, the owner, and the act.
+/-- **Maximum attained.** Fifteen requests: guide, draft, three panels of three,
+two revisions, owner consultation, and effect.
 
 The heartbeat budget above is what a `decide` on this world costs: `ωEcho` is
 the one world in the module that *reads* prompt text, so the kernel evaluates
@@ -999,9 +1041,9 @@ theorem bill_echo_demo :
   rw [billFresh_tick]
   exact congrArg _ (by decide)
 
-/-- **The minimum of the tree is not attained**, and the gap is one
-consultation: `minFold` is `5`, every run costs at least `6`, and the cheapest
-run costs exactly `6` (`bill_refuse_demo`). Read against `attack-adequacy` A2's
+/-- **Tree minimum is unattained**, with a one-request gap: `minFold = 5`,
+every run costs at least `6`, and `bill_refuse_demo` realizes `6`. Read against
+`attack-adequacy` A2's
 audit of the dossier's worked cost for this workload ("min 7, max 15"): the
 maximum lands on 15 and is attained (`bill_echo_demo`), while the minimum is 6
 attained and 5 as a leaf — neither of them 7.

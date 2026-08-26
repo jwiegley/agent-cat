@@ -1,4 +1,5 @@
 import Agentic.Core.Dlg
+import Agentic.Core.Request
 import Agentic.Core.Text
 import Mathlib.Data.FinEnum
 
@@ -18,11 +19,10 @@ The one design decision, which the whole module is a consequence of: the dilemma
 the binder. A `Plan` is first-order — an inspectable term — and its variables
 are de Bruijn indices, so there is no α-equivalence, no capture, no ill-scoped
 term and no `Quot`. What the host supplies is not the sequencing but the *pure*
-part: a question's **words** are built by an `Expr`, an ordinary function of the
-answers in scope, while the question's **shape** — who is asked, under what
-scope, at which draw — is written in the term. That split is what keeps a
-content-dependent prompt below the monadic rung *and* keeps the cost of the
-conversation readable off the term (`Agentic/Core/Cost.lean`, C2).
+part: a request annotation's **words** are built by an `Expr`, while question
+shape and execution intent are written in the term. Denotation forgets intent;
+an answer may change only words, keeping content-dependent prompts below the
+monadic rung and operational cost readable from syntax.
 
 Three things are therefore **not** here, on purpose.
 
@@ -41,6 +41,38 @@ Three things are therefore **not** here, on purpose.
 -/
 
 namespace Agentic.Core
+
+/-! ## Annotated execution observations
+
+These belong to the executable `Plan` representation. `ExecEvent.forget` is the
+K6 map back to the bare-question semantic event. -/
+
+/-- How one Plan occurrence obtained its answer. A memo hit has no dispatched
+question; a fresh attempt records the operationally selected question, including
+any failover relabelling. -/
+inductive AnswerSource (c : Code) where
+  | reused
+  | asked (dispatched : Q c)
+
+/-- One annotated Plan occurrence and its answer. `authored` never changes under
+routing or failover. -/
+structure ExecEvent where
+  c : Code
+  authored : Request c
+  source : AnswerSource c
+  answer : El c
+
+/-- Annotated execution trace, compared exactly at representation lockstep. -/
+abbrev ExecTrace : Type := List ExecEvent
+
+/-- Forget execution annotation and attribution, retaining the authored semantic
+question and answer. -/
+def ExecEvent.forget (e : ExecEvent) : Event :=
+  ⟨e.c, e.authored.question, e.answer⟩
+
+@[simp] theorem ExecEvent.forget_mk (c : Code) (r : Request c)
+    (source : AnswerSource c) (answer : El c) :
+    (ExecEvent.mk c r source answer).forget = ⟨c, r.question, answer⟩ := rfl
 
 /-! ## Contexts, environments, variables -/
 
@@ -435,11 +467,11 @@ below is the package's spelling of `PlanF A Γ`, unchanged at every use site. -/
 inductive PlanF (A : Type) : Ctx → Type where
   /-- The unit: answer with a pure function of what is known. -/
   | ret {Γ : Ctx} (e : Expr Γ A) : PlanF A Γ
-  /-- **Ask a closed question and bind the answer.** The generator, and the only
-  effect. Its question mentions nothing in scope, which is what gives a
-  `Const S`-valued analysis a domain — the batch rung is recorded in the term or
-  it is not well defined (kernel §2.3, `attack-adequacy` F1). -/
-  | askC {Γ : Ctx} (c : Code) (q : Q c) (k : PlanF A (c :: Γ)) : PlanF A Γ
+  /-- **Ask a closed request and bind the answer.** Its request mentions nothing
+  in scope, which is what gives a `Const S`-valued analysis a domain — the batch
+  rung is recorded in the term or it is not well defined (kernel §2.3,
+  `attack-adequacy` F1). -/
+  | askC {Γ : Ctx} (c : Code) (q : Request c) (k : PlanF A (c :: Γ)) : PlanF A Γ
   /-- **Ask a question whose *words* are built from the answers so far, and bind
   the answer.** The node the domain forces: the guide's text goes into the
   reviewer's prompt, the draft into the review, the objections into the
@@ -447,13 +479,13 @@ inductive PlanF (A : Type) : Ctx → Type where
   analysis has to reconstruct where an answer went.
 
   **The shape is term-level data and only the prompt is an expression**, which
-  is the whole of the kernel's C2. `Q c ≅ Q.Shape c × String`; the addressee,
+  is the whole of the kernel's C2. `Request c ≅ Request.Shape c × String`; intent,
   the scope and the draw are written by the author in the term `s`, and the
   answer flows into the words and nowhere else — not because a predicate on the
   term says so, but because there is no place in the node for it to flow. The
   shape sequence of a `pipeline` plan is therefore a *projection of the syntax*
   (`shapes_eq_of_le_pipeline`, which carries no hypothesis). -/
-  | ask {Γ : Ctx} (c : Code) (s : Q.Shape c) (e : Expr Γ String)
+  | ask {Γ : Ctx} (c : Code) (s : Request.Shape c) (e : Expr Γ String)
       (k : PlanF A (c :: Γ)) : PlanF A Γ
   /-- **Finite-tag branching, both arms in the term.** `Selective.branch`, with
   the payload riding in the context into whichever arm is taken. The tag is a
@@ -544,10 +576,10 @@ structure PlanAlg (P : Ctx → Type → Type v) where
   /-- What a pure leaf becomes. -/
   ret  : {Γ : Ctx} → {A : Type} → Expr Γ A → P Γ A
   /-- What a closed question and its binding become. -/
-  askC : {Γ : Ctx} → {A : Type} → (c : Code) → Q c → P (c :: Γ) A → P Γ A
+  askC : {Γ : Ctx} → {A : Type} → (c : Code) → Request c → P (c :: Γ) A → P Γ A
   /-- What an open question — shape in the term, words computed — and its
   binding become. -/
-  ask  : {Γ : Ctx} → {A : Type} → (c : Code) → Q.Shape c → Expr Γ String → P (c :: Γ) A → P Γ A
+  ask  : {Γ : Ctx} → {A : Type} → (c : Code) → Request.Shape c → Expr Γ String → P (c :: Γ) A → P Γ A
   /-- What a finite branch becomes: the copair over the tag's type. -/
   case : {Γ : Ctx} → {A : Type} → (t : Tag) → Expr Γ t.El → (t.El → P Γ A) → P Γ A
   /-- What the quarantined dynamic former becomes. -/
@@ -573,10 +605,10 @@ def fold {A : Type} : {Γ : Ctx} → Plan Γ A → P Γ A
 @[simp] theorem fold_ret {Γ : Ctx} {A : Type} (e : Expr Γ A) :
     alg.fold (Plan.ret e) = alg.ret e := rfl
 
-@[simp] theorem fold_askC {Γ : Ctx} {A : Type} (c : Code) (q : Q c) (k : Plan (c :: Γ) A) :
+@[simp] theorem fold_askC {Γ : Ctx} {A : Type} (c : Code) (q : Request c) (k : Plan (c :: Γ) A) :
     alg.fold (Plan.askC c q k) = alg.askC c q (alg.fold k) := rfl
 
-@[simp] theorem fold_ask {Γ : Ctx} {A : Type} (c : Code) (s : Q.Shape c) (e : Expr Γ String)
+@[simp] theorem fold_ask {Γ : Ctx} {A : Type} (c : Code) (s : Request.Shape c) (e : Expr Γ String)
     (k : Plan (c :: Γ) A) :
     alg.fold (Plan.ask c s e k) = alg.ask c s e (alg.fold k) := rfl
 
@@ -650,10 +682,10 @@ def sub {A : Type} : {Γ Δ : Ctx} → Plan Γ A → Sub Γ Δ → Plan Δ A :=
 theorem sub_ret {Γ Δ : Ctx} (e : Expr Γ A) (σ : Sub Γ Δ) :
     sub (Plan.ret e) σ = .ret (fun δ => e (σ δ)) := rfl
 
-theorem sub_askC {Γ Δ : Ctx} (c : Code) (q : Q c) (k : Plan (c :: Γ) A) (σ : Sub Γ Δ) :
+theorem sub_askC {Γ Δ : Ctx} (c : Code) (q : Request c) (k : Plan (c :: Γ) A) (σ : Sub Γ Δ) :
     sub (Plan.askC c q k) σ = .askC c q (sub k (Sub.lift σ)) := rfl
 
-theorem sub_ask {Γ Δ : Ctx} (c : Code) (s : Q.Shape c) (e : Expr Γ String)
+theorem sub_ask {Γ Δ : Ctx} (c : Code) (s : Request.Shape c) (e : Expr Γ String)
     (k : Plan (c :: Γ) A) (σ : Sub Γ Δ) :
     sub (Plan.ask c s e k) σ = .ask c s (fun δ => e (σ δ)) (sub k (Sub.lift σ)) := rfl
 
@@ -698,8 +730,8 @@ syntax" means: only the two question formers do anything, and each does the one
 thing `σ` says. -/
 def underAlg (σ : Sig) : PlanAlg (fun Γ A => Plan Γ A) where
   ret e := .ret e
-  askC c q k := .askC c (σ.onQ c q) k
-  ask c s e k := .ask c (σ c s) e k
+  askC c q k := .askC c (σ.onRequest c q) k
+  ask c s e k := .ask c (σ.onRequestShape c s) e k
   case t e arms := .case t e arms
   dyn b e f := .dyn b e f
 
@@ -711,12 +743,12 @@ def under {A : Type} (σ : Sig) : {Γ : Ctx} → Plan Γ A → Plan Γ A :=
 
 theorem under_ret (σ : Sig) (e : Expr Γ A) : under σ (Plan.ret e) = .ret e := rfl
 
-theorem under_askC (σ : Sig) (c : Code) (q : Q c) (k : Plan (c :: Γ) A) :
-    under σ (Plan.askC c q k) = .askC c (σ.onQ c q) (under σ k) := rfl
+theorem under_askC (σ : Sig) (c : Code) (q : Request c) (k : Plan (c :: Γ) A) :
+    under σ (Plan.askC c q k) = .askC c (σ.onRequest c q) (under σ k) := rfl
 
-theorem under_ask (σ : Sig) (c : Code) (s : Q.Shape c) (e : Expr Γ String)
+theorem under_ask (σ : Sig) (c : Code) (s : Request.Shape c) (e : Expr Γ String)
     (k : Plan (c :: Γ) A) :
-    under σ (Plan.ask c s e k) = .ask c (σ c s) e (under σ k) := rfl
+    under σ (Plan.ask c s e k) = .ask c (σ.onRequestShape c s) e (under σ k) := rfl
 
 theorem under_case (σ : Sig) (t : Tag) (e : Expr Γ t.El) (arms : t.El → Plan Γ A) :
     under σ (Plan.case t e arms) = .case t e (fun x => under σ (arms x)) := rfl
@@ -728,8 +760,8 @@ theorem under_dyn (σ : Sig) (b : Code) (e : Expr Γ (El b)) (f : El b → Plan 
 @[simp] theorem under_idSig (p : Plan Γ A) : under idSig p = p := by
   induction p with
   | ret e => rfl
-  | askC c q k ih => simp only [under_askC, idSig_onQ, ih]
-  | ask c s e k ih => simp only [under_ask, idSig, ih]
+  | askC c q k ih => simp only [under_askC, idSig_onRequest, ih]
+  | ask c s e k ih => simp only [under_ask, idSig_onRequestShape, ih]
   | case t e arms ih => simp only [under_case]; exact congrArg _ (funext fun x => ih x)
   | dyn b e f ih => simp only [under_dyn]; exact congrArg _ (funext fun x => ih x)
 
@@ -740,8 +772,8 @@ theorem under_under (σ τ : Sig) (p : Plan Γ A) :
     under σ (under τ p) = under (compSig σ τ) p := by
   induction p with
   | ret e => rfl
-  | askC c q k ih => simp only [under_askC, compSig_onQ, ih]
-  | ask c s e k ih => simp only [under_ask, compSig, ih]
+  | askC c q k ih => simp only [under_askC, compSig_onRequest, ih]
+  | ask c s e k ih => simp only [under_ask, compSig_onRequestShape, ih]
   | case t e arms ih => simp only [under_case]; exact congrArg _ (funext fun x => ih x)
   | dyn b e f ih => simp only [under_dyn]; exact congrArg _ (funext fun x => ih x)
 
@@ -816,11 +848,11 @@ def graft {B : Type} : {Γ : Ctx} → {A : Type} → Plan Γ A → Cont Γ A B �
 theorem graft_ret {B : Type} (e : Expr Γ A) (k : Cont Γ A B) :
     graft (Plan.ret e) k = k _ Sub.id e := rfl
 
-theorem graft_askC {B : Type} (c : Code) (q : Q c) (p : Plan (c :: Γ) A) (k : Cont Γ A B) :
+theorem graft_askC {B : Type} (c : Code) (q : Request c) (p : Plan (c :: Γ) A) (k : Cont Γ A B) :
     graft (Plan.askC c q p) k
       = .askC c q (graft p (fun Δ σ e => k Δ (Sub.comp Sub.wk σ) e)) := rfl
 
-theorem graft_ask {B : Type} (c : Code) (s : Q.Shape c) (d : Expr Γ String)
+theorem graft_ask {B : Type} (c : Code) (s : Request.Shape c) (d : Expr Γ String)
     (p : Plan (c :: Γ) A) (k : Cont Γ A B) :
     graft (Plan.ask c s d p) k
       = .ask c s d (graft p (fun Δ σ e => k Δ (Sub.comp Sub.wk σ) e)) := rfl
@@ -873,11 +905,11 @@ def bindP {c : Code} (p : Plan Γ (El c)) (k : El c → Plan Γ B) : Plan Γ B :
 
 /-- `[[askC1 c q]] = Dlg.ask1 c q`: put a closed question and answer with the
 reply. -/
-def askC1 (c : Code) (q : Q c) : Plan Γ (El c) := .askC c q (.ret (Expr.var .here))
+def askC1 (c : Code) (q : Request c) : Plan Γ (El c) := .askC c q (.ret (Expr.var .here))
 
 /-- `[[ask1 c s e]]` = put the question of shape `s` whose words `e` builds from
 what is known, and answer with the reply. -/
-def ask1 (c : Code) (s : Q.Shape c) (e : Expr Γ String) : Plan Γ (El c) :=
+def ask1 (c : Code) (s : Request.Shape c) (e : Expr Γ String) : Plan Γ (El c) :=
   .ask c s e (.ret (Expr.var .here))
 
 /-- `[[caseB e t f]] = if e then t else f`, with **both** arms in the term.

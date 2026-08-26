@@ -29,6 +29,16 @@ partial def waitBudget (task : Task (Except IO.Error Json)) (t0 budget : Nat) :
       IO.sleep 5
       waitBudget task t0 budget
 
+/-- Version 2 is the compatibility default; version 3 exposes request intent. -/
+def observationVersionOf (j : Json) : Except String ObservationVersion :=
+  match j.getObjVal? "version" with
+  | .error _ => .ok .v2
+  | .ok value =>
+    match value.getNat? with
+    | .ok 2 => .ok .v2
+    | .ok 3 => .ok .v3
+    | _ => .error "program observation version must be 2 or 3"
+
 /-- One request, dispatched. Pure except for the clock. -/
 def answer (j : Json) : IO Json := do
   if (j.getObjVal? "ping").toOption.isSome then
@@ -39,20 +49,23 @@ def answer (j : Json) : IO Json := do
     match fromJson? (α := RawProgram) pj with
     | .error e => return Json.mkObj [("error", Json.str s!"bad program: {e}")]
     | .ok prog =>
-      let worlds : List WorldSpec :=
-        match j.getObjVal? "worlds" with
-        | .ok wj =>
-          match fromJson? (α := List WorldSpec) wj with
-          | .ok ws => ws
+      match observationVersionOf j with
+      | .error e => return Json.mkObj [("error", Json.str e)]
+      | .ok version =>
+        let worlds : List WorldSpec :=
+          match j.getObjVal? "worlds" with
+          | .ok wj =>
+            match fromJson? (α := List WorldSpec) wj with
+            | .ok ws => ws
+            | .error _ => [{}]
           | .error _ => [{}]
-        | .error _ => [{}]
-      let budget : Nat :=
-        match (j.getObjVal? "budgetMs").toOption.bind (·.getNat?.toOption) with
-        | some n => n
-        | none => 30000
-      let t0 ← IO.monoMsNow
-      let task ← IO.asTask (pure (observe prog worlds))
-      waitBudget task t0 budget
+        let budget : Nat :=
+          match (j.getObjVal? "budgetMs").toOption.bind (·.getNat?.toOption) with
+          | some n => n
+          | none => 30000
+        let t0 ← IO.monoMsNow
+        let task ← IO.asTask (pure (observeAt version prog worlds))
+        waitBudget task t0 budget
   else
     return Json.mkObj [("error", Json.str "a request is {program, worlds?}, {string: {op, code?, text}}, or {ping}")]
 

@@ -166,29 +166,56 @@ def Prompt.expr {Γ : Ctx} (S : Bindings Γ) (pos : Pos) :
 
 /-! ## Questions -/
 
-/-- The shape a target writes: the addressee and the draw as given, the scope at
-the unit of the scope monoid, and the `served by` override — if there is one —
-applied to it. -/
-def askShape (m : Option String) (c : Code) (t : RawTarget) : Q.Shape c :=
-  -- Its argument is the *primary* alone: `RawAsk.model` is an `Option Served`
-  -- and the call sites pass `a.model.map (·.primary)`. **The alternates are
-  -- dropped here**, which is the formal statement that fail-over (D6) is not
-  -- part of the meaning — nothing downstream of this function can see them.
+/-- Value-position intent is structural in the source. A program-authored command
+used for a value is an observation; every other value-producing ask is a
+consultation. Mutating commands must be written as statement-position acts. -/
+def valueIntent (c : Code) (t : RawTarget) : Intent c :=
+  match t.addressee with
+  | .toolExec _ _ _ => .observe
+  | _ => .consult
+
+@[simp] theorem valueIntent_toolExec (c : Code) (id cmd : String)
+    (args : List String) (draw : Nat) :
+    valueIntent c ⟨.toolExec id cmd args, draw⟩ = .observe := rfl
+
+@[simp] theorem valueIntent_model (c : Code) (id : String) (draw : Nat) :
+    valueIntent c ⟨.model id, draw⟩ = .consult := rfl
+
+@[simp] theorem valueIntent_tool (c : Code) (id : String) (draw : Nat) :
+    valueIntent c ⟨.tool id, draw⟩ = .consult := rfl
+
+@[simp] theorem valueIntent_person (c : Code) (id : String) (draw : Nat) :
+    valueIntent c ⟨.person id, draw⟩ = .consult := rfl
+
+/-- Annotated Plan shape: semantic question shape plus execution intent.
+`served by` rewrites only question scope. -/
+def askShape (c : Code) (intent : Intent c) (m : Option String)
+    (t : RawTarget) : Request.Shape c :=
   let s : Q.Shape c := { addressee := t.addressee, scope := 1, draw := t.draw }
-  match m with
-  | none => s
-  | some mid => atModel mid c s
+  let question := match m with
+    | none => s
+    | some mid => atModel mid c s
+  ⟨question, intent⟩
+
+/-- Scope and serving-model relabelling cannot change authored intent. -/
+@[simp] theorem askShape_intent (c : Code) (intent : Intent c)
+    (m : Option String) (t : RawTarget) :
+    (askShape c intent m t).intent = intent := by
+  cases m <;> rfl
 
 /-- **Morphism equation.** At a single question the scope fold *is* the shape's
 relabelling: this is what licenses `served by` being elaborated by rewriting a
 shape rather than by wrapping a term. -/
-theorem under_ask1 (σ : Sig) {Γ : Ctx} (c : Code) (s : Q.Shape c) (e : Expr Γ String) :
-    Plan.under σ (Plan.ask1 c s e) = Plan.ask1 c (σ c s) e := rfl
+theorem under_ask1 (σ : Sig) {Γ : Ctx} (c : Code) (s : Request.Shape c)
+    (e : Expr Γ String) :
+    Plan.under σ (Plan.ask1 c s e) =
+      Plan.ask1 c (σ.onRequestShape c s) e := rfl
 
 /-- …and the same at a closed question, where the relabelling acts on the whole
 `Q` because the words are in the term too. -/
-theorem under_askC1 (σ : Sig) {Γ : Ctx} (c : Code) (q : Q c) :
-    Plan.under σ (Plan.askC1 (Γ := Γ) c q) = Plan.askC1 c (σ.onQ c q) := rfl
+theorem under_askC1 (σ : Sig) {Γ : Ctx} (c : Code) (q : Request c) :
+    Plan.under σ (Plan.askC1 (Γ := Γ) c q) =
+      Plan.askC1 c (σ.onRequest c q) := rfl
 
 /-! ## Kind inference
 
@@ -345,20 +372,28 @@ def askGuard (a : RawAsk) : Except CheckError Unit :=
                    a tool or a person is not served by one", "served"⟩
   | none, _ => .ok ()
 
-/-- One question at the kind its position or its binder fixed: `Plan.askC1`
-where the words are in the term, `Plan.ask1` where they are computed. -/
-def askPlan {Γ : Ctx} (c : Code) (S : Bindings Γ) (a : RawAsk) :
-    Except CheckError (Plan Γ (El c)) :=
+/-- One request at explicit execution intent: sole source-position lowering into
+the annotated `Plan.askC`/`Plan.ask` representation. -/
+def askForm {A : Type} {Γ : Ctx} (c : Code) (intent : Intent c)
+    (S : Bindings Γ) (a : RawAsk) :
+    Except CheckError (Plan (c :: Γ) A → Plan Γ A) :=
   match askGuard a with
   | .error err => .error err
   | .ok _ =>
-  let s := askShape (a.model.map (·.primary)) c a.target
-  match Prompt.closed a.prompt with
-  | some words => .ok (Plan.askC1 c (s.withPrompt words))
-  | none =>
-    match Prompt.expr S a.pos a.prompt with
-    | .error err => .error err
-    | .ok e => .ok (Plan.ask1 c s e)
+    let s := askShape c intent (a.model.map (·.primary)) a.target
+    match Prompt.closed a.prompt with
+    | some words => .ok (fun k => Plan.askC c (s.withPrompt words) k)
+    | none =>
+      match Prompt.expr S a.pos a.prompt with
+      | .error err => .error err
+      | .ok e => .ok (fun k => Plan.ask c s e k)
+
+/-- One value-position request at the kind fixed by its binder or position. -/
+def askPlan {Γ : Ctx} (c : Code) (S : Bindings Γ) (a : RawAsk) :
+    Except CheckError (Plan Γ (El c)) :=
+  match askForm c (valueIntent c a.target) S a with
+  | .error err => .error err
+  | .ok form => .ok (form (.ret (Expr.var .here)))
 
 /-- The members of a panel, each at `.verdict` — the kind the rule's monoid
 lives at. -/
@@ -542,17 +577,7 @@ def rhsPlan {Γ : Ctx} (fns : Fns) (c : Code) (S : Bindings Γ) (r : RawRhs) (wh
 def bindForm {A : Type} {Γ : Ctx} (fns : Fns) (c : Code) (S : Bindings Γ) (r : RawRhs) :
     Except CheckError (Plan (c :: Γ) A → Plan Γ A) :=
   match r with
-  | .ask a =>
-    match askGuard a with
-    | .error err => .error err
-    | .ok _ =>
-    let s := askShape (a.model.map (·.primary)) c a.target
-    match Prompt.closed a.prompt with
-    | some words => .ok (fun k => Plan.askC c (s.withPrompt words) k)
-    | none =>
-      match Prompt.expr S a.pos a.prompt with
-      | .error err => .error err
-      | .ok e => .ok (fun k => Plan.ask c s e k)
+  | .ask a => askForm c (valueIntent c a.target) S a
   | .panel ms pos =>
     match rhsPlan fns c S (.panel ms pos) "this binding" with
     | .error err => .error err
@@ -755,7 +780,7 @@ def checkBlock (fns : Fns) : (Γ : Ctx) → Bindings Γ → Option (Pend Γ) →
               String.intercalate ", " names⟩
   | _, _, some pd, .knownHere _ _ pos => .error (pendingErr pos pd.name)
   | Γ, S, none, .act a rest _pos =>
-    match bindForm fns Code.ack S (.ask a) with
+    match askForm Code.ack .effect S a with
     | .error err => .error err
     | .ok form =>
       match checkBlock fns Γ S none rest with
@@ -1049,7 +1074,7 @@ def checkBody {k : Code} (fns : Fns) (answer : Option String) (result : Code) :
       | .error err => .error err
       | .ok k' => .ok (form k')
   | Γ, S, .act a _ :: rest, fin =>
-    match bindForm fns Code.ack S (.ask a) with
+    match askForm Code.ack .effect S a with
     | .error err => .error err
     | .ok form =>
       match checkBody fns answer result Γ S rest fin with

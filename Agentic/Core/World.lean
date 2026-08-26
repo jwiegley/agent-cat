@@ -11,39 +11,27 @@ two-level dependent `pin` laws, written here rather than budgeted at zero).
 
 Two objects and one map between them.
 
-* `Ω`, the **total** answer sheet: a function from questions to answers. Being
-  a function is not a policy but a type, and it is what makes "the same question
-  asked twice is the same answer" a fact rather than a caching mode.
+* `Ω`, the **total** answer sheet: a function from questions to answers. Equal
+  questions therefore have one answer; occurrence multiplicity lives in traces.
 
-* `Table`, a **finite partial** answer sheet — the runtime's view, and exactly
-  what a memoizing interpreter accumulates. Its extension order is `≤` (the
-  kernel writes it `⊑`) and is a `Preorder`, not a partial order: two tables
-  that differ by shadowed or reordered entries denote the same partial sheet
-  without being equal as lists.
+* `Table`, a **finite partial** answer sheet over bare questions. Its extension
+  preorder identifies shadowing and reordering that denote the same sheet.
 
 * `worldOf`, the **defaulting totalization**, which exists because every `El c`
   is inhabited. It is what turns "the run logged these answers" into "there is a
   total world in which the plan means this", with no axiom and no `IO`.
 
-`pin` is `Function.update` at *two* levels, because `Ω` is a dependent function
-of a code and then of a question. Mathlib's five laws are for one level, so the
-five are re-derived here; `pin_pin_comm` needs the two keys to differ as a pair,
-which is `Sigma` disequality, and that is the shape the kernel predicted would
-be awkward.
+`pin` is dependent `Function.update` at code and question; the laws below
+re-derive its two-level behavior.
 -/
 
 namespace Agentic.Core
 
 /-! ## The total answer sheet -/
 
-/-- `[[Ω]]` = one complete answer sheet: a total function assigning, to every
-question, the thing its addressee says.
-
-A *function*, so two occurrences of one question denote one answer in every
-world (§3 q1) — which is why content-addressed caching needs no side condition,
-and why sharing is a variable used twice rather than a label. In `Type 0`,
-because `El c` is, so a world is an ordinary dependent function space rather
-than a rank-2 oracle threaded through a history. -/
+/-- `[[Ω]]` = one complete answer sheet: a total function assigning one answer
+to each question. Two occurrences of one question therefore agree in every
+world; trace separately preserves occurrence count. -/
 abbrev Ω : Type := (c : Code) → Q c → El c
 
 /-- Counterfactual substitution: `[[pin ω c q a]] = ω except that q answers a`.
@@ -194,6 +182,33 @@ theorem le_cons_of_lookup_none {t : Table} {c : Code} {q : Q c} (a : El c)
     (hnone : lookup t c q = none) : t ≤ Table.cons c q a t :=
   fun _ _ _ h => lookup_cons_of hnone h
 
+/-- Recording an already-present answer also extends the table by shadowing the
+same question with the same value. -/
+theorem le_cons_of_lookup_eq {t : Table} {c : Code} {q : Q c} {a : El c}
+    (hsome : lookup t c q = some a) : t ≤ Table.cons c q a t := by
+  intro c' q' a' h
+  by_cases hc : c = c'
+  · subst c'
+    by_cases hq : q' = q
+    · subst q'
+      rw [lookup_cons_self]
+      exact hsome.symm.trans h
+    · rw [lookup_cons_of_ne_q t c a hq]
+      exact h
+  · rw [lookup_cons_of_ne_code t q q' a hc]
+    exact h
+
+/-- An acknowledgement may be recorded again without invalidating an older table:
+its answer type is `Unit`, so the repeated value is necessarily the same. This is
+the extension fact used when every effect occurrence is executed and recorded. -/
+theorem le_cons_ack (t : Table) (q : Q .ack) :
+    t ≤ Table.cons .ack q () t := by
+  cases h : lookup t .ack q with
+  | none => exact le_cons_of_lookup_none (c := .ack) (q := q) () h
+  | some a =>
+    cases a
+    exact le_cons_of_lookup_eq (c := .ack) (q := q) h
+
 /-! ## From a partial sheet to a total one -/
 
 /-- `Extends ω t` = the total world `ω` agrees with everything `t` recorded.
@@ -215,6 +230,21 @@ theorem Extends.mono {ω : Ω} {t t' : Table} (hle : t ≤ t') (h : Extends ω t
 theorem Extends.head {ω : Ω} {t : Table} {c : Code} {q : Q c} {a : El c}
     (h : Extends ω (Table.cons c q a t)) : ω c q = a :=
   h c q a (lookup_cons_self t c q a)
+
+/-- Recording what an extending world already says preserves extension. -/
+theorem Extends.cons {ω : Ω} {t : Table} (h : Extends ω t)
+    (c : Code) (q : Q c) : Extends ω (Table.cons c q (ω c q) t) := by
+  intro c₀ q₀ a₀ ha
+  by_cases hc : c = c₀
+  · subst hc
+    by_cases hq : q₀ = q
+    · subst hq
+      rw [lookup_cons_self] at ha
+      exact (Option.some.inj ha) ▸ rfl
+    · rw [lookup_cons_of_ne_q t c _ hq] at ha
+      exact h c q₀ a₀ ha
+  · rw [lookup_cons_of_ne_code t q q₀ _ hc] at ha
+    exact h c₀ q₀ a₀ ha
 
 /-- `[[worldOf t]]` = the total answer sheet that says what `t` says and
 defaults elsewhere. It exists because every `El c` is inhabited, and it is the

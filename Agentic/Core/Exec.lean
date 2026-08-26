@@ -1,4 +1,4 @@
-import Agentic.Core.Denote
+import Agentic.Core.AnnotatedExec
 import Agentic.Core.Schema.Json
 
 /-!
@@ -328,9 +328,9 @@ theorem decodeFlag_eq_some_true {s w : String} (hw : words s = [w])
 word in it. Everything else — a refusal, a hedge, an explanation, a yes with a
 clause after it — is a denial or a re-ask.
 
-This is the theorem the consent gate rests on: `Harden.consentQ` is a `flag`,
-`Harden.consent_of_ack` says the act happens only where that flag is `true`, and
-this says a `true` had to be *said* and had to be the whole of what was said. -/
+`Harden.consent_of_ack` gates the semantic apply question on that flag;
+`Harden.consent_of_effect` transports the result to annotated execution trace.
+A decoded `true` must be the whole recognized answer. -/
 theorem decodeFlag_eq_some_true_iff {s : String} :
     decodeFlag s = some true ↔ saidNo s = false ∧ ∃ w, words s = [w] ∧ w ∈ yesWords := by
   unfold decodeFlag
@@ -442,324 +442,12 @@ theorem tag_decodeVerdict (s : String) :
 
 end Exec
 
-/-! ## The interpreter: a memoizing fold, with the answering service an argument
+/-! ## Interpreter boundary
 
-Nothing in this section mentions `IO`. The interpreter is polymorphic in the
-monad the answering service lives in, so the term that runs against a real
-adapter and the term the theorems below are about are *the same term*. -/
-
-/-- `[[Oracle m]]` = an answering service in `m`: given a code, a question, and
-everything the run has heard so far, it produces an answer.
-
-Three things are said by this type and they are the reason it is this type.
-
-* **It is history-dependent.** The `Table` argument is `B_adequacy.lean`'s
-  `Strategy` — the oracle may consult everything already said, so it may lie,
-  drift, contradict itself, or answer differently on a second run. Adequacy is
-  proved against all of them.
-* **It cannot rewrite history.** It returns `m (El c)` and not `m (El c × Table)`,
-  so an oracle can invent an answer but cannot forge or delete a recorded one.
-  That is a structural fact about the type, not a discipline the code follows.
-* **It is where `IO` is quarantined.** `Exec.oracle` is the only `Oracle IO` in
-  the package; every other effectful declaration in this file exists to build it
-  or to run it, and none of them is mentioned by a theorem. -/
-abbrev Oracle (m : Type → Type) : Type := (c : Code) → Q c → Table → m (El c)
-
-/-- `[[OracleM]] = StateT Table IO`: the execution monad — a run is an `IO`
-computation threading the finite world it is constructing.
-
-The state *is* the world being built (`Agentic.Core.Table`, and `worldOf` is its
-totalization), which is why the interpreter needs no separate log: the memo
-table and the transcript are the same object seen twice. -/
-abbrev OracleM : Type → Type := StateT Table IO
-
-/-- `[[Dlg.execM o p t]]` = run the dialogue `p` against the answering service
-`o`, starting from what `t` already records, and return the answer together with
-the table the run leaves behind.
-
-**Look up before asking; record after answering.** Those two lines are the whole
-of kernel §5's argument. `lookup` before the ask is what makes the run
-*functional* — one question, one answer, however faithless the addressee — with
-no hypothesis on the oracle, and `Table.cons` after it is what makes the run
-exhibit a world: `worldOf` sends `cons` to `pin` (`worldOf_cons`) and the
-prepend preserves every older lookup exactly because the key was absent
-(`lookup_cons_of`). The memo table is not a cache bolted onto an interpreter; it
-is the finite world the run constructs, and consulting it is what discharges
-MF's `Functional τ` hypothesis structurally.
-
-A deliberate resample is *not* defeated by this: `Q.draw` is a field of the
-question, so a second draw is a different question and misses the table by
-construction (§3 q1). -/
-def Dlg.execM {m : Type → Type} [Monad m] {A : Type} (o : Oracle m) :
-    Dlg A → Table → m (A × Table)
-  | .done a, t => pure (a, t)
-  | .ask c q f, t =>
-      match lookup t c q with
-      | some a => Dlg.execM o (f a) t
-      | none => do
-          let a ← o c q t
-          Dlg.execM o (f a) (Table.cons c q a t)
-
-namespace Dlg
-
-variable {m : Type → Type} [Monad m] {A : Type}
-
-/-- A finished dialogue asks nothing and records nothing. -/
-@[simp] theorem execM_done (o : Oracle m) (a : A) (t : Table) :
-    execM o (.done a) t = pure (a, t) := rfl
-
-/-- **The cache hit is the identity on the table**: a question the run has
-already put is not put again. -/
-theorem execM_ask_hit (o : Oracle m) (c : Code) (q : Q c) (f : El c → Dlg A)
-    {t : Table} {a : El c} (h : lookup t c q = some a) :
-    execM o (.ask c q f) t = execM o (f a) t := by
-  rw [execM, h]
-
-/-- **The cache miss asks, then records**, and records before continuing, so the
-continuation runs in the extended world. -/
-theorem execM_ask_miss (o : Oracle m) (c : Code) (q : Q c) (f : El c → Dlg A)
-    {t : Table} (h : lookup t c q = none) :
-    execM o (.ask c q f) t =
-      o c q t >>= fun a => execM o (f a) (Table.cons c q a t) := by
-  rw [execM, h]
-
-end Dlg
-
-/-! ### What the run does to the table -/
-
-/-- **The table only grows.** For every oracle, the final table extends the
-initial one in the extension order of `Agentic/Core/World.lean` — the run adds
-answers and never disturbs one, because `Table.cons` is only reached where
-`lookup` said `none`, which is `le_cons_of_lookup_none`'s hypothesis exactly. -/
-theorem execM_le {A : Type} (o : Oracle Id) (p : Dlg A) :
-    ∀ t : Table, t ≤ (Dlg.execM o p t).2 := by
-  induction p with
-  | done a => intro t; exact le_refl t
-  | ask c q f ih =>
-    intro t
-    rw [Dlg.execM]
-    cases ha : lookup t c q with
-    | some a => simpa using ih a t
-    | none =>
-      simp only []
-      exact le_trans (le_cons_of_lookup_none _ ha) (ih _ _)
-
-/-- **Adequacy, against an adversarial agent** (kernel §5(ii); the compiled probe
-is `attack-realizability-lean/B_adequacy.lean`).
-
-For **every** oracle — history-dependent, and free to lie, drift or
-contradict itself — and every world `ω` that agrees with the table the run left
-behind:
-
-* `ω` agrees with the table the run started from, and
-* `ω` assigns the dialogue exactly the value the run returned.
-
-**There is no hypothesis about the oracle**, and that is the theorem's whole
-content: consulting the memo table before asking discharges functionality
-structurally, so no `Functional τ` side condition is needed and no property of
-the agents is assumed. What the run produced is what the plan *means* in some
-world, and the run exhibits that world.
-
-Stated at `m := Id`, because a theorem about what an `IO` action returns would
-require modelling `IO`. The interpreter is one definition instantiated at two
-monads, so this is a theorem about the same term that runs against an adapter;
-the per-run certificate is what carries it to an actual `IO` run. -/
-theorem execM_adequacy {A : Type} (o : Oracle Id) (p : Dlg A) :
-    ∀ t : Table,
-      (∀ ω, Extends ω (Dlg.execM o p t).2 → Extends ω t) ∧
-      (∀ ω, Extends ω (Dlg.execM o p t).2 → Dlg.run ω p = (Dlg.execM o p t).1) := by
-  induction p with
-  | done a => intro t; exact ⟨fun _ h => h, fun _ _ => rfl⟩
-  | ask c q f ih =>
-    intro t
-    rw [Dlg.execM]
-    cases ha : lookup t c q with
-    | some a =>
-      simp only []
-      obtain ⟨h1, h2⟩ := ih a t
-      refine ⟨h1, fun ω hω => ?_⟩
-      have hωa : ω c q = a := h1 ω hω c q a ha
-      rw [Dlg.run_ask, hωa]
-      exact h2 ω hω
-    | none =>
-      simp only []
-      obtain ⟨h1, h2⟩ := ih (o c q t) (Table.cons c q (o c q t) t)
-      refine ⟨fun ω hω c₀ q₀ a₀ hf => h1 ω hω c₀ q₀ a₀ (lookup_cons_of ha hf), fun ω hω => ?_⟩
-      have hωa : ω c q = o c q t :=
-        h1 ω hω c q _ (lookup_cons_self t c q (o c q t))
-      rw [Dlg.run_ask, hωa]
-      exact h2 ω hω
-
-/-! ### The pure boundary: the interpreter at a function-world
-
-`pureOracle ω` is the answering service that simply *is* the world `ω`. Running
-the interpreter against it is running the meaning, and the three conclusions of
-`execM_pure` say so: the value is `Dlg.run ω`, the table is a finite
-approximation of `ω`, and the cells the run touched are exactly the transcript's.
-
-This is the factorization the file exists to establish. The `IO` layer is the
-oracle argument and nothing else, so replacing that argument by a function
-recovers the denotational semantics **on the nose**, with no interpreter of a
-second kind and no simulation relation. -/
-
-/-- `[[pureOracle ω]]` = the answering service that answers as the world `ω`
-does, ignoring the history because a world is a function of the question
-(§3 q1). -/
-def pureOracle (ω : Ω) : Oracle Id := fun c q _ => pure (ω c q)
-
-/-- Every event of a transcript records the answer the world gives; the
-transcript is a *reading* of `ω` and not an independent log. -/
-theorem Dlg.mem_trace_answer {A : Type} (ω : Ω) (p : Dlg A) :
-    ∀ e ∈ Dlg.trace ω p, ω e.c e.q = e.a := by
-  induction p with
-  | done a => intro e he; simp at he
-  | ask c q f ih =>
-    intro e he
-    rw [Dlg.trace_ask, List.mem_cons] at he
-    rcases he with rfl | he
-    · rfl
-    · exact ih _ e he
-
-/-- **The factorization theorem.** At the oracle `pureOracle ω`:
-
-1. the run returns `Dlg.run ω p` — the *meaning*, recovered by the interpreter
-   with no adequacy gap;
-2. `ω` extends the table the run leaves behind, so the run's record is a finite
-   approximation of the world it ran in;
-3. every cell the run asked about is recorded in that table with the answer it
-   got — the table *covers the transcript*.
-
-Together with `execM_le` these say that the interpreter is `Dlg.run` paired with
-a memo table that agrees with the world exactly on what was consulted, which is
-the sense in which the `IO` layer is only the oracle: swap the oracle for a
-function and the semantics is back, on the nose. -/
-theorem execM_pure {A : Type} (ω : Ω) (p : Dlg A) :
-    ∀ t : Table, Extends ω t →
-      (Dlg.execM (pureOracle ω) p t).1 = Dlg.run ω p ∧
-      Extends ω (Dlg.execM (pureOracle ω) p t).2 ∧
-      ∀ e ∈ Dlg.trace ω p, lookup (Dlg.execM (pureOracle ω) p t).2 e.c e.q = some e.a := by
-  induction p with
-  | done a => intro t ht; exact ⟨rfl, ht, by simp⟩
-  | ask c q f ih =>
-    intro t ht
-    rw [Dlg.execM]
-    cases ha : lookup t c q with
-    | some a =>
-      simp only []
-      have hωa : ω c q = a := ht c q a ha
-      obtain ⟨h1, h2, h3⟩ := ih a t ht
-      refine ⟨by rw [Dlg.run_ask, hωa]; exact h1, h2, ?_⟩
-      intro e he
-      rw [Dlg.trace_ask, List.mem_cons] at he
-      rcases he with rfl | he
-      · have hle : t ≤ (Dlg.execM (pureOracle ω) (f a) t).2 := execM_le _ _ t
-        exact hle c q a ha |>.trans (by rw [hωa])
-      · rw [hωa] at he; exact h3 e he
-    | none =>
-      simp only []
-      have hcons : Extends ω (Table.cons c q (ω c q) t) := by
-        intro c₀ q₀ a₀ h
-        by_cases hc : c = c₀
-        · subst hc
-          by_cases hq : q₀ = q
-          · subst hq; rw [lookup_cons_self] at h; exact (Option.some.inj h) ▸ rfl
-          · rw [lookup_cons_of_ne_q t c _ hq] at h; exact ht c q₀ a₀ h
-        · rw [lookup_cons_of_ne_code t q q₀ _ hc] at h; exact ht c₀ q₀ a₀ h
-      obtain ⟨h1, h2, h3⟩ := ih (ω c q) (Table.cons c q (ω c q) t) hcons
-      refine ⟨by rw [Dlg.run_ask]; exact h1, h2, ?_⟩
-      intro e he
-      rw [Dlg.trace_ask, List.mem_cons] at he
-      rcases he with rfl | he
-      · have hle : Table.cons c q (ω c q) t
-            ≤ (Dlg.execM (pureOracle ω) (f (ω c q)) (Table.cons c q (ω c q) t)).2 :=
-          execM_le _ _ _
-        exact hle c q (ω c q) (lookup_cons_self t c q (ω c q))
-      · exact h3 e he
-
-/-- **…and hence the run's own world agrees with `ω` on everything the run
-consulted.** `worldOf` of the final table is a total world, computed from the
-log alone, that is indistinguishable from `ω` along the transcript — which is
-what makes a per-run certificate possible at all.
-
-Note what is *not* claimed: off the transcript the two worlds differ freely,
-because `worldOf` defaults there, and `Inhabited Verdict` is `approve` — a cell
-nobody asked about reads as approval. Every theorem here is therefore stated
-*on* the transcript and never off it, and a consumer that wants a replay pinned
-to the log must check that the log *covers* the transcript (`Plan.Covered`, in
-`Agentic/Core/Report.lean`). Nothing puts a defaulted cell *into* a table: `Exec.oracle`
-fails the run rather than recording an answer it could not read, so the only
-defaults in sight are `worldOf`'s own, on cells no run ever touched. -/
-theorem worldOf_execM_pure {A : Type} (ω : Ω) (p : Dlg A) (t : Table) (ht : Extends ω t) :
-    ∀ e ∈ Dlg.trace ω p,
-      worldOf (Dlg.execM (pureOracle ω) p t).2 e.c e.q = ω e.c e.q := by
-  intro e he
-  have h := (execM_pure ω p t ht).2.2 e he
-  rw [worldOf, h, Option.getD_some, Dlg.mem_trace_answer ω p e he]
-
-/-! ### The interpreter at a plan: `denote`, then `execM`
-
-§5(i) of the kernel says commutation with the meaning is `rfl` *because the
-interpreter is the fold*. It is `rfl` here because that is literally how the
-following definition is written: there is no second traversal of the syntax. -/
-
-/-- `[[Plan.execWith o p γ t]]` = interpret the plan by folding it into its
-meaning and running the meaning. -/
-def Plan.execWith {m : Type → Type} [Monad m] {Γ : Ctx} {A : Type}
-    (o : Oracle m) (p : Plan Γ A) (γ : Env Γ) (t : Table) : m (A × Table) :=
-  Dlg.execM o (denote p γ) t
-
-/-- **§5(i), and it costs nothing.** The interpreter *is* `denote` followed by
-the fold at the execution monad; the commutation is `rfl` because writing it any
-other way is what would have made the theorem hard. -/
-theorem Plan.execWith_eq_execM_denote {m : Type → Type} [Monad m] {Γ : Ctx} {A : Type}
-    (o : Oracle m) (p : Plan Γ A) (γ : Env Γ) (t : Table) :
-    Plan.execWith o p γ t = Dlg.execM o (denote p γ) t := rfl
-
-/-- `[[Plan.execPure ω p γ]]` = **the interpreter with the `IO` taken out**: the
-same fold, the same memo table, the same order of operations, with the answering
-service replaced by the world `ω` itself.
-
-This is the whole factorization written as a definition. `exec` and `execPure`
-differ in one argument — the `Oracle` — and in nothing else, which is the
-precise sense in which the `IO` layer is *only* the oracle function. The two
-theorems below say what that buys: the value is the meaning, and the table is a
-finite world agreeing with `ω` exactly where the run looked. -/
-def Plan.execPure {Γ : Ctx} {A : Type} (ω : Ω) (p : Plan Γ A) (γ : Env Γ) :
-    Table → A × Table :=
-  Plan.execWith (pureOracle ω) p γ
-
-/-- **The factorization, at a plan.** A closed plan interpreted against the
-world `ω` returns exactly `Plan.run ω p Env.nil` — the value the plan *means* —
-with no hypothesis, because the empty table is extended by every world.
-
-`Plan.run ω p Env.nil` is by definition `Dlg.run ω (denote p Env.nil)`, so this
-equation is literally *"exec with a pure oracle is `run ω ∘ denote`"*. -/
-theorem Plan.execPure_fst {A : Type} (ω : Ω) (p : Plan [] A) :
-    (Plan.execPure ω p Env.nil Table.nil).1 = Plan.run ω p Env.nil :=
-  (execM_pure ω (denote p Env.nil) Table.nil (extends_nil ω)).1
-
-/-- …and the table it leaves behind agrees with `ω` on exactly the plan's
-transcript: `worldOf` of the run's own record is indistinguishable from the
-world the run ran in, on every cell the run asked about. -/
-theorem Plan.worldOf_execPure {A : Type} (ω : Ω) (p : Plan [] A) :
-    ∀ e ∈ Plan.trace ω p Env.nil,
-      worldOf (Plan.execPure ω p Env.nil Table.nil).2 e.c e.q = ω e.c e.q :=
-  worldOf_execM_pure ω (denote p Env.nil) Table.nil (extends_nil ω)
-
-/-- **Adequacy, at a plan.** For every oracle at `Id`, every world extending the
-run's table assigns the plan the value the run returned. -/
-theorem Plan.execWith_adequacy {A : Type} (o : Oracle Id) (p : Plan [] A) (ω : Ω)
-    (h : Extends ω (Plan.execWith o p Env.nil Table.nil).2) :
-    Plan.run ω p Env.nil = (Plan.execWith o p Env.nil Table.nil).1 :=
-  (execM_adequacy o (denote p Env.nil) Table.nil).2 ω h
-
-/-! ## The `IO` layer: rendering, the transport, and the answering service
-
-From here down there are no theorems, and there should not be: these are
-*definitions* that make bytes happen. The proof boundary is `Oracle IO` — swap
-this section for any other `Oracle` and every theorem above still holds of the
-same interpreter. -/
-
+`SemanticExec` owns the bare-question meaning fold and adequacy proofs.
+`AnnotatedExec` owns sequential interpretation of intent-bearing `Plan`. The
+definitions below are wire rendering and decoding policy only; they prove neither
+physical effects nor semantic intent identity. -/
 namespace Exec
 
 
@@ -781,10 +469,10 @@ def Addressee.render : Addressee → String
 /-- The model axis of a question's scope, if the author set one.
 `Agentic.Scope.axis₁` at `QScope`; `LastOpt` is `Option`, and the innermost
 setting has already won by the time the interpreter sees the question. -/
-def modelAxis {c : Code} (q : Q c) : Option String := Agentic.Scope.axis₁ q.scope
+def modelAxis {c : Code} (q : Request c) : Option String := Agentic.Scope.axis₁ q.scope
 
 /-- The mode axis of a question's scope, if the author set one. -/
-def modeAxis {c : Code} (q : Q c) : Option String :=
+def modeAxis {c : Code} (q : Request c) : Option String :=
   (q.scope : Agentic.LastOpt String × Agentic.LastOpt String).2
 
 /-- What the addressee must say for `Decode` to read it. Sent with every
@@ -843,7 +531,7 @@ semantics.
 `draw` is in the header whenever it is nonzero, because a resample is a
 *different question* (§3 q1) and the addressee is entitled to know that it is
 being asked again on purpose rather than by mistake. -/
-def renderQ (c : Code) (q : Q c) (sent : Selected) : String :=
+def renderQ (c : Code) (q : Request c) (sent : Selected) : String :=
   let model := match modelAxis q with
     | some m => if sent.model then "" else s!"model: {m}\n"
     | none => ""
@@ -851,8 +539,8 @@ def renderQ (c : Code) (q : Q c) (sent : Selected) : String :=
     | some m => if sent.mode then "" else s!"mode: {m}\n"
     | none => ""
   let draw := if q.draw = 0 then "" else s!"draw: {q.draw} (an independent re-draw)\n"
-  s!"[question for {Addressee.render q.addressee}\n{model}{mode}{draw}\
-     answer ({Code.name c}): {answerSpec c}]\n\n{q.prompt}"
+  s!"[question for {Addressee.render q.addressee}\nintent: {q.intent.name}\n\
+     {model}{mode}{draw}answer ({Code.name c}): {answerSpec c}]\n\n{q.prompt}"
 
 /-- What to append when a reply could not be read, so the second attempt is not
 a verbatim repeat of the first. -/
@@ -894,7 +582,7 @@ Deliberately *not* a class and not a structure: it is a function, so a transport
 is supplied by writing one, and nothing about a transport can be read back by the
 discipline. A runner writes one; nothing here can read anything back out of
 it. -/
-abbrev Say : Type := (c : Code) → Q c → String → IO String
+abbrev Say : Type := (c : Code) → Request c → String → IO String
 
 /-- `[[attemptWith st put c q n extra]]` = ask, decode, and on a failure to
 decode ask again — structurally, `n + 1` attempts in all.
@@ -903,7 +591,7 @@ decode ask again — structurally, `n + 1` attempts in all.
 unreadable reply, verbatim**: it is returned rather than discarded because it is
 the only evidence the caller has of what was actually said, and the caller's job
 is to report it, never to replace it with an answer of its own. -/
-def attemptWith (st : Settings) (put : Say) (c : Code) (q : Q c) :
+def attemptWith (st : Settings) (put : Say) (c : Code) (q : Request c) :
     Nat → String → IO (Except String (El c))
   | 0, extra => do
       let reply ← put c q extra
@@ -957,7 +645,7 @@ the error at the boundary it chooses.
 It takes a `Say` rather than a connection so that **every** transport abandons a
 run in the same words for the same reason: there is one function here and not
 one per transport. -/
-def askDecoding (st : Settings) (put : Say) (c : Code) (q : Q c) : IO (El c) := do
+def askDecoding (st : Settings) (put : Say) (c : Code) (q : Request c) : IO (El c) := do
   match ← attemptWith st put c q st.retries "" with
   | .ok a => return a
   | .error reply =>
@@ -969,13 +657,10 @@ def askDecoding (st : Settings) (put : Say) (c : Code) (q : Q c) : IO (El c) := 
 
 /-! ## Where the entry points went
 
-`Agentic.Core.exec`, `execIO` and `Exec.oracle` stood here: the fold at `IO`
-with a live ACP connection as its answering service. They are gone with the
-transport (`Agentic/Core/Acp.lean`, `Agentic/Core/Deck.lean`), and nothing is
-lost from the mathematics by their going — every theorem in this file is stated
-at an arbitrary `Oracle m`, and `Plan.execWith` is the fold itself. A runner
-supplies an `Oracle` and calls `Plan.execWith`; that is all an entry point ever
-was.
+The live Lean entry points departed with ACP/deck transports. `SemanticExec` now
+owns bare-Q `Oracle`/`Plan.execWith` and adequacy; `AnnotatedExec` owns the
+sequential intent-bearing reference. Production Haskell realizes the annotated
+Plan under empirical gates. Nothing here upgrades pipe behavior to a theorem.
 -/
 
 end Exec

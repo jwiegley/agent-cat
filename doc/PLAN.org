@@ -356,6 +356,24 @@ abstraction pass, high; converges with deep-review's proof-scope observation. Th
 ]
 #+end_src
 
+* DONE [#B] Capture request intent in the mathematical core
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-2ls
+:LABELS:   []
+:ISSUE_TYPE: feature
+:CREATED:  [2026-08-25 Tue 22:49]
+:MODIFIED: [2026-08-26 Wed 03:08]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-26 Wed 03:08]
+:CLOSE_REASON: Implemented request-indexed consult/observe/effect semantics across Lean and Haskell, preserved five-form Plan and v2 corpus, added intent-aware v3 plus effect/memo/source regressions, updated current and historical documentation, and passed full proof, corpus, Haskell, policy, adapter, and bisimulation gates.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Refine K1-K6 so each semantic request carries explicit consult/observe/effect intent. Plumb Request through Lean Question/World/Dlg/Plan/Denote/analyses/proofs/DSL/conformance and the Haskell production mirror/runtime. Preserve the existing five-form Plan and Haskell runtime; do not adopt the abandoned Lean-only scheduler/runtime strategy. Update design documents and add regression/conformance coverage proving intent is preserved and operational policy remains outside semantic identity.
+
 * DONE [#B] Certification residue: three violations, then the thesis is simply true
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -1451,6 +1469,40 @@ deep-review + alexey + validated. (1) End-of-input errors report 0:0 (Parse.lean
 :END:
 
 Discovered during acat-9kn: CSemiring's mul_comm blocks both the monoid semiring (MSemiring is a genuine semiring with non-commutative conv, currently exhibited by equations instead of instantiated) and the matrix star (acat-ruz needs star over a non-commutative carrier). One base class (semiring, no mul_comm) with CSemiring extending it lets total be a homomorphism of structures and lets Mat/MSemiring join the hierarchy. Touches acat-ruz, acat-ubt, acat-47y.
+
+* DONE [#B] Place request intent in the executable Plan representation
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-cvx
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-08-26 Wed 11:33]
+:MODIFIED: [2026-08-26 Wed 15:04]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-26 Wed 15:04]
+:CLOSE_REASON: Restored bare-Q K1; retained intent on five-form Plan; proved erasing denotation, actual annotated-executor correctness and trace square; split semantic/operational bills; keyed runtime memo by authored Q with dispatched attribution; preserved v2 and added v3 semanticTrace; all proof, corpus, Haskell, adapter, conformance and denotational-review gates passed.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Correct acat-2ls after denotational review: restore bare-Q principal meaning, retain indexed intent on five-form Plan, derive erasing denotation and annotated-trace commuting laws, reclassify runtime memo/permission/scheduling and v3 as representation fidelity, preserve v2 corpus and Haskell production architecture.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-cvx",
+    "depends_on_id": "acat-2ls",
+    "type": "discovered-from",
+    "created_at": "2026-08-26T18:33:03.571856Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
 
 * DONE [#D] shareT nesting: prove the innermost/outermost/compose rule as a theorem
 :PROPERTIES:

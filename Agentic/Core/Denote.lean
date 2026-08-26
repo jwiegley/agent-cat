@@ -51,7 +51,7 @@ and this algebra is their solved form.
 ```
 denote (ret e)        γ = .done (e γ)
 denote (askC c q k)   γ = .ask c q                    (fun x => denote k (γ ▷ x))
-denote (ask c s e k)  γ = .ask c (s.withPrompt (e γ)) (fun x => denote k (γ ▷ x))
+denote (ask c s e k)  γ = .ask c (s.question.withPrompt (e γ)) (fun x => denote k (γ ▷ x))
 denote (case e arms)  γ = denote (arms (e γ)) γ
 denote (dyn  e f)     γ = denote (f (e γ))    γ
 ```
@@ -64,8 +64,9 @@ exactly `attack-adequacy` F1's requirement, and it is available here precisely
 because the meaning does not record it. -/
 def denoteAlg : PlanAlg (fun Γ A => Env Γ → Dlg A) where
   ret e := fun γ => Dlg.done (e γ)
-  askC c q k := fun γ => Dlg.ask c q (fun x => k (Env.cons x γ))
-  ask c s e k := fun γ => Dlg.ask c (s.withPrompt (e γ)) (fun x => k (Env.cons x γ))
+  askC c r k := fun γ => Dlg.ask c r.question (fun x => k (Env.cons x γ))
+  ask c s e k := fun γ =>
+    Dlg.ask c (s.question.withPrompt (e γ)) (fun x => k (Env.cons x γ))
   case := fun _ e arms γ => arms (e γ) γ
   dyn := fun _ e f γ => f (e γ) γ
 
@@ -82,13 +83,13 @@ variable {Γ Δ Θ : Ctx} {A B C : Type}
 @[simp] theorem denote_ret (e : Expr Γ A) (γ : Env Γ) :
     denote (Plan.ret e) γ = .done (e γ) := rfl
 
-@[simp] theorem denote_askC (c : Code) (q : Q c) (k : Plan (c :: Γ) A) (γ : Env Γ) :
-    denote (Plan.askC c q k) γ = .ask c q (fun x => denote k (.cons x γ)) := rfl
+@[simp] theorem denote_askC (c : Code) (r : Request c) (k : Plan (c :: Γ) A) (γ : Env Γ) :
+    denote (Plan.askC c r k) γ = .ask c r.question (fun x => denote k (.cons x γ)) := rfl
 
-@[simp] theorem denote_ask (c : Code) (s : Q.Shape c) (e : Expr Γ String) (k : Plan (c :: Γ) A)
-    (γ : Env Γ) :
-    denote (Plan.ask c s e k) γ
-      = .ask c (s.withPrompt (e γ)) (fun x => denote k (.cons x γ)) := rfl
+@[simp] theorem denote_ask (c : Code) (s : Request.Shape c) (e : Expr Γ String)
+    (k : Plan (c :: Γ) A) (γ : Env Γ) :
+    denote (Plan.ask c s e k) γ =
+      .ask c (s.question.withPrompt (e γ)) (fun x => denote k (.cons x γ)) := rfl
 
 @[simp] theorem denote_case (t : Tag) (e : Expr Γ t.El) (arms : t.El → Plan Γ A) (γ : Env Γ) :
     denote (Plan.case t e arms) γ = denote (arms (e γ)) γ := rfl
@@ -113,8 +114,28 @@ its dialogue: §5(i)'s commutation between the interpreter and the meaning is
 `rfl` and there is nothing else to prove. -/
 def run (ω : Ω) (p : Plan Γ A) (γ : Env Γ) : A := Dlg.run ω (denote p γ)
 
-/-- `[[trace ω p γ]]` = what `p` consulted, in order, in the world `ω`. -/
+/-- Semantic trace of authored bare questions. Execution intent and dispatched
+targets belong to `execTrace`. -/
 def trace (ω : Ω) (p : Plan Γ A) (γ : Env Γ) : Trace := Dlg.trace ω (denote p γ)
+
+/-- Annotated pure execution as a `PlanAlg` fold. It records each authored
+request and the question selected by the pure interpreter; no memo or failover
+policy is present at this level. -/
+def execTraceAlg (ω : Ω) : PlanAlg (fun Γ _ => Env Γ → ExecTrace) where
+  ret _ := fun _ => []
+  askC c r k := fun γ =>
+    let answer := ω c r.question
+    ⟨c, r, .asked r.question, answer⟩ :: k (.cons answer γ)
+  ask c s e k := fun γ =>
+    let request := s.withPrompt (e γ)
+    let answer := ω c request.question
+    ⟨c, request, .asked request.question, answer⟩ :: k (.cons answer γ)
+  case := fun _ e arms γ => arms (e γ) γ
+  dyn := fun _ e f γ => f (e γ) γ
+
+/-- Pure annotated trace of a Plan representation. -/
+def execTrace (ω : Ω) (p : Plan Γ A) (γ : Env Γ) : ExecTrace :=
+  (execTraceAlg ω).fold p γ
 
 /-- **The interpreter is the fold.** Running a plan is running its denotation;
 there is no second semantics to reconcile. -/
@@ -132,21 +153,71 @@ theorem trace_eq_trace_denote (ω : Ω) (p : Plan Γ A) (γ : Env Γ) :
   simp [trace]
 
 /-- Asking records one event and continues with the answer the world gives. -/
-@[simp] theorem run_askC (ω : Ω) (c : Code) (q : Q c) (k : Plan (c :: Γ) A) (γ : Env Γ) :
-    run ω (Plan.askC c q k) γ = run ω k (.cons (ω c q) γ) := by simp [run]
+@[simp] theorem run_askC (ω : Ω) (c : Code) (r : Request c) (k : Plan (c :: Γ) A) (γ : Env Γ) :
+    run ω (Plan.askC c r k) γ = run ω k (.cons (ω c r.question) γ) := by simp [run]
 
-@[simp] theorem trace_askC (ω : Ω) (c : Code) (q : Q c) (k : Plan (c :: Γ) A) (γ : Env Γ) :
-    trace ω (Plan.askC c q k) γ = ⟨c, q, ω c q⟩ :: trace ω k (.cons (ω c q) γ) := by simp [trace]
+@[simp] theorem trace_askC (ω : Ω) (c : Code) (r : Request c) (k : Plan (c :: Γ) A) (γ : Env Γ) :
+    trace ω (Plan.askC c r k) γ =
+      ⟨c, r.question, ω c r.question⟩ :: trace ω k (.cons (ω c r.question) γ) := by
+  simp [trace]
 
-@[simp] theorem run_ask (ω : Ω) (c : Code) (s : Q.Shape c) (e : Expr Γ String)
+@[simp] theorem run_ask (ω : Ω) (c : Code) (s : Request.Shape c) (e : Expr Γ String)
     (k : Plan (c :: Γ) A) (γ : Env Γ) :
-    run ω (Plan.ask c s e k) γ = run ω k (.cons (ω c (s.withPrompt (e γ))) γ) := by simp [run]
+    run ω (Plan.ask c s e k) γ =
+      let q := s.question.withPrompt (e γ)
+      run ω k (.cons (ω c q) γ) := by
+  simp [run]
 
-@[simp] theorem trace_ask (ω : Ω) (c : Code) (s : Q.Shape c) (e : Expr Γ String)
+@[simp] theorem trace_ask (ω : Ω) (c : Code) (s : Request.Shape c) (e : Expr Γ String)
     (k : Plan (c :: Γ) A) (γ : Env Γ) :
-    trace ω (Plan.ask c s e k) γ
-      = ⟨c, s.withPrompt (e γ), ω c (s.withPrompt (e γ))⟩
-          :: trace ω k (.cons (ω c (s.withPrompt (e γ))) γ) := by simp [trace]
+    trace ω (Plan.ask c s e k) γ =
+      let q := s.question.withPrompt (e γ)
+      ⟨c, q, ω c q⟩ :: trace ω k (.cons (ω c q) γ) := by
+  simp [trace]
+
+@[simp] theorem execTrace_ret (ω : Ω) (e : Expr Γ A) (γ : Env Γ) :
+    execTrace ω (Plan.ret e) γ = [] := rfl
+
+@[simp] theorem execTrace_askC (ω : Ω) (c : Code) (r : Request c)
+    (k : Plan (c :: Γ) A) (γ : Env Γ) :
+    execTrace ω (Plan.askC c r k) γ =
+      let answer := ω c r.question
+      ⟨c, r, .asked r.question, answer⟩ :: execTrace ω k (.cons answer γ) := rfl
+
+@[simp] theorem execTrace_ask (ω : Ω) (c : Code) (s : Request.Shape c)
+    (e : Expr Γ String) (k : Plan (c :: Γ) A) (γ : Env Γ) :
+    execTrace ω (Plan.ask c s e k) γ =
+      let request := s.withPrompt (e γ)
+      let answer := ω c request.question
+      ⟨c, request, .asked request.question, answer⟩ ::
+        execTrace ω k (.cons answer γ) := rfl
+
+@[simp] theorem execTrace_case (ω : Ω) (t : Tag) (e : Expr Γ t.El)
+    (arms : t.El → Plan Γ A) (γ : Env Γ) :
+    execTrace ω (Plan.case t e arms) γ = execTrace ω (arms (e γ)) γ := rfl
+
+@[simp] theorem execTrace_dyn (ω : Ω) (c : Code) (e : Expr Γ (El c))
+    (f : El c → Plan Γ A) (γ : Env Γ) :
+    execTrace ω (Plan.dyn c e f) γ = execTrace ω (f (e γ)) γ := rfl
+
+/-- **K6 trace square.** Forgetting every pure execution annotation gives the
+bare-question semantic trace exactly. -/
+theorem execTrace_forget (ω : Ω) (p : Plan Γ A) (γ : Env Γ) :
+    (execTrace ω p γ).map ExecEvent.forget = trace ω p γ := by
+  induction p with
+  | ret e => rfl
+  | askC c r k ih =>
+    simp only [execTrace_askC, List.map_cons, ExecEvent.forget_mk, trace_askC]
+    exact congrArg _ (ih (.cons (ω c r.question) γ))
+  | ask c s e k ih =>
+    simp only [execTrace_ask, List.map_cons, ExecEvent.forget_mk, trace_ask]
+    exact congrArg _ (ih (.cons (ω c (s.question.withPrompt (e γ))) γ))
+  | case t e arms ih =>
+    rw [execTrace_case, trace, denote_case]
+    exact ih (e γ) γ
+  | dyn c e f ih =>
+    rw [execTrace_dyn, trace, denote_dyn]
+    exact ih (e γ) γ
 
 end Plan
 
@@ -156,8 +227,18 @@ end Plan
 same meaning. The redundancy is deliberate — `askC` is what records, *in the
 term*, that a question is closed, which is what gives a `Const S`-valued
 analysis a domain — and this is the coherence it owes. -/
-theorem askC_coherent (c : Code) (q : Q c) (k : Plan (c :: Γ) A) (γ : Env Γ) :
+theorem askC_coherent (c : Code) (q : Request c) (k : Plan (c :: Γ) A) (γ : Env Γ) :
     denote (Plan.askC c q k) γ = denote (Plan.ask c q.shape (fun _ => q.prompt) k) γ := by simp
+
+/-- Changing only a closed request's execution annotation does not move meaning. -/
+theorem denote_askC_intent_irrel (c : Code) (q : Q c) (i i' : Intent c)
+    (k : Plan (c :: Γ) A) (γ : Env Γ) :
+    denote (Plan.askC c ⟨q, i⟩ k) γ = denote (Plan.askC c ⟨q, i'⟩ k) γ := rfl
+
+/-- Changing only an open request shape's execution annotation does not move meaning. -/
+theorem denote_ask_intent_irrel (c : Code) (s : Q.Shape c) (i i' : Intent c)
+    (e : Expr Γ String) (k : Plan (c :: Γ) A) (γ : Env Γ) :
+    denote (Plan.ask c ⟨s, i⟩ e k) γ = denote (Plan.ask c ⟨s, i'⟩ e k) γ := rfl
 
 /-! ## Renaming and substitution -/
 
@@ -191,18 +272,20 @@ the meaning; with `Plan.under_idSig` and `Plan.under_under` it says relabellings
   induction p with
   | ret e => simp [Plan.under_ret]
   | askC c q k ih =>
-    simp only [Plan.under_askC, denote_askC, Dlg.under_ask, Dlg.ask.injEq, heq_eq_eq, true_and]
-    exact funext fun x => ih _
-  | ask c s e k ih =>
-    simp only [Plan.under_ask, denote_ask, Dlg.under_ask, Sig.onQ_withPrompt, Dlg.ask.injEq,
+    simp only [Plan.under_askC, denote_askC, Dlg.under_ask, Dlg.ask.injEq,
       heq_eq_eq, true_and]
-    exact funext fun x => ih _
+    exact ⟨rfl, funext fun x => ih _⟩
+  | ask c s e k ih =>
+    simp only [Plan.under_ask, denote_ask, Dlg.under_ask, Dlg.ask.injEq,
+      heq_eq_eq, true_and]
+    exact ⟨rfl, funext fun x => ih _⟩
   | case t e arms ih => simp only [Plan.under_case, denote_case]; exact ih _ _
   | dyn b e f ih => simp only [Plan.under_dyn, denote_dyn]; exact ih _ _
 
 /-- Relabelling a plan is precomposition on worlds, at the plan level. -/
 theorem run_under (ω : Ω) (σ : Sig) (p : Plan Γ A) (γ : Env Γ) :
-    Plan.run ω (Plan.under σ p) γ = Plan.run (fun c q => ω c (σ.onQ c q)) p γ := by
+    Plan.run ω (Plan.under σ p) γ =
+      Plan.run (fun c q => ω c (σ.onQ c q)) p γ := by
   simp [Plan.run, Dlg.run_under]
 
 /-! ## Grafting: the master lemma -/
@@ -464,12 +547,12 @@ theorem denote_bindP_assoc {c c' : Code} {D : Type} (p : Plan Γ (El c))
 
 /-! ## Authoring forms -/
 
-@[simp] theorem denote_askC1 (c : Code) (q : Q c) (γ : Env Γ) :
-    denote (Plan.askC1 c q) γ = Dlg.ask1 c q := by
+@[simp] theorem denote_askC1 (c : Code) (r : Request c) (γ : Env Γ) :
+    denote (Plan.askC1 c r) γ = Dlg.ask1 c r.question := by
   simp [Plan.askC1, Dlg.ask1]
 
-@[simp] theorem denote_ask1 (c : Code) (s : Q.Shape c) (e : Expr Γ String) (γ : Env Γ) :
-    denote (Plan.ask1 c s e) γ = Dlg.ask1 c (s.withPrompt (e γ)) := by
+@[simp] theorem denote_ask1 (c : Code) (s : Request.Shape c) (e : Expr Γ String) (γ : Env Γ) :
+    denote (Plan.ask1 c s e) γ = Dlg.ask1 c (s.question.withPrompt (e γ)) := by
   simp [Plan.ask1, Dlg.ask1]
 
 @[simp] theorem denote_caseB (e : Expr Γ Bool) (t f : Plan Γ A) (γ : Env Γ) :
@@ -482,23 +565,23 @@ theorem denote_bindP_assoc {c c' : Code} {D : Type} (p : Plan Γ (El c))
 
 /-! ## Sharing is a variable used twice, at the syntax -/
 
-/-- One consultation whose answer is read twice records **one** event. The
-answer flows into a *question* — which is what the dossier's applicative kernels
-cannot do below the monadic rung and what `ask` exists for. -/
-theorem trace_share (ω : Ω) (c : Code) (q : Q c) (s : Q.Shape c) (f : El c → El c → String) :
+/-- One annotated request whose answer is reused records one semantic question;
+the answer may compute only words of the later question. -/
+theorem trace_share (ω : Ω) (c : Code) (q : Request c) (s : Request.Shape c)
+    (f : El c → El c → String) :
     Plan.trace ω
         (Plan.askC c q (Plan.ask c s (fun γ => f γ.head γ.head) (Plan.ret (Expr.var .here))))
         Env.nil
-      = [⟨c, q, ω c q⟩,
-         ⟨c, s.withPrompt (f (ω c q) (ω c q)), ω c (s.withPrompt (f (ω c q) (ω c q)))⟩] := by
+      = [⟨c, q.question, ω c q.question⟩,
+         ⟨c, s.question.withPrompt (f (ω c q.question) (ω c q.question)),
+           ω c (s.question.withPrompt (f (ω c q.question) (ω c q.question)))⟩] := by
   simp [Plan.trace]
 
-/-- Two consultations record **two** events, even though the world answers them
-identically. No label is needed to tell sharing from duplication: the transcript
-is in the meaning, so cost is an invariant of semantic equality. -/
-theorem trace_dup (ω : Ω) (c : Code) (q : Q c) :
+/-- Two authored occurrences record two semantic events even when their annotation
+and world answer agree. -/
+theorem trace_dup (ω : Ω) (c : Code) (q : Request c) :
     Plan.trace ω (Plan.askC c q (Plan.askC c q (Plan.ret (Expr.var .here)))) Env.nil
-      = [⟨c, q, ω c q⟩, ⟨c, q, ω c q⟩] := by
+      = [⟨c, q.question, ω c q.question⟩, ⟨c, q.question, ω c q.question⟩] := by
   simp [Plan.trace]
 
 /-! ## Panels
@@ -688,7 +771,7 @@ theorem flatten_perm {α : Type} {L L' : List (List α)} (h : L.Perm L') :
 never invariant — but it does not change *which* events occurred. Up to
 permutation the transcript is invariant, and that is exactly the amount of
 freedom a scheduler has: it may choose an order, and it may not add, drop or
-change a consultation.
+change a request occurrence.
 
 `Agentic/Core/Cost.lean`'s `billFresh_panel_perm` is the cost reading. -/
 theorem trace_panel_perm [Monoid (El c)] (ω : Ω) {ps ps' : List (Plan Γ (El c))}
@@ -866,11 +949,12 @@ namespace Acceptance
 
 /-- `[[reviewShape]]` = whom the review goes to and under what: the part of the
 reviewer's question that is written in the term. -/
-def reviewShape : Q.Shape .verdict := { addressee := .model "reviewer", scope := 1, draw := 0 }
+def reviewShape : Request.Shape .verdict :=
+  .consult { addressee := .model "reviewer", scope := 1, draw := 0 }
 
 /-- The reviewer's question, whose words are built from the artefact under
 review. -/
-def reviewQ (s : String) : Q .verdict := reviewShape.withPrompt s
+def reviewQ (s : String) : Request .verdict := reviewShape.withPrompt s
 
 /-- What the reviewer's verdict comes to, in words the author can read. -/
 def tagText : VTag → String
@@ -879,11 +963,12 @@ def tagText : VTag → String
   | .declined => "declined to review"
 
 /-- `[[reviseShape]]` = whom a revision goes to and under what. -/
-def reviseShape : Q.Shape .text := { addressee := .model "author", scope := 1, draw := 0 }
+def reviseShape : Request.Shape .text :=
+  .consult { addressee := .model "author", scope := 1, draw := 0 }
 
 /-- The author's question, whose words are built from the artefact and the
 objections. -/
-def reviseQ (s : String) : Q .text := reviseShape.withPrompt s
+def reviseQ (s : String) : Request .text := reviseShape.withPrompt s
 
 /-- Check the artefact: one consultation, whose prompt is a function of the
 artefact — the `ask` node, which is the whole reason the domain sits below the
@@ -956,27 +1041,31 @@ no `case`, no `dyn`, and the transcript proves in every world that the guide was
 consulted exactly once. -/
 
 /-- Read the style guide. -/
-def guideQ : Q .text :=
-  { addressee := .tool "cat", scope := 1, prompt := "STYLE.md", draw := 0 }
+def guideQ : Request .text :=
+  .consult { addressee := .tool "cat", scope := 1, prompt := "STYLE.md", draw := 0 }
 
 /-- `[[correctShape]]` = whom the correctness review goes to. -/
-def correctShape : Q.Shape .verdict := { addressee := .model "reviewer-a", scope := 1, draw := 0 }
+def correctShape : Request.Shape .verdict :=
+  .consult { addressee := .model "reviewer-a", scope := 1, draw := 0 }
 
 /-- `[[correctText guide]]` = what is said to the correctness reviewer: the only
 part of the question the guide's text reaches. -/
 def correctText (guide : String) : String := "correctness: " ++ guide
 
 /-- Ask the correctness reviewer, quoting the guide. -/
-def correctQ (guide : String) : Q .verdict := correctShape.withPrompt (correctText guide)
+def correctQ (guide : String) : Request .verdict :=
+  correctShape.withPrompt (correctText guide)
 
 /-- `[[secureShape]]` = whom the security review goes to. -/
-def secureShape : Q.Shape .verdict := { addressee := .model "reviewer-b", scope := 1, draw := 0 }
+def secureShape : Request.Shape .verdict :=
+  .consult { addressee := .model "reviewer-b", scope := 1, draw := 0 }
 
 /-- `[[secureText guide]]` = what is said to the security reviewer. -/
 def secureText (guide : String) : String := "security: " ++ guide
 
 /-- Ask the security reviewer, quoting the same guide. -/
-def secureQ (guide : String) : Q .verdict := secureShape.withPrompt (secureText guide)
+def secureQ (guide : String) : Request .verdict :=
+  secureShape.withPrompt (secureText guide)
 
 /-- The plan: read the guide once, then a two-member panel whose questions both
 mention it. Both reviewers' prompts are functions of an earlier answer, and the
@@ -991,16 +1080,19 @@ world.** Three consultations, not four: the guide is read once and its text
 appears inside both reviewers' questions. -/
 theorem trace_sharedGuide (ω : Ω) :
     Plan.trace ω sharedGuide Env.nil
-      = [⟨.text, guideQ, ω .text guideQ⟩,
-         ⟨.verdict, correctQ (ω .text guideQ), ω .verdict (correctQ (ω .text guideQ))⟩,
-         ⟨.verdict, secureQ (ω .text guideQ), ω .verdict (secureQ (ω .text guideQ))⟩] := by
+      = [⟨.text, guideQ.question, ω .text guideQ.question⟩,
+         ⟨.verdict, (correctQ (ω .text guideQ.question)).question,
+           ω .verdict (correctQ (ω .text guideQ.question)).question⟩,
+         ⟨.verdict, (secureQ (ω .text guideQ.question)).question,
+           ω .verdict (secureQ (ω .text guideQ.question)).question⟩] := by
   simp [Plan.trace, sharedGuide, Dlg.ask1, correctQ, secureQ]
 
 /-- And the answer is the product of the two verdicts in the verdict monoid —
 `foldMap`, which is all a panel's reducer ever is. -/
 theorem run_sharedGuide (ω : Ω) :
     Plan.run ω sharedGuide Env.nil
-      = ω .verdict (correctQ (ω .text guideQ)) * ω .verdict (secureQ (ω .text guideQ)) := by
+      = ω .verdict (correctQ (ω .text guideQ.question)).question
+        * ω .verdict (secureQ (ω .text guideQ.question)).question := by
   simp [Plan.run, sharedGuide, Dlg.ask1, correctQ, secureQ]
 
 end Acceptance

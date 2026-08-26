@@ -137,10 +137,11 @@ variable {Γ Δ : Ctx} {A B C : Type}
 
 @[simp] theorem level_ret (e : Expr Γ A) : level (Plan.ret e) = .batch := rfl
 
-@[simp] theorem level_askC (c : Code) (q : Q c) (k : Plan (c :: Γ) A) :
+@[simp] theorem level_askC (c : Code) (q : Request c) (k : Plan (c :: Γ) A) :
     level (Plan.askC c q k) = level k := rfl
 
-@[simp] theorem level_ask (c : Code) (s : Q.Shape c) (e : Expr Γ String) (k : Plan (c :: Γ) A) :
+@[simp] theorem level_ask (c : Code) (s : Request.Shape c) (e : Expr Γ String)
+    (k : Plan (c :: Γ) A) :
     level (Plan.ask c s e k) = max .pipeline (level k) := rfl
 
 @[simp] theorem level_case (t : Tag) (e : Expr Γ t.El) (arms : t.El → Plan Γ A) :
@@ -190,11 +191,11 @@ whole of how a `level p ≤ ℓ` hypothesis is consumed, and it is why the analy
 in `Agentic/Core/Cost.lean` need no auxiliary predicate on terms. -/
 
 /-- Under an `askC` the level is unchanged. -/
-theorem level_le_of_askC {ℓ : Level} {c : Code} {q : Q c} {k : Plan (c :: Γ) A}
+theorem level_le_of_askC {ℓ : Level} {c : Code} {q : Request c} {k : Plan (c :: Γ) A}
     (h : level (Plan.askC c q k) ≤ ℓ) : level k ≤ ℓ := h
 
 /-- An `ask` forces `pipeline` and bounds its continuation. -/
-theorem le_of_ask {ℓ : Level} {c : Code} {s : Q.Shape c} {e : Expr Γ String}
+theorem le_of_ask {ℓ : Level} {c : Code} {s : Request.Shape c} {e : Expr Γ String}
     {k : Plan (c :: Γ) A} (h : level (Plan.ask c s e k) ≤ ℓ) :
     Level.pipeline ≤ ℓ ∧ level k ≤ ℓ :=
   max_le_iff.mp h
@@ -356,11 +357,12 @@ non-degenerate plan has. -/
 /-! ## The four rungs are inhabited, and the authoring forms sit where they say -/
 
 /-- A closed question is `batch`. -/
-@[simp] theorem level_askC1 (c : Code) (q : Q c) : level (Plan.askC1 (Γ := Γ) c q) = .batch := rfl
+@[simp] theorem level_askC1 (c : Code) (q : Request c) :
+    level (Plan.askC1 (Γ := Γ) c q) = .batch := rfl
 
 /-- A question built from what is known is `pipeline` — the rung the kernel
 exists to carry, and the reason a content-dependent prompt is not monadic. -/
-@[simp] theorem level_ask1 (c : Code) (s : Q.Shape c) (e : Expr Γ String) :
+@[simp] theorem level_ask1 (c : Code) (s : Request.Shape c) (e : Expr Γ String) :
     level (Plan.ask1 c s e) = .pipeline := rfl
 
 /-- A two-armed branch is at least `branch`. -/

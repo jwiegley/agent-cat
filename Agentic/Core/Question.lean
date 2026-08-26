@@ -14,17 +14,14 @@ Three decisions are made here and each is a *meaning*, not a convenience.
 * **The answer universe is small and closed.** `Code` tags an answer type and
   `El` gives it. `El c` is the set of things an addressee can *say*, so it is
   inhabited (an addressee always says something, even if what it says is "I
-  decline") and it lives in `Type 0`, which is what lets the world
-  `Ω := (c : Code) → Q c → El c` be an ordinary function type rather than a
-  rank-2 one. Extending the universe is adding a constructor and a clause; the
+  decline") and it lives in `Type 0`, which lets the downstream world
+  `Ω := (c : Code) → Q c → El c` remain an ordinary function type.
   two instances below are then discharged by `inferInstanceAs`.
 
-* **The question carries everything that determines the reply** — addressee,
-  scope, prompt, draw index. It has to: the world is a *function* of it. In
-  particular scope is a field and not a wrapper around meanings (§3 q3), so the
-  bulk operator `under σ` (see `Agentic/Core/Dlg.lean`) is a fold and not a
-  constructor, and `Agentic.LastOpt`'s innermost-wins is the scope algebra
-  verbatim.
+* **The question carries principal answer identity** — addressee, scope, prompt
+  and draw. `Agentic/Core/Request.lean` adds an executable Plan annotation that
+  denotation erases. Scope remains a field, so `under σ` is a semantic fold and
+  `Agentic.LastOpt` supplies innermost-wins verbatim.
 
 * **…and it factors, once and for all, into shape and words.**
   `Q c ≅ Q.Shape c × String` (`Q.withPrompt_shape`, `Q.shape_withPrompt`,
@@ -285,8 +282,8 @@ an addressee can be asked *for*.
 
 Small on purpose. `El c` must live in `Type 0` so that `Ω` is an ordinary
 dependent function type, and it must be inhabited so that total worlds exist —
-those two facts are what make the world a *function of questions* rather than a
-rank-2 oracle threaded through a history. -/
+those facts let `Q`-indexed worlds be ordinary dependent functions rather than
+rank-2 oracles threaded through history. -/
 inductive Code where
   /-- Free text. -/
   | text
@@ -330,16 +327,12 @@ instance instDecidableEqEl : (c : Code) → DecidableEq (El c)
 
 /-! ## Questions -/
 
-/-- `[[Q c]]` = a point of question space: everything that determines the reply
-to a question whose answer is an `El c` — who is asked, under what standing
-conditions, in what words, and which independent draw this is.
+/-- `[[Q c]]` = one question's content: who is asked, under what standing
+conditions, in what words, and which independent draw this is. The downstream
+`Request c` adds whether putting it consults, observes or acts.
 
-It carries all four because the world is a *function* of it (§1). Two
-consequences that other designs need machinery for are here mere consequences:
-asking the same question twice is the same answer (§3 q1), because `Ω` is a
-function; and resampling is a *different question* rather than a different
-operation, because `draw` is a field the author varies — no gensym, no state,
-no freshness from nowhere. -/
+Resampling is a different question because `draw` is author-supplied data; no
+gensym, state or freshness source is needed. -/
 structure Q (c : Code) where
   /-- Who is being asked. -/
   addressee : Addressee

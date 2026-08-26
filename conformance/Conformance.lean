@@ -1,5 +1,6 @@
 import Agentic.Core.Explain
 import Agentic.Core.Report
+import Agentic.Core.ExecCost
 import Agentic.Core.Schema.Conformance
 
 /-!
@@ -67,10 +68,9 @@ deriving instance FromJson, ToJson for RawProgram
 
 /-! ## The world, specified as data
 
-A world is a function of the question (`Ω = (c : Code) → Q c → El c`), so it is
-specified as a small closed DSL and interpreted — never serialized as a
-function. Ten combinators cover the whole existing pin suite (connection.md
-§3.3). -/
+A world is a function of bare questions (`Ω = (c : Code) → Q c → El c`) and is
+represented by this small closed DSL. Version 3 separately serializes annotated
+Plan events and their semantic-trace erasure. -/
 
 /-- A verdict, as a literal. -/
 inductive VLit where
@@ -230,6 +230,13 @@ def planSchemas {Γ : Ctx} {A : Type} (plan : Plan Γ A) : List Schema :=
 def WorldSpec.covers (world : WorldSpec) (schemas : List Schema) : Bool :=
   schemas.all fun schema => (Schema.Conformance.Answer.lookup world.schema schema).isSome
 
+/-- Version 2 is frozen semantic observation; version 3 compares the annotated
+Plan representation and includes its semantic-trace erasure. -/
+inductive ObservationVersion where
+  | v2
+  | v3
+  deriving DecidableEq
+
 def eventJson (e : Event) : Json :=
   Json.mkObj
     [ ("code", codeJson e.c)
@@ -238,6 +245,16 @@ def eventJson (e : Event) : Json :=
     , ("prompt", Json.str e.q.prompt)
     , ("draw", toJson e.q.draw)
     , ("answer", answerJson e.c e.a) ]
+
+def execEventJson (e : ExecEvent) : Json :=
+  Json.mkObj
+    [ ("code", codeJson e.c)
+    , ("intent", Json.str e.authored.intent.name)
+    , ("addressee", toJson e.authored.question.addressee)
+    , ("scope", scopeJson e.authored.question.scope)
+    , ("prompt", Json.str e.authored.question.prompt)
+    , ("draw", toJson e.authored.question.draw)
+    , ("answer", answerJson e.c e.answer) ]
 
 /-! ## The refusal classifier (D7)
 
@@ -297,15 +314,28 @@ def refusedJson (e : CheckError) : Json :=
         , ("excerpt", Json.str e.excerpt)                 -- oracle-only
         , ("message", Json.str e.message) ]) ]            -- oracle-only
 
-def worldObservation (p : Plan [] Unit) (w : WorldSpec) : Json :=
-  let t := Plan.trace w.toWorld p Env.nil
-  Json.mkObj
-    [ ("world", toJson w)
-    , ("trace", Json.arr (t.map eventJson).toArray)
-    , ("billFresh", toJson (Multiplicative.toAdd (billFresh tick t)))
-    , ("billMemo", toJson (Multiplicative.toAdd (billMemo tick t))) ]
+def worldObservation (version : ObservationVersion)
+    (p : Plan [] Unit) (w : WorldSpec) : Json :=
+  let semantic := Plan.trace w.toWorld p Env.nil
+  match version with
+  | .v2 =>
+    let memo := billOfKeys tick ((semantic.map Event.key).dedup)
+    Json.mkObj
+      [ ("world", toJson w)
+      , ("trace", Json.arr (semantic.map eventJson).toArray)
+      , ("billFresh", toJson (Multiplicative.toAdd (billFresh tick semantic)))
+      , ("billMemo", toJson (Multiplicative.toAdd memo)) ]
+  | .v3 =>
+    let operational := Plan.execTrace w.toWorld p Env.nil
+    Json.mkObj
+      [ ("world", toJson w)
+      , ("trace", Json.arr (operational.map execEventJson).toArray)
+      , ("semanticTrace", Json.arr (semantic.map eventJson).toArray)
+      , ("billFresh", toJson (Multiplicative.toAdd (billExecFresh execTick operational)))
+      , ("billMemo", toJson (Multiplicative.toAdd (billMemo execTick operational))) ]
 
-def observe (prog : RawProgram) (worlds : List WorldSpec) : Json :=
+def observeAt (version : ObservationVersion)
+    (prog : RawProgram) (worlds : List WorldSpec) : Json :=
   match h : checkProgram prog with
   | .error e => refusedJson e
   | .ok p =>
@@ -329,9 +359,17 @@ def observe (prog : RawProgram) (worlds : List WorldSpec) : Json :=
         , ("blockAsks", toJson (blockAsks fns prog.main))
         , ("fnAsks", Json.arr (fns.map (fun fe =>
             Json.arr #[Json.str fe.name, toJson fe.asks])).toArray)
-        , ("worlds", Json.arr (worlds.map (worldObservation p)).toArray) ]
+        , ("worlds", Json.arr (worlds.map (worldObservation version p)).toArray) ]
     else
       Json.mkObj [("error", "world is missing an answer for a queried structured schema")]
+
+/-- Frozen version-2 observation, retained byte-for-byte for the existing corpus. -/
+def observe (prog : RawProgram) (worlds : List WorldSpec) : Json :=
+  observeAt .v2 prog worlds
+
+/-- Intent-aware version-3 observation used by live cross-language conformance. -/
+def observeV3 (prog : RawProgram) (worlds : List WorldSpec) : Json :=
+  observeAt .v3 prog worlds
 
 /-! ## The string layer (D12)
 

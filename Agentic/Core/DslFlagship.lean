@@ -278,16 +278,15 @@ theorem card_leaves_flagship :
   decide +kernel
 
 set_option maxRecDepth 20000 in
-/-- **The cheapest leaf is 5 consultations**, and no world pays it —
-`Harden.minFold_not_attained_demo` again, transported by the trace
-agreements. -/
+/-- **Cheapest leaf is 5 request occurrences**, unattainable by any world; see
+`Harden.minFold_not_attained_demo`. -/
 theorem minFold_flagship :
     minFold (costM tick flagshipPlan level_flagshipPlan_le Env.nil)
       = ((Multiplicative.ofAdd 5 : Multiplicative Nat) : WithTop (Multiplicative Nat)) := by
   decide +kernel
 
 set_option maxRecDepth 20000 in
-/-- **The dearest leaf is 15 consultations**, and that one is paid. -/
+/-- **Dearest leaf is 15 request occurrences**, and it is attained. -/
 theorem maxFold_flagship :
     maxFold (costM tick flagshipPlan level_flagshipPlan_le Env.nil)
       = ((Multiplicative.ofAdd 15 : Multiplicative Nat) : WithBot (Multiplicative Nat)) := by
@@ -375,7 +374,7 @@ reason. -/
 def flagshipUpTo : PlanUpTo tick (Multiplicative.ofAdd 15 : Multiplicative Nat) Unit :=
   ⟨flagshipPlan, level_flagshipPlan_le, le_of_eq maxFold_flagship⟩
 
-/-- …so every world bills at most fifteen consultations. -/
+/-- …so every world bills at most fifteen request occurrences. -/
 theorem flagship_bill_le (ω : Ω) :
     billFresh tick (Plan.trace ω flagshipPlan Env.nil) ≤ Multiplicative.ofAdd 15 :=
   PlanUpTo.bill_le Harden.tick_pricesByShape flagshipUpTo ω

@@ -90,9 +90,10 @@ the uniqueness half the kernel's C-obligations assume and never state. -/
 theorem denote_unique (h : {Γ : Ctx} → {A : Type} → Plan Γ A → Env Γ → Dlg A)
     (hret : ∀ {Γ A} (e : Expr Γ A), h (.ret e) = fun γ => Dlg.done (e γ))
     (haskC : ∀ {Γ A} c q (k : Plan (c :: Γ) A),
-       h (.askC c q k) = fun γ => Dlg.ask c q (fun x => h k (Env.cons x γ)))
+       h (.askC c q k) = fun γ => Dlg.ask c q.question (fun x => h k (Env.cons x γ)))
     (hask : ∀ {Γ A} c s e (k : Plan (c :: Γ) A),
-       h (.ask c s e k) = fun γ => Dlg.ask c (s.withPrompt (e γ)) (fun x => h k (Env.cons x γ)))
+       h (.ask c s e k) = fun γ =>
+         Dlg.ask c (s.question.withPrompt (e γ)) (fun x => h k (Env.cons x γ)))
     (hcase : ∀ {Γ A} (t : Tag) (e : Expr Γ t.El) (arms : t.El → Plan Γ A),
        h (.case t e arms) = fun γ => h (arms (e γ)) γ)
     (hdyn : ∀ {Γ A} (b : Code) (e : Expr Γ (El b)) (f : El b → Plan Γ A),

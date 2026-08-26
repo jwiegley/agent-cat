@@ -1,5 +1,6 @@
 import Agentic.Core.Certify
 import Agentic.Core.Cost
+import Agentic.Core.ExecCost
 
 /-!
 # What a run warrants, and what it merely observed
@@ -23,9 +24,9 @@ claim.**
    becomes a `∀ ω`. Nothing here mentions the interpreter, the oracle, `Id` or
    `IO`: like `certify`, coverage is a function of the meaning and the log.
 
-2. **The bill as a number**, which is the bill of `Agentic/Core/Cost.lean` read
-   through `Multiplicative ℕ ≅ ℕ` so that it can be printed and compared. Each of
-   the two definitions carries the equation that says it is not a second count.
+2. **Bills as numbers.** `billNat` reads the semantic `billFresh`; `memoNat` reads
+   operational `ExecCost.billMemo` over `ExecTrace`. Each carries an equation and
+   an explicit placement boundary rather than masquerading as another semantics.
 
 3. **Rendering**, which claims almost nothing and says so. A rendering is total
    and one-line-per-item (`Trace.length_render`, `Table.length_render`); it is
@@ -51,7 +52,8 @@ the run did.
 -/
 
 /-- `[[e.recordedIn t]]` = the table records this event, with this answer. -/
-def Event.recordedIn (e : Event) (t : Table) : Prop := lookup t e.c e.q = some e.a
+def Event.recordedIn (e : Event) (t : Table) : Prop :=
+  lookup t e.c e.q = some e.a
 
 /-- `[[Event.coveredB t e]]` = `e.recordedIn t`, decided.
 
@@ -249,7 +251,7 @@ theorem certify_nil_ticks : certify (ticks (Γ := []) 1) Table.nil () = true :=
 
 theorem not_covered_nil_ticks : ¬ Plan.Covered Table.nil (ticks (Γ := []) 1) := by
   intro h
-  have hmem : (⟨.ack, ackQ 0, ()⟩ : Event)
+  have hmem : (⟨.ack, (ackQ 0).question, ()⟩ : Event)
       ∈ Plan.trace (worldOf Table.nil) (ticks (Γ := []) 1) Env.nil := by
     simp [ticks, Plan.trace_askC]
     rfl
@@ -309,15 +311,12 @@ def billNat (tr : Trace) : Nat := Multiplicative.toAdd (billFresh tick tr)
 /-- **The equation.** The number printed *is* the bill. -/
 theorem billNat_eq (tr : Trace) : Multiplicative.ofAdd (billNat tr) = billFresh tick tr := rfl
 
-/-- …and `tick` charges one per consultation, so the bill is the length of the
-transcript (`billFresh_tick`). -/
+/-- …and `tick` charges one per request occurrence, so fresh bill is trace length. -/
 theorem billNat_eq_length (tr : Trace) : billNat tr = tr.length := by
   simp [billNat, billFresh_tick]
 
-/-- **The counting price at a list of keys**: `tick` charges one per question,
-so a bill is a length. `billFresh_tick` of `Agentic/Core/Cost.lean` is this at
-`t.map Event.key`; the memo bill needs it at the deduplicated list, which is
-`memoNat_eq_dedup` below. -/
+/-- **Counting a key list**: `tick` charges one per request, so bill is length.
+Fresh and effect-aware memo counts apply this equation to different projections. -/
 theorem billOfKeys_tick (ks : List Key) :
     billOfKeys tick ks = Multiplicative.ofAdd ks.length := by
   induction ks with
@@ -327,25 +326,20 @@ theorem billOfKeys_tick (ks : List Key) :
     show Multiplicative.ofAdd 1 * Multiplicative.ofAdd ks.length = _
     rw [← ofAdd_add, Nat.add_comm]
 
-/-- `[[memoNat tr]]` = what the transcript comes to when each **distinct**
-question is charged once: `Cost.billMemo` at `tick`, as a number.
+/-- `[[memoNat tr]]` = operational memo bill at `execTick`: each bare-Q reusable
+answer once and every effect occurrence. This is representation analysis over
+`ExecTrace`, not a semantic trace fold. -/
+def memoNat (tr : ExecTrace) : Nat :=
+  Multiplicative.toAdd (billMemo execTick tr)
 
-**Equation** (`memoNat_eq_dedup`, proved adjacent): it is the number of distinct
-questions in the transcript — hence exactly the number of entries a memoizing
-run's table must hold. Checking it against the table's length is how a harness
-observes `Dlg.execM`'s look-up-before-asking, and it is the honest form of that
-check: `billMemo ∣ billFresh` in general (`billMemo_dvd_billFresh`), so "table
-length = transcript length" would be a claim about a particular workload —
-one where every question happens to be distinct — rather than about the
-interpreter. -/
-def memoNat (tr : Trace) : Nat := Multiplicative.toAdd (billMemo tick tr)
+/-- **The equation.** The number printed is the operational memo bill. -/
+theorem memoNat_eq (tr : ExecTrace) :
+    Multiplicative.ofAdd (memoNat tr) = billMemo execTick tr := rfl
 
-/-- **The equation.** The number checked *is* the memo bill. -/
-theorem memoNat_eq (tr : Trace) : Multiplicative.ofAdd (memoNat tr) = billMemo tick tr := rfl
-
-/-- …and it counts the distinct questions. -/
-theorem memoNat_eq_dedup (tr : Trace) : memoNat tr = ((tr.map Event.key).dedup).length := by
-  simp [memoNat, billMemo, billOfKeys_tick]
+/-- …and it counts the effect-aware execution-event projection. -/
+theorem memoNat_eq_execMemoEvents (tr : ExecTrace) :
+    memoNat tr = (execMemoEvents tr).length := by
+  simp [memoNat, billMemo, billExecEvents_tick]
 
 /-- `[[Trace.billIn bs tr]]` = is this transcript's bill one of the numbers a
 cost analysis proved possible?
@@ -397,7 +391,8 @@ def Trace.anyFlagTrue (tr : Trace) : Bool :=
     | _ => false
 
 theorem Trace.anyFlagTrue_eq_true_iff {tr : Trace} :
-    Trace.anyFlagTrue tr = true ↔ ∃ q : Q .flag, (⟨.flag, q, true⟩ : Event) ∈ tr := by
+    Trace.anyFlagTrue tr = true ↔
+      ∃ q : Q .flag, (⟨.flag, q, true⟩ : Event) ∈ tr := by
   constructor
   · intro h
     obtain ⟨e, he, hb⟩ := List.any_eq_true.mp h
@@ -485,22 +480,19 @@ def sayAnswer : (c : Code) → El c → String
   | .structured schema, value =>
       (Schema.Json.render? schema value).getD "<not representable as finite JSON>"
 
-/-- `[[Q.axes q]]` = the question's scope, as the two axes the interpreter reads
-off it: the model axis (`session/set_config_option`) and the mode axis
-(`session/set_mode`), each of which rides on the protocol where the adapter
-takes it and in the prompt header where it does not. `-` is an axis the author
-left silent. -/
+/-- Scope axes of a semantic question. -/
 def Q.axes {c : Code} (q : Q c) : String :=
-  let m := match Exec.modelAxis q with | some m => m | none => "-"
-  let d := match Exec.modeAxis q with | some d => d | none => "-"
+  let m := match Agentic.Scope.axis₁ q.scope with | some m => m | none => "-"
+  let d := match (q.scope : Agentic.LastOpt String × Agentic.LastOpt String).2 with
+    | some d => d | none => "-"
   s!"model={m} mode={d}"
 
-/-- `[[Event.render e]]` = one event as one line: who was asked, under what
-scope, the head of what was said to them, and the head of what came back. -/
+/-- One semantic event as one line. Intent and dispatch attribution are rendered
+from `ExecEvent`, not smuggled into semantic trace. -/
 def Event.render (e : Event) : String :=
-  s!"  {pad 24 (Exec.Addressee.render e.q.addressee)}{pad 20 (Q.axes e.q)}\
-     {pad 10 s!"({Exec.Code.name e.c})"}{pad 46 (head 44 e.q.prompt)} -> \
-     {head 40 (sayAnswer e.c e.a)}"
+  s!"  {pad 24 (Exec.Addressee.render e.q.addressee)}\
+     {pad 20 (Q.axes e.q)}{pad 10 s!"({Exec.Code.name e.c})"}\
+     {pad 46 (head 44 e.q.prompt)} -> {head 40 (sayAnswer e.c e.a)}"
 
 /-- `[[Trace.render tr]]` = the transcript, one event per line. -/
 def Trace.render (tr : Trace) : List String := tr.map Event.render
@@ -513,7 +505,8 @@ pretty-printer, and the thing a consumer counting lines relies on. -/
 /-- `[[Table.size t]]` = how many answers the table holds, shadowed entries
 included. `Table` is a `def` over a list of dependent triples, so this is where
 the list is named. -/
-def Table.size (t : Table) : Nat := (t : List ((c : Code) × Q c × El c)).length
+def Table.size (t : Table) : Nat :=
+  (t : List ((c : Code) × Q c × El c)).length
 
 /-- `[[Table.render t]]` = the log, one recorded answer per line, most recent
 first — the order `lookup` reads it in, so a shadowed entry is visibly below the
@@ -521,7 +514,8 @@ one shadowing it. -/
 def Table.render (t : Table) : List String :=
   (t : List ((c : Code) × Q c × El c)).map fun entry =>
     s!"  {pad 24 (Exec.Addressee.render entry.2.1.addressee)}\
-       {pad 10 s!"({Exec.Code.name entry.1})"}{pad 46 (head 44 entry.2.1.prompt)} -> \
+       {pad 10 s!"({Exec.Code.name entry.1})"}\
+       {pad 46 (head 44 entry.2.1.prompt)} -> \
        {head 40 (sayAnswer entry.1 entry.2.2)}"
 
 /-- **Total, and one line per entry.** -/

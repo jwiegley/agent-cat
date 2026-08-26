@@ -56,10 +56,12 @@ the transcript it heard is the one the replay reconstructs — so it stays on th
 cheap side of the split. -/
 
 /-- An `Event` as the dependent pair it is. -/
-def Event.toSigma (e : Event) : (c : Code) × (Q c × El c) := ⟨e.c, e.q, e.a⟩
+def Event.toSigma (e : Event) : (c : Code) × (Q c × El c) :=
+  ⟨e.c, e.q, e.a⟩
 
 /-- …and back. -/
-def Event.ofSigma (s : (c : Code) × (Q c × El c)) : Event := ⟨s.1, s.2.1, s.2.2⟩
+def Event.ofSigma (s : (c : Code) × (Q c × El c)) : Event :=
+  ⟨s.1, s.2.1, s.2.2⟩
 
 /-- **Morphism equation.** The two are inverse, on the nose: `Event` *is* the
 `Σ`-type, and the pair of definitions is a change of spelling. -/
@@ -165,19 +167,34 @@ open Agentic.Core
 
 /-! ## Every program of the language sits at or below the branch rung -/
 
-/-- One question, at whatever kind was imposed, is at `pipeline` at worst:
-`askC1` is `batch` and `ask1` is `pipeline`, and neither can be anything
-else. -/
+/-- One explicit-intent ask former adds at most the pipeline rung. -/
+theorem askForm_level_le {A : Type} {Γ : Ctx} {ℓ : Level}
+    (hp : Level.pipeline ≤ ℓ) (c : Code) (intent : Intent c)
+    (S : Bindings Γ) (a : RawAsk)
+    (form : Plan (c :: Γ) A → Plan Γ A) (h : askForm c intent S a = .ok form)
+    (k : Plan (c :: Γ) A) (hk : level k ≤ ℓ) : level (form k) ≤ ℓ := by
+  unfold askForm at h
+  split at h
+  · exact absurd h (by simp)
+  · split at h
+    · cases h
+      exact le_trans (le_of_eq (level_askC ..)) hk
+    · split at h
+      · exact absurd h (by simp)
+      · cases h
+        exact le_trans (le_of_eq (level_ask ..)) (max_le hp hk)
+
+/-- One value-position request, at whatever kind was imposed, is at `pipeline`
+at worst. -/
 theorem askPlan_level_le {Γ : Ctx} (c : Code) (S : Bindings Γ) (a : RawAsk)
     (p : Plan Γ (El c)) (h : askPlan c S a = .ok p) : level p ≤ Level.pipeline := by
   unfold askPlan at h
   split at h
   · exact absurd h (by simp)
-  · split at h
-    · cases h; exact le_trans (le_of_eq (level_askC1 ..)) bot_le
-    · split at h
-      · exact absurd h (by simp)
-      · cases h; exact le_of_eq (level_ask1 ..)
+  · rename_i form hform
+    cases h
+    exact askForm_level_le le_rfl c (valueIntent c a.target) S a form hform _
+      (le_trans (le_of_eq (level_ret _)) bot_le)
 
 /-- Panel members, one at a time: each is a question, so each is at `pipeline`
 at worst. -/
@@ -326,15 +343,7 @@ theorem bindForm_level_le {A : Type} {Γ : Ctx} {fns : Fns} (hf : FnLevel fns)
   cases r with
   | ask a =>
     simp only [bindForm] at h
-    split at h
-    · exact absurd h (by simp)
-    · split at h
-      · cases h
-        exact le_trans (le_of_eq (level_askC ..)) hk
-      · split at h
-        · exact absurd h (by simp)
-        · cases h
-          exact le_trans (le_of_eq (level_ask ..)) (max_le hp hk)
+    exact askForm_level_le hp c (valueIntent c a.target) S a form h k hk
   | panel ms pos =>
     simp only [bindForm] at h
     split at h
@@ -463,7 +472,7 @@ theorem checkBlock_level_le {fns : Fns} (hf : FnLevel fns) :
         · exact absurd h (by simp)
         · rename_i k hk
           cases h
-          exact bindForm_level_le hf (by decide) _ S _ form hform _
+          exact askForm_level_le (by decide) Code.ack .effect S a form hform _
             (le_trans (le_of_eq (level_sub _ _)) (ih _ _ none trivial k hk))
     | some pd => simp only [checkBlock] at h; exact absurd h (by simp)
   | callStmt f args rest pos ih =>
@@ -694,7 +703,7 @@ theorem checkBody_level_le {k : Code} {fns : Fns} (hf : FnLevel fns)
         · exact absurd h (by simp)
         · rename_i k' hk'
           cases h
-          exact bindForm_level_le hf le_rfl _ S _ form hform _
+          exact askForm_level_le le_rfl Code.ack .effect S a form hform _
             (le_trans (le_of_eq (level_sub _ _)) (ih _ _ fin hfin k' hk'))
     | callS f args pos =>
       simp only [checkBody] at h
@@ -1014,8 +1023,9 @@ theorem checkBlock_caseEnding_arms {fns : Fns} {Γ : Ctx} {S : Bindings Γ} {pd 
 
 /-- The source-written draw index survives shape elaboration: `served by`
 relabels the server and touches nothing else. -/
-theorem askShape_draw (m : Option String) (c : Code) (t : RawTarget) :
-    (askShape m c t).draw = t.draw := by
+theorem askShape_draw (c : Code) (intent : Intent c) (m : Option String)
+    (t : RawTarget) :
+    (askShape c intent m t).draw = t.draw := by
   cases m <;> rfl
 
 end Agentic.Core.Dsl

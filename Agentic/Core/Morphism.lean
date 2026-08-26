@@ -94,18 +94,20 @@ theorem denote_ret (e : Expr Γ A) (γ : Env Γ) : denote (Plan.ret e) γ = pure
 
 /-- **`askC` is the generator at a closed question.** `⟦askC c q k⟧ γ` puts `q`
 and continues with `k` under the answer. -/
-theorem denote_askC (c : Code) (q : Q c) (k : Plan (c :: Γ) A) (γ : Env Γ) :
-    denote (Plan.askC c q k) γ = Dlg.ask c q (fun x => denote k (.cons x γ)) := rfl
+theorem denote_askC (c : Code) (q : Request c) (k : Plan (c :: Γ) A) (γ : Env Γ) :
+    denote (Plan.askC c q k) γ =
+      Dlg.ask c q.question (fun x => denote k (.cons x γ)) := rfl
 
 /-- **`ask` is the generator at a question whose *words* are built from what is
 known** — the node the domain forces, and the whole reason a content-dependent
 prompt stays below the monadic rung. The only difference from `askC` is that the
 words are `e γ` rather than `q.prompt`; the shape `s` is written in the term
 either way, which is what makes C2 hold with no hypothesis. -/
-theorem denote_ask (c : Code) (s : Q.Shape c) (e : Expr Γ String) (k : Plan (c :: Γ) A)
+theorem denote_ask (c : Code) (s : Request.Shape c) (e : Expr Γ String)
+    (k : Plan (c :: Γ) A)
     (γ : Env Γ) :
-    denote (Plan.ask c s e k) γ
-      = Dlg.ask c (s.withPrompt (e γ)) (fun x => denote k (.cons x γ)) := rfl
+    denote (Plan.ask c s e k) γ =
+      Dlg.ask c (s.question.withPrompt (e γ)) (fun x => denote k (.cons x γ)) := rfl
 
 /-- **`case` is selection in the environment.** Both arms are in the term; the
 meaning takes the one the tag names. -/
@@ -125,7 +127,7 @@ theorem denote_dyn (b : Code) (e : Expr Γ (El b)) (f : El b → Plan Γ A) (γ 
 `askC` and the same question asked by `ask` at a constant expression are one
 dialogue. The redundancy buys the batch rung a domain and costs exactly this
 theorem. -/
-theorem askC_coherent (c : Code) (q : Q c) (k : Plan (c :: Γ) A) (γ : Env Γ) :
+theorem askC_coherent (c : Code) (q : Request c) (k : Plan (c :: Γ) A) (γ : Env Γ) :
     denote (Plan.askC c q k) γ = denote (Plan.ask c q.shape (fun _ => q.prompt) k) γ := rfl
 
 /-! ## Context morphisms: `denote` is a presheaf map -/
@@ -159,7 +161,8 @@ run ω (⟦under σ p⟧ γ) = run (ω ∘ σ) (⟦p⟧ γ)
 This is the kernel's "scope is part of the question": there is no scope layer
 wrapped around the meaning, only a change of which world is being read. -/
 theorem run_under (ω : Ω) (σ : Sig) (p : Plan Γ A) (γ : Env Γ) :
-    Plan.run ω (Plan.under σ p) γ = Plan.run (fun c q => ω c (σ.onQ c q)) p γ :=
+    Plan.run ω (Plan.under σ p) γ =
+      Plan.run (fun c q => ω c (σ.onQ c q)) p γ :=
   Agentic.Core.run_under ω σ p γ
 
 /-- **Scope is reindexing, on transcripts** — and the transcript half is *not*
@@ -515,11 +518,13 @@ theorem trace_panel [Monoid (El c)] (ω : Ω) (ps : List (Plan Γ (El c))) (γ :
   Agentic.Core.trace_panel ω ps γ
 
 /-- `[[panellistA]]` = a question put to one reviewer. -/
-def panellistA : Q .verdict := { addressee := .model "a", scope := 1, prompt := "", draw := 0 }
+def panellistA : Request .verdict :=
+  .consult { addressee := .model "a", scope := 1, prompt := "", draw := 0 }
 
 /-- `[[panellistB]]` = the same question put to a *different* reviewer, so that
 the two events differ in shape and a reordering is visible. -/
-def panellistB : Q .verdict := { addressee := .model "b", scope := 1, prompt := "", draw := 0 }
+def panellistB : Request .verdict :=
+  .consult { addressee := .model "b", scope := 1, prompt := "", draw := 0 }
 
 /-- **The honest order fact.** A panel's transcript is **never** permutation-
 invariant *as a list*: reordering the members reorders the events, in every
@@ -530,7 +535,7 @@ world. What is invariant is the transcript as a multiset
 
 So "parallel" is a fact about a runtime and not about the meaning, and the
 licence to reorder is a licence to choose an order — not to change which
-consultations happen. That is the correct outcome: were the transcript itself a
+request occurrences happen. Correct outcome: were transcript itself a
 multiset, the *order* of a metered conversation would be outside the meaning,
 and it is not. -/
 theorem trace_panel_not_perm_invariant :
@@ -597,8 +602,8 @@ theorem level_sound_batch (p : Plan Γ A) (h : level p ≤ Level.batch)
   Option.some.inj ((asks_eq_of_le_batch p h γ γ ω).symm.trans (asks_eq_of_le_batch p h γ γ' ω'))
 
 /-- **`pipeline` is sound, in the form that is true**: the sequence of answer
-codes — hence the number of consultations, hence the *shape of the transcript as
-a list* — is fixed by the term. No world changes it, and no hypothesis is
+codes — hence request-occurrence count and transcript length — is fixed by term.
+No world changes it, and no hypothesis is
 needed.
 
 This is the rung the kernel exists to carry: the prompt may be a function of an
@@ -637,9 +642,11 @@ every environment sees the same `s`; the induction of
 
 Stated as a `rfl` on purpose: "the shape is a projection of the syntax" is the
 kind of claim that should cost nothing to check. -/
-theorem shape_projects_from_ask (ω : Ω) (c : Code) (s : Q.Shape c) (e : Expr Γ String)
+theorem shape_projects_from_ask (ω : Ω) (c : Code) (s : Request.Shape c)
+    (e : Expr Γ String)
     (k : Plan (c :: Γ) A) (γ : Env Γ) :
-    ((Plan.trace ω (Plan.ask c s e k) γ).head?).map Event.shape = some ⟨c, s⟩ := rfl
+    ((Plan.trace ω (Plan.ask c s e k) γ).head?).map Event.shape =
+      some ⟨c, s.question⟩ := rfl
 
 /-- **`branch` is sound**: the bill of every run is one of the finite bag of
 bills the term determines. Both arms are in the term, so the bag exists; the one
@@ -812,13 +819,15 @@ and the kernel of `denote` is strictly finer than the kernel of
 
 /-- `[[repeatedP]]` = ask the same question twice and report both answers. -/
 def repeatedP : Plan [] (Bool × Bool) :=
-  .askC .flag Dlg.probe (.askC .flag Dlg.probe (.ret (fun γ => (γ.tail.head, γ.head))))
+  .askC .flag (Request.consult Dlg.probe)
+    (.askC .flag (Request.consult Dlg.probe) (.ret (fun γ => (γ.tail.head, γ.head))))
 
 /-- `[[repeatedP']]` = ask the same question twice and report the first answer
 twice. Because a world is a *function*, the second answer is already determined,
 so the two plans say the same thing in every world. -/
 def repeatedP' : Plan [] (Bool × Bool) :=
-  .askC .flag Dlg.probe (.askC .flag Dlg.probe (.ret (fun γ => (γ.tail.head, γ.tail.head))))
+  .askC .flag (Request.consult Dlg.probe)
+    (.askC .flag (Request.consult Dlg.probe) (.ret (fun γ => (γ.tail.head, γ.tail.head))))
 
 /-- The two plans denote the two dialogues of `Dlg.not_forcing` on the nose, so
 the refutation transports rather than being rebuilt. -/

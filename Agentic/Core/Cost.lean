@@ -34,19 +34,10 @@ is graded by `Agentic.Core.level`:
 
 1. **C2 is true, and the *representation* is why.** The kernel claims that at
    `level ≤ pipeline` the sequence of question *shapes* is world-independent.
-   Under an earlier representation, in which `ask` carried an arbitrary
-   `Expr Γ (Q c)`, that claim was false — an answer could select the
-   *addressee*, and the addressee is part of the shape — and the repair on offer
-   was a side predicate (`ShapeStatic`) asserting that answers flow into prompt
-   text and nowhere else. That predicate is gone. `Plan.ask` now carries the
-   shape as **term-level data** and only the prompt as an expression
-   (`Q c ≅ Q.Shape c × String`), so the counterexample is not expressible and
-   the shape sequence is a projection of the syntax — literally, as the fold
-   `shapes`, which reads it off the term with no environment and no world
-   (`shapes_eq_trace_of_le_pipeline`). `bill_exact_pipeline` carries no
-   hypothesis beyond the level bound and `PricesByShape`. The domain's pivot (§2.3, "the
-   prompt is a function of an earlier answer") is now the *type* of the node
-   rather than a property of it.
+   Under an earlier representation, `ask` could compute a whole `Q c`, including
+   addressee and scope. `Plan.ask` now carries an annotated request shape as
+   term data and computes only prompt words. The semantic `shapes` fold erases
+   intent and projects the written question shape, so C2 needs no side predicate.
 
 2. **C3's attainment claim is false as stated.** A `case` whose tag does not
    depend on any answer has an arm no world reaches, so the extreme *leaves* of
@@ -68,14 +59,11 @@ is graded by `Agentic.Core.level`:
    rung *admits* plans no finite analysis reaches, so no analysis is licensed
    there.
 
-## Two bills, both derived, neither baked in
+## The semantic bill
 
-`billFresh` sums over all events; `billMemo` sums over distinct questions.
-Making idempotence a property of the cost *carrier* bakes a memoizing runtime
-into the denotation; carrying the trace and deriving both dissolves the dispute
-(kernel §4). `billMemo_dvd_billFresh` is the exact relation between them —
-a divisibility in the monoid, with no order and no hypothesis — and
-`billMemo_le_billFresh` is its order reading where prices are at least the unit.
+`billFresh` is the monoid morphism from bare-question semantic trace. Runtime
+memo billing is an interpretation of annotated execution trace in
+`Agentic/Core/ExecCost.lean`; it is not principal meaning.
 -/
 
 namespace Agentic.Core
@@ -84,21 +72,12 @@ open Plan
 
 /-! ## Keys and shapes: what a price is a function of -/
 
-/-- `[[Key]]` = a question together with the code it asks for: a point of
-question space, forgetting the answer. This is the key of the memo table, the
-key of a content-addressed cache, and the argument of a price — three uses of
-one object (§3 q1). -/
+/-- `[[Key]]` = a semantic question together with its answer code, forgetting
+the answer. This is the key of the answer sheet and semantic price. -/
 abbrev Key : Type := (c : Code) × Q c
 
-/-- `[[Shape]]` = what a question is, minus what it says, across all codes: the
-total space of `Q.Shape` (`Agentic/Core/Question.lean`), which is where a
-*transcript* reads shapes off, since a transcript mixes codes.
-
-This is the finite quotient of question space that `attack-adequacy` §7 says all
-four re-derivations needed and none stated. Per-call and per-latency pricing
-factor through it; per-token pricing does not, and for per-token pricing the
-honest output is an interval keyed to a token bound carried in the answer type
-(kernel §2.5). -/
+/-- `[[Shape]]` = a question with only prompt text forgotten, across all codes.
+Intent is a Plan annotation and is erased before this semantic projection. -/
 abbrev Shape : Type := (c : Code) × Q.Shape c
 
 /-- The kind of answer asked for. -/
@@ -107,13 +86,14 @@ abbrev Shape.code (s : Shape) : Code := s.1
 /-- Who is being asked. -/
 abbrev Shape.addressee (s : Shape) : Addressee := s.2.addressee
 
-/-- The question an event put. -/
+/-- The semantic question an event put. -/
 def Event.key (e : Event) : Key := ⟨e.c, e.q⟩
 
 /-- The shape of a key. -/
 def Key.shape (k : Key) : Shape := ⟨k.1, k.2.shape⟩
 
-/-- The shape of the question an event put. -/
+
+/-- Question shape recorded by an event. -/
 def Event.shape (e : Event) : Shape := ⟨e.c, e.q.shape⟩
 
 @[simp] theorem Event.shape_eq_key_shape (e : Event) : e.shape = e.key.shape := rfl
@@ -126,16 +106,13 @@ theorem Event.map_shape (t : Trace) : t.map Event.shape = (t.map Event.key).map 
 
 variable {S : Type}
 
-/-- `[[Price S]]` = what each question costs, in the carrier `S`: a function of
-the question, because a price is a fact about what is asked and of whom, not
-about where in a plan it was asked. -/
+/-- `[[Price S]]` = semantic question price in carrier `S`. -/
 abbrev Price (S : Type) : Type := (c : Code) → Q c → S
 
 /-- A price, read at a key. -/
 def priceKey (price : Price S) (k : Key) : S := price k.1 k.2
 
-/-- `[[PricesByShape price]]` = the price of a question depends on its shape and
-not on its prompt text.
+/-- `[[PricesByShape price]]` = price depends on question shape, not prompt text.
 
 The hypothesis `attack-simplicity` I1 and `attack-adequacy` §7 both identify as
 missing from all four proposals, and the difference between an exact bill and a
@@ -146,12 +123,9 @@ interpretation of the term language has no argument position — the carrier is
 `fun _ _ => M`, so nothing an answer could flow into is available to it. An
 interpretation of the `ask` generator into such a target is therefore exactly a
 function of the generator's *label*, and at `pipeline` the label an `ask` node
-carries is its shape (`Q.Shape c`) and not its whole question, because the words
-are an `Expr` computed from answers in scope. `PricesByShape` is that fact
-written as a condition on the price: it is not an assumption about terms, it is
-the statement that the target is a `Const`. The one rung where it is not needed
-is `batch`, where the generator is nullary (`Plan.askC` carries a whole `Q c`)
-and every function `Key → M` is a legitimate interpretation — see
+carries is the authored `Q.Shape c`; execution intent is erased. The words remain
+an `Expr` computed from answers. At `batch`, `askC` carries the whole annotated
+request, whose question component supplies the semantic key; see
 `bill_exact_batch`. -/
 def PricesByShape (price : Price S) : Prop :=
   ∀ (c : Code) (q q' : Q c), q.shape = q'.shape → price c q = price c q'
@@ -180,15 +154,6 @@ read is one factor and a duplicated read is two (§3 q9). -/
 def billFresh [Monoid S] (price : Price S) (t : Trace) : S :=
   billOfKeys price (t.map Event.key)
 
-/-- `[[billMemo price t]]` = what the transcript comes to **charging each
-distinct question once**: the bill a memoizing runtime pays.
-
-Derived from the same trace as `billFresh` rather than baked into the carrier.
-Note that it is *not* a monoid morphism (`billMemo_not_monoid_hom`), which is
-exactly why making idempotence a property of the carrier is a mistake: the
-policy is a property of the runtime, and the meaning should record neither. -/
-def billMemo [Monoid S] (price : Price S) (t : Trace) : S :=
-  billOfKeys price ((t.map Event.key).dedup)
 
 section BillLaws
 
@@ -219,24 +184,6 @@ theorem billFresh_append (t t' : Trace) :
 
 end BillLaws
 
-/-- **The exact relation between the two bills**, with no order and no
-hypothesis on the prices: the memoized bill *divides* the fresh one, because the
-deduplicated key list is a sublist of the key list. -/
-theorem billMemo_dvd_billFresh [CommMonoid S] (price : Price S) (t : Trace) :
-    billMemo price t ∣ billFresh price t :=
-  (((t.map Event.key).dedup_sublist).map (priceKey price)).prod_dvd_prod
-
-/-- …and its order reading, where every question costs at least the unit:
-memoizing never costs more. The hypothesis is on the *prices*, not on the
-carrier — an idempotent carrier would be a memoizing runtime smuggled into the
-denotation. -/
-theorem billMemo_le_billFresh [Monoid S] [Preorder S] [MulLeftMono S] [MulRightMono S]
-    (price : Price S) (h1 : ∀ (c : Code) (q : Q c), 1 ≤ price c q) (t : Trace) :
-    billMemo price t ≤ billFresh price t := by
-  refine List.Sublist.prod_le_prod' (((t.map Event.key).dedup_sublist).map _) ?_
-  intro a ha
-  obtain ⟨k, _, rfl⟩ := List.mem_map.mp ha
-  exact h1 k.1 k.2
 
 /-! ## What a scheduler is allowed to change about the bill
 
@@ -266,14 +213,12 @@ theorem billFresh_panel_perm [CommMonoid S] (price : Price S) {Γ : Ctx} {c : Co
 
 /-! ## The counting price, which is what "#asks" means as a bill -/
 
-/-- `[[tick]]` = one unit per consultation. The bill at this price is the number
-of events, so every statement below about bills specializes to a statement about
-`#asks` without a second notion of cost. -/
+/-- `[[tick]]` = one unit per semantic question occurrence. -/
 def tick : Price (Multiplicative Nat) := fun _ _ => Multiplicative.ofAdd 1
 
 /-- **Morphism equation.** The bill at the counting price is the length of the
 transcript: `Multiplicative ℕ` is the free monoid on one generator, and `tick`
-is the map that sends every question to it. -/
+is the map sending every question to it. -/
 @[simp] theorem billFresh_tick (t : Trace) :
     billFresh tick t = Multiplicative.ofAdd t.length := by
   induction t with
@@ -283,14 +228,6 @@ is the map that sends every question to it. -/
     show Multiplicative.ofAdd 1 * Multiplicative.ofAdd t.length = _
     rw [← ofAdd_add, Nat.add_comm]
 
-/-- **`billMemo` is not a monoid morphism**, and the counting price is enough to
-see it: a transcript concatenated with itself has the same distinct questions,
-so the memo bill does not double. Recorded in code because it is the reason the
-memoization policy cannot live in the carrier. -/
-theorem billMemo_not_monoid_hom :
-    ∃ (t : Trace), billMemo tick (t ++ t) ≠ billMemo tick t * billMemo tick t := by
-  refine ⟨[⟨.ack, ⟨.tool "t", 1, "", 0⟩, ()⟩], ?_⟩
-  decide
 
 /-! ## The default world, and what a fold of the term is a fold *of* -/
 
@@ -333,10 +270,10 @@ def codes : {Γ : Ctx} → {A : Type} → Plan Γ A → Option (List Code) :=
 
 theorem codes_ret {Γ : Ctx} {A : Type} (e : Expr Γ A) : codes (Plan.ret e) = some [] := rfl
 
-theorem codes_askC {Γ : Ctx} {A : Type} (c : Code) (q : Q c) (k : Plan (c :: Γ) A) :
+theorem codes_askC {Γ : Ctx} {A : Type} (c : Code) (q : Request c) (k : Plan (c :: Γ) A) :
     codes (Plan.askC c q k) = (c :: ·) <$> codes k := rfl
 
-theorem codes_ask {Γ : Ctx} {A : Type} (c : Code) (s : Q.Shape c) (e : Expr Γ String)
+theorem codes_ask {Γ : Ctx} {A : Type} (c : Code) (s : Request.Shape c) (e : Expr Γ String)
     (k : Plan (c :: Γ) A) : codes (Plan.ask c s e k) = (c :: ·) <$> codes k := rfl
 
 theorem codes_case {Γ : Ctx} {A : Type} (t : Tag) (e : Expr Γ t.El) (arms : t.El → Plan Γ A) :
@@ -349,17 +286,15 @@ theorem codes_dyn {Γ : Ctx} {A : Type} (b : Code) (e : Expr Γ (El b)) (f : El 
 sequence of question *shapes* `p` will put — who is asked, under what scope, at
 which draw — if that sequence is fixed by the term.
 
-**No environment and no world.** This fold is the payoff of the representation
-repair: an `ask` node carries `s : Q.Shape c` as data, so its shape can be read
-off without evaluating anything. Under the old node, in which the whole question
-was an `Expr Γ (Q c)`, no such fold could exist — the best available was `asks`,
+**No environment and no world.** Each annotated `ask` node carries a question
+shape as term data, so the semantic shape is read after erasing intent.
 which substitutes `default` answers and is exact only up to shape.
 
 `none` at `case` and `dyn`, where the sequence is not fixed by the term. -/
 def shapesAlg : PlanAlg (fun _ _ => Option (List Shape)) where
   ret _ := some []
-  askC c q k := (⟨c, q.shape⟩ :: ·) <$> k
-  ask c s _ k := (⟨c, s⟩ :: ·) <$> k
+  askC c q k := (⟨c, q.question.shape⟩ :: ·) <$> k
+  ask c s _ k := (⟨c, s.question⟩ :: ·) <$> k
   case := fun _ _ _ => none
   dyn _ _ _ := none
 
@@ -372,11 +307,12 @@ def shapes : {Γ : Ctx} → {A : Type} → Plan Γ A → Option (List Shape) :=
 
 theorem shapes_ret {Γ : Ctx} {A : Type} (e : Expr Γ A) : shapes (Plan.ret e) = some [] := rfl
 
-theorem shapes_askC {Γ : Ctx} {A : Type} (c : Code) (q : Q c) (k : Plan (c :: Γ) A) :
-    shapes (Plan.askC c q k) = (⟨c, q.shape⟩ :: ·) <$> shapes k := rfl
+theorem shapes_askC {Γ : Ctx} {A : Type} (c : Code) (q : Request c) (k : Plan (c :: Γ) A) :
+    shapes (Plan.askC c q k) = (⟨c, q.question.shape⟩ :: ·) <$> shapes k := rfl
 
-theorem shapes_ask {Γ : Ctx} {A : Type} (c : Code) (s : Q.Shape c) (e : Expr Γ String)
-    (k : Plan (c :: Γ) A) : shapes (Plan.ask c s e k) = (⟨c, s⟩ :: ·) <$> shapes k := rfl
+theorem shapes_ask {Γ : Ctx} {A : Type} (c : Code) (s : Request.Shape c) (e : Expr Γ String)
+    (k : Plan (c :: Γ) A) :
+    shapes (Plan.ask c s e k) = (⟨c, s.question⟩ :: ·) <$> shapes k := rfl
 
 theorem shapes_case {Γ : Ctx} {A : Type} (t : Tag) (e : Expr Γ t.El) (arms : t.El → Plan Γ A) :
     shapes (Plan.case t e arms) = none := rfl
@@ -410,8 +346,9 @@ for.
 action on it. -/
 def asksAlg : PlanAlg (fun Γ _ => Env Γ → Option (List Key)) where
   ret _ := fun _ => some []
-  askC c q k := fun γ => (⟨c, q⟩ :: ·) <$> k (.cons default γ)
-  ask c s e k := fun γ => (⟨c, s.withPrompt (e γ)⟩ :: ·) <$> k (.cons default γ)
+  askC c q k := fun γ => (⟨c, q.question⟩ :: ·) <$> k (.cons default γ)
+  ask c s e k := fun γ =>
+    (⟨c, s.question.withPrompt (e γ)⟩ :: ·) <$> k (.cons default γ)
   case := fun _ _ _ => fun _ => none
   dyn _ _ _ := fun _ => none
 
@@ -425,13 +362,15 @@ def asks : {Γ : Ctx} → {A : Type} → Plan Γ A → Env Γ → Option (List K
 theorem asks_ret {Γ : Ctx} {A : Type} (e : Expr Γ A) (γ : Env Γ) :
     asks (Plan.ret e) γ = some [] := rfl
 
-theorem asks_askC {Γ : Ctx} {A : Type} (c : Code) (q : Q c) (k : Plan (c :: Γ) A) (γ : Env Γ) :
-    asks (Plan.askC c q k) γ = (⟨c, q⟩ :: ·) <$> asks k (.cons default γ) := rfl
-
-theorem asks_ask {Γ : Ctx} {A : Type} (c : Code) (s : Q.Shape c) (e : Expr Γ String)
+theorem asks_askC {Γ : Ctx} {A : Type} (c : Code) (q : Request c)
     (k : Plan (c :: Γ) A) (γ : Env Γ) :
-    asks (Plan.ask c s e k) γ
-      = (⟨c, s.withPrompt (e γ)⟩ :: ·) <$> asks k (.cons default γ) := rfl
+    asks (Plan.askC c q k) γ =
+      (⟨c, q.question⟩ :: ·) <$> asks k (.cons default γ) := rfl
+
+theorem asks_ask {Γ : Ctx} {A : Type} (c : Code) (s : Request.Shape c) (e : Expr Γ String)
+    (k : Plan (c :: Γ) A) (γ : Env Γ) :
+    asks (Plan.ask c s e k) γ =
+      (⟨c, s.question.withPrompt (e γ)⟩ :: ·) <$> asks k (.cons default γ) := rfl
 
 theorem asks_case {Γ : Ctx} {A : Type} (t : Tag) (e : Expr Γ t.El) (arms : t.El → Plan Γ A)
     (γ : Env Γ) : asks (Plan.case t e arms) γ = none := rfl
@@ -546,7 +485,7 @@ theorem asks_eq_of_le_batch (p : Plan Γ A) (h : level p ≤ Level.batch) :
   | ret e => intro γ γ' ω; simp [asks_ret, Plan.trace]
   | askC c q k ih =>
     intro γ γ' ω
-    rw [asks_askC, ih h (.cons default γ) (.cons (ω c q) γ') ω]
+    rw [asks_askC, ih h (.cons default γ) (.cons (ω c q.question) γ') ω]
     simp [Plan.trace_askC, Event.key]
   | ask c s e k _ => exact absurd (le_of_ask h).1 (by decide)
   | case t e arms _ => exact absurd (le_of_case h).1 (by decide)
@@ -591,8 +530,8 @@ theorem bill_exact_batch [Monoid S] (price : Price S) (p : Plan Γ A)
 /-! ## C2 — PIPELINE: the exact count, code sequence and shapes -/
 
 /-- **Kernel obligation C2, at the codes.** At `level ≤ pipeline` the sequence
-of answer codes — and hence the number of consultations — is fixed by the term:
-no world and no environment can change it.
+of answer codes — and hence the number of request occurrences — is fixed by the
+term: no world and no environment can change it.
 
 The code is the coarsest thing a question has, so this is the weakest half of
 the pipeline guarantee; `shapes_eq_trace_of_le_pipeline` below strengthens it to
@@ -604,11 +543,12 @@ theorem codes_eq_of_le_pipeline (p : Plan Γ A) (h : level p ≤ Level.pipeline)
   | ret e => intro γ ω; simp [codes_ret, Plan.trace]
   | askC c q k ih =>
     intro γ ω
-    rw [codes_askC, ih h (.cons (ω c q) γ) ω]
+    rw [codes_askC, ih h (.cons (ω c q.question) γ) ω]
     simp [Plan.trace_askC]
   | ask c s e k ih =>
     intro γ ω
-    rw [codes_ask, ih (le_of_ask h).2 (.cons (ω c (s.withPrompt (e γ))) γ) ω]
+    rw [codes_ask, ih (le_of_ask h).2
+      (.cons (ω c (s.question.withPrompt (e γ))) γ) ω]
     simp [Plan.trace_ask]
   | case t e arms _ => exact absurd (le_of_case h).1 (by decide)
   | dyn b e f _ => exact absurd h (by simp only [level_dyn]; decide)
@@ -626,7 +566,8 @@ theorem length_trace_eq_of_le_pipeline (p : Plan Γ A) (h : level p ≤ Level.pi
 /-! ## …and the half the kernel got wrong, now true by construction -/
 
 /-- A coin to consult. -/
-def coinQ : Q .flag := { addressee := .tool "coin", scope := 1, prompt := "heads?", draw := 0 }
+def coinQ : Request .flag :=
+  .consult { addressee := .tool "coin", scope := 1, prompt := "heads?", draw := 0 }
 
 /-- The world that says heads. -/
 def heads : Ω := fun c => match c with
@@ -658,10 +599,9 @@ returns the shape sequence of the run, in every world and under every
 environment.
 
 **Why there is nothing to assume.** The kernel's C2 was refuted under a
-representation in which `ask` carried an arbitrary `Expr Γ (Q c)`: an answer
-could then choose the *addressee*, and the addressee is part of the shape. The
-counterexample is no longer expressible. `Plan.ask` carries `s : Q.Shape c` as
-term-level data and `e : Expr Γ String` as the words, and the `ask` case of this
+representation in which an answer could choose the addressee, which is part of
+the shape. The counterexample is no longer expressible. `Plan.ask` carries
+`s : Request.Shape c` as term-level data; `shapes` projects `s.question` while
 induction is `congrArg₂ _ rfl …` — the shape on both sides is the literal `s`
 written in the term. The side predicate that used to repair this theorem
 (`ShapeStatic`, "the answer flows into the prompt text and nowhere else") is
@@ -676,11 +616,12 @@ theorem shapes_eq_trace_of_le_pipeline (p : Plan Γ A) (h : level p ≤ Level.pi
   | ret e => intro γ ω; simp [shapes_ret, Plan.trace]
   | askC c q k ih =>
     intro γ ω
-    rw [shapes_askC, ih h (.cons (ω c q) γ) ω]
+    rw [shapes_askC, ih h (.cons (ω c q.question) γ) ω]
     simp [Plan.trace_askC, Event.shape]
   | ask c s e k ih =>
     intro γ ω
-    rw [shapes_ask, ih (le_of_ask h).2 (.cons (ω c (s.withPrompt (e γ))) γ) ω]
+    rw [shapes_ask, ih (le_of_ask h).2
+      (.cons (ω c (s.question.withPrompt (e γ))) γ) ω]
     simp [Plan.trace_ask, Event.shape]
   | case t e arms _ => exact absurd (le_of_case h).1 (by decide)
   | dyn b e f _ => exact absurd h (by simp only [level_dyn]; decide)
@@ -794,8 +735,8 @@ package that is not a `PlanAlg.fold`: an algebra carrier may not mention `p`.
 
 ```
 costM (ret e)       γ = {1}
-costM (askC c q k)  γ = map (price c q *)                     (costM k γ)
-costM (ask c s e k) γ = map (price c (s.withPrompt (e γ)) *)  (costM k γ)
+costM (askC c r k)  γ = map (price c r.question *)                  (costM k γ)
+costM (ask c s e k) γ = map (price c (s.question.withPrompt (e γ)) *)(costM k γ)
 costM (case _ arms) γ = Finset.univ.val.bind (fun t => costM (arms t) γ)
 ```
 
@@ -806,9 +747,11 @@ the difference. `bill_mem_leaves` is that argument. -/
 def costM [CommMonoid S] (price : Price S) {A : Type} :
     {Γ : Ctx} → (p : Plan Γ A) → level p ≤ Level.branch → Env Γ → Multiset S
   | _, .ret _, _, _ => {1}
-  | _, .askC c q k, h, γ => (costM price k h (.cons default γ)).map (price c q * ·)
+  | _, .askC c q k, h, γ =>
+      (costM price k h (.cons default γ)).map (price c q.question * ·)
   | _, .ask c s e k, h, γ =>
-      (costM price k (le_of_ask h).2 (.cons default γ)).map (price c (s.withPrompt (e γ)) * ·)
+      (costM price k (le_of_ask h).2 (.cons default γ)).map
+        (price c (s.question.withPrompt (e γ)) * ·)
   | _, .case _ _ arms, h, γ =>
       -- The tag's type is enumerated in the analyses; the bag sums over the
       -- `Fintype` Mathlib derives from that enumeration, which is the same
@@ -826,9 +769,9 @@ is why `costM` returns the bag and not a tree. It is what the bounds and the
 budget subtype are proved from.
 
 The `ask` case is where the shape repair pays: the analysis prices
-`s.withPrompt (e γ')` and the run pays for `s.withPrompt (e γ)`, two questions
-of the *same shape* `s`, so `PricesByShape` closes the gap with no side
-condition on the term. -/
+`s.question.withPrompt (e γ')` and the run pays for
+`s.question.withPrompt (e γ)`, two questions of the same semantic shape, so
+`PricesByShape` closes the gap. -/
 theorem bill_mem_leaves [CommMonoid S] {price : Price S} (hp : PricesByShape price) :
     ∀ {Γ : Ctx} {A : Type} (p : Plan Γ A) (h : level p ≤ Level.branch),
       ∀ (γ γ' : Env Γ) (ω : Ω),
@@ -843,7 +786,7 @@ theorem bill_mem_leaves [CommMonoid S] {price : Price S} (hp : PricesByShape pri
   | ask c s e k ih =>
     intro h γ γ' ω
     simp only [costM, Plan.trace_ask, billFresh_cons]
-    rw [hp c (s.withPrompt (e γ)) (s.withPrompt (e γ')) rfl]
+    rw [hp c (s.question.withPrompt (e γ)) (s.question.withPrompt (e γ')) rfl]
     exact Multiset.mem_map_of_mem _ (ih (le_of_ask h).2 _ _ ω)
   | case t e arms ih =>
     intro h γ γ' ω
@@ -938,7 +881,8 @@ end Tropical
 /-! ### …and the arm no world takes -/
 
 /-- A question to charge for. -/
-def ackQ (n : Nat) : Q .ack := { addressee := .tool "tick", scope := 1, prompt := "", draw := n }
+def ackQ (n : Nat) : Request .ack :=
+  .consult { addressee := .tool "tick", scope := 1, prompt := "", draw := n }
 
 /-- A branch whose tag mentions no answer, so one arm is unreachable — and the
 unreachable arm is the cheap one. -/
@@ -991,7 +935,8 @@ theorem length_trace_ticks (ω : Ω) :
   | succ n ih => intro Γ γ; simp [ticks, Plan.trace_askC, ih]
 
 /-- The question whose answer decides how much work there is. -/
-def sizeQ : Q .text := { addressee := .tool "ls", scope := 1, prompt := "how many?", draw := 0 }
+def sizeQ : Request .text :=
+  .consult { addressee := .tool "ls", scope := 1, prompt := "how many?", draw := 0 }
 
 /-- **A `dyn` plan whose bill is unbounded.** One closed question, then a plan
 *computed from* the answer: the residue `case` cannot reach, and the reason
@@ -1012,7 +957,7 @@ def sayLong (n : Nat) : Ω := fun c => match c with
 theorem bill_unbounded (n : Nat) :
     billFresh tick (Plan.trace (sayLong n) unbounded Env.nil) = Multiplicative.ofAdd (n + 1) := by
   have hlen : (Plan.trace (sayLong n) unbounded Env.nil).length = n + 1 := by
-    have hstr : (sayLong n .text sizeQ).length = n := by simp [sayLong]
+    have hstr : (sayLong n .text sizeQ.question).length = n := by simp [sayLong]
     rw [unbounded, Plan.trace_askC, List.length_cons, Plan.trace, denote_dyn]
     simp only [Env.head_cons, hstr]
     exact congrArg (· + 1) (length_trace_ticks (sayLong n) n _)

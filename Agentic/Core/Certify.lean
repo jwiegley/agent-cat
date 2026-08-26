@@ -7,8 +7,8 @@ Rederivation kernel §5(ii) and §5(iii), and open question 10 ("what must the
 runtime-adherence theorem SAY?"). The compiled probes are
 `attack-realizability-lean/B_adequacy.lean` and
 `attack-realizability-lean/C_certificate.lean`; this module is those two probes
-ported onto the `Plan`/`denote`/`Table` of the package, where `Code`, `El` and
-`Q` are *definitions* rather than the probes' three axioms.
+ported onto the package's annotated `Plan`, erasing `denote`, and bare-question
+`Table`; `Code`, `El`, and `Q` are definitions rather than probe axioms.
 
 Two statements, and the difference between them is the whole design.
 
@@ -101,9 +101,11 @@ theorem execM_trace_agree {A : Type} (o : Oracle Id) (p : Dlg A) :
       simp only []
       intro ω ω' hω hω'
       have e : ω c q = o c q t :=
-        Extends.head ((execM_adequacy o (f (o c q t)) (Table.cons c q (o c q t) t)).1 ω hω)
+        Extends.head ((execM_adequacy o (f (o c q t))
+          (Table.cons c q (o c q t) t)).1 ω hω)
       have e' : ω' c q = o c q t :=
-        Extends.head ((execM_adequacy o (f (o c q t)) (Table.cons c q (o c q t) t)).1 ω' hω')
+        Extends.head ((execM_adequacy o (f (o c q t))
+          (Table.cons c q (o c q t) t)).1 ω' hω')
       rw [Dlg.trace_ask, Dlg.trace_ask, e, e',
         ih (o c q t) (Table.cons c q (o c q t) t) ω ω' hω hω']
 
@@ -211,14 +213,13 @@ here the way `test/Pollution.lean` asserts its own: as build failures. Add a
 `sorry`, a `Classical.choice`, or a `Fintype` to the syntax and one of these
 stops elaborating.
 
-**Zero axioms for the certificate.** `certify_sound` reaches `Plan`, `denote`,
-`worldOf`, `lookup`, `Q` and `El` and nothing else, none of which is a quotient
-or a choice — which is what `Agentic/Core/Plan.lean`'s closed `Tag` and
-`Agentic/Core/Question.lean`'s `Verdict.instInhabited` are each written for.
+**Zero axioms for the certificate.** `certify_sound` reaches the annotated `Plan`,
+erasing `denote`, bare-Q `worldOf`/`lookup`, and `El`; none requires quotient or
+choice.
 
 **Adequacy is `propext`-only**, which is the class the probe
-`attack-realizability-lean/B_adequacy.lean` reports (`[Code, El, Qq, propext]`,
-its first three being the axioms standing in for this package's definitions). No
+`attack-realizability-lean/B_adequacy.lean` reports; its abstract question
+axioms are concrete `Q` definitions here. No
 `Classical.choice`, no `Quot.sound`, and nothing of Mathlib's.
 -/
 

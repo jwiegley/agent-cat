@@ -10,21 +10,14 @@ import Agentic.Scope
 -- from lists and products. JSON is a representation in `Schema.Json`, outside
 -- this mathematical root.
 import Agentic.Core.Schema
--- The rederivation kernel's mathematical space, Stage 1 (dossier
--- rederivation-kernel.md §1–§3): question space — the answer universe `El`,
--- including the schema-indexed structured family, and the question `Q c` that carries everything determining the reply
--- (scope included, so `under` is a fold and not a constructor), its
--- factorization `Q c ≅ Q.Shape c × String` into what is asked of whom and what
--- is said (which is what `Plan`'s `ask` node splits, and hence why the kernel's
--- C2 needs no side condition), and `Verdict` as `WithZero (FreeMonoid
--- Objection)`, in which refusal is an answer — together with the two
--- projections every renderer in the package shares, `Verdict.objections` and
--- `Verdict.render`, defined once here beside the algebra they read.
+-- Stage 1 question space: `Code`/`El`, `Q c` (addressee, scope, words and
+-- draw), its shape/words factorization, and the verdict algebra.
 import Agentic.Core.Question
--- Worlds: the total answer sheet `Ω = (c : Code) → Q c → El c`, the finite
--- partial sheets a run accumulates (`Table`, its extension preorder, and the
--- defaulting totalization `worldOf`), and `pin` as `Function.update` at the two
--- levels `Ω` actually has, with the fork law re-derived rather than assumed.
+-- Annotated executable requests: `Request c = Q c × Intent c`. Denotation erases
+-- intent; reuse, ordering, permission, and lockstep interpret it below meaning.
+import Agentic.Core.Request
+-- Worlds: `Ω = (c : Code) → Q c → El c`, finite bare-question sheets,
+-- defaulting totalization and counterfactual pinning.
 import Agentic.Core.World
 -- Dialogues: the coherent world-indexed (answer, transcript) pair, `Monad` and
 -- `LawfulMonad` with no quotient, `run`/`trace` as the two morphisms that are
@@ -34,9 +27,9 @@ import Agentic.Core.Dlg
 -- Plans, Stage 2: the representation. Contexts as lists of codes, environments
 -- as their products, variables as de Bruijn membership proofs, and the five
 -- term formers — `ret`, `askC`, `ask`, `case`, `dyn` — of a first-order,
--- intrinsically-typed syntax. `ask` carries the question's *shape* as term-level
--- data and only its *words* as a pure `Expr` over the answers in scope, so an
--- answer reaches the prompt and nothing else by construction. Sequencing is
+-- intrinsically-typed syntax. `ask` carries question shape and execution intent
+-- as term-level data and computes only words from prior answers; `denote` erases
+-- intent.
 -- `graft` (substitution into the `ret` leaves), not a constructor; `under σ`,
 -- `panel` and `revising` are derived, and only general value-sequencing
 -- (`bindP`) needs the quarantined `dyn`.
@@ -55,8 +48,8 @@ import Agentic.Core.Denote
 -- Mathlib's `max` and `Finset.sup`, invariant under renaming and scope, and
 -- unmoved by `mapP`/`zipWith` while `bindP` sits at the top.
 import Agentic.Core.Level
--- The bill, Stage 3: prices as functions of the question, the transcript's two
--- bills (`billFresh`, `billMemo`, related by divisibility), and the kernel's
+-- Semantic bill, Stage 3: price is a function of bare question and `billFresh`
+-- is the transcript monoid morphism. Operational memo billing is in `ExecCost`.
 -- cost obligations proved where they are true — the exact question list at
 -- `batch`, the exact count, code sequence and question *shapes* at `pipeline`
 -- and the exact bill there under `PricesByShape` alone (the kernel's C2 holds

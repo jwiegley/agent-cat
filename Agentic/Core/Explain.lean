@@ -159,10 +159,12 @@ namespace Plan
 
 theorem size_ret {Γ : Ctx} {A : Type} (e : Expr Γ A) : Plan.size (Plan.ret e) = 1 := rfl
 
-theorem size_askC {Γ : Ctx} {A : Type} (c : Code) (q : Q c) (k : Plan (c :: Γ) A) :
+theorem size_askC {Γ : Ctx} {A : Type} (c : Code) (q : Request c)
+    (k : Plan (c :: Γ) A) :
     Plan.size (Plan.askC c q k) = 1 + Plan.size k := rfl
 
-theorem size_ask {Γ : Ctx} {A : Type} (c : Code) (s : Q.Shape c) (e : Expr Γ String)
+theorem size_ask {Γ : Ctx} {A : Type} (c : Code) (s : Request.Shape c)
+    (e : Expr Γ String)
     (k : Plan (c :: Γ) A) : Plan.size (Plan.ask c s e k) = 1 + Plan.size k := rfl
 
 theorem size_case {Γ : Ctx} {A : Type} (t : Tag) (e : Expr Γ t.El) (arms : t.El → Plan Γ A) :
@@ -174,14 +176,8 @@ theorem size_dyn {Γ : Ctx} {A : Type} (b : Code) (e : Expr Γ (El b)) (f : El b
 
 end Plan
 
-/-- The consultation count, as an algebra. `Plan.askNodes` just below is its
-fold: how many consultations are *written* in the term, both arms of every
-branching counted.
-
-Not a bill: a run pays for the questions on the path it takes, and that is what
-`Cost.costM`'s bag counts. This is the other number — how many questions the
-author wrote — and the two coincide exactly where there is no branching, which is
-`Plan.length_trace_eq_askNodes` below. -/
+/-- Request-node count as a fold: every authored `askC`/`ask` occurrence, with
+both arms of a branch counted. Not a bill; a run pays only its selected path. -/
 def Plan.askNodesAlg : PlanAlg (fun _ _ => Nat) where
   ret _ := 0
   askC _ _ n := 1 + n
@@ -190,7 +186,7 @@ def Plan.askNodesAlg : PlanAlg (fun _ _ => Nat) where
     (FinEnum.toList t.El).foldl (fun acc x => acc + arms x) 0
   dyn _ _ _ := 0
 
-/-- `[[Plan.askNodes p]]` = how many consultations are written in the term.
+/-- `[[Plan.askNodes p]]` = authored request nodes in the term.
 `Plan.askNodesAlg.fold`. -/
 def Plan.askNodes : {Γ : Ctx} → {A : Type} → Plan Γ A → Nat :=
   fun p => Plan.askNodesAlg.fold p
@@ -201,10 +197,12 @@ namespace Plan
 
 theorem askNodes_ret {Γ : Ctx} {A : Type} (e : Expr Γ A) : Plan.askNodes (Plan.ret e) = 0 := rfl
 
-theorem askNodes_askC {Γ : Ctx} {A : Type} (c : Code) (q : Q c) (k : Plan (c :: Γ) A) :
+theorem askNodes_askC {Γ : Ctx} {A : Type} (c : Code) (q : Request c)
+    (k : Plan (c :: Γ) A) :
     Plan.askNodes (Plan.askC c q k) = 1 + Plan.askNodes k := rfl
 
-theorem askNodes_ask {Γ : Ctx} {A : Type} (c : Code) (s : Q.Shape c) (e : Expr Γ String)
+theorem askNodes_ask {Γ : Ctx} {A : Type} (c : Code) (s : Request.Shape c)
+    (e : Expr Γ String)
     (k : Plan (c :: Γ) A) : Plan.askNodes (Plan.ask c s e k) = 1 + Plan.askNodes k := rfl
 
 theorem askNodes_case {Γ : Ctx} {A : Type} (t : Tag) (e : Expr Γ t.El)
@@ -232,7 +230,8 @@ theorem Plan.length_trace_eq_askNodes {Γ : Ctx} {A : Type} (p : Plan Γ A)
   | ret e => intro γ ω; simp [Plan.trace, Plan.askNodes_ret]
   | askC c q k ih =>
     intro γ ω
-    rw [Plan.trace_askC, List.length_cons, ih h (.cons (ω c q) γ) ω, Plan.askNodes_askC]
+    rw [Plan.trace_askC, List.length_cons,
+      ih h (.cons (ω c q.question) γ) ω, Plan.askNodes_askC]
     omega
   | ask c s e k ih =>
     intro γ ω
@@ -253,16 +252,16 @@ so that a prompt with newlines in it reads as its addressee will read it. -/
 def quoted (d : Nat) (s : String) : List String :=
   (s.splitOn "\n").map fun l => s!"{indent d}| {l}"
 
-/-- `[[shapeLine c s]]` = the part of a question that is written in the term: its
-kind, its addressee, its two scope axes and its draw.
+/-- Representation request shape, including execution intent. -/
+def requestShapeLine (c : Code) (s : Request.Shape c) : String :=
+  s!"{pad 10 s.intent.name}{pad 8 (Exec.Code.name c)}\
+     {pad 24 (Exec.Addressee.render s.addressee)}\
+     {pad 22 (Q.axes (s.question.withPrompt ""))}draw={s.draw}"
 
-`Q.axes` reads the axes off a *question*, and a shape is a question with its words
-forgotten (`Q.withPrompt_shape`), so asking a shape for its own axes is asking the
-question with the empty prompt. -/
+/-- Bare semantic question shape. -/
 def shapeLine (c : Code) (s : Q.Shape c) : String :=
-  let q := s.withPrompt ""
   s!"{pad 8 (Exec.Code.name c)}{pad 24 (Exec.Addressee.render s.addressee)}\
-     {pad 22 (Q.axes q)}draw={s.draw}"
+     {pad 22 (Q.axes (s.withPrompt ""))}draw={s.draw}"
 
 end Explain
 
@@ -276,10 +275,10 @@ term does not contain. -/
 def Plan.explainAlg : PlanAlg (fun _ _ => Nat → List String) where
   ret _ := fun d => [s!"{Explain.indent d}ret     (a leaf: the block is over)"]
   askC := fun {Γ} {_} c q k => fun d =>
-      (s!"{Explain.indent d}askC    {Explain.shapeLine c q.shape}  binds #{Γ.length}"
+      (s!"{Explain.indent d}askC    {Explain.requestShapeLine c q.shape}  binds #{Γ.length}"
         :: Explain.quoted (d + 1) q.prompt) ++ k d
   ask := fun {Γ} {_} c s e k => fun d =>
-      (s!"{Explain.indent d}ask     {Explain.shapeLine c s}  binds #{Γ.length}"
+      (s!"{Explain.indent d}ask     {Explain.requestShapeLine c s}  binds #{Γ.length}"
         :: Explain.quoted (d + 1) (e (Env.probe Γ))) ++ k d
   case := fun t _ arms => fun d =>
       let ts := FinEnum.toList t.El
@@ -305,16 +304,17 @@ theorem explain_ret {Γ : Ctx} {A : Type} (d : Nat) (e : Expr Γ A) :
     Plan.explain d (Plan.ret e)
       = [s!"{Explain.indent d}ret     (a leaf: the block is over)"] := rfl
 
-theorem explain_askC {Γ : Ctx} {A : Type} (d : Nat) (c : Code) (q : Q c)
+theorem explain_askC {Γ : Ctx} {A : Type} (d : Nat) (c : Code) (q : Request c)
     (k : Plan (c :: Γ) A) :
     Plan.explain d (Plan.askC c q k)
-      = (s!"{Explain.indent d}askC    {Explain.shapeLine c q.shape}  binds #{Γ.length}"
+      = (s!"{Explain.indent d}askC    {Explain.requestShapeLine c q.shape}  binds #{Γ.length}"
           :: Explain.quoted (d + 1) q.prompt) ++ Plan.explain d k := rfl
 
-theorem explain_ask {Γ : Ctx} {A : Type} (d : Nat) (c : Code) (s : Q.Shape c)
+theorem explain_ask {Γ : Ctx} {A : Type} (d : Nat) (c : Code)
+    (s : Request.Shape c)
     (e : Expr Γ String) (k : Plan (c :: Γ) A) :
     Plan.explain d (Plan.ask c s e k)
-      = (s!"{Explain.indent d}ask     {Explain.shapeLine c s}  binds #{Γ.length}"
+      = (s!"{Explain.indent d}ask     {Explain.requestShapeLine c s}  binds #{Γ.length}"
           :: Explain.quoted (d + 1) (e (Env.probe Γ))) ++ Plan.explain d k := rfl
 
 theorem explain_case {Γ : Ctx} {A : Type}
@@ -352,6 +352,7 @@ theorem bindForm_ask_head_draw {A : Type} {Γ : Ctx} (fns : Fns) (c : Code)
     ((Plan.trace ω (form k) γ).head?).map (fun e => e.q.draw)
       = some a.target.draw := by
   simp only [bindForm] at h
+  unfold askForm at h
   cases hg : askGuard a with
   | error e => rw [hg] at h; exact absurd h (by simp)
   | ok u =>
@@ -376,11 +377,11 @@ and what rung it sits at. -/
 def planLines {A : Type} (p : Plan [] A) : List String :=
   [ "--- the checked term, as the library holds it: a rendering of the REPRESENTATION \
      (Plan [] Unit) and not of the source text ---"
-  , s!"nodes: {p.size}   consultations written: {p.askNodes}   level: {levelName (level p)}"
+  , s!"nodes: {p.size}   request nodes written: {p.askNodes}   level: {levelName (level p)}"
   , "legend: `binds #d` is the binder a question introduces, named by its distance from the \
      root, and `{#d}` inside a prompt is where the term splices that answer;"
-  , "        `askC` carries its words in the term (a closed question, the batch rung), `ask` \
-     computes them from the answers in scope (the pipeline rung);"
+  , "        each request line begins with `consult`, `observe`, or `effect`; `askC` carries \
+     closed words, while `ask` computes words from answers in scope;"
   , "        a `case` prints its arms in the enumeration order of its tag type — the `else` \
      arm then the `if` arm for a flag, `approved` then `objected` then `no answer` for a \
      verdict;"
@@ -414,8 +415,8 @@ paths, from `Cost.costM`.
 `h : level p ≤ Level.branch` is the argument `costM` demands, which is why
 `Dsl.checkProgram_level_le` is the term every tool over programs is built on.
 The folds are `Cost.minFold` and `Cost.maxFold` at `tick`, so the numbers
-are consultations — and they are **bounds**: `Cost.minFold_not_attained` exhibits a
-plan whose `minFold` no world pays.
+count request occurrences — and they are **bounds**: `Cost.minFold_not_attained`
+exhibits a plan whose `minFold` no world pays.
 
 `paths` is `Multiset.card`, so it counts paths *with multiplicity*: two arms that
 cost the same are two paths, which is what a reader of `leafBills` below is
@@ -474,15 +475,15 @@ Three regimes, and the output says which one it is in.
   programs. -/
 def costLines {A : Type} (p : Plan [] A) : List String :=
   let hdr :=
-    [ s!"level: {levelName (level p)}   consultations written in the term: {p.askNodes}   \
+    [ s!"level: {levelName (level p)}   request nodes written: {p.askNodes}   \
          nodes: {p.size}" ]
   if h : level p ≤ Level.branch then
     let (lo, hi, paths) := costSummary p h
     let bills := leafBills p h
     let attainment : List String :=
       if level p ≤ Level.pipeline then
-        [ s!"attained: exactly {p.askNodes} consultations, in every world — at or below the \
-             `pipeline` rung the term fixes the question sequence, so this is a bill and not a \
+        [ s!"attained: exactly {p.askNodes} request occurrences, in every world — at or below the \
+             `pipeline` rung the term fixes the request sequence, so this is a bill and not a \
              bound (Plan.length_trace_eq_askNodes, Cost.length_trace_eq_of_le_pipeline)." ]
       else
         [ "attained: NOT computed, and not computable from the term alone. The numbers above \
@@ -499,8 +500,7 @@ def costLines {A : Type} (p : Plan [] A) : List String :=
     hdr
       ++ shapeLines p
       ++ [ s!"cost tree: {paths} leaves, cheapest {sayNat? lo}, dearest {sayNat? hi} \
-              consultations (tick: one unit per consultation)"
-         , s!"leaf bills, with multiplicity: {sayNats bills}"
+              request occurrences (tick: one unit per request)"
          , s!"leaf bills, as a set:          {sayNats bills.dedup}" ]
       ++ attainment
   else

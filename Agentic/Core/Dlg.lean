@@ -108,7 +108,7 @@ instance : LawfulMonad Dlg := by
 
 end Dlg
 
-/-- `[[Event]]` = one thing said and its reply: `Σ c, Q c × El c`. -/
+/-- `[[Event]]` = one question and its reply: `Σ c, Q c × El c`. -/
 structure Event where
   /-- The kind of answer asked for. -/
   c : Code
@@ -116,6 +116,7 @@ structure Event where
   q : Q c
   /-- What came back. -/
   a : El c
+
 
 /-- `[[Trace]]` = the transcript: the free monoid on `Event`. Concatenation is
 `++`, the empty transcript is `[]`, and every bill is a monoid morphism out of
@@ -189,8 +190,7 @@ theorem run_bind' (ω : Ω) (p : Dlg A) (k : A → Dlg B) :
 theorem trace_bind' (ω : Ω) (p : Dlg A) (k : A → Dlg B) :
     trace ω (p >>= k) = trace ω p ++ trace ω (k (run ω p)) := trace_bind ω p k
 
-/-- One consultation, as a dialogue. `[[ask1 c q]]` = the dialogue that puts `q`
-and answers with the reply. -/
+/-- One question as a dialogue: put it, then return its reply. -/
 def ask1 (c : Code) (q : Q c) : Dlg (El c) := .ask c q .done
 
 @[simp] theorem run_ask1 (ω : Ω) (c : Code) (q : Q c) : run ω (ask1 c q) = ω c q := rfl
@@ -204,13 +204,12 @@ def ask1 (c : Code) (q : Q c) : Dlg (El c) := .ask c q .done
 state, is two lines about transcripts once the transcript is in the meaning
 (§3 q2). -/
 
-/-- Consulting once and reading the answer twice records **one** event. -/
+/-- Putting one question and reading its answer twice records **one** event. -/
 theorem trace_share (ω : Ω) (c : Code) (q : Q c) :
     trace ω (do let x ← ask1 c q; pure (x, x)) = [⟨c, q, ω c q⟩] := rfl
 
-/-- Consulting twice records **two** events, even though both consultations have
-the same answer. Cost is therefore an invariant of semantic equality, and no
-label is needed to tell sharing from duplication. -/
+/-- Putting a question twice records **two** events, even though its world answer
+is equal. Trace distinguishes sharing from duplicated occurrences. -/
 theorem trace_dup (ω : Ω) (c : Code) (q : Q c) :
     trace ω (do let x ← ask1 c q; let y ← ask1 c q; pure (x, y))
       = [⟨c, q, ω c q⟩, ⟨c, q, ω c q⟩] := rfl
@@ -272,13 +271,15 @@ theorem run_under (ω : Ω) (σ : Sig) (p : Dlg A) :
   | ask c q f ih => simp only [under_ask, run_ask]; exact ih _
 
 /-- Relabelling one event. -/
-def _root_.Agentic.Core.Event.relabel (σ : Sig) (e : Event) : Event := ⟨e.c, σ.onQ e.c e.q, e.a⟩
+def _root_.Agentic.Core.Event.relabel (σ : Sig) (e : Event) : Event :=
+  ⟨e.c, σ.onQ e.c e.q, e.a⟩
 
 /-- **Morphism equation for `under` on transcripts**: the transcript of a
 relabelled dialogue is the relabelled transcript of the dialogue at the
 precomposed world. -/
 theorem trace_under (ω : Ω) (σ : Sig) (p : Dlg A) :
-    trace ω (under σ p) = (trace (fun c q => ω c (σ.onQ c q)) p).map (Event.relabel σ) := by
+    trace ω (under σ p) =
+      (trace (fun c q => ω c (σ.onQ c q)) p).map (Event.relabel σ) := by
   induction p with
   | done a => rfl
   | ask c q f ih =>
@@ -400,13 +401,12 @@ theorem forcing {A : Type} (p p' : Dlg A)
     (hp : Fresh Table.nil p) (hp' : Fresh Table.nil p') : p = p' ↔ Obs p p' :=
   ⟨obs_of_eq, fun h => forcing_of_fresh p p' Table.nil hp hp' (ObsOn.of_obs h)⟩
 
-/-- Freshness is not a vacuous hypothesis: one consultation is fresh. -/
+/-- Freshness is not vacuous: one question is fresh. -/
 theorem fresh_ask1 (c : Code) (q : Q c) : Fresh Table.nil (ask1 c q) :=
   Fresh.ask rfl (fun _ => Fresh.done _ _)
 
-/-- Nor is it vacuous at depth: two consultations with *different* questions are
-fresh, and a deliberate resample is a different question (§3 q1), so the
-repeat-free fragment is where plans actually live. -/
+/-- Nor is it vacuous at depth: two distinct questions are fresh; changing draw
+is one ordinary way to obtain that difference (§3 q1). -/
 theorem fresh_two (c : Code) {q q' : Q c} (h : q' ≠ q) :
     Fresh Table.nil (bind (ask1 c q) (fun _ => ask1 c q')) :=
   Fresh.ask rfl (fun x =>
@@ -416,7 +416,8 @@ theorem fresh_two (c : Code) {q q' : Q c} (h : q' ≠ q) :
 /-! ## …and the counterexample that says why the hypothesis is there -/
 
 /-- A question, for the counterexample. -/
-def probe : Q .flag := { addressee := .model "m", scope := 1, prompt := "?", draw := 0 }
+def probe : Q .flag :=
+  { addressee := .model "m", scope := 1, prompt := "?", draw := 0 }
 
 /-- Ask one question twice and report both answers. -/
 def repeated : Dlg (Bool × Bool) :=
