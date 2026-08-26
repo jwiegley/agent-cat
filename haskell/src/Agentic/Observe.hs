@@ -34,6 +34,7 @@
 
 module Agentic.Observe
   ( observeValue,
+    observeValueWithIntent,
     printedValue,
     zeroPosValue,
 
@@ -62,10 +63,23 @@ import qualified Data.Vector as V
 
 import Agentic.Builder (Program, progPlan, progRawOut)
 import Agentic.Guards (askCounts)
-import Agentic.Plan (askNodes, codes, costSummary, level, levelName, schemaRequirements, size)
+import Agentic.Plan
+  ( Plan,
+    askNodes,
+    codes,
+    costSummary,
+    level,
+    levelName,
+    schemaRequirements,
+    size
+  )
 import Agentic.Schema.Conformance (coversAnswer)
 import Agentic.Schema.Json (codeJson)
-import Agentic.World (WorldSpec (..), worldObservation)
+import Agentic.World
+  ( WorldSpec (..),
+    worldObservation,
+    worldObservationWithIntent
+  )
 
 -- ---------------------------------------------------------------------------
 -- The reply
@@ -86,8 +100,8 @@ import Agentic.World (WorldSpec (..), worldObservation)
 -- that is part of its identity. A plan whose paths disagree on
 -- their answer kinds has no @codes@ at all and the field is @null@ — which is
 -- a different thing from the empty list a question-free batch program yields.
-observeValue :: Program -> [WorldSpec] -> Value
-observeValue prog ws
+observeValueAt :: (Plan '[] () -> WorldSpec -> Value) -> Program -> [WorldSpec] -> Value
+observeValueAt observeWorld prog ws
   | not (all (\world -> all (coversAnswer (wsSchema world)) requirements) ws) =
       object ["error" .= ("world is missing an answer for a queried structured schema" :: Text)]
   | otherwise =
@@ -100,13 +114,21 @@ observeValue prog ws
             .= object ["minFold" .= mn, "maxFold" .= mx, "paths" .= paths],
           "blockAsks" .= blockAsks,
           "fnAsks" .= fnAsks,
-          "worlds" .= map (worldObservation p) ws
+          "worlds" .= map (observeWorld p) ws
         ]
   where
     p = progPlan prog
     requirements = schemaRequirements p
     (mn, mx, paths) = costSummary p
     (blockAsks, fnAsks) = askCounts (progRawOut prog)
+
+-- | Frozen version-2 observation.
+observeValue :: Program -> [WorldSpec] -> Value
+observeValue = observeValueAt worldObservation
+
+-- | Intent-aware version-3 observation.
+observeValueWithIntent :: Program -> [WorldSpec] -> Value
+observeValueWithIntent = observeValueAt worldObservationWithIntent
 
 -- ---------------------------------------------------------------------------
 -- The program, printed

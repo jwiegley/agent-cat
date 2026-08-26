@@ -22,48 +22,32 @@
 --    to "Agentic.Text", which is the byte-faithful port and the /only/ place in
 --    this package that decides what an addressee's bytes mean. A second copy of
 --    that decision is exactly what @Exec.lean:248@–@:249@ says must not exist.
--- 2. __The memoizing interpreter__ — 'runPlanIO' realizes @Exec.lean:503@'s
---    @Dlg.execM@ observable while scheduling dependency-ready asks concurrently.
---    Prompt support is carried by 'Expr'; STM answer cells block only consumers,
---    memo reservations ensure equal questions race to one consultation, and trace
---    tickets restore plan order. This is no longer Lean's sequential @rfl@
---    implementation at @IO@, so the claim retained here is the executable pure
---    factorization below, not definitional equality of operational steps.
--- 3. __The answering service__ — 'WorldIO', Lean's @Oracle IO@, passed in. The
---    only 'WorldIO' here is 'scriptedWorld'; the live one is
---    @Agentic.AgentDeck@'s 'worldOfDeck', and it is built from the same
---    'askDecoding' loop.
+-- 2. __The annotated Plan realization__ — 'runPlanIO' schedules dependency-ready
+--    asks concurrently. STM memo reservations key reusable answers by bare Q;
+--    every Plan occurrence constructs its own 'ExecEvent'; effects bypass reuse.
+--    Plan-order tickets restore the authored occurrence order.
+-- 3. __The answering service__ — 'WorldIO' consumes annotated `Request`; scripted,
+--    deck, ACP, routing and shell layers interpret that representation policy.
 --
--- == What the run observes, and why it is the pure semantics' observable
---
--- 'runPlanIO' returns @(a, 'Trace')@, and the 'Trace' is "Agentic.World"'s:
--- __one 'Event' per ask node walked__, memo hit or not. The memo /table/ and the
--- transcript are two objects here where Lean makes them one, and the split is
--- deliberate:
---
--- * the table is Lean's @Table@ — consulted before asking and extended after
---   answering. The check, in-flight reservation and insertion are one STM state
---   transition, so two equal ready questions still invoke the service once.
---   (@Exec.lean:507@–@:511@). A question already answered is not put again.
--- * the trace is @Plan.trace@ — what the /plan/ consulted, repetitions and all,
---   so that 'billFresh' and 'billMemo' mean here what they mean in
---   "Agentic.World". Lean reads its bills off @Plan.trace@ too
---   (@Cost.lean@); reading them off the memo table would make 'billFresh' and
---   'billMemo' the same number by construction and the memo bill unfalsifiable.
---
--- Hence the invariant a caller may lean on, and which a test should pin:
---
--- > billFresh t == the number of ask nodes the run walked
--- > billMemo  t == the number of distinct successfully answered questions in t
+-- == What the run observes
 
--- Failed transport attempts and decode retries are operational work but have no
--- 'Event', so neither bill pretends to count them.
+-- 'runPlanIO' returns an 'ExecTrace': one annotated event per Plan node walked,
+-- memo hit or not. Each event keeps the authored request and says whether its
+-- answer was reused or which failover-relabelled question was dispatched.
 --
--- and, at a pure world ('pureWorldIO', Lean's @pureOracle@ at
--- @Exec.lean:618@), the factorization theorem @Exec.lean:646@ becomes an
--- equation anyone can run:
+-- The memo stores semantic answer events keyed by bare Q, never authored event
+-- annotations. Thus `consult q` followed by `observe q` invokes the service once
+-- while the trace retains both intents. Effects are always dispatched.
 --
--- > runPlanIO (pureWorldIO w) p  ==  pure (runPlan w p, trace w p)
+-- Operational bills read this annotated trace:
+--
+-- > billExecFresh t == number of Plan ask nodes walked
+-- > billMemo t      == reusable bare questions once plus every effect occurrence
+--
+-- Failed transport attempts and decode retries remain operational work outside
+-- these per-node bills. At a pure world, forgetting every ExecEvent yields the
+-- bare semantic trace; Lean proves the corresponding K6 square in
+-- `Plan.execAnnotatedPure_forget_trace`.
 --
 -- == What is deliberately not ported
 --
@@ -160,19 +144,25 @@ module Agentic.Exec
 where
 
 import Agentic.Plan
-  ( El,
+  ( AnswerSource (AnswerAsked, AnswerReused),
+    El,
     Env (ECons, ENil),
+    ExecEvent (ExecEvent),
+    ExecTrace,
     Expr,
     Plan (PAsk, PAskC, PCase, PDyn, PRet),
     Q (..),
-    Shape (..),
+    Request (..),
+    RequestShape (..),
     SCode (SAck, SFlag, SStructured, SText, SVerdict),
     defaultEl,
     evalExpr,
     exprUses,
+    intentName,
     fromSCode,
-    shapeOf,
-    withPrompt,
+    intentIsEffect,
+    requestShapeOf,
+    withRequestPrompt,
   )
 import Agentic.Raw
   ( Addressee (AddrModel, AddrPerson, AddrTool, AddrToolExec),
@@ -187,7 +177,6 @@ import Agentic.WF (wft)
 import Agentic.World
   ( Event (Event),
     EventKey,
-    Trace,
     World (worldAnswer),
     eventKey,
   )
@@ -256,51 +245,47 @@ newTurnLaneIO = do
 -- an event; the lane lets the interpreter reserve transport order before a
 -- prompt's dependencies are ready.
 data WorldIO = WorldIO
-  { worldAskIO :: forall (c :: Code). SCode c -> Q c -> IO (El c),
-    worldTurnLane :: forall (c :: Code). SCode c -> Shape c -> Maybe TurnLane
+  { worldAskIO :: forall (c :: Code). SCode c -> Request c -> IO (El c),
+    worldTurnLane :: forall (c :: Code). SCode c -> RequestShape c -> Maybe TurnLane
   }
 
 -- | An answering service whose calls need no ordering beyond data dependencies.
-concurrentWorld :: (forall (c :: Code). SCode c -> Q c -> IO (El c)) -> WorldIO
+concurrentWorld :: (forall (c :: Code). SCode c -> Request c -> IO (El c)) -> WorldIO
 concurrentWorld ask = WorldIO ask (\_ _ -> Nothing)
 
--- | @pureOracle ω@ (@Exec.lean:618@): the answering service that /is/ the world
--- @ω@, ignoring the history because a world is a function of the question.
+-- | Pure annotated answering service over a bare world (`SemanticExec.lean:91`).
+-- @ω@, ignoring history because a world is a function of the bare question.
 --
--- This is the factorization written as a definition. 'runPlanIO' at this
--- 'WorldIO' returns the meaning and the pure transcript:
---
--- > runPlanIO (pureWorldIO w) p  ==  pure (runPlan w p, trace w p)
---
--- which is @Plan.execPure_fst@ (@Exec.lean:747@) and @execM_pure@'s third
--- conclusion (@:646@) at once. The memo table changes nothing here precisely
+-- Lean proves the value square at `SemanticExec.lean:166` and the annotated
+-- trace-erasure square in `Denote.lean`; this Haskell realization is pinned by
+-- policy and conformance probes.
 -- because a 'World' is a function: a repeated question would have got the same
 -- answer had it been put again.
 pureWorldIO :: World -> WorldIO
-pureWorldIO w = concurrentWorld (\c q -> pure (worldAnswer w c q))
+pureWorldIO w = concurrentWorld (\c r -> pure (worldAnswer w c (reqQuestion r)))
 
--- | Wrap an answering service so that every question it is actually put — and
--- the answer that came back — is announced, one line each.
+-- | Wrap an answering service so every request actually put and its answer are
+-- announced.
 --
--- __A memo hit announces nothing__, because nothing was asked: what this prints
--- is the sequence of consultations the run paid for, which is 'billMemo' many
--- lines, not 'billFresh' many. A caller that wants every ask /node/ instead
--- should print the 'Trace' 'runPlanIO' returns.
+-- __A memo hit announces nothing__: output has one line per reusable miss and
+-- effect occurrence, exactly `billMemo`; trace retains every authored node.
 --
 -- Reporting only. Removing it changes no answer. Lean once carried the same
 -- knob as @Settings.onTurn@ and retired it with the rest of the wire policy
--- (@Exec.lean:878@, \"What used to be here\"); the property it had is the one
+-- (`Exec.lean:553`, "What used to be here"); the property it had is the one
 -- this has — a reporting hook is visible to no theorem.
 announcingWorld :: (Text -> IO ()) -> WorldIO -> WorldIO
 announcingWorld out inner =
   WorldIO
     { worldAskIO = \c q -> do
         out $
-          codeWord (fromSCode c)
+          intentName (reqIntent q)
+            <> " "
+            <> codeWord (fromSCode c)
             <> " -> "
-            <> addresseeWord (qAddressee q)
+            <> addresseeWord (qAddressee (reqQuestion q))
             <> ": "
-            <> oneLine (qPrompt q)
+            <> oneLine (qPrompt (reqQuestion q))
         a <- worldAskIO inner c q
         out $ "  <- " <> oneLine (sayEl c a)
         pure a,
@@ -321,9 +306,8 @@ data Memo = Memo
     memoSpent :: !(Set Text)
   }
 
--- | One scheduled ask node: its typed answer and the event occupying that node's
--- position in the eventual trace.
-data NodeResult (c :: Code) = NodeResult (El c) Event
+-- | One scheduled Plan node: typed answer plus its own annotated event.
+data NodeResult (c :: Code) = NodeResult (El c) ExecEvent
 
 type NodeCell c = TMVar (Either SomeException (NodeResult c))
 
@@ -362,14 +346,14 @@ data Reservation = Reservation !(TMVar ()) !(TMVar ())
 -- The observable remains the sequential meaning: the result is evaluated from
 -- the same answers, and tickets are collected in plan order rather than worker
 -- completion order. A case schedules only the selected arm. A concurrent memo
--- reservation preserves "one question, one answer" when equal questions race.
-runPlanIO :: WorldIO -> Plan '[] a -> IO (a, Trace)
+-- reservation preserves one answer when equal reusable requests race; effects bypass it.
+runPlanIO :: WorldIO -> Plan '[] a -> IO (a, ExecTrace)
 runPlanIO = runPlanWith noChains
 
 -- | 'runPlanIO' under a fail-over chain table. The spent-model set is checked
 -- atomically before each attempt; it is scheduling knowledge, not a lock, so
 -- dependency-independent questions remain concurrent even at one model pin.
-runPlanWith :: Chains -> WorldIO -> Plan '[] a -> IO (a, Trace)
+runPlanWith :: Chains -> WorldIO -> Plan '[] a -> IO (a, ExecTrace)
 runPlanWith ch w p = mask $ \restore -> do
   memo <- newTVarIO (Memo Map.empty Map.empty Set.empty)
   threads <- newTVarIO []
@@ -390,7 +374,7 @@ execIn scheduler w ch y pl = case pl of
     a <- awaitExpr scheduler e y
     pure (a, [])
   PAskC c q k -> do
-    cell <- spawn scheduler (reserveQuestion scheduler w ch c (shapeOf q)) $ do
+    cell <- spawn scheduler (reserveQuestion scheduler w ch c (requestShapeOf q)) $ do
       (a, event) <- askOrMemo scheduler w ch c q
       pure (NodeResult a event)
     (result, tickets) <- execIn scheduler w ch (PendingCons cell y) k
@@ -398,7 +382,7 @@ execIn scheduler w ch y pl = case pl of
   PAsk c shape prompt k -> do
     cell <- spawn scheduler (reserveQuestion scheduler w ch c shape) $ do
       words' <- awaitExpr scheduler prompt y
-      (a, event) <- askOrMemo scheduler w ch c (withPrompt shape words')
+      (a, event) <- askOrMemo scheduler w ch c (withRequestPrompt shape words')
       pure (NodeResult a event)
     (result, tickets) <- execIn scheduler w ch (PendingCons cell y) k
     pure (result, Ticket cell : tickets)
@@ -409,21 +393,17 @@ execIn scheduler w ch y pl = case pl of
     a <- awaitExpr scheduler e y
     execIn scheduler w ch y (f a)
 
-reserveQuestion :: Scheduler -> WorldIO -> Chains -> SCode c -> Shape c -> IO [Reservation]
+reserveQuestion :: Scheduler -> WorldIO -> Chains -> SCode c -> RequestShape c -> IO [Reservation]
 reserveQuestion scheduler w ch c shape = atomically (traverse reserveLane (nub lanes))
   where
-    q = withPrompt shape T.empty
+    q = withRequestPrompt shape T.empty
     transportLanes =
       mapMaybe
-        (\candidate -> worldTurnLane w c (shapeOf candidate))
-        (candidates ch Set.empty q)
+        (\candidate -> worldTurnLane w c (requestShapeOf candidate))
+        (requestCandidates ch Set.empty q)
     lanes =
-      (if writes then [schedulerEffects scheduler] else []) <> transportLanes
-    writes = case c of
-      SAck -> True
-      _ -> case shAddressee shape of
-        AddrToolExec {} -> True
-        _ -> False
+      (if intentIsEffect (rsIntent shape) then [schedulerEffects scheduler] else [])
+        <> transportLanes
 
 reserveLane :: TurnLane -> STM Reservation
 reserveLane (TurnLane tailCell) = do
@@ -473,7 +453,7 @@ cancelWorkers :: Scheduler -> IO ()
 cancelWorkers scheduler =
   atomically (readTVar (schedulerThreads scheduler)) >>= mapM_ killThread
 
-awaitTicket :: Scheduler -> Ticket -> IO Event
+awaitTicket :: Scheduler -> Ticket -> IO ExecEvent
 awaitTicket scheduler (Ticket cell) = do
   NodeResult _ event <- awaitCell scheduler cell
   pure event
@@ -515,25 +495,24 @@ dropHead = IntSet.mapMonotonic (subtract 1) . IntSet.delete 0
 -- removed after publishing its exception, preserving the old rule that a later
 -- occurrence retries a transient gap; simultaneous occurrences still share the
 -- one attempt they raced on.
-askOrMemo :: Scheduler -> WorldIO -> Chains -> SCode c -> Q c -> IO (El c, Event)
-askOrMemo scheduler w ch c q = go (candidates ch Set.empty q)
+askOrMemo :: forall c. Scheduler -> WorldIO -> Chains -> SCode c -> Request c -> IO (El c, ExecEvent)
+askOrMemo scheduler w ch c q = go (requestCandidates ch Set.empty q)
   where
-    go [] = abandonAllSpent c q (chainOf ch q)
+    go [] = abandonAllSpent c (reqQuestion q) (chainOf ch (reqQuestion q))
     go (qi : rest) = do
       available <- atomically (candidateAvailable scheduler qi)
       if not available
         then chainLog ch (spentSkip qi) >> go rest
         else do
-          outcome <- try (consult scheduler w c qi) :: IO (Either SomeException Event)
+          outcome <- try (consult scheduler w c q qi) ::
+            IO (Either SomeException (El c, AnswerSource c))
           case outcome of
             Left e
               | Just tge <- fromException e,
                 tgeGap tge == GapExhausted -> markSpent scheduler qi
             _ -> pure ()
           case outcome of
-            Right event -> case eventAnswer c event of
-              Just a -> pure (a, event)
-              Nothing -> ioError (userError "memoized event has a different answer code from its key")
+            Right (a, source) -> pure (a, ExecEvent c q source a)
             Left e
               -- An interrupt is the operator talking, not a gap.
               | Just (_ :: SomeAsyncException) <- fromException e -> throwIO e
@@ -544,7 +523,7 @@ askOrMemo scheduler w ch c q = go (candidates ch Set.empty q)
                     case next of
                       Just qi' -> do
                         chainLog ch $
-                          fromMaybe (addresseeWord (qAddressee qi)) (modelOf qi)
+                          fromMaybe (addresseeWord (qAddressee (reqQuestion qi))) (modelOf qi)
                             <> ": "
                             <> tgeWhy tge
                             <> "; falling back to "
@@ -553,16 +532,16 @@ askOrMemo scheduler w ch c q = go (candidates ch Set.empty q)
                       Nothing -> throwIO (tgeFinal tge)
 
     spentSkip qi =
-      fromMaybe (addresseeWord (qAddressee qi)) (modelOf qi)
+      fromMaybe (addresseeWord (qAddressee (reqQuestion qi))) (modelOf qi)
         <> " " <> [wft|reported its allowance spent earlier in this run; not asking it again|]
 
 
-candidateAvailable :: Scheduler -> Q c -> STM Bool
+candidateAvailable :: Scheduler -> Request c -> STM Bool
 candidateAvailable scheduler q = do
   spent <- memoSpent <$> readTVar (schedulerMemo scheduler)
   pure (maybe True (`Set.notMember` spent) (modelOf q))
 
-markSpent :: Scheduler -> Q c -> IO ()
+markSpent :: Scheduler -> Request c -> IO ()
 markSpent scheduler q = case modelOf q of
   Nothing -> pure ()
   Just model ->
@@ -571,41 +550,50 @@ markSpent scheduler q = case modelOf q of
         (schedulerMemo scheduler)
         (\memo -> memo {memoSpent = Set.insert model (memoSpent memo)})
 
-nextLive :: Scheduler -> [Q c] -> IO (Maybe (Q c))
+nextLive :: Scheduler -> [Request c] -> IO (Maybe (Request c))
 nextLive scheduler qs = atomically $ do
   spent <- memoSpent <$> readTVar (schedulerMemo scheduler)
   pure (find (maybe True (`Set.notMember` spent) . modelOf) qs)
 
-consult :: Scheduler -> WorldIO -> SCode c -> Q c -> IO Event
-consult scheduler w c q = mask $ \restore -> do
-  let key = questionKey c q
-  claim <- atomically (claimQuestion scheduler key)
-  case claim of
-    ClaimCached event -> pure event
-    ClaimWait slot -> atomically (readTMVar slot >>= either throwSTM pure)
-    ClaimOwner slot -> do
-      outcome <- try (restore (worldAskIO w c q))
-      case outcome of
-        Right a -> do
-          let event = Event c q a
-          atomically $ do
-            modifyTVar'
-              (schedulerMemo scheduler)
-              ( \memo ->
-                  memo
-                    { memoTable = Map.insert key event (memoTable memo),
-                      memoPending = Map.delete key (memoPending memo)
-                    }
-              )
-            putTMVar slot (Right event)
-          pure event
-        Left (e :: SomeException) -> do
-          atomically $ do
-            modifyTVar'
-              (schedulerMemo scheduler)
-              (\memo -> memo {memoPending = Map.delete key (memoPending memo)})
-            putTMVar slot (Left e)
-          throwIO e
+consult :: Scheduler -> WorldIO -> SCode c -> Request c -> Request c ->
+  IO (El c, AnswerSource c)
+consult scheduler w c authored dispatched
+  | intentIsEffect (reqIntent authored) = do
+      a <- worldAskIO w c dispatched
+      pure (a, AnswerAsked (reqQuestion dispatched))
+  | otherwise = mask $ \restore -> do
+      let key = questionKey c authored
+      claim <- atomically (claimQuestion scheduler key)
+      case claim of
+        ClaimCached event -> reuse event
+        ClaimWait slot -> atomically (readTMVar slot >>= either throwSTM pure) >>= reuse
+        ClaimOwner slot -> do
+          outcome <- try (restore (worldAskIO w c dispatched))
+          case outcome of
+            Right a -> do
+              let event = Event c (reqQuestion authored) a
+              atomically $ do
+                modifyTVar'
+                  (schedulerMemo scheduler)
+                  ( \memo ->
+                      memo
+                        { memoTable = Map.insert key event (memoTable memo),
+                          memoPending = Map.delete key (memoPending memo)
+                        }
+                  )
+                putTMVar slot (Right event)
+              pure (a, AnswerAsked (reqQuestion dispatched))
+            Left (e :: SomeException) -> do
+              atomically $ do
+                modifyTVar'
+                  (schedulerMemo scheduler)
+                  (\memo -> memo {memoPending = Map.delete key (memoPending memo)})
+                putTMVar slot (Left e)
+              throwIO e
+  where
+    reuse event = case eventAnswer c event of
+      Just a -> pure (a, AnswerReused)
+      Nothing -> ioError (userError "memoized answer has a different code from its bare-Q key")
 
 claimQuestion :: Scheduler -> EventKey -> STM Claim
 claimQuestion scheduler key = do
@@ -622,13 +610,17 @@ claimQuestion scheduler key = do
         pure (ClaimOwner slot)
 
 -- | The model a question's scope names, if it names one.
-modelOf :: Q c -> Maybe Text
-modelOf = scopeModelAxis . qScope
+modelOfQuestion :: Q c -> Maybe Text
+modelOfQuestion = scopeModelAxis . qScope
+
+-- | Model named by an annotated request's question.
+modelOf :: Request c -> Maybe Text
+modelOf = modelOfQuestion . reqQuestion
 
 -- | The whole chain a question pins, spent members included: the primary and
 -- its alternates, or nothing at all when the question is unpinned.
 chainOf :: Chains -> Q c -> [Text]
-chainOf ch q = case modelOf q of
+chainOf ch q = case modelOfQuestion q of
   Nothing -> []
   Just i -> nub (i : Map.findWithDefault [] i (chainAlternates ch))
 
@@ -640,13 +632,19 @@ chainOf ch q = case modelOf q of
 -- back from. Worth saying out loud, because it is an argument for pinning:
 -- __fail-over is a service you get by pinning.__
 candidates :: Chains -> Set Text -> Q c -> [Q c]
-candidates ch spent q = case modelOf q of
+candidates ch spent q = case modelOfQuestion q of
   Nothing -> [q]
   Just i ->
     [ q {qScope = (qScope q) {scopeModelAxis = Just x}}
       | x <- nub (i : Map.findWithDefault [] i (chainAlternates ch)),
         not (x `Set.member` spent)
     ]
+
+-- | Select dispatched questions while preserving the authored annotation.
+requestCandidates :: Chains -> Set Text -> Request c -> [Request c]
+requestCandidates ch spent r =
+  [Request q (reqIntent r) | q <- candidates ch spent (reqQuestion r)]
+
 
 -- | Every model this question pins has already reported its allowance spent.
 --
@@ -701,16 +699,10 @@ noChains = Chains Map.empty stderrLog
 chainsOf :: (Text -> IO ()) -> Map Text [Text] -> Chains
 chainsOf lg t = Chains t lg
 
--- | The key a question is memoized under: 'eventKey' of the event it will
--- become.
---
--- Going through 'eventKey' rather than rebuilding the record is deliberate —
--- the memo key and the bill key are one key, and a port that wrote them out
--- twice could let them drift. The answer handed over is immaterial because
--- 'EventKey' forgets it (a world is a function, so equal questions have equal
--- answers anyway), and 'defaultEl' is the cheapest immaterial answer there is.
-questionKey :: SCode c -> Q c -> EventKey
-questionKey c q = eventKey (Event c q (defaultEl c))
+-- | Bare-Q key of a reusable annotated request. The memo stores a semantic
+-- answer event; each Plan occurrence constructs its own ExecEvent.
+questionKey :: SCode c -> Request c -> EventKey
+questionKey c q = eventKey (Event c (reqQuestion q) (defaultEl c))
 
 -- | Recover the typed answer from the existential event stored at a memo key.
 -- The impossible mismatch remains 'Nothing' rather than introducing a partial
@@ -759,7 +751,7 @@ sayEl (SStructured schema) value =
 -- What a question says about itself on the wire
 -- ---------------------------------------------------------------------------
 
--- | @Exec.Code.name@ (@Exec.lean:777@) — how a code names itself in a prompt
+-- | @Exec.Code.name@ (@Exec.lean:455@) — how a code names itself in a prompt
 -- header, a warning and an abandonment message.
 --
 -- __This is not @Agentic.Raw.codeName@.__ That one spells @CodeAck@ as
@@ -776,7 +768,7 @@ codeWord (SomeCode code) = case code of
   SAck -> "ack"
   SStructured _ -> "structured"
 
--- | @Addressee.render@ (@Exec.lean:784@) — how an addressee names itself in a
+-- | @Addressee.render@ (@Exec.lean:463@) — how an addressee names itself in a
 -- prompt header and in an error.
 addresseeWord :: Addressee -> Text
 addresseeWord = \case
@@ -787,7 +779,7 @@ addresseeWord = \case
   -- wants to know which gate ran, and the argv is in the printed program.
   AddrToolExec i cmd _ -> "tool " <> i <> " (" <> cmd <> ")"
 
--- | @Exec.answerSpec@ (@Exec.lean:807@) — what the addressee must say for
+-- | @Exec.answerSpec@ (@Exec.lean:486@) — what the addressee must say for
 -- 'decodeEl' to read it, sent with every question because the trusted base is
 -- narrow on purpose and an addressee cannot be expected to guess it.
 --
@@ -804,7 +796,7 @@ answerSpec = \case
     "Reply with exactly one JSON value matching this schema and nothing else: "
       <> renderSchema schema
 
--- | @Exec.nudge@ (@Exec.lean:866@) — what to append when a reply could not be
+-- | @Exec.nudge@ (@Exec.lean:547@) — what to append when a reply could not be
 -- read, so the second attempt is not a verbatim repeat of the first.
 --
 -- > "\n\n[Your previous reply could not be read as a {code}: {reply}\n{answerSpec}]"
@@ -827,33 +819,26 @@ nudge c reply =
 -- __This rule is stated here and nowhere else.__ Lean carried a
 -- @Exec.requiresCompletedTurn@ beside its own ACP transport; that transport and
 -- everything that was a policy about a wire are retired (@Exec.lean:62@,
--- @:878@), so the rule below is not a port of a surviving definition — it is
--- the definition, and a transport that changes it changes the meaning of a
--- receipt.
+-- @:553@), so the rule below is not a port of a surviving definition — it is
+-- the definition of this transport-completion policy, not a semantic operation.
 --
--- 'False' is /refusal is an answer/ (§3 q8): a @text@, @verdict@ or @flag@ from
--- a model or a tool is read as given even if the turn was cut short, because a
--- review that stopped mid-sentence is still a review with objections in it.
---
--- 'True' is the case that argument does not cover, and there are two:
---
--- * @ack@ — an act. The question does not ask what somebody thinks, it asks
---   them to do something and say when it is done, and @Decode .ack@ is total,
---   so a receipt from an interrupted turn is /the same term/ in the table as
---   one from a completed act. Recording it would be recording an act nobody
---   performed.
--- * a person. A person-addressed question whose turn was cancelled was not
---   answered by that person; the stand-in stopped, and nobody answered.
+-- 'False' covers every non-effect request not addressed to a person. Interrupted
+-- model/tool output is still its answer; a consultation at @ack@ claims no
+-- external action. 'True' covers annotated effects, whose @Unit@ cannot attest
+-- completion, and person-addressed requests, where a stopped stand-in means no
+-- person answered.
 --
 -- Exported because it is a decision about what bytes may mean, and so belongs
 -- beside 'decodeEl' rather than inside whichever transport can observe a stop
 -- reason. A transport that /cannot/ observe one — the agent-deck CLI does not
 -- report why a turn ended — cannot apply this rule and owes its reader that
 -- fact in as many words.
-requiresCompletedTurn :: SomeCode -> Addressee -> Bool
-requiresCompletedTurn (SomeCode SAck) _ = True
-requiresCompletedTurn _ (AddrPerson _) = True
-requiresCompletedTurn _ _ = False
+requiresCompletedTurn :: Request c -> Bool
+requiresCompletedTurn q =
+  intentIsEffect (reqIntent q)
+    || case qAddressee (reqQuestion q) of
+      AddrPerson _ -> True
+      _ -> False
 
 -- ---------------------------------------------------------------------------
 -- Whose words a reply is
@@ -967,7 +952,7 @@ splitTransportNarration reply = peel [] (T.splitOn "\n" reply)
 -- The decode loop
 -- ---------------------------------------------------------------------------
 
--- | @Settings.retries@'s default (@Exec.lean:890@): re-ask once, so a question
+-- | @Settings.retries@'s default (@Exec.lean:568@): re-ask once, so a question
 -- is put at most twice.
 --
 -- Only a @flag@ can trigger a re-ask at all (@Decode_eq_none@), so this is not
@@ -976,7 +961,7 @@ splitTransportNarration reply = peel [] (T.splitOn "\n" reply)
 defaultRetries :: Int
 defaultRetries = 1
 
--- | @Settings.log@'s default (@Exec.lean:895@): a warning goes to stderr,
+-- | @Settings.log@'s default (@Exec.lean:568@): a warning goes to stderr,
 -- prefixed @agentic:@.
 --
 -- Warnings report what the run is /about/ to do about something it noticed;
@@ -1138,7 +1123,7 @@ budgetedRecovery ga
 -- | A gap on its way past 'askOrMemo', carrying __what to raise if there is
 -- nowhere to go__.
 --
--- 'WorldIO' stays exactly as it is — @forall c. SCode c -> Q c -> IO (El c)@ —
+-- 'WorldIO' stays @forall c. SCode c -> Request c -> IO (El c)@ —
 -- because widening it to let the answerer report /which/ model answered would
 -- hand the answerer the power to forge the trace, which is strictly worse than
 -- the forgery the type was designed to prevent. So a gap travels the one way a
@@ -1201,7 +1186,7 @@ withTransportGaps ::
   -- failure that is not a gap at all
   (SomeException -> Maybe (TurnGap, Text)) ->
   SCode c ->
-  Q c ->
+  Request c ->
   IO a ->
   IO a
 withTransportGaps st classify c q act0 = go 0
@@ -1222,7 +1207,7 @@ withTransportGaps st classify c q act0 = go 0
                         esLog st $
                           gapWord g
                             <> " gap at "
-                            <> addresseeWord (qAddressee q)
+                            <> addresseeWord (qAddressee (reqQuestion q))
                             <> " for a "
                             <> codeWord (fromSCode c)
                             <> " ("
@@ -1236,7 +1221,7 @@ withTransportGaps st classify c q act0 = go 0
 -- The run policy
 -- ---------------------------------------------------------------------------
 
--- | @Exec.Settings@ (@Exec.lean:887@)'s two fields, plus the run policy this
+-- | @Exec.Settings@ (@Exec.lean:568@)'s two fields, plus run policy this
 -- port owes an operator.
 --
 -- Neither 'Eq' nor 'Show': two of its fields are functions, exactly as Lean's
@@ -1320,7 +1305,7 @@ gapBudget st = \case
   -- different model, which is the fail-over walk.
   GapExhausted -> 0
 
--- | @Exec.attemptWith@ (@Exec.lean:913@): ask, decode, and on a failure to decode
+-- | @Exec.attemptWith@ (@Exec.lean:594@): ask, decode, and on failure decode
 -- ask again — @n + 1@ attempts in all, the second and later ones carrying the
 -- 'nudge' that quotes back what could not be read.
 --
@@ -1394,11 +1379,11 @@ attemptRecovering st c say = go 0 T.empty
                   go (spent + 1) (nudge c reply)
                 answer -> pure (Left (ga, answer))
 
--- | @Exec.askDecoding@ (@Exec.lean:968@): 'attemptDecoding', and — if
+-- | @Exec.askDecoding@ (@Exec.lean:648@): 'attemptDecoding', and — if
 -- every attempt was unreadable — __abandon the run__ with an 'ioError' quoting
 -- the words that could not be read.
 --
--- __Why exhaustion is an error and not a default__ (@Exec.lean:933@). Every
+-- __Why exhaustion is an error and not a default__ (@Exec.lean:613@). Every
 -- @El c@ is inhabited, so @pure (defaultEl c)@ typechecks here and would be
 -- wrong. A memo entry carries a code, a question and an answer and /nothing
 -- else/, so a defaulted cell is definitionally identical to one an addressee
@@ -1418,7 +1403,7 @@ askDecoding ::
   -- | @Settings.retries@
   Int ->
   SCode c ->
-  Q c ->
+  Request c ->
   -- | @say extra@
   (Text -> IO Text) ->
   IO (El c)
@@ -1463,7 +1448,7 @@ askDecodingWith ::
   forall (c :: Code).
   ExecSettings ->
   SCode c ->
-  Q c ->
+  Request c ->
   -- | @say extra@
   (Text -> IO Text) ->
   IO (El c)
@@ -1481,7 +1466,7 @@ askDecodingWith st c q say0 = do
     -- The operator's standing answer, in place of the transport, for a person
     -- nobody is standing next to.
     standingSay :: IO (Text -> IO Text)
-    standingSay = case (esStandingAnswer st, qAddressee q) of
+    standingSay = case (esStandingAnswer st, qAddressee (reqQuestion q)) of
       (Just canned, AddrPerson i) -> do
         esLog st $
           "unattended: person "
@@ -1489,7 +1474,7 @@ askDecodingWith st c q say0 = do
             <> " is not being asked; the standing answer '"
             <> trimAscii canned
             <> "' is taken instead (prompt: '"
-            <> oneLine (qPrompt q)
+            <> oneLine (qPrompt (reqQuestion q))
             <> "')"
         pure (\_extra -> pure canned)
       _ -> pure say0
@@ -1507,17 +1492,17 @@ askDecodingWith st c q say0 = do
       (Just arm, SFlag) -> do
         esLog st $
           "no readable flag from "
-            <> addresseeWord (qAddressee q)
+            <> addresseeWord (qAddressee (reqQuestion q))
             <> " after "
             <> T.pack (show (gaSpent ga + 1))
             <> " attempts; taking the operator-configured arm ("
             <> sayFlag arm
             <> [wft|) rather than abandoning the run — nothing checks that this arm is the loud one; that safety is the operator's. This answer is not |]
-            <> addresseeWord (qAddressee q)
+            <> addresseeWord (qAddressee (reqQuestion q))
             <> "'s (last reply: '"
             <> trimAscii (gaWhy ga)
             <> "', prompt: '"
-            <> oneLine (qPrompt q)
+            <> oneLine (qPrompt (reqQuestion q))
             <> "')."
         pure arm
       _ ->
@@ -1526,13 +1511,13 @@ askDecodingWith st c q say0 = do
                 "no readable "
                   <> codeWord (fromSCode c)
                   <> " from "
-                  <> addresseeWord (qAddressee q)
+                  <> addresseeWord (qAddressee (reqQuestion q))
                   <> " after "
                   <> T.pack (show (gaSpent ga + 1))
                   <> " attempts; last reply: '"
                   <> trimAscii (gaWhy ga)
                   <> "' (prompt: '"
-                  <> qPrompt q
+                  <> qPrompt (reqQuestion q)
                   <> [wft|'). The run is abandoned: recording an answer nobody gave would be indistinguishable, in the table, from one they did.|]
             why =
               "no readable "
@@ -1595,9 +1580,10 @@ scriptedWorldWith st table = concurrentWorld $ \c q ->
 
 -- | The bytes the scripted table answers a question with: the first entry whose
 -- key is a prefix of the prompt, else 'scriptedDefault'.
-scriptedReply :: [(Text, Text)] -> SCode c -> Q c -> Text
+scriptedReply :: [(Text, Text)] -> SCode c -> Request c -> Text
 scriptedReply table c q =
-  fromMaybe (scriptedDefault c q) (snd <$> find (\e -> fst e `T.isPrefixOf` qPrompt q) table)
+  fromMaybe (scriptedDefault c q)
+    (snd <$> find (\e -> fst e `T.isPrefixOf` qPrompt (reqQuestion q)) table)
 
 -- | What an unmatched prompt is answered with, per code:
 --
@@ -1610,8 +1596,8 @@ scriptedReply table c q =
 --
 -- These are /bytes/, not answers, and they go through 'decodeEl' like anything
 -- else: the scripted world has no private channel to the answer type.
-scriptedDefault :: SCode c -> Q c -> Text
-scriptedDefault SText q = qPrompt q
+scriptedDefault :: SCode c -> Request c -> Text
+scriptedDefault SText q = qPrompt (reqQuestion q)
 scriptedDefault SFlag _ = "yes"
 scriptedDefault SVerdict _ = "APPROVE"
 scriptedDefault SAck _ = "DONE"

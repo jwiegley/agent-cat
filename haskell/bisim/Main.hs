@@ -119,7 +119,7 @@ import Agentic.Gen
 import Agentic.Guards (Guard (..), askCounts, guardCheck)
 import Agentic.Observe
   ( firstDiffWith,
-    observeValue,
+    observeValueWithIntent,
     printedValue,
     render,
     tshow,
@@ -310,7 +310,7 @@ propBuilder oracle seed n =
     -- The Haskell side is forced inside `try`: a partial function in a fold or
     -- a trace is this implementation's bug, and it should be reported as this
     -- case's failure rather than kill the run.
-    ours <- forced (observeValue prog ws)
+    ours <- forced (observeValueWithIntent prog ws)
     pure $ case (classify reply, ours) of
       (_, Left err) ->
         Diverged

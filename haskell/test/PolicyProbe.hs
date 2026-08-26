@@ -114,13 +114,24 @@ import Agentic.Cli
   )
 import Agentic.Exec
 import Agentic.Plan
-  ( Cont (..),
+  ( AnswerSource (AnswerAsked, AnswerReused),
+    Cont (..),
     El,
+    ExecEvent (ExecEvent),
+    ExecTrace,
     Plan,
     Q (..),
     QScope (..),
+    Request (..),
+    RequestShape (..),
     SCode (SAck, SFlag, SStructured, SText, SVerdict),
     Shape (..),
+    consultRequest,
+    intentName,
+    consultShape,
+    effectRequest,
+    observeRequest,
+    effectShape,
     ask1,
     askC1,
     defaultEl,
@@ -155,7 +166,10 @@ import Agentic.Workflow
     wf,
     wft,
   )
-import Agentic.World (Event (Event), Trace, World (World), billFresh, billMemo, eventJson)
+import Agentic.World
+  ( World (World), billExecFresh, billMemo, billMemoLegacy, eventJson,
+    forgetExecEvent, trace
+  )
 import Control.Concurrent (forkFinally, killThread)
 import Control.Concurrent.STM
   ( TMVar,
@@ -237,12 +251,12 @@ probe failures name st expect = do
     (Right _, Left needle) ->
       failWith ("completed, but should have thrown: " <> needle)
     (Right (_, tr), Right (wantFresh, wantMemo))
-      | billFresh tr == wantFresh && billMemo tr == wantMemo ->
+      | billExecFresh tr == wantFresh && billMemo tr == wantMemo ->
           TIO.putStrLn ("ok   " <> T.pack name)
       | otherwise ->
           failWith
             ( "bills ("
-                <> T.pack (show (billFresh tr))
+                <> T.pack (show (billExecFresh tr))
                 <> ","
                 <> T.pack (show (billMemo tr))
                 <> ") wanted ("
@@ -323,7 +337,7 @@ failOverProgram =
 -- bills twice for hiding it.
 refusingWorld :: Text -> WorldIO
 refusingWorld bad = concurrentWorld $ \c q ->
-  if scopeModelAxis (qScope q) == Just bad
+  if scopeModelAxis (scopeOf q) == Just bad
     then
       raiseGap
         GapTransportRefusal
@@ -331,16 +345,22 @@ refusingWorld bad = concurrentWorld $ \c q ->
         (userError ("no readable flag from model r after 1 attempts"))
     else pure (answerAt c q)
   where
-    answerAt :: SCode c -> Q c -> El c
+    answerAt :: SCode c -> Request c -> El c
     answerAt SFlag _ = True
     answerAt SAck _ = ()
-    answerAt SText q = qPrompt q
+    answerAt SText q = promptOf q
     answerAt SVerdict _ = verdictApprove
     answerAt code@(SStructured _) _ = defaultEl code
 
 -- | The model each event's scope names, in trace order.
-answerers :: [Event] -> [Maybe Text]
-answerers tr = [scopeModelAxis (qScope q) | Event _ q _ <- tr]
+answerers :: ExecTrace -> [Maybe Text]
+answerers = map answerer
+  where
+    answerer (ExecEvent _ _ (AnswerAsked q) _) = scopeModelAxis (qScope q)
+    answerer (ExecEvent _ _ AnswerReused _) = Nothing
+
+authoredModels :: ExecTrace -> [Maybe Text]
+authoredModels = map (\(ExecEvent _ r _ _) -> scopeModelAxis (qScope (reqQuestion r)))
 
 -- ---------------------------------------------------------------------------
 -- The executing world (D5)
@@ -355,7 +375,7 @@ noWorld = concurrentWorld $ \c q ->
         ( "the executing layer did not take a "
             <> T.unpack (codeWord (fromSCode c))
             <> " question put to "
-            <> T.unpack (addresseeWord (qAddressee q))
+            <> T.unpack (addresseeWord (addresseeOf q))
         )
     )
 
@@ -617,11 +637,11 @@ routedGateProgram =
           )
           stop
 
-execProbe :: IORef Int -> String -> Program -> (Trace -> Bool) -> IO ()
+execProbe :: IORef Int -> String -> Program -> (ExecTrace -> Bool) -> IO ()
 execProbe failures name prog want = do
   let cfg = defaultShellConfig {shellCwd = "."}
   out <- try (runPlanIO (executingWorld cfg noWorld) (progPlan prog))
-  case out :: Either SomeException ((), Trace) of
+  case out :: Either SomeException ((), ExecTrace) of
     Left e -> do
       TIO.putStrLn ("FAIL " <> T.pack name <> ": threw " <> T.pack (show e))
       modifyIORef' failures (+ 1)
@@ -632,7 +652,7 @@ execProbe failures name prog want = do
             ( "FAIL "
                 <> T.pack name
                 <> ": bills ("
-                <> T.pack (show (billFresh tr))
+                <> T.pack (show (billExecFresh tr))
                 <> ","
                 <> T.pack (show (billMemo tr))
                 <> ")"
@@ -644,26 +664,36 @@ execProbe failures name prog want = do
 -- independent sentinel proves the scheduler has passed two dependent workers
 -- while their shared source remains blocked; and a later failure must cancel
 -- an earlier worker that is blocked forever.
-textQuestion :: Text -> Q 'CodeText
-textQuestion prompt = Q (AddrModel prompt) scopeUnit prompt 0
+textQuestion :: Text -> Request 'CodeText
+textQuestion prompt = consultRequest (Q (AddrModel prompt) scopeUnit prompt 0)
 
-ackQuestion :: Text -> Q 'CodeAck
-ackQuestion prompt = Q (AddrModel prompt) scopeUnit prompt 0
+ackQuestion :: Text -> Request 'CodeAck
+ackQuestion prompt = effectRequest (Q (AddrModel prompt) scopeUnit prompt 0)
 
-statefulQuestion :: Text -> Q 'CodeText
-statefulQuestion prompt = Q (AddrModel "stateful") scopeUnit prompt 0
+statefulQuestion :: Text -> Request 'CodeText
+statefulQuestion prompt = consultRequest (Q (AddrModel "stateful") scopeUnit prompt 0)
 
-servedQuestion :: Text -> Text -> Q 'CodeText
-servedQuestion model prompt = Q (AddrModel prompt) (QScope (Just model) Nothing) prompt 0
+servedQuestion :: Text -> Text -> Request 'CodeText
+servedQuestion model prompt =
+  consultRequest (Q (AddrModel prompt) (QScope (Just model) Nothing) prompt 0)
 
-textShape :: Text -> Shape 'CodeText
-textShape party = Shape (AddrModel party) scopeUnit 0
+textShape :: Text -> RequestShape 'CodeText
+textShape party = consultShape (Shape (AddrModel party) scopeUnit 0)
 
-ackShape :: Text -> Shape 'CodeAck
-ackShape party = Shape (AddrModel party) scopeUnit 0
+ackShape :: Text -> RequestShape 'CodeAck
+ackShape party = effectShape (Shape (AddrModel party) scopeUnit 0)
 
-tracePrompts :: Trace -> [Text]
-tracePrompts = map (\(Event _ q _) -> qPrompt q)
+promptOf :: Request c -> Text
+promptOf = qPrompt . reqQuestion
+
+scopeOf :: Request c -> QScope
+scopeOf = qScope . reqQuestion
+
+addresseeOf :: Request c -> Addressee
+addresseeOf = qAddressee . reqQuestion
+
+tracePrompts :: ExecTrace -> [Text]
+tracePrompts = map (\(ExecEvent _ r _ _) -> promptOf r)
 
 newSignal :: IO (TMVar ())
 newSignal = newEmptyTMVarIO
@@ -674,7 +704,7 @@ overlapProbe failures = do
   secondStarted <- newSignal
   let plan = pairP (askC1 SText (servedQuestion "shared" "first")) (askC1 SText (servedQuestion "shared" "second"))
       world = concurrentWorld $ \c q -> case c of
-        SText -> case qPrompt q of
+        SText -> case promptOf q of
           "first" -> do
             atomically (putTMVar firstStarted ())
             atomically (takeTMVar secondStarted)
@@ -716,7 +746,7 @@ effectOrderProbe failures = do
                 (askC1 SText (textQuestion "effect-sentinel"))
           )
       world = concurrentWorld $ \c q -> case c of
-        SText -> case qPrompt q of
+        SText -> case promptOf q of
           "effect-source" -> do
             atomically (putTMVar sourceStarted ())
             atomically (takeTMVar releaseSource)
@@ -724,8 +754,8 @@ effectOrderProbe failures = do
           "effect-sentinel" -> atomically (putTMVar sentinelStarted ()) >> pure "sentinel-answer"
           _ -> pure "unexpected"
         SAck -> do
-          atomically (modifyTVar' effects (<> [qPrompt q]))
-          if qPrompt q == "write-one:seed"
+          atomically (modifyTVar' effects (<> [promptOf q]))
+          if promptOf q == "write-one:seed"
             then do
               atomically (putTMVar firstEffectStarted ())
               atomically (takeTMVar releaseFirstEffect)
@@ -786,7 +816,7 @@ statefulTurnOrderProbe failures = do
       world =
         WorldIO
           { worldAskIO = \c q -> case c of
-              SText -> case qPrompt q of
+              SText -> case promptOf q of
                 "turn-source" -> do
                   atomically (putTMVar sourceStarted ())
                   atomically (takeTMVar releaseSource)
@@ -803,7 +833,7 @@ statefulTurnOrderProbe failures = do
                       pure prompt
                   | otherwise -> pure "unexpected"
               _ -> pure (defaultEl c),
-            worldTurnLane = \_ shape -> case shAddressee shape of
+            worldTurnLane = \_ shape -> case shAddressee (rsQuestion shape) of
               AddrModel party | party == "stateful" -> Just lane
               _ -> Nothing
           }
@@ -857,7 +887,7 @@ dependencyProbe failures = do
                 (askC1 SText (textQuestion "sentinel"))
           )
       world = concurrentWorld $ \c q -> case c of
-        SText -> case qPrompt q of
+        SText -> case promptOf q of
           "source" -> do
             atomically (putTMVar sourceStarted ())
             atomically (takeTMVar releaseSource)
@@ -911,7 +941,7 @@ memoConcurrencyProbe failures = do
   let repeated = askC1 SText (textQuestion "same")
       plan = pairP (pairP repeated repeated) (askC1 SText (textQuestion "memo-sentinel"))
       world = concurrentWorld $ \c q -> case c of
-        SText -> case qPrompt q of
+        SText -> case promptOf q of
           "same" -> do
             atomically $ do
               modifyTVar' calls (+ 1)
@@ -947,10 +977,94 @@ memoConcurrencyProbe failures = do
         Just (Right (answer, tr)) ->
           [ ("both nodes received the one answer", answer == (("one-answer", "one-answer"), "sentinel-answer")),
             ("both nodes remain in the trace", tracePrompts tr == ["same", "same", "memo-sentinel"]),
-            ("the bills distinguish nodes from questions", (billFresh tr, billMemo tr) == (3, 2))
+            ("the bills distinguish nodes from questions",
+              (billExecFresh tr, billMemo tr) == (3, 2))
           ]
         Just (Left e) -> [("the run threw: " <> show e, False)]
         Nothing -> [("the memoized run did not finish", False)]
+
+intentMemoProbe :: IORef Int -> IO ()
+intentMemoProbe failures = do
+  calls <- newIORef (0 :: Int)
+  let q = Q (AddrModel "same-ack") scopeUnit "same operation" 0
+      effect = effectRequest q
+      consult = consultRequest q
+      observe = observeRequest q
+      plan = pairP (pairP (askC1 SAck effect) (askC1 SAck effect))
+        (pairP (askC1 SAck consult)
+          (pairP (askC1 SAck observe) (askC1 SAck observe)))
+      world = concurrentWorld $ \c _ -> case c of
+        SAck -> atomicModifyIORef' calls (\n -> (n + 1, ()))
+        _ -> pure (defaultEl c)
+      semantic = trace (World (\c _ -> defaultEl c)) plan
+  out <- try @SomeException (runPlanIO world plan)
+  invocations <- readIORef calls
+  pureProbe failures "intent separates reusable answers from effect occurrences" $
+    case out of
+      Right (_, tr) ->
+        [ ("effects run twice; consult and observations share bare Q", invocations == 3),
+          ("operational bill retains effects and one reusable answer",
+            (billExecFresh tr, billMemo tr) == (5, 3)),
+          ("each occurrence retains its authored annotation",
+            [intentName (reqIntent r) | ExecEvent _ r _ _ <- tr] ==
+              ["effect", "effect", "consult", "observe", "observe"]),
+          ("runtime annotated trace erases to semantic trace",
+            map (eventJson . forgetExecEvent) tr == map eventJson semantic),
+          ("v2 erases intent before deduplication",
+            billMemoLegacy (map forgetExecEvent tr) == 1)
+        ]
+      Left e -> [("the run threw: " <> show e, False)]
+
+failoverMemoIdentityProbe :: IORef Int -> IO ()
+failoverMemoIdentityProbe failures = do
+  dispatchedCalls <- newIORef ([] :: [Maybe Text])
+  let request model =
+        consultRequest (Q (AddrModel "r") (QScope (Just model) Nothing) "same" 0)
+      deep = request "deep"
+      broad = request "broad"
+      plan = pairP (askC1 SFlag deep)
+        (pairP (askC1 SFlag broad) (askC1 SFlag deep))
+      chains = chainsOf (const (pure ())) (Map.fromList [("deep", ["broad"])])
+      world = concurrentWorld $ \c r -> case c of
+        SFlag -> do
+          let model = scopeModelAxis (scopeOf r)
+          modifyIORef' dispatchedCalls (model :)
+          case model of
+            Just "deep" -> raiseGap GapTransportRefusal "deep refused"
+              (userError "deep refused")
+            _ -> pure True
+        _ -> pure (defaultEl c)
+  out <- try @SomeException (runPlanWith chains world plan)
+  calls <- reverse <$> readIORef dispatchedCalls
+  pureProbe failures "failover memo identity is authored bare Q" $ case out of
+    Right (answer, tr) ->
+      [ ("all three Plan occurrences receive answers", answer == (True, (True, True))),
+        ("first deep falls back, broad is separately asked, repeated deep reuses",
+          calls == [Just "deep", Just "broad", Just "broad"]),
+        ("authored questions survive",
+          authoredModels tr == [Just "deep", Just "broad", Just "deep"]),
+        ("dispatch attribution stays operational",
+          answerers tr == [Just "broad", Just "broad", Nothing]),
+        ("fresh/memo bills are 3/2", (billExecFresh tr, billMemo tr) == (3, 2))
+      ]
+    Left e -> [("the run threw: " <> show e, False)]
+
+sourceIntentProbe :: IORef Int -> IO ()
+sourceIntentProbe failures = do
+  out <- try @SomeException $ runPlanIO world (progPlan (runningProgram "true" []))
+  pureProbe failures "Builder lowers command value and act positions to intent" $
+    case out of
+      Right (_, [ExecEvent SFlag observed _ _, ExecEvent SAck effected _ _]) ->
+        [ ("value-position running is observe", intentName (reqIntent observed) == "observe"),
+          ("statement-position act is effect", intentName (reqIntent effected) == "effect")
+        ]
+      Right (_, tr) -> [("unexpected source fixture trace length: " <> show (length tr), False)]
+      Left e -> [("the source fixture threw: " <> show e, False)]
+  where
+    world = concurrentWorld $ \c _ -> case c of
+      SFlag -> pure True
+      SAck -> pure ()
+      _ -> pure (defaultEl c)
 
 failureConcurrencyProbe :: IORef Int -> IO ()
 failureConcurrencyProbe failures = do
@@ -958,7 +1072,7 @@ failureConcurrencyProbe failures = do
   cleaned <- newSignal
   let plan = pairP (askC1 SText (textQuestion "blocked")) (askC1 SText (textQuestion "boom"))
       world = concurrentWorld $ \c q -> case c of
-        SText -> case qPrompt q of
+        SText -> case promptOf q of
           "blocked" -> do
             atomically (putTMVar blockedStarted ())
             atomically retry `finally` atomically (void (tryPutTMVar cleaned ()))
@@ -1007,6 +1121,9 @@ main = do
   statefulTurnOrderProbe failures
   dependencyProbe failures
   memoConcurrencyProbe failures
+  intentMemoProbe failures
+  failoverMemoIdentityProbe failures
+  sourceIntentProbe failures
   failureConcurrencyProbe failures
 
   -- The surface's own refusals: what an author is told, in the author's words.
@@ -1057,17 +1174,17 @@ main = do
             (Map.fromList [("deep", ["broad"])])
     out <- try (runPlanWith chains (refusingWorld "deep") (progPlan failOverProgram))
     msgs <- readIORef logged
-    case out :: Either SomeException ((), [Event]) of
+    case out :: Either SomeException ((), ExecTrace) of
       Left e -> do
         TIO.putStrLn ("FAIL fail-over settles: threw " <> T.pack (show e))
         modifyIORef' failures (+ 1)
       Right (_, tr)
-        | billFresh tr == 2 && billMemo tr == 2 ->
+        | billExecFresh tr == 2 && billMemo tr == 2 ->
             TIO.putStrLn "ok   fail-over settles on the spare (2/2)"
         | otherwise -> do
             TIO.putStrLn
               ( "FAIL fail-over settles: bills ("
-                  <> T.pack (show (billFresh tr))
+                  <> T.pack (show (billExecFresh tr))
                   <> ","
                   <> T.pack (show (billMemo tr))
                   <> ") wanted (2,2)"
@@ -1075,7 +1192,8 @@ main = do
             modifyIORef' failures (+ 1)
     case out of
       Right (_, tr)
-        | take 1 (answerers tr) == [Just "broad"] ->
+        | take 1 (answerers tr) == [Just "broad"],
+          take 1 (authoredModels tr) == [Just "deep"] ->
             TIO.putStrLn "ok   …and the trace names the model that answered"
         | otherwise -> do
             TIO.putStrLn
@@ -1093,7 +1211,7 @@ main = do
 
   do
     out <- try (runPlanIO (refusingWorld "deep") (progPlan failOverProgram))
-    case out :: Either SomeException ((), [Event]) of
+    case out :: Either SomeException ((), ExecTrace) of
       Left e
         | "no readable flag from model r" `T.isInfixOf` T.pack (show e) ->
             TIO.putStrLn "ok   …and with no chain it abandons in the old words"
@@ -1108,14 +1226,14 @@ main = do
   -- the act; `false` takes the no arm and does not. Nothing but the executing
   -- layer may answer these, which `noWorld` enforces by raising.
   execProbe failures "a command that exits 0 answers yes (2/2)"
-    (runningProgram "true" []) (\tr -> billFresh tr == 2 && billMemo tr == 2)
+    (runningProgram "true" []) (\tr -> billExecFresh tr == 2 && billMemo tr == 2)
   execProbe failures "…and one that exits nonzero answers no (1/1)"
-    (runningProgram "false" []) (\tr -> billFresh tr == 1 && billMemo tr == 1)
+    (runningProgram "false" []) (\tr -> billExecFresh tr == 1 && billMemo tr == 1)
   -- The most important D5 assertion: two commands at one tool id, saying the
   -- same words, are two questions. Were the argv anywhere outside the
   -- addressee the second would be answered from the memo table without running.
   execProbe failures "two commands at one tool are two questions (2/2)"
-    twoCommandsProgram (\tr -> billFresh tr == 2 && billMemo tr == 2)
+    twoCommandsProgram (\tr -> billExecFresh tr == 2 && billMemo tr == 2)
   -- A command that cannot be run is a __gap__, not an answer, and it is named
   -- so an operator can tell "the gate said no" from "the gate could not be run".
   do
@@ -1126,7 +1244,7 @@ main = do
             (executingWorld cfg noWorld)
             (progPlan (runningProgram "no-such-gate-command" []))
         )
-    case out :: Either SomeException ((), Trace) of
+    case out :: Either SomeException ((), ExecTrace) of
       Left e
         | "did not run" `T.isInfixOf` T.pack (show e) ->
             TIO.putStrLn "ok   …and a command that cannot be run is named, not answered"
@@ -1445,12 +1563,14 @@ main = do
         (progPlan hardenProgram)
     routedSeen <- readIORef seen
     pureProbe failures "routing is invisible to the fold"
-      [ ("the traces are equal event for event", map eventJson bare == map eventJson routed),
-        ("billFresh", billFresh bare == billFresh routed),
+      [ ("the semantic traces are equal after erasure",
+          map (eventJson . forgetExecEvent) bare ==
+            map (eventJson . forgetExecEvent) routed),
+        ("billFresh", billExecFresh bare == billExecFresh routed),
         ("billMemo", billMemo bare == billMemo routed),
         -- And they are the flagship's own numbers, so the row cannot pass by
         -- finding two equally wrong runs.
-        ("the flagship's bills", (billFresh routed, billMemo routed) == (7, 7)),
+        ("the flagship's bills", (billExecFresh routed, billMemo routed) == (7, 7)),
         ("the unrouted run reached the default and nothing else", nub bareSeen == ["default"]),
         ("the routed run put the pinned questions to deep", "deep" `elem` routedSeen),
         ("…and every other question to the default", sort (nub routedSeen) == ["deep", "default"]),
@@ -1478,13 +1598,13 @@ main = do
             (executingWorld cfg (routedWorld table))
             (progPlan routedGateProgram)
         )
-    case out :: Either SomeException ((), Trace) of
+    case out :: Either SomeException ((), ExecTrace) of
       Left e -> do
         TIO.putStrLn ("FAIL routing does not intercept toolExec: threw " <> T.pack (show e))
         modifyIORef' failures (+ 1)
       Right (_, tr) ->
         pureProbe failures "routing does not intercept toolExec"
-          [ ("bills", billFresh tr == 3 && billMemo tr == 3),
+          [ ("bills", billExecFresh tr == 3 && billMemo tr == 3),
             ( "the two commands were the executing layer's and the ask was deep's",
               answerers tr == [Nothing, Just "deep", Nothing]
             )
@@ -1506,18 +1626,22 @@ main = do
     out <- try (runPlanWith chains (routedWorld rs) (progPlan failOverProgram))
     msgs <- readIORef logged
     bare <- try (runPlanIO (routedWorld rs) (progPlan failOverProgram))
-    let settled = case out :: Either SomeException ((), Trace) of
-          Right (_, tr) -> billFresh tr == 2 && billMemo tr == 2
+    let settled = case out :: Either SomeException ((), ExecTrace) of
+          Right (_, tr) -> billExecFresh tr == 2 && billMemo tr == 2
           Left _ -> False
         namesBroad = case out of
           Right (_, tr) -> take 1 (answerers tr) == [Just "broad"]
           Left _ -> False
-        abandons = case bare :: Either SomeException ((), Trace) of
+        authoredDeep = case out of
+          Right (_, tr) -> take 1 (authoredModels tr) == [Just "deep"]
+          Left _ -> False
+        abandons = case bare :: Either SomeException ((), ExecTrace) of
           Left e -> "no readable flag from model r" `T.isInfixOf` T.pack (show e)
           Right _ -> False
     pureProbe failures "a fail-over crosses backends, and with no spare abandons as ever"
       [ ("settles on the spare's backend (2/2)", settled),
         ("the trace names the model that answered", namesBroad),
+        ("failover preserves the authored deep question", authoredDeep),
         ("the narration keeps its wording", any ("falling back to broad" `T.isInfixOf`) msgs),
         ("with no chain the same two backends abandon in the old words", abandons)
       ]

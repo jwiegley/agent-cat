@@ -10,12 +10,10 @@
 -- Module      : Agentic.World
 -- Description : The world as data, the trace, the bills, and the oracle's JSON.
 --
--- The port of the /meaning/: @Agentic\/Core\/Denote.lean@'s @denote@ and
--- @Plan.trace@ fused into one fold, @Agentic\/Core\/Dlg.lean@'s @Event@ and
--- @Trace@, @Agentic\/Core\/Cost.lean@'s @billFresh@\/@billMemo@ at the counting
--- price @tick@, and the whole of @conformance\/Conformance.lean@'s world DSL
--- ('WorldSpec', 'toWorld') and event serialization ('eventJson',
--- 'worldObservation').
+-- The port of bare-question meaning: fused `Plan.run`/`Plan.trace`, semantic
+-- `Event`/`Trace`, and `billFresh`. The module also carries annotated pure
+-- `ExecTrace`, operational memo counting, and v2/v3 JSON projections; these
+-- representation observations erase to the semantic trace.
 --
 -- == What is not here
 --
@@ -23,8 +21,8 @@
 -- clauses are exactly the @simp@ lemmas at @Denote.lean:131@–@:149@, so the
 -- fused fold ('traceIn') /is/ the definition rather than a shortcut.
 --
--- No memo table, no @pin@, no @worldOf@, no @Price@ polymorphism, no
--- @billOfKeys@ — the oracle serializes only the two tick bills, so the port is
+-- No semantic memo policy, @pin@, @worldOf@, or polymorphic prices. Runtime memo
+-- counting consumes `ExecTrace`; it is not a second meaning.
 -- monomorphic in the carrier. No 'Agentic.Raw.Pos' anywhere: a 'Q' has no
 -- position, because positions are oracle-only, like @message@ and @excerpt@.
 --
@@ -48,8 +46,13 @@ module Agentic.World
     -- * The meaning
     Event (..),
     Trace,
+    ExecEvent (..),
+    ExecTrace,
+    forgetExecEvent,
     trace,
     traceIn,
+    execTrace,
+    execTraceIn,
     runPlan,
     runIn,
 
@@ -57,22 +60,32 @@ module Agentic.World
     EventKey (..),
     eventKey,
     billFresh,
+    billExecFresh,
     billMemo,
+    billMemoLegacy,
 
     -- * The oracle's JSON
     verdictJson,
     answerJson,
     scopeJson,
     eventJson,
+    eventJsonWithIntent,
     worldObservation,
+    worldObservationWithIntent,
   )
 where
 
 import Agentic.Plan
-  ( El,
+  ( AnswerSource (AnswerAsked),
+    El,
     Env (ECons, ENil),
+    ExecEvent (ExecEvent),
+    ExecTrace,
     Plan (PAsk, PAskC, PCase, PDyn, PRet),
     Q (..),
+    Request (..),
+    intentName,
+    intentIsEffect,
     QScope (..),
     SCode (SAck, SFlag, SStructured, SText, SVerdict),
     VTag (VApprove, VDeclined, VObject),
@@ -81,7 +94,7 @@ import Agentic.Plan
     fromSCode,
     verdictObject,
     verdictTag,
-    withPrompt,
+    withRequestPrompt,
   )
 import Agentic.Schema (defaultEl)
 import Agentic.Schema.Conformance (SomeAnswer, encodeExact, lookupAnswer, uniqueAnswers)
@@ -98,10 +111,9 @@ import Agentic.Raw
 import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:?), (.=))
 import qualified Data.Aeson as A
 import qualified Data.Aeson.Key as K
-import Data.Aeson.Types (Parser)
-import Data.List (find)
+import Data.Aeson.Types (Pair, Parser)
+import Data.List (find, nub)
 import Data.Maybe (fromMaybe)
-import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 
@@ -276,12 +288,10 @@ instance FromJSON WorldSpec where
 -- toWorld
 -- ---------------------------------------------------------------------------
 
--- | @Agentic\/Core\/World.lean:47@: @Ω = (c : Code) → Q c → El c@.
---
--- A rank-2 newtype, because the answer type depends on the code. A world is a
--- /function/, which is the property the memo bill leans on: equal questions
--- have equal answers, so the answer is no part of an 'EventKey'.
-newtype World = World {worldAnswer :: forall (c :: Code). SCode c -> Q c -> El c}
+-- | Bare-question answer sheet, mirroring Lean K1.
+newtype World = World
+  { worldAnswer :: forall (c :: Code). SCode c -> Q c -> El c
+  }
 
 -- | @WorldSpec.toWorld@ (@Conformance.lean:121@), clause for clause.
 --
@@ -322,11 +332,7 @@ byPrefix table d s = maybe d snd (find (\e -> fst e `T.isPrefixOf` s) table)
 -- Event, Trace, and the fused fold
 -- ---------------------------------------------------------------------------
 
--- | @Agentic\/Core\/Dlg.lean:112@ — one thing said and its reply, @Σ c, Q c × El c@.
---
--- The code is a 'SCode' rather than a 'Code' because the answer's type depends
--- on it; erasing it to 'Code' is what 'eventKey' does, where the answer is
--- forgotten.
+-- | Bare semantic question and reply.
 data Event where
   Event :: SCode c -> Q c -> El c -> Event
 
@@ -359,15 +365,40 @@ trace w = traceIn w ENil
 --   contribution (@Denote.lean:60@: the two share a meaning clause on purpose).
 traceIn :: World -> Env g -> Plan g a -> Trace
 traceIn _ _ (PRet _) = []
-traceIn w y (PAskC c q k) =
-  let a = worldAnswer w c q
+traceIn w y (PAskC c r k) =
+  let q = reqQuestion r
+      a = worldAnswer w c q
    in Event c q a : traceIn w (ECons a y) k
 traceIn w y (PAsk c s e k) =
-  let q = withPrompt s (evalExpr e y)
+  let r = withRequestPrompt s (evalExpr e y)
+      q = reqQuestion r
       a = worldAnswer w c q
    in Event c q a : traceIn w (ECons a y) k
 traceIn w y (PCase _ e arms) = traceIn w y (arms (evalExpr e y))
 traceIn w y (PDyn _ e f) = traceIn w y (f (evalExpr e y))
+
+-- | Forget execution annotation and dispatched attribution.
+forgetExecEvent :: ExecEvent -> Event
+forgetExecEvent (ExecEvent c r _ a) = Event c (reqQuestion r) a
+
+-- | Pure annotated trace. Every occurrence is freshly answered by its authored
+-- question; runtime memo/failover sources are recorded by Agentic.Exec.
+execTrace :: World -> Plan '[] a -> ExecTrace
+execTrace w = execTraceIn w ENil
+
+execTraceIn :: World -> Env g -> Plan g a -> ExecTrace
+execTraceIn _ _ (PRet _) = []
+execTraceIn w y (PAskC c r k) =
+  let q = reqQuestion r
+      a = worldAnswer w c q
+   in ExecEvent c r (AnswerAsked q) a : execTraceIn w (ECons a y) k
+execTraceIn w y (PAsk c s e k) =
+  let r = withRequestPrompt s (evalExpr e y)
+      q = reqQuestion r
+      a = worldAnswer w c q
+   in ExecEvent c r (AnswerAsked q) a : execTraceIn w (ECons a y) k
+execTraceIn w y (PCase _ e arms) = execTraceIn w y (arms (evalExpr e y))
+execTraceIn w y (PDyn _ e f) = execTraceIn w y (f (evalExpr e y))
 
 -- | @Plan.run@ in the empty context — the answer rather than the transcript.
 -- No part of the oracle's record, but free from the same fold and useful in a
@@ -379,12 +410,12 @@ runPlan w = runIn w ENil
 -- 'traceIn' is.
 runIn :: World -> Env g -> Plan g a -> a
 runIn _ y (PRet e) = evalExpr e y
-runIn w y (PAskC c q k) =
-  let a = worldAnswer w c q
+runIn w y (PAskC c r k) =
+  let a = worldAnswer w c (reqQuestion r)
    in runIn w (ECons a y) k
 runIn w y (PAsk c s e k) =
-  let q = withPrompt s (evalExpr e y)
-      a = worldAnswer w c q
+  let r = withRequestPrompt s (evalExpr e y)
+      a = worldAnswer w c (reqQuestion r)
    in runIn w (ECons a y) k
 runIn w y (PCase _ e arms) = runIn w y (arms (evalExpr e y))
 runIn w y (PDyn _ e f) = runIn w y (f (evalExpr e y))
@@ -393,14 +424,7 @@ runIn w y (PDyn _ e f) = runIn w y (f (evalExpr e y))
 -- The bills
 -- ---------------------------------------------------------------------------
 
--- | Lean's @Key = (c : Code) × Q c@ (@Cost.lean:91@), flattened to first-order
--- data so that it can be compared.
---
--- Equality is on all five components and on nothing else. In particular the
--- __answer is not part of the key__ (a world is a function, so equal questions
--- have equal answers anyway), and there is no position and no site: two
--- syntactically distinct asks that say the same words, to the same addressee,
--- in the same scope, at the same draw, are __one question__.
+-- | Bare semantic key: code plus every question field, answer forgotten.
 data EventKey = EventKey
   { ekCode :: !SomeCode,
     ekAddressee :: !Addressee,
@@ -410,11 +434,6 @@ data EventKey = EventKey
   }
   deriving (Eq, Show)
 
--- | Hand-written rather than derived only because @Agentic.Raw.Addressee@
--- carries no 'Ord' instance and this module may not add an orphan one. It
--- agrees with the derived 'Eq' — the addressee's constructor index and
--- identifier decide it — so it is a lawful total order, which is all
--- 'billMemo' needs of it.
 instance Ord EventKey where
   compare a b = compare (ordKey a) (ordKey b)
     where
@@ -425,11 +444,6 @@ instance Ord EventKey where
           ekPrompt k,
           ekDraw k
         )
-      -- The key must mention __every__ field the derived 'Eq' compares, or two
-      -- unequal addressees would order as one and 'billMemo' would conflate
-      -- them. That is the whole reason @toolExec@'s @cmd@ and @args@ are here:
-      -- two commands at one tool id are two questions (D5), and
-      -- @battery-219@\/@battery-220@ pin the pair of bills that says so.
       addresseeOrd :: Addressee -> (Int, Text, Text, [Text])
       addresseeOrd = \case
         AddrModel i -> (0, i, T.empty, [])
@@ -437,36 +451,48 @@ instance Ord EventKey where
         AddrPerson i -> (2, i, T.empty, [])
         AddrToolExec i cmd args -> (3, i, cmd, args)
 
--- | @Event.key@ (@Cost.lean:111@): the question an event put, forgetting the
--- answer.
-eventKey :: Event -> EventKey
-eventKey (Event c q _) =
-  EventKey (fromSCode c) (qAddressee q) (qScope q) (qPrompt q) (qDraw q)
+questionKey :: SCode c -> Q c -> EventKey
+questionKey c q =
+  EventKey
+    (fromSCode c)
+    (qAddressee q)
+    (qScope q)
+    (qPrompt q)
+    (qDraw q)
 
--- | @Multiplicative.toAdd (billFresh tick t)@, which @Cost.lean:277@
--- (@billFresh_tick@) proves is @t.length@: __charge every event__.
+eventKey :: Event -> EventKey
+eventKey (Event c q _) = questionKey c q
+
+execEventKey :: ExecEvent -> EventKey
+execEventKey (ExecEvent c r _ _) = questionKey c (reqQuestion r)
+
+execEventIsEffect :: ExecEvent -> Bool
+execEventIsEffect (ExecEvent _ r _ _) = intentIsEffect (reqIntent r)
+
+-- | Semantic fresh bill: one unit per bare-question event.
 billFresh :: Trace -> Integer
 billFresh = fromIntegral . length
 
--- | @Multiplicative.toAdd (billMemo tick t)@: __charge each distinct question
--- once__, distinctness being 'EventKey' equality.
---
--- @battery-117-two-draws-of-one-prompt-are-two-questions@ is the entry that
--- pins the boundary: three identical prompts to one model, drawn at @0@, @0@
--- and @1@, bill @4@ fresh and @3@ memoized — the two draw-@0@ questions
--- collapse and the draw-@1@ one does not, which is @Q.draw@'s entire reason for
--- existing. (@battery-137-empty-prompts-and-an-empty-define@ is the only other
--- corpus entry where the two bills differ; @vector-001-billmemo-below-billfresh@,
--- despite its name, reports @3@ and @3@.)
---
--- __One subtlety, harmless here and dangerous if generalized.__ Lean's
--- @List.dedup@ keeps the /last/ occurrence of each key where a set-based (or
--- @nub@-based) dedup keeps the first. The two agree on cardinality, which is
--- all @billMemo@ at @tick@ observes; anything that ever needs the deduplicated
--- key /list/ — a non-commutative price carrier would — must reproduce Lean's
--- last-wins order instead.
-billMemo :: Trace -> Integer
-billMemo = fromIntegral . Set.size . Set.fromList . map eventKey
+-- | Operational fresh bill: one unit per annotated Plan occurrence.
+billExecFresh :: ExecTrace -> Integer
+billExecFresh = fromIntegral . length
+
+-- | Operational memo projection: reusable identity is bare Q, effects are kept
+-- per occurrence, and retained events preserve their own authored annotation.
+execMemoEvents :: ExecTrace -> ExecTrace
+execMemoEvents [] = []
+execMemoEvents (e : es)
+  | execEventIsEffect e = e : execMemoEvents es
+  | execEventKey e `elem` map execEventKey (filter (not . execEventIsEffect) es) =
+      execMemoEvents es
+  | otherwise = e : execMemoEvents es
+
+billMemo :: ExecTrace -> Integer
+billMemo = fromIntegral . length . execMemoEvents
+
+-- | Frozen v2 projection over semantic trace: every bare question once.
+billMemoLegacy :: Trace -> Integer
+billMemoLegacy = fromIntegral . length . nub . map eventKey
 
 -- ---------------------------------------------------------------------------
 -- The oracle's JSON (Conformance.lean:155-:238)
@@ -513,26 +539,49 @@ scopeJson s =
 -- code is an object carrying the schema that is part of question identity. The
 -- prompt is the evaluated words, not the chunk list.
 
-eventJson :: Event -> Value
-eventJson (Event c q a) =
-  object
-    [ "code" .= codeJson (fromSCode c),
-      "addressee" .= qAddressee q,
-      "scope" .= scopeJson (qScope q),
-      "prompt" .= qPrompt q,
-      "draw" .= qDraw q,
-      "answer" .= answerJson c a
-    ]
+eventFields :: SCode c -> Q c -> El c -> [Pair]
+eventFields c q a =
+  [ "code" .= codeJson (fromSCode c),
+    "addressee" .= qAddressee q,
+    "scope" .= scopeJson (qScope q),
+    "prompt" .= qPrompt q,
+    "draw" .= qDraw q,
+    "answer" .= answerJson c a
+  ]
 
--- | @Conformance.lean:244@ — one entry of a checked reply's @"worlds"@ array.
--- Argument order is Lean's: the plan, then the spec.
+eventJson :: Event -> Value
+eventJson (Event c q a) = object (eventFields c q a)
+
+-- | Version-3 representation event. Question fields are authored; dispatch and
+-- answer-source attribution remain execution metadata outside this wire version.
+eventJsonWithIntent :: ExecEvent -> Value
+eventJsonWithIntent (ExecEvent c r _ a) =
+  object $
+    ["code" .= codeJson (fromSCode c), "intent" .= intentName (reqIntent r)]
+      ++ drop 1 (eventFields c (reqQuestion r) a)
+
+
+-- | Frozen semantic v2 observation.
 worldObservation :: Plan '[] () -> WorldSpec -> Value
 worldObservation p w =
-  object
-    [ "world" .= w,
-      "trace" .= map eventJson t,
-      "billFresh" .= billFresh t,
-      "billMemo" .= billMemo t
-    ]
-  where
-    t = trace (toWorld w) p
+  let semantic = trace (toWorld w) p
+   in object
+        [ "world" .= w,
+          "trace" .= map eventJson semantic,
+          "billFresh" .= billFresh semantic,
+          "billMemo" .= billMemoLegacy semantic
+        ]
+
+-- | Annotated representation v3 plus its bare semantic erasure.
+worldObservationWithIntent :: Plan '[] () -> WorldSpec -> Value
+worldObservationWithIntent p w =
+  let world = toWorld w
+      semantic = trace world p
+      operational = execTrace world p
+   in object
+        [ "world" .= w,
+          "trace" .= map eventJsonWithIntent operational,
+          "semanticTrace" .= map eventJson semantic,
+          "billFresh" .= billExecFresh operational,
+          "billMemo" .= billMemo operational
+        ]

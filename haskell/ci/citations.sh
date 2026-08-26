@@ -11,8 +11,8 @@
 # `test/AcpSmoke.lean` outright and cut 584 lines from `Agentic/Core/Exec.lean`
 # and 132 from `Agentic/Core/Explain.lean`, and 58 of the 254 citations in
 # `haskell/` were left naming a file that no longer existed or a line past the
-# end of one — while `Exec.lean:925`, cited for a permission policy, still
-# resolved, to an unrelated retry loop.
+# end of one — while a citation to line 925 of `Exec.lean`, intended for a
+# permission policy, still resolved to an unrelated retry loop.
 #
 #     ./ci/citations.sh
 #

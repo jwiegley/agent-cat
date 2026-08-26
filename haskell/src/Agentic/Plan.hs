@@ -6,6 +6,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
@@ -71,6 +72,24 @@ module Agentic.Plan
     shapeOf,
     withPrompt,
     atModelShape,
+
+    -- * Annotated executable requests
+    Intent (..),
+    intentName,
+    intentIsEffect,
+    Request (..),
+    RequestShape (..),
+    consultRequest,
+    observeRequest,
+    effectRequest,
+    consultShape,
+    observeShape,
+    effectShape,
+    requestShapeOf,
+    withRequestPrompt,
+    AnswerSource (..),
+    ExecEvent (..),
+    ExecTrace,
 
     -- * Contexts, environments, variables, expressions
     Ctx,
@@ -327,6 +346,82 @@ withPrompt s p = Q (shAddressee s) (shScope s) p (shDraw s)
 atModelShape :: Text -> Shape c -> Shape c
 atModelShape m s = s {shScope = scopeMul (scopeFst m) (shScope s)}
 
+-- | Typed execution annotation. It does not alter bare-question denotation.
+data Intent (c :: Code) where
+  Consult :: Intent c
+  Observe :: Intent c
+  Effect :: Intent 'CodeAck
+
+deriving instance Eq (Intent c)
+deriving instance Show (Intent c)
+
+intentName :: Intent c -> Text
+intentName Consult = "consult"
+intentName Observe = "observe"
+intentName Effect = "effect"
+
+intentIsEffect :: Intent c -> Bool
+intentIsEffect Effect = True
+intentIsEffect _ = False
+
+-- | Executable Plan request: semantic question plus operational annotation.
+data Request (c :: Code) = Request
+  { reqQuestion :: !(Q c),
+    reqIntent :: !(Intent c)
+  }
+
+deriving instance Eq (Request c)
+deriving instance Show (Request c)
+
+-- | Annotated request with only its prompt forgotten.
+data RequestShape (c :: Code) = RequestShape
+  { rsQuestion :: !(Shape c),
+    rsIntent :: !(Intent c)
+  }
+
+deriving instance Eq (RequestShape c)
+deriving instance Show (RequestShape c)
+
+consultRequest :: Q c -> Request c
+consultRequest q = Request q Consult
+
+observeRequest :: Q c -> Request c
+observeRequest q = Request q Observe
+
+effectRequest :: Q 'CodeAck -> Request 'CodeAck
+effectRequest q = Request q Effect
+
+consultShape :: Shape c -> RequestShape c
+consultShape s = RequestShape s Consult
+
+observeShape :: Shape c -> RequestShape c
+observeShape s = RequestShape s Observe
+
+effectShape :: Shape 'CodeAck -> RequestShape 'CodeAck
+effectShape s = RequestShape s Effect
+
+requestShapeOf :: Request c -> RequestShape c
+requestShapeOf (Request q intent) = RequestShape (shapeOf q) intent
+
+withRequestPrompt :: RequestShape c -> Text -> Request c
+withRequestPrompt (RequestShape s intent) prompt = Request (withPrompt s prompt) intent
+
+-- | How this occurrence obtained its answer. 'AnswerAsked' may carry a
+-- failover-relabelled question; 'AnswerReused' means no request was dispatched.
+data AnswerSource (c :: Code)
+  = AnswerReused
+  | AnswerAsked !(Q c)
+
+deriving instance Eq (AnswerSource c)
+deriving instance Show (AnswerSource c)
+
+-- | One annotated Plan occurrence. The authored request is never rewritten by
+-- routing or fallback.
+data ExecEvent where
+  ExecEvent :: SCode c -> Request c -> AnswerSource c -> El c -> ExecEvent
+
+type ExecTrace = [ExecEvent]
+
 -- ---------------------------------------------------------------------------
 -- Contexts, environments, variables, expressions, substitutions
 -- ---------------------------------------------------------------------------
@@ -562,8 +657,8 @@ tagValues TEnding = [EndSettled, EndUnsettled, EndAbandoned]
 --
 -- > inductive PlanF (A : Type) : Ctx → Type where
 -- >   | ret  (e : Expr Γ A) : PlanF A Γ
--- >   | askC (c : Code) (q : Q c) (k : PlanF A (c :: Γ)) : PlanF A Γ
--- >   | ask  (c : Code) (s : Q.Shape c) (e : Expr Γ String) (k : PlanF A (c :: Γ)) : PlanF A Γ
+-- >   | askC (c : Code) (q : Request c) (k : PlanF A (c :: Γ)) : PlanF A Γ
+-- >   | ask  (c : Code) (s : Request.Shape c) (e : Expr Γ String) (k : PlanF A (c :: Γ)) : PlanF A Γ
 -- >   | case (t : Tag) (e : Expr Γ t.El) (arms : t.El → PlanF A Γ) : PlanF A Γ
 -- >   | dyn  (b : Code) (e : Expr Γ (El b)) (f : El b → PlanF A Γ) : PlanF A Γ
 --
@@ -587,8 +682,8 @@ tagValues TEnding = [EndSettled, EndUnsettled, EndAbandoned]
 -- No 'Eq', 'Ord' or 'Show': every former but 'PRet' holds a function.
 data Plan (g :: Ctx) a where
   PRet :: Expr g a -> Plan g a
-  PAskC :: SCode c -> Q c -> Plan (c ': g) a -> Plan g a
-  PAsk :: SCode c -> Shape c -> Expr g Text -> Plan (c ': g) a -> Plan g a
+  PAskC :: SCode c -> Request c -> Plan (c ': g) a -> Plan g a
+  PAsk :: SCode c -> RequestShape c -> Expr g Text -> Plan (c ': g) a -> Plan g a
   PCase :: Tag t -> Expr g t -> (t -> Plan g a) -> Plan g a
   PDyn :: SCode b -> Expr g (El b) -> (El b -> Plan g a) -> Plan g a
 
@@ -689,12 +784,12 @@ bindP :: SCode c -> Plan g (El c) -> (El c -> Plan g b) -> Plan g b
 bindP c p k = graft p (Cont (\s e -> PDyn c e (\a -> subP (k a) s)))
 
 -- | @Plan.askC1@ (@:872@): put a closed question and answer with the reply.
-askC1 :: SCode c -> Q c -> Plan g (El c)
+askC1 :: SCode c -> Request c -> Plan g (El c)
 askC1 c q = PAskC c q (PRet (exprVar VHere))
 
 -- | @Plan.ask1@ (@:876@): put the question of this shape whose words are built
 -- from what is known, and answer with the reply.
-ask1 :: SCode c -> Shape c -> Expr g Text -> Plan g (El c)
+ask1 :: SCode c -> RequestShape c -> Expr g Text -> Plan g (El c)
 ask1 c s e = PAsk c s e (PRet (exprVar VHere))
 
 -- | @Plan.caseB@ (@:882@): @.case e (fun b => cond b t f)@.
@@ -971,11 +1066,9 @@ size = \case
   PCase t _ arms -> 1 + sum (map (size . arms) (tagValues t))
   PDyn {} -> 1
 
--- | @Plan.askNodes@ (@Agentic/Core/Explain.lean:194@): how many consultations
--- are /written/ in the term, both arms of every branching counted.
+-- | @Plan.askNodes@: request nodes written in term, counting both branch arms.
 --
--- Not a bill — a run pays for the questions on the path it takes, and that is
--- what 'costM'\'s bag counts. The two coincide exactly where there is no
+-- Not a bill: a run pays for requests on its selected path, which 'costM' counts.
 -- branching (@Plan.length_trace_eq_askNodes@). A @case@ contributes only its
 -- arms, and a 'PDyn' contributes nothing.
 askNodes :: Plan g a -> Integer
@@ -1041,8 +1134,7 @@ schemaRequirements = \case
 --    therefore takes no environment and works in any context.
 -- 2. @Multiplicative Nat@ read through @Multiplicative.toAdd@ is ordinary
 --    addition: @{1}@ is the singleton bag of additive @0@, and each ask adds
---    @1@ to every element. So a bill is an 'Integer' and it counts
---    consultations.
+--    @1@ to every element. A bill is an 'Integer' counting request occurrences.
 -- 3. @Multiset@ is only ever read through @min@, @max@ and @card@ — and
 --    @Explain.leafBills@ sorts it before printing — so a list is faithful.
 --

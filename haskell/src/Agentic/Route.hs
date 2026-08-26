@@ -6,15 +6,14 @@
 
 -- |
 -- Module      : Agentic.Route
--- Description : Which backend answers which question — execution policy, and
---               nothing below it.
+-- Description : Which backend answers which request — execution policy only.
 --
 -- One run, several model backends. A route is a pair @NAME=BACKEND@ where
 -- @NAME@ is a __serving model__ — a @served by@ pin, or one of its
 -- @falling back to@ spares — and @BACKEND@ is a transport to start or to send
 -- to. The whole runtime is 'routedWorld', a 'WorldIO' that dispatches both the
--- eventual consultation and its prompt-independent turn lane to the backend
--- selected by the question's model axis.
+-- request and prompt-independent turn lane to backend selected by its question's
+-- model axis.
 --
 -- __The resolution rule, stated once.__ /A question is routed by its model
 -- axis; 'Nothing' takes the default./ Four things follow, and the first is why
@@ -54,7 +53,7 @@
 -- table. One pin tried at two backends is the same question — same code, same
 -- addressee, same scope, same prompt, same draw, hence the same @EventKey@ —
 -- put twice to two processes; the first answer is inserted and the second is a
--- consultation the table cannot distinguish from the first and the bill cannot
+-- request the table cannot distinguish from the first and the bill cannot
 -- see. Cross-provider recovery goes through the /pin ladder/, which relabels
 -- the key, and there is nowhere else for it to go. The corollary an implementer
 -- must not miss: __a route whose backend is dead is a dead question__, not a
@@ -95,7 +94,12 @@ module Agentic.Route
 where
 
 import Agentic.Exec (WorldIO (..))
-import Agentic.Plan (Q (qScope), QScope (scopeModelAxis), withPrompt)
+import Agentic.Plan
+  ( Q (qScope),
+    QScope (scopeModelAxis),
+    Request (reqQuestion),
+    withRequestPrompt
+  )
 import Agentic.WF (wft)
 import Data.List (nub)
 import Data.Map.Strict (Map)
@@ -251,7 +255,7 @@ parseRoute spec = case T.breakOn "=" spec of
 -- typed, which is the order the run starts them and the order the header prints
 -- them — an operator must be able to read the header against their own command
 -- line. 'routeByModel' is the same table for lookup, which is what
--- 'backendFor' does once per consultation. 'routes' is the only thing that
+-- 'backendFor' does once per request. 'routes' is the only thing that
 -- builds either, so they cannot disagree.
 data Routes b = Routes
   { -- | Every question no route claims: every unpinned ask, every tool, every
@@ -312,7 +316,7 @@ routeBackends rs = nub (routeDefault rs : map snd (routeNamed rs))
 -- The layer
 -- ---------------------------------------------------------------------------
 
--- | Dispatch each question to the backend its model axis names.
+-- | Dispatch each request by its question's model axis.
 --
 -- Installed at exactly the position one @worldOfAcp cfg acp@ occupies today, so
 -- that @runPlanWith@, the memo table, the chain walk, @billFresh@, @billMemo@
@@ -332,8 +336,8 @@ routeBackends rs = nub (routeDefault rs : map snd (routeNamed rs))
 --     guarantee — a gate is an exit code and not a model's claim about one — is
 --     unaffected by which providers the run reached.
 --   * __Announcement is unchanged.__ @announcingWorld@ is outermost, prints one
---     line per consultation, and a memo hit prints nothing. Routing changes
---     neither the count nor the wording.
+--     line per reusable miss or effect occurrence; memo hits print nothing.
+--     Routing changes neither count nor wording.
 --   * __The chain walk is above routing, not beside it.__ @askOrMemo@ computes
 --     the candidate sequence as a pure function of the question and the chain
 --     table, consults the memo, and only then calls @worldAskIO@. Routing is
@@ -341,8 +345,8 @@ routeBackends rs = nub (routeDefault rs : map snd (routeNamed rs))
 routedWorld :: Routes WorldIO -> WorldIO
 routedWorld rs =
   WorldIO
-    { worldAskIO = \c q -> worldAskIO (backendFor rs q) c q,
+    { worldAskIO = \c q -> worldAskIO (backendFor rs (reqQuestion q)) c q,
       worldTurnLane = \c shape ->
-        let backend = backendFor rs (withPrompt shape T.empty)
+        let backend = backendFor rs (reqQuestion (withRequestPrompt shape T.empty))
          in worldTurnLane backend c shape
     }

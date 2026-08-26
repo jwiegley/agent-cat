@@ -577,15 +577,36 @@ askShapeH _ a =
   let s = Shape {shAddressee = askAddr a, shScope = scopeUnit, shDraw = askDraw a}
    in maybe s (\srv -> atModelShape (srvPrimary srv) s) (askServe a)
 
+-- | Value-position commands are observations; other value asks are
+-- consultations. Statement-position acts bypass this classifier.
+valueIntentH :: SCode c -> Ask s -> Intent c
+valueIntentH _ a = case askAddr a of
+  AddrToolExec {} -> Observe
+  _ -> Consult
+
+requestShapeH :: Intent c -> SCode c -> Ask s -> RequestShape c
+requestShapeH intent c a = RequestShape (askShapeH c a) intent
+
+askNodeWithIntent ::
+  Intent c ->
+  SCode c ->
+  Ask s ->
+  Plan (c ': Codes s) a ->
+  Plan (Codes s) a
+askNodeWithIntent intent c a k = case wordsClosed (askWords a) of
+  Just w -> PAskC c (withRequestPrompt (requestShapeH intent c a) w) k
+  Nothing -> PAsk c (requestShapeH intent c a) (wordsExpr (askWords a)) k
+
+askNodeEffect :: Ask s -> Plan ('CodeAck ': Codes s) a -> Plan (Codes s) a
+askNodeEffect = askNodeWithIntent Effect SAck
+
 -- | A question in binding position: __one__ node, because 'PAsk' /is/
 -- ask-and-bind. Lean: @bindForm@ (@Check.lean:542@), its @.ask@ branch at @:551@.
 askNode :: forall c s a. KnownCode c => Ask s -> Plan (c ': Codes s) a -> Plan (Codes s) a
 askNode = askNodeWith (sCode @c)
 
 askNodeWith :: SCode c -> Ask s -> Plan (c ': Codes s) a -> Plan (Codes s) a
-askNodeWith c a k = case wordsClosed (askWords a) of
-  Just w -> PAskC c (withPrompt (askShapeH c a) w) k
-  Nothing -> PAsk c (askShapeH c a) (wordsExpr (askWords a)) k
+askNodeWith c a = askNodeWithIntent (valueIntentH c a) c a
 
 -- | A question as a value. Lean: @askPlan@ (@Check.lean:350@), i.e. @askC1@
 -- where the words are in the term and @ask1@ where they are computed.
@@ -593,9 +614,12 @@ askAt :: forall c s. KnownCode c => Ask s -> Plan (Codes s) (El c)
 askAt = askAtWith (sCode @c)
 
 askAtWith :: SCode c -> Ask s -> Plan (Codes s) (El c)
-askAtWith c a = case wordsClosed (askWords a) of
-  Just w -> askC1 c (withPrompt (askShapeH c a) w)
-  Nothing -> ask1 c (askShapeH c a) (wordsExpr (askWords a))
+askAtWith c a =
+  let intent = valueIntentH c a
+      shape = requestShapeH intent c a
+   in case wordsClosed (askWords a) of
+        Just w -> askC1 c (withRequestPrompt shape w)
+        Nothing -> ask1 c shape (wordsExpr (askWords a))
 
 -- ---------------------------------------------------------------------------
 -- Clause-position sources
@@ -1000,7 +1024,7 @@ actB a rest =
   Body
     { bodyRaw = BodyAct (askRaw a) pos0 : bodyRaw rest,
       bodyAnswer = bodyAnswer rest,
-      bodyPlan = askNode @'CodeAck a (weakenP (bodyPlan rest))
+      bodyPlan = askNodeEffect a (weakenP (bodyPlan rest))
     }
 
 -- | A statement call in a body. Only a @-> receipt@ function may stand here,
@@ -1115,7 +1139,7 @@ act :: Ask s -> Blk s -> Blk s
 act a rest =
   Blk
     (RawAct (askRaw a) (blkRaw rest) pos0)
-    (askNode @'CodeAck a (weakenP (blkPlan rest)))
+    (askNodeEffect a (weakenP (blkPlan rest)))
 
 -- | A statement call: @Plan.graft p (fun _ σ _ => Plan.sub k σ)@
 -- (@Check.lean:778@). The answer is discarded and __no__ context slot is

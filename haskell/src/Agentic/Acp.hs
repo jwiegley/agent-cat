@@ -14,7 +14,7 @@
 -- @Agentic\/Core\/Exec.lean@. All three are retired: @Exec.lean:62@ (\"Where
 -- the transport went\") records that the Lean ACP and @agent-deck@ transports,
 -- the @Oracle IO@ over them and the entry points @exec@\/@execIO@ are gone and
--- that @agentic-run@ on the Haskell side is the runner, and @Exec.lean:978@
+-- that @agentic-run@ on the Haskell side is the runner, and @Exec.lean:657@
 -- says the same of the entry points from the other end. What survives in Lean
 -- is the part that was never about a wire — @Decode@, @Dlg.execM@, @renderQ@,
 -- @answerSpec@, @nudge@, @askDecoding@ — and this module is now the /only/
@@ -24,11 +24,10 @@
 --
 -- == What this transport can promise that the deck cannot
 --
--- 'Agentic.Exec.requiresCompletedTurn' says that an @ack@ — or /any/ answer
--- from a person — may not be recorded from a turn the agent did not finish:
--- @Decode .ack@ is total, so a receipt from an interrupted turn is the same
--- term in the table as one from a completed act, and recording it would be
--- recording an act nobody performed. "Agentic.AgentDeck" says in as many words
+-- 'Agentic.Exec.requiresCompletedTurn' says that an effect — or any request
+-- addressed to a person — may not be credited from an unfinished turn. Effect
+-- acknowledgements carry only @()@, so recording interrupted bytes would claim
+-- an occurrence completed when it did not.
 -- that it __cannot__ apply that rule, because the @agent-deck@ CLI reports no
 -- stop reason.
 --
@@ -155,7 +154,7 @@
 -- the person included. Lean had a second route for that one — an
 -- @askPersonOnStdin@ setting, a question printed on stderr and a line read from
 -- stdin, turned on for a /live/ adapter and off for the stub, which answers for
--- the human — and it went with the rest of the wire policy (@Exec.lean:878@).
+-- the human — and it went with the rest of wire policy (@Exec.lean:553@).
 -- This port has only the off position, which is the stub's, and a run against a
 -- live adapter therefore lets the agent play the owner. That is a limitation of
 -- this version and is named rather than hidden: the addressee is not lost — it is the first thing 'renderQ' says — but
@@ -163,33 +162,26 @@
 --
 -- == Which questions may write
 --
--- 'permissionByCode' is this package's own rule, stated in Haskell and in no
--- Lean file (the @Settings@ that carried a permission policy kept it as a
--- policy about a wire, and shed it with the transport — @Exec.lean:878@): a
--- tool call requested during an __act__ is granted, and one requested during
--- an ask — text, verdict or flag — is declined in the schema's own words
--- (@{\"outcome\":\"cancelled\"}@). The policy is a function of the /question/
--- and not of the connection, which is the repair of a measured defect: with one
--- connection-wide @grant@, an agent drafting a patch could rewrite the
--- workspace during a turn that had asked it only to think. 'sayAcp' sets the
--- policy immediately before each prompt, because "the question under way" is a
--- fact it has and the pump does not.
+-- 'permissionByIntent' grants only `Intent.effect`; consultations and
+-- observations are denied in the schema's own words. Answer code and addressee
+-- no longer stand in for authority, so an acknowledgement can be harmless while
+-- a statement-position act is writable by construction. `sayAcp` installs the
+-- policy immediately before each prompt.
 --
 -- Every decision is announced on stderr through 'Agentic.Exec.stderrLog',
 -- unconditionally: a run that denied an agent the workspace and paid a retry
 -- for it must not look identical to one nobody asked anything of. (Lean had
 -- this as @Settings.onPermission@ and retired it with the rest of the wire
--- policy, @Exec.lean:878@.)
+-- policy, @Exec.lean:553@.)
 --
 -- == A question forgets its predecessors
 --
 -- 'acpFreshPerQuestion' defaults to 'True': a new @session\/new@ before every
--- question, because a world is a function of the /question/
--- (@Agentic\/Core\/World.lean:47@ — @Ω := (c : Code) → Q c → El c@) and a
--- single session is a memory of the ones before it. It is an approximation and
--- it is a policy, not a theorem: nothing here can make an agent forget. Lean
+-- dispatched question approximates the bare-Q world, which does not depend on
+-- predecessor history. A session does remember predecessors, so this remains a
+-- policy rather than a theorem; nothing here can make an agent forget.
 -- had the same knob as @Settings.freshSessionPerQuestion@ and shed it with the
--- transport (@Exec.lean:878@); this port has no @--session@ (see the
+-- transport (@Exec.lean:553@); this port has no @--session@ (see the
 -- departures below), so the rule reduces to "always fresh".
 --
 -- == What is not here
@@ -198,7 +190,7 @@
 -- ('askDecoding'), exactly as in "Agentic.AgentDeck", so a run against an
 -- adapter and a run against a table fail in the same words. The rendered
 -- question is 'renderQ' — imported from "Agentic.AgentDeck", never re-worded,
--- because @Exec.renderQ@ (@Exec.lean:853@) is one function in Lean and two
+-- because @Exec.renderQ@ (@Exec.lean:534@) is one function in Lean and two
 -- copies of a prompt header is how two transports come to tell an addressee two
 -- different answer formats.
 --
@@ -226,7 +218,7 @@
 -- * __No @session\/load@, no @session\/fork@, no scope calls.__ v1 opens
 --   sessions of its own; the model and mode axes travel in 'renderQ'\'s header,
 --   which is the fallback @renderQ@ itself documents for a transport with no
---   call for them (@Exec.lean:842@: \"select via the protocol where the
+--   call for them (@Exec.lean:508@: "select via the protocol where the
 --   protocol says how, otherwise say it in words\"; it is what
 --   "Agentic.AgentDeck" does, for want of any call at all). Capabilities are
 --   still read at the handshake, because that is what a client that later wants
@@ -283,7 +275,7 @@ module Agentic.Acp
 
     -- * Which questions may write
     Permission (..),
-    permissionByCode,
+    permissionByIntent,
     pickAllow,
     permissionChoice,
     permissionResponse,
@@ -370,8 +362,8 @@ import Agentic.Exec
     withTransportGaps,
     newTurnLaneIO,
   )
-import Agentic.Plan (Q (..), SCode (SAck), fromSCode)
-import Agentic.Raw (Addressee, Code, SomeCode (..))
+import Agentic.Plan (Intent (..), Q (..), Request (..), SCode, fromSCode)
+import Agentic.Raw (Code)
 import Agentic.WF (wft)
 
 -- ---------------------------------------------------------------------------
@@ -744,22 +736,11 @@ data Turn = Turn
 data Permission = Grant | Cancel
   deriving (Eq, Show)
 
--- | An act may write and an ask may not.
---
--- __Stated here, and in no Lean file.__ Lean's @Settings@ carried a permission
--- policy and shed it with the transport, because every field of it was a policy
--- about a wire this package no longer owns (@Exec.lean:878@). So this is the
--- definition rather than a port of one.
---
--- It is a decision about /questions/, which is why it is a function of the
--- code and not a field of the connection. A connection-wide grant made @ask@
--- and @act@ indistinguishable to the permission layer, so a draft turn could
--- write to the workspace with the same authority as a consented act; that is
--- the defect this replaces, and @test\/stub_adapter.py --write-on-ask@ is its
--- negative control.
-permissionByCode :: SomeCode -> Addressee -> Permission
-permissionByCode (SomeCode SAck) _ = Grant
-permissionByCode _ _ = Cancel
+-- | Only an effect-annotated Plan occurrence may write. Answer code and
+-- addressee no longer stand in for authority.
+permissionByIntent :: Intent c -> Permission
+permissionByIntent Effect = Grant
+permissionByIntent _ = Cancel
 
 -- | The option selected when a request is granted — @allow_once@ if the agent offered one, else @allow_always@, else
 -- the first option of any kind, else nothing at all.
@@ -1362,7 +1343,7 @@ acpGap e = case fromException e of
   Just ae -> Just (GapTransportRefusal, renderAcpError ae)
   Nothing -> Nothing
 
--- | Lean's @Say@ (@Exec.lean:904@) at this transport: name the question under
+-- | Lean's @Say@ (@Exec.lean:585@) at this transport: name the question under
 -- way, set the permission policy for it, prompt, and __insist that the bytes
 -- are somebody's answer__.
 --
@@ -1388,9 +1369,9 @@ acpGap e = case fromException e of
 -- and everything downstream sees. (The abandonment message below therefore
 -- quotes the answer, not the banner — the banner is on the line above it, in
 -- every run that had one.)
-sayAcp :: forall (c :: Code). AcpConfig -> Acp -> SCode c -> Q c -> Text -> IO Text
+sayAcp :: forall (c :: Code). AcpConfig -> Acp -> SCode c -> Request c -> Text -> IO Text
 sayAcp cfg acp c q extra = do
-  writeIORef (acpAsked acp) (what, permissionByCode code (qAddressee q))
+  writeIORef (acpAsked acp) (what, permissionByIntent (reqIntent q))
   let message = renderQ c q <> extra
   chat cfg ("put " <> what <> " (" <> tshow (T.length message) <> " characters)")
   turn <- promptTurn acp what message
@@ -1413,7 +1394,7 @@ sayAcp cfg acp c q extra = do
           <> " ended '"
           <> renderStopReason (turnStop turn)
           <> "', not 'end_turn'"
-      when (requiresCompletedTurn code (qAddressee q)) $
+      when (requiresCompletedTurn q) $
         -- A gap, and the one only this transport can name: the turn ended
         -- cleanly in a way the protocol says is not an answer. Its message is
         -- kept verbatim as the final abandonment, so a question with no spare
@@ -1428,14 +1409,17 @@ sayAcp cfg acp c q extra = do
             <> " ended '"
             <> renderStopReason (turnStop turn)
             <> "' rather than completing (prompt: '"
-            <> qPrompt q
+            <> qPrompt (reqQuestion q)
             <> "'; what arrived: '"
             <> trimAscii (turnText turn)
-            <> [wft|'). The run is abandoned: an unfinished turn did not perform the act it was asked to perform, and a recorded acknowledgement of it would be indistinguishable, in the table, from one that did.|]
+            <> ( case reqIntent q of
+                   Effect -> [wft|'). The run is abandoned: an unfinished turn did not perform the act it was asked to perform, and a recorded acknowledgement of it would be indistinguishable, in the table, from one that did.|]
+                   _ -> [wft|'). The run is abandoned: the unfinished stand-in did not obtain the person's answer, so recording one would attribute words that person never gave.|]
+               )
       pure (turnText turn)
   where
     code = fromSCode c
-    who = addresseeWord (qAddressee q)
+    who = addresseeWord (qAddressee (reqQuestion q))
     -- How the record and the diagnosis name this question, and what is stored
     -- in `acpAsked` for a permission request to be reported against.
     what = "the " <> codeWord code <> " question put to " <> who

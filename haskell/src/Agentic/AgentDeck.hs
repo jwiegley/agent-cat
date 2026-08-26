@@ -64,7 +64,7 @@
 --
 -- == What is sent, and the format line
 --
--- 'renderQ' is @Exec.renderQ@ (@Exec.lean:853@) verbatim, with @Selected@ empty:
+-- 'renderQ' is @Exec.renderQ@ (@Exec.lean:534@) verbatim, with @Selected@ empty:
 -- a header naming the addressee, the scope axes, the draw when it is not the
 -- first, and the answer format, then a blank line, then the prompt. Both scope
 -- axes are said /in words/ because this transport has no call for either — that
@@ -82,7 +82,7 @@
 --
 -- Decoding, re-asking and abandonment are __not__ here: 'worldOfDeck' hands the
 -- transport to "Agentic.Exec"'s 'askDecoding', which is @Exec.attemptWith@
--- (@Exec.lean:913@) and @Exec.askDecoding@'s error (@Exec.lean:968@), so the
+-- (@Exec.lean:594@) and @Exec.askDecoding@'s error (@Exec.lean:648@), so the
 -- retry wording and the exhaustion message exist once in this package.
 --
 -- == One rule this transport cannot apply
@@ -187,6 +187,8 @@ import Agentic.Exec
   )
 import Agentic.Plan
   ( Q (..),
+    Request (..),
+    intentName,
     QScope (..),
     SCode,
     fromSCode,
@@ -202,7 +204,7 @@ import Agentic.Raw (Code)
 -- @deckPollMs@ is the gap between two @session show@ calls and @deckTimeoutMs@
 -- is the budget for a whole turn — send, poll and read. There is deliberately
 -- no retry knob: how many times an unreadable answer is re-asked is
--- 'Agentic.Exec.defaultRetries', which is @Settings.retries@ (@Exec.lean:890@),
+-- 'Agentic.Exec.defaultRetries', which is @Settings.retries@ (@Exec.lean:568@),
 -- and it is a fact about the language's trusted base rather than about this
 -- transport.
 data DeckConfig = DeckConfig
@@ -242,7 +244,7 @@ defaultDeckConfig sess =
 -- longer.
 --
 -- Decode exhaustion is __not__ here: an answer that arrived and could not be
--- read is "Agentic.Exec"'s error (@askDecoding@, @Exec.lean:968@), thrown by
+-- read is "Agentic.Exec"'s error (@askDecoding@, @Exec.lean:648@), thrown by
 -- 'askDecoding' with the wording Lean uses. The split is the useful one — these
 -- are failures to /obtain/ an answer, that one is a failure to /read/ one.
 data DeckError
@@ -390,7 +392,7 @@ parseReply raw = do
 -- What goes on the wire
 -- ---------------------------------------------------------------------------
 
--- | @Exec.renderQ c q {}@ (@Exec.lean:853@): the question as bytes, with a
+-- | @Exec.renderQ c q {}@ (@Exec.lean:534@): the question as bytes, with a
 -- header carrying everything that determines the reply, then the words.
 --
 -- > [question for model author
@@ -406,10 +408,12 @@ parseReply raw = do
 -- scope axes travel in the header. @draw@ appears only when it is nonzero,
 -- because a resample is a different question and the addressee is owed the fact
 -- that it is being asked again on purpose.
-renderQ :: forall (c :: Code). SCode c -> Q c -> Text
-renderQ c q =
+renderQ :: forall (c :: Code). SCode c -> Request c -> Text
+renderQ c request =
   "[question for "
     <> addresseeWord (qAddressee q)
+    <> "\nintent: "
+    <> intentName (reqIntent request)
     <> "\n"
     <> axis "model" (scopeModelAxis (qScope q))
     <> axis "mode" (scopeModeAxis (qScope q))
@@ -421,6 +425,7 @@ renderQ c q =
     <> "]\n\n"
     <> qPrompt q
   where
+    q = reqQuestion request
     axis :: Text -> Maybe Text -> Text
     axis name = maybe "" (\v -> name <> ": " <> v <> "\n")
 
@@ -482,7 +487,7 @@ deckGap e = case fromException e of
   Just de -> Just (GapTransportRefusal, renderDeckError de)
   Nothing -> Nothing
 
--- | Lean's @Say@ (@Exec.lean:904@) at this transport: render the question,
+-- | Lean's @Say@ (@Exec.lean:585@) at this transport: render the question,
 -- append what the caller wants appended, send it, wait for the session to
 -- finish, and return the bytes.
 --
@@ -494,7 +499,7 @@ deckGap e = case fromException e of
 -- Every turn gets a fresh @deckTimeoutMs@ budget, re-asks included: a second
 -- attempt is a second turn, and charging it what the first one spent would make
 -- a slow answer unaskable twice.
-sayDeck :: forall (c :: Code). DeckConfig -> SCode c -> Q c -> Text -> IO Text
+sayDeck :: forall (c :: Code). DeckConfig -> SCode c -> Request c -> Text -> IO Text
 sayDeck cfg c q extra = do
   dl <- deadlineIn (deckTimeoutMs cfg)
   let message = renderQ c q <> extra
@@ -502,7 +507,7 @@ sayDeck cfg c q extra = do
     "put "
       <> codeWord (fromSCode c)
       <> " to "
-      <> addresseeWord (qAddressee q)
+      <> addresseeWord (qAddressee (reqQuestion q))
       <> " ("
       <> tshow (T.length message)
       <> " characters)"

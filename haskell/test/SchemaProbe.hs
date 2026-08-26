@@ -14,14 +14,18 @@ module Main (main) where
 import qualified Agentic.Builder as B
 import Agentic.Exec (askDecoding)
 import qualified Agentic.Observe as O
-import Agentic.Plan (Q (Q), scopeUnit)
+import Agentic.Plan
+  ( AnswerSource (AnswerAsked), ExecEvent (ExecEvent), Q (Q),
+    consultRequest, effectRequest, scopeUnit )
 import Agentic.Raw (Addressee (AddrModel))
 import Agentic.Schema
 import qualified Agentic.Schema.Conformance as C
 import Agentic.Schema.Json
 import Agentic.Schema.TH (deriveSchema)
 import qualified Agentic.Workflow as W
-import Agentic.World (defaultWorldSpec)
+import Agentic.World
+  ( Event (Event), defaultWorldSpec, eventJson, eventJsonWithIntent, execTrace,
+    forgetExecEvent, toWorld, trace )
 import qualified Data.Aeson as A
 import qualified Data.Aeson.KeyMap as KM
 import Data.Aeson.Types (parseEither)
@@ -93,7 +97,7 @@ main = do
       Nothing -> True
       Just encoded -> decode schemaNumber encoded == Just value
   replies <- newIORef ["not json", "{\"count\":3,\"name\":\"Ada\"}"]
-  let question = Q (AddrModel "structured") scopeUnit "answer structurally" 0
+  let question = consultRequest (Q (AddrModel "structured") scopeUnit "answer structurally" 0)
       say _ = atomicModifyIORef' replies $ \case
         [] -> ([], "not json")
         reply : rest -> (rest, reply)
@@ -142,6 +146,20 @@ main = do
             ]) :: A.Result C.SomeAnswer of
         A.Success _ -> False
         A.Error _ -> True
+      intentQuestion = Q (AddrModel "effect") scopeUnit "apply" 0
+      intentRequest = effectRequest intentQuestion
+      semanticEvent = Event SAck intentQuestion ()
+      intentEvent = ExecEvent SAck intentRequest (AnswerAsked intentQuestion) ()
+      v2ErasesIntent = case eventJson semanticEvent of
+        A.Object object -> not (KM.member "intent" object)
+        _ -> False
+      v3ExposesIntent = case eventJsonWithIntent intentEvent of
+        A.Object object -> KM.lookup "intent" object == Just (A.String "effect")
+        _ -> False
+      semantic = trace (toWorld defaultWorldSpec) (B.progPlan schemaProgram)
+      operational = execTrace (toWorld defaultWorldSpec) (B.progPlan schemaProgram)
+      traceErasureCommutes =
+        map eventJson semantic == map (eventJson . forgetExecEvent) operational
       checks =
         [ ("semantic product is directly usable", fst exampleValue == 3),
           ("TH derives schema from record fields", demoteSchema (schemaOf @ReleasePlan) == workedSchema),
@@ -182,6 +200,9 @@ main = do
           ("exact conformance answer round-trips", exactRoundTrips),
           ("malformed exact fixture is rejected", malformedExactRejected),
           ("negative exact denominator is rejected", negativeDenominatorRejected),
+          ("v2 event projection erases intent", v2ErasesIntent),
+          ("v3 event projection exposes effect intent", v3ExposesIntent),
+          ("annotated pure trace erases to semantic trace", traceErasureCommutes),
           ("exact conformance lookup preserves value", C.lookupAnswer [exactAnswer] exampleSchema == Just exampleValue),
           ("exact conformance distinguishes non-finite rationals", C.encodeExact schemaNumber (1 % 3) /= C.encodeExact schemaNumber (2 % 3))
         ]

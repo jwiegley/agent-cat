@@ -87,6 +87,8 @@ import Agentic.Exec
 import Agentic.Plan
   ( El,
     Q (..),
+    Request (..),
+    RequestShape (..),
     Shape (shAddressee),
     SCode (SAck, SFlag, SStructured, SText, SVerdict),
     fromSCode,
@@ -186,10 +188,10 @@ renderShellError = \case
 executingWorld :: ShellConfig -> WorldIO -> WorldIO
 executingWorld cfg inner =
   WorldIO
-    { worldAskIO = \c q -> case qAddressee q of
+    { worldAskIO = \c q -> case qAddressee (reqQuestion q) of
         AddrToolExec _ cmd args -> answerByRunning cfg c q cmd args
         _ -> worldAskIO inner c q,
-      worldTurnLane = \c shape -> case shAddressee shape of
+      worldTurnLane = \c shape -> case shAddressee (rsQuestion shape) of
         AddrToolExec {} -> Nothing
         _ -> worldTurnLane inner c shape
     }
@@ -213,7 +215,7 @@ executingWorld cfg inner =
 -- so any answer manufactured for a nonzero exit would be /definitionally
 -- identical in the memo table/ to one a successful command gave — which is
 -- @askDecoding@'s own reason for abandoning rather than defaulting, and
--- @requiresCompletedTurn@'s for refusing an ack from an interrupted turn.
+-- @requiresCompletedTurn@'s reason for refusing an interrupted effect.
 -- @flag@ and @verdict@ have exactly the room a failure needs: two values, and
 -- objection lines. So a gate at @verdict@ never abandons and takes the objected
 -- arm with the __command's own first failing line__ as the objection.
@@ -239,7 +241,7 @@ answerByRunning ::
   forall (c :: Code).
   ShellConfig ->
   SCode c ->
-  Q c ->
+  Request c ->
   Text ->
   [Text] ->
   IO (El c)
@@ -251,14 +253,14 @@ answerByRunning cfg c q cmd args = do
       <> " (for the "
       <> codeWord (fromSCode c)
       <> " question put to "
-      <> addresseeWord (qAddressee q)
+      <> addresseeWord (qAddressee (reqQuestion q))
       <> ")"
   outcome <-
     timeout (shellTimeoutMs cfg * 1000) $
       try @IOException
         ( readCreateProcessWithExitCode
             (proc (T.unpack cmd) (map T.unpack args)) {cwd = Just (shellCwd cfg)}
-            (T.unpack (qPrompt q))
+            (T.unpack (qPrompt (reqQuestion q)))
         )
   case outcome of
     -- A mechanism failure, not an answer: a gap, so the run policy prices it
@@ -319,11 +321,11 @@ answerByRunning cfg c q cmd args = do
           <> " answering a "
           <> codeWord (fromSCode c)
           <> " for "
-          <> addresseeWord (qAddressee q)
+          <> addresseeWord (qAddressee (reqQuestion q))
           <> ", and a "
           <> codeWord (fromSCode c)
           <> " " <> [wft|has no value that says so: the run is abandoned rather than recording an answer indistinguishable, in the table, from one a command that succeeded gave. (prompt: '|]
-          <> oneLine (qPrompt q)
+          <> oneLine (qPrompt (reqQuestion q))
           <> "'; it said: '"
           <> oneLine (T.take 400 (err <> out))
           <> [wft|'). Ask it as a `flag` or a `verdict` if a nonzero exit is an answer here.|]

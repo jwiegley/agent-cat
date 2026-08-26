@@ -172,7 +172,7 @@
 -- > ,"level":"batch"|"pipeline"|"branch"|"loop"     'Agentic.Plan.levelName'
 -- > ,"size":31                  'Agentic.Plan.size'
 -- > ,"askNodes":9               'Agentic.Plan.askNodes', the asks *written*
--- > ,"minFold":9                least consultations on any path, null if no path
+-- > ,"minFold":9                least request occurrences on any path, null if none
 -- > ,"maxFold":9                greatest, null if no path
 -- > ,"paths":1                  how many paths the cost fold has
 -- > ,"inputs":["plan","base"]   the OPERATOR's inputs, in declaration order
@@ -343,7 +343,8 @@ import Agentic.Shell
 import Agentic.Guards (guardUnpinnedAsk)
 import Agentic.Observe (printedValue, render, renderString)
 import Agentic.Plan
-  ( askNodes,
+  ( ExecTrace,
+    askNodes,
     codes,
     costM,
     costSummary,
@@ -367,7 +368,7 @@ import Agentic.Workflow
     sessionPolicy,
     supply,
   )
-import Agentic.World (Trace, billFresh, billMemo)
+import Agentic.World (billExecFresh, billMemo)
 
 -- ---------------------------------------------------------------------------
 -- The registry
@@ -539,7 +540,7 @@ data Target
 --
 -- The working directory is settled in 'runCmd' and not in the parser, because a
 -- run without @--scratch@ makes one — an act may write, and
--- 'Agentic.Acp.permissionByCode' authorizes a tool call in the session's
+-- 'Agentic.Acp.permissionByIntent' authorizes an effect's tool call in the session's
 -- working directory, so a run that had not been given one of its own would be
 -- authorizing writes into whatever directory it was started from.
 data RunRoutes = RunRoutes
@@ -1064,7 +1065,7 @@ data Facts = Facts
     factSummary :: (Maybe Integer, Maybe Integer, Integer),
     -- | 'Nothing' when the program branches, so no one sequence of answer kinds
     factCodes :: Maybe [Text],
-    -- | the cost fold as runs — @(consultations, how many paths pay it)@
+    -- | cost fold as @(request occurrences, path multiplicity)@
     factFold :: [(Integer, Int)],
     -- | 'operatorInputs'
     factInputs :: [Text],
@@ -1369,8 +1370,8 @@ planCmd rendering raw f prog gs = case rendering of
 -- | The cost summary, and the fold it is a summary of.
 --
 -- @costSummary@ is @(minFold, maxFold, paths)@ over @costM@'s bag of bills:
--- one element per path through the program, each the number of consultations
--- that path pays for. The two bounds are what a run can be held against — a run
+-- one element per path, each its number of request occurrences. Bounds constrain
+-- fresh runtime bills;
 -- whose @billFresh@ falls outside them is a run of a different program — and
 -- when they coincide the program has one price rather than a range.
 --
@@ -1692,12 +1693,13 @@ runCmd reg name target prog gs = case target of
         <> T.intercalate ", " spares
         <> " — a fail-over is narrated on stderr, and the trace records who answered"
 
-    report :: Trace -> IO ()
+    report :: ExecTrace -> IO ()
     report tr = do
       say "  the run is over."
       say "    answer      () — a workflow's value is the unit; what it did is the trace"
-      say $ "    billFresh   " <> tshow (billFresh tr) <> " (consultations the run reached)"
-      say $ "    billMemo    " <> tshow (billMemo tr) <> " (distinct questions, which is what was put)"
+      say $ "    billFresh   " <> tshow (billExecFresh tr) <> " (request occurrences reached)"
+      say $ "    billMemo    " <> tshow (billMemo tr)
+        <> " (reusable requests once, every effect occurrence)"
 
 -- ---------------------------------------------------------------------------
 -- The transport configurations, and the facts they are read for
@@ -1927,7 +1929,7 @@ freshSentinel = do
 -- @--engine acp@ run that named none.
 --
 -- Every run acts somewhere: a workflow may end in an act that writes, and
--- 'Agentic.Acp.permissionByCode' authorizes a tool call /in the session's
+-- 'Agentic.Acp.permissionByIntent' authorizes an effect's tool call /in the session's
 -- working directory/. Making one per run is what keeps the answer to "where may
 -- this agent write?" from being "wherever you happened to be standing". The name
 -- is the registry's binary, for the reason every refusal names it too: a @wf@

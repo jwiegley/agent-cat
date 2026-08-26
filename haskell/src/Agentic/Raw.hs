@@ -342,8 +342,8 @@ instance FromJSON Served where
 servedBy1 :: Text -> Served
 servedBy1 m = Served m []
 
--- | One question, as written. The kind is not a field: it comes from the
--- binder or the position, and the checker imposes it.
+-- | One question as written. Kind and execution intent are occurrence properties,
+-- not Raw fields; Builder lowers source form into annotated Plan.
 data RawAsk = RawAsk
   { -- | The @served by "s"@ override, if any — with its alternates.
     askModel :: !(Maybe Served),

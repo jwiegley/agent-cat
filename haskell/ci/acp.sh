@@ -46,8 +46,8 @@ note() { echo "ci/acp: $*"; }
 bad() { echo "ci/acp: FAIL [$scenario] $*" >&2; failures=$((failures + 1)); }
 
 # Run one scenario in a directory of its own, which is also the adapter's
-# working directory: `permissionByCode` authorizes a tool call *there*, so what
-# a run wrote — and what it did not — is a fact about `$state` and nothing else.
+# working directory: `permissionByIntent` authorizes an effect tool call there,
+# so what a run wrote — and did not — is local to `$state`.
 #
 # stdin is /dev/null on purpose. Every addressee, the `person owner` included,
 # is put to the adapter, and the stub answers for the person (`--adapter-arg
@@ -147,11 +147,9 @@ note "hello: 3 consultations, exit 0"
 # `parse.c`. A client holding one connection-wide `grant` allows it, and the
 # workspace changes during a turn that asked for nothing but words.
 #
-# `Exec.permissionByCode` decides per question instead, so every ask is DENIED
-# and only the act is granted. The run still bills 7/7 — the denial costs
-# nothing, because the stub answers anyway — and the two file assertions are the
-# whole point: `applied.c` exists (the act ran) and `parse.c` does not (no ask
-# wrote).
+# `Exec.permissionByIntent` grants only semantic effects, so this consultation is
+# denied while the final act is granted. The run still bills 7/7 — denial costs
+# nothing because the stub answers anyway. File assertions pin both outcomes.
 # ---------------------------------------------------------------------------
 play write-on-ask run harden --engine acp --adapter stub --adapter-arg --write-on-ask --timeout 60000
 want_code 0
@@ -289,8 +287,8 @@ note "crossed-flags: refused before anything was spawned, exit 1"
 # flag. `deep` is routed to a two-line wrapper script that runs the same stub
 # under `--write-on-ask` — which is scenario 4's measured defect: the adapter
 # asks permission to rewrite `parse.c` during a turn that was only asked a
-# question, and `permissionByCode` denies it. So the routed stub announces
-# itself, by denial, on exactly the questions it answered.
+# consultation, and `permissionByIntent` denies it. The routed stub therefore
+# identifies itself by denial on exactly the requests it answered.
 #
 # That the wrapper suffices is the whole of the argument against a `--route-arg`
 # flag: `adapterArgv` falls through to a bare path for any word it does not

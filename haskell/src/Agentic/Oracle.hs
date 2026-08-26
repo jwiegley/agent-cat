@@ -247,7 +247,8 @@ oracleProgram :: Oracle -> Value -> [WorldSpec] -> IO Value
 oracleProgram o prog ws =
   request
     o
-    [ "program" .= prog,
+    [ "version" .= (3 :: Int),
+      "program" .= prog,
       "worlds" .= toJSON ws,
       "budgetMs" .= programBudgetMs
     ]

@@ -73,9 +73,8 @@ path:
                       a refusing run against the real adapter, `parse.c` was
                       replaced during the AUTHOR's draft turn, because the
                       client held one connection-wide permission policy and
-                      granted every request whatever the question was. Against a
-                      client that decides per question (`Exec.permissionByCode`)
-                      the request is DENIED and nothing is written, so this flag
+                      granted every request whatever its semantic intent was.
+                      Against a client using `Exec.permissionByIntent`, this
                       is the negative control for the fix: the run passes and
                       its workspace is unchanged, and it would not have been.
   --write-anyway      write the same file during an ask *without asking
