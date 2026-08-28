@@ -64,7 +64,7 @@ async function startModelFixture(): Promise<{ url: string; requests: () => numbe
     request.resume();
     request.on("end", () => {
       requests += 1;
-      response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
+      response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "close" });
       response.write(`data: ${JSON.stringify({ id: "fixture", object: "chat.completion.chunk", choices: [{ index: 0, delta: { role: "assistant", content: '{"title":"Child result","priority":1,"steps":["decode"]}' }, finish_reason: null }] })}\n\n`);
       response.write(`data: ${JSON.stringify({ id: "fixture", object: "chat.completion.chunk", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`);
       response.end("data: [DONE]\n\n");
@@ -79,6 +79,9 @@ async function startModelFixture(): Promise<{ url: string; requests: () => numbe
   return {
     url: `http://127.0.0.1:${address.port}`,
     requests: () => requests,
-    close: () => new Promise<void>((resolvePromise, reject) => server.close((error) => error ? reject(error) : resolvePromise())),
+    close: () => new Promise<void>((resolvePromise, reject) => {
+      server.close((error) => error ? reject(error) : resolvePromise());
+      server.closeAllConnections();
+    }),
   };
 }
