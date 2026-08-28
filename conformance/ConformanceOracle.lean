@@ -29,15 +29,22 @@ partial def waitBudget (task : Task (Except IO.Error Json)) (t0 budget : Nat) :
       IO.sleep 5
       waitBudget task t0 budget
 
-/-- Version 2 is the compatibility default; version 3 exposes request intent. -/
-def observationVersionOf (j : Json) : Except String ObservationVersion :=
+/-- Request-level versions. The trace-only observation algebra remains v2/v3;
+v4 selects the separate typed-result observer. -/
+inductive ProgramVersion where
+  | v2
+  | v3
+  | v4
+
+def observationVersionOf (j : Json) : Except String ProgramVersion :=
   match j.getObjVal? "version" with
   | .error _ => .ok .v2
   | .ok value =>
     match value.getNat? with
     | .ok 2 => .ok .v2
     | .ok 3 => .ok .v3
-    | _ => .error "program observation version must be 2 or 3"
+    | .ok 4 => .ok .v4
+    | _ => .error "program observation version must be 2, 3 or 4"
 
 /-- One request, dispatched. Pure except for the clock. -/
 def answer (j : Json) : IO Json := do
@@ -63,8 +70,19 @@ def answer (j : Json) : IO Json := do
           match (j.getObjVal? "budgetMs").toOption.bind (·.getNat?.toOption) with
           | some n => n
           | none => 30000
+        let observed : Json :=
+          match version with
+          | .v2 => observeAt .v2 prog worlds
+          | .v3 => observeAt .v3 prog worlds
+          | .v4 =>
+            match j.getObjVal? "result" with
+            | .error _ => Json.mkObj [("error", "version 4 requires a result code")]
+            | .ok rj =>
+              match fromJson? (α := Code) rj with
+              | .error e => Json.mkObj [("error", Json.str s!"bad result code: {e}")]
+              | .ok result => observeResult result prog worlds
         let t0 ← IO.monoMsNow
-        let task ← IO.asTask (pure (observeAt version prog worlds))
+        let task ← IO.asTask (pure observed)
         waitBudget task t0 budget
   else
     return Json.mkObj [("error", Json.str "a request is {program, worlds?}, {string: {op, code?, text}}, or {ping}")]

@@ -139,6 +139,7 @@ module Agentic.Builder
     -- * Blocks
     Blk (..),
     stop,
+    answerBlk,
     bind,
     bindI,
     bindAs,
@@ -157,8 +158,11 @@ module Agentic.Builder
     revisingOnCaseI,
 
     -- * Programs
-    Program (..),
+    ProgramOf (..),
+    Program,
+    SomeProgram (..),
     SomeFn (..),
+    programOf,
     program,
 
     -- * The pos rule
@@ -377,6 +381,7 @@ zeroSource = \case
 zeroRaw :: Raw -> Raw
 zeroRaw = \case
   RawEmpty _ -> RawEmpty pos0
+  RawAnswer x _ -> RawAnswer x pos0
   RawBind x ann src rest _ -> RawBind x ann (zeroSource src) (zeroRaw rest) pos0
   RawAct a rest _ -> RawAct (zeroAsk a) (zeroRaw rest) pos0
   RawIfFlag x y n _ -> RawIfFlag x (zeroRaw y) (zeroRaw n) pos0
@@ -1062,18 +1067,22 @@ endB = Body {bodyRaw = [], bodyAnswer = Nothing, bodyPlan = PRet (exprConst ())}
 -- Blocks
 -- ---------------------------------------------------------------------------
 
--- | A block: the 'Raw' it prints and the 'Plan' it elaborates to. Every
--- combinator below takes the rest of the block as its last argument, so a
--- program is a @$@-chain that reads in source order — which is @RawBlock@'s
--- @rest@ field exactly.
-data Blk (s :: Scope) = Blk
+-- | A block: the 'Raw' it prints and the result-indexed 'Plan' it elaborates
+-- to. Every combinator below takes the rest of the block as its last argument,
+-- so a program is a @$@-chain that reads in source order — which is
+-- @RawBlock@'s @rest@ field exactly.
+data Blk (s :: Scope) (r :: Code) = Blk
   { blkRaw :: Raw,
-    blkPlan :: Plan (Codes s) ()
+    blkPlan :: Plan (Codes s) (El r)
   }
 
--- | @stop@, and the end of a block. Lean: @.empty _ => .ok (.ret fun _ => ())@.
-stop :: Blk s
+-- | @stop@, and the end of a receipt-valued block.
+stop :: Blk s 'CodeAck
 stop = Blk (RawEmpty pos0) (PRet (exprConst ()))
+
+-- | @answer x@, the terminal of a result-valued block.
+answerBlk :: forall h s c. KnownIx h s => V h c -> Blk s c
+answerBlk v = Blk (RawAnswer (vName v) pos0) (PRet (exprVar (readV @h @s v)))
 
 -- | @x <- …@; prints @ann = null@.
 --
@@ -1085,16 +1094,16 @@ stop = Blk (RawEmpty pos0) (PRet (exprConst ()))
 -- twice by tier1 — the printed Raw still matches, but the trace's @code@ and
 -- the world's answer diverge from the frozen reply.
 bind ::
-  forall n c s.
+  forall n c r s.
   (KnownSymbol n, Fresh n s, KnownCode c) =>
   Rhs s c ->
-  (V ('(n, c) ': s) c -> Blk ('(n, c) ': s)) ->
-  Blk s
+  (V ('(n, c) ': s) c -> Blk ('(n, c) ': s) r) ->
+  Blk s r
 bind rhs rest = bindI @n (nameText @n) rhs (rest (hereV @n))
 
 -- | 'bind' at an index: the name as it is printed, the scope entry it pushes
 -- left to the continuation's type.
-bindI :: forall n c s. Text -> Rhs s c -> Blk ('(n, c) ': s) -> Blk s
+bindI :: forall n c r s. Text -> Rhs s c -> Blk ('(n, c) ': s) r -> Blk s r
 bindI x rhs rest =
   Blk
     (RawBind x Nothing (SrcRhs (rhsRaw rhs)) (blkRaw rest) pos0)
@@ -1103,15 +1112,15 @@ bindI x rhs rest =
 -- | @x : c <- …@; prints @ann = c@. Same elaboration as 'bind' — an
 -- annotation grounds inference, it does not change the term.
 bindAs ::
-  forall n c s.
+  forall n c r s.
   (KnownSymbol n, Fresh n s, KnownCode c) =>
   Rhs s c ->
-  (V ('(n, c) ': s) c -> Blk ('(n, c) ': s)) ->
-  Blk s
+  (V ('(n, c) ': s) c -> Blk ('(n, c) ': s) r) ->
+  Blk s r
 bindAs rhs rest = bindAsI @n (sCode @c) (nameText @n) rhs (rest (hereV @n))
 
 -- | 'bindAs' at an index. The 'SCode' is what the annotation prints.
-bindAsI :: forall n c s. SCode c -> Text -> Rhs s c -> Blk ('(n, c) ': s) -> Blk s
+bindAsI :: forall n c r s. SCode c -> Text -> Rhs s c -> Blk ('(n, c) ': s) r -> Blk s r
 bindAsI c x rhs rest =
   Blk
     ( RawBind
@@ -1135,7 +1144,7 @@ bindAsI c x rhs rest =
 -- out right.
 --
 -- Trace consequence: the event's code is @receipt@ and its answer is @null@.
-act :: Ask s -> Blk s -> Blk s
+act :: Ask s -> Blk s r -> Blk s r
 act a rest =
   Blk
     (RawAct (askRaw a) (blkRaw rest) pos0)
@@ -1145,7 +1154,7 @@ act a rest =
 -- (@Check.lean:778@). The answer is discarded and __no__ context slot is
 -- added — the contrast with 'act' is deliberate and is what @battery-144@
 -- pins. Only a @-> receipt@ function may stand here, which is the type.
-callStmt :: Fn ps 'CodeAck -> Args s ps -> Blk s -> Blk s
+callStmt :: Fn ps 'CodeAck -> Args s ps -> Blk s r -> Blk s r
 callStmt f as rest =
   Blk
     (RawCallStmt (fnName (fnRaw f)) (argsRaw as) (blkRaw rest) pos0)
@@ -1158,16 +1167,16 @@ callStmt f as rest =
 -- __same__ names. No binder is added — the flag is read through the existing
 -- variable.
 ifFlag ::
-  forall h s.
+  forall h r s.
   KnownIx h s =>
   V h 'CodeFlag ->
-  Blk s ->
-  Blk s ->
-  Blk s
+  Blk s r ->
+  Blk s r ->
+  Blk s r
 ifFlag v yes no = ifFlagI (vName v) (readV @h @s v) yes no
 
 -- | 'ifFlag' at an index.
-ifFlagI :: forall s. Text -> Var (Codes s) 'CodeFlag -> Blk s -> Blk s -> Blk s
+ifFlagI :: forall r s. Text -> Var (Codes s) 'CodeFlag -> Blk s r -> Blk s r -> Blk s r
 ifFlagI x v yes no =
   Blk
     (RawIfFlag x (blkRaw yes) (blkRaw no) pos0)
@@ -1179,25 +1188,25 @@ ifFlagI x v yes no =
 -- is @Verdict.tag@ of the name. The verdict itself stays readable in every arm
 -- — the tag decides the shape, the objections ride in the environment.
 caseVerdict ::
-  forall h s.
+  forall h r s.
   KnownIx h s =>
   V h 'CodeVerdict ->
-  Blk s ->
-  Blk s ->
-  Blk s ->
-  Blk s
+  Blk s r ->
+  Blk s r ->
+  Blk s r ->
+  Blk s r
 caseVerdict v approved objected noAnswer =
   caseVerdictI (vName v) (readV @h @s v) approved objected noAnswer
 
 -- | 'caseVerdict' at an index.
 caseVerdictI ::
-  forall s.
+  forall r s.
   Text ->
   Var (Codes s) 'CodeVerdict ->
-  Blk s ->
-  Blk s ->
-  Blk s ->
-  Blk s
+  Blk s r ->
+  Blk s r ->
+  Blk s r ->
+  Blk s r
 caseVerdictI x v approved objected noAnswer =
   Blk
     ( RawCaseVerdict
@@ -1221,14 +1230,14 @@ caseVerdictI x v approved objected noAnswer =
 -- event, and does not appear in @size@. The names it prints are computed from
 -- the type-level scope, innermost first, so a rebuilt case cannot print a
 -- wrong one. @known here: nothing@ is what an empty scope computes.
-knownHere :: forall s. KnownScope s => Blk s -> Blk s
+knownHere :: forall r s. KnownScope s => Blk s r -> Blk s r
 knownHere rest = knownHereI (scopeNames @s) rest
 
 -- | 'knownHere' at an index. __The names are not checked against anything__:
 -- at the type level they are computed from the scope and cannot be wrong,
 -- here they are the caller's assertion, and Lean refuses a wrong one. Pass the
 -- live names, innermost first.
-knownHereI :: forall s. [Text] -> Blk s -> Blk s
+knownHereI :: forall r s. [Text] -> Blk s r -> Blk s r
 knownHereI names rest =
   Blk (RawKnownHere names (blkRaw rest) pos0) (blkPlan rest)
 
@@ -1259,15 +1268,13 @@ reviseCont rev =
 -- acc else exh)@; since @Plan.caseB e t f = .case .bool e (fun b => cond b t
 -- f)@, __the emitted node, its tag and its arm order are literally
 -- unchanged__, and @tagValues TBool = [False, True]@ keeps arm 0 the unsettled
--- arm and arm 1 the settled one. The one real difference: __both__ arms are now
--- @Plan (c ': g) ()@ and both are substituted with the candidate, where the
--- unsettled arm used to be @subP exh sigma@ at @g@ and the settled arm read a
--- 'defaultEl' no run ever saw. That is why 'KnownCode' is gone from here.
+-- arm and arm 1 the settled one. Both arms have one result code `r` and are
+-- substituted with the candidate.
 exitCont ::
-  forall t c g.
+  forall t c g r.
   Tag t ->
-  (t -> Plan (c ': g) ()) ->
-  Cont g (El c, t) ()
+  (t -> Plan (c ': g) (El r)) ->
+  Cont g (El c, t) (El r)
 exitCont t arms =
   Cont
     ( \sigma final ->
@@ -1311,7 +1318,7 @@ exitCont t arms =
 -- innermost. This builder refuses that program instead of resolving it
 -- differently: @Fresh rev ('(carrier, c) ': s)@. No corpus entry writes one.
 revisingCase ::
-  forall carrier rev settled unsettled h s c.
+  forall carrier rev settled unsettled h s c r.
   ( KnownSymbol carrier,
     KnownSymbol rev,
     KnownSymbol settled,
@@ -1341,15 +1348,15 @@ revisingCase ::
   ) ->
   -- | the settled arm, with the artefact bound
   ( V ('(settled, c) ': s) c ->
-    Blk ('(settled, c) ': s)
+    Blk ('(settled, c) ': s) r
   ) ->
   -- | the unsettled arm, with the last candidate bound
   ( V ('(unsettled, c) ': s) c ->
-    Blk ('(unsettled, c) ': s)
+    Blk ('(unsettled, c) ': s) r
   ) ->
-  Blk s
+  Blk s r
 revisingCase subj resultName n reviewAnn review amend settled unsettled =
-  revisingCaseI @c @carrier @rev @settled @unsettled @s
+  revisingCaseI @c @r @carrier @rev @settled @unsettled @s
     (vName subj)
     (readV @h @s subj)
     (nameText @carrier)
@@ -1375,7 +1382,7 @@ revisingCase subj resultName n reviewAnn review amend settled unsettled =
 -- @0 <= n <= 64@ and a review annotation other than @verdict@ are refusals, not
 -- programs.
 revisingCaseI ::
-  forall c nc nr ns nu s.
+  forall c r nc nr ns nu s.
   -- | the subject's name, as printed
   Text ->
   -- | the index that reads the subject
@@ -1401,10 +1408,10 @@ revisingCaseI ::
   -- | the amend, at the candidate's kind, seeing the verdict and the candidate
   Rhs ('(nr, 'CodeVerdict) ': '(nc, c) ': s) c ->
   -- | the settled arm, with the artefact bound
-  Blk ('(ns, c) ': s) ->
+  Blk ('(ns, c) ': s) r ->
   -- | the unsettled arm, with the last candidate bound
-  Blk ('(nu, c) ': s) ->
-  Blk s
+  Blk ('(nu, c) ': s) r ->
+  Blk s r
 revisingCaseI
   subjName
   subjVar
@@ -1472,10 +1479,11 @@ revisingCaseI
         subId
         (exprVar subjVar)
 
+    plan :: Plan (Codes s) (El r)
     plan =
       graft
         loop
-        (exitCont TBool (\b -> if b then blkPlan settled else blkPlan unsettled))
+        (exitCont @Bool @c @(Codes s) @r TBool (\b -> if b then blkPlan settled else blkPlan unsettled))
 
 -- | @x <- revising on subj as carrier, at most n amendments { … }@ together
 -- with the @case x { settled p { … } unsettled q { … } abandoned t { … } }@
@@ -1490,7 +1498,7 @@ revisingCaseI
 -- @blockAsks@ and the reason a @revising on@ with a wide tail reaches the
 -- affordability refusal at roughly half the bound a @revising@ does.
 revisingOnCase ::
-  forall carrier rev settled unsettled abandoned h s c.
+  forall carrier rev settled unsettled abandoned h s c r.
   ( KnownSymbol carrier,
     KnownSymbol rev,
     KnownSymbol settled,
@@ -1521,14 +1529,14 @@ revisingOnCase ::
     Rhs ('(rev, 'CodeVerdict) ': '(carrier, c) ': s) c
   ) ->
   -- | the settled arm
-  (V ('(settled, c) ': s) c -> Blk ('(settled, c) ': s)) ->
+  (V ('(settled, c) ': s) c -> Blk ('(settled, c) ': s) r) ->
   -- | the unsettled arm
-  (V ('(unsettled, c) ': s) c -> Blk ('(unsettled, c) ': s)) ->
+  (V ('(unsettled, c) ': s) c -> Blk ('(unsettled, c) ': s) r) ->
   -- | the abandoned arm
-  (V ('(abandoned, c) ': s) c -> Blk ('(abandoned, c) ': s)) ->
-  Blk s
+  (V ('(abandoned, c) ': s) c -> Blk ('(abandoned, c) ': s) r) ->
+  Blk s r
 revisingOnCase subj resultName n reviewAnn review amend settled unsettled abandoned =
-  revisingOnCaseI @c @carrier @rev @settled @unsettled @abandoned @s
+  revisingOnCaseI @c @r @carrier @rev @settled @unsettled @abandoned @s
     (vName subj)
     (readV @h @s subj)
     (nameText @carrier)
@@ -1550,7 +1558,7 @@ revisingOnCase subj resultName n reviewAnn review amend settled unsettled abando
 -- | 'revisingOnCase' at an index: the six names as they are /printed/, and the
 -- de Bruijn index that reads the subject.
 revisingOnCaseI ::
-  forall c nc nr ns nu na s.
+  forall c r nc nr ns nu na s.
   Text ->
   Var (Codes s) c ->
   Text ->
@@ -1563,10 +1571,10 @@ revisingOnCaseI ::
   Maybe SomeCode ->
   Rhs ('(nc, c) ': s) 'CodeVerdict ->
   Rhs ('(nr, 'CodeVerdict) ': '(nc, c) ': s) c ->
-  Blk ('(ns, c) ': s) ->
-  Blk ('(nu, c) ': s) ->
-  Blk ('(na, c) ': s) ->
-  Blk s
+  Blk ('(ns, c) ': s) r ->
+  Blk ('(nu, c) ': s) r ->
+  Blk ('(na, c) ': s) r ->
+  Blk s r
 revisingOnCaseI
   subjName
   subjVar
@@ -1634,10 +1642,11 @@ revisingOnCaseI
         subId
         (exprVar subjVar)
 
+    plan :: Plan (Codes s) (El r)
     plan =
       graft
         loop
-        ( exitCont TEnding $ \e -> case e of
+        ( exitCont @Ending @c @(Codes s) @r TEnding $ \e -> case e of
             EndSettled -> blkPlan settled
             EndUnsettled -> blkPlan unsettled
             EndAbandoned -> blkPlan abandoned
@@ -1651,19 +1660,33 @@ revisingOnCaseI
 data SomeFn where
   SomeFn :: Fn ps r -> SomeFn
 
--- | A whole program after the import walk: what it prints, and what it means.
-data Program = Program
-  { progRawOut :: RawProgram,
-    progPlan :: Plan '[] ()
+-- | A whole program after the import walk: what it prints, its result witness,
+-- and the result-indexed plan it means.
+data ProgramOf (r :: Code) = ProgramOf
+  { progResultCode :: SCode r,
+    progRawOut :: RawProgram,
+    progPlan :: Plan '[] (El r)
   }
 
--- | The function table in declaration order, and the workflow.
-program :: [SomeFn] -> Blk '[] -> Program
-program fns b =
-  Program
-    { progRawOut = RawProgram [fnRaw f | SomeFn f <- fns] (blkRaw b),
+-- | The receipt-valued program type every existing workflow names.
+type Program = ProgramOf 'CodeAck
+
+-- | A program whose result code is carried existentially by a registry row.
+data SomeProgram where
+  SomeProgram :: ProgramOf r -> SomeProgram
+
+-- | The function table in declaration order and a result-valued workflow.
+programOf :: forall r. KnownCode r => [SomeFn] -> Blk '[] r -> ProgramOf r
+programOf fns b =
+  ProgramOf
+    { progResultCode = sCode @r,
+      progRawOut = RawProgram [fnRaw f | SomeFn f <- fns] (blkRaw b),
       progPlan = blkPlan b
     }
+
+-- | The legacy receipt-valued specialization.
+program :: [SomeFn] -> Blk '[] 'CodeAck -> Program
+program = programOf
 
 -- ---------------------------------------------------------------------------
 -- A note on the index-level entry points

@@ -18,10 +18,11 @@ loop.
 Three request kinds (`doc/conformance-schema.md` is the format of record):
 
 * `{"id": …, "program": <RawProgram>, "worlds": [<WorldSpec>]}` → the
-  observation record: the refusal (classified by the guard enum defined HERE —
-  `CheckError` carries no code, and adding one would edit literals that
-  theorems pin), or the checked term's static folds and one trace-and-bills
-  block per world.
+  legacy observation record; at version 4 a `result` code beside the unchanged
+  program adds the typed closed-program value to each world. All versions return
+  refusals or the checked term's static folds and one trace-and-bills block per
+  world. Refusals are classified by the guard enum defined HERE — `CheckError`
+  carries no code, and adding one would edit literals that theorems pin.
 * `{"id": …, "string": {"op": "norm"|"words"|"decodeVerdict"|"decode"|"say",
   …}}` → the string layer (`Exec.norm` is ASCII-only where Haskell's `toLower`
   is Unicode; this request kind exists because nothing else on the boundary
@@ -231,7 +232,8 @@ def WorldSpec.covers (world : WorldSpec) (schemas : List Schema) : Bool :=
   schemas.all fun schema => (Schema.Conformance.Answer.lookup world.schema schema).isSome
 
 /-- Version 2 is frozen semantic observation; version 3 compares the annotated
-Plan representation and includes its semantic-trace erasure. -/
+Plan representation and includes its semantic-trace erasure. Result observation
+is the separate version-4 `observeResult` path below. -/
 inductive ObservationVersion where
   | v2
   | v3
@@ -334,6 +336,21 @@ def worldObservation (version : ObservationVersion)
       , ("billFresh", toJson (Multiplicative.toAdd (billExecFresh execTick operational)))
       , ("billMemo", toJson (Multiplicative.toAdd (billMemo execTick operational))) ]
 
+/-- Version-4 world observation: the annotated trace plus the typed value the
+closed program returns in this world. -/
+def worldObservationResult (result : Code) (p : Plan [] (El result))
+    (w : WorldSpec) : Json :=
+  let world := w.toWorld
+  let semantic := Plan.trace world p Env.nil
+  let operational := Plan.execTrace world p Env.nil
+  Json.mkObj
+    [ ("world", toJson w)
+    , ("trace", Json.arr (operational.map execEventJson).toArray)
+    , ("semanticTrace", Json.arr (semantic.map eventJson).toArray)
+    , ("result", answerJson result (Plan.run world p Env.nil))
+    , ("billFresh", toJson (Multiplicative.toAdd (billExecFresh execTick operational)))
+    , ("billMemo", toJson (Multiplicative.toAdd (billMemo execTick operational))) ]
+
 def observeAt (version : ObservationVersion)
     (prog : RawProgram) (worlds : List WorldSpec) : Json :=
   match h : checkProgram prog with
@@ -370,6 +387,38 @@ def observe (prog : RawProgram) (worlds : List WorldSpec) : Json :=
 /-- Intent-aware version-3 observation used by live cross-language conformance. -/
 def observeV3 (prog : RawProgram) (worlds : List WorldSpec) : Json :=
   observeAt .v3 prog worlds
+
+/-- Version-4 observation of a result-valued closed program. The result code is
+an additive request field; the `RawProgram` object itself is unchanged. -/
+def observeResult (result : Code) (prog : RawProgram) (worlds : List WorldSpec) : Json :=
+  match h : checkProgramResult result prog with
+  | .error e => refusedJson e
+  | .ok p =>
+    let schemas := codeSchemas result ++ planSchemas p
+    if worlds.all (fun world => WorldSpec.covers world schemas) then
+      let hl : level p ≤ Level.branch := checkProgramResult_level_le result prog p h
+      let (lo, hi, paths) := Explain.costSummary p hl
+      let fns := match checkFnsList [] prog.fns with
+        | .ok fns => fns
+        | .error _ => []
+      Json.mkObj
+        [ ("result", codeJson result)
+        , ("level", Json.str (levelName (level p)))
+        , ("size", toJson (Plan.size p))
+        , ("askNodes", toJson (Plan.askNodes p))
+        , ("codes", match codes p with
+            | some cs => Json.arr (cs.map codeJson).toArray
+            | none => Json.null)
+        , ("costSummary", Json.mkObj
+            [ ("minFold", match lo with | some n => toJson n | none => Json.null)
+            , ("maxFold", match hi with | some n => toJson n | none => Json.null)
+            , ("paths", toJson paths) ])
+        , ("blockAsks", toJson (blockAsks fns prog.main))
+        , ("fnAsks", Json.arr (fns.map (fun fe =>
+            Json.arr #[Json.str fe.name, toJson fe.asks])).toArray)
+        , ("worlds", Json.arr (worlds.map (worldObservationResult result p)).toArray) ]
+    else
+      Json.mkObj [("error", "world is missing an answer for a queried structured schema")]
 
 /-! ## The string layer (D12)
 

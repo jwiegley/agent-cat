@@ -220,9 +220,11 @@
 -- apart because they ask different things of the operator: @2@ is something to
 -- fix about the transport, @3@ is something that was said, or not finished
 -- being said.
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Agentic.Cli
@@ -305,7 +307,13 @@ import Agentic.AgentDeck
     renderDeckError,
     worldOfDeck,
   )
-import Agentic.Builder (Program, progPlan, progRawOut)
+import Agentic.Builder
+  ( ProgramOf,
+    SomeProgram (..),
+    progPlan,
+    progRawOut,
+    progResultCode,
+  )
 import Agentic.Chains (servedChains)
 import qualified Data.Map.Strict as Map
 import Agentic.Exec
@@ -316,6 +324,7 @@ import Agentic.Exec
     noChains,
     runPlanWith,
     scriptedWorld,
+    sayEl,
     stderrLog,
   )
 import Agentic.Route
@@ -353,6 +362,8 @@ import Agentic.Plan
     size,
   )
 import Agentic.Raw (codeName)
+import Agentic.Schema (El, SCode (..), SomeCode, fromSCode)
+import Agentic.Schema.Json (codeJson)
 import Agentic.WF (wft)
 import Agentic.Workflow
   ( Example (..),
@@ -613,7 +624,7 @@ execute reg = \case
 
 -- | The verb owes the program no precondition of its own — @plan@ and @cost@,
 -- which read no flag that is a claim about the program's text.
-noRefusal :: Program -> Maybe Text
+noRefusal :: ProgramOf r -> Maybe Text
 noRefusal = const Nothing
 
 -- | __A @--route@ naming a model this program never pins has configured
@@ -634,7 +645,7 @@ noRefusal = const Nothing
 -- An ill-defined chain table is passed over in silence here, because the run is
 -- about to refuse it in its own words with the two spellings named — and a
 -- table that cannot be built cannot say which models this program pins either.
-routeRefusal :: Registry -> Target -> Program -> Maybe Text
+routeRefusal :: Registry -> Target -> ProgramOf r -> Maybe Text
 routeRefusal _ Scripted _ = Nothing
 routeRefusal reg (Routed rr) prog = case servedChains (progRawOut prog) of
   Left _ -> Nothing
@@ -693,11 +704,11 @@ withExample ::
   Registry ->
   Bool ->
   Bool ->
-  (Program -> Maybe Text) ->
+  (forall r. ProgramOf r -> Maybe Text) ->
   Text ->
   [(Text, Text)] ->
   [InputFlag] ->
-  (Facts -> Program -> [Given] -> IO ()) ->
+  (forall r. Facts -> ProgramOf r -> [Given] -> IO ()) ->
   IO ()
 withExample reg pinned needsAll refuses name facts ins k = case regLookup reg name of
   Nothing -> die reg 1 (noSuchRow reg name)
@@ -705,7 +716,7 @@ withExample reg pinned needsAll refuses name facts ins k = case regLookup reg na
     resolved <- resolveInputs name needsAll facts (rowExample row) ins
     case resolved of
       Left why -> die reg 1 why
-      Right (prog, bs)
+      Right (SomeProgram prog, bs)
         | pinned, Just why <- guardUnpinnedAsk (progRawOut prog) -> die reg 1 ("refused: " <> why)
         | Just why <- refuses prog -> die reg 1 why
         | otherwise -> k (factsOf name row prog) prog bs >> exitSuccess
@@ -797,10 +808,10 @@ runFactInputs = filter reservedInput . declaredInputs
 --
 -- The one place a 'Given' becomes a 'Program', so @plan@, @cost@ and @list
 -- --json@ cannot disagree about which program they are the numbers of.
-buildProgram :: Example -> [Given] -> Either Text Program
+buildProgram :: Example -> [Given] -> Either Text SomeProgram
 buildProgram ex gs = case ex of
-  Fixed prog -> Right prog
-  Needs par -> supply par (map (fromMaybe "" . givenText) gs)
+  Fixed prog -> Right (SomeProgram prog)
+  Needs par -> SomeProgram <$> supply par (map (fromMaybe "" . givenText) gs)
 
 -- | Every declared input, unbound: what a verb that was given nothing binds.
 unboundInputs :: Example -> [Given]
@@ -836,10 +847,10 @@ resolveInputs ::
   [(Text, Text)] ->
   Example ->
   [InputFlag] ->
-  IO (Either Text (Program, [Given]))
+  IO (Either Text (SomeProgram, [Given]))
 resolveInputs name needsAll facts ex ins = case ex of
   Fixed prog
-    | null ins -> pure (Right (prog, []))
+    | null ins -> pure (Right (SomeProgram prog, []))
     | otherwise -> pure (Left (name <> " takes no input"))
   Needs _ -> case traverse (named (operatorInputs ex)) ins of
     Left why -> pure (Left why)
@@ -1058,6 +1069,8 @@ data Facts = Facts
   { factName :: Text,
     -- | 'rowDoc' — the row's one line
     factBlurb :: Text,
+    -- | The result code of the closed program.
+    factResult :: SomeCode,
     factLevel :: Text,
     factSize :: Integer,
     factAskNodes :: Integer,
@@ -1084,11 +1097,12 @@ data Facts = Facts
 -- @plan review-lite --input ./commit.diff@ is answering about the program that
 -- diff builds, and 'listFacts' about the one an empty value builds. Both are
 -- 'buildProgram''s work, and this reads the folds off whichever it is given.
-factsOf :: Text -> Row -> Program -> Facts
+factsOf :: Text -> Row -> ProgramOf r -> Facts
 factsOf n row prog =
   Facts
     { factName = n,
       factBlurb = rowDoc row,
+      factResult = fromSCode (progResultCode prog),
       factLevel = levelName (level p),
       factSize = size p,
       factAskNodes = askNodes p,
@@ -1118,7 +1132,7 @@ factsOf n row prog =
 -- the run is about to refuse it in its own words with both spellings named, and
 -- until then a table that cannot be built cannot say which models are pinned
 -- either.
-pinnedModels :: Program -> [Text]
+pinnedModels :: ProgramOf r -> [Text]
 pinnedModels prog = case servedChains (progRawOut prog) of
   Left _ -> []
   Right t -> sort (nub (Map.keys t <> concat (Map.elems t)))
@@ -1134,7 +1148,9 @@ pinnedModels prog = case servedChains (progRawOut prog) of
 -- the program the empty value built. The 'Left' is 'supply''s own words and
 -- cannot arise from here, one text per declared name being what it asks for.
 listFacts :: Text -> Row -> Either Text Facts
-listFacts n row = factsOf n row <$> buildProgram ex (unboundInputs ex)
+listFacts n row = do
+  SomeProgram prog <- buildProgram ex (unboundInputs ex)
+  pure (factsOf n row prog)
   where
     ex = rowExample row
 
@@ -1181,6 +1197,7 @@ factFields :: Facts -> [Pair]
 factFields f =
   [ "name" .= factName f,
     "blurb" .= factBlurb f,
+    "result" .= codeJson (factResult f),
     "level" .= factLevel f,
     "size" .= factSize f,
     "askNodes" .= factAskNodes f,
@@ -1242,6 +1259,9 @@ helpCmd reg name = case regLookup reg name of
     Right f -> do
       say $ factName f <> " — " <> factBlurb f
       say ""
+      if factResult f == fromSCode SAck
+        then pure ()
+        else say $ headed "result" (codeName (factResult f))
       say $ headed "level" (factLevel f)
       say $ headed "cost" (renderSummary (factSummary f))
       say $ headed "inputs" (orDash (factInputs f))
@@ -1303,17 +1323,24 @@ helpFooter reg =
 -- per declared name, which is a bug and not a workflow's business.
 listCmd :: Registry -> Render -> IO ()
 listCmd reg = \case
-  Human -> do
-    say $ regBinary reg <> " — " <> tshow (length rows) <> " registered:"
-    say ""
-    mapM_ line rows
+  Human -> case traverse (uncurry listFacts) rows of
+    Left why -> die reg 1 why
+    Right fs -> do
+      say $ regBinary reg <> " — " <> tshow (length rows) <> " registered:"
+      say ""
+      mapM_ line (zip rows fs)
   Json -> case traverse (uncurry listFacts) rows of
     Left why -> die reg 1 why
     Right fs -> sayJson (toJSON [object (factFields f) | f <- fs])
   where
     rows = regRows reg
     width = maximum (1 : map (T.length . fst) rows)
-    line (n, row) = say $ "  " <> T.justifyLeft width ' ' n <> "  " <> rowDoc row
+    line ((n, row), f) =
+      say $ "  " <> T.justifyLeft width ' ' n <> resultSuffix f <> "  " <> rowDoc row
+
+    resultSuffix f
+      | factResult f == fromSCode SAck = ""
+      | otherwise = " -> " <> codeName (factResult f)
 
 -- ---------------------------------------------------------------------------
 -- plan
@@ -1332,13 +1359,16 @@ listCmd reg = \case
 -- The @inputs@ lines have no @--json@ counterpart naming /where/ each value
 -- came from, and want none — a caller that passed the flags knows what it
 -- passed, and @inputs@ names the fields there are to pass.
-planCmd :: Render -> Bool -> Facts -> Program -> [Given] -> IO ()
+planCmd :: Render -> Bool -> Facts -> ProgramOf r -> [Given] -> IO ()
 planCmd rendering raw f prog gs = case rendering of
   Json -> sayJson (object (planFields f <> [("program", printedValue prog) | raw]))
   Human -> do
     say $ factName f <> ", as elaborated:"
     say ""
     mapM_ (say . inputsLine) gs
+    if factResult f == fromSCode SAck
+      then pure ()
+      else say $ "  result    " <> codeName (factResult f)
     say $ "  level     " <> factLevel f
     say $ "  size      " <> tshow (factSize f)
     say $ "  askNodes  " <> tshow (factAskNodes f)
@@ -1433,7 +1463,7 @@ costCmd f gs = do
 -- ill-defined one refuses the run before anything is asked. That is a runner
 -- precondition and not a language refusal: the program is well-formed and its
 -- meaning is unchanged; what is ill-defined is this table.
-runCmd :: Registry -> Text -> Target -> Program -> [Given] -> IO ()
+runCmd :: Registry -> Text -> Target -> ProgramOf r -> [Given] -> IO ()
 runCmd reg name target prog gs = case target of
   Scripted -> do
     say $
@@ -1678,13 +1708,13 @@ runCmd reg name target prog gs = case target of
               mapM_ (say . chainLine) [e | e <- Map.toList t, not (null (snd e))]
               pure (chainsOf stderrLog t)
       say ""
-      (_, tr) <-
+      (result, tr) <-
         runPlanWith
           chains
           (announcingWorld (say . ("  " <>)) (exec world))
           (progPlan prog)
       say ""
-      report tr
+      report (progResultCode prog) result tr
 
     chainLine (m, spares) =
       "  "
@@ -1693,10 +1723,15 @@ runCmd reg name target prog gs = case target of
         <> T.intercalate ", " spares
         <> " — a fail-over is narrated on stderr, and the trace records who answered"
 
-    report :: ExecTrace -> IO ()
-    report tr = do
+    report :: SCode c -> El c -> ExecTrace -> IO ()
+    report code result tr = do
       say "  the run is over."
-      say "    answer      () — a workflow's value is the unit; what it did is the trace"
+      case code of
+        SAck ->
+          say "    answer      () — a workflow's value is the unit; what it did is the trace"
+        _ -> do
+          say $ "    result      " <> codeName (fromSCode code)
+          say (indentBy 6 (sayEl code result))
       say $ "    billFresh   " <> tshow (billExecFresh tr) <> " (request occurrences reached)"
       say $ "    billMemo    " <> tshow (billMemo tr)
         <> " (reusable requests once, every effect occurrence)"

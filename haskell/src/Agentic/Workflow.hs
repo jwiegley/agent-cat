@@ -272,12 +272,14 @@
 --     the /list/ is what says when a function was declared.
 module Agentic.Workflow
   ( -- * Programs
+    ProgramOf,
     Program,
     workflow,
     defining,
 
     -- * A program's inputs
-    Parameterized (..),
+    ParameterizedOf (..),
+    Parameterized,
     Ins,
     noInputs,
     In,
@@ -442,6 +444,7 @@ import Agentic.Builder
     ParamCtx,
     Params (..),
     Piece,
+    ProgramOf,
     Program,
     Rhs,
     Scope,
@@ -778,16 +781,13 @@ data Ann (s :: Scope) (c :: Code) = Ann (SCode c) (Rhs s c)
 -- The block: an indexed CPS monad over a Stage
 -- ---------------------------------------------------------------------------
 
--- | Where a block stands. One of the three is Lean's, and two are this
--- surface's way of holding a revision's two clauses apart:
+-- | Where a block stands. The legacy open stage remains receipt-valued; the
+-- additive result stage carries the code returned by the whole program:
 --
---   * @'Open' s@ — an ordinary block over the live bindings @s@;
---   * @'Review' c s@ — inside a revision, awaiting its one review, with the
---     candidate live at index @0@;
---   * @'Amending' c s@ — the same revision, awaiting its one amendment, with
---     the verdict live too;
---   * @'Body' r s@ — a function body over its parameters @s@, at the result
---     kind @r@ the function declares.
+--   * @'Open' s@ — the source-compatible receipt-valued block over @s@;
+--   * @'Result' r s@ — a closed-program block returning @r@;
+--   * @'Review' c s@ and @'Amending' c s@ — a revision's two clauses;
+--   * @'Body' r s@ — a function body returning @r@.
 --
 -- Lean's fourth state, @Pend Γ@ (@Check.lean:639@) — a block /pending/ the
 -- @case@ that consumes a bounded revision's result — has no stage here,
@@ -799,16 +799,25 @@ data Ann (s :: Scope) (c :: Code) = Ann (SCode c) (Rhs s c)
 -- which is how every other Builder entry point is written in this module.
 data Stage
   = Open Scope
+  | Result Code Scope
   | Review Code Scope
   | Amending Code Scope
   | Body Code Scope
 
--- | What a block at a given stage /is/. The family is injective because its
--- four results are distinct type constructors — and it has to be, or
--- unwrapping a 'W' could not recover its indices and @>>=@ would not typecheck
--- at all.
+-- | The source stage selected by a closed program result. Receipt programs keep
+-- the legacy `Open`; every value result uses the additive result stage.
+type family ProgramOpen (r :: Code) (s :: Scope) :: Stage where
+  ProgramOpen 'CodeAck s = 'Open s
+  ProgramOpen r s = 'Result r s
+
+-- | Internal wrapper keeping the legacy open stage distinct from a result stage
+-- at `CodeAck`; this preserves `Res` injectivity and the public `'Open s` type.
+newtype UnitBlk (s :: Scope) = UnitBlk {unUnitBlk :: Blk s 'CodeAck}
+
+-- | What a block at a given stage is.
 type family Res (i :: Stage) = (r :: Type) | r -> i where
-  Res ('Open s) = Blk s
+  Res ('Open s) = UnitBlk s
+  Res ('Result r s) = Blk s r
   Res ('Review c s) = Clauses c s
   Res ('Amending c s) = Amendment c s
   Res ('Body r s) = B.Body s r
@@ -820,8 +829,8 @@ type family Res (i :: Stage) = (r :: Type) | r -> i where
 -- twice — and since D3 that scope is honest at both, each arm binding the
 -- candidate the loop was holding. One name, because both arms are built at one
 -- depth and 'genName' is a function of the depth.
-data Arms (c :: Code) (s :: Scope)
-  = Arms Text (Blk (An c ': s)) (Blk (An c ': s))
+data Arms (c :: Code) (r :: Code) (s :: Scope)
+  = Arms Text (Blk (An c ': s) r) (Blk (An c ': s) r)
 
 -- | The three arms of a @case result@ over a @revising on@ (D4), as its fork
 -- produces them: the names the three exit binders print, and the three blocks
@@ -830,14 +839,14 @@ data Arms (c :: Code) (s :: Scope)
 -- Three names rather than one, because an index-level caller may thread its own
 -- supply; 'revisingOn' passes 'genName'\'s one answer three times, for the
 -- reason 'Arms' carries one.
-data Arms3 (c :: Code) (s :: Scope)
+data Arms3 (c :: Code) (r :: Code) (s :: Scope)
   = Arms3
       Text
       Text
       Text
-      (Blk (An c ': s))
-      (Blk (An c ': s))
-      (Blk (An c ': s))
+      (Blk (An c ': s) r)
+      (Blk (An c ': s) r)
+      (Blk (An c ': s) r)
 
 -- | A revision's two clauses: the review binding's name, what it prints as its
 -- annotation, the review, and the amendment.
@@ -885,8 +894,8 @@ type family NoFollow a :: Constraint where
       ('TL.Text "nothing follows a terminal: `stop`, `if` and `case` end a block")
   NoFollow a = ()
 
--- | The block a workflow's @do@ finally is, under the names live at its head.
-runW :: Live -> W ('Open s) j Term -> Blk s
+-- | Run one CPS block at whatever stage its index names.
+runW :: Live -> W i j Term -> Res i
 runW live (W f) = f live absurdTerm
 
 -- | The two clauses a revision's @do@ finally is.
@@ -929,10 +938,10 @@ instance Step st i j a => Step (Nm st) i j a where
 -- a text question" (@Check.lean:213@) made structural.
 instance
   ( s' ~ s,
-    j ~ 'Open (An 'CodeText ': s),
+    j ~ 'Result r (An 'CodeText ': s),
     a ~ V (An 'CodeText ': s) 'CodeText
   ) =>
-  Step (Ask s') ('Open s) j a
+  Step (Ask s') ('Result r s) j a
   where
   step mn live q k = B.bindI x (B.one @'CodeText q) (k (V x VHere) (x : live))
     where
@@ -942,10 +951,10 @@ instance
 -- kind comes from the source, and the annotation stays @null@.
 instance
   ( s' ~ s,
-    j ~ 'Open (An c ': s),
+    j ~ 'Result r (An c ': s),
     a ~ V (An c ': s) c
   ) =>
-  Step (Rhs s' c) ('Open s) j a
+  Step (Rhs s' c) ('Result r s) j a
   where
   step mn live r k = B.bindI x r (k (V x VHere) (x : live))
     where
@@ -955,14 +964,39 @@ instance
 -- printed: @x : c <- …@.
 instance
   ( s' ~ s,
-    j ~ 'Open (An c ': s),
+    j ~ 'Result r (An c ': s),
     a ~ V (An c ': s) c
   ) =>
-  Step (Ann s' c) ('Open s) j a
+  Step (Ann s' c) ('Result r s) j a
   where
   step mn live (Ann sc r) k = B.bindAsI sc x r (k (V x VHere) (x : live))
     where
       x = fromMaybe (genName live) mn
+
+-- The source-compatible receipt-valued open stage mirrors the three result
+-- instances above. Existing explicit `W ('Open s)` signatures keep compiling.
+instance
+  (s' ~ s, j ~ 'Open (An 'CodeText ': s), a ~ V (An 'CodeText ': s) 'CodeText) =>
+  Step (Ask s') ('Open s) j a
+  where
+  step mn live q k =
+    UnitBlk $ B.bindI x (B.one @'CodeText q) (unUnitBlk (k (V x VHere) (x : live)))
+    where x = fromMaybe (genName live) mn
+
+instance
+  (s' ~ s, j ~ 'Open (An c ': s), a ~ V (An c ': s) c) =>
+  Step (Rhs s' c) ('Open s) j a
+  where
+  step mn live r k = UnitBlk $ B.bindI x r (unUnitBlk (k (V x VHere) (x : live)))
+    where x = fromMaybe (genName live) mn
+
+instance
+  (s' ~ s, j ~ 'Open (An c ': s), a ~ V (An c ': s) c) =>
+  Step (Ann s' c) ('Open s) j a
+  where
+  step mn live (Ann sc r) k =
+    UnitBlk $ B.bindAsI sc x r (unUnitBlk (k (V x VHere) (x : live)))
+    where x = fromMaybe (genName live) mn
 
 -- | @x <- ask …@ in a function body: a bare question is a text question, here
 -- as there. The three instances that follow are the exact mirrors of their
@@ -1023,10 +1057,10 @@ instance
 instance
   ( s' ~ s,
     c' ~ c,
-    j ~ 'Open (An c ': s),
+    j ~ 'Result r (An c ': s),
     a ~ Outcome c s
   ) =>
-  Step (Loop c' s') ('Open s) j a
+  Step (Loop c' s') ('Result r s) j a
   where
   step mn live lp k =
     loopRun
@@ -1053,10 +1087,10 @@ instance
 instance
   ( s' ~ s,
     c' ~ c,
-    j ~ 'Open (An c ': s),
+    j ~ 'Result r (An c ': s),
     a ~ Ending c s
   ) =>
-  Step (LoopOn c' s') ('Open s) j a
+  Step (LoopOn c' s') ('Result r s) j a
   where
   step mn live lp k =
     loopOnRun
@@ -1073,6 +1107,30 @@ instance
       )
     where
       x = genName live
+
+-- Receipt-valued revisions preserve the original `Open` stage.
+instance
+  (s' ~ s, c' ~ c, j ~ 'Open (An c ': s), a ~ Outcome c s) =>
+  Step (Loop c' s') ('Open s) j a
+  where
+  step mn live lp k = UnitBlk $
+    loopRun lp live (fromMaybe (resultName live) mn)
+      (Arms x
+        (unUnitBlk (k (Settled (V x VHere)) (x : live)))
+        (unUnitBlk (k (Unsettled (V x VHere)) (x : live))))
+    where x = genName live
+
+instance
+  (s' ~ s, c' ~ c, j ~ 'Open (An c ': s), a ~ Ending c s) =>
+  Step (LoopOn c' s') ('Open s) j a
+  where
+  step mn live lp k = UnitBlk $
+    loopOnRun lp live (fromMaybe (resultName live) mn)
+      (Arms3 x x x
+        (unUnitBlk (k (SettledOn (V x VHere)) (x : live)))
+        (unUnitBlk (k (UnsettledOn (V x VHere)) (x : live)))
+        (unUnitBlk (k (AbandonedOn (V x VHere)) (x : live))))
+    where x = genName live
 
 -- | @verdict <- ask …@ inside a revision: the review, elaborated at @verdict@
 -- by position, exactly as @checkMembers@ does.
@@ -1187,8 +1245,11 @@ data Calling (s :: Scope) where
   Calling :: Fn ps 'CodeAck -> Args s ps -> Calling s
 
 -- | @act …@ in a workflow block.
-instance (s' ~ s, j ~ 'Open s, a ~ ()) => Step (Acting s') ('Open s) j a where
+instance (s' ~ s, j ~ 'Result r s, a ~ ()) => Step (Acting s') ('Result r s) j a where
   step _ live (Acting q) k = B.act q (k () live)
+
+instance (s' ~ s, j ~ 'Open s, a ~ ()) => Step (Acting s') ('Open s) j a where
+  step _ live (Acting q) k = UnitBlk $ B.act q (unUnitBlk (k () live))
 
 -- | @act …@ in a function body — @battery-144@'s @applied@ is a body that /is/
 -- one act.
@@ -1196,8 +1257,12 @@ instance (s' ~ s, j ~ 'Body r s, a ~ ()) => Step (Acting s') ('Body r s) j a whe
   step _ live (Acting q) k = B.actB q (k () live)
 
 -- | @call_ f …@ in a workflow block.
-instance (s' ~ s, j ~ 'Open s, a ~ ()) => Step (Calling s') ('Open s) j a where
+instance (s' ~ s, j ~ 'Result r s, a ~ ()) => Step (Calling s') ('Result r s) j a where
   step _ live (Calling f as) k = B.callStmt f as (k () live)
+
+instance (s' ~ s, j ~ 'Open s, a ~ ()) => Step (Calling s') ('Open s) j a where
+  step _ live (Calling f as) k =
+    UnitBlk $ B.callStmt f as (unUnitBlk (k () live))
 
 -- | @call_ f …@ in a function body.
 instance (s' ~ s, j ~ 'Body r s, a ~ ()) => Step (Calling s') ('Body r s) j a where
@@ -1274,7 +1339,7 @@ thenW m n = bindW @st @i @j @a m (\_ -> n)
 
 -- | @stop@ — the end of a block.
 stop :: W ('Open s) j Term
-stop = W (\_ _ -> B.stop)
+stop = W (\_ _ -> UnitBlk B.stop)
 
 -- | A statement-position question: it binds nothing, and its answer is a
 -- receipt. The scope is unchanged; the plan is weakened past the slot.
@@ -1309,14 +1374,34 @@ act p w = Acting (ask p w)
 -- is for the one shape it names: the block whose last statement is a question
 -- nobody reads the answer to.
 ask_ :: Party p -> Words s -> W ('Open s) j Term
-ask_ p w = W (\_ _ -> B.act (ask p w) B.stop)
+ask_ p w = W (\_ _ -> UnitBlk (B.act (ask p w) B.stop))
 
--- | @known here: …@ — an assertion, and no node at all. The names are the
--- ones the block is carrying, innermost first, so this prints what the
--- bindings actually print — generated or 'named' — and cannot print a wrong
--- one.
-knownHere :: W ('Open s) ('Open s) ()
-knownHere = W (\live k -> B.knownHereI live (k ()))
+-- | The two whole-program stages share the same result-indexed Builder block,
+-- while retaining different source-level stage constructors for compatibility.
+class ProgramStage (i :: Stage) (r :: Code) (s :: Scope) | i -> r s where
+  programBlock :: Res i -> Blk s r
+  programKnown :: Live -> Res i -> Res i
+  programIf :: forall h. KnownIx h s => V h 'CodeFlag -> Res i -> Res i -> Res i
+  programCase :: forall h. KnownIx h s =>
+    V h 'CodeVerdict -> Res i -> Res i -> Res i -> Res i
+
+instance ProgramStage ('Open s) 'CodeAck s where
+  programBlock = unUnitBlk
+  programKnown live (UnitBlk b) = UnitBlk (B.knownHereI live b)
+  programIf v (UnitBlk yes) (UnitBlk no) = UnitBlk (B.ifFlag v yes no)
+  programCase v (UnitBlk a) (UnitBlk o) (UnitBlk d) =
+    UnitBlk (B.caseVerdict v a o d)
+
+instance ProgramStage ('Result r s) r s where
+  programBlock = id
+  programKnown = B.knownHereI
+  programIf = B.ifFlag
+  programCase = B.caseVerdict
+
+-- | @known here: …@ — an assertion, and no node at all, at either whole-program
+-- stage.
+knownHere :: forall i r s. ProgramStage i r s => W i i ()
+knownHere = W (\live k -> programKnown @i @r @s live (k ()))
 
 -- | Haskell's @if@, over a flag handle and two blocks — which is what
 --
@@ -1342,28 +1427,28 @@ knownHere = W (\live k -> B.knownHereI live (k ()))
 -- rebinds the block it is written on, and @RebindableSyntax@ rebinds only
 -- unqualified syntax.
 ifThenElse ::
-  forall h s j.
-  KnownIx h s =>
+  forall h i r s j.
+  (KnownIx h s, ProgramStage i r s) =>
   V h 'CodeFlag ->
-  W ('Open s) j Term ->
-  W ('Open s) j Term ->
-  W ('Open s) j Term
+  W i j Term ->
+  W i j Term ->
+  W i j Term
 ifThenElse = ifFlag
 
 -- | @if x { … } else { … }@ — a terminal, and the combinator 'ifThenElse' is.
 -- Exported because it is the desugaring and a reader of a printed program
 -- should be able to find it by name; an author writes the @if@.
 ifFlag ::
-  forall h s j.
-  KnownIx h s =>
+  forall h i r s j.
+  (KnownIx h s, ProgramStage i r s) =>
   V h 'CodeFlag ->
-  W ('Open s) j Term ->
-  W ('Open s) j Term ->
-  W ('Open s) j Term
+  W i j Term ->
+  W i j Term ->
+  W i j Term
 ifFlag v yes no =
   W
     ( \live _ ->
-        B.ifFlag @h @s v (runW live yes) (runW live no)
+        programIf @i @r @s v (runW live yes) (runW live no)
     )
 
 -- | @when ok $ W.do …@ — the one-armed @if@, for the shape an author writes
@@ -1413,7 +1498,10 @@ when ::
   V h 'CodeFlag ->
   st ->
   W ('Open s) j Term
-when v body = ifThenElse v (thenW @st @('Open s) @('Open s') @() body stop) stop
+when v body =
+  ifThenElse v
+    (thenW @st @('Open s) @('Open s') @() body stop)
+    stop
 
 -- | @unless ok $ W.do …@ — 'when' on the other arm, and terminal for the same
 -- reason.
@@ -1431,7 +1519,9 @@ unless ::
   V h 'CodeFlag ->
   st ->
   W ('Open s) j Term
-unless v body = ifThenElse v stop (thenW @st @('Open s) @('Open s') @() body stop)
+unless v body =
+  ifThenElse v stop
+    (thenW @st @('Open s) @('Open s') @() body stop)
 
 -- | @case x { approved … objected … no answer … }@ — a terminal, its arms
 -- positional, in Lean's order.
@@ -1443,17 +1533,17 @@ unless v body = ifThenElse v stop (thenW @st @('Open s) @('Open s') @() body sto
 -- three arms are Lean's three tags in Lean's order rather than the
 -- constructors of any Haskell type, so nothing may fork at a pattern either.
 caseVerdict ::
-  forall h s j.
-  KnownIx h s =>
+  forall h i r s j.
+  (KnownIx h s, ProgramStage i r s) =>
   V h 'CodeVerdict ->
-  W ('Open s) j Term ->
-  W ('Open s) j Term ->
-  W ('Open s) j Term ->
-  W ('Open s) j Term
+  W i j Term ->
+  W i j Term ->
+  W i j Term ->
+  W i j Term
 caseVerdict v approved objected noAnswer =
   W
     ( \live _ ->
-        B.caseVerdict @h @s
+        programCase @i @r @s
           v
           (runW live approved)
           (runW live objected)
@@ -1475,7 +1565,7 @@ atMost = Bound
 -- | The loop, awaiting the two things its statement cannot give it: the
 -- result's name, and the two arms of the @case@ that consumes it.
 newtype Loop (c :: Code) (s :: Scope) = Loop
-  {loopRun :: Live -> Text -> Arms c s -> Blk s}
+  {loopRun :: forall r. Live -> Text -> Arms c r s -> Blk s r}
 
 -- | What a bounded revision binds, and the one thing a workflow's @case@ is
 -- written on:
@@ -1578,7 +1668,7 @@ revising subj (Bound n) clauses = Loop $ \live result arms ->
 -- | The three-way loop, awaiting the two things its statement cannot give it:
 -- the result's name, and the three arms of the @case@ that consumes it.
 newtype LoopOn (c :: Code) (s :: Scope) = LoopOn
-  {loopOnRun :: Live -> Text -> Arms3 c s -> Blk s}
+  {loopOnRun :: forall r. Live -> Text -> Arms3 c r s -> Blk s r}
 
 -- | What a three-way bounded revision binds (D4), and the one thing a
 -- workflow's @case@ over one is written on:
@@ -1749,10 +1839,22 @@ function nm ps body =
       (applyTo body hs :: W ('Body r s) ('Body r s) Term)
 
 
--- | @answer x@ — the body's value, at the kind the handle carries, which is
--- the function's declared result.
-answer :: forall h s c j. KnownIx h s => V h c -> W ('Body c s) j Term
-answer v = W (\_ _ -> B.answerB @h @s v)
+-- | A result terminal at either result-bearing stage. Function bodies return
+-- to their caller; result blocks return from the whole registered program. The
+-- stage fixes the result code, so the same spelling cannot cross the two.
+class AnswerStage (i :: Stage) (c :: Code) (s :: Scope) | i -> c s where
+  answerStage :: forall h. KnownIx h s => V h c -> Res i
+
+instance AnswerStage ('Result c s) c s where
+  answerStage = B.answerBlk
+
+instance AnswerStage ('Body c s) c s where
+  answerStage = B.answerB
+
+-- | @answer x@ — return the live value `x` from a function body or a whole
+-- result-valued program.
+answer :: forall h s c i j. (KnownIx h s, AnswerStage i c s) => V h c -> W i j Term
+answer v = W (\_ _ -> answerStage @i @c @s v)
 
 -- | The end of a @-> receipt@ body: it answers nothing, and the caller gets a
 -- receipt.
@@ -1905,16 +2007,21 @@ instance c ~ 'CodeText => Gives Text s c where
 -- not find (@Guards.hs:101@), so such a program silently prices wrong and Lean
 -- refuses it as @unbound@. 'tableProblem' is both, on a CAF, so it fires the
 -- first time anything touches the program — the idiom 'panel' already uses.
-defining :: [SomeFn] -> W ('Open '[]) ('Open '[]) Term -> Program
+defining :: forall r.
+  (KnownCode r, ProgramStage (ProgramOpen r '[]) r '[]) =>
+  [SomeFn] -> W (ProgramOpen r '[]) (ProgramOpen r '[]) Term -> ProgramOf r
 defining fns b = case tableProblem prog of
   Just msg -> error (T.unpack msg)
   Nothing -> prog
   where
-    prog = B.program fns (runW [] b)
+    prog = B.programOf fns
+      (programBlock @(ProgramOpen r '[]) @r @'[] (runW [] b))
 
 -- | A whole program with no functions — 'defining' at the empty table, which
 -- is what it has always been.
-workflow :: W ('Open '[]) ('Open '[]) Term -> Program
+workflow ::
+  (KnownCode r, ProgramStage (ProgramOpen r '[]) r '[]) =>
+  W (ProgramOpen r '[]) (ProgramOpen r '[]) Term -> ProgramOf r
 workflow = defining []
 
 -- | 'Nothing' if the table is one the language accepts: no name twice, and
@@ -1928,7 +2035,7 @@ workflow = defining []
 -- @guardCheck@ is deliberately not called here: it answers a different
 -- question (which of five refusals @checkProgram@ fires first), and an empty
 -- panel is already an @error@ at its own site.
-tableProblem :: Program -> Maybe Text
+tableProblem :: ProgramOf r -> Maybe Text
 tableProblem prog =
   firstOf
     [ dup names,
@@ -1993,6 +2100,7 @@ tableProblem prog =
       RawCaseVerdict _ a o d _ -> rawCalls a ++ rawCalls o ++ rawCalls d
       RawCaseResult _ _ _ st un _ -> rawCalls st ++ rawCalls un
       RawCaseEnding _ _ _ _ st un ab _ -> rawCalls st ++ rawCalls un ++ rawCalls ab
+      RawAnswer _ _ -> []
       RawKnownHere _ rest _ -> rawCalls rest
       RawCallStmt f _ rest _ -> f : rawCalls rest
 
@@ -2018,12 +2126,15 @@ tableProblem prog =
 -- __Inputs are text__, because 'Agentic.Raw.RawArg' has no other literal and
 -- because a define is spliced by @Says Text@. An author who wants to select
 -- between two /programs/ on a boolean writes an ordinary Haskell function.
-data Parameterized = Parameterized
+data ParameterizedOf (r :: Code) = ParameterizedOf
   { -- | the names, in source order, that the CLI binds by
     inputNames :: [Text],
-    -- | the program, given one text per name in that order
-    supply :: [Text] -> Either Text Program
+    -- | the result-indexed program, given one text per name in that order
+    supply :: [Text] -> Either Text (ProgramOf r)
   }
+
+-- | The receipt-valued parameterized program type existing rows name.
+type Parameterized = ParameterizedOf 'CodeAck
 
 -- | The inputs a program takes. The type index counts them, so the body may be
 -- an ordinary curried Haskell function.
@@ -2283,9 +2394,10 @@ instance Curries hs => Curries (Text, hs) where
   applyTo f (t, hs) = applyTo (f t) hs
 
 -- | @taking (input "subject" :> noInputs) \\subject -> workflow W.do …@
-taking :: forall hs. Curries hs => Ins hs -> Curried hs Program -> Parameterized
+taking :: forall hs r. Curries hs =>
+  Ins hs -> Curried hs (ProgramOf r) -> ParameterizedOf r
 taking ins k =
-  Parameterized
+  ParameterizedOf
     { inputNames = insNames ins,
       supply = \ts -> applyTo k <$> insTuple ins ts
     }
@@ -2316,8 +2428,8 @@ taking ins k =
 -- repository would otherwise have to import each other: the sum is the union
 -- of two of this module's own types, and naming it here is what keeps
 -- @Example.Harden@ and @Example.Isaac@ able to list programs of either kind.
-data Example
-  = -- | a program, whole
-    Fixed Program
-  | -- | a program, once its inputs are given
-    Needs Parameterized
+data Example where
+  -- | a result-indexed program, whole
+  Fixed :: ProgramOf r -> Example
+  -- | a result-indexed program, once its inputs are given
+  Needs :: ParameterizedOf r -> Example

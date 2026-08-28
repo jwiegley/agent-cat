@@ -125,6 +125,9 @@ import Example.Structured
   ( structuredBlurb,
     structuredHelp,
     structuredProgram,
+    structuredResultBlurb,
+    structuredResultHelp,
+    structuredResultProgram,
     structuredScript,
   )
 import Prelude
@@ -262,7 +265,8 @@ examples :: [(Text, Example)]
 examples =
   [ ("harden", Fixed hardenProgram),
     ("hello", Fixed helloProgram),
-    ("structured", Fixed structuredProgram)
+    ("structured", Fixed structuredProgram),
+    ("structured-result", Fixed structuredResultProgram)
   ]
     <> isaacExamples
 
@@ -296,6 +300,7 @@ blurbFor :: Text -> Text
 blurbFor "harden" = "the flagship: draft a patch, review it by panel under a bounded revision, apply it"
 blurbFor "hello" = "the smallest thing that is still a workflow: two questions and an act"
 blurbFor "structured" = structuredBlurb
+blurbFor "structured-result" = structuredResultBlurb
 blurbFor n = isaacBlurb n
 
 -- ---------------------------------------------------------------------------
@@ -308,12 +313,12 @@ blurbFor n = isaacBlurb n
 -- __Six sections, and the CLI supplies none of them.__ What this row is, what
 -- each of its inputs /means/, which transport it wants, one command line that
 -- would really run it, one rehearsal that consults nobody, and the caveats a
--- price cannot state. The header above it already carries @level@, @cost@,
--- @inputs@, @runFacts@ and @pins@, so __no text below names a number__: a
+-- price cannot state. The header above it already carries @result@ where the
+-- program returns one, plus @level@, @cost@, @inputs@, @runFacts@ and @pins@,
 -- hand-copied price is drift with a schedule, and the one place a page may talk
 -- about cost is a caveat pointing at @agentic-run cost@.
 --
--- These eight are the reference implementation the downstream rows in
+-- These nine are the reference implementation the downstream rows in
 -- @agent-workflows@ are written against, which is why each says the
 -- same six things in the same order even where a row could have said less.
 --
@@ -325,6 +330,7 @@ helpFor :: Text -> Text
 helpFor "harden" = hardenHelp
 helpFor "hello" = helloHelp
 helpFor "structured" = structuredHelp
+helpFor "structured-result" = structuredResultHelp
 helpFor n = isaacHelp n
 
 -- | 'hardenProgram''s page.
@@ -459,6 +465,7 @@ scriptFor "hello" =
     ("Say it:", "DONE")
   ]
 scriptFor "structured" = structuredScript
+scriptFor "structured-result" = structuredScript
 -- "Example.Isaac"'s five carry their own table, in their own module, because
 -- its keys /are/ the prompt defines those programs are written from: a key
 -- there is a prefix by construction rather than by proofreading, which is what

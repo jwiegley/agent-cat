@@ -341,6 +341,7 @@ bindName env n x = M.insert x (canonName n) env
 canonRaw :: Names -> Int -> Raw -> Raw
 canonRaw env n = \case
   RawEmpty pos -> RawEmpty pos
+  RawAnswer x pos -> RawAnswer (useName env x) pos
   RawBind x ann src rest pos ->
     RawBind
       (canonName n)

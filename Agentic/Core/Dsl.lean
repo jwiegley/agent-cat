@@ -384,8 +384,8 @@ theorem bindForm_level_le {A : Type} {Γ : Ctx} {fns : Fns} (hf : FnLevel fns)
 with its arms — at **either** tag, which is what lets `revising`'s two-armed
 exit and `revising on`'s three-armed one share one lemma as they share one
 definition. -/
-theorem level_exitCont_le {Γ Δ : Ctx} {c : Code} {ℓ : Level} (t : Tag)
-    (arms : t.El → Plan (c :: Γ) Unit) (hb : Level.branch ≤ ℓ)
+theorem level_exitCont_le {A : Type} {Γ Δ : Ctx} {c : Code} {ℓ : Level} (t : Tag)
+    (arms : t.El → Plan (c :: Γ) A) (hb : Level.branch ≤ ℓ)
     (ha : ∀ x, level (arms x) ≤ ℓ) (σ : Sub Γ Δ) (final : Expr Δ (El c × t.El)) :
     level (exitCont t arms Δ σ final) ≤ ℓ := by
   show level (Plan.case t _ _) ≤ ℓ
@@ -440,31 +440,51 @@ could.
 
 Not decoration: `Cost.costM` takes this bound as an argument, so a cost
 report over a source file is not writable without it. -/
-theorem checkBlock_level_le {fns : Fns} (hf : FnLevel fns) :
+theorem checkBlockResult_level_le {result : Code} {fns : Fns} (hf : FnLevel fns) :
     ∀ (b : RawBlock) (Γ : Ctx) (S : Bindings Γ) (pend : Option (Pend Γ)),
-      PendLevel pend → ∀ (p : Plan Γ Unit),
-        checkBlock fns Γ S pend b = .ok p → level p ≤ Level.branch := by
+      PendLevel pend → ∀ (p : Plan Γ (El result)),
+        checkBlockResult result fns Γ S pend b = .ok p → level p ≤ Level.branch := by
   intro b
   induction b with
   | empty pos =>
     intro Γ S pend hpend p h
     cases pend with
-    | none => simp only [checkBlock] at h; cases h; exact bot_le
-    | some pd => simp only [checkBlock] at h; exact absurd h (by simp)
+    | none =>
+      revert p
+      cases result <;> intro p h <;> simp only [checkBlockResult] at h
+      case ack =>
+        cases h
+        exact bot_le
+      all_goals cases h
+    | some pd => simp only [checkBlockResult] at h; exact absurd h (by simp)
+  | answer x pos =>
+    intro Γ S pend hpend p h
+    cases pend with
+    | none =>
+      simp only [checkBlockResult] at h
+      split at h
+      · cases h
+      · rename_i b hb
+        split at h
+        · rename_i e he
+          cases h
+          exact bot_le
+        · cases h
+    | some pd => simp only [checkBlockResult] at h; exact absurd h (by simp)
   | knownHere names rest pos ih =>
     intro Γ S pend hpend p h
     cases pend with
     | none =>
-      simp only [checkBlock] at h
+      simp only [checkBlockResult] at h
       split at h
       · exact ih _ _ none trivial p h
       · exact absurd h (by simp)
-    | some pd => simp only [checkBlock] at h; exact absurd h (by simp)
+    | some pd => simp only [checkBlockResult] at h; exact absurd h (by simp)
   | act a rest pos ih =>
     intro Γ S pend hpend p h
     cases pend with
     | none =>
-      simp only [checkBlock] at h
+      simp only [checkBlockResult] at h
       split at h
       · exact absurd h (by simp)
       · rename_i form hform
@@ -474,12 +494,12 @@ theorem checkBlock_level_le {fns : Fns} (hf : FnLevel fns) :
           cases h
           exact askForm_level_le (by decide) Code.ack .effect S a form hform _
             (le_trans (le_of_eq (level_sub _ _)) (ih _ _ none trivial k hk))
-    | some pd => simp only [checkBlock] at h; exact absurd h (by simp)
+    | some pd => simp only [checkBlockResult] at h; exact absurd h (by simp)
   | callStmt f args rest pos ih =>
     intro Γ S pend hpend p h
     cases pend with
     | none =>
-      simp only [checkBlock] at h
+      simp only [checkBlockResult] at h
       split at h
       · exact absurd h (by simp)
       · rename_i rc q hq
@@ -492,25 +512,25 @@ theorem checkBlock_level_le {fns : Fns} (hf : FnLevel fns) :
               (max_le (le_trans (callPlan_level_le S hf f args pos hq) (by decide)) le_rfl)
             exact le_trans (le_of_eq (level_sub _ _)) (ih _ _ none trivial k hk)
         · exact absurd h (by simp)
-    | some pd => simp only [checkBlock] at h; exact absurd h (by simp)
+    | some pd => simp only [checkBlockResult] at h; exact absurd h (by simp)
   | bind x ann src rest pos ih =>
     intro Γ S pend hpend p h
     cases pend with
     | some pd =>
       cases src with
       | rhs r =>
-        simp only [checkBlock] at h
+        simp only [checkBlockResult] at h
         exact absurd h (by simp)
       | revising subj carrier n rname rann review amend rpos =>
-        simp only [checkBlock] at h
+        simp only [checkBlockResult] at h
         exact absurd h (by simp)
       | revisingOn subj carrier n rname rann review amend rpos =>
-        simp only [checkBlock] at h
+        simp only [checkBlockResult] at h
         exact absurd h (by simp)
     | none =>
       cases src with
       | rhs r =>
-        simp only [checkBlock] at h
+        simp only [checkBlockResult] at h
         split at h
         · exact absurd h (by simp)
         · split at h
@@ -526,7 +546,7 @@ theorem checkBlock_level_le {fns : Fns} (hf : FnLevel fns) :
                 exact bindForm_level_le hf (by decide) c S r form hform k
                   (ih _ _ none trivial k hk)
       | revising subj carrier n rname rann review amend rpos =>
-        simp only [checkBlock] at h
+        simp only [checkBlockResult] at h
         split at h
         · exact absurd h (by simp)
         · rename_i lp hlp
@@ -537,7 +557,7 @@ theorem checkBlock_level_le {fns : Fns} (hf : FnLevel fns) :
           · exact le_trans (le_of_eq (level_sub _ _)) (le_trans hrev (by decide))
           · exact le_trans (le_of_eq (level_sub _ _)) (le_trans ham (by decide))
       | revisingOn subj carrier n rname rann review amend rpos =>
-        simp only [checkBlock] at h
+        simp only [checkBlockResult] at h
         split at h
         · exact absurd h (by simp)
         · rename_i lp hlp
@@ -551,7 +571,7 @@ theorem checkBlock_level_le {fns : Fns} (hf : FnLevel fns) :
     intro Γ S pend hpend p h
     cases pend with
     | none =>
-      simp only [checkBlock] at h
+      simp only [checkBlockResult] at h
       split at h
       · exact absurd h (by simp)
       · split at h
@@ -565,12 +585,12 @@ theorem checkBlock_level_le {fns : Fns} (hf : FnLevel fns) :
               cases h
               exact level_caseB_le _ _ _ le_rfl (ihy _ _ none trivial y' hy')
                 (ihn _ _ none trivial n' hn')
-    | some pd => simp only [checkBlock] at h; exact absurd h (by simp)
+    | some pd => simp only [checkBlockResult] at h; exact absurd h (by simp)
   | caseVerdict x a o d pos iha iho ihd =>
     intro Γ S pend hpend p h
     cases pend with
     | none =>
-      simp only [checkBlock] at h
+      simp only [checkBlockResult] at h
       split at h
       · exact absurd h (by simp)
       · split at h
@@ -590,13 +610,13 @@ theorem checkBlock_level_le {fns : Fns} (hf : FnLevel fns) :
                 · exact iha _ _ none trivial a' ha'
                 · exact iho _ _ none trivial o' ho'
                 · exact ihd _ _ none trivial d' hd'
-    | some pd => simp only [checkBlock] at h; exact absurd h (by simp)
+    | some pd => simp only [checkBlockResult] at h; exact absurd h (by simp)
   | caseResult x sname uname settled unsettled pos ihs ihu =>
     intro Γ S pend hpend p h
     cases pend with
-    | none => simp only [checkBlock] at h; exact absurd h (by simp)
+    | none => simp only [checkBlockResult] at h; exact absurd h (by simp)
     | some pd =>
-      simp only [checkBlock] at h
+      simp only [checkBlockResult] at h
       split at h
       · exact absurd h (by simp)
       · split at h
@@ -622,9 +642,9 @@ theorem checkBlock_level_le {fns : Fns} (hf : FnLevel fns) :
   | caseEnding x sname uname aname settled unsettled abandoned pos ihs ihu iha =>
     intro Γ S pend hpend p h
     cases pend with
-    | none => simp only [checkBlock] at h; exact absurd h (by simp)
+    | none => simp only [checkBlockResult] at h; exact absurd h (by simp)
     | some pd =>
-      simp only [checkBlock] at h
+      simp only [checkBlockResult] at h
       split at h
       · exact absurd h (by simp)
       · split at h
@@ -653,6 +673,14 @@ theorem checkBlock_level_le {fns : Fns} (hf : FnLevel fns) :
                       · exact ihu _ _ none trivial unsettledP hunsettled
                       · exact iha _ _ none trivial abandonedP habandoned
         · exact absurd h (by simp)
+
+/-- The legacy receipt-valued block theorem, at the public type every existing
+caller uses. -/
+theorem checkBlock_level_le {fns : Fns} (hf : FnLevel fns)
+    (b : RawBlock) (Γ : Ctx) (S : Bindings Γ) (pend : Option (Pend Γ))
+    (hpend : PendLevel pend) (p : Plan Γ Unit)
+    (h : checkBlock fns Γ S pend b = .ok p) : level p ≤ Level.branch :=
+  checkBlockResult_level_le (result := Code.ack) hf b Γ S pend hpend p h
 
 /-! ## Function bodies stay at the pipeline rung
 
@@ -781,12 +809,14 @@ theorem checkFnsList_fnLevel :
           · rcases List.mem_singleton.mp hg with rfl
             exact checkFn_level_le hacc f fe hfe
 
-/-- **The program claim.** Everything `checkProgram` accepts is at or below the
-branch rung: the table is at `pipeline`, and the spliced block is bounded by
-`checkBlock_level_le` over it. -/
-theorem checkProgram_level_le (prog : RawProgram) (p : Plan [] Unit)
-    (h : checkProgram prog = .ok p) : level p ≤ Level.branch := by
-  simp only [checkProgram] at h
+/-- **The result-valued program claim.** Everything `checkProgramResult` accepts
+is at or below the branch rung: the table is at `pipeline`, the result terminal
+is a pure `ret`, and the spliced block is bounded by
+`checkBlockResult_level_le` over it. -/
+theorem checkProgramResult_level_le (result : Code) (prog : RawProgram)
+    (p : Plan [] (El result)) (h : checkProgramResult result prog = .ok p) :
+    level p ≤ Level.branch := by
+  simp only [checkProgramResult] at h
   split at h
   · exact absurd h (by simp)
   · rename_i fns hfns
@@ -794,9 +824,14 @@ theorem checkProgram_level_le (prog : RawProgram) (p : Plan [] Unit)
     · exact absurd h (by simp)
     · split at h
       · exact absurd h (by simp)
-      · exact checkBlock_level_le
+      · exact checkBlockResult_level_le (result := result)
           (checkFnsList_fnLevel prog.fns [] (fun _ hg => absurd hg (by simp)) fns hfns)
           _ [] [] none trivial p h
+
+/-- The frozen receipt-valued specialization, retained at its original type. -/
+theorem checkProgram_level_le (prog : RawProgram) (p : Plan [] Unit)
+    (h : checkProgram prog = .ok p) : level p ≤ Level.branch :=
+  checkProgramResult_level_le Code.ack prog p h
 
 /-! ## The guards of the front end, as theorems
 
@@ -815,6 +850,9 @@ theorem overRevised_sound :
   intro r
   induction r with
   | empty p =>
+    intro pos n h
+    simp [overRevised] at h
+  | answer x p =>
     intro pos n h
     simp [overRevised] at h
   | knownHere names rest p ih =>
@@ -921,8 +959,8 @@ theorem checkProgram_overRevised {prog : RawProgram} {fns : Fns} {rpos : Pos} {n
       = .error ⟨rpos, s!"a bounded revision is unrolled into the term it writes, \
                         so its bound may name at most {maxRevisions} amendments",
                 s!"at most {n} amendments"⟩ := by
-  unfold checkProgram
-  rw [hf, h]
+  simp only [checkProgram, checkProgramResult, hf, h]
+  rfl
 
 /-- An elaboration over the question budget is refused with the actual count —
 likewise for every program. -/
@@ -934,9 +972,9 @@ theorem checkProgram_oversized {prog : RawProgram} {fns : Fns}
       = .error ⟨⟨0, 0⟩, s!"this program elaborates to \
                           {blockAsks fns prog.main} questions, and the bound \
                           is {maxQuestions}", ""⟩ := by
-  unfold checkProgram
-  rw [hf, hr]
-  simp [h]
+  simp only [checkProgram, checkProgramResult, hf, hr]
+  rw [if_pos h]
+  rfl
 
 /-- …and within both bounds, the program front end **is** the block checker:
 the guards decide, they never distort. -/
@@ -945,9 +983,9 @@ theorem checkProgram_of_within {prog : RawProgram} {fns : Fns}
     (hr : overRevised prog.main = none)
     (h : ¬ maxQuestions < blockAsks fns prog.main) :
     checkProgram prog = checkBlock fns [] [] none prog.main := by
-  unfold checkProgram
-  rw [hf, hr]
-  simp [h]
+  simp only [checkProgram, checkProgramResult, hf, hr]
+  rw [if_neg h]
+  rfl
 
 /-- **A checked `case` lands each verdict on its own arm.** The term is
 `Plan.caseV` of exactly the three checked blocks, approve to the `approved`
@@ -962,7 +1000,7 @@ theorem checkBlock_caseVerdict_arms {fns : Fns} {Γ : Ctx} {S : Bindings Γ}
       checkBlock fns Γ S none d = .ok d' ∧
       p = Plan.caseV e (fun t => match t with
             | .approve => a' | .object => o' | .declined => d') := by
-  simp only [checkBlock] at h
+  simp only [checkBlock, checkBlockResult] at h
   split at h
   · exact absurd h (by simp)
   · split at h
@@ -997,7 +1035,7 @@ theorem checkBlock_caseEnding_arms {fns : Fns} {Γ : Ctx} {S : Bindings Γ} {pd 
       checkBlock fns (pd.code :: Γ) (Bindings.push aname pd.code S) none abandoned = .ok a' ∧
       p = Plan.graft pplan (exitCont .ending (fun e => match e with
             | .settled => s' | .unsettled => u' | .abandoned => a')) := by
-  simp only [checkBlock] at h
+  simp only [checkBlock, checkBlockResult] at h
   split at h
   · exact absurd h (by simp)
   · split at h

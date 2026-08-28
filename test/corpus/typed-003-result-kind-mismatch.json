@@ -1,0 +1,35 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "version": 4,
+  "result": "flag",
+  "program":
+  {"main":
+   {"bind":
+    {"x": "answer",
+     "src":
+     {"rhs":
+      {"r":
+       {"ask":
+        {"a":
+         {"target":
+          {"draw": 0, "addressee": {"model": {"id": "result-producer"}}},
+          "prompt": [{"lit": {"s": "Return text."}}],
+          "pos": {"line": 0, "col": 0},
+          "model": null}}}}},
+     "rest": {"answer": {"x": "answer", "pos": {"line": 0, "col": 0}}},
+     "pos": {"line": 0, "col": 0},
+     "ann": "text"}},
+   "fns": []}},
+ "reply":
+ {"refused":
+  {"pos": {"line": 0, "col": 0},
+   "n": null,
+   "message":
+   "`answer answer`: `answer` answers `text`, but this program answers `flag`",
+   "guard": "other",
+   "excerpt": "answer"}},
+ "oracleVersion": 1,
+ "name": "typed program result kind mismatch"}

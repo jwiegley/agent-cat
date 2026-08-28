@@ -113,6 +113,7 @@ servedChains prog =
 
     blockServes = \case
       RawEmpty _ -> []
+      RawAnswer _ _ -> []
       RawBind _ _ src rest _ -> srcServes src ++ blockServes rest
       RawAct a rest _ -> askServes a ++ blockServes rest
       RawKnownHere _ rest _ -> blockServes rest

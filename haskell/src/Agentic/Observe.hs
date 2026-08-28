@@ -29,12 +29,14 @@
 -- that wants to say so plainly rather than trust that fact should test
 -- @'Agentic.Plan.level' . 'Agentic.Builder.progPlan'@ itself before calling.
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Agentic.Observe
   ( observeValue,
     observeValueWithIntent,
+    observeResultValue,
     printedValue,
     zeroPosValue,
 
@@ -61,10 +63,11 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Vector as V
 
-import Agentic.Builder (Program, progPlan, progRawOut)
+import Agentic.Builder (Program, ProgramOf, progPlan, progRawOut, progResultCode)
 import Agentic.Guards (askCounts)
 import Agentic.Plan
-  ( Plan,
+  ( El,
+    Plan,
     askNodes,
     codes,
     costSummary,
@@ -73,12 +76,14 @@ import Agentic.Plan
     schemaRequirements,
     size
   )
+import Agentic.Schema (SCode (..), SomeSchema (..), fromSCode)
 import Agentic.Schema.Conformance (coversAnswer)
 import Agentic.Schema.Json (codeJson)
 import Agentic.World
   ( WorldSpec (..),
     worldObservation,
-    worldObservationWithIntent
+    worldObservationWithIntent,
+    worldObservationWithResult
   )
 
 -- ---------------------------------------------------------------------------
@@ -100,7 +105,7 @@ import Agentic.World
 -- that is part of its identity. A plan whose paths disagree on
 -- their answer kinds has no @codes@ at all and the field is @null@ — which is
 -- a different thing from the empty list a question-free batch program yields.
-observeValueAt :: (Plan '[] () -> WorldSpec -> Value) -> Program -> [WorldSpec] -> Value
+observeValueAt :: (Plan '[] (El r) -> WorldSpec -> Value) -> ProgramOf r -> [WorldSpec] -> Value
 observeValueAt observeWorld prog ws
   | not (all (\world -> all (coversAnswer (wsSchema world)) requirements) ws) =
       object ["error" .= ("world is missing an answer for a queried structured schema" :: Text)]
@@ -130,6 +135,34 @@ observeValue = observeValueAt worldObservation
 observeValueWithIntent :: Program -> [WorldSpec] -> Value
 observeValueWithIntent = observeValueAt worldObservationWithIntent
 
+-- | Version-4 observation of a result-valued program: the same folds and
+-- annotated trace, plus the result code and one returned value per world.
+observeResultValue :: ProgramOf r -> [WorldSpec] -> Value
+observeResultValue prog ws
+  | not (all (\world -> all (coversAnswer (wsSchema world)) requirements) ws) =
+      object ["error" .= ("world is missing an answer for a queried structured schema" :: Text)]
+  | otherwise =
+      object
+        [ "result" .= codeJson (fromSCode code),
+          "level" .= levelName (level p),
+          "size" .= size p,
+          "askNodes" .= askNodes p,
+          "codes" .= maybe Null (toJSON . map codeJson) (codes p),
+          "costSummary"
+            .= object ["minFold" .= mn, "maxFold" .= mx, "paths" .= paths],
+          "blockAsks" .= blockAsks,
+          "fnAsks" .= fnAsks,
+          "worlds" .= map (worldObservationWithResult code p) ws
+        ]
+  where
+    code = progResultCode prog
+    p = progPlan prog
+    requirements = case code of
+      SStructured schema -> SomeSchema schema : schemaRequirements p
+      _ -> schemaRequirements p
+    (mn, mx, paths) = costSummary p
+    (blockAsks, fnAsks) = askCounts (progRawOut prog)
+
 -- ---------------------------------------------------------------------------
 -- The program, printed
 -- ---------------------------------------------------------------------------
@@ -139,7 +172,7 @@ observeValueWithIntent = observeValueAt worldObservationWithIntent
 -- Positions are printed as @0:0@ throughout, because the builder has no way to
 -- represent one; compare this against an oracle program through
 -- 'zeroPosValue' on both sides.
-printedValue :: Program -> Value
+printedValue :: ProgramOf r -> Value
 printedValue = toJSON . progRawOut
 
 -- ---------------------------------------------------------------------------

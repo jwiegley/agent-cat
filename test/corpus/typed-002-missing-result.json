@@ -1,0 +1,18 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": "echo",
+    "flag": {"const": {"b": true}}}],
+  "version": 4,
+  "result": "text",
+  "program": {"main": {"empty": {"pos": {"line": 0, "col": 0}}}, "fns": []}},
+ "reply":
+ {"refused":
+  {"pos": {"line": 0, "col": 0},
+   "n": null,
+   "message":
+   "`stop` ends a receipt-valued program, but this program answers `text`; end it with `answer <name>`",
+   "guard": "other",
+   "excerpt": "stop"}},
+ "oracleVersion": 1,
+ "name": "typed program missing result"}

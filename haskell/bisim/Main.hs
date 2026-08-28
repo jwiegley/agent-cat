@@ -64,8 +64,10 @@
 -- defaulting to the built oracle under @agent-cat\/.lake@, 200 iterations, and
 -- a seed drawn from the system. The seed used is always printed first, so any
 -- run can be replayed exactly with @--seed@.
+{-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE QualifiedDo #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -108,7 +110,7 @@ import Test.QuickCheck (Gen, resize)
 import Test.QuickCheck.Gen (unGen)
 import Test.QuickCheck.Random (mkQCGen)
 
-import Agentic.Builder (progPlan)
+import Agentic.Builder (progPlan, progResultCode)
 import Agentic.Gen
   ( GenCase (..),
     genCase,
@@ -120,6 +122,7 @@ import Agentic.Guards (Guard (..), askCounts, guardCheck)
 import Agentic.Observe
   ( firstDiffWith,
     observeValueWithIntent,
+    observeResultValue,
     printedValue,
     render,
     tshow,
@@ -130,13 +133,18 @@ import Agentic.Oracle
     oracleErrorText,
     oraclePing,
     oracleProgram,
+    oracleResultProgram,
     oracleStringOf,
     withOracle,
   )
 import Agentic.Plan (Level (..), level)
+import Agentic.Schema (fromSCode)
 import Agentic.Raw (RawProgram)
 import Agentic.Text (stringOpOf)
 import Agentic.WF (wft)
+import Agentic.Workflow (Code (CodeText), ProgramOf, answer, ask, lit, model, workflow)
+import qualified Agentic.Workflow.Do as W
+import Agentic.World (defaultWorldSpec)
 
 -- ---------------------------------------------------------------------------
 -- Options
@@ -236,10 +244,11 @@ run opts = do
         TIO.putStrLn "bisim: the oracle did not answer a ping; aborting"
         exitFailure
 
+      tr <- propResult oracle
       t1 <- propBuilder oracle (seedFor seed 1) (optN opts)
       t2 <- propString oracle (seedFor seed 2) (optN opts)
       t3 <- propRefusal oracle (seedFor seed 3) (optN opts)
-      summarize [t1, t2, t3]
+      summarize [tr, t1, t2, t3]
 
 onTransportFailure :: OracleError -> IO a
 onTransportFailure e = do
@@ -295,6 +304,30 @@ maxTermSize = 20
 -- dotted capitals, whitespace runs.
 maxTextSize :: Int
 maxTextSize = 12
+
+-- | One fixed result-valued program keeps the additive version-4 boundary in
+-- every live bisimulation run without changing the legacy random generator.
+textResultProgram :: ProgramOf 'CodeText
+textResultProgram = workflow W.do
+  result <- ask (model "result-producer") [lit "Return the final greeting."]
+  answer result
+
+propResult :: Oracle -> IO Tally
+propResult oracle = runProperty "P1R" [()] $ \() -> do
+  let worlds = [defaultWorldSpec]
+      requestProgram = printedValue textResultProgram
+      resultCode = fromSCode (progResultCode textResultProgram)
+  reply <- oracleResultProgram oracle resultCode requestProgram worlds
+  ours <- forced (observeResultValue textResultProgram worlds)
+  pure $ case ours of
+    Left err ->
+      Diverged ("this implementation raised while assembling the typed result reply: " <> err)
+        [("request", requestProgram)]
+    Right ourReply
+      | Just d <- firstDiffWith "oracle" "haskell" reply ourReply ->
+          Diverged ("typed result reply differs at " <> d)
+            [("request", requestProgram), ("oracle", reply), ("haskell", ourReply)]
+      | otherwise -> Agreed
 
 -- ---------------------------------------------------------------------------
 -- P1 — the builder bisimulation

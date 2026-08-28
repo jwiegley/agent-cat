@@ -173,6 +173,7 @@ bodyAsks fns (BodyCallS f _ _ : rest) = callAsks fns f + bodyAsks fns rest
 -- defined, and 'guardCheck' may still need it to decide the budget.
 blockAsks :: Fns -> Raw -> Integer
 blockAsks _ (RawEmpty _) = 0
+blockAsks _ (RawAnswer _ _) = 0
 blockAsks fns (RawKnownHere _ r _) = blockAsks fns r
 blockAsks fns (RawAct _ r _) = 1 + blockAsks fns r
 blockAsks fns (RawCallStmt f _ r _) = callAsks fns f + blockAsks fns r
@@ -259,6 +260,7 @@ bodyGuard = firstOf . map stmt
 -- is scanned; a @revising@ scans @review@, then @amend@, then @rest@.
 blockGuard :: Raw -> Maybe Refusal
 blockGuard (RawEmpty _) = Nothing
+blockGuard (RawAnswer _ _) = Nothing
 blockGuard (RawKnownHere _ rest _) = blockGuard rest
 blockGuard (RawAct a rest _) = askGuard a <|> blockGuard rest
 blockGuard (RawCallStmt _ _ rest _) = blockGuard rest
@@ -283,6 +285,7 @@ blockGuard (RawCaseEnding _ _ _ _ st un ab _) =
 -- 'RawBodyStmt' binding takes a 'RawRhs', so a @revising@ is unwritable there.
 overRevised :: Raw -> Maybe Integer
 overRevised (RawEmpty _) = Nothing
+overRevised (RawAnswer _ _) = Nothing
 overRevised (RawKnownHere _ r _) = overRevised r
 overRevised (RawAct _ r _) = overRevised r
 overRevised (RawCallStmt _ _ r _) = overRevised r
@@ -471,6 +474,7 @@ unpinnedBody = firstOf . map stmt
 -- | 'blockGuard'\'s traversal, at this test.
 blockUnpinned :: Raw -> Maybe Text
 blockUnpinned (RawEmpty _) = Nothing
+blockUnpinned (RawAnswer _ _) = Nothing
 blockUnpinned (RawKnownHere _ rest _) = blockUnpinned rest
 blockUnpinned (RawAct a rest _) = askUnpinned a <|> blockUnpinned rest
 blockUnpinned (RawCallStmt _ _ rest _) = blockUnpinned rest

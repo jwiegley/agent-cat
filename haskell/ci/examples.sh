@@ -5,9 +5,9 @@
 #
 #     ./ci/examples.sh
 #
-# `Example.Harden.examples` is eight programs: the two walked ones the frozen
-# corpus holds, `Example.Structured` as the representation-boundary example, and
-# "Example.Isaac"'s five, which are an *experiment* about what the language can
+# `Example.Harden.examples` is nine programs: the two walked ones the frozen
+# corpus holds, `Example.Structured` as the representation-boundary pair
+# (`structured` and `structured-result`), and "Example.Isaac"'s five, which are
 # express and are deliberately **not** frozen (isaac-workflows §6, D10: "keep
 # them out of the frozen corpus, and pin their numbers anyway").
 # That decision leaves the five with numbers published in three places — each
@@ -81,8 +81,9 @@ cat_run() { nix develop path:./. -c cabal run -v0 agentic-run -- "$@"; }
 #   pin <name> <level> <size> <askNodes> <minFold> <maxFold> <paths> \
 #              <billFresh> <billMemo>
 #
-# `codes` is not pinned here: it is `null` on six of the eight (they branch);
-# `hello` and `structured` are pinned more strongly by their focused fixtures.
+# `codes` is not pinned here: it is `null` on six of the nine (they branch);
+# `hello`, `structured` and `structured-result` are straight lines whose codes
+# are exercised by their scripted runs.
 
 names=()
 declare -A pinLevel pinSize pinAsks pinMin pinMax pinPaths pinFresh pinMemo
@@ -119,6 +120,10 @@ pin hello             pipeline     4    3    3    3     1     3    3
 # The structured representation-boundary example. One closed model question,
 # decoded under its carried schema, then stop.
 pin structured        batch        2    1    1    1     1     1    1
+
+# The same question returned from the closed program. A pure result terminal
+# adds no node, path or bill, so every number is deliberately identical.
+pin structured-result batch        2    1    1    1     1     1    1
 
 # The five Isaac programs. Each number below is published twice more: in the
 # program's own haddock in `example/Example/Isaac.hs`, and in
@@ -297,6 +302,17 @@ for n in "${names[@]}"; do
   note "$n: ${pinLevel[$n]}, size ${pinSize[$n]}, askNodes ${pinAsks[$n]}, $want_summary; scripted ${pinFresh[$n]}/${pinMemo[$n]}, exit 0"
 done
 
+# The result-bearing row must expose the typed value after the trace, while the
+# legacy structured row remains receipt-valued.
+grep -q '^    result  *structured$' "$work/structured-result.run" \
+  || bad structured-result "final result" "a structured result block" "absent"
+grep -q '"priority":1' "$work/structured-result.run" \
+  || bad structured-result "final result value" "the canned structured object" "absent"
+grep -q '^    answer  *()' "$work/structured.run" \
+  || bad structured "legacy final answer" "unit" "moved"
+grep -q '^    answer  *()' "$work/structured-result.run" \
+  && bad structured-result "final result" "not unit" "answer ()"
+
 # ---------------------------------------------------------------------------
 # Every program's page
 # ---------------------------------------------------------------------------
@@ -308,9 +324,9 @@ done
 # if any of them moved, the work stops — and this block is the evidence that the
 # prose is true.
 #
-# The eight pages here are dispatched by `Text` in `Example.Harden.helpFor` and
+# The nine pages here are dispatched by `Text` in `Example.Harden.helpFor` and
 # `Example.Isaac.isaacHelp`, neither of which is exhaustiveness-checked, so a
-# row added and not documented is a RUNTIME error. Running all eight is the only
+# row added and not documented is a RUNTIME error. Running all nine is the only
 # thing that catches it.
 #
 # The binary is resolved once. Everything above goes through `cat_run`, which is

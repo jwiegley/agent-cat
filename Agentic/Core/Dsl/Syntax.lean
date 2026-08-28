@@ -378,12 +378,17 @@ inductive RawSource where
 
 /-- `[[RawBlock]]` = an unchecked block: statements, of which the branchings
 are terminal — each arm *is* the rest of the workflow — and a statement-position
-ask is the act, which may be followed. `stop` writes the block that does
-nothing, and `{ }` is not writable. -/
+ask is the act, which may be followed. `stop` writes a receipt-valued ending;
+`answer x` returns one live binding from a result-valued program; and `{ }` is
+not writable. -/
 inductive RawBlock where
-  /-- `stop`, or a block whose statements ran out after an act. The position is
-  where the nothing is written. -/
+  /-- `stop`, or a receipt-valued block whose statements ran out after an act.
+  The position is where the nothing is written. -/
   | empty (pos : Pos)
+  /-- `answer x`: return the live binding named `x`. The program's expected
+  result code is carried outside the frozen `RawProgram` record and imposed by
+  `checkProgramResult`; every branch is checked at that same code. -/
+  | answer (x : String) (pos : Pos)
   /-- `x <- source` or `x : kind <- source`, followed by the rest. When the
   source is a `revising`, the rest must begin with `case x { settled …
   unsettled … }`, which the checker enforces. -/

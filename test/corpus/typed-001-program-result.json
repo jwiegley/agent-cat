@@ -1,0 +1,59 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": {"const": {"s": "Hello result"}},
+    "flag": {"const": {"b": true}}}],
+  "version": 4,
+  "result": "text",
+  "program":
+  {"main":
+   {"bind":
+    {"x": "answer",
+     "src":
+     {"rhs":
+      {"r":
+       {"ask":
+        {"a":
+         {"target":
+          {"draw": 0, "addressee": {"model": {"id": "result-producer"}}},
+          "prompt": [{"lit": {"s": "Return the final greeting."}}],
+          "pos": {"line": 0, "col": 0},
+          "model": null}}}}},
+     "rest": {"answer": {"x": "answer", "pos": {"line": 0, "col": 0}}},
+     "pos": {"line": 0, "col": 0},
+     "ann": null}},
+   "fns": []}},
+ "reply":
+ {"worlds":
+  [{"world":
+    {"verdict": {"const": {"v": "approve"}},
+     "text": {"const": {"s": "Hello result"}},
+     "flag": {"const": {"b": true}}},
+    "trace":
+    [{"scope": {"model": null, "mode": null},
+      "prompt": "Return the final greeting.",
+      "intent": "consult",
+      "draw": 0,
+      "code": "text",
+      "answer": "Hello result",
+      "addressee": {"model": {"id": "result-producer"}}}],
+    "semanticTrace":
+    [{"scope": {"model": null, "mode": null},
+      "prompt": "Return the final greeting.",
+      "draw": 0,
+      "code": "text",
+      "answer": "Hello result",
+      "addressee": {"model": {"id": "result-producer"}}}],
+    "result": "Hello result",
+    "billMemo": 1,
+    "billFresh": 1}],
+  "size": 2,
+  "result": "text",
+  "level": "batch",
+  "fnAsks": [],
+  "costSummary": {"paths": 1, "minFold": 1, "maxFold": 1},
+  "codes": ["text"],
+  "blockAsks": 1,
+  "askNodes": 1},
+ "oracleVersion": 1,
+ "name": "typed text result"}

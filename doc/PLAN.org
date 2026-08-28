@@ -2940,6 +2940,21 @@ The design names three homomorphisms: extensional, quantitative, rendering. Term
 ]
 #+end_src
 
+* DONE [#C] Add typed top-level results to registered programs
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-mvp
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-27 Thu 14:22]
+:MODIFIED: [2026-08-27 Thu 20:58]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-27 Thu 20:58]
+:CLOSE_REASON: Implemented typed top-level program results with Lean/Haskell parity, v4 conformance, CLI rendering, compatibility tests, and documentation.
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+
 * DONE [#E] Prove the classical Kleene-algebra identities now that KleeneStar makes them theorems
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17

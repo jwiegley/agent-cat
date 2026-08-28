@@ -77,7 +77,21 @@ def replyFor (request : Json) : Except String Json := do
           match fromJson? (α := List WorldSpec) wj with
           | .ok ws => .ok ws
           | .error e => .error s!"bad worlds: {e}"
-      .ok (observe prog worlds)
+      let version : Nat :=
+        match request.getObjVal? "version" with
+        | .ok v => (v.getNat?).toOption.getD 2
+        | .error _ => 2
+      match version with
+      | 2 => .ok (observe prog worlds)
+      | 3 => .ok (observeV3 prog worlds)
+      | 4 =>
+        match request.getObjVal? "result" with
+        | .error _ => .error "version 4 requires a result code"
+        | .ok rj =>
+          match fromJson? (α := Code) rj with
+          | .error e => .error s!"bad result code: {e}"
+          | .ok result => .ok (observeResult result prog worlds)
+      | _ => .error "program observation version must be 2, 3 or 4"
   else
     .error "a request is {program, worlds?} or {string: {op, code?, text}}"
 

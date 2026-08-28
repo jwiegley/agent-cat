@@ -578,13 +578,16 @@ rawSourcePos = \case
 
 -- | An unchecked block: statements, of which the branchings are terminal —
 -- each arm /is/ the rest of the workflow — and a statement-position ask is the
--- act, which may be followed.
+-- act, which may be followed. `RawEmpty` ends a receipt-valued program;
+-- `RawAnswer` returns one live binding at the expected program result code.
 --
 -- Lean names this @RawBlock@ and abbreviates @Raw@ to it. Here the data type
 -- is 'Raw' and 'RawBlock' is the synonym; the two names are one type either
 -- way.
 data Raw
   = RawEmpty !Pos
+  | -- | @RawAnswer x pos@
+    RawAnswer !Text !Pos
   | -- | @RawBind x ann src rest pos@
     RawBind !Text !(Maybe SomeCode) !RawSource !Raw !Pos
   | -- | @RawAct a rest pos@
@@ -619,6 +622,7 @@ type RawBlock = Raw
 instance ToJSON Raw where
   toJSON = \case
     RawEmpty pos -> ctorObj "empty" ["pos" .= pos]
+    RawAnswer x pos -> ctorObj "answer" ["x" .= x, "pos" .= pos]
     RawBind x ann src rest pos ->
       ctorObj
         "bind"
@@ -668,6 +672,7 @@ instance ToJSON Raw where
 instance FromJSON Raw where
   parseJSON = withCtor "Raw" $ \tag o -> case tag of
     "empty" -> RawEmpty <$> o .:: "pos"
+    "answer" -> RawAnswer <$> o .:: "x" <*> o .:: "pos"
     "bind" ->
       RawBind
         <$> o .:: "x"

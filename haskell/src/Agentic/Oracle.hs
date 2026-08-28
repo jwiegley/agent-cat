@@ -58,6 +58,7 @@ module Agentic.Oracle
 
     -- * The requests
     oracleProgram,
+    oracleResultProgram,
     oracleString,
     oracleStringOf,
     oraclePing,
@@ -116,6 +117,8 @@ import System.Process
   )
 import System.Timeout (timeout)
 
+import Agentic.Schema (SomeCode)
+import Agentic.Schema.Json (codeJson)
 import Agentic.World (WorldSpec)
 
 -- ---------------------------------------------------------------------------
@@ -248,6 +251,19 @@ oracleProgram o prog ws =
   request
     o
     [ "version" .= (3 :: Int),
+      "program" .= prog,
+      "worlds" .= toJSON ws,
+      "budgetMs" .= programBudgetMs
+    ]
+
+-- | Observe a version-4 result-valued program. The raw program object is the
+-- same one `oracleProgram` sends; the result code is an additive envelope field.
+oracleResultProgram :: Oracle -> SomeCode -> Value -> [WorldSpec] -> IO Value
+oracleResultProgram o result prog ws =
+  request
+    o
+    [ "version" .= (4 :: Int),
+      "result" .= codeJson result,
       "program" .= prog,
       "worlds" .= toJSON ws,
       "budgetMs" .= programBudgetMs

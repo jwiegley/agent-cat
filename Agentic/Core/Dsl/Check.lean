@@ -286,42 +286,44 @@ private def useKindS (sig : List (String × List (String × Code) × Code))
           firstOf (useKindR sig carrier review) (useKindR sig carrier amend)
         else none))
 
-/-- The first ground use of `x` in a block, in reading order. -/
+/-- The first ground use of `x` in a block, in reading order. The expected
+program result grounds `x` when a terminal `answer x` is its first use. -/
 private def useKindB (sig : List (String × List (String × Code) × Code))
-    (x : String) : RawBlock → Option Code
+    (result : Code) (x : String) : RawBlock → Option Code
   | .empty _ => none
-  | .knownHere _ rest _ => useKindB sig x rest
-  | .act a rest _ => firstOf (usePrompt x a.prompt) (useKindB sig x rest)
+  | .answer y _ => if y == x then some result else none
+  | .knownHere _ rest _ => useKindB sig result x rest
+  | .act a rest _ => firstOf (usePrompt x a.prompt) (useKindB sig result x rest)
   | .callStmt f args rest _ =>
-    firstOf (useArgs sig x f args) (useKindB sig x rest)
-  | .bind _ _ src rest _ => firstOf (useKindS sig x src) (useKindB sig x rest)
+    firstOf (useArgs sig x f args) (useKindB sig result x rest)
+  | .bind _ _ src rest _ =>
+    firstOf (useKindS sig x src) (useKindB sig result x rest)
   | .ifFlag x' y n _ =>
     if x' == x then some Code.flag
-    else firstOf (useKindB sig x y) (useKindB sig x n)
+    else firstOf (useKindB sig result x y) (useKindB sig result x n)
   | .caseVerdict x' a o d _ =>
     if x' == x then some Code.verdict
-    else firstOf (useKindB sig x a) (firstOf (useKindB sig x o) (useKindB sig x d))
+    else firstOf (useKindB sig result x a)
+      (firstOf (useKindB sig result x o) (useKindB sig result x d))
   | .caseResult _ _ _ settled unsettled _ =>
-    firstOf (useKindB sig x settled) (useKindB sig x unsettled)
+    firstOf (useKindB sig result x settled) (useKindB sig result x unsettled)
   | .caseEnding _ _ _ _ settled unsettled abandoned _ =>
-    firstOf (useKindB sig x settled)
-      (firstOf (useKindB sig x unsettled) (useKindB sig x abandoned))
-
-/-- The kind of a binding: its annotation, or its first ground use, or the
-refusal that names the annotation. -/
+    firstOf (useKindB sig result x settled)
+      (firstOf (useKindB sig result x unsettled) (useKindB sig result x abandoned))
+/-- The kind of a binding: its annotation, or its first ground use — including
+the program's typed `answer` terminal — or the refusal that names the annotation. -/
 private def bindKind (sig : List (String × List (String × Code) × Code))
-    (pos : Pos) (x : String) (ann : Option Code) (rest : RawBlock) :
+    (result : Code) (pos : Pos) (x : String) (ann : Option Code) (rest : RawBlock) :
     Except CheckError Code :=
   match ann with
   | some c => .ok c
   | none =>
-    match useKindB sig x rest with
+    match useKindB sig result x rest with
     | some c => .ok c
     | none =>
       .error ⟨pos, s!"nothing fixes what kind of answer `{x}` names: use it \
                      (a hole, an `if`, a `case`), or annotate it — \
                      `{x} : text <- …`", x⟩
-
 /-! ## The function table
 
 A function is a named open plan over exactly its parameters: `Sub Γ Δ` is
@@ -637,15 +639,14 @@ exh)`; since `Plan.caseB e t f = .case .bool e (fun b => cond b t f)`, **the
 emitted node, its tag and its arm order are literally unchanged**, and
 `Tag.values .bool = [false, true]` keeps `arm 0` the unsettled arm and `arm 1`
 the settled one, which is what keeps `Explain.planLines`' arm numbering fixed.
-The one real difference: **both** arms are now `Plan (c :: Γ) Unit` and both are
-substituted with the candidate, where the unsettled arm used to be
+The one real difference: **both** arms have the same result type `A` and both
+are substituted with the candidate, where the unsettled arm used to be
 `Plan.sub exh σ` at `Γ` and the settled arm read a `default` no run ever saw. -/
-def exitCont {Γ : Ctx} {c : Code} (t : Tag)
-    (arms : t.El → Plan (c :: Γ) Unit) : Plan.Cont Γ (El c × t.El) Unit :=
+def exitCont {A : Type} {Γ : Ctx} {c : Code} (t : Tag)
+    (arms : t.El → Plan (c :: Γ) A) : Plan.Cont Γ (El c × t.El) A :=
   fun _ σ final =>
     Plan.case t (fun δ => (final δ).2)
       (fun x => Plan.sub (arms x) (fun δ => Env.cons (final δ).1 (σ δ)))
-
 /-! ## How far a bounded revision may be unrolled -/
 
 /-- `[[maxRevisions]]` = the largest `n` an `at most n amendments` may name.
@@ -764,16 +765,34 @@ def checkLoopParts (fns : Fns) {Γ : Ctx} (S : Bindings Γ)
 /-! ## The checker -/
 
 set_option maxHeartbeats 1000000 in
-/-- `[[checkBlock fns Γ S pend b]]` = the plan `b` writes under the names `S`
-and the function table `fns`, with `pend` the loop result the previous
-statement left to be consumed, or the reason `b` writes none. -/
-def checkBlock (fns : Fns) : (Γ : Ctx) → Bindings Γ → Option (Pend Γ) → RawBlock →
-    Except CheckError (Plan Γ Unit)
-  | _, _, none, .empty _ => .ok (.ret fun _ => ())
+/-- `[[checkBlockResult result fns Γ S pend b]]` = the plan `b` writes under
+the names `S`, returning `El result` at every terminal, with `pend` the loop
+result the previous statement left to be consumed, or the reason `b` writes
+none. The result code is one program-wide expectation, so disjoint branch
+terminals cannot disagree about what the program returns. -/
+def checkBlockResult (result : Code) (fns : Fns) :
+    (Γ : Ctx) → Bindings Γ → Option (Pend Γ) → RawBlock →
+    Except CheckError (Plan Γ (El result))
+  | _, _, none, .empty pos =>
+    match result with
+    | .ack => .ok (.ret fun _ => ())
+    | c =>
+      .error ⟨pos, s!"`stop` ends a receipt-valued program, but this program \
+                     answers `{codeName c}`; end it with `answer <name>`", "stop"⟩
   | _, _, some pd, .empty pos => .error (pendingErr pos pd.name)
+  | _, S, none, .answer x pos =>
+    match lookupBinding S pos x with
+    | .error err => .error err
+    | .ok b =>
+      match b.at? result with
+      | some e => .ok (.ret e)
+      | none =>
+        .error ⟨pos, s!"`answer {x}`: `{x}` answers `{codeName b.code}`, \
+                       but this program answers `{codeName result}`", x⟩
+  | _, _, some pd, .answer _ pos => .error (pendingErr pos pd.name)
   | Γ, S, none, .knownHere names rest pos =>
     let live := S.map (·.name)
-    if names == live then checkBlock fns Γ S none rest
+    if names == live then checkBlockResult result fns Γ S none rest
     else
       .error ⟨pos, s!"`known here` asserts the names in scope, innermost first, \
                      and they are: {String.intercalate ", " live}",
@@ -783,7 +802,7 @@ def checkBlock (fns : Fns) : (Γ : Ctx) → Bindings Γ → Option (Pend Γ) →
     match askForm Code.ack .effect S a with
     | .error err => .error err
     | .ok form =>
-      match checkBlock fns Γ S none rest with
+      match checkBlockResult result fns Γ S none rest with
       | .error err => .error err
       | .ok k => .ok (form (Plan.sub k Sub.wk))
   | _, _, some pd, .act _ _ pos => .error (pendingErr pos pd.name)
@@ -797,7 +816,7 @@ def checkBlock (fns : Fns) : (Γ : Ctx) → Bindings Γ → Option (Pend Γ) →
     | .ok ⟨rc, p⟩ =>
       match rc, p with
       | .ack, p =>
-        match checkBlock fns Γ S none rest with
+        match checkBlockResult result fns Γ S none rest with
         | .error err => .error err
         | .ok k =>
           .ok (Plan.graft p (fun _ σ _ => Plan.sub k σ))
@@ -827,20 +846,21 @@ def checkBlock (fns : Fns) : (Γ : Ctx) → Bindings Γ → Option (Pend Γ) →
               | none =>
                 .error ⟨pos, "no function answers to this name (functions are \
                              declared above their first use)", f⟩)
-           | .ask _ => bindKind (fnSigsOf fns) pos x ann rest : Except CheckError Code) with
+           | .ask _ =>
+             bindKind (fnSigsOf fns) result pos x ann rest : Except CheckError Code) with
     | .error err => .error err
     | .ok c =>
     match bindForm fns c S rhs with
     | .error err => .error err
     | .ok form =>
-      match checkBlock fns (c :: Γ) (Bindings.push x c S) none rest with
+      match checkBlockResult result fns (c :: Γ) (Bindings.push x c S) none rest with
       | .error err => .error err
       | .ok k => .ok (form k)
   | Γ, S, none, .bind x ann (.revising subj carrier n rname rann review amend rpos) rest pos =>
     match checkLoopParts fns S x ann subj carrier n rname rann review amend rpos pos with
     | .error err => .error err
     | .ok lp =>
-      checkBlock fns Γ S
+      checkBlockResult result fns Γ S
         (some ⟨x, lp.code, .bool,
           Plan.revising (checkCont lp.review) (reviseCont lp.amend) n Γ Sub.id lp.subject⟩)
         rest
@@ -848,7 +868,7 @@ def checkBlock (fns : Fns) : (Γ : Ctx) → Bindings Γ → Option (Pend Γ) →
     match checkLoopParts fns S x ann subj carrier n rname rann review amend rpos pos with
     | .error err => .error err
     | .ok lp =>
-      checkBlock fns Γ S
+      checkBlockResult result fns Γ S
         (some ⟨x, lp.code, .ending,
           Plan.revisingOn (checkCont lp.review) (reviseCont lp.amend) n Γ Sub.id lp.subject⟩)
         rest
@@ -861,10 +881,10 @@ def checkBlock (fns : Fns) : (Γ : Ctx) → Bindings Γ → Option (Pend Γ) →
       .error ⟨pos, s!"an `if` branches on a flag, \
                      but `{x}` answers `{codeName bnd.code}`", x⟩
     | some e =>
-    match checkBlock fns Γ S none y with
+    match checkBlockResult result fns Γ S none y with
     | .error err => .error err
     | .ok y' =>
-    match checkBlock fns Γ S none n with
+    match checkBlockResult result fns Γ S none n with
     | .error err => .error err
     | .ok n' => .ok (Plan.caseB e y' n')
   | _, _, some pd, .ifFlag _ _ _ pos => .error (pendingErr pos pd.name)
@@ -877,13 +897,13 @@ def checkBlock (fns : Fns) : (Γ : Ctx) → Bindings Γ → Option (Pend Γ) →
       .error ⟨pos, s!"the arms `approved`, `objected` and `no answer` branch on \
                      a `verdict`, but `{x}` answers `{codeName bnd.code}`", x⟩
     | some e =>
-    match checkBlock fns Γ S none a with
+    match checkBlockResult result fns Γ S none a with
     | .error err => .error err
     | .ok a' =>
-    match checkBlock fns Γ S none o with
+    match checkBlockResult result fns Γ S none o with
     | .error err => .error err
     | .ok o' =>
-    match checkBlock fns Γ S none d with
+    match checkBlockResult result fns Γ S none d with
     | .error err => .error err
     | .ok d' =>
       .ok (Plan.caseV e (fun t => match t with
@@ -896,22 +916,16 @@ def checkBlock (fns : Fns) : (Γ : Ctx) → Bindings Γ → Option (Pend Γ) →
     else
     match pd with
     | ⟨_, pc, .bool, pplan⟩ =>
-      -- **The unsettled binder is checked for freshness against the enclosing
-      -- scope**, on the same rule and with the same message as the settled one.
-      -- That is what keeps kind inference sound: `useKindB` is structural,
-      -- first-match and deliberately ignorant of shadowing precisely because
-      -- `freshName` refuses shadowing before any inferred kind is acted on, and
-      -- a binder without its check would open that hole in the unsettled arm.
       match freshName S pos sname with
       | .error err => .error err
       | .ok _ =>
       match freshName S pos uname with
       | .error err => .error err
       | .ok _ =>
-      match checkBlock fns (pc :: Γ) (Bindings.push sname pc S) none settled with
+      match checkBlockResult result fns (pc :: Γ) (Bindings.push sname pc S) none settled with
       | .error err => .error err
       | .ok settledP =>
-      match checkBlock fns (pc :: Γ) (Bindings.push uname pc S) none unsettled with
+      match checkBlockResult result fns (pc :: Γ) (Bindings.push uname pc S) none unsettled with
       | .error err => .error err
       | .ok unsettledP =>
         .ok (Plan.graft pplan (exitCont .bool (fun b => cond b settledP unsettledP)))
@@ -939,13 +953,13 @@ def checkBlock (fns : Fns) : (Γ : Ctx) → Bindings Γ → Option (Pend Γ) →
       match freshName S pos aname with
       | .error err => .error err
       | .ok _ =>
-      match checkBlock fns (pc :: Γ) (Bindings.push sname pc S) none settled with
+      match checkBlockResult result fns (pc :: Γ) (Bindings.push sname pc S) none settled with
       | .error err => .error err
       | .ok settledP =>
-      match checkBlock fns (pc :: Γ) (Bindings.push uname pc S) none unsettled with
+      match checkBlockResult result fns (pc :: Γ) (Bindings.push uname pc S) none unsettled with
       | .error err => .error err
       | .ok unsettledP =>
-      match checkBlock fns (pc :: Γ) (Bindings.push aname pc S) none abandoned with
+      match checkBlockResult result fns (pc :: Γ) (Bindings.push aname pc S) none abandoned with
       | .error err => .error err
       | .ok abandonedP =>
         .ok (Plan.graft pplan (exitCont .ending (fun e =>
@@ -962,6 +976,10 @@ def checkBlock (fns : Fns) : (Γ : Ctx) → Bindings Γ → Option (Pend Γ) →
                    on` result, and `{x}` is not one: it is bound by \
                    `{x} <- revising on …` as the statement before its `case`", x⟩
 
+/-- The legacy receipt-valued block checker, unchanged at its public type. -/
+def checkBlock (fns : Fns) (Γ : Ctx) (S : Bindings Γ) (pend : Option (Pend Γ))
+    (b : RawBlock) : Except CheckError (Plan Γ Unit) :=
+  checkBlockResult Code.ack fns Γ S pend b
 /-- `[[check Γ S r]]` = the workflow `r` writes, or the reason it writes none.
 
 **This type is the type-soundness theorem.** A checker returning
@@ -979,7 +997,7 @@ theorem check_panel_nil {Γ : Ctx} (S : Bindings Γ) (x : String) (ann : Option 
     (rest : RawBlock) (ppos bpos : Pos) (hx : Bindings.find? S x = none) :
     check Γ S (.bind x ann (.rhs (.panel [] ppos)) rest bpos)
       = .error ⟨ppos, "a panel needs at least one member", "panel"⟩ := by
-  unfold check checkBlock freshName
+  unfold check checkBlock checkBlockResult freshName
   rw [hx]
   rfl
 
@@ -991,7 +1009,7 @@ theorem check_panelText_nil {Γ : Ctx} (S : Bindings Γ) (x : String) (ann : Opt
     (rest : RawBlock) (ppos bpos : Pos) (hx : Bindings.find? S x = none) :
     check Γ S (.bind x ann (.rhs (.panelText [] ppos)) rest bpos)
       = .error ⟨ppos, "a text panel needs at least one member", "panelText"⟩ := by
-  unfold check checkBlock freshName
+  unfold check checkBlock checkBlockResult freshName
   rw [hx]
   rfl
 
@@ -1158,6 +1176,7 @@ def bodyAsks (fns : Fns) : List RawBodyStmt → Nat
 once per exit, which is what the graft builds. -/
 def blockAsks (fns : Fns) : RawBlock → Nat
   | .empty _ => 0
+  | .answer _ _ => 0
   | .knownHere _ r _ => blockAsks fns r
   | .act _ r _ => 1 + blockAsks fns r
   | .callStmt f _ r _ => rhsAsks fns (.call f [] ⟨0, 0⟩) + blockAsks fns r
@@ -1212,6 +1231,7 @@ byte-identical to `checkBlock`'s own refusal, which still stands behind it for
 the hand-built entry points. -/
 def overRevised : Raw → Option (Pos × Nat)
   | .empty _ => none
+  | .answer _ _ => none
   | .knownHere _ r _ => overRevised r
   | .act _ r _ => overRevised r
   | .callStmt _ _ r _ => overRevised r
@@ -1243,6 +1263,7 @@ and `checkLoopParts` refuses any numeral above `maxRevisions` before it
 elaborates anything. -/
 def RawBlock.revisionBounds : RawBlock → List (Pos × Nat)
   | .empty _ => []
+  | .answer _ _ => []
   | .knownHere _ rest _ => rest.revisionBounds
   | .act _ rest _ => rest.revisionBounds
   | .callStmt _ _ rest _ => rest.revisionBounds
@@ -1257,11 +1278,11 @@ def RawBlock.revisionBounds : RawBlock → List (Pos × Nat)
   | .caseEnding _ _ _ _ s u a _ =>
     s.revisionBounds ++ u.revisionBounds ++ a.revisionBounds
 
-/-- `[[checkProgram prog]]` = the plan the whole program writes: the functions
-checked once, the elaboration sized — hostile loop bounds first, at their own
-lines, then the question count — and the spliced block checked against the
-table. -/
-def checkProgram (prog : RawProgram) : Except CheckError (Plan [] Unit) :=
+/-- `[[checkProgramResult result prog]]` = the result-valued plan the whole
+program writes. The existing `RawProgram` record remains the frozen syntax; the
+expected result code is an additive envelope imposed uniformly on every terminal. -/
+def checkProgramResult (result : Code) (prog : RawProgram) :
+    Except CheckError (Plan [] (El result)) :=
   match checkFnsList [] prog.fns with
   | .error err => .error err
   | .ok fns =>
@@ -1276,6 +1297,11 @@ def checkProgram (prog : RawProgram) : Except CheckError (Plan [] Unit) :=
         .error ⟨⟨0, 0⟩, s!"this program elaborates to {n} questions, and the \
                           bound is {maxQuestions}", ""⟩
       else
-        checkBlock fns [] [] none prog.main
+        checkBlockResult result fns [] [] none prog.main
+
+/-- The frozen receipt-valued program checker. Its public type and every legacy
+program's elaboration remain unchanged. -/
+def checkProgram (prog : RawProgram) : Except CheckError (Plan [] Unit) :=
+  checkProgramResult Code.ack prog
 
 end Agentic.Core.Dsl

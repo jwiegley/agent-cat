@@ -72,6 +72,7 @@ module Agentic.World
     eventJsonWithIntent,
     worldObservation,
     worldObservationWithIntent,
+    worldObservationWithResult,
   )
 where
 
@@ -562,7 +563,7 @@ eventJsonWithIntent (ExecEvent c r _ a) =
 
 
 -- | Frozen semantic v2 observation.
-worldObservation :: Plan '[] () -> WorldSpec -> Value
+worldObservation :: Plan '[] a -> WorldSpec -> Value
 worldObservation p w =
   let semantic = trace (toWorld w) p
    in object
@@ -573,7 +574,7 @@ worldObservation p w =
         ]
 
 -- | Annotated representation v3 plus its bare semantic erasure.
-worldObservationWithIntent :: Plan '[] () -> WorldSpec -> Value
+worldObservationWithIntent :: Plan '[] a -> WorldSpec -> Value
 worldObservationWithIntent p w =
   let world = toWorld w
       semantic = trace world p
@@ -582,6 +583,21 @@ worldObservationWithIntent p w =
         [ "world" .= w,
           "trace" .= map eventJsonWithIntent operational,
           "semanticTrace" .= map eventJson semantic,
+          "billFresh" .= billExecFresh operational,
+          "billMemo" .= billMemo operational
+        ]
+
+-- | Version-4 annotated observation plus the result returned in this world.
+worldObservationWithResult :: SCode c -> Plan '[] (El c) -> WorldSpec -> Value
+worldObservationWithResult code p w =
+  let world = toWorld w
+      semantic = trace world p
+      operational = execTrace world p
+   in object
+        [ "world" .= w,
+          "trace" .= map eventJsonWithIntent operational,
+          "semanticTrace" .= map eventJson semantic,
+          "result" .= answerJson code (runPlan world p),
           "billFresh" .= billExecFresh operational,
           "billMemo" .= billMemo operational
         ]

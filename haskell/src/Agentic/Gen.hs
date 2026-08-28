@@ -102,7 +102,9 @@ import Agentic.Builder
     ParamCtx,
     Params,
     Piece,
-    Program (..),
+    Program,
+    progPlan,
+    progRawOut,
     Rhs,
     Scope,
     SomeFn (SomeFn),
@@ -614,7 +616,7 @@ genFn fns name = do
 -- Measured over five thousand draws, 'genCase'\'s settings put the elaborated
 -- term at median size 22, 90th percentile 73 and maximum 282 — the range the
 -- corpus occupies, with @vector-002@\'s 92 near the middle of the tail.
-genBlk :: forall s. [GFn] -> Int -> Int -> Bool -> Live s -> Gen (Blk s)
+genBlk :: forall s. [GFn] -> Int -> Int -> Bool -> Live s -> Gen (Blk s 'CodeAck)
 genBlk fns fuel rd br ns
   | fuel <= 0 = pure stop
   | otherwise =
@@ -1056,6 +1058,7 @@ programFragments prog =
 
     blockPrompts = \case
       RawEmpty _ -> []
+      RawAnswer _ _ -> []
       RawBind _ _ src r _ -> srcPrompts src ++ blockPrompts r
       RawAct (RawAsk _ _ p _) r _ -> p : blockPrompts r
       RawIfFlag _ y n _ -> blockPrompts y ++ blockPrompts n
@@ -1657,6 +1660,7 @@ placeStmt f b = frequency ((3, pure (f b)) : deeper)
           (1, at (\ab' -> RawCaseEnding x sn un0 an st un ab' p) ab)
         ]
       RawEmpty _ -> []
+      RawAnswer _ _ -> []
 
 -- | Shrinking a raw program is sound in a way shrinking a 'GenCase' is not:
 -- there is no 'Agentic.Plan.Plan' to keep in step, so any structural
@@ -1670,6 +1674,7 @@ shrinkRawProgram (RawProgram fs m) =
 
     shrinkRaw = \case
       RawEmpty _ -> []
+      RawAnswer _ _ -> []
       RawBind _ _ _ r _ -> [r]
       RawAct _ r _ -> [r]
       RawKnownHere _ r _ -> [r]
