@@ -115,6 +115,8 @@ common settings
     , stm
     , template-haskell
     , text
+    , time
+    , unix
     , vector
 
 library
@@ -138,12 +140,18 @@ library
     Agentic.Schema.Json
     Agentic.Schema.TH
     Agentic.Route
+    Agentic.Runtime.Control
+    Agentic.Runtime.Machine
+    Agentic.Runtime.Protocol
+    Agentic.Runtime.Store
     Agentic.Shell
     Agentic.Text
     Agentic.WF
     Agentic.Workflow
     Agentic.Workflow.Do
     Agentic.World
+  other-modules:   Paths_agentic
+  autogen-modules: Paths_agentic
 
 -- The worked examples, written in the authoring surface — `Agentic.Workflow`,
 -- which is sugar over the production one: the flagship (corpus entry

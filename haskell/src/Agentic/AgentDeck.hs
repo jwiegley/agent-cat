@@ -177,12 +177,14 @@ import Agentic.Exec
     addresseeWord,
     answerSpec,
     askDecodingWith,
+    attemptExecSettings,
     codeWord,
     defaultExecSettings,
     defaultRetries,
     oneLine,
     stderrLog,
     trimAscii,
+    withPhysicalAttempt,
     withTransportGaps,
   )
 import Agentic.Plan
@@ -477,6 +479,12 @@ worldOfDeckWith st cfg = do
     WorldIO
       { worldAskIO = \c q ->
           withTransportGaps st deckGap c q (askDecodingWith st c q (sayDeck cfg c q)),
+        worldAskAttemptIO = \context c q ->
+          let controlledSettings = attemptExecSettings context st
+           in withTransportGaps controlledSettings deckGap c q $
+                askDecodingWith controlledSettings c q $ \extra ->
+                  withPhysicalAttempt context (addresseeWord (qAddressee (reqQuestion q))) $
+                    \_ -> sayDeck cfg c q extra,
         worldTurnLane = \_ _ -> Just lane
       }
 

@@ -13,6 +13,7 @@ module Agentic.Schema.Conformance
     coversAnswer,
     uniqueAnswers,
     encodeExact,
+    decodeExact,
   )
 where
 
@@ -35,6 +36,9 @@ data SomeAnswer where
 
 encodeExact :: SchemaWitness schema -> SchemaEl schema -> Value
 encodeExact schema value = withSchema schema (\witness -> encodeShape witness value)
+
+decodeExact :: SchemaWitness schema -> Value -> Maybe (SchemaEl schema)
+decodeExact schema value = withSchema schema (\witness -> decodeShape witness value)
 
 encodeShape :: SSchema schema -> SchemaEl schema -> Value
 encodeShape SSNull () = A.Null

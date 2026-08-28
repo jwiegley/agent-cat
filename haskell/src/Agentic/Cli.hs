@@ -220,6 +220,7 @@
 -- apart because they ask different things of the operator: @2@ is something to
 -- fix about the transport, @3@ is something that was said, or not finished
 -- being said.
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
@@ -250,18 +251,30 @@ module Agentic.Cli
   )
 where
 
-import Control.Exception (Handler (..), IOException, catches, try)
-import Control.Monad (unless)
-import Data.Aeson (Value (..), encode, object, toJSON, (.=))
+import Control.Exception
+  ( Handler (..),
+    IOException,
+    SomeAsyncException,
+    SomeException,
+    catches,
+    displayException,
+    fromException,
+    throwIO,
+    try,
+  )
+import Control.Monad (foldM, unless, void, when)
+import Data.Aeson (Value (..), eitherDecodeStrict', encode, object, toJSON, withObject, (.:), (.=))
 import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
-import Data.Aeson.Types (Pair)
+import Data.Aeson.Types (Pair, parseEither)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
-import Data.List (nub, sort, sortOn, tails)
+import Data.List (find, nub, sort, sortOn, tails)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Read as TR
+import Data.Word (Word64)
 import Data.Text.Encoding (decodeUtf8', decodeUtf8Lenient, encodeUtf8)
 -- `text`'s own internal module, for one thing and only in a message: the
 -- length of a byte string's longest valid UTF-8 prefix, which is the offset an
@@ -273,8 +286,10 @@ import qualified Data.Text.IO as TIO
 import qualified Data.Vector as V
 import GHC.Clock (getMonotonicTimeNSec)
 import Numeric (showFFloat)
+import qualified Paths_agentic as Paths
+import Data.Version (showVersion)
 import System.Directory (createDirectoryIfMissing, getTemporaryDirectory)
-import System.Environment (getArgs)
+import System.Environment (getArgs, lookupEnv)
 import System.Exit (ExitCode (..), exitSuccess, exitWith)
 import System.FilePath ((</>))
 import System.IO
@@ -282,6 +297,7 @@ import System.IO
     hSetBuffering,
     hSetEncoding,
     stderr,
+    stdin,
     stdout,
     utf8,
   )
@@ -309,15 +325,51 @@ import Agentic.Builder (Program, progPlan, progRawOut)
 import Agentic.Chains (servedChains)
 import qualified Data.Map.Strict as Map
 import Agentic.Exec
-  ( WorldIO,
+  ( PersistenceHooks (..),
+    WorldIO,
     announcingWorld,
     concurrentWorld,
     chainsOf,
     noChains,
-    runPlanWith,
+    nullPersistenceHooks,
+    runPlanPersisted,
     scriptedWorld,
     stderrLog,
   )
+import Agentic.Runtime.Control (ControlRuntime, newControlRuntime)
+import Agentic.Runtime.Machine (MachineCancelled (..), handlesEventSink, stdoutEventSink, withControlInput)
+import Agentic.Runtime.Store
+  ( LineageOperation (ForkRun, RestartRun, ResumeRun, RootRun),
+    AnswerRecord (..),
+    Checkpoint (..),
+    EffectPhase (EffectCompleted, EffectStarted),
+    EffectRecord (EffectRecord),
+    RunManifest (..),
+    RunStore,
+    appendEffectRecord,
+    lookupStoredAnswer,
+    readAnswerRecords,
+    readCheckpoint,
+    readEffectRecords,
+    readManifest,
+    storeReusableAnswer,
+    writeCheckpoint,
+    storeEventHandle,
+    withRunStoreSeeded,
+  )
+import Agentic.Runtime.Protocol
+  ( EventSink,
+    descriptorVersion,
+    FailureClass (..),
+    OccurrenceId (..),
+    RunId,
+    RuntimeEvent (..),
+    mkRunId,
+    protocolVersion,
+    storeVersion,
+    nullEventSink,
+  )
+import Data.IORef (atomicModifyIORef', newIORef, readIORef)
 import Agentic.Route
   ( Backend (BackendAcp, BackendDeck),
     Routes,
@@ -345,14 +397,17 @@ import Agentic.Observe (printedValue, render, renderString)
 import Agentic.Plan
   ( ExecTrace,
     askNodes,
+    intentCounts,
     codes,
     costM,
     costSummary,
     level,
     levelName,
     size,
+    toolExecNodes,
   )
-import Agentic.Raw (codeName)
+import Agentic.Raw (SomeCode (..), codeName)
+import Agentic.Schema.Json (codeFromJson)
 import Agentic.WF (wft)
 import Agentic.Workflow
   ( Example (..),
@@ -368,7 +423,7 @@ import Agentic.Workflow
     sessionPolicy,
     supply,
   )
-import Agentic.World (billExecFresh, billMemo)
+import Agentic.World (answerFromJson, billExecFresh, billMemo)
 
 -- ---------------------------------------------------------------------------
 -- The registry
@@ -453,6 +508,9 @@ regLookup reg n = lookup n (regRows reg)
 -- The input flags ride on all three of the program verbs, because @plan --raw@
 -- prints prompts and an operator pricing a run wants to price the run they will
 -- make.
+data ForkEdit = ForkDrop !OccurrenceId | ForkReplace !OccurrenceId !FilePath
+  deriving (Eq, Show)
+
 data Command
   = -- | The usage message, asked for: stdout, exit @0@. Bare @\<binary\>@ is
     -- not this — it is a 'Left' carrying the same text, on stderr under exit
@@ -473,7 +531,12 @@ data Command
   | -- | Execute, against one of the three answering services, under
     -- @--require-pinned@ when the 'Bool'.
     Run !Text !Target !Bool ![InputFlag]
-
+  | -- | Structured execution: caller-supplied run id, then the ordinary run.
+    Machine !RunId !Text !Target !Bool ![InputFlag]
+  | -- | Validate lineage compatibility without creating a child run.
+    LineageCheck !LineageOperation !FilePath ![ForkEdit] !Text !Target !Bool ![InputFlag]
+  | -- | New immutable child run derived from a stored parent.
+    MachineLineage !LineageOperation !RunId !FilePath ![ForkEdit] !Text !Target !Bool ![InputFlag]
 -- | Who the output is for: an operator reading it, or a program parsing it.
 --
 -- It rides on the two verbs whose whole output is a statement about the
@@ -610,6 +673,15 @@ execute reg = \case
   Run name target pinned ins -> do
     facts <- runFactsOf reg name target
     withExample reg pinned True (routeRefusal reg target) name facts ins (const (runCmd reg name target))
+  Machine runId name target pinned ins -> do
+    facts <- runFactsOf reg name target
+    withExample reg pinned True (routeRefusal reg target) name facts ins (const (runMachineCmd reg runId name target))
+  LineageCheck lineage parent edits name target pinned ins -> do
+    facts <- runFactsOf reg name target
+    withExample reg pinned True (routeRefusal reg target) name facts ins (\_ program _ -> void (validateLineage lineage parent edits name target program))
+  MachineLineage lineage runId parent edits name target pinned ins -> do
+    facts <- runFactsOf reg name target
+    withExample reg pinned True (routeRefusal reg target) name facts ins (const (runMachineLineageCmd reg lineage runId parent edits name target))
 
 -- | The verb owes the program no precondition of its own — @plan@ and @cost@,
 -- which read no flag that is a claim about the program's text.
@@ -1061,6 +1133,8 @@ data Facts = Facts
     factLevel :: Text,
     factSize :: Integer,
     factAskNodes :: Integer,
+    factIntents :: (Integer, Integer, Integer),
+    factToolExecNodes :: Integer,
     -- | @(minFold, maxFold, paths)@, as 'renderSummary' prints it
     factSummary :: (Maybe Integer, Maybe Integer, Integer),
     -- | 'Nothing' when the program branches, so no one sequence of answer kinds
@@ -1092,6 +1166,8 @@ factsOf n row prog =
       factLevel = levelName (level p),
       factSize = size p,
       factAskNodes = askNodes p,
+      factIntents = intentCounts p,
+      factToolExecNodes = toolExecNodes p,
       factSummary = costSummary p,
       factCodes = map codeName <$> codes p,
       -- Sorted before it is grouped, because a multiset has no order of its own
@@ -1177,9 +1253,33 @@ renderSummary (mn, mx, paths) =
 -- depending on @aeson@'s key map. The one order that is promised is @inputs@',
 -- which is declaration order, because that is the order an interface should ask
 -- for them in.
+runnerVersion :: Text
+runnerVersion = T.pack (showVersion Paths.version)
+
 factFields :: Facts -> [Pair]
 factFields f =
-  [ "name" .= factName f,
+  [ "descriptorVersion" .= descriptorVersion,
+    "runnerVersion" .= runnerVersion,
+    "protocolVersions" .= [protocolVersion],
+    "storeVersions" .= [storeVersion],
+    "capabilities"
+      .= object
+        [ "structuredRun" .= True,
+          "wholeRunCancel" .= True,
+          "requestControls" .= True,
+          "steering" .= True,
+          "interactiveRetry" .= True,
+          "schedulerRedirect" .= True,
+          "semanticResume" .= True,
+          "immutableFork" .= True,
+          "restartFromScratch" .= True,
+          "consults" .= consults,
+          "observes" .= observes,
+          "effects" .= effects,
+          "effectful" .= (effects > 0),
+          "toolExecution" .= (factToolExecNodes f > 0)
+        ],
+    "name" .= factName f,
     "blurb" .= factBlurb f,
     "level" .= factLevel f,
     "size" .= factSize f,
@@ -1193,6 +1293,7 @@ factFields f =
   ]
   where
     (mn, mx, paths) = factSummary f
+    (consults, observes, effects) = factIntents f
 
 -- | The two @plan@ adds: the codes when the program is a straight line, and the
 -- per-path fold @cost@ prints as a row of runs.
@@ -1434,9 +1535,16 @@ costCmd f gs = do
 -- precondition and not a language refusal: the program is well-formed and its
 -- meaning is unchanged; what is ill-defined is this table.
 runCmd :: Registry -> Text -> Target -> Program -> [Given] -> IO ()
-runCmd reg name target prog gs = case target of
+runCmd reg name target prog gs =
+  void (runCmdObserved nullEventSink say reg name target prog gs)
+
+runCmdObserved :: EventSink -> (Text -> IO ()) -> Registry -> Text -> Target -> Program -> [Given] -> IO ExecTrace
+runCmdObserved = runCmdControlled Nothing nullPersistenceHooks
+
+runCmdControlled :: Maybe ControlRuntime -> PersistenceHooks -> EventSink -> (Text -> IO ()) -> Registry -> Text -> Target -> Program -> [Given] -> IO ExecTrace
+runCmdControlled runtimeControls persistence observer output reg name target prog gs = case target of
   Scripted -> do
-    say $
+    output $
       "running "
         <> name
         <> " against the scripted table ("
@@ -1444,7 +1552,7 @@ runCmd reg name target prog gs = case target of
         <> " canned replies)"
     -- Without this line a green `--scripted` run reads as evidence that the
     -- gate passed, which is the same class of mistake D5 exists to fix.
-    say
+    output
       ("  " <> [wft|no command was run; every gate in this program was answered from the table|])
     walkWith id (scriptedWorld script)
   Routed rr -> do
@@ -1503,7 +1611,7 @@ runCmd reg name target prog gs = case target of
       defaultShellConfig
         { shellCwd = dir,
           shellTimeoutMs = 120000,
-          shellLog = say . ("  " <>)
+          shellLog = output . ("  " <>)
         }
 
     isAcp b = schemeOf b == SchemeAcp
@@ -1538,7 +1646,7 @@ runCmd reg name target prog gs = case target of
     sayBackends rr dir = \case
       [BackendAcp w] -> do
         let cfg = acpConfigFor rr dir w
-        say $
+        output $
           "running "
             <> name
             <> " against the "
@@ -1550,8 +1658,8 @@ runCmd reg name target prog gs = case target of
         -- means, and the difference is the difference between a run that
         -- answers itself and one that reaches a real agent.
         unless (rrAdapterGiven rr) $
-          say "  no --adapter given, so the stub answers — the same default agent-cat's own CLI takes"
-        say $
+          output "  no --adapter given, so the stub answers — the same default agent-cat's own CLI takes"
+        output $
           "  cwd "
             <> T.pack dir
             <> ", "
@@ -1559,11 +1667,11 @@ runCmd reg name target prog gs = case target of
             <> "ms to a turn, "
             <> acpSessionPolicy cfg
             <> "; every addressee — model, tool and person — is this one adapter"
-        say $ "  a `running` tool's command runs in " <> T.pack dir
+        output $ "  a `running` tool's command runs in " <> T.pack dir
       [BackendDeck s] -> do
         let cfg = deckConfigFor rr s
-        say $ "running " <> name <> " against agent-deck session " <> deckSession cfg
-        say $
+        output $ "running " <> name <> " against agent-deck session " <> deckSession cfg
+        output $
           "  polling every "
             <> tshow (deckPollMs cfg)
             <> "ms, "
@@ -1574,7 +1682,7 @@ runCmd reg name target prog gs = case target of
         -- The deck engine sends into a session somebody else started, so the
         -- directory a command runs in and the directory that session works in
         -- need not agree. Announce it rather than assume it.
-        say
+        output
           ("  " <> [wft|a `running` tool's command runs in this process's directory, which the deck session — started by somebody else — need not share|])
       bs -> sayManyBackends rr dir bs
 
@@ -1591,21 +1699,21 @@ runCmd reg name target prog gs = case target of
     -- answered anything.
     sayManyBackends :: RunRoutes -> FilePath -> [Backend] -> IO ()
     sayManyBackends rr dir bs = do
-      say $ "running " <> name <> " against " <> tshow (length bs) <> " backends:"
+      output $ "running " <> name <> " against " <> tshow (length bs) <> " backends:"
       -- The label is `Agentic.Workflow.routeDefaultLabel` and not a literal, for
       -- `deckSessionPolicy`'s reason: `run.routes` carries this same table to
       -- the prompts, and a header that named the default answerer one way while
       -- the fact named it another would be one run described twice.
-      say $ pad routeDefaultLabel <> backendWords rr (routeDefault (rrRoutes rr))
-      say $ pad "" <> "— every unpinned ask, every tool and every person"
+      output $ pad routeDefaultLabel <> backendWords rr (routeDefault (rrRoutes rr))
+      output $ pad "" <> "— every unpinned ask, every tool and every person"
       mapM_ route (routeNamed (rrRoutes rr))
       unless (null unclaimed) $
-        say $ pad (T.intercalate ", " unclaimed) <> "the default (no --route names them)"
+        output $ pad (T.intercalate ", " unclaimed) <> "the default (no --route names them)"
       case [w | BackendAcp w <- bs] of
         [] -> pure ()
         (w : _) ->
           let cfg = acpConfigFor rr dir w
-           in say $
+           in output $
                 "  cwd "
                   <> T.pack dir
                   <> ", "
@@ -1616,23 +1724,23 @@ runCmd reg name target prog gs = case target of
         [] -> pure ()
         (s : _) ->
           let cfg = deckConfigFor rr s
-           in say $
+           in output $
                 "  polling every "
                   <> tshow (deckPollMs cfg)
                   <> "ms, "
                   <> tshow (deckTimeoutMs cfg)
                   <> "ms to a turn, "
                   <> deckSessionPolicy
-      say $ "  a `running` tool's command runs in " <> T.pack dir
+      output $ "  a `running` tool's command runs in " <> T.pack dir
       where
         route (m, b) = do
-          say $ pad m <> backendWords rr b
+          output $ pad m <> backendWords rr b
           -- §5.3: the deck arm's directory caveat is per route and not per run,
           -- because with a mixed table it holds of the `deck:` routes and is
           -- false of the `acp:` ones.
           case b of
             BackendDeck _ ->
-              say $
+              output $
                 pad ""
                   <> "— its working directory is its own; this run's tools run in "
                   <> T.pack dir
@@ -1662,29 +1770,30 @@ runCmd reg name target prog gs = case target of
         "the " <> w <> " adapter: " <> T.unwords (map T.pack (acpCommand (acpConfigFor rr "." w)))
       BackendDeck s -> "agent-deck session " <> s
 
-    walkWith :: (WorldIO -> WorldIO) -> WorldIO -> IO ()
+    walkWith :: (WorldIO -> WorldIO) -> WorldIO -> IO ExecTrace
     walkWith exec world = do
       -- The inputs this run's prompts were built from, announced before the
       -- first question: an operator reading a transcript must be able to see
       -- which subject it was about, and the value itself can be a whole diff.
-      mapM_ (say . inputsLine) gs
+      mapM_ (output . inputsLine) gs
       chains <- case servedChains (progRawOut prog) of
         Left why -> do
-          say ("refusing to start: " <> why)
+          output ("refusing to start: " <> why)
           exitWith (ExitFailure 1)
         Right t
           | Map.null t -> pure noChains
           | otherwise -> do
-              mapM_ (say . chainLine) [e | e <- Map.toList t, not (null (snd e))]
+              mapM_ (output . chainLine) [e | e <- Map.toList t, not (null (snd e))]
               pure (chainsOf stderrLog t)
-      say ""
+      output ""
       (_, tr) <-
-        runPlanWith
+        runPlanPersisted runtimeControls persistence observer
           chains
-          (announcingWorld (say . ("  " <>)) (exec world))
+          (announcingWorld (output . ("  " <>)) (exec world))
           (progPlan prog)
-      say ""
+      output ""
       report tr
+      pure tr
 
     chainLine (m, spares) =
       "  "
@@ -1695,11 +1804,241 @@ runCmd reg name target prog gs = case target of
 
     report :: ExecTrace -> IO ()
     report tr = do
-      say "  the run is over."
-      say "    answer      () — a workflow's value is the unit; what it did is the trace"
-      say $ "    billFresh   " <> tshow (billExecFresh tr) <> " (request occurrences reached)"
-      say $ "    billMemo    " <> tshow (billMemo tr)
+      output "  the run is over."
+      output "    answer      () — a workflow's value is the unit; what it did is the trace"
+      output $ "    billFresh   " <> tshow (billExecFresh tr) <> " (request occurrences reached)"
+      output $ "    billMemo    " <> tshow (billMemo tr)
         <> " (reusable requests once, every effect occurrence)"
+
+runMachineCmd :: Registry -> RunId -> Text -> Target -> Program -> [Given] -> IO ()
+runMachineCmd = runMachineWith RootRun Nothing []
+
+runMachineLineageCmd :: Registry -> LineageOperation -> RunId -> FilePath -> [ForkEdit] -> Text -> Target -> Program -> [Given] -> IO ()
+runMachineLineageCmd reg lineage runId parentDirectory edits name target prog gs = do
+  childStore <- lookupEnv "AGENT_CAT_RUN_STORE"
+  when (childStore == Nothing) (ioError (userError "lineage operations require AGENT_CAT_RUN_STORE for the new child run"))
+  (parentRunId, inheritedAnswers) <- validateLineage lineage parentDirectory edits name target prog
+  runMachineWith lineage (Just parentRunId) inheritedAnswers reg runId name target prog gs
+
+validateLineage :: LineageOperation -> FilePath -> [ForkEdit] -> Text -> Target -> Program -> IO (RunId, [AnswerRecord])
+validateLineage lineage parentDirectory edits name target prog = do
+  parentManifest <- readManifest parentDirectory
+  let program = printedValue prog
+      exactLaunch =
+        manifestWorkflow parentManifest == name
+          && manifestRunnerVersion parentManifest == runnerVersion
+          && manifestProgram parentManifest == program
+          && manifestTarget parentManifest == targetLabel target
+          && manifestPolicy parentManifest == targetPolicy target
+      checkpointMatches checkpoint = checkpointProgram checkpoint == manifestProgram parentManifest
+      requireCheckpoint =
+        readCheckpoint parentDirectory >>= maybe (ioError (userError "parent run has no compatible checkpoint")) pure
+      validateOptionalCheckpoint = do
+        checkpoint <- readCheckpoint parentDirectory
+        mapM_ (\value -> unless (checkpointMatches value) (ioError (userError "parent checkpoint program fingerprint does not match its immutable manifest"))) checkpoint
+        pure checkpoint
+      validateCounts checkpoint answers effects =
+        unless (checkpointAnswers checkpoint == length answers && checkpointEffects checkpoint == length effects)
+          (ioError (userError "parent checkpoint counts do not match its answer/effect journals"))
+  inheritedAnswers <- case lineage of
+    RestartRun -> do
+      unless (null edits) (ioError (userError "answer edits are valid only for fork"))
+      unless exactLaunch (ioError (userError "restart launch does not match the parent fingerprint/policy"))
+      pure []
+    ResumeRun -> do
+      unless (null edits) (ioError (userError "answer edits are valid only for fork"))
+      checkpoint <- requireCheckpoint
+      unless (checkpointMatches checkpoint) (ioError (userError "parent checkpoint program fingerprint does not match its immutable manifest"))
+      unless exactLaunch (ioError (userError "resume launch does not match the parent fingerprint/policy"))
+      effects <- readEffectRecords parentDirectory
+      answers <- filter answerReplayable <$> readAnswerRecords parentDirectory
+      validateInheritedAnswers answers
+      unless (null effects) (ioError (userError "resume refuses a parent with started or completed effects; restart explicitly instead"))
+      validateCounts checkpoint answers effects
+      pure answers
+    ForkRun -> do
+      checkpoint <- validateOptionalCheckpoint
+      unless (manifestWorkflow parentManifest == name && manifestRunnerVersion parentManifest == runnerVersion)
+        (ioError (userError "fork must use the parent workflow and runner version"))
+      effects <- readEffectRecords parentDirectory
+      answers <- filter answerReplayable <$> readAnswerRecords parentDirectory
+      validateInheritedAnswers answers
+      unless (null effects) (ioError (userError "fork refuses a parent with started or completed effects; effects are never replayed"))
+      mapM_ (\value -> validateCounts value answers effects) checkpoint
+      applyForkEdits edits answers
+    RootRun -> ioError (userError "root is not a lineage child operation")
+  validateInheritedAnswers inheritedAnswers
+  pure (manifestRunId parentManifest, inheritedAnswers)
+
+applyForkEdits :: [ForkEdit] -> [AnswerRecord] -> IO [AnswerRecord]
+applyForkEdits edits initialAnswers = do
+  case firstDuplicate (map editOccurrence edits) of
+    Just occurrence -> ioError (userError ("fork answer was edited more than once: " <> show (occurrenceNumber occurrence)))
+    Nothing -> pure ()
+  foldM apply initialAnswers edits
+  where
+    editOccurrence (ForkDrop occurrence) = occurrence
+    editOccurrence (ForkReplace occurrence _) = occurrence
+    apply answers (ForkDrop occurrence)
+      | any ((== occurrence) . answerOccurrence) answers = pure (filter ((/= occurrence) . answerOccurrence) answers)
+      | otherwise = ioError (userError ("fork drop names no persisted answer: " <> show (occurrenceNumber occurrence)))
+    apply answers (ForkReplace occurrence path)
+      | not (any ((== occurrence) . answerOccurrence) answers) =
+          ioError (userError ("fork replacement names no persisted answer: " <> show (occurrenceNumber occurrence)))
+      | otherwise = do
+          bytes <- BS.readFile path
+          replacement <- case eitherDecodeStrict' bytes of
+            Left why -> ioError (userError ("fork replacement is not JSON: " <> why))
+            Right value -> pure value
+          original <- case find ((== occurrence) . answerOccurrence) answers of
+            Nothing -> ioError (userError "fork replacement lost its persisted answer")
+            Just answer -> pure answer
+          case replacementFits original replacement of
+            Left why -> ioError (userError ("fork replacement " <> why))
+            Right () -> pure ()
+          pure
+            [ if answerOccurrence answer == occurrence
+                then answer {answerValue = replacement, answerReplayable = True, answerReplaced = True}
+                else answer
+              | answer <- answers
+            ]
+
+replacementFits :: AnswerRecord -> Value -> Either String ()
+replacementFits answer replacement = do
+  SomeCode code <- parseEither (withObject "persisted question" (\o -> o .: "code" >>= codeFromJson)) (answerQuestion answer)
+  case answerFromJson code replacement of
+    Nothing -> Left "answer does not conform to its persisted code/schema"
+    Just _ -> Right ()
+
+validateInheritedAnswers :: [AnswerRecord] -> IO ()
+validateInheritedAnswers answers = do
+  case firstDuplicate (map answerOccurrence answers) of
+    Just occurrence -> ioError (userError ("parent answer store duplicates occurrence " <> show (occurrenceNumber occurrence)))
+    Nothing -> pure ()
+  case firstDuplicate (map answerQuestion answers) of
+    Just _ -> ioError (userError "parent answer store duplicates a bare question")
+    Nothing -> pure ()
+  mapM_ validate answers
+  where
+    validate answer = case replacementFits answer (answerValue answer) of
+      Left why -> ioError (userError ("parent answer store is incompatible: " <> why))
+      Right () -> pure ()
+
+runMachineWith :: LineageOperation -> Maybe RunId -> [AnswerRecord] -> Registry -> RunId -> Text -> Target -> Program -> [Given] -> IO ()
+runMachineWith lineage parent inherited reg runId name target prog gs = do
+  store <- lookupEnv "AGENT_CAT_RUN_STORE"
+  owner <- fmap T.pack <$> lookupEnv "AGENT_CAT_RUN_OWNER"
+  case store of
+    Nothing -> stdoutEventSink runId >>= runWith nullPersistenceHooks
+    Just directory ->
+      withRunStoreSeeded directory (manifest owner) inherited $ \runStore -> do
+        persistence <- persistenceFor runStore (printedValue prog) (length inherited)
+        handlesEventSink [storeEventHandle runStore, stdout] runId >>= runWith persistence
+  where
+    manifest owner =
+      RunManifest
+        runId
+        name
+        runnerVersion
+        (printedValue prog)
+        (targetLabel target)
+        (targetPolicy target)
+        parent
+        lineage
+        owner
+    runWith persistence sink = do
+      sink (RunStarted name (targetLabel target))
+      controlled <- (== Just "1") <$> lookupEnv "AGENT_CAT_CONTROL_STDIN"
+      controls <- newControlRuntime
+      let run =
+            runCmdControlled
+              (if controlled then Just controls else Nothing)
+              persistence
+              sink
+              (TIO.hPutStrLn stderr)
+              reg
+              name
+              target
+              prog
+              gs
+      outcome <- try (if controlled then withControlInput stdin sink controls run else run)
+      case outcome of
+        Right tr -> sink (RunCompleted (billExecFresh tr) (billMemo tr))
+        Left (e :: SomeException)
+          | Just (MachineCancelled why) <- fromException e -> do
+              sink (RunCancelled (T.pack why))
+              throwIO (ExitFailure 130)
+          | Just (_ :: SomeAsyncException) <- fromException e ->
+              sink (RunCancelled (T.pack (displayException e))) >> throwIO e
+          | otherwise ->
+              sink (RunFailed (machineFailureClass e) (T.pack (displayException e))) >> throwIO e
+
+persistenceFor :: RunStore -> Value -> Int -> IO PersistenceHooks
+persistenceFor store program inheritedAnswers = do
+  counts <- newIORef (inheritedAnswers, 0 :: Int)
+  pure
+    PersistenceHooks
+      { persistenceLookupAnswer = \question ->
+          fmap (\answer -> (answerValue answer, if answerReplaced answer then "replacement" else "persistent"))
+            <$> lookupStoredAnswer store question,
+        persistenceStoreAnswer = \occurrence question answer replayable ->
+          when replayable $ do
+            storeReusableAnswer store (AnswerRecord question answer occurrence True False)
+            atomicModifyIORef' counts (\(answers, effects) -> ((answers + 1, effects), ())),
+        persistenceStartEffect = \occurrence question ->
+          appendEffectRecord store (EffectRecord question Nothing occurrence EffectStarted),
+        persistenceCompleteEffect = \occurrence question answer -> do
+          appendEffectRecord store (EffectRecord question (Just answer) occurrence EffectCompleted)
+          atomicModifyIORef' counts (\(answers, effects) -> ((answers, effects + 1), ())),
+        persistenceCheckpoint = \occurrence -> do
+          (answers, effects) <- readIORef counts
+          writeCheckpoint store (Checkpoint program (Just occurrence) answers effects)
+      }
+
+targetLabel :: Target -> Text
+targetLabel Scripted = "scripted"
+targetLabel (Routed rr) = T.intercalate "," (map backendSpelling (routeBackends (rrRoutes rr)))
+
+targetPolicy :: Target -> Value
+targetPolicy Scripted = object ["kind" .= ("scripted" :: Text)]
+targetPolicy (Routed rr) =
+  object
+    [ "kind" .= ("routed" :: Text),
+      "default" .= backendSpelling (routeDefault (rrRoutes rr)),
+      "routes"
+        .= [object ["name" .= name, "backend" .= backendSpelling backend] | (name, backend) <- routeNamed (rrRoutes rr)],
+      "scratch" .= rrScratch rr,
+      "adapterArgs" .= redactAdapterArgs (rrAdapterArgs rr),
+      "binary" .= rrBinary rr,
+      "pollMs" .= rrPollMs rr,
+      "timeoutMs" .= rrTimeoutMs rr,
+      "verbose" .= rrVerbose rr
+    ]
+
+redactAdapterArgs :: [String] -> [Text]
+redactAdapterArgs = go False
+  where
+    go _ [] = []
+    go redactNext (arg : rest)
+      | redactNext = "<redacted>" : go False rest
+      | otherwise =
+          let text = T.pack arg
+              (key, value) = T.breakOn "=" text
+           in if sensitive key
+                then
+                  if T.null value
+                    then text : go True rest
+                    else (key <> "=<redacted>") : go False rest
+                else text : go False rest
+    sensitive text = any (`T.isInfixOf` T.toLower text) ["token", "secret", "password", "api-key", "api_key", "authorization"]
+
+machineFailureClass :: SomeException -> FailureClass
+machineFailureClass e
+  | Just (_ :: AcpError) <- fromException e = FailureTransport
+  | Just (_ :: DeckError) <- fromException e = FailureTransport
+  | Just (_ :: ExitCode) <- fromException e = FailureSetup
+  | Just (_ :: IOError) <- fromException e = FailureRuntime
+  | otherwise = FailureRuntime
 
 -- ---------------------------------------------------------------------------
 -- The transport configurations, and the facts they are read for
@@ -1977,6 +2316,22 @@ parseCommand reg = \case
   ("plan" : name : rest) -> planOpts name Human False False [] rest
   ("cost" : name : rest) -> costOpts name [] rest
   ("run" : name : rest) -> (\(t, p, ins) -> Run name t p ins) <$> parseTarget reg rest
+  ("machine" : runIdText : name : rest) -> do
+    runId <- mkRunId runIdText
+    (target, pinned, inputs) <- parseTarget reg rest
+    pure (Machine runId name target pinned inputs)
+  ("lineage-check" : operation : parent : name : rest) -> do
+    lineage <- case operation of
+      "restart" -> Right RestartRun
+      "resume" -> Right ResumeRun
+      "fork" -> Right ForkRun
+      _ -> Left "lineage-check operation must be restart, resume, or fork"
+    (edits, targetArgs) <- lineageEdits lineage rest
+    (target, pinned, inputs) <- parseTarget reg targetArgs
+    pure (LineageCheck lineage (T.unpack parent) edits name target pinned inputs)
+  ("machine-restart" : runIdText : parent : name : rest) -> lineageCommand RestartRun runIdText parent name rest
+  ("machine-resume" : runIdText : parent : name : rest) -> lineageCommand ResumeRun runIdText parent name rest
+  ("machine-fork" : runIdText : parent : name : rest) -> lineageCommand ForkRun runIdText parent name rest
   [name, "--help"] -> Right (Help name)
   [name] | isJust (regLookup reg name) -> Left (bareRow reg name)
   (verb : _) -> Left ("no verb '" <> verb <> "'\n\n" <> usage reg)
@@ -1984,7 +2339,39 @@ parseCommand reg = \case
     -- Still three. `help` is not among them because `help` alone is a request
     -- that has an answer — the usage — where `plan` alone is a verb missing its
     -- subject.
-    verbs = ["plan", "cost", "run"]
+    verbs = ["plan", "cost", "run", "machine", "lineage-check", "machine-restart", "machine-resume", "machine-fork"]
+
+    lineageCommand lineage runIdText parent name rest = do
+      runId <- mkRunId runIdText
+      (edits, targetArgs) <- lineageEdits lineage rest
+      (target, pinned, inputs) <- parseTarget reg targetArgs
+      pure (MachineLineage lineage runId (T.unpack parent) edits name target pinned inputs)
+
+    lineageEdits lineage args = do
+      (edits, remaining) <- extractEdits [] args
+      if lineage /= ForkRun && not (null edits)
+        then Left "answer edits are valid only for fork"
+        else Right (edits, remaining)
+
+    extractEdits edits ("--drop-answer" : occurrence : rest) = do
+      parsed <- ForkDrop <$> parseOccurrenceArg occurrence
+      extractEdits (edits <> [parsed]) rest
+    extractEdits edits ("--set-answer" : specification : rest) = do
+      let (occurrence, suffix) = T.breakOn "=" specification
+      if T.null occurrence || T.null suffix
+        then Left "--set-answer expects OCCURRENCE_ID=JSON_FILE"
+        else do
+          parsed <- parseOccurrenceArg occurrence
+          extractEdits (edits <> [ForkReplace parsed (T.unpack (T.drop 1 suffix))]) rest
+    extractEdits edits (arg : rest) = do
+      (more, remaining) <- extractEdits [] rest
+      Right (edits <> more, arg : remaining)
+    extractEdits edits [] = Right (edits, [])
+
+    parseOccurrenceArg text = case (TR.decimal text :: Either String (Integer, Text)) of
+      Right (value, suffix)
+        | T.null suffix, value <= toInteger (maxBound :: Word64) -> Right (OccurrenceId (fromInteger value))
+      _ -> Left "fork occurrence id must be an unsigned Word64 decimal string"
 
     -- Three independent flags, so they are folded rather than enumerated: the
     -- same three spelled in any other order are the same request. In particular
@@ -2239,6 +2626,11 @@ usage reg =
       "  " <> bin <> " plan <" <> noun <> "> [--raw] [--require-pinned] [--json] [<input>...]",
       "  " <> bin <> " cost <" <> noun <> "> [<input>...]",
       "  " <> bin <> " run  <" <> noun <> "> --scripted [<input>...]",
+      "  " <> bin <> " machine <run-id> <" <> noun <> "> <run options>",
+      "  " <> bin <> " lineage-check restart|resume|fork <parent-store> <" <> noun <> "> <run options>",
+      "  " <> bin <> " machine-restart <run-id> <parent-store> <" <> noun <> "> <run options>",
+      "  " <> bin <> " machine-resume  <run-id> <parent-store> <" <> noun <> "> <run options>",
+      "  " <> bin <> " machine-fork    <run-id> <parent-store> <" <> noun <> "> <run options>",
       runLead <> "--session <id> [--binary PATH] [--poll MS]",
       under (runLead <> "--session <id> ") <> "[--route NAME=BACKEND]...",
       under (runLead <> "--session <id> ") <> "[--timeout MS] [--verbose]",

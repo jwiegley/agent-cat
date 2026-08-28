@@ -112,6 +112,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 nix develop path:./. -c cabal run -v0 policy-probe
+nix develop path:./. -c cabal build agentic-run >/dev/null
+agentic_run=$(nix develop path:./. -c cabal list-bin agentic-run)
+python3 ../test/lineage_probe.py "$agentic_run"
+python3 ../test/control_probe.py "$agentic_run"
 
 # ---------------------------------------------------------------------------
 # The refusals that are the command line's

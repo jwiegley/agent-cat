@@ -346,6 +346,8 @@ routedWorld :: Routes WorldIO -> WorldIO
 routedWorld rs =
   WorldIO
     { worldAskIO = \c q -> worldAskIO (backendFor rs (reqQuestion q)) c q,
+      worldAskAttemptIO = \context c q ->
+        worldAskAttemptIO (backendFor rs (reqQuestion q)) context c q,
       worldTurnLane = \c shape ->
         let backend = backendFor rs (reqQuestion (withRequestPrompt shape T.empty))
          in worldTurnLane backend c shape

@@ -67,6 +67,8 @@ module Agentic.World
     -- * The oracle's JSON
     verdictJson,
     answerJson,
+    answerFromJson,
+    questionJson,
     scopeJson,
     eventJson,
     eventJsonWithIntent,
@@ -97,7 +99,7 @@ import Agentic.Plan
     withRequestPrompt,
   )
 import Agentic.Schema (defaultEl)
-import Agentic.Schema.Conformance (SomeAnswer, encodeExact, lookupAnswer, uniqueAnswers)
+import Agentic.Schema.Conformance (SomeAnswer, decodeExact, encodeExact, lookupAnswer, uniqueAnswers)
 import Agentic.Schema.Json (codeJson)
 import Agentic.Raw
   ( Addressee (AddrModel, AddrPerson, AddrTool, AddrToolExec),
@@ -111,11 +113,13 @@ import Agentic.Raw
 import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:?), (.=))
 import qualified Data.Aeson as A
 import qualified Data.Aeson.Key as K
+import qualified Data.Aeson.KeyMap as KM
 import Data.Aeson.Types (Pair, Parser)
 import Data.List (find, nub)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Vector as V
 
 -- ---------------------------------------------------------------------------
 -- The world, specified as data (Conformance.lean:76-:116)
@@ -522,6 +526,33 @@ answerJson SVerdict v = verdictJson v
 answerJson SFlag b = A.Bool b
 answerJson SAck _ = A.Null
 answerJson (SStructured schema) value = encodeExact schema value
+
+answerFromJson :: SCode c -> Value -> Maybe (El c)
+answerFromJson SText (A.String value) = Just value
+answerFromJson SFlag (A.Bool value) = Just value
+answerFromJson SAck A.Null = Just ()
+answerFromJson SVerdict (A.Object value) = case KM.lookup "tag" value of
+  Just (A.String "approve") -> Just Approve
+  Just (A.String "declined") -> Just Declined
+  Just (A.String "object") -> do
+    A.Array objections <- KM.lookup "objections" value
+    Object <$> traverse objectionText (V.toList objections)
+  _ -> Nothing
+  where
+    objectionText (A.String text) = Just text
+    objectionText _ = Nothing
+answerFromJson (SStructured schema) value = decodeExact schema value
+answerFromJson _ _ = Nothing
+
+questionJson :: SCode c -> Q c -> Value
+questionJson c q =
+  object
+    [ "code" .= codeJson (fromSCode c),
+      "addressee" .= qAddressee q,
+      "scope" .= scopeJson (qScope q),
+      "prompt" .= qPrompt q,
+      "draw" .= qDraw q
+    ]
 
 -- | @Conformance.lean:172@ — the two scope axes, __both keys always present__,
 -- @null@ where the axis is silent. The second key is @mode@; nothing in this
