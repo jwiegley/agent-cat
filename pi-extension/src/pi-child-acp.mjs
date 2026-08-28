@@ -1,7 +1,12 @@
 #!/usr/bin/env node
-import { isAbsolute } from "node:path";
+import { isAbsolute, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import readline from "node:readline";
-import { createAgentSession, DefaultResourceLoader, getAgentDir, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
+
+const codingAgentModule = process.env.PI_PACKAGE_DIR
+  ? pathToFileURL(join(process.env.PI_PACKAGE_DIR, "dist/index.js")).href
+  : "@earendil-works/pi-coding-agent";
+const { createAgentSession, DefaultResourceLoader, getAgentDir, SessionManager, SettingsManager } = await import(codingAgentModule);
 
 let session;
 let sessionId;

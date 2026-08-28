@@ -8,6 +8,7 @@ import { createUnixServer } from "@earendil-works/pi-server/unix";
 import { TestServerService } from "@earendil-works/pi-server/testing";
 import { selectRemoteTarget } from "../src/index.ts";
 import { afterEach, describe, expect, it } from "vitest";
+import { piPackageRoot } from "./fixtures/pi-package-root.ts";
 
 const created: string[] = [];
 afterEach(async () => Promise.all(created.splice(0).map((path) => rm(path, { recursive: true, force: true }))));
@@ -97,7 +98,7 @@ async function openAdapter(socketPath: string, cwd: string) {
 
 async function spawnAdapter(socketPath: string): Promise<{ child: ChildProcessWithoutNullStreams; lines: AsyncIterator<string> }> {
   const child = spawn(process.execPath, [resolve("src/pi-remote-acp.mjs")], {
-    env: { ...process.env, AGENT_CAT_PI_REMOTE_SOCKET: socketPath, AGENT_CAT_PI_REMOTE_SESSION: "known-session" },
+    env: { ...process.env, AGENT_CAT_PI_REMOTE_SOCKET: socketPath, AGENT_CAT_PI_REMOTE_SESSION: "known-session", PI_PACKAGE_DIR: piPackageRoot },
     stdio: ["pipe", "pipe", "pipe"],
   });
   const lines = readline.createInterface({ input: child.stdout })[Symbol.asyncIterator]();

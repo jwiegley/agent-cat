@@ -1,8 +1,16 @@
 #!/usr/bin/env node
-import { isAbsolute } from "node:path";
+import { existsSync } from "node:fs";
+import { dirname, isAbsolute, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import readline from "node:readline";
-import { PiClient } from "@earendil-works/pi-client";
-import { createUnixTransportFactory } from "@earendil-works/pi-client/unix";
+
+const packageParent = process.env.PI_PACKAGE_DIR ? dirname(process.env.PI_PACKAGE_DIR) : undefined;
+const clientRoot = packageParent
+  ? [join(packageParent, "pi-client"), join(packageParent, "client")].find(existsSync)
+  : undefined;
+const clientModule = clientRoot ? pathToFileURL(join(clientRoot, "dist/index.js")).href : "@earendil-works/pi-client";
+const unixModule = clientRoot ? pathToFileURL(join(clientRoot, "dist/unix.js")).href : "@earendil-works/pi-client/unix";
+const [{ PiClient }, { createUnixTransportFactory }] = await Promise.all([import(clientModule), import(unixModule)]);
 
 const socketPath = process.env.AGENT_CAT_PI_REMOTE_SOCKET;
 if (!socketPath || !isAbsolute(socketPath)) {

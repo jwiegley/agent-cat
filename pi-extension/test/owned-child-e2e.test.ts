@@ -6,6 +6,7 @@ import { discoverRunner } from "../src/catalogue.ts";
 import { prepareLaunch, preflightLineage } from "../src/launch.ts";
 import { RunSupervisor } from "../src/supervisor.ts";
 import type { RunnerConfig } from "../src/types.ts";
+import { piPackageRoot } from "./fixtures/pi-package-root.ts";
 
 const runnerPath = process.env.AGENT_CAT_E2E_RUNNER;
 const created: string[] = [];
@@ -33,6 +34,7 @@ describe.runIf(Boolean(runnerPath))("owned Pi child through the extension superv
       AGENT_CAT_FIXTURE_COUNTER: counter,
       NODE_OPTIONS: [process.env.NODE_OPTIONS, `--import=${resolve("test/fixtures/openai-fetch-preload.mjs")}`].filter(Boolean).join(" "),
       PI_CODING_AGENT_DIR: agentDir,
+      PI_PACKAGE_DIR: piPackageRoot,
     };
 
     const parent = await prepareLaunch({ runner, descriptor, cwd: directory, stateDir, inputs: {}, targetKind: "child", targetArgs });

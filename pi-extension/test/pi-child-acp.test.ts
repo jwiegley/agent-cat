@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import readline from "node:readline";
 import { afterEach, describe, expect, it } from "vitest";
+import { piPackageRoot } from "./fixtures/pi-package-root.ts";
 
 const created: string[] = [];
 afterEach(async () => Promise.all(created.splice(0).map((path) => rm(path, { recursive: true, force: true }))));
@@ -31,7 +32,7 @@ async function temporaryDirectory(): Promise<string> {
 }
 
 async function openChild(directory: string): Promise<{ sessionId: string; close: () => Promise<number | null> }> {
-  const child = spawn(process.execPath, [resolve("src/pi-child-acp.mjs")], { cwd: directory, stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn(process.execPath, [resolve("src/pi-child-acp.mjs")], { cwd: directory, env: { ...process.env, PI_PACKAGE_DIR: piPackageRoot }, stdio: ["pipe", "pipe", "pipe"] });
   const lines = readline.createInterface({ input: child.stdout })[Symbol.asyncIterator]();
   child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 0, method: "initialize", params: { protocolVersion: 1 } })}\n`);
   expect(JSON.parse((await lines.next()).value).result.protocolVersion).toBe(1);
