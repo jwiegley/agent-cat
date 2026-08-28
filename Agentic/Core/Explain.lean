@@ -8,7 +8,7 @@ import Mathlib.Data.Multiset.Sort
 The reporting layer of the analyses: two renderings, `Explain.planLines` and
 `Explain.costLines`, that say what `Agentic/Core/Level.lean`,
 `Agentic/Core/Cost.lean` and `Agentic/Core/Report.lean` already know about a
-`Plan [] Unit`, and nothing else. `Explain.costSummary` with a JSON encoder in
+result-polymorphic `Plan [] A`. `Explain.costSummary` with a JSON encoder in
 front of it is what `conformance/Conformance.lean` serializes into every
 program entry of the frozen corpus, so these numbers are also what the Haskell
 implementation is held to. One fold, one set of numbers.
@@ -376,7 +376,7 @@ to know what they are looking at: that it is the representation, how big it is,
 and what rung it sits at. -/
 def planLines {A : Type} (p : Plan [] A) : List String :=
   [ "--- the checked term, as the library holds it: a rendering of the REPRESENTATION \
-     (Plan [] Unit) and not of the source text ---"
+     (a closed, result-polymorphic Plan) and not of the source text ---"
   , s!"nodes: {p.size}   request nodes written: {p.askNodes}   level: {levelName (level p)}"
   , "legend: `binds #d` is the binder a question introduces, named by its distance from the \
      root, and `{#d}` inside a prompt is where the term splices that answer;"

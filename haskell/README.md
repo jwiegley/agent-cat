@@ -9,7 +9,7 @@ surface a human actually writes — kept honest by replaying a frozen corpus
 produced by the Lean formalization.
 
 Lean is normative. This directory does not ask to be believed on its own
-authority: every claim it makes about the language is checked against 190
+authority: every claim it makes about the language is checked against 193
 request/reply pairs the Lean oracle emitted (`../test/corpus`), and the check
 is two programs you can run in one command each. That corpus is the frozen
 conformance record: each request carries either a `RawProgram` — the same raw
@@ -25,8 +25,8 @@ nix develop -c cabal run tier1
 ```
 
 ```
-tier0: kinds: 44 string, 9 guard, 43 other, 94 checked, 0 ping, 0 unclassified
-tier0: 190 passed, 0 failed, 43 other-refusals (codec-only), of 190 files
+tier0: kinds: 44 string, 9 guard, 45 other, 95 checked, 0 ping, 0 unclassified
+tier0: 193 passed, 0 failed, 45 other-refusals (codec-only), of 193 files
 tier1: 30 passed, 0 failed, of 30 cases
 ```
 
@@ -59,9 +59,11 @@ preserves the authored
 request and records its dispatched target separately. Tags state execution policy,
 not physical success; `Observe` cannot prove an argv read-only.
 
-The frozen corpus remains version 2 bare-question semantics. Live `bisim` requests
-version 3, comparing annotated events and `semanticTrace`, their erasure. Passing
-this boundary proves representation parity, not intent as meaning.
+The frozen legacy corpus remains version 2 bare-question semantics. Live `bisim`
+uses version 3 for generated programs, comparing annotated events and
+`semanticTrace`, and adds one version-4 result program whose typed value is
+compared end to end. Passing these boundaries proves representation parity, not
+intent as meaning.
 
 And the library **runs**: `agentic-run` plans, prices and executes the walked
 examples, against a table of canned replies, against a live `agent-deck`
@@ -157,9 +159,10 @@ extra key a failure.
 | the ask counts | `Agentic.Guards.askCounts` on the *printed* program — week-one code, which is what makes this a cross-check of the builder rather than a second reading of the same term |
 | each world | frozen v2 projection: world, event fields `code/addressee/scope/prompt/draw/answer`, legacy bills |
 
-`bisim` strengthens this boundary live with version 3: it compares intent-bearing
-Plan events, their bare-question `semanticTrace` erasure, and operational memo
-billing.
+`bisim` strengthens this boundary live with version 3 for generated programs:
+it compares intent-bearing Plan events, their bare-question `semanticTrace`
+erasure, and operational memo billing. Its fixed P1R case uses version 4 and
+also compares the closed program's result code and value.
 
 The builder-written ones are chosen to reach every rung and every corner the
 corpus fixes: all
@@ -441,7 +444,29 @@ things the type level cannot see: no name twice, and every call naming an entry
 declared before it — because an unknown callee is priced at zero and would
 print a program Lean refuses.
 
-**An input is a define supplied at run time.** `taking (input "subject"
+**A closed program may return an existing answer code.** `Program` and
+`Parameterized` remain receipt-valued aliases, so every existing `stop` program
+and every explicit `'Open s` signature is source-compatible. `ProgramOf c` and
+`ParameterizedOf c` carry the result witness, and `answer` closes the whole
+program just as it closes a function body:
+
+```haskell
+translated :: ParameterizedOf 'CodeText
+translated = taking (input "language" :> noInputs) \language -> workflow W.do
+  source <- ask (model "greeter") [wf|Hello, world!|]
+  result <- ask (model "translator") [wf|Translate into {language}: {source}|]
+  answer result
+```
+
+The stage index distinguishes a function return from a program return. Both
+branches of an `if`, verdict case or bounded-revision exit must produce the same
+result code in Haskell, and Lean's `checkProgramResult` imposes the same code on
+every `RawBlock.answer`. The terminal elaborates to `ret`, so it changes no
+static fold or bill. `RawProgram` remains the frozen `{fns, main}` record; only
+the additive `answer` terminal is new, and conformance version 4 carries the
+expected code beside that unchanged object.
+
+**An input is a define supplied at run time.** `taking (input "subject" :>
 noInputs) \subject -> …` makes the program a Haskell function of its inputs,
 and `{subject}` splices as literal chunks wherever it is written, including
 inside the `if` arms. It is deliberately not `main`'s parameter list:
@@ -556,9 +581,10 @@ The two walked programs are `harden` and `hello`, written in
 against the frozen corpus** — nothing is rebuilt, adapted or trimmed for
 execution — which is what makes a run evidence about the language rather than
 about this executable. `Example.Structured` is registered beside them as the
-worked representation-boundary example; `Example.Isaac`'s five follow, with
-`review-lite` as a program of its subject. Registry entries are `Fixed` or
-`Needs` accordingly.
+worked representation-boundary example, with `structured-result` showing the
+same schema-valued answer returned from the closed program; `Example.Isaac`'s
+five follow, with `review-lite` as a program of its subject. Registry entries
+remain `Fixed` or `Needs` regardless of result code.
 
 ### Structured JSON answers
 
@@ -581,6 +607,10 @@ The derived schema is both runtime validator and type index.
 ```sh
 agentic-run run structured --scripted
 # <- {"priority":1,"steps":["decode JSON","consume typed fields"],"title":"Ship structured answers"}
+
+agentic-run run structured-result --scripted
+# result structured
+#   {"priority":1,"steps":["decode JSON","consume typed fields"],"title":"Ship structured answers"}
 ```
 
 ### `plan` — what the program is, before anyone is asked anything

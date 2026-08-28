@@ -1,9 +1,10 @@
 # The conformance wire format
 
-*Version 3. Program requests accept `"version": 2 | 3`; omission means 2.
+*Version 4. Program requests accept `"version": 2 | 3 | 4`; omission means 2.
 Version 2 remains byte-identical semantic observation. Version 3 compares
 intent-bearing Plan events and includes `semanticTrace`, their bare-question
-erasure. Its occurrence-sensitive memo bill is operational evidence, not K1.*
+erasure. Version 4 adds a typed closed-program result while keeping the
+`RawProgram` object unchanged.*
 
 The oracle speaks line-delimited JSON on stdin/stdout: one request per line,
 one reply per line, `id` echoed verbatim when the request carries one. EOF on
@@ -17,7 +18,7 @@ asymmetry must be recordable as an asymmetry.
 ## Request 1 — observe a program
 
 ```json
-{"id": …, "version": 2|3, "program": <RawProgram>, "worlds": [<WorldSpec>, …], "budgetMs": …}
+{"id": …, "version": 2|3|4, "result": <Code>, "program": <RawProgram>, "worlds": [<WorldSpec>, …], "budgetMs": …}
 ```
 
 `RawProgram` is the Lean datatype `Agentic.Core.Dsl.RawProgram` under Lean's
@@ -28,6 +29,8 @@ objects — the corpus files are the normative examples). `worlds` defaults to
 is validated while the request is decoded; malformed fixtures are rejected
 rather than silently defaulted. A world missing any schema the checked plan may
 query is rejected before evaluation; schemas the plan never asks for may be omitted.
+`result` is required only at version 4. It is imposed on every terminal by
+`checkProgramResult`; versions 2 and 3 remain receipt-valued.
 
 Three constructor-level changes landed together in the D-slate regeneration, and
 because Surface 2 below freezes the *term's encoding*, each moved requests whose
@@ -89,7 +92,8 @@ family and these are well-formedness.
 ### Checked
 
 ```json
-{"level": "batch" | "pipeline" | "branch" | "dynamic",
+{"result": <Code>,                              // version 4 only
+ "level": "batch" | "pipeline" | "branch" | "dynamic",
  "size": <Nat>, "askNodes": <Nat>,
  "codes": [<Code>, …] | null,             // null on any branching program
  "costSummary": {"minFold": <Nat>|null, "maxFold": <Nat>|null, "paths": <Nat>},
@@ -98,7 +102,8 @@ family and these are well-formedness.
  "worlds": [
    {"world": <WorldSpec>,
     "trace": [<SemanticEventV2>|<ExecEventV3>, …],
-    "semanticTrace": [<SemanticEventV2>, …],     // version 3 only
+    "semanticTrace": [<SemanticEventV2>, …],     // versions 3 and 4 only
+    "result": <answer>,                          // version 4 only
     "billFresh": <Nat>, "billMemo": <Nat>}, …]}
 ```
 
@@ -110,13 +115,15 @@ family and these are well-formedness.
   the leaf count. `minFold`/`maxFold` are null only at the empty tree edge.
 * `blockAsks`/`fnAsks` are the Raw-level ask counts — the week-one comparands,
   computable on both sides with no `Plan`.
-* Version 2 `trace` contains semantic bare-question events. Version 3 `trace`
-  contains annotated execution events and `semanticTrace` contains the same
-  occurrences after intent erasure. Both are data, never renderings:
+* Version 2 `trace` contains semantic bare-question events. Versions 3 and 4
+  contain annotated execution events in `trace` and the same occurrences after
+  intent erasure in `semanticTrace`. Version 4 additionally returns the program
+  result at the top level as its code and in each world as its value. All are
+  data, never renderings:
 
 ```json
 {"code": <Code>,
- "intent": "consult" | "observe" | "effect",        // v3 trace only
+ "intent": "consult" | "observe" | "effect",        // v3/v4 trace only
  "addressee": {"model"|"tool"|"person": {"id": "…"}}
             | {"toolExec": {"id": "…", "cmd": "…", "args": ["…", …]}},
  "scope": {"model": "…"|null, "mode": "…"|null},
@@ -156,7 +163,7 @@ representation rejects duplicate object members (including escape-equivalent
 keys) and exponents whose magnitude exceeds 4096 before numeric expansion.
 
 Both traces are compared **in order, unnormalized**. Semantic event identity is
-code plus complete `Q`; version-3 intent is representation annotation. Routes,
+code plus complete `Q`; version-3/4 intent is representation annotation. Routes,
 retries, timeouts and selected backends remain execution metadata and do not
 rewrite the authored question in `semanticTrace`.
 
@@ -249,18 +256,18 @@ the specification.
 
 *Recorded because every working paper in `doc/research/profunctor-design/`
 listed one or two of the three, and two of them named a field that is pinned by
-nothing. Counted in this checkout, over the 190 files as they stand.*
+nothing. The checkout has 190 legacy files plus three additive version-4
+typed-result vectors.*
 
-**Surface 1 — the frozen reply record, and it has exactly eight keys.** A
-checked reply is `level`, `size`, `askNodes`, `codes`, `costSummary`,
-`blockAsks`, `fnAsks`, `worlds`, and nothing else; the Haskell producer is
-`Agentic.Observe.observeValue`, whose own docstring calls them "the five static
-folds, the two ask counts, and one observation per world". Of the 190 files, 94
-carry a checked reply, 52 a `refused` reply and 44 a `result` from the string
-layer.
+**Surface 1 — the frozen reply record.** A legacy checked reply has exactly
+eight keys: `level`, `size`, `askNodes`, `codes`, `costSummary`, `blockAsks`,
+`fnAsks`, `worlds`. Version 4 adds the ninth, `result`, and each world adds its
+returned value. The Haskell producers are `Agentic.Observe.observeValue` and
+`observeResultValue`. Of the 193 files, 95 carry a checked reply, 54 a `refused`
+reply and 44 a `result` from the string layer.
 
 **`shapes` and `asks` are on no wire and in no file** — `grep '"shapes"'` and
-`grep '"asks"'` return zero hits across all 190. The record specified in
+`grep '"asks"'` return zero hits across all 193. The record specified in
 `connection.md` §3.1 lists them and the implemented record does not; that
 discrepancy is the note under "Checked" above, and its effect is to *loosen* the
 constraint rather than to tighten it. `Cost.shapes` and `Cost.asks` may be
@@ -269,16 +276,16 @@ reorganised freely — as `Agentic/Core/Cost.lean`'s `shapes_eq_map_asks` and
 pinned of that family is `codes`, and only `codes`.
 
 **Surface 2 — the printed `RawProgram`.** The `request.program` of each vector
-is the Lean datatype `Agentic.Core.Dsl.RawProgram` under Lean's derived JSON
-encoding, so the *term's encoding* is frozen alongside its observations: a
-change to a constructor name, a field name or a field order is a corpus
-regeneration even when every number in every reply is unmoved. The one field
-this surface does not compare is position: the corpus stores real `line`/`col`
-(1,455 of 1,457 `pos` occurrences are non-zero), and `Agentic.Observe.zeroPosValue`
-sets `pos` and `answerPos` to `0:0` on **both** sides of a printed-program
-comparison, because the Haskell builder has no way to represent a position.
-`pos` is oracle-only for a whole program in the same sense `message` and
-`excerpt` are oracle-only for a refusal.
+is the Lean datatype `Agentic.Core.Dsl.RawProgram` under Lean's JSON encoding,
+so existing constructor and field bytes remain frozen alongside observations.
+The record is still exactly `fns` plus `main`; version 4 carries its result code
+outside it. The additive `RawBlock.answer` tag appears only in new vectors and
+does not move a legacy program byte. The one field this surface does not compare
+is position: the corpus stores real `line`/`col`, and
+`Agentic.Observe.zeroPosValue` sets `pos` and `answerPos` to `0:0` on **both**
+sides of a printed-program comparison, because the Haskell builder has no way
+to represent a position. `pos` is oracle-only for a whole program in the same
+sense `message` and `excerpt` are oracle-only for a refusal.
 
 **Surface 3 — `Explain.planLines`, which is no longer pinned anywhere.**
 `test/CliSmoke.lean` used to check that `agent-cat plan example/harden.wf`

@@ -79,12 +79,12 @@ not physical outcome; `observe` cannot prove an argv read-only.
 ## The conformance boundary
 
 `lake exe conformance-oracle` is a line-delimited JSON process that checks and
-observes `RawProgram`s and exercises the string layer. `test/corpus/` is 190 of
-its version-2 request/reply pairs, committed — so Tier 0 runs with no Lean in the
-loop. Version 2 remains byte-identical semantic observation. Live differential
-requests version 3, comparing annotated Plan events while also returning
-`semanticTrace`, their bare-question erasure. This proves representation parity,
-not semantic inequality of intents or physical effect success.
+observes `RawProgram`s and exercises the string layer. `test/corpus/` holds 190
+legacy version-2 request/reply pairs plus three additive version-4 typed-result
+vectors. Version 2 remains byte-identical semantic observation. Live differential
+requests version 3 compare annotated Plan events while also returning
+`semanticTrace`, their bare-question erasure; version 4 carries a result code
+beside the unchanged `RawProgram` and returns that value per world.
 
 The corpus is **frozen**, and the requests in it are the specification.
 `lake exe corpus-gen` reads each file, takes its request *verbatim*, puts it back
@@ -180,6 +180,34 @@ observation whose answer comes from that argv. In statement position the same
 wherever the answer type can express failure — `flag` takes `True`/`False`,
 `verdict` takes the command's first failing line — and the run is abandoned where
 it cannot. The argv is program text with no interpolation syntax.
+
+## Typed closed-program results
+
+The mathematical space already had results: `Plan Γ A`, `Dlg A`, and
+`runPlanWith :: Plan '[] a -> IO (a, ExecTrace)`. The closed authoring surface
+now exposes that existing parameter. Legacy `Program` remains the receipt-valued
+alias and still ends in `stop`; `ProgramOf c` and `ParameterizedOf c` retain an
+existing `Code`/`Schema` witness, and a result program ends in `answer`:
+
+```haskell
+translated :: ParameterizedOf 'CodeText
+translated = taking (input "language" :> noInputs) \language -> workflow W.do
+  source <- ask (model "greeter") [wf|Hello, world!|]
+  result <- ask (model "translator") [wf|Translate into {language}: {source}|]
+  answer result
+```
+
+`answer` remains the function-body return too; the stage index distinguishes
+returning to a caller from returning from the whole program. Every branch is
+built at one result code, so inconsistent arms fail in Haskell and the Lean
+checker imposes the same code on every raw terminal. Returning is a pure `ret`:
+it adds no question, path, effect, rung or cost.
+
+The frozen `RawProgram` record is still exactly `{fns, main}`. Typed programs add
+only the `answer` terminal constructor; conformance version 4 supplies the
+expected result code as an envelope field. Existing program JSON and all legacy
+corpus bytes therefore remain unchanged. `structured-result` is the runnable
+schema-valued example.
 
 ## The runner — `agentic-run`
 
