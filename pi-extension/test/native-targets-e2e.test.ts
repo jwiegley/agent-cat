@@ -28,7 +28,7 @@ describe.runIf(Boolean(runnerPath))("native agent-cat targets through the extens
       ],
     });
     const result = await new RunSupervisor().start(launch).finished;
-    expect(result).toMatchObject({ status: "succeeded", billFresh: "7", billMemo: "7" });
+    expect(result, `${result.failureClass}: ${result.failure}`).toMatchObject({ status: "succeeded", billFresh: "7", billMemo: "7" });
     expect([...result.occurrences.values()].some((occurrence) => occurrence.attempts.size > 0)).toBe(true);
   }, 60_000);
 
@@ -50,7 +50,7 @@ describe.runIf(Boolean(runnerPath))("native agent-cat targets through the extens
     });
     Object.assign(launch.env, { DECK_STUB_STATE: deckState, DECK_STUB_MODE: "happy" });
     const result = await new RunSupervisor().start(launch).finished;
-    expect(result).toMatchObject({ status: "succeeded", billFresh: "7", billMemo: "7" });
+    expect(result, `${result.failureClass}: ${result.failure}`).toMatchObject({ status: "succeeded", billFresh: "7", billMemo: "7" });
     expect(await readFile(join(deckState, "sends"), "utf8")).toBe("7\n");
   }, 60_000);
 });
