@@ -7,7 +7,11 @@ import { Type } from "typebox";
 
 const packageParent = process.env.PI_PACKAGE_DIR ? dirname(process.env.PI_PACKAGE_DIR) : undefined;
 const clientRoot = packageParent
-  ? [join(packageParent, "pi-client"), join(packageParent, "client")].find(existsSync)
+  ? [
+      join(packageParent, "pi-client"),
+      join(packageParent, "client"),
+      join(process.env.PI_PACKAGE_DIR!, "node_modules/@earendil-works/pi-client"),
+    ].find(existsSync)
   : undefined;
 const clientModule = clientRoot ? pathToFileURL(join(clientRoot, "dist/index.js")).href : "@earendil-works/pi-client";
 const unixModule = clientRoot ? pathToFileURL(join(clientRoot, "dist/unix.js")).href : "@earendil-works/pi-client/unix";
