@@ -58,7 +58,7 @@ want_sends() {
 want_line() {
   grep -qF -- "$1" "$out" || bad "no line containing '$1'; output was:$(printf '\n  %s' "$(cat "$out")")"
 }
-# The two-pane assertions (scenario 8). A pane's transcript is the witness from
+# The two-pane assertions (scenario 9). A pane's transcript is the witness from
 # *outside* the process: the shim gives each session its own state directory, so
 # `prompts` is exactly what that pane was sent and nothing else.
 saw() {
@@ -200,13 +200,24 @@ want_sends 0
 note "missing: named as a transport failure, exit 2"
 
 # ---------------------------------------------------------------------------
-# 8. One program, two panes: the routed pin answered in one and everything else
+# 8. Pi reports terminal-derived replies with an empty timestamp. Empty means
+#    absent, not one permanent stamp that makes every later reply look stale.
+# ---------------------------------------------------------------------------
+play empty-stamp empty-stamp run harden --session stub --poll 20 --timeout 30000
+want_code 0
+want_line "billFresh   7"
+want_line "billMemo    7"
+want_sends 7
+note "empty-stamp: unstamped replies settled in 7 turns, exit 0"
+
+# ---------------------------------------------------------------------------
+# 9. One program, two panes: the routed pin answered in one and everything else
 #    in the other.
 #
 # THE two-pane scenario, and the deck twin of `ci/acp.sh`'s scenario 13. The
 # claim under test is a transport claim — one run, two live deck sessions, each
 # question answered in the pane its pin names — so it belongs here, where the
-# deck engine, the stub and the seven scenarios above already live. It is also
+# deck engine, the stub and the eight scenarios above already live. It is also
 # the executable half of `run.routes`: the fact carries this run's table to the
 # prompts, and what makes the fact worth carrying is that the table is *true*.
 #
@@ -216,7 +227,7 @@ note "missing: named as a transport failure, exit 2"
 # one reply and answer each other's questions. The stub is *not* edited for this:
 # a shim installed as `agent-deck` derives the state directory from the session
 # id — which is `$3` in every command the stub implements — and execs it. Two
-# instances of one fixture, one per pane, and the seven scenarios above are
+# instances of one fixture, one per pane, and the eight scenarios above are
 # untouched by construction because none of them installs the shim.
 #
 # `harden` needs no new fixture either: it pins exactly one model (`author served
@@ -299,7 +310,7 @@ note "two-panes: one run, two sessions, the pin in its own pane, 6+1 of 7, exit 
 
 scenario=summary
 if [ "$failures" = 0 ]; then
-  echo "ci/deck: 8 scenarios passed, 0 failed"
+  echo "ci/deck: 9 scenarios passed, 0 failed"
 else
   echo "ci/deck: $failures scenario assertion(s) failed" >&2
 fi

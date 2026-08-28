@@ -358,11 +358,7 @@ parseSessionState raw = do
   -- An empty @substate@ is the absence of one — @agent-deck@ writes @\"\"@ for
   -- a session whose tool reports no finer state — and reading it as a substate
   -- would put a stray @\/@ in every message that quotes one.
-  pure (SessionState st (nonEmpty (lookupString "substate" o)))
-  where
-    nonEmpty = \case
-      Just s | not (T.null s) -> Just s
-      _ -> Nothing
+  pure (SessionState st (nonEmptyText (lookupString "substate" o)))
 
 -- ---------------------------------------------------------------------------
 -- The reply
@@ -386,7 +382,7 @@ parseReply :: Text -> Maybe Reply
 parseReply raw = do
   o <- asObject raw
   content <- lookupString "content" o
-  pure (Reply content (lookupString "timestamp" o))
+  pure (Reply content (nonEmptyText (lookupString "timestamp" o)))
 
 -- ---------------------------------------------------------------------------
 -- What goes on the wire
@@ -723,6 +719,11 @@ asObject raw = case A.decodeStrict (encodeUtf8 raw) of
 lookupString :: Text -> KM.KeyMap Value -> Maybe Text
 lookupString k o = case KM.lookup (K.fromText k) o of
   Just (String s) -> Just s
+  _ -> Nothing
+
+nonEmptyText :: Maybe Text -> Maybe Text
+nonEmptyText = \case
+  Just s | not (T.null s) -> Just s
   _ -> Nothing
 
 utf8 :: BS.ByteString -> Text

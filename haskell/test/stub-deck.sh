@@ -46,6 +46,8 @@
 #   stale        a send never changes the reply's timestamp, so from the second
 #                question on the adapter must refuse to read the previous
 #                turn's text as this question's answer.
+#   empty-stamp  replies carry timestamp:"", as Pi sessions do; an empty stamp
+#                must degrade to the documented unstamped-reply path.
 
 set -uo pipefail
 
@@ -175,8 +177,10 @@ case "$verb" in
     # nothing to print either, so this exits nonzero and the adapter reads that
     # as "no output yet".
     [ -f "$reply_file" ] || fail "session $id has produced no output yet"
+    stamp="stub-$(read_num "$seq_file")"
+    [ "$MODE" = empty-stamp ] && stamp=
     printf '{"content":"%s","timestamp":"%s"}\n' \
-      "$(json_escape < "$reply_file")" "stub-$(read_num "$seq_file")"
+      "$(json_escape < "$reply_file")" "$stamp"
     ;;
 
   *)

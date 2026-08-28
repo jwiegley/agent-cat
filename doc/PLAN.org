@@ -1113,6 +1113,24 @@ From acat-ruz: reach = csum of powers is carrier-generic except star_eq_left nee
 ]
 #+end_src
 
+* DONE [#C] Fix Pi agent-deck submission confirmation and reply freshness
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-9xi
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-08-27 Thu 23:41]
+:MODIFIED: [2026-08-28 Fri 00:46]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-28 Fri 00:46]
+:CLOSE_REASON: Pi sends now confirm from composer state, Pi replies come from timestamped JSONL, and empty legacy stamps no longer wedge the Haskell poller; live hello-world run exits 0.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Agent-deck 1.15 falsely reports delivery=typed for fast Pi/DeepSeek turns after Pi accepted the prompt, and terminal-derived Pi output carries no timestamp. Teach agent-deck to recognize Pi's empty composer as submission and read Pi's structured JSONL response with its timestamp. Treat empty legacy timestamps as absent in Agentic.AgentDeck. Reproduced and verified with agent-workflows hello-world session run.
+
 * DONE [#B] DSL: caseVerdict arm mapping is unproved and untested — permuting arms passes the whole package
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
