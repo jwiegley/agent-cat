@@ -539,8 +539,7 @@ read back — three readers, one sentence, exactly as `run.engine` and
 
 ## Running a workflow
 
-A program in this language is a value, and `agentic-run` is the four things you
-can do: list the registered ones, then read, price or run any of them.
+A program in this language is a value. The human surface lists registered programs, then reads, prices, or runs them. A separate machine surface emits protocol records only and adds immutable lineage operations.
 
 ```sh
 nix develop -c cabal build all              # library, examples, all four executables
@@ -585,6 +584,40 @@ worked representation-boundary example, with `structured-result` showing the
 same schema-valued answer returned from the closed program; `Example.Isaac`'s
 five follow, with `review-lite` as a program of its subject. Registry entries
 remain `Fixed` or `Needs` regardless of result code.
+
+### Machine protocol, controls, and durable lineage
+
+`machine RUN_ID NAME <run options>` executes the same built `Program` through
+`runPlanPersisted`/`WorldIO`, but stdout is strict version-1 NDJSON. Events distinguish
+chronological sequence from `trace.ordered`, and name runs, occurrences, physical
+attempts, output chunks, memo reuse, recovery, redirect, controls, failures, and
+terminal bills. Diagnostics remain on stderr. Encoded frames are checked against the 1 MiB limit; large attempt output is split losslessly, while oversized non-output events fail before writing. ACP input lines are bounded before JSON decoding. Counters are decimal strings, timestamps are canonical UTC, and duplicate, conflicting, gapped, or torn journals fail closed.
+
+With `AGENT_CAT_CONTROL_STDIN=1`, stdin accepts correlated JSON controls for whole-run
+cancel, capability-advertised steering, runner-offered retry/failover/abandon after automatic
+recovery is spent, and redirect during the scheduler's 30-second reserved-target dispatch window.
+Steering emits operational provenance without changing `Q`; its answer group is not inserted for future
+memo/durable replay.
+
+Set `AGENT_CAT_RUN_STORE` to a new private directory to persist the immutable manifest,
+event journal, typed reusable answers keyed by complete bare-question JSON, started/
+completed effect journal, and atomic checkpoint. `AGENT_CAT_RUN_OWNER` adds controller
+metadata. Unknown versions, corruption, target/program/policy mismatch, and any parent
+effect record fail closed.
+
+```sh
+agentic-run machine         RUN_ID NAME <run options>
+agentic-run machine-restart RUN_ID PARENT_STORE NAME <run options>
+agentic-run machine-resume  RUN_ID PARENT_STORE NAME <run options>
+agentic-run machine-fork    RUN_ID PARENT_STORE NAME [--drop-answer OCCURRENCE] \
+  [--set-answer OCCURRENCE=JSON_FILE] <run options>
+agentic-run lineage-check   restart|resume|fork PARENT_STORE NAME [fork edits] <run options>
+```
+
+Restart inherits no answers and does not require a checkpoint. Resume requires a compatible checkpoint and the exact launch fingerprint. Fork may proceed without a checkpoint,
+change input/route state, and explicitly drop or replace persisted answers; only complete bare-question keys that still match can otherwise be reused. Replacement files contain one JSON value and are checked against the persisted code/schema. `lineage-check` validates compatibility, answer/effect/checkpoint counts, and fork edits without creating a child store. All three create a new run with an immutable parent link; none mutates the parent.
+A started or completed parent effect refuses resume/fork, because effect completion cannot
+be safely inferred or silently replayed. `ci/policies.sh` runs the crash/lineage fixture.
 
 ### Structured JSON answers
 

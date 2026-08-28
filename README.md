@@ -14,6 +14,14 @@ half: the authoring surface a person actually writes, and the runner that puts
 questions to real agents. The boundary is `RawProgram`-in — a first-order syntax
 tree, never a string — and it is frozen, byte for byte, in `test/corpus/`.
 
+A third, operational integration surface lives in `pi-extension/`: Pi discovers and
+supervises the Haskell runner through agent-cat's versioned machine protocol. It does not
+interpret `RawProgram` or `Plan`. The runtime owns occurrence/attempt events, correlated
+controls, typed persistence, effect journaling, restart/resume/fork, and ACP/deck/Pi
+answerers; Pi owns catalogue/approval/monitoring and durable run references. See
+[`pi-extension/README.md`](pi-extension/README.md) and
+[`doc/pi-workflow-extension.md`](doc/pi-workflow-extension.md).
+
 ## The Lean half — the verification spine
 
 Lean 4.30.0 with Mathlib v4.30.0. `Agentic.lean` is the mathematical space and

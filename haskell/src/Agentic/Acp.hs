@@ -261,6 +261,7 @@ module Agentic.Acp
     -- * The calls
     newSession,
     promptTurn,
+    steerTurn,
 
     -- * What the agent advertised
     Capabilities (..),
@@ -293,11 +294,13 @@ module Agentic.Acp
 where
 
 import Control.Concurrent (threadDelay)
+import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newEmptyMVar, newMVar, takeMVar, tryPutMVar, withMVar)
 import Control.Exception
   ( Exception,
     IOException,
     SomeException,
     bracket,
+    finally,
     fromException,
     onException,
     throwIO,
@@ -311,6 +314,8 @@ import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy as BL
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import Data.Scientific (toBoundedInteger)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -343,6 +348,8 @@ import System.Process
 import System.Timeout (timeout)
 
 import Agentic.AgentDeck (renderQ)
+import Agentic.Runtime.Control (SteeringTiming (InterruptNow, NextBoundary))
+import Agentic.Runtime.Protocol (maxFrameBytes)
 import Agentic.Exec
   ( ExecSettings (esLog, esRetryUndecodable),
     TurnGap (GapEmptyOrProtocol, GapTransportRefusal),
@@ -353,12 +360,16 @@ import Agentic.Exec
     codeWord,
     defaultExecSettings,
     defaultRetries,
+    emitAttemptOutput,
+    attemptExecSettings,
     oneLine,
     raiseGap,
     requiresCompletedTurn,
     splitTransportNarration,
     stderrLog,
     trimAscii,
+    withAttemptSteering,
+    withPhysicalAttempt,
     withTransportGaps,
     newTurnLaneIO,
   )
@@ -612,6 +623,7 @@ renderAcpError = \case
 data Capabilities = Capabilities
   { capLoadSession :: !Bool,
     capForkSession :: !Bool,
+    capSteerAttempt :: !Bool,
     -- | The @agentCapabilities@ object verbatim, or 'Null' if there was none.
     capRaw :: !Value
   }
@@ -628,6 +640,7 @@ capabilitiesOf initResult =
         Nothing -> False
         Just Null -> False
         Just _ -> True,
+      capSteerAttempt = (field "agentCat" agent >>= field "steer") == Just (Bool True),
       capRaw = agent
     }
   where
@@ -859,7 +872,10 @@ data Acp = Acp
     acpProgram :: !String,
     acpStdin :: !Handle,
     acpStdout :: !Handle,
+    acpReadBuffer :: !(IORef BS.ByteString),
     acpChild :: !ProcessHandle,
+    acpWriteLock :: !(MVar ()),
+    acpSteerAcks :: !(MVar (Map Text (MVar Bool))),
     acpNextId :: !(IORef Int),
     acpSession :: !(IORef (Maybe Text)),
     acpCaps :: !(IORef Capabilities),
@@ -948,11 +964,14 @@ connectAcp cfg = do
   -- line and can be tens of kilobytes, and a message half-written is a message.
   hSetBuffering hin (BlockBuffering Nothing)
   hSetBuffering hout LineBuffering
+  readBuffer <- newIORef BS.empty
   acp <-
-    Acp cfg prog hin hout ph
-      <$> newIORef 0
+    Acp cfg prog hin hout readBuffer ph
+      <$> newMVar ()
+      <*> newMVar Map.empty
+      <*> newIORef 0
       <*> newIORef Nothing
-      <*> newIORef (Capabilities False False Null)
+      <*> newIORef (Capabilities False False False Null)
       <*> newIORef ("no question (the handshake, or a caller that set none)", Cancel)
       <*> newTurnLaneIO
   flip onException (closeAcp acp) $ do
@@ -1050,25 +1069,48 @@ msgOfLine line = case A.decodeStrict line of
 
 -- | Write one JSON value as one line, and flush: the framing /is/ the newline.
 writeJson :: Acp -> Value -> IO ()
-writeJson acp j = do
-  r <- try (BL.hPut (acpStdin acp) (A.encode j <> "\n") >> hFlush (acpStdin acp))
-  case r of
-    Right () -> pure ()
-    Left (_ :: IOException) ->
-      throwIO (AcpAdapterDied (T.pack (acpProgram acp)) "a message this client was writing")
+writeJson acp j =
+  withMVar (acpWriteLock acp) $ \_ -> do
+    let bytes = A.encode j
+    when (BL.length bytes > fromIntegral maxFrameBytes)
+      (throwIO (AcpProtocol (T.pack (acpProgram acp)) "outgoing JSON-RPC frame exceeds 1048576 bytes"))
+    r <- try (BL.hPut (acpStdin acp) (bytes <> "\n") >> hFlush (acpStdin acp))
+    case r of
+      Right () -> pure ()
+      Left (_ :: IOException) ->
+        throwIO (AcpAdapterDied (T.pack (acpProgram acp)) "a message this client was writing")
 
 -- | One line of adapter output. Lines are not small: the real adapter's command
 -- catalogue arrived as a single 39,598-byte line, and the stub reproduces it at
 -- that size, so "the framing is the newline" is a claim this path has to keep.
 readJsonLine :: Acp -> Text -> IO BS.ByteString
 readJsonLine acp what = do
-  r <- try (BS.hGetLine (acpStdout acp))
+  r <- try (readBoundedLine acp what)
   case r of
     Right bs -> pure (BS.dropWhileEnd (== '\r') bs)
     -- End of file is the adapter closing its output; any other read error is
     -- the same conversation ending less politely, and the operator's next step
     -- is the same either way.
     Left (_ :: IOException) -> throwIO (AcpAdapterDied (T.pack (acpProgram acp)) what)
+
+readBoundedLine :: Acp -> Text -> IO BS.ByteString
+readBoundedLine acp what = readIORef (acpReadBuffer acp) >>= go
+  where
+    go buffered = case BS.elemIndex '\n' buffered of
+      Just index
+        | index > maxFrameBytes -> tooLarge
+        | otherwise -> do
+            let (line, rest) = BS.splitAt index buffered
+            writeIORef (acpReadBuffer acp) (BS.drop 1 rest)
+            pure line
+      Nothing
+        | BS.length buffered > maxFrameBytes -> tooLarge
+        | otherwise -> do
+            chunk <- BS.hGetSome (acpStdout acp) 4096
+            if BS.null chunk
+              then throwIO (AcpAdapterDied (T.pack (acpProgram acp)) what)
+              else go (buffered <> chunk)
+    tooLarge = throwIO (AcpProtocol (T.pack (acpProgram acp)) "incoming JSON-RPC frame exceeds 1048576 bytes")
 
 -- ---------------------------------------------------------------------------
 -- The request loop
@@ -1101,6 +1143,7 @@ pump acp wantId what onChunk answering = go
             | otherwise -> throwIO (AcpIdMismatch prog (tshow wantId) (compact i))
           Right (MsgRequest i method ps) -> answerAgentRequest acp i method ps >> go
           Right (MsgNotification method ps)
+            | method == "session/steer_ack" -> recordSteerAck acp ps >> go
             | method /= "session/update" -> go
             | otherwise -> case chunkText ps of
                 Left why
@@ -1108,6 +1151,13 @@ pump acp wantId what onChunk answering = go
                   | otherwise -> go
                 Right Nothing -> go
                 Right (Just txt) -> onChunk txt >> go
+
+recordSteerAck :: Acp -> Value -> IO ()
+recordSteerAck acp params = case (field "steerId" params >>= textOf, field "accepted" params) of
+  (Just steerId, Just (Bool accepted)) -> do
+    gate <- modifyMVar (acpSteerAcks acp) (\pending -> pure (pending, Map.lookup steerId pending))
+    maybe (pure ()) (\slot -> void (tryPutMVar slot accepted)) gate
+  _ -> pure ()
 
 -- | Answer a request the agent made of us.
 --
@@ -1250,7 +1300,10 @@ newSession acp = do
 -- whole of the transport-banner ruling's mechanism — see 'Turn' and the module
 -- header for what it is and why.
 promptTurn :: Acp -> Text -> Text -> IO Turn
-promptTurn acp what text = do
+promptTurn = promptTurnWith (const (pure ()))
+
+promptTurnWith :: (Text -> IO ()) -> Acp -> Text -> Text -> IO Turn
+promptTurnWith onChunk acp what text = do
   sid <-
     readIORef (acpSession acp) >>= \case
       Just sid -> pure sid
@@ -1267,7 +1320,7 @@ promptTurn acp what text = do
             "prompt" .= [object ["type" .= ("text" :: Text), "text" .= text]]
           ]
       )
-      (\chunk -> atomicModifyIORef' acc (\cs -> (chunk : cs, ())))
+      (\chunk -> onChunk chunk >> atomicModifyIORef' acc (\cs -> (chunk : cs, ())))
       True
   said <- T.concat . reverse <$> readIORef acc
   let (narration, answer) = splitTransportNarration said
@@ -1284,6 +1337,32 @@ cancelTurn acp =
   readIORef (acpSession acp) >>= \case
     Nothing -> pure ()
     Just sid -> notify acp "session/cancel" (object ["sessionId" .= sid])
+
+steerTurn :: Acp -> SteeringTiming -> Text -> IO (Either Text ())
+steerTurn acp timing text =
+  readIORef (acpSession acp) >>= \case
+    Nothing -> pure (Left "no session; nothing can be steered")
+    Just sid -> do
+      number <- atomicModifyIORef' (acpNextId acp) (\n -> (n + 1, n))
+      let steerId = "steer-" <> tshow number
+      gate <- newEmptyMVar
+      modifyMVar_ (acpSteerAcks acp) (pure . Map.insert steerId gate)
+      accepted <-
+        ( notify
+            acp
+            "session/steer"
+            (object ["sessionId" .= sid, "steerId" .= steerId, "timing" .= steeringTimingText timing, "text" .= text])
+            >> timeout (2 * 1000 * 1000) (takeMVar gate)
+        )
+          `finally` modifyMVar_ (acpSteerAcks acp) (pure . Map.delete steerId)
+      pure $ case accepted of
+        Just True -> Right ()
+        Just False -> Left "active turn rejected steering"
+        Nothing -> Left "active turn did not acknowledge steering"
+
+steeringTimingText :: SteeringTiming -> Text
+steeringTimingText InterruptNow = "interrupt-now"
+steeringTimingText NextBoundary = "next-boundary"
 
 -- ---------------------------------------------------------------------------
 -- The answering service
@@ -1333,6 +1412,19 @@ worldOfAcpWith st cfg acp =
     { worldAskIO = \c q -> do
         when (acpFreshPerQuestion cfg) (void (newSession acp))
         withTransportGaps st acpGap c q (askDecodingWith st c q (sayAcp cfg acp c q)),
+      worldAskAttemptIO = \context c q -> do
+        when (acpFreshPerQuestion cfg) (void (newSession acp))
+        capabilities <- acpCapabilities acp
+        let controlledSettings = attemptExecSettings context st
+            controlled =
+              if capSteerAttempt capabilities
+                then withAttemptSteering context (steerTurn acp)
+                else context
+        withTransportGaps controlledSettings acpGap c q $
+          askDecodingWith controlledSettings c q $ \extra ->
+            withPhysicalAttempt controlled (addresseeWord (qAddressee (reqQuestion q))) $
+              \attempt ->
+                sayAcpWith (emitAttemptOutput controlled attempt) cfg acp c q extra,
       worldTurnLane = \_ _ -> Just (acpTurnLane acp)
     }
 
@@ -1370,11 +1462,14 @@ acpGap e = case fromException e of
 -- quotes the answer, not the banner — the banner is on the line above it, in
 -- every run that had one.)
 sayAcp :: forall (c :: Code). AcpConfig -> Acp -> SCode c -> Request c -> Text -> IO Text
-sayAcp cfg acp c q extra = do
+sayAcp = sayAcpWith (const (pure ()))
+
+sayAcpWith :: forall (c :: Code). (Text -> IO ()) -> AcpConfig -> Acp -> SCode c -> Request c -> Text -> IO Text
+sayAcpWith onChunk cfg acp c q extra = do
   writeIORef (acpAsked acp) (what, permissionByIntent (reqIntent q))
   let message = renderQ c q <> extra
   chat cfg ("put " <> what <> " (" <> tshow (T.length message) <> " characters)")
-  turn <- promptTurn acp what message
+  turn <- promptTurnWith onChunk acp what message
   chat cfg ("turn ended " <> renderStopReason (turnStop turn))
   when (not (T.null (turnNarration turn))) $
     stderrLog $

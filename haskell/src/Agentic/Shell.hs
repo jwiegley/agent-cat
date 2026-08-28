@@ -81,6 +81,7 @@ import Agentic.Exec
     addresseeWord,
     codeWord,
     oneLine,
+    withPhysicalAttempt,
     raiseGap,
     trimAscii,
   )
@@ -191,6 +192,11 @@ executingWorld cfg inner =
     { worldAskIO = \c q -> case qAddressee (reqQuestion q) of
         AddrToolExec _ cmd args -> answerByRunning cfg c q cmd args
         _ -> worldAskIO inner c q,
+      worldAskAttemptIO = \context c q -> case qAddressee (reqQuestion q) of
+        AddrToolExec _ cmd args ->
+          withPhysicalAttempt context (addresseeWord (qAddressee (reqQuestion q))) $
+            \_ -> answerByRunning cfg c q cmd args
+        _ -> worldAskAttemptIO inner context c q,
       worldTurnLane = \c shape -> case shAddressee (rsQuestion shape) of
         AddrToolExec {} -> Nothing
         _ -> worldTurnLane inner c shape

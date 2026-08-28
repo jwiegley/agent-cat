@@ -142,6 +142,8 @@ module Agentic.Plan
     level,
     size,
     askNodes,
+    intentCounts,
+    toolExecNodes,
     codes,
     schemaRequirements,
     costM,
@@ -149,7 +151,7 @@ module Agentic.Plan
   )
 where
 
-import Agentic.Raw (Addressee)
+import Agentic.Raw (Addressee (AddrToolExec))
 import Agentic.Schema
   ( Code (..),
     El,
@@ -1078,6 +1080,34 @@ askNodes = \case
   PAsk _ _ _ k -> 1 + askNodes k
   PCase t _ arms -> sum (map (askNodes . arms) (tagValues t))
   PDyn {} -> 0
+
+-- | Structural counts of @(consult, observe, effect)@ occurrences across every
+-- finite branch.  Like 'askNodes', this is program metadata rather than a bill.
+intentCounts :: Plan g a -> (Integer, Integer, Integer)
+intentCounts = \case
+  PRet _ -> (0, 0, 0)
+  PAskC _ request rest -> addIntent (reqIntent request) (intentCounts rest)
+  PAsk _ shape _ rest -> addIntent (rsIntent shape) (intentCounts rest)
+  PCase tag _ arms -> foldr (addCounts . intentCounts . arms) (0, 0, 0) (tagValues tag)
+  PDyn {} -> (0, 0, 0)
+  where
+    addIntent intent (consults, observes, effects) = case intent of
+      Consult -> (consults + 1, observes, effects)
+      Observe -> (consults, observes + 1, effects)
+      Effect -> (consults, observes, effects + 1)
+    addCounts (a, b, c) (x, y, z) = (a + x, b + y, c + z)
+
+-- | Program-authored command occurrences across every finite branch.
+toolExecNodes :: Plan g a -> Integer
+toolExecNodes = \case
+  PRet _ -> 0
+  PAskC _ request rest -> at (qAddressee (reqQuestion request)) + toolExecNodes rest
+  PAsk _ shape _ rest -> at (shAddressee (rsQuestion shape)) + toolExecNodes rest
+  PCase tag _ arms -> sum (map (toolExecNodes . arms) (tagValues tag))
+  PDyn {} -> 0
+  where
+    at AddrToolExec {} = 1
+    at _ = 0
 
 -- | @codes@ (@Agentic/Core/Cost.lean:329@): the sequence of answer codes the
 -- term will ask for, if that sequence is fixed by the term.

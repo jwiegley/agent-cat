@@ -79,6 +79,11 @@
 module Agentic.Exec
   ( -- * The answering service
     WorldIO (..),
+    AttemptContext,
+    emitAttemptOutput,
+    attemptExecSettings,
+    withAttemptSteering,
+    withPhysicalAttempt,
     concurrentWorld,
     TurnLane,
     newTurnLaneIO,
@@ -88,6 +93,11 @@ module Agentic.Exec
     -- * The interpreter
     runPlanIO,
     runPlanWith,
+    runPlanObserved,
+    runPlanPersisted,
+    PersistenceHooks (..),
+    nullPersistenceHooks,
+    runPlanControlled,
 
     -- * Fail-over
     Chains (..),
@@ -164,6 +174,29 @@ import Agentic.Plan
     requestShapeOf,
     withRequestPrompt,
   )
+import Agentic.Runtime.Control
+  ( AttemptSteerer,
+    awaitRuntimeRedirect,
+    ControlRuntime,
+    RecoveryControl (RecoveryAbandon, RecoveryFailOver, RecoveryRetry),
+    controlRuntimeSnapshot,
+    controlIdText,
+    runtimeOccurrenceReplayable,
+    registerControlAttempt,
+    registerRuntimeRedirects,
+    reservedRedirects,
+    unregisterControlAttempt,
+    waitForRuntimeRecovery,
+  )
+import Agentic.Runtime.Protocol
+  ( AttemptId (..),
+    EventSink,
+    FailureClass (..),
+    OccurrenceId (..),
+    RecoveryOption (..),
+    RuntimeEvent (..),
+    nullEventSink,
+  )
 import Agentic.Raw
   ( Addressee (AddrModel, AddrPerson, AddrTool, AddrToolExec),
     Code,
@@ -179,8 +212,12 @@ import Agentic.World
     EventKey,
     World (worldAnswer),
     eventKey,
+    answerFromJson,
+    answerJson,
+    questionJson,
   )
 import Control.Concurrent (ThreadId, forkFinally, killThread)
+import Data.Aeson (Value)
 import Control.Concurrent.STM
   ( STM,
     TMVar,
@@ -202,6 +239,7 @@ import Control.Concurrent.STM
   )
 import Control.Exception
   ( Exception (displayException, toException),
+    bracket_,
     SomeAsyncException,
     SomeException,
     fromException,
@@ -210,19 +248,20 @@ import Control.Exception
     throwIO,
     try,
   )
-import Control.Monad (void)
+import Control.Monad (void, when)
 import Data.Foldable (traverse_)
 import Data.IntSet (IntSet)
 import qualified Data.IntSet as IntSet
 import Data.List (find, nub)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (fromMaybe, isJust, mapMaybe)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Type.Equality ((:~:) (Refl))
+import Data.Word (Word32, Word64)
 import System.IO (hPutStrLn, stderr)
 
 -- ---------------------------------------------------------------------------
@@ -240,18 +279,33 @@ newTurnLaneIO = do
   completed <- newTMVarIO ()
   TurnLane <$> newTVarIO completed
 
--- | @Oracle IO@ plus the stateful lane, if any, selected from a question's
--- prompt-independent shape. The answerer can invent an answer but cannot forge
--- an event; the lane lets the interpreter reserve transport order before a
--- prompt's dependencies are ready.
+-- | Operational context for one reached occurrence.  Transports ask it for a
+-- fresh attempt id at each physical turn; it cannot affect semantic identity.
+data AttemptContext = AttemptContext
+  { attemptOccurrenceId :: !OccurrenceId,
+    nextAttemptId :: !(IO AttemptId),
+    attemptEvents :: !EventSink,
+    attemptControlRuntime :: !(Maybe ControlRuntime),
+    attemptSteerer :: !(Maybe AttemptSteerer),
+    attemptFailoverAvailable :: !(IO Bool)
+  }
+
+-- | @Oracle IO@ plus the stateful lane and an attempt-aware realization path.
 data WorldIO = WorldIO
   { worldAskIO :: forall (c :: Code). SCode c -> Request c -> IO (El c),
+    worldAskAttemptIO :: forall (c :: Code). AttemptContext -> SCode c -> Request c -> IO (El c),
     worldTurnLane :: forall (c :: Code). SCode c -> RequestShape c -> Maybe TurnLane
   }
 
 -- | An answering service whose calls need no ordering beyond data dependencies.
 concurrentWorld :: (forall (c :: Code). SCode c -> Request c -> IO (El c)) -> WorldIO
-concurrentWorld ask = WorldIO ask (\_ _ -> Nothing)
+concurrentWorld ask =
+  WorldIO
+    { worldAskIO = ask,
+      worldAskAttemptIO = \context c request ->
+        withPhysicalAttempt context (requestTarget request) (\_ -> ask c request),
+      worldTurnLane = \_ _ -> Nothing
+    }
 
 -- | Pure annotated answering service over a bare world (`SemanticExec.lean:91`).
 -- @ω@, ignoring history because a world is a function of the bare question.
@@ -277,20 +331,24 @@ pureWorldIO w = concurrentWorld (\c r -> pure (worldAnswer w c (reqQuestion r)))
 announcingWorld :: (Text -> IO ()) -> WorldIO -> WorldIO
 announcingWorld out inner =
   WorldIO
-    { worldAskIO = \c q -> do
-        out $
-          intentName (reqIntent q)
-            <> " "
-            <> codeWord (fromSCode c)
-            <> " -> "
-            <> addresseeWord (qAddressee (reqQuestion q))
-            <> ": "
-            <> oneLine (qPrompt (reqQuestion q))
-        a <- worldAskIO inner c q
-        out $ "  <- " <> oneLine (sayEl c a)
-        pure a,
+    { worldAskIO = \c q -> announce c q (worldAskIO inner c q),
+      worldAskAttemptIO = \context c q -> announce c q (worldAskAttemptIO inner context c q),
       worldTurnLane = worldTurnLane inner
     }
+  where
+    announce :: forall c. SCode c -> Request c -> IO (El c) -> IO (El c)
+    announce c q action = do
+      out $
+        intentName (reqIntent q)
+          <> " "
+          <> codeWord (fromSCode c)
+          <> " -> "
+          <> addresseeWord (qAddressee (reqQuestion q))
+          <> ": "
+          <> oneLine (qPrompt (reqQuestion q))
+      a <- action
+      out $ "  <- " <> oneLine (sayEl c a)
+      pure a
 
 -- ---------------------------------------------------------------------------
 -- The concurrent memoizing interpreter
@@ -301,10 +359,14 @@ announcingWorld out inner =
 -- atomic snapshot. A prompt already in flight may finish after a model becomes
 -- spent; only work that has not started is skipped.
 data Memo = Memo
-  { memoTable :: !(Map EventKey Event),
-    memoPending :: !(Map EventKey (TMVar (Either SomeException Event))),
+  { -- The occurrence that first owned the bare-Q answer is its run-local
+    -- answer-group identity; it never enters the semantic key.
+    memoTable :: !(Map EventKey (OccurrenceId, Event)),
+    memoPending :: !(Map EventKey (OccurrenceId, TMVar (Either SomeException PendingAnswer))),
     memoSpent :: !(Set Text)
   }
+
+data PendingAnswer = PendingAnswer !Event !Bool
 
 -- | One scheduled Plan node: typed answer plus its own annotated event.
 data NodeResult (c :: Code) = NodeResult (El c) ExecEvent
@@ -317,19 +379,41 @@ data Pending (g :: [Code]) where
   PendingCons :: NodeCell c -> Pending g -> Pending (c ': g)
 
 data Ticket where
-  Ticket :: NodeCell c -> Ticket
+  Ticket :: !OccurrenceId -> NodeCell c -> Ticket
 
 data Scheduler = Scheduler
   { schedulerMemo :: !(TVar Memo),
     schedulerThreads :: !(TVar [ThreadId]),
     schedulerFailed :: !(TMVar SomeException),
-    schedulerEffects :: !TurnLane
+    schedulerEffects :: !TurnLane,
+    schedulerNextOccurrence :: !(TVar Word64),
+    schedulerPersistence :: !PersistenceHooks,
+    schedulerSink :: !EventSink,
+    schedulerControlRuntime :: !(Maybe ControlRuntime)
   }
 
+data PersistenceHooks = PersistenceHooks
+  { persistenceLookupAnswer :: Value -> IO (Maybe (Value, Text)),
+    persistenceStoreAnswer :: OccurrenceId -> Value -> Value -> Bool -> IO (),
+    persistenceStartEffect :: OccurrenceId -> Value -> IO (),
+    persistenceCompleteEffect :: OccurrenceId -> Value -> Value -> IO (),
+    persistenceCheckpoint :: OccurrenceId -> IO ()
+  }
+
+nullPersistenceHooks :: PersistenceHooks
+nullPersistenceHooks =
+  PersistenceHooks
+    { persistenceLookupAnswer = const (pure Nothing),
+      persistenceStoreAnswer = \_ _ _ _ -> pure (),
+      persistenceStartEffect = \_ _ -> pure (),
+      persistenceCompleteEffect = \_ _ _ -> pure (),
+      persistenceCheckpoint = const (pure ())
+    }
+
 data Claim
-  = ClaimCached Event
-  | ClaimWait (TMVar (Either SomeException Event))
-  | ClaimOwner (TMVar (Either SomeException Event))
+  = ClaimCached !OccurrenceId !Event
+  | ClaimWait !OccurrenceId !(TMVar (Either SomeException PendingAnswer))
+  | ClaimOwner !(TMVar (Either SomeException PendingAnswer))
 
 -- | One FIFO link: wait for the predecessor, then publish this node's completion.
 data Reservation = Reservation !(TMVar ()) !(TMVar ())
@@ -354,15 +438,34 @@ runPlanIO = runPlanWith noChains
 -- atomically before each attempt; it is scheduling knowledge, not a lock, so
 -- dependency-independent questions remain concurrent even at one model pin.
 runPlanWith :: Chains -> WorldIO -> Plan '[] a -> IO (a, ExecTrace)
-runPlanWith ch w p = mask $ \restore -> do
+runPlanWith = runPlanObserved nullEventSink
+
+-- | 'runPlanWith' with a write-only operational observer.  The observer sees
+-- realization facts but cannot supply an answer, choose a branch, or alter a
+-- semantic key.
+runPlanObserved :: EventSink -> Chains -> WorldIO -> Plan '[] a -> IO (a, ExecTrace)
+runPlanObserved = runPlanObservedWith Nothing nullPersistenceHooks
+
+runPlanControlled :: ControlRuntime -> EventSink -> Chains -> WorldIO -> Plan '[] a -> IO (a, ExecTrace)
+runPlanControlled controls = runPlanObservedWith (Just controls) nullPersistenceHooks
+
+runPlanPersisted :: Maybe ControlRuntime -> PersistenceHooks -> EventSink -> Chains -> WorldIO -> Plan '[] a -> IO (a, ExecTrace)
+runPlanPersisted = runPlanObservedWith
+
+runPlanObservedWith :: Maybe ControlRuntime -> PersistenceHooks -> EventSink -> Chains -> WorldIO -> Plan '[] a -> IO (a, ExecTrace)
+runPlanObservedWith controls persistence sink ch w p = mask $ \restore -> do
   memo <- newTVarIO (Memo Map.empty Map.empty Set.empty)
   threads <- newTVarIO []
   failed <- newEmptyTMVarIO
   effects <- newTurnLaneIO
-  let scheduler = Scheduler memo threads failed effects
+  nextOccurrence <- newTVarIO 0
+  let scheduler = Scheduler memo threads failed effects nextOccurrence persistence sink controls
       run = do
         (a, tickets) <- execIn scheduler w ch PendingNil p
-        trace <- traverse (awaitTicket scheduler) tickets
+        ordered <- traverse (awaitTicket scheduler) tickets
+        let occurrenceIds = map fst ordered
+            trace = map snd ordered
+        sink (TraceOrdered occurrenceIds)
         pure (a, trace)
   restore run `onException` cancelWorkers scheduler
 
@@ -374,18 +477,19 @@ execIn scheduler w ch y pl = case pl of
     a <- awaitExpr scheduler e y
     pure (a, [])
   PAskC c q k -> do
-    cell <- spawn scheduler (reserveQuestion scheduler w ch c (requestShapeOf q)) $ do
-      (a, event) <- askOrMemo scheduler w ch c q
-      pure (NodeResult a event)
+    occurrence <- freshOccurrence scheduler
+    cell <-
+      spawn scheduler (reserveQuestion scheduler occurrence w ch c (requestShapeOf q)) $
+        runOccurrence scheduler w ch occurrence c q
     (result, tickets) <- execIn scheduler w ch (PendingCons cell y) k
-    pure (result, Ticket cell : tickets)
+    pure (result, Ticket occurrence cell : tickets)
   PAsk c shape prompt k -> do
-    cell <- spawn scheduler (reserveQuestion scheduler w ch c shape) $ do
+    occurrence <- freshOccurrence scheduler
+    cell <- spawn scheduler (reserveQuestion scheduler occurrence w ch c shape) $ do
       words' <- awaitExpr scheduler prompt y
-      (a, event) <- askOrMemo scheduler w ch c (withRequestPrompt shape words')
-      pure (NodeResult a event)
+      runOccurrence scheduler w ch occurrence c (withRequestPrompt shape words')
     (result, tickets) <- execIn scheduler w ch (PendingCons cell y) k
-    pure (result, Ticket cell : tickets)
+    pure (result, Ticket occurrence cell : tickets)
   PCase _ e arms -> do
     tag <- awaitExpr scheduler e y
     execIn scheduler w ch y (arms tag)
@@ -393,10 +497,16 @@ execIn scheduler w ch y pl = case pl of
     a <- awaitExpr scheduler e y
     execIn scheduler w ch y (f a)
 
-reserveQuestion :: Scheduler -> WorldIO -> Chains -> SCode c -> RequestShape c -> IO [Reservation]
-reserveQuestion scheduler w ch c shape = atomically (traverse reserveLane (nub lanes))
+reserveQuestion :: Scheduler -> OccurrenceId -> WorldIO -> Chains -> SCode c -> RequestShape c -> IO [Reservation]
+reserveQuestion scheduler occurrence w ch c shape = do
+  when (length targets > 1) $ case schedulerControlRuntime scheduler of
+    Nothing -> pure ()
+    Just controls -> registerRuntimeRedirects controls occurrence targets
+  atomically (traverse reserveLane (nub lanes))
   where
     q = withRequestPrompt shape T.empty
+    candidates' = requestCandidates ch Set.empty q
+    targets = nub (map requestTarget candidates')
     transportLanes =
       mapMaybe
         (\candidate -> worldTurnLane w c (requestShapeOf candidate))
@@ -453,10 +563,17 @@ cancelWorkers :: Scheduler -> IO ()
 cancelWorkers scheduler =
   atomically (readTVar (schedulerThreads scheduler)) >>= mapM_ killThread
 
-awaitTicket :: Scheduler -> Ticket -> IO ExecEvent
-awaitTicket scheduler (Ticket cell) = do
+freshOccurrence :: Scheduler -> IO OccurrenceId
+freshOccurrence scheduler =
+  atomically $ do
+    n <- readTVar (schedulerNextOccurrence scheduler)
+    writeTVar (schedulerNextOccurrence scheduler) (n + 1)
+    pure (OccurrenceId n)
+
+awaitTicket :: Scheduler -> Ticket -> IO (OccurrenceId, ExecEvent)
+awaitTicket scheduler (Ticket occurrence cell) = do
   NodeResult _ event <- awaitCell scheduler cell
-  pure event
+  pure (occurrence, event)
 
 awaitCell :: Scheduler -> TMVar (Either SomeException a) -> IO a
 awaitCell scheduler cell =
@@ -491,20 +608,191 @@ pendingEnv uses (PendingCons cell rest) = do
 dropHead :: IntSet -> IntSet
 dropHead = IntSet.mapMonotonic (subtract 1) . IntSet.delete 0
 
+runOccurrence :: Scheduler -> WorldIO -> Chains -> OccurrenceId -> SCode c -> Request c -> IO (NodeResult c)
+runOccurrence scheduler w ch occurrence c request = do
+  emit scheduler $
+    OccurrenceStarted
+      occurrence
+      (codeWord (fromSCode c))
+      (intentName (reqIntent request))
+      (questionTarget (reqQuestion request))
+      (previewEventText (qPrompt (reqQuestion request)))
+  case schedulerControlRuntime scheduler of
+    Nothing -> pure ()
+    Just controls -> do
+      controlState <- controlRuntimeSnapshot controls
+      case Map.lookup occurrence (reservedRedirects controlState) of
+        Nothing -> pure ()
+        Just targets -> emit scheduler (OccurrenceDispatchPending occurrence targets)
+  context <- newAttemptContext scheduler occurrence
+  outcome <- try (askOrMemo scheduler w ch context c request)
+  case outcome of
+    Right (answer, event@(ExecEvent _ _ source _)) -> do
+      persistenceCheckpoint (schedulerPersistence scheduler) occurrence
+      emit scheduler $
+        OccurrenceCompleted
+          occurrence
+          (answerSourceText source)
+          (previewEventText (sayEl c answer))
+      pure (NodeResult answer event)
+    Left (e :: SomeException) -> do
+      emit scheduler (OccurrenceFailed occurrence (failureClassOf e) (failureMessage e))
+      throwIO e
+
+newAttemptContext :: Scheduler -> OccurrenceId -> IO AttemptContext
+newAttemptContext scheduler occurrence = do
+  next <- newTVarIO (0 :: Word32)
+  pure
+    AttemptContext
+      { attemptOccurrenceId = occurrence,
+        nextAttemptId = atomically $ do
+          n <- readTVar next
+          if n == maxBound
+            then throwSTM (userError "runtime attempt counter exhausted")
+            else writeTVar next (n + 1) >> pure (AttemptId occurrence n),
+        attemptEvents = schedulerSink scheduler,
+        attemptControlRuntime = schedulerControlRuntime scheduler,
+        attemptSteerer = Nothing,
+        attemptFailoverAvailable = pure False
+      }
+
+withAttemptSteering :: AttemptContext -> AttemptSteerer -> AttemptContext
+withAttemptSteering context steerer = context {attemptSteerer = Just steerer}
+
+attemptExecSettings :: AttemptContext -> ExecSettings -> ExecSettings
+attemptExecSettings context settings = case attemptControlRuntime context of
+  Nothing -> settings
+  Just controls ->
+    settings
+      { esRecoverIO =
+          Just $ \gap -> do
+            baseline <- recoverDecision settings gap
+            case baseline of
+              RetryHere -> pure RetryHere
+              _ -> do
+                esLog settings $
+                  "waiting for retry control at occurrence "
+                    <> T.pack (show (occurrenceNumber (attemptOccurrenceId context)))
+                    <> " after "
+                    <> gapWord (gaGap gap)
+                    <> " gap"
+                hasFailover <- attemptFailoverAvailable context
+                let offered = [RecoveryRetry] <> [RecoveryFailOver | hasFailover] <> [RecoveryAbandon]
+                    option RecoveryRetry = RecoveryOption "retry" Nothing
+                    option RecoveryFailOver = RecoveryOption "failover" Nothing
+                    option RecoveryAbandon = RecoveryOption "abandon" Nothing
+                (recoveryId, recovery) <-
+                  waitForRuntimeRecovery controls (attemptOccurrenceId context) offered $
+                    attemptEvents context $
+                      OccurrenceRecoveryPending
+                        (attemptOccurrenceId context)
+                        (gapWord (gaGap gap))
+                        (previewEventText (gaWhy gap))
+                        (map option offered)
+                let choice = case recovery of
+                      RecoveryRetry -> "retry"
+                      RecoveryFailOver -> "failover"
+                      RecoveryAbandon -> "abandon"
+                attemptEvents context (OccurrenceRecoveryChosen (attemptOccurrenceId context) (controlIdText recoveryId) choice Nothing)
+                case recovery of
+                  RecoveryRetry -> do
+                    attemptEvents context (OccurrenceRetried (attemptOccurrenceId context) (controlIdText recoveryId))
+                    pure RetryHere
+                  RecoveryFailOver -> do
+                    attemptEvents context (OccurrenceRetried (attemptOccurrenceId context) (controlIdText recoveryId))
+                    pure FailOver
+                  RecoveryAbandon -> pure Abandon
+      }
+
+withPhysicalAttempt :: AttemptContext -> Text -> (AttemptId -> IO a) -> IO a
+withPhysicalAttempt context target action = do
+  attempt <- nextAttemptId context
+  let run = do
+        attemptEvents context (AttemptStarted attempt target)
+        outcome <- try (action attempt)
+        case outcome of
+          Right answer -> attemptEvents context (AttemptCompleted attempt target) >> pure answer
+          Left (e :: SomeException) -> do
+            attemptEvents context (AttemptFailed attempt (failureClassOf e) (failureMessage e))
+            throwIO e
+  case attemptControlRuntime context of
+    Nothing -> run
+    Just controls ->
+      bracket_
+        (registerControlAttempt controls attempt (attemptSteerer context))
+        (unregisterControlAttempt controls attempt)
+        run
+
+emitAttemptOutput :: AttemptContext -> AttemptId -> Text -> IO ()
+emitAttemptOutput context attempt chunk = attemptEvents context (AttemptOutput attempt chunk)
+
+emit :: Scheduler -> RuntimeEvent -> IO ()
+emit scheduler = schedulerSink scheduler
+
+previewEventText :: Text -> Text
+previewEventText = T.take 500 . oneLine
+
+questionTarget :: Q c -> Text
+questionTarget q =
+  addresseeWord (qAddressee q)
+    <> maybe "" ("@" <>) (scopeModelAxis (qScope q))
+
+requestTarget :: Request c -> Text
+requestTarget = questionTarget . reqQuestion
+
+answerSourceText :: AnswerSource c -> Text
+answerSourceText AnswerReused = "reused"
+answerSourceText (AnswerAsked q) = "asked:" <> questionTarget q
+
+failureMessage :: SomeException -> Text
+failureMessage = T.pack . displayException
+
+failureClassOf :: SomeException -> FailureClass
+failureClassOf e
+  | Just (_ :: SomeAsyncException) <- fromException e = FailureCancelled
+  | Just tge <- fromException e = case tgeGap tge of
+      GapUndecodable -> FailureDecode
+      GapTransportRefusal -> FailureTransport
+      GapEmptyOrProtocol -> FailureProtocol
+      GapExhausted -> FailureTransport
+  | otherwise = FailureRuntime
+
 -- | Consult a chain against the concurrent memo. A failed reservation is
 -- removed after publishing its exception, preserving the old rule that a later
 -- occurrence retries a transient gap; simultaneous occurrences still share the
 -- one attempt they raced on.
-askOrMemo :: forall c. Scheduler -> WorldIO -> Chains -> SCode c -> Request c -> IO (El c, ExecEvent)
-askOrMemo scheduler w ch c q = go (requestCandidates ch Set.empty q)
+askOrMemo :: forall c. Scheduler -> WorldIO -> Chains -> AttemptContext -> SCode c -> Request c -> IO (El c, ExecEvent)
+askOrMemo scheduler w ch context c q = do
+  let question = questionJson c (reqQuestion q)
+  persisted <-
+    if intentIsEffect (reqIntent q)
+      then pure Nothing
+      else persistenceLookupAnswer (schedulerPersistence scheduler) question
+  case persisted of
+    Just (raw, provenance) -> case answerFromJson c raw of
+      Nothing -> ioError (userError "persisted answer does not match the current question code/schema")
+      Just answer -> do
+        emit scheduler (OccurrenceReused (attemptOccurrenceId context) provenance)
+        pure (answer, ExecEvent c q AnswerReused answer)
+    Nothing -> do
+      let candidates' = requestCandidates ch Set.empty q
+      redirect <- case schedulerControlRuntime scheduler of
+        Nothing -> pure Nothing
+        Just controls -> awaitRuntimeRedirect controls (attemptOccurrenceId context)
+      go (maybe candidates' (`preferTarget` candidates') redirect)
   where
+    preferTarget target requests = case break ((== target) . requestTarget) requests of
+      (_, []) -> requests
+      (before, selected : after) -> selected : before <> after
+    go :: [Request c] -> IO (El c, ExecEvent)
     go [] = abandonAllSpent c (reqQuestion q) (chainOf ch (reqQuestion q))
     go (qi : rest) = do
       available <- atomically (candidateAvailable scheduler qi)
       if not available
         then chainLog ch (spentSkip qi) >> go rest
         else do
-          outcome <- try (consult scheduler w c q qi) ::
+          let controlledContext = context {attemptFailoverAvailable = isJust <$> nextLive scheduler rest}
+          outcome <- try (consult scheduler w controlledContext c q qi) ::
             IO (Either SomeException (El c, AnswerSource c))
           case outcome of
             Left e
@@ -555,33 +843,57 @@ nextLive scheduler qs = atomically $ do
   spent <- memoSpent <$> readTVar (schedulerMemo scheduler)
   pure (find (maybe True (`Set.notMember` spent) . modelOf) qs)
 
-consult :: Scheduler -> WorldIO -> SCode c -> Request c -> Request c ->
+consult :: Scheduler -> WorldIO -> AttemptContext -> SCode c -> Request c -> Request c ->
   IO (El c, AnswerSource c)
-consult scheduler w c authored dispatched
+consult scheduler w context c authored dispatched
   | intentIsEffect (reqIntent authored) = do
-      a <- worldAskIO w c dispatched
+      let question = questionJson c (reqQuestion authored)
+      persistenceStartEffect (schedulerPersistence scheduler) (attemptOccurrenceId context) question
+      a <- dispatchAttempt w context c dispatched
+      persistenceCompleteEffect
+        (schedulerPersistence scheduler)
+        (attemptOccurrenceId context)
+        question
+        (answerJson c a)
       pure (a, AnswerAsked (reqQuestion dispatched))
   | otherwise = mask $ \restore -> do
       let key = questionKey c authored
-      claim <- atomically (claimQuestion scheduler key)
+      claim <- atomically (claimQuestion scheduler key (attemptOccurrenceId context))
       case claim of
-        ClaimCached event -> reuse event
-        ClaimWait slot -> atomically (readTMVar slot >>= either throwSTM pure) >>= reuse
+        ClaimCached owner event -> reuse owner event
+        ClaimWait owner slot -> do
+          PendingAnswer event replayable <- atomically (readTMVar slot >>= either throwSTM pure)
+          if replayable
+            then reuse owner event
+            else restore (consult scheduler w context c authored dispatched)
         ClaimOwner slot -> do
-          outcome <- try (restore (worldAskIO w c dispatched))
+          outcome <- try (restore (dispatchAttempt w context c dispatched))
           case outcome of
             Right a -> do
               let event = Event c (reqQuestion authored) a
+                  owner = attemptOccurrenceId context
+              replayable <- case schedulerControlRuntime scheduler of
+                Nothing -> pure True
+                Just controls -> runtimeOccurrenceReplayable controls owner
+              persistenceStoreAnswer
+                (schedulerPersistence scheduler)
+                owner
+                (questionJson c (reqQuestion authored))
+                (answerJson c a)
+                replayable
               atomically $ do
                 modifyTVar'
                   (schedulerMemo scheduler)
                   ( \memo ->
                       memo
-                        { memoTable = Map.insert key event (memoTable memo),
+                        { memoTable =
+                            if replayable
+                              then Map.insert key (owner, event) (memoTable memo)
+                              else Map.delete key (memoTable memo),
                           memoPending = Map.delete key (memoPending memo)
                         }
                   )
-                putTMVar slot (Right event)
+                putTMVar slot (Right (PendingAnswer event replayable))
               pure (a, AnswerAsked (reqQuestion dispatched))
             Left (e :: SomeException) -> do
               atomically $ do
@@ -591,22 +903,27 @@ consult scheduler w c authored dispatched
                 putTMVar slot (Left e)
               throwIO e
   where
-    reuse event = case eventAnswer c event of
-      Just a -> pure (a, AnswerReused)
+    reuse owner event = case eventAnswer c event of
+      Just a -> do
+        emit scheduler (OccurrenceReused (attemptOccurrenceId context) ("occurrence:" <> T.pack (show (occurrenceNumber owner))))
+        pure (a, AnswerReused)
       Nothing -> ioError (userError "memoized answer has a different code from its bare-Q key")
 
-claimQuestion :: Scheduler -> EventKey -> STM Claim
-claimQuestion scheduler key = do
+dispatchAttempt :: WorldIO -> AttemptContext -> SCode c -> Request c -> IO (El c)
+dispatchAttempt w context c dispatched = worldAskAttemptIO w context c dispatched
+
+claimQuestion :: Scheduler -> EventKey -> OccurrenceId -> STM Claim
+claimQuestion scheduler key owner = do
   memo <- readTVar (schedulerMemo scheduler)
   case Map.lookup key (memoTable memo) of
-    Just event -> pure (ClaimCached event)
+    Just (answerOwner, event) -> pure (ClaimCached answerOwner event)
     Nothing -> case Map.lookup key (memoPending memo) of
-      Just slot -> pure (ClaimWait slot)
+      Just (answerOwner, slot) -> pure (ClaimWait answerOwner slot)
       Nothing -> do
         slot <- newEmptyTMVar
         writeTVar
           (schedulerMemo scheduler)
-          memo {memoPending = Map.insert key slot (memoPending memo)}
+          memo {memoPending = Map.insert key (owner, slot) (memoPending memo)}
         pure (ClaimOwner slot)
 
 -- | The model a question's scope names, if it names one.
@@ -1200,22 +1517,23 @@ withTransportGaps st classify c q act0 = go 0
           | Just tge <- fromException e -> throwIO (tge :: TurnGapError)
           | otherwise -> case classify e of
               Nothing -> throwIO e
-              Just (g, why) ->
+              Just (g, why) -> do
                 let ga = GapAsk g spent (gapBudget st g) why
-                 in case esRecover st ga of
-                      RetryHere -> do
-                        esLog st $
-                          gapWord g
-                            <> " gap at "
-                            <> addresseeWord (qAddressee (reqQuestion q))
-                            <> " for a "
-                            <> codeWord (fromSCode c)
-                            <> " ("
-                            <> trimAscii why
-                            <> "); asking again"
-                        go (spent + 1)
-                      Abandon -> throwIO e
-                      FailOver -> throwIO (TurnGapError g why e)
+                recovery <- recoverDecision st ga
+                case recovery of
+                  RetryHere -> do
+                    esLog st $
+                      gapWord g
+                        <> " gap at "
+                        <> addresseeWord (qAddressee (reqQuestion q))
+                        <> " for a "
+                        <> codeWord (fromSCode c)
+                        <> " ("
+                        <> trimAscii why
+                        <> "); asking again"
+                    go (spent + 1)
+                  Abandon -> throwIO e
+                  FailOver -> throwIO (TurnGapError g why e)
 
 -- ---------------------------------------------------------------------------
 -- The run policy
@@ -1245,6 +1563,8 @@ data ExecSettings = ExecSettings
     esRetryEmptyOrProtocol :: !Int,
     -- | How a gap is answered once it is raised. Default 'budgetedRecovery'.
     esRecover :: Recover,
+    -- | Optional effectful recovery, used only by a controlled runtime.
+    esRecoverIO :: !(Maybe (GapAsk -> IO Recovery)),
     -- | D7's cheap half: the arm an unreadable @flag@ takes once its re-asks
     -- are spent, instead of abandoning the run. __Default 'Nothing'__, which is
     -- to abandon.
@@ -1288,9 +1608,15 @@ defaultExecSettings =
       esRetryTransportRefusal = 0,
       esRetryEmptyOrProtocol = 0,
       esRecover = budgetedRecovery,
+      esRecoverIO = Nothing,
       esLoudArm = Nothing,
       esStandingAnswer = Nothing
     }
+
+recoverDecision :: ExecSettings -> GapAsk -> IO Recovery
+recoverDecision settings gap = case esRecoverIO settings of
+  Nothing -> pure (esRecover settings gap)
+  Just recover -> recover gap
 
 -- | This gap's re-ask budget, never negative — the one place the three fields
 -- are read, so a caller cannot pick the wrong one for a gap.
@@ -1368,16 +1694,18 @@ attemptRecovering st c say = go 0 T.empty
         Just a -> pure (Right a)
         Nothing ->
           let ga = GapAsk GapUndecodable spent budget reply
-           in case esRecover st ga of
-                RetryHere -> do
-                  esLog st $
-                    "could not read a "
-                      <> codeWord (fromSCode c)
-                      <> " from '"
-                      <> trimAscii reply
-                      <> "'; re-asking"
-                  go (spent + 1) (nudge c reply)
-                answer -> pure (Left (ga, answer))
+           in do
+                recovery <- recoverDecision st ga
+                case recovery of
+                  RetryHere -> do
+                    esLog st $
+                      "could not read a "
+                        <> codeWord (fromSCode c)
+                        <> " from '"
+                        <> trimAscii reply
+                        <> "'; re-asking"
+                    go (spent + 1) (nudge c reply)
+                  answer -> pure (Left (ga, answer))
 
 -- | @Exec.askDecoding@ (@Exec.lean:648@): 'attemptDecoding', and — if
 -- every attempt was unreadable — __abandon the run__ with an 'ioError' quoting
@@ -1575,8 +1903,18 @@ scriptedWorld = scriptedWorldWith defaultExecSettings
 -- nothing about the policy itself. A scripted case under a non-default policy
 -- is what would close that, and it is not in this wave.
 scriptedWorldWith :: ExecSettings -> [(Text, Text)] -> WorldIO
-scriptedWorldWith st table = concurrentWorld $ \c q ->
-  askDecodingWith st c q (\_extra -> pure (scriptedReply table c q))
+scriptedWorldWith st table =
+  WorldIO
+    { worldAskIO = ask,
+      worldAskAttemptIO = \context c q ->
+        let controlledSettings = attemptExecSettings context st
+         in askDecodingWith controlledSettings c q $ \_extra ->
+              withPhysicalAttempt context (requestTarget q) (\_ -> pure (scriptedReply table c q)),
+      worldTurnLane = \_ _ -> Nothing
+    }
+  where
+    ask :: forall c. SCode c -> Request c -> IO (El c)
+    ask c q = askDecodingWith st c q (\_extra -> pure (scriptedReply table c q))
 
 -- | The bytes the scripted table answers a question with: the first entry whose
 -- key is a prefix of the prompt, else 'scriptedDefault'.

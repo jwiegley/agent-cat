@@ -155,6 +155,13 @@ import Agentic.Route
     routedWorld,
     routes,
   )
+import Agentic.Runtime.Control
+import Agentic.Runtime.Machine (handleEventSink)
+import Agentic.Runtime.Store
+import Agentic.Runtime.Protocol
+import Data.Aeson (Value, encode, object, toJSON, (.=))
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as BL
 import Agentic.Shell (ShellConfig (shellCwd), defaultShellConfig, executingWorld)
 import Agentic.Workflow
   ( Example (Fixed),
@@ -170,7 +177,7 @@ import Agentic.World
   ( World (World), billExecFresh, billMemo, billMemoLegacy, eventJson,
     forgetExecEvent, trace
   )
-import Control.Concurrent (forkFinally, killThread)
+import Control.Concurrent (forkFinally, forkIO, killThread, threadDelay)
 import Control.Concurrent.STM
   ( TMVar,
     atomically,
@@ -185,6 +192,7 @@ import Control.Concurrent.STM
     tryPutTMVar,
   )
 import Control.Exception (ErrorCall, SomeException, evaluate, finally, try)
+import Data.Bits ((.&.))
 import Control.Monad (void)
 import Data.IORef
 import Data.List (nub, sort)
@@ -211,7 +219,12 @@ import Agentic.Builder
   )
 import qualified Data.Map.Strict as Map
 import Agentic.Observe (printedValue)
+import GHC.Clock (getMonotonicTimeNSec)
+import System.Directory (doesFileExist, getTemporaryDirectory, removePathForcibly)
+import System.FilePath ((</>))
+import System.Posix.Files (fileMode, getFileStatus)
 import System.Exit (exitFailure)
+import System.IO (IOMode (WriteMode), withBinaryFile)
 import System.Timeout (timeout)
 
 import SurfaceRefusals
@@ -485,7 +498,7 @@ collidingRegistry =
     { regBinary = "wf",
       regNoun = "workflow",
       regBanner = "a table that collides with its own verbs",
-      regRows = [(n, row) | n <- ["run", "plan", "cost", "list", "help", "ordinary"]]
+      regRows = [(n, row) | n <- ["run", "machine", "plan", "cost", "list", "help", "ordinary"]]
     }
   where
     row = Row (Fixed hardenProgram) "one line" "a page" []
@@ -504,6 +517,9 @@ parsedAs args = case parseCommand collidingRegistry args of
   Right (Plan n _ _ _ _) -> "plan " <> T.unpack n
   Right (Cost n _) -> "cost " <> T.unpack n
   Right (Run n _ _ _) -> "run " <> T.unpack n
+  Right (Machine _ n _ _ _) -> "machine " <> T.unpack n
+  Right (LineageCheck _ _ _ n _ _ _) -> "lineage-check " <> T.unpack n
+  Right (MachineLineage _ _ _ _ n _ _ _) -> "machine-lineage " <> T.unpack n
   Left t
     | "and not a verb" `T.isInfixOf` t -> "bare-row"
     | "no verb '" `T.isInfixOf` t -> "no-verb"
@@ -833,6 +849,8 @@ statefulTurnOrderProbe failures = do
                       pure prompt
                   | otherwise -> pure "unexpected"
               _ -> pure (defaultEl c),
+            worldAskAttemptIO = \context c q ->
+              withPhysicalAttempt context "stateful" (\_ -> worldAskIO world c q),
             worldTurnLane = \_ shape -> case shAddressee (rsQuestion shape) of
               AddrModel party | party == "stateful" -> Just lane
               _ -> Nothing
@@ -1092,10 +1110,434 @@ failureConcurrencyProbe failures = do
       ("the blocked sibling ran its cleanup", cleanup == Just ())
     ]
 
+storeProbe :: IORef Int -> IO ()
+storeProbe failures = do
+  temp <- getTemporaryDirectory
+  stamp <- getMonotonicTimeNSec
+  let directory = temp </> ("agentic-store-probe-" <> show stamp)
+      run = RunId "run-store-probe"
+      manifest = RunManifest run "fixture" "0.1.0.0" (object []) "scripted" (object ["kind" .= ("scripted" :: Text)]) Nothing RootRun Nothing
+      envelope n event = Envelope protocolVersion run (SeqNo n) "2026-08-28T00:00:00Z" event
+      first = envelope 0 (RunStarted "fixture" "scripted")
+      second = envelope 1 (RunCompleted 1 1)
+      gap = envelope 3 (RunFailed FailureRuntime "gap")
+      question = object ["prompt" .= ("persist me" :: Text)]
+      answer = object ["value" .= ("answer" :: Text)]
+      answerRecord = AnswerRecord question answer (OccurrenceId 0) True False
+      effectRecord = EffectRecord question (Just answer) (OccurrenceId 1) EffectCompleted
+      checkpoint = Checkpoint (object ["program" .= ("fixture" :: Text)]) (Just (OccurrenceId 2)) 1 1
+      olderCheckpoint = Checkpoint (object ["program" .= ("fixture" :: Text)]) (Just (OccurrenceId 1)) 2 1
+      mergedCheckpoint = Checkpoint (object ["program" .= ("fixture" :: Text)]) (Just (OccurrenceId 2)) 2 1
+  checks <-
+    ( do
+        appended <- withRunStore directory manifest $ \store -> do
+          firstDecision <- appendStoredEvent store first
+          secondDecision <- appendStoredEvent store second
+          duplicateResult <- try @StoreError (appendStoredEvent store second)
+          gapResult <- try @StoreError (appendStoredEvent store gap)
+          writeSnapshot store (object ["state" .= ("done" :: Text)])
+          storeReusableAnswer store answerRecord
+          lookedUp <- lookupStoredAnswer store question
+          appendEffectRecord store effectRecord
+          writeCheckpoint store checkpoint
+          writeCheckpoint store olderCheckpoint
+          pure (firstDecision, secondDecision, duplicateResult, gapResult, lookedUp)
+        restoredManifest <- readManifest directory
+        (events, health) <- readEventLog directory
+        answers <- readAnswerRecords directory
+        effects <- readEffectRecords directory
+        restoredCheckpoint <- readCheckpoint directory
+        directoryMode <- fileMode <$> getFileStatus directory
+        manifestMode <- fileMode <$> getFileStatus (directory </> "manifest.json")
+        answerMode <- fileMode <$> getFileStatus (directory </> "answers.json")
+        effectMode <- fileMode <$> getFileStatus (directory </> "effects.ndjson")
+        checkpointMode <- fileMode <$> getFileStatus (directory </> "checkpoint.json")
+        snapshotExists <- doesFileExist (directory </> "snapshot.json")
+        BS.appendFile (directory </> "events.ndjson") "{torn"
+        tornEvents <- try @StoreError (readEventLog directory)
+        duplicateCreate <- try @StoreError (createRunStore directory manifest)
+        BS.appendFile (directory </> "effects.ndjson") "{torn"
+        tornEffect <- try @StoreError (readEffectRecords directory)
+        BL.writeFile (directory </> "answers.json") (encode (object ["semanticStoreVersion" .= (99 :: Int), "answers" .= ([] :: [Value])]))
+        incompatibleAnswers <- try @StoreError (readAnswerRecords directory)
+        pure
+          [ ("manifest round-trips", restoredManifest == manifest),
+            ("ordered events append and duplicate both fail closed", case appended of
+              (SequenceNext, SequenceNext, Left (StoreCorrupt _ _), Left (StoreCorrupt _ _), Just persisted) -> events == [first, second] && answerValue persisted == answer
+              _ -> False),
+            ("typed answer, effect journal, and monotone checkpoint round-trip", answers == [answerRecord] && effects == [effectRecord] && restoredCheckpoint == Just mergedCheckpoint),
+            ("healthy log is reported", health == StoreHealthy),
+            ("directory and files are private", directoryMode .&. 0o777 == 0o700 && all (\mode -> mode .&. 0o777 == 0o600) [manifestMode, answerMode, effectMode, checkpointMode]),
+            ("snapshot is atomically visible", snapshotExists),
+            ("a torn event journal fails closed", case tornEvents of Left (StoreCorrupt _ _) -> True; _ -> False),
+            ("an existing run is immutable", case duplicateCreate of Left (StoreAlreadyExists _) -> True; _ -> False),
+            ("a torn effect journal fails closed", case tornEffect of Left (StoreCorrupt _ _) -> True; _ -> False),
+            ("an unknown semantic migration fails explicitly", case incompatibleAnswers of Left (StoreIncompatible _ _) -> True; _ -> False)
+          ]
+    )
+      `finally` removePathForcibly directory
+  pureProbe failures "runtime store is private, ordered, atomic, and recoverable" checks
+
+machineFrameProbe :: IORef Int -> IO ()
+machineFrameProbe failures = do
+  temp <- getTemporaryDirectory
+  stamp <- getMonotonicTimeNSec
+  let path = temp </> ("agentic-machine-frame-" <> show stamp <> ".ndjson")
+      run = RunId "run-machine-frame"
+      attempt = AttemptId (OccurrenceId 0) 0
+      chunk = T.replicate 150000 "\NUL" <> T.replicate 150000 "x"
+  checks <-
+    ( do
+        withBinaryFile path WriteMode $ \handle -> do
+          sink <- handleEventSink handle run
+          sink (RunStarted "fixture" "scripted")
+          sink (AttemptOutput attempt chunk)
+          sink (RunCompleted 1 1)
+        bytes <- BS.readFile path
+        let lines' = filter (not . BS.null) (BS.split 10 bytes)
+            decoded = traverse decodeEnvelope lines'
+            chunks = case decoded of
+              Right envelopes -> [text | Envelope _ _ _ _ (AttemptOutput _ text) <- envelopes]
+              Left _ -> []
+        oversized <- withBinaryFile path WriteMode $ \handle -> do
+          sink <- handleEventSink handle run
+          try @SomeException (sink (RunCancelled (T.replicate 200000 "x")))
+        pure
+          [ ("large attempt output is split into valid bounded envelopes", length lines' > 3 && all ((<= maxFrameBytes) . BS.length) lines' && T.concat chunks == chunk),
+            ("oversized non-output events are refused before writing", either (const True) (const False) oversized)
+          ]
+    )
+      `finally` removePathForcibly path
+  pureProbe failures "machine event emission enforces the frame bound" checks
+
+controlProbe :: IORef Int -> IO ()
+controlProbe failures = do
+  let occurrence = OccurrenceId 4
+      attempt = AttemptId occurrence 2
+      cancel = Control (ControlId "cancel") Nothing Nothing CancelRun
+      steer = Control (ControlId "steer") (Just occurrence) (Just attempt) (Steer NextBoundary "focus")
+      retryControl = Control (ControlId "retry") (Just occurrence) Nothing RetryOccurrence
+      failoverControl = Control (ControlId "failover") (Just occurrence) Nothing (ChooseRecovery RecoveryFailOver)
+      abandonControl = Control (ControlId "abandon") (Just occurrence) Nothing (ChooseRecovery RecoveryAbandon)
+      redirect = Control (ControlId "redirect") (Just occurrence) Nothing (RedirectOccurrence "deck:other")
+      controls = [cancel, steer, retryControl, failoverControl, abandonControl, redirect]
+      base = emptyControlSnapshot {activeAttempts = [attempt]}
+      none = ControlCapabilities False False False
+      allCapabilities = ControlCapabilities True True True
+      (cancelling, cancelAck, cancelAction) = decideControl none base cancel
+      (_, secondCancelAck, secondCancelAction) = decideControl none cancelling (Control (ControlId "cancel-2") Nothing Nothing CancelRun)
+      (_, staleAck, _) = decideControl allCapabilities base (Control (ControlId "stale") (Just occurrence) (Just (AttemptId occurrence 9)) (Steer InterruptNow "x"))
+      (_, unsupportedAck, _) = decideControl none base steer
+      redirectable = emptyControlSnapshot {reservedRedirects = Map.singleton occurrence ["deck:other"]}
+      (_, redirectAck, redirectAction) = decideControl allCapabilities redirectable redirect
+      (_, activeRedirectAck, _) = decideControl allCapabilities base {reservedRedirects = Map.singleton occurrence ["deck:other"]} redirect
+      recoverable = emptyControlSnapshot {recoverableOccurrences = [occurrence], recoveryOptions = Map.singleton occurrence [RecoveryRetry]}
+      (_, retryAck, retryAction) = decideControl allCapabilities recoverable retryControl
+      (_, unofferedAck, unofferedAction) = decideControl allCapabilities recoverable failoverControl
+  deliveredRef <- newIORef ([] :: [(SteeringTiming, Text)])
+  runtime <- newControlRuntime
+  registerControlAttempt runtime attempt (Just (\timing text -> atomicModifyIORef' deliveredRef (\xs -> ((timing, text) : xs, Right ()))))
+  (acceptedAck, acceptedAction) <- decideRuntimeControl runtime steer
+  deliveredAck <- case acceptedAction of
+    Just action -> deliverRuntimeAction runtime steer action
+    Nothing -> pure acceptedAck
+  (duplicateAck, duplicateAction) <- decideRuntimeControl runtime steer
+  delivered <- readIORef deliveredRef
+  retryResult <- newEmptyTMVarIO
+  _ <- forkIO (waitForRuntimeRecovery runtime occurrence [RecoveryRetry] (pure ()) >>= atomically . putTMVar retryResult)
+  let awaitRegistered = do
+        current <- controlRuntimeSnapshot runtime
+        if occurrence `elem` recoverableOccurrences current
+          then pure ()
+          else threadDelay 1000 >> awaitRegistered
+  awaitRegistered
+  (runtimeRetryAck, runtimeRetryAction) <- decideRuntimeControl runtime retryControl
+  runtimeRetryDelivered <- case runtimeRetryAction of
+    Just action -> deliverRuntimeAction runtime retryControl action
+    Nothing -> pure runtimeRetryAck
+  receivedRetry <- atomically (takeTMVar retryResult)
+  unregisterControlAttempt runtime attempt
+  registerRuntimeRedirects runtime occurrence ["deck:default", "deck:other"]
+  redirectResult <- newEmptyTMVarIO
+  _ <- forkIO (awaitRuntimeRedirect runtime occurrence >>= atomically . putTMVar redirectResult)
+  (runtimeRedirectAck, runtimeRedirectAction) <- decideRuntimeControl runtime redirect
+  runtimeRedirectDelivered <- case runtimeRedirectAction of
+    Just action -> deliverRuntimeAction runtime redirect action
+    Nothing -> pure runtimeRedirectAck
+  receivedRedirect <- atomically (takeTMVar redirectResult)
+  (staleRuntimeAck, _) <- decideRuntimeControl runtime (Control (ControlId "after") (Just occurrence) (Just attempt) (Steer InterruptNow "late"))
+  snapshot <- controlRuntimeSnapshot runtime
+  pureProbe failures "runtime control codec, stale/capability policy, and live delivery are strict"
+    [ ("every control round-trips", all (\c -> decodeControl (encodeControl c) == Right c) controls),
+      ("first cancel is accepted and marks cancelling", acknowledgementState cancelAck == Accepted && cancelAction == Just ActCancel && controlCancelling cancelling),
+      ("cancel is idempotent", acknowledgementState secondCancelAck == Accepted && secondCancelAction == Nothing),
+      ("a stale attempt is rejected", acknowledgementState staleAck == RejectedStale),
+      ("unsupported steering is explicit", acknowledgementState unsupportedAck == Unsupported),
+      ("a reserved undispatched redirect is accepted", acknowledgementState redirectAck == Accepted && redirectAction == Just (ActRedirect occurrence "deck:other")),
+      ("an active attempt cannot be redirected", acknowledgementState activeRedirectAck == RejectedStale),
+      ("retry requires a recoverable occurrence", acknowledgementState retryAck == Accepted && retryAction == Just (ActRecover occurrence RecoveryRetry)),
+      ("an unoffered recovery choice is rejected", acknowledgementState unofferedAck == RejectedStale && unofferedAction == Nothing),
+      ("live steering is accepted, delivered once, and remembered idempotently", acknowledgementState acceptedAck == Accepted && acknowledgementState deliveredAck == Delivered && acknowledgementState duplicateAck == Delivered && duplicateAction == Nothing && delivered == [(NextBoundary, "focus")]),
+      ("interactive recovery registers, accepts, and delivers one retry", acknowledgementState runtimeRetryAck == Accepted && acknowledgementState runtimeRetryDelivered == Delivered && receivedRetry == (ControlId "retry", RecoveryRetry)),
+      ("scheduler redirect selects one reserved target before dispatch", acknowledgementState runtimeRedirectAck == Accepted && acknowledgementState runtimeRedirectDelivered == Delivered && receivedRedirect == Just "deck:other"),
+      ("finished attempts become stale", acknowledgementState staleRuntimeAck == RejectedStale && null (activeAttempts snapshot))
+    ]
+
+protocolProbe :: IORef Int -> IO ()
+protocolProbe failures = do
+  let run = RunId "run-protocol-probe"
+      occurrence = OccurrenceId 7
+      attempt = AttemptId occurrence 2
+      events =
+        [ RunStarted "fixture" "scripted",
+          OccurrenceStarted occurrence "text" "consult" "model reviewer" "review this",
+          AttemptStarted attempt "scripted",
+          AttemptOutput attempt "partial",
+          AttemptSteered attempt "steer-1" "next-boundary" "focus",
+          AttemptCompleted attempt "model reviewer",
+          AttemptFailed attempt FailureTransport "refused",
+          OccurrenceReused occurrence "answer-1",
+          OccurrenceCompleted occurrence "asked:model reviewer" "approved",
+          OccurrenceFailed occurrence FailureDecode "unreadable",
+          ControlAcknowledged "steer-1" "delivered" "steer delivered",
+          OccurrenceRecoveryPending occurrence "decode" "unreadable" [RecoveryOption "retry" Nothing, RecoveryOption "failover" Nothing, RecoveryOption "abandon" Nothing],
+          OccurrenceRetried occurrence "retry-1",
+          OccurrenceRecoveryChosen occurrence "failover-1" "failover" Nothing,
+          OccurrenceDispatchPending occurrence ["deck:default", "deck:other"],
+          OccurrenceRedirected occurrence "redirect-1" "deck:other",
+          TraceOrdered [occurrence],
+          RunCompleted 3 2,
+          RunFailed FailureRuntime "boom",
+          RunCancelled "operator"
+        ]
+      envelope n event = Envelope protocolVersion run (SeqNo n) "2026-08-28T00:00:00Z" event
+      envelopes = zipWith (envelope . fromIntegral) [0 :: Int ..] events
+      first = envelope 0 (RunStarted "fixture" "scripted")
+      second = envelope 1 (OccurrenceStarted occurrence "text" "consult" "model reviewer" "review this")
+      third = envelope 2 (AttemptStarted attempt "scripted")
+      unknownFields =
+        object
+          [ "protocolVersion" .= protocolVersion,
+            "runId" .= ("run-protocol-probe" :: Text),
+            "sequence" .= ("0" :: Text),
+            "timestamp" .= ("2026-08-28T00:00:00Z" :: Text),
+            "future" .= True,
+            "event"
+              .= object
+                [ "type" .= ("run.started" :: Text),
+                  "workflow" .= ("fixture" :: Text),
+                  "target" .= ("scripted" :: Text),
+                  "future" .= True
+                ]
+          ]
+      wrongVersion =
+        object
+          [ "protocolVersion" .= (protocolVersion + 1),
+            "runId" .= ("run-protocol-probe" :: Text),
+            "sequence" .= ("0" :: Text),
+            "timestamp" .= ("2026-08-28T00:00:00Z" :: Text),
+            "event" .= toJSON (RunStarted "fixture" "scripted")
+          ]
+      missingEvent =
+        object
+          [ "protocolVersion" .= protocolVersion,
+            "runId" .= ("run-protocol-probe" :: Text),
+            "sequence" .= ("0" :: Text),
+            "timestamp" .= ("2026-08-28T00:00:00Z" :: Text)
+          ]
+      decodeValue = decodeEnvelope . BL.toStrict . encode
+      conflicting = second {envelopeTimestamp = "later"}
+      gap = third {envelopeSequence = SeqNo 3}
+      regressed = first {envelopeSequence = SeqNo 0}
+      exhausted = second {envelopeSequence = SeqNo maxBound}
+  pureProbe failures "runtime protocol codec and sequence are strict"
+    [ ("every event round-trips", all (\e -> decodeEnvelope (encodeEnvelope e) == Right e) envelopes),
+      ("unknown additive fields are ignored", decodeValue unknownFields == Right first),
+      ("unsupported major version is refused", either (T.isInfixOf "unsupported runtime protocol version") (const False) (decodeValue wrongVersion)),
+      ("missing required event is refused", either (const True) (const False) (decodeValue missingEvent)),
+      ("a torn line is refused", either (const True) (const False) (decodeEnvelope (BS.init (encodeEnvelope first)))),
+      ("the first sequence is zero", checkSequence Nothing first == Right SequenceNext),
+      ("the next sequence advances by one", checkSequence (Just first) second == Right SequenceNext),
+      ("an identical duplicate is refused", either (T.isInfixOf "duplicate") (const False) (checkSequence (Just second) second)),
+      ("a conflicting duplicate is corruption", either (T.isInfixOf "conflicting duplicate") (const False) (checkSequence (Just second) conflicting)),
+      ("a sequence gap is corruption", either (T.isInfixOf "gap") (const False) (checkSequence (Just second) gap)),
+      ("a sequence regression is corruption", either (T.isInfixOf "regressed") (const False) (checkSequence (Just second) regressed)),
+      ("a sequence cannot wrap past Word64", either (T.isInfixOf "exhausted") (const False) (checkSequence (Just exhausted) first))
+    ]
+
+observedExecutionProbe :: IORef Int -> IO ()
+observedExecutionProbe failures = do
+  observed <- newIORef ([] :: [RuntimeEvent])
+  calls <- newIORef (0 :: Int)
+  let occurrenceSink event = atomicModifyIORef' observed (\events -> (event : events, ()))
+      repeated = askC1 SText (textQuestion "observed-same")
+      effectQ = effectRequest (Q (AddrTool "observed-effect") scopeUnit "observed-effect" 0)
+      plan = pairP (pairP repeated repeated) (askC1 SAck effectQ)
+      world = concurrentWorld $ \c _ -> do
+        atomicModifyIORef' calls (\n -> (n + 1, ()))
+        pure (defaultEl c)
+  out <- try @SomeException (runPlanObserved occurrenceSink noChains world plan)
+  events <- reverse <$> readIORef observed
+  invocations <- readIORef calls
+  let occurrenceIds = [i | OccurrenceStarted i _ _ _ _ <- events]
+      attempts = [i | AttemptStarted i _ <- events]
+      reused = [i | OccurrenceReused i _ <- events]
+      ordered = [is | TraceOrdered is <- events]
+  pureProbe failures "runtime observer preserves scheduler and memo semantics" $
+    case out of
+      Right (_, trace') ->
+        [ ("three reached nodes get three monotone occurrence ids", occurrenceIds == map OccurrenceId [0, 1, 2]),
+          ("one memo owner and one effect make two physical attempts", length attempts == 2 && invocations == 2),
+          ("the racing equal occurrence is reuse, not a fake attempt", length reused == 1),
+          ("authored order comes from tickets", ordered == [map OccurrenceId [0, 1, 2]]),
+          ("the existing trace and bills are unchanged", tracePrompts trace' == ["observed-same", "observed-same", "observed-effect"] && (billExecFresh trace', billMemo trace') == (3, 2))
+        ]
+      Left e -> [("the observed run threw: " <> show e, False)]
+
+observedFailureProbe :: IORef Int -> IO ()
+observedFailureProbe failures = do
+  failoverEventsRef <- newIORef ([] :: [RuntimeEvent])
+  let sink ref event = atomicModifyIORef' ref (\events -> (event : events, ()))
+      request model =
+        consultRequest (Q (AddrModel "observed-router") (QScope (Just model) Nothing) "observed-route" 0)
+      chains = chainsOf (const (pure ())) (Map.fromList [("deep", ["broad"])])
+      routedWorld' = concurrentWorld $ \c r -> case c of
+        SFlag
+          | scopeModelAxis (scopeOf r) == Just "deep" ->
+              raiseGap GapTransportRefusal "deep refused" (userError "deep refused")
+          | otherwise -> pure True
+        _ -> pure (defaultEl c)
+  routed <- try @SomeException $
+    runPlanObserved (sink failoverEventsRef) chains routedWorld' (askC1 SFlag (request "deep"))
+  failoverEvents <- reverse <$> readIORef failoverEventsRef
+  let targets = [target | AttemptStarted _ target <- failoverEvents]
+      failedAttempts = [failure | AttemptFailed _ failure _ <- failoverEvents]
+      completedSources = [source | OccurrenceCompleted _ source _ <- failoverEvents]
+  pureProbe failures "runtime observer records failover attempts without changing authored request" $
+    case routed of
+      Right (_, [ExecEvent _ authored (AnswerAsked dispatched) _]) ->
+        [ ("primary and spare are two attempts", targets == ["model observed-router@deep", "model observed-router@broad"]),
+          ("the failed primary is classified", failedAttempts == [FailureTransport]),
+          ("the occurrence resolves through the spare", completedSources == ["asked:model observed-router@broad"]),
+          ("the authored request stays deep", scopeModelAxis (qScope (reqQuestion authored)) == Just "deep"),
+          ("dispatch attribution says broad", scopeModelAxis (qScope dispatched) == Just "broad")
+        ]
+      Right _ -> [("the routed trace had an unexpected shape", False)]
+      Left e -> [("the routed observed run threw: " <> show e, False)]
+
+  failureEventsRef <- newIORef ([] :: [RuntimeEvent])
+  let boom = askC1 SText (textQuestion "observed-boom")
+      broken = concurrentWorld $ \_ _ -> ioError (userError "observed failure")
+  failed <- try @SomeException (runPlanObserved (sink failureEventsRef) noChains broken boom)
+  failureEvents <- reverse <$> readIORef failureEventsRef
+  pureProbe failures "runtime observer records attempt and occurrence failure"
+    [ ("the run still raises the original failure", either (T.isInfixOf "observed failure" . T.pack . show) (const False) failed),
+      ("the physical attempt failed", length [() | AttemptFailed _ FailureRuntime _ <- failureEvents] == 1),
+      ("the reached occurrence failed", length [() | OccurrenceFailed (OccurrenceId 0) FailureRuntime _ <- failureEvents] == 1),
+      ("a failed run has no invented authored trace order", null [() | TraceOrdered _ <- failureEvents])
+    ]
+
+observedRetryProbe :: IORef Int -> IO ()
+observedRetryProbe failures = do
+  eventsRef <- newIORef ([] :: [RuntimeEvent])
+  let sink event = atomicModifyIORef' eventsRef (\events -> (event : events, ()))
+      settings = defaultExecSettings {esLog = const (pure ()), esRetryUndecodable = 2}
+      request = consultRequest (Q (AddrModel "retry") scopeUnit "observed-retry" 0)
+      world = scriptedWorldWith settings [("observed-retry", "maybe")]
+  outcome <- try @SomeException $ runPlanObserved sink noChains world (askC1 SFlag request)
+  events <- reverse <$> readIORef eventsRef
+  pureProbe failures "runtime observer counts every decode re-ask as a transport attempt"
+    [ ("three physical turns were attempted", length [() | AttemptStarted _ _ <- events] == 3),
+      ("all three transports completed before decoding refused them", length [() | AttemptCompleted _ _ <- events] == 3),
+      ("the occurrence reports terminal decode failure", length [() | OccurrenceFailed _ _ why <- events, "no readable flag" `T.isInfixOf` why] == 1),
+      ("the run still abandons without inventing an answer", either (T.isInfixOf "after 3 attempts" . T.pack . show) (const False) outcome)
+    ]
+
+controlledRedirectProbe :: IORef Int -> IO ()
+controlledRedirectProbe failures = do
+  controls <- newControlRuntime
+  eventsRef <- newIORef ([] :: [RuntimeEvent])
+  statesRef <- newIORef ([] :: [AckState])
+  let sink event = do
+        atomicModifyIORef' eventsRef (\events -> (event : events, ()))
+        case event of
+          OccurrenceDispatchPending occurrence targets -> case reverse targets of
+            target : _ -> do
+              let redirect = Control (ControlId "redirect-live") (Just occurrence) Nothing (RedirectOccurrence target)
+              (accepted, action) <- decideRuntimeControl controls redirect
+              delivered <- maybe (pure accepted) (deliverRuntimeAction controls redirect) action
+              writeIORef statesRef [acknowledgementState accepted, acknowledgementState delivered]
+            [] -> pure ()
+          _ -> pure ()
+      request model =
+        consultRequest (Q (AddrModel "observed-router") (QScope (Just model) Nothing) "controlled-redirect" 0)
+      chains = chainsOf (const (pure ())) (Map.fromList [("deep", ["broad"])])
+      world = concurrentWorld (\c _ -> pure (defaultEl c))
+  outcome <- try @SomeException $
+    runPlanControlled controls sink chains world (askC1 SFlag (request "deep"))
+  events <- reverse <$> readIORef eventsRef
+  states <- readIORef statesRef
+  pureProbe failures "controlled redirect changes only the pre-dispatch reserved target"
+    [ ("redirect is accepted then delivered", states == [Accepted, Delivered]),
+      ("only the selected spare is attempted", [target | AttemptStarted _ target <- events] == ["model observed-router@broad"]),
+      ("redirected execution preserves the authored answer", either (const False) (const True) outcome)
+    ]
+
+steeredMemoProbe :: IORef Int -> IO ()
+steeredMemoProbe failures = do
+  controls <- newControlRuntime
+  eventsRef <- newIORef ([] :: [RuntimeEvent])
+  callsRef <- newIORef (0 :: Int)
+  steeredRef <- newIORef False
+  let sink event = do
+        atomicModifyIORef' eventsRef (\events -> (event : events, ()))
+        case event of
+          AttemptStarted attempt _ -> do
+            already <- atomicModifyIORef' steeredRef (\value -> (True, value))
+            if already
+              then pure ()
+              else do
+                let steer = Control (ControlId "memo-steer") (Just (attemptOccurrence attempt)) (Just attempt) (Steer NextBoundary "different")
+                (_, action) <- decideRuntimeControl controls steer
+                maybe (pure ()) (void . deliverRuntimeAction controls steer) action
+          _ -> pure ()
+      repeated = askC1 SText (textQuestion "steered-memo")
+      world =
+        WorldIO
+          { worldAskIO = \c _ -> pure (defaultEl c),
+            worldAskAttemptIO = \context c _ ->
+              withPhysicalAttempt
+                (withAttemptSteering context (\_ _ -> pure (Right ())))
+                "controlled"
+                (\_ -> do
+                    atomicModifyIORef' callsRef (\count -> (count + 1, ()))
+                    threadDelay 20000
+                    pure (defaultEl c)
+                ),
+            worldTurnLane = \_ _ -> Nothing
+          }
+  outcome <- try @SomeException $ runPlanControlled controls sink noChains world (pairP repeated repeated)
+  calls <- readIORef callsRef
+  events <- reverse <$> readIORef eventsRef
+  pureProbe failures "steered in-flight answers are not replayed to memo waiters"
+    [ ("both occurrences dispatch independently", calls == 2),
+      ("no occurrence is reported as ordinary reuse", null [() | OccurrenceReused _ _ <- events]),
+      ("the authored program still completes", either (const False) (const True) outcome)
+    ]
+
 main :: IO ()
 main = do
   failures <- newIORef (0 :: Int)
   let d = defaultExecSettings
+  machineFrameProbe failures
+  storeProbe failures
+  controlProbe failures
+  protocolProbe failures
+  observedExecutionProbe failures
+  observedFailureProbe failures
+  observedRetryProbe failures
+  controlledRedirectProbe failures
+  steeredMemoProbe failures
 
   probe failures "defaults abandon after 2 attempts" d
     (Left "after 2 attempts")
@@ -1658,6 +2100,7 @@ main = do
   -- lines mean the row.
   pureProbe failures "a verb in head position beats a row of the same name"
     [ ("run NAME is the verb", parsedAs ["run", "ordinary", "--scripted"] == "run ordinary"),
+      ("machine RUN_ID NAME is the structured verb", parsedAs ["machine", "run-1", "ordinary", "--scripted"] == "machine ordinary"),
       ("a bare `run` is the verb wanting a subject", parsedAs ["run"] == "refused"),
       ("`run --help` is the verb too, and refuses", parsedAs ["run", "--help"] == "refused"),
       ("plan NAME is the verb", parsedAs ["plan", "ordinary"] == "plan ordinary"),
