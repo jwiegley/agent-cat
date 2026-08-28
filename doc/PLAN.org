@@ -3199,6 +3199,24 @@ Interior sits on a lawless LE (Interior.id must take refl as an argument); it is
 
 The largest remaining generalization failure: four hand-built KleeneAlgebra instances are all csum-of-powers in a complete idempotent semiring (Cost and Prob literally re-prove the identical formula). One construction over [CompleteCSemiring S] + CsumIsSup deletes both star defs, four star-law proofs, ofCommStarLe, and the reach lemma tower — and yields KleeneAlgebra (Mat S i i) for EVERY idempotent complete carrier, making retry_mat_least construct its algebra instead of assuming it (review finding 12). Wrinkle: leastness needs csum f <= y from pointwise — not derivable from the six fields; CsumIsSup (csum = iSup over CompleteLattice) is the clean mixin, rfl at all three lattice carriers. SUBSUMES acat-9ml and acat-ew8.
 
+* DONE [#C] Design first-class agent-cat workflows in Pi
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-nvl
+:LABELS:   []
+:ISSUE_TYPE: docs
+:CREATED:  [2026-08-27 Thu 15:53]
+:MODIFIED: [2026-08-27 Thu 16:31]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-27 Thu 16:31]
+:CLOSE_REASON: Completed source-cited Pi/agent-cat workflow architecture report; audit fixes add required four-category feasibility matrix, row-level citations, exact test paths, and tracked report artifact.
+:SOURCE_REPO: agent-cat-pi-ext
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat-pi-ext
+:ORIGINAL_SIZE: 0
+:END:
+
+Inventory agent-functor workflow/TUI behavior, map Pi and agent-cat integration surfaces, and produce a source-cited feasibility report with a minimal MVP and phased roadmap.
+
 * DONE [#C] Surface reorientation: the author-facing language is recognized standard structure on the semantic quotient
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -4386,6 +4404,40 @@ parT is the tensor skeleton only; §7 says the panel is a primitive, not derivab
     "author": "johnw",
     "text": "Closed with the stratum it concerned: the pre-re-derivation Term algebra was excised at 4aed549 under acat-q1i (owner-approved hybrid, 2026-08-20). This ticket's subject, its state at closure, and why it retires are recorded — with the machine-checked results it relates to transcribed exactly — in doc/research/term-algebra-results.md (the ticket graveyard section names this issue individually). The mathematics is preserved as a document and in git history at b98e25f; the six theory threads are recorded there as future directions should the program ever be revived.",
     "created_at": "2026-08-20T18:42:44Z"
+  }
+]
+#+end_src
+
+* DONE [#B] Implement first-class agent-cat workflows in Pi
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-xkv
+:LABELS:   []
+:ISSUE_TYPE: epic
+:CREATED:  [2026-08-27 Thu 21:10]
+:MODIFIED: [2026-08-28 Fri 12:17]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-28 Fri 12:17]
+:CLOSE_REASON: Completed bounded Option B closure: enforced 1 MiB machine/ACP frames, explicit durable target kinds, non-skipping target integration with real ACP/deck and owned-child decode/resume reuse, truthful tmux evidence, full gates green, and focused review APPROVED.
+:SOURCE_REPO: agent-cat-pi-ext
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat-pi-ext
+:ORIGINAL_SIZE: 0
+:END:
+
+Implement the full Option B roadmap from doc/pi-workflow-extension.md across this repository and the minimal required public APIs in ~/db/pi: structured execution/events/controls, extension UX/supervision, Pi targets, durable recovery/resume/fork, remote leases, security, and full fixtures.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-xkv",
+    "depends_on_id": "acat-nvl",
+    "type": "discovered-from",
+    "created_at": "2026-08-28T04:10:13.026158Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src
