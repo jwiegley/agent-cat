@@ -1344,6 +1344,21 @@ The owner's full architecture note is preserved below for the design round.
 
 From acat-l59: would delete the residual join-slack paragraph and make static/bounded-0 indistinguishable outright; larger index-type change interacting with fanT 0. Candidate simplification, weigh against the definitional-reduction discipline.
 
+* DONE [#C] Format bare CLI registry as bounded rows
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-bbp
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-08-27 Thu 23:20]
+:MODIFIED: [2026-08-27 Thu 23:32]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-27 Thu 23:32]
+:CLOSE_REASON: Bare usage now renders ordered registry rows with bounded summaries; examples gate covers streams, completeness, and width.
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+
 * DONE [#C] Give cachedAt content: a replay construction proved equal to f
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17

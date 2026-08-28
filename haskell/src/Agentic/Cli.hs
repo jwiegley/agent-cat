@@ -2262,6 +2262,32 @@ chooseTarget reg o = case (roScripted o, roEngine o, roSession o) of
             rrAdapterGiven = isJust (roAdapter o)
           }
 
+-- | Usage's human registry catalog. Names are command syntax and stay whole;
+-- only their prose yields to the fixed terminal width.
+usageCatalog :: Registry -> Text
+usageCatalog reg = T.intercalate "\n" (heading : map line rows)
+  where
+    rows = regRows reg
+    nameWidth = maximum (1 : map (T.length . fst) rows)
+    heading = "  <" <> regNoun reg <> "> is one of:"
+
+    line (name, row) =
+      let prefix = "  " <> T.justifyLeft nameWidth ' ' name <> "  "
+       in prefix <> shorten (80 - T.length prefix) (rowDoc row)
+
+    shorten limit text
+      | T.length text <= limit = text
+      | limit <= 0 = ""
+      | limit == 1 = "…"
+      | otherwise =
+          let clipped = T.take (limit - 1) text
+              complete = T.stripEnd (fst (T.breakOnEnd " " clipped))
+              stem
+                | T.take 1 (T.drop (limit - 1) text) == " " = T.stripEnd clipped
+                | T.null complete = clipped
+                | otherwise = complete
+           in stem <> "…"
+
 usage :: Registry -> Text
 usage reg =
   T.intercalate
@@ -2282,7 +2308,7 @@ usage reg =
       under (runLead <> "--engine acp ") <> "[--route NAME=BACKEND]...",
       under (runLead <> "--engine acp ") <> "[--timeout MS] [--verbose]",
       "",
-      "  <" <> noun <> "> is " <> T.intercalate " or " (regNames reg),
+      usageCatalog reg,
       "",
       "  help prints one " <> noun <> "'s own page: what it is for, what each of",
       "  its inputs means, which transport it wants, a worked command line and a",

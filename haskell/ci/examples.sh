@@ -481,14 +481,38 @@ code=$?
 grep -q "no example named 'no-such-example'" "$work/help.unknown" \
   || bad help "an unknown name" "the existing refusal" "$(head -1 "$work/help.unknown")"
 
-# `--help` bare: the usage, on STDOUT, exit 0. Bare `agentic-run` stays what it
-# was — the usage on stderr under exit 1 — and the asymmetry is the point: a
-# command line that asked for nothing is not a request that was answered.
+# `--help` bare: the usage, on STDOUT, exit 0. Bare `agentic-run` prints the
+# same payload on stderr under exit 1. Its catalog is the registry in order,
+# with one nonempty, at-most-80-column row per example.
 "$bin" --help > "$work/usage.out" 2> "$work/usage.err"
 code=$?
 [ "$code" = 0 ] || bad "--help" "exit" 0 "$code"
 [ -s "$work/usage.out" ] || bad "--help" "the usage" "on stdout" "stdout was empty"
 [ -s "$work/usage.err" ] && bad "--help" "the usage" "nothing on stderr" "$(head -1 "$work/usage.err")"
+
+"$bin" > "$work/usage.bare.out" 2> "$work/usage.bare.err"
+code=$?
+[ "$code" = 1 ] || bad "bare agentic-run" "exit" 1 "$code"
+[ ! -s "$work/usage.bare.out" ] \
+  || bad "bare agentic-run" "stdout" "empty" "$(head -1 "$work/usage.bare.out")"
+[ -s "$work/usage.bare.err" ] \
+  || bad "bare agentic-run" "stderr" "the usage" "empty"
+sed '1s/^agentic-run: //' "$work/usage.bare.err" > "$work/usage.bare"
+cmp -s "$work/usage.bare" "$work/usage.out" \
+  || bad "bare agentic-run" "usage payload" "the --help bytes" "different"
+
+usage_registered=$(sed -n \
+  '/^  <example> is one of:$/,/^$/s/^  \([^ ][^ ]*\)  .*/\1/p' \
+  "$work/usage.out")
+[ "$usage_registered" = "$registered" ] \
+  || bad "--help" "catalog names" "$registered" "$usage_registered"
+while read -r n; do
+  [ -n "$n" ] || continue
+  doc=$(sed -n "/^  <example> is one of:$/,/^$/s/^  $n  *//p" "$work/usage.out")
+  [ -n "$doc" ] || bad "$n" "usage summary" "one line" "empty"
+done <<< "$usage_registered"
+too_wide=$(awk 'length($0) > 80 { print NR ":" length($0); exit }' "$work/usage.out")
+[ -z "$too_wide" ] || bad "--help" "line width" "at most 80" "$too_wide"
 
 # THE TWO SENTENCES OF ADVICE IN THE USAGE TEXT, PINNED. Both were added with
 # the help feature and neither belongs to a row: they are facts about a FLAG, so
