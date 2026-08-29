@@ -251,6 +251,16 @@ and `--verbose` are common; the flags that belong to one engine are refused for
 the other by name. Exit codes are `0` a completed run, `1` a usage error, `2` a
 transport failure, `3` a run abandoned over what arrived.
 
+Live runs may resolve symbolic workflow pins through layered YAML routing
+profiles. A profile such as `deep-thinker` owns an ordered ACP/deck realization
+chain — router, provider, model, thinking level and output bound — while Haskell
+source retains only the capability name. User and project files load
+automatically; explicit `--route` entries remain the highest backend override;
+and every declared setting is applied or verified before a prompt. The
+versioned schema, precedence rules, migration example and transport limitations
+are specified in
+[`haskell/README.md`](haskell/README.md#symbolic-routing-profiles).
+
 Nothing here rebuilds, adapts or trims a program for execution: `agentic-run run
 harden` runs the exact `Program` that `tier1` has already held against the frozen
 corpus entry, print and reply alike, which is what makes a live run evidence
@@ -264,14 +274,17 @@ entries in the production surface and compares the whole reply — printed
 program, folds, ask counts, one trace and two bills per world — and `bisim`
 draws fresh programs and worlds against the live oracle.
 
-Four scripts in `haskell/ci/` are the gates. `ci/tier0.sh` is the PR gate: it
+The principal scripts in `haskell/ci/` are the gates. `ci/tier0.sh` is the PR gate: it
 runs the first two executables against the corpus as committed data, with **no
 Lean in the loop at all**. `ci/acp.sh` and `ci/deck.sh` drive `agentic-run` end
 to end against the two fixture doubles, `test/stub_adapter.py` and
 `haskell/test/stub-deck.sh` — no Lean, no network, and what they pin is the part
 of the runtime the corpus cannot reach: the poll loop, the staleness guard, the
 named transport failures, the re-ask and the memo table observed from outside
-the process. `ci/tier1.sh` is the nightly differential and the only gate that
+process. `ci/routing-config.sh` pins YAML validation and precedence, ordered
+cross-backend failover, ACP option selection before prompt, deck metadata
+verification before send, strict negative controls, and machine provenance.
+`ci/tier1.sh` is the nightly differential and the only gate that
 wants Lean — as a **prebuilt** `conformance-oracle` binary, which it refuses to
 build itself and refuses to skip over. That refusal is the one-build rule
 (`connection.md` §3.9 — one Lean build at a time, machine-wide), and a Tier 1

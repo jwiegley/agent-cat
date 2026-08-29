@@ -757,10 +757,10 @@ failureClassOf e
       GapExhausted -> FailureTransport
   | otherwise = FailureRuntime
 
--- | Consult a chain against the concurrent memo. A failed reservation is
--- removed after publishing its exception, preserving the old rule that a later
--- occurrence retries a transient gap; simultaneous occurrences still share the
--- one attempt they raced on.
+-- | Consult a whole fail-over chain under one concurrent memo reservation.
+-- A waiter shares the owner's final answer or final failure; it never starts a
+-- second walk between rungs. Once a failed reservation is removed, a genuinely
+-- later occurrence may retry the transient gap.
 askOrMemo :: forall c. Scheduler -> WorldIO -> Chains -> AttemptContext -> SCode c -> Request c -> IO (El c, ExecEvent)
 askOrMemo scheduler w ch context c q = do
   let question = questionJson c (reqQuestion q)
@@ -779,20 +779,80 @@ askOrMemo scheduler w ch context c q = do
       redirect <- case schedulerControlRuntime scheduler of
         Nothing -> pure Nothing
         Just controls -> awaitRuntimeRedirect controls (attemptOccurrenceId context)
-      go (maybe candidates' (`preferTarget` candidates') redirect)
+      let ordered = maybe candidates' (`preferTarget` candidates') redirect
+      if intentIsEffect (reqIntent q)
+        then do
+          (answer, source) <- go dispatchEffect ordered
+          pure (answer, ExecEvent c q source answer)
+        else memoWalk ordered
   where
     preferTarget target requests = case break ((== target) . requestTarget) requests of
       (_, []) -> requests
       (before, selected : after) -> selected : before <> after
-    go :: [Request c] -> IO (El c, ExecEvent)
-    go [] = abandonAllSpent c (reqQuestion q) (chainOf ch (reqQuestion q))
-    go (qi : rest) = do
+
+    memoWalk :: [Request c] -> IO (El c, ExecEvent)
+    memoWalk candidates' = mask $ \restore -> do
+      let key = questionKey c q
+      claim <- atomically (claimQuestion scheduler key (attemptOccurrenceId context))
+      case claim of
+        ClaimCached owner event -> reuse owner event
+        ClaimWait owner slot -> do
+          PendingAnswer event replayable <- atomically (readTMVar slot >>= either throwSTM pure)
+          if replayable
+            then reuse owner event
+            else restore (memoWalk candidates')
+        ClaimOwner slot -> do
+          outcome <- try (restore (go dispatchReusable candidates'))
+          case outcome of
+            Right (answer, source) -> do
+              let event = Event c (reqQuestion q) answer
+                  owner = attemptOccurrenceId context
+              replayable <- case schedulerControlRuntime scheduler of
+                Nothing -> pure True
+                Just controls -> runtimeOccurrenceReplayable controls owner
+              persistenceStoreAnswer
+                (schedulerPersistence scheduler)
+                owner
+                (questionJson c (reqQuestion q))
+                (answerJson c answer)
+                replayable
+              atomically $ do
+                modifyTVar'
+                  (schedulerMemo scheduler)
+                  ( \memo ->
+                      memo
+                        { memoTable =
+                            if replayable
+                              then Map.insert key (owner, event) (memoTable memo)
+                              else Map.delete key (memoTable memo),
+                          memoPending = Map.delete key (memoPending memo)
+                        }
+                  )
+                putTMVar slot (Right (PendingAnswer event replayable))
+              pure (answer, ExecEvent c q source answer)
+            Left (e :: SomeException) -> do
+              atomically $ do
+                modifyTVar'
+                  (schedulerMemo scheduler)
+                  (\memo -> memo {memoPending = Map.delete key (memoPending memo)})
+                putTMVar slot (Left e)
+              throwIO e
+
+    reuse owner event = case eventAnswer c event of
+      Just answer -> do
+        emit scheduler (OccurrenceReused (attemptOccurrenceId context) ("occurrence:" <> T.pack (show (occurrenceNumber owner))))
+        pure (answer, ExecEvent c q AnswerReused answer)
+      Nothing -> ioError (userError "memoized answer has a different code from its bare-Q key")
+
+    go :: (AttemptContext -> Request c -> IO (El c, AnswerSource c)) -> [Request c] -> IO (El c, AnswerSource c)
+    go _ [] = abandonAllSpent c (reqQuestion q) (chainOf ch (reqQuestion q))
+    go dispatch (qi : rest) = do
       available <- atomically (candidateAvailable scheduler qi)
       if not available
-        then chainLog ch (spentSkip qi) >> go rest
+        then chainLog ch (spentSkip qi) >> go dispatch rest
         else do
           let controlledContext = context {attemptFailoverAvailable = isJust <$> nextLive scheduler rest}
-          outcome <- try (consult scheduler w controlledContext c q qi) ::
+          outcome <- try (dispatch controlledContext qi) ::
             IO (Either SomeException (El c, AnswerSource c))
           case outcome of
             Left e
@@ -800,9 +860,8 @@ askOrMemo scheduler w ch context c q = do
                 tgeGap tge == GapExhausted -> markSpent scheduler qi
             _ -> pure ()
           case outcome of
-            Right (a, source) -> pure (a, ExecEvent c q source a)
+            Right result -> pure result
             Left e
-              -- An interrupt is the operator talking, not a gap.
               | Just (_ :: SomeAsyncException) <- fromException e -> throwIO e
               | otherwise -> case fromException e of
                   Nothing -> throwIO e
@@ -816,8 +875,23 @@ askOrMemo scheduler w ch context c q = do
                             <> tgeWhy tge
                             <> "; falling back to "
                             <> fromMaybe "the next candidate" (modelOf qi')
-                        go rest
+                        go dispatch rest
                       Nothing -> throwIO (tgeFinal tge)
+
+    dispatchReusable attempt dispatched = do
+      answer <- dispatchAttempt w attempt c dispatched
+      pure (answer, AnswerAsked (reqQuestion dispatched))
+
+    dispatchEffect attempt dispatched = do
+      let question = questionJson c (reqQuestion q)
+      persistenceStartEffect (schedulerPersistence scheduler) (attemptOccurrenceId attempt) question
+      answer <- dispatchAttempt w attempt c dispatched
+      persistenceCompleteEffect
+        (schedulerPersistence scheduler)
+        (attemptOccurrenceId attempt)
+        question
+        (answerJson c answer)
+      pure (answer, AnswerAsked (reqQuestion dispatched))
 
     spentSkip qi =
       fromMaybe (addresseeWord (qAddressee (reqQuestion qi))) (modelOf qi)
@@ -843,71 +917,6 @@ nextLive scheduler qs = atomically $ do
   spent <- memoSpent <$> readTVar (schedulerMemo scheduler)
   pure (find (maybe True (`Set.notMember` spent) . modelOf) qs)
 
-consult :: Scheduler -> WorldIO -> AttemptContext -> SCode c -> Request c -> Request c ->
-  IO (El c, AnswerSource c)
-consult scheduler w context c authored dispatched
-  | intentIsEffect (reqIntent authored) = do
-      let question = questionJson c (reqQuestion authored)
-      persistenceStartEffect (schedulerPersistence scheduler) (attemptOccurrenceId context) question
-      a <- dispatchAttempt w context c dispatched
-      persistenceCompleteEffect
-        (schedulerPersistence scheduler)
-        (attemptOccurrenceId context)
-        question
-        (answerJson c a)
-      pure (a, AnswerAsked (reqQuestion dispatched))
-  | otherwise = mask $ \restore -> do
-      let key = questionKey c authored
-      claim <- atomically (claimQuestion scheduler key (attemptOccurrenceId context))
-      case claim of
-        ClaimCached owner event -> reuse owner event
-        ClaimWait owner slot -> do
-          PendingAnswer event replayable <- atomically (readTMVar slot >>= either throwSTM pure)
-          if replayable
-            then reuse owner event
-            else restore (consult scheduler w context c authored dispatched)
-        ClaimOwner slot -> do
-          outcome <- try (restore (dispatchAttempt w context c dispatched))
-          case outcome of
-            Right a -> do
-              let event = Event c (reqQuestion authored) a
-                  owner = attemptOccurrenceId context
-              replayable <- case schedulerControlRuntime scheduler of
-                Nothing -> pure True
-                Just controls -> runtimeOccurrenceReplayable controls owner
-              persistenceStoreAnswer
-                (schedulerPersistence scheduler)
-                owner
-                (questionJson c (reqQuestion authored))
-                (answerJson c a)
-                replayable
-              atomically $ do
-                modifyTVar'
-                  (schedulerMemo scheduler)
-                  ( \memo ->
-                      memo
-                        { memoTable =
-                            if replayable
-                              then Map.insert key (owner, event) (memoTable memo)
-                              else Map.delete key (memoTable memo),
-                          memoPending = Map.delete key (memoPending memo)
-                        }
-                  )
-                putTMVar slot (Right (PendingAnswer event replayable))
-              pure (a, AnswerAsked (reqQuestion dispatched))
-            Left (e :: SomeException) -> do
-              atomically $ do
-                modifyTVar'
-                  (schedulerMemo scheduler)
-                  (\memo -> memo {memoPending = Map.delete key (memoPending memo)})
-                putTMVar slot (Left e)
-              throwIO e
-  where
-    reuse owner event = case eventAnswer c event of
-      Just a -> do
-        emit scheduler (OccurrenceReused (attemptOccurrenceId context) ("occurrence:" <> T.pack (show (occurrenceNumber owner))))
-        pure (a, AnswerReused)
-      Nothing -> ioError (userError "memoized answer has a different code from its bare-Q key")
 
 dispatchAttempt :: WorldIO -> AttemptContext -> SCode c -> Request c -> IO (El c)
 dispatchAttempt w context c dispatched = worldAskAttemptIO w context c dispatched

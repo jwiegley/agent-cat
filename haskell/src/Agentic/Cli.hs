@@ -83,7 +83,7 @@
 -- and the fact will be there; @plan@ and @cost@ leave them unbound, because
 -- they are making no run. They are inputs like any other in every other
 -- respect — a define, spliced as literal chunks, invisible to every fold — and
--- 'runFactsOf' is where they come from.
+-- 'runFactsWith' is where they come from.
 --
 -- @plan@ and @cost@ read the elaborated 'Agentic.Plan.Plan' and say nothing a
 -- run could contradict: they are the /static/ folds, decided before anybody is
@@ -312,14 +312,16 @@ import Agentic.Acp
     adapterArgv,
     defaultAcpConfig,
     renderAcpError,
+    preflightAcpRealization,
     withAcps,
-    worldOfAcp,
+    worldOfAcpConfigured,
   )
 import Agentic.AgentDeck
   ( DeckConfig (..),
     DeckError,
     defaultDeckConfig,
     renderDeckError,
+    verifyDeckRealizations,
     worldOfDeck,
   )
 import Agentic.Builder
@@ -392,6 +394,18 @@ import Agentic.Route
     routes,
     schemeOf,
     schemeWord,
+  )
+import Agentic.RoutingConfig
+  ( LoadedRouting (..),
+    Realization (..),
+    ResolvedRealization (..),
+    ResolvedRouting (..),
+    Router (..),
+    emptyRoutingConfig,
+    loadRoutingConfig,
+    resolveRoutingConfig,
+    thinkingName,
+    routesWithProfiles,
   )
 import Data.Set (Set)
 import qualified Data.Set as Set
@@ -618,6 +632,12 @@ data Target
 data RunRoutes = RunRoutes
   { -- | The default, and the routes that refine it.
     rrRoutes :: !(Routes Backend),
+    -- | Routes exactly as the command line supplied them, before YAML.
+    rrCommandRoutes :: !(Routes Backend),
+    -- | The layered YAML policy loaded before any program or backend.
+    rrRouting :: !LoadedRouting,
+    -- | Concrete settings by runtime model axis, populated after the program is built.
+    rrRealizations :: !(Map.Map Text ResolvedRealization),
     -- | @--scratch DIR@, or 'Nothing' for a fresh one.
     rrScratch :: !(Maybe FilePath),
     -- | @--adapter-arg@, in the order given, for every @acp:@ backend.
@@ -648,7 +668,10 @@ cliMain reg = do
   case parseCommand reg args of
     Left problem -> die reg 1 problem
     Right cmd ->
-      execute reg cmd
+      ( do
+          configured <- loadCommandRouting cmd
+          either (die reg 1 . ("routing configuration: " <>)) (execute reg) configured
+      )
         `catches` [ Handler $ \(e :: DeckError) -> die reg 2 ("transport: " <> renderDeckError e),
                     Handler $ \(e :: AcpError) -> die reg 2 ("transport: " <> renderAcpError e),
                     Handler $ \(e :: IOError) ->
@@ -657,6 +680,27 @@ cliMain reg = do
                           then T.pack (ioeGetErrorString e)
                           else T.pack (show e)
                   ]
+
+-- | Attach optional user/project routing policy only to commands that can reach
+-- a live backend. Static and scripted commands remain independent of local
+-- machine configuration.
+loadCommandRouting :: Command -> IO (Either Text Command)
+loadCommandRouting = \case
+  Run name target pinned inputs -> withTarget target (\target' -> Run name target' pinned inputs)
+  Machine run name target pinned inputs -> withTarget target (\target' -> Machine run name target' pinned inputs)
+  LineageCheck op parent edits name target pinned inputs ->
+    withTarget target (\target' -> LineageCheck op parent edits name target' pinned inputs)
+  MachineLineage op run parent edits name target pinned inputs ->
+    withTarget target (\target' -> MachineLineage op run parent edits name target' pinned inputs)
+  command -> pure (Right command)
+  where
+    withTarget Scripted rebuild = pure (Right (rebuild Scripted))
+    withTarget (Routed routes') rebuild = do
+      loaded <- loadRoutingConfig
+      pure $ do
+        config <- loaded
+        effective <- routesWithProfiles (loadedRouting config) (rrCommandRoutes routes')
+        pure (rebuild (Routed routes' {rrRoutes = effective, rrRouting = config}))
 
 -- | Which verb, and — for @run@ — the facts the run supplies about itself.
 --
@@ -679,18 +723,14 @@ execute reg = \case
   List r -> listCmd reg r >> exitSuccess
   Plan name r raw pinned ins -> withExample reg pinned False noRefusal name [] ins (planCmd r raw)
   Cost name ins -> withExample reg False False noRefusal name [] ins (\f _ -> costCmd f)
-  Run name target pinned ins -> do
-    facts <- runFactsOf reg name target
-    withExample reg pinned True (routeRefusal reg target) name facts ins (const (runCmd reg name target))
-  Machine runId name target pinned ins -> do
-    facts <- runFactsOf reg name target
-    withExample reg pinned True (routeRefusal reg target) name facts ins (const (runMachineCmd reg runId name target))
-  LineageCheck lineage parent edits name target pinned ins -> do
-    facts <- runFactsOf reg name target
-    withExample reg pinned True (routeRefusal reg target) name facts ins (\_ program _ -> void (validateLineage lineage parent edits name target program))
-  MachineLineage lineage runId parent edits name target pinned ins -> do
-    facts <- runFactsOf reg name target
-    withExample reg pinned True (routeRefusal reg target) name facts ins (const (runMachineLineageCmd reg lineage runId parent edits name target))
+  Run name target pinned ins ->
+    withRunExample reg pinned name target ins (\effective _ program bindings -> runCmd reg name effective program bindings)
+  Machine runId name target pinned ins ->
+    withRunExample reg pinned name target ins (\effective _ program bindings -> runMachineCmd reg runId name effective program bindings)
+  LineageCheck lineage parent edits name target pinned ins ->
+    withRunExample reg pinned name target ins (\effective _ program _ -> void (validateLineage lineage parent edits name effective program))
+  MachineLineage lineage runId parent edits name target pinned ins ->
+    withRunExample reg pinned name target ins (\effective _ program bindings -> runMachineLineageCmd reg lineage runId parent edits name effective program bindings)
 
 -- | The verb owes the program no precondition of its own — @plan@ and @cost@,
 -- which read no flag that is a claim about the program's text.
@@ -731,7 +771,7 @@ routeRefusal reg (Routed rr) prog = case servedChains (progRawOut prog) of
                      then "it pins no model at all"
                      else "the models it pins are: " <> T.intercalate ", " pinnable
                  )
-          | (m, _) <- routeNamed (rrRoutes rr),
+          | (m, _) <- routeNamed (rrCommandRoutes rr),
             m `notElem` pinnable
           ]
 
@@ -790,6 +830,48 @@ withExample reg pinned needsAll refuses name facts ins k = case regLookup reg na
         | pinned, Just why <- guardUnpinnedAsk (progRawOut prog) -> die reg 1 ("refused: " <> why)
         | Just why <- refuses prog -> die reg 1 why
         | otherwise -> k (factsOf name row prog) prog bs >> exitSuccess
+
+-- | Build a live program and its routing-dependent run facts to a fixed point.
+-- A program may branch while its Haskell value is built, so deriving routes
+-- once before that build can make @run.routes@ disagree with execution. The
+-- sentinel is held fixed throughout; only the target-derived facts move.
+withRunExample ::
+  Registry ->
+  Bool ->
+  Text ->
+  Target ->
+  [InputFlag] ->
+  (forall r. Target -> Facts -> ProgramOf r -> [Given] -> IO ()) ->
+  IO ()
+withRunExample reg pinned name initialTarget inputs k = case regLookup reg name of
+  Nothing -> die reg 1 (noSuchRow reg name)
+  Just row -> do
+    sentinel <- freshSentinel
+    settle row sentinel [] 0 initialTarget
+  where
+    settle row sentinel seen turns target
+      | turns >= (16 :: Int) = die reg 1 "routing configuration and run facts did not converge after 16 program builds"
+      | otherwise = do
+          let runFacts' = runFactsWith reg name target sentinel
+          resolved <- resolveInputs name True runFacts' (rowExample row) inputs
+          case resolved of
+            Left why -> die reg 1 why
+            Right (SomeProgram prog, bindings) -> case resolveTargetForProgram target prog of
+              Left why -> die reg 1 why
+              Right effective
+                | targetPolicy effective == targetPolicy target ->
+                    if pinned
+                      then case guardUnpinnedAsk (progRawOut prog) of
+                        Just why -> die reg 1 ("refused: " <> why)
+                        Nothing -> finish row effective prog bindings
+                      else finish row effective prog bindings
+                | targetPolicy effective `elem` seen ->
+                    die reg 1 "routing configuration and run facts form a cycle; the program changes which profiles it pins when run.routes changes"
+                | otherwise -> settle row sentinel (targetPolicy target : seen) (turns + 1) effective
+    finish :: forall r. Row -> Target -> ProgramOf r -> [Given] -> IO ()
+    finish row effective prog bindings = case routeRefusal reg effective prog of
+      Just why -> die reg 1 why
+      Nothing -> k effective (factsOf name row prog) prog bindings >> exitSuccess
 
 -- | The refusal a name no row answers to earns, from whichever verb was asking.
 --
@@ -1572,6 +1654,7 @@ runCmdObserved = runCmdControlled Nothing nullPersistenceHooks
 runCmdControlled :: Maybe ControlRuntime -> PersistenceHooks -> EventSink -> (Text -> IO ()) -> Registry -> Text -> Target -> ProgramOf r -> [Given] -> IO ExecTrace
 runCmdControlled runtimeControls persistence observer output reg name target prog gs = case target of
   Scripted -> do
+    authored <- requiredChains
     output $
       "running "
         <> name
@@ -1582,10 +1665,22 @@ runCmdControlled runtimeControls persistence observer output reg name target pro
     -- gate passed, which is the same class of mistake D5 exists to fix.
     output
       ("  " <> [wft|no command was run; every gate in this program was answered from the table|])
-    walkWith id (scriptedWorld script)
-  Routed rr -> do
-    let rs = rrRoutes rr
+    walkWith authored id (scriptedWorld script)
+  Routed parsedRoutes -> do
+    authored <- requiredChains
+    resolved <-
+      case resolveRoutingConfig (loadedRouting (rrRouting parsedRoutes)) (rrCommandRoutes parsedRoutes) authored of
+        Left why -> refuse why
+        Right value -> pure value
+    let rr =
+          parsedRoutes
+            { rrRoutes = resolvedRoutes resolved,
+              rrRealizations = resolvedRealizations resolved
+            }
+        rs = rrRoutes rr
         backends = routeBackends rs
+    announceRouting rr
+    mapM_ (verifyDeckBackend rr) backends
     -- __The run has a directory of its own exactly when it starts an adapter of
     -- its own__, and there is one of them however many backends there are
     -- (§3.4). Every `acp:` route gets it as its `acpCwd` and `executingWorld`
@@ -1615,6 +1710,7 @@ runCmdControlled runtimeControls persistence observer output reg name target pro
     -- so a run whose default will not start fails before spawning anything
     -- else.
     withAcps [(b, acpConfigFor rr dir w) | b@(BackendAcp w) <- backends] $ \live -> do
+      preflightAcp rr live
       services <-
         traverse
           ( \b -> do
@@ -1627,7 +1723,7 @@ runCmdControlled runtimeControls persistence observer output reg name target pro
             Nothing ->
               concurrentWorld $ \_ _ ->
                 ioError (userError ("no answering service was made for backend " <> show b))
-      walkWith (executingWorld (shellAt dir)) (routedWorld (fmap connected rs))
+      walkWith (resolvedChains resolved) (executingWorld (shellAt dir)) (routedWorld (fmap connected rs))
   where
     -- The canned table is the row's own, which is why `run` looks the row up
     -- again rather than being handed a program: a script that lived anywhere
@@ -1644,6 +1740,21 @@ runCmdControlled runtimeControls persistence observer output reg name target pro
 
     isAcp b = schemeOf b == SchemeAcp
 
+    preflightAcp rr =
+      mapM_
+        ( \(backend, acp) ->
+            mapM_
+              (preflightAcpRealization acp . resolvedSpec)
+              [realization | realization <- Map.elems (rrRealizations rr), resolvedBackend realization == backend]
+        )
+
+    verifyDeckBackend rr backend = case backend of
+      BackendAcp _ -> pure ()
+      BackendDeck session ->
+        verifyDeckRealizations
+          (deckConfigFor rr session)
+          [realization | realization <- Map.elems (rrRealizations rr), resolvedBackend realization == backend]
+
     -- The answering service of one backend. Every backend the table names is in
     -- `live` if it is an `acp:` one, because `live` is keyed by exactly the
     -- `acp:` members of `routeBackends` and `fmap` asks about nothing else; the
@@ -1654,7 +1765,13 @@ runCmdControlled runtimeControls persistence observer output reg name target pro
     worldOf rr dir live b = case b of
       BackendDeck s -> worldOfDeck (deckConfigFor rr s)
       BackendAcp w -> case lookup b live of
-        Just acp -> pure (worldOfAcp (acpConfigFor rr dir w) acp)
+        Just acp ->
+          pure
+            ( worldOfAcpConfigured
+                (fmap resolvedSpec . (`Map.lookup` rrRealizations rr))
+                (acpConfigFor rr dir w)
+                acp
+            )
         Nothing ->
           pure
             ( concurrentWorld
@@ -1798,21 +1915,57 @@ runCmdControlled runtimeControls persistence observer output reg name target pro
         "the " <> w <> " adapter: " <> T.unwords (map T.pack (acpCommand (acpConfigFor rr "." w)))
       BackendDeck s -> "agent-deck session " <> s
 
-    walkWith :: (WorldIO -> WorldIO) -> WorldIO -> IO ExecTrace
-    walkWith exec world = do
+    announceRouting rr
+      | null sources && Map.null (rrRealizations rr) = pure ()
+      | otherwise = do
+          output "routing configuration:"
+          mapM_ (output . ("  loaded " <>) . T.pack) sources
+          mapM_ (output . realizationLine) (Map.toAscList (rrRealizations rr))
+      where
+        sources = loadedRoutingSources (rrRouting rr)
+
+    realizationLine (axis, realization) =
+      let spec = resolvedSpec realization
+          router = resolvedRouter realization
+          optionSetting (key, String value) = key <> "=" <> value
+          optionSetting (key, value) = key <> "=" <> render value
+          optionSettings
+            | Map.null (realizationOptions spec) = ""
+            | otherwise =
+                "; options "
+                  <> T.intercalate "," (map optionSetting (Map.toAscList (realizationOptions spec)))
+       in "  "
+            <> axis
+            <> " = "
+            <> backendSpelling (resolvedBackend realization)
+            <> "; "
+            <> routerProvider router
+            <> "/"
+            <> realizationModel spec
+            <> "; thinking " <> thinkingName (realizationThinking spec)
+            <> "; max-output " <> tshow (realizationMaxOutput spec)
+            <> optionSettings
+
+    requiredChains :: IO (Map.Map Text [Text])
+    requiredChains = case servedChains (progRawOut prog) of
+      Left why -> refuse why
+      Right value -> pure value
+
+    refuse :: Text -> IO a
+    refuse why = do
+      output ("refusing to start: " <> why)
+      exitWith (ExitFailure 1)
+
+    walkWith :: Map.Map Text [Text] -> (WorldIO -> WorldIO) -> WorldIO -> IO ExecTrace
+    walkWith chainTable exec world = do
       -- The inputs this run's prompts were built from, announced before the
       -- first question: an operator reading a transcript must be able to see
       -- which subject it was about, and the value itself can be a whole diff.
       mapM_ (output . inputsLine) gs
-      chains <- case servedChains (progRawOut prog) of
-        Left why -> do
-          output ("refusing to start: " <> why)
-          exitWith (ExitFailure 1)
-        Right t
-          | Map.null t -> pure noChains
-          | otherwise -> do
-              mapM_ (output . chainLine) [e | e <- Map.toList t, not (null (snd e))]
-              pure (chainsOf stderrLog t)
+      let chains
+            | Map.null chainTable = noChains
+            | otherwise = chainsOf stderrLog chainTable
+      mapM_ (output . chainLine) [entry | entry <- Map.toList chainTable, not (null (snd entry))]
       output ""
       (result, tr) <-
         runPlanPersisted runtimeControls persistence observer
@@ -1855,14 +2008,15 @@ runMachineLineageCmd reg lineage runId parentDirectory edits name target prog gs
 
 validateLineage :: LineageOperation -> FilePath -> [ForkEdit] -> Text -> Target -> ProgramOf r -> IO (RunId, [AnswerRecord])
 validateLineage lineage parentDirectory edits name target prog = do
+  effectiveTarget <- either (ioError . userError . T.unpack) pure (resolveTargetForProgram target prog)
   parentManifest <- readManifest parentDirectory
   let program = printedValue prog
       exactLaunch =
         manifestWorkflow parentManifest == name
           && manifestRunnerVersion parentManifest == runnerVersion
           && manifestProgram parentManifest == program
-          && manifestTarget parentManifest == targetLabel target
-          && manifestPolicy parentManifest == targetPolicy target
+          && manifestTarget parentManifest == targetLabel effectiveTarget
+          && manifestPolicy parentManifest == targetPolicy effectiveTarget
       checkpointMatches checkpoint = checkpointProgram checkpoint == manifestProgram parentManifest
       requireCheckpoint =
         readCheckpoint parentDirectory >>= maybe (ioError (userError "parent run has no compatible checkpoint")) pure
@@ -1959,28 +2113,29 @@ validateInheritedAnswers answers = do
 
 runMachineWith :: LineageOperation -> Maybe RunId -> [AnswerRecord] -> Registry -> RunId -> Text -> Target -> ProgramOf r -> [Given] -> IO ()
 runMachineWith lineage parent inherited reg runId name target prog gs = do
+  effectiveTarget <- either (ioError . userError . T.unpack) pure (resolveTargetForProgram target prog)
   store <- lookupEnv "AGENT_CAT_RUN_STORE"
   owner <- fmap T.pack <$> lookupEnv "AGENT_CAT_RUN_OWNER"
   case store of
-    Nothing -> stdoutEventSink runId >>= runWith nullPersistenceHooks
+    Nothing -> stdoutEventSink runId >>= runWith effectiveTarget nullPersistenceHooks
     Just directory ->
-      withRunStoreSeeded directory (manifest owner) inherited $ \runStore -> do
+      withRunStoreSeeded directory (manifest effectiveTarget owner) inherited $ \runStore -> do
         persistence <- persistenceFor runStore (printedValue prog) (length inherited)
-        handlesEventSink [storeEventHandle runStore, stdout] runId >>= runWith persistence
+        handlesEventSink [storeEventHandle runStore, stdout] runId >>= runWith effectiveTarget persistence
   where
-    manifest owner =
+    manifest effectiveTarget owner =
       RunManifest
         runId
         name
         runnerVersion
         (printedValue prog)
-        (targetLabel target)
-        (targetPolicy target)
+        (targetLabel effectiveTarget)
+        (targetPolicy effectiveTarget)
         parent
         lineage
         owner
-    runWith persistence sink = do
-      sink (RunStarted name (targetLabel target))
+    runWith effectiveTarget persistence sink = do
+      sink (RunStarted name (targetLabel effectiveTarget))
       controlled <- (== Just "1") <$> lookupEnv "AGENT_CAT_CONTROL_STDIN"
       controls <- newControlRuntime
       let run =
@@ -1991,7 +2146,7 @@ runMachineWith lineage parent inherited reg runId name target prog gs = do
               (TIO.hPutStrLn stderr)
               reg
               name
-              target
+              effectiveTarget
               prog
               gs
       outcome <- try (if controlled then withControlInput stdin sink controls run else run)
@@ -2028,6 +2183,19 @@ persistenceFor store program inheritedAnswers = do
           writeCheckpoint store (Checkpoint program (Just occurrence) answers effects)
       }
 
+resolveTargetForProgram :: Target -> ProgramOf r -> Either Text Target
+resolveTargetForProgram Scripted _ = Right Scripted
+resolveTargetForProgram (Routed rr) prog = do
+  authored <- servedChains (progRawOut prog)
+  resolved <- resolveRoutingConfig (loadedRouting (rrRouting rr)) (rrCommandRoutes rr) authored
+  pure
+    ( Routed
+        rr
+          { rrRoutes = resolvedRoutes resolved,
+            rrRealizations = resolvedRealizations resolved
+          }
+    )
+
 targetLabel :: Target -> Text
 targetLabel Scripted = "scripted"
 targetLabel (Routed rr) = T.intercalate "," (map backendSpelling (routeBackends (rrRoutes rr)))
@@ -2045,8 +2213,27 @@ targetPolicy (Routed rr) =
       "binary" .= rrBinary rr,
       "pollMs" .= rrPollMs rr,
       "timeoutMs" .= rrTimeoutMs rr,
+      "routingSources" .= map T.pack (loadedRoutingSources (rrRouting rr)),
+      "realizations" .= map realizationPolicy (Map.elems (rrRealizations rr)),
       "verbose" .= rrVerbose rr
     ]
+
+realizationPolicy :: ResolvedRealization -> Value
+realizationPolicy target =
+  let spec = resolvedSpec target
+      router = resolvedRouter target
+   in object
+        [ "profile" .= resolvedProfile target,
+          "axis" .= resolvedAxis target,
+          "rung" .= resolvedRung target,
+          "backend" .= backendSpelling (resolvedBackend target),
+          "router" .= routerName router,
+          "provider" .= routerProvider router,
+          "model" .= realizationModel spec,
+          "thinking" .= thinkingName (realizationThinking spec),
+          "maxOutput" .= realizationMaxOutput spec,
+          "options" .= realizationOptions spec
+        ]
 
 redactAdapterArgs :: [String] -> [Text]
 redactAdapterArgs = go False
@@ -2082,8 +2269,9 @@ machineFailureClass e
 -- Nothing new is decided here: 'adapterArgv' and 'defaultDeckConfig' already
 -- turn a word into a backend.
 --
--- It stands at the top level rather than inside 'runCmd' because 'runFactsOf'
--- reads it too, before there is a program to run — and the alternative was a
+-- It stands at the top level rather than inside 'runCmd' because
+-- 'runFactsWith' reads it while the program and its run facts settle to one
+-- routing table; deriving it twice is how a header and a fact disagree.
 -- second derivation of the same policy, which is exactly how a header and a
 -- fact come to disagree about one run.
 acpConfigFor :: RunRoutes -> FilePath -> Text -> AcpConfig
@@ -2171,15 +2359,13 @@ deckSessionPolicy = sessionPolicy False
 -- a sentence written in this function and the header's @deck:@ arm was a
 -- different one, so one pane had two descriptions and only one of them could be
 -- matched.
-runFactsOf :: Registry -> Text -> Target -> IO [(Text, Text)]
-runFactsOf reg name target = do
-  sentinel <- freshSentinel
-  pure
-    [ (runFactBackends, backendsFact),
-      (runFactEngine, engineFact),
-      (runFactRoutes, routesFact tableOf),
-      (runFactSentinel, sentinel)
-    ]
+runFactsWith :: Registry -> Text -> Target -> Text -> [(Text, Text)]
+runFactsWith reg name target sentinel =
+  [ (runFactBackends, backendsFact),
+    (runFactEngine, engineFact),
+    (runFactRoutes, routesFact tableOf),
+    (runFactSentinel, sentinel)
+  ]
   where
     -- The table, or the absence of one. `routesFact` takes this rather than the
     -- `Target` so that the fact cannot come to depend on `--poll`.
@@ -2638,6 +2824,9 @@ chooseTarget reg o = case (roScripted o, roEngine o, roSession o) of
       pure . Routed $
         RunRoutes
           { rrRoutes = table,
+            rrCommandRoutes = table,
+            rrRouting = LoadedRouting emptyRoutingConfig [],
+            rrRealizations = Map.empty,
             rrScratch = T.unpack <$> roScratch o,
             rrAdapterArgs = map T.unpack (roAdapterArgs o),
             rrBinary = T.unpack <$> roBinary o,
@@ -2769,6 +2958,11 @@ usage reg =
       "                 fail-over ladder cross providers. A pinned model no --route",
       "                 names, every unpinned ask, and every tool and person take",
       "                 the default. Refuses a NAME this program never pins",
+      "  routing YAML   live commands automatically load routing.yaml:",
+      "                 user first, then the nearest project file.",
+      "                 Profiles map symbolic servedBy names to ordered concrete",
+      "                 ACP/deck realizations; --route overrides a primary backend.",
+      "                 See the Symbolic routing profiles section of haskell/README.md",
       "  --timeout      milliseconds one turn may take before it is abandoned",
       "  --verbose      narrate the transport on stderr",
       "  --require-pinned",

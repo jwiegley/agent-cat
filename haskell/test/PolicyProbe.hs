@@ -1046,7 +1046,7 @@ failoverMemoIdentityProbe failures = do
       world = concurrentWorld $ \c r -> case c of
         SFlag -> do
           let model = scopeModelAxis (scopeOf r)
-          modifyIORef' dispatchedCalls (model :)
+          atomicModifyIORef' dispatchedCalls (\models -> (model : models, ()))
           case model of
             Just "deep" -> raiseGap GapTransportRefusal "deep refused"
               (userError "deep refused")
@@ -1057,12 +1057,12 @@ failoverMemoIdentityProbe failures = do
   pureProbe failures "failover memo identity is authored bare Q" $ case out of
     Right (answer, tr) ->
       [ ("all three Plan occurrences receive answers", answer == (True, (True, True))),
-        ("first deep falls back, broad is separately asked, repeated deep reuses",
-          calls == [Just "deep", Just "broad", Just "broad"]),
+        ("concurrent equal deep asks share one whole fallback walk",
+          sort calls == sort [Just "deep", Just "broad", Just "broad"]),
         ("authored questions survive",
           authoredModels tr == [Just "deep", Just "broad", Just "deep"]),
-        ("dispatch attribution stays operational",
-          answerers tr == [Just "broad", Just "broad", Nothing]),
+        ("one deep occurrence owns the fallback and the other reuses it",
+          sort (answerers tr) == sort [Just "broad", Just "broad", Nothing]),
         ("fresh/memo bills are 3/2", (billExecFresh tr, billMemo tr) == (3, 2))
       ]
     Left e -> [("the run threw: " <> show e, False)]
@@ -1386,7 +1386,7 @@ observedExecutionProbe failures = do
   pureProbe failures "runtime observer preserves scheduler and memo semantics" $
     case out of
       Right (_, trace') ->
-        [ ("three reached nodes get three monotone occurrence ids", occurrenceIds == map OccurrenceId [0, 1, 2]),
+        [ ("three reached nodes get three distinct plan-order occurrence ids", sort occurrenceIds == map OccurrenceId [0, 1, 2]),
           ("one memo owner and one effect make two physical attempts", length attempts == 2 && invocations == 2),
           ("the racing equal occurrence is reuse, not a fake attempt", length reused == 1),
           ("authored order comes from tickets", ordered == [map OccurrenceId [0, 1, 2]]),

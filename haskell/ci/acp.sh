@@ -60,7 +60,7 @@ play() {
   state="$work/$scenario"
   mkdir -p "$state"
   out="$state/out"
-  nix develop path:./. -c cabal run -v0 agentic-run -- "$@" --scratch "$state" \
+  nix develop path:./. -c cabal run -v0 agentic-run -- "$@" --scratch "$state" +RTS -N8 -RTS \
     < /dev/null > "$out" 2>&1
   code=$?
 }

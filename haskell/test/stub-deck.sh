@@ -134,6 +134,20 @@ answer_for() {
 
 fail() { echo "stub-deck: $*" >&2; exit 2; }
 
+if [ "${1:-}" = list ] && [ "${2:-}" = --json ]; then
+  provider="${DECK_STUB_PROVIDER-anthropic}"
+  model="${DECK_STUB_MODEL:-fixture-model}"
+  thinking="${DECK_STUB_THINKING:-high}"
+  if [ "${DECK_STUB_OMIT_MAX_OUTPUT:-0}" = 1 ]; then
+    printf '[{"id":"stub","title":"stub","tool":"claude","provider":"%s","model_id":"%s","thinking":"%s"}]\n' \
+      "$provider" "$model" "$thinking"
+  else
+    printf '[{"id":"stub","title":"stub","tool":"claude","provider":"%s","model_id":"%s","thinking":"%s","max_output":%s}]\n' \
+      "$provider" "$model" "$thinking" "${DECK_STUB_MAX_OUTPUT:-65536}"
+  fi
+  exit 0
+fi
+
 [ "${1:-}" = session ] || fail "this stub implements 'session' only, not '${1:-<nothing>}'"
 verb="${2:-}"
 id="${3:-}"
@@ -184,6 +198,6 @@ case "$verb" in
     ;;
 
   *)
-    fail "this stub implements send, show and output only, not 'session ${verb:-<nothing>}'"
+    fail "this stub implements list and session send/show/output only, not 'session ${verb:-<nothing>}'"
     ;;
 esac

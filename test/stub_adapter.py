@@ -240,6 +240,33 @@ CONFIG_OPTIONS = [
             {"value": "high", "name": "High"},
         ],
     },
+    {
+        "id": "max-output",
+        "name": "Maximum output",
+        "description": "Maximum output tokens",
+        "category": "max_output",
+        "type": "integer",
+        "currentValue": 4096,
+        "options": [],
+    },
+    {
+        "id": "temperature",
+        "name": "Temperature",
+        "description": "Sampling temperature",
+        "category": "generation",
+        "type": "number",
+        "currentValue": 0.0,
+        "options": [],
+    },
+    {
+        "id": "web-search",
+        "name": "Web search",
+        "description": "Whether web search is enabled",
+        "category": "tools",
+        "type": "boolean",
+        "currentValue": False,
+        "options": [],
+    },
 ]
 
 MODES = {
@@ -652,7 +679,8 @@ def handle_set_config_option(rid, params):
               {"_errors": [], "configId": {"_errors": ["Unknown config option"]}})
         return
     value = params.get("value")
-    if value not in [o["value"] for o in known[0]["options"]]:
+    offered = [o["value"] for o in known[0]["options"]]
+    if offered and value not in offered:
         # A value outside a `select` option's own list. The -32602 shape is
         # claude's; that claude rejects an unlisted value was NOT measured, and
         # is assumed here because the alternative — a select that accepts
@@ -661,6 +689,7 @@ def handle_set_config_option(rid, params):
               {"_errors": [], "value": {"_errors": ["Not an option of " + config_id]}})
         return
     known[0]["currentValue"] = value
+    note("set config %s=%r" % (config_id, value))
     result(rid, {"configOptions": CONFIG_OPTIONS})
 
 

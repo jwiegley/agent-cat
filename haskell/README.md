@@ -559,6 +559,158 @@ racing share one memo reservation; effects never do and execute once per
 occurrence. Returned traces stay in plan order. Stateful ACP/deck lanes and the
 intent-selected effect lane reserve FIFO positions during traversal, so a later
 ready effect cannot overtake an earlier blocked effect.
+
+### Symbolic routing profiles
+
+A workflow may name an execution capability rather than a provider model:
+
+```haskell
+ask (model "reviewer" `servedBy` "deep-thinker") [wf|Review this change.|]
+```
+
+The name `deep-thinker` is part of the authored question. Its physical
+realization is execution policy, loaded from two optional YAML files in
+increasing precedence order:
+
+1. `$XDG_CONFIG_HOME/agent-cat/routing.yaml`, or
+   `~/.config/agent-cat/routing.yaml` when `XDG_CONFIG_HOME` is unset;
+2. the nearest `.agent-cat/routing.yaml` between the working directory and the
+   repository root; and
+3. existing `--route NAME=BACKEND` arguments, which override backend selection
+   for the named primary profile while retaining its declared constraints.
+
+A higher YAML layer replaces a same-named router or profile whole. It does not
+merge fields. Missing files preserve the former command-line behavior.
+Scripted and static commands do not read live routing configuration.
+
+Version 1 uses lists so duplicate names can be refused rather than silently
+collapsed by an object decoder:
+
+```yaml
+version: 1
+routers:
+  - name: anthropic-acp
+    backend: acp:claude
+    provider: anthropic
+  - name: review-pane
+    backend: deck:reviewer
+    provider: anthropic
+profiles:
+  - name: deep-thinker
+    chain:
+      - router: anthropic-acp
+        model: claude-fable-5
+        thinking: max
+        max-output: 65536
+        options:
+          mode: plan
+      - router: review-pane
+        model: claude-opus-5
+        thinking: high
+        max-output: 32768
+```
+
+A router names one physical backend and its provider. A profile owns a nonempty,
+ordered chain of realizations. `model`, `thinking`, and `max-output` are
+required constraints; only `options` is optional. Option values retain YAML
+string, number, or boolean types; arrays, objects, and null are refused. The
+runner applies or verifies
+every required value before a prompt and refuses the run when the backend cannot
+prove it. There is no silent delegation to a backend default. Valid
+thinking values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and
+`max`; `max-output` is a positive integer. Unknown fields, empty names or
+chains, unresolved routers, duplicate declarations, unsupported values, and
+credential-bearing option keys are errors, including token, password,
+credential, auth, cookie, bearer, and `*-key` forms. Credentials do not belong
+in this file.
+
+For ACP, eager preflight opens a throwaway session for every used rung, validates
+its advertised catalogue, and applies every requested setting through
+`session/set_config_option`. Only after every setter succeeds does the scheduler
+begin. Each dispatched question opens and configures its own session again before
+`session/prompt`. Thus an unsupported or setter-refusing late fallback cannot
+spend tokens on earlier rungs. For
+agent-deck, the runner sends nothing until `agent-deck list --json` identifies
+one existing session whose provider, model, thinking level, and output limit
+match every declared constraint. Provider metadata must be explicit: a tool
+name such as `claude` is a harness and is not evidence of Anthropic rather
+than Bedrock or Vertex. Agent-deck exposes no generic metadata for
+backend-specific `options`, so a deck realization carrying them is refused.
+The runner neither creates nor mutates deck sessions.
+
+A profile chain and a Haskell `fallingBackTo` chain cannot both own one pin.
+That ambiguity is refused before startup. YAML fallbacks acquire stable runtime
+axes (`deep-thinker#2`, `deep-thinker#3`, and so on), preserving memo identity
+while the header and machine manifest retain their parent profile, concrete
+backend, provider, model, declared rung, and settings. The machine event journal
+records the generated axis that actually answered. Failover remains sequential and
+uses the existing recoverable-gap policy.
+
+The run header names each loaded file and effective realization. Machine runs
+persist the same data under `policy.routingSources` and
+`policy.realizations`. These records are the audit surface for the mapping; a
+symbolic pin by itself makes no claim about a provider model. Because Haskell
+may branch while building a program from `run.routes`, live commands hold the
+run sentinel fixed and rebuild until the program's pins and its target policy
+agree. A cycle or more than sixteen builds is a usage refusal; no backend has
+started at that point.
+
+#### Migrating a concrete Haskell ladder
+
+A concrete helper such as:
+
+```haskell
+broad party =
+  party `servedBy` "fable"
+    `fallingBackTo` "gemini-3.1-pro-preview"
+    `fallingBackTo` "opus"
+
+greeting <- ask (broad (model "hello-world-greeter")) prompt
+```
+
+becomes one symbolic pin in the workflow:
+
+```haskell
+greeting <-
+  ask (model "hello-world-greeter" `servedBy` "deep-thinker") prompt
+```
+
+Define `deep-thinker` under `profiles` in routing.yaml, placing the former
+`fable`, Gemini, and Opus particulars in its ordered `chain`, with a router,
+model, thinking level, and output bound on every rung. Remove the Haskell
+`fallingBackTo` calls. Keeping both spellings is refused as ambiguous; this
+prevents two sources from claiming authority over fallback order. The
+`Workflows.HelloWorld` example in the sibling `agent-workflows` repository is
+the runnable migration.
+
+#### Diagnostics and pre-spend refusals
+
+Routing failures are divided by the boundary at which they are known:
+
+* YAML syntax, unknown fields or versions, duplicate names, missing required
+  `thinking` or `max-output`, unresolved routers, invalid limits, suspicious
+  option keys, ambiguous Haskell/YAML chains, and run-fact fixed-point cycles
+  exit `1` before a backend starts. The diagnostic begins `routing
+  configuration:` or `refusing to start:` and names the file, profile, or
+  generated axis responsible.
+* ACP catalogue or setter mismatches exit `2` with `cannot realize the requested
+  routing profile` or the adapter's `session/set_config_option` refusal. Every
+  used rung is applied on a throwaway session before the scheduler starts; no
+  `session/prompt` is sent when any setter fails.
+* Agent-deck metadata mismatches exit `2` with the same realization phrase.
+  The message distinguishes an absent session, ambiguous id/title, missing
+  provider or generation metadata, and a mismatched value. No `session send`
+  occurs.
+* On success, the `routing configuration:` header lists each loaded file and
+  effective rung, including backend options as `key=value` rather than names
+  alone. Failover narration names the selected generated axis; machine
+  manifests retain the declared chain, and each `occurrence.completed.source`
+  in the event journal identifies the rung that actually answered.
+
+Threaded executions in this repository use `+RTS -N8 -RTS`. Open-ended `-N` is
+not used, because its capability count follows the host and can saturate
+machines with very large core counts.
+
 `plan` and `run` both take `--require-pinned`, which refuses the program —
 before it is planned, before an adapter is started, before anything is spent —
 if any question put to a *model* does not say `served by` which model serves it

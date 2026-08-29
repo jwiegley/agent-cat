@@ -215,14 +215,13 @@
 --   answers the agent's requests with the agent's own ids, so a @result@ whose
 --   id is not the one in flight is a desynchronized stream, and continuing to
 --   read one is how a reply gets attributed to the wrong question.
--- * __No @session\/load@, no @session\/fork@, no scope calls.__ v1 opens
---   sessions of its own; the model and mode axes travel in 'renderQ'\'s header,
---   which is the fallback @renderQ@ itself documents for a transport with no
---   call for them (@Exec.lean:508@: "select via the protocol where the
---   protocol says how, otherwise say it in words\"; it is what
---   "Agentic.AgentDeck" does, for want of any call at all). Capabilities are
---   still read at the handshake, because that is what a client that later wants
---   to ask for a handoff must not skip.
+-- * __No @session\/load@, no @session\/fork@ and no mode call.__ v1 opens
+--   sessions of its own. The symbolic model and mode axes still travel in
+--   'renderQ'\'s header; when routing policy also names a concrete model or
+--   generation setting, 'worldOfAcpConfigured' applies the adapter's advertised
+--   @session\/set_config_option@ before the prompt. An unconfigured question
+--   makes no such call. Capabilities are still read at the handshake, because
+--   that is what a client that later wants to ask for a handoff must not skip.
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
@@ -254,6 +253,8 @@ module Agentic.Acp
 
     -- * The answering service
     worldOfAcp,
+    worldOfAcpConfigured,
+    preflightAcpRealization,
     worldOfAcpWith,
     acpGap,
     sayAcp,
@@ -312,6 +313,8 @@ import qualified Data.Aeson as A
 import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString.Char8 as BS
+import Data.List (find)
+import Data.Maybe (mapMaybe)
 import qualified Data.ByteString.Lazy as BL
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
 import Data.Map.Strict (Map)
@@ -373,7 +376,8 @@ import Agentic.Exec
     withTransportGaps,
     newTurnLaneIO,
   )
-import Agentic.Plan (Intent (..), Q (..), Request (..), SCode, fromSCode)
+import Agentic.Plan (Intent (..), Q (..), QScope (scopeModelAxis), Request (..), SCode, fromSCode)
+import Agentic.RoutingConfig (Realization (..), thinkingName)
 import Agentic.Raw (Code)
 import Agentic.WF (wft)
 
@@ -564,6 +568,8 @@ data AcpError
   | -- | The agent answered a call with a JSON-RPC error: the program, the
     -- method, the error object.
     AcpRefused !Text !Text !Text
+  | -- | A requested model or generation setting is absent or unavailable.
+    AcpConfiguration !Text !Text
   | -- | A request outran 'acpTurnTimeoutMs': the program, the budget, and the
     -- question that was being put.
     AcpTimedOut !Text !Int !Text
@@ -599,6 +605,8 @@ renderAcpError = \case
     "'" <> prog <> "' is not speaking ACP v1 as this client implements it: " <> why
   AcpRefused prog method err ->
     "'" <> prog <> "' answered '" <> method <> "' with error " <> clipText err
+  AcpConfiguration prog why ->
+    "'" <> prog <> "' cannot realize the requested routing profile: " <> why
   AcpTimedOut prog ms what ->
     "'"
       <> prog
@@ -878,6 +886,8 @@ data Acp = Acp
     acpSteerAcks :: !(MVar (Map Text (MVar Bool))),
     acpNextId :: !(IORef Int),
     acpSession :: !(IORef (Maybe Text)),
+    -- | Configuration options advertised by the current session.
+    acpConfigOptions :: !(IORef [ConfigOption]),
     acpCaps :: !(IORef Capabilities),
     -- | The question under way and how a permission request arriving during it
     -- is answered. 'sayAcp' sets it immediately before each prompt, because
@@ -971,6 +981,7 @@ connectAcp cfg = do
       <*> newMVar Map.empty
       <*> newIORef 0
       <*> newIORef Nothing
+      <*> newIORef []
       <*> newIORef (Capabilities False False False Null)
       <*> newIORef ("no question (the handshake, or a caller that set none)", Cancel)
       <*> newTurnLaneIO
@@ -1284,11 +1295,113 @@ newSession acp = do
   case field "sessionId" res >>= textOf of
     Just sid -> do
       writeIORef (acpSession acp) (Just sid)
+      writeIORef (acpConfigOptions acp) (configOptionsOf res)
       chat (acpConfig acp) ("session " <> sid)
       pure sid
     Nothing ->
       throwIO . AcpProtocol (T.pack (acpProgram acp)) $
         "session/new returned no sessionId: " <> clipText (compact res)
+
+-- | The small part of an ACP configuration option needed to select a value.
+data ConfigOption = ConfigOption
+  { configOptionId :: !Text,
+    configOptionCategory :: !(Maybe Text),
+    configOptionType :: !(Maybe Text),
+    configOptionValues :: ![Value]
+  }
+
+configOptionsOf :: Value -> [ConfigOption]
+configOptionsOf response = case field "configOptions" response of
+  Just (Array values) -> mapMaybe configOptionOf (V.toList values)
+  _ -> []
+
+configOptionOf :: Value -> Maybe ConfigOption
+configOptionOf value = do
+  optionId <- field "id" value >>= textOf
+  let category = field "category" value >>= textOf
+      optionType = field "type" value >>= textOf
+      values = case field "options" value of
+        Just (Array choices) -> mapMaybe (field "value") (V.toList choices)
+        _ -> []
+  pure (ConfigOption optionId category optionType values)
+
+-- | Prove one realization on a throwaway session before the scheduler starts.
+-- This checks both the advertised catalogue and every setter response; no prompt
+-- is sent, and normal execution opens and configures its own fresh session.
+preflightAcpRealization :: Acp -> Realization -> IO ()
+preflightAcpRealization acp realization = do
+  void (newSession acp)
+  configureSession acp realization
+
+configureSession :: Acp -> Realization -> IO ()
+configureSession acp realization = do
+  desired <- desiredConfiguration acp realization
+  sid <- readIORef (acpSession acp) >>= maybe (configurationError acp "there is no current session") pure
+  mapM_ (uncurry (setConfigOption acp sid)) desired
+
+desiredConfiguration :: Acp -> Realization -> IO [(ConfigOption, Value)]
+desiredConfiguration acp realization = do
+  options <- readIORef (acpConfigOptions acp)
+  model <- required "model" ["model"] ["model"] options
+  thinkingOption <- required "thinking" ["thought_level", "thinking"] ["effort", "thinking", "thought_level"] options
+  maxOutputOption <- required "max-output" ["max_output", "max_output_tokens"] ["max-output", "max_output", "maxOutput", "max_tokens", "maxOutputTokens"] options
+  let maxOutputValue = case configOptionType maxOutputOption of
+        Just "number" -> A.toJSON (realizationMaxOutput realization)
+        Just "integer" -> A.toJSON (realizationMaxOutput realization)
+        _ -> String (T.pack (show (realizationMaxOutput realization)))
+  custom <- traverse (\(name, value) -> (,) <$> required ("option " <> name) [] [name] options <*> pure value) (Map.toList (realizationOptions realization))
+  let desired =
+        [ (model, String (realizationModel realization)),
+          (thinkingOption, String (thinkingName (realizationThinking realization))),
+          (maxOutputOption, maxOutputValue)
+        ]
+          <> custom
+      ids = map (configOptionId . fst) desired
+  case duplicateText ids of
+    Just optionId -> configurationError acp ("configuration option '" <> optionId <> "' was requested twice")
+    Nothing -> pure ()
+  mapM_ (uncurry (validateConfigOption acp)) desired
+  pure desired
+  where
+    required label categories ids options =
+      case find (\option -> maybe False (`elem` categories) (configOptionCategory option) || configOptionId option `elem` ids) options of
+        Just option -> pure option
+        Nothing -> configurationError acp (label <> " is not advertised by this adapter")
+
+validateConfigOption :: Acp -> ConfigOption -> Value -> IO ()
+validateConfigOption acp option value = do
+  let allowed = configOptionValues option
+  when (not (null allowed) && value `notElem` allowed) $
+    configurationError acp
+      ( "option '"
+          <> configOptionId option
+          <> "' does not offer "
+          <> compact value
+          <> "; offered values: "
+          <> T.intercalate ", " (map compact allowed)
+      )
+
+setConfigOption :: Acp -> Text -> ConfigOption -> Value -> IO ()
+setConfigOption acp sid option value =
+  void $
+    request
+      acp
+      ("configuration option " <> configOptionId option)
+      "session/set_config_option"
+      (object ["sessionId" .= sid, "configId" .= configOptionId option, "value" .= value])
+      (const (pure ()))
+      False
+
+configurationError :: Acp -> Text -> IO a
+configurationError acp = throwIO . AcpConfiguration (T.pack (acpProgram acp))
+
+duplicateText :: [Text] -> Maybe Text
+duplicateText = go Map.empty
+  where
+    go _ [] = Nothing
+    go seen (value : rest)
+      | value `Map.member` seen = Just value
+      | otherwise = go (Map.insert value () seen) rest
 
 -- | Send one text prompt and collect the turn. Chunks accumulate in arrival
 -- order; the request's own reply is what ends the turn, so no heuristic decides
@@ -1388,11 +1501,15 @@ steeringTimingText NextBoundary = "next-boundary"
 -- connection's copy is the recipe it was started from. Pass the one 'withAcp'
 -- was given and the two are the same object.
 worldOfAcp :: AcpConfig -> Acp -> WorldIO
-worldOfAcp = worldOfAcpWith settings
+worldOfAcp = worldOfAcpConfigured (const Nothing)
+
+-- | An ACP world that applies the realization selected by runtime model axis
+-- after opening a session and before sending its first prompt.
+worldOfAcpConfigured :: (Text -> Maybe Realization) -> AcpConfig -> Acp -> WorldIO
+worldOfAcpConfigured select = worldOfAcpConfiguredWith settings select
   where
     settings =
       defaultExecSettings {esLog = stderrLog, esRetryUndecodable = defaultRetries}
-
 -- | 'worldOfAcp' under an operator's 'Agentic.Exec.ExecSettings'.
 --
 -- __This is where the failure vocabulary meets this transport.__ An 'AcpError'
@@ -1407,11 +1524,16 @@ worldOfAcp = worldOfAcpWith settings
 -- that answer is @RetryHere@, and otherwise handed to the fail-over walk. With
 -- no chain declared every diagnostic is the one it always was.
 worldOfAcpWith :: ExecSettings -> AcpConfig -> Acp -> WorldIO
-worldOfAcpWith st cfg acp =
+worldOfAcpWith st = worldOfAcpConfiguredWith st (const Nothing)
+
+worldOfAcpConfiguredWith :: ExecSettings -> (Text -> Maybe Realization) -> AcpConfig -> Acp -> WorldIO
+worldOfAcpConfiguredWith st select cfg acp =
   WorldIO
     { worldAskIO = \c q -> do
         when (acpFreshPerQuestion cfg) (void (newSession acp))
-        withTransportGaps st acpGap c q (askDecodingWith st c q (sayAcp cfg acp c q)),
+        withTransportGaps st acpGap c q $ do
+          configureRequest select acp q
+          askDecodingWith st c q (sayAcp cfg acp c q),
       worldAskAttemptIO = \context c q -> do
         when (acpFreshPerQuestion cfg) (void (newSession acp))
         capabilities <- acpCapabilities acp
@@ -1420,13 +1542,20 @@ worldOfAcpWith st cfg acp =
               if capSteerAttempt capabilities
                 then withAttemptSteering context (steerTurn acp)
                 else context
-        withTransportGaps controlledSettings acpGap c q $
+        withTransportGaps controlledSettings acpGap c q $ do
+          configureRequest select acp q
           askDecodingWith controlledSettings c q $ \extra ->
             withPhysicalAttempt controlled (addresseeWord (qAddressee (reqQuestion q))) $
               \attempt ->
                 sayAcpWith (emitAttemptOutput controlled attempt) cfg acp c q extra,
       worldTurnLane = \_ _ -> Just (acpTurnLane acp)
     }
+
+configureRequest :: (Text -> Maybe Realization) -> Acp -> Request c -> IO ()
+configureRequest select acp request' =
+  case scopeModelAxis (qScope (reqQuestion request')) >>= select of
+    Nothing -> pure ()
+    Just realization -> configureSession acp realization
 
 -- | Which gap an 'AcpError' is, and the evidence — @Nothing@ for an exception
 -- that is not this transport's to classify, which is rethrown untouched.

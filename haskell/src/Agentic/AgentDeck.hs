@@ -112,6 +112,7 @@ module Agentic.AgentDeck
     -- * The answering service
     worldOfDeck,
     worldOfDeckWith,
+    verifyDeckRealizations,
     sayDeck,
 
     -- * What goes on the wire
@@ -135,6 +136,7 @@ module Agentic.AgentDeck
   )
 where
 
+import Control.Applicative ((<|>))
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.Exception
@@ -151,14 +153,17 @@ import qualified Data.Aeson as A
 import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString as BS
-import Data.Maybe (isNothing)
+import Data.Maybe (isNothing, mapMaybe)
+import Data.Scientific (floatingOrInteger)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (decodeUtf8With, encodeUtf8)
 import Data.Text.Encoding.Error (lenientDecode)
+import qualified Data.Vector as V
 import Data.Word (Word64)
 import GHC.Clock (getMonotonicTimeNSec)
 import System.Exit (ExitCode (..))
+import Text.Read (readMaybe)
 import System.IO (Handle, hPutStrLn, stderr)
 import System.Process
   ( CreateProcess (..),
@@ -196,6 +201,12 @@ import Agentic.Plan
     fromSCode,
   )
 import Agentic.Raw (Code)
+import Agentic.RoutingConfig
+  ( Realization (..),
+    ResolvedRealization (..),
+    Router (routerProvider),
+    thinkingName,
+  )
 
 -- ---------------------------------------------------------------------------
 -- The configuration
@@ -259,6 +270,8 @@ data DeckError
   | -- | A command's stdout was not the JSON object expected: the command, the
     -- stdout it produced.
     DeckUnreadable !Text !Text
+  | -- | An existing session cannot prove the requested routing constraints.
+    DeckConfiguration !Text !Text
   | -- | The session is not in a state that can answer: the session, and the
     -- @status\/substate@ observed.
     DeckNotAlive !Text !Text
@@ -288,6 +301,8 @@ renderDeckError = \case
       <> "' did not answer with the JSON object expected; it said '"
       <> clipText (trimAscii out)
       <> "'"
+  DeckConfiguration sess why ->
+    "session '" <> sess <> "' cannot realize the requested routing profile: " <> why
   DeckNotAlive sess seen ->
     "session '"
       <> sess
@@ -362,6 +377,69 @@ parseSessionState raw = do
   -- would put a stray @\/@ in every message that quotes one.
   pure (SessionState st (nonEmptyText (lookupString "substate" o)))
 
+-- | Model facts exposed by @agent-deck list --json@. Missing fields remain
+-- missing: verification must not turn absence into a backend default.
+data SessionMetadata = SessionMetadata
+  { metadataId :: !Text,
+    metadataTitle :: !Text,
+    metadataProvider :: !(Maybe Text),
+    metadataModel :: !(Maybe Text),
+    metadataThinking :: !(Maybe Text),
+    metadataMaxOutput :: !(Maybe Integer)
+  }
+  deriving (Eq, Show)
+
+parseSessionMetadata :: Text -> Maybe [SessionMetadata]
+parseSessionMetadata raw = case A.decodeStrict (encodeUtf8 raw) of
+  Just (Array values) -> Just (mapMaybe metadataOf (V.toList values))
+  _ -> Nothing
+
+metadataOf :: Value -> Maybe SessionMetadata
+metadataOf (Object object) = do
+  identifier <- lookupString "id" object
+  let title = maybe identifier id (lookupString "title" object)
+      provider = nonEmptyText (lookupString "provider" object)
+      model = lookupString "model_id" object <|> lookupString "model" object
+      arguments = lookupStrings "extra_args" object
+      thinking = lookupString "thinking" object <|> lookupString "thinking_level" object <|> flagValue ["--effort", "--thinking"] arguments
+      maxOutput =
+        lookupInteger "max_output" object
+          <|> lookupInteger "max_output_tokens" object
+          <|> (flagValue ["--max-output", "--max-output-tokens", "--max-tokens"] arguments >>= readMaybe . T.unpack)
+  pure (SessionMetadata identifier title provider model thinking maxOutput)
+metadataOf _ = Nothing
+
+
+-- | Verify every declared constraint before the first @session send@. An empty
+-- list is the legacy unconfigured path and performs no additional command.
+verifyDeckRealizations :: DeckConfig -> [ResolvedRealization] -> IO ()
+verifyDeckRealizations _ [] = pure ()
+verifyDeckRealizations cfg expected = do
+  deadline <- deadlineIn (deckTimeoutMs cfg)
+  (out, cmd) <- deckCommand cfg deadline ["list", "--json"]
+  entries <- maybe (throwIO (DeckUnreadable cmd out)) pure (parseSessionMetadata out)
+  metadata <- case filter matches entries of
+    [entry] -> pure entry
+    [] -> configurationError ("is absent from `agent-deck list --json`")
+    _ -> configurationError "matches more than one session id/title"
+  mapM_ (verify metadata) expected
+  where
+    matches entry = deckSession cfg == metadataId entry || deckSession cfg == metadataTitle entry
+    configurationError = throwIO . DeckConfiguration (deckSession cfg)
+    verify metadata realization = do
+      let spec = resolvedSpec realization
+          expectedProvider = routerProvider (resolvedRouter realization)
+      require "provider" expectedProvider (metadataProvider metadata)
+      require "model" (realizationModel spec) (metadataModel metadata)
+      require "thinking" (thinkingName (realizationThinking spec)) (metadataThinking metadata)
+      require "max-output" (realizationMaxOutput spec) (metadataMaxOutput metadata)
+      when (not (null (realizationOptions spec))) $
+        configurationError "agent-deck exposes no generic metadata for backend-specific options"
+    require label wanted = \case
+      Nothing -> configurationError ("does not report " <> label <> "; required " <> tshow wanted)
+      Just actual
+        | actual == wanted -> pure ()
+        | otherwise -> configurationError ("reports " <> label <> " " <> tshow actual <> ", required " <> tshow wanted)
 -- ---------------------------------------------------------------------------
 -- The reply
 -- ---------------------------------------------------------------------------
@@ -587,6 +665,29 @@ sendMessage cfg dl message =
       cfg
       dl
       ["session", "send", T.unpack (deckSession cfg), T.unpack message]
+
+lookupStrings :: Text -> KM.KeyMap Value -> [Text]
+lookupStrings key object = case KM.lookup (K.fromText key) object of
+  Just (Array values) -> [value | String value <- V.toList values]
+  _ -> []
+
+lookupInteger :: Text -> KM.KeyMap Value -> Maybe Integer
+lookupInteger key object = KM.lookup (K.fromText key) object >>= \case
+  Number value -> either (const Nothing) Just (floatingOrInteger value :: Either Double Integer)
+  String value -> readMaybe (T.unpack value)
+  _ -> Nothing
+
+flagValue :: [Text] -> [Text] -> Maybe Text
+flagValue names = go
+  where
+    go [] = Nothing
+    go [arg] = inline arg
+    go (arg : value : rest)
+      | arg `elem` names = Just value
+      | otherwise = inline arg <|> go (value : rest)
+    inline arg =
+      let (name, suffix) = T.breakOn "=" arg
+       in if name `elem` names then T.stripPrefix "=" suffix else Nothing
 
 -- | @agent-deck session show \<id\> --json@, parsed.
 sessionState :: DeckConfig -> Deadline -> IO SessionState

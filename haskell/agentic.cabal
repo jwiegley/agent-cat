@@ -116,6 +116,7 @@ common settings
     , template-haskell
     , text
     , time
+    , yaml
     , unix
     , vector
 
@@ -140,6 +141,7 @@ library
     Agentic.Schema.Json
     Agentic.Schema.TH
     Agentic.Route
+    Agentic.RoutingConfig
     Agentic.Runtime.Control
     Agentic.Runtime.Machine
     Agentic.Runtime.Protocol
@@ -223,6 +225,24 @@ executable policy-probe
   build-depends:
     , agentic
     , agentic:examples
+
+  ghc-options:     -threaded
+
+-- Focused YAML routing schema, discovery, and layering regression probe.
+executable routing-config-probe
+  import:          settings
+  hs-source-dirs:  test
+  main-is:         RoutingConfigProbe.hs
+  build-depends:   agentic
+  ghc-options:     -threaded
+
+-- Live synthetic programs that converge or cycle through run.routes.
+executable routing-fixed-point-probe
+  import:          settings
+  hs-source-dirs:  test
+  main-is:         RoutingFixedPointProbe.hs
+  build-depends:   agentic
+  ghc-options:     -threaded
 
 -- Focused schema algebra/JSON-representation regression probe.
 executable schema-probe

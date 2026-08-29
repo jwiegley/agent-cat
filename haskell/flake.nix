@@ -11,7 +11,7 @@
       let
         pkgs = import nixpkgs { inherit system; };
 
-        # One GHC with `aeson` and `QuickCheck` already in its package
+        # One GHC with `aeson`, `QuickCheck` and `yaml` already in its package
         # database. `aeson` drags in every other library the cabal file names —
         # text, bytestring, containers, vector, scientific — and base,
         # directory, filepath and process ship with the compiler, so the whole
@@ -25,7 +25,7 @@
         # dependency, not a test-suite one: the generators are part of the
         # product's conformance surface, and `bisim` is an executable that
         # ships beside `tier0` and `tier1`.
-        ghc = pkgs.haskellPackages.ghcWithPackages (p: [ p.aeson p.QuickCheck ]);
+        ghc = pkgs.haskellPackages.ghcWithPackages (p: [ p.aeson p.QuickCheck p.yaml ]);
       in {
         devShells.default = pkgs.mkShell {
           buildInputs = [

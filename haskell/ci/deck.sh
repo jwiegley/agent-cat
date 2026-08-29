@@ -42,7 +42,7 @@ play() {
   out="$state/out"
   DECK_STUB_STATE="$state" DECK_STUB_MODE="$mode" \
     PATH="$state/bin:$PATH" \
-    nix develop -c cabal run -v0 agentic-run -- "$@" > "$out" 2>&1
+    nix develop -c cabal run -v0 agentic-run -- "$@" +RTS -N8 -RTS > "$out" 2>&1
   code=$?
   sends=$( [ -f "$state/sends" ] && cat "$state/sends" || echo 0 )
 }
@@ -257,6 +257,7 @@ out="$state/out"
 DECK_STUB_MODE=happy PATH="$state/bin:$PATH" \
   nix develop -c cabal run -v0 agentic-run -- \
     run harden --session pane-a --route 'deep=deck:pane-b' --poll 20 --timeout 30000 \
+    +RTS -N8 -RTS \
     > "$out" 2>&1
 code=$?
 

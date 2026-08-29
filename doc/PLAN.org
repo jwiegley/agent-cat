@@ -866,6 +866,40 @@ Two small residues of acat-192/acat-9kn: prune the deriving clauses if nothing w
 ]
 #+end_src
 
+* DONE [#B] Concurrent equal failover asks can abort nondeterministically
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-5vr
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-08-29 Sat 01:41]
+:MODIFIED: [2026-08-29 Sat 02:44]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-29 Sat 02:28]
+:CLOSE_REASON: Memo reservation now encloses the whole fallback walk; concurrent equal asks share final success/failure. Restored concurrent regression passes 100/100 at -N8.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+At +RTS -N8, two simultaneous identical deep asks once shared only a single candidate attempt, so one could observe the primary gap while the other continued to the broad fallback. The memo reservation now encloses the entire fallback walk: equal concurrent occurrences share its final success or final failure. The applicative concurrent regression remains intact and passed 100/100 at -N8.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-5vr",
+    "depends_on_id": "acat-lb5",
+    "type": "discovered-from",
+    "created_at": "2026-08-29T08:41:23.917866Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#C] Fix a package-wide classical Decidable convention before the folds
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -2901,6 +2935,24 @@ static <= bounded 0 in the order, but scale n static = bounded n while scale n (
   }
 ]
 #+end_src
+
+* DONE [#B] Add layered YAML routing profiles
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-lb5
+:LABELS:   []
+:ISSUE_TYPE: feature
+:CREATED:  [2026-08-28 Fri 23:53]
+:MODIFIED: [2026-08-29 Sat 02:22]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-29 Sat 02:22]
+:CLOSE_REASON: Added layered YAML symbolic routing profiles with strict ACP/deck realization, provenance, compatibility, documentation, and regression gates.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Add versioned user/project YAML routing configuration that maps symbolic workflow profiles to ordered ACP/agent-deck provider/model/thinking/max-output realizations, preserving legacy CLI behavior.
 
 * DONE [#B] Connection research: extractor vs FFI vs subprocess vs bisimulation — how the Haskell program meets the Lean proofs
 :PROPERTIES:
