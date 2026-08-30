@@ -1,3 +1,4 @@
 .lake/
 .envrc.cache
 pi-extension/node_modules/
+doc/build/

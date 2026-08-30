@@ -1,0 +1,341 @@
+{
+  "runId": "agent-cat-manual-mtc8ywaw-oqxenx",
+  "workflow": "agent_cat_manual",
+  "script": "workflows/agent-cat-manual.js",
+  "scriptSha256": "10f66aa25cf654376ce436c1b1e0c354b2f0697962f45668e7ab8ce19e2c2654",
+  "args": {
+    "mode": "update",
+    "smoke": true,
+    "scope": "One two-sentence Texinfo paragraph explaining that a Haskell Program pairs RawProgram with a typed Plan and that Lean is used for conformance testing rather than production execution.",
+    "requirements": "Exercise all fourteen calls and six phases. Keep every result strictly bounded. The Validate phase must run actual makeinfo Info and HTML commands against a temporary wrapped candidate and return exact outcomes. Every review finding must receive an applied or deferred stable-ID disposition, and every intermediate gaps array must be empty for complete=true."
+  },
+  "status": {
+    "state": "completed",
+    "phase": "Validate",
+    "totalAgents": 14,
+    "doneAgents": 14,
+    "errorAgents": 0,
+    "skippedAgents": 0
+  },
+  "startedAt": "2026-08-28T01:02:37.064Z",
+  "completedAt": "2026-08-28T01:18:41.635Z",
+  "durationMs": 964538,
+  "result": {
+    "request": {
+      "mode": "update",
+      "smoke": true,
+      "scope": "One two-sentence Texinfo paragraph explaining that a Haskell Program pairs RawProgram with a typed Plan and that Lean is used for conformance testing rather than production execution.",
+      "requirements": "Exercise all fourteen calls and six phases. Keep every result strictly bounded. The Validate phase must run actual makeinfo Info and HTML commands against a temporary wrapped candidate and return exact outcomes. Every review finding must receive an applied or deferred stable-ID disposition, and every intermediate gaps array must be empty for complete=true.",
+      "manualPath": "doc/agent-cat.texi",
+      "coverageCommand": "python3 doc/check-manual-coverage.py",
+      "integrationCommands": [
+        "make -C doc check",
+        "make -C doc check-haskell"
+      ]
+    },
+    "inventory": {
+      "summary": "Current executable sources fully support the bounded paragraph. Haskell `Program` stores an emitted `RawProgram` beside a typed `Plan '[] ()`; the production CLI inspects the former and executes the latter. Lean checks and observes serialized programs through the conformance oracle, whose committed corpus is replayed by Haskell tests. All five specialist roles have a current source, and no additional manual coverage is required.",
+      "sourceMap": [
+        "[purpose-architecture] `haskell/src/Agentic/Builder.hs:1655-1666`, `Program`, `program`: the record fields are `progRawOut :: RawProgram` and `progPlan :: Plan '[] ()`, built together from one block.",
+        "[mathematics] `Agentic/Core/Dsl/Check.lean:1260-1264`, `Dsl.checkProgram`: a successful Lean check maps `RawProgram` to `Plan [] Unit`, establishing the typed Lean-side counterpart.",
+        "[operations] `haskell/src/Agentic/Cli.hs:1671-1685`, `walkWith`: production derives routing from `progRawOut` and calls `runPlanWith ... (progPlan prog)`; this is the actual execution path.",
+        "[user-guide] `haskell/example/Example/Harden.hs:161-162`, `hardenProgram`: the current compiled authoring form is `hardenProgram :: Program` built with `workflow W.do`; procedural detail is unnecessary for this sentence.",
+        "[reference] `haskell/src/Agentic/Builder.hs:160-162`, module exports: `Program (..)`, `SomeFn (..)`, and `program` are the exact public names relevant to the paragraph.",
+        "[conformance] `conformance/Conformance.lean:9-15,337-371`, `observeAt`, `observe`: the file marks itself test-only, checks a `RawProgram`, and emits observations for the frozen corpus.",
+        "[corpus contract] `test/CorpusGen.lean:8-27`, `replyFor`: committed requests are the specification and are re-observed through the same functions served by `conformance-oracle`; regeneration must be a no-op.",
+        "[live overview] `README.md:8-16,81-84`, “two halves” and “conformance boundary”: current foundational prose assigns authoring and execution to Haskell and the oracle/corpus role to Lean."
+      ],
+      "requiredTopics": [
+        "One Texinfo paragraph containing exactly two sentences.",
+        "Sentence 1: `Program` pairs `@code{progRawOut :: RawProgram}` with `@code{progPlan :: Plan '[] ()}`; both are built together.",
+        "Sentence 2: production executes the Haskell Plan without starting Lean; Lean is used by oracle/corpus conformance testing.",
+        "Do not expand into examples, CLI reference, proofs, or historical architecture."
+      ],
+      "staleSources": [
+        "Retired `.wf` syntax and parser: `test/CorpusGen.lean:8-12` and `README.md:288-297` explicitly say no parser or `.wf` files remain.",
+        "Deleted Lean production runtimes: `Agentic/Core/Report.lean:524-539`, “Where the run report went,” records that their consumers are gone and `agentic-run` now reports Haskell runs.",
+        "Superseded `Term` calculus: `doc/research/term-algebra-results.md:1-30` is explicitly a permanent historical record of an excised stratum superseded by `Agentic/Core/**`."
+      ],
+      "gaps": []
+    },
+    "draftLedger": [
+      {
+        "id": "purpose-architecture",
+        "status": "complete",
+        "result": {
+          "texinfo": "In Haskell, @code{Program} pairs the emitted raw form, @code{progRawOut :: RawProgram}, with the typed execution plan, @code{progPlan :: Plan '[] ()}, and @code{program} constructs the two fields together.  Production reads the raw form for routing and executes the Haskell @code{Plan} without starting Lean; Lean checks and observes @code{RawProgram} values through the conformance oracle, and the resulting frozen corpus is replayed by Haskell tests.",
+          "evidence": [
+            "`haskell/src/Agentic/Builder.hs:1653-1666` defines `Program` with the exact two fields and shows `program` constructing them together.",
+            "`haskell/src/Agentic/Cli.hs:1671-1685` derives routing from `progRawOut prog` and passes `progPlan prog` to `runPlanWith`, establishing the production path.",
+            "`conformance/Conformance.lean:9-15,337-371` identifies the oracle as test-only and shows `observeAt` applying `checkProgram` to a `RawProgram` before producing observations.",
+            "`test/CorpusGen.lean:8-27` states that frozen requests are re-observed through the functions served by the oracle; `haskell/ci/tier0.sh:1-9` confirms that Haskell replays the committed corpus with no Lean present.",
+            "Placement suggestion: use the existing node `Architecture and Guarantees` and section `Two implementations and one boundary` at `doc/agent-cat.texi:147-154`; this paragraph needs no new node or section.",
+            "Review dispositions: `PA-REV-001` applied—avoided claiming that both fields arise solely from the workflow block; `PA-REV-002` applied—distinguished Lean-derived corpus observations from the Lean-free Haskell replay. No finding was deferred.",
+            "Info validation used temporary wrapper `/var/folders/1q/mmxrlqw15hvd4gvfc86kjwhh0000gn/T//agent-cat-purpose-architecture-final.MZNcUz/candidate.texi`. Exact command: `makeinfo --no-split --output=/var/folders/1q/mmxrlqw15hvd4gvfc86kjwhh0000gn/T//agent-cat-purpose-architecture-final.MZNcUz/candidate.info /var/folders/1q/mmxrlqw15hvd4gvfc86kjwhh0000gn/T//agent-cat-purpose-architecture-final.MZNcUz/candidate.texi`. Exit 0; stdout 0 bytes; stderr 0 bytes; Info output 677 bytes.",
+            "HTML validation used the same temporary wrapper. Exact command: `makeinfo --html --no-split --output=/var/folders/1q/mmxrlqw15hvd4gvfc86kjwhh0000gn/T//agent-cat-purpose-architecture-final.MZNcUz/candidate.html /var/folders/1q/mmxrlqw15hvd4gvfc86kjwhh0000gn/T//agent-cat-purpose-architecture-final.MZNcUz/candidate.texi`. Exit 0; stdout 0 bytes; stderr 0 bytes; HTML output 1487 bytes. The temporary directory was then removed."
+          ],
+          "coveredTopics": [
+            "Exactly one Texinfo paragraph containing two sentences.",
+            "The Haskell `Program` pairing and joint construction of `RawProgram` and typed `Plan`.",
+            "The Lean-free production execution path and Lean's oracle/frozen-corpus conformance role.",
+            "Existing node and section placement, with no historical syntax or superseded runtime material."
+          ],
+          "gaps": []
+        }
+      },
+      {
+        "id": "mathematics",
+        "status": "complete",
+        "result": {
+          "texinfo": "@c Suggested placement: node Architecture and Guarantees, section Two implementations and one boundary.\n\nA Haskell @code{Program} pairs @code{progRawOut :: RawProgram} with the typed @code{progPlan :: Plan '[] ()}, and @code{program} constructs both together from one function table and block.  The production path executes @code{progPlan} without starting Lean; Lean supplies checker and observer results for oracle-based and frozen-corpus conformance tests.",
+          "evidence": [
+            "`haskell/src/Agentic/Builder.hs:1655-1666` defines `Program` with the exact Haskell fields `progRawOut :: RawProgram` and `progPlan :: Plan '[] ()`; `program fns b` constructs both fields in one record value.",
+            "`haskell/src/Agentic/Cli.hs:1671-1685` derives routing information from `progRawOut prog` and passes `progPlan prog` directly to `runPlanWith`, establishing the production execution path.",
+            "`Agentic/Core/Dsl/Check.lean:1260-1264` gives Lean's separate checking type, `RawProgram -> Except CheckError (Plan [] Unit)`. This supports conformance checking but must not replace the exact Haskell type `Plan '[] ()` in the paragraph.",
+            "`conformance/Conformance.lean:9-15,337-371` identifies the oracle as test-only and implements `observeAt` by applying `checkProgram` to a `RawProgram`; successful checks produce the observations used for conformance.",
+            "`test/CorpusGen.lean:8-27` states that frozen requests are re-observed through the functions served by `conformance-oracle` and that regeneration must be a no-op, supporting the frozen-corpus wording."
+          ],
+          "coveredTopics": [
+            "Exactly one two-sentence Texinfo paragraph.",
+            "Suggested placement under `Architecture and Guarantees` / `Two implementations and one boundary`.",
+            "Exact Haskell `Program` field types, their joint construction, and the separation between Haskell production execution and Lean-backed conformance testing."
+          ],
+          "gaps": []
+        }
+      },
+      {
+        "id": "operations",
+        "status": "complete",
+        "result": {
+          "texinfo": "A Haskell @code{Program} pairs @code{progRawOut :: RawProgram}, a first-order\nrepresentation used for inspection and conformance, with @code{progPlan :: Plan\n'[] ()}, the typed Haskell execution plan; @code{program} builds the pair\ntogether.  The production runner inspects @code{progRawOut} for routing and\nexecutes @code{progPlan}, whereas Lean supplies the oracle and regenerates the\nfrozen corpus of committed request/reply cases for conformance testing rather\nthan taking part in production execution.",
+          "evidence": [
+            "Placement suggestion: retain the existing @node{Architecture and Guarantees} and @section{Two implementations and one boundary}; this paragraph needs no new node or section.",
+            "haskell/src/Agentic/Builder.hs:1655-1666 defines Program with progRawOut :: RawProgram and progPlan :: Plan '[] (), and program constructs both fields together.",
+            "haskell/src/Agentic/Cli.hs:1671-1685 derives served chains from progRawOut and passes progPlan to runPlanWith, establishing the production path.",
+            "conformance/Conformance.lean:9-15 identifies the Lean oracle as test-only and states that the production runner never invokes it; conformance/Conformance.lean:337-371 checks RawProgram values and emits observations.",
+            "test/CorpusGen.lean:8-27 states that committed requests are re-observed through the functions served by conformance-oracle and that regeneration must leave the frozen corpus unchanged.",
+            "Validation used GNU texinfo 7.2. `makeinfo --no-split --output=/tmp/agent-cat-operations.ZdYPCA/candidate.info /tmp/agent-cat-operations.ZdYPCA/candidate.texi` exited 0 with empty stdout and stderr; `makeinfo --html --no-split --output=/tmp/agent-cat-operations.ZdYPCA/candidate.html /tmp/agent-cat-operations.ZdYPCA/candidate.texi` exited 0 with empty stdout and stderr. The temporary directory was removed by the command trap."
+          ],
+          "coveredTopics": [
+            "Exactly one Texinfo paragraph containing two sentences.",
+            "The Haskell Program pair and its exact field types.",
+            "Construction of both representations together.",
+            "Haskell production routing and Plan execution.",
+            "Lean oracle and frozen-corpus conformance duties, excluded from production execution."
+          ],
+          "gaps": []
+        }
+      },
+      {
+        "id": "user-guide",
+        "status": "complete",
+        "result": {
+          "texinfo": "",
+          "evidence": [
+            "`haskell/src/Agentic/Builder.hs:1655-1666` defines `Program` with `progRawOut :: RawProgram` and `progPlan :: Plan '[] ()`; `program` constructs both from the same block.",
+            "`haskell/src/Agentic/Cli.hs:1671-1685` reads `progRawOut prog` for routing and passes `progPlan prog` to `runPlanWith`, establishing the production path.",
+            "`conformance/Conformance.lean:9-15,337-371` identifies the oracle as test-only, checks a `RawProgram`, and emits observations; it states that the production runner never starts this process.",
+            "`doc/agent-cat.texi:154-187`, under `@node Architecture and Guarantees` and `@section Two implementations and one boundary`, already states both requested claims."
+          ],
+          "coveredTopics": [
+            "Out of scope for an additional user-guide draft: the requested architectural mechanics are already covered in the live manual, so adding the two-sentence paragraph would duplicate current material.",
+            "Existing node/section: `Architecture and Guarantees` / `Two implementations and one boundary`."
+          ],
+          "gaps": []
+        }
+      },
+      {
+        "id": "reference",
+        "status": "complete",
+        "result": {
+          "texinfo": "@code{Program} pairs @code{progRawOut :: RawProgram} with @code{progPlan :: Plan '[] ()}, and @code{program} constructs both values from the same workflow block. Production executes the Haskell @code{Plan} without starting Lean; Lean is a test dependency for conformance testing, which compares Haskell observations with the Lean oracle and its frozen corpus.",
+          "evidence": [
+            "`haskell/src/Agentic/Builder.hs:1655-1666` defines the two `Program` fields and constructs both in one record from the same `Blk '[]`.",
+            "`haskell/src/Agentic/Cli.hs:1671-1685` reads `progRawOut` for routing and passes `progPlan prog` to `runPlanWith`, establishing the production path.",
+            "`Agentic/Core/Dsl/Check.lean:1260-1264` maps a checked `RawProgram` to `Plan [] Unit`; `conformance/Conformance.lean:11-16,337-371` identifies this oracle as test-only and produces checked observations.",
+            "`test/CorpusGen.lean:15-27` treats committed requests as the specification and regenerates replies through the oracle functions, with regeneration required to be a no-op.",
+            "Place the paragraph under `@node Architecture and Guarantees`, in `@section Two implementations and one boundary`. The existing `@c COVER API Agentic.Workflow.Program support` marker at `doc/agent-cat.texi:1734` already satisfies the reference obligation; no new node, section, marker, or detailed reference prose is needed.",
+            "`python3 doc/check-manual-coverage.py` exited 0 with exact output: `manual coverage: 214 source items accounted for, classified, and indexed`.",
+            "Temporary wrapped candidate validation: `makeinfo --no-split --output=<tmp>/candidate.info <tmp>/candidate.texi` exited 0, with empty stdout and stderr and a nonempty Info artifact; `makeinfo --html --no-split --output=<tmp>/candidate.html <tmp>/candidate.texi` exited 0, with empty stdout and stderr and a nonempty HTML artifact.",
+            "No review finding was raised in this bounded draft call, so no stable-ID disposition is pending."
+          ],
+          "coveredTopics": [
+            "Exactly one Texinfo paragraph of two sentences.",
+            "The Haskell `Program` pairing and joint construction.",
+            "The production Haskell execution path and Lean's conformance-testing role.",
+            "Canonical manual placement and the absence of additional reference-coverage implications."
+          ],
+          "gaps": []
+        }
+      }
+    ],
+    "synthesis": {
+      "texinfo": "@c COVER API Agentic.Workflow.Program support\nA Haskell @code{Program} pairs the emitted raw representation @code{progRawOut :: RawProgram} with the typed execution plan @code{progPlan :: Plan '[] ()}, and @code{program} constructs both fields together.  Production inspects @code{progRawOut} for routing and executes @code{progPlan} without starting Lean; Lean checks and observes raw programs for conformance testing through its test-only oracle and the frozen corpus replayed by Haskell tests.",
+      "coveredIds": [
+        "purpose-architecture",
+        "mathematics",
+        "operations",
+        "user-guide",
+        "reference"
+      ],
+      "missingIds": [],
+      "evidence": [
+        "[purpose-architecture] `haskell/src/Agentic/Builder.hs:1655-1666` defines the two exact fields and constructs them together in one `Program` value.",
+        "[mathematics] `Agentic/Core/Dsl/Check.lean:1260-1264` gives Lean's checking result as `Plan [] Unit`; the paragraph retains the distinct, exact Haskell type `Plan '[] ()`.",
+        "[operations] `haskell/src/Agentic/Cli.hs:1671-1685` derives routing from `progRawOut` and passes `progPlan` to `runPlanWith`.",
+        "[user-guide] Place this explanation once in `Architecture and Guarantees`, section `Two implementations and one boundary`; other discussions should use `@xref{Architecture and Guarantees}` rather than repeat the execution-boundary account.",
+        "[reference] The `Agentic.Workflow.Program` support marker follows the current coverage convention; the ledger records `python3 doc/check-manual-coverage.py` exiting 0 with `manual coverage: 214 source items accounted for, classified, and indexed`.",
+        "`conformance/Conformance.lean:9-15,337-371` identifies the oracle as test-only; `test/CorpusGen.lean:8-27` defines frozen requests as the specification and regenerates replies through the oracle functions.",
+        "Review dispositions: `PA-REV-001` applied by stating joint construction without attributing both fields solely to the workflow block; `PA-REV-002` applied by distinguishing Lean oracle/corpus generation from Lean-free Haskell replay. No finding was deferred.",
+        "Info validation of this exact paragraph: `makeinfo --no-split --output=/tmp/agent-cat-synthesis.2xx18M/candidate.info /tmp/agent-cat-synthesis.2xx18M/candidate.texi` exited 0; stdout 0 bytes; stderr 0 bytes; output 675 bytes.",
+        "HTML validation of this exact paragraph: `makeinfo --html --no-split --output=/tmp/agent-cat-synthesis.2xx18M/candidate.html /tmp/agent-cat-synthesis.2xx18M/candidate.texi` exited 0; stdout 0 bytes; stderr 0 bytes; output 1484 bytes. The temporary wrapper was removed."
+      ],
+      "gaps": []
+    },
+    "reviewLedger": [
+      {
+        "id": "facts",
+        "status": "complete",
+        "result": {
+          "passed": true,
+          "checked": [
+            "`haskell/src/Agentic/Builder.hs:1653-1666`: `Program` has the exact `progRawOut :: RawProgram` and `progPlan :: Plan '[] ()` fields, and `program` constructs both in one record.",
+            "`haskell/src/Agentic/Cli.hs:1667-1685`: production derives routing with `servedChains (progRawOut prog)` and executes `progPlan prog` via `runPlanWith`.",
+            "`conformance/Conformance.lean:9-15,337-371` and `conformance/ConformanceOracle.lean:65-68`: the oracle is explicitly test-only and checks/observes `RawProgram`; production never invokes it.",
+            "`haskell/tier0/Main.hs:1-48,122-164`: the Haskell conformance runner replays the committed Lean-produced corpus without requiring Lean.",
+            "Temporary exact-candidate render: unsplit Info and HTML both exited 0 with empty stderr; both preserve the two sentences and exact Haskell types."
+          ],
+          "findings": [],
+          "gaps": []
+        }
+      },
+      {
+        "id": "completeness",
+        "status": "complete",
+        "result": {
+          "passed": true,
+          "checked": [
+            "Scope and structure: the candidate is one paragraph of exactly two sentences and does not expand into examples, CLI reference, proofs, or history.",
+            "Haskell API: `haskell/src/Agentic/Builder.hs:1655-1666` supports both exact `Program` fields and their joint construction by `program`.",
+            "Production CLI: `haskell/src/Agentic/Cli.hs:1671-1685` reads `progRawOut` for routing and passes `progPlan` to `runPlanWith`.",
+            "Lean boundary: `conformance/Conformance.lean:9-15,337-371` explicitly marks the oracle test-only and checks/observes `RawProgram`; production does not invoke it.",
+            "Corpus role: `test/CorpusGen.lean:8-27` and the Haskell Tier 0 sources support a Lean-produced frozen corpus replayed by Haskell without Lean in the loop.",
+            "Navigation and cross-references: the intended `Architecture and Guarantees` location is already in the manual menu and is the canonical boundary discussion; this paragraph needs no additional node or cross-reference.",
+            "Glossary: `Program`, `RawProgram`, `Plan`, and `conformance` already have canonical entries in `doc/agent-cat.texi:2958-2962,3065-3073,3085-3088`; the surrounding architecture section explains the oracle/corpus terms.",
+            "Coverage marker: `Agentic.Workflow.Program support` matches the source-derived API classification and remains invisible in both rendered formats.",
+            "Review dispositions: the candidate reflects applied dispositions `PA-REV-001` (joint construction without misattribution) and `PA-REV-002` (Lean oracle generation distinguished from Lean-free Haskell replay).",
+            "Temporary rendering: fresh Info and HTML renders both exited 0; the paragraph rendered intact as one paragraph, with sizes 675 bytes and 1484 bytes respectively."
+          ],
+          "findings": [],
+          "gaps": []
+        }
+      },
+      {
+        "id": "examples",
+        "status": "complete",
+        "result": {
+          "passed": true,
+          "checked": [
+            "`haskell/src/Agentic/Builder.hs:1654-1666`: `Program` has exactly `progRawOut :: RawProgram` and `progPlan :: Plan '[] ()`; `program` constructs both fields in one value.",
+            "`haskell/src/Agentic/Cli.hs:1671-1685`: production derives routing from `progRawOut` and executes `progPlan` with `runPlanWith`.",
+            "`conformance/Conformance.lean:9-15,337-371`, `test/CorpusGen.lean:8-27`, and `haskell/tier0/Main.hs:1-50`: Lean’s oracle is test-only, corpus replies come from Lean observation, and Haskell replays the frozen corpus without Lean.",
+            "Exact temporary candidate rendering: Info and HTML `makeinfo` commands both exited 0 with empty stdout/stderr; rendered prose preserved both sentences and `Plan '[] ()`."
+          ],
+          "findings": [],
+          "gaps": []
+        }
+      },
+      {
+        "id": "texinfo",
+        "status": "complete",
+        "result": {
+          "passed": false,
+          "checked": [
+            "Candidate syntax and temporary Info/HTML rendering: balanced `@code{}` markup, valid literal `::`, `'[]`, and `()`, with both renderings preserving the two sentences without diagnostics.",
+            "Structure: the candidate adds no node, menu, anchor, index command, example block, or cross-reference, so the paragraph itself requires no corresponding structural entry.",
+            "Integration context in `Architecture and Guarantees` and the existing API coverage marker in `Programs and inputs`."
+          ],
+          "findings": [
+            {
+              "severity": "warning",
+              "location": "Candidate line 1; doc/agent-cat.texi:1734; doc/check-manual-coverage.py:236-237",
+              "problem": "TEX-REV-001: Integrating the candidate verbatim would duplicate the existing `@c COVER API Agentic.Workflow.Program support` marker.",
+              "evidence": "The exact marker already precedes the canonical `Program` reference entry at `doc/agent-cat.texi:1734`. The coverage checker stores matches by name in a dictionary, so lines 236-237 silently collapse duplicates rather than diagnosing them. The marker is absent from both temporary renderings because it is a Texinfo comment.",
+              "correction": "Remove the candidate’s `@c COVER` line and retain the existing marker beside the `Program` reference entry. The two-sentence paragraph then integrates without any node, menu, anchor, index, escaping, example, or cross-reference change.",
+              "id": "texinfo:1"
+            }
+          ],
+          "gaps": []
+        }
+      },
+      {
+        "id": "prose",
+        "status": "complete",
+        "result": {
+          "passed": false,
+          "checked": [
+            "Exact two-sentence Texinfo candidate and its temporary Info and HTML renderings; both makeinfo commands exited 0 and preserved `progRawOut :: RawProgram` and `progPlan :: Plan '[] ()`.",
+            "`haskell/src/Agentic/Builder.hs:1655-1666`: `Program` contains the two stated fields, and `program` constructs them together.",
+            "`haskell/src/Agentic/Cli.hs:1671-1685`: production reads `progRawOut` for served chains and passes `progPlan` to `runPlanWith`.",
+            "`conformance/Conformance.lean:9-15,337-371` and `haskell/tier0/Main.hs:1-4`: Lean is test-only; Haskell Tier 0 replays the frozen corpus produced by the Lean oracle."
+          ],
+          "findings": [
+            {
+              "severity": "warning",
+              "location": "PROSE-REV-001 — candidate Texinfo, sentence 2, clause beginning “Lean checks”",
+              "problem": "The preposition “through” coordinates the Lean oracle with the corpus replayed by Haskell tests, suggesting that Lean participates in both mechanisms. It also introduces “oracle” and “frozen corpus” without explaining them. This obscures the production/conformance boundary.",
+              "evidence": "`conformance/Conformance.lean:9-15` calls the Lean process test-only and says the frozen corpus permits Tier 0 to run with no Lean in the loop. `haskell/tier0/Main.hs:1-4` says Tier 0 replays that corpus against the Haskell implementation.",
+              "correction": "Replace sentence 2 with: `Production inspects @code{progRawOut} for routing and executes @code{progPlan} entirely in Haskell; conformance testing uses Lean only as a reference process, which checks and observes raw programs and supplies a frozen corpus of observations for Haskell tests to replay.`",
+              "id": "prose:1"
+            }
+          ],
+          "gaps": []
+        }
+      }
+    ],
+    "revision": {
+      "texinfo": "A Haskell @code{Program} pairs the emitted raw representation @code{progRawOut :: RawProgram} with the typed execution plan @code{progPlan :: Plan '[] ()}, and @code{program} constructs both fields together.  Production inspects @code{progRawOut} for routing and executes @code{progPlan} entirely in Haskell; conformance testing uses Lean only as a reference process, which checks and observes raw programs and supplies a frozen corpus of observations for Haskell tests to replay.",
+      "appliedFindings": [
+        "texinfo:1",
+        "prose:1"
+      ],
+      "deferredFindings": [],
+      "validationEvidence": [
+        "`haskell/src/Agentic/Builder.hs:1653-1666` defines `Program` with `progRawOut :: RawProgram` and `progPlan :: Plan '[] ()`; `program` constructs both fields in one record.",
+        "`haskell/src/Agentic/Cli.hs:1671-1685` derives routing from `progRawOut prog` and executes `progPlan prog` with `runPlanWith`.",
+        "`conformance/Conformance.lean:9-15` states that Lean is a test-only dependency and that production never invokes it; `haskell/tier0/Main.hs:1-4` states that Haskell replays the frozen Lean-produced corpus.",
+        "`doc/agent-cat.texi:1734` already contains `@c COVER API Agentic.Workflow.Program support`; the replacement therefore omits the duplicate marker.",
+        "Info validation ran `makeinfo --no-split --output=/tmp/agent-cat-revision.BRvmxN/candidate.info /tmp/agent-cat-revision.BRvmxN/candidate.texi`: exit status 0, stdout 0 bytes, stderr 0 bytes, output 705 bytes.",
+        "HTML validation ran `makeinfo --html --no-split --output=/tmp/agent-cat-revision.BRvmxN/candidate.html /tmp/agent-cat-revision.BRvmxN/candidate.texi`: exit status 0, stdout 0 bytes, stderr 0 bytes, output 1514 bytes.",
+        "Inspection of both rendered outputs confirmed one paragraph containing both sentences and the exact types `progRawOut :: RawProgram` and `progPlan :: Plan '[] ()`. The temporary wrapper directory was removed afterward."
+      ],
+      "gaps": []
+    },
+    "validation": {
+      "passed": true,
+      "commands": [
+        "sed -n '1650,1670p' haskell/src/Agentic/Builder.hs; sed -n '1668,1688p' haskell/src/Agentic/Cli.hs; sed -n '1,18p' conformance/Conformance.lean; sed -n '1,8p' haskell/tier0/Main.hs",
+        "cat > doc/revision.texinfo <<'EOF'\n\\input texinfo\n@setfilename revision.info\n@settitle Revision\n@node Top\n@top Revision\n\nA Haskell @code{Program} pairs the emitted raw representation @code{progRawOut :: RawProgram} with the typed execution plan @code{progPlan :: Plan '[] ()}, and @code{program} constructs both fields together.  Production inspects @code{progRawOut} for routing and executes @code{progPlan} entirely in Haskell; conformance testing uses Lean only as a reference process, which checks and observes raw programs and supplies a frozen corpus of observations for Haskell tests to replay.\n\n@bye\nEOF",
+        "makeinfo --no-split --output=/tmp/agent-cat-revision.1cdAn8/revision.info doc/revision.texinfo >/tmp/agent-cat-revision.1cdAn8/info.stdout 2>/tmp/agent-cat-revision.1cdAn8/info.stderr",
+        "makeinfo --html --no-split --output=/tmp/agent-cat-revision.1cdAn8/revision.html doc/revision.texinfo >/tmp/agent-cat-revision.1cdAn8/html.stdout 2>/tmp/agent-cat-revision.1cdAn8/html.stderr",
+        "rm -f -- doc/revision.texinfo; rm -rf -- /tmp/agent-cat-revision.1cdAn8",
+        "test ! -e doc/revision.texinfo && test ! -e /tmp/agent-cat-revision.1cdAn8"
+      ],
+      "outputs": [
+        "Source inspection confirmed the paragraph matches the Haskell Program fields and constructor, Haskell routing/execution path, and Lean's test-only frozen-corpus role.",
+        "Info: exit 0; stdout 0 bytes; stderr 0 bytes (empty); output 703 bytes.",
+        "HTML: exit 0; stdout 0 bytes; stderr 0 bytes (empty); output 1508 bytes.",
+        "Cleanup verification: exit 0; candidate, logs, and rendered outputs were removed. No tracked file was edited.",
+        "Stable-ID dispositions are complete: texinfo:1 applied; prose:1 applied; none deferred.",
+        "Coverage command was not applicable in update mode. The caller-reserved integration commands were not run."
+      ],
+      "gaps": []
+    },
+    "integrationCommands": [
+      "make -C doc check",
+      "make -C doc check-haskell"
+    ],
+    "gaps": [],
+    "complete": true
+  }
+}

@@ -60,9 +60,16 @@ play() {
   state="$work/$scenario"
   mkdir -p "$state"
   out="$state/out"
+  stdout="$state/stdout"
+  stderr="$state/stderr"
   nix develop path:./. -c cabal run -v0 agentic-run -- "$@" --scratch "$state" +RTS -N8 -RTS \
-    < /dev/null > "$out" 2>&1
+    < /dev/null > "$stdout" 2> "$stderr"
   code=$?
+  # Keep process stdout and stderr distinct while they are written. Redirecting
+  # both to one descriptor lets concurrent scheduler output split a diagnostic
+  # line, which makes line-oriented assertions flaky. Order is irrelevant here;
+  # every assertion below is on complete content, never cross-stream chronology.
+  cat "$stdout" "$stderr" > "$out"
 }
 
 want_code() {

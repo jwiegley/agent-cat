@@ -488,6 +488,24 @@ From acat-5b7's honest scope: retryT/fanT need an n-ary Key.splice (provable, un
 ]
 #+end_src
 
+* DONE [#B] Write complete Texinfo manual and reusable authoring workflow
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-3vv
+:LABELS:   []
+:ISSUE_TYPE: docs
+:CREATED:  [2026-08-27 Thu 12:46]
+:MODIFIED: [2026-08-27 Thu 15:09]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-27 Thu 15:09]
+:CLOSE_REASON: Completed the checked Texinfo manual, exhaustive Haskell/CLI reference, source and runtime verification gates, separate indexes/glossary/troubleshooting, and reusable six-phase Pi workflow.
+:SOURCE_REPO: agent-cat-manual
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat-manual
+:ORIGINAL_SIZE: 0
+:END:
+
+Deliver a source-audited Texinfo manual covering purpose, architecture, mathematics, operations, complete Haskell workflow authoring guide/reference, CLI reference, checked examples, navigation, and style constraints; add a reusable Pi dynamic workflow and local Texinfo build/check command. Goal: mtbxmxgh-84w1ds.
+
 * DONE [#C] DSL checker: Theta(k^2) Bindings plumbing on the MCP path, which accepts unbounded remote source
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -1895,15 +1913,17 @@ From acat-ozh: Mat Prop is the only matrix star; at Prob the csum-of-powers cons
 
 Replaces the hand-rolled Cost supremum machinery and the dyadic Prob workaround; unlocks the real-valued probability carrier (resolves the acat-467/kwb deferrals), sum-product Markov read-outs, and the numeric expectation module. SqZero may survive as a construction over Mathlib semirings (check Mathlib for dual numbers: TrivSqZeroExt exists!).
 
-* TODO [#D] DSL reference page: elaboration contract, three named hazards, determinism law, edit-preservation statement
+* DONE [#D] DSL reference page: elaboration contract, three named hazards, determinism law, edit-preservation statement
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-f8e
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-08-14 Fri 20:22]
-:MODIFIED: [2026-08-20 Thu 10:12]
+:MODIFIED: [2026-08-27 Thu 15:09]
 :CREATED_BY: johnw
+:FINISHED: [2026-08-27 Thu 15:09]
+:CLOSE_REASON: Covered by doc/agent-cat.texi: checker contract, hazards, determinism, edit-preservation, extension rules, round identity, and panel semantics are documented against the live Haskell/Lean spine.
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -4042,6 +4062,40 @@ Meta-finding from the validated review pass, which ABORTED per its attestation c
 ]
 #+end_src
 
+* DONE [#C] Deck two-pane fixture does not terminate after core scenarios
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-srh
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-08-27 Thu 14:10]
+:MODIFIED: [2026-08-27 Thu 17:12]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-27 Thu 17:12]
+:CLOSE_REASON: The timeout came from nesting the self-contained deck gate inside another nix develop. The manual now documents direct invocation; direct ./ci/deck.sh passes 8/8 including two panes.
+:SOURCE_REPO: agent-cat-manual
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat-manual
+:ORIGINAL_SIZE: 0
+:END:
+
+Discovered while verifying acat-3vv. `nix develop -c ./ci/deck.sh` completed scenarios 1-7, then exceeded 600 seconds in scenario 8 (`two-panes`) and was killed by the harness. No process from this repository survived. Investigate the routed two-session fixture or its nested nix invocation; retain the existing routing assertions.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-srh",
+    "depends_on_id": "acat-3vv",
+    "type": "discovered-from",
+    "created_at": "2026-08-27T21:10:58.549548Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#C] Vendor the design document (Revision 2.1) into doc/ as the normative reference each module cites
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -4247,6 +4301,40 @@ Grounded by 3-agent recon 2026-08-12 (pi-claude-bridge source, incite entry poin
     "author": "johnw",
     "text": "Triage 2026-08-20: achieved at 4875b4e — harden_demo --adapter claude against nix-built claude-agent-acp 0.64.0, 7 consultations / 83.5s / bill 7 in the proved set, six protocol findings a stub could not produce. The achieving Lean code was then deliberately retired (75c277c) and rebuilt as the Haskell engines (Acp.hs, AgentDeck.hs, Route.hs), live-proven repeatedly since, most recently the two-provider routed runs in doc/research/pal-subsumption/route-live-log.txt.",
     "created_at": "2026-08-20T17:11:06Z"
+  }
+]
+#+end_src
+
+* DONE [#C] ACP two-adapter gate is vulnerable to concurrent stdout/stderr interleaving
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-uew
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-08-27 Thu 13:58]
+:MODIFIED: [2026-08-27 Thu 17:12]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-27 Thu 17:12]
+:CLOSE_REASON: Fixed the gate capture: ACP stdout and stderr are written separately and combined only after the process exits, so concurrent output cannot split line assertions. Direct ./ci/acp.sh now passes 16/16.
+:SOURCE_REPO: agent-cat-manual
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat-manual
+:ORIGINAL_SIZE: 0
+:END:
+
+Discovered while verifying acat-3vv. haskell/ci/acp.sh two-adapters expects one contiguous permission DENIED line, but concurrent adapter stdout/stderr can splice the answer line into that diagnostic. Behavior completed 7/7 with exit 0; only grep assertion failed. Make the fixture capture/serialize the diagnostic without weakening the behavioral check.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-uew",
+    "depends_on_id": "acat-3vv",
+    "type": "discovered-from",
+    "created_at": "2026-08-27T20:58:07.903137Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src

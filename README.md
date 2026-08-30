@@ -303,6 +303,20 @@ lake exe corpus-gen         # re-observe the frozen corpus; expect no diff
 lake exe conformance-oracle # the oracle, on stdin/stdout
 ```
 
+The Texinfo manual builds and checks in the same shell:
+
+```sh
+nix develop -c make -C doc check
+```
+
+The command renders GNU Info and single-page HTML in a temporary directory,
+treats diagnostics as failures, and leaves no generated file in the working tree.
+Use `make -C doc all` to retain both formats under the ignored `doc/build/`
+directory. Run `make -C doc check-haskell` for the compiler-derived constructor
+and instance inventory, complete manual examples, and deterministic CLI transcript.
+The exact workflow and repository verification outcomes are recorded in
+`doc/verification.md`.
+
 **Never run two Lean builds at once.** `Agentic/Core/DslFlagship.lean` dominates
 the build — minutes of wall clock and several gigabytes, the kernel running the
 checker, the cost algebra and the interpreter on a real program — and two at once

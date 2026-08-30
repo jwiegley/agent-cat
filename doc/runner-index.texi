@@ -1,0 +1,24 @@
+@c Generated from doc/check-manual-coverage.py --list; checked for exact parity.
+@clindex --adapter
+@clindex --adapter-arg
+@clindex --binary
+@clindex --engine
+@clindex --help
+@clindex --input
+@clindex --input-arg
+@clindex --input-file
+@clindex --json
+@clindex --poll
+@clindex --raw
+@clindex --require-pinned
+@clindex --route
+@clindex --scratch
+@clindex --scripted
+@clindex --session
+@clindex --timeout
+@clindex --verbose
+@clindex verb:cost
+@clindex verb:help
+@clindex verb:list
+@clindex verb:plan
+@clindex verb:run

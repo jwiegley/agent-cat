@@ -70,7 +70,13 @@ bad() {
   failures=$((failures + 1))
 }
 
-cat_run() { nix develop path:./. -c cabal run -v0 agentic-run -- "$@"; }
+cat_run() {
+  if [ -n "${IN_NIX_SHELL:-}" ]; then
+    cabal run -v0 agentic-run -- "$@"
+  else
+    nix develop path:./. -c cabal run -v0 agentic-run -- "$@"
+  fi
+}
 
 # ---------------------------------------------------------------------------
 # The pinned table

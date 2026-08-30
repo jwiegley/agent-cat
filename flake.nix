@@ -22,6 +22,8 @@
             # claimed the opposite on both counts; connection.md §3.9 filed
             # the correction.)
             pkgs.lean4
+            # Manual source is Texinfo; `make -C doc check` builds Info and HTML.
+            pkgs.texinfo
           ];
         };
       });

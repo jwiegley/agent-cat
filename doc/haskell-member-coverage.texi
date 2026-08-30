@@ -1,0 +1,783 @@
+@c Compiler-derived public children and exported-class instances.
+@c Regenerate with: make -C doc update-haskell-inventory
+
+@section Compiler-derived public members and instances
+
+This matrix is generated from GHCi @code{:info!} output for the current
+package.  Every row names its public parent and maps to that parent entry
+later in this chapter; the comments beside the rows carry the classifications
+checked by the documentation gates.
+
+@subsection Wildcard-exported constructors, fields, and methods
+
+@multitable @columnfractions .42 .25 .33
+@headitem Public parent @tab Exported member @tab Documentation entry
+@c MEMBER Agentic.Cli.Command.member:Cost support
+@hsindex Agentic.Cli.Command.Cost
+@item @code{Agentic.Cli.Command} @tab @code{Cost} @tab @code{Agentic.Cli.Command}
+@c MEMBER Agentic.Cli.Command.member:Help support
+@hsindex Agentic.Cli.Command.Help
+@item @code{Agentic.Cli.Command} @tab @code{Help} @tab @code{Agentic.Cli.Command}
+@c MEMBER Agentic.Cli.Command.member:List support
+@hsindex Agentic.Cli.Command.List
+@item @code{Agentic.Cli.Command} @tab @code{List} @tab @code{Agentic.Cli.Command}
+@c MEMBER Agentic.Cli.Command.member:Plan support
+@hsindex Agentic.Cli.Command.Plan
+@item @code{Agentic.Cli.Command} @tab @code{Plan} @tab @code{Agentic.Cli.Command}
+@c MEMBER Agentic.Cli.Command.member:Run support
+@hsindex Agentic.Cli.Command.Run
+@item @code{Agentic.Cli.Command} @tab @code{Run} @tab @code{Agentic.Cli.Command}
+@c MEMBER Agentic.Cli.Command.member:Usage support
+@hsindex Agentic.Cli.Command.Usage
+@item @code{Agentic.Cli.Command} @tab @code{Usage} @tab @code{Agentic.Cli.Command}
+@c MEMBER Agentic.Cli.Registry.member:Registry support
+@hsindex Agentic.Cli.Registry.Registry
+@item @code{Agentic.Cli.Registry} @tab @code{Registry} @tab @code{Agentic.Cli.Registry}
+@c MEMBER Agentic.Cli.Registry.member:regBanner support
+@hsindex Agentic.Cli.Registry.regBanner
+@item @code{Agentic.Cli.Registry} @tab @code{regBanner} @tab @code{Agentic.Cli.Registry}
+@c MEMBER Agentic.Cli.Registry.member:regBinary support
+@hsindex Agentic.Cli.Registry.regBinary
+@item @code{Agentic.Cli.Registry} @tab @code{regBinary} @tab @code{Agentic.Cli.Registry}
+@c MEMBER Agentic.Cli.Registry.member:regNoun support
+@hsindex Agentic.Cli.Registry.regNoun
+@item @code{Agentic.Cli.Registry} @tab @code{regNoun} @tab @code{Agentic.Cli.Registry}
+@c MEMBER Agentic.Cli.Registry.member:regRows support
+@hsindex Agentic.Cli.Registry.regRows
+@item @code{Agentic.Cli.Registry} @tab @code{regRows} @tab @code{Agentic.Cli.Registry}
+@c MEMBER Agentic.Cli.Row.member:Row support
+@hsindex Agentic.Cli.Row.Row
+@item @code{Agentic.Cli.Row} @tab @code{Row} @tab @code{Agentic.Cli.Row}
+@c MEMBER Agentic.Cli.Row.member:rowDoc support
+@hsindex Agentic.Cli.Row.rowDoc
+@item @code{Agentic.Cli.Row} @tab @code{rowDoc} @tab @code{Agentic.Cli.Row}
+@c MEMBER Agentic.Cli.Row.member:rowExample support
+@hsindex Agentic.Cli.Row.rowExample
+@item @code{Agentic.Cli.Row} @tab @code{rowExample} @tab @code{Agentic.Cli.Row}
+@c MEMBER Agentic.Cli.Row.member:rowHelp support
+@hsindex Agentic.Cli.Row.rowHelp
+@item @code{Agentic.Cli.Row} @tab @code{rowHelp} @tab @code{Agentic.Cli.Row}
+@c MEMBER Agentic.Cli.Row.member:rowScript support
+@hsindex Agentic.Cli.Row.rowScript
+@item @code{Agentic.Cli.Row} @tab @code{rowScript} @tab @code{Agentic.Cli.Row}
+@c MEMBER Agentic.Schema.Code.member:CodeAck support
+@hsindex Agentic.Schema.Code.CodeAck
+@item @code{Agentic.Schema.Code} @tab @code{CodeAck} @tab @code{Agentic.Schema.Code}
+@c MEMBER Agentic.Schema.Code.member:CodeFlag support
+@hsindex Agentic.Schema.Code.CodeFlag
+@item @code{Agentic.Schema.Code} @tab @code{CodeFlag} @tab @code{Agentic.Schema.Code}
+@c MEMBER Agentic.Schema.Code.member:CodeStructured support
+@hsindex Agentic.Schema.Code.CodeStructured
+@item @code{Agentic.Schema.Code} @tab @code{CodeStructured} @tab @code{Agentic.Schema.Code}
+@c MEMBER Agentic.Schema.Code.member:CodeText support
+@hsindex Agentic.Schema.Code.CodeText
+@item @code{Agentic.Schema.Code} @tab @code{CodeText} @tab @code{Agentic.Schema.Code}
+@c MEMBER Agentic.Schema.Code.member:CodeVerdict support
+@hsindex Agentic.Schema.Code.CodeVerdict
+@item @code{Agentic.Schema.Code} @tab @code{CodeVerdict} @tab @code{Agentic.Schema.Code}
+@c MEMBER Agentic.Schema.CodeRep.member:RepAck support
+@hsindex Agentic.Schema.CodeRep.RepAck
+@item @code{Agentic.Schema.CodeRep} @tab @code{RepAck} @tab @code{Agentic.Schema.CodeRep}
+@c MEMBER Agentic.Schema.CodeRep.member:RepFlag support
+@hsindex Agentic.Schema.CodeRep.RepFlag
+@item @code{Agentic.Schema.CodeRep} @tab @code{RepFlag} @tab @code{Agentic.Schema.CodeRep}
+@c MEMBER Agentic.Schema.CodeRep.member:RepStructured support
+@hsindex Agentic.Schema.CodeRep.RepStructured
+@item @code{Agentic.Schema.CodeRep} @tab @code{RepStructured} @tab @code{Agentic.Schema.CodeRep}
+@c MEMBER Agentic.Schema.CodeRep.member:RepText support
+@hsindex Agentic.Schema.CodeRep.RepText
+@item @code{Agentic.Schema.CodeRep} @tab @code{RepText} @tab @code{Agentic.Schema.CodeRep}
+@c MEMBER Agentic.Schema.CodeRep.member:RepVerdict support
+@hsindex Agentic.Schema.CodeRep.RepVerdict
+@item @code{Agentic.Schema.CodeRep} @tab @code{RepVerdict} @tab @code{Agentic.Schema.CodeRep}
+@c MEMBER Agentic.Schema.HasSchema.member:SchemaOf support
+@hsindex Agentic.Schema.HasSchema.SchemaOf
+@item @code{Agentic.Schema.HasSchema} @tab @code{SchemaOf} @tab @code{Agentic.Schema.HasSchema}
+@c MEMBER Agentic.Schema.HasSchema.member:fromSchemaEl support
+@hsindex Agentic.Schema.HasSchema.fromSchemaEl
+@item @code{Agentic.Schema.HasSchema} @tab @code{fromSchemaEl} @tab @code{Agentic.Schema.HasSchema}
+@c MEMBER Agentic.Schema.HasSchema.member:schemaOf support
+@hsindex Agentic.Schema.HasSchema.schemaOf
+@item @code{Agentic.Schema.HasSchema} @tab @code{schemaOf} @tab @code{Agentic.Schema.HasSchema}
+@c MEMBER Agentic.Schema.HasSchema.member:toSchemaEl support
+@hsindex Agentic.Schema.HasSchema.toSchemaEl
+@item @code{Agentic.Schema.HasSchema} @tab @code{toSchemaEl} @tab @code{Agentic.Schema.HasSchema}
+@c MEMBER Agentic.Schema.KnownCode.member:sCode support
+@hsindex Agentic.Schema.KnownCode.sCode
+@item @code{Agentic.Schema.KnownCode} @tab @code{sCode} @tab @code{Agentic.Schema.KnownCode}
+@c MEMBER Agentic.Schema.KnownSchema.member:schemaWitness support
+@hsindex Agentic.Schema.KnownSchema.schemaWitness
+@item @code{Agentic.Schema.KnownSchema} @tab @code{schemaWitness} @tab @code{Agentic.Schema.KnownSchema}
+@c MEMBER Agentic.Schema.SCode.member:SAck machinery
+@hsindex Agentic.Schema.SCode.SAck
+@item @code{Agentic.Schema.SCode} @tab @code{SAck} @tab @code{Agentic.Schema.SCode}
+@c MEMBER Agentic.Schema.SCode.member:SFlag machinery
+@hsindex Agentic.Schema.SCode.SFlag
+@item @code{Agentic.Schema.SCode} @tab @code{SFlag} @tab @code{Agentic.Schema.SCode}
+@c MEMBER Agentic.Schema.SCode.member:SStructured machinery
+@hsindex Agentic.Schema.SCode.SStructured
+@item @code{Agentic.Schema.SCode} @tab @code{SStructured} @tab @code{Agentic.Schema.SCode}
+@c MEMBER Agentic.Schema.SCode.member:SText machinery
+@hsindex Agentic.Schema.SCode.SText
+@item @code{Agentic.Schema.SCode} @tab @code{SText} @tab @code{Agentic.Schema.SCode}
+@c MEMBER Agentic.Schema.SCode.member:SVerdict machinery
+@hsindex Agentic.Schema.SCode.SVerdict
+@item @code{Agentic.Schema.SCode} @tab @code{SVerdict} @tab @code{Agentic.Schema.SCode}
+@c MEMBER Agentic.Schema.SSchema.member:SSArray machinery
+@hsindex Agentic.Schema.SSchema.SSArray
+@item @code{Agentic.Schema.SSchema} @tab @code{SSArray} @tab @code{Agentic.Schema.SSchema}
+@c MEMBER Agentic.Schema.SSchema.member:SSBoolean machinery
+@hsindex Agentic.Schema.SSchema.SSBoolean
+@item @code{Agentic.Schema.SSchema} @tab @code{SSBoolean} @tab @code{Agentic.Schema.SSchema}
+@c MEMBER Agentic.Schema.SSchema.member:SSInteger machinery
+@hsindex Agentic.Schema.SSchema.SSInteger
+@item @code{Agentic.Schema.SSchema} @tab @code{SSInteger} @tab @code{Agentic.Schema.SSchema}
+@c MEMBER Agentic.Schema.SSchema.member:SSNull machinery
+@hsindex Agentic.Schema.SSchema.SSNull
+@item @code{Agentic.Schema.SSchema} @tab @code{SSNull} @tab @code{Agentic.Schema.SSchema}
+@c MEMBER Agentic.Schema.SSchema.member:SSNumber machinery
+@hsindex Agentic.Schema.SSchema.SSNumber
+@item @code{Agentic.Schema.SSchema} @tab @code{SSNumber} @tab @code{Agentic.Schema.SSchema}
+@c MEMBER Agentic.Schema.SSchema.member:SSObject machinery
+@hsindex Agentic.Schema.SSchema.SSObject
+@item @code{Agentic.Schema.SSchema} @tab @code{SSObject} @tab @code{Agentic.Schema.SSchema}
+@c MEMBER Agentic.Schema.SSchema.member:SSProperty machinery
+@hsindex Agentic.Schema.SSchema.SSProperty
+@item @code{Agentic.Schema.SSchema} @tab @code{SSProperty} @tab @code{Agentic.Schema.SSchema}
+@c MEMBER Agentic.Schema.SSchema.member:SSString machinery
+@hsindex Agentic.Schema.SSchema.SSString
+@item @code{Agentic.Schema.SSchema} @tab @code{SSString} @tab @code{Agentic.Schema.SSchema}
+@c MEMBER Agentic.Schema.Schema.member:SchemaArray support
+@hsindex Agentic.Schema.Schema.SchemaArray
+@item @code{Agentic.Schema.Schema} @tab @code{SchemaArray} @tab @code{Agentic.Schema.Schema}
+@c MEMBER Agentic.Schema.Schema.member:SchemaBoolean support
+@hsindex Agentic.Schema.Schema.SchemaBoolean
+@item @code{Agentic.Schema.Schema} @tab @code{SchemaBoolean} @tab @code{Agentic.Schema.Schema}
+@c MEMBER Agentic.Schema.Schema.member:SchemaInteger support
+@hsindex Agentic.Schema.Schema.SchemaInteger
+@item @code{Agentic.Schema.Schema} @tab @code{SchemaInteger} @tab @code{Agentic.Schema.Schema}
+@c MEMBER Agentic.Schema.Schema.member:SchemaNull support
+@hsindex Agentic.Schema.Schema.SchemaNull
+@item @code{Agentic.Schema.Schema} @tab @code{SchemaNull} @tab @code{Agentic.Schema.Schema}
+@c MEMBER Agentic.Schema.Schema.member:SchemaNumber support
+@hsindex Agentic.Schema.Schema.SchemaNumber
+@item @code{Agentic.Schema.Schema} @tab @code{SchemaNumber} @tab @code{Agentic.Schema.Schema}
+@c MEMBER Agentic.Schema.Schema.member:SchemaObject support
+@hsindex Agentic.Schema.Schema.SchemaObject
+@item @code{Agentic.Schema.Schema} @tab @code{SchemaObject} @tab @code{Agentic.Schema.Schema}
+@c MEMBER Agentic.Schema.Schema.member:SchemaProperty support
+@hsindex Agentic.Schema.Schema.SchemaProperty
+@item @code{Agentic.Schema.Schema} @tab @code{SchemaProperty} @tab @code{Agentic.Schema.Schema}
+@c MEMBER Agentic.Schema.Schema.member:SchemaString support
+@hsindex Agentic.Schema.Schema.SchemaString
+@item @code{Agentic.Schema.Schema} @tab @code{SchemaString} @tab @code{Agentic.Schema.Schema}
+@c MEMBER Agentic.Schema.SchemaRep.member:RepArray support
+@hsindex Agentic.Schema.SchemaRep.RepArray
+@item @code{Agentic.Schema.SchemaRep} @tab @code{RepArray} @tab @code{Agentic.Schema.SchemaRep}
+@c MEMBER Agentic.Schema.SchemaRep.member:RepBoolean support
+@hsindex Agentic.Schema.SchemaRep.RepBoolean
+@item @code{Agentic.Schema.SchemaRep} @tab @code{RepBoolean} @tab @code{Agentic.Schema.SchemaRep}
+@c MEMBER Agentic.Schema.SchemaRep.member:RepInteger support
+@hsindex Agentic.Schema.SchemaRep.RepInteger
+@item @code{Agentic.Schema.SchemaRep} @tab @code{RepInteger} @tab @code{Agentic.Schema.SchemaRep}
+@c MEMBER Agentic.Schema.SchemaRep.member:RepNull support
+@hsindex Agentic.Schema.SchemaRep.RepNull
+@item @code{Agentic.Schema.SchemaRep} @tab @code{RepNull} @tab @code{Agentic.Schema.SchemaRep}
+@c MEMBER Agentic.Schema.SchemaRep.member:RepNumber support
+@hsindex Agentic.Schema.SchemaRep.RepNumber
+@item @code{Agentic.Schema.SchemaRep} @tab @code{RepNumber} @tab @code{Agentic.Schema.SchemaRep}
+@c MEMBER Agentic.Schema.SchemaRep.member:RepObject support
+@hsindex Agentic.Schema.SchemaRep.RepObject
+@item @code{Agentic.Schema.SchemaRep} @tab @code{RepObject} @tab @code{Agentic.Schema.SchemaRep}
+@c MEMBER Agentic.Schema.SchemaRep.member:RepProperty support
+@hsindex Agentic.Schema.SchemaRep.RepProperty
+@item @code{Agentic.Schema.SchemaRep} @tab @code{RepProperty} @tab @code{Agentic.Schema.SchemaRep}
+@c MEMBER Agentic.Schema.SchemaRep.member:RepString support
+@hsindex Agentic.Schema.SchemaRep.RepString
+@item @code{Agentic.Schema.SchemaRep} @tab @code{RepString} @tab @code{Agentic.Schema.SchemaRep}
+@c MEMBER Agentic.Schema.SomeCode.member:SomeCode support
+@hsindex Agentic.Schema.SomeCode.SomeCode
+@item @code{Agentic.Schema.SomeCode} @tab @code{SomeCode} @tab @code{Agentic.Schema.SomeCode}
+@c MEMBER Agentic.Schema.SomeSchema.member:SomeSchema support
+@hsindex Agentic.Schema.SomeSchema.SomeSchema
+@item @code{Agentic.Schema.SomeSchema} @tab @code{SomeSchema} @tab @code{Agentic.Schema.SomeSchema}
+@c MEMBER Agentic.WF.Says.member:says support
+@hsindex Agentic.WF.Says.says
+@item @code{Agentic.WF.Says} @tab @code{says} @tab @code{Agentic.WF.Says}
+@c MEMBER Agentic.WF.V.member:V support
+@hsindex Agentic.WF.V.V
+@item @code{Agentic.WF.V} @tab @code{V} @tab @code{Agentic.WF.V}
+@c MEMBER Agentic.WF.V.member:vIx support
+@hsindex Agentic.WF.V.vIx
+@item @code{Agentic.WF.V} @tab @code{vIx} @tab @code{Agentic.WF.V}
+@c MEMBER Agentic.WF.V.member:vName support
+@hsindex Agentic.WF.V.vName
+@item @code{Agentic.WF.V} @tab @code{vName} @tab @code{Agentic.WF.V}
+@c MEMBER Agentic.Workflow.Answer.member:Flag author
+@hsindex Agentic.Workflow.Answer.Flag
+@item @code{Agentic.Workflow.Answer} @tab @code{Flag} @tab @code{Agentic.Workflow.Answer}
+@c MEMBER Agentic.Workflow.Answer.member:Receipt author
+@hsindex Agentic.Workflow.Answer.Receipt
+@item @code{Agentic.Workflow.Answer} @tab @code{Receipt} @tab @code{Agentic.Workflow.Answer}
+@c MEMBER Agentic.Workflow.Answer.member:Structured author
+@hsindex Agentic.Workflow.Answer.Structured
+@item @code{Agentic.Workflow.Answer} @tab @code{Structured} @tab @code{Agentic.Workflow.Answer}
+@c MEMBER Agentic.Workflow.Answer.member:Text author
+@hsindex Agentic.Workflow.Answer.Text
+@item @code{Agentic.Workflow.Answer} @tab @code{Text} @tab @code{Agentic.Workflow.Answer}
+@c MEMBER Agentic.Workflow.Answer.member:Verdict author
+@hsindex Agentic.Workflow.Answer.Verdict
+@item @code{Agentic.Workflow.Answer} @tab @code{Verdict} @tab @code{Agentic.Workflow.Answer}
+@c MEMBER Agentic.Workflow.Code.member:CodeAck support
+@hsindex Agentic.Workflow.Code.CodeAck
+@item @code{Agentic.Workflow.Code} @tab @code{CodeAck} @tab @code{Agentic.Workflow.Code}
+@c MEMBER Agentic.Workflow.Code.member:CodeFlag support
+@hsindex Agentic.Workflow.Code.CodeFlag
+@item @code{Agentic.Workflow.Code} @tab @code{CodeFlag} @tab @code{Agentic.Workflow.Code}
+@c MEMBER Agentic.Workflow.Code.member:CodeStructured support
+@hsindex Agentic.Workflow.Code.CodeStructured
+@item @code{Agentic.Workflow.Code} @tab @code{CodeStructured} @tab @code{Agentic.Workflow.Code}
+@c MEMBER Agentic.Workflow.Code.member:CodeText support
+@hsindex Agentic.Workflow.Code.CodeText
+@item @code{Agentic.Workflow.Code} @tab @code{CodeText} @tab @code{Agentic.Workflow.Code}
+@c MEMBER Agentic.Workflow.Code.member:CodeVerdict support
+@hsindex Agentic.Workflow.Code.CodeVerdict
+@item @code{Agentic.Workflow.Code} @tab @code{CodeVerdict} @tab @code{Agentic.Workflow.Code}
+@c MEMBER Agentic.Workflow.Curries.member:Curried machinery
+@hsindex Agentic.Workflow.Curries.Curried
+@item @code{Agentic.Workflow.Curries} @tab @code{Curried} @tab @code{Agentic.Workflow.Curries}
+@c MEMBER Agentic.Workflow.Curries.member:applyTo machinery
+@hsindex Agentic.Workflow.Curries.applyTo
+@item @code{Agentic.Workflow.Curries} @tab @code{applyTo} @tab @code{Agentic.Workflow.Curries}
+@c MEMBER Agentic.Workflow.Decider.member:AnyLineStartsWith author
+@hsindex Agentic.Workflow.Decider.AnyLineStartsWith
+@item @code{Agentic.Workflow.Decider} @tab @code{AnyLineStartsWith} @tab @code{Agentic.Workflow.Decider}
+@c MEMBER Agentic.Workflow.Decider.member:AnyPathMatches author
+@hsindex Agentic.Workflow.Decider.AnyPathMatches
+@item @code{Agentic.Workflow.Decider} @tab @code{AnyPathMatches} @tab @code{Agentic.Workflow.Decider}
+@c MEMBER Agentic.Workflow.Decider.member:ContainsLine author
+@hsindex Agentic.Workflow.Decider.ContainsLine
+@item @code{Agentic.Workflow.Decider} @tab @code{ContainsLine} @tab @code{Agentic.Workflow.Decider}
+@c MEMBER Agentic.Workflow.Decider.member:LastNonEmptyLineIs author
+@hsindex Agentic.Workflow.Decider.LastNonEmptyLineIs
+@item @code{Agentic.Workflow.Decider} @tab @code{LastNonEmptyLineIs} @tab @code{Agentic.Workflow.Decider}
+@c MEMBER Agentic.Workflow.Ending.member:AbandonedOn author
+@hsindex Agentic.Workflow.Ending.AbandonedOn
+@item @code{Agentic.Workflow.Ending} @tab @code{AbandonedOn} @tab @code{Agentic.Workflow.Ending}
+@c MEMBER Agentic.Workflow.Ending.member:SettledOn author
+@hsindex Agentic.Workflow.Ending.SettledOn
+@item @code{Agentic.Workflow.Ending} @tab @code{SettledOn} @tab @code{Agentic.Workflow.Ending}
+@c MEMBER Agentic.Workflow.Ending.member:UnsettledOn author
+@hsindex Agentic.Workflow.Ending.UnsettledOn
+@item @code{Agentic.Workflow.Ending} @tab @code{UnsettledOn} @tab @code{Agentic.Workflow.Ending}
+@c MEMBER Agentic.Workflow.Example.member:Fixed support
+@hsindex Agentic.Workflow.Example.Fixed
+@item @code{Agentic.Workflow.Example} @tab @code{Fixed} @tab @code{Agentic.Workflow.Example}
+@c MEMBER Agentic.Workflow.Example.member:Needs support
+@hsindex Agentic.Workflow.Example.Needs
+@item @code{Agentic.Workflow.Example} @tab @code{Needs} @tab @code{Agentic.Workflow.Example}
+@c MEMBER Agentic.Workflow.Gives.member:arg author
+@hsindex Agentic.Workflow.Gives.arg
+@item @code{Agentic.Workflow.Gives} @tab @code{arg} @tab @code{Agentic.Workflow.Gives}
+@c MEMBER Agentic.Workflow.HasSchema.member:SchemaOf support
+@hsindex Agentic.Workflow.HasSchema.SchemaOf
+@item @code{Agentic.Workflow.HasSchema} @tab @code{SchemaOf} @tab @code{Agentic.Workflow.HasSchema}
+@c MEMBER Agentic.Workflow.HasSchema.member:fromSchemaEl support
+@hsindex Agentic.Workflow.HasSchema.fromSchemaEl
+@item @code{Agentic.Workflow.HasSchema} @tab @code{fromSchemaEl} @tab @code{Agentic.Workflow.HasSchema}
+@c MEMBER Agentic.Workflow.HasSchema.member:schemaOf support
+@hsindex Agentic.Workflow.HasSchema.schemaOf
+@item @code{Agentic.Workflow.HasSchema} @tab @code{schemaOf} @tab @code{Agentic.Workflow.HasSchema}
+@c MEMBER Agentic.Workflow.HasSchema.member:toSchemaEl support
+@hsindex Agentic.Workflow.HasSchema.toSchemaEl
+@item @code{Agentic.Workflow.HasSchema} @tab @code{toSchemaEl} @tab @code{Agentic.Workflow.HasSchema}
+@c MEMBER Agentic.Workflow.KnownSchema.member:schemaWitness support
+@hsindex Agentic.Workflow.KnownSchema.schemaWitness
+@item @code{Agentic.Workflow.KnownSchema} @tab @code{schemaWitness} @tab @code{Agentic.Workflow.KnownSchema}
+@c MEMBER Agentic.Workflow.Outcome.member:Settled author
+@hsindex Agentic.Workflow.Outcome.Settled
+@item @code{Agentic.Workflow.Outcome} @tab @code{Settled} @tab @code{Agentic.Workflow.Outcome}
+@c MEMBER Agentic.Workflow.Outcome.member:Unsettled author
+@hsindex Agentic.Workflow.Outcome.Unsettled
+@item @code{Agentic.Workflow.Outcome} @tab @code{Unsettled} @tab @code{Agentic.Workflow.Outcome}
+@c MEMBER Agentic.Workflow.Parameterized.member:Parameterized support
+@hsindex Agentic.Workflow.Parameterized.Parameterized
+@item @code{Agentic.Workflow.Parameterized} @tab @code{Parameterized} @tab @code{Agentic.Workflow.Parameterized}
+@c MEMBER Agentic.Workflow.Parameterized.member:inputNames support
+@hsindex Agentic.Workflow.Parameterized.inputNames
+@item @code{Agentic.Workflow.Parameterized} @tab @code{inputNames} @tab @code{Agentic.Workflow.Parameterized}
+@c MEMBER Agentic.Workflow.Parameterized.member:supply support
+@hsindex Agentic.Workflow.Parameterized.supply
+@item @code{Agentic.Workflow.Parameterized} @tab @code{supply} @tab @code{Agentic.Workflow.Parameterized}
+@c MEMBER Agentic.Workflow.PartyK.member:IsModel support
+@hsindex Agentic.Workflow.PartyK.IsModel
+@item @code{Agentic.Workflow.PartyK} @tab @code{IsModel} @tab @code{Agentic.Workflow.PartyK}
+@c MEMBER Agentic.Workflow.PartyK.member:IsPerson support
+@hsindex Agentic.Workflow.PartyK.IsPerson
+@item @code{Agentic.Workflow.PartyK} @tab @code{IsPerson} @tab @code{Agentic.Workflow.PartyK}
+@c MEMBER Agentic.Workflow.PartyK.member:IsTool support
+@hsindex Agentic.Workflow.PartyK.IsTool
+@item @code{Agentic.Workflow.PartyK} @tab @code{IsTool} @tab @code{Agentic.Workflow.PartyK}
+@c MEMBER Agentic.Workflow.Says.member:says support
+@hsindex Agentic.Workflow.Says.says
+@item @code{Agentic.Workflow.Says} @tab @code{says} @tab @code{Agentic.Workflow.Says}
+@c MEMBER Agentic.Workflow.Schema.member:SchemaArray support
+@hsindex Agentic.Workflow.Schema.SchemaArray
+@item @code{Agentic.Workflow.Schema} @tab @code{SchemaArray} @tab @code{Agentic.Workflow.Schema}
+@c MEMBER Agentic.Workflow.Schema.member:SchemaBoolean support
+@hsindex Agentic.Workflow.Schema.SchemaBoolean
+@item @code{Agentic.Workflow.Schema} @tab @code{SchemaBoolean} @tab @code{Agentic.Workflow.Schema}
+@c MEMBER Agentic.Workflow.Schema.member:SchemaInteger support
+@hsindex Agentic.Workflow.Schema.SchemaInteger
+@item @code{Agentic.Workflow.Schema} @tab @code{SchemaInteger} @tab @code{Agentic.Workflow.Schema}
+@c MEMBER Agentic.Workflow.Schema.member:SchemaNull support
+@hsindex Agentic.Workflow.Schema.SchemaNull
+@item @code{Agentic.Workflow.Schema} @tab @code{SchemaNull} @tab @code{Agentic.Workflow.Schema}
+@c MEMBER Agentic.Workflow.Schema.member:SchemaNumber support
+@hsindex Agentic.Workflow.Schema.SchemaNumber
+@item @code{Agentic.Workflow.Schema} @tab @code{SchemaNumber} @tab @code{Agentic.Workflow.Schema}
+@c MEMBER Agentic.Workflow.Schema.member:SchemaObject support
+@hsindex Agentic.Workflow.Schema.SchemaObject
+@item @code{Agentic.Workflow.Schema} @tab @code{SchemaObject} @tab @code{Agentic.Workflow.Schema}
+@c MEMBER Agentic.Workflow.Schema.member:SchemaProperty support
+@hsindex Agentic.Workflow.Schema.SchemaProperty
+@item @code{Agentic.Workflow.Schema} @tab @code{SchemaProperty} @tab @code{Agentic.Workflow.Schema}
+@c MEMBER Agentic.Workflow.Schema.member:SchemaString support
+@hsindex Agentic.Workflow.Schema.SchemaString
+@item @code{Agentic.Workflow.Schema} @tab @code{SchemaString} @tab @code{Agentic.Workflow.Schema}
+@c MEMBER Agentic.Workflow.SomeFn.member:SomeFn support
+@hsindex Agentic.Workflow.SomeFn.SomeFn
+@item @code{Agentic.Workflow.SomeFn} @tab @code{SomeFn} @tab @code{Agentic.Workflow.SomeFn}
+@c MEMBER Agentic.Workflow.Stage.member:Amending machinery
+@hsindex Agentic.Workflow.Stage.Amending
+@item @code{Agentic.Workflow.Stage} @tab @code{Amending} @tab @code{Agentic.Workflow.Stage}
+@c MEMBER Agentic.Workflow.Stage.member:Body machinery
+@hsindex Agentic.Workflow.Stage.Body
+@item @code{Agentic.Workflow.Stage} @tab @code{Body} @tab @code{Agentic.Workflow.Stage}
+@c MEMBER Agentic.Workflow.Stage.member:Open machinery
+@hsindex Agentic.Workflow.Stage.Open
+@item @code{Agentic.Workflow.Stage} @tab @code{Open} @tab @code{Agentic.Workflow.Stage}
+@c MEMBER Agentic.Workflow.Stage.member:Review machinery
+@hsindex Agentic.Workflow.Stage.Review
+@item @code{Agentic.Workflow.Stage} @tab @code{Review} @tab @code{Agentic.Workflow.Stage}
+@c MEMBER Agentic.Workflow.Step.member:step machinery
+@hsindex Agentic.Workflow.Step.step
+@item @code{Agentic.Workflow.Step} @tab @code{step} @tab @code{Agentic.Workflow.Step}
+@end multitable
+
+@subsection Exported-class instances
+
+@table @asis
+@c INSTANCE Agentic.Schema.Code.instance:837ec029a048b408 support
+@c INSTANCE-TEXT Agentic.Schema.Code.instance:837ec029a048b408 instance (GHC.Internal.TypeLits.KnownSymbol n, Agentic.Builder.KnownScope s) => Agentic.Builder.KnownScope ('(n, c) : s)
+@item @code{Agentic.Schema.Code}
+@code{instance (GHC.Internal.TypeLits.KnownSymbol n, Agentic.Builder.KnownScope s) => Agentic.Builder.KnownScope ('(n, c) : s)}
+@c INSTANCE Agentic.Schema.Code.instance:38806a310f935ec1 support
+@c INSTANCE-TEXT Agentic.Schema.Code.instance:38806a310f935ec1 instance (TypeError ...) => Agentic.Builder.KnownIx' False h '[]
+@item @code{Agentic.Schema.Code}
+@code{instance (TypeError ...) => Agentic.Builder.KnownIx' False h '[]}
+@c INSTANCE Agentic.Schema.Code.instance:1670ac54698ca790 support
+@c INSTANCE-TEXT Agentic.Schema.Code.instance:1670ac54698ca790 instance (s ~ s') => Agentic.Workflow.Chain (Agentic.Builder.Arg s c) (Agentic.Builder.Args s' ps) (Agentic.Builder.Args s' (c : ps))
+@item @code{Agentic.Schema.Code}
+@code{instance (s ~ s') => Agentic.Workflow.Chain (Agentic.Builder.Arg s c) (Agentic.Builder.Args s' ps) (Agentic.Builder.Args s' (c : ps))}
+@c INSTANCE Agentic.Schema.Code.instance:2156f59ac2d5e49a support
+@c INSTANCE-TEXT Agentic.Schema.Code.instance:2156f59ac2d5e49a instance Agentic.Builder.KnownIx h s => Agentic.Builder.KnownIx' False h ('(n, d) : s)
+@item @code{Agentic.Schema.Code}
+@code{instance Agentic.Builder.KnownIx h s => Agentic.Builder.KnownIx' False h ('(n, d) : s)}
+@c INSTANCE Agentic.Schema.Code.instance:615604f90948c16f support
+@c INSTANCE-TEXT Agentic.Schema.Code.instance:615604f90948c16f instance Agentic.Builder.KnownScope '[]
+@item @code{Agentic.Schema.Code}
+@code{instance Agentic.Builder.KnownScope '[]}
+@c INSTANCE Agentic.Schema.CodeRep.instance:24ea67394ba6ea87 support
+@c INSTANCE-TEXT Agentic.Schema.CodeRep.instance:24ea67394ba6ea87 instance Eq Agentic.Schema.CodeRep
+@item @code{Agentic.Schema.CodeRep}
+@code{instance Eq Agentic.Schema.CodeRep}
+@c INSTANCE Agentic.Schema.CodeRep.instance:fad4b5a8ee1eb2d5 support
+@c INSTANCE-TEXT Agentic.Schema.CodeRep.instance:fad4b5a8ee1eb2d5 instance Ord Agentic.Schema.CodeRep
+@item @code{Agentic.Schema.CodeRep}
+@code{instance Ord Agentic.Schema.CodeRep}
+@c INSTANCE Agentic.Schema.CodeRep.instance:70713b4ebe49f387 support
+@c INSTANCE-TEXT Agentic.Schema.CodeRep.instance:70713b4ebe49f387 instance Show Agentic.Schema.CodeRep
+@item @code{Agentic.Schema.CodeRep}
+@code{instance Show Agentic.Schema.CodeRep}
+@c INSTANCE Agentic.Schema.HasSchema.instance:43a3f4d9a4c71ba5 support
+@c INSTANCE-TEXT Agentic.Schema.HasSchema.instance:43a3f4d9a4c71ba5 instance Agentic.Schema.HasSchema ()
+@item @code{Agentic.Schema.HasSchema}
+@code{instance Agentic.Schema.HasSchema ()}
+@c INSTANCE Agentic.Schema.HasSchema.instance:7da9f0c52b17082f support
+@c INSTANCE-TEXT Agentic.Schema.HasSchema.instance:7da9f0c52b17082f instance Agentic.Schema.HasSchema Bool
+@item @code{Agentic.Schema.HasSchema}
+@code{instance Agentic.Schema.HasSchema Bool}
+@c INSTANCE Agentic.Schema.HasSchema.instance:dc8f8447946b4aa3 support
+@c INSTANCE-TEXT Agentic.Schema.HasSchema.instance:dc8f8447946b4aa3 instance Agentic.Schema.HasSchema Integer
+@item @code{Agentic.Schema.HasSchema}
+@code{instance Agentic.Schema.HasSchema Integer}
+@c INSTANCE Agentic.Schema.HasSchema.instance:398c65ba696f597d support
+@c INSTANCE-TEXT Agentic.Schema.HasSchema.instance:398c65ba696f597d instance Agentic.Schema.HasSchema Rational
+@item @code{Agentic.Schema.HasSchema}
+@code{instance Agentic.Schema.HasSchema Rational}
+@c INSTANCE Agentic.Schema.HasSchema.instance:82de3c8417547d38 support
+@c INSTANCE-TEXT Agentic.Schema.HasSchema.instance:82de3c8417547d38 instance Agentic.Schema.HasSchema Text
+@item @code{Agentic.Schema.HasSchema}
+@code{instance Agentic.Schema.HasSchema Text}
+@c INSTANCE Agentic.Schema.HasSchema.instance:bb4fa1e3f69d880f support
+@c INSTANCE-TEXT Agentic.Schema.HasSchema.instance:bb4fa1e3f69d880f instance Agentic.Schema.HasSchema value => Agentic.Schema.HasSchema [value]
+@item @code{Agentic.Schema.HasSchema}
+@code{instance Agentic.Schema.HasSchema value => Agentic.Schema.HasSchema [value]}
+@c INSTANCE Agentic.Schema.KnownCode.instance:8be5a1b07f6021ac support
+@c INSTANCE-TEXT Agentic.Schema.KnownCode.instance:8be5a1b07f6021ac instance Agentic.Schema.KnownCode Agentic.Schema.CodeAck
+@item @code{Agentic.Schema.KnownCode}
+@code{instance Agentic.Schema.KnownCode Agentic.Schema.CodeAck}
+@c INSTANCE Agentic.Schema.KnownCode.instance:65e24edbd39bc159 support
+@c INSTANCE-TEXT Agentic.Schema.KnownCode.instance:65e24edbd39bc159 instance Agentic.Schema.KnownCode Agentic.Schema.CodeFlag
+@item @code{Agentic.Schema.KnownCode}
+@code{instance Agentic.Schema.KnownCode Agentic.Schema.CodeFlag}
+@c INSTANCE Agentic.Schema.KnownCode.instance:536d28305aa0141b support
+@c INSTANCE-TEXT Agentic.Schema.KnownCode.instance:536d28305aa0141b instance Agentic.Schema.KnownCode Agentic.Schema.CodeText
+@item @code{Agentic.Schema.KnownCode}
+@code{instance Agentic.Schema.KnownCode Agentic.Schema.CodeText}
+@c INSTANCE Agentic.Schema.KnownCode.instance:2cdfe42a94f24385 support
+@c INSTANCE-TEXT Agentic.Schema.KnownCode.instance:2cdfe42a94f24385 instance Agentic.Schema.KnownCode Agentic.Schema.CodeVerdict
+@item @code{Agentic.Schema.KnownCode}
+@code{instance Agentic.Schema.KnownCode Agentic.Schema.CodeVerdict}
+@c INSTANCE Agentic.Schema.KnownCode.instance:ad8a67f441f74fd2 support
+@c INSTANCE-TEXT Agentic.Schema.KnownCode.instance:ad8a67f441f74fd2 instance Agentic.Schema.KnownSchema schema => Agentic.Schema.KnownCode (Agentic.Schema.CodeStructured schema)
+@item @code{Agentic.Schema.KnownCode}
+@code{instance Agentic.Schema.KnownSchema schema => Agentic.Schema.KnownCode (Agentic.Schema.CodeStructured schema)}
+@c INSTANCE Agentic.Schema.KnownSchema.instance:02493f6157f34b8a support
+@c INSTANCE-TEXT Agentic.Schema.KnownSchema.instance:02493f6157f34b8a instance (GHC.Internal.TypeLits.KnownSymbol name, Agentic.Schema.KnownSchema fieldSchema, Agentic.Schema.KnownSchema fields, Agentic.Schema.ObjectTail fields, Agentic.Schema.FreshProperty name fields) => Agentic.Schema.KnownSchema (Agentic.Schema.SchemaProperty name fieldSchema fields)
+@item @code{Agentic.Schema.KnownSchema}
+@code{instance (GHC.Internal.TypeLits.KnownSymbol name, Agentic.Schema.KnownSchema fieldSchema, Agentic.Schema.KnownSchema fields, Agentic.Schema.ObjectTail fields, Agentic.Schema.FreshProperty name fields) => Agentic.Schema.KnownSchema (Agentic.Schema.SchemaProperty name fieldSchema fields)}
+@c INSTANCE Agentic.Schema.KnownSchema.instance:84d1e1f94d47e6d3 support
+@c INSTANCE-TEXT Agentic.Schema.KnownSchema.instance:84d1e1f94d47e6d3 instance Agentic.Schema.KnownSchema Agentic.Schema.SchemaBoolean
+@item @code{Agentic.Schema.KnownSchema}
+@code{instance Agentic.Schema.KnownSchema Agentic.Schema.SchemaBoolean}
+@c INSTANCE Agentic.Schema.KnownSchema.instance:e862313133da50a9 support
+@c INSTANCE-TEXT Agentic.Schema.KnownSchema.instance:e862313133da50a9 instance Agentic.Schema.KnownSchema Agentic.Schema.SchemaInteger
+@item @code{Agentic.Schema.KnownSchema}
+@code{instance Agentic.Schema.KnownSchema Agentic.Schema.SchemaInteger}
+@c INSTANCE Agentic.Schema.KnownSchema.instance:245073276f6c2d6a support
+@c INSTANCE-TEXT Agentic.Schema.KnownSchema.instance:245073276f6c2d6a instance Agentic.Schema.KnownSchema Agentic.Schema.SchemaNull
+@item @code{Agentic.Schema.KnownSchema}
+@code{instance Agentic.Schema.KnownSchema Agentic.Schema.SchemaNull}
+@c INSTANCE Agentic.Schema.KnownSchema.instance:9ff20f8c325c4a91 support
+@c INSTANCE-TEXT Agentic.Schema.KnownSchema.instance:9ff20f8c325c4a91 instance Agentic.Schema.KnownSchema Agentic.Schema.SchemaNumber
+@item @code{Agentic.Schema.KnownSchema}
+@code{instance Agentic.Schema.KnownSchema Agentic.Schema.SchemaNumber}
+@c INSTANCE Agentic.Schema.KnownSchema.instance:ff5270fd74317585 support
+@c INSTANCE-TEXT Agentic.Schema.KnownSchema.instance:ff5270fd74317585 instance Agentic.Schema.KnownSchema Agentic.Schema.SchemaObject
+@item @code{Agentic.Schema.KnownSchema}
+@code{instance Agentic.Schema.KnownSchema Agentic.Schema.SchemaObject}
+@c INSTANCE Agentic.Schema.KnownSchema.instance:ceb7162f0ff31842 support
+@c INSTANCE-TEXT Agentic.Schema.KnownSchema.instance:ceb7162f0ff31842 instance Agentic.Schema.KnownSchema Agentic.Schema.SchemaString
+@item @code{Agentic.Schema.KnownSchema}
+@code{instance Agentic.Schema.KnownSchema Agentic.Schema.SchemaString}
+@c INSTANCE Agentic.Schema.KnownSchema.instance:732c4b0c8fcc4a83 support
+@c INSTANCE-TEXT Agentic.Schema.KnownSchema.instance:732c4b0c8fcc4a83 instance Agentic.Schema.KnownSchema schema => Agentic.Schema.KnownSchema (Agentic.Schema.SchemaArray schema)
+@item @code{Agentic.Schema.KnownSchema}
+@code{instance Agentic.Schema.KnownSchema schema => Agentic.Schema.KnownSchema (Agentic.Schema.SchemaArray schema)}
+@c INSTANCE Agentic.Schema.ObjectTail.instance:7e23401e50ac86c9 machinery
+@c INSTANCE-TEXT Agentic.Schema.ObjectTail.instance:7e23401e50ac86c9 instance Agentic.Schema.ObjectTail (Agentic.Schema.SchemaProperty name field rest)
+@item @code{Agentic.Schema.ObjectTail}
+@code{instance Agentic.Schema.ObjectTail (Agentic.Schema.SchemaProperty name field rest)}
+@c INSTANCE Agentic.Schema.ObjectTail.instance:eb028296182dfc5a machinery
+@c INSTANCE-TEXT Agentic.Schema.ObjectTail.instance:eb028296182dfc5a instance Agentic.Schema.ObjectTail Agentic.Schema.SchemaObject
+@item @code{Agentic.Schema.ObjectTail}
+@code{instance Agentic.Schema.ObjectTail Agentic.Schema.SchemaObject}
+@c INSTANCE Agentic.Schema.SchemaRep.instance:cfb4db4bdccde971 support
+@c INSTANCE-TEXT Agentic.Schema.SchemaRep.instance:cfb4db4bdccde971 instance Eq Agentic.Schema.SchemaRep
+@item @code{Agentic.Schema.SchemaRep}
+@code{instance Eq Agentic.Schema.SchemaRep}
+@c INSTANCE Agentic.Schema.SchemaRep.instance:d172fd65a6196431 support
+@c INSTANCE-TEXT Agentic.Schema.SchemaRep.instance:d172fd65a6196431 instance Ord Agentic.Schema.SchemaRep
+@item @code{Agentic.Schema.SchemaRep}
+@code{instance Ord Agentic.Schema.SchemaRep}
+@c INSTANCE Agentic.Schema.SchemaRep.instance:3197009724c111de support
+@c INSTANCE-TEXT Agentic.Schema.SchemaRep.instance:3197009724c111de instance Show Agentic.Schema.SchemaRep
+@item @code{Agentic.Schema.SchemaRep}
+@code{instance Show Agentic.Schema.SchemaRep}
+@c INSTANCE Agentic.Schema.SomeCode.instance:e6540a6b2bad7b5e support
+@c INSTANCE-TEXT Agentic.Schema.SomeCode.instance:e6540a6b2bad7b5e instance Eq Agentic.Schema.SomeCode
+@item @code{Agentic.Schema.SomeCode}
+@code{instance Eq Agentic.Schema.SomeCode}
+@c INSTANCE Agentic.Schema.SomeCode.instance:d702a43b414330d6 support
+@c INSTANCE-TEXT Agentic.Schema.SomeCode.instance:d702a43b414330d6 instance Ord Agentic.Schema.SomeCode
+@item @code{Agentic.Schema.SomeCode}
+@code{instance Ord Agentic.Schema.SomeCode}
+@c INSTANCE Agentic.Schema.SomeCode.instance:b3e5ae10c8e9b9f9 support
+@c INSTANCE-TEXT Agentic.Schema.SomeCode.instance:b3e5ae10c8e9b9f9 instance Show Agentic.Schema.SomeCode
+@item @code{Agentic.Schema.SomeCode}
+@code{instance Show Agentic.Schema.SomeCode}
+@c INSTANCE Agentic.WF.KnownIx.instance:1806bf879e894c7e machinery
+@c INSTANCE-TEXT Agentic.WF.KnownIx.instance:1806bf879e894c7e instance Agentic.Builder.KnownIx' (Agentic.Builder.ScopeEq h s) h s => Agentic.Builder.KnownIx h s
+@item @code{Agentic.WF.KnownIx}
+@code{instance Agentic.Builder.KnownIx' (Agentic.Builder.ScopeEq h s) h s => Agentic.Builder.KnownIx h s}
+@c INSTANCE Agentic.WF.Says.instance:07e357823f719147 support
+@c INSTANCE-TEXT Agentic.WF.Says.instance:07e357823f719147 instance (Agentic.Builder.KnownIx h s, Agentic.Builder.Spliceable c) => Agentic.WF.Says (Agentic.Builder.V h c) s
+@item @code{Agentic.WF.Says}
+@code{instance (Agentic.Builder.KnownIx h s, Agentic.Builder.Spliceable c) => Agentic.WF.Says (Agentic.Builder.V h c) s}
+@c INSTANCE Agentic.WF.Says.instance:319d2020ecb2f49f support
+@c INSTANCE-TEXT Agentic.WF.Says.instance:319d2020ecb2f49f instance (s ~ s') => Agentic.WF.Says [Agentic.Builder.Piece s'] s
+@item @code{Agentic.WF.Says}
+@code{instance (s ~ s') => Agentic.WF.Says [Agentic.Builder.Piece s'] s}
+@c INSTANCE Agentic.WF.Says.instance:db8c765a1d532adb support
+@c INSTANCE-TEXT Agentic.WF.Says.instance:db8c765a1d532adb instance Agentic.WF.Says Text s
+@item @code{Agentic.WF.Says}
+@code{instance Agentic.WF.Says Text s}
+@c INSTANCE Agentic.WF.V.instance:07e357823f719147 support
+@c INSTANCE-TEXT Agentic.WF.V.instance:07e357823f719147 instance (Agentic.Builder.KnownIx h s, Agentic.Builder.Spliceable c) => Agentic.WF.Says (Agentic.Builder.V h c) s
+@item @code{Agentic.WF.V}
+@code{instance (Agentic.Builder.KnownIx h s, Agentic.Builder.Spliceable c) => Agentic.WF.Says (Agentic.Builder.V h c) s}
+@c INSTANCE Agentic.WF.V.instance:14c269583f4414f4 support
+@c INSTANCE-TEXT Agentic.WF.V.instance:14c269583f4414f4 instance (Agentic.Builder.KnownIx h s, c' ~ c) => Agentic.Workflow.Gives (Agentic.Builder.V h c') s c
+@item @code{Agentic.WF.V}
+@code{instance (Agentic.Builder.KnownIx h s, c' ~ c) => Agentic.Workflow.Gives (Agentic.Builder.V h c') s c}
+@c INSTANCE Agentic.WF.V.instance:197ccefae044078b support
+@c INSTANCE-TEXT Agentic.WF.V.instance:197ccefae044078b instance Agentic.Workflow.Curries hs => Agentic.Workflow.Curries (Agentic.Builder.V h c, hs)
+@item @code{Agentic.WF.V}
+@code{instance Agentic.Workflow.Curries hs => Agentic.Workflow.Curries (Agentic.Builder.V h c, hs)}
+@c INSTANCE Agentic.Workflow.Chain.instance:1670ac54698ca790 support
+@c INSTANCE-TEXT Agentic.Workflow.Chain.instance:1670ac54698ca790 instance (s ~ s') => Agentic.Workflow.Chain (Agentic.Builder.Arg s c) (Agentic.Builder.Args s' ps) (Agentic.Builder.Args s' (c : ps))
+@item @code{Agentic.Workflow.Chain}
+@code{instance (s ~ s') => Agentic.Workflow.Chain (Agentic.Builder.Arg s c) (Agentic.Builder.Args s' ps) (Agentic.Builder.Args s' (c : ps))}
+@c INSTANCE Agentic.Workflow.Chain.instance:d512737724272c54 support
+@c INSTANCE-TEXT Agentic.Workflow.Chain.instance:d512737724272c54 instance Agentic.Workflow.Chain Agentic.Workflow.In (Agentic.Workflow.Ins hs) (Agentic.Workflow.Ins (Text, hs))
+@item @code{Agentic.Workflow.Chain}
+@code{instance Agentic.Workflow.Chain Agentic.Workflow.In (Agentic.Workflow.Ins hs) (Agentic.Workflow.Ins (Text, hs))}
+@c INSTANCE Agentic.Workflow.Code.instance:837ec029a048b408 support
+@c INSTANCE-TEXT Agentic.Workflow.Code.instance:837ec029a048b408 instance (GHC.Internal.TypeLits.KnownSymbol n, Agentic.Builder.KnownScope s) => Agentic.Builder.KnownScope ('(n, c) : s)
+@item @code{Agentic.Workflow.Code}
+@code{instance (GHC.Internal.TypeLits.KnownSymbol n, Agentic.Builder.KnownScope s) => Agentic.Builder.KnownScope ('(n, c) : s)}
+@c INSTANCE Agentic.Workflow.Code.instance:38806a310f935ec1 support
+@c INSTANCE-TEXT Agentic.Workflow.Code.instance:38806a310f935ec1 instance (TypeError ...) => Agentic.Builder.KnownIx' False h '[]
+@item @code{Agentic.Workflow.Code}
+@code{instance (TypeError ...) => Agentic.Builder.KnownIx' False h '[]}
+@c INSTANCE Agentic.Workflow.Code.instance:1670ac54698ca790 support
+@c INSTANCE-TEXT Agentic.Workflow.Code.instance:1670ac54698ca790 instance (s ~ s') => Agentic.Workflow.Chain (Agentic.Builder.Arg s c) (Agentic.Builder.Args s' ps) (Agentic.Builder.Args s' (c : ps))
+@item @code{Agentic.Workflow.Code}
+@code{instance (s ~ s') => Agentic.Workflow.Chain (Agentic.Builder.Arg s c) (Agentic.Builder.Args s' ps) (Agentic.Builder.Args s' (c : ps))}
+@c INSTANCE Agentic.Workflow.Code.instance:2156f59ac2d5e49a support
+@c INSTANCE-TEXT Agentic.Workflow.Code.instance:2156f59ac2d5e49a instance Agentic.Builder.KnownIx h s => Agentic.Builder.KnownIx' False h ('(n, d) : s)
+@item @code{Agentic.Workflow.Code}
+@code{instance Agentic.Builder.KnownIx h s => Agentic.Builder.KnownIx' False h ('(n, d) : s)}
+@c INSTANCE Agentic.Workflow.Code.instance:615604f90948c16f support
+@c INSTANCE-TEXT Agentic.Workflow.Code.instance:615604f90948c16f instance Agentic.Builder.KnownScope '[]
+@item @code{Agentic.Workflow.Code}
+@code{instance Agentic.Builder.KnownScope '[]}
+@c INSTANCE Agentic.Workflow.Curries.instance:1db9e2c964e7d9ae machinery
+@c INSTANCE-TEXT Agentic.Workflow.Curries.instance:1db9e2c964e7d9ae instance Agentic.Workflow.Curries ()
+@item @code{Agentic.Workflow.Curries}
+@code{instance Agentic.Workflow.Curries ()}
+@c INSTANCE Agentic.Workflow.Curries.instance:197ccefae044078b machinery
+@c INSTANCE-TEXT Agentic.Workflow.Curries.instance:197ccefae044078b instance Agentic.Workflow.Curries hs => Agentic.Workflow.Curries (Agentic.Builder.V h c, hs)
+@item @code{Agentic.Workflow.Curries}
+@code{instance Agentic.Workflow.Curries hs => Agentic.Workflow.Curries (Agentic.Builder.V h c, hs)}
+@c INSTANCE Agentic.Workflow.Curries.instance:0b34e02bc45a950c machinery
+@c INSTANCE-TEXT Agentic.Workflow.Curries.instance:0b34e02bc45a950c instance Agentic.Workflow.Curries hs => Agentic.Workflow.Curries (Text, hs)
+@item @code{Agentic.Workflow.Curries}
+@code{instance Agentic.Workflow.Curries hs => Agentic.Workflow.Curries (Text, hs)}
+@c INSTANCE Agentic.Workflow.Decider.instance:8625eba73012cab3 author
+@c INSTANCE-TEXT Agentic.Workflow.Decider.instance:8625eba73012cab3 instance Bounded Agentic.Text.Decider
+@item @code{Agentic.Workflow.Decider}
+@code{instance Bounded Agentic.Text.Decider}
+@c INSTANCE Agentic.Workflow.Decider.instance:9e3b0979bdebb22a author
+@c INSTANCE-TEXT Agentic.Workflow.Decider.instance:9e3b0979bdebb22a instance Enum Agentic.Text.Decider
+@item @code{Agentic.Workflow.Decider}
+@code{instance Enum Agentic.Text.Decider}
+@c INSTANCE Agentic.Workflow.Decider.instance:da53a0f0c11d85b6 author
+@c INSTANCE-TEXT Agentic.Workflow.Decider.instance:da53a0f0c11d85b6 instance Eq Agentic.Text.Decider
+@item @code{Agentic.Workflow.Decider}
+@code{instance Eq Agentic.Text.Decider}
+@c INSTANCE Agentic.Workflow.Decider.instance:643c0ac05d7d7fad author
+@c INSTANCE-TEXT Agentic.Workflow.Decider.instance:643c0ac05d7d7fad instance Ord Agentic.Text.Decider
+@item @code{Agentic.Workflow.Decider}
+@code{instance Ord Agentic.Text.Decider}
+@c INSTANCE Agentic.Workflow.Decider.instance:51803dd0bf183679 author
+@c INSTANCE-TEXT Agentic.Workflow.Decider.instance:51803dd0bf183679 instance Show Agentic.Text.Decider
+@item @code{Agentic.Workflow.Decider}
+@code{instance Show Agentic.Text.Decider}
+@c INSTANCE Agentic.Workflow.Gives.instance:14c269583f4414f4 author
+@c INSTANCE-TEXT Agentic.Workflow.Gives.instance:14c269583f4414f4 instance (Agentic.Builder.KnownIx h s, c' ~ c) => Agentic.Workflow.Gives (Agentic.Builder.V h c') s c
+@item @code{Agentic.Workflow.Gives}
+@code{instance (Agentic.Builder.KnownIx h s, c' ~ c) => Agentic.Workflow.Gives (Agentic.Builder.V h c') s c}
+@c INSTANCE Agentic.Workflow.Gives.instance:05099e7f81e89981 author
+@c INSTANCE-TEXT Agentic.Workflow.Gives.instance:05099e7f81e89981 instance (c ~ Agentic.Schema.CodeText) => Agentic.Workflow.Gives Text s c
+@item @code{Agentic.Workflow.Gives}
+@code{instance (c ~ Agentic.Schema.CodeText) => Agentic.Workflow.Gives Text s c}
+@c INSTANCE Agentic.Workflow.Gives.instance:0708a5a2714fcd5b author
+@c INSTANCE-TEXT Agentic.Workflow.Gives.instance:0708a5a2714fcd5b instance (s ~ s', c ~ Agentic.Schema.CodeText) => Agentic.Workflow.Gives [Agentic.Builder.Piece s'] s c
+@item @code{Agentic.Workflow.Gives}
+@code{instance (s ~ s', c ~ Agentic.Schema.CodeText) => Agentic.Workflow.Gives [Agentic.Builder.Piece s'] s c}
+@c INSTANCE Agentic.Workflow.HasSchema.instance:43a3f4d9a4c71ba5 support
+@c INSTANCE-TEXT Agentic.Workflow.HasSchema.instance:43a3f4d9a4c71ba5 instance Agentic.Schema.HasSchema ()
+@item @code{Agentic.Workflow.HasSchema}
+@code{instance Agentic.Schema.HasSchema ()}
+@c INSTANCE Agentic.Workflow.HasSchema.instance:7da9f0c52b17082f support
+@c INSTANCE-TEXT Agentic.Workflow.HasSchema.instance:7da9f0c52b17082f instance Agentic.Schema.HasSchema Bool
+@item @code{Agentic.Workflow.HasSchema}
+@code{instance Agentic.Schema.HasSchema Bool}
+@c INSTANCE Agentic.Workflow.HasSchema.instance:dc8f8447946b4aa3 support
+@c INSTANCE-TEXT Agentic.Workflow.HasSchema.instance:dc8f8447946b4aa3 instance Agentic.Schema.HasSchema Integer
+@item @code{Agentic.Workflow.HasSchema}
+@code{instance Agentic.Schema.HasSchema Integer}
+@c INSTANCE Agentic.Workflow.HasSchema.instance:398c65ba696f597d support
+@c INSTANCE-TEXT Agentic.Workflow.HasSchema.instance:398c65ba696f597d instance Agentic.Schema.HasSchema Rational
+@item @code{Agentic.Workflow.HasSchema}
+@code{instance Agentic.Schema.HasSchema Rational}
+@c INSTANCE Agentic.Workflow.HasSchema.instance:82de3c8417547d38 support
+@c INSTANCE-TEXT Agentic.Workflow.HasSchema.instance:82de3c8417547d38 instance Agentic.Schema.HasSchema Text
+@item @code{Agentic.Workflow.HasSchema}
+@code{instance Agentic.Schema.HasSchema Text}
+@c INSTANCE Agentic.Workflow.HasSchema.instance:bb4fa1e3f69d880f support
+@c INSTANCE-TEXT Agentic.Workflow.HasSchema.instance:bb4fa1e3f69d880f instance Agentic.Schema.HasSchema value => Agentic.Schema.HasSchema [value]
+@item @code{Agentic.Workflow.HasSchema}
+@code{instance Agentic.Schema.HasSchema value => Agentic.Schema.HasSchema [value]}
+@c INSTANCE Agentic.Workflow.KnownIx.instance:1806bf879e894c7e support
+@c INSTANCE-TEXT Agentic.Workflow.KnownIx.instance:1806bf879e894c7e instance Agentic.Builder.KnownIx' (Agentic.Builder.ScopeEq h s) h s => Agentic.Builder.KnownIx h s
+@item @code{Agentic.Workflow.KnownIx}
+@code{instance Agentic.Builder.KnownIx' (Agentic.Builder.ScopeEq h s) h s => Agentic.Builder.KnownIx h s}
+@c INSTANCE Agentic.Workflow.KnownSchema.instance:02493f6157f34b8a support
+@c INSTANCE-TEXT Agentic.Workflow.KnownSchema.instance:02493f6157f34b8a instance (GHC.Internal.TypeLits.KnownSymbol name, Agentic.Schema.KnownSchema fieldSchema, Agentic.Schema.KnownSchema fields, Agentic.Schema.ObjectTail fields, Agentic.Schema.FreshProperty name fields) => Agentic.Schema.KnownSchema (Agentic.Schema.SchemaProperty name fieldSchema fields)
+@item @code{Agentic.Workflow.KnownSchema}
+@code{instance (GHC.Internal.TypeLits.KnownSymbol name, Agentic.Schema.KnownSchema fieldSchema, Agentic.Schema.KnownSchema fields, Agentic.Schema.ObjectTail fields, Agentic.Schema.FreshProperty name fields) => Agentic.Schema.KnownSchema (Agentic.Schema.SchemaProperty name fieldSchema fields)}
+@c INSTANCE Agentic.Workflow.KnownSchema.instance:84d1e1f94d47e6d3 support
+@c INSTANCE-TEXT Agentic.Workflow.KnownSchema.instance:84d1e1f94d47e6d3 instance Agentic.Schema.KnownSchema Agentic.Schema.SchemaBoolean
+@item @code{Agentic.Workflow.KnownSchema}
+@code{instance Agentic.Schema.KnownSchema Agentic.Schema.SchemaBoolean}
+@c INSTANCE Agentic.Workflow.KnownSchema.instance:e862313133da50a9 support
+@c INSTANCE-TEXT Agentic.Workflow.KnownSchema.instance:e862313133da50a9 instance Agentic.Schema.KnownSchema Agentic.Schema.SchemaInteger
+@item @code{Agentic.Workflow.KnownSchema}
+@code{instance Agentic.Schema.KnownSchema Agentic.Schema.SchemaInteger}
+@c INSTANCE Agentic.Workflow.KnownSchema.instance:245073276f6c2d6a support
+@c INSTANCE-TEXT Agentic.Workflow.KnownSchema.instance:245073276f6c2d6a instance Agentic.Schema.KnownSchema Agentic.Schema.SchemaNull
+@item @code{Agentic.Workflow.KnownSchema}
+@code{instance Agentic.Schema.KnownSchema Agentic.Schema.SchemaNull}
+@c INSTANCE Agentic.Workflow.KnownSchema.instance:9ff20f8c325c4a91 support
+@c INSTANCE-TEXT Agentic.Workflow.KnownSchema.instance:9ff20f8c325c4a91 instance Agentic.Schema.KnownSchema Agentic.Schema.SchemaNumber
+@item @code{Agentic.Workflow.KnownSchema}
+@code{instance Agentic.Schema.KnownSchema Agentic.Schema.SchemaNumber}
+@c INSTANCE Agentic.Workflow.KnownSchema.instance:ff5270fd74317585 support
+@c INSTANCE-TEXT Agentic.Workflow.KnownSchema.instance:ff5270fd74317585 instance Agentic.Schema.KnownSchema Agentic.Schema.SchemaObject
+@item @code{Agentic.Workflow.KnownSchema}
+@code{instance Agentic.Schema.KnownSchema Agentic.Schema.SchemaObject}
+@c INSTANCE Agentic.Workflow.KnownSchema.instance:ceb7162f0ff31842 support
+@c INSTANCE-TEXT Agentic.Workflow.KnownSchema.instance:ceb7162f0ff31842 instance Agentic.Schema.KnownSchema Agentic.Schema.SchemaString
+@item @code{Agentic.Workflow.KnownSchema}
+@code{instance Agentic.Schema.KnownSchema Agentic.Schema.SchemaString}
+@c INSTANCE Agentic.Workflow.KnownSchema.instance:732c4b0c8fcc4a83 support
+@c INSTANCE-TEXT Agentic.Workflow.KnownSchema.instance:732c4b0c8fcc4a83 instance Agentic.Schema.KnownSchema schema => Agentic.Schema.KnownSchema (Agentic.Schema.SchemaArray schema)
+@item @code{Agentic.Workflow.KnownSchema}
+@code{instance Agentic.Schema.KnownSchema schema => Agentic.Schema.KnownSchema (Agentic.Schema.SchemaArray schema)}
+@c INSTANCE Agentic.Workflow.Says.instance:07e357823f719147 support
+@c INSTANCE-TEXT Agentic.Workflow.Says.instance:07e357823f719147 instance (Agentic.Builder.KnownIx h s, Agentic.Builder.Spliceable c) => Agentic.WF.Says (Agentic.Builder.V h c) s
+@item @code{Agentic.Workflow.Says}
+@code{instance (Agentic.Builder.KnownIx h s, Agentic.Builder.Spliceable c) => Agentic.WF.Says (Agentic.Builder.V h c) s}
+@c INSTANCE Agentic.Workflow.Says.instance:319d2020ecb2f49f support
+@c INSTANCE-TEXT Agentic.Workflow.Says.instance:319d2020ecb2f49f instance (s ~ s') => Agentic.WF.Says [Agentic.Builder.Piece s'] s
+@item @code{Agentic.Workflow.Says}
+@code{instance (s ~ s') => Agentic.WF.Says [Agentic.Builder.Piece s'] s}
+@c INSTANCE Agentic.Workflow.Says.instance:db8c765a1d532adb support
+@c INSTANCE-TEXT Agentic.Workflow.Says.instance:db8c765a1d532adb instance Agentic.WF.Says Text s
+@item @code{Agentic.Workflow.Says}
+@code{instance Agentic.WF.Says Text s}
+@c INSTANCE Agentic.Workflow.Step.instance:fae40c5609321835 machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:fae40c5609321835 instance (TypeError ...) => Agentic.Workflow.Step (Agentic.Builder.Ask s') (Agentic.Workflow.Amending c s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (TypeError ...) => Agentic.Workflow.Step (Agentic.Builder.Ask s') (Agentic.Workflow.Amending c s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:bf95cea2709dc36a machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:bf95cea2709dc36a instance (TypeError ...) => Agentic.Workflow.Step (Agentic.Builder.Rhs s' c') (Agentic.Workflow.Amending c s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (TypeError ...) => Agentic.Workflow.Step (Agentic.Builder.Rhs s' c') (Agentic.Workflow.Amending c s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:60cb6613a6709186 machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:60cb6613a6709186 instance (TypeError ...) => Agentic.Workflow.Step (Agentic.Workflow.Acting s') (Agentic.Workflow.Amending c s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (TypeError ...) => Agentic.Workflow.Step (Agentic.Workflow.Acting s') (Agentic.Workflow.Amending c s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:c91542d6bac4c5d0 machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:c91542d6bac4c5d0 instance (TypeError ...) => Agentic.Workflow.Step (Agentic.Workflow.Acting s') (Agentic.Workflow.Review c s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (TypeError ...) => Agentic.Workflow.Step (Agentic.Workflow.Acting s') (Agentic.Workflow.Review c s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:dca4a2380023fd10 machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:dca4a2380023fd10 instance (TypeError ...) => Agentic.Workflow.Step (Agentic.Workflow.Calling s') (Agentic.Workflow.Amending c s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (TypeError ...) => Agentic.Workflow.Step (Agentic.Workflow.Calling s') (Agentic.Workflow.Amending c s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:7f12437a4eb7230e machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:7f12437a4eb7230e instance (TypeError ...) => Agentic.Workflow.Step (Agentic.Workflow.Calling s') (Agentic.Workflow.Review c s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (TypeError ...) => Agentic.Workflow.Step (Agentic.Workflow.Calling s') (Agentic.Workflow.Review c s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:90dd34f24d3c92be machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:90dd34f24d3c92be instance (TypeError ...) => Agentic.Workflow.Step (Agentic.Workflow.Loop c' s') (Agentic.Workflow.Body r s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (TypeError ...) => Agentic.Workflow.Step (Agentic.Workflow.Loop c' s') (Agentic.Workflow.Body r s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:af480ca5edb3a1f4 machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:af480ca5edb3a1f4 instance (TypeError ...) => Agentic.Workflow.Step (Agentic.Workflow.LoopOn c' s') (Agentic.Workflow.Body r s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (TypeError ...) => Agentic.Workflow.Step (Agentic.Workflow.LoopOn c' s') (Agentic.Workflow.Body r s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:49eef7a93fb82e07 machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:49eef7a93fb82e07 instance (i ~ i', j ~ j', a ~ a') => Agentic.Workflow.Step (Agentic.Workflow.W i' j' a') i j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (i ~ i', j ~ j', a ~ a') => Agentic.Workflow.Step (Agentic.Workflow.W i' j' a') i j a}
+@c INSTANCE Agentic.Workflow.Step.instance:255b6fae15ac19fc machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:255b6fae15ac19fc instance (s' ~ (Agentic.Workflow.An c : s), c' ~ Agentic.Schema.CodeVerdict, j ~ Agentic.Workflow.Amending c s, a ~ Agentic.Builder.V (Agentic.Workflow.An Agentic.Schema.CodeVerdict : Agentic.Workflow.An c : s) Agentic.Schema.CodeVerdict) => Agentic.Workflow.Step (Agentic.Builder.Rhs s' c') (Agentic.Workflow.Review c s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (s' ~ (Agentic.Workflow.An c : s), c' ~ Agentic.Schema.CodeVerdict, j ~ Agentic.Workflow.Amending c s, a ~ Agentic.Builder.V (Agentic.Workflow.An Agentic.Schema.CodeVerdict : Agentic.Workflow.An c : s) Agentic.Schema.CodeVerdict) => Agentic.Workflow.Step (Agentic.Builder.Rhs s' c') (Agentic.Workflow.Review c s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:d24a3bdef5380928 machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:d24a3bdef5380928 instance (s' ~ (Agentic.Workflow.An c : s), c' ~ Agentic.Schema.CodeVerdict, j ~ Agentic.Workflow.Amending c s, a ~ Agentic.Builder.V (Agentic.Workflow.An Agentic.Schema.CodeVerdict : Agentic.Workflow.An c : s) Agentic.Schema.CodeVerdict) => Agentic.Workflow.Step (Agentic.Workflow.Ann s' c') (Agentic.Workflow.Review c s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (s' ~ (Agentic.Workflow.An c : s), c' ~ Agentic.Schema.CodeVerdict, j ~ Agentic.Workflow.Amending c s, a ~ Agentic.Builder.V (Agentic.Workflow.An Agentic.Schema.CodeVerdict : Agentic.Workflow.An c : s) Agentic.Schema.CodeVerdict) => Agentic.Workflow.Step (Agentic.Workflow.Ann s' c') (Agentic.Workflow.Review c s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:6ecee5d5f3fe8703 machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:6ecee5d5f3fe8703 instance (s' ~ (Agentic.Workflow.An c : s), j ~ Agentic.Workflow.Amending c s, a ~ Agentic.Builder.V (Agentic.Workflow.An Agentic.Schema.CodeVerdict : Agentic.Workflow.An c : s) Agentic.Schema.CodeVerdict) => Agentic.Workflow.Step (Agentic.Builder.Ask s') (Agentic.Workflow.Review c s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (s' ~ (Agentic.Workflow.An c : s), j ~ Agentic.Workflow.Amending c s, a ~ Agentic.Builder.V (Agentic.Workflow.An Agentic.Schema.CodeVerdict : Agentic.Workflow.An c : s) Agentic.Schema.CodeVerdict) => Agentic.Workflow.Step (Agentic.Builder.Ask s') (Agentic.Workflow.Review c s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:71b1113d045160ea machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:71b1113d045160ea instance (s' ~ s, c' ~ c, j ~ Agentic.Workflow.Open (Agentic.Workflow.An c : s), a ~ Agentic.Workflow.Ending c s) => Agentic.Workflow.Step (Agentic.Workflow.LoopOn c' s') (Agentic.Workflow.Open s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (s' ~ s, c' ~ c, j ~ Agentic.Workflow.Open (Agentic.Workflow.An c : s), a ~ Agentic.Workflow.Ending c s) => Agentic.Workflow.Step (Agentic.Workflow.LoopOn c' s') (Agentic.Workflow.Open s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:2c91fc73141e2b39 machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:2c91fc73141e2b39 instance (s' ~ s, c' ~ c, j ~ Agentic.Workflow.Open (Agentic.Workflow.An c : s), a ~ Agentic.Workflow.Outcome c s) => Agentic.Workflow.Step (Agentic.Workflow.Loop c' s') (Agentic.Workflow.Open s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (s' ~ s, c' ~ c, j ~ Agentic.Workflow.Open (Agentic.Workflow.An c : s), a ~ Agentic.Workflow.Outcome c s) => Agentic.Workflow.Step (Agentic.Workflow.Loop c' s') (Agentic.Workflow.Open s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:328266beed2325f3 machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:328266beed2325f3 instance (s' ~ s, j ~ Agentic.Workflow.Body r (Agentic.Workflow.An Agentic.Schema.CodeText : s), a ~ Agentic.Builder.V (Agentic.Workflow.An Agentic.Schema.CodeText : s) Agentic.Schema.CodeText) => Agentic.Workflow.Step (Agentic.Builder.Ask s') (Agentic.Workflow.Body r s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (s' ~ s, j ~ Agentic.Workflow.Body r (Agentic.Workflow.An Agentic.Schema.CodeText : s), a ~ Agentic.Builder.V (Agentic.Workflow.An Agentic.Schema.CodeText : s) Agentic.Schema.CodeText) => Agentic.Workflow.Step (Agentic.Builder.Ask s') (Agentic.Workflow.Body r s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:cff659f3e49c8bc0 machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:cff659f3e49c8bc0 instance (s' ~ s, j ~ Agentic.Workflow.Body r (Agentic.Workflow.An c : s), a ~ Agentic.Builder.V (Agentic.Workflow.An c : s) c) => Agentic.Workflow.Step (Agentic.Builder.Rhs s' c) (Agentic.Workflow.Body r s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (s' ~ s, j ~ Agentic.Workflow.Body r (Agentic.Workflow.An c : s), a ~ Agentic.Builder.V (Agentic.Workflow.An c : s) c) => Agentic.Workflow.Step (Agentic.Builder.Rhs s' c) (Agentic.Workflow.Body r s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:a905724e3fdd616f machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:a905724e3fdd616f instance (s' ~ s, j ~ Agentic.Workflow.Body r (Agentic.Workflow.An c : s), a ~ Agentic.Builder.V (Agentic.Workflow.An c : s) c) => Agentic.Workflow.Step (Agentic.Workflow.Ann s' c) (Agentic.Workflow.Body r s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (s' ~ s, j ~ Agentic.Workflow.Body r (Agentic.Workflow.An c : s), a ~ Agentic.Builder.V (Agentic.Workflow.An c : s) c) => Agentic.Workflow.Step (Agentic.Workflow.Ann s' c) (Agentic.Workflow.Body r s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:31a3e64e997def45 machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:31a3e64e997def45 instance (s' ~ s, j ~ Agentic.Workflow.Body r s, a ~ ()) => Agentic.Workflow.Step (Agentic.Workflow.Acting s') (Agentic.Workflow.Body r s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (s' ~ s, j ~ Agentic.Workflow.Body r s, a ~ ()) => Agentic.Workflow.Step (Agentic.Workflow.Acting s') (Agentic.Workflow.Body r s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:42be3d8183f26396 machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:42be3d8183f26396 instance (s' ~ s, j ~ Agentic.Workflow.Body r s, a ~ ()) => Agentic.Workflow.Step (Agentic.Workflow.Calling s') (Agentic.Workflow.Body r s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (s' ~ s, j ~ Agentic.Workflow.Body r s, a ~ ()) => Agentic.Workflow.Step (Agentic.Workflow.Calling s') (Agentic.Workflow.Body r s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:31c5925fbb27cfdb machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:31c5925fbb27cfdb instance (s' ~ s, j ~ Agentic.Workflow.Open (Agentic.Workflow.An Agentic.Schema.CodeText : s), a ~ Agentic.Builder.V (Agentic.Workflow.An Agentic.Schema.CodeText : s) Agentic.Schema.CodeText) => Agentic.Workflow.Step (Agentic.Builder.Ask s') (Agentic.Workflow.Open s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (s' ~ s, j ~ Agentic.Workflow.Open (Agentic.Workflow.An Agentic.Schema.CodeText : s), a ~ Agentic.Builder.V (Agentic.Workflow.An Agentic.Schema.CodeText : s) Agentic.Schema.CodeText) => Agentic.Workflow.Step (Agentic.Builder.Ask s') (Agentic.Workflow.Open s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:8858867388f6baff machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:8858867388f6baff instance (s' ~ s, j ~ Agentic.Workflow.Open (Agentic.Workflow.An c : s), a ~ Agentic.Builder.V (Agentic.Workflow.An c : s) c) => Agentic.Workflow.Step (Agentic.Builder.Rhs s' c) (Agentic.Workflow.Open s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (s' ~ s, j ~ Agentic.Workflow.Open (Agentic.Workflow.An c : s), a ~ Agentic.Builder.V (Agentic.Workflow.An c : s) c) => Agentic.Workflow.Step (Agentic.Builder.Rhs s' c) (Agentic.Workflow.Open s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:a254d550d2053ebd machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:a254d550d2053ebd instance (s' ~ s, j ~ Agentic.Workflow.Open (Agentic.Workflow.An c : s), a ~ Agentic.Builder.V (Agentic.Workflow.An c : s) c) => Agentic.Workflow.Step (Agentic.Workflow.Ann s' c) (Agentic.Workflow.Open s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (s' ~ s, j ~ Agentic.Workflow.Open (Agentic.Workflow.An c : s), a ~ Agentic.Builder.V (Agentic.Workflow.An c : s) c) => Agentic.Workflow.Step (Agentic.Workflow.Ann s' c) (Agentic.Workflow.Open s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:846ee5bf5ad91f24 machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:846ee5bf5ad91f24 instance (s' ~ s, j ~ Agentic.Workflow.Open s, a ~ ()) => Agentic.Workflow.Step (Agentic.Workflow.Acting s') (Agentic.Workflow.Open s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (s' ~ s, j ~ Agentic.Workflow.Open s, a ~ ()) => Agentic.Workflow.Step (Agentic.Workflow.Acting s') (Agentic.Workflow.Open s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:5ddae6d230fdb3b8 machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:5ddae6d230fdb3b8 instance (s' ~ s, j ~ Agentic.Workflow.Open s, a ~ ()) => Agentic.Workflow.Step (Agentic.Workflow.Calling s') (Agentic.Workflow.Open s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (s' ~ s, j ~ Agentic.Workflow.Open s, a ~ ()) => Agentic.Workflow.Step (Agentic.Workflow.Calling s') (Agentic.Workflow.Open s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:0110f801f1b95776 machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:0110f801f1b95776 instance Agentic.Workflow.Step st i j a => Agentic.Workflow.Step (Agentic.Workflow.Nm st) i j a
+@item @code{Agentic.Workflow.Step}
+@code{instance Agentic.Workflow.Step st i j a => Agentic.Workflow.Step (Agentic.Workflow.Nm st) i j a}
+@end table
