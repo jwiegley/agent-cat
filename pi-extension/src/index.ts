@@ -135,7 +135,7 @@ export default function agentCatExtension(pi: ExtensionAPI): void {
     await currentBridge.close();
   });
 
-  pi.registerCommand("workflows", {
+  pi.registerCommand("wf", {
     description: "Browse configured agent-cat workflows",
     handler: async (_args, ctx) => {
       const catalogue = await discover(ctx);

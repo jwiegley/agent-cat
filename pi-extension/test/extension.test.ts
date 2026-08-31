@@ -85,7 +85,9 @@ describe("Pi extension lifecycle", () => {
       } as never);
       const notices: string[] = [];
       const ctx = { hasUI: false, cwd: process.cwd(), mode, ui: { notify: (message: string) => notices.push(message) } };
-      await commands.get("workflows")!.handler("", ctx);
+      expect(commands.has("wf")).toBe(true);
+      expect(commands.has("workflows")).toBe(false);
+      await commands.get("wf")!.handler("", ctx);
       expect(notices.at(-1)).toContain("agent-cat:fixture");
       await commands.get("workflow-status")!.handler("", ctx);
       expect(notices.at(-1)).toContain("No active workflow runs");

@@ -41,7 +41,7 @@ Remote ownership, boundary-follow-up, and correlated current-session turns requi
 
 ## Commands
 
-- `/workflows` — catalogue and exact runner help.
+- `/wf` — catalogue and exact runner help.
 - `/workflow-help RUNNER:WORKFLOW` — exact `help` output.
 - `/workflow-plan RUNNER:WORKFLOW` — actual-input `plan --json --raw`.
 - `/workflow RUNNER:WORKFLOW` — approved launch wizard.

@@ -407,7 +407,7 @@ A command handler receives `ExtensionCommandContext`; a tool receives `Extension
 
 Recommended MVP surface:
 
-- `/workflows` — browse, inspect, start, and open runs;
+- `/wf` — browse, inspect, start, and open runs;
 - `/workflow <name>` — direct launch with completion;
 - `/workflow-status [run-id]` — open monitor;
 - one generic model tool, `agent_cat_workflow`, with list/describe/start/status/output/cancel actions.
@@ -574,7 +574,7 @@ Parsing `RawProgram`, recreating `Plan` scheduling, or porting agent-functor's r
 
 ### Catalogue
 
-`/workflows` opens a searchable Pi component with one row per `(runner, workflow)`:
+`/wf` opens a searchable Pi component with one row per `(runner, workflow)`:
 
 - name and runner provenance;
 - blurb;

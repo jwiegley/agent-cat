@@ -2924,6 +2924,24 @@ From acat-ozh: toRat homomorphism lemmas not built — core Rat has arithmetic b
 ]
 #+end_src
 
+* DONE [#C] Avoid Pi workflow command collision
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-l3z
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-08-30 Sun 19:59]
+:MODIFIED: [2026-08-30 Sun 19:59]
+:CREATED_BY: johnw
+:FINISHED: [2026-08-30 Sun 19:59]
+:CLOSE_REASON: Renamed the Pi catalogue command to /wf, reserved /workflows for pi-dynamic-workflows, and passed TypeScript plus focused extension tests.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Rename the agent-cat Pi extension catalogue command from /workflows to /wf so pi-dynamic-workflows retains /workflows; update regression coverage and current documentation.
+
 * DONE [#B] Resolve bounded 0 vs static: scale is not monotone in its body
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
