@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { discoverRunner, readHelp } from "../src/catalogue.ts";
-import { prepareLaunch, preflightLineage, previewPlan } from "../src/launch.ts";
+import { assertNoCredentialArgs, prepareLaunch, preflightLineage, previewPlan } from "../src/launch.ts";
 import type { RunnerConfig } from "../src/types.ts";
 
 const created: string[] = [];
@@ -19,6 +19,17 @@ async function setup(): Promise<{ directory: string; config: RunnerConfig }> {
 }
 
 describe("catalogue and launch", () => {
+  it("rejects credential-bearing adapter argv before launch", () => {
+    for (const args of [
+      ["--api-key", "x"],
+      ["--factory-api-key", "x"],
+      ["FACTORY_API_KEY=x"],
+      ["--factory_api_key=x"],
+      ["--header", "Authorization: Bearer x"],
+      ["--adapter", "FACTORY_API_KEY=x"],
+      ["--route", "deep=acp:FACTORY_API_KEY=x"],
+    ]) expect(() => assertNoCredentialArgs(args)).toThrow("credential-bearing target argv is forbidden");
+  });
   it("discovers strict descriptors and preserves exact help", async () => {
     const { directory, config } = await setup();
     const [descriptor] = await discoverRunner(config, directory);

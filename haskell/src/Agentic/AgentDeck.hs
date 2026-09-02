@@ -432,7 +432,9 @@ verifyDeckRealizations cfg expected = do
       require "provider" expectedProvider (metadataProvider metadata)
       require "model" (realizationModel spec) (metadataModel metadata)
       require "thinking" (thinkingName (realizationThinking spec)) (metadataThinking metadata)
-      require "max-output" (realizationMaxOutput spec) (metadataMaxOutput metadata)
+      case realizationMaxOutput spec of
+        Nothing -> pure ()
+        Just wanted -> require "max-output" wanted (metadataMaxOutput metadata)
       when (not (null (realizationOptions spec))) $
         configurationError "agent-deck exposes no generic metadata for backend-specific options"
     require label wanted = \case

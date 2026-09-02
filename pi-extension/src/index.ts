@@ -20,7 +20,7 @@ import { discoverRunner, readHelp } from "./catalogue.ts";
 import { configuredRemote, configuredRunners, retentionPolicy, stateDirectory } from "./config.ts";
 import { CurrentSessionBridge } from "./current-bridge.ts";
 import { MutationGrants, type GrantScope } from "./grants.ts";
-import { prepareLaunch, preflightLineage, previewPlan, type LineageEdit, type PreparedLaunch } from "./launch.ts";
+import { assertNoCredentialArgs, prepareLaunch, preflightLineage, previewPlan, type LineageEdit, type PreparedLaunch } from "./launch.ts";
 import { formatMonitor } from "./monitor.ts";
 import { WorkflowMonitorComponent } from "./monitor-ui.ts";
 import { RunSupervisor } from "./supervisor.ts";
@@ -202,15 +202,18 @@ export default function agentCatExtension(pi: ExtensionAPI): void {
       let targetSpec: { args: string[]; env: NodeJS.ProcessEnv };
       if (target.startsWith("native ACP")) {
         targetKind = "acp";
-        const adapter = await ctx.ui.input("ACP adapter (stub, claude, codex, or absolute path)", "stub");
+        const adapter = await ctx.ui.input("ACP adapter (stub, claude, codex, droid, or absolute path)", "stub");
         if (!adapter?.trim()) return;
         const rawArgs = await ctx.ui.editor("Adapter argv JSON array (use [] for none)", "[]");
         if (rawArgs === undefined) return;
         const adapterArgs = parseStringArray(rawArgs, "adapter argv");
+        try { assertNoCredentialArgs(adapterArgs); } catch (error) { ctx.ui.notify(error instanceof Error ? error.message : String(error), "error"); return; }
         const routes = await collectRoutes(ctx, selected.descriptor.pins);
         if (!routes) return;
+        const acpArgs = ["--engine", "acp", "--adapter", adapter.trim(), ...adapterArgs.flatMap((arg) => ["--adapter-arg", arg]), ...routes];
+        try { assertNoCredentialArgs(acpArgs); } catch (error) { ctx.ui.notify(error instanceof Error ? error.message : String(error), "error"); return; }
         if (!(await ctx.ui.confirm("Use live ACP adapter?", "The adapter may call a paid model. Agent-cat owns its scratch cwd and intent permissions; this is not an OS sandbox."))) return;
-        targetSpec = { args: ["--engine", "acp", "--adapter", adapter.trim(), ...adapterArgs.flatMap((arg) => ["--adapter-arg", arg]), ...routes], env: {} };
+        targetSpec = { args: acpArgs, env: {} };
       } else if (target.startsWith("native agent-deck")) {
         targetKind = "deck";
         const sessionId = await ctx.ui.input("agent-deck session ID");

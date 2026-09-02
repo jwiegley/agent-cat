@@ -15,7 +15,7 @@
 -- > <binary> run   NAME --session <id> [--binary PATH] [--poll MS]
 -- >                                    [--route NAME=BACKEND]...
 -- >                                    [--timeout MS] [--verbose]
--- > <binary> run   NAME --engine acp [--adapter stub|claude|codex|PATH]
+-- > <binary> run   NAME --engine acp [--adapter stub|claude|codex|droid|PATH]
 -- >                                  [--adapter-arg ARG]... [--scratch DIR]
 -- >                                  [--route NAME=BACKEND]...
 -- >                                  [--timeout MS] [--verbose]
@@ -1929,6 +1929,7 @@ runCmdControlled runtimeControls persistence observer output reg name target pro
           router = resolvedRouter realization
           optionSetting (key, String value) = key <> "=" <> value
           optionSetting (key, value) = key <> "=" <> render value
+          maxOutputSetting = maybe "; max-output unconstrained" (\value -> "; max-output " <> tshow value) (realizationMaxOutput spec)
           optionSettings
             | Map.null (realizationOptions spec) = ""
             | otherwise =
@@ -1943,7 +1944,7 @@ runCmdControlled runtimeControls persistence observer output reg name target pro
             <> "/"
             <> realizationModel spec
             <> "; thinking " <> thinkingName (realizationThinking spec)
-            <> "; max-output " <> tshow (realizationMaxOutput spec)
+            <> maxOutputSetting
             <> optionSettings
 
     requiredChains :: IO (Map.Map Text [Text])
@@ -2882,7 +2883,7 @@ usage reg =
       runLead <> "--session <id> [--binary PATH] [--poll MS]",
       under (runLead <> "--session <id> ") <> "[--route NAME=BACKEND]...",
       under (runLead <> "--session <id> ") <> "[--timeout MS] [--verbose]",
-      runLead <> "--engine acp [--adapter stub|claude|codex|PATH]",
+      runLead <> "--engine acp [--adapter stub|claude|codex|droid|PATH]",
       under (runLead <> "--engine acp ") <> "[--adapter-arg ARG]... [--scratch DIR]",
       under (runLead <> "--engine acp ") <> "[--route NAME=BACKEND]...",
       under (runLead <> "--engine acp ") <> "[--timeout MS] [--verbose]",
@@ -2938,8 +2939,9 @@ usage reg =
       "  --poll         milliseconds between two checks of the session's status",
       "  --adapter      the answering program (default: stub, the deterministic double",
       "                 at ../test/stub_adapter.py); claude and codex are looked for on",
-      "                 PATH and then at their machine-local pins; anything else is a",
-      "                 path. --engine acp only",
+      "                 PATH and then at machine-local pins; droid runs `droid exec",
+      "                 --output-format acp` from PATH; anything else is a path.",
+      "                 --engine acp only",
       "  --adapter-arg  one argument for the adapter's argv; repeatable.",
       "                 `--adapter-arg --refuse` is how the stub is told to answer *no*",
       "                 to a person's yes/no question. --engine acp only",
@@ -2951,7 +2953,7 @@ usage reg =
       "  --route        NAME=BACKEND — put the questions this run pins to the model",
       "                 NAME to BACKEND instead of to the default answerer.",
       "                 Repeatable, at most once per NAME. BACKEND is",
-      "                 acp:stub|claude|codex|PATH (start an adapter of this run's",
+      "                 acp:stub|claude|codex|droid|PATH (start an adapter of this run's",
       "                 own) or deck:<id> (send to a live agent-deck session).",
       "                 NAME is a *serving model* — a `served by` pin or one of its",
       "                 spares — and not a party: routing the pin is what makes a",

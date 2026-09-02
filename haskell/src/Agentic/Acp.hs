@@ -3,8 +3,9 @@
 -- "Agentic.Exec" runs a plan against a 'WorldIO'; this module builds one out of
 -- a child process that speaks the Agent Client Protocol — line-delimited
 -- JSON-RPC 2.0 over its stdio — so that a program written in
--- "Agentic.Builder" can be executed by Claude's or Codex's ACP adapter. It is
--- the sibling of "Agentic.AgentDeck", which reaches an agent the other way:
+-- "Agentic.Builder" can be executed by Claude's, Codex's, or Factory Droid's
+-- ACP adapter. It is the sibling of "Agentic.AgentDeck", which reaches an
+-- agent the other way:
 -- through the @agent-deck@ command line, into a session somebody else started.
 --
 -- == There is no Lean counterpart to this file, and there was
@@ -454,18 +455,19 @@ codexPin = "/nix/store/i0wl19lx66n2093bv9g4g3lsxj16f9ry-codex-acp-0.13.0/bin/cod
 -- | The pure half of adapter resolution: the @argv@ a command line's word
 -- names.
 --
--- Three names and a fallback — @stub@ is the deterministic double run under
--- @python3@, @claude@ and @codex@ are the two real adapters by the names they
--- install themselves under, and anything else is read as a path, so a caller
--- can point at an adapter this module has never heard of.
+-- Four names and a fallback — @stub@ is the deterministic double run under
+-- @python3@, @claude@ and @codex@ name their standalone adapters, and @droid@
+-- starts Factory Droid in its native ACP mode. Anything else is read as a path,
+-- so a caller can point at an adapter this module has never heard of.
 --
--- What is /not/ decided here is where those two programs are: that is
+-- What is /not/ decided here is where the pinned programs are: that is
 -- 'resolveArgv', because it is a question about this machine.
 adapterArgv :: Text -> [String]
 adapterArgv name
   | name == "stub" = ["python3", stubScript]
   | name == "claude" = ["claude-agent-acp"]
   | name == "codex" = ["codex-acp"]
+  | name == "droid" = ["droid", "exec", "--output-format", "acp"]
   | otherwise = [T.unpack name]
 
 -- | Adapter resolution in @IO@: the @argv@ that will actually be executed.
@@ -479,12 +481,16 @@ adapterArgv name
 --   a child that exits nonzero, so without this the diagnosis for "the tool is
 --   not installed" is an exit code.) A name with no pin is left to @execvp@,
 --   and a path is taken as given;
--- * __the arguments__ — one that names a file relative to /this/ directory is
---   made absolute, because the child is started in the run's own working
---   directory, where @..\/test\/stub_adapter.py@ names nothing.
+-- * __the arguments__ — Droid's three fixed ACP words identify every following
+--   value as a user @--adapter-arg@, so those values are preserved byte for byte.
+--   Other adapters retain the historical path resolution needed to make the
+--   built-in relative stub script survive the child working-directory change.
 resolveArgv :: [String] -> IO [String]
 resolveArgv [] = throwIO (AcpAdapterMissing "" "an empty argv names no program")
-resolveArgv (prog : args) = (:) <$> resolveProgram prog <*> traverse absolutize args
+resolveArgv (prog : args)
+  | prog == "droid", take 3 args == ["exec", "--output-format", "acp"] =
+      (:) <$> resolveProgram prog <*> pure args
+  | otherwise = (:) <$> resolveProgram prog <*> traverse absolutize args
   where
     resolveProgram :: String -> IO String
     -- A path is taken as given, and made absolute if it names something here:
@@ -862,6 +868,15 @@ chunkText params = case field "update" params >>= field "sessionUpdate" >>= text
           Just ty -> Left ("agent_message_chunk carried content of type '" <> ty <> "', not 'text'")
           Nothing -> Left "an agent_message_chunk carried content with no type"
 
+-- | Read an update only when it belongs to the session being prompted. One ACP
+-- process may hold several sessions, and their notifications share one pipe.
+chunkTextForSession :: Text -> Value -> Either Text (Maybe Text)
+chunkTextForSession expected params = case field "sessionId" params >>= textOf of
+  Nothing -> Left "a session/update carried no sessionId"
+  Just actual
+    | actual /= expected -> Right Nothing
+    | otherwise -> chunkText params
+
 -- ---------------------------------------------------------------------------
 -- The connection
 -- ---------------------------------------------------------------------------
@@ -889,10 +904,10 @@ data Acp = Acp
     -- | Configuration options advertised by the current session.
     acpConfigOptions :: !(IORef [ConfigOption]),
     acpCaps :: !(IORef Capabilities),
-    -- | The question under way and how a permission request arriving during it
-    -- is answered. 'sayAcp' sets it immediately before each prompt, because
-    -- "the question under way" is a fact it has and the pump does not.
-    acpAsked :: !(IORef (Text, Permission)),
+    -- | The active prompt's session, question and permission policy. 'sayAcp'
+    -- sets it immediately before @session\/prompt@ and clears it on every return
+    -- or exception; requests outside that dynamic extent are always cancelled.
+    acpAsked :: !(IORef (Maybe (Text, Text, Permission))),
     -- | Plan-ordered turns on this one JSON-RPC pipe.
     acpTurnLane :: !TurnLane
   }
@@ -983,7 +998,7 @@ connectAcp cfg = do
       <*> newIORef Nothing
       <*> newIORef []
       <*> newIORef (Capabilities False False False Null)
-      <*> newIORef ("no question (the handshake, or a caller that set none)", Cancel)
+      <*> newIORef Nothing
       <*> newTurnLaneIO
   flip onException (closeAcp acp) $ do
     handshake acp
@@ -1131,11 +1146,11 @@ readBoundedLine acp what = readIORef (acpReadBuffer acp) >>= go
 -- @agent_message_chunk@ to @onChunk@ on the way and answering every request the
 -- agent makes of us as it comes.
 --
--- @answering@ says whether the updates arriving belong to /this/ request. During
--- a @session\/prompt@ they do, and a chunk that is not text is a protocol
--- violation this client reports rather than drops, because dropping it would
--- lose an answer. During @session\/new@ they do not: what arrives there is the
--- adapter's own bookkeeping.
+-- @answering@ says this is a @session\/prompt@. Only updates carrying that
+-- prompt's current @sessionId@ belong to its answer; updates for older sessions
+-- on the same adapter pipe are ignored. A current-session chunk that is not text
+-- is a protocol violation rather than dropped. Non-prompt requests ignore all
+-- updates as adapter bookkeeping.
 pump :: Acp -> Int -> Text -> (Text -> IO ()) -> Bool -> IO (Either Value Value)
 pump acp wantId what onChunk answering = go
   where
@@ -1156,12 +1171,14 @@ pump acp wantId what onChunk answering = go
           Right (MsgNotification method ps)
             | method == "session/steer_ack" -> recordSteerAck acp ps >> go
             | method /= "session/update" -> go
-            | otherwise -> case chunkText ps of
-                Left why
-                  | answering -> throwIO (AcpProtocol prog (why <> "; line: " <> clipText line))
-                  | otherwise -> go
-                Right Nothing -> go
-                Right (Just txt) -> onChunk txt >> go
+            | not answering -> go
+            | otherwise ->
+                readIORef (acpSession acp) >>= \case
+                  Nothing -> throwIO (AcpProtocol prog "a session/update arrived while no session was current")
+                  Just sid -> case chunkTextForSession sid ps of
+                    Left why -> throwIO (AcpProtocol prog (why <> "; line: " <> clipText line))
+                    Right Nothing -> go
+                    Right (Just txt) -> onChunk txt >> go
 
 recordSteerAck :: Acp -> Value -> IO ()
 recordSteerAck acp params = case (field "steerId" params >>= textOf, field "accepted" params) of
@@ -1172,18 +1189,24 @@ recordSteerAck acp params = case (field "steerId" params >>= textOf, field "acce
 
 -- | Answer a request the agent made of us.
 --
--- @session\/request_permission@ is answered by the policy for the question under
--- way and the decision is announced; everything else — every @fs\/*@ and
--- @terminal\/*@ method — is answered @-32601@, honestly, because the handshake
--- advertised no such capability and a conforming agent should not have asked.
+-- @session\/request_permission@ is granted only when it matches an active
+-- prompt's @sessionId@ and intent policy; stale or out-of-turn requests are
+-- cancelled, and every decision is announced. Everything else — every @fs\/*@ and @terminal\/*@
+-- method — is answered @-32601@, honestly, because the handshake advertised no
+-- such capability and a conforming agent should not have asked.
 answerAgentRequest :: Acp -> Value -> Text -> Value -> IO ()
 answerAgentRequest acp i method params
   | method == "session/request_permission" = do
-      (question, policy) <- readIORef (acpAsked acp)
-      let choice = permissionChoice policy params
+      active <- readIORef (acpAsked acp)
+      let requestSession = field "sessionId" params >>= textOf
+          activePrompt = case (active, requestSession) of
+            (Just (expected, question, policy), Just actual)
+              | expected == actual -> Just (question, policy)
+            _ -> Nothing
+          choice = activePrompt >>= \(_, policy) -> permissionChoice policy params
           decision =
             PermissionDecision
-              { decisionQuestion = question,
+              { decisionQuestion = maybe "no active matching ACP prompt" fst activePrompt,
                 decisionTool = permissionTool params,
                 decisionGranted = maybe False (const True) choice
               }
@@ -1344,17 +1367,21 @@ desiredConfiguration acp realization = do
   options <- readIORef (acpConfigOptions acp)
   model <- required "model" ["model"] ["model"] options
   thinkingOption <- required "thinking" ["thought_level", "thinking"] ["effort", "thinking", "thought_level"] options
-  maxOutputOption <- required "max-output" ["max_output", "max_output_tokens"] ["max-output", "max_output", "maxOutput", "max_tokens", "maxOutputTokens"] options
-  let maxOutputValue = case configOptionType maxOutputOption of
-        Just "number" -> A.toJSON (realizationMaxOutput realization)
-        Just "integer" -> A.toJSON (realizationMaxOutput realization)
-        _ -> String (T.pack (show (realizationMaxOutput realization)))
+  maxOutputSetting <- case realizationMaxOutput realization of
+    Nothing -> pure []
+    Just wanted -> do
+      option <- required "max-output" ["max_output", "max_output_tokens"] ["max-output", "max_output", "maxOutput", "max_tokens", "maxOutputTokens"] options
+      let value = case configOptionType option of
+            Just "number" -> A.toJSON wanted
+            Just "integer" -> A.toJSON wanted
+            _ -> String (T.pack (show wanted))
+      pure [(option, value)]
   custom <- traverse (\(name, value) -> (,) <$> required ("option " <> name) [] [name] options <*> pure value) (Map.toList (realizationOptions realization))
   let desired =
         [ (model, String (realizationModel realization)),
-          (thinkingOption, String (thinkingName (realizationThinking realization))),
-          (maxOutputOption, maxOutputValue)
+          (thinkingOption, String (thinkingName (realizationThinking realization)))
         ]
+          <> maxOutputSetting
           <> custom
       ids = map (configOptionId . fst) desired
   case duplicateText ids of
@@ -1595,10 +1622,15 @@ sayAcp = sayAcpWith (const (pure ()))
 
 sayAcpWith :: forall (c :: Code). (Text -> IO ()) -> AcpConfig -> Acp -> SCode c -> Request c -> Text -> IO Text
 sayAcpWith onChunk cfg acp c q extra = do
-  writeIORef (acpAsked acp) (what, permissionByIntent (reqIntent q))
+  sid <-
+    readIORef (acpSession acp) >>= maybe
+      (throwIO (AcpProtocol (T.pack (acpProgram acp)) "no session; nothing was opened to prompt"))
+      pure
   let message = renderQ c q <> extra
   chat cfg ("put " <> what <> " (" <> tshow (T.length message) <> " characters)")
-  turn <- promptTurnWith onChunk acp what message
+  turn <-
+    (writeIORef (acpAsked acp) (Just (sid, what, permissionByIntent (reqIntent q))) >> promptTurnWith onChunk acp what message)
+      `finally` writeIORef (acpAsked acp) Nothing
   chat cfg ("turn ended " <> renderStopReason (turnStop turn))
   when (not (T.null (turnNarration turn))) $
     stderrLog $
@@ -1645,7 +1677,7 @@ sayAcpWith onChunk cfg acp c q extra = do
     code = fromSCode c
     who = addresseeWord (qAddressee (reqQuestion q))
     -- How the record and the diagnosis name this question, and what is stored
-    -- in `acpAsked` for a permission request to be reported against.
+    -- in the active `acpAsked` scope for permission requests to be reported against.
     what = "the " <> codeWord code <> " question put to " <> who
 
 -- ---------------------------------------------------------------------------

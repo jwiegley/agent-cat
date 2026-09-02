@@ -46,8 +46,8 @@ description:
   alpha.
   .
   Week seven adds the second transport: @Agentic.Acp@ starts an Agent Client
-  Protocol adapter of its own — Claude's or Codex's, or the deterministic
-  double at @agent-cat\/test\/stub_adapter.py@ — and speaks line-delimited
+  Protocol adapter of its own — Claude's, Codex's, Factory Droid's native ACP
+  mode, or the deterministic double at @agent-cat\/test\/stub_adapter.py@ — and
   JSON-RPC 2.0 to it over a pipe this process owns. It is the transport that can check what the
   @agent-deck@ one cannot: a prompt is answered with a stop reason, so an act
   whose turn did not complete abandons the run rather than recording a receipt

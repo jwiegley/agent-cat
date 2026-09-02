@@ -124,8 +124,8 @@ import qualified Data.Text as T
 -- deduplicates by, so two pins routed to the same adapter share one process
 -- (§3.1) and the header does not overstate how many agents this run started.
 data Backend
-  = -- | @acp:stub@ | @acp:claude@ | @acp:codex@ | @acp:\/path\/to\/adapter@ —
-    -- an adapter this run starts and owns the pipe to.
+  = -- | @acp:stub@ | @acp:claude@ | @acp:codex@ | @acp:droid@ |
+    -- @acp:\/path\/to\/adapter@ — an adapter this run starts and owns the pipe to.
     BackendAcp !Text
   | -- | @deck:\<id\>@ — a live @agent-deck@ session somebody else started.
     BackendDeck !Text

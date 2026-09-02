@@ -100,11 +100,13 @@
 @hsindex Agentic.Workflow.NoFollow
 @hsindex Agentic.Workflow.Outcome
 @hsindex Agentic.Workflow.Parameterized
+@hsindex Agentic.Workflow.ParameterizedOf
 @hsindex Agentic.Workflow.Params
 @hsindex Agentic.Workflow.Party
 @hsindex Agentic.Workflow.PartyK
 @hsindex Agentic.Workflow.Piece
 @hsindex Agentic.Workflow.Program
+@hsindex Agentic.Workflow.ProgramOf
 @hsindex Agentic.Workflow.Res
 @hsindex Agentic.Workflow.Rhs
 @hsindex Agentic.Workflow.Says

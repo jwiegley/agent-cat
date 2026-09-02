@@ -227,9 +227,20 @@ cabal run agentic-run -- help harden          # or: agentic-run harden --help
 cabal run agentic-run -- plan harden [--raw]
 cabal run agentic-run -- cost harden
 cabal run agentic-run -- run  harden --scripted
-cabal run agentic-run -- run  harden --engine acp [--adapter stub|claude|codex|PATH]
+cabal run agentic-run -- run  harden --engine acp [--adapter stub|claude|codex|droid|PATH]
 cabal run agentic-run -- run  harden --session <deck-id> [--binary PATH] [--poll MS]
 ```
+
+Factory Droid is built in as `--adapter droid`, which launches `droid exec
+--output-format acp`; the Python SDK is not required. The executable must be on
+`PATH` and authenticated locally or through an inherited `FACTORY_API_KEY`. Use
+`acp:droid` in routes. A plain Droid backend uses its configured default model;
+a routing profile with `max-output: unconstrained` selects and verifies Droid's
+advertised model and reasoning controls before prompting. Unsupported declared
+settings fail preflight rather than silently falling back.
+
+The exact commands, temporary source/profile, authorization, and non-secret live
+outcomes are retained in [`doc/droid-live-verification.md`](doc/droid-live-verification.md).
 
 `help` prints one program's page — what it is for, what each of its inputs means,
 which transport it wants, one worked command line and one rehearsal — under a
@@ -253,7 +264,7 @@ transport failure, `3` a run abandoned over what arrived.
 
 Live runs may resolve symbolic workflow pins through layered YAML routing
 profiles. A profile such as `deep-thinker` owns an ordered ACP/deck realization
-chain — router, provider, model, thinking level and output bound — while Haskell
+chain — router, provider, model, thinking level and explicit output policy — while Haskell
 source retains only the capability name. User and project files load
 automatically; explicit `--route` entries remain the highest backend override;
 and every declared setting is applied or verified before a prompt. The

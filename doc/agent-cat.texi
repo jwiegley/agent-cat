@@ -1444,10 +1444,10 @@ starting an adapter or asking an addressee.
 @section List and help
 
 @code{agentic-run list} prints the registry in declaration order.  The current
-repository has eight rows: @code{harden}, @code{hello}, @code{structured},
-@code{plan-feature}, @code{review-lite}, @code{ship-feature-lite},
-@code{grind-tests}, and @code{stack-prs}.  Each line includes the row's short
-description.
+repository has nine rows: @code{harden}, @code{hello}, @code{structured},
+@code{structured-result}, @code{plan-feature}, @code{review-lite},
+@code{ship-feature-lite}, @code{grind-tests}, and @code{stack-prs}.  Each line
+includes the row's short description.
 
 @code{agentic-run help NAME} and @code{agentic-run NAME --help} print the same
 program page.  The page combines current static facts with prose stored in the
@@ -1569,11 +1569,30 @@ An ACP run starts an adapter process and owns its line-delimited JSON-RPC pipe:
 agentic-run run NAME --engine acp [--adapter ADAPTER] [--scratch DIR]
 @end example
 
-@code{--adapter} accepts @code{stub}, @code{claude}, @code{codex}, or an
-executable path.  The default is @code{stub}, the deterministic local adapter;
-omitting the option never starts a paid live model.  Named live adapters are
-looked up on @code{PATH} and then at machine-local fallback paths where
-configured.
+@code{--adapter} accepts @code{stub}, @code{claude}, @code{codex},
+@code{droid}, or an executable path.  The default is @code{stub}, the
+deterministic local adapter; omitting the option never starts a paid live model.
+Claude and Codex are looked up on @code{PATH} and then at configured
+machine-local fallback paths.  Droid expands to @command{droid exec
+--output-format acp} on @code{PATH}; it uses Droid's native ACP mode and does not
+require the Python SDK.
+
+@example
+agentic-run run structured --engine acp --adapter droid
+@end example
+
+Authenticate Droid locally or provide @code{FACTORY_API_KEY} in the environment
+that starts the runner.  Never put credentials in @code{--adapter-arg} or routing
+configuration.  A plain Droid backend uses its configured session default.  To
+select a model and reasoning level, define a routing profile whose backend is
+@code{acp:droid} and set @code{max-output: unconstrained}; the runner validates
+and applies both settings through @code{session/set_config_option} before sending
+a prompt.  Any declared unsupported setting still refuses preflight.
+
+One adapter process may retain subscriptions for sessions opened earlier in the
+run.  The runner accepts answer chunks only for the current @code{sessionId}.
+Permission requests must also match the session and dynamic extent of an active
+prompt; stale or delayed out-of-turn requests are cancelled.
 
 @code{--adapter-arg ARG} appends one argument to every ACP adapter argv and may
 repeat.  @code{--timeout MS} bounds one request; the default is 900000
@@ -1622,6 +1641,7 @@ A live run has one default backend and may refine it by serving-model pin:
 @example
 --route NAME=acp:stub
 --route NAME=acp:claude
+--route NAME=acp:droid
 --route NAME=deck:SESSION
 @end example
 
@@ -1732,10 +1752,13 @@ compiler message has a place to lead; ordinary source does not call it directly.
 
 @table @code
 @c COVER API Agentic.Workflow.Program support
-@item Program
-The complete builder result.  It contains @code{progRawOut :: RawProgram} and
-@code{progPlan :: Plan '[] ()}.  Build it with @code{workflow} or
-@code{defining}; inspect and execute it through a registry.
+@c COVER API Agentic.Workflow.ProgramOf support
+@item Program, ProgramOf c
+@code{ProgramOf c} is a complete result-indexed builder value carrying
+@code{progResultCode}, @code{progRawOut :: RawProgram}, and
+@code{progPlan :: Plan '[] (El c)}.  @code{Program} is its receipt-valued
+specialization.  Build one with @code{workflow} or @code{defining}; inspect and
+execute it through a registry.
 
 @c COVER API Agentic.Cli.Registry support
 @item Registry
@@ -1758,8 +1781,9 @@ routing, transports, and exit statuses as @command{agentic-run}.
 @c COVER API Agentic.Cli.Command support
 @item Command
 Parsed command with constructors @code{Usage}, @code{Help}, @code{List},
-@code{Plan}, @code{Cost}, and @code{Run}.  This type is exported for policy tests
-and front ends that need to inspect a parse.
+@code{Plan}, @code{Cost}, @code{Run}, @code{Machine}, @code{LineageCheck}, and
+@code{MachineLineage}.  This type is exported for policy tests and front ends
+that need to inspect a parse.
 
 @c COVER API Agentic.Cli.parseCommand support
 @item parseCommand registry arguments
@@ -1796,10 +1820,13 @@ Registry payload with constructors @code{Fixed Program} and
 and runner inputs.
 
 @c COVER API Agentic.Workflow.Parameterized support
-@item Parameterized
-A Program of input texts.  Its exported fields are @code{inputNames :: [Text]}
-and @code{supply :: [Text] -> Either Text Program}.  Registry and CLI code use
-these fields; normal source constructs the value with @code{taking}.
+@c COVER API Agentic.Workflow.ParameterizedOf support
+@item Parameterized, ParameterizedOf c
+A result-indexed Program awaiting input texts.  Its exported fields are
+@code{inputNames :: [Text]} and
+@code{supply :: [Text] -> Either Text (ProgramOf c)}; @code{Parameterized} is
+the receipt-valued specialization.  Registry and CLI code use these fields;
+normal source constructs the value with @code{taking}.
 
 @c COVER API Agentic.Workflow.Ins support
 @c COVER API Agentic.Workflow.In support
@@ -2406,7 +2433,8 @@ bypass the supported source grammar.
 @c COVER API Agentic.Workflow.NoFollow machinery
 @c COVER API Agentic.Workflow.Step machinery
 @item Block stages and CPS
-@code{Stage} has @code{Open}, @code{Review}, @code{Amending}, and @code{Body};
+@code{Stage} has @code{Open}, @code{Review}, @code{Amending}, @code{Body}, and
+@code{Result};
 @code{Res} maps a stage to its builder result.  @code{W} is the indexed CPS block,
 @code{Term} is uninhabited, @code{NoFollow} rejects continuation after a terminal,
 and @code{Step} lowers each source statement.
@@ -2505,6 +2533,11 @@ agentic-run cost NAME [INPUT ...]
 agentic-run run NAME --scripted [INPUT ...]
 agentic-run run NAME --session ID [DECK-OPTION ...] [INPUT ...]
 agentic-run run NAME --engine acp [ACP-OPTION ...] [INPUT ...]
+agentic-run machine RUN_ID NAME RUN-OPTION ...
+agentic-run lineage-check restart|resume|fork PARENT_STORE NAME RUN-OPTION ...
+agentic-run machine-restart RUN_ID PARENT_STORE NAME RUN-OPTION ...
+agentic-run machine-resume RUN_ID PARENT_STORE NAME RUN-OPTION ...
+agentic-run machine-fork RUN_ID PARENT_STORE NAME [FORK-EDIT ...] RUN-OPTION ...
 @end example
 
 A verb in head position wins over a registered row of the same name.  Help has
@@ -2540,6 +2573,27 @@ data is available through @code{plan --json}; @code{cost} accepts no JSON option
 Build, preflight, and execute the Program against exactly one scripted target or
 a live route table with one default backend.  The trace is printed as the run
 progresses, followed by result and bills.
+
+@c COVER CLI verb:machine author
+@item machine RUN_ID NAME target [options]
+Execute the same Program through the durable runner while emitting strict
+version-1 NDJSON events on standard output.  The private store, owner metadata,
+and control channel are selected through the documented @code{AGENT_CAT_*}
+environment variables.
+
+@c COVER CLI verb:lineage-check author
+@item lineage-check OPERATION PARENT_STORE NAME target [options]
+Validate restart, resume, or fork compatibility without creating a child run.
+Resume requires a compatible checkpoint; restart and fork do not.
+
+@c COVER CLI verb:machine-restart author
+@c COVER CLI verb:machine-resume author
+@c COVER CLI verb:machine-fork author
+@item machine-restart|machine-resume|machine-fork RUN_ID PARENT_STORE NAME target [options]
+Create a durable child run with an immutable parent link.  Restart inherits no
+answers, resume uses an exact compatible checkpoint, and fork reuses matching
+complete answers after validating any explicit edits.
+
 @end table
 
 @section Common inspection options
@@ -2610,7 +2664,7 @@ Select an agent-deck session as the default backend.  Mutually exclusive with
 scripted and ACP defaults.
 
 @c COVER CLI --adapter author
-@item --adapter stub|claude|codex|PATH
+@item --adapter stub|claude|codex|droid|PATH
 Select the ACP adapter.  It defaults to @code{stub} and is meaningful only when
 at least one ACP backend exists.
 
@@ -2646,6 +2700,21 @@ deadline, so a mixed run should use a positive value.
 @item --verbose
 Narrate live transport commands, polls, and protocol activity on standard error.
 It is refused under scripted execution.
+@end table
+
+@section Fork edit options
+
+@table @code
+@c COVER CLI --drop-answer author
+@item --drop-answer OCCURRENCE_ID
+For @code{lineage-check fork} or @code{machine-fork}, omit one persisted answer
+from inheritance so that occurrence runs again.  Repeatable.
+
+@c COVER CLI --set-answer author
+@item --set-answer OCCURRENCE_ID=JSON_FILE
+Replace one inherited answer with the single JSON value in @code{JSON_FILE}.
+The runner validates it against the persisted answer code or schema before child
+creation.  Repeatable and valid only for fork.
 @end table
 
 @section Routing

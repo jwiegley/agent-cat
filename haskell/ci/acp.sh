@@ -28,6 +28,9 @@
 # stream, and a client that separates it from the answer, announces the
 # separation, and puts a clean answer into every prompt that quotes it (16).
 #
+# Factory Droid's built-in name is exercised through a fake `droid` on PATH that
+# validates the native ACP argv before handing the same protocol to the stub (17).
+#
 # Runs on every commit, beside ci/deck.sh. Exits 0 only if every scenario
 # behaved exactly as written below.
 set -uo pipefail
@@ -460,10 +463,79 @@ want_no_line "<- **Model fallback:**"
 note "narrating-adapter: the banner was separated and announced, 7/7 clean prompts, exit 0"
 
 # ---------------------------------------------------------------------------
+# 17. Factory Droid's built-in name is the native ACP command, default or routed.
+#
+# No Factory process, account or network is involved. A fake `droid` on PATH
+# records the argv, checks the three fixed words, and hands the remaining argv to
+# the ACP stub. The stub emits each answer and permission event first under a
+# foreign session id, reproducing Droid 0.208.2 with an initial and a fresh
+# question session; the run succeeds only when agent-cat correlates events before
+# assembling answers or applying permission policy.
+# The routed run also adds scenario 13's write-on-ask distinction, proving
+# `acp:droid` answered the pin. The final run pins failure before any spend.
+# ---------------------------------------------------------------------------
+droid_bin="$work/droid/bin"
+droid_argv="$work/droid/argv"
+mkdir -p "$droid_bin"
+cat > "$droid_bin/droid" <<EOF
+#!/bin/sh
+printf '%s\n' "\$@" > "$droid_argv"
+[ "\$#" -ge 3 ] &&
+  [ "\$1" = exec ] &&
+  [ "\$2" = --output-format ] &&
+  [ "\$3" = acp ] || exit 64
+shift 3
+set -- --foreign-session-events "\$@"
+case " \$* " in
+  *" --route-probe "*) set -- --write-on-ask "\$@" ;;
+esac
+exec python3 "$stubabs" "\$@"
+EOF
+chmod +x "$droid_bin/droid"
+old_path=$PATH
+PATH="$droid_bin:$PATH"
+
+play droid-default run harden --engine acp --adapter droid \
+  --adapter-arg --argv-probe --adapter-arg ./test/PolicyProbe.hs --timeout 60000
+want_code 0
+want_bills 7 7
+want_file applied.c
+want_line "permission DENIED  to 'apply the patch' during no active matching ACP prompt"
+want_line "permission granted to 'apply the patch' during the ack question put to tool apply"
+printf '%s\n' exec --output-format acp --argv-probe ./test/PolicyProbe.hs > "$work/droid/expected"
+cmp -s "$work/droid/expected" "$droid_argv" \
+  || bad "droid argv was:$(printf '\n  %s' "$(cat "$droid_argv")")"
+note "droid-default: foreign-session chunks ignored; native argv preserved, 7/7, exit 0"
+
+play droid-route run harden --engine acp --adapter stub \
+  --route 'deep=acp:droid' --adapter-arg --route-probe --timeout 60000
+want_code 0
+want_line "permission DENIED  to 'edit parse.c while answering' during the text question put to model author"
+want_line "permission DENIED  to 'edit parse.c while answering' during no active matching ACP prompt"
+want_no_line "during the text question put to model reviewer-correct"
+want_bills 7 7
+printf '%s\n' exec --output-format acp --route-probe > "$work/droid/expected"
+cmp -s "$work/droid/expected" "$droid_argv" \
+  || bad "routed droid argv was:$(printf '\n  %s' "$(cat "$droid_argv")")"
+note "droid-route: deep reached acp:droid; unpinned asks kept the default, 7/7, exit 0"
+
+cat > "$droid_bin/droid" <<'EOF'
+#!/bin/sh
+exit 19
+EOF
+chmod +x "$droid_bin/droid"
+play droid-dead run structured --engine acp --adapter droid --timeout 10000
+want_code 2
+want_line "closed its output while the initialize handshake was outstanding"
+want_no_line "billFresh"
+note "droid-dead: native alias failure stayed a transport failure before spend, exit 2"
+PATH=$old_path
+
+# ---------------------------------------------------------------------------
 
 scenario=summary
 if [ "$failures" = 0 ]; then
-  echo "ci/acp: 16 scenarios passed, 0 failed"
+  echo "ci/acp: 17 scenarios passed, 0 failed"
 else
   echo "ci/acp: $failures scenario assertion(s) failed" >&2
 fi

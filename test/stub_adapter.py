@@ -65,6 +65,23 @@ path:
                       adapter does this, but an adapter without a `model`
                       option is allowed to, and it is the other half of the
                       fallback the client is supposed to have.
+  --foreign-session-events
+                      before each real answer chunk or permission request, send
+                      the same event under a different session id. Factory Droid
+                      0.208.2 did this after the client opened an initial session
+                      and then a fresh question session: both session adapters
+                      subscribed to one global event stream. A client must
+                      correlate events by `params.sessionId`, or answers are
+                      concatenated twice and stale permissions can be granted.
+  --delayed-same-session-permission
+                      after a completed Apply turn, send another permission
+                      request under that same session id. The next session/new
+                      waits for its reply and writes a sentinel only when the
+                      out-of-turn request is cancelled.
+  --no-max-output-option
+                      omit the optional max-output configuration control, as
+                      Factory Droid 0.208.2 does, while retaining model and
+                      reasoning controls.
   --write-on-ask      while answering an *ask* — a text, verdict or flag
                       question — request permission for an edit and, if it is
                       granted, replace `parse.c` in the session's working
@@ -126,6 +143,7 @@ PROTOCOL_VERSION = 1
 # A UUID, because both real adapters return one; the old stub's "sess_stub_0001"
 # is a shape no adapter produces.
 SESSION_ID = "9f3f7b1e-2c4a-4d5e-8f00-000000000001"
+FOREIGN_SESSION_ID = "9f3f7b1e-2c4a-4d5e-8f00-000000000002"
 
 GUIDE = (
     "House style: two-space indent, no tabs, every public name documented, "
@@ -167,6 +185,9 @@ WRITE_ON_ASK = "--write-on-ask" in ARGV
 WRITE_ANYWAY = "--write-anyway" in ARGV
 REFUSE_SET_MODE = "--refuse-set-mode" in ARGV
 REFUSE_SET_CONFIG = "--refuse-set-config" in ARGV
+FOREIGN_SESSION_EVENTS = "--foreign-session-events" in ARGV
+DELAYED_SAME_SESSION_PERMISSION = "--delayed-same-session-permission" in ARGV
+NO_MAX_OUTPUT_OPTION = "--no-max-output-option" in ARGV
 # Which of the two session-handoff calls this adapter admits to having, and
 # what `session/load` answers with. Both default to advertised, because claude
 # 0.66.0 advertises both.
@@ -268,6 +289,8 @@ CONFIG_OPTIONS = [
         "options": [],
     },
 ]
+if NO_MAX_OUTPUT_OPTION:
+    CONFIG_OPTIONS = [option for option in CONFIG_OPTIONS if option["id"] != "max-output"]
 
 MODES = {
     "currentModeId": "default",
@@ -334,20 +357,23 @@ def error(rid, code, message, data=None):
     send({"jsonrpc": "2.0", "id": rid, "error": body})
 
 
-def update(body):
+def update(body, session_id=SESSION_ID):
     send({
         "jsonrpc": "2.0",
         "method": "session/update",
-        "params": {"sessionId": SESSION_ID, "update": body},
+        "params": {"sessionId": session_id, "update": body},
     })
 
 
 def chunk(text, message_id="msg_stub_0001"):
-    update({
+    body = {
         "sessionUpdate": "agent_message_chunk",
         "content": {"type": "text", "text": text},
         "messageId": message_id,
-    })
+    }
+    if FOREIGN_SESSION_EVENTS:
+        update(body, FOREIGN_SESSION_ID)
+    update(body)
 
 
 def usage(used):
@@ -375,19 +401,11 @@ def tool_call(status, extra=None):
 # case the real adapters never produce, so the numeric id that actually collides
 # with the client's own numbering went untested.
 NEXT_AGENT_ID = 0
+DELAYED_PERMISSION_ID = None
 
 
-def ask_permission(title="apply the patch"):
-    """An agent-initiated request; returns the selected optionId, or None.
-
-    The options are claude's, verbatim: three of them, `allow_always` first,
-    with `kind` carrying the meaning and `optionId` carrying the name to send
-    back.
-    """
-    global NEXT_AGENT_ID
-    rid = NEXT_AGENT_ID
-    NEXT_AGENT_ID += 1
-    send({
+def permission_request(rid, session_id, title):
+    return {
         "jsonrpc": "2.0",
         "id": rid,
         "method": "session/request_permission",
@@ -398,7 +416,7 @@ def ask_permission(title="apply the patch"):
                 {"kind": "allow_once", "name": "Allow", "optionId": "allow"},
                 {"kind": "reject_once", "name": "Reject", "optionId": "reject"},
             ],
-            "sessionId": SESSION_ID,
+            "sessionId": session_id,
             "toolCall": {
                 "toolCallId": "toolu_stub_0001",
                 "title": title,
@@ -408,7 +426,26 @@ def ask_permission(title="apply the patch"):
                 "locations": [],
             },
         },
-    })
+    }
+
+
+def ask_permission(title="apply the patch"):
+    """An agent-initiated request; returns the selected optionId, or None.
+
+    The options are claude's, verbatim: three of them, `allow_always` first,
+    with `kind` carrying the meaning and `optionId` carrying the name to send
+    back.
+    """
+    global NEXT_AGENT_ID
+    if FOREIGN_SESSION_EVENTS:
+        foreign_rid = NEXT_AGENT_ID
+        NEXT_AGENT_ID += 1
+        send(permission_request(foreign_rid, FOREIGN_SESSION_ID, title))
+        foreign_reply = read_message()
+        note("foreign-session permission reply: " + json.dumps(foreign_reply))
+    rid = NEXT_AGENT_ID
+    NEXT_AGENT_ID += 1
+    send(permission_request(rid, SESSION_ID, title))
     reply = read_message()
     note("permission reply: " + json.dumps(reply))
     if not isinstance(reply, dict) or reply.get("id") != rid:
@@ -492,7 +529,7 @@ FIRST_PROMPT = True
 
 
 def handle_prompt(rid, params):
-    global FIRST_PROMPT
+    global FIRST_PROMPT, NEXT_AGENT_ID, DELAYED_PERMISSION_ID
     # Which session a prompt is for. A real adapter holds many and answers for
     # the one named; this stub holds one, and the check is here because it is the
     # only evidence that a client which loaded or forked a session went on to
@@ -564,6 +601,10 @@ def handle_prompt(rid, params):
                  "usage": {"inputTokens": 2, "outputTokens": 42,
                            "cachedReadTokens": 14057, "cachedWriteTokens": 18299,
                            "totalTokens": 32400}})
+    if DELAYED_SAME_SESSION_PERMISSION and key == "Apply:":
+        DELAYED_PERMISSION_ID = NEXT_AGENT_ID
+        NEXT_AGENT_ID += 1
+        send(permission_request(DELAYED_PERMISSION_ID, SESSION_ID, "delayed same-session permission"))
 
 
 def replay_history():
@@ -694,6 +735,7 @@ def handle_set_config_option(rid, params):
 
 
 def main():
+    global DELAYED_PERMISSION_ID
     while True:
         msg = read_message()
         if msg is None:
@@ -736,6 +778,15 @@ def main():
             })
         elif method == "session/new":
             note("cwd " + str(params.get("cwd")))
+            if DELAYED_PERMISSION_ID is not None:
+                reply = read_message()
+                outcome = ((reply or {}).get("result") or {}).get("outcome") or {}
+                cancelled = (reply or {}).get("id") == DELAYED_PERMISSION_ID and outcome.get("outcome") == "cancelled"
+                note("delayed same-session permission was " + ("cancelled" if cancelled else "NOT cancelled"))
+                if cancelled:
+                    with open("delayed-permission-cancelled", "w") as handle:
+                        handle.write("cancelled\n")
+                DELAYED_PERMISSION_ID = None
             result(rid, {"sessionId": SESSION_ID, "modes": MODES,
                          "configOptions": CONFIG_OPTIONS})
         elif method == "session/load":

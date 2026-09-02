@@ -66,7 +66,7 @@ projectYaml =
       "      - router: claude",
       "        model: project-model",
       "        thinking: low",
-      "        max-output: 16384"
+      "        max-output: unconstrained"
     ]
 
 bad :: [BS.ByteString]
@@ -137,7 +137,7 @@ main = do
           Just profile ->
             map realizationModel (NE.toList (profileChain profile)) == ["claude-fable-5", "claude-opus-5"]
               && realizationThinking (NE.head (profileChain profile)) == ThinkMax
-              && realizationMaxOutput (NE.head (profileChain profile)) == 65536
+              && realizationMaxOutput (NE.head (profileChain profile)) == Just 65536
               && Map.lookup "temperature" (realizationOptions (NE.head (profileChain profile))) == Just (String "deterministic")
               && Map.lookup "samples" (realizationOptions (NE.head (profileChain profile))) == Just (Number 3)
               && Map.lookup "streaming" (realizationOptions (NE.head (profileChain profile))) == Just (Bool True)
@@ -200,7 +200,7 @@ main = do
                 Just profile ->
                   map realizationModel (NE.toList (profileChain profile)) == ["project-model"]
                     && realizationThinking (NE.head (profileChain profile)) == ThinkLow
-                    && realizationMaxOutput (NE.head (profileChain profile)) == 16384
+                    && realizationMaxOutput (NE.head (profileChain profile)) == Nothing
                 Nothing -> False
           Left _ -> False
     )

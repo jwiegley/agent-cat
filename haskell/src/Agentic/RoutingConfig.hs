@@ -25,9 +25,11 @@
 -- >         thinking: max
 -- >         max-output: 65536
 --
--- @thinking@ and @max-output@ are required constraints, never hints; the
--- runtime must apply or verify them before putting a question. @options@ is
--- optional and carries additional non-secret backend constraints.
+-- @model@, @thinking@ and @max-output@ are required policy. @max-output@ is
+-- either a positive integer constraint or the explicit word @unconstrained@ for
+-- backends that expose no output-limit control. Every declared setting must be
+-- applied or verified before a question. @options@ carries additional non-secret
+-- backend constraints.
 module Agentic.RoutingConfig
   ( Thinking (..),
     thinkingName,
@@ -133,7 +135,7 @@ data Realization = Realization
   { realizationRouter :: !Text,
     realizationModel :: !Text,
     realizationThinking :: !Thinking,
-    realizationMaxOutput :: !Integer,
+    realizationMaxOutput :: !(Maybe Integer),
     realizationOptions :: !(Map Text Value)
   }
   deriving (Eq, Show)
@@ -223,8 +225,11 @@ instance FromJSON Realization where
     router <- nonBlank "realization router" =<< o .: "router"
     model <- nonBlank "realization model" =<< o .: "model"
     thinking <- o .: "thinking"
-    maxOutput <- o .: "max-output"
-    when (maxOutput <= 0) (fail "max-output must be a positive integer")
+    maxOutputValue <- o .: "max-output"
+    maxOutput <- case maxOutputValue of
+      String "unconstrained" -> pure Nothing
+      value -> Just <$> parseJSON value
+    when (maybe False (<= 0) maxOutput) (fail "max-output must be a positive integer or 'unconstrained'")
     options <- fromMaybe Map.empty <$> o .:? "options"
     case find (sensitive . fst) (Map.toList options) of
       Just (key, _) -> fail ("backend option '" <> T.unpack key <> "' may carry a secret and is not allowed")

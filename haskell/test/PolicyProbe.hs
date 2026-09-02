@@ -105,6 +105,7 @@ module Main (main) where
 -- `Agentic.Workflow`, and the pair is one contract. And for the parse, whose
 -- arm order IS the collision policy — read below over a registry that collides
 -- with every verb, which neither real table does.
+import Agentic.Acp (AcpConfig (..), adapterArgv, defaultAcpConfig, newSession, resolveArgv, sayAcp, withAcp)
 import Agentic.Cli
   ( Command (..),
     Registry (..),
@@ -220,7 +221,7 @@ import Agentic.Builder
 import qualified Data.Map.Strict as Map
 import Agentic.Observe (printedValue)
 import GHC.Clock (getMonotonicTimeNSec)
-import System.Directory (doesFileExist, getTemporaryDirectory, removePathForcibly)
+import System.Directory (createDirectoryIfMissing, doesFileExist, getTemporaryDirectory, removePathForcibly)
 import System.FilePath ((</>))
 import System.Posix.Files (fileMode, getFileStatus)
 import System.Exit (exitFailure)
@@ -1697,13 +1698,47 @@ main = do
         TIO.putStrLn "FAIL the missing command: the run completed"
         modifyIORef' failures (+ 1)
 
+  -- Permission authority exists only while session/prompt is active. The stub
+  -- sends a same-session permission request after a completed effect; newSession
+  -- pumps it before its own response, and it must be cancelled despite the prior
+  -- effect having carried Grant.
+  temp <- getTemporaryDirectory
+  stamp <- getMonotonicTimeNSec
+  let delayedDir = temp </> ("agentic-delayed-permission-" <> show stamp)
+      delayedCfg =
+        (defaultAcpConfig (adapterArgv "stub" <> ["--delayed-same-session-permission"]))
+          { acpCwd = delayedDir, acpTurnTimeoutMs = 10000 }
+      delayedRequest = effectRequest (Q (AddrTool "apply") scopeUnit "Apply:\n+ok" 0)
+  createDirectoryIfMissing True delayedDir
+  delayed <-
+    try
+      ( withAcp delayedCfg $ \acp -> do
+          _ <- sayAcp delayedCfg acp SAck delayedRequest ""
+          _ <- newSession acp
+          doesFileExist (delayedDir </> "delayed-permission-cancelled")
+      )
+      `finally` removePathForcibly delayedDir
+  let delayedSafe = case delayed :: Either SomeException Bool of
+        Right True -> True
+        _ -> False
+  pureProbe failures "same-session permissions outside prompt scope are cancelled"
+    [("delayed after completed effect", delayedSafe)]
+
   -- Routing (Agentic.Route): the grammar an operator types, and the one rule
   -- that decides where a question goes. Pure — no process, no network — because
   -- routing is a function of a field the interpreter has already computed.
+  resolvedDroid <- resolveArgv (adapterArgv "droid" <> ["./test/PolicyProbe.hs"])
+  pureProbe failures "Droid adapter arguments remain byte-for-byte unchanged"
+    [("existing relative path", resolvedDroid == ["droid", "exec", "--output-format", "acp", "./test/PolicyProbe.hs"])]
+  pureProbe failures "adapterArgv selects Droid's native ACP mode"
+    [ ("droid", adapterArgv "droid" == ["droid", "exec", "--output-format", "acp"]),
+      ("appended argv", adapterArgv "droid" <> ["--probe"] == ["droid", "exec", "--output-format", "acp", "--probe"])
+    ]
   pureProbe failures "parseBackend reads both schemes, splitting on the first colon"
     [ ("acp:stub", parseBackend "acp:stub" == Right (BackendAcp "stub")),
       ("acp:claude", parseBackend "acp:claude" == Right (BackendAcp "claude")),
       ("acp:codex", parseBackend "acp:codex" == Right (BackendAcp "codex")),
+      ("acp:droid", parseBackend "acp:droid" == Right (BackendAcp "droid")),
       ("acp:PATH", parseBackend "acp:/opt/bin/my-adapter" == Right (BackendAcp "/opt/bin/my-adapter")),
       ("deck:id", parseBackend "deck:gemini-pane" == Right (BackendDeck "gemini-pane")),
       -- The first colon and no other: a deck session's title may contain one,
@@ -1752,6 +1787,7 @@ main = do
           [ BackendAcp "stub",
             BackendAcp "claude",
             BackendAcp "codex",
+            BackendAcp "droid",
             BackendAcp "/opt/bin/my-adapter",
             BackendAcp "./adapters/local.sh",
             BackendDeck "gemini-pane",
@@ -1894,6 +1930,7 @@ main = do
     )
   pureProbe failures "parseRoute splits NAME=BACKEND on the first ="
     [ ("deep=acp:codex", parseRoute "deep=acp:codex" == Right ("deep", BackendAcp "codex")),
+      ("deep=acp:droid", parseRoute "deep=acp:droid" == Right ("deep", BackendAcp "droid")),
       -- The first `=`, for the reason `--input-file` splits on the first `=`:
       -- no model name contains one and a value may contain as many as it likes.
       ("a value containing =", parseRoute "deep=acp:/opt/a=b/adapter" == Right ("deep", BackendAcp "/opt/a=b/adapter")),

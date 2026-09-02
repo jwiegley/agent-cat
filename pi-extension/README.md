@@ -63,12 +63,33 @@ The `agent_cat_workflow` model tool can discover, start (scripted/tool-free-chil
 ## Targets and containment
 
 - **Scripted:** offline table; no commands.
-- **Native ACP:** configured adapter plus validated descriptor-pin routes, in agent-cat's scratch cwd. Not an OS sandbox.
+- **Native ACP:** configured adapter plus validated descriptor-pin routes, in agent-cat's scratch cwd. Built-ins are `stub`, `claude`, `codex`, and `droid`; Droid launches `droid exec --output-format acp`. Not an OS sandbox.
 - **Native agent-deck:** configured external session plus validated descriptor-pin routes.
 - **Current Pi session:** visible exclusive injected turns in the current project. This is not a sandbox.
 - **Owned Pi child:** agent-cat scratch cwd, in-memory Pi session, tools disabled.
 - **Known or authenticated-discovered remote Pi session:** its remote workspace under an exclusive lease. This is not a sandbox.
 - **ACP/deck routes:** still launched and interpreted by agent-cat.
+
+For Droid, install and authenticate the `droid` executable before starting Pi, or inherit `FACTORY_API_KEY` into Pi's environment. Never enter a key in the adapter argv editor; credentials are rejected from argv and omitted from manifests.
+
+Select a Factory model and reasoning level through agent-cat's normal symbolic routing profile, not adapter arguments. The workflow's `servedBy` name must match the profile; a Droid router uses `backend: acp:droid`, and because Droid exposes no output-limit control the required policy is explicit:
+
+```yaml
+version: 1
+routers:
+  - name: factory-droid
+    backend: acp:droid
+    provider: factory
+profiles:
+  - name: deep
+    chain:
+      - router: factory-droid
+        model: gpt-5.6-luna
+        thinking: low
+        max-output: unconstrained
+```
+
+Pi passes the selected routes to agent-cat; agent-cat preflights the advertised model/reasoning setters before any prompt. Omitting `max-output` or declaring any unsupported setting refuses the run.
 
 Effectful workflows cannot use the tool-free child target. Current/remote live targets require an explicit charge/ownership confirmation. Agent-cat's intent-based ACP permission policy remains authoritative.
 

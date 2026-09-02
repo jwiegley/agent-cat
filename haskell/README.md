@@ -611,14 +611,15 @@ profiles:
 ```
 
 A router names one physical backend and its provider. A profile owns a nonempty,
-ordered chain of realizations. `model`, `thinking`, and `max-output` are
-required constraints; only `options` is optional. Option values retain YAML
-string, number, or boolean types; arrays, objects, and null are refused. The
+ordered chain of realizations. `model`, `thinking`, and `max-output` are required
+policy; `max-output` is either a positive integer bound or `unconstrained`. Only
+`options` is optional. Option values retain YAML string, number, or boolean
+types; arrays, objects, and null are refused. The
 runner applies or verifies
 every required value before a prompt and refuses the run when the backend cannot
 prove it. There is no silent delegation to a backend default. Valid
 thinking values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and
-`max`; `max-output` is a positive integer. Unknown fields, empty names or
+`max`; `max-output` is a positive integer or `unconstrained`. Unknown fields, empty names or
 chains, unresolved routers, duplicate declarations, unsupported values, and
 credential-bearing option keys are errors, including token, password,
 credential, auth, cookie, bearer, and `*-key` forms. Credentials do not belong
@@ -631,8 +632,8 @@ begin. Each dispatched question opens and configures its own session again befor
 `session/prompt`. Thus an unsupported or setter-refusing late fallback cannot
 spend tokens on earlier rungs. For
 agent-deck, the runner sends nothing until `agent-deck list --json` identifies
-one existing session whose provider, model, thinking level, and output limit
-match every declared constraint. Provider metadata must be explicit: a tool
+one existing session whose provider, model, thinking level, and any declared
+output limit match every constraint. Provider metadata must be explicit: a tool
 name such as `claude` is a harness and is not evidence of Anthropic rather
 than Bedrock or Vertex. Agent-deck exposes no generic metadata for
 backend-specific `options`, so a deck realization carrying them is refused.
@@ -677,7 +678,9 @@ greeting <-
 
 Define `deep-thinker` under `profiles` in routing.yaml, placing the former
 `fable`, Gemini, and Opus particulars in its ordered `chain`, with a router,
-model, thinking level, and output bound on every rung. Remove the Haskell
+model, thinking level, and explicit output policy on every rung. Use a positive
+`max-output` bound where enforced and `max-output: unconstrained` otherwise.
+Remove the Haskell
 `fallingBackTo` calls. Keeping both spellings is refused as ambiguous; this
 prevents two sources from claiming authority over fallback order. The
 `Workflows.HelloWorld` example in the sibling `agent-workflows` repository is
@@ -959,18 +962,40 @@ already describes**, so nothing above changes unless an operator asks.
 ### `run --engine acp` — execute against an adapter this run starts
 
 ```sh
-agentic-run run harden --engine acp [--adapter stub|claude|codex|PATH] \
+agentic-run run harden --engine acp [--adapter stub|claude|codex|droid|PATH] \
     [--adapter-arg ARG]... [--scratch DIR] [--timeout MS] [--verbose]
 ```
 
 | option | what it is | default |
 | --- | --- | --- |
 | `--engine acp` | start an ACP adapter and speak line-delimited JSON-RPC 2.0 to it over a pipe this process owns | — |
-| `--adapter` | the answering program: `stub` (`agent-cat/test/stub_adapter.py`, under `python3`), `claude` and `codex` (looked for on `PATH`, then at their machine-local nix-store pins), or a path | `stub`, announced when it was not typed |
+| `--adapter` | the answering program: `stub` (`agent-cat/test/stub_adapter.py`, under `python3`); `claude` and `codex` (looked for on `PATH`, then at their machine-local nix-store pins); `droid` (`droid exec --output-format acp` from `PATH`); or a path | `stub`, announced when it was not typed |
 | `--adapter-arg` | one argument appended to the adapter's `argv`; repeatable — `--adapter-arg --refuse` is how the stub is told to answer *no* to the owner | — |
 | `--scratch` | the adapter's working directory, and the only place an act is authorized to write | a fresh temporary directory, printed |
 | `--timeout` | milliseconds one request may take before the child is killed and the question named | `900000` |
 | `--verbose` | narrate the transport on stderr | off |
+
+`droid` uses Factory Droid's native ACP mode; it does not add a Python SDK
+dependency or a second transport. Install and authenticate the Droid CLI first,
+or provide `FACTORY_API_KEY` in the environment that starts `agentic-run`. Never
+put the key in `--adapter-arg`, routing YAML, or a wrapper script.
+
+```sh
+agentic-run run structured --engine acp --adapter droid
+agentic-run run harden --engine acp --adapter stub --route deep=acp:droid
+```
+
+A plain Droid backend uses Droid's configured session default. To select a model
+and reasoning level, define a routing profile whose router is `acp:droid` and set
+`max-output: unconstrained`; agent-cat validates and applies both settings through
+the existing `session/set_config_option` path before any prompt. Declaring an
+unsupported setting still refuses preflight. Do not append `--model`: ACP session
+settings do not come from Droid's ordinary command-line model flag.
+
+One adapter process may retain subscriptions for sessions opened earlier in the
+run. Agent-cat accepts answer chunks only for the current `sessionId`. Permission
+requests must also match the session and dynamic extent of an active prompt; stale
+or delayed out-of-turn requests are cancelled.
 
 The honest paragraph. **This transport can promise one thing the `agent-deck`
 one cannot.** `session/prompt` answers with a `stopReason`, and exactly one of
@@ -983,11 +1008,11 @@ make that check, because the CLI it drives reports no stop reason. Everything
 else is the same runtime: the question is rendered by the same `renderQ` with
 the same `Agentic.Exec.answerSpec` line, decoded by the same trusted base,
 re-asked once by the same loop, and abandoned in the same words. What is
-*not* here is Lean's `--session`/`--fork-session` handoff, its
-`session/set_mode` and `session/set_config_option` scope calls (both axes travel
-in the prompt header instead, exactly as they do for the deck), and its second
-clock: one `--timeout` bounds a whole request, and a wedged pipe is a wedged
-request.
+*not* here is Lean's `--session`/`--fork-session` handoff,
+`session/set_mode`, or its second clock. An unconfigured symbolic axis travels
+in the prompt header; a routing profile's concrete model and generation settings
+are instead validated and applied through `session/set_config_option`. One
+`--timeout` bounds a whole request, and a wedged pipe is a wedged request.
 
 Two policies are worth reading before pointing this at a directory you care
 about. Each request gets a **new session** because a semantic world is a function
@@ -998,6 +1023,15 @@ stands in for authority, and every decision is printed. The grant remains an
 assumption about the adapter, directory and requested tool call.
 
 ### Testing the transport without a live session
+
+`ci/acp.sh` drives the ACP stub directly and through a fake `droid` on `PATH`.
+The Droid scenario validates `droid exec --output-format acp`, appended arguments,
+default and routed turns, current-session answer and permission correlation, and
+a dead-process failure without Factory credentials or network access.
+
+The separately authorized live record—including diagnostic history and the one
+post-fix acceptance smoke—is inspectable at
+[`../doc/droid-live-verification.md`](../doc/droid-live-verification.md).
 
 `ci/deck.sh` runs `agentic-run` against `test/stub-deck.sh`, a fake `agent-deck`
 implementing exactly the three commands the adapter uses and refusing every

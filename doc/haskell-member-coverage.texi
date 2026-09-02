@@ -18,9 +18,18 @@ checked by the documentation gates.
 @c MEMBER Agentic.Cli.Command.member:Help support
 @hsindex Agentic.Cli.Command.Help
 @item @code{Agentic.Cli.Command} @tab @code{Help} @tab @code{Agentic.Cli.Command}
+@c MEMBER Agentic.Cli.Command.member:LineageCheck support
+@hsindex Agentic.Cli.Command.LineageCheck
+@item @code{Agentic.Cli.Command} @tab @code{LineageCheck} @tab @code{Agentic.Cli.Command}
 @c MEMBER Agentic.Cli.Command.member:List support
 @hsindex Agentic.Cli.Command.List
 @item @code{Agentic.Cli.Command} @tab @code{List} @tab @code{Agentic.Cli.Command}
+@c MEMBER Agentic.Cli.Command.member:Machine support
+@hsindex Agentic.Cli.Command.Machine
+@item @code{Agentic.Cli.Command} @tab @code{Machine} @tab @code{Agentic.Cli.Command}
+@c MEMBER Agentic.Cli.Command.member:MachineLineage support
+@hsindex Agentic.Cli.Command.MachineLineage
+@item @code{Agentic.Cli.Command} @tab @code{MachineLineage} @tab @code{Agentic.Cli.Command}
 @c MEMBER Agentic.Cli.Command.member:Plan support
 @hsindex Agentic.Cli.Command.Plan
 @item @code{Agentic.Cli.Command} @tab @code{Plan} @tab @code{Agentic.Cli.Command}
@@ -300,15 +309,15 @@ checked by the documentation gates.
 @c MEMBER Agentic.Workflow.Outcome.member:Unsettled author
 @hsindex Agentic.Workflow.Outcome.Unsettled
 @item @code{Agentic.Workflow.Outcome} @tab @code{Unsettled} @tab @code{Agentic.Workflow.Outcome}
-@c MEMBER Agentic.Workflow.Parameterized.member:Parameterized support
-@hsindex Agentic.Workflow.Parameterized.Parameterized
-@item @code{Agentic.Workflow.Parameterized} @tab @code{Parameterized} @tab @code{Agentic.Workflow.Parameterized}
-@c MEMBER Agentic.Workflow.Parameterized.member:inputNames support
-@hsindex Agentic.Workflow.Parameterized.inputNames
-@item @code{Agentic.Workflow.Parameterized} @tab @code{inputNames} @tab @code{Agentic.Workflow.Parameterized}
-@c MEMBER Agentic.Workflow.Parameterized.member:supply support
-@hsindex Agentic.Workflow.Parameterized.supply
-@item @code{Agentic.Workflow.Parameterized} @tab @code{supply} @tab @code{Agentic.Workflow.Parameterized}
+@c MEMBER Agentic.Workflow.ParameterizedOf.member:ParameterizedOf support
+@hsindex Agentic.Workflow.ParameterizedOf.ParameterizedOf
+@item @code{Agentic.Workflow.ParameterizedOf} @tab @code{ParameterizedOf} @tab @code{Agentic.Workflow.ParameterizedOf}
+@c MEMBER Agentic.Workflow.ParameterizedOf.member:inputNames support
+@hsindex Agentic.Workflow.ParameterizedOf.inputNames
+@item @code{Agentic.Workflow.ParameterizedOf} @tab @code{inputNames} @tab @code{Agentic.Workflow.ParameterizedOf}
+@c MEMBER Agentic.Workflow.ParameterizedOf.member:supply support
+@hsindex Agentic.Workflow.ParameterizedOf.supply
+@item @code{Agentic.Workflow.ParameterizedOf} @tab @code{supply} @tab @code{Agentic.Workflow.ParameterizedOf}
 @c MEMBER Agentic.Workflow.PartyK.member:IsModel support
 @hsindex Agentic.Workflow.PartyK.IsModel
 @item @code{Agentic.Workflow.PartyK} @tab @code{IsModel} @tab @code{Agentic.Workflow.PartyK}
@@ -357,6 +366,9 @@ checked by the documentation gates.
 @c MEMBER Agentic.Workflow.Stage.member:Open machinery
 @hsindex Agentic.Workflow.Stage.Open
 @item @code{Agentic.Workflow.Stage} @tab @code{Open} @tab @code{Agentic.Workflow.Stage}
+@c MEMBER Agentic.Workflow.Stage.member:Result machinery
+@hsindex Agentic.Workflow.Stage.Result
+@item @code{Agentic.Workflow.Stage} @tab @code{Result} @tab @code{Agentic.Workflow.Stage}
 @c MEMBER Agentic.Workflow.Stage.member:Review machinery
 @hsindex Agentic.Workflow.Stage.Review
 @item @code{Agentic.Workflow.Stage} @tab @code{Review} @tab @code{Agentic.Workflow.Stage}
@@ -736,6 +748,14 @@ checked by the documentation gates.
 @c INSTANCE-TEXT Agentic.Workflow.Step.instance:2c91fc73141e2b39 instance (s' ~ s, c' ~ c, j ~ Agentic.Workflow.Open (Agentic.Workflow.An c : s), a ~ Agentic.Workflow.Outcome c s) => Agentic.Workflow.Step (Agentic.Workflow.Loop c' s') (Agentic.Workflow.Open s) j a
 @item @code{Agentic.Workflow.Step}
 @code{instance (s' ~ s, c' ~ c, j ~ Agentic.Workflow.Open (Agentic.Workflow.An c : s), a ~ Agentic.Workflow.Outcome c s) => Agentic.Workflow.Step (Agentic.Workflow.Loop c' s') (Agentic.Workflow.Open s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:c2b57821d09aeebe machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:c2b57821d09aeebe instance (s' ~ s, c' ~ c, j ~ Agentic.Workflow.Result r (Agentic.Workflow.An c : s), a ~ Agentic.Workflow.Ending c s) => Agentic.Workflow.Step (Agentic.Workflow.LoopOn c' s') (Agentic.Workflow.Result r s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (s' ~ s, c' ~ c, j ~ Agentic.Workflow.Result r (Agentic.Workflow.An c : s), a ~ Agentic.Workflow.Ending c s) => Agentic.Workflow.Step (Agentic.Workflow.LoopOn c' s') (Agentic.Workflow.Result r s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:facb0307fe28b202 machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:facb0307fe28b202 instance (s' ~ s, c' ~ c, j ~ Agentic.Workflow.Result r (Agentic.Workflow.An c : s), a ~ Agentic.Workflow.Outcome c s) => Agentic.Workflow.Step (Agentic.Workflow.Loop c' s') (Agentic.Workflow.Result r s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (s' ~ s, c' ~ c, j ~ Agentic.Workflow.Result r (Agentic.Workflow.An c : s), a ~ Agentic.Workflow.Outcome c s) => Agentic.Workflow.Step (Agentic.Workflow.Loop c' s') (Agentic.Workflow.Result r s) j a}
 @c INSTANCE Agentic.Workflow.Step.instance:328266beed2325f3 machinery
 @c INSTANCE-TEXT Agentic.Workflow.Step.instance:328266beed2325f3 instance (s' ~ s, j ~ Agentic.Workflow.Body r (Agentic.Workflow.An Agentic.Schema.CodeText : s), a ~ Agentic.Builder.V (Agentic.Workflow.An Agentic.Schema.CodeText : s) Agentic.Schema.CodeText) => Agentic.Workflow.Step (Agentic.Builder.Ask s') (Agentic.Workflow.Body r s) j a
 @item @code{Agentic.Workflow.Step}
@@ -776,6 +796,26 @@ checked by the documentation gates.
 @c INSTANCE-TEXT Agentic.Workflow.Step.instance:5ddae6d230fdb3b8 instance (s' ~ s, j ~ Agentic.Workflow.Open s, a ~ ()) => Agentic.Workflow.Step (Agentic.Workflow.Calling s') (Agentic.Workflow.Open s) j a
 @item @code{Agentic.Workflow.Step}
 @code{instance (s' ~ s, j ~ Agentic.Workflow.Open s, a ~ ()) => Agentic.Workflow.Step (Agentic.Workflow.Calling s') (Agentic.Workflow.Open s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:20ca421ff8014556 machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:20ca421ff8014556 instance (s' ~ s, j ~ Agentic.Workflow.Result r (Agentic.Workflow.An Agentic.Schema.CodeText : s), a ~ Agentic.Builder.V (Agentic.Workflow.An Agentic.Schema.CodeText : s) Agentic.Schema.CodeText) => Agentic.Workflow.Step (Agentic.Builder.Ask s') (Agentic.Workflow.Result r s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (s' ~ s, j ~ Agentic.Workflow.Result r (Agentic.Workflow.An Agentic.Schema.CodeText : s), a ~ Agentic.Builder.V (Agentic.Workflow.An Agentic.Schema.CodeText : s) Agentic.Schema.CodeText) => Agentic.Workflow.Step (Agentic.Builder.Ask s') (Agentic.Workflow.Result r s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:7fa3a46fd8fff0c5 machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:7fa3a46fd8fff0c5 instance (s' ~ s, j ~ Agentic.Workflow.Result r (Agentic.Workflow.An c : s), a ~ Agentic.Builder.V (Agentic.Workflow.An c : s) c) => Agentic.Workflow.Step (Agentic.Builder.Rhs s' c) (Agentic.Workflow.Result r s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (s' ~ s, j ~ Agentic.Workflow.Result r (Agentic.Workflow.An c : s), a ~ Agentic.Builder.V (Agentic.Workflow.An c : s) c) => Agentic.Workflow.Step (Agentic.Builder.Rhs s' c) (Agentic.Workflow.Result r s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:ca4d804c2cbb86cc machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:ca4d804c2cbb86cc instance (s' ~ s, j ~ Agentic.Workflow.Result r (Agentic.Workflow.An c : s), a ~ Agentic.Builder.V (Agentic.Workflow.An c : s) c) => Agentic.Workflow.Step (Agentic.Workflow.Ann s' c) (Agentic.Workflow.Result r s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (s' ~ s, j ~ Agentic.Workflow.Result r (Agentic.Workflow.An c : s), a ~ Agentic.Builder.V (Agentic.Workflow.An c : s) c) => Agentic.Workflow.Step (Agentic.Workflow.Ann s' c) (Agentic.Workflow.Result r s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:2725c675897df026 machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:2725c675897df026 instance (s' ~ s, j ~ Agentic.Workflow.Result r s, a ~ ()) => Agentic.Workflow.Step (Agentic.Workflow.Acting s') (Agentic.Workflow.Result r s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (s' ~ s, j ~ Agentic.Workflow.Result r s, a ~ ()) => Agentic.Workflow.Step (Agentic.Workflow.Acting s') (Agentic.Workflow.Result r s) j a}
+@c INSTANCE Agentic.Workflow.Step.instance:bb65103cbcb159d2 machinery
+@c INSTANCE-TEXT Agentic.Workflow.Step.instance:bb65103cbcb159d2 instance (s' ~ s, j ~ Agentic.Workflow.Result r s, a ~ ()) => Agentic.Workflow.Step (Agentic.Workflow.Calling s') (Agentic.Workflow.Result r s) j a
+@item @code{Agentic.Workflow.Step}
+@code{instance (s' ~ s, j ~ Agentic.Workflow.Result r s, a ~ ()) => Agentic.Workflow.Step (Agentic.Workflow.Calling s') (Agentic.Workflow.Result r s) j a}
 @c INSTANCE Agentic.Workflow.Step.instance:0110f801f1b95776 machinery
 @c INSTANCE-TEXT Agentic.Workflow.Step.instance:0110f801f1b95776 instance Agentic.Workflow.Step st i j a => Agentic.Workflow.Step (Agentic.Workflow.Nm st) i j a
 @item @code{Agentic.Workflow.Step}

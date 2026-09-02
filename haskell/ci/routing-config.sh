@@ -162,6 +162,44 @@ sources = [item["event"].get("source") for item in events
 assert "asked:model author@deep#2" in sources, sources
 PY
 
+# Factory Droid advertises model and reasoning but no output-limit control. An
+# optional-bound profile must therefore configure both advertised settings and run,
+# while a declared unsupported setting remains a preflight failure below.
+mkdir -p "$tmp/droid-bin"
+cat >"$tmp/droid-bin/droid" <<EOF
+#!/bin/sh
+[ "\$1" = exec ] && [ "\$2" = --output-format ] && [ "\$3" = acp ] || exit 64
+shift 3
+exec python3 "$root/test/stub_adapter.py" --no-max-output-option "\$@" 2>>"$tmp/droid.log"
+EOF
+chmod +x "$tmp/droid-bin/droid"
+cat >"$tmp/xdg/agent-cat/routing.yaml" <<'EOF'
+version: 1
+routers:
+  - name: factory-droid
+    backend: acp:droid
+    provider: factory
+profiles:
+  - name: deep
+    chain:
+      - router: factory-droid
+        model: deep
+        thinking: high
+        max-output: unconstrained
+EOF
+rm -rf "$tmp/work" && mkdir "$tmp/work"
+rm -f "$tmp/droid.log"
+PATH="$tmp/droid-bin:$PATH" XDG_CONFIG_HOME="$tmp/xdg" "$bin" run harden \
+  --engine acp --adapter "$tmp/fallback" --scratch "$tmp/work" \
+  +RTS -N8 -RTS >"$tmp/droid.out" 2>"$tmp/droid.err"
+grep -qE '^  deep += acp:droid; factory/deep; thinking high; max-output unconstrained$' "$tmp/droid.out"
+grep -q "set config model='deep'" "$tmp/droid.log"
+grep -q "set config effort='high'" "$tmp/droid.log"
+! grep -q 'set config max-output' "$tmp/droid.log"
+grep -q 'billFresh   7' "$tmp/droid.out"
+grep -q 'billMemo    7' "$tmp/droid.out"
+cp "$tmp/valid-routing.yaml" "$tmp/xdg/agent-cat/routing.yaml"
+
 # Every ACP rung is preflighted before the scheduler starts. A valid primary
 # with an unavailable later fallback must therefore spend no token and mutate
 # neither adapter session.

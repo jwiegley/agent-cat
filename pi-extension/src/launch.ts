@@ -120,11 +120,12 @@ export async function previewPlan(options: {
   }
 }
 
-function assertNoCredentialArgs(args: string[]): void {
+export function assertNoCredentialArgs(args: string[]): void {
   const credentialKeys = new Set([
     "api-key", "api_key", "apikey", "token", "access-token", "auth-token",
     "secret", "client-secret", "password", "authorization", "access-key",
   ]);
+  const credentialKey = /(^|[-_])(api[-_]?key|access[-_]?key|auth|authorization|token|secret|password|cookie|credential)([-_]|$)/;
   const inspectArgs = args.filter((argument) => argument.trim().toLowerCase() !== "--adapter-arg");
   for (let index = 0; index < inspectArgs.length; index += 1) {
     const argument = inspectArgs[index].trim().toLowerCase();
@@ -136,7 +137,8 @@ function assertNoCredentialArgs(args: string[]): void {
     const headerName = headerValue?.split(":", 1)[0];
     const credentialHeader = headerName !== undefined && /(^|[-_])(api[-_]?key|access[-_]?key|auth|authorization|token|secret|password|cookie|credential)([-_]|$)/.test(headerName);
     const authorizationHeader = /^authorization\s*:/.test(argument);
-    if (credentialKeys.has(key) || authorizationHeader || credentialHeader) {
+    const embeddedCredentialKey = argument.split(/[=:]/).some((part) => credentialKey.test(part.replace(/^--?/, "")));
+    if (credentialKeys.has(key) || credentialKey.test(key) || embeddedCredentialKey || authorizationHeader || credentialHeader) {
       throw new Error("credential-bearing target argv is forbidden; use inherited environment configuration");
     }
   }

@@ -2,6 +2,7 @@
 @clindex --adapter
 @clindex --adapter-arg
 @clindex --binary
+@clindex --drop-answer
 @clindex --engine
 @clindex --help
 @clindex --input
@@ -15,10 +16,16 @@
 @clindex --scratch
 @clindex --scripted
 @clindex --session
+@clindex --set-answer
 @clindex --timeout
 @clindex --verbose
 @clindex verb:cost
 @clindex verb:help
+@clindex verb:lineage-check
 @clindex verb:list
+@clindex verb:machine
+@clindex verb:machine-fork
+@clindex verb:machine-restart
+@clindex verb:machine-resume
 @clindex verb:plan
 @clindex verb:run
