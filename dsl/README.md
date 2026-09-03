@@ -1,59 +1,53 @@
 # dsl
 
-`agentic-dsl` is the pure Haskell authoring layer for agent-cat workflows. It
-owns the typed structural AST, raw wire syntax, schema and text vocabulary,
-builder, prompt quasiquoters, and the `QualifiedDo` workflow surface. It does
-not plan, price, execute, route, or select engines.
+`dsl/src` is the pure authoring layer of the `agentic` package and the root of
+its dependency graph. It owns the raw first-order syntax, the schema and text
+vocabulary, the typed structural AST, the builder that elaborates authored
+constructions into a `RawProgram` and a typed `Plan` at once, the prompt
+quasiquoters, and the `QualifiedDo` workflow surface. It does not plan, price,
+execute, route, or select engines.
 
-## Public API
+## Public modules
 
-Workflow authors normally import:
-
-- `Agentic.Workflow`
-- `Agentic.Workflow.Do`
-- `Agentic.WF` for `[wf|...|]` and `[wft|...|]`
-- `Agentic.Schema`, `.Json`, and `.TH` for structured answers
-
-Infrastructure consumers use the deliberately small facade set:
-
-- `Agentic.DSL` — raw syntax, canonical text/JSON rules, and shared data
-- `Agentic.DSL.Plan` — typed structural AST
-- `Agentic.Builder` — advanced typed elaboration
-
-The implementation modules `Agentic.Raw`, `Agentic.Text`, and
-`Agentic.DSL.Json` are hidden by Cabal. Cross-package imports cannot reach them.
+A workflow author imports `Agentic.Workflow` for the authoring vocabulary,
+`Agentic.Workflow.Do` qualified as `W` for the block grammar, `Agentic.WF` for
+the `[wf|...|]` and `[wft|...|]` quasiquoters, and `Agentic.Schema` with its
+`Json` and `TH` companions for structured answers. Infrastructure consumers use
+three smaller facades: `Agentic.DSL` for the raw syntax, its canonical text and
+JSON rules, and shared data; `Agentic.DSL.Plan` for the typed structural AST;
+and `Agentic.Builder` for typed elaboration. The implementation modules
+`Agentic.Raw`, `Agentic.Text`, and `Agentic.DSL.Json` are hidden by the Cabal
+file, so no other directory can reach them.
 
 ## Dependencies
 
-`dsl` has no dependency on another agent-cat package. Downstream edges are:
+This directory depends on no other agent-cat directory. `plan`, `runtime`
+through `plan`, every `workflow` directory, and `bisim` depend on it. A workflow
+imports symbolic model and profile names only; concrete models, routing,
+sessions, engines, cost, and execution are absent from this layer. A workflow
+that wants one of the four runner-supplied run facts declares it with an
+ordinary `input` under the reserved `run.` prefix; the Text-only
+`Agentic.Runtime.Facts` module that names and reads those facts is imported by
+hosts such as the CLI, never by a workflow.
 
-```text
-plan -> dsl
-runtime -> plan -> dsl
-workflow/* -> dsl
-bisim -> dsl
-```
+## Build and test
 
-A workflow imports symbolic model/profile names only. Concrete models, routing,
-sessions, engines, cost, and execution are absent. Authors who intentionally
-need engine-neutral run facts import the separate `runtime` package; that
-choice is visible in their package manifest.
-
-## Build
-
-From this directory:
+The directory builds as part of the single package from the repository root:
 
 ```sh
-nix develop path:.. -c cabal build agentic-dsl
+nix develop path:. -c cabal build all
+./bisim/ci/tier0.sh
+./cli/ci/policies.sh
 ```
+
+The frozen corpus pins the raw encoding and the printed output of the authoring
+surface, so a change here that moves those bytes is a change to the
+specification.
 
 ## Conventions
 
-- Keep the AST typed and engine-independent.
-- Add shared authoring capability here only when every supported engine can
-  realize it.
-- Do not inspect runtime, route, session, engine, plan-analysis, or cost state.
-- Keep model references symbolic; model-definition files belong to CLI
-  composition.
-- Preserve raw encoding and authoring output unless changing the specification
-  explicitly.
+Keep the AST typed and engine-independent, and add a shared authoring capability
+only when every supported engine can realize it. Do not inspect runtime, route,
+session, engine, plan-analysis, or cost state. Keep model references symbolic;
+model-definition files belong to `cli`. Preserve the raw encoding and the
+authoring output unless the specification is being changed deliberately.

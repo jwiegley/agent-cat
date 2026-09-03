@@ -1,10 +1,10 @@
 # Bisimulation maintenance
 
-- This module is test-only. Never make a production package depend on it.
-- Build the Lean oracle before live differential tests; do not build the
-  expensive flagship as part of the oracle closure.
-- Keep `corpus/` byte-identical unless the user explicitly changes semantics.
-- Keep Haskell bisimulation limited to DSL and planner modules. Cost and canonical
-  workflows belong to private verification; never duplicate them.
-- Use deterministic local processes only. Do not run paid/live engines.
-- Run Tier 0, rebuilt Tier 1, and fixed-seed live bisimulation after changes.
+This directory is test-only, and no production component may depend on it.
+Build the Lean oracle before a live differential run, and never make the
+oracle closure import the expensive flagship. Keep `corpus/` byte-identical
+unless the user changes the specification explicitly. Keep the Haskell side
+limited to DSL and planner modules; cost and canonical workflows belong to the
+private verification library. Use deterministic local processes only and never
+a paid engine. After a change, run tier 0, the rebuilt tier 1 cases, and a
+fixed-seed live bisimulation.

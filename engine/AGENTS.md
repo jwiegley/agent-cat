@@ -1,8 +1,8 @@
 # Engine maintenance
 
-- All concrete engines depend on `api`, never on DSL, plan, runtime, CLI, bisim,
-  or sibling engines.
-- Keep decode/retry/failover/memo policy in runtime.
-- Keep model routing and definition-file loading in CLI composition.
-- Preserve transport protocol, permissions, completion evidence, and failures.
-- Do not create an MCP directory/package until implementing it fully.
+Every concrete engine depends on `api` and never on the DSL, the planner, the
+runtime, the CLI, conformance support, or a sibling engine. Decode, retry,
+fail-over, and memo policy stay in the runtime; model routing and
+definition-file loading stay in the CLI. Preserve each transport's protocol,
+permissions, completion evidence, and failure wording. Do not add a new
+transport directory or placeholder until it is implemented in full.

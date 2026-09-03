@@ -1,36 +1,37 @@
 # workflow
 
-This container holds compiled workflow definitions. Each child is an independent
-package whose only local dependency is [`../dsl`](../dsl).
+`workflow` holds the compiled workflow definitions. Each child directory is a
+set of Haskell modules whose only local dependency is `dsl`; they build into
+the internal `examples` library of the `agentic` package together with the
+registry data under `cli/example`.
 
-## Scope and public APIs
+## Layout
 
-- [`core`](core): empty reserved package for future stable workflows
-- [`example`](example): teaching workflows via `Harden`, `Hello`, and `Structured`
-- [`extra`](extra): narrower workflows via `Isaac`
+`example` holds the teaching workflows `Harden`, `Hello`, and `Structured`.
+`extra` holds `Isaac`, the five workflows derived from incite. `core` is
+reserved for stable, generally useful workflows and holds no module at
+present; it is not listed in `agentic.cabal`.
 
-The container itself has no code API.
-
-## Dependencies and adjacent modules
+## Dependencies
 
 ```text
-workflow/{example,extra} -> dsl; workflow/core -> (empty)
+workflow/{example,extra} -> dsl
 cli -> workflow/{example,extra}
-bisim -> workflow/example (tests only)
+cli/verification -> workflow/example   (tests only)
 ```
 
-Workflow packages never depend on each other.
+Workflow directories never depend on one another.
 
 ## Build and test
 
 ```sh
-nix develop path:.. -c cabal build agentic-workflow-core agentic-workflow-example agentic-workflow-extra
+nix develop path:. -c cabal build all
 ./cli/ci/examples.sh
 ./bisim/ci/tier0.sh
 ```
 
 ## Conventions
 
-Definitions and authoring data only. Keep models symbolic and move registry/help,
-canned execution replies, model definitions, planning, pricing, and execution above
-this layer.
+These directories hold definitions and authoring data only. Models are named
+symbolically. Registry rows, help pages, canned replies, model definitions,
+planning, pricing, and execution live above this layer.

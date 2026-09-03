@@ -1,28 +1,29 @@
 # workflow/example
 
-`agentic-workflow-example` owns small teaching and representation examples, including
-canonical `hardenProgram`.
+`workflow/example` holds the small teaching and representation examples.
+`Harden` exports the flagship `hardenProgram`, whose first-order term is frozen
+as corpus entry `example-000` and proved accepted in
+`model/Agentic/Core/DslFlagship.lean`. `Hello` exports `helloProgram`, the
+smallest complete program, which the manual's first chapter walks through.
+`Structured` exports the structured-answer programs and the host record whose
+schema one `deriveSchema` splice derives.
 
-## Public API
+## Dependencies
 
-`Harden` exports frozen flagship `hardenProgram`.
-`Hello` exports frozen `helloProgram`.
-`Structured` exports structured-answer programs and host record boundary.
-
-## Dependencies and adjacent modules
-
-The sole local dependency is `agentic-dsl`. CLI registers these values; bisim uses
-them through a test-only edge. No sibling workflow or runtime package is allowed.
+`dsl` is the sole local dependency. The CLI registers these values, and the
+conformance suite rebuilds `hardenProgram` and `helloProgram` against the
+frozen corpus.
 
 ## Build and test
 
 ```sh
-nix develop path:../.. -c cabal build agentic-workflow-example
+nix develop path:. -c cabal build all
 ./cli/ci/examples.sh
 ./bisim/ci/tier0.sh
 ```
 
 ## Conventions
 
-Keep examples small, symbolic, and engine-independent. CLI help and canned answers
-stay in CLI composition.
+Keep the examples small, symbolic, and engine-independent. `hardenProgram` and
+`helloProgram` must print exactly as their frozen fixtures do. Help pages and
+canned answers stay in `cli/example`.

@@ -1,10 +1,12 @@
 # CLI maintenance
 
-- CLI is the composition root; no lower package may import it.
-- Own concrete backend grammar, adapter selection, model-definition file IO,
-  registry/help/script tables, process-facing commands, and exit mapping here.
-- Keep workflows symbolic and lower runtime/engine APIs identity-neutral.
-- Preserve CLI text/JSON, exit codes, protocol/store versions, routing precedence,
-  strict validation, secret refusal, and eager preflight.
-- Use deterministic scripted/ACP/deck fixtures; never run `engine/acp/ci/route-live.sh` automatically.
-- Run CLI policy, examples, routing-config, engine, and ext-pi integration gates.
+The CLI is the composition root, and no other directory may import it. Own the
+concrete backend grammar, adapter selection, model-definition file IO, the
+registry, help, and scripted tables, the process-facing commands, and the exit
+mapping here. Keep workflows symbolic and the runtime and engine APIs
+identity-neutral. Preserve the command-line text and JSON, the exit codes, the
+protocol and store versions, the routing precedence, strict validation,
+secret refusal, and eager preflight. Use the deterministic scripted, ACP, and
+deck fixtures, and never run `engine/acp/ci/route-live.sh` automatically.
+Verify with the policy, examples, routing-config, engine, and Pi extension
+gates.

@@ -1,6 +1,7 @@
 # Extra workflow maintenance
 
-- Import only `agentic-dsl` modules and standard libraries.
-- Keep model/profile references symbolic and avoid runtime/engine assumptions.
-- Keep shared prompt text single-sourced for workflow definitions and CLI fixtures.
-- Put registry, help, routing, and scripted execution behavior in CLI.
+Import only `dsl` modules and standard libraries. Keep model and profile
+references symbolic and avoid runtime or engine assumptions. Keep the shared
+prompt text single-sourced between the workflow definitions and the CLI
+fixtures. Registry, help, routing, and scripted execution behavior belong in
+`cli`.

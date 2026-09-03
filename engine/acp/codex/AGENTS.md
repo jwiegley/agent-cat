@@ -1,5 +1,5 @@
 # Codex ACP selector maintenance
 
-- Own only Codex adapter command/pin selection.
-- Depend on common ACP API, never DSL, plan, runtime, CLI, workflows, or other engines.
-- Preserve PATH-first, pin-second resolution.
+Own only the Codex adapter command and pin selection. Preserve PATH-first, pin-second resolution. Depend on the
+common ACP module and never on the DSL, the planner, the runtime, the CLI,
+workflow modules, or another engine.

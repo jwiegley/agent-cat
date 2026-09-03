@@ -1,45 +1,45 @@
 # model
 
-`model` is agent-cat's mathematical definition in Lean. It owns the semantic
-objects, laws, proofs, typed workflow representation, and checked flagship. A
-successful build is the module's product; it produces no runtime library or
-application artifact.
+`model` is agent-cat's mathematical definition in Lean 4. It owns the semantic
+objects, the laws and their proofs, the typed workflow representation, and the
+kernel-checked flagship. A successful build is the product; the package
+produces no runtime library and no application.
 
-## Public API
+## Public modules
 
-The Lean modules rooted at `Agentic` are the public mathematical API.
-`Agentic.lean` is the narrative root, while `Agentic.Core.*` exposes the
-individual strata. The `Pollution` target checks that importing the model does
-not install unwanted global instances.
-
-Conformance wire codecs, the oracle process, corpus generation, and frozen
-vectors are not part of this module. They live in [`../bisim`](../bisim) and
-consume `model` through Lake's local package dependency.
+`Agentic.lean` is the root and imports the strata in order: the scope monoid,
+schema-indexed values, questions, annotated requests, worlds, dialogues, the
+`Plan` representation, its denotation, the level and cost folds, the commuting
+theorems, the fold algebra, and the flagship `HardenPatch`. Beside the root,
+`Agentic.Core` holds the first-order syntax and checker under `Dsl`, the
+kernel-checked flagship term in `DslFlagship`, the JSON representation of
+structured values, the reference interpreters `SemanticExec` and
+`AnnotatedExec`, the trusted base `Exec`, the certificate layer `Certify`, and
+the renderings `Report` and `Explain`. The `Pollution` target checks that
+importing the model installs no unwanted global instance.
 
 ## Dependencies
 
-- Lean 4.30.0, pinned by `lean-toolchain`
-- Mathlib v4.30.0, pinned by `lakefile.toml` and `lake-manifest.json`
-- No agent-cat Haskell, runtime, engine, CLI, or extension package
-
-The dependency direction is `bisim -> model`; `model` never imports `bisim`.
+Lean 4.30.0 is pinned by `lean-toolchain`, and Mathlib v4.30.0 by
+`lakefile.toml` and `lake-manifest.json`. The model depends on no Haskell,
+runtime, engine, CLI, or extension code. The conformance package under
+`../bisim` depends on this one by a local Lake path; the model never imports
+it.
 
 ## Build
-
-From this directory:
 
 ```sh
 nix develop path:. -c lake build
 ```
 
-This builds `Agentic` and `Pollution`. `Agentic.Core.DslFlagship` is deliberately
-expensive because its kernel-checked proofs compute the flagship. Never launch
-two full model builds concurrently.
+The default targets are `Agentic` and `Pollution`. `Agentic.Core.DslFlagship`
+proves its theorems by running the checker, the cost algebra, and the
+interpreter inside the kernel, which takes minutes and several gigabytes of
+memory. Never run two full model builds at once.
 
 ## Conventions
 
-- Meaning and proofs belong here; operational realization belongs elsewhere.
-- Keep the root import narrative aligned with the mathematical strata.
-- Do not add process, wire-format, corpus, or engine concerns.
-- Preserve the narrow imports used by `bisim`; do not make its oracle import the
-  expensive flagship module.
+Meaning and proofs belong here; operational realization belongs elsewhere.
+Keep the root import narrative aligned with the strata. Add no process,
+wire-format, corpus, or engine concern. Preserve the narrow imports that the
+conformance oracle uses, so that it never depends on the expensive flagship.

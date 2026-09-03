@@ -1,38 +1,33 @@
 # cost
 
-`agentic-cost` is the pure static cost interpreter. It consumes an
-`Agentic.Plan.Plan` and computes the request-count bag and its minimum, maximum,
-and path count before execution. It performs no IO and does not inspect model
+`cost/src` is the pure static cost interpreter of the `agentic` package. It
+consumes an `Agentic.Plan.Plan` and computes the bag of request-count bills,
+one per finite branch path, together with their minimum, maximum, and path
+count, before execution. It performs no IO and does not inspect model
 definitions, engines, runtime state, or answers.
 
-## Public API
+## Public module
 
-`Agentic.Cost` exports:
-
-- `costM` — one possible request-count bill per finite branch path
-- `costSummary` — minimum, maximum, and number of paths
-
-Dollar or token pricing may be added only when it remains a pure interpretation
-of public plan data; it must not discover runtime or engine state.
+`Agentic.Cost` exports `costM`, which gives one possible request-count bill per
+syntactic path, and `costSummary`, which gives the minimum fold, the maximum
+fold, and the number of paths. Dollar or token pricing may be added only as a
+further pure interpretation of public plan data.
 
 ## Dependencies
 
-```text
-cost -> plan -> dsl
-bisim -> cost
-cli -> cost
-```
+`plan` is the only local dependency, and `plan` depends on `dsl`. The CLI and the
+private verification library depend on this directory.
 
-`agentic-plan` is the only local dependency.
-
-## Build
+## Build and test
 
 ```sh
-nix develop path:.. -c cabal build agentic-cost
+nix develop path:. -c cabal build all
+./bisim/ci/tier0.sh
+./cli/ci/examples.sh
 ```
 
 ## Conventions
 
-- Interpret the existing plan; never copy its AST.
-- Keep results deterministic and independent of runtime realization.
-- Preserve values pinned by Lean conformance and the example gate.
+Interpret the existing plan rather than copying its AST. Keep results
+deterministic and independent of any runtime realization. The values are pinned
+by the Lean conformance corpus and by the examples gate.

@@ -1,7 +1,8 @@
 # agent-deck maintenance
 
-- Depend only on `../api`; never import DSL, plan, runtime, CLI, bisim, ACP, or workflows.
-- Preserve polling, staleness, private-file, timeout, and cleanup guarantees.
-- Report raw results and unverified completion honestly.
-- Keep decoding, retry, failover, memoization, and scheduling in runtime.
-- Verify with the deterministic deck fixture; never require a live session.
+Depend only on `engine/api`; never import the DSL, the planner, the runtime,
+the CLI, conformance support, the ACP engine, or workflow modules. Preserve
+the polling, staleness, private-file, timeout, and cleanup guarantees, and
+report raw results and unverified completion honestly. Decoding, retry,
+fail-over, memoization, and scheduling stay in the runtime. Verify with the
+deterministic deck fixture and never require a live session.

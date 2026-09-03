@@ -1,23 +1,27 @@
 # engine/acp/claude
 
-`agentic-acp-claude` owns Claude ACP adapter selection.
+`engine/acp/claude/src` owns the selection of the Claude ACP adapter and
+nothing else.
 
-## Public API
+## Public module
 
-`Agentic.Acp.Claude` exports `claudeAdapter` and its PATH-fallback `claudePin`.
+`Agentic.Acp.Claude` exports `claudeAdapter` and its machine-local fallback `claudePin`. The adapter is found on `PATH` first and at the pinned path second.
 
-## Dependencies and adjacent modules
+## Dependencies
 
-Its sole local dependency is `agentic-acp`; CLI selects the returned `AdapterSpec`.
-No DSL, plan, runtime, workflow, bisim, deck, or other selector dependency is allowed.
+`engine/acp` is the sole local dependency, and the CLI selects the returned
+`AdapterSpec`. The DSL, the planner, the runtime, workflow modules,
+conformance support, the deck engine, and the other selectors are never
+imported.
 
 ## Build and test
 
 ```sh
-nix develop path:../../.. -c cabal build agentic-acp-claude
+nix develop path:. -c cabal build all
 ./engine/acp/ci/acp.sh
 ```
 
 ## Conventions
 
-Own only Claude command/pin policy and preserve PATH-first, pin-second resolution.
+Own only the Claude command and pin policy. Common ACP protocol behavior and
+runtime policy belong to the parent directory and the runtime.

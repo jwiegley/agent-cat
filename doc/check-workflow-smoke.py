@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check the retained full workflow smoke result against the checked-in script."""
+"""Check the retained workflow smoke result against the checked-in script and the manual."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "doc/workflows/agent-cat-manual.js"
 RECORD = ROOT / "doc/workflow-smoke.json"
-VERIFICATION = ROOT / "doc/verification.md"
+MANUAL = ROOT / "doc/agent-cat.texi"
 WORK_IDS = ["purpose-architecture", "mathematics", "operations", "user-guide", "reference"]
 REVIEW_IDS = ["facts", "completeness", "examples", "texinfo", "prose"]
 
@@ -95,9 +95,8 @@ def main() -> int:
     if validation["gaps"] != []:
         raise SystemExit("workflow Validate phase retained a gap")
 
-    verification = VERIFICATION.read_text()
+    manual = MANUAL.read_text()
     required = [
-        record["runId"],
         "nix develop path:. -c make -C doc check",
         "make -C doc check-haskell",
         "./bisim/ci/tier0.sh",
@@ -106,9 +105,9 @@ def main() -> int:
         "./engine/agent-deck/ci/deck.sh",
         "python3 doc/check-prose.py",
     ]
-    missing = [entry for entry in required if entry not in verification]
+    missing = [entry for entry in required if entry not in manual]
     if missing:
-        raise SystemExit(f"verification record lacks required evidence: {missing}")
+        raise SystemExit(f"manual verification chapter lacks required commands: {missing}")
 
     leftovers = list((ROOT / "doc").glob("revision.*")) + list((ROOT / "doc").glob(".validation-output.*"))
     if leftovers:

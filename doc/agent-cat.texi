@@ -48,11 +48,13 @@ family of constructions.  @ref{Haskell Authoring Reference} and
 * Mathematical Meaning::
 * Representation and Analysis::
 * Operational Model::
+* Conformance Boundary::
 * First Workflow::
 * Authoring Workflows::
 * Functions Inputs and Schemas::
 * Inspecting Workflows::
 * Running Workflows::
+* Building and Verification::
 * Haskell Authoring Reference::
 * Runner Reference::
 * Diagnostics and Troubleshooting::
@@ -135,9 +137,11 @@ program exists, its Plan remains within the analyzable fragment.
 
 @ref{Architecture and Guarantees} gives the boundary map and the evidence
 ceiling.  The next three chapters explain the mathematical, representational,
-and operational layers in that order.  Readers who want to write a program
-immediately may proceed to @ref{First Workflow} and return to the foundations
-when a cost, sharing, or execution question requires them.
+and operational layers in that order, and @ref{Conformance Boundary} specifies
+the wire format that holds the Haskell implementation to the Lean model.
+Readers who want to write a program immediately may proceed to
+@ref{First Workflow} and return to the foundations when a cost, sharing, or
+execution question requires them.
 
 The guide chapters move from ordinary authoring to functions, inputs, schemas,
 inspection, and execution.  The reference chapters collect source names, usage
@@ -221,8 +225,8 @@ placeholder in the checked modules.
 under the theorem's recorded axiom footprint.
 @tab Named declarations in @file{model/Agentic/Core/}
 @item Frozen corpus replay
-@tab Haskell agrees with 190 committed request/reply observations without Lean
-in the test loop.
+@tab Haskell reproduces all 193 committed request/reply observations without
+Lean in the test loop.
 @tab @file{bisim/corpus/} and @command{tier0}
 @item Curated surface comparison
 @tab Checked Haskell programs print and observe as their frozen counterparts
@@ -238,11 +242,14 @@ fixture doubles.
 @tab @file{engine/acp/ci/acp.sh} and @file{engine/agent-deck/ci/deck.sh}
 @end multitable
 
-The corpus has two program observation versions.  Version 2 preserves the
-frozen bare-question semantics.  Version 3 adds intent-bearing execution events
-and a @code{semanticTrace} obtained by erasure.  Passing version 3 establishes
-representation parity for those annotations.  It does not make intent part of
-semantic answer identity.
+Program observations exist at three versions.  Version 2 preserves the frozen
+bare-question semantics and is the version of every legacy corpus entry.
+Version 3 adds intent-bearing execution events and a @code{semanticTrace}
+obtained by erasure; the live differential test uses it.  Version 4 adds a
+typed program result beside the unchanged program and is the version of the
+three newest corpus entries.  Passing version 3 establishes representation
+parity for the annotations.  It does not make intent part of semantic answer
+identity.  @ref{Conformance Boundary} gives the wire format.
 
 @section The evidence ceiling
 
@@ -265,23 +272,33 @@ The agent-deck command line exposes no corresponding stop reason.  The manual
 states this distinction wherever an operator chooses an engine, since a theorem
 about the common Plan cannot erase a fact about the transport.
 
-@section Current and historical material
+@section Where the documentation lives
+
+@cindex documentation map
+This manual is the reference for the authoring surface, the runner, and the
+boundaries between the Lean model, the Haskell implementation, and the
+conformance suite.  The root @file{README.md} orients a reader who meets the
+repository for the first time.  @file{doc/meaning-and-representation.md}
+gives the denotational argument at length: what a workflow means, what is
+written in its place, and the theorems that bind the two.  Each source
+directory carries a @file{README.md} that states its purpose, public modules,
+dependencies, and commands, and an @file{AGENTS.md} that states the
+conventions a maintainer follows there.
+
+@file{doc/research/} holds the design records and research dossiers: the
+re-derivation that produced the current mathematics, the connection design
+that chose conformance testing over extraction, the placement decision for
+request intent, the design of the Pi extension, and the results of the
+superseded @code{Term} calculus.  Those documents record how a decision arose
+and are kept as records.  Current source, tests, and this manual govern
+present behavior, and executable evidence takes precedence where prose has
+drifted.
 
 @cindex retired workflow syntax
-The live authoring language is the Haskell surface.  The former @file{.wf}
-syntax, parser, Lean production transports, MCP server, and old @command{agent-cat}
-command were removed.  @file{model/Agentic/Core/Dsl.lean} contains a checker for
-@code{RawProgram}; it contains no parser or concrete source language.
-
-The pre-rederivation @code{Term} calculus and its resource-algebra modules were
-also removed after the current @file{model/Agentic/Core/} design superseded them.
-@file{doc/research/term-algebra-results.md} preserves their results as history.
-@file{doc/design.html}, @file{doc/walkthrough.html}, and most of
-@file{doc/HANDOFF.md} describe earlier states of the project.  They can explain
-how a decision arose.  Current source and tests govern present behavior; the
-root README, @file{doc/request-intent-representation.md}, and the live portions
-of @file{doc/research/connection.md} supply orientation and design rationale,
-with executable evidence taking precedence where prose has drifted.
+The live authoring language is the Haskell surface.  There is no separate
+workflow file format, parser, or Lean production transport.
+@file{model/Agentic/Core/Dsl/Check.lean} checks a first-order
+@code{RawProgram} that Haskell emits; it contains no concrete source language.
 
 @node Mathematical Meaning
 @chapter Mathematical Meaning
@@ -692,12 +709,48 @@ This chapter explains how the Haskell Plan is interpreted during a run.  The
 mathematical question remains the key for answers; execution intent determines
 reuse, ordering, permission, completion checks, and event annotation.
 
+@anchor{Requests and intent}
 @section Requests and intent
 
 @cindex execution intent
+@cindex intent, purpose of
 A represented request has the form @code{Request c = Q c × Intent c}.  The
 question determines semantic answer identity.  The intent describes how one
-authored occurrence is to be realized.  Three intents are available:
+authored occurrence is to be realized.  This section explains why the
+representation carries that second component, what it refines, and what the
+runtime obtains from it.
+
+@subsection Why the representation needs intent
+
+The mathematical meaning identifies a question by four fields: the addressee,
+the scope, the words, and the draw.  A world answers questions and nothing
+else.  That identity is exactly what the theorems need, and it deliberately
+says nothing about how an occurrence is carried out.  A runtime that executes
+a Plan has to make decisions the meaning does not record.  It has to decide
+whether an occurrence may reuse an answer already obtained for the same bare
+question.  It has to decide whether an occurrence runs every time it is
+reached because it acts on the world.  It has to decide whether the addressee
+may be granted tool permission, and in what order the occurrence stands
+relative to other acts.  Without a declaration from the author, the runtime
+would infer these policies from the answer code or the addressee.  A live run
+showed where that inference leads: permission was once a property of the
+connection, every question looked alike to the layer that authorized writing,
+and a model asked only to draft a patch wrote the file during its drafting
+turn.
+
+Two placements were possible.  Intent could enter the question, so that worlds
+are indexed by @code{Request} rather than by @code{Q}.  Under that placement
+the answer to a question would depend on the policy under which it is asked,
+and two workflows that ask the same questions in the same order and hear the
+same answers would have different meanings.  No observer of the domain wants
+that dependence.  Intent therefore belongs to the representation.  It refines
+the five-form Plan without adding a sixth form, and denotation projects the
+question and forgets the intent.  The theorems
+@code{denote_askC_intent_irrel} and @code{denote_ask_intent_irrel} in
+@file{model/Agentic/Core/Denote.lean} state that changing only the intent of a
+request leaves its dialogue unchanged, and both are proved by reflexivity.
+
+@subsection The three intents
 
 @multitable @columnfractions .18 .23 .24 .35
 @headitem Intent @tab Source position @tab Reuse policy @tab Operational role
@@ -715,11 +768,51 @@ authored occurrence is to be realized.  Three intents are available:
 @tab Reserve the effect lane and request permission; result kind is receipt.
 @end multitable
 
-An ordinary @code{ask}, @code{confirm}, panel member, or revision question
-lowers to consultation.  A tool modified by @code{running} lowers to observation
-when its answer is bound.  The same executable tool in statement position
-lowers to effect.  Denotation erases these tags, so changing intent alone leaves
-the semantic dialogue unchanged.
+Source position fixes the annotation, and no answer can change it.  An
+ordinary @code{ask}, @code{confirm}, panel member, or revision question lowers
+to consultation.  A tool modified by @code{running} lowers to observation when
+its answer is bound.  The same executable tool in statement position lowers to
+effect.  The Lean checker applies the same rule to the first-order program
+(@file{model/Agentic/Core/Dsl/Check.lean}, @code{valueIntent}), and the
+@code{effect} constructor exists only at the receipt code, so no Plan can
+branch on an alleged effect result.  Intent lives in the request shape rather
+than in the prompt words, so computing words from earlier answers cannot alter
+it.
+
+@subsection What intent provides during a run
+
+The annotation gives the runtime five things that the bare question cannot.
+Consult and observe occurrences share one memo table keyed by the bare
+question, so a repeated question is answered once.  Effect occurrences never
+read or populate that table; every effect is dispatched, and each is billed
+per occurrence, which is the difference between @code{billFresh} and
+@code{billMemo}.  Under the ACP transport only an effect is granted tool
+permission, and consultations and observations are denied in the protocol's
+own words.  Effects enter an ordered lane, so a later act cannot overtake an
+earlier one, and ACP requires a completed turn before an effect is credited
+with a receipt.  Every execution event retains the authored request beside its
+answer source, so a trace states whether an answer was reused or which
+dispatched question produced it after fail-over.  The rendered question header
+also names the intent, so an addressee is told whether it is being consulted
+or asked to act.
+
+The theorem @code{Plan.execAnnotated_correct} in
+@file{model/Agentic/Core/AnnotatedExec.lean} ties these policies back to the
+meaning.  The annotated executor returns the semantic value, extends the
+bare-question table, and produces an execution trace that erases, event by
+event, to the semantic trace.  Conformance version 3 compares the annotated
+trace between Lean and Haskell and returns the erased @code{semanticTrace}
+beside it, so the placement is checked at the boundary as well as in the
+kernel.
+
+@subsection What intent does not establish
+
+The tags state authored policy and never physical outcome.  An @code{observe}
+tag does not prove that a command is read-only.  An @code{effect} tag does not
+prove that a change occurred; a completed adapter turn establishes only that
+the adapter reported completion.  Evidence about the external world requires
+an independent observation, which a workflow can be written to include, as
+@ref{Permission and external effects} describes.
 
 @anchor{Memoization and event identity}
 @section Memoization and event identity
@@ -853,6 +946,7 @@ cross providers without adding backend identity to semantic question keys.
 The run facts described in @ref{Functions Inputs and Schemas} let a program
 state and inspect the resolved operational arrangement in its prompts.
 
+@anchor{Permission and external effects}
 @section Permission and external effects
 
 @cindex permission
@@ -874,6 +968,247 @@ was incomplete.  Workflow design should therefore include explicit
 observations or independent checks when the external result matters.  The Plan
 and its proofs can structure these checks, while their observations provide
 evidence about the external result.
+
+@node Conformance Boundary
+@chapter Conformance Boundary
+
+This chapter specifies the wire format through which the Haskell
+implementation is held to the Lean model, and states exactly what the frozen
+corpus pins.  A reader who only writes and runs workflows may skip it; a
+reader who changes the elaboration, the cost algebra, the interpreter, or the
+string layer must read it, because every such change is measured here.
+
+@section The oracle process
+
+@cindex conformance oracle
+@command{lake exe conformance-oracle}, built in @file{bisim/}, is a
+line-delimited JSON process.  It reads one request per line on standard input
+and writes one reply per line on standard output, echoing the request's
+@code{id} verbatim when one is present.  End of file on standard input is the
+clean shutdown.  The oracle imports the Lean model through a local Lake
+dependency and deliberately excludes the expensive flagship module, so it
+builds in seconds.
+
+Every request may carry @code{budgetMs}, whose default is 30000.  When the
+budget expires the reply is @code{@{"timeout": @{"ms": n@}@}}.  A timeout is
+an observation rather than an error, because the two implementations differ
+in asymptotics and an asymmetry must be recordable as an asymmetry.
+
+The oracle answers three request kinds: a program observation, a string
+operation, and a liveness check.  A liveness request
+@code{@{"id": @dots{}, "ping": true@}} receives @code{@{"id": @dots{}, "pong": true@}}.
+
+@section Program observation
+
+@cindex program observation
+A program request has the form
+
+@example
+@{"id": @dots{}, "version": 2 | 3 | 4, "result": <Code>,
+ "program": <RawProgram>, "worlds": [<WorldSpec>, @dots{}], "budgetMs": @dots{}@}
+@end example
+
+@code{RawProgram} is the Lean datatype @code{Agentic.Core.Dsl.RawProgram}
+under Lean's derived JSON encoding: constructors as single-key objects and
+structures as field objects.  The corpus files are the normative examples of
+that encoding.  The record is exactly @code{fns} and @code{main}.  An omitted
+@code{version} means 2.  @code{worlds} defaults to the single echo world; a
+world may add exact structured answers as a list of schema and value pairs,
+and every entry is validated while the request is decoded.  A world that omits
+a schema the checked Plan may query is rejected before evaluation.
+@code{result} is required only at version 4, where it is imposed on every
+terminal of the program; versions 2 and 3 are receipt-valued.
+
+A reply is refused, checked, or timed out.  A refusal names one of seven
+guards:
+
+@example
+@{"refused": @{"guard": "panelEmpty" | "revisionBound" | "questionBudget"
+                    | "servedBy" | "dupFunction" | "deciderEmpty" | "other",
+             "n": <Nat> | null,
+             "pos": @{"line": @dots{}, "col": @dots{}@}, "excerpt": "@dots{}", "message": "@dots{}"@}@}
+@end example
+
+The guard, and for the question budget the computed @code{n}, are compared,
+because both implementations produce them.  The position, excerpt, and message
+are functions of written characters and of the checker's wording, which the
+Haskell builder never has, so they are oracle-only.  The guard is assigned in
+the oracle by matching the checker's message text.  @code{deciderEmpty} covers
+a decider with no needle and a decider with an empty needle, since both are a
+test that is constantly true or constantly false.  @code{panelEmpty} covers an
+empty verdict panel and an empty text panel.  @code{other} covers every
+refusal outside the six term-level guards; those are diagnostics rather than
+comparands.
+
+A checked reply carries the static folds and one record per world:
+
+@example
+@{"result": <Code>,                            version 4 only
+ "level": "batch" | "pipeline" | "branch" | "dynamic",
+ "size": <Nat>, "askNodes": <Nat>,
+ "codes": [<Code>, @dots{}] | null,           null on any branching program
+ "costSummary": @{"minFold": <Nat>|null, "maxFold": <Nat>|null, "paths": <Nat>@},
+ "blockAsks": <Nat>,
+ "fnAsks": [["name", <Nat>], @dots{}],
+ "worlds": [@{"world": <WorldSpec>,
+             "trace": [<Event>, @dots{}],
+             "semanticTrace": [<Event>, @dots{}],  versions 3 and 4
+             "result": <answer>,                  version 4
+             "billFresh": <Nat>, "billMemo": <Nat>@}, @dots{}]@}
+@end example
+
+@code{codes} is a pipeline-only comparand and is null whenever a case node
+exists.  @code{costSummary} gives the folded minimum, the folded maximum, and
+the leaf count of the cost tree.  @code{blockAsks} and @code{fnAsks} are the
+first-order ask counts, computable on both sides without a Plan.  At version 2
+each trace event is a bare-question semantic event.  At versions 3 and 4 the
+@code{trace} holds annotated execution events and @code{semanticTrace} holds
+the same occurrences after intent erasure.  Version 4 additionally returns the
+program result as a code at the top level and as a value in each world.
+
+An event is data and never a rendering:
+
+@example
+@{"code": <Code>,
+ "intent": "consult" | "observe" | "effect",      versions 3 and 4
+ "addressee": @{"model" | "tool" | "person": @{"id": "@dots{}"@}@}
+            | @{"toolExec": @{"id": "@dots{}", "cmd": "@dots{}", "args": ["@dots{}", @dots{}]@}@},
+ "scope": @{"model": "@dots{}" | null, "mode": "@dots{}" | null@},
+ "prompt": "@dots{}", "draw": <Nat>,
+ "answer": <string> | @{"tag": "approve"@} | @{"tag": "declined"@}
+         | @{"tag": "object", "objections": ["@dots{}", @dots{}]@}
+         | <bool> | null | <SchemaValue>@}
+@end example
+
+A code is one of the strings @code{text}, @code{verdict}, @code{flag}, and
+@code{receipt}, or the structured family @code{@{"json": @{"schema": <Schema>@}@}}.
+The tag @code{json} is a wire spelling only; the semantic constructor is
+@code{Code.structured}, and diagnostics say @code{structured}.  A schema is
+one of the five primitive strings @code{null}, @code{boolean}, @code{integer},
+@code{number}, and @code{string}; an array form @code{@{"array": @{"items": <Schema>@}@}};
+the empty object @code{"object"}; or a property form
+@code{@{"property": @{"name": "@dots{}", "schema": <Schema>, "rest": <Schema>@}@}}.
+A schema value is a total exact boundary representation.  Unit, booleans,
+integers, and strings use their direct JSON forms; lists and records recurse;
+exact rationals use a numerator and denominator pair.  This representation is
+distinct from the user-facing JSON codec, and no two semantic values collapse
+in it.
+
+Both traces are compared in order and unnormalized.  Semantic event identity
+is the code together with the complete question.  Routes, retries, timeouts,
+and selected backends are execution metadata and never rewrite the authored
+question in @code{semanticTrace}.  Version 2 deduplicates bare questions in
+its memo bill, which preserves the historical billing of the legacy corpus.
+Versions 3 and 4 share consult and observe answers by bare question while
+retaining every effect occurrence.  The pure oracle executes nothing.
+
+@section The string layer
+
+@cindex string layer
+A string request has the form
+@code{@{"id": @dots{}, "string": @{"op": @dots{}, "text": "@dots{}", @dots{}@}@}} and is
+answered with @code{@{"result": @dots{}@}}.
+
+@multitable @columnfractions .18 .30 .52
+@headitem Operation @tab Extra request fields @tab Result
+@item @code{norm} @tab none @tab the normalized string
+@item @code{words} @tab none @tab the list of words
+@item @code{decodeVerdict} @tab none @tab a verdict object
+@item @code{decode} @tab @code{code} @tab @code{@{"answer": @dots{} | null@}}
+@item @code{say} @tab @code{code} @tab the rendered answer specification
+@item @code{bare} @tab none @tab the string with markup removed
+@item @code{fields} @tab none @tab the list of fields
+@item @code{headerPaths} @tab none @tab the paths read from diff headers
+@item @code{matchGlob} @tab @code{pattern} @tab a Boolean
+@item @code{decide} @tab @code{decider}, @code{needles} @tab a Boolean
+@item @code{fence} @tab @code{name} @tab the fenced text block
+@end multitable
+
+An oracle that meets an unknown operation answers
+@code{@{"error": "unknown string op @dots{}"@}}, so an extension of the table
+fails loudly.  The @code{decider} field takes @code{lastNonEmptyLineIs},
+@code{containsLine}, @code{anyLineStartsWith}, or @code{anyPathMatches}, the
+same spelling that the first-order @code{decide} node carries.
+
+This request kind exists because the string layer is the highest-ranked
+divergence risk and a program observation never reaches it: on a program-in,
+world-out boundary nothing calls the decoders.  The four low-level operations
+@code{bare}, @code{fields}, @code{headerPaths}, and @code{matchGlob} make a
+divergence localizable.  A @code{decide} mismatch with all four agreeing is a
+composition defect, and a mismatch in one of them is that function's defect.
+The known hazard the vectors freeze is case folding: the Lean normalizer
+lowercases ASCII only, whereas a naive Haskell @code{toLower} is Unicode.
+Every predicate in this layer follows the ASCII rule, and the vectors pin the
+places where the two implementations could otherwise drift, including a
+carriage-return marker line, whitespace-only input, a non-ASCII capital
+through a needle, glob patterns against paths with and without directories, an
+indented diff header, and a fenced body that closes its own tag or a
+sibling's.
+
+@section The corpus
+
+@cindex frozen corpus
+@file{bisim/corpus/} holds one JSON file per case, of the form
+@code{@{"name": "@dots{}", "request": <request>, "reply": <reply>, "oracleVersion": <Nat>@}},
+where the last field records the oracle format under which the entry was
+frozen.  Each file was produced by running the oracle once and committing its
+output.
+The checkout holds 193 files: 95 checked replies, 54 refusals, and 44 string
+results.  All legacy entries are version 2; the three typed-result entries are
+version 4.  The flagship is entry @file{example-000-the-flagship-single-file},
+whose request is the same @code{RawProgram} that
+@file{model/Agentic/Core/DslFlagship.lean} proves accepted.
+
+The corpus is frozen, and the requests in it are the specification.
+@command{tier0} is the Haskell side reproducing every reply from every request
+with no Lean in the loop.  @command{lake exe corpus-gen} reads each file, takes
+its request verbatim, puts it back through the same observation the oracle
+serves, and rewrites the file with the fresh reply.  Regenerating is expected
+to change nothing: an empty @code{git status --short bisim/corpus} afterwards
+states that the elaboration, the cost algebra, the interpreter, and the
+trusted base still say exactly what the frozen specification says.  A diff is
+a change to the specification and is reviewed as one.
+
+@section What the corpus pins
+
+Three surfaces are pinned, and one former surface is not.
+
+The first surface is the reply record.  A legacy checked reply has exactly
+eight keys; version 4 adds @code{result} and a returned value in each world.
+The keys @code{shapes} and @code{asks} appear in no file, so
+@code{Cost.shapes} and @code{Cost.asks} may be reorganized without a corpus
+regeneration.  Of that family only @code{codes} is pinned.
+
+The second surface is the printed @code{RawProgram}.  The request of each
+vector is the Lean datatype under Lean's JSON encoding, so constructor and
+field bytes are frozen alongside the observations.  Position is the one field
+this surface does not compare: the corpus stores real line and column values,
+and the Haskell comparison zeroes positions on both sides, because the Haskell
+builder has no source position to record.
+
+The third surface is exercised by the Haskell gates rather than by the corpus
+alone: @command{tier1} rebuilds the curated checked entries in the production
+authoring surface and compares the printed program and the whole reply.  Two
+further checks are pinned outside the wire: the two @code{#guard_msgs} in
+@file{model/Agentic/Core/Certify.lean}, one of which states that
+@code{certify_sound} depends on no axioms.  They are build failures rather
+than comments, so the discipline is self-enforcing.
+
+The former surface was the Lean plan renderer.  @code{Explain.planLines} once
+had a command-line test that pinned its exact output; that command line was
+retired with the Lean runtime, and the renderer survives as a library function
+with no gate on its output.  That loss is recorded here deliberately.  In
+particular, nothing now checks that closing the case tag universe reproduces
+the arm enumeration order the renderer printed.
+
+@section What is never on the wire
+
+A Plan, a dialogue, a world as a function, a table holding anything other
+than data, and source text of any kind never cross the boundary.
+@code{RawProgram} is the complete first-order object.  There is no parser on
+the Lean side, so the boundary is the only way a program reaches the oracle.
+Transport failures between the two processes are not conformance
+divergences.
 
 @node First Workflow
 @chapter First Workflow
@@ -1555,11 +1890,10 @@ abandon the run just like the same bytes from a live service.  Scripted mode
 therefore exercises Plan scheduling, branching, memoization, decoding, and
 billing while leaving transports and external tools untouched.
 
-A standard rehearsal is:
+A standard rehearsal, from the repository root, is:
 
 @example
-cd haskell
-nix develop -c cabal run agentic-run -- run hello --scripted
+nix develop path:. -c cabal run agentic-run -- run hello --scripted
 @end example
 
 The closing report gives the workflow result, @code{billFresh}, and
@@ -1685,7 +2019,7 @@ request from spending a turn.
 @section Exit status and failure classes
 
 @cindex exit status
-The executable distinguishes four outcomes:
+The executable distinguishes five outcomes:
 
 @table @asis
 @item 0
@@ -1699,6 +2033,9 @@ protocol failed, or a turn exceeded its time budget.
 @item 3
 The run abandoned because an answer could not be decoded after recovery or an
 ACP turn lacked required completion evidence.
+@item 130
+A machine run was cancelled by a control command or by the close of its
+control input.  Human @code{run} never exits with this status.
 @end table
 
 Usage and preflight messages go to standard error.  @code{list --json} and
@@ -1713,14 +2050,17 @@ recovery, effects, memoization, and route combinations without credentials or
 network access:
 
 @example
-cd haskell
-./ci/acp.sh
-./ci/deck.sh
+./engine/acp/ci/acp.sh
+./engine/agent-deck/ci/deck.sh
 @end example
 
-@file{ci/route-live.sh} is different: it is a manual smoke test for real
-backends.  It is not part of the deterministic suite and should be run only with
-the operator's explicit choice of authenticated adapters and destinations.
+The ACP gate drives @file{engine/acp/test/stub_adapter.py} and its misbehaving
+siblings in the same directory; the deck gate drives
+@file{engine/agent-deck/test/stub-deck.sh}.  @file{engine/acp/ci/route-live.sh}
+is different: it is a manual smoke test against real backends.  It is outside
+the deterministic suite, no automatic gate invokes it, and it should be run
+only with the operator's explicit choice of authenticated adapters and
+destinations.
 
 @section Operational safety
 
@@ -1740,6 +2080,185 @@ A successful exit establishes that the represented execution completed under
 the runner's evidence rules.  When an external result matters, follow the act
 with an independent observation or verification step whose answer is recorded
 in the workflow.
+
+@node Building and Verification
+@chapter Building and Verification
+
+This chapter gives the procedures that build the repository and the gates that
+verify it.  It is written for a maintainer.  A reader who only writes
+workflows needs the first section and the scripted rehearsal in
+@ref{Running Workflows}.
+
+@section Environments
+
+@cindex development shell
+Two Nix development shells are the supported environments, and nothing is
+installed globally.  The root shell, entered with @code{nix develop path:.}
+from the repository root, supplies one GHC with the external Haskell
+dependencies and @command{cabal-install}; @code{direnv allow .} wires it up
+for a terminal.  The model shell, entered with @code{nix develop path:./model},
+supplies Lean and @command{texinfo}.  @file{model/lean-toolchain} pins Lean
+4.30.0, and @file{model/lakefile.toml} pins Mathlib at the matching tag.
+
+@section Building the Haskell workspace
+
+@cindex cabal components
+The Haskell side is one Cabal package, @code{agentic}, whose components are
+declared in @file{agentic.cabal}:
+
+@example
+nix develop path:. -c cabal build all
+nix develop path:. -c cabal test all
+@end example
+
+The public library @code{agentic} gathers the source directories @file{dsl},
+@file{plan}, @file{cost}, @file{runtime}, @file{engine/api}, @file{engine/acp}
+and its three selector directories, @file{engine/agent-deck}, and @file{cli}.
+Three internal libraries build beside it: @code{examples} holds the compiled
+workflows and their registry data, @code{bisim-support} holds the generators,
+guards, and oracle client, and the private @code{verification} library
+assembles complete conformance observations.  The executables are
+@command{agentic-run}, the runner; @command{tier0}, @command{tier1}, and
+@command{bisim}, the three conformance programs; and the probes
+@command{policy-probe}, @command{routing-config-probe},
+@command{routing-fixed-point-probe}, and @command{schema-probe}, which the
+gate scripts drive.  The test suite @code{engine-api-test} exercises the
+neutral engine interface against a deterministic fake engine.
+
+@section Building the Lean model and the oracle
+
+@cindex one-build rule
+The model and the conformance package are separate Lake packages.  The
+conformance package requires the model by a local path, so the model is built
+first:
+
+@example
+nix develop path:./model -c bash -c 'cd model && lake build'
+nix develop path:./model -c bash -c 'cd bisim && lake build && lake exe corpus-gen'
+@end example
+
+The model's default targets are @code{Agentic} and @code{Pollution}; the
+second checks that importing the model installs no unwanted global instance.
+The conformance package's default targets are the @code{Conformance} library
+and the two executables @command{conformance-oracle} and
+@command{corpus-gen}.  Never run two full model builds at once.
+@file{model/Agentic/Core/DslFlagship.lean} proves its theorems by running the
+checker, the cost algebra, and the interpreter inside the kernel, which takes
+minutes of wall clock and several gigabytes of memory.  The conformance
+package deliberately excludes that module and builds in seconds; a
+conformance build that appears to hang has re-coupled the dependency, and
+that is the defect.
+
+After @command{corpus-gen}, @code{git status --short bisim/corpus} is expected
+to print nothing.  A diff is a change to the specification.
+
+@section Conformance gates
+
+@cindex tier0
+@cindex tier1
+The conformance gates live beside the code they check:
+
+@example
+./bisim/ci/tier0.sh
+N=500 SEED=1 ./bisim/ci/tier1.sh
+@end example
+
+@file{bisim/ci/tier0.sh} runs two executables with no Lean in the loop.
+@command{tier0} replays every frozen vector through the Haskell codec, guards,
+string layer, and observation.  @command{tier1} rebuilds the curated checked
+entries in the production authoring surface and compares the whole reply with
+the frozen one: the printed program, the folds, the ask counts, and one trace
+and two bills per world.  @file{bisim/ci/tier1.sh} runs the live differential
+test through the @command{bisim} executable: it draws fresh programs and
+worlds, sends them to the prebuilt @command{conformance-oracle}, and compares
+the versioned observation surface.  The oracle path comes from @code{ORACLE}
+and defaults to the conformance package's build output; the iteration count
+comes from @code{N} and the seed from @code{SEED}.  The script refuses to
+build the oracle or to fall back silently when it is missing, which preserves
+the one-build rule.
+
+@section Runtime, command-line, and engine gates
+
+@cindex policy gate
+The deterministic gates for the runner and the engines use local process
+doubles and contact no paid service:
+
+@example
+./cli/ci/policies.sh
+./cli/ci/examples.sh
+nix develop path:. -c ./cli/ci/routing-config.sh
+./cli/ci/citations.sh
+./engine/acp/ci/acp.sh
+./engine/agent-deck/ci/deck.sh
+@end example
+
+@file{cli/ci/policies.sh} checks the import policy between source directories
+and drives the policy, control, and lineage probes, which pin memoization,
+scheduling, effect multiplicity, decode recovery, fail-over, persistence,
+restart, resume, fork, steering, and redirect behavior.
+@file{cli/ci/examples.sh} reads the registry out of the built runner and, for
+every registered program, holds the level, size, ask-node count, cost summary,
+and scripted bills against a table pinned in the script, so a program cannot
+be registered without being priced.  @file{cli/ci/routing-config.sh} exercises
+the model-definition loader: schema validation, precedence, fail-over,
+preflight, and provenance.  @file{cli/ci/citations.sh} checks that every Lean
+citation written in a Haskell docstring still names an existing file and line.
+@file{engine/acp/ci/acp.sh} drives the ACP transport against
+@file{engine/acp/test/stub_adapter.py} and the misbehaving adapters beside it;
+@file{engine/agent-deck/ci/deck.sh} drives the deck transport against
+@file{engine/agent-deck/test/stub-deck.sh}.  @file{engine/acp/ci/route-live.sh}
+is the one script that contacts real backends; it is manual, paid, and outside
+every automatic gate.
+
+@section Documentation gates
+
+@cindex manual checks
+The manual is checked against the source it describes:
+
+@example
+nix develop path:. -c make -C doc check
+make -C doc check-haskell
+python3 doc/check-prose.py
+@end example
+
+@code{make -C doc check} renders GNU Info and single-page HTML in a temporary
+directory and treats any diagnostic as a failure.  It then runs the checkers
+in @file{doc/}.  @file{check-manual-sources.py} confirms that every marked
+Haskell excerpt in the manual is a verbatim excerpt of live source and that
+the two complete example modules are included.  @file{check-manual-coverage.py}
+derives the public authoring surface and the command-line options from the
+source and confirms that the reference chapters account for, classify, and
+index every item.  @file{check-prose.py} enforces the manual's prose rules.
+@file{check-workflow-smoke.py} confirms that the retained smoke record of the
+manual-authoring workflow in @file{doc/workflows/} still describes the
+checked-in script and that this chapter names the verification commands.
+
+@code{make -C doc check-haskell} builds the package, compiles
+@file{doc/examples/Hello.hs} and @file{doc/examples/Registry.hs} against it,
+runs the resulting registry, compares the deterministic command-line
+transcripts quoted in this manual with fresh output, and verifies the
+compiler-derived member and instance ledger in
+@file{doc/haskell-member-coverage.texi}.  When an export changes, regenerate
+that ledger with @code{make -C doc update-haskell-inventory}.  @code{make -C
+doc all} renders both formats under the ignored @file{doc/build/} directory.
+
+@section The Pi extension
+
+@cindex ext-pi tests
+The TypeScript extension under @file{ext-pi/} has its own checks:
+
+@example
+cd ext-pi
+npm ci --legacy-peer-deps --ignore-scripts
+npm run check
+npm test
+AGENT_CAT_E2E_RUNNER="$(cd .. && nix develop path:. -c cabal list-bin agentic-run)" npm run test:integration
+@end example
+
+The unit tests run against fixtures.  The integration tests require a freshly
+built @command{agentic-run} and the accompanying local Pi packages, and they
+exercise the scripted, native ACP, native deck, current-session, owned-child,
+and remote targets without a paid call.
 
 @node Haskell Authoring Reference
 @chapter Haskell Authoring Reference
@@ -2793,6 +3312,8 @@ diagnostics.
 or timeout.
 @item 3 @tab Run abandonment after answer recovery or failed required completion
 evidence.
+@item 130 @tab Machine run cancelled by a control command or by control-input
+end of file.
 @end multitable
 
 @node Diagnostics and Troubleshooting

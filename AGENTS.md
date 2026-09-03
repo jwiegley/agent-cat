@@ -1,3 +1,67 @@
+# Working in this repository
+
+This file states the conventions that govern changes to agent-cat. Each source
+directory carries its own `AGENTS.md` with the rules particular to that
+directory; this file holds the rules that apply everywhere. The `README.md`
+describes what the repository is, and the Texinfo manual in `doc/agent-cat.texi`
+is the reference for the authoring surface and the runner.
+
+## Method
+
+Meaning comes before syntax. Every type in the Lean model opens its docstring
+with the mathematical object it denotes, and every operation that carries a
+semantic claim states its commuting equation beside the proved theorem. An
+equation that will not close is recorded with a diagnosis. It is never weakened
+to make something else pass, and a flagship theorem statement is never weakened
+for the same reason.
+
+Standard structure is preferred to bespoke vocabulary. Where Mathlib or the
+Haskell base libraries supply a lawful structure, the model uses it, and laws
+are inherited through morphisms rather than asserted. Agreement between this
+design and the seed implementations that preceded it (agent-functor and incite)
+is treated as evidence of contamination rather than as justification;
+implementation precedent is not cited in support of a specification decision.
+
+Progress on the mathematics is reported as theorem statements with their axiom
+footprints. Process and tracking updates belong in the issue tracker.
+
+## Examples and surfaces
+
+An example file contains exactly what a user would write: no vocabulary tables,
+no read-outs, no runner machinery. Any definition an example forces on its
+author is a library gap and is fixed in the library. A keyword in the authoring
+surface either says what it means or does not exist.
+
+## Building
+
+The Nix development shells are the only supported environments, and `direnv
+allow .` wires the root shell up. The Haskell workspace builds from the
+repository root with `nix develop path:. -c cabal build all`. The Lean model
+builds with `nix develop path:./model -c bash -c 'cd model && lake build'`, and
+the conformance oracle with the same shell in `bisim`. Never run two full Lean
+builds at once: `model/Agentic/Core/DslFlagship.lean` proves its theorems by
+running the checker inside the kernel, which takes minutes of wall clock and
+several gigabytes of memory.
+
+After a change, run the gates that own the changed layer. The deterministic
+gates are `bisim/ci/tier0.sh`, `cli/ci/policies.sh`, `cli/ci/examples.sh`,
+`cli/ci/routing-config.sh`, `engine/acp/ci/acp.sh`, and
+`engine/agent-deck/ci/deck.sh`; `bisim/ci/tier1.sh` requires a prebuilt oracle
+and refuses to build one. `engine/acp/ci/route-live.sh` contacts paid backends
+and is run only by explicit operator choice. The documentation gates are
+`make -C doc check` and `make -C doc check-haskell`. A change to the frozen
+corpus under `bisim/corpus/` is a change to the specification and is reviewed
+as one.
+
+## Documentation
+
+Documentation in this repository is Markdown or Texinfo, and it describes the
+current state of the code. Design records and research dossiers live under
+`doc/research/` and are kept as records rather than revised to match the
+present. Prose in the manual is checked by `doc/check-prose.py`; write in
+plain, formal English without contractions, marketing vocabulary, or runs of
+very short sentences.
+
 <!-- obr-agent-instructions-v1 -->
 
 ---

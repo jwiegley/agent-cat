@@ -1,37 +1,36 @@
 # engine/api
 
-`agentic-engine` is the only interface shared by runtime and concrete engines. It
-contains neutral request, result, completion, failure, steering, lane, and common
-model-setting values. It names no concrete transport.
+`engine/api/src` defines `Agentic.Engine`, the only interface shared by the
+runtime and the concrete engines. It contains neutral request, result,
+completion, failure, steering, lane, and common model-setting values, and it
+names no concrete transport.
 
-## Public API
+## Public module
 
-`Agentic.Engine` is the sole exposed module. Its `Engine` typeclass has one
-logical-start operation and one optional ordered lane. Runtime translates typed
-Plan requests into `EngineRequest`; instances return raw `EngineResult` values.
-`ModelConfig` contains only settings implemented by both current engines: model,
-thinking, and maximum output. Symbolic profiles, routers, provider identity,
-backend-specific options, and file loading remain CLI-owned.
+`Agentic.Engine` exposes the `Engine` typeclass, which has one logical-start
+operation and one optional ordered lane. The runtime translates typed plan
+requests into `EngineRequest` values, and an instance returns raw
+`EngineResult` values. `ModelConfig` carries only the settings both current
+engines implement: model, thinking level, and maximum output. Symbolic
+profiles, routers, provider identity, backend-specific options, and file
+loading remain in the CLI.
 
-## Dependencies and adjacent modules
+## Dependencies
 
-This package imports no other agent-cat package.
-
-```text
-runtime -> engine/api
-engine/acp -> engine/api
-engine/agent-deck -> engine/api
-```
+This directory imports no other agent-cat directory. The runtime, the ACP
+engine, and the agent-deck engine depend on it.
 
 ## Build and test
 
 ```sh
-nix develop path:../.. -c cabal test agentic-engine
+nix develop path:. -c cabal test engine-api-test
 ```
 
-The test implements a deterministic fake engine across the complete public contract.
+The test suite drives a deterministic fake engine through the complete public
+contract.
 
 ## Conventions
 
-Add only engine-common capabilities. Keep typed planning and runtime policy above
-this API, and concrete wire/protocol details below it.
+Add only capabilities that every supported engine shares. Typed planning and
+runtime policy stay above this interface, and concrete wire detail stays below
+it.

@@ -1,5 +1,5 @@
-# Droid ACP selector maintenance
+# Factory Droid ACP selector maintenance
 
-- Own only Droid's native ACP command selection.
-- Preserve `droid exec --output-format acp` and literal following arguments.
-- Depend on common ACP API, never DSL, plan, runtime, CLI, workflows, or other engines.
+Own only the Factory Droid adapter command and pin selection. Preserve `droid exec --output-format acp` and the literal following arguments. Depend on the
+common ACP module and never on the DSL, the planner, the runtime, the CLI,
+workflow modules, or another engine.

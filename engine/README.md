@@ -1,40 +1,41 @@
 # engine
 
-`engine` contains concrete execution transports behind the neutral API. Runtime
-translates plans and owns decoding, retries, failover, memoization, and scheduling;
-engines own connection, protocol, permission, completion evidence, and model-setting
-application.
+`engine` holds the concrete execution transports behind one neutral interface.
+The runtime translates plans and owns decoding, retries, fail-over,
+memoization, and scheduling; an engine owns its connection, its protocol,
+permission, completion evidence, and the application of model settings.
 
-## Scope and public API
+## Layout
 
-This container has no code API. Its implemented children expose:
+This directory has no code of its own. `api` defines `Agentic.Engine`, the
+interface shared by the runtime and every transport. `acp` implements the Agent
+Client Protocol as `Agentic.Acp`, with the selector modules for Claude, Codex,
+and Factory Droid as children. `agent-deck` implements `Agentic.AgentDeck`,
+which joins a session that agent-deck already owns.
 
-- [`api`](api): `Agentic.Engine`
-- [`acp`](acp): `Agentic.Acp` and Claude/Codex/Droid selector packages
-- [`agent-deck`](agent-deck): `Agentic.AgentDeck`
-
-## Dependencies and adjacent modules
+## Dependencies
 
 ```text
 runtime -> engine/api
-engine/acp/* -> engine/acp -> engine/api
+engine/acp/{claude,codex,droid} -> engine/acp -> engine/api
 engine/agent-deck -> engine/api
 cli -> concrete engines
 ```
 
-Concrete engines never import DSL, plan, runtime, CLI, workflows, bisim, or one
-another.
+Concrete engines never import the DSL, the planner, the runtime, the CLI,
+workflow modules, conformance support, or one another.
 
 ## Build and test
 
 ```sh
-nix develop path:.. -c cabal build agentic-engine agentic-acp agentic-agent-deck
+nix develop path:. -c cabal build all
+nix develop path:. -c cabal test engine-api-test
 ./engine/acp/ci/acp.sh
 ./engine/agent-deck/ci/deck.sh
 ```
 
-## Conventions and future boundary
+## Conventions
 
-Use only capabilities shared through `Agentic.Engine`; keep engine-specific details
-inside their child. MCP is a documented future child, but no `engine/mcp` directory,
-package, or placeholder exists until a working implementation is added.
+Use only the capabilities shared through `Agentic.Engine`, and keep
+engine-specific detail inside the child that owns it. No other transport
+directory exists until a working implementation is added.
