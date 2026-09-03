@@ -28,6 +28,37 @@ export AGENT_CAT_PI_REMOTE_SESSION=<known-session-id>  # optional
 
 The runner path and state directory must be absolute. No project file or repository scan implicitly grants runner trust, and every mutable launch additionally requires Pi's `ctx.isProjectTrusted()` decision for the cwd. Adapter argv containing credential-like flags/values is refused; credentials must remain in inherited environment/provider configuration and are never written to supervisor manifests. Remote transport authentication occurs before Pi protocol bytes; Unix transport relies on private socket permissions. The remote session is acquired exclusively across client connections.
 
+`/wf` requires Pi to be running inside Agent Deck. It reads Agent Deck's inherited `AGENTDECK_INSTANCE_ID`; it never scans for or asks the user to name another Agent Deck session.
+
+### Source-aware inputs
+
+Workflow authors declare source metadata in the existing input chain:
+
+```haskell
+taking (argsInput :> stdinInput :> input "tone" :> noInputs) \args body tone -> …
+```
+
+`argsInput` defaults to name `args`; `stdinInput` defaults to `input`. `argsInputAs` and `stdinInputAs` choose custom names. Names are unique, and only one command-tail and one stdin source may be declared.
+
+`/wf` accepts the workflow and unsplit command-tail text on line one, then a multiline stdin body:
+
+```text
+/wf review Scope of the review
+
+  These are instructions on what I want the review to focus on
+```
+
+This binds `args` to `Scope of the review` and `input` to `These are instructions on what I want the review to focus on`. Only leading body whitespace is removed; internal and trailing whitespace remain. Missing tail/body values use the normal input editor. Tail or body text without its matching declaration fails before confirmation or run-state creation.
+
+Direct runner piping uses the same stdin declaration:
+
+```sh
+cat instructions.txt | agentic-run run review --session "$AGENTDECK_INSTANCE_ID" \
+  --input-arg args='Scope of the review'
+```
+
+Machine mode reserves fd 0 for that payload and uses inherited fd 3 for control NDJSON. Legacy descriptor-v1 runners remain prompt-only and retain stdin controls; multiline bodies require descriptor-v2 plus fd-control support.
+
 Install dependencies for development with:
 
 ```sh
@@ -41,10 +72,10 @@ Remote ownership, boundary-follow-up, and correlated current-session turns requi
 
 ## Commands
 
-- `/wf` — catalogue and exact runner help.
+- `/wf [RUNNER:WORKFLOW]` — launch in the current Agent Deck session; omit the name to select from the catalogue.
 - `/workflow-help RUNNER:WORKFLOW` — exact `help` output.
 - `/workflow-plan RUNNER:WORKFLOW` — actual-input `plan --json --raw`.
-- `/workflow RUNNER:WORKFLOW` — approved launch wizard.
+- `/workflow RUNNER:WORKFLOW` — compatibility launch wizard for alternate targets.
 - `/workflow-status` — active and recent run summaries.
 - `/workflow-monitor [RUN_ID]` — live authored-order monitor; arrows or `j`/`k`, Enter to fold, Escape to close.
 - `/workflow-steer [RUN_ID]` — exact-attempt steering.
@@ -64,7 +95,7 @@ The `agent_cat_workflow` model tool can discover, start (scripted/tool-free-chil
 
 - **Scripted:** offline table; no commands.
 - **Native ACP:** configured adapter plus validated descriptor-pin routes, in agent-cat's scratch cwd. Built-ins are `stub`, `claude`, `codex`, and `droid`; Droid launches `droid exec --output-format acp`. Not an OS sandbox.
-- **Native agent-deck:** configured external session plus validated descriptor-pin routes.
+- **Native agent-deck:** the current Agent Deck session inherited by `/wf`, or a session chosen through the compatibility launch wizard, plus validated descriptor-pin routes.
 - **Current Pi session:** visible exclusive injected turns in the current project. This is not a sandbox.
 - **Owned Pi child:** agent-cat scratch cwd, in-memory Pi session, tools disabled.
 - **Known or authenticated-discovered remote Pi session:** its remote workspace under an exclusive lease. This is not a sandbox.
@@ -99,7 +130,7 @@ Supervisor state is private under `STATE/runs/<run-id>/`; the agent-cat store is
 
 Agent-cat persists:
 
-- immutable manifest and full actual-program compatibility value;
+- immutable manifest with a fixed reference to private `program.json`;
 - append-only protocol events;
 - schema-indexed reusable answers keyed by complete bare-question JSON;
 - started/completed effect journal;
@@ -107,12 +138,13 @@ Agent-cat persists:
 
 Resume reuses only exact compatible reusable answers. A changed program/target/policy, corrupt or unknown store version, mismatched checkpoint counts, invalid stored-answer schema, or any started/completed parent effect refuses before child creation. Restart is always a new run. Fork inherits only matching bare-question answers, may drop or replace selected persisted answers after runner-owned schema-validating preflight, and never mutates its parent. `/workflow-diff` reports durable edit hashes and resulting occurrence differences. Steered answer groups are marked non-replayable.
 
-On extension restart, terminal records are reconstructed from snapshots or agent-cat events. A nonterminal run with no owned control channel is shown as `orphaned`; it is never presented as live or controllable. Use restart, resume, or fork.
+On extension restart, terminal records are reconstructed from snapshots or agent-cat events. A malformed manifested run is isolated as `corrupt-store`; a fresh pre-manifest directory is ignored so another run cannot hide valid history, and stale incomplete directories follow retention cleanup. A nonterminal run with no owned control channel is shown as `orphaned`; it is never presented as live or controllable. Use restart, resume, or fork.
 
 ## Security and limits
 
 - direct argv spawning; no shell command construction;
-- mode-0600 input files, deleted after terminal cleanup;
+- mode-0600 input/program files, with transient launch inputs deleted after terminal cleanup;
+- mode-0600 Agent Deck message files deleted after each send; prompt text never enters argv or machine diagnostics;
 - user-private run/store directories;
 - 1 MiB protocol frames, canonical UTC timestamps, and fail-closed sequence/lifecycle reduction;
 - 64 KiB in-memory attempt-output tails;

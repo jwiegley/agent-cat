@@ -9,7 +9,7 @@
 # other one loudly, so an adapter that grows a fourth command fails here rather
 # than silently against a real deck:
 #
-#   agent-deck session send   <id> <message>
+#   agent-deck session send   <id> --message-file <private-file>
 #   agent-deck session show   <id> --json
 #   agent-deck session output <id> --json
 #
@@ -19,7 +19,7 @@
 # `{"content":…,"timestamp":…}` from `output`.
 #
 # The three verbs still read as they do above at 1.13.0, and each takes
-# `<id|title>` rather than an id alone — `session send <id|title> <message>`,
+# `<id|title>` rather than an id alone — `session send <id|title> --message-file FILE`,
 # `session show [id|title]`, `session output [id|title]` — which is why a gate
 # comparing backend spellings cannot know two names for one pane are one pane.
 #
@@ -40,6 +40,7 @@
 #                memo table, observed from outside the process.
 #   undecodable  the owner answers the flag question with `maybe`, twice. The
 #                run re-asks once with the nudge and then abandons.
+#   send-fail    reading succeeds, then send fails; diagnostics must omit prompt.
 #   stopped      `session show` reports `stopped`: nothing will answer.
 #   hang         `session show` reports `running` forever: the turn outruns its
 #                budget.
@@ -62,6 +63,10 @@ reply_file="$STATE/reply"
 busy_file="$STATE/busy"
 sends_file="$STATE/sends"
 prompts_file="$STATE/prompts"
+argv_file="$STATE/argv"
+message_mode_file="$STATE/message-mode"
+
+{ printf '%s\n' "$@"; } >> "$argv_file"
 
 read_num() { [ -f "$1" ] && cat "$1" || echo "${2:-0}"; }
 
@@ -155,8 +160,18 @@ id="${3:-}"
 case "$verb" in
 
   send)
-    message="${4:-}"
+    if [ "${4:-}" = --message-file ]; then
+      message_file="${5:-}"
+      [ -f "$message_file" ] || fail "session send --message-file needs a readable file"
+      message=$(cat "$message_file"; printf .)
+      message=${message%.}
+      if mode=$(stat -f '%Lp' "$message_file" 2>/dev/null); then :; else mode=$(stat -c '%a' "$message_file"); fi
+      printf '%s\n' "$mode" > "$message_mode_file"
+    else
+      message="${4:-}"
+    fi
     [ -n "$message" ] || fail "session send needs a message"
+    [ "$MODE" = send-fail ] && fail "forced send failure"
     { printf '=== send %s ===\n' "$(($(read_num "$sends_file") + 1))"
       printf '%s\n' "$message"; } >> "$prompts_file"
     answer_for "$message" > "$reply_file"

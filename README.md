@@ -19,8 +19,9 @@ supervises the Haskell runner through agent-cat's versioned machine protocol. It
 interpret `RawProgram` or `Plan`. The runtime owns occurrence/attempt events, correlated
 controls, typed persistence, effect journaling, restart/resume/fork, and ACP/deck/Pi
 answerers; Pi owns catalogue/approval/monitoring and durable run references. See
-[`pi-extension/README.md`](pi-extension/README.md) and
-[`doc/pi-workflow-extension.md`](doc/pi-workflow-extension.md).
+[`pi-extension/README.md`](pi-extension/README.md),
+[`doc/pi-workflow-extension.md`](doc/pi-workflow-extension.md), and the approved
+[`source-aware input design`](doc/source-aware-workflow-inputs.md).
 
 ## The Lean half — the verification spine
 

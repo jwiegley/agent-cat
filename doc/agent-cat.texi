@@ -1324,28 +1324,35 @@ question.  Since Plan folds do not inspect prompt text, a program that only
 splices an input has the same level, node counts, answer-code structure, and cost
 for every input value.
 
-@code{input "subject" :> noInputs} declares one input.  @code{taking} curries
-the program body over the resulting list and produces @code{Parameterized}.
-The compiled @code{review-lite} example begins in this form:
+@code{input "subject" :> noInputs} declares one ordinary input.
+@code{argsInput} declares command-tail text under default name @code{args};
+@code{stdinInput} declares literal standard input under default name @code{input}.
+@code{argsInputAs} and @code{stdinInputAs} select custom names.  Names are
+unique, and only one command-tail and one standard-input source may appear.
+@code{taking} curries the body over the ordered declarations and produces
+@code{Parameterized}.  The compiled @code{review-lite} example uses a custom
+stdin name:
 
 @c SOURCE haskell/example/Example/Isaac.hs
 @verbatim
 reviewLite :: Parameterized
-reviewLite = taking (input "subject" :> noInputs) \subject ->
+reviewLite = taking (stdinInputAs "subject" :> noInputs) \subject ->
   defining [SomeFn reviewReport] W.do
 @end verbatim
 @c END SOURCE
 
-A registry stores a parameterized value with @code{Needs}.  @code{plan} and
-@code{cost} may leave an operator input unbound at empty text because no static
-fold reads it; their output says that it is missing.  @code{run} requires every
-operator input before it starts an answering service.
+A registry stores a parameterized value with @code{Needs}.  Descriptor version
+2 exposes each operator input as a @code{name}/@code{source} record; version-1
+string entries are interpreted by new clients as ordinary prompt inputs.
+@code{plan} and @code{cost} may leave inputs empty because folds read no prompt.
+@code{run} requires every input.
 
-The command line has three input forms.  @code{--input FILE} supplies the sole
-operator input of a one-input program.  @code{--input-file NAME=FILE} supplies a
-named input from UTF-8 file contents.  @code{--input-arg NAME=VALUE} supplies it
-inline.  Named forms may repeat.  File input strips one trailing newline so that
-its contents splice like a source define.
+The explicit forms remain @code{--input FILE}, @code{--input-file NAME=FILE},
+and @code{--input-arg NAME=VALUE}.  For @code{run} and machine/lineage commands,
+an unbound stdin declaration reads fd 0 strictly as UTF-8 to EOF.  Empty input is
+valid; a terminal refuses rather than hanging.  Explicit input flags take
+precedence.  Stdin and command-tail inputs preserve exact text, while an
+ordinary file input retains the legacy one-final-LF removal.
 
 @section Run facts
 
@@ -1823,11 +1830,18 @@ and runner inputs.
 @c COVER API Agentic.Workflow.ParameterizedOf support
 @item Parameterized, ParameterizedOf c
 A result-indexed Program awaiting input texts.  Its exported fields are
-@code{inputNames :: [Text]} and
-@code{supply :: [Text] -> Either Text (ProgramOf c)}; @code{Parameterized} is
-the receipt-valued specialization.  Registry and CLI code use these fields;
-normal source constructs the value with @code{taking}.
+@code{inputSpecs :: [InputSpec]} and
+@code{supply :: [Text] -> Either Text (ProgramOf c)}; @code{inputNames} projects
+the ordered names, and @code{Parameterized} is the receipt-valued specialization.
+Registry and CLI code use these fields; normal source uses @code{taking}.
 
+@c COVER API Agentic.Workflow.InputSource support
+@c COVER API Agentic.Workflow.InputSpec support
+@c COVER API Agentic.Workflow.inputNames support
+@item InputSource, InputSpec, inputNames
+@code{InputSpec} pairs @code{inputName} with @code{inputSource}.  Sources are
+@code{PromptInput}, @code{CommandTailInput}, and @code{StandardInput}.  They
+govern acquisition only and do not enter @code{RawProgram} or denotation.
 @c COVER API Agentic.Workflow.Ins support
 @c COVER API Agentic.Workflow.In support
 @item Ins, In
@@ -1841,9 +1855,18 @@ Terminate an input chain.  Result type: @code{Ins ()}.
 
 @c COVER API Agentic.Workflow.input author
 @item input name
-Create one @code{In}.  Names under @code{run.} must be one of the four reserved
-run facts; an unknown reserved name raises a value-level error when the chain is
-forced.
+Create an ordinary named @code{In}.  Names under @code{run.} must be one of the
+four reserved run facts; an unknown reserved name raises a value-level error.
+
+@c COVER API Agentic.Workflow.argsInput support
+@c COVER API Agentic.Workflow.argsInputAs support
+@item argsInput, argsInputAs name
+Declare the one unsplit command-tail input.  Default name: @code{args}.
+
+@c COVER API Agentic.Workflow.stdinInput support
+@c COVER API Agentic.Workflow.stdinInputAs support
+@item stdinInput, stdinInputAs name
+Declare the one literal standard-input source.  Default name: @code{input}.
 
 @c COVER API Agentic.Workflow.taking author
 @item taking inputs body
@@ -2577,9 +2600,13 @@ progresses, followed by result and bills.
 @c COVER CLI verb:machine author
 @item machine RUN_ID NAME target [options]
 Execute the same Program through the durable runner while emitting strict
-version-1 NDJSON events on standard output.  The private store, owner metadata,
-and control channel are selected through the documented @code{AGENT_CAT_*}
-environment variables.
+version-1 NDJSON events on standard output.  Workflow text uses standard input;
+correlated controls use the inherited descriptor named by
+@code{AGENT_CAT_CONTROL_FD} (fd 3 in Pi).  The private store and owner metadata
+use the remaining documented @code{AGENT_CAT_*} environment variables.  Human
+prompt narration is omitted from machine diagnostics.  @code{manifest.json}
+references a separate mode-0600 @code{program.json}, keeping input-expanded text
+out of the manifest while preserving exact lineage validation.
 
 @c COVER CLI verb:lineage-check author
 @item lineage-check OPERATION PARENT_STORE NAME target [options]
@@ -2632,7 +2659,8 @@ is not parsed as @samp{NAME=FILE}, so an equals sign remains part of the path.
 @c COVER CLI --input-file author
 @item --input-file NAME=FILE
 Supply a named operator input from UTF-8 file contents.  May repeat.  Invalid
-UTF-8 is refused, and one trailing newline is stripped.
+UTF-8 is refused.  Ordinary prompt inputs strip one trailing newline; declared
+command-tail and stdin inputs preserve exact decoded text.
 
 @c COVER CLI --input-arg author
 @item --input-arg NAME=VALUE
@@ -2642,8 +2670,15 @@ signs because parsing splits at the first one.
 
 Input flags are accepted by plan, cost, and run.  A Program with no operator
 inputs refuses them.  A valid @code{run.} fact name is also refused because the
-runner supplies it; an unknown reserved name is an authoring error.
+runner supplies it; an unknown reserved name is an authoring error.  During
+@code{run}, machine, and machine-lineage commands, an unbound stdin declaration
+reads fd 0 to EOF.  Plan and cost never auto-read stdin.
 
+Machine supervisors set @code{AGENT_CAT_CONTROL_FD} to an inherited descriptor
+of at least 3; Pi uses fd 3.  Control NDJSON and workflow input therefore coexist
+without framing.  Legacy @code{AGENT_CAT_CONTROL_STDIN=1} works only when the
+stdin-designated value was supplied explicitly, and both control modes together
+are refused.
 @section Target and transport options
 
 @table @code

@@ -8,6 +8,8 @@ export type PreparedLaunch = {
   manifest: LaunchManifest;
   storeDir: string;
   inputFiles: Map<string, string>;
+  stdinFile?: string;
+  controlFd?: 3;
   command: string;
   args: string[];
   env: NodeJS.ProcessEnv;
@@ -33,8 +35,13 @@ export async function prepareLaunch(options: {
   if (lineage && !inside(await realpath(join(options.stateDir, "runs")), lineage.parentRuntimeDir)) {
     throw new Error("parent runtime store is outside the configured run-state root");
   }
-  assertExactInputs(options.descriptor.inputs, options.inputs);
+  assertExactInputs(options.descriptor.inputs.map(({ name }) => name), options.inputs);
   assertNoCredentialArgs(options.targetArgs);
+  const stdinInput = options.descriptor.inputs.find(({ source }) => source === "stdin");
+  const advertisedControlFd = options.descriptor.capabilities.controlFd;
+  if (advertisedControlFd !== undefined && advertisedControlFd !== 3) throw new Error(`runner ${options.runner.id} advertises unsupported control fd ${advertisedControlFd}`);
+  const controlFd = advertisedControlFd === 3 ? 3 : undefined;
+  if (stdinInput && controlFd !== 3) throw new Error(`runner ${options.runner.id} cannot combine workflow stdin with live controls`);
 
   const runId = randomUUID();
   const storeDir = join(options.stateDir, "runs", runId);
@@ -43,7 +50,7 @@ export async function prepareLaunch(options: {
     await mkdir(inputDir, { recursive: true, mode: 0o700 });
     const inputFiles = new Map<string, string>();
   const inputHashes: Record<string, string> = {};
-  for (const [index, name] of options.descriptor.inputs.entries()) {
+  for (const [index, { name }] of options.descriptor.inputs.entries()) {
     const value = options.inputs[name];
     const path = join(inputDir, `${index}.txt`);
     await writeFile(path, value, { encoding: "utf8", mode: 0o600, flag: "wx" });
@@ -80,15 +87,27 @@ export async function prepareLaunch(options: {
     ...invocation,
     ...options.targetArgs,
   ];
-  for (const [name, path] of inputFiles) args.push("--input-file", `${name}=${path}`);
+  for (const [name, path] of inputFiles) {
+    if (name !== stdinInput?.name) args.push("--input-file", `${name}=${path}`);
+  }
+  const env: NodeJS.ProcessEnv = { ...process.env, AGENT_CAT_RUN_STORE: join(storeDir, "runtime"), AGENT_CAT_RUN_OWNER: `pi-extension:${process.pid}` };
+  if (controlFd === 3) {
+    env.AGENT_CAT_CONTROL_FD = "3";
+    delete env.AGENT_CAT_CONTROL_STDIN;
+  } else {
+    env.AGENT_CAT_CONTROL_STDIN = "1";
+    delete env.AGENT_CAT_CONTROL_FD;
+  }
   return {
     manifest,
     storeDir,
     inputFiles,
+    stdinFile: stdinInput ? inputFiles.get(stdinInput.name) : undefined,
+    controlFd,
     command: executable,
     args,
-    env: { ...process.env, AGENT_CAT_RUN_STORE: join(storeDir, "runtime"), AGENT_CAT_CONTROL_STDIN: "1", AGENT_CAT_RUN_OWNER: `pi-extension:${process.pid}` },
-    };
+    env,
+  };
   } catch (error) {
     await rm(storeDir, { recursive: true, force: true });
     throw error;
@@ -104,12 +123,12 @@ export async function previewPlan(options: {
 }): Promise<Record<string, unknown>> {
   const executable = await canonicalExecutable(options.runner.executable);
   const cwd = await allowedCwd(options.cwd, options.runner.allowedCwds);
-  assertExactInputs(options.descriptor.inputs, options.inputs);
+  assertExactInputs(options.descriptor.inputs.map(({ name }) => name), options.inputs);
   const directory = join(options.stateDir, "previews", randomUUID());
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const files = new Map<string, string>();
   try {
-    for (const [index, name] of options.descriptor.inputs.entries()) {
+    for (const [index, { name }] of options.descriptor.inputs.entries()) {
       const path = join(directory, `${index}.txt`);
       await writeFile(path, options.inputs[name], { encoding: "utf8", mode: 0o600, flag: "wx" });
       files.set(name, path);
@@ -189,13 +208,13 @@ export async function preflightLineage(options: {
   const cwd = await allowedCwd(options.cwd, options.runner.allowedCwds);
   const parentRuntimeDir = await realpath(options.parentRuntimeDir);
   if (!inside(await realpath(join(options.stateDir, "runs")), parentRuntimeDir)) throw new Error("parent runtime store is outside the configured run-state root");
-  assertExactInputs(options.descriptor.inputs, options.inputs);
+  assertExactInputs(options.descriptor.inputs.map(({ name }) => name), options.inputs);
   assertNoCredentialArgs(options.targetArgs);
   const directory = join(options.stateDir, "previews", randomUUID());
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const files = new Map<string, string>();
   try {
-    for (const [index, name] of options.descriptor.inputs.entries()) {
+    for (const [index, { name }] of options.descriptor.inputs.entries()) {
       const path = join(directory, `${index}.txt`);
       await writeFile(path, options.inputs[name], { encoding: "utf8", mode: 0o600, flag: "wx" });
       files.set(name, path);

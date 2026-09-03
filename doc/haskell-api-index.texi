@@ -91,6 +91,8 @@
 @hsindex Agentic.Workflow.HasSchema
 @hsindex Agentic.Workflow.In
 @hsindex Agentic.Workflow.Ins
+@hsindex Agentic.Workflow.InputSource
+@hsindex Agentic.Workflow.InputSpec
 @hsindex Agentic.Workflow.KnownIx
 @hsindex Agentic.Workflow.KnownSchema
 @hsindex Agentic.Workflow.Live
@@ -125,6 +127,8 @@
 @hsindex Agentic.Workflow.annotated
 @hsindex Agentic.Workflow.answer
 @hsindex Agentic.Workflow.answering
+@hsindex Agentic.Workflow.argsInput
+@hsindex Agentic.Workflow.argsInputAs
 @hsindex Agentic.Workflow.ask
 @hsindex Agentic.Workflow.ask_
 @hsindex Agentic.Workflow.atMost
@@ -143,6 +147,7 @@
 @hsindex Agentic.Workflow.ifFlag
 @hsindex Agentic.Workflow.ifThenElse
 @hsindex Agentic.Workflow.input
+@hsindex Agentic.Workflow.inputNames
 @hsindex Agentic.Workflow.knownHere
 @hsindex Agentic.Workflow.lit
 @hsindex Agentic.Workflow.model
@@ -181,6 +186,8 @@
 @hsindex Agentic.Workflow.servedBy
 @hsindex Agentic.Workflow.sessionPolicy
 @hsindex Agentic.Workflow.sharesOneSession
+@hsindex Agentic.Workflow.stdinInput
+@hsindex Agentic.Workflow.stdinInputAs
 @hsindex Agentic.Workflow.stop
 @hsindex Agentic.Workflow.structured
 @hsindex Agentic.Workflow.takes

@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { appendFile, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { appendFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { initialSnapshot, reduceEvent } from "./reducer.ts";
 import type { PreparedLaunch } from "./launch.ts";
+import type { Writable } from "node:stream";
 import type { ControlAckSnapshot, LaunchManifest, RunSnapshot, RuntimeEvent } from "./types.ts";
 
 const MAX_FRAME = 1024 * 1024;
@@ -11,6 +13,8 @@ const MAX_STDERR_LOG = 10 * 1024 * 1024;
 const STDERR_TRUNCATION_MARKER = Buffer.from("\n[agent-cat stderr truncated at 10485760 bytes]\n");
 
 type Listener = (snapshot: RunSnapshot) => void;
+type MachineChild = ChildProcessWithoutNullStreams & { control: Writable };
+type RestoreRecord = { storeDir: string; manifest: LaunchManifest; snapshot: RunSnapshot; created: number; ownerLive: boolean };
 
 export interface RunHandle {
   readonly snapshot: RunSnapshot;
@@ -59,15 +63,34 @@ export class RunSupervisor {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
       throw error;
     }
-    const records: Array<{ storeDir: string; manifest: LaunchManifest; snapshot: RunSnapshot; created: number; ownerLive: boolean }> = [];
+    const cutoff = policy.days === 0 ? Number.NEGATIVE_INFINITY : Date.now() - policy.days * 86_400_000;
+    const records: RestoreRecord[] = [];
     for (const entry of entries.filter((item) => item.isDirectory())) {
       const storeDir = join(root, entry.name);
-      const manifest = parseLaunchManifest(JSON.parse(await readFile(join(storeDir, "supervisor-manifest.json"), "utf8")));
+      let manifestText: string;
+      try { manifestText = await readFile(join(storeDir, "supervisor-manifest.json"), "utf8"); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          if (policy.days > 0) {
+            try { if ((await stat(storeDir)).mtimeMs < cutoff) await rm(storeDir, { recursive: true, force: true }); } catch {}
+          }
+          continue;
+        }
+        records.push(await corruptRestoreRecord(storeDir, entry.name, `supervisor manifest cannot be read: ${error instanceof Error ? error.message : String(error)}`));
+        continue;
+      }
+      let manifest: LaunchManifest;
+      try { manifest = parseLaunchManifest(JSON.parse(manifestText)); }
+      catch (error) {
+        records.push(await corruptRestoreRecord(storeDir, entry.name, `supervisor manifest is corrupt: ${error instanceof Error ? error.message : String(error)}`));
+        continue;
+      }
       const created = Date.parse(manifest.createdAt);
-      if (!Number.isFinite(created)) throw new Error(`run ${manifest.runId} has an invalid createdAt`);
-      const ownerLive = await ownerIsLive(storeDir);
+      let ownerLive = false;
       let snapshot: RunSnapshot;
       try {
+        if (!Number.isFinite(created)) throw new Error(`run ${manifest.runId} has an invalid createdAt`);
+        ownerLive = await ownerIsLive(storeDir);
         snapshot = await restoreSnapshot(storeDir, manifest.runId, ownerLive);
       } catch (error) {
         snapshot = {
@@ -77,12 +100,11 @@ export class RunSupervisor {
           failure: error instanceof Error ? error.message : String(error),
         };
       }
-      records.push({ storeDir, manifest, snapshot, created, ownerLive });
+      records.push({ storeDir, manifest, snapshot, created: Number.isFinite(created) ? created : await storeTimestamp(storeDir), ownerLive });
     }
     records.sort((left, right) => left.created - right.created);
     const protectedParents = new Set(records.flatMap(({ manifest }) => manifest.parentRunId ? [manifest.parentRunId] : []));
     const remove = new Set<string>();
-    const cutoff = policy.days === 0 ? Number.NEGATIVE_INFINITY : Date.now() - policy.days * 86_400_000;
     for (const record of records) {
       if (record.created < cutoff && isPrunable(record, protectedParents)) remove.add(record.manifest.runId);
     }
@@ -118,7 +140,7 @@ export class OwnedRun {
   readonly finished: Promise<RunSnapshot>;
   #resolveFinished!: (snapshot: RunSnapshot) => void;
   #snapshot: RunSnapshot;
-  #child?: ChildProcessWithoutNullStreams;
+  #child?: MachineChild;
   #buffer = "";
   #terminal = false;
   #forcedTermination = false;
@@ -221,19 +243,31 @@ export class OwnedRun {
     this.#leaseTimer = setInterval(() => this.#queueOwnerHeartbeat(), 2_000);
     this.#leaseTimer.unref();
     if (this.#child) throw new Error("run already started");
-    const child = spawn(this.#prepared.command, this.#prepared.args, {
+    const spawned = spawn(this.#prepared.command, this.#prepared.args, {
       cwd: this.#prepared.manifest.cwd,
       env: this.#prepared.env,
       shell: false,
-      stdio: ["pipe", "pipe", "pipe"],
+      stdio: this.#prepared.controlFd === 3 ? ["pipe", "pipe", "pipe", "pipe"] : ["pipe", "pipe", "pipe"],
       detached: process.platform !== "win32",
-    });
+    }) as ChildProcessWithoutNullStreams;
+    const control = (this.#prepared.controlFd === 3 ? spawned.stdio[3] : spawned.stdin) as Writable;
+    const child = Object.assign(spawned, { control });
     this.#child = child;
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
-    child.stdin.on("error", (error: NodeJS.ErrnoException) => {
+    child.control.on("error", (error: NodeJS.ErrnoException) => {
       if (error.code !== "EPIPE" && error.code !== "ERR_STREAM_DESTROYED") this.#fail(`control pipe failed: ${error.message}`);
     });
+    if (this.#prepared.controlFd === 3) {
+      child.stdin.on("error", (error: NodeJS.ErrnoException) => {
+        if (error.code !== "EPIPE" && error.code !== "ERR_STREAM_DESTROYED") this.#fail(`workflow stdin failed: ${error.message}`);
+      });
+      if (this.#prepared.stdinFile) {
+        const source = createReadStream(this.#prepared.stdinFile);
+        source.on("error", (error) => this.#fail(`workflow stdin failed: ${error.message}`));
+        source.pipe(child.stdin);
+      } else child.stdin.end();
+    }
     child.stdout.on("data", (chunk: string) => this.#consume(chunk));
     child.stderr.on("data", (chunk: string) => this.#queueStderr(chunk));
     child.on("error", (error) => this.#fail(`spawn failed: ${error.message}`));
@@ -264,8 +298,8 @@ export class OwnedRun {
 
   #sendControl(control: unknown): void {
     const child = this.#child;
-    if (!child || child.stdin.destroyed || !child.stdin.writable) throw new Error("run control channel is unavailable");
-    child.stdin.write(`${JSON.stringify(control)}\n`);
+    if (!child || child.control.destroyed || !child.control.writable) throw new Error("run control channel is unavailable");
+    child.control.write(`${JSON.stringify(control)}\n`);
   }
 
   #sendControlAwait(controlId: string, control: unknown): Promise<ControlAckSnapshot> {
@@ -404,6 +438,7 @@ export class OwnedRun {
     const child = this.#child;
     if (!child || child.exitCode !== null || child.signalCode !== null) return;
     child.stdin.destroy();
+    child.control.destroy();
     this.#signalProcessGroup("SIGTERM");
     await Promise.race([waitForExit(child, 1_000), delay(1_000)]);
     this.#signalProcessGroup("SIGKILL");
@@ -564,6 +599,28 @@ async function ownerIsLive(storeDir: string): Promise<boolean> {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
     throw error;
   }
+}
+
+async function storeTimestamp(storeDir: string): Promise<number> {
+  try {
+    const created = (await stat(storeDir)).mtimeMs;
+    return Number.isFinite(created) ? created : Date.now();
+  } catch { return Date.now(); }
+}
+
+async function corruptRestoreRecord(storeDir: string, runId: string, failure: string): Promise<RestoreRecord> {
+  const created = await storeTimestamp(storeDir);
+  return {
+    storeDir, created, ownerLive: false, manifest: corruptLaunchManifest(runId, storeDir, created),
+    snapshot: { ...initialSnapshot(runId), status: "failed", failureClass: "corrupt-store", failure },
+  };
+}
+
+function corruptLaunchManifest(runId: string, storeDir: string, created: number): LaunchManifest {
+  return {
+    runId, runnerId: "corrupt", workflow: "unknown", cwd: storeDir, targetKind: "scripted",
+    targetArgs: [], inputHashes: {}, programHash: "", createdAt: new Date(created).toISOString(),
+  };
 }
 
 function parseLaunchManifest(value: unknown): LaunchManifest {

@@ -161,7 +161,7 @@ nullEventSink :: EventSink
 nullEventSink _ = pure ()
 
 descriptorVersion, protocolVersion, storeVersion :: Int
-descriptorVersion = 1
+descriptorVersion = 2
 protocolVersion = 1
 storeVersion = 1
 

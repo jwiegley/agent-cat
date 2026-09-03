@@ -26,7 +26,9 @@ registry =
       regBanner = "routing fixed-point fixture",
       regRows =
         [ ("convergent", row convergentExample),
-          ("cyclic", row cyclicExample)
+          ("cyclic", row cyclicExample),
+          ("controlled", row controlledExample),
+          ("controlled-single", row controlledSingleExample)
         ]
     }
   where
@@ -44,6 +46,27 @@ cyclicProgram :: Text -> Program
 cyclicProgram routesText
   | "deep =" `T.isInfixOf` routesText = pinnedProgram "other"
   | otherwise = pinnedProgram "deep"
+
+controlledExample :: Example
+controlledExample =
+  Needs $ taking (stdinInput :> noInputs) controlledProgram
+
+controlledProgram :: Text -> Program
+controlledProgram body = workflow W.do
+  _approved <-
+    confirm
+      (model "controlled" `servedBy` "primary" `fallingBackTo` "spare")
+      [wf|Apply this patch? {body}|]
+  stop
+
+controlledSingleExample :: Example
+controlledSingleExample =
+  Needs $ taking (stdinInput :> noInputs) controlledSingleProgram
+
+controlledSingleProgram :: Text -> Program
+controlledSingleProgram body = workflow W.do
+  _approved <- confirm (model "controlled" `servedBy` "primary") [wf|Apply this patch? {body}|]
+  stop
 
 pinnedProgram :: Text -> Program
 pinnedProgram pin = workflow W.do

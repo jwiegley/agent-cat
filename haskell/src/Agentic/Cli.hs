@@ -175,7 +175,7 @@
 -- > ,"minFold":9                least request occurrences on any path, null if none
 -- > ,"maxFold":9                greatest, null if no path
 -- > ,"paths":1                  how many paths the cost fold has
--- > ,"inputs":["plan","base"]   the OPERATOR's inputs, in declaration order
+-- > ,"inputs":[{"name":"plan","source":"command-tail"}] -- operator inputs, ordered
 -- > ,"runFacts":["run.engine"]  the run facts this program declares
 -- > ,"pins":["partner","worker"]            the models --route may name, sorted
 -- > ,"codes":["text","verdict"] plan only; null when the program branches
@@ -183,10 +183,11 @@
 -- > ,"program":{…}              plan --json --raw only; 'Agentic.Observe.printedValue'
 -- > }
 --
--- @inputs@ is exactly the list the @has no input named@ refusal names
--- ('operatorInputs'), so a caller that offers a field per element offers
--- exactly the fields @run@ will accept; the runner's facts are under
--- @runFacts@, where nothing can mistake them for something to fill in.
+-- @inputs@ carries exactly the names the @has no input named@ refusal names
+-- ('operatorInputs'), in declaration order, plus acquisition source metadata.
+-- A caller therefore offers the fields @run@ accepts and can pre-bind only the
+-- command-tail/stdin fields their descriptors declare. Runner facts remain under
+-- @runFacts@, where nothing can mistake them for operator input.
 --
 -- @pins@ is the other half of what a caller needs to /configure/ a run rather
 -- than only to start one: @inputs@ says what to prompt for, and @pins@ says
@@ -295,6 +296,8 @@ import System.Exit (ExitCode (..), exitSuccess, exitWith)
 import System.FilePath ((</>))
 import System.IO
   ( BufferMode (LineBuffering),
+    Handle,
+    hIsTerminalDevice,
     hSetBuffering,
     hSetEncoding,
     stderr,
@@ -303,6 +306,8 @@ import System.IO
     utf8,
   )
 import System.IO.Error (ioeGetErrorString, isUserError)
+import System.Posix.IO (fdToHandle)
+import System.Posix.Types (Fd (..))
 import Text.Read (readMaybe)
 
 import Agentic.Acp
@@ -347,7 +352,17 @@ import Agentic.Exec
     stderrLog,
   )
 import Agentic.Runtime.Control (ControlRuntime, newControlRuntime)
-import Agentic.Runtime.Machine (MachineCancelled (..), handlesEventSink, stdoutEventSink, withControlInput)
+import Agentic.Runtime.Machine
+  ( DeferredEventSink,
+    MachineCancelled (..),
+    activateEventSink,
+    deferredEventSink,
+    eventSinkActive,
+    handlesEventSink,
+    newDeferredEventSink,
+    stdoutEventSink,
+    withControlInput,
+  )
 import Agentic.Runtime.Store
   ( LineageOperation (ForkRun, RestartRun, ResumeRun, RootRun),
     AnswerRecord (..),
@@ -434,7 +449,9 @@ import Agentic.Schema.Json (codeFromJson, codeJson)
 import Agentic.WF (wft)
 import Agentic.Workflow
   ( Example (..),
-    inputNames,
+    InputSource (..),
+    InputSpec (..),
+    inputSpecs,
     reservedInput,
     routeDefaultLabel,
     runFactBackends,
@@ -575,11 +592,10 @@ data Render
   | -- | the object documented in this module's haddock, for a program
     Json
 
--- | One input flag, as written.
+-- | One resolved operator-input source.
 --
--- @--input FILE@ is the common case and takes no @NAME=@, so a path containing
--- @=@ is never misread; the two named forms split on the first @=@, and no
--- declared name contains one.
+-- The first three constructors come from command-line flags. 'NamedStdin' is
+-- synthesized after a declared standard-input source is decoded.
 data InputFlag
   = -- | @--input FILE@ — the sole input, read from a file
     SoleFile !FilePath
@@ -587,6 +603,8 @@ data InputFlag
     NamedFile !Text !FilePath
   | -- | @--input-arg NAME=VALUE@
     NamedArg !Text !Text
+  | -- | A declared standard-input value, decoded once before route stabilization.
+    NamedStdin !Text !Text
 
 -- | One of a program's inputs, once the command line has been read: its name,
 -- the text it was given (or 'Nothing', which only @plan@ and @cost@ allow),
@@ -726,11 +744,38 @@ execute reg = \case
   Run name target pinned ins ->
     withRunExample reg pinned name target ins (\effective _ program bindings -> runCmd reg name effective program bindings)
   Machine runId name target pinned ins ->
-    withRunExample reg pinned name target ins (\effective _ program bindings -> runMachineCmd reg runId name effective program bindings)
+    withMachineControls runId name target $ \control ->
+      withRunExample reg pinned name target ins (\effective _ program bindings -> runMachineCmd control reg runId name effective program bindings)
   LineageCheck lineage parent edits name target pinned ins ->
     withRunExample reg pinned name target ins (\effective _ program _ -> void (validateLineage lineage parent edits name effective program))
   MachineLineage lineage runId parent edits name target pinned ins ->
-    withRunExample reg pinned name target ins (\effective _ program bindings -> runMachineLineageCmd reg lineage runId parent edits name effective program bindings)
+    withMachineControls runId name target $ \control ->
+      withRunExample reg pinned name target ins (\effective _ program bindings -> runMachineLineageCmd control reg lineage runId parent edits name effective program bindings)
+
+data MachineControl = MachineControl ControlRuntime DeferredEventSink EventSink
+
+-- | Start controls before stdin or route-dependent program construction.
+withMachineControls :: RunId -> Text -> Target -> (Maybe MachineControl -> IO ()) -> IO ()
+withMachineControls runId name initialTarget action = do
+  handle <- machineControlHandle
+  case handle of
+    Nothing -> action Nothing
+    Just controlHandle -> do
+      runtime <- newControlRuntime
+      deferred <- newDeferredEventSink
+      let sink = deferredEventSink deferred
+      outcome <- try (withControlInput controlHandle sink runtime (action (Just (MachineControl runtime deferred sink))))
+      case outcome of
+        Right () -> pure ()
+        Left (err :: SomeException)
+          | Just (MachineCancelled why) <- fromException err -> do
+              active <- eventSinkActive deferred
+              unless active $ do
+                actual <- stdoutEventSink runId
+                void (activateEventSink deferred actual (RunStarted name (targetLabel initialTarget)))
+              sink (RunCancelled (T.pack why))
+              throwIO (ExitFailure 130)
+          | otherwise -> throwIO err
 
 -- | The verb owes the program no precondition of its own — @plan@ and @cost@,
 -- which read no flag that is a claim about the program's text.
@@ -846,14 +891,18 @@ withRunExample ::
 withRunExample reg pinned name initialTarget inputs k = case regLookup reg name of
   Nothing -> die reg 1 (noSuchRow reg name)
   Just row -> do
-    sentinel <- freshSentinel
-    settle row sentinel [] 0 initialTarget
+    prepared <- prepareRunInputs name (rowExample row) inputs
+    case prepared of
+      Left why -> die reg 1 why
+      Right inputs' -> do
+        sentinel <- freshSentinel
+        settle row sentinel inputs' [] 0 initialTarget
   where
-    settle row sentinel seen turns target
+    settle row sentinel inputs' seen turns target
       | turns >= (16 :: Int) = die reg 1 "routing configuration and run facts did not converge after 16 program builds"
       | otherwise = do
           let runFacts' = runFactsWith reg name target sentinel
-          resolved <- resolveInputs name True runFacts' (rowExample row) inputs
+          resolved <- resolveInputs name True runFacts' (rowExample row) inputs'
           case resolved of
             Left why -> die reg 1 why
             Right (SomeProgram prog, bindings) -> case resolveTargetForProgram target prog of
@@ -867,7 +916,7 @@ withRunExample reg pinned name initialTarget inputs k = case regLookup reg name 
                       else finish row effective prog bindings
                 | targetPolicy effective `elem` seen ->
                     die reg 1 "routing configuration and run facts form a cycle; the program changes which profiles it pins when run.routes changes"
-                | otherwise -> settle row sentinel (targetPolicy target : seen) (turns + 1) effective
+                | otherwise -> settle row sentinel inputs' (targetPolicy target : seen) (turns + 1) effective
     finish :: forall r. Row -> Target -> ProgramOf r -> [Given] -> IO ()
     finish row effective prog bindings = case routeRefusal reg effective prog of
       Just why -> die reg 1 why
@@ -928,32 +977,27 @@ article reg
 -- The inputs
 -- ---------------------------------------------------------------------------
 
--- | Every input a program declares, in declaration order — the runner's facts
--- among them.
---
--- The order is the one 'Agentic.Workflow.supply' expects, so this is also the
--- order 'buildProgram' binds in.
-declaredInputs :: Example -> [Text]
-declaredInputs = \case
+-- | Every input declaration in source order — the runner's facts among them.
+declaredInputSpecs :: Example -> [InputSpec]
+declaredInputSpecs = \case
   Fixed _ -> []
-  Needs par -> inputNames par
+  Needs par -> inputSpecs par
 
--- | The inputs a command line may speak about: every declared name that is not
--- the runner's.
---
--- __One function and not two lists.__ It is what the @has no input named@
--- refusal enumerates, what @--input@ counts when it decides a program has
--- exactly one, and what @--json@ publishes under @inputs@ — so a caller that
--- offers a field per element offers exactly the fields @run@ will accept. Three
--- readers of one definition; a second one written beside it is how a listing
--- comes to advertise an input the runner is about to refuse.
+-- | Every declared name in the order 'supply' expects.
+declaredInputs :: Example -> [Text]
+declaredInputs = map inputName . declaredInputSpecs
+
+-- | The operator-facing input declarations; run facts are runner-owned.
+operatorInputSpecs :: Example -> [InputSpec]
+operatorInputSpecs = filter (not . reservedInput . inputName) . declaredInputSpecs
+
+-- | Names accepted by the existing explicit input flags.
 operatorInputs :: Example -> [Text]
-operatorInputs = filter (not . reservedInput) . declaredInputs
+operatorInputs = map inputName . operatorInputSpecs
 
--- | The rest of them: the run facts this program declares, which are the
--- runner's to bind and nobody else's ('Agentic.Workflow.runFacts').
+-- | The run facts this program declares, which are the runner's to bind.
 runFactInputs :: Example -> [Text]
-runFactInputs = filter reservedInput . declaredInputs
+runFactInputs = map inputName . filter (reservedInput . inputName) . declaredInputSpecs
 
 -- | The program these bindings build — an unbound input being the empty text,
 -- which is what a static verb answers about when nobody gave one.
@@ -969,8 +1013,8 @@ buildProgram ex gs = case ex of
 unboundInputs :: Example -> [Given]
 unboundInputs ex = [Given n Nothing "" | n <- declaredInputs ex]
 
--- | Bind a program's inputs from the command line, or say exactly what is
--- wrong with the line.
+-- | Bind a program's inputs from explicit flags, declared standard input, and
+-- runner-owned run facts, or say exactly what is wrong with those bindings.
 --
 -- Every refusal here is a usage error, and each names the one thing to change.
 -- The order is the order an operator meets them: a program that takes nothing,
@@ -993,6 +1037,65 @@ unboundInputs ex = [Given n Nothing "" | n <- declaredInputs ex]
 -- \"it takes …\" refusals still list what there is to give. A count that
 -- included the runner's facts would be telling the operator to supply
 -- something this function is about to refuse them.
+prepareRunInputs :: Text -> Example -> [InputFlag] -> IO (Either Text [InputFlag])
+prepareRunInputs name ex ins = case nameInputFlags name ex ins of
+  Left why -> pure (Left why)
+  Right pairs -> case [spec | spec <- operatorInputSpecs ex, inputSource spec == StandardInput] of
+    [] -> pure (Right ins)
+    [spec]
+      | inputName spec `elem` map fst pairs -> pure (Right ins)
+      | otherwise -> do
+          legacyControls <- (== Just "1") <$> lookupEnv "AGENT_CAT_CONTROL_STDIN"
+          if legacyControls
+            then pure (Left "standard-input workflow data conflicts with legacy AGENT_CAT_CONTROL_STDIN controls; use the separate control fd")
+            else do
+              terminal <- hIsTerminalDevice stdin
+              if terminal
+                then pure (Left ("run needs input '" <> inputName spec <> "' from standard input; pipe UTF-8 text or supply it with --input-arg/--input-file"))
+                else do
+                  bytes <- BS.hGetContents stdin
+                  pure $ do
+                    value <- decodeInputBytes "standard input" bytes
+                    pure (ins <> [NamedStdin (inputName spec) value])
+    _ -> pure (Left "workflow declares more than one standard-input source")
+
+nameInputFlags :: Text -> Example -> [InputFlag] -> Either Text [(Text, InputFlag)]
+nameInputFlags name ex ins = do
+  pairs <- traverse named ins
+  case firstDuplicate (map fst pairs) of
+    Just n -> Left ("input '" <> n <> "' was given twice")
+    Nothing -> Right pairs
+  where
+    names = operatorInputs ex
+
+    named f = case f of
+      SoleFile _ -> case names of
+        [n] -> Right (n, f)
+        _ ->
+          Left
+            ( name
+                <> " takes "
+                <> tshow (length names)
+                <> (if length names == 1 then " input (" else " inputs (")
+                <> T.intercalate ", " names
+                <> "); name them with --input-arg or --input-file"
+            )
+      NamedFile n _ -> known n f
+      NamedArg n _ -> known n f
+      NamedStdin n _ -> known n f
+
+    known n f
+      | Just why <- runFactRefusal n = Left why
+      | n `elem` names = Right (n, f)
+      | otherwise =
+          Left
+            ( name
+                <> " has no input named '"
+                <> n
+                <> "'; it takes "
+                <> T.intercalate ", " names
+            )
+
 resolveInputs ::
   Text ->
   Bool ->
@@ -1004,112 +1107,66 @@ resolveInputs name needsAll facts ex ins = case ex of
   Fixed prog
     | null ins -> pure (Right (SomeProgram prog, []))
     | otherwise -> pure (Left (name <> " takes no input"))
-  Needs _ -> case traverse (named (operatorInputs ex)) ins of
+  Needs _ -> case nameInputFlags name ex ins of
     Left why -> pure (Left why)
-    Right pairs -> case firstDuplicate (map fst pairs) of
-      Just n -> pure (Left ("input '" <> n <> "' was given twice"))
-      Nothing -> do
-        read' <- traverse (\(n, src) -> fmap ((,) n) <$> text src) pairs
-        pure $ do
-          given <- sequence read'
-          bounds <- traverse (bind given) (declaredInputs ex)
-          prog <- buildProgram ex bounds
-          pure (prog, bounds)
+    Right pairs -> do
+      read' <- traverse (\(n, src) -> fmap ((,) n) <$> inputText n src) pairs
+      pure $ do
+        given <- sequence read'
+        bounds <- traverse (bind given) (declaredInputs ex)
+        prog <- buildProgram ex bounds
+        pure (prog, bounds)
   where
-    -- Which input a flag names. `--input` names one by being the only one.
-    named :: [Text] -> InputFlag -> Either Text (Text, InputFlag)
-    named ns f = case f of
-      SoleFile _ -> case ns of
-        [n] -> Right (n, f)
-        _ ->
-          Left
-            ( name
-                <> " takes "
-                <> tshow (length ns)
-                <> (if length ns == 1 then " input (" else " inputs (")
-                <> T.intercalate ", " ns
-                <> "); name them with --input-arg or --input-file"
-            )
-      NamedFile n _ -> known ns n f
-      NamedArg n _ -> known ns n f
+    inputText n = \case
+      NamedArg _ value -> pure (Right (value, sizeOf value <> " given with --input-arg"))
+      NamedStdin _ value -> pure (Right (value, sizeOf value <> " from standard input"))
+      SoleFile path -> fromFile n path
+      NamedFile _ path -> fromFile n path
 
-    -- The run-fact refusal comes first, because it is the more specific
-    -- mistake: `--input-arg run.engine=acp` is not a name this program lacks,
-    -- it is a name nobody may give, and "has no input named" would send the
-    -- operator looking for a typo.
-    known ns n f
-      | Just why <- runFactRefusal n = Left why
-      | n `elem` ns = Right (n, f)
-      | otherwise =
-          Left
-            ( name
-                <> " has no input named '"
-                <> n
-                <> "'; it takes "
-                <> T.intercalate ", " ns
-            )
-
-    -- The text, and where it came from. A file's contents are read as UTF-8
-    -- and one trailing newline is stripped, so that an input from a file
-    -- splices like a define written in the source: `[wf|…|]` produces no
-    -- trailing newline either, and a silent blank line in a prompt is the kind
-    -- of difference this repository exists to prevent.
-    --
-    -- The decode is *strict*: a file that is not UTF-8 refuses the run. A
-    -- lenient decode would turn each undecodable byte into U+FFFD and carry
-    -- on, and the operator would learn nothing — the substitution happens
-    -- inside a prompt, which is where this repository is least willing to be
-    -- approximate. A binary file given as a subject is a mistake worth
-    -- hearing about at the command line rather than in a model's answer.
-    text :: InputFlag -> IO (Either Text (Text, Text))
-    text = \case
-      NamedArg _ v -> pure (Right (v, sizeOf v <> " given with --input-arg"))
-      SoleFile p -> ofFile p
-      NamedFile _ p -> ofFile p
-
-    ofFile p = do
-      got <- try (BS.readFile p)
+    fromFile n path = do
+      got <- try (BS.readFile path)
       pure $ case got :: Either IOException BS.ByteString of
-        Left e -> Left ("could not read " <> T.pack p <> ": " <> T.pack (ioeGetErrorString e))
-        Right bytes -> case decodeUtf8' bytes of
-          Left e ->
-            Left
-              ( T.pack p
-                  <> " is not UTF-8, at byte "
-                  <> tshow (fst (validateUtf8Chunk bytes))
-                  <> " of "
-                  <> tshow (BS.length bytes)
-                  <> ": "
-                  <> T.pack (show e)
-                  <> [wft|; an input is spliced into prompts as text, so bytes that are not UTF-8 refuse the run|]
-              )
-          Right t ->
-            let t' = fromMaybe t (T.stripSuffix "\n" t)
-             in Right (t', sizeOf t' <> " from " <> T.pack p)
+        Left e -> Left ("could not read " <> T.pack path <> ": " <> T.pack (ioeGetErrorString e))
+        Right bytes -> do
+          value <- decodeInputBytes (T.pack path) bytes
+          let normalized = case inputSource (inputSpecFor ex n) of
+                PromptInput -> fromMaybe value (T.stripSuffix "\n" value)
+                CommandTailInput -> value
+                StandardInput -> value
+          Right (normalized, sizeOf normalized <> " from " <> T.pack path)
 
-    -- The runner's facts first: a run fact cannot be in `given` — `known`
-    -- refused it — so the two lookups can never disagree about one name. On
-    -- `plan` and `cost` `facts` is empty and a run fact falls through to the
-    -- unbound arm, which is the honest answer there: no run was made.
     bind given n = case lookup n facts of
-      Just t -> Right (Given n (Just t) (sizeOf t <> " supplied by the runner"))
+      Just value -> Right (Given n (Just value) (sizeOf value <> " supplied by the runner"))
       Nothing -> case lookup n given of
-        Just (t, whence) -> Right (Given n (Just t) whence)
+        Just (value, whence) -> Right (Given n (Just value) whence)
         Nothing
           | needsAll, reservedInput n -> Left (runFactUnbound n)
           | needsAll -> Left ("run needs every input: '" <> n <> "' was not given")
           | otherwise -> Right (Given n Nothing "")
 
-    -- Unreachable by construction and named anyway: `input` refuses every
-    -- `run.` name that is not a fact, and `execute` binds all three on `run`.
-    -- It is a refusal rather than an `error` because the operator could still
-    -- act on it — the run has not started, nothing was spawned, and a runner
-    -- over a second registry is the one thing that could get here.
     runFactUnbound n =
       "'"
         <> n
         <> [wft|' is a run fact and this runner bound none; the facts a run supplies are |]
         <> T.intercalate ", " runFacts
+
+inputSpecFor :: Example -> Text -> InputSpec
+inputSpecFor ex name = fromMaybe (InputSpec name PromptInput) (find ((== name) . inputName) (declaredInputSpecs ex))
+
+decodeInputBytes :: Text -> BS.ByteString -> Either Text Text
+decodeInputBytes source bytes = case decodeUtf8' bytes of
+  Left err ->
+    Left
+      ( source
+          <> " is not UTF-8, at byte "
+          <> tshow (fst (validateUtf8Chunk bytes))
+          <> " of "
+          <> tshow (BS.length bytes)
+          <> ": "
+          <> T.pack (show err)
+          <> [wft|; an input is spliced into prompts as text, so bytes that are not UTF-8 refuse the run|]
+      )
+  Right value -> Right value
 
 -- | The first element that appears again later, if one does.
 --
@@ -1234,9 +1291,8 @@ data Facts = Facts
     factCodes :: Maybe [Text],
     -- | cost fold as @(request occurrences, path multiplicity)@
     factFold :: [(Integer, Int)],
-    -- | 'operatorInputs'
-    factInputs :: [Text],
-    -- | 'runFactInputs'
+    -- | 'operatorInputSpecs'
+    factInputs :: [InputSpec],
     factRunFacts :: [Text],
     -- | Every model this program pins — the @served by@ primaries and their
     -- spares — sorted, and @[]@ on a chain table that is ill-defined, which the
@@ -1267,7 +1323,7 @@ factsOf n row prog =
       -- Sorted before it is grouped, because a multiset has no order of its own
       -- to report; @Explain.leafBills@ sorts the same one for the same reason.
       factFold = runLengths (sort (costM p)),
-      factInputs = operatorInputs (rowExample row),
+      factInputs = operatorInputSpecs (rowExample row),
       factRunFacts = runFactInputs (rowExample row),
       factPins = pinnedModels prog
     }
@@ -1362,6 +1418,7 @@ factFields f =
       .= object
         [ "structuredRun" .= True,
           "wholeRunCancel" .= True,
+          "controlFd" .= (3 :: Int),
           "requestControls" .= True,
           "steering" .= True,
           "interactiveRetry" .= True,
@@ -1384,7 +1441,7 @@ factFields f =
     "minFold" .= mn,
     "maxFold" .= mx,
     "paths" .= paths,
-    "inputs" .= factInputs f,
+    "inputs" .= map inputDescriptor (factInputs f),
     "runFacts" .= factRunFacts f,
     "pins" .= factPins f
   ]
@@ -1392,6 +1449,15 @@ factFields f =
     (mn, mx, paths) = factSummary f
     (consults, observes, effects) = factIntents f
 
+    inputDescriptor spec =
+      object
+        [ "name" .= inputName spec,
+          "source" .= inputSourceWord (inputSource spec)
+        ]
+
+    inputSourceWord PromptInput = ("prompt" :: Text)
+    inputSourceWord CommandTailInput = "command-tail"
+    inputSourceWord StandardInput = "stdin"
 -- | The two @plan@ adds: the codes when the program is a straight line, and the
 -- per-path fold @cost@ prints as a row of runs.
 --
@@ -1445,7 +1511,7 @@ helpCmd reg name = case regLookup reg name of
         else say $ headed "result" (codeName (factResult f))
       say $ headed "level" (factLevel f)
       say $ headed "cost" (renderSummary (factSummary f))
-      say $ headed "inputs" (orDash (factInputs f))
+      say $ headed "inputs" (orDash (map inputName (factInputs f)))
       say $ headed "runFacts" (orDash (factRunFacts f))
       say $ headed "pins" (orDash (factPins f))
       say ""
@@ -1997,15 +2063,15 @@ runCmdControlled runtimeControls persistence observer output reg name target pro
       output $ "    billMemo    " <> tshow (billMemo tr)
         <> " (reusable requests once, every effect occurrence)"
 
-runMachineCmd :: Registry -> RunId -> Text -> Target -> ProgramOf r -> [Given] -> IO ()
-runMachineCmd = runMachineWith RootRun Nothing []
+runMachineCmd :: Maybe MachineControl -> Registry -> RunId -> Text -> Target -> ProgramOf r -> [Given] -> IO ()
+runMachineCmd control = runMachineWith control RootRun Nothing []
 
-runMachineLineageCmd :: Registry -> LineageOperation -> RunId -> FilePath -> [ForkEdit] -> Text -> Target -> ProgramOf r -> [Given] -> IO ()
-runMachineLineageCmd reg lineage runId parentDirectory edits name target prog gs = do
+runMachineLineageCmd :: Maybe MachineControl -> Registry -> LineageOperation -> RunId -> FilePath -> [ForkEdit] -> Text -> Target -> ProgramOf r -> [Given] -> IO ()
+runMachineLineageCmd control reg lineage runId parentDirectory edits name target prog gs = do
   childStore <- lookupEnv "AGENT_CAT_RUN_STORE"
   when (childStore == Nothing) (ioError (userError "lineage operations require AGENT_CAT_RUN_STORE for the new child run"))
   (parentRunId, inheritedAnswers) <- validateLineage lineage parentDirectory edits name target prog
-  runMachineWith lineage (Just parentRunId) inheritedAnswers reg runId name target prog gs
+  runMachineWith control lineage (Just parentRunId) inheritedAnswers reg runId name target prog gs
 
 validateLineage :: LineageOperation -> FilePath -> [ForkEdit] -> Text -> Target -> ProgramOf r -> IO (RunId, [AnswerRecord])
 validateLineage lineage parentDirectory edits name target prog = do
@@ -2112,8 +2178,8 @@ validateInheritedAnswers answers = do
       Left why -> ioError (userError ("parent answer store is incompatible: " <> why))
       Right () -> pure ()
 
-runMachineWith :: LineageOperation -> Maybe RunId -> [AnswerRecord] -> Registry -> RunId -> Text -> Target -> ProgramOf r -> [Given] -> IO ()
-runMachineWith lineage parent inherited reg runId name target prog gs = do
+runMachineWith :: Maybe MachineControl -> LineageOperation -> Maybe RunId -> [AnswerRecord] -> Registry -> RunId -> Text -> Target -> ProgramOf r -> [Given] -> IO ()
+runMachineWith control lineage parent inherited reg runId name target prog gs = do
   effectiveTarget <- either (ioError . userError . T.unpack) pure (resolveTargetForProgram target prog)
   store <- lookupEnv "AGENT_CAT_RUN_STORE"
   owner <- fmap T.pack <$> lookupEnv "AGENT_CAT_RUN_OWNER"
@@ -2135,22 +2201,32 @@ runMachineWith lineage parent inherited reg runId name target prog gs = do
         parent
         lineage
         owner
-    runWith effectiveTarget persistence sink = do
-      sink (RunStarted name (targetLabel effectiveTarget))
-      controlled <- (== Just "1") <$> lookupEnv "AGENT_CAT_CONTROL_STDIN"
-      controls <- newControlRuntime
+    runWith effectiveTarget persistence actualSink = do
+      let runtimeControls = case control of
+            Nothing -> Nothing
+            Just (MachineControl controls _ _) -> Just controls
+          sink = case control of
+            Nothing -> actualSink
+            Just (MachineControl _ _ deferredSink) -> deferredSink
+      case control of
+        Nothing -> actualSink (RunStarted name (targetLabel effectiveTarget))
+        Just (MachineControl _ deferred _) -> do
+          activated <- activateEventSink deferred actualSink (RunStarted name (targetLabel effectiveTarget))
+          unless activated (ioError (userError "machine event sink was activated twice"))
+      -- Machine events are the trace. Human narration would duplicate full,
+      -- input-expanded prompts into diagnostic stderr.
       let run =
             runCmdControlled
-              (if controlled then Just controls else Nothing)
+              runtimeControls
               persistence
               sink
-              (TIO.hPutStrLn stderr)
+              (const (pure ()))
               reg
               name
               effectiveTarget
               prog
               gs
-      outcome <- try (if controlled then withControlInput stdin sink controls run else run)
+      outcome <- try run
       case outcome of
         Right tr -> sink (RunCompleted (billExecFresh tr) (billMemo tr))
         Left (e :: SomeException)
@@ -2161,6 +2237,18 @@ runMachineWith lineage parent inherited reg runId name target prog gs = do
               sink (RunCancelled (T.pack (displayException e))) >> throwIO e
           | otherwise ->
               sink (RunFailed (machineFailureClass e) (T.pack (displayException e))) >> throwIO e
+
+machineControlHandle :: IO (Maybe Handle)
+machineControlHandle = do
+  descriptor <- lookupEnv "AGENT_CAT_CONTROL_FD"
+  legacy <- (== Just "1") <$> lookupEnv "AGENT_CAT_CONTROL_STDIN"
+  case (descriptor, legacy) of
+    (Just _, True) -> ioError (userError "AGENT_CAT_CONTROL_FD and AGENT_CAT_CONTROL_STDIN cannot both select the control channel")
+    (Nothing, True) -> pure (Just stdin)
+    (Nothing, False) -> pure Nothing
+    (Just value, False) -> case readMaybe value of
+      Just descriptorNumber | descriptorNumber >= (3 :: Int) -> Just <$> fdToHandle (Fd (fromIntegral descriptorNumber))
+      _ -> ioError (userError ("AGENT_CAT_CONTROL_FD must be a decimal file descriptor at least 3, not '" <> value <> "'"))
 
 persistenceFor :: RunStore -> Value -> Int -> IO PersistenceHooks
 persistenceFor store program inheritedAnswers = do
@@ -2874,7 +2962,7 @@ usage reg =
       "  " <> bin <> " <" <> noun <> "> --help",
       "  " <> bin <> " plan <" <> noun <> "> [--raw] [--require-pinned] [--json] [<input>...]",
       "  " <> bin <> " cost <" <> noun <> "> [<input>...]",
-      "  " <> bin <> " run  <" <> noun <> "> --scripted [<input>...]",
+      "  " <> bin <> " run  <" <> noun <> "> --scripted [<input>...] [< stdin]",
       "  " <> bin <> " machine <run-id> <" <> noun <> "> <run options>",
       "  " <> bin <> " lineage-check restart|resume|fork <store> <" <> noun <> "> <run options>",
       "  " <> bin <> " machine-restart <run-id> <parent-store> <" <> noun <> "> <run options>",
@@ -2883,7 +2971,8 @@ usage reg =
       runLead <> "--session <id> [--binary PATH] [--poll MS]",
       under (runLead <> "--session <id> ") <> "[--route NAME=BACKEND]...",
       under (runLead <> "--session <id> ") <> "[--timeout MS] [--verbose]",
-      runLead <> "--engine acp [--adapter stub|claude|codex|droid|PATH]",
+      runLead <> "--engine acp",
+      under runLead <> "[--adapter stub|claude|codex|droid|PATH]",
       under (runLead <> "--engine acp ") <> "[--adapter-arg ARG]... [--scratch DIR]",
       under (runLead <> "--engine acp ") <> "[--route NAME=BACKEND]...",
       under (runLead <> "--engine acp ") <> "[--timeout MS] [--verbose]",
@@ -2896,11 +2985,11 @@ usage reg =
       "  the same page; a bare <" <> noun <> "> with no verb is refused, because it",
       "  is ambiguous between telling you about it and doing it.",
       "",
-      "  <input> is one of the three input flags below. A program that takes",
-      "  inputs is a program of them: an input is a define supplied at run time,",
-      "  spliced into prompts as data and never asked of anybody. plan and cost",
-      "  answer without one — no static fold reads a prompt — and say so on the",
-      "  inputs line; run requires every input.",
+      "  <input> is one of the three explicit flags below. A program that takes",
+      "  inputs is a program of them: each is a define supplied at run time and",
+      "  spliced into prompts as data. An author may mark one input as command-tail",
+      "  data and one as standard input; their default names are args and input.",
+      "  plan and cost leave missing values empty; run requires every input.",
       "",
       "  An input named run.<something> is a RUN FACT and is not yours to give:",
       "  run binds it from the run it is making and no flag can. There are four —",
@@ -2918,10 +3007,12 @@ usage reg =
       "                 so what arrives depends on the shell — write \"$HOME/...\"",
       "                 when you mean your home directory and it arrives the same",
       "                 either way",
-      "                 (a file's contents are read as UTF-8 — bytes that are",
-      "                 not UTF-8 refuse the run — and one trailing newline is",
-      "                 stripped, so a file splices like a define written in",
-      "                 the source)",
+      "                 (files are strict UTF-8. An ordinary input strips one final",
+      "                 newline as before; command-tail and stdin inputs preserve",
+      "                 exact decoded text. Invalid UTF-8 refuses before the run)",
+      "  standard input A declared stdin input is read to EOF when run did not get",
+      "                 that name from an explicit flag. A terminal refuses instead",
+      "                 of waiting. Explicit --input-arg/--input-file takes precedence",
       "  --json         print one object per row (list) or one object (plan)",
       "                 instead of the prose, for a program that drives this CLI.",
       "                 The key names are an interface and are documented in the",
@@ -2953,7 +3044,7 @@ usage reg =
       "  --route        NAME=BACKEND — put the questions this run pins to the model",
       "                 NAME to BACKEND instead of to the default answerer.",
       "                 Repeatable, at most once per NAME. BACKEND is",
-      "                 acp:stub|claude|codex|droid|PATH (start an adapter of this run's",
+      "                 acp:stub|claude|codex|droid|PATH (start this run's adapter)",
       "                 own) or deck:<id> (send to a live agent-deck session).",
       "                 NAME is a *serving model* — a `served by` pin or one of its",
       "                 spares — and not a party: routing the pin is what makes a",

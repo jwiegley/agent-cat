@@ -468,10 +468,25 @@ expected code beside that unchanged object.
 
 **An input is a define supplied at run time.** `taking (input "subject" :>
 noInputs) \subject -> …` makes the program a Haskell function of its inputs,
-and `{subject}` splices as literal chunks wherever it is written, including
-inside the `if` arms. It is deliberately not `main`'s parameter list:
-`RawProgram` is `fns` and `main`, there is nowhere to print a parameter, and a
-`main` holing a name no printed binder introduces is a program Lean refuses.
+and `{subject}` splices as literal chunks wherever it is written. Input source
+metadata changes only how a caller obtains that text:
+
+```haskell
+taking
+  ( argsInput                 -- command tail, name "args"
+      :> stdinInput           -- standard input, name "input"
+      :> input "tone"         -- ordinary named/prompted input
+      :> noInputs
+  )
+
+-- Custom-name alternatives: argsInputAs "scope", stdinInputAs "document".
+```
+
+A declaration has unique names, at most one command-tail source, and at most
+one stdin source. `run.*` facts remain runner-owned and cannot use either
+operator source. These declarations remain outside `main`'s parameter list:
+`RawProgram` is still only `fns` and `main`, and source metadata never enters
+workflow denotation.
 Because an input reaches the term only as literal chunks inside prompts, and no
 static fold reads a prompt, **every fold is the same for every input** — which
 is why `plan` and `cost` answer without one and say so:
@@ -479,8 +494,10 @@ is why `plan` and `cost` answer without one and say so:
 ```sh
 nix develop -c cabal run agentic-run -- plan review-lite
 nix develop -c cabal run agentic-run -- plan review-lite --input ./commit.diff
-nix develop -c cabal run agentic-run -- run  review-lite --scripted \
-    --input-arg subject='diff --git a/src/Export.hs b/src/Export.hs'
+printf 'diff --git …\n' | \
+  nix develop -c cabal run agentic-run -- run review-lite --scripted
+nix develop -c cabal run agentic-run -- run review-lite --scripted \
+    --input-arg subject='diff --git …'
 ```
 
 ```
@@ -492,12 +509,14 @@ review-lite, as elaborated:
   askNodes  9
 ```
 
-The `inputs` line names the input, where its text came from and how big it is,
-and never the text itself, which can be a whole diff. `run` requires every
-input; `plan` and `cost` bind a missing one to `""` and say so on that line,
-and under `--raw` a note stands immediately above the printed program, because
-a program printed with an empty subject is a different text from the one that
-will run.
+The `inputs` line names each input, its source, and byte size, never its value.
+`run` requires every input. A declared stdin input not supplied by an explicit
+input flag is read strictly as UTF-8 to EOF; empty stdin is valid, while a
+terminal refuses with piping guidance instead of hanging. Explicit flags take
+precedence. Stdin and command-tail sources preserve decoded text exactly; the
+legacy ordinary-file source alone strips one final LF. `plan` and `cost` never
+auto-read stdin: they bind missing values to `""`, say so, and accept explicit
+input flags when an actual-input plan is wanted.
 
 **Four input names are the runner's and not the command line's.** An input
 under the `run.` prefix is a *run fact* — `run.backends`, `run.engine`,
@@ -746,19 +765,28 @@ remain `Fixed` or `Needs` regardless of result code.
 `runPlanPersisted`/`WorldIO`, but stdout is strict version-1 NDJSON. Events distinguish
 chronological sequence from `trace.ordered`, and name runs, occurrences, physical
 attempts, output chunks, memo reuse, recovery, redirect, controls, failures, and
-terminal bills. Diagnostics remain on stderr. Encoded frames are checked against the 1 MiB limit; large attempt output is split losslessly, while oversized non-output events fail before writing. ACP input lines are bounded before JSON decoding. Counters are decimal strings, timestamps are canonical UTC, and duplicate, conflicting, gapped, or torn journals fail closed.
+terminal bills. Transport/setup diagnostics remain on stderr, but machine mode does not duplicate
+input-expanded human narration there. Encoded frames are checked against the 1 MiB limit; large
+attempt output is split losslessly, while oversized non-output events fail before writing. ACP input
+lines are bounded before JSON decoding. Counters are decimal strings, timestamps are canonical UTC,
+and duplicate, conflicting, gapped, or torn journals fail closed.
 
-With `AGENT_CAT_CONTROL_STDIN=1`, stdin accepts correlated JSON controls for whole-run
-cancel, capability-advertised steering, runner-offered retry/failover/abandon after automatic
-recovery is spent, and redirect during the scheduler's 30-second reserved-target dispatch window.
-Steering emits operational provenance without changing `Q`; its answer group is not inserted for future
-memo/durable replay.
+With `AGENT_CAT_CONTROL_FD=N` (where `N >= 3`), that inherited descriptor
+accepts correlated JSON controls while fd 0 remains literal workflow input.
+The control reader starts before stdin and route-dependent program construction,
+so cancellation also interrupts a blocked input read. Pi uses fd 3. Control
+NDJSON still covers whole-run cancel, capability-advertised steering,
+runner-offered retry/failover/abandon, and bounded pre-dispatch redirect.
+`AGENT_CAT_CONTROL_STDIN=1` remains a legacy compatibility path only when the
+stdin-designated workflow value was supplied explicitly; selecting both control
+modes is refused. Steering provenance and replay rules are unchanged.
 
 Set `AGENT_CAT_RUN_STORE` to a new private directory to persist the immutable manifest,
-event journal, typed reusable answers keyed by complete bare-question JSON, started/
-completed effect journal, and atomic checkpoint. `AGENT_CAT_RUN_OWNER` adds controller
-metadata. Unknown versions, corruption, target/program/policy mismatch, and any parent
-effect record fail closed.
+private `program.json`, event journal, typed reusable answers keyed by complete bare questions,
+started/completed effect journal, and atomic checkpoint. `manifest.json` stores only a fixed
+reference to the mode-0600 program file, so source input text is absent from manifests while
+remaining available for exact lineage validation. `AGENT_CAT_RUN_OWNER` adds controller metadata.
+Unknown versions, corruption, target/program/policy mismatch, and any parent effect record fail closed.
 
 ```sh
 agentic-run machine         RUN_ID NAME <run options>
@@ -892,7 +920,8 @@ One question is one turn, and a turn is three commands:
    timestamp of the reply already there. Without this the window between
    "submitted" and "the agent has begun" reads as idle, and the **previous**
    turn's text is recorded as this question's answer.
-2. `agent-deck session send <id> <message>` — the rendered question.
+2. `agent-deck session send <id> --message-file <private-file>` — the rendered
+   question through a mode-0600 temporary file, never argv or command diagnostics.
 3. `agent-deck session show <id> --json`, every `--poll` milliseconds, until
    `status` is no longer `running`; then `session output <id> --json` again,
    accepted only once its `timestamp` differs from the one taken in step 1.

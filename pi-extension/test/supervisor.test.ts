@@ -13,10 +13,13 @@ const created: string[] = [];
 const execFileAsync = promisify(execFile);
 afterEach(async () => Promise.all(created.splice(0).map((path) => rm(path, { recursive: true, force: true }))));
 
-async function prepared(hang = false) {
+async function prepared(hang = false, legacy = false) {
   const directory = await mkdtemp(join(tmpdir(), "agent-cat-supervisor-"));
   created.push(directory);
-  const runner: RunnerConfig = { id: "fixture", executable: resolve("test/fixtures/runner.mjs"), allowedCwds: [directory] };
+  const runner: RunnerConfig = {
+    id: "fixture", executable: resolve("test/fixtures/runner.mjs"),
+    allowedCwds: [directory], ...(legacy ? { prefixArgs: ["--descriptor-v1"] } : {}),
+  };
   const [descriptor] = await discoverRunner(runner, directory);
   const launch = await prepareLaunch({ runner, descriptor, cwd: directory, stateDir: join(directory, "state"), inputs: { subject: "x" }, targetKind: "scripted", targetArgs: ["--scripted"] });
   if (hang) launch.env.FIXTURE_HANG = "1";
@@ -35,6 +38,16 @@ describe("run supervisor", () => {
     expect(result.status).toBe("succeeded");
     expect(result.billFresh).toBe("1");
     expect(result.occurrences.get("0")?.state).toBe("completed");
+  });
+
+  it("retains descriptor-v1 control compatibility on stdin", async () => {
+    const launch = await prepared(true, true);
+    expect(launch.controlFd).toBeUndefined();
+    expect(launch.env.AGENT_CAT_CONTROL_STDIN).toBe("1");
+    const run = new RunSupervisor().start(launch);
+    await until(() => run.snapshot.status === "running");
+    await run.cancel();
+    expect((await run.finished).status).toBe("cancelled");
   });
 
   it("redacts configured secrets and bounds durable stderr", async () => {
@@ -119,14 +132,31 @@ describe("run supervisor", () => {
     await expect(run?.cancel()).rejects.toThrow("no live control channel");
   });
 
-  it("refuses an unknown durable target kind", async () => {
+  it("isolates an invalid durable manifest as a corrupt run", async () => {
     const launch = await prepared();
     await new RunSupervisor().start(launch).finished;
     const manifestPath = join(launch.storeDir, "supervisor-manifest.json");
     const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
     manifest.targetKind = "guessed-from-argv";
     await writeFile(manifestPath, `${JSON.stringify(manifest)}\n`, "utf8");
-    await expect(new RunSupervisor().restore(dirname(dirname(launch.storeDir)))).rejects.toThrow("targetKind is invalid");
+    const restored = new RunSupervisor();
+    await restored.restore(dirname(dirname(launch.storeDir)));
+    expect(restored.get(launch.manifest.runId)?.snapshot).toMatchObject({
+      status: "failed", failureClass: "corrupt-store", failure: expect.stringContaining("targetKind is invalid"),
+    });
+  });
+
+  it("ignores an incomplete pre-manifest directory without hiding valid runs", async () => {
+    const launch = await prepared();
+    await new RunSupervisor().start(launch).finished;
+    const runRoot = dirname(launch.storeDir);
+    const incomplete = join(runRoot, "incomplete", "inputs");
+    await mkdir(incomplete, { recursive: true, mode: 0o700 });
+    await writeFile(join(incomplete, "0.txt"), "private", { mode: 0o600 });
+    const restored = new RunSupervisor();
+    await restored.restore(dirname(runRoot));
+    expect(restored.get(launch.manifest.runId)?.snapshot.status).toBe("succeeded");
+    expect(restored.get("incomplete")).toBeUndefined();
   });
 
   it("classifies a torn stored event journal as corruption even when a snapshot exists", async () => {

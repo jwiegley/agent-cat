@@ -44,7 +44,7 @@ import Agentic.Runtime.Protocol
   )
 import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar)
 import Control.Exception (Exception, bracket, throwIO)
-import Control.Monad (foldM, unless)
+import Control.Monad (foldM, unless, when)
 import Data.List (find)
 import Data.Maybe (fromMaybe)
 import Data.Aeson
@@ -167,9 +167,10 @@ createRunStoreSeeded directory manifest inheritedAnswers = do
     else do
       createDirectory directory
       setFileMode directory privateDirectoryMode
+      writeExclusiveJson (directory </> "program.json") (manifestProgram manifest)
       writeExclusiveJson
         (directory </> "manifest.json")
-        (StoredManifest storeVersion protocolVersion manifest)
+        (StoredManifest storeVersion protocolVersion (manifest {manifestProgram = privateProgramReference}))
       writeExclusiveJson (directory </> "answers.json") (StoredAnswers semanticStoreVersion inheritedAnswers)
       effects <- openPrivateAppend (directory </> "effects.ndjson")
       events <- openPrivateAppend (directory </> "events.ndjson")
@@ -210,14 +211,26 @@ readManifest :: FilePath -> IO RunManifest
 readManifest directory = do
   let path = directory </> "manifest.json"
   bytes <- BS.readFile path
-  case eitherDecodeStrict' bytes of
+  stored <- case eitherDecodeStrict' bytes of
     Left why -> throwIO (StoreCorrupt path (T.pack why))
-    Right manifest
-      | manifestStoreVersion manifest /= storeVersion ->
-          throwIO (StoreIncompatible path "unsupported store version")
-      | manifestProtocolVersion manifest /= protocolVersion ->
-          throwIO (StoreIncompatible path "unsupported protocol version")
-      | otherwise -> pure (manifestPayload manifest)
+    Right value -> pure value
+  when (manifestStoreVersion stored /= storeVersion)
+    (throwIO (StoreIncompatible path "unsupported store version"))
+  when (manifestProtocolVersion stored /= protocolVersion)
+    (throwIO (StoreIncompatible path "unsupported protocol version"))
+  let manifest = manifestPayload stored
+  if manifestProgram manifest /= privateProgramReference
+    then pure manifest
+    else do
+      let programPath = directory </> "program.json"
+      programBytes <- BS.readFile programPath
+      program <- case eitherDecodeStrict' programBytes of
+        Left why -> throwIO (StoreCorrupt programPath (T.pack why))
+        Right value -> pure value
+      pure manifest {manifestProgram = program}
+
+privateProgramReference :: Value
+privateProgramReference = object ["privateProgram" .= ("program.json" :: Text)]
 
 readEventLog :: FilePath -> IO ([Envelope], StoreHealth)
 readEventLog directory = do

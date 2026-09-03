@@ -280,10 +280,17 @@ module Agentic.Workflow
     -- * A program's inputs
     ParameterizedOf (..),
     Parameterized,
+    InputSource (..),
+    InputSpec (..),
+    inputNames,
     Ins,
     noInputs,
     In,
     input,
+    argsInput,
+    argsInputAs,
+    stdinInput,
+    stdinInputAs,
     taking,
     Example (..),
 
@@ -2127,11 +2134,29 @@ tableProblem prog =
 -- because a define is spliced by @Says Text@. An author who wants to select
 -- between two /programs/ on a boolean writes an ordinary Haskell function.
 data ParameterizedOf (r :: Code) = ParameterizedOf
-  { -- | the names, in source order, that the CLI binds by
-    inputNames :: [Text],
-    -- | the result-indexed program, given one text per name in that order
+  { -- | the ordered input declarations that the CLI binds
+    inputSpecs :: [InputSpec],
+    -- | the result-indexed program, given one text per declaration in order
     supply :: [Text] -> Either Text (ProgramOf r)
   }
+
+-- | The names a parameterized program declares, in source order.
+inputNames :: ParameterizedOf r -> [Text]
+inputNames = map inputName . inputSpecs
+
+-- | Where an operator-facing input is obtained by default.
+data InputSource
+  = PromptInput
+  | CommandTailInput
+  | StandardInput
+  deriving (Eq)
+
+-- | One named text input and its preferred source.
+data InputSpec = InputSpec
+  { inputName :: !Text,
+    inputSource :: !InputSource
+  }
+  deriving (Eq)
 
 -- | The receipt-valued parameterized program type existing rows name.
 type Parameterized = ParameterizedOf 'CodeAck
@@ -2140,33 +2165,16 @@ type Parameterized = ParameterizedOf 'CodeAck
 -- an ordinary curried Haskell function.
 data Ins (hs :: Type) where
   INil :: Ins ()
-  ICons :: Text -> Ins hs -> Ins (Text, hs)
+  ICons :: InputSpec -> Ins hs -> Ins (Text, hs)
 
 -- | The end of an input list.
 noInputs :: Ins ()
 noInputs = INil
 
--- | One input's name, on its way into an input list. 'input' makes one, and
--- nothing else does; see 'Chain' for why the name is wrapped rather than
--- passed as the 'Text' it is.
---
--- A @data@ and not a @newtype@, with the field strict: 'input' refuses a
--- misspelled run fact, and a newtype's pattern match is a coercion that forces
--- nothing — so the refusal would have waited until somebody looked at the name,
--- which on a good day is a printed plan and on a bad one is a run that already
--- started. Boxed, @'chainCons'@'s own pattern match is what raises it, at the
--- @:>@ where the mistake was typed.
-data In = In !Text
+-- | One input declaration on its way into an input list.
+data In = In !InputSpec
 
--- | One input, by the name a command line binds it under:
--- @input "request" :> input "base" :> noInputs@.
---
--- A name under the @run.@ prefix is a __run fact__ and is not the command
--- line's to bind: see 'runFacts'. One that is not one of the four is refused
--- here, on a CAF, exactly as 'reserved' refuses a generated binding name — a
--- program declaring @input \"run.whatever\"@ would otherwise elaborate fine and
--- then refuse every @run@ of itself, because the runner has no such fact to
--- bind and @run@ needs every input.
+-- | One ordinary named input. Pi prompts for it when no source pre-binds it.
 input :: Text -> In
 input n
   | reservedInput n, n `notElem` runFacts =
@@ -2176,8 +2184,34 @@ input n
             <> T.unpack [wft|` is under the `run.` prefix, which names the facts the runner supplies about the run it is making, and the facts there are |]
             <> T.unpack (T.intercalate ", " runFacts)
         )
-  | otherwise = In n
+  | otherwise = In (InputSpec n PromptInput)
 
+-- | Command-tail text under its default input name, @args@.
+argsInput :: In
+argsInput = argsInputAs "args"
+
+-- | Command-tail text under a custom input name.
+argsInputAs :: Text -> In
+argsInputAs = sourcedInput "argsInputAs" CommandTailInput
+
+-- | Standard input under its default input name, @input@.
+stdinInput :: In
+stdinInput = stdinInputAs "input"
+
+-- | Standard input under a custom input name.
+stdinInputAs :: Text -> In
+stdinInputAs = sourcedInput "stdinInputAs" StandardInput
+
+sourcedInput :: String -> InputSource -> Text -> In
+sourcedInput label source n
+  | reservedInput n =
+      error
+        ( label
+            <> ": `"
+            <> T.unpack n
+            <> "` is under the `run.` prefix, whose values only the runner supplies"
+        )
+  | otherwise = In (InputSpec n source)
 -- | Whether an input name is under the prefix the runner owns.
 --
 -- The prefix and not the list, because the two refusals differ: an /author/ who
@@ -2386,25 +2420,29 @@ runFactRefusal n
 -- | One input, onto the rest of an input list. The index gains a @Text@,
 -- which is what 'taking' curries the body over.
 instance Chain In (Ins hs) (Ins (Text, hs)) where
-  chainCons (In n) ins = ICons n ins
-  chainUncons (ICons n ins) = (In n, ins)
+  chainCons (In spec) ins = ICons spec ins
+  chainUncons (ICons spec ins) = (In spec, ins)
 
 instance Curries hs => Curries (Text, hs) where
   type Curried (Text, hs) r = Text -> Curried hs r
   applyTo f (t, hs) = applyTo (f t) hs
 
--- | @taking (input "subject" :> noInputs) \\subject -> workflow W.do …@
+-- | @taking (input "subject" :> noInputs) \subject -> workflow W.do …@
 taking :: forall hs r. Curries hs =>
   Ins hs -> Curried hs (ProgramOf r) -> ParameterizedOf r
-taking ins k =
-  ParameterizedOf
-    { inputNames = insNames ins,
-      supply = \ts -> applyTo k <$> insTuple ins ts
-    }
+taking ins k
+  | Just why <- inputProblem specs = error (T.unpack why)
+  | otherwise =
+      ParameterizedOf
+        { inputSpecs = specs,
+          supply = \ts -> applyTo k <$> insTuple ins ts
+        }
   where
-    insNames :: Ins hs' -> [Text]
-    insNames INil = []
-    insNames (ICons n rest) = n : insNames rest
+    specs = insSpecs ins
+
+    insSpecs :: Ins hs' -> [InputSpec]
+    insSpecs INil = []
+    insSpecs (ICons spec rest) = spec : insSpecs rest
 
     -- The CLI is the only caller, and it has already refused every wrong
     -- count by name; this is what makes that a fact rather than a comment.
@@ -2416,11 +2454,32 @@ taking ins k =
 
     tooMany =
       "this program takes "
-        <> T.pack (show (length (insNames ins)))
+        <> T.pack (show (length specs))
         <> " input(s), named "
-        <> T.intercalate ", " (insNames ins)
+        <> T.intercalate ", " (map inputName specs)
         <> ", and was given a different number of texts"
 
+inputProblem :: [InputSpec] -> Maybe Text
+inputProblem specs = case firstDuplicate (map inputName specs) of
+  Just name -> Just ("taking: input '" <> name <> "' was declared twice")
+  Nothing -> case multiple CommandTailInput "command-tail" of
+    Just why -> Just why
+    Nothing -> multiple StandardInput "standard-input"
+  where
+    multiple source label = case [inputName spec | spec <- specs, inputSource spec == source] of
+      first : second : rest ->
+        Just
+          ( "taking: more than one "
+              <> label
+              <> " input was declared: "
+              <> T.intercalate ", " (first : second : rest)
+          )
+      _ -> Nothing
+
+    firstDuplicate (name : rest)
+      | name `elem` rest = Just name
+      | otherwise = firstDuplicate rest
+    firstDuplicate [] = Nothing
 -- | What a registry holds: a program, or a program that needs its inputs
 -- first.
 --

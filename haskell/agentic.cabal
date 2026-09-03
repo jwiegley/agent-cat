@@ -236,7 +236,7 @@ executable routing-config-probe
   build-depends:   agentic
   ghc-options:     -threaded
 
--- Live synthetic programs that converge or cycle through run.routes.
+-- Synthetic programs for route fixed points and real stdin/control routing.
 executable routing-fixed-point-probe
   import:          settings
   hs-source-dirs:  test

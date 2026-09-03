@@ -287,7 +287,7 @@ Agent-cat's operational half is in `haskell/`. Its design is a better integratio
 - level;
 - size and ask-node count;
 - minimum/maximum fold and path count;
-- ordered operator input names;
+- ordered operator input descriptors (`name` plus `prompt`, `command-tail`, or `stdin` source);
 - runner-supplied run facts;
 - model pins.
 
@@ -295,7 +295,7 @@ Agent-cat's operational half is in `haskell/`. Its design is a better integratio
 
 `help NAME` prints authored prose explaining input meanings, useful transport choices, example invocations, rehearsal, and caveats. Help intentionally has no JSON form.
 
-`Agentic.Workflow.Parameterized`, `taking`, and `input` make each operator argument a required named text. There are no per-argument types beyond text, defaults, validation schemas, or structured descriptions. Parameterized Haskell can choose program shape from input values, so the extension should obtain the final raw-program fingerprint with the actual inputs before launch rather than assuming the empty-input catalogue shape.
+`Agentic.Workflow.Parameterized`, `taking`, and `InputSpec` keep every operator argument as required named text while recording its preferred source. `input "name"` remains ordinary prompt/file input; `argsInput`/`argsInputAs` declare one raw command-tail value; `stdinInput`/`stdinInputAs` declare one literal standard-input value. Descriptor v2 publishes these records; the extension upgrades descriptor-v1 string inputs to prompt sources. Parameterized Haskell may choose program shape from values, so the extension still obtains the final raw-program fingerprint with actual inputs before launch.
 
 This is already enough for a Pi launch wizard:
 
@@ -407,8 +407,8 @@ A command handler receives `ExtensionCommandContext`; a tool receives `Extension
 
 Recommended MVP surface:
 
-- `/wf` — browse, inspect, start, and open runs;
-- `/workflow <name>` — direct launch with completion;
+- `/wf [<name>]` — select or directly launch in the current Agent Deck session;
+- `/workflow <name>` — compatibility launch wizard for alternate targets;
 - `/workflow-status [run-id]` — open monitor;
 - one generic model tool, `agent_cat_workflow`, with list/describe/start/status/output/cancel actions.
 
@@ -518,7 +518,7 @@ Agent-cat-only changes are named in the evidence column rather than creating a f
 | Pi full-screen monitor | Possible through supported Pi extension APIs | `packages/coding-agent/src/core/extensions/types.ts`, `ExtensionUIContext.custom`; component/overlay usage is documented in `packages/coding-agent/docs/extensions.md`, “Custom UI”. |
 | Persistent active-run widget/footer | Possible through supported Pi extension APIs | `packages/coding-agent/src/core/extensions/types.ts`, `ExtensionUIContext.setWidget`, `setStatus`, and `setFooter`; live render precedent is `packages/coding-agent/examples/extensions/custom-footer.ts`. |
 | Terminal transcript card | Possible through supported Pi extension APIs | `packages/coding-agent/src/core/extensions/types.ts`, `ExtensionAPI.appendEntry` and `registerEntryRenderer`; durable shape is `packages/coding-agent/src/core/session-manager.ts`, `CustomEntry`. |
-| Whole-run immediate abort | Possible with constraints | Implemented through control stdin, ACP bracket unwinding, `run.cancelled`, idempotent supervisor cancel, and process-group TERM/KILL fallback with distinct forced-termination classification. |
+| Whole-run immediate abort | Possible with constraints | Implemented through a dedicated inherited control fd, ACP bracket unwinding, `run.cancelled`, idempotent supervisor cancel, and process-group TERM/KILL fallback with distinct forced-termination classification. Workflow payload remains on fd 0; legacy stdin-control mode is retained only when no automatic stdin binding is needed. |
 | Current/child/remote Pi steering timing | Possible with constraints | Current turns use `TaskTurnHandle.steer` versus `followUp`; remote turns use protocol `steer` versus `follow_up`; child ACP uses the corresponding agent-session operations. `interrupt-now` and `next-boundary` are never collapsed into one call. |
 | Agent-cat request steer | Possible with constraints | Implemented for capability-advertising ACP targets through exact occurrence/attempt controls and `session/steer`; provenance emits `attempt.steered`, and the answer group is excluded from in-run future memo and durable replay. |
 | Manual retry/failover/abandon choice | Possible with constraints | Implemented once automatic recovery is spent. Agent-cat emits the offered choices, a correlated control selects one, and the runtime records `occurrence.recovery-chosen`; unavailable choices and stale occurrences refuse. |
@@ -574,39 +574,22 @@ Parsing `RawProgram`, recreating `Plan` scheduling, or porting agent-functor's r
 
 ### Catalogue
 
-`/wf` opens a searchable Pi component with one row per `(runner, workflow)`:
+`/wf` with no argument opens a searchable selector with one row per `(runner, workflow)`. `/wf <runner>:<workflow>` skips it. Text after the workflow name on line one binds the declared command-tail input as one unsplit value; text after the first newline is stripped of leading whitespace once and binds the declared stdin input. Selecting or naming a row launches it through the current Agent Deck session after one charge, containment, and persistence confirmation.
 
-- name and runner provenance;
-- blurb;
-- level and min/max/path cost;
-- input count;
-- pins;
-- availability or discovery error.
+The command reads inherited `AGENTDECK_INSTANCE_ID`; it neither scans for sessions nor asks for a session ID. Missing source declarations fail before prompts, confirmation, state creation, or target contact. Missing source values return to ordinary input prompting. Exact runner prose remains available through `/workflow-help`.
 
-Selecting a row shows:
+### Launch paths
 
-- verbatim help;
-- static plan/fold;
-- raw-program fingerprint;
-- runner path/version;
-- inputs and routes;
-- recent runs and lineage.
+The primary `/wf` path:
 
-Refresh re-runs discovery; it does not reload the Pi extension.
+1. Resolve the current Agent Deck session from inherited `AGENTDECK_INSTANCE_ID`.
+2. Resolve the named workflow, or ask the user to select one.
+3. Bind raw first-line tail and leading-trimmed multiline body only to matching declared sources; reject unsupported text.
+4. Prompt once for every still-unbound input, writing values to user-only temporary files.
+5. Show runner, cwd, current session, containment, effects, source byte counts, cost possibility, and persistence; require one confirmation.
+6. Plan with every actual input, stream the stdin-designated private file over fd 0, and launch agent-cat with `--session <current-id>` while controls use fd 3.
 
-### Launch wizard
-
-1. Select runner and workflow.
-2. Collect each named text input, allowing inline text, multi-line editor, or file source. By default, put raw values in user-only temporary files and invoke agent-cat with `--input-file`; do not expose potentially sensitive values in process arguments.
-3. Choose target:
-   - scripted;
-   - agent-cat ACP/deck routing;
-   - later: current Pi session or owned Pi child sessions.
-4. Map only advertised pins to routes.
-5. Choose cwd/scratch/isolation policy.
-6. Show exact runner, target, cwd, permission implications, and whether work may edit in place.
-7. Confirm only when the chosen target can act on the world or use a project-local untrusted runner.
-8. Compute the actual-input plan fingerprint and launch.
+The compatibility `/workflow` wizard retains scripted, ACP, manually selected Agent Deck, current Pi, owned child, and authenticated remote targets. Both paths leave agent-cat authoritative for interpretation, routing, permissions, and persistence.
 
 ### Active monitor
 
@@ -844,12 +827,13 @@ Defer. Revisit when Pi's experimental server becomes a stable coding-agent servi
 
 Use a project-scoped untracked run store, preferably `.agent-cat/runs/<run-id>/`, containing:
 
-- `manifest.json` — immutable launch descriptor and fingerprints;
+- `manifest.json` — immutable launch descriptor, hashes, and private-program reference;
+- `program.json` — mode-0600 actual-input program used for exact compatibility;
 - `events.ndjson` — append-only structured events and controls;
 - `stdout.log` / `stderr.log` or structured log equivalents;
 - `snapshot.json` — atomically replaced reduced state;
 - `owner.json` — process/session lease and heartbeat;
-- later `answers/` and `checkpoints/` owned by agent-cat.
+- `answers/` and checkpoints owned by agent-cat.
 
 Run directories and sensitive files must be user-only, with configurable retention; full prompts, answers, and input values are opt-in rather than assumed. A user-level private store keyed by project is an acceptable deployment alternative.
 
@@ -861,8 +845,8 @@ At minimum include:
 
 - runner identity and version;
 - workflow name;
-- canonical actual-input `RawProgram` from `plan --json --raw`;
-- ordered input content hashes and provenance by default; retain raw values only under an explicit private-content policy;
+- canonical actual-input `RawProgram` from `plan --json --raw`, stored outside manifests in private `program.json`;
+- ordered input content hashes and provenance in the manifest; raw values remain only in private input/program/event state;
 - routes, engine, and relevant runtime policy;
 - agent-cat protocol version.
 
@@ -911,8 +895,8 @@ Manual redirect fits agent-cat more cleanly: `ExecEvent` already separates autho
 1. Load runner paths only from trusted user configuration or trusted project configuration.
 2. Gate project-local configuration with `ctx.isProjectTrusted()`.
 3. Spawn argv directly; never construct a shell command string.
-4. Carry raw input through mode-`0600` temporary files and `--input-file` by default, then delete according to retention policy.
-5. Display runner, cwd, engine, route table, scratch/isolation, and permission implications before launch.
+4. Carry raw input through mode-`0600` temporary files; stream the declared stdin file over fd 0, keep controls on fd 3, and delete launch inputs at terminal cleanup. Persist input-expanded programs only in private `program.json`, never manifests or diagnostics.
+5. Display runner, cwd, engine, route table, scratch/isolation, source byte counts, and permission implications before launch; never echo source values.
 6. Add an agent-cat-provided effect/tool-execution capability summary to machine metadata; do not infer it by parsing `RawProgram` or help prose.
 7. Require an explicit saved grant or interactive confirmation for model-initiated mutable runs; refuse in noninteractive mode when approval is unresolved.
 8. Default ACP/world-acting runs to an isolated scratch/worktree policy in the extension, while stating honestly that current agent-cat owns a scratch directory rather than a general sandbox.
@@ -1093,12 +1077,13 @@ Acceptance:
 6. Additive intent/effect/tool-execution capability summary for safe launch preflight.
 
 ### Agent-cat, delivered follow-on
-1. Correlated control channel.
-2. Runner-offered retry/failover/abandon recovery and scheduler-reserved redirect.
-3. Steering provenance and replay policy.
-4. Persisted answer/memo/checkpoint store.
-5. Restart/resume/fork lineage with answer drop/replace and immutable parent state.
-6. Optional Pi/stdio/ACP bridges for current, child, and remote Pi answerers.
+1. Correlated controls over a dedicated inherited fd, leaving process stdin available for workflow text.
+2. Source-aware named inputs, descriptor-v2 metadata, raw command-tail binding, and literal UTF-8 stdin.
+3. Runner-offered retry/failover/abandon recovery and scheduler-reserved redirect.
+4. Steering provenance and replay policy.
+5. Persisted answer/memo/checkpoint store with input-expanded program content outside manifests in a private file.
+6. Restart/resume/fork lineage with answer drop/replace and immutable parent state.
+7. Optional Pi/stdio/ACP bridges for current, child, and remote Pi answerers.
 
 ### Pi, MVP
 

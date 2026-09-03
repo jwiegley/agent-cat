@@ -5,6 +5,13 @@ export type RunnerConfig = {
   allowedCwds: string[];
 };
 
+export type WorkflowInputSource = "prompt" | "command-tail" | "stdin";
+
+export type WorkflowInput = {
+  name: string;
+  source: WorkflowInputSource;
+};
+
 export type WorkflowDescriptor = {
   runnerId: string;
   name: string;
@@ -15,7 +22,7 @@ export type WorkflowDescriptor = {
   minFold: number | null;
   maxFold: number | null;
   paths: number;
-  inputs: string[];
+  inputs: WorkflowInput[];
   runFacts: string[];
   pins: string[];
   descriptorVersion: number;

@@ -7,6 +7,7 @@ import uuid
 
 session_id = str(uuid.UUID("00000000-0000-0000-0000-000000000123"))
 pending = None
+pending_flag = False
 prompt_count = 0
 
 
@@ -50,13 +51,15 @@ for line in sys.stdin:
         prompt_count += 1
         if prompt_count == 1:
             pending = request_id
+            text = "".join(block.get("text", "") for block in params.get("prompt", []) if block.get("type") == "text")
+            pending_flag = "Apply this patch?" in text
         else:
             answer(request_id, "answer")
     elif method == "session/steer":
         accepted = pending is not None
         send({"jsonrpc": "2.0", "method": "session/steer_ack", "params": {"steerId": params.get("steerId"), "accepted": accepted}})
         if accepted:
-            answer(pending, '{"priority":1,"steps":["steered"],"title":"Steered"}')
+            answer(pending, "yes" if pending_flag else '{"priority":1,"steps":["steered"],"title":"Steered"}')
             pending = None
     elif method == "session/cancel" and pending is not None:
         result(pending, {"stopReason": "cancelled"})

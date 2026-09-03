@@ -1,15 +1,26 @@
 #!/usr/bin/env node
 import readline from "node:readline";
-import { mkdirSync } from "node:fs";
+import { createReadStream, mkdirSync } from "node:fs";
 
 const args = process.argv.slice(2);
+const descriptorMode = args[0]?.startsWith("--descriptor-") ? args.shift() : "--descriptor-v2";
+const descriptorInputs = {
+  "--descriptor-v1": ["subject"],
+  "--descriptor-v2": [{ name: "subject", source: "prompt" }],
+  "--descriptor-sources": [{ name: "args", source: "command-tail" }, { name: "input", source: "stdin" }, { name: "tone", source: "prompt" }],
+  "--descriptor-stdin": [{ name: "subject", source: "stdin" }],
+  "--descriptor-stdin-no-control": [{ name: "subject", source: "stdin" }],
+  "--descriptor-bad-source": [{ name: "subject", source: "guessed" }],
+  "--descriptor-duplicate": [{ name: "subject", source: "prompt" }, { name: "subject", source: "stdin" }],
+  "--descriptor-multi-stdin": [{ name: "left", source: "stdin" }, { name: "right", source: "stdin" }],
+}[descriptorMode];
 const descriptor = {
-  descriptorVersion: 1,
+  descriptorVersion: descriptorMode === "--descriptor-v1" ? 1 : 2,
   runnerVersion: "fixture-1",
   protocolVersions: [1],
   storeVersions: [1],
-  capabilities: { structuredRun: true, wholeRunCancel: true, requestControls: false, semanticResume: false, consults: 1, observes: 0, effects: 0, effectful: false, toolExecution: false },
-  name: "fixture",
+  capabilities: { structuredRun: true, wholeRunCancel: true, requestControls: false, semanticResume: false, consults: 1, observes: 0, effects: 0, effectful: false, toolExecution: false, ...(["--descriptor-v1", "--descriptor-stdin-no-control"].includes(descriptorMode) ? {} : { controlFd: 3 }) },
+  name: descriptorMode === "--descriptor-sources" ? "review" : "fixture",
   blurb: "fixture workflow",
   level: "batch",
   size: 2,
@@ -17,10 +28,14 @@ const descriptor = {
   minFold: 1,
   maxFold: 1,
   paths: 1,
-  inputs: ["subject"],
+  inputs: descriptorInputs,
   runFacts: [],
   pins: ["worker"],
 };
+
+const controlInput = () => process.env.AGENT_CAT_CONTROL_FD === "3"
+  ? createReadStream("", { fd: 3, autoClose: false })
+  : process.stdin;
 
 if (args[0] === "list" && args[1] === "--json") {
   console.log(JSON.stringify([descriptor]));
@@ -41,11 +56,11 @@ if (args[0] === "list" && args[1] === "--json") {
   const emit = (event) => console.log(JSON.stringify({ protocolVersion: 1, runId, sequence: String(seq++), timestamp: new Date().toISOString(), event }));
   if (process.env.FIXTURE_SECRET) process.stderr.write(`Authorization: Bearer ${process.env.FIXTURE_SECRET}\ntoken=${process.env.FIXTURE_SECRET}\n`);
   if (process.env.FIXTURE_STDERR_BYTES) process.stderr.write("x".repeat(Number(process.env.FIXTURE_STDERR_BYTES)));
-  emit({ type: "run.started", workflow: "fixture", target: "scripted" });
+  emit({ type: "run.started", workflow: descriptor.name, target: "scripted" });
   if (process.env.FIXTURE_HANG === "1") {
     emit({ type: "occurrence.started", occurrenceId: "0", code: "text", intent: "consult", addressee: "model", prompt: "subject" });
     emit({ type: "attempt.started", occurrenceId: "0", attempt: "0", target: "scripted" });
-    const rl = readline.createInterface({ input: process.stdin });
+    const rl = readline.createInterface({ input: controlInput() });
     rl.on("line", (line) => {
       const control = JSON.parse(line);
       if (control.command.type === "steerOccurrence") {
@@ -66,7 +81,7 @@ if (args[0] === "list" && args[1] === "--json") {
   } else if (process.env.FIXTURE_REDIRECT === "1") {
     emit({ type: "occurrence.started", occurrenceId: "0", code: "text", intent: "consult", addressee: "model", prompt: "subject" });
     emit({ type: "occurrence.dispatch-pending", occurrenceId: "0", targets: ["model@primary", "model@spare"] });
-    const rl = readline.createInterface({ input: process.stdin });
+    const rl = readline.createInterface({ input: controlInput() });
     rl.once("line", (line) => {
       const control = JSON.parse(line);
       emit({ type: "control.ack", controlId: control.controlId, state: "accepted", message: "redirect accepted" });
@@ -86,7 +101,7 @@ if (args[0] === "list" && args[1] === "--json") {
     emit({ type: "attempt.failed", occurrenceId: "0", attempt: "0", failure: "decode", message: "unreadable" });
     const recoveryChoices = process.env.FIXTURE_NO_FAILOVER === "1" ? [{ choice: "retry" }, { choice: "abandon" }] : [{ choice: "retry" }, { choice: "failover", target: "model@spare" }, { choice: "abandon" }];
     emit({ type: "occurrence.recovery-pending", occurrenceId: "0", gap: "decode", message: "unreadable", choices: recoveryChoices });
-    const rl = readline.createInterface({ input: process.stdin });
+    const rl = readline.createInterface({ input: controlInput() });
     rl.once("line", (line) => {
       const control = JSON.parse(line);
       const choice = control.command.type === "failoverOccurrence" ? "failover" : control.command.type === "abandonOccurrence" ? "abandon" : "retry";

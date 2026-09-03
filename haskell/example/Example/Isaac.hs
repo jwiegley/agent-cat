@@ -1082,7 +1082,7 @@ reviewReport =
 -- > cost  minFold 7, maxFold 8, over 2 paths
 -- > run --scripted: billFresh 8, billMemo 8 (the router said yes)
 reviewLite :: Parameterized
-reviewLite = taking (input "subject" :> noInputs) \subject ->
+reviewLite = taking (stdinInputAs "subject" :> noInputs) \subject ->
   defining [SomeFn reviewReport] W.do
     correctness <- ask (model "correctness" `servedBy` "fable") [wf|
         {correctnessLens}
@@ -1746,11 +1746,9 @@ isaacHelp = \case
     **Inputs.**
 
     * `subject` — the commit under review: the diff itself, spliced into every
-      prompt as a `define`. It used to be asked of a tool; as an input it is
-      *data* the run was given, so two runs over one diff put the same question.
-      A diff usually has newlines in it, so `--input-file subject=./commit.diff`
-      is the natural spelling. An empty one is a review of nothing, which the
-      plan prints.
+      prompt as a `define`. It is declared with `stdinInputAs "subject"`, so a
+      direct run reads strict UTF-8 from standard input when no explicit input
+      flag supplies it. Empty stdin is a review of nothing.
 
     **Transport.** An adapter of the run's own, and a scratch directory you are
     willing to have written in — the report function ends in an act that writes

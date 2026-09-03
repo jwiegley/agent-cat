@@ -32,8 +32,8 @@
 --    timestamp of the reply that is already there. This is the staleness guard:
 --    without it, a session that has not started working yet reads as idle and
 --    the /previous/ turn's text is read as this question's answer.
--- 2. @agent-deck session send \<id\> \<message\>@ — the question, rendered by
---    'renderQ'.
+-- 2. @agent-deck session send \<id\> --message-file \<private-file\>@ — the
+--    'renderQ' question without prompt text in argv.
 -- 3. @agent-deck session show \<id\> --json@, repeatedly, @deckPollMs@ apart,
 --    until the session is not working any more (see 'Liveness'), and then
 --    @agent-deck session output \<id\> --json@ for the reply — accepted only
@@ -143,6 +143,7 @@ import Control.Exception
   ( Exception,
     IOException,
     SomeException,
+    bracket,
     fromException,
     throwIO,
     try,
@@ -162,9 +163,11 @@ import Data.Text.Encoding.Error (lenientDecode)
 import qualified Data.Vector as V
 import Data.Word (Word64)
 import GHC.Clock (getMonotonicTimeNSec)
+import System.Directory (getTemporaryDirectory, removeFile)
 import System.Exit (ExitCode (..))
+import System.Posix.Files (setFileMode)
 import Text.Read (readMaybe)
-import System.IO (Handle, hPutStrLn, stderr)
+import System.IO (Handle, hClose, hPutStrLn, openBinaryTempFile, stderr)
 import System.Process
   ( CreateProcess (..),
     StdStream (..),
@@ -648,25 +651,35 @@ awaitReply cfg dl before = go "not yet polled"
 -- The three commands
 -- ---------------------------------------------------------------------------
 
--- | @agent-deck session send \<id\> \<message\>@.
+-- | Send one rendered question through an owner-only temporary file.
 --
--- The message is one @argv@ entry: no shell is involved, so it needs no
--- quoting, and @execve@ carries it whole. (@agent-deck@ also offers
--- @-message-file -@ for prompts too large for @ARG_MAX@; nothing this language
--- writes is close, and reaching for it would put a second failure mode — a
--- half-written pipe — on the common path.)
---
--- No liveness check precedes it, on purpose: @session send@ waits for the agent
--- to be ready before it types, which is a better version of the check this
--- module could make, and a session that cannot take a message at all fails here
--- with what it said about why.
+-- Prompt text never enters argv or command diagnostics. Agent Deck reads the
+-- file synchronously; cleanup runs on success, failure, and timeout.
 sendMessage :: DeckConfig -> Deadline -> Text -> IO ()
 sendMessage cfg dl message =
-  void $
-    deckCommand
-      cfg
-      dl
-      ["session", "send", T.unpack (deckSession cfg), T.unpack message]
+  withMessageFile message $ \path ->
+    void $
+      deckCommand
+        cfg
+        dl
+        ["session", "send", T.unpack (deckSession cfg), "--message-file", path]
+
+withMessageFile :: Text -> (FilePath -> IO a) -> IO a
+withMessageFile message use = do
+  temporary <- getTemporaryDirectory
+  bracket
+    (openBinaryTempFile temporary "agentic-deck-message")
+    cleanup
+    (\(path, handle) -> do
+      setFileMode path 0o600
+      BS.hPut handle (encodeUtf8 message)
+      hClose handle
+      use path)
+  where
+    cleanup (path, handle) = do
+      _ <- try (hClose handle) :: IO (Either IOException ())
+      removed <- try (removeFile path)
+      either (throwIO :: IOException -> IO ()) pure removed
 
 lookupStrings :: Text -> KM.KeyMap Value -> [Text]
 lookupStrings key object = case KM.lookup (K.fromText key) object of

@@ -95,12 +95,12 @@ A later detached `120x36` tmux run selected `harden` through the ordinary `/work
 
 | Flow | Executable observation |
 |---|---|
-| Interrupt-now and next-boundary steering | Current and remote adapter fixtures assert different underlying operations and terminal acknowledgements. `test/control_probe.py` drives `test/steer_adapter.py` through the real machine; the policy probe verifies in-flight provenance and non-replayability. |
-| Scheduler redirect | `pi-extension/test/supervisor.test.ts` opens a reserved dispatch window, rejects unreserved/active targets, delivers the control, and records the selected target and attempt. The Haskell controlled-redirect probe verifies that authored `Q` is unchanged. |
-| Retry | `test/control_probe.py` drives `test/retry_adapter.py`: automatic decoding recovery is exhausted, the runtime advertises retry/abandon, one correlated retry is delivered, and `occurrence.recovery-chosen`/`occurrence.retried` are recorded. |
-| Failover | The supervisor fixture advertises failover only when offered, records the choice, starts a new physical attempt at `model@spare`, and succeeds. |
-| Abandon | The same real-machine probe selects advertised abandon, receives a delivered acknowledgement, emits occurrence/run failure, exits with the documented non-success code, and never invents an answer. |
-| Cancellation | TUI flow above plus supervisor process-tree fixtures verify acknowledged cancellation, idempotence, EOF cleanup, and TERM/KILL fallback with `forced-termination` classification. |
+| Interrupt-now and next-boundary steering | Current and remote adapter fixtures assert distinct operations. `test/control_probe.py` drives `steer_adapter.py` through real machine mode on stdin-declared `controlled-single`, verifies the stdin payload in the prompt, and records delivered steering/non-replayability. |
+| Scheduler redirect | The same real machine drives stdin-declared chained `controlled`, selects an offered reserved target before dispatch, and verifies `occurrence.completed.source` names it. Supervisor tests also reject unreserved and active targets. |
+| Retry | Real machine `controlled-single` receives literal stdin, exhausts automatic decoding recovery, accepts one correlated retry, records `occurrence.recovery-chosen`/`occurrence.retried`, and succeeds. |
+| Failover | Real machine chained `controlled` receives literal stdin, advertises failover after primary exhaustion, delivers the control, starts the spare ACP realization, and succeeds from `asked:model controlled@spare`. |
+| Abandon | Real machine `controlled-single` receives literal stdin, selects advertised abandon, records delivered acknowledgement plus occurrence/run failure, and exits nonzero without inventing an answer. |
+| Cancellation and EOF | Blocked literal stdin is independently interrupted by fd-control cancellation and by control EOF; supervisor process-tree fixtures retain idempotence and TERM/KILL fallback with `forced-termination` classification. |
 
 ## Restart, resume, fork, edit, and diff
 

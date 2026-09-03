@@ -2,6 +2,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -166,11 +167,23 @@ import qualified Data.ByteString.Lazy as BL
 import Agentic.Shell (ShellConfig (shellCwd), defaultShellConfig, executingWorld)
 import Agentic.Workflow
   ( Example (Fixed),
+    InputSource (..),
+    InputSpec (..),
+    Parameterized,
     Words,
+    argsInput,
+    argsInputAs,
+    input,
+    inputSpecs,
+    noInputs,
     routeDefaultLabel,
     routedBackend,
     sessionPolicy,
     sharesOneSession,
+    stdinInput,
+    stdinInputAs,
+    taking,
+    pattern (:>),
     wf,
     wft,
   )
@@ -533,6 +546,40 @@ pureProbe failures name cases = case [c | (c, ok) <- cases, not ok] of
     TIO.putStrLn ("FAIL " <> T.pack name <> ": " <> T.pack (unwords bad))
     modifyIORef' failures (+ 1)
 
+inputSourceProbe :: IORef Int -> IO ()
+inputSourceProbe failures = do
+  let defaults :: Parameterized
+      defaults = taking (argsInput :> stdinInput :> input "tone" :> noInputs) $ \_ _ _ -> hardenProgram
+      custom :: Parameterized
+      custom = taking (argsInputAs "scope" :> stdinInputAs "document" :> noInputs) $ \_ _ -> hardenProgram
+      duplicate :: Parameterized
+      duplicate = taking (input "same" :> stdinInputAs "same" :> noInputs) $ \_ _ -> hardenProgram
+      twoArgs :: Parameterized
+      twoArgs = taking (argsInput :> argsInputAs "scope" :> noInputs) $ \_ _ -> hardenProgram
+      twoStdin :: Parameterized
+      twoStdin = taking (stdinInput :> stdinInputAs "document" :> noInputs) $ \_ _ -> hardenProgram
+      sourcedRunFact :: Parameterized
+      sourcedRunFact = taking (stdinInputAs "run.engine" :> noInputs) $ \_ -> hardenProgram
+  pureProbe failures "input sources retain ordered defaults and custom names"
+    [ ("default source descriptors", inputSpecs defaults == [InputSpec "args" CommandTailInput, InputSpec "input" StandardInput, InputSpec "tone" PromptInput]),
+      ("custom source descriptors", inputSpecs custom == [InputSpec "scope" CommandTailInput, InputSpec "document" StandardInput])
+    ]
+  inputSourceRefusal failures "duplicate input names are refused" duplicate "input 'same' was declared twice"
+  inputSourceRefusal failures "multiple command-tail inputs are refused" twoArgs "more than one command-tail input was declared: args, scope"
+  inputSourceRefusal failures "multiple standard-input inputs are refused" twoStdin "more than one standard-input input was declared: input, document"
+  inputSourceRefusal failures "run facts cannot be sourced from stdin" sourcedRunFact "is under the `run.` prefix"
+
+inputSourceRefusal :: IORef Int -> String -> Parameterized -> Text -> IO ()
+inputSourceRefusal failures name parameterized needle = do
+  out <- try (evaluate (length (inputSpecs parameterized)))
+  case out :: Either ErrorCall Int of
+    Left e | needle `T.isInfixOf` T.pack (show e) -> TIO.putStrLn ("ok   " <> T.pack name)
+    Left e -> do
+      TIO.putStrLn ("FAIL " <> T.pack name <> ": said " <> T.pack (show e))
+      modifyIORef' failures (+ 1)
+    Right _ -> do
+      TIO.putStrLn ("FAIL " <> T.pack name <> ": declaration was accepted")
+      modifyIORef' failures (+ 1)
 -- | A question at a chosen addressee, pinned to a chosen model or to none.
 --
 -- The code is 'CodeText' and could be any of the four: 'backendFor' reads
@@ -1117,7 +1164,8 @@ storeProbe failures = do
   stamp <- getMonotonicTimeNSec
   let directory = temp </> ("agentic-store-probe-" <> show stamp)
       run = RunId "run-store-probe"
-      manifest = RunManifest run "fixture" "0.1.0.0" (object []) "scripted" (object ["kind" .= ("scripted" :: Text)]) Nothing RootRun Nothing
+      program = object ["prompt" .= ("sensitive body text" :: Text)]
+      manifest = RunManifest run "fixture" "0.1.0.0" program "scripted" (object ["kind" .= ("scripted" :: Text)]) Nothing RootRun Nothing
       envelope n event = Envelope protocolVersion run (SeqNo n) "2026-08-28T00:00:00Z" event
       first = envelope 0 (RunStarted "fixture" "scripted")
       second = envelope 1 (RunCompleted 1 1)
@@ -1150,6 +1198,9 @@ storeProbe failures = do
         restoredCheckpoint <- readCheckpoint directory
         directoryMode <- fileMode <$> getFileStatus directory
         manifestMode <- fileMode <$> getFileStatus (directory </> "manifest.json")
+        programMode <- fileMode <$> getFileStatus (directory </> "program.json")
+        manifestBytes <- BS.readFile (directory </> "manifest.json")
+        programBytes <- BS.readFile (directory </> "program.json")
         answerMode <- fileMode <$> getFileStatus (directory </> "answers.json")
         effectMode <- fileMode <$> getFileStatus (directory </> "effects.ndjson")
         checkpointMode <- fileMode <$> getFileStatus (directory </> "checkpoint.json")
@@ -1162,13 +1213,14 @@ storeProbe failures = do
         BL.writeFile (directory </> "answers.json") (encode (object ["semanticStoreVersion" .= (99 :: Int), "answers" .= ([] :: [Value])]))
         incompatibleAnswers <- try @StoreError (readAnswerRecords directory)
         pure
-          [ ("manifest round-trips", restoredManifest == manifest),
+          [ ("manifest round-trips through its private program reference", restoredManifest == manifest),
+            ("manifest omits sensitive program text", not ("sensitive body text" `BS.isInfixOf` manifestBytes) && "program.json" `BS.isInfixOf` manifestBytes && "sensitive body text" `BS.isInfixOf` programBytes),
             ("ordered events append and duplicate both fail closed", case appended of
               (SequenceNext, SequenceNext, Left (StoreCorrupt _ _), Left (StoreCorrupt _ _), Just persisted) -> events == [first, second] && answerValue persisted == answer
               _ -> False),
             ("typed answer, effect journal, and monotone checkpoint round-trip", answers == [answerRecord] && effects == [effectRecord] && restoredCheckpoint == Just mergedCheckpoint),
             ("healthy log is reported", health == StoreHealthy),
-            ("directory and files are private", directoryMode .&. 0o777 == 0o700 && all (\mode -> mode .&. 0o777 == 0o600) [manifestMode, answerMode, effectMode, checkpointMode]),
+            ("directory and files are private", directoryMode .&. 0o777 == 0o700 && all (\mode -> mode .&. 0o777 == 0o600) [manifestMode, programMode, answerMode, effectMode, checkpointMode]),
             ("snapshot is atomically visible", snapshotExists),
             ("a torn event journal fails closed", case tornEvents of Left (StoreCorrupt _ _) -> True; _ -> False),
             ("an existing run is immutable", case duplicateCreate of Left (StoreAlreadyExists _) -> True; _ -> False),
@@ -1529,6 +1581,7 @@ steeredMemoProbe failures = do
 main :: IO ()
 main = do
   failures <- newIORef (0 :: Int)
+  inputSourceProbe failures
   let d = defaultExecSettings
   machineFrameProbe failures
   storeProbe failures

@@ -38,6 +38,24 @@ Allow prompts whose dependencies are satisfied to execute in parallel, while coo
 
 Found by the live run on 2026-08-14 (workflow w5sz6gul7, live stage). SYMPTOM: in the REFUSING run (owner answered no, transcript has six turns and no 'tool apply' line, bill 6) the scratch parse.c was nevertheless replaced with the hardened 823-byte version (seed is 323 bytes, md5 f18314ef... -> 8e856c16...). Timestamps place the write inside the AUTHOR's draft turn (dir birth 12:03:34, file birth 12:04:08, author turn spans ~12:03:49-12:04:23), and it is a birth not a modification: write-and-rename, the signature of an editing tool. CAUSE: Agentic/Core/Acp.lean:271 'permission : Permission := .grant' is a single connection-wide policy that nothing sets; pickAllow answers allow_once to every session/request_permission regardless of the question's Code. To the permission layer, 'ask text model author' and 'act tool apply' are the same thing, so the program's ask/act distinction and the case ok { no -> done } consent branch are unenforceable against a live agent. Harden.no_ack_of_refused still holds — it is about acknowledgements, not bytes — which is exactly the point: there is no theorem and no runtime check saying 'a refused run leaves the workspace as it found it'. FIX (two parts): (1) make the permission decision a function of the QUESTION, not of the connection: grant only for the act (.ack), deny for every ask, and document the known consequence of denial (the turn completes with prose in place of an act, ~97k tokens, no protocol signal); thread the current question through Exec into Acp; log each decision in the transcript. (2) Add the empirical counterpart of the consent theorem: fingerprint the workspace before and after a run, report changes, and fail the run when no act was performed and the workspace changed. Cover both with stub tests. ALSO from the same run, separate issues: the adapter substituted claude-opus-4-8 (not in its advertised catalogue) after claude-fable-5 declined on policy grounds, reporting it only as prose inside the answer — so Conn.configValues is not a complete account of what may answer; and all three reviewers approved a draft that was a policy-refusal banner plus prose plus a fenced diff rather than 'a unified diff only'.
 
+* DONE [#C] Add source-aware args and stdin workflow inputs
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-0fn
+:LABELS:   []
+:ISSUE_TYPE: feature
+:CREATED:  [2026-09-02 Wed 13:29]
+:MODIFIED: [2026-09-02 Wed 16:15]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-02 Wed 16:15]
+:CLOSE_REASON: Implemented approved source-aware args/stdin design: descriptor-v2 metadata with v1 compatibility, literal UTF-8 stdin, fd control transport, multiline /wf binding to current Agent Deck, private message/program persistence, restore isolation, tests, and docs. Haskell/TS/manual/real-stub/local Nix package gates pass; publication and activation remain unauthorized.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Implement approved source-aware input design: command-tail args, literal standard input, separate machine controls, multiline /wf binding, regressions, docs, and Nix integration evidence. Design approved 2026-09-02 in Pi goal mtkjiqtl-25777e.
+
 * DONE [#C] shareT under retryT/fanT: iteration and fan indices in the site key, or ask-once semantics
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -787,6 +805,24 @@ Adopted from the 2026-08-14 web survey (comparison judge, acat-k28 phase C). (1)
   }
 ]
 #+end_src
+
+* DONE [#C] Make /wf launch through current Agent Deck session
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-4qa
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-02 Wed 01:11]
+:MODIFIED: [2026-09-02 Wed 01:21]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-02 Wed 01:21]
+:CLOSE_REASON: Changed /wf to select or directly resolve a workflow, require current AGENTDECK_INSTANCE_ID, and launch with --session without help or target/session prompts; added regression coverage and updated docs. Typecheck, 58-test extension suite, and real runner stub Agent Deck E2E pass.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Change Pi extension so /wf with no argument selects and launches a workflow, /wf NAME launches directly, and both use the current Agent Deck session from AGENTDECK_INSTANCE_ID without target or session prompts. Keep explicit help under /workflow-help and preserve compatibility commands.
 
 * DONE [#C] Plan carrier: mathematical space, representation, TCM proofs, flagship theorems (owner demands 1 and 3)
 :PROPERTIES:

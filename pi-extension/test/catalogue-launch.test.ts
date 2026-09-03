@@ -30,12 +30,54 @@ describe("catalogue and launch", () => {
       ["--route", "deep=acp:FACTORY_API_KEY=x"],
     ]) expect(() => assertNoCredentialArgs(args)).toThrow("credential-bearing target argv is forbidden");
   });
-  it("discovers strict descriptors and preserves exact help", async () => {
+  it("discovers v2 input sources, upgrades v1 inputs, and preserves exact help", async () => {
     const { directory, config } = await setup();
     const [descriptor] = await discoverRunner(config, directory);
     expect(descriptor.name).toBe("fixture");
-    expect(descriptor.inputs).toEqual(["subject"]);
+    expect(descriptor.descriptorVersion).toBe(2);
+    expect(descriptor.inputs).toEqual([{ name: "subject", source: "prompt" }]);
+    const [legacy] = await discoverRunner({ ...config, prefixArgs: ["--descriptor-v1"] }, directory);
+    expect(legacy.inputs).toEqual([{ name: "subject", source: "prompt" }]);
     expect(await readHelp(config, "fixture", directory)).toBe("exact fixture help\n");
+  });
+
+  it.each([
+    ["--descriptor-bad-source", "unknown source guessed"],
+    ["--descriptor-duplicate", "input subject was listed twice"],
+    ["--descriptor-multi-stdin", "multiple stdin inputs: left, right"],
+  ])("rejects malformed v2 input metadata from %s", async (flag, message) => {
+    const { directory, config } = await setup();
+    await expect(discoverRunner({ ...config, prefixArgs: [flag] }, directory)).rejects.toThrow(message);
+  });
+
+  it("uses fd-3 controls for stdin descriptors and legacy stdin controls for v1", async () => {
+    const { directory, config } = await setup();
+    const [legacyDescriptor] = await discoverRunner({ ...config, prefixArgs: ["--descriptor-v1"] }, directory);
+    const legacy = await prepareLaunch({
+      runner: { ...config, prefixArgs: ["--descriptor-v1"] }, descriptor: legacyDescriptor, cwd: directory,
+      stateDir: join(directory, "legacy-state"), inputs: { subject: "legacy" }, targetKind: "scripted", targetArgs: ["--scripted"],
+    });
+    expect(legacy.controlFd).toBeUndefined();
+    expect(legacy.env.AGENT_CAT_CONTROL_STDIN).toBe("1");
+
+    const stdinRunner = { ...config, prefixArgs: ["--descriptor-stdin"] };
+    const [stdinDescriptor] = await discoverRunner(stdinRunner, directory);
+    const stdinLaunch = await prepareLaunch({
+      runner: stdinRunner, descriptor: stdinDescriptor, cwd: directory, stateDir: join(directory, "stdin-state"),
+      inputs: { subject: "private body" }, targetKind: "scripted", targetArgs: ["--scripted"],
+    });
+    expect(stdinLaunch).toMatchObject({ controlFd: 3, stdinFile: expect.any(String) });
+    expect(stdinLaunch.env.AGENT_CAT_CONTROL_FD).toBe("3");
+    expect(stdinLaunch.env.AGENT_CAT_CONTROL_STDIN).toBeUndefined();
+    expect(stdinLaunch.args.join(" ")).not.toContain("subject=");
+    expect(stdinLaunch.args.join(" ")).not.toContain("private body");
+
+    const unsupportedRunner = { ...config, prefixArgs: ["--descriptor-stdin-no-control"] };
+    const [unsupportedDescriptor] = await discoverRunner(unsupportedRunner, directory);
+    await expect(prepareLaunch({
+      runner: unsupportedRunner, descriptor: unsupportedDescriptor, cwd: directory, stateDir: join(directory, "unsupported-state"),
+      inputs: { subject: "private body" }, targetKind: "scripted", targetArgs: ["--scripted"],
+    })).rejects.toThrow("cannot combine workflow stdin with live controls");
   });
 
   it("uses private input files and keeps values out of argv and manifest", async () => {

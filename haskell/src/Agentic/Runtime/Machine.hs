@@ -3,6 +3,11 @@
 -- | Thread-safe NDJSON writer for the runtime protocol.
 module Agentic.Runtime.Machine
   ( MachineCancelled (..),
+    DeferredEventSink,
+    newDeferredEventSink,
+    deferredEventSink,
+    activateEventSink,
+    eventSinkActive,
     handleEventSink,
     handlesEventSink,
     stdoutEventSink,
@@ -35,7 +40,7 @@ import Agentic.Runtime.Protocol
     protocolVersion,
   )
 import Control.Concurrent (forkIO, killThread, myThreadId, throwTo)
-import Control.Concurrent.MVar (modifyMVar_, newMVar)
+import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar, readMVar)
 import Control.Exception (Exception, finally, throwIO)
 import Control.Monad (foldM, when)
 import qualified Data.ByteString as BS
@@ -45,6 +50,37 @@ import Data.Time.Clock (getCurrentTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import Data.Word (Word64)
 import System.IO (Handle, hFlush, hIsEOF, stdout)
+
+-- | Queue events until the run store and its sequenced sink exist.
+data DeferredState = Deferred [RuntimeEvent] | Activated EventSink
+
+newtype DeferredEventSink = DeferredEventSink (MVar DeferredState)
+
+newDeferredEventSink :: IO DeferredEventSink
+newDeferredEventSink = DeferredEventSink <$> newMVar (Deferred [])
+
+deferredEventSink :: DeferredEventSink -> EventSink
+deferredEventSink (DeferredEventSink state) event =
+  modifyMVar_ state $ \current -> case current of
+    Deferred events -> pure (Deferred (event : events))
+    Activated sink -> sink event >> pure current
+
+-- | Emit @run.started@ first, then queued controls, and forward future events.
+activateEventSink :: DeferredEventSink -> EventSink -> RuntimeEvent -> IO Bool
+activateEventSink (DeferredEventSink state) sink started =
+  modifyMVar state $ \current -> case current of
+    Activated _ -> pure (current, False)
+    Deferred events -> do
+      sink started
+      mapM_ sink (reverse events)
+      pure (Activated sink, True)
+
+eventSinkActive :: DeferredEventSink -> IO Bool
+eventSinkActive (DeferredEventSink state) = do
+  current <- readMVar state
+  pure $ case current of
+    Activated _ -> True
+    Deferred _ -> False
 
 -- | One writer lock and one sequence supply per run.  Concurrent scheduler
 -- threads may call the sink, but complete envelopes reach the handle in one

@@ -136,16 +136,54 @@ export default function agentCatExtension(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("wf", {
-    description: "Browse configured agent-cat workflows",
-    handler: async (_args, ctx) => {
+    description: "Run an agent-cat workflow in the current Agent Deck session",
+    getArgumentCompletions: async (prefix) => {
+      if (!lastContext) return null;
+      const catalogue = await discover(lastContext);
+      const items = catalogue
+        .map(({ runner, descriptor }) => ({ value: `${runner.id}:${descriptor.name}`, label: `${runner.id}:${descriptor.name}`, description: descriptor.blurb }))
+        .filter((item) => item.value.startsWith(prefix));
+      return items.length ? items : null;
+    },
+    handler: async (args, ctx) => {
+      if (!ctx.hasUI) return ctx.ui.notify("/wf requires interactive approval and is unavailable in this mode", "error");
+      if (!ctx.isProjectTrusted()) return ctx.ui.notify("/wf requires a trusted project", "error");
+      const sessionId = process.env.AGENTDECK_INSTANCE_ID?.trim();
+      if (!sessionId) return ctx.ui.notify("/wf requires a current Agent Deck session (AGENTDECK_INSTANCE_ID is unavailable)", "error");
+      let invocation: WorkflowCommand;
+      try { invocation = parseWorkflowCommand(args); }
+      catch (error) { return ctx.ui.notify(error instanceof Error ? error.message : String(error), "error"); }
       const catalogue = await discover(ctx);
       if (catalogue.length === 0) return ctx.ui.notify("No AGENT_CAT_RUNNER is configured", "warning");
-      const choices = catalogue.map(({ runner, descriptor }) => `${runner.id}:${descriptor.name} — ${descriptor.blurb}`);
-      if (!ctx.hasUI) return ctx.ui.notify(choices.join("\n"), "info");
-      const choice = await ctx.ui.select("agent-cat workflows", choices);
-      if (!choice) return;
-      const selected = catalogue[choices.indexOf(choice)];
-      ctx.ui.notify(await readHelp(selected.runner, selected.descriptor.name, ctx.cwd), "info");
+      let selected = invocation.workflow ? selectWorkflow(catalogue, invocation.workflow) : undefined;
+      if (invocation.workflow && !selected) return ctx.ui.notify(`Unknown workflow: ${invocation.workflow}`, "error");
+      if (!invocation.workflow) {
+        const choices = catalogue.map(({ runner, descriptor }) => `${runner.id}:${descriptor.name} — ${descriptor.blurb}`);
+        const choice = await ctx.ui.select("agent-cat workflows", choices);
+        if (!choice) return;
+        selected = catalogue[choices.indexOf(choice)];
+      }
+      if (!selected) return;
+      let supplied: Record<string, string>;
+      try { supplied = bindWorkflowSources(selected.descriptor, invocation); }
+      catch (error) { return ctx.ui.notify(error instanceof Error ? error.message : String(error), "error"); }
+      const inputs = await collectInputs(ctx, selected.descriptor, supplied);
+      if (!inputs) return;
+      const sourceSummary = Object.entries(supplied).map(([name, value]) => `${name}=${Buffer.byteLength(value)}B`).join(", ") || "none";
+      if (!(await ctx.ui.confirm(
+        "Run workflow in current Agent Deck session?",
+        `workflow=${selected.runner.id}:${selected.descriptor.name}\nrunner=${selected.runner.executable}\ncwd=${ctx.cwd}\ntarget=current Agent Deck session (${sessionId}); external pane/workspace, not sandboxed\nprebound inputs=${sourceSummary}\neffects=${selected.descriptor.capabilities.effects ?? "unknown"}\nmay call a paid model; persistence=private full prompts/answers plus input hashes`,
+      ))) return;
+      const prepared = await prepareLaunch({
+        runner: selected.runner,
+        descriptor: selected.descriptor,
+        cwd: ctx.cwd,
+        stateDir: stateDirectory(),
+        inputs,
+        targetKind: "deck",
+        targetArgs: ["--session", sessionId],
+      });
+      supervise(prepared, ctx, selected.descriptor.name);
     },
   });
 
@@ -482,9 +520,9 @@ function parseInputsJson(value: string | undefined, descriptor?: WorkflowDescrip
   }
   const inputs = parsed as Record<string, string>;
   if (descriptor) {
-    const expected = [...descriptor.inputs].sort();
+    const expected = descriptor.inputs.map(({ name }) => name).sort();
     const actual = Object.keys(inputs).sort();
-    if (expected.length !== actual.length || expected.some((name, index) => name !== actual[index])) throw new Error(`inputs must be exactly: ${descriptor.inputs.join(", ") || "(none)"}`);
+    if (expected.length !== actual.length || expected.some((name, index) => name !== actual[index])) throw new Error(`inputs must be exactly: ${descriptor.inputs.map(({ name }) => name).join(", ") || "(none)"}`);
   }
   return inputs;
 }
@@ -703,9 +741,45 @@ function selectWorkflow(rows: Array<{ runner: RunnerConfig; descriptor: Workflow
   return rows.find(({ runner, descriptor }) => name === `${runner.id}:${descriptor.name}` || name === descriptor.name);
 }
 
-async function collectInputs(ctx: ExtensionContext, descriptor: WorkflowDescriptor): Promise<Record<string, string> | undefined> {
+type WorkflowCommand = { workflow?: string; commandTail?: string; body?: string };
+
+export function parseWorkflowCommand(args: string): WorkflowCommand {
+  const newline = args.indexOf("\n");
+  const firstLine = (newline < 0 ? args : args.slice(0, newline)).replace(/\r$/, "").trimStart();
+  const bodyText = newline < 0 ? "" : args.slice(newline + 1).trimStart();
+  if (!firstLine.trim()) {
+    if (bodyText) throw new Error("/wf multiline input requires a workflow name on the first line");
+    return {};
+  }
+  const separator = firstLine.search(/[ \t]/);
+  const workflow = separator < 0 ? firstLine : firstLine.slice(0, separator);
+  const tailText = separator < 0 ? "" : firstLine.slice(separator).replace(/^[ \t]+/, "");
+  return {
+    workflow,
+    ...(tailText.trim() ? { commandTail: tailText } : {}),
+    ...(bodyText ? { body: bodyText } : {}),
+  };
+}
+
+function bindWorkflowSources(descriptor: WorkflowDescriptor, invocation: WorkflowCommand): Record<string, string> {
   const inputs: Record<string, string> = {};
-  for (const name of descriptor.inputs) {
+  const commandTail = descriptor.inputs.find(({ source }) => source === "command-tail");
+  const stdin = descriptor.inputs.find(({ source }) => source === "stdin");
+  if (invocation.commandTail !== undefined) {
+    if (!commandTail) throw new Error(`workflow ${descriptor.name} has no command-tail input for first-line text`);
+    inputs[commandTail.name] = invocation.commandTail;
+  }
+  if (invocation.body !== undefined) {
+    if (!stdin) throw new Error(`workflow ${descriptor.name} has no standard-input declaration for multiline body`);
+    inputs[stdin.name] = invocation.body;
+  }
+  return inputs;
+}
+
+async function collectInputs(ctx: ExtensionContext, descriptor: WorkflowDescriptor, supplied: Record<string, string> = {}): Promise<Record<string, string> | undefined> {
+  const inputs: Record<string, string> = { ...supplied };
+  for (const { name } of descriptor.inputs) {
+    if (Object.prototype.hasOwnProperty.call(inputs, name)) continue;
     const value = await ctx.ui.editor(`Input: ${name}`);
     if (value === undefined) return undefined;
     inputs[name] = value;

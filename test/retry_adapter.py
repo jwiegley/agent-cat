@@ -30,7 +30,8 @@ for line in sys.stdin:
         result(request_id, {"sessionId": session_id})
     elif method == "session/prompt":
         prompts += 1
-        answer = "maybe" if prompts <= 2 else '{"priority":1,"steps":["retry"],"title":"Recovered"}'
+        text = "".join(block.get("text", "") for block in message.get("params", {}).get("prompt", []) if block.get("type") == "text")
+        answer = "maybe" if prompts <= 2 else ("yes" if "Apply this patch?" in text else '{"priority":1,"steps":["retry"],"title":"Recovered"}')
         send({
             "jsonrpc": "2.0",
             "method": "session/update",

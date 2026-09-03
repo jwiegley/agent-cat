@@ -112,10 +112,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 nix develop path:./. -c cabal run -v0 policy-probe -- +RTS -N8 -RTS
-nix develop path:./. -c cabal build agentic-run >/dev/null
+nix develop path:./. -c cabal build agentic-run routing-fixed-point-probe >/dev/null
 agentic_run=$(nix develop path:./. -c cabal list-bin agentic-run)
+control_runner=$(nix develop path:./. -c cabal list-bin routing-fixed-point-probe)
 GHCRTS=-N8 python3 ../test/lineage_probe.py "$agentic_run"
-GHCRTS=-N8 python3 ../test/control_probe.py "$agentic_run"
+GHCRTS=-N8 python3 ../test/control_probe.py "$agentic_run" "$control_runner"
 
 # ---------------------------------------------------------------------------
 # The refusals that are the command line's

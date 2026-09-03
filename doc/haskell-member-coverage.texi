@@ -300,6 +300,24 @@ checked by the documentation gates.
 @c MEMBER Agentic.Workflow.HasSchema.member:toSchemaEl support
 @hsindex Agentic.Workflow.HasSchema.toSchemaEl
 @item @code{Agentic.Workflow.HasSchema} @tab @code{toSchemaEl} @tab @code{Agentic.Workflow.HasSchema}
+@c MEMBER Agentic.Workflow.InputSource.member:CommandTailInput support
+@hsindex Agentic.Workflow.InputSource.CommandTailInput
+@item @code{Agentic.Workflow.InputSource} @tab @code{CommandTailInput} @tab @code{Agentic.Workflow.InputSource}
+@c MEMBER Agentic.Workflow.InputSource.member:PromptInput support
+@hsindex Agentic.Workflow.InputSource.PromptInput
+@item @code{Agentic.Workflow.InputSource} @tab @code{PromptInput} @tab @code{Agentic.Workflow.InputSource}
+@c MEMBER Agentic.Workflow.InputSource.member:StandardInput support
+@hsindex Agentic.Workflow.InputSource.StandardInput
+@item @code{Agentic.Workflow.InputSource} @tab @code{StandardInput} @tab @code{Agentic.Workflow.InputSource}
+@c MEMBER Agentic.Workflow.InputSpec.member:InputSpec support
+@hsindex Agentic.Workflow.InputSpec.InputSpec
+@item @code{Agentic.Workflow.InputSpec} @tab @code{InputSpec} @tab @code{Agentic.Workflow.InputSpec}
+@c MEMBER Agentic.Workflow.InputSpec.member:inputName support
+@hsindex Agentic.Workflow.InputSpec.inputName
+@item @code{Agentic.Workflow.InputSpec} @tab @code{inputName} @tab @code{Agentic.Workflow.InputSpec}
+@c MEMBER Agentic.Workflow.InputSpec.member:inputSource support
+@hsindex Agentic.Workflow.InputSpec.inputSource
+@item @code{Agentic.Workflow.InputSpec} @tab @code{inputSource} @tab @code{Agentic.Workflow.InputSpec}
 @c MEMBER Agentic.Workflow.KnownSchema.member:schemaWitness support
 @hsindex Agentic.Workflow.KnownSchema.schemaWitness
 @item @code{Agentic.Workflow.KnownSchema} @tab @code{schemaWitness} @tab @code{Agentic.Workflow.KnownSchema}
@@ -312,9 +330,9 @@ checked by the documentation gates.
 @c MEMBER Agentic.Workflow.ParameterizedOf.member:ParameterizedOf support
 @hsindex Agentic.Workflow.ParameterizedOf.ParameterizedOf
 @item @code{Agentic.Workflow.ParameterizedOf} @tab @code{ParameterizedOf} @tab @code{Agentic.Workflow.ParameterizedOf}
-@c MEMBER Agentic.Workflow.ParameterizedOf.member:inputNames support
-@hsindex Agentic.Workflow.ParameterizedOf.inputNames
-@item @code{Agentic.Workflow.ParameterizedOf} @tab @code{inputNames} @tab @code{Agentic.Workflow.ParameterizedOf}
+@c MEMBER Agentic.Workflow.ParameterizedOf.member:inputSpecs support
+@hsindex Agentic.Workflow.ParameterizedOf.inputSpecs
+@item @code{Agentic.Workflow.ParameterizedOf} @tab @code{inputSpecs} @tab @code{Agentic.Workflow.ParameterizedOf}
 @c MEMBER Agentic.Workflow.ParameterizedOf.member:supply support
 @hsindex Agentic.Workflow.ParameterizedOf.supply
 @item @code{Agentic.Workflow.ParameterizedOf} @tab @code{supply} @tab @code{Agentic.Workflow.ParameterizedOf}
@@ -644,6 +662,14 @@ checked by the documentation gates.
 @c INSTANCE-TEXT Agentic.Workflow.HasSchema.instance:bb4fa1e3f69d880f instance Agentic.Schema.HasSchema value => Agentic.Schema.HasSchema [value]
 @item @code{Agentic.Workflow.HasSchema}
 @code{instance Agentic.Schema.HasSchema value => Agentic.Schema.HasSchema [value]}
+@c INSTANCE Agentic.Workflow.InputSource.instance:0f49e9de92e48ad4 support
+@c INSTANCE-TEXT Agentic.Workflow.InputSource.instance:0f49e9de92e48ad4 instance Eq Agentic.Workflow.InputSource
+@item @code{Agentic.Workflow.InputSource}
+@code{instance Eq Agentic.Workflow.InputSource}
+@c INSTANCE Agentic.Workflow.InputSpec.instance:27189a23a05e3f64 support
+@c INSTANCE-TEXT Agentic.Workflow.InputSpec.instance:27189a23a05e3f64 instance Eq Agentic.Workflow.InputSpec
+@item @code{Agentic.Workflow.InputSpec}
+@code{instance Eq Agentic.Workflow.InputSpec}
 @c INSTANCE Agentic.Workflow.KnownIx.instance:1806bf879e894c7e support
 @c INSTANCE-TEXT Agentic.Workflow.KnownIx.instance:1806bf879e894c7e instance Agentic.Builder.KnownIx' (Agentic.Builder.ScopeEq h s) h s => Agentic.Builder.KnownIx h s
 @item @code{Agentic.Workflow.KnownIx}

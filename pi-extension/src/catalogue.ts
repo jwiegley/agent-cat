@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { RunnerConfig, WorkflowDescriptor } from "./types.ts";
+import type { RunnerConfig, WorkflowDescriptor, WorkflowInput } from "./types.ts";
 
 const execFileAsync = promisify(execFile);
 const MAX_OUTPUT = 4 * 1024 * 1024;
@@ -82,6 +82,8 @@ async function invoke(config: RunnerConfig, args: string[], cwd: string): Promis
 
 function parseDescriptor(runnerId: string, value: unknown): WorkflowDescriptor {
   if (!isObject(value)) throw new Error(`runner ${runnerId} returned a non-object workflow`);
+  const descriptorVersion = number(value.descriptorVersion, "descriptorVersion");
+  if (descriptorVersion !== 1 && descriptorVersion !== 2) throw new Error(`unsupported descriptor version ${descriptorVersion}`);
   const descriptor: WorkflowDescriptor = {
     runnerId,
     name: text(value.name, "name"),
@@ -92,19 +94,38 @@ function parseDescriptor(runnerId: string, value: unknown): WorkflowDescriptor {
     minFold: nullableNumber(value.minFold, "minFold"),
     maxFold: nullableNumber(value.maxFold, "maxFold"),
     paths: number(value.paths, "paths"),
-    inputs: texts(value.inputs, "inputs"),
+    inputs: workflowInputs(value.inputs, descriptorVersion),
     runFacts: texts(value.runFacts, "runFacts"),
     pins: texts(value.pins, "pins"),
-    descriptorVersion: number(value.descriptorVersion, "descriptorVersion"),
+    descriptorVersion,
     runnerVersion: text(value.runnerVersion, "runnerVersion"),
     protocolVersions: numbers(value.protocolVersions, "protocolVersions"),
     storeVersions: numbers(value.storeVersions, "storeVersions"),
     capabilities: capabilities(value.capabilities),
   };
   assertName(descriptor.name, "workflow");
-  if (descriptor.descriptorVersion !== 1) throw new Error(`unsupported descriptor version ${descriptor.descriptorVersion}`);
+  const duplicate = descriptor.inputs.find((input, index) => descriptor.inputs.findIndex(({ name }) => name === input.name) !== index);
+  if (duplicate) throw new Error(`input ${duplicate.name} was listed twice`);
+  for (const source of ["command-tail", "stdin"] as const) {
+    const names = descriptor.inputs.filter((input) => input.source === source).map(({ name }) => name);
+    if (names.length > 1) throw new Error(`multiple ${source} inputs: ${names.join(", ")}`);
+  }
   if (!descriptor.protocolVersions.includes(1)) throw new Error(`runner ${runnerId} does not support protocol 1`);
   return descriptor;
+}
+
+function workflowInputs(value: unknown, descriptorVersion: number): WorkflowInput[] {
+  if (descriptorVersion === 1) return texts(value, "inputs").map((name) => ({ name, source: "prompt" }));
+  if (!Array.isArray(value)) throw new Error("inputs is not an input descriptor array");
+  return value.map((entry, index) => {
+    if (!isObject(entry)) throw new Error(`inputs[${index}] is not an object`);
+    if (Object.keys(entry).some((key) => key !== "name" && key !== "source")) throw new Error(`inputs[${index}] has an unknown field`);
+    const name = text(entry.name, `inputs[${index}].name`);
+    assertName(name, "input");
+    const source = text(entry.source, `inputs[${index}].source`);
+    if (source !== "prompt" && source !== "command-tail" && source !== "stdin") throw new Error(`inputs[${index}] has unknown source ${source}`);
+    return { name, source };
+  });
 }
 
 function assertName(value: string, label: string): void {
