@@ -113,17 +113,15 @@ questions and nothing else. A runtime that executes a plan has to make decisions
 that identity does not record: whether an occurrence may reuse an answer
 already obtained for the same question, whether it must run every time it is
 reached because it acts on the world, whether the addressee may be granted
-tool permission, and how it is ordered relative to other acts. Without an
-author's declaration, the runtime would infer these policies from the answer
-code or the addressee. An early live run showed where that leads: permission
-was a property of the connection, and a model asked only to draft a patch wrote
-the file during its drafting turn.
+tool permission, and how it is ordered relative to other acts. Neither the
+answer code nor the addressee settles these questions, since a receipt-valued
+question to a tool may be a harmless consultation or an act on the world, so
+the author declares the intent and the runtime reads it.
 
-Placing intent inside the question was considered and rejected, because it
-would make the answer to a question depend on the policy under which it is
-asked, and two workflows that ask the same questions and hear the same answers
-would then mean different things. Intent therefore refines the representation
-rather than the meaning. Source position fixes it: an ordinary value question
+Intent refines the representation and leaves the meaning untouched. Because it
+is no part of the question, two workflows that ask the same questions in the
+same order and hear the same answers have the same meaning under every
+execution policy. Source position fixes the tag: an ordinary value question
 lowers to `consult`, an executable tool in value position lowers to `observe`,
 and a statement-position act lowers to `effect`, which exists only at the
 receipt code. Denotation forgets the intent, and the theorems
@@ -175,8 +173,8 @@ events and returns their erasure as `semanticTrace`. Version 4 adds a typed
 program result beside the unchanged program.
 
 `bisim/corpus/` holds 193 frozen request and reply pairs: 95 checked replies,
-54 refusals, and 44 string-layer results. Every legacy entry is version 2 and
-the three typed-result entries are version 4. The corpus is the specification.
+54 refusals, and 44 string-layer results. The three typed-result entries are
+version 4 and every other entry is version 2. The corpus is the specification.
 `lake exe corpus-gen` re-observes every request and rewrites the reply, and it
 is expected to change nothing; an empty `git status --short bisim/corpus`
 afterwards states that the elaboration, the cost algebra, the interpreter, and
@@ -350,11 +348,8 @@ ceilings, the mathematical and operational models, the conformance wire
 format, a tutorial, the authoring and runner references, diagnostics, and a
 glossary. `doc/meaning-and-representation.md` gives the denotational argument
 at length. Every source directory has a `README.md` and an `AGENTS.md`.
-`doc/research/` holds the design records and research dossiers, including the
-re-derivation that produced the current mathematics, the connection design
-that chose conformance testing over extraction, the placement decision for
-request intent, the design of the Pi extension, and the results of the
-superseded `Term` calculus; they are kept as records of how decisions arose.
+`doc/research/` holds the design records and research dossiers, indexed by its
+own `README.md`.
 The implementation designs for the proposed Brick interface and persona-aware
 model resolution are [`doc/tui-design.md`](doc/tui-design.md) and
 [`doc/model-routing-v2.md`](doc/model-routing-v2.md); both remain proposals,

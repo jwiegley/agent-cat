@@ -242,9 +242,9 @@ fixture doubles.
 @tab @file{engine/acp/ci/acp.sh} and @file{engine/agent-deck/ci/deck.sh}
 @end multitable
 
-Program observations exist at three versions.  Version 2 preserves the frozen
-bare-question semantics and is the version of every legacy corpus entry.
-Version 3 adds intent-bearing execution events and a @code{semanticTrace}
+Program observations exist at three versions.  Version 2 is the frozen
+bare-question semantics and is the version of all corpus entries except the
+three typed-result entries.  Version 3 adds intent-bearing execution events and a @code{semanticTrace}
 obtained by erasure; the live differential test uses it.  Version 4 adds a
 typed program result beside the unchanged program and is the version of the
 three newest corpus entries.  Passing version 3 establishes representation
@@ -285,20 +285,15 @@ directory carries a @file{README.md} that states its purpose, public modules,
 dependencies, and commands, and an @file{AGENTS.md} that states the
 conventions a maintainer follows there.
 
-@file{doc/research/} holds the design records and research dossiers: the
-re-derivation that produced the current mathematics, the connection design
-that chose conformance testing over extraction, the placement decision for
-request intent, the design of the Pi extension, and the results of the
-superseded @code{Term} calculus.  Those documents record how a decision arose
-and are kept as records.  Current source, tests, and this manual govern
+@file{doc/research/} holds the design records and research dossiers, indexed
+by its own @file{README.md}.  Current source, tests, and this manual govern
 present behavior, and executable evidence takes precedence where prose has
 drifted.
 
-@cindex retired workflow syntax
-The live authoring language is the Haskell surface.  There is no separate
-workflow file format, parser, or Lean production transport.
-@file{model/Agentic/Core/Dsl/Check.lean} checks a first-order
-@code{RawProgram} that Haskell emits; it contains no concrete source language.
+@cindex authoring language
+The authoring language is the Haskell surface.  Lean receives a program only
+as the first-order @code{RawProgram} that Haskell emits, which
+@file{model/Agentic/Core/Dsl/Check.lean} checks and elaborates.
 
 @node Mathematical Meaning
 @chapter Mathematical Meaning
@@ -731,21 +726,17 @@ whether an occurrence may reuse an answer already obtained for the same bare
 question.  It has to decide whether an occurrence runs every time it is
 reached because it acts on the world.  It has to decide whether the addressee
 may be granted tool permission, and in what order the occurrence stands
-relative to other acts.  Without a declaration from the author, the runtime
-would infer these policies from the answer code or the addressee.  A live run
-showed where that inference leads: permission was once a property of the
-connection, every question looked alike to the layer that authorized writing,
-and a model asked only to draft a patch wrote the file during its drafting
-turn.
+relative to other acts.  Neither the answer code nor the addressee settles
+these questions, since a receipt-valued question to a tool may be a harmless
+consultation or an act on the world.  The author therefore declares the intent
+on each occurrence, and the runtime reads it.
 
-Two placements were possible.  Intent could enter the question, so that worlds
-are indexed by @code{Request} rather than by @code{Q}.  Under that placement
-the answer to a question would depend on the policy under which it is asked,
-and two workflows that ask the same questions in the same order and hear the
-same answers would have different meanings.  No observer of the domain wants
-that dependence.  Intent therefore belongs to the representation.  It refines
-the five-form Plan without adding a sixth form, and denotation projects the
-question and forgets the intent.  The theorems
+Intent belongs to the representation and never to the question.  Worlds stay
+indexed by @code{Q}, so the answer to a question cannot depend on the policy
+under which it is asked, and two workflows that ask the same questions in the
+same order and hear the same answers have the same meaning under every
+execution policy.  Intent refines the five-form Plan without adding a sixth
+form, and denotation projects the question and forgets the intent.  The theorems
 @code{denote_askC_intent_irrel} and @code{denote_ask_intent_irrel} in
 @file{model/Agentic/Core/Denote.lean} state that changing only the intent of a
 request leaves its dialogue unchanged, and both are proved by reflexivity.
@@ -1098,7 +1089,7 @@ Both traces are compared in order and unnormalized.  Semantic event identity
 is the code together with the complete question.  Routes, retries, timeouts,
 and selected backends are execution metadata and never rewrite the authored
 question in @code{semanticTrace}.  Version 2 deduplicates bare questions in
-its memo bill, which preserves the historical billing of the legacy corpus.
+its memo bill, which is the billing the version-2 corpus entries pin.
 Versions 3 and 4 share consult and observe answers by bare question while
 retaining every effect occurrence.  The pure oracle executes nothing.
 
@@ -1154,8 +1145,8 @@ where the last field records the oracle format under which the entry was
 frozen.  Each file was produced by running the oracle once and committing its
 output.
 The checkout holds 193 files: 95 checked replies, 54 refusals, and 44 string
-results.  All legacy entries are version 2; the three typed-result entries are
-version 4.  The flagship is entry @file{example-000-the-flagship-single-file},
+results.  The three typed-result entries are version 4, and every other entry
+is version 2.  The flagship is entry @file{example-000-the-flagship-single-file},
 whose request is the same @code{RawProgram} that
 @file{model/Agentic/Core/DslFlagship.lean} proves accepted.
 
@@ -1171,9 +1162,9 @@ a change to the specification and is reviewed as one.
 
 @section What the corpus pins
 
-Three surfaces are pinned, and one former surface is not.
+Three surfaces are pinned.
 
-The first surface is the reply record.  A legacy checked reply has exactly
+The first surface is the reply record.  A version-2 checked reply has exactly
 eight keys; version 4 adds @code{result} and a returned value in each world.
 The keys @code{shapes} and @code{asks} appear in no file, so
 @code{Cost.shapes} and @code{Cost.asks} may be reorganized without a corpus
@@ -1193,13 +1184,6 @@ further checks are pinned outside the wire: the two @code{#guard_msgs} in
 @file{model/Agentic/Core/Certify.lean}, one of which states that
 @code{certify_sound} depends on no axioms.  They are build failures rather
 than comments, so the discipline is self-enforcing.
-
-The former surface was the Lean plan renderer.  @code{Explain.planLines} once
-had a command-line test that pinned its exact output; that command line was
-retired with the Lean runtime, and the renderer survives as a library function
-with no gate on its output.  That loss is recorded here deliberately.  In
-particular, nothing now checks that closing the case tag universe reproduces
-the arm enumeration order the renderer printed.
 
 @section What is never on the wire
 
@@ -1686,7 +1670,7 @@ and @code{--input-arg NAME=VALUE}.  For @code{run} and machine/lineage commands,
 an unbound stdin declaration reads fd 0 strictly as UTF-8 to EOF.  Empty input is
 valid; a terminal refuses rather than hanging.  Explicit input flags take
 precedence.  Stdin and command-tail inputs preserve exact text, while an
-ordinary file input retains the legacy one-final-LF removal.
+ordinary file input has one final line feed removed.
 
 @section Optional runtime facts
 
@@ -3201,9 +3185,9 @@ reads fd 0 to EOF.  Plan and cost never auto-read stdin.
 
 Machine supervisors set @code{AGENT_CAT_CONTROL_FD} to an inherited descriptor
 of at least 3; Pi uses fd 3.  Control NDJSON and workflow input therefore coexist
-without framing.  Legacy @code{AGENT_CAT_CONTROL_STDIN=1} works only when the
-stdin-designated value was supplied explicitly, and both control modes together
-are refused.
+without framing.  The compatibility form @code{AGENT_CAT_CONTROL_STDIN=1} puts
+controls on standard input instead; it works only when the stdin-designated
+value was supplied explicitly, and both control modes together are refused.
 @section Target and transport options
 
 @table @code

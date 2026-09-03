@@ -191,20 +191,16 @@ mathematics does not record. It must decide whether an occurrence may reuse an
 answer already obtained for the same bare question. It must decide whether an
 occurrence has to run every time it is reached, because it acts on the world.
 It must decide whether the addressee may be granted tool permission, and in
-what order the occurrence stands relative to other acts. Without an author's
-declaration, the runtime would have to infer these policies from the answer
-code or the addressee, and an early live run showed where that leads: a model
-asked to draft a patch wrote the file during its drafting turn, because
-permission was a property of the connection and every question looked alike
-to the layer that authorised writing.
+what order the occurrence stands relative to other acts. Neither the answer
+code nor the addressee settles these questions: a receipt-valued question to a
+tool may be a harmless consultation or an act on the world. The author
+therefore declares the intent, and the runtime reads it.
 
-Two placements were possible, and one was rejected. Putting intent into the
-question, so that worlds are indexed by `Request` rather than by `Q`, would
-make the answer to a question depend on the policy under which it is asked.
-Two workflows that ask the same questions in the same order and hear the same
-answers would then have different meanings. No observer of the domain wants
-that dependence, so intent is placed in the representation instead. The
-denotation projects the question and forgets the intent:
+Intent lives in the representation and never in the question. Worlds stay
+indexed by `Q`, so the answer to a question cannot depend on the policy under
+which it is asked, and two workflows that ask the same questions in the same
+order and hear the same answers have the same meaning under every execution
+policy. The denotation projects the question and forgets the intent:
 
 ```lean
 theorem denote_askC_intent_irrel (c : Code) (q : Q c) (i i' : Intent c) ... :
