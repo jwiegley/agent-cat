@@ -1164,8 +1164,8 @@ storeProbe failures = do
   stamp <- getMonotonicTimeNSec
   let directory = temp </> ("agentic-store-probe-" <> show stamp)
       run = RunId "run-store-probe"
-      program = object ["prompt" .= ("sensitive body text" :: Text)]
-      manifest = RunManifest run "fixture" "0.1.0.0" program "scripted" (object ["kind" .= ("scripted" :: Text)]) Nothing RootRun Nothing
+      sensitiveProgram = object ["prompt" .= ("sensitive body text" :: Text)]
+      manifest = RunManifest run "fixture" "0.1.0.0" sensitiveProgram "scripted" (object ["kind" .= ("scripted" :: Text)]) Nothing RootRun Nothing
       envelope n event = Envelope protocolVersion run (SeqNo n) "2026-08-28T00:00:00Z" event
       first = envelope 0 (RunStarted "fixture" "scripted")
       second = envelope 1 (RunCompleted 1 1)
