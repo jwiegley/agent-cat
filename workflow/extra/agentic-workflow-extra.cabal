@@ -8,9 +8,9 @@ maintainer:      jwiegley@positron.ai
 build-type:      Simple
 
 library
-  hs-source-dirs:  src
+  hs-source-dirs:  .
   exposed-modules:
-    Workflow.Extra.Isaac
+    Isaac
 
   build-depends:
     , agentic-dsl

@@ -1,5 +1,5 @@
 -- |
--- Module      : Workflow.Example.Structured
+-- Module      : Structured
 -- Description : Model-generated JSON decoded into typed Haskell data.
 --
 -- 'structuredProgram' shows the normal authoring path: 'deriveSchema' derives
@@ -17,7 +17,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module Workflow.Example.Structured
+module Structured
   ( structuredProgram,
     structuredResultProgram,
     producerBrief,

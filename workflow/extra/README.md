@@ -5,8 +5,8 @@ authoring prompt library.
 
 ## Public API
 
-`Workflow.Extra.Isaac` exposes the five canonical program values plus prompt text
-used by CLI-owned deterministic fixtures.
+`Isaac` exposes the five canonical program values plus prompt text used by
+CLI-owned deterministic fixtures.
 
 ## Dependencies and adjacent modules
 

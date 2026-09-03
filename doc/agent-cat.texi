@@ -1170,7 +1170,7 @@ first-order place inside the round and are rejected.
 
 The flagship's complete review clause is a compiled example:
 
-@c SOURCE workflow/core/src/Workflow/Core/Harden.hs
+@c SOURCE workflow/example/Harden.hs
 @verbatim
     result <- revising draft (atMost 2) \patch -> W.do
         verdict <- panel
@@ -1202,7 +1202,7 @@ The bind of a revision is also the branch point.  Its result is consumed by the
 immediately following Haskell case.  Both outcomes carry the candidate then in
 hand:
 
-@c SOURCE workflow/core/src/Workflow/Core/Harden.hs
+@c SOURCE workflow/example/Harden.hs
 @verbatim
     case result of
       Settled patch -> W.do
@@ -1263,7 +1263,7 @@ bounded revision, and @code{knownHere} belong to the calling workflow.
 The @code{reviewReport} function from the compiled Isaac examples has six text
 parameters and a receipt result:
 
-@c SOURCE workflow/extra/src/Workflow/Extra/Isaac.hs
+@c SOURCE workflow/extra/Isaac.hs
 @verbatim
 reviewReport ::
   Fn '[ 'CodeText, 'CodeText, 'CodeText, 'CodeText, 'CodeText, 'CodeText] 'CodeAck
@@ -1332,7 +1332,7 @@ unique, and only one command-tail and one standard-input source may appear.
 @code{Parameterized}.  The compiled @code{review-lite} example uses a custom
 stdin name:
 
-@c SOURCE workflow/extra/src/Workflow/Extra/Isaac.hs
+@c SOURCE workflow/extra/Isaac.hs
 @verbatim
 reviewLite :: Parameterized
 reviewLite = taking (stdinInputAs "subject" :> noInputs) \subject ->
@@ -1401,7 +1401,7 @@ in both directions.  Primitive types and lists have built-in instances.
 @code{deriveSchema} derives a record's schema, witness, and conversion from one
 record declaration.  The compiled structured example uses:
 
-@c SOURCE workflow/example/src/Workflow/Example/Structured.hs
+@c SOURCE workflow/example/Structured.hs
 @verbatim
 data ReleasePlan = ReleasePlan
   { title :: Text,
@@ -1417,7 +1417,7 @@ $(deriveSchema ''ReleasePlan)
 A model question selects this answer through @code{structured @@ReleasePlan}.
 Using @code{annotated} prints the structured code in the first-order source:
 
-@c SOURCE workflow/example/src/Workflow/Example/Structured.hs
+@c SOURCE workflow/example/Structured.hs
 @verbatim
 structuredProgram :: Program
 structuredProgram = workflow W.do

@@ -76,7 +76,10 @@ from pathlib import Path
 
 workflow = Path("../workflow")
 refs = set()
-for source in workflow.glob("*/src/**/*.hs"):
+sources = list(workflow.glob("*/*.hs"))
+if list(workflow.glob("*/src/**/*.hs")) or not sources:
+    raise SystemExit("workflow sources must be flat files")
+for source in sources:
     refs.update(re.findall(r'`servedBy`\s*"([^"]+)"', source.read_text()))
 
 profiles_text = Path("model-definitions.example.yaml").read_text().split("\nprofiles:\n", 1)[1]
@@ -86,7 +89,8 @@ concrete = sorted(ref for ref in refs if re.search(r"gpt|claude|codex|opus|fable
 bad_deps = []
 for cabal in workflow.glob("*/*.cabal"):
     local = set(re.findall(r"^\s*, (agentic-[a-z0-9-]+)$", cabal.read_text(), re.MULTILINE))
-    if local != {"agentic-dsl"}:
+    expected = {"agentic-dsl"} if list(cabal.parent.glob("*.hs")) else set()
+    if local != expected:
         bad_deps.append(f"{cabal}: {sorted(local)}")
 
 for label, values in (("unmapped profile", missing), ("concrete-looking profile", concrete), ("workflow dependency", bad_deps)):
@@ -95,9 +99,9 @@ for label, values in (("unmapped profile", missing), ("concrete-looking profile"
 raise SystemExit(bool(missing or concrete or bad_deps))
 PY
 then
-  note "workflow boundary: DSL-only dependencies and symbolic CLI-mapped profiles verified"
+  note "workflow boundary: flat sources, DSL-only populated packages, and symbolic CLI-mapped profiles verified"
 else
-  bad "workflow" "boundary" "DSL-only with symbolic CLI mappings" "violation above"
+  bad "workflow" "boundary" "flat sources, DSL-only populated packages, symbolic CLI mappings" "violation above"
 fi
 
 cat_run() {
@@ -140,7 +144,7 @@ pin() {
 
 # The flagship. Also `bisim/corpus/example-000-the-flagship-single-file.json`
 # (`level branch, size 36, askNodes 19, costSummary {5, 15, 9}`), which tier0
-# replays and tier1 rebuilds from `Workflow.Core.Harden.hardenProgram` itself;
+# replays and tier1 rebuilds from `Harden.hardenProgram` itself;
 # the haddock on that value; README.md; and isaac-workflows §3's reference
 # line. The 7/7 bill is the corpus's own world, and is reached three further
 # ways: engine/agent-deck/ci/deck.sh's `happy`, engine/acp/ci/acp.sh's `happy`, and the Lean demo's

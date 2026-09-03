@@ -1,12 +1,13 @@
 # workflow/example
 
-`agentic-workflow-example` owns small teaching and representation examples.
+`agentic-workflow-example` owns small teaching and representation examples, including
+canonical `hardenProgram`.
 
 ## Public API
 
-`Workflow.Example.Hello` exports the frozen `helloProgram`.
-`Workflow.Example.Structured` exports structured-answer programs and their host
-record boundary.
+`Harden` exports frozen flagship `hardenProgram`.
+`Hello` exports frozen `helloProgram`.
+`Structured` exports structured-answer programs and host record boundary.
 
 ## Dependencies and adjacent modules
 

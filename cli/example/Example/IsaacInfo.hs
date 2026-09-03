@@ -12,7 +12,7 @@ where
 
 import Agentic.Workflow (Example (..), wft)
 import Data.Text (Text)
-import Workflow.Extra.Isaac
+import Isaac
 
 -- ---------------------------------------------------------------------------
 -- The registry, and the canned answers

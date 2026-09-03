@@ -5,7 +5,7 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE RebindableSyntax #-}
 
-module Workflow.Core.Harden (hardenProgram) where
+module Harden (hardenProgram) where
 
 import Agentic.Workflow
 import qualified Agentic.Workflow.Do as W

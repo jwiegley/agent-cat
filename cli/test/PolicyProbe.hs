@@ -208,7 +208,7 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
-import Workflow.Core.Harden (hardenProgram)
+import Harden (hardenProgram)
 import Agentic.Builder
   ( Code (CodeAck, CodeFlag, CodeText),
     Program,

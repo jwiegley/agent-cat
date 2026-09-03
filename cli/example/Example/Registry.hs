@@ -20,9 +20,9 @@ import Example.StructuredInfo
     structuredResultHelp,
     structuredScript,
   )
-import Workflow.Core.Harden (hardenProgram)
-import Workflow.Example.Hello (helloProgram)
-import Workflow.Example.Structured (structuredProgram, structuredResultProgram)
+import Harden (hardenProgram)
+import Hello (helloProgram)
+import Structured (structuredProgram, structuredResultProgram)
 
 -- ---------------------------------------------------------------------------
 -- The registry

@@ -5238,3 +5238,18 @@ HIGH (validated, machine-checked): at Cost with mA=d=fin 0, mB=fin 3, all of fin
 ]
 #+end_src
 
+* DONE [#C] Flatten workflow package sources
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-zyq
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-03 Thu 09:34]
+:MODIFIED: [2026-09-03 Thu 09:59]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-03 Thu 09:59]
+:CLOSE_REASON: Flattened workflow package sources; moved Harden into example; retained core as an empty reserved package; updated module imports, package edges, documentation, and boundary checks.
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+

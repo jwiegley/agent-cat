@@ -5,7 +5,7 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE RebindableSyntax #-}
 
-module Workflow.Example.Hello (helloProgram) where
+module Hello (helloProgram) where
 
 import Agentic.Workflow
 import qualified Agentic.Workflow.Do as W

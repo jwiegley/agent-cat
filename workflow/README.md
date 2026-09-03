@@ -5,18 +5,18 @@ package whose only local dependency is [`../dsl`](../dsl).
 
 ## Scope and public APIs
 
-- [`core`](core): stable workflows via `Workflow.Core.*`
-- [`example`](example): teaching workflows via `Workflow.Example.*`
-- [`extra`](extra): narrower workflows via `Workflow.Extra.*`
+- [`core`](core): empty reserved package for future stable workflows
+- [`example`](example): teaching workflows via `Harden`, `Hello`, and `Structured`
+- [`extra`](extra): narrower workflows via `Isaac`
 
 The container itself has no code API.
 
 ## Dependencies and adjacent modules
 
 ```text
-workflow/{core,example,extra} -> dsl
-cli -> workflow/*
-bisim -> workflow/{core,example} (tests only)
+workflow/{example,extra} -> dsl; workflow/core -> (empty)
+cli -> workflow/{example,extra}
+bisim -> workflow/example (tests only)
 ```
 
 Workflow packages never depend on each other.

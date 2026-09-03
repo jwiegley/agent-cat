@@ -53,10 +53,10 @@ runtime -> plan + engine/api
 engine/acp -> engine/api
 engine/acp/{claude,codex,droid} -> engine/acp
 engine/agent-deck -> engine/api
-workflow/{core,example,extra} -> dsl
+workflow/{example,extra} -> dsl; workflow/core -> (empty)
 bisim -> dsl + plan
 cli:verification -> bisim + cost + dsl + plan
-cli:tier1 -> cli:verification + dsl + plan + workflow/{core,example}
+cli:tier1 -> cli:verification + dsl + plan + workflow/example
 cli:bisim -> cli:verification + bisim + dsl + plan
 ```
 

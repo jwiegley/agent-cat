@@ -147,7 +147,7 @@ bind, a fenced prompt is a `[wf|…|]` with `{name}` holes and a layout rule, a
 `result <- revising draft (atMost 2) \patch -> W.do` opens the review loop.
 Both branches are Haskell's own — a `case` on the exported `Outcome`, and an `if`
 reaching `ifThenElse` because an authoring module enables `RebindableSyntax`. The
-end of `workflow/core/src/Workflow/Core/Harden.hs`:
+end of `workflow/example/Harden.hs`:
 
 ```haskell
     case result of
@@ -196,7 +196,7 @@ Five further forms the surface carries, each an ordinary Haskell value:
   answer's meaning:
   `Schema.Json` / `Agentic.Schema.Json` are one representation layer, responsible
   for parsing, finite-decimal encoding and the standard JSON Schema instruction.
-  `workflow/example/src/Workflow/Example/Structured.hs` is the runnable worked example: its
+  `workflow/example/Structured.hs` is the runnable worked example: its
   record declaration and one splice are all the schema author writes.
 * **`decide`** — a closed vocabulary of four pure classifications
   (`LastNonEmptyLineIs`, `ContainsLine`, `AnyLineStartsWith`, `AnyPathMatches`)

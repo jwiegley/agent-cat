@@ -14,7 +14,7 @@
 {-# LANGUAGE RebindableSyntax #-}
 {-# LANGUAGE TypeApplications #-}
 
-module Workflow.Extra.Isaac
+module Isaac
   ( planFeatureProgram,
     reviewLite,
     shipFeatureLiteProgram,

@@ -13,7 +13,7 @@ where
 
 import Agentic.Workflow (wft)
 import Data.Text (Text)
-import Workflow.Example.Structured (producerBrief)
+import Structured (producerBrief)
 
 structuredAnswer :: Text
 structuredAnswer =

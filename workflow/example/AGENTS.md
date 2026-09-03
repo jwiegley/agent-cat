@@ -2,5 +2,5 @@
 
 - Import only `agentic-dsl` modules and standard libraries.
 - Keep examples small, symbolic, and independent of runtime/engine choices.
-- Preserve `helloProgram` exactly against its frozen bisimulation fixture.
+- Preserve `hardenProgram` and `helloProgram` exactly against frozen bisimulation fixtures.
 - Keep CLI help and scripted answers outside this package.

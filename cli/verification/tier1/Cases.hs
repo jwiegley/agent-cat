@@ -59,8 +59,8 @@ module Cases (cases, alphaNamed, callVectorsW) where
 import Data.List.NonEmpty (NonEmpty (..))
 
 import CallVectors (battery144W, battery147W, module000W)
-import Workflow.Core.Harden (hardenProgram)
-import Workflow.Example.Hello (helloProgram)
+import Harden (hardenProgram)
+import Hello (helloProgram)
 import LoopVectors (semantic008W)
 
 import Agentic.Builder

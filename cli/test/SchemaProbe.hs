@@ -39,7 +39,7 @@ import qualified Data.Text.IO as TIO
 import System.Exit (exitFailure)
 import Test.QuickCheck (isSuccess, maxSuccess, quickCheckWithResult, stdArgs)
 import Example.StructuredInfo (structuredAnswer)
-import Workflow.Example.Structured (ReleasePlan (ReleasePlan), consumeModelJson)
+import Structured (ReleasePlan (ReleasePlan), consumeModelJson)
 
 data Approval = Approval
   { plan :: ReleasePlan,

@@ -85,7 +85,6 @@ library examples
 
   build-depends:
     , agentic-cli
-    , agentic-workflow-core
     , agentic-workflow-example
     , agentic-workflow-extra
 
@@ -122,7 +121,6 @@ executable tier1
     , agentic-cli:verification
     , agentic-dsl
     , agentic-plan
-    , agentic-workflow-core
     , agentic-workflow-example
     , base
     , bytestring
@@ -171,8 +169,7 @@ executable policy-probe
     , agentic-cli:examples
     , agentic-cli:verification
     , agentic-bisim
-    , agentic-workflow-core
-
+    , agentic-workflow-example
   ghc-options:     -threaded
 
 -- Focused YAML routing schema, discovery, and layering regression probe.

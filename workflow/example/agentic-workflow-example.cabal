@@ -8,10 +8,11 @@ maintainer:      jwiegley@positron.ai
 build-type:      Simple
 
 library
-  hs-source-dirs:  src
+  hs-source-dirs:  .
   exposed-modules:
-    Workflow.Example.Hello
-    Workflow.Example.Structured
+    Harden
+    Hello
+    Structured
 
   build-depends:
     , agentic-dsl
