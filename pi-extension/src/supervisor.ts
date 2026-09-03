@@ -256,15 +256,15 @@ export class OwnedRun {
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.control.on("error", (error: NodeJS.ErrnoException) => {
-      if (error.code !== "EPIPE" && error.code !== "ERR_STREAM_DESTROYED") this.#fail(`control pipe failed: ${error.message}`);
+      if (!this.#cancelRequested && error.code !== "EPIPE" && error.code !== "ERR_STREAM_DESTROYED") this.#fail(`control pipe failed: ${error.message}`);
     });
     if (this.#prepared.controlFd === 3) {
       child.stdin.on("error", (error: NodeJS.ErrnoException) => {
-        if (error.code !== "EPIPE" && error.code !== "ERR_STREAM_DESTROYED") this.#fail(`workflow stdin failed: ${error.message}`);
+        if (!this.#cancelRequested && error.code !== "EPIPE" && error.code !== "ERR_STREAM_DESTROYED") this.#fail(`workflow stdin failed: ${error.message}`);
       });
       if (this.#prepared.stdinFile) {
         const source = createReadStream(this.#prepared.stdinFile);
-        source.on("error", (error) => this.#fail(`workflow stdin failed: ${error.message}`));
+        source.on("error", (error) => { if (!this.#cancelRequested) this.#fail(`workflow stdin failed: ${error.message}`); });
         source.pipe(child.stdin);
       } else child.stdin.end();
     }

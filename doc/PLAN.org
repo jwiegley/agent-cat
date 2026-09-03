@@ -1137,6 +1137,38 @@ alexey + comments + abstraction. (1) Check.lean:28-33: 'three binders are not co
 ]
 #+end_src
 
+* DOING [#B] Keep cancellation classification across pipe teardown
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-9ab
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-02 Wed 21:42]
+:MODIFIED: [2026-09-02 Wed 21:42]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Ignore workflow/control stream errors only after cancellation has begun so Linux process-group teardown cannot overwrite forced-termination cancellation with a supervisor failure.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-9ab",
+    "depends_on_id": "acat-0fn",
+    "type": "discovered-from",
+    "created_at": "2026-09-03T04:42:26.232535Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#C] Decide CsumAdditive's status: fenced hypothesis vs class axiom
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
