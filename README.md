@@ -6,26 +6,54 @@ program, the interpreter that runs it against a live agent, and a conformance
 relation that holds a second implementation to the first. The method is Conal
 Elliott's denotational design, taken literally.
 
-The repository is now **two halves with one boundary between them**. Lean is the
-verification spine: the mathematical space, the elaboration from raw syntax to a
-plan that is well-typed by construction, the theorems about what that elaboration
-can produce, and an oracle that emits observations. Haskell is the operational
-half: the authoring surface a person actually writes, and the runner that puts
-questions to real agents. The boundary is `RawProgram`-in — a first-order syntax
-tree, never a string — and it is frozen, byte for byte, in `test/corpus/`.
+## Module architecture
 
-A third, operational integration surface lives in `pi-extension/`: Pi discovers and
-supervises the Haskell runner through agent-cat's versioned machine protocol. It does not
-interpret `RawProgram` or `Plan`. The runtime owns occurrence/attempt events, correlated
-controls, typed persistence, effect journaling, restart/resume/fork, and ACP/deck/Pi
-answerers; Pi owns catalogue/approval/monitoring and durable run references. See
-[`pi-extension/README.md`](pi-extension/README.md),
-[`doc/pi-workflow-extension.md`](doc/pi-workflow-extension.md), and the approved
-[`source-aware input design`](doc/source-aware-workflow-inputs.md).
+Agent-cat is one repository and one product, built as independently checkable
+modules. The root [`cabal.project`](cabal.project) is the Haskell workspace; the
+packages are not versioned or published independently. Lean remains normative,
+and [`bisim`](bisim) holds the only Lean–Haskell conformance boundary.
+
+`A → B` means that A may depend on B:
+
+```text
+model
+dsl
+plan → dsl
+cost → plan
+engine/api
+runtime → plan + engine/api
+engine/acp/{claude,codex,droid} → engine/acp → engine/api
+engine/agent-deck → engine/api
+workflow/{core,example,extra} → dsl
+bisim → model + dsl + plan
+cli:verification → bisim + cost + dsl + plan  (private test library)
+cli:tier1 → cli:verification + dsl + plan + workflow/{core,example}
+cli:bisim → cli:verification + bisim + dsl + plan
+cli → workflows + plan + cost + runtime + concrete engines
+ext-pi → cli's versioned process protocol
+```
+
+The dependency graph is acyclic and Cabal-enforced. Workflow packages import
+only [`dsl`](dsl), name models symbolically, and cannot see planning, cost,
+runtime, routing, or engine implementation details. Engine-neutral facts supplied
+by a host are named in the Text-only `Agentic.Runtime.Facts` API; repository
+workflow packages do not import it. [`cli`](cli) alone loads model-definition
+files and maps symbolic references to concrete engines/models.
+
+Every module has a local `README.md` and `AGENTS.md` describing its purpose, API,
+dependencies, adjacent edges, commands, and conventions. The single shared issue
+ledger remains [`doc/PLAN.org`](doc/PLAN.org).
+
+[`ext-pi`](ext-pi) discovers and supervises `agentic-run` through the versioned
+machine protocol; it does not interpret `RawProgram` or `Plan`. Future
+`engine/mcp` and `tui` boundaries are documented but deliberately have no source
+tree or placeholder package. A future TUI is to be drawn from
+[agent-functor](https://gitlab.com/fresheyeball/agent-functor), use its own local
+flake, and be invoked by CLI only when fully implemented.
 
 ## The Lean half — the verification spine
 
-Lean 4.30.0 with Mathlib v4.30.0. `Agentic.lean` is the mathematical space and
+Lean 4.30.0 with Mathlib v4.30.0. `model/Agentic.lean` is the mathematical space and
 imports only mathematics: the resource algebra, panels, traces and scopes, the
 authoring words of `Surface`, and the rederivation kernel under `Agentic.Core` —
 the schema-indexed values (`Schema`), principal question identity (`Question`),
@@ -45,7 +73,7 @@ There is **no parser, no concrete syntax and no runtime here.** What Lean keeps
 is what can be proved and what the port is measured against; the authoring
 surface and the runner are Haskell's.
 
-The flagship is kernel-checked. `Agentic/Core/DslFlagship.lean` holds the flagship
+The flagship is kernel-checked. `model/Agentic/Core/DslFlagship.lean` holds the flagship
 as a `RawProgram` — the term of record, and the very program frozen as corpus
 entry `example-000` — and proves by `decide +kernel` that the checker accepts it,
 that its level is `branch`, that its cost tree has nine leaves with a minimum of 5
@@ -87,8 +115,8 @@ not physical outcome; `observe` cannot prove an argv read-only.
 
 ## The conformance boundary
 
-`lake exe conformance-oracle` is a line-delimited JSON process that checks and
-observes `RawProgram`s and exercises the string layer. `test/corpus/` holds 190
+`cd bisim && lake exe conformance-oracle` is a line-delimited JSON process that
+checks and observes `RawProgram`s and exercises the string layer. `bisim/corpus/` holds 190
 legacy version-2 request/reply pairs plus three additive version-4 typed-result
 vectors. Version 2 remains byte-identical semantic observation. Live differential
 requests version 3 compare annotated Plan events while also returning
@@ -102,24 +130,24 @@ file with the fresh reply. (It once built the corpus from `.wf` sources; with no
 parser and no `.wf` files there is nothing upstream of a request to start from,
 and re-observation is both all that is possible and the whole of what mattered.)
 **Regenerating is expected to be a no-op**: an empty `git status --short
-test/corpus` afterwards is the statement that the elaboration, the cost algebra,
+bisim/corpus` afterwards is the statement that the elaboration, the cost algebra,
 the interpreter and the trusted base still say exactly what the frozen
 specification says they say. A diff is a change to the specification, reviewed as
 one.
 
 ## The Haskell half — the authoring surface
 
-`haskell/` holds the `Raw` syntax and its codec, the guards, the string layer, a
-typed annotated `Plan` with the same static folds, bare-question worlds, semantic
-fresh bills, operational memo bills, the Builder,
-authoring surface a human writes. **That surface is ordinary Haskell** — no
+[`dsl`](dsl) holds raw syntax, schemas, the typed structural AST, Builder, and
+the ordinary-Haskell authoring surface. [`plan`](plan) and [`cost`](cost) provide
+separate pure interpreters; [`runtime`](runtime) executes through
+[`engine/api`](engine/api). **The authoring surface is ordinary Haskell** — no
 splice, no bracket, no label, and no file format of its own. A bind is a Haskell
 bind, a fenced prompt is a `[wf|…|]` with `{name}` holes and a layout rule, a
 `define` is a Haskell binding, `W.do` is `QualifiedDo`, and
 `result <- revising draft (atMost 2) \patch -> W.do` opens the review loop.
 Both branches are Haskell's own — a `case` on the exported `Outcome`, and an `if`
 reaching `ifThenElse` because an authoring module enables `RebindableSyntax`. The
-end of `haskell/example/Example/Harden.hs`:
+end of `workflow/core/src/Workflow/Core/Harden.hs`:
 
 ```haskell
     case result of
@@ -168,7 +196,7 @@ Five further forms the surface carries, each an ordinary Haskell value:
   answer's meaning:
   `Schema.Json` / `Agentic.Schema.Json` are one representation layer, responsible
   for parsing, finite-decimal encoding and the standard JSON Schema instruction.
-  `haskell/example/Example/Structured.hs` is the runnable worked example: its
+  `workflow/example/src/Workflow/Example/Structured.hs` is the runnable worked example: its
   record declaration and one splice are all the schema author writes.
 * **`decide`** — a closed vocabulary of four pure classifications
   (`LastNonEmptyLineIs`, `ContainsLine`, `AnyLineStartsWith`, `AnyPathMatches`)
@@ -220,16 +248,16 @@ schema-valued example.
 
 ## The runner — `agentic-run`
 
-One executable, five verbs over those programs, from `haskell/`:
+One executable, five verbs over those programs, from the repository root:
 
 ```sh
-cabal run agentic-run -- list
-cabal run agentic-run -- help harden          # or: agentic-run harden --help
-cabal run agentic-run -- plan harden [--raw]
-cabal run agentic-run -- cost harden
-cabal run agentic-run -- run  harden --scripted
-cabal run agentic-run -- run  harden --engine acp [--adapter stub|claude|codex|droid|PATH]
-cabal run agentic-run -- run  harden --session <deck-id> [--binary PATH] [--poll MS]
+nix develop path:. -c cabal run agentic-run -- list
+nix develop path:. -c cabal run agentic-run -- help harden
+nix develop path:. -c cabal run agentic-run -- plan harden --raw
+nix develop path:. -c cabal run agentic-run -- cost harden
+nix develop path:. -c cabal run agentic-run -- run harden --scripted
+nix develop path:. -c cabal run agentic-run -- run harden --engine acp --adapter stub
+nix develop path:. -c cabal run agentic-run -- run harden --session <deck-id>
 ```
 
 Factory Droid is built in as `--adapter droid`, which launches `droid exec
@@ -271,7 +299,7 @@ automatically; explicit `--route` entries remain the highest backend override;
 and every declared setting is applied or verified before a prompt. The
 versioned schema, precedence rules, migration example and transport limitations
 are specified in
-[`haskell/README.md`](haskell/README.md#symbolic-routing-profiles).
+[`cli/README.md`](cli/README.md#model-definitions).
 
 Nothing here rebuilds, adapts or trims a program for execution: `agentic-run run
 harden` runs the exact `Program` that `tier1` has already held against the frozen
@@ -286,34 +314,32 @@ entries in the production surface and compares the whole reply — printed
 program, folds, ask counts, one trace and two bills per world — and `bisim`
 draws fresh programs and worlds against the live oracle.
 
-The principal scripts in `haskell/ci/` are the gates. `ci/tier0.sh` is the PR gate: it
-runs the first two executables against the corpus as committed data, with **no
-Lean in the loop at all**. `ci/acp.sh` and `ci/deck.sh` drive `agentic-run` end
-to end against the two fixture doubles, `test/stub_adapter.py` and
-`haskell/test/stub-deck.sh` — no Lean, no network, and what they pin is the part
-of the runtime the corpus cannot reach: the poll loop, the staleness guard, the
-named transport failures, the re-ask and the memo table observed from outside
-process. `ci/routing-config.sh` pins YAML validation and precedence, ordered
-cross-backend failover, ACP option selection before prompt, deck metadata
-verification before send, strict negative controls, and machine provenance.
-`ci/tier1.sh` is the nightly differential and the only gate that
-wants Lean — as a **prebuilt** `conformance-oracle` binary, which it refuses to
-build itself and refuses to skip over. That refusal is the one-build rule
-(`connection.md` §3.9 — one Lean build at a time, machine-wide), and a Tier 1
-that quietly degraded to Tier 0 is the failure the conformance program exists to
-avoid.
+The deterministic gates live with their owners:
+
+- `bisim/ci/tier0.sh` replays frozen vectors and rebuilt programs without Lean.
+- `bisim/ci/tier1.sh` runs the live differential against a prebuilt oracle.
+- `cli/ci/examples.sh`, `policies.sh`, and `routing-config.sh` pin CLI,
+  scheduler, persistence, control, and model-definition behavior.
+- `engine/acp/ci/acp.sh` and `engine/agent-deck/ci/deck.sh` drive all transport
+  scenarios against module-local doubles. `engine/acp/ci/route-live.sh` is
+  manual and paid; no automatic gate invokes it.
+
+Tier 1 refuses to build or silently skip its oracle. This preserves the
+one-build rule for the expensive Lean flagship.
 
 ## Building
 
 The nix devShell is the only environment; `direnv allow .` wires it up.
 
-```sh
-nix develop                 # or: direnv exec . <command>
-lake exe cache get          # Mathlib's objects — a cold miss is hours of elaboration
-lake build                  # everything in defaultTargets
-lake exe corpus-gen         # re-observe the frozen corpus; expect no diff
-lake exe conformance-oracle # the oracle, on stdin/stdout
-```
+# Haskell workspace
+nix develop path:. -c cabal build all
+nix develop path:. -c cabal run agentic-run -- run harden --scripted
+
+# Normative Lean model
+nix develop path:./model -c bash -c 'cd model && lake build'
+
+# Lean conformance oracle and byte-frozen corpus
+nix develop path:./model -c bash -c 'cd bisim && lake build && lake exe corpus-gen'
 
 The Texinfo manual builds and checks in the same shell:
 
@@ -329,20 +355,18 @@ and instance inventory, complete manual examples, and deterministic CLI transcri
 The exact workflow and repository verification outcomes are recorded in
 `doc/verification.md`.
 
-**Never run two Lean builds at once.** `Agentic/Core/DslFlagship.lean` dominates
-the build — minutes of wall clock and several gigabytes, the kernel running the
-checker, the cost algebra and the interpreter on a real program — and two at once
-have exhausted 48 GB. Nothing else costs that: neither the oracle nor the corpus
-generator imports the flagship, so `lake exe conformance-oracle` builds in
-seconds, and an oracle build that hangs for minutes is the bug. The Haskell side
-is independent, from `haskell/`:
+**Never run two full model builds at once.**
+`model/Agentic/Core/DslFlagship.lean` dominates the build — minutes of wall
+clock and several gigabytes. The bisim oracle deliberately excludes that module.
+The Haskell workspace is independent and runs from the repository root:
 
 ```sh
-nix develop -c cabal build all
-nix develop -c cabal run agentic-run -- run harden --scripted
-./ci/tier0.sh          # the PR gate: tier0 and tier1 over the frozen corpus
-./ci/acp.sh; ./ci/deck.sh   # the runner against the two fixture doubles
-./ci/tier1.sh          # nightly; wants ../.lake/build/bin/conformance-oracle built
+nix develop path:. -c cabal build all
+nix develop path:. -c cabal run agentic-run -- run harden --scripted
+./bisim/ci/tier0.sh
+./cli/ci/policies.sh; ./cli/ci/examples.sh
+./engine/acp/ci/acp.sh; ./engine/agent-deck/ci/deck.sh
+N=500 SEED=1 ./bisim/ci/tier1.sh
 ```
 
 ## What was retired
@@ -353,7 +377,7 @@ to `agent-deck`, and an MCP server that stepped a run by tool call. On
 2026-08-18 the owner retired all of it in favour of the Haskell authoring
 surface, and it was removed rather than deprecated. What the language leaves
 behind is its contract, and the contract is the point: the frozen corpus under
-`test/corpus/` still pins, byte for byte, exactly what the elaboration, the cost
+`bisim/corpus/` still pins, byte for byte, exactly what the elaboration, the cost
 algebra, the interpreter and the trusted base compute, and the flagship's
 kernel theorems still hold — re-anchored to the `RawProgram` term, which is now
 where the program is written down rather than a thing a parser produced. Git
@@ -386,7 +410,10 @@ live sources before they went. Cite that page rather than the module names.
   `doc/design.html` and `doc/walkthrough.html`, which describe the superseded
   `Term` calculus.
 * `doc/conformance-schema.md` — the wire format, and what the corpus pins on each
-  of its three surfaces. `haskell/README.md` is the port.
+  of its three surfaces. The module-local READMEs describe the current Haskell implementation.
+* `doc/verification.md` — current deterministic build/test and boundary-audit evidence.
+* `doc/workflows/` — Pi workflow used only to author and validate the manual; it is
+  documentation tooling, not an agent-cat workflow/runtime module.
 * `doc/research/connection.md` — the design of record for the connection between
   the two implementations: why reimplementation-plus-conformance rather than
   extraction, FFI or a subprocess oracle, and, in §3, the boundary, the request
@@ -404,7 +431,7 @@ Issue tracking is `obr` (prefix `acat`; see `AGENTS.md` and `doc/PLAN.org`).
 ## Acknowledgements
 
 This work owes a real debt to **Isaac Shapira** and two projects of his:
-[agent-functor](https://github.com/jwiegley/agent-functor) and
+[agent-functor](https://gitlab.com/fresheyeball/agent-functor) and
 [incite](https://github.com/jwiegley/incite). agent-functor showed what a
 typed, lawful account of agent interaction could look like as working
 Haskell, and incite's workflows — the review ladders, the rosters of

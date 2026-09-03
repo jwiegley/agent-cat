@@ -10,15 +10,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MANUAL = ROOT / "doc" / "agent-cat.texi"
 MODULES = {
-    "Agentic.Cli": ROOT / "haskell/src/Agentic/Cli.hs",
-    "Agentic.Workflow": ROOT / "haskell/src/Agentic/Workflow.hs",
-    "Agentic.Workflow.Do": ROOT / "haskell/src/Agentic/Workflow/Do.hs",
-    "Agentic.WF": ROOT / "haskell/src/Agentic/WF.hs",
-    "Agentic.Schema": ROOT / "haskell/src/Agentic/Schema.hs",
-    "Agentic.Schema.Json": ROOT / "haskell/src/Agentic/Schema/Json.hs",
-    "Agentic.Schema.TH": ROOT / "haskell/src/Agentic/Schema/TH.hs",
+    "Agentic.Cli": ROOT / "cli/src/Agentic/Cli.hs",
+    "Agentic.Runtime.Facts": ROOT / "runtime/src/Agentic/Runtime/Facts.hs",
+    "Agentic.Workflow": ROOT / "dsl/src/Agentic/Workflow.hs",
+    "Agentic.Workflow.Do": ROOT / "dsl/src/Agentic/Workflow/Do.hs",
+    "Agentic.WF": ROOT / "dsl/src/Agentic/WF.hs",
+    "Agentic.Schema": ROOT / "dsl/src/Agentic/Schema.hs",
+    "Agentic.Schema.Json": ROOT / "dsl/src/Agentic/Schema/Json.hs",
+    "Agentic.Schema.TH": ROOT / "dsl/src/Agentic/Schema/TH.hs",
 }
-CLI_SOURCE = ROOT / "haskell/src/Agentic/Cli.hs"
+CLI_SOURCE = ROOT / "cli/src/Agentic/Cli.hs"
 HASKELL_INDEX = ROOT / "doc/haskell-api-index.texi"
 CLI_INDEX = ROOT / "doc/runner-index.texi"
 MARKER = re.compile(r"^@c COVER (API|CLI) (\S+) (author|support|machinery)$", re.MULTILINE)
@@ -60,11 +61,6 @@ AUTHOR_WORKFLOW = {
     "person",
     "revising",
     "revisingOn",
-    "routedBackend",
-    "runFactBackends",
-    "runFactEngine",
-    "runFactRoutes",
-    "runFactSentinel",
     "running",
     "schemaArray",
     "schemaBoolean",
@@ -75,8 +71,6 @@ AUTHOR_WORKFLOW = {
     "schemaProperty",
     "schemaString",
     "servedBy",
-    "sessionPolicy",
-    "sharesOneSession",
     "stop",
     "structured",
     "takes",

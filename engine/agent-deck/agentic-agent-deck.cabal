@@ -1,0 +1,26 @@
+cabal-version:   3.0
+name:            agentic-agent-deck
+version:         0.1.0.0
+synopsis:        agent-deck engine for agent-cat
+license:         MIT
+author:          John Wiegley
+maintainer:      jwiegley@positron.ai
+build-type:      Simple
+
+library
+  hs-source-dirs:  src
+  exposed-modules:
+    Agentic.AgentDeck
+  build-depends:
+    , aeson
+    , agentic-engine
+    , base
+    , bytestring
+    , directory
+    , process
+    , scientific
+    , text
+    , unix
+    , vector
+  ghc-options:      -Wall
+  default-language: Haskell2010

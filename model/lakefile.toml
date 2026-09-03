@@ -1,0 +1,40 @@
+name = "agentic"
+version = "0.1.0"
+defaultTargets = ["Agentic", "Pollution"]
+
+# The root module and every `Agentic/Core/*` module. The glob is explicit rather
+# than implied by the root's imports, because a module the root does not import
+# would otherwise be invisible to `lake build`; with the glob, one that stops
+# compiling breaks the build like everything else.
+#
+# WHERE THE BUILD TIME IS. One module in this glob dominates the whole build:
+# `Agentic/Core/DslFlagship.lean` takes about six minutes and several gigabytes
+# to elaborate, because its nine `decide +kernel` proofs make the kernel run
+# the checker, the cost algebra and the interpreter on the flagship `Raw` term —
+# the theorems about the flagship are true by computation, not by assertion, and
+# that is what computation costs. Never elaborate it twice concurrently; two at
+# once have exhausted 48 GB on a developer machine.
+#
+# It is a separate module from `Agentic/Core/Dsl.lean` for exactly that reason.
+# `Dsl.lean` is the cheap half — the level theorems about the *checker*, about a
+# second and a half — and it is all that `Agentic/Core/Explain.lean` and, through
+# it, `../bisim/lean/Conformance.lean` need, so the conformance oracle and its
+# corpus generator build in seconds rather than importing the flagship.
+# minutes. Keep it so: if a tool comes to need something proved about the
+# flagship, move the *statement* into the cheap half rather than the import into
+# the tool.
+[[lean_lib]]
+name = "Agentic"
+globs = ["Agentic", "Agentic.Core.+"]
+
+[[require]]
+name = "mathlib"
+git = "https://github.com/leanprover-community/mathlib4"
+rev = "v4.30.0"
+
+# The instance-pollution probe (test/Pollution.lean): machine-checked assertions
+# that importing this package installs no arithmetic on `Bool`, `Prop` or `ℕ`.
+# In defaultTargets on purpose — a re-polluting instance must break the build.
+[[lean_lib]]
+name = "Pollution"
+srcDir = "test"

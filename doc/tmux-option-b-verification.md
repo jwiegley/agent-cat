@@ -4,6 +4,8 @@ Date: 2026-08-28
 
 Interface note (2026-08-30): the catalogue command was subsequently renamed from `/workflows` to `/wf` so that `pi-dynamic-workflows` retains `/workflows`. References below preserve the command observed during this verification run.
 
+Layout note: filesystem paths below likewise preserve the pre-modular layout that was verified; current paths are documented in the root and module READMEs.
+
 This record separates (1) flows observed through the offline Pi TUI and (2) executable protocol fixtures used where a real provider would add cost or nondeterminism. No prompt was sent to a paid/live model. Pi printed a pre-existing local `models.json` warning at startup; extension commands and deterministic fixtures remained operational.
 
 ## Environment

@@ -36,10 +36,10 @@ check:
 	$(PYTHON) check-workflow-smoke.py
 
 check-haskell:
-	cd ../haskell && nix develop -c bash -c 'set -eu; cabal build all; tmp=$$(mktemp -d); mkdir -p "$$tmp/ghc"; cabal exec -- ghc -outputdir "$$tmp/ghc" -i../doc/examples -package agentic ../doc/examples/Registry.hs -o "$$tmp/manual-run"; "$$tmp/manual-run" list >/dev/null; "$$tmp/manual-run" run hello --scripted >/dev/null; runner=$$(cabal list-bin agentic-run); python3 ../doc/check-manual-cli.py "$$runner"; python3 ../doc/check-manual-members.py; rm -rf "$$tmp"'
+	cd .. && nix develop path:. -c bash -c 'set -eu; cabal build all; tmp=$$(mktemp -d); mkdir -p "$$tmp/ghc"; cabal exec -- ghc -outputdir "$$tmp/ghc" -idoc/examples -package agentic-cli -package agentic-dsl doc/examples/Registry.hs -o "$$tmp/manual-run"; "$$tmp/manual-run" list >/dev/null; "$$tmp/manual-run" run hello --scripted >/dev/null; runner=$$(cabal list-bin agentic-run); python3 doc/check-manual-cli.py "$$runner"; python3 doc/check-manual-members.py; rm -rf "$$tmp"'
 
 update-haskell-inventory:
-	cd ../haskell && nix develop -c bash -c 'set -eu; cabal build all; python3 ../doc/check-manual-members.py --write'
+	cd .. && nix develop path:. -c bash -c 'set -eu; cabal build all; python3 doc/check-manual-members.py --write'
 
 clean:
 	rm -rf $(BUILD_DIR)

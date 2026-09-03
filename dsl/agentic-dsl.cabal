@@ -1,0 +1,39 @@
+cabal-version:   3.0
+name:            agentic-dsl
+version:         0.1.0.0
+synopsis:        Pure typed Haskell DSL for agent-cat workflows
+license:         MIT
+author:          John Wiegley
+maintainer:      jwiegley@positron.ai
+build-type:      Simple
+
+library
+  hs-source-dirs:  src
+  exposed-modules:
+    Agentic.Builder
+    Agentic.DSL
+    Agentic.DSL.Plan
+    Agentic.Schema
+    Agentic.Schema.Json
+    Agentic.Schema.TH
+    Agentic.WF
+    Agentic.Workflow
+    Agentic.Workflow.Do
+
+  other-modules:
+    Agentic.DSL.Json
+    Agentic.Raw
+    Agentic.Text
+
+  build-depends:
+    , aeson
+    , base
+    , bytestring
+    , containers
+    , scientific
+    , template-haskell
+    , text
+    , vector
+
+  ghc-options:      -Wall
+  default-language: Haskell2010

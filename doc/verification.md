@@ -1,114 +1,130 @@
-# Manual verification record
+# Verification record
 
-This record covers the working tree on branch `manual`, based on
-`5540d80e43895498da4e0ec0e58dcc26c4e5431f` and the uncommitted manual changes
-present on 2026-08-28. No command below used a live model, network-backed
-adapter, production service, or external account.
+This record covers the modular working tree based on
+`4d11cf37da7867cd36305d8d97e52c751f4302cb`, verified on 2026-09-03. No command
+used a live model, network-backed adapter, production service, or paid account.
+`engine/acp/ci/route-live.sh` was deliberately not run.
 
-## Workflow smoke run
+## Frozen artifacts
 
-The checked-in script `workflows/agent-cat-manual.js` had SHA-256
-`10f66aa25cf654376ce436c1b1e0c354b2f0697962f45668e7ab8ce19e2c2654`.
-It was passed verbatim to the Pi `workflow` tool with these arguments:
+- Corpus: 193 files under `bisim/corpus/`, aggregate SHA-256
+  `ddc3c072660c1bc09e2ef06e850ae314512dbafff06734ad23ef1d4a47be14e5`.
+- Manual workflow: `doc/workflows/agent-cat-manual.js`, SHA-256
+  `10f66aa25cf654376ce436c1b1e0c354b2f0697962f45668e7ab8ce19e2c2654`.
+- Retained workflow smoke run: `agent-cat-manual-mtc8ywaw-oqxenx`; all fourteen
+  agents completed, every review finding was applied, and validation passed.
 
-```json
-{
-  "mode": "update",
-  "smoke": true,
-  "scope": "One two-sentence Texinfo paragraph explaining that a Haskell Program pairs RawProgram with a typed Plan and that Lean is used for conformance testing rather than production execution.",
-  "requirements": "Exercise all fourteen calls and six phases. Keep every result strictly bounded. The Validate phase must run actual makeinfo Info and HTML commands against a temporary wrapped candidate and return exact outcomes. Every review finding must receive an applied or deferred stable-ID disposition, and every intermediate gaps array must be empty for complete=true."
-}
-```
-
-Run `agent-cat-manual-mtc8ywaw-oqxenx` completed with fourteen agents done,
-zero errors, zero skipped agents, and the final phase `Validate`. The runtime's
-full persisted `result` is retained in `doc/workflow-smoke.json`: the eight-entry
-source map, all five draft Texinfo values and evidence arrays, synthesis and its
-empty gap ledger, all five review reports and their complete findings, the
-revised Texinfo, stable-ID dispositions (`texinfo:1` and `prose:1` applied; none
-deferred), validation evidence, and final `gaps: []` / `complete: true`.
-
-The validation agent ran these exact render commands:
+## Lean model and bisimulation
 
 ```sh
-makeinfo --no-split --output=/tmp/agent-cat-revision.1cdAn8/revision.info doc/revision.texinfo
-makeinfo --html --no-split --output=/tmp/agent-cat-revision.1cdAn8/revision.html doc/revision.texinfo
+nix flake check path:./model --no-build
+nix develop path:./model -c bash -c 'cd model && lake build'
+nix develop path:./model -c bash -c 'cd bisim && lake build && lake exe corpus-gen'
+./bisim/ci/tier0.sh
+N=500 SEED=1 ./bisim/ci/tier1.sh
 ```
 
-Both exited 0 with empty standard output and standard error, producing nonempty
-Info and HTML files. The candidate, captures, and rendered files were removed,
-and the cleanup assertion exited 0. `doc/check-workflow-smoke.py` binds this
-full result to the current script hash and verifies every inventory, draft,
-synthesis, review, disposition, revision, validation, and final-gap field.
+Results:
 
-## Documentation and examples
+- Model: 762 jobs, including `Agentic.Core.DslFlagship` and `Pollution`, passed.
+- Bisim Lean package: 1503 jobs; oracle and corpus generator passed.
+- Corpus regeneration: 193 entries re-observed, all byte-identical.
+- Tier 0: 193/193 passed; 45 expected codec-only `other` refusals.
+- Rebuilt Tier 1: 30/30 passed.
+- Live differential: P1R 1/1, P1 500/500, P2 12000/12000, P3 419/500 with
+  81 expected `other` skips; zero failures.
 
-| Command | Outcome |
-| --- | --- |
-| `nix flake check --no-build` | Passed for `aarch64-darwin`; incompatible systems were reported as omitted. |
-| `nix develop -c make -C doc check` | Passed. Info and HTML emitted no diagnostics; six source excerpts, two complete Haskell files, 214 top-level API/CLI entries, three indexes, and the retained workflow smoke record passed their checks. |
-| `make -C doc check-haskell` | Passed. Cabal was up to date; the complete `Hello` and `Registry` modules compiled and linked in a temporary directory; the one-row executable listed and ran `hello --scripted`; deterministic CLI transcripts and defaults matched; GHCi derived and verified 117 wildcard-exported children and 103 exported-class instances. |
-| `make -C doc clean all` | Passed. Retained outputs were `doc/build/agent-cat.info` and `doc/build/agent-cat.html`; `doc/build/` is ignored. |
-| `python3 doc/check-prose.py` | Passed with exact output `manual prose: prohibited patterns absent; no three-sentence staccato run`. |
+## Haskell workspace and interfaces
 
-The compiler-derived ledger is regenerated with
-`make -C doc update-haskell-inventory`. Its checker obtains wildcard-exported
-constructors, fields, associated types, and methods from GHCi `:info!`, discovers
-exported classes from current source, and records all instances reported by
-GHCi. The checked ledger is `doc/haskell-member-coverage.texi`; it is no longer
-a hand-maintained constructor or instance inventory. Its compiler-derived
-member and instance rows render as a reader-visible matrix in the Haskell
-reference and map each row to its documented parent entry.
+```sh
+nix flake check --no-build
+nix develop path:. -c cabal build all
+nix develop path:. -c cabal test all
+```
 
-## Haskell and conformance gates
+All 15 workspace packages built independently and together. The engine API fake
+test passed. The generated Cabal plan was audited for cycles and exact critical
+edges:
 
-| Command | Outcome |
-| --- | --- |
-| `cd haskell && nix develop -c bash -c 'set -e; ./ci/tier0.sh; ./ci/policies.sh; ./ci/citations.sh'` | Passed. Tier 0: 190/190; curated Tier 1: 30/30; all policy probes passed; 208 Lean citations resolved across 41 files. |
-| `cd haskell && nix develop -c ./ci/examples.sh` | Passed. Eight registered programs were pinned with zero failures; both help spellings and their commands ran; input-dependent folds stayed fixed while printed programs changed. |
-| `cd haskell && ./ci/acp.sh` | Passed. Sixteen scenarios, zero failures, including permission denial/grant, exit statuses 1/2/3, two routed adapters, fail-over, and narration separation. |
-| `cd haskell && ./ci/deck.sh` | Passed. Eight scenarios, zero failures, including memo reuse, decode abandonment, stopped/hung/stale sessions, missing binary, and two routed panes. |
+```text
+plan -> dsl
+cost -> plan
+runtime -> plan + engine/api
+engine/acp -> engine/api
+engine/acp/{claude,codex,droid} -> engine/acp
+engine/agent-deck -> engine/api
+workflow/{core,example,extra} -> dsl
+bisim -> dsl + plan
+cli:verification -> bisim + cost + dsl + plan
+cli:tier1 -> cli:verification + dsl + plan + workflow/{core,example}
+cli:bisim -> cli:verification + bisim + dsl + plan
+```
 
-`haskell/ci/acp.sh` now captures process standard output and standard error
-separately before combining them for content assertions, preventing concurrent
-scheduler output from splitting a diagnostic line. `haskell/ci/examples.sh`
-reuses an existing Nix development shell when one is supplied, avoiding a new
-Nix evaluation for every CLI call while retaining direct-invocation behavior.
+The audit also confirmed unique Haskell module ownership, hidden implementation
+modules behind DSL/Plan/Runtime/Bisim/CLI facades, an `Engine` typeclass with ACP
+and deck instances, and one shared `Thinking` representation. `ModelConfig` contains
+only model, thinking, and maximum-output fields consumed by both engines. ACP-only
+options terminate at `AcpModelConfig`; deck-only provider identity terminates at
+`DeckModelConfig`. Repository workflows
+have DSL as their sole local dependency; every `servedBy` value is a symbolic
+profile mapped in CLI's model-definition example. There is no production dependency
+on bisim, no MCP/TUI placeholder, and no obsolete pre-modular source tree.
 
-An earlier aggregate invocation exceeded the harness time limit while unrelated
-Nix, GHC, and Haddock work was active. Each unfinished gate was subsequently run
-as the exact separate command shown above and passed.
+## Runtime, CLI, and engines
 
-## Workflow syntax and prose
+```sh
+./cli/ci/policies.sh
+./cli/ci/citations.sh
+./cli/ci/examples.sh
+nix develop path:. -c ./cli/ci/routing-config.sh
+./engine/acp/ci/acp.sh
+./engine/agent-deck/ci/deck.sh
+```
 
-The workflow source was parsed with Acorn using ECMAScript module syntax plus the
-runtime's allowed top-level await and return settings; parsing succeeded. The
-manual prose check searched for the prohibited stock phrases, contractions,
-marketing terms, clipped `Constructor:` and `Default:` lead-ins, and the
-unexplained terms identified by independent review; no match remained. A
-sentence scan found no run of three prose sentences of six words or fewer.
+Results:
 
-Three independent read-only reviewers audited factual claims, completeness, and
-prose. Their supported findings were applied: cost-tree extrema were separated
-from attained world extrema; the checker contract and hazards were made
-explicit; complete copyable module and registry examples were added; registration
-exports were covered; constructor and instance inventory became compiler-derived;
-build dependencies and CLI transcript checks were added; and the cited prose
-faults were corrected. The claim that `doc/design.html` and
-`doc/walkthrough.html` were absent was rejected after direct file inspection.
+- Policy probe, lineage, and control probes passed, including memoization,
+  scheduling, effects, persistence, restart/resume/fork, steering, recovery, and
+  redirect behavior.
+- 197 live Haskell-to-Lean citations resolved against 42 Lean files.
+- Nine registered workflows retained every pinned plan, cost, help, and scripted
+  result.
+- Routing/model definitions retained strict schema validation, precedence,
+  failover, preflight, and provenance behavior.
+- ACP: 18/18 deterministic scenarios passed, including common settings and an
+  ACP-only option observed on the stub wire.
+- Agent-deck: 10/10 deterministic scenarios passed, including refusal of ACP-only
+  options before any deck command.
 
-## Repository state
+## Documentation
 
-`git diff --cached --check` passed. `git ls-files --error-unmatch` confirmed that
-`doc/agent-cat.texi`, `doc/Makefile`, `doc/verification.md`, and
-`workflows/agent-cat-manual.js` are tracked. `git status --short test/corpus` was
-empty, no `.hi`, `.o`, or `__pycache__` artifact remained under `doc/`, and obr
-reported its database and `doc/PLAN.org` in sync. All goal changes are staged;
-the goal-created `.pi/` runtime state remains untracked. No commit was created
-because the user did not request one.
+```sh
+nix develop path:. -c make -C doc check
+make -C doc check-haskell
+python3 doc/check-prose.py
+```
 
-A full `lake build` was not run because no Lean source changed. The Lean-facing
-claims were checked against current declarations, the 190 frozen observations,
-the 30 curated comparisons, and the citation gate. Live ACP adapters and real
-agent-deck sessions were excluded by the goal boundary; their deterministic
-fixture doubles passed as recorded above.
+Info and HTML rendered without diagnostics. Six source excerpts and two complete
+Haskell examples matched live source. API/CLI coverage accounted for 231 items.
+The compiler-derived ledger verified 127 public children and 112 exported-class
+instances. CLI transcript/default checks and the retained manual workflow smoke
+passed.
+
+## Pi extension
+
+```sh
+cd ext-pi
+npm run check
+npm test
+AGENT_CAT_E2E_RUNNER="$(cd .. && nix develop path:. -c cabal list-bin agentic-run)" npm run test:integration
+```
+
+TypeScript checking passed. Unit tests: 67 passed, five skipped. Integration tests:
+10 passed against deterministic ACP/deck/current/child/remote fixtures.
+
+## Final hygiene
+
+`git diff --check`, staged-diff whitespace checking, relative documentation-link
+validation, frozen-hash checks, forbidden-import scans, package inventory, module
+uniqueness, obsolete-path checks, and a staged-addition secret scan all passed.
+`doc/PLAN.org` is synchronized through obr issue `acat-eyr`.

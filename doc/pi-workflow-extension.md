@@ -25,12 +25,12 @@ The full Option B roadmap was subsequently implemented. The pre-implementation f
 - agent-cat protocol/store version 1 with strict bounded NDJSON events, lossless output splitting, pre-decode ACP frame limits, controls, typed answer state, effect journal, checkpoints, ownership, and immutable lineage;
 - `machine`, `machine-restart`, `machine-resume`, and `machine-fork`, all using `Program -> Plan -> runPlanPersisted -> WorldIO` (the compatibility path remains `runPlanWith`);
 - correlated cancel and timing-distinct steering, runner-offered retry/failover/abandon recovery, and scheduler-reserved redirect, with steering provenance and durable non-replayability;
-- `pi-extension/`, providing ordered trusted multi-runner discovery, exact help/plan, private inputs, scripted/ACP/deck/current/owned/discovered-remote targets, supervision, live/status surfaces, detailed terminal references, acknowledged controls, retention, and cross-session reconstruction;
+- `ext-pi/`, providing ordered trusted multi-runner discovery, exact help/plan, private inputs, scripted/ACP/deck/current/owned/discovered-remote targets, supervision, live/status surfaces, detailed terminal references, acknowledged controls, retention, and cross-session reconstruction;
 - project-trust checks and one-time scoped `/workflow-grant` tokens gate every model-initiated mutation; the generic tool can start, restart, resume, fork, inspect, and control runs;
 - `lineage-check` performs runner-owned compatibility and fork-edit preflight using private preview inputs before the extension creates a child run directory; restart/fork do not require a checkpoint, resume does, and fork supports multiple answer drops/replacements plus `/workflow-diff`;
 - the required Pi deltas: optional protocol `attach.mode` with cross-connection exclusive enforcement, `follow_up` as a timing-distinct operation, `RemoteSession.discover` over the authenticated client transport, and a correlated exclusive `ExtensionAPI.startTaskTurn` handle for the current session. Legacy attach remains shared; no generic workflow framework was added.
 
-Deterministic fixture coverage lives in `haskell/test/PolicyProbe.hs`, `test/lineage_probe.py`, `test/*_adapter.py`, `pi-extension/test/`, and the focused Pi package suites. The inspectable user-flow and executable verification matrix is `doc/tmux-option-b-verification.md`. No paid model call is required. Pause/unpause, nested workflow semantics, a generic workflow framework, and Pi-conversation fork as a workflow operation remain intentionally absent.
+Deterministic fixture coverage lives in `cli/test/PolicyProbe.hs`, `test/{lineage,control}_probe.py`, `engine/acp/test/*_adapter.py`, `ext-pi/test/`, and the focused Pi package suites. The inspectable user-flow and executable verification matrix is `doc/tmux-option-b-verification.md`. No paid model call is required. Pause/unpause, nested workflow semantics, a generic workflow framework, and Pi-conversation fork as a workflow operation remain intentionally absent.
 
 ## Scope and evidence baseline
 
@@ -257,7 +257,7 @@ Do not carry forward:
 
 ## What agent-cat already provides
 
-Agent-cat's operational half is in `haskell/`. Its design is a better integration foundation than an agent-functor port because the runtime seams already separate semantics, execution, and transport.
+Agent-cat's operational half is split across `dsl/`, `plan/`, `cost/`, `runtime/`, `engine/`, and `cli/`. These enforced seams are a better integration foundation than an agent-functor port because semantics, execution, transport, and composition are separate packages.
 
 ### Program and registry
 
@@ -275,7 +275,7 @@ Agent-cat's operational half is in `haskell/`. Its design is a better integratio
 - a full human help page;
 - scripted replies.
 
-`haskell/run/Main.hs` is only `cliMain examplesRegistry`. A downstream runner can apply the same CLI to another registry, which is how the private workflow toolbox already works.
+`cli/run/Main.hs` is only `cliMain examplesRegistry`. A downstream runner can apply the same CLI to another registry, which is how the private workflow toolbox already works.
 
 ### Discovery and argument metadata
 
@@ -496,22 +496,22 @@ Agent-cat-only changes are named in the evidence column rather than creating a f
 | Capability | Classification | Direct evidence and required work |
 |---|---|---|
 | Discover configured runner binaries | Possible with constraints | Extensions may use Node built-ins and `ExtensionAPI.exec` (`packages/coding-agent/docs/extensions.md`, “Available Imports”; `packages/coding-agent/src/core/extensions/types.ts`, `ExtensionAPI.exec`). There is no runner-discovery API, so use explicit trusted configuration and bounded PATH candidates, never an arbitrary repository scan. |
-| Refresh available workflows dynamically | Possible through supported Pi extension APIs | Reinvoke each configured runner's machine catalogue (`haskell/src/Agentic/Cli.hs`, `Registry`, `listCmd`; `haskell/run/Main.hs`, `main`) from an extension command/tool. The catalogue is compiled into the runner but dynamic from Pi's point of view. |
-| Show workflow name, blurb, level, cost, inputs, run facts, pins | Possible through supported Pi extension APIs | `haskell/src/Agentic/Cli.hs` documents the machine fields and derives them in `factFields`; `listCmd` emits them under `--json`. |
-| Show full help | Possible through supported Pi extension APIs | Invoke the runner's `help NAME`; `haskell/src/Agentic/Cli.hs`, `Row.rowHelp` and `helpCmd`, make the prose authoritative and verbatim. |
-| Obtain final program/cost fingerprint for actual inputs | Possible through supported Pi extension APIs | `haskell/src/Agentic/Cli.hs`, `planCmd`, emits `--json --raw`; `haskell/src/Agentic/Builder.hs`, `Program.progRawOut`, is the raw value to canonicalize before hashing. |
-| Per-argument types/defaults/structured help | Possible with constraints | `haskell/src/Agentic/Workflow.hs`, `Parameterized`, `taking`, and `input`, expose ordered required text names only; descriptions remain `haskell/src/Agentic/Cli.hs`, `Row.rowHelp`. Add descriptor fields if workflows need richer arguments. |
+| Refresh available workflows dynamically | Possible through supported Pi extension APIs | Reinvoke each configured runner's machine catalogue (`cli/src/Agentic/Cli.hs`, `Registry`, `listCmd`; `cli/run/Main.hs`, `main`) from an extension command/tool. The catalogue is compiled into the runner but dynamic from Pi's point of view. |
+| Show workflow name, blurb, level, cost, inputs, run facts, pins | Possible through supported Pi extension APIs | `cli/src/Agentic/Cli.hs` documents the machine fields and derives them in `factFields`; `listCmd` emits them under `--json`. |
+| Show full help | Possible through supported Pi extension APIs | Invoke the runner's `help NAME`; `cli/src/Agentic/Cli.hs`, `Row.rowHelp` and `helpCmd`, make the prose authoritative and verbatim. |
+| Obtain final program/cost fingerprint for actual inputs | Possible through supported Pi extension APIs | `cli/src/Agentic/Cli.hs`, `planCmd`, emits `--json --raw`; `dsl/src/Agentic/Builder.hs`, `Program.progRawOut`, is the raw value to canonicalize before hashing. |
+| Per-argument types/defaults/structured help | Possible with constraints | `dsl/src/Agentic/Workflow.hs`, `Parameterized`, `taking`, and `input`, expose ordered required text names only; descriptions remain `cli/src/Agentic/Cli.hs`, `Row.rowHelp`. Add descriptor fields if workflows need richer arguments. |
 | Command argument completion | Possible through supported Pi extension APIs | `packages/coding-agent/src/core/extensions/types.ts`, `RegisteredCommand.getArgumentCompletions`; usage is documented in `packages/coding-agent/docs/extensions.md`, `pi.registerCommand`. |
 | Rich argument wizard | Possible through supported Pi extension APIs | `packages/coding-agent/src/core/extensions/types.ts`, `ExtensionUIContext.select`, `input`, `editor`, and `custom`. |
-| Launch scripted workflow | Possible through supported Pi extension APIs | `haskell/src/Agentic/Cli.hs`, `Target.Scripted` and `runCmd`, are current execution paths; process launch precedent is `packages/coding-agent/examples/extensions/subagent/index.ts`, `runSingleAgent`. |
-| Launch against ACP adapters/routes | Possible through supported Pi extension APIs | Agent-cat remains the runner: `haskell/src/Agentic/Cli.hs`, `runCmd`; `haskell/src/Agentic/Acp.hs`, `withAcps` and `worldOfAcp`; `haskell/src/Agentic/Route.hs`, `routedWorld`. |
-| Launch against agent-deck session | Possible through supported Pi extension APIs | `haskell/src/Agentic/Cli.hs`, `runCmd`, accepts deck targets; `haskell/src/Agentic/AgentDeck.hs`, `worldOfDeck` and `sayDeck`, drive the external session. |
+| Launch scripted workflow | Possible through supported Pi extension APIs | `cli/src/Agentic/Cli.hs`, `Target.Scripted` and `runCmd`, are current execution paths; process launch precedent is `packages/coding-agent/examples/extensions/subagent/index.ts`, `runSingleAgent`. |
+| Launch against ACP adapters/routes | Possible through supported Pi extension APIs | Agent-cat remains the runner: `cli/src/Agentic/Cli.hs`, `runCmd`; `engine/acp/src/Agentic/Acp.hs`, `withAcps` and `engineOfAcp`; `runtime/src/Agentic/Runtime/Route.hs`, `routedWorld`. |
+| Launch against agent-deck session | Possible through supported Pi extension APIs | `cli/src/Agentic/Cli.hs`, `runCmd`, accepts deck targets; `engine/agent-deck/src/Agentic/AgentDeck.hs`, `engineOfDeck` and `sayDeck`, drive the external session. |
 | Use current Pi session as control plane | Possible through supported Pi extension APIs | `packages/coding-agent/src/core/extensions/types.ts`, `ExtensionAPI.registerCommand`, `registerTool`, and `ExtensionUIContext`, provide the command/tool/TUI host. |
 | Use current Pi session as workflow answerer | Possible with constraints | Implemented by the authenticated `CurrentSessionBridge`, ACP proxy, and `ExtensionAPI.startTaskTurn`. It is explicit, exclusive, handle-correlated (not prompt-text matched), visibly injects Pi turns, and is not a sandbox. |
-| Use extension-owned child Pi sessions | Possible with constraints | Implemented by `pi-extension/src/pi-child-acp.mjs` through public `createAgentSession`; sessions are in-memory, one prompt at a time, concurrent across child processes, steerable/abortable, and deliberately tool-free. |
+| Use extension-owned child Pi sessions | Possible with constraints | Implemented by `ext-pi/src/pi-child-acp.mjs` through public `createAgentSession`; sessions are in-memory, one prompt at a time, concurrent across child processes, steerable/abortable, and deliberately tool-free. |
 | Control arbitrary already-running Pi sessions | Possible with constraints | Implemented for sessions discovered over an explicitly configured authenticated transport or named by ID. `RemoteSession.discover` lists durable metadata after authentication; optional `attach.mode` and server enforcement make exclusive acquisition conflict before work. There is no unauthenticated global scan. |
 | Process-level run status | Possible through supported Pi extension APIs | The shipped subprocess precedent tracks spawn, close, exit code, and abort in `packages/coding-agent/examples/extensions/subagent/index.ts`, `runSingleAgent`; extensions may import Node `child_process` per `packages/coding-agent/docs/extensions.md`, “Available Imports”. |
-| Combined live stdout/stderr | Possible through supported Pi extension APIs | `packages/coding-agent/examples/extensions/subagent/index.ts`, `runSingleAgent`, consumes child stdout/stderr incrementally; agent-cat enables line-buffered output in `haskell/src/Agentic/Cli.hs`, `cliMain`. Output remains prose without step attribution. |
+| Combined live stdout/stderr | Possible through supported Pi extension APIs | `packages/coding-agent/examples/extensions/subagent/index.ts`, `runSingleAgent`, consumes child stdout/stderr incrementally; agent-cat enables line-buffered output in `cli/src/Agentic/Cli.hs`, `cliMain`. Output remains prose without step attribution. |
 | Per-step pending/running/done/reused/failed | Possible with constraints | Implemented by `Agentic.Runtime.Protocol`, `runPlanPersisted`, and the pure extension reducer. Operational occurrence identity remains below denotation. |
 | Per-step backend, retry, failover, answer source | Possible with constraints | Implemented as occurrence/attempt/reuse/recovery/redirect events; authored trace order remains a separate `trace.ordered` event. |
 | Stream model text/reasoning/todos per step | Possible with constraints | ACP text chunks are emitted as bounded `attempt.output`; private reasoning/todos remain unsupported rather than inferred. Agent-deck remains completion-oriented. |
@@ -530,9 +530,9 @@ Agent-cat-only changes are named in the evidence column rather than creating a f
 | Fork current Pi conversation | Possible through supported Pi extension APIs | `packages/coding-agent/src/core/extensions/types.ts`, `ExtensionCommandContext.fork`; lifecycle and stale-context rules are documented in `packages/coding-agent/docs/extensions.md`, `ctx.fork`. It replaces the current session and is not workflow fork. |
 | Persist logs and terminal records | Possible through supported Pi extension APIs | `packages/coding-agent/src/core/extensions/types.ts`, `ExtensionAPI.appendEntry`, plus Node filesystem imports allowed by `packages/coding-agent/docs/extensions.md`, “Available Imports”; `packages/coding-agent/src/core/session-manager.ts`, `CustomEntry`, persists references. |
 | Persist semantic replay state | Possible with constraints | Implemented in agent-cat-owned `answers.json`, `effects.ndjson`, and `checkpoint.json`, with full question JSON keys, schema-indexed answer decoding, semantic versioning, and fail-closed migration/corruption policy. |
-| Nested workflow runs | Not currently feasible | `haskell/src/Agentic/Workflow.hs`, `function`, `call`, and `defining`, build/in-line one `Program`; there is no child-run identity or runtime nesting protocol. |
-| Enforce agent-cat effect permission | Possible through supported Pi extension APIs | Existing agent-cat execution enforces it in `haskell/src/Agentic/Acp.hs`, `permissionByIntent`; the extension launches that runtime rather than reproducing permission logic. |
-| Enforce extension/runner capability sandbox | Possible with constraints | Pi explicitly gives extensions full process authority (`packages/coding-agent/docs/security.md`, “No built-in sandbox”); agent-cat provides cwd/scratch policy through `haskell/src/Agentic/Acp.hs`, `AcpConfig.acpCwd`, not an OS sandbox. Use trust checks, grants, isolation, and clear labels. |
+| Nested workflow runs | Not currently feasible | `dsl/src/Agentic/Workflow.hs`, `function`, `call`, and `defining`, build/in-line one `Program`; there is no child-run identity or runtime nesting protocol. |
+| Enforce agent-cat effect permission | Possible through supported Pi extension APIs | Existing agent-cat execution enforces it in `engine/acp/src/Agentic/Acp.hs`, `permissionByIntent`; the extension launches that runtime rather than reproducing permission logic. |
+| Enforce extension/runner capability sandbox | Possible with constraints | Pi explicitly gives extensions full process authority (`packages/coding-agent/docs/security.md`, “No built-in sandbox”); agent-cat provides cwd/scratch policy through `engine/acp/src/Agentic/Acp.hs`, `AcpConfig.acpCwd`, not an OS sandbox. Use trust checks, grants, isolation, and clear labels. |
 
 ## Architecture options
 
@@ -683,7 +683,7 @@ agent-cat Registry -> Program -> runPlanWith -> WorldIO
 4. **Pure run reducer**
    - consumes monotone sequenced events;
    - is transport- and TUI-independent;
-   - ignores duplicates and detects gaps;
+   - rejects duplicate or gapped sequences as corruption;
    - never infers success from silence.
 
 5. **Pi views**
@@ -1128,8 +1128,8 @@ Extension:
 Use current project fixtures only:
 
 - scripted workflows for deterministic path/reuse behavior;
-- `test/stub_adapter.py` and Haskell ACP gate for live protocol behavior;
-- `haskell/test/stub-deck.sh` for external-session behavior;
+- `engine/acp/test/stub_adapter.py` and the ACP gate for live protocol behavior;
+- `engine/agent-deck/test/stub-deck.sh` for external-session behavior;
 - a fake event runner for extension error injection;
 - Pi tmux interactive mode for catalogue, launch, monitor, resize, key controls, and cancellation.
 
@@ -1177,15 +1177,16 @@ A green build alone is insufficient. `doc/tmux-option-b-verification.md` separat
 
 ### agent-cat
 
-- `haskell/src/Agentic/Builder.hs`: `Program`, `program`.
-- `haskell/src/Agentic/Workflow.hs`: `workflow`, `Parameterized`, `taking`, `input`, `Example`, run facts.
-- `haskell/src/Agentic/Cli.hs`: `Registry`, `Row`, `listCmd`, `helpCmd`, `planCmd`, `runCmd`, discovery JSON contract.
-- `haskell/src/Agentic/Plan.hs`: `Plan`, `Request`, `Intent`, `AnswerSource`, `ExecEvent`, `ExecTrace`.
-- `haskell/src/Agentic/Exec.hs`: `WorldIO`, `runPlanWith`, `announcingWorld`, `askOrMemo`, `TurnGap`, `Recovery`, `ExecSettings`.
-- `haskell/src/Agentic/Acp.hs`: `AcpConfig`, `withAcp`, `withAcps`, `worldOfAcp`, `promptTurn`, permission and stop-reason policy.
-- `haskell/src/Agentic/AgentDeck.hs`: `WorldIO` adapter, session liveness/poll/output behavior.
-- `haskell/run/Main.hs`, `haskell/example/Example/Harden.hs`.
-- `README.md`, `haskell/README.md`, `doc/request-intent-representation.md`.
+- `dsl/src/Agentic/Builder.hs`: `Program`, `program`.
+- `dsl/src/Agentic/Workflow.hs`: pure `workflow`, `Parameterized`, `taking`, `input`, `Example`.
+- `runtime/src/Agentic/Runtime/Facts.hs`: engine-neutral run fact names and readers.
+- `cli/src/Agentic/Cli.hs`: `Registry`, `Row`, `listCmd`, `helpCmd`, `planCmd`, `runCmd`, discovery JSON contract.
+- `plan/src/Agentic/Plan.hs`: `Plan`, `Request`, `Intent`, `AnswerSource`, `ExecEvent`, `ExecTrace`.
+- `runtime/src/Agentic/Exec.hs`: `WorldIO`, `runPlanWith`, `announcingWorld`, `askOrMemo`, `TurnGap`, `Recovery`, `ExecSettings`.
+- `engine/acp/src/Agentic/Acp.hs`: `AcpConfig`, `withAcp`, `withAcps`, `engineOfAcp`, `promptTurn`, permission and stop-reason policy.
+- `engine/agent-deck/src/Agentic/AgentDeck.hs`: engine adapter, session liveness/poll/output behavior.
+- `cli/run/Main.hs` and the packages under `workflow/`.
+- `README.md`, module-local READMEs, and `doc/request-intent-representation.md`.
 
 ### Pi
 

@@ -12,6 +12,7 @@ import tempfile
 
 BINARY = os.path.abspath(sys.argv[1])
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ADAPTER_DIR = os.path.join(ROOT, "engine", "acp", "test")
 
 
 def run(args, store, timeout=20):
@@ -106,7 +107,7 @@ def assert_completed_lineage(root):
     assert result.returncode != 0 and not result.stdout and "no compatible checkpoint" in result.stderr
     assert not os.path.exists(os.path.join(missing_checkpoint, "manifest.json"))
     mismatch = os.path.join(root, "policy-mismatch")
-    adapter = os.path.join(ROOT, "test", "retry_adapter.py")
+    adapter = os.path.join(ADAPTER_DIR, "retry_adapter.py")
     result = run(["machine-restart", "mismatch", parent, "structured", "--engine", "acp", "--adapter", sys.executable, "--adapter-arg", adapter], mismatch)
     assert result.returncode != 0 and not result.stdout and "fingerprint/policy" in result.stderr
     assert not os.path.exists(os.path.join(mismatch, "manifest.json"))
@@ -139,7 +140,7 @@ def assert_crash_resume(root):
 
 def assert_effect_refusal(root):
     parent = os.path.join(root, "effect-crash")
-    adapter = os.path.join(ROOT, "test", "effect_hang_adapter.py")
+    adapter = os.path.join(ADAPTER_DIR, "effect_hang_adapter.py")
     process = subprocess.Popen(
         [BINARY, "machine", "effect-crash", "hello", "--engine", "acp", "--adapter", sys.executable, "--adapter-arg", adapter, "--timeout", "30000"],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True,

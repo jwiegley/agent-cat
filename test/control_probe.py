@@ -17,6 +17,7 @@ if len(sys.argv) != 3:
 BINARY = os.path.abspath(sys.argv[1])
 CONTROL_BINARY = os.path.abspath(sys.argv[2])
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ADAPTER_DIR = os.path.join(ROOT, "engine", "acp", "test")
 
 
 def event_lines(stream):
@@ -37,7 +38,7 @@ def event_lines(stream):
 def run_probe(name, adapter_name, trigger_type, control, expected_code=0, terminal_type="run.completed"):
     root = tempfile.mkdtemp(prefix=f"agentic-{name}-")
     store = os.path.join(root, "run")
-    adapter = os.path.join(ROOT, "test", adapter_name)
+    adapter = os.path.join(ADAPTER_DIR, adapter_name)
     control_read, control_write = os.pipe()
     try:
         process = subprocess.Popen(
@@ -215,8 +216,8 @@ def blocked_stdin_control_probe():
 def routed_control_probe(choice):
     root = tempfile.mkdtemp(prefix=f"agentic-{choice}-")
     control_read, control_write = os.pipe()
-    adapter = os.path.join(ROOT, "test", "retry_adapter.py")
-    spare = os.path.join(ROOT, "test", "stub_adapter.py")
+    adapter = os.path.join(ADAPTER_DIR, "retry_adapter.py")
+    spare = os.path.join(ADAPTER_DIR, "stub_adapter.py")
     process = None
     controls = None
     try:
@@ -308,7 +309,7 @@ def oversize_probe():
         result = subprocess.run(
             [
                 BINARY, "machine", "oversize-run", "structured", "--engine", "acp",
-                "--adapter", sys.executable, "--adapter-arg", os.path.join(ROOT, "test", "oversize_adapter.py"), "--timeout", "10000",
+                "--adapter", sys.executable, "--adapter-arg", os.path.join(ADAPTER_DIR, "oversize_adapter.py"), "--timeout", "10000",
             ],
             capture_output=True,
             text=True,

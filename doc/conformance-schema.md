@@ -241,7 +241,7 @@ oracle.
 
 ## The corpus
 
-`test/corpus/*.json`: one file per case, of the form
+`bisim/corpus/*.json`: one file per case, of the form
 
 ```json
 {"name": "…", "request": <request>, "reply": <reply>, "oracleVersion": 1}

@@ -1,0 +1,24 @@
+name = "agentic-bisim"
+version = "0.1.0"
+defaultTargets = ["Conformance", "conformance-oracle", "corpus-gen"]
+
+[[require]]
+name = "agentic"
+path = "../model"
+
+# Test-boundary codecs and observations. This deliberately imports the cheap
+# model closure, never Agentic.Core.DslFlagship or Agentic.Core.HardenPatch.
+[[lean_lib]]
+name = "Conformance"
+srcDir = "lean"
+globs = ["Conformance", "Conformance.+"]
+
+[[lean_exe]]
+name = "conformance-oracle"
+srcDir = "lean"
+root = "ConformanceOracle"
+
+[[lean_exe]]
+name = "corpus-gen"
+srcDir = "lean"
+root = "CorpusGen"

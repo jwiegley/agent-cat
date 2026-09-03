@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MANUAL = ROOT / "doc/agent-cat.texi"
 LEDGER = ROOT / "doc/haskell-member-coverage.texi"
-HASKELL = ROOT / "haskell"
+HASKELL = ROOT
 sys.dont_write_bytecode = True
 
 spec = importlib.util.spec_from_file_location("manual_coverage", ROOT / "doc/check-manual-coverage.py")
@@ -35,14 +35,18 @@ def wildcard_parents() -> set[str]:
 
 def exported_class_parents(api: dict[str, str]) -> set[str]:
     class_names: set[str] = set()
-    for path in (HASKELL / "src").rglob("*.hs"):
+    for path in (ROOT / "dsl/src").rglob("*.hs"):
         for match in re.finditer(r"(?m)^class\s+(?:\([^\n]*\)\s*=>\s*)?([A-Z][A-Za-z0-9_']*)\b", path.read_text()):
             class_names.add(match.group(1))
     return {name for name in api if name.rsplit(".", 1)[-1] in class_names}
 
 
 def ghci_info(parents: list[str]) -> dict[str, str]:
-    commands = [':set prompt ""', ':set prompt-cont ""']
+    commands = [
+        ':set prompt ""',
+        ':set prompt-cont ""',
+        ':module + Agentic.Builder Agentic.Cli Agentic.DSL Agentic.DSL.Plan Agentic.Planning Agentic.Runtime.Facts Agentic.Schema Agentic.Schema.Json Agentic.Schema.TH Agentic.WF Agentic.Workflow Agentic.Workflow.Do',
+    ]
     for index, parent in enumerate(parents):
         commands.extend(
             [
@@ -53,7 +57,7 @@ def ghci_info(parents: list[str]) -> dict[str, str]:
         )
     commands.append(":quit")
     result = subprocess.run(
-        ["cabal", "repl", "agentic", "-v0"],
+        ["cabal", "repl", "agentic-cli:lib:agentic-cli", "-v0"],
         cwd=HASKELL,
         input="\n".join(commands) + "\n",
         text=True,
@@ -78,16 +82,16 @@ def ghci_info(parents: list[str]) -> dict[str, str]:
 def members(block: str) -> set[str]:
     result: set[str] = set()
     # Constructors in ordinary data declarations.
-    for match in re.finditer(r"(?:=|\|)\s+[A-Za-z0-9_.]+\.([A-Z][A-Za-z0-9_']*)\b", block):
+    for match in re.finditer(r"(?:=|\|)\s+(?:[A-Za-z0-9_.]+\.)?([A-Z][A-Za-z0-9_']*)\b", block):
         result.add(match.group(1))
     # GADT constructors and class methods.
-    for match in re.finditer(r"(?m)^\s{2}[A-Za-z0-9_.]+\.([A-Za-z_][A-Za-z0-9_']*)\s+::", block):
+    for match in re.finditer(r"(?m)^\s{2}(?:[A-Za-z0-9_.]+\.)?([A-Za-z_][A-Za-z0-9_']*)\s+::", block):
         result.add(match.group(1))
     # Record fields may begin immediately after an opening brace or on later lines.
-    for match in re.finditer(r"[\{,]\s*[A-Za-z0-9_.]+\.([a-z][A-Za-z0-9_']*)\s+::", block):
+    for match in re.finditer(r"[\{,]\s*(?:[A-Za-z0-9_.]+\.)?([a-z][A-Za-z0-9_']*)\s+::", block):
         result.add(match.group(1))
     # Associated type families declared by a class.
-    for match in re.finditer(r"(?m)^\s{2}type (?:family )?[A-Za-z0-9_.]+\.([A-Z][A-Za-z0-9_']*)\b", block):
+    for match in re.finditer(r"(?m)^\s{2}type (?:family )?(?:[A-Za-z0-9_.]+\.)?([A-Z][A-Za-z0-9_']*)\b", block):
         result.add(match.group(1))
     return result
 
@@ -99,7 +103,7 @@ def normalize_instance(header: str) -> str:
 
 def instances(block: str) -> set[str]:
     result: set[str] = set()
-    for match in re.finditer(r"(?ms)^instance\s+(.*?)(?=^\s*-- Defined at)", block):
+    for match in re.finditer(r"(?ms)^instance\s+(.*?)(?=\s*-- Defined (?:at|in))", block):
         header = normalize_instance("instance " + match.group(1))
         result.add(header)
     return result

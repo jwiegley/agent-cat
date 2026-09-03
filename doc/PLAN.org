@@ -1934,6 +1934,80 @@ Today both live engines bind EVERY addressee to one backend per run — run/Main
 
 From acat-ozh: Mat Prop is the only matrix star; at Prob the csum-of-powers construction may work BECAUSE suprema are attained — plausibly the cheapest second matrix star, sidestepping acat-9ml's missing reindexing law at this carrier.
 
+* DONE [#B] Modularize agent-cat with strict package interfaces
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-eyr
+:LABELS:   []
+:ISSUE_TYPE: epic
+:CREATED:  [2026-09-02 Wed 23:49]
+:MODIFIED: [2026-09-03 Thu 06:48]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-03 Thu 06:48]
+:CLOSE_REASON: Completed after second audit correction: 15 target-layout packages; repository workflows are DSL-only and use only CLI-mapped symbolic profiles; Runtime facts are a Text-only core-runtime host API with no DSL edge; neutral ModelConfig has only model/thinking/output fields consumed by both engines; ACP options and deck provider identity live in adapter-specific types. Full deterministic suite passed, including ACP 18/18 and deck 10/10 boundary scenarios.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Refactor agent-cat into the confirmed org-jw-style multi-package architecture tracked by pi goal mtl5ytt6-usrm8d. Preserve semantics and external behavior; enforce Cabal package boundaries; isolate model, bisim, DSL, plan, cost, runtime, engines, workflows, CLI, and ext-pi; document future MCP/TUI slots without stubs.
+
+** Notes
+
+Confirmed architecture rulings
+- `dsl` is strictly runtime-independent.
+- An optional, engine-neutral `runtime` API may expose run/session/routing facts; importing it is an explicit purity opt-out.
+- Shipped workflow packages remain DSL-only; runtime-aware probes belong to runtime/CLI tests.
+- `bisim` may have test-only dependencies on `cost`, `workflow/core`, and `workflow/example` so it checks the exact analyzer and executable workflows rather than copies.
+- `route-live.sh` is preserved but excluded from automatic verification because it performs paid calls.
+
+Baseline at 4d11cf37da7867cd36305d8d97e52c751f4302cb
+- 408 tracked paths; 21 executable; 45 Haskell; 42 Lean; 193 frozen corpus files.
+- Corpus aggregate SHA-256: ddc3c072660c1bc09e2ef06e850ae314512dbafff06734ad23ef1d4a47be14e5.
+- Workflow smoke SHA-256: d1e8aa369008e0b35d03ba699142fbcceb55a026a4dc63d442f737923f7c4b0d.
+- Manual workflow source SHA-256: 10f66aa25cf654376ce436c1b1e0c354b2f0697962f45668e7ab8ce19e2c2654.
+- Lean 4.30.0: lake build 1511 jobs; oracle ping passed; corpus-gen re-observed 193 byte-identically.
+- Haskell: cabal build all; tier0 193/193; rebuilt tier1 30/30; fixed-seed bisim P1 500/500, P2 12000/12000, P3 419/500 with 81 expected `other` skips; all zero failures.
+- Deterministic gates: policies, citations (207), examples (9), ACP (17), deck (9), routing config all passed.
+- Documentation checks passed: six excerpts, two complete files, 230 coverage items, 127 children, 112 instances, CLI and workflow smoke.
+- ext-pi: TypeScript check; 67 unit tests passed with five skipped; 10 integration tests passed.
+
+Ownership map before moves
+- model: Lean mathematical/proof sources and Pollution test.
+- bisim: Lean conformance/oracle/generator, corpus, Haskell Gen/Observe/Oracle/world fixtures and tier0/tier1/live differential.
+- dsl: Text/Schema/Raw/typed IR/Builder/WF/Workflow authoring surface.
+- plan: pure analyses, semantic evaluation/trace, canonical typed identity codecs.
+- cost: static cost interpreter and summaries.
+- engine/api: extracted neutral request/result/error capability contract.
+- runtime: execution, memo/retry/effects, generic routing, controls/protocol/store, shell interception, optional workflow runtime API.
+- engine/acp: ACP transport and Claude/Codex/Droid realization selectors plus fixtures.
+- engine/agent-deck: deck transport plus fixture.
+- workflow/core: harden; workflow/example: hello and structured examples; workflow/extra: five Isaac workflows.
+- cli: registry/help/composition, concrete backend grammar, routing/model-definition loading, runner and CLI probes.
+- ext-pi: current pi-extension package and fixtures, renamed.
+- root/doc: shared documentation, historical research, manual workflow, aggregate checks, and PLAN.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 219,
+    "issue_id": "acat-eyr",
+    "author": "johnw",
+    "text": "Reopened: Independent goal audit identified six remaining structural/documentation violations; corrective pass started.",
+    "created_at": "2026-09-03T12:04:39Z"
+  },
+  {
+    "id": 220,
+    "issue_id": "acat-eyr",
+    "author": "johnw",
+    "text": "Reopened: Second independent audit found concrete-looking workflow selections, an extra runtime/workflow package, and a generic engine option backchannel; corrective pass started.",
+    "created_at": "2026-09-03T13:04:58Z"
+  }
+]
+#+end_src
+
 * DONE [#C] DSL: implement 'panel, at least n must approve' (quorum read-out) with its three required theorems
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17

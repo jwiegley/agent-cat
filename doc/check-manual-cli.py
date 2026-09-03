@@ -83,8 +83,8 @@ def main() -> int:
     run(runner, "--help")
     run(runner, code=1)
 
-    acp = (ROOT / "haskell/src/Agentic/Acp.hs").read_text()
-    deck = (ROOT / "haskell/src/Agentic/AgentDeck.hs").read_text()
+    acp = (ROOT / "engine/acp/src/Agentic/Acp.hs").read_text()
+    deck = (ROOT / "engine/agent-deck/src/Agentic/AgentDeck.hs").read_text()
     defaults = {
         "ACP timeout": re.search(r"acpTurnTimeoutMs = (\d+)", acp).group(1),
         "deck poll": re.search(r"deckPollMs = (\d+)", deck).group(1),

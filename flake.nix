@@ -1,5 +1,5 @@
 {
-  description = "agent-cat — a denotational design for agentic workflows, formalized in Lean 4";
+  description = "agent-cat — modular Haskell workflow library and runner";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -10,20 +10,19 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
+
+        # One GHC with `aeson`, `QuickCheck` and `yaml` already in its package
+        # database. Together they cover the external dependencies declared by
+        # the sibling Cabal packages: core types ship with GHC, `aeson` brings
+        # text/bytestring/containers/vector/scientific, `QuickCheck` serves the
+        # bisimulation package, and `yaml` serves CLI model-definition loading.
+        # The shell is the environment; nothing is installed globally.
+        ghc = pkgs.haskellPackages.ghcWithPackages (p: [ p.aeson p.QuickCheck p.yaml ]);
       in {
         devShells.default = pkgs.mkShell {
           buildInputs = [
-            # Lean 4 (compiler + lake), from nixpkgs rather than elan. The
-            # repository DOES carry a lean-toolchain file (v4.30.0, which this
-            # derivation must match) and lakefile.toml requires Mathlib at the
-            # same tag, so a cold build needs the network once — `lake exe
-            # cache get` for Mathlib's objects, or hours of elaboration on a
-            # cache miss. After that, everything is local. (This comment once
-            # claimed the opposite on both counts; connection.md §3.9 filed
-            # the correction.)
-            pkgs.lean4
-            # Manual source is Texinfo; `make -C doc check` builds Info and HTML.
-            pkgs.texinfo
+            ghc
+            pkgs.cabal-install
           ];
         };
       });

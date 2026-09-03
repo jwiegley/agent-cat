@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "workflows/agent-cat-manual.js"
+SCRIPT = ROOT / "doc/workflows/agent-cat-manual.js"
 RECORD = ROOT / "doc/workflow-smoke.json"
 VERIFICATION = ROOT / "doc/verification.md"
 WORK_IDS = ["purpose-architecture", "mathematics", "operations", "user-guide", "reference"]
@@ -98,12 +98,12 @@ def main() -> int:
     verification = VERIFICATION.read_text()
     required = [
         record["runId"],
-        "nix develop -c make -C doc check",
+        "nix develop path:. -c make -C doc check",
         "make -C doc check-haskell",
-        "./ci/tier0.sh",
-        "./ci/examples.sh",
-        "./ci/acp.sh",
-        "./ci/deck.sh",
+        "./bisim/ci/tier0.sh",
+        "./cli/ci/examples.sh",
+        "./engine/acp/ci/acp.sh",
+        "./engine/agent-deck/ci/deck.sh",
         "python3 doc/check-prose.py",
     ]
     missing = [entry for entry in required if entry not in verification]

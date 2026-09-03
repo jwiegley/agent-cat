@@ -1,0 +1,43 @@
+version: 1
+routers:
+  - name: claude-acp
+    backend: acp:claude
+    provider: anthropic
+  - name: codex-acp
+    backend: acp:codex
+    provider: openai
+profiles:
+  - name: deep
+    chain:
+      - router: claude-acp
+        model: claude-opus-4-8
+        thinking: high
+        max-output: unconstrained
+      - router: codex-acp
+        model: gpt-5.5
+        thinking: xhigh
+        max-output: 65536
+  - name: balanced
+    chain:
+      - router: claude-acp
+        model: claude-fable-5
+        thinking: high
+        max-output: unconstrained
+  - name: review
+    chain:
+      - router: claude-acp
+        model: claude-opus-4-8
+        thinking: high
+        max-output: unconstrained
+  - name: reasoning
+    chain:
+      - router: codex-acp
+        model: gpt-5.5
+        thinking: xhigh
+        max-output: 65536
+  - name: coding
+    chain:
+      - router: codex-acp
+        model: gpt-5.5
+        thinking: high
+        max-output: 65536

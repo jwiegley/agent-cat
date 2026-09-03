@@ -1,0 +1,45 @@
+cabal-version:   3.0
+name:            agentic-bisim
+version:         0.1.0.0
+synopsis:        Lean-Haskell conformance for agent-cat
+license:         MIT
+author:          John Wiegley
+maintainer:      jwiegley@positron.ai
+build-type:      Simple
+
+common settings
+  ghc-options:      -Wall
+  default-language: Haskell2010
+  build-depends:
+    , aeson
+    , agentic-dsl
+    , agentic-plan
+    , base
+    , bytestring
+    , containers
+    , directory
+    , filepath
+    , process
+    , QuickCheck
+    , scientific
+    , text
+    , time
+    , unix
+    , vector
+
+library
+  import:          settings
+  hs-source-dirs:  haskell/src
+  exposed-modules:
+    Agentic.Bisim
+
+  other-modules:
+    Agentic.Gen
+    Agentic.Guards
+    Agentic.Oracle
+
+executable tier0
+  import:          settings
+  hs-source-dirs:  haskell/tier0
+  main-is:         Main.hs
+  build-depends:   agentic-bisim

@@ -183,7 +183,7 @@ Haskell source
 @end smallexample
 
 A production run follows the first branch and does not start Lean.  The second
-branch belongs to testing.  @file{conformance/Conformance.lean} implements a
+branch belongs to testing.  @file{bisim/lean/Conformance.lean} implements a
 line-delimited oracle, while the Haskell conformance programs compare their own
 printed program and Plan-derived observations with the oracle's replies.
 
@@ -215,15 +215,15 @@ questions and should be read at their own level.
 @item Lean type checking
 @tab Definitions and theorem statements elaborate without an admitted
 placeholder in the checked modules.
-@tab @file{Agentic/Core/} and the Lean build
+@tab @file{model/Agentic/Core/} and the Lean build
 @item Kernel theorems
 @tab The stated equality, bound, law, or witness follows from the definitions
 under the theorem's recorded axiom footprint.
-@tab Named declarations in @file{Agentic/Core/}
+@tab Named declarations in @file{model/Agentic/Core/}
 @item Frozen corpus replay
 @tab Haskell agrees with 190 committed request/reply observations without Lean
 in the test loop.
-@tab @file{test/corpus/} and @command{tier0}
+@tab @file{bisim/corpus/} and @command{tier0}
 @item Curated surface comparison
 @tab Checked Haskell programs print and observe as their frozen counterparts
 specify, including folds, traces, and bills.
@@ -235,7 +235,7 @@ the declared versioned observation surface.
 @item Deterministic transport gates
 @tab The Haskell runner behaves as expected against local ACP and agent-deck
 fixture doubles.
-@tab @file{haskell/ci/acp.sh} and @file{haskell/ci/deck.sh}
+@tab @file{engine/acp/ci/acp.sh} and @file{engine/agent-deck/ci/deck.sh}
 @end multitable
 
 The corpus has two program observation versions.  Version 2 preserves the
@@ -270,11 +270,11 @@ about the common Plan cannot erase a fact about the transport.
 @cindex retired workflow syntax
 The live authoring language is the Haskell surface.  The former @file{.wf}
 syntax, parser, Lean production transports, MCP server, and old @command{agent-cat}
-command were removed.  @file{Agentic/Core/Dsl.lean} contains a checker for
+command were removed.  @file{model/Agentic/Core/Dsl.lean} contains a checker for
 @code{RawProgram}; it contains no parser or concrete source language.
 
 The pre-rederivation @code{Term} calculus and its resource-algebra modules were
-also removed after the current @file{Agentic/Core/} design superseded them.
+also removed after the current @file{model/Agentic/Core/} design superseded them.
 @file{doc/research/term-algebra-results.md} preserves their results as history.
 @file{doc/design.html}, @file{doc/walkthrough.html}, and most of
 @file{doc/HANDOFF.md} describe earlier states of the project.  They can explain
@@ -330,7 +330,7 @@ question and may consequently receive another answer.
 
 The total function is a mathematical device rather than an instruction to
 compute every answer in advance.  A runtime constructs a finite table as a run
-proceeds.  @file{Agentic/Core/World.lean} relates that table to a total world
+proceeds.  @file{model/Agentic/Core/World.lean} relates that table to a total world
 through extension and counterfactual pinning.
 
 @section Dialogues
@@ -365,7 +365,7 @@ rather than an implementation convention.
 @cindex observational equality
 Two dialogues are observationally equal when every world gives them the same
 result and semantic transcript.  The relation is named @code{Obs} in
-@file{Agentic/Core/Dlg.lean}.  It is an equivalence and a congruence for bind,
+@file{model/Agentic/Core/Dlg.lean}.  It is an equivalence and a congruence for bind,
 which permits laws proved through denotation to descend to represented
 operations.
 
@@ -425,8 +425,8 @@ An operation on Plans is justified by a commuting equation.  Building a Plan
 and then denoting it must agree with applying the corresponding operation to
 the denoted dialogues.  The five Plan formers provide the defining equations.
 Substitution, scope changes, grafting, panels, and bounded revision have derived
-equations in @file{Agentic/Core/Morphism.lean} and
-@file{Agentic/Core/Denote.lean}.
+equations in @file{model/Agentic/Core/Morphism.lean} and
+@file{model/Agentic/Core/Denote.lean}.
 
 Several familiar laws follow through these equations.  Grafting denotes
 dialogue bind and carries unit and associativity laws.  Mapping and pairing
@@ -446,7 +446,7 @@ structural reports use this common recursion scheme.
 The flagship workflow reads a guide, asks for a draft, reviews it through a
 three-member panel under at most two amendments, asks a person for consent, and
 performs an apply effect only on the consenting branch.  Its meaning is written
-directly as a dialogue in @file{Agentic/Core/HardenPatch.lean} and represented
+directly as a dialogue in @file{model/Agentic/Core/HardenPatch.lean} and represented
 as a Plan in the same module.
 
 The named theorems establish six principal facts.  Refusal of consent excludes
@@ -457,7 +457,7 @@ maximum of fifteen request occurrences.  The minimum leaf is unattainable, and
 every actual world produces one of seven bills: 6, 7, 10, 11, 13, 14, or 15.
 The dialogue run is total.
 
-@file{Agentic/Core/DslFlagship.lean} checks the first-order flagship term and
+@file{model/Agentic/Core/DslFlagship.lean} checks the first-order flagship term and
 proves transcript agreement with the hand-written Plan in four named worlds,
 including the longest demonstrated path.  The file states plainly that a
 universally quantified transcript agreement is not proved.  This distinction
@@ -884,13 +884,12 @@ the project runner and its conformance tests.
 
 @section Enter the Haskell development shell
 
-The Haskell package has its own Nix development shell.  Run the commands in this
-chapter from @file{haskell/}:
+The root Nix development shell contains the Haskell workspace. Run these commands
+from the repository root:
 
 @example
-cd haskell
-nix develop -c cabal build all
-nix develop -c cabal run agentic-run -- list
+nix develop path:. -c cabal build all
+nix develop path:. -c cabal run agentic-run -- list
 @end example
 
 The build covers the library, the compiled examples, and the conformance and
@@ -1171,7 +1170,7 @@ first-order place inside the round and are rejected.
 
 The flagship's complete review clause is a compiled example:
 
-@c SOURCE haskell/example/Example/Harden.hs
+@c SOURCE workflow/core/src/Workflow/Core/Harden.hs
 @verbatim
     result <- revising draft (atMost 2) \patch -> W.do
         verdict <- panel
@@ -1203,7 +1202,7 @@ The bind of a revision is also the branch point.  Its result is consumed by the
 immediately following Haskell case.  Both outcomes carry the candidate then in
 hand:
 
-@c SOURCE haskell/example/Example/Harden.hs
+@c SOURCE workflow/core/src/Workflow/Core/Harden.hs
 @verbatim
     case result of
       Settled patch -> W.do
@@ -1264,7 +1263,7 @@ bounded revision, and @code{knownHere} belong to the calling workflow.
 The @code{reviewReport} function from the compiled Isaac examples has six text
 parameters and a receipt result:
 
-@c SOURCE haskell/example/Example/Isaac.hs
+@c SOURCE workflow/extra/src/Workflow/Extra/Isaac.hs
 @verbatim
 reviewReport ::
   Fn '[ 'CodeText, 'CodeText, 'CodeText, 'CodeText, 'CodeText, 'CodeText] 'CodeAck
@@ -1333,7 +1332,7 @@ unique, and only one command-tail and one standard-input source may appear.
 @code{Parameterized}.  The compiled @code{review-lite} example uses a custom
 stdin name:
 
-@c SOURCE haskell/example/Example/Isaac.hs
+@c SOURCE workflow/extra/src/Workflow/Extra/Isaac.hs
 @verbatim
 reviewLite :: Parameterized
 reviewLite = taking (stdinInputAs "subject" :> noInputs) \subject ->
@@ -1354,7 +1353,7 @@ valid; a terminal refuses rather than hanging.  Explicit input flags take
 precedence.  Stdin and command-tail inputs preserve exact text, while an
 ordinary file input retains the legacy one-final-LF removal.
 
-@section Run facts
+@section Optional runtime facts
 
 @cindex run fact
 Four reserved inputs are supplied by the runner rather than the operator:
@@ -1374,20 +1373,20 @@ A line generated for this run and inserted nowhere except prompts that hole the
 fact.
 @end table
 
-A Program declares these names through the ordinary @code{input} chain.  A name
-under @code{run.} that is outside the closed set is refused when the Program is
-forced.  An operator flag that attempts to supply a valid run fact is also
-refused, since a command line cannot state what its own run did.
+A workflow declares one of these names with the DSL's ordinary @code{input}; the
+name is a symbol, so the workflow package remains DSL-only.  The CLI treats
+@code{run.} as a closed namespace and supplies the fact from the run it is making.
+A name under that prefix outside the closed set is refused.  An operator flag that
+attempts to supply a valid run fact is also refused, since a command line cannot
+state what its own run did.  Hosts share the constants and readers through the
+Text-only @code{Agentic.Runtime.Facts} API.
 
 @code{sharesOneSession} reads @code{run.engine} and reports whether at least one
 answerer shares a conversation across the run.  @code{routedBackend} reads
 @code{run.routes} and returns the named backend, then the default backend, then
 empty text when no table exists.  @code{plan} and @code{cost} leave every run
-fact empty.  Scripted execution
-binds the roster, engine, and sentinel while leaving @code{run.routes} empty
-because it has no backend table.  The helper functions give conservative
-answers in both cases, suitable for choosing the Program's Haskell shape before
-a live run.
+fact empty.  Scripted execution binds the roster, engine, and sentinel while
+leaving @code{run.routes} empty because it has no backend table.
 
 @section Structured answers
 
@@ -1402,7 +1401,7 @@ in both directions.  Primitive types and lists have built-in instances.
 @code{deriveSchema} derives a record's schema, witness, and conversion from one
 record declaration.  The compiled structured example uses:
 
-@c SOURCE haskell/example/Example/Structured.hs
+@c SOURCE workflow/example/src/Workflow/Example/Structured.hs
 @verbatim
 data ReleasePlan = ReleasePlan
   { title :: Text,
@@ -1418,7 +1417,7 @@ $(deriveSchema ''ReleasePlan)
 A model question selects this answer through @code{structured @@ReleasePlan}.
 Using @code{annotated} prints the structured code in the first-order source:
 
-@c SOURCE haskell/example/Example/Structured.hs
+@c SOURCE workflow/example/src/Workflow/Example/Structured.hs
 @verbatim
 structuredProgram :: Program
 structuredProgram = workflow W.do
@@ -2256,44 +2255,51 @@ Overloaded right-associative cons for argument and input chains.  Construction
 is inferred from the endpoint; pattern matching is not a supported use.
 @end table
 
-@section Runner-supplied facts
+@section Runtime fact API
 
+The pure DSL does not export run, route, engine, or session facts.
+@code{Agentic.Runtime.Facts} is a Text-only host API with no dependency on the DSL
+or a concrete engine.
 @table @code
-@c COVER API Agentic.Workflow.runFacts support
+@c COVER API Agentic.Runtime.Facts.runFactName support
+@item runFactName name
+Validate and return one of the closed runner-supplied fact names; unknown names are
+refused.
+@c COVER API Agentic.Runtime.Facts.runFacts support
 @item runFacts
 Closed list of all four reserved names.
-@c COVER API Agentic.Workflow.runFactBackends author
+@c COVER API Agentic.Runtime.Facts.runFactBackends support
 @item runFactBackends
 Text constant @code{"run.backends"}.
-@c COVER API Agentic.Workflow.runFactEngine author
+@c COVER API Agentic.Runtime.Facts.runFactEngine support
 @item runFactEngine
 Text constant @code{"run.engine"}.
-@c COVER API Agentic.Workflow.runFactRoutes author
+@c COVER API Agentic.Runtime.Facts.runFactRoutes support
 @item runFactRoutes
 Text constant @code{"run.routes"}.
-@c COVER API Agentic.Workflow.runFactSentinel author
+@c COVER API Agentic.Runtime.Facts.runFactSentinel support
 @item runFactSentinel
 Text constant @code{"run.sentinel"}.
-@c COVER API Agentic.Workflow.reservedInput support
+@c COVER API Agentic.Runtime.Facts.reservedInput support
 @item reservedInput name
 Test whether a name lies under the runner-owned @code{run.} prefix.
-@c COVER API Agentic.Workflow.runFactRefusal support
+@c COVER API Agentic.Runtime.Facts.runFactRefusal support
 @item runFactRefusal name
 Return the operator-facing refusal for a reserved fact, or @code{Nothing}.
-@c COVER API Agentic.Workflow.sessionPolicy author
+@c COVER API Agentic.Runtime.Facts.sessionPolicy support
 @item sessionPolicy freshPerQuestion
 Render the canonical session-sharing phrase for @code{run.engine}.
-@c COVER API Agentic.Workflow.oneSessionPhrase support
+@c COVER API Agentic.Runtime.Facts.oneSessionPhrase support
 @item oneSessionPhrase
 Canonical text @samp{one session for the run}, shared by renderer and reader.
-@c COVER API Agentic.Workflow.sharesOneSession author
+@c COVER API Agentic.Runtime.Facts.sharesOneSession support
 @item sharesOneSession engineFact
 Report whether any backend in @code{run.engine} shares one conversation.  Empty
 text returns false.
-@c COVER API Agentic.Workflow.routeDefaultLabel support
+@c COVER API Agentic.Runtime.Facts.routeDefaultLabel support
 @item routeDefaultLabel
 Canonical @code{(default)} label used in @code{run.routes}.
-@c COVER API Agentic.Workflow.routedBackend author
+@c COVER API Agentic.Runtime.Facts.routedBackend support
 @item routedBackend routesFact pin
 Return the named backend, then the default backend, then empty text when no table
 exists.
@@ -2988,7 +2994,7 @@ build.
 @item corpus regeneration changes files
 The current Lean oracle no longer produces the committed observations.  Review
 the diff as a specification change; a successful no-op regeneration leaves
-@code{git status --short test/corpus} empty.
+@code{git status --short bisim/corpus} empty.
 
 @item Texinfo check reports missing coverage
 Run @code{python3 doc/check-manual-coverage.py --list} to see the source-derived

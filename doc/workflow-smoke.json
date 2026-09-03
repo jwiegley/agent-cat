@@ -1,7 +1,7 @@
 {
   "runId": "agent-cat-manual-mtc8ywaw-oqxenx",
   "workflow": "agent_cat_manual",
-  "script": "workflows/agent-cat-manual.js",
+  "script": "doc/workflows/agent-cat-manual.js",
   "scriptSha256": "10f66aa25cf654376ce436c1b1e0c354b2f0697962f45668e7ab8ce19e2c2654",
   "args": {
     "mode": "update",
