@@ -37,5 +37,6 @@ nix develop path:. -c cabal test engine-api-test
 ## Conventions
 
 Use only the capabilities shared through `Agentic.Engine`, and keep
-engine-specific detail inside the child that owns it. No other transport
-directory exists until a working implementation is added.
+engine-specific detail inside the child that owns it. An MCP transport is a
+documented future child of this directory; no `engine/mcp` directory, package,
+or placeholder exists until a working implementation is added.
