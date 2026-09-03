@@ -1,40 +1,43 @@
 # agent-cat
 
-agent-cat is a language for agentic workflows with a mathematical meaning, a
-typed representation that can be inspected before it runs, and a runtime that
-executes it against live agents. The design follows Conal Elliott's
-denotational design. A workflow is first given a precise meaning. The syntax an
-author writes, the folds that classify and price a program, the interpreter
-that runs it, and the conformance relation that holds a second implementation
-to the first are all derived from that meaning.
+agent-cat is a system for writing and running agentic workflows. A workflow in
+this system puts questions to language models, tools, and people, receives
+typed answers, and uses those answers to decide what to ask next. The system
+gives every workflow a mathematical meaning before it runs. The syntax that an
+author writes, the analyses that classify and price a program, the interpreter
+that runs it, and the tests that hold the implementation to its meaning are all
+derived from that meaning. The method is the denotational design of Conal
+Elliott.
 
 The repository holds two implementations and the boundary between them. A Lean
 4 model under `model/` defines the meaning, the representation, and the
-theorems that connect them. A Haskell package rooted at `agentic.cabal`
-provides the authoring surface, the analyses, the runtime, the engine adapters,
-and the `agentic-run` command. The conformance suite under `bisim/` holds the
-Haskell implementation to the Lean model through a frozen corpus and a live
-oracle. A TypeScript extension under `ext-pi/` makes workflows available inside
-the Pi coding agent. The Texinfo manual in `doc/agent-cat.texi` is the
-reference for all of it.
+theorems that connect the two. A Haskell package rooted at `agentic.cabal`
+provides the authoring surface, the analyses, the runtime, the adapters for
+live agents, and the `agentic-run` command. The conformance suite under `bisim/`
+checks the Haskell implementation against the Lean model through a frozen corpus
+of test vectors and a live oracle process. A TypeScript extension under
+`ext-pi/` makes the workflows available inside the Pi coding agent. The Texinfo
+manual in `doc/agent-cat.texi` is the reference for all of these parts.
 
 ## What a workflow is
 
-A workflow puts questions to parties, receives typed answers, and uses those
-answers to decide what to ask next. A party is a model, a tool, or a person. An
-answer is text, a verdict, a flag, a receipt, or a structured value described
-by a schema. Control is finite: a workflow may branch on a flag or a verdict,
-fan a question out to a panel of reviewers, revise a candidate a bounded number
-of times, and call straight-line functions. Every program the authoring surface
-accepts therefore has a finite set of possible paths, and its cost can be
-computed before anyone is asked anything.
+A workflow is a program that asks questions and acts on the answers. Each
+question names a party, which is a model, a tool, or a person. Each answer has
+one of five kinds. It is text, a verdict from a reviewer, a yes-or-no flag, a
+receipt that confirms an action, or a structured value that a schema describes.
+A workflow can branch on a flag or a verdict. It can send one question to a
+panel of reviewers and combine their verdicts. It can revise a candidate a
+bounded number of times, and it can call functions that contain no branches.
+The workflow has no other form of control. Every program that the authoring
+surface accepts therefore has a finite set of possible paths, and the system
+can compute its cost before anyone is asked anything.
 
-The authoring surface is ordinary Haskell. A workflow block is a `QualifiedDo`
-block, a prompt is a `[wf|...|]` quasiquotation with `{name}` holes that refer
-to Haskell variables in scope, and a branch is a Haskell `case` or `if`. The
-end of the flagship example, `workflow/example/Harden.hs`, reviews a patch
-through a three-member panel, revises it at most twice, and applies it only
-with the owner's consent:
+An author writes a workflow in ordinary Haskell. A workflow block is a
+`QualifiedDo` block, a prompt is a `[wf|...|]` quasiquotation, and a hole such
+as `{patch}` inside a prompt refers to a Haskell variable in scope. A branch is a
+Haskell `case` or `if`. The flagship example in `workflow/example/Harden.hs`
+sends a patch to a panel of three reviewers, revises the patch at most twice,
+and applies it only when the owner consents. Its final part reads as follows:
 
 ```haskell
     result <- revising draft (atMost 2) \patch -> W.do
@@ -76,125 +79,144 @@ with the owner's consent:
       Unsettled _ -> stop
 ```
 
-Building this value produces two things at once: a first-order `RawProgram`,
-which is printable data that crosses the language boundary, and a typed `Plan`,
-which the Haskell runtime analyses and executes. The manual's chapters "First
-Workflow" through "Functions, Inputs, and Schemas" teach the surface.
+When Haskell evaluates this value, it produces two things. The first is a
+`RawProgram`, a first-order tree of plain data that can be printed and sent
+across the language boundary. The second is a typed `Plan`, which the Haskell
+runtime analyses and executes. The manual teaches the authoring surface in its
+chapters from "First Workflow" to "Functions, Inputs, and Schemas".
 
 ## Meaning, representation, and intent
 
 The meaning of a workflow is defined against a world. A world is a total answer
-sheet, one answer for every typed question, written `Ω = (c : Code) → Q c →
-El c`. A question `Q c` records its addressee, its scope, its prompt, and a
-draw that distinguishes deliberate resampling from reuse; these four fields are
-the whole of a question's identity. A workflow denotes, for each world, a
-result together with the ordered transcript of the questions that produced it.
-That meaning is computed by two folds over a dialogue, the free monad on the
-question signature, and equality of workflows is agreement of both folds in
-every world.
+sheet that holds one answer for every possible typed question, and it is
+written `Ω = (c : Code) → Q c → El c`. A question `Q c` records four things. It
+records the party that is asked, the scope of the question, the prompt, and a
+draw number that distinguishes a deliberate resample from a reuse of the same
+question. These four fields are the whole identity of a question. A workflow
+denotes, for each world, a result together with the ordered transcript of the
+questions that produced that result. Two folds over a dialogue compute this
+meaning, where a dialogue is the free monad on the question signature. Two
+workflows are equal when both folds agree in every world.
 
-The representation is the five-form `Plan`: return, closed ask, open ask,
-finite case, and a dynamic form that the authoring surface never emits. It is
-first-order with de Bruijn binders, so it can be folded. The folds give the
-analysis level of a program, its node and question counts, and its cost tree,
-which at the `branch` level is a finite multiset containing every world's bill.
-A denotation function maps a `Plan` to a dialogue, and
-`model/Agentic/Core/Morphism.lean` proves that every operation on plans
-commutes with the corresponding operation on dialogues. Running a plan is
-defined as running its denotation, so the interpreter agrees with the meaning
-by reflexivity. `doc/meaning-and-representation.md` presents this argument in
-full.
+The representation is a `Plan`, a tree with five forms. The forms are a
+return, a closed ask whose words are fixed, an open ask whose words are computed
+from earlier answers, a finite case, and a dynamic form that the authoring
+surface never emits. The tree is first-order and uses de Bruijn indices for its
+binders, so it can be folded. The folds give the analysis level of a program,
+its counts of nodes and questions, and its cost tree. At the `branch` level the
+cost tree is a finite multiset that contains the bill of every world. A
+denotation function maps a `Plan` to a dialogue, and
+`model/Agentic/Core/Morphism.lean` proves that every operation on plans commutes
+with the corresponding operation on dialogues. The interpreter runs a plan by
+running its denotation, so the interpreter and the meaning agree by
+definition. `doc/meaning-and-representation.md` presents this argument in full.
 
-The representation carries one component the meaning does not: an intent. A
-request in a `Plan` is `Request c = Q c × Intent c`, and the intent is one of
-`consult`, `observe`, or `effect`. The mathematics identifies a question by who
-is asked, in what scope, with what words, and at which draw, and a world answers
-questions and nothing else. A runtime that executes a plan has to make decisions
-that identity does not record: whether an occurrence may reuse an answer
-already obtained for the same question, whether it must run every time it is
-reached because it acts on the world, whether the addressee may be granted
-tool permission, and how it is ordered relative to other acts. Neither the
-answer code nor the addressee settles these questions, since a receipt-valued
-question to a tool may be a harmless consultation or an act on the world, so
-the author declares the intent and the runtime reads it.
+The representation carries one component that the meaning does not carry, and
+that component is the intent of a request. A request in a `Plan` has the type
+`Request c = Q c × Intent c`, and the intent is `consult`, `observe`, or
+`effect`. The meaning identifies a question by its party, scope, words, and
+draw, and a world only answers questions. It records nothing about how a
+question is carried out. A runtime that executes a plan must make several
+decisions that this identity does not record. It must decide whether an
+occurrence can reuse an answer that an earlier identical question obtained. It
+must decide whether an occurrence must run every time it is reached, because
+it acts on the world. It must decide whether the party can receive permission
+to use tools, and in what order the occurrence runs relative to other acts.
+Neither the answer kind nor the party settles these decisions. A receipt-valued
+question to a tool can be a harmless consultation or an act on the world. The
+author therefore declares the intent, and the runtime reads it.
 
-Intent refines the representation and leaves the meaning untouched. Because it
-is no part of the question, two workflows that ask the same questions in the
-same order and hear the same answers have the same meaning under every
-execution policy. Source position fixes the tag: an ordinary value question
-lowers to `consult`, an executable tool in value position lowers to `observe`,
-and a statement-position act lowers to `effect`, which exists only at the
-receipt code. Denotation forgets the intent, and the theorems
-`denote_askC_intent_irrel` and `denote_ask_intent_irrel` hold by reflexivity.
-Operationally the tag is what the runtime consults. Consult and observe
-occurrences share one memo table keyed by the bare question, so a repeated
-question is answered once. Effect occurrences bypass that table, execute per
-occurrence, are billed per occurrence, enter an ordered lane, and are the only
-occurrences granted tool permission under the ACP transport. Every execution
-event keeps the authored request beside its answer source, and the theorem
-`Plan.execAnnotated_correct` proves that the annotated execution trace erases,
-event by event, to the semantic trace. The tags state authored policy and never
-physical outcome: `observe` does not prove a command read-only, and `effect`
-does not prove that a change occurred.
+The intent lives in the representation and never in the question. Worlds stay
+indexed by the bare question, so the answer to a question cannot depend on the
+policy under which the question is asked. Two workflows that ask the same
+questions in the same order and hear the same answers therefore have the same
+meaning under every execution policy. The position of a request in the source
+determines its intent. An ordinary value question is a `consult`. An
+executable tool in value position is an `observe`. An act in statement
+position is an `effect`, and the `effect` intent exists only for the receipt
+kind. The denotation forgets the intent. The theorems
+`denote_askC_intent_irrel` and `denote_ask_intent_irrel` state this fact, and
+both hold by reflexivity.
+
+During a run, the runtime reads the intent of each occurrence to choose its
+policy. Consult and observe occurrences share one memo table that is keyed by
+the bare question, so the runtime answers a repeated question once. Effect
+occurrences bypass that table. The runtime executes and bills each effect
+occurrence separately, and it places effects in an ordered lane so that a later
+act cannot overtake an earlier one. Under the ACP transport, it grants tool
+permission only to effects. Every execution event keeps the authored request
+beside the source of its answer, and the theorem `Plan.execAnnotated_correct`
+proves that the annotated execution trace erases, event by event, to the
+semantic trace. The intent states the policy that the author declared and
+never a physical outcome. An `observe` does not prove that a command is
+read-only, and an `effect` does not prove that a change occurred.
 
 ## The Lean model
 
-`model/` is a Lake package pinned to Lean 4.30.0 and Mathlib v4.30.0.
-`model/Agentic.lean` imports the mathematical strata in order: the last-wins
-scope monoid, schema-indexed values, questions, annotated requests, worlds,
-dialogues, the `Plan` representation, its denotation, the level and cost folds,
-the commuting theorems, the fold algebra, and the flagship workload
+`model/` is a Lake package that is pinned to Lean 4.30.0 and Mathlib v4.30.0.
+The root module `model/Agentic.lean` imports the mathematical strata in order.
+It begins with the last-wins scope monoid, schema-indexed values, questions,
+annotated requests, worlds, and dialogues. It continues with the `Plan`
+representation, its denotation, the level and cost folds, the commuting
+theorems, and the fold algebra, and it ends with the flagship workload
 `HardenPatch`. Beside the root sit the modules that concern a program rather
-than the space: the first-order syntax and its checker under `Core/Dsl`, the
-JSON representation of structured values, the reference interpreters
-`SemanticExec` and `AnnotatedExec`, the trusted base `Exec`, the per-run
-certificate `Certify`, and the renderings in `Report` and `Explain`. There is no
-parser, no concrete syntax, and no runtime in Lean; the authoring surface and
-the runner are Haskell's.
+than the space. These are the first-order syntax and its checker under
+`Core/Dsl`, the JSON representation of structured values, and the reference
+interpreters `SemanticExec` and `AnnotatedExec`. The trusted base `Exec`, the
+per-run certificate `Certify`, and the renderings in `Report` and `Explain`
+sit beside them.
+Lean contains no parser, no concrete syntax, and no runtime. The authoring
+surface and the runner belong to Haskell.
 
-The flagship is kernel-checked. `model/Agentic/Core/DslFlagship.lean` holds the
-flagship as a `RawProgram`, the same term frozen as corpus entry
-`example-000`, and proves by `decide +kernel` that the checker accepts it, that
-its level is `branch`, that its cost tree has nine leaves with a minimum of 5
-and a maximum of 15, and that its transcript in four named worlds equals the
-hand-written dialogue's. The theorem `Dsl.checkProgram_level_le` states that
-every program the checker accepts sits at or below the `branch` rung, so every
-accepted program has a finite cost tree.
+The module `model/Agentic/Core/DslFlagship.lean` holds the flagship as a
+`RawProgram`. This term is the same term that the corpus freezes as entry
+`example-000`. The module proves four facts inside the kernel by
+`decide +kernel`. The checker accepts the term, and its level is `branch`. Its
+cost tree has nine leaves with a minimum of 5 and a maximum of 15. Its
+transcript in four named worlds equals the transcript of the hand-written
+dialogue. The
+theorem `Dsl.checkProgram_level_le` states that every program
+that the checker accepts sits at or below the `branch` level, so every accepted
+program has a finite cost tree.
 
 ## The conformance boundary
 
-`bisim/` is a second Lake package that requires the model by a local path and
-deliberately excludes the expensive flagship module. Its `conformance-oracle`
-executable is a line-delimited JSON process that checks and observes
+`bisim/` is a second Lake package. It requires the model by a local path and
+deliberately excludes the expensive flagship module, so it builds in seconds.
+Its `conformance-oracle` executable is a process that reads one JSON request
+per line and writes one reply per line. The oracle checks and observes
 `RawProgram` values, evaluates them in specified worlds, and exercises the
-string layer. Program observations exist at three versions. Version 2 is
-frozen bare-question semantics. Version 3 compares intent-annotated execution
-events and returns their erasure as `semanticTrace`. Version 4 adds a typed
-program result beside the unchanged program.
+string layer that decodes answers. Program observations exist at three
+versions. Version 2 records the frozen bare-question semantics. Version 3
+compares intent-annotated execution events and returns their erasure as
+`semanticTrace`. Version 4 adds a typed program result beside the unchanged
+program.
 
-`bisim/corpus/` holds 193 frozen request and reply pairs: 95 checked replies,
-54 refusals, and 44 string-layer results. The three typed-result entries are
-version 4 and every other entry is version 2. The corpus is the specification.
-`lake exe corpus-gen` re-observes every request and rewrites the reply, and it
-is expected to change nothing; an empty `git status --short bisim/corpus`
-afterwards states that the elaboration, the cost algebra, the interpreter, and
+`bisim/corpus/` holds 193 frozen pairs of a request and its reply. The
+corpus contains 95 checked replies, 54 refusals, and 44 results from the string
+layer. The three typed-result entries are version 4, and every other entry is
+version 2. The corpus serves as the specification of the boundary. The command
+`lake exe corpus-gen` re-observes every request and rewrites its reply, and this
+command must change nothing. An empty `git status --short bisim/corpus` after
+the command states that the elaboration, the cost algebra, the interpreter, and
 the trusted base still agree with the frozen specification. A diff is a change
-to the specification and is reviewed as one. The manual's "Conformance
-Boundary" chapter specifies the wire format and states exactly what the corpus
+to the specification, and it is reviewed as one. The manual's chapter
+"Conformance Boundary" specifies the wire format and states what the corpus
 pins.
 
-Three Haskell executables sit on the boundary. `tier0` replays every frozen
+Three Haskell executables work at this boundary. `tier0` replays every frozen
 vector without Lean. `tier1` rebuilds the curated checked entries in the
 production authoring surface and compares the printed program and the whole
-reply. `bisim` draws fresh programs and worlds and compares them with the live
-oracle. Lean is normative throughout: the Haskell implementation asks to be
-believed on no authority of its own.
+reply with the frozen versions. `bisim` draws fresh programs and worlds and
+compares them with the live oracle. Lean is normative throughout, and every
+claim that the Haskell implementation makes about the language is checked
+against it.
 
 ## The Haskell implementation
 
-The Haskell side is one Cabal package, `agentic`, whose source directories keep
-separate ownership and an acyclic dependency graph. An arrow means that the
-left side may depend on the right:
+The Haskell side is one Cabal package named `agentic`. Its source directories
+keep separate ownership, and their dependency graph has no cycles. In the
+graph below, an arrow means that the left side can depend on the right side:
 
 ```text
 dsl
@@ -210,27 +232,29 @@ cli -> workflow, plan, cost, runtime, concrete engines
 ext-pi -> the versioned process protocols of agentic-run
 ```
 
-`dsl` owns the raw syntax, the schema vocabulary, the typed structural AST, the
-builder, the prompt quasiquoters, and the `QualifiedDo` authoring surface.
-`plan` and `cost` are pure interpreters over the typed AST: level, size,
-question nodes, answer codes, and the cost tree. `runtime` executes a plan
-against any engine and owns scheduling, memoization, decode and re-ask policy,
-fail-over, effect ordering, the machine protocol, persistence, and lineage.
-`engine/api` is the neutral interface; `engine/acp` speaks the Agent Client
-Protocol to an adapter process, with Claude, Codex, and Factory Droid
-selectors as children, and `engine/agent-deck` joins an existing agent-deck
-session. `workflow` holds compiled workflow values whose only local dependency
-is `dsl`; they name models symbolically and cannot see planning, cost, routing,
-runtime, or engines. `cli` is the composition root: it owns the registry, the
-help pages, the scripted replies, the concrete backend grammar, the routing
-configuration, and the exit mapping. `cli/ci/policies.sh` enforces the import
-graph. Each directory carries a `README.md` describing its purpose and a
-`AGENTS.md` describing its conventions.
+`dsl` owns the raw syntax, the schema vocabulary, the typed structural tree,
+the builder, the prompt quasiquoters, and the `QualifiedDo` authoring surface.
+`plan` and `cost` are pure interpreters over the typed tree. They compute the
+level, the size, the question nodes, the answer kinds, and the cost tree.
+`runtime` executes a plan against any engine. It owns scheduling, memoization,
+the decode and re-ask policy, fail-over, the ordering of effects, the machine
+protocol, persistence, and lineage. `engine/api` is the neutral interface to an
+engine. `engine/acp` speaks the Agent Client Protocol to an adapter process,
+with selectors for Claude, Codex, and Factory Droid as children, and
+`engine/agent-deck` joins a session that agent-deck already owns. `workflow`
+holds the compiled workflow values. Their only local dependency is `dsl`, they
+name models symbolically, and they cannot see planning, cost, routing, the
+runtime, or the engines. `cli` is the composition root. It owns the registry,
+the help pages, the scripted replies, the concrete backend grammar, the
+routing configuration, and the exit mapping. The script `cli/ci/policies.sh`
+enforces the import graph between the directories. Each directory carries a
+`README.md` that describes its purpose and an `AGENTS.md` that describes its
+conventions.
 
 ## The runner
 
-`agentic-run` is one executable with five human verbs over the registered
-programs, run from the repository root:
+`agentic-run` is one executable with five verbs for human use over the
+registered programs. Run it from the repository root:
 
 ```sh
 nix develop path:. -c cabal run agentic-run -- list
@@ -242,64 +266,67 @@ nix develop path:. -c cabal run agentic-run -- run harden --engine acp --adapter
 nix develop path:. -c cabal run agentic-run -- run harden --session <deck-id>
 ```
 
-`list`, `help`, `plan`, and `cost` spend nothing and start no adapter. `plan`
-and `cost` report the static folds, decided before anybody is asked anything,
-and `--raw` prints the first-order program the builder emitted. `run` executes
-through the memoizing interpreter against one of three answering services, and
-which one is the whole of what `--engine` says. `--scripted` answers from a
-table of canned replies registered beside the program. `--engine acp` starts an
-adapter and owns its pipe; the adapters are `stub`, `claude`, `codex`, `droid`,
-or an executable path, and `droid` launches `droid exec --output-format acp`,
-authenticated locally or through an inherited `FACTORY_API_KEY`. `--session`
-sends every question into a live agent-deck session that another process
-started and is watching. All three end at the same typed decode loop, so a run
-means the same thing on every service and fails in the same words. Exit status
-0 is a completed run, 1 a usage or preflight refusal, 2 a transport failure,
-and 3 a run abandoned over what arrived; a machine run cancelled through its
-control channel exits 130.
+The verbs `list`, `help`, `plan`, and `cost` spend nothing and start no
+adapter. `plan` and `cost` report the static folds, which are decided before
+anyone is asked anything, and `--raw` prints the first-order program that the
+builder emitted. `run` executes the program through the memoizing interpreter
+against one of three answering services, and the `--engine` option selects
+only which service answers. `--scripted` answers from a table of canned replies
+that is registered beside the program. `--engine acp` starts an adapter and owns
+its pipe. The adapters are `stub`, `claude`, `codex`, `droid`, or the path of
+an executable, and `droid` launches `droid exec --output-format acp`, which
+must be authenticated locally or through an inherited `FACTORY_API_KEY`.
+`--session` sends every question into a live agent-deck session that another
+process started and watches. All three services end at the same typed decode
+loop, so a run means the same thing on every service and fails in the same
+words. Exit status 0 is a completed run, 1 is a usage or preflight refusal, 2
+is a transport failure, and 3 is a run abandoned over what arrived. A machine
+run that is cancelled through its control channel exits 130.
 
-A workflow names its serving model symbolically, for example `servedBy
+A workflow names its serving model symbolically, for example with `servedBy
 "deep-thinker"`. A live run resolves that name through layered YAML routing
-profiles: a user file at `$XDG_CONFIG_HOME/agent-cat/routing.yaml` and the
-nearest project file `.agent-cat/routing.yaml`, both at schema version 1, with
-an explicit `--route` as the highest backend override. A profile owns an
-ordered realization chain of router, model, thinking level, and output policy,
-and every declared setting is applied or verified before the first prompt.
-`cli/model-definitions.example.yaml` is a complete example covering every
-profile the bundled workflows name. Routing selects an answering service after
-the program and its analyses already exist, so it changes neither the plan nor
-its price.
+profiles. The user file is `$XDG_CONFIG_HOME/agent-cat/routing.yaml`, the
+project file is the nearest `.agent-cat/routing.yaml`, both use schema version
+1, and an explicit `--route` option is the highest backend override. A profile
+owns an ordered chain of router, model, thinking level, and output policy, and
+the runner applies or verifies every declared setting before the first prompt.
+The file `cli/model-definitions.example.yaml` is a complete example that covers
+every profile that the bundled workflows name. Routing selects an answering
+service after the program and its analyses already exist, so it changes
+neither the plan nor its price.
 
-The `machine` verbs execute the same program while emitting protocol version 1
-NDJSON events on standard output and accepting correlated controls on an
-inherited file descriptor. Runs can persist an immutable manifest, an
-append-only event journal, reusable typed answers, an effect journal, and
-checkpoints, and `machine-restart`, `machine-resume`, and `machine-fork` create
-child runs with immutable lineage. `list --json` publishes descriptor version 2
-for supervisors. The registry currently holds nine programs: `harden`, `hello`,
-`structured`, `structured-result`, `plan-feature`, `review-lite`,
-`ship-feature-lite`, `grind-tests`, and `stack-prs`.
+The `machine` verbs execute the same program for a supervising process. They
+emit NDJSON events of protocol version 1 on standard output and accept
+correlated controls on an inherited file descriptor. A machine run can persist
+an immutable manifest, an append-only event journal, reusable typed answers, an
+effect journal, and checkpoints. The verbs `machine-restart`, `machine-resume`,
+and `machine-fork` create child runs with immutable lineage. The command `list
+--json` publishes descriptor version 2 for supervisors. The registry currently
+holds nine programs, named `harden`, `hello`, `structured`,
+`structured-result`, `plan-feature`, `review-lite`, `ship-feature-lite`,
+`grind-tests`, and `stack-prs`.
 
 ## The Pi extension
 
 `ext-pi/` is a TypeScript extension that makes Pi the control plane for
-agent-cat workflows. It performs no search for a runner: the trusted
-`agentic-run` executables are named, by absolute path, in `AGENT_CAT_RUNNER` or
+agent-cat workflows. It performs no search for a runner. The trusted
+`agentic-run` executables are named by absolute path in `AGENT_CAT_RUNNER` or
 `AGENT_CAT_RUNNERS`. The extension reads their descriptors, collects inputs,
 launches machine mode, reduces the event stream into a live monitor, delivers
-controls, and keeps durable run references. The `/wf`
-command launches a workflow in the current Agent Deck session, and a family of
-`/workflow-...` commands covers help, plan, status, monitoring, steering,
-recovery, redirect, grants, lineage, and cancellation. The extension never
-interprets a `RawProgram` or a `Plan`; agent-cat remains the only workflow
-interpreter. `ext-pi/README.md` gives its configuration, commands, targets, and
+controls, and keeps durable references to runs. The `/wf` command launches a
+workflow in the current Agent Deck session, and a family of `/workflow-...`
+commands covers help, plan, status, monitoring, steering, recovery, redirect,
+grants, lineage, and cancellation. The extension never interprets a
+`RawProgram` or a `Plan`, and agent-cat remains the only workflow interpreter.
+`ext-pi/README.md` gives its configuration, its commands, its targets, and its
 security posture.
 
 ## Building and verifying
 
-The Nix development shells are the only supported environments; `direnv allow
-.` wires the root shell up. The Haskell workspace builds from the repository
-root, and the Lean model and the conformance oracle build in the model shell:
+The Nix development shells are the only supported environments. Run `direnv
+allow .` once to attach the root shell to a terminal. The Haskell workspace
+builds from the repository root, and the Lean model and the conformance oracle
+build in the model shell:
 
 ```sh
 nix develop path:. -c cabal build all
@@ -308,12 +335,13 @@ nix develop path:./model -c bash -c 'cd model && lake build'
 nix develop path:./model -c bash -c 'cd bisim && lake build && lake exe corpus-gen'
 ```
 
-Never run two full model builds at once. `model/Agentic/Core/DslFlagship.lean`
-proves its theorems by running the checker inside the kernel, which takes
-minutes of wall clock and several gigabytes of memory. The conformance package
-excludes that module and builds in seconds.
+Never run two full model builds at once. The module
+`model/Agentic/Core/DslFlagship.lean` proves its theorems by running the
+checker inside the kernel, which takes minutes and several gigabytes of memory.
+The conformance package excludes that module and builds in seconds.
 
-The deterministic gates live beside their owners and contact no paid service:
+The deterministic gates live beside the code that they check, and none of them
+contacts a paid service:
 
 ```sh
 ./bisim/ci/tier0.sh
@@ -325,49 +353,51 @@ nix develop path:. -c ./cli/ci/routing-config.sh
 ./engine/agent-deck/ci/deck.sh
 ```
 
-`tier1.sh` requires a prebuilt oracle and refuses to build one.
-`engine/acp/ci/route-live.sh` contacts real backends and is run only by
-explicit operator choice. The manual builds and checks in the root shell:
+The script `tier1.sh` requires a prebuilt oracle and refuses to build one. The
+script `engine/acp/ci/route-live.sh` contacts real backends, and an operator
+runs it only by explicit choice. The manual builds and checks in the root
+shell:
 
 ```sh
 nix develop path:. -c make -C doc check
 make -C doc check-haskell
 ```
 
-The first command renders GNU Info and HTML in a temporary directory and runs
-the checkers that hold the manual's examples, reference coverage, prose, and
-retained workflow record against the source. The second compiles the manual's
-example modules, compares its command-line transcripts with fresh output, and
-verifies the compiler-derived member ledger. The manual's "Building and
-Verification" chapter describes every gate.
+The first command renders GNU Info and HTML in a temporary directory. It then
+runs the checkers that hold the manual's examples, its reference coverage, its
+prose, and the retained workflow record against the source. The second command
+compiles the manual's example modules, compares its command-line transcripts
+with fresh output, and verifies the compiler-derived member ledger. The
+manual's chapter "Building and Verification" describes every gate.
 
 ## Documentation
 
-The manual, `doc/agent-cat.texi`, is the reference: architecture and evidence
-ceilings, the mathematical and operational models, the conformance wire
-format, a tutorial, the authoring and runner references, diagnostics, and a
-glossary. `doc/meaning-and-representation.md` gives the denotational argument
-at length. Every source directory has a `README.md` and an `AGENTS.md`.
-`doc/research/` holds the design records and research dossiers, indexed by its
-own `README.md`.
-The implementation designs for the proposed Brick interface and persona-aware
-model resolution are [`doc/tui-design.md`](doc/tui-design.md) and
-[`doc/model-routing-v2.md`](doc/model-routing-v2.md); both remain proposals,
-not current runtime behavior.
-Issue tracking is `obr` with prefix `acat`, whose tracked surface is
-`doc/PLAN.org`; `AGENTS.md` describes the workflow.
+The manual, `doc/agent-cat.texi`, is the reference. It covers the architecture
+and its evidence ceilings, the mathematical and operational models, the
+conformance wire format, a tutorial, the authoring and runner references,
+diagnostics, and a glossary. `doc/meaning-and-representation.md` gives the
+denotational argument at length. Every source directory has a `README.md` and
+an `AGENTS.md`. `doc/research/` holds the design records and research
+dossiers, and its own `README.md` indexes them. The implementation designs for
+the proposed Brick interface and for persona-aware model resolution are
+[`doc/tui-design.md`](doc/tui-design.md) and
+[`doc/model-routing-v2.md`](doc/model-routing-v2.md). Both remain proposals
+and describe no current runtime behavior. Issue tracking uses `obr` with the
+prefix `acat`, its tracked surface is `doc/PLAN.org`, and `AGENTS.md` describes
+the workflow.
 
 ## Acknowledgements
 
-This work owes a real debt to Isaac Shapira and two projects of his,
+This work owes a real debt to Isaac Shapira and to two projects of his,
 [agent-functor](https://gitlab.com/fresheyeball/agent-functor) and
 [incite](https://github.com/jwiegley/incite). agent-functor showed what a
-typed, lawful account of agent interaction could look like as working Haskell.
-incite's workflows, the review ladders, the rosters of deliberately partial
-reviewers, and the grind loops that treat verification as a separate party,
-are the direct ancestors of this repository's authoring surface and of several
-of its worked examples; `workflow/extra/Isaac.hs` carries five of them, ported
-and priced. More than the code, the stance carried over: that a workflow is a
-value worth reasoning about before it runs, and that an intelligent reviewer is
-built rather than prompted. `doc/research/isaac-workflows.md` records what was
-taken, what was adapted, and where this project chose differently.
+typed, lawful account of agent interaction can look like as working Haskell.
+The workflows of incite are the direct ancestors of the authoring surface of
+this repository and of several of its worked examples. Their review ladders,
+their rosters of deliberately partial reviewers, and their grind loops treat
+verification as a separate party. `workflow/extra/Isaac.hs` carries five of
+them, ported and priced. More than the code, the stance
+carried over. A workflow is a value worth reasoning about before it runs, and
+an intelligent reviewer is built rather than prompted.
+`doc/research/isaac-workflows.md` records what was taken, what was adapted, and
+where this project chose differently.

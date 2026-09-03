@@ -1,6 +1,6 @@
 # ACP maintenance
 
-Depend only on `engine/api`; never import the DSL, the planner, the runtime,
+Depend only on `engine/api`. Never import the DSL, the planner, the runtime,
 the CLI, conformance support, the deck engine, or workflow modules. Own the ACP
 wire behavior, permissions, completion evidence, configuration, and process
 cleanup here, and return raw neutral results. Preserve the deterministic stub

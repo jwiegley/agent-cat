@@ -31,16 +31,17 @@ This manual is distributed under the same terms as agent-cat.
 @node Top
 @top agent-cat
 
-agent-cat gives a workflow written in Haskell a precise mathematical meaning,
-a statically inspectable representation, and an executable realization.  This
-manual explains how those parts fit together and how to write, inspect, and run
-workflows through the supported Haskell authoring surface.
+agent-cat gives a workflow that is written in Haskell a precise mathematical
+meaning, a representation that can be inspected before it runs, and an
+executable realization.  This manual explains how those parts fit together.
+It also explains how to write, inspect, and run workflows through the
+supported Haskell authoring surface.
 
-Readers meeting the project for the first time should begin with
-@ref{Introduction}, continue through @ref{Architecture and Guarantees}, and
-then work through @ref{First Workflow}.  The later guide chapters explain each
+A reader who meets the project for the first time can begin with
+@ref{Introduction}, continue with @ref{Architecture and Guarantees}, and then
+work through @ref{First Workflow}.  The later guide chapters explain each
 family of constructions.  @ref{Haskell Authoring Reference} and
-@ref{Runner Reference} serve readers who have a particular question in hand.
+@ref{Runner Reference} serve a reader who has a particular question in hand.
 
 @menu
 * Introduction::
@@ -65,20 +66,20 @@ family of constructions.  @ref{Haskell Authoring Reference} and
 @node Introduction
 @chapter Introduction
 
-This chapter explains the purpose of agent-cat, the form in which it presents a
-workflow, and the practical consequences of giving that workflow a mathematical
-meaning before it is run.
+This chapter explains the purpose of agent-cat and the form in which it
+presents a workflow.  It also explains the practical consequences of a
+mathematical meaning that is given to the workflow before the workflow runs.
 
 @section What the project provides
 
 @cindex workflow
 @cindex authoring surface
 agent-cat treats a workflow as an ordinary Haskell value.  An author writes a
-program through @code{Agentic.Workflow}; the library constructs a typed plan,
-records a first-order form for conformance testing, and makes the same value
-available to tools that describe, price, and execute it.  The production command
-@command{agentic-run} can therefore answer useful questions about a program
-before any addressee receives a prompt.
+program through @code{Agentic.Workflow}.  The library constructs a typed plan
+from that program, records a first-order form of it for conformance testing,
+and makes the same value available to the tools that describe, price, and
+execute it.  The production command @command{agentic-run} can therefore answer
+useful questions about a program before any addressee receives a prompt.
 
 Three facilities belong together in this design.  The Haskell authoring surface
 provides readable programs and a practical runner.  The Lean formalization gives
@@ -88,10 +89,11 @@ committed observations and live differential tests.  Each facility has a
 separate responsibility, and the boundary between them is part of the design.
 
 A workflow in this system is built from explicit questions, bindings, finite
-branches, reusable functions, and bounded revision.  Earlier answers may appear
-in later prompts.  Branches may depend on flags or verdicts.  The set of possible
-paths nevertheless remains finite for every program accepted by the authoring
-surface, which permits a static cost tree to be computed before execution.
+branches, reusable functions, and bounded revision.  Earlier answers can appear
+in later prompts, and branches can depend on flags or verdicts.  The set of
+possible paths nevertheless remains finite for every program that the authoring
+surface accepts.  The system can therefore compute a static cost tree before
+execution.
 
 @section Why meaning comes first
 
@@ -103,76 +105,79 @@ definition fixes the subject of the proofs.  It also prevents transport policy,
 memo tables, process management, and source syntax from quietly becoming part
 of question identity.
 
-The arrangement has visible consequences for an author.  Reusing the same
-question obtains the same semantic answer; a different draw denotes a different
-question.  Moving prompt text can change question identity while leaving the
-shape and static cost of the program unchanged.  A branch changes the set of
-possible paths, and an effect remains visible as an authored request occurrence
-even though its semantic answer is unit.  Later chapters derive each statement
-from the relevant representation.
+The arrangement has visible consequences for an author.  A question that is
+asked twice obtains the same semantic answer, and a different draw denotes a
+different question.  A change to the prompt text can change the identity of a
+question while the shape and the static cost of the program stay the same.  A
+branch changes the set of possible paths.  An effect remains visible as an
+authored request occurrence even though its semantic answer is unit.  Later
+chapters derive each of these statements from the relevant representation.
 
 @section When the design is useful
 
 The approach suits work whose questions and finite control structure deserve
 inspection before execution.  Review ladders, approval gates, bounded
 draft-and-revise loops, panels, routed consultations, structured answers, and
-repeatable operational checks all fit this form.  The static report can expose
-how many request nodes were written, which answer kinds occur on a straight
-path, and what range of request counts the finite branches permit.
+repeatable operational checks all fit this form.  The static report shows how
+many request nodes were written and which answer kinds occur on a straight
+path.  It also shows the range of request counts that the finite branches
+permit.
 
 The authoring surface is Haskell rather than a separate workflow file format.
 This choice brings ordinary bindings, lexical scope, modules, type checking,
 pattern matching, and host-language functions to workflow construction.  It
-also brings the usual cost of a typed Haskell library: authoring modules enable
-a small set of language extensions, compiler errors are part of the feedback
-loop, and runnable programs enter an explicit registry.
+also brings the usual cost of a typed Haskell library.  Authoring modules
+enable a small set of language extensions, compiler errors are part of the
+feedback loop, and runnable programs enter an explicit registry.
 
-Programs whose future structure must be computed from unrestricted answer text
-fall at the dynamic rung of the underlying Plan language.  The public workflow
+A program whose future structure must be computed from unrestricted answer text
+falls at the dynamic rung of the underlying Plan language.  The public workflow
 surface does not construct that rung.  An author can still use ordinary Haskell
-inputs to choose which finite program to build before analysis begins; once the
-program exists, its Plan remains within the analyzable fragment.
+inputs to choose which finite program to build before analysis begins.  Once
+the program exists, its Plan remains within the analyzable fragment.
 
 @section How to use this manual
 
 @ref{Architecture and Guarantees} gives the boundary map and the evidence
 ceiling.  The next three chapters explain the mathematical, representational,
-and operational layers in that order, and @ref{Conformance Boundary} specifies
-the wire format that holds the Haskell implementation to the Lean model.
-Readers who want to write a program immediately may proceed to
-@ref{First Workflow} and return to the foundations when a cost, sharing, or
-execution question requires them.
+and operational layers in that order.  @ref{Conformance Boundary} specifies the
+wire format that holds the Haskell implementation to the Lean model.  A reader
+who wants to write a program immediately can proceed to @ref{First Workflow}
+and return to the foundations when a question about cost, sharing, or
+execution requires them.
 
 The guide chapters move from ordinary authoring to functions, inputs, schemas,
 inspection, and execution.  The reference chapters collect source names, usage
-forms, constructors, command-line options, defaults, and restrictions.  Terms with a
-specialized meaning have one canonical definition in @ref{Glossary}.
+forms, constructors, command-line options, defaults, and restrictions.  Each
+term with a specialized meaning has one canonical definition in
+@ref{Glossary}.
 
 @node Architecture and Guarantees
 @chapter Architecture and Guarantees
 
-This chapter maps the live architecture, names the evidence carried at each
-boundary, and states what a successful proof or conformance check permits one
-to conclude.
+This chapter maps the live architecture and names the evidence that is carried
+at each boundary.  It also states what a successful proof or conformance check
+permits a reader to conclude.
 
 @section Two implementations and one boundary
 
 @cindex verification spine
 @cindex production runner
-Lean is the verification spine.  The root module @file{Agentic.lean} assembles
-the schema and question spaces, worlds, dialogues, the typed Plan
-representation, denotation, static analyses, commuting theorems, and the
-flagship workload.  The Lean checker accepts a first-order @code{RawProgram}
-and returns either a diagnostic or an intrinsically typed
-@code{Plan [] Unit}.  The type of a successful result carries the basic
-well-formedness statement.
+Lean is the verification spine of the project.  The root module
+@file{Agentic.lean} assembles the schema and question spaces, worlds,
+dialogues, the typed Plan representation, denotation, the static analyses, the
+commuting theorems, and the flagship workload.  The Lean checker accepts a
+first-order @code{RawProgram} and returns either a diagnostic or an
+intrinsically typed @code{Plan [] Unit}.  The type of a successful result
+carries the basic well-formedness statement.
 
 Haskell is the authoring and operational half.  @code{Agentic.Workflow} lowers
 ordinary Haskell constructions through @code{Agentic.Builder}.  The resulting
-@code{Program} contains two values built together: @code{progRawOut ::
-RawProgram} and @code{progPlan :: Plan '[] ()}.  The first is printable data
-used by guards, routing analysis, and conformance; the second is the typed plan
-that the Haskell runner analyzes and executes.
+@code{Program} contains two values that are built together.  The first value,
+@code{progRawOut :: RawProgram}, is printable data that the guards, the routing
+analysis, and the conformance suite use.  The second value,
+@code{progPlan :: Plan '[] ()}, is the typed plan that the Haskell runner
+analyzes and executes.
 
 @smallexample
 Haskell source
@@ -188,8 +193,9 @@ Haskell source
 
 A production run follows the first branch and does not start Lean.  The second
 branch belongs to testing.  @file{bisim/lean/Conformance.lean} implements a
-line-delimited oracle, while the Haskell conformance programs compare their own
-printed program and Plan-derived observations with the oracle's replies.
+line-delimited oracle.  The Haskell conformance programs compare their own
+printed program and their Plan-derived observations with the replies of the
+oracle.
 
 @section The representation tower
 
@@ -204,15 +210,15 @@ semantic transcript.
 
 Execution descends along a related path.  The Haskell interpreter reads the
 annotated Plan, obtains or reuses answers, and records an execution event for
-each authored occurrence.  Erasing the event's intent and answer-source
-annotation gives a semantic event.  The theorem and conformance surfaces check
-this erasure; the selected backend and the physical behavior of an adapter stay
-below it.
+each authored occurrence.  When the intent and the answer-source annotation of
+an event are erased, a semantic event remains.  The theorems and the
+conformance suite check this erasure.  The selected backend and the physical
+behavior of an adapter stay below it.
 
 @section What is established
 
 The project carries several kinds of evidence.  They answer different
-questions and should be read at their own level.
+questions, and each must be read at its own level.
 
 @multitable @columnfractions .23 .35 .42
 @headitem Evidence @tab What it establishes @tab Principal source
@@ -243,13 +249,14 @@ fixture doubles.
 @end multitable
 
 Program observations exist at three versions.  Version 2 is the frozen
-bare-question semantics and is the version of all corpus entries except the
-three typed-result entries.  Version 3 adds intent-bearing execution events and a @code{semanticTrace}
-obtained by erasure; the live differential test uses it.  Version 4 adds a
-typed program result beside the unchanged program and is the version of the
-three newest corpus entries.  Passing version 3 establishes representation
-parity for the annotations.  It does not make intent part of semantic answer
-identity.  @ref{Conformance Boundary} gives the wire format.
+bare-question semantics, and every corpus entry except the three typed-result
+entries has this version.  Version 3 adds intent-bearing execution events and a
+@code{semanticTrace} that is obtained by erasure, and the live differential
+test uses it.  Version 4 adds a typed program result beside the unchanged
+program, and the three newest corpus entries have this version.  A pass at
+version 3 establishes representation parity for the annotations.  It does not
+make intent part of semantic answer identity.  @ref{Conformance Boundary}
+gives the wire format.
 
 @section The evidence ceiling
 
@@ -261,16 +268,18 @@ versioned wire record.  These statements provide no direct observation of an
 external file, process, account, or service.
 
 The @code{effect} intent authorizes and orders an occurrence according to the
-runtime policy; its semantic answer is unit.  A completed adapter turn establishes
-that the adapter reported completion.  Evidence of the desired state change
-requires an independent check.  Likewise, the behavior of an observed command
-and the fidelity of its report require operational verification.
+runtime policy, and its semantic answer is unit.  A completed adapter turn
+establishes that the adapter reported completion.  Evidence of the desired
+state change requires an independent check.  Likewise, the behavior of an
+observed command and the fidelity of its report require operational
+verification.
 
-Transport differences remain operational.  ACP exposes a stop reason and can
-therefore require a completed turn for effects and person-addressed questions.
-The agent-deck command line exposes no corresponding stop reason.  The manual
-states this distinction wherever an operator chooses an engine, since a theorem
-about the common Plan cannot erase a fact about the transport.
+Differences between transports remain operational rather than semantic.  ACP
+exposes a stop reason, so the runner can require a completed turn for effects
+and for questions that are addressed to a person.  The agent-deck command line
+exposes no corresponding stop reason.  The manual states this distinction
+wherever an operator chooses an engine, because a theorem about the common Plan
+cannot erase a fact about the transport.
 
 @section Where the documentation lives
 
@@ -279,11 +288,11 @@ This manual is the reference for the authoring surface, the runner, and the
 boundaries between the Lean model, the Haskell implementation, and the
 conformance suite.  The root @file{README.md} orients a reader who meets the
 repository for the first time.  @file{doc/meaning-and-representation.md}
-gives the denotational argument at length: what a workflow means, what is
-written in its place, and the theorems that bind the two.  Each source
-directory carries a @file{README.md} that states its purpose, public modules,
-dependencies, and commands, and an @file{AGENTS.md} that states the
-conventions a maintainer follows there.
+gives the denotational argument at length.  It explains what a workflow means,
+what is written in its place, and the theorems that bind the two.  Each source
+directory carries a @file{README.md} that states its purpose, its public
+modules, its dependencies, and its commands.  Each directory also carries an
+@file{AGENTS.md} that states the conventions that a maintainer follows there.
 
 @file{doc/research/} holds the design records and research dossiers, indexed
 by its own @file{README.md}.  Current source, tests, and this manual govern
@@ -298,24 +307,26 @@ as the first-order @code{RawProgram} that Haskell emits, which
 @node Mathematical Meaning
 @chapter Mathematical Meaning
 
-This chapter defines the mathematical object denoted by a workflow.  The order
-is deliberate: answers and questions come first, dialogues organize their
-interaction, and the Plan representation receives its meaning from that space.
+This chapter defines the mathematical object that a workflow denotes.  The
+order of the sections is deliberate.  Answers and questions come first,
+dialogues organize their interaction, and the Plan representation receives its
+meaning from that space.
 
 @section Answer kinds and values
 
 @cindex answer kind
 @cindex structured answer
-@code{Code} is the closed universe of answer kinds.  Four constructors are
-built in: text, verdict, flag, and receipt.  A fifth constructor carries a
-structural schema.  The family @code{El} interprets each code as its value type:
-text as a string, verdict as the verdict algebra, flag as a Boolean, receipt as
-unit, and a structured code as the value described by its schema.
+@code{Code} is the closed universe of answer kinds.  Four of its constructors
+are built in, and they are text, verdict, flag, and receipt.  A fifth
+constructor carries a structural schema.  The family @code{El} interprets each
+code as its value type.  Text is a string, a verdict is a value of the verdict
+algebra, a flag is a Boolean, a receipt is unit, and a structured code is the
+value that its schema describes.
 
 A schema is built from null, Boolean, integer, exact rational, string, array,
-and named product fields.  Its semantic value is ordinary algebraic data.
-JSON is one boundary representation for that value, with validation and exact
-rational encoding supplied by @code{Agentic.Schema.Json}.  The semantic domain
+and named product fields.  Its semantic value is ordinary algebraic data.  JSON
+is one boundary representation for that value, and @code{Agentic.Schema.Json}
+supplies its validation and its exact rational encoding.  The semantic domain
 itself does not depend on JSON.
 
 @section Questions and worlds
@@ -337,8 +348,8 @@ A @dfn{world} is a total answer sheet:
 For every possible typed question, a world supplies one answer.  Equal
 questions therefore have equal answers in every world.  A repeated occurrence
 of the same question remains a repeated event in the transcript, although a
-runtime may obtain the answer only once.  An independent draw changes the
-question and may consequently receive another answer.
+runtime can obtain the answer only once.  An independent draw changes the
+question, and the changed question can receive another answer.
 
 The total function is a mathematical device rather than an instruction to
 compute every answer in advance.  A runtime constructs a finite table as a run
@@ -384,15 +395,16 @@ operations.
 The semantic function is not injective.  @code{Dlg.not_forcing} exhibits two
 structurally different dialogues that agree in every world.  Structural
 equality of dialogue trees is therefore stronger than equality of workflow
-meaning.  The general forcing claim is recorded as false; a repeat-free
+meaning.  The general forcing claim is recorded as false, and a repeat-free
 fragment supports a narrower theorem.
 
 @section Verdicts and panels
 
 @cindex verdict algebra
-Verdicts combine in reviewer order.  Approval leaves another verdict unchanged;
-refusal determines the combined result; and combining objections concatenates
-their ordered reason lists.  The order records the order in which reviewers
+Verdicts combine in reviewer order.  An approval leaves another verdict
+unchanged, and a refusal determines the combined result.  Two objections
+combine into one objection whose reason list is the concatenation of their
+ordered reason lists.  The order records the order in which the reviewers
 spoke.
 
 A verdict panel asks every member and applies these rules to the answers in list
@@ -423,43 +435,45 @@ question, and then asks it.  A finite case selects the denotation of one arm.
 The dynamic form computes and denotes a plan from an unrestricted answer.
 
 Execution intent is absent from this meaning.  A represented request is a
-question paired with intent, and denotation projects the question.  The theorem
-@code{denote_askC_intent_irrel} and @code{denote_ask_intent_irrel} state that
-changing only the intent leaves the
-dialogue unchanged.  This placement preserves bare-question answer identity
-while allowing the runtime to interpret consultation, observation, and effect
-differently.
+question that is paired with an intent, and denotation projects the question.
+The theorems @code{denote_askC_intent_irrel} and
+@code{denote_ask_intent_irrel} state that a change to the intent alone leaves
+the dialogue unchanged.  This placement preserves bare-question answer
+identity, and it lets the runtime interpret consultation, observation, and
+effect differently.
 
 @section Commuting operations
 
 @cindex commuting theorem
-An operation on Plans is justified by a commuting equation.  Building a Plan
-and then denoting it must agree with applying the corresponding operation to
-the denoted dialogues.  The five Plan formers provide the defining equations.
-Substitution, scope changes, grafting, panels, and bounded revision have derived
-equations in @file{model/Agentic/Core/Morphism.lean} and
+A commuting equation justifies each operation on Plans.  To build a Plan and
+then denote it must agree with the application of the corresponding operation
+to the denoted dialogues.  The five Plan formers provide the defining
+equations.  Substitution, scope changes, grafting, panels, and bounded revision
+have derived equations in @file{model/Agentic/Core/Morphism.lean} and
 @file{model/Agentic/Core/Denote.lean}.
 
-Several familiar laws follow through these equations.  Grafting denotes
-dialogue bind and carries unit and associativity laws.  Mapping and pairing
-inherit their functorial and applicative laws.  Scope acts by reindexing the
-world for both values and transcripts.  A panel combines member answers using
-the answer algebra, and bounded revision denotes its finite check-and-revise
-unrolling.
+Several familiar laws follow through these equations.  A graft denotes a
+dialogue bind, and it carries the unit and associativity laws.  Mapping and
+pairing inherit their functorial and applicative laws.  A scope acts by a
+reindexing of the world for both values and transcripts.  A panel combines the
+answers of its members with the answer algebra, and a bounded revision denotes
+its finite check-and-revise unrolling.
 
 The five Plan forms also determine every fold that obeys their equations.
-@code{PlanAlg} names those five operations, and @code{PlanAlg.fold_unique} states
-the uniqueness property.  Denotation, level, substitution, grafting, and most
-structural reports use this common recursion scheme.
+@code{PlanAlg} names those five operations, and @code{PlanAlg.fold_unique}
+states the uniqueness property.  Denotation, the level fold, substitution, the
+graft operation, and most structural reports use this common recursion
+scheme.
 
 @section The flagship meaning
 
 @cindex flagship workflow
-The flagship workflow reads a guide, asks for a draft, reviews it through a
-three-member panel under at most two amendments, asks a person for consent, and
-performs an apply effect only on the consenting branch.  Its meaning is written
-directly as a dialogue in @file{model/Agentic/Core/HardenPatch.lean} and represented
-as a Plan in the same module.
+The flagship workflow reads a guide and asks for a draft.  It reviews the
+draft through a three-member panel under at most two amendments, asks a person
+for consent, and performs an apply effect only on the consenting branch.  Its
+meaning is written directly as a dialogue in
+@file{model/Agentic/Core/HardenPatch.lean}, and the same module represents it
+as a Plan.
 
 The named theorems establish six principal facts.  Refusal of consent excludes
 the apply receipt from the semantic trace.  The guide is consulted exactly
@@ -469,11 +483,12 @@ maximum of fifteen request occurrences.  The minimum leaf is unattainable, and
 every actual world produces one of seven bills: 6, 7, 10, 11, 13, 14, or 15.
 The dialogue run is total.
 
-@file{model/Agentic/Core/DslFlagship.lean} checks the first-order flagship term and
-proves transcript agreement with the hand-written Plan in four named worlds,
-including the longest demonstrated path.  The file states plainly that a
-universally quantified transcript agreement is not proved.  This distinction
-keeps the flagship's evidence commensurate with its theorem statements.
+@file{model/Agentic/Core/DslFlagship.lean} checks the first-order flagship
+term.  It proves that the transcript of the term agrees with the transcript of
+the hand-written Plan in four named worlds, and one of these worlds follows the
+longest demonstrated path.  The file states plainly that a transcript
+agreement for all worlds is not proved.  This distinction keeps the evidence
+about the flagship commensurate with its theorem statements.
 
 @node Representation and Analysis
 @chapter Representation and Analysis
@@ -493,20 +508,20 @@ Substitutions rename or supply these variables while preserving their types.
 The Haskell authoring layer hides this machinery behind ordinary lexical
 variables.  A binding hands a typed handle to the remainder of its @code{W.do}
 block.  Prompt holes and later constructions consume that handle.  The handle
-carries the generated or author-selected printed name together with the typed
-variable that reads its value; a misspelled Haskell variable is consequently a
-normal compiler error.
+carries the printed name, which is generated or selected by the author,
+together with the typed variable that reads its value.  A misspelled Haskell
+variable is consequently a normal compiler error.
 
 Expressions are pure functions of an environment.  They hold constants, read
 variables, and combine earlier answers into later prompt text.  The shape of a
-question stays outside the expression, which is the design fact that permits
-question shapes and costs to remain static while words depend on answers.
+question stays outside the expression.  This design fact permits question
+shapes and costs to remain static while the words depend on answers.
 
 @section The five Plan forms
 
 @cindex Plan form
 The core representation has five forms.  Haskell prefixes their constructors
-with @code{P}; Lean presents the same family through @code{PlanF}.
+with @code{P}, and Lean presents the same family through @code{PlanF}.
 
 @table @code
 @item ret
@@ -531,8 +546,8 @@ at which no general finite cost tree exists.
 
 Substitution, sequencing, mapping, pairing, panels, and revision are derived
 operations rather than extra forms.  @code{graft} replaces every return leaf
-with a context-polymorphic continuation.  It provides sequencing without using
-@code{dyn}; general value-dependent Plan construction through @code{bindP} is
+with a context-polymorphic continuation, and it provides sequencing without
+@code{dyn}.  General value-dependent Plan construction through @code{bindP} is
 the operation that reaches the dynamic form.
 
 @section RawProgram and elaboration
@@ -545,19 +560,19 @@ Haskell closures and can therefore be encoded as JSON for the conformance
 boundary.
 
 The Haskell builder emits a @code{RawProgram} and a typed Haskell Plan from the
-same combinator application.  Lean's @code{checkProgram} independently checks
-the first-order tree and elaborates it to a Lean Plan.  The checker resolves
-names into de Bruijn expressions, fixes answer kinds from their ground uses,
-keeps a revision result pending until its required case, and chooses a closed
-ask exactly when every prompt component is literal after defines have been
-expanded.
+same combinator application.  The Lean function @code{checkProgram}
+independently checks the first-order tree and elaborates it to a Lean Plan.
+The checker resolves names into de Bruijn expressions and fixes answer kinds
+from their ground uses.  It keeps a revision result pending until its required
+case.  It chooses a closed ask exactly when every prompt component is literal
+after the defines are expanded.
 
 A successful checker result is already a closed, well-typed Plan.  The theorem
-@code{Dsl.checkProgram_level_le} adds the substantive global fact: every
+@code{Dsl.checkProgram_level_le} adds the substantive global fact that every
 accepted program lies at or below the branch rung.  The Haskell authoring
-surface enforces many refusals through its types or by making an invalid state
-unrepresentable, while the frozen corpus retains the Lean refusal contract for
-the first-order boundary.
+surface enforces many refusals through its types, or it makes the invalid state
+impossible to represent.  The frozen corpus retains the Lean refusal contract
+for the first-order boundary.
 
 @section Validation contract and authoring hazards
 
@@ -570,16 +585,17 @@ ground use.  Live names remain distinct from one another and from defines.
 A @code{knownHere} assertion names exactly the current context.
 
 The Haskell surface moves most of this contract into types and lexical scope.
-An arm exports no binding to a later join because each arm is the rest of the
-workflow and the Plan context contains answer codes rather than sum values.
-Place a shared tail in a function and call it from each arm.  The explicit
-duplication makes its cost visible in the source.
+An arm exports no binding to a later join, because each arm is the rest of the
+workflow, and because the Plan context contains answer codes rather than sum
+values.  Place a shared tail in a function and call it from each arm.  The
+explicit duplication makes its cost visible in the source.
 
 The answer kind belongs to the represented question shape.  A define such as a
-flag-format instruction helps the addressee produce that kind, while the decoder
-still follows the typed code.  If the prose instruction drifts from the code,
-the type remains authoritative and the answering service may require recovery.
-Live transports append their current answer specification for this reason.
+flag-format instruction helps the addressee produce that kind, while the
+decoder still follows the typed code.  If the prose instruction drifts from the
+code, the type remains authoritative, and the answering service can require
+recovery.  Live transports append their current answer specification for this
+reason.
 
 Given the same world, denotation follows the same dialogue path and produces the
 same result and semantic transcript.  This determinism is a property of the
@@ -597,18 +613,19 @@ sufficient to understand control.  When a construction's cost cannot be read
 from its existing notation, the notation must expose that cost rather than
 leaving it to hidden elaboration.
 
-A bounded revision is unrolled into distinct round questions; memoization does
-not collapse its iterations when the candidate or review words differ.  A
-one-member verdict panel uses the same all-must-approve reducer as a larger
-panel, leaving room for a future explicitly named reducer without changing the
-meaning of the existing form.
+A bounded revision is unrolled into distinct round questions, and memoization
+does not collapse its iterations when the candidate or the review words differ.
+A one-member verdict panel uses the same reducer as a larger panel, and that
+reducer requires every member to approve.  A future reducer with an explicit
+name can therefore be added without a change to the meaning of the existing
+form.
 
 @section The four analysis rungs
 
 @cindex analysis level
 @code{level} is a fold over a complete Plan.  It classifies the represented
-term, including branch nodes whose arms happen to behave alike.  The four
-values form the chain @code{batch <= pipeline <= branch <= dynamic}.
+term, and a branch node counts as a branch even when its arms behave alike.
+The four values form the chain @code{batch <= pipeline <= branch <= dynamic}.
 
 @multitable @columnfractions .16 .31 .53
 @headitem Rung @tab Structural criterion @tab Available information
@@ -616,24 +633,24 @@ values form the chain @code{batch <= pipeline <= branch <= dynamic}.
 @tab Closed asks and returns
 @tab Exact question list and a world-independent bill.
 @item pipeline
-@tab Open asks permitted; no case or dynamic form
-@tab Exact count, answer-code sequence, and question-shape sequence; exact bill
-for prices determined by shape.
+@tab Open asks permitted, and no case or dynamic form
+@tab Exact count, answer-code sequence, and question-shape sequence.  The bill
+is exact for prices that shape determines.
 @item branch
-@tab Finite cases permitted; no dynamic form
-@tab Finite multiset containing every world's bill, with sound folded bounds.
-The set of bills produced by worlds has an attained least and greatest member,
-which need not equal the multiset's folded extrema.
+@tab Finite cases permitted, and no dynamic form
+@tab A finite multiset that contains the bill of every world, with sound folded
+bounds.  The set of bills that worlds produce has an attained least and
+greatest member, and these can differ from the folded extrema of the multiset.
 @item dynamic
 @tab A dynamic form occurs
-@tab No general finite bill set; the formalization includes an unbounded witness.
+@tab No general finite bill set.  The formalization includes an unbounded witness.
 @end multitable
 
 Closed questions add no rung.  An open ask joins in @code{pipeline}.  A finite
 case joins in @code{branch} together with the levels of all arms.  A dynamic
-node returns @code{dynamic}.  This fold describes terms rather than attempting
-to infer behavior from traces, which would lose the structural premises used
-by the cost theorems.
+node returns @code{dynamic}.  This fold describes terms and does not infer
+behavior from traces, because an inference from traces loses the structural
+premises that the cost theorems use.
 
 The Haskell workflow surface emits no dynamic node.  Functions are open
 straight-line Plans, and a call substitutes arguments and grafts the callee's
@@ -649,7 +666,7 @@ the analysis rung.  @code{size} counts represented nodes across all arms.
 @code{askNodes} counts request nodes written in the Plan, also across all arms.
 @code{codes} gives the answer-code sequence for a pipeline and returns no single
 sequence when a branch exists.  @code{schemaRequirements} collects the
-structured schemas a Plan may request.
+structured schemas that a Plan can request.
 
 These values describe the term before a world selects one path.  An ask-node
 count is therefore distinct from a run's bill.  A branch contributes every arm
@@ -667,17 +684,17 @@ price, the branch-rung analysis @code{costM} produces a finite multiset whose
 leaves are the bills obtained by the syntactic branch combinations.  The
 summary reports its minimum fold, maximum fold, and number of paths.
 
-Every world's bill belongs to the finite multiset and therefore lies between
-its minimum and maximum folds.  Separately, the bills produced by all worlds
-have a least and greatest member, each attained by a world.  Those actual
-extrema need not equal the syntactic tree extrema because separate cases may be
-correlated.  The flagship demonstrates the distinction: its tree contains a
-leaf at five requests, while its direct meaning theorem proves that every actual
-world bills at least six.  A displayed minimum should therefore be read as the
-folded tree minimum unless a reachability theorem says more.
+The bill of every world belongs to the finite multiset, so it lies between the
+minimum and the maximum folds.  Separately, the bills that all worlds produce
+have a least member and a greatest member, and a world attains each of them.
+These actual extrema can differ from the extrema of the syntactic tree, because
+separate cases can be correlated.  The flagship demonstrates the distinction.
+Its tree contains a leaf at five requests, while its direct meaning theorem
+proves that every actual world bills at least six.  A displayed minimum is
+therefore the folded tree minimum, unless a reachability theorem says more.
 
-@code{billMemo} belongs to execution rather than principal meaning.  Consult and
-observe occurrences may share one answer by bare question identity, whereas
+@code{billMemo} belongs to execution rather than to principal meaning.  Consult
+and observe occurrences can share one answer by bare question identity, whereas
 effects are retained per occurrence.  The operational bill can consequently
 fall below the fresh semantic bill when repeated reusable questions occur.
 @ref{Operational Model} gives the policy that produces this difference.
@@ -701,8 +718,9 @@ written explicitly and remain exact.
 @chapter Operational Model
 
 This chapter explains how the Haskell Plan is interpreted during a run.  The
-mathematical question remains the key for answers; execution intent determines
-reuse, ordering, permission, completion checks, and event annotation.
+mathematical question remains the key for answers.  The execution intent
+determines reuse, ordering, permission, completion checks, and event
+annotation.
 
 @anchor{Requests and intent}
 @section Requests and intent
@@ -717,29 +735,30 @@ runtime obtains from it.
 
 @subsection Why the representation needs intent
 
-The mathematical meaning identifies a question by four fields: the addressee,
-the scope, the words, and the draw.  A world answers questions and nothing
-else.  That identity is exactly what the theorems need, and it deliberately
-says nothing about how an occurrence is carried out.  A runtime that executes
-a Plan has to make decisions the meaning does not record.  It has to decide
-whether an occurrence may reuse an answer already obtained for the same bare
-question.  It has to decide whether an occurrence runs every time it is
-reached because it acts on the world.  It has to decide whether the addressee
-may be granted tool permission, and in what order the occurrence stands
-relative to other acts.  Neither the answer code nor the addressee settles
-these questions, since a receipt-valued question to a tool may be a harmless
-consultation or an act on the world.  The author therefore declares the intent
-on each occurrence, and the runtime reads it.
+The mathematical meaning identifies a question by four fields.  These fields
+are the addressee, the scope, the words, and the draw.  A world supplies one
+answer to each such question.  That identity is exactly what the theorems
+need, and it says nothing about how an occurrence is carried out.  A runtime
+that executes a Plan must make decisions that the meaning does not record.  It
+must decide whether an occurrence can reuse an answer that was already
+obtained for the same bare question.  It must decide whether an occurrence runs
+every time it is reached, because the occurrence acts on the world.  It must
+decide whether the addressee can receive tool permission, and in what order
+the occurrence stands relative to other acts.  Neither the answer code nor the
+addressee settles these questions.  A receipt-valued question to a tool can be
+a harmless consultation or an act on the world.  The author therefore declares
+the intent on each occurrence, and the runtime reads it.
 
 Intent belongs to the representation and never to the question.  Worlds stay
 indexed by @code{Q}, so the answer to a question cannot depend on the policy
-under which it is asked, and two workflows that ask the same questions in the
-same order and hear the same answers have the same meaning under every
-execution policy.  Intent refines the five-form Plan without adding a sixth
-form, and denotation projects the question and forgets the intent.  The theorems
-@code{denote_askC_intent_irrel} and @code{denote_ask_intent_irrel} in
-@file{model/Agentic/Core/Denote.lean} state that changing only the intent of a
-request leaves its dialogue unchanged, and both are proved by reflexivity.
+under which the question is asked.  Two workflows that ask the same questions
+in the same order and hear the same answers therefore have the same meaning
+under every execution policy.  Intent refines the five-form Plan without a
+sixth form, and denotation projects the question and forgets the intent.  The
+theorems @code{denote_askC_intent_irrel} and @code{denote_ask_intent_irrel} in
+@file{model/Agentic/Core/Denote.lean} state that a change to the intent of a
+request alone leaves its dialogue unchanged.  Both theorems are proved by
+reflexivity.
 
 @subsection The three intents
 
@@ -756,72 +775,73 @@ request leaves its dialogue unchanged, and both are proved by reflexivity.
 @item effect
 @tab Statement-position act
 @tab Execute per occurrence
-@tab Reserve the effect lane and request permission; result kind is receipt.
+@tab Reserve the effect lane and request permission.  The result kind is receipt.
 @end multitable
 
-Source position fixes the annotation, and no answer can change it.  An
-ordinary @code{ask}, @code{confirm}, panel member, or revision question lowers
-to consultation.  A tool modified by @code{running} lowers to observation when
-its answer is bound.  The same executable tool in statement position lowers to
-effect.  The Lean checker applies the same rule to the first-order program
-(@file{model/Agentic/Core/Dsl/Check.lean}, @code{valueIntent}), and the
+The position of a request in the source determines its annotation, and no
+answer can change it.  An ordinary @code{ask}, a @code{confirm}, a panel
+member, or a revision question lowers to a consultation.  A tool that
+@code{running} modifies lowers to an observation when its answer is bound.  The
+same executable tool in statement position lowers to an effect.  The Lean
+checker applies the same rule to the first-order program in the function
+@code{valueIntent} of @file{model/Agentic/Core/Dsl/Check.lean}.  The
 @code{effect} constructor exists only at the receipt code, so no Plan can
-branch on an alleged effect result.  Intent lives in the request shape rather
-than in the prompt words, so computing words from earlier answers cannot alter
-it.
+branch on an alleged result of an effect.  Intent lives in the shape of the
+request rather than in the prompt words, so the computation of words from
+earlier answers cannot alter it.
 
 @subsection What intent provides during a run
 
-The annotation gives the runtime five things that the bare question cannot.
-Consult and observe occurrences share one memo table keyed by the bare
-question, so a repeated question is answered once.  Effect occurrences never
-read or populate that table; every effect is dispatched, and each is billed
-per occurrence, which is the difference between @code{billFresh} and
-@code{billMemo}.  Under the ACP transport only an effect is granted tool
-permission, and consultations and observations are denied in the protocol's
-own words.  Effects enter an ordered lane, so a later act cannot overtake an
-earlier one, and ACP requires a completed turn before an effect is credited
-with a receipt.  Every execution event retains the authored request beside its
-answer source, so a trace states whether an answer was reused or which
-dispatched question produced it after fail-over.  The rendered question header
-also names the intent, so an addressee is told whether it is being consulted
-or asked to act.
+The annotation gives the runtime five things that the bare question cannot
+give.  Consult and observe occurrences share one memo table that is keyed by
+the bare question, so a repeated question is answered once.  Effect
+occurrences never read or populate that table.  The runtime dispatches every
+effect and bills each one per occurrence, and this is the difference between
+@code{billFresh} and @code{billMemo}.  Under the ACP transport, only an effect
+receives tool permission, and the runtime denies permission to consultations
+and observations in the words of the protocol.  Effects enter an ordered lane,
+so a later act cannot overtake an earlier one.  ACP requires a completed turn
+before an effect is credited with a receipt.  Every execution event retains the
+authored request beside its answer source.  A trace therefore states whether an
+answer was reused, or which dispatched question produced it after a fail-over.
+The rendered question header also names the intent, so an addressee knows
+whether it is consulted or asked to act.
 
 The theorem @code{Plan.execAnnotated_correct} in
 @file{model/Agentic/Core/AnnotatedExec.lean} ties these policies back to the
-meaning.  The annotated executor returns the semantic value, extends the
-bare-question table, and produces an execution trace that erases, event by
+meaning.  The annotated executor returns the semantic value and extends the
+bare-question table.  It also produces an execution trace that erases, event by
 event, to the semantic trace.  Conformance version 3 compares the annotated
 trace between Lean and Haskell and returns the erased @code{semanticTrace}
-beside it, so the placement is checked at the boundary as well as in the
-kernel.
+beside it.  The placement is therefore checked at the boundary as well as in
+the kernel.
 
 @subsection What intent does not establish
 
 The tags state authored policy and never physical outcome.  An @code{observe}
 tag does not prove that a command is read-only.  An @code{effect} tag does not
-prove that a change occurred; a completed adapter turn establishes only that
-the adapter reported completion.  Evidence about the external world requires
-an independent observation, which a workflow can be written to include, as
-@ref{Permission and external effects} describes.
+prove that a change occurred, and a completed adapter turn establishes only
+that the adapter reported completion.  Evidence about the external world
+requires an independent observation.  A workflow can be written to include one,
+as @ref{Permission and external effects} describes.
 
 @anchor{Memoization and event identity}
 @section Memoization and event identity
 
 @cindex memoization
 The reusable memo table is keyed by the bare typed question.  Consult and
-observe read and populate it.  Effect occurrences bypass it in both directions,
-which preserves each authored effect and its operational charge.  A consultation
-and observation of the same bare question may therefore share one underlying
-answer while producing two annotated execution events with their respective
-intents.
+observe occurrences read and populate it.  Effect occurrences bypass it in both
+directions, which preserves each authored effect and its operational charge.  A
+consultation and an observation of the same bare question can therefore share
+one underlying answer, and they still produce two annotated execution events
+with their respective intents.
 
-Every Plan occurrence records an event.  The event retains the authored request,
-the answer, and an answer source.  A reused source records memo reuse; an asked
-source records the question actually dispatched after fail-over relabeling.
-Erasing the source and intent recovers the authored bare-question semantic
-event.  The version 3 conformance record includes both the annotated trace and
-this @code{semanticTrace}.
+Every Plan occurrence records an event.  The event retains the authored
+request, the answer, and an answer source.  A reused source records memo reuse.
+An asked source records the question that was actually dispatched after
+fail-over relabeling.  When the source and the intent are erased, the authored
+bare-question semantic event remains.  The version 3 conformance record
+includes both the annotated trace and this @code{semanticTrace}.
 
 The runner reports two counts after a run.  @code{billFresh} counts the request
 occurrences reached on the selected path.  @code{billMemo} deduplicates reusable
@@ -855,9 +875,9 @@ without a shell.  The prompt is written to standard input.  The command and its
 arguments are program text and have no interpolation syntax, which keeps prompt
 data out of the argv.
 
-The exit status is converted where the answer kind can express failure.  A flag
-receives success or failure; a verdict receives approval on success and the
-first failing line on failure.  A result kind without such a representation
+The exit status is converted where the answer kind can express failure.  A
+flag receives success or failure.  A verdict receives approval on success and
+the first failing line on failure.  A result kind without such a representation
 causes the run to abandon.  Statement position produces a receipt only through
 the effect policy.
 
@@ -880,11 +900,11 @@ refusal and empty or protocol-invalid replies have separate gap classes and do
 not receive that same retry.  Exhausted recovery abandons the run rather than
 inventing a typed answer.
 
-A @code{servedBy} chain may name alternate models through
+A @code{servedBy} chain can name alternate models through
 @code{fallingBackTo}.  A gap can advance through that chain.  The authored
 question remains fixed, while the dispatched target and the failed attempt are
-operational facts.  A successful alternate is recorded as the answer source;
-the failed attempt is narrated on standard error.
+operational facts.  A successful alternate is recorded as the answer source,
+and the failed attempt is narrated on standard error.
 
 @section Answering services
 
@@ -910,31 +930,30 @@ reason, so this engine cannot perform ACP's completed-turn check.
 @end table
 
 All three services receive the same typed request and use the same decode and
-recovery loop.  The live transports share one rendered question header; the
-scripted table selects bytes directly from the authored prompt.  Session
+recovery loop.  The live transports share one rendered question header, and
+the scripted table selects bytes directly from the authored prompt.  Session
 ownership, permission channels, and completion evidence differ.  @ref{Running
-Workflows} gives the corresponding
-operator commands and safety rules.
+Workflows} gives the corresponding operator commands and safety rules.
 
 @section Routing and fail-over
 
 @cindex routing
 A serving-model pin is authored on a model question through @code{servedBy}.
-The primary pin participates in the represented question's scope.  Alternate
-pins are execution policy collected before the run; adding an alternate changes
-the printed program but leaves the elaborated Plan, denotation, and static cost
-unchanged.
+The primary pin participates in the scope of the represented question.
+Alternate pins are execution policy that is collected before the run.  An
+added alternate changes the printed program, but it leaves the elaborated Plan,
+the denotation, and the static cost unchanged.
 
-A live run has a default backend and may add @code{--route NAME=BACKEND} entries
-for serving-model pins.  Unrouted pins, unpinned model questions, tools, and
-people use the default.  Routing selects an answering service after the program
-and its static analyses already exist.  It therefore changes neither Plan
-shape nor price.
+A live run has a default backend, and it can add @code{--route NAME=BACKEND}
+entries for serving-model pins.  Unrouted pins, unpinned model questions,
+tools, and people use the default.  Routing selects an answering service after
+the program and its static analyses already exist.  It therefore changes
+neither the shape of the Plan nor its price.
 
 Fail-over occurs within the authored pin chain.  Routing can place different
-pins in different ACP adapters or agent-deck sessions, allowing one chain to
-cross providers without adding backend identity to semantic question keys.
-The run facts described in @ref{Functions Inputs and Schemas} let a program
+pins in different ACP adapters or agent-deck sessions.  One chain can therefore
+cross providers, and no backend identity enters the semantic question keys.
+The run facts that @ref{Functions Inputs and Schemas} describes let a program
 state and inspect the resolved operational arrangement in its prompts.
 
 @anchor{Permission and external effects}
@@ -942,51 +961,51 @@ state and inspect the resolved operational arrangement in its prompts.
 
 @cindex permission
 Under ACP, permission follows intent.  Consultations and observations decline
-tool permission; effects may grant it within the configured scratch directory.
-The grant remains a policy decision communicated to the adapter.  The adapter,
-directory, requested tool call, and external system determine what actually
-happens.
+tool permission, and effects can grant it within the configured scratch
+directory.  The grant remains a policy decision that is communicated to the
+adapter.  The adapter, the directory, the requested tool call, and the external
+system determine what actually happens.
 
 A scratch directory bounds where the ACP process starts and where an authorized
 act is intended to write.  The default is a fresh temporary directory.  An
 operator who intends to alter a working tree must name that tree deliberately
-with @code{--scratch}; this action carries consequences beyond inspecting or
-rehearsing a workflow.
+with @code{--scratch}.  This action carries consequences beyond the inspection
+or the rehearsal of a workflow.
 
-A run can finish successfully while producing no useful external change.  It
-can also receive a plausible report from an addressee whose underlying action
-was incomplete.  Workflow design should therefore include explicit
-observations or independent checks when the external result matters.  The Plan
-and its proofs can structure these checks, while their observations provide
-evidence about the external result.
+A run can finish successfully and produce no useful external change.  It can
+also receive a plausible report from an addressee whose underlying action was
+incomplete.  When the external result matters, the workflow must therefore
+include explicit observations or independent checks.  The Plan and its proofs
+can structure these checks, and the observations of the checks provide evidence
+about the external result.
 
 @node Conformance Boundary
 @chapter Conformance Boundary
 
 This chapter specifies the wire format through which the Haskell
-implementation is held to the Lean model, and states exactly what the frozen
-corpus pins.  A reader who only writes and runs workflows may skip it; a
+implementation is held to the Lean model, and it states exactly what the frozen
+corpus pins.  A reader who only writes and runs workflows can skip it.  A
 reader who changes the elaboration, the cost algebra, the interpreter, or the
 string layer must read it, because every such change is measured here.
 
 @section The oracle process
 
 @cindex conformance oracle
-@command{lake exe conformance-oracle}, built in @file{bisim/}, is a
+@command{lake exe conformance-oracle}, which is built in @file{bisim/}, is a
 line-delimited JSON process.  It reads one request per line on standard input
-and writes one reply per line on standard output, echoing the request's
-@code{id} verbatim when one is present.  End of file on standard input is the
+and writes one reply per line on standard output.  When a request carries an
+@code{id}, the reply echoes it verbatim.  End of file on standard input is the
 clean shutdown.  The oracle imports the Lean model through a local Lake
-dependency and deliberately excludes the expensive flagship module, so it
+dependency, and it deliberately excludes the expensive flagship module, so it
 builds in seconds.
 
-Every request may carry @code{budgetMs}, whose default is 30000.  When the
-budget expires the reply is @code{@{"timeout": @{"ms": n@}@}}.  A timeout is
-an observation rather than an error, because the two implementations differ
-in asymptotics and an asymmetry must be recordable as an asymmetry.
+Every request can carry @code{budgetMs}, whose default is 30000.  When the
+budget expires, the reply is @code{@{"timeout": @{"ms": n@}@}}.  A timeout is
+an observation rather than an error.  The two implementations differ in their
+asymptotic behavior, and an asymmetry must be recordable as an asymmetry.
 
-The oracle answers three request kinds: a program observation, a string
-operation, and a liveness check.  A liveness request
+The oracle answers three kinds of request, which are a program observation, a
+string operation, and a liveness check.  A liveness request
 @code{@{"id": @dots{}, "ping": true@}} receives @code{@{"id": @dots{}, "pong": true@}}.
 
 @section Program observation
@@ -1000,15 +1019,16 @@ A program request has the form
 @end example
 
 @code{RawProgram} is the Lean datatype @code{Agentic.Core.Dsl.RawProgram}
-under Lean's derived JSON encoding: constructors as single-key objects and
-structures as field objects.  The corpus files are the normative examples of
-that encoding.  The record is exactly @code{fns} and @code{main}.  An omitted
-@code{version} means 2.  @code{worlds} defaults to the single echo world; a
-world may add exact structured answers as a list of schema and value pairs,
-and every entry is validated while the request is decoded.  A world that omits
-a schema the checked Plan may query is rejected before evaluation.
-@code{result} is required only at version 4, where it is imposed on every
-terminal of the program; versions 2 and 3 are receipt-valued.
+under the derived JSON encoding of Lean, which encodes constructors as
+single-key objects and structures as field objects.  The corpus files are the
+normative examples of that encoding.  The record is exactly @code{fns} and
+@code{main}.  An omitted @code{version} means 2.  @code{worlds} defaults to the
+single echo world.  A world can add exact structured answers as a list of
+schema and value pairs, and every entry is validated while the request is
+decoded.  A world that omits a schema that the checked Plan can query is
+rejected before evaluation.  @code{result} is required only at version 4, where
+it is imposed on every terminal of the program.  Versions 2 and 3 are
+receipt-valued.
 
 A reply is refused, checked, or timed out.  A refusal names one of seven
 guards:
@@ -1020,16 +1040,16 @@ guards:
              "pos": @{"line": @dots{}, "col": @dots{}@}, "excerpt": "@dots{}", "message": "@dots{}"@}@}
 @end example
 
-The guard, and for the question budget the computed @code{n}, are compared,
-because both implementations produce them.  The position, excerpt, and message
-are functions of written characters and of the checker's wording, which the
-Haskell builder never has, so they are oracle-only.  The guard is assigned in
-the oracle by matching the checker's message text.  @code{deciderEmpty} covers
-a decider with no needle and a decider with an empty needle, since both are a
-test that is constantly true or constantly false.  @code{panelEmpty} covers an
-empty verdict panel and an empty text panel.  @code{other} covers every
-refusal outside the six term-level guards; those are diagnostics rather than
-comparands.
+The guard is compared, and for the question budget the computed @code{n} is
+compared too, because both implementations produce them.  The position, the
+excerpt, and the message are functions of written characters and of the
+wording of the checker.  The Haskell builder never has those, so these fields
+are oracle-only.  The oracle assigns the guard by a match on the message text
+of the checker.  @code{deciderEmpty} covers a decider with no needle and a
+decider with an empty needle, because both are a test that is constantly true
+or constantly false.  @code{panelEmpty} covers an empty verdict panel and an
+empty text panel.  @code{other} covers every refusal outside the six term-level
+guards, and those refusals are diagnostics rather than comparands.
 
 A checked reply carries the static folds and one record per world:
 
@@ -1048,14 +1068,15 @@ A checked reply carries the static folds and one record per world:
              "billFresh": <Nat>, "billMemo": <Nat>@}, @dots{}]@}
 @end example
 
-@code{codes} is a pipeline-only comparand and is null whenever a case node
+@code{codes} is a pipeline-only comparand, and it is null whenever a case node
 exists.  @code{costSummary} gives the folded minimum, the folded maximum, and
 the leaf count of the cost tree.  @code{blockAsks} and @code{fnAsks} are the
-first-order ask counts, computable on both sides without a Plan.  At version 2
-each trace event is a bare-question semantic event.  At versions 3 and 4 the
-@code{trace} holds annotated execution events and @code{semanticTrace} holds
-the same occurrences after intent erasure.  Version 4 additionally returns the
-program result as a code at the top level and as a value in each world.
+first-order ask counts, and both sides can compute them without a Plan.  At
+version 2, each trace event is a bare-question semantic event.  At versions 3
+and 4, the @code{trace} holds annotated execution events, and
+@code{semanticTrace} holds the same occurrences after intent erasure.  Version
+4 also returns the program result, as a code at the top level and as a value in
+each world.
 
 An event is data and never a rendering:
 
@@ -1072,26 +1093,29 @@ An event is data and never a rendering:
 @end example
 
 A code is one of the strings @code{text}, @code{verdict}, @code{flag}, and
-@code{receipt}, or the structured family @code{@{"json": @{"schema": <Schema>@}@}}.
-The tag @code{json} is a wire spelling only; the semantic constructor is
-@code{Code.structured}, and diagnostics say @code{structured}.  A schema is
-one of the five primitive strings @code{null}, @code{boolean}, @code{integer},
-@code{number}, and @code{string}; an array form @code{@{"array": @{"items": <Schema>@}@}};
-the empty object @code{"object"}; or a property form
+@code{receipt}, or it is the structured family
+@code{@{"json": @{"schema": <Schema>@}@}}.  The tag @code{json} is a wire
+spelling only.  The semantic constructor is @code{Code.structured}, and
+diagnostics say @code{structured}.  A schema has one of four forms.  It is one
+of the five primitive strings @code{null}, @code{boolean}, @code{integer},
+@code{number}, and @code{string}.  It is an array form
+@code{@{"array": @{"items": <Schema>@}@}}.  It is the empty object
+@code{"object"}.  Or it is a property form
 @code{@{"property": @{"name": "@dots{}", "schema": <Schema>, "rest": <Schema>@}@}}.
 A schema value is a total exact boundary representation.  Unit, booleans,
-integers, and strings use their direct JSON forms; lists and records recurse;
-exact rationals use a numerator and denominator pair.  This representation is
-distinct from the user-facing JSON codec, and no two semantic values collapse
-in it.
+integers, and strings use their direct JSON forms.  Lists and records recurse.
+Exact rationals use a pair of a numerator and a denominator.  This
+representation is distinct from the user-facing JSON codec, and no two
+semantic values collapse in it.
 
-Both traces are compared in order and unnormalized.  Semantic event identity
-is the code together with the complete question.  Routes, retries, timeouts,
-and selected backends are execution metadata and never rewrite the authored
-question in @code{semanticTrace}.  Version 2 deduplicates bare questions in
-its memo bill, which is the billing the version-2 corpus entries pin.
-Versions 3 and 4 share consult and observe answers by bare question while
-retaining every effect occurrence.  The pure oracle executes nothing.
+Both traces are compared in order and without normalization.  The identity of
+a semantic event is the code together with the complete question.  Routes,
+retries, timeouts, and selected backends are execution metadata, and they never
+rewrite the authored question in @code{semanticTrace}.  Version 2 deduplicates
+bare questions in its memo bill, and the version-2 corpus entries pin that
+billing.  Versions 3 and 4 share consult and observe answers by bare question
+and retain every effect occurrence.  The pure oracle itself executes no
+command.
 
 @section The string layer
 
@@ -1118,93 +1142,94 @@ answered with @code{@{"result": @dots{}@}}.
 An oracle that meets an unknown operation answers
 @code{@{"error": "unknown string op @dots{}"@}}, so an extension of the table
 fails loudly.  The @code{decider} field takes @code{lastNonEmptyLineIs},
-@code{containsLine}, @code{anyLineStartsWith}, or @code{anyPathMatches}, the
-same spelling that the first-order @code{decide} node carries.
+@code{containsLine}, @code{anyLineStartsWith}, or @code{anyPathMatches}, which
+is the same spelling that the first-order @code{decide} node carries.
 
 This request kind exists because the string layer is the highest-ranked
-divergence risk and a program observation never reaches it: on a program-in,
-world-out boundary nothing calls the decoders.  The four low-level operations
-@code{bare}, @code{fields}, @code{headerPaths}, and @code{matchGlob} make a
-divergence localizable.  A @code{decide} mismatch with all four agreeing is a
-composition defect, and a mismatch in one of them is that function's defect.
-The known hazard the vectors freeze is case folding: the Lean normalizer
-lowercases ASCII only, whereas a naive Haskell @code{toLower} is Unicode.
-Every predicate in this layer follows the ASCII rule, and the vectors pin the
-places where the two implementations could otherwise drift, including a
-carriage-return marker line, whitespace-only input, a non-ASCII capital
-through a needle, glob patterns against paths with and without directories, an
-indented diff header, and a fenced body that closes its own tag or a
-sibling's.
+divergence risk, and a program observation never reaches it.  On a boundary
+that takes a program in and gives a world out, nothing calls the decoders.  The
+four low-level operations @code{bare}, @code{fields}, @code{headerPaths}, and
+@code{matchGlob} make a divergence localizable.  A @code{decide} mismatch while
+all four agree is a composition defect.  A mismatch in one of them is a defect
+in that function.  The known hazard that the vectors freeze is case folding.
+The Lean normalizer lowercases ASCII only, whereas a naive Haskell
+@code{toLower} is Unicode.  Every predicate in this layer follows the ASCII
+rule.  The vectors pin the places where the two implementations can otherwise
+drift.  These places include a carriage-return marker line, whitespace-only
+input, and a non-ASCII capital through a needle.  They also include glob
+patterns against paths with and without directories, an indented diff header,
+and a fenced body that closes its own tag or the tag of a sibling.
 
 @section The corpus
 
 @cindex frozen corpus
 @file{bisim/corpus/} holds one JSON file per case, of the form
-@code{@{"name": "@dots{}", "request": <request>, "reply": <reply>, "oracleVersion": <Nat>@}},
-where the last field records the oracle format under which the entry was
-frozen.  Each file was produced by running the oracle once and committing its
-output.
-The checkout holds 193 files: 95 checked replies, 54 refusals, and 44 string
-results.  The three typed-result entries are version 4, and every other entry
-is version 2.  The flagship is entry @file{example-000-the-flagship-single-file},
-whose request is the same @code{RawProgram} that
-@file{model/Agentic/Core/DslFlagship.lean} proves accepted.
+@code{@{"name": "@dots{}", "request": <request>, "reply": <reply>, "oracleVersion": <Nat>@}}.
+The last field records the oracle format under which the entry was frozen.
+Each file was produced by one run of the oracle, and its output was committed.
+The checkout holds 193 files, which are 95 checked replies, 54 refusals, and
+44 string results.  The three typed-result entries are version 4, and every
+other entry is version 2.  The flagship is the entry
+@file{example-000-the-flagship-single-file}.  Its request is the same
+@code{RawProgram} that @file{model/Agentic/Core/DslFlagship.lean} proves
+accepted.
 
 The corpus is frozen, and the requests in it are the specification.
-@command{tier0} is the Haskell side reproducing every reply from every request
-with no Lean in the loop.  @command{lake exe corpus-gen} reads each file, takes
-its request verbatim, puts it back through the same observation the oracle
-serves, and rewrites the file with the fresh reply.  Regenerating is expected
-to change nothing: an empty @code{git status --short bisim/corpus} afterwards
-states that the elaboration, the cost algebra, the interpreter, and the
-trusted base still say exactly what the frozen specification says.  A diff is
-a change to the specification and is reviewed as one.
+@command{tier0} is the Haskell side, and it reproduces every reply from every
+request with no Lean in the loop.  @command{lake exe corpus-gen} reads each
+file and takes its request verbatim.  It puts the request back through the same
+observation that the oracle serves, and it rewrites the file with the fresh
+reply.  This regeneration must change nothing.  An empty
+@code{git status --short bisim/corpus} afterwards states that the
+elaboration, the cost algebra, the interpreter, and the trusted base still
+agree with the frozen specification.  A diff is a change to the specification,
+and it is reviewed as one.
 
 @section What the corpus pins
 
-Three surfaces are pinned.
+The corpus pins three surfaces, and each is described below.
 
 The first surface is the reply record.  A version-2 checked reply has exactly
-eight keys; version 4 adds @code{result} and a returned value in each world.
+eight keys, and version 4 adds @code{result} and a returned value in each world.
 The keys @code{shapes} and @code{asks} appear in no file, so
-@code{Cost.shapes} and @code{Cost.asks} may be reorganized without a corpus
-regeneration.  Of that family only @code{codes} is pinned.
+@code{Cost.shapes} and @code{Cost.asks} can be reorganized without a corpus
+regeneration.  Of that family, only @code{codes} is pinned.
 
 The second surface is the printed @code{RawProgram}.  The request of each
-vector is the Lean datatype under Lean's JSON encoding, so constructor and
-field bytes are frozen alongside the observations.  Position is the one field
-this surface does not compare: the corpus stores real line and column values,
-and the Haskell comparison zeroes positions on both sides, because the Haskell
-builder has no source position to record.
+vector is the Lean datatype under the JSON encoding of Lean, so the constructor
+and field bytes are frozen beside the observations.  Position is the one field
+that this surface does not compare.  The corpus stores real line and column
+values, and the Haskell comparison zeroes the positions on both sides, because
+the Haskell builder has no source position to record.
 
 The third surface is exercised by the Haskell gates rather than by the corpus
-alone: @command{tier1} rebuilds the curated checked entries in the production
-authoring surface and compares the printed program and the whole reply.  Two
-further checks are pinned outside the wire: the two @code{#guard_msgs} in
-@file{model/Agentic/Core/Certify.lean}, one of which states that
-@code{certify_sound} depends on no axioms.  They are build failures rather
-than comments, so the discipline is self-enforcing.
+alone.  @command{tier1} rebuilds the curated checked entries in the production
+authoring surface, and it compares the printed program and the whole reply.
+Two further checks are pinned outside the wire.  They are the two
+@code{#guard_msgs} in @file{model/Agentic/Core/Certify.lean}, and one of them
+states that @code{certify_sound} depends on no axioms.  They are build failures
+rather than comments, so the discipline enforces itself.
 
 @section What is never on the wire
 
-A Plan, a dialogue, a world as a function, a table holding anything other
-than data, and source text of any kind never cross the boundary.
-@code{RawProgram} is the complete first-order object.  There is no parser on
-the Lean side, so the boundary is the only way a program reaches the oracle.
-Transport failures between the two processes are not conformance
-divergences.
+Five things never cross the boundary.  These are a Plan, a dialogue, a world as
+a function, a table that holds anything other than data, and source text of any
+kind.  @code{RawProgram} is the complete first-order object.  There is no
+parser on the Lean side, so the boundary is the only way that a program reaches
+the oracle.  A transport failure between the two processes is not a
+conformance divergence.
 
 @node First Workflow
 @chapter First Workflow
 
 This chapter builds the smallest complete program, inspects it, and runs it
-against a deterministic table.  The example is the same compiled value used by
-the project runner and its conformance tests.
+against a deterministic table.  The example is the same compiled value that the
+project runner and its conformance tests use.
 
 @section Enter the Haskell development shell
 
-The root Nix development shell contains the Haskell workspace. Run these commands
-from the repository root:
+The root Nix development shell contains the Haskell workspace.  Run these
+commands from the repository root:
 
 @example
 nix develop path:. -c cabal build all
@@ -1213,31 +1238,31 @@ nix develop path:. -c cabal run agentic-run -- list
 
 The build covers the library, the compiled examples, and the conformance and
 runner executables.  Nothing is installed globally.  A bare
-@command{agentic-run} in later examples means the executable reached through
-@code{nix develop -c cabal run agentic-run --}.
+@command{agentic-run} in later examples means the executable that
+@code{nix develop -c cabal run agentic-run --} reaches.
 
 @section A complete authoring module
 
 @cindex QualifiedDo
 The introductory program needs @code{BlockArguments}, @code{QualifiedDo}, and
-@code{QuasiQuotes}; @code{OverloadedStrings} keeps prompt and identifier literals
-concise.  The complete module below is compiled during the manual verification
-and can be copied as one file:
+@code{QuasiQuotes}.  @code{OverloadedStrings} keeps prompt and identifier
+literals concise.  The complete module below is compiled during the
+verification of the manual, and it can be copied as one file:
 
 @verbatiminclude examples/Hello.hs
 
 @code{W.do} changes only the workflow block in which it appears, while ordinary
-@code{do} keeps its usual meaning.  A module that writes Haskell @code{if} over a
-workflow flag additionally enables @code{RebindableSyntax}; under that extension,
-import @code{Prelude} explicitly and import @code{Data.String (fromString)} for
-@code{OverloadedStrings}.
+@code{do} keeps its usual meaning.  A module that writes a Haskell @code{if}
+over a workflow flag also enables @code{RebindableSyntax}.  Under that
+extension, import @code{Prelude} explicitly, and import
+@code{Data.String (fromString)} for @code{OverloadedStrings}.
 
 @code{workflow} closes a @code{W.do} block with no function table.  A bare
 @code{ask} in binding position is a text question, so @code{subject} and
 @code{greeting} are typed handles to text answers.  Their prompt holes refer to
 ordinary Haskell variables in lexical scope.  The local @code{brief} binding is
-text supplied by the author; it is inserted as literal prompt data and creates
-no answer binding or Plan node.
+text that the author supplies.  It is inserted as literal prompt data, and it
+creates no answer binding and no Plan node.
 
 The final @code{ask_} discards a receipt and ends the block.  It is exactly the
 same represented term as @code{act (tool "say") ...} followed by @code{stop}.
@@ -1249,8 +1274,8 @@ result is ignored.
 
 @cindex registry
 A program becomes available to @command{agentic-run} through a @code{Registry}.
-Each row carries an @code{Example}, one-line description, help page, and scripted
-answer table.  @code{Fixed helloProgram} registers a complete Program;
+Each row carries an @code{Example}, a one-line description, a help page, and a
+scripted answer table.  @code{Fixed helloProgram} registers a complete Program.
 @code{Needs parameterizedProgram} registers a program whose operator inputs are
 supplied before the Program is built.
 
@@ -1264,15 +1289,15 @@ package.  Running the resulting executable with @code{run hello --scripted}
 requires no credential or external process.
 
 The library performs no global discovery.  A downstream executable constructs
-its own registry and applies @code{Agentic.Cli.cliMain}.  This repository's
-@command{agentic-run} applies that function to @code{examplesRegistry}; the
-private workflow toolbox mentioned in the source uses the same CLI with another
-table.
+its own registry and applies @code{Agentic.Cli.cliMain}.  The
+@command{agentic-run} of this repository applies that function to
+@code{examplesRegistry}.  The private workflow toolbox that the source mentions
+uses the same CLI with another table.
 
-Every registered row has a help page by type construction.  The repository's
-deterministic examples gate also pins each row's level, size, ask-node count,
-cost summary, and scripted bills, so adding a row requires an explicit account
-of its static and observed cost.
+Every registered row has a help page by type construction.  The deterministic
+examples gate of the repository also pins the level, the size, the ask-node
+count, the cost summary, and the scripted bills of each row.  A new row
+therefore requires an explicit account of its static and observed cost.
 
 @section Inspect before running
 
@@ -1305,10 +1330,11 @@ agentic-run run hello --scripted
 @end example
 
 The table answers the three prompts with fixed bytes.  Those bytes pass through
-the normal typed decoder, the scheduler follows the same Plan used by live
-runs, and the final report gives both fresh and memo bills.  No adapter,
+the normal typed decoder.  The scheduler follows the same Plan that live runs
+use, and the final report gives both the fresh and the memo bills.  No adapter,
 agent-deck session, person, or executable tool is contacted.  This is the
-preferred first run and the repeatable form used throughout the guide.
+preferred first run, and it is the repeatable form that the guide uses
+throughout.
 
 @node Authoring Workflows
 @chapter Authoring Workflows
@@ -1321,9 +1347,9 @@ statements, finite branches, panels, decisions, and bounded revision.
 @cindex workflow block
 A @code{W.do} block is indexed by its incoming and outgoing stage.  The stage
 tracks whether the block is an ordinary workflow, a review clause, an amendment
-clause, or a function body.  Ordinary source code does not mention those indices;
-they appear in compiler messages when a construction is placed where the
-grammar cannot represent it.
+clause, or a function body.  Ordinary source code does not mention those
+indices.  They appear in compiler messages when a construction is placed where
+the grammar cannot represent it.
 
 A workflow block ends in a terminal.  @code{stop} is the empty ending.
 @code{ask_} performs one answer-discarding request and stops.  A two- or
@@ -1338,11 +1364,11 @@ first-order program needs to carry and check an explicit account of its context.
 
 @section Bindings and printed names
 
-A bound answer is a typed handle handed to the remainder of the Haskell block.
-The surface generates its printed binder name from depth, beginning with
-@code{b0}; a revision result uses the corresponding @code{r0} form.  Generated
-names make printing reproducible and require no type-level copy of the Haskell
-binder's spelling.
+A bound answer is a typed handle that is handed to the remainder of the Haskell
+block.  The surface generates the printed binder name from the depth of the
+binding, and the first name is @code{b0}.  A revision result uses the
+corresponding @code{r0} form.  Generated names make printing reproducible, and
+they require no type-level copy of the spelling of the Haskell binder.
 
 @code{named "guide" statement} selects the printed name for a binding.  It
 changes neither the typed variable nor the Plan meaning, and prompt holes continue
@@ -1358,24 +1384,24 @@ lines at the two edges are dropped, common indentation is removed, and the
 result has no trailing newline.  A hole such as @code{@{subject@}} is resolved
 as an ordinary Haskell expression at the splice site.
 
-The class @code{Says} admits three useful sources.  A live handle contributes an
-interpolation piece under the name carried by that handle.  A @code{Text} value
-contributes literal words.  A fenced define contributes its existing prompt
-pieces.  A handle must have a supported textual rendering; flags and receipts
-cannot be placed in prompt holes.
+The class @code{Says} admits three useful sources.  A live handle contributes
+an interpolation piece under the name that the handle carries.  A @code{Text}
+value contributes literal words.  A fenced define contributes its existing
+prompt pieces.  A handle must have a supported textual rendering, so flags and
+receipts cannot be placed in prompt holes.
 
 A verdict hole renders its objection text.  Approval and refusal both render as
-an empty string under the verdict algebra.  Branch on the verdict tag when the
-difference matters, rather than relying on rendered text to distinguish them.
+an empty string under the verdict algebra.  When the difference matters, branch
+on the verdict tag, because the rendered text cannot distinguish them.
 
-@code{[wft|...|]} applies the same fence layout to a define and returns text
-rather than scoped prompt pieces.  Its holes may name defines in Haskell scope,
-but they cannot name live workflow handles because the resulting text carries
-no workflow scope in which such a handle would remain live.
+@code{[wft|...|]} applies the same fence layout to a define, and it returns
+text rather than scoped prompt pieces.  Its holes can name defines in Haskell
+scope.  They cannot name live workflow handles, because the resulting text
+carries no workflow scope in which such a handle is live.
 
 Literal pieces on either side of a hole remain separate in the first-order
 prompt.  This detail makes the authoring surface print the same left-associated
-expression expected by the Lean checker and frozen corpus.
+expression that the Lean checker and the frozen corpus expect.
 
 @section Parties and question modifiers
 
@@ -1388,14 +1414,15 @@ traces and rendered headers.  A model party can be modified by
 model "reviewer" `servedBy` "deep" `fallingBackTo` "broad"
 @end example
 
-The primary serving model enters the represented question scope.  Alternates
-form an ordered execution chain.  Tools and people cannot carry a model-serving
-chain; the party kind makes such a construction a compile-time error.
+The primary serving model enters the scope of the represented question.
+Alternates form an ordered execution chain.  Tools and people cannot carry a
+model-serving chain, and the party kind makes such a construction a
+compile-time error.
 
-@code{drawing party n} sets the draw field.  Equal prompts at distinct draws are
-distinct questions and occupy distinct memo keys.  @code{running} attaches an
-argv to a tool party.  Its command and arguments are literal program text; the
-prompt travels separately on standard input.
+@code{drawing party n} sets the draw field.  Equal prompts at distinct draws
+are distinct questions, and they occupy distinct memo keys.  @code{running}
+attaches an argv to a tool party.  Its command and arguments are literal
+program text, and the prompt travels separately on standard input.
 
 @section Answer kinds
 
@@ -1423,18 +1450,19 @@ The @code{Answer} witnesses are @code{Text}, @code{Flag}, @code{Verdict},
 @section Panels
 
 @cindex panel
-@code{panel} accepts a nonempty list of questions and yields a verdict.  Members
-become independent Plan subterms, so the scheduler may overlap them when their
-prompt dependencies permit it.  Their verdicts are multiplied in list order;
-all members must approve for the result to approve.
+@code{panel} accepts a nonempty list of questions and yields a verdict.  The
+members become independent Plan subterms, so the scheduler can overlap them
+when their prompt dependencies permit it.  Their verdicts are multiplied in
+list order, and all members must approve for the result to approve.
 
-@code{panelText} accepts nonempty pairs of a label and question.  It yields text
-formed from one named block per member.  Labels are authored document roles,
-rather than addressee identifiers, and must be valid and distinct.  The body of
-a block cannot close its own fence because that closing tag is escaped.
+@code{panelText} accepts nonempty pairs of a label and a question.  It yields
+text that is formed from one named block per member.  Labels are authored
+document roles rather than addressee identifiers, and they must be valid and
+distinct.  The body of a block cannot close its own fence, because that closing
+tag is escaped.
 
-Empty lists are refused when the Program is forced.  The authoring surface uses
-ordinary lists so that a panel reads naturally, while the value-level refusal
+An empty list is refused when the Program is forced.  The authoring surface
+uses ordinary lists so that a panel reads naturally.  The value-level refusal
 preserves the same language contract as the first-order checker.
 
 @section Pure decisions
@@ -1454,10 +1482,11 @@ Some line begins with one of the needles.
 A path read from a diff header matches one of the glob patterns.
 @end table
 
-The line deciders compare under the project's ASCII case-folding rules.  Needles
-remain literal program text and must be nonempty; the list must contain at least
-one.  Replacing an asked flag with a decision removes one question from every
-path while preserving the path count and analysis rung.
+The line deciders compare under the ASCII case-folding rules of the project.
+Needles remain literal program text, and each needle must be nonempty.  The
+list must contain at least one needle.  When a decision replaces an asked flag,
+it removes one question from every path, and the path count and the analysis
+rung stay the same.
 
 @section Boolean and verdict branches
 
@@ -1472,20 +1501,21 @@ supply @code{stop} for the omitted arm and seal the body with its own terminal.
 These combinators are terminal, unlike the continuing operations of the same
 names in @code{Control.Monad}.
 
-A verdict handle remains an ordinary value that may be spliced or acted past.
-@code{caseVerdict verdict approved objected declined} supplies its three terminal
-arms in the Lean tag order.  There is no Haskell data constructor to match here
-because the branch is placed at the explicit @code{caseVerdict} call, potentially
-many statements after the verdict was bound.
+A verdict handle remains an ordinary value, and a workflow can splice it or act
+past it.  @code{caseVerdict verdict approved objected declined} supplies its
+three terminal arms in the Lean tag order.  There is no Haskell data
+constructor to match here.  The branch is placed at the explicit
+@code{caseVerdict} call, which can come many statements after the verdict was
+bound.
 
 @section Bounded revision
 
 @cindex bounded revision
-@code{revising subject (atMost n)} reviews a candidate and may amend it up to
+@code{revising subject (atMost n)} reviews a candidate and can amend it up to
 @code{n} times.  The bound lies between zero and sixty-four.  Each round has
-exactly two source clauses: a verdict-producing review followed by
-@code{amend} at the candidate's answer kind.  Additional statements have no
-first-order place inside the round and are rejected.
+exactly two source clauses.  The first is a review that produces a verdict, and
+the second is an @code{amend} at the answer kind of the candidate.  Additional
+statements have no first-order place inside the round, and they are rejected.
 
 The flagship's complete review clause is a compiled example:
 
@@ -1544,28 +1574,29 @@ candidate reviewed when the bound ran out.  Each pattern binds its own typed
 handle in its own arm, and Haskell lexical scope prevents one arm from using the
 other arm's value.
 
-@code{revisingOn} reads the review verdict's three tags separately.  Approval
-produces @code{SettledOn}; an outstanding objection at the bound produces
-@code{UnsettledOn}; refusal produces @code{AbandonedOn}.  Every constructor
-carries the current candidate.  The continuation is represented in all three
-arms, which grows the tail @code{2n+1} times rather than the @code{n+1} copies
-used by @code{revising}.  A long shared tail belongs in a function called from
-each arm.
+@code{revisingOn} reads the three tags of the review verdict separately.
+Approval produces @code{SettledOn}.  An outstanding objection at the bound
+produces @code{UnsettledOn}.  Refusal produces @code{AbandonedOn}.  Every
+constructor carries the current candidate.  The continuation is represented in
+all three arms, so the tail grows @code{2n+1} times rather than the @code{n+1}
+copies that @code{revising} uses.  A long shared tail belongs in a function
+that each arm calls.
 
 @node Functions Inputs and Schemas
 @chapter Functions, Inputs, and Schemas
 
-This chapter explains the constructions that organize larger programs:
-straight-line functions, typed arguments, operator inputs, runner-supplied facts,
-and schema-indexed structured answers.
+This chapter explains the constructions that organize larger programs.  These
+are straight-line functions, typed arguments, operator inputs, runner-supplied
+facts, and schema-indexed structured answers.
 
 @section Functions
 
 @cindex workflow function
 A workflow function is a named open Plan over a typed parameter context.  Its
-body is a straight-line @code{W.do} block.  Calls substitute arguments into the
-body and graft the resulting nodes at the call site, so a call adds no runtime
-dispatch node and costs exactly what the inlined body costs.
+body is a straight-line @code{W.do} block.  A call substitutes the arguments
+into the body and grafts the resulting nodes at the call site.  A call
+therefore adds no runtime dispatch node, and it costs exactly what the inlined
+body costs.
 
 A parameter list ends at @code{noParams}.  Each @code{takes @@"name" Answer}
 adds a printed name and answer kind.  The name is a type-level symbol because
@@ -1573,11 +1604,12 @@ the function signature and every prompt hole in the body must agree on its
 spelling.  Duplicate parameter names and reserved generated names are compile-time
 errors.
 
-@code{function} takes the function name, parameter list, and curried body.  The
-terminal determines the result kind.  @code{answer handle} returns a value of
-the handle's kind.  @code{done} returns a receipt to the caller.  Function
-bodies permit binds, questions, acts, calls, and one final answer; branches,
-bounded revision, and @code{knownHere} belong to the calling workflow.
+@code{function} takes the function name, the parameter list, and the curried
+body.  The terminal determines the result kind.  @code{answer handle} returns a
+value of the kind of the handle.  @code{done} returns a receipt to the caller.
+A function body permits binds, questions, acts, calls, and one final answer.
+Branches, bounded revision, and @code{knownHere} belong to the workflow that
+calls the function.
 
 The @code{reviewReport} function from the compiled Isaac examples has six text
 parameters and a receipt result:
@@ -1618,10 +1650,10 @@ priced.
 
 @section Calls and argument chains
 
-@code{call fn args} is a value source and may be bound wherever an
-@code{Rhs} may stand.  @code{call_ fn args} is a statement call restricted to a
-receipt-returning function.  The underscore again records that no value is
-bound.
+@code{call fn args} is a value source, and it can be bound wherever an
+@code{Rhs} can stand.  @code{call_ fn args} is a statement call that is
+restricted to a function that returns a receipt.  The underscore again records
+that no value is bound.
 
 Arguments form a right-associated chain with @code{:>} and end at
 @code{noArgs}.  @code{arg handle} passes a live answer by reference at its exact
@@ -1630,26 +1662,26 @@ supply text whose holes read bindings in the caller's scope.  Kind and arity
 mismatches are ordinary type errors.
 
 The same @code{:>} spelling builds program input lists.  The overloaded pattern
-has only these two construction instances; matching a chain in user code is
-outside the supported surface.
+has only these two construction instances.  A pattern match on a chain in user
+code is outside the supported surface.
 
 @section Program inputs
 
 @cindex program input
-An input is text supplied before the Program is built.  It behaves like a
-Haskell define placed in prompts, rather than like an answer obtained from a
-question.  Since Plan folds do not inspect prompt text, a program that only
-splices an input has the same level, node counts, answer-code structure, and cost
-for every input value.
+An input is text that is supplied before the Program is built.  It behaves
+like a Haskell define that is placed in prompts, and not like an answer that a
+question obtains.  Plan folds do not inspect prompt text.  A program that only
+splices an input therefore has the same level, node counts, answer-code
+structure, and cost for every input value.
 
 @code{input "subject" :> noInputs} declares one ordinary input.
-@code{argsInput} declares command-tail text under default name @code{args};
-@code{stdinInput} declares literal standard input under default name @code{input}.
-@code{argsInputAs} and @code{stdinInputAs} select custom names.  Names are
-unique, and only one command-tail and one standard-input source may appear.
-@code{taking} curries the body over the ordered declarations and produces
-@code{Parameterized}.  The compiled @code{review-lite} example uses a custom
-stdin name:
+@code{argsInput} declares command-tail text under the default name @code{args}.
+@code{stdinInput} declares literal standard input under the default name
+@code{input}.  @code{argsInputAs} and @code{stdinInputAs} select custom names.
+Names are unique, and a program can declare at most one command-tail source and
+one standard-input source.  @code{taking} curries the body over the ordered
+declarations and produces @code{Parameterized}.  The compiled
+@code{review-lite} example uses a custom stdin name:
 
 @c SOURCE workflow/extra/Isaac.hs
 @verbatim
@@ -1660,16 +1692,17 @@ reviewLite = taking (stdinInputAs "subject" :> noInputs) \subject ->
 @c END SOURCE
 
 A registry stores a parameterized value with @code{Needs}.  Descriptor version
-2 exposes each operator input as a @code{name}/@code{source} record; version-1
-string entries are interpreted by new clients as ordinary prompt inputs.
-@code{plan} and @code{cost} may leave inputs empty because folds read no prompt.
-@code{run} requires every input.
+2 exposes each operator input as a record with a @code{name} and a
+@code{source}.  New clients interpret version-1 string entries as ordinary
+prompt inputs.  @code{plan} and @code{cost} can leave inputs empty, because the
+folds read no prompt.  @code{run} requires every input.
 
 The explicit forms remain @code{--input FILE}, @code{--input-file NAME=FILE},
-and @code{--input-arg NAME=VALUE}.  For @code{run} and machine/lineage commands,
-an unbound stdin declaration reads fd 0 strictly as UTF-8 to EOF.  Empty input is
-valid; a terminal refuses rather than hanging.  Explicit input flags take
-precedence.  Stdin and command-tail inputs preserve exact text, while an
+and @code{--input-arg NAME=VALUE}.  For @code{run} and for the machine and
+lineage commands, an unbound stdin declaration reads file descriptor 0 to end
+of file, strictly as UTF-8.  Empty input is valid.  A terminal is refused
+rather than read, so the command does not hang.  Explicit input flags take
+precedence.  Stdin and command-tail inputs preserve the exact text, while an
 ordinary file input has one final line feed removed.
 
 @section Optional runtime facts
@@ -1682,8 +1715,8 @@ Four reserved inputs are supplied by the runner rather than the operator:
 A one-line roster describing how many answering services the run reaches and
 which kinds they are.
 @item run.engine
-The engine and session-sharing policy, using the wording returned by
-@code{sessionPolicy}.
+The engine and the session-sharing policy, in the wording that
+@code{sessionPolicy} returns.
 @item run.routes
 The resolved route table, one @samp{label = backend} line per answerer, with
 @code{(default)} first.
@@ -1692,13 +1725,14 @@ A line generated for this run and inserted nowhere except prompts that hole the
 fact.
 @end table
 
-A workflow declares one of these names with the DSL's ordinary @code{input}; the
-name is a symbol, so the workflow package remains DSL-only.  The CLI treats
-@code{run.} as a closed namespace and supplies the fact from the run it is making.
-A name under that prefix outside the closed set is refused.  An operator flag that
-attempts to supply a valid run fact is also refused, since a command line cannot
-state what its own run did.  Hosts share the constants and readers through the
-Text-only @code{Agentic.Runtime.Facts} API.
+A workflow declares one of these names with the ordinary @code{input} of the
+DSL.  The name is a symbol, so the workflow package remains DSL-only.  The CLI
+treats @code{run.} as a closed namespace, and it supplies the fact from the run
+that it is making.  A name under that prefix outside the closed set is refused.
+An operator flag that attempts to supply a valid run fact is also refused,
+because a command line cannot state what its own run did.  Hosts share the
+constants and the readers through the Text-only @code{Agentic.Runtime.Facts}
+API.
 
 @code{sharesOneSession} reads @code{run.engine} and reports whether at least one
 answerer shares a conversation across the run.  @code{routedBackend} reads
@@ -1711,7 +1745,7 @@ leaving @code{run.routes} empty because it has no backend table.
 
 @cindex schema-indexed answer
 A structured answer carries its schema in the answer code.  Primitive schemas
-cover unit, Boolean, integer, exact rational, and text values; arrays and named
+cover unit, Boolean, integer, exact rational, and text values.  Arrays and named
 product fields compose them.  @code{SchemaEl} interprets that structure as
 ordinary Haskell values.
 
@@ -1747,18 +1781,18 @@ structuredProgram = workflow W.do
 @end verbatim
 @c END SOURCE
 
-The runtime appends a JSON Schema instruction to the rendered question, rejects
-duplicate object keys and schema mismatches, and decodes a successful response
-to the semantic @code{SchemaEl} value.  @code{decodeAs @@ReleasePlan} then
-converts the same bytes directly to the host record where host-side code needs
-that boundary.
+The runtime appends a JSON Schema instruction to the rendered question.  It
+rejects duplicate object keys and schema mismatches, and it decodes a successful
+response to the semantic @code{SchemaEl} value.  Where host-side code needs
+that boundary, @code{decodeAs @@ReleasePlan} converts the same bytes directly
+to the host record.
 
-@code{Agentic.Schema.Json} also provides explicit decode, encode, render, and
-schema-document functions.  User-facing JSON rejects numeric exponents whose
-magnitude exceeds 4096.  Encoding an arbitrary exact rational succeeds only
-when it has a finite decimal representation; the conformance representation
-uses an exact numerator and denominator
-so distinct semantic values do not collapse.
+@code{Agentic.Schema.Json} also provides explicit functions that decode,
+encode, render, and produce the schema document.  User-facing JSON rejects a
+numeric exponent whose magnitude exceeds 4096.  The encoding of an arbitrary
+exact rational succeeds only when the rational has a finite decimal
+representation.  The conformance representation uses an exact numerator and
+denominator, so distinct semantic values do not collapse.
 
 @node Inspecting Workflows
 @chapter Inspecting Workflows
@@ -1769,17 +1803,18 @@ starting an adapter or asking an addressee.
 @section List and help
 
 @code{agentic-run list} prints the registry in declaration order.  The current
-repository has nine rows: @code{harden}, @code{hello}, @code{structured},
+repository has nine rows, named @code{harden}, @code{hello}, @code{structured},
 @code{structured-result}, @code{plan-feature}, @code{review-lite},
 @code{ship-feature-lite}, @code{grind-tests}, and @code{stack-prs}.  Each line
-includes the row's short description.
+includes the short description of the row.
 
 @code{agentic-run help NAME} and @code{agentic-run NAME --help} print the same
-program page.  The page combines current static facts with prose stored in the
-row: purpose, input meanings, suitable transport, a worked command, a scripted
-rehearsal, and caveats.  It starts no answering service and exits successfully.
-A bare registered name is refused because it is ambiguous between inspection
-and execution.
+program page.  The page combines the current static facts with the prose that
+is stored in the row.  That prose gives the purpose, the meaning of each input,
+the suitable transport, a worked command, a scripted rehearsal, and caveats.
+The command starts no answering service and exits successfully.  A bare
+registered name is refused, because it is ambiguous between inspection and
+execution.
 
 @code{--help} or bare @code{help} prints general usage.  A bare executable with
 no arguments prints the same usage as an error, since no command was requested.
@@ -1787,22 +1822,23 @@ no arguments prints the same usage as an error, since no command was requested.
 @section Plan
 
 @cindex plan command
-@code{plan NAME} reports five structural observations: level, size, ask nodes,
-answer codes where a single sequence exists, and the cost summary.  The result
-comes from the Haskell Plan and is available before any world supplies an
-answer.
+@code{plan NAME} reports five structural observations.  These are the level,
+the size, the ask nodes, the answer codes where a single sequence exists, and
+the cost summary.  The result comes from the Haskell Plan, and it is available
+before any world supplies an answer.
 
 @code{--raw} adds the emitted @code{RawProgram}.  The printed tree is the same
 first-order value used by guards, route and fail-over analysis, curated
 conformance cases, and the Lean oracle boundary.  Input values can change its
 prompt literals without changing the structural folds.
 
-@code{--json} changes @code{plan} to a machine-readable object.  Stable keys
-include @code{name}, @code{blurb}, @code{level}, @code{size},
-@code{askNodes}, @code{minFold}, @code{maxFold}, @code{paths}, operator
-@code{inputs}, declared @code{runFacts}, routing @code{pins}, @code{codes},
-and the cost @code{fold}.  @code{--raw --json} additionally includes
-@code{program}.  Object key order is not part of the interface; input order is.
+@code{--json} changes @code{plan} to a machine-readable object.  The stable
+keys include @code{name}, @code{blurb}, @code{level}, @code{size},
+@code{askNodes}, @code{minFold}, @code{maxFold}, @code{paths}, the operator
+@code{inputs}, the declared @code{runFacts}, the routing @code{pins},
+@code{codes}, and the cost @code{fold}.  @code{--raw --json} also includes
+@code{program}.  The order of the object keys is not part of the interface, and
+the order of the inputs is.
 
 @section Cost
 
@@ -1834,10 +1870,10 @@ For a Program with operator inputs, @code{plan} and @code{cost} accept
 is bound to empty text for inspection and is named as unbound in the output.
 Run facts also remain empty because no run exists yet.
 
-When @code{plan --raw} prints a Program built with missing inputs, a note appears
-above the tree.  The note matters because the printed prompt text differs from
-the Program that will be built once real values are supplied, even though its
-folds are the same.
+When @code{plan --raw} prints a Program that was built with missing inputs, a
+note appears above the tree.  The note matters because the printed prompt text
+differs from the Program that real values will build, even though the folds
+are the same.
 
 @section The pinning guard
 
@@ -1847,8 +1883,8 @@ model through @code{servedBy}.  Tool and person questions are outside this
 guard.  The same option is available on @code{run} and is checked before an
 adapter starts or any request can be spent.
 
-A fallback chain counts as pinned because it has a primary serving model.
-The guard protects future model questions by refusing the complete Program; it
+A fallback chain counts as pinned, because it has a primary serving model.  The
+guard protects future model questions when it refuses the complete Program.  It
 does not infer or add a serving model.
 
 @node Running Workflows
@@ -1862,17 +1898,18 @@ only when the destination and its consequences are understood.
 @section Scripted execution
 
 @cindex scripted execution
-@code{run NAME --scripted} executes the registered Plan against canned reply
-bytes stored in its row.  Prefix matching uses the authored prompt rather than
-a substring, which prevents an earlier answer spliced into a later prompt from
-accidentally selecting the wrong reply.  An unmatched prompt receives a
-code-specific deterministic default.
+@code{run NAME --scripted} executes the registered Plan against the canned
+reply bytes that are stored in its row.  The match uses a prefix of the
+authored prompt rather than a substring.  An earlier answer that is spliced
+into a later prompt therefore cannot select the wrong reply by accident.  An
+unmatched prompt receives a deterministic default for its code.
 
 Canned bytes use the normal decoder and recovery settings.  A canned
-@samp{maybe} at a flag is unreadable, is re-asked according to policy, and can
-abandon the run just like the same bytes from a live service.  Scripted mode
-therefore exercises Plan scheduling, branching, memoization, decoding, and
-billing while leaving transports and external tools untouched.
+@samp{maybe} at a flag is unreadable.  The runtime re-asks it according to
+policy, and the run can abandon, exactly as with the same bytes from a live
+service.  Scripted mode therefore exercises Plan scheduling, branching,
+memoization, decoding, and billing, and it leaves transports and external tools
+untouched.
 
 A standard rehearsal, from the repository root, is:
 
@@ -1881,8 +1918,8 @@ nix develop path:. -c cabal run agentic-run -- run hello --scripted
 @end example
 
 The closing report gives the workflow result, @code{billFresh}, and
-@code{billMemo}.  A workflow Program normally returns unit; its useful record is
-the execution trace printed as questions and answers occur.
+@code{billMemo}.  A workflow Program normally returns unit.  Its useful record
+is the execution trace, which is printed as questions and answers occur.
 
 @section ACP adapters
 
@@ -1895,42 +1932,46 @@ agentic-run run NAME --engine acp [--adapter ADAPTER] [--scratch DIR]
 
 @code{--adapter} accepts @code{stub}, @code{claude}, @code{codex},
 @code{droid}, or an executable path.  The default is @code{stub}, the
-deterministic local adapter; omitting the option never starts a paid live model.
-Claude and Codex are looked up on @code{PATH} and then at configured
-machine-local fallback paths.  Droid expands to @command{droid exec
---output-format acp} on @code{PATH}; it uses Droid's native ACP mode and does not
-require the Python SDK.
+deterministic local adapter, so an omitted option never starts a paid live
+model.  Claude and Codex are looked up on @code{PATH} and then at configured
+machine-local fallback paths.  Droid expands to
+@command{droid exec --output-format acp} on @code{PATH}.  It uses the native
+ACP mode of Droid, and it does not require the Python SDK.
 
 @example
 agentic-run run structured --engine acp --adapter droid
 @end example
 
-Authenticate Droid locally or provide @code{FACTORY_API_KEY} in the environment
-that starts the runner.  Never put credentials in @code{--adapter-arg} or routing
-configuration.  A plain Droid backend uses its configured session default.  To
-select a model and reasoning level, define a routing profile whose backend is
-@code{acp:droid} and set @code{max-output: unconstrained}; the runner validates
-and applies both settings through @code{session/set_config_option} before sending
-a prompt.  Any declared unsupported setting still refuses preflight.
+Authenticate Droid locally, or provide @code{FACTORY_API_KEY} in the
+environment that starts the runner.  Never put credentials in
+@code{--adapter-arg} or in the routing configuration.  A plain Droid backend
+uses its configured session default.  To select a model and a reasoning level,
+define a routing profile whose backend is @code{acp:droid}, and set
+@code{max-output: unconstrained}.  The runner validates and applies both
+settings through @code{session/set_config_option} before it sends a prompt.
+Any declared setting that the adapter does not support still refuses
+preflight.
 
-One adapter process may retain subscriptions for sessions opened earlier in the
-run.  The runner accepts answer chunks only for the current @code{sessionId}.
-Permission requests must also match the session and dynamic extent of an active
-prompt; stale or delayed out-of-turn requests are cancelled.
+One adapter process can retain subscriptions for sessions that were opened
+earlier in the run.  The runner accepts answer chunks only for the current
+@code{sessionId}.  A permission request must also match the session and the
+dynamic extent of an active prompt.  Stale or delayed requests that arrive out
+of turn are cancelled.
 
-@code{--adapter-arg ARG} appends one argument to every ACP adapter argv and may
-repeat.  @code{--timeout MS} bounds one request; the default is 900000
+@code{--adapter-arg ARG} appends one argument to every ACP adapter argv, and it
+can repeat.  @code{--timeout MS} bounds one request, and the default is 900000
 milliseconds.  @code{--verbose} narrates protocol activity on standard error.
 
-@code{--scratch DIR} sets the adapter's working directory and the directory in
-which an effect may receive permission.  Without it, the runner creates and
-prints a fresh temporary directory.  A live command intended to alter the
-current tree therefore names @code{--scratch "$PWD"} explicitly.  This is an
-authorization decision, not a convenience flag.
+@code{--scratch DIR} sets the working directory of the adapter and the
+directory in which an effect can receive permission.  Without it, the runner
+creates and prints a fresh temporary directory.  A live command that is
+intended to alter the current tree therefore names @code{--scratch "$PWD"}
+explicitly.  This is an authorization decision, and it is not a convenience
+flag.
 
-By default, ACP opens a new session for every question.  This policy limits
-history carried from one semantic question to the next.  It is an approximation
-of the world model rather than a theorem about the adapter.
+By default, ACP opens a new session for every question.  This policy limits the
+history that is carried from one semantic question to the next.  It is an
+approximation of the world model rather than a theorem about the adapter.
 
 @section agent-deck sessions
 
@@ -1947,20 +1988,22 @@ the @command{agent-deck} executable, whose default is @code{agent-deck} on
 @code{PATH}.  @code{--poll} defaults to 1000 milliseconds.  The common
 @code{--timeout} defaults to 600000 milliseconds for a deck turn.
 
-Before sending a question, the runner records the timestamp of the output
-already present.  It sends the rendered question, polls the session until idle,
-and accepts a reply only after the timestamp changes.  This staleness guard
-prevents the previous turn's output from becoming the current answer.
+Before it sends a question, the runner records the timestamp of the output
+that is already present.  It sends the rendered question, polls the session
+until the session is idle, and accepts a reply only after the timestamp
+changes.  This staleness guard prevents the output of the previous turn from
+becoming the current answer.
 
 Every model, tool, and person question goes to the selected session.  The
-rendered header states the authored addressee, intent, serving model, and answer
-format.  Deck reports no ACP stop reason, so completion evidence is limited to
-the session becoming idle and producing newer output.
+rendered header states the authored addressee, the intent, the serving model,
+and the answer format.  Deck reports no ACP stop reason, so the completion
+evidence is limited to an idle session and newer output.
 
 @section Routes
 
 @cindex route option
-A live run has one default backend and may refine it by serving-model pin:
+A live run has one default backend, and it can refine that backend by
+serving-model pin:
 
 @example
 --route NAME=acp:stub
@@ -1969,21 +2012,21 @@ A live run has one default backend and may refine it by serving-model pin:
 --route NAME=deck:SESSION
 @end example
 
-@code{NAME} is a primary or alternate model named by @code{servedBy} or
-@code{fallingBackTo}; it is not a model-party identifier.  A route name absent
-from the Program's pin set is refused before execution.  One name may appear
-only once.  Pinned questions without a route, unpinned model questions, tools,
-and people use the default backend.
+@code{NAME} is a primary or alternate model that @code{servedBy} or
+@code{fallingBackTo} names, and it is not a model-party identifier.  A route
+name that is absent from the pin set of the Program is refused before
+execution.  One name can appear only once.  Pinned questions without a route,
+unpinned model questions, tools, and people use the default backend.
 
-Routes may mix ACP and deck backends.  Engine-specific flags are accepted when
+Routes can mix ACP and deck backends.  Engine-specific flags are accepted when
 at least one backend of the corresponding scheme uses them.  @code{--adapter},
-@code{--adapter-arg}, and @code{--scratch} configure ACP backends;
-@code{--binary} and @code{--poll} configure deck backends; @code{--timeout} and
-@code{--verbose} apply to both.  A foreign flag with no backend to consume it is
-refused rather than ignored.
+@code{--adapter-arg}, and @code{--scratch} configure ACP backends.
+@code{--binary} and @code{--poll} configure deck backends.  @code{--timeout}
+and @code{--verbose} apply to both.  A foreign flag with no backend to consume
+it is refused rather than ignored.
 
-Scripted execution accepts no routes because its table does not dispatch by
-serving-model scope.  A route also requires a default live answerer, since
+Scripted execution accepts no routes, because its table does not dispatch by
+serving-model scope.  A route also requires a default live answerer, because
 unclaimed questions still need a destination.
 
 @section Inputs and preflight checks
@@ -1994,10 +2037,10 @@ a Program that declares none refuses all three forms.  Run facts are bound by
 the runner after it resolves the complete backend table and before it builds the
 Program.
 
-@code{--require-pinned} may accompany any execution engine.  Route syntax,
+@code{--require-pinned} can accompany any execution engine.  Route syntax,
 duplicate routes, unknown pins, function-table validity, reserved input names,
 and required operator inputs are all checked before a live backend starts.
-This ordering keeps usage errors at exit status 1 and prevents a malformed
+This ordering keeps usage errors at exit status 1, and it prevents a malformed
 request from spending a turn.
 
 @section Exit status and failure classes
@@ -2009,14 +2052,14 @@ The executable distinguishes five outcomes:
 @item 0
 The inspection completed or the run reached its represented end.
 @item 1
-The command line or Program failed preflight, including an unpinned Program
-under @code{--require-pinned}.
+The command line or the Program failed preflight.  An unpinned Program under
+@code{--require-pinned} is one such failure.
 @item 2
-A transport failed: an executable was missing, a session stopped, a pipe or
+A transport failed.  An executable was missing, a session stopped, a pipe or a
 protocol failed, or a turn exceeded its time budget.
 @item 3
-The run abandoned because an answer could not be decoded after recovery or an
-ACP turn lacked required completion evidence.
+The run abandoned.  Either an answer was not decodable after recovery, or an
+ACP turn lacked the required completion evidence.
 @item 130
 A machine run was cancelled by a control command or by the close of its
 control input.  Human @code{run} never exits with this status.
@@ -2029,66 +2072,65 @@ reader checks the exit status before parsing standard output.
 @section Deterministic transport tests
 
 The repository supplies local fixture doubles for both live transports.  They
-exercise process ownership, polling, stale-output rejection, timeouts, decode
-recovery, effects, memoization, and route combinations without credentials or
-network access:
+exercise process ownership, polling, the rejection of stale output, timeouts,
+decode recovery, effects, memoization, and route combinations.  They need no
+credentials and no network access:
 
 @example
 ./engine/acp/ci/acp.sh
 ./engine/agent-deck/ci/deck.sh
 @end example
 
-The ACP gate drives @file{engine/acp/test/stub_adapter.py} and its misbehaving
-siblings in the same directory; the deck gate drives
+The ACP gate drives @file{engine/acp/test/stub_adapter.py} and the misbehaving
+adapters in the same directory.  The deck gate drives
 @file{engine/agent-deck/test/stub-deck.sh}.  @file{engine/acp/ci/route-live.sh}
-is different: it is a manual smoke test against real backends.  It is outside
-the deterministic suite, no automatic gate invokes it, and it should be run
-only with the operator's explicit choice of authenticated adapters and
-destinations.
+is different.  It is a manual smoke test against real backends, it is outside
+the deterministic suite, and no automatic gate invokes it.  Run it only with an
+explicit choice of authenticated adapters and destinations.
 
 @section Operational safety
 
 Inspection and scripted execution are local and reversible.  A live run can
-send repository contents to an external service, consume paid capacity, join a
-conversation watched by another process, and authorize tools in a scratch
-directory.  Select the engine, route table, inputs, and scratch directory as one
-operational decision.
+send repository contents to an external service.  It can consume paid
+capacity, join a conversation that another process watches, and authorize
+tools in a scratch directory.  Select the engine, the route table, the inputs,
+and the scratch directory as one operational decision.
 
-Keep the default temporary scratch directory for rehearsal.  Point
-@code{--scratch} at a working tree only when the workflow's effect is intended
-to modify that tree.  Close or coordinate other writers before joining a deck
-session, and read the run header to confirm every resolved backend before the
-first question is sent.
+Keep the default temporary scratch directory for a rehearsal.  Point
+@code{--scratch} at a working tree only when the effect of the workflow is
+intended to modify that tree.  Before you join a deck session, close or
+coordinate the other writers.  Read the run header to confirm every resolved
+backend before the first question is sent.
 
 A successful exit establishes that the represented execution completed under
-the runner's evidence rules.  When an external result matters, follow the act
-with an independent observation or verification step whose answer is recorded
-in the workflow.
+the evidence rules of the runner.  When an external result matters, follow the
+act with an independent observation or verification step, and record its
+answer in the workflow.
 
 @node Building and Verification
 @chapter Building and Verification
 
 This chapter gives the procedures that build the repository and the gates that
-verify it.  It is written for a maintainer.  A reader who only writes
-workflows needs the first section and the scripted rehearsal in
-@ref{Running Workflows}.
+verify it.  It is written for a maintainer.  A reader who only writes workflows
+needs the first section and the scripted rehearsal in @ref{Running Workflows}.
 
 @section Environments
 
 @cindex development shell
 Two Nix development shells are the supported environments, and nothing is
-installed globally.  The root shell, entered with @code{nix develop path:.}
-from the repository root, supplies one GHC with the external Haskell
-dependencies and @command{cabal-install}; @code{direnv allow .} wires it up
-for a terminal.  The model shell, entered with @code{nix develop path:./model},
-supplies Lean and @command{texinfo}.  @file{model/lean-toolchain} pins Lean
-4.30.0, and @file{model/lakefile.toml} pins Mathlib at the matching tag.
+installed globally.  The root shell supplies one GHC with the external Haskell
+dependencies and @command{cabal-install}.  Enter it with
+@code{nix develop path:.} from the repository root, or run
+@code{direnv allow .} once to attach it to a terminal.  The model shell
+supplies Lean and @command{texinfo}, and @code{nix develop path:./model}
+enters it.  @file{model/lean-toolchain} pins Lean 4.30.0, and
+@file{model/lakefile.toml} pins Mathlib at the matching tag.
 
 @section Building the Haskell workspace
 
 @cindex cabal components
-The Haskell side is one Cabal package, @code{agentic}, whose components are
-declared in @file{agentic.cabal}:
+The Haskell side is one Cabal package, @code{agentic}, and @file{agentic.cabal}
+declares its components:
 
 @example
 nix develop path:. -c cabal build all
@@ -2097,17 +2139,17 @@ nix develop path:. -c cabal test all
 
 The public library @code{agentic} gathers the source directories @file{dsl},
 @file{plan}, @file{cost}, @file{runtime}, @file{engine/api}, @file{engine/acp}
-and its three selector directories, @file{engine/agent-deck}, and @file{cli}.
-Three internal libraries build beside it: @code{examples} holds the compiled
-workflows and their registry data, @code{bisim-support} holds the generators,
-guards, and oracle client, and the private @code{verification} library
-assembles complete conformance observations.  The executables are
-@command{agentic-run}, the runner; @command{tier0}, @command{tier1}, and
-@command{bisim}, the three conformance programs; and the probes
+with its three selector directories, @file{engine/agent-deck}, and @file{cli}.
+Three internal libraries build beside it.  @code{examples} holds the compiled
+workflows and their registry data.  @code{bisim-support} holds the generators,
+the guards, and the oracle client.  The private @code{verification} library
+assembles complete conformance observations.  The executables are the runner
+@command{agentic-run}, the three conformance programs @command{tier0},
+@command{tier1}, and @command{bisim}, and the four probes
 @command{policy-probe}, @command{routing-config-probe},
-@command{routing-fixed-point-probe}, and @command{schema-probe}, which the
-gate scripts drive.  The test suite @code{engine-api-test} exercises the
-neutral engine interface against a deterministic fake engine.
+@command{routing-fixed-point-probe}, and @command{schema-probe}, which the gate
+scripts drive.  The test suite @code{engine-api-test} exercises the neutral
+engine interface against a deterministic fake engine.
 
 @section Building the Lean model and the oracle
 
@@ -2121,17 +2163,17 @@ nix develop path:./model -c bash -c 'cd model && lake build'
 nix develop path:./model -c bash -c 'cd bisim && lake build && lake exe corpus-gen'
 @end example
 
-The model's default targets are @code{Agentic} and @code{Pollution}; the
-second checks that importing the model installs no unwanted global instance.
-The conformance package's default targets are the @code{Conformance} library
-and the two executables @command{conformance-oracle} and
-@command{corpus-gen}.  Never run two full model builds at once.
-@file{model/Agentic/Core/DslFlagship.lean} proves its theorems by running the
-checker, the cost algebra, and the interpreter inside the kernel, which takes
-minutes of wall clock and several gigabytes of memory.  The conformance
-package deliberately excludes that module and builds in seconds; a
-conformance build that appears to hang has re-coupled the dependency, and
-that is the defect.
+The default targets of the model are @code{Agentic} and @code{Pollution}.  The
+second target checks that an import of the model installs no unwanted global
+instance.  The default targets of the conformance package are the
+@code{Conformance} library and the two executables
+@command{conformance-oracle} and @command{corpus-gen}.  Never run two full
+model builds at once.  @file{model/Agentic/Core/DslFlagship.lean} proves its
+theorems when it runs the checker, the cost algebra, and the interpreter inside
+the kernel, and this takes minutes of wall clock and several gigabytes of
+memory.  The conformance package deliberately excludes that module and builds
+in seconds.  A conformance build that takes minutes therefore indicates that
+the dependency was re-coupled.
 
 After @command{corpus-gen}, @code{git status --short bisim/corpus} is expected
 to print nothing.  A diff is a change to the specification.
@@ -2148,18 +2190,19 @@ N=500 SEED=1 ./bisim/ci/tier1.sh
 @end example
 
 @file{bisim/ci/tier0.sh} runs two executables with no Lean in the loop.
-@command{tier0} replays every frozen vector through the Haskell codec, guards,
-string layer, and observation.  @command{tier1} rebuilds the curated checked
-entries in the production authoring surface and compares the whole reply with
-the frozen one: the printed program, the folds, the ask counts, and one trace
-and two bills per world.  @file{bisim/ci/tier1.sh} runs the live differential
-test through the @command{bisim} executable: it draws fresh programs and
-worlds, sends them to the prebuilt @command{conformance-oracle}, and compares
-the versioned observation surface.  The oracle path comes from @code{ORACLE}
-and defaults to the conformance package's build output; the iteration count
-comes from @code{N} and the seed from @code{SEED}.  The script refuses to
-build the oracle or to fall back silently when it is missing, which preserves
-the one-build rule.
+@command{tier0} replays every frozen vector through the Haskell codec, the
+guards, the string layer, and the observation.  @command{tier1} rebuilds the
+curated checked entries in the production authoring surface, and it compares
+the whole reply with the frozen one.  The comparison covers the printed
+program, the folds, the ask counts, and one trace and two bills per world.
+@file{bisim/ci/tier1.sh} runs the live differential test through the
+@command{bisim} executable.  That executable draws fresh programs and worlds,
+sends them to the prebuilt @command{conformance-oracle}, and compares the
+versioned observation surface.  The oracle path comes from @code{ORACLE}, and
+it defaults to the build output of the conformance package.  The iteration
+count comes from @code{N}, and the seed comes from @code{SEED}.  When the
+oracle is missing, the script refuses to build it and refuses to fall back
+silently, which preserves the one-build rule.
 
 @section Runtime, command-line, and engine gates
 
@@ -2176,23 +2219,23 @@ nix develop path:. -c ./cli/ci/routing-config.sh
 ./engine/agent-deck/ci/deck.sh
 @end example
 
-@file{cli/ci/policies.sh} checks the import policy between source directories
-and drives the policy, control, and lineage probes, which pin memoization,
-scheduling, effect multiplicity, decode recovery, fail-over, persistence,
-restart, resume, fork, steering, and redirect behavior.
-@file{cli/ci/examples.sh} reads the registry out of the built runner and, for
-every registered program, holds the level, size, ask-node count, cost summary,
-and scripted bills against a table pinned in the script, so a program cannot
-be registered without being priced.  @file{cli/ci/routing-config.sh} exercises
-the model-definition loader: schema validation, precedence, fail-over,
-preflight, and provenance.  @file{cli/ci/citations.sh} checks that every Lean
-citation written in a Haskell docstring still names an existing file and line.
-@file{engine/acp/ci/acp.sh} drives the ACP transport against
-@file{engine/acp/test/stub_adapter.py} and the misbehaving adapters beside it;
-@file{engine/agent-deck/ci/deck.sh} drives the deck transport against
-@file{engine/agent-deck/test/stub-deck.sh}.  @file{engine/acp/ci/route-live.sh}
-is the one script that contacts real backends; it is manual, paid, and outside
-every automatic gate.
+@file{cli/ci/policies.sh} checks the import policy between the source
+directories, and it drives the policy, control, and lineage probes.  Those
+probes pin memoization, scheduling, effect multiplicity, decode recovery,
+fail-over, persistence, restart, resume, fork, steering, and redirect behavior.
+@file{cli/ci/examples.sh} reads the registry out of the built runner.  For
+every registered program, it holds the level, the size, the ask-node count,
+the cost summary, and the scripted bills against a table that is pinned in the
+script.  A program therefore cannot be registered without a price.
+@file{cli/ci/routing-config.sh} exercises the model-definition loader, and it
+covers schema validation, precedence, fail-over, preflight, and provenance.
+@file{cli/ci/citations.sh} checks that every Lean citation in a Haskell
+docstring still names an existing file and line.  @file{engine/acp/ci/acp.sh}
+drives the ACP transport against @file{engine/acp/test/stub_adapter.py} and
+the misbehaving adapters beside it.  @file{engine/agent-deck/ci/deck.sh}
+drives the deck transport against @file{engine/agent-deck/test/stub-deck.sh}.
+@file{engine/acp/ci/route-live.sh} is the one script that contacts real
+backends.  It is manual and paid, and it is outside every automatic gate.
 
 @section Documentation gates
 
@@ -2206,25 +2249,27 @@ python3 doc/check-prose.py
 @end example
 
 @code{make -C doc check} renders GNU Info and single-page HTML in a temporary
-directory and treats any diagnostic as a failure.  It then runs the checkers
-in @file{doc/}.  @file{check-manual-sources.py} confirms that every marked
-Haskell excerpt in the manual is a verbatim excerpt of live source and that
-the two complete example modules are included.  @file{check-manual-coverage.py}
-derives the public authoring surface and the command-line options from the
-source and confirms that the reference chapters account for, classify, and
-index every item.  @file{check-prose.py} enforces the manual's prose rules.
-@file{check-workflow-smoke.py} confirms that the retained smoke record of the
-manual-authoring workflow in @file{doc/workflows/} still describes the
-checked-in script and that this chapter names the verification commands.
+directory, and it treats any diagnostic as a failure.  It then runs the
+checkers in @file{doc/}.  @file{check-manual-sources.py} confirms that every
+marked Haskell excerpt in the manual is a verbatim excerpt of live source, and
+it confirms that the two complete example modules are included.
+@file{check-manual-coverage.py} derives the public authoring surface and the
+command-line options from the source.  It then confirms that the reference
+chapters account for, classify, and index every item.  @file{check-prose.py}
+enforces the prose rules of the manual.  @file{check-workflow-smoke.py}
+confirms two things.  The retained smoke record of the manual-authoring
+workflow in @file{doc/workflows/} still describes the checked-in script, and
+this chapter names the verification commands.
 
-@code{make -C doc check-haskell} builds the package, compiles
-@file{doc/examples/Hello.hs} and @file{doc/examples/Registry.hs} against it,
-runs the resulting registry, compares the deterministic command-line
-transcripts quoted in this manual with fresh output, and verifies the
+@code{make -C doc check-haskell} builds the package and compiles
+@file{doc/examples/Hello.hs} and @file{doc/examples/Registry.hs} against it.
+It runs the resulting registry, and it compares the deterministic command-line
+transcripts that this manual quotes with fresh output.  It also verifies the
 compiler-derived member and instance ledger in
 @file{doc/haskell-member-coverage.texi}.  When an export changes, regenerate
-that ledger with @code{make -C doc update-haskell-inventory}.  @code{make -C
-doc all} renders both formats under the ignored @file{doc/build/} directory.
+that ledger with @code{make -C doc update-haskell-inventory}.
+@code{make -C doc all} renders both formats under the ignored
+@file{doc/build/} directory.
 
 @section The Pi extension
 
@@ -2240,19 +2285,20 @@ AGENT_CAT_E2E_RUNNER="$(cd .. && nix develop path:. -c cabal list-bin agentic-ru
 @end example
 
 The unit tests run against fixtures.  The integration tests require a freshly
-built @command{agentic-run} and the accompanying local Pi packages, and they
+built @command{agentic-run} and the accompanying local Pi packages.  They
 exercise the scripted, native ACP, native deck, current-session, owned-child,
-and remote targets without a paid call.
+and remote targets, and they make no paid call.
 
 @node Haskell Authoring Reference
 @chapter Haskell Authoring Reference
 
-This chapter is the exhaustive reference for the modules used to author a
-workflow.  An @dfn{author} export is written directly in normal workflow source.
-A @dfn{support} export names a public type, witness, conversion, or printed form
-that author-facing signatures expose.  A @dfn{machinery} export exists for
-qualified do-notation, type inference, or lowering and is documented so that a
-compiler message has a place to lead; ordinary source does not call it directly.
+This chapter is the exhaustive reference for the modules that author a
+workflow.  An @dfn{author} export is written directly in normal workflow
+source.  A @dfn{support} export names a public type, witness, conversion, or
+printed form that author-facing signatures expose.  A @dfn{machinery} export
+exists for qualified do-notation, type inference, or lowering.  It is
+documented so that a compiler message has a place to lead, and ordinary source
+does not call it directly.
 
 @include haskell-api-index.texi
 @include haskell-member-coverage.texi
@@ -2266,8 +2312,8 @@ compiler message has a place to lead; ordinary source does not call it directly.
 @code{ProgramOf c} is a complete result-indexed builder value carrying
 @code{progResultCode}, @code{progRawOut :: RawProgram}, and
 @code{progPlan :: Plan '[] (El c)}.  @code{Program} is its receipt-valued
-specialization.  Build one with @code{workflow} or @code{defining}; inspect and
-execute it through a registry.
+specialization.  Build one with @code{workflow} or @code{defining}, and inspect
+and execute it through a registry.
 
 @c COVER API Agentic.Cli.Registry support
 @item Registry
@@ -2283,9 +2329,10 @@ page and deterministic reply table for every row.
 
 @c COVER API Agentic.Cli.cliMain author
 @item cliMain registry
-Run the shared parser and dispatcher for a registry.  Its binary and row noun
-come from the Registry, so downstream tools receive the same verbs, input rules,
-routing, transports, and exit statuses as @command{agentic-run}.
+Run the shared parser and dispatcher for a registry.  Its binary and its row
+noun come from the Registry.  Downstream tools therefore receive the same
+verbs, input rules, routing, transports, and exit statuses as
+@command{agentic-run}.
 
 @c COVER API Agentic.Cli.Command support
 @item Command
@@ -2296,9 +2343,9 @@ that need to inspect a parse.
 
 @c COVER API Agentic.Cli.parseCommand support
 @item parseCommand registry arguments
-Purely parse argument texts into @code{Either Text Command}, including verb
-precedence and engine-option coherence.  Execution and file input resolution
-occur later.
+Purely parse argument texts into @code{Either Text Command}.  The parse
+applies verb precedence and checks the coherence of the engine options.
+Execution and the resolution of file inputs occur later.
 
 @c COVER API Agentic.Cli.routesFact support
 @item routesFact maybeRoutes
@@ -2313,29 +2360,30 @@ empty open scope and must finish with a workflow terminal.
 @c COVER API Agentic.Workflow.defining author
 @item defining functions block
 Build a Program with the listed @code{SomeFn} declarations.  Names must be
-unique, and each function may call only earlier entries.  Violations are raised
+unique, and each function can call only earlier entries.  A violation is raised
 when the Program is forced.
 
 @c COVER API Agentic.Workflow.SomeFn support
 @item SomeFn
-Existential wrapper for a typed @code{Fn}; it lets functions with different
+Existential wrapper for a typed @code{Fn}.  It lets functions with different
 parameter and result types occupy one declaration list.  Its constructor is
 @code{SomeFn}.
 
 @c COVER API Agentic.Workflow.Example support
 @item Example
 Registry payload with constructors @code{Fixed Program} and
-@code{Needs Parameterized}.  The first is complete; the second awaits operator
-and runner inputs.
+@code{Needs Parameterized}.  The first is complete, and the second awaits
+operator and runner inputs.
 
 @c COVER API Agentic.Workflow.Parameterized support
 @c COVER API Agentic.Workflow.ParameterizedOf support
 @item Parameterized, ParameterizedOf c
-A result-indexed Program awaiting input texts.  Its exported fields are
+A result-indexed Program that awaits input texts.  Its exported fields are
 @code{inputSpecs :: [InputSpec]} and
-@code{supply :: [Text] -> Either Text (ProgramOf c)}; @code{inputNames} projects
-the ordered names, and @code{Parameterized} is the receipt-valued specialization.
-Registry and CLI code use these fields; normal source uses @code{taking}.
+@code{supply :: [Text] -> Either Text (ProgramOf c)}.  @code{inputNames}
+projects the ordered names, and @code{Parameterized} is the receipt-valued
+specialization.  Registry and CLI code use these fields, and normal source uses
+@code{taking}.
 
 @c COVER API Agentic.Workflow.InputSource support
 @c COVER API Agentic.Workflow.InputSpec support
@@ -2348,33 +2396,35 @@ govern acquisition only and do not enter @code{RawProgram} or denotation.
 @c COVER API Agentic.Workflow.In support
 @item Ins, In
 @code{Ins hs} is the typed input chain, with constructors @code{INil} and
-@code{ICons}; @code{In} is one checked input name on its way into that chain.
+@code{ICons}.  @code{In} is one checked input name on its way into that chain.
 Use @code{input}, @code{:>}, and @code{noInputs} rather than the constructors.
 
 @c COVER API Agentic.Workflow.noInputs author
 @item noInputs
-Terminate an input chain.  Result type: @code{Ins ()}.
+Terminate an input chain.  The result type is @code{Ins ()}.
 
 @c COVER API Agentic.Workflow.input author
 @item input name
-Create an ordinary named @code{In}.  Names under @code{run.} must be one of the
-four reserved run facts; an unknown reserved name raises a value-level error.
+Create an ordinary named @code{In}.  A name under @code{run.} must be one of
+the four reserved run facts, and an unknown reserved name raises a value-level
+error.
 
 @c COVER API Agentic.Workflow.argsInput support
 @c COVER API Agentic.Workflow.argsInputAs support
 @item argsInput, argsInputAs name
-Declare the one unsplit command-tail input.  Default name: @code{args}.
+Declare the one unsplit command-tail input.  The default name is @code{args}.
 
 @c COVER API Agentic.Workflow.stdinInput support
 @c COVER API Agentic.Workflow.stdinInputAs support
 @item stdinInput, stdinInputAs name
-Declare the one literal standard-input source.  Default name: @code{input}.
+Declare the one literal standard-input source.  The default name is @code{input}.
 
 @c COVER API Agentic.Workflow.taking author
 @item taking inputs body
 Curry a Haskell function over the declared input texts and return
-@code{Parameterized}.  The body's arity follows from @code{Ins}; supplying a
-different number through its low-level field returns an explanatory @code{Left}.
+@code{Parameterized}.  The arity of the body follows from @code{Ins}.  A
+different number of inputs through its low-level field returns an explanatory
+@code{Left}.
 @end table
 
 See @ref{Functions Inputs and Schemas} for complete constructions and the CLI
@@ -2387,20 +2437,20 @@ rules for operator inputs.
 @c COVER API Agentic.WF.wf author
 @item [wf|text and @{holes@}|]
 The scoped prompt quasiquoter.  It removes blank edge lines and common
-indentation, emits no trailing newline, and resolves holes as Haskell expressions.
-Result: @code{Words s}.  Invalid fence layout or hole syntax is a compile-time
-quasiquoter error.
+indentation, emits no trailing newline, and resolves holes as Haskell
+expressions.  The result is @code{Words s}.  An invalid fence layout or an
+invalid hole syntax is a compile-time quasiquoter error.
 
 @c COVER API Agentic.Workflow.wft author
 @c COVER API Agentic.WF.wft author
 @item [wft|text and @{defines@}|]
-The define-text quasiquoter with the same layout.  A hole may name a define but
-not a live @code{V}; result: @code{Text}.
+The define-text quasiquoter with the same layout.  A hole can name a define but
+not a live @code{V}.  The result is @code{Text}.
 
 @c COVER API Agentic.Workflow.Says support
 @c COVER API Agentic.WF.Says support
 @item Says
-Class of values accepted in a prompt hole.  Method:
+Class of values that a prompt hole accepts.  Its method is
 @code{says :: a -> Words s}.  Instances cover a spliceable live handle,
 @code{Text}, and existing prompt pieces at the same scope.
 
@@ -2413,8 +2463,9 @@ Read a scopeless define through the same path used by @code{wft} holes and retur
 @c COVER API Agentic.WF.V support
 @item V h c
 Typed live handle.  Constructor @code{V} stores @code{vName}, the printed name,
-and @code{vIx}, the de Bruijn variable at the binding's own scope.  Binders
-create it; prompt holes, decisions, branches, calls, and terminals consume it.
+and @code{vIx}, the de Bruijn variable at the own scope of the binding.
+Binders create it, and prompt holes, decisions, branches, calls, and terminals
+consume it.
 
 @c COVER API Agentic.Workflow.named author
 @item named name statement
@@ -2426,9 +2477,9 @@ value-level error.  A nonbinding statement ignores the selection.
 @c COVER API Agentic.Workflow.Words support
 @c COVER API Agentic.Workflow.lit support
 @item Piece, Words, lit
-@code{Piece s} is one literal or interpolation prompt fragment;
-@code{Words s} is its list.  @code{lit :: Text -> Piece s} constructs a literal.
-The quasiquoters are the normal source-level interface.
+@code{Piece s} is one literal or interpolation prompt fragment, and
+@code{Words s} is a list of them.  @code{lit :: Text -> Piece s} constructs a
+literal.  The quasiquoters are the normal source-level interface.
 
 @c COVER API Agentic.Workflow.KnownIx support
 @item KnownIx h s
@@ -2475,9 +2526,9 @@ Raw while leaving the Plan and cost unchanged.
 
 @c COVER API Agentic.Workflow.running author
 @item toolParty `running` (command, arguments)
-Attach a literal argv to a tool.  The prompt is sent on standard input; no shell
-or argv interpolation is used.  Value position lowers to observation and
-statement position to effect.
+Attach a literal argv to a tool.  The prompt is sent on standard input, and no
+shell or argv interpolation is used.  Value position lowers to observation, and
+statement position lowers to effect.
 
 @c COVER API Agentic.Workflow.drawing author
 @item drawing party n
@@ -2486,13 +2537,13 @@ and memo key.
 
 @c COVER API Agentic.Workflow.Ask support
 @item Ask s
-A question before answer kind is imposed by its position.  Its fields retain
-addressee, serving chain, draw, and prompt words.
+A question before its position imposes an answer kind.  Its fields retain the
+addressee, the serving chain, the draw, and the prompt words.
 
 @c COVER API Agentic.Workflow.ask author
 @item ask party words
 Build @code{Ask s}.  In ordinary binding or function-body position it is a text
-question; panel, review, act, and explicit-answer forms impose other kinds.
+question.  Panel, review, act, and explicit-answer forms impose other kinds.
 
 @c COVER API Agentic.Workflow.confirm author
 @item confirm party words
@@ -2501,15 +2552,15 @@ Build a flag-valued @code{Rhs}, normally bound and consumed by Haskell
 
 @c COVER API Agentic.Workflow.panel author
 @item panel members
-Build a verdict-valued @code{Rhs} by multiplying member verdicts in order.
-The list must be nonempty; @code{panel []} raises the language's empty-panel
-error when forced.
+Build a verdict-valued @code{Rhs} as the product of the member verdicts in
+order.  The list must be nonempty, and @code{panel []} raises the empty-panel
+error of the language when forced.
 
 @c COVER API Agentic.Workflow.panelText author
 @item panelText labeledMembers
-Build text from labeled member blocks in order.  The list must be nonempty;
-labels must be valid and distinct.  Invalid values raise the corresponding
-builder error.
+Build text from labeled member blocks in order.  The list must be nonempty,
+and the labels must be valid and distinct.  An invalid value raises the
+corresponding builder error.
 
 @c COVER API Agentic.Workflow.Decider author
 @item Decider
@@ -2518,9 +2569,9 @@ Closed classification vocabulary with constructors @code{LastNonEmptyLineIs},
 
 @c COVER API Agentic.Workflow.decide author
 @item decide decider textHandle needles
-Purely classify bound text and return a flag @code{Rhs}.  Needles are literal,
-nonempty, and present at least once; empty input raises a value-level error.
-The operation asks nothing and adds no request node.
+Purely classify bound text and return a flag @code{Rhs}.  Needles are literal
+and nonempty, and at least one must be present.  Empty input raises a
+value-level error.  The operation asks nothing and adds no request node.
 @end table
 
 @section Answer kinds and schemas
@@ -2538,7 +2589,7 @@ source annotation.
 
 @c COVER API Agentic.Workflow.annotated author
 @item question `annotated` answerKind
-Turn @code{Ask s} into @code{Ann s c}; binding it prints the answer-code
+Turn @code{Ask s} into @code{Ann s c}.  A binding of it prints the answer-code
 annotation in the first-order Program.
 
 @c COVER API Agentic.Workflow.structured author
@@ -2548,7 +2599,7 @@ Produce structured @code{Answer} evidence from @code{HasSchema HostType}.
 @c COVER API Agentic.Workflow.Schema support
 @c COVER API Agentic.Schema.Schema support
 @item Schema
-Promoted schema algebra.  Constructors: @code{SchemaNull},
+Promoted schema algebra.  Its constructors are @code{SchemaNull},
 @code{SchemaBoolean}, @code{SchemaInteger}, @code{SchemaNumber},
 @code{SchemaString}, @code{SchemaArray}, @code{SchemaObject}, and
 @code{SchemaProperty name field rest}.
@@ -2620,13 +2671,13 @@ effect intent and can be followed by another statement.
 
 @c COVER API Agentic.Workflow.Acting support
 @item Acting s
-Statement wrapper returned by @code{act}; its @code{Step} instances place the
-same spelling in workflow and function bodies.
+Statement wrapper that @code{act} returns.  Its @code{Step} instances place
+the same spelling in workflow and function bodies.
 
 @c COVER API Agentic.Workflow.ask_ author
 @item ask_ party words
 Perform the same represented act as @code{act ...} followed by @code{stop}.
-Result: terminal workflow block.
+The result is a terminal workflow block.
 
 @c COVER API Agentic.Workflow.knownHere author
 @item knownHere
@@ -2662,7 +2713,8 @@ arm.
 @c COVER API Agentic.Workflow.Ending author
 @item Ending c s
 Result of @code{revisingOn}, with constructors @code{SettledOn},
-@code{UnsettledOn}, and @code{AbandonedOn}; each carries the current candidate.
+@code{UnsettledOn}, and @code{AbandonedOn}.  Each carries the current
+candidate.
 
 @c COVER API Agentic.Workflow.Bound support
 @item Bound
@@ -2675,9 +2727,9 @@ zero through sixty-four.
 
 @c COVER API Agentic.Workflow.revising author
 @item revising subject bound clauses
-Build a two-ending bounded revision.  The subject fixes the carrier code; clauses
-must bind one verdict review and end with one @code{amend}.  Its bind must be
-consumed by the immediately following Haskell case.
+Build a two-ending bounded revision.  The subject fixes the carrier code.  The
+clauses must bind one verdict review and end with one @code{amend}.  The
+Haskell case that follows immediately must consume its bind.
 
 @c COVER API Agentic.Workflow.revisingOn author
 @item revisingOn subject bound clauses
@@ -2709,7 +2761,7 @@ Terminate a function parameter list.
 @c COVER API Agentic.Workflow.takes author
 @item takes @@"name" answerKind rest
 Prepend a named typed parameter.  Duplicate and reserved names are compile-time
-errors; the resulting body receives a corresponding curried handle.
+errors.  The resulting body receives a corresponding curried handle.
 
 @c COVER API Agentic.Workflow.function author
 @item function name params body
@@ -2730,32 +2782,35 @@ Finish a receipt-returning function body and return control to the caller.
 @c COVER API Agentic.Workflow.ANil support
 @item Arg, Args, ANil
 Typed call argument and argument chain.  @code{ANil} is the exported empty
-constructor; use @code{noArgs}.
+constructor, and @code{noArgs} is the form to use.
 
 @c COVER API Agentic.Workflow.Gives author
 @item Gives and arg
-Class of call-site values, with @code{arg :: a -> Arg s c}.  A live handle passes
-by name at its exact code; @code{Text} and prompt pieces pass literal text.
+Class of call-site values, with @code{arg :: a -> Arg s c}.  A live handle
+passes by name at its exact code.  @code{Text} and prompt pieces pass literal
+text.
 
 @c COVER API Agentic.Workflow.noArgs author
 @item noArgs
-Terminate an argument chain; result @code{Args s '[]}.
+Terminate an argument chain.  The result is @code{Args s '[]}.
 
 @c COVER API Agentic.Workflow.call author
 @item call function arguments
-Inline a value-returning function as @code{Rhs s r}.  Adds no call node to the
-typed Plan; arity and answer-code mismatches fail type checking.
+Inline a value-returning function as @code{Rhs s r}.  It adds no call node to
+the typed Plan.  An arity mismatch or an answer-code mismatch fails type
+checking.
 
 @c COVER API Agentic.Workflow.call_ author
 @item call_ function arguments
-Statement form restricted to @code{CodeAck} functions.  It may continue in
-workflow or function bodies.
+Statement form that is restricted to @code{CodeAck} functions.  It can continue
+in workflow or function bodies.
 
 @c COVER API Agentic.Workflow.Chain support
 @c COVER API Agentic.Workflow.:> author
 @item element :> rest
-Overloaded right-associative cons for argument and input chains.  Construction
-is inferred from the endpoint; pattern matching is not a supported use.
+Overloaded right-associative cons for argument and input chains.  The
+construction is inferred from the endpoint, and pattern matching is not a
+supported use.
 @end table
 
 @section Runtime fact API
@@ -2766,8 +2821,8 @@ or a concrete engine.
 @table @code
 @c COVER API Agentic.Runtime.Facts.runFactName support
 @item runFactName name
-Validate and return one of the closed runner-supplied fact names; unknown names are
-refused.
+Validate and return one of the closed runner-supplied fact names.  An unknown
+name is refused.
 @c COVER API Agentic.Runtime.Facts.runFacts support
 @item runFacts
 Closed list of all four reserved names.
@@ -2873,10 +2928,11 @@ Return the canonical default semantic value for a code.
 Demote @code{SomeCode} to @code{CodeRep}.
 @c COVER API Agentic.Schema.codeName support
 @item codeName code
-Render the diagnostic name: text, verdict, flag, receipt, or structured.
+Render the diagnostic name, which is text, verdict, flag, receipt, or
+structured.
 @c COVER API Agentic.Schema.codeOfName support
 @item codeOfName text
-Parse the four built-in diagnostic names; structured codes require a schema.
+Parse the four built-in diagnostic names.  A structured code requires a schema.
 @end table
 
 @subsection JSON representation
@@ -2952,10 +3008,10 @@ explicit type errors for unsupported stage/construction pairs.
 
 @section Public lowering machinery
 
-These exports make the authoring grammar typecheck and allow Haddock or compiler
-diagnostics to name their subjects.  They are public because qualified do
-desugaring and exported signatures mention them.  Direct construction would
-bypass the supported source grammar.
+These exports make the authoring grammar typecheck, and they let Haddock or
+compiler diagnostics name their subjects.  They are public because qualified do
+desugaring and exported signatures mention them.  Direct construction bypasses
+the supported source grammar, so ordinary source does not use it.
 
 @table @asis
 @c COVER API Agentic.Workflow.Stage machinery
@@ -2966,18 +3022,17 @@ bypass the supported source grammar.
 @c COVER API Agentic.Workflow.Step machinery
 @item Block stages and CPS
 @code{Stage} has @code{Open}, @code{Review}, @code{Amending}, @code{Body}, and
-@code{Result};
-@code{Res} maps a stage to its builder result.  @code{W} is the indexed CPS block,
-@code{Term} is uninhabited, @code{NoFollow} rejects continuation after a terminal,
-and @code{Step} lowers each source statement.
+@code{Result}.  @code{Res} maps a stage to its builder result.  @code{W} is
+the indexed CPS block, @code{Term} is uninhabited, @code{NoFollow} rejects a
+continuation after a terminal, and @code{Step} lowers each source statement.
 
 @c COVER API Agentic.Workflow.Scope machinery
 @c COVER API Agentic.Workflow.Entry machinery
 @c COVER API Agentic.Workflow.An machinery
 @c COVER API Agentic.Workflow.Live machinery
 @item Scope and generated-name state
-@code{Scope}, @code{Entry}, and @code{An} describe anonymous typed bindings;
-@code{Live} holds their printed names.
+@code{Scope}, @code{Entry}, and @code{An} describe anonymous typed bindings,
+and @code{Live} holds their printed names.
 
 @c COVER API Agentic.Workflow.Nm machinery
 @c COVER API Agentic.Workflow.genName machinery
@@ -2990,8 +3045,8 @@ and @code{Step} lowers each source statement.
 @c COVER API Agentic.Workflow.Rhs machinery
 @c COVER API Agentic.Workflow.Blk machinery
 @item Lowered source values
-@code{Ann} carries an explicit answer singleton and source; @code{Rhs} is a
-typed clause source; @code{Blk} is the lower-level first-order block builder.
+@code{Ann} carries an explicit answer singleton and a source.  @code{Rhs} is a
+typed clause source.  @code{Blk} is the lower-level first-order block builder.
 
 @c COVER API Agentic.Workflow.Arms machinery
 @c COVER API Agentic.Workflow.Arms3 machinery
@@ -3007,8 +3062,9 @@ pending loop builders until a Haskell bind supplies the consuming case.
 @c COVER API Agentic.Workflow.Curries machinery
 @item Call and currying machinery
 @code{Calling} wraps a receipt statement call.  @code{Curries} maps handle and
-input tuples to ordinary curried Haskell functions through associated type
-@code{Curried}; method @code{applyTo} feeds a tuple to such a function in order.
+input tuples to ordinary curried Haskell functions through the associated type
+@code{Curried}.  Its method @code{applyTo} feeds a tuple to such a function in
+order.
 
 @c COVER API Agentic.Workflow.bindW machinery
 @c COVER API Agentic.Workflow.thenW machinery
@@ -3019,12 +3075,12 @@ input tuples to ordinary curried Haskell functions through associated type
 @c COVER API Agentic.Workflow.Do.>> machinery
 @item Qualified-do machinery
 @code{bindW} and @code{thenW} implement the exported @code{W.>>=} and
-@code{W.>>}; @code{runW}, @code{runRev}, and @code{runBody} close the three block
-grammars into lower-level builder values.
+@code{W.>>}.  @code{runW}, @code{runRev}, and @code{runBody} close the three
+block grammars into lower-level builder values.
 
 @c COVER API Agentic.Workflow.ifThenElse machinery
 @item ifThenElse
-The @code{RebindableSyntax} target for Haskell @code{if}; it delegates to
+The @code{RebindableSyntax} target for a Haskell @code{if}.  It delegates to
 @code{ifFlag}.
 
 @c COVER API Agentic.WF.KnownIx machinery
@@ -3049,8 +3105,9 @@ live handle where no live scope exists.
 @chapter Runner Reference
 
 This chapter is the complete command-line reference for @command{agentic-run}.
-All commands operate on the registry supplied to @code{Agentic.Cli.cliMain};
-the noun used below is @samp{example} in this repository.
+All commands operate on the registry that is supplied to
+@code{Agentic.Cli.cliMain}.  The noun below is @samp{example} in this
+repository.
 
 @include runner-index.texi
 
@@ -3091,14 +3148,15 @@ and print its computed facts and help page.  @code{NAME --help} is byte-identica
 
 @c COVER CLI verb:plan author
 @item plan NAME [options]
-Build the Program and print its static level, size, ask nodes, code sequence when
-available, and cost summary.  @code{--raw} adds the emitted first-order Program;
-@code{--json} selects the machine object.
+Build the Program and print its static level, size, ask nodes, code sequence
+when one exists, and cost summary.  @code{--raw} adds the emitted first-order
+Program, and @code{--json} selects the machine object.
 
 @c COVER CLI verb:cost author
 @item cost NAME [inputs]
 Print the cost summary and every folded syntactic path.  Machine-readable cost
-data is available through @code{plan --json}; @code{cost} accepts no JSON option.
+data is available through @code{plan --json}, and @code{cost} accepts no JSON
+option.
 
 @c COVER CLI verb:run author
 @item run NAME target [options]
@@ -3108,27 +3166,28 @@ progresses, followed by result and bills.
 
 @c COVER CLI verb:machine author
 @item machine RUN_ID NAME target [options]
-Execute the same Program through the durable runner while emitting strict
-version-1 NDJSON events on standard output.  Workflow text uses standard input;
-correlated controls use the inherited descriptor named by
-@code{AGENT_CAT_CONTROL_FD} (fd 3 in Pi).  The private store and owner metadata
-use the remaining documented @code{AGENT_CAT_*} environment variables.  Human
-prompt narration is omitted from machine diagnostics.  @code{manifest.json}
-references a separate mode-0600 @code{program.json}, keeping input-expanded text
-out of the manifest while preserving exact lineage validation.
+Execute the same Program through the durable runner, and emit strict version-1
+NDJSON events on standard output.  Workflow text uses standard input.
+Correlated controls use the inherited descriptor that
+@code{AGENT_CAT_CONTROL_FD} names, which is descriptor 3 in Pi.  The private
+store and the owner metadata use the remaining documented @code{AGENT_CAT_*}
+environment variables.  Human prompt narration is omitted from machine
+diagnostics.  @code{manifest.json} references a separate @code{program.json}
+with mode 0600.  This keeps input-expanded text out of the manifest and
+preserves exact lineage validation.
 
 @c COVER CLI verb:lineage-check author
 @item lineage-check OPERATION PARENT_STORE NAME target [options]
-Validate restart, resume, or fork compatibility without creating a child run.
-Resume requires a compatible checkpoint; restart and fork do not.
+Validate restart, resume, or fork compatibility without a child run.  Resume
+requires a compatible checkpoint, and restart and fork do not.
 
 @c COVER CLI verb:machine-restart author
 @c COVER CLI verb:machine-resume author
 @c COVER CLI verb:machine-fork author
 @item machine-restart|machine-resume|machine-fork RUN_ID PARENT_STORE NAME target [options]
 Create a durable child run with an immutable parent link.  Restart inherits no
-answers, resume uses an exact compatible checkpoint, and fork reuses matching
-complete answers after validating any explicit edits.
+answers.  Resume uses an exact compatible checkpoint.  Fork validates any
+explicit edits and then reuses the matching complete answers.
 
 @end table
 
@@ -3143,13 +3202,13 @@ not accepted as an option to other verb forms.
 @c COVER CLI --json author
 @item --json
 Machine rendering for @code{list} and @code{plan}.  With @code{plan --raw}, add
-the @code{program} key.  Help, cost, and run have no JSON form; refusals remain
-prose on standard error.
+the @code{program} key.  Help, cost, and run have no JSON form, and refusals
+remain prose on standard error.
 
 @c COVER CLI --raw author
 @item --raw
-With @code{plan}, print or include the emitted @code{RawProgram}.  May be combined
-with @code{--json} and input flags in any order.
+With @code{plan}, print or include the emitted @code{RawProgram}.  It can be
+combined with @code{--json} and with input flags in any order.
 
 @c COVER CLI --require-pinned author
 @item --require-pinned
@@ -3167,27 +3226,31 @@ is not parsed as @samp{NAME=FILE}, so an equals sign remains part of the path.
 
 @c COVER CLI --input-file author
 @item --input-file NAME=FILE
-Supply a named operator input from UTF-8 file contents.  May repeat.  Invalid
-UTF-8 is refused.  Ordinary prompt inputs strip one trailing newline; declared
-command-tail and stdin inputs preserve exact decoded text.
+Supply a named operator input from UTF-8 file contents.  It can repeat.
+Invalid UTF-8 is refused.  An ordinary prompt input strips one trailing
+newline.  Declared command-tail and stdin inputs preserve the exact decoded
+text.
 
 @c COVER CLI --input-arg author
 @item --input-arg NAME=VALUE
-Supply a named operator input inline.  May repeat; the value may contain equals
-signs because parsing splits at the first one.
+Supply a named operator input inline.  It can repeat.  The value can contain
+equals signs, because the parse splits at the first one.
 @end table
 
-Input flags are accepted by plan, cost, and run.  A Program with no operator
-inputs refuses them.  A valid @code{run.} fact name is also refused because the
-runner supplies it; an unknown reserved name is an authoring error.  During
+Plan, cost, and run accept the input flags.  A Program with no operator inputs
+refuses them.  A valid @code{run.} fact name is also refused, because the runner
+supplies it.  An unknown reserved name is an authoring error.  During
 @code{run}, machine, and machine-lineage commands, an unbound stdin declaration
-reads fd 0 to EOF.  Plan and cost never auto-read stdin.
+reads descriptor 0 to end of file.  Plan and cost never read stdin
+automatically.
 
 Machine supervisors set @code{AGENT_CAT_CONTROL_FD} to an inherited descriptor
-of at least 3; Pi uses fd 3.  Control NDJSON and workflow input therefore coexist
-without framing.  The compatibility form @code{AGENT_CAT_CONTROL_STDIN=1} puts
-controls on standard input instead; it works only when the stdin-designated
-value was supplied explicitly, and both control modes together are refused.
+of at least 3, and Pi uses descriptor 3.  Control NDJSON and workflow input
+therefore coexist without framing.  The compatibility form
+@code{AGENT_CAT_CONTROL_STDIN=1} puts controls on standard input instead.  It
+works only when the stdin-designated value was supplied explicitly, and both
+control modes together are refused.
+
 @section Target and transport options
 
 @table @code
@@ -3199,8 +3262,8 @@ Select the registered canned table.  Mutually exclusive with @code{--engine},
 @c COVER CLI --engine author
 @item --engine acp
 Select an ACP default backend.  @code{--engine deck} is accepted only with
-@code{--session ID}; a bare session already selects deck.  Any other word is
-refused.
+@code{--session ID}, and a bare session already selects deck.  Any other word
+is refused.
 
 @c COVER CLI --session author
 @item --session ID
@@ -3235,10 +3298,10 @@ milliseconds, and the value must be a nonnegative integer.
 
 @c COVER CLI --timeout author
 @item --timeout MS
-Set the per-request or per-turn budget for every live backend.  Without the flag,
-ACP uses 900000 milliseconds and deck uses 600000.  The CLI accepts a
-nonnegative integer.  Zero leaves ACP unbounded but gives deck an already expired
-deadline, so a mixed run should use a positive value.
+Set the per-request or per-turn budget for every live backend.  Without the
+flag, ACP uses 900000 milliseconds and deck uses 600000.  The CLI accepts a
+nonnegative integer.  Zero leaves ACP unbounded but gives deck a deadline that
+has already expired, so a mixed run must use a positive value.
 
 @c COVER CLI --verbose author
 @item --verbose
@@ -3278,20 +3341,21 @@ identity is absent from the semantic key.
 
 @section Outputs and exit status
 
-Human @code{plan}, @code{cost}, and @code{help} output is descriptive rather than
-a stable machine interface.  @code{list --json} and @code{plan --json} share one
-computed fact record; key names are stable, object key order is not, and input
-array order follows declaration order.
+The human output of @code{plan}, @code{cost}, and @code{help} is descriptive,
+and it is not a stable machine interface.  @code{list --json} and
+@code{plan --json} share one computed fact record.  Its key names are stable,
+its object key order is not, and its input array order follows the declaration
+order.
 
-Run output is the trace record as it happens.  There is no summary JSON because
-a second representation would omit or duplicate the event stream.  Standard
-error carries refusals, transport narration, failed attempts, and recovery
-diagnostics.
+Run output is the trace record as it happens.  There is no summary JSON,
+because a second representation either omits or duplicates the event stream.
+Standard error carries refusals, transport narration, failed attempts, and
+recovery diagnostics.
 
 @multitable @columnfractions .12 .88
 @headitem Status @tab Meaning
 @item 0 @tab Inspection completed or the run reached its represented end.
-@item 1 @tab Usage or preflight refusal; no live execution need have started.
+@item 1 @tab Usage or preflight refusal.  No live execution has started.
 @item 2 @tab Transport failure, missing process, protocol error, stopped session,
 or timeout.
 @item 3 @tab Run abandonment after answer recovery or failed required completion
@@ -3303,10 +3367,10 @@ end of file.
 @node Diagnostics and Troubleshooting
 @chapter Diagnostics and Troubleshooting
 
-This chapter begins with common questions, then relates compiler and runner
-symptoms to the layer that can explain them.  A diagnostic from Haskell,
-Program preflight, typed answer recovery, or transport execution should be
-handled at that same layer.
+This chapter begins with common questions.  It then relates compiler and
+runner symptoms to the layer that can explain them.  Handle a diagnostic from
+Haskell, from Program preflight, from typed answer recovery, or from transport
+execution at that same layer.
 
 @section Where to look
 
@@ -3318,8 +3382,8 @@ Read @ref{Introduction}.  The architecture and evidence limits follow in
 Read @ref{Memoization and event identity}.  Semantic occurrences and operational
 answer reuse are distinct.
 @item Why can the displayed minimum cost be unattainable?
-Read @ref{Cost trees and bills}.  The tree combines syntactic arms, while worlds
-may correlate separate choices.
+Read @ref{Cost trees and bills}.  The tree combines syntactic arms, while
+worlds can correlate separate choices.
 @item How is a workflow run without credentials?
 Use scripted execution in @ref{Scripted execution}.
 @item Which Haskell word or type is public?
@@ -3327,7 +3391,8 @@ Look it up in @ref{Haskell Authoring Reference} or the Haskell API index.
 @item Which command-line flag belongs to an engine?
 Use @ref{Runner Reference} or the CLI index.
 @item What does a mathematical term mean here?
-Use @ref{Glossary}; each cross-cutting term has one canonical definition there.
+Use @ref{Glossary}.  Each cross-cutting term has one canonical definition
+there.
 @end table
 
 @section Haskell authoring diagnostics
@@ -3350,9 +3415,9 @@ the handle is live, or convert only author-supplied define text through
 
 @item Couldn't match 'CodeVerdict with 'CodeText
 A source, parameter, argument, branch, or function result has the wrong answer
-kind.  Follow the two types named by GHC.  Select a question kind with
-@code{confirm}, @code{answering}, @code{annotated}, or @code{structured}; keep
-function parameters and call arguments exact.
+kind.  Follow the two types that GHC names.  Select a question kind with
+@code{confirm}, @code{answering}, @code{annotated}, or @code{structured}, and
+keep function parameters and call arguments exact.
 
 @item nothing follows a terminal
 A statement appears after @code{stop}, @code{ask_}, @code{if}, a revision case,
@@ -3379,8 +3444,8 @@ also give every member a valid distinct label.
 
 @item decide: a decider needs at least one needle
 The classifier has no meaningful literal test.  Supply one or more nonempty
-needles; a test chosen from model-authored text would change the intended trust
-boundary and is unsupported.
+needles.  A test that is chosen from model-authored text changes the intended
+trust boundary, and it is unsupported.
 
 @item named: b0 is a name this surface generates for itself
 A selected binding or parameter uses the reserved @code{bN} or @code{rN} shape.
@@ -3410,8 +3475,8 @@ An input flag names no operator input declared by the Program.  Read the
 cannot be supplied by a flag.
 
 @item input 'run.engine' is a run fact
-The runner owns that value.  Remove the input flag; a live or scripted run binds
-the fact automatically.
+The runner owns that value.  Remove the input flag, because a live or scripted
+run binds the fact automatically.
 
 @item --input needs a program with exactly one input
 Use @code{--input-file NAME=FILE} or @code{--input-arg NAME=VALUE} when several
@@ -3428,11 +3493,11 @@ rather than the party identifier.  Inspect @code{pins} through help or JSON.
 
 @item --route refines this run's default answerer, and there is none
 Add @code{--engine acp} or @code{--session ID}.  A route table sends only named
-pins elsewhere; unclaimed questions still require a default.
+pins elsewhere, and unclaimed questions still require a default.
 
 @item FLAG is not the ENGINE engine's to take
-An option would be inert because the selected backend table contains no matching
-scheme.  Remove it or add an actual ACP or deck backend that consumes it.
+The option is inert, because the selected backend table contains no matching
+scheme.  Remove it, or add an actual ACP or deck backend that consumes it.
 
 @item run needs --scripted, --engine acp, or --session ID
 Select exactly one default answering service.  Mixed live runs still begin with
@@ -3443,13 +3508,14 @@ one default and add routes.
 
 @table @asis
 @item Exit 2 with @samp{could not run}
-The adapter, deck binary, or another required process was not found or could not
-start.  Confirm the path and execute permission before examining prompts.
+The adapter, the deck binary, or another required process was not found or did
+not start.  Confirm the path and the execute permission before you examine
+prompts.
 
 @item Exit 2 with protocol or EOF wording
-The live transport ended or spoke a message outside the expected protocol.
-Use @code{--verbose} and the named failing method; the represented Program has
-not supplied a typed answer for this failure.
+The live transport ended, or it spoke a message outside the expected protocol.
+Use @code{--verbose} and the named failing method.  The represented Program
+has not supplied a typed answer for this failure.
 
 @item Exit 2 with @samp{did not answer within ...ms}
 The transport exceeded its turn budget.  Check whether the session is stopped,
@@ -3457,9 +3523,9 @@ stale, or still working before increasing @code{--timeout}.  A larger budget
 does not repair a session that cannot produce newer output.
 
 @item Exit 3 after an unreadable answer
-The normal decoder and configured re-asks could not obtain a value of the
+The normal decoder and the configured re-asks did not obtain a value of the
 required kind.  Read the quoted bytes and the answer specification.  Correct
-the prompt or answering service instead of adding a default answer that was
+the prompt or the answering service, and do not add a default answer that was
 never given.
 
 @item Exit 3 after a cancelled ACP effect
@@ -3473,23 +3539,25 @@ This is expected reuse.  Effects remain per occurrence.  Compare the annotated
 trace when the difference is surprising.
 
 @item billFresh is outside the plan range
-The run did not execute the Plan that was priced, or a reporting/conformance
-defect exists.  Record @code{plan --raw}, inputs, run facts, and the complete
-trace; every accepted branch-level Program has a sound interval theorem.
+Either the run did not execute the Plan that was priced, or a defect exists in
+reporting or conformance.  Record @code{plan --raw}, the inputs, the run
+facts, and the complete trace.  Every accepted branch-level Program has a sound
+interval theorem.
 
 @item generated binder names differ from the source
-The authoring library prints depth names because it cannot inspect Haskell binder
-spelling.  Use @code{named} when human-readable first-order output matters;
-scope-aware alpha comparison still checks binding identity in curated cases.
+The authoring library prints depth names, because it cannot inspect the
+spelling of a Haskell binder.  Use @code{named} when human-readable first-order
+output matters.  Scope-aware alpha comparison still checks binding identity in
+the curated cases.
 @end table
 
 @section Conformance and build failures
 
 @table @asis
 @item @command{tier0} reports a corpus mismatch
-The Haskell codec, guards, string layer, or observation has diverged from a
-committed Lean reply.  Treat a corpus request as specification data.  Regenerate
-only when changing that specification deliberately.
+The Haskell codec, the guards, the string layer, or the observation diverged
+from a committed Lean reply.  Treat a corpus request as specification data.
+Regenerate only when you change that specification deliberately.
 
 @item @command{tier1} cannot find the conformance oracle
 Build the Lean @command{conformance-oracle} once outside the script, then rerun.
@@ -3497,15 +3565,15 @@ The gate refuses to build or silently skip it and must not overlap another Lean
 build.
 
 @item corpus regeneration changes files
-The current Lean oracle no longer produces the committed observations.  Review
-the diff as a specification change; a successful no-op regeneration leaves
-@code{git status --short bisim/corpus} empty.
+The current Lean oracle does not produce the committed observations.  Review
+the diff as a specification change.  A successful regeneration changes nothing
+and leaves @code{git status --short bisim/corpus} empty.
 
 @item Texinfo check reports missing coverage
-Run @code{python3 doc/check-manual-coverage.py --list} to see the source-derived
-inventory.  Add or classify the new export or CLI item in the reference, update
-its exact index entry, and keep the checker policy aligned with the intended
-public status.
+Run @code{python3 doc/check-manual-coverage.py --list} to see the
+source-derived inventory.  Add or classify the new export or CLI item in the
+reference, and update its exact index entry.  Keep the checker policy aligned
+with the intended public status.
 @end table
 
 @node Glossary
@@ -3537,8 +3605,8 @@ source.  Erasure yields the semantic trace.
 
 @cindex ask node
 @item ask node
-A request occurrence written in the Plan.  Static @code{askNodes} counts all
-branch arms; a run reaches only one selected path.
+A request occurrence that is written in the Plan.  The static @code{askNodes}
+count covers all branch arms, and a run reaches only one selected path.
 
 @cindex bare question
 @item bare question
@@ -3547,8 +3615,8 @@ semantic events, and reusable memo answers.
 
 @cindex bill, fresh
 @item billFresh
-A price folded over the semantic transcript, counting every reached request
-occurrence.
+A price that is folded over the semantic transcript.  It counts every reached
+request occurrence.
 
 @cindex bill, memo
 @item billMemo
@@ -3603,8 +3671,8 @@ execution intent.
 
 @cindex dialogue
 @item dialogue
-A well-founded typed question-and-continuation tree.  Running it in a world
-produces a result; tracing it produces semantic events.
+A well-founded typed question-and-continuation tree.  A run in a world
+produces a result, and a trace produces semantic events.
 
 @cindex dispatched question
 @item dispatched question
@@ -3618,9 +3686,9 @@ questions and memo keys.
 
 @cindex effect intent
 @item effect
-Occurrence-sensitive execution intent for a statement-position act.  It uses the
-receipt code, bypasses reusable memo state, reserves the effect lane, and may
-request permission.
+Occurrence-sensitive execution intent for a statement-position act.  It uses
+the receipt code, bypasses reusable memo state, reserves the effect lane, and
+can request permission.
 
 @cindex environment
 @item environment
@@ -3654,13 +3722,13 @@ guides execution and is erased by denotation.
 
 @cindex memo table
 @item memo table
-The typed runtime table keyed by bare questions.  Consult and observe use it;
-effects bypass it.
+The typed runtime table that is keyed by bare questions.  Consult and observe
+use it, and effects bypass it.
 
 @cindex observe intent
 @item observe
 Execution intent for an executable tool in value position.  Its answer is
-reusable; the tag alone does not establish that the argv is read-only.
+reusable.  The tag alone does not establish that the argv is read-only.
 
 @cindex open question
 @item open question
@@ -3674,7 +3742,7 @@ the named text-block algebra.
 
 @cindex pipeline rung
 @item pipeline
-The analysis rung at which prompt words may depend on earlier answers while
+The analysis rung at which prompt words can depend on earlier answers while
 question shapes and path structure stay fixed.
 
 @cindex Plan
@@ -3689,8 +3757,8 @@ Haskell Plan constructed from the same authoring operations.
 
 @cindex prompt
 @item prompt
-The authored words of a question.  Prompt expressions may combine literals and
-textual renderings of earlier answers.
+The authored words of a question.  A prompt expression can combine literals
+and textual renderings of earlier answers.
 
 @cindex question
 @item question
@@ -3733,8 +3801,8 @@ annotated execution trace.
 
 @cindex serving model
 @item serving model
-The model pin authored on a model question.  The primary participates in scope;
-alternates form a fail-over chain.
+The model pin that is authored on a model question.  The primary participates
+in scope, and the alternates form a fail-over chain.
 
 @cindex shape
 @item shape
@@ -3743,8 +3811,9 @@ and draw.  Shape-based prices support exact pipeline cost.
 
 @cindex scope
 @item scope
-Authored policy axes carried by a question, including the serving-model axis;
-also used informally for the typed set of live bindings where context is clear.
+The authored policy axes that a question carries, among them the serving-model
+axis.  The word is also used informally for the typed set of live bindings
+where the context is clear.
 
 @cindex structured answer
 @item structured answer

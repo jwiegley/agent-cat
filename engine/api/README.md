@@ -1,19 +1,19 @@
 # engine/api
 
-`engine/api/src` defines `Agentic.Engine`, the only interface shared by the
-runtime and the concrete engines. It contains neutral request, result,
-completion, failure, steering, lane, and common model-setting values, and it
-names no concrete transport.
+`engine/api/src` defines `Agentic.Engine`, the only interface that the runtime
+and the concrete engines share. It contains neutral values for requests,
+results, completion, failures, steering, lanes, and common model settings, and
+it names no concrete transport.
 
 ## Public module
 
-`Agentic.Engine` exposes the `Engine` typeclass, which has one logical-start
-operation and one optional ordered lane. The runtime translates typed plan
-requests into `EngineRequest` values, and an instance returns raw
-`EngineResult` values. `ModelConfig` carries only the settings both current
-engines implement: model, thinking level, and maximum output. Symbolic
-profiles, routers, provider identity, backend-specific options, and file
-loading remain in the CLI.
+`Agentic.Engine` exposes the `Engine` type class. The class has one operation
+that starts a logical conversation and one optional ordered lane. The runtime
+translates typed plan requests into `EngineRequest` values, and an instance
+returns raw `EngineResult` values. `ModelConfig` carries only the settings that
+both current engines implement, which are the model, the thinking level, and
+the maximum output. Symbolic profiles, routers, provider identity,
+backend-specific options, and file loading remain in the CLI.
 
 ## Dependencies
 

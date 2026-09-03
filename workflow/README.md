@@ -1,16 +1,16 @@
 # workflow
 
 `workflow` holds the compiled workflow definitions. Each child directory is a
-set of Haskell modules whose only local dependency is `dsl`; they build into
-the internal `examples` library of the `agentic` package together with the
-registry data under `cli/example`.
+set of Haskell modules whose only local dependency is `dsl`. Together with the
+registry data under `cli/example`, they build into the internal `examples`
+library of the `agentic` package.
 
 ## Layout
 
 `example` holds the teaching workflows `Harden`, `Hello`, and `Structured`.
-`extra` holds `Isaac`, the five workflows derived from incite. `core` is
-reserved for stable, generally useful workflows and holds no module at
-present; it is not listed in `agentic.cabal`.
+`extra` holds `Isaac`, which contains the five workflows that were derived from
+incite. `core` is reserved for stable workflows of general use. It holds no
+module at present, and `agentic.cabal` does not list it.
 
 ## Dependencies
 
@@ -32,6 +32,6 @@ nix develop path:. -c cabal build all
 
 ## Conventions
 
-These directories hold definitions and authoring data only. Models are named
-symbolically. Registry rows, help pages, canned replies, model definitions,
-planning, pricing, and execution live above this layer.
+These directories hold definitions and authoring data only, and models are
+named symbolically. Registry rows, help pages, canned replies, model
+definitions, planning, pricing, and execution live above this layer.
