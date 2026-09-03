@@ -79,29 +79,33 @@ refs = set()
 sources = list(workflow.glob("*/*.hs"))
 if list(workflow.glob("*/src/**/*.hs")) or not sources:
     raise SystemExit("workflow sources must be flat files")
+allowed_imports = {
+    "Agentic.Schema.Json",
+    "Agentic.Schema.TH",
+    "Agentic.Workflow",
+    "Agentic.Workflow.Do",
+}
+bad_imports = []
 for source in sources:
-    refs.update(re.findall(r'`servedBy`\s*"([^"]+)"', source.read_text()))
+    text = source.read_text()
+    refs.update(re.findall(r'`servedBy`\s*"([^"]+)"', text))
+    imports = re.findall(r'^import (?:qualified )?(Agentic\.[A-Za-z0-9_.]+)', text, re.MULTILINE)
+    bad_imports.extend(f"{source}: {name}" for name in imports if name not in allowed_imports)
 
 profiles_text = Path("model-definitions.example.yaml").read_text().split("\nprofiles:\n", 1)[1]
 profiles = set(re.findall(r"^  - name: (\S+)$", profiles_text, re.MULTILINE))
 missing = sorted(refs - profiles)
 concrete = sorted(ref for ref in refs if re.search(r"gpt|claude|codex|opus|fable|opencode|droid|agent-deck|acp", ref, re.IGNORECASE))
-bad_deps = []
-for cabal in workflow.glob("*/*.cabal"):
-    local = set(re.findall(r"^\s*, (agentic-[a-z0-9-]+)$", cabal.read_text(), re.MULTILINE))
-    expected = {"agentic-dsl"} if list(cabal.parent.glob("*.hs")) else set()
-    if local != expected:
-        bad_deps.append(f"{cabal}: {sorted(local)}")
 
-for label, values in (("unmapped profile", missing), ("concrete-looking profile", concrete), ("workflow dependency", bad_deps)):
+for label, values in (("unmapped profile", missing), ("concrete-looking profile", concrete), ("forbidden workflow import", bad_imports)):
     for value in values:
         print(f"ci/examples: FAIL {label}: {value}")
-raise SystemExit(bool(missing or concrete or bad_deps))
+raise SystemExit(bool(missing or concrete or bad_imports))
 PY
 then
-  note "workflow boundary: flat sources, DSL-only populated packages, and symbolic CLI-mapped profiles verified"
+  note "workflow boundary: flat DSL-only imports and symbolic CLI-mapped profiles verified"
 else
-  bad "workflow" "boundary" "flat sources, DSL-only populated packages, symbolic CLI mappings" "violation above"
+  bad "workflow" "boundary" "flat DSL-only imports and symbolic CLI mappings" "violation above"
 fi
 
 cat_run() {

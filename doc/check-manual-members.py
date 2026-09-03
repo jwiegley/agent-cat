@@ -57,7 +57,7 @@ def ghci_info(parents: list[str]) -> dict[str, str]:
         )
     commands.append(":quit")
     result = subprocess.run(
-        ["cabal", "repl", "agentic-cli:lib:agentic-cli", "-v0"],
+        ["cabal", "repl", "agentic:lib:agentic", "-v0"],
         cwd=HASKELL,
         input="\n".join(commands) + "\n",
         text=True,

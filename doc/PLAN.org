@@ -5238,6 +5238,21 @@ HIGH (validated, machine-checked): at Cost with mA=d=fin 0, mB=fin 3, all of fin
 ]
 #+end_src
 
+* DONE [#C] Collapse agent-cat to one Cabal package
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-znl
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-03 Thu 10:07]
+:MODIFIED: [2026-09-03 Thu 10:24]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-03 Thu 10:24]
+:CLOSE_REASON: Replaced 15 Cabal packages with one root agentic package while retaining modular source directories, public facades, private examples/bisim/verification components, and deterministic source-import boundary checks.
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+
 * DONE [#C] Flatten workflow package sources
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17

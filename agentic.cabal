@@ -1,0 +1,211 @@
+cabal-version:   3.0
+name:            agentic
+version:         0.1.0.0
+synopsis:        Typed agentic workflow language, runtime, and CLI
+description:
+  agent-cat as one Haskell package. Source directories remain modular: DSL,
+  planning, cost, runtime, engine adapters, workflows, conformance, and CLI.
+  Public facades expose the supported library surface; internal components build
+  examples and conformance support without exposing them to downstream users.
+license:         MIT
+author:          John Wiegley
+maintainer:      jwiegley@positron.ai
+build-type:      Simple
+
+common settings
+  ghc-options:      -Wall
+  default-language: Haskell2010
+  build-depends:
+    , aeson
+    , base
+    , bytestring
+    , containers
+    , directory
+    , filepath
+    , process
+    , QuickCheck
+    , scientific
+    , stm
+    , template-haskell
+    , text
+    , time
+    , unix
+    , vector
+    , yaml
+
+library
+  import:          settings
+  hs-source-dirs:
+    dsl/src
+    plan/src
+    cost/src
+    runtime/src
+    engine/api/src
+    engine/acp/src
+    engine/acp/claude/src
+    engine/acp/codex/src
+    engine/acp/droid/src
+    engine/agent-deck/src
+    cli/src
+  exposed-modules:
+    Agentic.Acp
+    Agentic.Acp.Claude
+    Agentic.Acp.Codex
+    Agentic.Acp.Droid
+    Agentic.AgentDeck
+    Agentic.Builder
+    Agentic.Cli
+    Agentic.Cost
+    Agentic.DSL
+    Agentic.DSL.Plan
+    Agentic.Engine
+    Agentic.Plan
+    Agentic.Planning
+    Agentic.Route
+    Agentic.RoutingConfig
+    Agentic.Runtime
+    Agentic.Runtime.Facts
+    Agentic.Schema
+    Agentic.Schema.Json
+    Agentic.Schema.TH
+    Agentic.WF
+    Agentic.Workflow
+    Agentic.Workflow.Do
+  other-modules:
+    Agentic.Chains
+    Agentic.DSL.Json
+    Agentic.Exec
+    Agentic.Plan.Value
+    Agentic.Raw
+    Agentic.RequirePinned
+    Agentic.Runtime.Control
+    Agentic.Runtime.Machine
+    Agentic.Runtime.Protocol
+    Agentic.Runtime.Route
+    Agentic.Runtime.Store
+    Agentic.Schema.Conformance
+    Agentic.Shell
+    Agentic.Text
+    Agentic.World
+    Paths_agentic
+  autogen-modules: Paths_agentic
+
+library examples
+  import:          settings
+  hs-source-dirs:
+    workflow/example
+    workflow/extra
+    cli/example
+  exposed-modules:
+    Harden
+    Hello
+    Structured
+    Isaac
+    Example.IsaacInfo
+    Example.Registry
+    Example.StructuredInfo
+  build-depends:   agentic
+
+library bisim-support
+  import:          settings
+  hs-source-dirs:  bisim/haskell/src
+  exposed-modules: Agentic.Bisim
+  other-modules:
+    Agentic.Gen
+    Agentic.Guards
+    Agentic.Oracle
+  build-depends:   agentic
+
+library verification
+  import:          settings
+  visibility:      private
+  hs-source-dirs:  cli/verification/src
+  exposed-modules: Agentic.Observe
+  build-depends:
+    , agentic
+    , agentic:bisim-support
+
+executable tier0
+  import:          settings
+  hs-source-dirs:  bisim/haskell/tier0
+  main-is:         Main.hs
+  build-depends:
+    , agentic
+    , agentic:bisim-support
+
+executable tier1
+  import:          settings
+  hs-source-dirs:  cli/verification/tier1
+  main-is:         Main.hs
+  other-modules:
+    CallVectors
+    Cases
+    LoopVectors
+  build-depends:
+    , agentic
+    , agentic:examples
+    , agentic:verification
+
+executable bisim
+  import:          settings
+  hs-source-dirs:  cli/verification/live
+  main-is:         Main.hs
+  build-depends:
+    , agentic
+    , agentic:bisim-support
+    , agentic:verification
+  ghc-options:     -threaded
+
+executable policy-probe
+  import:          settings
+  hs-source-dirs:  cli/test
+  main-is:         PolicyProbe.hs
+  other-modules:   SurfaceRefusals
+  build-depends:
+    , agentic
+    , agentic:bisim-support
+    , agentic:examples
+    , agentic:verification
+  ghc-options:     -threaded
+
+executable routing-config-probe
+  import:          settings
+  hs-source-dirs:  cli/test
+  main-is:         RoutingConfigProbe.hs
+  build-depends:   agentic
+  ghc-options:     -threaded
+
+executable routing-fixed-point-probe
+  import:          settings
+  hs-source-dirs:  cli/test
+  main-is:         RoutingFixedPointProbe.hs
+  build-depends:   agentic
+  ghc-options:     -threaded
+
+executable schema-probe
+  import:          settings
+  hs-source-dirs:  cli/test
+  main-is:         SchemaProbe.hs
+  build-depends:
+    , agentic
+    , agentic:bisim-support
+    , agentic:examples
+    , agentic:verification
+
+executable agentic-run
+  import:          settings
+  hs-source-dirs:  cli/run
+  main-is:         Main.hs
+  build-depends:
+    , agentic
+    , agentic:examples
+  ghc-options:     -threaded
+
+test-suite engine-api-test
+  import:           settings
+  type:             exitcode-stdio-1.0
+  hs-source-dirs:   engine/api/test
+  main-is:          Main.hs
+  build-depends:
+    , agentic
+    , base

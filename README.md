@@ -8,10 +8,10 @@ Elliott's denotational design, taken literally.
 
 ## Module architecture
 
-Agent-cat is one repository and one product, built as independently checkable
-modules. The root [`cabal.project`](cabal.project) is the Haskell workspace; the
-packages are not versioned or published independently. Lean remains normative,
-and [`bisim`](bisim) holds the only Lean–Haskell conformance boundary.
+Agent-cat is one repository, one product, and one Cabal package:
+[`agentic.cabal`](agentic.cabal). Source directories remain independently owned
+modules; Lean remains normative, and [`bisim`](bisim) holds the only Lean–Haskell
+conformance boundary.
 
 `A → B` means that A may depend on B:
 
@@ -26,19 +26,20 @@ engine/acp/{claude,codex,droid} → engine/acp → engine/api
 engine/agent-deck → engine/api
 workflow/{core,example,extra} → dsl
 bisim → model + dsl + plan
-cli:verification → bisim + cost + dsl + plan  (private test library)
-cli:tier1 → cli:verification + dsl + plan + workflow/{core,example}
-cli:bisim → cli:verification + bisim + dsl + plan
+agentic:verification → agentic:bisim-support + cost + dsl + plan  (private test library)
+agentic:tier1 → agentic:verification + workflow/example
+agentic:bisim → agentic:verification + agentic:bisim-support + dsl + plan
 cli → workflows + plan + cost + runtime + concrete engines
 ext-pi → cli's versioned process protocol
 ```
 
-The dependency graph is acyclic and Cabal-enforced. Workflow packages import
-only [`dsl`](dsl), name models symbolically, and cannot see planning, cost,
+The dependency graph is acyclic and enforced by `cli/ci/policies.sh` import
+checks plus component visibility in `agentic.cabal`. Workflow sources import only
+DSL authoring modules, name models symbolically, and cannot see planning, cost,
 runtime, routing, or engine implementation details. Engine-neutral facts supplied
-by a host are named in the Text-only `Agentic.Runtime.Facts` API; repository
-workflow packages do not import it. [`cli`](cli) alone loads model-definition
-files and maps symbolic references to concrete engines/models.
+by a host are named in Text-only `Agentic.Runtime.Facts`; repository workflows do
+not import it. [`cli`](cli) alone loads model definitions and maps symbolic
+references to concrete engines/models.
 
 Every module has a local `README.md` and `AGENTS.md` describing its purpose, API,
 dependencies, adjacent edges, commands, and conventions. The single shared issue

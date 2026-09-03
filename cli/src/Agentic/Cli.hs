@@ -288,7 +288,7 @@ import qualified Data.Text.IO as TIO
 import qualified Data.Vector as V
 import GHC.Clock (getMonotonicTimeNSec)
 import Numeric (showFFloat)
-import qualified Paths_agentic_cli as Paths
+import qualified Paths_agentic as Paths
 import Data.Version (showVersion)
 import System.Directory (createDirectoryIfMissing, getTemporaryDirectory)
 import System.Environment (getArgs, lookupEnv)

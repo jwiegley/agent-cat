@@ -42,27 +42,15 @@ nix develop path:. -c cabal build all
 nix develop path:. -c cabal test all
 ```
 
-All 15 workspace packages built independently and together. The engine API fake
-test passed. The generated Cabal plan was audited for cycles and exact critical
-edges:
-
-```text
-plan -> dsl
-cost -> plan
-runtime -> plan + engine/api
-engine/acp -> engine/api
-engine/acp/{claude,codex,droid} -> engine/acp
-engine/agent-deck -> engine/api
-workflow/{example,extra} -> dsl; workflow/core -> (empty)
-bisim -> dsl + plan
-cli:verification -> bisim + cost + dsl + plan
-cli:tier1 -> cli:verification + dsl + plan + workflow/example
-cli:bisim -> cli:verification + bisim + dsl + plan
-```
+One `agentic` package builds the public library plus private `examples`,
+`bisim-support`, and `verification` components. `cli/ci/policies.sh` checks the
+same critical source-level edges: plan -> dsl, cost -> plan, runtime ->
+plan + engine API, concrete engines -> engine API, workflow -> DSL, and
+bisim -> DSL + plan.
 
 The audit also confirmed unique Haskell module ownership, hidden implementation
-modules behind DSL/Plan/Runtime/Bisim/CLI facades, an `Engine` typeclass with ACP
-and deck instances, and one shared `Thinking` representation. `ModelConfig` contains
+modules behind DSL/Plan/Runtime/CLI facades, an `Engine` typeclass with ACP and
+deck instances, and one shared `Thinking` representation. `ModelConfig` contains
 only model, thinking, and maximum-output fields consumed by both engines. ACP-only
 options terminate at `AcpModelConfig`; deck-only provider identity terminates at
 `DeckModelConfig`. Repository workflows

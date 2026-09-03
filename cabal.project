@@ -1,16 +1,2 @@
 packages:
-  dsl/
-  plan/
-  cost/
-  engine/api/
-  engine/acp/
-  engine/acp/claude/
-  engine/acp/codex/
-  engine/acp/droid/
-  engine/agent-deck/
-  runtime/
-  bisim/
-  workflow/core/
-  workflow/example/
-  workflow/extra/
-  cli/
+  .

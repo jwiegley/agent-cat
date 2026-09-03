@@ -1,6 +1,6 @@
 # Workflow maintenance
 
-- Every child package may depend on `agentic-dsl` only among local packages.
+- Every workflow source may import only DSL authoring modules.
 - Do not import or describe planner, cost, runtime, routing, engines, CLI, Pi, or
   concrete provider/model implementation details.
 - Keep model references symbolic.

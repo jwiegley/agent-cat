@@ -112,6 +112,28 @@
 set -euo pipefail
 root=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$root"
+python3 - <<'PY'
+import re
+from pathlib import Path
+
+checks = {
+    "dsl/src": ("Agentic.Plan", "Agentic.Cost", "Agentic.Runtime", "Agentic.Engine", "Agentic.Acp", "Agentic.AgentDeck", "Agentic.Cli", "Agentic.Route"),
+    "plan/src": ("Agentic.Cost", "Agentic.Runtime", "Agentic.Engine", "Agentic.Acp", "Agentic.AgentDeck", "Agentic.Cli", "Agentic.Route", "Agentic.Workflow"),
+    "cost/src": ("Agentic.Runtime", "Agentic.Engine", "Agentic.Acp", "Agentic.AgentDeck", "Agentic.Cli", "Agentic.Route", "Agentic.Workflow"),
+    "runtime/src": ("Agentic.DSL", "Agentic.Builder", "Agentic.WF", "Agentic.Workflow", "Agentic.Acp", "Agentic.AgentDeck", "Agentic.Cli", "Agentic.Route"),
+    "engine": ("Agentic.DSL", "Agentic.Builder", "Agentic.Plan", "Agentic.Cost", "Agentic.Runtime", "Agentic.Cli", "Agentic.Route", "Agentic.Workflow"),
+    "bisim/haskell/src": ("Agentic.Cost", "Agentic.Runtime", "Agentic.Engine", "Agentic.Acp", "Agentic.AgentDeck", "Agentic.Cli", "Agentic.Route", "Agentic.Workflow"),
+}
+bad = []
+for directory, forbidden in checks.items():
+    for source in Path(directory).rglob("*.hs"):
+        for imported in re.findall(r"^import (?:qualified )?(Agentic\.[A-Za-z0-9_.]+)", source.read_text(), re.MULTILINE):
+            if imported in forbidden:
+                bad.append(f"{source}: {imported}")
+if bad:
+    raise SystemExit("forbidden layer import(s):\n" + "\n".join(bad))
+print("policy imports: module-layer boundaries verified")
+PY
 nix develop path:. -c cabal run -v0 policy-probe -- +RTS -N8 -RTS
 nix develop path:. -c cabal build agentic-run routing-fixed-point-probe >/dev/null
 agentic_run=$(nix develop path:. -c cabal list-bin agentic-run)
