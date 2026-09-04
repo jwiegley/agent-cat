@@ -145,7 +145,14 @@ export function assertNoCredentialArgs(args: string[]): void {
     "secret", "client-secret", "password", "authorization", "access-key",
   ]);
   const credentialKey = /(^|[-_])(api[-_]?key|access[-_]?key|auth|authorization|token|secret|password|cookie|credential)([-_]|$)/;
-  const inspectArgs = args.filter((argument) => argument.trim().toLowerCase() !== "--adapter-arg");
+  const inspectArgs: string[] = [];
+  let skipRoutingValue = false;
+  for (const raw of args) {
+    const argument = raw.trim().toLowerCase();
+    if (skipRoutingValue) { skipRoutingValue = false; continue; }
+    if (argument === "--persona" || argument === "--realize") { skipRoutingValue = true; continue; }
+    if (argument !== "--adapter-arg") inspectArgs.push(raw);
+  }
   for (let index = 0; index < inspectArgs.length; index += 1) {
     const argument = inspectArgs[index].trim().toLowerCase();
     const key = argument.split("=", 1)[0].replace(/^--?/, "");

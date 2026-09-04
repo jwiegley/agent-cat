@@ -30,9 +30,15 @@ checked by the documentation gates.
 @c MEMBER Agentic.Cli.Command.member:MachineLineage support
 @hsindex Agentic.Cli.Command.MachineLineage
 @item @code{Agentic.Cli.Command} @tab @code{MachineLineage} @tab @code{Agentic.Cli.Command}
+@c MEMBER Agentic.Cli.Command.member:MigrateRouting support
+@hsindex Agentic.Cli.Command.MigrateRouting
+@item @code{Agentic.Cli.Command} @tab @code{MigrateRouting} @tab @code{Agentic.Cli.Command}
 @c MEMBER Agentic.Cli.Command.member:Plan support
 @hsindex Agentic.Cli.Command.Plan
 @item @code{Agentic.Cli.Command} @tab @code{Plan} @tab @code{Agentic.Cli.Command}
+@c MEMBER Agentic.Cli.Command.member:RoutingInspection support
+@hsindex Agentic.Cli.Command.RoutingInspection
+@item @code{Agentic.Cli.Command} @tab @code{RoutingInspection} @tab @code{Agentic.Cli.Command}
 @c MEMBER Agentic.Cli.Command.member:Run support
 @hsindex Agentic.Cli.Command.Run
 @item @code{Agentic.Cli.Command} @tab @code{Run} @tab @code{Agentic.Cli.Command}

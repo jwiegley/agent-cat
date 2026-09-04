@@ -7,6 +7,9 @@ const descriptorMode = args[0]?.startsWith("--descriptor-") ? args.shift() : "--
 const descriptorInputs = {
   "--descriptor-v1": ["subject"],
   "--descriptor-v2": [{ name: "subject", source: "prompt" }],
+  "--descriptor-v3": [{ name: "subject", source: "prompt" }],
+  "--descriptor-v3-v1-routing": [{ name: "subject", source: "prompt" }],
+  "--descriptor-v3-unsafe": [{ name: "subject", source: "prompt" }],
   "--descriptor-sources": [{ name: "args", source: "command-tail" }, { name: "input", source: "stdin" }, { name: "tone", source: "prompt" }],
   "--descriptor-stdin": [{ name: "subject", source: "stdin" }],
   "--descriptor-stdin-no-control": [{ name: "subject", source: "stdin" }],
@@ -15,11 +18,19 @@ const descriptorInputs = {
   "--descriptor-multi-stdin": [{ name: "left", source: "stdin" }, { name: "right", source: "stdin" }],
 }[descriptorMode];
 const descriptor = {
-  descriptorVersion: descriptorMode === "--descriptor-v1" ? 1 : 2,
+  descriptorVersion: descriptorMode === "--descriptor-v1" ? 1 : descriptorMode.startsWith("--descriptor-v3") ? 3 : 2,
   runnerVersion: "fixture-1",
   protocolVersions: [1],
   storeVersions: [1],
-  capabilities: { structuredRun: true, wholeRunCancel: true, requestControls: false, semanticResume: false, consults: 1, observes: 0, effects: 0, effectful: false, toolExecution: false, ...(["--descriptor-v1", "--descriptor-stdin-no-control"].includes(descriptorMode) ? {} : { controlFd: 3 }) },
+  capabilities: {
+    structuredRun: true, wholeRunCancel: true, requestControls: false, semanticResume: false,
+    consults: 1, observes: 0, effects: 0, effectful: false, toolExecution: false,
+    ...(["--descriptor-v1", "--descriptor-stdin-no-control"].includes(descriptorMode) ? {} : { controlFd: 3 }),
+    ...(descriptorMode.startsWith("--descriptor-v3") ? {
+      protocolNegotiation: true, routingInspection: true, routingJsonVersion: 2,
+      personaRouting: true, modelAliasRouting: true,
+    } : {}),
+  },
   name: descriptorMode === "--descriptor-sources" ? "review" : "fixture",
   blurb: "fixture workflow",
   level: "batch",
@@ -37,7 +48,26 @@ const controlInput = () => process.env.AGENT_CAT_CONTROL_FD === "3"
   ? createReadStream("", { fd: 3, autoClose: false })
   : process.stdin;
 
-if (args[0] === "list" && args[1] === "--json") {
+if (args[0] === "--routing" && args[1] === "--json") {
+  const personaIndex = args.indexOf("--persona");
+  const persona = personaIndex >= 0 ? args[personaIndex + 1] : "personal";
+  const alias = persona === "work" ? "work-model" : "personal-model";
+  const value = descriptorMode === "--descriptor-v3-v1-routing"
+    ? { version: 1, profiles: [{ options: { url: "opaque-v1-option" } }] }
+    : {
+    version: 2,
+    persona: { name: persona, source: personaIndex >= 0 ? "command-line" : "user-default" },
+    availablePersonas: ["personal", "work"],
+    availableModels: persona === "work"
+      ? [{ alias: "work-model", engine: "work-engine" }]
+      : [{ alias: "personal-model", engine: "personal-engine" }, { alias: "shared-model", engine: "personal-engine" }],
+    profiles: [{ name: "worker", rungs: [{ axis: "worker", modelAlias: alias, model: `${alias}-exact` }] }],
+    warnings: [],
+    engines: [], models: [], sources: [],
+  };
+  if (descriptorMode === "--descriptor-v3-unsafe") value.secrets = { leaked: "sentinel" };
+  console.log(JSON.stringify(value));
+} else if (args[0] === "list" && args[1] === "--json") {
   console.log(JSON.stringify([descriptor]));
 } else if (args[0] === "help") {
   process.stdout.write("exact fixture help\n");

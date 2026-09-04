@@ -234,6 +234,9 @@
 module Agentic.Acp
   ( -- * The configuration
     AcpConfig (..),
+    ChildEnvironment,
+    inheritChildEnvironment,
+    explicitChildEnvironment,
     defaultAcpConfig,
 
     -- * Adapter selection
@@ -373,6 +376,30 @@ import Agentic.Engine
 -- The configuration
 -- ---------------------------------------------------------------------------
 
+-- | Either preserve today's inherited process environment or install one exact
+-- environment assembled by trusted CLI composition. Values are deliberately
+-- opaque: the only 'Show' output is a count, and this type has no 'Eq' instance.
+data ChildEnvironment
+  = InheritChildEnvironment
+  | ExplicitChildEnvironment ![(String, String)]
+
+instance Show ChildEnvironment where
+  show InheritChildEnvironment = "<inherited child environment>"
+  show (ExplicitChildEnvironment bindings) =
+    "<explicit child environment: " <> show (length bindings) <> " bindings>"
+
+-- | Preserve the complete ambient environment, which is the version-1 default.
+inheritChildEnvironment :: ChildEnvironment
+inheritChildEnvironment = InheritChildEnvironment
+
+-- | Install exactly these bindings; duplicate names use the last value.
+explicitChildEnvironment :: [(String, String)] -> ChildEnvironment
+explicitChildEnvironment = ExplicitChildEnvironment . Map.toAscList . Map.fromList
+
+childProcessEnvironment :: ChildEnvironment -> Maybe [(String, String)]
+childProcessEnvironment InheritChildEnvironment = Nothing
+childProcessEnvironment (ExplicitChildEnvironment bindings) = Just bindings
+
 -- | Which program to start, where it runs, how long one turn may take, and
 -- whether each question gets a session of its own.
 --
@@ -401,10 +428,12 @@ data AcpConfig = AcpConfig
     -- | Open a new session before every question. 'True' by default; see the
     -- module header.
     acpFreshPerQuestion :: !Bool,
+    -- | Exact child environment policy. Defaults to ambient inheritance for v1.
+    acpChildEnvironment :: !ChildEnvironment,
     -- | Narrate the transport — every call, every turn — on stderr.
     acpVerbose :: !Bool
   }
-  deriving (Eq, Show)
+  deriving (Show)
 
 -- | The configuration for an @argv@, with the defaults the retired Lean
 -- transport carried: the current directory, fifteen minutes to a turn — a real
@@ -419,6 +448,7 @@ defaultAcpConfig argv =
       acpCwd = ".",
       acpTurnTimeoutMs = 900000,
       acpFreshPerQuestion = True,
+      acpChildEnvironment = inheritChildEnvironment,
       acpVerbose = False
     }
 
@@ -931,7 +961,8 @@ connectAcp cfg = do
           -- The child's stderr is the human's: an adapter's diagnostics are for
           -- the operator running the build and not for this parser.
           std_err = Inherit,
-          cwd = Just (acpCwd cfg)
+          cwd = Just (acpCwd cfg),
+          env = childProcessEnvironment (acpChildEnvironment cfg)
         }
   (hin, hout, ph) <- case spawned of
     Left (e :: IOException) -> throwIO (AcpAdapterMissing prog (T.pack (show e)))
@@ -946,8 +977,11 @@ connectAcp cfg = do
   hSetBuffering hin (BlockBuffering Nothing)
   hSetBuffering hout LineBuffering
   readBuffer <- newIORef BS.empty
+  -- The resolved values have crossed their only boundary. Keep no copy in the
+  -- long-lived connection configuration.
+  let runtimeCfg = cfg {acpChildEnvironment = inheritChildEnvironment}
   acp <-
-    Acp cfg prog hin hout readBuffer ph
+    Acp runtimeCfg prog hin hout readBuffer ph
       <$> newMVar ()
       <*> newMVar Map.empty
       <*> newIORef 0

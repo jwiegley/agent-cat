@@ -10,9 +10,14 @@ application of common model settings, and transport failures.
 `Agentic.Acp` exposes the connection and configuration primitives, the neutral
 `AdapterSpec`, the ACP-specific `AcpModelConfig`, and the two constructors
 `engineOfAcp` and `engineOfAcpConfigured`. Arbitrary ACP configuration options
-stop at this boundary and never enter the neutral engine API. Permission
-follows the intent of a request. `permissionByIntent` grants a tool request
-only for an effect-annotated occurrence, and it cancels the request for
+stop at this boundary and never enter the neutral engine API. `AcpConfig` also
+carries an opaque `ChildEnvironment`. Its default inherits the complete ambient
+environment, as version 1 did. Version-2 CLI composition can supply one explicit
+map whose `Show` instance reveals only a binding count, and the retained ACP
+configuration discards it after process creation.
+
+Permission follows the intent of a request. `permissionByIntent` grants a tool
+request only for an effect-annotated occurrence, and it cancels the request for
 consultations and observations. Every decision is announced on standard error.
 The commands and pins for Claude, Codex, and Droid belong to the three child
 directories.

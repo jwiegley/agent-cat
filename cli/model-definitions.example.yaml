@@ -1,43 +1,133 @@
-version: 1
-routers:
-  - name: claude-acp
+# Model identifiers are illustrative; verify them through inspection and engine preflight.
+version: 2
+default-persona: personal
+
+secrets:
+  anthropic-personal:
+    env: ANTHROPIC_PERSONAL_API_KEY
+  openai-work:
+    env: OPENAI_WORK_API_KEY
+
+engines:
+  claude-personal:
     backend: acp:claude
     provider: anthropic
-  - name: codex-acp
+    environment:
+      ANTHROPIC_API_KEY:
+        secret: anthropic-personal
+    catalogue:
+      dialect: anthropic
+      url: https://api.anthropic.com/v1/models
+      auth:
+        header: x-api-key
+        secret: anthropic-personal
+      headers:
+        anthropic-version: "2023-06-01"
+      timeout-ms: 5000
+      max-bytes: 4194304
+      cache:
+        fresh-for: 24h
+        stale-if-error: 7d
+
+  codex-work:
     backend: acp:codex
     provider: openai
-profiles:
-  - name: deep
-    chain:
-      - router: claude-acp
-        model: claude-opus-4-8
-        thinking: high
-        max-output: unconstrained
-      - router: codex-acp
-        model: gpt-5.5
-        thinking: xhigh
-        max-output: 65536
-  - name: balanced
-    chain:
-      - router: claude-acp
-        model: claude-fable-5
-        thinking: high
-        max-output: unconstrained
-  - name: review
-    chain:
-      - router: claude-acp
-        model: claude-opus-4-8
-        thinking: high
-        max-output: unconstrained
-  - name: reasoning
-    chain:
-      - router: codex-acp
-        model: gpt-5.5
-        thinking: xhigh
-        max-output: 65536
-  - name: coding
-    chain:
-      - router: codex-acp
-        model: gpt-5.5
-        thinking: high
-        max-output: 65536
+    environment:
+      OPENAI_API_KEY:
+        secret: openai-work
+    catalogue:
+      dialect: openai
+      url: https://api.openai.com/v1/models
+      auth:
+        header: authorization
+        scheme: bearer
+        secret: openai-work
+      timeout-ms: 5000
+      max-bytes: 4194304
+      cache:
+        fresh-for: 24h
+        stale-if-error: 7d
+
+models:
+  opus-personal:
+    engine: claude-personal
+    select:
+      - exact: claude-opus-example
+
+  fable-personal:
+    engine: claude-personal
+    select:
+      - exact: claude-fable-example
+
+  sol-work:
+    engine: codex-work
+    select:
+      - exact: gpt-sol-example
+      - prefix: gpt-sol-example-
+        order: newest
+
+personas:
+  personal:
+    engines:
+      - claude-personal
+    models:
+      - opus-personal
+      - fable-personal
+    profiles:
+      deep:
+        chain:
+          - model: opus-personal
+            thinking: max
+            max-output: unconstrained
+      balanced:
+        chain:
+          - model: fable-personal
+            thinking: high
+            max-output: unconstrained
+      review:
+        chain:
+          - model: opus-personal
+            thinking: high
+            max-output: unconstrained
+      reasoning:
+        chain:
+          - model: opus-personal
+            thinking: max
+            max-output: unconstrained
+      coding:
+        chain:
+          - model: fable-personal
+            thinking: high
+            max-output: unconstrained
+
+  work:
+    engines:
+      - codex-work
+    models:
+      - sol-work
+    profiles:
+      deep:
+        chain:
+          - model: sol-work
+            thinking: xhigh
+            max-output: 65536
+      balanced:
+        chain:
+          - model: sol-work
+            thinking: high
+            max-output: 65536
+      review:
+        chain:
+          - model: sol-work
+            thinking: high
+            max-output: 65536
+      reasoning:
+        chain:
+          - model: sol-work
+            thinking: xhigh
+            max-output: 65536
+      coding:
+        chain:
+          - model: sol-work
+            thinking: high
+            max-output: 65536

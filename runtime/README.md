@@ -16,8 +16,9 @@ and imports nothing from this directory. The Cabal file hides the seven
 implementation modules, which are `Agentic.Exec`, `Agentic.Shell`, and the
 `Control`, `Machine`, `Protocol`, `Route`, and `Store` modules under
 `Agentic.Runtime`. `Agentic.Runtime.Protocol` fixes the versions of the process
-protocols. The descriptor is version 2, the machine protocol is version 1, and
-the store format is version 1.
+protocols. The descriptor is version 3, the machine protocol is version 1, and
+the store format is version 1. Descriptor version 3 adds routing and negotiation
+capabilities without changing the version-1 machine stream.
 
 ## Dependencies
 

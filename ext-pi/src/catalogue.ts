@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { RunnerConfig, WorkflowDescriptor, WorkflowInput } from "./types.ts";
+import type { RoutingInspection, RunnerConfig, WorkflowDescriptor, WorkflowInput } from "./types.ts";
 
 const execFileAsync = promisify(execFile);
 const MAX_OUTPUT = 4 * 1024 * 1024;
@@ -45,6 +45,30 @@ export async function readPlan(
   return parsed;
 }
 
+export function supportsRoutingInspection(descriptor: WorkflowDescriptor): boolean {
+  return descriptor.descriptorVersion >= 3
+    && descriptor.capabilities.routingInspection === true
+    && descriptor.capabilities.routingJsonVersion === 2
+    && descriptor.capabilities.personaRouting === true
+    && descriptor.capabilities.modelAliasRouting === true;
+}
+
+export function negotiateProtocolVersion(descriptor: WorkflowDescriptor, supported: readonly number[] = [1]): number {
+  const common = descriptor.protocolVersions.filter((version) => supported.includes(version)).sort((left, right) => right - left);
+  if (common.length === 0) throw new Error(`runner ${descriptor.runnerId} has no supported machine protocol`);
+  return common[0];
+}
+
+export async function readRouting(
+  config: RunnerConfig, cwd: string, options: { persona?: string; mode?: "offline" | "refresh" } = {},
+): Promise<RoutingInspection | undefined> {
+  const args = ["--routing", "--json"];
+  if (options.persona !== undefined) { assertName(options.persona, "persona"); args.push("--persona", options.persona); }
+  if (options.mode === "offline") args.push("--offline");
+  if (options.mode === "refresh") args.push("--refresh-models");
+  return parseRoutingInspection(config.id, JSON.parse(await invoke(config, args, cwd, 70_000)));
+}
+
 export async function checkLineage(
   config: RunnerConfig, operation: "restart" | "resume" | "fork", parentStore: string, workflow: string,
   inputFiles: ReadonlyMap<string, string>, targetArgs: string[], cwd: string,
@@ -69,13 +93,12 @@ export function canonicalJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
-async function invoke(config: RunnerConfig, args: string[], cwd: string): Promise<string> {
+async function invoke(config: RunnerConfig, args: string[], cwd: string, timeout = TIMEOUT_MS): Promise<string> {
   const { stdout } = await execFileAsync(config.executable, [...(config.prefixArgs ?? []), ...args], {
     cwd,
-    timeout: TIMEOUT_MS,
+    timeout,
     maxBuffer: MAX_OUTPUT,
     encoding: "utf8",
-    shell: false,
   });
   return stdout;
 }
@@ -83,7 +106,7 @@ async function invoke(config: RunnerConfig, args: string[], cwd: string): Promis
 function parseDescriptor(runnerId: string, value: unknown): WorkflowDescriptor {
   if (!isObject(value)) throw new Error(`runner ${runnerId} returned a non-object workflow`);
   const descriptorVersion = number(value.descriptorVersion, "descriptorVersion");
-  if (descriptorVersion !== 1 && descriptorVersion !== 2) throw new Error(`unsupported descriptor version ${descriptorVersion}`);
+  if (descriptorVersion !== 1 && descriptorVersion !== 2 && descriptorVersion !== 3) throw new Error(`unsupported descriptor version ${descriptorVersion}`);
   const descriptor: WorkflowDescriptor = {
     runnerId,
     name: text(value.name, "name"),
@@ -110,7 +133,7 @@ function parseDescriptor(runnerId: string, value: unknown): WorkflowDescriptor {
     const names = descriptor.inputs.filter((input) => input.source === source).map(({ name }) => name);
     if (names.length > 1) throw new Error(`multiple ${source} inputs: ${names.join(", ")}`);
   }
-  if (!descriptor.protocolVersions.includes(1)) throw new Error(`runner ${runnerId} does not support protocol 1`);
+  negotiateProtocolVersion(descriptor);
   return descriptor;
 }
 
@@ -170,4 +193,52 @@ function capabilities(value: unknown): Record<string, boolean | number> {
     result[key] = entry;
   }
   return result;
+}
+
+function parseRoutingInspection(runnerId: string, value: unknown): RoutingInspection | undefined {
+  if (!isObject(value)) throw new Error(`runner ${runnerId} routing inspection is not an object`);
+  const version = number(value.version, "routing version");
+  if (version === 1) return undefined;
+  if (version !== 2) throw new Error(`runner ${runnerId} returned unsupported routing inspection version`);
+  assertSanitizedRouting(value);
+  if (!isObject(value.persona)) throw new Error("routing persona is not an object");
+  const persona = { name: text(value.persona.name, "routing persona name"), source: text(value.persona.source, "routing persona source") };
+  const availablePersonas = texts(value.availablePersonas, "availablePersonas");
+  if (!availablePersonas.includes(persona.name)) throw new Error("selected routing persona is absent from availablePersonas");
+  if (!Array.isArray(value.availableModels)) throw new Error("availableModels is not an array");
+  const availableModels = value.availableModels.map((entry, index) => {
+    if (!isObject(entry)) throw new Error(`availableModels[${index}] is not an object`);
+    return { alias: text(entry.alias, `availableModels[${index}].alias`), engine: text(entry.engine, `availableModels[${index}].engine`) };
+  });
+  if (new Set(availablePersonas).size !== availablePersonas.length) throw new Error("availablePersonas contains duplicates");
+  if (new Set(availableModels.map(({ alias }) => alias)).size !== availableModels.length) throw new Error("availableModels contains duplicate aliases");
+  if (!Array.isArray(value.profiles)) throw new Error("routing profiles is not an array");
+  const profiles = value.profiles.map((profile, index) => {
+    if (!isObject(profile) || !Array.isArray(profile.rungs)) throw new Error(`profiles[${index}] is invalid`);
+    return {
+      name: text(profile.name, `profiles[${index}].name`),
+      rungs: profile.rungs.map((rung, rungIndex) => {
+        if (!isObject(rung)) throw new Error(`profiles[${index}].rungs[${rungIndex}] is not an object`);
+        return {
+          axis: text(rung.axis, `profiles[${index}].rungs[${rungIndex}].axis`),
+          modelAlias: text(rung.modelAlias, `profiles[${index}].rungs[${rungIndex}].modelAlias`),
+          model: text(rung.model, `profiles[${index}].rungs[${rungIndex}].model`),
+        };
+      }),
+    };
+  });
+  return { version: 2, persona, availablePersonas, availableModels, profiles, warnings: texts(value.warnings, "routing warnings"), raw: value };
+}
+
+function assertSanitizedRouting(value: unknown): void {
+  const forbidden = new Set(["secret", "secrets", "environment", "headers", "auth", "url", "authorization", "credential", "credentialvalue"]);
+  const visit = (entry: unknown): void => {
+    if (Array.isArray(entry)) { entry.forEach(visit); return; }
+    if (!isObject(entry)) return;
+    for (const [key, child] of Object.entries(entry)) {
+      if (forbidden.has(key.toLowerCase())) throw new Error(`routing inspection contains forbidden field ${key}`);
+      visit(child);
+    }
+  };
+  visit(value);
 }

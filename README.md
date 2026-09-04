@@ -264,6 +264,7 @@ nix develop path:. -c cabal run agentic-run -- cost harden
 nix develop path:. -c cabal run agentic-run -- run harden --scripted
 nix develop path:. -c cabal run agentic-run -- run harden --engine acp --adapter stub
 nix develop path:. -c cabal run agentic-run -- run harden --session <deck-id>
+nix develop path:. -c cabal run agentic-run -- --routing --json --offline
 ```
 
 The verbs `list`, `help`, `plan`, and `cost` spend nothing and start no
@@ -284,16 +285,22 @@ is a transport failure, and 3 is a run abandoned over what arrived. A machine
 run that is cancelled through its control channel exits 130.
 
 A workflow names its serving model symbolically, for example with `servedBy
-"deep-thinker"`. A live run resolves that name through layered YAML routing
-profiles. The user file is `$XDG_CONFIG_HOME/agent-cat/routing.yaml`, the
-project file is the nearest `.agent-cat/routing.yaml`, both use schema version
-1, and an explicit `--route` option is the highest backend override. A profile
-owns an ordered chain of router, model, thinking level, and output policy, and
-the runner applies or verifies every declared setting before the first prompt.
-The file `cli/model-definitions.example.yaml` is a complete example that covers
-every profile that the bundled workflows name. Routing selects an answering
-service after the program and its analyses already exist, so it changes
-neither the plan nor its price.
+"deep-thinker"`. Schema version 1 retains its existing layered routers, profiles,
+and raw `--route` precedence. Schema version 2 gives the user file authority over
+environment references, engines, bounded catalogues, concrete model aliases,
+personas, and profiles. The nearest project file can select a persona and replace
+whole profiles, but it cannot widen engines or models. Persona precedence is
+`--persona`, `AGENT_CAT_PERSONA`, the project selector, and then the user default.
+
+Exact and ordered-prefix selectors freeze an exact model identifier before an
+engine starts. `--realize AXIS=MODEL-ALIAS` safely replaces a managed version-2
+axis, while raw routes remain unchanged for version 1 and unconfigured names.
+`--routing --json` emits the sanitized frontend contract, and
+`--migrate-routing SOURCE --output DESTINATION` creates an equivalent offline
+version-2 file without overwriting the source. The example in
+`cli/model-definitions.example.yaml` covers every profile that the bundled
+workflows name. Routing remains operational policy after the program and its
+analyses exist, so persona changes neither the plan nor its price.
 
 The `machine` verbs execute the same program for a supervising process. They
 emit NDJSON events of protocol version 1 on standard output and accept
@@ -301,7 +308,9 @@ correlated controls on an inherited file descriptor. A machine run can persist
 an immutable manifest, an append-only event journal, reusable typed answers, an
 effect journal, and checkpoints. The verbs `machine-restart`, `machine-resume`,
 and `machine-fork` create child runs with immutable lineage. The command `list
---json` publishes descriptor version 2 for supervisors. The registry currently
+--json` publishes descriptor version 3 with routing and protocol-negotiation
+capabilities. Machine protocol and store format remain at version 1, and
+descriptor-version-2 clients remain compatible. The registry currently
 holds nine programs, named `harden`, `hello`, `structured`,
 `structured-result`, `plan-feature`, `review-lite`, `ship-feature-lite`,
 `grind-tests`, and `stack-prs`.
@@ -313,7 +322,10 @@ agent-cat workflows. It performs no search for a runner. The trusted
 `agentic-run` executables are named by absolute path in `AGENT_CAT_RUNNER` or
 `AGENT_CAT_RUNNERS`. The extension reads their descriptors, collects inputs,
 launches machine mode, reduces the event stream into a live monitor, delivers
-controls, and keeps durable references to runs. The `/wf` command launches a
+controls, and keeps durable references to runs. With a descriptor-version-3
+runner, it reads sanitized routing inspection and offers persona and model-alias
+choices. It never parses routing YAML or receives secret values. Descriptor
+versions 1 and 2 retain their established launch behavior. The `/wf` command
 workflow in the current Agent Deck session, and a family of `/workflow-...`
 commands covers help, plan, status, monitoring, steering, recovery, redirect,
 grants, lineage, and cancellation. The extension never interprets a
@@ -378,11 +390,12 @@ conformance wire format, a tutorial, the authoring and runner references,
 diagnostics, and a glossary. `doc/meaning-and-representation.md` gives the
 denotational argument at length. Every source directory has a `README.md` and
 an `AGENTS.md`. `doc/research/` holds the design records and research
-dossiers, and its own `README.md` indexes them. The implementation designs for
-the proposed Brick interface and for persona-aware model resolution are
-[`doc/tui-design.md`](doc/tui-design.md) and
-[`doc/model-routing-v2.md`](doc/model-routing-v2.md). Both remain proposals
-and describe no current runtime behavior. Issue tracking uses `obr` with the
+dossiers, and its own `README.md` indexes them. The implemented persona-aware
+routing contract is `doc/model-routing-v2.md`, and exact commands, outcomes, and
+residuals are recorded in `doc/routing-v2-verification.md`. The proposed Brick
+interface
+remains in `doc/tui-design.md`; only its routing-pane consumer is deferred, and
+it uses the same sanitized inspection contract as ext-pi. Issue tracking uses
 prefix `acat`, its tracked surface is `doc/PLAN.org`, and `AGENTS.md` describes
 the workflow.
 

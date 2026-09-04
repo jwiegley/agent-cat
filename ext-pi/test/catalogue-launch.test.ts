@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat } from "node:fs/p
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { discoverRunner, readHelp } from "../src/catalogue.ts";
+import { discoverRunner, negotiateProtocolVersion, readHelp, readRouting, supportsRoutingInspection } from "../src/catalogue.ts";
 import { assertNoCredentialArgs, prepareLaunch, preflightLineage, previewPlan } from "../src/launch.ts";
 import type { RunnerConfig } from "../src/types.ts";
 
@@ -29,6 +29,7 @@ describe("catalogue and launch", () => {
       ["--adapter", "FACTORY_API_KEY=x"],
       ["--route", "deep=acp:FACTORY_API_KEY=x"],
     ]) expect(() => assertNoCredentialArgs(args)).toThrow("credential-bearing target argv is forbidden");
+    expect(() => assertNoCredentialArgs(["--persona", "token-team", "--realize", "deep=api-key-auditor"])).not.toThrow();
   });
   it("discovers v2 input sources, upgrades v1 inputs, and preserves exact help", async () => {
     const { directory, config } = await setup();
@@ -39,6 +40,31 @@ describe("catalogue and launch", () => {
     const [legacy] = await discoverRunner({ ...config, prefixArgs: ["--descriptor-v1"] }, directory);
     expect(legacy.inputs).toEqual([{ name: "subject", source: "prompt" }]);
     expect(await readHelp(config, "fixture", directory)).toBe("exact fixture help\n");
+  });
+
+  it("negotiates descriptor-v3 routing while retaining descriptor-v2/protocol-v1 compatibility", async () => {
+    const { directory, config } = await setup();
+    const [older] = await discoverRunner(config, directory);
+    expect(supportsRoutingInspection(older)).toBe(false);
+    expect(negotiateProtocolVersion(older)).toBe(1);
+
+    const v3Runner = { ...config, prefixArgs: ["--descriptor-v3"] };
+    const [descriptor] = await discoverRunner(v3Runner, directory);
+    expect(descriptor.descriptorVersion).toBe(3);
+    expect(supportsRoutingInspection(descriptor)).toBe(true);
+    expect(negotiateProtocolVersion(descriptor)).toBe(1);
+    expect(() => negotiateProtocolVersion({ ...descriptor, protocolVersions: [2] })).toThrow("no supported machine protocol");
+
+    const configured = await readRouting(v3Runner, directory);
+    expect(configured).toMatchObject({
+      version: 2, persona: { name: "personal", source: "user-default" },
+      availablePersonas: ["personal", "work"],
+    });
+    const work = await readRouting(v3Runner, directory, { persona: "work", mode: "offline" });
+    expect(work?.persona).toEqual({ name: "work", source: "command-line" });
+    expect(work?.availableModels).toEqual([{ alias: "work-model", engine: "work-engine" }]);
+    expect(await readRouting({ ...config, prefixArgs: ["--descriptor-v3-v1-routing"] }, directory)).toBeUndefined();
+    await expect(readRouting({ ...config, prefixArgs: ["--descriptor-v3-unsafe"] }, directory)).rejects.toThrow("forbidden field secrets");
   });
 
   it.each([

@@ -32,6 +32,18 @@ export type WorkflowDescriptor = {
   capabilities: Record<string, boolean | number>;
 };
 
+export type RoutingModelChoice = { alias: string; engine: string };
+
+export type RoutingInspection = {
+  version: 2;
+  persona: { name: string; source: string };
+  availablePersonas: string[];
+  availableModels: RoutingModelChoice[];
+  profiles: Array<{ name: string; rungs: Array<{ axis: string; modelAlias: string; model: string }> }>;
+  warnings: string[];
+  raw: Record<string, unknown>;
+};
+
 export type RuntimeEvent = {
   protocolVersion: number;
   runId: string;

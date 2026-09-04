@@ -521,6 +521,8 @@ parsedAs :: [Text] -> String
 parsedAs args = case parseCommand collidingRegistry args of
   Right Usage -> "usage"
   Right (Help n) -> "help " <> T.unpack n
+  Right (RoutingInspection _ _ _) -> "routing"
+  Right (MigrateRouting _ _) -> "migration"
   Right (List _) -> "list"
   Right (Plan n _ _ _ _) -> "plan " <> T.unpack n
   Right (Cost n _) -> "cost " <> T.unpack n
@@ -2188,6 +2190,8 @@ main = do
       ("cost NAME is the verb", parsedAs ["cost", "ordinary"] == "cost ordinary"),
       ("`list` is the verb", parsedAs ["list"] == "list"),
       ("`help` alone is the usage", parsedAs ["help"] == "usage"),
+      ("leading --routing cannot collide with a workflow name", parsedAs ["--routing"] == "routing"),
+      ("leading --migrate-routing cannot collide with a workflow name", parsedAs ["--migrate-routing", "old", "--output", "new"] == "migration"),
       -- The one door left open, and it is enough: a row named after a verb can
       -- still be READ about, which is what makes the situation a thing to fix
       -- rather than a thing to discover.

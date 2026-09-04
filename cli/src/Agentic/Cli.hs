@@ -270,6 +270,7 @@ import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
 import Data.Aeson.Types (Pair, parseEither)
 import qualified Data.ByteString as BS
+import Data.Char (isAlphaNum)
 import qualified Data.ByteString.Lazy as BL
 import Data.List (find, nub, sort, sortOn, tails)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
@@ -285,18 +286,20 @@ import Data.Text.Encoding (decodeUtf8', decodeUtf8Lenient, encodeUtf8)
 -- `decodeUtf8'`'s alone — this only sharpens the refusal.
 import Data.Text.Internal.Encoding (validateUtf8Chunk)
 import qualified Data.Text.IO as TIO
+import Data.Time.Clock (getCurrentTime)
 import qualified Data.Vector as V
 import GHC.Clock (getMonotonicTimeNSec)
 import Numeric (showFFloat)
 import qualified Paths_agentic as Paths
 import Data.Version (showVersion)
-import System.Directory (createDirectoryIfMissing, getTemporaryDirectory)
-import System.Environment (getArgs, lookupEnv)
+import System.Directory (createDirectoryIfMissing, doesFileExist, getHomeDirectory, getTemporaryDirectory)
+import System.Environment (getArgs, getEnvironment, lookupEnv)
 import System.Exit (ExitCode (..), exitSuccess, exitWith)
 import System.FilePath ((</>))
 import System.IO
   ( BufferMode (LineBuffering),
     Handle,
+    hClose,
     hIsTerminalDevice,
     hSetBuffering,
     hSetEncoding,
@@ -306,7 +309,13 @@ import System.IO
     utf8,
   )
 import System.IO.Error (ioeGetErrorString, isUserError)
-import System.Posix.IO (fdToHandle)
+import System.Posix.IO
+  ( OpenFileFlags (creat, exclusive),
+    OpenMode (WriteOnly),
+    defaultFileFlags,
+    fdToHandle,
+    openFd,
+  )
 import System.Posix.Types (Fd (..))
 import Text.Read (readMaybe)
 
@@ -314,6 +323,8 @@ import Agentic.Acp
   ( Acp,
     AcpModelConfig (..),
     AcpConfig (..),
+    ChildEnvironment,
+    inheritChildEnvironment,
     AcpError,
     AdapterSpec,
     adapterConfig,
@@ -425,11 +436,39 @@ import Agentic.RoutingConfig
     ResolvedRealization (..),
     ResolvedRouting (..),
     Router (..),
+    decodeRoutingConfig,
     emptyRoutingConfig,
     loadRoutingConfig,
+    expandRoutingConfigV2,
+    freezeRoutingConfigV2,
     resolveRoutingConfig,
     thinkingName,
     routesWithProfiles,
+  )
+import Agentic.RoutingConfig.V2
+  ( Persona (personaProfiles),
+    SelectedRoutingV2 (selectedPersona, selectedPersonaName, selectedPersonaSource),
+    selectRoutingPersona,
+  )
+import Agentic.RoutingDiscovery
+  ( DiscoveryMode (..),
+    discoverRoutingInventories,
+    sha256Fingerprint,
+  )
+import Agentic.RoutingSecrets
+  ( resolveEngineContexts,
+    resolvedEngineBackend,
+    resolvedEngineChildEnvironment,
+    resolvedEngineCredentialReady,
+  )
+import Agentic.RoutingInspect
+  ( migrateRoutingConfigV1,
+    personaSelectionSourceName,
+    renderRoutingInspectionV1,
+    renderRoutingInspectionV2,
+    resolvedRealizationPolicy,
+    routingInspectionV1,
+    routingInspectionV2,
   )
 import Data.Set (Set)
 import qualified Data.Set as Set
@@ -570,6 +609,10 @@ data Command
     -- unconditional in the name, so a misspelling gets the list of rows rather
     -- than @no verb@.
     Help !Text
+  | -- | Sanitized local routing policy; may explicitly refresh catalogues.
+    RoutingInspection !Render !(Maybe Text) !DiscoveryMode
+  | -- | Mechanical, non-overwriting version-1 to version-2 conversion.
+    MigrateRouting !FilePath !FilePath
   | -- | The registry itself: every name, with its one line.
     List !Render
   | -- | The static folds, the printed program when the first 'Bool', and
@@ -600,6 +643,7 @@ data Render
     Human
   | -- | the object documented in this module's haddock, for a program
     Json
+  deriving (Eq)
 
 -- | One resolved operator-input source.
 --
@@ -663,6 +707,18 @@ data RunRoutes = RunRoutes
     rrCommandRoutes :: !(Routes Backend),
     -- | The layered YAML policy loaded before any program or backend.
     rrRouting :: !LoadedRouting,
+    -- | Trust-selected v2 policy, if the loaded files are version 2.
+    rrSelectedRoutingV2 :: !(Maybe SelectedRoutingV2),
+    -- | Explicit persona name before precedence is applied.
+    rrPersonaOverride :: !(Maybe Text),
+    -- | Concrete-model overrides keyed by runtime axis.
+    rrRealizeOverrides :: !(Map.Map Text Text),
+    -- | Cache/network behavior chosen explicitly for this operation.
+    rrDiscoveryMode :: !DiscoveryMode,
+    -- | Exact environments retained only until their ACP children are spawned.
+    rrChildEnvironments :: !(Map.Map Backend ChildEnvironment),
+    -- | Whether inventory selection and secret resolution have run once.
+    rrV2Frozen :: !Bool,
     -- | Concrete settings by runtime model axis, populated after the program is built.
     rrRealizations :: !(Map.Map Text ResolvedRealization),
     -- | @--scratch DIR@, or 'Nothing' for a fresh one.
@@ -731,10 +787,31 @@ loadCommandRouting = \case
     withTarget Scripted rebuild = pure (Right (rebuild Scripted))
     withTarget (Routed routes') rebuild = do
       loaded <- loadRoutingConfig
+      environmentPersona <- fmap T.pack <$> lookupEnv "AGENT_CAT_PERSONA"
       pure $ do
         config <- loaded
+        selected <- case loadedRoutingV2User config of
+          Nothing -> do
+            when
+              ( isJust (rrPersonaOverride routes')
+                  || not (Map.null (rrRealizeOverrides routes'))
+                  || rrDiscoveryMode routes' /= DiscoveryNormal
+              )
+              (Left "--persona, --realize, --offline, and --refresh-models require version-2 routing")
+            Right Nothing
+          Just user ->
+            Just <$> selectRoutingPersona user (rrPersonaOverride routes') environmentPersona (loadedRoutingV2Project config)
         effective <- routesWithProfiles (loadedRouting config) (rrCommandRoutes routes')
-        pure (rebuild (Routed routes' {rrRoutes = effective, rrRouting = config}))
+        pure
+          ( rebuild
+              ( Routed
+                  routes'
+                    { rrRoutes = effective,
+                      rrRouting = config,
+                      rrSelectedRoutingV2 = selected
+                    }
+              )
+          )
 
 -- | Which verb, and — for @run@ — the facts the run supplies about itself.
 --
@@ -754,19 +831,83 @@ execute :: Registry -> Command -> IO ()
 execute reg = \case
   Usage -> say (usage reg) >> exitSuccess
   Help name -> helpCmd reg name >> exitSuccess
+  RoutingInspection rendering persona mode -> routingInspectionCmd reg rendering persona mode >> exitSuccess
+  MigrateRouting source outputPath -> migrateRoutingCmd reg source outputPath >> exitSuccess
   List r -> listCmd reg r >> exitSuccess
   Plan name r raw pinned ins -> withExample reg pinned False noRefusal name [] ins (planCmd r raw)
   Cost name ins -> withExample reg False False noRefusal name [] ins (\f _ -> costCmd f)
   Run name target pinned ins ->
-    withRunExample reg pinned name target ins (\effective _ program bindings -> runCmd reg name effective program bindings)
+    withRunExample reg pinned name target ins $ \effective _ program bindings ->
+      withFinalTarget reg effective program (\finalTarget -> runCmd reg name finalTarget program bindings)
   Machine runId name target pinned ins ->
     withMachineControls runId name target $ \control ->
-      withRunExample reg pinned name target ins (\effective _ program bindings -> runMachineCmd control reg runId name effective program bindings)
+      withRunExample reg pinned name target ins $ \effective _ program bindings ->
+        withFinalTarget reg effective program (\finalTarget -> runMachineCmd control reg runId name finalTarget program bindings)
   LineageCheck lineage parent edits name target pinned ins ->
-    withRunExample reg pinned name target ins (\effective _ program _ -> void (validateLineage lineage parent edits name effective program))
+    withRunExample reg pinned name target ins $ \effective _ program _ ->
+      withFinalTarget reg effective program (\finalTarget -> void (validateLineage lineage parent edits name finalTarget program))
   MachineLineage lineage runId parent edits name target pinned ins ->
     withMachineControls runId name target $ \control ->
-      withRunExample reg pinned name target ins (\effective _ program bindings -> runMachineLineageCmd control reg lineage runId parent edits name effective program bindings)
+      withRunExample reg pinned name target ins $ \effective _ program bindings ->
+        withFinalTarget reg effective program (\finalTarget -> runMachineLineageCmd control reg lineage runId parent edits name finalTarget program bindings)
+
+routingInspectionCmd :: Registry -> Render -> Maybe Text -> DiscoveryMode -> IO ()
+routingInspectionCmd reg rendering persona mode = do
+  loadedResult <- loadRoutingConfig
+  loaded <- either (die reg 1 . ("routing configuration: " <>)) pure loadedResult
+  case loadedRoutingV2User loaded of
+    Nothing -> do
+      when (isJust persona || mode /= DiscoveryNormal) $
+        die reg 1 "--persona, --offline, and --refresh-models require version-2 routing"
+      case rendering of
+        Human -> say (renderRoutingInspectionV1 loaded)
+        Json -> sayJson (routingInspectionV1 loaded)
+    Just user -> do
+      environmentPersona <- fmap T.pack <$> lookupEnv "AGENT_CAT_PERSONA"
+      selected <-
+        either (die reg 1 . ("routing configuration: " <>)) pure $
+          selectRoutingPersona user persona environmentPersona (loadedRoutingV2Project loaded)
+      let authored = Map.fromList [(name, []) | name <- Map.keys (personaProfiles (selectedPersona selected))]
+          commandRoutes = routes (BackendAcp "routing-inspection") []
+      expanded <-
+        either (die reg 1 . ("routing configuration: " <>)) pure $
+          expandRoutingConfigV2 selected Map.empty commandRoutes authored
+      ambient <- Map.fromList <$> getEnvironment
+      let required = nub (map (routerName . resolvedRouter) (Map.elems (resolvedRealizations expanded)))
+      contexts <-
+        either (die reg 1 . ("routing configuration: " <>)) pure $
+          resolveEngineContexts selected required ambient
+      cacheHome <- routingCacheHome
+      now <- getCurrentTime
+      inventories <-
+        discoverRoutingInventories mode cacheHome now selected contexts required
+          >>= either (die reg 1 . ("routing configuration: " <>)) pure
+      resolved <-
+        either (die reg 1 . ("routing configuration: " <>)) pure $
+          freezeRoutingConfigV2 selected inventories expanded
+      let readiness = Map.map resolvedEngineCredentialReady contexts
+      case rendering of
+        Human -> say (renderRoutingInspectionV2 loaded selected resolved)
+        Json -> sayJson (routingInspectionV2 loaded selected readiness inventories resolved)
+
+migrateRoutingCmd :: Registry -> FilePath -> FilePath -> IO ()
+migrateRoutingCmd reg source outputPath = do
+  when (source == outputPath) $ die reg 1 "--migrate-routing refuses to overwrite its source"
+  outputExists <- doesFileExist outputPath
+  when outputExists $ die reg 1 ("--migrate-routing refuses to overwrite existing " <> T.pack outputPath)
+  bytes <- BS.readFile source
+  config <- either (die reg 1 . ("routing migration: " <>)) pure (decodeRoutingConfig bytes)
+  output <- either (die reg 1 . ("routing migration: " <>)) pure (migrateRoutingConfigV1 config)
+  descriptor <- openFd outputPath WriteOnly defaultFileFlags {exclusive = True, creat = Just 0o600}
+  handle <- fdToHandle descriptor
+  BS.hPut handle output
+  hClose handle
+  say ("wrote version-2 routing to " <> T.pack outputPath)
+
+withFinalTarget :: Registry -> Target -> ProgramOf r -> (Target -> IO a) -> IO a
+withFinalTarget reg target program action = do
+  finalized <- finalizeTargetForProgram target program
+  either (die reg 1 . ("routing configuration: " <>)) action finalized
 
 data MachineControl = MachineControl ControlRuntime DeferredEventSink EventSink
 
@@ -1442,6 +1583,11 @@ factFields f =
           "semanticResume" .= True,
           "immutableFork" .= True,
           "restartFromScratch" .= True,
+          "protocolNegotiation" .= True,
+          "routingInspection" .= True,
+          "routingJsonVersion" .= (2 :: Int),
+          "personaRouting" .= True,
+          "modelAliasRouting" .= True,
           "consults" .= consults,
           "observes" .= observes,
           "effects" .= effects,
@@ -1751,9 +1897,20 @@ runCmdControlled runtimeControls persistence observer output reg name target pro
   Routed parsedRoutes -> do
     authored <- requiredChains
     resolved <-
-      case resolveRoutingConfig (loadedRouting (rrRouting parsedRoutes)) (rrCommandRoutes parsedRoutes) authored of
-        Left why -> refuse why
-        Right value -> pure value
+      case rrSelectedRoutingV2 parsedRoutes of
+        Just selected | rrV2Frozen parsedRoutes ->
+          case expandRoutingConfigV2 selected (rrRealizeOverrides parsedRoutes) (rrCommandRoutes parsedRoutes) authored of
+            Left why -> refuse why
+            Right structure ->
+              pure
+                structure
+                  { resolvedRoutes = rrRoutes parsedRoutes,
+                    resolvedRealizations = rrRealizations parsedRoutes
+                  }
+        _ ->
+          case resolveRoutingConfig (loadedRouting (rrRouting parsedRoutes)) (rrCommandRoutes parsedRoutes) authored of
+            Left why -> refuse why
+            Right value -> pure value
     let rr =
           parsedRoutes
             { rrRoutes = resolvedRoutes resolved,
@@ -2134,7 +2291,7 @@ validateLineage lineage parentDirectory edits name target prog = do
           && manifestRunnerVersion parentManifest == runnerVersion
           && manifestProgram parentManifest == program
           && manifestTarget parentManifest == targetLabel effectiveTarget
-          && manifestPolicy parentManifest == targetPolicy effectiveTarget
+          && lineagePolicy (manifestPolicy parentManifest) == lineagePolicy (targetPolicy effectiveTarget)
       checkpointMatches checkpoint = checkpointProgram checkpoint == manifestProgram parentManifest
       requireCheckpoint =
         readCheckpoint parentDirectory >>= maybe (ioError (userError "parent run has no compatible checkpoint")) pure
@@ -2325,9 +2482,12 @@ persistenceFor store program inheritedAnswers = do
 
 resolveTargetForProgram :: Target -> ProgramOf r -> Either Text Target
 resolveTargetForProgram Scripted _ = Right Scripted
+resolveTargetForProgram target@(Routed rr) _ | rrV2Frozen rr = Right target
 resolveTargetForProgram (Routed rr) prog = do
   authored <- servedChains (progRawOut prog)
-  resolved <- resolveRoutingConfig (loadedRouting (rrRouting rr)) (rrCommandRoutes rr) authored
+  resolved <- case rrSelectedRoutingV2 rr of
+    Nothing -> resolveRoutingConfig (loadedRouting (rrRouting rr)) (rrCommandRoutes rr) authored
+    Just selected -> expandRoutingConfigV2 selected (rrRealizeOverrides rr) (rrCommandRoutes rr) authored
   pure
     ( Routed
         rr
@@ -2336,44 +2496,126 @@ resolveTargetForProgram (Routed rr) prog = do
           }
     )
 
+-- | Resolve secrets and inventories only after the run-fact/routing fixed point.
+-- The resulting target is immutable and safe to persist before any child starts.
+finalizeTargetForProgram :: Target -> ProgramOf r -> IO (Either Text Target)
+finalizeTargetForProgram Scripted _ = pure (Right Scripted)
+finalizeTargetForProgram target@(Routed rr) _ | rrV2Frozen rr = pure (Right target)
+finalizeTargetForProgram (Routed rr) prog = case rrSelectedRoutingV2 rr of
+  Nothing -> pure (resolveTargetForProgram (Routed rr) prog)
+  Just selected
+    | any credentialArgument (rrAdapterArgs rr) ->
+        pure (Left "credential-bearing adapter argv is forbidden for version-2 routing; use an environment secret reference")
+    | otherwise -> do
+        ambient <- Map.fromList <$> getEnvironment
+        case do
+          authored <- servedChains (progRawOut prog)
+          expanded <- expandRoutingConfigV2 selected (rrRealizeOverrides rr) (rrCommandRoutes rr) authored
+          let required = nub (map (routerName . resolvedRouter) (Map.elems (resolvedRealizations expanded)))
+          contexts <- resolveEngineContexts selected required ambient
+          pure (expanded, required, contexts) of
+          Left problem -> pure (Left problem)
+          Right (expanded, required, contexts) -> do
+            cacheHome <- routingCacheHome
+            now <- getCurrentTime
+            discovered <- discoverRoutingInventories (rrDiscoveryMode rr) cacheHome now selected contexts required
+            pure $ do
+              inventories <- discovered
+              frozen <- freezeRoutingConfigV2 selected inventories expanded
+              let childEnvironments =
+                    Map.fromList
+                      [ (backend, resolvedEngineChildEnvironment context)
+                        | context <- Map.elems contexts,
+                          let backend = resolvedEngineBackend context,
+                          BackendAcp _ <- [backend]
+                      ]
+              pure
+                ( Routed
+                    rr
+                      { rrRoutes = resolvedRoutes frozen,
+                        rrRealizations = resolvedRealizations frozen,
+                        rrChildEnvironments = childEnvironments,
+                        rrV2Frozen = True
+                      }
+                )
+
+routingCacheHome :: IO FilePath
+routingCacheHome = do
+  configured <- lookupEnv "XDG_CACHE_HOME"
+  case configured of
+    Just path | not (null path) -> pure path
+    _ -> (</> ".cache") <$> getHomeDirectory
+
+credentialArgument :: String -> Bool
+credentialArgument argument =
+  any (`elem` credentialWords) (filter (not . T.null) (T.split (not . isAlphaNum) (T.toLower (T.pack argument))))
+  where
+    credentialWords =
+      [ "apikey",
+        "key",
+        "auth",
+        "authorization",
+        "token",
+        "secret",
+        "password",
+        "cookie",
+        "credential"
+      ]
+
 targetLabel :: Target -> Text
 targetLabel Scripted = "scripted"
 targetLabel (Routed rr) = T.intercalate "," (map backendSpelling (routeBackends (rrRoutes rr)))
 
 targetPolicy :: Target -> Value
 targetPolicy Scripted = object ["kind" .= ("scripted" :: Text)]
-targetPolicy (Routed rr) =
-  object
-    [ "kind" .= ("routed" :: Text),
-      "default" .= backendSpelling (routeDefault (rrRoutes rr)),
-      "routes"
-        .= [object ["name" .= name, "backend" .= backendSpelling backend] | (name, backend) <- routeNamed (rrRoutes rr)],
-      "scratch" .= rrScratch rr,
-      "adapterArgs" .= redactAdapterArgs (rrAdapterArgs rr),
-      "binary" .= rrBinary rr,
-      "pollMs" .= rrPollMs rr,
-      "timeoutMs" .= rrTimeoutMs rr,
-      "routingSources" .= map T.pack (loadedRoutingSources (rrRouting rr)),
-      "realizations" .= map realizationPolicy (Map.elems (rrRealizations rr)),
-      "verbose" .= rrVerbose rr
-    ]
+targetPolicy (Routed rr) = case rrSelectedRoutingV2 rr of
+  Nothing -> object baseFields
+  Just selected ->
+    let versionedFields =
+          baseFields
+            <> [ "routingVersion" .= (2 :: Int),
+                 "persona" .= selectedPersonaName selected,
+                 "personaSource" .= personaSelectionSourceName (selectedPersonaSource selected)
+               ]
+        policyWithoutDigest = object versionedFields
+        digest = sha256Fingerprint (BL.toStrict (encode policyWithoutDigest))
+     in object (versionedFields <> ["policyDigest" .= digest])
+  where
+    baseFields =
+      [ "kind" .= ("routed" :: Text),
+        "default" .= backendSpelling (routeDefault (rrRoutes rr)),
+        "routes"
+          .= [object ["name" .= name, "backend" .= backendSpelling backend] | (name, backend) <- routeNamed (rrRoutes rr)],
+        "scratch" .= rrScratch rr,
+        "adapterArgs" .= redactAdapterArgs (rrAdapterArgs rr),
+        "binary" .= rrBinary rr,
+        "pollMs" .= rrPollMs rr,
+        "timeoutMs" .= rrTimeoutMs rr,
+        "routingSources" .= map T.pack (loadedRoutingSources (rrRouting rr)),
+        "realizations" .= map resolvedRealizationPolicy (Map.elems (rrRealizations rr)),
+        "verbose" .= rrVerbose rr
+      ]
 
-realizationPolicy :: ResolvedRealization -> Value
-realizationPolicy target =
-  let spec = resolvedSpec target
-      router = resolvedRouter target
-   in object
-        [ "profile" .= resolvedProfile target,
-          "axis" .= resolvedAxis target,
-          "rung" .= resolvedRung target,
-          "backend" .= backendSpelling (resolvedBackend target),
-          "router" .= routerName router,
-          "provider" .= routerProvider router,
-          "model" .= realizationModel spec,
-          "thinking" .= thinkingName (realizationThinking spec),
-          "maxOutput" .= realizationMaxOutput spec,
-          "options" .= realizationOptions spec
-        ]
+lineagePolicy :: Value -> Value
+lineagePolicy (Object policy) =
+  Object
+    ( update "realizations" normalizeRealizations
+        (KM.delete "policyDigest" policy)
+    )
+  where
+    normalizeRealizations (Array realizations) = Array (fmap normalizeRealization realizations)
+    normalizeRealizations value = value
+    normalizeRealization (Object realization) =
+      Object (update "inventory" normalizeInventory realization)
+    normalizeRealization value = value
+    normalizeInventory (Object inventory) =
+      Object (foldr KM.delete inventory ["source", "fetchedAt", "cacheAgeSeconds", "warning"])
+    normalizeInventory value = value
+    update key transform values =
+      case KM.lookup key values of
+        Nothing -> values
+        Just value -> KM.insert key (transform value) values
+lineagePolicy value = value
 
 redactAdapterArgs :: [String] -> [Text]
 redactAdapterArgs = go False
@@ -2423,6 +2665,7 @@ acpConfigFor rr dir w =
    in base
         { acpCwd = dir,
           acpTurnTimeoutMs = fromMaybe (acpTurnTimeoutMs base) (rrTimeoutMs rr),
+          acpChildEnvironment = Map.findWithDefault inheritChildEnvironment (BackendAcp w) (rrChildEnvironments rr),
           acpVerbose = rrVerbose rr
         }
 
@@ -2671,6 +2914,11 @@ parseCommand :: Registry -> [Text] -> Either Text Command
 parseCommand reg = \case
   [] -> Left (usage reg)
   ["--help"] -> Right Usage
+  ("--routing" : rest) -> routingOptions Human Nothing DiscoveryNormal rest
+  ["--migrate-routing"] -> Left "--migrate-routing takes SOURCE --output DESTINATION"
+  ("--migrate-routing" : source : rest) -> case rest of
+    ["--output", destination] -> Right (MigrateRouting (T.unpack source) (T.unpack destination))
+    _ -> Left "--migrate-routing takes SOURCE --output DESTINATION"
   ["help"] -> Right Usage
   ["help", name] -> Right (Help name)
   ("help" : _) ->
@@ -2708,6 +2956,24 @@ parseCommand reg = \case
     -- that has an answer — the usage — where `plan` alone is a verb missing its
     -- subject.
     verbs = ["plan", "cost", "run", "machine", "lineage-check", "machine-restart", "machine-resume", "machine-fork"]
+
+    routingOptions rendering persona mode = \case
+      [] -> Right (RoutingInspection rendering persona mode)
+      "--json" : rest
+        | rendering == Json -> Left "--routing received --json twice"
+        | otherwise -> routingOptions Json persona mode rest
+      "--persona" : value : rest
+        | isJust persona -> Left "--routing received --persona twice"
+        | T.null (T.strip value) -> Left "--persona takes a non-empty name"
+        | otherwise -> routingOptions rendering (Just value) mode rest
+      "--offline" : rest
+        | mode /= DiscoveryNormal -> Left "--offline and --refresh-models are mutually exclusive and may appear only once"
+        | otherwise -> routingOptions rendering persona DiscoveryOffline rest
+      "--refresh-models" : rest
+        | mode /= DiscoveryNormal -> Left "--offline and --refresh-models are mutually exclusive and may appear only once"
+        | otherwise -> routingOptions rendering persona DiscoveryRefresh rest
+      ["--persona"] -> Left "--persona takes a name"
+      flag : _ -> Left ("no option '" <> flag <> "' for --routing")
 
     lineageCommand lineage runIdText parent name rest = do
       runId <- mkRunId runIdText
@@ -2817,6 +3083,9 @@ data RunOpts = RunOpts
     -- starts them and the order the header prints them, so that an operator can
     -- read the header against their own command line.
     roRoutes :: ![Text],
+    roPersona :: !(Maybe Text),
+    roRealizations :: ![Text],
+    roDiscoveryMode :: !(Maybe DiscoveryMode),
     roScratch :: !(Maybe Text),
     -- | @--require-pinned@. Belongs to no engine — it is a question about the
     -- program's text, which is the same text whoever answers it — so it is the
@@ -2829,7 +3098,25 @@ data RunOpts = RunOpts
   }
 
 noRunOpts :: RunOpts
-noRunOpts = RunOpts False Nothing Nothing Nothing Nothing Nothing False Nothing [] [] Nothing False []
+noRunOpts =
+  RunOpts
+    { roScripted = False,
+      roEngine = Nothing,
+      roSession = Nothing,
+      roBinary = Nothing,
+      roPollMs = Nothing,
+      roTimeoutMs = Nothing,
+      roVerbose = False,
+      roAdapter = Nothing,
+      roAdapterArgs = [],
+      roRoutes = [],
+      roPersona = Nothing,
+      roRealizations = [],
+      roDiscoveryMode = Nothing,
+      roScratch = Nothing,
+      roRequirePinned = False,
+      roInputs = []
+    }
 
 -- | The @run@ options: three mutually exclusive answerers, the knobs that
 -- belong to one of them alone, and @--require-pinned@ and the input flags,
@@ -2861,6 +3148,15 @@ parseTarget reg args = do
       ("--adapter" : v : rest) -> go o {roAdapter = Just v} rest
       ("--adapter-arg" : v : rest) -> go o {roAdapterArgs = roAdapterArgs o <> [v]} rest
       ("--route" : v : rest) -> go o {roRoutes = roRoutes o <> [v]} rest
+      ("--persona" : v : rest)
+        | isJust (roPersona o) -> Left "--persona may appear only once"
+        | T.null (T.strip v) -> Left "--persona takes a non-empty name"
+        | otherwise -> go o {roPersona = Just v} rest
+      ("--realize" : v : rest) -> go o {roRealizations = roRealizations o <> [v]} rest
+      ("--offline" : rest) -> setDiscovery o DiscoveryOffline rest
+      ("--refresh-models" : rest) -> setDiscovery o DiscoveryRefresh rest
+      [flag]
+        | flag `elem` ["--persona", "--realize"] -> Left (flag <> " takes a value")
       ("--scratch" : v : rest) -> go o {roScratch = Just v} rest
       -- Refused by name rather than by the fallthrough below, because the
       -- operator asking for it is asking a coherent question with a real
@@ -2878,6 +3174,10 @@ parseTarget reg args = do
     withMs flag v k = case readMaybe (T.unpack v) of
       Just n | n >= 0 -> k n
       _ -> Left (flag <> " takes a number of milliseconds, not '" <> v <> "'")
+
+    setDiscovery o mode rest = case roDiscoveryMode o of
+      Nothing -> go o {roDiscoveryMode = Just mode} rest
+      Just _ -> Left "--offline and --refresh-models are mutually exclusive and may appear only once"
 
 -- | Which answerer the options name — or a refusal saying which two of them
 -- were named at once.
@@ -2918,7 +3218,13 @@ chooseTarget reg o = case (roScripted o, roEngine o, roSession o) of
 
     acpFlags = [("--adapter", isJust (roAdapter o)), ("--adapter-arg", not (null (roAdapterArgs o))), ("--scratch", isJust (roScratch o))]
     deckFlags = [("--binary", isJust (roBinary o)), ("--poll", isJust (roPollMs o))]
-    liveFlags = acpFlags <> deckFlags <> [("--timeout", isJust (roTimeoutMs o)), ("--verbose", roVerbose o)]
+    routingFlags =
+      [ ("--persona", isJust (roPersona o)),
+        ("--realize", not (null (roRealizations o))),
+        ("--offline", roDiscoveryMode o == Just DiscoveryOffline),
+        ("--refresh-models", roDiscoveryMode o == Just DiscoveryRefresh)
+      ]
+    liveFlags = acpFlags <> deckFlags <> routingFlags <> [("--timeout", isJust (roTimeoutMs o)), ("--verbose", roVerbose o)]
 
     -- `--route` is refused here rather than left inert. Routes *would* be inert
     -- under `--scripted` — `scriptedReply` reads `qPrompt` and nothing else, so
@@ -2968,13 +3274,23 @@ chooseTarget reg o = case (roScripted o, roEngine o, roSession o) of
                 <> "' twice; a model has one backend in a run"
             )
         Nothing -> Right ()
+      realized <- traverse parseRealize (roRealizations o)
+      case firstDuplicate (map fst realized) of
+        Just axis -> Left ("--realize names axis '" <> axis <> "' twice")
+        Nothing -> Right ()
       let table = routes def named
       forbidForeign (Set.fromList (map schemeOf (routeBackends table)))
       pure . Routed $
         RunRoutes
           { rrRoutes = table,
             rrCommandRoutes = table,
-            rrRouting = LoadedRouting emptyRoutingConfig [],
+            rrRouting = LoadedRouting emptyRoutingConfig [] Nothing Nothing,
+            rrSelectedRoutingV2 = Nothing,
+            rrPersonaOverride = roPersona o,
+            rrRealizeOverrides = Map.fromList realized,
+            rrDiscoveryMode = fromMaybe DiscoveryNormal (roDiscoveryMode o),
+            rrChildEnvironments = Map.empty,
+            rrV2Frozen = False,
             rrRealizations = Map.empty,
             rrScratch = T.unpack <$> roScratch o,
             rrAdapterArgs = map T.unpack (roAdapterArgs o),
@@ -2984,6 +3300,11 @@ chooseTarget reg o = case (roScripted o, roEngine o, roSession o) of
             rrVerbose = roVerbose o,
             rrAdapterGiven = isJust (roAdapter o)
           }
+
+    parseRealize value = case T.breakOn "=" value of
+      (axis, suffix)
+        | not (T.null axis), Just alias <- T.stripPrefix "=" suffix, not (T.null alias) -> Right (axis, alias)
+      _ -> Left ("--realize takes AXIS=MODEL-ALIAS, not '" <> value <> "'")
 
 -- | Usage's human registry catalog. Names are command syntax and stay whole;
 -- only their prose yields to the fixed terminal width.
@@ -3018,6 +3339,8 @@ usage reg =
     [ bin <> " — " <> regBanner reg,
       "",
       "  " <> bin <> " list [--json]",
+      "  " <> bin <> " --routing [--json] [--persona NAME] [--offline | --refresh-models]",
+      "  " <> bin <> " --migrate-routing SOURCE --output DESTINATION",
       "  " <> bin <> " help <" <> noun <> ">",
       "  " <> bin <> " <" <> noun <> "> --help",
       "  " <> bin <> " plan <" <> noun <> "> [--raw] [--require-pinned] [--json] [<input>...]",
@@ -3036,6 +3359,8 @@ usage reg =
       under (runLead <> "--engine acp ") <> "[--adapter-arg ARG]... [--scratch DIR]",
       under (runLead <> "--engine acp ") <> "[--route NAME=BACKEND]...",
       under (runLead <> "--engine acp ") <> "[--timeout MS] [--verbose]",
+      under runLead <> "[--persona NAME] [--realize AXIS=MODEL-ALIAS]...",
+      under runLead <> "[--offline | --refresh-models]",
       "",
       usageCatalog reg,
       "",
@@ -3073,7 +3398,17 @@ usage reg =
       "  standard input A declared stdin input is read to EOF when run did not get",
       "                 that name from an explicit flag. A terminal refuses instead",
       "                 of waiting. Explicit --input-arg/--input-file takes precedence",
-      "  --json         print one object per row (list) or one object (plan)",
+      "  --routing      inspect resolved routing without starting an engine; --json",
+      "                 is the sanitized frontend contract",
+      "  --migrate-routing SOURCE --output DESTINATION",
+      "                 create, but never overwrite, an equivalent offline v2 user file",
+      "  --persona NAME select a v2 routing context explicitly; precedence is command",
+      "                 line, AGENT_CAT_PERSONA, project selector, then user default",
+      "  --realize AXIS=MODEL-ALIAS",
+      "                 replace one managed v2 axis with an allowed concrete alias",
+      "  --offline       use permitted model caches or static exact selectors only",
+      "  --refresh-models force catalogue refresh and refuse if it fails",
+      "  --json         print one object per row (list), one object (plan), or the",
       "                 instead of the prose, for a program that drives this CLI.",
       "                 The key names are an interface and are documented in the",
       "                 Agentic.Cli haddock; `inputs` names exactly the inputs a",

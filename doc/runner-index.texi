@@ -9,10 +9,17 @@
 @clindex --input-arg
 @clindex --input-file
 @clindex --json
+@clindex --migrate-routing
+@clindex --offline
+@clindex --output
+@clindex --persona
 @clindex --poll
 @clindex --raw
+@clindex --realize
+@clindex --refresh-models
 @clindex --require-pinned
 @clindex --route
+@clindex --routing
 @clindex --scratch
 @clindex --scripted
 @clindex --session
