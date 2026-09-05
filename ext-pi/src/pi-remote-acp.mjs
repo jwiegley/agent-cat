@@ -1,20 +1,9 @@
 #!/usr/bin/env node
-import { existsSync } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { randomUUID } from "node:crypto";
+import { open, readFile, unlink } from "node:fs/promises";
+import { isAbsolute } from "node:path";
 import readline from "node:readline";
-
-const packageParent = process.env.PI_PACKAGE_DIR ? dirname(process.env.PI_PACKAGE_DIR) : undefined;
-const clientRoot = packageParent
-  ? [
-      join(packageParent, "pi-client"),
-      join(packageParent, "client"),
-      join(process.env.PI_PACKAGE_DIR, "node_modules/@earendil-works/pi-client"),
-    ].find(existsSync)
-  : undefined;
-const clientModule = clientRoot ? pathToFileURL(join(clientRoot, "dist/index.js")).href : "@earendil-works/pi-client";
-const unixModule = clientRoot ? pathToFileURL(join(clientRoot, "dist/unix.js")).href : "@earendil-works/pi-client/unix";
-const [{ PiClient }, { createUnixTransportFactory }] = await Promise.all([import(clientModule), import(unixModule)]);
+import { openRemotePi } from "./pi-remote-runtime.mjs";
 
 const socketPath = process.env.AGENT_CAT_PI_REMOTE_SOCKET;
 if (!socketPath || !isAbsolute(socketPath)) {
@@ -26,11 +15,13 @@ if (!knownSessionId) {
   process.stderr.write("AGENT_CAT_PI_REMOTE_SESSION must name a known remote session\n");
   process.exit(2);
 }
-const client = new PiClient({ transportFactory: createUnixTransportFactory({ path: socketPath }) });
+
+const leasePath = `${socketPath}.agent-cat-${encodeURIComponent(knownSessionId)}.lock`;
+const leaseToken = `${process.pid}:${randomUUID()}`;
+let lease;
 let remote;
 let sessionId;
 let activePromptId;
-let connectedOnce = false;
 const lines = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 const promptTasks = new Set();
 
@@ -55,8 +46,8 @@ try {
   }
   await Promise.allSettled(promptTasks);
 } finally {
-  if (remote) await remote.dispose();
-  await client.dispose();
+  await closeRemote();
+  await releaseLease();
 }
 
 async function handleControl(request) {
@@ -65,30 +56,39 @@ async function handleControl(request) {
     result(id, { protocolVersion: 1, agentCapabilities: { loadSession: false, agentCat: { steer: true } }, agentInfo: { name: "pi-known-remote", version: "1" } });
   } else if (method === "session/new") {
     if (activePromptId !== undefined) throw new Error("cannot replace a session during an active prompt");
-    if (remote) await remote.dispose();
     if (typeof params.cwd !== "string" || !isAbsolute(params.cwd)) throw new Error("session cwd must be absolute");
-    if (!client.connected) {
-      if (connectedOnce) await client.reconnect();
-      else await client.connect();
-      connectedOnce = true;
+    await acquireLease();
+    await closeRemote();
+    try {
+      remote = await openRemotePi(socketPath);
+      if (!remote.listSessions().some((session) => session.sessionId === knownSessionId)) {
+        throw new Error(`unknown remote session ${knownSessionId}`);
+      }
+      await remote.attach(knownSessionId);
+      sessionId = knownSessionId;
+      result(id, { sessionId });
+    } catch (failure) {
+      await closeRemote();
+      await releaseLease();
+      throw failure;
     }
-    remote = await client.acquireSession(knownSessionId, { mode: "exclusive" });
-    sessionId = remote.id;
-    result(id, { sessionId });
   } else if (method === "session/steer") {
     const validTiming = params.timing === "interrupt-now" || params.timing === "next-boundary";
     let accepted = Boolean(remote && activePromptId !== undefined && params.sessionId === sessionId && typeof params.text === "string" && validTiming);
     if (accepted) {
       try {
-        if (params.timing === "next-boundary") await remote.followUp(params.text);
-        else await remote.steer(params.text);
+        const response = params.timing === "next-boundary"
+          ? await remote.followUp(params.text)
+          : await remote.steer(params.text);
+        accepted = response.accepted;
       } catch {
         accepted = false;
       }
     }
     notification("session/steer_ack", { steerId: params.steerId, accepted });
   } else if (method === "session/cancel") {
-    if (remote) await remote.abort();
+    const operationId = remote?.activeOperationId();
+    if (operationId) await remote.requestAbort(operationId);
   } else if (id !== undefined) {
     error(id, -32601, `unknown method ${method}`);
   }
@@ -99,14 +99,73 @@ async function handlePrompt(request) {
   if (!remote || params.sessionId !== sessionId) throw new Error("unknown session");
   if (activePromptId !== undefined) throw new Error("a prompt is already active");
   activePromptId = id;
+  let assistant;
+  const unsubscribe = remote.subscribe((value) => {
+    const event = value.event;
+    if (event?.type === "message_end" && event.message?.role === "assistant") assistant = event.message;
+  });
   try {
-    const snapshot = await remote.prompt(promptText(params.prompt));
-    const assistant = lastAssistant(snapshot.transcript);
+    const response = await remote.prompt(promptText(params.prompt));
+    if (!response.accepted) throw new Error(response.error.message);
+    if (response.error) throw new Error(response.error.message);
+    assistant ??= lastAssistant(remote.snapshot()?.transcript);
     const answer = assistant?.content.filter((part) => part.type === "text").map((part) => part.text).join("") ?? "";
     if (answer) notification("session/update", { sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: answer } } });
     result(id, { stopReason: stopReason(assistant) });
   } finally {
+    unsubscribe();
     activePromptId = undefined;
+  }
+}
+
+async function acquireLease() {
+  if (lease) return;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      lease = await open(leasePath, "wx", 0o600);
+      await lease.writeFile(`${leaseToken}\n`);
+      return;
+    } catch (failure) {
+      if (failure?.code !== "EEXIST") throw failure;
+      const owner = await readFile(leasePath, "utf8").catch(() => "");
+      const ownerPid = Number.parseInt(owner, 10);
+      if (!Number.isInteger(ownerPid) || processExists(ownerPid)) {
+        throw new Error(`remote session ${knownSessionId} is locked by another adapter`);
+      }
+      await unlink(leasePath).catch((error) => {
+        if (error?.code !== "ENOENT") throw error;
+      });
+    }
+  }
+  throw new Error(`remote session ${knownSessionId} is locked by another adapter`);
+}
+
+async function releaseLease() {
+  if (!lease) return;
+  const handle = lease;
+  lease = undefined;
+  await handle.close();
+  const owner = await readFile(leasePath, "utf8").catch(() => "");
+  if (owner.trim() === leaseToken) {
+    await unlink(leasePath).catch((error) => {
+      if (error?.code !== "ENOENT") throw error;
+    });
+  }
+}
+
+async function closeRemote() {
+  const connection = remote;
+  remote = undefined;
+  sessionId = undefined;
+  if (connection) await connection.dispose().catch(() => {});
+}
+
+function processExists(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (failure) {
+    return failure?.code === "EPERM";
   }
 }
 
@@ -117,9 +176,11 @@ function promptText(value) {
     return part.text;
   }).join("");
 }
-function lastAssistant(transcript) {
-  return [...transcript].reverse().find((item) => item.role === "assistant");
+
+function lastAssistant(transcript = []) {
+  return [...transcript].reverse().find((entry) => entry.type === "message" && entry.message?.role === "assistant")?.message;
 }
+
 function stopReason(assistant) {
   switch (assistant?.stopReason) {
     case "length": return "max_tokens";
@@ -128,12 +189,15 @@ function stopReason(assistant) {
     default: return "end_turn";
   }
 }
+
 function result(id, value) {
   process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, result: value })}\n`);
 }
+
 function error(id, code, message) {
   process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, error: { code, message } })}\n`);
 }
+
 function notification(method, params) {
   process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`);
 }

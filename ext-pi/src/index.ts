@@ -1,21 +1,8 @@
-import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-
-const packageParent = process.env.PI_PACKAGE_DIR ? dirname(process.env.PI_PACKAGE_DIR) : undefined;
-const clientRoot = packageParent
-  ? [
-      join(packageParent, "pi-client"),
-      join(packageParent, "client"),
-      join(process.env.PI_PACKAGE_DIR!, "node_modules/@earendil-works/pi-client"),
-    ].find(existsSync)
-  : undefined;
-const clientModule = clientRoot ? pathToFileURL(join(clientRoot, "dist/index.js")).href : "@earendil-works/pi-client";
-const unixModule = clientRoot ? pathToFileURL(join(clientRoot, "dist/unix.js")).href : "@earendil-works/pi-client/unix";
-const [{ PiClient }, { createUnixTransportFactory }] = await Promise.all([import(clientModule), import(unixModule)]);
 import { discoverRunner, readHelp, readRouting, supportsRoutingInspection } from "./catalogue.ts";
 import { configuredRemote, configuredRunners, retentionPolicy, stateDirectory } from "./config.ts";
 import { CurrentSessionBridge } from "./current-bridge.ts";
@@ -23,6 +10,7 @@ import { MutationGrants, type GrantScope } from "./grants.ts";
 import { assertNoCredentialArgs, prepareLaunch, preflightLineage, previewPlan, type LineageEdit, type PreparedLaunch } from "./launch.ts";
 import { formatMonitor } from "./monitor.ts";
 import { WorkflowMonitorComponent } from "./monitor-ui.ts";
+import { openRemotePi } from "./pi-remote-runtime.mjs";
 import { RunSupervisor } from "./supervisor.ts";
 import type { ControlAckSnapshot, RoutingInspection, RunnerConfig, RunSnapshot, TargetKind, WorkflowDescriptor } from "./types.ts";
 
@@ -893,18 +881,16 @@ function ownedChildTarget(): { args: string[]; env: NodeJS.ProcessEnv } {
 
 export async function selectRemoteTarget(ctx: ExtensionContext, remote: { socket: string; sessionId?: string }): Promise<{ args: string[]; env: NodeJS.ProcessEnv } | undefined> {
   if (remote.sessionId) return knownRemoteTarget({ socket: remote.socket, sessionId: remote.sessionId });
-  const client = new PiClient({ transportFactory: createUnixTransportFactory({ path: remote.socket }) });
+  const connection = await openRemotePi(remote.socket);
   try {
-    await client.connect();
-    const sessions = await client.listSessions() as Array<{ id: string; sessionName?: string; cwd?: string }>;
+    const sessions = connection.listSessions();
     if (sessions.length === 0) { ctx.ui.notify("The authenticated Pi server reported no sessions", "warning"); return undefined; }
-    const choices = sessions.map((session) => `${session.id} — ${session.sessionName ?? session.cwd ?? "unnamed"}`);
+    const choices = sessions.map((session) => session.sessionId);
     const selected = await ctx.ui.select("Authenticated remote Pi session", choices);
     if (!selected) return undefined;
-    const index = choices.indexOf(selected);
-    return knownRemoteTarget({ socket: remote.socket, sessionId: sessions[index].id });
+    return knownRemoteTarget({ socket: remote.socket, sessionId: sessions[choices.indexOf(selected)].sessionId });
   } finally {
-    await client.dispose();
+    await connection.dispose();
   }
 }
 
