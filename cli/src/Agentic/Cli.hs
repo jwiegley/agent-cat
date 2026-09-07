@@ -264,12 +264,13 @@ import Control.Exception
     throwIO,
     try,
   )
-import Control.Monad (foldM, unless, void, when)
+import Control.Monad (filterM, foldM, unless, void, when)
 import Data.Aeson (Value (..), eitherDecodeStrict', encode, object, toJSON, withObject, (.:), (.=))
 import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
 import Data.Aeson.Types (Pair, parseEither)
 import qualified Data.ByteString as BS
+import Data.Char (isAlphaNum)
 import qualified Data.ByteString.Lazy as BL
 import Data.List (find, nub, sort, sortOn, tails)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
@@ -285,18 +286,20 @@ import Data.Text.Encoding (decodeUtf8', decodeUtf8Lenient, encodeUtf8)
 -- `decodeUtf8'`'s alone — this only sharpens the refusal.
 import Data.Text.Internal.Encoding (validateUtf8Chunk)
 import qualified Data.Text.IO as TIO
+import Data.Time.Clock (getCurrentTime)
 import qualified Data.Vector as V
 import GHC.Clock (getMonotonicTimeNSec)
 import Numeric (showFFloat)
 import qualified Paths_agentic as Paths
 import Data.Version (showVersion)
-import System.Directory (createDirectoryIfMissing, getTemporaryDirectory)
-import System.Environment (getArgs, lookupEnv)
+import System.Directory (createDirectoryIfMissing, doesFileExist, getCurrentDirectory, getHomeDirectory, getTemporaryDirectory)
+import System.Environment (getArgs, getEnvironment, getExecutablePath, lookupEnv)
 import System.Exit (ExitCode (..), exitSuccess, exitWith)
 import System.FilePath ((</>))
 import System.IO
   ( BufferMode (LineBuffering),
     Handle,
+    hClose,
     hIsTerminalDevice,
     hSetBuffering,
     hSetEncoding,
@@ -306,7 +309,17 @@ import System.IO
     utf8,
   )
 import System.IO.Error (ioeGetErrorString, isUserError)
-import System.Posix.IO (fdToHandle)
+import System.Posix.IO
+  ( OpenFileFlags (creat, exclusive),
+    OpenMode (ReadOnly, WriteOnly),
+    closeFd,
+    defaultFileFlags,
+    dupTo,
+    fdToHandle,
+    handleToFd,
+    openFd,
+  )
+import System.Posix.Process (executeFile)
 import System.Posix.Types (Fd (..))
 import Text.Read (readMaybe)
 
@@ -314,6 +327,8 @@ import Agentic.Acp
   ( Acp,
     AcpModelConfig (..),
     AcpConfig (..),
+    ChildEnvironment,
+    inheritChildEnvironment,
     AcpError,
     AdapterSpec,
     adapterConfig,
@@ -352,6 +367,7 @@ import Agentic.Runtime
     announcingWorld,
     worldOfEngine,
     concurrentWorld,
+    personControlWorld,
     chainsOf,
     noChains,
     nullPersistenceHooks,
@@ -367,10 +383,10 @@ import Agentic.Runtime
     activateEventSink,
     deferredEventSink,
     eventSinkActive,
-    handlesEventSink,
+    handlesEventSinkFor,
     newDeferredEventSink,
-    stdoutEventSink,
-    withControlInput,
+    stdoutEventSinkFor,
+    withControlInputFor,
   )
 import Agentic.Runtime
   ( LineageOperation (ForkRun, RestartRun, ResumeRun, RootRun),
@@ -388,17 +404,31 @@ import Agentic.Runtime
     readManifest,
     storeReusableAnswer,
     writeCheckpoint,
+    writeQuestionArtifact,
+    writeResultArtifact,
     storeEventHandle,
-    withRunStoreSeeded,
+    withRunStoreSeededVersioned,
   )
 import Agentic.Runtime
-  ( EventSink,
+  ( DescriptorCapabilities (..),
+    EventSink,
+    withStateAnchor,
+    privatePathComponents,
+    readPrivateFileAt,
+    PersonAnswering (..),
+    WorkflowDescriptor (..),
+    WorkflowInputDescriptor (..),
+    WorkflowInputSource (..),
     descriptorVersion,
+    latestDescriptorVersion,
+    workflowDescriptorFields,
     FailureClass (..),
     OccurrenceId (..),
     RunId,
     RuntimeEvent (..),
     mkRunId,
+    latestProtocolVersion,
+    latestStoreVersion,
     protocolVersion,
     storeVersion,
     nullEventSink,
@@ -420,16 +450,42 @@ import Agentic.Route
     schemeWord,
   )
 import Agentic.RoutingConfig
-  ( LoadedRouting (..),
+  ( DiscoveryMode (..),
+    LoadedRouting (..),
     Realization (..),
+    ResolvedEngineContext,
     ResolvedRealization (..),
     ResolvedRouting (..),
+    Persona (personaProfiles),
+    SelectedRoutingV2 (selectedPersona, selectedPersonaName, selectedPersonaSource),
     Router (..),
+    decodeRoutingConfig,
     emptyRoutingConfig,
+    discoverRoutingInventories,
     loadRoutingConfig,
+    expandRoutingConfigV2,
+    freezeRoutingConfigV2,
+    resolveEngineContexts,
+    resolvedEngineAlias,
+    resolvedEngineBackend,
+    resolvedEngineChildEnvironment,
+    resolvedEngineCredentialReady,
+    resolvedEngineExecutionFingerprint,
+    selectRoutingPersona,
+    sha256Fingerprint,
     resolveRoutingConfig,
     thinkingName,
     routesWithProfiles,
+  )
+import Agentic.RoutingInspect
+  ( migrateRoutingConfigV1,
+    personaSelectionSourceName,
+    renderRoutingInspectionV1,
+    renderRoutingInspectionV2,
+    resolvedRealizationPolicy,
+    routingLaunchFingerprint,
+    routingInspectionV1,
+    routingInspectionV2,
   )
 import Data.Set (Set)
 import qualified Data.Set as Set
@@ -454,6 +510,7 @@ import Agentic.Plan
 import Agentic.Schema (El, SCode (..), SomeCode (..), fromSCode)
 import Agentic.Schema.Json (codeFromJson, codeJson)
 import Agentic.WF (wft)
+import Agentic.Tui (TuiConfig (..), runTui)
 import Agentic.Runtime.Facts
   ( reservedInput,
     routeDefaultLabel,
@@ -472,7 +529,27 @@ import Agentic.Workflow
     inputSpecs,
     supply,
   )
-import Agentic.Planning (answerFromJson, billExecFresh, billMemo)
+import Agentic.Planning (answerFromJson, answerJson, billExecFresh, billMemo)
+
+-- | Re-exec a machine child after moving its private stdin pipe to fd 3.
+--
+-- 'System.Process' performs the only spawn.  This bootstrap runs in that fresh
+-- process, so the threaded TUI never executes Haskell code between @fork@ and
+-- @exec@.  The second image sees the original machine argv and a null stdin.
+bootstrapTuiControlFd :: IO ()
+bootstrapTuiControlFd = do
+  requested <- lookupEnv "AGENT_CAT_TUI_BOOTSTRAP_FD3"
+  when (requested == Just "1") $ do
+    arguments <- getArgs
+    executable <- getExecutablePath
+    environment <- filter ((/= "AGENT_CAT_TUI_BOOTSTRAP_FD3") . fst) <$> getEnvironment
+    source <- handleToFd stdin
+    _ <- dupTo source (Fd 3)
+    nullInput <- openFd "/dev/null" ReadOnly defaultFileFlags
+    _ <- dupTo nullInput (Fd 0)
+    when (nullInput /= Fd 0 && nullInput /= Fd 3) (closeFd nullInput)
+    when (source /= Fd 0 && source /= Fd 3) (closeFd source)
+    executeFile executable False arguments (Just environment)
 
 -- ---------------------------------------------------------------------------
 -- The registry
@@ -560,8 +637,19 @@ regLookup reg n = lookup n (regRows reg)
 data ForkEdit = ForkDrop !OccurrenceId | ForkReplace !OccurrenceId !FilePath
   deriving (Eq, Show)
 
+data MachineOptions = MachineOptions
+  { machineProtocolVersion :: !Int,
+    machinePersonAnswering :: !PersonAnswering
+  }
+  deriving (Eq, Show)
+
+defaultMachineOptions :: MachineOptions
+defaultMachineOptions = MachineOptions protocolVersion PersonAnswerEngine
+
 data Command
-  = -- | The usage message, asked for: stdout, exit @0@. Bare @\<binary\>@ is
+  = -- | Explicit full-screen terminal frontend.
+    Tui
+  | -- | The usage message, asked for: stdout, exit @0@. Bare @\<binary\>@ is
     -- not this — it is a 'Left' carrying the same text, on stderr under exit
     -- @1@, because a command line that asked for nothing was not answered.
     Usage
@@ -570,6 +658,10 @@ data Command
     -- unconditional in the name, so a misspelling gets the list of rows rather
     -- than @no verb@.
     Help !Text
+  | -- | Sanitized local routing policy; may explicitly refresh catalogues.
+    RoutingInspection !Render !(Maybe Text) !DiscoveryMode
+  | -- | Mechanical, non-overwriting version-1 to version-2 conversion.
+    MigrateRouting !FilePath !FilePath
   | -- | The registry itself: every name, with its one line.
     List !Render
   | -- | The static folds, the printed program when the first 'Bool', and
@@ -581,11 +673,11 @@ data Command
     -- @--require-pinned@ when the 'Bool'.
     Run !Text !Target !Bool ![InputFlag]
   | -- | Structured execution: caller-supplied run id, then the ordinary run.
-    Machine !RunId !Text !Target !Bool ![InputFlag]
+    Machine !MachineOptions !RunId !Text !Target !Bool ![InputFlag]
   | -- | Validate lineage compatibility without creating a child run.
-    LineageCheck !LineageOperation !FilePath ![ForkEdit] !Text !Target !Bool ![InputFlag]
+    LineageCheck !MachineOptions !LineageOperation !FilePath ![ForkEdit] !Text !Target !Bool ![InputFlag]
   | -- | New immutable child run derived from a stored parent.
-    MachineLineage !LineageOperation !RunId !FilePath ![ForkEdit] !Text !Target !Bool ![InputFlag]
+    MachineLineage !MachineOptions !LineageOperation !RunId !FilePath ![ForkEdit] !Text !Target !Bool ![InputFlag]
 -- | Who the output is for: an operator reading it, or a program parsing it.
 --
 -- It rides on the two verbs whose whole output is a statement about the
@@ -600,6 +692,9 @@ data Render
     Human
   | -- | the object documented in this module's haddock, for a program
     Json
+  | -- | Explicit newest descriptor rendering for process frontends.
+    JsonV3
+  deriving (Eq)
 
 -- | One resolved operator-input source.
 --
@@ -640,6 +735,14 @@ data Target
   | -- | Live backends: the default, and the routes that refine it.
     Routed !RunRoutes
 
+-- | One process/session identity after a v2 engine alias has been retained.
+data EngineRoute = EngineRoute
+  { engineRouteAlias :: !(Maybe Text),
+    engineRouteManaged :: !Bool,
+    engineRouteBackend :: !Backend
+  }
+  deriving (Eq, Show)
+
 -- | A run's answerers, and the knobs that belong to the /run/ rather than to
 -- any one of them.
 --
@@ -663,6 +766,20 @@ data RunRoutes = RunRoutes
     rrCommandRoutes :: !(Routes Backend),
     -- | The layered YAML policy loaded before any program or backend.
     rrRouting :: !LoadedRouting,
+    -- | Trust-selected v2 policy, if the loaded files are version 2.
+    rrSelectedRoutingV2 :: !(Maybe SelectedRoutingV2),
+    -- | Explicit persona name before precedence is applied.
+    rrPersonaOverride :: !(Maybe Text),
+    -- | Concrete-model overrides keyed by runtime axis.
+    rrRealizeOverrides :: !(Map.Map Text Text),
+    -- | Cache/network behavior chosen explicitly for this operation.
+    rrDiscoveryMode :: !DiscoveryMode,
+    -- | TUI preflight token proving that launch still matches its preview.
+    rrExpectedRoutingFingerprint :: !(Maybe Text),
+    -- | Exact environments retained only until their ACP children are spawned.
+    rrChildEnvironments :: !(Map.Map Text ChildEnvironment),
+    -- | Whether inventory selection and secret resolution have run once.
+    rrV2Frozen :: !Bool,
     -- | Concrete settings by runtime model axis, populated after the program is built.
     rrRealizations :: !(Map.Map Text ResolvedRealization),
     -- | @--scratch DIR@, or 'Nothing' for a fresh one.
@@ -681,9 +798,33 @@ data RunRoutes = RunRoutes
     rrAdapterGiven :: !Bool
   }
 
+executionRoutes :: RunRoutes -> Routes EngineRoute
+executionRoutes rr =
+  routes
+    (EngineRoute Nothing False (routeDefault (rrRoutes rr)))
+    [ (axis, routeFor axis backend)
+      | (axis, backend) <- routeNamed (rrRoutes rr)
+    ]
+  where
+    routeFor axis backend =
+      EngineRoute
+        { engineRouteAlias = case (rrSelectedRoutingV2 rr, backend, Map.lookup axis (rrRealizations rr)) of
+            (Just _, BackendAcp _, Just realization) -> Just (routerName (resolvedRouter realization))
+            _ -> Nothing,
+          engineRouteManaged = isJust (rrSelectedRoutingV2 rr) && Map.member axis (rrRealizations rr),
+          engineRouteBackend = backend
+        }
+
+engineRouteSpelling :: EngineRoute -> Text
+engineRouteSpelling route =
+  case engineRouteAlias route of
+    Nothing -> backendSpelling (engineRouteBackend route)
+    Just alias -> "engine:" <> alias <> "[" <> backendSpelling (engineRouteBackend route) <> "]"
+
 -- | The runner, over the registry it serves.
 cliMain :: Registry -> IO ()
 cliMain reg = do
+  bootstrapTuiControlFd
   -- A run's questions and answers are the output, and they arrive over
   -- minutes; line buffering is what makes them appear as they happen rather
   -- than in a block at the end. UTF-8 explicitly, because an answer can carry
@@ -715,26 +856,66 @@ handleEngineError reg error' =
     Engine.TransportFailure -> die reg 2 ("transport: " <> Engine.engineFailureMessage error')
     Engine.ProtocolFailure -> die reg 3 (Engine.engineFailureMessage error')
 
+validateMachineEnvironment :: MachineOptions -> IO ()
+validateMachineEnvironment options = do
+  store <- lookupEnv "AGENT_CAT_RUN_STORE"
+  controlFd <- lookupEnv "AGENT_CAT_CONTROL_FD"
+  legacyControl <- lookupEnv "AGENT_CAT_CONTROL_STDIN"
+  when (machineProtocolVersion options == latestProtocolVersion && store == Nothing) $
+    ioError (userError "protocol version 2 requires AGENT_CAT_RUN_STORE")
+  when (machinePersonAnswering options == PersonAnswerLocalControl && controlFd /= Just "3") $
+    ioError (userError "local person answering requires AGENT_CAT_CONTROL_FD=3")
+  when (machinePersonAnswering options == PersonAnswerLocalControl && legacyControl == Just "1") $
+    ioError (userError "local person answering does not support legacy stdin controls")
+
+machineStarted :: MachineOptions -> Text -> Target -> RuntimeEvent
+machineStarted options name target
+  | machineProtocolVersion options == protocolVersion = RunStarted name (targetLabel target)
+  | otherwise = RunStartedV2 name (targetLabel target) (machinePersonAnswering options)
+
 -- | Attach optional user/project routing policy only to commands that can reach
 -- a live backend. Static and scripted commands remain independent of local
 -- machine configuration.
 loadCommandRouting :: Command -> IO (Either Text Command)
 loadCommandRouting = \case
   Run name target pinned inputs -> withTarget target (\target' -> Run name target' pinned inputs)
-  Machine run name target pinned inputs -> withTarget target (\target' -> Machine run name target' pinned inputs)
-  LineageCheck op parent edits name target pinned inputs ->
-    withTarget target (\target' -> LineageCheck op parent edits name target' pinned inputs)
-  MachineLineage op run parent edits name target pinned inputs ->
-    withTarget target (\target' -> MachineLineage op run parent edits name target' pinned inputs)
+  Machine options run name target pinned inputs ->
+    withTarget target (\target' -> Machine options run name target' pinned inputs)
+  LineageCheck options op parent edits name target pinned inputs ->
+    withTarget target (\target' -> LineageCheck options op parent edits name target' pinned inputs)
+  MachineLineage options op run parent edits name target pinned inputs ->
+    withTarget target (\target' -> MachineLineage options op run parent edits name target' pinned inputs)
   command -> pure (Right command)
   where
     withTarget Scripted rebuild = pure (Right (rebuild Scripted))
     withTarget (Routed routes') rebuild = do
       loaded <- loadRoutingConfig
+      environmentPersona <- fmap T.pack <$> lookupEnv "AGENT_CAT_PERSONA"
       pure $ do
         config <- loaded
+        selected <- case loadedRoutingV2User config of
+          Nothing -> do
+            when
+              ( isJust (rrPersonaOverride routes')
+                  || not (Map.null (rrRealizeOverrides routes'))
+                  || rrDiscoveryMode routes' /= DiscoveryNormal
+                  || isJust (rrExpectedRoutingFingerprint routes')
+              )
+              (Left "--persona, --realize, --offline, --refresh-models, and --expect-routing-fingerprint require version-2 routing")
+            Right Nothing
+          Just user ->
+            Just <$> selectRoutingPersona user (rrPersonaOverride routes') environmentPersona (loadedRoutingV2Project config)
         effective <- routesWithProfiles (loadedRouting config) (rrCommandRoutes routes')
-        pure (rebuild (Routed routes' {rrRoutes = effective, rrRouting = config}))
+        pure
+          ( rebuild
+              ( Routed
+                  routes'
+                    { rrRoutes = effective,
+                      rrRouting = config,
+                      rrSelectedRoutingV2 = selected
+                    }
+              )
+          )
 
 -- | Which verb, and — for @run@ — the facts the run supplies about itself.
 --
@@ -752,27 +933,121 @@ loadCommandRouting = \case
 -- does for every row.
 execute :: Registry -> Command -> IO ()
 execute reg = \case
+  Tui -> tuiCmd reg
   Usage -> say (usage reg) >> exitSuccess
   Help name -> helpCmd reg name >> exitSuccess
+  RoutingInspection rendering persona mode -> routingInspectionCmd reg rendering persona mode >> exitSuccess
+  MigrateRouting source outputPath -> migrateRoutingCmd reg source outputPath >> exitSuccess
   List r -> listCmd reg r >> exitSuccess
   Plan name r raw pinned ins -> withExample reg pinned False noRefusal name [] ins (planCmd r raw)
   Cost name ins -> withExample reg False False noRefusal name [] ins (\f _ -> costCmd f)
   Run name target pinned ins ->
-    withRunExample reg pinned name target ins (\effective _ program bindings -> runCmd reg name effective program bindings)
-  Machine runId name target pinned ins ->
-    withMachineControls runId name target $ \control ->
-      withRunExample reg pinned name target ins (\effective _ program bindings -> runMachineCmd control reg runId name effective program bindings)
-  LineageCheck lineage parent edits name target pinned ins ->
-    withRunExample reg pinned name target ins (\effective _ program _ -> void (validateLineage lineage parent edits name effective program))
-  MachineLineage lineage runId parent edits name target pinned ins ->
-    withMachineControls runId name target $ \control ->
-      withRunExample reg pinned name target ins (\effective _ program bindings -> runMachineLineageCmd control reg lineage runId parent edits name effective program bindings)
+    withRunExample reg pinned name target ins $ \effective _ program bindings ->
+      withFinalTarget reg effective program (\finalTarget -> runCmd reg name finalTarget program bindings)
+  Machine options runId name target pinned ins -> do
+    validateMachineEnvironment options
+    withMachineControls options runId name target $ \control ->
+      withRunExample reg pinned name target ins $ \effective _ program bindings ->
+        withFinalTarget reg effective program (\finalTarget -> runMachineCmd options control reg runId name finalTarget program bindings)
+  LineageCheck options lineage parent edits name target pinned ins ->
+    withRunExample reg pinned name target ins $ \effective _ program _ ->
+      withFinalTarget reg effective program (\finalTarget -> void (validateLineage options lineage parent edits name finalTarget program))
+  MachineLineage options lineage runId parent edits name target pinned ins -> do
+    validateMachineEnvironment options
+    withMachineControls options runId name target $ \control ->
+      withRunExample reg pinned name target ins $ \effective _ program bindings ->
+        withFinalTarget reg effective program (\finalTarget -> runMachineLineageCmd options control reg lineage runId parent edits name finalTarget program bindings)
+
+tuiCmd :: Registry -> IO ()
+tuiCmd reg = do
+  runner <- getExecutablePath
+  workingDirectory <- getCurrentDirectory
+  let runnerComponent = T.unpack (T.map (\character -> if isAlphaNum character || character `elem` ("._-" :: String) then character else '_') (regBinary reg))
+  configured <- lookupEnv "AGENT_CAT_STATE_DIR"
+  stateDirectory <- case configured of
+    Just path | not (null path) -> pure path
+    _ -> do
+      stateHome <- lookupEnv "XDG_STATE_HOME"
+      case stateHome of
+        Just path | not (null path) -> pure (path </> "agent-cat" </> "tui" </> runnerComponent)
+        _ -> do
+          home <- getHomeDirectory
+          pure (home </> ".local" </> "state" </> "agent-cat" </> "tui" </> runnerComponent)
+  runTui
+    TuiConfig
+      { tuiRunnerId = regBinary reg,
+        tuiRunner = runner,
+        tuiRunnerArgs = [],
+        tuiWorkingDir = workingDirectory,
+        tuiStateDir = stateDirectory
+      }
+
+routingInspectionCmd :: Registry -> Render -> Maybe Text -> DiscoveryMode -> IO ()
+routingInspectionCmd reg rendering persona mode = do
+  loadedResult <- loadRoutingConfig
+  loaded <- either (die reg 1 . ("routing configuration: " <>)) pure loadedResult
+  case loadedRoutingV2User loaded of
+    Nothing -> do
+      when (isJust persona || mode /= DiscoveryNormal) $
+        die reg 1 "--persona, --offline, and --refresh-models require version-2 routing"
+      case rendering of
+        Human -> say (renderRoutingInspectionV1 loaded)
+        Json -> sayJson (routingInspectionV1 loaded)
+        JsonV3 -> sayJson (routingInspectionV1 loaded)
+    Just user -> do
+      environmentPersona <- fmap T.pack <$> lookupEnv "AGENT_CAT_PERSONA"
+      selected <-
+        either (die reg 1 . ("routing configuration: " <>)) pure $
+          selectRoutingPersona user persona environmentPersona (loadedRoutingV2Project loaded)
+      let authored = Map.fromList [(name, []) | name <- Map.keys (personaProfiles (selectedPersona selected))]
+          commandRoutes = routes (BackendAcp "routing-inspection") []
+      expanded <-
+        either (die reg 1 . ("routing configuration: " <>)) pure $
+          expandRoutingConfigV2 selected Map.empty commandRoutes authored
+      ambient <- Map.fromList <$> getEnvironment
+      let required = nub (map (routerName . resolvedRouter) (Map.elems (resolvedRealizations expanded)))
+      contexts <-
+        either (die reg 1 . ("routing configuration: " <>)) pure $
+          resolveEngineContexts selected required ambient
+      cacheHome <- routingCacheHome
+      now <- getCurrentTime
+      inventories <-
+        discoverRoutingInventories mode cacheHome now selected contexts required
+          >>= either (die reg 1 . ("routing configuration: " <>)) pure
+      resolved <-
+        either (die reg 1 . ("routing configuration: " <>)) pure $
+          freezeRoutingConfigV2 selected inventories expanded
+      let resolvedWithEnvironment = withExecutionFingerprints contexts resolved
+          readiness = Map.map resolvedEngineCredentialReady contexts
+      case rendering of
+        Human -> say (renderRoutingInspectionV2 loaded selected resolvedWithEnvironment)
+        Json -> sayJson (routingInspectionV2 loaded selected readiness inventories resolvedWithEnvironment)
+        JsonV3 -> sayJson (routingInspectionV2 loaded selected readiness inventories resolvedWithEnvironment)
+
+migrateRoutingCmd :: Registry -> FilePath -> FilePath -> IO ()
+migrateRoutingCmd reg source outputPath = do
+  when (source == outputPath) $ die reg 1 "--migrate-routing refuses to overwrite its source"
+  outputExists <- doesFileExist outputPath
+  when outputExists $ die reg 1 ("--migrate-routing refuses to overwrite existing " <> T.pack outputPath)
+  bytes <- BS.readFile source
+  config <- either (die reg 1 . ("routing migration: " <>)) pure (decodeRoutingConfig bytes)
+  output <- either (die reg 1 . ("routing migration: " <>)) pure (migrateRoutingConfigV1 config)
+  descriptor <- openFd outputPath WriteOnly defaultFileFlags {exclusive = True, creat = Just 0o600}
+  handle <- fdToHandle descriptor
+  BS.hPut handle output
+  hClose handle
+  say ("wrote version-2 routing to " <> T.pack outputPath)
+
+withFinalTarget :: Registry -> Target -> ProgramOf r -> (Target -> IO a) -> IO a
+withFinalTarget reg target program action = do
+  finalized <- finalizeTargetForProgram target program
+  either (die reg 1 . ("routing configuration: " <>)) action finalized
 
 data MachineControl = MachineControl ControlRuntime DeferredEventSink EventSink
 
 -- | Start controls before stdin or route-dependent program construction.
-withMachineControls :: RunId -> Text -> Target -> (Maybe MachineControl -> IO ()) -> IO ()
-withMachineControls runId name initialTarget action = do
+withMachineControls :: MachineOptions -> RunId -> Text -> Target -> (Maybe MachineControl -> IO ()) -> IO ()
+withMachineControls options runId name initialTarget action = do
   handle <- machineControlHandle
   case handle of
     Nothing -> action Nothing
@@ -780,15 +1055,15 @@ withMachineControls runId name initialTarget action = do
       runtime <- newControlRuntime
       deferred <- newDeferredEventSink
       let sink = deferredEventSink deferred
-      outcome <- try (withControlInput controlHandle sink runtime (action (Just (MachineControl runtime deferred sink))))
+      outcome <- try (withControlInputFor (machineProtocolVersion options) controlHandle sink runtime (action (Just (MachineControl runtime deferred sink))))
       case outcome of
         Right () -> pure ()
         Left (err :: SomeException)
           | Just (MachineCancelled why) <- fromException err -> do
               active <- eventSinkActive deferred
               unless active $ do
-                actual <- stdoutEventSink runId
-                void (activateEventSink deferred actual (RunStarted name (targetLabel initialTarget)))
+                actual <- stdoutEventSinkFor (machineProtocolVersion options) runId
+                void (activateEventSink deferred actual (machineStarted options name initialTarget))
               sink (RunCancelled (T.pack why))
               throwIO (ExitFailure 130)
           | otherwise -> throwIO err
@@ -1140,7 +1415,11 @@ resolveInputs name needsAll facts ex ins = case ex of
       NamedFile _ path -> fromFile n path
 
     fromFile n path = do
-      got <- try (BS.readFile path)
+      got <- try $ withStateAnchor $ \anchor -> case anchor of
+        Nothing -> BS.readFile path
+        Just root -> do
+          components <- privatePathComponents root path
+          readPrivateFileAt root components (64 * 1024 * 1024)
       pure $ case got :: Either IOException BS.ByteString of
         Left e -> Left ("could not read " <> T.pack path <> ": " <> T.pack (ioeGetErrorString e))
         Right bytes -> do
@@ -1425,55 +1704,68 @@ runnerVersion :: Text
 runnerVersion = T.pack (showVersion Paths.version)
 
 factFields :: Facts -> [Pair]
-factFields f =
-  [ "descriptorVersion" .= descriptorVersion,
-    "runnerVersion" .= runnerVersion,
-    "protocolVersions" .= [protocolVersion],
-    "storeVersions" .= [storeVersion],
-    "capabilities"
-      .= object
-        [ "structuredRun" .= True,
-          "wholeRunCancel" .= True,
-          "controlFd" .= (3 :: Int),
-          "requestControls" .= True,
-          "steering" .= True,
-          "interactiveRetry" .= True,
-          "schedulerRedirect" .= True,
-          "semanticResume" .= True,
-          "immutableFork" .= True,
-          "restartFromScratch" .= True,
-          "consults" .= consults,
-          "observes" .= observes,
-          "effects" .= effects,
-          "effectful" .= (effects > 0),
-          "toolExecution" .= (factToolExecNodes f > 0)
-        ],
-    "name" .= factName f,
-    "blurb" .= factBlurb f,
-    "result" .= codeJson (factResult f),
-    "level" .= factLevel f,
-    "size" .= factSize f,
-    "askNodes" .= factAskNodes f,
-    "minFold" .= mn,
-    "maxFold" .= mx,
-    "paths" .= paths,
-    "inputs" .= map inputDescriptor (factInputs f),
-    "runFacts" .= factRunFacts f,
-    "pins" .= factPins f
-  ]
+factFields = factFieldsFor descriptorVersion
+
+factFieldsFor :: Int -> Facts -> [Pair]
+factFieldsFor version = workflowDescriptorFields . descriptorOfFacts version
+
+descriptorOfFacts :: Int -> Facts -> WorkflowDescriptor
+descriptorOfFacts version f =
+  WorkflowDescriptor
+    { workflowDescriptorVersion = version,
+      workflowRunnerVersion = runnerVersion,
+      workflowProtocolVersions = if version >= latestDescriptorVersion then [protocolVersion, latestProtocolVersion] else [protocolVersion],
+      workflowStoreVersions = if version >= latestDescriptorVersion then [storeVersion, latestStoreVersion] else [storeVersion],
+      workflowCapabilities =
+        DescriptorCapabilities
+          { descriptorStructuredRun = True,
+            descriptorWholeRunCancel = True,
+            descriptorControlFd = Just 3,
+            descriptorRequestControls = True,
+            descriptorSteering = True,
+            descriptorInteractiveRetry = True,
+            descriptorSchedulerRedirect = True,
+            descriptorSemanticResume = True,
+            descriptorImmutableFork = True,
+            descriptorRestartFromScratch = True,
+            descriptorProtocolNegotiation = version >= latestDescriptorVersion,
+            descriptorRoutingInspection = version >= latestDescriptorVersion,
+            descriptorRoutingJsonVersion = if version >= latestDescriptorVersion then Just 2 else Nothing,
+            descriptorPersonaRouting = version >= latestDescriptorVersion,
+            descriptorModelAliasRouting = version >= latestDescriptorVersion,
+            descriptorConsults = consults,
+            descriptorObserves = observes,
+            descriptorEffects = effects,
+            descriptorEffectful = effects > 0,
+            descriptorToolExecution = factToolExecNodes f > 0
+          },
+      workflowName = factName f,
+      workflowBlurb = factBlurb f,
+      workflowResultCode = codeJson (factResult f),
+      workflowLevel = factLevel f,
+      workflowSize = factSize f,
+      workflowAskNodes = factAskNodes f,
+      workflowMinFold = mn,
+      workflowMaxFold = mx,
+      workflowPaths = paths,
+      workflowInputs = map inputDescriptor (factInputs f),
+      workflowRunFacts = factRunFacts f,
+      workflowPins = factPins f,
+      workflowPersonAnsweringModes = if version >= latestDescriptorVersion then ["local-control"] else []
+    }
   where
     (mn, mx, paths) = factSummary f
     (consults, observes, effects) = factIntents f
 
     inputDescriptor spec =
-      object
-        [ "name" .= inputName spec,
-          "source" .= inputSourceWord (inputSource spec)
-        ]
+      WorkflowInputDescriptor
+        { workflowInputName = inputName spec,
+          workflowInputSource = inputSourceValue (inputSource spec)
+        }
 
-    inputSourceWord PromptInput = ("prompt" :: Text)
-    inputSourceWord CommandTailInput = "command-tail"
-    inputSourceWord StandardInput = "stdin"
+    inputSourceValue PromptInput = DescriptorPrompt
+    inputSourceValue CommandTailInput = DescriptorCommandTail
+    inputSourceValue StandardInput = DescriptorStdin
 -- | The two @plan@ adds: the codes when the program is a straight line, and the
 -- per-path fold @cost@ prints as a row of runs.
 --
@@ -1592,10 +1884,12 @@ listCmd reg = \case
       say $ regBinary reg <> " — " <> tshow (length rows) <> " registered:"
       say ""
       mapM_ line (zip rows fs)
-  Json -> case traverse (uncurry listFacts) rows of
-    Left why -> die reg 1 why
-    Right fs -> sayJson (toJSON [object (factFields f) | f <- fs])
+  Json -> jsonRows descriptorVersion
+  JsonV3 -> jsonRows latestDescriptorVersion
   where
+    jsonRows version = case traverse (uncurry listFacts) rows of
+      Left why -> die reg 1 why
+      Right fs -> sayJson (toJSON [object (factFieldsFor version f) | f <- fs])
     rows = regRows reg
     width = maximum (1 : map (T.length . fst) rows)
     line ((n, row), f) =
@@ -1625,6 +1919,7 @@ listCmd reg = \case
 planCmd :: Render -> Bool -> Facts -> ProgramOf r -> [Given] -> IO ()
 planCmd rendering raw f prog gs = case rendering of
   Json -> sayJson (object (planFields f <> [("program", printedValue prog) | raw]))
+  JsonV3 -> sayJson (object (planFields f <> [("program", printedValue prog) | raw]))
   Human -> do
     say $ factName f <> ", as elaborated:"
     say ""
@@ -1731,10 +2026,22 @@ runCmd reg name target prog gs =
   void (runCmdObserved nullEventSink say reg name target prog gs)
 
 runCmdObserved :: EventSink -> (Text -> IO ()) -> Registry -> Text -> Target -> ProgramOf r -> [Given] -> IO ExecTrace
-runCmdObserved = runCmdControlled Nothing nullPersistenceHooks
+runCmdObserved observer output reg name target prog gs =
+  snd
+    <$> runCmdControlled
+      PersonAnswerEngine
+      Nothing
+      nullPersistenceHooks
+      observer
+      output
+      reg
+      name
+      target
+      prog
+      gs
 
-runCmdControlled :: Maybe ControlRuntime -> PersistenceHooks -> EventSink -> (Text -> IO ()) -> Registry -> Text -> Target -> ProgramOf r -> [Given] -> IO ExecTrace
-runCmdControlled runtimeControls persistence observer output reg name target prog gs = case target of
+runCmdControlled :: forall r. PersonAnswering -> Maybe ControlRuntime -> PersistenceHooks -> EventSink -> (Text -> IO ()) -> Registry -> Text -> Target -> ProgramOf r -> [Given] -> IO (El r, ExecTrace)
+runCmdControlled personAnswering runtimeControls persistence observer output reg name target prog gs = case target of
   Scripted -> do
     authored <- requiredChains
     output $
@@ -1747,22 +2054,34 @@ runCmdControlled runtimeControls persistence observer output reg name target pro
     -- gate passed, which is the same class of mistake D5 exists to fix.
     output
       ("  " <> [wft|no command was run; every gate in this program was answered from the table|])
-    walkWith authored id (scriptedWorld script)
+    world <- localPersonAnswers (scriptedWorld script)
+    walkWith authored world
   Routed parsedRoutes -> do
     authored <- requiredChains
     resolved <-
-      case resolveRoutingConfig (loadedRouting (rrRouting parsedRoutes)) (rrCommandRoutes parsedRoutes) authored of
-        Left why -> refuse why
-        Right value -> pure value
+      case rrSelectedRoutingV2 parsedRoutes of
+        Just selected | rrV2Frozen parsedRoutes ->
+          case expandRoutingConfigV2 selected (rrRealizeOverrides parsedRoutes) (rrCommandRoutes parsedRoutes) authored of
+            Left why -> refuse why
+            Right structure ->
+              pure
+                structure
+                  { resolvedRoutes = rrRoutes parsedRoutes,
+                    resolvedRealizations = rrRealizations parsedRoutes
+                  }
+        _ ->
+          case resolveRoutingConfig (loadedRouting (rrRouting parsedRoutes)) (rrCommandRoutes parsedRoutes) authored of
+            Left why -> refuse why
+            Right value -> pure value
     let rr =
           parsedRoutes
             { rrRoutes = resolvedRoutes resolved,
               rrRealizations = resolvedRealizations resolved
             }
-        rs = rrRoutes rr
+        rs = executionRoutes rr
         backends = routeBackends rs
     announceRouting rr
-    mapM_ (verifyDeckBackend rr) backends
+    mapM_ (verifyDeckRoute rr) backends
     -- __The run has a directory of its own exactly when it starts an adapter of
     -- its own__, and there is one of them however many backends there are
     -- (§3.4). Every `acp:` route gets it as its `acpCwd` and `executingWorld`
@@ -1791,7 +2110,11 @@ runCmdControlled runtimeControls persistence observer output reg name target pro
     -- holds no connection at all. The default first because every run needs it,
     -- so a run whose default will not start fails before spawning anything
     -- else.
-    withAcps [(b, acpConfigFor rr dir w) | b@(BackendAcp w) <- backends] $ \live -> do
+    withAcps
+      [ (route, acpConfigForRoute rr dir route)
+        | route <- backends,
+          BackendAcp _ <- [engineRouteBackend route]
+      ] $ \live -> do
       preflightAcp rr live
       services <-
         traverse
@@ -1805,7 +2128,9 @@ runCmdControlled runtimeControls persistence observer output reg name target pro
             Nothing ->
               concurrentWorld $ \_ _ ->
                 ioError (userError ("no answering service was made for backend " <> show b))
-      walkWith (resolvedChains resolved) (executingWorld (shellAt dir)) (routedWorld (fmap connected rs))
+      let baseWorld = executingWorld (shellAt dir) (routedWorld (fmap connected rs))
+      world <- localPersonAnswers baseWorld
+      walkWith (resolvedChains resolved) world
   where
     -- The canned table is the row's own, which is why `run` looks the row up
     -- again rather than being handed a program: a script that lived anywhere
@@ -1820,21 +2145,20 @@ runCmdControlled runtimeControls persistence observer output reg name target pro
           shellLog = output . ("  " <>)
         }
 
-    isAcp b = schemeOf b == SchemeAcp
+    isAcp route = schemeOf (engineRouteBackend route) == SchemeAcp
 
     preflightAcp rr =
       mapM_
-        ( \(backend, acp) ->
+        ( \(route, acp) ->
             mapM_
               (preflightAcpModel acp . acpModelConfigOf)
-              [realization | realization <- Map.elems (rrRealizations rr), resolvedBackend realization == backend]
+              (routeRealizations rr route)
         )
 
-    verifyDeckBackend rr backend = case backend of
+    verifyDeckRoute rr route = case engineRouteBackend route of
       BackendAcp _ -> pure ()
       BackendDeck session -> do
-        let realizations =
-              [realization | realization <- Map.elems (rrRealizations rr), resolvedBackend realization == backend]
+        let realizations = routeRealizations rr route
         case find (not . Map.null . realizationOptions . resolvedSpec) realizations of
           Just _ ->
             throwIO
@@ -1853,24 +2177,42 @@ runCmdControlled runtimeControls persistence observer output reg name target pro
     -- fourth case is therefore unreachable, and it is a raising 'WorldIO'
     -- rather than an `error` so that a bug here would be a named run failure at
     -- the question that hit it and not a bottom in the middle of a fold.
-    worldOf :: RunRoutes -> FilePath -> [(Backend, Acp)] -> Backend -> IO WorldIO
-    worldOf rr dir live b = case b of
-      BackendDeck s -> worldOfEngine <$> engineOfDeck (deckConfigFor rr s)
-      BackendAcp w -> case lookup b live of
+    worldOf :: RunRoutes -> FilePath -> [(EngineRoute, Acp)] -> EngineRoute -> IO WorldIO
+    worldOf rr dir live route = case engineRouteBackend route of
+      BackendDeck session -> worldOfEngine <$> engineOfDeck (deckConfigFor rr session)
+      BackendAcp adapter -> case lookup route live of
         Just acp ->
           pure
             ( worldOfEngine
                 ( engineOfAcpConfigured
                     (fmap acpModelConfigOf . (`Map.lookup` rrRealizations rr))
-                    (acpConfigFor rr dir w)
+                    (acpConfigForRoute rr dir route)
                     acp
                 )
             )
         Nothing ->
           pure
             ( concurrentWorld
-                (\_ _ -> ioError (userError ("no connection was made for the backend acp:" <> T.unpack w)))
+                (\_ _ -> ioError (userError ("no connection was made for the backend acp:" <> T.unpack adapter)))
             )
+
+    routeRealizations rr route
+      | Just alias <- engineRouteAlias route =
+          [ realization
+            | realization <- Map.elems (rrRealizations rr),
+              routerName (resolvedRouter realization) == alias
+          ]
+      | engineRouteManaged route =
+          [ realization
+            | realization <- Map.elems (rrRealizations rr),
+              resolvedBackend realization == engineRouteBackend route
+          ]
+      | isJust (rrSelectedRoutingV2 rr) = []
+      | otherwise =
+          [ realization
+            | realization <- Map.elems (rrRealizations rr),
+              resolvedBackend realization == engineRouteBackend route
+          ]
 
     modelConfigOf :: ResolvedRealization -> Engine.ModelConfig
     modelConfigOf realization =
@@ -1904,49 +2246,44 @@ runCmdControlled runtimeControls persistence observer output reg name target pro
     -- is not a hedge and not a lie: it is a lie when there are two backends and
     -- true when there is one, so the run that names one prints it and the run
     -- that names several prints the table instead.
-    sayBackends :: RunRoutes -> FilePath -> [Backend] -> IO ()
+    sayBackends :: RunRoutes -> FilePath -> [EngineRoute] -> IO ()
     sayBackends rr dir = \case
-      [BackendAcp w] -> do
-        let cfg = acpConfigFor rr dir w
-        output $
-          "running "
-            <> name
-            <> " against the "
-            <> w
-            <> " adapter: "
-            <> T.unwords (map T.pack (acpCommand cfg))
-        -- A default that was not typed is announced rather than assumed: `stub`
-        -- is both a word an operator can write and what a silent command line
-        -- means, and the difference is the difference between a run that
-        -- answers itself and one that reaches a real agent.
-        unless (rrAdapterGiven rr) $
-          output "  no --adapter given, so the stub answers — the same default agent-cat's own CLI takes"
-        output $
-          "  cwd "
-            <> T.pack dir
-            <> ", "
-            <> tshow (acpTurnTimeoutMs cfg)
-            <> "ms to a turn, "
-            <> acpSessionPolicy cfg
-            <> "; every addressee — model, tool and person — is this one adapter"
-        output $ "  a `running` tool's command runs in " <> T.pack dir
-      [BackendDeck s] -> do
-        let cfg = deckConfigFor rr s
-        output $ "running " <> name <> " against agent-deck session " <> deckSession cfg
-        output $
-          "  polling every "
-            <> tshow (deckPollMs cfg)
-            <> "ms, "
-            <> tshow (deckTimeoutMs cfg)
-            <> "ms to a turn, "
-            <> deckSessionPolicy
-            <> "; every addressee — model, tool and person — is this one session"
-        -- The deck engine sends into a session somebody else started, so the
-        -- directory a command runs in and the directory that session works in
-        -- need not agree. Announce it rather than assume it.
-        output
-          ("  " <> [wft|a `running` tool's command runs in this process's directory, which the deck session — started by somebody else — need not share|])
-      bs -> sayManyBackends rr dir bs
+      [route] -> case engineRouteBackend route of
+        BackendAcp adapter -> do
+          let cfg = acpConfigForRoute rr dir route
+              prefix = maybe ("the " <> adapter <> " adapter") (\alias -> "engine " <> alias <> " using the " <> adapter <> " adapter") (engineRouteAlias route)
+          output $
+            "running "
+              <> name
+              <> " against "
+              <> prefix
+              <> ": "
+              <> T.unwords (map T.pack (acpCommand cfg))
+          unless (rrAdapterGiven rr || isJust (engineRouteAlias route)) $
+            output "  no --adapter given, so the stub answers — the same default agent-cat's own CLI takes"
+          output $
+            "  cwd "
+              <> T.pack dir
+              <> ", "
+              <> tshow (acpTurnTimeoutMs cfg)
+              <> "ms to a turn, "
+              <> acpSessionPolicy cfg
+              <> "; every addressee — model, tool and person — is this one adapter"
+          output $ "  a `running` tool's command runs in " <> T.pack dir
+        BackendDeck session -> do
+          let cfg = deckConfigFor rr session
+          output $ "running " <> name <> " against agent-deck session " <> deckSession cfg
+          output $
+            "  polling every "
+              <> tshow (deckPollMs cfg)
+              <> "ms, "
+              <> tshow (deckTimeoutMs cfg)
+              <> "ms to a turn, "
+              <> deckSessionPolicy
+              <> "; every addressee — model, tool and person — is this one session"
+          output
+            ("  " <> [wft|a `running` tool's command runs in this process's directory, which the deck session — started by somebody else — need not share|])
+      routes' -> sayManyBackends rr dir routes'
 
     -- The table, when there is more than one backend to name. Six things it
     -- owes the operator, each earned: the backends __deduplicated__, so the
@@ -1959,22 +2296,19 @@ runCmdControlled runtimeControls persistence observer output reg name target pro
     -- `walkWith` prints a moment later and which are more worth printing when a
     -- ladder crosses providers, not less; and no claim that any backend
     -- answered anything.
-    sayManyBackends :: RunRoutes -> FilePath -> [Backend] -> IO ()
-    sayManyBackends rr dir bs = do
-      output $ "running " <> name <> " against " <> tshow (length bs) <> " backends:"
-      -- The label is `Agentic.Workflow.routeDefaultLabel` and not a literal, for
-      -- `deckSessionPolicy`'s reason: `run.routes` carries this same table to
-      -- the prompts, and a header that named the default answerer one way while
-      -- the fact named it another would be one run described twice.
-      output $ pad routeDefaultLabel <> backendWords rr (routeDefault (rrRoutes rr))
+    sayManyBackends :: RunRoutes -> FilePath -> [EngineRoute] -> IO ()
+    sayManyBackends rr dir backends = do
+      let realizedRoutes = executionRoutes rr
+      output $ "running " <> name <> " against " <> tshow (length backends) <> " backends:"
+      output $ pad routeDefaultLabel <> backendWords rr (routeDefault realizedRoutes)
       output $ pad "" <> "— every unpinned ask, every tool and every person"
-      mapM_ route (routeNamed (rrRoutes rr))
+      mapM_ route (routeNamed realizedRoutes)
       unless (null unclaimed) $
         output $ pad (T.intercalate ", " unclaimed) <> "the default (no --route names them)"
-      case [w | BackendAcp w <- bs] of
+      case [candidate | candidate <- backends, BackendAcp _ <- [engineRouteBackend candidate]] of
         [] -> pure ()
-        (w : _) ->
-          let cfg = acpConfigFor rr dir w
+        (candidate : _) ->
+          let cfg = acpConfigForRoute rr dir candidate
            in output $
                 "  cwd "
                   <> T.pack dir
@@ -1982,10 +2316,10 @@ runCmdControlled runtimeControls persistence observer output reg name target pro
                   <> tshow (acpTurnTimeoutMs cfg)
                   <> "ms to a turn, "
                   <> acpSessionPolicy cfg
-      case [s | BackendDeck s <- bs] of
+      case [session | candidate <- backends, BackendDeck session <- [engineRouteBackend candidate]] of
         [] -> pure ()
-        (s : _) ->
-          let cfg = deckConfigFor rr s
+        (session : _) ->
+          let cfg = deckConfigFor rr session
            in output $
                 "  polling every "
                   <> tshow (deckPollMs cfg)
@@ -1995,12 +2329,9 @@ runCmdControlled runtimeControls persistence observer output reg name target pro
                   <> deckSessionPolicy
       output $ "  a `running` tool's command runs in " <> T.pack dir
       where
-        route (m, b) = do
-          output $ pad m <> backendWords rr b
-          -- §5.3: the deck arm's directory caveat is per route and not per run,
-          -- because with a mixed table it holds of the `deck:` routes and is
-          -- false of the `acp:` ones.
-          case b of
+        route (model, candidate) = do
+          output $ pad model <> backendWords rr candidate
+          case engineRouteBackend candidate of
             BackendDeck _ ->
               output $
                 pad ""
@@ -2026,11 +2357,13 @@ runCmdControlled runtimeControls persistence observer output reg name target pro
     -- How a backend names itself in the header: the words today's one-backend
     -- header uses, so that reading a routed run's table is reading the same
     -- sentence several times.
-    backendWords :: RunRoutes -> Backend -> Text
-    backendWords rr = \case
-      BackendAcp w ->
-        "the " <> w <> " adapter: " <> T.unwords (map T.pack (acpCommand (acpConfigFor rr "." w)))
-      BackendDeck s -> "agent-deck session " <> s
+    backendWords :: RunRoutes -> EngineRoute -> Text
+    backendWords rr route =
+      let aliasPrefix = maybe "" (\alias -> "engine " <> alias <> ": ") (engineRouteAlias route)
+       in aliasPrefix <> case engineRouteBackend route of
+            BackendAcp adapter ->
+              "the " <> adapter <> " adapter: " <> T.unwords (map T.pack (acpCommand (acpConfigForRoute rr "." route)))
+            BackendDeck session -> "agent-deck session " <> session
 
     announceRouting rr
       | null sources && Map.null (rrRealizations rr) = pure ()
@@ -2074,8 +2407,12 @@ runCmdControlled runtimeControls persistence observer output reg name target pro
       output ("refusing to start: " <> why)
       exitWith (ExitFailure 1)
 
-    walkWith :: Map.Map Text [Text] -> (WorldIO -> WorldIO) -> WorldIO -> IO ExecTrace
-    walkWith chainTable exec world = do
+    localPersonAnswers world = case personAnswering of
+      PersonAnswerEngine -> pure world
+      PersonAnswerLocalControl -> personControlWorld world
+
+    walkWith :: Map.Map Text [Text] -> WorldIO -> IO (El r, ExecTrace)
+    walkWith chainTable world = do
       -- The inputs this run's prompts were built from, announced before the
       -- first question: an operator reading a transcript must be able to see
       -- which subject it was about, and the value itself can be a whole diff.
@@ -2088,11 +2425,11 @@ runCmdControlled runtimeControls persistence observer output reg name target pro
       (result, tr) <-
         runPlanPersisted runtimeControls persistence observer
           chains
-          (announcingWorld (output . ("  " <>)) (exec world))
+          (announcingWorld (output . ("  " <>)) world)
           (progPlan prog)
       output ""
       report (progResultCode prog) result tr
-      pure tr
+      pure (result, tr)
 
     chainLine (m, spares) =
       "  "
@@ -2114,18 +2451,18 @@ runCmdControlled runtimeControls persistence observer output reg name target pro
       output $ "    billMemo    " <> tshow (billMemo tr)
         <> " (reusable requests once, every effect occurrence)"
 
-runMachineCmd :: Maybe MachineControl -> Registry -> RunId -> Text -> Target -> ProgramOf r -> [Given] -> IO ()
-runMachineCmd control = runMachineWith control RootRun Nothing []
+runMachineCmd :: MachineOptions -> Maybe MachineControl -> Registry -> RunId -> Text -> Target -> ProgramOf r -> [Given] -> IO ()
+runMachineCmd options control = runMachineWith options control RootRun Nothing []
 
-runMachineLineageCmd :: Maybe MachineControl -> Registry -> LineageOperation -> RunId -> FilePath -> [ForkEdit] -> Text -> Target -> ProgramOf r -> [Given] -> IO ()
-runMachineLineageCmd control reg lineage runId parentDirectory edits name target prog gs = do
+runMachineLineageCmd :: MachineOptions -> Maybe MachineControl -> Registry -> LineageOperation -> RunId -> FilePath -> [ForkEdit] -> Text -> Target -> ProgramOf r -> [Given] -> IO ()
+runMachineLineageCmd options control reg lineage runId parentDirectory edits name target prog gs = do
   childStore <- lookupEnv "AGENT_CAT_RUN_STORE"
   when (childStore == Nothing) (ioError (userError "lineage operations require AGENT_CAT_RUN_STORE for the new child run"))
-  (parentRunId, inheritedAnswers) <- validateLineage lineage parentDirectory edits name target prog
-  runMachineWith control lineage (Just parentRunId) inheritedAnswers reg runId name target prog gs
+  (parentRunId, inheritedAnswers) <- validateLineage options lineage parentDirectory edits name target prog
+  runMachineWith options control lineage (Just parentRunId) inheritedAnswers reg runId name target prog gs
 
-validateLineage :: LineageOperation -> FilePath -> [ForkEdit] -> Text -> Target -> ProgramOf r -> IO (RunId, [AnswerRecord])
-validateLineage lineage parentDirectory edits name target prog = do
+validateLineage :: MachineOptions -> LineageOperation -> FilePath -> [ForkEdit] -> Text -> Target -> ProgramOf r -> IO (RunId, [AnswerRecord])
+validateLineage options lineage parentDirectory edits name target prog = do
   effectiveTarget <- either (ioError . userError . T.unpack) pure (resolveTargetForProgram target prog)
   parentManifest <- readManifest parentDirectory
   let program = printedValue prog
@@ -2160,7 +2497,7 @@ validateLineage lineage parentDirectory edits name target prog = do
       validateInheritedAnswers answers
       unless (null effects) (ioError (userError "resume refuses a parent with started or completed effects; restart explicitly instead"))
       validateCounts checkpoint answers effects
-      pure answers
+      inheritedPersonAnswers options parentManifest answers
     ForkRun -> do
       checkpoint <- validateOptionalCheckpoint
       unless (manifestWorkflow parentManifest == name && manifestRunnerVersion parentManifest == runnerVersion)
@@ -2170,10 +2507,32 @@ validateLineage lineage parentDirectory edits name target prog = do
       validateInheritedAnswers answers
       unless (null effects) (ioError (userError "fork refuses a parent with started or completed effects; effects are never replayed"))
       mapM_ (\value -> validateCounts value answers effects) checkpoint
-      applyForkEdits edits answers
+      edited <- applyForkEdits edits answers
+      inheritedPersonAnswers options parentManifest edited
     RootRun -> ioError (userError "root is not a lineage child operation")
   validateInheritedAnswers inheritedAnswers
   pure (manifestRunId parentManifest, inheritedAnswers)
+
+inheritedPersonAnswers :: MachineOptions -> RunManifest -> [AnswerRecord] -> IO [AnswerRecord]
+inheritedPersonAnswers options parentManifest answers
+  | machinePersonAnswering options /= PersonAnswerLocalControl = pure answers
+  | manifestPersonAnswering parentManifest == Just PersonAnswerLocalControl = pure answers
+  | otherwise = filterM keep answers
+  where
+    keep answer
+      | answerReplaced answer = pure True
+      | otherwise = not <$> storedQuestionIsPerson (answerQuestion answer)
+
+storedQuestionIsPerson :: Value -> IO Bool
+storedQuestionIsPerson (Object question) =
+  case KM.lookup "addressee" question of
+    Just (Object addressee)
+      | length (KM.keys addressee) == 1
+          && any (`KM.member` addressee) ["model", "tool", "person", "toolExec"] ->
+          pure (KM.member "person" addressee)
+    _ -> ioError (userError "parent answer store has malformed question addressee provenance")
+storedQuestionIsPerson _ =
+  ioError (userError "parent answer store has malformed question provenance")
 
 applyForkEdits :: [ForkEdit] -> [AnswerRecord] -> IO [AnswerRecord]
 applyForkEdits edits initialAnswers = do
@@ -2229,17 +2588,20 @@ validateInheritedAnswers answers = do
       Left why -> ioError (userError ("parent answer store is incompatible: " <> why))
       Right () -> pure ()
 
-runMachineWith :: Maybe MachineControl -> LineageOperation -> Maybe RunId -> [AnswerRecord] -> Registry -> RunId -> Text -> Target -> ProgramOf r -> [Given] -> IO ()
-runMachineWith control lineage parent inherited reg runId name target prog gs = do
+runMachineWith :: MachineOptions -> Maybe MachineControl -> LineageOperation -> Maybe RunId -> [AnswerRecord] -> Registry -> RunId -> Text -> Target -> ProgramOf r -> [Given] -> IO ()
+runMachineWith options control lineage parent inherited reg runId name target prog gs = do
   effectiveTarget <- either (ioError . userError . T.unpack) pure (resolveTargetForProgram target prog)
   store <- lookupEnv "AGENT_CAT_RUN_STORE"
   owner <- fmap T.pack <$> lookupEnv "AGENT_CAT_RUN_OWNER"
+  let version = machineProtocolVersion options
+      storeFormat = if version == protocolVersion then storeVersion else latestStoreVersion
   case store of
-    Nothing -> stdoutEventSink runId >>= runWith effectiveTarget nullPersistenceHooks
+    Nothing -> stdoutEventSinkFor version runId >>= runWith effectiveTarget nullPersistenceHooks Nothing
     Just directory ->
-      withRunStoreSeeded directory (manifest effectiveTarget owner) inherited $ \runStore -> do
-        persistence <- persistenceFor runStore (printedValue prog) (length inherited)
-        handlesEventSink [storeEventHandle runStore, stdout] runId >>= runWith effectiveTarget persistence
+      withRunStoreSeededVersioned storeFormat version directory (manifest effectiveTarget owner) inherited $ \runStore -> do
+        persistence <- persistenceFor runId runStore (printedValue prog) (length inherited)
+        handlesEventSinkFor version [storeEventHandle runStore, stdout] runId
+          >>= runWith effectiveTarget persistence (Just runStore)
   where
     manifest effectiveTarget owner =
       RunManifest
@@ -2252,22 +2614,28 @@ runMachineWith control lineage parent inherited reg runId name target prog gs = 
         parent
         lineage
         owner
-    runWith effectiveTarget persistence actualSink = do
+        ( if machineProtocolVersion options == protocolVersion
+            then Nothing
+            else Just (machinePersonAnswering options)
+        )
+    runWith effectiveTarget persistence runStore actualSink = do
       let runtimeControls = case control of
             Nothing -> Nothing
             Just (MachineControl controls _ _) -> Just controls
           sink = case control of
             Nothing -> actualSink
             Just (MachineControl _ _ deferredSink) -> deferredSink
+          started = machineStarted options name effectiveTarget
       case control of
-        Nothing -> actualSink (RunStarted name (targetLabel effectiveTarget))
+        Nothing -> actualSink started
         Just (MachineControl _ deferred _) -> do
-          activated <- activateEventSink deferred actualSink (RunStarted name (targetLabel effectiveTarget))
+          activated <- activateEventSink deferred actualSink started
           unless activated (ioError (userError "machine event sink was activated twice"))
       -- Machine events are the trace. Human narration would duplicate full,
       -- input-expanded prompts into diagnostic stderr.
       let run =
             runCmdControlled
+              (machinePersonAnswering options)
               runtimeControls
               persistence
               sink
@@ -2277,9 +2645,26 @@ runMachineWith control lineage parent inherited reg runId name target prog gs = 
               effectiveTarget
               prog
               gs
-      outcome <- try run
+      outcome <- try $ do
+        (result, tr) <- run
+        if machineProtocolVersion options == protocolVersion
+          then sink (RunCompleted (billExecFresh tr) (billMemo tr))
+          else do
+            durableStore <-
+              maybe
+                (ioError (userError "protocol version 2 lost its required run store"))
+                pure
+                runStore
+            reference <-
+              writeResultArtifact
+                durableStore
+                runId
+                (codeJson (fromSCode (progResultCode prog)))
+                (answerJson (progResultCode prog) result)
+                (sayEl (progResultCode prog) result)
+            sink (RunCompletedV2 (billExecFresh tr) (billMemo tr) reference)
       case outcome of
-        Right tr -> sink (RunCompleted (billExecFresh tr) (billMemo tr))
+        Right () -> pure ()
         Left (e :: SomeException)
           | Just (MachineCancelled why) <- fromException e -> do
               sink (RunCancelled (T.pack why))
@@ -2301,8 +2686,8 @@ machineControlHandle = do
       Just descriptorNumber | descriptorNumber >= (3 :: Int) -> Just <$> fdToHandle (Fd (fromIntegral descriptorNumber))
       _ -> ioError (userError ("AGENT_CAT_CONTROL_FD must be a decimal file descriptor at least 3, not '" <> value <> "'"))
 
-persistenceFor :: RunStore -> Value -> Int -> IO PersistenceHooks
-persistenceFor store program inheritedAnswers = do
+persistenceFor :: RunId -> RunStore -> Value -> Int -> IO PersistenceHooks
+persistenceFor runId store program inheritedAnswers = do
   counts <- newIORef (inheritedAnswers, 0 :: Int)
   pure
     PersistenceHooks
@@ -2318,6 +2703,8 @@ persistenceFor store program inheritedAnswers = do
         persistenceCompleteEffect = \occurrence question answer -> do
           appendEffectRecord store (EffectRecord question (Just answer) occurrence EffectCompleted)
           atomicModifyIORef' counts (\(answers, effects) -> ((answers, effects + 1), ())),
+        persistenceStoreQuestion = \occurrence intent question ->
+          Just <$> writeQuestionArtifact store runId occurrence intent question,
         persistenceCheckpoint = \occurrence -> do
           (answers, effects) <- readIORef counts
           writeCheckpoint store (Checkpoint program (Just occurrence) answers effects)
@@ -2325,9 +2712,12 @@ persistenceFor store program inheritedAnswers = do
 
 resolveTargetForProgram :: Target -> ProgramOf r -> Either Text Target
 resolveTargetForProgram Scripted _ = Right Scripted
+resolveTargetForProgram target@(Routed rr) _ | rrV2Frozen rr = Right target
 resolveTargetForProgram (Routed rr) prog = do
   authored <- servedChains (progRawOut prog)
-  resolved <- resolveRoutingConfig (loadedRouting (rrRouting rr)) (rrCommandRoutes rr) authored
+  resolved <- case rrSelectedRoutingV2 rr of
+    Nothing -> resolveRoutingConfig (loadedRouting (rrRouting rr)) (rrCommandRoutes rr) authored
+    Just selected -> expandRoutingConfigV2 selected (rrRealizeOverrides rr) (rrCommandRoutes rr) authored
   pure
     ( Routed
         rr
@@ -2336,44 +2726,144 @@ resolveTargetForProgram (Routed rr) prog = do
           }
     )
 
+-- | Resolve secrets and inventories only after the run-fact/routing fixed point.
+-- The resulting target is immutable and safe to persist before any child starts.
+finalizeTargetForProgram :: Target -> ProgramOf r -> IO (Either Text Target)
+finalizeTargetForProgram Scripted _ = pure (Right Scripted)
+finalizeTargetForProgram target@(Routed rr) _ | rrV2Frozen rr = pure (Right target)
+finalizeTargetForProgram (Routed rr) prog = case rrSelectedRoutingV2 rr of
+  Nothing
+    | isJust (rrExpectedRoutingFingerprint rr) -> pure (Left "--expect-routing-fingerprint requires version-2 routing")
+    | otherwise -> pure (resolveTargetForProgram (Routed rr) prog)
+  Just selected
+    | any credentialArgument (rrAdapterArgs rr) ->
+        pure (Left "credential-bearing adapter argv is forbidden for version-2 routing; use an environment secret reference")
+    | otherwise -> do
+        ambient <- Map.fromList <$> getEnvironment
+        case do
+          authored <- servedChains (progRawOut prog)
+          expanded <- expandRoutingConfigV2 selected (rrRealizeOverrides rr) (rrCommandRoutes rr) authored
+          fingerprintExpanded <- case rrExpectedRoutingFingerprint rr of
+            Nothing -> Right expanded
+            Just _ ->
+              expandRoutingConfigV2
+                selected
+                Map.empty
+                (rrCommandRoutes rr)
+                (Map.fromList [(name, []) | name <- Map.keys (personaProfiles (selectedPersona selected))])
+          let executionRequired = nub (map (routerName . resolvedRouter) (Map.elems (resolvedRealizations expanded)))
+              fingerprintRequired = nub (map (routerName . resolvedRouter) (Map.elems (resolvedRealizations fingerprintExpanded)))
+              required = nub (executionRequired <> fingerprintRequired)
+          contexts <- resolveEngineContexts selected required ambient
+          pure (expanded, fingerprintExpanded, executionRequired, required, contexts) of
+          Left problem -> pure (Left problem)
+          Right (expanded, fingerprintExpanded, executionRequired, required, contexts) -> do
+            cacheHome <- routingCacheHome
+            now <- getCurrentTime
+            discovered <- discoverRoutingInventories (rrDiscoveryMode rr) cacheHome now selected contexts required
+            pure $ do
+              inventories <- discovered
+              frozen <- freezeRoutingConfigV2 selected inventories expanded
+              fingerprintFrozen <- freezeRoutingConfigV2 selected inventories fingerprintExpanded
+              let childEnvironments =
+                    Map.fromList
+                      [ (resolvedEngineAlias context, resolvedEngineChildEnvironment context)
+                        | context <- Map.elems contexts,
+                          resolvedEngineAlias context `elem` executionRequired,
+                          BackendAcp _ <- [resolvedEngineBackend context]
+                      ]
+                  resolvedWithEnvironment = withExecutionFingerprints contexts frozen
+                  fingerprintWithEnvironment = withExecutionFingerprints contexts fingerprintFrozen
+                  launchFingerprint =
+                    routingLaunchFingerprint
+                      (selectedPersonaName selected)
+                      (routeDefault (rrCommandRoutes rr))
+                      fingerprintWithEnvironment
+              case rrExpectedRoutingFingerprint rr of
+                Just expected | expected /= launchFingerprint ->
+                  Left "routing changed after TUI preview; return to routing selection and preview again"
+                _ -> Right ()
+              pure
+                ( Routed
+                    rr
+                      { rrRoutes = resolvedRoutes frozen,
+                        rrRealizations = resolvedRealizations resolvedWithEnvironment,
+                        rrChildEnvironments = childEnvironments,
+                        rrV2Frozen = True
+                      }
+                )
+
+withExecutionFingerprints :: Map.Map Text ResolvedEngineContext -> ResolvedRouting -> ResolvedRouting
+withExecutionFingerprints contexts resolved =
+  resolved
+    { resolvedRealizations =
+        Map.map
+          ( \realization ->
+              realization
+                { resolvedExecutionFingerprint =
+                    resolvedEngineExecutionFingerprint
+                      <$> Map.lookup (routerName (resolvedRouter realization)) contexts
+                }
+          )
+          (resolvedRealizations resolved)
+    }
+
+routingCacheHome :: IO FilePath
+routingCacheHome = do
+  configured <- lookupEnv "XDG_CACHE_HOME"
+  case configured of
+    Just path | not (null path) -> pure path
+    _ -> (</> ".cache") <$> getHomeDirectory
+
+credentialArgument :: String -> Bool
+credentialArgument argument =
+  any (`elem` credentialWords) (filter (not . T.null) (T.split (not . isAlphaNum) (T.toLower (T.pack argument))))
+  where
+    credentialWords =
+      [ "apikey",
+        "key",
+        "auth",
+        "authorization",
+        "token",
+        "secret",
+        "password",
+        "cookie",
+        "credential"
+      ]
+
 targetLabel :: Target -> Text
 targetLabel Scripted = "scripted"
 targetLabel (Routed rr) = T.intercalate "," (map backendSpelling (routeBackends (rrRoutes rr)))
 
 targetPolicy :: Target -> Value
 targetPolicy Scripted = object ["kind" .= ("scripted" :: Text)]
-targetPolicy (Routed rr) =
-  object
-    [ "kind" .= ("routed" :: Text),
-      "default" .= backendSpelling (routeDefault (rrRoutes rr)),
-      "routes"
-        .= [object ["name" .= name, "backend" .= backendSpelling backend] | (name, backend) <- routeNamed (rrRoutes rr)],
-      "scratch" .= rrScratch rr,
-      "adapterArgs" .= redactAdapterArgs (rrAdapterArgs rr),
-      "binary" .= rrBinary rr,
-      "pollMs" .= rrPollMs rr,
-      "timeoutMs" .= rrTimeoutMs rr,
-      "routingSources" .= map T.pack (loadedRoutingSources (rrRouting rr)),
-      "realizations" .= map realizationPolicy (Map.elems (rrRealizations rr)),
-      "verbose" .= rrVerbose rr
-    ]
-
-realizationPolicy :: ResolvedRealization -> Value
-realizationPolicy target =
-  let spec = resolvedSpec target
-      router = resolvedRouter target
-   in object
-        [ "profile" .= resolvedProfile target,
-          "axis" .= resolvedAxis target,
-          "rung" .= resolvedRung target,
-          "backend" .= backendSpelling (resolvedBackend target),
-          "router" .= routerName router,
-          "provider" .= routerProvider router,
-          "model" .= realizationModel spec,
-          "thinking" .= thinkingName (realizationThinking spec),
-          "maxOutput" .= realizationMaxOutput spec,
-          "options" .= realizationOptions spec
-        ]
+targetPolicy (Routed rr) = case rrSelectedRoutingV2 rr of
+  Nothing -> object baseFields
+  Just selected ->
+    let versionedFields =
+          baseFields
+            <> [ "routingVersion" .= (2 :: Int),
+                 "persona" .= selectedPersonaName selected,
+                 "personaSource" .= personaSelectionSourceName (selectedPersonaSource selected)
+               ]
+        policyWithoutDigest = object versionedFields
+        digest = sha256Fingerprint (BL.toStrict (encode policyWithoutDigest))
+     in object (versionedFields <> ["policyDigest" .= digest])
+  where
+    baseFields =
+      [ "kind" .= ("routed" :: Text),
+        "default" .= backendSpelling (routeDefault (rrRoutes rr)),
+        "routes"
+          .= [object ["name" .= name, "backend" .= backendSpelling backend] | (name, backend) <- routeNamed (rrRoutes rr)],
+        "scratch" .= rrScratch rr,
+        "adapterArgs" .= redactAdapterArgs (rrAdapterArgs rr),
+        "binary" .= rrBinary rr,
+        "pollMs" .= rrPollMs rr,
+        "timeoutMs" .= rrTimeoutMs rr,
+        "routingSources" .= map T.pack (loadedRoutingSources (rrRouting rr)),
+        "realizations" .= map resolvedRealizationPolicy (Map.elems (rrRealizations rr)),
+        "verbose" .= rrVerbose rr
+      ]
 
 redactAdapterArgs :: [String] -> [Text]
 redactAdapterArgs = go False
@@ -2417,14 +2907,23 @@ machineFailureClass e
 -- routing table; deriving it twice is how a header and a fact disagree.
 -- second derivation of the same policy, which is exactly how a header and a
 -- fact come to disagree about one run.
-acpConfigFor :: RunRoutes -> FilePath -> Text -> AcpConfig
-acpConfigFor rr dir w =
-  let base = adapterConfig (adapterSpecFor w) (rrAdapterArgs rr)
-   in base
-        { acpCwd = dir,
-          acpTurnTimeoutMs = fromMaybe (acpTurnTimeoutMs base) (rrTimeoutMs rr),
-          acpVerbose = rrVerbose rr
-        }
+
+acpConfigForRoute :: RunRoutes -> FilePath -> EngineRoute -> AcpConfig
+acpConfigForRoute rr dir route = case engineRouteBackend route of
+  BackendAcp adapter ->
+    let base = adapterConfig (adapterSpecFor adapter) (rrAdapterArgs rr)
+        environment =
+          maybe
+            inheritChildEnvironment
+            (\alias -> Map.findWithDefault inheritChildEnvironment alias (rrChildEnvironments rr))
+            (engineRouteAlias route)
+     in base
+          { acpCwd = dir,
+            acpTurnTimeoutMs = fromMaybe (acpTurnTimeoutMs base) (rrTimeoutMs rr),
+            acpChildEnvironment = environment,
+            acpVerbose = rrVerbose rr
+          }
+  BackendDeck _ -> error "Agentic.Cli.acpConfigForRoute: deck route"
 
 adapterSpecFor :: Text -> AdapterSpec
 adapterSpecFor "stub" = stubAdapter
@@ -2432,9 +2931,9 @@ adapterSpecFor "claude" = claudeAdapter
 adapterSpecFor "codex" = codexAdapter
 adapterSpecFor "droid" = droidAdapter
 adapterSpecFor name = pathAdapter name
--- | The @deck:@ half of 'acpConfigFor'.
+-- | The @deck:@ half of 'acpConfigForRoute'.
 --
--- It stands here for one of 'acpConfigFor''s two reasons and not both: nothing
+-- It stands here for one of 'acpConfigForRoute''s two reasons and not both: nothing
 -- new is decided, because 'Agentic.AgentDeck.defaultDeckConfig' already turns a
 -- word into a backend. Its callers are all inside 'runCmd' — the world for a
 -- @deck:@ backend and the two header arms that name one — because
@@ -2482,7 +2981,7 @@ deckSessionPolicy = sessionPolicy False
 -- here has to wait for an adapter to start or a question to be answered. The
 -- working directory is deliberately not among them — it is settled in 'runCmd',
 -- after this — and 'acpSessionPolicy' does not read it, which is why passing
--- @\".\"@ to 'acpConfigFor' below states the same policy the run will state.
+-- @"."@ to 'acpConfigForRoute' below states the same policy the run will state.
 --
 -- __What each one is worth to a prompt.__ @run.backends@ and @run.engine@ are
 -- the two facts a reporting model was previously told to leave as conditionals,
@@ -2512,15 +3011,19 @@ runFactsWith :: Registry -> Text -> Target -> Text -> [(Text, Text)]
 runFactsWith reg name target sentinel =
   [ (runFactBackends, backendsFact),
     (runFactEngine, engineFact),
-    (runFactRoutes, routesFact tableOf),
+    (runFactRoutes, routeFact),
     (runFactSentinel, sentinel)
   ]
   where
-    -- The table, or the absence of one. `routesFact` takes this rather than the
-    -- `Target` so that the fact cannot come to depend on `--poll`.
-    tableOf = case target of
-      Scripted -> Nothing
-      Routed rr -> Just (rrRoutes rr)
+    routeFact = case target of
+      Scripted -> routesFact Nothing
+      Routed rr
+        | isJust (rrSelectedRoutingV2 rr) ->
+            let realized = executionRoutes rr
+                line label route = label <> " = " <> engineRouteSpelling route <> "\n"
+             in line routeDefaultLabel (routeDefault realized)
+                  <> T.concat [line axis route | (axis, route) <- routeNamed realized]
+        | otherwise -> routesFact (Just (rrRoutes rr))
 
     backendsFact = case target of
       -- No colon in this arm, and one in the other two: a fact is spliced after
@@ -2531,12 +3034,12 @@ runFactsWith reg name target sentinel =
         [wft|no backend at all -- every question is answered from this program's own table of |]
           <> tshow (length (maybe [] rowScript (regLookup reg name)))
           <> " canned replies, and nothing is reached"
-      Routed rr -> case routeBackends (rrRoutes rr) of
-        [b] -> "1 backend: " <> backendSpelling b
-        bs ->
-          tshow (length bs)
+      Routed rr -> case routeBackends (executionRoutes rr) of
+        [backend] -> "1 backend: " <> engineRouteSpelling backend
+        backends ->
+          tshow (length backends)
             <> " backends: "
-            <> T.intercalate ", " (map backendSpelling bs)
+            <> T.intercalate ", " (map engineRouteSpelling backends)
 
     -- Derived from the very fields the header prints, and from nothing else.
     -- The mixed table earns its own arm rather than a hedge: a run that is half
@@ -2545,11 +3048,11 @@ runFactsWith reg name target sentinel =
     engineFact = case target of
       Scripted -> "scripted: a canned table, no process and no session"
       Routed rr ->
-        let bs = routeBackends (rrRoutes rr)
-            acps = [w | BackendAcp w <- bs]
-            decks = [s | BackendDeck s <- bs]
+        let routes' = routeBackends (executionRoutes rr)
+            acps = [route | route <- routes', BackendAcp _ <- [engineRouteBackend route]]
+            decks = [session | route <- routes', BackendDeck session <- [engineRouteBackend route]]
             acpWords = case acps of
-              (w : _) -> "acp: " <> acpSessionPolicy (acpConfigFor rr "." w)
+              (route : _) -> "acp: " <> acpSessionPolicy (acpConfigForRoute rr "." route)
               [] -> ""
             -- The session id is deliberately not spliced: what a prompt is
             -- owed is the policy, and a pane's title is neither a policy nor
@@ -2597,7 +3100,7 @@ runFactsWith reg name target sentinel =
 -- 'False'.
 --
 -- It stands at the top level, exported, and takes the /table/ rather than the
--- 'Target', for two reasons. The first is 'acpConfigFor''s second reason: the
+-- 'Target', for two reasons. The first is the transport-configuration reason: the
 -- policy gate holds it against 'Agentic.Workflow.routedBackend' — the fact and
 -- its one reader, checked as one contract, exactly as @run.engine@ and
 -- 'Agentic.Workflow.sharesOneSession' are, and a fact whose derivation lived
@@ -2671,13 +3174,21 @@ parseCommand :: Registry -> [Text] -> Either Text Command
 parseCommand reg = \case
   [] -> Left (usage reg)
   ["--help"] -> Right Usage
+  ["--tui"] -> Right Tui
+  ("--routing" : rest) -> routingOptions Human Nothing DiscoveryNormal rest
+  ["--migrate-routing"] -> Left "--migrate-routing takes SOURCE --output DESTINATION"
+  ("--migrate-routing" : source : rest) -> case rest of
+    ["--output", destination] -> Right (MigrateRouting (T.unpack source) (T.unpack destination))
+    _ -> Left "--migrate-routing takes SOURCE --output DESTINATION"
   ["help"] -> Right Usage
   ["help", name] -> Right (Help name)
   ("help" : _) ->
     Left ("help takes one " <> regNoun reg <> " and nothing else\n\n" <> usage reg)
   ["list"] -> Right (List Human)
   ["list", "--json"] -> Right (List Json)
-  ("list" : _) -> Left ("list takes nothing but --json\n\n" <> usage reg)
+  ["list", "--json", "--descriptor-version", "3"] -> Right (List JsonV3)
+  ["list", "--descriptor-version", "3", "--json"] -> Right (List JsonV3)
+  ("list" : _) -> Left ("list takes --json and, for a negotiated client, --descriptor-version 3\n\n" <> usage reg)
   [verb]
     | verb `elem` verbs ->
         Left (verb <> " needs " <> article reg <> ": " <> T.intercalate " or " (regNames reg))
@@ -2686,17 +3197,19 @@ parseCommand reg = \case
   ("run" : name : rest) -> (\(t, p, ins) -> Run name t p ins) <$> parseTarget reg rest
   ("machine" : runIdText : name : rest) -> do
     runId <- mkRunId runIdText
-    (target, pinned, inputs) <- parseTarget reg rest
-    pure (Machine runId name target pinned inputs)
+    (options, targetArgs) <- machineOptions rest
+    (target, pinned, inputs) <- parseTarget reg targetArgs
+    pure (Machine options runId name target pinned inputs)
   ("lineage-check" : operation : parent : name : rest) -> do
     lineage <- case operation of
       "restart" -> Right RestartRun
       "resume" -> Right ResumeRun
       "fork" -> Right ForkRun
       _ -> Left "lineage-check operation must be restart, resume, or fork"
-    (edits, targetArgs) <- lineageEdits lineage rest
+    (edits, remaining) <- lineageEdits lineage rest
+    (options, targetArgs) <- machineOptions remaining
     (target, pinned, inputs) <- parseTarget reg targetArgs
-    pure (LineageCheck lineage (T.unpack parent) edits name target pinned inputs)
+    pure (LineageCheck options lineage (T.unpack parent) edits name target pinned inputs)
   ("machine-restart" : runIdText : parent : name : rest) -> lineageCommand RestartRun runIdText parent name rest
   ("machine-resume" : runIdText : parent : name : rest) -> lineageCommand ResumeRun runIdText parent name rest
   ("machine-fork" : runIdText : parent : name : rest) -> lineageCommand ForkRun runIdText parent name rest
@@ -2709,11 +3222,54 @@ parseCommand reg = \case
     -- subject.
     verbs = ["plan", "cost", "run", "machine", "lineage-check", "machine-restart", "machine-resume", "machine-fork"]
 
+    routingOptions rendering persona mode = \case
+      [] -> Right (RoutingInspection rendering persona mode)
+      "--json" : rest
+        | rendering == Json -> Left "--routing received --json twice"
+        | otherwise -> routingOptions Json persona mode rest
+      "--persona" : value : rest
+        | isJust persona -> Left "--routing received --persona twice"
+        | T.null (T.strip value) -> Left "--persona takes a non-empty name"
+        | otherwise -> routingOptions rendering (Just value) mode rest
+      "--offline" : rest
+        | mode /= DiscoveryNormal -> Left "--offline and --refresh-models are mutually exclusive and may appear only once"
+        | otherwise -> routingOptions rendering persona DiscoveryOffline rest
+      "--refresh-models" : rest
+        | mode /= DiscoveryNormal -> Left "--offline and --refresh-models are mutually exclusive and may appear only once"
+        | otherwise -> routingOptions rendering persona DiscoveryRefresh rest
+      ["--persona"] -> Left "--persona takes a name"
+      flag : _ -> Left ("no option '" <> flag <> "' for --routing")
+
     lineageCommand lineage runIdText parent name rest = do
       runId <- mkRunId runIdText
-      (edits, targetArgs) <- lineageEdits lineage rest
+      (edits, remaining) <- lineageEdits lineage rest
+      (options, targetArgs) <- machineOptions remaining
       (target, pinned, inputs) <- parseTarget reg targetArgs
-      pure (MachineLineage lineage runId (T.unpack parent) edits name target pinned inputs)
+      pure (MachineLineage options lineage runId (T.unpack parent) edits name target pinned inputs)
+
+    machineOptions = goMachineOptions defaultMachineOptions False False []
+      where
+        goMachineOptions options seenProtocol seenPerson remaining args = case args of
+          [] -> do
+            whenE
+              (machinePersonAnswering options == PersonAnswerLocalControl && machineProtocolVersion options /= latestProtocolVersion)
+              "--person-answering local-control requires --protocol-version 2"
+            Right (options, reverse remaining)
+          ("--protocol-version" : value : rest)
+            | seenProtocol -> Left "--protocol-version was given more than once"
+            | value == "1" -> goMachineOptions options {machineProtocolVersion = protocolVersion} True seenPerson remaining rest
+            | value == "2" -> goMachineOptions options {machineProtocolVersion = latestProtocolVersion} True seenPerson remaining rest
+            | otherwise -> Left ("--protocol-version takes 1 or 2, not '" <> value <> "'")
+          ("--person-answering" : value : rest)
+            | seenPerson -> Left "--person-answering was given more than once"
+            | value == "engine" -> goMachineOptions options {machinePersonAnswering = PersonAnswerEngine} seenProtocol True remaining rest
+            | value == "local-control" -> goMachineOptions options {machinePersonAnswering = PersonAnswerLocalControl} seenProtocol True remaining rest
+            | otherwise -> Left ("--person-answering takes engine or local-control, not '" <> value <> "'")
+          ["--protocol-version"] -> Left "--protocol-version takes 1 or 2, and was given none"
+          ["--person-answering"] -> Left "--person-answering takes engine or local-control, and was given none"
+          (arg : rest) -> goMachineOptions options seenProtocol seenPerson (arg : remaining) rest
+
+        whenE condition message = if condition then Left message else Right ()
 
     lineageEdits lineage args = do
       (edits, remaining) <- extractEdits [] args
@@ -2817,6 +3373,10 @@ data RunOpts = RunOpts
     -- starts them and the order the header prints them, so that an operator can
     -- read the header against their own command line.
     roRoutes :: ![Text],
+    roPersona :: !(Maybe Text),
+    roRealizations :: ![Text],
+    roDiscoveryMode :: !(Maybe DiscoveryMode),
+    roExpectedRoutingFingerprint :: !(Maybe Text),
     roScratch :: !(Maybe Text),
     -- | @--require-pinned@. Belongs to no engine — it is a question about the
     -- program's text, which is the same text whoever answers it — so it is the
@@ -2829,7 +3389,26 @@ data RunOpts = RunOpts
   }
 
 noRunOpts :: RunOpts
-noRunOpts = RunOpts False Nothing Nothing Nothing Nothing Nothing False Nothing [] [] Nothing False []
+noRunOpts =
+  RunOpts
+    { roScripted = False,
+      roEngine = Nothing,
+      roSession = Nothing,
+      roBinary = Nothing,
+      roPollMs = Nothing,
+      roTimeoutMs = Nothing,
+      roVerbose = False,
+      roAdapter = Nothing,
+      roAdapterArgs = [],
+      roRoutes = [],
+      roPersona = Nothing,
+      roRealizations = [],
+      roDiscoveryMode = Nothing,
+      roExpectedRoutingFingerprint = Nothing,
+      roScratch = Nothing,
+      roRequirePinned = False,
+      roInputs = []
+    }
 
 -- | The @run@ options: three mutually exclusive answerers, the knobs that
 -- belong to one of them alone, and @--require-pinned@ and the input flags,
@@ -2860,7 +3439,21 @@ parseTarget reg args = do
       ("--binary" : v : rest) -> go o {roBinary = Just v} rest
       ("--adapter" : v : rest) -> go o {roAdapter = Just v} rest
       ("--adapter-arg" : v : rest) -> go o {roAdapterArgs = roAdapterArgs o <> [v]} rest
+      ("--expect-routing-fingerprint" : v : rest)
+        | isJust (roExpectedRoutingFingerprint o) -> Left "--expect-routing-fingerprint may appear only once"
+        | T.length v /= 64 || not (T.all (`elem` ("0123456789abcdef" :: String)) v) -> Left "--expect-routing-fingerprint takes a lowercase SHA-256 digest"
+        | otherwise -> go o {roExpectedRoutingFingerprint = Just v} rest
       ("--route" : v : rest) -> go o {roRoutes = roRoutes o <> [v]} rest
+      ("--persona" : v : rest)
+        | isJust (roPersona o) -> Left "--persona may appear only once"
+        | T.null (T.strip v) -> Left "--persona takes a non-empty name"
+        | otherwise -> go o {roPersona = Just v} rest
+      ("--realize" : v : rest) -> go o {roRealizations = roRealizations o <> [v]} rest
+      ("--offline" : rest) -> setDiscovery o DiscoveryOffline rest
+      ("--refresh-models" : rest) -> setDiscovery o DiscoveryRefresh rest
+      ["--expect-routing-fingerprint"] -> Left "--expect-routing-fingerprint takes a digest"
+      [flag]
+        | flag `elem` ["--persona", "--realize"] -> Left (flag <> " takes a value")
       ("--scratch" : v : rest) -> go o {roScratch = Just v} rest
       -- Refused by name rather than by the fallthrough below, because the
       -- operator asking for it is asking a coherent question with a real
@@ -2878,6 +3471,10 @@ parseTarget reg args = do
     withMs flag v k = case readMaybe (T.unpack v) of
       Just n | n >= 0 -> k n
       _ -> Left (flag <> " takes a number of milliseconds, not '" <> v <> "'")
+
+    setDiscovery o mode rest = case roDiscoveryMode o of
+      Nothing -> go o {roDiscoveryMode = Just mode} rest
+      Just _ -> Left "--offline and --refresh-models are mutually exclusive and may appear only once"
 
 -- | Which answerer the options name — or a refusal saying which two of them
 -- were named at once.
@@ -2918,7 +3515,14 @@ chooseTarget reg o = case (roScripted o, roEngine o, roSession o) of
 
     acpFlags = [("--adapter", isJust (roAdapter o)), ("--adapter-arg", not (null (roAdapterArgs o))), ("--scratch", isJust (roScratch o))]
     deckFlags = [("--binary", isJust (roBinary o)), ("--poll", isJust (roPollMs o))]
-    liveFlags = acpFlags <> deckFlags <> [("--timeout", isJust (roTimeoutMs o)), ("--verbose", roVerbose o)]
+    routingFlags =
+      [ ("--persona", isJust (roPersona o)),
+        ("--realize", not (null (roRealizations o))),
+        ("--offline", roDiscoveryMode o == Just DiscoveryOffline),
+        ("--refresh-models", roDiscoveryMode o == Just DiscoveryRefresh),
+        ("--expect-routing-fingerprint", isJust (roExpectedRoutingFingerprint o))
+      ]
+    liveFlags = acpFlags <> deckFlags <> routingFlags <> [("--timeout", isJust (roTimeoutMs o)), ("--verbose", roVerbose o)]
 
     -- `--route` is refused here rather than left inert. Routes *would* be inert
     -- under `--scripted` — `scriptedReply` reads `qPrompt` and nothing else, so
@@ -2968,13 +3572,24 @@ chooseTarget reg o = case (roScripted o, roEngine o, roSession o) of
                 <> "' twice; a model has one backend in a run"
             )
         Nothing -> Right ()
+      realized <- traverse parseRealize (roRealizations o)
+      case firstDuplicate (map fst realized) of
+        Just axis -> Left ("--realize names axis '" <> axis <> "' twice")
+        Nothing -> Right ()
       let table = routes def named
       forbidForeign (Set.fromList (map schemeOf (routeBackends table)))
       pure . Routed $
         RunRoutes
           { rrRoutes = table,
             rrCommandRoutes = table,
-            rrRouting = LoadedRouting emptyRoutingConfig [],
+            rrRouting = LoadedRouting emptyRoutingConfig [] Nothing Nothing,
+            rrSelectedRoutingV2 = Nothing,
+            rrPersonaOverride = roPersona o,
+            rrRealizeOverrides = Map.fromList realized,
+            rrDiscoveryMode = fromMaybe DiscoveryNormal (roDiscoveryMode o),
+            rrExpectedRoutingFingerprint = roExpectedRoutingFingerprint o,
+            rrChildEnvironments = Map.empty,
+            rrV2Frozen = False,
             rrRealizations = Map.empty,
             rrScratch = T.unpack <$> roScratch o,
             rrAdapterArgs = map T.unpack (roAdapterArgs o),
@@ -2984,6 +3599,11 @@ chooseTarget reg o = case (roScripted o, roEngine o, roSession o) of
             rrVerbose = roVerbose o,
             rrAdapterGiven = isJust (roAdapter o)
           }
+
+    parseRealize value = case T.breakOn "=" value of
+      (axis, suffix)
+        | not (T.null axis), Just alias <- T.stripPrefix "=" suffix, not (T.null alias) -> Right (axis, alias)
+      _ -> Left ("--realize takes AXIS=MODEL-ALIAS, not '" <> value <> "'")
 
 -- | Usage's human registry catalog. Names are command syntax and stay whole;
 -- only their prose yields to the fixed terminal width.
@@ -3017,7 +3637,10 @@ usage reg =
     "\n"
     [ bin <> " — " <> regBanner reg,
       "",
-      "  " <> bin <> " list [--json]",
+      "  " <> bin <> " --tui",
+      "  " <> bin <> " list [--json [--descriptor-version 3]]",
+      "  " <> bin <> " --routing [--json] [--persona NAME] [--offline | --refresh-models]",
+      "  " <> bin <> " --migrate-routing SOURCE --output DESTINATION",
       "  " <> bin <> " help <" <> noun <> ">",
       "  " <> bin <> " <" <> noun <> "> --help",
       "  " <> bin <> " plan <" <> noun <> "> [--raw] [--require-pinned] [--json] [<input>...]",
@@ -3036,6 +3659,9 @@ usage reg =
       under (runLead <> "--engine acp ") <> "[--adapter-arg ARG]... [--scratch DIR]",
       under (runLead <> "--engine acp ") <> "[--route NAME=BACKEND]...",
       under (runLead <> "--engine acp ") <> "[--timeout MS] [--verbose]",
+      under runLead <> "[--persona NAME] [--realize AXIS=MODEL-ALIAS]...",
+      under runLead <> "[--offline | --refresh-models]",
+      under runLead <> "[--expect-routing-fingerprint SHA256]",
       "",
       usageCatalog reg,
       "",
@@ -3073,7 +3699,19 @@ usage reg =
       "  standard input A declared stdin input is read to EOF when run did not get",
       "                 that name from an explicit flag. A terminal refuses instead",
       "                 of waiting. Explicit --input-arg/--input-file takes precedence",
-      "  --json         print one object per row (list) or one object (plan)",
+      "  --routing      inspect resolved routing without starting an engine; --json",
+      "                 is the sanitized frontend contract",
+      "  --migrate-routing SOURCE --output DESTINATION",
+      "                 create, but never overwrite, an equivalent offline v2 user file",
+      "  --persona NAME select a v2 routing context explicitly; precedence is command",
+      "                 line, AGENT_CAT_PERSONA, project selector, then user default",
+      "  --realize AXIS=MODEL-ALIAS",
+      "                 replace one managed v2 axis with an allowed concrete alias",
+      "  --offline       use permitted model caches or static exact selectors only",
+      "  --refresh-models force catalogue refresh and refuse if it fails",
+      "  --expect-routing-fingerprint SHA256",
+      "                 frontend preflight; refuse if offline routing changed",
+      "  --json         print one object per row (list), one object (plan), or the",
       "                 instead of the prose, for a program that drives this CLI.",
       "                 The key names are an interface and are documented in the",
       "                 Agentic.Cli haddock; `inputs` names exactly the inputs a",

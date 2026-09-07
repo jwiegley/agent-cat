@@ -1,0 +1,9 @@
+{"protocolVersion":1,"runId":"run-1","sequence":"0","timestamp":"2026-09-03T00:00:00Z","event":{"type":"run.started","workflow":"review","target":"scripted"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"1","timestamp":"2026-09-03T00:00:00Z","event":{"type":"occurrence.started","occurrenceId":"0","code":"text","intent":"consult","addressee":"model reviewer","prompt":"prompt"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"2","timestamp":"2026-09-03T00:00:00Z","event":{"type":"attempt.started","occurrenceId":"0","attempt":"0","target":"scripted"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"3","timestamp":"2026-09-03T00:00:00Z","event":{"type":"attempt.output","occurrenceId":"0","attempt":"0","stream":"transport-text","chunk":"answer"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"4","timestamp":"2026-09-03T00:00:00Z","event":{"type":"attempt.steered","occurrenceId":"0","attempt":"0","controlId":"steer-1","timing":"interrupt-now","text":"focus"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"5","timestamp":"2026-09-03T00:00:00Z","event":{"type":"attempt.completed","occurrenceId":"0","attempt":"0","source":"scripted"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"6","timestamp":"2026-09-03T00:00:00Z","event":{"type":"occurrence.completed","occurrenceId":"0","source":"asked:model reviewer","answer":"answer"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"7","timestamp":"2026-09-03T00:00:00Z","event":{"type":"trace.ordered","occurrenceIds":["0"]}}
+{"protocolVersion":1,"runId":"run-1","sequence":"8","timestamp":"2026-09-03T00:00:00Z","event":{"type":"run.completed","billFresh":"1","billMemo":"1"}}

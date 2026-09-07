@@ -25,12 +25,18 @@ describe.runIf(Boolean(runnerPath))("owned Pi child through the extension superv
     } } }));
     await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: "fixture", defaultModel: "fixture-model" }));
 
-    const runner: RunnerConfig = { id: "e2e", executable: runnerPath!, allowedCwds: [directory] };
+    const runner: RunnerConfig = {
+      id: "e2e",
+      executable: "/usr/bin/env",
+      prefixArgs: ["-u", "AGENT_CAT_PERSONA", `XDG_CONFIG_HOME=${join(directory, "isolated-config")}`, runnerPath!],
+      allowedCwds: [directory],
+    };
     const descriptor = (await discoverRunner(runner, directory)).find(({ name }) => name === "structured");
     if (!descriptor) throw new Error("structured descriptor is missing");
     const targetArgs = ["--engine", "acp", "--adapter", process.execPath, "--adapter-arg", resolve("src/pi-child-acp.mjs")];
     const stateDir = join(directory, "state");
     const childEnvironment = {
+      XDG_CONFIG_HOME: join(directory, "isolated-config"),
       AGENT_CAT_FIXTURE_COUNTER: counter,
       NODE_OPTIONS: [process.env.NODE_OPTIONS, `--import=${resolve("test/fixtures/openai-fetch-preload.mjs")}`].filter(Boolean).join(" "),
       PI_CODING_AGENT_DIR: agentDir,
@@ -39,6 +45,7 @@ describe.runIf(Boolean(runnerPath))("owned Pi child through the extension superv
 
     const parent = await prepareLaunch({ runner, descriptor, cwd: directory, stateDir, inputs: {}, targetKind: "child", targetArgs });
     Object.assign(parent.env, childEnvironment);
+    delete parent.env.AGENT_CAT_PERSONA;
     const parentResult = await new RunSupervisor().start(parent).finished;
     expect(parentResult).toMatchObject({ status: "succeeded", billFresh: "1", billMemo: "1" });
     expect(await requestCount(counter)).toBe(1);
@@ -49,6 +56,7 @@ describe.runIf(Boolean(runnerPath))("owned Pi child through the extension superv
       lineage: { operation: "resume", parentRunId: parent.manifest.runId, parentRuntimeDir: join(parent.storeDir, "runtime"), edits: [] },
     });
     Object.assign(child.env, childEnvironment);
+    delete child.env.AGENT_CAT_PERSONA;
     const childResult = await new RunSupervisor().start(child).finished;
     expect(childResult.status).toBe("succeeded");
     expect(childResult.occurrences.get("0")?.state).toBe("reused");

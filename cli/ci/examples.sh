@@ -92,8 +92,8 @@ for source in sources:
     imports = re.findall(r'^import (?:qualified )?(Agentic\.[A-Za-z0-9_.]+)', text, re.MULTILINE)
     bad_imports.extend(f"{source}: {name}" for name in imports if name not in allowed_imports)
 
-profiles_text = Path("model-definitions.example.yaml").read_text().split("\nprofiles:\n", 1)[1]
-profiles = set(re.findall(r"^  - name: (\S+)$", profiles_text, re.MULTILINE))
+personas_text = Path("model-definitions.example.yaml").read_text().split("\npersonas:\n", 1)[1]
+profiles = set(re.findall(r"^      ([^#:\\s][^:]*):$", personas_text, re.MULTILINE))
 missing = sorted(refs - profiles)
 concrete = sorted(ref for ref in refs if re.search(r"gpt|claude|codex|opus|fable|opencode|droid|agent-deck|acp", ref, re.IGNORECASE))
 

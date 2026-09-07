@@ -926,10 +926,18 @@ the printed program but leaves the elaborated Plan, denotation, and static cost
 unchanged.
 
 A live run has a default backend and may add @code{--route NAME=BACKEND} entries
-for serving-model pins.  Unrouted pins, unpinned model questions, tools, and
-people use the default.  Routing selects an answering service after the program
-and its static analyses already exist.  It therefore changes neither Plan
-shape nor price.
+for serving-model pins.  Under routing schema version 1, unrouted pins, unpinned
+model questions, tools, and people use the default.  Routing selects an answering
+service after the program and its static analyses already exist.  It therefore
+changes neither Plan shape nor price.
+
+Routing schema version 2 adds an operational persona above the same resolver.
+The user file owns environment references, engines, catalogues, concrete model
+aliases, persona allowlists, and profile chains.  A project file may select a
+persona and replace whole profiles but cannot introduce any of those privileged
+objects.  The selected persona is never a workflow input or @code{run.*} fact.
+Exact or deterministically ordered-prefix selectors freeze one model id and its
+non-secret provenance before an engine starts.
 
 Fail-over occurs within the authored pin chain.  Routing can place different
 pins in different ACP adapters or agent-deck sessions, allowing one chain to
@@ -1982,6 +1990,11 @@ at least one backend of the corresponding scheme uses them.  @code{--adapter},
 @code{--verbose} apply to both.  A foreign flag with no backend to consume it is
 refused rather than ignored.
 
+For a version-2 managed axis, @code{--realize AXIS=MODEL-ALIAS} is the safe
+override.  The alias carries its authorized engine, provider, environment, and
+catalogue.  Raw @code{--route} for that axis is refused; raw routes remain
+unchanged for version 1 and for symbolic names with no selected v2 profile.
+
 Scripted execution accepts no routes because its table does not dispatch by
 serving-model scope.  A route also requires a default live answerer, since
 unclaimed questions still need a destination.
@@ -2105,6 +2118,7 @@ assembles complete conformance observations.  The executables are
 @command{agentic-run}, the runner; @command{tier0}, @command{tier1}, and
 @command{bisim}, the three conformance programs; and the probes
 @command{policy-probe}, @command{routing-config-probe},
+@command{routing-v2-probe}, @command{routing-discovery-probe},
 @command{routing-fixed-point-probe}, and @command{schema-probe}, which the
 gate scripts drive.  The test suite @code{engine-api-test} exercises the
 neutral engine interface against a deterministic fake engine.
@@ -2285,12 +2299,13 @@ page and deterministic reply table for every row.
 @item cliMain registry
 Run the shared parser and dispatcher for a registry.  Its binary and row noun
 come from the Registry, so downstream tools receive the same verbs, input rules,
-routing, transports, and exit statuses as @command{agentic-run}.
+routing, transports, terminal mode, and exit statuses as @command{agentic-run}.
 
 @c COVER API Agentic.Cli.Command support
 @item Command
-Parsed command with constructors @code{Usage}, @code{Help}, @code{List},
-@code{Plan}, @code{Cost}, @code{Run}, @code{Machine}, @code{LineageCheck}, and
+Parsed command with constructors @code{Tui}, @code{Usage}, @code{Help}, @code{List},
+@code{Plan}, @code{Cost}, @code{Run}, @code{RoutingInspection},
+@code{MigrateRouting}, @code{Machine}, @code{LineageCheck}, and
 @code{MachineLineage}.  This type is exported for policy tests and front ends
 that need to inspect a parse.
 
@@ -3057,14 +3072,17 @@ the noun used below is @samp{example} in this repository.
 @section Synopsis
 
 @example
-agentic-run list [--json]
+agentic-run --tui
+agentic-run list [--json [--descriptor-version 3]]
+agentic-run --routing [--json] [--persona NAME] [--offline | --refresh-models]
+agentic-run --migrate-routing SOURCE --output DESTINATION
 agentic-run help NAME
 agentic-run NAME --help
 agentic-run plan NAME [--raw] [--require-pinned] [--json] [INPUT ...]
 agentic-run cost NAME [INPUT ...]
 agentic-run run NAME --scripted [INPUT ...]
 agentic-run run NAME --session ID [DECK-OPTION ...] [INPUT ...]
-agentic-run run NAME --engine acp [ACP-OPTION ...] [INPUT ...]
+agentic-run run NAME --engine acp [ACP-OPTION ...] [ROUTING-OPTION ...] [INPUT ...]
 agentic-run machine RUN_ID NAME RUN-OPTION ...
 agentic-run lineage-check restart|resume|fork PARENT_STORE NAME RUN-OPTION ...
 agentic-run machine-restart RUN_ID PARENT_STORE NAME RUN-OPTION ...
@@ -3075,6 +3093,72 @@ agentic-run machine-fork RUN_ID PARENT_STORE NAME [FORK-EDIT ...] RUN-OPTION ...
 A verb in head position wins over a registered row of the same name.  Help has
 two per-row spellings and one general spelling.  A bare registered name is
 refused rather than interpreted as help or execution.
+
+@section Terminal frontend
+
+@c COVER CLI --tui author
+@table @code
+@item --tui
+Open the terminal frontend for the current executable's registry.  The command
+requires terminal input and output and refuses pipes before initializing Vty.
+A downstream executable that calls @code{cliMain}, including @command{wf},
+therefore browses and launches its own registry rather than this repository's
+example table.
+@end table
+
+The browser cycles through Workflows, Runs, and Routing with @kbd{TAB}.
+@kbd{UP} and @kbd{DOWN} move the current selection.  In Workflows, @kbd{/} opens
+the bounded fuzzy filter.  Run rows show lineage, persona, concrete realizations,
+bills, final-result availability, and ownership.  Routing shows symbolic profile
+chains and concrete inventory provenance.  @kbd{RET} selects a workflow or
+reconstructs a stored run; @kbd{h} opens the selected workflow's
+bounded runner help; @kbd{q} exits only when this process owns
+no live child.  Workflow values are collected in descriptor order.  @kbd{RET}
+inserts a newline and @kbd{C-d} accepts the current value.  @kbd{p} cycles the
+available routing personas.  Scripted and live targets use @kbd{s} and @kbd{l}.
+Exact-input plan facts, the runner executable and target arguments, and a concrete
+routing summary appear before a separate @kbd{y} launch confirmation.  Routing
+inspection supplies opaque CLI-owned target arguments
+and a fingerprint.  Launch repeats offline routing and refuses if that fingerprint
+has changed.
+
+A confirmed run uses protocol version 2, store format 2, local person answering,
+and a control pipe on file descriptor 3.  Its header shows workflow, persona,
+concrete realization, run identifier, status, elapsed time, and known bills.  The
+monitor is entered only after a
+valid @code{run.started} event.  @kbd{ESC} detaches without cancelling and
+reattaches from the browser; @kbd{c} opens a cancellation confirmation.
+Occurrence selection uses @kbd{j} and @kbd{k}.  Active attempts accept immediate
+and next-boundary steering with @kbd{i} and @kbd{b}; recovery uses @kbd{r},
+@kbd{f}, and @kbd{a}; numbered choices select pre-dispatch redirects.  @kbd{UP}
+and @kbd{DOWN} scroll the dedicated output viewport, while @kbd{G} or @kbd{END}
+resumes tail following.  Person questions and recoveries are delivered in FIFO
+order, and person answers require @kbd{C-d}.  After result verification, @kbd{s}
+opens an explicit absolute-path prompt which copies the JSON value to a new
+mode-0600 file; an existing path is never overwritten.
+
+The monitor renders answer output separately from bounded public message, tool,
+todo, context-usage, and explicit reasoning-summary updates.  ACP thought chunks
+are not reasoning summaries and are not retained.  Plain text, lightweight Markdown
+line cues, status classes, and unified-diff classes cover the implemented event data
+without a native grammar library.
+
+State is private beneath @env{AGENT_CAT_STATE_DIR} when that variable is set to an
+absolute path.  An existing root must be a no-follow directory owned by the effective
+user and must expose no group or other mode bits.  A symlink, foreign owner, or public
+mode is refused rather than repaired.  The frontend retains the validated root
+descriptor and performs descendant mutation through no-follow descriptor-relative
+operations.  Plan and machine children receive @env{AGENT_CAT_STATE_ANCHOR}, a
+captured path, device, and inode identity that they validate before accessing inputs
+or creating a runtime store.  Runtime stores retain their own descriptors, including
+during atomic artifact publication.
+Without it, terminal runs use
+@file{$XDG_STATE_HOME/agent-cat/tui/RUNNER-ID}, with @file{~/.local/state} as
+fallback.  Runner defaults and ext-pi's default are distinct; sharing is therefore
+explicit.  Live foreign owners are read-only; stale owners are orphaned.  Restart,
+resume, and fork create new stores and preserve the runner's compatibility checks.
+The supported terminal platforms are macOS and Linux.  The repository records the executable requirement
+matrix and platform evidence in @file{doc/tui-release-evidence.md}.
 
 @section Verbs
 
@@ -3109,13 +3193,15 @@ progresses, followed by result and bills.
 @c COVER CLI verb:machine author
 @item machine RUN_ID NAME target [options]
 Execute the same Program through the durable runner while emitting strict
-version-1 NDJSON events on standard output.  Workflow text uses standard input;
-correlated controls use the inherited descriptor named by
-@code{AGENT_CAT_CONTROL_FD} (fd 3 in Pi).  The private store and owner metadata
-use the remaining documented @code{AGENT_CAT_*} environment variables.  Human
-prompt narration is omitted from machine diagnostics.  @code{manifest.json}
-references a separate mode-0600 @code{program.json}, keeping input-expanded text
-out of the manifest while preserving exact lineage validation.
+versioned NDJSON events on standard output.  Omission selects protocol version
+1; an explicit version 2 writes store format 2 and a verified result artifact.
+Workflow text uses standard input; correlated controls use the inherited
+descriptor named by @code{AGENT_CAT_CONTROL_FD} (fd 3 in Pi).  The private
+store and owner metadata use the remaining documented @code{AGENT_CAT_*}
+environment variables.  Human prompt narration is omitted from machine
+diagnostics.  @code{manifest.json} references a separate mode-0600
+@code{program.json}, keeping input-expanded text out of the manifest while
+preserving exact lineage validation.
 
 @c COVER CLI verb:lineage-check author
 @item lineage-check OPERATION PARENT_STORE NAME target [options]
@@ -3132,6 +3218,29 @@ complete answers after validating any explicit edits.
 
 @end table
 
+@section Top-level routing modes
+
+@table @code
+@c COVER CLI --routing author
+@item --routing [--json] [--persona NAME] [--offline | --refresh-models]
+Load the conventional routing files and print the resolved policy without
+starting an engine or creating a run store.  Human output names persona, axes,
+aliases, exact model ids, engines, and inventory source.  JSON additionally
+carries available persona/model choices, credential readiness booleans, profile
+rungs, cache age/timestamps, warnings, and endpoint fingerprints.  It omits
+secret names and values, environment/header values and names, raw endpoint URLs,
+and unselected inventories.
+
+@c COVER CLI --migrate-routing author
+@c COVER CLI --output author
+@item --migrate-routing SOURCE --output DESTINATION
+Decode one complete version-1 file and exclusively create an offline version-2
+user file: one engine per router, one exact model alias per router/model pair, a
+@code{default} persona, and equivalent profile chains.  The source and every
+existing destination are refused rather than overwritten.
+@end table
+
+
 @section Common inspection options
 
 @table @code
@@ -3142,9 +3251,15 @@ not accepted as an option to other verb forms.
 
 @c COVER CLI --json author
 @item --json
-Machine rendering for @code{list} and @code{plan}.  With @code{plan --raw}, add
-the @code{program} key.  Help, cost, and run have no JSON form; refusals remain
-prose on standard error.
+Machine rendering for @code{list}, @code{plan}, and @code{--routing}.  With
+@code{plan --raw}, add the @code{program} key.  Help, cost, and run have no JSON
+form; refusals remain prose on standard error.
+
+@c COVER CLI --descriptor-version author
+@item --descriptor-version 3
+With @code{list --json}, request descriptor version 3.  It advertises protocol
+and store versions 1 and 2, local person answering, and sanitized routing
+inspection while the unqualified command retains descriptor version 2.
 
 @c COVER CLI --raw author
 @item --raw
@@ -3188,13 +3303,33 @@ of at least 3; Pi uses fd 3.  Control NDJSON and workflow input therefore coexis
 without framing.  The compatibility form @code{AGENT_CAT_CONTROL_STDIN=1} puts
 controls on standard input instead; it works only when the stdin-designated
 value was supplied explicitly, and both control modes together are refused.
+
+@section Machine protocol options
+
+@table @code
+@c COVER CLI --protocol-version author
+@item --protocol-version 1|2
+Select the machine event and store contract.  Omission remains version 1.
+Version 2 requires @code{AGENT_CAT_RUN_STORE}, writes store format 2, and
+installs the result artifact before successful completion is emitted.
+
+@c COVER CLI --person-answering author
+@item --person-answering engine|local-control
+Select who realizes every person-addressed question in this machine run.
+@code{engine} preserves ordinary routing.  @code{local-control} requires
+protocol version 2, @code{AGENT_CAT_CONTROL_FD=3}, and the private store; it
+publishes a verified full-question reference and accepts a schema-checked
+@code{answerPerson} control without creating a physical engine attempt.
+@end table
+value was supplied explicitly, and both control modes together are refused.
 @section Target and transport options
 
 @table @code
 @c COVER CLI --scripted author
 @item --scripted
 Select the registered canned table.  Mutually exclusive with @code{--engine},
-@code{--session}, every live transport option, and @code{--route}.
+@code{--session}, every live transport option, @code{--route}, and every v2
+persona/discovery override.
 
 @c COVER CLI --engine author
 @item --engine acp
@@ -3268,7 +3403,40 @@ creation.  Repeatable and valid only for fork.
 @item --route NAME=BACKEND
 Route one serving-model pin to @code{acp:ADAPTER} or @code{deck:SESSION}.
 Repeatable at most once per name.  The Program must contain the named primary or
-alternate pin.  A default live backend is still required for unclaimed questions.
+alternate pin.  A default live backend is still required.  Version 1 and
+unconfigured v2 names retain this behavior; a managed v2 axis refuses raw backend
+substitution.
+
+@c COVER CLI --persona author
+@item --persona NAME
+Select a version-2 persona explicitly.  Precedence is this flag,
+@code{AGENT_CAT_PERSONA}, the project file's @code{persona}, then the user file's
+@code{default-persona}.  No repository, branch, hostname, account, or email is
+inferred.
+
+@c COVER CLI --realize author
+@item --realize AXIS=MODEL-ALIAS
+Replace one managed runtime axis with a concrete alias allowed by the selected
+persona.  Repeatable once per axis.  The alias's owning engine must also be in the
+persona engine allowlist.
+
+@c COVER CLI --offline author
+@item --offline
+Perform no catalogue request.  A cache no older than @code{stale-if-error} may
+satisfy inventory-dependent selectors; an exact selector may remain
+@code{static-unverified}.
+
+@c COVER CLI --refresh-models author
+@item --refresh-models
+Force every required catalogue to refresh.  A failure is a setup refusal and
+never silently falls back to stale cache.  Mutually exclusive with
+@code{--offline}.
+
+@c COVER CLI --expect-routing-fingerprint author
+@item --expect-routing-fingerprint SHA256
+Require version-2 offline launch resolution to equal the opaque fingerprint returned
+by routing inspection.  The terminal frontend supplies this internal preflight token;
+a mismatch refuses the run before creating its store or starting an engine.
 @end table
 
 A route table can contain both schemes.  ACP-specific and deck-specific flags
@@ -3276,12 +3444,31 @@ are accepted when their corresponding scheme occurs anywhere in that table and
 are refused otherwise.  Routes do not alter Plan folds or bills because backend
 identity is absent from the semantic key.
 
+Version-2 user routing is read from
+@file{$XDG_CONFIG_HOME/agent-cat/routing.yaml}, with @file{~/.config} as fallback.
+The nearest @file{.agent-cat/routing.yaml} up to the Git boundary is the restricted
+project layer.  Mixed schema versions fail before secret lookup.  Environment
+secret references are resolved only for engines used after the routing/run-fact
+fixed point.  ACP inherits the ambient environment after every declared source
+and destination name is removed, then receives the selected bindings.  This is
+routing context, not credential isolation from files, profiles, or the operating
+system.
+
+OpenAI and Anthropic catalogue responses are fetched by the bounded Haskell HTTP
+client, never @command{curl}.  Responses, pages, items, ids, headers, and time are
+bounded; redirects are disabled.  Mode-0600 atomic caches live beneath
+@file{$XDG_CACHE_HOME/agent-cat/models/PERSONA/FINGERPRINT.json}.  Selection and
+inventory provenance are frozen in the manifest policy with a canonical SHA-256
+digest before the first question.
+
 @section Outputs and exit status
 
 Human @code{plan}, @code{cost}, and @code{help} output is descriptive rather than
-a stable machine interface.  @code{list --json} and @code{plan --json} share one
-computed fact record; key names are stable, object key order is not, and input
-array order follows declaration order.
+a stable machine interface.  @code{list --json}, @code{plan --json}, and
+@code{--routing --json} use stable key names; object key order is not significant,
+and declared input array order is preserved.  @code{list --json} emits descriptor
+version 3 with routing and protocol-negotiation capabilities while retaining
+machine protocol and store version 1.
 
 Run output is the trace record as it happens.  There is no summary JSON because
 a second representation would omit or duplicate the event stream.  Standard

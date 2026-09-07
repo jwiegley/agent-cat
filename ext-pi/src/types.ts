@@ -16,6 +16,7 @@ export type WorkflowDescriptor = {
   runnerId: string;
   name: string;
   blurb: string;
+  result: unknown;
   level: string;
   size: number;
   askNodes: number;
@@ -30,6 +31,19 @@ export type WorkflowDescriptor = {
   protocolVersions: number[];
   storeVersions: number[];
   capabilities: Record<string, boolean | number>;
+  personAnsweringModes: string[];
+};
+
+export type RoutingModelChoice = { alias: string; engine: string };
+
+export type RoutingInspection = {
+  version: 2;
+  persona: { name: string; source: string };
+  availablePersonas: string[];
+  availableModels: RoutingModelChoice[];
+  profiles: Array<{ name: string; rungs: Array<{ axis: string; modelAlias: string; model: string }> }>;
+  warnings: string[];
+  raw: Record<string, unknown>;
 };
 
 export type RuntimeEvent = {
@@ -40,12 +54,40 @@ export type RuntimeEvent = {
   event: { type: string; [key: string]: unknown };
 };
 
+export type QuestionRef = {
+  artifactVersion: number;
+  path: string;
+  sha256: string;
+  bytes: string;
+};
+
+export type PublicToolProgress = {
+  id: string;
+  title?: string;
+  toolKind?: string;
+  status?: "pending" | "in_progress" | "completed" | "failed" | "cancelled";
+  summary?: string;
+};
+
+export type PublicTodoItem = { content: string; priority: "high" | "medium" | "low"; status: "pending" | "in_progress" | "completed" };
+export type PublicUsage = { used: string; size: string };
+
+export type ResultRef = QuestionRef & {
+  code: unknown;
+  preview: string;
+};
+
 export type AttemptSnapshot = {
   id: string;
   target?: string;
   state: "running" | "completed" | "failed";
   output: string;
   steers: Array<{ controlId: string; timing: string; text: string }>;
+  messages: string[];
+  tools: Map<string, PublicToolProgress>;
+  todos: PublicTodoItem[];
+  usage?: PublicUsage;
+  reasoningSummaries: string[];
   failure?: string;
   failureClass?: string;
 };
@@ -70,20 +112,31 @@ export type OccurrenceSnapshot = {
   source?: string;
   failureClass?: string;
   replayable: boolean;
+  personQuestion?: QuestionRef;
+  personPending?: boolean;
   attempts: Map<string, AttemptSnapshot>;
 };
 
 export type RunStatus = "starting" | "running" | "cancelling" | "succeeded" | "failed" | "cancelled" | "orphaned";
 
-export type ControlAckSnapshot = { controlId: string; state: string; message: string };
+export type ControlAckSnapshot = {
+  controlId: string;
+  state: string;
+  message: string;
+  command?: string;
+  occurrenceId?: string;
+  attemptId?: string;
+};
 
 export type RunSnapshot = {
   runId: string;
   status: RunStatus;
+  protocolVersion?: number;
   lastSequence?: bigint;
   sequenceGap?: string;
   workflow?: string;
   target?: string;
+  personAnswering?: "engine" | "local-control";
   occurrences: Map<string, OccurrenceSnapshot>;
   authoredOrder: string[];
   traceRecorded: boolean;
@@ -91,6 +144,7 @@ export type RunSnapshot = {
   controlAcks: Map<string, ControlAckSnapshot>;
   billFresh?: string;
   billMemo?: string;
+  result?: ResultRef;
   failure?: string;
   failureClass?: string;
 };
@@ -98,8 +152,11 @@ export type RunSnapshot = {
 export type TargetKind = "scripted" | "acp" | "deck" | "current" | "child" | "remote";
 
 export type LaunchManifest = {
+  frontendManifestVersion?: 2;
   runId: string;
   runnerId: string;
+  runnerExecutable?: string;
+  runnerVersion?: string;
   workflow: string;
   cwd: string;
   targetKind: TargetKind;
@@ -110,4 +167,9 @@ export type LaunchManifest = {
   parentRunId?: string;
   lineage?: "restart" | "resume" | "fork";
   lineageEdits?: Array<{ type: "drop" | "replace"; occurrenceId: string; replacementHash?: string }>;
+  persona?: string;
+  policyDigest?: string;
+  personAnswering?: "engine" | "local-control";
+  ownerId?: string;
+  runtimeStore?: "runtime";
 };

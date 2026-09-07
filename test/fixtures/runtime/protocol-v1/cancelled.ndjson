@@ -1,0 +1,3 @@
+{"protocolVersion":1,"runId":"run-1","sequence":"0","timestamp":"2026-09-03T00:00:00Z","event":{"type":"run.started","workflow":"review","target":"scripted"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"1","timestamp":"2026-09-03T00:00:00Z","event":{"type":"control.ack","controlId":"cancel-1","state":"accepted","message":"cancellation accepted"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"2","timestamp":"2026-09-03T00:00:00Z","event":{"type":"run.cancelled","message":"cancelled"}}

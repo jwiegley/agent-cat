@@ -10,8 +10,20 @@ common model settings, and transport failures.
 `Agentic.Acp` exposes the connection and configuration primitives, the neutral
 `AdapterSpec`, the ACP-specific `AcpModelConfig`, and the two constructors
 `engineOfAcp` and `engineOfAcpConfigured`. Arbitrary ACP configuration options
-stop at this boundary and never enter the neutral engine API. Permission
-follows intent: `permissionByIntent` grants a tool request only for an
+stop at this boundary and never enter the neutral engine API. `AcpConfig` also
+carries an opaque `ChildEnvironment`: its default inherits the ambient process
+environment exactly as before, while CLI-resolved routing v2 may supply one
+explicit map plus the exact secret values that suppress matching public updates.
+Neither appears through `Show`; environment values are passed only to child creation,
+and the redaction set remains internal to the engine/runtime boundary.
+
+Answer chunks use the explicit answer constructor in `EngineUpdate`. Measured
+ACP tool, complete plan, and usage updates use optional public constructors and
+are bounded and redacted, including by exact selected secret value, before protocol-v2 persistence. ACP thought
+chunks are ignored because the protocol does not identify them as public reasoning
+summaries. Unknown update kinds remain absent rather than acquiring synthetic data.
+
+Permission follows intent: `permissionByIntent` grants a tool request only for an
 effect-annotated occurrence and cancels it for consultations and observations,
 and every decision is announced on standard error. The commands and pins for
 Claude, Codex, and Droid belong to the three child directories.

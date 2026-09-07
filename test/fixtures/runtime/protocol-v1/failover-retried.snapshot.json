@@ -1,0 +1,71 @@
+{
+  "runId": "run-1",
+  "status": "succeeded",
+  "lastSequence": "13",
+  "workflow": "review",
+  "target": "routed",
+  "occurrences": [
+    {
+      "id": "0",
+      "state": "completed",
+      "code": "text",
+      "intent": "consult",
+      "addressee": "model reviewer",
+      "prompt": "prompt",
+      "answer": "answer",
+      "dispatch": null,
+      "recovery": {
+        "gap": "transport",
+        "message": "unavailable",
+        "retries": ["failover-1"],
+        "choices": [
+          { "choice": "retry" },
+          { "choice": "failover" },
+          { "choice": "abandon" }
+        ],
+        "chosen": {
+          "controlId": "failover-1",
+          "choice": "failover",
+          "target": null
+        }
+      },
+      "reuseKind": null,
+      "source": "asked:model@spare",
+      "failureClass": null,
+      "replayable": true,
+      "attempts": [
+        {
+          "id": "0:0",
+          "target": "model@primary",
+          "state": "failed",
+          "output": "",
+          "steers": [],
+          "failure": "unavailable",
+          "failureClass": "transport"
+        },
+        {
+          "id": "0:1",
+          "target": "model@spare",
+          "state": "completed",
+          "output": "",
+          "steers": [],
+          "failure": null,
+          "failureClass": null
+        }
+      ]
+    }
+  ],
+  "authoredOrder": ["0"],
+  "traceRecorded": true,
+  "controlAcks": [
+    {
+      "controlId": "failover-1",
+      "state": "delivered",
+      "message": "recovery delivered"
+    }
+  ],
+  "billFresh": "1",
+  "billMemo": "1",
+  "failure": null,
+  "failureClass": null
+}

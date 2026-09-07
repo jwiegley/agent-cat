@@ -1,0 +1,10 @@
+{"protocolVersion":1,"runId":"run-1","sequence":"0","timestamp":"2026-09-03T00:00:00Z","event":{"type":"run.started","workflow":"review","target":"routed"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"1","timestamp":"2026-09-03T00:00:00Z","event":{"type":"occurrence.started","occurrenceId":"0","code":"flag","intent":"consult","addressee":"model reviewer","prompt":"prompt"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"2","timestamp":"2026-09-03T00:00:00Z","event":{"type":"attempt.started","occurrenceId":"0","attempt":"0","target":"model@primary"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"3","timestamp":"2026-09-03T00:00:00Z","event":{"type":"attempt.failed","occurrenceId":"0","attempt":"0","failure":"decode","message":"maybe"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"4","timestamp":"2026-09-03T00:00:00Z","event":{"type":"occurrence.recovery-pending","occurrenceId":"0","gap":"decode","message":"maybe","choices":[{"choice":"retry"},{"choice":"failover","target":"model@spare"},{"choice":"abandon"}]}}
+{"protocolVersion":1,"runId":"run-1","sequence":"5","timestamp":"2026-09-03T00:00:00Z","event":{"type":"control.ack","controlId":"abandon-1","state":"accepted","message":"recovery accepted"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"6","timestamp":"2026-09-03T00:00:00Z","event":{"type":"occurrence.recovery-chosen","occurrenceId":"0","controlId":"abandon-1","choice":"abandon"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"7","timestamp":"2026-09-03T00:00:00Z","event":{"type":"control.ack","controlId":"abandon-1","state":"delivered","message":"recovery delivered"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"8","timestamp":"2026-09-03T00:00:00Z","event":{"type":"occurrence.failed","occurrenceId":"0","failure":"decode","message":"abandoned"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"9","timestamp":"2026-09-03T00:00:00Z","event":{"type":"run.failed","failure":"decode","message":"abandoned"}}

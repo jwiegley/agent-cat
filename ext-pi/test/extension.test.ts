@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { access, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -291,6 +291,66 @@ describe("Pi extension lifecycle", () => {
       for (const handler of events.get("session_shutdown") ?? []) await handler({}, ctx);
     } finally {
       if (previousRunner === undefined) delete process.env.AGENT_CAT_RUNNER; else process.env.AGENT_CAT_RUNNER = previousRunner;
+      if (previousState === undefined) delete process.env.AGENT_CAT_STATE_DIR; else process.env.AGENT_CAT_STATE_DIR = previousState;
+    }
+  });
+
+  it("uses descriptor-v3 sanitized routing choices and persists only persona/model aliases", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "agent-cat-extension-routing-v3-"));
+    created.push(directory);
+    const previousRunner = process.env.AGENT_CAT_RUNNER;
+    const previousRunners = process.env.AGENT_CAT_RUNNERS;
+    const previousState = process.env.AGENT_CAT_STATE_DIR;
+    delete process.env.AGENT_CAT_RUNNER;
+    process.env.AGENT_CAT_RUNNERS = JSON.stringify([{
+      id: "agent-cat", executable: resolve("test/fixtures/runner.mjs"),
+      prefixArgs: ["--descriptor-v3"], allowedCwds: [directory],
+    }]);
+    process.env.AGENT_CAT_STATE_DIR = join(directory, "state");
+    try {
+      const commands = new Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>();
+      const events = new Map<string, Array<(event: unknown, ctx: unknown) => Promise<unknown>>>();
+      const entries: unknown[] = [];
+      const selectors: string[] = [];
+      const confirmations: string[] = [];
+      extension({
+        registerEntryRenderer: () => {}, registerTool: () => {}, sendUserMessage: () => {},
+        registerCommand: (name: string, command: unknown) => commands.set(name, command as never),
+        appendEntry: (_type: string, data: unknown) => entries.push(data),
+        on: (name: string, handler: (event: unknown, ctx: unknown) => Promise<unknown>) => events.set(name, [...(events.get(name) ?? []), handler]),
+      } as never);
+      const ui = {
+        select: async (title: string, choices: string[]) => {
+          selectors.push(title);
+          if (title === "Execution target") return "native ACP adapter (live, agent-cat scratch)";
+          if (title === "Routing persona") return "persona: personal";
+          if (title === "Model alias for worker") return "shared-model";
+          throw new Error(`unexpected selector ${title}: ${choices.join(",")}`);
+        },
+        input: async (title: string) => title.startsWith("ACP adapter") ? "/trusted/adapter" : undefined,
+        editor: async (title: string) => title.startsWith("Adapter argv") ? "[]" : "subject",
+        confirm: async (title: string) => { confirmations.push(title); return true; },
+        notify: () => {}, setWidget: () => {}, setStatus: () => {}, custom: async () => undefined,
+      };
+      const ctx = { cwd: directory, mode: "tui", hasUI: true, isProjectTrusted: () => true, ui, isIdle: () => true, abort: () => {}, sessionManager: { getBranch: () => [] } };
+      for (const handler of events.get("session_start") ?? []) await handler({}, ctx);
+      await commands.get("workflow")!.handler("agent-cat:fixture", ctx);
+      await until(() => entries.length === 1);
+      const [runId] = await readdir(join(directory, "state", "runs"));
+      const manifestPath = join(directory, "state", "runs", runId, "supervisor-manifest.json");
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+      expect(manifest.targetArgs).toEqual([
+        "--engine", "acp", "--adapter", "/trusted/adapter",
+        "--persona", "personal", "--realize", "worker=shared-model",
+      ]);
+      expect(JSON.stringify(manifest)).not.toContain("sentinel");
+      expect((await stat(manifestPath)).mode & 0o077).toBe(0);
+      expect(selectors).toEqual(["Execution target", "Routing persona", "Model alias for worker"]);
+      expect(confirmations).not.toContain("Configure pin routes?");
+      for (const handler of events.get("session_shutdown") ?? []) await handler({}, ctx);
+    } finally {
+      if (previousRunner === undefined) delete process.env.AGENT_CAT_RUNNER; else process.env.AGENT_CAT_RUNNER = previousRunner;
+      if (previousRunners === undefined) delete process.env.AGENT_CAT_RUNNERS; else process.env.AGENT_CAT_RUNNERS = previousRunners;
       if (previousState === undefined) delete process.env.AGENT_CAT_STATE_DIR; else process.env.AGENT_CAT_STATE_DIR = previousState;
     }
   });

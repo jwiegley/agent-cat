@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat } from "node:fs/p
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { discoverRunner, readHelp } from "../src/catalogue.ts";
+import { discoverRunner, negotiateProtocolVersion, parseDescriptor, readHelp, readRouting, supportsRoutingInspection } from "../src/catalogue.ts";
 import { assertNoCredentialArgs, prepareLaunch, preflightLineage, previewPlan } from "../src/launch.ts";
 import type { RunnerConfig } from "../src/types.ts";
 
@@ -30,15 +30,67 @@ describe("catalogue and launch", () => {
       ["--route", "deep=acp:FACTORY_API_KEY=x"],
     ]) expect(() => assertNoCredentialArgs(args)).toThrow("credential-bearing target argv is forbidden");
   });
-  it("discovers v2 input sources, upgrades v1 inputs, and preserves exact help", async () => {
+  it("negotiates v3 input sources, upgrades v1 inputs, and preserves exact help", async () => {
     const { directory, config } = await setup();
     const [descriptor] = await discoverRunner(config, directory);
     expect(descriptor.name).toBe("fixture");
-    expect(descriptor.descriptorVersion).toBe(2);
+    expect(descriptor.descriptorVersion).toBe(3);
     expect(descriptor.inputs).toEqual([{ name: "subject", source: "prompt" }]);
     const [legacy] = await discoverRunner({ ...config, prefixArgs: ["--descriptor-v1"] }, directory);
     expect(legacy.inputs).toEqual([{ name: "subject", source: "prompt" }]);
+    const [fallback] = await discoverRunner({ ...config, prefixArgs: ["--descriptor-legacy-reject-v3"] }, directory);
+    expect(fallback).toMatchObject({ descriptorVersion: 1, protocolVersions: [1], storeVersions: [1] });
+    await expect(discoverRunner({ ...config, prefixArgs: ["--descriptor-v3-error"] }, directory)).rejects.toThrow("descriptor catalogue crashed");
     expect(await readHelp(config, "fixture", directory)).toBe("exact fixture help\n");
+  });
+
+  it("agrees with shared descriptor-v2 and descriptor-v3 fixtures", async () => {
+    const fixture = async (path: string): Promise<unknown> =>
+      JSON.parse(await readFile(resolve("../test/fixtures/runtime", path), "utf8")) as unknown;
+    expect(parseDescriptor("shared", await fixture("descriptor-v2/valid.json"))).toMatchObject({
+      descriptorVersion: 2, name: "review", personAnsweringModes: [],
+      protocolVersions: [1], storeVersions: [1],
+    });
+    const invalid = await fixture("descriptor-v2/invalid-unknown.json");
+    expect(() => parseDescriptor("shared", invalid)).toThrow("unknown field");
+    const effectsOnly = await fixture("descriptor-v2/valid.json") as Record<string, unknown>;
+    effectsOnly.capabilities = { ...(effectsOnly.capabilities as Record<string, unknown>), effects: 1 };
+    delete (effectsOnly.capabilities as Record<string, unknown>).effectful;
+    expect(() => parseDescriptor("shared", effectsOnly)).toThrow("effectful disagrees with effects");
+    expect(parseDescriptor("shared", await fixture("descriptor-v3/valid.json"))).toMatchObject({
+      descriptorVersion: 3, name: "review", personAnsweringModes: ["local-control"],
+      protocolVersions: [1, 2], storeVersions: [1, 2],
+    });
+  });
+
+  it("negotiates descriptor-v3 protocol v2 while retaining descriptor-v2/protocol-v1 compatibility", async () => {
+    const { directory, config } = await setup();
+    const [latest] = await discoverRunner(config, directory);
+    expect(latest.descriptorVersion).toBe(3);
+    expect(supportsRoutingInspection(latest)).toBe(false);
+    const [older] = await discoverRunner({ ...config, prefixArgs: ["--descriptor-v1"] }, directory);
+    expect(supportsRoutingInspection(older)).toBe(false);
+    expect(negotiateProtocolVersion(older)).toBe(1);
+
+    const v3Runner = { ...config, prefixArgs: ["--descriptor-v3"] };
+    const [descriptor] = await discoverRunner(v3Runner, directory);
+    expect(descriptor.descriptorVersion).toBe(3);
+    expect(supportsRoutingInspection(descriptor)).toBe(true);
+    expect(negotiateProtocolVersion(descriptor)).toBe(2);
+    expect(negotiateProtocolVersion(descriptor, [1])).toBe(1);
+    expect(() => negotiateProtocolVersion(descriptor, [3])).toThrow("no supported machine protocol");
+
+    const configured = await readRouting(v3Runner, directory);
+    expect(configured).toMatchObject({
+      version: 2, persona: { name: "personal", source: "user-default" },
+      availablePersonas: ["personal", "work"],
+    });
+    const work = await readRouting(v3Runner, directory, { persona: "work", mode: "offline" });
+    expect(work?.persona).toEqual({ name: "work", source: "command-line" });
+    expect(work?.availableModels).toEqual([{ alias: "work-model", engine: "work-engine" }]);
+    await expect(readRouting({ ...config, prefixArgs: ["--descriptor-v3-unsafe"] }, directory)).rejects.toThrow("forbidden field secrets");
+    await expect(readRouting({ ...config, prefixArgs: ["--descriptor-v3-unsafe-case"] }, directory)).rejects.toThrow("forbidden field api_Key");
+    await expect(readRouting({ ...config, prefixArgs: ["--descriptor-v3-unsafe-url"] }, directory)).rejects.toThrow("forbidden field endpointUrl");
   });
 
   it.each([
@@ -57,16 +109,17 @@ describe("catalogue and launch", () => {
       runner: { ...config, prefixArgs: ["--descriptor-v1"] }, descriptor: legacyDescriptor, cwd: directory,
       stateDir: join(directory, "legacy-state"), inputs: { subject: "legacy" }, targetKind: "scripted", targetArgs: ["--scripted"],
     });
-    expect(legacy.controlFd).toBeUndefined();
+    expect(legacy).toMatchObject({ controlFd: undefined, protocolVersion: 1 });
     expect(legacy.env.AGENT_CAT_CONTROL_STDIN).toBe("1");
 
-    const stdinRunner = { ...config, prefixArgs: ["--descriptor-stdin"] };
+    const stdinRunner = { ...config, prefixArgs: ["--descriptor-v3-stdin"] };
     const [stdinDescriptor] = await discoverRunner(stdinRunner, directory);
     const stdinLaunch = await prepareLaunch({
       runner: stdinRunner, descriptor: stdinDescriptor, cwd: directory, stateDir: join(directory, "stdin-state"),
       inputs: { subject: "private body" }, targetKind: "scripted", targetArgs: ["--scripted"],
     });
-    expect(stdinLaunch).toMatchObject({ controlFd: 3, stdinFile: expect.any(String) });
+    expect(stdinLaunch).toMatchObject({ controlFd: 3, protocolVersion: 2, stdinFile: expect.any(String) });
+    expect(stdinLaunch.args).toContain("--protocol-version");
     expect(stdinLaunch.env.AGENT_CAT_CONTROL_FD).toBe("3");
     expect(stdinLaunch.env.AGENT_CAT_CONTROL_STDIN).toBeUndefined();
     expect(stdinLaunch.args.join(" ")).not.toContain("subject=");
@@ -98,8 +151,14 @@ describe("catalogue and launch", () => {
     expect((await stat(input)).mode & 0o777).toBe(0o600);
     const manifest = await readFile(join(prepared.storeDir, "supervisor-manifest.json"), "utf8");
     expect(manifest).not.toContain("secret");
+    expect(prepared.manifest).toMatchObject({
+      frontendManifestVersion: 2, targetKind: "scripted", personAnswering: "engine", runtimeStore: "runtime",
+      runnerExecutable: await realpath(config.executable), runnerVersion: descriptor.runnerVersion,
+    });
     expect(prepared.manifest.programHash).toMatch(/^[0-9a-f]{64}$/);
-    expect(prepared.manifest.targetKind).toBe("scripted");
+    expect(prepared.manifest.ownerId).toBe(prepared.env.AGENT_CAT_RUN_OWNER);
+    expect(prepared.protocolVersion).toBe(2);
+    expect(prepared.args).toContain("--protocol-version");
   });
 
   it("removes private preview inputs after reading the raw plan", async () => {

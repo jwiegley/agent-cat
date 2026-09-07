@@ -13,9 +13,13 @@ Pi loads `src/index.ts`, which registers the `/wf` command, the
 `/workflow-...` commands, and the `agent_cat_workflow` tool. The extension
 imports no Haskell code and never interprets a `RawProgram` or a `Plan`. It
 speaks three versioned process protocols of `agentic-run`: the descriptor that
-`list --json` publishes (version 2), the machine event stream (protocol version
-1), and the correlated control channel. The CLI and the runtime own scheduling,
-persistence semantics, effects, and engine behavior; the extension owns trusted
+`list --json` publishes (version 3, while versions 1 and 2 remain accepted), the
+machine event stream (protocol version 2 when advertised, with version 1 retained
+for older runners), and the correlated control channel. Descriptor v3 advertises
+sanitized routing inspection and protocol negotiation; v2 completion carries a
+verified private result reference.
+The CLI and runtime own scheduling, persistence semantics, effects, and engine
+behavior; the extension owns trusted
 discovery, approval, supervision, the user interface, retention, and durable
 run references.
 
@@ -49,11 +53,17 @@ export AGENT_CAT_PI_REMOTE_SESSION=<known-session-id>  # optional
 The runner path and the state directory must be absolute. No project file and
 no repository scan grants runner trust, and every mutable launch additionally
 requires Pi's project-trust decision for the working directory. Adapter
-arguments that contain credential-like flags or values are refused; credentials
-stay in the inherited environment or provider configuration and are never
-written to a manifest. Remote transport authentication occurs before any Pi
+arguments that contain credential-like flags or values are refused. Under routing
+v2, credentials remain environment references resolved inside agent-cat; the
+extension receives neither those references nor their values, and writes only
+persona/model-alias argv to its private manifest. Remote transport authentication
 protocol bytes, the Unix transport relies on private socket permissions, and a
 remote session is acquired exclusively across client connections.
+
+Protocol-v2 runs retain typed public tool, complete plan/todo, and context-usage
+updates separately from answer chunks. Obvious credential-bearing diagnostic
+lines are redacted before persistence. ACP thought chunks are not public reasoning
+summaries and are ignored. Engines that report no optional progress acquire none.
 
 `/wf` requires Pi to be running inside Agent Deck. It reads the inherited
 `AGENTDECK_INSTANCE_ID` and never scans for, or asks the user to name, another
@@ -96,9 +106,10 @@ cat instructions.txt | agentic-run run review --session "$AGENTDECK_INSTANCE_ID"
 ```
 
 Machine mode reserves file descriptor 0 for that payload and takes control
-NDJSON on the inherited descriptor 3. A runner that publishes descriptor
-version 1 remains prompt-only and keeps stdin controls; multiline bodies
-require descriptor version 2 and control-descriptor support.
+NDJSON on inherited file descriptor 3. Descriptor v3 retains protocol v1 while
+advertising negotiation and routing capabilities. A descriptor-v1 runner remains
+prompt-only and keeps stdin controls; multiline bodies require descriptor v2 or
+v3 plus control-descriptor support.
 
 ## Commands
 
@@ -129,13 +140,29 @@ anything is spent. Controls wait for agent-cat's terminal acknowledgement and
 report `delivered`, `rejected-stale`, `unsupported`, or `failed` verbatim; a
 request is never presented as a success.
 
+## Routing selection
+
+When a trusted descriptor-v3 runner advertises routing inspection, `/wf` and
+`/workflow` invoke `agentic-run --routing --json`. Pi offers the configured
+persona or another user-owned persona, then optional concrete model aliases for
+the workflow's managed profile axes. It passes only `--persona` and
+`--realize AXIS=MODEL-ALIAS`. Raw `--route` remains available only for pins that
+the inspection says are unmanaged.
+
+The extension validates the sanitized version-2 projection and rejects fields for
+secrets, environment bindings, headers, authorization, or endpoint URLs. It never
+opens `routing.yaml`, resolves selectors, reads a cache, or interprets an engine.
+Descriptor-v1/v2 runners, and descriptor-v3 runners currently using v1 routing,
+retain the previous route wizard. Supervisor manifests remain mode 0600 and store
+only the selected non-secret argument vector.
+
 ## Targets and containment
 
 | Target | What answers | Containment |
 |---|---|---|
 | Scripted | The registered canned table. | Offline; no commands run. |
-| Native ACP | A configured adapter plus validated descriptor-pin routes. Built-ins are `stub`, `claude`, `codex`, and `droid`; `droid` launches `droid exec --output-format acp`. | agent-cat's scratch directory, which is not an operating-system sandbox. |
-| Native agent-deck | The Agent Deck session inherited by `/wf`, or one chosen in the compatibility wizard, plus validated routes. | The session's own workspace. |
+| Native ACP | A configured adapter plus validated unmanaged-pin routes or v2 persona/model-alias choices. Built-ins are `stub`, `claude`, `codex`, and `droid`; `droid` launches `droid exec --output-format acp`. | agent-cat's scratch directory, which is not an operating-system sandbox. |
+| Native agent-deck | The Agent Deck session inherited by `/wf`, or one chosen in the compatibility wizard, plus unmanaged routes or v2 persona/model-alias choices. | The session's own workspace. |
 | Current Pi session | Visible, exclusive injected turns in the current project. | Not a sandbox. |
 | Owned Pi child | An in-memory Pi session with tools disabled. | agent-cat's scratch directory. |
 | Remote Pi session | A known or authenticated-discovered session under an exclusive lease. | Its remote workspace; not a sandbox. |
@@ -173,11 +200,13 @@ permission policy under ACP remains authoritative.
 ## Persistence and recovery
 
 Supervisor state is private under `STATE/runs/<run-id>/`, and agent-cat's own
-store is the `runtime/` child of that directory. Pi transcript entries hold
-references and terminal status, never copied prompts or credentials. A
-mode-0600 owner heartbeat lets another Pi process attach read-only to a live
-run's mirrored event stream while controls stay with the original exclusive
-supervisor; a dead owner leaves the run `orphaned`.
+store is the `runtime/` child of that directory. New runs use frontend manifest
+version 2, shared with the terminal frontend; legacy extension manifests remain
+readable. Pi transcript entries hold references and terminal status, never copied
+prompts or credentials. A mode-0600 owner heartbeat lets another Pi or TUI process
+attach read-only to a live run's event stream while controls stay with the original
+exclusive supervisor; a dead owner leaves the run `orphaned`. State sharing occurs
+only when those frontends are explicitly given the same `AGENT_CAT_STATE_DIR`.
 
 agent-cat persists an immutable manifest with a fixed reference to a private
 `program.json`, an append-only event journal, schema-indexed reusable answers
@@ -208,7 +237,9 @@ after each send, and prompt text never enters an argument vector or a machine
 diagnostic. Run and store directories are private to the user. Protocol frames
 are bounded at 1 MiB with canonical UTC timestamps and fail-closed sequence and
 lifecycle reduction; in-memory attempt-output tails are bounded at 64 KiB, and
-redacted standard-error logs at 10 MiB. Environment values with credential-like
+redacted standard-error logs at 10 MiB. Public progress text, collections, event
+counts, and tool histories are bounded; stored event identities use fixed-size
+digests. Environment values with credential-like
 names or common token syntax are redacted. Cancellation is graceful first and
 falls back to a process-group TERM and KILL. Retention never prunes an orphaned
 run or an immutable parent that retained lineage references.

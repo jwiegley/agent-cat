@@ -9,9 +9,13 @@ executable. No other directory imports it.
 
 `cli/src` holds the library modules. `Agentic.Cli` is the registry and command
 dispatcher, `Agentic.Route` is the concrete `acp:` and `deck:` backend grammar
-over the generic runtime route table, and `Agentic.RoutingConfig` is the strict
-layered model-definition schema and resolver. `Agentic.Chains` and
-`Agentic.RequirePinned` are hidden implementation modules. `cli/example` holds
+over the generic runtime route table. `Agentic.RoutingConfig` retains the public
+version-1 resolver and the sanitized resolved-policy surface. Hidden
+`Agentic.RoutingConfig.V2`, `Agentic.RoutingDiscovery`,
+`Agentic.RoutingSecrets`, and `Agentic.RoutingInspect` own strict trust-separated
+version-2 decoding, bounded catalogue/cache I/O, environment references, and
+inspection/migration. `Agentic.Chains` and `Agentic.RequirePinned` remain hidden
+implementation modules. `cli/example` holds
 the registry rows, help pages, and scripted replies for the bundled workflows;
 they build into the internal `examples` library beside the workflow values
 themselves. `cli/run/Main.hs` is the executable, which applies `cliMain` to the
@@ -22,27 +26,44 @@ and live `bisim` executables.
 
 ## External behavior
 
-The command is `agentic-run` with the verbs `list`, `help`, `plan`, `cost`,
-`run`, and the machine family `machine`, `machine-restart`, `machine-resume`,
-`machine-fork`, and `lineage-check`. Exit status 0 is a completed command, 1 a
-usage or preflight refusal, 2 a transport failure, and 3 a run abandoned over
-what arrived. `list --json` publishes descriptor version 2; machine mode
-speaks protocol version 1 and store format 1. The Texinfo manual's "Runner
-Reference" chapter documents every verb and option.
+The command is `agentic-run` with top-level `--tui`, the verbs `list`, `help`,
+`plan`, `cost`, `run`, and the machine family `machine`, `machine-restart`,
+`machine-resume`, `machine-fork`, and `lineage-check`. Exit status 0 is a
+completed command, 1 a usage or preflight refusal, 2 a transport failure, and 3
+a run abandoned over what arrived. `list --json` publishes descriptor version 3.
+Omitted machine protocol remains version 1/store 1; negotiated protocol 2/store 2
+adds result/question artifacts, local person answers, and bounded public progress.
+`--tui` delegates to the public Runtime-only terminal facade, which launches the
+current executable rather than importing this module's interpreter. The Texinfo
+manual's "Runner Reference" chapter documents every verb and option.
 
 ## Model definitions
 
-Workflow source contains symbolic model and profile names. Optional version-1
-`routing.yaml` files map those names to routers, concrete models, thinking
-levels, output limits, and scalar ACP options. The user file is
-`$XDG_CONFIG_HOME/agent-cat/routing.yaml`, and the nearest `.agent-cat/routing.yaml`
-between the working directory and the repository boundary is the project
-layer, whose named routers and profiles replace their user-layer
-counterparts. A command-line `--route` is the highest backend override. The
-CLI alone discovers, validates, merges, resolves, preflights, and records
-these definitions, and ACP options enter the adapter-specific `AcpModelConfig`
-rather than the neutral engine API. `model-definitions.example.yaml` is
-documentation rather than an automatic default; it covers every `servedBy`
+Workflow source contains symbolic model and profile names. Version-1
+`routing.yaml` files retain their existing whole-router/profile overlay and raw
+`--route` precedence. Version 2 separates a privileged user file at
+`$XDG_CONFIG_HOME/agent-cat/routing.yaml` from the nearest restricted project
+file `.agent-cat/routing.yaml`: the user defines environment secret references,
+engine instances, bounded catalogues, concrete model aliases, personas, and
+profiles; a project may select a persona and replace profiles only. Mixed
+versions are refused.
+
+Persona precedence is `--persona`, `AGENT_CAT_PERSONA`, project selector, then
+user default. `--realize AXIS=MODEL-ALIAS` safely replaces a managed v2 axis; a
+raw `--route` for such an axis is refused, while v1 and unconfigured route
+behavior is unchanged. `--offline` and `--refresh-models` select cache policy.
+`--routing --json` is the sanitized frontend contract, and
+`--migrate-routing SOURCE --output DESTINATION` creates an offline v2 file
+without overwriting either path.
+
+The CLI alone discovers, validates, resolves, preflights, freezes, and records
+these definitions. Secret values come only from named environment variables,
+never YAML or argv, and selected ACP children receive a redacted environment
+overlay after declared source/destination variables are scrubbed. This is routing
+context, not an operating-system credential sandbox. Agent Deck receives no
+synthetic environment behavior. `model-definitions.example.yaml` is documentation
+rather than an automatic default and covers every `servedBy` profile in the
+bundled workflows.
 profile the bundled workflows name.
 
 ## Dependencies
@@ -61,6 +82,9 @@ nix develop path:. -c cabal run agentic-run -- list
 nix develop path:. -c cabal run agentic-run -- plan harden
 nix develop path:. -c cabal run agentic-run -- cost harden
 nix develop path:. -c cabal run agentic-run -- run harden --scripted
+nix develop path:. -c cabal run agentic-run -- --tui
+nix develop path:. -c cabal run agentic-run -- --routing --json --offline
+nix develop path:. -c cabal run agentic-run -- --migrate-routing old.yaml --output new.yaml
 ```
 
 ## Conventions
@@ -70,4 +94,4 @@ identity-neutral. Preserve the routing precedence, the strict schema and
 secret refusals, eager preflight, the command-line text and JSON, and the exit
 mapping. Registry, help, and scripted data may describe workflows and stay in
 this directory. After a composition change, run `ci/policies.sh`,
-`ci/examples.sh`, `ci/routing-config.sh`, and both engine gates.
+`ci/examples.sh`, `ci/routing-config.sh`, both engine gates, and `../tui/ci/tui.sh`.

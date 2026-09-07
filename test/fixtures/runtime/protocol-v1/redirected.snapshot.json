@@ -1,0 +1,55 @@
+{
+  "runId": "run-1",
+  "status": "succeeded",
+  "lastSequence": "10",
+  "workflow": "review",
+  "target": "routed",
+  "occurrences": [
+    {
+      "id": "0",
+      "state": "completed",
+      "code": "text",
+      "intent": "consult",
+      "addressee": "model reviewer",
+      "prompt": "prompt",
+      "answer": "answer",
+      "dispatch": {
+        "targets": ["model@primary", "model@spare"],
+        "open": false,
+        "redirect": {
+          "controlId": "redirect-1",
+          "target": "model@spare"
+        }
+      },
+      "recovery": null,
+      "reuseKind": null,
+      "source": "asked:model@spare",
+      "failureClass": null,
+      "replayable": true,
+      "attempts": [
+        {
+          "id": "0:0",
+          "target": "model@spare",
+          "state": "completed",
+          "output": "",
+          "steers": [],
+          "failure": null,
+          "failureClass": null
+        }
+      ]
+    }
+  ],
+  "authoredOrder": ["0"],
+  "traceRecorded": true,
+  "controlAcks": [
+    {
+      "controlId": "redirect-1",
+      "state": "delivered",
+      "message": "redirect delivered"
+    }
+  ],
+  "billFresh": "1",
+  "billMemo": "1",
+  "failure": null,
+  "failureClass": null
+}

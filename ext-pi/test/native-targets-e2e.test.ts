@@ -27,6 +27,7 @@ describe.runIf(Boolean(runnerPath))("native agent-cat targets through the extens
         "--timeout", "30000",
       ],
     });
+    isolateRouting(launch, directory);
     const result = await new RunSupervisor().start(launch).finished;
     expect(result, `${result.failureClass}: ${result.failure}`).toMatchObject({ status: "succeeded", billFresh: "7", billMemo: "7" });
     expect([...result.occurrences.values()].some((occurrence) => occurrence.attempts.size > 0)).toBe(true);
@@ -39,6 +40,7 @@ describe.runIf(Boolean(runnerPath))("native agent-cat targets through the extens
       runner, descriptor, cwd: directory, stateDir: join(directory, "state"),
       inputs: { subject: payload }, targetKind: "scripted", targetArgs: ["--scripted"],
     });
+    isolateRouting(launch, directory);
     expect(launch).toMatchObject({ controlFd: 3, stdinFile: expect.any(String) });
     expect(launch.args.join(" ")).not.toContain("subject=");
     expect(launch.args.join(" ")).not.toContain("UNIQUE-A");
@@ -69,6 +71,7 @@ describe.runIf(Boolean(runnerPath))("native agent-cat targets through the extens
       targetKind: "deck",
       targetArgs: ["--session", "stub", "--binary", deckBinary, "--poll", "20", "--timeout", "30000"],
     });
+    isolateRouting(launch, directory);
     Object.assign(launch.env, { DECK_STUB_STATE: deckState, DECK_STUB_MODE: "happy" });
     const result = await new RunSupervisor().start(launch).finished;
     expect(result, `${result.failureClass}: ${result.failure}`).toMatchObject({ status: "succeeded", billFresh: "7", billMemo: "7" });
@@ -86,6 +89,7 @@ describe.runIf(Boolean(runnerPath))("native agent-cat targets through the extens
       inputs: { subject: secret }, targetKind: "deck",
       targetArgs: ["--session", "stub", "--binary", deckBinary, "--poll", "20", "--timeout", "1000"],
     });
+    isolateRouting(launch, directory);
     Object.assign(launch.env, { DECK_STUB_STATE: deckState, DECK_STUB_MODE: "send-fail" });
     const run = new RunSupervisor().start(launch);
     await until(() => [...run.snapshot.occurrences.values()].some(({ state }) => state === "recovering"));
@@ -106,10 +110,20 @@ describe.runIf(Boolean(runnerPath))("native agent-cat targets through the extens
   }, 15_000);
 });
 
+function isolateRouting(launch: Awaited<ReturnType<typeof prepareLaunch>>, directory: string): void {
+  launch.env.XDG_CONFIG_HOME = join(directory, "isolated-config");
+  delete launch.env.AGENT_CAT_PERSONA;
+}
+
 async function setup(workflow = "harden") {
   const directory = await mkdtemp(join(tmpdir(), "agent-cat-native-e2e-"));
   created.push(directory);
-  const runner: RunnerConfig = { id: "e2e", executable: runnerPath!, allowedCwds: [directory] };
+  const runner: RunnerConfig = {
+    id: "e2e",
+    executable: "/usr/bin/env",
+    prefixArgs: ["-u", "AGENT_CAT_PERSONA", `XDG_CONFIG_HOME=${join(directory, "isolated-config")}`, runnerPath!],
+    allowedCwds: [directory],
+  };
   const descriptor = (await discoverRunner(runner, directory)).find(({ name }) => name === workflow);
   if (!descriptor) throw new Error(`${workflow} descriptor is missing`);
   return { directory, runner, descriptor };

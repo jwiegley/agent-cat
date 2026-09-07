@@ -15,6 +15,13 @@ engines implement: model, thinking level, and maximum output. Symbolic
 profiles, routers, provider identity, backend-specific options, and file
 loading remain in the CLI.
 
+`EngineUpdate` keeps streamed answer chunks separate from optional public message,
+tool, todo, usage, and explicitly public reasoning-summary updates. An engine may
+emit none. An engine may also supply exact values through
+`enginePublicRedactionValues`; these are private filtering context, not updates. The
+runtime alone validates, bounds, redacts, persists, or omits presentation facts;
+they do not alter `EngineResult`.
+
 ## Dependencies
 
 This directory imports no other agent-cat directory. The runtime, the ACP

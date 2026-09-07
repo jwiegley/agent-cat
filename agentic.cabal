@@ -11,17 +11,46 @@ license:         MIT
 author:          John Wiegley
 maintainer:      jwiegley@positron.ai
 build-type:      Simple
+extra-source-files:
+  nix/haskell-overrides.nix
+  nix/process-close-fds-linux.patch
+  test/fixtures/runtime/descriptor-v2/*.json
+  test/fixtures/runtime/descriptor-v3/*.json
+  test/fixtures/runtime/frontend-manifest/*.json
+  test/fixtures/runtime/protocol-v1/*.json
+  test/fixtures/runtime/protocol-v1/*.ndjson
+  test/fixtures/runtime/protocol-v2/*.json
+  test/fixtures/runtime/protocol-v2/*.ndjson
+  test/fixtures/tui/*.golden
+  test/fixtures/tui/import-boundaries.json
+  test/source-boundaries.hs
+extra-doc-files:
+  doc/tui-design.md
+  doc/tui-release-evidence.md
+
+flag tui-tests
+  description: Build the private PTY fixture driver
+  default:     False
+  manual:      True
 
 common settings
   ghc-options:      -Wall
   default-language: Haskell2010
   build-depends:
     , aeson
+    , async
     , base
+    , brick
     , bytestring
+    , case-insensitive
     , containers
+    , crypton
     , directory
     , filepath
+    , http-client
+    , http-client-tls
+    , http-types
+    , memory
     , process
     , QuickCheck
     , scientific
@@ -30,16 +59,21 @@ common settings
     , text
     , time
     , unix
+    , vty
+    , vty-unix
     , vector
     , yaml
 
 library
   import:          settings
+  c-sources:       tui/cbits/process_group.c
+                   runtime/cbits/private_directory.c
   hs-source-dirs:
     dsl/src
     plan/src
     cost/src
     runtime/src
+    tui/src
     engine/api/src
     engine/acp/src
     engine/acp/claude/src
@@ -65,6 +99,7 @@ library
     Agentic.RoutingConfig
     Agentic.Runtime
     Agentic.Runtime.Facts
+    Agentic.Tui
     Agentic.Schema
     Agentic.Schema.Json
     Agentic.Schema.TH
@@ -78,11 +113,30 @@ library
     Agentic.Plan.Value
     Agentic.Raw
     Agentic.RequirePinned
+    Agentic.RoutingConfig.V2
+    Agentic.RoutingDiscovery
+    Agentic.RoutingInspect
+    Agentic.RoutingSecrets
+    Agentic.Runtime.Catalogue
     Agentic.Runtime.Control
+    Agentic.Runtime.Descriptor
     Agentic.Runtime.Machine
+    Agentic.Runtime.PrivateFile
+    Agentic.Runtime.PrivateRoot
     Agentic.Runtime.Protocol
     Agentic.Runtime.Route
+    Agentic.Runtime.Snapshot
     Agentic.Runtime.Store
+    Agentic.Tui.App
+    Agentic.Tui.Client
+    Agentic.Tui.Highlight
+    Agentic.Tui.Model
+    Agentic.Tui.Person
+    Agentic.Tui.Process
+    Agentic.Tui.ProcessGroup
+    Agentic.Tui.RunModel
+    Agentic.Tui.Root
+    Agentic.Tui.Types
     Agentic.Schema.Conformance
     Agentic.Shell
     Agentic.Text
@@ -175,6 +229,20 @@ executable routing-config-probe
   build-depends:   agentic
   ghc-options:     -threaded
 
+executable routing-v2-probe
+  import:          settings
+  hs-source-dirs:  cli/test
+  main-is:         RoutingV2Probe.hs
+  build-depends:   agentic
+  ghc-options:     -threaded
+
+executable routing-discovery-probe
+  import:          settings
+  hs-source-dirs:  cli/test
+  main-is:         RoutingDiscoveryProbe.hs
+  build-depends:   agentic
+  ghc-options:     -threaded
+
 executable routing-fixed-point-probe
   import:          settings
   hs-source-dirs:  cli/test
@@ -209,3 +277,40 @@ test-suite engine-api-test
   build-depends:
     , agentic
     , base
+
+test-suite runtime-contract-test
+  import:           settings
+  type:             exitcode-stdio-1.0
+  hs-source-dirs:   runtime/test
+  main-is:          Main.hs
+  build-depends:
+    , agentic
+    , base
+
+test-suite tui-model-test
+  import:           settings
+  type:             exitcode-stdio-1.0
+  hs-source-dirs:
+    tui/test
+    tui/src
+  main-is:          Main.hs
+  other-modules:
+    Agentic.Tui.Highlight
+    Agentic.Tui.Model
+    Agentic.Tui.Person
+    Agentic.Tui.RunModel
+    Agentic.Tui.Types
+  build-depends:
+    , agentic
+    , base
+
+executable tui-test-driver
+  import:           settings
+  if !flag(tui-tests)
+    buildable:       False
+  hs-source-dirs:   tui/test
+  main-is:          Driver.hs
+  build-depends:
+    , agentic
+    , base
+  ghc-options:     -threaded

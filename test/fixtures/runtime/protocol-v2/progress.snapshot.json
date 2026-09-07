@@ -1,0 +1,84 @@
+{
+  "authoredOrder": [
+    "0"
+  ],
+  "billFresh": "1",
+  "billMemo": "1",
+  "controlAcks": [],
+  "failure": null,
+  "failureClass": null,
+  "lastSequence": "13",
+  "occurrences": [
+    {
+      "addressee": "model reviewer",
+      "answer": "answer",
+      "attempts": [
+        {
+          "failure": null,
+          "failureClass": null,
+          "id": "0:0",
+          "messages": [
+            "Working"
+          ],
+          "output": "answer",
+          "reasoningSummaries": [
+            "Checked the public constraints."
+          ],
+          "state": "completed",
+          "steers": [],
+          "target": "acp:stub",
+          "todos": [
+            {
+              "content": "Inspect input",
+              "priority": "high",
+              "status": "completed"
+            },
+            {
+              "content": "Write result",
+              "priority": "medium",
+              "status": "in_progress"
+            }
+          ],
+          "tools": [
+            {
+              "id": "tool-1",
+              "status": "completed",
+              "summary": "<redacted public update>",
+              "title": "Write parse.c",
+              "toolKind": "edit"
+            }
+          ],
+          "usage": {
+            "size": "100",
+            "used": "42"
+          }
+        }
+      ],
+      "code": "text",
+      "dispatch": null,
+      "failureClass": null,
+      "id": "0",
+      "intent": "consult",
+      "prompt": "prompt",
+      "recovery": null,
+      "replayable": true,
+      "reuseKind": null,
+      "source": "asked:model reviewer",
+      "state": "completed"
+    }
+  ],
+  "personAnswering": "engine",
+  "result": {
+    "artifactVersion": 1,
+    "bytes": "1",
+    "code": "text",
+    "path": "result.json",
+    "preview": "answer",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "runId": "run-1",
+  "status": "succeeded",
+  "target": "acp:stub",
+  "traceRecorded": true,
+  "workflow": "review"
+}

@@ -1,0 +1,32 @@
+{
+  "runId": "run-1",
+  "status": "succeeded",
+  "lastSequence": "5",
+  "workflow": "review",
+  "target": "scripted",
+  "occurrences": [
+    {
+      "id": "0",
+      "state": "reused",
+      "code": "text",
+      "intent": "observe",
+      "addressee": "model reviewer",
+      "prompt": "prompt",
+      "answer": "answer",
+      "dispatch": null,
+      "recovery": null,
+      "reuseKind": "occurrence:9",
+      "source": "reused",
+      "failureClass": null,
+      "replayable": true,
+      "attempts": []
+    }
+  ],
+  "authoredOrder": ["0"],
+  "traceRecorded": true,
+  "controlAcks": [],
+  "billFresh": "1",
+  "billMemo": "1",
+  "failure": null,
+  "failureClass": null
+}

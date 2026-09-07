@@ -1,0 +1,13 @@
+{
+  "runId": "run-legacy",
+  "runnerId": "fixture",
+  "workflow": "review",
+  "cwd": "/tmp/project",
+  "targetKind": "scripted",
+  "targetArgs": ["--scripted"],
+  "inputHashes": {
+    "subject": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "programHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "createdAt": "2026-09-03T00:00:00Z"
+}

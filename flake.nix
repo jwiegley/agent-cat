@@ -7,17 +7,26 @@
   };
 
   outputs = { self, nixpkgs, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (system:
+    flake-utils.lib.eachSystem [ "aarch64-darwin" "aarch64-linux" "x86_64-linux" ] (system:
       let
         pkgs = import nixpkgs { inherit system; };
 
-        # One GHC with `aeson`, `QuickCheck` and `yaml` already in its package
-        # database. Together they cover the external dependencies declared by
-        # the sibling Cabal packages: core types ship with GHC, `aeson` brings
-        # text/bytestring/containers/vector/scientific, `QuickCheck` serves the
-        # bisimulation package, and `yaml` serves CLI model-definition loading.
-        # The shell is the environment; nothing is installed globally.
-        ghc = pkgs.haskellPackages.ghcWithPackages (p: [ p.aeson p.QuickCheck p.yaml ]);
+        # One GHC with the dependencies declared by the single Cabal package.
+        # HTTP/TLS and SHA-256 support belong to bounded routing discovery; no
+        # external fetch executable or provider SDK is used.
+        hs = pkgs.haskellPackages.extend (import ./nix/haskell-overrides.nix pkgs);
+        ghc = hs.ghcWithPackages (p: [
+          p.aeson
+          p.async
+          p.brick
+          p.crypton
+          p.http-client
+          p.http-client-tls
+          p.QuickCheck
+          p.vty
+          p."vty-unix"
+          p.yaml
+        ]);
       in {
         devShells.default = pkgs.mkShell {
           buildInputs = [

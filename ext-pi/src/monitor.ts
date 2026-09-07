@@ -80,6 +80,13 @@ export class MonitorModel {
     for (const attempt of occurrence.attempts.values()) {
       lines.push(fit(`    attempt ${attempt.id}: ${attempt.state} target=${attempt.target ?? "?"}${attempt.failure ? ` failure=${attempt.failureClass ?? "unknown"}:${attempt.failure}` : ""}`, width));
       appendWrapped(lines, "      output: ", attempt.output || undefined, width);
+      for (const message of attempt.messages) appendWrapped(lines, "      message: ", message, width);
+      for (const tool of attempt.tools.values()) {
+        appendWrapped(lines, `      tool ${tool.status ?? "pending"} ${tool.title ?? tool.id}${tool.toolKind ? ` [${tool.toolKind}]` : ""}: `, tool.summary, width);
+      }
+      for (const todo of attempt.todos) appendWrapped(lines, `      todo ${todo.status}/${todo.priority}: `, todo.content, width);
+      if (attempt.usage) lines.push(fit(`      usage: ${attempt.usage.used}/${attempt.usage.size}`, width));
+      for (const summary of attempt.reasoningSummaries) appendWrapped(lines, "      reasoning summary: ", summary, width);
       for (const steer of attempt.steers) appendWrapped(lines, `      steer ${steer.controlId} (${steer.timing}): `, steer.text, width);
     }
     appendWrapped(lines, `    answer (${occurrence.source ?? "unknown"}${occurrence.reuseKind ? `, ${occurrence.reuseKind}` : ""}${occurrence.replayable ? "" : ", non-replayable"}): `, occurrence.answer, width);

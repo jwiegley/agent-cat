@@ -1,0 +1,38 @@
+{
+  "descriptorVersion": 2,
+  "runnerVersion": "0.1.0.0",
+  "protocolVersions": [1],
+  "storeVersions": [1],
+  "capabilities": {
+    "structuredRun": true,
+    "wholeRunCancel": true,
+    "controlFd": 3,
+    "requestControls": true,
+    "steering": true,
+    "interactiveRetry": true,
+    "schedulerRedirect": true,
+    "semanticResume": true,
+    "immutableFork": true,
+    "restartFromScratch": true,
+    "consults": 1,
+    "observes": 1,
+    "effects": 0,
+    "effectful": false,
+    "toolExecution": false
+  },
+  "name": "review",
+  "blurb": "Review one subject",
+  "result": "receipt",
+  "level": "pipeline",
+  "size": 3,
+  "askNodes": 2,
+  "minFold": 2,
+  "maxFold": 2,
+  "paths": 1,
+  "inputs": [
+    { "name": "subject", "source": "command-tail" },
+    { "name": "notes", "source": "prompt" }
+  ],
+  "runFacts": ["run.engine"],
+  "pins": ["deep"]
+}

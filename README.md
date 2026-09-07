@@ -240,6 +240,7 @@ nix develop path:. -c cabal run agentic-run -- cost harden
 nix develop path:. -c cabal run agentic-run -- run harden --scripted
 nix develop path:. -c cabal run agentic-run -- run harden --engine acp --adapter stub
 nix develop path:. -c cabal run agentic-run -- run harden --session <deck-id>
+nix develop path:. -c cabal run agentic-run -- --routing --json --offline
 ```
 
 `list`, `help`, `plan`, and `cost` spend nothing and start no adapter. `plan`
@@ -259,26 +260,64 @@ and 3 a run abandoned over what arrived; a machine run cancelled through its
 control channel exits 130.
 
 A workflow names its serving model symbolically, for example `servedBy
-"deep-thinker"`. A live run resolves that name through layered YAML routing
-profiles: a user file at `$XDG_CONFIG_HOME/agent-cat/routing.yaml` and the
-nearest project file `.agent-cat/routing.yaml`, both at schema version 1, with
-an explicit `--route` as the highest backend override. A profile owns an
-ordered realization chain of router, model, thinking level, and output policy,
-and every declared setting is applied or verified before the first prompt.
-`cli/model-definitions.example.yaml` is a complete example covering every
-profile the bundled workflows name. Routing selects an answering service after
-the program and its analyses already exist, so it changes neither the plan nor
-its price.
+"deep-thinker"`. Version-1 routing remains supported unchanged. Version 2 keeps
+privileged engines, environment references, catalogues, concrete model aliases,
+personas, and defaults in the user file
+`$XDG_CONFIG_HOME/agent-cat/routing.yaml`; the nearest project file may select a
+persona and replace profiles, but cannot widen engines or models. Persona
+precedence is `--persona`, `AGENT_CAT_PERSONA`, project selector, then user
+default. Exact and ordered-prefix selectors freeze one model id per run; bounded
+OpenAI/Anthropic discovery uses private persona/fingerprint caches.
 
-The `machine` verbs execute the same program while emitting protocol version 1
-NDJSON events on standard output and accepting correlated controls on an
-inherited file descriptor. Runs can persist an immutable manifest, an
-append-only event journal, reusable typed answers, an effect journal, and
-checkpoints, and `machine-restart`, `machine-resume`, and `machine-fork` create
-child runs with immutable lineage. `list --json` publishes descriptor version 2
-for supervisors. The registry currently holds nine programs: `harden`, `hello`,
+`--realize AXIS=MODEL-ALIAS` replaces a managed v2 axis without separating its
+model from its engine, provider, environment, or catalogue. Raw `--route` remains
+unchanged for v1 and unconfigured names and is refused for managed v2 axes.
+`--routing --json` emits the sanitized frontend contract;
+`--migrate-routing SOURCE --output DESTINATION` creates an equivalent offline v2
+file without overwriting its source. `cli/model-definitions.example.yaml` covers
+every symbolic profile in the bundled workflows. Routing remains composition
+policy after the program and its analyses exist, so persona never enters the DSL,
+plan, price, or `run.*` facts.
+
+The `machine` verbs execute the same program while emitting versioned NDJSON
+events on standard output and accepting correlated controls on an inherited file
+descriptor. Omission preserves protocol version 1. An explicit version 2 uses
+store format 2 and adds private result/question artifacts, local person answering,
+and bounded public progress without changing answers, traces, or bills. Runs
+persist an immutable manifest, append-only events, reusable typed answers, an
+effect journal, and checkpoints; lineage verbs create immutable child runs.
+`list --json` publishes descriptor version 3 with routing and protocol negotiation.
+The registry currently holds nine programs: `harden`, `hello`,
 `structured`, `structured-result`, `plan-feature`, `review-lite`,
 `ship-feature-lite`, `grind-tests`, and `stack-prs`.
+
+## The terminal interface
+
+`agentic-run --tui` opens the Brick/Vty frontend for the current executable's
+registry; downstream binaries using `cliMain`, including `wf`, inherit the same
+mode. It offers a fuzzy workflow browser, detailed run history, and routing profile/
+inventory views, then collects declared
+inputs, previews exact-input plan facts, the runner executable and target arguments,
+and an opaque CLI-owned concrete realization, then requires a separate confirmation
+before creating a run. Live launch repeats offline resolution and supplies the preview
+fingerprint; a changed route is refused. The live monitor header includes workflow,
+persona, realization, elapsed time, and bills. It uses protocol 2, a
+private store, fd-3 controls, and local person answering. It preserves occurrence
+identity under concurrent updates, supports detach/reattach, steering, recovery,
+redirect, confirmed cancellation, and restart/resume/fork, and restores final
+results. A verified result can be copied through an explicit exclusive path prompt.
+Public tool, todo, usage, message, and explicit reasoning-summary updates
+remain distinct from answer output; private ACP thought updates are discarded.
+
+Terminal runs default to the runner-specific
+`$XDG_STATE_HOME/agent-cat/tui/<runner-id>` directory (or
+`~/.local/state/agent-cat/tui/<runner-id>`) unless `AGENT_CAT_STATE_DIR` is
+explicitly set to an absolute path. Giving the same state root to the TUI and ext-pi enables read-only
+cross-frontend discovery; no default is shared. macOS and
+Linux are supported. The renderer provides bounded plain text, lightweight Markdown
+line cues, status styling, and unified-diff styling without a tree-sitter dependency.
+The requirement matrix and release results are recorded in
+[`doc/tui-release-evidence.md`](doc/tui-release-evidence.md).
 
 ## The Pi extension
 
@@ -287,7 +326,12 @@ agent-cat workflows. It performs no search for a runner: the trusted
 `agentic-run` executables are named, by absolute path, in `AGENT_CAT_RUNNER` or
 `AGENT_CAT_RUNNERS`. The extension reads their descriptors, collects inputs,
 launches machine mode, reduces the event stream into a live monitor, delivers
-controls, and keeps durable run references. The `/wf`
+controls, and keeps durable run references. Descriptor-v3 runners expose a
+sanitized routing inspection; the extension offers persona and concrete-alias
+choices and passes only `--persona`/`--realize`, never parsing YAML or receiving
+secret values. Descriptor-v3 runners negotiate protocol v2, shared frontend
+manifests, terminal result references, and public progress; descriptor-v1/v2
+protocol-v1 runners retain their existing launch flow. The `/wf`
 command launches a workflow in the current Agent Deck session, and a family of
 `/workflow-...` commands covers help, plan, status, monitoring, steering,
 recovery, redirect, grants, lineage, and cancellation. The extension never
@@ -323,6 +367,7 @@ N=500 SEED=1 ./bisim/ci/tier1.sh
 nix develop path:. -c ./cli/ci/routing-config.sh
 ./engine/acp/ci/acp.sh
 ./engine/agent-deck/ci/deck.sh
+./tui/ci/tui.sh
 ```
 
 `tier1.sh` requires a prebuilt oracle and refuses to build one.
@@ -349,11 +394,11 @@ format, a tutorial, the authoring and runner references, diagnostics, and a
 glossary. `doc/meaning-and-representation.md` gives the denotational argument
 at length. Every source directory has a `README.md` and an `AGENTS.md`.
 `doc/research/` holds the design records and research dossiers, indexed by its
-own `README.md`.
-The implementation designs for the proposed Brick interface and persona-aware
-model resolution are [`doc/tui-design.md`](doc/tui-design.md) and
-[`doc/model-routing-v2.md`](doc/model-routing-v2.md); both remain proposals,
-not current runtime behavior.
+own `README.md`. The persona-aware model-routing implementation and its contract
+are documented in [`doc/model-routing-v2.md`](doc/model-routing-v2.md). The Brick
+terminal interface and its implemented contracts are documented in
+[`doc/tui-design.md`](doc/tui-design.md). Its routing pane consumes the sanitized
+inspection contract.
 Issue tracking is `obr` with prefix `acat`, whose tracked surface is
 `doc/PLAN.org`; `AGENTS.md` describes the workflow.
 

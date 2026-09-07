@@ -549,10 +549,20 @@ def handle_prompt(rid, params):
         FIRST_PROMPT = False
         update({"sessionUpdate": "available_commands_update",
                 "availableCommands": available_commands()})
+        update({"sessionUpdate": "plan", "entries": [
+            {"content": "Inspect request", "priority": "high", "status": "completed"},
+            {"content": "Return answer", "priority": "medium", "status": "in_progress"},
+        ]})
+        update({"sessionUpdate": "agent_thought_chunk",
+                "content": {"type": "text", "text": "private-reasoning-sentinel"}})
     else:
         update({"sessionUpdate": "session_info_update",
                 "title": text[:40], "updatedAt": "2026-08-13T20:30:22.832Z"})
     usage(32360)
+
+    public_secret_name = os.environ.get("ACP_PUBLIC_REDACTION_PROBE")
+    if public_secret_name and os.environ.get(public_secret_name):
+        tool_call("completed", {"rawOutput": os.environ[public_secret_name]})
 
     if key == "Apply:":
         tool_call("pending")
@@ -576,7 +586,7 @@ def handle_prompt(rid, params):
         # and because an act that reports completion without acting is the
         # thing this stub exists to not be.
         apply_patch(text)
-        tool_call("completed", {"rawOutput": "File updated"})
+        tool_call("completed", {"rawOutput": 'File updated; {"token":\n"fixture-progress-value-8675309"}\nBearer: opaque-value-8675309'})
     elif WRITE_ON_ASK or WRITE_ANYWAY:
         # A question that asked for nothing but an answer, answered by an agent
         # that edits the workspace while it thinks about it.

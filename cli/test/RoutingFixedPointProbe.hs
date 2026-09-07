@@ -29,7 +29,8 @@ registry =
         [ ("convergent", row convergentExample),
           ("cyclic", row cyclicExample),
           ("controlled", row controlledExample),
-          ("controlled-single", row controlledSingleExample)
+          ("controlled-single", row controlledSingleExample),
+          ("person-controlled", row personControlledExample)
         ]
     }
   where
@@ -67,6 +68,16 @@ controlledSingleExample =
 controlledSingleProgram :: Text -> Program
 controlledSingleProgram body = workflow W.do
   _approved <- confirm (model "controlled" `servedBy` "primary") [wf|Apply this patch? {body}|]
+  stop
+
+personControlledExample :: Example
+personControlledExample =
+  Needs $ taking (stdinInput :> noInputs) personControlledProgram
+
+personControlledProgram :: Text -> Program
+personControlledProgram body = workflow W.do
+  _first <- confirm (person "first") [wf|First approval? {body}|]
+  _second <- confirm (person "second") [wf|Second approval? {body}|]
   stop
 
 pinnedProgram :: Text -> Program

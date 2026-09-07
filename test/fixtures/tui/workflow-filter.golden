@@ -1,0 +1,2 @@
+filter /rvw/  1 of 2
+> review  [pipeline; cost 2..2 over 1 path; inputs subject:arg,notes:prompt; pins deep]  Review one subject

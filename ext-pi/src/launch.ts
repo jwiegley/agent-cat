@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
-import { canonicalJson, checkLineage, readPlan } from "./catalogue.ts";
+import { canonicalJson, checkLineage, negotiateProtocolVersion, readPlan } from "./catalogue.ts";
 import type { LaunchManifest, RunnerConfig, TargetKind, WorkflowDescriptor } from "./types.ts";
 
 export type PreparedLaunch = {
@@ -10,6 +10,7 @@ export type PreparedLaunch = {
   inputFiles: Map<string, string>;
   stdinFile?: string;
   controlFd?: 3;
+  protocolVersion: 1 | 2;
   command: string;
   args: string[];
   env: NodeJS.ProcessEnv;
@@ -27,6 +28,8 @@ export async function prepareLaunch(options: {
   inputs: Record<string, string>;
   targetKind: TargetKind;
   targetArgs: string[];
+  persona?: string;
+  policyDigest?: string;
   lineage?: { operation: "restart" | "resume" | "fork"; parentRunId: string; parentRuntimeDir: string; edits?: LineageEdit[] };
 }): Promise<PreparedLaunch> {
   const executable = await canonicalExecutable(options.runner.executable);
@@ -42,6 +45,10 @@ export async function prepareLaunch(options: {
   if (advertisedControlFd !== undefined && advertisedControlFd !== 3) throw new Error(`runner ${options.runner.id} advertises unsupported control fd ${advertisedControlFd}`);
   const controlFd = advertisedControlFd === 3 ? 3 : undefined;
   if (stdinInput && controlFd !== 3) throw new Error(`runner ${options.runner.id} cannot combine workflow stdin with live controls`);
+  const negotiatedProtocol = negotiateProtocolVersion(options.descriptor, [1, 2]);
+  if (negotiatedProtocol !== 1 && negotiatedProtocol !== 2) throw new Error(`unsupported negotiated protocol ${negotiatedProtocol}`);
+  const protocolVersion: 1 | 2 = negotiatedProtocol;
+  const ownerId = `ext-pi:${process.pid}:${randomUUID()}`;
 
   const runId = randomUUID();
   const storeDir = join(options.stateDir, "runs", runId);
@@ -62,8 +69,11 @@ export async function prepareLaunch(options: {
   const plan = await readPlan({ ...options.runner, executable }, options.descriptor.name, inputFiles, cwd);
   const programHash = sha256(canonicalJson(plan.program));
   const manifest: LaunchManifest = {
+    frontendManifestVersion: 2,
     runId,
     runnerId: options.runner.id,
+    runnerExecutable: executable,
+    runnerVersion: options.descriptor.runnerVersion,
     workflow: options.descriptor.name,
     cwd,
     targetKind: options.targetKind,
@@ -71,6 +81,11 @@ export async function prepareLaunch(options: {
     inputHashes,
     programHash,
     createdAt: new Date().toISOString(),
+    persona: options.persona ?? personaArgument(options.targetArgs),
+    policyDigest: options.policyDigest,
+    personAnswering: "engine",
+    ownerId,
+    runtimeStore: "runtime",
     parentRunId: lineage?.parentRunId,
     lineage: lineage?.operation,
     lineageEdits: lineage?.edits?.map((edit) => edit.type === "drop"
@@ -86,11 +101,12 @@ export async function prepareLaunch(options: {
     ...(options.runner.prefixArgs ?? []),
     ...invocation,
     ...options.targetArgs,
+    ...(protocolVersion === 2 ? ["--protocol-version", "2"] : []),
   ];
   for (const [name, path] of inputFiles) {
     if (name !== stdinInput?.name) args.push("--input-file", `${name}=${path}`);
   }
-  const env: NodeJS.ProcessEnv = { ...process.env, AGENT_CAT_RUN_STORE: join(storeDir, "runtime"), AGENT_CAT_RUN_OWNER: `ext-pi:${process.pid}` };
+  const env: NodeJS.ProcessEnv = { ...process.env, AGENT_CAT_RUN_STORE: join(storeDir, "runtime"), AGENT_CAT_RUN_OWNER: ownerId };
   if (controlFd === 3) {
     env.AGENT_CAT_CONTROL_FD = "3";
     delete env.AGENT_CAT_CONTROL_STDIN;
@@ -104,6 +120,7 @@ export async function prepareLaunch(options: {
     inputFiles,
     stdinFile: stdinInput ? inputFiles.get(stdinInput.name) : undefined,
     controlFd,
+    protocolVersion,
     command: executable,
     args,
     env,
@@ -112,6 +129,12 @@ export async function prepareLaunch(options: {
     await rm(storeDir, { recursive: true, force: true });
     throw error;
   }
+}
+
+function personaArgument(args: readonly string[]): string | undefined {
+  const index = args.lastIndexOf("--persona");
+  const value = index >= 0 ? args[index + 1] : undefined;
+  return value && !value.startsWith("--") ? value : undefined;
 }
 
 export async function previewPlan(options: {

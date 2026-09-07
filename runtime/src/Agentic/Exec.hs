@@ -85,6 +85,7 @@ module Agentic.Exec
     withAttemptSteering,
     withPhysicalAttempt,
     concurrentWorld,
+    personControlWorld,
     TurnLane,
     newTurnLaneIO,
     pureWorldIO,
@@ -160,6 +161,10 @@ where
 import Agentic.Engine
   ( Engine (..),
     EngineCompletion (..),
+    EngineTodoItem (..),
+    EngineToolUpdate (..),
+    EngineUpdate (..),
+    EngineUsage (..),
     EngineContext (..),
     EngineConversation (..),
     EngineError (..),
@@ -183,6 +188,7 @@ import Agentic.Plan
     QScope (..),
     Request (..),
     RequestShape (..),
+    Shape (shAddressee),
     SCode (SAck, SFlag, SStructured, SText, SVerdict),
     defaultEl,
     evalExpr,
@@ -207,12 +213,18 @@ import Agentic.Runtime.Control
     reservedRedirects,
     unregisterControlAttempt,
     waitForRuntimeRecovery,
+    waitForRuntimePersonAnswer,
   )
 import Agentic.Runtime.Protocol
   ( AttemptId (..),
     EventSink,
     FailureClass (..),
     OccurrenceId (..),
+    PublicProgress (..),
+    PublicTodoItem (..),
+    PublicToolUpdate (..),
+    PublicUsage (..),
+    QuestionRef,
     RecoveryOption (..),
     RuntimeEvent (..),
     nullEventSink,
@@ -273,6 +285,7 @@ import Control.Exception
 import Control.Monad (void, when)
 import Data.Foldable (traverse_)
 import Data.IntSet (IntSet)
+import Data.Char (isAlphaNum)
 import qualified Data.IntSet as IntSet
 import Data.List (find, nub)
 import Data.Map.Strict (Map)
@@ -298,7 +311,8 @@ data AttemptContext = AttemptContext
     attemptEvents :: !EventSink,
     attemptControlRuntime :: !(Maybe ControlRuntime),
     attemptSteerer :: !(Maybe AttemptSteerer),
-    attemptFailoverAvailable :: !(IO Bool)
+    attemptFailoverAvailable :: !(IO Bool),
+    attemptStoreQuestion :: !(Text -> Value -> IO (Maybe QuestionRef))
   }
 
 -- | @Oracle IO@ plus the stateful lane and an attempt-aware realization path.
@@ -317,6 +331,49 @@ concurrentWorld ask =
         withPhysicalAttempt context (requestTarget request) (\_ -> ask c request),
       worldTurnLane = \_ _ -> Nothing
     }
+
+-- | Replace every person addressee with the local machine-control broker.
+personControlWorld :: WorldIO -> IO WorldIO
+personControlWorld inner = do
+  personLane <- newTurnLaneIO
+  pure
+    WorldIO
+      { worldAskIO = \code request -> case qAddressee (reqQuestion request) of
+          AddrPerson _ -> ioError (userError "local person answering requires runtime attempt context")
+          _ -> worldAskIO inner code request,
+        worldAskAttemptIO = \context code request -> case qAddressee (reqQuestion request) of
+          AddrPerson _ -> answerPerson context code request
+          _ -> worldAskAttemptIO inner context code request,
+        worldTurnLane = \code shape -> case shAddressee (rsQuestion shape) of
+          AddrPerson _ -> Just personLane
+          _ -> worldTurnLane inner code shape
+      }
+  where
+
+    answerPerson :: forall c. AttemptContext -> SCode c -> Request c -> IO (El c)
+    answerPerson context code request = do
+      controls <-
+        maybe
+          (ioError (userError "local person answering requires the machine control channel"))
+          pure
+          (attemptControlRuntime context)
+      reference <-
+        attemptStoreQuestion context
+          (intentName (reqIntent request))
+          (questionJson code (reqQuestion request))
+          >>= maybe
+            (ioError (userError "local person answering requires a private protocol-v2 question store"))
+            pure
+      (_, encoded) <-
+        waitForRuntimePersonAnswer
+          controls
+          (attemptOccurrenceId context)
+          (isJust . answerFromJson code)
+          (attemptEvents context (OccurrencePersonAnswerPending (attemptOccurrenceId context) reference))
+      maybe
+        (ioError (userError "validated local person answer no longer matches its code/schema"))
+        pure
+        (answerFromJson code encoded)
 
 -- | Pure annotated answering service over a bare world (`SemanticExec.lean:91`).
 -- @ω@, ignoring history because a world is a function of the bare question.
@@ -379,7 +436,7 @@ worldOfEngineWith settings engine =
       let controlledSettings = maybe settings (`attemptExecSettings` settings) context
        in withTransportGaps controlledSettings engineGap code request $ do
             let neutral = engineRequest code request
-            conversation <- startEngine engine (engineContextFor context) neutral
+            conversation <- startEngine engine (engineContextFor (enginePublicRedactionValues engine) context) neutral
             askDecodingWith controlledSettings code request
               (engineTurn controlledSettings code request neutral conversation)
 
@@ -431,21 +488,104 @@ renderRequest code request =
       | qDraw question == 0 = ""
       | otherwise = "draw: " <> T.pack (show (qDraw question)) <> " (an independent re-draw)\n"
 
-engineContextFor :: Maybe AttemptContext -> EngineContext
-engineContextFor Nothing =
+engineContextFor :: [Text] -> Maybe AttemptContext -> EngineContext
+engineContextFor _ Nothing =
   EngineContext {runEngineAttempt = \_ _ action -> action (const (pure ()))}
-engineContextFor (Just context) =
+engineContextFor redactions (Just context) =
   EngineContext
     { runEngineAttempt = \steerer target action ->
         let controlled = maybe context (withAttemptSteering context . runtimeSteerer) steerer
          in withPhysicalAttempt controlled target $ \attempt ->
-              action (emitAttemptOutput controlled attempt)
+              action (emitEngineUpdate redactions controlled attempt)
     }
+
+emitEngineUpdate :: [Text] -> AttemptContext -> AttemptId -> EngineUpdate -> IO ()
+emitEngineUpdate redactions context attempt update = case update of
+  EngineAnswerChunk text -> emitAttemptOutput context attempt text
+  _ -> mapM_ (attemptEvents context . AttemptProgress attempt) (publicProgressOf redactions update)
+
+publicProgressOf :: [Text] -> EngineUpdate -> Maybe PublicProgress
+publicProgressOf redactions update = case update of
+  EngineAnswerChunk _ -> Nothing
+  EnginePublicMessage text -> ProgressMessage <$> publicText redactions 4096 text
+  EnginePublicReasoningSummary text -> ProgressReasoningSummary <$> publicText redactions 4096 text
+  EngineToolProgress tool -> do
+    identifier <- publicIdentifier redactions (engineToolId tool)
+    title <- traverse (publicText redactions 1024) (engineToolTitle tool)
+    kind <- traverse (publicText redactions 128) (engineToolKind tool)
+    status <- traverse allowedToolStatus (engineToolStatus tool)
+    summary <- traverse (publicText redactions 4096) (engineToolSummary tool)
+    pure (ProgressTool (PublicToolUpdate identifier title kind status summary))
+  EngineTodoSnapshot items
+    | length items > 128 -> Nothing
+    | otherwise -> ProgressTodos <$> traverse publicTodo items
+  EngineUsageProgress usage
+    | engineUsageUsed usage >= 0,
+      engineUsageSize usage > 0,
+      engineUsageUsed usage <= engineUsageSize usage ->
+        Just (ProgressUsage (PublicUsage (engineUsageUsed usage) (engineUsageSize usage)))
+    | otherwise -> Nothing
   where
-    runtimeSteerer :: Engine.EngineSteerer -> AttemptSteerer
-    runtimeSteerer steer timing =
-      steer
-        (case timing of InterruptNow -> Engine.InterruptNow; NextBoundary -> Engine.NextBoundary)
+    publicTodo item = do
+      content <- publicText redactions 1024 (engineTodoContent item)
+      priority <- allowedTodoPriority (engineTodoPriority item)
+      status <- allowedTodoStatus (engineTodoStatus item)
+      pure (PublicTodoItem content priority status)
+
+publicText :: [Text] -> Int -> Text -> Maybe Text
+publicText redactions limit value =
+  let sensitive =
+        any sensitivePublicLine (T.splitOn "\n" value)
+          || containsExactRedaction redactions value
+      sanitized = if sensitive then "<redacted public update>" else value
+      bounded = T.take limit sanitized
+   in if T.null (T.strip bounded) then Nothing else Just bounded
+
+sensitivePublicLine :: Text -> Bool
+sensitivePublicLine line =
+  let lower = T.toLower line
+   in any (`T.isInfixOf` lower)
+        [ "authorization",
+          "bearer",
+          "api_key",
+          "api-key",
+          "api key",
+          "token",
+          "password",
+          "secret",
+          "cookie",
+          "credential"
+        ]
+
+containsExactRedaction :: [Text] -> Text -> Bool
+containsExactRedaction redactions value =
+  any (\secret -> not (T.null secret) && secret `T.isInfixOf` value) redactions
+
+publicIdentifier :: [Text] -> Text -> Maybe Text
+publicIdentifier redactions value
+  | T.null value || T.length value > 128 || containsExactRedaction redactions value = Nothing
+  | T.all (\character -> isAlphaNum character || character `elem` ("._:-" :: String)) value = Just value
+  | otherwise = Nothing
+
+allowedToolStatus :: Text -> Maybe Text
+allowedToolStatus value
+  | value `elem` ["pending", "in_progress", "completed", "failed", "cancelled"] = Just value
+  | otherwise = Nothing
+
+allowedTodoPriority :: Text -> Maybe Text
+allowedTodoPriority value
+  | value `elem` ["high", "medium", "low"] = Just value
+  | otherwise = Nothing
+
+allowedTodoStatus :: Text -> Maybe Text
+allowedTodoStatus value
+  | value `elem` ["pending", "in_progress", "completed"] = Just value
+  | otherwise = Nothing
+
+runtimeSteerer :: Engine.EngineSteerer -> AttemptSteerer
+runtimeSteerer steer timing =
+  steer
+    (case timing of InterruptNow -> Engine.InterruptNow; NextBoundary -> Engine.NextBoundary)
 
 engineTurn :: ExecSettings -> SCode c -> Request c -> EngineRequest -> EngineConversation -> Text -> IO Text
 engineTurn settings code request neutral conversation extra = do
@@ -551,6 +691,7 @@ data PersistenceHooks = PersistenceHooks
     persistenceStoreAnswer :: OccurrenceId -> Value -> Value -> Bool -> IO (),
     persistenceStartEffect :: OccurrenceId -> Value -> IO (),
     persistenceCompleteEffect :: OccurrenceId -> Value -> Value -> IO (),
+    persistenceStoreQuestion :: OccurrenceId -> Text -> Value -> IO (Maybe QuestionRef),
     persistenceCheckpoint :: OccurrenceId -> IO ()
   }
 
@@ -561,6 +702,7 @@ nullPersistenceHooks =
       persistenceStoreAnswer = \_ _ _ _ -> pure (),
       persistenceStartEffect = \_ _ -> pure (),
       persistenceCompleteEffect = \_ _ _ -> pure (),
+      persistenceStoreQuestion = \_ _ _ -> pure Nothing,
       persistenceCheckpoint = const (pure ())
     }
 
@@ -807,7 +949,9 @@ newAttemptContext scheduler occurrence = do
         attemptEvents = schedulerSink scheduler,
         attemptControlRuntime = schedulerControlRuntime scheduler,
         attemptSteerer = Nothing,
-        attemptFailoverAvailable = pure False
+        attemptFailoverAvailable = pure False,
+        attemptStoreQuestion =
+          persistenceStoreQuestion (schedulerPersistence scheduler) occurrence
       }
 
 withAttemptSteering :: AttemptContext -> AttemptSteerer -> AttemptContext

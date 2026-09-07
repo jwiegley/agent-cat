@@ -1,20 +1,26 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { createReadStream } from "node:fs";
-import { appendFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { constants as fsConstants, createReadStream } from "node:fs";
+import { appendFile, lstat, mkdir, open, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { isAbsolute, join, relative } from "node:path";
 import { initialSnapshot, reduceEvent } from "./reducer.ts";
 import type { PreparedLaunch } from "./launch.ts";
 import type { Writable } from "node:stream";
 import type { ControlAckSnapshot, LaunchManifest, RunSnapshot, RuntimeEvent } from "./types.ts";
 
 const MAX_FRAME = 1024 * 1024;
+const MAX_METADATA_FILE = 4 * 1024 * 1024;
+const MAX_SNAPSHOT_FILE = 64 * 1024 * 1024;
+const MAX_JOURNAL_FILE = 512 * 1024 * 1024;
 const MAX_STDERR_LOG = 10 * 1024 * 1024;
+const MAX_STDERR_LINE = 64 * 1024;
 const STDERR_TRUNCATION_MARKER = Buffer.from("\n[agent-cat stderr truncated at 10485760 bytes]\n");
 
 type Listener = (snapshot: RunSnapshot) => void;
 type MachineChild = ChildProcessWithoutNullStreams & { control: Writable };
+type ControlCorrelation = { command: string; occurrenceId?: string; attemptId?: string };
 type RestoreRecord = { storeDir: string; manifest: LaunchManifest; snapshot: RunSnapshot; created: number; ownerLive: boolean };
+type ReducedJournal = { path: string; bytes: number; digest: string; snapshot: RunSnapshot };
 
 export interface RunHandle {
   readonly snapshot: RunSnapshot;
@@ -68,7 +74,7 @@ export class RunSupervisor {
     for (const entry of entries.filter((item) => item.isDirectory())) {
       const storeDir = join(root, entry.name);
       let manifestText: string;
-      try { manifestText = await readFile(join(storeDir, "supervisor-manifest.json"), "utf8"); }
+      try { manifestText = await readTextBounded(join(storeDir, "supervisor-manifest.json"), MAX_METADATA_FILE); }
       catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") {
           if (policy.days > 0) {
@@ -80,7 +86,10 @@ export class RunSupervisor {
         continue;
       }
       let manifest: LaunchManifest;
-      try { manifest = parseLaunchManifest(JSON.parse(manifestText)); }
+      try {
+        manifest = parseLaunchManifest(JSON.parse(manifestText));
+        if (manifest.runId !== entry.name) throw new Error("frontend manifest run id does not match its directory");
+      }
       catch (error) {
         records.push(await corruptRestoreRecord(storeDir, entry.name, `supervisor manifest is corrupt: ${error instanceof Error ? error.message : String(error)}`));
         continue;
@@ -146,18 +155,21 @@ export class OwnedRun {
   #forcedTermination = false;
   #cancelRequested = false;
   #stderrBytes = 0;
+  #stderrPending = "";
+  #stderrDropping = false;
   #stderrQueue: Promise<void> = Promise.resolve();
   #eventMirrorQueue: Promise<void> = Promise.resolve();
   #leaseQueue: Promise<void> = Promise.resolve();
   #leaseTimer?: NodeJS.Timeout;
-  readonly #ownerId = randomUUID();
+  readonly #ownerId: string;
   #fatalCleanup?: Promise<void>;
-  readonly #controlWaiters = new Map<string, { resolve: (ack: ControlAckSnapshot) => void; reject: (error: Error) => void; timeout: NodeJS.Timeout }>();
+  readonly #controlWaiters = new Map<string, { resolve: (ack: ControlAckSnapshot) => void; reject: (error: Error) => void; timeout: NodeJS.Timeout; expected: ControlCorrelation }>();
   readonly #secretValues: string[];
 
   constructor(prepared: PreparedLaunch, onTerminal: () => void) {
     this.#prepared = prepared;
     this.#onTerminal = onTerminal;
+    this.#ownerId = prepared.manifest.ownerId ?? randomUUID();
     this.#snapshot = initialSnapshot(prepared.manifest.runId);
     this.#secretValues = Object.entries(prepared.env)
       .filter(([key, value]) => /(?:token|secret|password|api[_-]?key|authorization)/i.test(key) && typeof value === "string" && value.length >= 8)
@@ -309,8 +321,11 @@ export class OwnedRun {
         reject(new Error(`control ${controlId} was not acknowledged`));
       }, 10_000);
       timeout.unref();
-      this.#controlWaiters.set(controlId, { resolve, reject, timeout });
-      try { this.#sendControl(control); }
+      try {
+        const expected = controlCorrelation(control);
+        this.#controlWaiters.set(controlId, { resolve, reject, timeout, expected });
+        this.#sendControl(control);
+      }
       catch (error) {
         clearTimeout(timeout);
         this.#controlWaiters.delete(controlId);
@@ -322,6 +337,15 @@ export class OwnedRun {
   #settleControl(controlId: string, ack: ControlAckSnapshot): void {
     if (!['delivered', 'rejected-stale', 'unsupported', 'failed'].includes(ack.state)) return;
     const waiter = this.#controlWaiters.get(controlId);
+    if (waiter && this.#snapshot.protocolVersion === 2
+      && (ack.command !== waiter.expected.command || ack.occurrenceId !== waiter.expected.occurrenceId || ack.attemptId !== waiter.expected.attemptId)) {
+      clearTimeout(waiter.timeout);
+      this.#controlWaiters.delete(controlId);
+      const error = new Error(`control ${controlId} acknowledgement correlation mismatch`);
+      waiter.reject(error);
+      this.#fail(error.message);
+      return;
+    }
     if (!waiter) return;
     clearTimeout(waiter.timeout);
     this.#controlWaiters.delete(controlId);
@@ -376,8 +400,12 @@ export class OwnedRun {
     this.#terminal = true;
     try {
       if (this.#fatalCleanup) await this.#fatalCleanup;
+      this.#queueStderr("", true);
       await this.#stderrQueue;
       await this.#eventMirrorQueue;
+      if (this.#snapshot.status === "succeeded" && this.#snapshot.result) {
+        await verifyResultArtifact(this.#prepared.storeDir, this.#snapshot.runId, this.#snapshot.result);
+      }
       if (this.#leaseTimer) clearInterval(this.#leaseTimer);
       await this.#leaseQueue;
       await rm(join(this.#prepared.storeDir, "owner.json"), { force: true });
@@ -406,23 +434,53 @@ export class OwnedRun {
     }).catch((error) => this.#fail(`owner lease persistence failed: ${error instanceof Error ? error.message : String(error)}`));
   }
 
-  #queueStderr(chunk: string): void {
+  #queueStderr(chunk: string, final = false): void {
     this.#stderrQueue = this.#stderrQueue.then(async () => {
-      if (this.#stderrBytes >= MAX_STDERR_LOG) return;
-      let redacted = chunk
-        .replace(/(authorization\s*:\s*bearer\s+)\S+/gi, "$1[REDACTED]")
-        .replace(/((?:api[_-]?key|token|secret|password)\s*[:=]\s*)\S+/gi, "$1[REDACTED]");
-      for (const secret of this.#secretValues) redacted = redacted.split(secret).join("[REDACTED]");
-      const bytes = Buffer.from(redacted);
+      this.#stderrPending += chunk;
+      const output: string[] = [];
+      for (;;) {
+        if (this.#stderrDropping) {
+          const newline = this.#stderrPending.indexOf("\n");
+          if (newline < 0) { this.#stderrPending = ""; break; }
+          this.#stderrPending = this.#stderrPending.slice(newline + 1);
+          this.#stderrDropping = false;
+        }
+        const newline = this.#stderrPending.indexOf("\n");
+        if (newline < 0) {
+          if (Buffer.byteLength(this.#stderrPending) > MAX_STDERR_LINE) {
+            output.push("[REDACTED OVERLONG DIAGNOSTIC]\n");
+            this.#stderrPending = "";
+            this.#stderrDropping = true;
+          }
+          break;
+        }
+        const line = this.#stderrPending.slice(0, newline);
+        this.#stderrPending = this.#stderrPending.slice(newline + 1);
+        output.push(Buffer.byteLength(line) > MAX_STDERR_LINE ? "[REDACTED OVERLONG DIAGNOSTIC]\n" : `${this.#redactDiagnostic(line)}\n`);
+      }
+      if (final && !this.#stderrDropping && this.#stderrPending) {
+        output.push(this.#redactDiagnostic(this.#stderrPending));
+        this.#stderrPending = "";
+      }
+      if (output.length === 0 || this.#stderrBytes >= MAX_STDERR_LOG) return;
+      const bytes = Buffer.from(output.join(""));
       const contentLimit = MAX_STDERR_LOG - STDERR_TRUNCATION_MARKER.length;
       const remaining = Math.max(0, contentLimit - this.#stderrBytes);
-      const output = bytes.length <= remaining
+      const retained = bytes.length <= remaining
         ? bytes
         : Buffer.concat([utf8Prefix(bytes, remaining), STDERR_TRUNCATION_MARKER]);
-      if (output.length === 0) return;
-      await appendFile(join(this.#prepared.storeDir, "stderr.log"), output, { mode: 0o600 });
-      this.#stderrBytes += output.length;
+      if (retained.length === 0) return;
+      await appendFile(join(this.#prepared.storeDir, "stderr.log"), retained, { mode: 0o600 });
+      this.#stderrBytes += retained.length;
     }).catch((error) => this.#fail(`stderr persistence failed: ${error instanceof Error ? error.message : String(error)}`));
+  }
+
+  #redactDiagnostic(line: string): string {
+    let redacted = line
+      .replace(/(authorization\s*:\s*bearer\s+)\S+/gi, "$1[REDACTED]")
+      .replace(/((?:api[_-]?key|token|secret|password)\s*[:=]\s*)\S+/gi, "$1[REDACTED]");
+    for (const secret of this.#secretValues) redacted = redacted.split(secret).join("[REDACTED]");
+    return redacted;
   }
 
   #fail(message: string): void {
@@ -431,6 +489,11 @@ export class OwnedRun {
       this.#snapshot = { ...this.#snapshot, status: "failed", failureClass: "supervisor", failure: message };
       this.#notify();
     }
+    for (const [controlId, waiter] of this.#controlWaiters) {
+      clearTimeout(waiter.timeout);
+      waiter.reject(new Error(`${message} (control ${controlId})`));
+    }
+    this.#controlWaiters.clear();
     if (!this.#fatalCleanup) this.#fatalCleanup = this.#terminateFatalProcessGroup();
   }
 
@@ -465,7 +528,9 @@ export class OwnedRun {
     const serializable = {
       ...this.#snapshot,
       lastSequence: this.#snapshot.lastSequence?.toString(),
-      occurrences: [...this.#snapshot.occurrences].map(([id, value]) => [id, { ...value, attempts: [...value.attempts] }]),
+      occurrences: [...this.#snapshot.occurrences].map(([id, value]) => [id, {
+        ...value, attempts: [...value.attempts].map(([attemptId, attempt]) => [attemptId, { ...attempt, tools: [...attempt.tools] }]),
+      }]),
       eventDigests: [...this.#snapshot.eventDigests],
       controlAcks: [...this.#snapshot.controlAcks],
     };
@@ -521,34 +586,66 @@ class RestoredRun implements RunHandle {
   }
 }
 
-async function restoreSnapshot(storeDir: string, runId: string, ownerLive = false): Promise<RunSnapshot> {
-  const journals: RunSnapshot[] = [];
-  let journalSnapshot: RunSnapshot | undefined;
-  for (const path of [join(storeDir, "runtime", "events.ndjson"), join(storeDir, "live-events.ndjson")]) {
-    try {
-      const bytes = await readFile(path, "utf8");
-      if (bytes && !bytes.endsWith("\n")) throw new Error(`${path} has a torn final protocol record`);
-      let reduced = initialSnapshot(runId);
-      for (const line of bytes.split("\n").filter(Boolean)) {
+async function reduceJournal(path: string, runId: string): Promise<ReducedJournal> {
+  const handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+  try {
+    const information = await handle.stat();
+    if (!information.isFile()) throw new Error(`${path} is not a regular file`);
+    if (information.size > MAX_JOURNAL_FILE) throw new Error(`${path} exceeds ${MAX_JOURNAL_FILE} bytes`);
+    const stream = handle.createReadStream({ autoClose: false });
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let total = 0;
+    let buffered = "";
+    let snapshot = initialSnapshot(runId);
+    const digest = createHash("sha256");
+    for await (const chunk of stream) {
+      if (!Buffer.isBuffer(chunk)) throw new Error("stored protocol journal produced a non-byte chunk");
+      total += chunk.length;
+      if (total > MAX_JOURNAL_FILE) { stream.destroy(); throw new Error(`${path} exceeds ${MAX_JOURNAL_FILE} bytes`); }
+      digest.update(chunk);
+      buffered += decoder.decode(chunk, { stream: true });
+      for (;;) {
+        const newline = buffered.indexOf("\n");
+        if (newline < 0) break;
+        const line = buffered.slice(0, newline);
+        buffered = buffered.slice(newline + 1);
+        if (!line) continue;
         if (Buffer.byteLength(line) > MAX_FRAME) throw new Error("stored protocol frame exceeded limit");
-        reduced = reduceEvent(reduced, JSON.parse(line) as RuntimeEvent);
+        snapshot = reduceEvent(snapshot, JSON.parse(line) as RuntimeEvent);
       }
+      if (Buffer.byteLength(buffered) > MAX_FRAME) throw new Error("stored protocol frame exceeded limit");
+    }
+    buffered += decoder.decode();
+    if (buffered) throw new Error(`${path} has a torn final protocol record`);
+    return { path, bytes: total, digest: digest.digest("hex"), snapshot };
+  } finally {
+    await handle.close();
+  }
+}
+
+async function restoreSnapshot(storeDir: string, runId: string, ownerLive = false): Promise<RunSnapshot> {
+  const journals: ReducedJournal[] = [];
+  let journalSnapshot: RunSnapshot | undefined;
+  for (const components of [["runtime", "events.ndjson"], ["live-events.ndjson"]]) {
+    try {
+      const path = await confinedPath(storeDir, components);
+      const reduced = await reduceJournal(path, runId);
       for (const prior of journals) {
-        assertJournalPrefix(prior, reduced);
+        await assertJournalPrefix(prior, reduced);
         const exactRequired = !ownerLive;
-        if (exactRequired && ((prior.lastSequence ?? -1n) !== (reduced.lastSequence ?? -1n) || snapshotDifference(prior, reduced).length > 0)) {
+        if (exactRequired && ((prior.snapshot.lastSequence ?? -1n) !== (reduced.snapshot.lastSequence ?? -1n) || snapshotDifference(prior.snapshot, reduced.snapshot).length > 0)) {
           throw new Error("stored protocol journals disagree in terminal length or state");
         }
       }
       journals.push(reduced);
-      if (!journalSnapshot || (reduced.lastSequence ?? -1n) > (journalSnapshot.lastSequence ?? -1n)) journalSnapshot = reduced;
+      if (!journalSnapshot || (reduced.snapshot.lastSequence ?? -1n) > (journalSnapshot.lastSequence ?? -1n)) journalSnapshot = reduced.snapshot;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
   let snapshot: RunSnapshot;
   try {
-    snapshot = parseSnapshot(JSON.parse(await readFile(join(storeDir, "snapshot.json"), "utf8")), runId);
+    snapshot = parseSnapshot(JSON.parse(await readTextBounded(join(storeDir, "snapshot.json"), MAX_SNAPSHOT_FILE)), runId);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     snapshot = journalSnapshot ?? initialSnapshot(runId);
@@ -557,12 +654,14 @@ async function restoreSnapshot(storeDir: string, runId: string, ownerLive = fals
     if (isTerminal(snapshot.status) && snapshotDifference(snapshot, journalSnapshot).length > 0) {
       throw new Error(`stored snapshot disagrees with the terminal protocol journal (${snapshotDifference(snapshot, journalSnapshot).join(", ")})`);
     }
+    await verifySnapshotResult(storeDir, runId, journalSnapshot);
     return journalSnapshot;
   }
   if (isTerminal(snapshot.status)) {
     const supervisorTerminal = (snapshot.status === "failed" || snapshot.status === "cancelled")
       && ["supervisor", "forced-termination", "missing-terminal-event"].includes(snapshot.failureClass ?? "");
     if (!supervisorTerminal) throw new Error("terminal snapshot has no matching terminal protocol event");
+    await verifySnapshotResult(storeDir, runId, snapshot);
     return snapshot;
   }
   if (ownerLive) return journalSnapshot ?? snapshot;
@@ -578,26 +677,28 @@ function snapshotDifference(left: RunSnapshot, right: RunSnapshot): string[] {
 }
 
 function snapshotProjection(snapshot: RunSnapshot): string {
+  const { eventDigests: _eventDigests, ...projected } = snapshot;
   return JSON.stringify({
-    ...snapshot,
+    ...projected,
     lastSequence: snapshot.lastSequence?.toString(),
-    occurrences: [...snapshot.occurrences].map(([id, occurrence]) => [id, { ...occurrence, attempts: [...occurrence.attempts] }]),
-    eventDigests: [...snapshot.eventDigests],
+    occurrences: [...snapshot.occurrences].map(([id, occurrence]) => [id, {
+      ...occurrence, attempts: [...occurrence.attempts].map(([attemptId, attempt]) => [attemptId, { ...attempt, tools: [...attempt.tools] }]),
+    }]),
     controlAcks: [...snapshot.controlAcks],
   });
 }
 
 async function ownerIsLive(storeDir: string): Promise<boolean> {
   try {
-    const owner = record(JSON.parse(await readFile(join(storeDir, "owner.json"), "utf8")), "owner lease");
-    if (owner.version !== 1 || typeof owner.pid !== "number" || !Number.isSafeInteger(owner.pid) || owner.pid <= 0 || typeof owner.heartbeat !== "string") return false;
+    const owner = record(JSON.parse(await readTextBounded(join(storeDir, "owner.json"), MAX_METADATA_FILE)), "owner lease");
+    onlyKeys(owner, ["version", "ownerId", "pid", "heartbeat"], "owner lease");
+    if (owner.version !== 1 || typeof owner.ownerId !== "string" || !owner.ownerId || typeof owner.pid !== "number" || !Number.isSafeInteger(owner.pid) || owner.pid <= 0 || typeof owner.heartbeat !== "string") return false;
     const heartbeat = Date.parse(owner.heartbeat);
-    if (!Number.isFinite(heartbeat) || Date.now() - heartbeat > 10_000) return false;
+    if (!Number.isFinite(heartbeat) || Math.abs(Date.now() - heartbeat) > 10_000) return false;
     try { process.kill(owner.pid, 0); return true; }
     catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
+  } catch {
+    return false;
   }
 }
 
@@ -623,14 +724,24 @@ function corruptLaunchManifest(runId: string, storeDir: string, created: number)
   };
 }
 
-function parseLaunchManifest(value: unknown): LaunchManifest {
+export function parseLaunchManifest(value: unknown): LaunchManifest {
   const object = record(value, "supervisor manifest");
+  const versioned = object.frontendManifestVersion !== undefined;
+  if (versioned) {
+    if (object.frontendManifestVersion !== 2) throw new Error("unsupported frontend manifest version");
+    onlyKeys(object, [
+      "frontendManifestVersion", "runId", "runnerId", "runnerExecutable", "runnerVersion", "workflow", "cwd",
+      "targetKind", "targetArgs", "inputHashes", "programHash", "createdAt", "parentRunId", "lineage", "lineageEdits",
+      "persona", "policyDigest", "personAnswering", "ownerId", "runtimeStore",
+    ], "frontend manifest");
+  }
   const hashes = record(object.inputHashes, "inputHashes");
   if (!Object.values(hashes).every((entry) => typeof entry === "string")) throw new Error("inputHashes is invalid");
   const targetArgs = stringArray(object.targetArgs, "targetArgs");
   const targetKind = string(object.targetKind, "targetKind");
   if (!["scripted", "acp", "deck", "current", "child", "remote"].includes(targetKind)) throw new Error("targetKind is invalid");
-  const lineage = object.lineage;
+  const lineageValue = object.lineage === null ? undefined : object.lineage;
+  const lineage = lineageValue === undefined ? undefined : string(lineageValue, "lineage");
   if (lineage !== undefined && lineage !== "restart" && lineage !== "resume" && lineage !== "fork") throw new Error("lineage is invalid");
   const rawEdits = object.lineageEdits ?? [];
   if (!Array.isArray(rawEdits)) throw new Error("lineageEdits is invalid");
@@ -643,17 +754,35 @@ function parseLaunchManifest(value: unknown): LaunchManifest {
     const replacementHash = edit.replacementHash === undefined ? undefined : string(edit.replacementHash, "lineage edit replacementHash");
     if (type === "replace" && !replacementHash) throw new Error("replacement lineage edit has no hash");
     if (type === "drop" && replacementHash !== undefined) throw new Error("drop lineage edit has a replacement hash");
+    if (versioned && replacementHash !== undefined && !digest(replacementHash)) throw new Error("replacement lineage edit hash is invalid");
     return { type, occurrenceId, replacementHash };
   });
   if (new Set(lineageEdits.map((edit) => edit.occurrenceId)).size !== lineageEdits.length) throw new Error("lineage answer was edited more than once");
-  const parentRunId = object.parentRunId === undefined ? undefined : string(object.parentRunId, "parentRunId");
+  const parentValue = object.parentRunId === null ? undefined : object.parentRunId;
+  const parentRunId = parentValue === undefined ? undefined : string(parentValue, "parentRunId");
   if ((parentRunId === undefined) !== (lineage === undefined)) throw new Error("parentRunId and lineage must appear together");
   if (lineage !== "fork" && lineageEdits.length > 0) throw new Error("only fork lineage may contain answer edits");
-  return {
+  const base: LaunchManifest = {
     runId: string(object.runId, "runId"), runnerId: string(object.runnerId, "runnerId"), workflow: string(object.workflow, "workflow"),
     cwd: string(object.cwd, "cwd"), targetKind: targetKind as LaunchManifest["targetKind"], targetArgs, inputHashes: hashes as Record<string, string>,
     programHash: string(object.programHash, "programHash"), createdAt: string(object.createdAt, "createdAt"),
     parentRunId, lineage, lineageEdits,
+  };
+  if (!versioned) return base;
+  if (!/^[A-Za-z0-9._-]{1,128}$/.test(base.runId)) throw new Error("runId is invalid");
+  if (!isAbsolute(base.cwd)) throw new Error("frontend cwd is not absolute");
+  if (!digest(base.programHash) || !Object.values(base.inputHashes).every(digest)) throw new Error("frontend digest is invalid");
+  const runnerExecutable = string(object.runnerExecutable, "runnerExecutable");
+  if (!isAbsolute(runnerExecutable)) throw new Error("runnerExecutable is not absolute");
+  const personAnswering = string(object.personAnswering, "personAnswering");
+  if (personAnswering !== "engine" && personAnswering !== "local-control") throw new Error("personAnswering is invalid");
+  if (object.runtimeStore !== "runtime") throw new Error("runtimeStore is invalid");
+  const persona = optionalText(object.persona, "persona");
+  const policyDigest = optionalText(object.policyDigest, "policyDigest");
+  if (policyDigest !== undefined && !digest(policyDigest)) throw new Error("policyDigest is invalid");
+  return {
+    ...base, frontendManifestVersion: 2, runnerExecutable, runnerVersion: string(object.runnerVersion, "runnerVersion"),
+    persona, policyDigest, personAnswering, ownerId: string(object.ownerId, "ownerId"), runtimeStore: "runtime",
   };
 }
 
@@ -672,7 +801,25 @@ function parseSnapshot(value: unknown, runId: string): RunSnapshot {
     if (!Array.isArray(occurrence.attempts)) throw new Error("snapshot attempts is invalid");
     for (const attemptItem of occurrence.attempts) {
       if (!Array.isArray(attemptItem) || attemptItem.length !== 2) throw new Error("snapshot attempt entry is invalid");
-      attempts.set(string(attemptItem[0], "attempt id"), record(attemptItem[1], "attempt") as never);
+      const attemptId = string(attemptItem[0], "attempt id");
+      const attempt = record(attemptItem[1], "attempt");
+      const tools = new Map<string, unknown>();
+      const rawTools = attempt.tools ?? [];
+      if (!Array.isArray(rawTools)) throw new Error("snapshot public tools is invalid");
+      for (const toolItem of rawTools) {
+        if (!Array.isArray(toolItem) || toolItem.length !== 2) throw new Error("snapshot public tool entry is invalid");
+        tools.set(string(toolItem[0], "public tool id"), record(toolItem[1], "public tool"));
+      }
+      const rawTodos = attempt.todos ?? [];
+      if (!Array.isArray(rawTodos)) throw new Error("snapshot public todos is invalid");
+      attempts.set(attemptId, {
+        ...attempt,
+        messages: stringArray(attempt.messages ?? [], "public messages"),
+        tools,
+        todos: rawTodos.map((todo) => record(todo, "public todo")),
+        usage: attempt.usage === undefined ? undefined : record(attempt.usage, "public usage"),
+        reasoningSummaries: stringArray(attempt.reasoningSummaries ?? [], "public reasoning summaries"),
+      } as never);
     }
     occurrences.set(id, { ...occurrence, id, attempts } as never);
   }
@@ -680,7 +827,11 @@ function parseSnapshot(value: unknown, runId: string): RunSnapshot {
   if (!Array.isArray(object.eventDigests)) throw new Error("snapshot eventDigests is invalid");
   for (const item of object.eventDigests) {
     if (!Array.isArray(item) || item.length !== 2) throw new Error("snapshot event digest is invalid");
-    eventDigests.set(string(item[0], "event sequence"), string(item[1], "event digest"));
+    const storedDigest = string(item[1], "event digest");
+    const normalizedDigest = /^[0-9a-f]{64}$/.test(storedDigest)
+      ? storedDigest
+      : createHash("sha256").update(storedDigest).digest("hex");
+    eventDigests.set(string(item[0], "event sequence"), normalizedDigest);
   }
   const controlAcks = new Map<string, ControlAckSnapshot>();
   const rawControlAcks = object.controlAcks ?? [];
@@ -689,7 +840,12 @@ function parseSnapshot(value: unknown, runId: string): RunSnapshot {
     if (!Array.isArray(item) || item.length !== 2) throw new Error("snapshot control acknowledgement is invalid");
     const value = record(item[1], "control acknowledgement");
     const controlId = string(item[0], "control id");
-    controlAcks.set(controlId, { controlId, state: string(value.state, "control state"), message: string(value.message, "control message") });
+    controlAcks.set(controlId, {
+      controlId, state: string(value.state, "control state"), message: string(value.message, "control message"),
+      ...(value.command === undefined ? {} : { command: string(value.command, "control command") }),
+      ...(value.occurrenceId === undefined ? {} : { occurrenceId: string(value.occurrenceId, "control occurrenceId") }),
+      ...(value.attemptId === undefined ? {} : { attemptId: string(value.attemptId, "control attemptId") }),
+    });
   }
   const sequence = object.lastSequence;
   if (sequence !== undefined && (typeof sequence !== "string" || !/^(0|[1-9][0-9]*)$/.test(sequence))) throw new Error("snapshot sequence is invalid");
@@ -704,11 +860,167 @@ function utf8Prefix(bytes: Buffer, maximum: number): Buffer {
   return Buffer.from(text);
 }
 
+async function confinedPath(root: string, components: string[]): Promise<string> {
+  const rootPath = await realpath(root);
+  let current = root;
+  for (const [index, component] of components.entries()) {
+    if (!component || component === "." || component === ".." || component.includes("/") || component.includes("\\")) throw new Error("confined path has an invalid component");
+    current = join(current, component);
+    const information = await lstat(current);
+    if (information.isSymbolicLink()) throw new Error(`${current} is a symbolic link`);
+    if (index < components.length - 1 && !information.isDirectory()) throw new Error(`${current} is not a directory`);
+    if (index === components.length - 1 && !information.isFile()) throw new Error(`${current} is not a regular file`);
+    const resolved = await realpath(current);
+    const descent = relative(rootPath, resolved);
+    if (descent === ".." || descent.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(descent)) throw new Error(`${current} escapes its run store`);
+  }
+  return current;
+}
+
+async function readBytesBounded(path: string, maximum: number): Promise<Buffer> {
+  const handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+  try {
+    const information = await handle.stat();
+    if (!information.isFile()) throw new Error(`${path} is not a regular file`);
+    if (information.size > maximum) throw new Error(`${path} exceeds ${maximum} bytes`);
+    const chunks: Buffer[] = [];
+    let total = 0;
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    for (;;) {
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+      if (total > maximum) throw new Error(`${path} exceeds ${maximum} bytes`);
+      chunks.push(Buffer.from(buffer.subarray(0, bytesRead)));
+    }
+    return Buffer.concat(chunks, total);
+  } finally {
+    await handle.close();
+  }
+}
+
+async function readTextBounded(path: string, maximum: number): Promise<string> {
+  return (await readBytesBounded(path, maximum)).toString("utf8");
+}
+
+async function verifySnapshotResult(storeDir: string, runId: string, snapshot: RunSnapshot): Promise<void> {
+  if (snapshot.status === "succeeded" && snapshot.result) await verifyResultArtifact(storeDir, runId, snapshot.result);
+}
+
+function jsonHasOuterWhitespace(value: string): boolean {
+  let inString = false;
+  let escaped = false;
+  for (const character of value) {
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+    } else if (character === '"') inString = true;
+    else if (/\s/u.test(character)) return true;
+  }
+  return false;
+}
+
+async function verifyResultArtifact(storeDir: string, runId: string, reference: NonNullable<RunSnapshot["result"]>): Promise<void> {
+  const expectedBytes = BigInt(reference.bytes);
+  const path = await confinedPath(storeDir, ["runtime", "result.json"]);
+  const bytes = await readBytesBounded(path, MAX_SNAPSHOT_FILE);
+  if (BigInt(bytes.length) !== expectedBytes) throw new Error("result artifact byte count does not match its event");
+  if (createHash("sha256").update(bytes).digest("hex") !== reference.sha256) throw new Error("result artifact digest does not match its event");
+  if (bytes.length === 0 || bytes[bytes.length - 1] !== 10 || bytes.subarray(0, -1).includes(10)) throw new Error("result artifact is not canonical compact JSON followed by one newline");
+  const compact = new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, -1));
+  if (jsonHasOuterWhitespace(compact)) throw new Error("result artifact is not canonical compact JSON followed by one newline");
+  const value = JSON.parse(compact) as unknown;
+  const artifact = record(value, "result artifact");
+  const entries = compactObjectEntries(compact);
+  if (JSON.stringify(entries.map(([key]) => key)) !== JSON.stringify(["artifactVersion", "result", "runId"])) throw new Error("result artifact has non-canonical, unknown, or missing fields");
+  if (entries[0][1] !== "1" || artifact.artifactVersion !== 1) throw new Error("unsupported or non-canonical result artifact version");
+  if (entries[2][1] !== JSON.stringify(runId) || artifact.runId !== runId) throw new Error("result artifact run id does not canonically match its event");
+  const result = record(artifact.result, "result artifact payload");
+  const resultEntries = compactObjectEntries(entries[1][1]);
+  if (JSON.stringify(resultEntries.map(([key]) => key)) !== JSON.stringify(["code", "value"])) throw new Error("result artifact payload has non-canonical, unknown, or missing fields");
+  if (resultEntries[0][1] !== JSON.stringify(reference.code) || JSON.stringify(result.code) !== JSON.stringify(reference.code)) throw new Error("result artifact code does not canonically match its event");
+}
+
+function compactObjectEntries(value: string): Array<[string, string]> {
+  if (!value.startsWith("{") || !value.endsWith("}")) throw new Error("canonical JSON object is malformed");
+  const entries: Array<[string, string]> = [];
+  let index = 1;
+  if (value[index] === "}") return entries;
+  while (index < value.length - 1) {
+    if (value[index] !== '"') throw new Error("canonical JSON object key is malformed");
+    const keyEnd = jsonStringEnd(value, index);
+    const keyText = value.slice(index, keyEnd);
+    const key = JSON.parse(keyText) as unknown;
+    if (typeof key !== "string" || JSON.stringify(key) !== keyText || value[keyEnd] !== ":") throw new Error("canonical JSON object key is malformed");
+    const valueStart = keyEnd + 1;
+    const valueEnd = jsonValueEnd(value, valueStart);
+    const raw = value.slice(valueStart, valueEnd);
+    JSON.parse(raw);
+    entries.push([key, raw]);
+    if (value[valueEnd] === "}") {
+      if (valueEnd !== value.length - 1) throw new Error("canonical JSON object has trailing data");
+      return entries;
+    }
+    if (value[valueEnd] !== ",") throw new Error("canonical JSON object separator is malformed");
+    index = valueEnd + 1;
+  }
+  throw new Error("canonical JSON object is unterminated");
+}
+
+function jsonStringEnd(value: string, start: number): number {
+  let escaped = false;
+  for (let index = start + 1; index < value.length; index += 1) {
+    if (escaped) escaped = false;
+    else if (value[index] === "\\") escaped = true;
+    else if (value[index] === '"') return index + 1;
+  }
+  throw new Error("canonical JSON string is unterminated");
+}
+
+function jsonValueEnd(value: string, start: number): number {
+  if (value[start] === '"') return jsonStringEnd(value, start);
+  if (value[start] !== "{" && value[start] !== "[") {
+    let index = start;
+    while (index < value.length && value[index] !== "," && value[index] !== "}") index += 1;
+    return index;
+  }
+  let depth = 0;
+  for (let index = start; index < value.length; index += 1) {
+    if (value[index] === '"') index = jsonStringEnd(value, index) - 1;
+    else if (value[index] === "{" || value[index] === "[") depth += 1;
+    else if (value[index] === "}" || value[index] === "]") {
+      depth -= 1;
+      if (depth === 0) return index + 1;
+    }
+  }
+  throw new Error("canonical JSON value is unterminated");
+}
+
 function record(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error(`${label} is not an object`);
   return value as Record<string, unknown>;
 }
+function controlCorrelation(value: unknown): ControlCorrelation {
+  const control = record(value, "runtime control");
+  const command = record(control.command, "runtime control command");
+  const occurrenceId = control.expectedOccurrenceId === null || control.expectedOccurrenceId === undefined
+    ? undefined : string(control.expectedOccurrenceId, "expectedOccurrenceId");
+  let attemptId: string | undefined;
+  if (control.expectedAttemptId !== null && control.expectedAttemptId !== undefined) {
+    const attempt = record(control.expectedAttemptId, "expectedAttemptId");
+    attemptId = `${string(attempt.occurrenceId, "attempt occurrenceId")}:${string(attempt.attemptNumber, "attempt number")}`;
+  }
+  return { command: string(command.type, "control command type"), occurrenceId, attemptId };
+}
+
 function string(value: unknown, label: string): string { if (typeof value !== "string") throw new Error(`${label} is not text`); return value; }
+function optionalText(value: unknown, label: string): string | undefined { return value === undefined || value === null ? undefined : string(value, label); }
+function digest(value: string): boolean { return /^[0-9a-f]{64}$/.test(value); }
+function onlyKeys(value: Record<string, unknown>, allowed: readonly string[], label: string): void {
+  const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
+  if (unknown.length) throw new Error(`${label} has unknown field(s): ${unknown.join(", ")}`);
+}
 function stringArray(value: unknown, label: string): string[] { if (!Array.isArray(value) || !value.every((entry) => typeof entry === "string")) throw new Error(`${label} is not text[]`); return [...value]; }
 
 function isPrunable(record: { manifest: LaunchManifest; snapshot: RunSnapshot }, protectedParents: Set<string>): boolean {
@@ -723,12 +1035,29 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-function assertJournalPrefix(left: RunSnapshot, right: RunSnapshot): void {
-  const shorter = (left.lastSequence ?? -1n) <= (right.lastSequence ?? -1n) ? left : right;
-  const longer = shorter === left ? right : left;
-  for (const [sequence, digest] of shorter.eventDigests) {
-    if (longer.eventDigests.get(sequence) !== digest) throw new Error(`stored protocol journals disagree at sequence ${sequence}`);
+async function assertJournalPrefix(left: ReducedJournal, right: ReducedJournal): Promise<void> {
+  const leftSequence = left.snapshot.lastSequence ?? -1n;
+  const rightSequence = right.snapshot.lastSequence ?? -1n;
+  if (leftSequence === rightSequence) {
+    if (left.bytes !== right.bytes || left.digest !== right.digest) throw new Error("stored protocol journals disagree at equal sequence");
+    return;
   }
+  const shorter = leftSequence < rightSequence ? left : right;
+  const longer = shorter === left ? right : left;
+  if (shorter.bytes > longer.bytes) throw new Error("stored protocol journals disagree in prefix length");
+  const digest = createHash("sha256");
+  if (shorter.bytes > 0) {
+    const handle = await open(longer.path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    try {
+      const information = await handle.stat();
+      if (!information.isFile() || information.size < shorter.bytes) throw new Error("stored protocol journal changed during prefix validation");
+      const stream = handle.createReadStream({ start: 0, end: shorter.bytes - 1, autoClose: false });
+      for await (const chunk of stream) digest.update(chunk);
+    } finally {
+      await handle.close();
+    }
+  }
+  if (digest.digest("hex") !== shorter.digest) throw new Error(`stored protocol journals disagree before sequence ${shorter.snapshot.lastSequence ?? 0n}`);
 }
 
 function waitForExit(child: ChildProcessWithoutNullStreams, timeoutMs: number): Promise<boolean> {

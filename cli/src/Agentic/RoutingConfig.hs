@@ -31,7 +31,9 @@
 -- applied or verified before a question. @options@ carries additional non-secret
 -- backend constraints.
 module Agentic.RoutingConfig
-  ( Thinking (..),
+  ( module Agentic.RoutingConfig.V2,
+    module Agentic.RoutingDiscovery,
+    Thinking (..),
     thinkingName,
     Router (..),
     Realization (..),
@@ -40,11 +42,21 @@ module Agentic.RoutingConfig
     LoadedRouting (..),
     ResolvedRealization (..),
     ResolvedRouting (..),
+    ResolvedEngineContext,
+    resolvedEngineAlias,
+    resolvedEngineBackend,
+    resolvedEngineChildEnvironment,
+    resolvedEngineCredentialReady,
+    resolvedEngineExecutionFingerprint,
+    resolveEngineContexts,
     emptyRoutingConfig,
     decodeRoutingConfig,
     mergeRoutingConfig,
     routesWithProfiles,
     resolveRoutingConfig,
+    expandRoutingConfigV2,
+    freezeRoutingConfigV2,
+    resolveRoutingConfigV2,
     discoverRoutingFiles,
     loadRoutingFiles,
     loadRoutingConfig,
@@ -52,6 +64,17 @@ module Agentic.RoutingConfig
 where
 
 import Agentic.Engine (Thinking (..), thinkingName)
+import Agentic.RoutingDiscovery
+import Agentic.RoutingConfig.V2
+import Agentic.RoutingSecrets
+  ( ResolvedEngineContext,
+    resolveEngineContexts,
+    resolvedEngineAlias,
+    resolvedEngineBackend,
+    resolvedEngineChildEnvironment,
+    resolvedEngineCredentialReady,
+    resolvedEngineExecutionFingerprint,
+  )
 import Agentic.Route
   ( Backend,
     Routes,
@@ -61,7 +84,7 @@ import Agentic.Route
     routes,
   )
 import Control.Exception (IOException, try)
-import Control.Monad (unless, when)
+import Control.Monad (forM_, unless, when)
 import Data.Aeson
   ( FromJSON (parseJSON),
     Object,
@@ -130,7 +153,9 @@ data RoutingConfig = RoutingConfig
 -- in increasing precedence order.
 data LoadedRouting = LoadedRouting
   { loadedRouting :: !RoutingConfig,
-    loadedRoutingSources :: ![FilePath]
+    loadedRoutingSources :: ![FilePath],
+    loadedRoutingV2User :: !(Maybe RoutingConfigV2),
+    loadedRoutingV2Project :: !(Maybe ProjectRoutingV2)
   }
   deriving (Eq, Show)
 
@@ -143,7 +168,9 @@ data ResolvedRealization = ResolvedRealization
     resolvedRung :: !Int,
     resolvedRouter :: !Router,
     resolvedBackend :: !Backend,
-    resolvedSpec :: !Realization
+    resolvedSpec :: !Realization,
+    resolvedModelSelection :: !(Maybe ResolvedModelSelection),
+    resolvedExecutionFingerprint :: !(Maybe Text)
   }
   deriving (Eq, Show)
 
@@ -151,7 +178,9 @@ data ResolvedRealization = ResolvedRealization
 data ResolvedRouting = ResolvedRouting
   { resolvedRoutes :: !(Routes Backend),
     resolvedChains :: !(Map Text [Text]),
-    resolvedRealizations :: !(Map Text ResolvedRealization)
+    resolvedRealizations :: !(Map Text ResolvedRealization),
+    resolvedRoutingPersona :: !(Maybe Text),
+    resolvedRoutingPersonaSource :: !(Maybe PersonaSelectionSource)
   }
 
 emptyRoutingConfig :: RoutingConfig
@@ -330,7 +359,9 @@ resolveRoutingConfig config commandRoutes authored = do
     ResolvedRouting
       { resolvedRoutes = routeTable,
         resolvedChains = Map.fromList [(piecePrimary piece, pieceAlternates piece) | piece <- pieces],
-        resolvedRealizations = realized
+        resolvedRealizations = realized,
+        resolvedRoutingPersona = Nothing,
+        resolvedRoutingPersonaSource = Nothing
       }
   where
     authoredNames = Map.keys authored <> concat (Map.elems authored)
@@ -371,7 +402,163 @@ resolveRoutingConfig config commandRoutes authored = do
             resolvedRung = rung,
             resolvedRouter = router,
             resolvedBackend = routerBackend router,
-            resolvedSpec = spec
+            resolvedSpec = spec,
+            resolvedModelSelection = Nothing,
+            resolvedExecutionFingerprint = Nothing
+          }
+
+-- | Expand version-2 symbolic profiles through the established chain resolver.
+-- The resulting model names are still concrete aliases; no inventory or secret
+-- is consulted, so this phase is safe inside the run-fact fixed point.
+expandRoutingConfigV2 :: SelectedRoutingV2 -> Map Text Text -> Routes Backend -> Map Text [Text] -> Either Text ResolvedRouting
+expandRoutingConfigV2 selected overrides commandRoutes authored = do
+  lowered <- lowerSelectedRouting selected
+  expanded <- resolveRoutingConfig lowered commandRoutes authored
+  let managed = resolvedRealizations expanded
+      rawConflicts = [axis | (axis, _) <- routeNamed commandRoutes, axis `Map.member` managed]
+      unknownOverrides = filter (`Map.notMember` managed) (Map.keys overrides)
+  case rawConflicts of
+    axis : _ ->
+      Left
+        ( "raw --route cannot replace version-2 managed axis '"
+            <> axis
+            <> "'; use --realize AXIS=MODEL-ALIAS or a project profile override"
+        )
+    [] -> pure ()
+  case unknownOverrides of
+    axis : _ -> Left ("--realize names unknown version-2 axis '" <> axis <> "'")
+    [] -> pure ()
+  realized <- Map.traverseWithKey applyAlias managed
+  let configured = [(axis, resolvedBackend target) | (axis, target) <- Map.toAscList realized]
+      unmanagedCommand = filter ((`Map.notMember` managed) . fst) (routeNamed commandRoutes)
+  pure
+    expanded
+      { resolvedRoutes = overlayRoutes (routeDefault commandRoutes) configured unmanagedCommand,
+        resolvedRealizations = realized,
+        resolvedRoutingPersona = Just (selectedPersonaName selected),
+        resolvedRoutingPersonaSource = Just (selectedPersonaSource selected)
+      }
+  where
+    config = selectedRoutingV2 selected
+    persona = selectedPersona selected
+
+    applyAlias axis target = do
+      let alias = Map.findWithDefault (realizationModel (resolvedSpec target)) axis overrides
+      (model, engine) <- modelAndEngine config persona (selectedPersonaName selected) alias
+      let router =
+            Router
+              { routerName = concreteModelEngine model,
+                routerBackend = engineBackend engine,
+                routerProvider = engineProvider engine
+              }
+          spec =
+            (resolvedSpec target)
+              { realizationRouter = concreteModelEngine model,
+                realizationModel = alias
+              }
+      pure
+        target
+          { resolvedRouter = router,
+            resolvedBackend = engineBackend engine,
+            resolvedSpec = spec,
+            resolvedModelSelection = Nothing
+          }
+
+-- | Replace the aliases of an already-expanded policy with exact model ids.
+-- This phase is run once after inventories have been frozen.
+freezeRoutingConfigV2 :: SelectedRoutingV2 -> Map Text InventoryResult -> ResolvedRouting -> Either Text ResolvedRouting
+freezeRoutingConfigV2 selected inventories expanded = do
+  unless (resolvedRoutingPersona expanded == Just (selectedPersonaName selected)) $
+    Left "version-2 routing was expanded for a different persona"
+  realized <- Map.traverseWithKey freezeAxis (resolvedRealizations expanded)
+  pure expanded {resolvedRealizations = realized}
+  where
+    config = selectedRoutingV2 selected
+    persona = selectedPersona selected
+
+    freezeAxis _ target = do
+      let alias = realizationModel (resolvedSpec target)
+      (model, _) <- modelAndEngine config persona (selectedPersonaName selected) alias
+      let evidence = Map.findWithDefault (InventoryResult Nothing Nothing Nothing) (concreteModelEngine model) inventories
+      selection <- case resolveConcreteModel alias model evidence of
+        Right value -> Right value
+        Left problem ->
+          Left
+            ( "persona '"
+                <> selectedPersonaName selected
+                <> "', engine '"
+                <> concreteModelEngine model
+                <> "', model alias '"
+                <> alias
+                <> "', endpoint "
+                <> fromMaybe "none" (inventoryResultFingerprint evidence)
+                <> maybe "" (", inventory " <>) (inventoryResultWarning evidence)
+                <> ": "
+                <> problem
+            )
+      pure
+        target
+          { resolvedSpec = (resolvedSpec target) {realizationModel = selectedModelId selection},
+            resolvedModelSelection = Just selection
+          }
+
+-- | Convenience composition for callers which already possess frozen
+-- inventories. CLI execution uses the two phases separately around convergence.
+resolveRoutingConfigV2 :: SelectedRoutingV2 -> Map Text InventoryResult -> Map Text Text -> Routes Backend -> Map Text [Text] -> Either Text ResolvedRouting
+resolveRoutingConfigV2 selected inventories overrides commandRoutes authored =
+  expandRoutingConfigV2 selected overrides commandRoutes authored >>= freezeRoutingConfigV2 selected inventories
+
+modelAndEngine :: RoutingConfigV2 -> Persona -> Text -> Text -> Either Text (ConcreteModel, EngineDefinition)
+modelAndEngine config persona personaName alias = do
+  unless (alias `elem` personaModels persona) $
+    Left ("model alias '" <> alias <> "' is outside persona '" <> personaName <> "'")
+  model <- maybe (Left ("unknown concrete model alias '" <> alias <> "'")) Right (Map.lookup alias (routingV2Models config))
+  unless (concreteModelEngine model `elem` personaEngines persona) $
+    Left ("concrete model alias '" <> alias <> "' belongs to engine outside persona '" <> personaName <> "'")
+  engine <-
+    maybe
+      (Left ("concrete model alias '" <> alias <> "' names unknown engine '" <> concreteModelEngine model <> "'"))
+      Right
+      (Map.lookup (concreteModelEngine model) (routingV2Engines config))
+  pure (model, engine)
+
+lowerSelectedRouting :: SelectedRoutingV2 -> Either Text RoutingConfig
+lowerSelectedRouting selected = do
+  let config = selectedRoutingV2 selected
+      persona = selectedPersona selected
+  routersByName <- fmap Map.fromList . traverse (lowerEngine config) $ personaEngines persona
+  profilesByName <- Map.traverseWithKey (lowerProfile config) (personaProfiles persona)
+  pure (RoutingConfig routersByName profilesByName)
+  where
+    lowerEngine config name = do
+      engine <- maybe (Left ("persona names unknown engine '" <> name <> "'")) Right (Map.lookup name (routingV2Engines config))
+      pure
+        ( name,
+          Router
+            { routerName = name,
+              routerBackend = engineBackend engine,
+              routerProvider = engineProvider engine
+            }
+        )
+
+    lowerProfile config name (ProfileV2 chain) = do
+      lowered <- traverse (lowerRealization config) chain
+      nonEmpty <- maybe (Left ("profile '" <> name <> "' has an empty chain")) Right (NE.nonEmpty lowered)
+      pure (Profile name nonEmpty)
+
+    lowerRealization config realization = do
+      model <-
+        maybe
+          (Left ("profile names unknown concrete model alias '" <> realizationV2Model realization <> "'"))
+          Right
+          (Map.lookup (realizationV2Model realization) (routingV2Models config))
+      pure
+        Realization
+          { realizationRouter = concreteModelEngine model,
+            realizationModel = realizationV2Model realization,
+            realizationThinking = realizationV2Thinking realization,
+            realizationMaxOutput = realizationV2MaxOutput realization,
+            realizationOptions = realizationV2Options realization
           }
 
 data Piece = Piece
@@ -429,19 +616,80 @@ nearestProjectFile = go
           let parent = takeDirectory directory
           if gitBoundary || parent == directory then pure Nothing else go parent
 
--- | Read, validate and overlay files in increasing precedence order.
+-- | Read, validate and overlay files in increasing precedence order. Version-1
+-- layers preserve their historical merge behavior. Version-2 consists of one
+-- privileged user document followed by at most one project selector; versions
+-- may never be mixed.
 loadRoutingFiles :: [FilePath] -> IO (Either Text LoadedRouting)
-loadRoutingFiles files = go emptyRoutingConfig [] files
+loadRoutingFiles files = do
+  readResult <- traverse readLayer files
+  pure $ do
+    layers <- sequence readResult
+    versions <- traverse (\(path, bytes) -> firstAt path (routingDocumentVersion bytes)) layers
+    let distinctVersions = nub versions
+    case distinctVersions of
+      [] -> Right (LoadedRouting emptyRoutingConfig [] Nothing Nothing)
+      [1] -> loadV1Layers layers
+      [2] -> loadV2Layers layers
+      [version] -> Left ("unsupported routing configuration version " <> T.pack (show version))
+      _
+        | all (`elem` [1, 2]) distinctVersions -> Left "routing configuration cannot mix version 1 and version 2 documents"
+        | otherwise -> Left ("unsupported routing configuration versions " <> T.intercalate ", " (map (T.pack . show) distinctVersions))
   where
-    go config sources [] =
-      pure (LoadedRouting <$> validateRoutingConfig config <*> pure sources)
-    go config sources (path : rest) = do
-      readResult <- try (BS.readFile path)
-      case readResult of
-        Left problem -> pure (Left (T.pack path <> ": " <> T.pack (show (problem :: IOException))))
-        Right bytes -> case decodeRoutingLayer bytes of
-          Left problem -> pure (Left (T.pack path <> ": " <> problem))
-          Right layer -> go (mergeRoutingConfig config layer) (sources <> [path]) rest
+    readLayer path = do
+      result <- try (BS.readFile path)
+      pure $ case result of
+        Left problem -> Left (T.pack path <> ": " <> T.pack (show (problem :: IOException)))
+        Right bytes -> Right (path, bytes)
+
+    firstAt path = either (Left . ((T.pack path <> ": ") <>)) Right
+
+loadV1Layers :: [(FilePath, BS.ByteString)] -> Either Text LoadedRouting
+loadV1Layers layers = do
+  config <- foldl apply (Right emptyRoutingConfig) layers >>= validateRoutingConfig
+  pure (LoadedRouting config (map fst layers) Nothing Nothing)
+  where
+    apply accumulated (path, bytes) = do
+      base <- accumulated
+      layer <- firstAt path (decodeRoutingLayer bytes)
+      pure (mergeRoutingConfig base layer)
+    firstAt path = either (Left . ((T.pack path <> ": ") <>)) Right
+
+loadV2Layers :: [(FilePath, BS.ByteString)] -> Either Text LoadedRouting
+loadV2Layers layers = do
+  (user, project) <- foldl apply (Right (Nothing, Nothing)) layers
+  privileged <- maybe (Left "version-2 routing requires one user document declaring engines, models, and personas") Right user
+  forM_ project $ \selector -> do
+    _ <- selectRoutingPersona privileged Nothing Nothing (Just selector)
+    pure ()
+  pure
+    LoadedRouting
+      { loadedRouting = emptyRoutingConfig,
+        loadedRoutingSources = map fst layers,
+        loadedRoutingV2User = Just privileged,
+        loadedRoutingV2Project = project
+      }
+  where
+    apply accumulated (path, bytes) = do
+      (user, project) <- accumulated
+      case decodeRoutingUserV2 bytes of
+        Right privileged
+          | user /= Nothing -> Left (T.pack path <> ": version-2 routing declares more than one user document")
+          | project /= Nothing -> Left (T.pack path <> ": version-2 user routing must precede project routing")
+          | otherwise -> Right (Just privileged, project)
+        Left userProblem -> case decodeRoutingProjectV2 bytes of
+          Right selector
+            | project /= Nothing -> Left (T.pack path <> ": version-2 routing declares more than one project document")
+            | otherwise -> Right (user, Just selector)
+          Left projectProblem ->
+            Left
+              ( T.pack path
+                  <> ": document is neither valid version-2 user routing ("
+                  <> userProblem
+                  <> ") nor project routing ("
+                  <> projectProblem
+                  <> ")"
+              )
 
 -- | Load the conventional user and project files for this process.
 loadRoutingConfig :: IO (Either Text LoadedRouting)

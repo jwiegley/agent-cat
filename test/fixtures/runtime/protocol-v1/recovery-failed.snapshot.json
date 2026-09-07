@@ -1,0 +1,62 @@
+{
+  "runId": "run-1",
+  "status": "failed",
+  "lastSequence": "9",
+  "workflow": "review",
+  "target": "routed",
+  "occurrences": [
+    {
+      "id": "0",
+      "state": "failed",
+      "code": "flag",
+      "intent": "consult",
+      "addressee": "model reviewer",
+      "prompt": "prompt",
+      "answer": "abandoned",
+      "dispatch": null,
+      "recovery": {
+        "gap": "decode",
+        "message": "maybe",
+        "retries": [],
+        "choices": [
+          { "choice": "retry" },
+          { "choice": "failover", "target": "model@spare" },
+          { "choice": "abandon" }
+        ],
+        "chosen": {
+          "controlId": "abandon-1",
+          "choice": "abandon",
+          "target": null
+        }
+      },
+      "reuseKind": null,
+      "source": null,
+      "failureClass": "decode",
+      "replayable": true,
+      "attempts": [
+        {
+          "id": "0:0",
+          "target": "model@primary",
+          "state": "failed",
+          "output": "",
+          "steers": [],
+          "failure": "maybe",
+          "failureClass": "decode"
+        }
+      ]
+    }
+  ],
+  "authoredOrder": [],
+  "traceRecorded": false,
+  "controlAcks": [
+    {
+      "controlId": "abandon-1",
+      "state": "delivered",
+      "message": "recovery delivered"
+    }
+  ],
+  "billFresh": null,
+  "billMemo": null,
+  "failure": "abandoned",
+  "failureClass": "decode"
+}

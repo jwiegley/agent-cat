@@ -1,0 +1,21 @@
+--- a/cbits/posix/fork_exec.c
++++ b/cbits/posix/fork_exec.c
+@@ -266,13 +266,12 @@
+         setup_std_handle_fork(STDERR_FILENO, stdErrHdl, forkCommunicationFds[1]);
+ 
+         if ((flags & RUN_PROCESS_IN_CLOSE_FDS) != 0) {
+-            int max_fd = get_max_fd();
+-            // XXX Not the pipe
+-            for (int i = 3; i < max_fd; i++) {
+-                if (i != forkCommunicationFds[1]) {
+-                    close(i);
+-                }
++            // Keep the error pipe until exec; its allocation bounds this loop
++            // by open descriptors rather than the inherited resource limit.
++            for (int i = 3; i < forkCommunicationFds[1]; i++) {
++                close(i);
+             }
++            closefrom(forkCommunicationFds[1] + 1);
+         }
+ 
+         /* Reset the SIGINT/SIGQUIT signal handlers in the child, if requested

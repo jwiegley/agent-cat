@@ -1,9 +1,34 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { initialSnapshot, reduceEvent } from "../src/reducer.ts";
-import type { RuntimeEvent } from "../src/types.ts";
+import { initialSnapshot, reduceEvent, snapshotValue } from "../src/reducer.ts";
+import type { RunSnapshot, RuntimeEvent } from "../src/types.ts";
 
 function event(sequence: number, type: string, payload: Record<string, unknown> = {}): RuntimeEvent {
   return { protocolVersion: 1, runId: "run-1", sequence: String(sequence), timestamp: "2026-08-28T00:00:00.000Z", event: { type, ...payload } };
+}
+
+const sharedFixture = (version: 1 | 2, name: string): string =>
+  readFileSync(new URL(`../../test/fixtures/runtime/protocol-v${version}/${name}`, import.meta.url), "utf8");
+
+function sharedEvents(version: 1 | 2, name: string): RuntimeEvent[] {
+  return sharedFixture(version, name).trim().split("\n").map((line) => JSON.parse(line) as RuntimeEvent);
+}
+
+function reduceShared(events: RuntimeEvent[]): RunSnapshot {
+  return events.reduce(reduceEvent, initialSnapshot("run-1"));
+}
+
+function refusalClass(events: RuntimeEvent[]): { errorClass: string } {
+  try {
+    reduceShared(events);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("sequence")) return { errorClass: "sequence" };
+    if (message.includes("protocol version")) return { errorClass: "version" };
+    if (message.includes("run id")) return { errorClass: "run" };
+    return { errorClass: "lifecycle" };
+  }
+  throw new Error("shared refusal fixture was accepted");
 }
 
 describe("runtime reducer", () => {
@@ -27,6 +52,24 @@ describe("runtime reducer", () => {
     expect(snapshot.occurrences.get("0")?.replayable).toBe(false);
     expect(snapshot.billFresh).toBe("1");
   });
+
+  it("accepts more than 65,536 bounded protocol events without retaining digest history", () => {
+    const envelope = (sequence: number, type: string, payload: Record<string, unknown> = {}): RuntimeEvent => ({
+      protocolVersion: 2, runId: "run-many", sequence: String(sequence), timestamp: "2026-08-28T00:00:00.000Z", event: { type, ...payload },
+    });
+    let snapshot = initialSnapshot("run-many");
+    snapshot = reduceEvent(snapshot, envelope(0, "run.started", { workflow: "hello", target: "scripted", personAnswering: "engine" }));
+    snapshot = reduceEvent(snapshot, envelope(1, "occurrence.started", { occurrenceId: "0", code: "text", intent: "consult", addressee: "model", prompt: "p" }));
+    snapshot = reduceEvent(snapshot, envelope(2, "attempt.started", { occurrenceId: "0", attempt: "0", target: "scripted" }));
+    for (let sequence = 3; sequence < 65_540; sequence += 1) {
+      snapshot = reduceEvent(snapshot, envelope(sequence, "attempt.progress", {
+        occurrenceId: "0", attempt: "0", progress: { kind: "message", text: `step ${sequence}` },
+      }));
+    }
+    expect(snapshot.lastSequence).toBe(65_539n);
+    expect(snapshot.eventDigests.size).toBe(1);
+    expect(snapshot.occurrences.get("0")?.attempts.get("0:0")?.messages).toHaveLength(64);
+  }, 30_000);
 
   it("rejects identical duplicates, gaps, and conflicts", () => {
     const first = event(0, "run.started", { workflow: "hello", target: "scripted" });
@@ -128,5 +171,44 @@ describe("runtime reducer", () => {
     expect(failed).toMatchObject({ status: "failed", failureClass: "transport", failure: "adapter died" });
     expect(() => reduceEvent(running, event(1, "occurrence.completed", { occurrenceId: "9", source: "x", answer: "x" }))).toThrow("unknown occurrence");
     expect(() => reduceEvent(running, event(1, "future.event"))).toThrow("unknown runtime event");
+    expect(() => reduceEvent(running, event(1, "attempt.progress", { occurrenceId: "0", attempt: "0", progress: { kind: "message", text: "x" } }))).toThrow("unavailable in protocol version 1");
+  });
+
+  it("agrees with shared protocol-v1 snapshot and refusal fixtures", () => {
+    const expectedSnapshot = JSON.parse(sharedFixture(1, "success.snapshot.json")) as unknown;
+    expect(snapshotValue(reduceShared(sharedEvents(1, "success.ndjson")))).toEqual(expectedSnapshot);
+    for (const name of ["cancelled", "reused", "redirected", "recovery-failed", "failover-retried"]) {
+      const expected = JSON.parse(sharedFixture(1, `${name}.snapshot.json`)) as unknown;
+      expect(snapshotValue(reduceShared(sharedEvents(1, `${name}.ndjson`)))).toEqual(expected);
+    }
+
+    const expectedRefusal = JSON.parse(sharedFixture(1, "sequence-gap.error.json")) as unknown;
+    expect(refusalClass(sharedEvents(1, "sequence-gap.ndjson"))).toEqual(expectedRefusal);
+    const reuseRefusal = JSON.parse(sharedFixture(1, "reuse-after-attempt.error.json")) as unknown;
+    expect(refusalClass(sharedEvents(1, "reuse-after-attempt.ndjson"))).toEqual(reuseRefusal);
+  });
+
+  it("agrees with the shared protocol-v2 person/result fixture", () => {
+    const expected = JSON.parse(sharedFixture(2, "person-result.snapshot.json")) as unknown;
+    expect(snapshotValue(reduceShared(sharedEvents(2, "person-result.ndjson")))).toEqual(expected);
+    const progress = JSON.parse(sharedFixture(2, "progress.snapshot.json")) as unknown;
+    expect(snapshotValue(reduceShared(sharedEvents(2, "progress.ndjson")))).toEqual(progress);
+    const refusal = JSON.parse(sharedFixture(2, "person-terminal-without-acceptance.error.json")) as unknown;
+    expect(refusalClass(sharedEvents(2, "person-terminal-without-acceptance.ndjson"))).toEqual(refusal);
+    const queued = JSON.parse(sharedFixture(2, "person-queued-then-delivered.error.json")) as unknown;
+    expect(refusalClass(sharedEvents(2, "person-queued-then-delivered.ndjson"))).toEqual(queued);
+    const correlation = JSON.parse(sharedFixture(2, "control-correlation-change.error.json")) as unknown;
+    expect(refusalClass(sharedEvents(2, "control-correlation-change.ndjson"))).toEqual(correlation);
+  });
+  it("counts protocol-v2 result previews by Unicode code point", () => {
+    const accepted = structuredClone(sharedEvents(2, "person-result.ndjson"));
+    accepted.at(-1)!.event.result = {
+      ...(accepted.at(-1)!.event.result as Record<string, unknown>),
+      preview: "😀".repeat(500),
+    };
+    expect(reduceShared(accepted).status).toBe("succeeded");
+    const refused = structuredClone(accepted);
+    (refused.at(-1)!.event.result as Record<string, unknown>).preview = "😀".repeat(501);
+    expect(() => reduceShared(refused)).toThrow("invalid result artifact reference");
   });
 });

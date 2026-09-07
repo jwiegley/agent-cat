@@ -1,17 +1,35 @@
 import { execFile } from "node:child_process";
-import { appendFile, cp, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { appendFile, cp, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { discoverRunner } from "../src/catalogue.ts";
 import { prepareLaunch } from "../src/launch.ts";
-import { RunSupervisor, type OwnedRun } from "../src/supervisor.ts";
+import { parseLaunchManifest, RunSupervisor, type OwnedRun } from "../src/supervisor.ts";
 import type { RunnerConfig, RunSnapshot } from "../src/types.ts";
 
 const created: string[] = [];
 const execFileAsync = promisify(execFile);
 afterEach(async () => Promise.all(created.splice(0).map((path) => rm(path, { recursive: true, force: true }))));
+
+async function installResult(runtimeDir: string, runId: string, code: unknown, value: unknown, preview = "done") {
+  const bytes = Buffer.from(`${JSON.stringify({ artifactVersion: 1, result: { code, value }, runId })}\n`);
+  await writeFile(join(runtimeDir, "result.json"), bytes, { mode: 0o600 });
+  return {
+    artifactVersion: 1, path: "result.json", sha256: createHash("sha256").update(bytes).digest("hex"),
+    bytes: String(bytes.length), code, preview,
+  };
+}
+
+function withResult(journal: string, result: Awaited<ReturnType<typeof installResult>>): string {
+  return journal.split("\n").filter(Boolean).map((line) => {
+    const envelope = JSON.parse(line) as { event: { type: string; result?: unknown } };
+    if (envelope.event.type === "run.completed") envelope.event.result = result;
+    return JSON.stringify(envelope);
+  }).join("\n") + "\n";
+}
 
 async function prepared(hang = false, legacy = false) {
   const directory = await mkdtemp(join(tmpdir(), "agent-cat-supervisor-"));
@@ -31,18 +49,222 @@ function terminal(run: OwnedRun): Promise<RunSnapshot> {
 }
 
 describe("run supervisor", () => {
+  it("normalizes shared legacy and version-2 frontend manifests", async () => {
+    const fixture = async (name: string): Promise<unknown> =>
+      JSON.parse(await readFile(resolve("../test/fixtures/runtime/frontend-manifest", name), "utf8")) as unknown;
+    const legacy = parseLaunchManifest(await fixture("legacy-ext-pi.json"));
+    expect(legacy).toMatchObject({ runId: "run-legacy", runnerId: "fixture", targetKind: "scripted" });
+    expect(legacy).not.toHaveProperty("frontendManifestVersion");
+    expect(parseLaunchManifest(await fixture("v2.json"))).toMatchObject({
+      frontendManifestVersion: 2, runId: "run-v2", runnerId: "fixture", runnerExecutable: "/bin/agentic-run",
+      personAnswering: "engine", ownerId: "tui:owner", runtimeStore: "runtime",
+    });
+    const unknown = { ...(await fixture("v2.json") as Record<string, unknown>), future: true };
+    expect(() => parseLaunchManifest(unknown)).toThrow("unknown field");
+  });
+  it("restores a Haskell-style version-2 manifest and shared protocol-v2 journal read-only", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "agent-cat-shared-frontend-"));
+    created.push(directory);
+    const stateDir = join(directory, "state");
+    const runDir = join(stateDir, "runs", "run-1");
+    await mkdir(join(runDir, "runtime"), { recursive: true, mode: 0o700 });
+    const manifest = JSON.parse(await readFile(resolve("../test/fixtures/runtime/frontend-manifest/v2.json"), "utf8"));
+    manifest.runId = "run-1";
+    await writeFile(join(runDir, "supervisor-manifest.json"), `${JSON.stringify(manifest)}\n`, { mode: 0o600 });
+    const personResult = await installResult(join(runDir, "runtime"), "run-1", "receipt", { ok: true });
+    const personEvents = withResult(await readFile(resolve("../test/fixtures/runtime/protocol-v2/person-result.ndjson"), "utf8"), personResult);
+    await writeFile(join(runDir, "runtime", "events.ndjson"), personEvents, { mode: 0o600 });
+    const progressDir = join(stateDir, "runs", "run-progress");
+    await mkdir(join(progressDir, "runtime"), { recursive: true, mode: 0o700 });
+    await writeFile(join(progressDir, "supervisor-manifest.json"), `${JSON.stringify({ ...manifest, runId: "run-progress" })}\n`, { mode: 0o600 });
+    const progressResult = await installResult(join(progressDir, "runtime"), "run-progress", "receipt", { ok: true });
+    const progressEvents = withResult(
+      (await readFile(resolve("../test/fixtures/runtime/protocol-v2/progress.ndjson"), "utf8")).replaceAll('"run-1"', '"run-progress"'),
+      progressResult,
+    );
+    await writeFile(join(progressDir, "runtime", "events.ndjson"), progressEvents, { mode: 0o600 });
+    const supervisor = new RunSupervisor();
+    await supervisor.restore(stateDir);
+    const restored = supervisor.get("run-1");
+    expect(restored?.snapshot).toMatchObject({ status: "succeeded", protocolVersion: 2, personAnswering: "local-control" });
+    expect(restored?.snapshot.result).toMatchObject({ path: "result.json", preview: "done" });
+    await expect(restored?.cancel()).rejects.toThrow("no live control channel");
+    const progress = supervisor.get("run-progress")?.snapshot.occurrences.get("0")?.attempts.get("0:0");
+    expect(progress).toMatchObject({
+      output: "answer", messages: ["Working"], usage: { used: "42", size: "100" },
+      reasoningSummaries: ["Checked the public constraints."],
+    });
+    expect(progress?.tools.get("tool-1")).toMatchObject({ status: "completed", title: "Write parse.c" });
+  });
+  it("streams a valid cross-language journal beyond the former 64 MiB frontend limit", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "agent-cat-large-journal-"));
+    created.push(directory);
+    const stateDir = join(directory, "state");
+    const runId = "run-large";
+    const runDir = join(stateDir, "runs", runId);
+    const runtimeDir = join(runDir, "runtime");
+    await mkdir(runtimeDir, { recursive: true, mode: 0o700 });
+    const manifest = JSON.parse(await readFile(resolve("../test/fixtures/runtime/frontend-manifest/v2.json"), "utf8"));
+    manifest.runId = runId;
+    await writeFile(join(runDir, "supervisor-manifest.json"), `${JSON.stringify(manifest)}\n`, { mode: 0o600 });
+    let sequence = 0;
+    const envelope = (event: Record<string, unknown>): string => JSON.stringify({
+      protocolVersion: 2, runId, sequence: String(sequence++), timestamp: "2026-09-04T00:00:00Z", event,
+    }) + "\n";
+    const journal = join(runtimeDir, "events.ndjson");
+    await writeFile(journal, envelope({ type: "run.started", workflow: "review", target: "scripted", personAnswering: "engine" }));
+    await appendFile(journal, envelope({ type: "occurrence.started", occurrenceId: "0", code: "text", intent: "consult", addressee: "model reviewer", prompt: "prompt" }));
+    await appendFile(journal, envelope({ type: "attempt.started", occurrenceId: "0", attempt: "0", target: "scripted" }));
+    const chunk = "x".repeat(900_000);
+    for (let index = 0; index < 76; index += 1) {
+      await appendFile(journal, envelope({ type: "attempt.output", occurrenceId: "0", attempt: "0", stream: "transport-text", chunk }));
+    }
+    await appendFile(journal, envelope({ type: "attempt.completed", occurrenceId: "0", attempt: "0", source: "scripted" }));
+    await appendFile(journal, envelope({ type: "occurrence.completed", occurrenceId: "0", source: "asked:model reviewer", answer: "done" }));
+    await appendFile(journal, envelope({ type: "trace.ordered", occurrenceIds: ["0"] }));
+    const result = await installResult(runtimeDir, runId, "text", "done");
+    await appendFile(journal, envelope({ type: "run.completed", billFresh: "1", billMemo: "1", result }));
+    expect((await stat(journal)).size).toBeGreaterThan(64 * 1024 * 1024);
+    const supervisor = new RunSupervisor();
+    await supervisor.restore(stateDir);
+    const snapshot = supervisor.get(runId)?.snapshot;
+    expect(snapshot?.status, snapshot?.failure).toBe("succeeded");
+    expect(Buffer.byteLength(snapshot?.occurrences.get("0")?.attempts.get("0:0")?.output ?? "")).toBeLessThanOrEqual(64 * 1024);
+  }, 30_000);
+  it("restores dual journals with more than 65,536 protocol events", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "agent-cat-many-events-"));
+    created.push(directory);
+    const stateDir = join(directory, "state");
+    const runId = "run-many-events";
+    const runDir = join(stateDir, "runs", runId);
+    const runtimeDir = join(runDir, "runtime");
+    await mkdir(runtimeDir, { recursive: true, mode: 0o700 });
+    const manifest = JSON.parse(await readFile(resolve("../test/fixtures/runtime/frontend-manifest/v2.json"), "utf8"));
+    manifest.runId = runId;
+    await writeFile(join(runDir, "supervisor-manifest.json"), `${JSON.stringify(manifest)}\n`, { mode: 0o600 });
+    let sequence = 0;
+    const envelope = (event: Record<string, unknown>): string => JSON.stringify({
+      protocolVersion: 2, runId, sequence: String(sequence++), timestamp: "2026-09-04T00:00:00Z", event,
+    }) + "\n";
+    const lines = [
+      envelope({ type: "run.started", workflow: "review", target: "scripted", personAnswering: "engine" }),
+      envelope({ type: "occurrence.started", occurrenceId: "0", code: "text", intent: "consult", addressee: "model reviewer", prompt: "prompt" }),
+      envelope({ type: "attempt.started", occurrenceId: "0", attempt: "0", target: "scripted" }),
+    ];
+    for (let index = 0; index < 65_537; index += 1) {
+      lines.push(envelope({ type: "attempt.progress", occurrenceId: "0", attempt: "0", progress: { kind: "message", text: `step ${index}` } }));
+    }
+    lines.push(envelope({ type: "attempt.completed", occurrenceId: "0", attempt: "0", source: "scripted" }));
+    lines.push(envelope({ type: "occurrence.completed", occurrenceId: "0", source: "asked:model reviewer", answer: "done" }));
+    lines.push(envelope({ type: "trace.ordered", occurrenceIds: ["0"] }));
+    const result = await installResult(runtimeDir, runId, "text", "done");
+    lines.push(envelope({ type: "run.completed", billFresh: "1", billMemo: "1", result }));
+    const journal = lines.join("");
+    await writeFile(join(runtimeDir, "events.ndjson"), journal, { mode: 0o600 });
+    await writeFile(join(runDir, "live-events.ndjson"), journal, { mode: 0o600 });
+    const supervisor = new RunSupervisor();
+    await supervisor.restore(stateDir);
+    const snapshot = supervisor.get(runId)?.snapshot;
+    expect(snapshot?.status, snapshot?.failure).toBe("succeeded");
+    expect(snapshot?.lastSequence).toBe(65_543n);
+    expect(snapshot?.eventDigests.size).toBe(1);
+  }, 60_000);
+
+  it("isolates mismatched and oversized frontend manifests without hiding healthy siblings", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "agent-cat-manifest-bounds-"));
+    created.push(directory);
+    const stateDir = join(directory, "state");
+    const runsDir = join(stateDir, "runs");
+    const mismatched = join(runsDir, "directory-id");
+    const oversized = join(runsDir, "oversized-id");
+    await mkdir(mismatched, { recursive: true });
+    await mkdir(oversized, { recursive: true });
+    const manifest = await readFile(resolve("../test/fixtures/runtime/frontend-manifest/v2.json"), "utf8");
+    await writeFile(join(mismatched, "supervisor-manifest.json"), manifest);
+    await writeFile(join(oversized, "supervisor-manifest.json"), "x".repeat(4 * 1024 * 1024 + 1));
+    const supervisor = new RunSupervisor();
+    await supervisor.restore(stateDir);
+    expect(supervisor.get("directory-id")?.snapshot).toMatchObject({ status: "failed", failureClass: "corrupt-store", failure: expect.stringContaining("does not match") });
+    expect(supervisor.get("oversized-id")?.snapshot).toMatchObject({ status: "failed", failureClass: "corrupt-store", failure: expect.stringContaining("exceeds") });
+  });
+  it("treats malformed owner leases as absent rather than corrupting a terminal store", async () => {
+    const launch = await prepared();
+    await new RunSupervisor().start(launch).finished;
+    await writeFile(join(launch.storeDir, "owner.json"), "{not-json\n", "utf8");
+    const restored = new RunSupervisor();
+    await restored.restore(dirname(dirname(launch.storeDir)));
+    expect(restored.get(launch.manifest.runId)?.snapshot.status).toBe("succeeded");
+  });
   it("owns a successful run beyond launch", async () => {
     const supervisor = new RunSupervisor();
     const run = supervisor.start(await prepared());
     const result = await terminal(run);
     expect(result.status).toBe("succeeded");
+    expect(result.protocolVersion).toBe(2);
+    expect(result.result).toMatchObject({ path: "result.json", code: "receipt", preview: "done" });
     expect(result.billFresh).toBe("1");
     expect(result.occurrences.get("0")?.state).toBe("completed");
   });
 
+  it("refuses a terminal run whose private result artifact fails digest verification", async () => {
+    const launch = await prepared();
+    await new RunSupervisor().start(launch).finished;
+    const path = join(launch.storeDir, "runtime", "result.json");
+    const bytes = await readFile(path);
+    bytes[0] ^= 1;
+    await writeFile(path, bytes);
+    const restored = new RunSupervisor();
+    await restored.restore(dirname(dirname(launch.storeDir)));
+    expect(restored.get(launch.manifest.runId)?.snapshot).toMatchObject({
+      status: "failed", failureClass: "corrupt-store", failure: expect.stringContaining("digest"),
+    });
+  });
+
+  it("accepts a canonical private result whose JSON integer exceeds Number.MAX_SAFE_INTEGER", async () => {
+    const launch = await prepared();
+    launch.env.FIXTURE_LARGE_INTEGER_RESULT = "1";
+    const result = await new RunSupervisor().start(launch).finished;
+    expect(result.status, result.failure).toBe("succeeded");
+  });
+
+  it.each(["version", "run-id", "code"])("refuses non-canonical %s result metadata", async (variant) => {
+    const launch = await prepared();
+    launch.env.FIXTURE_NONCANONICAL_RESULT = variant;
+    const result = await new RunSupervisor().start(launch).finished;
+    expect(result).toMatchObject({ status: "failed", failure: expect.stringContaining("canonical") });
+  });
+
+  it("refuses result restoration through a symlinked runtime ancestor", async () => {
+    const launch = await prepared();
+    await new RunSupervisor().start(launch).finished;
+    const runtime = join(launch.storeDir, "runtime");
+    const outside = join(dirname(dirname(launch.storeDir)), "escaped-runtime");
+    await rename(runtime, outside);
+    await symlink(outside, runtime, "dir");
+    const restored = new RunSupervisor();
+    await restored.restore(dirname(dirname(launch.storeDir)));
+    expect(restored.get(launch.manifest.runId)?.snapshot).toMatchObject({
+      status: "failed", failureClass: "corrupt-store", failure: expect.stringContaining("symbolic link"),
+    });
+  });
+
+  it("refuses invalid UTF-8 in an otherwise bounded protocol journal", async () => {
+    const launch = await prepared();
+    await new RunSupervisor().start(launch).finished;
+    const path = join(launch.storeDir, "live-events.ndjson");
+    const bytes = await readFile(path);
+    const offset = bytes.indexOf(Buffer.from("fixture"));
+    expect(offset).toBeGreaterThanOrEqual(0);
+    bytes[offset] = 0xff;
+    await writeFile(path, bytes);
+    const restored = new RunSupervisor();
+    await restored.restore(dirname(dirname(launch.storeDir)));
+    expect(restored.get(launch.manifest.runId)?.snapshot).toMatchObject({ status: "failed", failureClass: "corrupt-store" });
+  });
+
   it("retains descriptor-v1 control compatibility on stdin", async () => {
     const launch = await prepared(true, true);
-    expect(launch.controlFd).toBeUndefined();
+    expect(launch).toMatchObject({ controlFd: undefined, protocolVersion: 1 });
     expect(launch.env.AGENT_CAT_CONTROL_STDIN).toBe("1");
     const run = new RunSupervisor().start(launch);
     await until(() => run.snapshot.status === "running");
@@ -60,7 +282,7 @@ describe("run supervisor", () => {
     expect((await stat(path)).size).toBeLessThanOrEqual(10 * 1024 * 1024);
     expect(log).not.toContain("super-secret-value");
     expect(log).toContain("[REDACTED]");
-    expect(log).toContain("stderr truncated");
+    expect(log).toContain("[REDACTED OVERLONG DIAGNOSTIC]");
   });
 
   it("reattaches read-only to a live owner and follows it to terminal state", async () => {
@@ -81,7 +303,8 @@ describe("run supervisor", () => {
     await expect(attached?.cancel()).rejects.toThrow("another live supervisor");
     const terminal = attached!.finished;
     await owned.cancel();
-    expect((await terminal).status).toBe("cancelled");
+    const observed = await terminal;
+    expect(observed.status, `${observed.failureClass}: ${observed.failure}`).toBe("cancelled");
     await observer.shutdown();
   }, 10_000);
 
@@ -108,6 +331,14 @@ describe("run supervisor", () => {
     expect(ack).toMatchObject({ state: "unsupported", message: "target rejected control" });
     expect(run.snapshot.controlAcks.get(ack.controlId)).toEqual(ack);
     await run.cancel();
+  });
+  it("rejects a terminal protocol-v2 acknowledgement with mismatched control correlation", async () => {
+    const launch = await prepared(true);
+    launch.env.FIXTURE_BAD_CONTROL_CORRELATION = "1";
+    const run = new RunSupervisor().start(launch);
+    await until(() => run.snapshot.occurrences.get("0")?.attempts.has("0:0") === true);
+    await expect(run.steer("0", "0:0", "focus", "next-boundary")).rejects.toThrow("correlation mismatch");
+    expect((await run.finished).status).toBe("failed");
   });
 
   it("migrates legacy snapshots and restores terminal runs read-only", async () => {
@@ -219,8 +450,14 @@ describe("run supervisor", () => {
     const snapshot = JSON.parse(await readFile(join(newer, "snapshot.json"), "utf8"));
     snapshot.runId = newerId;
     await writeFile(join(newer, "snapshot.json"), `${JSON.stringify(snapshot)}\n`, "utf8");
+    const replacementResult = await installResult(join(newer, "runtime"), newerId, "receipt", "done");
     const eventsPath = join(newer, "live-events.ndjson");
-    const events = (await readFile(eventsPath, "utf8")).trimEnd().split("\n").map((line) => ({ ...JSON.parse(line), runId: newerId }));
+    const events = (await readFile(eventsPath, "utf8")).trimEnd().split("\n").map((line) => {
+      const event = { ...JSON.parse(line), runId: newerId };
+      if (event.event.type === "run.completed") event.event.result = replacementResult;
+      return event;
+    });
+    snapshot.result = replacementResult;
     await writeFile(eventsPath, `${events.map((event) => JSON.stringify(event)).join("\n")}\n`, "utf8");
     snapshot.eventDigests = events.map((event) => [event.sequence, JSON.stringify(event)]);
     await writeFile(join(newer, "snapshot.json"), `${JSON.stringify(snapshot)}\n`, "utf8");

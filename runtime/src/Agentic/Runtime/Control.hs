@@ -18,21 +18,34 @@ module Agentic.Runtime.Control
     registerControlAttempt,
     unregisterControlAttempt,
     waitForRuntimeRecovery,
+    waitForRuntimePersonAnswer,
     registerRuntimeRedirects,
     awaitRuntimeRedirect,
     controlRuntimeSnapshot,
     runtimeOccurrenceReplayable,
     decideRuntimeControl,
     deliverRuntimeAction,
+    deliverRuntimeActionDeferred,
     emptyControlSnapshot,
     decideControl,
     ackEvent,
+    ackEventFor,
+    invalidAckEventFor,
     encodeControl,
+    encodeControlFor,
     decodeControl,
+    decodeControlFor,
   )
 where
 
-import Agentic.Runtime.Protocol (AttemptId (..), OccurrenceId (..), RuntimeEvent (ControlAcknowledged), maxFrameBytes)
+import Agentic.Runtime.Protocol
+  ( AttemptId (..),
+    OccurrenceId (..),
+    RuntimeEvent (ControlAcknowledged, ControlAcknowledgedV2),
+    latestProtocolVersion,
+    maxFrameBytes,
+    protocolVersion,
+  )
 import Control.Concurrent.MVar
   ( MVar,
     modifyMVar,
@@ -40,6 +53,7 @@ import Control.Concurrent.MVar
     newEmptyMVar,
     newMVar,
     readMVar,
+    putMVar,
     takeMVar,
     tryPutMVar,
   )
@@ -58,7 +72,7 @@ import Data.Aeson
     (.:?),
     (.=),
   )
-import Data.Aeson.Types (Parser)
+import Data.Aeson.Types (Parser, parseEither)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
@@ -86,6 +100,7 @@ data ControlCommand
   | RetryOccurrence
   | ChooseRecovery !RecoveryControl
   | RedirectOccurrence !Text
+  | AnswerPerson !Value
   deriving (Eq, Show)
 
 data Control = Control
@@ -109,7 +124,8 @@ data ControlAck = ControlAck
 data ControlCapabilities = ControlCapabilities
   { canSteer :: !Bool,
     canRetry :: !Bool,
-    canRedirect :: !Bool
+    canRedirect :: !Bool,
+    canAnswerPerson :: !Bool
   }
   deriving (Eq, Show)
 
@@ -118,6 +134,7 @@ data ControlSnapshot = ControlSnapshot
     controlCancelling :: !Bool,
     activeAttempts :: ![AttemptId],
     recoverableOccurrences :: ![OccurrenceId],
+    answerablePersonOccurrences :: ![OccurrenceId],
     recoveryOptions :: !(Map OccurrenceId [RecoveryControl]),
     reservedRedirects :: !(Map OccurrenceId [Text])
   }
@@ -128,15 +145,22 @@ data ControlAction
   | ActSteer !AttemptId !SteeringTiming !Text
   | ActRecover !OccurrenceId !RecoveryControl
   | ActRedirect !OccurrenceId !Text
+  | ActAnswerPerson !OccurrenceId !Value
   deriving (Eq, Show)
 
 type AttemptSteerer = SteeringTiming -> Text -> IO (Either Text ())
+
+data PersonAnswerGate = PersonAnswerGate
+  { personAnswerValid :: Value -> Bool,
+    personAnswerDelivery :: MVar (ControlId, Value, MVar ())
+  }
 
 data LiveControlState = LiveControlState
   { liveSnapshot :: !ControlSnapshot,
     liveSteerers :: !(Map AttemptId (Maybe AttemptSteerer)),
     liveRetries :: !(Map OccurrenceId (MVar (ControlId, RecoveryControl))),
     liveRedirects :: !(Map OccurrenceId (MVar Text)),
+    livePersonAnswers :: !(Map OccurrenceId PersonAnswerGate),
     liveNonReplayable :: !(Map OccurrenceId ()),
     liveAcks :: !(Map ControlId ControlAck)
   }
@@ -144,7 +168,10 @@ data LiveControlState = LiveControlState
 newtype ControlRuntime = ControlRuntime (MVar LiveControlState)
 
 newControlRuntime :: IO ControlRuntime
-newControlRuntime = ControlRuntime <$> newMVar (LiveControlState emptyControlSnapshot Map.empty Map.empty Map.empty Map.empty Map.empty)
+newControlRuntime =
+  ControlRuntime
+    <$> newMVar
+      (LiveControlState emptyControlSnapshot Map.empty Map.empty Map.empty Map.empty Map.empty Map.empty)
 
 registerControlAttempt :: ControlRuntime -> AttemptId -> Maybe AttemptSteerer -> IO ()
 registerControlAttempt (ControlRuntime state) attempt steerer =
@@ -168,15 +195,18 @@ waitForRuntimeRecovery :: ControlRuntime -> OccurrenceId -> [RecoveryControl] ->
 waitForRuntimeRecovery (ControlRuntime state) occurrence offered ready = do
   gate <- newEmptyMVar
   modifyMVar_ state $ \live ->
-    pure
-      live
-        { liveSnapshot =
-            (liveSnapshot live)
-              { recoverableOccurrences = occurrence : filter (/= occurrence) (recoverableOccurrences (liveSnapshot live)),
-                recoveryOptions = Map.insert occurrence offered (recoveryOptions (liveSnapshot live))
-              },
-          liveRetries = Map.insert occurrence gate (liveRetries live)
-        }
+    if Map.member occurrence (liveRetries live)
+      then ioError (userError "recovery gate was registered twice")
+      else
+        pure
+          live
+            { liveSnapshot =
+                (liveSnapshot live)
+                  { recoverableOccurrences = recoverableOccurrences (liveSnapshot live) <> [occurrence],
+                    recoveryOptions = Map.insert occurrence offered (recoveryOptions (liveSnapshot live))
+                  },
+              liveRetries = Map.insert occurrence gate (liveRetries live)
+            }
   ready
   retryId <-
     takeMVar gate `finally`
@@ -193,6 +223,43 @@ waitForRuntimeRecovery (ControlRuntime state) occurrence offered ready = do
                 }
         )
   pure retryId
+
+waitForRuntimePersonAnswer :: ControlRuntime -> OccurrenceId -> (Value -> Bool) -> IO () -> IO (ControlId, Value)
+waitForRuntimePersonAnswer (ControlRuntime state) occurrence valid ready = do
+  gate <- PersonAnswerGate valid <$> newEmptyMVar
+  modifyMVar_ state $ \live ->
+    if Map.member occurrence (livePersonAnswers live)
+      then ioError (userError "person answer gate was registered twice")
+      else
+        pure
+          live
+            { liveSnapshot =
+                (liveSnapshot live)
+                  { answerablePersonOccurrences =
+                      answerablePersonOccurrences (liveSnapshot live) <> [occurrence]
+                  },
+              livePersonAnswers = Map.insert occurrence gate (livePersonAnswers live)
+            }
+  ready
+  result <-
+    ( do
+        (control, answer, acknowledged) <- takeMVar (personAnswerDelivery gate)
+        takeMVar acknowledged
+        pure (control, answer)
+    )
+      `finally` modifyMVar_ state
+        ( \live ->
+            pure
+              live
+                { liveSnapshot =
+                    (liveSnapshot live)
+                      { answerablePersonOccurrences =
+                          filter (/= occurrence) (answerablePersonOccurrences (liveSnapshot live))
+                      },
+                  livePersonAnswers = Map.delete occurrence (livePersonAnswers live)
+                }
+        )
+  pure result
 
 registerRuntimeRedirects :: ControlRuntime -> OccurrenceId -> [Text] -> IO ()
 registerRuntimeRedirects (ControlRuntime state) occurrence targets = do
@@ -240,19 +307,32 @@ decideRuntimeControl (ControlRuntime state) control =
     Just prior -> pure (live, (prior, Nothing))
     Nothing -> do
       let steerable = expectedAttempt control >>= (`Map.lookup` liveSteerers live) >>= id
-          retryable = maybe False (`Map.member` liveRetries live) (expectedOccurrence control)
+          retryable =
+            case (expectedOccurrence control, recoverableOccurrences (liveSnapshot live)) of
+              (Just occurrence, first : _) -> occurrence == first && Map.member occurrence (liveRetries live)
+              _ -> False
           redirectable = maybe False (`Map.member` liveRedirects live) (expectedOccurrence control)
-          capabilities = ControlCapabilities (isJust steerable) retryable redirectable
+          answerable =
+            case (expectedOccurrence control, answerablePersonOccurrences (liveSnapshot live)) of
+              (Just occurrence, first : _) -> occurrence == first && Map.member occurrence (livePersonAnswers live)
+              _ -> False
+          capabilities = ControlCapabilities (isJust steerable) retryable redirectable answerable
           (snapshot', ack, action) = decideControl capabilities (liveSnapshot live) control
           next = live {liveSnapshot = snapshot', liveAcks = Map.insert (controlId control) ack (liveAcks live)}
       pure (next, (ack, action))
 
 deliverRuntimeAction :: ControlRuntime -> Control -> ControlAction -> IO ControlAck
-deliverRuntimeAction runtime@(ControlRuntime state) control action = do
-  ack <- case action of
+deliverRuntimeAction runtime control action = do
+  (ack, afterAcknowledgement) <- deliverRuntimeActionDeferred runtime control action
+  afterAcknowledgement
+  pure ack
+
+deliverRuntimeActionDeferred :: ControlRuntime -> Control -> ControlAction -> IO (ControlAck, IO ())
+deliverRuntimeActionDeferred runtime@(ControlRuntime state) control action = do
+  (ack, afterAcknowledgement) <- case action of
     ActSteer attempt timing text -> do
       handler <- Map.lookup attempt . liveSteerers <$> readMVar state
-      case joinMaybe handler of
+      result <- case joinMaybe handler of
         Nothing -> pure (ControlAck cid Unsupported "active target no longer supports steering")
         Just steer -> do
           outcome <- tryDelivery (steer timing text)
@@ -260,9 +340,10 @@ deliverRuntimeAction runtime@(ControlRuntime state) control action = do
             Left failure -> ControlAck cid ControlFailed (T.pack (displayException failure))
             Right (Left why) -> ControlAck cid ControlFailed why
             Right (Right ()) -> ControlAck cid Delivered "steer delivered to active attempt"
+      pure (result, pure ())
     ActRecover occurrence recovery -> do
       gate <- Map.lookup occurrence . liveRetries <$> readMVar state
-      case gate of
+      result <- case gate of
         Nothing -> pure (ControlAck cid RejectedStale "occurrence is no longer waiting for recovery")
         Just retry -> do
           delivered <- tryPutMVar retry (cid, recovery)
@@ -270,9 +351,10 @@ deliverRuntimeAction runtime@(ControlRuntime state) control action = do
             if delivered
               then ControlAck cid Delivered "recovery choice delivered to recoverable occurrence"
               else ControlAck cid ControlFailed "recovery choice was already delivered"
+      pure (result, pure ())
     ActRedirect occurrence target -> do
       gate <- Map.lookup occurrence . liveRedirects <$> readMVar state
-      case gate of
+      result <- case gate of
         Nothing -> pure (ControlAck cid RejectedStale "occurrence is no longer waiting for redirect")
         Just redirect -> do
           delivered <- tryPutMVar redirect target
@@ -280,14 +362,29 @@ deliverRuntimeAction runtime@(ControlRuntime state) control action = do
             if delivered
               then ControlAck cid Delivered "redirect delivered before attempt dispatch"
               else ControlAck cid ControlFailed "redirect was already delivered"
-    ActCancel -> pure (ControlAck cid Unsupported "cancellation delivery belongs to the machine owner")
+      pure (result, pure ())
+    ActAnswerPerson occurrence answer -> do
+      pending <- Map.lookup occurrence . livePersonAnswers <$> readMVar state
+      case pending of
+        Nothing -> pure (ControlAck cid RejectedStale "occurrence is no longer waiting for a person answer", pure ())
+        Just gate
+          | not (personAnswerValid gate answer) ->
+              pure (ControlAck cid ControlFailed "person answer does not match the expected code or schema", pure ())
+          | otherwise -> do
+              acknowledged <- newEmptyMVar
+              delivered <- tryPutMVar (personAnswerDelivery gate) (cid, answer, acknowledged)
+              pure $
+                if delivered
+                  then (ControlAck cid Delivered "person answer delivered to pending occurrence", putMVar acknowledged ())
+                  else (ControlAck cid ControlFailed "person answer was already delivered", pure ())
+    ActCancel -> pure (ControlAck cid Unsupported "cancellation delivery belongs to the machine owner", pure ())
   when (acknowledgementState ack == Delivered) $ case action of
     ActSteer attempt _ _ ->
       modifyMVar_ state $ \live ->
         pure live {liveNonReplayable = Map.insert (attemptOccurrence attempt) () (liveNonReplayable live)}
     _ -> pure ()
   recordAck runtime ack
-  pure ack
+  pure (ack, afterAcknowledgement)
   where
     cid = controlId control
 
@@ -303,7 +400,7 @@ joinMaybe (Just value) = value
 joinMaybe Nothing = Nothing
 
 emptyControlSnapshot :: ControlSnapshot
-emptyControlSnapshot = ControlSnapshot False False [] [] Map.empty Map.empty
+emptyControlSnapshot = ControlSnapshot False False [] [] [] Map.empty Map.empty
 -- | Pure stale/capability/scheduler-boundary policy.  Delivery is performed by
 -- the runtime after this decision and receives a later acknowledgement.
 decideControl :: ControlCapabilities -> ControlSnapshot -> Control -> (ControlSnapshot, ControlAck, Maybe ControlAction)
@@ -329,6 +426,17 @@ decideControl capabilities snapshot control = case controlCommand control of
             if canRedirect capabilities
               then accept snapshot "redirect accepted" (Just (ActRedirect occurrence target))
               else unsupported "runtime does not support redirect"
+  AnswerPerson answer ->
+    case expectedAttempt control of
+      Just _ -> reject "person answer control must not name an attempt"
+      Nothing -> withOccurrence $ \occurrence ->
+        case answerablePersonOccurrences snapshot of
+          first : _
+            | first /= occurrence -> reject "another person occurrence is waiting first"
+            | canAnswerPerson capabilities ->
+                accept snapshot "person answer accepted for validation" (Just (ActAnswerPerson occurrence answer))
+            | otherwise -> unsupported "runtime does not support local person answers"
+          [] -> reject "occurrence is not waiting for a person answer"
   where
     cid = controlId control
     ack state message = ControlAck cid state message
@@ -336,12 +444,18 @@ decideControl capabilities snapshot control = case controlCommand control of
     reject message = (snapshot, ack RejectedStale message, Nothing)
     unsupported message = (snapshot, ack Unsupported message, Nothing)
     recover recovery = withOccurrence $ \occurrence ->
-      case Map.lookup occurrence (recoveryOptions snapshot) of
-        Nothing -> reject "occurrence is not waiting for recovery"
-        Just offered
-          | recovery `notElem` offered -> reject "recovery choice was not offered"
-          | canRetry capabilities -> accept snapshot "recovery choice accepted" (Just (ActRecover occurrence recovery))
-          | otherwise -> unsupported "runtime does not support interactive recovery"
+      case recoverableOccurrences snapshot of
+        first : _
+          | first /= occurrence -> reject "another recovery occurrence is waiting first"
+          | otherwise -> choose occurrence
+        [] -> reject "occurrence is not waiting for recovery"
+      where
+        choose occurrence = case Map.lookup occurrence (recoveryOptions snapshot) of
+          Nothing -> reject "occurrence is not waiting for recovery"
+          Just offered
+            | recovery `notElem` offered -> reject "recovery choice was not offered"
+            | canRetry capabilities -> accept snapshot "recovery choice accepted" (Just (ActRecover occurrence recovery))
+            | otherwise -> unsupported "runtime does not support interactive recovery"
     withOccurrence k = case expectedOccurrence control of
       Nothing -> reject "control requires expectedOccurrenceId"
       Just occurrence -> k occurrence
@@ -360,13 +474,52 @@ ackEvent ack =
     (ackStateText (acknowledgementState ack))
     (acknowledgementMessage ack)
 
+ackEventFor :: Int -> Control -> ControlAck -> RuntimeEvent
+ackEventFor version control ack
+  | version == protocolVersion = ackEvent ack
+  | otherwise =
+      ControlAcknowledgedV2
+        (controlIdText (acknowledgedControl ack))
+        (ackStateText (acknowledgementState ack))
+        (acknowledgementMessage ack)
+        (controlCommandName (controlCommand control))
+        (expectedOccurrence control)
+        (expectedAttempt control)
+
+invalidAckEventFor :: Int -> ControlAck -> RuntimeEvent
+invalidAckEventFor version ack
+  | version == protocolVersion = ackEvent ack
+  | otherwise =
+      ControlAcknowledgedV2
+        (controlIdText (acknowledgedControl ack))
+        (ackStateText (acknowledgementState ack))
+        (acknowledgementMessage ack)
+        "invalid"
+        Nothing
+        Nothing
+
 encodeControl :: Control -> ByteString
 encodeControl = BL.toStrict . encode
 
-decodeControl :: ByteString -> Either Text Control
-decodeControl bytes
+encodeControlFor :: Int -> Control -> Either Text ByteString
+encodeControlFor version control
+  | version `notElem` [protocolVersion, latestProtocolVersion] = Left ("unsupported runtime protocol version " <> T.pack (show version))
+  | version == protocolVersion, AnswerPerson {} <- controlCommand control = Left "answerPerson is unavailable in protocol version 1"
   | BS.length bytes > maxFrameBytes = Left "runtime control frame exceeds 1048576 bytes"
-  | otherwise = either (Left . T.pack) Right (eitherDecodeStrict' bytes)
+  | otherwise = Right bytes
+  where
+    bytes = encodeControl control
+
+decodeControl :: ByteString -> Either Text Control
+decodeControl = decodeControlFor protocolVersion
+
+decodeControlFor :: Int -> ByteString -> Either Text Control
+decodeControlFor version bytes
+  | version `notElem` [protocolVersion, latestProtocolVersion] = Left ("unsupported runtime protocol version " <> T.pack (show version))
+  | BS.length bytes > maxFrameBytes = Left "runtime control frame exceeds 1048576 bytes"
+  | otherwise = do
+      value <- either (Left . T.pack) Right (eitherDecodeStrict' bytes :: Either String Value)
+      either (Left . T.pack) Right (parseEither (parseControlFor version) value)
 
 instance ToJSON Control where
   toJSON control =
@@ -378,12 +531,15 @@ instance ToJSON Control where
       ]
 
 instance FromJSON Control where
-  parseJSON = withObject "runtime control" $ \o -> do
-    cid <- ControlId <$> (o .: "controlId" >>= validId)
-    occurrence <- traverse (parseOccurrence "expectedOccurrenceId") =<< o .:? "expectedOccurrenceId"
-    attempt <- traverse parseAttempt =<< o .:? "expectedAttemptId"
-    command <- o .: "command" >>= parseCommand
-    pure (Control cid occurrence attempt command)
+  parseJSON = parseControlFor protocolVersion
+
+parseControlFor :: Int -> Value -> Parser Control
+parseControlFor version = withObject "runtime control" $ \o -> do
+  cid <- ControlId <$> (o .: "controlId" >>= validId)
+  occurrence <- traverse (parseOccurrence "expectedOccurrenceId") =<< o .:? "expectedOccurrenceId"
+  attempt <- traverse parseAttempt =<< o .:? "expectedAttemptId"
+  command <- o .: "command" >>= parseCommandFor version
+  pure (Control cid occurrence attempt command)
 
 commandValue :: ControlCommand -> Value
 commandValue = \case
@@ -394,9 +550,10 @@ commandValue = \case
   ChooseRecovery RecoveryFailOver -> object ["type" .= ("failoverOccurrence" :: Text)]
   ChooseRecovery RecoveryAbandon -> object ["type" .= ("abandonOccurrence" :: Text)]
   RedirectOccurrence target -> object ["type" .= ("redirectOccurrence" :: Text), "target" .= target]
+  AnswerPerson answer -> object ["type" .= ("answerPerson" :: Text), "answer" .= answer]
 
-parseCommand :: Value -> Parser ControlCommand
-parseCommand = withObject "runtime control command" $ \o -> do
+parseCommandFor :: Int -> Value -> Parser ControlCommand
+parseCommandFor version = withObject "runtime control command" $ \o -> do
   command <- o .: "type" :: Parser Text
   case command of
     "cancelRun" -> pure CancelRun
@@ -405,7 +562,21 @@ parseCommand = withObject "runtime control command" $ \o -> do
     "failoverOccurrence" -> pure (ChooseRecovery RecoveryFailOver)
     "abandonOccurrence" -> pure (ChooseRecovery RecoveryAbandon)
     "redirectOccurrence" -> RedirectOccurrence <$> o .: "target"
+    "answerPerson"
+      | version == latestProtocolVersion -> AnswerPerson <$> o .: "answer"
+      | otherwise -> fail "answerPerson is unavailable in protocol version 1"
     _ -> fail ("unknown runtime control command " <> T.unpack command)
+
+controlCommandName :: ControlCommand -> Text
+controlCommandName = \case
+  CancelRun -> "cancelRun"
+  Steer {} -> "steerOccurrence"
+  RetryOccurrence -> "retryOccurrence"
+  ChooseRecovery RecoveryRetry -> "retryOccurrence"
+  ChooseRecovery RecoveryFailOver -> "failoverOccurrence"
+  ChooseRecovery RecoveryAbandon -> "abandonOccurrence"
+  RedirectOccurrence {} -> "redirectOccurrence"
+  AnswerPerson {} -> "answerPerson"
 
 attemptValue :: AttemptId -> Value
 attemptValue attempt =

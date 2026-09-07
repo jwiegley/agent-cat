@@ -566,11 +566,23 @@ want_line "set config effort='high'"
 want_line "set config max-output=2048"
 want_line "set config temperature=0.25"
 note "configured-options: common constraints and ACP-only option applied, 7/7, exit 0"
+
 # ---------------------------------------------------------------------------
+# 19. Protocol-v2 public progress is optional, redacted, persisted, and answer-neutral.
+# ---------------------------------------------------------------------------
+scenario=public-progress
+runner=$(nix develop path:. -c cabal list-bin agentic-run)
+mkdir -p "$work/progress-config"
+if env -u AGENT_CAT_PERSONA XDG_CONFIG_HOME="$work/progress-config" python3 test/progress_probe.py "$runner"; then
+  note "public-progress: v2 tool/todo/usage updates persisted without changing v1 answers or bills"
+else
+  bad "public progress probe failed"
+fi
+
 
 scenario=summary
 if [ "$failures" = 0 ]; then
-  echo "ci/acp: 18 scenarios passed, 0 failed"
+  echo "ci/acp: 19 scenarios passed, 0 failed"
 else
   echo "ci/acp: $failures scenario assertion(s) failed" >&2
 fi

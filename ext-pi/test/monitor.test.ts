@@ -13,7 +13,14 @@ function occurrence(id: string, prompt = `prompt ${id}`): OccurrenceSnapshot {
     answer: `answer ${id}`,
     source: "asked:worker",
     replayable: true,
-    attempts: new Map([[`${id}:0`, { id: `${id}:0`, state: "completed", target: "pi", output: `output ${id}`, steers: [] }]]),
+    attempts: new Map([[`${id}:0`, {
+      id: `${id}:0`, state: "completed", target: "pi", output: `output ${id}`, steers: [],
+      messages: [`message ${id}`],
+      tools: new Map([[`tool-${id}`, { id: `tool-${id}`, title: "Read", toolKind: "read", status: "completed", summary: "done" }]]),
+      todos: [{ content: "Check result", priority: "high", status: "completed" }],
+      usage: { used: "10", size: "100" },
+      reasoningSummaries: ["Public summary"],
+    }]]),
   };
 }
 
@@ -43,6 +50,16 @@ describe("monitor model", () => {
     const resized = model.render(24, 8);
     expect(model.selectedId).toBe("0");
     expect(resized.every((line) => line.length <= 24)).toBe(true);
+  });
+
+  it("renders typed public progress distinctly from answer output", () => {
+    const rendered = formatMonitor(snapshot());
+    expect(rendered).toContain("message 1");
+    expect(rendered).toContain("tool completed Read [read]: done");
+    expect(rendered).toContain("todo completed/high: Check result");
+    expect(rendered).toContain("usage: 10/100");
+    expect(rendered).toContain("reasoning summary: Public summary");
+    expect(rendered).toContain("answer 1");
   });
 
   it("folds selected occurrences and keeps focus on live updates", () => {

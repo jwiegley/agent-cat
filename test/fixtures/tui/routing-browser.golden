@@ -1,0 +1,4 @@
+persona work (command-line)
+> engine-a  deck:pane  fixture
+  profile deep chain:
+    0. deep -> concrete-a on engine-a (fixture, deck:pane, inventory offline-cache, fingerprint sha256:inventory, fetched 2026-09-04T00:00:00Z)

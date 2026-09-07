@@ -1,0 +1,14 @@
+{"protocolVersion":1,"runId":"run-1","sequence":"0","timestamp":"2026-09-03T00:00:00Z","event":{"type":"run.started","workflow":"review","target":"routed"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"1","timestamp":"2026-09-03T00:00:00Z","event":{"type":"occurrence.started","occurrenceId":"0","code":"text","intent":"consult","addressee":"model reviewer","prompt":"prompt"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"2","timestamp":"2026-09-03T00:00:00Z","event":{"type":"attempt.started","occurrenceId":"0","attempt":"0","target":"model@primary"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"3","timestamp":"2026-09-03T00:00:00Z","event":{"type":"attempt.failed","occurrenceId":"0","attempt":"0","failure":"transport","message":"unavailable"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"4","timestamp":"2026-09-03T00:00:00Z","event":{"type":"occurrence.recovery-pending","occurrenceId":"0","gap":"transport","message":"unavailable","choices":[{"choice":"retry"},{"choice":"failover"},{"choice":"abandon"}]}}
+{"protocolVersion":1,"runId":"run-1","sequence":"5","timestamp":"2026-09-03T00:00:00Z","event":{"type":"control.ack","controlId":"failover-1","state":"accepted","message":"recovery accepted"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"6","timestamp":"2026-09-03T00:00:00Z","event":{"type":"occurrence.recovery-chosen","occurrenceId":"0","controlId":"failover-1","choice":"failover"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"7","timestamp":"2026-09-03T00:00:00Z","event":{"type":"occurrence.retried","occurrenceId":"0","controlId":"failover-1"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"8","timestamp":"2026-09-03T00:00:00Z","event":{"type":"control.ack","controlId":"failover-1","state":"delivered","message":"recovery delivered"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"9","timestamp":"2026-09-03T00:00:00Z","event":{"type":"attempt.started","occurrenceId":"0","attempt":"1","target":"model@spare"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"10","timestamp":"2026-09-03T00:00:00Z","event":{"type":"attempt.completed","occurrenceId":"0","attempt":"1","source":"model@spare"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"11","timestamp":"2026-09-03T00:00:00Z","event":{"type":"occurrence.completed","occurrenceId":"0","source":"asked:model@spare","answer":"answer"}}
+{"protocolVersion":1,"runId":"run-1","sequence":"12","timestamp":"2026-09-03T00:00:00Z","event":{"type":"trace.ordered","occurrenceIds":["0"]}}
+{"protocolVersion":1,"runId":"run-1","sequence":"13","timestamp":"2026-09-03T00:00:00Z","event":{"type":"run.completed","billFresh":"1","billMemo":"1"}}

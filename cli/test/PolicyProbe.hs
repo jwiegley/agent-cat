@@ -519,15 +519,18 @@ collidingRegistry =
 -- operator reads.
 parsedAs :: [Text] -> String
 parsedAs args = case parseCommand collidingRegistry args of
+  Right Tui -> "tui"
   Right Usage -> "usage"
   Right (Help n) -> "help " <> T.unpack n
+  Right (RoutingInspection _ _ _) -> "routing"
+  Right (MigrateRouting _ _) -> "migration"
   Right (List _) -> "list"
   Right (Plan n _ _ _ _) -> "plan " <> T.unpack n
   Right (Cost n _) -> "cost " <> T.unpack n
   Right (Run n _ _ _) -> "run " <> T.unpack n
-  Right (Machine _ n _ _ _) -> "machine " <> T.unpack n
-  Right (LineageCheck _ _ _ n _ _ _) -> "lineage-check " <> T.unpack n
-  Right (MachineLineage _ _ _ _ n _ _ _) -> "machine-lineage " <> T.unpack n
+  Right (Machine _ _ n _ _ _) -> "machine " <> T.unpack n
+  Right (LineageCheck _ _ _ _ n _ _ _) -> "lineage-check " <> T.unpack n
+  Right (MachineLineage _ _ _ _ _ n _ _ _) -> "machine-lineage " <> T.unpack n
   Left t
     | "and not a verb" `T.isInfixOf` t -> "bare-row"
     | "no verb '" `T.isInfixOf` t -> "no-verb"
@@ -1156,7 +1159,7 @@ storeProbe failures = do
   let directory = temp </> ("agentic-store-probe-" <> show stamp)
       run = RunId "run-store-probe"
       sensitiveProgram = object ["prompt" .= ("sensitive body text" :: Text)]
-      manifest = RunManifest run "fixture" "0.1.0.0" sensitiveProgram "scripted" (object ["kind" .= ("scripted" :: Text)]) Nothing RootRun Nothing
+      manifest = RunManifest run "fixture" "0.1.0.0" sensitiveProgram "scripted" (object ["kind" .= ("scripted" :: Text)]) Nothing RootRun Nothing Nothing
       envelope n event = Envelope protocolVersion run (SeqNo n) "2026-08-28T00:00:00Z" event
       first = envelope 0 (RunStarted "fixture" "scripted")
       second = envelope 1 (RunCompleted 1 1)
@@ -1266,8 +1269,8 @@ controlProbe failures = do
       redirect = Control (ControlId "redirect") (Just occurrence) Nothing (RedirectOccurrence "deck:other")
       controls = [cancel, steer, retryControl, failoverControl, abandonControl, redirect]
       base = emptyControlSnapshot {activeAttempts = [attempt]}
-      none = ControlCapabilities False False False
-      allCapabilities = ControlCapabilities True True True
+      none = ControlCapabilities False False False False
+      allCapabilities = ControlCapabilities True True True True
       (cancelling, cancelAck, cancelAction) = decideControl none base cancel
       (_, secondCancelAck, secondCancelAction) = decideControl none cancelling (Control (ControlId "cancel-2") Nothing Nothing CancelRun)
       (_, staleAck, _) = decideControl allCapabilities base (Control (ControlId "stale") (Just occurrence) (Just (AttemptId occurrence 9)) (Steer InterruptNow "x"))
@@ -2187,7 +2190,10 @@ main = do
       ("plan NAME is the verb", parsedAs ["plan", "ordinary"] == "plan ordinary"),
       ("cost NAME is the verb", parsedAs ["cost", "ordinary"] == "cost ordinary"),
       ("`list` is the verb", parsedAs ["list"] == "list"),
+      ("leading --tui cannot collide with a workflow name", parsedAs ["--tui"] == "tui"),
       ("`help` alone is the usage", parsedAs ["help"] == "usage"),
+      ("leading --routing cannot collide with a workflow name", parsedAs ["--routing"] == "routing"),
+      ("leading --migrate-routing cannot collide with a workflow name", parsedAs ["--migrate-routing", "old", "--output", "new"] == "migration"),
       -- The one door left open, and it is enough: a row named after a verb can
       -- still be READ about, which is what makes the situation a thing to fix
       -- rather than a thing to discover.

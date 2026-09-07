@@ -53,10 +53,10 @@
 -- 3. @session\/prompt@ — @{sessionId, prompt: [{type:\"text\", text}]}@, one
 --    per question (per /attempt/: a re-ask is a second prompt). While it is
 --    outstanding the adapter streams @session\/update@ notifications, and
---    __only @agent_message_chunk@ is an answer__ ('chunkText'): the other kinds
---    measured on the real wire — @usage_update@, @tool_call@,
---    @tool_call_update@, @available_commands_update@, @session_info_update@,
---    @config_option_update@ — are progress, and are ignored. The request's own
+--    __only @agent_message_chunk@ is answer text__ ('chunkText'). Measured
+--    @usage_update@, @tool_call@, @tool_call_update@, and complete @plan@
+--    snapshots become bounded public presentation updates; unsupported update
+--    kinds remain bookkeeping and are ignored. None enters the answer bytes.
 --    reply ends the turn, so no heuristic decides when the agent has stopped
 --    speaking.
 -- 4. @session\/request_permission@ — the agent asking /us/, mid-turn. See
@@ -234,6 +234,11 @@
 module Agentic.Acp
   ( -- * The configuration
     AcpConfig (..),
+    ChildEnvironment,
+    inheritChildEnvironment,
+    explicitChildEnvironment,
+    explicitChildEnvironmentWithRedactions,
+    childEnvironmentNames,
     defaultAcpConfig,
 
     -- * Adapter selection
@@ -287,6 +292,7 @@ module Agentic.Acp
 
     -- * What an update says
     chunkText,
+    progressUpdate,
 
     -- * Failure
     AcpError (..),
@@ -354,6 +360,11 @@ import System.Timeout (timeout)
 import Agentic.Engine
   ( Engine (..),
     EngineCompletion (..),
+    EngineTodoItem (..),
+    EngineToolUpdate (..),
+    EngineUpdate (..),
+    EngineUpdateSink,
+    EngineUsage (..),
     EngineContext (runEngineAttempt),
     EngineConversation (..),
     EngineError (..),
@@ -372,6 +383,37 @@ import Agentic.Engine
 -- ---------------------------------------------------------------------------
 -- The configuration
 -- ---------------------------------------------------------------------------
+
+-- | Either preserve today's inherited process environment or install one exact
+-- environment assembled by trusted CLI composition. Values are deliberately
+-- opaque: the only 'Show' output is a count, and this type has no 'Eq' instance.
+data ChildEnvironment
+  = InheritChildEnvironment
+  | ExplicitChildEnvironment ![(String, String)] ![Text]
+
+instance Show ChildEnvironment where
+  show InheritChildEnvironment = "<inherited child environment>"
+  show (ExplicitChildEnvironment bindings _) =
+    "<explicit child environment: " <> show (length bindings) <> " bindings>"
+
+inheritChildEnvironment :: ChildEnvironment
+inheritChildEnvironment = InheritChildEnvironment
+
+explicitChildEnvironment :: [(String, String)] -> ChildEnvironment
+explicitChildEnvironment bindings = ExplicitChildEnvironment (Map.toAscList (Map.fromList bindings)) []
+
+-- | Give one ACP child its exact environment and private values that suppress matching public progress.
+explicitChildEnvironmentWithRedactions :: [(String, String)] -> [Text] -> ChildEnvironment
+explicitChildEnvironmentWithRedactions bindings redactions =
+  ExplicitChildEnvironment (Map.toAscList (Map.fromList bindings)) redactions
+
+childEnvironmentNames :: ChildEnvironment -> Maybe [String]
+childEnvironmentNames InheritChildEnvironment = Nothing
+childEnvironmentNames (ExplicitChildEnvironment bindings _) = Just (map fst bindings)
+
+childProcessEnvironment :: ChildEnvironment -> Maybe [(String, String)]
+childProcessEnvironment InheritChildEnvironment = Nothing
+childProcessEnvironment (ExplicitChildEnvironment bindings _) = Just bindings
 
 -- | Which program to start, where it runs, how long one turn may take, and
 -- whether each question gets a session of its own.
@@ -401,10 +443,12 @@ data AcpConfig = AcpConfig
     -- | Open a new session before every question. 'True' by default; see the
     -- module header.
     acpFreshPerQuestion :: !Bool,
+    -- | Exact child environment policy. Defaults to ambient inheritance for v1.
+    acpChildEnvironment :: !ChildEnvironment,
     -- | Narrate the transport — every call, every turn — on stderr.
     acpVerbose :: !Bool
   }
-  deriving (Eq, Show)
+  deriving (Show)
 
 -- | The configuration for an @argv@, with the defaults the retired Lean
 -- transport carried: the current directory, fifteen minutes to a turn — a real
@@ -419,6 +463,7 @@ defaultAcpConfig argv =
       acpCwd = ".",
       acpTurnTimeoutMs = 900000,
       acpFreshPerQuestion = True,
+      acpChildEnvironment = inheritChildEnvironment,
       acpVerbose = False
     }
 
@@ -796,8 +841,8 @@ renderPermissionDecision d =
 -- | The text of a @session\/update@ when that update is an
 -- @agent_message_chunk@, and 'Nothing' for every other kind.
 --
--- The six other kinds measured on the real wire are progress, not answer, and
--- this client is entitled to ignore them and does. An @agent_message_chunk@
+-- Other kinds are not answer text. 'progressUpdate' separately projects the
+-- measured public subset and ignores unsupported bookkeeping. An @agent_message_chunk@
 -- whose content is /not/ text is a protocol violation and is reported as one:
 -- dropping it silently would lose an answer.
 --
@@ -833,6 +878,49 @@ chunkTextForSession expected params = case field "sessionId" params >>= textOf o
     | actual /= expected -> Right Nothing
     | otherwise -> chunkText params
 
+-- | Conservative public projection of one measured ACP session update.
+progressUpdate :: Value -> Either Text (Maybe EngineUpdate)
+progressUpdate params = do
+  update <- maybe (Left "a session/update carried no update object") Right (field "update" params)
+  kind <- maybe (Left "a session/update carried no update.sessionUpdate string") Right (field "sessionUpdate" update >>= textOf)
+  case kind of
+    "usage_update" -> do
+      used <- maybe (Left "a usage_update carried no integer used") (Right . toInteger) (field "used" update >>= intOf)
+      size <- maybe (Left "a usage_update carried no integer size") (Right . toInteger) (field "size" update >>= intOf)
+      if used < 0 || size <= 0 || used > size
+        then Left "a usage_update was outside its context window"
+        else Right (Just (EngineUsageProgress (EngineUsage used size)))
+    "tool_call" -> Just . EngineToolProgress <$> toolUpdate update
+    "tool_call_update" -> Just . EngineToolProgress <$> toolUpdate update
+    "plan" -> Just . EngineTodoSnapshot <$> todoSnapshot update
+    _ -> Right Nothing
+  where
+    toolUpdate update = do
+      identifier <- requiredText "toolCallId" "a tool update carried no toolCallId" update
+      let title = field "title" update >>= textOf
+          toolKind = field "kind" update >>= textOf
+          status = field "status" update >>= textOf
+          summary = field "rawOutput" update >>= textOf
+      pure (EngineToolUpdate identifier title toolKind status summary)
+    todoSnapshot update = case field "entries" update of
+      Just (Array entries)
+        | V.length entries <= 128 -> traverse todoItem (V.toList entries)
+        | otherwise -> Left "an ACP plan exceeds 128 entries"
+      _ -> Left "an ACP plan carried no entries array"
+    todoItem item =
+      EngineTodoItem
+        <$> requiredText "content" "an ACP plan entry carried no content" item
+        <*> requiredText "priority" "an ACP plan entry carried no priority" item
+        <*> requiredText "status" "an ACP plan entry carried no status" item
+    requiredText name problem value = maybe (Left problem) Right (field name value >>= textOf)
+
+progressUpdateForSession :: Text -> Value -> Either Text (Maybe EngineUpdate)
+progressUpdateForSession expected params = case field "sessionId" params >>= textOf of
+  Nothing -> Left "a session/update carried no sessionId"
+  Just actual
+    | actual /= expected -> Right Nothing
+    | otherwise -> progressUpdate params
+
 -- ---------------------------------------------------------------------------
 -- The connection
 -- ---------------------------------------------------------------------------
@@ -864,6 +952,8 @@ data Acp = Acp
     -- sets it immediately before @session\/prompt@ and clears it on every return
     -- or exception; requests outside that dynamic extent are always cancelled.
     acpAsked :: !(IORef (Maybe (Text, Text, Permission))),
+    -- | Dynamic sink for optional public progress on the active prompt.
+    acpUpdateSink :: !(IORef EngineUpdateSink),
     -- | Plan-ordered turns on this one JSON-RPC pipe.
     acpTurnLane :: !TurnLane
   }
@@ -931,7 +1021,8 @@ connectAcp cfg = do
           -- The child's stderr is the human's: an adapter's diagnostics are for
           -- the operator running the build and not for this parser.
           std_err = Inherit,
-          cwd = Just (acpCwd cfg)
+          cwd = Just (acpCwd cfg),
+          env = childProcessEnvironment (acpChildEnvironment cfg)
         }
   (hin, hout, ph) <- case spawned of
     Left (e :: IOException) -> throwIO (AcpAdapterMissing prog (T.pack (show e)))
@@ -946,8 +1037,11 @@ connectAcp cfg = do
   hSetBuffering hin (BlockBuffering Nothing)
   hSetBuffering hout LineBuffering
   readBuffer <- newIORef BS.empty
+  -- The resolved values have crossed their only boundary. Keep no copy in the
+  -- long-lived connection configuration.
+  let runtimeCfg = cfg {acpChildEnvironment = inheritChildEnvironment}
   acp <-
-    Acp cfg prog hin hout readBuffer ph
+    Acp runtimeCfg prog hin hout readBuffer ph
       <$> newMVar ()
       <*> newMVar Map.empty
       <*> newIORef 0
@@ -955,6 +1049,7 @@ connectAcp cfg = do
       <*> newIORef []
       <*> newIORef (Capabilities False False False Null)
       <*> newIORef Nothing
+      <*> newIORef (const (pure ()))
       <*> newTurnLaneIO
   flip onException (closeAcp acp) $ do
     handshake acp
@@ -1133,7 +1228,10 @@ pump acp wantId what onChunk answering = go
                   Nothing -> throwIO (AcpProtocol prog "a session/update arrived while no session was current")
                   Just sid -> case chunkTextForSession sid ps of
                     Left why -> throwIO (AcpProtocol prog (why <> "; line: " <> clipText line))
-                    Right Nothing -> go
+                    Right Nothing -> case progressUpdateForSession sid ps of
+                      Left why -> throwIO (AcpProtocol prog (why <> "; line: " <> clipText line))
+                      Right Nothing -> go
+                      Right (Just update) -> readIORef (acpUpdateSink acp) >>= (\sink -> sink update) >> go
                     Right (Just txt) -> onChunk txt >> go
 
 recordSteerAck :: Acp -> Value -> IO ()
@@ -1489,11 +1587,13 @@ instance Engine AcpEngine where
       let steerer = if capSteerAttempt capabilities then Just (steerTurn acp) else Nothing
       pure
         ( EngineConversation $ \extra ->
-            runEngineAttempt context steerer (engineTarget engineReq) $ \onChunk ->
-              acpTransport (sayAcpWith onChunk cfg acp engineReq extra)
+            runEngineAttempt context steerer (engineTarget engineReq) $ \onUpdate ->
+              acpTransport (sayAcpWith onUpdate cfg acp engineReq extra)
         )
   engineTurnLane (AcpEngine _ _ acp) = Just (acpTurnLane acp)
-
+  enginePublicRedactionValues (AcpEngine _ cfg _) = case acpChildEnvironment cfg of
+    InheritChildEnvironment -> []
+    ExplicitChildEnvironment _ values -> values
 configureRequest :: (Text -> Maybe AcpModelConfig) -> Acp -> EngineRequest -> IO ()
 configureRequest select acp engineReq =
   case engineModelAxis engineReq >>= select of
@@ -1517,8 +1617,8 @@ acpTransport action =
 sayAcp :: AcpConfig -> Acp -> EngineRequest -> Text -> IO EngineResult
 sayAcp = sayAcpWith (const (pure ()))
 
-sayAcpWith :: (Text -> IO ()) -> AcpConfig -> Acp -> EngineRequest -> Text -> IO EngineResult
-sayAcpWith onChunk cfg acp engineReq extra = do
+sayAcpWith :: EngineUpdateSink -> AcpConfig -> Acp -> EngineRequest -> Text -> IO EngineResult
+sayAcpWith onUpdate cfg acp engineReq extra = do
   sid <-
     readIORef (acpSession acp) >>= maybe
       (throwIO (AcpProtocol (T.pack (acpProgram acp)) "no session; nothing was opened to prompt"))
@@ -1528,9 +1628,11 @@ sayAcpWith onChunk cfg acp engineReq extra = do
   chat cfg ("put " <> what <> " (" <> tshow (T.length message) <> " characters)")
   turn <-
     ( writeIORef (acpAsked acp) (Just (sid, what, permissionByIntent (engineIntent engineReq)))
-        >> promptTurnWith onChunk acp what message
+        >> writeIORef (acpUpdateSink acp) onUpdate
+        >> promptTurnWith (onUpdate . EngineAnswerChunk) acp what message
     )
-      `finally` writeIORef (acpAsked acp) Nothing
+      `finally` (writeIORef (acpUpdateSink acp) (const (pure ())) >> writeIORef (acpAsked acp) Nothing)
+  when (not (T.null (turnNarration turn))) (onUpdate (EnginePublicMessage (turnNarration turn)))
   chat cfg ("turn ended " <> renderStopReason (turnStop turn))
   pure
     EngineResult

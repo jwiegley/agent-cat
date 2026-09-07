@@ -12,18 +12,29 @@ module Agentic.Runtime.Protocol
     SeqNo (..),
     FailureClass (..),
     RecoveryOption (..),
+    PersonAnswering (..),
+    QuestionRef (..),
+    ResultRef (..),
+    PublicProgress (..),
+    PublicToolUpdate (..),
+    PublicTodoItem (..),
+    PublicUsage (..),
     RuntimeEvent (..),
     Envelope (..),
     SequenceDecision (..),
     EventSink,
     nullEventSink,
     mkRunId,
-    descriptorVersion,
     protocolVersion,
+    latestProtocolVersion,
     storeVersion,
+    latestStoreVersion,
     maxFrameBytes,
+    maxArtifactBytes,
     encodeEnvelope,
+    encodeEnvelopeFor,
     decodeEnvelope,
+    decodeEnvelopeFor,
     checkSequence,
   )
 where
@@ -36,11 +47,12 @@ import Data.Aeson
     encode,
     object,
     withObject,
+    withText,
     (.:),
     (.:?),
     (.=),
   )
-import Data.Aeson.Types (Object, Pair, Parser)
+import Data.Aeson.Types (Object, Pair, Parser, parseEither)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
@@ -94,6 +106,198 @@ instance FromJSON RecoveryOption where
       then fail "only failover recovery may name a target"
       else pure (RecoveryOption choice target)
 
+-- | Who realizes person-addressed questions in one machine run.
+data PersonAnswering = PersonAnswerEngine | PersonAnswerLocalControl
+  deriving (Eq, Ord, Show)
+
+instance ToJSON PersonAnswering where
+  toJSON = toJSON . personAnsweringText
+
+instance FromJSON PersonAnswering where
+  parseJSON = withText "person answering mode" parsePersonAnswering
+
+-- | Private full-question artifact made visible by a bounded reference.
+data QuestionRef = QuestionRef
+  { questionArtifactVersion :: !Int,
+    questionArtifactPath :: !Text,
+    questionArtifactSha256 :: !Text,
+    questionArtifactBytes :: !Integer
+  }
+  deriving (Eq, Show)
+
+-- | Private final-result artifact installed before successful completion.
+data ResultRef = ResultRef
+  { resultArtifactVersion :: !Int,
+    resultArtifactPath :: !Text,
+    resultArtifactSha256 :: !Text,
+    resultArtifactBytes :: !Integer,
+    resultArtifactCode :: !Value,
+    resultArtifactPreview :: !Text
+  }
+  deriving (Eq, Show)
+
+instance ToJSON QuestionRef where
+  toJSON reference =
+    object
+      [ "artifactVersion" .= questionArtifactVersion reference,
+        "path" .= questionArtifactPath reference,
+        "sha256" .= questionArtifactSha256 reference,
+        "bytes" .= integerText (questionArtifactBytes reference)
+      ]
+
+instance FromJSON QuestionRef where
+  parseJSON = withObject "question artifact reference" $ \o -> do
+    reference <-
+      QuestionRef
+        <$> o .: "artifactVersion"
+        <*> o .: "path"
+        <*> o .: "sha256"
+        <*> (parseInteger "question artifact bytes" =<< o .: "bytes")
+    validateQuestionRef reference
+
+instance ToJSON ResultRef where
+  toJSON reference =
+    object
+      [ "artifactVersion" .= resultArtifactVersion reference,
+        "path" .= resultArtifactPath reference,
+        "sha256" .= resultArtifactSha256 reference,
+        "bytes" .= integerText (resultArtifactBytes reference),
+        "code" .= resultArtifactCode reference,
+        "preview" .= resultArtifactPreview reference
+      ]
+
+instance FromJSON ResultRef where
+  parseJSON = withObject "result artifact reference" $ \o -> do
+    reference <-
+      ResultRef
+        <$> o .: "artifactVersion"
+        <*> o .: "path"
+        <*> o .: "sha256"
+        <*> (parseInteger "result artifact bytes" =<< o .: "bytes")
+        <*> o .: "code"
+        <*> o .: "preview"
+    validateResultRef reference
+
+-- | Public presentation data emitted by an engine outside its answer bytes.
+data PublicProgress
+  = ProgressMessage !Text
+  | ProgressTool !PublicToolUpdate
+  | ProgressTodos ![PublicTodoItem]
+  | ProgressUsage !PublicUsage
+  | ProgressReasoningSummary !Text
+  deriving (Eq, Show)
+
+-- | One bounded tool-state patch keyed by the transport's stable call id.
+data PublicToolUpdate = PublicToolUpdate
+  { publicToolId :: !Text,
+    publicToolTitle :: !(Maybe Text),
+    publicToolKind :: !(Maybe Text),
+    publicToolStatus :: !(Maybe Text),
+    publicToolSummary :: !(Maybe Text)
+  }
+  deriving (Eq, Show)
+
+-- | One entry in an authoritative public todo snapshot.
+data PublicTodoItem = PublicTodoItem
+  { publicTodoContent :: !Text,
+    publicTodoPriority :: !Text,
+    publicTodoStatus :: !Text
+  }
+  deriving (Eq, Show)
+
+-- | Cumulative public context-window usage.
+data PublicUsage = PublicUsage
+  { publicUsageUsed :: !Integer,
+    publicUsageSize :: !Integer
+  }
+  deriving (Eq, Show)
+
+instance ToJSON PublicProgress where
+  toJSON = \case
+    ProgressMessage text -> object ["kind" .= ("message" :: Text), "text" .= text]
+    ProgressTool tool -> object ["kind" .= ("tool" :: Text), "tool" .= tool]
+    ProgressTodos todos -> object ["kind" .= ("todos" :: Text), "items" .= todos]
+    ProgressUsage usage -> object ["kind" .= ("usage" :: Text), "usage" .= usage]
+    ProgressReasoningSummary text -> object ["kind" .= ("reasoning-summary" :: Text), "text" .= text]
+
+instance FromJSON PublicProgress where
+  parseJSON = withObject "public progress" $ \o -> do
+    kind <- o .: "kind" :: Parser Text
+    case kind of
+      "message" -> ProgressMessage <$> (o .: "text" >>= boundedProgressText "message" 4096)
+      "tool" -> ProgressTool <$> o .: "tool"
+      "todos" -> do
+        items <- o .: "items"
+        if length items > 128 then fail "public todo snapshot exceeds 128 entries" else pure (ProgressTodos items)
+      "usage" -> ProgressUsage <$> o .: "usage"
+      "reasoning-summary" -> ProgressReasoningSummary <$> (o .: "text" >>= boundedProgressText "reasoning summary" 4096)
+      _ -> fail ("unknown public progress kind " <> T.unpack kind)
+
+instance ToJSON PublicToolUpdate where
+  toJSON tool =
+    object
+      ( ["id" .= publicToolId tool]
+          <> maybe [] (\value -> ["title" .= value]) (publicToolTitle tool)
+          <> maybe [] (\value -> ["toolKind" .= value]) (publicToolKind tool)
+          <> maybe [] (\value -> ["status" .= value]) (publicToolStatus tool)
+          <> maybe [] (\value -> ["summary" .= value]) (publicToolSummary tool)
+      )
+
+instance FromJSON PublicToolUpdate where
+  parseJSON = withObject "public tool update" $ \o -> do
+    identifier <- o .: "id" >>= boundedProgressId "tool id"
+    title <- traverse (boundedProgressText "tool title" 1024) =<< o .:? "title"
+    kind <- traverse (boundedProgressText "tool kind" 128) =<< o .:? "toolKind"
+    status <- traverse parseToolStatus =<< o .:? "status"
+    summary <- traverse (boundedProgressText "tool summary" 4096) =<< o .:? "summary"
+    pure (PublicToolUpdate identifier title kind status summary)
+
+instance ToJSON PublicTodoItem where
+  toJSON item = object ["content" .= publicTodoContent item, "priority" .= publicTodoPriority item, "status" .= publicTodoStatus item]
+
+instance FromJSON PublicTodoItem where
+  parseJSON = withObject "public todo item" $ \o ->
+    PublicTodoItem
+      <$> (o .: "content" >>= boundedProgressText "todo content" 1024)
+      <*> (o .: "priority" >>= parseTodoPriority)
+      <*> (o .: "status" >>= parseTodoStatus)
+
+instance ToJSON PublicUsage where
+  toJSON usage = object ["used" .= integerText (publicUsageUsed usage), "size" .= integerText (publicUsageSize usage)]
+
+instance FromJSON PublicUsage where
+  parseJSON = withObject "public usage" $ \o -> do
+    used <- parseNatural "usage used" =<< o .: "used"
+    size <- parseNatural "usage size" =<< o .: "size"
+    if size <= 0 || used > size then fail "public usage is outside its context window" else pure (PublicUsage used size)
+
+boundedProgressText :: String -> Int -> Text -> Parser Text
+boundedProgressText label limit value
+  | T.null value = fail (label <> " is empty")
+  | T.length value > limit = fail (label <> " exceeds " <> show limit <> " characters")
+  | otherwise = pure value
+
+boundedProgressId :: String -> Text -> Parser Text
+boundedProgressId label value
+  | T.null value || T.length value > 128 = fail (label <> " is empty or too long")
+  | T.all (\character -> isAlphaNum character || character `elem` ("._:-" :: String)) value = pure value
+  | otherwise = fail (label <> " contains an invalid character")
+
+parseToolStatus :: Text -> Parser Text
+parseToolStatus value
+  | value `elem` ["pending", "in_progress", "completed", "failed", "cancelled"] = pure value
+  | otherwise = fail ("unknown public tool status " <> T.unpack value)
+
+parseTodoPriority :: Text -> Parser Text
+parseTodoPriority value
+  | value `elem` ["high", "medium", "low"] = pure value
+  | otherwise = fail ("unknown public todo priority " <> T.unpack value)
+
+parseTodoStatus :: Text -> Parser Text
+parseTodoStatus value
+  | value `elem` ["pending", "in_progress", "completed"] = pure value
+  | otherwise = fail ("unknown public todo status " <> T.unpack value)
+
 parseRecoveryChoice :: Text -> Parser Text
 parseRecoveryChoice choice
   | choice `elem` ["retry", "failover", "abandon"] = pure choice
@@ -122,9 +326,11 @@ parseControlId control
 -- the interpreter has collected its tickets.
 data RuntimeEvent
   = RunStarted !Text !Text
+  | RunStartedV2 !Text !Text !PersonAnswering
   | OccurrenceStarted !OccurrenceId !Text !Text !Text !Text
   | AttemptStarted !AttemptId !Text
   | AttemptOutput !AttemptId !Text
+  | AttemptProgress !AttemptId !PublicProgress
   | AttemptSteered !AttemptId !Text !Text !Text
   | AttemptCompleted !AttemptId !Text
   | AttemptFailed !AttemptId !FailureClass !Text
@@ -137,8 +343,11 @@ data RuntimeEvent
   | OccurrenceCompleted !OccurrenceId !Text !Text
   | OccurrenceFailed !OccurrenceId !FailureClass !Text
   | ControlAcknowledged !Text !Text !Text
+  | ControlAcknowledgedV2 !Text !Text !Text !Text !(Maybe OccurrenceId) !(Maybe AttemptId)
+  | OccurrencePersonAnswerPending !OccurrenceId !QuestionRef
   | TraceOrdered ![OccurrenceId]
   | RunCompleted !Integer !Integer
+  | RunCompletedV2 !Integer !Integer !ResultRef
   | RunFailed !FailureClass !Text
   | RunCancelled !Text
   deriving (Eq, Show)
@@ -160,25 +369,57 @@ type EventSink = RuntimeEvent -> IO ()
 nullEventSink :: EventSink
 nullEventSink _ = pure ()
 
-descriptorVersion, protocolVersion, storeVersion :: Int
-descriptorVersion = 2
+protocolVersion, latestProtocolVersion, storeVersion, latestStoreVersion :: Int
 protocolVersion = 1
+latestProtocolVersion = 2
 storeVersion = 1
+latestStoreVersion = 2
 
 -- | Bound one NDJSON record before asking aeson to allocate for it.  Transport
 -- output is split into smaller events by the writer.
 maxFrameBytes :: Int
 maxFrameBytes = 1024 * 1024
 
+maxArtifactBytes :: Integer
+maxArtifactBytes = 64 * 1024 * 1024
+
 encodeEnvelope :: Envelope -> ByteString
 encodeEnvelope = BL.toStrict . encode
 
+encodeEnvelopeFor :: Int -> Envelope -> Either Text ByteString
+encodeEnvelopeFor version envelope
+  | version `notElem` [protocolVersion, latestProtocolVersion] = Left ("unsupported runtime protocol version " <> T.pack (show version))
+  | envelopeVersion envelope /= version = Left "runtime envelope version does not match selected protocol"
+  | not (eventSupported version (envelopeEvent envelope)) = Left "runtime event is not available in selected protocol"
+  | Left failure <- validateRuntimeEventFor version (envelopeEvent envelope) = Left ("runtime event is invalid: " <> failure)
+  | BS.length bytes > maxFrameBytes = Left "runtime protocol event exceeds 1048576 bytes"
+  | otherwise = Right bytes
+  where
+    bytes = encodeEnvelope envelope
+
+validateRuntimeEventFor :: Int -> RuntimeEvent -> Either Text ()
+validateRuntimeEventFor version event@AttemptProgress {} =
+  case parseEither (parseRuntimeEventFor version) (toJSON event) of
+    Left failure -> Left (T.pack failure)
+    Right parsed
+      | parsed == event -> Right ()
+      | otherwise -> Left "runtime event changed during validation"
+validateRuntimeEventFor _ _ = Right ()
+
 decodeEnvelope :: ByteString -> Either Text Envelope
-decodeEnvelope bytes
+decodeEnvelope = decodeEnvelopeFor [protocolVersion]
+
+decodeEnvelopeFor :: [Int] -> ByteString -> Either Text Envelope
+decodeEnvelopeFor accepted bytes
   | BS.length bytes > maxFrameBytes = Left "runtime protocol frame exceeds 1048576 bytes"
-  | otherwise = case eitherDecodeStrict' bytes of
-      Left why -> Left (T.pack why)
-      Right envelope -> Right envelope
+  | otherwise = do
+      value <- either (Left . T.pack) Right (eitherDecodeStrict' bytes :: Either String Value)
+      version <-
+        either (Left . T.pack) Right $
+          parseEither (withObject "runtime envelope" (\o -> o .: "protocolVersion")) value
+      if version `notElem` accepted
+        then Left ("unsupported runtime protocol version " <> T.pack (show (version :: Int)))
+        else either (Left . T.pack) Right (parseEither parseJSON value)
 
 -- | Check one append against the previously accepted envelope.  Duplicates,
 -- gaps, regressions, cross-run records, and conflicting records are corruption.
@@ -212,13 +453,14 @@ instance ToJSON Envelope where
 instance FromJSON Envelope where
   parseJSON = withObject "runtime envelope" $ \o -> do
     version <- o .: "protocolVersion"
-    if version /= protocolVersion
+    if version `notElem` [protocolVersion, latestProtocolVersion]
       then fail ("unsupported runtime protocol version " <> show (version :: Int))
       else do
         run <- parseRunId =<< o .: "runId"
         sequence' <- parseWord64 "sequence" =<< o .: "sequence"
         timestamp <- o .: "timestamp" >>= parseTimestamp
-        event <- o .: "event"
+        eventValue <- o .: "event"
+        event <- parseRuntimeEventFor version eventValue
         pure (Envelope version run (SeqNo sequence') timestamp event)
 
 parseTimestamp :: Text -> Parser Text
@@ -250,6 +492,13 @@ instance ToJSON RuntimeEvent where
   toJSON = \case
     RunStarted workflow target ->
       object ["type" .= ("run.started" :: Text), "workflow" .= workflow, "target" .= target]
+    RunStartedV2 workflow target personAnswering ->
+      object
+        [ "type" .= ("run.started" :: Text),
+          "workflow" .= workflow,
+          "target" .= target,
+          "personAnswering" .= personAnsweringText personAnswering
+        ]
     OccurrenceStarted occurrence code intent addressee prompt ->
       object
         [ "type" .= ("occurrence.started" :: Text),
@@ -263,6 +512,8 @@ instance ToJSON RuntimeEvent where
       attemptObject "attempt.started" attempt ["target" .= target]
     AttemptOutput attempt chunk ->
       attemptObject "attempt.output" attempt ["stream" .= ("transport-text" :: Text), "chunk" .= chunk]
+    AttemptProgress attempt progress ->
+      attemptObject "attempt.progress" attempt ["progress" .= progress]
     AttemptSteered attempt control timing text ->
       attemptObject
         "attempt.steered"
@@ -295,23 +546,39 @@ instance ToJSON RuntimeEvent where
           "state" .= state,
           "message" .= message
         ]
+    ControlAcknowledgedV2 control state message command occurrence attempt ->
+      object
+        [ "type" .= ("control.ack" :: Text),
+          "controlId" .= control,
+          "state" .= state,
+          "message" .= message,
+          "command" .= command,
+          "occurrenceId" .= fmap occurrenceText occurrence,
+          "attemptId" .= fmap attemptValue attempt
+        ]
+    OccurrencePersonAnswerPending occurrence reference ->
+      occurrenceObject "occurrence.person-answer-pending" occurrence ["question" .= reference]
     TraceOrdered occurrences ->
       object ["type" .= ("trace.ordered" :: Text), "occurrenceIds" .= map occurrenceText occurrences]
     RunCompleted fresh memo ->
       object ["type" .= ("run.completed" :: Text), "billFresh" .= integerText fresh, "billMemo" .= integerText memo]
+    RunCompletedV2 fresh memo result ->
+      object ["type" .= ("run.completed" :: Text), "billFresh" .= integerText fresh, "billMemo" .= integerText memo, "result" .= result]
     RunFailed failure why ->
       object ["type" .= ("run.failed" :: Text), "failure" .= failureText failure, "message" .= why]
     RunCancelled why ->
       object ["type" .= ("run.cancelled" :: Text), "message" .= why]
 
 instance FromJSON RuntimeEvent where
-  parseJSON = withObject "runtime event" parseRuntimeEvent
+  parseJSON = parseRuntimeEventFor protocolVersion
 
-parseRuntimeEvent :: Object -> Parser RuntimeEvent
-parseRuntimeEvent o = do
+parseRuntimeEventFor :: Int -> Value -> Parser RuntimeEvent
+parseRuntimeEventFor version = withObject "runtime event" $ \o -> do
   eventType <- o .: "type" :: Parser Text
   case eventType of
-    "run.started" -> RunStarted <$> o .: "workflow" <*> o .: "target"
+    "run.started"
+      | version == protocolVersion -> RunStarted <$> o .: "workflow" <*> o .: "target"
+      | otherwise -> RunStartedV2 <$> o .: "workflow" <*> o .: "target" <*> (o .: "personAnswering" >>= parsePersonAnswering)
     "occurrence.started" ->
       OccurrenceStarted
         <$> occurrenceFrom o
@@ -325,6 +592,9 @@ parseRuntimeEvent o = do
       if stream /= "transport-text"
         then fail ("unknown attempt output stream " <> T.unpack stream)
         else AttemptOutput <$> attemptFrom o <*> o .: "chunk"
+    "attempt.progress"
+      | version == latestProtocolVersion -> AttemptProgress <$> attemptFrom o <*> o .: "progress"
+      | otherwise -> fail "attempt progress is unavailable in protocol version 1"
     "attempt.steered" -> do
       attempt <- attemptFrom o
       control <- o .: "controlId" >>= parseControlId
@@ -359,20 +629,36 @@ parseRuntimeEvent o = do
     "occurrence.redirected" -> OccurrenceRedirected <$> occurrenceFrom o <*> (o .: "controlId" >>= parseControlId) <*> o .: "target"
     "occurrence.completed" -> OccurrenceCompleted <$> occurrenceFrom o <*> o .: "source" <*> o .: "answer"
     "occurrence.failed" -> OccurrenceFailed <$> occurrenceFrom o <*> failureFrom o <*> o .: "message"
+    "occurrence.person-answer-pending"
+      | version == latestProtocolVersion -> OccurrencePersonAnswerPending <$> occurrenceFrom o <*> o .: "question"
+      | otherwise -> fail "person answer event is unavailable in protocol version 1"
     "control.ack" -> do
       control <- o .: "controlId" >>= parseControlId
       state <- o .: "state" >>= parseAcknowledgementState
-      ControlAcknowledged control state <$> o .: "message"
+      message <- o .: "message"
+      if version == protocolVersion
+        then pure (ControlAcknowledged control state message)
+        else
+          ControlAcknowledgedV2 control state message
+            <$> (o .: "command" >>= parseControlCommandName)
+            <*> (traverse (fmap OccurrenceId . parseWord64 "occurrenceId") =<< o .:? "occurrenceId")
+            <*> (traverse parseAttemptValue =<< o .:? "attemptId")
     "trace.ordered" -> do
       ids <- o .: "occurrenceIds"
       occurrences <- traverse (fmap OccurrenceId . parseWord64 "occurrenceId") ids
       if length (nub occurrences) /= length occurrences
         then fail "trace occurrenceIds are duplicated"
         else pure (TraceOrdered occurrences)
-    "run.completed" ->
-      RunCompleted
-        <$> (parseInteger "billFresh" =<< o .: "billFresh")
-        <*> (parseInteger "billMemo" =<< o .: "billMemo")
+    "run.completed"
+      | version == protocolVersion ->
+          RunCompleted
+            <$> (parseInteger "billFresh" =<< o .: "billFresh")
+            <*> (parseInteger "billMemo" =<< o .: "billMemo")
+      | otherwise ->
+          RunCompletedV2
+            <$> (parseInteger "billFresh" =<< o .: "billFresh")
+            <*> (parseInteger "billMemo" =<< o .: "billMemo")
+            <*> o .: "result"
     "run.failed" -> RunFailed <$> failureFrom o <*> o .: "message"
     "run.cancelled" -> RunCancelled <$> o .: "message"
     _ -> fail ("unknown runtime event type " <> T.unpack eventType)
@@ -385,6 +671,12 @@ attemptFrom o =
   AttemptId
     <$> occurrenceFrom o
     <*> (parseWord32 "attempt" =<< o .: "attempt")
+
+parseAttemptValue :: Value -> Parser AttemptId
+parseAttemptValue = withObject "runtime attempt id" $ \o ->
+  AttemptId
+    <$> (OccurrenceId <$> (parseWord64 "attempt occurrenceId" =<< o .: "occurrenceId"))
+    <*> (parseWord32 "attemptNumber" =<< o .: "attemptNumber")
 
 failureFrom :: Object -> Parser FailureClass
 failureFrom o = do
@@ -400,6 +692,13 @@ attemptObject eventType attempt fields =
       ]
         <> fields
     )
+
+attemptValue :: AttemptId -> Value
+attemptValue attempt =
+  object
+    [ "occurrenceId" .= occurrenceText (attemptOccurrence attempt),
+      "attemptNumber" .= word32Text (attemptNumber attempt)
+    ]
 
 occurrenceObject :: Text -> OccurrenceId -> [Pair] -> Value
 occurrenceObject eventType occurrence fields =
@@ -450,6 +749,70 @@ parseNatural :: String -> Text -> Parser Integer
 parseNatural label t = case TR.decimal t of
   Right (n, rest) | T.null rest -> pure n
   _ -> fail ("runtime protocol " <> label <> " is not an unsigned decimal string")
+
+parsePersonAnswering :: Text -> Parser PersonAnswering
+parsePersonAnswering "engine" = pure PersonAnswerEngine
+parsePersonAnswering "local-control" = pure PersonAnswerLocalControl
+parsePersonAnswering other = fail ("unknown person answering mode " <> T.unpack other)
+
+personAnsweringText :: PersonAnswering -> Text
+personAnsweringText PersonAnswerEngine = "engine"
+personAnsweringText PersonAnswerLocalControl = "local-control"
+
+parseControlCommandName :: Text -> Parser Text
+parseControlCommandName command
+  | command `elem` ["cancelRun", "steerOccurrence", "retryOccurrence", "failoverOccurrence", "abandonOccurrence", "redirectOccurrence", "answerPerson", "invalid"] = pure command
+  | otherwise = fail ("unknown runtime control command " <> T.unpack command)
+
+validateQuestionRef :: QuestionRef -> Parser QuestionRef
+validateQuestionRef reference = do
+  unlessP (questionArtifactVersion reference == 1) "unsupported question artifact version"
+  unlessP (validQuestionPath (questionArtifactPath reference)) "invalid question artifact path"
+  validateDigest (questionArtifactSha256 reference)
+  validateArtifactBytes (questionArtifactBytes reference)
+  pure reference
+
+validateResultRef :: ResultRef -> Parser ResultRef
+validateResultRef reference = do
+  unlessP (resultArtifactVersion reference == 1) "unsupported result artifact version"
+  unlessP (resultArtifactPath reference == "result.json") "invalid result artifact path"
+  validateDigest (resultArtifactSha256 reference)
+  validateArtifactBytes (resultArtifactBytes reference)
+  unlessP (T.length (resultArtifactPreview reference) <= 500 && not (T.any (`elem` ['\n', '\r']) (resultArtifactPreview reference))) "invalid result artifact preview"
+  pure reference
+
+validQuestionPath :: Text -> Bool
+validQuestionPath path =
+  case T.stripPrefix "person/questions/" path >>= T.stripSuffix ".json" of
+    Just occurrence -> not (T.null occurrence) && T.all isDigit occurrence
+    Nothing -> False
+
+validateDigest :: Text -> Parser ()
+validateDigest digest =
+  unlessP (T.length digest == 64 && T.all (\c -> isDigit c || c `elem` ['a' .. 'f']) digest) "invalid artifact SHA-256"
+
+validateArtifactBytes :: Integer -> Parser ()
+validateArtifactBytes bytes =
+  unlessP (bytes > 0 && bytes <= maxArtifactBytes) "artifact byte count is outside the supported bound"
+
+unlessP :: Bool -> String -> Parser ()
+unlessP condition message = if condition then pure () else fail message
+
+eventSupported :: Int -> RuntimeEvent -> Bool
+eventSupported version event
+  | version == protocolVersion = case event of
+      RunStartedV2 {} -> False
+      ControlAcknowledgedV2 {} -> False
+      OccurrencePersonAnswerPending {} -> False
+      AttemptProgress {} -> False
+      RunCompletedV2 {} -> False
+      _ -> True
+  | version == latestProtocolVersion = case event of
+      RunStarted {} -> False
+      ControlAcknowledged {} -> False
+      RunCompleted {} -> False
+      _ -> True
+  | otherwise = False
 
 failureText :: FailureClass -> Text
 failureText = \case

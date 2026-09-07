@@ -1,0 +1,21 @@
+{
+  "runId": "run-1",
+  "status": "cancelled",
+  "lastSequence": "2",
+  "workflow": "review",
+  "target": "scripted",
+  "occurrences": [],
+  "authoredOrder": [],
+  "traceRecorded": false,
+  "controlAcks": [
+    {
+      "controlId": "cancel-1",
+      "state": "accepted",
+      "message": "cancellation accepted"
+    }
+  ],
+  "billFresh": null,
+  "billMemo": null,
+  "failure": "cancelled",
+  "failureClass": "cancelled"
+}

@@ -7,6 +7,11 @@ module Agentic.Engine
     ConcurrentEngine,
     EngineConversation (..),
     EngineContext (..),
+    EngineUpdateSink,
+    EngineUpdate (..),
+    EngineToolUpdate (..),
+    EngineTodoItem (..),
+    EngineUsage (..),
     EngineSteerer,
     EngineSteering (..),
     EngineRequest (..),
@@ -33,9 +38,47 @@ import Data.Aeson (FromJSON (parseJSON), withText)
 import Data.Text (Text)
 import qualified Data.Text as T
 
+-- | Optional public progress emitted during one physical attempt.
+type EngineUpdateSink = EngineUpdate -> IO ()
+
+-- | Typed stream facts from one engine turn; answer bytes remain explicit.
+data EngineUpdate
+  = EngineAnswerChunk !Text
+  | EnginePublicMessage !Text
+  | EngineToolProgress !EngineToolUpdate
+  | EngineTodoSnapshot ![EngineTodoItem]
+  | EngineUsageProgress !EngineUsage
+  | EnginePublicReasoningSummary !Text
+  deriving (Eq, Show)
+
+-- | One bounded patch to a transport tool call, keyed by its stable id.
+data EngineToolUpdate = EngineToolUpdate
+  { engineToolId :: !Text,
+    engineToolTitle :: !(Maybe Text),
+    engineToolKind :: !(Maybe Text),
+    engineToolStatus :: !(Maybe Text),
+    engineToolSummary :: !(Maybe Text)
+  }
+  deriving (Eq, Show)
+
+-- | One entry in an authoritative public todo snapshot.
+data EngineTodoItem = EngineTodoItem
+  { engineTodoContent :: !Text,
+    engineTodoPriority :: !Text,
+    engineTodoStatus :: !Text
+  }
+  deriving (Eq, Show)
+
+-- | Cumulative public context usage reported by a transport.
+data EngineUsage = EngineUsage
+  { engineUsageUsed :: !Integer,
+    engineUsageSize :: !Integer
+  }
+  deriving (Eq, Show)
+
 -- | Capabilities required to report one physical attempt to the runtime.
 data EngineContext = EngineContext
-  { runEngineAttempt :: forall a. Maybe EngineSteerer -> Text -> ((Text -> IO ()) -> IO a) -> IO a
+  { runEngineAttempt :: forall a. Maybe EngineSteerer -> Text -> (EngineUpdateSink -> IO a) -> IO a
   }
 
 data EngineSteering = InterruptNow | NextBoundary
@@ -156,6 +199,9 @@ newtype EngineConversation = EngineConversation
 class Engine engine where
   startEngine :: engine -> EngineContext -> EngineRequest -> IO EngineConversation
   engineTurnLane :: engine -> Maybe TurnLane
+  -- | Exact secret values that must suppress any matching public presentation update.
+  enginePublicRedactionValues :: engine -> [Text]
+  enginePublicRedactionValues _ = []
 
 newtype ConcurrentEngine = ConcurrentEngine (EngineRequest -> Text -> IO EngineResult)
 
