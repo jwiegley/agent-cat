@@ -2,16 +2,16 @@
 
 `engine` holds the concrete execution transports behind one neutral interface.
 The runtime translates plans and owns decoding, retries, fail-over,
-memoization, and scheduling; an engine owns its connection, its protocol,
+memoization, and scheduling. An engine owns its connection, its protocol,
 permission, completion evidence, and the application of model settings.
 
 ## Layout
 
 This directory has no code of its own. `api` defines `Agentic.Engine`, the
-interface shared by the runtime and every transport. `acp` implements the Agent
-Client Protocol as `Agentic.Acp`, with the selector modules for Claude, Codex,
-and Factory Droid as children. `agent-deck` implements `Agentic.AgentDeck`,
-which joins a session that agent-deck already owns.
+interface that the runtime and every transport share. `acp` implements the
+Agent Client Protocol as `Agentic.Acp`, and its children hold the selector
+modules for Claude, Codex, and Factory Droid. `agent-deck` implements
+`Agentic.AgentDeck`, which joins a session that agent-deck already owns.
 
 ## Dependencies
 
@@ -36,7 +36,7 @@ nix develop path:. -c cabal test engine-api-test
 
 ## Conventions
 
-Use only the capabilities shared through `Agentic.Engine`, and keep
+Use only the capabilities that `Agentic.Engine` shares, and keep
 engine-specific detail inside the child that owns it. An MCP transport is a
-documented future child of this directory; no `engine/mcp` directory, package,
+documented future child of this directory. No `engine/mcp` directory, package,
 or placeholder exists until a working implementation is added.

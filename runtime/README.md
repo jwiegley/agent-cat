@@ -1,10 +1,10 @@
 # runtime
 
 `runtime/src` executes typed plans against any `Agentic.Engine.Engine`. It owns
-scheduling, memoization, decoding and re-asking, recovery and fail-over, effect
-ordering and journaling, generic routing, controls, the machine protocol,
-persistence, restart, resume, and fork support, and the execution of
-program-authored commands.
+scheduling, memoization, decoding and re-asking, recovery and fail-over, the
+ordering and journaling of effects, generic routing, controls, the machine
+protocol, persistence, and support for restart, resume, and fork. It also
+executes the commands that a program authors.
 
 ## Public modules
 

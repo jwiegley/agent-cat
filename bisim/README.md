@@ -1,20 +1,21 @@
 # bisim
 
-`bisim` is the test-only agreement boundary between the normative Lean model
-and the Haskell implementation. It owns the Lean conformance codec and oracle,
-the frozen corpus, the corpus generator, and the Haskell generators, guards,
-oracle client, and frozen-vector runner. No production component depends on
-it, and Lean is invoked as a subprocess rather than linked into any executable.
+`bisim` is the test-only boundary where the Haskell implementation is checked
+against the normative Lean model. It owns the Lean conformance codec and
+oracle, the frozen corpus, the corpus generator, and the Haskell generators,
+guards, oracle client, and frozen-vector runner. No production component
+depends on it. Lean runs as a subprocess and is never linked into an
+executable.
 
 ## Layout
 
 `bisim/lean` is the Lake package `agentic-bisim`. It requires the model by a
-local path, deliberately imports only the cheap closure of the model and never
-`Agentic.Core.DslFlagship` or `Agentic.Core.HardenPatch`, and builds the
-`Conformance` library and the executables `conformance-oracle` and
+local path, and it imports only the cheap closure of the model. It never
+imports `Agentic.Core.DslFlagship` or `Agentic.Core.HardenPatch`. It builds
+the `Conformance` library and the executables `conformance-oracle` and
 `corpus-gen`. `bisim/corpus` holds the frozen vectors. `bisim/haskell/src` is
-the internal `bisim-support` library of the `agentic` package, which exposes
-`Agentic.Bisim` over the hidden `Agentic.Gen`, `Agentic.Guards`, and
+the internal `bisim-support` library of the `agentic` package. It exposes
+`Agentic.Bisim` over the hidden modules `Agentic.Gen`, `Agentic.Guards`, and
 `Agentic.Oracle`. `bisim/haskell/tier0` is the `tier0` executable, which
 replays the frozen vectors without Lean. The `tier1` and live `bisim`
 executables need cost and workflow definitions, so they live under
@@ -37,17 +38,17 @@ nix develop path:. -c cabal build all
 N=500 SEED=1 ./bisim/ci/tier1.sh
 ```
 
-`corpus-gen` must leave every corpus byte unchanged; a diff is a change to the
-specification. `tier1.sh` requires the prebuilt oracle and refuses to build it,
-which preserves the one-build rule for the expensive model. The manual's
-"Conformance Boundary" chapter specifies the wire format and states what the
-corpus pins.
+`corpus-gen` must leave every corpus byte unchanged. A diff is a change to the
+specification. The script `tier1.sh` requires the prebuilt oracle and refuses
+to build it, which preserves the one-build rule for the expensive model. The
+chapter "Conformance Boundary" of the manual specifies the wire format and
+states what the corpus pins.
 
 ## Conventions
 
 Lean observations are authoritative, and a Haskell comparison must not weaken
-them. Keep the corpus byte-frozen unless the specification changes. Keep the
-Haskell side of this directory limited to DSL and planner dependencies; cost
-and workflow definitions belong to the private verification library. Use
-deterministic local processes only, and treat transport errors as failures of
-the harness rather than as conformance divergences.
+them. Keep the corpus frozen byte for byte unless the specification changes.
+Keep the Haskell side of this directory limited to DSL and planner
+dependencies. Cost and workflow definitions belong to the private verification
+library. Use deterministic local processes only. Treat a transport error as a
+failure of the harness and not as a conformance divergence.

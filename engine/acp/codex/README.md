@@ -1,18 +1,17 @@
 # engine/acp/codex
 
-`engine/acp/codex/src` owns the selection of the Codex ACP adapter and
-nothing else.
+`engine/acp/codex/src` owns only the selection of the Codex ACP adapter.
 
 ## Public module
 
-`Agentic.Acp.Codex` exports `codexAdapter` and its machine-local fallback `codexPin`. The adapter is found on `PATH` first and at the pinned path second.
+`Agentic.Acp.Codex` exports `codexAdapter` and its machine-local fallback
+`codexPin`. The adapter is found on `PATH` first and at the pinned path second.
 
 ## Dependencies
 
 `engine/acp` is the sole local dependency, and the CLI selects the returned
-`AdapterSpec`. The DSL, the planner, the runtime, workflow modules,
-conformance support, the deck engine, and the other selectors are never
-imported.
+`AdapterSpec`. This directory never imports the DSL, the planner, the runtime,
+workflow modules, conformance support, the deck engine, or another selector.
 
 ## Build and test
 
@@ -23,5 +22,5 @@ nix develop path:. -c cabal build all
 
 ## Conventions
 
-Own only the Codex command and pin policy. Common ACP protocol behavior and
-runtime policy belong to the parent directory and the runtime.
+Own only the Codex command and pin policy. Common ACP protocol behavior
+belongs to the parent directory, and runtime policy belongs to the runtime.

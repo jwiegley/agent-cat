@@ -2,10 +2,10 @@
 
 `ext-pi` is a Pi extension that makes Pi the control plane for agent-cat
 workflows. agent-cat remains the only workflow interpreter. The extension reads
-the trusted runner executables named in its configuration, gathers inputs,
-launches the runner in machine mode, reduces its event stream into a live
-monitor, delivers controls, and keeps durable references to runs. It never
-searches the file system or `PATH` for a runner.
+the trusted runner executables that its configuration names, and it gathers
+inputs and launches the runner in machine mode. It reduces the event stream of
+the runner into a live monitor, delivers controls, and keeps durable references
+to runs. It never searches the file system or `PATH` for a runner.
 
 ## Boundary
 
@@ -25,7 +25,7 @@ run references.
 
 ## Configuration
 
-Set the user-owned environment variables before starting Pi:
+Set the user-owned environment variables before you start Pi:
 
 ```sh
 export AGENT_CAT_RUNNER=/absolute/path/to/agentic-run
@@ -41,9 +41,9 @@ of `AGENT_CAT_RUNNER`:
 export AGENT_CAT_RUNNERS='[{"id":"stable","executable":"/opt/agentic-run","allowedCwds":["/work"]},{"id":"next","executable":"/opt/agentic-run-next"}]'
 ```
 
-A remote Pi server additionally requires a private transport. The session
-identifier is optional; when it is omitted, the extension uses Pi's
-authenticated discovery and asks the user to select a durable session:
+A remote Pi server requires a private transport in addition. The session
+identifier is optional. When it is omitted, the extension uses the
+authenticated discovery of Pi and asks the user to select a durable session:
 
 ```sh
 export AGENT_CAT_PI_REMOTE_SOCKET=/absolute/private/pi.sock
@@ -57,17 +57,18 @@ arguments that contain credential-like flags or values are refused. Under routin
 v2, credentials remain environment references resolved inside agent-cat; the
 extension receives neither those references nor their values, and writes only
 persona/model-alias argv to its private manifest. Remote transport authentication
-protocol bytes, the Unix transport relies on private socket permissions, and a
-remote session is acquired exclusively across client connections.
+occurs before any Pi protocol bytes are exchanged. The Unix transport relies
+on private socket permissions, and a remote session is acquired exclusively
+across client connections.
 
 Protocol-v2 runs retain typed public tool, complete plan/todo, and context-usage
 updates separately from answer chunks. Obvious credential-bearing diagnostic
 lines are redacted before persistence. ACP thought chunks are not public reasoning
 summaries and are ignored. Engines that report no optional progress acquire none.
 
-`/wf` requires Pi to be running inside Agent Deck. It reads the inherited
-`AGENTDECK_INSTANCE_ID` and never scans for, or asks the user to name, another
-Agent Deck session.
+`/wf` requires Pi to run inside Agent Deck. It reads the inherited
+`AGENTDECK_INSTANCE_ID`, and it never scans for another Agent Deck session or
+asks the user to name one.
 
 ## Source-aware inputs
 
@@ -79,12 +80,13 @@ taking (argsInput :> stdinInput :> input "tone" :> noInputs) \args body tone -> 
 ```
 
 `argsInput` declares the command-tail input under the default name `args`, and
-`stdinInput` declares the standard-input value under the default name `input`;
-`argsInputAs` and `stdinInputAs` choose other names. Names are unique, and at
-most one command-tail source and one standard-input source may be declared.
+`stdinInput` declares the standard-input value under the default name `input`.
+`argsInputAs` and `stdinInputAs` choose other names. Names are unique. A
+workflow can declare at most one command-tail source and at most one
+standard-input source.
 
 `/wf` takes the workflow name and the unsplit command-tail text on its first
-line, then a multiline body:
+line, and then it takes a multiline body:
 
 ```text
 /wf review Scope of the review
@@ -92,11 +94,11 @@ line, then a multiline body:
   These are instructions on what I want the review to focus on
 ```
 
-This binds `args` to `Scope of the review` and `input` to the body. Only
-leading whitespace of the body is removed; internal and trailing whitespace is
-preserved. A missing tail or body value falls back to the ordinary input
-editor. Tail or body text without a matching declaration fails before any
-confirmation or run state is created.
+This binds `args` to `Scope of the review` and `input` to the body. The
+extension removes only the leading whitespace of the body, and it preserves the
+internal and trailing whitespace. A missing tail or body value falls back to
+the ordinary input editor. Tail or body text without a matching declaration
+fails before any confirmation and before any run state is created.
 
 The same declaration serves a direct pipe into the runner:
 
@@ -115,30 +117,30 @@ v3 plus control-descriptor support.
 
 | Command | Purpose |
 |---|---|
-| `/wf [RUNNER:WORKFLOW]` | Launch in the current Agent Deck session; omit the name to select from the catalogue. |
-| `/workflow-help RUNNER:WORKFLOW` | Show the runner's exact `help` output. |
+| `/wf [RUNNER:WORKFLOW]` | Launch in the current Agent Deck session. Omit the name to select from the catalogue. |
+| `/workflow-help RUNNER:WORKFLOW` | Show the exact `help` output of the runner. |
 | `/workflow-plan RUNNER:WORKFLOW` | Show `plan --json --raw` with the actual inputs. |
 | `/workflow RUNNER:WORKFLOW` | Compatibility launch wizard for alternate targets. |
 | `/workflow-status` | Summaries of active and recent runs. |
-| `/workflow-monitor [RUN_ID]` | Live monitor in authored order; arrows or `j` and `k` move, Enter folds, Escape closes. |
+| `/workflow-monitor [RUN_ID]` | Live monitor in authored order. The arrow keys or `j` and `k` move, Enter folds, and Escape closes. |
 | `/workflow-steer [RUN_ID]` | Steer one exact attempt. |
-| `/workflow-retry [RUN_ID]` | Retry an occurrence that is waiting after automatic recovery is spent. |
+| `/workflow-retry [RUN_ID]` | Retry an occurrence that waits after automatic recovery is spent. |
 | `/workflow-recover [RUN_ID]` | Choose one runner-offered retry, fail-over, or abandon action. |
 | `/workflow-redirect RUN_ID OCCURRENCE_ID RESERVED_TARGET` | Redirect a scheduler-reserved occurrence during the thirty-second decision window. |
 | `/workflow-grant` | Issue a one-time scoped grant for model-initiated starts, lineage, or controls. |
-| `/workflow-restart PARENT_RUN_ID` | New run from scratch with immutable lineage. |
-| `/workflow-resume PARENT_RUN_ID` | Compatible semantic resume. |
-| `/workflow-fork PARENT_RUN_ID` | Immutable workflow fork with persisted-answer drops or replacements; distinct from a Pi conversation fork. |
+| `/workflow-restart PARENT_RUN_ID` | Start a new run from scratch with immutable lineage. |
+| `/workflow-resume PARENT_RUN_ID` | Resume a compatible run semantically. |
+| `/workflow-fork PARENT_RUN_ID` | Fork a workflow immutably, with drops or replacements of persisted answers. This is distinct from a Pi conversation fork. |
 | `/workflow-diff CHILD_RUN_ID` | Compare lineage, identity, answer edits, and outcomes with the immutable parent. |
-| `/workflow-cancel RUN_ID` | Approved cancellation of an owned live run. |
+| `/workflow-cancel RUN_ID` | Cancel an owned live run after approval. |
 
 The `agent_cat_workflow` tool lets a model discover, start, inspect, control,
-restart, resume, or fork runs; starts are limited to scripted, tool-free child,
-and known remote targets. Every mutation requires an unused matching grant
-issued by `/workflow-grant`, and an unresolved or expired grant refuses before
-anything is spent. Controls wait for agent-cat's terminal acknowledgement and
-report `delivered`, `rejected-stale`, `unsupported`, or `failed` verbatim; a
-request is never presented as a success.
+restart, resume, or fork runs. Starts from the tool are limited to the
+scripted, tool-free child, and known remote targets. Every mutation requires an
+unused matching grant from `/workflow-grant`, and an unresolved or expired grant
+refuses before anything is spent. Controls wait for the terminal acknowledgement
+of agent-cat, and they report `delivered`, `rejected-stale`, `unsupported`, or
+`failed` verbatim. A request is never presented as a success.
 
 ## Routing selection
 
@@ -160,20 +162,20 @@ only the selected non-secret argument vector.
 
 | Target | What answers | Containment |
 |---|---|---|
-| Scripted | The registered canned table. | Offline; no commands run. |
-| Native ACP | A configured adapter plus validated unmanaged-pin routes or v2 persona/model-alias choices. Built-ins are `stub`, `claude`, `codex`, and `droid`; `droid` launches `droid exec --output-format acp`. | agent-cat's scratch directory, which is not an operating-system sandbox. |
-| Native agent-deck | The Agent Deck session inherited by `/wf`, or one chosen in the compatibility wizard, plus unmanaged routes or v2 persona/model-alias choices. | The session's own workspace. |
+| Scripted | The registered canned table. | Offline. No command runs. |
+| Native ACP | A configured adapter plus validated unmanaged-pin routes or v2 persona/model-alias choices. Built-ins are `stub`, `claude`, `codex`, and `droid`; `droid` launches `droid exec --output-format acp`. | The scratch directory of agent-cat, which is not an operating-system sandbox. |
+| Native agent-deck | The Agent Deck session inherited by `/wf`, or one chosen in the compatibility wizard, plus unmanaged routes or v2 persona/model-alias choices. | The workspace of that session. |
 | Current Pi session | Visible, exclusive injected turns in the current project. | Not a sandbox. |
-| Owned Pi child | An in-memory Pi session with tools disabled. | agent-cat's scratch directory. |
-| Remote Pi session | A known or authenticated-discovered session under an exclusive lease. | Its remote workspace; not a sandbox. |
+| Owned Pi child | An in-memory Pi session with tools disabled. | The scratch directory of agent-cat. |
+| Remote Pi session | A known or discovered session under an exclusive lease. | Its remote workspace, which is not a sandbox. |
 
-For Droid, install and authenticate the `droid` executable before starting Pi,
-or inherit `FACTORY_API_KEY` into Pi's environment. Never enter a key in the
-adapter argument editor. A Factory model and reasoning level are selected
-through agent-cat's symbolic routing profile rather than through adapter
-arguments. The workflow's `servedBy` name must match the profile, a Droid
-router uses `backend: acp:droid`, and because Droid exposes no output-limit
-control the output policy is stated explicitly:
+For Droid, install and authenticate the `droid` executable before you start Pi,
+or inherit `FACTORY_API_KEY` into the environment of Pi. Never enter a key in
+the editor for adapter arguments. Select a Factory model and a reasoning level
+through the symbolic routing profile of agent-cat, and not through adapter
+arguments. The `servedBy` name of the workflow must match the profile, and a
+Droid router uses `backend: acp:droid`. Droid exposes no output-limit control,
+so the output policy must be stated explicitly:
 
 ```yaml
 version: 1
@@ -190,12 +192,13 @@ profiles:
         max-output: unconstrained
 ```
 
-Pi passes the selected routes to agent-cat, which preflights the advertised
-model and reasoning setters before any prompt. Omitting `max-output` or
-declaring an unsupported setting refuses the run. Effectful workflows cannot
-use the tool-free child target, and the current and remote live targets
-require an explicit charge and ownership confirmation. agent-cat's intent-based
-permission policy under ACP remains authoritative.
+Pi passes the selected routes to agent-cat, and agent-cat preflights the
+advertised model and reasoning setters before any prompt. If `max-output` is
+omitted, or if any declared setting is unsupported, the run is refused. An
+effectful workflow cannot use the tool-free child target. The current and
+remote live targets require an explicit confirmation of charge and ownership.
+The intent-based permission policy of agent-cat under ACP remains
+authoritative.
 
 ## Persistence and recovery
 
@@ -208,25 +211,28 @@ attach read-only to a live run's event stream while controls stay with the origi
 exclusive supervisor; a dead owner leaves the run `orphaned`. State sharing occurs
 only when those frontends are explicitly given the same `AGENT_CAT_STATE_DIR`.
 
-agent-cat persists an immutable manifest with a fixed reference to a private
-`program.json`, an append-only event journal, schema-indexed reusable answers
-keyed by the complete bare question, a journal of started and completed
-effects, atomic checkpoints, and ownership and lineage. Resume reuses only
-exact compatible answers; a changed program, target, or policy, a corrupt or
-unknown store version, mismatched checkpoint counts, an invalid stored-answer
-schema, or any started or completed parent effect refuses before a child is
-created. Restart is always a new run. Fork inherits only matching bare-question
-answers, may drop or replace selected answers after the runner's
-schema-validating preflight, and never mutates its parent. `/workflow-diff`
-reports the durable edit hashes and the resulting occurrence differences.
-Steered answer groups are marked non-replayable.
+agent-cat persists six kinds of state. These are an immutable manifest with a
+fixed reference to a private `program.json`, an append-only event journal, and
+schema-indexed reusable answers that are keyed by the complete bare question.
+The other three are a journal of started and completed effects, atomic
+checkpoints, and ownership and lineage. Resume reuses only exact compatible
+answers. A changed program, target, or policy refuses before a child is
+created. A corrupt or unknown store version, a mismatched checkpoint count, an
+invalid stored-answer schema, or any started or completed parent effect also
+refuses. Restart is always a new run.
+Fork inherits only matching bare-question answers. It can drop or replace
+selected answers after the schema-validating preflight of the runner, and it
+never mutates its parent. `/workflow-diff` reports the durable edit hashes and
+the resulting occurrence differences. Steered answer groups are marked as not
+replayable.
 
-On extension restart, terminal records are reconstructed from snapshots or
+When the extension restarts, it reconstructs terminal records from snapshots or
 from agent-cat events. A malformed manifested run is isolated as
-`corrupt-store`; a fresh pre-manifest directory is ignored so that it cannot
-hide valid history; and stale incomplete directories follow retention cleanup.
-A nonterminal run with no owned control channel is shown as `orphaned` and is
-never presented as live or controllable; restart, resume, or fork it instead.
+`corrupt-store`. A fresh directory without a manifest is ignored, so that it
+cannot hide valid history, and stale incomplete directories follow retention
+cleanup. A run that is not terminal and has no owned control channel is shown
+as `orphaned`, and it is never presented as live or controllable. Restart,
+resume, or fork such a run instead.
 
 ## Security and limits
 
@@ -244,10 +250,9 @@ names or common token syntax are redacted. Cancellation is graceful first and
 falls back to a process-group TERM and KILL. Retention never prunes an orphaned
 run or an immutable parent that retained lineage references.
 
-Unsupported or stale controls produce explicit acknowledgements. Modes without
-a terminal user interface can list runs and show bounded textual monitors,
-while launch and lineage approval refuse when interactive approval is
-unavailable.
+Unsupported or stale controls produce explicit acknowledgements. Modes without a
+terminal user interface can list runs and show bounded textual monitors, but
+launch and lineage approval refuse when interactive approval is unavailable.
 
 ## Build and test
 
@@ -260,17 +265,17 @@ AGENT_CAT_E2E_RUNNER="$(cd .. && nix develop path:. -c cabal list-bin agentic-ru
 
 The pinned install keeps unit development reproducible. Remote ownership,
 boundary follow-up, and correlated current-session turns depend on the
-accompanying Pi protocol, client, server, and coding-agent changes
-(`attach.mode`, `follow_up`, `RemoteSession.discover`, and
-`ExtensionAPI.startTaskTurn`); the current-session choice is hidden when
-`startTaskTurn` is absent. The integration tests do not skip: they require a
-built runner and the accompanying local Pi packages, and they exercise the
-native ACP, native deck, current, owned-child, and remote targets without a
-paid call.
+accompanying changes to the Pi protocol, client, server, and coding agent. Those
+changes are `attach.mode`, `follow_up`, `RemoteSession.discover`, and
+`ExtensionAPI.startTaskTurn`. The current-session choice is hidden when
+`startTaskTurn` is absent. The integration tests do not skip when a
+prerequisite is missing. They require a built runner and the accompanying local
+Pi packages, and they exercise the native ACP, native deck, current,
+owned-child, and remote targets without a paid call.
 
 ## Conventions
 
 Keep this package a strict protocol client. Preserve project trust, explicit
 grants, private files, bounded logs and events, fail-closed reduction, and
-process cleanup. Add runner capability through versioned protocol fields rather
-than through source imports or inference from prose.
+process cleanup. Add runner capability through versioned protocol fields, and
+not through source imports or inference from prose.

@@ -64,15 +64,14 @@ context, not an operating-system credential sandbox. Agent Deck receives no
 synthetic environment behavior. `model-definitions.example.yaml` is documentation
 rather than an automatic default and covers every `servedBy` profile in the
 bundled workflows.
-profile the bundled workflows name.
 
 ## Dependencies
 
-The CLI may depend on every other production directory and on the workflow
-registries. It is the only directory that imports concrete engines and
-chooses Claude, Codex, Droid, agent-deck, or an explicit adapter path. The Pi
-extension drives its versioned process protocols and never imports Haskell
-modules.
+The CLI can depend on every other production directory and on the workflow
+registries. It is the only directory that imports concrete engines, and it
+alone chooses Claude, Codex, Droid, agent-deck, or an explicit adapter path.
+The Pi extension drives the versioned process protocols of the CLI and never
+imports Haskell modules.
 
 ## Build and use
 
