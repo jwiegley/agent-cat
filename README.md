@@ -294,15 +294,16 @@ precedence is `--persona`, `AGENT_CAT_PERSONA`, project selector, then user
 default. Exact and ordered-prefix selectors freeze one model id per run; bounded
 OpenAI/Anthropic discovery uses private persona/fingerprint caches.
 
-`--realize AXIS=MODEL-ALIAS` replaces a managed v2 axis without separating its
-model from its engine, provider, environment, or catalogue. Raw `--route` remains
-unchanged for v1 and unconfigured names and is refused for managed v2 axes.
-`--routing --json` emits the sanitized frontend contract;
-`--migrate-routing SOURCE --output DESTINATION` creates an equivalent offline v2
-file without overwriting its source. `cli/model-definitions.example.yaml` covers
-every symbolic profile in the bundled workflows. Routing remains composition
-policy after the program and its analyses exist, so persona never enters the DSL,
-plan, price, or `run.*` facts.
+
+Exact and ordered-prefix selectors freeze an exact model identifier before an
+engine starts. `--realize AXIS=MODEL-ALIAS` safely replaces a managed version-2
+axis, while raw routes remain unchanged for version 1 and unconfigured names.
+`--routing --json` emits the sanitized frontend contract, and
+`--migrate-routing SOURCE --output DESTINATION` creates an equivalent offline
+version-2 file without overwriting the source. The example in
+`cli/model-definitions.example.yaml` covers every profile that the bundled
+workflows name. Routing remains operational policy after the program and its
+analyses exist, so persona changes neither the plan nor its price.
 
 The `machine` verbs execute the same program while emitting versioned NDJSON
 events on standard output and accepting correlated controls on an inherited file
@@ -311,7 +312,8 @@ store format 2 and adds private result/question artifacts, local person answerin
 and bounded public progress without changing answers, traces, or bills. Runs
 persist an immutable manifest, append-only events, reusable typed answers, an
 effect journal, and checkpoints; lineage verbs create immutable child runs.
-`list --json` publishes descriptor version 3 with routing and protocol negotiation.
+`list --json` preserves descriptor version 2. `--descriptor-version 3` selects
+the routing and protocol-negotiation capabilities of the current frontend.
 The registry currently holds nine programs: `harden`, `hello`,
 `structured`, `structured-result`, `plan-feature`, `review-lite`,
 `ship-feature-lite`, `grind-tests`, and `stack-prs`.

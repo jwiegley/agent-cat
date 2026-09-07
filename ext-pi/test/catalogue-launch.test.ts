@@ -29,6 +29,7 @@ describe("catalogue and launch", () => {
       ["--adapter", "FACTORY_API_KEY=x"],
       ["--route", "deep=acp:FACTORY_API_KEY=x"],
     ]) expect(() => assertNoCredentialArgs(args)).toThrow("credential-bearing target argv is forbidden");
+    expect(() => assertNoCredentialArgs(["--persona", "token-team", "--realize", "deep=api-key-auditor"])).not.toThrow();
   });
   it("negotiates v3 input sources, upgrades v1 inputs, and preserves exact help", async () => {
     const { directory, config } = await setup();
@@ -88,6 +89,7 @@ describe("catalogue and launch", () => {
     const work = await readRouting(v3Runner, directory, { persona: "work", mode: "offline" });
     expect(work?.persona).toEqual({ name: "work", source: "command-line" });
     expect(work?.availableModels).toEqual([{ alias: "work-model", engine: "work-engine" }]);
+    expect(await readRouting({ ...config, prefixArgs: ["--descriptor-v3-v1-routing"] }, directory)).toBeUndefined();
     await expect(readRouting({ ...config, prefixArgs: ["--descriptor-v3-unsafe"] }, directory)).rejects.toThrow("forbidden field secrets");
     await expect(readRouting({ ...config, prefixArgs: ["--descriptor-v3-unsafe-case"] }, directory)).rejects.toThrow("forbidden field api_Key");
     await expect(readRouting({ ...config, prefixArgs: ["--descriptor-v3-unsafe-url"] }, directory)).rejects.toThrow("forbidden field endpointUrl");

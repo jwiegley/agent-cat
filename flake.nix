@@ -20,9 +20,13 @@
           p.async
           p.brick
           p.crypton
+          p.crypton-connection
+          p.crypton-x509-store
           p.http-client
           p.http-client-tls
+          p.libyaml
           p.QuickCheck
+          p.tls
           p.vty
           p."vty-unix"
           p.yaml
@@ -32,6 +36,8 @@
           buildInputs = [
             ghc
             pkgs.cabal-install
+            # Test-only: generate an ephemeral loopback TLS certificate.
+            pkgs.openssl
           ];
         };
       });

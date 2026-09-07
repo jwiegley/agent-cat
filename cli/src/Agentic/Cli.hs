@@ -801,19 +801,22 @@ data RunRoutes = RunRoutes
 executionRoutes :: RunRoutes -> Routes EngineRoute
 executionRoutes rr =
   routes
-    (EngineRoute Nothing False (routeDefault (rrRoutes rr)))
-    [ (axis, routeFor axis backend)
+    (routeFor Nothing (routeDefault (rrRoutes rr)))
+    [ (axis, routeFor (Just axis) backend)
       | (axis, backend) <- routeNamed (rrRoutes rr)
     ]
   where
     routeFor axis backend =
-      EngineRoute
-        { engineRouteAlias = case (rrSelectedRoutingV2 rr, backend, Map.lookup axis (rrRealizations rr)) of
-            (Just _, BackendAcp _, Just realization) -> Just (routerName (resolvedRouter realization))
-            _ -> Nothing,
-          engineRouteManaged = isJust (rrSelectedRoutingV2 rr) && Map.member axis (rrRealizations rr),
-          engineRouteBackend = backend
-        }
+      let realization = axis >>= (`Map.lookup` rrRealizations rr)
+       in EngineRoute
+            { engineRouteAlias = case (rrSelectedRoutingV2 rr, backend, realization) of
+                (Just _, BackendAcp _, Just configured) -> Just (routerName (resolvedRouter configured))
+                _ -> Nothing,
+              engineRouteManaged = isJust (rrSelectedRoutingV2 rr) && case backend of
+                BackendAcp _ -> isJust realization
+                BackendDeck _ -> any ((== backend) . resolvedBackend) (Map.elems (rrRealizations rr)),
+              engineRouteBackend = backend
+            }
 
 engineRouteSpelling :: EngineRoute -> Text
 engineRouteSpelling route =
@@ -2471,7 +2474,7 @@ validateLineage options lineage parentDirectory edits name target prog = do
           && manifestRunnerVersion parentManifest == runnerVersion
           && manifestProgram parentManifest == program
           && manifestTarget parentManifest == targetLabel effectiveTarget
-          && manifestPolicy parentManifest == targetPolicy effectiveTarget
+          && lineagePolicy (manifestPolicy parentManifest) == lineagePolicy (targetPolicy effectiveTarget)
       checkpointMatches checkpoint = checkpointProgram checkpoint == manifestProgram parentManifest
       requireCheckpoint =
         readCheckpoint parentDirectory >>= maybe (ioError (userError "parent run has no compatible checkpoint")) pure
@@ -2864,6 +2867,26 @@ targetPolicy (Routed rr) = case rrSelectedRoutingV2 rr of
         "realizations" .= map resolvedRealizationPolicy (Map.elems (rrRealizations rr)),
         "verbose" .= rrVerbose rr
       ]
+lineagePolicy :: Value -> Value
+lineagePolicy (Object policy) =
+  Object
+    ( update "realizations" normalizeRealizations
+        (KM.delete "policyDigest" policy)
+    )
+  where
+    normalizeRealizations (Array realizations) = Array (fmap normalizeRealization realizations)
+    normalizeRealizations value = value
+    normalizeRealization (Object realization) =
+      Object (update "inventory" normalizeInventory realization)
+    normalizeRealization value = value
+    normalizeInventory (Object inventory) =
+      Object (foldr KM.delete inventory ["source", "fetchedAt", "cacheAgeSeconds", "warning"])
+    normalizeInventory value = value
+    update key transform values =
+      case KM.lookup key values of
+        Nothing -> values
+        Just value -> KM.insert key (transform value) values
+lineagePolicy value = value
 
 redactAdapterArgs :: [String] -> [Text]
 redactAdapterArgs = go False
@@ -3239,6 +3262,7 @@ parseCommand reg = \case
         | otherwise -> routingOptions rendering persona DiscoveryRefresh rest
       ["--persona"] -> Left "--persona takes a name"
       flag : _ -> Left ("no option '" <> flag <> "' for --routing")
+
 
     lineageCommand lineage runIdText parent name rest = do
       runId <- mkRunId runIdText

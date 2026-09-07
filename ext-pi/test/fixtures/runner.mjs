@@ -22,6 +22,7 @@ const descriptorInputs = {
   "--descriptor-legacy-reject-v3": ["subject"],
   "--descriptor-v3-error": ["subject"],
   "--descriptor-v2": [{ name: "subject", source: "prompt" }],
+  "--descriptor-v3-v1-routing": [{ name: "subject", source: "prompt" }],
   "--descriptor-v3": [{ name: "subject", source: "prompt" }],
   "--descriptor-v3-auto": [{ name: "subject", source: "prompt" }],
   "--descriptor-v3-unsafe": [{ name: "subject", source: "prompt" }],
@@ -44,7 +45,7 @@ const descriptor = {
     structuredRun: true, wholeRunCancel: true, requestControls: false, semanticResume: false,
     consults: 1, observes: 0, effects: 0, effectful: false, toolExecution: false,
     ...(["--descriptor-v1", "--descriptor-legacy-reject-v3", "--descriptor-stdin-no-control"].includes(descriptorMode) ? {} : { controlFd: 3 }),
-    ...(["--descriptor-v3", "--descriptor-v3-unsafe", "--descriptor-v3-unsafe-case", "--descriptor-v3-unsafe-url"].includes(descriptorMode) ? {
+    ...(["--descriptor-v3", "--descriptor-v3-v1-routing", "--descriptor-v3-unsafe", "--descriptor-v3-unsafe-case", "--descriptor-v3-unsafe-url"].includes(descriptorMode) ? {
       protocolNegotiation: true, routingInspection: true, routingJsonVersion: 2,
       personaRouting: true, modelAliasRouting: true,
     } : {}),
@@ -72,7 +73,9 @@ if (args[0] === "--routing" && args[1] === "--json") {
   const personaIndex = args.indexOf("--persona");
   const persona = personaIndex >= 0 ? args[personaIndex + 1] : "personal";
   const alias = persona === "work" ? "work-model" : "personal-model";
-  const value = {
+  const value = descriptorMode === "--descriptor-v3-v1-routing"
+    ? { version: 1, profiles: [{ options: { url: "opaque-v1-option" } }] }
+    : {
     version: 2,
     persona: { name: persona, source: personaIndex >= 0 ? "command-line" : "user-default" },
     availablePersonas: ["personal", "work"],

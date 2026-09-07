@@ -1,8 +1,8 @@
 # Persona-aware model routing, version 2
 
-Status: implemented runtime contract; only the future Brick routing pane is deferred.
+Status: implemented routing contract for the CLI, Pi, and terminal frontends.
 
-Last checked: 2026-09-03.
+Last checked: 2026-09-06.
 
 ## 1. Decision
 
@@ -52,7 +52,7 @@ ACP preflight opens a throwaway session, checks advertised model/thinking/output
 
 ## 4. Trust-separated files
 
-Version 2 preserves the two-file discovery order but gives each layer a different authority.
+Version 2 preserves the two-file discovery order but gives each layer a different authority. Discovery assigns the user or project role from the path before decoding, so a user-shaped project document cannot acquire user authority. Untagged version-2 input is refused.
 
 ### 4.1 User layer
 
@@ -278,11 +278,11 @@ A `deck:` engine must omit `environment`: the selected Agent Deck session was cr
 - `openai`: an object with `object: "list"` and a `data` array containing unique model objects with `id`, optional numeric `created`, and optional `owned_by`; and
 - `anthropic`: cursor-paginated objects with `data`, `has_more`, `first_id`, and `last_id`, whose models carry `id`, optional `created_at`, display name, limits, and capability metadata.
 
-`url` is complete, not a base to which hidden path rules are applied. HTTPS is required whenever `auth` is present; plain HTTP is accepted only without authentication and only for a literal IPv4 `127/8` or IPv6 `::1` address. The URL contains no user-info component, fragment, or credential-shaped query key. Redirects are disabled by default; a later option may permit same-origin redirects if a demonstrated endpoint requires them.
+`url` is complete, not a base to which hidden path rules are applied. HTTPS is required whenever `auth` is present. Plain HTTP is accepted only without authentication and only for a valid literal IPv4 `127/8` or IPv6 `::1` address. User-info, fragments, malformed percent encoding, and credential-shaped query keys are refused. Query keys are decoded before validation, and redirects are disabled.
 
-`auth` supplies one header from a secret reference. `scheme: bearer` prefixes the value with `Bearer `; absence of `scheme` sends the raw value, as Anthropic's `x-api-key` requires. Literal values are forbidden for credential-shaped headers. Additional `headers` are limited to 64 non-sensitive RFC-token names; each value is at most 8,192 UTF-8 bytes and contains no control/newline; all literal names and values together are at most 61,440 bytes. The auth header cannot be duplicated among them.
+`auth` supplies one header from a secret reference. `scheme: bearer` prefixes the value with `Bearer `, while absence of `scheme` sends the raw value required by Anthropic's `x-api-key`. Literal values are forbidden for credential-shaped headers. The complete explicit header set, including resolved authentication and the generated request identifier, is limited to 64 entries and 61,440 aggregate UTF-8 bytes. Each value is at most 8,192 bytes and contains no control characters. The auth header cannot duplicate a literal header.
 
-`timeout-ms` is in `1..60000`; `max-bytes` is in `1..4194304`. Discovery is further bounded to 100 pages, 10,000 models, and 512 UTF-8 bytes per id. Cache durations are positive integer `s`, `m`, `h`, or `d` values no greater than one year, and `stale-if-error` is not shorter than `fresh-for`. Values outside these maxima are refused at decode time rather than trusted to exhaust memory later.
+URLs are limited to 8,192 UTF-8 bytes, with at most 4,096 query bytes and 64 query items. Final requests are checked again after pagination parameters and headers are added. `timeout-ms` is in `1..60000`, and `max-bytes` is in `1..4194304`. Discovery is further bounded to 100 pages, 10,000 models, and 512 UTF-8 bytes per id. Cache durations are positive integer `s`, `m`, `h`, or `d` values no greater than one year, and `stale-if-error` is not shorter than `fresh-for`. Values outside these maxima are refused rather than trusted to exhaust memory later.
 
 A discovered id is non-empty, has no leading/trailing or embedded whitespace, and contains no Unicode control or format character. It otherwise remains opaque; punctuation such as `/`, `:`, `.`, `_`, `+`, and `-` is not assigned semantics by the parser.
 
@@ -487,7 +487,7 @@ The machine run manifest's policy includes the following fields plus a canonical
 }
 ```
 
-This is non-secret and makes a run explainable. The execution fingerprint covers engine alias, backend, provider, environment destination names, non-secret literal values, secret-reference names, and their source-variable names; it never includes resolved secret values. Semantic resume compares the frozen policy exactly, so changing a persona, exact model, endpoint configuration, or settings refuses resume. Rotating the value behind an unchanged secret reference does not change the policy. Restart remains available.
+This non-secret projection explains a run. The execution fingerprint covers engine alias, backend, provider, environment destination names, non-secret literal values, secret-reference names, and their source-variable names. It never includes resolved secret values. Semantic resume compares the stable execution projection, excluding only observation-time inventory source, fetch time, cache age, warning, and the full-snapshot digest derived from those fields. Persona, exact model, endpoint fingerprint, settings, and execution identity remain significant. Rotating a value behind an unchanged secret reference does not change the policy. Cache identity separately covers the complete non-secret engine definition and catalogue policy.
 
 ## 11. Worked outcomes
 
@@ -741,7 +741,7 @@ Version 1 support remains intact. Rollback consists of restoring version-1 files
 4. **Complete:** bounded discovery/cache with deterministic local servers.
 5. **Complete:** frozen persisted policy, digest, and lineage comparison.
 6. **Complete:** inspection, migration, persona/cache options, and model-alias overrides.
-7. **Complete for ext-pi; deferred for TUI:** both consume the same sanitized output, but no Brick code exists yet.
+7. **Complete:** ext-pi and the terminal frontend consume the same sanitized routing output.
 8. **In verification:** examples, manual, source-boundary checks, and downstream compatibility gates.
 
 Every stage retains the non-paid ACP/deck fixtures and existing v1 routing probe.

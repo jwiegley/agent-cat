@@ -37,6 +37,13 @@ import System.Process
     terminateProcess,
     waitForProcess,
   )
+import Data.X509.CertificateStore (readCertificateStore)
+import Network.Connection (TLSSettings (TLSSettings))
+import Network.HTTP.Client (Manager, newManager)
+import Network.HTTP.Client.TLS (mkManagerSettings)
+import Network.TLS (ClientParams (clientShared), Shared (sharedCAStore), defaultParamsClient)
+import System.Directory (createDirectoryLink)
+import System.Exit (ExitCode (..))
 
 check :: IORef Int -> Text -> Bool -> IO ()
 check failures label holds =
@@ -56,13 +63,29 @@ main = do
   let portFile = marker </> "port"
       countFile = marker </> "count"
       controlFile = marker </> "control"
+      tlsPortFile = marker </> "tls-port"
+      tlsCountFile = marker </> "tls-count"
+      tlsControlFile = marker </> "tls-control"
+      certificateFile = marker </> "certificate.pem"
+      keyFile = marker </> "key.pem"
       cacheHome = marker </> "cache"
       serverScript = root </> "cli/test/model_catalogue_server.py"
   writeFile controlFile ""
-  bracket
-    (startServer serverScript portFile countFile controlFile)
-    stopServer
-    (\_ -> runChecks failures marker cacheHome portFile countFile controlFile)
+  writeFile tlsControlFile ""
+  generateCertificate certificateFile keyFile
+  ( bracket
+      (startServer serverScript portFile countFile controlFile)
+      stopServer
+      ( \_ ->
+          bracket
+            (startTlsServer serverScript tlsPortFile tlsCountFile tlsControlFile certificateFile keyFile)
+            stopServer
+            ( \_ -> do
+                tlsManager <- trustedTlsManager certificateFile
+                runChecks failures marker cacheHome portFile countFile controlFile tlsPortFile tlsCountFile tlsManager
+            )
+      )
+    )
     `finally` removePathForcibly marker
   count <- readIORef failures
   if count == 0
@@ -70,16 +93,52 @@ main = do
     else TIO.putStrLn ("routing discovery probe: " <> T.pack (show count) <> " failed") >> exitFailure
 
 startServer :: FilePath -> FilePath -> FilePath -> FilePath -> IO ProcessHandle
-startServer script portFile countFile controlFile = do
+startServer script portFile countFile controlFile =
+  startServerWith script portFile countFile controlFile []
+
+startTlsServer :: FilePath -> FilePath -> FilePath -> FilePath -> FilePath -> FilePath -> IO ProcessHandle
+startTlsServer script portFile countFile controlFile certificateFile keyFile =
+  startServerWith script portFile countFile controlFile [certificateFile, keyFile]
+
+startServerWith :: FilePath -> FilePath -> FilePath -> FilePath -> [FilePath] -> IO ProcessHandle
+startServerWith script portFile countFile controlFile extraArguments = do
   (_, _, _, process) <-
     createProcess
-      (proc "python3" [script, portFile, countFile, controlFile])
+      (proc "python3" ([script, portFile, countFile, controlFile] <> extraArguments))
         { std_in = NoStream,
           std_out = NoStream,
           std_err = Inherit
         }
   waitForFile 1000 portFile
   pure process
+
+generateCertificate :: FilePath -> FilePath -> IO ()
+generateCertificate certificateFile keyFile = do
+  (_, _, _, process) <-
+    createProcess
+      ( proc
+          "openssl"
+          [ "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-sha256",
+            "-keyout", keyFile, "-out", certificateFile, "-days", "1",
+            "-subj", "/CN=127.0.0.1",
+            "-addext", "subjectAltName=IP:127.0.0.1",
+            "-addext", "basicConstraints=critical,CA:TRUE",
+            "-addext", "keyUsage=critical,digitalSignature,keyEncipherment,keyCertSign",
+            "-addext", "extendedKeyUsage=serverAuth"
+          ]
+      )
+        { std_in = NoStream, std_out = NoStream, std_err = NoStream }
+  exitCode <- waitForProcess process
+  case exitCode of
+    ExitSuccess -> pure ()
+    ExitFailure code -> ioError (userError ("openssl certificate fixture failed with exit " <> show code))
+
+trustedTlsManager :: FilePath -> IO Manager
+trustedTlsManager certificateFile = do
+  store <- readCertificateStore certificateFile >>= maybe (ioError (userError "cannot read generated TLS certificate")) pure
+  let defaults = defaultParamsClient "127.0.0.1" ""
+      parameters = defaults {clientShared = (clientShared defaults) {sharedCAStore = store}}
+  newManager (mkManagerSettings (TLSSettings parameters) Nothing)
 
 stopServer :: ProcessHandle -> IO ()
 stopServer process = terminateProcess process >> waitForProcess process >> pure ()
@@ -90,8 +149,8 @@ waitForFile attempts path = do
   present <- doesFileExist path
   if present then pure () else threadDelay 10000 >> waitForFile (attempts - 1) path
 
-runChecks :: IORef Int -> FilePath -> FilePath -> FilePath -> FilePath -> FilePath -> IO ()
-runChecks failures temporary cacheHome portFile countFile controlFile = do
+runChecks :: IORef Int -> FilePath -> FilePath -> FilePath -> FilePath -> FilePath -> FilePath -> FilePath -> Manager -> IO ()
+runChecks failures temporary cacheHome portFile countFile controlFile tlsPortFile tlsCountFile tlsManager = do
   port <- readIntFile portFile
   let now = read "2026-03-01 00:00:00 UTC" :: UTCTime
       oneHour = addUTCTime 3600 now
@@ -110,8 +169,13 @@ runChecks failures temporary cacheHome portFile countFile controlFile = do
               && fmap frozenInventorySource (inventoryResultInventory result) == Just InventoryFresh
               && fmap selectedModelId (resolveAlias selected result) == Right "gpt-sol-a"
           Left _ -> False
-      let fingerprint = engineCatalogueFingerprint "engine" engine
-          path = cacheFileFor cacheHome "p" fingerprint
+      let endpointFingerprint = engineCatalogueFingerprint "engine" engine
+          engineFingerprint = engineDefinitionFingerprint (selectedRoutingV2 selected) "engine" engine
+          path = cacheFileFor cacheHome "p" engineFingerprint
+      check failures "selection provenance keeps endpoint fingerprint separate from cache identity" $
+        case first >>= lookupInventory of
+          Right result -> inventoryResultFingerprint result == Just endpointFingerprint
+          Left _ -> False
       cachePresent <- doesFileExist path
       mode <- if cachePresent then fileMode <$> getFileStatus path else pure 0
       bytes <- if cachePresent then BS.readFile path else pure BS.empty
@@ -162,16 +226,34 @@ runChecks failures temporary cacheHome portFile countFile controlFile = do
         countAfterRepair == countAfterRefresh + 1
           && sourceOf repaired == Just InventoryFresh
           && warningOf repaired == Just "cache-corrupt"
+      BS.writeFile path (BS.replicate (8 * 1024 * 1024 + 1) 120)
+      oversized <- discoverRoutingInventories DiscoveryNormal cacheHome twoDays selected contexts ["engine"]
+      countAfterOversized <- readCount countFile
+      check failures "oversized cache is rejected before JSON allocation and refreshed" $
+        countAfterOversized == countAfterRepair + 1
+          && sourceOf oversized == Just InventoryFresh
+          && warningOf oversized == Just "cache-too-large"
       setFileMode path 0o644
       privateAgain <- discoverRoutingInventories DiscoveryNormal cacheHome (addUTCTime 3600 twoDays) selected contexts ["engine"]
       countAfterPrivate <- readCount countFile
       repairedMode <- fileMode <$> getFileStatus path
       leftovers <- filter (T.isPrefixOf ".inventory.tmp" . T.pack . takeFileName) <$> listDirectory (takeDirectory path)
       check failures "insecure cache permissions force refresh; atomic rewrite restores 0600" $
-        countAfterPrivate == countAfterRepair + 1
+        countAfterPrivate == countAfterOversized + 1
           && warningOf privateAgain == Just "cache-permissions-are-not-private"
           && repairedMode .&. 0o077 == 0
           && null leftovers
+
+      let unsafeCache = temporary </> "symlink-cache"
+          outsideCache = temporary </> "symlink-target"
+      createDirectory unsafeCache
+      createDirectory outsideCache
+      createDirectoryLink outsideCache (unsafeCache </> "agent-cat")
+      symlinked <- discoverRoutingInventories DiscoveryRefresh unsafeCache twoDays selected contexts ["engine"]
+      outsideEntries <- listDirectory outsideCache
+      check failures "cache reads and writes refuse symlinked managed directories" $
+        maybe False (\warning -> "cache-directory-unsafe" `T.isInfixOf` warning && "cache-write-failed" `T.isInfixOf` warning) (warningOf symlinked)
+          && null outsideEntries
 
       let otherPersona = fixture port "openai" CatalogueOpenAI 5000 4194304 "other"
       case otherPersona of
@@ -183,7 +265,23 @@ runChecks failures temporary cacheHome portFile countFile controlFile = do
           check failures "cache cannot cross persona directories" $
             before == after
               && sourceOf isolated == Nothing
-              && cacheFileFor cacheHome "p" fingerprint /= cacheFileFor cacheHome "other" fingerprint
+              && cacheFileFor cacheHome "p" engineFingerprint /= cacheFileFor cacheHome "other" engineFingerprint
+
+      let changedEngine = engine {engineEnvironment = Map.singleton "PROFILE_HOME" (EnvironmentValue "/tmp/other-profile")}
+          changedConfig = (selectedRoutingV2 selected) {routingV2Engines = Map.insert "engine" changedEngine (routingV2Engines (selectedRoutingV2 selected))}
+          changedSelected = selected {selectedRoutingV2 = changedConfig}
+          changedFingerprint = engineDefinitionFingerprint changedConfig "engine" changedEngine
+      case resolveEngineContexts changedSelected ["engine"] Map.empty of
+        Left problem -> check failures ("changed engine context resolves: " <> problem) False
+        Right changedContexts -> do
+          before <- readCount countFile
+          changedOffline <- discoverRoutingInventories DiscoveryOffline cacheHome twoDays changedSelected changedContexts ["engine"]
+          after <- readCount countFile
+          check failures "cache identity includes the complete non-secret engine definition" $
+            before == after
+              && sourceOf changedOffline == Nothing
+              && engineFingerprint /= changedFingerprint
+              && cacheFileFor cacheHome "p" engineFingerprint /= cacheFileFor cacheHome "p" changedFingerprint
 
   writeFile controlFile ""
   let anthropic = fixture port "anthropic" CatalogueAnthropic 5000 4194304 "p"
@@ -203,6 +301,7 @@ runChecks failures temporary cacheHome portFile countFile controlFile = do
   checkFailure failures port temporary countFile "non-200 status is classified without response details" "status" CatalogueOpenAI 5000 4194304 "http-status-503"
   checkFailure failures port temporary countFile "malformed JSON is refused" "malformed" CatalogueOpenAI 5000 4194304 "openai-response-malformed"
   checkFailure failures port temporary countFile "response body bound stops oversized payloads" "large" CatalogueOpenAI 5000 128 "response-too-large"
+  checkFailure failures port temporary countFile "chunked response streaming stops at the body bound" "chunked-large" CatalogueOpenAI 5000 128 "response-too-large"
   checkFailure failures port temporary countFile "duplicate model ids are refused" "duplicate" CatalogueOpenAI 5000 4194304 "duplicate-model-id"
   checkFailure failures port temporary countFile "model count is bounded" "too-many" CatalogueOpenAI 5000 4194304 "openai-response-malformed"
   checkFailure failures port temporary countFile "model ids are bounded to 512 UTF-8 bytes" "large-id" CatalogueOpenAI 5000 4194304 "model inventory id exceeds 512"
@@ -210,6 +309,14 @@ runChecks failures temporary cacheHome portFile countFile controlFile = do
   checkFailure failures port temporary countFile "response timeout is enforced" "slow" CatalogueOpenAI 50 4194304 "network-error"
   checkFailure failures port temporary countFile "pagination must advance" "anthropic-loop" CatalogueAnthropic 5000 4194304 "pagination-did-not-advance"
   checkFailure failures port temporary countFile "duplicate ids across pages are refused" "anthropic-duplicate" CatalogueAnthropic 5000 4194304 "duplicate-model-id"
+  checkFailure failures port temporary countFile "nonempty Anthropic pages require matching first/last ids" "anthropic-missing-bounds" CatalogueAnthropic 5000 4194304 "anthropic-response-malformed"
+  let itemBoundEndpoint = "anthropic?" <> T.intercalate "&" ["p" <> T.pack (show index) <> "=x" | index <- [1 :: Int .. 64]]
+      byteBoundEndpoint = "anthropic?pad=" <> T.replicate 4082 "x"
+      urlPrefix = "http://127.0.0.1:" <> T.pack (show port) <> "/"
+      urlBoundEndpoint = T.replicate (maxCatalogueUrlBytes - BS.length (encodeUtf8 urlPrefix)) "a"
+  checkSynthesizedRequestBound failures port temporary countFile "Anthropic pagination cannot exceed final query-item bound" itemBoundEndpoint "request-query-item-limit"
+  checkSynthesizedRequestBound failures port temporary countFile "Anthropic pagination cannot exceed final query-byte bound" byteBoundEndpoint "request-query-byte-limit"
+  checkSynthesizedRequestBound failures port temporary countFile "Anthropic pagination cannot exceed final URL bound" urlBoundEndpoint "request-url-limit"
 
   let pages = fixture port "anthropic-pages" CatalogueAnthropic 5000 4194304 "p"
   case pages of
@@ -229,13 +336,85 @@ runChecks failures temporary cacheHome portFile countFile controlFile = do
       check failures "HTTPS uses the verifying TLS manager and never downgrades to loopback HTTP" $
         either (T.isInfixOf "discovery failed: network-error") (const False) result
 
-  let baseEngine = either (const Nothing) (Just . third) (fixture port "openai" CatalogueOpenAI 5000 4194304 "p")
-      changedEngine = either (const Nothing) (Just . third) (fixture port "status" CatalogueOpenAI 5000 4194304 "p")
-  check failures "endpoint fingerprint is stable and changes with catalogue definition" $
-    case (baseEngine, changedEngine) of
-      (Just firstEngine, Just secondEngine) ->
+  tlsPort <- readIntFile tlsPortFile
+  tlsBefore <- readCount tlsCountFile
+  case authenticatedFixture tlsPort CatalogueOpenAI of
+    Left problem -> check failures ("authenticated OpenAI TLS fixture: " <> problem) False
+    Right (selected, contexts, engine) -> do
+      untrusted <- discoverRoutingInventories DiscoveryRefresh (temporary </> "untrusted-openai-cache") now selected contexts ["engine"]
+      check failures "standard TLS manager rejects an untrusted local certificate" $
+        either (T.isInfixOf "discovery failed: network-error") (const False) untrusted
+      case resolveEngineContexts selected ["engine"] (Map.singleton "FIXTURE_CATALOGUE_SECRET" (replicate 8193 's')) of
+        Left problem -> check failures ("oversized auth context resolves: " <> problem) False
+        Right oversizedContexts -> do
+          before <- readCount tlsCountFile
+          oversized <- discoverRoutingInventoriesWithManager (Just tlsManager) DiscoveryRefresh (temporary </> "oversized-auth-cache") now selected oversizedContexts ["engine"]
+          after <- readCount tlsCountFile
+          check failures "resolved authentication headers are bounded before request" $
+            before == after
+              && either (T.isInfixOf "discovery failed: request-header-value-limit") (const False) oversized
+      case engineCatalogue engine of
+        Nothing -> check failures "authenticated catalogue remains available" False
+        Just catalogue -> do
+          let crowdedEngine = engine {engineCatalogue = Just catalogue {catalogueHeaders = Map.fromList [("x-fixture-" <> T.pack (show index), "v") | index <- [1 :: Int .. 63]]}}
+              crowdedConfig = (selectedRoutingV2 selected) {routingV2Engines = Map.insert "engine" crowdedEngine (routingV2Engines (selectedRoutingV2 selected))}
+              crowdedSelected = selected {selectedRoutingV2 = crowdedConfig}
+          case resolveEngineContexts crowdedSelected ["engine"] (Map.singleton "FIXTURE_CATALOGUE_SECRET" "fixture-secret") of
+            Left problem -> check failures ("crowded header context resolves: " <> problem) False
+            Right crowdedContexts -> do
+              before <- readCount tlsCountFile
+              crowded <- discoverRoutingInventoriesWithManager (Just tlsManager) DiscoveryRefresh (temporary </> "crowded-header-cache") now crowdedSelected crowdedContexts ["engine"]
+              after <- readCount tlsCountFile
+              check failures "literal, auth, and generated headers share the final count bound" $
+                before == after
+                  && either (T.isInfixOf "discovery failed: request-header-count-limit") (const False) crowded
+          let aggregateEngine = engine {engineCatalogue = Just catalogue {catalogueHeaders = Map.fromList [("x-large-" <> T.pack (show index), T.replicate 8000 "x") | index <- [1 :: Int .. 7]]}}
+              aggregateConfig = (selectedRoutingV2 selected) {routingV2Engines = Map.insert "engine" aggregateEngine (routingV2Engines (selectedRoutingV2 selected))}
+              aggregateSelected = selected {selectedRoutingV2 = aggregateConfig}
+          case resolveEngineContexts aggregateSelected ["engine"] (Map.singleton "FIXTURE_CATALOGUE_SECRET" (replicate 6000 's')) of
+            Left problem -> check failures ("aggregate header context resolves: " <> problem) False
+            Right aggregateContexts -> do
+              before <- readCount tlsCountFile
+              aggregate <- discoverRoutingInventoriesWithManager (Just tlsManager) DiscoveryRefresh (temporary </> "aggregate-header-cache") now aggregateSelected aggregateContexts ["engine"]
+              after <- readCount tlsCountFile
+              check failures "literal and resolved authentication headers share the final byte bound" $
+                before == after
+                  && either (T.isInfixOf "discovery failed: request-header-byte-limit") (const False) aggregate
+      result <- discoverRoutingInventoriesWithManager (Just tlsManager) DiscoveryRefresh (temporary </> "authenticated-openai-cache") now selected contexts ["engine"]
+      tlsAfterOpenAI <- readCount tlsCountFile
+      let engineFingerprint = engineDefinitionFingerprint (selectedRoutingV2 selected) "engine" engine
+          cachePath = cacheFileFor (temporary </> "authenticated-openai-cache") "p" engineFingerprint
+      cacheBytes <- BS.readFile cachePath
+      check failures "trusted local TLS sends bearer auth and selects OpenAI inventory" $
+        tlsAfterOpenAI == tlsBefore + 1
+          && sourceOf result == Just InventoryFresh
+          && case result >>= lookupInventory of
+            Right inventory -> fmap selectedModelId (resolveAlias selected inventory) == Right "gpt-sol-a"
+            Left _ -> False
+      check failures "authenticated cache stores fingerprints but no secret or endpoint" $
+        not ("fixture-secret" `BS.isInfixOf` cacheBytes)
+          && not ("127.0.0.1" `BS.isInfixOf` cacheBytes)
+  case authenticatedFixture tlsPort CatalogueAnthropic of
+    Left problem -> check failures ("authenticated Anthropic TLS fixture: " <> problem) False
+    Right (selected, contexts, _) -> do
+      before <- readCount tlsCountFile
+      result <- discoverRoutingInventoriesWithManager (Just tlsManager) DiscoveryRefresh (temporary </> "authenticated-anthropic-cache") now selected contexts ["engine"]
+      after <- readCount tlsCountFile
+      check failures "trusted local TLS sends raw x-api-key auth across Anthropic pagination" $
+        after == before + 2
+          && case result >>= lookupInventory of
+            Right inventory -> fmap selectedModelId (resolveAlias selected inventory) == Right "claude-a"
+            Left _ -> False
+
+  let baseFixture = fixture port "openai" CatalogueOpenAI 5000 4194304 "p"
+      changedFixture = fixture port "status" CatalogueOpenAI 5000 4194304 "p"
+  check failures "endpoint and complete engine fingerprints are stable and definition-sensitive" $
+    case (baseFixture, changedFixture) of
+      (Right (firstSelected, _, firstEngine), Right (secondSelected, _, secondEngine)) ->
         engineCatalogueFingerprint "engine" firstEngine == engineCatalogueFingerprint "engine" firstEngine
           && engineCatalogueFingerprint "engine" firstEngine /= engineCatalogueFingerprint "engine" secondEngine
+          && engineDefinitionFingerprint (selectedRoutingV2 firstSelected) "engine" firstEngine
+            /= engineDefinitionFingerprint (selectedRoutingV2 secondSelected) "engine" secondEngine
       _ -> False
 
 checkFailure :: IORef Int -> Int -> FilePath -> FilePath -> Text -> Text -> CatalogueDialect -> Int -> Int -> Text -> IO ()
@@ -245,6 +424,39 @@ checkFailure failures port temporary _ label endpoint dialect timeoutMs maximumB
     Right (selected, contexts, _) -> do
       result <- discoverRoutingInventories DiscoveryNormal (temporary </> "failure-" <> T.unpack endpoint) (read "2026-03-01 00:00:00 UTC") selected contexts ["engine"]
       check failures label $ maybe False (T.isInfixOf expected) (warningOf result)
+
+checkSynthesizedRequestBound :: IORef Int -> Int -> FilePath -> FilePath -> Text -> Text -> Text -> IO ()
+checkSynthesizedRequestBound failures port temporary countFile label endpoint expected =
+  case fixture port endpoint CatalogueAnthropic 5000 4194304 "p" of
+    Left problem -> check failures (label <> " (fixture: " <> problem <> ")") False
+    Right (selected, contexts, _) -> do
+      before <- readCount countFile
+      result <- discoverRoutingInventories DiscoveryRefresh (temporary </> "synthesized-" <> T.unpack expected) (read "2026-03-01 00:00:00 UTC") selected contexts ["engine"]
+      after <- readCount countFile
+      check failures label $
+        before == after && either (T.isInfixOf ("discovery failed: " <> expected)) (const False) result
+
+authenticatedFixture :: Int -> CatalogueDialect -> Either Text (SelectedRoutingV2, Map.Map Text ResolvedEngineContext, EngineDefinition)
+authenticatedFixture port dialect = do
+  (selected, _, engine) <- fixtureWithScheme "https" port endpoint dialect 5000 4194304 "p"
+  catalogue <- maybe (Left "authenticated fixture catalogue missing") Right (engineCatalogue engine)
+  let secretName = "fixture-auth"
+      auth = case dialect of
+        CatalogueOpenAI -> CatalogueAuth "authorization" CatalogueAuthBearer secretName
+        CatalogueAnthropic -> CatalogueAuth "x-api-key" CatalogueAuthRaw secretName
+      authenticatedEngine = engine {engineCatalogue = Just catalogue {catalogueAuth = Just auth}}
+      config =
+        (selectedRoutingV2 selected)
+          { routingV2Secrets = Map.singleton secretName (SecretEnvironment "FIXTURE_CATALOGUE_SECRET"),
+            routingV2Engines = Map.insert "engine" authenticatedEngine (routingV2Engines (selectedRoutingV2 selected))
+          }
+      authenticatedSelected = selected {selectedRoutingV2 = config}
+  contexts <- resolveEngineContexts authenticatedSelected ["engine"] (Map.singleton "FIXTURE_CATALOGUE_SECRET" "fixture-secret")
+  pure (authenticatedSelected, contexts, authenticatedEngine)
+  where
+    endpoint = case dialect of
+      CatalogueOpenAI -> "openai"
+      CatalogueAnthropic -> "anthropic"
 
 fixture :: Int -> Text -> CatalogueDialect -> Int -> Int -> Text -> Either Text (SelectedRoutingV2, Map.Map Text ResolvedEngineContext, EngineDefinition)
 fixture = fixtureWithScheme "http"
@@ -325,6 +537,7 @@ warningOf result = do
 readCount :: FilePath -> IO Int
 readCount = readIntFile
 
+
 readIntFile :: FilePath -> IO Int
 readIntFile = go (200 :: Int)
   where
@@ -334,6 +547,3 @@ readIntFile = go (200 :: Int)
       case readMaybe contents of
         Just value -> pure value
         Nothing -> threadDelay 1000 >> go (attempts - 1) path
-
-third :: (a, b, c) -> c
-third (_, _, value) = value

@@ -3,7 +3,7 @@ import { access, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import extension, { parseWorkflowCommand } from "../src/index.ts";
+import extension, { parseWorkflowCommand, routingLineageArgs } from "../src/index.ts";
 
 const created: string[] = [];
 afterEach(async () => Promise.all(created.splice(0).map((path) => rm(path, { recursive: true, force: true }))));
@@ -354,76 +354,151 @@ describe("Pi extension lifecycle", () => {
       if (previousState === undefined) delete process.env.AGENT_CAT_STATE_DIR; else process.env.AGENT_CAT_STATE_DIR = previousState;
     }
   });
+  it("extracts only explicit persona and realization choices for rebuilt lineage targets", () => {
+    expect(routingLineageArgs([
+      "--engine", "acp", "--adapter-arg", "--persona", "--route", "worker=acp:stub",
+      "--persona", "work", "--realize", "worker=work-model", "--realize", "worker#2=spare-model",
+    ])).toEqual(["--persona", "work", "--realize", "worker=work-model", "--realize", "worker#2=spare-model"]);
+    expect(routingLineageArgs(["--adapter-arg", "--persona"])).toEqual([]);
+  });
 
-  it("uses one-time grants for model starts and lineage operations", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "agent-cat-extension-tool-"));
+  it("uses descriptor-v3 sanitized routing choices and preserves them for owned-child lineage", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "agent-cat-extension-routing-v3-"));
     created.push(directory);
     const previousRunner = process.env.AGENT_CAT_RUNNER;
+    const previousRunners = process.env.AGENT_CAT_RUNNERS;
     const previousState = process.env.AGENT_CAT_STATE_DIR;
-    process.env.AGENT_CAT_RUNNER = resolve("test/fixtures/runner.mjs");
+    delete process.env.AGENT_CAT_RUNNER;
+    process.env.AGENT_CAT_RUNNERS = JSON.stringify([{
+      id: "agent-cat", executable: resolve("test/fixtures/runner.mjs"),
+      prefixArgs: ["--descriptor-v3"], allowedCwds: [directory],
+    }]);
     process.env.AGENT_CAT_STATE_DIR = join(directory, "state");
     try {
       const commands = new Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>();
       const events = new Map<string, Array<(event: unknown, ctx: unknown) => Promise<unknown>>>();
-      let tool: any;
-      let grantScope = "start";
-      const notices: string[] = [];
       const entries: unknown[] = [];
+      const selectors: string[] = [];
+      const confirmations: string[] = [];
       extension({
-        registerEntryRenderer: () => {}, registerCommand: (name: string, command: unknown) => commands.set(name, command as never),
-        registerTool: (definition: unknown) => { tool = definition; }, appendEntry: (_type: string, data: unknown) => entries.push(data), sendUserMessage: () => {},
+        registerEntryRenderer: () => {}, registerTool: () => {}, sendUserMessage: () => {},
+        registerCommand: (name: string, command: unknown) => commands.set(name, command as never),
+        appendEntry: (_type: string, data: unknown) => entries.push(data),
         on: (name: string, handler: (event: unknown, ctx: unknown) => Promise<unknown>) => events.set(name, [...(events.get(name) ?? []), handler]),
       } as never);
       const ui = {
-        select: async (title: string) => title === "One-time model grant" ? grantScope : undefined,
-        confirm: async () => true, notify: (message: string) => notices.push(message), setWidget: () => {}, setStatus: () => {},
+        select: async (title: string, choices: string[]) => {
+          selectors.push(title);
+          if (title === "Execution target") return "owned Pi child (live, agent-cat scratch, no tools)";
+          if (title === "Routing persona") return "persona: personal";
+          if (title === "Model alias for worker") return "shared-model";
+          throw new Error(`unexpected selector ${title}: ${choices.join(",")}`);
+        },
+        input: async () => undefined,
+        editor: async () => "subject",
+        confirm: async (title: string) => { confirmations.push(title); return true; },
+        notify: () => {}, setWidget: () => {}, setStatus: () => {}, custom: async () => undefined,
       };
       const ctx = { cwd: directory, mode: "tui", hasUI: true, isProjectTrusted: () => true, ui, isIdle: () => true, abort: () => {}, sessionManager: { getBranch: () => [] } };
       for (const handler of events.get("session_start") ?? []) await handler({}, ctx);
-      await commands.get("workflow-grant")!.handler("", ctx);
-      const startGrant = notices.at(-1)!.match(/grant-[0-9a-f-]+/)![0];
-      const untrustedStart = await tool.execute("untrusted-start", { action: "start", workflow: "agent-cat:fixture", inputsJson: '{"subject":"x"}', launchTarget: "scripted", grantId: startGrant }, undefined, undefined, { ...ctx, isProjectTrusted: () => false });
-      expect(untrustedStart).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("trusted project") }] });
-      const started = await tool.execute("start", { action: "start", workflow: "agent-cat:fixture", inputsJson: '{"subject":"x"}', launchTarget: "scripted", grantId: startGrant }, undefined, undefined, ctx);
-      expect(started.isError).not.toBe(true);
-      const parentRunId = started.content[0].text.match(/[0-9a-f-]{36}/)![0];
+      await commands.get("workflow")!.handler("agent-cat:fixture", ctx);
       await until(() => entries.length === 1);
-      const inspected = await tool.execute("inspect", { action: "inspect", runId: parentRunId }, undefined, undefined, ctx);
-      expect(inspected.content[0].text).toContain(parentRunId);
-      const untrustedInspect = await tool.execute("inspect-untrusted", { action: "inspect", runId: parentRunId }, undefined, undefined, { ...ctx, isProjectTrusted: () => false });
-      expect(untrustedInspect.isError).toBe(true);
-      const reusedGrant = await tool.execute("again", { action: "start", workflow: "agent-cat:fixture", inputsJson: '{"subject":"x"}', grantId: startGrant }, undefined, undefined, ctx);
-      expect(reusedGrant.isError).toBe(true);
-      grantScope = "control";
-      await commands.get("workflow-grant")!.handler("", ctx);
-      const controlGrant = notices.at(-1)!.match(/grant-[0-9a-f-]+/)![0];
-      const untrustedControl = await tool.execute("untrusted", { action: "cancel", runId: parentRunId, grantId: controlGrant }, undefined, undefined, { ...ctx, isProjectTrusted: () => false });
-      expect(untrustedControl).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("trusted project") }] });
-      const trustedControl = await tool.execute("trusted", { action: "cancel", runId: parentRunId, grantId: controlGrant }, undefined, undefined, ctx);
-      expect(trustedControl.isError).not.toBe(true);
-      grantScope = "lineage";
-      await commands.get("workflow-grant")!.handler("", ctx);
-      const lineageGrant = notices.at(-1)!.match(/grant-[0-9a-f-]+/)![0];
-      const resumed = await tool.execute("resume", { action: "resume", parentRunId, inputsJson: '{"subject":"x"}', grantId: lineageGrant }, undefined, undefined, ctx);
-      expect(resumed.isError).not.toBe(true);
+      const [runId] = await readdir(join(directory, "state", "runs"));
+      const manifestPath = join(directory, "state", "runs", runId, "supervisor-manifest.json");
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+      expect(manifest.targetKind).toBe("child");
+      expect(manifest.targetArgs.slice(-4)).toEqual([
+        "--persona", "personal", "--realize", "worker=shared-model",
+      ]);
+      expect(JSON.stringify(manifest)).not.toContain("sentinel");
+      expect((await stat(manifestPath)).mode & 0o077).toBe(0);
+      await commands.get("workflow-resume")!.handler(runId, ctx);
       await until(() => entries.length === 2);
-      await commands.get("workflow-grant")!.handler("", ctx);
-      const forkGrant = notices.at(-1)!.match(/grant-[0-9a-f-]+/)![0];
-      const forked = await tool.execute("fork", { action: "fork", parentRunId, inputsJson: '{"subject":"x"}', forkEditsJson: '[{"type":"drop","occurrenceId":"0"}]', grantId: forkGrant }, undefined, undefined, ctx);
-      expect(forked.isError).not.toBe(true);
-      const forkRunId = forked.content[0].text.match(/[0-9a-f-]{36}/)![0];
-      await until(() => entries.length === 3);
-      const forkManifest = JSON.parse(await readFile(join(directory, "state", "runs", forkRunId, "supervisor-manifest.json"), "utf8"));
-      expect(forkManifest.lineageEdits).toEqual([{ type: "drop", occurrenceId: "0" }]);
-      await commands.get("workflow-diff")!.handler(forkRunId, ctx);
-      expect(notices.at(-1)).toContain("answer edits:");
-      expect(notices.at(-1)).toContain("occurrence 0:");
+      const manifests = await Promise.all((await readdir(join(directory, "state", "runs"))).map(async (id) =>
+        JSON.parse(await readFile(join(directory, "state", "runs", id, "supervisor-manifest.json"), "utf8")),
+      ));
+      const child = manifests.find((value) => value.parentRunId === runId);
+      expect(child).toMatchObject({ targetKind: "child", lineage: "resume", parentRunId: runId });
+      expect(child.targetArgs).toEqual(manifest.targetArgs);
+      expect(selectors).toEqual(["Execution target", "Routing persona", "Model alias for worker"]);
+      expect(confirmations).not.toContain("Configure pin routes?");
       for (const handler of events.get("session_shutdown") ?? []) await handler({}, ctx);
     } finally {
       if (previousRunner === undefined) delete process.env.AGENT_CAT_RUNNER; else process.env.AGENT_CAT_RUNNER = previousRunner;
+      if (previousRunners === undefined) delete process.env.AGENT_CAT_RUNNERS; else process.env.AGENT_CAT_RUNNERS = previousRunners;
       if (previousState === undefined) delete process.env.AGENT_CAT_STATE_DIR; else process.env.AGENT_CAT_STATE_DIR = previousState;
     }
   });
+
+  it("uses one-time grants for model starts and lineage operations", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "agent-cat-extension-tool-"));
+  created.push(directory);
+  const previousRunner = process.env.AGENT_CAT_RUNNER;
+  const previousState = process.env.AGENT_CAT_STATE_DIR;
+  process.env.AGENT_CAT_RUNNER = resolve("test/fixtures/runner.mjs");
+  process.env.AGENT_CAT_STATE_DIR = join(directory, "state");
+  try {
+    const commands = new Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>();
+    const events = new Map<string, Array<(event: unknown, ctx: unknown) => Promise<unknown>>>();
+    let tool: any;
+    let grantScope = "start";
+    const notices: string[] = [];
+    const entries: unknown[] = [];
+    extension({
+      registerEntryRenderer: () => {}, registerCommand: (name: string, command: unknown) => commands.set(name, command as never),
+      registerTool: (definition: unknown) => { tool = definition; }, appendEntry: (_type: string, data: unknown) => entries.push(data), sendUserMessage: () => {},
+      on: (name: string, handler: (event: unknown, ctx: unknown) => Promise<unknown>) => events.set(name, [...(events.get(name) ?? []), handler]),
+    } as never);
+    const ui = {
+      select: async (title: string) => title === "One-time model grant" ? grantScope : undefined,
+      confirm: async () => true, notify: (message: string) => notices.push(message), setWidget: () => {}, setStatus: () => {},
+    };
+    const ctx = { cwd: directory, mode: "tui", hasUI: true, isProjectTrusted: () => true, ui, isIdle: () => true, abort: () => {}, sessionManager: { getBranch: () => [] } };
+    for (const handler of events.get("session_start") ?? []) await handler({}, ctx);
+    await commands.get("workflow-grant")!.handler("", ctx);
+    const startGrant = notices.at(-1)!.match(/grant-[0-9a-f-]+/)![0];
+    const untrustedStart = await tool.execute("untrusted-start", { action: "start", workflow: "agent-cat:fixture", inputsJson: '{"subject":"x"}', launchTarget: "scripted", grantId: startGrant }, undefined, undefined, { ...ctx, isProjectTrusted: () => false });
+    expect(untrustedStart).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("trusted project") }] });
+    const started = await tool.execute("start", { action: "start", workflow: "agent-cat:fixture", inputsJson: '{"subject":"x"}', launchTarget: "scripted", grantId: startGrant }, undefined, undefined, ctx);
+    expect(started.isError).not.toBe(true);
+    const parentRunId = started.content[0].text.match(/[0-9a-f-]{36}/)![0];
+    await until(() => entries.length === 1);
+    const inspected = await tool.execute("inspect", { action: "inspect", runId: parentRunId }, undefined, undefined, ctx);
+    expect(inspected.content[0].text).toContain(parentRunId);
+    const untrustedInspect = await tool.execute("inspect-untrusted", { action: "inspect", runId: parentRunId }, undefined, undefined, { ...ctx, isProjectTrusted: () => false });
+    expect(untrustedInspect.isError).toBe(true);
+    const reusedGrant = await tool.execute("again", { action: "start", workflow: "agent-cat:fixture", inputsJson: '{"subject":"x"}', grantId: startGrant }, undefined, undefined, ctx);
+    expect(reusedGrant.isError).toBe(true);
+    grantScope = "control";
+    await commands.get("workflow-grant")!.handler("", ctx);
+    const controlGrant = notices.at(-1)!.match(/grant-[0-9a-f-]+/)![0];
+    const untrustedControl = await tool.execute("untrusted", { action: "cancel", runId: parentRunId, grantId: controlGrant }, undefined, undefined, { ...ctx, isProjectTrusted: () => false });
+    expect(untrustedControl).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("trusted project") }] });
+    const trustedControl = await tool.execute("trusted", { action: "cancel", runId: parentRunId, grantId: controlGrant }, undefined, undefined, ctx);
+    expect(trustedControl.isError).not.toBe(true);
+    grantScope = "lineage";
+    await commands.get("workflow-grant")!.handler("", ctx);
+    const lineageGrant = notices.at(-1)!.match(/grant-[0-9a-f-]+/)![0];
+    const resumed = await tool.execute("resume", { action: "resume", parentRunId, inputsJson: '{"subject":"x"}', grantId: lineageGrant }, undefined, undefined, ctx);
+    expect(resumed.isError).not.toBe(true);
+    await until(() => entries.length === 2);
+    await commands.get("workflow-grant")!.handler("", ctx);
+    const forkGrant = notices.at(-1)!.match(/grant-[0-9a-f-]+/)![0];
+    const forked = await tool.execute("fork", { action: "fork", parentRunId, inputsJson: '{"subject":"x"}', forkEditsJson: '[{"type":"drop","occurrenceId":"0"}]', grantId: forkGrant }, undefined, undefined, ctx);
+    expect(forked.isError).not.toBe(true);
+    const forkRunId = forked.content[0].text.match(/[0-9a-f-]{36}/)![0];
+    await until(() => entries.length === 3);
+    const forkManifest = JSON.parse(await readFile(join(directory, "state", "runs", forkRunId, "supervisor-manifest.json"), "utf8"));
+    expect(forkManifest.lineageEdits).toEqual([{ type: "drop", occurrenceId: "0" }]);
+    await commands.get("workflow-diff")!.handler(forkRunId, ctx);
+    expect(notices.at(-1)).toContain("answer edits:");
+    expect(notices.at(-1)).toContain("occurrence 0:");
+    for (const handler of events.get("session_shutdown") ?? []) await handler({}, ctx);
+  } finally {
+    if (previousRunner === undefined) delete process.env.AGENT_CAT_RUNNER; else process.env.AGENT_CAT_RUNNER = previousRunner;
+    if (previousState === undefined) delete process.env.AGENT_CAT_STATE_DIR; else process.env.AGENT_CAT_STATE_DIR = previousState;
+  }
+});
 });
 
 async function until(predicate: () => boolean): Promise<void> {

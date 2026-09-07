@@ -14,7 +14,9 @@ module Agentic.RoutingDiscovery
     ModelSelectionSource (..),
     ResolvedModelSelection (..),
     discoverRoutingInventories,
+    discoverRoutingInventoriesWithManager,
     engineCatalogueFingerprint,
+    engineDefinitionFingerprint,
     sha256Fingerprint,
     cacheFileFor,
     resolveConcreteModel,
@@ -51,11 +53,11 @@ import Data.Aeson
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Aeson.Types (Parser, parseEither)
-import qualified Data.ByteArray as ByteArray
 import Data.Bits ((.&.))
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
 import Data.CaseInsensitive (mk)
+import qualified Data.CaseInsensitive as CI
 import Data.Char (GeneralCategory (Format), generalCategory, isAlphaNum, isAscii, isControl, isSpace)
 import Data.Foldable (forM_)
 import Data.List (nub, sortOn)
@@ -70,12 +72,12 @@ import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
 import Data.Time.Clock (UTCTime, diffUTCTime)
 import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
-import Data.Word (Word8)
 import Network.HTTP.Client
   ( BodyReader,
     HttpException,
     Manager,
     Request (..),
+    getUri,
     brRead,
     newManager,
     parseRequest,
@@ -86,19 +88,21 @@ import Network.HTTP.Client
     withResponse,
   )
 import Network.HTTP.Client.TLS (tlsManagerSettings)
+import Network.HTTP.Types.Header (Header)
 import Network.HTTP.Types.Status (statusCode)
-import Network.HTTP.Types.URI (parseQuery)
+import Network.HTTP.Types.URI (Query, parseQuery, renderQuery)
 import Numeric (showHex)
 import System.Directory
-  ( createDirectoryIfMissing,
+  ( createDirectory,
+    createDirectoryIfMissing,
     doesFileExist,
+    doesPathExist,
     removeFile,
     renameFile,
   )
 import System.FilePath (takeDirectory, takeFileName, (</>))
 import System.IO (hClose, hFlush, openBinaryTempFile)
-import System.IO.Error (isDoesNotExistError)
-import System.Posix.Files (fileMode, setFileMode)
+import System.Posix.Files (fileMode, fileSize, getSymbolicLinkStatus, isDirectory, isRegularFile, isSymbolicLink, setFileMode)
 
 data ModelInventoryEntry = ModelInventoryEntry
   { inventoryModelId :: !Text,
@@ -158,51 +162,58 @@ discoverRoutingInventories mode cacheHome now selected contexts required = do
   manager <- case mode of
     DiscoveryOffline -> pure Nothing
     _ -> Just <$> newManager tlsManagerSettings
+  discoverRoutingInventoriesWithManager manager mode cacheHome now selected contexts required
+
+-- | Testable acquisition boundary. Production calls this only with the standard
+-- TLS manager above; deterministic TLS fixtures supply a manager with a local CA.
+discoverRoutingInventoriesWithManager :: Maybe Manager -> DiscoveryMode -> FilePath -> UTCTime -> SelectedRoutingV2 -> Map Text ResolvedEngineContext -> [Text] -> IO (Either Text (Map Text InventoryResult))
+discoverRoutingInventoriesWithManager manager mode cacheHome now selected contexts required =
   go manager Map.empty (nub required)
   where
     config = selectedRoutingV2 selected
     personaName = selectedPersonaName selected
 
     go _ accumulated [] = pure (Right accumulated)
-    go manager accumulated (alias : rest) = case Map.lookup alias (routingV2Engines config) of
+    go activeManager accumulated (alias : rest) = case Map.lookup alias (routingV2Engines config) of
       Nothing -> pure (Left ("persona '" <> personaName <> "' requires unknown engine '" <> alias <> "'"))
       Just engine -> case Map.lookup alias contexts of
         Nothing -> pure (Left ("persona '" <> personaName <> "', engine '" <> alias <> "' has no resolved environment context"))
         Just context -> do
-          result <- acquireEngine manager mode cacheHome now personaName alias engine context
+          result <- acquireEngine config activeManager mode cacheHome now personaName alias engine context
           case result of
             Left problem -> pure (Left problem)
-            Right inventory -> go manager (Map.insert alias inventory accumulated) rest
+            Right inventory -> go activeManager (Map.insert alias inventory accumulated) rest
 
-acquireEngine :: Maybe Manager -> DiscoveryMode -> FilePath -> UTCTime -> Text -> Text -> EngineDefinition -> ResolvedEngineContext -> IO (Either Text InventoryResult)
-acquireEngine _ _ _ _ _ _ EngineDefinition {engineCatalogue = Nothing} _ =
+acquireEngine :: RoutingConfigV2 -> Maybe Manager -> DiscoveryMode -> FilePath -> UTCTime -> Text -> Text -> EngineDefinition -> ResolvedEngineContext -> IO (Either Text InventoryResult)
+acquireEngine _ _ _ _ _ _ _ EngineDefinition {engineCatalogue = Nothing} _ =
   pure (Right (InventoryResult Nothing Nothing Nothing))
-acquireEngine manager mode cacheHome now personaName engineName engine context = do
+acquireEngine config manager mode cacheHome now personaName engineName engine context = do
   let catalogue = fromMaybe (error "catalogue checked above") (engineCatalogue engine)
-      fingerprint = engineCatalogueFingerprint engineName engine
-      path = cacheFileFor cacheHome personaName fingerprint
-  cached <- readCache path now personaName engineName fingerprint
+      endpointFingerprint = engineCatalogueFingerprint engineName engine
+      engineFingerprint = engineDefinitionFingerprint config engineName engine
+      path = cacheFileFor cacheHome personaName engineFingerprint
+  cached <- readCache path now personaName engineName engineFingerprint endpointFingerprint
   case mode of
     DiscoveryOffline ->
       pure . Right $ case usableStale catalogue cached of
-        Just (record, age) -> inventoryFromCache InventoryOfflineCache fingerprint record age (cacheWarning cached)
-        Nothing -> InventoryResult (Just fingerprint) Nothing (Just (fromMaybe "offline-cache-unavailable" (cacheWarning cached)))
+        Just (record, age) -> inventoryFromCache InventoryOfflineCache endpointFingerprint record age (cacheWarning cached)
+        Nothing -> InventoryResult (Just endpointFingerprint) Nothing (Just (fromMaybe "offline-cache-unavailable" (cacheWarning cached)))
     DiscoveryNormal -> case freshCache catalogue cached of
-      Just (record, age) -> pure (Right (inventoryFromCache InventoryFreshCache fingerprint record age (cacheWarning cached)))
-      Nothing -> refresh False catalogue fingerprint path cached
-    DiscoveryRefresh -> refresh True catalogue fingerprint path cached
+      Just (record, age) -> pure (Right (inventoryFromCache InventoryFreshCache endpointFingerprint record age (cacheWarning cached)))
+      Nothing -> refresh False catalogue engineFingerprint endpointFingerprint path cached
+    DiscoveryRefresh -> refresh True catalogue engineFingerprint endpointFingerprint path cached
   where
-    refresh explicit catalogue fingerprint path cached = case manager of
+    refresh explicit catalogue engineFingerprint endpointFingerprint path cached = case manager of
       Nothing -> pure (Left "internal error: refresh has no HTTP manager")
       Just http -> do
-        fetched <- fetchCatalogue http fingerprint catalogue context
+        fetched <- fetchCatalogue http endpointFingerprint catalogue context
         case fetched of
           Right entries -> do
-            let record = CacheRecord 1 personaName engineName fingerprint now (sortOn inventoryModelId entries)
+            let record = CacheRecord 1 personaName engineName engineFingerprint endpointFingerprint now (sortOn inventoryModelId entries)
             cacheWrite <- writeCache path record
             let warning = joinWarnings [cacheWarning cached, either Just (const Nothing) cacheWrite]
-                frozen = FrozenInventory InventoryFresh fingerprint now 0 (cacheModels record)
-            pure (Right (InventoryResult (Just fingerprint) (Just frozen) warning))
+                frozen = FrozenInventory InventoryFresh endpointFingerprint now 0 (cacheModels record)
+            pure (Right (InventoryResult (Just endpointFingerprint) (Just frozen) warning))
           Left failure
             | explicit ->
                 pure
@@ -212,21 +223,22 @@ acquireEngine manager mode cacheHome now personaName engineName engine context =
                           <> "', engine '"
                           <> engineName
                           <> "', endpoint "
-                          <> fingerprint
+                          <> endpointFingerprint
                           <> " discovery failed: "
                           <> failure
                       )
                   )
             | Just (record, age) <- usableStale catalogue cached ->
-                pure (Right (inventoryFromCache InventoryStaleCache fingerprint record age (Just failure)))
+                pure (Right (inventoryFromCache InventoryStaleCache endpointFingerprint record age (Just failure)))
             | otherwise ->
-                pure (Right (InventoryResult (Just fingerprint) Nothing (Just failure)))
+                pure (Right (InventoryResult (Just endpointFingerprint) Nothing (Just failure)))
 
 data CacheRecord = CacheRecord
   { cacheVersion :: !Int,
     cachePersona :: !Text,
     cacheEngine :: !Text,
-    cacheFingerprint :: !Text,
+    cacheEngineFingerprint :: !Text,
+    cacheEndpointFingerprint :: !Text,
     cacheFetchedAt :: !UTCTime,
     cacheModels :: ![ModelInventoryEntry]
   }
@@ -237,15 +249,16 @@ instance ToJSON CacheRecord where
       [ "version" .= cacheVersion,
         "persona" .= cachePersona,
         "engine" .= cacheEngine,
-        "fingerprint" .= cacheFingerprint,
+        "engineFingerprint" .= cacheEngineFingerprint,
+        "endpointFingerprint" .= cacheEndpointFingerprint,
         "fetchedAt" .= cacheFetchedAt,
         "models" .= cacheModels
       ]
 
 instance FromJSON CacheRecord where
   parseJSON = withObject "model inventory cache" $ \o -> do
-    onlyKeys "model inventory cache" ["version", "persona", "engine", "fingerprint", "fetchedAt", "models"] o
-    CacheRecord <$> o .: "version" <*> o .: "persona" <*> o .: "engine" <*> o .: "fingerprint" <*> o .: "fetchedAt" <*> o .: "models"
+    onlyKeys "model inventory cache" ["version", "persona", "engine", "engineFingerprint", "endpointFingerprint", "fetchedAt", "models"] o
+    CacheRecord <$> o .: "version" <*> o .: "persona" <*> o .: "engine" <*> o .: "engineFingerprint" <*> o .: "endpointFingerprint" <*> o .: "fetchedAt" <*> o .: "models"
 
 instance ToJSON ModelInventoryEntry where
   toJSON ModelInventoryEntry {..} = object ["id" .= inventoryModelId, "createdAt" .= inventoryModelCreatedAt]
@@ -255,37 +268,74 @@ instance FromJSON ModelInventoryEntry where
     onlyKeys "cached model" ["id", "createdAt"] o
     ModelInventoryEntry <$> o .: "id" <*> o .:? "createdAt"
 
+maxCacheRecordBytes :: Integer
+maxCacheRecordBytes = 8 * 1024 * 1024
+
 data CacheRead
   = CacheMissing
   | CacheBroken !Text
   | CacheFound !CacheRecord !Integer
 
-maxCacheBytes :: Integer
-maxCacheBytes = 16 * 1024 * 1024
-
-readCache :: FilePath -> UTCTime -> Text -> Text -> Text -> IO CacheRead
-readCache path now personaName engineName fingerprint = do
-  readResult <- try (readConfinedFile (takeDirectory path) [takeFileName path] maxCacheBytes)
-  pure $ case readResult of
-    Left exception
-      | isDoesNotExistError exception -> CacheMissing
-      | otherwise -> CacheBroken "cache-read-failed"
-    Right (bytes, status)
-      | fileMode status .&. 0o077 /= 0 -> CacheBroken "cache-permissions-are-not-private"
-      | otherwise -> case eitherDecodeStrict' bytes of
-          Left _ -> CacheBroken "cache-corrupt"
-          Right record -> validateRecord record
+readCache :: FilePath -> UTCTime -> Text -> Text -> Text -> Text -> IO CacheRead
+readCache path now personaName engineName engineFingerprint endpointFingerprint = do
+  parentsSafe <- cacheParentsSafe path
+  if not parentsSafe
+    then pure (CacheBroken "cache-directory-unsafe")
+    else do
+      exists <- doesFileExist path
+      if not exists
+        then pure CacheMissing
+        else do
+          statusResult <- try (getSymbolicLinkStatus path)
+          case statusResult of
+            Left (_ :: IOException) -> pure (CacheBroken "cache-read-failed")
+            Right status
+              | isSymbolicLink status -> pure (CacheBroken "cache-is-symbolic-link")
+              | not (isRegularFile status) -> pure (CacheBroken "cache-is-not-a-regular-file")
+              | toInteger (fileSize status) > maxCacheRecordBytes -> pure (CacheBroken "cache-too-large")
+              | fileMode status .&. 0o077 /= 0 -> pure (CacheBroken "cache-permissions-are-not-private")
+              | otherwise -> do
+                  let personaDirectory = takeDirectory path
+                      modelDirectory = takeDirectory personaDirectory
+                      agentCatDirectory = takeDirectory modelDirectory
+                      cacheHome = takeDirectory agentCatDirectory
+                      components = map takeFileName [agentCatDirectory, modelDirectory, personaDirectory, path]
+                  bytesResult <- try (readConfinedFile cacheHome components maxCacheRecordBytes)
+                  pure $ case bytesResult of
+                    Left (_ :: IOException) -> CacheBroken "cache-read-failed"
+                    Right (_, opened) | fileMode opened .&. 0o077 /= 0 -> CacheBroken "cache-permissions-are-not-private"
+                    Right (bytes, _) -> case eitherDecodeStrict' bytes of
+                      Left _ -> CacheBroken "cache-corrupt"
+                      Right record -> validateRecord record
   where
     validateRecord record
       | cacheVersion record /= 1 = CacheBroken "cache-version-unsupported"
       | cachePersona record /= personaName = CacheBroken "cache-persona-mismatch"
       | cacheEngine record /= engineName = CacheBroken "cache-engine-mismatch"
-      | cacheFingerprint record /= fingerprint = CacheBroken "cache-fingerprint-mismatch"
+      | cacheEngineFingerprint record /= engineFingerprint = CacheBroken "cache-engine-fingerprint-mismatch"
+      | cacheEndpointFingerprint record /= endpointFingerprint = CacheBroken "cache-endpoint-fingerprint-mismatch"
       | age < 0 = CacheBroken "cache-timestamp-is-in-the-future"
       | Left _ <- validateEntries (cacheModels record) = CacheBroken "cache-models-invalid"
       | otherwise = CacheFound record age
       where
         age = floor (diffUTCTime now (cacheFetchedAt record))
+
+cacheParentsSafe :: FilePath -> IO Bool
+cacheParentsSafe path = do
+  checked <- try (and <$> traverse safe managed) :: IO (Either IOException Bool)
+  pure (either (const False) id checked)
+  where
+    personaDirectory = takeDirectory path
+    modelDirectory = takeDirectory personaDirectory
+    agentCatDirectory = takeDirectory modelDirectory
+    managed = [agentCatDirectory, modelDirectory, personaDirectory]
+    safe directory = do
+      exists <- doesPathExist directory
+      if not exists
+        then pure True
+        else do
+          status <- getSymbolicLinkStatus directory
+          pure (not (isSymbolicLink status) && isDirectory status && fileMode status .&. 0o077 == 0)
 
 writeCache :: FilePath -> CacheRecord -> IO (Either Text ())
 writeCache path record = do
@@ -294,11 +344,12 @@ writeCache path record = do
   where
     directory = takeDirectory path
     modelDirectory = takeDirectory directory
+    agentCatDirectory = takeDirectory modelDirectory
+    cacheHomeDirectory = takeDirectory agentCatDirectory
 
     write = do
-      createDirectoryIfMissing True directory
-      setFileMode modelDirectory 0o700
-      setFileMode directory 0o700
+      createDirectoryIfMissing True cacheHomeDirectory
+      forM_ [agentCatDirectory, modelDirectory, directory] ensureManagedDirectory
       (temporary, handle) <- openBinaryTempFile directory ".inventory.tmp"
       let cleanup = do
             hClose handle `catch` \(_ :: IOException) -> pure ()
@@ -312,6 +363,17 @@ writeCache path record = do
             renameFile temporary path
             setFileMode path 0o600
       install `onException` cleanup
+
+    ensureManagedDirectory managed = do
+      exists <- doesPathExist managed
+      if exists
+        then do
+          status <- getSymbolicLinkStatus managed
+          when (isSymbolicLink status || not (isDirectory status) || fileMode status .&. 0o077 /= 0) $
+            ioError (userError "unsafe routing cache directory")
+        else do
+          createDirectory managed
+          setFileMode managed 0o700
 
 freshCache :: Catalogue -> CacheRead -> Maybe (CacheRecord, Integer)
 freshCache catalogue (CacheFound record age)
@@ -338,6 +400,34 @@ joinWarnings :: [Maybe Text] -> Maybe Text
 joinWarnings warnings = case [warning | Just warning <- warnings] of
   [] -> Nothing
   values -> Just (T.intercalate ";" (nub values))
+
+engineDefinitionFingerprint :: RoutingConfigV2 -> Text -> EngineDefinition -> Text
+engineDefinitionFingerprint config engineName engine = sha256Fingerprint (encodeUtf8 payload)
+  where
+    payload =
+      T.intercalate
+        "\NUL"
+        ( [ engineName,
+            backendSpelling (engineBackend engine),
+            engineProvider engine
+          ]
+            <> concatMap environmentPart (Map.toAscList (engineEnvironment engine))
+            <> maybe [] cataloguePart (engineCatalogue engine)
+        )
+    environmentPart (destination, EnvironmentValue value) = [destination, "value", value]
+    environmentPart (destination, EnvironmentSecret secretName) =
+      [ destination,
+        "secret",
+        secretName,
+        maybe "<unknown>" secretEnvironmentName (Map.lookup secretName (routingV2Secrets config))
+      ]
+    cataloguePart catalogue =
+      [ engineCatalogueFingerprint engineName engine,
+        T.pack (show (catalogueTimeoutMs catalogue)),
+        T.pack (show (catalogueMaxBytes catalogue)),
+        T.pack (show (cacheFreshSeconds (catalogueCache catalogue))),
+        T.pack (show (cacheStaleIfErrorSeconds (catalogueCache catalogue)))
+      ]
 
 engineCatalogueFingerprint :: Text -> EngineDefinition -> Text
 engineCatalogueFingerprint engineName engine = sha256Fingerprint (encodeUtf8 payload)
@@ -385,14 +475,7 @@ safeComponent value
 
 sha256Fingerprint :: BS.ByteString -> Text
 sha256Fingerprint value =
-  let digest = hash value :: Digest SHA256
-      bytes = ByteArray.convert digest :: BS.ByteString
-   in "sha256:" <> T.pack (concatMap hexByte (BS.unpack bytes))
-
-hexByte :: Word8 -> String
-hexByte value = case showHex value "" of
-  [digit] -> ['0', digit]
-  digits -> digits
+  "sha256:" <> T.pack (show (hash value :: Digest SHA256))
 
 dialectName :: CatalogueDialect -> Text
 dialectName CatalogueOpenAI = "openai"
@@ -479,17 +562,35 @@ fetchPage manager fingerprint catalogue context cursor page = do
                   responseTimeout = responseTimeoutMicro (catalogueTimeoutMs catalogue * 1000),
                   checkResponse = \_ _ -> pure ()
                 }
-      when (isJust (catalogueAuth catalogue) && null authHeaders) $
-        ioError (userError "resolved catalogue credential is missing")
-      withResponse request manager $ \response -> do
-        let code = statusCode (responseStatus response)
-        if code >= 300 && code < 400
-          then pure (Left "redirect-refused")
-          else
-            if code /= 200
-              then pure (Left ("http-status-" <> T.pack (show code)))
-              else readBounded (catalogueMaxBytes catalogue) (responseBody response)
+      case validateOutboundRequest request pagedQuery of
+        Left problem -> pure (Left problem)
+        Right ()
+          | isJust (catalogueAuth catalogue) && null authHeaders -> pure (Left "resolved-credential-unavailable")
+          | otherwise ->
+              withResponse request manager $ \response -> do
+                let code = statusCode (responseStatus response)
+                if code >= 300 && code < 400
+                  then pure (Left "redirect-refused")
+                  else
+                    if code /= 200
+                      then pure (Left ("http-status-" <> T.pack (show code)))
+                      else readBounded (catalogueMaxBytes catalogue) (responseBody response)
 
+validateOutboundRequest :: Request -> Query -> Either Text ()
+validateOutboundRequest request query = do
+  when (length query > maxCatalogueQueryItems) (Left "request-query-item-limit")
+  when (BS.length (renderQuery False query) > maxCatalogueQueryBytes) (Left "request-query-byte-limit")
+  when (BS.length (encodeUtf8 (T.pack (show (getUri request)))) > maxCatalogueUrlBytes) (Left "request-url-limit")
+  validateOutboundHeaders (requestHeaders request)
+
+validateOutboundHeaders :: [Header] -> Either Text ()
+validateOutboundHeaders headers = do
+  when (length headers > maxCatalogueHeaders) (Left "request-header-count-limit")
+  forM_ headers $ \(_, value) ->
+    when (BS.length value > maxCatalogueHeaderValueBytes || BS.any (\byte -> byte < 32 || byte == 127) value) $
+      Left "request-header-value-limit"
+  let total = sum [BS.length (CI.original name) + BS.length value | (name, value) <- headers]
+  when (total > maxCatalogueHeaderBytes) (Left "request-header-byte-limit")
 
 readBounded :: Int -> BodyReader -> IO (Either Text BS.ByteString)
 readBounded limit = go 0 []
@@ -547,8 +648,10 @@ decodeAnthropicPage = decodeJson "anthropic-response-malformed" $ withObject "An
       when (firstId /= Nothing || lastId /= Nothing) (fail "empty page carries first_id or last_id")
     firstEntry : rest -> do
       let lastEntry = foldl (\_ entry -> entry) firstEntry rest
-      forM_ firstId $ \identifier -> unless (identifier == inventoryModelId firstEntry) (fail "first_id mismatch")
-      forM_ lastId $ \identifier -> unless (identifier == inventoryModelId lastEntry) (fail "last_id mismatch")
+      firstIdentifier <- maybe (fail "nonempty page has no first_id") pure firstId
+      lastIdentifier <- maybe (fail "nonempty page has no last_id") pure lastId
+      unless (firstIdentifier == inventoryModelId firstEntry) (fail "first_id mismatch")
+      unless (lastIdentifier == inventoryModelId lastEntry) (fail "last_id mismatch")
   when (hasMore && lastId == Nothing) (fail "paginated response has no last_id")
   pure (AnthropicPage entries hasMore lastId)
 

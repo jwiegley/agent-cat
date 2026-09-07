@@ -51,15 +51,18 @@ export AGENT_CAT_PI_REMOTE_SESSION=<known-session-id>  # optional
 ```
 
 The runner path and the state directory must be absolute. No project file and
-no repository scan grants runner trust, and every mutable launch additionally
-requires Pi's project-trust decision for the working directory. Adapter
-arguments that contain credential-like flags or values are refused. Under routing
-v2, credentials remain environment references resolved inside agent-cat; the
-extension receives neither those references nor their values, and writes only
-persona/model-alias argv to its private manifest. Remote transport authentication
-occurs before any Pi protocol bytes are exchanged. The Unix transport relies
-on private socket permissions, and a remote session is acquired exclusively
-across client connections.
+no repository scan grants trust to a runner, and every mutable launch also
+requires the project-trust decision of Pi for the working directory. The
+extension refuses adapter arguments that contain credential-like flags or
+values. Under routing version 2, credentials remain environment references that
+agent-cat resolves. The extension receives neither those references nor their
+values, and its private manifest contains only persona and model-alias arguments.
+When it rebuilds current-session, owned-child, or remote targets for lineage, it
+carries those explicit parent arguments forward instead of silently selecting
+current defaults. Remote
+transport authentication occurs before any Pi protocol bytes are exchanged.
+The Unix transport relies on private socket permissions, and a remote session
+is acquired exclusively across client connections.
 
 Protocol-v2 runs retain typed public tool, complete plan/todo, and context-usage
 updates separately from answer chunks. Obvious credential-bearing diagnostic
@@ -108,10 +111,11 @@ cat instructions.txt | agentic-run run review --session "$AGENTDECK_INSTANCE_ID"
 ```
 
 Machine mode reserves file descriptor 0 for that payload and takes control
-NDJSON on inherited file descriptor 3. Descriptor v3 retains protocol v1 while
-advertising negotiation and routing capabilities. A descriptor-v1 runner remains
-prompt-only and keeps stdin controls; multiline bodies require descriptor v2 or
-v3 plus control-descriptor support.
+NDJSON on inherited file descriptor 3. Descriptor version 3 retains protocol
+version 1 while advertising negotiation and routing capabilities. A runner that
+publishes descriptor version 1 remains prompt-only and keeps its controls on
+standard input. A multiline body requires descriptor version 2 or 3 and support
+for the control descriptor.
 
 ## Commands
 
@@ -144,27 +148,27 @@ of agent-cat, and they report `delivered`, `rejected-stale`, `unsupported`, or
 
 ## Routing selection
 
-When a trusted descriptor-v3 runner advertises routing inspection, `/wf` and
-`/workflow` invoke `agentic-run --routing --json`. Pi offers the configured
-persona or another user-owned persona, then optional concrete model aliases for
-the workflow's managed profile axes. It passes only `--persona` and
-`--realize AXIS=MODEL-ALIAS`. Raw `--route` remains available only for pins that
-the inspection says are unmanaged.
+When a trusted descriptor-version-3 runner advertises routing inspection, `/wf`
+and `/workflow` invoke `agentic-run --routing --json`. Pi offers the configured
+persona or another user-owned persona, followed by optional concrete model
+aliases for the managed profile axes of the workflow. It passes only `--persona`
+and `--realize AXIS=MODEL-ALIAS`. Raw `--route` remains available for unmanaged
+pins.
 
-The extension validates the sanitized version-2 projection and rejects fields for
-secrets, environment bindings, headers, authorization, or endpoint URLs. It never
-opens `routing.yaml`, resolves selectors, reads a cache, or interprets an engine.
-Descriptor-v1/v2 runners, and descriptor-v3 runners currently using v1 routing,
-retain the previous route wizard. Supervisor manifests remain mode 0600 and store
-only the selected non-secret argument vector.
+The extension validates the sanitized version-2 projection and rejects fields
+for secrets, environment bindings, headers, authorization, or endpoint URLs. It
+never opens `routing.yaml`, resolves a selector, reads a cache, or interprets an
+engine. Descriptor-version-1 and version-2 runners, and a version-3 runner that
+uses version-1 routing, retain the previous route wizard. Supervisor manifests
+have mode 0600 and store only the selected non-secret argument vector.
 
 ## Targets and containment
 
 | Target | What answers | Containment |
 |---|---|---|
 | Scripted | The registered canned table. | Offline. No command runs. |
-| Native ACP | A configured adapter plus validated unmanaged-pin routes or v2 persona/model-alias choices. Built-ins are `stub`, `claude`, `codex`, and `droid`; `droid` launches `droid exec --output-format acp`. | The scratch directory of agent-cat, which is not an operating-system sandbox. |
-| Native agent-deck | The Agent Deck session inherited by `/wf`, or one chosen in the compatibility wizard, plus unmanaged routes or v2 persona/model-alias choices. | The workspace of that session. |
+| Native ACP | A configured adapter plus validated unmanaged-pin routes or version-2 persona and model-alias choices. The built-in adapters are `stub`, `claude`, `codex`, and `droid`, and `droid` launches `droid exec --output-format acp`. | The scratch directory of agent-cat, which is not an operating-system sandbox. |
+| Native agent-deck | The Agent Deck session that `/wf` inherits, or a session that is chosen in the compatibility wizard, plus unmanaged routes or version-2 persona and model-alias choices. | The workspace of that session. |
 | Current Pi session | Visible, exclusive injected turns in the current project. | Not a sandbox. |
 | Owned Pi child | An in-memory Pi session with tools disabled. | The scratch directory of agent-cat. |
 | Remote Pi session | A known or discovered session under an exclusive lease. | Its remote workspace, which is not a sandbox. |

@@ -265,10 +265,10 @@ function capabilities(value: unknown, descriptorVersion: number): Record<string,
 
 function parseRoutingInspection(runnerId: string, value: unknown): RoutingInspection | undefined {
   if (!isObject(value)) throw new Error(`runner ${runnerId} routing inspection is not an object`);
-  assertSanitizedRouting(value);
   const version = number(value.version, "routing version");
   if (version === 1) return undefined;
   if (version !== 2) throw new Error(`runner ${runnerId} returned unsupported routing inspection version`);
+  assertSanitizedRouting(value);
   if (!isObject(value.persona)) throw new Error("routing persona is not an object");
   const persona = { name: text(value.persona.name, "routing persona name"), source: text(value.persona.source, "routing persona source") };
   const availablePersonas = texts(value.availablePersonas, "availablePersonas");

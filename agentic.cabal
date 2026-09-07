@@ -50,6 +50,7 @@ common settings
     , http-client
     , http-client-tls
     , http-types
+    , libyaml
     , memory
     , process
     , QuickCheck
@@ -240,7 +241,11 @@ executable routing-discovery-probe
   import:          settings
   hs-source-dirs:  cli/test
   main-is:         RoutingDiscoveryProbe.hs
-  build-depends:   agentic
+  build-depends:
+    , agentic
+    , crypton-connection
+    , crypton-x509-store
+    , tls
   ghc-options:     -threaded
 
 executable routing-fixed-point-probe

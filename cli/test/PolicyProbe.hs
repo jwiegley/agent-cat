@@ -443,6 +443,22 @@ verdictFence = [wf|Reply with exactly APPROVE if you find nothing, or OBJECTION:
 
 -- | A hole-free define, both ways.
 lensOldWay, lensNewWay :: Text
+
+-- | A define that holes a computed count and a fence, both ways — @qaFence@'s
+-- shape, which is the shape that would break first if the two quoters splice a
+-- hole differently.
+holedOldWay, holedNewWay :: Text
+
+-- | The two counts the holes above name, derived as @qaFence@ derives its own.
+reviewers, siblings :: Text
+
+-- | __The owner's two-pane split__ — @--session CODEX --route
+-- partner=deck:CLAUDE@ — as the tables @run.routes@ is written from.
+--
+-- At 'Backend' and not at the naming type, unlike 'namedRoutes': what the
+-- @run.routes@ group checks is the /spelling/, and the spelling is
+-- @Agentic.Route.backendSpelling@'s, which only a real backend has.
+ownersSplit, inverted, sharedPane, pathBackend :: Routes Backend
 lensOldWay = wfText [wf|
   Correctness lens. Read the change below and report only defects that are
   wrong on inputs this code will actually see.
@@ -455,11 +471,6 @@ lensNewWay = [wft|
 
   For each: the location, the input that reaches it, and what it produces
   instead of the right answer.|]
-
--- | A define that holes a computed count and a fence, both ways — @qaFence@'s
--- shape, which is the shape that would break first if the two quoters splice a
--- hole differently.
-holedOldWay, holedNewWay :: Text
 holedOldWay = wfText [wf|
   You are one of {reviewers} independent reviewers and there is no synthesis
   step behind you, so anything you repeat ships twice. The other {siblings}
@@ -472,9 +483,6 @@ holedNewWay = [wft|
   own the rest.
 
   {verdictFence}|]
-
--- | The two counts the holes above name, derived as @qaFence@ derives its own.
-reviewers, siblings :: Text
 reviewers = "6"
 siblings = "5"
 
@@ -591,14 +599,6 @@ namedRoutes = namedTable "default" [("gemini", "gemini-backend"), ("opus", "opus
 -- expression rather than one expression and an annotation.
 namedTable :: Text -> [(Text, Text)] -> Routes Text
 namedTable = routes
-
--- | __The owner's two-pane split__ — @--session CODEX --route
--- partner=deck:CLAUDE@ — as the tables @run.routes@ is written from.
---
--- At 'Backend' and not at the naming type, unlike 'namedRoutes': what the
--- @run.routes@ group checks is the /spelling/, and the spelling is
--- @Agentic.Route.backendSpelling@'s, which only a real backend has.
-ownersSplit, inverted, sharedPane, pathBackend :: Routes Backend
 ownersSplit = routes (BackendDeck "CODEX") [("partner", BackendDeck "CLAUDE")]
 -- The same two panes, the other flag routed: it looks like the split, and it
 -- leaves everything the program did not pin itself in the pane that is about to

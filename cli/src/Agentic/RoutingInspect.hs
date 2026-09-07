@@ -27,7 +27,6 @@ import Agentic.RoutingConfig
   )
 import Agentic.RoutingConfig.V2
 import Agentic.RoutingDiscovery
-import Control.Monad (unless)
 import Crypto.Hash (Digest, SHA256, hash)
 import Data.Aeson (Value (..), encode, object, (.=))
 import qualified Data.Aeson.Key as Key
@@ -314,7 +313,6 @@ personaSelectionSourceName PersonaFromUserDefault = "user-default"
 
 migrateRoutingConfigV1 :: RoutingConfig -> Either Text BS.ByteString
 migrateRoutingConfigV1 config = do
-  whenEmpty
   let output = Yaml.encode document
   _ <- firstText (decodeRoutingUserV2 output)
   pure output
@@ -369,7 +367,6 @@ migrateRoutingConfigV1 config = do
           "max-output" .= maybe (String "unconstrained") (Number . fromInteger) (realizationMaxOutput realization),
           "options" .= realizationOptions realization
         ]
-    whenEmpty = unless (not (Map.null (routingProfiles config))) (Left "version-1 routing has no profiles to migrate")
 
 v1RealizationJson :: Realization -> Value
 v1RealizationJson realization =

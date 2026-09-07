@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import ssl
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -13,6 +14,8 @@ from urllib.parse import parse_qs, urlparse
 PORT_FILE = Path(sys.argv[1])
 COUNT_FILE = Path(sys.argv[2])
 CONTROL_FILE = Path(sys.argv[3])
+CERT_FILE = Path(sys.argv[4]) if len(sys.argv) > 4 else None
+KEY_FILE = Path(sys.argv[5]) if len(sys.argv) > 5 else None
 COUNT = 0
 
 
@@ -20,8 +23,15 @@ def write_count() -> None:
     COUNT_FILE.write_text(f"{COUNT}\n", encoding="ascii")
 
 
+class QuietThreadingHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def handle_error(self, _request: object, _client_address: object) -> None:
+        pass
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "agent-cat-fixture"
+    protocol_version = "HTTP/1.1"
 
     def log_message(self, _format: str, *_args: object) -> None:
         pass
@@ -43,6 +53,7 @@ class Handler(BaseHTTPRequestHandler):
         write_count()
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
+        using_tls = isinstance(self.connection, ssl.SSLSocket)
         if CONTROL_FILE.exists() and CONTROL_FILE.read_text(encoding="ascii").strip() == "fail":
             self.send_json({"error": "controlled failure"}, status=503)
             return
@@ -59,6 +70,21 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/large":
             self.send_json({"object": "list", "data": [{"id": "x" * 2048}]})
+            return
+        if parsed.path == "/chunked-large":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Transfer-Encoding", "chunked")
+            self.end_headers()
+            try:
+                for _ in range(8):
+                    chunk = b"x" * 64
+                    self.wfile.write(f"{len(chunk):X}\r\n".encode("ascii") + chunk + b"\r\n")
+                    self.wfile.flush()
+                self.wfile.write(b"0\r\n\r\n")
+                self.wfile.flush()
+            except BrokenPipeError:
+                pass
             return
         if parsed.path == "/malformed":
             body = b"{not-json"
@@ -86,7 +112,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"object": "list", "data": [{"id": "model", "created": 1.5}]})
             return
         if parsed.path == "/openai":
-            if self.headers.get("Authorization") not in (None, "Bearer fixture-secret"):
+            authorization = self.headers.get("Authorization")
+            if authorization != "Bearer fixture-secret" and (using_tls or authorization is not None):
                 self.send_json({"error": "unauthorized"}, status=401)
                 return
             self.send_json(
@@ -103,13 +130,22 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
         if parsed.path.startswith("/anthropic"):
-            if self.headers.get("x-api-key") not in (None, "fixture-secret") or self.headers.get("anthropic-version") != "2023-06-01":
+            api_key = self.headers.get("x-api-key")
+            if (api_key != "fixture-secret" and (using_tls or api_key is not None)) or self.headers.get("anthropic-version") != "2023-06-01":
                 self.send_json({"error": "unauthorized"}, status=401)
                 return
             if query.get("limit") != ["1000"]:
                 self.send_json({"error": "missing limit"}, status=400)
                 return
             cursor = query.get("after_id", [None])[0]
+            if parsed.path == "/anthropic-missing-bounds":
+                self.send_json(
+                    {
+                        "data": [{"id": "claude-unbounded", "created_at": "2026-01-01T00:00:00Z"}],
+                        "has_more": False,
+                    }
+                )
+                return
             if parsed.path == "/anthropic-pages":
                 number = 1 if cursor is None else int(cursor.removeprefix("page-")) + 1
                 identifier = f"page-{number}"
@@ -162,7 +198,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"error": "not found"}, status=404)
 
 
-server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+server = QuietThreadingHTTPServer(("127.0.0.1", 0), Handler)
+if CERT_FILE is not None and KEY_FILE is not None:
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(CERT_FILE, KEY_FILE)
+    server.socket = context.wrap_socket(server.socket, server_side=True)
 PORT_FILE.write_text(f"{server.server_address[1]}\n", encoding="ascii")
 write_count()
 server.serve_forever()

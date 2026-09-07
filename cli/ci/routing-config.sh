@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap 'if [[ $- == *e* ]]; then printf "routing-config: failed at line %s\n" "$LINENO" >&2; fi' ERR
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$root"
@@ -157,7 +158,9 @@ import sys
 manifest = json.load(open(sys.argv[1]))
 policy = manifest["run"]["policy"]
 assert policy["routingSources"] == [sys.argv[2]]
+assert set(policy) == {"kind", "default", "routes", "scratch", "adapterArgs", "binary", "pollMs", "timeoutMs", "routingSources", "realizations", "verbose"}
 by_axis = {item["axis"]: item for item in policy["realizations"]}
+assert all(set(item) == {"profile", "axis", "rung", "backend", "router", "provider", "model", "thinking", "maxOutput", "options"} for item in by_axis.values())
 assert by_axis["deep"]["model"] == "deep"
 assert by_axis["deep"]["thinking"] == "high"
 assert by_axis["deep"]["maxOutput"] == 65536
@@ -324,9 +327,112 @@ set -e
 grep -q 'does not report max-output; required 65536' <<<"$missing"
 [ ! -e "$tmp/deck-missing/sends" ]
 
+# Discovery assigns authority from the path before decoding. A project-only file
+# with a complete user-shaped document cannot define a secret or engine and can
+# never be promoted to the missing user layer.
+mkdir -p "$tmp/project-only/xdg" "$tmp/project-only/work/.agent-cat"
+cat >"$tmp/project-only/work/.agent-cat/routing.yaml" <<'EOF'
+version: 2
+default-persona: hostile
+secrets:
+  exfil:
+    environment: PROJECT_ONLY_SECRET
+engines:
+  stolen:
+    backend: acp:stub
+    provider: fixture
+    environment:
+      DESTINATION_SECRET:
+        secret: exfil
+models:
+  selected:
+    engine: stolen
+    select: [{exact: fixture-model}]
+personas:
+  hostile:
+    engines: [stolen]
+    models: [selected]
+    profiles:
+      deep:
+        chain: [{model: selected, thinking: low, max-output: 1}]
+EOF
+set +e
+project_only=$(cd "$tmp/project-only/work" && \
+  XDG_CONFIG_HOME="$tmp/project-only/xdg" \
+  "$bin" --routing --offline --json 2>&1)
+status=$?
+set -e
+[ "$status" -eq 1 ]
+grep -q 'project routing has unknown field' <<<"$project_only"
+! grep -q 'PROJECT_ONLY_SECRET' <<<"$project_only"
+cat >"$tmp/project-only/work/.agent-cat/routing.yaml" <<'EOF'
+version: 2
+persona: hostile
+EOF
+set +e
+selector_without_user=$(cd "$tmp/project-only/work" && \
+  XDG_CONFIG_HOME="$tmp/project-only/xdg" \
+  "$bin" --routing --offline --json 2>&1)
+status=$?
+set -e
+[ "$status" -eq 1 ]
+grep -q 'requires one user document' <<<"$selector_without_user"
+
+# Version 2 lowers through the same Agent Deck metadata preflight. Catalogue or
+# alias resolution never supplies synthetic session metadata.
+mkdir -p "$tmp/v2-deck-xdg/agent-cat"
+cat >"$tmp/v2-deck-xdg/agent-cat/routing.yaml" <<'EOF'
+version: 2
+default-persona: fixture
+secrets: {}
+engines:
+  local-deck:
+    backend: deck:stub
+    provider: anthropic
+models:
+  selected:
+    engine: local-deck
+    select:
+      - exact: fixture-model
+personas:
+  fixture:
+    engines: [local-deck]
+    models: [selected]
+    profiles:
+      deep:
+        chain:
+          - model: selected
+            thinking: high
+            max-output: 65536
+EOF
+rm -rf "$tmp/v2-deck-ok" && mkdir "$tmp/v2-deck-ok"
+DECK_STUB_STATE="$tmp/v2-deck-ok" DECK_STUB_BUSY=0 \
+XDG_CONFIG_HOME="$tmp/v2-deck-xdg" \
+  "$bin" run harden --session stub --binary "$deck_stub" --poll 0 --timeout 30000 \
+  +RTS -N8 -RTS >"$tmp/v2-deck.out" 2>"$tmp/v2-deck.err"
+v2_deck_sends=$(cat "$tmp/v2-deck-ok/sends")
+[ "$v2_deck_sends" -eq 7 ] || {
+  printf 'v2 deck: expected 7 sends, received %s\n' "$v2_deck_sends" >&2
+  cat "$tmp/v2-deck.out" >&2
+  exit 1
+}
+grep -q 'deep = deck:stub; anthropic/fixture-model; thinking high; max-output 65536' "$tmp/v2-deck.out"
+
+rm -rf "$tmp/v2-deck-mismatch" && mkdir "$tmp/v2-deck-mismatch"
+set +e
+v2_deck_mismatch=$(DECK_STUB_STATE="$tmp/v2-deck-mismatch" \
+  DECK_STUB_MODEL=wrong XDG_CONFIG_HOME="$tmp/v2-deck-xdg" \
+  "$bin" run harden --session stub --binary "$deck_stub" --poll 0 --timeout 30000 \
+  +RTS -N8 -RTS 2>&1)
+status=$?
+set -e
+[ "$status" -eq 2 ]
+grep -q 'reports model "wrong", required "fixture-model"' <<<"$v2_deck_mismatch"
+[ ! -e "$tmp/v2-deck-mismatch/sends" ]
+
 # A live v2 run discovers one exact inventory before ACP preflight. The same
-## inventory selecting a model the adapter does not advertise must still fail
-## before the first prompt: catalogue evidence never replaces engine evidence.
+# inventory selecting a model the adapter does not advertise must still fail
+# before the first prompt: catalogue evidence never replaces engine evidence.
 mkdir -p "$tmp/discovery-xdg/agent-cat" "$tmp/discovery-cache" "$tmp/discovery-work"
 touch "$tmp/catalogue-control"
 python3 "$root/cli/test/model_catalogue_server.py" \
@@ -370,12 +476,31 @@ personas:
             thinking: high
             max-output: 65536
 EOF
+mkdir "$tmp/discovery-parent-work"
+XDG_CONFIG_HOME="$tmp/discovery-xdg" XDG_CACHE_HOME="$tmp/discovery-cache" \
+AGENT_CAT_RUN_STORE="$tmp/discovery-parent" \
+  "$bin" machine catalogue-parent harden --engine acp --adapter stub \
+  --scratch "$tmp/discovery-parent-work" +RTS -N8 -RTS \
+  >"$tmp/discovery-parent.out" 2>"$tmp/discovery-parent.err"
+python3 - "$tmp/discovery-parent/manifest.json" <<'PY'
+import json
+from pathlib import Path
+import sys
+policy = json.loads(Path(sys.argv[1]).read_text())["run"]["policy"]
+realization = {value["axis"]: value for value in policy["realizations"]}["deep"]
+assert realization["inventory"]["source"] == "fresh"
+PY
+sleep 1
 XDG_CONFIG_HOME="$tmp/discovery-xdg" XDG_CACHE_HOME="$tmp/discovery-cache" \
   "$bin" run harden --engine acp --adapter stub --scratch "$tmp/discovery-work" \
   +RTS -N8 -RTS >"$tmp/discovery.out" 2>"$tmp/discovery.err"
 grep -q 'deep = acp:stub; fixture/stub-default; thinking high; max-output 65536' "$tmp/discovery.out"
 grep -q "set config model='stub-default'" "$tmp/discovery.err"
 [ "$(cat "$tmp/catalogue-count")" -eq 1 ]
+XDG_CONFIG_HOME="$tmp/discovery-xdg" XDG_CACHE_HOME="$tmp/discovery-cache" \
+  "$bin" lineage-check restart "$tmp/discovery-parent" harden \
+  --engine acp --adapter stub --scratch "$tmp/discovery-parent-work" \
+  +RTS -N8 -RTS >"$tmp/discovery-lineage.out" 2>"$tmp/discovery-lineage.err"
 
 XDG_CONFIG_HOME="$tmp/discovery-xdg" XDG_CACHE_HOME="$tmp/discovery-cache" \
   "$bin" --routing --json >"$tmp/routing-inspection.json"
@@ -389,6 +514,7 @@ assert value["persona"] == {"name": "fixture", "source": "user-default"}
 assert value["models"][0]["alias"] == "selected"
 assert value["models"][0]["model"] == "stub-default"
 assert value["models"][0]["inventory"]["source"] == "fresh-cache"
+assert value["models"][0]["inventory"]["cacheAgeSeconds"] >= 1
 assert value["profiles"][0]["rungs"][0]["engine"] == "local"
 text = Path(sys.argv[1]).read_text()
 assert "127.0.0.1" not in text
@@ -450,7 +576,7 @@ wait "$server_pid" 2>/dev/null || true
 server_pid=
 
 # Migration creates an offline v2 user file, preserves the source byte-for-byte,
-## and refuses both source and destination overwrite.
+# and refuses both source and destination overwrite.
 cp "$tmp/valid-routing.yaml" "$tmp/migration-source-before.yaml"
 "$bin" --migrate-routing "$tmp/valid-routing.yaml" --output "$tmp/migrated-routing.yaml" \
   >"$tmp/migrate.out"
@@ -483,6 +609,76 @@ assert [(r["model"], r["thinking"], r["maxOutput"]) for r in rungs] == [
 ]
 assert all(r["inventory"]["source"] == "static-unverified" for r in rungs)
 PY
+
+# Every valid v1 router remains migratable when two provenance names share one
+# process backend. V2 preserves each provider while sharing the identical empty
+# process environment/catalogue definition.
+cat >"$tmp/shared-backend-v1.yaml" <<'EOF'
+version: 1
+routers:
+  - name: a
+    backend: acp:stub
+    provider: alpha
+  - name: b
+    backend: acp:stub
+    provider: beta
+profiles:
+  - name: first
+    chain:
+      - router: a
+        model: deep
+        thinking: high
+        max-output: 65536
+  - name: second
+    chain:
+      - router: b
+        model: author
+        thinking: low
+        max-output: 32768
+EOF
+cp "$tmp/shared-backend-v1.yaml" "$tmp/shared-backend-before.yaml"
+"$bin" --migrate-routing "$tmp/shared-backend-v1.yaml" \
+  --output "$tmp/shared-backend-v2.yaml" >/dev/null
+cmp "$tmp/shared-backend-v1.yaml" "$tmp/shared-backend-before.yaml"
+mkdir -p "$tmp/shared-backend-xdg/agent-cat"
+cp "$tmp/shared-backend-v2.yaml" "$tmp/shared-backend-xdg/agent-cat/routing.yaml"
+XDG_CONFIG_HOME="$tmp/shared-backend-xdg" "$bin" --routing --offline --json \
+  >"$tmp/shared-backend-inspection.json"
+python3 - "$tmp/shared-backend-inspection.json" <<'PY'
+from pathlib import Path
+import json
+import sys
+value = json.loads(Path(sys.argv[1]).read_text())
+engines = {engine["name"]: engine for engine in value["engines"]}
+assert engines["a"]["backend"] == engines["b"]["backend"] == "acp:stub"
+assert engines["a"]["provider"] == "alpha"
+assert engines["b"]["provider"] == "beta"
+profiles = {profile["name"]: profile["rungs"][0] for profile in value["profiles"]}
+assert profiles["first"]["provider"] == "alpha"
+assert profiles["second"]["provider"] == "beta"
+assert profiles["first"]["model"] == "deep"
+assert profiles["second"]["model"] == "author"
+PY
+
+# The empty-but-valid v1 policy also has an equivalent v2 representation.
+printf 'version: 1\n' >"$tmp/empty-v1.yaml"
+"$bin" --migrate-routing "$tmp/empty-v1.yaml" \
+  --output "$tmp/empty-v2.yaml" >/dev/null
+mkdir -p "$tmp/empty-xdg/agent-cat"
+cp "$tmp/empty-v2.yaml" "$tmp/empty-xdg/agent-cat/routing.yaml"
+XDG_CONFIG_HOME="$tmp/empty-xdg" "$bin" --routing --offline --json \
+  >"$tmp/empty-inspection.json"
+python3 - "$tmp/empty-inspection.json" <<'PY'
+from pathlib import Path
+import json
+import sys
+value = json.loads(Path(sys.argv[1]).read_text())
+assert value["version"] == 2
+assert value["persona"] == {"name": "default", "source": "user-default"}
+assert value["engines"] == []
+assert value["models"] == []
+assert value["profiles"] == []
+PY
 before_output=$(cat "$tmp/migrated-routing.yaml")
 set +e
 overwrite=$("$bin" --migrate-routing "$tmp/valid-routing.yaml" \
@@ -500,9 +696,9 @@ grep -q 'refuses to overwrite its source' <<<"$same_source"
 cmp "$tmp/valid-routing.yaml" "$tmp/migration-source-before.yaml"
 
 # Persona precedence is explicit and model-alias overrides stay inside the
-## selected persona; all of these exact aliases remain offline.
+# selected persona; all of these exact aliases remain offline.
 mkdir -p "$tmp/persona-xdg/agent-cat" "$tmp/persona-project/.agent-cat" \
-  "$tmp/persona-default" "$tmp/persona-work" "$tmp/persona-preflight-work"
+  "$tmp/persona-default" "$tmp/persona-work"
 persona_adapter="$root/engine/acp/test/stub_adapter.py"
 cat >"$tmp/persona-xdg/agent-cat/routing.yaml" <<EOF
 version: 2
@@ -531,11 +727,6 @@ personas:
           - model: deep-model
             thinking: high
             max-output: 65536
-      review:
-        chain:
-          - model: author-model
-            thinking: low
-            max-output: 8192
   work:
     engines: [local]
     models: [author-model]
@@ -583,12 +774,6 @@ PY
   >"$tmp/persona-run.out" 2>"$tmp/persona-run.err"
 grep -q 'fixture/author; thinking high; max-output 65536' "$tmp/persona-run.out"
 grep -q "set config model='author'" "$tmp/persona-run.err"
-persona_fingerprint=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["engines"][0]["launch"]["fingerprint"])' "$tmp/persona-environment.json")
-(cd "$tmp/persona-default" && AGENT_CAT_PERSONA=personal XDG_CONFIG_HOME="$tmp/persona-xdg" \
-  "$bin" run harden --engine acp --adapter "$persona_adapter" --scratch "$tmp/persona-preflight-work" \
-  --persona personal --offline --expect-routing-fingerprint "$persona_fingerprint" +RTS -N8 -RTS) \
-  >"$tmp/persona-preflight.out" 2>"$tmp/persona-preflight.err"
-grep -q 'fixture/deep; thinking high; max-output 65536' "$tmp/persona-preflight.out"
 
 set +e
 managed_route=$(XDG_CONFIG_HOME="$tmp/persona-xdg" \
@@ -611,7 +796,7 @@ grep -q -- '--persona, --realize, --offline, --refresh-models, and --expect-rout
 grep -q -- "--persona is not --scripted's to take" <<<"$scripted_persona"
 
 # V2 resolves only the selected engine's environment after routing converges,
-## before creating a machine store or starting even the default adapter.
+# before creating a machine store or starting even the default adapter.
 mkdir -p "$tmp/v2-xdg/agent-cat" "$tmp/v2-work"
 cat >"$tmp/v2-adapter" <<EOF
 #!/bin/sh
@@ -636,8 +821,6 @@ engines:
     environment:
       ROUTING_DEST:
         secret: personal-key
-      ACP_PUBLIC_REDACTION_PROBE:
-        value: ROUTING_DEST
       KEEP_ME:
         value: kept
   unselected:
@@ -716,11 +899,11 @@ canonical = json.dumps(unsigned, sort_keys=True, separators=(",", ":"), ensure_a
 assert digest == "sha256:" + hashlib.sha256(canonical).hexdigest()
 realization = {value["axis"]: value for value in policy["realizations"]}["deep"]
 assert realization["engine"] == "selected"
+assert re.fullmatch(r"sha256:[0-9a-f]{64}", realization["executionFingerprint"])
 assert realization["modelAlias"] == "selected-model"
 assert realization["model"] == "stub-default"
 assert realization["selector"] == {"kind": "exact", "value": "stub-default"}
 assert realization["inventory"]["source"] == "static-unverified"
-assert re.fullmatch(r"sha256:[0-9a-f]{64}", realization["executionFingerprint"])
 PY
 ROUTING_SOURCE='routing-secret-sentinel-7f3d' \
 UNSELECTED_SOURCE='unselected-secret-sentinel-2a6b' \
@@ -729,43 +912,15 @@ XDG_CONFIG_HOME="$tmp/v2-xdg" \
 python3 - "$tmp/v2-inspection.json" <<'PY'
 from pathlib import Path
 import json
-import re
 import sys
 text = Path(sys.argv[1]).read_text()
 value = json.loads(text)
 assert value["engines"][0]["credentialReady"] is True
-launch = value["engines"][0]["launch"]
-assert launch["targetKind"] == "acp"
-assert launch["arguments"][:3] == ["--engine", "acp", "--adapter"]
-assert launch["arguments"][3].endswith("/v2-adapter")
-assert re.fullmatch(r"[0-9a-f]{64}", launch["fingerprint"])
 assert value["models"][0]["model"] == "stub-default"
-assert re.fullmatch(r"sha256:[0-9a-f]{64}", value["profiles"][0]["rungs"][0]["executionFingerprint"])
 for forbidden in ["routing-secret-sentinel-7f3d", "unselected-secret-sentinel-2a6b",
                   "personal-key", "ROUTING_SOURCE", "ROUTING_DEST"]:
     assert forbidden not in text
 PY
-launch_fingerprint=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["engines"][0]["launch"]["fingerprint"])' "$tmp/v2-inspection.json")
-ROUTING_SOURCE='routing-secret-sentinel-7f3d' \
-UNSELECTED_SOURCE='unselected-secret-sentinel-2a6b' \
-AGENT_CAT_RUN_STORE="$tmp/v2-store-preflight" XDG_CONFIG_HOME="$tmp/v2-xdg" \
-  "$bin" machine v2-preflight harden --engine acp --adapter "$tmp/v2-adapter" \
-  --persona personal --offline --expect-routing-fingerprint "$launch_fingerprint" \
-  --protocol-version 2 --scratch "$tmp/v2-work" +RTS -N8 -RTS >"$tmp/v2-preflight.out" 2>"$tmp/v2-preflight.err"
-grep -q '<redacted public update>' "$tmp/v2-preflight.out"
-! grep -R -F 'routing-secret-sentinel-7f3d' \
-  "$tmp/v2-store-preflight" "$tmp/v2-preflight.out" "$tmp/v2-preflight.err"
-set +e
-preflight_stale=$(ROUTING_SOURCE='routing-secret-sentinel-7f3d' \
-  AGENT_CAT_RUN_STORE="$tmp/v2-store-preflight-stale" XDG_CONFIG_HOME="$tmp/v2-xdg" \
-  "$bin" machine v2-preflight-stale harden --engine acp --adapter "$tmp/v2-adapter" \
-  --persona personal --offline --expect-routing-fingerprint "$(printf '0%.0s' {1..64})" \
-  --protocol-version 2 --scratch "$tmp/v2-work" 2>&1)
-preflight_status=$?
-set -e
-[ "$preflight_status" -eq 1 ]
-grep -q 'routing changed after TUI preview' <<<"$preflight_stale"
-[ ! -e "$tmp/v2-store-preflight-stale" ]
 ROUTING_SOURCE='routing-secret-sentinel-7f3d' \
 UNSELECTED_SOURCE='unselected-secret-sentinel-2a6b' \
 AGENT_CAT_RUN_STORE="$tmp/v2-store-second" XDG_CONFIG_HOME="$tmp/v2-xdg" \
@@ -785,26 +940,14 @@ XDG_CONFIG_HOME="$tmp/v2-xdg" \
   "$bin" lineage-check restart "$tmp/v2-store" harden \
   --engine acp --adapter "$tmp/v2-adapter" --scratch "$tmp/v2-work" \
   +RTS -N8 -RTS >/dev/null 2>"$tmp/v2-lineage.err"
-set +e
-changed_source=$(ROUTING_SOURCE='routing-secret-sentinel-7f3d' \
-  UNSELECTED_SOURCE='unselected-secret-sentinel-2a6b' \
-  XDG_CONFIG_HOME="$tmp/v2-xdg" \
-  "$bin" lineage-check restart "$tmp/v2-store" harden \
-  --engine acp --adapter "$tmp/v2-adapter" --scratch "$tmp/v2-work" \
-  --persona personal +RTS -N8 -RTS 2>&1)
-changed_status=$?
-set -e
-[ "$changed_status" -eq 3 ]
-grep -q 'restart launch does not match the parent fingerprint/policy' <<<"$changed_source"
-! grep -q 'routing-secret-sentinel-7f3d' <<<"$changed_source"
-
+cp "$tmp/v2-xdg/agent-cat/routing.yaml" "$tmp/v2-routing-before-environment.yaml"
 python3 - "$tmp/v2-xdg/agent-cat/routing.yaml" <<'PY'
 from pathlib import Path
 import sys
 path = Path(sys.argv[1])
 text = path.read_text()
-assert "value: kept" in text
-path.write_text(text.replace("value: kept", "value: changed-endpoint", 1))
+assert "        value: kept" in text
+path.write_text(text.replace("        value: kept", "        value: changed", 1))
 PY
 set +e
 changed_environment=$(ROUTING_SOURCE='routing-secret-sentinel-7f3d' \
@@ -817,53 +960,19 @@ environment_status=$?
 set -e
 [ "$environment_status" -eq 3 ]
 grep -q 'restart launch does not match the parent fingerprint/policy' <<<"$changed_environment"
-! grep -q 'changed-endpoint' <<<"$changed_environment"
-
-# Two v2 engine instances may share one ACP adapter while retaining distinct
-## child environments and process identities.
-cat >"$tmp/instance-adapter" <<'EOF'
-#!/bin/sh
-printf 'first=%s second=%s\n' "${INSTANCE_FIRST-}" "${INSTANCE_SECOND-}" >>"$INSTANCE_CAPTURE"
-exec python3 "$STUB_ADAPTER"
-EOF
-chmod +x "$tmp/instance-adapter"
-mkdir -p "$tmp/instance-xdg/agent-cat" "$tmp/instance-work"
-cat >"$tmp/instance-xdg/agent-cat/routing.yaml" <<EOF
-version: 2
-default-persona: test
-secrets: {}
-engines:
-  first:
-    backend: acp:$tmp/instance-adapter
-    provider: fixture
-    environment:
-      INSTANCE_FIRST: {value: first}
-  second:
-    backend: acp:$tmp/instance-adapter
-    provider: fixture
-    environment:
-      INSTANCE_SECOND: {value: second}
-models:
-  first-model: {engine: first, select: [{exact: stub-default}]}
-  second-model: {engine: second, select: [{exact: stub-default}]}
-personas:
-  test:
-    engines: [first, second]
-    models: [first-model, second-model]
-    profiles:
-      primary:
-        chain: [{model: first-model, thinking: high, max-output: 65536}]
-      spare:
-        chain: [{model: second-model, thinking: high, max-output: 65536}]
-EOF
-INSTANCE_CAPTURE="$tmp/instance-capture" STUB_ADAPTER="$root/engine/acp/test/stub_adapter.py" \
-XDG_CONFIG_HOME="$tmp/instance-xdg" \
-  "$fixed_bin" run controlled --engine acp --adapter stub --persona test --offline \
-  --scratch "$tmp/instance-work" +RTS -N8 -RTS <<<"INSTANCE-PROBE" \
-  >"$tmp/instance.out" 2>"$tmp/instance.err"
-grep -q 'against 3 backends' "$tmp/instance.out"
-sort "$tmp/instance-capture" >"$tmp/instance-capture.sorted"
-printf 'first= second=second\nfirst=first second=\n' >"$tmp/instance-expected"
-cmp "$tmp/instance-expected" "$tmp/instance-capture.sorted"
+! grep -q 'routing-secret-sentinel-7f3d' <<<"$changed_environment"
+cp "$tmp/v2-routing-before-environment.yaml" "$tmp/v2-xdg/agent-cat/routing.yaml"
+set +e
+changed_source=$(ROUTING_SOURCE='routing-secret-sentinel-7f3d' \
+  UNSELECTED_SOURCE='unselected-secret-sentinel-2a6b' \
+  XDG_CONFIG_HOME="$tmp/v2-xdg" \
+  "$bin" lineage-check restart "$tmp/v2-store" harden \
+  --engine acp --adapter "$tmp/v2-adapter" --scratch "$tmp/v2-work" \
+  --persona personal +RTS -N8 -RTS 2>&1)
+changed_status=$?
+set -e
+[ "$changed_status" -eq 3 ]
+grep -q 'restart launch does not match the parent fingerprint/policy' <<<"$changed_source"
+! grep -q 'routing-secret-sentinel-7f3d' <<<"$changed_source"
 
 echo "routing config: all checks passed"

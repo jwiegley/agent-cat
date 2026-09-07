@@ -29,6 +29,9 @@ module Agentic.RoutingConfig.V2
     sensitiveName,
     scalarV2Option,
     maxCatalogueBytes,
+    maxCatalogueUrlBytes,
+    maxCatalogueQueryBytes,
+    maxCatalogueQueryItems,
     maxCatalogueTimeoutMs,
     maxCatalogueHeaders,
     maxCatalogueHeaderValueBytes,
@@ -52,19 +55,21 @@ import Data.Aeson
   )
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
-import Data.Aeson.Types (Parser, parseEither)
+import Data.Aeson.Types (Parser, formatError, parseEither)
 import qualified Data.ByteString as BS
-import Data.Char (GeneralCategory (Format), generalCategory, isAlpha, isAlphaNum, isAscii, isControl, isSpace)
+import Data.Char (GeneralCategory (Format), generalCategory, isAlpha, isAlphaNum, isAscii, isControl, isHexDigit, isSpace)
 import Data.List (nub)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
-import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (decodeUtf8', encodeUtf8)
+import Network.HTTP.Types.URI (parseQuery)
 import qualified Data.Text.Read as TextRead
-import qualified Data.Yaml as Yaml
+import qualified Data.Yaml.Internal as YamlInternal
+import System.IO.Unsafe (unsafePerformIO)
+import qualified Text.Libyaml as LibYaml
 
 newtype SecretReference = SecretEnvironment
   { secretEnvironmentName :: Text
@@ -178,8 +183,11 @@ data SelectedRoutingV2 = SelectedRoutingV2
   }
   deriving (Eq, Show)
 
-maxCatalogueBytes, maxCatalogueTimeoutMs, maxCatalogueHeaders, maxCatalogueHeaderValueBytes, maxCatalogueHeaderBytes, maxCataloguePages, maxCatalogueModels, maxModelIdBytes :: Int
+maxCatalogueBytes, maxCatalogueUrlBytes, maxCatalogueQueryBytes, maxCatalogueQueryItems, maxCatalogueTimeoutMs, maxCatalogueHeaders, maxCatalogueHeaderValueBytes, maxCatalogueHeaderBytes, maxCataloguePages, maxCatalogueModels, maxModelIdBytes :: Int
 maxCatalogueBytes = 4 * 1024 * 1024
+maxCatalogueUrlBytes = 8192
+maxCatalogueQueryBytes = 4096
+maxCatalogueQueryItems = 64
 maxCatalogueTimeoutMs = 60000
 maxCatalogueHeaders = 64
 maxCatalogueHeaderValueBytes = 8192
@@ -327,16 +335,14 @@ instance FromJSON RoutingConfigV2 where
 
 instance FromJSON ProjectRoutingV2 where
   parseJSON = withObject "project routing" $ \o -> do
-    onlyKeys "project routing" ["version", "persona", "profiles"] o
+    projectKeys o
     version <- o .: "version"
     unless (version == (2 :: Int)) (fail "project routing version is not 2")
     ProjectRoutingV2 <$> o .: "persona" <*> (fromMaybe Map.empty <$> o .:? "profiles")
 
 routingDocumentVersion :: BS.ByteString -> Either Text Int
 routingDocumentVersion bytes = do
-  text <- firstText (T.pack . show) (decodeUtf8' bytes)
-  rejectDuplicateYaml text
-  value <- firstText (T.pack . Yaml.prettyPrintParseException) (Yaml.decodeEither' bytes :: Either Yaml.ParseException Value)
+  value <- (decodeYaml bytes :: Either Text Value)
   firstText T.pack (parseEither (withObject "routing document" (.: "version")) value)
 
 decodeRoutingUserV2 :: BS.ByteString -> Either Text RoutingConfigV2
@@ -379,7 +385,6 @@ validateRoutingV2 config@RoutingConfigV2 {..} = do
   unless (routingV2DefaultPersona `Map.member` routingV2Personas) $
     Left ("default persona '" <> routingV2DefaultPersona <> "' is not declared")
   forM_ (Map.toList routingV2Engines) $ \(name, engine) -> validateEngine routingV2Secrets name engine
-  validateBackendAliases routingV2Engines
   forM_ (Map.toList routingV2Models) $ \(name, model) -> validateConcreteModel routingV2Engines name model
   forM_ (Map.toList routingV2Personas) $ \(name, persona) -> validatePersona config name persona
   pure config
@@ -387,8 +392,7 @@ validateRoutingV2 config@RoutingConfigV2 {..} = do
 validateEngine :: Map Text SecretReference -> Text -> EngineDefinition -> Either Text ()
 validateEngine secrets name EngineDefinition {..} = do
   case engineBackend of
-    BackendDeck _ | not (Map.null engineEnvironment) ->
-      Left ("deck engine '" <> name <> "' cannot declare child environment bindings")
+    BackendDeck _ -> unless (Map.null engineEnvironment) (Left ("deck engine '" <> name <> "' cannot declare child environment bindings"))
     _ -> pure ()
   forM_ (Map.toList engineEnvironment) $ \(variable, binding) -> do
     unless (environmentName variable) (Left ("engine '" <> name <> "' has invalid environment variable '" <> variable <> "'"))
@@ -402,25 +406,6 @@ validateEngine secrets name EngineDefinition {..} = do
       unless (catalogueAuthSecret auth `Map.member` secrets) $
         Left ("engine '" <> name <> "' catalogue names unknown secret '" <> catalogueAuthSecret auth <> "'")
 
-validateBackendAliases :: Map Text EngineDefinition -> Either Text ()
-validateBackendAliases engines =
-  forM_ (Map.toList grouped) $ \(backend, definitions) -> case definitions of
-    [] -> pure ()
-    (firstName, firstDefinition) : rest -> case backend of
-      BackendAcp _ -> pure ()
-      BackendDeck _ ->
-        unless (all ((== firstDefinition) . snd) rest) $
-          Left
-            ( "deck engine aliases "
-                <> T.intercalate ", " (firstName : map fst rest)
-                <> " share backend "
-                <> T.pack (show backend)
-                <> " but have different definitions"
-            )
-  where
-    grouped =
-      Map.fromListWith (<>)
-        [(engineBackend definition, [(name, definition)]) | (name, definition) <- Map.toList engines]
 
 validateConcreteModel :: Map Text EngineDefinition -> Text -> ConcreteModel -> Either Text ()
 validateConcreteModel engines name model =
@@ -429,9 +414,8 @@ validateConcreteModel engines name model =
 
 validatePersona :: RoutingConfigV2 -> Text -> Persona -> Either Text ()
 validatePersona RoutingConfigV2 {..} name Persona {..} = do
-  nonEmptyDistinct ("persona '" <> name <> "' engines") personaEngines
-  nonEmptyDistinct ("persona '" <> name <> "' models") personaModels
-  when (Map.null personaProfiles) (Left ("persona '" <> name <> "' has no profiles"))
+  distinct ("persona '" <> name <> "' engines") personaEngines
+  distinct ("persona '" <> name <> "' models") personaModels
   forM_ personaEngines $ \engine ->
     unless (engine `Map.member` routingV2Engines) (Left ("persona '" <> name <> "' names unknown engine '" <> engine <> "'"))
   forM_ personaModels $ \modelName -> do
@@ -479,38 +463,74 @@ validateCatalogue catalogue@Catalogue {..} = do
 
 validateUrl :: Maybe CatalogueAuth -> Text -> Either Text ()
 validateUrl auth url = do
+  when (BS.length (encodeUtf8 url) > maxCatalogueUrlBytes) (Left "catalogue URL exceeds 8192 UTF-8 bytes")
   when (T.any (\c -> isSpace c || isControl c) url) (Left "catalogue URL contains whitespace or controls")
   when ("#" `T.isInfixOf` url) (Left "catalogue URL contains a fragment")
   let (scheme, separator) = T.breakOn "://" url
   when (T.null separator) (Left "catalogue URL has no scheme")
   let afterScheme = T.drop 3 separator
       authority = T.takeWhile (\c -> c /= '/' && c /= '?' && c /= '#') afterScheme
-      host =
-        if "[" `T.isPrefixOf` authority
-          then T.takeWhile (/= ']') (T.drop 1 authority)
-          else T.takeWhile (/= ':') authority
-      loopback = host == "::1" || ipv4Loopback host
       query = case T.breakOn "?" url of
         (_, rest) | T.null rest -> ""
         (_, rest) -> T.takeWhile (/= '#') (T.drop 1 rest)
-      queryKeys = [T.takeWhile (/= '=') part | part <- T.splitOn "&" query, not (T.null part)]
   when (T.null authority) (Left "catalogue URL has no authority")
   when ("@" `T.isInfixOf` authority) (Left "catalogue URL contains user-info")
+  host <- maybe (Left "catalogue URL has an invalid authority") Right (authorityHost authority)
+  when (BS.length (encodeUtf8 query) > maxCatalogueQueryBytes) (Left "catalogue URL query exceeds 4096 UTF-8 bytes")
+  unless (validPercentEncoding query) (Left "catalogue URL contains malformed percent encoding")
+  let queryItems = parseQuery (encodeUtf8 ("?" <> query))
+  when (length queryItems > maxCatalogueQueryItems) (Left "catalogue URL query has more than 64 items")
+  queryKeys <-
+    traverse
+      (firstText (const "catalogue URL query key is not UTF-8") . decodeUtf8')
+      [key | (key, _) <- queryItems]
   when (any sensitiveName queryKeys) (Left "catalogue URL contains a credential-shaped query key")
   case (T.toLower scheme, auth) of
     ("https", _) -> pure ()
-    ("http", Nothing) -> unless loopback (Left "unauthenticated HTTP catalogue is not a literal loopback address")
+    ("http", Nothing) -> unless (literalLoopback host) (Left "unauthenticated HTTP catalogue is not a literal loopback address")
     ("http", Just _) -> Left "authenticated catalogue URL uses plain HTTP"
     _ -> Left "catalogue URL scheme is not HTTP or HTTPS"
 
-ipv4Loopback :: Text -> Bool
-ipv4Loopback host = case T.splitOn "." host of
-  first : rest -> first == "127" && length rest == 3 && all validOctet rest
-  [] -> False
+authorityHost :: Text -> Maybe Text
+authorityHost authority
+  | Just bracketed <- T.stripPrefix "[" authority =
+      let (host, closing) = T.breakOn "]" bracketed
+       in if T.null host || T.null closing || not (validPortSuffix (T.drop 1 closing)) then Nothing else Just host
+  | otherwise = case T.splitOn ":" authority of
+      [host] | not (T.null host) -> Just host
+      [host, port] | not (T.null host) && validPort port -> Just host
+      _ -> Nothing
+
+validPortSuffix :: Text -> Bool
+validPortSuffix suffix
+  | T.null suffix = True
+  | Just port <- T.stripPrefix ":" suffix = validPort port
+  | otherwise = False
+
+validPort :: Text -> Bool
+validPort value = case TextRead.decimal value of
+  Right (port, rest) -> T.null rest && port >= (0 :: Int) && port <= 65535
+  Left _ -> False
+
+literalLoopback :: Text -> Bool
+literalLoopback "::1" = True
+literalLoopback host = case traverse octet (T.splitOn "." host) of
+  Just [127, _, _, _] -> True
+  _ -> False
   where
-    validOctet octet = case TextRead.decimal octet :: Either String (Integer, Text) of
-      Right (value, suffix) -> not (T.null octet) && T.null suffix && value <= 255
-      Left _ -> False
+    octet value = case TextRead.decimal value of
+      Right (number, rest) | T.null rest && number >= (0 :: Int) && number <= 255 -> Just number
+      _ -> Nothing
+
+validPercentEncoding :: Text -> Bool
+validPercentEncoding value = case T.uncons value of
+  Nothing -> True
+  Just ('%', rest) -> case T.uncons rest of
+    Just (first, rest') | isHexDigit first -> case T.uncons rest' of
+      Just (second, more) | isHexDigit second -> validPercentEncoding more
+      _ -> False
+    _ -> False
+  Just (_, rest) -> validPercentEncoding rest
 
 validateHeaders :: Maybe CatalogueAuth -> Map Text Text -> Either Text ()
 validateHeaders auth headers = do
@@ -579,9 +599,8 @@ validateProfileName name = do
   unless (not (T.null name) && name == T.strip name) (Left "profile name is empty or has surrounding whitespace")
   when ("#" `T.isInfixOf` name) (Left ("profile name '" <> name <> "' contains reserved character '#'"))
 
-nonEmptyDistinct :: Text -> [Text] -> Either Text ()
-nonEmptyDistinct label values = do
-  when (null values) (Left (label <> " is empty"))
+distinct :: Text -> [Text] -> Either Text ()
+distinct label values =
   when (length values /= length (nub values)) (Left (label <> " contains duplicates"))
 
 
@@ -602,47 +621,27 @@ onlyKeys label allowed object =
     [] -> pure ()
     unknown -> fail (label <> " has unknown field(s): " <> T.unpack (T.intercalate ", " unknown))
 
+projectKeys :: Object -> Parser ()
+projectKeys object =
+  case filter (`notElem` ["version", "persona", "profiles"]) (map Key.toText (KeyMap.keys object)) of
+    [] -> pure ()
+    unknown ->
+      fail
+        ( "project routing has unknown field(s): "
+            <> T.unpack (T.intercalate ", " unknown)
+            <> "; privileged routing definitions belong only in the user file"
+        )
+
+-- Data.Yaml's pure decoder intentionally drops duplicate-key warnings. Use the
+-- same pinned libyaml decoder while retaining those warnings before FromJSON.
 decodeYaml :: (FromJSON a) => BS.ByteString -> Either Text a
-decodeYaml bytes = firstText (T.pack . Yaml.prettyPrintParseException) (Yaml.decodeEither' bytes)
-
-rejectDuplicateYaml :: Text -> Either Text ()
-rejectDuplicateYaml source = case duplicateYamlKeys source of
-  [] -> pure ()
-  (line, key) : _ -> Left ("duplicate YAML key '" <> key <> "' at line " <> T.pack (show line))
-
-duplicateYamlKeys :: Text -> [(Int, Text)]
-duplicateYamlKeys source = reverse duplicates
-  where
-    (_, duplicates) = foldl step ([], []) (zip [1 :: Int ..] (T.lines source))
-    step (stack, found) (lineNumber, raw)
-      | T.null body || "#" `T.isPrefixOf` body = (stack, found)
-      | otherwise =
-          let item = "- " `T.isPrefixOf` body
-              keyDepth = indentation + if item then 2 else 0
-              content = if item then T.drop 2 body else body
-              trimmed = if item then dropWhile ((>= keyDepth) . fst) stack else dropWhile ((> keyDepth) . fst) stack
-              scoped = case trimmed of
-                (depth, _) : _ | depth == keyDepth -> trimmed
-                _ -> (keyDepth, Set.empty) : trimmed
-           in case yamlKey content of
-                Nothing -> (scoped, found)
-                Just key -> case scoped of
-                  (depth, seen) : rest
-                    | key `Set.member` seen -> ((depth, seen) : rest, (lineNumber, key) : found)
-                    | otherwise -> ((depth, Set.insert key seen) : rest, found)
-                  [] -> ([(keyDepth, Set.singleton key)], found)
-      where
-        indentation = T.length (T.takeWhile (== ' ') raw)
-        body = T.stripStart raw
-    yamlKey content =
-      let (rawKey, suffix) = T.breakOn ":" content
-          key = unquote (T.strip rawKey)
-       in if T.null suffix || T.null key then Nothing else Just key
-    unquote value
-      | Just inner <- T.stripPrefix "\"" value >>= T.stripSuffix "\"" = inner
-      | Just inner <- T.stripPrefix "'" value >>= T.stripSuffix "'" = inner
-      | otherwise = value
+decodeYaml bytes = unsafePerformIO $ do
+  decoded <- YamlInternal.decodeHelper (LibYaml.decode bytes)
+  pure $ case decoded of
+    Left problem -> Left (T.pack (YamlInternal.prettyPrintParseException problem))
+    Right (YamlInternal.DuplicateKey path : _, _) -> Left (T.pack (formatError path "duplicate YAML key"))
+    Right ([], parsed) -> firstText T.pack parsed
+{-# NOINLINE decodeYaml #-}
 
 firstText :: (e -> Text) -> Either e a -> Either Text a
 firstText render = either (Left . render) Right
-

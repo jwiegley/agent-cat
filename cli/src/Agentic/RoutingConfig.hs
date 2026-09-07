@@ -57,8 +57,11 @@ module Agentic.RoutingConfig
     expandRoutingConfigV2,
     freezeRoutingConfigV2,
     resolveRoutingConfigV2,
+    RoutingLayerRole (..),
     discoverRoutingFiles,
+    discoverRoutingLayers,
     loadRoutingFiles,
+    loadRoutingLayers,
     loadRoutingConfig,
   )
 where
@@ -149,6 +152,12 @@ data RoutingConfig = RoutingConfig
   }
   deriving (Eq, Show)
 
+-- | Trust assigned by path discovery, before document contents are decoded.
+-- Version 2 uses this tag to prevent a project document from being interpreted
+-- as privileged user configuration.
+data RoutingLayerRole = UserRoutingLayer | ProjectRoutingLayer
+  deriving (Eq, Show)
+
 -- | The merged configuration together with the files that contributed to it,
 -- in increasing precedence order.
 data LoadedRouting = LoadedRouting
@@ -188,6 +197,11 @@ emptyRoutingConfig = RoutingConfig Map.empty Map.empty
 
 -- The list representation is intentional: unlike an object decoder, it can
 -- reject duplicate names instead of silently retaining one value.
+newtype RoutingVersionFile = RoutingVersionFile Int
+
+instance FromJSON RoutingVersionFile where
+  parseJSON = withObject "routing document" $ \o -> RoutingVersionFile <$> o .: "version"
+
 data RoutingFile = RoutingFile [Router] [Profile]
 
 instance FromJSON RoutingFile where
@@ -313,6 +327,11 @@ sensitive key =
 -- | Decode and validate one complete version-1 document.
 decodeRoutingConfig :: BS.ByteString -> Either Text RoutingConfig
 decodeRoutingConfig bytes = decodeRoutingLayer bytes >>= validateRoutingConfig
+
+decodeLayerVersion :: BS.ByteString -> Either Text Int
+decodeLayerVersion bytes = case Yaml.decodeEither' bytes of
+  Left problem -> Left (T.pack (Yaml.prettyPrintParseException problem))
+  Right (RoutingVersionFile version) -> Right version
 
 decodeRoutingLayer :: BS.ByteString -> Either Text RoutingConfig
 decodeRoutingLayer bytes = case Yaml.decodeEither' bytes of
@@ -593,15 +612,32 @@ overlayRoutes defaultBackend lower higher =
   let claimed = map fst higher
    in routes defaultBackend (filter ((`notElem` claimed) . fst) lower <> higher)
 
--- | Discover the user layer followed by the nearest project layer.  The first
--- argument is the already-resolved XDG configuration home, which keeps tests
--- independent of process-global environment variables.
+-- | Discover untagged routing paths for version-1 API compatibility. The
+-- composition root uses private role-preserving discovery for version 2.
 discoverRoutingFiles :: FilePath -> FilePath -> IO [FilePath]
-discoverRoutingFiles configHome cwd = do
+discoverRoutingFiles configHome cwd = map snd <$> discoverRoutingLayers configHome cwd
+
+-- | Discover the trusted user path followed by the nearest untrusted project
+-- path. Authority comes from this path-derived role, never from YAML shape.
+discoverRoutingLayers :: FilePath -> FilePath -> IO [(RoutingLayerRole, FilePath)]
+discoverRoutingLayers configHome cwd = do
   let user = configHome </> "agent-cat" </> "routing.yaml"
   userThere <- doesFileExist user
   project <- nearestProjectFile cwd
-  pure (nub (catMaybes [if userThere then Just user else Nothing, project]))
+  pure
+    ( deduplicate
+        []
+        ( catMaybes
+            [ if userThere then Just (UserRoutingLayer, user) else Nothing,
+              fmap (\path -> (ProjectRoutingLayer, path)) project
+            ]
+        )
+    )
+  where
+    deduplicate _ [] = []
+    deduplicate seen (layer@(_, path) : rest)
+      | path `elem` seen = deduplicate seen rest
+      | otherwise = layer : deduplicate (path : seen) rest
 
 nearestProjectFile :: FilePath -> IO (Maybe FilePath)
 nearestProjectFile = go
@@ -616,31 +652,44 @@ nearestProjectFile = go
           let parent = takeDirectory directory
           if gitBoundary || parent == directory then pure Nothing else go parent
 
--- | Read, validate and overlay files in increasing precedence order. Version-1
--- layers preserve their historical merge behavior. Version-2 consists of one
--- privileged user document followed by at most one project selector; versions
--- may never be mixed.
+-- | Read and overlay version-1 files in increasing precedence order. Untagged
+-- version-2 input is refused because its user/project authority is unknowable.
 loadRoutingFiles :: [FilePath] -> IO (Either Text LoadedRouting)
-loadRoutingFiles files = do
+loadRoutingFiles files = loadRoutingDocuments [(Nothing, path) | path <- files]
+
+-- | Read routing files whose authority was assigned before decoding. Version-1
+-- retains its historical overlay behavior; version 2 requires one user layer
+-- followed by at most one project layer.
+loadRoutingLayers :: [(RoutingLayerRole, FilePath)] -> IO (Either Text LoadedRouting)
+loadRoutingLayers layers = loadRoutingDocuments [(Just role, path) | (role, path) <- layers]
+
+loadRoutingDocuments :: [(Maybe RoutingLayerRole, FilePath)] -> IO (Either Text LoadedRouting)
+loadRoutingDocuments files = do
   readResult <- traverse readLayer files
   pure $ do
     layers <- sequence readResult
-    versions <- traverse (\(path, bytes) -> firstAt path (routingDocumentVersion bytes)) layers
+    versions <- traverse (\(_, path, bytes) -> firstAt path (decodeLayerVersion bytes)) layers
     let distinctVersions = nub versions
     case distinctVersions of
       [] -> Right (LoadedRouting emptyRoutingConfig [] Nothing Nothing)
-      [1] -> loadV1Layers layers
-      [2] -> loadV2Layers layers
+      [1] -> loadV1Layers [(path, bytes) | (_, path, bytes) <- layers]
+      [2] -> do
+        tagged <- traverse requireRole layers
+        loadV2Layers tagged
       [version] -> Left ("unsupported routing configuration version " <> T.pack (show version))
       _
         | all (`elem` [1, 2]) distinctVersions -> Left "routing configuration cannot mix version 1 and version 2 documents"
         | otherwise -> Left ("unsupported routing configuration versions " <> T.intercalate ", " (map (T.pack . show) distinctVersions))
   where
-    readLayer path = do
+    readLayer (role, path) = do
       result <- try (BS.readFile path)
       pure $ case result of
         Left problem -> Left (T.pack path <> ": " <> T.pack (show (problem :: IOException)))
-        Right bytes -> Right (path, bytes)
+        Right bytes -> Right (role, path, bytes)
+
+    requireRole (Nothing, path, _) =
+      Left (T.pack path <> ": version-2 routing requires path-derived user/project authority")
+    requireRole (Just role, path, bytes) = Right (role, path, bytes)
 
     firstAt path = either (Left . ((T.pack path <> ": ") <>)) Right
 
@@ -655,41 +704,31 @@ loadV1Layers layers = do
       pure (mergeRoutingConfig base layer)
     firstAt path = either (Left . ((T.pack path <> ": ") <>)) Right
 
-loadV2Layers :: [(FilePath, BS.ByteString)] -> Either Text LoadedRouting
+loadV2Layers :: [(RoutingLayerRole, FilePath, BS.ByteString)] -> Either Text LoadedRouting
 loadV2Layers layers = do
-  (user, project) <- foldl apply (Right (Nothing, Nothing)) layers
-  privileged <- maybe (Left "version-2 routing requires one user document declaring engines, models, and personas") Right user
+  users <- traverse (uncurry firstUserAt) [(path, bytes) | (UserRoutingLayer, path, bytes) <- layers]
+  projects <- traverse (uncurry firstProjectAt) [(path, bytes) | (ProjectRoutingLayer, path, bytes) <- layers]
+  let roles = [role | (role, _, _) <- layers]
+  unless (roles == [UserRoutingLayer] || roles == [UserRoutingLayer, ProjectRoutingLayer]) $
+    Left "version-2 routing requires one user document followed by at most one project document"
+  (privileged, project) <- case (users, projects) of
+    ([user], []) -> Right (user, Nothing)
+    ([user], [project]) -> Right (user, Just project)
+    _ -> Left "version-2 routing requires one user document followed by at most one project document"
   forM_ project $ \selector -> do
     _ <- selectRoutingPersona privileged Nothing Nothing (Just selector)
     pure ()
   pure
     LoadedRouting
       { loadedRouting = emptyRoutingConfig,
-        loadedRoutingSources = map fst layers,
+        loadedRoutingSources = [path | (_, path, _) <- layers],
         loadedRoutingV2User = Just privileged,
         loadedRoutingV2Project = project
       }
   where
-    apply accumulated (path, bytes) = do
-      (user, project) <- accumulated
-      case decodeRoutingUserV2 bytes of
-        Right privileged
-          | user /= Nothing -> Left (T.pack path <> ": version-2 routing declares more than one user document")
-          | project /= Nothing -> Left (T.pack path <> ": version-2 user routing must precede project routing")
-          | otherwise -> Right (Just privileged, project)
-        Left userProblem -> case decodeRoutingProjectV2 bytes of
-          Right selector
-            | project /= Nothing -> Left (T.pack path <> ": version-2 routing declares more than one project document")
-            | otherwise -> Right (user, Just selector)
-          Left projectProblem ->
-            Left
-              ( T.pack path
-                  <> ": document is neither valid version-2 user routing ("
-                  <> userProblem
-                  <> ") nor project routing ("
-                  <> projectProblem
-                  <> ")"
-              )
+    firstUserAt path bytes = firstAt path (decodeRoutingUserV2 bytes)
+    firstProjectAt path bytes = firstAt path (decodeRoutingProjectV2 bytes)
+    firstAt path = either (Left . ((T.pack path <> ": ") <>)) Right
 
 -- | Load the conventional user and project files for this process.
 loadRoutingConfig :: IO (Either Text LoadedRouting)
@@ -700,4 +739,4 @@ loadRoutingConfig = do
         Just path | not (null path) -> path
         _ -> home </> ".config"
   cwd <- getCurrentDirectory
-  discoverRoutingFiles configHome cwd >>= loadRoutingFiles
+  discoverRoutingLayers configHome cwd >>= loadRoutingLayers

@@ -321,6 +321,7 @@ validateHeaders auth headers = do
 
 validateCatalogueUrl :: Maybe Auth -> Text -> Check ()
 validateCatalogueUrl auth url = do
+  ensure (BS.length (encodeUtf8 url) <= 8192) "catalogue URL exceeds 8192 bytes"
   ensure (not (T.any (\c -> isSpace c || isControl c) url)) "catalogue URL contains whitespace or controls"
   ensure (not ("#" `T.isInfixOf` url)) "catalogue URL contains a fragment"
   let (scheme, withSeparator) = T.breakOn "://" url
@@ -335,9 +336,12 @@ validateCatalogueUrl auth url = do
       query = case T.breakOn "?" url of
         (_, rest) | T.null rest -> ""
         (_, rest) -> T.takeWhile (/= '#') (T.drop 1 rest)
-      queryKeys = [T.takeWhile (/= '=') piece | piece <- T.splitOn "&" query, not (T.null piece)]
+      queryParts = filter (not . T.null) (T.splitOn "&" query)
+      queryKeys = map (T.takeWhile (/= '=')) queryParts
   ensure (not (T.null authority)) "catalogue URL has no authority"
   ensure (not ("@" `T.isInfixOf` authority)) "catalogue URL contains user-info"
+  ensure (BS.length (encodeUtf8 query) <= 4096) "catalogue URL query exceeds 4096 bytes"
+  ensure (length queryParts <= 64) "catalogue URL query has more than 64 items"
   ensure (not (any sensitiveName queryKeys)) "catalogue URL contains a sensitive query key"
   case (T.toLower scheme, auth) of
     ("https", _) -> pure ()
@@ -668,9 +672,12 @@ main = do
         ]
     )
   expect
-    "header, timeout, body, and duration bounds are enforced"
+    "URL, query, header, timeout, body, and duration bounds are enforced"
     ( allLeft
-        [ checkCatalogue codexCatalogue {catalogueTimeoutMs = 60001},
+        [ checkCatalogue codexCatalogue {catalogueUrl = "https://" <> T.replicate 8200 "a"},
+          checkCatalogue codexCatalogue {catalogueUrl = "https://api.openai.com/v1/models?q=" <> T.replicate 4097 "x"},
+          checkCatalogue codexCatalogue {catalogueUrl = "https://api.openai.com/v1/models?" <> T.intercalate "&" ["p" <> T.pack (show i) <> "=x" | i <- [1 .. 65 :: Int]]},
+          checkCatalogue codexCatalogue {catalogueTimeoutMs = 60001},
           checkCatalogue codexCatalogue {catalogueMaxBytes = 4194305},
           checkCatalogue codexCatalogue {catalogueHeaders = Map.singleton "x-long" (T.replicate 8193 "x")},
           checkCatalogue codexCatalogue {catalogueHeaders = Map.fromList [("x-" <> T.pack (show i), "v") | i <- [1 .. 65 :: Int]]},

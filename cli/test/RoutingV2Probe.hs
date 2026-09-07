@@ -422,11 +422,17 @@ main = do
 
   let privilegedProject = BS.unlines ["version: 2", "persona: personal", "engines: {}"]
       duplicateNested = BS.unlines ["version: 2", "persona: personal", "profiles:", "  deep:", "    chain: []", "    chain: []"]
+      duplicateFlow = "version: 2\npersona: personal\nprofiles: {deep: {chain: [], chain: []}}\n"
       mixedUnknown = BS.unlines ["version: 2", "default-persona: personal", "surprise: true", "secrets: {}", "engines: {}", "models: {}", "personas: {}"]
       sensitiveLiteral = BS.unlines ["version: 2", "default-persona: p", "secrets: {}", "engines:", "  e:", "    backend: acp:stub", "    provider: p", "    environment:", "      OPENAI_API_KEY:", "        value: literal", "models:", "  m:", "    engine: e", "    select:", "      - exact: m", "personas:", "  p:", "    engines: [e]", "    models: [m]", "    profiles:", "      deep:", "        chain:", "          - model: m", "            thinking: low", "            max-output: 1"]
       unauthorizedModel = BS.unlines ["version: 2", "default-persona: p", "secrets: {}", "engines:", "  e:", "    backend: acp:stub", "    provider: p", "models:", "  allowed:", "    engine: e", "    select:", "      - exact: allowed", "  denied:", "    engine: e", "    select:", "      - exact: denied", "personas:", "  p:", "    engines: [e]", "    models: [allowed]", "    profiles:", "      deep:", "        chain:", "          - model: denied", "            thinking: low", "            max-output: 1"]
       authenticatedHttp = BS.pack . T.unpack $ T.replace "https://api.anthropic.com/v1/models" "http://127.0.0.1:8080/v1/models" (T.pack (BS.unpack userYaml))
       credentialQuery = BS.pack . T.unpack $ T.replace "https://api.anthropic.com/v1/models" "https://api.anthropic.com/v1/models?api_key=literal" userText
+      encodedCredentialQuery = BS.pack . T.unpack $ T.replace "https://api.anthropic.com/v1/models" "https://api.anthropic.com/v1/models?to%6ben=literal" userText
+      malformedQuery = BS.pack . T.unpack $ T.replace "https://api.anthropic.com/v1/models" "https://api.anthropic.com/v1/models?name%=literal" userText
+      tooLongUrl = BS.pack . T.unpack $ T.replace "https://api.anthropic.com/v1/models" ("https://" <> T.replicate 8200 "a") userText
+      tooLongQuery = BS.pack . T.unpack $ T.replace "https://api.anthropic.com/v1/models" ("https://api.anthropic.com/v1/models?q=" <> T.replicate 4097 "x") userText
+      tooManyQueryItems = BS.pack . T.unpack $ T.replace "https://api.anthropic.com/v1/models" ("https://api.anthropic.com/v1/models?" <> T.intercalate "&" ["p" <> T.pack (show index) <> "=x" | index <- [1 :: Int .. 65]]) userText
       userText = T.pack (BS.unpack userYaml)
       headerNeedle = "      headers:\n        anthropic-version: '2023-06-01'"
       withHeaders rows = BS.pack . T.unpack $ T.replace headerNeedle ("      headers:\n" <> T.unlines (map ("        " <>) rows)) userText
@@ -437,8 +443,9 @@ main = do
       badCacheWindow = BS.pack . T.unpack $ T.replace "stale-if-error: 7d" "stale-if-error: 1h" userText
   check failures "project layer cannot declare engines" $
     isLeftContaining "project routing has unknown field" (decodeRoutingProjectV2 privilegedProject)
-  check failures "nested duplicate YAML keys are refused before decode" $
-    isLeftContaining "duplicate YAML key 'chain'" (decodeRoutingProjectV2 duplicateNested)
+  check failures "nested and flow duplicate YAML keys are refused before decode" $
+    isLeftContaining "duplicate YAML key" (decodeRoutingProjectV2 duplicateNested)
+      && isLeftContaining "duplicate YAML key" (decodeRoutingProjectV2 duplicateFlow)
   check failures "unknown v2 fields are refused" $
     isLeftContaining "unknown field" (decodeRoutingUserV2 mixedUnknown)
   check failures "sensitive environment variables require secret references" $
@@ -447,6 +454,12 @@ main = do
     isLeftContaining "authenticated catalogue URL uses plain HTTP" (decodeRoutingUserV2 authenticatedHttp)
   check failures "catalogue URLs reject credential-shaped query keys" $
     isLeftContaining "credential-shaped query key" (decodeRoutingUserV2 credentialQuery)
+      && isLeftContaining "credential-shaped query key" (decodeRoutingUserV2 encodedCredentialQuery)
+      && isLeftContaining "malformed percent encoding" (decodeRoutingUserV2 malformedQuery)
+  check failures "catalogue URL and query bounds are enforced" $
+    isLeftContaining "8192" (decodeRoutingUserV2 tooLongUrl)
+      && isLeftContaining "4096" (decodeRoutingUserV2 tooLongQuery)
+      && isLeftContaining "64" (decodeRoutingUserV2 tooManyQueryItems)
   check failures "catalogue header count, value, and aggregate bytes are bounded" $
     isLeftContaining "more than 64 headers" (decodeRoutingUserV2 tooManyHeaders)
       && isLeftContaining "exceeds 8192 bytes" (decodeRoutingUserV2 tooLongHeader)
@@ -477,7 +490,13 @@ main = do
   (projectPath, projectHandle) <- openBinaryTempFile temporary "agent-cat-routing-project.yaml"
   BS.hPut projectHandle projectYaml
   hClose projectHandle
-  loadedV2 <- loadRoutingFiles [userPath, projectPath]
+  untagged <- loadRoutingFiles [userPath, projectPath]
+  check failures "untagged version-2 files cannot infer authority from shape" $
+    isLeftContaining "path-derived user/project authority" untagged
+  hostileProject <- loadRoutingLayers [(ProjectRoutingLayer, userPath)]
+  check failures "a user-shaped project file cannot gain user authority" $
+    isLeftContaining "project routing" hostileProject
+  loadedV2 <- loadRoutingLayers [(UserRoutingLayer, userPath), (ProjectRoutingLayer, projectPath)]
   check failures "v2 user and project layers load without becoming legacy routing" $
     case loadedV2 of
       Right loaded ->

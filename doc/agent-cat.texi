@@ -944,18 +944,18 @@ Alternate pins are execution policy that is collected before the run.  An
 added alternate changes the printed program, but it leaves the elaborated Plan,
 the denotation, and the static cost unchanged.
 
-A live run has a default backend and may add @code{--route NAME=BACKEND} entries
-for serving-model pins.  Under routing schema version 1, unrouted pins, unpinned
-model questions, tools, and people use the default.  Routing selects an answering
-service after the program and its static analyses already exist.  It therefore
-changes neither Plan shape nor price.
+A live run has a default backend, and schema version 1 can add
+@code{--route NAME=BACKEND} entries for serving-model pins.  Unrouted pins,
+unpinned model questions, tools, and people use the default.  Routing selects an
+answering service after the program and its static analyses already exist.  It
+therefore changes neither the shape of the Plan nor its price.
 
-Routing schema version 2 adds an operational persona above the same resolver.
-The user file owns environment references, engines, catalogues, concrete model
-aliases, persona allowlists, and profile chains.  A project file may select a
-persona and replace whole profiles but cannot introduce any of those privileged
-objects.  The selected persona is never a workflow input or @code{run.*} fact.
-Exact or deterministically ordered-prefix selectors freeze one model id and its
+Schema version 2 adds an operational persona above the same resolver.  The user
+file owns environment references, engines, catalogues, concrete model aliases,
+persona allowlists, and profile chains.  A project file can select a persona and
+replace whole profiles, but it cannot introduce those privileged objects.  The
+selected persona is never a workflow input or a @code{run.*} fact.  Exact or
+deterministically ordered-prefix selectors freeze one model identifier and its
 non-secret provenance before an engine starts.
 
 Fail-over occurs within the authored pin chain.  Routing can place different
@@ -2033,13 +2033,13 @@ at least one backend of the corresponding scheme uses them.  @code{--adapter},
 and @code{--verbose} apply to both.  A foreign flag with no backend to consume
 it is refused rather than ignored.
 
-For a version-2 managed axis, @code{--realize AXIS=MODEL-ALIAS} is the safe
+A version-2 managed axis uses @code{--realize AXIS=MODEL-ALIAS} as its safe
 override.  The alias carries its authorized engine, provider, environment, and
-catalogue.  Raw @code{--route} for that axis is refused; raw routes remain
-unchanged for version 1 and for symbolic names with no selected v2 profile.
+catalogue.  Raw @code{--route} is refused for such an axis, and it remains
+unchanged for schema version 1 and unconfigured version-2 names.
 
-Scripted execution accepts no routes because its table does not dispatch by
-serving-model scope.  A route also requires a default live answerer, since
+Scripted execution accepts no routes, because its table does not dispatch by
+serving-model scope.  A route also requires a default live answerer, because
 unclaimed questions still need a destination.
 
 @section Inputs and preflight checks
@@ -2158,12 +2158,12 @@ workflows and their registry data.  @code{bisim-support} holds the generators,
 the guards, and the oracle client.  The private @code{verification} library
 assembles complete conformance observations.  The executables are the runner
 @command{agentic-run}, the three conformance programs @command{tier0},
-@command{tier1}, and @command{bisim}, and the four probes
+@command{tier1}, and @command{bisim}, and the six probes
 @command{policy-probe}, @command{routing-config-probe},
 @command{routing-v2-probe}, @command{routing-discovery-probe},
-@command{routing-fixed-point-probe}, and @command{schema-probe}, which the
-gate scripts drive.  The test suite @code{engine-api-test} exercises the
-neutral engine interface against a deterministic fake engine.
+@command{routing-fixed-point-probe}, and @command{schema-probe}, which the gate
+scripts drive.  The test suite @code{engine-api-test} exercises the neutral
+engine interface against a deterministic fake engine.
 
 @section Building the Lean model and the oracle
 
@@ -3280,21 +3280,22 @@ explicit edits and then reuses the matching complete answers.
 @table @code
 @c COVER CLI --routing author
 @item --routing [--json] [--persona NAME] [--offline | --refresh-models]
-Load the conventional routing files and print the resolved policy without
-starting an engine or creating a run store.  Human output names persona, axes,
-aliases, exact model ids, engines, and inventory source.  JSON additionally
-carries available persona/model choices, credential readiness booleans, profile
-rungs, cache age/timestamps, warnings, and endpoint fingerprints.  It omits
-secret names and values, environment/header values and names, raw endpoint URLs,
-and unselected inventories.
+Load the conventional routing files and print the resolved policy without an
+engine or a run store.  Human output names the persona, axes, aliases, exact model
+identifiers, engines, and inventory source.  JSON also carries the available
+persona and model choices, credential-readiness booleans, profile rungs, cache
+ages and timestamps, warnings, and endpoint fingerprints.  It omits secret names
+and values, environment and header data, raw endpoint URLs, and unselected
+inventories.
 
 @c COVER CLI --migrate-routing author
 @c COVER CLI --output author
 @item --migrate-routing SOURCE --output DESTINATION
-Decode one complete version-1 file and exclusively create an offline version-2
-user file: one engine per router, one exact model alias per router/model pair, a
-@code{default} persona, and equivalent profile chains.  The source and every
-existing destination are refused rather than overwritten.
+Decode one complete schema-version-1 file and create an offline version-2 user
+file exclusively.  The output has one engine per router, one exact model alias
+per router and model pair, one @code{default} persona, and equivalent profile
+chains.  The source and every existing destination are refused rather than
+overwritten.
 @end table
 
 
@@ -3386,9 +3387,9 @@ value was supplied explicitly, and both control modes together are refused.
 @table @code
 @c COVER CLI --scripted author
 @item --scripted
-Select the registered canned table.  Mutually exclusive with @code{--engine},
-@code{--session}, every live transport option, @code{--route}, and every v2
-persona/discovery override.
+Select the registered canned table.  It is mutually exclusive with
+@code{--engine}, @code{--session}, every live transport option, @code{--route},
+and every version-2 persona or discovery override.
 
 @c COVER CLI --engine author
 @item --engine acp
@@ -3500,34 +3501,53 @@ a mismatch refuses the run before creating its store or starting an engine.
 
 A route table can contain both schemes.  ACP-specific and deck-specific flags
 are accepted when their corresponding scheme occurs anywhere in that table and
-are refused otherwise.  Routes do not alter Plan folds or bills because backend
+are refused otherwise.  Routes do not alter Plan folds or bills, because backend
 identity is absent from the semantic key.
 
-Version-2 user routing is read from
-@file{$XDG_CONFIG_HOME/agent-cat/routing.yaml}, with @file{~/.config} as fallback.
-The nearest @file{.agent-cat/routing.yaml} up to the Git boundary is the restricted
-project layer.  Mixed schema versions fail before secret lookup.  Environment
-secret references are resolved only for engines used after the routing/run-fact
-fixed point.  ACP inherits the ambient environment after every declared source
-and destination name is removed, then receives the selected bindings.  This is
-routing context, not credential isolation from files, profiles, or the operating
-system.
+The version-2 user file is
+@file{$XDG_CONFIG_HOME/agent-cat/routing.yaml}, with @file{~/.config} as its
+fallback.  The project layer is the nearest @file{.agent-cat/routing.yaml} up to
+the Git boundary.  Discovery assigns these roles before decoding; document shape
+cannot promote a project file to user authority, and untagged version-2 loading
+is refused.  Mixed schema versions fail before a secret lookup.  The CLI
+resolves environment references only for engines that remain after the routing
+and run-fact fixed point.  ACP inherits the ambient environment after every
+declared source and destination name is removed, and then receives the selected
+bindings.  This is a routing context, not credential isolation from files,
+profiles, or the operating system.
 
-OpenAI and Anthropic catalogue responses are fetched by the bounded Haskell HTTP
-client, never @command{curl}.  Responses, pages, items, ids, headers, and time are
-bounded; redirects are disabled.  Mode-0600 atomic caches live beneath
-@file{$XDG_CACHE_HOME/agent-cat/models/PERSONA/FINGERPRINT.json}.  Selection and
-inventory provenance are frozen in the manifest policy with a canonical SHA-256
-digest before the first question.
+The bounded Haskell HTTP client fetches OpenAI and Anthropic catalogue responses,
+and it never invokes @command{curl}.  It verifies authenticated TLS, limits a URL
+to 8192 UTF-8 bytes and its query to 4096 bytes and 64 items, and rechecks those
+bounds after it adds pagination parameters.  The complete explicit header set,
+including resolved authentication and the generated request identifier, shares
+the count, value, and aggregate-byte bounds.  Response bytes, pages, entries,
+model identifiers, and time are also bounded.  Redirects are
+disabled.  Atomic files with
+mode 0600 are stored below
+@file{$XDG_CACHE_HOME/agent-cat/models/PERSONA/FINGERPRINT.json}.  The path
+fingerprint covers the complete non-secret engine definition, including cache
+policy, while a separate endpoint fingerprint explains model selection.  A cache
+record is bounded before allocation, and managed cache directories cannot be
+symbolic links.  The exact selection, its inventory provenance, and the
+execution fingerprint enter the manifest policy with a canonical SHA-256
+digest before the first question.  The complete snapshot remains immutable
+provenance.  Restart and resume compare its stable execution projection, so an
+observation-time inventory source, fetch time, cache age, warning, or the digest
+derived from those fields cannot reject otherwise identical routing.  Persona
+selection, engine and endpoint fingerprints, exact model, settings, options, and
+routes remain significant.
 
 @section Outputs and exit status
 
-Human @code{plan}, @code{cost}, and @code{help} output is descriptive rather than
-a stable machine interface.  @code{list --json}, @code{plan --json}, and
-@code{--routing --json} use stable key names; object key order is not significant,
-and declared input array order is preserved.  @code{list --json} emits descriptor
-version 3 with routing and protocol-negotiation capabilities while retaining
-machine protocol and store version 1.
+The human output of @code{plan}, @code{cost}, and @code{help} is descriptive,
+and it is not a stable machine interface.  @code{list --json},
+@code{plan --json}, and @code{--routing --json} use stable key names.  JSON
+object key order is not significant, and the input array follows declaration
+order.  @code{list --json} retains descriptor version 2, while
+@code{--descriptor-version 3} requests routing and protocol-negotiation
+capabilities.  Machine protocol and store format retain version 1 unless
+protocol version 2 is selected explicitly.
 
 Run output is the trace record as it happens.  There is no summary JSON,
 because a second representation either omits or duplicates the event stream.

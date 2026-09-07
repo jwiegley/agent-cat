@@ -1,3 +1,4 @@
+# Model identifiers are illustrative; verify them through inspection and engine preflight.
 version: 2
 default-persona: personal
 
