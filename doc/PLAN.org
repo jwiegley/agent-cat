@@ -4405,6 +4405,40 @@ Discovered while verifying acat-3vv. `nix develop -c ./ci/deck.sh` completed sce
 :ORIGINAL_SIZE: 0
 :END:
 
+* DONE [#B] Bound secure subprocess startup under very large RLIMIT_NOFILE
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-tbn
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-04 Fri 21:17]
+:MODIFIED: [2026-09-05 Sat 15:18]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-05 Sat 15:18]
+:CLOSE_REASON: Fixed in bundled process/GHC with native package-set alignment; default-limit Linux build/tests/TUI, Darwin/Linux packages, ownership regressions, scoped reviews and independent completion audit approved.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The x86_64-linux Nix shell on andoria-08 supplies soft and hard RLIMIT_NOFILE=1073741816. agentic-run --tui stalls before its first draw while System.Process.createProcess(close_fds=True) walks the descriptor range; the child is still in the pre-exec image and the parent blocks on the exec-error pipe. process-1.6.26.1 documents the O(max-open-files) close loop. Direct descriptor listing returns in 0.008 seconds, whereas TUI startup times out at 45 seconds; lowering limits to 4096 in the verification subshell permits startup. Preserve close_fds=True: do not bypass descriptor hygiene or silently impose a process-wide limit merely for green tests. Resolve bounded spawn and cancellation/reap during spawn through the supported process implementation, with a high-limit regression and Darwin/Linux packaging evidence. The parent cancellation during the diagnostic left its pre-exec helper orphaned; that exact diagnostic child was subsequently terminated.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-tbn",
+    "depends_on_id": "acat-tui-production-d9e.9",
+    "type": "discovered-from",
+    "created_at": "2026-09-05T04:17:53.002188Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#D] Generalize the peak semantic anchor beyond peak = 0
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -4454,6 +4488,489 @@ From acat-vbl: muExt_indep_of_peak_eq_zero anchors the count semantically only a
 :END:
 
 Owner 2026-08-13, after the DSL/MCP work: (1) reconstruct the hardenPatch Lean example as a PROGRAM TEXT in the DSL — a file in the repo (examples/harden.wf or similar), not just a string constant in a test; (2) a single executable 'agent-cat' with three subcommands over that file: 'agent-cat run <program>' parses, type-checks, and EXECUTES the plan against a live agent (ACP adapter as in harden_demo; --adapter stub|claude|codex), printing the transcript, bill and certificate; 'agent-cat cost <program>' parses, type-checks and prints the COST analysis without executing — level, shape sequence, cost tree leaves, min/max, and the reachable-bill set where the level permits it, stating plainly when a bound is sound but unattained; 'agent-cat plan <program>' parses, type-checks and PRINTS THE PLAN — a readable rendering of the checked term (structure, questions with addressee/scope, binders, branches, revision bounds), i.e. what the author wrote as the library understands it. All three share one parseAndCheck front end and must report type errors identically with position and message. Exit nonzero on type error. Keep harden_demo working or fold it into 'agent-cat run' with the demo's assertions behind a flag. Depends on the DSL landing (workflow wlkbf4jne).
+
+* DONE [#B] Implement production agent-cat TUI
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-tui-production-d9e
+:LABELS:   []
+:ISSUE_TYPE: epic
+:CREATED:  [2026-09-03 Thu 13:57]
+:MODIFIED: [2026-09-05 Sat 15:18]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-05 Sat 15:18]
+:CLOSE_REASON: Production TUI goal mtm03s1f-737bbz completed and independently audited; no blocking implementation or verification gap remains; explicit exclusions retained.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Deliver the confirmed TUI goal from doc/tui-design.md while agent-cat remains the only interpreter.
+
+Order: human-answer semantics; shared descriptor/snapshot/protocol/store/catalogue contracts; routing-v2 integration; TUI launch shell; live monitor; ext-pi convergence; persisted rich progress; conditional tree-sitter; release validation.
+
+Owners and gates: runtime contracts use frozen compatibility and shared Haskell/TypeScript vectors; CLI routing uses policy/routing/oracle/security fixtures; engines use deterministic API/ACP/deck gates; TUI uses pure/golden/PTY/stress tests; ext-pi uses check/unit/integration; packaging and docs use Cabal/Nix/manual/downstream gates.
+
+No paid/live route is acceptance. Preserve existing CLI/protocol/store behavior, denotation, trace, bills, secrets, and user work.
+
+* DONE [#B] Specify local TUI answers for person-addressed questions
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-tui-production-d9e.1
+:LABELS:   []
+:ISSUE_TYPE: feature
+:CREATED:  [2026-09-03 Thu 13:58]
+:MODIFIED: [2026-09-03 Thu 15:35]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-03 Thu 15:35]
+:CLOSE_REASON: Specified and implemented explicit protocol-v2 local person answering with typed controls, FIFO, private prompt artifacts, lineage provenance, cancellation, and deterministic regression probes.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+** Acceptance Criteria
+
+Exact ownership, fallback, FIFO, cancellation, restart, and non-TUI semantics are documented and tested before protocol v2 is finalized.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-tui-production-d9e.1",
+    "depends_on_id": "acat-tui-production-d9e",
+    "type": "parent-child",
+    "created_at": "2026-09-03T20:58:07.271963Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* DONE [#B] Implement shared frontend runtime contracts
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-tui-production-d9e.2
+:LABELS:   []
+:ISSUE_TYPE: feature
+:CREATED:  [2026-09-03 Thu 13:58]
+:MODIFIED: [2026-09-03 Thu 16:04]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-03 Thu 16:04]
+:CLOSE_REASON: Implemented and independently reviewed descriptor v2/v3, protocol/store v2, result/question artifacts, Haskell/TypeScript snapshots, local person controls, lineage provenance, and confined run catalogue; owning deterministic gates pass.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+** Acceptance Criteria
+
+Descriptor-v2, protocol-v1, and store-v1 remain frozen; reducers agree; v2 result, store, catalogue, and human-input contracts pass bounds, atomicity, digest, path, permission, lifecycle, and legacy tests.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-tui-production-d9e.2",
+    "depends_on_id": "acat-tui-production-d9e",
+    "type": "parent-child",
+    "created_at": "2026-09-03T20:58:08.386437Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* DONE [#B] Integrate persona routing v2 and sanitized inspection for TUI
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-tui-production-d9e.3
+:LABELS:   []
+:ISSUE_TYPE: feature
+:CREATED:  [2026-09-03 Thu 13:58]
+:MODIFIED: [2026-09-03 Thu 17:21]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-03 Thu 17:21]
+:CLOSE_REASON: Integrated and corrected routing v2: strict trust-separated config, discovery/cache, sanitized inspection, model aliases, distinct engine-instance environments, execution fingerprints, ext-pi v3 negotiation, docs, and all deterministic gates.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+** Acceptance Criteria
+
+Consume isolated routing-v2 implementation without duplication; executable oracle, v1 regression, provenance parity, discovery/cache, and secret-sentinel gates pass.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-tui-production-d9e.3",
+    "depends_on_id": "acat-tui-production-d9e",
+    "type": "parent-child",
+    "created_at": "2026-09-03T20:58:14.145323Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* DONE [#B] Build TUI catalogue and confirmed launch shell
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-tui-production-d9e.4
+:LABELS:   []
+:ISSUE_TYPE: feature
+:CREATED:  [2026-09-03 Thu 13:58]
+:MODIFIED: [2026-09-03 Thu 18:25]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-03 Thu 18:25]
+:CLOSE_REASON: Implemented the Runtime-only Brick catalogue/input/target/preview/confirmation shell and direct-argv protocol-v2 machine child with fd 3, private store/manifest, owner heartbeat, bounded subprocesses, and terminal restoration. Verified by tui-model-test, test/tui_probe.py, tui/ci/tui.sh, clean Cabal build, and policy-probe.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+** Acceptance Criteria
+
+agentic-run and downstream wf browse their own catalogue, runs, and routing; preserve input sources; preview and confirm; launch v2 machine child with private store and fd3; restore terminal on all tested exits.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-tui-production-d9e.4",
+    "depends_on_id": "acat-tui-production-d9e",
+    "type": "parent-child",
+    "created_at": "2026-09-03T20:58:18.482845Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  },
+  {
+    "issue_id": "acat-tui-production-d9e.4",
+    "depends_on_id": "acat-tui-production-d9e.2",
+    "type": "blocks",
+    "created_at": "2026-09-03T20:58:27.386095Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  },
+  {
+    "issue_id": "acat-tui-production-d9e.4",
+    "depends_on_id": "acat-tui-production-d9e.3",
+    "type": "blocks",
+    "created_at": "2026-09-03T20:58:27.648827Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* DONE [#B] Build live TUI monitor controls persistence and final view
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-tui-production-d9e.5
+:LABELS:   []
+:ISSUE_TYPE: feature
+:CREATED:  [2026-09-03 Thu 13:58]
+:MODIFIED: [2026-09-03 Thu 22:14]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-03 Thu 22:14]
+:CLOSE_REASON: Implemented identity-stable bounded monitoring, FIFO local-person modals, exact redirect/steer/recovery controls, confirmed cancellation with TERM/KILL fallback, owner leases, detach/reattach, secure reconstruction and final results, restart/resume/fork launch support, catalogue refresh, protocol-failure ownership, bounded split-safe diagnostics, and 10 MiB/count-pressure PTY gates. tui/ci/tui.sh and independent re-review are green.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+** Acceptance Criteria
+
+Identity-stable concurrent monitoring, bounded spool, FIFO modals, exact controls, detach/reattach, cancellation, leases, lineage, reconstruction, final result, and 10 MiB stress tests pass.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-tui-production-d9e.5",
+    "depends_on_id": "acat-tui-production-d9e",
+    "type": "parent-child",
+    "created_at": "2026-09-03T20:58:20.658787Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  },
+  {
+    "issue_id": "acat-tui-production-d9e.5",
+    "depends_on_id": "acat-tui-production-d9e.4",
+    "type": "blocks",
+    "created_at": "2026-09-03T20:58:27.929934Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* DONE [#C] Converge ext-pi on shared descriptor and protocol v2 contracts
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-tui-production-d9e.6
+:LABELS:   []
+:ISSUE_TYPE: feature
+:CREATED:  [2026-09-03 Thu 13:58]
+:MODIFIED: [2026-09-04 Fri 00:03]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-04 Fri 00:03]
+:CLOSE_REASON: ext-pi now negotiates protocol v2 for descriptor-v3 runners, retains protocol-v1 fallback, writes and reads shared frontend-manifest v2, restores Haskell v2 journals read-only, preserves legacy stores, correlates v2 controls, bounds restoration, and keeps trust/grant/native/current/child behavior green. npm check, 74 unit tests, 8 non-paid integrations, 68 MiB streaming restore, and independent review pass; remote FollowUp integration remains unavailable in the installed Pi package and is reported separately in validation.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+** Acceptance Criteria
+
+Both frontends normalize fixture facts; old runners and legacy stores remain supported; foreign owners stay read-only; Pi trust, grant, remote, native, restore, and security tests pass.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-tui-production-d9e.6",
+    "depends_on_id": "acat-tui-production-d9e",
+    "type": "parent-child",
+    "created_at": "2026-09-03T20:58:25.639459Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  },
+  {
+    "issue_id": "acat-tui-production-d9e.6",
+    "depends_on_id": "acat-tui-production-d9e.2",
+    "type": "blocks",
+    "created_at": "2026-09-03T20:58:28.211633Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  },
+  {
+    "issue_id": "acat-tui-production-d9e.6",
+    "depends_on_id": "acat-tui-production-d9e.3",
+    "type": "blocks",
+    "created_at": "2026-09-03T20:58:28.490895Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  },
+  {
+    "issue_id": "acat-tui-production-d9e.6",
+    "depends_on_id": "acat-tui-production-d9e.5",
+    "type": "blocks",
+    "created_at": "2026-09-03T20:58:28.782103Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* DONE [#C] Add persisted rich public progress and bounded rendering
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-tui-production-d9e.7
+:LABELS:   []
+:ISSUE_TYPE: feature
+:CREATED:  [2026-09-03 Thu 13:58]
+:MODIFIED: [2026-09-04 Fri 00:36]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-04 Fri 00:36]
+:CLOSE_REASON: Added a typed EngineUpdate boundary separating answer chunks from bounded public message/tool/todo/usage/explicit reasoning-summary updates; protocol-v2 persistence and Haskell/TypeScript restoration; ACP measured tool/plan/usage projection; conservative whole-update credential redaction; private thought omission; quiet-engine omission; TUI and Pi rendering; shared fixtures and answer/trace/bill neutrality probes. Haskell tests, 19-scenario ACP gate, 78 ext-pi tests, TUI PTY gate, and independent review pass.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+** Acceptance Criteria
+
+Typed public message, tool, todo, usage, and reasoning-summary updates remain bounded, redacted, persisted, restorable, and distinct from answers; unsupported engines synthesize nothing; render tests pass.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-tui-production-d9e.7",
+    "depends_on_id": "acat-tui-production-d9e",
+    "type": "parent-child",
+    "created_at": "2026-09-03T20:58:26.210133Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  },
+  {
+    "issue_id": "acat-tui-production-d9e.7",
+    "depends_on_id": "acat-tui-production-d9e.5",
+    "type": "blocks",
+    "created_at": "2026-09-03T20:58:29.067177Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  },
+  {
+    "issue_id": "acat-tui-production-d9e.7",
+    "depends_on_id": "acat-tui-production-d9e.6",
+    "type": "blocks",
+    "created_at": "2026-09-03T20:58:29.362987Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* DONE [#C] Resolve evidence gate for tree-sitter highlighting
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-tui-production-d9e.8
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-03 Thu 13:58]
+:MODIFIED: [2026-09-04 Fri 00:50]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-04 Fri 00:50]
+:CLOSE_REASON: No structured language/file datum demonstrates a native grammar consumer. Agentic.Tui.Highlight classifies bounded projected lines as plain, status, or unified-diff header/file-header/hunk/addition/removal; unit and PTY tests cover all progress and diff forms; Cabal/Nix and the TUI gate reject tree-sitter, cmark, and microlens dependencies. tui/ci/tui.sh and independent evidence review return GO.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+** Acceptance Criteria
+
+Either demonstrated event demand is met by fully packaged Darwin, Linux, and downstream tree-sitter support, or tested plain, diff, and status rendering covers every emitted datum with no native grammar dependency.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-tui-production-d9e.8",
+    "depends_on_id": "acat-tui-production-d9e",
+    "type": "parent-child",
+    "created_at": "2026-09-03T20:58:26.544697Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  },
+  {
+    "issue_id": "acat-tui-production-d9e.8",
+    "depends_on_id": "acat-tui-production-d9e.7",
+    "type": "blocks",
+    "created_at": "2026-09-03T20:58:29.683409Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* DONE [#B] Harden and validate the complete agent-cat TUI release
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-tui-production-d9e.9
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-09-03 Thu 13:58]
+:MODIFIED: [2026-09-05 Sat 15:18]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-05 Sat 15:18]
+:CLOSE_REASON: Current applicable non-paid matrix, packaged wf TUI, compiler-parsed boundary fixtures, exact evidence scope, independent source reviews and completion audit approved.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+** Acceptance Criteria
+
+Docs, help, and schema agree; all applicable non-paid agent-cat, ext-pi, and downstream gates pass; platform evidence, final impact audit, and independent review have no unresolved high-severity finding.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-tui-production-d9e.9",
+    "depends_on_id": "acat-tbn",
+    "type": "blocks",
+    "created_at": "2026-09-05T04:59:09.631128Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  },
+  {
+    "issue_id": "acat-tui-production-d9e.9",
+    "depends_on_id": "acat-tui-production-d9e",
+    "type": "parent-child",
+    "created_at": "2026-09-03T20:58:26.803736Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  },
+  {
+    "issue_id": "acat-tui-production-d9e.9",
+    "depends_on_id": "acat-tui-production-d9e.4",
+    "type": "blocks",
+    "created_at": "2026-09-03T20:58:29.994433Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  },
+  {
+    "issue_id": "acat-tui-production-d9e.9",
+    "depends_on_id": "acat-tui-production-d9e.5",
+    "type": "blocks",
+    "created_at": "2026-09-03T20:58:30.316005Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  },
+  {
+    "issue_id": "acat-tui-production-d9e.9",
+    "depends_on_id": "acat-tui-production-d9e.6",
+    "type": "blocks",
+    "created_at": "2026-09-03T20:58:30.628739Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  },
+  {
+    "issue_id": "acat-tui-production-d9e.9",
+    "depends_on_id": "acat-tui-production-d9e.7",
+    "type": "blocks",
+    "created_at": "2026-09-03T20:58:30.947460Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  },
+  {
+    "issue_id": "acat-tui-production-d9e.9",
+    "depends_on_id": "acat-tui-production-d9e.8",
+    "type": "blocks",
+    "created_at": "2026-09-03T20:58:31.318196Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
 
 * DONE [#C] Front-door docs describe a repository two re-derivations old: README and flake.nix
 :PROPERTIES:
@@ -4746,6 +5263,24 @@ Probe P8: w(join)=sup, w(par)=+, w(scale n)=n*max 1 w — Frag is ENat encoded f
   }
 ]
 #+end_src
+
+* DONE [#C] Design Brick TUI and persona-aware model routing
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-voi
+:LABELS:   []
+:ISSUE_TYPE: feature
+:CREATED:  [2026-09-03 Thu 11:28]
+:MODIFIED: [2026-09-03 Thu 12:53]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-03 Thu 12:53]
+:CLOSE_REASON: Completed and audit-hardened: exact 71-import TUI dependency matrix, exhaustive non-TUI API/compatibility/test ledger, pinned Brick 2.9/Vty 6.4 docs and compile probe, explicit persona engine/model allowlists, executable YAML/schema/cache/security oracle with 20 outcomes, per-phase prerequisites/risks, and residual-risk register.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Research agent-functor Agent.Tui, current Brick/Vty, agent-cat and ext-pi; produce implementation-ready TUI integration and multidimensional persona/engine/concrete/symbolic model configuration designs without production implementation.
 
 * DONE [#C] DSL: revise given x, x accepted — artefact silently shadows the objection binder
 :PROPERTIES:
