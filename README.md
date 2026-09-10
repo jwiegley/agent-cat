@@ -336,10 +336,11 @@ foreground colors.
 The launch path collects declared inputs in paste-safe multiline editors and preserves
 them during backward navigation within workflow configuration and during resize. It
 strictly decodes the post-input plan and checks its workflow identity against the
-catalogue row. The compact review shows its level, size, ask count, request fold,
-effects, pins and relevant profile chains, target, persona, directory, warnings, and
-live billing risk. A separate scrollable layer contains the complete fold histogram,
-direct argv, paths, provenance, and fingerprints. Input bodies and the raw program
+catalogue row. The compact review shows the workflow, request range, effects,
+relevant profile chains, target, persona, directory, warning count, and live billing
+risk. A separate scrollable layer contains every warning, the level, size, ask count,
+pins, complete fold histogram, direct argv, paths, provenance, and fingerprints.
+Input bodies and the raw program
 remain hidden. Confirmation requires `Enter` or `y`. It is enabled only when every
 review row and the launch, back, and exact-detail controls fit the current terminal.
 Live launch requires full model-pin coverage, repeats offline routing-only resolution,

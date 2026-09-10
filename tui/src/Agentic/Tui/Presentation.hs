@@ -231,7 +231,7 @@ statusView presentation width = withAttr attribute (displayText (oneLine width m
       | Just failure <- presentationControlError presentation = (attrName "error", "ERROR: " <> failure)
       | RecoveryLayer <- presentationLayer presentation = (attrName "warning", "Recovery required")
       | FilterLayer <- presentationLayer presentation = (attrName "status", browserStatus (setWorkflowFilter (T.unwords (T.words (T.intercalate "\n" (Edit.getEditContents (presentationEditor presentation))))) model))
-      | BrowserScreen <- modelScreen model = (attrName "status", browserStatus model)
+      | BrowserScreen <- modelScreen model = (attrName "status", modelStatus model <> " | " <> browserStatus model)
       | otherwise = (attrName "status", modelStatus model)
 
 browserStatus :: TuiModel -> Text

@@ -416,7 +416,7 @@ handleEventCore event = case event of
   AppEvent (RunsReady result) -> do
     state <- get
     case result of
-      Left failure -> put state {stateModel = (stateModel state) {modelStatus = "run catalogue refresh failed: " <> failure}}
+      Left failure -> put state {stateModel = (stateModel state) {modelStatus = "ERROR: run catalogue refresh failed: " <> failure}}
       Right records ->
         let model = stateModel state
             selected = max 0 (min (length records - 1) (modelRunIndex model))
@@ -433,7 +433,7 @@ handleEventCore event = case event of
               _ -> Nothing
          in put
               state
-                { stateModel = model {modelRuns = records, modelRunIndex = selected},
+                { stateModel = model {modelRuns = records, modelRunIndex = selected, modelStatus = "run catalogue refreshed"},
                   stateViewingRecord = case contextRecord of
                     Just record -> Just record
                     Nothing -> stateViewingRecord state,

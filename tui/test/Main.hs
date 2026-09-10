@@ -394,8 +394,22 @@ checkRendering descriptor routing initial = do
   check "rendered untrusted text replaces terminal controls" ("�[31munsafe�text" `T.isInfixOf` frameText unsafeHelpFrame && not (T.any (`elem` ['\ESC', '\r']) (frameText unsafeHelpFrame)))
   check "long unbroken wide-character errors remain within real cells" (all ((<= 24) . renderedColumns) (frameRows longFailureFrame))
   check "narrow Unicode layout retains header context and adjacent footer cells" (all (`T.isInfixOf` frameText unicodeFrame) ["[Workflows]", "界", "workflow", "Tab SECTION"] && all ((<= 40) . renderedColumns) (frameRows unicodeFrame))
-  let resizeFrames = map (`renderFrame` presentation) [(140, 36), (40, 12), (80, 24), (24, 6), (140, 36)]
-  check "rapid pure resize rendering preserves launch state" (length resizeFrames == 5 && modelInputs (presentationModel presentation) == previewInputs preview && presentationOutputFollow presentation)
+  let resizeSizes = [(140, 36), (40, 12), (80, 24), (24, 6), (140, 36)]
+      resizeFrames = map (`renderFrame` presentation) resizeSizes
+  forM_ (zip resizeSizes resizeFrames) $ \((columns, rows), frame) ->
+    check "every rapid-resize frame is evaluated, bounded, and retains review status"
+      (length (frameRows frame) <= rows && all ((<= columns) . renderedColumns) (frameRows frame) && "preview complete" `T.isInfixOf` frameText frame)
+  check "returning to the original size restores the rendered review" $ case resizeFrames of
+    [first, _, _, _, final] -> frameText first == frameText final
+    _ -> False
+  forM_ [WorkflowsTab, RunsTab, RoutingTab] $ \tab -> do
+    let statusModel = initial {modelScreen = BrowserScreen, modelTab = tab, modelStatus = "STATUS_SENTINEL"}
+        statusFrame = renderFrame (80, 24) (staticPresentation config statusModel)
+    check "browser context retains operation status" ("STATUS_SENTINEL" `T.isInfixOf` frameText statusFrame)
+  let refreshFailure = "ERROR: run catalogue refresh failed: unreadable state"
+      staleRuns = initial {modelScreen = BrowserScreen, modelTab = RunsTab, modelStatus = refreshFailure}
+      staleFrame = renderFrame (80, 24) (staticPresentation config staleRuns)
+  check "run browser displays a failed refresh instead of only stale counts" (refreshFailure `T.isInfixOf` frameText staleFrame)
   failedId <- requireRight "failed run id" (mkRunId "failed-before-first-request")
   let failure = "Configured model is unavailable. Select an offered model.\n" <> T.replicate 80 "diagnostic detail\n" <> "LAST_DIAGNOSTIC"
       failed = (initialRunSnapshot failedId) {snapshotWorkflow = Just "hello-world", snapshotRunStatus = RunFailedStatus, snapshotRunFailure = Just failure}
