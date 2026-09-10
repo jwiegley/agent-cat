@@ -1044,11 +1044,9 @@ frontendCmd reg = Frontend.runFrontendSession (regBinary reg) runnerVersion cred
               Frontend.preparationPolicyDigest = textField "policyDigest",
               Frontend.preparationRun = \runId control buffered -> do
                 validateMachineEnvironment options
-                withMachineControlsBuffered options runId name frozen (Just control) buffered $ \controls ->
-                  do
-                    current <- checkParent
-                    unless (current == inherited) (ioError (userError "parent answers changed after frontend approval"))
-                    runMachineWith options controls lineage (fst <$> inherited) (maybe [] snd inherited) reg runId name frozen program bindings
+                current <- checkParent
+                unless (current == inherited) (ioError (userError "parent answers changed after frontend approval"))
+                runMachineWith options (Just (MachineControlInput control buffered)) lineage (fst <$> inherited) (maybe [] snd inherited) reg runId name frozen program bindings
             }
     frontendEdit (Frontend.DropAnswer occurrence) = ForkDrop occurrence
     frontendEdit (Frontend.ReplaceAnswer occurrence value) = ForkReplaceValue occurrence (PrivateForkAnswer value)
@@ -1146,23 +1144,22 @@ withFinalTarget reg target program action = do
   finalized <- finalizeTargetForProgram target program
   either (die reg 1 . ("routing configuration: " <>)) action finalized
 
-data MachineControl = MachineControl ControlRuntime DeferredEventSink EventSink
+-- | Existing preflight controls or a private input for an already prepared run.
+data MachineControl
+  = MachineControl ControlRuntime DeferredEventSink EventSink
+  | MachineControlInput Handle BS.ByteString
 
 -- | Start controls before stdin or route-dependent program construction.
 withMachineControls :: MachineOptions -> RunId -> Text -> Target -> (Maybe MachineControl -> IO ()) -> IO ()
 withMachineControls options runId name initialTarget action = do
   handle <- machineControlHandle
-  withMachineControlsBuffered options runId name initialTarget handle BS.empty action
-
-withMachineControlsBuffered :: MachineOptions -> RunId -> Text -> Target -> Maybe Handle -> BS.ByteString -> (Maybe MachineControl -> IO ()) -> IO ()
-withMachineControlsBuffered options runId name initialTarget handle buffered action =
   case handle of
     Nothing -> action Nothing
     Just controlHandle -> do
       runtime <- newControlRuntime
       deferred <- newDeferredEventSink
       let sink = deferredEventSink deferred
-      outcome <- try (withBufferedControlInputFor (machineProtocolVersion options) controlHandle buffered sink runtime (action (Just (MachineControl runtime deferred sink))))
+      outcome <- try (withBufferedControlInputFor (machineProtocolVersion options) controlHandle BS.empty sink runtime (action (Just (MachineControl runtime deferred sink))))
       case outcome of
         Right () -> pure ()
         Left (err :: SomeException)
@@ -2718,60 +2715,63 @@ runMachineWith options control lineage parent inherited reg runId name target pr
             else Just (machinePersonAnswering options)
         )
     runWith effectiveTarget persistence runStore actualSink = do
-      let runtimeControls = case control of
-            Nothing -> Nothing
-            Just (MachineControl controls _ _) -> Just controls
-          sink = case control of
-            Nothing -> actualSink
-            Just (MachineControl _ _ deferredSink) -> deferredSink
-          started = machineStarted options name effectiveTarget
+      let started = machineStarted options name effectiveTarget
       case control of
-        Nothing -> actualSink started
-        Just (MachineControl _ deferred _) -> do
+        Nothing -> actualSink started >> execute Nothing actualSink id
+        Just (MachineControl controls deferred sink) -> do
           activated <- activateEventSink deferred actualSink started
           unless activated (ioError (userError "machine event sink was activated twice"))
-      -- Machine events are the trace. Human narration would duplicate full,
-      -- input-expanded prompts into diagnostic stderr.
-      let run =
-            runCmdControlled
-              (machinePersonAnswering options)
-              runtimeControls
-              persistence
-              sink
-              (const (pure ()))
-              reg
-              name
-              effectiveTarget
-              prog
-              gs
-      outcome <- try $ do
-        (result, tr) <- run
-        if machineProtocolVersion options == protocolVersion
-          then sink (RunCompleted (billExecFresh tr) (billMemo tr))
-          else do
-            durableStore <-
-              maybe
-                (ioError (userError "protocol version 2 lost its required run store"))
-                pure
-                runStore
-            reference <-
-              writeResultArtifact
-                durableStore
-                runId
-                (codeJson (fromSCode (progResultCode prog)))
-                (answerJson (progResultCode prog) result)
-                (sayEl (progResultCode prog) result)
-            sink (RunCompletedV2 (billExecFresh tr) (billMemo tr) reference)
-      case outcome of
-        Right () -> pure ()
-        Left (e :: SomeException)
-          | Just (MachineCancelled why) <- fromException e -> do
-              sink (RunCancelled (T.pack why))
-              throwIO (ExitFailure 130)
-          | Just (_ :: SomeAsyncException) <- fromException e ->
-              sink (RunCancelled (T.pack (displayException e))) >> throwIO e
-          | otherwise ->
-              sink (RunFailed (machineFailureClass e) (T.pack (displayException e))) >> throwIO e
+          execute (Just controls) sink id
+        Just (MachineControlInput handle buffered) -> do
+          controls <- newControlRuntime
+          -- Prepared runs establish durable history before consuming queued controls.
+          actualSink started
+          execute (Just controls) actualSink
+            (withBufferedControlInputFor (machineProtocolVersion options) handle buffered actualSink controls)
+      where
+        execute runtimeControls sink supervise = do
+          -- Machine events are the trace. Human narration would duplicate full,
+          -- input-expanded prompts into diagnostic stderr.
+          let run =
+                runCmdControlled
+                  (machinePersonAnswering options)
+                  runtimeControls
+                  persistence
+                  sink
+                  (const (pure ()))
+                  reg
+                  name
+                  effectiveTarget
+                  prog
+                  gs
+          outcome <- try $ supervise $ do
+            (result, tr) <- run
+            if machineProtocolVersion options == protocolVersion
+              then sink (RunCompleted (billExecFresh tr) (billMemo tr))
+              else do
+                durableStore <-
+                  maybe
+                    (ioError (userError "protocol version 2 lost its required run store"))
+                    pure
+                    runStore
+                reference <-
+                  writeResultArtifact
+                    durableStore
+                    runId
+                    (codeJson (fromSCode (progResultCode prog)))
+                    (answerJson (progResultCode prog) result)
+                    (sayEl (progResultCode prog) result)
+                sink (RunCompletedV2 (billExecFresh tr) (billMemo tr) reference)
+          case outcome of
+            Right () -> pure ()
+            Left (e :: SomeException)
+              | Just (MachineCancelled why) <- fromException e -> do
+                  sink (RunCancelled (T.pack why))
+                  throwIO (ExitFailure 130)
+              | Just (_ :: SomeAsyncException) <- fromException e ->
+                  sink (RunCancelled (T.pack (displayException e))) >> throwIO e
+              | otherwise ->
+                  sink (RunFailed (machineFailureClass e) (T.pack (displayException e))) >> throwIO e
 
 machineControlHandle :: IO (Maybe Handle)
 machineControlHandle = do

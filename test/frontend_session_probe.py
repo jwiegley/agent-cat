@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import select
+import signal
 import stat
 import subprocess
 import sys
@@ -265,10 +266,11 @@ def source_vectors(runner: Path, directory: Path) -> None:
 
 
 def decisions(runner: Path, directory: Path) -> None:
-    for operation in ["discard", "stale", "root-change", "buffered-cancel"]:
+    for operation in ["discard", "stale", "root-change", "buffered-cancel", "buffered-eof"]:
         case = directory / operation
         case.mkdir()
-        session = Session(runner, case, "prompt-source", [{"name": "input", "source": "literal", "value": "private fixture content"}])
+        workflow = "person-controlled" if operation == "buffered-eof" else "prompt-source"
+        session = Session(runner, case, workflow, [{"name": "input", "source": "literal", "value": "private fixture content"}])
         if operation == "discard":
             session.send(session.decision("discard"))
             assert session.finish() == []
@@ -285,11 +287,21 @@ def decisions(runner: Path, directory: Path) -> None:
             assert not (session.root / "runs").exists()
             assert not (case / "original-root/runs").exists()
         else:
-            session.send(session.decision("start"), {"controlId": "buffered", "expectedOccurrenceId": None,
-                         "expectedAttemptId": None, "command": {"type": "cancelRun"}})
+            if operation == "buffered-eof":
+                session.send(session.decision("start"))
+                session.process.stdin.close()
+            else:
+                session.send(session.decision("start"), {"controlId": "buffered", "expectedOccurrenceId": None,
+                             "expectedAttemptId": None, "command": {"type": "cancelRun"}})
             events = session.finish(130)
-            assert any(item["event"].get("controlId") == "buffered" and item["event"].get("state") == "accepted" for item in events)
+            if operation == "buffered-cancel":
+                assert any(item["event"].get("controlId") == "buffered" and item["event"].get("state") == "accepted" for item in events)
             assert events[-1]["event"]["type"] == "run.cancelled"
+            stored = [json.loads(line) for line in (session.run / "runtime/events.ndjson").read_bytes().splitlines()]
+            assert stored == events, (stored, events)
+            observed = query(runner, case, {"version": 1, "operation": "read-run",
+                             "rootIdentity": session.preview["rootIdentity"], "runId": session.preview["runId"]})["run"]
+            assert observed["snapshot"]["status"] == "cancelled", observed
 
 
 def invalid_sources(runner: Path, directory: Path) -> None:
@@ -406,6 +418,80 @@ def targets(runner: Path, directory: Path) -> None:
         session.send(session.decision("discard"))
         assert session.finish() == []
         assert not (session.root / "runs").exists()
+
+
+def frozen_routing(runner: Path, directory: Path) -> None:
+    case = directory / "frozen-routing"
+    case.mkdir()
+    config = case / "config/agent-cat/routing.yaml"
+    config.parent.mkdir(parents=True)
+    stub = Path(__file__).resolve().parents[1] / "engine/acp/test/stub_adapter.py"
+    adapters = []
+    for name in ["approved", "replacement"]:
+        adapter = case / name
+        marker = case / (name + ".started")
+        adapter.write_text(f"#!{sys.executable}\nimport os, pathlib\n"
+                           f"pathlib.Path({str(marker)!r}).write_text(str(os.getpid()))\n"
+                           f"os.execv({sys.executable!r}, [{sys.executable!r}, {str(stub)!r}])\n")
+        adapter.chmod(0o755)
+        adapters.append(adapter)
+    def configure(adapter: Path) -> None:
+        config.write_text("version: 1\nrouters:\n  - name: fixture\n"
+                          f"    backend: {json.dumps('acp:' + str(adapter))}\n"
+                          "    provider: fixture\nprofiles:\n  - name: deep\n"
+                          "    chain:\n      - router: fixture\n        model: stub-default\n"
+                          "        thinking: high\n        max-output: 65536\n")
+    configure(adapters[0])
+    arguments = ["--engine", "acp", "--adapter", str(adapters[0]), "--timeout", "10000"]
+    session = Session(runner, case, "convergent", [], arguments)
+    assert session.preview["targetKind"] == "acp"
+    assert not (case / "approved.started").exists() and not (case / "replacement.started").exists()
+    policy = session.preview["policy"]
+    assert str(adapters[0]) in json.dumps(policy), policy
+    configure(adapters[1])
+    session.send(session.decision("start"))
+    events = session.finish()
+    assert events[-1]["event"]["type"] == "run.completed", events
+    assert (case / "approved.started").exists() and not (case / "replacement.started").exists()
+    observed = query(runner, case, {"version": 1, "operation": "read-run",
+                     "rootIdentity": session.preview["rootIdentity"], "runId": session.preview["runId"]})["run"]
+    assert observed["policy"] == policy, (observed["policy"], policy)
+    fresh = Session(runner, case, "convergent", [], arguments)
+    assert str(adapters[1]) in json.dumps(fresh.preview["policy"]), fresh.preview["policy"]
+    fresh.send(fresh.decision("discard"))
+    assert fresh.finish() == [] and not (case / "replacement.started").exists()
+
+
+def process_parents() -> dict[int, int]:
+    rows = subprocess.check_output(["ps", "-axo", "pid=,ppid="], text=True, timeout=10).splitlines()
+    return {int(pid): int(parent) for pid, parent in (row.split() for row in rows)}
+
+
+def native_cleanup(runner: Path, directory: Path) -> None:
+    for operation in ["discard", "cancel", "terminate"]:
+        case = directory / ("native-cleanup-" + operation)
+        case.mkdir()
+        session = Session(runner, case, "person-controlled",
+                          [{"name": "input", "source": "literal", "value": "native cleanup fixture"}])
+        workers = {pid for pid, parent in process_parents().items() if parent == session.process.pid}
+        assert workers, "native supervisor did not expose its live prepared worker"
+        if operation == "cancel":
+            session.send(session.decision("start"))
+            while True:
+                frame = session.read()
+                assert frame is not None, "human-controlled run exited before cancellation"
+                if frame["event"]["type"] == "occurrence.person-answer-pending":
+                    break
+            session.send({"controlId": "cleanup", "expectedOccurrenceId": None, "expectedAttemptId": None,
+                          "command": {"type": "cancelRun"}})
+            assert session.finish(130)[-1]["event"]["type"] == "run.cancelled"
+        elif operation == "terminate":
+            session.process.terminate()
+            assert session.finish(-signal.SIGINT) == []
+        else:
+            session.send(session.decision("discard"))
+            assert session.finish() == []
+        assert workers.isdisjoint(process_parents()), (operation, workers)
 
 
 def person(runner: Path, directory: Path) -> None:
@@ -723,6 +809,8 @@ def main() -> None:
             source_vectors(runner, root)
             decisions(runner, root)
             targets(runner, root)
+            frozen_routing(runner, root)
+            native_cleanup(runner, root)
             person(runner, root)
             native_controls(runner, root)
             invalid_sources(runner, root)

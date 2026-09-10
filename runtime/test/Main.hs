@@ -24,6 +24,7 @@ import Data.Word (Word64)
 import Data.Time.Clock (addUTCTime, getCurrentTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import GHC.Clock (getMonotonicTimeNSec)
+import GHC.IO.Handle (hDuplicateTo)
 import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getTemporaryDirectory, listDirectory, removeFile, removePathForcibly, renameDirectory)
 import System.Environment (getArgs, getExecutablePath, lookupEnv, setEnv, unsetEnv)
 import qualified System.Posix.Directory as PosixDirectory
@@ -1054,6 +1055,20 @@ durableMirrorFailureProbe = do
       expect "durable journal advances before a failed stdout mirror and remains terminal" $
         case (first, events) of
           (Left _, [Envelope _ _ (SeqNo 0) _ RunStartedV2 {}, Envelope _ _ (SeqNo 1) _ RunFailed {}]) -> True
+          _ -> False
+      let repairedPath = root </> "repaired-primary"
+      failures <- withBinaryFile durablePath ReadMode $ \primary ->
+        withBinaryFile repairedPath WriteMode $ \replacement -> do
+          sink <- handlesEventSinkFor 2 [primary] run
+          failed <- try @IOException (sink (RunStartedV2 "fixture" "scripted" PersonAnswerEngine))
+          hDuplicateTo replacement primary
+          hPutStrLn primary "handle repaired"
+          repeated <- try @IOException (sink (RunCancelled "must not append after an uncertain primary write"))
+          pure (failed, repeated)
+      repairedBytes <- BS.readFile repairedPath
+      expect "a failed primary write poisons the sink even if the handle becomes writable" $
+        case failures of
+          (Left _, Left _) -> repairedBytes == "handle repaired\n"
           _ -> False
     )
     `finally` removePathForcibly root

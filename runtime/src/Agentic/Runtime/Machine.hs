@@ -54,9 +54,9 @@ import Agentic.Runtime.Protocol
     maxFrameBytes,
     protocolVersion,
   )
-import Control.Concurrent (forkIO, killThread, myThreadId, throwTo)
-import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar, readMVar)
-import Control.Exception (Exception, SomeException, finally, throwIO, try)
+import Control.Concurrent (forkIOWithUnmask, killThread, myThreadId, throwTo)
+import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVarMasked, modifyMVar_, newMVar, readMVar)
+import Control.Exception (Exception, SomeException, bracket, throwIO, try)
 import Control.Monad (when)
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
@@ -113,27 +113,33 @@ handlesEventSink = handlesEventSinkFor protocolVersion
 
 handlesEventSinkFor :: Int -> [Handle] -> RunId -> IO EventSink
 handlesEventSinkFor version handles runId = do
-  next <- newMVar (0 :: Word64)
+  next <- newMVar (Right 0 :: Either SomeException Word64)
   pure $ \event -> case event of
     AttemptProgress {} | version /= latestProtocolVersion -> pure ()
     _ -> mapM_ (writeEvent next) (splitOutput event)
   where
     writeEvent next event = do
-      mirrorFailure <- modifyMVar next $ \sequence' -> do
-        when (sequence' == maxBound) (throwIO (userError "runtime protocol sequence counter exhausted"))
-        when (not (eventTextFits event)) (throwIO (userError "runtime protocol event text exceeds bounded frame policy"))
-        now <- T.pack . formatTime defaultTimeLocale "%FT%T%QZ" <$> getCurrentTime
-        bytes <-
-          either (throwIO . userError . T.unpack) pure $
-            encodeEnvelopeFor version (Envelope version runId (SeqNo sequence') now event)
-        failure <- case handles of
-          [] -> pure Nothing
-          durable : mirrors -> do
-            writeEnvelope bytes durable
-            firstMirrorFailure bytes mirrors
-        pure (sequence' + 1, failure)
-      case mirrorFailure of
-        Just exception | not (terminalEvent event) -> throwIO exception
+      -- Cancellation must not roll back a sequence whose primary write succeeded.
+      outcome <- modifyMVarMasked next $ \current -> case current of
+        Left exception -> pure (current, Left exception)
+        Right sequence' -> do
+          when (sequence' == maxBound) (throwIO (userError "runtime protocol sequence counter exhausted"))
+          when (not (eventTextFits event)) (throwIO (userError "runtime protocol event text exceeds bounded frame policy"))
+          now <- T.pack . formatTime defaultTimeLocale "%FT%T%QZ" <$> getCurrentTime
+          bytes <-
+            either (throwIO . userError . T.unpack) pure $
+              encodeEnvelopeFor version (Envelope version runId (SeqNo sequence') now event)
+          written <- try @SomeException $ case handles of
+            [] -> pure Nothing
+            durable : mirrors -> do
+              writeEnvelope bytes durable
+              firstMirrorFailure bytes mirrors
+          case written of
+            Left exception -> pure (Left exception, Left exception)
+            Right failure -> pure (Right (sequence' + 1), Right failure)
+      case outcome of
+        Left exception -> throwIO exception
+        Right (Just exception) | not (terminalEvent event) -> throwIO exception
         _ -> pure ()
 
     firstMirrorFailure _ [] = pure Nothing
@@ -253,8 +259,10 @@ withControlInputFor version handle = withBufferedControlInputFor version handle 
 withBufferedControlInputFor :: Int -> Handle -> BS.ByteString -> EventSink -> ControlRuntime -> IO a -> IO a
 withBufferedControlInputFor version handle initial sink runtime action = do
   owner <- myThreadId
-  reader <- forkIO (loop owner initial)
-  action `finally` killThread reader
+  bracket
+    (forkIOWithUnmask (\unmask -> unmask (loop owner initial)))
+    killThread
+    (const action)
   where
     loop owner buffered = do
       frame <- readNdjsonFrame maxFrameBytes "runtime control" handle buffered
