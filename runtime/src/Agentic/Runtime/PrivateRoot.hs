@@ -13,6 +13,7 @@ module Agentic.Runtime.PrivateRoot
     withPrivateDirectoryAt,
     privateRootPath,
     privateRootIdentity,
+    withPrivateRootIdentity,
     withStateAnchor,
     privatePathComponents,
     assertPrivateRoot,
@@ -36,6 +37,7 @@ import Control.Monad (unless, when)
 import Data.Aeson (eitherDecodeStrict', encode)
 import Data.Bits ((.&.))
 import qualified Data.ByteString as BS
+import Data.Unique (hashUnique, newUnique)
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -46,10 +48,11 @@ import System.Directory (createDirectoryIfMissing)
 import System.Environment (lookupEnv)
 import System.FilePath (dropTrailingPathSeparator, isAbsolute, isPathSeparator, makeRelative, normalise, splitDirectories, takeDirectory, (</>))
 import System.IO (Handle, hClose, hFlush)
-import System.IO.Error (isDoesNotExistError)
+import System.IO.Error (isAlreadyExistsError, isDoesNotExistError)
 import qualified System.Posix.Directory as PosixDirectory
 import System.Posix.Files (FileStatus, deviceID, fileID, fileMode, fileOwner, getFdStatus, getSymbolicLinkStatus, isDirectory, isSymbolicLink, ownerModes)
 import System.Posix.IO (OpenFileFlags (cloexec, creat, directory, exclusive, nofollow), OpenMode (ReadOnly, WriteOnly), closeFd, defaultFileFlags, fdToHandle, openFd, openFdAt)
+import System.Posix.Process (getProcessID)
 import System.Posix.Types (CMode (..), DeviceID, Fd (..), FileID, UserID)
 import System.Posix.User (getEffectiveUserID)
 
@@ -122,15 +125,19 @@ withStateAnchor action = do
   configured <- lookupEnv "AGENT_CAT_STATE_ANCHOR"
   case configured of
     Nothing -> action Nothing
-    Just encoded -> do
-      let bytes = TE.encodeUtf8 (T.pack encoded)
-      when (BS.length bytes > 16384) (ioError (userError "state root identity exceeds its byte bound"))
-      (path, device, inode) <- either (const (ioError (userError "invalid state root identity"))) pure $
-        eitherDecodeStrict' @(FilePath, Integer, Integer) bytes
-      bracket (openPrivateRoot "anchored state root" path) closePrivateRoot $ \root -> do
-        unless (toInteger (privateRootDevice root) == device && toInteger (privateRootFile root) == inode) $
-          ioError (userError "state root identity changed before child access")
-        action (Just root)
+    Just encoded -> withPrivateRootIdentity encoded (action . Just)
+
+-- | Reopen a captured private-directory identity without granting new authority.
+withPrivateRootIdentity :: String -> (PrivateRoot -> IO a) -> IO a
+withPrivateRootIdentity encoded action = do
+  let bytes = TE.encodeUtf8 (T.pack encoded)
+  when (BS.length bytes > 16384) (ioError (userError "state root identity exceeds its byte bound"))
+  (path, device, inode) <- either (const (ioError (userError "invalid state root identity"))) pure $
+    eitherDecodeStrict' @(FilePath, Integer, Integer) bytes
+  bracket (openPrivateRoot "anchored state root" path) closePrivateRoot $ \root -> do
+    unless (toInteger (privateRootDevice root) == device && toInteger (privateRootFile root) == inode) $
+      ioError (userError "state root identity changed before child access")
+    action root
 
 privatePathComponents :: PrivateRoot -> FilePath -> IO [FilePath]
 privatePathComponents root path = do
@@ -190,9 +197,8 @@ publishPrivateFileAt = withTemporaryAt True
 
 withTemporaryAt :: Bool -> PrivateRoot -> [FilePath] -> (Handle -> IO a) -> IO a
 withTemporaryAt exclusivePublish root components action = withParent root components $ \parent file -> mask $ \restore -> do
-  let temporary = file <> ".tmp"
-      cleanup = voidUnlink parent temporary
-  descriptor <- openFdAt (Just parent) temporary WriteOnly fileFlags
+  (temporary, descriptor) <- openUniqueTemporaryAt parent file
+  let cleanup = voidUnlink parent temporary
   handle <- fdToHandle descriptor `onException` (closeFd descriptor `finally` cleanup)
   result <- (restore (action handle <* hFlush handle) `finally` hClose handle) `onException` cleanup
   (if exclusivePublish
@@ -200,6 +206,22 @@ withTemporaryAt exclusivePublish root components action = withParent root compon
       else renameAt parent temporary parent file
     ) `onException` cleanup
   pure result
+
+openUniqueTemporaryAt :: Fd -> FilePath -> IO (FilePath, Fd)
+openUniqueTemporaryAt parent finalName = do
+  pid <- getProcessID
+  let attempt = do
+        unique <- hashUnique <$> newUnique
+        let temporary = ".agentic-tmp-" <> show pid <> "-" <> show unique
+        if temporary == finalName
+          then attempt
+          else do
+            opened <- try @IOException (openFdAt (Just parent) temporary WriteOnly fileFlags)
+            case opened of
+              Left failure | isAlreadyExistsError failure -> attempt
+              Left failure -> throwIO failure
+              Right descriptor -> pure (temporary, descriptor)
+  attempt
 
 movePrivateAt :: PrivateRoot -> [FilePath] -> [FilePath] -> IO ()
 movePrivateAt root oldComponents newComponents =

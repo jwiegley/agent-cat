@@ -119,7 +119,7 @@ The source totals 5,242 lines across seven modules. The table records the entire
 | `Agent.Tui.Highlight` | 777 | Transcript segmentation, diff pairing, status styling, four tree-sitter grammars through FFI | Split. Reuse the pure segmentation, diff, status, and wrapping ideas against structured progress. Defer the FFI language parser until protocol events actually carry file/tool content; then port the C/Nix support deliberately. |
 | `Agent.Tui.Live` | 1,714 | Pure live state and reducer; per-flow output/reasoning/checklists; navigation; modal queue; nested-run wire; render projections | Rewrite over `Envelope`/`RuntimeEvent` and occurrence/attempt ids. Retain pure reduction, identity-stable selection, replacement-versus-append semantics, bounded windows, and control modals. Omit MCP nested-run wiring: agent-cat has no such semantic object and this goal excludes MCP scaffolding. |
 | `Agent.Tui.Markdown` | 210 | CommonMark block model and Brick rendering through `cmark` | Do not port the native parser. Current machine events provide bounded presentation text but no trusted CommonMark AST; the frontend renders a deterministic plain-text fallback and styles status and unified-diff lines. |
-| `Agent.Tui.Theme` | 100 | Tokyo Night true-colour palette and derived surfaces | Reuse as the initial built-in theme. Permit terminal defaults and future customization without making theme configuration a prerequisite. |
+| `Agent.Tui.Theme` | 100 | Tokyo Night true-colour palette and derived surfaces | Do not copy the fixed palette. Use terminal-default backgrounds, a small semantic foreground map, and a `NO_COLOR` mode whose non-colour focus and selection cues remain complete. |
 | `Agent.Tui.ViewModel` | 323 | Finished `RunGraph` projection, aggregate progress, status precedence, exact text renderer | Replace `RunGraph` with agent-cat's final `RunSnapshot`/trace projection. Reuse status precedence, textual fallback, progress bars, and the principle that headless rendering is not second-class. |
 
 ### 4.1 Direct dependency matrix
@@ -228,28 +228,25 @@ machine/process threads -> bounded lossless event queue -> pure reducer -> TUI s
 
 A `BChan` is bounded; `writeBChan` blocks when full and `writeBChanNonBlocking` drops the write when full (Brick 2.9 `Brick.BChan`). Engine or child-process reader threads therefore should not write every protocol frame directly into Brick's channel. Blocking them can halt all transport progress, while dropping their events corrupts the monitor.
 
-Use two queues:
+The implementation uses a bounded STM queue for every decoded envelope, with backpressure confined to the dedicated machine-reader thread. A bounded Brick channel carries one coalesced `FrameReady` notification and bounded one-shot worker results. Each operation kind has one cancellable worker slot, so replacing an operation first joins its predecessor.
 
-- a bounded STM queue for every decoded envelope, with backpressure confined to the dedicated machine-reader thread; and
-- a one-element non-blocking Brick channel carrying only `FrameReady` notifications.
-
-At each frame the Brick thread drains a bounded batch, folds it in sequence, spools display text, and schedules another frame immediately when backlog remains. A 60 Hz display ceiling and 10 Hz animation phase are adequate; agent-functor's 144 Hz ceiling has no established requirement and should not become policy by inheritance.
+At each frame the Brick thread drains at most 512 envelopes, folds them in sequence, and schedules another frame immediately when backlog remains. Protocol traffic drives these frames, while a non-blocking one-second tick updates elapsed time and loading animation. No display-rate loop or growing render queue exists.
 
 ### 5.5 Viewports, lists, forms, and editors
 
 Brick viewports render their entire child and therefore should not hold an unbounded transcript. A scrollable viewport also requires a child fixed in the scrolling dimension; violation raises a runtime exception (Brick 2.9 User Guide, “Viewport Restrictions”). Agent-functor's moving in-memory window plus disk spool is the correct response.
 
-Use `Brick.Widgets.List` for workflow, run, occurrence, and attempt selection, and `Brick.Widgets.Edit` or `Brick.Forms` for workflow inputs. These components already manage visibility, focus, cursor placement, mouse events, and wide-character editing. A dynamic input form should retain one editor per descriptor entry and preserve descriptor order; command-tail and stdin inputs remain semantically distinct even if both are edited in text widgets.
+Workflow, run, routing, and occurrence selection live in the pure model as bounded indices or stable occurrence identities. Plain non-wrapping rows inside named viewports make the selected row visible without introducing another selection model. `Brick.Widgets.Edit` owns the one active text editor. Accepted values live in the pure input map, and backward navigation reconstructs the editor from that map. Command-tail and stdin inputs remain semantically distinct even though both use the same editor.
 
-Forms perform pure field validation and retain the last valid form state. Network discovery and run preflight do not belong in a form validator; they run as background operations whose result returns as an application event (Brick 2.9 User Guide, “Input Forms”).
+Network discovery and run preflight do not run in editor validation. They occupy bounded worker slots whose typed results return as application events.
 
 ### 5.6 Terminal behavior
 
-Vty supplies efficient differential rendering, resize handling, bracketed paste, mouse modes, and multi-column character support. Mouse and paste modes are off by default and must be enabled only when the output reports support (Vty 6.4 README; Brick 2.9 User Guide, “Mouse Support” and “Paste Support”). Every action remains keyboard-reachable.
+Vty supplies efficient differential rendering, resize handling, bracketed paste, and multi-column character support. The TUI enables bracketed paste only when the output reports support. It does not enable mouse mode, and every action remains keyboard-reachable.
 
-Terminal column width can disagree across emulators. Brick's `textWidth` and Vty's Unicode-width machinery are authoritative; `Text.length` is not. The TUI should honor user Vty configuration and custom width tables where the selected platform package loads them. Unicode glyphs require ASCII fallbacks for terminals or test environments that cannot display them faithfully.
+Terminal column width can disagree across emulators. Vty's Unicode-width calculation is authoritative for the rendered picture, while `Text.length` is not. Real-cell tests therefore inspect Vty display spans rather than predicting terminal widths in the model.
 
-`customMain` restores the initial input state on ordinary and exceptional shutdown. The implementation must nevertheless test interruption and child failure, because terminal cleanup is an acceptance property rather than an assumption.
+`customMain` restores the initial input state on ordinary shutdown. The outer cleanup also invokes Vty's idempotent shutdown while later termination signals are ignored. This closes the interval in which another signal could interrupt Brick's exceptional cleanup. Interruption and child-failure PTY cases assert terminal restoration directly.
 
 The explicit `--tui` mode requires terminal input and output. When either side is not a terminal, it should refuse before Vty initialization and direct the caller to `list`, `plan`, `run`, or machine mode as appropriate.
 
@@ -257,9 +254,9 @@ Although Brick and Vty provide Windows backends, agent-cat's present machine-con
 
 ### 5.7 Rendering cache
 
-Brick's cache is explicit and does not infer when state invalidates an image. Cache settled markdown, completed diff blocks, and static help; do not cache a growing output segment, cursor-bearing editor, or animated status. Invalidate on resize and after theme change, and sweep long-lived content caches. The agent-functor failures caused by caching each growing segment are directly applicable.
+The implementation does not use Brick's explicit rendering cache. Runtime snapshots and their bounded presentation windows already own retention, and rebuilding the small visible widget tree avoids cache invalidation state for editors, resize, focus, and loading animation.
 
-For golden checks, `Brick.Main.renderWidget` can render widgets at a fixed display region without running a terminal. Brick 2.9 documents it as useful for tests but not stable; isolate it in tests rather than in production code (`Brick.Main`, compile-verified above).
+For fixed-cell checks, `Brick.Main.renderWidget` renders the production presentation at a chosen display region without running a terminal. The test then converts the picture with Vty's `displayOpsForPic` and checks emitted cell widths and attributes. Brick documents `renderWidget` as a testing helper rather than a stable production interface, so this conversion remains in the test executable (`Brick.Main`, compile-verified above).
 
 ### 5.8 Highlighting evidence decision
 
@@ -289,24 +286,25 @@ tui/
   src/Agentic/Tui/Types.hs           frontend-local launch and view types
   src/Agentic/Tui/Model.hs           top-level pure screen/focus/navigation state
   src/Agentic/Tui/RunModel.hs        pure projection of runtime snapshots
+  src/Agentic/Tui/Presentation.hs    responsive fixed-shell Brick presentation
   src/Agentic/Tui/App.hs             Brick/Vty adapter and event pump
   src/Agentic/Tui/Client.hs          bounded runner queries
   src/Agentic/Tui/Person.hs          verified person-question loading
   src/Agentic/Tui/Process.hs         fd 3, protocol readers, journals, leases
-  src/Agentic/Tui/ProcessGroup.hs    shared helper/machine ownership and reap
-  cbits/process_group.c             non-reaping observation and group signals
   src/Agentic/Tui/Highlight.hs       bounded plain/status/diff presentation
   src/Agentic/Tui/Root.hs            shared Runtime private-root facade
   test/...                           pure, render, protocol, and PTY tests
 ```
 
-The pure reducer remains outside Brick, and process/protocol supervision remains outside drawing. The retained directory contract lives in `Agentic.Runtime.PrivateRoot`, so frontend writes and runtime store writes use the same descriptor-relative operations. The terminal facade supplies only its diagnostic label. Plan and machine children validate the captured root path/device/inode from `AGENT_CAT_STATE_ANCHOR` before reading inputs or creating stores; the identity does not replace ownership or private-mode checks.
+The pure reducer remains outside Brick, and process/protocol supervision remains outside drawing. The retained directory contract lives in `Agentic.Runtime.PrivateRoot`, so frontend writes and runtime store writes use the same descriptor-relative operations. The terminal facade supplies only its diagnostic label. Plan and machine children validate the captured root path/device/inode from `AGENT_CAT_STATE_ANCHOR` before reading inputs or creating stores. The identity does not replace ownership or private-mode checks.
+
+Process ownership and sole reap live in `runtime/src/Agentic/Runtime/ProcessGroup.hs`, with non-reaping observation and group signals in `runtime/cbits/process_group.c`. The TUI imports these operations through the public runtime facade.
 
 `Agentic.Tui` exposes only an entry configuration and entry point:
 
 ```haskell
 data TuiConfig = TuiConfig
-  { tuiRunnerId    :: Text
+  { tuiRunnerAlias :: Text
   , tuiRunner      :: FilePath
   , tuiRunnerArgs  :: [String]
   , tuiWorkingDir  :: FilePath
@@ -316,7 +314,7 @@ data TuiConfig = TuiConfig
 runTui :: TuiConfig -> IO ()
 ```
 
-The current executable path is the runner. A downstream binary using `Agentic.Cli.cliMain` therefore lists and launches its own registry without a callback interface, source import, or second registry representation.
+The current executable path is the configured runner for the built-in command. The TUI obtains server identity from `frontend --capabilities` before workflow discovery, while the configuration fields remain the trusted alias and wrapper invocation. A downstream binary using `Agentic.Cli.cliMain` therefore lists and launches its own registry without a callback interface, source import, or second registry representation.
 
 ### 6.1 Import graph
 
@@ -361,39 +359,46 @@ The Haskell supervisor should remain smaller than ext-pi's. It does not need rem
 
 ## 7. User experience
 
-### 7.1 Top-level browser
+### 7.1 Fixed shell and top-level browser
 
-The initial screen has three views reached by one tab cycle:
+Brick starts before runner discovery. A fixed shell reserves rows for the current section, compact context, status, and contextual controls. Catalogue, help, routing, preview, and process startup run in bounded workers and display an animated loading state instead of delaying entry into the alternate screen.
 
-- **Workflows:** descriptor rows, fuzzy filter, static level/path/cost facts, input requirements, symbolic pins, and help/plan actions.
-- **Runs:** terminal and live stores, lineage, owner state, persona, resolved engines/models, bills, and final-result availability.
-- **Routing:** selected persona, available engines, concrete inventory provenance, and symbolic profile chains, obtained from a new sanitized CLI inspection command described in `model-routing-v2.md`.
+The initial browser has three sections reached by one tab cycle:
 
-The browser never parses Haskell, plans, or routing YAML. It invokes the runner's machine-readable commands.
+- **Workflows:** name-only rows, inline fuzzy filtering, and selected-row details for the description, input requirements, result type, execution capabilities, symbolic pins, and help actions.
+- **Runs:** concise stored-run rows with selected-row details for lineage, owner state, persona, resolved engines/models, bills, and final-result availability.
+- **Routing:** concise engine rows with selected-row details for credential readiness, concrete inventory provenance, optional execution fingerprints, and symbolic profile chains obtained from the sanitized CLI inspection command described in `model-routing-v2.md`.
+
+Wide terminals show one workflow name per row beside an overview of the selected workflow. Its description appears only in the overview. Narrow terminals show one pane at a time. Left and Right choose pane focus, Tab chooses the browser section, and a bullet marks the focused pane. The inline search updates matching rows as text is entered. Enter or Ctrl-D applies the filter, while Escape keeps the previous query. Context-specific key help is a modal layer. The browser never parses Haskell, DSL values, or routing YAML. It consumes the shared descriptor and exact-plan JSON contracts from the runner's machine-readable commands.
 
 ### 7.2 Launch path
 
 A launch proceeds through explicit states:
 
 1. Select a workflow.
-2. Collect each declared input in descriptor order. Prompt inputs use an editor, command-tail inputs remain one logical value, and stdin inputs preserve multiline text.
-3. Select scripted or live execution. Live execution selects a persona first; advanced raw route overrides remain separate and visibly exceptional.
-4. Request exact-input `plan --json --raw` and sanitized routing resolution in background threads.
-5. Show a confirmation containing workflow, cwd, effectfulness, static bill bounds, persona, symbolic-to-concrete chain, target, and store location. No secret or input body appears in the summary.
-6. Create the private supervisor directory and spawn `machine` with input files, a runtime store, and control fd 3.
-7. Enter the live monitor only after the first valid `run.started` envelope. Setup failures return to the launch screen with stderr redacted and bounded.
+2. Collect each declared input in descriptor order. Editors grow with the input up to eight rows rather than filling the screen. Prompt inputs use an editor, command-tail inputs remain one logical value, and stdin inputs preserve multiline text. Enter inserts a newline, Ctrl-D accepts, supported bracketed paste is one editor event, and backward navigation within configuration restores the draft. Escape from the first input cancels configuration.
+3. Select scripted or live execution. Live execution selects a credential-ready engine and persona first. Advanced raw route overrides remain separate and visibly exceptional.
+4. Request exact-input `plan --json --raw` in a bounded background worker and combine it with the selected sanitized routing inspection. A strict shared decoder validates the complete descriptor-v2 plan surface, code sequence, fold histogram, and opaque raw program. The runner identity, workflow name, description, result type, and input contract must still match the selected catalogue row.
+5. Show a compact confirmation containing workflow, working directory, exact request bounds and path count, effect capabilities, persona, target, warning count, and only profile chains selected by exact post-input pin membership. Offline readiness does not verify that a provider accepts the selected model. No secret, input body, or raw program appears in the summary.
+6. Make all plan fields, complete warnings, direct argv, routing provenance, and fingerprints available through a separate scrollable detail layer. The launch and back actions remain in the fixed footer in both layers.
+7. Create the private supervisor directory and spawn `machine` with input files, a runtime store, and control fd 3 in a bounded background worker. Reader, diagnostic, waiter, and heartbeat callbacks remain behind an activation gate until Brick has adopted process ownership.
+8. Enter the live monitor only after the first valid `run.started` envelope. Setup and protocol failures retain sole ownership through synchronous process-group termination and reap before returning to a bounded failure screen with stderr redacted.
 
-No live run begins from a bare selection key. Confirmation is the TUI's local safety boundary; engine permission policy remains the runtime's.
+No live run begins from a bare selection key. Confirmation is the TUI's local safety boundary, and engine permission policy remains the runtime's. The launch action is enabled only when every required review row and the complete launch, back, and exact-detail controls fit the current terminal. The decision is derived from display-cell wrapping and the fixed shell rather than a hard-coded terminal dimension. Refusal and resize preserve accepted inputs, target choice, pane focus, and detail state.
 
 ### 7.3 Live monitor
 
 The live screen adapts agent-functor's layout to agent-cat's semantics:
 
-- header: workflow, persona, selected concrete realization, run id, status, elapsed time, and exact request bills when known;
-- left pane: occurrence rows, grouped by stable occurrence id and showing intent, code, addressee, state, reuse, and active target;
-- right pane: selected occurrence prompt preview, attempt stream, recovery/redirect history, answer preview, and control acknowledgements;
-- optional full panes: prompt, attempt output, and final result;
-- footer: navigation, help, steer, next-boundary note, recovery, redirect, detach, and cancel.
+- **Context:** workflow, persona, selected concrete realization, human-readable status, elapsed time, follow state, and exact request bills when known. For terminal runs, elapsed time ends at the last recorded event.
+- **Left pane:** request number, lifecycle, and addressee in a rail that occupies at most one quarter of a wide terminal, capped at 32 columns. Selection remains attached to the stable occurrence id.
+- **Right pane:** the answer or a line- and character-bounded tail of the latest attempt stream, with paragraph spacing and lightweight Markdown cues. Full prompts, earlier attempts, public progress, routing history, and control acknowledgements remain in the scrollable Details layer.
+- **Optional right-pane result view:** the verified bounded result, selected explicitly rather than appended to the monitor.
+- **Run failure:** the recorded reason appears above both panes without requiring a selection, including failures before any request started. `d` opens the complete diagnostic and run identity in a scrollable detail layer. Stored-run details begin with the same failure.
+- **Status:** control, save, and protocol outcomes distinct from the run context.
+- **Footer:** only navigation and actions valid in the active modal or screen.
+
+Tab changes pane focus. Up and Down move occurrence selection when the list is focused and scroll output when the output pane is focused. Manual output scrolling marks the output pane `Paused`. `G` and End resume tail following. Narrow terminals show only the focused pane.
 
 Before `trace.ordered`, rows retain occurrence-id order and are labeled as live activity. When authored order arrives, the list may reorder, but the selection remains attached to its occurrence id. No index is treated as identity.
 
@@ -412,7 +417,7 @@ Protocol version 2 extends the existing command protocol without changing versio
 - cancellation first sends `cancelRun`, waits for the terminal event, and then uses process-group TERM/KILL with the same bounded fallback as ext-pi; and
 - the UI reports `delivered`, `rejected-stale`, `unsupported`, or `failed` from the terminal acknowledgement. “Requested” is not success.
 
-Recovery and person-answer decisions queue in protocol order. No modal replaces an earlier decision whose runtime producer is awaiting a reply.
+Recovery and person-answer decisions share one FIFO keyed by run id, protocol sequence, occurrence id, and decision kind. No modal replaces an earlier decision whose runtime producer is awaiting a reply. Person artifacts retain the same identity and a load generation, so a stale worker result cannot activate another prompt. Input, filter, person, steering, and save editors retain separate drafts when a mandatory layer preempts another editor. An active editor owns every printable character, including keys that are commands outside editors. Multiline editors use Enter for newlines and Ctrl-D for submission. The single-line filter also accepts Enter. Steering uses a bounded editor beneath the run view. Escape from a person-answer editor requests confirmed cancellation rather than discarding a blocked runtime producer.
 
 ### 7.5 Final result and history
 
@@ -427,6 +432,8 @@ A live run owned by another process is read-only. A stale owner becomes orphaned
 ### 8.1 Shared descriptor and snapshot projections
 
 Extract descriptor versioning, DTOs, strict JSON decoding, and encoding from `Agentic.Cli.factFields` into a Text/Aeson-only `Agentic.Runtime.Descriptor`. CLI constructs the DTO after its existing plan/cost folds; TUI decodes that same type from `list --json`. The extraction preserves every descriptor-v2 key, value type, and array-order guarantee; JSON object-key order remains explicitly unspecified. ext-pi remains a cross-language decoder and consumes shared valid/invalid descriptor fixtures.
+
+`Agentic.Runtime.Plan` owns the strict `plan --json --raw` boundary. It decodes the exact post-input descriptor, optional straight-line code sequence, and request-fold histogram, validates the histogram against its path count and bounds, and returns the raw program only as an opaque value for fingerprinting. The TUI does not rediscover exact facts from the catalogue row or rendered JSON.
 
 Add `Agentic.Runtime.Snapshot`, a pure state machine from validated envelopes to a `RunSnapshot`. It should enforce the lifecycle rules now implemented by ext-pi's TypeScript reducer: sequence continuity, one run id, no post-terminal event, valid occurrence and attempt transitions, exact control-ack transitions, complete authored trace before successful completion, and bounded text windows.
 
@@ -607,6 +614,7 @@ This ledger is the complete non-`tui` change surface. “No change” rows are i
 | Owner / files | Exact API or contract change | Compatibility impact | Required verification |
 |---|---|---|---|
 | `runtime/src/Agentic/Runtime/Descriptor.hs`; `Runtime.hs` | Introduce Text/Aeson-only `WorkflowDescriptor`, `WorkflowInputDescriptor`, strict v2/v3 codecs, and descriptor capability fields; CLI encodes and TUI decodes this one type. | Descriptor-v2 keys, value types, and array order remain compatible; JSON object-key order remains unspecified; v3 is additive and explicitly advertised. | Frozen descriptor-v2 semantic fixtures; valid/invalid v3 vectors consumed by Haskell and ext-pi. |
+| `runtime/src/Agentic/Runtime/Plan.hs`; `Runtime.hs` | Decode the strict exact-input `plan --json --raw` descriptor, code sequence, and fold histogram while returning the raw program only for opaque fingerprinting. | The existing CLI plan bytes and authoring surface remain unchanged. The TUI no longer treats arbitrary JSON or catalogue facts as an exact plan. | Valid, malformed, unknown-field, version, histogram, input-dependent fact, and catalogue-identity regressions. |
 | `runtime/src/Agentic/Runtime/{Protocol,Control,Machine}.hs` | Add explicit protocol selection, `ResultRef`, `QuestionRef`, local-person pending and typed-answer controls, v2 realization/progress fields, and version-directed envelope/control codecs; split large allowed streams before framing. | Omitted `--protocol-version` remains v1; v1 event and control kinds and bytes remain frozen; unknown v2 kinds never enter a v1 stream. | Existing protocol/control probes plus cross-version, frame-bound, sequence, lifecycle, typed-person-answer, FIFO, and negotiation vectors. |
 | `runtime/src/Agentic/Runtime/Snapshot.hs`; `Runtime.hs` | Add `initialRunSnapshot` and pure `stepRunSnapshot :: RunSnapshot -> Envelope -> Either SnapshotError RunSnapshot`. | New projection only; it changes no scheduler or denotation. | Haskell/TypeScript normalized-snapshot corpus, including every refusal transition. |
 | `runtime/src/Agentic/Runtime/Store.hs` | Add store-format 2 readers/writers, generic result and full-question artifact operations, and person-answering provenance; semantic answer-store version remains 1. | Protocol-v1 runs continue writing store 1; readers accept store 1 and 2; v2 requires store 2. Local-control lineage inherits person answers only from local-control parents. | Store permission, atomicity, digest, size, torn-write, corrupt-version, question/result order, provenance filtering, and v1 lineage regressions. |
@@ -635,14 +643,14 @@ The TUI is a display and control client, not a sandbox. It should preserve the f
 - Bound protocol frames, buffered stderr, output tails, in-memory scrollback, cache entries, and control text.
 - Bound `list`, help, plan, and routing-inspection subprocess output to 4 MiB and 30 seconds. The larger wall-clock bound avoids false refusal under loaded CI while process-group TERM/KILL and byte bounds remain strict.
 - Retain the original session leader through group signalling and the sole reap, including successful helpers whose descendants redirect their pipes. Serialize signalling and reap rather than checking a cached exit flag.
+- Gate machine callbacks until the application has adopted ownership. Keep startup cancellation and protocol-failure ownership until synchronous termination and reap complete.
 - Protect worker cancellation and joins from a second shutdown signal, while keeping the machine grace timeout interruptible and its final KILL/reap protected.
 - Revalidate a confined lineage parent and its current lease before preview, preparation, and spawn. Read the lease and clock after potentially lengthy store reconstruction.
 - Open candidate files nonblocking before type validation; enumerate directories from captured descriptors and enforce the entry bound during traversal.
 - Redact credential-shaped diagnostics and exact secret values known to the launcher before writing stderr logs.
 - Record hashes and secret reference names where necessary, never secret values.
-- Treat discovered model inventories, machine events, markdown, filenames, and tool output as untrusted data. They may be rendered as text but never executed or interpreted as terminal escape sequences.
-- Use Vty/Brick text constructors rather than writing raw ANSI received from an engine.
-- Confirm live and effectful launches with cwd, persona, and concrete realization visible. Project routing files cannot introduce credentials or endpoints; `model-routing-v2.md` owns that rule.
+- Treat discovered model inventories, machine events, markdown, filenames, and tool output as untrusted data. The shared presentation boundary replaces terminal control characters before every Brick text constructor, so received ANSI is displayed as text rather than interpreted.
+- Confirm live and effectful launches with cwd, persona, and concrete realization visible. Derive exact size, fold, pins, capabilities, and relevant routing profiles from the strict post-input plan. Project routing files cannot introduce credentials or endpoints; `model-routing-v2.md` owns that rule.
 - A TUI crash must not leave the terminal altered. A detached run remains supervised; an attached process-owner crash leaves an orphaned store, not a falsely live record.
 
 Markdown rendering should show raw HTML as text, as the source implementation does. Hyperlinks remain disabled unless a later design defines safe URI handling and terminal support.
@@ -656,16 +664,17 @@ Port the behavioral claims, not test-framework shape. Unit and property tests sh
 - every valid event transition and every invalid lifecycle transition;
 - sequence, run-id, duplicate, gap, post-terminal, and frame refusals;
 - selection stability under concurrent insertion and final authored reordering;
-- modal FIFO ordering and no lost blocked control;
+- one protocol-sequence FIFO across interleaved person and recovery decisions, with no lost blocked control;
 - append versus replace behavior;
 - viewport re-anchoring decisions;
-- bounded output, spool slices, cache age, and progress counts;
+- bounded output, line-level display tails, spool slices, cache age, and progress counts;
 - deterministic text projections and width-aware wrapping;
 - markdown block/inline parsing and diff pairing; and
-- exact control payloads and terminal acknowledgements; and
+- exact control payloads and terminal acknowledgements;
+- strict exact-plan decoding, catalogue identity checks, and input-dependent size, fold, pin, capability, and routing facts; and
 - local-person typed-answer validation, FIFO activation, memo/effect behavior, lineage provenance, and proof that the inner engine world is never called.
 
-Use `Brick.Main.renderWidget` at fixed dimensions for selected layout goldens, while keeping the pure text projection as the principal oracle. Test narrow and wide terminals, empty catalogues, long unbroken tokens, combining characters, emoji, and unsupported colour.
+Use `Brick.Main.renderWidget` and Vty's picture-to-spans conversion at fixed dimensions while keeping the pure text projection as the semantic oracle. Assert actual display-cell widths rather than `Text` lengths. Test 140×36, 80×24, 40×12, 24×6, and 1×1 regions, empty catalogues, long unbroken tokens, combining characters, emoji, and terminal-default colour. Confirm that the final footer rows and primary consent actions remain present. Test the content-derived consent boundary immediately above and below the required height and verify that narrow terminals become eligible only when every fact and primary control fits.
 
 ### 12.2 Cross-language protocol
 
@@ -678,12 +687,14 @@ Protocol-v1 fixtures remain frozen. v2 negotiation tests prove that old clients 
 Use deterministic stub ACP and deck fixtures only. PTY tests should cover:
 
 - `--tui` catalogue startup and clean exit;
-- workflow input editing, bracketed paste, preview, and cancellation;
+- workflow input editing, command-like printable text, bracketed multiline paste, state-preserving back navigation, preview, and cancellation.
 - live concurrent occurrences with scrollback larger than memory windows;
 - steer, retry/failover/abandon, redirect, local person answers, detach, and reattach;
-- full multiline person prompts, invalid and oversized answers, concurrent FIFO prompts, cancellation while blocked, restart, resume, and legacy-parent filtering;
-- child crash, malformed frame, torn frame, oversized output, and forced process-group termination;
-- final result artifact and run reconstruction; and
+- full multiline person prompts, invalid and oversized answers, mixed person/recovery FIFO decisions, modal editor preemption, cancellation while blocked, restart, resume, and legacy-parent filtering;
+- child crash, malformed frame, torn frame, oversized output, deterministic pre-activation failure, and forced process-group termination;
+- final result artifact and run reconstruction.
+- current-screen assertions through an ANSI cell parser, including rapid resize sequences and fixed footer placement.
+- `NO_COLOR` output with textual focus and selection cues.
 - terminal restoration after normal exit, exception, and interrupt.
 
 A stress fixture should deliver at least 10 MiB in small chunks across concurrent attempts while measuring bounded resident growth and responsive controls. Performance assertions should target established failures—quadratic partial-line concatenation, unbounded viewport contents, and ever-growing render caches—rather than arbitrary frame-rate numbers.
@@ -734,7 +745,7 @@ Each completed phase remains independently reviewable and leaves existing non-TU
 
 **Affected areas:** `tui/src`, `agentic.cabal`, `flake.nix`, `Agentic.Cli` command grammar, source-boundary CI.
 
-**Delivered:** Brick/Vty dependencies and `Agentic.Tui`; explicit `--tui`; current-executable descriptor discovery; workflow, versioned-run, and sanitized-routing browsers; source-aware inputs; plan/cost/concrete-realization preview; confirmation; protocol-v2 machine launch with local person answering, private store, and fd-3 controls.
+**Delivered:** Brick/Vty dependencies and `Agentic.Tui`, explicit `--tui`, asynchronous current-executable discovery, a fixed responsive shell, concise list/detail workflow, versioned-run and sanitized-routing browsers, explicit pane focus and key help, source-aware paste-safe inputs with backward restoration, strict post-input plan decoding, compact and exact launch review, credential readiness, content-derived consent, protocol-v2 machine launch with local person answering, private store and fd-3 controls, and terminal-default `NO_COLOR` presentation.
 
 **Risks:** terminal state left altered, catalogue subprocess deadlock or overflow, a new frontend path bypassing CLI policy, and a dependency closure that breaks downstream `wf`. PTY cleanup, strict output bounds, process-only integration, and agent-workflows builds are release gates.
 
@@ -746,7 +757,7 @@ Each completed phase remains independently reviewable and leaves existing non-TU
 
 **Affected areas:** TUI run model/application/process modules and shared protocol/store readers.
 
-**Delivered:** occurrence/attempt dashboard, FIFO person-answer and recovery modals, verified full-question rendering, bounded scrollback, detach/reattach, exact controls, process-group cancellation, owner heartbeat, history/lineage actions, and verified final-result rendering/copy.
+**Delivered:** responsive occurrence/detail dashboard, explicit pane focus and follow state, one protocol-sequence FIFO across person-answer and recovery modals, modal-specific editor state, verified full-question rendering, bounded scrollback, detach/reattach, exact controls, gated process adoption, process-group cancellation, owner heartbeat, history/lineage actions, and compact on-demand verified final-result rendering/copy.
 
 **Risks:** stale controls presented as delivered, a concurrent modal orphaning its waiter, a locally owned person request reaching an engine, unbounded stream/cache growth, selection moving under concurrency, and children surviving owner exit. Lifecycle fixtures, engine sentinels, identity-keyed state, the run-local person lane, bounded spools, stress tests, and process-group cleanup address these.
 

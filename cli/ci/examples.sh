@@ -109,11 +109,7 @@ else
 fi
 
 cat_run() {
-  if [ -n "${IN_NIX_SHELL:-}" ]; then
-    cabal run -v0 agentic-run -- "$@"
-  else
-    nix develop path:.. -c cabal run -v0 agentic-run -- "$@"
-  fi
+  ../test/cabal.sh run -v0 agentic-run -- "$@"
 }
 
 # ---------------------------------------------------------------------------
@@ -290,7 +286,7 @@ inputsFor() {
 # nobody is watching, and a row naming no program is a row about something that
 # has gone.
 
-nix develop path:.. -c cabal build all > "$work/build" 2>&1 \
+../test/cabal.sh build all > "$work/build" 2>&1 \
   || { echo "ci/examples: the build failed:" >&2; cat "$work/build" >&2; exit 1; }
 
 cat_run plan --no-such-example > "$work/registry" 2>&1
@@ -373,11 +369,8 @@ grep -q '^    answer  *()' "$work/structured-result.run" \
 # row added and not documented is a RUNTIME error. Running all nine is the only
 # thing that catches it.
 #
-# The binary is resolved once. Everything above goes through `cat_run`, which is
-# `nix develop … cabal run` and costs about eighteen seconds a call; that is
-# affordable for three calls a row and not for the four more this block wants.
-# It is the same binary either way — `cabal run` builds it and then executes it.
-bin=$(nix develop path:.. -c cabal list-bin exe:agentic-run 2>/dev/null | tail -1)
+# Resolve the same binary once for the repeated help checks below.
+bin=$(../test/cabal.sh list-bin exe:agentic-run 2>/dev/null | tail -1)
 [ -x "$bin" ] || { echo "ci/examples: no agentic-run binary: '$bin'" >&2; exit 1; }
 
 # NO REGISTERED NAME IS A VERB. `Agentic.Cli.parseCommand` decides a verb in

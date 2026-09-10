@@ -1,6 +1,6 @@
 [
   {"name":"shared runtime facade", "layer":"tui/src", "source":"module Boundary where\nimport Agentic.Runtime\n", "allowed":true},
-  {"name":"terminal-owned implementation", "layer":"tui/src", "source":"module Boundary where\nimport qualified Agentic.Tui.ProcessGroup as Group\n", "allowed":true},
+  {"name":"terminal-owned implementation", "layer":"tui/src", "source":"module Boundary where\nimport qualified Agentic.Tui.Process as Process\n", "allowed":true},
   {"name":"standard dependency", "layer":"tui/src", "source":"module Boundary where\nimport Data.Text\n", "allowed":true},
   {"name":"comments and strings are not imports", "layer":"tui/src", "source":"module Boundary where\n-- import Agentic.Exec\n{- import Agentic.RoutingConfig.V2 {- nested -} -}\nimport Agentic.Runtime\nexample = \"import Agentic.Cli\"\n", "allowed":true},
   {"name":"execution implementation", "layer":"tui/src", "source":"module Boundary where\nimport Agentic.Exec\n", "allowed":false},

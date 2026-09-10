@@ -11,11 +11,13 @@ module Agentic.Tui.Types
     TargetSelection (..),
     LaunchPreview (..),
     decodeRoutingSummary,
+    routingProfilesForPlan,
     targetArguments,
+    validateStoredInvocation,
   )
 where
 
-import Agentic.Runtime (LineageOperation, RunRecord, WorkflowDescriptor)
+import Agentic.Runtime (ExactPlanSummary, FrontendInvocation (..), FrontendManifest (..), LineageOperation, RunRecord, WorkflowDescriptor (workflowPins), exactPlanDescriptor)
 import Control.Monad (unless)
 import Data.Aeson (FromJSON (parseJSON), Value (..), eitherDecodeStrict', withObject, (.:), (.:?))
 import qualified Data.Aeson.Key as Key
@@ -32,7 +34,7 @@ import qualified Data.Text as T
 
 -- | Everything needed to run a TUI against one executable registry.
 data TuiConfig = TuiConfig
-  { tuiRunnerId :: !Text,
+  { tuiRunnerAlias :: !Text,
     tuiRunner :: !FilePath,
     tuiRunnerArgs :: ![String],
     tuiWorkingDir :: !FilePath,
@@ -44,7 +46,8 @@ data TuiConfig = TuiConfig
 data EngineChoice = EngineChoice
   { engineChoiceAlias :: !Text,
     engineChoiceBackend :: !Text,
-    engineChoiceProvider :: !Text
+    engineChoiceProvider :: !Text,
+    engineChoiceCredentialReady :: !Bool
   }
   deriving (Eq, Show)
 
@@ -66,6 +69,8 @@ data RoutingRungChoice = RoutingRungChoice
     routingRungBackend :: !Text,
     routingRungProvider :: !Text,
     routingRungThinking :: !Text,
+    routingRungMaxOutput :: !(Maybe Integer),
+    routingRungExecutionFingerprint :: !(Maybe Text),
     routingRungInventory :: !RoutingInventoryChoice
   }
   deriving (Eq, Show)
@@ -106,7 +111,7 @@ data LaunchPreview = LaunchPreview
     previewTarget :: !TargetSelection,
     previewLineage :: !(Maybe (LineageOperation, RunRecord)),
     previewRouting :: !(Maybe RoutingSummary),
-    previewPlan :: !Value,
+    previewPlan :: !ExactPlanSummary,
     previewProgramHash :: !Text
   }
   deriving (Eq, Show)
@@ -164,17 +169,22 @@ instance FromJSON RoutingInventoryChoice where
     RoutingInventoryChoice <$> inventory .: "source" <*> inventory .:? "fingerprint" <*> inventory .:? "fetchedAt"
 
 instance FromJSON RoutingRungChoice where
-  parseJSON = withObject "routing rung" $ \rung ->
-    RoutingRungChoice
-      <$> rung .: "axis"
-      <*> rung .: "rung"
-      <*> rung .:? "modelAlias"
-      <*> rung .: "model"
-      <*> rung .: "router"
-      <*> rung .: "backend"
-      <*> rung .: "provider"
-      <*> rung .: "thinking"
-      <*> rung .: "inventory"
+  parseJSON = withObject "routing rung" $ \rung -> do
+    choice <-
+      RoutingRungChoice
+        <$> rung .: "axis"
+        <*> rung .: "rung"
+        <*> rung .:? "modelAlias"
+        <*> rung .: "model"
+        <*> rung .: "router"
+        <*> rung .: "backend"
+        <*> rung .: "provider"
+        <*> rung .: "thinking"
+        <*> rung .:? "maxOutput"
+        <*> rung .:? "executionFingerprint"
+        <*> rung .: "inventory"
+    unless (maybe True (> 0) (routingRungMaxOutput choice)) (fail "routing rung maxOutput is invalid")
+    pure choice
 
 instance FromJSON RoutingProfileChoice where
   parseJSON = withObject "routing profile" $ \profile ->
@@ -200,19 +210,36 @@ rejectSensitiveRouting = go
       unless (normalized `Set.notMember` forbidden) (fail ("routing inspection contains forbidden field " <> T.unpack (Key.toText key)))
       go value
 
+routingProfilesForPlan :: ExactPlanSummary -> RoutingSummary -> [RoutingProfileChoice]
+routingProfilesForPlan plan routing =
+  filter ((`elem` workflowPins (exactPlanDescriptor plan)) . routingProfileName) (routingSummaryProfiles routing)
+
 instance FromJSON EngineChoice where
   parseJSON = withObject "routing engine" $ \engine -> do
     name <- engine .: "name"
     backend <- engine .: "backend"
     provider <- engine .: "provider"
+    credentialReady <- engine .: "credentialReady"
     unless (not (T.null name) && not (T.null backend)) (fail "routing engine name or backend is empty")
-    pure (EngineChoice name backend provider)
+    pure (EngineChoice name backend provider credentialReady)
 
 validLaunchArgument :: Text -> Bool
 validLaunchArgument value = not (T.null value) && T.length value <= 4096 && not (T.any (`elem` ['\NUL', '\n', '\r']) value)
 
 validLaunchFingerprint :: Text -> Bool
 validLaunchFingerprint value = T.length value == 64 && T.all (`elem` ("0123456789abcdef" :: String)) value
+
+-- | Check a stored invocation only against the current trusted TUI configuration.
+validateStoredInvocation :: TuiConfig -> FrontendManifest -> Either Text ()
+validateStoredInvocation config manifest = case frontendInvocation manifest of
+  Nothing -> Right ()
+  Just invocation
+    | frontendInvocationRunnerAlias invocation /= tuiRunnerAlias config ->
+        Left "stored runner alias is not present in the current trusted configuration"
+    | frontendInvocationExecutable invocation /= T.pack (tuiRunner config)
+        || frontendInvocationPrefixArgs invocation /= map T.pack (tuiRunnerArgs config) ->
+        Left "stored runner invocation does not match the current trusted configuration"
+    | otherwise -> Right ()
 
 targetArguments :: TargetSelection -> Either Text [String]
 targetArguments TargetScripted = Right ["--scripted"]

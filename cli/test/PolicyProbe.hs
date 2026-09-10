@@ -506,7 +506,7 @@ siblings = "5"
 -- makes unreachable-but-registered a thing a gate can shout about.
 --
 -- No program here is ever run. The parse is a pure function of the arguments
--- and the registry's /names/, so the flagship stands in for six programs and
+-- and the registry's /names/, so the flagship stands in for each program and
 -- the rows differ in nothing but what they are called.
 collidingRegistry :: Registry
 collidingRegistry =
@@ -514,7 +514,7 @@ collidingRegistry =
     { regBinary = "wf",
       regNoun = "workflow",
       regBanner = "a table that collides with its own verbs",
-      regRows = [(n, row) | n <- ["run", "machine", "plan", "cost", "list", "help", "ordinary"]]
+      regRows = [(n, row) | n <- ["run", "machine", "frontend", "frontend-io", "frontend-export", "plan", "cost", "list", "help", "ordinary"]]
     }
   where
     row = Row (Fixed hardenProgram) "one line" "a page" []
@@ -528,6 +528,10 @@ collidingRegistry =
 parsedAs :: [Text] -> String
 parsedAs args = case parseCommand collidingRegistry args of
   Right Tui -> "tui"
+  Right FrontendCapabilities -> "frontend-capabilities"
+  Right FrontendIo -> "frontend-io"
+  Right (FrontendExport _) -> "frontend-export"
+  Right FrontendSession -> "frontend"
   Right Usage -> "usage"
   Right (Help n) -> "help " <> T.unpack n
   Right (RoutingInspection _ _ _) -> "routing"
@@ -2201,6 +2205,16 @@ main = do
       ("cost NAME is the verb", parsedAs ["cost", "ordinary"] == "cost ordinary"),
       ("`list` is the verb", parsedAs ["list"] == "list"),
       ("leading --tui cannot collide with a workflow name", parsedAs ["--tui"] == "tui"),
+      ("frontend is the prepared-session verb", parsedAs ["frontend"] == "frontend"),
+      ("frontend capabilities are a distinct discovery command", parsedAs ["frontend", "--capabilities"] == "frontend-capabilities"),
+      ("frontend-io is the read-only query verb", parsedAs ["frontend-io"] == "frontend-io"),
+      ("frontend-export requires a trusted absolute state root", parsedAs ["frontend-export", "--state", "/tmp/state"] == "frontend-export"),
+      ("frontend help does not prepare a session", parsedAs ["frontend", "--help"] == "usage"),
+      ("frontend-io help does not query a store", parsedAs ["frontend-io", "--help"] == "usage"),
+      ("frontend-export help does not read a request", parsedAs ["frontend-export", "--help"] == "usage"),
+      ("frontend refuses positional payloads", parsedAs ["frontend", "private-input"] == "refused"),
+      ("frontend-io refuses positional payloads", parsedAs ["frontend-io", "private-input"] == "refused"),
+      ("frontend-export refuses a relative state root", parsedAs ["frontend-export", "--state", "relative"] == "refused"),
       ("`help` alone is the usage", parsedAs ["help"] == "usage"),
       ("leading --routing cannot collide with a workflow name", parsedAs ["--routing"] == "routing"),
       ("leading --migrate-routing cannot collide with a workflow name", parsedAs ["--migrate-routing", "old", "--output", "new"] == "migration"),

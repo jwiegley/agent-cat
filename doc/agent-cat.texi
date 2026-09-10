@@ -3138,6 +3138,10 @@ repository.
 
 @example
 agentic-run --tui
+agentic-run frontend --capabilities
+agentic-run frontend
+agentic-run frontend-io < request.json
+agentic-run frontend-export --state STATE < request.json
 agentic-run list [--json [--descriptor-version 3]]
 agentic-run --routing [--json] [--persona NAME] [--offline | --refresh-models]
 agentic-run --migrate-routing SOURCE --output DESTINATION
@@ -3172,42 +3176,103 @@ therefore browses and launches its own registry rather than this repository's
 example table.
 @end table
 
-The browser cycles through Workflows, Runs, and Routing with @kbd{TAB}.
-@kbd{UP} and @kbd{DOWN} move the current selection.  In Workflows, @kbd{/} opens
-the bounded fuzzy filter.  Run rows show lineage, persona, concrete realizations,
-bills, final-result availability, and ownership.  Routing shows symbolic profile
-chains and concrete inventory provenance.  @kbd{RET} selects a workflow or
-reconstructs a stored run; @kbd{h} opens the selected workflow's
-bounded runner help; @kbd{q} exits only when this process owns
-no live child.  Workflow values are collected in descriptor order.  @kbd{RET}
-inserts a newline and @kbd{C-d} accepts the current value.  @kbd{p} cycles the
-available routing personas.  Scripted and routing-only targets use @kbd{s} and
-@kbd{l}.  Exact-input plan facts, the runner executable and target arguments,
-and a concrete routing summary appear before a separate @kbd{y} launch
-confirmation.  Routing inspection supplies opaque CLI-owned routing-only
-arguments and a fingerprint.  Launch requires full pin coverage, repeats offline
-routing, and refuses if that fingerprint has changed.
+The application enters its Brick screen before runner discovery begins.  Its
+trusted configuration keeps the runner alias, executable, and ordered prefix
+arguments as invocation data.  Before workflow or routing discovery, a bounded
+subprocess obtains the capability server record from that exact configured
+invocation.  Child manifests take @code{runnerId}, @code{runnerExecutable}, and
+@code{runnerVersion} from the discovered server record rather than from the alias
+or wrapper tuple.  A fixed shell keeps the current section, context, status, and
+applicable controls visible while bounded workers load the catalogue, help,
+routing, launch preview, or machine process.  The browser cycles through Workflows,
+Runs, and Routing with @kbd{TAB}.
+@kbd{UP} and @kbd{DOWN} move the current selection.  On a wide terminal, each
+workflow occupies one name-only row beside an overview containing its description.
+On a narrow terminal, @kbd{LEFT} and @kbd{RIGHT} select the list or details pane.
+A bullet marks the focused pane.  @kbd{?} opens context-specific key help.
+
+In Workflows, @kbd{/} opens an inline fuzzy filter whose matching rows update as
+text is entered.  @kbd{RET} or @kbd{C-d} applies the filter, while @kbd{ESC} keeps
+the previous filter.  Run details show lineage,
+persona, concrete realizations, bills, final-result availability, and ownership.
+Routing details show engine credential readiness, symbolic profile chains, output
+limits, optional execution fingerprints, and concrete inventory provenance.
+@kbd{RET} selects a workflow or reconstructs a stored run.  @kbd{h} opens the
+selected workflow's bounded runner help.  @kbd{q} exits only when this process owns
+no live child.
+
+Workflow values are collected in descriptor order.  @kbd{RET} inserts a newline and
+@kbd{C-d} accepts the exact current value.  Bracketed paste is enabled when Vty
+reports terminal support.  Printable characters remain editor data while an editor
+has focus.  Within workflow configuration, @kbd{ESC} returns to the preceding input
+and preserves the current draft.  From the first input it cancels configuration and
+returns to the browser.  @kbd{p} cycles the available routing personas.  Scripted and
+routing-only targets use @kbd{s} and @kbd{l}.  An engine whose routing inspection
+reports @samp{NOT READY} cannot enter launch review.  @samp{READY (offline)} records
+local configuration readiness, not acceptance of the selected model by a live provider.
+
+Launch review first strictly decodes the exact post-input plan and verifies its
+workflow identity against the selected catalogue row.  The compact view shows the
+workflow, target, persona, request bounds, path count, effect capabilities, working
+directory, routing warning count, live billing warning, and profile chains whose names
+are exact members of the post-input pins.  @kbd{d} opens a scrollable exact-details
+view with the complete warnings first, followed by all plan fields, including the
+level, size, ask count, and fold histogram,
+runner executable, direct argv, routing provenance, launch fingerprint, and execution
+fingerprints when supplied.  Input bodies and the raw program do not appear in either
+view.  @kbd{RET} or @kbd{y}
+confirms, and @kbd{n} returns to target selection with the input state intact.
+Confirmation is enabled only when every required review row and the complete launch,
+back, and exact-detail controls fit the current terminal cells.  Resizing does not
+alter selection, editor contents, pane focus, detail mode, or pending consent.  Launch
+requires full pin coverage, repeats offline routing-only resolution, and refuses a
+changed CLI-owned fingerprint.  Restarts, resumes, and forks retain the billing
+classification of the restored target.
 
 A confirmed run uses protocol version 2, store format 2, local person answering,
-and a control pipe on file descriptor 3.  Its header shows workflow, persona,
-concrete realization, run identifier, status, elapsed time, and known bills.  The
-monitor is entered only after a
-valid @code{run.started} event.  @kbd{ESC} detaches without cancelling and
-reattaches from the browser; @kbd{c} opens a cancellation confirmation.
-Occurrence selection uses @kbd{j} and @kbd{k}.  Active attempts accept immediate
-and next-boundary steering with @kbd{i} and @kbd{b}; recovery uses @kbd{r},
-@kbd{f}, and @kbd{a}; numbered choices select pre-dispatch redirects.  @kbd{UP}
-and @kbd{DOWN} scroll the dedicated output viewport, while @kbd{G} or @kbd{END}
-resumes tail following.  Person questions and recoveries are delivered in FIFO
-order, and person answers require @kbd{C-d}.  After result verification, @kbd{s}
-opens an explicit absolute-path prompt which copies the JSON value to a new
-mode-0600 file; an existing path is never overwritten.
+and a control pipe on file descriptor 3.  Its context line shows workflow, persona,
+concrete realization, human-readable status, elapsed time, follow state, and known
+bills.  Terminal elapsed time ends at the last recorded event.  @kbd{d} opens the
+complete run diagnostic and run identifier.  A run-level failure appears above the
+occurrence panes, even when no request started; stored-run details begin with the same
+failure.  Machine callbacks remain gated until the frontend adopts process ownership,
+and the monitor is entered only after a valid @code{run.started} event.  Startup and
+protocol failures retain ownership until process-group termination and reap complete.
+The request rail occupies at most one quarter of a wide terminal, capped at 32
+columns.  Its rows show request number, lifecycle, and addressee.  The reading pane
+shows the answer or the latest attempt output with paragraph spacing.  Full prompts,
+earlier attempts, public progress, routing history, and control acknowledgements
+remain available in @kbd{d} Details.
+@kbd{TAB} changes pane focus.  @kbd{UP} and @kbd{DOWN} move the occurrence selection
+when the list is focused and scroll output when the output pane is focused.
+@kbd{j} and @kbd{k} also move the occurrence selection.  Manual output scrolling
+sets the visible state to @samp{Paused}, while @kbd{G} or @kbd{END} resumes tail
+following.
+
+@kbd{ESC} detaches without cancelling and reattaches from the run browser.  On a
+live run outside an editor, @kbd{c} opens a cancellation confirmation.  Active attempts accept
+immediate and next-boundary steering with @kbd{i} and @kbd{b}.  The bounded steering
+editor appears beneath the run view, keeping output visible during composition.
+Recovery uses
+@kbd{r}, @kbd{f}, and @kbd{a}, and numbered choices select pre-dispatch redirects.
+Person questions and recoveries share one FIFO ordered by machine protocol sequence.
+Input, filter, person, steering, and save editors retain separate drafts when a
+mandatory decision preempts another editor.  In a person-answer editor, printable
+characters including @kbd{c}, @kbd{q}, and @kbd{?} are answer text, @kbd{C-d}
+submits, and @kbd{ESC} opens cancellation confirmation.  After result
+verification, @kbd{r} shows the bounded result pane on demand.  @kbd{s} opens an
+explicit absolute-path prompt which copies the JSON value to a new mode-0600 file.
+An existing path is never overwritten.  @kbd{PGUP} and @kbd{PGDN} scroll save errors.
 
 The monitor renders answer output separately from bounded public message, tool,
 todo, context-usage, and explicit reasoning-summary updates.  ACP thought chunks
 are not reasoning summaries and are not retained.  Plain text, lightweight Markdown
 line cues, status classes, and unified-diff classes cover the implemented event data
-without a native grammar library.
+without a native grammar library.  The color map keeps the terminal's default
+background.  A nonempty @env{NO_COLOR} removes semantic foreground colors while
+retaining textual focus, reverse-video selection, headings, warnings, and diff
+prefixes.  The presentation boundary replaces terminal control characters in every
+rendered string before Brick constructs Vty cells.
 
 State is private beneath @env{AGENT_CAT_STATE_DIR} when that variable is set to an
 absolute path.  An existing root must be a no-follow directory owned by the effective
@@ -3377,6 +3442,382 @@ of at least 3; Pi uses fd 3.  Control NDJSON and workflow input therefore coexis
 without framing.  The compatibility form @code{AGENT_CAT_CONTROL_STDIN=1} puts
 controls on standard input instead; it works only when the stdin-designated
 value was supplied explicitly, and both control modes together are refused.
+
+@section Frontend capability discovery
+
+@c COVER CLI --capabilities author
+
+The @code{frontend --capabilities} command writes one UTF-8 JSON object followed
+by an LF and exits at zero.  It does not read standard input, inspect a workflow,
+load routing or provider configuration, open state, or perform a managed write.
+The response has @code{version: 1}, @code{operation: "capabilities"}, and the
+following records.
+
+@table @code
+@item server
+This record contains @code{runnerId}, the actual registry binary name,
+@code{executable}, the value returned by @code{getExecutablePath}, and
+@code{runnerVersion}, the package version derived from
+@code{Paths_agentic.version}.  Workflow descriptors use the same version source.
+
+@item session
+This record advertises session version 1, the @code{prepare},
+@code{prepare-lineage}, @code{start}, and @code{discard} operations, the
+@code{literal}, @code{file}, and @code{transport} input sources, invocation
+version 1, and a @code{maxRequestBytes} value of 2097152.
+
+@item io
+This record advertises version 1 and the @code{open-root},
+@code{read-question}, @code{read-result}, @code{list-runs}, and @code{read-run}
+operations.
+
+@item export
+This record advertises version 1, the @code{export-result} operation,
+@code{format: "result-json"}, and @code{destination: "state-exports"}.
+@end table
+
+The top-level @code{frontendManifestVersions} value is @code{[2, 3]}.
+The separate @code{legacyFrontendManifests: true} field reports support for
+unversioned manifests.  It does not authorize an explicit manifest version 1.
+A client checks the document version and every operation, version, and input
+source that it needs.  Failed, malformed, or incomplete discovery does not
+authorize a fallback, and a descriptor version or executable name is not a
+substitute for this response.  The command is represented by
+@code{Agentic.Cli.Command.FrontendCapabilities}.
+
+@section Native frontend file access
+
+@c COVER CLI verb:frontend-io author
+
+The @code{frontend-io} command reads one versioned JSON request from standard
+input through end of file and writes one JSON response followed by a newline.
+It opens existing private roots and verifies referenced artifacts without
+creating a run, reading routing configuration, or acquiring live controls.
+Successful requests exit at zero.  Invalid requests and failed verification
+exit at three with diagnostics on standard error and no JSON response.
+
+Every request contains @code{version: 1} and an @code{operation} string.
+Unknown operations, versions, and top-level fields are refused.  The request
+limit is 2 MiB, including the encoded root identity and artifact reference.
+Responses are bounded by the 64 MiB artifact limit plus 4096 bytes.
+
+@table @code
+@item open-root
+The request supplies an absolute @code{path} naming an existing directory.
+The directory must satisfy the runtime's private-root ownership and permission
+checks.  The response contains @code{rootIdentity}, an opaque string that the
+client retains unchanged.  It identifies the directory rather than granting
+authority.  A missing root is refused rather than created.
+
+@item read-question
+The request supplies @code{rootIdentity}, @code{runId}, @code{occurrenceId},
+@code{codeName}, and @code{reference}.  The occurrence identifier is a decimal
+Word64 string of at most 20 digits.  The reference has the existing
+@code{QuestionRef} fields.
+The response contains the run and occurrence identifiers, @code{intent}, and
+the full @code{question} value.
+
+@item read-result
+The request supplies @code{rootIdentity}, @code{runId}, and @code{reference}
+with the existing @code{ResultRef} fields.  The response contains the run
+identifier, the verified @code{code}, and the result @code{value}.
+
+@item list-runs
+The request supplies @code{rootIdentity}.  The response contains @code{runs},
+a bounded catalogue of summary records and visible corrupt entries.  A summary
+contains the run, runner, workflow, directory, creation time, lineage, persona,
+ownership classification, and compact snapshot status and billing fields.
+@code{resultReferenceAvailable} reports a recorded reference, not verified
+result content.  Every healthy summary also contains @code{invocation}.  Its
+value is null for an unversioned or version-2 manifest and is the retained
+invocation record for a version-3 manifest.
+
+@item read-run
+The request supplies @code{rootIdentity} and @code{runId}.  The response contains
+@code{run}, with the frontend manifest, sanitized runtime policy, ownership
+classification, and full public runtime snapshot.  No caller-supplied owner
+identifier is accepted, so these queries cannot report control ownership for
+their caller.
+@end table
+
+Every successful response also contains @code{version: 1} and the requested
+operation.  Artifact requests reopen and verify the captured root identity,
+then traverse @file{runs/RUN_ID/runtime} relative to retained directory
+descriptors.  Ancestor and leaf symlinks, nonregular files, mismatched identity,
+size, digest, code, and noncanonical artifact bytes are refused.
+
+The client obtains each expected reference and code name from its validated
+event stream or restored snapshot.  It supplies that reference unchanged rather
+than computing a new digest from the file it wants to read.  Artifact queries
+verify those expectations independently of journal replay and do not establish
+store health, decision eligibility, or control ownership.  Catalogue and
+@code{read-run} queries separately validate and replay the runtime journal.
+A torn or changing journal can refuse inspection while previously authenticated
+artifact references remain independently readable.  Catalogue corruption does
+not hide healthy siblings.  Input bytes are authenticated separately when
+preparing lineage.
+
+The Haskell facade exposes @code{runFrontendQuery} and
+@code{maxFrontendQueryBytes}.  @code{withPrivateRootIdentity} supplies the same
+captured-root validation used by the existing process-boundary state anchor.
+The command is represented by @code{Agentic.Cli.Command.FrontendIo}.
+
+@section Managed verified result export
+
+@c COVER CLI verb:frontend-export author
+@c COVER CLI --state author
+
+The @code{frontend-export --state STATE} command is a separate mutating
+interface.  @code{STATE} is mandatory, must be an absolute bounded path, and
+comes from the client's current trusted configuration.  The directory must
+already exist and satisfy the private-root ownership and mode checks.  The
+command reads one JSON request through end of file.
+
+@example
+@{
+  "version": 1,
+  "operation": "export-result",
+  "rootIdentity": "CAPTURED_ROOT_IDENTITY",
+  "runId": "RUN_ID",
+  "reference": @{@dots{} complete ResultRef fields @dots{}@},
+  "name": "result.json"
+@}
+@end example
+
+The request is strict and bounded at 2 MiB.  The root identity must exactly
+name the path, device, and inode opened from the trusted @code{--state}
+argument.  The result reference is the complete existing @code{ResultRef}
+obtained from a validated event or snapshot.  The exporter verifies its fixed
+path, size, digest, run identifier, canonical artifact encoding, and result
+code through retained directory descriptors.  It captures the verified value
+once and does not require fresh journal replay, establish whole-store health,
+or acquire control ownership.
+
+The name is one nonempty filename component of at most 255 UTF-8 bytes.  It
+cannot be @file{.} or @file{..} and cannot contain a slash, backslash, NUL,
+ASCII control character, or delete character.  The only destination is
+@file{STATE/exports/NAME}.  There is no request field for another destination,
+file body, overwrite mode, or client-side fallback write.
+
+The published bytes are compact JSON containing exactly @code{code} and
+@code{value}, followed by one LF.  Both fields retain their original JSON types,
+and the complete sequence cannot exceed 67108864 bytes.  Publication creates or
+validates an owned mode-0700 @file{exports} directory, writes through a unique
+mode-0600 exclusive temporary file, and commits atomically without replacing an
+existing file, directory, or symbolic link.  Concurrent requests for one name
+therefore have at most one success.  A temporary file left by a dead process
+does not reserve the final name.
+
+A successful response reports version 1, @code{operation: "export-result"}, the
+run and filename, the fixed absolute path, a decimal-string byte count, a bare
+lowercase SHA-256 digest of the published bytes, and the verified result code.
+Validation and input or output failures exit at three with bounded diagnostics
+and no success object.  Failure before publication leaves no final partial file.
+A lost response after publication can leave a complete file, and retrying the
+same name refuses rather than overwriting or deleting it.  A client reports
+that outcome as uncertain.  The Haskell facade exposes
+@code{runFrontendExport}, and the command is represented by
+@code{Agentic.Cli.Command.FrontendExport}, while @code{frontend-io} remains
+read-only.
+
+@section Native frontend preparation
+@c COVER CLI verb:frontend author
+
+The @code{frontend} command prepares one execution and retains it until the
+client approves or discards it.  The client invokes the runner directly with
+ordinary standard-input and standard-output pipes, without arranging fd 3.
+The runner owns a separate process group and reserves fd 3 inside its worker
+before the Haskell RTS initializes its event managers.  Each preparation and
+decision is one newline-terminated JSON object, bounded at 2 MiB.
+
+A preparation specifies the workflow, an absolute private state directory,
+the ordinary target arguments, and every declared input.  It may also carry the
+client's exact configured invocation.  Literal input values remain in the
+private pipe rather than appearing in process arguments.
+
+@example
+@{
+  "version": 1,
+  "operation": "prepare",
+  "workflow": "review",
+  "stateDirectory": "/home/user/.local/state/workflows",
+  "targetArguments": ["--scripted"],
+  "personAnswering": "local-control",
+  "invocation": @{
+    "version": 1,
+    "runnerAlias": "configured-alias",
+    "executable": "/trusted/wrapper",
+    "prefixArgs": ["--profile", "work"]
+  @},
+  "inputs": [
+    @{"name": "subject", "source": "literal", "value": "Review this change"@},
+    @{"name": "notes", "source": "file", "path": "/home/user/notes.txt"@}
+  ]
+@}
+@end example
+
+Input names occur exactly once and are checked against the descriptor.
+File sources are bounded regular files opened without following the leaf
+symbolic link.  The captured bytes remain in memory, so subsequent source-file
+changes do not change the prepared execution.  Captured input transports are
+bounded at 64 MiB in total.  Literal values use UTF-8, with one additional LF
+in prompt-file transport so that the existing single-LF decoding preserves
+the complete literal value.  Command-tail and standard-input transports retain
+their UTF-8 bytes without that addition.
+
+The @code{transport} source carries UTF-8 text captured by the client before
+preparation.  Its @code{value} encodes the original transport bytes rather
+than the logical input value:
+
+@example
+@{"name": "notes", "source": "transport", "value": "Captured text\n"@}
+@end example
+
+The runner encodes that text without adding an LF, removing a BOM, or
+normalizing Unicode.  The existing input decoder then applies the descriptor
+source rule once.  Prompt inputs lose one final LF when present, while
+command-tail and standard-input values retain their text.  Byte counts,
+digests, persisted inputs, and restoration retain the original transport
+bytes.  No source path is accepted or reread for this variant, and capture
+requires valid UTF-8 without replacement decoding or BOM removal.
+
+Transport input remains within the preparation frame's 2 MiB limit, including
+JSON escaping.  The 64 MiB aggregate input limit does not enlarge that frame
+limit.  Oversized captures are refused rather than converted to a file or
+literal source.  Request version 1 and the existing source variants retain
+their meanings.
+
+Preparation resolves the target through the ordinary CLI grammar and routing
+fixed point.  The program, its run facts, the resolved policy, and the worker
+environment are retained in the same process.  Inventory discovery follows
+the supplied target options, while workflow execution does not begin before
+approval.  The state root may be created during preparation, but no run directory,
+input files, lease, or workflow store is created before @code{start}.
+
+The response has @code{version: 1} and @code{operation: "prepared"}.  It
+contains @code{approvalId}, @code{runId}, @code{rootIdentity}, @code{cwd},
+the version-3 @code{descriptor}, the exact @code{plan}, @code{programHash},
+@code{targetKind}, @code{targetArguments}, sanitized @code{policy},
+@code{personAnswering}, and input names with decimal-string byte counts and
+bare hexadecimal SHA-256 digests.  The required @code{server} record has the
+same shape and values as capability discovery, while required
+@code{invocation} is the validated request record or JSON null.  Its size is
+bounded at 64 MiB plus 4096 bytes.
+The exact plan includes the prepared run facts.  The separate program hash
+retains the existing frontend-manifest meaning: the post-input static program
+with run facts unbound.  Returned target arguments include resolved defaults,
+including an automatically selected ACP scratch directory, so the retained
+arguments describe the execution accepted by the existing lineage commands.
+The byte and value reference vectors are in
+@file{test/fixtures/runtime/input-sources/v1.json}.
+
+The optional request field @code{targetKind} preserves a native host's
+@code{current}, @code{child}, or @code{remote} classification for an ACP target.
+Other classifications must agree with the backend selected by the CLI.
+Person answering defaults to @code{local-control} and also accepts @code{engine}.
+The optional invocation record has exactly @code{version}, @code{runnerAlias},
+@code{executable}, and @code{prefixArgs}.  Version must be 1.  Alias and
+executable are non-whitespace, NUL-free strings bounded at 256 and 4096 UTF-8
+bytes.  The executable remains exact and can be a bare command.  Prefix
+arguments remain exact and ordered, with at most 4096 entries and 65536 UTF-8
+bytes in aggregate.  An empty vector is explicit.  Existing
+credential-argument checks reject recognizable secret-bearing prefix arguments,
+but callers remain responsible for excluding credentials and private
+environment selectors.  Unknown fields, incompatible classifications, missing
+inputs, credential-bearing adapter or invocation arguments, and malformed
+requests are refused before managed run writes.
+
+Approval is a decision on that same process and its captured root identity:
+
+@example
+@{"version":1,"operation":"start","approvalId":"RETURNED_APPROVAL_ID"@}
+@end example
+
+Using @code{discard} instead of @code{start} exits without creating a run.
+The approval ID is local to one preparation, and a mismatched ID is refused.
+The client does not reconstruct a routing fingerprint or spawn another machine
+command after approval.  Changing the setup requires another preparation and
+review.
+
+After @code{start}, standard output contains the existing protocol-version-2
+runtime envelopes, and the same input pipe accepts existing version-2 controls.
+The runner writes the original captured input transports through
+@code{Runtime.PrivateRoot}, then owns the lease and runtime execution.  Closing
+the control pipe cancels execution.  The public @code{Runtime.ProcessGroup}
+implementation retains the group leader until its sole reap and terminates
+descendants when that leader exits.
+
+A preparation without invocation metadata writes the existing frontend
+manifest version 2 with no @code{invocation} key.  A preparation with invocation
+metadata writes explicit version 3, which contains every version-2 field and a
+required non-null @code{invocation}.  Decoding uses separate strict branches for
+versions 2 and 3, while pre-versioned manifests remain accepted.  An explicit
+version 1 is refused.  @code{read-run} exposes the corresponding original
+manifest shape.
+
+Native manifests keep server identity separate from configured invocation.
+@code{runnerId} remains the registry's binary name, @code{runnerExecutable}
+remains the executing binary's absolute path, and @code{runnerVersion} remains
+the package-derived server version.  The invocation record is client-declared
+non-secret metadata rather than server attestation or execution authority.  A
+restoring client resolves @code{runnerAlias} only in its current trusted
+configuration, requires exact executable and ordered prefix-argument equality,
+and launches that trusted configuration.  It never reconstructs a command from
+stored metadata or infers invocation identity from a version-2, unversioned, or
+parent record.
+
+The @code{Agentic.Cli.Command.FrontendSession} entry point also accepts a
+@code{prepare-lineage} request.  It names an existing state directory, a
+@code{parentRunId}, and @code{lineage} equal to @code{restart}, @code{resume}, or
+@code{fork}.  It may carry the same invocation record.  The optional
+person-answering mode defaults to local control.  Inputs, target arguments,
+workflow identity, and working directory come from the parent manifest and
+authenticated input files rather than client-supplied reconstructions.
+
+@example
+@{
+  "version": 1,
+  "operation": "prepare-lineage",
+  "stateDirectory": "/home/user/.local/state/workflows",
+  "parentRunId": "PARENT_RUN_ID",
+  "lineage": "fork",
+  "invocation": @{
+    "version": 1,
+    "runnerAlias": "configured-alias",
+    "executable": "/trusted/wrapper",
+    "prefixArgs": ["--profile", "work"]
+  @},
+  "edits": [@{"operation":"replace","occurrenceId":"0","answer":false@}]
+@}
+@end example
+
+Fork edits either @code{drop} an occurrence or @code{replace} its answer with
+a JSON value.  The existing lineage validator checks the stored question's
+type and schema, replayability, checkpoint, effects, and person-answer provenance.
+Restart and resume retain their exact program and policy requirements, while
+fork retains the existing immutable-parent and answer-reuse rules.
+
+Preparation retains the parent directory identity and refuses another current
+owner.  A version-3 parent requires an exactly equal invocation in the lineage
+request.  A missing or mismatched record is refused before semantic preparation
+or managed writes, and the child retains that invocation.  For a version-2 or
+unversioned parent, omission produces a version-2 child, while an explicitly
+supplied invocation produces a version-3 child and describes only that child.
+Its response adds @code{parentRunId}, @code{lineage}, and edit metadata.
+Replacement metadata contains a digest rather than the answer content.  After
+approval, the parent identity, ownership, and inherited answers are revalidated
+before execution, and the child receives separate input files, manifest, lease,
+and runtime store.  Parent files are never rewritten by these operations.
+
+An inherited native proxy still requires its host to provide the appropriate
+connection environment.  A stored manifest or read-only query does not grant
+attachment or control authority.  The @code{frontend-io} interface remains
+read-only throughout history inspection and lineage preparation.
+
+The runtime facade also exposes @code{readNdjsonFrame} and
+@code{withBufferedControlInputFor}.  These preserve bytes already read after
+a preparation decision when the same transport begins carrying controls.
+@code{withControlInputFor} retains its existing empty-buffer behavior.
 
 @section Machine protocol options
 

@@ -325,21 +325,36 @@ The registry currently holds nine programs: `harden`, `hello`,
 ## The terminal interface
 
 `agentic-run --tui` opens the Brick/Vty frontend for the current executable's
-registry; downstream binaries using `cliMain`, including `wf`, inherit the same
-mode. It offers a fuzzy workflow browser, detailed run history, and routing
-profile and inventory views, then collects declared inputs, previews exact-input
-plan facts, the runner executable, routing-only target arguments, and an opaque
-CLI-owned concrete realization. A separate confirmation precedes every run.
-Live launch requires full pin coverage, repeats offline resolution, and supplies
-the preview fingerprint. A changed route is refused. The live monitor header
-includes workflow,
-persona, realization, elapsed time, and bills. It uses protocol 2, a
-private store, fd-3 controls, and local person answering. It preserves occurrence
-identity under concurrent updates, supports detach/reattach, steering, recovery,
-redirect, confirmed cancellation, and restart/resume/fork, and restores final
-results. A verified result can be copied through an explicit exclusive path prompt.
-Public tool, todo, usage, message, and explicit reasoning-summary updates
-remain distinct from answer output; private ACP thought updates are discarded.
+registry. Downstream binaries using `cliMain`, including `wf`, inherit the same mode.
+The interface enters a fixed shell before asynchronous discovery and keeps context,
+status, and applicable actions visible. Its Workflows, Runs, and Routing sections use
+concise non-wrapping list rows with selected-row details, explicit pane focus, and
+contextual key help. Narrow terminals show one focused pane at a time. A nonempty
+`NO_COLOR` keeps terminal defaults and textual selection cues without semantic
+foreground colors.
+
+The launch path collects declared inputs in paste-safe multiline editors and preserves
+them during backward navigation within workflow configuration and during resize. It
+strictly decodes the post-input plan and checks its workflow identity against the
+catalogue row. The compact review shows its level, size, ask count, request fold,
+effects, pins and relevant profile chains, target, persona, directory, warnings, and
+live billing risk. A separate scrollable layer contains the complete fold histogram,
+direct argv, paths, provenance, and fingerprints. Input bodies and the raw program
+remain hidden. Confirmation requires `Enter` or `y`. It is enabled only when every
+review row and the launch, back, and exact-detail controls fit the current terminal.
+Live launch requires full model-pin coverage, repeats offline routing-only resolution,
+and refuses a changed routing fingerprint or a credential-unready engine.
+
+The responsive live monitor includes workflow, persona, realization, run identity,
+status, elapsed time, follow state, and bills. Concise occurrence rows and a bounded
+detail/output pane preserve occurrence identity under concurrent updates. The
+frontend uses protocol 2, a private store, fd-3 controls, and local person answering.
+It supports detach and reattach, steering, recovery, redirect, confirmed cancellation,
+and restart, resume, and fork. Person and recovery decisions share one protocol-sequence
+FIFO, and modal-specific editor drafts survive mandatory preemption. Verified final results are displayed on demand and can
+be copied through an explicit exclusive path prompt. Public tool, todo, usage,
+message, and explicit reasoning-summary updates remain distinct from answer output.
+Private ACP thought updates are discarded.
 
 Terminal runs default to the runner-specific
 `$XDG_STATE_HOME/agent-cat/tui/<runner-id>` directory (or
@@ -374,16 +389,17 @@ security posture.
 
 ## Building and verifying
 
-The Nix development shells are the only supported environments. Run `direnv
-allow .` once to attach the root shell to a terminal. The Haskell workspace
-builds from the repository root, and the Lean model and the conformance oracle
-build in the model shell:
+The Nix development shells are the only supported environments. Configure
+direnv for the root, model, and conformance directories before running their
+tools. The root environment supplies `CABAL_BUILDDIR` beneath `~/Products`.
+The shared `test/cabal.sh` entry point passes that directory explicitly and
+runs Cabal offline, without entering another shell or fetching dependencies:
 
 ```sh
-nix develop path:. -c cabal build all
-nix develop path:. -c cabal test all
-nix develop path:./model -c bash -c 'cd model && lake build'
-nix develop path:./model -c bash -c 'cd bisim && lake build && lake exe corpus-gen'
+direnv exec . test/cabal.sh build all
+direnv exec . test/cabal.sh test all
+(cd model && direnv exec . lake build)
+(cd bisim && direnv exec . bash -c 'lake build && lake exe corpus-gen')
 ```
 
 Never run two full model builds at once. The module
@@ -395,14 +411,14 @@ The deterministic gates live beside the code that they check, and none of them
 contacts a paid service:
 
 ```sh
-./bisim/ci/tier0.sh
-N=500 SEED=1 ./bisim/ci/tier1.sh
-./cli/ci/policies.sh
-./cli/ci/examples.sh
-nix develop path:. -c ./cli/ci/routing-config.sh
-./engine/acp/ci/acp.sh
-./engine/agent-deck/ci/deck.sh
-./tui/ci/tui.sh
+direnv exec . ./bisim/ci/tier0.sh
+direnv exec . env N=500 SEED=1 ./bisim/ci/tier1.sh
+direnv exec . ./cli/ci/policies.sh
+direnv exec . ./cli/ci/examples.sh
+direnv exec . ./cli/ci/routing-config.sh
+direnv exec . ./engine/acp/ci/acp.sh
+direnv exec . ./engine/agent-deck/ci/deck.sh
+direnv exec . ./tui/ci/tui.sh
 ```
 
 The script `tier1.sh` requires a prebuilt oracle and refuses to build one. The
@@ -411,8 +427,8 @@ runs it only by explicit choice. The manual builds and checks in the root
 shell:
 
 ```sh
-nix develop path:. -c make -C doc check
-make -C doc check-haskell
+direnv exec . make -C doc check
+direnv exec . make -C doc check-haskell
 ```
 
 The first command renders GNU Info and HTML in a temporary directory. It then

@@ -17,6 +17,8 @@ the tests, the root `README.md`, and the Texinfo manual in
 | `dslate-design/` | The implementation designs for those decisions. They cover functions and inputs, text panels and deciders, the revising redesign, and receipts with fail-over. |
 | `source-aware-workflow-inputs.md` | The approved design for command-tail and standard-input workflow inputs, descriptor version 2, and the control file descriptor. |
 | `pi-workflow-extension.md` | The design of the Pi extension as the control plane of agent-cat. It gives the capability matrix, the options that were considered, the machine protocol, and the delivered roadmap. |
+| [workflow-manager.md](workflow-manager.md) | The proposed remote single-user manager, with a source inventory, exact approval and ownership model, REST and SSE contracts, security boundaries, client migration, and verification obligations. |
+| [workflow-manager-implementation-plan.md](workflow-manager-implementation-plan.md) | The implementation plan for the approved manager design, with dependency-ordered work packages, source boundaries, acceptance scenarios, migration stages, and release gates. |
 | `pal-subsumption/` | The plan, the routing design, the confer workflow design, and the parity matrix for workflow-native parity with the PAL MCP server, together with a live routing log. |
 | `pal-vs-agent-cat.md` | The analysis on which the PAL-parity track rests. |
 | `ai-config-workflows/pal-note.md` | The coordinator note for the architecture phase of that track. |

@@ -5,10 +5,11 @@
 module Main (main) where
 
 import Agentic.Runtime
-import Control.Concurrent (forkIO, threadDelay)
+import Control.Concurrent (forkIO, killThread, threadDelay)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar, tryReadMVar)
-import Control.Exception (IOException, bracket, finally, throwIO, try)
+import Control.Exception (IOException, SomeException, bracket, finally, throwIO, try)
 import Data.Bits ((.&.))
+import Crypto.Hash (Digest, SHA256, hash)
 import Data.Aeson (Value (..), eitherDecodeStrict', encode, object, toJSON, (.=))
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
@@ -23,16 +24,29 @@ import Data.Word (Word64)
 import Data.Time.Clock (addUTCTime, getCurrentTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import GHC.Clock (getMonotonicTimeNSec)
-import System.Directory (createDirectoryIfMissing, doesFileExist, getTemporaryDirectory, listDirectory, removeFile, removePathForcibly, renameDirectory)
-import System.Environment (lookupEnv, setEnv, unsetEnv)
+import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getTemporaryDirectory, listDirectory, removeFile, removePathForcibly, renameDirectory)
+import System.Environment (getArgs, getExecutablePath, lookupEnv, setEnv, unsetEnv)
 import qualified System.Posix.Directory as PosixDirectory
 import System.FilePath ((</>))
 import System.Posix.Files (createNamedPipe, createSymbolicLink, fileMode, getFileStatus, setFileMode)
-import System.IO (IOMode (ReadMode, WriteMode), hClose, openBinaryFile, withBinaryFile)
+import System.IO (IOMode (ReadMode, WriteMode), hClose, hPutStrLn, openBinaryFile, stderr, stdin, withBinaryFile)
+import System.Exit (ExitCode (..), exitWith)
+import System.Process (CreateProcess (close_fds), proc, readCreateProcessWithExitCode)
+import System.Timeout (timeout)
 
 main :: IO ()
-main = do
+main = getArgs >>= \case
+  ["--frontend-io-test"] -> do
+    request <- BS.hGet stdin (maxFrontendQueryBytes + 1)
+    response <- runFrontendQuery request
+    either (\failure -> hPutStrLn stderr (T.unpack failure) >> exitWith (ExitFailure 3)) BS.putStr response
+  _ -> contractTests
+
+contractTests :: IO ()
+contractTests = do
   privateRootContractTests
+  frontendIoContractTests
+  frontendExportContractTests
   recoveryFifoProbe
   durableMirrorFailureProbe
   boundedControlFrameProbe
@@ -43,6 +57,31 @@ main = do
   expectLeft "descriptor duplicate input" (decodeWorkflowDescriptor (encodeWorkflowDescriptor descriptorV2 {workflowInputs = duplicateInputs}))
   expectLeft "descriptor duplicate stdin" (decodeWorkflowDescriptor (encodeWorkflowDescriptor descriptorV2 {workflowInputs = stdinInputs}))
   expect "descriptor v3 round trip" (decodeWorkflowDescriptor (encodeWorkflowDescriptor descriptorV3) == Right descriptorV3)
+  let exactPlan = exactPlanValue descriptorV2 [object ["consults" .= (2 :: Integer), "paths" .= (1 :: Integer)]]
+  expect "exact plan contract decodes post-input descriptor and fold" $
+    case decodeExactPlan (encoded exactPlan) of
+      Right (summary, Object _) -> exactPlanDescriptor summary == descriptorV2 && exactPlanCodes summary == Just ["text", "receipt"] && exactPlanFold summary == [PlanFold 2 1]
+      _ -> False
+  expectLeft "exact plan contract requires raw program" (decodeExactPlan (encoded (deleteField "program" exactPlan)))
+  expectLeft "exact plan contract requires codes" (decodeExactPlan (encoded (deleteField "codes" exactPlan)))
+  expectLeft "exact plan contract requires fold" (decodeExactPlan (encoded (deleteField "fold" exactPlan)))
+  expectLeft "exact plan contract requires an object program" (decodeExactPlan (encoded (insertValueField "program" Null exactPlan)))
+  expectLeft "exact plan contract refuses unknown fields" (decodeExactPlan (encoded (insertValueField "future" (Bool True) exactPlan)))
+  expectLeft "exact plan contract refuses unknown fold fields" (decodeExactPlan (encoded (exactPlanValue descriptorV2 [object ["consults" .= (2 :: Integer), "paths" .= (1 :: Integer), "future" .= True]])))
+  expectLeft "exact plan contract bounds code values" (decodeExactPlan (encoded (insertValueField "codes" (toJSON ([""] :: [Text])) exactPlan)))
+  expectLeft "exact plan contract refuses descriptor version 3" (decodeExactPlan (encoded (exactPlanValue descriptorV3 [object ["consults" .= (2 :: Integer), "paths" .= (1 :: Integer)]])))
+  expectLeft "exact plan contract checks fold summary" (decodeExactPlan (encoded (exactPlanValue descriptorV2 [object ["consults" .= (3 :: Integer), "paths" .= (1 :: Integer)]])))
+  let duplicateFoldDescriptor = descriptorV2 {workflowPaths = 2}
+  expectLeft "exact plan contract refuses duplicate fold counts" (decodeExactPlan (encoded (exactPlanValue duplicateFoldDescriptor [object ["consults" .= (2 :: Integer), "paths" .= (1 :: Integer)], object ["consults" .= (2 :: Integer), "paths" .= (1 :: Integer)]])))
+  expectLeft "exact plan contract refuses nonpositive fold paths" (decodeExactPlan (encoded (exactPlanValue descriptorV2 [object ["consults" .= (2 :: Integer), "paths" .= (0 :: Integer)]])))
+  expectLeft "exact plan contract bounds fold rows" (decodeExactPlan (encoded (exactPlanValue descriptorV2 (replicate 4097 (object ["consults" .= (2 :: Integer), "paths" .= (1 :: Integer)])))))
+  let postInputCapabilities = capabilities {descriptorConsults = 3, descriptorObserves = 0, descriptorEffects = 1, descriptorEffectful = True, descriptorToolExecution = True}
+      postInputDescriptor = descriptorV2 {workflowCapabilities = postInputCapabilities, workflowSize = 7, workflowAskNodes = 4, workflowMinFold = Just 1, workflowMaxFold = Just 3, workflowPaths = 4, workflowPins = ["input-route"], workflowRunFacts = ["input-selected"]}
+      postInputPlan = exactPlanValue postInputDescriptor [object ["consults" .= (1 :: Integer), "paths" .= (1 :: Integer)], object ["consults" .= (3 :: Integer), "paths" .= (3 :: Integer)]]
+  expect "exact plan contract retains input-dependent facts" $
+    case decodeExactPlan (encoded postInputPlan) of
+      Right (summary, _) -> exactPlanDescriptor summary == postInputDescriptor && exactPlanFold summary == [PlanFold 1 1, PlanFold 3 3]
+      Left _ -> False
   expectLeft "descriptor v3 requires protocol 2" (decodeWorkflowDescriptor (encodeWorkflowDescriptor descriptorV3 {workflowProtocolVersions = [1]}))
   expectLeft "descriptor v3 person mode is exact" (decodeWorkflowDescriptor (encodeWorkflowDescriptor descriptorV3 {workflowPersonAnsweringModes = ["engine"]}))
   descriptorV2Fixture <- BS.readFile "test/fixtures/runtime/descriptor-v2/valid.json"
@@ -204,10 +243,51 @@ catalogueContractTests :: IO ()
 catalogueContractTests = do
   legacyBytes <- BS.readFile "test/fixtures/runtime/frontend-manifest/legacy-ext-pi.json"
   version2Bytes <- BS.readFile "test/fixtures/runtime/frontend-manifest/v2.json"
+  version3Bytes <- BS.readFile "test/fixtures/runtime/frontend-manifest/v3.json"
   legacy <- requireTextRight "legacy frontend manifest" (decodeFrontendManifest legacyBytes)
   version2 <- requireTextRight "versioned frontend manifest" (decodeFrontendManifest version2Bytes)
-  expect "legacy frontend manifest is upgraded" (frontendVersion legacy == 1 && frontendRuntimeStore legacy == "runtime")
-  expect "versioned frontend manifest round trip" (decodeFrontendManifest (encodeFrontendManifest version2) == Right version2)
+  version3 <- requireTextRight "invocation frontend manifest" (decodeFrontendManifest version3Bytes)
+  expect "legacy frontend manifest remains unversioned when exposed" $
+    frontendVersion legacy == 1
+      && frontendRuntimeStore legacy == "runtime"
+      && eitherDecodeStrict' @Value (encodeFrontendManifest legacy) == eitherDecodeStrict' @Value legacyBytes
+  expect "versioned frontend manifest v2 round trip and shape remain unchanged" $
+    frontendInvocation version2 == Nothing
+      && decodeFrontendManifest (encodeFrontendManifest version2) == Right version2
+      && eitherDecodeStrict' @Value (encodeFrontendManifest version2) == eitherDecodeStrict' @Value version2Bytes
+  expect "versioned frontend manifest v3 round trip retains exact invocation" $
+    frontendVersion version3 == frontendManifestVersionWithInvocation
+      && decodeFrontendManifest (encodeFrontendManifest version3) == Right version3
+  expectLeft "explicit frontend manifest version 1 is not legacy"
+    (decodeFrontendManifest (encoded (insertValueField "frontendManifestVersion" (Number 1) (toJSON legacy))))
+  expectLeft "null frontend manifest version cannot downgrade v3 to legacy"
+    (decodeFrontendManifest (encoded (insertValueField "frontendManifestVersion" Null (toJSON version3))))
+  expectLeft "frontend manifest v2 refuses invocation"
+    (decodeFrontendManifest (encoded (insertValueField "invocation" (maybe Null toJSON (frontendInvocation version3)) (toJSON version2))))
+  expectLeft "frontend manifest v3 requires its invocation field"
+    (decodeFrontendManifest (encoded (deleteField "invocation" (toJSON version3))))
+  expectLeft "frontend manifest v3 requires non-null invocation"
+    (decodeFrontendManifest (encodeFrontendManifest version3 {frontendInvocation = Nothing}))
+  expectLeft "frontend manifest v3 refuses unknown outer fields"
+    (decodeFrontendManifest (encoded (insertValueField "future" (Bool True) (toJSON version3))))
+  expectLeft "frontend manifest v3 requires every v2 field"
+    (decodeFrontendManifest (encoded (deleteField "targetArgs" (toJSON version3))))
+  expectLeft "frontend manifest v3 does not treat null arrays as omitted"
+    (decodeFrontendManifest (encoded (insertValueField "targetArgs" Null (toJSON version3))))
+  case frontendInvocation version3 of
+    Nothing -> fail "v3 frontend manifest fixture has no invocation"
+    Just invocation -> do
+      let rejects label changed = expectLeft label (decodeFrontendManifest (encodeFrontendManifest version3 {frontendInvocation = Just changed}))
+      rejects "frontend invocation rejects unsupported versions" invocation {frontendInvocationVersion = 2}
+      rejects "frontend invocation rejects whitespace aliases" invocation {frontendInvocationRunnerAlias = " \t"}
+      rejects "frontend invocation bounds alias UTF-8 bytes" invocation {frontendInvocationRunnerAlias = T.replicate 129 "é"}
+      rejects "frontend invocation rejects whitespace executables" invocation {frontendInvocationExecutable = "\n"}
+      rejects "frontend invocation bounds executable UTF-8 bytes" invocation {frontendInvocationExecutable = T.replicate 2049 "é"}
+      rejects "frontend invocation rejects NUL prefix arguments" invocation {frontendInvocationPrefixArgs = ["ok", "bad\NULargument"]}
+      rejects "frontend invocation bounds prefix argument count" invocation {frontendInvocationPrefixArgs = replicate 4097 ""}
+      rejects "frontend invocation bounds aggregate UTF-8 bytes" invocation {frontendInvocationPrefixArgs = replicate 17 (T.replicate 2048 "é")}
+      let withUnknownInvocation = mapValueField "invocation" (insertValueField "future" (Bool True)) (toJSON version3)
+      expectLeft "frontend invocation refuses unknown nested fields" (decodeFrontendManifest (encoded withUnknownInvocation))
   temporary <- getTemporaryDirectory
   stamp <- getMonotonicTimeNSec
   now <- getCurrentTime
@@ -253,6 +333,19 @@ catalogueContractTests = do
         expect "catalogue retains only the non-secret runtime policy projection" (policy terminalRun == [Just (object ["kind" .= ("scripted" :: Text)])])
         expect "catalogue marks foreign live owner read-only" (ownership liveRun == [RunOwnedElsewhere])
         expect "catalogue retains prepared legacy run" (ownership (RunId "run-legacy") == [RunNotStarted])
+        case [record | record <- healthy, frontendRunId (recordManifest record) == terminalRun] of
+          [record] -> withPrivateRoot "catalogue input bounds" root $ \anchor -> do
+            let digest = "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+                expected = record {recordManifest = (recordManifest record) {frontendInputHashes = Map.fromList [("first", digest), ("second", digest)]}}
+            createPrivateDirectoryAt anchor ["runs", "run-v2", "inputs"]
+            writePrivateExclusiveAt anchor ["runs", "run-v2", "inputs", "0.txt"] "\n"
+            writePrivateExclusiveAt anchor ["runs", "run-v2", "inputs", "1.txt"] "\n"
+            withPrivateDirectoryAt anchor ["runs", "run-v2"] $ \descriptor -> do
+              expectIoFailure "aggregate input bound applies before the next file is read" (readFrontendInputBytesBoundedAt 1 expected descriptor ["first", "second"])
+              inputs <- readFrontendInputBytesBoundedAt 2 expected descriptor ["first", "second"]
+              ordinary <- readFrontendInputBytesAt expected descriptor ["first", "second"]
+              expect "bounded input capture preserves the existing ordered reader" (inputs == Map.fromList [("first", "\n"), ("second", "\n")] && inputs == ordinary)
+          _ -> ioError (userError "catalogue input fixture is missing")
         let writeLease time = writePrivate (liveDirectory </> "owner.json")
               (BL.toStrict (encode (object ["version" .= (1 :: Int), "ownerId" .= ("tui:foreign" :: Text), "pid" .= (1 :: Int), "heartbeat" .= T.pack (formatTime defaultTimeLocale "%FT%T%QZ" time)])))
         writeLease (addUTCTime (-20) now)
@@ -290,6 +383,196 @@ catalogueContractTests = do
             expectIoFailure "catalogue bounds enumeration before reading records" (listRunCatalogue root Nothing now)
           _ -> fail "missing live catalogue test record"
   exercise `finally` removePathForcibly root
+
+frontendIoContractTests :: IO ()
+frontendIoContractTests = do
+  executable <- getExecutablePath
+  temporary <- getTemporaryDirectory
+  stamp <- getMonotonicTimeNSec
+  now <- getCurrentTime
+  frontendBytes <- BS.readFile "test/fixtures/runtime/frontend-manifest/v2.json"
+  frontend <- requireTextRight "frontend IO manifest" (decodeFrontendManifest frontendBytes)
+  let root = temporary </> ("agentic-frontend-io-" <> show stamp)
+      runDirectory = root </> "runs" </> T.unpack (runIdText run1)
+      runtimeDirectory = runDirectory </> "runtime"
+      resultPath = runtimeDirectory </> "result.json"
+      questionPath = runtimeDirectory </> "person" </> "questions" </> "0.json"
+      question = object
+        [ "code" .= ("flag" :: Text),
+          "addressee" .= object ["person" .= object ["id" .= ("owner" :: Text)]],
+          "scope" .= object ["model" .= Null, "mode" .= Null],
+          "prompt" .= ("full\nquestion" :: Text),
+          "draw" .= (0 :: Int)
+        ]
+      result = object ["ok" .= True]
+      ownerBytes = encoded (object ["version" .= (1 :: Int), "ownerId" .= ("pi:foreign" :: Text), "pid" .= (1 :: Int), "heartbeat" .= T.pack (formatTime defaultTimeLocale "%FT%T%QZ" now)])
+      query operation fields = object (["version" .= (1 :: Int), "operation" .= (operation :: Text)] <> fields)
+      call value = do
+        outcome <- timeout 10000000 $
+          readCreateProcessWithExitCode ((proc executable ["--frontend-io-test"]) {close_fds = True}) (T.unpack (Text.decodeUtf8 (encoded value)))
+        case outcome of
+          Nothing -> fail "frontend IO child timed out"
+          Just (ExitSuccess, output, _) -> pure (Right (Text.encodeUtf8 (T.pack output)))
+          Just (ExitFailure 3, _, failure) -> pure (Left (T.pack failure))
+          Just (status, _, failure) -> fail ("frontend IO child failed: " <> show status <> " " <> failure)
+      success :: Value -> IO Value
+      success value = do
+        bytes <- call value >>= requireTextRight "frontend IO response"
+        either fail pure (eitherDecodeStrict' bytes)
+      refused label value = call value >>= expectLeft label
+      writePrivate path bytes = BS.writeFile path bytes >> setFileMode path 0o600
+      exercise = do
+        mapM_ (\path -> createDirectoryIfMissing True path >> setFileMode path 0o700) [root, root </> "runs", runDirectory]
+        identity <- success (query "open-root" ["path" .= root]) >>= \case
+          Object fields | Just (String value) <- KeyMap.lookup "rootIdentity" fields -> pure value
+          _ -> fail "frontend root response has no identity"
+        refused "frontend IO rejects unknown versions" (object ["version" .= (2 :: Int), "operation" .= ("open-root" :: Text), "path" .= root])
+        refused "frontend IO rejects unknown fields" (query "open-root" ["path" .= root, "future" .= True])
+        refused "frontend IO does not create roots" (query "open-root" ["path" .= (root </> "missing")])
+        missing <- doesDirectoryExist (root </> "missing")
+        expect "frontend IO missing root remains absent" (not missing)
+        refused "frontend IO refuses relative roots" (query "open-root" ["path" .= ("relative" :: Text)])
+        runFrontendQuery "not-json" >>= expectLeft "frontend IO refuses malformed JSON"
+        runFrontendQuery (BS.replicate (maxFrontendQueryBytes + 1) 32) >>= expectLeft "frontend IO bounds request bytes"
+        writePrivate (runDirectory </> "supervisor-manifest.json")
+          (encodeFrontendManifest frontend {frontendRunId = run1, frontendPersonAnswering = Just PersonAnswerLocalControl, frontendOwnerId = Just "pi:foreign"})
+        writePrivate (runDirectory </> "owner.json") ownerBytes
+        (questionRequest, resultRequest) <-
+          withRunStoreVersioned latestStoreVersion latestProtocolVersion runtimeDirectory (testManifest (Just PersonAnswerLocalControl)) $ \store -> do
+            reference <- writeQuestionArtifact store run1 occurrence0 "consult" question
+            _ <- appendStoredEvent store (envelopeV2 0 (RunStartedV2 "review" "scripted" PersonAnswerLocalControl))
+            _ <- appendStoredEvent store (envelopeV2 1 (OccurrenceStarted occurrence0 "flag" "consult" "person owner" "approve?"))
+            _ <- appendStoredEvent store (envelopeV2 2 (OccurrencePersonAnswerPending occurrence0 reference))
+            let questionRequest = query "read-question"
+                  [ "rootIdentity" .= identity, "runId" .= runIdText run1,
+                    "occurrenceId" .= ("0" :: Text), "codeName" .= ("flag" :: Text), "reference" .= reference
+                  ]
+            answer <- success questionRequest
+            expect "frontend IO reads a complete live human question"
+              (answer == query "read-question" ["runId" .= runIdText run1, "occurrenceId" .= ("0" :: Text), "intent" .= ("consult" :: Text), "question" .= question])
+            observedOwner <- BS.readFile (runDirectory </> "owner.json")
+            expect "frontend IO observes a foreign owner without acquiring control" (observedOwner == ownerBytes)
+            mapM_ (\operation -> refused "frontend IO refuses live controls" (query operation ["rootIdentity" .= identity, "runId" .= runIdText run1]))
+              ["answerPerson", "cancelRun", "steerOccurrence", "retryOccurrence", "failoverOccurrence", "abandonOccurrence", "redirectOccurrence"]
+            refused "frontend IO verifies question code" (insertValueField "codeName" (String "text") questionRequest)
+            refused "frontend IO checks occurrence identity" (insertValueField "occurrenceId" (String "1") questionRequest)
+            refused "frontend IO bounds occurrence identifiers" (insertValueField "occurrenceId" (String "18446744073709551616") questionRequest)
+            refused "frontend IO rejects numeric occurrence identifiers" (insertValueField "occurrenceId" (Number 0) questionRequest)
+            refused "frontend IO checks run identity" (insertValueField "runId" (String "another-run") questionRequest)
+            refused "frontend IO rejects run path traversal" (insertValueField "runId" (String "..") questionRequest)
+            refused "frontend IO verifies question digest"
+              (insertValueField "reference" (toJSON reference {questionArtifactSha256 = T.replicate 64 "0"}) questionRequest)
+            refused "frontend IO verifies question byte count"
+              (insertValueField "reference" (toJSON reference {questionArtifactBytes = questionArtifactBytes reference + 1}) questionRequest)
+            originalQuestion <- BS.readFile questionPath
+            writePrivate questionPath "{bad-json\n"
+            refused "frontend IO rejects changed question bytes" questionRequest
+            writePrivate questionPath originalQuestion
+            let personDirectory = runtimeDirectory </> "person"
+                realPersonDirectory = runtimeDirectory </> "person-real"
+            renameDirectory personDirectory realPersonDirectory
+            createSymbolicLink realPersonDirectory personDirectory
+            refused "frontend IO rejects question ancestor symlinks" questionRequest
+            removeFile personDirectory
+            renameDirectory realPersonDirectory personDirectory
+            _ <- appendStoredEvent store (envelopeV2 3 (ControlAcknowledgedV2 "person-1" "accepted" "accepted" "answerPerson" (Just occurrence0) Nothing))
+            _ <- appendStoredEvent store (envelopeV2 4 (ControlAcknowledgedV2 "person-1" "delivered" "delivered" "answerPerson" (Just occurrence0) Nothing))
+            _ <- appendStoredEvent store (envelopeV2 5 (OccurrenceCompleted occurrence0 "asked:person owner" "yes"))
+            _ <- appendStoredEvent store (envelopeV2 6 (TraceOrdered [occurrence0]))
+            resultReference <- writeResultArtifact store run1 (String "receipt") result "done"
+            _ <- appendStoredEvent store (envelopeV2 7 (RunCompletedV2 1 1 resultReference))
+            pure (questionRequest, query "read-result" ["rootIdentity" .= identity, "runId" .= runIdText run1, "reference" .= resultReference])
+        value <- success resultRequest
+        expect "frontend IO reads the verified result"
+          (value == query "read-result" ["runId" .= runIdText run1, "code" .= ("receipt" :: Text), "value" .= result])
+        let journalPath = runtimeDirectory </> "events.ndjson"
+        journal <- BS.readFile journalPath
+        writePrivate journalPath "{incomplete"
+        _ <- success questionRequest
+        _ <- success resultRequest
+        writePrivate journalPath journal
+        originalResult <- BS.readFile resultPath
+        let anotherDirectory = root </> "runs" </> "another-run" </> "runtime"
+        mapM_ (\path -> createDirectoryIfMissing True path >> setFileMode path 0o700) [root </> "runs" </> "another-run", anotherDirectory]
+        writePrivate (anotherDirectory </> "result.json") originalResult
+        refused "frontend IO verifies the stored run identity" (insertValueField "runId" (String "another-run") resultRequest)
+        let copyPath = root </> "result-copy.json"
+        writePrivate copyPath originalResult
+        removeFile resultPath
+        createSymbolicLink copyPath resultPath
+        refused "frontend IO rejects result leaf symlinks" resultRequest
+        removeFile resultPath
+        writePrivate resultPath originalResult
+        removeFile resultPath
+        createNamedPipe resultPath 0o600
+        refused "frontend IO rejects nonregular artifacts without blocking" resultRequest
+        removeFile resultPath
+        refused "frontend IO rejects missing artifacts" resultRequest
+        writePrivate resultPath originalResult
+        let moved = root <> "-moved"
+        renameDirectory root moved
+        (do
+            PosixDirectory.createDirectory root 0o700
+            outcome <- call resultRequest
+            expect "frontend IO refuses a replaced root identity" (either ("identity changed" `T.isInfixOf`) (const False) outcome)
+          ) `finally` (removePathForcibly root >> renameDirectory moved root)
+  exercise `finally` removePathForcibly root
+
+frontendExportContractTests :: IO ()
+frontendExportContractTests = do
+  temporary <- getTemporaryDirectory
+  stamp <- getMonotonicTimeNSec
+  let rootPath = temporary </> ("agentic-frontend-export-" <> show stamp)
+      runDirectory = rootPath </> "runs" </> T.unpack (runIdText run1)
+      runtimeDirectory = runDirectory </> "runtime"
+      result = object ["ok" .= True, "count" .= (3 :: Int)]
+      code = object ["name" .= ("receipt" :: Text)]
+      exercise = withPrivateRoot "frontend export test root" rootPath $ \root -> do
+        ensurePrivateDirectoryAt root ["runs"]
+        createPrivateDirectoryAt root ["runs", T.unpack (runIdText run1)]
+        reference <- withAnchorEnvironment root $
+          withRunStoreVersioned latestStoreVersion latestProtocolVersion runtimeDirectory (testManifest (Just PersonAnswerLocalControl)) $ \store ->
+            writeResultArtifact store run1 code result "typed result"
+        BS.writeFile (runtimeDirectory </> "events.ndjson") "{damaged journal"
+        let request name reference' identity = object
+              [ "version" .= (1 :: Int), "operation" .= ("export-result" :: Text),
+                "rootIdentity" .= identity, "runId" .= runIdText run1,
+                "reference" .= reference', "name" .= (name :: Text)
+              ]
+            expected = encoded (object ["code" .= code, "value" .= result]) <> "\n"
+            expectedDigest = T.pack (show (hash expected :: Digest SHA256))
+        receiptBytes <- runFrontendExport rootPath (encoded (request "typed.json" reference (privateRootIdentity root)))
+          >>= requireTextRight "frontend export response"
+        exported <- BS.readFile (rootPath </> "exports" </> "typed.json")
+        mode <- fileMode <$> getFileStatus (rootPath </> "exports" </> "typed.json")
+        receipt <- either fail pure (eitherDecodeStrict' receiptBytes)
+        expect "frontend export publishes exact typed compact JSON and receipt" $
+          exported == expected
+            && mode .&. 0o777 == 0o600
+            && receipt == object
+              [ "version" .= (1 :: Int), "operation" .= ("export-result" :: Text),
+                "runId" .= runIdText run1, "name" .= ("typed.json" :: Text),
+                "path" .= (rootPath </> "exports" </> "typed.json"),
+                "bytes" .= T.pack (show (BS.length expected)), "sha256" .= expectedDigest,
+                "code" .= code
+              ]
+        runFrontendExport rootPath (encoded (request "typed.json" reference (privateRootIdentity root)))
+          >>= expectLeft "frontend export never overwrites an existing destination"
+        unchanged <- BS.readFile (rootPath </> "exports" </> "typed.json")
+        expect "frontend export existing destination remains unchanged" (unchanged == expected)
+        runFrontendExport rootPath (encoded (request "wrong-root.json" reference ("[]" :: String)))
+          >>= expectLeft "frontend export binds the request to configured state"
+        runFrontendExport rootPath (encoded (request "tampered.json" reference {resultArtifactSha256 = T.replicate 64 "0"} (privateRootIdentity root)))
+          >>= expectLeft "frontend export verifies the complete artifact reference"
+        runFrontendExport rootPath (encoded (insertValueField "body" (String "forbidden") (request "body.json" reference (privateRootIdentity root))))
+          >>= expectLeft "frontend export has no caller-supplied body"
+        runFrontendExport rootPath (encoded (mapValueField "reference" (insertValueField "future" (Bool True)) (request "nested.json" reference (privateRootIdentity root))))
+          >>= expectLeft "frontend export reference schema is strict"
+        mapM_ (\name -> runFrontendExport rootPath (encoded (request name reference (privateRootIdentity root))) >>= expectLeft "frontend export rejects invalid names")
+          ["", ".", "..", "a/b", "a\\b", "control\DEL", T.replicate 128 "é"]
+        runFrontendExport rootPath (BS.replicate (maxFrontendQueryBytes + 1) 32)
+          >>= expectLeft "frontend export bounds request bytes"
+  exercise `finally` removePathForcibly rootPath
 
 storeContractTests :: IO ()
 storeContractTests = do
@@ -389,10 +672,36 @@ privateRootContractTests = do
         closedPublication <- BS.readFile (path </> "closing.json")
         expect "in-flight publication retains its own descriptor through root close" (closedPublication == "retained before close")
         createSymbolicLink (outside </> "sentinel") (path </> "owner.json.tmp")
-        expectIoFailure "atomic write refuses a preexisting temporary symlink" (writePrivateAtomicAt root ["owner.json"] "bad")
-        temporaryStillExists <- doesFileExist (path </> "owner.json.tmp")
-        expect "failed exclusive open does not unlink an unowned temporary" temporaryStillExists
+        writePrivateAtomicAt root ["owner.json"] "third"
+        ownerAfterStaleTemporary <- BS.readFile (path </> "owner.json")
+        staleTemporaryStillExists <- doesFileExist (path </> "owner.json.tmp")
+        expect "a stale fixed temporary cannot reserve an atomic destination" (ownerAfterStaleTemporary == "third" && staleTemporaryStillExists)
         removeFile (path </> "owner.json.tmp")
+        createSymbolicLink (outside </> "sentinel") (path </> ".agentic-tmp-stale")
+        publishPrivateFileAt root ["after-stale.json"] (\handle -> BS.hPut handle "complete")
+        afterStale <- BS.readFile (path </> "after-stale.json")
+        staleUniqueStillExists <- doesFileExist (path </> ".agentic-tmp-stale")
+        expect "a stale unique temporary cannot reserve a later publication" (afterStale == "complete" && staleUniqueStillExists)
+        interruptionStarted <- newEmptyMVar
+        interruptionDone <- newEmptyMVar
+        interruptedThread <- forkIO $
+          try @SomeException (publishPrivateFileAt root ["interrupted.json"] $ \handle -> do
+            BS.hPut handle "partial"
+            putMVar interruptionStarted ()
+            threadDelay 60000000) >>= putMVar interruptionDone
+        takeMVar interruptionStarted
+        killThread interruptedThread
+        interrupted <- takeMVar interruptionDone
+        interruptedFinal <- doesFileExist (path </> "interrupted.json")
+        expect "an interrupted publication leaves no final partial file" (either (const (not interruptedFinal)) (const False) interrupted)
+        completions <- mapM (\index -> do
+          done <- newEmptyMVar
+          _ <- forkIO $ try @IOException (publishPrivateFileAt root ["concurrent.json"] (\handle -> BS.hPut handle (BS.replicate 32 index))) >>= putMVar done
+          pure done) [1 .. 8]
+        outcomes <- mapM takeMVar completions
+        concurrent <- BS.readFile (path </> "concurrent.json")
+        let successes = length [() | Right () <- outcomes]
+        expect "concurrent exclusive publication has one complete winner" (successes == 1 && concurrent `elem` [BS.replicate 32 index | index <- [1 .. 8]])
         createSymbolicLink outside (path </> "linked")
         expectIoFailure "mkdirat refuses a symlink ancestor" (ensurePrivateDirectoryAt root ["linked", "escaped"])
         expectIoFailure "openat refuses a symlink ancestor" (writePrivateExclusiveAt root ["linked", "escaped"] "bad")
@@ -579,6 +888,29 @@ envelopeV2 sequence' event = Envelope 2 run1 (SeqNo sequence') "2026-09-03T00:00
 encoded :: Value -> BS.ByteString
 encoded = BL.toStrict . encode
 
+exactPlanValue :: WorkflowDescriptor -> [Value] -> Value
+exactPlanValue descriptor folds = case toJSON descriptor of
+  Object fields ->
+    Object
+      ( KeyMap.insert "program" (object ["fixture" .= True])
+          (KeyMap.insert "codes" (toJSON (["text", "receipt"] :: [Text])) (KeyMap.insert "fold" (toJSON folds) fields))
+      )
+  other -> other
+
+deleteField :: Text -> Value -> Value
+deleteField key (Object fields) = Object (KeyMap.delete (fromText key) fields)
+deleteField _ value = value
+
+insertValueField :: Text -> Value -> Value -> Value
+insertValueField key field (Object fields) = Object (KeyMap.insert (fromText key) field fields)
+insertValueField _ _ value = value
+
+mapValueField :: Text -> (Value -> Value) -> Value -> Value
+mapValueField key change (Object fields) = case KeyMap.lookup (fromText key) fields of
+  Just value -> Object (KeyMap.insert (fromText key) (change value) fields)
+  Nothing -> Object fields
+mapValueField _ _ value = value
+
 insertField :: Text -> Value -> WorkflowDescriptor -> Value
 insertField key value descriptor = case toJSON descriptor of
   Object fields -> Object (KeyMap.insert (fromText key) value fields)
@@ -670,6 +1002,27 @@ boundedControlFrameProbe = do
       expect "control reader refuses an over-bound frame before decoding" $
         case (result, events) of
           (Left _, [ControlAcknowledgedV2 _ "failed" message _ _ _]) -> "exceeds" `T.isInfixOf` message
+          _ -> False
+      BS.writeFile path ""
+      withBinaryFile path ReadMode $ \handle -> do
+        frame <- readNdjsonFrame 3 "frontend request" handle "abc\nnext"
+        expect "framing retains following transport bytes" (frame == Right (Just ("abc", "next")))
+        oversized <- readNdjsonFrame 3 "frontend request" handle "abcd\n"
+        expect "framing rejects a complete oversized frame" (oversized == Left "frontend request frame exceeds 3 bytes")
+        truncated <- readNdjsonFrame 3 "frontend request" handle "abc"
+        expect "framing refuses an incomplete final frame" (truncated == Left "frontend request stream ended without a terminating newline")
+        ended <- readNdjsonFrame 3 "frontend request" handle ""
+        expect "framing distinguishes clean EOF" (ended == Right Nothing)
+      cancellation <- either (ioError . userError . T.unpack) pure (encodeControlFor 2 (Control (ControlId "buffered") Nothing Nothing CancelRun))
+      bufferedRuntime <- newControlRuntime
+      bufferedEvents <- newIORef []
+      cancelled <- withBinaryFile path ReadMode $ \handle ->
+        try @MachineCancelled
+          (withBufferedControlInputFor 2 handle (cancellation <> "\n") (\event -> modifyIORef' bufferedEvents (<> [event])) bufferedRuntime (threadDelay 5000000))
+      delivered <- readIORef bufferedEvents
+      expect "retained controls are consumed before EOF without losing correlation" $
+        case (cancelled, delivered) of
+          (Left failure, [ControlAcknowledgedV2 "buffered" "accepted" _ _ _ _]) -> machineCancellationReason failure == "cancelled by control"
           _ -> False
     )
     `finally` removeFile path

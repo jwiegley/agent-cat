@@ -89,7 +89,7 @@ EOF
   out="$state/out"
   stdout="$state/stdout"
   stderr="$state/stderr"
-  XDG_CONFIG_HOME="$state/config" nix develop path:. -c cabal run -v0 agentic-run -- "$@" --scratch "$state" +RTS -N8 -RTS \
+  XDG_CONFIG_HOME="$state/config" test/cabal.sh run -v0 agentic-run -- "$@" --scratch "$state" +RTS -N8 -RTS \
     < /dev/null > "$stdout" 2> "$stderr"
   code=$?
   # Keep process stdout and stderr distinct while they are written. Redirecting
@@ -568,7 +568,7 @@ note "configured-options: explicit ACP ignored ambient routing, 7/7, exit 0"
 # 19. Protocol-v2 public progress is optional, redacted, persisted, and answer-neutral.
 # ---------------------------------------------------------------------------
 scenario=public-progress
-runner=$(nix develop path:. -c cabal list-bin agentic-run)
+runner=$(test/cabal.sh list-bin agentic-run)
 mkdir -p "$work/progress-config"
 if env -u AGENT_CAT_PERSONA XDG_CONFIG_HOME="$work/progress-config" python3 test/progress_probe.py "$runner"; then
   note "public-progress: v2 tool/todo/usage updates persisted without changing v1 answers or bills"
@@ -577,9 +577,37 @@ else
 fi
 
 
+# Startup failures reach machine clients through the standard Exception interface.
+scenario=exception-display
+cat > "$work/display-acp-error.hs" <<'EOF'
+{-# LANGUAGE OverloadedStrings #-}
+import Agentic.Acp (AcpError (..), renderAcpError)
+import Control.Exception (displayException, toException)
+import Control.Monad (unless)
+import qualified Data.Text as T
+import System.Exit (die)
+main :: IO ()
+main = do
+  let failure = AcpConfiguration "adapter" "configured model is unavailable"
+      expected = renderAcpError failure
+      refusal = AcpRefused "adapter" "session/prompt" "{\"code\":-32603,\"data\":{\"errorKind\":\"authentication_failed\"},\"message\":\"Internal error: Failed to authenticate: OAuth session expired and could not be refreshed.\"}"
+      expectedRefusal = "ACP session/prompt failed: Authentication failed: OAuth session expired and could not be refreshed. (JSON-RPC -32603)"
+  unless (T.pack (displayException failure) == expected
+          && T.stripEnd (T.pack (displayException (toException failure))) == expected
+          && renderAcpError refusal == expectedRefusal)
+    (die "ACP exceptions expose raw protocol data or Haskell constructors")
+EOF
+if test/cabal.sh exec -- bash -c \
+  'runghc --ghc-arg=-package-id --ghc-arg=agentic-0.1.0.0-inplace "$1"' \
+  _ "$work/display-acp-error.hs"; then
+  note "exception-display: machine startup failures retain the human ACP diagnostic"
+else
+  bad "ACP exception display failed"
+fi
+
 scenario=summary
 if [ "$failures" = 0 ]; then
-  echo "ci/acp: 19 scenarios passed, 0 failed"
+  echo "ci/acp: 20 scenarios passed, 0 failed"
 else
   echo "ci/acp: $failures scenario assertion(s) failed" >&2
 fi

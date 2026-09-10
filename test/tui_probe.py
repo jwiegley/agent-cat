@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import codecs
+import fcntl
 import json
 import os
 import pty
+import re
 import select
 import shutil
 import signal
@@ -16,12 +19,220 @@ import subprocess
 import tempfile
 import termios
 import time
+import unicodedata
 from pathlib import Path
 
+ESC_UP = b"\x1b[A"
 ESC_DOWN = b"\x1b[B"
+ESC_LEFT = b"\x1b[D"
+ESC_RIGHT = b"\x1b[C"
 ESCAPE = b"\x1b"
 ENTER = b"\r"
 CTRL_D = b"\x04"
+PAGE_DOWN = b"\x1b[6~"
+PASTE_START = b"\x1b[200~"
+PASTE_END = b"\x1b[201~"
+
+
+class TerminalScreen:
+    """Small ANSI cell emulator for assertions about Vty's current picture."""
+
+    def __init__(self, rows: int, columns: int):
+        self.rows = rows
+        self.columns = columns
+        self.cells = [[" "] * columns for _ in range(rows)]
+        self.row = 0
+        self.column = 0
+        self.saved = (0, 0)
+        self.state = "text"
+        self.sequence = ""
+        self.wrap_pending = False
+        self.decoder = codecs.getincrementaldecoder("utf-8")("replace")
+
+    def resize(self, rows: int, columns: int) -> None:
+        resized = [[" "] * columns for _ in range(rows)]
+        for row in range(min(rows, self.rows)):
+            for column in range(min(columns, self.columns)):
+                resized[row][column] = self.cells[row][column]
+        self.rows = rows
+        self.columns = columns
+        self.cells = resized
+        self.row = min(self.row, max(0, rows - 1))
+        self.column = min(self.column, max(0, columns - 1))
+        self.wrap_pending = False
+
+    def feed(self, chunk: bytes) -> None:
+        for character in self.decoder.decode(chunk):
+            if self.state == "text":
+                self._text(character)
+            elif self.state == "escape":
+                self._escape(character)
+            elif self.state == "charset":
+                self.state = "text"
+            elif self.state == "osc":
+                if character == "\a":
+                    self.state = "text"
+                elif character == "\x1b":
+                    self.state = "osc-escape"
+            elif self.state == "osc-escape":
+                self.state = "text" if character == "\\" else "osc"
+            elif self.state == "csi":
+                self.sequence += character
+                if "@" <= character <= "~":
+                    self._csi(self.sequence)
+                    self.sequence = ""
+                    self.state = "text"
+
+    def text(self) -> str:
+        return "\n".join("".join(row).rstrip() for row in self.cells)
+
+    def lines(self) -> list[str]:
+        return ["".join(row) for row in self.cells]
+
+    def _text(self, character: str) -> None:
+        if character == "\x1b":
+            self.state = "escape"
+        elif character == "\r":
+            self.column = 0
+            self.wrap_pending = False
+        elif character in ("\n", "\v", "\f"):
+            self._linefeed()
+        elif character == "\b":
+            self.column = max(0, self.column - 1)
+            self.wrap_pending = False
+        elif character == "\t":
+            self.column = min(self.columns - 1, ((self.column // 8) + 1) * 8)
+            self.wrap_pending = False
+        elif character >= " ":
+            self._put(character)
+
+    def _escape(self, character: str) -> None:
+        if character == "[":
+            self.sequence = ""
+            self.state = "csi"
+        elif character == "]":
+            self.state = "osc"
+        elif character in "()":
+            self.state = "charset"
+        else:
+            self.state = "text"
+            if character == "7":
+                self.saved = (self.row, self.column)
+            elif character == "8":
+                self.row, self.column = self.saved
+            elif character in "DE":
+                if character == "E":
+                    self.column = 0
+                self._linefeed()
+            elif character == "c":
+                self.cells = [[" "] * self.columns for _ in range(self.rows)]
+                self.row = self.column = 0
+
+    def _csi(self, sequence: str) -> None:
+        final = sequence[-1]
+        parameters = sequence[:-1]
+        private = parameters.startswith("?")
+        if private:
+            parameters = parameters[1:]
+        values = [int(value) if value else 0 for value in parameters.split(";")] if parameters else []
+        first = values[0] if values else 0
+        self.wrap_pending = False
+        if final in "Hf":
+            self.row = self._bounded_row((values[0] if values and values[0] else 1) - 1)
+            self.column = self._bounded_column((values[1] if len(values) > 1 and values[1] else 1) - 1)
+        elif final == "A":
+            self.row = self._bounded_row(self.row - (first or 1))
+        elif final in "Be":
+            self.row = self._bounded_row(self.row + (first or 1))
+        elif final in "Ca":
+            self.column = self._bounded_column(self.column + (first or 1))
+        elif final == "D":
+            self.column = self._bounded_column(self.column - (first or 1))
+        elif final == "E":
+            self.row = self._bounded_row(self.row + (first or 1)); self.column = 0
+        elif final == "F":
+            self.row = self._bounded_row(self.row - (first or 1)); self.column = 0
+        elif final in "G`":
+            self.column = self._bounded_column((first or 1) - 1)
+        elif final == "d":
+            self.row = self._bounded_row((first or 1) - 1)
+        elif final == "J":
+            self._erase_display(first)
+        elif final == "K":
+            self._erase_line(first)
+        elif final == "X":
+            for column in range(self.column, min(self.columns, self.column + (first or 1))):
+                self.cells[self.row][column] = " "
+        elif final == "P":
+            count = first or 1
+            row = self.cells[self.row]
+            del row[self.column:self.column + count]
+            row.extend([" "] * count)
+        elif final == "@":
+            count = first or 1
+            row = self.cells[self.row]
+            row[self.column:self.column] = [" "] * count
+            del row[self.columns:]
+        elif final == "s":
+            self.saved = (self.row, self.column)
+        elif final == "u":
+            self.row, self.column = self.saved
+        elif final in "hl" and private and first == 1049 and final == "h":
+            self.cells = [[" "] * self.columns for _ in range(self.rows)]
+            self.row = self.column = 0
+
+    def _erase_display(self, mode: int) -> None:
+        if mode in (2, 3):
+            self.cells = [[" "] * self.columns for _ in range(self.rows)]
+        elif mode == 0:
+            self._erase_line(0)
+            for row in range(self.row + 1, self.rows):
+                self.cells[row] = [" "] * self.columns
+        elif mode == 1:
+            self._erase_line(1)
+            for row in range(self.row):
+                self.cells[row] = [" "] * self.columns
+
+    def _erase_line(self, mode: int) -> None:
+        if mode == 0:
+            start, end = self.column, self.columns
+        elif mode == 1:
+            start, end = 0, self.column + 1
+        else:
+            start, end = 0, self.columns
+        for column in range(start, end):
+            self.cells[self.row][column] = " "
+
+    def _put(self, character: str) -> None:
+        width = 0 if unicodedata.combining(character) else 2 if unicodedata.east_asian_width(character) in ("W", "F") else 1
+        if width == 0:
+            target = max(0, self.column - 1)
+            self.cells[self.row][target] += character
+            return
+        if self.wrap_pending or self.column + width > self.columns:
+            self.column = 0
+            self._linefeed()
+        self.cells[self.row][self.column] = character
+        if width == 2 and self.column + 1 < self.columns:
+            self.cells[self.row][self.column + 1] = ""
+        self.column += width
+        if self.column >= self.columns:
+            self.column = self.columns - 1
+            self.wrap_pending = True
+
+    def _linefeed(self) -> None:
+        self.wrap_pending = False
+        if self.row + 1 < self.rows:
+            self.row += 1
+        else:
+            self.cells.pop(0)
+            self.cells.append([" "] * self.columns)
+
+    def _bounded_row(self, row: int) -> int:
+        return min(max(0, row), max(0, self.rows - 1))
+
+    def _bounded_column(self, column: int) -> int:
+        return min(max(0, column), max(0, self.columns - 1))
 
 
 class TuiSession:
@@ -38,9 +249,8 @@ class TuiSession:
     ):
         self.master, self.slave = pty.openpty()
         self.before = termios.tcgetattr(self.slave)
+        self.screen = TerminalScreen(rows, columns)
         os.set_blocking(self.master, False)
-        import fcntl
-
         fcntl.ioctl(self.slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, 0, 0))
         environment = os.environ.copy()
         environment["TERM"] = "xterm-256color"
@@ -70,6 +280,7 @@ class TuiSession:
         except (BlockingIOError, OSError):
             return
         self.output.extend(chunk)
+        self.screen.feed(chunk)
         if len(self.output) > 16 * 1024 * 1024:
             del self.output[: len(self.output) - 16 * 1024 * 1024]
 
@@ -78,16 +289,38 @@ class TuiSession:
             self.pump(0.01)
 
     def wait_for(self, needle: bytes, *, after: int = 0, timeout: float = 45.0) -> int:
+        # Styling may split a label into several spans. Cursor movement is not
+        # ignored here; assertions about current visibility use wait_screen.
+        pattern = re.compile(rb"(?:\x1b\[[0-9;]*m|\x1b\([B0])*".join(re.escape(bytes([byte])) for byte in needle))
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             self.pump()
-            position = self.output.find(needle, after)
-            if position >= 0:
-                return position + len(needle)
+            match = pattern.search(self.output, after)
+            if match is not None:
+                return match.end()
             if self.process.poll() is not None:
                 break
-        tail = bytes(self.output[-4000:]).decode("utf-8", "replace")
+        tail = bytes(self.output[-16000:]).decode("utf-8", "replace")
         raise AssertionError(f"TUI did not render {needle!r}; exit={self.process.poll()}; tail={tail!r}")
+
+    def wait_screen(self, needle: str, *, timeout: float = 45.0) -> str:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            self.pump()
+            current = self.screen.text()
+            if needle in current:
+                self.settle()
+                current = self.screen.text()
+                if needle in current:
+                    return current
+            if self.process.poll() is not None:
+                break
+        raise AssertionError(f"TUI current screen did not contain {needle!r}; exit={self.process.poll()}; screen={self.screen.text()!r}")
+
+    def resize(self, rows: int, columns: int) -> None:
+        fcntl.ioctl(self.slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, 0, 0))
+        self.screen.resize(rows, columns)
+        os.killpg(self.process.pid, signal.SIGWINCH)
 
     def send(self, value: bytes) -> None:
         pending = memoryview(value)
@@ -120,8 +353,8 @@ class TuiSession:
         assert self.before[:3] == after[:3], (self.before, after)
         assert before_lflag == after_lflag, (self.before[3], after[3])
         assert self.before[4:] == after[4:], (self.before, after)
-        assert b"\x1b[?1049l" in self.output, "alternate screen was not restored"
-        assert b"\x1b[?25h" in self.output, "cursor was not restored"
+        assert b"\x1b[?1049l" in self.output, ("alternate screen was not restored", len(self.output), bytes(self.output[-500:]))
+        assert b"\x1b[?25h" in self.output, ("cursor was not restored", len(self.output), bytes(self.output[-500:]))
 
     def close(self) -> None:
         if self.process.poll() is None:
@@ -139,6 +372,13 @@ class TuiSession:
 
 def mode(path: Path) -> int:
     return stat.S_IMODE(path.stat().st_mode)
+
+
+def replace_json(path: Path, value: object) -> None:
+    replacement = path.with_name(path.name + ".replacement")
+    replacement.write_text(json.dumps(value))
+    replacement.chmod(mode(path))
+    os.replace(replacement, path)
 
 
 def runs(state: Path) -> list[Path]:
@@ -251,19 +491,22 @@ def test_interrupted_helper_shutdown(driver: Path, fixture: Path, root: Path) ->
         term_seen = root / f"shutdown-term-{first}"
         command = [str(driver), str(fixture), str(state), str(root)]
         baseline = processes_matching(str(fixture))
+        pause = "list" if first == "quit" else "help"
         try:
             with TuiSession(driver, state, command=command, extra_environment={
-                "TUI_FIXTURE_PAUSE": "help", "TUI_FIXTURE_READY": str(ready),
+                "TUI_FIXTURE_PAUSE": pause, "TUI_FIXTURE_READY": str(ready),
                 "TUI_FIXTURE_TERM_SEEN": str(term_seen),
             }) as session:
-                session.wait_for(b"Workflows"); session.settle(); session.send(b"h")
+                if first == "quit":
+                    session.wait_screen("Loading workflows, stored runs, and offline routing")
+                else:
+                    session.wait_for(b"Workflows"); session.settle(); session.send(b"h")
                 deadline = time.monotonic() + 5
                 while (not ready.exists() or not ready.read_text()) and time.monotonic() < deadline:
                     session.pump(0.005)
                 assert ready.exists() and ready.read_text(), "shutdown helper did not start"
                 if first == "quit":
-                    cursor = len(session.output); session.send(ESCAPE)
-                    session.wait_for(b"filter /", after=cursor); session.send(b"q")
+                    session.send(b"q")
                 else:
                     session.process.send_signal(signal.SIGTERM)
                 deadline = time.monotonic() + 5
@@ -272,8 +515,15 @@ def test_interrupted_helper_shutdown(driver: Path, fixture: Path, root: Path) ->
                 assert term_seen.exists(), "helper cleanup did not enter TERM grace"
                 assert session.process.poll() is None, "owner exited before cleanup interruption"
                 session.process.send_signal(signal.SIGINT)
-                assert session.wait_exit(timeout=10) != 0
-                session.assert_restored()
+                status = session.wait_exit(timeout=10)
+                if first == "quit":
+                    assert status == 0
+                else:
+                    assert status != 0
+                try:
+                    session.assert_restored()
+                except AssertionError as failure:
+                    raise AssertionError(f"{first} shutdown restoration failed with exit {status}: {failure}") from failure
             survivors = processes_matching(str(fixture)) - baseline
             assert not survivors, f"helper survived interrupted shutdown: {survivors}"
         finally:
@@ -300,21 +550,30 @@ def test_helper_ownership(driver: Path, fixture: Path, root: Path) -> None:
                     session.wait_for(b"Workflows"); session.settle(); session.send(b"h")
                 elif verb == "plan":
                     select_workflow(session, 0)
-                    session.wait_for(b"execution target"); session.send(b"s")
+                    session.wait_for(b"Execution target"); session.send(b"s")
+                else:
+                    session.wait_for(b"Loading workflows, stored runs, and offline routing")
                 deadline = time.monotonic() + 10
                 while (not ready.exists() or not ready.read_text()) and time.monotonic() < deadline:
                     session.pump()
                 assert ready.exists() and ready.read_text(), f"{verb} helper did not start; exit={session.process.poll()}; output={bytes(session.output[-1500:])!r}"
+                if verb == "list":
+                    session.wait_screen("Loading workflows, stored runs, and offline routing")
                 first = int(ready.read_text()); children.add(first)
                 if label in ("help-child", "help-redirect"):
                     session.wait_for(b"fixture help")
                 if verb in ("list", "--routing"):
                     session.process.send_signal(signal.SIGTERM)
                     assert session.wait_exit(timeout=10) != 0
-                    assert termios.tcgetattr(session.slave) == session.before
+                    session.assert_restored()
                 else:
                     cursor = len(session.output); session.send(ESCAPE)
-                    session.wait_for(b"filter /", after=cursor)
+                    if verb == "plan":
+                        cursor = session.wait_for(b"Execution target", after=cursor)
+                        session.send(ESCAPE)
+                        session.wait_for(b"browser", after=cursor)
+                    else:
+                        session.wait_for(b"filter /", after=cursor)
                     if verb == "help":
                         session.send(b"h")
                         deadline = time.monotonic() + 10
@@ -404,7 +663,7 @@ def test_state_root_confinement(runner: Path, root: Path) -> None:
         anchored.rename(moved)
         anchored.symlink_to(escaped, target_is_directory=True)
         select_workflow(session, 1)
-        target = session.wait_for(b"execution target", after=cursor)
+        target = session.wait_for(b"Execution target", after=cursor)
         session.send(b"s")
         failure = session.wait_for(b"TUI state root", after=target)
         assert list(escaped.iterdir()) == [], "replacement state root received preview files"
@@ -471,21 +730,201 @@ def test_filter_and_responsive_browser(driver: Path, fixture: Path, root: Path) 
     command = [str(driver), str(fixture), str(state), str(Path.cwd())]
     with TuiSession(driver, state, rows=24, columns=80, command=command) as session:
         cursor = session.wait_for(b"Workflows")
+        session.send(ESC_RIGHT)
+        session.wait_screen("Details •")
+        session.send(b"?")
+        workflow_keys = session.wait_screen("Keyboard shortcuts")
+        assert "configure workflow" in workflow_keys and "filter workflows" in workflow_keys
+        assert "next routing persona" not in workflow_keys and "restart, resume" not in workflow_keys
+        session.send(b"?")
+        session.wait_screen("Details •")
+        session.send(ESC_LEFT)
+        session.wait_screen("Workflows •")
+        session.send(b"p")
+        session.settle()
         session.send(b"/")
-        editor = session.wait_for(b"Fuzzy workflow filter", after=cursor)
-        session.send(b"ctrl" + CTRL_D)
-        filtered = session.wait_for(b"filter /ctrl/", after=editor)
-        session.wait_for(b"control-stress", after=filtered)
+        session.wait_screen("Enter APPLY")
+        session.send(b"ctrl")
+        session.wait_screen("filter /ctrl/")
+        assert "control-stress" in session.screen.text()
+        session.send(ENTER)
+        session.wait_screen("control-stress")
         session.send(b"\t\t")
-        routing = session.wait_for(b"profile fixture-profile chain", after=filtered)
-        session.wait_for(b"inventory static", after=routing)
+        session.wait_screen("profile fixture-profile chain")
+        session.wait_screen("persona fixture (default)")
+        session.send(ESC_RIGHT + ESC_DOWN * 8)
+        session.wait_screen("Details •")
+        session.wait_screen("inventory static")
+        session.wait_screen("execution fingerprint")
+        session.send(b"?")
+        routing_keys = session.wait_screen("Keyboard shortcuts")
+        assert "next routing persona" in routing_keys and "filter workflows" not in routing_keys
+        session.send(b"?")
+        session.wait_screen("Details •")
         session.send(b"q")
         assert session.wait_exit() == 0
         session.assert_restored()
 
+def test_resize_confirmation_and_no_color(driver: Path, fixture: Path, root: Path) -> None:
+    for label, key in [("letter", b"l"), ("enter", ENTER)]:
+        unready_state = root / f"unready-routing-{label}"
+        unready_command = [str(driver), str(fixture), str(unready_state), str(Path.cwd())]
+        with TuiSession(driver, unready_state, rows=24, columns=80, command=unready_command,
+                        extra_environment={"TUI_FIXTURE_CREDENTIAL_READY": "0"}) as session:
+            session.wait_screen("Workflows •")
+            session.send(ENTER)
+            session.wait_screen("Execution target")
+            session.wait_screen("NOT READY")
+            session.send(key)
+            session.wait_screen("routing engine is NOT READY")
+            assert runs(unready_state) == [], "credential-unready routing crossed the consent boundary"
+            session.send(ESC)
+            session.wait_screen("Workflows •")
+            session.send(b"q")
+            assert session.wait_exit() == 0
+            session.assert_restored()
+    state = root / "resize-no-color-state"
+    command = [str(driver), str(fixture), str(state), str(Path.cwd())]
+    with TuiSession(
+        driver,
+        state,
+        rows=24,
+        columns=80,
+        command=command,
+        extra_environment={"NO_COLOR": "1"},
+    ) as session:
+        session.wait_screen("Workflows •")
+        session.settle()
+        sgr_parameters = [
+            int(parameter)
+            for sequence in re.findall(rb"\x1b\[([0-9;]*)m", bytes(session.output))
+            for parameter in sequence.split(b";")
+            if parameter
+        ]
+        assert not any(
+            parameter in (38, 48, 58)
+            or 30 <= parameter <= 37
+            or 40 <= parameter <= 47
+            or 90 <= parameter <= 107
+            for parameter in sgr_parameters
+        ), sgr_parameters
+        session.send(ENTER)
+        session.wait_screen("Execution target")
+        session.wait_screen("fixture-engine")
+        session.wait_screen("READY (offline)")
+        session.send(b"l")
+        session.wait_screen("Review live run")
+        session.wait_screen("LIVE BACKEND: PROVIDER CHARGES MAY APPLY")
+        assert runs(state) == [], "responsive review crossed the consent boundary"
+        assert "Enter/y LAUNCH" in session.screen.lines()[-1]
+
+        session.resize(12, 40)
+        session.wait_screen("LAUNCH DISABLED")
+        session.wait_screen("RESIZE TO REVIEW")
+        assert "Enter/y LAUNCH" not in session.screen.text()
+        session.send(b"y")
+        session.settle()
+        assert runs(state) == [], "incomplete proportional review accepted consent"
+
+        session.resize(6, 24)
+        session.wait_screen("n BACK d DETAILS RESIZE")
+        assert "Enter/y LAUNCH" not in session.screen.text()
+        session.send(b"y")
+        session.settle()
+        assert runs(state) == [], "undersized review accepted consent"
+        assert session.process.poll() is None
+
+        session.resize(1, 1)
+        session.settle()
+        assert session.process.poll() is None, "1x1 resize crashed the TUI"
+        for rows, columns in [(12, 40), (24, 80), (10, 36), (36, 140), (24, 80)]:
+            session.resize(rows, columns)
+            session.pump(0.01)
+        session.wait_screen("Review live run")
+        session.wait_screen("Persona   fixture (default)")
+        session.wait_screen("Enter/y LAUNCH")
+        assert "Enter/y LAUNCH" in session.screen.lines()[-1]
+        assert runs(state) == [], "resize changed launch state"
+
+        session.send(b"d")
+        session.wait_screen("Launch details")
+        session.resize(12, 40)
+        session.wait_screen("Launch details")
+        session.resize(24, 80)
+        session.wait_screen("Launch details")
+        session.send(b"d")
+        session.wait_screen("Review live run")
+        session.send(b"n")
+        session.wait_screen("Execution target")
+        session.send(ESCAPE)
+        session.wait_screen("Workflows •")
+        session.send(b"q")
+        assert session.wait_exit() == 0
+        session.assert_restored()
+
+
+def test_exact_plan_preview(driver: Path, fixture: Path, root: Path) -> None:
+    working_directory = Path.cwd()
+    state = root / "exact-plan-state"
+    command = [str(driver), str(fixture), str(state), str(working_directory)]
+    with TuiSession(
+        driver,
+        state,
+        rows=30,
+        columns=100,
+        command=command,
+        extra_environment={"TUI_FIXTURE_PLAN_VARIANT": "post-input"},
+    ) as session:
+        select_workflow(session, 0)
+        target = session.wait_for(b"Execution target")
+        session.send(b"l")
+        session.wait_screen("Requests  2..3 occurrences / 4 paths")
+        session.wait_screen("Effects   effectful yes; tool execution yes")
+        session.wait_screen("input-profile (no matching inspected profile)")
+        assert runs(state) == [], "exact-plan review crossed the consent boundary"
+        session.send(b"d")
+        session.wait_screen("Launch details")
+        for _ in range(3):
+            session.send(PAGE_DOWN)
+            session.pump(0.1)
+        session.wait_screen("size: 7")
+        session.wait_screen("ask nodes: 4")
+        session.wait_screen("fold histogram: 2 consults x 3 paths, 3 consults x 1 paths")
+        session.send(b"n")
+        session.wait_screen("Execution target")
+        session.send(ESCAPE)
+        session.wait_screen("Workflows •")
+        session.send(b"q")
+        assert session.wait_exit() == 0
+        session.assert_restored()
+
+    for variant, expected in [
+        ("malformed", b"unknown field(s): unknown"),
+        ("identity-mismatch", b"exact workflow plan names another workflow"),
+    ]:
+        refusal_state = root / f"{variant}-plan-state"
+        refusal_command = [str(driver), str(fixture), str(refusal_state), str(working_directory)]
+        with TuiSession(
+            driver,
+            refusal_state,
+            command=refusal_command,
+            extra_environment={"TUI_FIXTURE_PLAN_VARIANT": variant},
+        ) as session:
+            select_workflow(session, 0)
+            target = session.wait_for(b"Execution target")
+            session.send(b"s")
+            failure = session.wait_for(expected, after=target)
+            assert runs(refusal_state) == [], f"{variant} exact plan reached machine launch"
+            session.send(ESCAPE)
+            session.wait_for(b"browser", after=failure)
+            session.send(b"q")
+            assert session.wait_exit() == 0
+            session.assert_restored()
+
+
 def test_startup_and_input(runner: Path, root: Path) -> None:
     state = root / "input-state"
-    marker = b"TUI_SECRET_BODY_slyncq\nsecond line"
+    marker = b"TUI_SECRET_BODY_?qcslyncq\nsecond line"
     with TuiSession(runner, state) as session:
         cursor = session.wait_for(b"Workflows")
         session.settle()
@@ -496,24 +935,102 @@ def test_startup_and_input(runner: Path, root: Path) -> None:
         session.wait_for(b"browser", after=help_screen)
         session.settle()
         session.send(ESC_DOWN * 5 + ENTER)
-        cursor = session.wait_for(b"standard input")
-        session.send(marker)
-        session.wait_for(b"TUI_SECRET_BODY_slyncq", after=cursor)
+        cursor = session.wait_for("Input •".encode())
+        session.send(PASTE_START + marker + PASTE_END)
+        session.wait_for(marker.splitlines()[0], after=cursor)
+        session.resize(12, 40)
+        session.wait_screen(marker.splitlines()[0].decode())
+        session.resize(36, 140)
+        session.wait_screen(marker.splitlines()[1].decode())
         session.send(CTRL_D)
-        cursor = session.wait_for(b"execution target", after=cursor)
+        cursor = session.wait_for(b"Execution target", after=cursor)
         session.send(b"s")
         confirmation = session.wait_for(b"launch confirmation", after=cursor)
         assert marker.splitlines()[0] not in session.output[confirmation:], "confirmation repeated an input body"
         assert runs(state) == [], "preview created a run before confirmation"
         session.send(b"n")
-        session.wait_for(b"execution target", after=confirmation)
+        session.wait_for(b"Execution target", after=confirmation)
         assert runs(state) == [], "declined confirmation created a run"
         session.send(ESCAPE)
-        session.wait_for(b"browser", after=confirmation)
+        restored_input = session.wait_for("Input •".encode(), after=confirmation)
+        session.wait_for(marker.splitlines()[0], after=restored_input)
+        session.send(ESCAPE)
+        session.wait_for(b"browser", after=restored_input)
         session.settle()
         session.send(b"q")
         assert session.wait_exit() == 0
         session.assert_restored()
+
+
+def test_recovery_layout(driver: Path, fixture: Path, root: Path) -> None:
+    state = root / "auth-recovery-layout"
+    command = [str(driver), str(fixture), str(state), str(Path.cwd())]
+    with TuiSession(driver, state, rows=24, columns=80, command=command,
+                    extra_environment={"TUI_FIXTURE_MODE": "auth-recovery"}) as session:
+        select_workflow(session, 0)
+        session.wait_screen("Execution target")
+        session.send(b"s")
+        session.wait_screen("Enter/y LAUNCH")
+        session.send(b"y")
+        session.wait_screen("Authentication failed")
+        for rows, columns in [(12, 40), (24, 80), (36, 140), (24, 80)]:
+            session.resize(rows, columns)
+            session.send(b"\x1b[H")
+            screen = session.wait_screen("Authentication failed")
+            assert "r RETRY" in "\n".join(session.screen.lines()[-2:])
+            assert all(text not in screen for text in ('{"code"', 'transport-refusal', 'Occurrence 0', '/etc/profiles'))
+            session.send(b"\x1b[F")
+            session.wait_screen("END_AUTH_DIAGNOSTIC")
+            assert "r RETRY" in "\n".join(session.screen.lines()[-2:])
+        session.send(b"r")
+        session.wait_screen("Authentication failed")
+        session.send(b"r")
+        terminal = session.wait_for(b"Succeeded")
+        quit_completed_run(session, terminal)
+        session.assert_restored()
+
+
+def test_run_failure_details(driver: Path, fixture: Path, root: Path) -> None:
+    for mode_name in ["startup-failure", "request-failure"]:
+        state = root / mode_name
+        command = [str(driver), str(fixture), str(state), str(Path.cwd())]
+        with TuiSession(driver, state, rows=24, columns=80, command=command,
+                        extra_environment={"TUI_FIXTURE_MODE": mode_name, "NO_COLOR": "1"}) as session:
+            select_workflow(session, 0)
+            session.wait_screen("Execution target")
+            session.send(b"s")
+            session.wait_screen("Enter/y LAUNCH")
+            cursor = len(session.output)
+            session.send(b"y")
+            session.wait_screen("Configured model is unavailable")
+            for rows, columns in [(12, 40), (36, 140), (24, 80)]:
+                session.resize(rows, columns)
+                screen = session.wait_screen("Configured model is unavailable")
+                assert "RunFailedStatus" not in screen, screen
+                assert "d DETAILS" in "\n".join(session.screen.lines()[-2:]), screen
+                if mode_name == "startup-failure":
+                    assert "No occurrence selected" not in screen, screen
+            elapsed = re.search(r"elapsed (\S+)", session.screen.text()).group(1)
+            session.pump(2.2)
+            assert re.search(r"elapsed (\S+)", session.screen.text()).group(1) == elapsed, "failed run timer kept running"
+            session.send(b"d")
+            session.wait_screen("RUN DETAILS •")
+            session.wait_screen("Why it stopped")
+            session.send(b"\x1b[F")
+            session.wait_screen("LAST_DIAGNOSTIC")
+            session.send(b"ycsin")
+            session.settle()
+            assert "RUN DETAILS •" in session.screen.text()
+            session.send(b"\x1b[H")
+            session.wait_screen("Why it stopped")
+            session.send(ESCAPE)
+            session.wait_screen("Configured model is unavailable")
+            quit_failed_run(session, cursor)
+            session.assert_restored()
+        events = [json.loads(line)["event"] for line in (runs(state)[0] / "runtime" / "events.ndjson").read_text().splitlines()]
+        assert events[-1]["type"] == "run.failed"
+        assert events[-1]["message"].endswith("LAST_DIAGNOSTIC")
+        assert not any(event["type"] == "control.ack" for event in events)
 
 
 def test_exact_controls_and_stress(driver: Path, fixture: Path, root: Path) -> None:
@@ -524,41 +1041,40 @@ def test_exact_controls_and_stress(driver: Path, fixture: Path, root: Path) -> N
         driver,
         live_state,
         command=live_command,
-        extra_environment={"TUI_FIXTURE_MODE": "simple"},
+        extra_environment={"TUI_FIXTURE_MODE": "simple", "TUI_FIXTURE_POST_RESULT_DELAY": "0.5"},
     ) as session:
         select_workflow(session, 0)
-        cursor = session.wait_for(b"execution target")
+        cursor = session.wait_for(b"Execution target")
         session.settle()
         session.send(b"p")
         cursor = session.wait_for(b"Persona: work", after=cursor)
         session.send(b"l")
         confirmation = session.wait_for(b"launch confirmation", after=cursor)
-        session.wait_for(b"work-model", after=confirmation)
-        session.wait_for(b"Exact-input plan:", after=confirmation)
-        arguments = session.wait_for(b"Exact target arguments", after=confirmation)
-        session.wait_for(b"--expect-routing-fingerprint", after=arguments)
-        session.wait_for(b"work-session", after=arguments)
-        session.wait_for(b"fixture-provider", after=confirmation)
+        session.wait_screen("work-model")
+        session.wait_screen("fixture-provider")
+        session.send(b"d")
+        details = session.wait_for(b"Launch details", after=confirmation)
+        for fact in ("Exact target arguments", "work-session", "--expect-routing-fingerprint", "Exact-input plan", "execution fingerprint"):
+            for _ in range(20):
+                session.settle()
+                if fact in session.screen.text():
+                    break
+                session.send(PAGE_DOWN)
+            else:
+                raise AssertionError(f"launch detail not reachable: {fact}\n{session.screen.text()}")
         session.send(b"y")
-        live_header = session.wait_for(b"workflow control-stress", after=confirmation)
-        session.wait_for(b"persona work", after=live_header)
-        session.wait_for(b"work-model", after=live_header)
+        live_header = session.wait_for("Requests •".encode(), after=confirmation)
+        session.wait_screen("persona work")
         session.wait_for(b"elapsed", after=live_header)
-        terminal = session.wait_for(b"RunSucceeded", after=confirmation)
-        bill = session.wait_for(b"bill 1 fresh / 1", after=live_header)
-        session.wait_for(b"memo", after=bill)
-        session.wait_for(b"public status", after=confirmation)
-        session.wait_for(b"tool completed", after=confirmation)
-        session.wait_for(b"diff --git a/x b/x", after=confirmation)
-        session.wait_for(b"--- a/x", after=confirmation)
-        session.wait_for(b"+++ b/x", after=confirmation)
-        session.wait_for(b"@@ -1 +1 @@", after=confirmation)
-        session.wait_for(b"-old", after=confirmation)
-        session.wait_for(b"+new", after=confirmation)
-        session.wait_for(b"todo completed/high", after=confirmation)
-        session.wait_for(b"usage: 10/100", after=confirmation)
-        session.wait_for(b"reasoning summary: Public summary", after=confirmation)
-        save_ready = session.wait_for(b"s save/copy result", after=terminal)
+        terminal = session.wait_for(b"Succeeded", after=confirmation)
+        session.wait_screen("bill 1 fresh / 1 memo")
+        session.send(b"d")
+        session.wait_screen("RUN DETAILS •")
+        session.send(b"\x1b[F")
+        for fact in ("public status", "tool completed", "diff --git a/x b/x", "--- a/x", "+++ b/x", "@@ -1 +1 @@", "-old", "+new", "todo completed/high", "usage: 10/100", "reasoning summary: Public summary"):
+            session.wait_screen(fact)
+        session.send(b"d")
+        save_ready = session.wait_for(b"s save verified copy", after=terminal)
         saved_result = live_state / "saved-result.json"
         session.send(b"s")
         save_prompt = session.wait_for(b"Copy the verified final JSON result", after=save_ready)
@@ -566,12 +1082,17 @@ def test_exact_controls_and_stress(driver: Path, fixture: Path, root: Path) -> N
         saved = session.wait_for(b"saved verified final result", after=save_prompt)
         assert json.loads(saved_result.read_text()) == "fixture answer"
         assert mode(saved_result) == 0o600
+        deadline = time.monotonic() + 3
+        while child_processes(session.process.pid) and time.monotonic() < deadline:
+            session.pump(0.05)
+        assert not child_processes(session.process.pid), "machine child did not exit after result save"
+        assert "saved verified final result" in session.screen.text(), session.screen.text()
         session.send(b"s")
         second_prompt = session.wait_for(b"Copy the verified final JSON result", after=saved)
         session.send(str(saved_result).encode() + CTRL_D)
         refused = session.wait_for(b"exists", after=second_prompt)
         session.send(ESCAPE)
-        save_closed = session.wait_for(b"s save/copy result", after=refused)
+        save_closed = session.wait_for(b"s save verified copy", after=refused)
         quit_completed_run(session, save_closed)
         session.assert_restored()
     live_record = runs(live_state)[0]
@@ -594,7 +1115,7 @@ def test_exact_controls_and_stress(driver: Path, fixture: Path, root: Path) -> N
         failure_command = [str(driver), str(fixture), str(failure_state), str(working_directory)]
         with TuiSession(driver, failure_state, command=failure_command, extra_environment={"TUI_FIXTURE_MODE": mode_name}) as session:
             select_workflow(session, 0)
-            cursor = session.wait_for(b"execution target")
+            cursor = session.wait_for(b"Execution target")
             session.send(b"s")
             cursor = session.wait_for(b"launch confirmation", after=cursor)
             session.send(b"y")
@@ -606,11 +1127,11 @@ def test_exact_controls_and_stress(driver: Path, fixture: Path, root: Path) -> N
     ignored_command = [str(driver), str(fixture), str(ignored_state), str(working_directory)]
     with TuiSession(driver, ignored_state, command=ignored_command, extra_environment={"TUI_FIXTURE_MODE": "ignore-cancel"}) as session:
         select_workflow(session, 0)
-        cursor = session.wait_for(b"execution target")
+        cursor = session.wait_for(b"Execution target")
         session.send(b"s")
         cursor = session.wait_for(b"launch confirmation", after=cursor)
         session.send(b"y")
-        live = session.wait_for(b"live run", after=cursor)
+        live = session.wait_for("Requests •".encode(), after=cursor)
         session.send(b"c")
         confirmation = session.wait_for(b"Cancel the machine child", after=live)
         started = time.monotonic()
@@ -624,11 +1145,11 @@ def test_exact_controls_and_stress(driver: Path, fixture: Path, root: Path) -> N
     heartbeat_command = [str(driver), str(fixture), str(heartbeat_state), str(working_directory)]
     with TuiSession(driver, heartbeat_state, command=heartbeat_command, extra_environment={"TUI_FIXTURE_MODE": "heartbeat"}) as session:
         select_workflow(session, 0)
-        cursor = session.wait_for(b"execution target")
+        cursor = session.wait_for(b"Execution target")
         session.send(b"s")
         cursor = session.wait_for(b"launch confirmation", after=cursor)
         session.send(b"y")
-        live = session.wait_for(b"1 left", after=cursor)
+        live = session.wait_for(b"Routes", after=cursor)
         heartbeat_record = runs(heartbeat_state)[0]
         heartbeat_record.chmod(0o500)
         try:
@@ -648,11 +1169,11 @@ def test_exact_controls_and_stress(driver: Path, fixture: Path, root: Path) -> N
         extra_environment={"TUI_FIXTURE_MODE": "controls"},
     ) as session:
         select_workflow(session, 0)
-        cursor = session.wait_for(b"execution target")
+        cursor = session.wait_for(b"Execution target")
         session.send(b"s")
         cursor = session.wait_for(b"launch confirmation", after=cursor)
         session.send(b"y")
-        live = session.wait_for(b"1 left", after=cursor)
+        live = session.wait_for(b"Routes", after=cursor)
         owner_path = runs(control_state)[0] / "owner.json"
         initial_heartbeat = json.loads(owner_path.read_text())["heartbeat"]
         heartbeat_deadline = time.monotonic() + 2.5
@@ -662,18 +1183,21 @@ def test_exact_controls_and_stress(driver: Path, fixture: Path, root: Path) -> N
         session.send(ESCAPE)
         detached = session.wait_for(b"browser", after=live)
         session.send(ENTER)
-        reattached = session.wait_for(b"live run", after=detached)
+        reattached = session.wait_for("Requests •".encode(), after=detached)
         assert len(runs(control_state)) == 1, "detached workflow activation started a second child"
         session.send(b"2")
+        session.wait_screen("Running on right")
+        session.send(b"d")
         redirected = session.wait_for(b"redirect delivered", after=reattached)
-        session.wait_for(b"steer-next", after=redirected)
+        session.send(b"d")
+        session.wait_screen("Running on right")
         session.send(b"b")
         steer = session.wait_for(b"next-boundary", after=redirected)
         session.send(b"focus fixture" + CTRL_D)
-        steered = session.wait_for(b"Recovery required for occurrence 0", after=steer)
+        steered = session.wait_for(b"Recovery required", after=steer)
         session.send(b"f")
-        terminal = session.wait_for(b"RunSucceeded", after=steered)
-        session.wait_for(b"final result", after=terminal)
+        terminal = session.wait_for(b"Succeeded", after=steered)
+        session.wait_for(b"RESULT AVAILABLE", after=terminal)
         quit_completed_run(session, terminal)
         session.assert_restored()
     control_record = runs(control_state)[0]
@@ -686,11 +1210,11 @@ def test_exact_controls_and_stress(driver: Path, fixture: Path, root: Path) -> N
         extra_environment={"TUI_FIXTURE_MODE": "recoveries"},
     ) as session:
         select_workflow(session, 0)
-        cursor = session.wait_for(b"execution target")
+        cursor = session.wait_for(b"Execution target")
         session.send(b"s")
         cursor = session.wait_for(b"launch confirmation", after=cursor)
         session.send(b"y")
-        pending_screen = session.wait_for(b"Recovery required for occurrence", after=cursor)
+        pending_screen = session.wait_for(b"Recovery required", after=cursor)
         journal = runs(recovery_state)[0] / "runtime" / "events.ndjson"
         deadline = time.monotonic() + 10
         recovery_order: list[str] = []
@@ -702,13 +1226,49 @@ def test_exact_controls_and_stress(driver: Path, fixture: Path, root: Path) -> N
                 break
         assert sorted(recovery_order) == ["0", "1"], recovery_order
         first_id, second_id = recovery_order
-        first = session.wait_for(f"Recovery required for occurrence {first_id}".encode(), after=cursor)
+        first = session.wait_for(f"Request {int(first_id) + 1}".encode(), after=cursor)
+        session.wait_screen("r RETRY")
+        session.wait_screen("Recovery required")
+        recovery_screen = session.screen.lines()
+        recovery_top = next(i for i, line in enumerate(recovery_screen) if "Recovery required" in line and "┌" in line)
+        recovery_bottom = next(i for i, line in enumerate(recovery_screen[recovery_top + 1:], recovery_top + 1) if "└" in line)
+        assert recovery_bottom - recovery_top <= 7, "recovery dialog consumed the screen"
+        assert "This FIFO decision" not in session.screen.text()
         session.send(b"j")
         session.send(b"r")
-        second = session.wait_for(f"Recovery required for occurrence {second_id}".encode(), after=first)
+        second = session.wait_for(f"Request {int(second_id) + 1}".encode(), after=first)
         session.send(b"k")
         session.send(b"r")
-        terminal = session.wait_for(b"RunSucceeded", after=second)
+        terminal = session.wait_for(b"Succeeded", after=second)
+        quit_completed_run(session, terminal)
+        session.assert_restored()
+
+    mixed_state = root / "fifo-mixed-state"
+    mixed_command = [str(driver), str(fixture), str(mixed_state), str(working_directory)]
+    with TuiSession(
+        driver,
+        mixed_state,
+        rows=36,
+        columns=130,
+        command=mixed_command,
+        extra_environment={"TUI_FIXTURE_MODE": "mixed-decisions"},
+    ) as session:
+        select_workflow(session, 0)
+        cursor = session.wait_for(b"Execution target")
+        session.send(b"s")
+        cursor = session.wait_for(b"launch confirmation", after=cursor)
+        session.send(b"y")
+        person_title = session.wait_for(b"Your answer", after=cursor)
+        first = session.wait_for(b"Ctrl-D SUBMIT", after=person_title)
+        mixed_journal = runs(mixed_state)[0] / "runtime" / "events.ndjson"
+        pending_events = [json.loads(line)["event"]["type"] for line in mixed_journal.read_text().splitlines()]
+        assert "occurrence.person-answer-pending" in pending_events and "occurrence.recovery-pending" in pending_events
+        assert "r RETRY" not in session.screen.text(), "later recovery bypassed the earlier person decision"
+        session.send(b"yes" + CTRL_D)
+        second = session.wait_for(b"Recovery required", after=first)
+        session.wait_screen("Request 2")
+        session.send(b"r")
+        terminal = session.wait_for(b"Succeeded", after=second)
         quit_completed_run(session, terminal)
         session.assert_restored()
 
@@ -723,15 +1283,17 @@ def test_exact_controls_and_stress(driver: Path, fixture: Path, root: Path) -> N
         extra_environment={"TUI_FIXTURE_MODE": "persons"},
     ) as session:
         select_workflow(session, 0)
-        cursor = session.wait_for(b"execution target")
+        cursor = session.wait_for(b"Execution target")
         session.send(b"s")
         cursor = session.wait_for(b"launch confirmation", after=cursor)
         session.send(b"y")
-        first = session.wait_for(b"Person answer required for occurrence 0", after=cursor)
+        person_title = session.wait_for(b"Your answer", after=cursor)
+        first = session.wait_for(b"Ctrl-D SUBMIT", after=person_title)
         session.send(b"yes" + CTRL_D)
-        second = session.wait_for(b"Person answer required for occurrence 1", after=first)
+        second_title = session.wait_for(b"Answer person occurrence 1?", after=first)
+        second = session.wait_for(b"Ctrl-D SUBMIT", after=second_title)
         session.send(b"no" + CTRL_D)
-        terminal = session.wait_for(b"RunSucceeded", after=second)
+        terminal = session.wait_for(b"Succeeded", after=second)
         quit_completed_run(session, terminal)
         session.assert_restored()
     person_record = runs(person_state)[0]
@@ -746,19 +1308,49 @@ def test_exact_controls_and_stress(driver: Path, fixture: Path, root: Path) -> N
         extra_environment={"TUI_FIXTURE_MODE": "person-retry"},
     ) as session:
         select_workflow(session, 0)
-        cursor = session.wait_for(b"execution target")
+        cursor = session.wait_for(b"Execution target")
         session.send(b"s")
         cursor = session.wait_for(b"launch confirmation", after=cursor)
         session.send(b"y")
-        prompt = session.wait_for(b"Person answer required for occurrence 0", after=cursor)
+        prompt_title = session.wait_for(b"Your answer", after=cursor)
+        prompt = session.wait_for(b"Ctrl-D SUBMIT", after=prompt_title)
         session.send(b"yes" + CTRL_D)
         rejected = session.wait_for(b"fixture schema rejection", after=prompt)
         session.send(CTRL_D)
-        terminal = session.wait_for(b"RunSucceeded", after=rejected)
+        terminal = session.wait_for(b"Succeeded", after=rejected)
         quit_completed_run(session, terminal)
         session.assert_restored()
     retry_record = runs(retry_state)[0]
     assert (retry_record / "stderr.log").read_bytes() == b""
+
+    preempt_state = root / "preempt-editor-state"
+    preempt_command = [str(driver), str(fixture), str(preempt_state), str(working_directory)]
+    with TuiSession(
+        driver,
+        preempt_state,
+        rows=36,
+        columns=130,
+        command=preempt_command,
+        extra_environment={"TUI_FIXTURE_MODE": "preempt-editor"},
+    ) as session:
+        select_workflow(session, 0)
+        cursor = session.wait_for(b"Execution target")
+        session.send(b"s")
+        cursor = session.wait_for(b"launch confirmation", after=cursor)
+        session.send(b"y")
+        active = session.wait_for(b"Running on primary", after=cursor)
+        session.send(b"b")
+        editor = session.wait_for("Steer ·".encode(), after=active)
+        session.send(b"draft-survives")
+        person_title = session.wait_for(b"Your answer", after=editor, timeout=15)
+        person = session.wait_for(b"Ctrl-D SUBMIT", after=person_title)
+        session.send(b"yes" + CTRL_D)
+        session.wait_screen("Steer ·")
+        session.wait_screen("draft-survives")
+        session.send(CTRL_D)
+        terminal = session.wait_for(b"Succeeded", after=person)
+        quit_completed_run(session, terminal)
+        session.assert_restored()
 
     stress_state = root / "stress-state"
     stress_command = [str(driver), str(fixture), str(stress_state), str(working_directory)]
@@ -771,11 +1363,11 @@ def test_exact_controls_and_stress(driver: Path, fixture: Path, root: Path) -> N
         extra_environment={"TUI_FIXTURE_MODE": "stress"},
     ) as session:
         select_workflow(session, 0)
-        cursor = session.wait_for(b"execution target")
+        cursor = session.wait_for(b"Execution target")
         session.send(b"s")
         cursor = session.wait_for(b"launch confirmation", after=cursor)
         session.send(b"y")
-        active = session.wait_for(b"AttemptRunning", after=cursor, timeout=30)
+        active = session.wait_for(b"Running on fixture", after=cursor, timeout=30)
         session.send(b"i")
         editor = session.wait_for(b"interrupt-now", after=active)
         session.send(b"responsive under pressure" + CTRL_D)
@@ -789,13 +1381,13 @@ def test_exact_controls_and_stress(driver: Path, fixture: Path, root: Path) -> N
             if time.monotonic() >= next_rss_sample:
                 maximum_rss = max(maximum_rss, resident_kib(session.process.pid))
                 next_rss_sample = time.monotonic() + 0.5
-            position = session.output.find(b"RunSucceeded", steered)
+            position = session.output.find(b"Succeeded", steered)
             if position >= 0:
-                terminal = position + len(b"RunSucceeded")
+                terminal = position + len(b"Succeeded")
                 break
         assert terminal >= 0, "stress run did not complete"
         assert maximum_rss < 300 * 1024, f"TUI RSS grew to {maximum_rss} KiB"
-        session.wait_for(b"final result", after=terminal)
+        session.wait_for(b"RESULT AVAILABLE", after=terminal)
         quit_completed_run(session, terminal)
         session.assert_restored()
     stress_record = runs(stress_state)[0]
@@ -839,7 +1431,7 @@ def test_exact_controls_and_stress(driver: Path, fixture: Path, root: Path) -> N
         extra_environment={"TUI_FIXTURE_MODE": "term-resistant"},
     ) as session:
         select_workflow(session, 0)
-        cursor = session.wait_for(b"execution target")
+        cursor = session.wait_for(b"Execution target")
         session.send(b"s")
         cursor = session.wait_for(b"launch confirmation", after=cursor)
         session.send(b"y")
@@ -861,7 +1453,7 @@ def test_exact_controls_and_stress(driver: Path, fixture: Path, root: Path) -> N
         extra_environment={"TUI_FIXTURE_MODE": "persons"},
     ) as session:
         select_workflow(session, 0)
-        cursor = session.wait_for(b"execution target")
+        cursor = session.wait_for(b"Execution target")
         session.send(b"s")
         cursor = session.wait_for(b"launch confirmation", after=cursor)
         session.send(b"y")
@@ -882,11 +1474,11 @@ def test_exact_controls_and_stress(driver: Path, fixture: Path, root: Path) -> N
         extra_environment={"TUI_FIXTURE_MODE": "persons"},
     ) as session:
         select_workflow(session, 0)
-        cursor = session.wait_for(b"execution target")
+        cursor = session.wait_for(b"Execution target")
         session.send(b"s")
         cursor = session.wait_for(b"launch confirmation", after=cursor)
         session.send(b"y")
-        session.wait_for(b"Person answer required for occurrence 0", after=cursor)
+        session.wait_for(b"Your answer", after=cursor)
         child_pids = child_processes(session.process.pid)
         assert child_pids, "active machine child was not present"
         session.process.send_signal(signal.SIGTERM)
@@ -933,7 +1525,7 @@ def test_lineage_owner_refresh(runner: Path, root: Path) -> None:
             owner_path = parent / "owner.json"
             owner = json.loads(owner_path.read_text())
             owner["heartbeat"] = "2000-01-01T00:00:00Z"
-            owner_path.write_text(json.dumps(owner))
+            replace_json(owner_path, owner)
             with TuiSession(runner, state, columns=200) as session:
                 cursor = session.wait_for(b"Workflows")
                 session.settle(); session.send(b"\t")
@@ -942,13 +1534,13 @@ def test_lineage_owner_refresh(runner: Path, root: Path) -> None:
                     session.send(key)
                     cursor = session.wait_for(b"launch confirmation", after=cursor)
                 owner["heartbeat"] = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
-                owner_path.write_text(json.dumps(owner))
+                replace_json(owner_path, owner)
                 session.send(key if stage == "preview" else b"y")
                 failure = session.wait_for(b"another live owner", after=cursor, timeout=5)
                 assert runs(state) == [parent], "fresh foreign owner did not prevent child-directory creation"
                 assert not child_processes(session.process.pid), "fresh foreign owner did not prevent child launch"
                 session.send(ESCAPE)
-                session.wait_for(b"r restart", after=failure)
+                session.wait_for(b"r RESTART", after=failure)
                 session.send(b"q")
                 assert session.wait_exit() == 0
                 session.assert_restored()
@@ -965,7 +1557,7 @@ def test_machine_group_ownership(driver: Path, fixture: Path, root: Path) -> Non
                 "TUI_FIXTURE_MODE": scenario, "TUI_FIXTURE_READY": str(ready),
             }) as session:
                 select_workflow(session, 0)
-                cursor = session.wait_for(b"execution target")
+                cursor = session.wait_for(b"Execution target")
                 session.send(b"s")
                 cursor = session.wait_for(b"launch confirmation", after=cursor)
                 session.send(b"y")
@@ -974,7 +1566,7 @@ def test_machine_group_ownership(driver: Path, fixture: Path, root: Path) -> Non
                     assert ready.exists(), "descendant did not publish its synchronized PID"
                     quit_failed_run(session, failure)
                 else:
-                    marker = b"orphan ready" if scenario == "term-orphan" else b"AttemptRunning"
+                    marker = b"orphan ready" if scenario == "term-orphan" else b"Running on fixture"
                     active = session.wait_for(marker, after=cursor)
                     if scenario == "unread-control":
                         session.send(b"i")
@@ -1009,28 +1601,29 @@ def test_confirmed_machine_launch(runner: Path, root: Path) -> None:
     state = root / "launch-state"
     with TuiSession(runner, state) as session:
         select_workflow(session, 1)
-        cursor = session.wait_for(b"execution target")
+        cursor = session.wait_for(b"Execution target")
         session.send(b"s")
         confirmation = session.wait_for(b"launch confirmation", after=cursor)
         assert runs(state) == [], "plan preview crossed the launch confirmation boundary"
         session.send(b"y")
         launching = session.wait_for(b"validated run.started", after=confirmation)
-        live = session.wait_for(b"live run", after=launching)
-        session.wait_for(b"workflow hello", after=launching)
-        session.wait_for(b"realization scripted", after=launching)
+        live = session.wait_for("Requests •".encode(), after=launching)
+        session.wait_for(b"hello |", after=launching)
+        session.wait_for(b"target tool cat", after=launching)
         session.wait_for(b"elapsed", after=launching)
         assert live > launching
-        terminal = session.wait_for(b"RunSucceeded", after=live)
-        session.wait_for(b"final result", after=terminal)
+        terminal = session.wait_for(b"Succeeded", after=live)
+        result_ready = session.wait_for(b"s save verified copy", after=terminal)
+        session.send(b"r")
+        session.wait_for("Result •".encode(), after=result_ready)
         run_name = runs(state)[0].name.encode()
         session.send(ESCAPE)
         browser = session.wait_for(b"browser", after=terminal)
-        session.send(b"\t")
         refreshed = session.wait_for(run_name, after=browser)
-        session.wait_for(b"lineage root", after=browser)
-        session.wait_for(b"persona none", after=browser)
-        session.wait_for(b"bills", after=browser)
-        session.wait_for(b"result available", after=browser)
+        session.wait_for(b"lineage: root", after=browser)
+        session.wait_for(b"persona: none", after=browser)
+        session.wait_for(b"bills:", after=browser)
+        session.wait_for(b"result: available", after=browser)
         deadline = time.monotonic() + 8
         while session.process.poll() is None and time.monotonic() < deadline:
             session.settle()
@@ -1073,8 +1666,10 @@ def test_confirmed_machine_launch(runner: Path, root: Path) -> None:
         session.send(b"\t")
         cursor = session.wait_for(manifest["runId"].encode(), after=cursor)
         session.send(ENTER)
-        live = session.wait_for(b"live run", after=cursor)
-        session.wait_for(b"final result", after=live)
+        live = session.wait_for("Requests •".encode(), after=cursor)
+        result_ready = session.wait_for(b"s save verified copy", after=live)
+        session.send(b"r")
+        session.wait_for("Result •".encode(), after=result_ready)
         session.send(ESCAPE)
         browser = session.wait_for(b"browser", after=live)
         session.settle()
@@ -1090,7 +1685,7 @@ def test_confirmed_machine_launch(runner: Path, root: Path) -> None:
         session.send(b"r")
         confirmation = session.wait_for(b"restart from", after=cursor)
         session.send(b"y")
-        terminal = session.wait_for(b"RunSucceeded", after=confirmation)
+        terminal = session.wait_for(b"Succeeded", after=confirmation)
         quit_completed_run(session, terminal)
         session.assert_restored()
     lineage_records = runs(state)
@@ -1106,14 +1701,15 @@ def test_local_person_answer_and_cancel(runner: Path, root: Path) -> None:
     answer_state = root / "person-answer-state"
     with TuiSession(runner, answer_state, rows=40, columns=150) as session:
         select_workflow(session, 0)
-        cursor = session.wait_for(b"execution target")
+        cursor = session.wait_for(b"Execution target")
         session.send(b"s")
         cursor = session.wait_for(b"launch confirmation", after=cursor)
         session.send(b"y")
-        person = session.wait_for(b"Person answer required", after=cursor, timeout=45)
+        person_title = session.wait_for(b"Your answer", after=cursor, timeout=45)
+        person = session.wait_for(b"Ctrl-D SUBMIT", after=person_title)
         session.send(b"no" + CTRL_D)
-        terminal = session.wait_for(b"RunSucceeded", after=person, timeout=45)
-        session.wait_for(b"final result", after=terminal)
+        terminal = session.wait_for(b"Succeeded", after=person, timeout=45)
+        session.wait_for(b"RESULT AVAILABLE", after=terminal)
         quit_completed_run(session, terminal)
         session.assert_restored()
     record = runs(answer_state)[0]
@@ -1131,19 +1727,24 @@ def test_local_person_answer_and_cancel(runner: Path, root: Path) -> None:
     cancel_state = root / "person-cancel-state"
     with TuiSession(runner, cancel_state, rows=40, columns=150) as session:
         select_workflow(session, 0)
-        cursor = session.wait_for(b"execution target")
+        cursor = session.wait_for(b"Execution target")
         session.send(b"s")
         cursor = session.wait_for(b"launch confirmation", after=cursor)
         session.send(b"y")
-        person = session.wait_for(b"Person answer required", after=cursor, timeout=45)
-        session.send(b"c")
+        person_title = session.wait_for(b"Your answer", after=cursor, timeout=45)
+        person = session.wait_for(b"Ctrl-D SUBMIT", after=person_title)
+        session.send(b"c?q")
+        session.wait_screen("c?q")
+        assert "Cancel run?" not in session.screen.text(), "printable command keys escaped the person editor"
+        session.send(ESCAPE)
         confirmation = session.wait_for(b"Cancel the machine child", after=person)
         session.send(b"n")
-        person_again = session.wait_for(b"Person answer required", after=confirmation)
-        session.send(b"c")
+        person_again = session.wait_for(b"Your answer", after=confirmation)
+        session.wait_screen("Ctrl-D SUBMIT")
+        session.send(ESCAPE)
         confirmation = session.wait_for(b"Cancel the machine child", after=person_again)
         session.send(b"y")
-        terminal = session.wait_for(b"RunCancelledStatus", after=confirmation, timeout=20)
+        terminal = session.wait_for(b"Cancelled", after=confirmation, timeout=20)
         quit_completed_run(session, terminal)
         session.assert_restored()
     cancel_events = [json.loads(line)["event"] for line in (runs(cancel_state)[0] / "runtime" / "events.ndjson").read_text().splitlines()]
@@ -1158,7 +1759,7 @@ def test_child_exec_failure(runner: Path, root: Path) -> None:
     copied_runner.chmod(0o700)
     with TuiSession(copied_runner, state) as session:
         select_workflow(session, 1)
-        cursor = session.wait_for(b"execution target")
+        cursor = session.wait_for(b"Execution target")
         session.send(b"s")
         confirmation = session.wait_for(b"launch confirmation", after=cursor)
         copied_runner.unlink()
@@ -1208,6 +1809,10 @@ def main() -> None:
             test_interrupted_helper_shutdown(arguments.driver.resolve(), arguments.fixture.resolve(), root)
             test_machine_group_ownership(arguments.driver.resolve(), arguments.fixture.resolve(), root)
             test_filter_and_responsive_browser(arguments.driver.resolve(), arguments.fixture.resolve(), root)
+            test_resize_confirmation_and_no_color(arguments.driver.resolve(), arguments.fixture.resolve(), root)
+            test_exact_plan_preview(arguments.driver.resolve(), arguments.fixture.resolve(), root)
+            test_run_failure_details(arguments.driver.resolve(), arguments.fixture.resolve(), root)
+            test_recovery_layout(arguments.driver.resolve(), arguments.fixture.resolve(), root)
             test_exact_controls_and_stress(arguments.driver.resolve(), arguments.fixture.resolve(), root)
         test_local_person_answer_and_cancel(runner, root)
         test_child_exec_failure(runner, root)

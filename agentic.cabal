@@ -17,6 +17,7 @@ extra-source-files:
   test/fixtures/runtime/descriptor-v2/*.json
   test/fixtures/runtime/descriptor-v3/*.json
   test/fixtures/runtime/frontend-manifest/*.json
+  test/fixtures/runtime/input-sources/*.json
   test/fixtures/runtime/protocol-v1/*.json
   test/fixtures/runtime/protocol-v1/*.ndjson
   test/fixtures/runtime/protocol-v2/*.json
@@ -24,6 +25,11 @@ extra-source-files:
   test/fixtures/tui/*.golden
   test/fixtures/tui/import-boundaries.json
   test/source-boundaries.hs
+  test/cabal.sh
+  test/cabal_env_probe.py
+  test/frontend_export_probe.py
+  test/frontend_io_probe.py
+  test/frontend_session_probe.py
 extra-doc-files:
   doc/tui-design.md
   doc/tui-release-evidence.md
@@ -67,8 +73,9 @@ common settings
 
 library
   import:          settings
-  c-sources:       tui/cbits/process_group.c
+  c-sources:       runtime/cbits/process_group.c
                    runtime/cbits/private_directory.c
+                   cli/cbits/control_bootstrap.c
   hs-source-dirs:
     dsl/src
     plan/src
@@ -109,6 +116,7 @@ library
     Agentic.Workflow.Do
   other-modules:
     Agentic.Chains
+    Agentic.Cli.Frontend
     Agentic.DSL.Json
     Agentic.Exec
     Agentic.Plan.Value
@@ -121,9 +129,12 @@ library
     Agentic.Runtime.Catalogue
     Agentic.Runtime.Control
     Agentic.Runtime.Descriptor
+    Agentic.Runtime.Frontend
     Agentic.Runtime.Machine
+    Agentic.Runtime.Plan
     Agentic.Runtime.PrivateFile
     Agentic.Runtime.PrivateRoot
+    Agentic.Runtime.ProcessGroup
     Agentic.Runtime.Protocol
     Agentic.Runtime.Route
     Agentic.Runtime.Snapshot
@@ -133,8 +144,8 @@ library
     Agentic.Tui.Highlight
     Agentic.Tui.Model
     Agentic.Tui.Person
+    Agentic.Tui.Presentation
     Agentic.Tui.Process
-    Agentic.Tui.ProcessGroup
     Agentic.Tui.RunModel
     Agentic.Tui.Root
     Agentic.Tui.Types
@@ -300,9 +311,13 @@ test-suite tui-model-test
     tui/src
   main-is:          Main.hs
   other-modules:
+    Agentic.Tui.Client
     Agentic.Tui.Highlight
     Agentic.Tui.Model
     Agentic.Tui.Person
+    Agentic.Tui.Presentation
+    Agentic.Tui.Process
+    Agentic.Tui.Root
     Agentic.Tui.RunModel
     Agentic.Tui.Types
   build-depends:

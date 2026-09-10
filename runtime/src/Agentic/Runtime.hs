@@ -5,8 +5,11 @@ module Agentic.Runtime
     module Agentic.Runtime.Control,
     module Agentic.Runtime.Descriptor,
     module Agentic.Runtime.Facts,
+    module Agentic.Runtime.Frontend,
     module Agentic.Runtime.Machine,
+    module Agentic.Runtime.Plan,
     module Agentic.Runtime.PrivateRoot,
+    module Agentic.Runtime.ProcessGroup,
     module Agentic.Runtime.Protocol,
     module Agentic.Runtime.Route,
     module Agentic.Runtime.Snapshot,
@@ -20,8 +23,11 @@ import Agentic.Runtime.Catalogue
 import Agentic.Runtime.Control
 import Agentic.Runtime.Descriptor
 import Agentic.Runtime.Facts
+import Agentic.Runtime.Frontend
 import Agentic.Runtime.Machine
+import Agentic.Runtime.Plan
 import Agentic.Runtime.PrivateRoot
+import Agentic.Runtime.ProcessGroup
 import Agentic.Runtime.Protocol
 import Agentic.Runtime.Route
 import Agentic.Runtime.Snapshot

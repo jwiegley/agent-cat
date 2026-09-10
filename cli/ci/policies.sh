@@ -112,15 +112,19 @@
 set -euo pipefail
 root=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$root"
-nix develop path:. -c bash -c 'runghc -package=ghc test/source-boundaries.hs "$(ghc --print-libdir)"'
-nix develop path:. -c cabal run -v0 policy-probe -- +RTS -N8 -RTS
-nix develop path:. -c cabal build agentic-run routing-fixed-point-probe >/dev/null
-agentic_run=$(nix develop path:. -c cabal list-bin agentic-run)
-control_runner=$(nix develop path:. -c cabal list-bin routing-fixed-point-probe)
+python3 test/cabal_env_probe.py
+runghc -package=ghc test/source-boundaries.hs "$(ghc --print-libdir)"
+test/cabal.sh run -v0 policy-probe -- +RTS -N8 -RTS
+test/cabal.sh build agentic-run routing-fixed-point-probe >/dev/null
+agentic_run=$(test/cabal.sh list-bin agentic-run)
+control_runner=$(test/cabal.sh list-bin routing-fixed-point-probe)
 GHCRTS=-N8 python3 test/lineage_probe.py "$agentic_run"
 GHCRTS=-N8 python3 test/control_probe.py "$agentic_run" "$control_runner"
 GHCRTS=-N8 python3 test/person_control_probe.py "$control_runner"
 GHCRTS=-N8 python3 test/person_lineage_probe.py "$control_runner"
+python3 test/frontend_io_probe.py "$agentic_run"
+GHCRTS=-N8 python3 test/frontend_session_probe.py "$control_runner"
+python3 test/frontend_export_probe.py "$control_runner"
 
 # ---------------------------------------------------------------------------
 # The refusals that are the command line's
@@ -145,7 +149,7 @@ GHCRTS=-N8 python3 test/person_lineage_probe.py "$control_runner"
 # believe is theirs to set — it is a table they typed on the same command line.
 refuses_fact() {
   local fact="$1" refusal code
-  refusal=$(nix develop path:. -c cabal run -v0 agentic-run -- \
+  refusal=$(test/cabal.sh run -v0 agentic-run -- \
               plan review-lite --input-arg "$fact=" 2>&1) && code=0 || code=$?
 
   if [ "$code" != 1 ]; then

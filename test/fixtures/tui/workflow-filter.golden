@@ -1,2 +1,23 @@
-filter /rvw/  1 of 2
-> review  [pipeline; cost 2..2 over 1 path; inputs subject:arg,notes:prompt; pins deep]  Review one subject
+> review
+
+review
+Review one subject
+
+Inputs
+  subject (command tail)
+  notes (prompt)
+
+Result
+  receipt
+
+Plan
+  level pipeline; size 3; ask nodes 2
+  2..2 request occurrences; 1 path
+  pins: deep
+  run facts: run.engine
+
+Capabilities
+  consult 1; observe 1; effect 0
+  effectful: no; tool execution: no
+
+Enter configures this workflow.

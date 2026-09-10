@@ -15,6 +15,18 @@ checked by the documentation gates.
 @c MEMBER Agentic.Cli.Command.member:Cost support
 @hsindex Agentic.Cli.Command.Cost
 @item @code{Agentic.Cli.Command} @tab @code{Cost} @tab @code{Agentic.Cli.Command}
+@c MEMBER Agentic.Cli.Command.member:FrontendCapabilities support
+@hsindex Agentic.Cli.Command.FrontendCapabilities
+@item @code{Agentic.Cli.Command} @tab @code{FrontendCapabilities} @tab @code{Agentic.Cli.Command}
+@c MEMBER Agentic.Cli.Command.member:FrontendExport support
+@hsindex Agentic.Cli.Command.FrontendExport
+@item @code{Agentic.Cli.Command} @tab @code{FrontendExport} @tab @code{Agentic.Cli.Command}
+@c MEMBER Agentic.Cli.Command.member:FrontendIo support
+@hsindex Agentic.Cli.Command.FrontendIo
+@item @code{Agentic.Cli.Command} @tab @code{FrontendIo} @tab @code{Agentic.Cli.Command}
+@c MEMBER Agentic.Cli.Command.member:FrontendSession support
+@hsindex Agentic.Cli.Command.FrontendSession
+@item @code{Agentic.Cli.Command} @tab @code{FrontendSession} @tab @code{Agentic.Cli.Command}
 @c MEMBER Agentic.Cli.Command.member:Help support
 @hsindex Agentic.Cli.Command.Help
 @item @code{Agentic.Cli.Command} @tab @code{Help} @tab @code{Agentic.Cli.Command}

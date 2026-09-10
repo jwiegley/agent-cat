@@ -2,7 +2,7 @@
 {-# LANGUAGE TypeApplications #-}
 
 -- | POSIX groups whose leader remains waitable through group signalling.
-module Agentic.Tui.ProcessGroup
+module Agentic.Runtime.ProcessGroup
   ( ProcessGroup,
     groupPid,
     groupInput,

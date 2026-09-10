@@ -5,12 +5,12 @@ trap 'if [[ $- == *e* ]]; then printf "routing-config: failed at line %s\n" "$LI
 root=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$root"
 
-cabal run routing-config-probe -- +RTS -N8 -RTS
-cabal run routing-v2-probe -- +RTS -N8 -RTS
-cabal run routing-discovery-probe -- +RTS -N8 -RTS
-cabal build agentic-run routing-fixed-point-probe >/dev/null
-bin=$(cabal list-bin agentic-run)
-fixed_bin=$(cabal list-bin routing-fixed-point-probe)
+test/cabal.sh run routing-config-probe -- +RTS -N8 -RTS
+test/cabal.sh run routing-v2-probe -- +RTS -N8 -RTS
+test/cabal.sh run routing-discovery-probe -- +RTS -N8 -RTS
+test/cabal.sh build agentic-run routing-fixed-point-probe >/dev/null
+bin=$(test/cabal.sh list-bin agentic-run)
+fixed_bin=$(test/cabal.sh list-bin routing-fixed-point-probe)
 tmp=$(mktemp -d)
 server_pid=
 cleanup() {
@@ -317,7 +317,7 @@ setter_refusal=$(XDG_CONFIG_HOME="$tmp/xdg" "$fixed_bin" run pinned \
 status=$?
 set -e
 [ "$status" -eq 2 ]
-grep -q "answered 'session/set_config_option' with error" <<<"$setter_refusal"
+grep -Fq "ACP session/set_config_option failed:" <<<"$setter_refusal"
 grep -q "set config model='deep'" "$tmp/primary.log"
 ! grep -q 'prompt matched' "$tmp/primary.log"
 ! grep -q 'prompt matched' "$tmp/fallback.log"

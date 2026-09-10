@@ -303,7 +303,7 @@ where
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newEmptyMVar, newMVar, takeMVar, tryPutMVar, withMVar)
 import Control.Exception
-  ( Exception,
+  ( Exception (displayException),
     IOException,
     SomeException,
     bracket,
@@ -327,7 +327,7 @@ import qualified Data.Map.Strict as Map
 import Data.Scientific (toBoundedInteger)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.Encoding (decodeUtf8With)
+import Data.Text.Encoding (decodeUtf8With, encodeUtf8)
 import Data.Text.Encoding.Error (lenientDecode)
 import qualified Data.Vector as V
 import System.Directory (canonicalizePath, doesFileExist)
@@ -582,7 +582,8 @@ data AcpError
     AcpTimedOut !Text !Int !Text
   deriving (Eq, Show)
 
-instance Exception AcpError
+instance Exception AcpError where
+  displayException = T.unpack . renderAcpError
 
 -- | An 'AcpError' as one sentence, for a CLI that would rather print a line
 -- than a constructor.
@@ -610,8 +611,8 @@ renderAcpError = \case
       <> " was the one in flight; the stream is out of step and no reply can be attributed to a question"
   AcpProtocol prog why ->
     "'" <> prog <> "' is not speaking ACP v1 as this client implements it: " <> why
-  AcpRefused prog method err ->
-    "'" <> prog <> "' answered '" <> method <> "' with error " <> clipText err
+  AcpRefused _ method err ->
+    "ACP " <> method <> " failed: " <> renderRpcError err
   AcpConfiguration prog why ->
     "'" <> prog <> "' cannot realize the requested routing profile: " <> why
   AcpTimedOut prog ms what ->
@@ -622,6 +623,33 @@ renderAcpError = \case
       <> " within "
       <> tshow ms
       <> "ms; it was killed. The question was abandoned rather than answered by this runtime"
+
+renderRpcError :: Text -> Text
+renderRpcError raw = case A.decodeStrict' (encodeUtf8 raw) of
+  Just (Object fields)
+    | Just (String message) <- KM.lookup "message" fields ->
+        kindPrefix fields
+          <> cleanMessage (errorKind fields) message
+          <> codeSuffix fields
+  _ -> clipText raw
+  where
+    errorKind fields = case KM.lookup "data" fields of
+      Just (Object details) -> case KM.lookup "errorKind" details of
+        Just (String kind) -> Just kind
+        _ -> Nothing
+      _ -> Nothing
+    kindPrefix fields = case errorKind fields of
+      Nothing -> ""
+      Just kind -> sentenceCase (T.replace "_" " " kind) <> ": "
+    cleanMessage (Just "authentication_failed") message =
+      maybe message id (T.stripPrefix "Internal error: Failed to authenticate: " message)
+    cleanMessage _ message = message
+    codeSuffix fields = case KM.lookup "code" fields of
+      Just (Number number) -> case toBoundedInteger number :: Maybe Int of
+        Just code -> " (JSON-RPC " <> tshow code <> ")"
+        Nothing -> ""
+      _ -> ""
+    sentenceCase text = T.toUpper (T.take 1 text) <> T.drop 1 text
 
 -- ---------------------------------------------------------------------------
 -- What the agent advertised

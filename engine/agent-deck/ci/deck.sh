@@ -61,7 +61,7 @@ EOF
   out="$state/out"
   DECK_STUB_STATE="$state" DECK_STUB_MODE="$mode" XDG_CONFIG_HOME="$state/config" \
     PATH="$state/bin:$PATH" \
-    nix develop path:. -c cabal run -v0 agentic-run -- "$@" +RTS -N8 -RTS > "$out" 2>&1
+    test/cabal.sh run -v0 agentic-run -- "$@" +RTS -N8 -RTS > "$out" 2>&1
   code=$?
   sends=$( [ -f "$state/sends" ] && cat "$state/sends" || echo 0 )
 }
@@ -286,7 +286,7 @@ chmod +x "$state/bin/agent-deck"
 
 out="$state/out"
 XDG_CONFIG_HOME="$state/config" DECK_STUB_MODE=happy PATH="$state/bin:$PATH" \
-  nix develop path:. -c cabal run -v0 agentic-run -- \
+  test/cabal.sh run -v0 agentic-run -- \
     run harden --session pane-a --route 'deep=deck:pane-b' --poll 20 --timeout 30000 \
     +RTS -N8 -RTS \
     > "$out" 2>&1

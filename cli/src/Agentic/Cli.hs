@@ -223,6 +223,7 @@
 -- apart because they ask different things of the operator: @2@ is something to
 -- fix about the transport, @3@ is something that was said, or not finished
 -- being said.
+{-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -255,6 +256,7 @@ module Agentic.Cli
   )
 where
 
+import qualified Agentic.Cli.Frontend as Frontend
 import Control.Exception
   ( Handler (..),
     IOException,
@@ -297,7 +299,7 @@ import Data.Version (showVersion)
 import System.Directory (createDirectoryIfMissing, doesFileExist, getCurrentDirectory, getHomeDirectory, getTemporaryDirectory)
 import System.Environment (getArgs, getEnvironment, getExecutablePath, lookupEnv)
 import System.Exit (ExitCode (..), exitSuccess, exitWith)
-import System.FilePath ((</>))
+import System.FilePath (isAbsolute, (</>))
 import System.IO
   ( BufferMode (LineBuffering),
     Handle,
@@ -313,15 +315,11 @@ import System.IO
 import System.IO.Error (ioeGetErrorString, isUserError)
 import System.Posix.IO
   ( OpenFileFlags (creat, exclusive),
-    OpenMode (ReadOnly, WriteOnly),
-    closeFd,
+    OpenMode (WriteOnly),
     defaultFileFlags,
-    dupTo,
     fdToHandle,
-    handleToFd,
     openFd,
   )
-import System.Posix.Process (executeFile)
 import System.Posix.Types (Fd (..))
 import Text.Read (readMaybe)
 
@@ -388,11 +386,13 @@ import Agentic.Runtime
     handlesEventSinkFor,
     newDeferredEventSink,
     stdoutEventSinkFor,
-    withControlInputFor,
+    withBufferedControlInputFor,
   )
 import Agentic.Runtime
   ( LineageOperation (ForkRun, RestartRun, ResumeRun, RootRun),
     AnswerRecord (..),
+    FrontendManifest (..),
+    RunRecord (..),
     Checkpoint (..),
     EffectPhase (EffectCompleted, EffectStarted),
     EffectRecord (EffectRecord),
@@ -415,6 +415,9 @@ import Agentic.Runtime
   ( DescriptorCapabilities (..),
     EventSink,
     withStateAnchor,
+    maxFrontendQueryBytes,
+    runFrontendExport,
+    runFrontendQuery,
     privatePathComponents,
     readPrivateFileAt,
     PersonAnswering (..),
@@ -533,25 +536,10 @@ import Agentic.Workflow
   )
 import Agentic.Planning (answerFromJson, answerJson, billExecFresh, billMemo)
 
--- | Re-exec a machine child after moving its private stdin pipe to fd 3.
---
--- 'System.Process' performs the only spawn.  This bootstrap runs in that fresh
--- process, so the threaded TUI never executes Haskell code between @fork@ and
--- @exec@.  The second image sees the original machine argv and a null stdin.
-bootstrapTuiControlFd :: IO ()
-bootstrapTuiControlFd = do
-  requested <- lookupEnv "AGENT_CAT_TUI_BOOTSTRAP_FD3"
-  when (requested == Just "1") $ do
-    arguments <- getArgs
-    executable <- getExecutablePath
-    environment <- filter ((/= "AGENT_CAT_TUI_BOOTSTRAP_FD3") . fst) <$> getEnvironment
-    source <- handleToFd stdin
-    _ <- dupTo source (Fd 3)
-    nullInput <- openFd "/dev/null" ReadOnly defaultFileFlags
-    _ <- dupTo nullInput (Fd 0)
-    when (nullInput /= Fd 0 && nullInput /= Fd 3) (closeFd nullInput)
-    when (source /= Fd 0 && source /= Fd 3) (closeFd source)
-    executeFile executable False arguments (Just environment)
+-- | Keep the pre-RTS control bootstrap linked into each registry executable.
+-- Its constructor reserves fd 3 before an event manager can allocate it.
+foreign import ccall unsafe "agentic_bootstrap_control_fd"
+  bootstrapTuiControlFd :: IO ()
 
 -- ---------------------------------------------------------------------------
 -- The registry
@@ -636,8 +624,14 @@ regLookup reg n = lookup n (regRows reg)
 -- The input flags ride on all three of the program verbs, because @plan --raw@
 -- prints prompts and an operator pricing a run wants to price the run they will
 -- make.
-data ForkEdit = ForkDrop !OccurrenceId | ForkReplace !OccurrenceId !FilePath
+data ForkEdit = ForkDrop !OccurrenceId | ForkReplace !OccurrenceId !FilePath | ForkReplaceValue !OccurrenceId !PrivateForkAnswer
   deriving (Eq, Show)
+
+newtype PrivateForkAnswer = PrivateForkAnswer Value
+  deriving (Eq)
+
+instance Show PrivateForkAnswer where
+  show _ = "<private answer>"
 
 data MachineOptions = MachineOptions
   { machineProtocolVersion :: !Int,
@@ -651,6 +645,14 @@ defaultMachineOptions = MachineOptions protocolVersion PersonAnswerEngine
 data Command
   = -- | Explicit full-screen terminal frontend.
     Tui
+  | -- | Workflow-independent process-interface discovery.
+    FrontendCapabilities
+  | -- | Read-only, versioned private-store queries for native frontends.
+    FrontendIo
+  | -- | Publish one verified result beneath a trusted state root.
+    FrontendExport !FilePath
+  | -- | Prepare and approve an exact private execution before activating controls.
+    FrontendSession
   | -- | The usage message, asked for: stdout, exit @0@. Bare @\<binary\>@ is
     -- not this — it is a 'Left' carrying the same text, on stderr under exit
     -- @1@, because a command line that asked for nothing was not answered.
@@ -935,6 +937,16 @@ loadCommandRouting = \case
 execute :: Registry -> Command -> IO ()
 execute reg = \case
   Tui -> tuiCmd reg
+  FrontendCapabilities -> Frontend.runFrontendCapabilities (regBinary reg) runnerVersion
+  FrontendSession -> frontendCmd reg
+  FrontendIo -> do
+    request <- readFrontendRequest
+    response <- runFrontendQuery request
+    either (die reg 3) BS.putStr response
+  FrontendExport stateRoot -> do
+    request <- readFrontendRequest
+    response <- runFrontendExport stateRoot request
+    either (die reg 3) BS.putStr response
   Usage -> say (usage reg) >> exitSuccess
   Help name -> helpCmd reg name >> exitSuccess
   RoutingInspection rendering persona mode -> routingInspectionCmd reg rendering persona mode >> exitSuccess
@@ -959,6 +971,96 @@ execute reg = \case
       withRunExample reg pinned name target ins $ \effective _ program bindings ->
         withFinalTarget reg effective program (\finalTarget -> runMachineLineageCmd options control reg lineage runId parent edits name finalTarget program bindings)
 
+readFrontendRequest :: IO BS.ByteString
+readFrontendRequest = go (maxFrontendQueryBytes + 1) []
+  where
+    go remaining chunks
+      | remaining == 0 = pure (BS.concat (reverse chunks))
+      | otherwise = do
+          chunk <- BS.hGetSome stdin (min 32768 remaining)
+          if BS.null chunk
+            then pure (BS.concat (reverse chunks))
+            else go (remaining - BS.length chunk) (chunk : chunks)
+
+frontendCmd :: Registry -> IO ()
+frontendCmd reg = Frontend.runFrontendSession (regBinary reg) runnerVersion credentialArgument describe prepare
+  where
+    requireRow name = maybe (die reg 1 (noSuchRow reg name)) pure (regLookup reg name)
+    require = either (ioError . userError . T.unpack) pure
+    describe name = do
+      row <- requireRow name
+      facts <- require (listFacts name row)
+      pure (descriptorOfFacts latestDescriptorVersion facts)
+    prepare parent name arguments answering captured = do
+      row <- requireRow name
+      inputs <- traverse
+        (\(inputName', bytes) -> NamedArg inputName' <$> require (decodeInputFileBytes (inputSource (inputSpecFor (rowExample row) inputName')) ("frontend input " <> inputName') bytes))
+        captured
+      (initial, pinned, forbiddenInputs) <- require (parseTarget reg arguments)
+      unless (null forbiddenInputs) (ioError (userError "frontend target arguments cannot contain workflow inputs"))
+      case initial of
+        Routed routes' | any credentialArgument (rrAdapterArgs routes') ->
+          ioError (userError "frontend adapter arguments cannot carry credentials")
+        _ -> pure ()
+      configured <- loadCommandRouting (Run name initial pinned inputs) >>= require
+      target <- case configured of
+        Run _ routed _ _ -> pure routed
+        _ -> error "frontend routing changed the command constructor"
+      (SomeProgram static, _) <- resolveInputs name False [] (rowExample row) inputs >>= require
+      withRunExample reg pinned name target inputs $ \effective facts program bindings ->
+        withFinalTarget reg effective program $ \resolved -> do
+          (frozen, frozenArguments) <- case resolved of
+            Routed routes'
+              | rrScratch routes' == Nothing, not (null [() | BackendAcp _ <- routeBackends (rrRoutes routes')]) -> do
+                  scratch <- freshScratch reg
+                  pure (Routed routes' {rrScratch = Just scratch}, arguments <> ["--scratch", T.pack scratch])
+            _ -> pure (resolved, arguments)
+          let policy = targetPolicy frozen
+              textField key = case policy of
+                Object fields -> case KM.lookup key fields of Just (String value) -> Just value; _ -> Nothing
+                _ -> Nothing
+              targetKind = case frozen of
+                Scripted -> "scripted"
+                Routing _ -> "routing"
+                Routed routes' -> case routeDefault (rrRoutes routes') of
+                  Nothing -> "routing"
+                  Just (BackendAcp _) -> "acp"
+                  Just (BackendDeck _) -> "deck"
+              options = MachineOptions latestProtocolVersion answering
+              lineage = maybe RootRun Frontend.parentOperation parent
+              checkParent = traverse
+                (\selected -> validateLineage options (Frontend.parentOperation selected)
+                  (recordDirectory (Frontend.parentRecord selected) </> frontendRuntimeStore (recordManifest (Frontend.parentRecord selected)))
+                  (map frontendEdit (Frontend.parentEdits selected)) name frozen program)
+                parent
+          inherited <- checkParent
+          pure Frontend.FrontendPreparation
+            { Frontend.preparationPlan = object (planFields facts <> ["program" .= printedValue program]),
+              Frontend.preparationProgramHash = Frontend.frontendDigest (BL.toStrict (encode (printedValue static))),
+              Frontend.preparationPolicy = policy,
+              Frontend.preparationArguments = frozenArguments,
+              Frontend.preparationTargetKind = targetKind,
+              Frontend.preparationPersona = textField "persona",
+              Frontend.preparationPolicyDigest = textField "policyDigest",
+              Frontend.preparationRun = \runId control buffered -> do
+                validateMachineEnvironment options
+                withMachineControlsBuffered options runId name frozen (Just control) buffered $ \controls ->
+                  do
+                    current <- checkParent
+                    unless (current == inherited) (ioError (userError "parent answers changed after frontend approval"))
+                    runMachineWith options controls lineage (fst <$> inherited) (maybe [] snd inherited) reg runId name frozen program bindings
+            }
+    frontendEdit (Frontend.DropAnswer occurrence) = ForkDrop occurrence
+    frontendEdit (Frontend.ReplaceAnswer occurrence value) = ForkReplaceValue occurrence (PrivateForkAnswer value)
+
+decodeInputFileBytes :: InputSource -> Text -> BS.ByteString -> Either Text Text
+decodeInputFileBytes source label bytes = do
+  value <- decodeInputBytes label bytes
+  pure $ case source of
+    PromptInput -> fromMaybe value (T.stripSuffix "\n" value)
+    CommandTailInput -> value
+    StandardInput -> value
+
 tuiCmd :: Registry -> IO ()
 tuiCmd reg = do
   runner <- getExecutablePath
@@ -976,7 +1078,7 @@ tuiCmd reg = do
           pure (home </> ".local" </> "state" </> "agent-cat" </> "tui" </> runnerComponent)
   runTui
     TuiConfig
-      { tuiRunnerId = regBinary reg,
+      { tuiRunnerAlias = regBinary reg,
         tuiRunner = runner,
         tuiRunnerArgs = [],
         tuiWorkingDir = workingDirectory,
@@ -1050,13 +1152,17 @@ data MachineControl = MachineControl ControlRuntime DeferredEventSink EventSink
 withMachineControls :: MachineOptions -> RunId -> Text -> Target -> (Maybe MachineControl -> IO ()) -> IO ()
 withMachineControls options runId name initialTarget action = do
   handle <- machineControlHandle
+  withMachineControlsBuffered options runId name initialTarget handle BS.empty action
+
+withMachineControlsBuffered :: MachineOptions -> RunId -> Text -> Target -> Maybe Handle -> BS.ByteString -> (Maybe MachineControl -> IO ()) -> IO ()
+withMachineControlsBuffered options runId name initialTarget handle buffered action =
   case handle of
     Nothing -> action Nothing
     Just controlHandle -> do
       runtime <- newControlRuntime
       deferred <- newDeferredEventSink
       let sink = deferredEventSink deferred
-      outcome <- try (withControlInputFor (machineProtocolVersion options) controlHandle sink runtime (action (Just (MachineControl runtime deferred sink))))
+      outcome <- try (withBufferedControlInputFor (machineProtocolVersion options) controlHandle buffered sink runtime (action (Just (MachineControl runtime deferred sink))))
       case outcome of
         Right () -> pure ()
         Left (err :: SomeException)
@@ -1172,14 +1278,14 @@ withExample reg pinned needsAll refuses name facts ins k = case regLookup reg na
 -- A program may branch while its Haskell value is built, so deriving routes
 -- once before that build can make @run.routes@ disagree with execution. The
 -- sentinel is held fixed throughout; only the target-derived facts move.
-withRunExample ::
+withRunExample :: forall a.
   Registry ->
   Bool ->
   Text ->
   Target ->
   [InputFlag] ->
-  (forall r. Target -> Facts -> ProgramOf r -> [Given] -> IO ()) ->
-  IO ()
+  (forall r. Target -> Facts -> ProgramOf r -> [Given] -> IO a) ->
+  IO a
 withRunExample reg pinned name initialTarget inputs k = case regLookup reg name of
   Nothing -> die reg 1 (noSuchRow reg name)
   Just row -> do
@@ -1209,10 +1315,10 @@ withRunExample reg pinned name initialTarget inputs k = case regLookup reg name 
                 | targetPolicy effective `elem` seen ->
                     die reg 1 "routing configuration and run facts form a cycle; the program changes which profiles it pins when run.routes changes"
                 | otherwise -> settle row sentinel inputs' (targetPolicy target : seen) (turns + 1) effective
-    finish :: forall r. Row -> Target -> ProgramOf r -> [Given] -> IO ()
+    finish :: forall r. Row -> Target -> ProgramOf r -> [Given] -> IO a
     finish row effective prog bindings = case routeRefusal reg effective prog of
       Just why -> die reg 1 why
-      Nothing -> k effective (factsOf name row prog) prog bindings >> exitSuccess
+      Nothing -> k effective (factsOf name row prog) prog bindings
 
 -- | The refusal a name no row answers to earns, from whichever verb was asking.
 --
@@ -1424,11 +1530,7 @@ resolveInputs name needsAll facts ex ins = case ex of
       pure $ case got :: Either IOException BS.ByteString of
         Left e -> Left ("could not read " <> T.pack path <> ": " <> T.pack (ioeGetErrorString e))
         Right bytes -> do
-          value <- decodeInputBytes (T.pack path) bytes
-          let normalized = case inputSource (inputSpecFor ex n) of
-                PromptInput -> fromMaybe value (T.stripSuffix "\n" value)
-                CommandTailInput -> value
-                StandardInput -> value
+          normalized <- decodeInputFileBytes (inputSource (inputSpecFor ex n)) (T.pack path) bytes
           Right (normalized, sizeOf normalized <> " from " <> T.pack path)
 
     bind given n = case lookup n facts of
@@ -2536,6 +2638,7 @@ applyForkEdits edits initialAnswers = do
   where
     editOccurrence (ForkDrop occurrence) = occurrence
     editOccurrence (ForkReplace occurrence _) = occurrence
+    editOccurrence (ForkReplaceValue occurrence _) = occurrence
     apply answers (ForkDrop occurrence)
       | any ((== occurrence) . answerOccurrence) answers = pure (filter ((/= occurrence) . answerOccurrence) answers)
       | otherwise = ioError (userError ("fork drop names no persisted answer: " <> show (occurrenceNumber occurrence)))
@@ -2547,18 +2650,21 @@ applyForkEdits edits initialAnswers = do
           replacement <- case eitherDecodeStrict' bytes of
             Left why -> ioError (userError ("fork replacement is not JSON: " <> why))
             Right value -> pure value
-          original <- case find ((== occurrence) . answerOccurrence) answers of
-            Nothing -> ioError (userError "fork replacement lost its persisted answer")
-            Just answer -> pure answer
-          case replacementFits original replacement of
-            Left why -> ioError (userError ("fork replacement " <> why))
-            Right () -> pure ()
-          pure
-            [ if answerOccurrence answer == occurrence
-                then answer {answerValue = replacement, answerReplayable = True, answerReplaced = True}
-                else answer
-              | answer <- answers
-            ]
+          replaceAnswer answers occurrence replacement
+    apply answers (ForkReplaceValue occurrence (PrivateForkAnswer replacement)) = replaceAnswer answers occurrence replacement
+    replaceAnswer answers occurrence replacement = do
+      original <- case find ((== occurrence) . answerOccurrence) answers of
+        Nothing -> ioError (userError ("fork replacement names no persisted answer: " <> show (occurrenceNumber occurrence)))
+        Just answer -> pure answer
+      case replacementFits original replacement of
+        Left why -> ioError (userError ("fork replacement " <> why))
+        Right () -> pure ()
+      pure
+        [ if answerOccurrence answer == occurrence
+            then answer {answerValue = replacement, answerReplayable = True, answerReplaced = True}
+            else answer
+          | answer <- answers
+        ]
 
 replacementFits :: AnswerRecord -> Value -> Either String ()
 replacementFits answer replacement = do
@@ -3265,6 +3371,21 @@ parseCommand reg = \case
   [] -> Left (usage reg)
   ["--help"] -> Right Usage
   ["--tui"] -> Right Tui
+  ["frontend"] -> Right FrontendSession
+  ["frontend", "--capabilities"] -> Right FrontendCapabilities
+  ["frontend", "--help"] -> Right Usage
+  ("frontend" : _) -> Left "frontend takes --capabilities or a preparation request and approval on its private input pipe"
+  ["frontend-io"] -> Right FrontendIo
+  ["frontend-io", "--help"] -> Right Usage
+  ("frontend-io" : _) -> Left "frontend-io takes one versioned JSON request on standard input"
+  ["frontend-export", "--state", stateRoot]
+    | let path = T.unpack stateRoot,
+      isAbsolute path,
+      not (T.any (== '\NUL') stateRoot),
+      BS.length (encodeUtf8 stateRoot) <= 4096 -> Right (FrontendExport path)
+    | otherwise -> Left "frontend-export --state requires an absolute NUL-free path of at most 4096 UTF-8 bytes"
+  ["frontend-export", "--help"] -> Right Usage
+  ("frontend-export" : _) -> Left "frontend-export requires exactly --state TRUSTED_STATE"
   ("--routing" : rest) -> routingOptions Human Nothing DiscoveryNormal rest
   ["--migrate-routing"] -> Left "--migrate-routing takes SOURCE --output DESTINATION"
   ("--migrate-routing" : source : rest) -> case rest of
@@ -3708,6 +3829,10 @@ usage reg =
     [ bin <> " — " <> regBanner reg,
       "",
       "  " <> bin <> " --tui",
+      "  " <> bin <> " frontend --capabilities",
+      "  " <> bin <> " frontend",
+      "  " <> bin <> " frontend-io < request.json",
+      "  " <> bin <> " frontend-export --state TRUSTED_STATE < request.json",
       "  " <> bin <> " list [--json [--descriptor-version 3]]",
       "  " <> bin <> " --routing [--json] [--persona NAME] [--offline | --refresh-models]",
       "  " <> bin <> " --migrate-routing SOURCE --output DESTINATION",

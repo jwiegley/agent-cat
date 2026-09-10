@@ -8,7 +8,7 @@
 module Main (main) where
 
 import Agentic.Cli (Registry (..), Row (..), cliMain)
-import Agentic.Runtime.Facts (runFactName, runFactRoutes)
+import Agentic.Runtime.Facts (runFactEngine, runFactName, runFactRoutes, sharesOneSession)
 import Agentic.Workflow
 import qualified Agentic.Workflow.Do as W
 import Data.String (fromString)
@@ -31,11 +31,28 @@ registry =
           ("cyclic", row cyclicExample),
           ("controlled", row controlledExample),
           ("controlled-single", row controlledSingleExample),
-          ("person-controlled", row personControlledExample)
+          ("person-controlled", row personControlledExample),
+          ("prompt-source", row (Needs $ taking (input "input" :> noInputs) sourceProgram)),
+          ("tail-source", row (Needs $ taking (argsInputAs "input" :> noInputs) sourceProgram)),
+          ("stdin-source", row (Needs $ taking (stdinInputAs "input" :> noInputs) sourceProgram)),
+          ("target-sensitive", row (Needs $ taking (input (runFactName runFactEngine) :> noInputs) targetSensitiveProgram))
         ]
     }
   where
     row example = Row example "fixture" "Routing fixed-point fixture." [("fixed-point", "ok")]
+
+targetSensitiveProgram :: Text -> Program
+targetSensitiveProgram engine
+  | sharesOneSession engine = sourceProgram "shared"
+  | otherwise = workflow W.do
+      _first <- ask (model "fixed-point") [wf|fixed-point first|]
+      _second <- ask (model "fixed-point") [wf|fixed-point second|]
+      stop
+
+sourceProgram :: Text -> Program
+sourceProgram body = workflow W.do
+  _answer <- ask (model "fixed-point") [wf|fixed-point source: {body}|]
+  stop
 
 convergentExample :: Example
 convergentExample =

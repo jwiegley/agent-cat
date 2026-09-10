@@ -1,1 +1,23 @@
-> run-v2  workflow review  target scripted  status RunSucceeded  lineage root  persona none  realizations deep -> concrete-a on engine-a/fixture  bills 1/1  result available  owner RunTerminal
+> review  Succeeded  run-v2
+
+run-v2
+
+Run
+  status: Succeeded
+  ownership: RunTerminal
+  workflow: review
+  target kind: scripted
+  persona: none
+  lineage: root
+  parent: none
+  bills: 1 fresh / 1 memo
+  result: available
+
+Realizations
+  deep -> concrete-a on engine-a/fixture
+
+Identity
+  program SHA-256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  policy digest: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+  working directory: /tmp/project
+  store: /tmp/run-v2

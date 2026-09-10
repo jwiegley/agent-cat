@@ -6,6 +6,7 @@ module Agentic.Tui.Process
   ( RunningMachine (..),
     MachineExit (..),
     startMachine,
+    activateMachine,
     sendMachineControl,
     terminateMachine,
   )
@@ -15,27 +16,37 @@ import Agentic.Runtime
   ( Control,
     Envelope,
     FrontendManifest (..),
+    FrontendServer (..),
     LineageOperation (..),
     PersonAnswering (PersonAnswerLocalControl),
+    ProcessGroup,
     RunId (runIdText),
     RunRecord (..),
     WorkflowDescriptor (..),
     WorkflowInputDescriptor (..),
+    closeGroupPipes,
+    createProcessGroup,
     decodeEnvelopeFor,
     encodeControlFor,
     frontendManifestVersion,
+    frontendManifestVersionWithInvocation,
+    groupErrors,
+    groupInput,
+    groupOutcome,
+    groupOutput,
+    groupPid,
     maxFrameBytes,
     mkRunId,
     revalidateLineageParentAt,
+    terminateProcessGroup,
   )
-import Agentic.Tui.ProcessGroup
 import Agentic.Tui.Root
 import Agentic.Tui.Types
 import Control.Concurrent (ThreadId, forkIO, threadDelay)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar, takeMVar, tryPutMVar, tryReadMVar)
 import Control.Concurrent.STM (TBQueue, atomically, writeTBQueue)
-import Control.Exception (IOException, SomeAsyncException, SomeException, displayException, finally, fromException, mask_, throwIO, try)
-import Control.Monad (unless, when)
+import Control.Exception (IOException, SomeAsyncException, SomeException, displayException, finally, fromException, mask_, onException, throwIO, try)
+import Control.Monad (unless, void, when)
 import Crypto.Hash (Digest, SHA256, hash)
 import Data.Aeson (encode, object, (.=))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
@@ -81,11 +92,13 @@ data RunningMachine = RunningMachine
     runningErrorThread :: !ThreadId,
     runningWaiterThread :: !ThreadId,
     runningHeartbeatThread :: !ThreadId,
+    runningActivation :: !(MVar ()),
     runningExit :: !(MVar (Either IOException ExitCode)),
     runningFailure :: !(MVar MachineExit)
   }
 
 startMachine ::
+  FrontendServer ->
   TuiConfig ->
   PrivateRoot ->
   LaunchPreview ->
@@ -93,12 +106,14 @@ startMachine ::
   IO () ->
   (MachineExit -> IO ()) ->
   IO (Either Text RunningMachine)
-startMachine config root preview events notifyFrame notifyExit = do
+startMachine server config root preview events notifyFrame notifyExit = do
   partialDirectory <- newIORef Nothing
   partialProcess <- newIORef Nothing
-  result <- try @SomeException (prepareAndStart partialDirectory partialProcess config root preview events notifyFrame notifyExit)
+  partialActivation <- newIORef Nothing
+  result <- try @SomeException (prepareAndStart partialDirectory partialProcess partialActivation server config root preview events notifyFrame notifyExit)
   case result of
     Left failure -> do
+      readIORef partialActivation >>= mapM_ (void . (`tryPutMVar` ()))
       readIORef partialProcess >>= mapM_ terminatePartialProcess
       readIORef partialDirectory >>= mapM_ (removePartialDirectory root)
       case fromException failure :: Maybe SomeAsyncException of
@@ -106,10 +121,13 @@ startMachine config root preview events notifyFrame notifyExit = do
         Nothing -> pure (Left (T.pack (displayException failure)))
     Right running -> pure (Right running)
 
-prepareAndStart :: IORef (Maybe FilePath) -> IORef (Maybe ProcessGroup) -> TuiConfig -> PrivateRoot -> LaunchPreview -> TBQueue Envelope -> IO () -> (MachineExit -> IO ()) -> IO RunningMachine
-prepareAndStart partialDirectory partialProcess config root preview events notifyFrame notifyExit = do
+prepareAndStart :: IORef (Maybe FilePath) -> IORef (Maybe ProcessGroup) -> IORef (Maybe (MVar ())) -> FrontendServer -> TuiConfig -> PrivateRoot -> LaunchPreview -> TBQueue Envelope -> IO () -> (MachineExit -> IO ()) -> IO RunningMachine
+prepareAndStart partialDirectory partialProcess partialActivation server config root preview events notifyFrame notifyExit = do
+  unless (frontendServerRunnerVersion server == workflowRunnerVersion (previewDescriptor preview)) $
+    ioError (userError "capability server version disagrees with the launch descriptor")
   when (maybe False ((== RootRun) . fst) (previewLineage preview)) $
     ioError (userError "root lineage cannot use a parent run")
+  mapM_ (either (ioError . userError . T.unpack) pure . validateStoredInvocation config . recordManifest . snd) (previewLineage preview)
   let revalidateParent = case previewLineage preview of
         Nothing -> pure ()
         Just (_, record) -> do
@@ -134,6 +152,7 @@ prepareAndStart partialDirectory partialProcess config root preview events notif
   inputFiles <- writeInputs root runId inputDirectory (previewDescriptor preview) (previewInputs preview)
   let inputHashes = Map.fromList [(name, sha256 (TE.encodeUtf8 value)) | (name, value) <- Map.toList (previewInputs preview)]
       parentManifest = recordManifest . snd <$> previewLineage preview
+      retainedInvocation = parentManifest >>= frontendInvocation
       persona = case parentManifest of
         Just parent -> frontendPersona parent
         Nothing -> case previewTarget preview of
@@ -159,11 +178,12 @@ prepareAndStart partialDirectory partialProcess config root preview events notif
           ]
       manifest =
         FrontendManifest
-          { frontendVersion = frontendManifestVersion,
+          { frontendVersion = maybe frontendManifestVersion (const frontendManifestVersionWithInvocation) retainedInvocation,
             frontendRunId = runId,
-            frontendRunnerId = tuiRunnerId config,
-            frontendRunnerExecutable = Just (tuiRunner config),
-            frontendRunnerVersion = Just (workflowRunnerVersion (previewDescriptor preview)),
+            frontendRunnerId = frontendServerRunnerId server,
+            frontendRunnerExecutable = Just (frontendServerExecutable server),
+            frontendRunnerVersion = Just (frontendServerRunnerVersion server),
+            frontendInvocation = retainedInvocation,
             frontendWorkflow = workflowName (previewDescriptor preview),
             frontendCwd = launchCwd,
             frontendTargetKind = targetKind,
@@ -210,36 +230,44 @@ prepareAndStart partialDirectory partialProcess config root preview events notif
   diagnosticState <- newEmptyMVar
   readerDone <- newEmptyMVar
   diagnosticHandle <- openPrivateFileAt root ["runs", T.unpack (runIdText runId), "stderr.log"]
-  heartbeat <- forkIO (heartbeatOwner root runId ownerId pid exitState (reportFailure failureState notifyExit))
-  reader <- forkIO (readEvents output events notifyFrame (reportFailure failureState notifyExit) `finally` (closeQuietly output >> putMVar readerDone ()))
-  errorReader <- forkIO $ do
-    outcome <- try @SomeException (spoolErrors diagnosticHandle errors `finally` closeQuietly errors)
-    putMVar diagnosticState (either (const False) id outcome)
-  waiter <- forkIO $ do
-    status <- readMVar exitState
-    closeQuietly control
-    takeMVar readerDone
-    hadDiagnostics <- takeMVar diagnosticState
-    let diagnostic = if hadDiagnostics then "runner diagnostics were redacted into private stderr.log" else ""
-    case status of
-      Left failure -> reportFailure failureState notifyExit (MachineProtocolFailed (T.pack (displayException failure)))
-      Right code -> notifyExit (MachineExited code diagnostic)
-  pure
-    RunningMachine
-      { runningRunId = runId,
-        runningDirectory = runDirectory,
-        runningPid = groupPid childGroup,
-        runningGroup = childGroup,
-        runningControl = control,
-        runningStdout = output,
-        runningStderr = errors,
-        runningReaderThread = reader,
-        runningErrorThread = errorReader,
-        runningWaiterThread = waiter,
-        runningHeartbeatThread = heartbeat,
-        runningExit = exitState,
-        runningFailure = failureState
-      }
+  (do
+      activation <- mask_ $ do
+        value <- newEmptyMVar
+        writeIORef partialActivation (Just value)
+        pure value
+      let afterActivation action = readMVar activation >> action
+      heartbeat <- forkIO (afterActivation (heartbeatOwner root runId ownerId pid exitState (reportFailure failureState notifyExit)))
+      reader <- forkIO (afterActivation (readEvents output events notifyFrame (reportFailure failureState notifyExit)) `finally` (closeQuietly output >> putMVar readerDone ()))
+      errorReader <- forkIO . afterActivation $ do
+        outcome <- try @SomeException (spoolErrors diagnosticHandle errors `finally` closeQuietly errors)
+        putMVar diagnosticState (either (const False) id outcome)
+      waiter <- forkIO . afterActivation $ do
+        status <- readMVar exitState
+        closeQuietly control
+        takeMVar readerDone
+        hadDiagnostics <- takeMVar diagnosticState
+        let diagnostic = if hadDiagnostics then "runner diagnostics were redacted into private stderr.log" else ""
+        case status of
+          Left failure -> reportFailure failureState notifyExit (MachineProtocolFailed (T.pack (displayException failure)))
+          Right code -> notifyExit (MachineExited code diagnostic)
+      pure
+        RunningMachine
+          { runningRunId = runId,
+            runningDirectory = runDirectory,
+            runningPid = groupPid childGroup,
+            runningGroup = childGroup,
+            runningControl = control,
+            runningStdout = output,
+            runningStderr = errors,
+            runningReaderThread = reader,
+            runningErrorThread = errorReader,
+            runningWaiterThread = waiter,
+            runningHeartbeatThread = heartbeat,
+            runningActivation = activation,
+            runningExit = exitState,
+            runningFailure = failureState
+          }
+    ) `onException` closeQuietly diagnosticHandle
 
 
 readEvents :: Handle -> TBQueue Envelope -> IO () -> (MachineExit -> IO ()) -> IO ()
@@ -327,8 +355,11 @@ sendMachineControl running control = case encodeControlFor 2 control of
       Left failure | Just _ <- fromException @SomeAsyncException failure -> throwIO failure
       _ -> pure (either (Left . T.pack . displayException) (const (Right ())) result)
 
+activateMachine :: RunningMachine -> IO ()
+activateMachine running = void (tryPutMVar (runningActivation running) ())
+
 terminateMachine :: RunningMachine -> IO ()
-terminateMachine = terminateProcessGroup 5000000 . runningGroup
+terminateMachine running = activateMachine running >> terminateProcessGroup 5000000 (runningGroup running)
 
 terminatePartialProcess :: ProcessGroup -> IO ()
 terminatePartialProcess group = terminateProcessGroup 2000000 group `finally` closeGroupPipes group

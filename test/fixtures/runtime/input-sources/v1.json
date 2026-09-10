@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "vectors": [
+    {
+      "name": "no-final-lf",
+      "utf8Hex": "6f6e65",
+      "sha256": "7692c3ad3540bb803c020b3aee66cd8887123234ea0c6e7143c0add73ff431ed",
+      "literalValue": "one",
+      "fileValues": {"prompt": "one", "command-tail": "one", "stdin": "one"},
+      "literalPromptFile": {
+        "utf8Hex": "6f6e650a",
+        "sha256": "2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806"
+      }
+    },
+    {
+      "name": "unicode-scalars",
+      "utf8Hex": "e99baaf09f9880",
+      "sha256": "c7d6344b3b16cb73d55e41f1bf3ec5e71eafcf3296b3eb41e8f9e776e7d5bd45",
+      "literalValue": "雪😀",
+      "fileValues": {"prompt": "雪😀", "command-tail": "雪😀", "stdin": "雪😀"},
+      "literalPromptFile": {
+        "utf8Hex": "e99baaf09f98800a",
+        "sha256": "3df625268470c423b1b108f208928cf20675e623744ac1aa36299fe8b56921c3"
+      }
+    },
+    {
+      "name": "empty",
+      "utf8Hex": "",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "literalValue": "",
+      "fileValues": {"prompt": "", "command-tail": "", "stdin": ""},
+      "literalPromptFile": {
+        "utf8Hex": "0a",
+        "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+      }
+    },
+    {
+      "name": "lf",
+      "utf8Hex": "0a",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "literalValue": "\n",
+      "fileValues": {"prompt": "", "command-tail": "\n", "stdin": "\n"},
+      "literalPromptFile": {
+        "utf8Hex": "0a0a",
+        "sha256": "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070"
+      }
+    },
+    {
+      "name": "two-final-lfs",
+      "utf8Hex": "6f6e650a0a",
+      "sha256": "e1fab8e3a85da76b442cce547fcdbc42f8f05f876486db2a0c48a3b2f20bf62d",
+      "literalValue": "one\n\n",
+      "fileValues": {"prompt": "one\n", "command-tail": "one\n\n", "stdin": "one\n\n"},
+      "literalPromptFile": {
+        "utf8Hex": "6f6e650a0a0a",
+        "sha256": "e352e2d86bf891cf9a92a434e44b1dab9374bc0cef49ad4dc701777dcca2dfcd"
+      }
+    },
+    {
+      "name": "crlf",
+      "utf8Hex": "6f6e650d0a",
+      "sha256": "5259d46a49644bf76792231ef7315b5293677c49ddd7e69d95557013e10320d4",
+      "literalValue": "one\r\n",
+      "fileValues": {"prompt": "one\r", "command-tail": "one\r\n", "stdin": "one\r\n"},
+      "literalPromptFile": {
+        "utf8Hex": "6f6e650d0a0a",
+        "sha256": "abda83810cd8e90e544dfcf81a6652cd097ab8d30923061dea62b460780df545"
+      }
+    },
+    {
+      "name": "unicode-whitespace",
+      "utf8Hex": "2020ceb109ceb220200a",
+      "sha256": "4a288a46bf6d978b1c82bb52cdd51e426b353a7ffe09ded6b4b14a74963f5c87",
+      "literalValue": "  α\tβ  \n",
+      "fileValues": {"prompt": "  α\tβ  ", "command-tail": "  α\tβ  \n", "stdin": "  α\tβ  \n"},
+      "literalPromptFile": {
+        "utf8Hex": "2020ceb109ceb220200a0a",
+        "sha256": "ecec15d5228457c898b80e77f520638cad86221877a07fc81d5a5066b09865ad"
+      }
+    },
+    {
+      "name": "leading-bom",
+      "utf8Hex": "efbbbf6c656164696e6720424f4d",
+      "sha256": "3d0f83fc4750969299e89af00e10acbcfd7ac6a61d42044fc67df447797c8125",
+      "literalValue": "\ufeffleading BOM",
+      "fileValues": {"prompt": "\ufeffleading BOM", "command-tail": "\ufeffleading BOM", "stdin": "\ufeffleading BOM"},
+      "literalPromptFile": {
+        "utf8Hex": "efbbbf6c656164696e6720424f4d0a",
+        "sha256": "55e2a6b743f18f9bf59e1842172020e4cc4a499b60a8bc14894f465e77661beb"
+      }
+    }
+  ]
+}

@@ -4,20 +4,25 @@
 
 -- | Versioned frontend manifests and fail-closed local run discovery.
 module Agentic.Runtime.Catalogue
-  ( FrontendManifest (..),
+  ( FrontendServer (..),
+    FrontendInvocation (..),
+    FrontendManifest (..),
     OwnerLease (..),
     RunOwnership (..),
     RunRecord (..),
     CatalogueEntry (..),
     frontendManifestVersion,
+    frontendManifestVersionWithInvocation,
     encodeFrontendManifest,
     decodeFrontendManifest,
     readFrontendManifest,
     readFrontendInputBytes,
     readFrontendInputBytesAt,
+    readFrontendInputBytesBoundedAt,
     revalidateLineageParentAt,
     listRunCatalogue,
     listRunCatalogueAt,
+    readRunRecordAt,
   )
 where
 
@@ -32,15 +37,16 @@ import Agentic.Runtime.Snapshot
     RunStatus (..),
     initialRunSnapshot,
     snapshotRunStatus,
+    snapshotWorkflow,
     stepRunSnapshot,
   )
 import Agentic.Runtime.PrivateFile (listConfinedDirectoryAt, readConfinedFileAt, withConfinedDirectory, withConfinedDirectoryAt, withConfinedDirectoryIfPresentAt)
 import Agentic.Runtime.Store
-  ( RunManifest (manifestPolicy, manifestRunId),
+  ( RunManifest (manifestPolicy, manifestRunId, manifestWorkflow),
     readRunStoreAt,
   )
 import Control.Exception (IOException, SomeAsyncException, SomeException, displayException, fromException, throwIO, try)
-import Control.Monad (foldM, unless)
+import Control.Monad (foldM, unless, when)
 import Crypto.Hash (Digest, SHA256, hash)
 import Data.Aeson
   ( FromJSON (parseJSON),
@@ -56,6 +62,7 @@ import Data.Aeson
   )
 import Data.Aeson.Key (toText)
 import Data.Aeson.KeyMap (keys)
+import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Aeson.Types (Object, Parser)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
@@ -66,15 +73,37 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import Data.Time.Clock (UTCTime, diffUTCTime, getCurrentTime)
 import Data.Time.Format (defaultTimeLocale, parseTimeM)
 import System.FilePath ((</>), isAbsolute, normalise, takeFileName)
 import System.IO.Error (isDoesNotExistError)
 import System.Posix.Types (Fd)
 
--- | Current private supervisor-manifest format.
+-- | The supervisor-manifest format emitted when no configured invocation is supplied.
 frontendManifestVersion :: Int
 frontendManifestVersion = 2
+
+-- | The supervisor-manifest format emitted with a configured invocation.
+frontendManifestVersionWithInvocation :: Int
+frontendManifestVersionWithInvocation = 3
+
+-- | One server's process identity reported by capability discovery.
+data FrontendServer = FrontendServer
+  { frontendServerRunnerId :: !Text,
+    frontendServerExecutable :: !FilePath,
+    frontendServerRunnerVersion :: !Text
+  }
+  deriving (Eq, Show)
+
+-- | One client's exact, non-secret configured process invocation.
+data FrontendInvocation = FrontendInvocation
+  { frontendInvocationVersion :: !Int,
+    frontendInvocationRunnerAlias :: !Text,
+    frontendInvocationExecutable :: !Text,
+    frontendInvocationPrefixArgs :: ![Text]
+  }
+  deriving (Eq, Show)
 
 -- | Non-secret launch facts shared by local frontends.
 data FrontendManifest = FrontendManifest
@@ -83,6 +112,7 @@ data FrontendManifest = FrontendManifest
     frontendRunnerId :: !Text,
     frontendRunnerExecutable :: !(Maybe FilePath),
     frontendRunnerVersion :: !(Maybe Text),
+    frontendInvocation :: !(Maybe FrontendInvocation),
     frontendWorkflow :: !Text,
     frontendCwd :: !FilePath,
     frontendTargetKind :: !Text,
@@ -159,20 +189,25 @@ readFrontendInputBytes record names =
   withConfinedDirectory (recordDirectory record) [] $ \descriptor -> readFrontendInputBytesAt record descriptor names
 
 readFrontendInputBytesAt :: RunRecord -> Fd -> [Text] -> IO (Map Text BS.ByteString)
-readFrontendInputBytesAt record runDescriptor names = do
+readFrontendInputBytesAt record descriptor names =
+  readFrontendInputBytesBoundedAt (toInteger (length names) * maxArtifactBytes) record descriptor names
+
+-- | Authenticate ordered inputs while enforcing an aggregate allocation bound.
+readFrontendInputBytesBoundedAt :: Integer -> RunRecord -> Fd -> [Text] -> IO (Map Text BS.ByteString)
+readFrontendInputBytesBoundedAt limit record runDescriptor names = do
   let manifest = recordManifest record
       expected = frontendInputHashes manifest
   unless (length names == length (nub names) && sort names == sort (Map.keys expected)) $
     ioError (userError "workflow descriptor inputs do not match the frontend manifest")
   withConfinedDirectoryAt runDescriptor ["inputs"] $ \inputDescriptor ->
-    Map.fromList <$> traverse (readOne inputDescriptor expected) (zip [0 :: Int ..] names)
+    fst <$> foldM (readOne inputDescriptor expected) (Map.empty, limit) (zip [0 :: Int ..] names)
   where
-    readOne inputDescriptor expected (index, name) = do
+    readOne inputDescriptor expected (inputs, remaining) (index, name) = do
       let component = show index <> ".txt"
-      (bytes, _) <- readConfinedFileAt inputDescriptor [component] maxArtifactBytes
+      (bytes, _) <- readConfinedFileAt inputDescriptor [component] (min maxArtifactBytes remaining)
       unless (Map.lookup name expected == Just (digestText bytes)) $
         ioError (userError ("frontend input digest mismatch for " <> T.unpack name))
-      pure (name, bytes)
+      pure (Map.insert name bytes inputs, remaining - toInteger (BS.length bytes))
 
 digestText :: BS.ByteString -> Text
 digestText bytes = T.pack (show (hash bytes :: Digest SHA256))
@@ -200,16 +235,17 @@ listRunCatalogueAt stateRoot stateDescriptor localOwner now = do
       outcome <-
         try @SomeException $
           withConfinedDirectoryAt runsDescriptor [name] $ \runDescriptor ->
-            readRecordAt directory name runDescriptor localOwner now
+            readRunRecordAt directory runDescriptor localOwner now
       case outcome of
         Right record -> pure (CatalogueRun record)
         Left failure | Just _ <- fromException @SomeAsyncException failure -> throwIO failure
         Left failure -> pure (CatalogueCorrupt directory (boundedFailure failure))
 
-readRecordAt :: FilePath -> FilePath -> Fd -> Maybe Text -> UTCTime -> IO RunRecord
-readRecordAt directory directoryName descriptor localOwner now = do
+-- | Reconstruct one run through its retained directory descriptor.
+readRunRecordAt :: FilePath -> Fd -> Maybe Text -> UTCTime -> IO RunRecord
+readRunRecordAt directory descriptor localOwner now = do
   manifest <- readFrontendManifestAt descriptor
-  unless (runIdText (frontendRunId manifest) == T.pack directoryName) $
+  unless (runIdText (frontendRunId manifest) == T.pack (takeFileName directory)) $
     ioError (userError "frontend manifest run id does not match its directory")
   let runtimeName = frontendRuntimeStore manifest
       runtimeDirectory = directory </> runtimeName
@@ -217,6 +253,8 @@ readRecordAt directory directoryName descriptor localOwner now = do
     (runtimeManifest, events, _) <- readRunStoreAt runtimeDirectory runtimeDescriptor
     unless (manifestRunId runtimeManifest == frontendRunId manifest) $
       ioError (userError "runtime and frontend manifests name different run ids")
+    unless (manifestWorkflow runtimeManifest == frontendWorkflow manifest) $
+      ioError (userError "runtime and frontend manifests name different workflows")
     reduced <- case events of
       [] -> pure Nothing
       _ ->
@@ -225,6 +263,8 @@ readRecordAt directory directoryName descriptor localOwner now = do
             (ioError . userError . T.unpack . snapshotErrorText)
             pure
             (foldM stepRunSnapshot (initialRunSnapshot (frontendRunId manifest)) events)
+    unless (all ((== Just (manifestWorkflow runtimeManifest)) . snapshotWorkflow) reduced) $
+      ioError (userError "runtime journal and manifest name different workflows")
     pure (Just (manifestPolicy runtimeManifest), reduced)
   let (policy, snapshot) = fromMaybe (Nothing, Nothing) runtime
   lease <- readOwnerLeaseAt descriptor
@@ -244,7 +284,7 @@ revalidateLineageParentAt :: RunRecord -> Fd -> IO ()
 revalidateLineageParentAt expected descriptor = do
   started <- getCurrentTime
   let directory = recordDirectory expected
-  current <- readRecordAt directory (takeFileName directory) descriptor Nothing started
+  current <- readRunRecordAt directory descriptor Nothing started
   unless (recordManifest current == recordManifest expected) $
     ioError (userError "the selected parent manifest changed before lineage launch")
   lease <- readOwnerLeaseAt descriptor
@@ -284,39 +324,105 @@ leaseFresh now lease =
     Nothing -> False
     Just heartbeat -> abs (diffUTCTime now heartbeat) <= 10
 
-instance ToJSON FrontendManifest where
-  toJSON manifest =
+instance ToJSON FrontendServer where
+  toJSON server =
     object
-      [ "frontendManifestVersion" .= frontendVersion manifest,
-        "runId" .= runIdText (frontendRunId manifest),
-        "runnerId" .= frontendRunnerId manifest,
-        "runnerExecutable" .= fmap T.pack (frontendRunnerExecutable manifest),
-        "runnerVersion" .= frontendRunnerVersion manifest,
-        "workflow" .= frontendWorkflow manifest,
-        "cwd" .= T.pack (frontendCwd manifest),
-        "targetKind" .= frontendTargetKind manifest,
-        "targetArgs" .= frontendTargetArgs manifest,
-        "inputHashes" .= frontendInputHashes manifest,
-        "programHash" .= frontendProgramHash manifest,
-        "createdAt" .= frontendCreatedAt manifest,
-        "parentRunId" .= fmap runIdText (frontendParentRunId manifest),
-        "lineage" .= frontendLineage manifest,
-        "lineageEdits" .= frontendLineageEdits manifest,
-        "persona" .= frontendPersona manifest,
-        "policyDigest" .= frontendPolicyDigest manifest,
-        "personAnswering" .= frontendPersonAnswering manifest,
-        "ownerId" .= frontendOwnerId manifest,
-        "runtimeStore" .= T.pack (frontendRuntimeStore manifest)
+      [ "runnerId" .= frontendServerRunnerId server,
+        "executable" .= T.pack (frontendServerExecutable server),
+        "runnerVersion" .= frontendServerRunnerVersion server
       ]
 
+instance FromJSON FrontendServer where
+  parseJSON = withObject "frontend server" $ \o -> do
+    onlyKeys "frontend server" ["runnerId", "executable", "runnerVersion"] o
+    runnerId <- o .: "runnerId" >>= parsedName "runner"
+    executable <- T.unpack <$> o .: "executable"
+    unless (isAbsolute executable && '\NUL' `notElem` executable) $
+      fail "frontend server executable is not an absolute NUL-free path"
+    runnerVersion <- o .: "runnerVersion"
+    unless (not (T.null runnerVersion) && not (T.any (== '\NUL') runnerVersion)) $
+      fail "frontend server version is empty or contains NUL"
+    pure (FrontendServer runnerId executable runnerVersion)
+
+instance ToJSON FrontendInvocation where
+  toJSON invocation =
+    object
+      [ "version" .= frontendInvocationVersion invocation,
+        "runnerAlias" .= frontendInvocationRunnerAlias invocation,
+        "executable" .= frontendInvocationExecutable invocation,
+        "prefixArgs" .= frontendInvocationPrefixArgs invocation
+      ]
+
+instance FromJSON FrontendInvocation where
+  parseJSON = withObject "frontend invocation" $ \o -> do
+    onlyKeys "frontend invocation" invocationKeys o
+    version <- o .: "version"
+    unless (version == (1 :: Int)) (fail "unsupported frontend invocation version")
+    alias <- o .: "runnerAlias" >>= boundedNonWhitespace "runner alias" 256
+    executable <- o .: "executable" >>= boundedNonWhitespace "invocation executable" 4096
+    arguments <- o .: "prefixArgs"
+    when (length arguments > 4096) (fail "frontend invocation has more than 4096 prefix arguments")
+    when (any (T.any (== '\NUL')) arguments) (fail "frontend invocation prefix argument contains NUL")
+    when (sum (map (toInteger . BS.length . TE.encodeUtf8) arguments) > 65536) $
+      fail "frontend invocation prefix arguments exceed 65536 UTF-8 bytes"
+    pure (FrontendInvocation version alias executable arguments)
+
+instance ToJSON FrontendManifest where
+  toJSON manifest = case frontendVersion manifest of
+    1 -> object legacyFields
+    current
+      | current == frontendManifestVersionWithInvocation ->
+          object (versionedFields <> ["invocation" .= frontendInvocation manifest])
+      | otherwise -> object versionedFields
+    where
+      legacyFields =
+        [ "runId" .= runIdText (frontendRunId manifest),
+          "runnerId" .= frontendRunnerId manifest,
+          "workflow" .= frontendWorkflow manifest,
+          "cwd" .= T.pack (frontendCwd manifest),
+          "targetKind" .= frontendTargetKind manifest,
+          "targetArgs" .= frontendTargetArgs manifest,
+          "inputHashes" .= frontendInputHashes manifest,
+          "programHash" .= frontendProgramHash manifest,
+          "createdAt" .= frontendCreatedAt manifest
+        ]
+          <> maybe [] (\parent -> ["parentRunId" .= runIdText parent]) (frontendParentRunId manifest)
+          <> maybe [] (\lineage -> ["lineage" .= lineage]) (frontendLineage manifest)
+          <> ["lineageEdits" .= frontendLineageEdits manifest | not (null (frontendLineageEdits manifest))]
+      versionedFields =
+        [ "frontendManifestVersion" .= frontendVersion manifest,
+          "runId" .= runIdText (frontendRunId manifest),
+          "runnerId" .= frontendRunnerId manifest,
+          "runnerExecutable" .= fmap T.pack (frontendRunnerExecutable manifest),
+          "runnerVersion" .= frontendRunnerVersion manifest,
+          "workflow" .= frontendWorkflow manifest,
+          "cwd" .= T.pack (frontendCwd manifest),
+          "targetKind" .= frontendTargetKind manifest,
+          "targetArgs" .= frontendTargetArgs manifest,
+          "inputHashes" .= frontendInputHashes manifest,
+          "programHash" .= frontendProgramHash manifest,
+          "createdAt" .= frontendCreatedAt manifest,
+          "parentRunId" .= fmap runIdText (frontendParentRunId manifest),
+          "lineage" .= frontendLineage manifest,
+          "lineageEdits" .= frontendLineageEdits manifest,
+          "persona" .= frontendPersona manifest,
+          "policyDigest" .= frontendPolicyDigest manifest,
+          "personAnswering" .= frontendPersonAnswering manifest,
+          "ownerId" .= frontendOwnerId manifest,
+          "runtimeStore" .= T.pack (frontendRuntimeStore manifest)
+        ]
+
 instance FromJSON FrontendManifest where
-  parseJSON = withObject "frontend manifest" $ \o -> do
-    version <- o .:? "frontendManifestVersion"
-    case version of
+  parseJSON = withObject "frontend manifest" $ \o ->
+    case KeyMap.lookup "frontendManifestVersion" o of
       Nothing -> parseLegacyManifest o
-      Just current
-        | current == frontendManifestVersion -> parseVersion2Manifest o
-        | otherwise -> fail ("unsupported frontend manifest version " <> show (current :: Int))
+      Just encodedVersion -> do
+        current <- parseJSON encodedVersion
+        if current == frontendManifestVersion
+          then parseVersion2Manifest o
+          else if current == frontendManifestVersionWithInvocation
+            then parseVersion3Manifest o
+            else fail ("unsupported frontend manifest version " <> show (current :: Int))
 
 parseLegacyManifest :: Object -> Parser FrontendManifest
 parseLegacyManifest o = do
@@ -330,6 +436,7 @@ parseLegacyManifest o = do
     1
     runId
     <$> o .: "runnerId"
+    <*> pure Nothing
     <*> pure Nothing
     <*> pure Nothing
     <*> o .: "workflow"
@@ -351,6 +458,17 @@ parseLegacyManifest o = do
 parseVersion2Manifest :: Object -> Parser FrontendManifest
 parseVersion2Manifest o = do
   onlyKeys "frontend manifest" version2Keys o
+  parseVersionedManifest frontendManifestVersion Nothing False o
+
+parseVersion3Manifest :: Object -> Parser FrontendManifest
+parseVersion3Manifest o = do
+  onlyKeys "frontend manifest" version3Keys o
+  requireKeys "frontend manifest" version3Keys o
+  invocation <- o .: "invocation"
+  parseVersionedManifest frontendManifestVersionWithInvocation (Just invocation) True o
+
+parseVersionedManifest :: Int -> Maybe FrontendInvocation -> Bool -> Object -> Parser FrontendManifest
+parseVersionedManifest version invocation strictFields o = do
   runId <- o .: "runId" >>= parsedRunId
   runnerId <- o .: "runnerId" >>= parsedName "runner"
   executable <- T.unpack <$> o .: "runnerExecutable"
@@ -362,25 +480,28 @@ parseVersion2Manifest o = do
   hashes <- o .: "inputHashes" >>= validateHashes "inputHashes"
   programHash <- o .: "programHash" >>= parsedDigest "programHash"
   created <- o .: "createdAt" >>= parsedTimestamp "createdAt"
-  parent <- traverse parsedRunId =<< o .:? "parentRunId"
-  lineage <- o .:? "lineage" >>= traverse parsedLineage
+  parentText <- if strictFields then o .: "parentRunId" else o .:? "parentRunId"
+  parent <- traverse parsedRunId parentText
+  lineageText <- if strictFields then o .: "lineage" else o .:? "lineage"
+  lineage <- traverse parsedLineage lineageText
   runtimeStore <- T.unpack <$> o .: "runtimeStore"
   unless (normalise runtimeStore == "runtime" && not (isAbsolute runtimeStore)) $
     fail "frontend runtime store is not the fixed relative path runtime"
   personAnswering <- o .: "personAnswering"
   owner <- o .: "ownerId" >>= parsedName "owner"
   runnerVersion <- o .: "runnerVersion"
-  targetArgs <- fromMaybe [] <$> o .:? "targetArgs"
-  lineageEdits <- fromMaybe [] <$> o .:? "lineageEdits"
-  persona <- o .:? "persona"
-  policyDigest <- o .:? "policyDigest"
+  targetArgs <- if strictFields then o .: "targetArgs" else fromMaybe [] <$> o .:? "targetArgs"
+  lineageEdits <- if strictFields then o .: "lineageEdits" else fromMaybe [] <$> o .:? "lineageEdits"
+  persona <- if strictFields then o .: "persona" else o .:? "persona"
+  policyDigest <- if strictFields then o .: "policyDigest" else o .:? "policyDigest"
   pure
     FrontendManifest
-      { frontendVersion = frontendManifestVersion,
+      { frontendVersion = version,
         frontendRunId = runId,
         frontendRunnerId = runnerId,
         frontendRunnerExecutable = Just executable,
         frontendRunnerVersion = Just runnerVersion,
+        frontendInvocation = invocation,
         frontendWorkflow = workflow,
         frontendCwd = cwd,
         frontendTargetKind = target,
@@ -411,6 +532,9 @@ instance FromJSON OwnerLease where
     unless (ownerLeasePid lease > 0) (fail "owner lease pid is not positive")
     pure lease
 
+invocationKeys :: [Text]
+invocationKeys = ["version", "runnerAlias", "executable", "prefixArgs"]
+
 version2Keys :: [Text]
 version2Keys =
   [ "frontendManifestVersion",
@@ -434,6 +558,16 @@ version2Keys =
     "ownerId",
     "runtimeStore"
   ]
+
+version3Keys :: [Text]
+version3Keys = version2Keys <> ["invocation"]
+
+boundedNonWhitespace :: String -> Int -> Text -> Parser Text
+boundedNonWhitespace label limit value
+  | T.null (T.strip value) = fail ("frontend " <> label <> " is whitespace")
+  | T.any (== '\NUL') value = fail ("frontend " <> label <> " contains NUL")
+  | BS.length (TE.encodeUtf8 value) > limit = fail ("frontend " <> label <> " exceeds " <> show limit <> " UTF-8 bytes")
+  | otherwise = pure value
 
 parsedRunId :: Text -> Parser RunId
 parsedRunId = either (fail . T.unpack) pure . mkRunId
@@ -479,6 +613,12 @@ onlyKeys label allowed object' =
   case filter (`notElem` allowed) (map toText (keys object')) of
     [] -> pure ()
     unknown -> fail (label <> " has unknown field(s): " <> T.unpack (T.intercalate ", " unknown))
+
+requireKeys :: String -> [Text] -> Object -> Parser ()
+requireKeys label required object' =
+  case filter (`notElem` map toText (keys object')) required of
+    [] -> pure ()
+    missing -> fail (label <> " is missing field(s): " <> T.unpack (T.intercalate ", " missing))
 
 
 snapshotErrorText :: Show a => a -> Text
