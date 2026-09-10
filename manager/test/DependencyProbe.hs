@@ -167,12 +167,13 @@ httpChecks = do
   started <- newEmptyMVar
   stopped <- newEmptyMVar
   received <- newEmptyMVar
-  let application request respond
+  consumed <- newEmptyMVar
+  let expected = "data: ready\n\n"
+      application request respond
         | Wai.rawPathInfo request == "/stream" =
             respond (Wai.responseStream status200 [("Content-Type", "text/event-stream")] $ \write flush ->
               (do
-                  write (Builder.byteString "data: ready\n\n")
-                  flush
+                  mapM_ (\byte -> write (Builder.word8 byte) >> flush >> takeMVar consumed) (BS.unpack expected)
                   putMVar started ()
                   forever (threadDelay 10000 >> write (Builder.byteString ": heartbeat\n\n") >> flush)
               ) `finally` putMVar stopped ())
@@ -193,8 +194,16 @@ httpChecks = do
     check "incremental body accounting rejects an oversized chunked request" (HTTP.responseStatus large == status413)
     stream <- HTTP.parseRequest ("http://127.0.0.1:" <> show port <> "/stream")
     withAsync (HTTP.withResponse stream manager $ \response -> do
-        chunk <- HTTP.brRead (HTTP.responseBody response)
-        check "stream flush is visible before the response completes" ("data: ready\n\n" `BS.isPrefixOf` chunk)
+        let readPrefix remaining
+              | remaining == 0 = pure BS.empty
+              | otherwise = do
+                  chunk <- HTTP.brRead (HTTP.responseBody response)
+                  unless (not (BS.null chunk)) (die "stream ended before its bounded prefix")
+                  let part = BS.take remaining chunk
+                  putMVar consumed ()
+                  (part <>) <$> readPrefix (remaining - BS.length part)
+        prefix <- readPrefix (BS.length expected)
+        check "fragmented stream prefix is visible before the response completes" (prefix == expected)
         putMVar received ()
         forever (threadDelay 1000000)) $ \client -> do
       ready <- timeout 5000000 (takeMVar started >> takeMVar received)
