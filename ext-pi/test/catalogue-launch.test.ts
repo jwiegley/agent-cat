@@ -84,6 +84,7 @@ describe("catalogue and launch", () => {
     const configured = await readRouting(v3Runner, directory);
     expect(configured).toMatchObject({
       version: 2, persona: { name: "personal", source: "user-default" },
+      launch: { arguments: ["--routing"], fingerprint: "f".repeat(64) },
       availablePersonas: ["personal", "work"],
     });
     const work = await readRouting(v3Runner, directory, { persona: "work", mode: "offline" });

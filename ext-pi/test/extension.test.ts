@@ -3,7 +3,7 @@ import { access, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import extension, { parseWorkflowCommand, routingLineageArgs } from "../src/index.ts";
+import extension, { parseWorkflowCommand } from "../src/index.ts";
 
 const created: string[] = [];
 afterEach(async () => Promise.all(created.splice(0).map((path) => rm(path, { recursive: true, force: true }))));
@@ -295,7 +295,7 @@ describe("Pi extension lifecycle", () => {
     }
   });
 
-  it("uses descriptor-v3 sanitized routing choices and persists only persona/model aliases", async () => {
+  it("uses descriptor-v3 sanitized routing choices in a routing-only launch", async () => {
     const directory = await mkdtemp(join(tmpdir(), "agent-cat-extension-routing-v3-"));
     created.push(directory);
     const previousRunner = process.env.AGENT_CAT_RUNNER;
@@ -322,7 +322,7 @@ describe("Pi extension lifecycle", () => {
       const ui = {
         select: async (title: string, choices: string[]) => {
           selectors.push(title);
-          if (title === "Execution target") return "native ACP adapter (live, agent-cat scratch)";
+          if (title === "Execution target") return "routing configuration (live, full pin coverage)";
           if (title === "Routing persona") return "persona: personal";
           if (title === "Model alias for worker") return "shared-model";
           throw new Error(`unexpected selector ${title}: ${choices.join(",")}`);
@@ -339,9 +339,10 @@ describe("Pi extension lifecycle", () => {
       const [runId] = await readdir(join(directory, "state", "runs"));
       const manifestPath = join(directory, "state", "runs", runId, "supervisor-manifest.json");
       const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+      expect(manifest.targetKind).toBe("routing");
       expect(manifest.targetArgs).toEqual([
-        "--engine", "acp", "--adapter", "/trusted/adapter",
-        "--persona", "personal", "--realize", "worker=shared-model",
+        "--routing", "--persona", "personal", "--realize", "worker=shared-model",
+        "--offline", "--expect-routing-fingerprint", "f".repeat(64),
       ]);
       expect(JSON.stringify(manifest)).not.toContain("sentinel");
       expect((await stat(manifestPath)).mode & 0o077).toBe(0);
@@ -354,15 +355,8 @@ describe("Pi extension lifecycle", () => {
       if (previousState === undefined) delete process.env.AGENT_CAT_STATE_DIR; else process.env.AGENT_CAT_STATE_DIR = previousState;
     }
   });
-  it("extracts only explicit persona and realization choices for rebuilt lineage targets", () => {
-    expect(routingLineageArgs([
-      "--engine", "acp", "--adapter-arg", "--persona", "--route", "worker=acp:stub",
-      "--persona", "work", "--realize", "worker=work-model", "--realize", "worker#2=spare-model",
-    ])).toEqual(["--persona", "work", "--realize", "worker=work-model", "--realize", "worker#2=spare-model"]);
-    expect(routingLineageArgs(["--adapter-arg", "--persona"])).toEqual([]);
-  });
 
-  it("uses descriptor-v3 sanitized routing choices and preserves them for owned-child lineage", async () => {
+  it("preserves descriptor-v3 routing choices for routing-only lineage", async () => {
     const directory = await mkdtemp(join(tmpdir(), "agent-cat-extension-routing-v3-"));
     created.push(directory);
     const previousRunner = process.env.AGENT_CAT_RUNNER;
@@ -389,7 +383,7 @@ describe("Pi extension lifecycle", () => {
       const ui = {
         select: async (title: string, choices: string[]) => {
           selectors.push(title);
-          if (title === "Execution target") return "owned Pi child (live, agent-cat scratch, no tools)";
+          if (title === "Execution target") return "routing configuration (live, full pin coverage)";
           if (title === "Routing persona") return "persona: personal";
           if (title === "Model alias for worker") return "shared-model";
           throw new Error(`unexpected selector ${title}: ${choices.join(",")}`);
@@ -406,9 +400,9 @@ describe("Pi extension lifecycle", () => {
       const [runId] = await readdir(join(directory, "state", "runs"));
       const manifestPath = join(directory, "state", "runs", runId, "supervisor-manifest.json");
       const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-      expect(manifest.targetKind).toBe("child");
-      expect(manifest.targetArgs.slice(-4)).toEqual([
-        "--persona", "personal", "--realize", "worker=shared-model",
+      expect(manifest.targetKind).toBe("routing");
+      expect(manifest.targetArgs.slice(-5)).toEqual([
+        "--realize", "worker=shared-model", "--offline", "--expect-routing-fingerprint", "f".repeat(64),
       ]);
       expect(JSON.stringify(manifest)).not.toContain("sentinel");
       expect((await stat(manifestPath)).mode & 0o077).toBe(0);
@@ -418,7 +412,7 @@ describe("Pi extension lifecycle", () => {
         JSON.parse(await readFile(join(directory, "state", "runs", id, "supervisor-manifest.json"), "utf8")),
       ));
       const child = manifests.find((value) => value.parentRunId === runId);
-      expect(child).toMatchObject({ targetKind: "child", lineage: "resume", parentRunId: runId });
+      expect(child).toMatchObject({ targetKind: "routing", lineage: "resume", parentRunId: runId });
       expect(child.targetArgs).toEqual(manifest.targetArgs);
       expect(selectors).toEqual(["Execution target", "Routing persona", "Model alias for worker"]);
       expect(confirmations).not.toContain("Configure pin routes?");

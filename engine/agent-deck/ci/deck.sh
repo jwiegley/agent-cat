@@ -77,6 +77,10 @@ want_sends() {
 want_line() {
   grep -qF -- "$1" "$out" || bad "no line containing '$1'; output was:$(printf '\n  %s' "$(cat "$out")")"
 }
+want_no_line() {
+  grep -qF -- "$1" "$out" && bad "a line contains '$1', and none should"
+  return 0
+}
 # The two-pane assertions (scenario 10). A pane's transcript is the witness from
 # *outside* the process: the shim gives each session its own state directory, so
 # `prompts` is exactly what that pane was sent and nothing else.
@@ -230,14 +234,13 @@ want_sends 7
 note "empty-stamp: unstamped replies settled in 7 turns, exit 0"
 
 # ---------------------------------------------------------------------------
-# 9. Backend-specific ACP options are refused by CLI composition before the deck
-#    adapter is invoked.
+# 9. An explicit deck session outranks even an explicit routing request.
 # ---------------------------------------------------------------------------
-play options happy run harden --session stub --poll 20 --timeout 30000
-want_code 2
-want_line "agent-deck exposes no generic metadata for backend-specific options"
-want_sends 0
-note "options: ACP-only configuration was refused before any deck command, exit 2"
+play options happy run harden --session stub --routing --poll 20 --timeout 30000
+want_code 0
+want_sends 7
+want_no_line "agent-deck exposes no generic metadata for backend-specific options"
+note "options: explicit session ignored ambient routing, 7/7, exit 0"
 # ---------------------------------------------------------------------------
 # 10. One program, two panes: the routed pin answered in one and everything else
 #    in the other.

@@ -52,7 +52,6 @@ module Agentic.RoutingConfig
     emptyRoutingConfig,
     decodeRoutingConfig,
     mergeRoutingConfig,
-    routesWithProfiles,
     resolveRoutingConfig,
     expandRoutingConfigV2,
     freezeRoutingConfigV2,
@@ -85,6 +84,7 @@ import Agentic.Route
     routeDefault,
     routeNamed,
     routes,
+    routesCovered,
   )
 import Control.Exception (IOException, try)
 import Control.Monad (forM_, unless, when)
@@ -352,19 +352,8 @@ mergeRoutingConfig base overlay =
       routingProfiles = routingProfiles overlay `Map.union` routingProfiles base
     }
 
--- | Add every profile's primary backend beneath explicit command-line routes.
--- The command line is the higher layer and therefore remains last in the
--- authored order and wins lookup for a repeated name.
-routesWithProfiles :: RoutingConfig -> Routes Backend -> Either Text (Routes Backend)
-routesWithProfiles config commandRoutes = do
-  configured <- traverse primary (Map.toAscList (routingProfiles config))
-  pure (overlayRoutes (routeDefault commandRoutes) configured (routeNamed commandRoutes))
-  where
-    primary (name, profile) = do
-      router <- routerFor config name (realizationRouter (NE.head (profileChain profile)))
-      pure (name, routerBackend router)
-
--- | Resolve the profile chains used by one program.  A YAML-owned multi-rung
+-- | Resolve the profile chains used by one program while preserving whether
+-- the command route table has an explicit default. A YAML-owned multi-rung
 -- chain and an authored @fallingBackTo@ chain may not both own the same model.
 resolveRoutingConfig :: RoutingConfig -> Routes Backend -> Map Text [Text] -> Either Text ResolvedRouting
 resolveRoutingConfig config commandRoutes authored = do
@@ -607,10 +596,11 @@ applyCommandOverride command target =
   target {resolvedBackend = Map.findWithDefault (resolvedBackend target) (resolvedAxis target) command}
 
 -- Lower-precedence pairs first, higher-precedence pairs last and authoritative.
-overlayRoutes :: Backend -> [(Text, Backend)] -> [(Text, Backend)] -> Routes Backend
+overlayRoutes :: Maybe Backend -> [(Text, Backend)] -> [(Text, Backend)] -> Routes Backend
 overlayRoutes defaultBackend lower higher =
   let claimed = map fst higher
-   in routes defaultBackend (filter ((`notElem` claimed) . fst) lower <> higher)
+      named = filter ((`notElem` claimed) . fst) lower <> higher
+   in maybe (routesCovered named) (`routes` named) defaultBackend
 
 -- | Discover untagged routing paths for version-1 API compatibility. The
 -- composition root uses private role-preserving discovery for version 2.

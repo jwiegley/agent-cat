@@ -49,10 +49,10 @@
 -- refusal wordings, which are the only part of a usage error anybody reads, and
 -- that whitespace is part of neither half, a blank value being the refusal
 -- @acp:@ gets rather than an adapter with no name — and the resolution rule
--- itself, which is that __a question is routed by its model axis and 'Nothing'
--- takes the default__. Then the two facts about the table a run's header rests
--- on — that 'Agentic.Route.routeBackends' is the /distinct/ backends with the
--- default first, so the header counts processes rather than route lines, and
+-- itself, which is that a question is routed by its model axis and then by an
+-- optional default. Then the two facts about the table a run's header rests on:
+-- 'Agentic.Route.routeBackends' is the distinct optional default followed by
+-- named backends, so the header counts processes rather than route lines, and
 -- that connecting the table with @fmap@ moves no question, so nothing can be
 -- answered by a backend the header did not name — and the three claims routing
 -- itself rests on:
@@ -1919,10 +1919,13 @@ main = do
         routesFact (Just (routes (BackendDeck "pane-a") [("deep", BackendDeck "pane-b")]))
           == "(default) = deck:pane-a\ndeep = deck:pane-b\n"
       ),
-      -- What `plan`, `cost` and `--scripted` hole, where there is no table at
-      -- all. Empty means NO TABLE, not "no --route".
+      -- Static and scripted commands carry no table. An executable covered table
+      -- has named entries even though it has no default.
       ("no table is the empty text", routesFact Nothing == ""),
-      ( "and a table is never empty, so the two cannot be confused",
+      ( "a fully covered table renders named routes without a default",
+        routesFact (Just (routesCovered [("deep", BackendAcp "stub")])) == "deep = acp:stub\n"
+      ),
+      ( "an explicit table is never empty",
         not (T.null (routesFact (Just (routes (BackendAcp "stub") []))))
       )
     ]
@@ -1931,7 +1934,7 @@ main = do
   -- `parseBackend`, so a gate that reads this fact is reading the operator's own
   -- word rather than a second rendering of it.
   pureProbe failures "routedBackend reads a run.routes table back"
-    ( [ ( "round trip: " <> T.unpack (backendSpelling (routeDefault t)) <> "/" <> T.unpack n,
+    ( [ ( "round trip: " <> T.unpack n,
           routedBackend (routesFact (Just t)) n == backendSpelling b
         )
         | t <- [ownersSplit, sharedPane, pathBackend],
@@ -1991,31 +1994,35 @@ main = do
       )
     ]
   pureProbe failures "backendFor sends a pinned question to its route"
-    [ ("gemini", backendFor namedRoutes (asked (Just "gemini") (AddrModel "lateral")) == "gemini-backend"),
-      ("opus", backendFor namedRoutes (asked (Just "opus") (AddrModel "author")) == "opus-backend")
+    [ ("gemini", backendFor namedRoutes (asked (Just "gemini") (AddrModel "lateral")) == Just "gemini-backend"),
+      ("opus", backendFor namedRoutes (asked (Just "opus") (AddrModel "author")) == Just "opus-backend")
     ]
   pureProbe failures "…and an unrouted pin to the default"
     -- Not an error, and this is the point of having a default at all: an
     -- exhaustive route table would make --route unusable on any program with
     -- more than two pins.
-    [("fable", backendFor namedRoutes (asked (Just "fable") (AddrModel "author")) == "default")]
+    [("fable", backendFor namedRoutes (asked (Just "fable") (AddrModel "author")) == Just "default")]
   -- One row and not three: an unpinned ask, a tool and a person differ in their
   -- addressee and in nothing `backendFor` reads, so three rows would report
   -- three facts where there is one.
   pureProbe failures "…and every question with no axis — ask, tool or person — to the default"
-    [ ("an unpinned model ask", backendFor namedRoutes (asked Nothing (AddrModel "reviewer-correct")) == "default"),
-      ("a tool", backendFor namedRoutes (asked Nothing (AddrTool "cat")) == "default"),
-      ("a person", backendFor namedRoutes (asked Nothing (AddrPerson "owner")) == "default")
+    [ ("an unpinned model ask", backendFor namedRoutes (asked Nothing (AddrModel "reviewer-correct")) == Just "default"),
+      ("a tool", backendFor namedRoutes (asked Nothing (AddrTool "cat")) == Just "default"),
+      ("a person", backendFor namedRoutes (asked Nothing (AddrPerson "owner")) == Just "default")
+    ]
+  let covered :: Routes Text
+      covered = routesCovered [("gemini", "gemini-backend")]
+  pureProbe failures "a fully covered table has no fallback"
+    [ ("its named model resolves", backendFor covered (asked (Just "gemini") (AddrModel "lateral")) == Just "gemini-backend"),
+      ("an unconfigured model does not", backendFor covered (asked (Just "fable") (AddrModel "author")) == Nothing),
+      ("a question without an axis does not", backendFor covered (asked Nothing (AddrTool "cat")) == Nothing)
     ]
 
   -- __The header counts processes, not route lines.__ `routeBackends` is what a
-  -- run starts and what its header announces, and being `nub` over the default
-  -- and the typed order is the whole reason it is a function rather than
-  -- `map snd`: two pins at one adapter are one provider, so a run that started
-  -- two would double nothing and a header that counted lines would claim more
-  -- agents than it had. The default is first because every run needs it, so one
-  -- whose default will not start fails before spawning anything else.
-  pureProbe failures "routeBackends is the distinct backends, the default first"
+  -- run starts and what its header announces. It deduplicates the optional
+  -- default followed by named-route order, so a fully covered table begins with
+  -- its first named backend.
+  pureProbe failures "routeBackends preserves optional-default then named order"
     [ ( "two pins at one backend are one process",
         routeBackends (namedTable "default" [("deep", "codex"), ("broad", "codex")])
           == ["default", "codex"]
@@ -2026,7 +2033,8 @@ main = do
       ( "the default leads, then the order they were typed",
         routeBackends (namedTable "d" [("b", "second"), ("a", "first")]) == ["d", "second", "first"]
       ),
-      ("and an empty table is the default alone", routeBackends (namedTable "default" []) == ["default"])
+      ("and an empty explicit table is the default alone", routeBackends (namedTable "default" []) == ["default"]),
+      ("a fully covered table starts with its first named backend", routeBackends (routesCovered [("deep", "codex"), ("broad", "claude")] :: Routes Text) == ["codex", "claude"])
     ]
 
   -- __Connecting a table moves no question.__ The run announces
@@ -2040,14 +2048,14 @@ main = do
   pureProbe failures "connecting a table moves no question"
     [ ( "backendFor commutes with fmap",
         and
-          [ backendFor (fmap connected namedRoutes) q == connected (backendFor namedRoutes q)
+          [ backendFor (fmap connected namedRoutes) q == fmap connected (backendFor namedRoutes q)
             | q <- routeSamples
           ]
       ),
       ( "so every answerer is one the header named",
         and
           [ backendFor (fmap connected namedRoutes) q
-              `elem` map connected (routeBackends namedRoutes)
+              `elem` map (Just . connected) (routeBackends namedRoutes)
             | q <- routeSamples
           ]
       )
@@ -2184,6 +2192,8 @@ main = do
   -- lines mean the row.
   pureProbe failures "a verb in head position beats a row of the same name"
     [ ("run NAME is the verb", parsedAs ["run", "ordinary", "--scripted"] == "run ordinary"),
+      ("run without an explicit target selects routing", parsedAs ["run", "ordinary"] == "run ordinary"),
+      ("an explicit engine outranks --routing", parsedAs ["run", "ordinary", "--engine", "acp", "--routing"] == "run ordinary"),
       ("machine RUN_ID NAME is the structured verb", parsedAs ["machine", "run-1", "ordinary", "--scripted"] == "machine ordinary"),
       ("a bare `run` is the verb wanting a subject", parsedAs ["run"] == "refused"),
       ("`run --help` is the verb too, and refuses", parsedAs ["run", "--help"] == "refused"),

@@ -403,8 +403,8 @@ note "unclaimed-pins: the header names the pins no route claims, exit 2"
 # ---------------------------------------------------------------------------
 # 15. The four usage refusals, none of which spawns anything.
 #
-# The same shape as scenario 12, which must itself stay green unedited: a flag
-# silently accepted by the transport it means nothing to is a run configured by
+# The same discipline as scenario 12: a flag silently accepted by a transport it
+# means nothing to is a run configured by a line nobody read.
 # a line nobody read. Exit 1 in every case, before an adapter is spawned or a
 # token is spent, and each asserted on its wording — which is the only part of a
 # usage error anybody reads.
@@ -419,7 +419,7 @@ want_no_line "billFresh"
 
 play route-no-default run harden --route 'deep=acp:codex'
 want_code 1
-want_line "--route refines this run's default answerer, and there is none"
+want_line "--route refines a command-line default answerer, and there is none"
 want_no_line "billFresh"
 
 # The one worth defending: a route naming a model the program never pins has
@@ -556,16 +556,13 @@ note "droid-dead: native alias failure stayed a transport failure before spend, 
 PATH=$old_path
 
 # ---------------------------------------------------------------------------
-# 18. CLI-owned ACP options cross only the ACP-specific configuration boundary.
+# 18. An explicit ACP engine outranks even an explicit routing request.
 # ---------------------------------------------------------------------------
-play configured-options run harden --engine acp --adapter stub --timeout 60000
+play configured-options run harden --engine acp --adapter stub --routing --timeout 60000
 want_code 0
 want_bills 7 7
-want_line "set config model='deep'"
-want_line "set config effort='high'"
-want_line "set config max-output=2048"
-want_line "set config temperature=0.25"
-note "configured-options: common constraints and ACP-only option applied, 7/7, exit 0"
+want_no_line "set config"
+note "configured-options: explicit ACP ignored ambient routing, 7/7, exit 0"
 
 # ---------------------------------------------------------------------------
 # 19. Protocol-v2 public progress is optional, redacted, persisted, and answer-neutral.

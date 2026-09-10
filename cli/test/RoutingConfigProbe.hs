@@ -148,7 +148,7 @@ main = do
         Right resolved -> do
           check failures "YAML owns the ordered fallback axes" $
             Map.lookup "deep-thinker" (resolvedChains resolved) == Just ["deep-thinker#2"]
-          check failures "CLI backend overrides the primary while YAML routes the fallback" $
+          check failures "higher-priority resolver input overrides the primary while YAML routes the fallback" $
             Map.lookup "deep-thinker" (routeByModel (resolvedRoutes resolved)) == Just (BackendDeck "cli-override")
               && Map.lookup "deep-thinker#2" (routeByModel (resolvedRoutes resolved)) == Just (BackendDeck "reviewer")
           check failures "resolved provenance retains profile, rung, and concrete model" $

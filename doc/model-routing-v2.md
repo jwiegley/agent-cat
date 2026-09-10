@@ -12,7 +12,7 @@ The design adds no persona, provider, endpoint, key, or discovered model to DSL 
 
 The ordered profile chain remains the policy. The resolver does not infer “best” or “cheap” from vendor names, catalogue order, or mutable prices. To prefer a low-cost model, place its named model definition at the desired point in the selected persona's chain. This is explicit, deterministic, and sufficient for the requested personal-only OMLX case.
 
-Version 1 remains supported without changed meaning. Mixed version-1 and version-2 user/project layers are refused with an actionable migration message rather than merged by guesswork.
+Version 1 remains supported with its decoder, layering, realization, and preflight unchanged. Live target precedence is shared across both versions. Mixed version-1 and version-2 user/project layers are refused with an actionable migration message rather than merged by guesswork.
 
 ## 2. Vocabulary
 
@@ -44,7 +44,7 @@ profiles:
         max-output: 65536
 ```
 
-The user file is `$XDG_CONFIG_HOME/agent-cat/routing.yaml`, falling back to `~/.config/agent-cat/routing.yaml`. The nearest `.agent-cat/routing.yaml` between cwd and the Git boundary is the project layer. Whole named routers and profiles in the project layer replace their user-layer counterparts. Explicit command-line routes have highest backend precedence (`Agentic.RoutingConfig`).
+The user file is `$XDG_CONFIG_HOME/agent-cat/routing.yaml`, falling back to `~/.config/agent-cat/routing.yaml`. The nearest `.agent-cat/routing.yaml` between cwd and the Git boundary is the project layer. Whole named routers and profiles in the project layer replace their user-layer counterparts. A run with no explicit engine or session uses these profiles and requires full pin coverage. An explicit engine or session instead uses only its command-line default and raw routes.
 
 The decoder rejects unknown fields, duplicate names, empty chains, surrounding whitespace, unknown router references, non-positive output limits, non-scalar ACP options, and option names which may carry secrets. The resolver expands a profile chain into axes such as `deep-thinker`, `deep-thinker#2`, and so forth, preserves profile/rung provenance, and refuses an authored fallback chain combined with a multi-rung YAML chain.
 
@@ -350,11 +350,11 @@ A wholly allowlisted environment would be stronger but risks silently breaking a
 
 Static commands remain offline. `list`, `help`, `plan`, and `cost` do not load secrets or call a model endpoint. Discovery runs only for:
 
-- a live run whose used engine declares a catalogue; exact selectors consult it opportunistically, while prefix selectors require it;
+- a routing-only live run whose used engine declares a catalogue, where exact selectors consult it opportunistically and prefix selectors require it;
 - explicit routing inspection or refresh; or
 - TUI routing display requested by the operator.
 
-This preserves the current distinction in which routing configuration attaches only to commands that can reach a live backend.
+Routing configuration attaches only to routing-only execution and inspection.
 
 ### 8.2 HTTP client
 
@@ -428,17 +428,17 @@ Resolution proceeds in the following order:
 
 The frozen selection cannot change in the middle of a run. A newly appearing model, refreshed cache, endpoint outage, or edited default persona affects the next run only.
 
-### 9.1 Command-line route overrides
+### 9.1 Command-line precedence
 
-Raw version-1 `--route MODEL=BACKEND` behavior remains unchanged for version-1 configuration and unconfigured symbolic names.
+Raw `--route MODEL=BACKEND` entries refine an explicit `--engine` or `--session` target. That explicit target is complete and routing files are not loaded, even when the redundant `--routing` flag is present.
 
-For a version-2 configured axis, changing only the backend can separate a model from the engine environment, credential, inventory, and provider through which it was validated. Version 2 therefore overrides with a concrete model alias, whose declaration carries the engine:
+With no explicit target, the routing files must resolve every model pin and every engine-bound question must be pinned. Version 2 overrides a configured axis with a concrete model alias whose declaration carries the engine:
 
 ```text
 --realize AXIS=MODEL-ALIAS
 ```
 
-The alias must appear in the selected persona's model allowlist, and its owning engine must appear in that persona's engine allowlist. A raw `--route` against a version-2 managed axis is refused with guidance to use `--realize` or a project profile override. This is a new-v2 restriction, not a change to existing v1 files.
+The alias must appear in the selected persona's model allowlist, and its owning engine must appear in that persona's engine allowlist.
 
 ## 10. Provenance and inspection
 
@@ -456,14 +456,15 @@ Its JSON contains:
 - concrete aliases and selected exact ids with selector/provenance;
 - symbolic profiles and ordered resolved rungs; and
 - warnings for stale inventory or static-unverified exact ids; and
-- a sanitized execution fingerprint for each selected engine definition; and
-- per-engine CLI-owned target kind and arguments, plus a lowercase SHA-256 launch fingerprint over the selected persona, default backend, and all resolved realizations.
+- a sanitized execution fingerprint for each selected engine definition;
+- one CLI-owned routing-only launch object and lowercase SHA-256 fingerprint over the selected persona, full-coverage policy, and all resolved realizations; and
+- per-engine CLI-owned target kind, arguments, and launch fingerprint for callers that deliberately choose an explicit engine.
 
 It omits secret values and references, authorization/header values, adapter environment names and values, raw endpoint URLs, and inventories not selected by a profile. Human output likewise uses endpoint fingerprints rather than URLs.
 
-ext-pi and the terminal frontend consume this contract. Neither frontend parses YAML, applies precedence, resolves a model, or reconstructs backend syntax. The TUI passes the opaque arguments with `--offline` and `--expect-routing-fingerprint`; the runner refuses launch if resolution no longer matches the preview. A leading option avoids reserving a downstream workflow name.
+ext-pi and the terminal frontend consume the routing-only launch object. Neither frontend parses YAML, applies precedence, resolves a model, or reconstructs backend syntax. They pass its opaque arguments with `--offline` and `--expect-routing-fingerprint`, and the runner refuses launch if resolution no longer matches the preview. Explicit frontend targets omit routing choices. A leading option avoids reserving a downstream workflow name.
 
-The machine run manifest's policy includes the following fields plus a canonical SHA-256 policy digest:
+The machine run manifest records `coverage: full` instead of a default backend, plus the following realization fields and a canonical SHA-256 policy digest:
 
 ```json
 {
@@ -697,7 +698,7 @@ Catalogue success does not waive existing preflight. Exercise an inventory which
 
 ### 14.1 Version 1
 
-All-version-1 discovered files retain their present decoder, merge, command-line route precedence, generated axes, preflight, and persisted policy. No environment secret or network discovery is introduced on that path.
+All version-1 discovered files retain their decoder, merge, generated axes, preflight, and persisted realization policy. Routing-only execution requires full pin coverage, while an explicit target uses only command-line routes. No environment secret or network discovery is introduced on the version-1 path.
 
 ### 14.2 Version 2 adoption
 

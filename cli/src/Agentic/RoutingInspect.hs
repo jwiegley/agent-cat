@@ -9,6 +9,7 @@ module Agentic.RoutingInspect
     renderRoutingInspectionV2,
     resolvedRealizationPolicy,
     routingLaunchFingerprint,
+    routingOnlyLaunchFingerprint,
     personaSelectionSourceName,
     migrateRoutingConfigV1,
   )
@@ -29,6 +30,7 @@ import Agentic.RoutingConfig.V2
 import Agentic.RoutingDiscovery
 import Crypto.Hash (Digest, SHA256, hash)
 import Data.Aeson (Value (..), encode, object, (.=))
+import Data.Aeson.Types (Pair)
 import qualified Data.Aeson.Key as Key
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
@@ -71,6 +73,12 @@ routingInspectionV2 loaded selected readiness inventories resolved =
         .= object
           [ "name" .= selectedPersonaName selected,
             "source" .= personaSelectionSourceName (selectedPersonaSource selected)
+          ],
+      "launch"
+        .= object
+          [ "targetKind" .= ("routing" :: Text),
+            "arguments" .= ["--routing" :: Text],
+            "fingerprint" .= routingOnlyLaunchFingerprint (selectedPersonaName selected) resolved
           ],
       "availablePersonas" .= Map.keys (routingV2Personas config),
       "availableModels" .= map availableModelJson (personaModels (selectedPersona selected)),
@@ -202,19 +210,27 @@ renderRoutingInspectionV2 loaded selected resolved =
       ]
 
 routingLaunchFingerprint :: Text -> Backend -> ResolvedRouting -> Text
-routingLaunchFingerprint persona backend resolved =
+routingLaunchFingerprint persona backend =
+  routingFingerprint ["persona" .= persona, "defaultBackend" .= backendSpelling backend]
+
+routingOnlyLaunchFingerprint :: Text -> ResolvedRouting -> Text
+routingOnlyLaunchFingerprint persona =
+  routingFingerprint ["persona" .= persona, "coverage" .= ("full" :: Text)]
+
+routingFingerprint :: [Pair] -> ResolvedRouting -> Text
+routingFingerprint fields resolved =
   T.pack . show $
     ( hash
         ( BL.toStrict
             ( encode
                 ( object
-                    [ "persona" .= persona,
-                      "defaultBackend" .= backendSpelling backend,
-                      "realizations"
-                        .= map
-                          launchRealizationPolicy
-                          (sortOn (\target -> (resolvedProfile target, resolvedAxis target, resolvedRung target)) (Map.elems (resolvedRealizations resolved)))
-                    ]
+                    ( fields
+                        <> [ "realizations"
+                               .= map
+                                 launchRealizationPolicy
+                                 (sortOn (\target -> (resolvedProfile target, resolvedAxis target, resolvedRung target)) (Map.elems (resolvedRealizations resolved)))
+                           ]
+                    )
                 )
             )
         ) :: Digest SHA256

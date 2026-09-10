@@ -739,7 +739,7 @@ export function parseLaunchManifest(value: unknown): LaunchManifest {
   if (!Object.values(hashes).every((entry) => typeof entry === "string")) throw new Error("inputHashes is invalid");
   const targetArgs = stringArray(object.targetArgs, "targetArgs");
   const targetKind = string(object.targetKind, "targetKind");
-  if (!["scripted", "acp", "deck", "current", "child", "remote"].includes(targetKind)) throw new Error("targetKind is invalid");
+  if (!["scripted", "routing", "acp", "deck", "current", "child", "remote"].includes(targetKind)) throw new Error("targetKind is invalid");
   const lineageValue = object.lineage === null ? undefined : object.lineage;
   const lineage = lineageValue === undefined ? undefined : string(lineageValue, "lineage");
   if (lineage !== undefined && lineage !== "restart" && lineage !== "resume" && lineage !== "fork") throw new Error("lineage is invalid");

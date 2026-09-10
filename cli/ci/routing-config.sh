@@ -27,10 +27,38 @@ mkdir -p "$tmp/xdg/agent-cat" "$tmp/work"
 printf 'version: 99\n' >"$tmp/xdg/agent-cat/routing.yaml"
 XDG_CONFIG_HOME="$tmp/xdg" "$bin" run harden --scripted +RTS -N8 -RTS >/dev/null
 
-# A live run validates YAML before trying even a nonexistent adapter.
+# An explicit live target ignores even a malformed ambient routing file.
+mkdir -p "$tmp/explicit-deck"
+DECK_STUB_STATE="$tmp/explicit-deck" DECK_STUB_BUSY=0 XDG_CONFIG_HOME="$tmp/xdg" \
+  "$bin" run harden --session hello \
+  --binary "$root/engine/agent-deck/test/stub-deck.sh" --poll 0 --timeout 30000 \
+  +RTS -N8 -RTS >"$tmp/explicit-deck.out" 2>&1
+grep -q 'running harden against agent-deck session hello' "$tmp/explicit-deck.out"
+! grep -q 'routing configuration:' "$tmp/explicit-deck.out"
+[ "$(cat "$tmp/explicit-deck/sends")" -eq 7 ]
+
 set +e
-invalid=$(XDG_CONFIG_HOME="$tmp/xdg" "$bin" run harden \
+exclusive_acp=$(XDG_CONFIG_HOME="$tmp/xdg" "$bin" run harden \
   --engine acp --adapter definitely-not-an-adapter +RTS -N8 -RTS 2>&1)
+status=$?
+set -e
+[ "$status" -eq 2 ]
+grep -q 'transport:' <<<"$exclusive_acp"
+! grep -q 'routing configuration:' <<<"$exclusive_acp"
+
+# Even an explicit --routing is less specific than --engine or --session.
+set +e
+explicit_with_routing=$(XDG_CONFIG_HOME="$tmp/xdg" "$bin" run harden \
+  --engine acp --adapter definitely-not-an-adapter --routing +RTS -N8 -RTS 2>&1)
+status=$?
+set -e
+[ "$status" -eq 2 ]
+grep -q 'transport:' <<<"$explicit_with_routing"
+! grep -q 'routing configuration:' <<<"$explicit_with_routing"
+
+# With no explicit live target, routing is mandatory and validates before startup.
+set +e
+invalid=$(XDG_CONFIG_HOME="$tmp/xdg" "$fixed_bin" run pinned +RTS -N8 -RTS 2>&1)
 status=$?
 set -e
 [ "$status" -eq 1 ]
@@ -40,7 +68,7 @@ grep -q 'unsupported routing configuration version 99' <<<"$invalid"
 
 # Programs may inspect run.routes while their Haskell value is built. One
 # synthetic row converges on its configured pin; the other alternates forever
-# and must be refused before the deliberately missing default adapter starts.
+# and must be refused before any backend starts.
 cat >"$tmp/xdg/agent-cat/routing.yaml" <<'EOF'
 version: 1
 routers:
@@ -54,25 +82,52 @@ profiles:
         model: stub-default
         thinking: high
         max-output: 65536
+  - name: other
+    chain:
+      - router: fixture
+        model: stub-default
+        thinking: high
+        max-output: 65536
 EOF
+
+# Routing-only execution proves every engine-bound question has a configured pin.
+set +e
+tool_uncovered=$(XDG_CONFIG_HOME="$tmp/xdg" "$bin" run harden +RTS -N8 -RTS 2>&1)
+tool_status=$?
+model_uncovered=$(XDG_CONFIG_HOME="$tmp/xdg" "$bin" run structured +RTS -N8 -RTS 2>&1)
+model_status=$?
+person_uncovered=$(XDG_CONFIG_HOME="$tmp/xdg" "$fixed_bin" run person-controlled +RTS -N8 -RTS </dev/null 2>&1)
+person_status=$?
+missing_profile=$(XDG_CONFIG_HOME="$tmp/xdg" "$fixed_bin" run controlled +RTS -N8 -RTS </dev/null 2>&1)
+missing_profile_status=$?
+set -e
+[ "$tool_status" -eq 1 ]
+[ "$model_status" -eq 1 ]
+[ "$person_status" -eq 1 ]
+[ "$missing_profile_status" -eq 1 ]
+grep -q 'requires full pin coverage, but tool `cat` cannot carry `served by`' <<<"$tool_uncovered"
+grep -q 'requires full pin coverage, but model `' <<<"$model_uncovered"
+grep -q 'requires full pin coverage, but person `first` cannot carry `served by`' <<<"$person_uncovered"
+grep -q "routing configuration has no route for pinned model 'primary'" <<<"$missing_profile"
+! grep -q 'transport:' <<<"$tool_uncovered$model_uncovered$person_uncovered$missing_profile"
+
 mkdir -p "$tmp/fixed-work"
 XDG_CONFIG_HOME="$tmp/xdg" "$fixed_bin" run convergent \
-  --engine acp --adapter stub --scratch "$tmp/fixed-work" \
+  --scratch "$tmp/fixed-work" \
   +RTS -N8 -RTS >"$tmp/fixed.out" 2>"$tmp/fixed.err"
 grep -q 'the run is over' "$tmp/fixed.out"
 
 set +e
-cycle=$(XDG_CONFIG_HOME="$tmp/xdg" "$fixed_bin" run cyclic \
-  --engine acp --adapter definitely-not-an-adapter +RTS -N8 -RTS 2>&1)
+cycle=$(XDG_CONFIG_HOME="$tmp/xdg" "$fixed_bin" run cyclic +RTS -N8 -RTS 2>&1)
 status=$?
 set -e
 [ "$status" -eq 1 ]
 grep -q 'routing configuration and run facts form a cycle' <<<"$cycle"
 ! grep -q 'transport:' <<<"$cycle"
 
-# The first fixture dies on Draft; the second is the ordinary ACP stub. This is
-# a transport gap rather than a semantic answer, so the YAML-owned second rung
-# must answer the same authored question.
+# The first fixture dies on the pinned question; the second is the ordinary ACP
+# stub. This transport gap makes the YAML-owned second rung answer the same
+# authored question.
 python3 - "$root/engine/acp/test/stub_adapter.py" "$tmp/primary.py" <<'PY'
 from pathlib import Path
 import sys
@@ -80,7 +135,7 @@ source = Path(sys.argv[1]).read_text()
 needle = "    text = prompt_text(params)\n"
 assert needle in source
 Path(sys.argv[2]).write_text(
-    source.replace(needle, needle + '    if "Draft" in text:\n        raise SystemExit(9)\n', 1)
+    source.replace(needle, needle + '    if "fixed-point" in text:\n        raise SystemExit(9)\n', 1)
 )
 PY
 cat >"$tmp/primary" <<EOF
@@ -119,8 +174,7 @@ profiles:
 EOF
 cp "$tmp/xdg/agent-cat/routing.yaml" "$tmp/valid-routing.yaml"
 
-XDG_CONFIG_HOME="$tmp/xdg" "$bin" run harden \
-  --engine acp --adapter "$tmp/fallback" --scratch "$tmp/work" \
+XDG_CONFIG_HOME="$tmp/xdg" "$fixed_bin" run pinned --scratch "$tmp/work" \
   +RTS -N8 -RTS >"$tmp/run.out" 2>"$tmp/run.err"
 grep -q 'deep = acp:.*primary; fixture/deep; thinking high; max-output 65536; options mode=plan,temperature=0.25,web-search=true' "$tmp/run.out"
 grep -q 'deep#2 = acp:.*fallback; fixture/author; thinking low' "$tmp/run.out"
@@ -139,18 +193,17 @@ from pathlib import Path
 import sys
 lines = Path(sys.argv[1]).read_text().splitlines()
 configured = next(i for i, line in enumerate(lines) if "set config model='author'" in line)
-prompted = next(i for i, line in enumerate(lines) if "prompt matched 'Draft'" in line)
+prompted = next(i for i, line in enumerate(lines) if "prompt matched None" in line)
 assert configured < prompted
 PY
-grep -q 'billFresh   7' "$tmp/run.out"
-grep -q 'billMemo    7' "$tmp/run.out"
+grep -q 'billFresh   1' "$tmp/run.out"
+grep -q 'billMemo    1' "$tmp/run.out"
 
 # Structured runs persist the declared chain; the event journal identifies the
 # rung that actually answered after failover.
 rm -rf "$tmp/work" && mkdir "$tmp/work"
 AGENT_CAT_RUN_STORE="$tmp/store" XDG_CONFIG_HOME="$tmp/xdg" \
-  "$bin" machine routing-config-probe harden \
-  --engine acp --adapter "$tmp/fallback" --scratch "$tmp/work" \
+  "$fixed_bin" machine routing-config-probe pinned --scratch "$tmp/work" \
   +RTS -N8 -RTS >"$tmp/machine.out" 2>"$tmp/machine.err"
 python3 - "$tmp/store/manifest.json" "$tmp/xdg/agent-cat/routing.yaml" "$tmp/store/events.ndjson" <<'PY'
 import json
@@ -158,7 +211,7 @@ import sys
 manifest = json.load(open(sys.argv[1]))
 policy = manifest["run"]["policy"]
 assert policy["routingSources"] == [sys.argv[2]]
-assert set(policy) == {"kind", "default", "routes", "scratch", "adapterArgs", "binary", "pollMs", "timeoutMs", "routingSources", "realizations", "verbose"}
+assert set(policy) == {"kind", "coverage", "routes", "scratch", "adapterArgs", "binary", "pollMs", "timeoutMs", "routingSources", "realizations", "verbose"}
 by_axis = {item["axis"]: item for item in policy["realizations"]}
 assert all(set(item) == {"profile", "axis", "rung", "backend", "router", "provider", "model", "thinking", "maxOutput", "options"} for item in by_axis.values())
 assert by_axis["deep"]["model"] == "deep"
@@ -171,7 +224,7 @@ assert by_axis["deep#2"]["backend"].endswith("/fallback")
 events = [json.loads(line) for line in open(sys.argv[3]) if line.strip()]
 sources = [item["event"].get("source") for item in events
            if item["event"].get("type") == "occurrence.completed"]
-assert "asked:model author@deep#2" in sources, sources
+assert "asked:model fixed-point@deep#2" in sources, sources
 PY
 
 # Factory Droid advertises model and reasoning but no output-limit control. An
@@ -201,15 +254,15 @@ profiles:
 EOF
 rm -rf "$tmp/work" && mkdir "$tmp/work"
 rm -f "$tmp/droid.log"
-PATH="$tmp/droid-bin:$PATH" XDG_CONFIG_HOME="$tmp/xdg" "$bin" run harden \
-  --engine acp --adapter "$tmp/fallback" --scratch "$tmp/work" \
+PATH="$tmp/droid-bin:$PATH" XDG_CONFIG_HOME="$tmp/xdg" "$fixed_bin" run pinned \
+  --scratch "$tmp/work" \
   +RTS -N8 -RTS >"$tmp/droid.out" 2>"$tmp/droid.err"
 grep -qE '^  deep += acp:droid; factory/deep; thinking high; max-output unconstrained$' "$tmp/droid.out"
 grep -q "set config model='deep'" "$tmp/droid.log"
 grep -q "set config effort='high'" "$tmp/droid.log"
 ! grep -q 'set config max-output' "$tmp/droid.log"
-grep -q 'billFresh   7' "$tmp/droid.out"
-grep -q 'billMemo    7' "$tmp/droid.out"
+grep -q 'billFresh   1' "$tmp/droid.out"
+grep -q 'billMemo    1' "$tmp/droid.out"
 cp "$tmp/valid-routing.yaml" "$tmp/xdg/agent-cat/routing.yaml"
 
 # Every ACP rung is preflighted before the scheduler starts. A valid primary
@@ -236,8 +289,8 @@ path.write_text(text[:start] + '''profiles:
 ''')
 PY
 set +e
-unsupported=$(XDG_CONFIG_HOME="$tmp/xdg" "$bin" run harden \
-  --engine acp --adapter "$tmp/fallback" --scratch "$tmp/work" \
+unsupported=$(XDG_CONFIG_HOME="$tmp/xdg" "$fixed_bin" run pinned \
+  --scratch "$tmp/work" \
   +RTS -N8 -RTS 2>&1)
 status=$?
 set -e
@@ -258,8 +311,8 @@ EOF
 chmod +x "$tmp/fallback"
 rm -f "$tmp/primary.log" "$tmp/fallback.log"
 set +e
-setter_refusal=$(XDG_CONFIG_HOME="$tmp/xdg" "$bin" run harden \
-  --engine acp --adapter "$tmp/primary" --scratch "$tmp/work" \
+setter_refusal=$(XDG_CONFIG_HOME="$tmp/xdg" "$fixed_bin" run pinned \
+  --scratch "$tmp/work" \
   +RTS -N8 -RTS 2>&1)
 status=$?
 set -e
@@ -289,15 +342,15 @@ EOF
 deck_stub="$root/engine/agent-deck/test/stub-deck.sh"
 rm -rf "$tmp/deck-ok" && mkdir "$tmp/deck-ok"
 DECK_STUB_STATE="$tmp/deck-ok" DECK_STUB_BUSY=0 XDG_CONFIG_HOME="$tmp/xdg" \
-  "$bin" run harden --session stub --binary "$deck_stub" --poll 0 --timeout 30000 \
+  "$fixed_bin" run pinned --binary "$deck_stub" --poll 0 --timeout 30000 \
   +RTS -N8 -RTS >"$tmp/deck.out" 2>"$tmp/deck.err"
-[ "$(cat "$tmp/deck-ok/sends")" -eq 7 ]
+[ "$(cat "$tmp/deck-ok/sends")" -eq 1 ]
 grep -q 'deep = deck:stub; anthropic/fixture-model; thinking high; max-output 65536' "$tmp/deck.out"
 
 rm -rf "$tmp/deck-mismatch" && mkdir "$tmp/deck-mismatch"
 set +e
 mismatch=$(DECK_STUB_STATE="$tmp/deck-mismatch" DECK_STUB_MODEL=wrong XDG_CONFIG_HOME="$tmp/xdg" \
-  "$bin" run harden --session stub --binary "$deck_stub" --poll 0 --timeout 30000 \
+  "$fixed_bin" run pinned --binary "$deck_stub" --poll 0 --timeout 30000 \
   +RTS -N8 -RTS 2>&1)
 status=$?
 set -e
@@ -308,7 +361,7 @@ grep -q 'reports model "wrong", required "fixture-model"' <<<"$mismatch"
 rm -rf "$tmp/deck-provider" && mkdir "$tmp/deck-provider"
 set +e
 no_provider=$(DECK_STUB_STATE="$tmp/deck-provider" DECK_STUB_PROVIDER= XDG_CONFIG_HOME="$tmp/xdg" \
-  "$bin" run harden --session stub --binary "$deck_stub" --poll 0 --timeout 30000 \
+  "$fixed_bin" run pinned --binary "$deck_stub" --poll 0 --timeout 30000 \
   +RTS -N8 -RTS 2>&1)
 status=$?
 set -e
@@ -319,7 +372,7 @@ grep -q 'does not report provider; required "anthropic"' <<<"$no_provider"
 rm -rf "$tmp/deck-missing" && mkdir "$tmp/deck-missing"
 set +e
 missing=$(DECK_STUB_STATE="$tmp/deck-missing" DECK_STUB_OMIT_MAX_OUTPUT=1 XDG_CONFIG_HOME="$tmp/xdg" \
-  "$bin" run harden --session stub --binary "$deck_stub" --poll 0 --timeout 30000 \
+  "$fixed_bin" run pinned --binary "$deck_stub" --poll 0 --timeout 30000 \
   +RTS -N8 -RTS 2>&1)
 status=$?
 set -e
@@ -408,11 +461,11 @@ EOF
 rm -rf "$tmp/v2-deck-ok" && mkdir "$tmp/v2-deck-ok"
 DECK_STUB_STATE="$tmp/v2-deck-ok" DECK_STUB_BUSY=0 \
 XDG_CONFIG_HOME="$tmp/v2-deck-xdg" \
-  "$bin" run harden --session stub --binary "$deck_stub" --poll 0 --timeout 30000 \
+  "$fixed_bin" run pinned --binary "$deck_stub" --poll 0 --timeout 30000 \
   +RTS -N8 -RTS >"$tmp/v2-deck.out" 2>"$tmp/v2-deck.err"
 v2_deck_sends=$(cat "$tmp/v2-deck-ok/sends")
-[ "$v2_deck_sends" -eq 7 ] || {
-  printf 'v2 deck: expected 7 sends, received %s\n' "$v2_deck_sends" >&2
+[ "$v2_deck_sends" -eq 1 ] || {
+  printf 'v2 deck: expected 1 send, received %s\n' "$v2_deck_sends" >&2
   cat "$tmp/v2-deck.out" >&2
   exit 1
 }
@@ -422,7 +475,7 @@ rm -rf "$tmp/v2-deck-mismatch" && mkdir "$tmp/v2-deck-mismatch"
 set +e
 v2_deck_mismatch=$(DECK_STUB_STATE="$tmp/v2-deck-mismatch" \
   DECK_STUB_MODEL=wrong XDG_CONFIG_HOME="$tmp/v2-deck-xdg" \
-  "$bin" run harden --session stub --binary "$deck_stub" --poll 0 --timeout 30000 \
+  "$fixed_bin" run pinned --binary "$deck_stub" --poll 0 --timeout 30000 \
   +RTS -N8 -RTS 2>&1)
 status=$?
 set -e
@@ -479,8 +532,7 @@ EOF
 mkdir "$tmp/discovery-parent-work"
 XDG_CONFIG_HOME="$tmp/discovery-xdg" XDG_CACHE_HOME="$tmp/discovery-cache" \
 AGENT_CAT_RUN_STORE="$tmp/discovery-parent" \
-  "$bin" machine catalogue-parent harden --engine acp --adapter stub \
-  --scratch "$tmp/discovery-parent-work" +RTS -N8 -RTS \
+  "$fixed_bin" machine catalogue-parent pinned --scratch "$tmp/discovery-parent-work" +RTS -N8 -RTS \
   >"$tmp/discovery-parent.out" 2>"$tmp/discovery-parent.err"
 python3 - "$tmp/discovery-parent/manifest.json" <<'PY'
 import json
@@ -492,14 +544,14 @@ assert realization["inventory"]["source"] == "fresh"
 PY
 sleep 1
 XDG_CONFIG_HOME="$tmp/discovery-xdg" XDG_CACHE_HOME="$tmp/discovery-cache" \
-  "$bin" run harden --engine acp --adapter stub --scratch "$tmp/discovery-work" \
+  "$fixed_bin" run pinned --scratch "$tmp/discovery-work" \
   +RTS -N8 -RTS >"$tmp/discovery.out" 2>"$tmp/discovery.err"
 grep -q 'deep = acp:stub; fixture/stub-default; thinking high; max-output 65536' "$tmp/discovery.out"
 grep -q "set config model='stub-default'" "$tmp/discovery.err"
 [ "$(cat "$tmp/catalogue-count")" -eq 1 ]
 XDG_CONFIG_HOME="$tmp/discovery-xdg" XDG_CACHE_HOME="$tmp/discovery-cache" \
-  "$bin" lineage-check restart "$tmp/discovery-parent" harden \
-  --engine acp --adapter stub --scratch "$tmp/discovery-parent-work" \
+  "$fixed_bin" lineage-check restart "$tmp/discovery-parent" pinned \
+  --scratch "$tmp/discovery-parent-work" \
   +RTS -N8 -RTS >"$tmp/discovery-lineage.out" 2>"$tmp/discovery-lineage.err"
 
 XDG_CONFIG_HOME="$tmp/discovery-xdg" XDG_CACHE_HOME="$tmp/discovery-cache" \
@@ -511,6 +563,9 @@ import sys
 value = json.loads(Path(sys.argv[1]).read_text())
 assert value["version"] == 2
 assert value["persona"] == {"name": "fixture", "source": "user-default"}
+assert value["launch"]["targetKind"] == "routing"
+assert value["launch"]["arguments"] == ["--routing"]
+assert "--routing" not in value["engines"][0]["launch"]["arguments"]
 assert value["models"][0]["alias"] == "selected"
 assert value["models"][0]["model"] == "stub-default"
 assert value["models"][0]["inventory"]["source"] == "fresh-cache"
@@ -520,6 +575,11 @@ text = Path(sys.argv[1]).read_text()
 assert "127.0.0.1" not in text
 assert "authorization" not in text.lower()
 PY
+routing_fingerprint=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["launch"]["fingerprint"])' "$tmp/routing-inspection.json")
+XDG_CONFIG_HOME="$tmp/discovery-xdg" XDG_CACHE_HOME="$tmp/discovery-cache" \
+  "$fixed_bin" run pinned --offline --expect-routing-fingerprint "$routing_fingerprint" \
+  --scratch "$tmp/discovery-work" +RTS -N8 -RTS >"$tmp/routing-launch.out" 2>"$tmp/routing-launch.err"
+grep -q 'the run is over' "$tmp/routing-launch.out"
 XDG_CONFIG_HOME="$tmp/discovery-xdg" XDG_CACHE_HOME="$tmp/discovery-cache" \
   "$bin" --routing >"$tmp/routing-inspection.txt"
 grep -q 'persona: fixture (user-default)' "$tmp/routing-inspection.txt"
@@ -563,7 +623,7 @@ PY
 rm -rf "$tmp/discovery-work" && mkdir "$tmp/discovery-work"
 set +e
 catalogue_mismatch=$(XDG_CONFIG_HOME="$tmp/discovery-xdg" XDG_CACHE_HOME="$tmp/discovery-cache" \
-  "$bin" run harden --engine acp --adapter stub --scratch "$tmp/discovery-work" \
+  "$fixed_bin" run pinned --scratch "$tmp/discovery-work" \
   +RTS -N8 -RTS 2>&1)
 status=$?
 set -e
@@ -769,28 +829,32 @@ assert command["persona"] == {"name": "work", "source": "command-line"}
 assert default["persona"] == {"name": "personal", "source": "user-default"}
 PY
 (cd "$tmp/persona-project" && XDG_CONFIG_HOME="$tmp/persona-xdg" \
-  "$bin" run harden --engine acp --adapter "$persona_adapter" --scratch "$tmp/persona-work" \
+  "$fixed_bin" run pinned --scratch "$tmp/persona-work" \
   --persona personal --realize deep=author-model --offline +RTS -N8 -RTS) \
   >"$tmp/persona-run.out" 2>"$tmp/persona-run.err"
 grep -q 'fixture/author; thinking high; max-output 65536' "$tmp/persona-run.out"
 grep -q "set config model='author'" "$tmp/persona-run.err"
 
 set +e
-managed_route=$(XDG_CONFIG_HOME="$tmp/persona-xdg" \
-  "$bin" run harden --engine acp --adapter stub --route deep=acp:stub \
-  --offline 2>&1)
-managed_status=$?
-v1_option=$(XDG_CONFIG_HOME="$tmp/xdg" \
+route_without_default=$(
+  "$fixed_bin" run pinned --route deep=acp:stub 2>&1)
+route_without_default_status=$?
+explicit_persona=$(
   "$bin" run harden --engine acp --adapter definitely-not-an-adapter \
-  --persona personal 2>&1)
+  --routing --persona personal 2>&1)
+explicit_persona_status=$?
+v1_option=$(XDG_CONFIG_HOME="$tmp/xdg" \
+  "$fixed_bin" run pinned --persona personal 2>&1)
 v1_status=$?
 scripted_persona=$("$bin" run harden --scripted --persona personal 2>&1)
 scripted_status=$?
 set -e
-[ "$managed_status" -eq 1 ]
+[ "$route_without_default_status" -eq 1 ]
+[ "$explicit_persona_status" -eq 1 ]
 [ "$v1_status" -eq 1 ]
 [ "$scripted_status" -eq 1 ]
-grep -q 'raw --route cannot replace version-2 managed axis' <<<"$managed_route"
+grep -q -- '--route refines a command-line default answerer' <<<"$route_without_default"
+grep -q -- '--persona applies only when no --engine or --session is given' <<<"$explicit_persona"
 grep -q -- '--persona, --realize, --offline, --refresh-models, and --expect-routing-fingerprint require version-2 routing' <<<"$v1_option"
 ! grep -q 'transport:' <<<"$v1_option"
 grep -q -- "--persona is not --scripted's to take" <<<"$scripted_persona"
@@ -849,8 +913,7 @@ EOF
 set +e
 v2_missing=$(AGENT_CAT_RUN_STORE="$tmp/v2-store-missing" \
   XDG_CONFIG_HOME="$tmp/v2-xdg" \
-  "$bin" machine v2-secret-missing harden --engine acp --adapter "$tmp/v2-adapter" \
-  --scratch "$tmp/v2-work" +RTS -N8 -RTS 2>&1)
+  "$fixed_bin" machine v2-secret-missing pinned --scratch "$tmp/v2-work" +RTS -N8 -RTS 2>&1)
 status=$?
 set -e
 [ "$status" -eq 1 ]
@@ -861,8 +924,7 @@ grep -q "requires secret 'personal-key' from environment variable ROUTING_SOURCE
 set +e
 v2_argv=$(ROUTING_SOURCE='routing-secret-sentinel-7f3d' \
   AGENT_CAT_RUN_STORE="$tmp/v2-store-argv" XDG_CONFIG_HOME="$tmp/v2-xdg" \
-  "$bin" machine v2-secret-argv harden --engine acp --adapter "$tmp/v2-adapter" \
-  --adapter-arg --api-key 2>&1)
+  "$fixed_bin" machine v2-secret-argv pinned --adapter-arg --api-key 2>&1)
 status=$?
 set -e
 [ "$status" -eq 1 ]
@@ -874,8 +936,7 @@ grep -q 'credential-bearing adapter argv is forbidden for version-2 routing' <<<
 ROUTING_SOURCE='routing-secret-sentinel-7f3d' \
 UNSELECTED_SOURCE='unselected-secret-sentinel-2a6b' \
 AGENT_CAT_RUN_STORE="$tmp/v2-store" XDG_CONFIG_HOME="$tmp/v2-xdg" \
-  "$bin" machine v2-secret-success harden --engine acp --adapter "$tmp/v2-adapter" \
-  --scratch "$tmp/v2-work" +RTS -N8 -RTS >"$tmp/v2.out" 2>"$tmp/v2.err"
+  "$fixed_bin" machine v2-secret-success pinned --scratch "$tmp/v2-work" +RTS -N8 -RTS >"$tmp/v2.out" 2>"$tmp/v2.err"
 [ "$(cat "$tmp/v2-child.log")" = 'dest=present source= unselected= keep=kept' ]
 ! grep -R -F 'routing-secret-sentinel-7f3d' \
   "$tmp/v2-store" "$tmp/v2.out" "$tmp/v2.err" "$tmp/v2-child.log"
@@ -924,8 +985,7 @@ PY
 ROUTING_SOURCE='routing-secret-sentinel-7f3d' \
 UNSELECTED_SOURCE='unselected-secret-sentinel-2a6b' \
 AGENT_CAT_RUN_STORE="$tmp/v2-store-second" XDG_CONFIG_HOME="$tmp/v2-xdg" \
-  "$bin" machine v2-secret-second harden --engine acp --adapter "$tmp/v2-adapter" \
-  --scratch "$tmp/v2-work" +RTS -N8 -RTS >"$tmp/v2-second.out" 2>"$tmp/v2-second.err"
+  "$fixed_bin" machine v2-secret-second pinned --scratch "$tmp/v2-work" +RTS -N8 -RTS >"$tmp/v2-second.out" 2>"$tmp/v2-second.err"
 python3 - "$tmp/v2-store/manifest.json" "$tmp/v2-store-second/manifest.json" <<'PY'
 from pathlib import Path
 import json
@@ -937,8 +997,8 @@ PY
 ROUTING_SOURCE='routing-secret-sentinel-7f3d' \
 UNSELECTED_SOURCE='unselected-secret-sentinel-2a6b' \
 XDG_CONFIG_HOME="$tmp/v2-xdg" \
-  "$bin" lineage-check restart "$tmp/v2-store" harden \
-  --engine acp --adapter "$tmp/v2-adapter" --scratch "$tmp/v2-work" \
+  "$fixed_bin" lineage-check restart "$tmp/v2-store" pinned \
+  --scratch "$tmp/v2-work" \
   +RTS -N8 -RTS >/dev/null 2>"$tmp/v2-lineage.err"
 cp "$tmp/v2-xdg/agent-cat/routing.yaml" "$tmp/v2-routing-before-environment.yaml"
 python3 - "$tmp/v2-xdg/agent-cat/routing.yaml" <<'PY'
@@ -953,8 +1013,8 @@ set +e
 changed_environment=$(ROUTING_SOURCE='routing-secret-sentinel-7f3d' \
   UNSELECTED_SOURCE='unselected-secret-sentinel-2a6b' \
   XDG_CONFIG_HOME="$tmp/v2-xdg" \
-  "$bin" lineage-check restart "$tmp/v2-store" harden \
-  --engine acp --adapter "$tmp/v2-adapter" --scratch "$tmp/v2-work" \
+  "$fixed_bin" lineage-check restart "$tmp/v2-store" pinned \
+  --scratch "$tmp/v2-work" \
   +RTS -N8 -RTS 2>&1)
 environment_status=$?
 set -e
@@ -966,8 +1026,8 @@ set +e
 changed_source=$(ROUTING_SOURCE='routing-secret-sentinel-7f3d' \
   UNSELECTED_SOURCE='unselected-secret-sentinel-2a6b' \
   XDG_CONFIG_HOME="$tmp/v2-xdg" \
-  "$bin" lineage-check restart "$tmp/v2-store" harden \
-  --engine acp --adapter "$tmp/v2-adapter" --scratch "$tmp/v2-work" \
+  "$fixed_bin" lineage-check restart "$tmp/v2-store" pinned \
+  --scratch "$tmp/v2-work" \
   --persona personal +RTS -N8 -RTS 2>&1)
 changed_status=$?
 set -e

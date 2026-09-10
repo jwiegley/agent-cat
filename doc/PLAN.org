@@ -806,6 +806,24 @@ Adopted from the 2026-08-14 web survey (comparison judge, acat-k28 phase C). (1)
 ]
 #+end_src
 
+* DONE [#B] Explicit CLI engine bypasses ambient routing
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-4g7v
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-09 Wed 22:48]
+:MODIFIED: [2026-09-10 Thu 02:11]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-10 Thu 02:11]
+:CLOSE_REASON: Implemented target precedence and full-coverage routing. No engine/session now always loads routing; explicit engine/session wins even with --routing. Routes now models an absent default directly, routing-only runs refuse unpinned, tool, person, and missing-profile coverage before startup, and TUI/Pi use fingerprinted routing-only launches. Full deterministic gates and downstream hello-world fixture pass.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Live target precedence: when --engine or --session is present, use only that explicit command-line route table even if --routing is also present. When neither is present, always load routing configuration. Routing-only execution must prove every engine-bound question has a configured model pin and refuse otherwise. Preserve routing-only frontend launch fingerprints and lineage.
+
 * DONE [#C] Make /wf launch through current Agent Deck session
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17

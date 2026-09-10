@@ -72,9 +72,6 @@ export default function agentCatExtension(pi: ExtensionAPI): void {
     else if (targetKind === "remote") targetSpec = remote ? await selectRemoteTarget(ctx, remote) : undefined;
     else targetSpec = { args: [...parent.manifest.targetArgs], env: {} };
     if (!targetSpec) return ctx.ui.notify("The parent's remote target is no longer configured", "error");
-    if (targetKind === "current" || targetKind === "child" || targetKind === "remote") {
-      targetSpec = { ...targetSpec, args: [...targetSpec.args, ...routingLineageArgs(parent.manifest.targetArgs)] };
-    }
     const stateDir = stateDirectory();
     const parentRuntimeDir = join(parent.storeDir, "runtime");
     try {
@@ -156,15 +153,6 @@ export default function agentCatExtension(pi: ExtensionAPI): void {
         selected = catalogue[choices.indexOf(choice)];
       }
       if (!selected) return;
-      let routingSelection: RoutingLaunchSelection;
-      try {
-        const configured = await collectRoutingSelection(ctx, selected.runner, selected.descriptor);
-        if (!configured) return;
-        routingSelection = configured;
-      } catch (error) {
-        ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
-        return;
-      }
       let supplied: Record<string, string>;
       try { supplied = bindWorkflowSources(selected.descriptor, invocation); }
       catch (error) { return ctx.ui.notify(error instanceof Error ? error.message : String(error), "error"); }
@@ -172,7 +160,7 @@ export default function agentCatExtension(pi: ExtensionAPI): void {
       if (!inputs) return;
       const sourceSummary = Object.entries(supplied).map(([name, value]) => `${name}=${Buffer.byteLength(value)}B`).join(", ") || "none";
       if (!(await ctx.ui.confirm(
-        `workflow=${selected.runner.id}:${selected.descriptor.name}\nrunner=${selected.runner.executable}\ncwd=${ctx.cwd}\ntarget=current Agent Deck session (${sessionId}); external pane/workspace, not sandboxed\nrouting=${routingSelection.inspection?.persona.name ?? "runner default"}\nprebound inputs=${sourceSummary}\neffects=${selected.descriptor.capabilities.effects ?? "unknown"}\nmay call a paid model; persistence=private full prompts/answers plus input hashes`,
+        "Launch agent-cat workflow?",
         `workflow=${selected.runner.id}:${selected.descriptor.name}\nrunner=${selected.runner.executable}\ncwd=${ctx.cwd}\ntarget=current Agent Deck session (${sessionId}); external pane/workspace, not sandboxed\nprebound inputs=${sourceSummary}\neffects=${selected.descriptor.capabilities.effects ?? "unknown"}\nmay call a paid model; persistence=private full prompts/answers plus input hashes`,
       ))) return;
       const prepared = await prepareLaunch({
@@ -182,8 +170,7 @@ export default function agentCatExtension(pi: ExtensionAPI): void {
         stateDir: stateDirectory(),
         inputs,
         targetKind: "deck",
-        targetArgs: ["--session", sessionId, ...routingSelection.args],
-        persona: routingSelection.inspection?.persona.name,
+        targetArgs: ["--session", sessionId],
       });
       supervise(prepared, ctx, selected.descriptor.name);
     },
@@ -228,20 +215,19 @@ export default function agentCatExtension(pi: ExtensionAPI): void {
       const selected = selectWorkflow(catalogue, args.trim());
       if (!selected) return ctx.ui.notify(`Unknown workflow: ${args.trim()}`, "error");
       const remote = configuredRemote();
-      const targets = [
-        "scripted (offline, no commands)",
+      const targets = ["scripted (offline, no commands)"];
+      if (supportsRoutingInspection(selected.descriptor)) targets.push("routing configuration (live, full pin coverage)");
+      targets.push(
         "native ACP adapter (live, agent-cat scratch)",
         "native agent-deck session (live, external pane)",
-      ];
+      );
       if (currentBridge.supported) targets.push("current Pi session (live, current project, not sandboxed)");
       targets.push("owned Pi child (live, agent-cat scratch, no tools)");
       if (remote) targets.push("authenticated remote Pi session (live, remote workspace, not sandboxed)");
       const target = await ctx.ui.select("Execution target", targets);
       if (!target) return;
       let routingSelection: RoutingLaunchSelection;
-      if (target.startsWith("scripted")) {
-        routingSelection = { args: [], managedAxes: new Set() };
-      } else {
+      if (target.startsWith("routing configuration")) {
         try {
           const configured = await collectRoutingSelection(ctx, selected.runner, selected.descriptor);
           if (!configured) return;
@@ -250,10 +236,15 @@ export default function agentCatExtension(pi: ExtensionAPI): void {
           ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
           return;
         }
+      } else {
+        routingSelection = { args: [], managedAxes: new Set() };
       }
       let targetKind: TargetKind = "scripted";
       let targetSpec: { args: string[]; env: NodeJS.ProcessEnv };
-      if (target.startsWith("native ACP")) {
+      if (target.startsWith("routing configuration")) {
+        targetKind = "routing";
+        targetSpec = { args: [], env: {} };
+      } else if (target.startsWith("native ACP")) {
         targetKind = "acp";
         const adapter = await ctx.ui.input("ACP adapter (stub, claude, codex, droid, or absolute path)", "stub");
         if (!adapter?.trim()) return;
@@ -296,18 +287,20 @@ export default function agentCatExtension(pi: ExtensionAPI): void {
         targetSpec = { args: ["--scripted"], env: {} };
       }
       if (routingSelection.args.length > 0) targetSpec = { ...targetSpec, args: [...targetSpec.args, ...routingSelection.args] };
-      const containment = target.startsWith("owned")
-        ? "agent-cat scratch directory; Pi tools disabled"
-        : target.startsWith("native ACP")
-          ? "agent-cat scratch directory; adapter is not an OS sandbox"
-          : target.startsWith("native agent-deck")
-            ? "external agent-deck pane/workspace; not a sandbox"
-            : target.startsWith("current")
-              ? "current Pi project workspace; not a sandbox"
-              : target.startsWith("authenticated remote")
-                ? "authenticated remote Pi workspace; not a sandbox"
-                : "offline scripted table; no command execution";
-      if (!(await ctx.ui.confirm("Launch agent-cat workflow?", `runner=${selected.runner.executable}\ncwd=${ctx.cwd}\ntarget=${target}\nrouting=${routingSelection.inspection?.persona.name ?? "runner default"}\ncontainment=${containment}\neffects=${selected.descriptor.capabilities.effects ?? "unknown"}\npersistence=private full prompts/answers plus input hashes`))) return;
+      const containment = target.startsWith("routing configuration")
+        ? "configured engines; full pin coverage required"
+        : target.startsWith("owned")
+          ? "agent-cat scratch directory; Pi tools disabled"
+          : target.startsWith("native ACP")
+            ? "agent-cat scratch directory; adapter is not an OS sandbox"
+            : target.startsWith("native agent-deck")
+              ? "external agent-deck pane/workspace; not a sandbox"
+              : target.startsWith("current")
+                ? "current Pi project workspace; not sandboxed"
+                : target.startsWith("authenticated remote")
+                  ? "authenticated remote Pi workspace; not sandboxed"
+                  : "offline scripted table; no command execution";
+      if (!(await ctx.ui.confirm("Launch agent-cat workflow?", `runner=${selected.runner.executable}\ncwd=${ctx.cwd}\ntarget=${target}\nrouting=${routingSelection.inspection?.persona.name ?? "not used"}\ncontainment=${containment}\neffects=${selected.descriptor.capabilities.effects ?? "unknown"}\npersistence=private full prompts/answers plus input hashes`))) return;
       const inputs = await collectInputs(ctx, selected.descriptor);
       if (!inputs) return;
       const prepared = await prepareLaunch({
@@ -817,7 +810,7 @@ export async function collectRoutingSelection(
   const personaChoices = [configuredChoice, ...inspection.availablePersonas.map((name) => `persona: ${name}`)];
   const personaChoice = await ctx.ui.select("Routing persona", personaChoices);
   if (!personaChoice) return undefined;
-  const args: string[] = [];
+  const args: string[] = [...inspection.launch.arguments];
   if (personaChoice !== configuredChoice) {
     const persona = personaChoice.slice("persona: ".length);
     args.push("--persona", persona);
@@ -839,6 +832,7 @@ export async function collectRoutingSelection(
       if (choice !== configured) args.push("--realize", `${rung.axis}=${choice}`);
     }
   }
+  args.push("--offline", "--expect-routing-fingerprint", inspection.launch.fingerprint);
   return { args, managedAxes: new Set(managedRungs.map(({ axis }) => axis)), inspection };
 }
 
@@ -867,16 +861,6 @@ function parseStringArray(value: string, label: string): string[] {
   return parsed;
 }
 
-export function routingLineageArgs(args: string[]): string[] {
-  // collectRoutingSelection appends these pairs after all target-specific arguments.
-  const inherited: string[] = [];
-  for (let end = args.length; end >= 2; end -= 2) {
-    const flag = args[end - 2];
-    if (flag !== "--persona" && flag !== "--realize") break;
-    inherited.unshift(flag, args[end - 1]);
-  }
-  return inherited;
-}
 
 function ownedChildTarget(): { args: string[]; env: NodeJS.ProcessEnv } {
   const adapter = fileURLToPath(new URL("./pi-child-acp.mjs", import.meta.url));

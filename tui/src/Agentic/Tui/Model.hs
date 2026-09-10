@@ -135,12 +135,10 @@ selectedRun :: TuiModel -> Maybe CatalogueEntry
 selectedRun model = atMay (modelRuns model) (modelRunIndex model)
 
 moveSelection :: Int -> TuiModel -> TuiModel
-moveSelection delta model
-  | modelScreen model == TargetScreen = model {modelEngineIndex = boundedIndex (length (routingEngines model)) (modelEngineIndex model + delta)}
-  | otherwise = case modelTab model of
-      WorkflowsTab -> model {modelWorkflowIndex = boundedIndex (length (visibleWorkflows model)) (modelWorkflowIndex model + delta)}
-      RunsTab -> model {modelRunIndex = boundedIndex (length (modelRuns model)) (modelRunIndex model + delta)}
-      RoutingTab -> model {modelEngineIndex = boundedIndex (length (routingEngines model)) (modelEngineIndex model + delta)}
+moveSelection delta model = case modelTab model of
+  WorkflowsTab -> model {modelWorkflowIndex = boundedIndex (length (visibleWorkflows model)) (modelWorkflowIndex model + delta)}
+  RunsTab -> model {modelRunIndex = boundedIndex (length (modelRuns model)) (modelRunIndex model + delta)}
+  RoutingTab -> model {modelEngineIndex = boundedIndex (length (routingEngines model)) (modelEngineIndex model + delta)}
 
 cycleTab :: TuiModel -> TuiModel
 cycleTab model =

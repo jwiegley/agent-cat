@@ -44,10 +44,7 @@ data TuiConfig = TuiConfig
 data EngineChoice = EngineChoice
   { engineChoiceAlias :: !Text,
     engineChoiceBackend :: !Text,
-    engineChoiceProvider :: !Text,
-    engineChoiceTargetKind :: !Text,
-    engineChoiceArguments :: ![Text],
-    engineChoiceFingerprint :: !Text
+    engineChoiceProvider :: !Text
   }
   deriving (Eq, Show)
 
@@ -86,6 +83,8 @@ data RoutingSummary = RoutingSummary
     routingSummaryPersona :: !(Maybe Text),
     routingSummaryPersonaSource :: !(Maybe Text),
     routingSummaryPersonas :: ![Text],
+    routingSummaryArguments :: ![Text],
+    routingSummaryFingerprint :: !Text,
     routingSummaryEngines :: ![EngineChoice],
     routingSummaryProfiles :: ![RoutingProfileChoice],
     routingSummaryWarnings :: ![Text],
@@ -96,7 +95,7 @@ data RoutingSummary = RoutingSummary
 -- | Execution target selected explicitly before preview.
 data TargetSelection
   = TargetScripted
-  | TargetLive !EngineChoice !Text
+  | TargetRouting !Text ![Text] !Text
   | TargetRestored !Text ![Text]
   deriving (Eq, Show)
 
@@ -125,6 +124,7 @@ instance FromJSON RoutingSummary where
         version <- object .: "version"
         unless (version == 2) (fail "routing inspection version is not 2")
         persona <- object .:? "persona" >>= traverse parsePersona
+        (arguments, fingerprint) <- object .: "launch" >>= parseRoutingLaunch
         engines <- fromMaybe [] <$> object .:? "engines"
         profiles <- fromMaybe [] <$> object .:? "profiles"
         warnings <- fromMaybe [] <$> object .:? "warnings"
@@ -141,6 +141,8 @@ instance FromJSON RoutingSummary where
               routingSummaryPersona = fst <$> persona,
               routingSummaryPersonaSource = snd <$> persona,
               routingSummaryPersonas = available,
+              routingSummaryArguments = arguments,
+              routingSummaryFingerprint = fingerprint,
               routingSummaryEngines = engines,
               routingSummaryProfiles = profiles,
               routingSummaryWarnings = warnings,
@@ -148,6 +150,14 @@ instance FromJSON RoutingSummary where
             }
       parsePersona = withObject "routing persona" $ \persona ->
         (,) <$> persona .: "name" <*> persona .: "source"
+      parseRoutingLaunch = withObject "routing-only launch" $ \launch -> do
+        targetKind <- launch .: "targetKind"
+        arguments <- launch .: "arguments"
+        fingerprint <- launch .: "fingerprint"
+        unless (targetKind == ("routing" :: Text)) (fail "routing-only launch target kind is invalid")
+        unless (not (null arguments) && length arguments <= 16 && all validLaunchArgument arguments) (fail "routing-only launch arguments are invalid")
+        unless (validLaunchFingerprint fingerprint) (fail "routing-only launch fingerprint is invalid")
+        pure (arguments, fingerprint)
 
 instance FromJSON RoutingInventoryChoice where
   parseJSON = withObject "routing inventory" $ \inventory ->
@@ -195,26 +205,25 @@ instance FromJSON EngineChoice where
     name <- engine .: "name"
     backend <- engine .: "backend"
     provider <- engine .: "provider"
-    (targetKind, arguments, fingerprint) <- engine .: "launch" >>= withObject "routing launch" parseLaunch
     unless (not (T.null name) && not (T.null backend)) (fail "routing engine name or backend is empty")
-    unless (targetKind `elem` ["acp", "deck"]) (fail "routing launch target kind is invalid")
-    unless (not (null arguments) && length arguments <= 16 && all validArgument arguments) (fail "routing launch arguments are invalid")
-    unless (T.length fingerprint == 64 && T.all (`elem` ("0123456789abcdef" :: String)) fingerprint) (fail "routing launch fingerprint is invalid")
-    pure (EngineChoice name backend provider targetKind arguments fingerprint)
-    where
-      parseLaunch launch = (,,) <$> launch .: "targetKind" <*> launch .: "arguments" <*> launch .: "fingerprint"
-      validArgument value = not (T.null value) && T.length value <= 4096 && not (T.any (`elem` ['\NUL', '\n', '\r']) value)
+    pure (EngineChoice name backend provider)
+
+validLaunchArgument :: Text -> Bool
+validLaunchArgument value = not (T.null value) && T.length value <= 4096 && not (T.any (`elem` ['\NUL', '\n', '\r']) value)
+
+validLaunchFingerprint :: Text -> Bool
+validLaunchFingerprint value = T.length value == 64 && T.all (`elem` ("0123456789abcdef" :: String)) value
 
 targetArguments :: TargetSelection -> Either Text [String]
 targetArguments TargetScripted = Right ["--scripted"]
 targetArguments (TargetRestored _ arguments) = Right (map T.unpack arguments)
-targetArguments (TargetLive engine persona) =
+targetArguments (TargetRouting persona arguments fingerprint) =
   Right
-    ( map T.unpack (engineChoiceArguments engine)
+    ( map T.unpack arguments
         <> [ "--persona",
              T.unpack persona,
              "--offline",
              "--expect-routing-fingerprint",
-             T.unpack (engineChoiceFingerprint engine)
+             T.unpack fingerprint
            ]
     )

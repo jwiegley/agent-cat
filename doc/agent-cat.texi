@@ -944,11 +944,14 @@ Alternate pins are execution policy that is collected before the run.  An
 added alternate changes the printed program, but it leaves the elaborated Plan,
 the denotation, and the static cost unchanged.
 
-A live run has a default backend, and schema version 1 can add
-@code{--route NAME=BACKEND} entries for serving-model pins.  Unrouted pins,
-unpinned model questions, tools, and people use the default.  Routing selects an
-answering service after the program and its static analyses already exist.  It
-therefore changes neither the shape of the Plan nor its price.
+With no explicit engine or session, a live run loads routing configuration and
+requires every engine-bound question to carry a configured serving-model pin.
+There is no default backend.  An explicit engine or session instead supplies a
+default backend, and @code{--route NAME=BACKEND} can add serving-model routes.
+Unrouted pins, unpinned model questions, tools,
+and people use that explicit default.  Routing selects an answering service
+after the program and its static analyses already exist.  It therefore changes
+neither the shape of the Plan nor its price.
 
 Schema version 2 adds an operational persona above the same resolver.  The user
 file owns environment references, engines, catalogues, concrete model aliases,
@@ -1744,8 +1747,8 @@ API.
 
 @code{sharesOneSession} reads @code{run.engine} and reports whether at least one
 answerer shares a conversation across the run.  @code{routedBackend} reads
-@code{run.routes} and returns the named backend, then the default backend, then
-empty text when no table exists.  @code{plan} and @code{cost} leave every run
+@code{run.routes} and returns the named backend, then the default backend when
+one is present, then empty text.  @code{plan} and @code{cost} leave every run
 fact empty.  Scripted execution binds the roster, engine, and sentinel while
 leaving @code{run.routes} empty because it has no backend table.
 
@@ -1954,7 +1957,8 @@ Authenticate Droid locally, or provide @code{FACTORY_API_KEY} in the
 environment that starts the runner.  Never put credentials in
 @code{--adapter-arg} or in the routing configuration.  A plain Droid backend
 uses its configured session default.  To select a model and a reasoning level,
-define a routing profile whose backend is @code{acp:droid}, and set
+define a routing profile whose backend is @code{acp:droid}, omit both
+@code{--engine} and @code{--session}, and set
 @code{max-output: unconstrained}.  The runner validates and applies both
 settings through @code{session/set_config_option} before it sends a prompt.
 Any declared setting that the adapter does not support still refuses
@@ -1991,10 +1995,12 @@ agentic-run run NAME --session ID [--binary PATH] [--poll MS]
 @end example
 
 @code{--session} by itself selects the deck engine.  The optional explicit form
-@code{--engine deck --session ID} means the same thing.  @code{--binary} names
-the @command{agent-deck} executable, whose default is @code{agent-deck} on
-@code{PATH}.  @code{--poll} defaults to 1000 milliseconds.  The common
-@code{--timeout} defaults to 600000 milliseconds for a deck turn.
+@code{--engine deck --session ID} means the same thing.  An explicit session is
+the complete command-line route table, even when the redundant @code{--routing}
+flag is present.  @code{--binary} names the @command{agent-deck} executable,
+whose default is @code{agent-deck} on @code{PATH}.  @code{--poll} defaults to
+1000 milliseconds.  The common @code{--timeout} defaults to 600000 milliseconds
+for a deck turn.
 
 Before it sends a question, the runner records the timestamp of the output
 that is already present.  It sends the rendered question, polls the session
@@ -2002,16 +2008,17 @@ until the session is idle, and accepts a reply only after the timestamp
 changes.  This staleness guard prevents the output of the previous turn from
 becoming the current answer.
 
-Every model, tool, and person question goes to the selected session.  The
-rendered header states the authored addressee, the intent, the serving model,
-and the answer format.  Deck reports no ACP stop reason, so the completion
-evidence is limited to an idle session and newer output.
+When no @code{--route} option is present, every model, tool, and person question
+goes to the selected session.  The rendered header states the authored addressee,
+the intent, the serving model, and the answer format.  Deck reports no ACP stop
+reason, so the completion evidence is limited to an idle session and newer
+output.
 
 @section Routes
 
 @cindex route option
-A live run has one default backend, and it can refine that backend by
-serving-model pin:
+An explicit live target has one default backend, and @code{--route} can refine
+that backend by serving-model pin:
 
 @example
 --route NAME=acp:stub
@@ -2024,7 +2031,7 @@ serving-model pin:
 @code{fallingBackTo} names, and it is not a model-party identifier.  A route
 name that is absent from the pin set of the Program is refused before
 execution.  One name can appear only once.  Pinned questions without a route,
-unpinned model questions, tools, and people use the default backend.
+unpinned model questions, tools, and people use the explicit default backend.
 
 Routes can mix ACP and deck backends.  Engine-specific flags are accepted when
 at least one backend of the corresponding scheme uses them.  @code{--adapter},
@@ -2033,14 +2040,15 @@ at least one backend of the corresponding scheme uses them.  @code{--adapter},
 and @code{--verbose} apply to both.  A foreign flag with no backend to consume
 it is refused rather than ignored.
 
-A version-2 managed axis uses @code{--realize AXIS=MODEL-ALIAS} as its safe
+A routing-only version-2 run uses @code{--realize AXIS=MODEL-ALIAS} as its safe
 override.  The alias carries its authorized engine, provider, environment, and
-catalogue.  Raw @code{--route} is refused for such an axis, and it remains
-unchanged for schema version 1 and unconfigured version-2 names.
+catalogue.  Raw @code{--route} belongs only to an explicit command-line target.
 
 Scripted execution accepts no routes, because its table does not dispatch by
-serving-model scope.  A route also requires a default live answerer, because
-unclaimed questions still need a destination.
+serving-model scope.  A raw route also requires an explicit default live
+answerer.  Without an explicit target, routing configuration must cover every
+engine-bound question.  Every model ask therefore needs a configured pin, while
+a tool or person question requires @code{--engine} or @code{--session}.
 
 @section Inputs and preflight checks
 
@@ -2050,9 +2058,10 @@ a Program that declares none refuses all three forms.  Run facts are bound by
 the runner after it resolves the complete backend table and before it builds the
 Program.
 
-@code{--require-pinned} can accompany any execution engine.  Route syntax,
-duplicate routes, unknown pins, function-table validity, reserved input names,
-and required operator inputs are all checked before a live backend starts.
+@code{--require-pinned} can accompany any execution target.  Routing-only
+execution imposes full pin and configured-route coverage automatically.  Route
+syntax, duplicate routes, unknown pins, function-table validity, reserved input
+names, and required operator inputs are checked before a live backend starts.
 This ordering keeps usage errors at exit status 1, and it prevents a malformed
 request from spending a turn.
 
@@ -2873,8 +2882,8 @@ text returns false.
 Canonical @code{(default)} label used in @code{run.routes}.
 @c COVER API Agentic.Runtime.Facts.routedBackend support
 @item routedBackend routesFact pin
-Return the named backend, then the default backend, then empty text when no table
-exists.
+Return the named backend, then a default backend when its canonical line is
+present, then empty text.
 @end table
 
 @section Schema and JSON support
@@ -3137,8 +3146,9 @@ agentic-run NAME --help
 agentic-run plan NAME [--raw] [--require-pinned] [--json] [INPUT ...]
 agentic-run cost NAME [INPUT ...]
 agentic-run run NAME --scripted [INPUT ...]
-agentic-run run NAME --session ID [DECK-OPTION ...] [INPUT ...]
-agentic-run run NAME --engine acp [ACP-OPTION ...] [ROUTING-OPTION ...] [INPUT ...]
+agentic-run run NAME [--routing] [ROUTING-OPTION ...] [INPUT ...]
+agentic-run run NAME --session ID [DECK-OPTION ...] [--routing] [INPUT ...]
+agentic-run run NAME --engine acp [ACP-OPTION ...] [--routing] [INPUT ...]
 agentic-run machine RUN_ID NAME RUN-OPTION ...
 agentic-run lineage-check restart|resume|fork PARENT_STORE NAME RUN-OPTION ...
 agentic-run machine-restart RUN_ID PARENT_STORE NAME RUN-OPTION ...
@@ -3171,12 +3181,12 @@ reconstructs a stored run; @kbd{h} opens the selected workflow's
 bounded runner help; @kbd{q} exits only when this process owns
 no live child.  Workflow values are collected in descriptor order.  @kbd{RET}
 inserts a newline and @kbd{C-d} accepts the current value.  @kbd{p} cycles the
-available routing personas.  Scripted and live targets use @kbd{s} and @kbd{l}.
-Exact-input plan facts, the runner executable and target arguments, and a concrete
-routing summary appear before a separate @kbd{y} launch confirmation.  Routing
-inspection supplies opaque CLI-owned target arguments
-and a fingerprint.  Launch repeats offline routing and refuses if that fingerprint
-has changed.
+available routing personas.  Scripted and routing-only targets use @kbd{s} and
+@kbd{l}.  Exact-input plan facts, the runner executable and target arguments,
+and a concrete routing summary appear before a separate @kbd{y} launch
+confirmation.  Routing inspection supplies opaque CLI-owned routing-only
+arguments and a fingerprint.  Launch requires full pin coverage, repeats offline
+routing, and refuses if that fingerprint has changed.
 
 A confirmed run uses protocol version 2, store format 2, local person answering,
 and a control pipe on file descriptor 3.  Its header shows workflow, persona,
@@ -3242,10 +3252,11 @@ data is available through @code{plan --json}, and @code{cost} accepts no JSON
 option.
 
 @c COVER CLI verb:run author
-@item run NAME target [options]
-Build, preflight, and execute the Program against exactly one scripted target or
-a live route table with one default backend.  The trace is printed as the run
-progresses, followed by result and bills.
+@item run NAME [target] [options]
+Build, preflight, and execute the Program against one scripted target, one
+explicit live route table with a default, or fully covered configured routes
+without a default.  The trace is printed as the run progresses, followed by
+result and bills.
 
 @c COVER CLI verb:machine author
 @item machine RUN_ID NAME target [options]
@@ -3284,9 +3295,12 @@ Load the conventional routing files and print the resolved policy without an
 engine or a run store.  Human output names the persona, axes, aliases, exact model
 identifiers, engines, and inventory source.  JSON also carries the available
 persona and model choices, credential-readiness booleans, profile rungs, cache
-ages and timestamps, warnings, and endpoint fingerprints.  It omits secret names
+ages and timestamps, warnings, endpoint fingerprints, and an opaque routing-only
+launch with its policy fingerprint.  It omits secret names
 and values, environment and header data, raw endpoint URLs, and unselected
-inventories.
+inventories.  Inside live run options, the same spelling explicitly names the
+routing target, but omission means the same thing when no engine or session was
+given.  An explicit engine or session takes precedence over this flag.
 
 @c COVER CLI --migrate-routing author
 @c COVER CLI --output author
@@ -3393,14 +3407,16 @@ and every version-2 persona or discovery override.
 
 @c COVER CLI --engine author
 @item --engine acp
-Select an ACP default backend.  @code{--engine deck} is accepted only with
+Select an ACP backend.  @code{--engine deck} is accepted only with
 @code{--session ID}, and a bare session already selects deck.  Any other word
-is refused.
+is refused.  This backend and explicit @code{--route} entries are the complete
+route table, even when @code{--routing} is also present.
 
 @c COVER CLI --session author
 @item --session ID
-Select an agent-deck session as the default backend.  Mutually exclusive with
-scripted and ACP defaults.
+Select an agent-deck session.  It is mutually exclusive with scripted and ACP
+targets.  This session and explicit @code{--route} entries are the complete
+route table, even when @code{--routing} is also present.
 
 @c COVER CLI --adapter author
 @item --adapter stub|claude|codex|droid|PATH
@@ -3459,20 +3475,27 @@ creation.  Repeatable and valid only for fork.
 @section Routing
 
 @table @code
+@item --routing
+Explicitly name the routing target for a live run.  The spelling is optional
+when neither @code{--engine} nor @code{--session} is present, because their
+absence always selects routing.  Every engine-bound question must have a
+configured model pin, and there is no default backend.  When an engine or
+session is present, that more explicit target wins and routing files are not
+read.
+
 @c COVER CLI --route author
 @item --route NAME=BACKEND
 Route one serving-model pin to @code{acp:ADAPTER} or @code{deck:SESSION}.
 Repeatable at most once per name.  The Program must contain the named primary or
-alternate pin.  A default live backend is still required.  Version 1 and
-unconfigured v2 names retain this behavior; a managed v2 axis refuses raw backend
-substitution.
+alternate pin, and an explicit default live backend is required.  Routing-only
+execution uses configured profiles and @code{--realize}, not raw routes.
 
 @c COVER CLI --persona author
 @item --persona NAME
-Select a version-2 persona explicitly.  Precedence is this flag,
+Select a version-2 persona for routing-only execution.  Precedence is this flag,
 @code{AGENT_CAT_PERSONA}, the project file's @code{persona}, then the user file's
 @code{default-persona}.  No repository, branch, hostname, account, or email is
-inferred.
+inferred.  An explicit engine or session makes this option inapplicable.
 
 @c COVER CLI --realize author
 @item --realize AXIS=MODEL-ALIAS
@@ -3494,9 +3517,9 @@ never silently falls back to stale cache.  Mutually exclusive with
 
 @c COVER CLI --expect-routing-fingerprint author
 @item --expect-routing-fingerprint SHA256
-Require version-2 offline launch resolution to equal the opaque fingerprint returned
-by routing inspection.  The terminal frontend supplies this internal preflight token;
-a mismatch refuses the run before creating its store or starting an engine.
+Require version-2 routing-only launch resolution to equal the opaque fingerprint
+returned by routing inspection.  Frontends supply this internal preflight token.
+A mismatch refuses the run before creating its store or starting an engine.
 @end table
 
 A route table can contain both schemes.  ACP-specific and deck-specific flags
@@ -3693,17 +3716,22 @@ dispatch is intended.
 The left side must be a primary or alternate serving-model pin from the Program,
 rather than the party identifier.  Inspect @code{pins} through help or JSON.
 
-@item --route refines this run's default answerer, and there is none
-Add @code{--engine acp} or @code{--session ID}.  A route table sends only named
-pins elsewhere, and unclaimed questions still require a default.
+@item --route refines a command-line default answerer, and there is none
+Add @code{--engine acp} or @code{--session ID}.  Raw routes refine only an
+explicit command-line target.
 
 @item FLAG is not the ENGINE engine's to take
 The option is inert, because the selected backend table contains no matching
 scheme.  Remove it, or add an actual ACP or deck backend that consumes it.
 
-@item run needs --scripted, --engine acp, or --session ID
-Select exactly one default answering service.  Mixed live runs still begin with
-one default and add routes.
+@item routing without --engine or --session requires full pin coverage
+Add @code{servedBy} to every model ask and define each profile in routing
+configuration.  A tool or person question cannot carry a model pin and therefore
+requires an explicit engine or session.
+
+@item routing configuration has no route for pinned model NAME
+Define the named profile in the selected routing persona, or use an explicit
+engine or session.
 @end table
 
 @section Execution failures

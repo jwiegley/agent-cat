@@ -1,13 +1,11 @@
 {-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE RankNTypes #-}
 
 -- | Generic model-axis routing over an arbitrary backend table.
 module Agentic.Runtime.Route
   ( Routes (..),
     routes,
+    routesCovered,
     backendFor,
     routeBackends,
     routedWorld,
@@ -22,6 +20,7 @@ import Agentic.Plan
     withRequestPrompt,
   )
 import Data.List (nub)
+import Data.Maybe (maybeToList)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
@@ -32,26 +31,20 @@ import qualified Data.Text as T
 -- The table
 -- ---------------------------------------------------------------------------
 
--- | A run's answerers: the one every question takes unless a route claims it,
--- and the routes, which claim by serving model.
+-- | A run's answerers: an optional default and routes claimed by serving model.
+-- A routing-only run has no default and must prove its named map total before
+-- execution.
 --
 -- Parametric in the backend because the same table is wanted twice at two
--- types: 'Backend' as the command line spelled it — which is what the refusals
--- and the header are about — and 'Agentic.Exec.WorldIO' once the transports are
--- connected, which is what 'routedWorld' dispatches over. The 'Functor'
--- instance is the connect step, and keeping it a @fmap@ is what makes it
--- impossible to connect a backend the header did not name.
+-- types: 'Backend' as the command line spelled it, and 'Agentic.Exec.WorldIO'
+-- once transports are connected. The 'Functor' instance is that connection
+-- step, making it impossible to connect a backend the table did not name.
 --
--- __Why the routes are held twice.__ 'routeNamed' is the order the operator
--- typed, which is the order the run starts them and the order the header prints
--- them — an operator must be able to read the header against their own command
--- line. 'routeByModel' is the same table for lookup, which is what
--- 'backendFor' does once per request. 'routes' is the only thing that
--- builds either, so they cannot disagree.
+-- 'routeNamed' preserves presentation and startup order. 'routeByModel' is the
+-- same table for lookup. The two smart constructors are their only builders.
 data Routes b = Routes
-  { -- | Every question no route claims: every unpinned ask, every tool, every
-    -- person, and every pinned model this table does not name.
-    routeDefault :: !b,
+  { -- | The backend for an unclaimed question, absent under full pin coverage.
+    routeDefault :: !(Maybe b),
     -- | The routes, in the order they were given.
     routeNamed :: ![(Text, b)],
     -- | The same routes, for lookup.
@@ -59,49 +52,33 @@ data Routes b = Routes
   }
   deriving (Functor)
 
--- | The table of a default and the routes that refine it.
---
--- The only constructor callers should use. A name given twice would be
--- resolved here by 'Data.Map.Strict.fromList', which retains the /last/ value
--- for a repeated key — while 'routeNamed' would still carry both, so the header
--- would announce a backend the lookup never used. That is not a policy, because
--- it is unreachable: the CLI refuses a name routed twice before this is called
--- (§1.5), because an operator who wrote two backends for one model believes
--- something about the run that no resolution of the clash would make true.
+-- | Build a table with an explicit default.
 routes :: b -> [(Text, b)] -> Routes b
-routes d named = Routes d named (Map.fromList named)
+routes defaultBackend = routeTable (Just defaultBackend)
 
--- | __A question is routed by its model axis. 'Nothing' takes the default.__
+-- | Build a named table with no default. Its caller must establish full
+-- coverage before execution.
+routesCovered :: [(Text, b)] -> Routes b
+routesCovered = routeTable Nothing
+
+routeTable :: Maybe b -> [(Text, b)] -> Routes b
+routeTable defaultBackend named = Routes defaultBackend named (Map.fromList named)
+
+-- | Route by model axis, then use the default when one exists.
 --
--- One field, and it is the field "Agentic.Exec" has already computed, already
--- relabels on a fail-over, and already records in the trace. A question with no
--- model axis — an unpinned model ask, a tool, a person — takes the default,
--- because there is no name on it to route by and inventing one would be the
--- runner deciding something the program declined to say.
-backendFor :: Routes b -> Q c -> b
+-- A routing-only table returns 'Nothing' for an uncovered question. CLI
+-- preflight proves that case unreachable before 'routedWorld' is installed.
+backendFor :: Routes b -> Q c -> Maybe b
 backendFor rs q = case scopeModelAxis (qScope q) of
-  Just m -> Map.findWithDefault (routeDefault rs) m (routeByModel rs)
+  Just model -> case Map.lookup model (routeByModel rs) of
+    Just backend -> Just backend
+    Nothing -> routeDefault rs
   Nothing -> routeDefault rs
 
--- | The distinct backends of a table, in the order a run starts them: __the
--- default first__, then the named routes in the order they were typed.
---
--- The default first because every run needs it, so a run whose default will not
--- start fails before spawning anything else. Typed order after it so the
--- operator can read the header against their own command line.
---
--- __Deduplicated__, which is the whole reason this is a function and not
--- @map snd@: two pins routed to @acp:codex@ are the same provider, two
--- processes would double nothing, and a header that counted route lines rather
--- than processes would say this run started more agents than it did.
---
--- The deduplication is safe today for a reason that is a constraint on
--- tomorrow: 'Agentic.Acp.acpFreshPerQuestion' is 'True' and the CLI never
--- overrides it, so two pins sharing an adapter never share a conversation.
--- __Any future flag exposing @acpFreshPerQuestion = False@ must either disable
--- this or key sessions by pin__, or two pins would silently share context.
+-- | Distinct backends in startup order: an explicit default when present, then
+-- named routes. A fully covered table starts directly with its first named route.
 routeBackends :: (Eq b) => Routes b -> [b]
-routeBackends rs = nub (routeDefault rs : map snd (routeNamed rs))
+routeBackends rs = nub (maybeToList (routeDefault rs) <> map snd (routeNamed rs))
 
 -- ---------------------------------------------------------------------------
 -- The layer
@@ -136,10 +113,21 @@ routeBackends rs = nub (routeDefault rs : map snd (routeNamed rs))
 routedWorld :: Routes WorldIO -> WorldIO
 routedWorld rs =
   WorldIO
-    { worldAskIO = \c q -> worldAskIO (backendFor rs (reqQuestion q)) c q,
-      worldAskAttemptIO = \context c q ->
-        worldAskAttemptIO (backendFor rs (reqQuestion q)) context c q,
-      worldTurnLane = \c shape ->
-        let backend = backendFor rs (reqQuestion (withRequestPrompt shape T.empty))
-         in worldTurnLane backend c shape
+    { worldAskIO = \code request -> case backendFor rs (reqQuestion request) of
+        Just backend -> worldAskIO backend code request
+        Nothing -> missing (reqQuestion request),
+      worldAskAttemptIO = \context code request -> case backendFor rs (reqQuestion request) of
+        Just backend -> worldAskAttemptIO backend context code request
+        Nothing -> missing (reqQuestion request),
+      worldTurnLane = \code shape ->
+        backendFor rs (reqQuestion (withRequestPrompt shape T.empty))
+          >>= \backend -> worldTurnLane backend code shape
     }
+  where
+    missing question =
+      ioError
+        ( userError
+            ( "routing table has no backend for model axis "
+                <> show (scopeModelAxis (qScope question))
+            )
+        )

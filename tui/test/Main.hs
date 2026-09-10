@@ -109,7 +109,7 @@ main = do
 
 routingFixture :: BS.ByteString
 routingFixture =
-  "{\"version\":2,\"persona\":{\"name\":\"work\",\"source\":\"command-line\"},\"availablePersonas\":[\"work\"],\"engines\":[{\"name\":\"engine-a\",\"backend\":\"deck:pane\",\"provider\":\"fixture\",\"launch\":{\"targetKind\":\"deck\",\"arguments\":[\"--session\",\"pane\"],\"fingerprint\":\"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\"}}],\"profiles\":[{\"name\":\"deep\",\"rungs\":[{\"axis\":\"deep\",\"rung\":0,\"modelAlias\":\"model-a\",\"model\":\"concrete-a\",\"router\":\"engine-a\",\"backend\":\"deck:pane\",\"provider\":\"fixture\",\"thinking\":\"high\",\"inventory\":{\"source\":\"offline-cache\",\"fingerprint\":\"sha256:inventory\",\"fetchedAt\":\"2026-09-04T00:00:00Z\"}}]}],\"warnings\":[]}"
+  "{\"version\":2,\"persona\":{\"name\":\"work\",\"source\":\"command-line\"},\"launch\":{\"targetKind\":\"routing\",\"arguments\":[\"--routing\"],\"fingerprint\":\"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\"},\"availablePersonas\":[\"work\"],\"engines\":[{\"name\":\"engine-a\",\"backend\":\"deck:pane\",\"provider\":\"fixture\",\"launch\":{\"targetKind\":\"deck\",\"arguments\":[\"--session\",\"pane\"],\"fingerprint\":\"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\"}}],\"profiles\":[{\"name\":\"deep\",\"rungs\":[{\"axis\":\"deep\",\"rung\":0,\"modelAlias\":\"model-a\",\"model\":\"concrete-a\",\"router\":\"engine-a\",\"backend\":\"deck:pane\",\"provider\":\"fixture\",\"thinking\":\"high\",\"inventory\":{\"source\":\"offline-cache\",\"fingerprint\":\"sha256:inventory\",\"fetchedAt\":\"2026-09-04T00:00:00Z\"}}]}],\"warnings\":[]}"
 
 checkProperty :: Testable property => String -> property -> IO ()
 checkProperty label property = do

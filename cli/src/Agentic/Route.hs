@@ -16,8 +16,10 @@
 -- model axis.
 --
 -- __The resolution rule, stated once.__ /A question is routed by its model
--- axis; 'Nothing' takes the default./ Four things follow, and the first is why
--- the rule is this one and not the obvious alternative of routing the party:
+-- axis, then by an explicit default when one exists./ Routing-only execution has
+-- no default and is admitted only after every engine-bound question has a named
+-- route. Four things follow, and the first explains why routing uses the model
+-- axis rather than the party:
 --
 --   * __It is the only rule under which a fail-over ladder can cross
 --     providers__, which is the entire capability. @Agentic.Exec.candidates@
@@ -84,13 +86,14 @@ module Agentic.Route
 
     Routes (..),
     routes,
+    routesCovered,
     backendFor,
     routeBackends,
     routedWorld,
   )
 where
 
-import Agentic.Runtime (Routes (..), backendFor, routeBackends, routedWorld, routes)
+import Agentic.Runtime (Routes (..), backendFor, routeBackends, routedWorld, routes, routesCovered)
 import Data.Text (Text)
 import qualified Data.Text as T
 
@@ -124,8 +127,8 @@ data Backend
 -- the deck engine's and @--adapter@, @--adapter-arg@ and @--scratch@ are the
 -- acp engine's, and until routing existed a run /was/ one engine, so "not the
 -- acp engine's to take" was a complete sentence. With a @deck:@ route under an
--- @acp@ default it is not, and the rule generalizes to the __set of schemes
--- this run's table uses__, default included.
+-- @acp@ default it is not, and the rule generalizes to the set of schemes in
+-- the optional default and named routes.
 data Scheme
   = SchemeAcp
   | SchemeDeck

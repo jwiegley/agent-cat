@@ -576,9 +576,9 @@ def test_exact_controls_and_stress(driver: Path, fixture: Path, root: Path) -> N
         session.assert_restored()
     live_record = runs(live_state)[0]
     live_manifest = json.loads((live_record / "supervisor-manifest.json").read_text())
-    assert live_manifest["targetKind"] == "deck"
+    assert live_manifest["targetKind"] == "routing"
     assert live_manifest["targetArgs"] == [
-        "--session", "work-session",
+        "--routing",
         "--persona", "work",
         "--offline",
         "--expect-routing-fingerprint", "f" * 64,

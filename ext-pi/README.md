@@ -56,10 +56,10 @@ requires the project-trust decision of Pi for the working directory. The
 extension refuses adapter arguments that contain credential-like flags or
 values. Under routing version 2, credentials remain environment references that
 agent-cat resolves. The extension receives neither those references nor their
-values, and its private manifest contains only persona and model-alias arguments.
-When it rebuilds current-session, owned-child, or remote targets for lineage, it
-carries those explicit parent arguments forward instead of silently selecting
-current defaults. Remote
+values. A routing-only private manifest contains only the sanitized launch,
+persona, and model-alias arguments. Lineage carries that exact target vector
+forward instead of silently selecting current defaults. Explicit targets remain
+explicit across lineage. Remote
 transport authentication occurs before any Pi protocol bytes are exchanged.
 The Unix transport relies on private socket permissions, and a remote session
 is acquired exclusively across client connections.
@@ -148,12 +148,16 @@ of agent-cat, and they report `delivered`, `rejected-stale`, `unsupported`, or
 
 ## Routing selection
 
-When a trusted descriptor-version-3 runner advertises routing inspection, `/wf`
-and `/workflow` invoke `agentic-run --routing --json`. Pi offers the configured
-persona or another user-owned persona, followed by optional concrete model
-aliases for the managed profile axes of the workflow. It passes only `--persona`
-and `--realize AXIS=MODEL-ALIAS`. Raw `--route` remains available for unmanaged
-pins.
+`/wf` always uses the current Agent Deck session and does not inspect or load
+routing configuration. `/workflow` offers routing configuration as a distinct
+live target when a trusted descriptor-version-3 runner advertises inspection.
+For that target, Pi invokes `agentic-run --routing --json`, offers the configured
+persona or another user-owned persona, and offers optional concrete model aliases
+for the workflow's managed profile axes. It passes the CLI-owned routing-only
+launch arguments and fingerprint plus explicit persona and realization choices.
+The runner requires full pin coverage. Explicit ACP, Agent Deck, current-session,
+owned-child, and remote targets do not load routing configuration. Raw `--route`
+remains available for explicit native ACP and Agent Deck targets.
 
 The extension validates the sanitized version-2 projection and rejects fields
 for secrets, environment bindings, headers, authorization, or endpoint URLs. It
@@ -167,8 +171,9 @@ have mode 0600 and store only the selected non-secret argument vector.
 | Target | What answers | Containment |
 |---|---|---|
 | Scripted | The registered canned table. | Offline. No command runs. |
-| Native ACP | A configured adapter plus validated unmanaged-pin routes or version-2 persona and model-alias choices. The built-in adapters are `stub`, `claude`, `codex`, and `droid`, and `droid` launches `droid exec --output-format acp`. | The scratch directory of agent-cat, which is not an operating-system sandbox. |
-| Native agent-deck | The Agent Deck session that `/wf` inherits, or a session that is chosen in the compatibility wizard, plus unmanaged routes or version-2 persona and model-alias choices. | The workspace of that session. |
+| Routing configuration | Configured profile engines. Every engine-bound question must have a configured pin. | Containment depends on every selected engine. |
+| Native ACP | One explicit adapter plus optional raw pin routes. The built-in adapters are `stub`, `claude`, `codex`, and `droid`, and `droid` launches `droid exec --output-format acp`. | The scratch directory of agent-cat, which is not an operating-system sandbox. |
+| Native agent-deck | The Agent Deck session that `/wf` inherits, or a session chosen in `/workflow`, plus optional raw pin routes. | The workspace of that session. |
 | Current Pi session | Visible, exclusive injected turns in the current project. | Not a sandbox. |
 | Owned Pi child | An in-memory Pi session with tools disabled. | The scratch directory of agent-cat. |
 | Remote Pi session | A known or discovered session under an exclusive lease. | Its remote workspace, which is not a sandbox. |

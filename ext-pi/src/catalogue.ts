@@ -271,6 +271,14 @@ function parseRoutingInspection(runnerId: string, value: unknown): RoutingInspec
   assertSanitizedRouting(value);
   if (!isObject(value.persona)) throw new Error("routing persona is not an object");
   const persona = { name: text(value.persona.name, "routing persona name"), source: text(value.persona.source, "routing persona source") };
+  if (!isObject(value.launch)) throw new Error("routing launch is not an object");
+  if (text(value.launch.targetKind, "routing launch target kind") !== "routing") throw new Error("routing launch target kind is invalid");
+  const launch = {
+    arguments: texts(value.launch.arguments, "routing launch arguments"),
+    fingerprint: text(value.launch.fingerprint, "routing launch fingerprint"),
+  };
+  if (launch.arguments.length === 0 || launch.arguments.length > 16 || launch.arguments.some((argument) => !argument || argument.length > 4096 || /[\0\r\n]/.test(argument))) throw new Error("routing launch arguments are invalid");
+  if (!/^[0-9a-f]{64}$/.test(launch.fingerprint)) throw new Error("routing launch fingerprint is invalid");
   const availablePersonas = texts(value.availablePersonas, "availablePersonas");
   if (!availablePersonas.includes(persona.name)) throw new Error("selected routing persona is absent from availablePersonas");
   if (!Array.isArray(value.availableModels)) throw new Error("availableModels is not an array");
@@ -295,7 +303,7 @@ function parseRoutingInspection(runnerId: string, value: unknown): RoutingInspec
       }),
     };
   });
-  return { version: 2, persona, availablePersonas, availableModels, profiles, warnings: texts(value.warnings, "routing warnings"), raw: value };
+  return { version: 2, persona, launch, availablePersonas, availableModels, profiles, warnings: texts(value.warnings, "routing warnings"), raw: value };
 }
 
 function isUnsupportedDescriptorVersion(error: unknown): boolean {

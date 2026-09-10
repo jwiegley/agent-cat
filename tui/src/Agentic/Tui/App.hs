@@ -546,7 +546,7 @@ inputView state index = case modelWorkflow model >>= (\descriptor -> atMay (work
 targetView :: TuiModel -> Widget Name
 targetView model =
   vBox
-    ( [txt "Press s for scripted execution, l for the selected live engine, or p for the next persona."]
+    ( [txt "Press s for scripted execution, l for fully pinned routing, or p for the next persona."]
         <> case modelRouting model of
           Left failure -> [txt ("Live routing unavailable: " <> failure)]
           Right routing ->
@@ -554,9 +554,8 @@ targetView model =
               txt ("Available personas: " <> T.intercalate ", " (routingSummaryPersonas routing)),
               txt ""
             ]
-              <> [ if index == modelEngineIndex model then withAttr (attrName "selected") (txt line) else txt line
-                   | (index, engine) <- zip [0 :: Int ..] (routingSummaryEngines routing),
-                     let line = engineChoiceAlias engine <> "  " <> engineChoiceBackend engine
+              <> [ txt (engineChoiceAlias engine <> "  " <> engineChoiceBackend engine)
+                   | engine <- routingSummaryEngines routing
                  ]
     )
 
@@ -574,15 +573,8 @@ confirmView config preview =
         Nothing -> case previewTarget preview of
           TargetScripted -> "scripted"
           TargetRestored kind _ -> "restored " <> kind
-          TargetLive engine persona ->
-            "live: "
-              <> engineChoiceAlias engine
-              <> " ("
-              <> persona
-              <> "); backend "
-              <> engineChoiceBackend engine
-              <> "; provider "
-              <> engineChoiceProvider engine
+          TargetRouting persona _ _ ->
+            "live routing (" <> persona <> "); full pin coverage required"
       workingDirectory = maybe (tuiWorkingDir config) (frontendCwd . recordManifest . snd) (previewLineage preview)
       exactTargetArguments = case previewLineage preview of
         Just (_, record) -> Right (map T.unpack (frontendTargetArgs (recordManifest record)))
@@ -708,7 +700,7 @@ footerScreen state = \case
     | modelTab (stateModel state) == RoutingTab -> "↑/↓ select  p next persona  Tab pane  q quit"
     | otherwise -> "↑/↓ select  / filter  Enter launch  h help  Tab pane  q quit"
   InputScreen _ -> "Ctrl-D accept  Esc back"
-  TargetScreen -> "s scripted  l live  p next persona  ↑/↓ engine  Esc back"
+  TargetScreen -> "s scripted  l routing  p next persona  Esc back"
   HelpLoading -> "runner help subprocess is bounded to 30 seconds / 4 MiB"
   HelpScreen _ -> "↑/↓ scroll  Esc return to browser"
   PreviewLoading -> "preview subprocess is bounded to 30 seconds / 4 MiB"
@@ -886,8 +878,6 @@ handleKey original key = do
         (InputScreen _, Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl]) -> submitEditor
         (InputScreen _, _) -> handleEditorInput original
         (TargetScreen, Vty.EvKey Vty.KEsc []) -> handleEscape
-        (TargetScreen, Vty.EvKey Vty.KUp []) -> handleMove (-1)
-        (TargetScreen, Vty.EvKey Vty.KDown []) -> handleMove 1
         (TargetScreen, Vty.EvKey (Vty.KChar 's') []) -> chooseScripted
         (TargetScreen, Vty.EvKey (Vty.KChar 'l') []) -> chooseLive
         (TargetScreen, Vty.EvKey (Vty.KChar 'p') []) -> cycleRoutingPersona
@@ -1189,11 +1179,15 @@ chooseLive = do
   let model = stateModel state
   case modelRouting model of
     Left failure -> put state {stateModel = model {modelScreen = FailureScreen failure}}
-    Right routing -> case atMay (routingSummaryEngines routing) (modelEngineIndex model) of
-      Nothing -> put state {stateModel = model {modelScreen = FailureScreen "no live routing engine is available"}}
-      Just engine -> case routingSummaryPersona routing of
-        Nothing -> put state {stateModel = model {modelScreen = FailureScreen "routing inspection selected no persona"}}
-        Just persona -> beginPreview (TargetLive engine persona)
+    Right routing -> case routingSummaryPersona routing of
+      Nothing -> put state {stateModel = model {modelScreen = FailureScreen "routing inspection selected no persona"}}
+      Just persona ->
+        beginPreview
+          ( TargetRouting
+              persona
+              (routingSummaryArguments routing)
+              (routingSummaryFingerprint routing)
+          )
 
 beginPreview :: TargetSelection -> EventM Name AppState ()
 beginPreview target = do
@@ -1208,7 +1202,7 @@ beginPreview target = do
           channel = stateChannel state
           routing = case target of
             TargetScripted -> Nothing
-            TargetLive {} -> either (const Nothing) Just (modelRouting model)
+            TargetRouting {} -> either (const Nothing) Just (modelRouting model)
             TargetRestored {} -> Nothing
       put state {stateModel = model, stateRequestSerial = request, statePreviewRequest = Just request}
       liftIO . startWorker state PreviewWork $ do
@@ -1268,7 +1262,7 @@ previewPersona :: LaunchPreview -> Maybe Text
 previewPersona preview = case previewLineage preview of
   Just (_, record) -> frontendPersona (recordManifest record)
   Nothing -> case previewTarget preview of
-    TargetLive _ persona -> Just persona
+    TargetRouting persona _ _ -> Just persona
     _ -> Nothing
 
 previewRealizationSummary :: LaunchPreview -> Text
@@ -1276,7 +1270,7 @@ previewRealizationSummary preview = case previewRouting preview of
   Nothing -> case previewTarget preview of
     TargetScripted -> "scripted"
     TargetRestored kind _ -> kind
-    TargetLive engine _ -> engineChoiceAlias engine <> "/" <> engineChoiceProvider engine
+    TargetRouting persona _ _ -> "routing/" <> persona
   Just routing -> case concatMap routingProfileLines (routingSummaryProfiles routing) of
     [] -> "unavailable"
     values -> boundedDisplay (T.intercalate " | " values)

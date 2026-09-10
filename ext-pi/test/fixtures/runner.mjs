@@ -78,6 +78,7 @@ if (args[0] === "--routing" && args[1] === "--json") {
     : {
     version: 2,
     persona: { name: persona, source: personaIndex >= 0 ? "command-line" : "user-default" },
+    launch: { targetKind: "routing", arguments: ["--routing"], fingerprint: "f".repeat(64) },
     availablePersonas: ["personal", "work"],
     availableModels: persona === "work"
       ? [{ alias: "work-model", engine: "work-engine" }]

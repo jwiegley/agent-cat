@@ -39,6 +39,7 @@ export type RoutingModelChoice = { alias: string; engine: string };
 export type RoutingInspection = {
   version: 2;
   persona: { name: string; source: string };
+  launch: { arguments: string[]; fingerprint: string };
   availablePersonas: string[];
   availableModels: RoutingModelChoice[];
   profiles: Array<{ name: string; rungs: Array<{ axis: string; modelAlias: string; model: string }> }>;
@@ -150,7 +151,7 @@ export type RunSnapshot = {
   failureClass?: string;
 };
 
-export type TargetKind = "scripted" | "acp" | "deck" | "current" | "child" | "remote";
+export type TargetKind = "scripted" | "routing" | "acp" | "deck" | "current" | "child" | "remote";
 
 export type LaunchManifest = {
   frontendManifestVersion?: 2;

@@ -2,8 +2,9 @@
 
 `Agentic.Tui` is the terminal frontend for an agent-cat runner. It discovers
 workflows and routing through bounded machine-readable subprocesses. Routing
-inspection supplies opaque target arguments and a launch fingerprint owned by the
-CLI; launch repeats offline resolution and refuses a changed fingerprint. The TUI
+inspection supplies opaque routing-only arguments and a launch fingerprint owned
+by the CLI. Launch requires full pin coverage, repeats offline resolution, and
+refuses a changed fingerprint. The TUI
 launches the same executable in protocol-v2 machine mode, reduces events with
 `Agentic.Runtime.Snapshot`, and sends correlated controls on an inherited file
 descriptor. It does not interpret workflows.

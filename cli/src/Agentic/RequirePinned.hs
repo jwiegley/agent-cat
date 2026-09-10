@@ -1,8 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 
--- | Optional CLI policy requiring every model ask to carry a symbolic pin.
-module Agentic.RequirePinned (guardUnpinnedAsk) where
+-- | CLI policies for symbolic model-pin coverage.
+module Agentic.RequirePinned (guardFullPinCoverage, guardUnpinnedAsk) where
 
 import Agentic.DSL
   ( Addressee (..),
@@ -81,13 +81,8 @@ firstOf = foldr (<|>) Nothing
 -- fires on no corpus entry, and no existing program is affected until a caller
 -- asks for it. @agentic-run --require-pinned@ is that caller.
 guardUnpinnedAsk :: RawProgram -> Maybe Text
-guardUnpinnedAsk prog =
-  refusal
-    <$> firstOf (map unpinnedFn (progFns prog) ++ [unpinnedBlock (progMain prog)])
+guardUnpinnedAsk prog = refusal <$> firstAsk askUnpinned prog
   where
-    unpinnedFn f = fmap (\i -> ("function `" <> fnName f <> "`", i)) (unpinnedBody (fnBody f))
-    unpinnedBlock b = fmap (\i -> ("`main`", i)) (blockUnpinned b)
-
     -- Names the model, and where it is asked, because a program with six
     -- lenses has six places to look and a refusal that names none of them
     -- costs the reader the search this check was meant to save.
@@ -100,46 +95,65 @@ guardUnpinnedAsk prog =
         <> i
         <> [wft|" `servedBy` "…") …`, or run without the requirement. Who answers is a property of the question here, so an unpinned ask is a question nobody has said who answers.|]
 
--- | The first unpinned model ask of an 'RawAsk', which is the whole of the
--- test: an override that is present pins, and an addressee that is not a model
--- cannot be pinned and is not asked to be.
+-- | Refuse routing-only execution unless every engine-bound question carries a
+-- model pin. Program-authored commands are already answered by the executing
+-- layer and therefore need no backend route.
+guardFullPinCoverage :: RawProgram -> Maybe Text
+guardFullPinCoverage prog = refusal <$> firstAsk coverageGap prog
+  where
+    refusal (whereAt, gap) =
+      "routing without --engine or --session requires full pin coverage, but "
+        <> gap
+        <> " in "
+        <> whereAt
+        <> ". Give every model ask a `served by` pin; a tool or person question requires --engine or --session."
+
+-- | The first unpinned model ask of a 'RawAsk'.
 askUnpinned :: RawAsk -> Maybe Text
 askUnpinned (RawAsk override (RawTarget adr _) _ _) = case (override, adr) of
   (Nothing, AddrModel i) -> Just i
   _ -> Nothing
 
--- | 'rhsGuard'\'s traversal, at this test.
-rhsUnpinned :: RawRhs -> Maybe Text
-rhsUnpinned (RhsAsk a) = askUnpinned a
-rhsUnpinned (RhsPanel ms _) = firstOf (map askUnpinned ms)
-rhsUnpinned (RhsPanelText ms _) = firstOf (map (askUnpinned . tmAsk) ms)
--- A decider asks nobody, so there is no question here to leave unpinned.
-rhsUnpinned RhsDecide {} = Nothing
-rhsUnpinned RhsCall {} = Nothing
+coverageGap :: RawAsk -> Maybe Text
+coverageGap (RawAsk override (RawTarget adr _) _ _) = case (override, adr) of
+  (Nothing, AddrModel i) -> Just ("model `" <> i <> "` is asked without `served by`")
+  (_, AddrTool i) -> Just ("tool `" <> i <> "` cannot carry `served by`")
+  (_, AddrPerson i) -> Just ("person `" <> i <> "` cannot carry `served by`")
+  (_, AddrToolExec {}) -> Nothing
+  _ -> Nothing
 
--- | 'bodyGuard'\'s traversal, at this test.
-unpinnedBody :: [RawBodyStmt] -> Maybe Text
-unpinnedBody = firstOf . map stmt
+-- | Traverse asks in source reading order, returning their enclosing function
+-- or main block with the first match.
+firstAsk :: (RawAsk -> Maybe a) -> RawProgram -> Maybe (Text, a)
+firstAsk match prog = firstOf (map matchingFn (progFns prog) ++ [matchingMain])
   where
-    stmt (BodyBind _ _ r _) = rhsUnpinned r
-    stmt (BodyAct a _) = askUnpinned a
-    stmt BodyCallS {} = Nothing
+    matchingFn f = fmap (\gap -> ("function `" <> fnName f <> "`", gap)) (matchingBody (fnBody f))
+    matchingMain = fmap (\gap -> ("`main`", gap)) (matchingRaw (progMain prog))
 
--- | 'blockGuard'\'s traversal, at this test.
-blockUnpinned :: Raw -> Maybe Text
-blockUnpinned (RawEmpty _) = Nothing
-blockUnpinned (RawAnswer _ _) = Nothing
-blockUnpinned (RawKnownHere _ rest _) = blockUnpinned rest
-blockUnpinned (RawAct a rest _) = askUnpinned a <|> blockUnpinned rest
-blockUnpinned (RawCallStmt _ _ rest _) = blockUnpinned rest
-blockUnpinned (RawBind _ _ (SrcRhs r) rest _) = rhsUnpinned r <|> blockUnpinned rest
-blockUnpinned (RawBind _ _ (SrcRevising _ _ _ _ _ rev am _) rest _) =
-  rhsUnpinned rev <|> rhsUnpinned am <|> blockUnpinned rest
-blockUnpinned (RawBind _ _ (SrcRevisingOn _ _ _ _ _ rev am _) rest _) =
-  rhsUnpinned rev <|> rhsUnpinned am <|> blockUnpinned rest
-blockUnpinned (RawIfFlag _ y n _) = blockUnpinned y <|> blockUnpinned n
-blockUnpinned (RawCaseVerdict _ a o d _) =
-  blockUnpinned a <|> blockUnpinned o <|> blockUnpinned d
-blockUnpinned (RawCaseResult _ _ _ st un _) = blockUnpinned st <|> blockUnpinned un
-blockUnpinned (RawCaseEnding _ _ _ _ st un ab _) =
-  blockUnpinned st <|> blockUnpinned un <|> blockUnpinned ab
+    matchingRhs (RhsAsk ask') = match ask'
+    matchingRhs (RhsPanel members _) = firstOf (map match members)
+    matchingRhs (RhsPanelText members _) = firstOf (map (match . tmAsk) members)
+    matchingRhs RhsDecide {} = Nothing
+    matchingRhs RhsCall {} = Nothing
+
+    matchingBody = firstOf . map matchingStatement
+    matchingStatement (BodyBind _ _ rhs _) = matchingRhs rhs
+    matchingStatement (BodyAct ask' _) = match ask'
+    matchingStatement BodyCallS {} = Nothing
+
+    matchingRaw (RawEmpty _) = Nothing
+    matchingRaw (RawAnswer _ _) = Nothing
+    matchingRaw (RawKnownHere _ rest _) = matchingRaw rest
+    matchingRaw (RawAct ask' rest _) = match ask' <|> matchingRaw rest
+    matchingRaw (RawCallStmt _ _ rest _) = matchingRaw rest
+    matchingRaw (RawBind _ _ (SrcRhs rhs) rest _) = matchingRhs rhs <|> matchingRaw rest
+    matchingRaw (RawBind _ _ (SrcRevising _ _ _ _ _ review amend _) rest _) =
+      matchingRhs review <|> matchingRhs amend <|> matchingRaw rest
+    matchingRaw (RawBind _ _ (SrcRevisingOn _ _ _ _ _ review amend _) rest _) =
+      matchingRhs review <|> matchingRhs amend <|> matchingRaw rest
+    matchingRaw (RawIfFlag _ yes no _) = matchingRaw yes <|> matchingRaw no
+    matchingRaw (RawCaseVerdict _ accept object defer _) =
+      matchingRaw accept <|> matchingRaw object <|> matchingRaw defer
+    matchingRaw (RawCaseResult _ _ _ success unsuccessful _) = matchingRaw success <|> matchingRaw unsuccessful
+    matchingRaw (RawCaseEnding _ _ _ _ success unsuccessful abandoned _) =
+      matchingRaw success <|> matchingRaw unsuccessful <|> matchingRaw abandoned

@@ -445,7 +445,7 @@ parsedName label value
 
 parsedTargetKind :: Text -> Parser Text
 parsedTargetKind target
-  | target `elem` ["scripted", "acp", "deck", "current", "child", "remote"] = pure target
+  | target `elem` ["scripted", "routing", "acp", "deck", "current", "child", "remote"] = pure target
   | otherwise = fail ("unknown target kind " <> T.unpack target)
 
 parsedLineage :: Text -> Parser Text

@@ -139,13 +139,13 @@ prepareAndStart partialDirectory partialProcess config root preview events notif
         Nothing -> case previewTarget preview of
           TargetScripted -> Nothing
           TargetRestored _ _ -> frontendPersona =<< parentManifest
-          TargetLive _ selected -> Just selected
+          TargetRouting selected _ _ -> Just selected
       targetKind = case parentManifest of
         Just parent -> frontendTargetKind parent
         Nothing -> case previewTarget preview of
           TargetScripted -> "scripted"
           TargetRestored kind _ -> kind
-          TargetLive engine _ -> engineChoiceTargetKind engine
+          TargetRouting {} -> "routing"
       parentRunId = frontendRunId <$> parentManifest
       lineage = lineageOperationText . fst <$> previewLineage preview
       launchCwd = maybe (tuiWorkingDir config) frontendCwd parentManifest

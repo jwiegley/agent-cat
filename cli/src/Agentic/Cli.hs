@@ -12,21 +12,23 @@
 -- > <binary> plan  NAME [--raw] [--require-pinned] [--json]
 -- > <binary> cost  NAME
 -- > <binary> run   NAME --scripted
+-- > <binary> run   NAME [--routing] [--persona NAME] [--realize AXIS=MODEL-ALIAS]...
+-- >                     [--offline | --refresh-models]
 -- > <binary> run   NAME --session <id> [--binary PATH] [--poll MS]
 -- >                                    [--route NAME=BACKEND]...
--- >                                    [--timeout MS] [--verbose]
+-- >                                    [--routing] [--timeout MS] [--verbose]
 -- > <binary> run   NAME --engine acp [--adapter stub|claude|codex|droid|PATH]
 -- >                                  [--adapter-arg ARG]... [--scratch DIR]
 -- >                                  [--route NAME=BACKEND]...
--- >                                  [--timeout MS] [--verbose]
+-- >                                  [--routing] [--timeout MS] [--verbose]
 --
--- @--engine acp --adapter X@ and @--session S@ name a run's __default
--- answerer__, and @--route@ refines it: a run reaches several model backends at
--- once, dispatching each question by the serving model its @served by@ pin
--- names. That is execution policy and nothing below it — @plan@ and @cost@ do
--- not read a route, and a price that varied with a route table would be the
--- first time in this language that who answers changed what a program costs.
--- See "Agentic.Route".
+-- With no @--engine@ or @--session@, conventional routing files supply every
+-- backend and every engine-bound question must have a configured @served by@
+-- pin. An explicit engine or session instead names the complete command-line
+-- route table, even when the redundant @--routing@ flag is also present.
+-- @--route@ refines only that explicit table. This is execution policy and
+-- nothing below it: @plan@ and @cost@ do not read routes, and who answers does
+-- not change what a program costs. See "Agentic.Route".
 --
 -- This module /was/ @run\/Main.hs@, whole. What moved it here is that a second
 -- table of named programs now exists — the owner's toolbox in the separate,
@@ -273,7 +275,7 @@ import qualified Data.ByteString as BS
 import Data.Char (isAlphaNum)
 import qualified Data.ByteString.Lazy as BL
 import Data.List (find, nub, sort, sortOn, tails)
-import Data.Maybe (fromMaybe, isJust, listToMaybe)
+import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Read as TR
@@ -446,6 +448,7 @@ import Agentic.Route
     routeNamed,
     routedWorld,
     routes,
+    routesCovered,
     schemeOf,
     schemeWord,
   )
@@ -475,7 +478,6 @@ import Agentic.RoutingConfig
     sha256Fingerprint,
     resolveRoutingConfig,
     thinkingName,
-    routesWithProfiles,
   )
 import Agentic.RoutingInspect
   ( migrateRoutingConfigV1,
@@ -484,10 +486,10 @@ import Agentic.RoutingInspect
     renderRoutingInspectionV2,
     resolvedRealizationPolicy,
     routingLaunchFingerprint,
+    routingOnlyLaunchFingerprint,
     routingInspectionV1,
     routingInspectionV2,
   )
-import Data.Set (Set)
 import qualified Data.Set as Set
 import Agentic.Runtime
   ( ShellConfig (shellCwd, shellLog, shellTimeoutMs),
@@ -495,7 +497,7 @@ import Agentic.Runtime
     executingWorld,
   )
 import Agentic.DSL (codeName, printedValue, render, renderString)
-import Agentic.RequirePinned (guardUnpinnedAsk)
+import Agentic.RequirePinned (guardFullPinCoverage, guardUnpinnedAsk)
 import Agentic.Cost (costM, costSummary)
 import Agentic.Plan
   ( ExecTrace,
@@ -722,19 +724,21 @@ data Given = Given
 
 -- | Who answers.
 --
--- Two arms and not three, and that is the whole of what routing changed here: a
--- live run is a __table of backends__ rather than a choice between two engines,
--- and the run that names one backend is the run whose table has one entry.
--- @--engine acp --adapter X@ and @--session S@ do not become something else;
--- they become the __default route__, with no change in spelling and no change
--- in meaning, and a command line with no @--route@ prints the same header and
--- reaches the same transport it always did.
+-- Scripted and explicit live targets are complete. With no explicit live target,
+-- routing configuration must cover every engine-bound question, since there is
+-- no default backend for an unpinned model, tool, or person.
 data Target
   = -- | The canned table of the row's 'rowScript'.
     Scripted
-  | -- | Live backends: the default, and the routes that refine it.
+  | -- | Routing configuration before full pin coverage has been established.
+    Routing !RoutingTarget
+  | -- | Live backends with an optional explicit default.
     Routed !RunRoutes
 
+-- | Routing-file state before a Program proves that its named routes are total.
+data RoutingTarget
+  = RoutingUnloaded !RunOpts
+  | RoutingLoaded !RunOpts !LoadedRouting !(Maybe SelectedRoutingV2)
 -- | One process/session identity after a v2 engine alias has been retained.
 data EngineRoute = EngineRoute
   { engineRouteAlias :: !(Maybe Text),
@@ -760,9 +764,9 @@ data EngineRoute = EngineRoute
 -- working directory, so a run that had not been given one of its own would be
 -- authorizing writes into whatever directory it was started from.
 data RunRoutes = RunRoutes
-  { -- | The default, and the routes that refine it.
+  { -- | The executable route table.
     rrRoutes :: !(Routes Backend),
-    -- | Routes exactly as the command line supplied them, before YAML.
+    -- | Routes supplied by the command line before configured profiles.
     rrCommandRoutes :: !(Routes Backend),
     -- | The layered YAML policy loaded before any program or backend.
     rrRouting :: !LoadedRouting,
@@ -800,12 +804,14 @@ data RunRoutes = RunRoutes
 
 executionRoutes :: RunRoutes -> Routes EngineRoute
 executionRoutes rr =
-  routes
-    (routeFor Nothing (routeDefault (rrRoutes rr)))
-    [ (axis, routeFor (Just axis) backend)
-      | (axis, backend) <- routeNamed (rrRoutes rr)
-    ]
+  case routeDefault (rrRoutes rr) of
+    Nothing -> routesCovered named
+    Just backend -> routes (routeFor Nothing backend) named
   where
+    named =
+      [ (axis, routeFor (Just axis) backend)
+        | (axis, backend) <- routeNamed (rrRoutes rr)
+      ]
     routeFor axis backend =
       let realization = axis >>= (`Map.lookup` rrRealizations rr)
        in EngineRoute
@@ -876,9 +882,9 @@ machineStarted options name target
   | machineProtocolVersion options == protocolVersion = RunStarted name (targetLabel target)
   | otherwise = RunStartedV2 name (targetLabel target) (machinePersonAnswering options)
 
--- | Attach optional user/project routing policy only to commands that can reach
--- a live backend. Static and scripted commands remain independent of local
--- machine configuration.
+-- | Load routing policy only for a command with no explicit engine or session.
+-- An explicit live target is complete even when the redundant @--routing@ flag
+-- is present.
 loadCommandRouting :: Command -> IO (Either Text Command)
 loadCommandRouting = \case
   Run name target pinned inputs -> withTarget target (\target' -> Run name target' pinned inputs)
@@ -891,7 +897,9 @@ loadCommandRouting = \case
   command -> pure (Right command)
   where
     withTarget Scripted rebuild = pure (Right (rebuild Scripted))
-    withTarget (Routed routes') rebuild = do
+    withTarget target@(Routed _) rebuild = pure (Right (rebuild target))
+    withTarget target@(Routing (RoutingLoaded _ _ _)) rebuild = pure (Right (rebuild target))
+    withTarget (Routing (RoutingUnloaded options)) rebuild = do
       loaded <- loadRoutingConfig
       environmentPersona <- fmap T.pack <$> lookupEnv "AGENT_CAT_PERSONA"
       pure $ do
@@ -899,26 +907,16 @@ loadCommandRouting = \case
         selected <- case loadedRoutingV2User config of
           Nothing -> do
             when
-              ( isJust (rrPersonaOverride routes')
-                  || not (Map.null (rrRealizeOverrides routes'))
-                  || rrDiscoveryMode routes' /= DiscoveryNormal
-                  || isJust (rrExpectedRoutingFingerprint routes')
+              ( isJust (roPersona options)
+                  || not (null (roRealizations options))
+                  || isJust (roDiscoveryMode options)
+                  || isJust (roExpectedRoutingFingerprint options)
               )
               (Left "--persona, --realize, --offline, --refresh-models, and --expect-routing-fingerprint require version-2 routing")
             Right Nothing
           Just user ->
-            Just <$> selectRoutingPersona user (rrPersonaOverride routes') environmentPersona (loadedRoutingV2Project config)
-        effective <- routesWithProfiles (loadedRouting config) (rrCommandRoutes routes')
-        pure
-          ( rebuild
-              ( Routed
-                  routes'
-                    { rrRoutes = effective,
-                      rrRouting = config,
-                      rrSelectedRoutingV2 = selected
-                    }
-              )
-          )
+            Just <$> selectRoutingPersona user (roPersona options) environmentPersona (loadedRoutingV2Project config)
+        pure (rebuild (Routing (RoutingLoaded options config selected)))
 
 -- | Which verb, and — for @run@ — the facts the run supplies about itself.
 --
@@ -1086,16 +1084,16 @@ noRefusal = const Nothing
 -- and the set of pinnable names is its keys plus every alternate, because an
 -- alternate is a model name and is routed like any other.
 --
--- The converse is __not__ an error: a pinned model no @--route@ names takes the
--- default, and the header says so. An exhaustive route table would make
--- @--route@ unusable on any program with more than two pins, and the whole
--- point of a default is to be the answer for everything unremarkable.
+-- For an explicit target, the converse is not an error: a pinned model no
+-- @--route@ names takes the default, and the header says so. Routing-only
+-- execution instead proves complete configured coverage before this check.
 --
 -- An ill-defined chain table is passed over in silence here, because the run is
 -- about to refuse it in its own words with the two spellings named — and a
 -- table that cannot be built cannot say which models this program pins either.
 routeRefusal :: Registry -> Target -> ProgramOf r -> Maybe Text
 routeRefusal _ Scripted _ = Nothing
+routeRefusal _ Routing {} _ = Nothing
 routeRefusal reg (Routed rr) prog = case servedChains (progRawOut prog) of
   Left _ -> Nothing
   Right _ ->
@@ -2059,6 +2057,7 @@ runCmdControlled personAnswering runtimeControls persistence observer output reg
       ("  " <> [wft|no command was run; every gate in this program was answered from the table|])
     world <- localPersonAnswers (scriptedWorld script)
     walkWith authored world
+  Routing _ -> refuse "routing target was not resolved against the program"
   Routed parsedRoutes -> do
     authored <- requiredChains
     resolved <-
@@ -2075,7 +2074,7 @@ runCmdControlled personAnswering runtimeControls persistence observer output reg
         _ ->
           case resolveRoutingConfig (loadedRouting (rrRouting parsedRoutes)) (rrCommandRoutes parsedRoutes) authored of
             Left why -> refuse why
-            Right value -> pure value
+            Right value -> either refuse pure (coveredIfRequired parsedRoutes prog value)
     let rr =
           parsedRoutes
             { rrRoutes = resolvedRoutes resolved,
@@ -2105,14 +2104,9 @@ runCmdControlled personAnswering runtimeControls persistence observer output reg
           pure d
         else pure "."
     sayBackends rr dir backends
-    -- Startup is __eager__ and the default is first. Eager because the header
-    -- must be true before the first question is put — one that promised three
-    -- backends and then failed to start the third mid-run would have been a
-    -- false statement at the moment it was read — and because it costs nothing:
-    -- `session/new` carries no prompt and spends no tokens, and a `deck:` route
-    -- holds no connection at all. The default first because every run needs it,
-    -- so a run whose default will not start fails before spawning anything
-    -- else.
+    -- Startup is eager, so every backend named by the truthful header exists
+    -- before the first question. The explicit default or routing-only canonical
+    -- extension comes first, followed by named routes in their printed order.
     withAcps
       [ (route, acpConfigForRoute rr dir route)
         | route <- backends,
@@ -2244,69 +2238,65 @@ runCmdControlled personAnswering runtimeControls persistence observer output reg
     -- and never a claim that anybody answered anything, which is the trace's to
     -- say and only afterwards.
     --
-    -- At one backend it is today's header, word for word, including "every
-    -- addressee — model, tool and person — is this one adapter". That sentence
-    -- is not a hedge and not a lie: it is a lie when there are two backends and
-    -- true when there is one, so the run that names one prints it and the run
-    -- that names several prints the table instead.
+    -- An explicit one-backend target retains its existing sentence. Routing-only
+    -- execution always prints the named table, even when it uses one backend,
+    -- because full coverage rather than a default makes that run total.
     sayBackends :: RunRoutes -> FilePath -> [EngineRoute] -> IO ()
-    sayBackends rr dir = \case
-      [route] -> case engineRouteBackend route of
-        BackendAcp adapter -> do
-          let cfg = acpConfigForRoute rr dir route
-              prefix = maybe ("the " <> adapter <> " adapter") (\alias -> "engine " <> alias <> " using the " <> adapter <> " adapter") (engineRouteAlias route)
-          output $
-            "running "
-              <> name
-              <> " against "
-              <> prefix
-              <> ": "
-              <> T.unwords (map T.pack (acpCommand cfg))
-          unless (rrAdapterGiven rr || isJust (engineRouteAlias route)) $
-            output "  no --adapter given, so the stub answers — the same default agent-cat's own CLI takes"
-          output $
-            "  cwd "
-              <> T.pack dir
-              <> ", "
-              <> tshow (acpTurnTimeoutMs cfg)
-              <> "ms to a turn, "
-              <> acpSessionPolicy cfg
-              <> "; every addressee — model, tool and person — is this one adapter"
-          output $ "  a `running` tool's command runs in " <> T.pack dir
-        BackendDeck session -> do
-          let cfg = deckConfigFor rr session
-          output $ "running " <> name <> " against agent-deck session " <> deckSession cfg
-          output $
-            "  polling every "
-              <> tshow (deckPollMs cfg)
-              <> "ms, "
-              <> tshow (deckTimeoutMs cfg)
-              <> "ms to a turn, "
-              <> deckSessionPolicy
-              <> "; every addressee — model, tool and person — is this one session"
-          output
-            ("  " <> [wft|a `running` tool's command runs in this process's directory, which the deck session — started by somebody else — need not share|])
-      routes' -> sayManyBackends rr dir routes'
+    sayBackends rr dir backends
+      | isNothing (routeDefault (rrRoutes rr)) = sayManyBackends rr dir backends
+    sayBackends rr dir [route] = case engineRouteBackend route of
+      BackendAcp adapter -> do
+        let cfg = acpConfigForRoute rr dir route
+            prefix = maybe ("the " <> adapter <> " adapter") (\alias -> "engine " <> alias <> " using the " <> adapter <> " adapter") (engineRouteAlias route)
+        output $
+          "running "
+            <> name
+            <> " against "
+            <> prefix
+            <> ": "
+            <> T.unwords (map T.pack (acpCommand cfg))
+        unless (rrAdapterGiven rr || isJust (engineRouteAlias route)) $
+          output "  no --adapter given, so the stub answers — the same default agent-cat's own CLI takes"
+        output $
+          "  cwd "
+            <> T.pack dir
+            <> ", "
+            <> tshow (acpTurnTimeoutMs cfg)
+            <> "ms to a turn, "
+            <> acpSessionPolicy cfg
+            <> "; every addressee — model, tool and person — is this one adapter"
+        output $ "  a `running` tool's command runs in " <> T.pack dir
+      BackendDeck session -> do
+        let cfg = deckConfigFor rr session
+        output $ "running " <> name <> " against agent-deck session " <> deckSession cfg
+        output $
+          "  polling every "
+            <> tshow (deckPollMs cfg)
+            <> "ms, "
+            <> tshow (deckTimeoutMs cfg)
+            <> "ms to a turn, "
+            <> deckSessionPolicy
+            <> "; every addressee — model, tool and person — is this one session"
+        output
+          ("  " <> [wft|a `running` tool's command runs in this process's directory, which the deck session — started by somebody else — need not share|])
+    sayBackends rr dir routes' = sayManyBackends rr dir routes'
 
-    -- The table, when there is more than one backend to name. Six things it
-    -- owes the operator, each earned: the backends __deduplicated__, so the
-    -- count is processes and not route lines; the default named first and what
-    -- falls to it said out loud, because the remainder is the part an operator
-    -- cannot compute from the flag list; the pinned models this program has
-    -- that no route claims, on their own line, so that a mistyped route reads
-    -- as a mistyped route and not as an absent one; the working-directory
-    -- lines, unchanged because the fact is unchanged; the chain lines, which
-    -- `walkWith` prints a moment later and which are more worth printing when a
-    -- ladder crosses providers, not less; and no claim that any backend
-    -- answered anything.
+    -- The routed table names distinct backend count, full-coverage or explicit
+    -- default policy, every named model route, transport settings, and no outcome
+    -- that only the later trace can establish.
     sayManyBackends :: RunRoutes -> FilePath -> [EngineRoute] -> IO ()
     sayManyBackends rr dir backends = do
       let realizedRoutes = executionRoutes rr
-      output $ "running " <> name <> " against " <> tshow (length backends) <> " backends:"
-      output $ pad routeDefaultLabel <> backendWords rr (routeDefault realizedRoutes)
-      output $ pad "" <> "— every unpinned ask, every tool and every person"
+          count = length backends
+          backendNoun = if count == 1 then " backend:" else " backends:"
+      output $ "running " <> name <> " against " <> tshow count <> backendNoun
+      case routeDefault realizedRoutes of
+        Nothing -> output "  full pin coverage — no default backend"
+        Just defaultRoute -> do
+          output $ pad routeDefaultLabel <> backendWords rr defaultRoute
+          output $ pad "" <> "— every unpinned ask, every tool and every person"
       mapM_ route (routeNamed realizedRoutes)
-      unless (null unclaimed) $
+      unless (isNothing (routeDefault realizedRoutes) || null unclaimed) $
         output $ pad (T.intercalate ", " unclaimed) <> "the default (no --route names them)"
       case [candidate | candidate <- backends, BackendAcp _ <- [engineRouteBackend candidate]] of
         [] -> pure ()
@@ -2353,7 +2343,7 @@ runCmdControlled personAnswering runtimeControls persistence observer output reg
             not (m `Map.member` routeByModel (rrRoutes rr))
           ]
 
-        labels = routeDefaultLabel : map fst (routeNamed (rrRoutes rr)) <> [T.intercalate ", " unclaimed]
+        labels = maybe [] (const [routeDefaultLabel]) (routeDefault (rrRoutes rr)) <> map fst (routeNamed (rrRoutes rr)) <> [T.intercalate ", " unclaimed]
         width = maximum (1 : map T.length labels)
         pad l = "  " <> T.justifyLeft (width + 2) ' ' l
 
@@ -2715,12 +2705,14 @@ persistenceFor runId store program inheritedAnswers = do
 
 resolveTargetForProgram :: Target -> ProgramOf r -> Either Text Target
 resolveTargetForProgram Scripted _ = Right Scripted
+resolveTargetForProgram (Routing routing) prog = resolveRoutingOnly routing prog
 resolveTargetForProgram target@(Routed rr) _ | rrV2Frozen rr = Right target
 resolveTargetForProgram (Routed rr) prog = do
   authored <- servedChains (progRawOut prog)
-  resolved <- case rrSelectedRoutingV2 rr of
+  resolved0 <- case rrSelectedRoutingV2 rr of
     Nothing -> resolveRoutingConfig (loadedRouting (rrRouting rr)) (rrCommandRoutes rr) authored
     Just selected -> expandRoutingConfigV2 selected (rrRealizeOverrides rr) (rrCommandRoutes rr) authored
+  resolved <- coveredIfRequired rr prog resolved0
   pure
     ( Routed
         rr
@@ -2729,10 +2721,78 @@ resolveTargetForProgram (Routed rr) prog = do
           }
     )
 
+resolveRoutingOnly :: RoutingTarget -> ProgramOf r -> Either Text Target
+resolveRoutingOnly (RoutingUnloaded _) _ = Left "routing configuration was not loaded"
+resolveRoutingOnly (RoutingLoaded options loaded selected) prog = do
+  overrides <- parseRealizations (roRealizations options)
+  authored <- servedChains (progRawOut prog)
+  resolved0 <- case selected of
+    Nothing -> resolveRoutingConfig (loadedRouting loaded) (routesCovered []) authored
+    Just selected' -> expandRoutingConfigV2 selected' overrides (routesCovered []) authored
+  resolved <- requireFullCoverage prog resolved0
+  validateRoutingOnlyFlags options (resolvedRoutes resolved)
+  let table = resolvedRoutes resolved
+  pure . Routed $
+    RunRoutes
+      { rrRoutes = table,
+        rrCommandRoutes = routesCovered [],
+        rrRouting = loaded,
+        rrSelectedRoutingV2 = selected,
+        rrPersonaOverride = roPersona options,
+        rrRealizeOverrides = overrides,
+        rrDiscoveryMode = fromMaybe DiscoveryNormal (roDiscoveryMode options),
+        rrExpectedRoutingFingerprint = roExpectedRoutingFingerprint options,
+        rrChildEnvironments = Map.empty,
+        rrV2Frozen = False,
+        rrRealizations = resolvedRealizations resolved,
+        rrScratch = T.unpack <$> roScratch options,
+        rrAdapterArgs = map T.unpack (roAdapterArgs options),
+        rrBinary = T.unpack <$> roBinary options,
+        rrPollMs = roPollMs options,
+        rrTimeoutMs = roTimeoutMs options,
+        rrVerbose = roVerbose options,
+        rrAdapterGiven = False
+      }
+
+
+-- | Prove that named routing is total over every question which can reach an
+-- engine. For every reachable question @q@, the proved equation is
+-- @backendFor table q = Just routeByModel[name(q)]@.
+requireFullCoverage :: ProgramOf r -> ResolvedRouting -> Either Text ResolvedRouting
+requireFullCoverage prog resolved = do
+  maybe (Right ()) Left (guardFullPinCoverage (progRawOut prog))
+  let table = resolvedRoutes resolved
+      named = routeNamed table
+      names = map fst named
+  case find (`notElem` names) (pinnedModels prog) of
+    Just model -> Left ("routing configuration has no route for pinned model '" <> model <> "'")
+    Nothing -> Right ()
+  case named of
+    [] -> Left "routing configuration resolves no backend for this program"
+    _ -> Right resolved
+
+coveredIfRequired :: RunRoutes -> ProgramOf r -> ResolvedRouting -> Either Text ResolvedRouting
+coveredIfRequired rr prog
+  | isNothing (routeDefault (rrCommandRoutes rr)) = requireFullCoverage prog
+  | otherwise = Right
+
+validateRoutingOnlyFlags :: RunOpts -> Routes Backend -> Either Text ()
+validateRoutingOnlyFlags options table = mapM_ forbidUnused [SchemeAcp, SchemeDeck]
+  where
+    used = Set.fromList (map schemeOf (routeBackends table))
+    flags SchemeAcp = [("--adapter-arg", not (null (roAdapterArgs options))), ("--scratch", isJust (roScratch options))]
+    flags SchemeDeck = [("--binary", isJust (roBinary options)), ("--poll", isJust (roPollMs options))]
+    forbidUnused scheme
+      | scheme `Set.member` used = Right ()
+      | otherwise = case find snd (flags scheme) of
+          Nothing -> Right ()
+          Just (flag, _) -> Left (flag <> " is not " <> T.intercalate " and " (map schemeWord (Set.toAscList used)) <> "'s to take")
+
 -- | Resolve secrets and inventories only after the run-fact/routing fixed point.
 -- The resulting target is immutable and safe to persist before any child starts.
 finalizeTargetForProgram :: Target -> ProgramOf r -> IO (Either Text Target)
 finalizeTargetForProgram Scripted _ = pure (Right Scripted)
+finalizeTargetForProgram (Routing _) _ = pure (Left "routing target was not resolved against the program")
 finalizeTargetForProgram target@(Routed rr) _ | rrV2Frozen rr = pure (Right target)
 finalizeTargetForProgram (Routed rr) prog = case rrSelectedRoutingV2 rr of
   Nothing
@@ -2767,6 +2827,7 @@ finalizeTargetForProgram (Routed rr) prog = case rrSelectedRoutingV2 rr of
             pure $ do
               inventories <- discovered
               frozen <- freezeRoutingConfigV2 selected inventories expanded
+              coveredFrozen <- coveredIfRequired rr prog frozen
               fingerprintFrozen <- freezeRoutingConfigV2 selected inventories fingerprintExpanded
               let childEnvironments =
                     Map.fromList
@@ -2775,13 +2836,16 @@ finalizeTargetForProgram (Routed rr) prog = case rrSelectedRoutingV2 rr of
                           resolvedEngineAlias context `elem` executionRequired,
                           BackendAcp _ <- [resolvedEngineBackend context]
                       ]
-                  resolvedWithEnvironment = withExecutionFingerprints contexts frozen
+                  resolvedWithEnvironment = withExecutionFingerprints contexts coveredFrozen
                   fingerprintWithEnvironment = withExecutionFingerprints contexts fingerprintFrozen
-                  launchFingerprint =
-                    routingLaunchFingerprint
-                      (selectedPersonaName selected)
-                      (routeDefault (rrCommandRoutes rr))
-                      fingerprintWithEnvironment
+                  launchFingerprint = case routeDefault (rrCommandRoutes rr) of
+                    Nothing ->
+                      routingOnlyLaunchFingerprint (selectedPersonaName selected) fingerprintWithEnvironment
+                    Just defaultBackend ->
+                      routingLaunchFingerprint
+                        (selectedPersonaName selected)
+                        defaultBackend
+                        fingerprintWithEnvironment
               case rrExpectedRoutingFingerprint rr of
                 Just expected | expected /= launchFingerprint ->
                   Left "routing changed after TUI preview; return to routing selection and preview again"
@@ -2789,7 +2853,7 @@ finalizeTargetForProgram (Routed rr) prog = case rrSelectedRoutingV2 rr of
               pure
                 ( Routed
                     rr
-                      { rrRoutes = resolvedRoutes frozen,
+                      { rrRoutes = resolvedRoutes coveredFrozen,
                         rrRealizations = resolvedRealizations resolvedWithEnvironment,
                         rrChildEnvironments = childEnvironments,
                         rrV2Frozen = True
@@ -2836,10 +2900,12 @@ credentialArgument argument =
 
 targetLabel :: Target -> Text
 targetLabel Scripted = "scripted"
+targetLabel Routing {} = "routing"
 targetLabel (Routed rr) = T.intercalate "," (map backendSpelling (routeBackends (rrRoutes rr)))
 
 targetPolicy :: Target -> Value
 targetPolicy Scripted = object ["kind" .= ("scripted" :: Text)]
+targetPolicy Routing {} = object ["kind" .= ("routing" :: Text)]
 targetPolicy (Routed rr) = case rrSelectedRoutingV2 rr of
   Nothing -> object baseFields
   Just selected ->
@@ -2854,19 +2920,22 @@ targetPolicy (Routed rr) = case rrSelectedRoutingV2 rr of
      in object (versionedFields <> ["policyDigest" .= digest])
   where
     baseFields =
-      [ "kind" .= ("routed" :: Text),
-        "default" .= backendSpelling (routeDefault (rrRoutes rr)),
-        "routes"
-          .= [object ["name" .= name, "backend" .= backendSpelling backend] | (name, backend) <- routeNamed (rrRoutes rr)],
-        "scratch" .= rrScratch rr,
-        "adapterArgs" .= redactAdapterArgs (rrAdapterArgs rr),
-        "binary" .= rrBinary rr,
-        "pollMs" .= rrPollMs rr,
-        "timeoutMs" .= rrTimeoutMs rr,
-        "routingSources" .= map T.pack (loadedRoutingSources (rrRouting rr)),
-        "realizations" .= map resolvedRealizationPolicy (Map.elems (rrRealizations rr)),
-        "verbose" .= rrVerbose rr
-      ]
+      ["kind" .= ("routed" :: Text)]
+        <> defaultFields
+        <> [ "routes"
+               .= [object ["name" .= name, "backend" .= backendSpelling backend] | (name, backend) <- routeNamed (rrRoutes rr)],
+             "scratch" .= rrScratch rr,
+             "adapterArgs" .= redactAdapterArgs (rrAdapterArgs rr),
+             "binary" .= rrBinary rr,
+             "pollMs" .= rrPollMs rr,
+             "timeoutMs" .= rrTimeoutMs rr,
+             "routingSources" .= map T.pack (loadedRoutingSources (rrRouting rr)),
+             "realizations" .= map resolvedRealizationPolicy (Map.elems (rrRealizations rr)),
+             "verbose" .= rrVerbose rr
+           ]
+    defaultFields = case routeDefault (rrRoutes rr) of
+      Nothing -> ["coverage" .= ("full" :: Text)]
+      Just defaultBackend -> ["default" .= backendSpelling defaultBackend]
 lineagePolicy :: Value -> Value
 lineagePolicy (Object policy) =
   Object
@@ -2999,8 +3068,8 @@ deckSessionPolicy = sessionPolicy False
 -- | __The facts this run knows about itself before it puts a question__, as the
 -- texts 'Agentic.Runtime.Facts.runFacts' binds.
 --
--- All four are properties of the command line and of the clock, which is what
--- lets them be inputs: an input is bound when the program is built, and nothing
+-- All four are properties of the command line, resolved routing policy, and
+-- clock, which is what lets them be inputs: an input is bound when the program
 -- here has to wait for an adapter to start or a question to be answered. The
 -- working directory is deliberately not among them — it is settled in 'runCmd',
 -- after this — and 'acpSessionPolicy' does not read it, which is why passing
@@ -3040,12 +3109,13 @@ runFactsWith reg name target sentinel =
   where
     routeFact = case target of
       Scripted -> routesFact Nothing
+      Routing _ -> ""
       Routed rr
         | isJust (rrSelectedRoutingV2 rr) ->
             let realized = executionRoutes rr
                 line label route = label <> " = " <> engineRouteSpelling route <> "\n"
-             in line routeDefaultLabel (routeDefault realized)
-                  <> T.concat [line axis route | (axis, route) <- routeNamed realized]
+                defaultLine = maybe "" (line routeDefaultLabel) (routeDefault realized)
+             in defaultLine <> T.concat [line axis route | (axis, route) <- routeNamed realized]
         | otherwise -> routesFact (Just (rrRoutes rr))
 
     backendsFact = case target of
@@ -3057,6 +3127,7 @@ runFactsWith reg name target sentinel =
         [wft|no backend at all -- every question is answered from this program's own table of |]
           <> tshow (length (maybe [] rowScript (regLookup reg name)))
           <> " canned replies, and nothing is reached"
+      Routing _ -> "routing configuration pending full pin coverage"
       Routed rr -> case routeBackends (executionRoutes rr) of
         [backend] -> "1 backend: " <> engineRouteSpelling backend
         backends ->
@@ -3070,6 +3141,7 @@ runFactsWith reg name target sentinel =
     -- one of them would be told a falsehood about half its answers.
     engineFact = case target of
       Scripted -> "scripted: a canned table, no process and no session"
+      Routing _ -> "routing: every engine-bound question must have a configured model pin"
       Routed rr ->
         let routes' = routeBackends (executionRoutes rr)
             acps = [route | route <- routes', BackendAcp _ <- [engineRouteBackend route]]
@@ -3085,9 +3157,8 @@ runFactsWith reg name target sentinel =
               (_ : _, []) -> acpWords
               ([], _ : _) -> deckWords
               (_ : _, _ : _) -> acpWords <> "; " <> deckWords
-              -- `routeBackends` always has the default, so this is
-              -- unreachable; it is written rather than left to a partial
-              -- pattern match.
+              -- Every executable table is nonempty after explicit-target or
+              -- full-coverage validation.
               ([], []) -> "no engine: this run reaches nothing"
 
 -- | @run.routes@ — __the route table as this run resolved it__, one line per
@@ -3109,18 +3180,14 @@ runFactsWith reg name target sentinel =
 -- is the /mapping/, and two pins on one backend is precisely the thing a gate
 -- over it must be able to see.
 --
--- __The default line is present on every live run, @--route@ or no @--route@.__
--- That is the one thing that makes the fact decidable where it matters: a run
--- with @--session A@ and nothing else still has an answerer, and
--- @(default) = deck:A@ is the single line that distinguishes it from the split
--- where a judge's pin is routed away. Omit it and the two read alike, and the
--- refusal that should have fired would not.
+-- An explicit live run contributes the canonical default line. A routing-only
+-- run has only named lines after full coverage is proved. The distinction is
+-- represented by 'routeDefault' itself rather than by a second rendering path.
 --
--- __It is empty exactly when there is no table__ — @--scripted@, and the two
--- static verbs, which bind no run fact at all. Empty means /no table/, not /no
--- @--route@/, and 'Agentic.Workflow.routedBackend' reads it as the empty text
--- for the reason 'Agentic.Workflow.sharesOneSession' reads an unbound engine as
--- 'False'.
+-- On an executable run it is empty only for @--scripted@. Routing-only preflight
+-- refuses an empty named table, and static verbs bind no run facts. Empty text
+-- therefore tells 'Agentic.Workflow.routedBackend' that no executable backend
+-- mapping exists.
 --
 -- It stands at the top level, exported, and takes the /table/ rather than the
 -- 'Target', for two reasons. The first is the transport-configuration reason: the
@@ -3135,8 +3202,8 @@ routesFact = \case
   Nothing -> ""
   Just rs ->
     T.unlines
-      [ label <> " = " <> backendSpelling b
-      | (label, b) <- (routeDefaultLabel, routeDefault rs) : routeNamed rs
+      [ label <> " = " <> backendSpelling backend
+        | (label, backend) <- maybe [] (\defaultBackend -> [(routeDefaultLabel, defaultBackend)]) (routeDefault rs) <> routeNamed rs
       ]
 
 -- | The line this run generates for itself, and puts nowhere else.
@@ -3217,6 +3284,7 @@ parseCommand reg = \case
         Left (verb <> " needs " <> article reg <> ": " <> T.intercalate " or " (regNames reg))
   ("plan" : name : rest) -> planOpts name Human False False [] rest
   ("cost" : name : rest) -> costOpts name [] rest
+  ["run", "--help"] -> Left ("run needs " <> article reg <> " before its options\n\n" <> usage reg)
   ("run" : name : rest) -> (\(t, p, ins) -> Run name t p ins) <$> parseTarget reg rest
   ("machine" : runIdText : name : rest) -> do
     runId <- mkRunId runIdText
@@ -3397,6 +3465,7 @@ data RunOpts = RunOpts
     -- starts them and the order the header prints them, so that an operator can
     -- read the header against their own command line.
     roRoutes :: ![Text],
+    roRouting :: !Bool,
     roPersona :: !(Maybe Text),
     roRealizations :: ![Text],
     roDiscoveryMode :: !(Maybe DiscoveryMode),
@@ -3425,6 +3494,7 @@ noRunOpts =
       roAdapter = Nothing,
       roAdapterArgs = [],
       roRoutes = [],
+      roRouting = False,
       roPersona = Nothing,
       roRealizations = [],
       roDiscoveryMode = Nothing,
@@ -3440,7 +3510,7 @@ noRunOpts =
 parseTarget :: Registry -> [Text] -> Either Text (Target, Bool, [InputFlag])
 parseTarget reg args = do
   o <- go noRunOpts args
-  t <- chooseTarget reg o
+  t <- chooseTarget o
   pure (t, roRequirePinned o, roInputs o)
   where
     go :: RunOpts -> [Text] -> Either Text RunOpts
@@ -3463,6 +3533,7 @@ parseTarget reg args = do
       ("--binary" : v : rest) -> go o {roBinary = Just v} rest
       ("--adapter" : v : rest) -> go o {roAdapter = Just v} rest
       ("--adapter-arg" : v : rest) -> go o {roAdapterArgs = roAdapterArgs o <> [v]} rest
+      ("--routing" : rest) -> go o {roRouting = True} rest
       ("--expect-routing-fingerprint" : v : rest)
         | isJust (roExpectedRoutingFingerprint o) -> Left "--expect-routing-fingerprint may appear only once"
         | T.length v /= 64 || not (T.all (`elem` ("0123456789abcdef" :: String)) v) -> Left "--expect-routing-fingerprint takes a lowercase SHA-256 digest"
@@ -3500,35 +3571,28 @@ parseTarget reg args = do
       Nothing -> go o {roDiscoveryMode = Just mode} rest
       Just _ -> Left "--offline and --refresh-models are mutually exclusive and may appear only once"
 
--- | Which answerer the options name — or a refusal saying which two of them
--- were named at once.
---
--- Every combination refused here is one where a flag would otherwise mean
--- nothing to the transport that was chosen, which is how a run comes to be
--- configured by a line nobody read.
-chooseTarget :: Registry -> RunOpts -> Either Text Target
-chooseTarget reg o = case (roScripted o, roEngine o, roSession o) of
+-- | Select the explicit answerer, or routing configuration when none was named.
+-- @--engine@ and @--session@ are more explicit than the redundant @--routing@
+-- flag and therefore always produce a command-line-only route table.
+chooseTarget :: RunOpts -> Either Text Target
+chooseTarget o = case (roScripted o, roEngine o, roSession o) of
   (True, Just e, _) -> Left ("--scripted answers from a table and --engine " <> e <> " reaches an agent; pick one")
   (True, _, Just _) -> Left "--scripted and --session name two different answerers; pick one"
   (True, _, _) -> onlyScripted
   (_, Just "acp", Just _) ->
     Left
       [wft|--engine acp starts an adapter of its own, and --session sends to an agent-deck session somebody else started; pick one|]
-  -- The default is `stub`, the deterministic double: a command line that named
-  -- no adapter must not spawn a real agent, spend a token or touch an account.
-  -- (The retired Lean CLI kept the same default, for the same reason.)
+  -- The explicit ACP default remains the deterministic stub when no adapter was
+  -- named. Routing-only execution never invents this default.
   (_, Just "acp", _) -> live (BackendAcp (fromMaybe "stub" (roAdapter o)))
   (_, Just "deck", Nothing) -> Left "--engine deck needs the session to send to: give --session <id> as well"
   (_, _, Just s) -> live (BackendDeck s)
-  -- A route refines a default answerer, so a run that named no default has
-  -- nowhere to put the questions no route claims — every unpinned ask, every
-  -- tool and every person — and saying so is more use than the general refusal
-  -- that follows it.
   _
     | not (null (roRoutes o)) ->
         Left
-          [wft|--route refines this run's default answerer, and there is none: give --engine acp or --session <id> as well|]
-  _ -> Left ("run needs --scripted, --engine acp, or --session <id>\n\n" <> usage reg)
+          [wft|--route refines a command-line default answerer, and there is none: give --engine acp or --session <id> as well|]
+    | isJust (roAdapter o) -> Left "--adapter selects an explicit ACP answerer; give --engine acp as well"
+    | otherwise -> routingOnly
   where
     -- A flag this run's answerer has no use for, refused by name.
     forbid :: Text -> [(Text, Bool)] -> Either Text ()
@@ -3539,20 +3603,15 @@ chooseTarget reg o = case (roScripted o, roEngine o, roSession o) of
 
     acpFlags = [("--adapter", isJust (roAdapter o)), ("--adapter-arg", not (null (roAdapterArgs o))), ("--scratch", isJust (roScratch o))]
     deckFlags = [("--binary", isJust (roBinary o)), ("--poll", isJust (roPollMs o))]
-    routingFlags =
+    routingOptions =
       [ ("--persona", isJust (roPersona o)),
         ("--realize", not (null (roRealizations o))),
         ("--offline", roDiscoveryMode o == Just DiscoveryOffline),
         ("--refresh-models", roDiscoveryMode o == Just DiscoveryRefresh),
         ("--expect-routing-fingerprint", isJust (roExpectedRoutingFingerprint o))
       ]
-    liveFlags = acpFlags <> deckFlags <> routingFlags <> [("--timeout", isJust (roTimeoutMs o)), ("--verbose", roVerbose o)]
+    liveFlags = acpFlags <> deckFlags <> (("--routing", roRouting o) : routingOptions) <> [("--timeout", isJust (roTimeoutMs o)), ("--verbose", roVerbose o)]
 
-    -- `--route` is refused here rather than left inert. Routes *would* be inert
-    -- under `--scripted` — `scriptedReply` reads `qPrompt` and nothing else, so
-    -- it cannot see the scope routing dispatches on, and a route table could
-    -- not change a canned answer even if one were permitted — and a flag that
-    -- is silently inert is the defect this whole function exists to prevent.
     onlyScripted
       | not (null (roRoutes o)) =
           Left "--route names live backends and --scripted answers from a table; pick one"
@@ -3563,42 +3622,18 @@ chooseTarget reg o = case (roScripted o, roEngine o, roSession o) of
       SchemeAcp -> acpFlags
       SchemeDeck -> deckFlags
 
-    -- The flags of the schemes this run's route table never reaches.
-    --
-    -- The generalization of the per-engine refusal to *the set of schemes the
-    -- table uses*, default included. At one scheme it is the predicate that
-    -- exists today, refusal wording and all: exactly one scheme is foreign, and
-    -- the run's own is the only one there is to name, so `--adapter` under a
-    -- deck run is still "not the deck engine's to take". At two it refuses
-    -- nothing, which is the whole of what a route makes newly meaningful — with
-    -- a `deck:` route under an `acp` default, `--binary` and `--poll` are the
-    -- run's to take after all.
-    forbidForeign :: Set Scheme -> Either Text ()
     forbidForeign used =
       mapM_
         (forbid (T.intercalate " and " (map schemeWord (Set.toAscList used))) . flagsOf)
         [s | s <- [minBound .. maxBound], not (s `Set.member` used)]
 
-    -- One default and the routes that refine it. `--engine acp --adapter X`
-    -- and `--session S` *become* the default route with no change in spelling
-    -- and no change in meaning: today they name the one backend every question
-    -- reaches, and after this they name the backend every question reaches that
-    -- no route claims.
     live def = do
-      -- A malformed route first, because it is the most local mistake and the
-      -- one whose message the operator can act on by retyping one word.
       named <- traverse parseRoute (roRoutes o)
       case firstDuplicate (map fst named) of
-        Just m ->
-          Left
-            ( "--route names the model '"
-                <> m
-                <> "' twice; a model has one backend in a run"
-            )
+        Just m -> Left ("--route names the model '" <> m <> "' twice; a model has one backend in a run")
         Nothing -> Right ()
-      realized <- traverse parseRealize (roRealizations o)
-      case firstDuplicate (map fst realized) of
-        Just axis -> Left ("--realize names axis '" <> axis <> "' twice")
+      case find snd routingOptions of
+        Just (flag, _) -> Left (flag <> " applies only when no --engine or --session is given")
         Nothing -> Right ()
       let table = routes def named
       forbidForeign (Set.fromList (map schemeOf (routeBackends table)))
@@ -3608,10 +3643,10 @@ chooseTarget reg o = case (roScripted o, roEngine o, roSession o) of
             rrCommandRoutes = table,
             rrRouting = LoadedRouting emptyRoutingConfig [] Nothing Nothing,
             rrSelectedRoutingV2 = Nothing,
-            rrPersonaOverride = roPersona o,
-            rrRealizeOverrides = Map.fromList realized,
-            rrDiscoveryMode = fromMaybe DiscoveryNormal (roDiscoveryMode o),
-            rrExpectedRoutingFingerprint = roExpectedRoutingFingerprint o,
+            rrPersonaOverride = Nothing,
+            rrRealizeOverrides = Map.empty,
+            rrDiscoveryMode = DiscoveryNormal,
+            rrExpectedRoutingFingerprint = Nothing,
             rrChildEnvironments = Map.empty,
             rrV2Frozen = False,
             rrRealizations = Map.empty,
@@ -3624,6 +3659,17 @@ chooseTarget reg o = case (roScripted o, roEngine o, roSession o) of
             rrAdapterGiven = isJust (roAdapter o)
           }
 
+    routingOnly = do
+      _ <- parseRealizations (roRealizations o)
+      pure (Routing (RoutingUnloaded o))
+
+parseRealizations :: [Text] -> Either Text (Map.Map Text Text)
+parseRealizations values = do
+  realized <- traverse parseRealize values
+  case firstDuplicate (map fst realized) of
+    Just axis -> Left ("--realize names axis '" <> axis <> "' twice")
+    Nothing -> Right (Map.fromList realized)
+  where
     parseRealize value = case T.breakOn "=" value of
       (axis, suffix)
         | not (T.null axis), Just alias <- T.stripPrefix "=" suffix, not (T.null alias) -> Right (axis, alias)
@@ -3675,6 +3721,9 @@ usage reg =
       "  " <> bin <> " machine-restart <run-id> <parent-store> <" <> noun <> "> <run options>",
       "  " <> bin <> " machine-resume  <run-id> <parent-store> <" <> noun <> "> <run options>",
       "  " <> bin <> " machine-fork    <run-id> <parent-store> <" <> noun <> "> <run options>",
+      runLead <> "[--routing] [--persona NAME]",
+      under runLead <> "[--realize AXIS=MODEL-ALIAS]...",
+      under runLead <> "[--offline | --refresh-models]",
       runLead <> "--session <id> [--binary PATH] [--poll MS]",
       under (runLead <> "--session <id> ") <> "[--route NAME=BACKEND]...",
       under (runLead <> "--session <id> ") <> "[--timeout MS] [--verbose]",
@@ -3683,9 +3732,6 @@ usage reg =
       under (runLead <> "--engine acp ") <> "[--adapter-arg ARG]... [--scratch DIR]",
       under (runLead <> "--engine acp ") <> "[--route NAME=BACKEND]...",
       under (runLead <> "--engine acp ") <> "[--timeout MS] [--verbose]",
-      under runLead <> "[--persona NAME] [--realize AXIS=MODEL-ALIAS]...",
-      under runLead <> "[--offline | --refresh-models]",
-      under runLead <> "[--expect-routing-fingerprint SHA256]",
       "",
       usageCatalog reg,
       "",
@@ -3723,12 +3769,14 @@ usage reg =
       "  standard input A declared stdin input is read to EOF when run did not get",
       "                 that name from an explicit flag. A terminal refuses instead",
       "                 of waiting. Explicit --input-arg/--input-file takes precedence",
-      "  --routing      inspect resolved routing without starting an engine; --json",
-      "                 is the sanitized frontend contract",
+      "  --routing      with no --engine or --session, an optional explicit spelling",
+      "                 of the automatic routing.yaml target; with either explicit",
+      "                 target, that target wins and routing.yaml is not read",
       "  --migrate-routing SOURCE --output DESTINATION",
       "                 create, but never overwrite, an equivalent offline v2 user file",
-      "  --persona NAME select a v2 routing context explicitly; precedence is command",
-      "                 line, AGENT_CAT_PERSONA, project selector, then user default",
+      "  --persona NAME select a v2 routing context when no explicit target is",
+      "                 present; precedence is command line, AGENT_CAT_PERSONA,",
+      "                 project selector, then user default",
       "  --realize AXIS=MODEL-ALIAS",
       "                 replace one managed v2 axis with an allowed concrete alias",
       "  --offline       use permitted model caches or static exact selectors only",
@@ -3754,15 +3802,16 @@ usage reg =
       "                 at ../test/stub_adapter.py); claude and codex are looked for on",
       "                 PATH and then at machine-local pins; droid runs `droid exec",
       "                 --output-format acp` from PATH; anything else is a path.",
-      "                 --engine acp only",
+      "                 only when this run reaches ACP",
       "  --adapter-arg  one argument for the adapter's argv; repeatable.",
       "                 `--adapter-arg --refuse` is how the stub is told to answer *no*",
-      "                 to a person's yes/no question. --engine acp only",
+      "                 to a person's yes/no question. Only when this run reaches ACP",
       "  --scratch      run in DIR instead of a fresh temporary directory: where the",
       "                 adapter is started, and the only place an act may write.",
       "                 Give --scratch \"$PWD\" whenever the run is meant to touch",
       "                 your own tree — without it the acts land in a temporary",
-      "                 directory and your tree is untouched. --engine acp only",
+      "                 directory and your tree is untouched.",
+      "                 Only when this run reaches ACP",
       "  --route        NAME=BACKEND — put the questions this run pins to the model",
       "                 NAME to BACKEND instead of to the default answerer.",
       "                 Repeatable, at most once per NAME. BACKEND is",
@@ -3773,17 +3822,18 @@ usage reg =
       "                 fail-over ladder cross providers. A pinned model no --route",
       "                 names, every unpinned ask, and every tool and person take",
       "                 the default. Refuses a NAME this program never pins",
-      "  routing YAML   live commands automatically load routing.yaml:",
-      "                 user first, then the nearest project file.",
-      "                 Profiles map symbolic servedBy names to ordered concrete",
-      "                 ACP/deck realizations; --route overrides a primary backend.",
+      "  routing YAML   no explicit engine or session always loads the user file and",
+      "                 then the nearest project file. Every engine-bound question",
+      "                 must have a configured pin; there is no default backend.",
+      "                 --engine or --session is more explicit and uses only the",
+      "                 command-line default and --route entries, even with --routing.",
       "                 See Model definitions in cli/README.md",
       "  --timeout      milliseconds one turn may take before it is abandoned",
       "  --verbose      narrate the transport on stderr",
       "  --require-pinned",
       "                 refuse the program unless every model ask names the model",
-      "                 that serves it (`servedBy`). Checked before anything is",
-      "                 printed, started or spent; plan and run, any engine"
+      "                 that serves it (`servedBy`). Routing-only runs impose this",
+      "                 check and configured-route coverage automatically"
     ]
   where
     bin = regBinary reg

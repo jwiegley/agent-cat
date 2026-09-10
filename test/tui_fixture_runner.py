@@ -99,6 +99,7 @@ def main() -> None:
         routing = {
             "version": 2,
             "persona": {"name": persona, "source": "command-line" if persona_index >= 0 else "default"},
+            "launch": {"targetKind": "routing", "arguments": ["--routing"], "fingerprint": "f" * 64},
             "availablePersonas": ["fixture", "work"],
             "engines": [
                 {

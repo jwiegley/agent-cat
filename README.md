@@ -278,26 +278,30 @@ its pipe. The adapters are `stub`, `claude`, `codex`, `droid`, or the path of
 an executable, and `droid` launches `droid exec --output-format acp`, which
 must be authenticated locally or through an inherited `FACTORY_API_KEY`.
 `--session` sends every question into a live agent-deck session that another
-process started and watches. All three services end at the same typed decode
-loop, so a run means the same thing on every service and fails in the same
-words. Exit status 0 is a completed run, 1 is a usage or preflight refusal, 2
-is a transport failure, and 3 is a run abandoned over what arrived. A machine
-run that is cancelled through its control channel exits 130.
+process started and watches. An explicit engine or session is the complete
+command-line route table, even when `--routing` is also present. All three
+services end at the same typed decode loop, so a run means the same thing on
+every service and fails in the same words. Exit status 0 is a completed run, 1
+is a usage or preflight refusal, 2 is a transport failure, and 3 is a run
+abandoned over what arrived. A machine run that is cancelled through its control
+channel exits 130.
 
 A workflow names its serving model symbolically, for example `servedBy
-"deep-thinker"`. Version-1 routing remains supported unchanged. Version 2 keeps
-privileged engines, environment references, catalogues, concrete model aliases,
-personas, and defaults in the user file
-`$XDG_CONFIG_HOME/agent-cat/routing.yaml`; the nearest project file may select a
+"deep-thinker"`. When no engine or session is named, the runner always loads
+routing configuration and requires every engine-bound question to have a
+configured pin. Tool and person questions require an explicit target. Version 1
+remains supported. Version 2 keeps privileged engines, environment references,
+catalogues, concrete model aliases, personas, and defaults in the user file
+`$XDG_CONFIG_HOME/agent-cat/routing.yaml`. The nearest project file may select a
 persona and replace profiles, but cannot widen engines or models. Persona
 precedence is `--persona`, `AGENT_CAT_PERSONA`, project selector, then user
-default. Exact and ordered-prefix selectors freeze one model id per run; bounded
-OpenAI/Anthropic discovery uses private persona/fingerprint caches.
+default. Exact and ordered-prefix selectors freeze one model id per run. Bounded
+OpenAI and Anthropic discovery uses private persona and fingerprint caches.
 
 
 Exact and ordered-prefix selectors freeze an exact model identifier before an
 engine starts. `--realize AXIS=MODEL-ALIAS` safely replaces a managed version-2
-axis, while raw routes remain unchanged for version 1 and unconfigured names.
+axis. Raw `--route` entries refine only an explicit command-line target.
 `--routing --json` emits the sanitized frontend contract, and
 `--migrate-routing SOURCE --output DESTINATION` creates an equivalent offline
 version-2 file without overwriting the source. The example in
@@ -322,12 +326,13 @@ The registry currently holds nine programs: `harden`, `hello`,
 
 `agentic-run --tui` opens the Brick/Vty frontend for the current executable's
 registry; downstream binaries using `cliMain`, including `wf`, inherit the same
-mode. It offers a fuzzy workflow browser, detailed run history, and routing profile/
-inventory views, then collects declared
-inputs, previews exact-input plan facts, the runner executable and target arguments,
-and an opaque CLI-owned concrete realization, then requires a separate confirmation
-before creating a run. Live launch repeats offline resolution and supplies the preview
-fingerprint; a changed route is refused. The live monitor header includes workflow,
+mode. It offers a fuzzy workflow browser, detailed run history, and routing
+profile and inventory views, then collects declared inputs, previews exact-input
+plan facts, the runner executable, routing-only target arguments, and an opaque
+CLI-owned concrete realization. A separate confirmation precedes every run.
+Live launch requires full pin coverage, repeats offline resolution, and supplies
+the preview fingerprint. A changed route is refused. The live monitor header
+includes workflow,
 persona, realization, elapsed time, and bills. It uses protocol 2, a
 private store, fd-3 controls, and local person answering. It preserves occurrence
 identity under concurrent updates, supports detach/reattach, steering, recovery,
@@ -354,11 +359,12 @@ agent-cat workflows. It performs no search for a runner. The trusted
 `AGENT_CAT_RUNNERS`. The extension reads their descriptors, collects inputs,
 launches machine mode, reduces the event stream into a live monitor, delivers
 controls, and keeps durable run references. Descriptor-v3 runners expose a
-sanitized routing inspection; the extension offers persona and concrete-alias
-choices and passes only `--persona`/`--realize`, never parsing YAML or receiving
-secret values. Descriptor-v3 runners negotiate protocol v2, shared frontend
-manifests, terminal result references, and public progress; descriptor-v1/v2
-protocol-v1 runners retain their existing launch flow. The `/wf`
+sanitized routing inspection. The extension offers a distinct routing-only target
+with persona and concrete-alias choices, while explicit targets bypass routing.
+It never parses YAML or receives secret values. Descriptor-v3 runners negotiate
+protocol v2, shared frontend manifests, terminal result references, and public
+progress. Descriptor-v1 and descriptor-v2 protocol-v1 runners retain their
+existing launch flow. The `/wf`
 command launches a workflow in the current Agent Deck session, and a family of
 `/workflow-...` commands covers help, plan, status, monitoring, steering,
 recovery, redirect, grants, lineage, and cancellation. The extension never

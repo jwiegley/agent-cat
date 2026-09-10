@@ -26,7 +26,8 @@ registry =
       regNoun = "fixture",
       regBanner = "routing fixed-point fixture",
       regRows =
-        [ ("convergent", row convergentExample),
+        [ ("pinned", row (Fixed (pinnedProgram "deep"))),
+          ("convergent", row convergentExample),
           ("cyclic", row cyclicExample),
           ("controlled", row controlledExample),
           ("controlled-single", row controlledSingleExample),

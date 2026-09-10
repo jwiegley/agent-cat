@@ -40,16 +40,20 @@ manual's "Runner Reference" chapter documents every verb and option.
 
 ## Model definitions
 
-Workflow source contains symbolic model and profile names. Version-1
-`routing.yaml` files retain their existing router and whole-profile layering and
-raw `--route` precedence. Version 2 gives the user file at
-`$XDG_CONFIG_HOME/agent-cat/routing.yaml` authority over environment references,
-engines, bounded catalogues, concrete model aliases, personas, defaults, and
-profiles. The nearest project file can select a persona and replace whole
-profiles, but it cannot widen either allowlist or introduce privileged data.
-Discovery fixes user/project authority from those paths before decoding, so a
-user-shaped project document is still rejected as a project document. Untagged
-version-2 loading is refused. Mixed versions are refused.
+Workflow source contains symbolic model and profile names. A live run with no
+`--engine` or `--session` always loads `routing.yaml`. Every engine-bound
+question must carry a model pin, and every pin must resolve through the selected
+routing policy. A tool or person question therefore requires an explicit target.
+An explicit engine or session is the complete command-line policy, even when
+`--routing` is also present, and `--route` refines only that explicit target.
+Version 1 retains its router and whole-profile layering. Version 2 gives the user
+file at `$XDG_CONFIG_HOME/agent-cat/routing.yaml` authority over environment
+references, engines, bounded catalogues, concrete model aliases, personas,
+defaults, and profiles. The nearest project file can select a persona and replace
+whole profiles, but it cannot widen either allowlist or introduce privileged
+data. Discovery fixes user/project authority from those paths before decoding,
+so a user-shaped project document is still rejected as a project document.
+Untagged version-2 loading and mixed versions are refused.
 
 Persona precedence is `--persona`, `AGENT_CAT_PERSONA`, the project selector, and
 then the user default. The option `--realize AXIS=MODEL-ALIAS` replaces a managed
