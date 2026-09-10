@@ -113,7 +113,8 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$root"
 python3 test/cabal_env_probe.py
-runghc -package=ghc test/source-boundaries.hs "$(ghc --print-libdir)"
+runghc -package=ghc -package=Cabal-syntax test/source-boundaries.hs "$(ghc --print-libdir)"
+python3 test/source_roots_probe.py
 test/cabal.sh run -v0 policy-probe -- +RTS -N8 -RTS
 test/cabal.sh build agentic-run routing-fixed-point-probe >/dev/null
 agentic_run=$(test/cabal.sh list-bin agentic-run)

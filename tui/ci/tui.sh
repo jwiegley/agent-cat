@@ -5,7 +5,7 @@ cd "$(dirname "$0")/../.."
 
 isolated_config=$(mktemp -d)
 trap 'rm -rf "$isolated_config"' EXIT
-runghc -package=ghc test/source-boundaries.hs "$(ghc --print-libdir)"
+runghc -package=ghc -package=Cabal-syntax test/source-boundaries.hs "$(ghc --print-libdir)"
 
 if grep -E -n 'tree-sitter|cmark|microlens' agentic.cabal flake.nix; then
   echo "tui/ci/tui: unapproved highlighting dependency entered the package" >&2

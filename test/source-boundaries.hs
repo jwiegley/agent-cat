@@ -6,8 +6,13 @@ module Main (main) where
 import Control.Monad (forM, forM_, unless)
 import Data.Aeson (FromJSON (parseJSON), eitherDecodeStrict', withObject, (.:))
 import qualified Data.ByteString as BS
-import Data.List (isPrefixOf, sort)
+import Data.List (find, isPrefixOf, nub, sort)
+import Data.Maybe (fromMaybe, maybeToList)
 import qualified Data.Set as Set
+import qualified Distribution.PackageDescription as Cabal
+import Distribution.PackageDescription.Configuration (flattenPackageDescription)
+import Distribution.PackageDescription.Parsec (parseGenericPackageDescriptionMaybe)
+import Distribution.Utils.Path (getSymbolicPath)
 import GHC (getSessionDynFlags, moduleNameString, runGhc, unLoc)
 import GHC.Data.StringBuffer (stringToStringBuffer)
 import GHC.Driver.Config.Parser (initParserOpts)
@@ -18,7 +23,7 @@ import GHC.Parser.Lexer (ParserOpts)
 import System.Directory (doesDirectoryExist, listDirectory)
 import System.Environment (getArgs)
 import System.Exit (die)
-import System.FilePath (takeExtension, (</>))
+import System.FilePath (addTrailingPathSeparator, normalise, takeDirectory, takeExtension, (</>))
 
 checks :: [(FilePath, [String])]
 checks =
@@ -46,16 +51,18 @@ main = do
     [path] -> pure path
     _ -> die "usage: source-boundaries.hs GHC_LIBDIR"
   flags <- runGhc (Just libdir) getSessionDynFlags
+  declaredRoots <- cabalSourceRoots
   let options = initParserOpts (foldl xopt_set flags [Extension.ImportQualifiedPost, Extension.PackageImports, Extension.ExplicitNamespaces, Extension.PatternSynonyms, Extension.MagicHash])
-      directories = map fst checks <> ["tui/src", "cli/src", "cli/example", "workflow"]
-  sources <- fmap concat $ forM directories $ \directory -> do
-    paths <- sourceFiles directory
-    forM paths $ \path -> do
-      (name, imports) <- readFile path >>= parseHeader options path
-      unless (directory /= "tui/src" || within "Agentic.Tui" name) (die (path <> ": terminal module is outside the Agentic.Tui namespace"))
-      unless (not ("manager/src/" `isPrefixOf` path) || within "Agentic.Manager" name) (die (path <> ": manager module is outside the Agentic.Manager namespace"))
-      unless (not (within "Agentic.Manager" name) || directory == "manager") (die (path <> ": manager namespace is outside the manager source root"))
-      pure (directory, path, name, imports)
+      layers = map fst checks <> ["tui/src"]
+      directories = nub (layers <> ["cli/src", "cli/example", "workflow"] <> declaredRoots)
+  paths <- nub . map normalise . concat <$> mapM sourceFiles directories
+  sources <- forM paths $ \path -> do
+    let directory = fromMaybe (takeDirectory path) (find (\layer -> addTrailingPathSeparator layer `isPrefixOf` path) layers)
+    (name, imports) <- readFile path >>= parseHeader options path
+    unless (directory /= "tui/src" || within "Agentic.Tui" name) (die (path <> ": terminal module is outside the Agentic.Tui namespace"))
+    unless (not ("manager/src/" `isPrefixOf` path) || within "Agentic.Manager" name) (die (path <> ": manager module is outside the Agentic.Manager namespace"))
+    unless (not (within "Agentic.Manager" name) || directory == "manager") (die (path <> ": manager namespace is outside the manager source root"))
+    pure (directory, path, name, imports)
   let projectModules = Set.fromList [name | (_, _, name, _) <- sources]
       terminalModules = Set.fromList [name | ("tui/src", _, name, _) <- sources]
       violations layer caller imports = filter (forbidden projectModules terminalModules layer caller) imports
@@ -74,6 +81,22 @@ main = do
   let bad = [path <> ": " <> target | (layer, path, caller, imports) <- sources, target <- violations layer caller imports]
   unless (null bad) (die ("forbidden layer import(s):\n" <> unlines bad))
   putStrLn ("policy imports: compiler-parsed module boundaries verified; " <> show (length fixtures) <> " syntax/frontend fixtures and " <> show (length edges) <> " forbidden-edge fixtures passed")
+
+cabalSourceRoots :: IO [FilePath]
+cabalSourceRoots = do
+  bytes <- BS.readFile "agentic.cabal"
+  generic <- maybe (die "cannot parse agentic.cabal source roots") pure (parseGenericPackageDescriptionMaybe bytes)
+  let package = flattenPackageDescription generic
+      -- Include disabled branches and components, not only buildable BuildInfos.
+      infos = map Cabal.libBuildInfo (maybeToList (Cabal.library package) <> Cabal.subLibraries package)
+        <> map Cabal.buildInfo (Cabal.executables package)
+        <> map Cabal.testBuildInfo (Cabal.testSuites package)
+        <> map Cabal.benchmarkBuildInfo (Cabal.benchmarks package)
+        <> map Cabal.foreignLibBuildInfo (Cabal.foreignLibs package)
+      roots info = case Cabal.hsSourceDirs info of
+        [] -> ["."]
+        paths -> map getSymbolicPath paths
+  pure (nub (map normalise (concatMap roots infos)))
 
 forbidden :: Set.Set String -> Set.Set String -> FilePath -> String -> String -> Bool
 forbidden projectModules terminalModules layer caller target

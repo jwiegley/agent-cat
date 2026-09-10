@@ -25,6 +25,7 @@ extra-source-files:
   test/fixtures/tui/*.golden
   test/fixtures/tui/import-boundaries.json
   test/source-boundaries.hs
+  test/source_roots_probe.py
   test/cabal.sh
   test/cabal_env_probe.py
   test/frontend_export_probe.py
