@@ -2,6 +2,7 @@
 @clindex --adapter
 @clindex --adapter-arg
 @clindex --binary
+@clindex --capabilities
 @clindex --descriptor-version
 @clindex --drop-answer
 @clindex --engine
@@ -28,10 +29,14 @@
 @clindex --scripted
 @clindex --session
 @clindex --set-answer
+@clindex --state
 @clindex --timeout
 @clindex --tui
 @clindex --verbose
 @clindex verb:cost
+@clindex verb:frontend
+@clindex verb:frontend-export
+@clindex verb:frontend-io
 @clindex verb:help
 @clindex verb:lineage-check
 @clindex verb:list

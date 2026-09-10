@@ -22,7 +22,7 @@ main = do
     [runner, stateDirectory, workingDirectory] ->
       runTui
         TuiConfig
-          { tuiRunnerId = "fixture",
+          { tuiRunnerAlias = "fixture",
             tuiRunner = runner,
             tuiRunnerArgs = [],
             tuiWorkingDir = workingDirectory,

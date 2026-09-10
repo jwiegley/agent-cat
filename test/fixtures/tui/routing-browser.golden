@@ -1,4 +1,18 @@
-persona work (command-line)
-> engine-a  deck:pane  fixture
+> engine-a  deck:pane/fixture  READY (offline)
+
+Persona
+  work (command-line)
+  available: work
+  launch fingerprint: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+
+Selected engine
+  alias: engine-a
+  backend: deck:pane; provider: fixture
+  credential: READY (offline)
+
+Profiles
   profile deep chain:
-    0. deep -> concrete-a on engine-a (fixture, deck:pane, inventory offline-cache, fingerprint sha256:inventory, fetched 2026-09-04T00:00:00Z)
+    0. deep -> concrete-a on engine-a (fixture, deck:pane, thinking high, max output unconstrained, inventory offline-cache, fingerprint sha256:inventory, fetched 2026-09-04T00:00:00Z, execution fingerprint sha256:execution)
+
+Warnings
+  none

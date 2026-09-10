@@ -46,7 +46,7 @@ DESCRIPTOR = {
     "paths": 1,
     "inputs": [],
     "runFacts": [],
-    "pins": ["fixture"],
+    "pins": ["fixture-profile"],
     "personAnsweringModes": ["local-control"],
 }
 
@@ -87,6 +87,37 @@ def main() -> None:
             signal.signal(signal.SIGTERM, signal.SIG_IGN)
         Path(os.environ["TUI_FIXTURE_READY"]).write_text(str(os.getpid()))
         time.sleep(60)
+    if arguments == ["frontend", "--capabilities"]:
+        capabilities = {
+            "version": 1,
+            "operation": "capabilities",
+            "server": {
+                "runnerId": "fixture",
+                "executable": str(Path(__file__).resolve()),
+                "runnerVersion": DESCRIPTOR["runnerVersion"],
+            },
+            "session": {
+                "versions": [1],
+                "operations": ["prepare", "prepare-lineage", "start", "discard"],
+                "inputSources": ["literal", "file", "transport"],
+                "invocationVersions": [1],
+                "maxRequestBytes": 2 * 1024 * 1024,
+            },
+            "io": {
+                "versions": [1],
+                "operations": ["open-root", "read-question", "read-result", "list-runs", "read-run"],
+            },
+            "export": {
+                "versions": [1],
+                "operations": ["export-result"],
+                "format": "result-json",
+                "destination": "state-exports",
+            },
+            "frontendManifestVersions": [2, 3],
+            "legacyFrontendManifests": True,
+        }
+        sys.stdout.buffer.write(compact(capabilities) + b"\n")
+        return
     if arguments[:1] == ["list"]:
         sys.stdout.buffer.write(compact([DESCRIPTOR]) + b"\n")
         return
@@ -106,8 +137,9 @@ def main() -> None:
                     "name": engine,
                     "backend": f"deck:{session}",
                     "provider": "fixture-provider",
+                    "credentialReady": os.environ.get("TUI_FIXTURE_CREDENTIAL_READY", "1") != "0",
                     "launch": {"targetKind": "deck", "arguments": ["--session", session], "fingerprint": "f" * 64},
-                }
+                },
             ],
             "profiles": [
                 {
@@ -122,6 +154,7 @@ def main() -> None:
                             "model": model,
                             "thinking": "medium",
                             "maxOutput": 4096,
+                            "executionFingerprint": f"sha256:{persona}-execution",
                             "options": {},
                             "inventory": {"source": "static"},
                         }
@@ -139,7 +172,24 @@ def main() -> None:
         sys.stdout.write("fixture help\n")
         return
     if arguments[:1] == ["plan"]:
-        sys.stdout.buffer.write(compact({"name": "control-stress", "program": {"fixture": True}}) + b"\n")
+        plan = dict(DESCRIPTOR)
+        plan["capabilities"] = dict(DESCRIPTOR["capabilities"])
+        plan["descriptorVersion"] = 2
+        plan.pop("personAnsweringModes")
+        plan.update({
+            "codes": ["text"],
+            "fold": [{"consults": 1, "paths": 1}],
+            "program": {"fixture": True},
+        })
+        if os.environ.get("TUI_FIXTURE_PLAN_VARIANT") == "post-input":
+            plan.update({"size": 7, "askNodes": 4, "minFold": 2, "maxFold": 3, "paths": 4, "pins": ["input-profile"], "runFacts": ["input-selected"]})
+            plan["capabilities"].update({"consults": 3, "observes": 0, "effects": 1, "effectful": True, "toolExecution": True})
+            plan["fold"] = [{"consults": 2, "paths": 3}, {"consults": 3, "paths": 1}]
+        if os.environ.get("TUI_FIXTURE_PLAN_VARIANT") == "malformed":
+            plan["unknown"] = True
+        if os.environ.get("TUI_FIXTURE_PLAN_VARIANT") == "identity-mismatch":
+            plan["name"] = "another-workflow"
+        sys.stdout.buffer.write(compact(plan) + b"\n")
         return
     if arguments[:1] == ["machine"]:
         run_machine(arguments[1], os.environ.get("TUI_FIXTURE_MODE", "controls"))
@@ -191,6 +241,15 @@ def run_machine(run_id: str, mode: str) -> None:
         sys.stdout.buffer.flush()
         return
     emit({"type": "run.started", "workflow": "control-stress", "target": "scripted", "personAnswering": "local-control"})
+    if mode in {"startup-failure", "request-failure"}:
+        message = "Configured model is unavailable. Select an offered model.\n" + "diagnostic context\n" * 80 + "LAST_DIAGNOSTIC"
+        if mode == "request-failure":
+            emit({"type": "occurrence.started", "occurrenceId": "0", "code": "text", "intent": "consult", "addressee": "model fixture", "prompt": "fixture prompt"})
+            emit({"type": "attempt.started", "occurrenceId": "0", "attempt": "0", "target": "fixture"})
+            emit({"type": "attempt.failed", "occurrenceId": "0", "attempt": "0", "failure": "transport", "message": message})
+            emit({"type": "occurrence.failed", "occurrenceId": "0", "failure": "transport", "message": message})
+        emit({"type": "run.failed", "failure": "transport", "message": message})
+        return
     if mode in {"orphan-pipes", "orphan-redirect", "term-orphan"}:
         spawn_sleeper(os.environ["TUI_FIXTURE_READY"], mode == "orphan-redirect")
         if mode == "term-orphan":
@@ -210,8 +269,14 @@ def run_machine(run_id: str, mode: str) -> None:
     if mode == "persons":
         run_persons(emit, run_id)
         return
-    if mode == "recoveries":
-        run_recoveries(emit, run_id)
+    if mode in {"recoveries", "auth-recovery"}:
+        run_recoveries(emit, run_id, auth_failure=mode == "auth-recovery")
+        return
+    if mode == "mixed-decisions":
+        run_mixed_decisions(emit, run_id)
+        return
+    if mode == "preempt-editor":
+        run_preempt_editor(emit, run_id)
         return
     if mode == "person-retry":
         run_person_retry(emit, run_id)
@@ -325,7 +390,7 @@ def run_machine(run_id: str, mode: str) -> None:
     finish(emit, run_id)
 
 
-def run_recoveries(emit, run_id: str) -> None:
+def run_recoveries(emit, run_id: str, auth_failure: bool = False) -> None:
     barrier = threading.Barrier(3)
     pending: list[tuple[int, str]] = []
     pending_lock = threading.Lock()
@@ -334,8 +399,9 @@ def run_recoveries(emit, run_id: str) -> None:
         barrier.wait()
         emit({"type": "occurrence.started", "occurrenceId": occurrence, "code": "text", "intent": "consult", "addressee": "model fixture", "prompt": f"recovery {occurrence}"})
         emit({"type": "attempt.started", "occurrenceId": occurrence, "attempt": "0", "target": "primary"})
-        emit({"type": "attempt.failed", "occurrenceId": occurrence, "attempt": "0", "failure": "transport", "message": f"gap {occurrence}"})
-        recovery_sequence = emit({"type": "occurrence.recovery-pending", "occurrenceId": occurrence, "gap": "transport", "message": f"gap {occurrence}", "choices": [{"choice": "retry"}]})
+        message = ("ACP session/prompt failed: Authentication failed: OAuth session expired and could not be refreshed (JSON-RPC -32603)\n" + "Provider diagnostic detail.\n" * 40 + "END_AUTH_DIAGNOSTIC") if auth_failure else f"gap {occurrence}"
+        emit({"type": "attempt.failed", "occurrenceId": occurrence, "attempt": "0", "failure": "transport", "message": message})
+        recovery_sequence = emit({"type": "occurrence.recovery-pending", "occurrenceId": occurrence, "gap": "transport-refusal", "message": message, "choices": [{"choice": "retry"}]})
         with pending_lock:
             pending.append((recovery_sequence, occurrence))
 
@@ -367,6 +433,69 @@ def read_control(command_type: str, occurrence: str, attempt: object) -> dict[st
     assert control.get("expectedAttemptId") == attempt, control
     assert control["command"]["type"] == command_type, control
     return control
+
+def run_mixed_decisions(emit, run_id: str) -> None:
+    person = "0"
+    recovery = "1"
+    prompt = "Answer the earlier cross-kind FIFO decision?"
+    reference = write_question(run_id, person, prompt)
+    emit({"type": "occurrence.started", "occurrenceId": person, "code": "flag", "intent": "consult", "addressee": "person owner", "prompt": prompt})
+    emit({"type": "occurrence.person-answer-pending", "occurrenceId": person, "question": reference})
+    emit({"type": "occurrence.started", "occurrenceId": recovery, "code": "text", "intent": "consult", "addressee": "model fixture", "prompt": "recover second"})
+    emit({"type": "attempt.started", "occurrenceId": recovery, "attempt": "0", "target": "primary"})
+    emit({"type": "attempt.failed", "occurrenceId": recovery, "attempt": "0", "failure": "transport", "message": "mixed gap"})
+    emit({"type": "occurrence.recovery-pending", "occurrenceId": recovery, "gap": "transport", "message": "mixed gap", "choices": [{"choice": "retry"}]})
+
+    answer = read_control("answerPerson", person, None)
+    assert answer["command"]["answer"] is True, answer
+    acknowledge(emit, answer, "accepted", "mixed person accepted")
+    acknowledge(emit, answer, "delivered", "mixed person delivered")
+    emit({"type": "occurrence.completed", "occurrenceId": person, "source": "asked:person owner", "answer": "yes"})
+
+    retry = read_control("retryOccurrence", recovery, None)
+    acknowledge(emit, retry, "accepted", "mixed recovery accepted")
+    emit({"type": "occurrence.recovery-chosen", "occurrenceId": recovery, "controlId": retry["controlId"], "choice": "retry"})
+    emit({"type": "occurrence.retried", "occurrenceId": recovery, "controlId": retry["controlId"]})
+    acknowledge(emit, retry, "delivered", "mixed recovery delivered")
+    emit({"type": "attempt.started", "occurrenceId": recovery, "attempt": "1", "target": "primary"})
+    emit({"type": "attempt.output", "occurrenceId": recovery, "attempt": "1", "stream": "transport-text", "chunk": "mixed recovered"})
+    emit({"type": "attempt.completed", "occurrenceId": recovery, "attempt": "1", "source": "primary"})
+    emit({"type": "occurrence.completed", "occurrenceId": recovery, "source": "fixture", "answer": "mixed recovered"})
+    complete_run(emit, run_id, [person, recovery])
+
+
+def run_preempt_editor(emit, run_id: str) -> None:
+    active = "0"
+    person = "1"
+    emit({"type": "occurrence.started", "occurrenceId": active, "code": "text", "intent": "consult", "addressee": "model fixture", "prompt": "steer before person"})
+    emit({"type": "attempt.started", "occurrenceId": active, "attempt": "0", "target": "primary"})
+
+    def require_person() -> None:
+        time.sleep(1.5)
+        prompt = "Mandatory answer preempts the steering editor?"
+        reference = write_question(run_id, person, prompt)
+        emit({"type": "occurrence.started", "occurrenceId": person, "code": "flag", "intent": "consult", "addressee": "person owner", "prompt": prompt})
+        emit({"type": "occurrence.person-answer-pending", "occurrenceId": person, "question": reference})
+
+    producer = threading.Thread(target=require_person)
+    producer.start()
+    answer = read_control("answerPerson", person, None)
+    producer.join()
+    assert answer["command"]["answer"] is True, answer
+    acknowledge(emit, answer, "accepted", "preempting person accepted")
+    acknowledge(emit, answer, "delivered", "preempting person delivered")
+    emit({"type": "occurrence.completed", "occurrenceId": person, "source": "asked:person owner", "answer": "yes"})
+
+    steer = read_control("steerOccurrence", active, {"occurrenceId": active, "attemptNumber": "0"})
+    assert steer["command"]["text"] == "draft-survives", steer
+    acknowledge(emit, steer, "accepted", "preserved steer accepted")
+    emit({"type": "attempt.steered", "occurrenceId": active, "attempt": "0", "controlId": steer["controlId"], "timing": steer["command"]["timing"], "text": steer["command"]["text"]})
+    acknowledge(emit, steer, "delivered", "preserved steer delivered")
+    emit({"type": "attempt.output", "occurrenceId": active, "attempt": "0", "stream": "transport-text", "chunk": "preemption complete"})
+    emit({"type": "attempt.completed", "occurrenceId": active, "attempt": "0", "source": "primary"})
+    emit({"type": "occurrence.completed", "occurrenceId": active, "source": "fixture", "answer": "preemption complete"})
+    complete_run(emit, run_id, [active, person])
+
 
 def run_person_retry(emit, run_id: str) -> None:
     occurrence = "0"
@@ -476,6 +605,7 @@ def complete_run(emit, run_id: str, occurrences: list[str]) -> None:
             },
         }
     )
+    time.sleep(float(os.environ.get("TUI_FIXTURE_POST_RESULT_DELAY", "0")))
 
 
 if __name__ == "__main__":

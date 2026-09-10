@@ -1,0 +1,30 @@
+{
+  "frontendManifestVersion": 3,
+  "runId": "run-v3",
+  "runnerId": "fixture",
+  "runnerExecutable": "/bin/agentic-run",
+  "runnerVersion": "0.1.0.0",
+  "invocation": {
+    "version": 1,
+    "runnerAlias": "configured-fixture",
+    "executable": "/trusted/wrapper",
+    "prefixArgs": ["--profile", "work"]
+  },
+  "workflow": "review",
+  "cwd": "/tmp/project",
+  "targetKind": "scripted",
+  "targetArgs": ["--scripted"],
+  "inputHashes": {
+    "subject": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "programHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "createdAt": "2026-09-03T00:00:00Z",
+  "parentRunId": null,
+  "lineage": null,
+  "lineageEdits": [],
+  "persona": null,
+  "policyDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "personAnswering": "engine",
+  "ownerId": "tui:owner",
+  "runtimeStore": "runtime"
+}

@@ -11,5 +11,5 @@ cd "$root"
 ORACLE="${ORACLE:-bisim/.lake/build/bin/conformance-oracle}"
 N="${N:-500}"
 [ -x "$ORACLE" ] || { echo "bisim/ci/tier1: oracle binary not found; Tier 1 skipped is NOT green: $ORACLE" >&2; exit 1; }
-nix develop path:. -c cabal build all
-nix develop path:. -c cabal run -v0 exe:bisim -- --oracle "$ORACLE" --n "$N" ${SEED:+--seed "$SEED"}
+test/cabal.sh build all
+test/cabal.sh run -v0 exe:bisim -- --oracle "$ORACLE" --n "$N" ${SEED:+--seed "$SEED"}

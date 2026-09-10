@@ -11,59 +11,43 @@ where
 
 import Agentic.Runtime
   ( AttemptId (attemptOccurrence),
-    AttemptSnapshot (..),
     CatalogueEntry (..),
     Control (..),
     ControlAckSnapshot (..),
     ControlCommand (..),
     ControlId (..),
-    DescriptorCapabilities (..),
     DispatchSnapshot (..),
     FrontendManifest (..),
+    FrontendServer,
     LineageOperation (..),
-    OccurrenceId (occurrenceNumber),
+    OccurrenceId,
     OccurrenceSnapshot (..),
     RecoveryControl (..),
     RecoveryOption (..),
     RecoverySnapshot (..),
     Envelope (..),
-    ResultRef (resultArtifactPreview),
-    RunId (runIdText),
+    RunId,
     RunOwnership (..),
     RunRecord (..),
     RunSnapshot (..),
     RunStatus (..),
-    RuntimeEvent
-      ( OccurrenceCompleted,
-        OccurrenceFailed,
-        OccurrencePersonAnswerPending,
-        OccurrenceRecoveryChosen,
-        OccurrenceRecoveryPending,
-        OccurrenceRetried,
-        RunCancelled,
-        RunFailed
-      ),
     SteeringTiming (..),
     SnapshotError (snapshotErrorMessage),
     WorkflowDescriptor (..),
-    WorkflowInputDescriptor (..),
-    WorkflowInputSource (..),
     initialRunSnapshot,
     readResultArtifactAt,
     stepRunSnapshot,
   )
 import Agentic.Tui.Client
-import Agentic.Tui.Highlight
 import Agentic.Tui.Model
 import Agentic.Tui.Person
+import Agentic.Tui.Presentation
 import Agentic.Tui.Process
 import Agentic.Tui.RunModel
 import Agentic.Tui.Root
 import Agentic.Tui.Types
 import Brick
 import Brick.BChan (BChan, newBChan, writeBChan, writeBChanNonBlocking)
-import Brick.Widgets.Border (borderWithLabel, vBorder)
-import Brick.Widgets.Center (center)
 import qualified Brick.Widgets.Edit as Edit
 import Control.Concurrent (forkIO, killThread, myThreadId, threadDelay, throwTo)
 import Control.Concurrent.Async (Async, asyncWithUnmask, cancel)
@@ -83,53 +67,55 @@ import Control.Concurrent.STM
 import Control.Exception (AsyncException (UserInterrupt), SomeAsyncException, SomeException, bracket, displayException, finally, fromException, mask, onException, throwIO, try, uninterruptibleMask_)
 import Control.Monad (forever, void, when)
 import Control.Monad.IO.Class (liftIO)
-import Data.Aeson (Value (..), encode)
-import qualified Data.Aeson.KeyMap as KeyMap
+import Data.Aeson (Value, encode)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
 import qualified Data.Map.Strict as Map
 import Data.List (elemIndex, find)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
-import qualified Data.Vector as Vector
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
-import Data.Time.Clock (UTCTime, diffUTCTime, getCurrentTime)
+import Data.Time.Clock (UTCTime, diffUTCTime, getCurrentTime, utctDayTime)
 import Data.Time.Format (defaultTimeLocale, parseTimeM)
 import GHC.Clock (getMonotonicTimeNSec)
 import qualified Graphics.Vty as Vty
+import qualified Graphics.Vty.Output as VtyOutput
 import Graphics.Vty.Platform.Unix (mkVty)
+import System.Environment (lookupEnv)
 import System.FilePath (isAbsolute, (</>))
 import System.IO (hClose)
 import System.Posix.Files (ownerReadMode, ownerWriteMode, unionFileModes)
 import System.Posix.IO (OpenFileFlags (cloexec, creat, exclusive, nofollow), OpenMode (WriteOnly), closeFd, defaultFileFlags, fdToHandle, openFd)
-import System.Posix.Signals (Handler (Catch), installHandler, sigINT, sigTERM)
-
--- | Brick resource identities.
-data Name = MainViewport | OutputViewport | InputEditor
-  deriving (Eq, Ord, Show)
+import System.Posix.Signals (Handler (Catch, Ignore), installHandler, sigINT, sigTERM)
 
 -- | Coalesced display wakeups plus lossless one-shot operation results.
 data AppEvent
   = FrameReady
+  | InitialReady !(Either Text InitialData)
   | Tick !UTCTime
   | PreviewReady !Int !(Either Text LaunchPreview)
   | HelpReady !Int !(Either Text Text)
   | RunsReady !(Either Text [CatalogueEntry])
   | RoutingReady !Text !(Either Text RoutingSummary)
-  | ChildStopped !MachineExit
-  | PersonPromptReady !OccurrenceId !(Either Text PersonPrompt)
+  | MachineReady !Int !LaunchPreview !(Either Text RunningMachine)
+  | ChildStopped !Int !MachineExit
+  | PersonPromptReady !MandatoryDecision !Int !(Either Text PersonPrompt)
   | FinalResultReady !RunId !(Either Text Value)
 
 -- | Bounded frontend IO slots, each retaining at most one cancellable task.
-data Work = PreviewWork | HelpWork | RunsWork | RoutingWork | PersonWork | ResultWork
+data Work = InitialWork | PreviewWork | HelpWork | RunsWork | RoutingWork | MachineWork | PersonWork | ResultWork
   deriving (Eq, Ord)
 
 -- | Brick-only editor/process state around the pure model.
 data AppState = AppState
   { stateModel :: !TuiModel,
     stateEditor :: !(Edit.Editor Text Name),
+    stateFilterEditor :: !(Edit.Editor Text Name),
+    statePersonEditor :: !(Edit.Editor Text Name),
+    stateControlEditor :: !(Edit.Editor Text Name),
+    stateSaveEditor :: !(Edit.Editor Text Name),
     stateChannel :: !(BChan AppEvent),
     stateEvents :: !(TBQueue Envelope),
     stateFramePending :: !(TVar Bool),
@@ -139,7 +125,12 @@ data AppState = AppState
     stateOwned :: !(IORef (Maybe RunningMachine)),
     stateWorkers :: !(MVar (Map.Map Work (Async ()))),
     stateRunView :: !RunView,
+    statePaneFocus :: !PaneFocus,
     stateOutputFollow :: !Bool,
+    stateConfirmDetails :: !Bool,
+    stateKeyHelp :: !Bool,
+    stateShowResult :: !Bool,
+    stateRunDetails :: !Bool,
     stateFilterEditing :: !Bool,
     stateSaveResult :: !Bool,
     stateSaveError :: !(Maybe Text),
@@ -151,12 +142,13 @@ data AppState = AppState
     stateViewingRecord :: !(Maybe RunRecord),
     stateRoutingRequest :: !(Maybe Text),
     stateRequestSerial :: !Int,
+    stateMachineRequest :: !(Maybe Int),
     statePreviewRequest :: !(Maybe Int),
     stateHelpRequest :: !(Maybe Int),
-    statePersonQueue :: ![OccurrenceId],
-    stateRecoveryQueue :: ![OccurrenceId],
-    statePersonLoading :: !(Maybe OccurrenceId),
-    statePersonPrompt :: !(Maybe PersonPrompt),
+    stateMandatoryDecisions :: ![MandatoryDecision],
+    statePersonLoadGeneration :: !Int,
+    statePersonLoading :: !(Maybe (MandatoryDecision, Int)),
+    statePersonPrompt :: !(Maybe (MandatoryDecision, PersonPrompt)),
     statePersonSubmitted :: !Bool,
     statePersonControlId :: !(Maybe Text),
     statePersonError :: !(Maybe Text),
@@ -165,14 +157,18 @@ data AppState = AppState
     stateControlError :: !(Maybe Text),
     stateFinalResult :: !(Maybe (Either Text Value)),
     stateFinalLoading :: !Bool,
+    stateNoColor :: !Bool,
+    stateTerminalSize :: !(Int, Int),
+    stateServer :: !(Maybe FrontendServer),
     stateConfig :: !TuiConfig,
     stateRoot :: !PrivateRoot
   }
 
-runApp :: TuiConfig -> PrivateRoot -> InitialData -> IO ()
-runApp config root initial = do
+runApp :: TuiConfig -> PrivateRoot -> IO ()
+runApp config root = mask $ \restore -> do
   channel <- newBChan 64
   now <- getCurrentTime
+  noColor <- maybe False (not . null) <$> lookupEnv "NO_COLOR"
   ticker <- forkIO . forever $ do
     threadDelay 1000000
     current <- getCurrentTime
@@ -181,10 +177,21 @@ runApp config root initial = do
   framePending <- newTVarIO False
   owned <- newIORef Nothing
   workers <- newMVar Map.empty
-  let initialState =
+  let buildVty = do
+        value <- mkVty Vty.defaultConfig
+        enableBracketedPaste value
+        pure value
+  initialVty <- buildVty
+  terminalSize <- VtyOutput.displayBounds (Vty.outputIface initialVty)
+  let loadingModel = (initialModel [] [] (Left "routing is loading")) {modelScreen = InitialLoading, modelStatus = "loading runner catalogue"}
+      initialState =
         AppState
-          { stateModel = initialModel (initialWorkflows initial) (initialRuns initial) (initialRouting initial),
-            stateEditor = Edit.editorText InputEditor Nothing "",
+          { stateModel = loadingModel,
+            stateEditor = blankEditor,
+            stateFilterEditor = blankEditor,
+            statePersonEditor = blankEditor,
+            stateControlEditor = blankEditor,
+            stateSaveEditor = blankEditor,
             stateChannel = channel,
             stateEvents = events,
             stateFramePending = framePending,
@@ -194,7 +201,12 @@ runApp config root initial = do
             stateOwned = owned,
             stateWorkers = workers,
             stateRunView = emptyRunView,
+            statePaneFocus = PrimaryPane,
             stateOutputFollow = True,
+            stateConfirmDetails = False,
+            stateKeyHelp = False,
+            stateShowResult = False,
+            stateRunDetails = False,
             stateFilterEditing = False,
             stateSaveResult = False,
             stateSaveError = Nothing,
@@ -206,10 +218,11 @@ runApp config root initial = do
             stateViewingRecord = Nothing,
             stateRoutingRequest = Nothing,
             stateRequestSerial = 0,
+            stateMachineRequest = Nothing,
             statePreviewRequest = Nothing,
             stateHelpRequest = Nothing,
-            statePersonQueue = [],
-            stateRecoveryQueue = [],
+            stateMandatoryDecisions = [],
+            statePersonLoadGeneration = 0,
             statePersonLoading = Nothing,
             statePersonPrompt = Nothing,
             statePersonSubmitted = False,
@@ -220,20 +233,34 @@ runApp config root initial = do
             stateControlError = Nothing,
             stateFinalResult = Nothing,
             stateFinalLoading = False,
+            stateNoColor = noColor,
+            stateTerminalSize = terminalSize,
+            stateServer = Nothing,
             stateConfig = config,
             stateRoot = root
           }
-      buildVty = mkVty Vty.defaultConfig
-      -- A second signal must not abandon a worker that is still reaping its group.
+      -- Vty shutdown is idempotent, so this also closes Brick's signal-time cleanup window.
       cleanup = do
-        uninterruptibleMask_ (killThread ticker >> (readMVar workers >>= mapM_ cancel))
-          `finally` (readIORef owned >>= mapM_ terminateMachine)
+        uninterruptibleMask_ (ignoreTerminationSignals >> Vty.shutdown initialVty)
+          `finally` ( uninterruptibleMask_ (killThread ticker >> (readMVar workers >>= mapM_ cancel))
+                        `finally` (readIORef owned >>= mapM_ terminateMachine)
+                    )
         writeIORef owned Nothing
-  (do
-      initialVty <- buildVty
-      void (customMain initialVty buildVty (Just channel) app initialState)
-    )
-    `finally` cleanup
+  restore (void (customMain initialVty buildVty (Just channel) app initialState)) `finally` cleanup
+
+ignoreTerminationSignals :: IO ()
+ignoreTerminationSignals = do
+  void (installHandler sigINT Ignore Nothing)
+  void (installHandler sigTERM Ignore Nothing)
+
+-- Vty restores every enabled mode during shutdown, including exceptional exits.
+enableBracketedPaste :: Vty.Vty -> IO ()
+enableBracketedPaste vty = do
+  let output = Vty.outputIface vty
+  when (VtyOutput.supportsMode output VtyOutput.BracketedPaste) (VtyOutput.setMode output VtyOutput.BracketedPaste True)
+
+blankEditor :: Edit.Editor Text Name
+blankEditor = Edit.editorText InputEditor Nothing ""
 
 startWorker :: AppState -> Work -> IO () -> IO ()
 startWorker state work action =
@@ -242,10 +269,19 @@ startWorker state work action =
     worker <- asyncWithUnmask (\unmask -> unmask action)
     pure (Map.insert work worker workers)
 
+cancelWorker :: AppState -> Work -> IO ()
+cancelWorker state work =
+  modifyMVarMasked_ (stateWorkers state) $ \workers -> do
+    mapM_ cancel (Map.lookup work workers)
+    pure (Map.delete work workers)
+
 withTerminationHandlers :: IO a -> IO a
 withTerminationHandlers action = do
   owner <- myThreadId
-  let caught = Catch (throwTo owner UserInterrupt)
+  stopping <- newIORef False
+  let caught = Catch $ do
+        first <- atomicModifyIORef' stopping (\already -> (True, not already))
+        when first (throwTo owner UserInterrupt)
       withSignal sig = bracket (installHandler sig caught Nothing) (\previous -> void (installHandler sig previous Nothing)) . const
   withSignal sigINT (withSignal sigTERM action)
 
@@ -255,466 +291,118 @@ app =
     { appDraw = draw,
       appChooseCursor = showFirstCursor,
       appHandleEvent = handleEvent,
-      appStartEvent = pure (),
-      appAttrMap = const attributes
+      appStartEvent = startInitialLoad,
+      appAttrMap = presentationAttributes . stateNoColor
     }
 
-attributes :: AttrMap
-attributes =
-  attrMap
-    Vty.defAttr
-    [ (attrName "selected", fg Vty.cyan `Vty.withStyle` Vty.bold),
-      (attrName "title", fg Vty.brightBlue `Vty.withStyle` Vty.bold),
-      (attrName "error", fg Vty.red),
-      (attrName "status", fg Vty.yellow),
-      (attrName "markdown-heading", fg Vty.brightBlue `Vty.withStyle` Vty.bold),
-      (attrName "markdown-quote", fg Vty.brightBlack),
-      (attrName "markdown-fence", fg Vty.brightMagenta),
-      (attrName "diff-header", fg Vty.cyan),
-      (attrName "diff-added", fg Vty.green),
-      (attrName "diff-removed", fg Vty.red),
-      (attrName "diff-hunk", fg Vty.magenta),
-      (Edit.editAttr, fg Vty.white),
-      (Edit.editFocusedAttr, fg Vty.brightWhite)
-    ]
+startInitialLoad :: EventM Name AppState ()
+startInitialLoad = do
+  state <- get
+  let channel = stateChannel state
+      config = stateConfig state
+      root = stateRoot state
+  liftIO . startWorker state InitialWork $ loadInitialData config root >>= writeBChan channel . InitialReady
 
 draw :: AppState -> [Widget Name]
-draw state =
-  [ vBox
-      [ withAttr (attrName "title") (txt "agent-cat"),
-        tabs (modelTab model),
-        withAttr (attrName "status") (txtWrap (modelStatus model)),
-        borderWithLabel (txt (screenTitle (modelScreen model))) (padAll 1 body),
-        txt (footer state)
-      ]
-  ]
+draw = drawPresentation . toPresentation
+
+toPresentation :: AppState -> Presentation
+toPresentation state =
+  (staticPresentation (stateConfig state) (stateModel state))
+    { presentationEditor = currentEditor state,
+      presentationRunView = stateRunView state,
+      presentationPaneFocus = statePaneFocus state,
+      presentationOutputFollow = stateOutputFollow state,
+      presentationLayer = activeLayer state,
+      presentationExactDetails = stateConfirmDetails state,
+      presentationRunning = isJust (stateRunning state),
+      presentationNoColor = stateNoColor state,
+      presentationPersonPrompt = snd <$> statePersonPrompt state,
+      presentationPersonSubmitted = statePersonSubmitted state,
+      presentationPersonError = statePersonError state,
+      presentationRecovery = queuedRecovery state,
+      presentationSteerTiming = stateSteerTiming state,
+      presentationControlError = stateControlError state,
+      presentationSaveError = stateSaveError state,
+      presentationFinalResult = stateFinalResult state,
+      presentationFinalLoading = stateFinalLoading state,
+      presentationShowResult = stateShowResult state,
+      presentationElapsed = elapsedText state,
+      presentationRunPersona = stateRunPersona state,
+      presentationRunRealization = stateRunRealization state,
+      presentationSpinner = spinnerFrame (stateNow state)
+    }
+
+currentEditor :: AppState -> Edit.Editor Text Name
+currentEditor state = case activeLayer state of
+  PersonLayer -> statePersonEditor state
+  SteerLayer -> stateControlEditor state
+  SaveLayer -> stateSaveEditor state
+  FilterLayer -> stateFilterEditor state
+  _ -> stateEditor state
+
+activeLayer :: AppState -> ActiveLayer
+activeLayer state
+  | stateKeyHelp state = KeyHelpLayer
+  | stateCancelConfirm state = CancelLayer
+  | Just decision <- listToMaybe (stateMandatoryDecisions state), mandatoryKind decision == MandatoryPerson = PersonLayer
+  | Just decision <- listToMaybe (stateMandatoryDecisions state), mandatoryKind decision == MandatoryRecovery = RecoveryLayer
+  | isJust (stateSteerTiming state) = SteerLayer
+  | stateSaveResult state = SaveLayer
+  | stateFilterEditing state = FilterLayer
+  | ConfirmScreen _ <- screen, stateConfirmDetails state = ConfirmDetailsLayer
+  | ConfirmScreen _ <- screen = ConfirmLayer
+  | LiveScreen _ <- screen, stateRunDetails state = RunDetailsLayer
+  | otherwise = ScreenLayer
   where
-    model = stateModel state
-    body
-      | stateCancelConfirm state = cancelConfirmationView
-      | Just prompt <- statePersonPrompt state = personPromptView state prompt
-      | Just (occurrence, recovery) <- queuedRecovery state = recoveryDecisionView occurrence recovery
-      | Just timing <- stateSteerTiming state = steerView state timing
-      | stateSaveResult state = saveResultView state
-      | stateFilterEditing state = workflowFilterView state
-      | otherwise = screenBody
-    screenBody = case modelScreen model of
-      BrowserScreen -> viewport MainViewport Vertical (vBox (map selectableLine (browserLines model)))
-      InputScreen index -> inputView state index
-      TargetScreen -> targetView model
-      HelpLoading -> center (txt "Loading bounded runner help…")
-      HelpScreen help -> viewport MainViewport Vertical (txt (boundedDisplay help))
-      PreviewLoading -> center (txt "Building exact-input plan and routing preview…")
-      ConfirmScreen preview -> confirmView (stateConfig state) preview
-      LaunchingScreen _ -> center (txt "Waiting for the validated run.started event…")
-      LiveScreen _ -> case modelSnapshot model of
-        Nothing -> center (txt "Waiting for run.started…")
-        Just snapshot -> liveView state snapshot
-      FailureScreen failure -> withAttr (attrName "error") (txtWrap failure)
-    selectableLine line
-      | "> " `T.isPrefixOf` line = withAttr (attrName "selected") (txtWrap line)
-      | otherwise = txtWrap line
-
-cancelConfirmationView :: Widget Name
-cancelConfirmationView =
-  center
-    ( borderWithLabel (txt "cancel owned run")
-        (padAll 1 (vBox [txt "Cancel the machine child and its process group?", txt "", withAttr (attrName "selected") (txt "y cancel   n keep running")]))
-    )
-
-workflowFilterView :: AppState -> Widget Name
-workflowFilterView state =
-  vBox
-    [ txt "Fuzzy workflow filter (subsequence match against name and description)",
-      Edit.renderEditor (txt . T.unlines) True (stateEditor state),
-      txt "Ctrl-D applies; Esc keeps the current filter."
-    ]
-
-saveResultView :: AppState -> Widget Name
-saveResultView state =
-  vBox
-    [ txt "Copy the verified final JSON result to a new absolute path (existing files are refused).",
-      Edit.renderEditor (txt . T.unlines) True (stateEditor state),
-      maybe emptyWidget (withAttr (attrName "error") . txtWrap) (stateSaveError state),
-      txt "Ctrl-D saves; Esc cancels."
-    ]
+    screen = modelScreen (stateModel state)
 
 queuedRecovery :: AppState -> Maybe (OccurrenceSnapshot, RecoverySnapshot)
 queuedRecovery state = do
   _ <- stateRunning state
-  occurrenceId <- case stateRecoveryQueue state of
-    first : _ -> Just first
-    [] -> Nothing
+  decision <- listToMaybe (stateMandatoryDecisions state)
+  if mandatoryKind decision == MandatoryRecovery then pure () else Nothing
   snapshot <- modelSnapshot (stateModel state)
-  occurrence <- Map.lookup occurrenceId (snapshotOccurrences snapshot)
+  occurrence <- Map.lookup (mandatoryOccurrence decision) (snapshotOccurrences snapshot)
   recovery <- snapshotOccurrenceRecovery occurrence
   pure (occurrence, recovery)
 
-recoveryDecisionView :: OccurrenceSnapshot -> RecoverySnapshot -> Widget Name
-recoveryDecisionView occurrence recovery =
-  vBox
-    [ txt ("Recovery required for occurrence " <> T.pack (show (occurrenceNumber (snapshotOccurrenceId occurrence)))),
-      txtWrap (snapshotRecoveryGap recovery <> ": " <> snapshotRecoveryMessage recovery),
-      txtWrap
-        ( "Choose "
-            <> T.intercalate
-              ", "
-              [ recoveryKey (recoveryChoice option) <> " " <> recoveryChoice option
-                | option <- snapshotRecoveryChoices recovery
-              ]
-        ),
-      txt "This FIFO decision cannot be bypassed by selecting a later occurrence.",
-      txt "c requests whole-run cancellation."
-    ]
-  where
-    recoveryKey "retry" = "r"
-    recoveryKey "failover" = "f"
-    recoveryKey "abandon" = "a"
-    recoveryKey _ = "?"
-
-steerView :: AppState -> SteeringTiming -> Widget Name
-steerView state timing =
-  vBox
-    [ txt ("Steer selected active attempt (" <> steeringTimingText timing <> ")"),
-      txt "The control is tied to the selected occurrence and physical attempt.",
-      Edit.renderEditor (txt . T.unlines) True (stateEditor state),
-      maybe emptyWidget (withAttr (attrName "error") . txtWrap) (stateControlError state),
-      txt "Enter inserts a newline; Ctrl-D sends. Esc closes without sending."
-    ]
-
-personPromptView :: AppState -> PersonPrompt -> Widget Name
-personPromptView state prompt =
-  vBox
-    [ txt ("Person answer required for occurrence " <> occurrenceNumberText (personPromptOccurrence prompt)),
-      txt (personPromptIntent prompt <> "/" <> personPromptCode prompt),
-      viewport MainViewport Vertical (txtWrap (boundedDisplay (personPromptText prompt))),
-      txt "",
-      if statePersonSubmitted state
-        then withAttr (attrName "selected") (txt "Answer accepted locally; waiting for delivered acknowledgement…")
-        else Edit.renderEditor (txt . T.unlines) True (stateEditor state),
-      maybe emptyWidget (withAttr (attrName "error") . txtWrap) (statePersonError state),
-      txt (personAnswerHelp (personPromptCode prompt))
-    ]
-
-liveView :: AppState -> RunSnapshot -> Widget Name
-liveView state snapshot =
-  vBox
-    [ txtWrap
-        ( "workflow "
-            <> fromMaybe "starting" (snapshotWorkflow snapshot)
-            <> "  persona "
-            <> fromMaybe "none" (stateRunPersona state)
-            <> "  realization "
-            <> fromMaybe (liveAttemptTargets snapshot) (stateRunRealization state)
-            <> "  run "
-            <> runIdText (snapshotRunId snapshot)
-            <> "  "
-            <> T.pack (show (snapshotRunStatus snapshot))
-            <> "  elapsed "
-            <> elapsedText state
-            <> billText snapshot
-        ),
-      hBox
-        [ hLimit 52 (viewport MainViewport Vertical (vBox (map selectedLine (occurrenceRows snapshot (stateRunView state))))),
-          vBorder,
-          padLeft (Pad 1) (viewport OutputViewport Vertical (vBox (map styledLine (selectedOccurrenceLines snapshot (stateRunView state)))))
-        ],
-      txt (controlHint snapshot (stateRunView state)),
-      maybe emptyWidget (withAttr (attrName "error") . txtWrap) (stateControlError state),
-      finalResultView state snapshot
-    ]
-  where
-    selectedLine line
-      | "> " `T.isPrefixOf` line = withAttr (attrName "selected") (txtWrap line)
-      | otherwise = txtWrap line
-
-liveAttemptTargets :: RunSnapshot -> Text
-liveAttemptTargets snapshot =
-  case
-      [ snapshotAttemptTarget attempt
-        | occurrence <- Map.elems (snapshotOccurrences snapshot),
-          attempt <- Map.elems (snapshotOccurrenceAttempts occurrence)
-      ] of
-    [] -> "pending"
-    values -> T.intercalate ", " (deduplicate values)
+spinnerFrame :: UTCTime -> Text
+spinnerFrame now = ["|", "/", "-", "\\"] !! (floor (utctDayTime now) `mod` 4)
 
 elapsedText :: AppState -> Text
 elapsedText state = case stateRunStartedAt state of
   Nothing -> "unknown"
   Just started ->
-    let seconds = max 0 (floor (diffUTCTime (stateNow state) started) :: Integer)
+    let end = case modelSnapshot (stateModel state) of
+          Just snapshot | terminalStatus (snapshotRunStatus snapshot) ->
+            fromMaybe started (snapshotLastEnvelope snapshot >>= parseFrontendTime . envelopeTimestamp)
+          _ -> stateNow state
+        seconds = max 0 (floor (diffUTCTime end started) :: Integer)
         (hours, afterHours) = seconds `divMod` 3600
         (minutes, remainder) = afterHours `divMod` 60
      in if hours > 0
           then T.pack (show hours <> "h" <> show minutes <> "m" <> show remainder <> "s")
           else T.pack (show minutes <> "m" <> show remainder <> "s")
 
-deduplicate :: (Eq a) => [a] -> [a]
-deduplicate [] = []
-deduplicate (value : rest) = value : deduplicate (filter (/= value) rest)
-
-controlHint :: RunSnapshot -> RunView -> Text
-controlHint snapshot view = case selectedOccurrence snapshot view of
-  Nothing -> ""
-  Just occurrence ->
-    let steer = maybe "" (const "i steer-now  b steer-next  ") (activeAttemptForSelection snapshot view)
-        recovery = case snapshotOccurrenceRecovery occurrence of
-          Nothing -> ""
-          Just pending ->
-            T.unwords
-              [ key <> " " <> recoveryChoice choice
-                | choice <- snapshotRecoveryChoices pending,
-                  let key = case recoveryChoice choice of
-                        "retry" -> "r"
-                        "failover" -> "f"
-                        "abandon" -> "a"
-                        _ -> "?"
-              ]
-        redirects = case snapshotOccurrenceDispatch occurrence of
-          Just dispatch
-            | dispatchOpen dispatch -> T.unwords [T.pack (show index) <> " " <> target | (index, target) <- zip [1 :: Int .. 9] (take 9 (dispatchTargets dispatch))]
-          _ -> ""
-     in T.strip (steer <> recovery <> "  " <> redirects)
-
-finalResultView :: AppState -> RunSnapshot -> Widget Name
-finalResultView state snapshot = case snapshotResult snapshot of
-  Nothing -> emptyWidget
-  Just reference ->
-    borderWithLabel (txt "final result") $
-      padAll 1 $ case stateFinalResult state of
-        Nothing
-          | stateFinalLoading state -> txt "Loading and verifying private result artifact…"
-          | otherwise -> txtWrap (resultArtifactPreview reference)
-        Just (Left failure) -> withAttr (attrName "error") (txtWrap failure)
-        Just (Right value) -> txtWrap (boundedDisplay (TE.decodeUtf8 (BL.toStrict (encode value))))
-
-billText :: RunSnapshot -> Text
-billText snapshot = case (snapshotBillFresh snapshot, snapshotBillMemo snapshot) of
-  (Nothing, Nothing) -> ""
-  (fresh, memo) -> "  bill " <> maybe "?" (T.pack . show) fresh <> " fresh / " <> maybe "?" (T.pack . show) memo <> " memo"
-
-boundedDisplay :: Text -> Text
-boundedDisplay value
-  | T.length value <= 262144 = value
-  | otherwise = T.take 262144 value <> "\n[… display truncated; full value remains in the private run store …]"
-
-personAnswerHelp :: Text -> Text
-personAnswerHelp "text" = "Enter inserts a newline; Ctrl-D submits the exact text. c cancels the run."
-personAnswerHelp "flag" = "Type yes/no or true/false, then Ctrl-D. c cancels the run."
-personAnswerHelp "receipt" = "Leave the editor empty and press Ctrl-D to acknowledge. c cancels the run."
-personAnswerHelp _ = "Enter a JSON value and press Ctrl-D. c cancels the run."
-
-screenTitle :: Screen -> Text
-screenTitle = \case
-  BrowserScreen -> "browser"
-  InputScreen _ -> "workflow input"
-  TargetScreen -> "execution target"
-  HelpLoading -> "workflow help"
-  HelpScreen _ -> "workflow help"
-  PreviewLoading -> "preview"
-  ConfirmScreen _ -> "launch confirmation"
-  LaunchingScreen _ -> "launching"
-  LiveScreen _ -> "live run"
-  FailureScreen _ -> "error"
-
-tabs :: BrowserTab -> Widget Name
-tabs selected =
-  hBox
-    [ tab WorkflowsTab "Workflows",
-      txt "  ",
-      tab RunsTab "Runs",
-      txt "  ",
-      tab RoutingTab "Routing"
-    ]
-  where
-    tab value label
-      | value == selected = withAttr (attrName "selected") (txt ("[" <> label <> "]"))
-      | otherwise = txt label
-
-inputView :: AppState -> Int -> Widget Name
-inputView state index = case modelWorkflow model >>= (\descriptor -> atMay (workflowInputs descriptor) index) of
-  Nothing -> withAttr (attrName "error") (txt "Input descriptor unavailable")
-  Just input ->
-    vBox
-      [ txt ("Input " <> T.pack (show (index + 1)) <> ": " <> workflowInputName input <> " (" <> inputSourceText (workflowInputSource input) <> ")"),
-        txt "Enter inserts a newline; Ctrl-D accepts this value.",
-        Edit.renderEditor (txt . T.unlines) True (stateEditor state)
-      ]
-  where
-    model = stateModel state
-
-targetView :: TuiModel -> Widget Name
-targetView model =
-  vBox
-    ( [txt "Press s for scripted execution, l for fully pinned routing, or p for the next persona."]
-        <> case modelRouting model of
-          Left failure -> [txt ("Live routing unavailable: " <> failure)]
-          Right routing ->
-            [ txt ("Persona: " <> fromMaybe "none" (routingSummaryPersona routing)),
-              txt ("Available personas: " <> T.intercalate ", " (routingSummaryPersonas routing)),
-              txt ""
-            ]
-              <> [ txt (engineChoiceAlias engine <> "  " <> engineChoiceBackend engine)
-                   | engine <- routingSummaryEngines routing
-                 ]
-    )
-
-confirmView :: TuiConfig -> LaunchPreview -> Widget Name
-confirmView config preview =
-  let descriptor = previewDescriptor preview
-      capabilities = workflowCapabilities descriptor
-      target = case previewLineage preview of
-        Just (operation, record) ->
-          lineageText operation
-            <> " from "
-            <> runIdText (frontendRunId (recordManifest record))
-            <> " using "
-            <> frontendTargetKind (recordManifest record)
-        Nothing -> case previewTarget preview of
-          TargetScripted -> "scripted"
-          TargetRestored kind _ -> "restored " <> kind
-          TargetRouting persona _ _ ->
-            "live routing (" <> persona <> "); full pin coverage required"
-      workingDirectory = maybe (tuiWorkingDir config) (frontendCwd . recordManifest . snd) (previewLineage preview)
-      exactTargetArguments = case previewLineage preview of
-        Just (_, record) -> Right (map T.unpack (frontendTargetArgs (recordManifest record)))
-        Nothing -> targetArguments (previewTarget preview)
-      renderedArguments = either ("invalid: " <>) (T.pack . show) exactTargetArguments
-      exactEffectful = case previewPlan preview of
-        Object plan -> case KeyMap.lookup "capabilities" plan of
-          Just (Object capabilities') -> case KeyMap.lookup "effectful" capabilities' of
-            Just (Bool value) -> value
-            _ -> descriptorEffectful capabilities
-          _ -> descriptorEffectful capabilities
-        _ -> descriptorEffectful capabilities
-   in vBox
-        ( [ txt ("Workflow: " <> workflowName descriptor),
-          txt ("Runner executable: " <> T.pack (tuiRunner config)),
-          txtWrap ("Runner prefix arguments: " <> T.pack (show (tuiRunnerArgs config))),
-          txtWrap ("Exact target arguments: " <> renderedArguments),
-          txt ("Working directory: " <> T.pack workingDirectory),
-          txt ("Target: " <> target),
-          txt ("Effectful: " <> yesNo exactEffectful),
-          txt ("Program SHA-256: " <> previewProgramHash preview),
-          txt ("Private state root: " <> T.pack (tuiStateDir config))
-        ]
-          <> planConfirmationLines (previewPlan preview)
-          <> routingConfirmationLines preview
-          <> [ txt "",
-          txt "Input bodies and secret values are intentionally omitted.",
-          withAttr (attrName "selected") (txt "Press y to launch, n to return.")
-          ]
-        )
-
-planConfirmationLines :: Value -> [Widget Name]
-planConfirmationLines (Object plan) =
-  [ txtWrap
-      ( "Exact-input plan: "
-          <> scalarField "level" plan
-          <> "; size "
-          <> scalarField "size" plan
-          <> "; ask nodes "
-          <> scalarField "askNodes" plan
-          <> "; fold "
-          <> scalarField "minFold" plan
-          <> "–"
-          <> scalarField "maxFold" plan
-          <> " over "
-          <> scalarField "paths" plan
-          <> " paths"
-      ),
-    txtWrap ("Code sequence: " <> arrayField "codes" plan)
-  ]
-planConfirmationLines _ = [withAttr (attrName "error") (txt "Exact-input plan is not an object")]
-
-scalarField :: KeyMap.Key -> KeyMap.KeyMap Value -> Text
-scalarField name fields = case KeyMap.lookup name fields of
-  Just (String value) -> value
-  Just (Number value) -> T.pack (show value)
-  Just Null -> "none"
-  _ -> "?"
-
-arrayField :: KeyMap.Key -> KeyMap.KeyMap Value -> Text
-arrayField name fields = case KeyMap.lookup name fields of
-  Just (Array values) ->
-    let rendered = [value | String value <- Vector.toList values]
-     in if null rendered then "none" else boundedDisplay (T.intercalate " → " rendered)
-  _ -> "?"
-
-routingConfirmationLines :: LaunchPreview -> [Widget Name]
-routingConfirmationLines preview = case previewRouting preview of
-  Nothing -> []
-  Just routing ->
-    map (txtWrap . ("Concrete realization: " <>)) realizations
-      <> [txtWrap ("Routing warnings: " <> if null (routingSummaryWarnings routing) then "none" else T.intercalate "; " (routingSummaryWarnings routing))]
-    where
-      realizations = case concatMap routingProfileLines (routingSummaryProfiles routing) of
-        [] -> ["unavailable"]
-        values -> values
-
-routingProfileLines :: RoutingProfileChoice -> [Text]
-routingProfileLines profile =
-  map (routingRungLine (routingProfileName profile)) (routingProfileRungs profile)
-
-routingRungLine :: Text -> RoutingRungChoice -> Text
-routingRungLine profileName rung =
-  profileName
-    <> ": "
-    <> routingRungAxis rung
-    <> " #"
-    <> T.pack (show (routingRungNumber rung))
-    <> " -> "
-    <> routingRungModel rung
-    <> maybe "" (" (" <>) (fmap (<> ")") (routingRungModelAlias rung))
-    <> " on "
-    <> routingRungRouter rung
-    <> " ["
-    <> routingRungBackend rung
-    <> "; "
-    <> routingRungProvider rung
-    <> "; thinking "
-    <> routingRungThinking rung
-    <> "; inventory "
-    <> routingInventoryProvenance (routingRungInventory rung)
-    <> "]"
-
-routingInventoryProvenance :: RoutingInventoryChoice -> Text
-routingInventoryProvenance inventory =
-  routingInventorySource inventory
-    <> maybe "" ("; fingerprint " <>) (routingInventoryFingerprint inventory)
-    <> maybe "" ("; fetched " <>) (routingInventoryFetchedAt inventory)
-
-footer :: AppState -> Text
-footer state
-  | stateSaveResult state = "Ctrl-D save verified result  Esc cancel"
-  | isJust (statePersonPrompt state) = "Ctrl-D submit person answer  c cancel"
-  | not (null (stateRecoveryQueue state)) = "r retry  f failover  a abandon  c cancel (FIFO recovery)"
-  | stateFilterEditing state = "Ctrl-D apply fuzzy filter  Esc cancel"
-  | otherwise = footerScreen state (modelScreen (stateModel state))
-
-footerScreen :: AppState -> Screen -> Text
-footerScreen state = \case
-  BrowserScreen
-    | isJust (stateRunning state) -> "↑/↓ select  Tab pane  Enter open  Esc live run  c cancel owned run"
-    | modelTab (stateModel state) == RunsTab -> "↑/↓ select  Enter inspect  r restart  m resume  f fork  q quit"
-    | modelTab (stateModel state) == RoutingTab -> "↑/↓ select  p next persona  Tab pane  q quit"
-    | otherwise -> "↑/↓ select  / filter  Enter launch  h help  Tab pane  q quit"
-  InputScreen _ -> "Ctrl-D accept  Esc back"
-  TargetScreen -> "s scripted  l routing  p next persona  Esc back"
-  HelpLoading -> "runner help subprocess is bounded to 30 seconds / 4 MiB"
-  HelpScreen _ -> "↑/↓ scroll  Esc return to browser"
-  PreviewLoading -> "preview subprocess is bounded to 30 seconds / 4 MiB"
-  ConfirmScreen _ -> "y launch  n back"
-  LaunchingScreen _ -> "Esc detach to browser  c cancel"
-  LiveScreen _
-    | isJust (stateRunning state) -> "j/k occurrence  ↑/↓ scroll  G follow tail  Esc detach  c cancel"
-    | Just (Right _) <- stateFinalResult state -> "j/k occurrence  ↑/↓ scroll  G follow tail  s save/copy result  Esc return to runs"
-    | otherwise -> "j/k occurrence  ↑/↓ scroll  G follow tail  Esc return to runs"
-  FailureScreen _ -> "Esc return to browser"
-
 handleEvent :: BrickEvent Name AppEvent -> EventM Name AppState ()
-handleEvent event = case event of
+handleEvent event = do
+  before <- get
+  handleEventCore event
+  after <- get
+  resetEnteredViewport before after
+
+handleEventCore :: BrickEvent Name AppEvent -> EventM Name AppState ()
+handleEventCore event = case event of
   AppEvent FrameReady -> handleFrame
+  AppEvent (InitialReady result) -> do
+    state <- get
+    when (modelScreen (stateModel state) == InitialLoading) $ case result of
+      Left failure -> put state {stateModel = (stateModel state) {modelScreen = FailureScreen failure, modelStatus = "runner discovery failed"}}
+      Right initial -> put state
+        { stateServer = Just (initialServer initial),
+          stateModel = initialModel (initialWorkflows initial) (initialRuns initial) (initialRouting initial)
+        }
   AppEvent (Tick now) -> modify (\state -> state {stateNow = now})
   AppEvent (PreviewReady request result) -> do
     state <- get
@@ -755,52 +443,84 @@ handleEvent event = case event of
   AppEvent (RoutingReady requested result) -> do
     state <- get
     when (stateRoutingRequest state == Just requested) $ case result of
-      Left failure -> put state {stateRoutingRequest = Nothing, stateModel = (stateModel state) {modelStatus = "routing persona failed: " <> failure}}
+      Left failure -> put state {stateRoutingRequest = Nothing, stateModel = (stateModel state) {modelRouting = Left failure, modelStatus = "routing persona failed: " <> failure}}
       Right routing
         | routingSummaryPersona routing == Just requested ->
             put state {stateRoutingRequest = Nothing, stateModel = (stateModel state) {modelRouting = Right routing, modelEngineIndex = 0, modelStatus = "routing persona selected"}}
         | otherwise ->
             put state {stateRoutingRequest = Nothing, stateModel = (stateModel state) {modelStatus = "routing inspection returned another persona"}}
-  AppEvent (ChildStopped outcome) -> do
+  AppEvent (MachineReady request preview result) -> handleMachineReady request preview result
+  AppEvent (ChildStopped request outcome) -> do
     state <- get
-    case outcome of
-      MachineProtocolFailed failure -> do
-        put state {stateMachineFailure = Just failure, stateModel = (stateModel state) {modelScreen = FailureScreen failure, modelStatus = "machine protocol failed"}}
-        liftIO . void . forkIO $ mapM_ terminateMachine (stateRunning state)
-      MachineExited _ _ -> do
-        put state {statePendingExit = Just outcome}
-        queueEmpty <- liftIO . atomically $ isEmptyTBQueue (stateEvents state)
-        if queueEmpty
-          then finalizePendingExit
-          else liftIO (notifyFrame (stateChannel state) (stateFramePending state))
-  AppEvent (PersonPromptReady occurrence result) -> do
+    when (stateMachineRequest state == Just request) $
+      if isProcessLoading state
+        then put state {statePendingExit = Just outcome, stateMachineFailure = protocolFailure outcome}
+        else case outcome of
+          MachineProtocolFailed failure -> do
+            put state {statePendingExit = Just outcome, stateMachineFailure = Just failure}
+            finalizePendingExit
+          MachineExited _ _ -> do
+            put state {statePendingExit = Just outcome}
+            queueEmpty <- liftIO . atomically $ isEmptyTBQueue (stateEvents state)
+            if queueEmpty
+              then finalizePendingExit
+              else liftIO (notifyFrame (stateChannel state) (stateFramePending state))
+  AppEvent (PersonPromptReady decision generation result) -> do
     state <- get
-    when (statePersonLoading state == Just occurrence) $ case result of
+    when (statePersonLoading state == Just (decision, generation) && listToMaybe (stateMandatoryDecisions state) == Just decision) $ case result of
       Left failure -> do
-        liftIO . void . forkIO $ mapM_ terminateMachine (stateRunning state)
+        let message = "private person question is invalid: " <> failure
         put
           state
-            { stateModel = (stateModel state) {modelScreen = FailureScreen ("private person question is invalid: " <> failure)},
-              stateMachineFailure = Just ("private person question is invalid: " <> failure),
+            { statePendingExit = Just (MachineProtocolFailed message),
+              stateMachineFailure = Just message,
               statePersonLoading = Nothing,
               statePersonError = Just failure
             }
-      Right prompt ->
+        finalizePendingExit
+      Right prompt -> do
+        vScrollToBeginning (viewportScroll PersonViewport)
         put
           state
             { statePersonLoading = Nothing,
-              statePersonPrompt = Just prompt,
+              statePersonPrompt = Just (decision, prompt),
               statePersonSubmitted = False,
               statePersonControlId = Nothing,
               statePersonError = Nothing,
-              stateEditor = Edit.editorText InputEditor Nothing ""
+              statePersonEditor = blankEditor
             }
   AppEvent (FinalResultReady runId result) -> do
     state <- get
     when (maybe False ((== runId) . snapshotRunId) (modelSnapshot (stateModel state))) $
       put state {stateFinalLoading = False, stateFinalResult = Just result}
+  VtyEvent (Vty.EvResize width height) -> modify $ \state ->
+    let model = stateModel state
+        status = case modelScreen model of
+          ConfirmScreen preview
+            | launchReviewAllowed (stateConfig state) preview (width, height) -> "complete launch review is visible"
+            | otherwise -> "launch disabled until the complete review fits"
+          _ -> modelStatus model
+     in state {stateTerminalSize = (width, height), stateModel = model {modelStatus = status}}
   VtyEvent key -> handleKey event key
   _ -> pure ()
+
+resetEnteredViewport :: AppState -> AppState -> EventM Name AppState ()
+resetEnteredViewport before after = do
+  let oldScreen = modelScreen (stateModel before)
+      newScreen = modelScreen (stateModel after)
+      oldDecision = listToMaybe (stateMandatoryDecisions before)
+      newDecision = listToMaybe (stateMandatoryDecisions after)
+  when (newFailure oldScreen newScreen) (vScrollToBeginning (viewportScroll FailureViewport))
+  when (newHelp oldScreen newScreen) (vScrollToBeginning (viewportScroll HelpViewport))
+  when (oldDecision /= newDecision && maybe False ((== MandatoryRecovery) . mandatoryKind) newDecision) (vScrollToBeginning (viewportScroll RecoveryViewport))
+  when (oldDecision /= newDecision && maybe False ((== MandatoryPerson) . mandatoryKind) newDecision) (vScrollToBeginning (viewportScroll PersonViewport))
+  where
+    newFailure (FailureScreen old) (FailureScreen new) = old /= new
+    newFailure _ FailureScreen {} = True
+    newFailure _ _ = False
+    newHelp (HelpScreen old) (HelpScreen new) = old /= new
+    newHelp _ HelpScreen {} = True
+    newHelp _ _ = False
 
 finalizePendingExit :: EventM Name AppState ()
 finalizePendingExit = do
@@ -808,13 +528,16 @@ finalizePendingExit = do
   case statePendingExit state of
     Nothing -> pure ()
     Just outcome -> do
-      liftIO (writeIORef (stateOwned state) Nothing)
+      case outcome of
+        MachineProtocolFailed _ -> liftIO (mapM_ terminateMachine (stateRunning state))
+        MachineExited {} -> pure ()
+      liftIO (cancelWorker state PersonWork >> writeIORef (stateOwned state) Nothing)
       let model = stateModel state
           stoppedModel = case stateMachineFailure state of
             Just failure -> model {modelScreen = FailureScreen failure, modelStatus = "machine protocol failed"}
             Nothing -> case outcome of
               MachineExited status diagnostic
-                | maybe False (terminalStatus . snapshotRunStatus) (modelSnapshot model) -> model {modelStatus = "machine child exited"}
+                | maybe False (terminalStatus . snapshotRunStatus) (modelSnapshot model) -> model
                 | otherwise ->
                     let detail = if T.null diagnostic then "" else "; " <> diagnostic
                      in model
@@ -828,87 +551,249 @@ finalizePendingExit = do
             stateRunning = Nothing,
             statePendingExit = Nothing,
             stateMachineFailure = Nothing,
+            stateMachineRequest = Nothing,
             stateCancelConfirm = False,
             stateSteerTiming = Nothing,
-            statePersonPrompt = if maybe False (terminalStatus . snapshotRunStatus) (modelSnapshot model) then Nothing else statePersonPrompt state
+            stateMandatoryDecisions = [],
+            statePersonLoading = Nothing,
+            statePersonPrompt = Nothing
           }
       refreshRuns
 
 handleKey :: BrickEvent Name AppEvent -> Vty.Event -> EventM Name AppState ()
 handleKey original key = do
   state <- get
-  if stateSaveResult state
-    then handleSaveResultKey original key
-    else if stateFilterEditing state
-      then handleFilterKey original key
-      else if stateCancelConfirm state
-        then handleCancelKey key
-        else if isJust (stateRunning state) && not (null (stateRecoveryQueue state)) && not (isJust (statePersonPrompt state))
-          then maybe (pure ()) (\occurrence -> handleRecoveryKey occurrence key) (listToMaybe (stateRecoveryQueue state))
-          else case statePersonPrompt state of
-      Just _ -> case key of
-        Vty.EvKey (Vty.KChar 'c') [] -> requestCancellation
-        Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl]
-          | not (statePersonSubmitted state) -> submitPersonAnswer
-        _
-          | statePersonSubmitted state -> pure ()
-          | otherwise -> handlePersonEditorInput original
-      Nothing
-        | Just _ <- stateSteerTiming state -> case key of
-            Vty.EvKey Vty.KEsc [] -> put state {stateSteerTiming = Nothing, stateControlError = Nothing}
-            Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl] -> submitSteer
-            _ -> handleControlEditorInput original
-      Nothing -> case (modelScreen (stateModel state), key) of
-        (BrowserScreen, Vty.EvKey (Vty.KChar 'q') [])
-          | not (isJust (stateRunning state)) -> halt
-        (BrowserScreen, Vty.EvKey Vty.KEsc []) -> handleEscape
-        (BrowserScreen, Vty.EvKey Vty.KUp []) -> handleMove (-1)
-        (BrowserScreen, Vty.EvKey Vty.KDown []) -> handleMove 1
-        (BrowserScreen, Vty.EvKey (Vty.KChar '\t') []) -> cycleBrowserTab
-        (BrowserScreen, Vty.EvKey (Vty.KChar 'p') []) -> cycleRoutingPersona
-        (BrowserScreen, Vty.EvKey Vty.KEnter []) -> handleEnter
-        (BrowserScreen, Vty.EvKey (Vty.KChar 'h') []) -> showSelectedHelp
-        (BrowserScreen, Vty.EvKey (Vty.KChar '/') [])
-          | modelTab (stateModel state) == WorkflowsTab -> openWorkflowFilter
-        (BrowserScreen, Vty.EvKey (Vty.KChar 'r') []) -> beginLineage RestartRun
-        (BrowserScreen, Vty.EvKey (Vty.KChar 'm') []) -> beginLineage ResumeRun
-        (BrowserScreen, Vty.EvKey (Vty.KChar 'f') []) -> beginLineage ForkRun
-        (BrowserScreen, Vty.EvKey (Vty.KChar 'c') []) -> requestCancellation
-        (InputScreen _, Vty.EvKey Vty.KEsc []) -> handleEscape
-        (InputScreen _, Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl]) -> submitEditor
-        (InputScreen _, _) -> handleEditorInput original
-        (TargetScreen, Vty.EvKey Vty.KEsc []) -> handleEscape
-        (TargetScreen, Vty.EvKey (Vty.KChar 's') []) -> chooseScripted
-        (TargetScreen, Vty.EvKey (Vty.KChar 'l') []) -> chooseLive
-        (TargetScreen, Vty.EvKey (Vty.KChar 'p') []) -> cycleRoutingPersona
-        (PreviewLoading, Vty.EvKey Vty.KEsc []) -> handleEscape
-        (ConfirmScreen _, Vty.EvKey (Vty.KChar 'y') []) -> confirmLaunch
-        (ConfirmScreen _, Vty.EvKey (Vty.KChar 'n') []) -> modify $ \value -> value {stateModel = (stateModel value) {modelScreen = TargetScreen}}
-        (LaunchingScreen _, Vty.EvKey Vty.KEsc []) -> handleEscape
-        (LaunchingScreen _, Vty.EvKey (Vty.KChar 'c') []) -> requestCancellation
-        (LiveScreen _, Vty.EvKey Vty.KEsc []) -> handleEscape
-        (LiveScreen _, Vty.EvKey Vty.KUp []) -> handleMove (-1)
-        (LiveScreen _, Vty.EvKey Vty.KDown []) -> handleMove 1
-        (LiveScreen _, Vty.EvKey (Vty.KChar 'G') []) -> followOutputTail
-        (LiveScreen _, Vty.EvKey Vty.KEnd []) -> followOutputTail
-        (LiveScreen _, Vty.EvKey (Vty.KChar 'j') []) -> moveOccurrence 1
-        (LiveScreen _, Vty.EvKey (Vty.KChar 'k') []) -> moveOccurrence (-1)
-        (LiveScreen _, Vty.EvKey (Vty.KChar 'i') []) -> openSteer InterruptNow
-        (LiveScreen _, Vty.EvKey (Vty.KChar 'b') []) -> openSteer NextBoundary
-        (LiveScreen _, Vty.EvKey (Vty.KChar 'r') []) -> sendRecovery RecoveryRetry
-        (LiveScreen _, Vty.EvKey (Vty.KChar 'f') []) -> sendRecovery RecoveryFailOver
-        (LiveScreen _, Vty.EvKey (Vty.KChar 'a') []) -> sendRecovery RecoveryAbandon
-        (LiveScreen _, Vty.EvKey (Vty.KChar digit) [])
-          | digit >= '1' && digit <= '9' -> redirectSelected (fromEnum digit - fromEnum '1')
-        (LiveScreen _, Vty.EvKey (Vty.KChar 'c') []) -> requestCancellation
-        (LiveScreen _, Vty.EvKey (Vty.KChar 's') [])
-          | Just (Right _) <- stateFinalResult state -> openSaveResult
-        (HelpLoading, Vty.EvKey Vty.KEsc []) -> handleEscape
-        (HelpScreen _, Vty.EvKey Vty.KEsc []) -> handleEscape
-        (HelpScreen _, Vty.EvKey Vty.KUp []) -> handleMove (-1)
-        (HelpScreen _, Vty.EvKey Vty.KDown []) -> handleMove 1
-        (FailureScreen _, Vty.EvKey Vty.KEsc []) -> handleEscape
-        _ -> pure ()
+  case activeLayer state of
+    KeyHelpLayer -> handleKeyHelp key
+    CancelLayer -> handleCancelKey key
+    PersonLayer -> handlePersonKey original key
+    RecoveryLayer -> maybe (pure ()) (\decision -> handleRecoveryKey (mandatoryOccurrence decision) key) (listToMaybe (stateMandatoryDecisions state))
+    SteerLayer -> handleSteerKey original key
+    SaveLayer -> handleSaveResultKey original key
+    FilterLayer -> handleFilterKey original key
+    ConfirmDetailsLayer -> handleConfirmDetailsKey key
+    ConfirmLayer -> handleConfirmKey key
+    RunDetailsLayer -> handleRunDetailsKey key
+    ScreenLayer -> handleScreenKey original key
+
+handleKeyHelp :: Vty.Event -> EventM Name AppState ()
+handleKeyHelp key = case key of
+  Vty.EvKey Vty.KEsc [] -> close
+  Vty.EvKey (Vty.KChar '?') [] -> close
+  Vty.EvKey Vty.KUp [] -> vScrollBy scroll (-1)
+  Vty.EvKey Vty.KDown [] -> vScrollBy scroll 1
+  Vty.EvKey Vty.KPageUp [] -> vScrollBy scroll (-10)
+  Vty.EvKey Vty.KPageDown [] -> vScrollBy scroll 10
+  Vty.EvKey Vty.KHome [] -> vScrollToBeginning scroll
+  Vty.EvKey Vty.KEnd [] -> vScrollToEnd scroll
+  _ -> pure ()
+  where
+    scroll = viewportScroll KeyHelpViewport
+    close = modify (\state -> state {stateKeyHelp = False})
+
+handleRunDetailsKey :: Vty.Event -> EventM Name AppState ()
+handleRunDetailsKey key = case key of
+  Vty.EvKey Vty.KEsc [] -> close
+  Vty.EvKey (Vty.KChar 'd') [] -> close
+  Vty.EvKey Vty.KUp [] -> vScrollBy scroll (-1)
+  Vty.EvKey Vty.KDown [] -> vScrollBy scroll 1
+  Vty.EvKey Vty.KPageUp [] -> vScrollBy scroll (-10)
+  Vty.EvKey Vty.KPageDown [] -> vScrollBy scroll 10
+  Vty.EvKey Vty.KHome [] -> vScrollToBeginning scroll
+  Vty.EvKey Vty.KEnd [] -> vScrollToEnd scroll
+  _ -> pure ()
+  where
+    scroll = viewportScroll FailureViewport
+    close = modify (\state -> state {stateRunDetails = False})
+
+handlePersonKey :: BrickEvent Name AppEvent -> Vty.Event -> EventM Name AppState ()
+handlePersonKey original key = do
+  state <- get
+  case key of
+    Vty.EvKey Vty.KEsc [] -> requestCancellation
+    Vty.EvKey Vty.KPageUp [] -> vScrollBy promptScroll (-10)
+    Vty.EvKey Vty.KPageDown [] -> vScrollBy promptScroll 10
+    Vty.EvKey Vty.KHome [] -> vScrollToBeginning promptScroll
+    Vty.EvKey Vty.KEnd [] -> vScrollToEnd promptScroll
+    Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl]
+      | isJust (statePersonPrompt state) && not (statePersonSubmitted state) -> submitPersonAnswer
+    _
+      | statePersonSubmitted state || not (isJust (statePersonPrompt state)) -> pure ()
+      | otherwise -> handlePersonEditorInput original
+  where
+    promptScroll = viewportScroll PersonViewport
+
+handleSteerKey :: BrickEvent Name AppEvent -> Vty.Event -> EventM Name AppState ()
+handleSteerKey original key = case key of
+  Vty.EvKey Vty.KEsc [] -> modify (\state -> state {stateSteerTiming = Nothing, stateControlError = Nothing})
+  Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl] -> submitSteer
+  _ -> handleControlEditorInput original
+
+handleConfirmKey :: Vty.Event -> EventM Name AppState ()
+handleConfirmKey key = case key of
+  Vty.EvKey (Vty.KChar 'y') [] -> confirmLaunch
+  Vty.EvKey Vty.KEnter [] -> confirmLaunch
+  Vty.EvKey (Vty.KChar 'n') [] -> declinePreview
+  Vty.EvKey Vty.KEsc [] -> declinePreview
+  Vty.EvKey (Vty.KChar 'd') [] -> do
+    modify (\state -> state {stateConfirmDetails = True})
+    vScrollToBeginning (viewportScroll ConfirmDetailsViewport)
+  Vty.EvKey (Vty.KChar '?') [] -> openKeyHelp
+  _ -> pure ()
+
+handleConfirmDetailsKey :: Vty.Event -> EventM Name AppState ()
+handleConfirmDetailsKey key = case key of
+  Vty.EvKey (Vty.KChar 'y') [] -> confirmLaunch
+  Vty.EvKey Vty.KEnter [] -> confirmLaunch
+  Vty.EvKey (Vty.KChar 'n') [] -> declinePreview
+  Vty.EvKey Vty.KEsc [] -> summary
+  Vty.EvKey (Vty.KChar 'd') [] -> summary
+  Vty.EvKey Vty.KUp [] -> vScrollBy scroll (-1)
+  Vty.EvKey Vty.KDown [] -> vScrollBy scroll 1
+  Vty.EvKey Vty.KPageUp [] -> vScrollBy scroll (-10)
+  Vty.EvKey Vty.KPageDown [] -> vScrollBy scroll 10
+  Vty.EvKey Vty.KHome [] -> vScrollToBeginning scroll
+  Vty.EvKey Vty.KEnd [] -> vScrollToEnd scroll
+  Vty.EvKey (Vty.KChar '?') [] -> openKeyHelp
+  _ -> pure ()
+  where
+    scroll = viewportScroll ConfirmDetailsViewport
+    summary = modify (\state -> state {stateConfirmDetails = False})
+
+handleScreenKey :: BrickEvent Name AppEvent -> Vty.Event -> EventM Name AppState ()
+handleScreenKey original key = do
+  state <- get
+  case (modelScreen (stateModel state), key) of
+    (InputScreen _, Vty.EvKey Vty.KEsc []) -> handleEscape
+    (InputScreen _, Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl]) -> submitEditor
+    (InputScreen _, _) -> handleEditorInput original
+    (_, Vty.EvKey (Vty.KChar '?') []) -> openKeyHelp
+    (InitialLoading, Vty.EvKey (Vty.KChar 'q') []) -> halt
+    (InitialLoading, Vty.EvKey Vty.KEsc []) -> halt
+    (BrowserScreen, Vty.EvKey (Vty.KChar 'q') [])
+      | not (isJust (stateRunning state)) -> halt
+    (BrowserScreen, Vty.EvKey Vty.KEsc []) -> handleBrowserEscape
+    (BrowserScreen, Vty.EvKey Vty.KLeft []) -> focusPrimary
+    (BrowserScreen, Vty.EvKey Vty.KRight []) -> focusSecondary
+    (BrowserScreen, Vty.EvKey Vty.KUp []) -> handleMove (-1)
+    (BrowserScreen, Vty.EvKey Vty.KDown []) -> handleMove 1
+    (BrowserScreen, Vty.EvKey (Vty.KChar '\t') []) -> cycleBrowserTab
+    (BrowserScreen, Vty.EvKey (Vty.KChar 'p') [])
+      | modelTab (stateModel state) == RoutingTab -> cycleRoutingPersona
+    (BrowserScreen, Vty.EvKey Vty.KEnter []) -> handleEnter
+    (BrowserScreen, Vty.EvKey (Vty.KChar 'h') [])
+      | modelTab (stateModel state) == WorkflowsTab -> showSelectedHelp
+    (BrowserScreen, Vty.EvKey (Vty.KChar '/') [])
+      | modelTab (stateModel state) == WorkflowsTab -> openWorkflowFilter
+    (BrowserScreen, Vty.EvKey (Vty.KChar 'r') [])
+      | modelTab (stateModel state) == RunsTab -> beginLineage RestartRun
+    (BrowserScreen, Vty.EvKey (Vty.KChar 'm') [])
+      | modelTab (stateModel state) == RunsTab -> beginLineage ResumeRun
+    (BrowserScreen, Vty.EvKey (Vty.KChar 'f') [])
+      | modelTab (stateModel state) == RunsTab -> beginLineage ForkRun
+    (BrowserScreen, Vty.EvKey (Vty.KChar 'c') [])
+      | isJust (stateRunning state) -> requestCancellation
+    (TargetScreen, Vty.EvKey Vty.KEsc []) -> handleEscape
+    (TargetScreen, Vty.EvKey Vty.KUp []) -> vScrollBy (viewportScroll TargetViewport) (-1)
+    (TargetScreen, Vty.EvKey Vty.KDown []) -> vScrollBy (viewportScroll TargetViewport) 1
+    (TargetScreen, Vty.EvKey (Vty.KChar 's') []) -> chooseScripted
+    (TargetScreen, Vty.EvKey (Vty.KChar 'l') []) -> chooseLive
+    (TargetScreen, Vty.EvKey Vty.KEnter []) -> chooseLive
+    (TargetScreen, Vty.EvKey (Vty.KChar 'p') []) -> cycleRoutingPersona
+    (PreviewLoading, Vty.EvKey Vty.KEsc []) -> cancelPreview
+    (ProcessLoading _, Vty.EvKey Vty.KEsc []) -> cancelProcessStart
+    (LaunchingScreen _, Vty.EvKey Vty.KEsc []) -> handleEscape
+    (LaunchingScreen _, Vty.EvKey (Vty.KChar 'c') []) -> requestCancellation
+    (LiveScreen _, Vty.EvKey Vty.KEsc []) -> handleEscape
+    (LiveScreen _, Vty.EvKey (Vty.KChar 'd') []) -> do
+      put state {stateRunDetails = True}
+      vScrollToBeginning (viewportScroll FailureViewport)
+    (LiveScreen _, Vty.EvKey (Vty.KChar '\t') []) -> togglePaneFocus
+    (LiveScreen _, Vty.EvKey Vty.KUp []) -> handleMove (-1)
+    (LiveScreen _, Vty.EvKey Vty.KDown []) -> handleMove 1
+    (LiveScreen _, Vty.EvKey Vty.KPageUp []) -> scrollFocusedOutput (-10)
+    (LiveScreen _, Vty.EvKey Vty.KPageDown []) -> scrollFocusedOutput 10
+    (LiveScreen _, Vty.EvKey (Vty.KChar 'G') []) -> followOutputTail
+    (LiveScreen _, Vty.EvKey Vty.KEnd []) -> followOutputTail
+    (LiveScreen _, Vty.EvKey (Vty.KChar 'j') []) -> moveOccurrence 1
+    (LiveScreen _, Vty.EvKey (Vty.KChar 'k') []) -> moveOccurrence (-1)
+    (LiveScreen _, Vty.EvKey (Vty.KChar 'i') []) -> openSteer InterruptNow
+    (LiveScreen _, Vty.EvKey (Vty.KChar 'b') []) -> openSteer NextBoundary
+    (LiveScreen _, Vty.EvKey (Vty.KChar digit) [])
+      | digit >= '1' && digit <= '9' -> redirectSelected (fromEnum digit - fromEnum '1')
+    (LiveScreen _, Vty.EvKey (Vty.KChar 'c') []) -> requestCancellation
+    (LiveScreen _, Vty.EvKey (Vty.KChar 'r') []) -> showFinalResult
+    (LiveScreen _, Vty.EvKey (Vty.KChar 's') [])
+      | Just (Right _) <- stateFinalResult state -> openSaveResult
+    (HelpLoading, Vty.EvKey Vty.KEsc []) -> cancelHelp
+    (HelpScreen _, Vty.EvKey Vty.KEsc []) -> handleEscape
+    (HelpScreen _, Vty.EvKey Vty.KUp []) -> vScrollBy (viewportScroll HelpViewport) (-1)
+    (HelpScreen _, Vty.EvKey Vty.KDown []) -> vScrollBy (viewportScroll HelpViewport) 1
+    (HelpScreen _, Vty.EvKey Vty.KPageUp []) -> vScrollBy (viewportScroll HelpViewport) (-10)
+    (HelpScreen _, Vty.EvKey Vty.KPageDown []) -> vScrollBy (viewportScroll HelpViewport) 10
+    (HelpScreen _, Vty.EvKey Vty.KHome []) -> vScrollToBeginning (viewportScroll HelpViewport)
+    (HelpScreen _, Vty.EvKey Vty.KEnd []) -> vScrollToEnd (viewportScroll HelpViewport)
+    (FailureScreen _, Vty.EvKey Vty.KEsc []) -> handleEscape
+    (FailureScreen _, Vty.EvKey Vty.KUp []) -> vScrollBy (viewportScroll FailureViewport) (-1)
+    (FailureScreen _, Vty.EvKey Vty.KDown []) -> vScrollBy (viewportScroll FailureViewport) 1
+    (FailureScreen _, Vty.EvKey Vty.KPageUp []) -> vScrollBy (viewportScroll FailureViewport) (-10)
+    (FailureScreen _, Vty.EvKey Vty.KPageDown []) -> vScrollBy (viewportScroll FailureViewport) 10
+    (FailureScreen _, Vty.EvKey Vty.KHome []) -> vScrollToBeginning (viewportScroll FailureViewport)
+    (FailureScreen _, Vty.EvKey Vty.KEnd []) -> vScrollToEnd (viewportScroll FailureViewport)
+    _ -> pure ()
+
+openKeyHelp :: EventM Name AppState ()
+openKeyHelp = do
+  modify (\state -> state {stateKeyHelp = True})
+  vScrollToBeginning (viewportScroll KeyHelpViewport)
+
+focusPrimary :: EventM Name AppState ()
+focusPrimary = modify (\state -> state {statePaneFocus = PrimaryPane})
+
+focusSecondary :: EventM Name AppState ()
+focusSecondary = modify (\state -> state {statePaneFocus = SecondaryPane})
+
+togglePaneFocus :: EventM Name AppState ()
+togglePaneFocus = modify $ \state -> state {statePaneFocus = if statePaneFocus state == PrimaryPane then SecondaryPane else PrimaryPane}
+
+handleBrowserEscape :: EventM Name AppState ()
+handleBrowserEscape = do
+  state <- get
+  if statePaneFocus state == SecondaryPane
+    then put state {statePaneFocus = PrimaryPane}
+    else handleEscape
+
+scrollFocusedOutput :: Int -> EventM Name AppState ()
+scrollFocusedOutput amount = do
+  state <- get
+  when (statePaneFocus state == SecondaryPane) $ do
+    put state {stateOutputFollow = False}
+    vScrollBy (viewportScroll OutputViewport) amount
+
+showFinalResult :: EventM Name AppState ()
+showFinalResult = do
+  state <- get
+  case stateFinalResult state of
+    Just _ -> do
+      put state {stateShowResult = True, statePaneFocus = SecondaryPane, stateOutputFollow = False}
+      vScrollToBeginning (viewportScroll OutputViewport)
+    Nothing -> put state {stateControlError = Just "the verified final result is not available yet"}
+
+declinePreview :: EventM Name AppState ()
+declinePreview =
+  modify (\state -> state {stateModel = previousStep (stateModel state), stateConfirmDetails = False, statePaneFocus = PrimaryPane})
+
+cancelPreview :: EventM Name AppState ()
+cancelPreview = do
+  state <- get
+  liftIO (cancelWorker state PreviewWork)
+  put state {statePreviewRequest = Nothing, stateModel = previousStep (stateModel state)}
+
+cancelHelp :: EventM Name AppState ()
+cancelHelp = do
+  state <- get
+  liftIO (cancelWorker state HelpWork)
+  put state {stateHelpRequest = Nothing, stateModel = previousStep (stateModel state)}
 
 handleRecoveryKey :: OccurrenceId -> Vty.Event -> EventM Name AppState ()
 handleRecoveryKey occurrence key = case key of
@@ -916,7 +801,16 @@ handleRecoveryKey occurrence key = case key of
   Vty.EvKey (Vty.KChar 'f') [] -> sendRecoveryFor occurrence RecoveryFailOver
   Vty.EvKey (Vty.KChar 'a') [] -> sendRecoveryFor occurrence RecoveryAbandon
   Vty.EvKey (Vty.KChar 'c') [] -> requestCancellation
+  Vty.EvKey Vty.KUp [] -> vScrollBy scroll (-1)
+  Vty.EvKey Vty.KDown [] -> vScrollBy scroll 1
+  Vty.EvKey Vty.KPageUp [] -> vScrollBy scroll (-10)
+  Vty.EvKey Vty.KPageDown [] -> vScrollBy scroll 10
+  Vty.EvKey Vty.KHome [] -> vScrollToBeginning scroll
+  Vty.EvKey Vty.KEnd [] -> vScrollToEnd scroll
+  Vty.EvKey (Vty.KChar '?') [] -> openKeyHelp
   _ -> pure ()
+  where
+    scroll = viewportScroll RecoveryViewport
 
 handleCancelKey :: Vty.Event -> EventM Name AppState ()
 handleCancelKey key = do
@@ -931,35 +825,35 @@ openWorkflowFilter :: EventM Name AppState ()
 openWorkflowFilter = do
   state <- get
   let query = modelWorkflowFilter (stateModel state)
-  put state {stateFilterEditing = True, stateEditor = Edit.editorText InputEditor (Just 1) query}
+  put state {stateFilterEditing = True, stateFilterEditor = Edit.editorText InputEditor (Just 1) query}
 
 handleFilterKey :: BrickEvent Name AppEvent -> Vty.Event -> EventM Name AppState ()
 handleFilterKey original key = case key of
   Vty.EvKey Vty.KEsc [] -> modify (\state -> state {stateFilterEditing = False})
-  Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl] -> do
-    state <- get
-    let query = T.unwords (T.words (T.intercalate "\n" (Edit.getEditContents (stateEditor state))))
-    put
-      state
-        { stateFilterEditing = False,
-          stateModel = (setWorkflowFilter query (stateModel state)) {modelStatus = "workflow filter applied"}
-        }
+  Vty.EvKey Vty.KEnter [] -> applyFilter
+  Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl] -> applyFilter
   _ -> do
     state <- get
-    (editor, ()) <- nestEventM (stateEditor state) (Edit.handleEditorEvent original)
+    (editor, ()) <- nestEventM (stateFilterEditor state) (Edit.handleEditorEvent original)
     let query = T.intercalate "\n" (Edit.getEditContents editor)
     if BS.length (TE.encodeUtf8 query) <= 256
-      then put state {stateEditor = editor}
+      then put state {stateFilterEditor = editor}
       else put state {stateModel = (stateModel state) {modelStatus = "workflow filter exceeds 256 UTF-8 bytes"}}
+  where
+    applyFilter = do
+      state <- get
+      let query = T.unwords (T.words (T.intercalate "\n" (Edit.getEditContents (stateFilterEditor state))))
+      put state {stateFilterEditing = False, stateModel = (setWorkflowFilter query (stateModel state)) {modelStatus = "workflow filter applied"}}
 
 openSaveResult :: EventM Name AppState ()
-openSaveResult =
+openSaveResult = do
+  vScrollToBeginning (viewportScroll FailureViewport)
   modify
     ( \state ->
         state
           { stateSaveResult = True,
             stateSaveError = Nothing,
-            stateEditor = Edit.editorText InputEditor (Just 1) ""
+            stateSaveEditor = Edit.editorText InputEditor (Just 1) ""
           }
     )
 
@@ -967,18 +861,20 @@ handleSaveResultKey :: BrickEvent Name AppEvent -> Vty.Event -> EventM Name AppS
 handleSaveResultKey original key = case key of
   Vty.EvKey Vty.KEsc [] -> modify (\state -> state {stateSaveResult = False, stateSaveError = Nothing})
   Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl] -> saveFinalResult
+  Vty.EvKey Vty.KPageUp [] -> vScrollBy (viewportScroll FailureViewport) (-10)
+  Vty.EvKey Vty.KPageDown [] -> vScrollBy (viewportScroll FailureViewport) 10
   _ -> do
     state <- get
-    (editor, ()) <- nestEventM (stateEditor state) (Edit.handleEditorEvent original)
+    (editor, ()) <- nestEventM (stateSaveEditor state) (Edit.handleEditorEvent original)
     let path = T.intercalate "\n" (Edit.getEditContents editor)
     if BS.length (TE.encodeUtf8 path) <= 4096
-      then put state {stateEditor = editor, stateSaveError = Nothing}
+      then put state {stateSaveEditor = editor, stateSaveError = Nothing}
       else put state {stateSaveError = Just "result path exceeds 4096 UTF-8 bytes"}
 
 saveFinalResult :: EventM Name AppState ()
 saveFinalResult = do
   state <- get
-  let pathText = T.intercalate "\n" (Edit.getEditContents (stateEditor state))
+  let pathText = T.intercalate "\n" (Edit.getEditContents (stateSaveEditor state))
   case stateFinalResult state of
     Just (Right value) -> do
       result <- liftIO (try @SomeException (saveResultFile (T.unpack pathText) value))
@@ -1032,7 +928,8 @@ cycleBrowserTab :: EventM Name AppState ()
 cycleBrowserTab = do
   state <- get
   let model = cycleTab (stateModel state)
-  put state {stateModel = model}
+  put state {stateModel = model, statePaneFocus = PrimaryPane}
+  vScrollToBeginning (viewportScroll BrowserDetailViewport)
   when (modelTab model == RunsTab) refreshRuns
 
 refreshRuns :: EventM Name AppState ()
@@ -1046,13 +943,18 @@ handleMove :: Int -> EventM Name AppState ()
 handleMove delta = do
   state <- get
   case modelScreen (stateModel state) of
-    BrowserScreen -> modify $ \value -> value {stateModel = moveSelection delta (stateModel value)}
-    TargetScreen -> modify $ \value -> value {stateModel = moveSelection delta (stateModel value)}
+    BrowserScreen
+      | statePaneFocus state == SecondaryPane -> vScrollBy (viewportScroll BrowserDetailViewport) delta
+      | otherwise -> do
+          put state {stateModel = moveSelection delta (stateModel state)}
+          vScrollToBeginning (viewportScroll BrowserDetailViewport)
+    TargetScreen -> put state {stateModel = moveSelection delta (stateModel state)}
     LaunchingScreen _ -> pure ()
-    LiveScreen _ -> do
-      put state {stateOutputFollow = False}
-      vScrollBy (viewportScroll OutputViewport) delta
-    HelpScreen _ -> vScrollBy (viewportScroll MainViewport) delta
+    LiveScreen _
+      | statePaneFocus state == PrimaryPane -> moveOccurrence delta
+      | otherwise -> do
+          put state {stateOutputFollow = False}
+          vScrollBy (viewportScroll OutputViewport) delta
     _ -> pure ()
 
 handleEnter :: EventM Name AppState ()
@@ -1061,33 +963,12 @@ handleEnter = do
   case modelScreen (stateModel state) of
     BrowserScreen
       | Just running <- stateRunning state ->
-          put state {stateModel = (stateModel state) {modelScreen = LiveScreen (runningRunId running), modelStatus = "reattached to owned run"}}
+          put state {stateModel = (stateModel state) {modelScreen = LiveScreen (runningRunId running), modelStatus = "reattached to owned run"}, statePaneFocus = PrimaryPane}
       | modelTab (stateModel state) == WorkflowsTab -> do
           let model = beginWorkflow (stateModel state)
-          put state {stateModel = model, stateEditor = Edit.editorText InputEditor Nothing ""}
+          put state {stateModel = model, stateEditor = Edit.editorText InputEditor Nothing (inputValue model), statePaneFocus = PrimaryPane}
       | modelTab (stateModel state) == RunsTab -> openSelectedRun
     _ -> pure ()
-
-appendPersonOccurrence :: [OccurrenceId] -> Envelope -> [OccurrenceId]
-appendPersonOccurrence queued envelope = case envelopeEvent envelope of
-  OccurrencePersonAnswerPending occurrence _
-    | occurrence `elem` queued -> queued
-    | otherwise -> queued <> [occurrence]
-  _ -> queued
-
-appendRecoveryOccurrence :: [OccurrenceId] -> Envelope -> [OccurrenceId]
-appendRecoveryOccurrence queued envelope = case envelopeEvent envelope of
-  OccurrenceRecoveryPending occurrence _ _ _
-    | occurrence `elem` queued -> queued
-    | otherwise -> queued <> [occurrence]
-  OccurrenceRecoveryChosen occurrence _ _ _ -> filter (/= occurrence) queued
-  OccurrenceRetried occurrence _ -> filter (/= occurrence) queued
-  OccurrenceFailed occurrence _ _ -> filter (/= occurrence) queued
-  OccurrenceCompleted occurrence _ _ -> filter (/= occurrence) queued
-  RunFailed {} -> []
-  RunCancelled {} -> []
-  _ -> queued
-
 
 openSelectedRun :: EventM Name AppState ()
 openSelectedRun = do
@@ -1113,14 +994,16 @@ openSelectedRun = do
               stateViewingRecord = Just record,
               stateRuntimeDirectory = Just (recordDirectory record </> frontendRuntimeStore manifest),
               stateRunView = reconcileRunView snapshot emptyRunView,
+              statePaneFocus = PrimaryPane,
               stateOutputFollow = True,
+              stateShowResult = False,
+              stateRunDetails = False,
               stateRunStartedAt = Just startedAt,
               stateRunPersona = frontendPersona manifest,
               stateRunRealization = Just (runRecordRealizations record),
               stateSaveResult = False,
               stateSaveError = Nothing,
-              statePersonQueue = [],
-              stateRecoveryQueue = [],
+              stateMandatoryDecisions = [],
               statePersonLoading = Nothing,
               statePersonPrompt = Nothing,
               statePersonSubmitted = False,
@@ -1167,7 +1050,7 @@ submitEditor = do
     InputScreen _ -> do
       let value = T.intercalate "\n" (Edit.getEditContents (stateEditor state))
           model = submitInput value (stateModel state)
-      put state {stateModel = model, stateEditor = Edit.editorText InputEditor Nothing ""}
+      put state {stateModel = model, stateEditor = Edit.editorText InputEditor Nothing (inputValue model)}
     _ -> pure ()
 
 chooseScripted :: EventM Name AppState ()
@@ -1179,15 +1062,18 @@ chooseLive = do
   let model = stateModel state
   case modelRouting model of
     Left failure -> put state {stateModel = model {modelScreen = FailureScreen failure}}
-    Right routing -> case routingSummaryPersona routing of
-      Nothing -> put state {stateModel = model {modelScreen = FailureScreen "routing inspection selected no persona"}}
-      Just persona ->
-        beginPreview
-          ( TargetRouting
-              persona
-              (routingSummaryArguments routing)
-              (routingSummaryFingerprint routing)
-          )
+    Right routing
+      | any (not . engineChoiceCredentialReady) (routingSummaryEngines routing) ->
+          put state {stateModel = model {modelStatus = "routing engine is NOT READY"}}
+      | otherwise -> case routingSummaryPersona routing of
+          Nothing -> put state {stateModel = model {modelScreen = FailureScreen "routing inspection selected no persona"}}
+          Just persona ->
+            beginPreview
+              ( TargetRouting
+                  persona
+                  (routingSummaryArguments routing)
+                  (routingSummaryFingerprint routing)
+              )
 
 beginPreview :: TargetSelection -> EventM Name AppState ()
 beginPreview target = do
@@ -1213,50 +1099,116 @@ confirmLaunch :: EventM Name AppState ()
 confirmLaunch = do
   state <- get
   case modelScreen (stateModel state) of
-    ConfirmScreen preview -> do
-      let channel = stateChannel state
-          queue = stateEvents state
-          notify = notifyFrame channel (stateFramePending state)
-          stopped = writeBChan channel . ChildStopped
-      started <- liftIO $ mask $ \_ -> do
-        result <- startMachine (stateConfig state) (stateRoot state) preview queue notify stopped
-        case result of
-          Right running -> writeIORef (stateOwned state) (Just running)
-          Left _ -> pure ()
-        pure result
-      case started of
-        Left failure -> put state {stateModel = (stateModel state) {modelScreen = FailureScreen failure}}
-        Right running -> do
-          now <- liftIO getCurrentTime
-          let snapshot = initialRunSnapshot (runningRunId running)
-          put
-            state
-              { stateRunning = Just running,
-                statePendingExit = Nothing,
-                stateMachineFailure = Nothing,
-                stateRunView = emptyRunView,
-                stateOutputFollow = True,
-                stateRunStartedAt = Just now,
-                stateRunPersona = previewPersona preview,
-                stateRunRealization = Just (previewRealizationSummary preview),
-                stateSaveResult = False,
-                stateSaveError = Nothing,
-                stateRuntimeDirectory = Just (runningDirectory running </> "runtime"),
-                stateViewingRecord = Nothing,
-                statePersonQueue = [],
-                stateRecoveryQueue = [],
-                statePersonLoading = Nothing,
-                statePersonPrompt = Nothing,
-                statePersonSubmitted = False,
-                statePersonControlId = Nothing,
-                statePersonError = Nothing,
-                stateSteerTiming = Nothing,
-                stateControlError = Nothing,
-                stateFinalResult = Nothing,
-                stateFinalLoading = False,
-                stateModel = launchStarted (runningRunId running) snapshot (stateModel state)
-              }
+    ConfirmScreen preview
+      | not (launchReviewAllowed (stateConfig state) preview (stateTerminalSize state)) ->
+          put state {stateModel = (stateModel state) {modelStatus = "launch disabled until the complete review fits"}}
+      | otherwise -> do
+          let request = stateRequestSerial state + 1
+              channel = stateChannel state
+              queue = stateEvents state
+              notify = notifyFrame channel (stateFramePending state)
+              stopped = writeBChan channel . ChildStopped request
+              starting =
+                state
+                  { stateModel = (stateModel state) {modelScreen = ProcessLoading preview, modelStatus = "starting validated machine child"},
+                    stateRequestSerial = request,
+                    stateMachineRequest = Just request,
+                    stateConfirmDetails = False
+                  }
+          put starting
+          liftIO . startWorker starting MachineWork $ do
+            result <- case stateServer state of
+              Nothing -> pure (Left "capability server identity is unavailable")
+              Just server -> mask $ \_ -> do
+                launched <- startMachine server (stateConfig state) (stateRoot state) preview queue notify stopped
+                case launched of
+                  Right running -> writeIORef (stateOwned state) (Just running)
+                  Left _ -> pure ()
+                pure launched
+            writeBChan channel (MachineReady request preview result)
     _ -> pure ()
+
+handleMachineReady :: Int -> LaunchPreview -> Either Text RunningMachine -> EventM Name AppState ()
+handleMachineReady request preview result = do
+  state <- get
+  when (stateMachineRequest state == Just request && isProcessLoading state) $ case result of
+    Left failure -> do
+      liftIO (discardQueuedFrames state)
+      put
+        state
+          { stateMachineRequest = Nothing,
+            stateModel = (stateModel state) {modelScreen = FailureScreen failure, modelStatus = "machine startup failed"}
+          }
+    Right running -> do
+      now <- liftIO getCurrentTime
+      put (adoptRunning state preview running now)
+      liftIO (activateMachine running >> notifyFrame (stateChannel state) (stateFramePending state))
+
+adoptRunning :: AppState -> LaunchPreview -> RunningMachine -> UTCTime -> AppState
+adoptRunning state preview running now =
+  state
+    { stateRunning = Just running,
+      stateRunView = emptyRunView,
+      statePaneFocus = PrimaryPane,
+      stateOutputFollow = True,
+      stateShowResult = False,
+      stateRunDetails = False,
+      stateRunStartedAt = Just now,
+      stateRunPersona = previewPersona preview,
+      stateRunRealization = Just (previewRealizationSummary preview),
+      stateSaveResult = False,
+      stateSaveError = Nothing,
+      stateRuntimeDirectory = Just (runningDirectory running </> "runtime"),
+      stateViewingRecord = Nothing,
+      stateMandatoryDecisions = [],
+      statePersonLoading = Nothing,
+      statePersonPrompt = Nothing,
+      statePersonSubmitted = False,
+      statePersonControlId = Nothing,
+      statePersonError = Nothing,
+      stateSteerTiming = Nothing,
+      stateControlError = Nothing,
+      stateFinalResult = Nothing,
+      stateFinalLoading = False,
+      stateModel = launchStarted (runningRunId running) (initialRunSnapshot (runningRunId running)) (stateModel state)
+    }
+
+cancelProcessStart :: EventM Name AppState ()
+cancelProcessStart = do
+  state <- get
+  liftIO (cancelWorker state MachineWork)
+  owned <- liftIO (readIORef (stateOwned state))
+  case (modelScreen (stateModel state), owned) of
+    (ProcessLoading preview, Just running) -> do
+      now <- liftIO getCurrentTime
+      put ((adoptRunning state preview running now) {stateCancelConfirm = True})
+      liftIO (activateMachine running >> notifyFrame (stateChannel state) (stateFramePending state))
+    (ProcessLoading _, Nothing) -> do
+      liftIO (discardQueuedFrames state)
+      put
+        state
+          { stateMachineRequest = Nothing,
+            stateModel = previousStep (stateModel state),
+            stateConfirmDetails = False
+          }
+    _ -> pure ()
+
+discardQueuedFrames :: AppState -> IO ()
+discardQueuedFrames state = atomically $ do
+  writeTVar (stateFramePending state) False
+  let drain = do
+        empty <- isEmptyTBQueue (stateEvents state)
+        if empty then pure () else readTBQueue (stateEvents state) >> drain
+  drain
+
+isProcessLoading :: AppState -> Bool
+isProcessLoading state = case modelScreen (stateModel state) of
+  ProcessLoading _ -> True
+  _ -> False
+
+protocolFailure :: MachineExit -> Maybe Text
+protocolFailure (MachineProtocolFailed failure) = Just failure
+protocolFailure MachineExited {} = Nothing
 
 previewPersona :: LaunchPreview -> Maybe Text
 previewPersona preview = case previewLineage preview of
@@ -1266,14 +1218,16 @@ previewPersona preview = case previewLineage preview of
     _ -> Nothing
 
 previewRealizationSummary :: LaunchPreview -> Text
-previewRealizationSummary preview = case previewRouting preview of
-  Nothing -> case previewTarget preview of
-    TargetScripted -> "scripted"
-    TargetRestored kind _ -> kind
-    TargetRouting persona _ _ -> "routing/" <> persona
-  Just routing -> case concatMap routingProfileLines (routingSummaryProfiles routing) of
-    [] -> "unavailable"
-    values -> boundedDisplay (T.intercalate " | " values)
+previewRealizationSummary preview = case previewTarget preview of
+  TargetScripted -> "scripted"
+  TargetRestored kind _ -> kind
+  TargetRouting persona _ _ -> case previewRouting preview of
+    Nothing -> "routing/" <> persona
+    Just routing -> case routingProfilesForPlan (previewPlan preview) routing of
+      [] -> "routing/" <> persona
+      profiles -> T.take 4096 (T.intercalate " | " (map profileSummary profiles))
+  where
+    profileSummary profile = routingProfileName profile <> ": " <> T.intercalate " -> " (map routingRungModel (routingProfileRungs profile))
 
 parseFrontendTime :: Text -> Maybe UTCTime
 parseFrontendTime = parseTimeM True defaultTimeLocale "%FT%T%QZ" . T.unpack
@@ -1291,6 +1245,12 @@ notifyFrame channel pending = do
 handleFrame :: EventM Name AppState ()
 handleFrame = do
   state <- get
+  if isProcessLoading state
+    then liftIO . atomically $ writeTVar (stateFramePending state) False
+    else consumeFrame state
+
+consumeFrame :: AppState -> EventM Name AppState ()
+consumeFrame state = do
   (envelopes, more) <- liftIO . atomically $ do
     writeTVar (stateFramePending state) False
     values <- drain 512 (stateEvents state)
@@ -1299,16 +1259,14 @@ handleFrame = do
   let stepped = foldSnapshots (modelSnapshot (stateModel state)) envelopes
   case stepped of
     Left failure -> do
-      put state {stateMachineFailure = Just failure, stateModel = (stateModel state) {modelScreen = FailureScreen failure, modelStatus = "machine protocol failed"}}
-      liftIO . void . forkIO $ mapM_ terminateMachine (stateRunning state)
+      let outcome = MachineProtocolFailed failure
+      liftIO (discardQueuedFrames state)
+      put state {statePendingExit = Just outcome, stateMachineFailure = Just failure}
+      finalizePendingExit
     Right Nothing -> pure ()
     Right (Just snapshot) -> do
-      let baseView = reconcileRunView snapshot (stateRunView state)
-          personQueue = foldl appendPersonOccurrence (statePersonQueue state) envelopes
-          recoveryQueue = foldl appendRecoveryOccurrence (stateRecoveryQueue state) envelopes
-          view = case recoveryQueue of
-            first : _ -> RunView (Just first)
-            [] -> baseView
+      let view = reconcileRunView snapshot (stateRunView state)
+          decisions = updateMandatoryDecisions (stateMandatoryDecisions state) envelopes snapshot
           contextNeeded =
             isJust (snapshotWorkflow snapshot)
               && maybe True (not . isJust . snapshotWorkflow) (modelSnapshot (stateModel state))
@@ -1316,8 +1274,7 @@ handleFrame = do
         state
           { stateModel = snapshotUpdated snapshot (stateModel state),
             stateRunView = view,
-            statePersonQueue = personQueue,
-            stateRecoveryQueue = recoveryQueue
+            stateMandatoryDecisions = decisions
           }
       when contextNeeded refreshRuns
       when (stateOutputFollow state) (vScrollToEnd (viewportScroll OutputViewport))
@@ -1344,39 +1301,36 @@ ensureAuxiliaryLoads = do
   case modelSnapshot (stateModel original) of
     Nothing -> pure ()
     Just snapshot -> do
-      let active = not (terminalStatus (snapshotRunStatus snapshot))
-          allPending = if active then pendingPersonOccurrences snapshot else []
-          queued =
-            [ occurrence
-              | occurrenceId <- statePersonQueue original,
-                occurrence <- allPending,
-                snapshotOccurrenceId occurrence == occurrenceId
-            ]
-          pending = queued <> [occurrence | occurrence <- allPending, snapshotOccurrenceId occurrence `notElem` map snapshotOccurrenceId queued]
-          pendingIds = map snapshotOccurrenceId pending
-          promptStillPending = maybe False ((`elem` pendingIds) . personPromptOccurrence) (statePersonPrompt original)
-          loadingStillPending = maybe True (`elem` pendingIds) (statePersonLoading original)
+      let headDecision = listToMaybe (stateMandatoryDecisions original)
+          headPerson = case headDecision of
+            Just decision | mandatoryKind decision == MandatoryPerson -> Just decision
+            _ -> Nothing
+          promptStillPending = maybe False (\(decision, _) -> Just decision == headPerson) (statePersonPrompt original)
+          loadingStillPending = maybe False (\(decision, _) -> Just decision == headPerson) (statePersonLoading original)
           personAck = statePersonControlId original >>= (`Map.lookup` snapshotControlAcks snapshot)
           answerFailed = maybe False ((`elem` ["failed", "rejected-stale", "unsupported"]) . snapshotControlState) personAck
           answerError = if answerFailed then snapshotControlMessage <$> personAck else statePersonError original
           synchronized =
             original
-              { statePersonQueue = pendingIds,
-                statePersonPrompt = if promptStillPending then statePersonPrompt original else Nothing,
+              { statePersonPrompt = if promptStillPending then statePersonPrompt original else Nothing,
                 statePersonLoading = if loadingStillPending then statePersonLoading original else Nothing,
                 statePersonSubmitted = promptStillPending && statePersonSubmitted original && not answerFailed,
                 statePersonControlId = if promptStillPending && not answerFailed then statePersonControlId original else Nothing,
-                statePersonError = if promptStillPending then answerError else Nothing
+                statePersonError = if promptStillPending then answerError else Nothing,
+                statePersonEditor = if promptStillPending then statePersonEditor original else blankEditor
               }
       put synchronized
       state <- get
-      case (stateRunning state, stateRuntimeDirectory state, statePersonPrompt state, statePersonLoading state, pending) of
-        (Just _, Just runtimeDirectory, Nothing, Nothing, occurrence : _) -> do
-          let occurrenceId = snapshotOccurrenceId occurrence
-              channel = stateChannel state
-              runId = snapshotRunId snapshot
-          put state {statePersonLoading = Just occurrenceId}
-          liftIO . startWorker state PersonWork $ loadPersonPrompt (stateRoot state) runtimeDirectory runId occurrence >>= writeBChan channel . PersonPromptReady occurrenceId
+      case (stateRunning state, stateRuntimeDirectory state, statePersonPrompt state, statePersonLoading state, headPerson) of
+        (Just _, Just runtimeDirectory, Nothing, Nothing, Just decision) ->
+          case Map.lookup (mandatoryOccurrence decision) (snapshotOccurrences snapshot) of
+            Nothing -> pure ()
+            Just occurrence -> do
+              let generation = statePersonLoadGeneration state + 1
+                  channel = stateChannel state
+                  runId = snapshotRunId snapshot
+              put state {statePersonLoadGeneration = generation, statePersonLoading = Just (decision, generation)}
+              liftIO . startWorker state PersonWork $ loadPersonPrompt (stateRoot state) runtimeDirectory runId occurrence >>= writeBChan channel . PersonPromptReady decision generation
         _ -> pure ()
       latest <- get
       case (snapshotResult snapshot, stateRuntimeDirectory latest, stateFinalResult latest, stateFinalLoading latest) of
@@ -1406,21 +1360,30 @@ handleEscape :: EventM Name AppState ()
 handleEscape = do
   state <- get
   case modelScreen (stateModel state) of
+    InputScreen _ -> do
+      let value = T.intercalate "\n" (Edit.getEditContents (stateEditor state))
+          model = previousStep (storeInput value (stateModel state))
+      put state {stateModel = model, stateEditor = Edit.editorText InputEditor Nothing (inputValue model)}
+    TargetScreen -> do
+      let model = previousStep (stateModel state)
+      put state {stateModel = model, stateEditor = Edit.editorText InputEditor Nothing (inputValue model)}
     LaunchingScreen _ -> put (detachedState state)
     LiveScreen _ -> put (detachedState state)
     BrowserScreen
       | isJust (stateRunning state) ->
-          put state {stateModel = (stateModel state) {modelScreen = maybe BrowserScreen (LiveScreen . runningRunId) (stateRunning state)}}
-    _ -> put state {stateModel = returnToBrowser (stateModel state)}
+          put state {stateModel = (stateModel state) {modelScreen = maybe BrowserScreen (LiveScreen . runningRunId) (stateRunning state)}, statePaneFocus = PrimaryPane}
+    _ -> put state {stateModel = previousStep (stateModel state), statePaneFocus = PrimaryPane}
   where
     detachedState current
-      | isJust (stateRunning current) = current {stateModel = returnToBrowser (stateModel current)}
+      | isJust (stateRunning current) = current {stateModel = (returnToBrowser (stateModel current)) {modelTab = RunsTab}, statePaneFocus = PrimaryPane}
       | otherwise =
           current
-            { stateModel = returnToBrowser (stateModel current),
+            { stateModel = (returnToBrowser (stateModel current)) {modelTab = RunsTab},
+              statePaneFocus = PrimaryPane,
+              stateShowResult = False,
               stateViewingRecord = Nothing,
               stateRuntimeDirectory = Nothing,
-              statePersonQueue = [],
+              stateMandatoryDecisions = [],
               statePersonLoading = Nothing,
               statePersonPrompt = Nothing,
               statePersonControlId = Nothing,
@@ -1456,8 +1419,8 @@ submitPersonAnswer :: EventM Name AppState ()
 submitPersonAnswer = do
   state <- get
   case (stateRunning state, statePersonPrompt state) of
-    (Just running, Just prompt) -> do
-      let input = T.intercalate "\n" (Edit.getEditContents (stateEditor state))
+    (Just running, Just (_, prompt)) -> do
+      let input = T.intercalate "\n" (Edit.getEditContents (statePersonEditor state))
       case personAnswerValue (personPromptCode prompt) input of
         Left failure -> put state {statePersonError = Just failure}
         Right answer -> do
@@ -1470,26 +1433,14 @@ submitPersonAnswer = do
             Right () -> put state {statePersonSubmitted = True, statePersonControlId = Just (controlIdText identifier), statePersonError = Nothing}
     _ -> pure ()
 
-styledLine :: Text -> Widget Name
-styledLine line = case classifyLine line of
-  PlainLine -> txtWrap line
-  StatusLine -> withAttr (attrName "status") (txtWrap line)
-  MarkdownHeadingLine -> withAttr (attrName "markdown-heading") (txtWrap line)
-  MarkdownQuoteLine -> withAttr (attrName "markdown-quote") (txtWrap line)
-  MarkdownFenceLine -> withAttr (attrName "markdown-fence") (txtWrap line)
-  DiffHeaderLine -> withAttr (attrName "diff-header") (txtWrap line)
-  DiffAddedLine -> withAttr (attrName "diff-added") (txtWrap line)
-  DiffRemovedLine -> withAttr (attrName "diff-removed") (txtWrap line)
-  DiffHunkLine -> withAttr (attrName "diff-hunk") (txtWrap line)
-
 moveOccurrence :: Int -> EventM Name AppState ()
 moveOccurrence delta = do
   state <- get
   case modelSnapshot (stateModel state) of
     Nothing -> pure ()
     Just snapshot -> do
-      put state {stateRunView = moveOccurrenceSelection delta snapshot (stateRunView state), stateOutputFollow = True}
-      vScrollBy (viewportScroll MainViewport) delta
+      put state {stateRunView = moveOccurrenceSelection delta snapshot (stateRunView state), stateOutputFollow = True, stateShowResult = False}
+      vScrollBy (viewportScroll OccurrenceViewport) delta
       vScrollToEnd (viewportScroll OutputViewport)
 
 followOutputTail :: EventM Name AppState ()
@@ -1502,13 +1453,13 @@ openSteer timing = do
   state <- get
   case (stateRunning state, modelSnapshot (stateModel state) >>= \snapshot -> activeAttemptForSelection snapshot (stateRunView state)) of
     (Just _, Just _) ->
-      put state {stateSteerTiming = Just timing, stateControlError = Nothing, stateEditor = Edit.editorText InputEditor Nothing ""}
+      put state {stateSteerTiming = Just timing, stateControlError = Nothing, stateControlEditor = blankEditor}
     _ -> put state {stateControlError = Just "the selected occurrence has no steerable active attempt"}
 
 submitSteer :: EventM Name AppState ()
 submitSteer = do
   state <- get
-  let text = T.intercalate "\n" (Edit.getEditContents (stateEditor state))
+  let text = T.intercalate "\n" (Edit.getEditContents (stateControlEditor state))
   case (stateSteerTiming state, modelSnapshot (stateModel state)) of
     (Just timing, Just snapshot) -> case activeAttemptForSelection snapshot (stateRunView state) of
       Nothing -> put state {stateSteerTiming = Nothing, stateControlError = Just "the selected attempt is no longer active"}
@@ -1516,13 +1467,6 @@ submitSteer = do
         | T.null (T.strip text) -> put state {stateControlError = Just "steering text is empty"}
         | otherwise -> sendSelectedControl "steer" (attemptOccurrence attempt) (Just attempt) (Steer timing text) True
     _ -> pure ()
-
-sendRecovery :: RecoveryControl -> EventM Name AppState ()
-sendRecovery recovery = do
-  state <- get
-  case modelSnapshot (stateModel state) >>= \snapshot -> selectedOccurrence snapshot (stateRunView state) of
-    Nothing -> put state {stateControlError = Just "no occurrence is selected"}
-    Just occurrence -> sendRecoveryFor (snapshotOccurrenceId occurrence) recovery
 
 sendRecoveryFor :: OccurrenceId -> RecoveryControl -> EventM Name AppState ()
 sendRecoveryFor occurrenceId recovery = do
@@ -1570,10 +1514,6 @@ recoveryName RecoveryRetry = "retry"
 recoveryName RecoveryFailOver = "failover"
 recoveryName RecoveryAbandon = "abandon"
 
-steeringTimingText :: SteeringTiming -> Text
-steeringTimingText InterruptNow = "interrupt-now"
-steeringTimingText NextBoundary = "next-boundary"
-
 freshControlId :: Text -> IO ControlId
 freshControlId purpose = do
   stamp <- getMonotonicTimeNSec
@@ -1583,32 +1523,31 @@ handleEditorInput :: BrickEvent Name AppEvent -> EventM Name AppState ()
 handleEditorInput event = do
   state <- get
   case modelScreen (stateModel state) of
-    InputScreen _ -> updateEditor event False
+    InputScreen _ -> do
+      (editor, ()) <- nestEventM (stateEditor state) (Edit.handleEditorEvent event)
+      if editorBytes editor <= 1024 * 1024
+        then put state {stateEditor = editor}
+        else put state {stateModel = (stateModel state) {modelStatus = "input exceeds 1048576 UTF-8 bytes"}}
     _ -> pure ()
 
 handlePersonEditorInput :: BrickEvent Name AppEvent -> EventM Name AppState ()
-handlePersonEditorInput event = updateEditor event True
+handlePersonEditorInput event = do
+  state <- get
+  (editor, ()) <- nestEventM (statePersonEditor state) (Edit.handleEditorEvent event)
+  if editorBytes editor <= 1024 * 1024
+    then put state {statePersonEditor = editor, statePersonError = Nothing}
+    else put state {statePersonError = Just "answer exceeds 1048576 UTF-8 bytes"}
 
 handleControlEditorInput :: BrickEvent Name AppEvent -> EventM Name AppState ()
 handleControlEditorInput event = do
   state <- get
-  (editor, ()) <- nestEventM (stateEditor state) (Edit.handleEditorEvent event)
-  let bytes = BS.length (TE.encodeUtf8 (T.intercalate "\n" (Edit.getEditContents editor)))
-  if bytes <= 1024 * 1024
-    then put state {stateEditor = editor, stateControlError = Nothing}
+  (editor, ()) <- nestEventM (stateControlEditor state) (Edit.handleEditorEvent event)
+  if editorBytes editor <= 1024 * 1024
+    then put state {stateControlEditor = editor, stateControlError = Nothing}
     else put state {stateControlError = Just "control text exceeds 1048576 UTF-8 bytes"}
 
-updateEditor :: BrickEvent Name AppEvent -> Bool -> EventM Name AppState ()
-updateEditor event personEditor = do
-  state <- get
-  (editor, ()) <- nestEventM (stateEditor state) (Edit.handleEditorEvent event)
-  let bytes = BS.length (TE.encodeUtf8 (T.intercalate "\n" (Edit.getEditContents editor)))
-  if bytes <= 1024 * 1024
-    then put state {stateEditor = editor, statePersonError = if personEditor then Nothing else statePersonError state}
-    else
-      if personEditor
-        then put state {statePersonError = Just "answer exceeds 1048576 UTF-8 bytes"}
-        else put state {stateModel = (stateModel state) {modelStatus = "input exceeds 1048576 UTF-8 bytes"}}
+editorBytes :: Edit.Editor Text Name -> Int
+editorBytes = BS.length . TE.encodeUtf8 . T.intercalate "\n" . Edit.getEditContents
 
 terminalStatus :: RunStatus -> Bool
 terminalStatus RunSucceeded = True
@@ -1618,24 +1557,6 @@ terminalStatus RunStarting = False
 terminalStatus RunRunning = False
 terminalStatus RunCancelling = False
 terminalStatus RunOrphaned = False
-
-lineageText :: LineageOperation -> Text
-lineageText RootRun = "root"
-lineageText RestartRun = "restart"
-lineageText ResumeRun = "resume"
-lineageText ForkRun = "fork"
-
-inputSourceText :: WorkflowInputSource -> Text
-inputSourceText DescriptorPrompt = "prompt"
-inputSourceText DescriptorCommandTail = "command tail"
-inputSourceText DescriptorStdin = "standard input"
-
-occurrenceNumberText :: OccurrenceId -> Text
-occurrenceNumberText = T.pack . show . occurrenceNumber
-
-yesNo :: Bool -> Text
-yesNo True = "yes"
-yesNo False = "no"
 
 showSelectedHelp :: EventM Name AppState ()
 showSelectedHelp = do

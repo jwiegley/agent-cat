@@ -2,7 +2,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
--- | Thread-safe NDJSON writer for the runtime protocol.
+-- | Bounded NDJSON transport for runtime events and controls.
 module Agentic.Runtime.Machine
   ( MachineCancelled (..),
     DeferredEventSink,
@@ -18,6 +18,8 @@ module Agentic.Runtime.Machine
     stdoutEventSinkFor,
     withControlInput,
     withControlInputFor,
+    withBufferedControlInputFor,
+    readNdjsonFrame,
   )
 where
 
@@ -218,37 +220,44 @@ newtype MachineCancelled = MachineCancelled {machineCancellationReason :: String
 
 instance Exception MachineCancelled
 
-readControlFrame :: Handle -> BS.ByteString -> IO (Either T.Text (Maybe (BS.ByteString, BS.ByteString)))
-readControlFrame handle buffered =
+-- | One bounded newline-terminated frame and the bytes already read after it.
+readNdjsonFrame :: Int -> T.Text -> Handle -> BS.ByteString -> IO (Either T.Text (Maybe (BS.ByteString, BS.ByteString)))
+readNdjsonFrame limit label handle buffered =
   case BS.break (== 10) buffered of
     (line, rest)
       | not (BS.null rest) ->
-          if BS.length line > maxFrameBytes
-            then pure (Left "runtime control frame exceeds 1048576 bytes")
+          if BS.length line > limit
+            then pure (Left oversized)
             else pure (Right (Just (line, BS.drop 1 rest)))
-      | BS.length buffered > maxFrameBytes -> pure (Left "runtime control frame exceeds 1048576 bytes")
+      | BS.length buffered > limit -> pure (Left oversized)
       | otherwise -> do
-          let remaining = max 1 (min 32768 (maxFrameBytes + 1 - BS.length buffered))
+          let remaining = max 1 (min 32768 (limit + 1 - BS.length buffered))
           chunk <- BS.hGetSome handle remaining
           if BS.null chunk
             then
               if BS.null buffered
                 then pure (Right Nothing)
-                else pure (Left "runtime control stream ended without a terminating newline")
-            else readControlFrame handle (buffered <> chunk)
+                else pure (Left (label <> " stream ended without a terminating newline"))
+            else readNdjsonFrame limit label handle (buffered <> chunk)
+  where
+    oversized = label <> " frame exceeds " <> T.pack (show limit) <> " bytes"
 
 -- | Run an action while a dedicated NDJSON control stream may cancel it.
 withControlInput :: Handle -> EventSink -> ControlRuntime -> IO a -> IO a
 withControlInput = withControlInputFor protocolVersion
 
 withControlInputFor :: Int -> Handle -> EventSink -> ControlRuntime -> IO a -> IO a
-withControlInputFor version handle sink runtime action = do
+withControlInputFor version handle = withBufferedControlInputFor version handle BS.empty
+
+-- | Begin controls with bytes retained from the same transport before activation.
+withBufferedControlInputFor :: Int -> Handle -> BS.ByteString -> EventSink -> ControlRuntime -> IO a -> IO a
+withBufferedControlInputFor version handle initial sink runtime action = do
   owner <- myThreadId
-  reader <- forkIO (loop owner BS.empty)
+  reader <- forkIO (loop owner initial)
   action `finally` killThread reader
   where
     loop owner buffered = do
-      frame <- readControlFrame handle buffered
+      frame <- readNdjsonFrame maxFrameBytes "runtime control" handle buffered
       case frame of
         Left why -> do
           sink (invalidAckEventFor version (ControlAck (ControlId "invalid") ControlFailed why))
