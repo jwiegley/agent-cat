@@ -29,7 +29,8 @@ with tempfile.TemporaryDirectory(prefix="agentic-cabal-env-") as temporary:
         assert reply.returncode == 23, reply
         assert reply.stderr == "", reply.stderr
         assert json.loads(reply.stdout) == [
-            [command, "--offline", f"--builddir={builddir}", *arguments],
+            [f"--store-dir={builddir}/cabal-store", "--active-repositories=:none",
+             command, "--offline", f"--builddir={builddir}", *arguments],
             str(root.resolve()), "fixture environment",
         ], reply.stdout
     del env["CABAL_BUILDDIR"]
