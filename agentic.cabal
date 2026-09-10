@@ -30,7 +30,12 @@ extra-source-files:
   test/frontend_export_probe.py
   test/frontend_io_probe.py
   test/frontend_session_probe.py
+  manager/AGENTS.md
+  manager/ci/dependencies.sh
+  manager/test/DependencyProbe.hs
+  manager/test/containment_probe.py
 extra-doc-files:
+  manager/README.md
   doc/tui-design.md
   doc/tui-release-evidence.md
 

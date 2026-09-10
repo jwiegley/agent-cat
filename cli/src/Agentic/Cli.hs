@@ -2717,19 +2717,19 @@ runMachineWith options control lineage parent inherited reg runId name target pr
     runWith effectiveTarget persistence runStore actualSink = do
       let started = machineStarted options name effectiveTarget
       case control of
-        Nothing -> actualSink started >> execute Nothing actualSink id
+        Nothing -> actualSink started >> executeRun Nothing actualSink id
         Just (MachineControl controls deferred sink) -> do
           activated <- activateEventSink deferred actualSink started
           unless activated (ioError (userError "machine event sink was activated twice"))
-          execute (Just controls) sink id
+          executeRun (Just controls) sink id
         Just (MachineControlInput handle buffered) -> do
           controls <- newControlRuntime
           -- Prepared runs establish durable history before consuming queued controls.
           actualSink started
-          execute (Just controls) actualSink
+          executeRun (Just controls) actualSink
             (withBufferedControlInputFor (machineProtocolVersion options) handle buffered actualSink controls)
       where
-        execute runtimeControls sink supervise = do
+        executeRun runtimeControls sink supervise = do
           -- Machine events are the trace. Human narration would duplicate full,
           -- input-expanded prompts into diagnostic stderr.
           let run =

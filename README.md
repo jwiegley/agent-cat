@@ -393,8 +393,9 @@ security posture.
 The Nix development shells are the only supported environments. Configure
 direnv for the root, model, and conformance directories before running their
 tools. The root environment supplies `CABAL_BUILDDIR` beneath `~/Products`.
-The shared `test/cabal.sh` entry point passes that directory explicitly and
-runs Cabal offline, without entering another shell or fetching dependencies:
+The shared `test/cabal.sh` entry point passes that directory explicitly, uses
+an isolated Cabal store, and disables package repositories. It builds against
+the supplied dependencies without entering another shell or fetching packages:
 
 ```sh
 direnv exec . test/cabal.sh build all

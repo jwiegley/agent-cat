@@ -11,14 +11,13 @@
       let
         pkgs = import nixpkgs { inherit system; };
 
-        # One GHC with the dependencies declared by the single Cabal package.
-        # HTTP/TLS and SHA-256 support belong to bounded routing discovery; no
-        # external fetch executable or provider SDK is used.
+        # One GHC for package builds and manager dependency probes.
         hs = pkgs.haskellPackages.extend (import ./nix/haskell-overrides.nix pkgs);
         ghc = hs.ghcWithPackages (p: [
           p.aeson
           p.async
           p.brick
+          p.direct-sqlite
           p.crypton
           p.crypton-connection
           p.crypton-x509-store
@@ -29,6 +28,9 @@
           p.tls
           p.vty
           p."vty-unix"
+          p.wai
+          p.warp
+          p.warp-tls
           p.yaml
         ]);
       in {

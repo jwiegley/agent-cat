@@ -22,12 +22,15 @@ import System.FilePath (takeExtension, (</>))
 
 checks :: [(FilePath, [String])]
 checks =
+  map (\(layer, denied) -> (layer, "Agentic.Manager" : denied))
   [ ("dsl/src", ["Agentic.Plan", "Agentic.Cost", "Agentic.Runtime", "Agentic.Exec", "Agentic.Shell", "Agentic.Engine", "Agentic.Acp", "Agentic.AgentDeck", "Agentic.Cli", "Agentic.Route", "Agentic.RoutingConfig", "Agentic.RoutingDiscovery", "Agentic.RoutingInspect", "Agentic.RoutingSecrets", "Agentic.Tui"]),
     ("plan/src", ["Agentic.Cost", "Agentic.Runtime", "Agentic.Exec", "Agentic.Shell", "Agentic.Engine", "Agentic.Acp", "Agentic.AgentDeck", "Agentic.Cli", "Agentic.Route", "Agentic.RoutingConfig", "Agentic.RoutingDiscovery", "Agentic.RoutingInspect", "Agentic.RoutingSecrets", "Agentic.Workflow", "Agentic.Tui"]),
     ("cost/src", ["Agentic.Runtime", "Agentic.Exec", "Agentic.Shell", "Agentic.Engine", "Agentic.Acp", "Agentic.AgentDeck", "Agentic.Cli", "Agentic.Route", "Agentic.RoutingConfig", "Agentic.RoutingDiscovery", "Agentic.RoutingInspect", "Agentic.RoutingSecrets", "Agentic.Workflow", "Agentic.Tui"]),
     ("runtime/src", ["Agentic.DSL", "Agentic.Builder", "Agentic.WF", "Agentic.Workflow", "Agentic.Acp", "Agentic.AgentDeck", "Agentic.Cli", "Agentic.Route", "Agentic.RoutingConfig", "Agentic.RoutingDiscovery", "Agentic.RoutingInspect", "Agentic.RoutingSecrets", "Agentic.Tui"]),
     ("engine", ["Agentic.DSL", "Agentic.Builder", "Agentic.Plan", "Agentic.Cost", "Agentic.Runtime", "Agentic.Exec", "Agentic.Shell", "Agentic.Cli", "Agentic.Route", "Agentic.RoutingConfig", "Agentic.RoutingDiscovery", "Agentic.RoutingInspect", "Agentic.RoutingSecrets", "Agentic.Workflow", "Agentic.Tui"]),
     ("bisim/haskell/src", ["Agentic.Cost", "Agentic.Runtime", "Agentic.Exec", "Agentic.Shell", "Agentic.Engine", "Agentic.Acp", "Agentic.AgentDeck", "Agentic.Cli", "Agentic.Route", "Agentic.RoutingConfig", "Agentic.RoutingDiscovery", "Agentic.RoutingInspect", "Agentic.RoutingSecrets", "Agentic.Workflow", "Agentic.Tui"])
+  ] <>
+  [ ("manager", ["Agentic.Builder", "Agentic.Cli", "Agentic.Cost", "Agentic.DSL", "Agentic.Engine", "Agentic.Exec", "Agentic.Plan", "Agentic.Schema", "Agentic.Shell", "Agentic.Route", "Agentic.RoutingConfig", "Agentic.Workflow", "Agentic.WF", "Agentic.Acp", "Agentic.AgentDeck", "Agentic.Tui", "Agentic.Bisim", "Agentic.Runtime.Machine"])
   ]
 
 data Fixture = Fixture String FilePath String Bool
@@ -50,33 +53,46 @@ main = do
     forM paths $ \path -> do
       (name, imports) <- readFile path >>= parseHeader options path
       unless (directory /= "tui/src" || within "Agentic.Tui" name) (die (path <> ": terminal module is outside the Agentic.Tui namespace"))
+      unless (not ("manager/src/" `isPrefixOf` path) || within "Agentic.Manager" name) (die (path <> ": manager module is outside the Agentic.Manager namespace"))
+      unless (not (within "Agentic.Manager" name) || directory == "manager") (die (path <> ": manager namespace is outside the manager source root"))
       pure (directory, path, name, imports)
   let projectModules = Set.fromList [name | (_, _, name, _) <- sources]
       terminalModules = Set.fromList [name | ("tui/src", _, name, _) <- sources]
-      violations layer imports = filter (forbidden projectModules terminalModules layer) imports
+      violations layer caller imports = filter (forbidden projectModules terminalModules layer caller) imports
   bytes <- BS.readFile "test/fixtures/tui/import-boundaries.json"
   fixtures <- either die pure (eitherDecodeStrict' bytes :: Either String [Fixture])
   forM_ fixtures $ \(Fixture name layer source allowed) -> do
-    (_, imports) <- parseHeader options name source
-    unless (null (violations layer imports) == allowed) (die ("import fixture failed: " <> name))
+    (caller, imports) <- parseHeader options name source
+    unless (null (violations layer caller imports) == allowed) (die ("import fixture failed: " <> name))
   -- Exercise every denied layer edge, including future submodules of that edge.
   let layerEdges = [(layer, target <> suffix) | (layer, targets) <- checks, target <- targets, suffix <- ["", ".Internal"]]
-      terminalEdges = [("tui/src", name) | name <- Set.toAscList (projectModules `Set.difference` terminalModules), name /= "Agentic.Runtime"]
+      terminalEdges = [("tui/src", name) | name <- Set.toAscList (projectModules `Set.difference` terminalModules), name `notElem` ["Agentic.Runtime", "Agentic.Manager.Client"]]
       edges = layerEdges <> terminalEdges
   forM_ edges $ \(layer, target) -> do
-    (_, imports) <- parseHeader options target ("module Negative where\nimport " <> target <> "\n")
-    unless (target `elem` violations layer imports) (die ("forbidden edge fixture accepted: " <> layer <> " -> " <> target))
-  let bad = [path <> ": " <> target | (layer, path, _, imports) <- sources, target <- violations layer imports]
+    (caller, imports) <- parseHeader options target ("module Negative where\nimport " <> target <> "\n")
+    unless (target `elem` violations layer caller imports) (die ("forbidden edge fixture accepted: " <> layer <> " -> " <> target))
+  let bad = [path <> ": " <> target | (layer, path, caller, imports) <- sources, target <- violations layer caller imports]
   unless (null bad) (die ("forbidden layer import(s):\n" <> unlines bad))
-  putStrLn ("policy imports: compiler-parsed module boundaries verified; " <> show (length fixtures) <> " syntax/TUI fixtures and " <> show (length edges) <> " forbidden-edge fixtures passed")
+  putStrLn ("policy imports: compiler-parsed module boundaries verified; " <> show (length fixtures) <> " syntax/frontend fixtures and " <> show (length edges) <> " forbidden-edge fixtures passed")
 
-forbidden :: Set.Set String -> Set.Set String -> FilePath -> String -> Bool
-forbidden projectModules terminalModules layer target
+forbidden :: Set.Set String -> Set.Set String -> FilePath -> String -> String -> Bool
+forbidden projectModules terminalModules layer caller target
+  | within "Agentic.Manager" caller && layer /= "manager" = True
   | layer == "tui/src" =
-      ("Agentic." `isPrefixOf` target || target `Set.member` projectModules)
-        && target /= "Agentic.Runtime"
+      projectImport
+        && target `notElem` ["Agentic.Runtime", "Agentic.Manager.Client"]
         && not (target `Set.member` terminalModules)
+  | layer == "manager", within "Agentic.Manager.Client" caller =
+      (projectImport && not (any (`within` target) ["Agentic.Manager.Client", "Agentic.Manager.Protocol"]))
+        || serverDependency
+  | layer == "manager", within "Agentic.Manager.Protocol" caller =
+      (projectImport && not (within "Agentic.Manager.Protocol" target)) || serverDependency
+  | layer == "manager" =
+      projectImport && target /= "Agentic.Runtime" && not (within "Agentic.Manager" target)
   | otherwise = any (`within` target) (maybe [] id (lookup layer checks))
+  where
+    projectImport = "Agentic." `isPrefixOf` target || target `Set.member` projectModules
+    serverDependency = any (`within` target) ["Database.SQLite", "Database.SQLite3", "Network.Wai"]
 
 within :: String -> String -> Bool
 within parent target = target == parent || (parent <> ".") `isPrefixOf` target
