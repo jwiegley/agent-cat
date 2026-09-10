@@ -27,6 +27,18 @@ root path, device number, and inode number captured by the parent. The child reo
 and validates that identity before confined input, lineage, or store access. The
 identity is not an authorization token and does not relax ownership or mode checks.
 
+## Observation failures and cancellation
+
+An exception from an event observer aborts execution without engine retry or
+additional nested failure events on that exception path. The private observer
+abort retains the original exception for the caller. An unsuccessful run
+terminal can follow a partial nested history, but cannot repair a torn journal
+write or establish that unrecorded events were delivered.
+
+Cancellation has one sender and waits for registered worker finalization before
+the runner returns. Further cancellation received during this wait does not
+abandon cleanup or replace the original failure.
+
 ## Dependencies
 
 The runtime imports `plan` and `engine/api` only, and `plan` brings `dsl`. No

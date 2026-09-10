@@ -185,7 +185,8 @@ import Agentic.Planning
   ( World (World), billExecFresh, billMemo, billMemoLegacy, eventJson,
     forgetExecEvent, trace
   )
-import Control.Concurrent (forkFinally, forkIO, killThread, threadDelay)
+import Control.Concurrent (forkFinally, forkIO, forkIOWithUnmask, killThread, myThreadId, threadDelay, throwTo, yield)
+import Control.Concurrent.Async (asyncThreadId, waitCatch, withAsync)
 import Control.Concurrent.STM
   ( TMVar,
     atomically,
@@ -195,13 +196,14 @@ import Control.Concurrent.STM
     newTVarIO,
     putTMVar,
     readTVar,
+    readTMVar,
     retry,
     takeTMVar,
     tryPutTMVar,
   )
-import Control.Exception (ErrorCall, SomeException, evaluate, finally, try)
+import Control.Exception (AsyncException (ThreadKilled), ErrorCall, SomeException, bracket, evaluate, finally, fromException, throwIO, try, uninterruptibleMask_)
 import Data.Bits ((.&.))
-import Control.Monad (void)
+import Control.Monad (foldM, forM_, void, when)
 import Data.IORef
 import Data.List (nub, sort)
 import Data.Maybe (fromMaybe)
@@ -228,11 +230,13 @@ import Agentic.Builder
 import qualified Data.Map.Strict as Map
 import Agentic.Observe (printedValue)
 import GHC.Clock (getMonotonicTimeNSec)
+import GHC.Conc (BlockReason (BlockedOnException), ThreadStatus (..), threadStatus)
 import System.Directory (createDirectoryIfMissing, doesFileExist, getTemporaryDirectory, removePathForcibly)
 import System.FilePath ((</>))
 import System.Posix.Files (fileMode, getFileStatus)
 import System.Exit (exitFailure)
-import System.IO (IOMode (WriteMode), withBinaryFile)
+import System.IO (IOMode (WriteMode), hClose, openBinaryTempFile, withBinaryFile)
+import System.IO.Error (ioeGetErrorString)
 import System.Timeout (timeout)
 
 import SurfaceRefusals
@@ -1488,6 +1492,170 @@ observedFailureProbe failures = do
       ("a failed run has no invented authored trace order", null [() | TraceOrdered _ <- failureEvents])
     ]
 
+observerFailureProbe :: IORef Int -> IO ()
+observerFailureProbe failures = do
+  baselineRef <- newIORef ([] :: [RuntimeEvent])
+  calls <- newIORef (0 :: Int)
+  let record ref event = atomicModifyIORef' ref (\events -> (event : events, ()))
+      request = consultRequest (Q (AddrModel "observer") (QScope (Just "deep") Nothing) "observer" 0)
+      plan = askC1 SText request
+      settings = defaultExecSettings {esLog = const (pure ()), esRetryTransportRefusal = 1}
+      chains = chainsOf (const (pure ())) (Map.singleton "deep" ["broad"])
+      world = (concurrentWorld (\c _ -> pure (defaultEl c)))
+        { worldAskAttemptIO = \context c q ->
+            withTransportGaps settings (const (Just (GapTransportRefusal, "fixture transport"))) c q $
+              withPhysicalAttempt context "fixture" $ \attempt -> do
+                atomicModifyIORef' calls (\n -> (n + 1, ()))
+                emitAttemptOutput context attempt "fixture output"
+                pure (defaultEl c)
+        }
+      faults :: [(String, IO (), SomeException -> Bool)]
+      faults =
+        [ ("io", ioError (userError "observer failure"), \e -> (ioeGetErrorString <$> fromException e) == Just "observer failure"),
+          ("cancel", throwIO ThreadKilled, \e -> fromException e == Just ThreadKilled),
+          ("gap", raiseGap GapExhausted "observer gap" (userError "observer final"), \e -> maybe False ((== GapExhausted) . tgeGap) (fromException e))
+        ]
+  _ <- runPlanObserved (record baselineRef) chains world plan
+  baseline <- reverse <$> readIORef baselineRef
+  forM_ (zip [0 :: Int ..] baseline) $ \(cut, _) ->
+    forM_ [False, True] $ \afterPublication ->
+      forM_ faults $ \(name, fault, original) -> do
+        eventsRef <- newIORef ([] :: [RuntimeEvent])
+        emission <- newIORef (0 :: Int)
+        writeIORef calls 0
+        let sink event = do
+              n <- atomicModifyIORef' emission (\count -> (count + 1, count))
+              when (n == cut && not afterPublication) fault
+              record eventsRef event
+              when (n == cut && afterPublication) fault
+        outcome <- try @SomeException (runPlanObserved sink chains world plan)
+        events <- reverse <$> readIORef eventsRef
+        invocations <- readIORef calls
+        let runId = RunId "observer-failure"
+            terminal = if name == "cancel" then RunCancelled "observer failure" else RunFailed FailureRuntime "observer failure"
+            framed = zipWith (\n event -> Envelope protocolVersion runId (SeqNo n) "2026-09-10T00:00:00Z" event) [0 ..]
+              (RunStarted "observer" "scripted" : events <> [terminal])
+            snapshot = foldM stepRunSnapshot (initialRunSnapshot runId) framed
+            prefix = take (cut + if afterPublication then 1 else 0) baseline
+        pureProbe failures ("observer failure retains its prefix: " <> show (cut, afterPublication, name))
+          [ ("the original observer exception is propagated", case outcome of Left e -> original e; Right _ -> False),
+            ("no engine retry or failover follows observer failure", invocations <= 1),
+            ("no nested terminal is invented after emission failure", events == prefix),
+            ("the actual prefix accepts an unsuccessful run terminal: " <> show snapshot, case snapshot of Right _ -> True; Left _ -> False)
+          ]
+
+  temp <- getTemporaryDirectory
+  let temporary = bracket (openBinaryTempFile temp "agentic-observer-")
+        (\(path, handle) -> hClose handle `finally` removePathForcibly path)
+      journalRun = RunId "observer-journal"
+  temporary $ \(path, journal) -> temporary $ \(_, mirror) -> do
+    sink <- handlesEventSink [journal, mirror] journalRun
+    sink (RunStarted "observer" "scripted")
+    writeIORef calls 0
+    let brokenMirror event = do
+          case event of AttemptStarted {} -> hClose mirror; _ -> pure ()
+          sink event
+    outcome <- try @SomeException (runPlanObserved brokenMirror chains world plan)
+    sink (RunFailed FailureRuntime "observer mirror closed")
+    hClose journal
+    bytes <- BS.readFile path
+    invocations <- readIORef calls
+    let decoded = traverse decodeEnvelope (filter (not . BS.null) (BS.split 10 bytes))
+    pureProbe failures "mirror failure preserves the real journal's accepted prefix"
+      [ ("the original mirror IO exception reaches the caller", case outcome of Left e -> maybe False (const True) (fromException e :: Maybe IOError); Right _ -> False),
+        ("no physical action follows failed start delivery", invocations == 0),
+        ("the journal contains no invented nested failure", case decoded of
+          Right frames -> case map envelopeEvent frames of
+            [RunStarted {}, OccurrenceStarted {}, AttemptStarted {}, RunFailed {}] -> True
+            _ -> False
+          Left _ -> False),
+        ("the actual journal restores as a failed run", case decoded of
+          Right frames -> case foldM stepRunSnapshot (initialRunSnapshot journalRun) frames of
+            Right snapshot -> snapshotRunStatus snapshot == RunFailedStatus
+            Left _ -> False
+          Left _ -> False)
+      ]
+
+observedCancellationProbe :: IORef Int -> IO ()
+observedCancellationProbe failures = do
+  eventsRef <- newIORef ([] :: [RuntimeEvent])
+  phases <- newIORef ([] :: [String])
+  senderFinished <- newEmptyTMVarIO
+  senderThread <- newIORef Nothing
+  let record phase = atomicModifyIORef' phases (\seen -> (phase : seen, ()))
+      awaitDelivery deadline sender = do
+        state <- threadStatus sender
+        case state of
+          ThreadBlocked BlockedOnException -> record "pending"
+          ThreadFinished -> record "sender-finished" >> ioError (userError "cancellation sender finished before rendezvous")
+          ThreadDied -> record "sender-died" >> ioError (userError "cancellation sender died before rendezvous")
+          _ -> do
+            now <- getMonotonicTimeNSec
+            if now >= deadline
+              then record "deadline" >> ioError (userError "attempt cancellation did not reach its event boundary")
+              -- Optimized polling need not allocate or schedule the sender.
+              else yield >> awaitDelivery deadline sender
+      sink event = do
+        atomicModifyIORef' eventsRef (\events -> (event : events, ()))
+        case event of
+          -- Queue cancellation at the callback boundary, not inside the test barrier.
+          AttemptStarted {} -> uninterruptibleMask_ $ do
+            owner <- myThreadId
+            deadline <- (+ 2000000000) <$> getMonotonicTimeNSec
+            sender <- forkIOWithUnmask $ \unmask ->
+              unmask (throwTo owner ThreadKilled) `finally` atomically (putTMVar senderFinished ())
+            writeIORef senderThread (Just sender)
+            awaitDelivery deadline sender
+            record "callback-return"
+          _ -> pure ()
+      world = concurrentWorld (\c _ -> record "action-entry" >> pure (defaultEl c))
+  outcome <- try @SomeException (runPlanObserved sink noChains world (askC1 SText (textQuestion "cancel-at-attempt-start")))
+  senderDone <- timeout 2000000 (atomically (readTMVar senderFinished))
+  case senderDone of
+    Just () -> pure ()
+    Nothing -> readIORef senderThread >>= mapM_ killThread
+  events <- reverse <$> readIORef eventsRef
+  phasesSeen <- reverse <$> readIORef phases
+  pureProbe failures "attempt activation and cancellation retain a valid event lifecycle"
+    [ ("cancellation reached its boundary: " <> show phasesSeen, phasesSeen == ["pending", "callback-return"]),
+      ("the cancellation sender finished", senderDone == Just ()),
+      ("the original cancellation is preserved", case outcome of Left e -> fromException e == Just ThreadKilled; Right _ -> False),
+      ("the started attempt closes before its occurrence fails: " <> show events, case events of
+        [OccurrenceStarted occurrence _ _ _ _, AttemptStarted first _, AttemptFailed second FailureCancelled _, OccurrenceFailed failed FailureCancelled _] ->
+          first == second && attemptOccurrence first == occurrence && occurrence == failed
+        _ -> False)
+    ]
+
+  ready <- newEmptyTMVarIO
+  cleanupStarted <- newEmptyTMVarIO
+  releaseCleanup <- newEmptyTMVarIO
+  never <- newEmptyTMVarIO :: IO (TMVar ())
+  let cleanupSink event = case event of
+        AttemptFailed attempt _ _ | attemptOccurrence attempt == OccurrenceId 1 ->
+          atomically (putTMVar cleanupStarted ()) >> atomically (readTMVar releaseCleanup)
+        _ -> pure ()
+      cleanupWorld = concurrentWorld $ \c request ->
+        if qPrompt (reqQuestion request) == "join-wait"
+          then atomically (putTMVar ready ()) >> atomically (readTMVar never) >> pure (defaultEl c)
+          else atomically (readTMVar ready) >> ioError (userError "join-failure")
+      plan = pairP (askC1 SText (textQuestion "join-fail")) (askC1 SText (textQuestion "join-wait"))
+  withAsync (runPlanObserved cleanupSink noChains cleanupWorld plan) $ \running ->
+    (do
+        cleaning <- timeout 2000000 (atomically (readTMVar cleanupStarted))
+        premature <- timeout 200000 (waitCatch running)
+        repeated <- timeout 2000000 (throwTo (asyncThreadId running) (MachineCancelled "second cancellation during cleanup"))
+        afterRepeated <- timeout 200000 (waitCatch running)
+        atomically (putTMVar releaseCleanup ())
+        finished <- timeout 2000000 (waitCatch running)
+        pureProbe failures "run failure joins cancelled worker finalization"
+          [ ("the cancelled sibling enters cleanup", cleaning == Just ()),
+            ("the run cannot return while worker cleanup is blocked", case premature of Nothing -> True; Just _ -> False),
+            ("a repeated native cancellation is received", repeated == Just ()),
+            ("repeated cancellation cannot abandon cleanup", case afterRepeated of Nothing -> True; Just _ -> False),
+            ("the original failure returns after cleanup is released", case finished of Just (Left e) -> (ioeGetErrorString <$> fromException e) == Just "join-failure"; _ -> False)
+          ]
+    ) `finally` atomically (void (tryPutTMVar releaseCleanup ()))
+
 observedRetryProbe :: IORef Int -> IO ()
 observedRetryProbe failures = do
   eventsRef <- newIORef ([] :: [RuntimeEvent])
@@ -1587,6 +1755,8 @@ main = do
   protocolProbe failures
   observedExecutionProbe failures
   observedFailureProbe failures
+  observerFailureProbe failures
+  observedCancellationProbe failures
   observedRetryProbe failures
   controlledRedirectProbe failures
   steeredMemoProbe failures

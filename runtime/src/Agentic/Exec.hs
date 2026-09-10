@@ -273,7 +273,11 @@ import Control.Concurrent.STM
   )
 import Control.Exception
   ( Exception (displayException, toException),
+    asyncExceptionFromException,
+    asyncExceptionToException,
     bracket_,
+    catch,
+    AsyncException (ThreadKilled),
     SomeAsyncException,
     SomeException,
     fromException,
@@ -282,7 +286,7 @@ import Control.Exception
     throwIO,
     try,
   )
-import Control.Monad (void, when)
+import Control.Monad (unless, void, when)
 import Data.Foldable (traverse_)
 import Data.IntSet (IntSet)
 import Data.Char (isAlphaNum)
@@ -677,7 +681,7 @@ data Ticket where
 
 data Scheduler = Scheduler
   { schedulerMemo :: !(TVar Memo),
-    schedulerThreads :: !(TVar [ThreadId]),
+    schedulerThreads :: !(TVar [(ThreadId, STM ())]),
     schedulerFailed :: !(TMVar SomeException),
     schedulerEffects :: !TurnLane,
     schedulerNextOccurrence :: !(TVar Word64),
@@ -761,9 +765,10 @@ runPlanObservedWith controls persistence sink ch w p = mask $ \restore -> do
         ordered <- traverse (awaitTicket scheduler) tickets
         let occurrenceIds = map fst ordered
             trace = map snd ordered
-        sink (TraceOrdered occurrenceIds)
+        emit scheduler (TraceOrdered occurrenceIds)
         pure (a, trace)
-  restore run `onException` cancelWorkers scheduler
+  (restore run `onException` cancelWorkers scheduler)
+    `catch` \(ObserverFailure cause) -> throwIO cause
 
 -- | Schedule the fixed spine immediately. Prompt and branch expressions wait
 -- only for the answer cells named by their dependency metadata.
@@ -834,7 +839,7 @@ spawn scheduler reserve action = mask $ \restore -> do
             Right _ -> pure ()
       )
       `onException` releaseReservations reservations
-  atomically (modifyTVar' (schedulerThreads scheduler) (tid :))
+  atomically (modifyTVar' (schedulerThreads scheduler) ((tid, void (readTMVar cell)) :))
   pure cell
 
 releaseReservations :: [Reservation] -> IO ()
@@ -856,8 +861,18 @@ completeReservation :: Reservation -> STM ()
 completeReservation (Reservation _ completed) = void (tryPutTMVar completed ())
 
 cancelWorkers :: Scheduler -> IO ()
-cancelWorkers scheduler =
-  atomically (readTVar (schedulerThreads scheduler)) >>= mapM_ killThread
+cancelWorkers scheduler = do
+  workers <- atomically $ do
+    void (tryPutTMVar (schedulerFailed scheduler) (toException ThreadKilled))
+    readTVar (schedulerThreads scheduler)
+  completed <- newEmptyTMVarIO
+  -- One sender owns cancellation. Further owner interruptions cannot resend it
+  -- or let a run terminal event overtake worker cleanup.
+  _ <- forkFinally
+    (mapM_ (killThread . fst) workers >> atomically (mapM_ snd workers))
+    (atomically . putTMVar completed)
+  let wait = atomically (readTMVar completed) `catch` \(_ :: SomeException) -> wait
+  wait >>= either throwIO pure
 
 freshOccurrence :: Scheduler -> IO OccurrenceId
 freshOccurrence scheduler =
@@ -932,7 +947,8 @@ runOccurrence scheduler w ch occurrence c request = do
           (previewEventText (sayEl c answer))
       pure (NodeResult answer event)
     Left (e :: SomeException) -> do
-      emit scheduler (OccurrenceFailed occurrence (failureClassOf e) (failureMessage e))
+      unless (observerFailed e) $
+        emit scheduler (OccurrenceFailed occurrence (failureClassOf e) (failureMessage e))
       throwIO e
 
 newAttemptContext :: Scheduler -> OccurrenceId -> IO AttemptContext
@@ -946,7 +962,7 @@ newAttemptContext scheduler occurrence = do
           if n == maxBound
             then throwSTM (userError "runtime attempt counter exhausted")
             else writeTVar next (n + 1) >> pure (AttemptId occurrence n),
-        attemptEvents = schedulerSink scheduler,
+        attemptEvents = emit scheduler,
         attemptControlRuntime = schedulerControlRuntime scheduler,
         attemptSteerer = Nothing,
         attemptFailoverAvailable = pure False,
@@ -1003,15 +1019,16 @@ attemptExecSettings context settings = case attemptControlRuntime context of
       }
 
 withPhysicalAttempt :: AttemptContext -> Text -> (AttemptId -> IO a) -> IO a
-withPhysicalAttempt context target action = do
+withPhysicalAttempt context target action = mask $ \restore -> do
   attempt <- nextAttemptId context
   let run = do
         attemptEvents context (AttemptStarted attempt target)
-        outcome <- try (action attempt)
+        outcome <- try (restore (action attempt))
         case outcome of
           Right answer -> attemptEvents context (AttemptCompleted attempt target) >> pure answer
           Left (e :: SomeException) -> do
-            attemptEvents context (AttemptFailed attempt (failureClassOf e) (failureMessage e))
+            unless (observerFailed e) $
+              attemptEvents context (AttemptFailed attempt (failureClassOf e) (failureMessage e))
             throwIO e
   case attemptControlRuntime context of
     Nothing -> run
@@ -1024,8 +1041,23 @@ withPhysicalAttempt context target action = do
 emitAttemptOutput :: AttemptContext -> AttemptId -> Text -> IO ()
 emitAttemptOutput context attempt chunk = attemptEvents context (AttemptOutput attempt chunk)
 
+-- | Failure of event observation, not of the interpreted question.
+newtype ObserverFailure = ObserverFailure SomeException
+
+instance Show ObserverFailure where
+  show (ObserverFailure cause) = displayException cause
+
+-- Observer failures abort engine work, even when the original error was synchronous.
+instance Exception ObserverFailure where
+  toException = asyncExceptionToException
+  fromException = asyncExceptionFromException
+
+observerFailed :: SomeException -> Bool
+observerFailed e = isJust (fromException e :: Maybe ObserverFailure)
+
 emit :: Scheduler -> RuntimeEvent -> IO ()
-emit scheduler = schedulerSink scheduler
+emit scheduler event = schedulerSink scheduler event
+  `catch` \(cause :: SomeException) -> throwIO (ObserverFailure cause)
 
 previewEventText :: Text -> Text
 previewEventText = T.take 500 . oneLine
@@ -1154,6 +1186,7 @@ askOrMemo scheduler w ch context c q = do
             IO (Either SomeException (El c, AnswerSource c))
           case outcome of
             Left e
+              | observerFailed e -> throwIO e
               | Just tge <- fromException e,
                 tgeGap tge == GapExhausted -> markSpent scheduler qi
             _ -> pure ()
@@ -1820,6 +1853,7 @@ withTransportGaps st classify c q act0 = go 0
       try act0 >>= \case
         Right a -> pure a
         Left (e :: SomeException)
+          | observerFailed e -> throwIO e
           | Just (_ :: SomeAsyncException) <- fromException e -> throwIO e
           | Just tge <- fromException e -> throwIO (tge :: TurnGapError)
           | otherwise -> case classify e of
