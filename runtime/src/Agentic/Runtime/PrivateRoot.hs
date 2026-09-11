@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -24,6 +25,12 @@ module Agentic.Runtime.PrivateRoot
     writePrivateExclusiveAt,
     writePrivateAtomicAt,
     publishPrivateFileAt,
+    PrivateCapture,
+    privateCapturePath,
+    privateCaptureBytes,
+    privateCaptureSha256,
+    CapturePublication (..),
+    publishPrivateCaptureAt,
     movePrivateAt,
     removePrivateFileAt,
     removePrivateDirectoryAt,
@@ -33,15 +40,17 @@ where
 import Agentic.Runtime.PrivateFile (readConfinedFileAt)
 import Control.Concurrent.MVar (MVar, modifyMVar, newMVar, withMVar)
 import Control.Exception (IOException, bracket, bracketOnError, finally, mask, mask_, onException, throwIO, try)
-import Control.Monad (unless, when)
+import Control.Monad (unless, void, when)
+import Crypto.Hash (Context, Digest, SHA256, hashFinalize, hashInit, hashUpdate)
 import Data.Aeson (eitherDecodeStrict', encode)
 import Data.Bits ((.&.))
 import qualified Data.ByteString as BS
 import Data.Unique (hashUnique, newUnique)
 import qualified Data.ByteString.Lazy as BL
+import Data.IORef (newIORef, readIORef, writeIORef)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
-import Foreign.C.Error (eEXIST, eNOENT, getErrno, throwErrno)
+import Foreign.C.Error (eEXIST, eNOENT, getErrno, throwErrno, throwErrnoIfMinus1Retry)
 import Foreign.C.String (CString, withCString)
 import Foreign.C.Types (CInt (..))
 import System.Directory (createDirectoryIfMissing)
@@ -207,6 +216,107 @@ withTemporaryAt exclusivePublish root components action = withParent root compon
     ) `onException` cleanup
   pure result
 
+-- | The relative name, byte count and SHA-256 of a completely written capture.
+data PrivateCapture = PrivateCapture ![FilePath] !Integer !T.Text
+  deriving (Eq, Show)
+
+privateCapturePath :: PrivateCapture -> [FilePath]
+privateCapturePath (PrivateCapture path _ _) = path
+
+privateCaptureBytes :: PrivateCapture -> Integer
+privateCaptureBytes (PrivateCapture _ bytes _) = bytes
+
+privateCaptureSha256 :: PrivateCapture -> T.Text
+privateCaptureSha256 (PrivateCapture _ _ digest) = digest
+
+-- | Publication by this call, separately from confirmation of its barriers.
+-- Not-published does not imply absence of an existing destination.
+data CapturePublication
+  = CaptureNotPublished !IOException
+  | CaptureUnconfirmed !PrivateCapture !IOException
+  | CapturePublished !PrivateCapture
+  deriving (Show)
+
+-- | Publish a bounded byte stream under an already durably provisioned root.
+-- An empty chunk ends the stream. Existing destination entries are never
+-- replaced. Every existing directory from the containing parent through the
+-- supplied root is synchronized before success, but no ancestor above it is.
+-- Escaping exceptions, including cancellation, do not imply non-publication.
+publishPrivateCaptureAt :: PrivateRoot -> [FilePath] -> Integer -> IO BS.ByteString -> IO CapturePublication
+publishPrivateCaptureAt root components limit source = do
+  published <- newIORef Nothing
+  outcome <- try @IOException $ do
+    when (limit < 0) (ioError (userError "capture byte limit is negative"))
+    withCaptureParents root components $ \parents parent file -> mask $ \restore -> do
+      (temporary, descriptor) <- openUniqueTemporaryAt parent file
+      let cleanup = voidUnlink parent temporary
+      handle <- fdToHandle descriptor `onException` (closeFd descriptor `finally` cleanup)
+      let closeAfterFailure = void (try @IOException (hClose handle)) `finally` cleanup
+      !receipt <- restore (writeCapture handle <* hFlush handle <* syncDescriptor descriptor)
+        `onException` closeAfterFailure
+      hClose handle `onException` cleanup
+      (do
+        assertCaptureParents root parents
+        linkAt parent temporary parent file
+        writeIORef published (Just receipt)
+        unlinkAt parent temporary
+        restore (mapM_ (syncDescriptor . snd) parents)
+        assertCaptureParents root parents
+        pure receipt) `onException` cleanup
+  case outcome of
+    Right receipt -> pure (CapturePublished receipt)
+    Left failure -> do
+      installed <- readIORef published
+      pure (maybe (CaptureNotPublished failure) (\receipt -> CaptureUnconfirmed receipt failure) installed)
+  where
+    writeCapture handle = go 0 (hashInit :: Context SHA256)
+      where
+        go !count !context = do
+          chunk <- source
+          if BS.null chunk
+            then pure (PrivateCapture components count (T.pack (show (hashFinalize context :: Digest SHA256))))
+            else do
+              let next = count + toInteger (BS.length chunk)
+              when (next > limit) (ioError (userError "capture exceeds its byte bound"))
+              BS.hPut handle chunk
+              go next (hashUpdate context chunk)
+
+withCaptureParents :: PrivateRoot -> [FilePath] -> ([([FilePath], Fd)] -> Fd -> FilePath -> IO a) -> IO a
+withCaptureParents root components action = do
+  mapM_ validateComponent components
+  case reverse components of
+    [] -> ioError (userError "private file path is empty")
+    file : parents -> withPrivateDirectoryAt root [] $ \descriptor ->
+      descendParents file descriptor [] [([], descriptor)] (reverse parents)
+  where
+    descendParents file parent _ retained [] = action retained parent file
+    descendParents file parent prefix retained (component : rest) =
+      bracket
+        (bracketOnError (openFdAt (Just parent) component ReadOnly directoryFlags) closeFd $ \child -> do
+          getFdStatus child >>= validateDirectory (privateRootOwner root) "private capture parent"
+          pure child)
+        closeFd
+        (\child -> let next = prefix <> [component] in descendParents file child next ((next, child) : retained) rest)
+
+assertCaptureParents :: PrivateRoot -> [([FilePath], Fd)] -> IO ()
+assertCaptureParents root parents = do
+  mapM_ check parents
+  assertPrivateRoot root
+  where
+    check (components, retained) = withPrivateDirectoryAt root components $ \current -> do
+      expected <- getFdStatus retained
+      actual <- getFdStatus current
+      unless (deviceID actual == deviceID expected && fileID actual == fileID expected) $
+        ioError (userError "private capture parent identity changed while it was open")
+
+syncDescriptor :: Fd -> IO ()
+syncDescriptor (Fd descriptor) =
+  void (throwErrnoIfMinus1Retry "private publication synchronization" (c_sync_private_descriptor descriptor))
+
+unlinkAt :: Fd -> FilePath -> IO ()
+unlinkAt (Fd descriptor) name =
+  void (withCString name (\path -> throwErrnoIfMinus1Retry "unlinkat" (c_unlinkat descriptor path 0)))
+
 openUniqueTemporaryAt :: Fd -> FilePath -> IO (FilePath, Fd)
 openUniqueTemporaryAt parent finalName = do
   pid <- getProcessID
@@ -341,3 +451,4 @@ foreign import ccall unsafe "mkdirat" c_mkdirat :: CInt -> CString -> CMode -> I
 foreign import ccall unsafe "renameat" c_renameat :: CInt -> CString -> CInt -> CString -> IO CInt
 foreign import ccall unsafe "linkat" c_linkat :: CInt -> CString -> CInt -> CString -> CInt -> IO CInt
 foreign import ccall unsafe "unlinkat" c_unlinkat :: CInt -> CString -> CInt -> IO CInt
+foreign import ccall safe "agentic_sync_private_descriptor" c_sync_private_descriptor :: CInt -> IO CInt

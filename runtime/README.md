@@ -27,6 +27,55 @@ root path, device number, and inode number captured by the parent. The child reo
 and validates that identity before confined input, lineage, or store access. The
 identity is not an authorization token and does not relax ownership or mode checks.
 
+## Durable capture publication
+
+`publishPrivateCaptureAt root components limit source`, exported through
+`Agentic.Runtime`, publishes a bounded stream without replacing an existing
+entry. The limit is a nonnegative byte count. Each source call supplies a strict
+byte chunk, and an empty chunk ends the stream. The operation checks the bound
+before writing each chunk and computes the count and SHA-256 incrementally.
+The caller controls source allocation and applies any required UTF-8 or typed
+validation. This byte bound does not limit memory allocated by the source.
+
+The supplied root and its own ancestor namespace must already be durably
+provisioned. The operation creates no directories. It retains every directory
+from that root through the destination parent, including descendants created
+by an earlier `ensurePrivateDirectoryAt`. It writes a mode-0600 exclusive
+temporary, flushes and synchronizes its file descriptor, closes the file,
+revalidates the retained parents, links the final name without replacement,
+and removes its temporary name. It then synchronizes the containing directory
+and each retained ancestor in reverse order through the supplied root, and
+revalidates their current pathname bindings before returning success.
+
+Each barrier uses `fsync`. On macOS it also requires `F_FULLFSYNC` to succeed.
+An unsupported or failed barrier is an error rather than a weaker success.
+Persistence depends on the filesystem and hardware honoring these calls.
+Neither a successful syscall nor the fault tests establish physical power-loss
+behavior. Ancestors above the supplied root are outside this operation's
+barrier, and namespace checks cannot prevent a subsequent external rename.
+
+`CapturePublished` carries a `PrivateCapture` with the relative path, byte
+count, and lowercase SHA-256, available through `privateCapturePath`,
+`privateCaptureBytes`, and `privateCaptureSha256`. `CaptureNotPublished` means
+this call did not install its final entry, not that the destination is absent.
+`CaptureUnconfirmed` carries the same metadata and the IO error when publication
+occurred but later synchronization, validation, or cleanup failed. The final
+name is never removed as rollback. Cancellation and other escaping exceptions
+do not imply non-publication. A lost reply likewise requires checking the
+existing capture rather than overwriting it on retry.
+
+Stale temporary entries are not reclaimed by age or name alone, and failures
+may leave an owned temporary for later reconciliation. Successful publication
+requires removal of its temporary entry. Immutability means no replacement
+through this API, not protection against another process with the same user's
+filesystem privileges. Existing `publishPrivateFileAt`, Store writes, and
+frontend export retain their namespace-only behavior and receipt formats.
+
+`runtime/ci/capture.sh` runs the publication checks at one and eight runtime
+capabilities. Its fault executable substitutes only this library's sync wrapper
+at link time, forwarding successful calls to the real platform implementation.
+It neither changes SQLite nor supplies SQLite confinement evidence.
+
 ## Neutral frontend transport
 
 `Agentic.Runtime.Frontend.Protocol`, re-exported through `Agentic.Runtime`,

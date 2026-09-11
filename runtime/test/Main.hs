@@ -5,6 +5,7 @@
 module Main (main) where
 
 import Agentic.Runtime
+import CaptureTests (captureTests)
 import FrontendProtocolTests (frontendProtocolTests, frontendCodecCheck)
 import SnapshotCheckpointTests (snapshotCheckpointTests)
 import Control.Concurrent (forkIO, killThread, myThreadId, threadDelay, yield)
@@ -59,6 +60,7 @@ contractTests = do
   frontendProtocolTests
   snapshotCheckpointTests "."
   privateRootContractTests
+  captureTests
   frontendIoContractTests
   frontendExportContractTests
   recoveryFifoProbe
