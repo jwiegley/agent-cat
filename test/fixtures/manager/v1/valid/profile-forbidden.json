@@ -1,0 +1,8 @@
+{
+  "type": "urn:agent-cat:manager:problem:insufficient-scope",
+  "title": "Insufficient scope",
+  "status": 403,
+  "instance": "/v1/profiles",
+  "code": "insufficient-scope",
+  "links": {}
+}

@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "runId": "run_21",
+  "revision": "controlrev_2",
+  "supervision": "owned",
+  "cancelAllowed": true,
+  "offers": [
+    {
+      "operation": "answer",
+      "address": {
+        "occurrenceId": "0"
+      },
+      "generation": "generation_3",
+      "timings": [],
+      "choices": [],
+      "targets": []
+    }
+  ],
+  "decisionHeadId": "decision_3"
+}

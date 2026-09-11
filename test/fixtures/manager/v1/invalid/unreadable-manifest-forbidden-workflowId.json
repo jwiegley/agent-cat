@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "kind": "unreadable-manifest",
+  "id": "run_unreadable",
+  "revision": "catalogue_bad_1",
+  "profileId": "profile_main",
+  "category": "malformed-manifest",
+  "links": {
+    "self": "/v1/runs/run_unreadable"
+  },
+  "workflowId": "wf_invented"
+}

@@ -1,0 +1,8 @@
+{
+  "type": "urn:agent-cat:manager:problem:invalid-precondition",
+  "title": "Invalid precondition",
+  "status": 400,
+  "instance": "/v1/requests/req_8",
+  "code": "invalid-precondition",
+  "links": {}
+}

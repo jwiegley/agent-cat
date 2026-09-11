@@ -1,0 +1,7 @@
+id: stream_A.1042
+event: run.changed
+data: {"version":1,"resource":"/v1/runs/run_21/snapshot","revision":"runrev_18"}
+
+id: stream_A.1043
+event: run.changed
+data: {"version":1,"resource":"/v1/runs/run_21/snapshot","revision":"runrev_18"}

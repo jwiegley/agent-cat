@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "operation": "backup",
+  "outputFile": "/private/operator/backup.db"
+}

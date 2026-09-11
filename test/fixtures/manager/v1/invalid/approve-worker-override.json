@@ -1,0 +1,9 @@
+{
+  "operation": "approve",
+  "reviewDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "requestRevision": "request_rev_2",
+  "profileRevision": "profile_rev_4",
+  "descriptorRevision": "catalogue_17",
+  "processGeneration": "process_A",
+  "workerId": "worker_forged"
+}

@@ -1,0 +1,8 @@
+{
+  "type": "urn:agent-cat:manager:problem:decision-not-head",
+  "title": "Decision not head",
+  "status": 409,
+  "instance": "/v1/runs/run_21/control",
+  "code": "decision-not-head",
+  "links": {}
+}

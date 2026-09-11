@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "page": {
+    "setId": "set_A",
+    "revision": "view_1",
+    "expiresAt": "2026-09-03T00:01:00Z",
+    "index": 0,
+    "totalItems": 1,
+    "next": null
+  },
+  "items": [
+    {
+      "version": 1,
+      "id": "export_1",
+      "runId": "run_21",
+      "commandId": "cmd_11",
+      "name": "review-result.json",
+      "code": "flag",
+      "state": "published",
+      "bytes": "30",
+      "sha256": "33f8cc4949bf9164873396692d6d6ccad79e2ba2c0b7d58ab6947f73c941a599",
+      "download": "/v1/artifacts/artifact_export_1"
+    }
+  ],
+  "runId": "run_21"
+}

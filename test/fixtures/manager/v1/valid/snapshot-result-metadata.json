@@ -1,0 +1,122 @@
+{
+  "version": 1,
+  "page": {
+    "setId": "set_A",
+    "revision": "view_1",
+    "expiresAt": "2026-09-03T00:01:00Z",
+    "index": 0,
+    "totalItems": 2,
+    "next": null
+  },
+  "items": [
+    {
+      "occurrenceId": "18446744073709551615",
+      "state": "completed",
+      "code": "text",
+      "intent": "consult",
+      "addressee": "model reviewer",
+      "prompt": "Review subject.",
+      "answer": "Reviewed.",
+      "dispatch": null,
+      "recovery": null,
+      "reuseKind": null,
+      "source": null,
+      "failureClass": null,
+      "replayable": true,
+      "decisionId": null,
+      "personPending": false,
+      "attempts": [
+        {
+          "address": {
+            "occurrenceId": "18446744073709551615",
+            "attemptId": "4294967295"
+          },
+          "targetLabel": "scripted",
+          "state": "completed",
+          "output": "雪😀\n",
+          "steers": [],
+          "messages": [
+            "Working"
+          ],
+          "tools": [
+            {
+              "id": "tool_1",
+              "title": "Inspect input",
+              "status": "completed",
+              "summary": "Public update"
+            }
+          ],
+          "todos": [
+            {
+              "content": "Review",
+              "priority": "high",
+              "status": "in_progress"
+            }
+          ],
+          "usage": {
+            "used": "42",
+            "size": "100"
+          },
+          "reasoningSummaries": [
+            "Checked public constraints."
+          ],
+          "failure": null,
+          "failureClass": null
+        }
+      ]
+    },
+    {
+      "occurrenceId": "0",
+      "state": "completed",
+      "code": "flag",
+      "intent": "consult",
+      "addressee": "person owner",
+      "prompt": "Proceed?",
+      "answer": "yes",
+      "dispatch": null,
+      "recovery": null,
+      "reuseKind": null,
+      "source": null,
+      "failureClass": null,
+      "replayable": true,
+      "decisionId": "decision_3",
+      "personPending": false,
+      "attempts": []
+    }
+  ],
+  "snapshotVersion": 1,
+  "runId": "run_21",
+  "runtime": {
+    "status": "succeeded",
+    "lastSequence": "9007199254740993",
+    "protocolVersion": 2
+  },
+  "workflow": "review",
+  "targetLabel": "scripted",
+  "personAnswering": "local-control",
+  "authoredOrder": [
+    "18446744073709551615",
+    "0"
+  ],
+  "traceRecorded": true,
+  "controlAcks": [],
+  "billFresh": "1",
+  "billMemo": "1",
+  "result": {
+    "artifactId": "artifact_1",
+    "artifactVersion": 1,
+    "bytes": "81",
+    "sha256": "9294065bba4452375bfdc9a35d8126ce26a9d6f8fb720a22cccb3cb706651fcd",
+    "code": "flag",
+    "preview": "no"
+  },
+  "verification": {
+    "state": "unavailable",
+    "artifactId": "artifact_1",
+    "reason": "missing"
+  },
+  "failure": null,
+  "failureClass": null,
+  "supervision": "lost",
+  "integrity": "valid"
+}

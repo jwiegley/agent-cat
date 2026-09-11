@@ -1,0 +1,8 @@
+{
+  "type": "urn:agent-cat:manager:problem:view-too-large",
+  "title": "View too large",
+  "status": 413,
+  "instance": "/v1/snapshot",
+  "code": "view-too-large",
+  "links": {}
+}

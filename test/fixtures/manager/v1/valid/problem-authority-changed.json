@@ -1,0 +1,8 @@
+{
+  "type": "urn:agent-cat:manager:problem:authority-changed",
+  "title": "Authority changed",
+  "status": 409,
+  "instance": "/v1/requests/req_8",
+  "code": "authority-changed",
+  "links": {}
+}

@@ -1,0 +1,27 @@
+{
+  "programHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "policy": {
+    "kind": "scripted"
+  },
+  "workflowId": "wf_review",
+  "profileId": "profile_main",
+  "workspaceLabel": "Review workspace",
+  "targetLabel": "Deterministic worker",
+  "inputs": [
+    {
+      "name": "subject",
+      "source": "capture",
+      "bytes": "10",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  "plan": "Review the supplied subject.",
+  "runFacts": [
+    "run.engine"
+  ],
+  "pins": [
+    "deep"
+  ],
+  "warnings": [],
+  "resultCode": "receipt"
+}

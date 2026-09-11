@@ -1,0 +1,8 @@
+{
+  "type": "urn:agent-cat:manager:problem:unknown-field",
+  "title": "Unknown field",
+  "status": 400,
+  "instance": "/v1/requests/req_8",
+  "code": "unknown-field",
+  "links": {}
+}

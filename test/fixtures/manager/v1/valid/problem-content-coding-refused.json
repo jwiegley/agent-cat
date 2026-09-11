@@ -1,0 +1,8 @@
+{
+  "type": "urn:agent-cat:manager:problem:content-coding-refused",
+  "title": "Content coding refused",
+  "status": 415,
+  "instance": "/v1/requests/req_8",
+  "code": "content-coding-refused",
+  "links": {}
+}

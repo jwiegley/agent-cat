@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "id": "cmd_11",
+  "profileId": "profile_main",
+  "operation": "steer",
+  "requiredScopes": [
+    "control"
+  ],
+  "resource": "/v1/runs/run_21/control",
+  "state": "acknowledged",
+  "acceptedAt": "2026-09-03T00:00:00Z",
+  "dispatchAttemptedAt": "2026-09-03T00:00:00Z",
+  "acknowledgement": {
+    "commandId": "cmd_11",
+    "state": "delivered",
+    "message": "Delivered by native runtime.",
+    "command": "steer",
+    "occurrenceId": "18446744073709551615",
+    "attemptId": "4294967295"
+  },
+  "effect": null,
+  "refusal": null,
+  "links": {
+    "self": "/v1/commands/cmd_11",
+    "resource": "/v1/runs/run_21/control"
+  }
+}

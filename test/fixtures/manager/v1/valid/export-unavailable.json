@@ -1,0 +1,8 @@
+{
+  "type": "urn:agent-cat:manager:problem:unavailable-resource",
+  "title": "Unavailable resource",
+  "status": 404,
+  "instance": "/v1/exports/export_1",
+  "code": "unavailable-resource",
+  "links": {}
+}

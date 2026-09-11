@@ -1,0 +1,10 @@
+{
+  "name": "subject",
+  "source": "command-tail",
+  "description": null,
+  "required": true,
+  "schema": {
+    "type": "string"
+  },
+  "default": ""
+}

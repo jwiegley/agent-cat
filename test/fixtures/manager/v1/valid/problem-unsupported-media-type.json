@@ -1,0 +1,8 @@
+{
+  "type": "urn:agent-cat:manager:problem:unsupported-media-type",
+  "title": "Unsupported media type",
+  "status": 415,
+  "instance": "/v1/requests/req_8",
+  "code": "unsupported-media-type",
+  "links": {}
+}

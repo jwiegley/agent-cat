@@ -1,0 +1,8 @@
+{
+  "type": "urn:agent-cat:manager:problem:admission-limit",
+  "title": "Admission limit",
+  "status": 429,
+  "instance": "/v1/requests",
+  "code": "admission-limit",
+  "links": {}
+}

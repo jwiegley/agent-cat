@@ -1,0 +1,8 @@
+{
+  "type": "urn:agent-cat:manager:problem:rate-limit",
+  "title": "Rate limit",
+  "status": 429,
+  "instance": "/v1/requests/req_8",
+  "code": "rate-limit",
+  "links": {}
+}

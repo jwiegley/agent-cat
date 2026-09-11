@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "operation": null,
+  "ok": false,
+  "error": {
+    "code": "malformed-request",
+    "message": "Request is not valid JSON."
+  }
+}

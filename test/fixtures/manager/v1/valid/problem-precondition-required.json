@@ -1,0 +1,8 @@
+{
+  "type": "urn:agent-cat:manager:problem:precondition-required",
+  "title": "Precondition required",
+  "status": 428,
+  "instance": "/v1/requests/req_8",
+  "code": "precondition-required",
+  "links": {}
+}

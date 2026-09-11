@@ -1,0 +1,8 @@
+{
+  "type": "urn:agent-cat:manager:problem:duplicate-field",
+  "title": "Duplicate field",
+  "status": 400,
+  "instance": "/v1/requests/req_8",
+  "code": "duplicate-field",
+  "links": {}
+}

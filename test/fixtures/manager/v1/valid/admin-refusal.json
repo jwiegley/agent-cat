@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "operation": "release-quarantine",
+  "ok": false,
+  "error": {
+    "code": "cleanup-unverified",
+    "message": "Verified cleanup evidence is required."
+  }
+}

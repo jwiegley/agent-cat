@@ -1,0 +1,4 @@
+{
+  "operation": "shell",
+  "command": "echo forbidden"
+}

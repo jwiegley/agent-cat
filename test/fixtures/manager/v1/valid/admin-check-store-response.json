@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "operation": "check-store",
+  "ok": true,
+  "result": {
+    "integrity": "valid",
+    "quarantineIds": []
+  }
+}

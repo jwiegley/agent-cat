@@ -1,0 +1,12 @@
+{
+  "code": "structured",
+  "semanticSchema": "boolean",
+  "editorSchema": null,
+  "addressee": "person owner",
+  "scope": {
+    "model": null,
+    "mode": null
+  },
+  "draw": "0",
+  "prompt": "Proceed with 雪😀?"
+}

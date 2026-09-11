@@ -1,0 +1,8 @@
+{
+  "type": "urn:agent-cat:manager:problem:export-conflict",
+  "title": "Export conflict",
+  "status": 409,
+  "instance": "/v1/runs/run_21/exports",
+  "code": "export-conflict",
+  "links": {}
+}

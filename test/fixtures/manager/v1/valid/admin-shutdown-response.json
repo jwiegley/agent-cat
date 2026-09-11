@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "operation": "shutdown",
+  "ok": true,
+  "result": {
+    "state": "stopped"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "operation": "release-quarantine",
+  "quarantineId": "quarantine_1",
+  "cleanupEvidenceId": "cleanup_1",
+  "cleanupEvidenceDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}

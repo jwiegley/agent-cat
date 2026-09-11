@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "page": {
+    "setId": "set_A",
+    "revision": "view_1",
+    "expiresAt": "2026-09-03T00:01:00Z",
+    "index": 0,
+    "totalItems": 3,
+    "next": null
+  },
+  "items": [
+    {
+      "kind": "attempt",
+      "address": {
+        "occurrenceId": "18446744073709551615",
+        "attemptId": "4294967295"
+      },
+      "transportText": "雪😀\n"
+    },
+    {
+      "kind": "diagnostic",
+      "message": "Public diagnostic."
+    },
+    {
+      "kind": "result",
+      "verification": {
+        "state": "verified",
+        "artifactId": "artifact_1"
+      },
+      "artifact": {
+        "id": "artifact_1",
+        "runId": "run_21",
+        "kind": "source-result",
+        "code": "flag",
+        "bytes": "81",
+        "sha256": "9294065bba4452375bfdc9a35d8126ce26a9d6f8fb720a22cccb3cb706651fcd",
+        "download": "/v1/artifacts/artifact_1"
+      }
+    }
+  ],
+  "runId": "run_21"
+}

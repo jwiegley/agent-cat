@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "operation": "backup",
+  "ok": true,
+  "result": {
+    "backupId": "backup_1",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "bytes": "4096"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "type": "urn:agent-cat:manager:problem:insufficient-scope",
+  "title": "Insufficient scope",
+  "status": 403,
+  "instance": "/v1/commands/cmd_11",
+  "code": "insufficient-scope",
+  "links": {}
+}

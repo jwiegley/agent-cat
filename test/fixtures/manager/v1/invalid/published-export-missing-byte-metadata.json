@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "id": "export_1",
+  "runId": "run_21",
+  "commandId": "cmd_11",
+  "name": "review-result.json",
+  "code": "flag",
+  "state": "published",
+  "bytes": null,
+  "sha256": null,
+  "download": "/v1/artifacts/artifact_export_1"
+}

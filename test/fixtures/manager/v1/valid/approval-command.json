@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "id": "cmd_11",
+  "profileId": "profile_main",
+  "operation": "approve",
+  "requiredScopes": [
+    "submit",
+    "control"
+  ],
+  "resource": "/v1/preparations/prep_9",
+  "state": "accepted",
+  "acceptedAt": "2026-09-03T00:00:00Z",
+  "dispatchAttemptedAt": null,
+  "acknowledgement": null,
+  "effect": null,
+  "refusal": null,
+  "links": {
+    "self": "/v1/commands/cmd_11",
+    "resource": "/v1/preparations/prep_9"
+  }
+}

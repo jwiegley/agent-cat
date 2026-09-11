@@ -24,6 +24,12 @@ extra-source-files:
   test/fixtures/runtime/protocol-v2/*.ndjson
   test/fixtures/tui/*.golden
   test/fixtures/tui/import-boundaries.json
+  test/fixtures/manager/v1/manifest.json
+  test/fixtures/manager/v1/valid/*.json
+  test/fixtures/manager/v1/valid/*.utf8
+  test/fixtures/manager/v1/invalid/*.json
+  test/fixtures/manager/v1/sse/*.sse
+  test/manager_contract_probe.py
   test/source-boundaries.hs
   test/source_roots_probe.py
   test/cabal.sh
@@ -33,10 +39,13 @@ extra-source-files:
   test/frontend_session_probe.py
   manager/AGENTS.md
   manager/ci/dependencies.sh
+  manager/ci/contract.sh
   manager/test/DependencyProbe.hs
   manager/test/containment_probe.py
 extra-doc-files:
   manager/README.md
+  doc/api/README.md
+  doc/api/openapi.yaml
   doc/tui-design.md
   doc/tui-release-evidence.md
 

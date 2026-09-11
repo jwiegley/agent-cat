@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "operation": "check-quarantine",
+  "ok": true,
+  "result": {
+    "quarantineId": "quarantine_1",
+    "state": "clean",
+    "cleanupEvidenceId": "cleanup_1",
+    "cleanupEvidenceDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "processGeneration": "process_A",
+    "expiresAt": "2026-09-03T00:10:00Z"
+  }
+}

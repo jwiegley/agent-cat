@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "page": {
+    "setId": "set_A",
+    "revision": "view_1",
+    "expiresAt": "2026-09-03T00:01:00Z",
+    "index": 0,
+    "totalItems": 1,
+    "next": null
+  },
+  "items": [
+    {
+      "version": 1,
+      "id": "decision_3",
+      "revision": "decisionrev_1",
+      "runId": "run_21",
+      "profileId": "profile_main",
+      "generation": "generation_3",
+      "address": {
+        "occurrenceId": "0"
+      },
+      "state": "pending",
+      "position": 0,
+      "observedSequence": "9007199254740994",
+      "queue": "/v1/decisions?runId=run_21",
+      "kind": "question",
+      "question": {
+        "code": "flag",
+        "semanticSchema": "boolean",
+        "editorSchema": null,
+        "addressee": "person owner",
+        "scope": {
+          "model": null,
+          "mode": null
+        },
+        "draw": "0",
+        "prompt": "Proceed with 雪😀?"
+      }
+    }
+  ]
+}

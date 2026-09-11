@@ -1,0 +1,9 @@
+{
+  "operation": "fork",
+  "edits": [
+    {
+      "operation": "drop",
+      "occurrenceId": 1
+    }
+  ]
+}

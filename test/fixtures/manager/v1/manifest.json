@@ -1,0 +1,2367 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "capabilities",
+      "file": "valid/capabilities.json",
+      "schema": "Capabilities",
+      "valid": true
+    },
+    {
+      "name": "profiles",
+      "file": "valid/profiles.json",
+      "schema": "ProfilePage",
+      "valid": true
+    },
+    {
+      "name": "input-declaration",
+      "file": "valid/input-declaration.json",
+      "schema": "InputDeclaration",
+      "valid": true
+    },
+    {
+      "name": "workflow",
+      "file": "valid/workflow.json",
+      "schema": "Workflow",
+      "valid": true
+    },
+    {
+      "name": "workflows",
+      "file": "valid/workflows.json",
+      "schema": "WorkflowPage",
+      "valid": true
+    },
+    {
+      "name": "create-request",
+      "file": "valid/create-request.json",
+      "schema": "CreateRequest",
+      "valid": true
+    },
+    {
+      "name": "request",
+      "file": "valid/request.json",
+      "schema": "Request",
+      "valid": true
+    },
+    {
+      "name": "requests",
+      "file": "valid/requests.json",
+      "schema": "RequestPage",
+      "valid": true
+    },
+    {
+      "name": "set-input-empty",
+      "file": "valid/set-input-empty.json",
+      "schema": "RequestMutation",
+      "valid": true
+    },
+    {
+      "name": "set-input-unicode",
+      "file": "valid/set-input-unicode.json",
+      "schema": "RequestMutation",
+      "valid": true
+    },
+    {
+      "name": "set-input-capture",
+      "file": "valid/set-input-capture.json",
+      "schema": "RequestMutation",
+      "valid": true
+    },
+    {
+      "name": "remove-input",
+      "file": "valid/remove-input.json",
+      "schema": "RequestMutation",
+      "valid": true
+    },
+    {
+      "name": "enqueue",
+      "file": "valid/enqueue.json",
+      "schema": "RequestMutation",
+      "valid": true
+    },
+    {
+      "name": "withdraw",
+      "file": "valid/withdraw.json",
+      "schema": "RequestMutation",
+      "valid": true
+    },
+    {
+      "name": "capture",
+      "file": "valid/capture.json",
+      "schema": "CaptureReceipt",
+      "valid": true
+    },
+    {
+      "name": "preparation",
+      "file": "valid/preparation.json",
+      "schema": "Preparation",
+      "valid": true
+    },
+    {
+      "name": "approve",
+      "file": "valid/approve.json",
+      "schema": "PreparationMutation",
+      "valid": true
+    },
+    {
+      "name": "discard",
+      "file": "valid/discard.json",
+      "schema": "PreparationMutation",
+      "valid": true
+    },
+    {
+      "name": "run",
+      "file": "valid/run.json",
+      "schema": "Run",
+      "valid": true
+    },
+    {
+      "name": "runs",
+      "file": "valid/runs.json",
+      "schema": "RunPage",
+      "valid": true
+    },
+    {
+      "name": "control-address-max",
+      "file": "valid/control-address-max.json",
+      "schema": "ControlAddress",
+      "valid": true
+    },
+    {
+      "name": "run-control",
+      "file": "valid/run-control.json",
+      "schema": "RunControl",
+      "valid": true
+    },
+    {
+      "name": "decision",
+      "file": "valid/decision.json",
+      "schema": "Decision",
+      "valid": true
+    },
+    {
+      "name": "decisions",
+      "file": "valid/decisions.json",
+      "schema": "DecisionPage",
+      "valid": true
+    },
+    {
+      "name": "answer-false",
+      "file": "valid/answer-false.json",
+      "schema": "DecisionMutation",
+      "valid": true
+    },
+    {
+      "name": "answer-null",
+      "file": "valid/answer-null.json",
+      "schema": "DecisionMutation",
+      "valid": true
+    },
+    {
+      "name": "answer-empty-array",
+      "file": "valid/answer-empty-array.json",
+      "schema": "DecisionMutation",
+      "valid": true
+    },
+    {
+      "name": "answer-empty-text",
+      "file": "valid/answer-empty-text.json",
+      "schema": "DecisionMutation",
+      "valid": true
+    },
+    {
+      "name": "answer-unicode",
+      "file": "valid/answer-unicode.json",
+      "schema": "DecisionMutation",
+      "valid": true
+    },
+    {
+      "name": "answer-structured",
+      "file": "valid/answer-structured.json",
+      "schema": "DecisionMutation",
+      "valid": true
+    },
+    {
+      "name": "answer-decimal",
+      "file": "valid/answer-decimal.json",
+      "schema": "DecisionMutation",
+      "valid": true
+    },
+    {
+      "name": "answer-precise-decimal",
+      "file": "valid/answer-precise-decimal.json",
+      "schema": "DecisionMutation",
+      "valid": true
+    },
+    {
+      "name": "choose-recovery",
+      "file": "valid/choose-recovery.json",
+      "schema": "DecisionMutation",
+      "valid": true
+    },
+    {
+      "name": "control-0",
+      "file": "valid/control-0.json",
+      "schema": "RunControlMutation",
+      "valid": true
+    },
+    {
+      "name": "control-1",
+      "file": "valid/control-1.json",
+      "schema": "RunControlMutation",
+      "valid": true
+    },
+    {
+      "name": "control-2",
+      "file": "valid/control-2.json",
+      "schema": "RunControlMutation",
+      "valid": true
+    },
+    {
+      "name": "control-3",
+      "file": "valid/control-3.json",
+      "schema": "RunControlMutation",
+      "valid": true
+    },
+    {
+      "name": "control-4",
+      "file": "valid/control-4.json",
+      "schema": "RunControlMutation",
+      "valid": true
+    },
+    {
+      "name": "control-5",
+      "file": "valid/control-5.json",
+      "schema": "RunControlMutation",
+      "valid": true
+    },
+    {
+      "name": "control-6",
+      "file": "valid/control-6.json",
+      "schema": "RunControlMutation",
+      "valid": true
+    },
+    {
+      "name": "request-command",
+      "file": "valid/request-command.json",
+      "schema": "CommandReceipt",
+      "valid": true
+    },
+    {
+      "name": "approval-command",
+      "file": "valid/approval-command.json",
+      "schema": "CommandReceipt",
+      "valid": true
+    },
+    {
+      "name": "control-command",
+      "file": "valid/control-command.json",
+      "schema": "CommandReceipt",
+      "valid": true
+    },
+    {
+      "name": "decision-command",
+      "file": "valid/decision-command.json",
+      "schema": "CommandReceipt",
+      "valid": true
+    },
+    {
+      "name": "export-command",
+      "file": "valid/export-command.json",
+      "schema": "CommandReceipt",
+      "valid": true
+    },
+    {
+      "name": "lineage-command",
+      "file": "valid/lineage-command.json",
+      "schema": "CommandReceipt",
+      "valid": true
+    },
+    {
+      "name": "run-snapshot",
+      "file": "valid/run-snapshot.json",
+      "schema": "RunSnapshot",
+      "valid": true
+    },
+    {
+      "name": "outputs",
+      "file": "valid/outputs.json",
+      "schema": "OutputPage",
+      "valid": true
+    },
+    {
+      "name": "artifact",
+      "file": "valid/artifact.json",
+      "schema": "ExportDocument",
+      "valid": true
+    },
+    {
+      "name": "artifact-download",
+      "file": "valid/artifact-download.utf8",
+      "schema": "ArtifactDownload",
+      "valid": true,
+      "encoding": "utf8"
+    },
+    {
+      "name": "export-download",
+      "file": "valid/export-download.utf8",
+      "schema": "ArtifactDownload",
+      "valid": true,
+      "encoding": "utf8"
+    },
+    {
+      "name": "export-create",
+      "file": "valid/export-create.json",
+      "schema": "ExportMutation",
+      "valid": true
+    },
+    {
+      "name": "export",
+      "file": "valid/export.json",
+      "schema": "ExportReceipt",
+      "valid": true
+    },
+    {
+      "name": "exports",
+      "file": "valid/exports.json",
+      "schema": "ExportPage",
+      "valid": true
+    },
+    {
+      "name": "export-unicode-download",
+      "file": "valid/export-unicode-download.utf8",
+      "schema": "ArtifactDownload",
+      "valid": true,
+      "encoding": "utf8"
+    },
+    {
+      "name": "export-unicode",
+      "file": "valid/export-unicode.json",
+      "schema": "ExportReceipt",
+      "valid": true
+    },
+    {
+      "name": "artifact-wrapper-forbidden",
+      "file": "invalid/artifact-wrapper-forbidden.json",
+      "schema": "ExportDocument",
+      "valid": false
+    },
+    {
+      "name": "published-export-missing-byte-metadata",
+      "file": "invalid/published-export-missing-byte-metadata.json",
+      "schema": "ExportReceipt",
+      "valid": false
+    },
+    {
+      "name": "verified-output-missing-byte-metadata",
+      "file": "invalid/verified-output-missing-byte-metadata.json",
+      "schema": "OutputItem",
+      "valid": false
+    },
+    {
+      "name": "lineages",
+      "file": "valid/lineages.json",
+      "schema": "LineagePage",
+      "valid": true
+    },
+    {
+      "name": "restart",
+      "file": "valid/restart.json",
+      "schema": "LineageMutation",
+      "valid": true
+    },
+    {
+      "name": "resume",
+      "file": "valid/resume.json",
+      "schema": "LineageMutation",
+      "valid": true
+    },
+    {
+      "name": "fork-empty",
+      "file": "valid/fork-empty.json",
+      "schema": "LineageMutation",
+      "valid": true
+    },
+    {
+      "name": "fork-edits",
+      "file": "valid/fork-edits.json",
+      "schema": "LineageMutation",
+      "valid": true
+    },
+    {
+      "name": "invalidation",
+      "file": "valid/invalidation.json",
+      "schema": "Invalidation",
+      "valid": true
+    },
+    {
+      "name": "event-batch",
+      "file": "valid/event-batch.json",
+      "schema": "EventBatch",
+      "valid": true
+    },
+    {
+      "name": "event-batch-empty",
+      "file": "valid/event-batch-empty.json",
+      "schema": "EventBatch",
+      "valid": true
+    },
+    {
+      "name": "overview",
+      "file": "valid/overview.json",
+      "schema": "OverviewSnapshot",
+      "valid": true
+    },
+    {
+      "name": "strong-etag",
+      "file": "valid/strong-etag.json",
+      "schema": "StrongETag",
+      "valid": true
+    },
+    {
+      "name": "idempotency-key",
+      "file": "valid/idempotency-key.json",
+      "schema": "IdempotencyKey",
+      "valid": true
+    },
+    {
+      "name": "event-cursor-overflow",
+      "file": "invalid/event-cursor-overflow.json",
+      "schema": "EventCursor",
+      "valid": false
+    },
+    {
+      "name": "event-cursor-leading-zero",
+      "file": "invalid/event-cursor-leading-zero.json",
+      "schema": "EventCursor",
+      "valid": false
+    },
+    {
+      "name": "answer-attempt-forbidden",
+      "file": "invalid/answer-attempt-forbidden.json",
+      "schema": "DecisionMutation",
+      "valid": false
+    },
+    {
+      "name": "redirect-attempt-forbidden",
+      "file": "invalid/redirect-attempt-forbidden.json",
+      "schema": "RunControlMutation",
+      "valid": false
+    },
+    {
+      "name": "receipt-scope-mismatch",
+      "file": "invalid/receipt-scope-mismatch.json",
+      "schema": "CommandReceipt",
+      "valid": false
+    },
+    {
+      "name": "artifact-flag-string",
+      "file": "invalid/artifact-flag-string.json",
+      "schema": "ExportDocument",
+      "valid": false
+    },
+    {
+      "name": "artifact-receipt-false",
+      "file": "invalid/artifact-receipt-false.json",
+      "schema": "ExportDocument",
+      "valid": false
+    },
+    {
+      "name": "artifact-receipt-null",
+      "file": "valid/artifact-receipt-null.json",
+      "schema": "ExportDocument",
+      "valid": true
+    },
+    {
+      "name": "artifact-empty-text",
+      "file": "valid/artifact-empty-text.json",
+      "schema": "ExportDocument",
+      "valid": true
+    },
+    {
+      "name": "artifact-verdict-approve",
+      "file": "valid/artifact-verdict-approve.json",
+      "schema": "ExportDocument",
+      "valid": true
+    },
+    {
+      "name": "artifact-verdict-objections",
+      "file": "valid/artifact-verdict-objections.json",
+      "schema": "ExportDocument",
+      "valid": true
+    },
+    {
+      "name": "artifact-structured-empty-array",
+      "file": "valid/artifact-structured-empty-array.json",
+      "schema": "ExportDocument",
+      "valid": true
+    },
+    {
+      "name": "artifact-structured-null",
+      "file": "valid/artifact-structured-null.json",
+      "schema": "ExportDocument",
+      "valid": true
+    },
+    {
+      "name": "artifact-structured-decimal",
+      "file": "valid/artifact-structured-decimal.json",
+      "schema": "ExportDocument",
+      "valid": true
+    },
+    {
+      "name": "runtime-absent",
+      "file": "valid/runtime-absent.json",
+      "schema": "Run",
+      "valid": true
+    },
+    {
+      "name": "snapshot-result-metadata",
+      "file": "valid/snapshot-result-metadata.json",
+      "schema": "RunSnapshot",
+      "valid": true
+    },
+    {
+      "name": "receipt-accepted-with-delivery",
+      "file": "invalid/receipt-accepted-with-delivery.json",
+      "schema": "CommandReceipt",
+      "valid": false
+    },
+    {
+      "name": "receipt-effect-missing",
+      "file": "invalid/receipt-effect-missing.json",
+      "schema": "CommandReceipt",
+      "valid": false
+    },
+    {
+      "name": "runtime-succeeded-content-unavailable",
+      "file": "valid/runtime-succeeded-content-unavailable.json",
+      "schema": "Run",
+      "valid": true
+    },
+    {
+      "name": "corrupt-journal-verified-result",
+      "file": "valid/corrupt-journal-verified-result.json",
+      "schema": "Run",
+      "valid": true
+    },
+    {
+      "name": "request-empty-text-ready",
+      "file": "valid/request-empty-text-ready.json",
+      "schema": "Request",
+      "valid": true
+    },
+    {
+      "name": "preparation-invalidated",
+      "file": "valid/preparation-invalidated.json",
+      "schema": "Preparation",
+      "valid": true
+    },
+    {
+      "name": "decision-submitting",
+      "file": "valid/decision-submitting.json",
+      "schema": "Decision",
+      "valid": true
+    },
+    {
+      "name": "decision-recovery",
+      "file": "valid/decision-recovery.json",
+      "schema": "Decision",
+      "valid": true
+    },
+    {
+      "name": "command-unresolved",
+      "file": "valid/command-unresolved.json",
+      "schema": "CommandReceipt",
+      "valid": true
+    },
+    {
+      "name": "command-acknowledged",
+      "file": "valid/command-acknowledged.json",
+      "schema": "CommandReceipt",
+      "valid": true
+    },
+    {
+      "name": "command-effect-observed",
+      "file": "valid/command-effect-observed.json",
+      "schema": "CommandReceipt",
+      "valid": true
+    },
+    {
+      "name": "runs-first-page",
+      "file": "valid/runs-first-page.json",
+      "schema": "RunPage",
+      "valid": true
+    },
+    {
+      "name": "runs-last-page",
+      "file": "valid/runs-last-page.json",
+      "schema": "RunPage",
+      "valid": true
+    },
+    {
+      "name": "page-unknown-field",
+      "file": "invalid/page-unknown-field.json",
+      "schema": "Page",
+      "valid": false
+    },
+    {
+      "name": "page-numeric-revision",
+      "file": "invalid/page-numeric-revision.json",
+      "schema": "Page",
+      "valid": false
+    },
+    {
+      "name": "limits-zero-global",
+      "file": "invalid/limits-zero-global.json",
+      "schema": "Limits",
+      "valid": false
+    },
+    {
+      "name": "limits-reservations-overflow",
+      "file": "invalid/limits-reservations-overflow.json",
+      "schema": "Limits",
+      "valid": false
+    },
+    {
+      "name": "version-domain-api",
+      "file": "invalid/version-domain-api.json",
+      "schema": "Versions",
+      "valid": false
+    },
+    {
+      "name": "version-domain-snapshot",
+      "file": "invalid/version-domain-snapshot.json",
+      "schema": "Versions",
+      "valid": false
+    },
+    {
+      "name": "version-domain-event",
+      "file": "invalid/version-domain-event.json",
+      "schema": "Versions",
+      "valid": false
+    },
+    {
+      "name": "version-domain-descriptor",
+      "file": "invalid/version-domain-descriptor.json",
+      "schema": "Versions",
+      "valid": false
+    },
+    {
+      "name": "version-domain-frontendSession",
+      "file": "invalid/version-domain-frontendSession.json",
+      "schema": "Versions",
+      "valid": false
+    },
+    {
+      "name": "version-domain-control",
+      "file": "invalid/version-domain-control.json",
+      "schema": "Versions",
+      "valid": false
+    },
+    {
+      "name": "version-domain-runtimeProtocol",
+      "file": "invalid/version-domain-runtimeProtocol.json",
+      "schema": "Versions",
+      "valid": false
+    },
+    {
+      "name": "version-domain-frontendManifest",
+      "file": "invalid/version-domain-frontendManifest.json",
+      "schema": "Versions",
+      "valid": false
+    },
+    {
+      "name": "version-domain-runtimeStore",
+      "file": "invalid/version-domain-runtimeStore.json",
+      "schema": "Versions",
+      "valid": false
+    },
+    {
+      "name": "version-domain-managerStore",
+      "file": "invalid/version-domain-managerStore.json",
+      "schema": "Versions",
+      "valid": false
+    },
+    {
+      "name": "version-domain-invocation",
+      "file": "invalid/version-domain-invocation.json",
+      "schema": "Versions",
+      "valid": false
+    },
+    {
+      "name": "code-text",
+      "file": "valid/code-text.json",
+      "schema": "ObservationCode",
+      "valid": true
+    },
+    {
+      "name": "code-verdict",
+      "file": "valid/code-verdict.json",
+      "schema": "ObservationCode",
+      "valid": true
+    },
+    {
+      "name": "code-flag",
+      "file": "valid/code-flag.json",
+      "schema": "ObservationCode",
+      "valid": true
+    },
+    {
+      "name": "code-receipt",
+      "file": "valid/code-receipt.json",
+      "schema": "ObservationCode",
+      "valid": true
+    },
+    {
+      "name": "code-json",
+      "file": "valid/code-json.json",
+      "schema": "ObservationCode",
+      "valid": true
+    },
+    {
+      "name": "semantic-schema",
+      "file": "valid/semantic-schema.json",
+      "schema": "SemanticSchema",
+      "valid": true
+    },
+    {
+      "name": "editor-schema",
+      "file": "valid/editor-schema.json",
+      "schema": "EditorSchema",
+      "valid": true
+    },
+    {
+      "name": "manifest-legacy",
+      "file": "valid/manifest-legacy.json",
+      "schema": "ManifestCompatibility",
+      "valid": true
+    },
+    {
+      "name": "manifest-2",
+      "file": "valid/manifest-2.json",
+      "schema": "ManifestCompatibility",
+      "valid": true
+    },
+    {
+      "name": "manifest-3",
+      "file": "valid/manifest-3.json",
+      "schema": "ManifestCompatibility",
+      "valid": true
+    },
+    {
+      "name": "unauthenticated",
+      "file": "valid/unauthenticated.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "profile-forbidden",
+      "file": "valid/profile-forbidden.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "workflow-unavailable",
+      "file": "valid/workflow-unavailable.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "request-view-expired",
+      "file": "valid/request-view-expired.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "request-admission-limit",
+      "file": "valid/request-admission-limit.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "request-unavailable",
+      "file": "valid/request-unavailable.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "request-stale",
+      "file": "valid/request-stale.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "capture-size",
+      "file": "valid/capture-size.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "preparation-unavailable",
+      "file": "valid/preparation-unavailable.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "preparation-conflict",
+      "file": "valid/preparation-conflict.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "run-view-large",
+      "file": "valid/run-view-large.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "run-unavailable",
+      "file": "valid/run-unavailable.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "snapshot-expired",
+      "file": "valid/snapshot-expired.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "control-unavailable",
+      "file": "valid/control-unavailable.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "control-not-head",
+      "file": "valid/control-not-head.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "decision-view-expired",
+      "file": "valid/decision-view-expired.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "decision-unavailable",
+      "file": "valid/decision-unavailable.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "decision-not-head",
+      "file": "valid/decision-not-head.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "command-forbidden",
+      "file": "valid/command-forbidden.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "output-unavailable",
+      "file": "valid/output-unavailable.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "artifact-unavailable",
+      "file": "valid/artifact-unavailable.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "export-view-expired",
+      "file": "valid/export-view-expired.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "export-conflict",
+      "file": "valid/export-conflict.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "export-unavailable",
+      "file": "valid/export-unavailable.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "lineage-quarantined",
+      "file": "valid/lineage-quarantined.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "lineage-incompatible",
+      "file": "valid/lineage-incompatible.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "overview-too-large",
+      "file": "valid/overview-too-large.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "cursor-expired",
+      "file": "valid/cursor-expired.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "problem-malformed-request",
+      "file": "valid/problem-malformed-request.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "problem-duplicate-field",
+      "file": "valid/problem-duplicate-field.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "problem-unknown-field",
+      "file": "valid/problem-unknown-field.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "problem-unsupported-version",
+      "file": "valid/problem-unsupported-version.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "problem-invalid-precondition",
+      "file": "valid/problem-invalid-precondition.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "problem-origin-refused",
+      "file": "valid/problem-origin-refused.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "problem-authority-changed",
+      "file": "valid/problem-authority-changed.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "problem-idempotency-conflict",
+      "file": "valid/problem-idempotency-conflict.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "problem-unsupported-operation",
+      "file": "valid/problem-unsupported-operation.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "problem-receipt-expired",
+      "file": "valid/problem-receipt-expired.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "problem-unsupported-media-type",
+      "file": "valid/problem-unsupported-media-type.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "problem-content-coding-refused",
+      "file": "valid/problem-content-coding-refused.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "problem-invalid-input",
+      "file": "valid/problem-invalid-input.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "problem-invalid-answer",
+      "file": "valid/problem-invalid-answer.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "problem-invalid-lineage-edit",
+      "file": "valid/problem-invalid-lineage-edit.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "problem-precondition-required",
+      "file": "valid/problem-precondition-required.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "problem-rate-limit",
+      "file": "valid/problem-rate-limit.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "problem-storage-quota",
+      "file": "valid/problem-storage-quota.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "problem-storage-unavailable",
+      "file": "valid/problem-storage-unavailable.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "problem-supervision-unavailable",
+      "file": "valid/problem-supervision-unavailable.json",
+      "schema": "Problem",
+      "valid": true
+    },
+    {
+      "name": "create-unknown",
+      "file": "invalid/create-unknown.json",
+      "schema": "CreateRequest",
+      "valid": false
+    },
+    {
+      "name": "create-client-override",
+      "file": "invalid/create-client-override.json",
+      "schema": "CreateRequest",
+      "valid": false
+    },
+    {
+      "name": "create-executable-override",
+      "file": "invalid/create-executable-override.json",
+      "schema": "CreateRequest",
+      "valid": false
+    },
+    {
+      "name": "create-duplicate",
+      "file": "invalid/create-duplicate.json",
+      "schema": "CreateRequest",
+      "valid": false
+    },
+    {
+      "name": "null-input",
+      "file": "invalid/null-input.json",
+      "schema": "RequestMutation",
+      "valid": false
+    },
+    {
+      "name": "input-path",
+      "file": "invalid/input-path.json",
+      "schema": "RequestMutation",
+      "valid": false
+    },
+    {
+      "name": "input-optional",
+      "file": "invalid/input-optional.json",
+      "schema": "InputDeclaration",
+      "valid": false
+    },
+    {
+      "name": "input-description",
+      "file": "invalid/input-description.json",
+      "schema": "InputDeclaration",
+      "valid": false
+    },
+    {
+      "name": "input-default",
+      "file": "invalid/input-default.json",
+      "schema": "InputDeclaration",
+      "valid": false
+    },
+    {
+      "name": "request-unknown-operation",
+      "file": "invalid/request-unknown-operation.json",
+      "schema": "RequestMutation",
+      "valid": false
+    },
+    {
+      "name": "approve-missing-generation",
+      "file": "invalid/approve-missing-generation.json",
+      "schema": "PreparationMutation",
+      "valid": false
+    },
+    {
+      "name": "approve-worker-override",
+      "file": "invalid/approve-worker-override.json",
+      "schema": "PreparationMutation",
+      "valid": false
+    },
+    {
+      "name": "control-qualified-attempt",
+      "file": "invalid/control-qualified-attempt.json",
+      "schema": "ControlAddress",
+      "valid": false
+    },
+    {
+      "name": "control-numeric-id",
+      "file": "invalid/control-numeric-id.json",
+      "schema": "ControlAddress",
+      "valid": false
+    },
+    {
+      "name": "control-u64-overflow",
+      "file": "invalid/control-u64-overflow.json",
+      "schema": "ControlAddress",
+      "valid": false
+    },
+    {
+      "name": "control-u32-overflow",
+      "file": "invalid/control-u32-overflow.json",
+      "schema": "ControlAddress",
+      "valid": false
+    },
+    {
+      "name": "control-leading-zero",
+      "file": "invalid/control-leading-zero.json",
+      "schema": "ControlAddress",
+      "valid": false
+    },
+    {
+      "name": "control-negative",
+      "file": "invalid/control-negative.json",
+      "schema": "ControlAddress",
+      "valid": false
+    },
+    {
+      "name": "control-pause",
+      "file": "invalid/control-pause.json",
+      "schema": "RunControlMutation",
+      "valid": false
+    },
+    {
+      "name": "control-shell",
+      "file": "invalid/control-shell.json",
+      "schema": "RunControlMutation",
+      "valid": false
+    },
+    {
+      "name": "answer-no-generation",
+      "file": "invalid/answer-no-generation.json",
+      "schema": "DecisionMutation",
+      "valid": false
+    },
+    {
+      "name": "answer-unknown",
+      "file": "invalid/answer-unknown.json",
+      "schema": "DecisionMutation",
+      "valid": false
+    },
+    {
+      "name": "answer-nonfinite",
+      "file": "invalid/answer-nonfinite.json",
+      "schema": "DecisionMutation",
+      "valid": false
+    },
+    {
+      "name": "answer-duplicate-nested",
+      "file": "invalid/answer-duplicate-nested.json",
+      "schema": "DecisionMutation",
+      "valid": false
+    },
+    {
+      "name": "answer-invalid-unicode",
+      "file": "invalid/answer-invalid-unicode.json",
+      "schema": "DecisionMutation",
+      "valid": false
+    },
+    {
+      "name": "code-invalid-ack",
+      "file": "invalid/code-invalid-ack.json",
+      "schema": "ObservationCode",
+      "valid": false
+    },
+    {
+      "name": "code-invalid-boolean",
+      "file": "invalid/code-invalid-boolean.json",
+      "schema": "ObservationCode",
+      "valid": false
+    },
+    {
+      "name": "code-invalid-json",
+      "file": "invalid/code-invalid-json.json",
+      "schema": "ObservationCode",
+      "valid": false
+    },
+    {
+      "name": "code-editor-as-semantic",
+      "file": "invalid/code-editor-as-semantic.json",
+      "schema": "ObservationCode",
+      "valid": false
+    },
+    {
+      "name": "semantic-bad-rest",
+      "file": "invalid/semantic-bad-rest.json",
+      "schema": "SemanticSchema",
+      "valid": false
+    },
+    {
+      "name": "semantic-unknown",
+      "file": "invalid/semantic-unknown.json",
+      "schema": "SemanticSchema",
+      "valid": false
+    },
+    {
+      "name": "etag-invalid-weak",
+      "file": "invalid/etag-invalid-weak.json",
+      "schema": "StrongETag",
+      "valid": false
+    },
+    {
+      "name": "etag-invalid-wildcard",
+      "file": "invalid/etag-invalid-wildcard.json",
+      "schema": "StrongETag",
+      "valid": false
+    },
+    {
+      "name": "etag-invalid-list",
+      "file": "invalid/etag-invalid-list.json",
+      "schema": "StrongETag",
+      "valid": false
+    },
+    {
+      "name": "etag-invalid-unquoted",
+      "file": "invalid/etag-invalid-unquoted.json",
+      "schema": "StrongETag",
+      "valid": false
+    },
+    {
+      "name": "key-no-epoch",
+      "file": "invalid/key-no-epoch.json",
+      "schema": "IdempotencyKey",
+      "valid": false
+    },
+    {
+      "name": "key-short-nonce",
+      "file": "invalid/key-short-nonce.json",
+      "schema": "IdempotencyKey",
+      "valid": false
+    },
+    {
+      "name": "export-name-invalid-parent",
+      "file": "invalid/export-name-invalid-parent.json",
+      "schema": "ExportMutation",
+      "valid": false
+    },
+    {
+      "name": "export-name-invalid-absolute",
+      "file": "invalid/export-name-invalid-absolute.json",
+      "schema": "ExportMutation",
+      "valid": false
+    },
+    {
+      "name": "export-name-invalid-slash",
+      "file": "invalid/export-name-invalid-slash.json",
+      "schema": "ExportMutation",
+      "valid": false
+    },
+    {
+      "name": "export-name-invalid-backslash",
+      "file": "invalid/export-name-invalid-backslash.json",
+      "schema": "ExportMutation",
+      "valid": false
+    },
+    {
+      "name": "export-name-invalid-dotdot",
+      "file": "invalid/export-name-invalid-dotdot.json",
+      "schema": "ExportMutation",
+      "valid": false
+    },
+    {
+      "name": "export-name-invalid-nul",
+      "file": "invalid/export-name-invalid-nul.json",
+      "schema": "ExportMutation",
+      "valid": false
+    },
+    {
+      "name": "lineage-override-workflowId",
+      "file": "invalid/lineage-override-workflowId.json",
+      "schema": "LineageMutation",
+      "valid": false
+    },
+    {
+      "name": "lineage-override-inputs",
+      "file": "invalid/lineage-override-inputs.json",
+      "schema": "LineageMutation",
+      "valid": false
+    },
+    {
+      "name": "lineage-override-target",
+      "file": "invalid/lineage-override-target.json",
+      "schema": "LineageMutation",
+      "valid": false
+    },
+    {
+      "name": "lineage-override-invocation",
+      "file": "invalid/lineage-override-invocation.json",
+      "schema": "LineageMutation",
+      "valid": false
+    },
+    {
+      "name": "lineage-override-root",
+      "file": "invalid/lineage-override-root.json",
+      "schema": "LineageMutation",
+      "valid": false
+    },
+    {
+      "name": "fork-drop-value",
+      "file": "invalid/fork-drop-value.json",
+      "schema": "LineageMutation",
+      "valid": false
+    },
+    {
+      "name": "fork-replace-missing",
+      "file": "invalid/fork-replace-missing.json",
+      "schema": "LineageMutation",
+      "valid": false
+    },
+    {
+      "name": "fork-numeric-occurrence",
+      "file": "invalid/fork-numeric-occurrence.json",
+      "schema": "LineageMutation",
+      "valid": false
+    },
+    {
+      "name": "resume-with-edits",
+      "file": "invalid/resume-with-edits.json",
+      "schema": "LineageMutation",
+      "valid": false
+    },
+    {
+      "name": "capabilities-unsupported-version",
+      "file": "invalid/capabilities-unsupported-version.json",
+      "schema": "Capabilities",
+      "valid": false
+    },
+    {
+      "name": "snapshot-unsupported-version",
+      "file": "invalid/snapshot-unsupported-version.json",
+      "schema": "RunSnapshot",
+      "valid": false
+    },
+    {
+      "name": "event-unsupported-version",
+      "file": "invalid/event-unsupported-version.json",
+      "schema": "Invalidation",
+      "valid": false
+    },
+    {
+      "name": "artifact-unsupported-version",
+      "file": "invalid/artifact-unsupported-version.json",
+      "schema": "ExportDocument",
+      "valid": false
+    },
+    {
+      "name": "snapshot-domain-version",
+      "file": "invalid/snapshot-domain-version.json",
+      "schema": "RunSnapshot",
+      "valid": false
+    },
+    {
+      "name": "manifest-unsupported-None",
+      "file": "invalid/manifest-unsupported-None.json",
+      "schema": "ManifestCompatibility",
+      "valid": false
+    },
+    {
+      "name": "manifest-unsupported-1",
+      "file": "invalid/manifest-unsupported-1.json",
+      "schema": "ManifestCompatibility",
+      "valid": false
+    },
+    {
+      "name": "manifest-unsupported-4",
+      "file": "invalid/manifest-unsupported-4.json",
+      "schema": "ManifestCompatibility",
+      "valid": false
+    },
+    {
+      "name": "fork-replace-old-field",
+      "file": "invalid/fork-replace-old-field.json",
+      "schema": "LineageMutation",
+      "valid": false
+    },
+    {
+      "name": "manifest-null-not-legacy",
+      "file": "invalid/manifest-null-not-legacy.json",
+      "schema": "ManifestCompatibility",
+      "valid": false
+    },
+    {
+      "name": "manifest-invocation-leak",
+      "file": "invalid/manifest-invocation-leak.json",
+      "schema": "ManifestCompatibility",
+      "valid": false
+    },
+    {
+      "name": "receipt-body-leak",
+      "file": "invalid/receipt-body-leak.json",
+      "schema": "CommandReceipt",
+      "valid": false
+    },
+    {
+      "name": "problem-status-mismatch",
+      "file": "invalid/problem-status-mismatch.json",
+      "schema": "Problem",
+      "valid": false
+    },
+    {
+      "name": "problem-path-leak",
+      "file": "invalid/problem-path-leak.json",
+      "schema": "Problem",
+      "valid": false
+    },
+    {
+      "name": "event-prompt-leak",
+      "file": "invalid/event-prompt-leak.json",
+      "schema": "Invalidation",
+      "valid": false
+    },
+    {
+      "name": "event-wrong-version",
+      "file": "invalid/event-wrong-version.json",
+      "schema": "EventBatch",
+      "valid": false
+    },
+    {
+      "name": "admin-status",
+      "file": "valid/admin-status.json",
+      "schema": "LocalAdminRequest",
+      "valid": true
+    },
+    {
+      "name": "admin-status-response",
+      "file": "valid/admin-status-response.json",
+      "schema": "LocalAdminResponse",
+      "valid": true
+    },
+    {
+      "name": "admin-reload-profiles",
+      "file": "valid/admin-reload-profiles.json",
+      "schema": "LocalAdminRequest",
+      "valid": true
+    },
+    {
+      "name": "admin-reload-profiles-response",
+      "file": "valid/admin-reload-profiles-response.json",
+      "schema": "LocalAdminResponse",
+      "valid": true
+    },
+    {
+      "name": "admin-list-credentials",
+      "file": "valid/admin-list-credentials.json",
+      "schema": "LocalAdminRequest",
+      "valid": true
+    },
+    {
+      "name": "admin-list-credentials-response",
+      "file": "valid/admin-list-credentials-response.json",
+      "schema": "LocalAdminResponse",
+      "valid": true
+    },
+    {
+      "name": "admin-issue-credential",
+      "file": "valid/admin-issue-credential.json",
+      "schema": "LocalAdminRequest",
+      "valid": true
+    },
+    {
+      "name": "admin-issue-credential-response",
+      "file": "valid/admin-issue-credential-response.json",
+      "schema": "LocalAdminResponse",
+      "valid": true
+    },
+    {
+      "name": "admin-rotate-credential",
+      "file": "valid/admin-rotate-credential.json",
+      "schema": "LocalAdminRequest",
+      "valid": true
+    },
+    {
+      "name": "admin-rotate-credential-response",
+      "file": "valid/admin-rotate-credential-response.json",
+      "schema": "LocalAdminResponse",
+      "valid": true
+    },
+    {
+      "name": "admin-revoke-credential",
+      "file": "valid/admin-revoke-credential.json",
+      "schema": "LocalAdminRequest",
+      "valid": true
+    },
+    {
+      "name": "admin-revoke-credential-response",
+      "file": "valid/admin-revoke-credential-response.json",
+      "schema": "LocalAdminResponse",
+      "valid": true
+    },
+    {
+      "name": "admin-drain",
+      "file": "valid/admin-drain.json",
+      "schema": "LocalAdminRequest",
+      "valid": true
+    },
+    {
+      "name": "admin-drain-response",
+      "file": "valid/admin-drain-response.json",
+      "schema": "LocalAdminResponse",
+      "valid": true
+    },
+    {
+      "name": "admin-shutdown",
+      "file": "valid/admin-shutdown.json",
+      "schema": "LocalAdminRequest",
+      "valid": true
+    },
+    {
+      "name": "admin-shutdown-response",
+      "file": "valid/admin-shutdown-response.json",
+      "schema": "LocalAdminResponse",
+      "valid": true
+    },
+    {
+      "name": "admin-check-store",
+      "file": "valid/admin-check-store.json",
+      "schema": "LocalAdminRequest",
+      "valid": true
+    },
+    {
+      "name": "admin-check-store-response",
+      "file": "valid/admin-check-store-response.json",
+      "schema": "LocalAdminResponse",
+      "valid": true
+    },
+    {
+      "name": "admin-backup",
+      "file": "valid/admin-backup.json",
+      "schema": "LocalAdminRequest",
+      "valid": true
+    },
+    {
+      "name": "admin-backup-response",
+      "file": "valid/admin-backup-response.json",
+      "schema": "LocalAdminResponse",
+      "valid": true
+    },
+    {
+      "name": "admin-restore",
+      "file": "valid/admin-restore.json",
+      "schema": "LocalAdminRequest",
+      "valid": true
+    },
+    {
+      "name": "admin-restore-response",
+      "file": "valid/admin-restore-response.json",
+      "schema": "LocalAdminResponse",
+      "valid": true
+    },
+    {
+      "name": "admin-check-quarantine",
+      "file": "valid/admin-check-quarantine.json",
+      "schema": "LocalAdminRequest",
+      "valid": true
+    },
+    {
+      "name": "admin-check-quarantine-response",
+      "file": "valid/admin-check-quarantine-response.json",
+      "schema": "LocalAdminResponse",
+      "valid": true
+    },
+    {
+      "name": "admin-release-quarantine",
+      "file": "valid/admin-release-quarantine.json",
+      "schema": "LocalAdminRequest",
+      "valid": true
+    },
+    {
+      "name": "admin-release-quarantine-response",
+      "file": "valid/admin-release-quarantine-response.json",
+      "schema": "LocalAdminResponse",
+      "valid": true
+    },
+    {
+      "name": "admin-refusal",
+      "file": "valid/admin-refusal.json",
+      "schema": "LocalAdminResponse",
+      "valid": true
+    },
+    {
+      "name": "admin-unsupported-version",
+      "file": "invalid/admin-unsupported-version.json",
+      "schema": "LocalAdminRequest",
+      "valid": false
+    },
+    {
+      "name": "admin-unknown-field",
+      "file": "invalid/admin-unknown-field.json",
+      "schema": "LocalAdminRequest",
+      "valid": false
+    },
+    {
+      "name": "admin-issue-client-override",
+      "file": "invalid/admin-issue-client-override.json",
+      "schema": "LocalAdminRequest",
+      "valid": false
+    },
+    {
+      "name": "admin-rotate-client-override",
+      "file": "invalid/admin-rotate-client-override.json",
+      "schema": "LocalAdminRequest",
+      "valid": false
+    },
+    {
+      "name": "admin-secret-stdout",
+      "file": "invalid/admin-secret-stdout.json",
+      "schema": "LocalAdminResponse",
+      "valid": false
+    },
+    {
+      "name": "admin-release-boolean",
+      "file": "invalid/admin-release-boolean.json",
+      "schema": "LocalAdminRequest",
+      "valid": false
+    },
+    {
+      "name": "admin-restore-no-fencing",
+      "file": "invalid/admin-restore-no-fencing.json",
+      "schema": "LocalAdminRequest",
+      "valid": false
+    },
+    {
+      "name": "admin-auto-reprovision",
+      "file": "invalid/admin-auto-reprovision.json",
+      "schema": "LocalAdminRequest",
+      "valid": false
+    },
+    {
+      "name": "admin-relative-output",
+      "file": "invalid/admin-relative-output.json",
+      "schema": "LocalAdminRequest",
+      "valid": false
+    },
+    {
+      "name": "admin-duplicate",
+      "file": "invalid/admin-duplicate.json",
+      "schema": "LocalAdminRequest",
+      "valid": false
+    },
+    {
+      "name": "snapshot-receipt",
+      "file": "valid/snapshot-receipt.json",
+      "schema": "RunSnapshot",
+      "valid": true
+    },
+    {
+      "name": "snapshot-non-person-structured",
+      "file": "valid/snapshot-non-person-structured.json",
+      "schema": "RunSnapshot",
+      "valid": true
+    },
+    {
+      "name": "snapshot-observation-receipt-forbidden",
+      "file": "invalid/snapshot-observation-receipt-forbidden.json",
+      "schema": "Occurrence",
+      "valid": false
+    },
+    {
+      "name": "snapshot-schema-invention-forbidden",
+      "file": "invalid/snapshot-schema-invention-forbidden.json",
+      "schema": "Occurrence",
+      "valid": false
+    },
+    {
+      "name": "question-snapshot-code-forbidden",
+      "file": "invalid/question-snapshot-code-forbidden.json",
+      "schema": "Question",
+      "valid": false
+    },
+    {
+      "name": "review-missing-programHash",
+      "file": "invalid/review-missing-programHash.json",
+      "schema": "Review",
+      "valid": false
+    },
+    {
+      "name": "review-missing-personAnswering",
+      "file": "invalid/review-missing-personAnswering.json",
+      "schema": "Review",
+      "valid": false
+    },
+    {
+      "name": "review-missing-policy",
+      "file": "invalid/review-missing-policy.json",
+      "schema": "Review",
+      "valid": false
+    },
+    {
+      "name": "preparation-routed-policy",
+      "file": "valid/preparation-routed-policy.json",
+      "schema": "Preparation",
+      "valid": true
+    },
+    {
+      "name": "preparation-engine-answering",
+      "file": "valid/preparation-engine-answering.json",
+      "schema": "Preparation",
+      "valid": true
+    },
+    {
+      "name": "review-policy-forbidden-binary",
+      "file": "invalid/review-policy-forbidden-binary.json",
+      "schema": "PublicPolicy",
+      "valid": false
+    },
+    {
+      "name": "review-policy-forbidden-adapterArgs",
+      "file": "invalid/review-policy-forbidden-adapterArgs.json",
+      "schema": "PublicPolicy",
+      "valid": false
+    },
+    {
+      "name": "review-policy-forbidden-environment",
+      "file": "invalid/review-policy-forbidden-environment.json",
+      "schema": "PublicPolicy",
+      "valid": false
+    },
+    {
+      "name": "review-policy-forbidden-invocation",
+      "file": "invalid/review-policy-forbidden-invocation.json",
+      "schema": "PublicPolicy",
+      "valid": false
+    },
+    {
+      "name": "review-policy-forbidden-scratch",
+      "file": "invalid/review-policy-forbidden-scratch.json",
+      "schema": "PublicPolicy",
+      "valid": false
+    },
+    {
+      "name": "review-policy-forbidden-routingSources",
+      "file": "invalid/review-policy-forbidden-routingSources.json",
+      "schema": "PublicPolicy",
+      "valid": false
+    },
+    {
+      "name": "review-policy-partial-v2",
+      "file": "invalid/review-policy-partial-v2.json",
+      "schema": "PublicPolicy",
+      "valid": false
+    },
+    {
+      "name": "review-policy-options-forbidden",
+      "file": "invalid/review-policy-options-forbidden.json",
+      "schema": "PublicRealizationPolicy",
+      "valid": false
+    },
+    {
+      "name": "review-invalid-program-hash",
+      "file": "invalid/review-invalid-program-hash.json",
+      "schema": "Review",
+      "valid": false
+    },
+    {
+      "name": "unreadable-manifest",
+      "file": "valid/unreadable-manifest.json",
+      "schema": "Run",
+      "valid": true
+    },
+    {
+      "name": "runs-with-unreadable-manifest",
+      "file": "valid/runs-with-unreadable-manifest.json",
+      "schema": "RunPage",
+      "valid": true
+    },
+    {
+      "name": "unreadable-manifest-forbidden-workflowId",
+      "file": "invalid/unreadable-manifest-forbidden-workflowId.json",
+      "schema": "Run",
+      "valid": false
+    },
+    {
+      "name": "unreadable-manifest-forbidden-manifest",
+      "file": "invalid/unreadable-manifest-forbidden-manifest.json",
+      "schema": "Run",
+      "valid": false
+    },
+    {
+      "name": "unreadable-manifest-forbidden-directory",
+      "file": "invalid/unreadable-manifest-forbidden-directory.json",
+      "schema": "Run",
+      "valid": false
+    },
+    {
+      "name": "unreadable-manifest-forbidden-error",
+      "file": "invalid/unreadable-manifest-forbidden-error.json",
+      "schema": "Run",
+      "valid": false
+    },
+    {
+      "name": "unreadable-manifest-forbidden-runtime",
+      "file": "invalid/unreadable-manifest-forbidden-runtime.json",
+      "schema": "Run",
+      "valid": false
+    },
+    {
+      "name": "admin-malformed-request",
+      "file": "invalid/admin-malformed-request.json",
+      "schema": "LocalAdminRequest",
+      "valid": false
+    },
+    {
+      "name": "admin-missing-operation",
+      "file": "invalid/admin-missing-operation.json",
+      "schema": "LocalAdminRequest",
+      "valid": false
+    },
+    {
+      "name": "admin-unknown-operation",
+      "file": "invalid/admin-unknown-operation.json",
+      "schema": "LocalAdminRequest",
+      "valid": false
+    },
+    {
+      "name": "admin-malformed-refusal",
+      "file": "valid/admin-malformed-refusal.json",
+      "schema": "LocalAdminResponse",
+      "valid": true
+    },
+    {
+      "name": "admin-missing-operation-refusal",
+      "file": "valid/admin-missing-operation-refusal.json",
+      "schema": "LocalAdminResponse",
+      "valid": true
+    },
+    {
+      "name": "admin-unknown-operation-refusal",
+      "file": "valid/admin-unknown-operation-refusal.json",
+      "schema": "LocalAdminResponse",
+      "valid": true
+    },
+    {
+      "name": "admin-predispatch-success-forbidden",
+      "file": "invalid/admin-predispatch-success-forbidden.json",
+      "schema": "LocalAdminResponse",
+      "valid": false
+    },
+    {
+      "name": "admin-predispatch-echo-forbidden",
+      "file": "invalid/admin-predispatch-echo-forbidden.json",
+      "schema": "LocalAdminResponse",
+      "valid": false
+    },
+    {
+      "name": "admin-predispatch-extra-forbidden",
+      "file": "invalid/admin-predispatch-extra-forbidden.json",
+      "schema": "LocalAdminResponse",
+      "valid": false
+    },
+    {
+      "name": "overview-missing-oldest-cursor",
+      "file": "invalid/overview-missing-oldest-cursor.json",
+      "schema": "OverviewSnapshot",
+      "valid": false
+    },
+    {
+      "name": "events-missing-oldest-cursor",
+      "file": "invalid/events-missing-oldest-cursor.json",
+      "schema": "EventBatch",
+      "valid": false
+    },
+    {
+      "name": "oldest-cursor-boundary",
+      "file": "valid/oldest-cursor-boundary.json",
+      "schema": "OldestCursor",
+      "valid": true
+    },
+    {
+      "name": "oldest-cursor-not-process",
+      "file": "invalid/oldest-cursor-not-process.json",
+      "schema": "OldestCursor",
+      "valid": false
+    },
+    {
+      "name": "events-at-oldest-boundary",
+      "file": "valid/events-at-oldest-boundary.json",
+      "schema": "EventBatch",
+      "valid": true
+    },
+    {
+      "name": "preparation-full-coverage",
+      "file": "valid/preparation-full-coverage.json",
+      "schema": "Preparation",
+      "valid": true
+    },
+    {
+      "name": "preparation-default-and-coverage",
+      "file": "invalid/preparation-default-and-coverage.json",
+      "schema": "Preparation",
+      "valid": false
+    },
+    {
+      "name": "preparation-partial-coverage",
+      "file": "invalid/preparation-partial-coverage.json",
+      "schema": "Preparation",
+      "valid": false
+    }
+  ],
+  "operations": [
+    {
+      "method": "get",
+      "path": "/capabilities",
+      "scopes": [
+        "observe"
+      ],
+      "success": "capabilities",
+      "refusal": "unauthenticated"
+    },
+    {
+      "method": "get",
+      "path": "/profiles",
+      "scopes": [
+        "observe"
+      ],
+      "success": "profiles",
+      "refusal": "profile-forbidden"
+    },
+    {
+      "method": "get",
+      "path": "/workflows",
+      "scopes": [
+        "observe"
+      ],
+      "success": "workflows",
+      "refusal": "workflow-unavailable"
+    },
+    {
+      "method": "get",
+      "path": "/workflows/{id}",
+      "scopes": [
+        "observe"
+      ],
+      "success": "workflow",
+      "refusal": "workflow-unavailable"
+    },
+    {
+      "method": "get",
+      "path": "/requests",
+      "scopes": [
+        "observe"
+      ],
+      "success": "requests",
+      "refusal": "request-view-expired"
+    },
+    {
+      "method": "post",
+      "path": "/requests",
+      "scopes": [
+        "submit"
+      ],
+      "success": "request",
+      "refusal": "request-admission-limit"
+    },
+    {
+      "method": "get",
+      "path": "/requests/{id}",
+      "scopes": [
+        "observe"
+      ],
+      "success": "request",
+      "refusal": "request-unavailable"
+    },
+    {
+      "method": "post",
+      "path": "/requests/{id}",
+      "scopes": [
+        "submit"
+      ],
+      "success": "request-command",
+      "refusal": "request-stale"
+    },
+    {
+      "method": "post",
+      "path": "/captures",
+      "scopes": [
+        "submit"
+      ],
+      "success": "capture",
+      "refusal": "capture-size"
+    },
+    {
+      "method": "get",
+      "path": "/preparations/{id}",
+      "scopes": [
+        "observe"
+      ],
+      "success": "preparation",
+      "refusal": "preparation-unavailable"
+    },
+    {
+      "method": "post",
+      "path": "/preparations/{id}",
+      "scopes": [
+        "submit",
+        "control"
+      ],
+      "success": "approval-command",
+      "refusal": "preparation-conflict"
+    },
+    {
+      "method": "get",
+      "path": "/runs",
+      "scopes": [
+        "observe"
+      ],
+      "success": "runs",
+      "refusal": "run-view-large"
+    },
+    {
+      "method": "get",
+      "path": "/runs/{id}",
+      "scopes": [
+        "observe"
+      ],
+      "success": "run",
+      "refusal": "run-unavailable"
+    },
+    {
+      "method": "get",
+      "path": "/runs/{id}/snapshot",
+      "scopes": [
+        "observe"
+      ],
+      "success": "run-snapshot",
+      "refusal": "snapshot-expired"
+    },
+    {
+      "method": "get",
+      "path": "/runs/{id}/control",
+      "scopes": [
+        "observe"
+      ],
+      "success": "run-control",
+      "refusal": "control-unavailable"
+    },
+    {
+      "method": "post",
+      "path": "/runs/{id}/control",
+      "scopes": [
+        "control"
+      ],
+      "success": "control-command",
+      "refusal": "control-not-head"
+    },
+    {
+      "method": "get",
+      "path": "/decisions",
+      "scopes": [
+        "observe"
+      ],
+      "success": "decisions",
+      "refusal": "decision-view-expired"
+    },
+    {
+      "method": "get",
+      "path": "/decisions/{id}",
+      "scopes": [
+        "observe"
+      ],
+      "success": "decision",
+      "refusal": "decision-unavailable"
+    },
+    {
+      "method": "post",
+      "path": "/decisions/{id}",
+      "scopes": [
+        "control"
+      ],
+      "success": "decision-command",
+      "refusal": "decision-not-head"
+    },
+    {
+      "method": "get",
+      "path": "/commands/{id}",
+      "scopes": [
+        "observe"
+      ],
+      "success": "control-command",
+      "refusal": "command-forbidden"
+    },
+    {
+      "method": "get",
+      "path": "/runs/{id}/outputs",
+      "scopes": [
+        "observe"
+      ],
+      "success": "outputs",
+      "refusal": "output-unavailable"
+    },
+    {
+      "method": "get",
+      "path": "/artifacts/{id}",
+      "scopes": [
+        "observe"
+      ],
+      "success": "artifact-download",
+      "refusal": "artifact-unavailable"
+    },
+    {
+      "method": "get",
+      "path": "/runs/{id}/exports",
+      "scopes": [
+        "observe"
+      ],
+      "success": "exports",
+      "refusal": "export-view-expired"
+    },
+    {
+      "method": "post",
+      "path": "/runs/{id}/exports",
+      "scopes": [
+        "observe",
+        "export"
+      ],
+      "success": "export-command",
+      "refusal": "export-conflict"
+    },
+    {
+      "method": "get",
+      "path": "/exports/{id}",
+      "scopes": [
+        "observe"
+      ],
+      "success": "export",
+      "refusal": "export-unavailable"
+    },
+    {
+      "method": "get",
+      "path": "/runs/{id}/lineage-requests",
+      "scopes": [
+        "observe"
+      ],
+      "success": "lineages",
+      "refusal": "lineage-quarantined"
+    },
+    {
+      "method": "post",
+      "path": "/runs/{id}/lineage-requests",
+      "scopes": [
+        "observe",
+        "submit"
+      ],
+      "success": "lineage-command",
+      "refusal": "lineage-incompatible"
+    },
+    {
+      "method": "get",
+      "path": "/snapshot",
+      "scopes": [
+        "observe"
+      ],
+      "success": "overview",
+      "refusal": "overview-too-large"
+    },
+    {
+      "method": "get",
+      "path": "/events",
+      "scopes": [
+        "observe"
+      ],
+      "success": "event-batch",
+      "refusal": "cursor-expired"
+    }
+  ],
+  "sse": [
+    {
+      "name": "one",
+      "file": "sse/one.sse",
+      "valid": true,
+      "events": [
+        {
+          "id": "stream_A.1042",
+          "event": "run.changed",
+          "data": {
+            "version": 1,
+            "resource": "/v1/runs/run_21/snapshot",
+            "revision": "runrev_18"
+          }
+        }
+      ]
+    },
+    {
+      "name": "incomplete",
+      "file": "sse/incomplete.sse",
+      "valid": true,
+      "events": []
+    },
+    {
+      "name": "heartbeat",
+      "file": "sse/heartbeat.sse",
+      "valid": true,
+      "events": []
+    },
+    {
+      "name": "complete-then-incomplete",
+      "file": "sse/complete-then-incomplete.sse",
+      "valid": true,
+      "events": [
+        {
+          "id": "stream_A.1042",
+          "event": "run.changed",
+          "data": {
+            "version": 1,
+            "resource": "/v1/runs/run_21/snapshot",
+            "revision": "runrev_18"
+          }
+        }
+      ]
+    },
+    {
+      "name": "heartbeat-then-event",
+      "file": "sse/heartbeat-then-event.sse",
+      "valid": true,
+      "events": [
+        {
+          "id": "stream_A.1042",
+          "event": "run.changed",
+          "data": {
+            "version": 1,
+            "resource": "/v1/runs/run_21/snapshot",
+            "revision": "runrev_18"
+          }
+        }
+      ]
+    },
+    {
+      "name": "two",
+      "file": "sse/two.sse",
+      "valid": true,
+      "events": [
+        {
+          "id": "stream_A.1042",
+          "event": "run.changed",
+          "data": {
+            "version": 1,
+            "resource": "/v1/runs/run_21/snapshot",
+            "revision": "runrev_18"
+          }
+        },
+        {
+          "id": "stream_A.1043",
+          "event": "service.changed",
+          "data": {
+            "version": 1,
+            "resource": "/v1/capabilities",
+            "revision": "service_2"
+          }
+        }
+      ]
+    },
+    {
+      "name": "crlf",
+      "file": "sse/crlf.sse",
+      "valid": false,
+      "events": []
+    },
+    {
+      "name": "missing-id",
+      "file": "sse/missing-id.sse",
+      "valid": false,
+      "events": []
+    },
+    {
+      "name": "duplicate-id",
+      "file": "sse/duplicate-id.sse",
+      "valid": false,
+      "events": []
+    },
+    {
+      "name": "unknown-event",
+      "file": "sse/unknown-event.sse",
+      "valid": false,
+      "events": []
+    },
+    {
+      "name": "unsupported-version",
+      "file": "sse/unsupported-version.sse",
+      "valid": false,
+      "events": []
+    },
+    {
+      "name": "heartbeat-with-id",
+      "file": "sse/heartbeat-with-id.sse",
+      "valid": false,
+      "events": []
+    },
+    {
+      "name": "unknown-field",
+      "file": "sse/unknown-field.sse",
+      "valid": false,
+      "events": []
+    },
+    {
+      "name": "cursor-overflow",
+      "file": "sse/cursor-overflow.sse",
+      "valid": false,
+      "events": []
+    },
+    {
+      "name": "oversize-block",
+      "file": "sse/oversize-block.sse",
+      "valid": false,
+      "events": []
+    },
+    {
+      "name": "duplicate-data-key",
+      "file": "sse/duplicate-data-key.sse",
+      "valid": false,
+      "events": []
+    },
+    {
+      "name": "oversize-incomplete-block",
+      "file": "sse/oversize-incomplete-block.sse",
+      "valid": false,
+      "events": []
+    }
+  ],
+  "downloads": [
+    {
+      "name": "source-result-bytes",
+      "file": "valid/artifact-download.utf8",
+      "receipt": "outputs",
+      "metadataPointer": "/items/2/artifact"
+    },
+    {
+      "name": "export-bytes",
+      "file": "valid/export-download.utf8",
+      "receipt": "export",
+      "metadataPointer": ""
+    },
+    {
+      "name": "unicode-export-bytes",
+      "file": "valid/export-unicode-download.utf8",
+      "receipt": "export-unicode",
+      "metadataPointer": ""
+    }
+  ]
+}

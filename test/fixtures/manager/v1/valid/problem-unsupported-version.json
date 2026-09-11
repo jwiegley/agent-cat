@@ -1,0 +1,8 @@
+{
+  "type": "urn:agent-cat:manager:problem:unsupported-version",
+  "title": "Unsupported version",
+  "status": 400,
+  "instance": "/v1/requests/req_8",
+  "code": "unsupported-version",
+  "links": {}
+}

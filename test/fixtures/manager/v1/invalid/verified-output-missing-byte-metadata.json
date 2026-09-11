@@ -1,0 +1,8 @@
+{
+  "kind": "result",
+  "verification": {
+    "state": "verified",
+    "artifactId": "artifact_1"
+  },
+  "artifact": null
+}

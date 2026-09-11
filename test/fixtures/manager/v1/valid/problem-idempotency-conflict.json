@@ -1,0 +1,8 @@
+{
+  "type": "urn:agent-cat:manager:problem:idempotency-conflict",
+  "title": "Idempotency conflict",
+  "status": 409,
+  "instance": "/v1/requests/req_8",
+  "code": "idempotency-conflict",
+  "links": {}
+}

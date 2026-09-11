@@ -1,0 +1,8 @@
+{
+  "type": "urn:agent-cat:manager:problem:cursor-expired",
+  "title": "Cursor expired",
+  "status": 410,
+  "instance": "/v1/events",
+  "code": "cursor-expired",
+  "links": {}
+}

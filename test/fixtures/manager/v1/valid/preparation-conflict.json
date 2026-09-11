@@ -1,0 +1,8 @@
+{
+  "type": "urn:agent-cat:manager:problem:state-conflict",
+  "title": "State conflict",
+  "status": 409,
+  "instance": "/v1/preparations/prep_9",
+  "code": "state-conflict",
+  "links": {}
+}

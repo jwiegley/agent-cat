@@ -1,0 +1,8 @@
+{
+  "type": "urn:agent-cat:manager:problem:size-limit",
+  "title": "Size limit",
+  "status": 413,
+  "instance": "/v1/captures",
+  "code": "size-limit",
+  "links": {}
+}
