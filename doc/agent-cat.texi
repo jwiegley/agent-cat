@@ -3685,6 +3685,45 @@ that outcome as uncertain.  The Haskell facade exposes
 @code{Agentic.Cli.Command.FrontendExport}, while @code{frontend-io} remains
 read-only.
 
+@section Durable private capture publication
+
+@findex publishPrivateCaptureAt
+@findex privateCapturePath
+@findex privateCaptureBytes
+@findex privateCaptureSha256
+The Haskell facade exposes @code{publishPrivateCaptureAt} as a separate storage
+operation.  It takes a private root, relative path components, a nonnegative
+byte limit, and an IO source of strict byte chunks.  An empty chunk ends the
+stream.  Each chunk is bounded before writing, and the count and SHA-256 are
+computed incrementally.  Source allocation and UTF-8 or typed validation remain
+the caller's responsibility.
+
+The root and its own ancestor namespace must already be durably provisioned.
+The operation creates no directories.  It retains the directory chain below
+that boundary, writes an exclusive mode-0600 temporary, flushes and synchronizes
+its descriptor, closes it, and revalidates the retained parent identities.
+It publishes through a no-clobber link and removes the temporary entry, then
+synchronizes every directory from the containing parent back through the root
+and checks their current bindings.  Each barrier calls @code{fsync}, followed
+on macOS by @code{F_FULLFSYNC}.  A failed or unsupported barrier is not silently
+downgraded.  Persistence remains conditional on the filesystem and hardware
+honoring these calls, and ancestors above the root are outside this barrier.
+
+@code{CapturePublished} carries the relative path, byte count, and SHA-256 as
+a @code{PrivateCapture}.  @code{CaptureNotPublished} means this call did not
+install its final name, rather than that no destination exists.
+@code{CaptureUnconfirmed} means the name was published but a later barrier,
+identity check, or cleanup failed.  It carries the capture metadata and IO
+error, and the final name remains intact.  Cancellation, process death, or a
+lost receipt requires reconciliation and never authorizes overwrite on retry.
+Temporary files are not reclaimed by age alone, and no protection against
+a process with the same user's filesystem privileges is implied.
+
+This operation does not change the existing Store or frontend-export receipt
+contracts.  It supplies neither a metadata transaction nor a manager service,
+and its tests do not establish SQLite confinement or physical power-loss
+behavior.
+
 @section Native frontend preparation
 @c COVER CLI verb:frontend author
 

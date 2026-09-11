@@ -44,6 +44,9 @@ extra-source-files:
   test/frontend_session_probe.py
   test/frontend_contract_probe.py
   test/answer_schema_probe.py
+  runtime/ci/capture.sh
+  runtime/test/CaptureFaultTests.hs
+  runtime/test/capture_sync_fault.c
   manager/AGENTS.md
   manager/ci/dependencies.sh
   manager/ci/contract.sh
@@ -98,6 +101,7 @@ library
   import:          settings
   c-sources:       runtime/cbits/process_group.c
                    runtime/cbits/private_directory.c
+                   runtime/cbits/private_sync.c
                    cli/cbits/control_bootstrap.c
   hs-source-dirs:
     dsl/src
@@ -328,6 +332,7 @@ test-suite runtime-contract-test
   hs-source-dirs:   runtime/test
   main-is:          Main.hs
   other-modules:
+    CaptureTests
     FrontendProtocolTests
     SnapshotCheckpointTests
   ghc-options:      -threaded
