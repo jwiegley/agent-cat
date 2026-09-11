@@ -186,11 +186,13 @@ def parse_sse(raw):
         require(len(block.encode("utf-8")) + 2 <= 16384, "SSE block exceeds byte bound")
         fields = {}
         data = []
+        order = []
         for line in block.split("\n"):
             if not line or line.startswith(":"):
                 continue
             name, separator, value = line.partition(":")
             require(separator and name in {"id", "event", "data"}, "noncanonical SSE field")
+            order.append(name)
             value = value.removeprefix(" ")
             if name == "data":
                 data.append(value)
@@ -200,10 +202,13 @@ def parse_sse(raw):
         if not data:
             require(not fields, "heartbeat cannot advance event identity")
             continue
+        require(order == ["id", "event", "data"], "noncanonical SSE field order or cardinality")
         require(set(fields) == {"id", "event"} and fields["id"]
                 and "\0" not in fields["id"] and fields["event"] in EVENT_NAMES,
                 "invalid SSE event identity")
-        payload = parse_json("\n".join(data).encode("utf-8"))
+        outside_strings = re.sub(r'"(?:[^"\\]|\\.)*"', '""', data[0])
+        require(not any(c in " \t\r\n" for c in outside_strings), "SSE data is not compact JSON")
+        payload = parse_json(data[0].encode("utf-8"))
         require(isinstance(payload, dict) and set(payload) == {"version", "resource", "revision"},
                 "invalid invalidation fields")
         require(integer_value(None, payload["version"]) and payload["version"] == 1,
