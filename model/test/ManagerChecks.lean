@@ -90,8 +90,11 @@ example : pending.answer 40 41 9 second "answer" = none := by
   · decide
 
 /-- Uncertain delivery keeps the first answer reserved and blocks a competing answer. -/
-example : ((pending.answer 40 41 9 first "answer").bind fun next => next.delivery 40 .uncertain).bind
-    (fun next => next.answer 42 41 9 first "different") = none := by
+example : ∃ next,
+    ((pending.answer 40 41 9 first "answer").bind fun next => next.delivery 40 .uncertain) = some next ∧
+    (next.commands.lookup 40).map (fun receipt => receipt.delivery) = some .uncertain ∧
+    next.decisions.lookup 9 = some [⟨first, some 40⟩, ⟨second, none⟩] ∧
+    next.answer 42 41 9 first "different" = none := by
   classical
   simp [Coordination.answer, Coordination.delivery, pending, review, queued]
 
