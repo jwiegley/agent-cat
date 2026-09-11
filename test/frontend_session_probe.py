@@ -143,8 +143,9 @@ def capability_discovery(runner: Path, directory: Path) -> tuple[Path, list[str]
             "maxRequestBytes": 2 * 1024 * 1024,
         },
         "io": {
-            "versions": [1],
-            "operations": ["open-root", "read-question", "read-result", "list-runs", "read-run"],
+            "versions": [1, 2],
+            "operations": ["open-root", "read-question", "read-result", "list-runs", "read-run",
+                           "read-run-checkpoint", "read-question-schema"],
         },
         "export": {
             "versions": [1],
@@ -534,6 +535,11 @@ def person(runner: Path, directory: Path) -> None:
                                              "runId": session.preview["runId"], "occurrenceId": event["occurrenceId"],
                                              "codeName": "flag", "reference": event["question"]})
             assert verified["question"]["prompt"].endswith("native human fixture")
+            editor = query(runner, case, {"version": 2, "operation": "read-question-schema",
+                                         "rootIdentity": session.preview["rootIdentity"], "runId": session.preview["runId"],
+                                         "occurrenceId": event["occurrenceId"], "reference": event["question"]})
+            assert editor == {**verified, "version": 2, "operation": "read-question-schema",
+                              "codeName": "flag", "answerSchema": {"type": "boolean"}}
             session.send({"controlId": "answer-" + event["occurrenceId"], "expectedOccurrenceId": event["occurrenceId"],
                           "expectedAttemptId": None, "command": {"type": "answerPerson", "answer": True}})
     assert session.finish() == []

@@ -116,10 +116,16 @@ python3 test/cabal_env_probe.py
 runghc -package=ghc -package=Cabal-syntax test/source-boundaries.hs "$(ghc --print-libdir)"
 python3 test/source_roots_probe.py
 test/cabal.sh run -v0 policy-probe -- +RTS -N8 -RTS
-test/cabal.sh build agentic-run routing-fixed-point-probe runtime-contract-test >/dev/null
+test/cabal.sh build agentic-run routing-fixed-point-probe runtime-contract-test schema-probe >/dev/null
 agentic_run=$(test/cabal.sh list-bin agentic-run)
 control_runner=$(test/cabal.sh list-bin routing-fixed-point-probe)
 codec_runner=$(test/cabal.sh list-bin runtime-contract-test)
+schema_runner=$(test/cabal.sh list-bin schema-probe)
+"$schema_runner"
+schema_vectors=$(mktemp "${CABAL_BUILDDIR:?}/answer-schema.XXXXXX.json")
+trap 'rm -f "$schema_vectors"' EXIT
+"$schema_runner" --answer-schema-vectors > "$schema_vectors"
+python3 test/answer_schema_probe.py "$schema_vectors"
 GHCRTS=-N8 python3 test/lineage_probe.py "$agentic_run"
 GHCRTS=-N8 python3 test/control_probe.py "$agentic_run" "$control_runner"
 GHCRTS=-N8 python3 test/person_control_probe.py "$control_runner"

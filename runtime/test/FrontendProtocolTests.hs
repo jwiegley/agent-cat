@@ -75,7 +75,8 @@ frontendProtocolTests = do
   check "capabilities round trip" (decodeFrontendCapabilities encodedCapabilities == Right capabilities)
   check "native capability lists" $
     capabilitySessionOperations capabilities == ["prepare", "prepare-lineage", "start", "discard"]
-      && capabilityIoOperations capabilities == ["open-root", "read-question", "read-result", "list-runs", "read-run"]
+      && capabilityIoVersions capabilities == [1, 2]
+      && capabilityIoOperations capabilities == ["open-root", "read-question", "read-result", "list-runs", "read-run", "read-run-checkpoint", "read-question-schema"]
       && capabilityInputSources capabilities == ["literal", "file", "transport"]
       && capabilityManifestVersions capabilities == [2, 3]
       && capabilityLegacyManifests capabilities

@@ -62,6 +62,20 @@ def main():
                     continue
                 assert events, "approved file-backed session produced no runtime observations"
                 assert (session.run / "inputs/0.txt").read_bytes() == expected
+                checkpoint_request = {"version": 2, "operation": "read-run-checkpoint",
+                                      "rootIdentity": session.preview["rootIdentity"], "runId": session.preview["runId"]}
+                observed = subprocess.run([str(runner), "frontend-io"], input=encode(checkpoint_request),
+                                          capture_output=True, cwd=directory, env=session.environment, timeout=30)
+                assert observed.returncode == 0 and not observed.stderr, observed
+                reply = json.loads(observed.stdout)
+                assert reply["version"] == 2 and reply["operation"] == "read-run-checkpoint"
+                checkpoint = reply["run"]["checkpoint"]
+                assert checkpoint == {"checkpointVersion": 1, "representation": "runtime-envelope-prefix",
+                                      "runId": session.preview["runId"], "protocolVersion": 2,
+                                      "lastSequence": events[-1]["sequence"], "envelopes": events}
+                restored = subprocess.run([str(checker), "--snapshot-checkpoint-codec-test"],
+                                          input=encode(checkpoint), capture_output=True, timeout=30)
+                assert restored.returncode == 0 and json.loads(restored.stdout) == checkpoint, restored
                 for operation in ["restart", "resume", "fork"]:
                     lineage = {"version": 1, "operation": "prepare-lineage", "stateDirectory": str(session.root),
                                "parentRunId": session.preview["runId"], "lineage": operation, "edits": [],
@@ -82,7 +96,7 @@ def main():
                 if not pipe.closed:
                     pipe.close()
     print("shared frontend codecs: real capabilities, preparation/lineage, exact invocation, Unicode/CRLF capture, "
-          "start/discard and frozen file bytes passed")
+          "start/discard, frozen file bytes and complete-prefix restoration passed")
 
 
 if __name__ == "__main__":
