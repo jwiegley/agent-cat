@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "operation": "status",
+  "ok": true,
+  "result": {
+    "state": "serving",
+    "authorityEpoch": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "streamId": "stream_A",
+    "processGeneration": "process_A",
+    "activeReservations": 1
+  }
+}

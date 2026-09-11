@@ -78,7 +78,9 @@ credentials or resource identity to another endpoint.
 
 Every POST requires `Idempotency-Key: <authorityEpoch>.<nonce>`. The complete
 key is at most 128 ASCII bytes and its newly generated nonce contains at least
-128 random bits. Its scope is the authenticated registered client, method,
+128 random bits. Authority epochs are at most 105 ASCII characters, leaving room
+for the separator and a minimum 22-character nonce. Its scope is the
+authenticated registered client, method,
 canonical URI, and key. The ledger binds exact body bytes, content type, and
 preconditions. Credential rotation retains the client identity and ledger.
 

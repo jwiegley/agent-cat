@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "authorityEpoch": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "streamId": "stream_A",
+  "versions": {
+    "api": [
+      1
+    ],
+    "snapshot": [
+      1
+    ],
+    "event": [
+      1
+    ],
+    "descriptor": [
+      2,
+      3
+    ],
+    "frontendSession": [
+      1
+    ],
+    "control": [
+      1,
+      2
+    ],
+    "runtimeProtocol": [
+      1,
+      2
+    ],
+    "frontendManifest": [
+      "legacy",
+      "2",
+      "3"
+    ],
+    "runtimeStore": [
+      1,
+      2
+    ],
+    "managerStore": [
+      1
+    ],
+    "invocation": [
+      1
+    ]
+  },
+  "scopes": [
+    "observe",
+    "submit",
+    "control",
+    "export"
+  ],
+  "profileIds": [
+    "profile_main"
+  ],
+  "transports": [
+    "sse",
+    "polling"
+  ],
+  "limits": {
+    "requestTargetBytes": 8192,
+    "headerBytes": 16384,
+    "headerFields": 100,
+    "jsonBodyBytes": 2097152,
+    "jsonDepth": 64,
+    "nativeControlBytes": 1048576,
+    "captureBytes": 67108864,
+    "aggregateInputBytes": 67108864,
+    "artifactBytes": 67108864,
+    "sseBlockBytes": 16384,
+    "pageBytes": 1048576,
+    "pageSetBytes": 67108864,
+    "pageSetsPerClient": 2,
+    "pageSetLifetimeSeconds": 60,
+    "queuedRequests": 100,
+    "maxReservations": 16,
+    "reviewLifetimeSeconds": 600,
+    "sseReadersPerClient": 2,
+    "ssePendingBytesPerReader": 1048576,
+    "replaySeconds": 604800,
+    "replayBytes": 268435456,
+    "heartbeatSeconds": 15,
+    "reconnectIdleSeconds": 45,
+    "reconnectBackoffMaxSeconds": 30,
+    "ordinaryMutationsPerMinute": 30,
+    "drafts": 100,
+    "globalDrafts": 100,
+    "globalCaptureBytes": 671088640,
+    "globalPageSets": 100,
+    "globalConnections": 100,
+    "globalDatabaseReaders": 100,
+    "globalMutationLedgerBytes": 67108864,
+    "safetyControlsPerMinute": 100,
+    "executionReservations": 1
+  }
+}

@@ -1923,6 +1923,48 @@
       "file": "invalid/preparation-partial-coverage.json",
       "schema": "Preparation",
       "valid": false
+    },
+    {
+      "name": "authority-epoch-max",
+      "file": "valid/authority-epoch-max.json",
+      "schema": "AuthorityEpoch",
+      "valid": true
+    },
+    {
+      "name": "authority-epoch-too-long",
+      "file": "invalid/authority-epoch-too-long.json",
+      "schema": "AuthorityEpoch",
+      "valid": false
+    },
+    {
+      "name": "idempotency-key-max-epoch",
+      "file": "valid/idempotency-key-max-epoch.json",
+      "schema": "IdempotencyKey",
+      "valid": true
+    },
+    {
+      "name": "idempotency-key-overflow-epoch",
+      "file": "invalid/idempotency-key-overflow-epoch.json",
+      "schema": "IdempotencyKey",
+      "valid": false
+    },
+    {
+      "name": "capabilities-long-epoch",
+      "file": "invalid/capabilities-long-epoch.json",
+      "schema": "Capabilities",
+      "valid": false
+    },
+    {
+      "name": "admin-status-long-epoch",
+      "file": "invalid/admin-status-long-epoch.json",
+      "schema": "LocalAdminResponse",
+      "valid": false
+    },
+    {
+      "name": "admin-restore-long-epoch",
+      "file": "invalid/admin-restore-long-epoch.json",
+      "schema": "LocalAdminResponse",
+      "valid": false
     }
   ],
   "operations": [
@@ -2340,6 +2382,24 @@
     {
       "name": "oversize-incomplete-block",
       "file": "sse/oversize-incomplete-block.sse",
+      "valid": false,
+      "events": []
+    },
+    {
+      "name": "reordered-fields",
+      "file": "sse/reordered-fields.sse",
+      "valid": false,
+      "events": []
+    },
+    {
+      "name": "multiple-data-lines",
+      "file": "sse/multiple-data-lines.sse",
+      "valid": false,
+      "events": []
+    },
+    {
+      "name": "noncompact-data",
+      "file": "sse/noncompact-data.sse",
       "valid": false,
       "events": []
     }

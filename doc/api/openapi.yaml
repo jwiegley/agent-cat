@@ -1905,6 +1905,12 @@ components:
       minLength: 1
       maxLength: 128
       pattern: ^[A-Za-z0-9_-]+$
+    AuthorityEpoch:
+      allOf:
+      - $ref: '#/components/schemas/ResourceId'
+      maxLength: 105
+      description: At most 105 ASCII characters, reserving one separator and at least
+        22 nonce characters within the 128-byte idempotency key bound.
     Revision:
       type: string
       minLength: 1
@@ -1959,8 +1965,9 @@ components:
       maxLength: 128
       format: idempotency-key
       pattern: ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{22,}$
-      description: At most 128 ASCII bytes. authorityEpoch.nonce. Generate nonce with
-        at least 128 random bits. Text syntax cannot prove entropy.
+      description: At most 128 ASCII bytes. authorityEpoch.nonce. AuthorityEpoch is at
+        most 105 characters. Generate nonce with at least 128 random bits. Text syntax
+        cannot prove entropy.
     EventCursor:
       type: string
       minLength: 3
@@ -2510,7 +2517,8 @@ components:
         version:
           const: 1
           type: integer
-        authorityEpoch: *id001
+        authorityEpoch:
+          $ref: '#/components/schemas/AuthorityEpoch'
         streamId: *id001
         versions:
           $ref: '#/components/schemas/Versions'
@@ -6856,7 +6864,8 @@ components:
                 - serving
                 - draining
                 - stopped
-              authorityEpoch: *id001
+              authorityEpoch:
+                $ref: '#/components/schemas/AuthorityEpoch'
               streamId: *id001
               processGeneration: *id001
               activeReservations:
@@ -7149,7 +7158,8 @@ components:
           result:
             type: object
             properties:
-              authorityEpoch: *id001
+              authorityEpoch:
+                $ref: '#/components/schemas/AuthorityEpoch'
               streamId: *id001
               credentialsRevoked:
                 const: true

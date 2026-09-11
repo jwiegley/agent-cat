@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "operation": "restore",
+  "ok": true,
+  "result": {
+    "authorityEpoch": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "streamId": "stream_B",
+    "credentialsRevoked": true,
+    "reprovisioned": false
+  }
+}
