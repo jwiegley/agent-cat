@@ -442,9 +442,10 @@ def frozen_routing(runner: Path, directory: Path) -> None:
                           "    chain:\n      - router: fixture\n        model: stub-default\n"
                           "        thinking: high\n        max-output: 65536\n")
     configure(adapters[0])
-    arguments = ["--engine", "acp", "--adapter", str(adapters[0]), "--timeout", "10000"]
-    session = Session(runner, case, "convergent", [], arguments)
-    assert session.preview["targetKind"] == "acp"
+    arguments = ["--routing", "--timeout", "10000"]
+    session = Session(runner, case, "pinned", [], arguments)
+    assert session.preview["targetKind"] == "routing"
+    assert session.preview["policy"]["coverage"] == "full" and "default" not in session.preview["policy"]
     assert not (case / "approved.started").exists() and not (case / "replacement.started").exists()
     policy = session.preview["policy"]
     assert str(adapters[0]) in json.dumps(policy), policy
@@ -456,10 +457,17 @@ def frozen_routing(runner: Path, directory: Path) -> None:
     observed = query(runner, case, {"version": 1, "operation": "read-run",
                      "rootIdentity": session.preview["rootIdentity"], "runId": session.preview["runId"]})["run"]
     assert observed["policy"] == policy, (observed["policy"], policy)
-    fresh = Session(runner, case, "convergent", [], arguments)
+    fresh = Session(runner, case, "pinned", [], arguments)
     assert str(adapters[1]) in json.dumps(fresh.preview["policy"]), fresh.preview["policy"]
     fresh.send(fresh.decision("discard"))
     assert fresh.finish() == [] and not (case / "replacement.started").exists()
+    explicit = Session(runner, case, "convergent", [],
+                       ["--routing", "--engine", "acp", "--adapter", str(adapters[0]), "--timeout", "10000"])
+    assert explicit.preview["targetKind"] == "acp"
+    assert explicit.preview["policy"]["default"] == "acp:" + str(adapters[0])
+    assert explicit.preview["policy"]["routingSources"] == []
+    explicit.send(explicit.decision("discard"))
+    assert explicit.finish() == [] and not (case / "replacement.started").exists()
 
 
 def process_parents() -> dict[int, int]:
