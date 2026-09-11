@@ -17,6 +17,7 @@ module Agentic.Schema.Json
     render,
     renderAs,
     jsonSchemaDocument,
+    jsonSchemaDocumentWithNumber,
     renderSchema,
     codeJson,
     schemaToJson,
@@ -208,16 +209,20 @@ renderAs :: forall value. HasSchema value => value -> Maybe Text
 renderAs = render (schemaOf @value) . toSchemaEl
 
 jsonSchemaDocument :: SchemaWitness schema -> Value
-jsonSchemaDocument = jsonSchemaRep . demoteSchema
+jsonSchemaDocument = jsonSchemaDocumentWithNumber (A.object ["type" A..= ("number" :: Text)])
 
-jsonSchemaRep :: SchemaRep -> Value
-jsonSchemaRep = \case
+-- | Interpret a schema with a supplied JSON representation for every number leaf.
+jsonSchemaDocumentWithNumber :: Value -> SchemaWitness schema -> Value
+jsonSchemaDocumentWithNumber numberSchema = jsonSchemaRep numberSchema . demoteSchema
+
+jsonSchemaRep :: Value -> SchemaRep -> Value
+jsonSchemaRep numberSchema = \case
   RepNull -> typeObject "null"
   RepBoolean -> typeObject "boolean"
   RepInteger -> typeObject "integer"
-  RepNumber -> typeObject "number"
+  RepNumber -> numberSchema
   RepString -> typeObject "string"
-  RepArray items -> A.object ["type" A..= ("array" :: Text), "items" A..= jsonSchemaRep items]
+  RepArray items -> A.object ["type" A..= ("array" :: Text), "items" A..= jsonSchemaRep numberSchema items]
   schema@RepObject -> objectSchema schema
   schema@RepProperty {} -> objectSchema schema
   where
@@ -225,7 +230,7 @@ jsonSchemaRep = \case
     objectSchema schema =
       A.object
         [ "type" A..= ("object" :: Text),
-          "properties" A..= A.object [K.fromText name A..= jsonSchemaRep field | (name, field) <- schemaFields schema],
+          "properties" A..= A.object [K.fromText name A..= jsonSchemaRep numberSchema field | (name, field) <- schemaFields schema],
           "required" A..= map fst (schemaFields schema),
           "additionalProperties" A..= False
         ]

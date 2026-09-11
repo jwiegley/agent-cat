@@ -57,6 +57,64 @@ their existing CLI and runtime boundaries. The TUI consumes the shared
 capability codec while retaining its own required-manifest and legacy-support
 checks.
 
+## Complete observations and restoration
+
+`SnapshotCheckpoint`, exported through `Agentic.Runtime`, denotes a complete
+sequence-zero envelope prefix whose encoded JSON fits 64 MiB. Its version-1
+object has exactly `checkpointVersion`, `representation`, `runId`,
+`protocolVersion`, `lastSequence`, and `envelopes`. The representation is
+`runtime-envelope-prefix`. The protocol and last sequence are null for an empty
+prefix, while a nonempty prefix supplies its protocol and canonical decimal
+last sequence. An empty checkpoint restores `initialRunSnapshot` for its run.
+
+Capture validates every envelope through the existing protocol codecs and
+`stepRunSnapshot`, retaining all original envelope values and the derived
+snapshot. Each encoded envelope is limited to 1 MiB. The complete object,
+including metadata, array delimiters, and commas, is limited to 64 MiB.
+Overflow refuses the whole capture rather than retaining a shorter tail.
+Decoding checks the outer byte bound before JSON parsing, refuses unknown or
+missing fields, validates the prefix, and compares its computed boundary with
+the declared boundary. Envelope values survive restoration, including the
+whole last envelope used to distinguish exact and conflicting duplicates.
+Original whitespace and key spelling are not retained.
+
+For accepted prefixes, `checkpointSnapshot` equals the full shared fold, and
+`appendSnapshotCheckpoint` applies the same fold to a validated suffix while
+retaining the prefix. These are executable regression checks, not new formal
+theorems. The representation does not cover arbitrary edited snapshot records
+or every long history. `runSnapshotValue` and catalogue summaries remain
+presentation formats and cannot decode as checkpoints.
+
+Frontend IO version 2 adds only `read-run-checkpoint` and
+`read-question-schema`, advertised alongside version 1. The former takes
+`rootIdentity` and `runId` and returns run metadata with a nullable `checkpoint`.
+Missing runtime evidence and empty journals yield null rather than a running
+snapshot. `readRunRecordWithEnvelopesAt` captures the record and prefix from
+one verified store read, tightening the journal read to 64 MiB before allocation.
+Existing store readers retain their 512 MiB journal bound. The checkpoint and
+the final helper reply have separate encoded-size checks, and either can refuse.
+Version-1 replies and the two-MiB request and 64-MiB-plus-4096-byte reply limits
+are unchanged. Catalogue enumeration refuses child 1001, counting corrupt and
+non-run children, rather than returning a successful partial catalogue.
+
+`read-question-schema` takes `rootIdentity`, `runId`, `occurrenceId`, and the
+original `QuestionRef`. It returns `intent`, the full `question`, `codeName`,
+and `answerSchema` through the existing private artifact verification. The
+planning API `answerSchemaForObservationCode` decodes the actual stored code
+and derives `answerJsonSchema` from its witness. Observation and public Ack
+names are `receipt`, while authoring syntax uses `ack`. The new observation
+adapter refuses the authoring spelling. Structured person/control numbers are
+exact numerator and positive-denominator objects, including within arrays and
+records. Model-response number schemas remain unchanged. Verdict extras retain
+their existing decoder acceptance. The schema describes JSON values, while
+runtime decoding and transport resource limits remain authoritative.
+
+Question and result verification remains independent of journal health.
+Neither a checkpoint nor an editor schema grants control or execution authority.
+Read and encoded byte limits are not total heap limits, and a record capture is
+not a transaction across the journal, manifests, and ownership files. The
+contract does not establish physical authenticity or publication durability.
+
 ## Observation failures and cancellation
 
 An exception from an event observer aborts execution without engine retry or
@@ -91,8 +149,10 @@ through this runtime. It also sends real capability and prepared replies through
 the shared codecs, sends encoded preparation and decision requests to live
 scripted workers, and checks captured file bytes after source mutation. These
 checks run with `GHCRTS=-N8`. The runtime contract suite tests codec round trips,
-refusals, and byte limits. The two engine gates exercise the same runtime
-through neutral engines.
+refusals, complete checkpoint restoration, suffix equivalence, and byte limits.
+The policy gate also checks native version-2 queries, the complete catalogue
+refusal, and bounded JSON Schema agreement with the existing answer decoder.
+The two engine gates exercise the same runtime through neutral engines.
 
 ## Conventions
 

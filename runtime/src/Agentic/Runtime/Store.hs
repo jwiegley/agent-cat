@@ -26,6 +26,7 @@ module Agentic.Runtime.Store
     readEventLog,
     readRunStore,
     readRunStoreAt,
+    readRunStoreBoundedAt,
     readManifest,
     writeSnapshot,
     lookupStoredAnswer,
@@ -42,9 +43,11 @@ module Agentic.Runtime.Store
     readQuestionArtifact,
     readQuestionArtifactByCodeName,
     readQuestionArtifactByCodeNameAt,
+    readQuestionArtifactSchemaAt,
   )
 where
 
+import Agentic.Planning (answerSchemaForObservationCode)
 import Agentic.Runtime.Protocol
   ( Envelope (..),
     PersonAnswering,
@@ -85,7 +88,7 @@ import Data.Aeson
   )
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
-import Data.Aeson.Types (Parser)
+import Data.Aeson.Types (Parser, parseEither)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
 import Data.Text (Text)
@@ -279,10 +282,16 @@ readRunStore directory =
   withStoreDirectory directory (readRunStoreAt directory)
 
 readRunStoreAt :: FilePath -> Fd -> IO (RunManifest, [Envelope], StoreHealth)
-readRunStoreAt directory descriptor = do
+readRunStoreAt = readRunStoreBoundedAt maxEventLogBytes
+
+-- | Read one store with a tighter journal allocation bound, never a larger one.
+readRunStoreBoundedAt :: Integer -> FilePath -> Fd -> IO (RunManifest, [Envelope], StoreHealth)
+readRunStoreBoundedAt limit directory descriptor = do
+  when (limit < 0 || limit > maxEventLogBytes) $
+    throwIO (StoreIncompatible directory "event log read limit must be between 0 and 536870912 bytes")
   stored <- readStoredManifestAt directory descriptor
   manifest <- readManifestAt directory descriptor stored
-  (events, health) <- readEventLogAt directory descriptor stored
+  (events, health) <- readEventLogBoundedAt limit directory descriptor stored
   pure (manifest, events, health)
 
 readStoredManifestAt :: FilePath -> Fd -> IO StoredManifest
@@ -309,9 +318,12 @@ readManifestAt directory descriptor stored = do
       pure manifest {manifestProgram = program}
 
 readEventLogAt :: FilePath -> Fd -> StoredManifest -> IO ([Envelope], StoreHealth)
-readEventLogAt directory descriptor stored = do
+readEventLogAt = readEventLogBoundedAt maxEventLogBytes
+
+readEventLogBoundedAt :: Integer -> FilePath -> Fd -> StoredManifest -> IO ([Envelope], StoreHealth)
+readEventLogBoundedAt limit directory descriptor stored = do
   let path = directory </> "events.ndjson"
-  (bytes, _) <- readConfinedFileAt descriptor ["events.ndjson"] maxEventLogBytes
+  (bytes, _) <- readConfinedFileAt descriptor ["events.ndjson"] limit
   let ended = BS.null bytes || BS.last bytes == 10
   unless ended (throwIO (StoreCorrupt path "runtime event log has a torn final record"))
   let complete = filter (not . BS.null) (BS.split 10 bytes)
@@ -587,6 +599,16 @@ readQuestionArtifactByCodeNameAt directory descriptor expectedRun expectedOccurr
   unless (actualCodeName == Just expectedCodeName) $
     throwIO (StoreCorrupt path "question artifact code/schema does not match its event")
   pure (storedQuestionIntent artifact, storedQuestionValue artifact)
+
+-- | Derive an editor schema from the actual verified observation code bytes.
+-- This is independent of journal health and does not validate a future answer.
+readQuestionArtifactSchemaAt :: FilePath -> Fd -> RunId -> OccurrenceId -> QuestionRef -> IO (Text, Value, Text, Value)
+readQuestionArtifactSchemaAt directory descriptor expectedRun expectedOccurrence reference = do
+  (path, artifact) <- readQuestionArtifactPayloadAt directory descriptor expectedRun expectedOccurrence reference
+  fields <- validateStoredQuestionShape path (storedQuestionValue artifact)
+  (code, schema) <- either (throwIO . StoreCorrupt path . T.pack) pure $
+    parseEither (\o -> o .: "code" >>= answerSchemaForObservationCode) fields
+  pure (storedQuestionIntent artifact, storedQuestionValue artifact, code, schema)
 
 readQuestionArtifactPayload :: FilePath -> RunId -> OccurrenceId -> QuestionRef -> IO (FilePath, StoredQuestionArtifact)
 readQuestionArtifactPayload directory expectedRun expectedOccurrence reference =

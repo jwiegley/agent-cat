@@ -68,6 +68,8 @@ module Agentic.World
     verdictJson,
     answerJson,
     answerFromJson,
+    answerJsonSchema,
+    answerSchemaForObservationCode,
     questionJson,
     scopeJson,
     eventJson,
@@ -99,13 +101,13 @@ import Agentic.Plan
     verdictTag,
     withRequestPrompt,
   )
-import Agentic.Schema (defaultEl)
+import Agentic.Schema (codeName, defaultEl, schemaBoolean, schemaNull, schemaString)
 import Agentic.Schema.Conformance (SomeAnswer, decodeExact, encodeExact, lookupAnswer, uniqueAnswers)
-import Agentic.Schema.Json (codeJson)
+import Agentic.Schema.Json (codeFromJson, codeJson, jsonSchemaDocument, jsonSchemaDocumentWithNumber)
 import Agentic.DSL
   ( Addressee (AddrModel, AddrPerson, AddrTool, AddrToolExec),
     Code,
-    SomeCode,
+    SomeCode (..),
     ctorObj,
     unknownCtor,
     withCtor,
@@ -544,6 +546,60 @@ answerFromJson SVerdict (A.Object value) = case KM.lookup "tag" value of
     objectionText _ = Nothing
 answerFromJson (SStructured schema) value = decodeExact schema value
 answerFromJson _ _ = Nothing
+
+-- | JSON Schema for person and control answers interpreted by 'answerFromJson'.
+-- Structured numbers are exact rational objects, not model-response decimals.
+-- Verdict extras are accepted, including ignored objections on approve/declined.
+-- This describes values, not lexical encodings or runtime resource limits.
+answerJsonSchema :: SCode c -> Value
+answerJsonSchema SText = jsonSchemaDocument schemaString
+answerJsonSchema SFlag = jsonSchemaDocument schemaBoolean
+answerJsonSchema SAck = jsonSchemaDocument schemaNull
+answerJsonSchema SVerdict =
+  object
+    [ "oneOf" .=
+        [ object
+            [ "type" .= ("object" :: Text),
+              "properties" .= object ["tag" .= object ["enum" .= (["approve", "declined"] :: [Text])]],
+              "required" .= (["tag"] :: [Text])
+            ],
+          object
+            [ "type" .= ("object" :: Text),
+              "properties" .= object
+                [ "tag" .= object ["const" .= ("object" :: Text)],
+                  "objections" .= object
+                    [ "type" .= ("array" :: Text),
+                      "items" .= jsonSchemaDocument schemaString
+                    ]
+                ],
+              "required" .= (["tag", "objections"] :: [Text])
+            ]
+        ]
+    ]
+answerJsonSchema (SStructured schema) =
+  jsonSchemaDocumentWithNumber
+    (object
+      [ "type" .= ("object" :: Text),
+        "properties" .= object
+          [ "numerator" .= object ["type" .= ("integer" :: Text)],
+            "denominator" .= object ["type" .= ("integer" :: Text), "minimum" .= (1 :: Integer)]
+          ],
+        "required" .= (["numerator", "denominator"] :: [Text]),
+        "additionalProperties" .= False
+      ])
+    schema
+
+-- | Decode observation code syntax into its public name and answer schema.
+-- Observation 'codeJson' uses receipt for Ack. Authoring-only ack is refused
+-- here. The returned public 'codeName' is receipt. Structured codes retain
+-- the existing 'codeFromJson' syntax and checked witness promotion.
+answerSchemaForObservationCode :: Value -> Parser (Text, Value)
+answerSchemaForObservationCode value = do
+  SomeCode code <- case value of
+    A.String "receipt" -> pure (fromSCode SAck)
+    A.String "ack" -> fail "Observation code: expected receipt, not authoring ack"
+    _ -> codeFromJson value
+  pure (codeName (fromSCode code), answerJsonSchema code)
 
 questionJson :: SCode c -> Q c -> Value
 questionJson c q =

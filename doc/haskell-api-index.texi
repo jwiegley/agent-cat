@@ -31,6 +31,7 @@
 @hsindex Agentic.Schema.Json.encode
 @hsindex Agentic.Schema.Json.encodeAs
 @hsindex Agentic.Schema.Json.jsonSchemaDocument
+@hsindex Agentic.Schema.Json.jsonSchemaDocumentWithNumber
 @hsindex Agentic.Schema.Json.render
 @hsindex Agentic.Schema.Json.renderAs
 @hsindex Agentic.Schema.Json.renderSchema

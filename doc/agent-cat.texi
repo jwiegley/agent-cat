@@ -2982,6 +2982,10 @@ Render a @code{HasSchema} value as @code{Maybe Text}.
 @c COVER API Agentic.Schema.Json.jsonSchemaDocument support
 @item jsonSchemaDocument schema
 Produce the JSON Schema document placed in a structured-answer instruction.
+@c COVER API Agentic.Schema.Json.jsonSchemaDocumentWithNumber support
+@item jsonSchemaDocumentWithNumber numberSchema schema
+Interpret the same schema with a supplied JSON Schema for every number leaf,
+including those nested in arrays and records.
 @c COVER API Agentic.Schema.Json.renderSchema support
 @item renderSchema schema
 Render that schema document as text.
@@ -3496,10 +3500,11 @@ creating a run, reading routing configuration, or acquiring live controls.
 Successful requests exit at zero.  Invalid requests and failed verification
 exit at three with diagnostics on standard error and no JSON response.
 
-Every request contains @code{version: 1} and an @code{operation} string.
-Unknown operations, versions, and top-level fields are refused.  The request
-limit is 2 MiB, including the encoded root identity and artifact reference.
-Responses are bounded by the 64 MiB artifact limit plus 4096 bytes.
+Every request contains a supported @code{version} and an @code{operation}
+string.  Unknown operations, versions, and top-level fields are refused.  The
+request limit is 2 MiB, including the encoded root identity and artifact
+reference.  Responses are bounded by 64 MiB plus 4096 bytes, including the
+terminating newline.  The following operations require @code{version: 1}.
 
 @table @code
 @item open-root
@@ -3535,12 +3540,12 @@ invocation record for a version-3 manifest.
 @item read-run
 The request supplies @code{rootIdentity} and @code{runId}.  The response contains
 @code{run}, with the frontend manifest, sanitized runtime policy, ownership
-classification, and full public runtime snapshot.  No caller-supplied owner
-identifier is accepted, so these queries cannot report control ownership for
-their caller.
+classification, and public runtime presentation snapshot.  This presentation
+is not a restoration checkpoint.  No caller-supplied owner identifier is
+accepted, so these queries cannot report control ownership for their caller.
 @end table
 
-Every successful response also contains @code{version: 1} and the requested
+Every successful response contains its operation's version and the requested
 operation.  Artifact requests reopen and verify the captured root identity,
 then traverse @file{runs/RUN_ID/runtime} relative to retained directory
 descriptors.  Ancestor and leaf symlinks, nonregular files, mismatched identity,
@@ -3556,6 +3561,66 @@ A torn or changing journal can refuse inspection while previously authenticated
 artifact references remain independently readable.  Catalogue corruption does
 not hide healthy siblings.  Input bytes are authenticated separately when
 preparing lineage.
+
+@subheading Restorable observations and answer editors
+
+Frontend capabilities advertise IO versions 1 and 2.  Version 2 supports only
+@code{read-run-checkpoint} and @code{read-question-schema}, while version 1
+retains the operations and replies above.  Neither version substitutes a
+compact catalogue for a complete restoration representation.
+
+@table @code
+@item read-run-checkpoint
+The request supplies @code{rootIdentity} and @code{runId}.  The response contains
+@code{run}, with @code{runId}, @code{directory}, @code{manifest}, @code{ownership},
+@code{policy}, and a nullable @code{checkpoint}.  Missing runtime evidence and
+an empty journal yield null, while corrupt or torn stores refuse inspection.
+The record and retained envelopes come from one verified store read.
+
+@item read-question-schema
+The request supplies @code{rootIdentity}, @code{runId}, @code{occurrenceId}, and
+the original @code{QuestionRef} in @code{reference}.  It requires no client code
+name.  The response contains the run and occurrence identifiers, @code{intent},
+the full @code{question}, @code{codeName}, and @code{answerSchema}.  Private
+artifact verification binds the actual stored code bytes, and the planning
+layer derives the editor schema from the decoded code witness.
+@end table
+
+A checkpoint is an object with exactly @code{checkpointVersion: 1},
+@code{representation: "runtime-envelope-prefix"}, @code{runId},
+@code{protocolVersion}, @code{lastSequence}, and @code{envelopes}.  It retains
+every original envelope value from sequence zero through the declared boundary.
+For an empty prefix, the protocol and sequence are null.  A nonempty prefix has
+one supported protocol and a canonical decimal sequence string.  Decoding
+validates each envelope with the existing protocol codecs, replays
+@code{stepRunSnapshot}, and verifies the declared boundary.  The whole last
+envelope survives, including the timestamp and payload used to distinguish
+exact and conflicting duplicate delivery.
+
+The complete encoded checkpoint is limited to 64 MiB, including metadata and
+array delimiters, and each encoded envelope is limited to 1 MiB.  Capture and
+suffix replay refuse overflow without returning a partial checkpoint.  The
+helper also limits the journal read to 64 MiB before allocating its contents,
+while existing store readers retain their 512 MiB bound.  The final reply has
+its separate 64-MiB-plus-4096-byte limit.  These are byte bounds, not total heap
+bounds.  Arbitrary edited snapshot records and histories beyond the advertised
+bounds are outside this representation.
+
+The editor schema describes person and control answers accepted by
+@code{answerFromJson}.  Structured numbers are objects with exactly an integer
+@code{numerator} and a positive integer @code{denominator}, recursively through
+arrays and records.  Model-response JSON numbers remain unchanged.  Text is a
+string, flag is Boolean, and receipt is null.  Verdict objects retain the
+decoder's acceptance of extra members and ignored objections for approval and
+decline.  Observation and public Ack names use @code{receipt}, while authoring
+syntax uses @code{ack}.  The observation adapter refuses the authoring spelling.
+Runtime byte limits and decoding remain authoritative.
+
+Catalogue enumeration refuses child 1001, counting corrupt entries, symlinks,
+and non-run children.  It does not return a successful truncated catalogue.
+Artifact reads remain independent of journal health.  None of these
+representations establishes control authority, publication durability, or an
+atomic observation across ownership files, manifests, and the journal.
 
 The Haskell facade exposes @code{runFrontendQuery} and
 @code{maxFrontendQueryBytes}.  @code{withPrivateRootIdentity} supplies the same

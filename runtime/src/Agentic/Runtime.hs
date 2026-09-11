@@ -14,6 +14,7 @@ module Agentic.Runtime
     module Agentic.Runtime.Protocol,
     module Agentic.Runtime.Route,
     module Agentic.Runtime.Snapshot,
+    module Agentic.Runtime.Snapshot.Checkpoint,
     module Agentic.Runtime.Store,
     module Agentic.Shell,
   )
@@ -33,5 +34,6 @@ import Agentic.Runtime.ProcessGroup
 import Agentic.Runtime.Protocol
 import Agentic.Runtime.Route
 import Agentic.Runtime.Snapshot
+import Agentic.Runtime.Snapshot.Checkpoint
 import Agentic.Runtime.Store
 import Agentic.Shell

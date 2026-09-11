@@ -11,6 +11,8 @@
 
 module Main (main) where
 
+import qualified AnswerSchemaProbe
+import FrontendObservationTests (frontendObservationTests)
 import qualified Agentic.Builder as B
 import Agentic.Runtime (askDecoding)
 import qualified Agentic.Observe as O
@@ -36,6 +38,7 @@ import Data.Type.Equality ((:~:) (Refl))
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
+import System.Environment (getArgs)
 import System.Exit (exitFailure)
 import Test.QuickCheck (isSuccess, maxSuccess, quickCheckWithResult, stdArgs)
 import Example.StructuredInfo (structuredAnswer)
@@ -81,7 +84,13 @@ schemaProgram =
       (B.one (B.askModel "structured" [B.lit "answer"])) B.stop
 
 main :: IO ()
-main = do
+main = getArgs >>= \case
+  ["--answer-schema-vectors"] -> AnswerSchemaProbe.main
+  _ -> schemaTests
+
+schemaTests :: IO ()
+schemaTests = do
+  frontendObservationTests "."
   let qc = stdArgs {maxSuccess = 200}
   recordLaw <- quickCheckWithResult qc $ \(count :: Integer) (name :: String) ->
     let value = (count, (T.pack name, ()))

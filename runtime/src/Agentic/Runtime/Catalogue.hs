@@ -23,11 +23,13 @@ module Agentic.Runtime.Catalogue
     listRunCatalogue,
     listRunCatalogueAt,
     readRunRecordAt,
+    readRunRecordWithEnvelopesAt,
   )
 where
 
 import Agentic.Runtime.Protocol
-  ( PersonAnswering (..),
+  ( Envelope,
+    PersonAnswering (..),
     RunId (..),
     maxArtifactBytes,
     mkRunId,
@@ -43,7 +45,9 @@ import Agentic.Runtime.Snapshot
 import Agentic.Runtime.PrivateFile (listConfinedDirectoryAt, readConfinedFileAt, withConfinedDirectory, withConfinedDirectoryAt, withConfinedDirectoryIfPresentAt)
 import Agentic.Runtime.Store
   ( RunManifest (manifestPolicy, manifestRunId, manifestWorkflow),
+    StoreHealth,
     readRunStoreAt,
+    readRunStoreBoundedAt,
   )
 import Control.Exception (IOException, SomeAsyncException, SomeException, displayException, fromException, throwIO, try)
 import Control.Monad (foldM, unless, when)
@@ -243,14 +247,23 @@ listRunCatalogueAt stateRoot stateDescriptor localOwner now = do
 
 -- | Reconstruct one run through its retained directory descriptor.
 readRunRecordAt :: FilePath -> Fd -> Maybe Text -> UTCTime -> IO RunRecord
-readRunRecordAt directory descriptor localOwner now = do
+readRunRecordAt directory descriptor localOwner now =
+  fst <$> readRunRecordWithStoreAt readRunStoreAt directory descriptor localOwner now
+
+-- | One observed record and its exact prefix from the same verified store read.
+-- The complete observation path tightens journal reads to 64 MiB before parsing.
+readRunRecordWithEnvelopesAt :: FilePath -> Fd -> Maybe Text -> UTCTime -> IO (RunRecord, [Envelope])
+readRunRecordWithEnvelopesAt = readRunRecordWithStoreAt (readRunStoreBoundedAt maxArtifactBytes)
+
+readRunRecordWithStoreAt :: (FilePath -> Fd -> IO (RunManifest, [Envelope], StoreHealth)) -> FilePath -> Fd -> Maybe Text -> UTCTime -> IO (RunRecord, [Envelope])
+readRunRecordWithStoreAt readStore directory descriptor localOwner now = do
   manifest <- readFrontendManifestAt descriptor
   unless (runIdText (frontendRunId manifest) == T.pack (takeFileName directory)) $
     ioError (userError "frontend manifest run id does not match its directory")
   let runtimeName = frontendRuntimeStore manifest
       runtimeDirectory = directory </> runtimeName
   runtime <- withConfinedDirectoryIfPresentAt descriptor runtimeName $ \runtimeDescriptor -> do
-    (runtimeManifest, events, _) <- readRunStoreAt runtimeDirectory runtimeDescriptor
+    (runtimeManifest, events, _) <- readStore runtimeDirectory runtimeDescriptor
     unless (manifestRunId runtimeManifest == frontendRunId manifest) $
       ioError (userError "runtime and frontend manifests name different run ids")
     unless (manifestWorkflow runtimeManifest == frontendWorkflow manifest) $
@@ -265,19 +278,19 @@ readRunRecordAt directory descriptor localOwner now = do
             (foldM stepRunSnapshot (initialRunSnapshot (frontendRunId manifest)) events)
     unless (all ((== Just (manifestWorkflow runtimeManifest)) . snapshotWorkflow) reduced) $
       ioError (userError "runtime journal and manifest name different workflows")
-    pure (Just (manifestPolicy runtimeManifest), reduced)
-  let (policy, snapshot) = fromMaybe (Nothing, Nothing) runtime
+    pure (Just (manifestPolicy runtimeManifest), reduced, events)
+  let (policy, snapshot, events) = fromMaybe (Nothing, Nothing, []) runtime
   lease <- readOwnerLeaseAt descriptor
   let ownership = ownershipFor localOwner now snapshot lease
-  pure
-    RunRecord
-      { recordDirectory = directory,
-        recordManifest = manifest,
-        recordOwnerLease = lease,
-        recordOwnership = ownership,
-        recordPolicy = policy,
-        recordSnapshot = snapshot
-      }
+      record = RunRecord
+        { recordDirectory = directory,
+          recordManifest = manifest,
+          recordOwnerLease = lease,
+          recordOwnership = ownership,
+          recordPolicy = policy,
+          recordSnapshot = snapshot
+        }
+  pure (record, events)
 
 -- | Recheck the current parent identity and ownership rather than browser facts.
 revalidateLineageParentAt :: RunRecord -> Fd -> IO ()

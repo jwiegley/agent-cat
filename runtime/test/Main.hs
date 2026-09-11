@@ -6,6 +6,7 @@ module Main (main) where
 
 import Agentic.Runtime
 import FrontendProtocolTests (frontendProtocolTests, frontendCodecCheck)
+import SnapshotCheckpointTests (snapshotCheckpointTests)
 import Control.Concurrent (forkIO, killThread, myThreadId, threadDelay, yield)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar, tryPutMVar, tryReadMVar)
 import Control.Exception (IOException, SomeException, bracket, finally, throwIO, try)
@@ -47,11 +48,16 @@ main = getArgs >>= \case
     request <- BS.hGet stdin (fromInteger maxFrontendReplyBytes + 1)
     let response = frontendCodecCheck arguments request
     either (\failure -> hPutStrLn stderr (T.unpack failure) >> exitWith (ExitFailure 3)) BS.putStr response
+  ["--snapshot-checkpoint-codec-test"] -> do
+    request <- BS.hGet stdin (fromInteger maxArtifactBytes + 1)
+    let response = decodeSnapshotCheckpoint request >>= encodeSnapshotCheckpoint
+    either (\failure -> hPutStrLn stderr (T.unpack failure) >> exitWith (ExitFailure 3)) BS.putStr response
   _ -> contractTests
 
 contractTests :: IO ()
 contractTests = do
   frontendProtocolTests
+  snapshotCheckpointTests "."
   privateRootContractTests
   frontendIoContractTests
   frontendExportContractTests

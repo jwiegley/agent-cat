@@ -43,6 +43,7 @@ extra-source-files:
   test/frontend_io_probe.py
   test/frontend_session_probe.py
   test/frontend_contract_probe.py
+  test/answer_schema_probe.py
   manager/AGENTS.md
   manager/ci/dependencies.sh
   manager/ci/contract.sh
@@ -161,6 +162,7 @@ library
     Agentic.Runtime.Protocol
     Agentic.Runtime.Route
     Agentic.Runtime.Snapshot
+    Agentic.Runtime.Snapshot.Checkpoint
     Agentic.Runtime.Store
     Agentic.Tui.App
     Agentic.Tui.Client
@@ -293,6 +295,9 @@ executable schema-probe
   import:          settings
   hs-source-dirs:  cli/test
   main-is:         SchemaProbe.hs
+  other-modules:
+    AnswerSchemaProbe
+    FrontendObservationTests
   build-depends:
     , agentic
     , agentic:bisim-support
@@ -322,7 +327,9 @@ test-suite runtime-contract-test
   type:             exitcode-stdio-1.0
   hs-source-dirs:   runtime/test
   main-is:          Main.hs
-  other-modules:    FrontendProtocolTests
+  other-modules:
+    FrontendProtocolTests
+    SnapshotCheckpointTests
   ghc-options:      -threaded
   build-depends:
     , agentic

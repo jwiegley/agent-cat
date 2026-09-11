@@ -13,9 +13,10 @@ where
 import Agentic.Runtime.Catalogue
 import Agentic.Runtime.Frontend.Protocol (maxFrontendQueryBytes, maxFrontendReplyBytes)
 import Agentic.Runtime.Snapshot (runSnapshotValue, snapshotResult)
+import Agentic.Runtime.Snapshot.Checkpoint (captureSnapshotCheckpoint, encodeSnapshotCheckpoint, snapshotCheckpointValue)
 import Agentic.Runtime.PrivateRoot
 import Agentic.Runtime.Protocol
-import Agentic.Runtime.Store (readQuestionArtifactByCodeNameAt, readResultArtifactAt)
+import Agentic.Runtime.Store (readQuestionArtifactByCodeNameAt, readQuestionArtifactSchemaAt, readResultArtifactAt)
 import Control.Exception (SomeAsyncException, SomeException, bracket, displayException, fromException, throwIO, try)
 import Control.Monad (unless, when)
 import Crypto.Hash (Digest, SHA256, hash)
@@ -43,6 +44,8 @@ data FrontendQuery
   | ReadResult !String !RunId !ResultRef
   | ListRuns !String
   | ReadRun !String !RunId
+  | ReadRunCheckpoint !String !RunId
+  | ReadQuestionSchema !String !RunId !OccurrenceId !QuestionRef
 
 -- | One request to publish a verified result beneath the configured state root.
 data FrontendExportRequest = FrontendExportRequest
@@ -55,15 +58,15 @@ data FrontendExportRequest = FrontendExportRequest
 instance FromJSON FrontendQuery where
   parseJSON = withObject "frontend query" $ \fields -> do
     version <- fields .: "version" :: Parser Int
-    unless (version == 1) (fail "unsupported frontend query version")
+    unless (version `elem` [1, 2]) (fail "unsupported frontend query version")
     operation <- fields .: "operation" :: Parser Text
-    case operation of
-      "open-root" -> do
+    case (version, operation) of
+      (1, "open-root") -> do
         onlyKeys fields ["version", "operation", "path"]
         path <- fields .: "path"
         when (BS.length (TE.encodeUtf8 path) > 4096) (fail "frontend root path exceeds 4096 bytes")
         pure (OpenRoot (T.unpack path))
-      "read-question" -> do
+      (1, "read-question") -> do
         onlyKeys fields ["version", "operation", "rootIdentity", "runId", "occurrenceId", "codeName", "reference"]
         identity <- fields .: "rootIdentity"
         run <- fields .: "runId" >>= either (fail . T.unpack) pure . mkRunId
@@ -71,19 +74,30 @@ instance FromJSON FrontendQuery where
         code <- fields .: "codeName"
         when (T.null code || T.length code > 256) (fail "invalid frontend question code name")
         ReadQuestion identity run occurrence code <$> fields .: "reference"
-      "read-result" -> do
+      (1, "read-result") -> do
         onlyKeys fields ["version", "operation", "rootIdentity", "runId", "reference"]
         identity <- fields .: "rootIdentity"
         run <- fields .: "runId" >>= either (fail . T.unpack) pure . mkRunId
         ReadResult identity run <$> fields .: "reference"
-      "list-runs" -> do
+      (1, "list-runs") -> do
         onlyKeys fields ["version", "operation", "rootIdentity"]
         ListRuns <$> fields .: "rootIdentity"
-      "read-run" -> do
+      (1, "read-run") -> do
         onlyKeys fields ["version", "operation", "rootIdentity", "runId"]
         identity <- fields .: "rootIdentity"
         run <- fields .: "runId" >>= either (fail . T.unpack) pure . mkRunId
         pure (ReadRun identity run)
+      (2, "read-run-checkpoint") -> do
+        onlyKeys fields ["version", "operation", "rootIdentity", "runId"]
+        identity <- fields .: "rootIdentity"
+        run <- fields .: "runId" >>= either (fail . T.unpack) pure . mkRunId
+        pure (ReadRunCheckpoint identity run)
+      (2, "read-question-schema") -> do
+        onlyKeys fields ["version", "operation", "rootIdentity", "runId", "occurrenceId", "reference"]
+        identity <- fields .: "rootIdentity"
+        run <- fields .: "runId" >>= either (fail . T.unpack) pure . mkRunId
+        occurrence <- fields .: "occurrenceId" >>= parseOccurrence
+        ReadQuestionSchema identity run occurrence <$> fields .: "reference"
       _ -> fail "unsupported frontend query operation"
 
 instance FromJSON FrontendExportRequest where
@@ -224,6 +238,32 @@ executeQuery = \case
         "policy" .= recordPolicy record, "snapshot" .= fmap runSnapshotValue (recordSnapshot record)
       ]])
 
+  ReadRunCheckpoint identity run -> withPrivateRootIdentity identity $ \root -> do
+    let components = ["runs", T.unpack (runIdText run)]
+        directory = privateRootPath root </> "runs" </> T.unpack (runIdText run)
+    now <- getCurrentTime
+    (record, envelopes) <- withPrivateDirectoryAt root components $ \descriptor ->
+      readRunRecordWithEnvelopesAt directory descriptor Nothing now
+    checkpoint <- case envelopes of
+      [] -> pure Nothing
+      _ -> do
+        captured <- either (ioError . userError . T.unpack) pure (captureSnapshotCheckpoint run envelopes)
+        _ <- either (ioError . userError . T.unpack) pure (encodeSnapshotCheckpoint captured)
+        pure (Just (snapshotCheckpointValue captured))
+    assertPrivateRoot root
+    pure (replyV2 "read-run-checkpoint" ["run" .= object
+      [ "runId" .= runIdText run, "directory" .= directory,
+        "manifest" .= recordManifest record, "ownership" .= ownershipText (recordOwnership record),
+        "policy" .= recordPolicy record, "checkpoint" .= checkpoint
+      ]])
+  ReadQuestionSchema identity run occurrence reference ->
+    withRuntimeDirectory identity run $ \directory descriptor -> do
+      (intent, question, code, schema) <- readQuestionArtifactSchemaAt directory descriptor run occurrence reference
+      pure (replyV2 "read-question-schema"
+        [ "runId" .= runIdText run, "occurrenceId" .= T.pack (show (occurrenceNumber occurrence)),
+          "intent" .= intent, "question" .= question, "codeName" .= code, "answerSchema" .= schema
+        ])
+
 catalogueSummary :: CatalogueEntry -> Value
 catalogueSummary (CatalogueCorrupt directory failure) = object
   ["kind" .= ("corrupt" :: Text), "directory" .= directory, "error" .= failure]
@@ -267,3 +307,6 @@ digestText bytes = T.pack (show (hash bytes :: Digest SHA256))
 
 reply :: Text -> [Pair] -> Value
 reply operation fields = object (["version" .= (1 :: Int), "operation" .= operation] <> fields)
+
+replyV2 :: Text -> [Pair] -> Value
+replyV2 operation fields = object (["version" .= (2 :: Int), "operation" .= operation] <> fields)
