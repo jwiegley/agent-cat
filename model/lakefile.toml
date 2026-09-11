@@ -1,11 +1,10 @@
 name = "agentic"
 version = "0.1.0"
-defaultTargets = ["Agentic", "Pollution"]
+defaultTargets = ["Agentic", "Pollution", "ManagerChecks"]
 
-# The root module and every `Agentic/Core/*` module. The glob is explicit rather
-# than implied by the root's imports, because a module the root does not import
-# would otherwise be invisible to `lake build`; with the glob, one that stops
-# compiling breaks the build like everything else.
+# The root module and every Core and Manager module belong to the default build.
+# Explicit globs include modules that the root does not import, so an unimported
+# module that stops compiling still breaks the build.
 #
 # WHERE THE BUILD TIME IS. One module in this glob dominates the whole build:
 # `Agentic/Core/DslFlagship.lean` takes about six minutes and several gigabytes
@@ -25,7 +24,7 @@ defaultTargets = ["Agentic", "Pollution"]
 # the tool.
 [[lean_lib]]
 name = "Agentic"
-globs = ["Agentic", "Agentic.Core.+"]
+globs = ["Agentic", "Agentic.Core.+", "Agentic.Manager.+"]
 
 [[require]]
 name = "mathlib"
@@ -37,4 +36,8 @@ rev = "v4.30.0"
 # In defaultTargets on purpose — a re-polluting instance must break the build.
 [[lean_lib]]
 name = "Pollution"
+srcDir = "test"
+
+[[lean_lib]]
+name = "ManagerChecks"
 srcDir = "test"
