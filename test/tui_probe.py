@@ -778,7 +778,7 @@ def test_resize_confirmation_and_no_color(driver: Path, fixture: Path, root: Pat
             session.send(key)
             session.wait_screen("routing engine is NOT READY")
             assert runs(unready_state) == [], "credential-unready routing crossed the consent boundary"
-            session.send(ESC)
+            session.send(b"\x1b")
             session.wait_screen("Workflows •")
             session.send(b"q")
             assert session.wait_exit() == 0
@@ -1051,10 +1051,10 @@ def test_exact_controls_and_stress(driver: Path, fixture: Path, root: Path) -> N
         session.send(b"l")
         confirmation = session.wait_for(b"launch confirmation", after=cursor)
         session.wait_screen("work-model")
-        session.wait_screen("fixture-provider")
+        session.wait_screen("Target    routing")
         session.send(b"d")
         details = session.wait_for(b"Launch details", after=confirmation)
-        for fact in ("Exact target arguments", "work-session", "--expect-routing-fingerprint", "Exact-input plan", "execution fingerprint"):
+        for fact in ("Exact target arguments", "--routing", "--expect-routing-fingerprint", "Exact-input plan", "fixture-provider", "execution fingerprint"):
             for _ in range(20):
                 session.settle()
                 if fact in session.screen.text():

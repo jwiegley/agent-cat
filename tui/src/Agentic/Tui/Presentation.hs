@@ -394,8 +394,14 @@ targetView presentation width = hCenter $ hLimit (min 84 width) $
   pane "Execution target [focus]" (viewport TargetViewport Vertical (vBox (headerLines <> routingLines)))
   where
     model = presentationModel presentation
+    readinessHeader = case modelRouting model of
+      Left _ -> withAttr (attrName "error") (displayText "ROUTING UNAVAILABLE")
+      Right routing ->
+        let ready = all engineChoiceCredentialReady (routingSummaryEngines routing)
+         in withAttr (attrName (if ready then "success" else "warning"))
+              (displayText (if ready then "ROUTING READY (offline)" else "ROUTING NOT READY"))
     headerLines =
-      [ withAttr (attrName "title") (displayText "Live run"),
+      [ readinessHeader,
         muted (displayTextWrap "Routing requires full pin coverage. You will review the exact plan before launch."),
         displayText ""
       ]
