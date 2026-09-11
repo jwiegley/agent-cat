@@ -1,0 +1,8 @@
+{
+  "type": "urn:agent-cat:manager:problem:view-expired",
+  "title": "View expired",
+  "status": 410,
+  "instance": "/v1/runs/run_21/snapshot",
+  "code": "view-expired",
+  "links": {}
+}

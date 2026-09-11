@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "operation": "check-quarantine",
+  "quarantineId": "quarantine_1"
+}

@@ -1,0 +1,4 @@
+# SSE fixtures require blank event terminators and literal CRLF refusal bytes.
+test/fixtures/manager/v1/sse/*.sse -text whitespace=cr-at-eol,-blank-at-eof
+# Download digests cover exact bytes, including their final line ending.
+test/fixtures/manager/v1/valid/*.utf8 -text

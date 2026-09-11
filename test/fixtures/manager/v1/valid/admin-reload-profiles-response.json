@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "operation": "reload-profiles",
+  "ok": true,
+  "result": {
+    "profileIds": [
+      "profile_main"
+    ],
+    "revision": "profiles_2"
+  }
+}

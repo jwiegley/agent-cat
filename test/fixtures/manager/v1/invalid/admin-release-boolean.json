@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "operation": "release-quarantine",
+  "quarantineId": "quarantine_1",
+  "approved": true
+}

@@ -1,0 +1,12 @@
+{
+  "code": {
+    "json": {
+      "schema": {
+        "array": {
+          "items": "string"
+        }
+      }
+    }
+  },
+  "value": []
+}

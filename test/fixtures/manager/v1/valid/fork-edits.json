@@ -1,0 +1,19 @@
+{
+  "operation": "fork",
+  "edits": [
+    {
+      "operation": "drop",
+      "occurrenceId": "0"
+    },
+    {
+      "operation": "replace",
+      "occurrenceId": "9007199254740993",
+      "answer": false
+    },
+    {
+      "operation": "replace",
+      "occurrenceId": "2",
+      "answer": null
+    }
+  ]
+}

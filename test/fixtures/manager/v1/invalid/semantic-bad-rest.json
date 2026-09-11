@@ -1,0 +1,7 @@
+{
+  "property": {
+    "name": "x",
+    "schema": "string",
+    "rest": "boolean"
+  }
+}

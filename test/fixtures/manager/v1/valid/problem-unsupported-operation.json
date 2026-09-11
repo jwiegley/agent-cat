@@ -1,0 +1,8 @@
+{
+  "type": "urn:agent-cat:manager:problem:unsupported-operation",
+  "title": "Unsupported operation",
+  "status": 409,
+  "instance": "/v1/requests/req_8",
+  "code": "unsupported-operation",
+  "links": {}
+}

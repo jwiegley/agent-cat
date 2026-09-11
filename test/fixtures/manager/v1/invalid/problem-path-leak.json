@@ -1,0 +1,9 @@
+{
+  "type": "urn:agent-cat:manager:problem:unauthenticated",
+  "title": "Unauthenticated",
+  "status": 401,
+  "instance": "/v1/capabilities",
+  "code": "unauthenticated",
+  "links": {},
+  "serverPath": "/private/root"
+}

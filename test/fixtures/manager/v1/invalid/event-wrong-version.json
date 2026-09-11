@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "cursor": "stream_A.1042",
+  "oldestCursor": "stream_A.1000",
+  "events": [
+    {
+      "id": "stream_A.1042",
+      "event": "run.changed",
+      "data": {
+        "version": 2,
+        "resource": "/v1/runs/run_21/snapshot",
+        "revision": "runrev_18"
+      }
+    }
+  ],
+  "hasMore": false
+}

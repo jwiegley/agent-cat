@@ -1,0 +1,40 @@
+{
+  "api": [
+    1
+  ],
+  "snapshot": [
+    1
+  ],
+  "event": [
+    1
+  ],
+  "descriptor": [
+    99
+  ],
+  "frontendSession": [
+    1
+  ],
+  "control": [
+    1,
+    2
+  ],
+  "runtimeProtocol": [
+    1,
+    2
+  ],
+  "frontendManifest": [
+    "legacy",
+    "2",
+    "3"
+  ],
+  "runtimeStore": [
+    1,
+    2
+  ],
+  "managerStore": [
+    1
+  ],
+  "invocation": [
+    1
+  ]
+}

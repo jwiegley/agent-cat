@@ -1,0 +1,4 @@
+id: stream_A.18446744073709551616
+event: run.changed
+data: {"version":1,"resource":"/v1/runs/run_21/snapshot","revision":"runrev_18"}
+

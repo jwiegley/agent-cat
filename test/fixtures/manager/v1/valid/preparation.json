@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "id": "prep_9",
+  "revision": "preprev_1",
+  "requestId": "req_8",
+  "requestRevision": "request_rev_2",
+  "profileId": "profile_main",
+  "profileRevision": "profile_rev_4",
+  "descriptorRevision": "catalogue_17",
+  "state": "live",
+  "expiresAt": "2026-09-03T00:10:00Z",
+  "reviewDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "processGeneration": "process_A",
+  "review": {
+    "programHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "personAnswering": "local-control",
+    "policy": {
+      "kind": "scripted"
+    },
+    "workflowId": "wf_review",
+    "profileId": "profile_main",
+    "workspaceLabel": "Review workspace",
+    "targetLabel": "Deterministic worker",
+    "inputs": [
+      {
+        "name": "subject",
+        "source": "capture",
+        "bytes": "10",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "plan": "Review the supplied subject.",
+    "runFacts": [
+      "run.engine"
+    ],
+    "pins": [
+      "deep"
+    ],
+    "warnings": [],
+    "resultCode": "receipt"
+  },
+  "reason": null
+}

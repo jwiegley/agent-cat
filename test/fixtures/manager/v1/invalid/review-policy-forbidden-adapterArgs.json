@@ -1,0 +1,37 @@
+{
+  "kind": "routed",
+  "default": "acp:reviewer",
+  "routes": [
+    {
+      "name": "deep",
+      "backend": "acp:reviewer"
+    }
+  ],
+  "pollMs": null,
+  "timeoutMs": 120000,
+  "verbose": false,
+  "realizations": [
+    {
+      "profile": "deep",
+      "axis": "model",
+      "rung": 0,
+      "backend": "acp:reviewer",
+      "router": "review-router",
+      "provider": "fixture-provider",
+      "model": "fixture-model",
+      "thinking": "high",
+      "maxOutput": 4096,
+      "executionFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "modelAlias": "deep",
+      "engine": "acp"
+    }
+  ],
+  "routingVersion": 2,
+  "persona": "reviewer",
+  "personaSource": "project",
+  "policyDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "adapterArgs": [
+    "--token",
+    "private"
+  ]
+}

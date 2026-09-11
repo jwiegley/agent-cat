@@ -1,0 +1,8 @@
+{
+  "type": "urn:agent-cat:manager:problem:invalid-answer",
+  "title": "Invalid answer",
+  "status": 422,
+  "instance": "/v1/requests/req_8",
+  "code": "invalid-answer",
+  "links": {}
+}

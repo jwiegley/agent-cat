@@ -1,0 +1,8 @@
+{
+  "type": "urn:agent-cat:manager:problem:unauthenticated",
+  "title": "Unauthenticated",
+  "status": 403,
+  "instance": "/v1/capabilities",
+  "code": "unauthenticated",
+  "links": {}
+}

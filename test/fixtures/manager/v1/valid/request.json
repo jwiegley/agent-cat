@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "id": "req_8",
+  "revision": "request_rev_1",
+  "workflowId": "wf_review",
+  "descriptorRevision": "catalogue_17",
+  "profileId": "profile_main",
+  "profileRevision": "profile_rev_4",
+  "phase": "draft",
+  "readiness": {
+    "declarations": [
+      {
+        "name": "subject",
+        "source": "command-tail",
+        "description": null,
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      }
+    ],
+    "supplied": [],
+    "missing": [
+      "subject"
+    ],
+    "errors": []
+  },
+  "admission": {
+    "state": "not-queued",
+    "position": null,
+    "reasons": [
+      "missing-inputs"
+    ]
+  },
+  "preparationId": null,
+  "runId": null,
+  "parentRunId": null,
+  "lineage": null,
+  "links": {
+    "self": "/v1/requests/req_8"
+  }
+}

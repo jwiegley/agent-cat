@@ -1,0 +1,7 @@
+{
+  "kind": "versioned",
+  "frontendManifestVersion": 3,
+  "invocation": {
+    "executable": "/private/runner"
+  }
+}

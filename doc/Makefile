@@ -5,7 +5,7 @@ BUILD_DIR := build
 MAKEINFO ?= makeinfo
 PYTHON ?= python3
 
-.PHONY: all info html check check-haskell update-haskell-inventory clean
+.PHONY: all info html check check-api check-haskell update-haskell-inventory clean
 
 all: info html
 
@@ -22,7 +22,7 @@ $(BUILD_DIR)/$(MANUAL).info: $(SOURCE) $(INCLUDES) | $(BUILD_DIR)
 $(BUILD_DIR)/$(MANUAL).html: $(SOURCE) $(INCLUDES) | $(BUILD_DIR)
 	$(MAKEINFO) --html --no-split --output=$@ $<
 
-check:
+check: check-api
 	@set -eu; \
 	tmp=$$(mktemp -d); \
 	trap 'rm -rf "$$tmp"' EXIT HUP INT TERM; \
@@ -39,6 +39,9 @@ check:
 	@grep -q '^## Conditional and unavailable checks$$' tui-release-evidence.md
 	@echo 'tui release evidence: requirement matrix, platforms, and unavailable checks recorded'
 	cd .. && runghc -Wall -Werror doc/check-model-routing-v2.hs
+
+check-api:
+	cd .. && bash manager/ci/contract.sh
 
 check-haskell:
 	cd .. && bash -c 'set -eu; test/cabal.sh build all; tmp=$$(mktemp -d); trap '\''rm -rf "$$tmp"'\'' EXIT; mkdir -p "$$tmp/ghc"; test/cabal.sh exec -- ghc -outputdir "$$tmp/ghc" -idoc/examples -package agentic doc/examples/Registry.hs -o "$$tmp/manual-run"; "$$tmp/manual-run" list >/dev/null; "$$tmp/manual-run" run hello --scripted >/dev/null; runner=$$(test/cabal.sh list-bin agentic-run); python3 doc/check-manual-cli.py "$$runner"; python3 doc/check-manual-members.py'

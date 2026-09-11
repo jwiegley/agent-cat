@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "id": "export_2",
+  "runId": "run_21",
+  "commandId": "cmd_11",
+  "name": "unicode.json",
+  "code": "text",
+  "state": "published",
+  "bytes": "38",
+  "sha256": "157d2c196fdef38b5fe1912c98965382fc0ad3c14c2448a7cdba88a986042001",
+  "download": "/v1/artifacts/artifact_export_2"
+}

@@ -1,0 +1,9 @@
+{
+  "name": "subject",
+  "source": "command-tail",
+  "description": "Invented",
+  "required": true,
+  "schema": {
+    "type": "string"
+  }
+}

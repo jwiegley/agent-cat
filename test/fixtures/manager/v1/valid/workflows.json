@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "page": {
+    "setId": "set_A",
+    "revision": "view_1",
+    "expiresAt": "2026-09-03T00:01:00Z",
+    "index": 0,
+    "totalItems": 1,
+    "next": null
+  },
+  "items": [
+    {
+      "version": 1,
+      "id": "wf_review",
+      "revision": "catalogue_17",
+      "profileId": "profile_main",
+      "profileRevision": "profile_rev_4",
+      "descriptorVersion": 3,
+      "runnerVersion": "0.1.0.0",
+      "name": "review",
+      "blurb": "Review one subject",
+      "resultCode": "receipt",
+      "level": "pipeline",
+      "size": "3",
+      "askNodes": "2",
+      "minFold": "2",
+      "maxFold": "2",
+      "paths": "1",
+      "inputs": [
+        {
+          "name": "subject",
+          "source": "command-tail",
+          "description": null,
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "runFacts": [
+        "run.engine"
+      ],
+      "pins": [
+        "deep"
+      ],
+      "capabilities": {
+        "structuredRun": true,
+        "wholeRunCancel": true,
+        "requestControls": true,
+        "steering": false,
+        "interactiveRetry": false,
+        "schedulerRedirect": false,
+        "semanticResume": false,
+        "immutableFork": false,
+        "restartFromScratch": false,
+        "protocolNegotiation": false,
+        "routingInspection": false,
+        "personaRouting": false,
+        "modelAliasRouting": false,
+        "effectful": false,
+        "toolExecution": false,
+        "consults": "1",
+        "observes": "1",
+        "effects": "0",
+        "personAnsweringModes": [
+          "local-control"
+        ]
+      },
+      "help": "Review one subject. Exact planning requires supplied input."
+    }
+  ]
+}

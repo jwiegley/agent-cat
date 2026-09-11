@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "operation": "restore",
+  "backupFile": "/private/operator/backup.db",
+  "fencingEvidenceFile": "/private/operator/fencing.json"
+}

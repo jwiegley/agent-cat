@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "operation": "rotate-credential",
+  "credentialId": "credential_1",
+  "expiresAt": "2026-10-03T00:00:00Z",
+  "outputFile": "/private/operator/terminal-next.credential",
+  "clientId": "client_other"
+}

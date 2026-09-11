@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "id": "run_21",
+  "revision": "runrev_18",
+  "profileId": "profile_main",
+  "workflowId": "wf_review",
+  "requestId": "req_8",
+  "parentRunId": null,
+  "lineage": null,
+  "manifest": {
+    "kind": "versioned",
+    "frontendManifestVersion": 3
+  },
+  "runtime": {
+    "status": "running",
+    "lastSequence": "9007199254740993",
+    "protocolVersion": 2
+  },
+  "supervision": "lost",
+  "integrity": "corrupt",
+  "verification": {
+    "state": "verified",
+    "artifactId": "artifact_1"
+  },
+  "limitations": [
+    "corrupt-journal",
+    "lost-supervision"
+  ],
+  "links": {
+    "self": "/v1/runs/run_21",
+    "snapshot": "/v1/runs/run_21/snapshot",
+    "control": "/v1/runs/run_21/control",
+    "outputs": "/v1/runs/run_21/outputs",
+    "exports": "/v1/runs/run_21/exports",
+    "lineageRequests": "/v1/runs/run_21/lineage-requests"
+  }
+}

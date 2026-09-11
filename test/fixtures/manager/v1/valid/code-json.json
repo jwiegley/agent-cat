@@ -1,0 +1,21 @@
+{
+  "json": {
+    "schema": {
+      "property": {
+        "name": "approved",
+        "schema": "boolean",
+        "rest": {
+          "property": {
+            "name": "notes",
+            "schema": {
+              "array": {
+                "items": "string"
+              }
+            },
+            "rest": "object"
+          }
+        }
+      }
+    }
+  }
+}

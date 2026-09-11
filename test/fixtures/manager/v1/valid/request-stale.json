@@ -1,0 +1,8 @@
+{
+  "type": "urn:agent-cat:manager:problem:stale-revision",
+  "title": "Stale revision",
+  "status": 412,
+  "instance": "/v1/requests/req_8",
+  "code": "stale-revision",
+  "links": {}
+}

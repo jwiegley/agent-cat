@@ -1,0 +1,10 @@
+{
+  "operation": "fork",
+  "edits": [
+    {
+      "operation": "replace",
+      "occurrenceId": "0",
+      "value": false
+    }
+  ]
+}

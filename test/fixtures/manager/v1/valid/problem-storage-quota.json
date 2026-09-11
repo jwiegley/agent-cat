@@ -1,0 +1,8 @@
+{
+  "type": "urn:agent-cat:manager:problem:storage-quota",
+  "title": "Storage quota",
+  "status": 429,
+  "instance": "/v1/requests/req_8",
+  "code": "storage-quota",
+  "links": {}
+}

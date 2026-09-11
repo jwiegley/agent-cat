@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "operation": "unknown-operation",
+  "ok": false,
+  "error": {
+    "code": "unknown-operation",
+    "message": "Operation is not supported."
+  }
+}

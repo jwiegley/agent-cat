@@ -1,0 +1,110 @@
+{
+  "version": 2,
+  "page": {
+    "setId": "set_A",
+    "revision": "view_1",
+    "expiresAt": "2026-09-03T00:01:00Z",
+    "index": 0,
+    "totalItems": 2,
+    "next": null
+  },
+  "items": [
+    {
+      "occurrenceId": "18446744073709551615",
+      "state": "running",
+      "code": "text",
+      "intent": "consult",
+      "addressee": "model reviewer",
+      "prompt": "Review subject.",
+      "answer": null,
+      "dispatch": null,
+      "recovery": null,
+      "reuseKind": null,
+      "source": null,
+      "failureClass": null,
+      "replayable": true,
+      "decisionId": null,
+      "personPending": false,
+      "attempts": [
+        {
+          "address": {
+            "occurrenceId": "18446744073709551615",
+            "attemptId": "4294967295"
+          },
+          "targetLabel": "scripted",
+          "state": "running",
+          "output": "雪😀\n",
+          "steers": [],
+          "messages": [
+            "Working"
+          ],
+          "tools": [
+            {
+              "id": "tool_1",
+              "title": "Inspect input",
+              "status": "completed",
+              "summary": "Public update"
+            }
+          ],
+          "todos": [
+            {
+              "content": "Review",
+              "priority": "high",
+              "status": "in_progress"
+            }
+          ],
+          "usage": {
+            "used": "42",
+            "size": "100"
+          },
+          "reasoningSummaries": [
+            "Checked public constraints."
+          ],
+          "failure": null,
+          "failureClass": null
+        }
+      ]
+    },
+    {
+      "occurrenceId": "0",
+      "state": "running",
+      "code": "flag",
+      "intent": "consult",
+      "addressee": "person owner",
+      "prompt": "Proceed?",
+      "answer": null,
+      "dispatch": null,
+      "recovery": null,
+      "reuseKind": null,
+      "source": null,
+      "failureClass": null,
+      "replayable": true,
+      "decisionId": "decision_3",
+      "personPending": true,
+      "attempts": []
+    }
+  ],
+  "snapshotVersion": 1,
+  "runId": "run_21",
+  "runtime": {
+    "status": "running",
+    "lastSequence": "9007199254740993",
+    "protocolVersion": 2
+  },
+  "workflow": "review",
+  "targetLabel": "scripted",
+  "personAnswering": "local-control",
+  "authoredOrder": [],
+  "traceRecorded": false,
+  "controlAcks": [],
+  "billFresh": null,
+  "billMemo": null,
+  "result": null,
+  "verification": {
+    "state": "absent"
+  },
+  "failure": null,
+  "failureClass": null,
+  "supervision": "lost",
+  "integrity": "valid"
+}

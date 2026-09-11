@@ -1,0 +1,6 @@
+{
+  "operation": "choose-recovery",
+  "generation": "generation_3",
+  "occurrenceId": "0",
+  "choice": "failover"
+}

@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "page": {
+    "setId": "set_A",
+    "revision": "view_1",
+    "expiresAt": "2026-09-03T00:01:00Z",
+    "index": 0,
+    "totalItems": 1,
+    "next": null
+  },
+  "items": [
+    {
+      "version": 1,
+      "id": "profile_main",
+      "revision": "profile_rev_4",
+      "workspaceLabel": "Review workspace",
+      "targetLabel": "Deterministic worker",
+      "readiness": "ready",
+      "refusal": null
+    }
+  ]
+}

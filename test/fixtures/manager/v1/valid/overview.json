@@ -1,0 +1,130 @@
+{
+  "version": 1,
+  "page": {
+    "setId": "set_A",
+    "revision": "view_1",
+    "expiresAt": "2026-09-03T00:01:00Z",
+    "index": 0,
+    "totalItems": 3,
+    "next": null
+  },
+  "items": [
+    {
+      "kind": "request",
+      "request": {
+        "version": 1,
+        "id": "req_8",
+        "revision": "request_rev_1",
+        "workflowId": "wf_review",
+        "descriptorRevision": "catalogue_17",
+        "profileId": "profile_main",
+        "profileRevision": "profile_rev_4",
+        "phase": "draft",
+        "readiness": {
+          "declarations": [
+            {
+              "name": "subject",
+              "source": "command-tail",
+              "description": null,
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "supplied": [],
+          "missing": [
+            "subject"
+          ],
+          "errors": []
+        },
+        "admission": {
+          "state": "not-queued",
+          "position": null,
+          "reasons": [
+            "missing-inputs"
+          ]
+        },
+        "preparationId": null,
+        "runId": null,
+        "parentRunId": null,
+        "lineage": null,
+        "links": {
+          "self": "/v1/requests/req_8"
+        }
+      }
+    },
+    {
+      "kind": "run",
+      "run": {
+        "version": 1,
+        "id": "run_21",
+        "revision": "runrev_18",
+        "profileId": "profile_main",
+        "workflowId": "wf_review",
+        "requestId": "req_8",
+        "parentRunId": null,
+        "lineage": null,
+        "manifest": {
+          "kind": "versioned",
+          "frontendManifestVersion": 3
+        },
+        "runtime": {
+          "status": "running",
+          "lastSequence": "9007199254740993",
+          "protocolVersion": 2
+        },
+        "supervision": "lost",
+        "integrity": "valid",
+        "verification": {
+          "state": "absent"
+        },
+        "limitations": [
+          "lost-supervision"
+        ],
+        "links": {
+          "self": "/v1/runs/run_21",
+          "snapshot": "/v1/runs/run_21/snapshot",
+          "control": "/v1/runs/run_21/control",
+          "outputs": "/v1/runs/run_21/outputs",
+          "exports": "/v1/runs/run_21/exports",
+          "lineageRequests": "/v1/runs/run_21/lineage-requests"
+        }
+      }
+    },
+    {
+      "kind": "decision",
+      "decision": {
+        "version": 1,
+        "id": "decision_3",
+        "revision": "decisionrev_1",
+        "runId": "run_21",
+        "profileId": "profile_main",
+        "generation": "generation_3",
+        "address": {
+          "occurrenceId": "0"
+        },
+        "state": "pending",
+        "position": 0,
+        "observedSequence": "9007199254740994",
+        "queue": "/v1/decisions?runId=run_21",
+        "kind": "question",
+        "question": {
+          "code": "flag",
+          "semanticSchema": "boolean",
+          "editorSchema": null,
+          "addressee": "person owner",
+          "scope": {
+            "model": null,
+            "mode": null
+          },
+          "draw": "0",
+          "prompt": "Proceed with 雪😀?"
+        }
+      }
+    }
+  ],
+  "snapshotVersion": 1,
+  "cursor": "stream_A.1041",
+  "oldestCursor": "stream_A.1000"
+}

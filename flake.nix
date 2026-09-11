@@ -40,6 +40,7 @@
             pkgs.cabal-install
             # Test-only: generate an ephemeral loopback TLS certificate.
             pkgs.openssl
+            (pkgs.python3.withPackages (p: [ p.pyyaml p.jsonschema p.openapi-spec-validator ]))
           ];
         };
       });

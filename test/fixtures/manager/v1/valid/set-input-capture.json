@@ -1,0 +1,8 @@
+{
+  "operation": "set-input",
+  "input": {
+    "name": "subject",
+    "source": "capture",
+    "captureId": "capture_6"
+  }
+}

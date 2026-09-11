@@ -1,0 +1,60 @@
+{
+  "occurrenceId": "18446744073709551615",
+  "state": "running",
+  "code": {
+    "json": {
+      "schema": "boolean"
+    }
+  },
+  "intent": "consult",
+  "addressee": "model reviewer",
+  "prompt": "Review subject.",
+  "answer": null,
+  "dispatch": null,
+  "recovery": null,
+  "reuseKind": null,
+  "source": null,
+  "failureClass": null,
+  "replayable": true,
+  "decisionId": null,
+  "personPending": false,
+  "attempts": [
+    {
+      "address": {
+        "occurrenceId": "18446744073709551615",
+        "attemptId": "4294967295"
+      },
+      "targetLabel": "scripted",
+      "state": "running",
+      "output": "雪😀\n",
+      "steers": [],
+      "messages": [
+        "Working"
+      ],
+      "tools": [
+        {
+          "id": "tool_1",
+          "title": "Inspect input",
+          "status": "completed",
+          "summary": "Public update"
+        }
+      ],
+      "todos": [
+        {
+          "content": "Review",
+          "priority": "high",
+          "status": "in_progress"
+        }
+      ],
+      "usage": {
+        "used": "42",
+        "size": "100"
+      },
+      "reasoningSummaries": [
+        "Checked public constraints."
+      ],
+      "failure": null,
+      "failureClass": null
+    }
+  ]
+}

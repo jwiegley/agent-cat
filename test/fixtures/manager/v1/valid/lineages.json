@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "page": {
+    "setId": "set_A",
+    "revision": "view_1",
+    "expiresAt": "2026-09-03T00:01:00Z",
+    "index": 0,
+    "totalItems": 0,
+    "next": null
+  },
+  "items": [],
+  "runId": "run_21",
+  "eligible": [
+    "restart",
+    "resume",
+    "fork"
+  ],
+  "refusal": null
+}

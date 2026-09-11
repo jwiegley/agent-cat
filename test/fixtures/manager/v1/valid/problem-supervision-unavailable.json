@@ -1,0 +1,8 @@
+{
+  "type": "urn:agent-cat:manager:problem:supervision-unavailable",
+  "title": "Supervision unavailable",
+  "status": 503,
+  "instance": "/v1/requests/req_8",
+  "code": "supervision-unavailable",
+  "links": {}
+}
