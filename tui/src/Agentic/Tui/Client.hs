@@ -24,6 +24,9 @@ import Agentic.Runtime
     RunRecord (..),
     WorkflowDescriptor (..),
     WorkflowInputDescriptor (..),
+    capabilityServer,
+    capabilityManifestVersions,
+    capabilityLegacyManifests,
     closeGroupPipes,
     createProcessGroup,
     decodeExactPlan,
@@ -36,16 +39,14 @@ import Agentic.Runtime
     terminateProcessGroup,
     waitProcessGroup,
   )
+import qualified Agentic.Runtime as Runtime (decodeFrontendCapabilities)
 import Agentic.Tui.Root
 import Agentic.Tui.Types
 import Control.Concurrent.Async (concurrently)
 import Control.Exception (SomeAsyncException, SomeException, bracket, displayException, finally, fromException, throwIO, try)
 import Control.Monad (unless)
 import Crypto.Hash (Digest, SHA256, hash)
-import Data.Aeson (FromJSON (parseJSON), eitherDecodeStrict', encode, withObject, (.:))
-import qualified Data.Aeson.Key as Key
-import qualified Data.Aeson.KeyMap as KeyMap
-import Data.Aeson.Types (Object, Parser)
+import Data.Aeson (encode)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
 import Data.Map.Strict (Map)
@@ -80,33 +81,14 @@ data InitialData = InitialData
     initialRouting :: !(Either Text RoutingSummary)
   }
 
-newtype TuiCapabilities = TuiCapabilities FrontendServer
-
-instance FromJSON TuiCapabilities where
-  parseJSON = withObject "frontend capabilities" $ \fields -> do
-    capabilityKeys fields ["version", "operation", "server", "session", "io", "export", "frontendManifestVersions", "legacyFrontendManifests"]
-    version <- fields .: "version" :: Parser Int
-    unless (version == 1) (fail "unsupported frontend capability version")
-    operation <- fields .: "operation" :: Parser Text
-    unless (operation == "capabilities") (fail "unexpected frontend capability operation")
-    fields .: "session" >>= withObject "frontend session capabilities" (const (pure ()))
-    fields .: "io" >>= withObject "frontend IO capabilities" (const (pure ()))
-    fields .: "export" >>= withObject "frontend export capabilities" (const (pure ()))
-    manifestVersions <- fields .: "frontendManifestVersions"
-    unless (manifestVersions == ([2, 3] :: [Int])) (fail "frontend manifest capabilities are not versions 2 and 3")
-    legacy <- fields .: "legacyFrontendManifests"
-    unless legacy (fail "frontend capability omits legacy manifest support")
-    TuiCapabilities <$> fields .: "server"
-
-capabilityKeys :: Object -> [Text] -> Parser ()
-capabilityKeys fields allowed =
-  unless (all ((`elem` allowed) . Key.toText) (KeyMap.keys fields)) $
-    fail "frontend capabilities contain unknown fields"
-
 decodeFrontendCapabilities :: BS.ByteString -> Either Text FrontendServer
-decodeFrontendCapabilities bytes = case eitherDecodeStrict' bytes of
-  Left why -> Left (T.pack why)
-  Right (TuiCapabilities server) -> Right server
+decodeFrontendCapabilities bytes = do
+  capabilities <- Runtime.decodeFrontendCapabilities bytes
+  unless (capabilityManifestVersions capabilities == [2, 3]) $
+    Left "Error in $: frontend manifest capabilities are not versions 2 and 3"
+  unless (capabilityLegacyManifests capabilities) $
+    Left "Error in $: frontend capability omits legacy manifest support"
+  pure (capabilityServer capabilities)
 
 loadRunCatalogue :: TuiConfig -> PrivateRoot -> IO (Either Text [CatalogueEntry])
 loadRunCatalogue config root = do

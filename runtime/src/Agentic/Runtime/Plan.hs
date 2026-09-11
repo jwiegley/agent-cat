@@ -5,6 +5,7 @@ module Agentic.Runtime.Plan
   ( ExactPlanSummary (..),
     PlanFold (..),
     decodeExactPlan,
+    parseExactPlan,
   )
 where
 
@@ -40,6 +41,7 @@ decodeExactPlan bytes = do
   value <- either (Left . T.pack) Right (eitherDecodeStrict' bytes)
   either (Left . T.pack) Right (parseEither parseExactPlan value)
 
+-- | Parse an already decoded exact plan without serializing its opaque program again.
 parseExactPlan :: Value -> Parser (ExactPlanSummary, Value)
 parseExactPlan = withObject "exact workflow plan" $ \object -> do
   program <- object .: "program"

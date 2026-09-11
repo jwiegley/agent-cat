@@ -26,6 +26,7 @@ import Agentic.Runtime
     decodeEnvelopeFor,
     decodeFrontendManifest,
     decodeWorkflowDescriptor,
+    frontendCapabilities,
     initialRunSnapshot,
     mkRunId,
     stepRunSnapshot,
@@ -45,7 +46,8 @@ import Control.Concurrent.MVar (newEmptyMVar, takeMVar, tryPutMVar, tryReadMVar)
 import Control.Concurrent.STM (atomically, isEmptyTBQueue, newTBQueueIO)
 import Control.Exception (finally)
 import Control.Monad (foldM, forM_, void)
-import Data.Aeson (Value (..), encode, object, (.=))
+import Data.Aeson (Value (..), encode, object, toJSON, (.=))
+import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Bits ((.&.))
 import Data.List (findIndex)
 import qualified Data.ByteString as BS
@@ -130,11 +132,7 @@ runTests = do
           frontendRunnerVersion = Just (frontendServerRunnerVersion storedServer),
           frontendInvocation = Just storedInvocation
         }
-      capabilityDocument = object
-        [ "version" .= (1 :: Int), "operation" .= ("capabilities" :: Text), "server" .= storedServer,
-          "session" .= object [], "io" .= object [], "export" .= object [],
-          "frontendManifestVersions" .= ([2, 3] :: [Int]), "legacyFrontendManifests" .= True
-        ]
+      capabilityDocument = toJSON (frontendCapabilities storedServer)
       encodedCapabilities = BL.toStrict (encode capabilityDocument <> "\n")
       rejectsCapabilities value = either (const True) (const False) (decodeFrontendCapabilities (BL.toStrict (encode value <> "\n")))
       rejectsInvocation config = either (const True) (const False) (validateStoredInvocation config invokedManifest)
@@ -164,9 +162,9 @@ runTests = do
       == Right ["--routing", "--persona", "work", "--offline", "--expect-routing-fingerprint", T.unpack (routingSummaryFingerprint routing)]
   check "capability discovery retains server identity distinct from configured invocation" $
     decodeFrontendCapabilities encodedCapabilities == Right storedServer
-      && rejectsCapabilities (object ["version" .= (1 :: Int), "operation" .= ("capabilities" :: Text), "server" .= storedServer,
-            "session" .= object [], "io" .= object [], "export" .= object [],
-            "frontendManifestVersions" .= ([2, 3] :: [Int]), "legacyFrontendManifests" .= True, "future" .= True])
+      && rejectsCapabilities (case capabilityDocument of
+           Object fields -> Object (KeyMap.insert "future" (Bool True) fields)
+           _ -> error "native capability advertisement is not an object")
   check "configured invocation accepts only the exact trusted alias, executable, and prefix" $
     validateStoredInvocation trustedConfig invokedManifest == Right ()
       && frontendInvocationRunnerAlias storedInvocation /= frontendServerRunnerId storedServer

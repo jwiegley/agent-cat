@@ -11,6 +11,7 @@ module Agentic.Runtime.Frontend
 where
 
 import Agentic.Runtime.Catalogue
+import Agentic.Runtime.Frontend.Protocol (maxFrontendQueryBytes, maxFrontendReplyBytes)
 import Agentic.Runtime.Snapshot (runSnapshotValue, snapshotResult)
 import Agentic.Runtime.PrivateRoot
 import Agentic.Runtime.Protocol
@@ -34,10 +35,6 @@ import Data.Maybe (isJust)
 import Data.Time.Clock (getCurrentTime)
 import System.FilePath ((</>))
 import System.Posix.Types (Fd)
-
--- | Bound allowing a runtime reference and its separately encoded root identity.
-maxFrontendQueryBytes :: Int
-maxFrontendQueryBytes = 2 * maxFrameBytes
 
 -- | A private-root observation or an artifact query with its expected reference.
 data FrontendQuery
@@ -146,7 +143,7 @@ runFrontendQuery bytes
         outcome <- try @SomeException $ do
           value <- executeQuery query
           let response = encode value <> "\n"
-          when (toInteger (BL.length response) > maxArtifactBytes + 4096) $
+          when (toInteger (BL.length response) > maxFrontendReplyBytes) $
             ioError (userError "frontend response exceeds its artifact byte bound")
           pure (BL.toStrict response)
         boundedOutcome outcome

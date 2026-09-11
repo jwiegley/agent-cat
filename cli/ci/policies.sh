@@ -116,9 +116,10 @@ python3 test/cabal_env_probe.py
 runghc -package=ghc -package=Cabal-syntax test/source-boundaries.hs "$(ghc --print-libdir)"
 python3 test/source_roots_probe.py
 test/cabal.sh run -v0 policy-probe -- +RTS -N8 -RTS
-test/cabal.sh build agentic-run routing-fixed-point-probe >/dev/null
+test/cabal.sh build agentic-run routing-fixed-point-probe runtime-contract-test >/dev/null
 agentic_run=$(test/cabal.sh list-bin agentic-run)
 control_runner=$(test/cabal.sh list-bin routing-fixed-point-probe)
+codec_runner=$(test/cabal.sh list-bin runtime-contract-test)
 GHCRTS=-N8 python3 test/lineage_probe.py "$agentic_run"
 GHCRTS=-N8 python3 test/control_probe.py "$agentic_run" "$control_runner"
 GHCRTS=-N8 python3 test/person_control_probe.py "$control_runner"
@@ -126,6 +127,7 @@ GHCRTS=-N8 python3 test/person_lineage_probe.py "$control_runner"
 python3 test/frontend_io_probe.py "$agentic_run"
 GHCRTS=-N8 python3 test/frontend_session_probe.py "$control_runner"
 python3 test/frontend_export_probe.py "$control_runner"
+GHCRTS=-N8 python3 test/frontend_contract_probe.py "$control_runner" "$codec_runner"
 
 # ---------------------------------------------------------------------------
 # The refusals that are the command line's

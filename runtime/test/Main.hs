@@ -5,6 +5,7 @@
 module Main (main) where
 
 import Agentic.Runtime
+import FrontendProtocolTests (frontendProtocolTests, frontendCodecCheck)
 import Control.Concurrent (forkIO, killThread, threadDelay)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar, tryReadMVar)
 import Control.Exception (IOException, SomeException, bracket, finally, throwIO, try)
@@ -41,10 +42,15 @@ main = getArgs >>= \case
     request <- BS.hGet stdin (maxFrontendQueryBytes + 1)
     response <- runFrontendQuery request
     either (\failure -> hPutStrLn stderr (T.unpack failure) >> exitWith (ExitFailure 3)) BS.putStr response
+  "--frontend-codec-test" : arguments -> do
+    request <- BS.hGet stdin (fromInteger maxFrontendReplyBytes + 1)
+    let response = frontendCodecCheck arguments request
+    either (\failure -> hPutStrLn stderr (T.unpack failure) >> exitWith (ExitFailure 3)) BS.putStr response
   _ -> contractTests
 
 contractTests :: IO ()
 contractTests = do
+  frontendProtocolTests
   privateRootContractTests
   frontendIoContractTests
   frontendExportContractTests
