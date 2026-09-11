@@ -90,7 +90,6 @@ runTests = do
   manifestBytes <- BS.readFile "test/fixtures/runtime/frontend-manifest/v2.json"
   personBytes <- BS.readFile "test/fixtures/runtime/protocol-v2/person-result.ndjson"
   descriptor <- requireRight "descriptor fixture" (decodeWorkflowDescriptor descriptorBytes)
-  tuiRootRoleTests descriptor (previewFor descriptor Map.empty)
   manifest <- requireRight "frontend manifest fixture" (decodeFrontendManifest manifestBytes)
   envelope <- requireRight "protocol fixture" (decodeEnvelopeFor [1] startedBytes)
   runId <- requireRight "run id" (mkRunId "tui-model-test")
@@ -139,6 +138,7 @@ runTests = do
       encodedCapabilities = BL.toStrict (encode capabilityDocument <> "\n")
       rejectsCapabilities value = either (const True) (const False) (decodeFrontendCapabilities (BL.toStrict (encode value <> "\n")))
       rejectsInvocation config = either (const True) (const False) (validateStoredInvocation config invokedManifest)
+  tuiRootRoleTests descriptor (previewFor descriptor Map.empty) runRecord
   concurrent <- twoOccurrenceSnapshot
   tailed <- longOutputSnapshot
   (mixedEvents, mixedSnapshot) <- mixedDecisionSnapshot

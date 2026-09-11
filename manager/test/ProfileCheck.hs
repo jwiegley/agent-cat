@@ -5,7 +5,7 @@ module Main (main) where
 import Agentic.Manager
 import Agentic.Runtime
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async (AsyncCancelled (..), async, cancel, waitCatch)
+import Control.Concurrent.Async (AsyncCancelled (..), async, asyncThreadId, cancel, wait, waitCatch, withAsync)
 import Control.Exception (IOException, fromException, try)
 import Control.Monad (forM_, unless, void)
 import Data.Aeson (Value (Object), eitherDecodeStrict', encode, object, toJSON, (.=))
@@ -18,7 +18,8 @@ import Data.List (sort)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Numeric (showHex)
-import System.Directory (createDirectory, getCurrentDirectory)
+import GHC.Conc (BlockReason (BlockedOnMVar), ThreadStatus (ThreadBlocked), threadStatus)
+import System.Directory (createDirectory, doesFileExist, getCurrentDirectory)
 import System.Environment (getArgs, getEnvironment, getExecutablePath)
 import System.Exit (exitFailure)
 import System.FilePath ((</>))
@@ -36,6 +37,15 @@ right = either (error . show) pure
 
 expect :: String -> Diagnostic -> Either Diagnostic a -> IO ()
 expect label expected result = check label (case result of Left actual -> actual == expected; Right _ -> False)
+
+await :: String -> IO Bool -> IO ()
+await label ready = do
+  reached <- timeout 5000000 loop
+  check label (reached == Just ())
+  where
+    loop = do
+      done <- ready
+      unless done (threadDelay 1000 >> loop)
 
 main :: IO ()
 main = do
@@ -62,6 +72,15 @@ fixture mode observations replies command = do
     "malformed" -> BS.hPut stdout "SYNTHETIC_PRIVATE_DECODER_DATA"
     "dual" -> BS.hPut stderr (BS.replicate 70000 120) >> reply command
     "normal" -> reply command
+    "gated" -> do
+      let phase = case command of
+            ["frontend", "--capabilities"] -> "capabilities"
+            ["list", "--json", "--descriptor-version", "3"] -> "catalogue"
+            _ -> error "unexpected gated query"
+          gate = observations <> "." <> phase
+      BS.writeFile (gate <> ".ready") BS.empty
+      await "private fixture release deadline" (doesFileExist (gate <> ".go"))
+      reply command
     _ -> error "unknown private fixture mode"
   where
     reply ["frontend", "--capabilities"] = BS.readFile (replies </> "capabilities.json") >>= BS.hPut stdout
@@ -192,7 +211,25 @@ checks root source = do
       probe registry blocked >>= expect "policy probe refusal" failure
       select registry blocked >>= expect "policy selection refusal" failure
     assertPublic registry readiness refusal
-  putStrLn "PASS registry: unknown, stale, removed, failed reload, fresh revisions, immutable contexts, explicit ownership, exact frozen public JSON"
+  serialized <- newRegistry (QueryLimits 65536 30000000) >>= right
+  gated <- rowOf serialized (definition "gated")
+  withAsync (probe serialized gated) $ \probing -> do
+    await "capability query reached gate" (doesFileExist (observations <> ".capabilities.ready"))
+    withAsync (rowOf serialized (definition "normal")) $ \reloading -> do
+      await "reload blocks behind discovery" ((== ThreadBlocked BlockedOnMVar) <$> threadStatus (asyncThreadId reloading))
+      BS.writeFile (observations <> ".capabilities.go") BS.empty
+      await "catalogue query reached gate" (doesFileExist (observations <> ".catalogue.ready"))
+      status <- threadStatus (asyncThreadId reloading)
+      check "reload remains blocked through second query" (status == ThreadBlocked BlockedOnMVar)
+      BS.writeFile (observations <> ".catalogue.go") BS.empty
+      void (wait probing >>= right)
+      replaced <- wait reloading
+      check "serialized reload changes revision" (publicRevision replaced /= publicRevision gated)
+      assertNoLaunch "old revision cannot launch after concurrent reload" $ do
+        probe serialized gated >>= expect "old concurrent revision" StaleRevision
+        select serialized gated >>= expect "old concurrent selection" StaleRevision
+      select serialized replaced >>= expect "reload does not inherit previous discovery readiness" SupervisionUnavailable
+  putStrLn "PASS registry: unknown, stale, removed, failed reload, fresh revisions, immutable contexts, explicit ownership, exact frozen public JSON, concurrent reload/probe serialization"
 
   let missing =
         [ native {capabilitySessionVersions = []}, native {capabilityInvocationVersions = []},

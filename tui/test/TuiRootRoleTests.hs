@@ -3,12 +3,12 @@
 
 module TuiRootRoleTests (tuiRootRoleTests) where
 
-import Agentic.Runtime (FrontendServer (..), WorkflowDescriptor (workflowRunnerVersion))
+import Agentic.Runtime (FrontendServer (..), LineageOperation (RestartRun), RunRecord (..), RunOwnership (RunTerminal), WorkflowDescriptor (workflowRunnerVersion))
 import qualified Agentic.Runtime as Runtime
-import Agentic.Tui.Client (buildLaunchPreview, loadInitialData, loadRunCatalogue)
+import Agentic.Tui.Client (buildLaunchPreview, buildLineagePreview, loadInitialData, loadRunCatalogue)
 import Agentic.Tui.Process (startMachine)
 import qualified Agentic.Tui.Root as Local
-import Agentic.Tui.Types (LaunchPreview, TargetSelection (TargetScripted), TuiConfig (..))
+import Agentic.Tui.Types (LaunchPreview, TargetSelection (TargetScripted), TuiConfig (..), validateStoredInvocation)
 import Control.Concurrent.STM (newTBQueueIO)
 import Control.Exception (IOException, displayException, finally, try)
 import Control.Monad (forM_, unless)
@@ -22,8 +22,8 @@ import System.FilePath ((</>))
 import qualified System.Posix.Directory as Directory
 
 -- The test executable records any accidental runner launch before failing.
-tuiRootRoleTests :: WorkflowDescriptor -> LaunchPreview -> IO ()
-tuiRootRoleTests descriptor preview = do
+tuiRootRoleTests :: WorkflowDescriptor -> LaunchPreview -> RunRecord -> IO ()
+tuiRootRoleTests descriptor preview parentRecord = do
   temporary <- getTemporaryDirectory
   stamp <- getMonotonicTimeNSec
   runner <- getExecutablePath
@@ -39,6 +39,13 @@ tuiRootRoleTests descriptor preview = do
       forM_ ["parent", "child", "partial"] $ \name -> do
         Runtime.ensurePrivateDirectoryAt root ["runs", name]
         Runtime.writePrivateExclusiveAt root ["runs", name, "sentinel"] "preserved"
+      let lineage = parentRecord {recordDirectory = path </> "runs" </> "parent"}
+          manifestBytes = Runtime.encodeFrontendManifest (recordManifest lineage)
+      unless (recordOwnership lineage == RunTerminal && maybe False (const True) (recordSnapshot lineage)) $
+        ioError (userError "lineage fixture must have a validated terminal snapshot")
+      unless (validateStoredInvocation config (recordManifest lineage) == Right ()) $
+        ioError (userError "lineage fixture invocation does not pass trusted configuration check")
+      Runtime.writePrivateExclusiveAt root ["runs", "parent", "supervisor-manifest.json"] manifestBytes
       before <- listDirectory path
       startup <- try @IOException (Local.withPrivateRoot path (const (ioError (userError "local startup callback ran"))))
       expectThrownRole "TUI startup" startup
@@ -47,6 +54,9 @@ tuiRootRoleTests descriptor preview = do
       loadInitialData config root >>= expectRole "TUI discovery"
       loadRunCatalogue config root >>= expectRole "TUI catalogue"
       buildLaunchPreview config root descriptor Map.empty TargetScripted >>= expectRole "TUI preview"
+      buildLineagePreview config root descriptor lineage RestartRun >>= expectRole "TUI lineage preview"
+      retainedManifest <- BS.readFile (path </> "runs" </> "parent" </> "supervisor-manifest.json")
+      unless (retainedManifest == manifestBytes) (ioError (userError "TUI lineage refusal changed parent manifest"))
       queue <- newTBQueueIO 4
       startMachine server config root preview queue (pure ()) (const (pure ())) >>= expectRole "TUI launch"
       didLaunch <- doesFileExist launched
