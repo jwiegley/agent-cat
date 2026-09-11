@@ -3724,6 +3724,77 @@ contracts.  It supplies neither a metadata transaction nor a manager service,
 and its tests do not establish SQLite confinement or physical power-loss
 behavior.
 
+@section State-root ownership
+
+@findex readStateRootRoleAt
+@findex assertLocalStateRoot
+@findex withLocalStateRoot
+@findex establishManagerRootRole
+A manager storage root has a private, owned, regular
+@file{.agentic-root-role.json} file.  Its canonical version-1 bytes are
+@code{@{"version":1,"role":"manager"@}} followed by one LF.
+@code{readStateRootRoleAt} reads that exact marker through a retained directory
+descriptor.  Absence yields @code{UnmarkedStateRoot}, while the canonical marker
+yields @code{ManagerStateRoot}.  Malformed, noncanonical, inaccessible, linked,
+or non-private markers refuse rather than becoming unmarked local state.
+
+@code{assertLocalStateRoot} refuses manager markers in the observed directory
+ancestry.  The walk requires readable directories and is bounded at 256 levels.
+@code{withLocalStateRoot} checks each directory role while opening or creating
+the local path through retained descriptors, then validates the resulting root
+against the configured pathname.  The TUI uses this contract before startup,
+discovery, catalogue refresh, preview, and launch.  Missing manifests do not
+bypass the root-level refusal.  Generic Runtime access remains available to
+manager code, and no existing frontend-IO request version is changed.
+
+@code{establishManagerRootRole} requires a durably provisioned root.  It publishes
+the marker only into an empty unmarked namespace with unmarked ancestry.
+A matching existing marker is synchronized again without replacement, including
+when its earlier publication was unconfirmed.  Failed barriers refuse success
+and never remove the installed marker.  The role does not provide a service
+lock, an ownership-transfer operation, or protection against arbitrary code with
+the same OS authority.  Other local clients must adopt the role contract, and
+older clients require disjoint configured directories.
+
+@section Trusted profile library
+
+@findex newRegistry
+@findex reloadProfiles
+@findex publicProfiles
+@findex selectProfile
+@findex probeProfile
+@findex validateRootSeparation
+@code{Agentic.Manager} provides a private profile registry and bounded trusted
+runner discovery.  It is not a manager service or an operator-configuration
+loader.  Trusted composition supplies @code{OperatorProfile} values with an
+exact configured invocation, working directory, target arguments, explicit
+environment, public labels, ownership classification, and quarantine state.
+Historical manifests and process-reported identity do not grant that authority.
+
+A successful reload validates the whole candidate set and atomically replaces
+the registry.  Every profile receives a new opaque revision, and invalid
+definitions leave the old snapshot intact.  Revisions use a random registry
+namespace and a generation rather than hashes of secret values.  Selection and
+probing check the current ID and revision, and unavailable profiles do not
+supply a mutation selection.  Returned contexts are immutable values, not
+approvals.  The owning coordinator must serialize approval with reload.
+
+Discovery uses direct argument vectors and an explicit environment for
+@code{frontend --capabilities} and @code{list --json --descriptor-version 3}.
+Each query has a positive budget of at most 4 MiB per stream and 30 seconds.
+Both streams are drained before the shared Runtime codecs validate the reply.
+The registry lock covers both queries and their readiness update.  Runtime
+cleanup preserves sole-reaper authority and can exceed the query deadline.
+Public profiles contain only the frozen safe projection and fixed refusal
+categories, never private execution fields or raw diagnostics.
+
+@code{validateRootSeparation} refuses equal, nested, or observed aliased manager
+and local-retention paths using canonical ancestry and directory identities.
+It includes not-yet-created suffixes and revalidates the manager root.  It does
+not freeze mount configuration or confer authority over later pathname IO.
+CLI policy construction, resource and person policy, approval integration, and
+the remaining clients are not supplied by this library alone.
+
 @section Native frontend preparation
 @c COVER CLI verb:frontend author
 

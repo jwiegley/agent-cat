@@ -103,8 +103,37 @@ main = do
     after <- listDirectory (path </> "one" </> "two")
     check "retry after uncertain sync neither deletes nor replaces" $ before == after && case retry of
       CaptureNotPublished _ -> True
-      _ -> False) `finally` removePathForcibly bucket
-  putStrLn "capture fault tests passed: real barriers, injected sync errors, post-link replacement and cancellation"
+      _ -> False
+    roleFaultTests bucket) `finally` removePathForcibly bucket
+  putStrLn "capture and role fault tests passed: real barriers, injected sync errors, post-link replacement and cancellation"
+
+roleFaultTests :: FilePath -> IO ()
+roleFaultTests bucket = forM_ [1, 2] $ \failure ->
+  withPrivateRoot "role fault root" (bucket </> ("role-" <> show failure)) $ \root -> do
+    configure failure 0 (-1) (-1)
+    initial <- try @SomeException (establishManagerRootRole root)
+    check "failed role barrier refuses establishment" (case initial of Left _ -> True; Right () -> False)
+    syncCalls >>= check "role establishment reaches expected failed barrier" . (== failure)
+    role <- withPrivateDirectoryAt root [] readStateRootRoleAt
+    check "role failure preserves publication phase" (role == if failure == 1 then UnmarkedStateRoot else ManagerStateRoot)
+    configure 0 0 (-1) (-1)
+    establishManagerRootRole root
+    count <- syncCalls
+    kinds <- mapM syncIsDirectory [0, 1]
+    check "role establishment synchronizes file and root" (count == 2 && kinds == [0, 1])
+    let marker = privateRootPath root </> ".agentic-root-role.json"
+    before <- getFileStatus marker
+    forM_ [1, 2] $ \failedAgain -> do
+      configure failedAgain 0 (-1) (-1)
+      retried <- try @SomeException (establishManagerRootRole root)
+      check "existing role does not bypass failed synchronization" (case retried of Left _ -> True; Right () -> False)
+      syncCalls >>= check "existing marker reaches failed barrier" . (== failedAgain)
+    configure 0 0 (-1) (-1)
+    establishManagerRootRole root
+    syncCalls >>= check "existing role repeats both persistence barriers" . (== 2)
+    after <- getFileStatus marker
+    check "uncertain existing role is never replaced" (fileID before == fileID after)
+    readPrivateFileAt root [".agentic-root-role.json"] 256 >>= check "role bytes survive synchronization failures" . (== "{\"version\":1,\"role\":\"manager\"}\n")
 
 chunks :: IO (IO BS.ByteString)
 chunks = do

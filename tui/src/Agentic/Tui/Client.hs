@@ -93,10 +93,10 @@ decodeFrontendCapabilities bytes = do
 loadRunCatalogue :: TuiConfig -> PrivateRoot -> IO (Either Text [CatalogueEntry])
 loadRunCatalogue config root = do
   outcome <- try @SomeException $ do
-    assertPrivateRoot root
+    assertLocalStateRoot root
     now <- getCurrentTime
     records <- withPrivateDirectoryAt root [] $ \descriptor -> listRunCatalogueAt (tuiStateDir config) descriptor Nothing now
-    assertPrivateRoot root
+    assertLocalStateRoot root
     pure records
   case outcome of
     Left failure | Just _ <- fromException @SomeAsyncException failure -> throwIO failure
@@ -117,6 +117,15 @@ loadRoutingSummary config persona = do
 
 loadInitialData :: TuiConfig -> PrivateRoot -> IO (Either Text InitialData)
 loadInitialData config root = do
+  outcome <- try @SomeException $ do
+    assertLocalStateRoot root
+    loadInitialDataUnchecked config root
+  case outcome of
+    Left failure | Just _ <- fromException @SomeAsyncException failure -> throwIO failure
+    _ -> pure (either (Left . T.pack . displayException) id outcome)
+
+loadInitialDataUnchecked :: TuiConfig -> PrivateRoot -> IO (Either Text InitialData)
+loadInitialDataUnchecked config root = do
   capabilities <- invokeRunner config ["frontend", "--capabilities"]
   case capabilities >>= decodeFrontendCapabilities of
     Left failure -> pure (Left ("capability discovery failed: " <> failure))
@@ -144,6 +153,7 @@ buildLaunchPreview config root descriptor inputs target = do
 
 buildLaunchPreviewUnchecked :: TuiConfig -> PrivateRoot -> WorkflowDescriptor -> Map Text Text -> TargetSelection -> IO (Either Text LaunchPreview)
 buildLaunchPreviewUnchecked config root descriptor inputs target = do
+  assertLocalStateRoot root
   stamp <- getMonotonicTimeNSec
   let components = ["previews", show stamp]
       directory = tuiStateDir config </> "previews" </> show stamp
@@ -155,7 +165,7 @@ buildLaunchPreviewUnchecked config root descriptor inputs target = do
             ["plan", T.unpack (workflowName descriptor), "--json", "--raw"]
               <> concatMap (\(name, path) -> ["--input-file", T.unpack name <> "=" <> path]) inputFiles
       result <- invokeRunnerWithRoot config (Just root) arguments
-      assertPrivateRoot root
+      assertLocalStateRoot root
       pure $ do
         bytes <- result
         (plan, program) <- decodeExactPlan bytes
@@ -187,6 +197,7 @@ buildLineagePreview config root descriptor record operation = case validateStore
   Left failure -> pure (Left failure)
   Right () -> do
     loaded <- try @SomeException $ do
+      assertLocalStateRoot root
       components <- privatePathComponents root (recordDirectory record)
       bytes <- withPrivateDirectoryAt root components $ \runDescriptor -> do
         revalidateLineageParentAt record runDescriptor
@@ -219,6 +230,7 @@ invokeRunnerWithRoot config root arguments = do
   environment <- case root of
     Nothing -> pure Nothing
     Just anchor -> do
+      assertLocalStateRoot anchor
       ambient <- getEnvironment
       pure (Just (("AGENT_CAT_STATE_ANCHOR", privateRootIdentity anchor) : filter ((/= "AGENT_CAT_STATE_ANCHOR") . fst) ambient))
   let command =
@@ -273,6 +285,7 @@ writeInputs root components directory descriptor inputs =
 
 cleanupPreview :: PrivateRoot -> [FilePath] -> Int -> IO ()
 cleanupPreview root components count = do
+  assertLocalStateRoot root
   mapM_ (removePrivateFileAt root . (components <>) . pure . (<> ".txt") . show) [0 .. count - 1]
   removePrivateDirectoryAt root components
 

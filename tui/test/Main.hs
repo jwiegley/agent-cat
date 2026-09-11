@@ -70,6 +70,7 @@ import System.FilePath ((</>))
 import System.IO (hFlush, stdout)
 import System.Timeout (timeout)
 import Test.QuickCheck (Testable, isSuccess, maxSuccess, quickCheckWithResult, stdArgs)
+import TuiRootRoleTests (tuiRootRoleTests)
 
 main :: IO ()
 main = do
@@ -79,6 +80,7 @@ main = do
       BS.hPut stdout "{not-json}\n"
       hFlush stdout
       threadDelay 60000000
+    "--root-role-runner" : path : _ -> BS.writeFile path "unexpected runner launch" >> exitFailure
     _ -> runTests
 
 runTests :: IO ()
@@ -88,6 +90,7 @@ runTests = do
   manifestBytes <- BS.readFile "test/fixtures/runtime/frontend-manifest/v2.json"
   personBytes <- BS.readFile "test/fixtures/runtime/protocol-v2/person-result.ndjson"
   descriptor <- requireRight "descriptor fixture" (decodeWorkflowDescriptor descriptorBytes)
+  tuiRootRoleTests descriptor (previewFor descriptor Map.empty)
   manifest <- requireRight "frontend manifest fixture" (decodeFrontendManifest manifestBytes)
   envelope <- requireRight "protocol fixture" (decodeEnvelopeFor [1] startedBytes)
   runId <- requireRight "run id" (mkRunId "tui-model-test")

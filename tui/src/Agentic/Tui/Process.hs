@@ -123,6 +123,7 @@ startMachine server config root preview events notifyFrame notifyExit = do
 
 prepareAndStart :: IORef (Maybe FilePath) -> IORef (Maybe ProcessGroup) -> IORef (Maybe (MVar ())) -> FrontendServer -> TuiConfig -> PrivateRoot -> LaunchPreview -> TBQueue Envelope -> IO () -> (MachineExit -> IO ()) -> IO RunningMachine
 prepareAndStart partialDirectory partialProcess partialActivation server config root preview events notifyFrame notifyExit = do
+  assertLocalStateRoot root
   unless (frontendServerRunnerVersion server == workflowRunnerVersion (previewDescriptor preview)) $
     ioError (userError "capability server version disagrees with the launch descriptor")
   when (maybe False ((== RootRun) . fst) (previewLineage preview)) $
@@ -208,7 +209,7 @@ prepareAndStart partialDirectory partialProcess partialActivation server config 
           <> targetArgs
           <> ["--protocol-version", "2", "--person-answering", "local-control"]
           <> concatMap (\(name, path) -> ["--input-file", T.unpack name <> "=" <> path]) inputFiles
-  assertPrivateRoot root
+  assertLocalStateRoot root
   let command =
         (proc (tuiRunner config) (tuiRunnerArgs config <> arguments))
           { cwd = Just launchCwd,
@@ -439,7 +440,9 @@ childEnvironment root runtime owner = do
 removePartialDirectory :: PrivateRoot -> FilePath -> IO ()
 removePartialDirectory root path = do
   let name = takeFileName path
-  _ <- try @SomeException (movePrivateAt root ["runs", name] [".failed-" <> name])
+  _ <- try @SomeException $ do
+    assertLocalStateRoot root
+    movePrivateAt root ["runs", name] [".failed-" <> name]
   pure ()
 
 closeQuietly :: Handle -> IO ()

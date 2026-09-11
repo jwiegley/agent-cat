@@ -1,9 +1,79 @@
 # Manager implementation boundary
 
-This directory currently contains dependency probes and the manager import
-policy. It does not yet contain a workflow-manager service. Implementation
-follows the [approved design](../doc/research/workflow-manager.md) and its
+This directory provides trusted profile registry and discovery operations through
+`Agentic.Manager`, alongside dependency probes and import-policy checks. It does
+not yet contain an operator-configuration loader or a workflow-manager service.
+Implementation follows the [approved design](../doc/research/workflow-manager.md) and its
 [work packages](../doc/research/workflow-manager-implementation-plan.md).
+
+## Profile authority
+
+`OperatorProfile` is a private immutable value supplied by trusted CLI
+composition. It contains the configured invocation, working directory, target
+arguments, explicit environment, public labels, ownership classification, and
+quarantine state. It has no generic `Show`, `Eq`, or JSON representation. The
+caller validates concrete target grammar, named-route ownership, workspace
+policy, and root ownership before installation. An invocation copied from a
+manifest or a process-reported server identity does not supply that authority.
+
+`newRegistry` creates a private registry with positive per-query budgets capped
+at 4 MiB per output stream and 30 seconds per query. `reloadProfiles` validates
+the entire candidate set before atomically replacing its snapshot. Every
+successful reload gives every profile a new revision, even when its values are
+unchanged. The revision combines a random registry namespace with a generation
+counter and contains no secret-derived hash. Invalid definitions leave the
+previous snapshot and revisions intact.
+
+`probeProfile` accepts only an installed ID and its exact revision. It refuses
+unknown, removed, stale, client-bound, and quarantined selections before any
+subprocess. The registry lock covers both queries and their readiness update.
+Each query uses the installed executable, ordered prefix, working directory,
+and explicit environment. The commands are `frontend --capabilities` and
+`list --json --descriptor-version 3`. Their streams are drained concurrently
+and bounded before the shared Runtime codecs decode them. Required operations
+and versions are checked, and catalogue runner versions must agree with the
+reported server. Missing support makes the profile unavailable.
+
+`publicProfiles` emits the frozen public Profile shape without invocation,
+environment, target arguments, or raw diagnostics. Failures are fixed categories
+rather than stderr or decoder messages. `selectProfile` returns an opaque
+immutable context only after current revision and readiness checks. That value
+is not approval, and this module has no operation that launches a returned
+selection. Approval commitment must be serialized with reload by the owning
+coordinator. An approved worker keeps its captured environment rather than
+taking a later profile's bindings.
+
+These operations do not freeze mutable executable or configuration files.
+They do not infer ownership from executable names or ACP transport, and process
+groups do not provide a sandbox. Each query has its own time budget, while the
+shared Runtime cleanup retains sole-reaper authority and can exceed that budget.
+Person-answering policy, resource quotas, CLI composition, and approval lifecycle
+integration remain separate unfinished parts of WM-008.
+
+## Root separation
+
+`validateRootSeparation` compares manager storage with the configured local
+retention roots. It checks canonical path ancestry and observed directory
+device/inode identities, including the suffix of a not-yet-created path.
+Equal, nested, and observed aliased roots refuse before a worker is started.
+The supplied manager `PrivateRoot` is revalidated around the check. A successful
+check is an observation, not authority for later pathname operations, and it
+does not freeze filesystem mounts or discover aliases outside the inspected
+ancestor paths.
+
+The shared Runtime root-role contract records manager ownership independently
+of manifests. The current TUI uses that contract for local startup, discovery,
+catalogue refresh, preview, and launch boundaries. It refuses a manager root
+even when its run directories have no manifests. Generic Runtime observation
+and manager IO remain available. Pi and downstream Emacs adoption are not
+provided by this component, and older clients still require configured directory
+separation. See [the Runtime contract](../runtime/README.md#state-root-roles).
+
+`manager/ci/profiles.sh` builds the actual library and runs the profile and root
+checks at one and eight runtime capabilities. It retains private fixture evidence
+under `CABAL_BUILDDIR`. Process checks use a deterministic executable with actual
+Runtime capability and descriptor codecs. No provider or workflow execution is
+part of that gate.
 
 ## Selected facilities
 

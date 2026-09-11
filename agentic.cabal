@@ -49,6 +49,7 @@ extra-source-files:
   runtime/test/capture_sync_fault.c
   manager/AGENTS.md
   manager/ci/dependencies.sh
+  manager/ci/profiles.sh
   manager/ci/contract.sh
   manager/test/DependencyProbe.hs
   manager/test/containment_probe.py
@@ -108,6 +109,7 @@ library
     plan/src
     cost/src
     runtime/src
+    manager/src
     tui/src
     engine/api/src
     engine/acp/src
@@ -128,6 +130,7 @@ library
     Agentic.DSL
     Agentic.DSL.Plan
     Agentic.Engine
+    Agentic.Manager
     Agentic.Plan
     Agentic.Planning
     Agentic.Route
@@ -146,6 +149,8 @@ library
     Agentic.Cli.Frontend
     Agentic.DSL.Json
     Agentic.Exec
+    Agentic.Manager.Profile
+    Agentic.Manager.Root
     Agentic.Plan.Value
     Agentic.Raw
     Agentic.RequirePinned
@@ -308,6 +313,20 @@ executable schema-probe
     , agentic:examples
     , agentic:verification
 
+executable manager-profile-probe
+  import:          settings
+  hs-source-dirs:  manager/test
+  main-is:         ProfileCheck.hs
+  build-depends:   agentic
+  ghc-options:     -threaded -rtsopts
+
+executable manager-root-probe
+  import:          settings
+  hs-source-dirs:  manager/test
+  main-is:         RootProbe.hs
+  build-depends:   agentic
+  ghc-options:     -threaded -rtsopts
+
 executable agentic-run
   import:          settings
   hs-source-dirs:  cli/run
@@ -335,6 +354,7 @@ test-suite runtime-contract-test
     CaptureTests
     FrontendProtocolTests
     SnapshotCheckpointTests
+    RootRoleTests
   ghc-options:      -threaded
   build-depends:
     , agentic
@@ -357,6 +377,7 @@ test-suite tui-model-test
     Agentic.Tui.Root
     Agentic.Tui.RunModel
     Agentic.Tui.Types
+    TuiRootRoleTests
   build-depends:
     , agentic
     , base

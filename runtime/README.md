@@ -76,6 +76,51 @@ capabilities. Its fault executable substitutes only this library's sync wrapper
 at link time, forwarding successful calls to the real platform implementation.
 It neither changes SQLite nor supplies SQLite confinement evidence.
 
+## State-root roles
+
+A manager root contains an owned private regular file named
+`.agentic-root-role.json`. Its version-1 representation is exactly the UTF-8
+bytes below, followed by one LF:
+
+```json
+{"version":1,"role":"manager"}
+```
+
+`readStateRootRoleAt` reads that marker through a supplied directory descriptor.
+It returns `UnmarkedStateRoot` only when the marker is absent, and
+`ManagerStateRoot` for the canonical private marker. Wrong bytes, unknown
+versions, extra or duplicate fields, noncanonical whitespace, oversized files,
+unreadable files, non-regular files, symbolic links, and non-private markers
+refuse rather than become absence. This is a storage role, not execution
+authority, a service lock, or a manifest version.
+
+`assertLocalStateRoot` checks the retained root and its observed directory
+ancestry before permitting local use. A manager marker on the root or an
+ancestor refuses local use. Ancestor directories must be readable, and the
+walk is bounded at 256 directories. `withLocalStateRoot` also checks roles while
+opening or creating the local directory chain through retained descriptors.
+It does not create missing local state beneath an observed manager marker.
+It canonicalizes configured path aliases and validates the final private root
+against the original pathname. Generic `withPrivateRoot` remains unchanged for
+manager access and existing low-level consumers.
+
+`establishManagerRootRole` requires an already durably provisioned root and
+unmarked ancestry above it. An unmarked root must be empty before its marker
+is published through the durable capture primitive. A matching existing marker
+is not replaced. Its file descriptor and containing root are synchronized
+again before success, including after an earlier unconfirmed publication.
+Barrier errors refuse establishment without removing the marker. A nonempty
+unmarked namespace, conflicting marker, or nested manager role is not silently
+claimed or repaired. The operation does not grant exclusive service ownership.
+
+Role checks observe the current directory view and do not freeze subsequent
+namespace changes or establish protection against another process with the
+same OS privileges. Local clients must use the local-use checks, while manager
+code may use the generic private IO contract. The current TUI uses these checks
+before its owned startup, enumeration, preview and launch paths. They do not
+change the existing generic frontend-IO request versions or implement Pi or
+Emacs retention for those clients.
+
 ## Neutral frontend transport
 
 `Agentic.Runtime.Frontend.Protocol`, re-exported through `Agentic.Runtime`,
