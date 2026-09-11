@@ -38,6 +38,7 @@
           buildInputs = [
             ghc
             pkgs.cabal-install
+            pkgs.lean4
             # Test-only: generate an ephemeral loopback TLS certificate.
             pkgs.openssl
             (pkgs.python3.withPackages (p: [ p.pyyaml p.jsonschema p.openapi-spec-validator ]))
