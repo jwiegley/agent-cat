@@ -7316,14 +7316,14 @@ WM006 COMPLETE 2026-09-11T10:03:45+00:00: independent fresh-origin fess1caf5361-
 ]
 #+end_src
 
-* DOING [#B] WM-007: Establish durable private publication and database confinement    :p1:
+* WAIT [#B] WM-007: Establish durable private publication and database confinement    :p1:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-wm-007-lfcg
 :LABELS:   ["p1","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-11 Fri 10:44]
+:MODIFIED: [2026-09-11 Fri 14:02]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-007
 :SOURCE_REPO: agent-cat
@@ -7390,6 +7390,16 @@ WM007 BLOCKED / WIGGUM STOP 2026-09-11T10:30:55+00:00: provider access gate stop
 
 PUBLICATION-ONLY RESUME/REFOCUS 2026-09-11T17:44:30+00:00, next deadline 2026-09-11T18:44:30+00:00. User explicitly requested continuation without bypassing the restriction. The SQLite initial-open/companion experiment remains blocked and will not be retried, rephrased, rerouted or implemented through another path. Work continues only on the independently required shared durable-publication primitive. WM007 cannot close without its separate SQLite acceptance evidence. Full frozen44package/G0-G5objective unchanged,6closed. Baseline all-target warning-fatal build and all3Cabal suites passed at17:38:35Z (durability.1upgl3zs/resume-baseline-build.log and resume-baseline-tests.log). Current HEADf1cecbe, fetched origin,0behind/17ahead. No rebase needed. Existing Store/export and in-flight close/retained-root publication semantics verified in actual source/tests and remain unchanged. New opt-in bounded-stream publication will synchronize file and retained containing-directory chain through the supplied private root, with fsync on Linux and fsync plus F_FULLFSYNC on macOS, failing rather than downgrading a barrier. Root and its own ancestor namespace must already be durably provisioned, since the operation neither creates nor synchronizes ancestors above that supplied boundary. Already-created descendants below root are included in bottom-up directory barriers. New result distinguishes no publication by this call, publication with unconfirmed completion, and confirmed publication metadata. Post-link failures never unlink final. Async/lost receipt requires reconciliation, not absence or overwrite. This is a conditional filesystem contract, not proof of physical power-loss behavior. Next implement smallest shared helper extension and focused publication checks. No source changes yet, no new dependencies. All artifacts remain under Products. Remaining permission blocker applies only to the named SQLite experiment. Refocus scope correction: do not let that blocked subtask stop independent publication work. No new test failure count.
 
+PUBLICATION REFOCUS 2026-09-11T18:37:50+00:00, next 2026-09-11T19:37:50+00:00. Scope remains the independently authorized publication half of007, not the restricted SQLite experiment. Added opt-in PrivateRoot bounded stream with explicit publication phase and real file/directory barriers. Existing namespace-only consumers unchanged. All3Cabal suites, all-target warning-fatal build, policies/native/control/person/lineage/IO/session/export/shared-wire, ACP20/deck10, routing,9examples, TUI, docs/manual, tier0193+30vectors and tier1seed719143184 n500 P1R1/1 P1500/500 P212000/12000 P3412/500 with88-other skips and0failures passed. Fault test byte-oriented fdRead replaced a deprecated text API after a warning-fatal refusal. Test CPP import shortcut was refused by compiler header boundary check and removed; standalone test now compiles the actual public facade and its source dependencies, without changing the checker. Both failures retained. Native focused checks cover real barriers, N1/N8, EIO at each sync boundary, pre/post-link root and ancestor changes, cancellation, no-clobber concurrency, original bytes/count/digest, stales and lost replies. Three isolated negative implementation controls now test that missing or swallowed barriers are detected. Linux parent-owned jobs83854(original isolated-source snapshot) and86318(current real-facade snapshot) share exact GHCderivationa5vz0qi3b44qr4yg8dqj3c3mfpcjqiyp. GHC is still compiling, no Linux publication acceptance yet. Current snapshot47files in publication-linux-source-v2.json. No Lean build or SQLite testing started. Removed only verified generated frontend_session_probe bytecode from test/__pycache__ after gates, and future Python commands disable bytecode. Next finish negative controls and package/source verification, then coherent partial work commit and independent review.007 remains open until Linux and separate SQLite criteria are actually satisfied.6/44closed,allG0-G5open. No active repeated-failure signature. No partner Markdown observations found.
+
+PUBLICATION REFOCUS 2026-09-11T20:25:55+00:00, next 2026-09-11T21:25:55+00:00. The observed continuation clock has passed the previous refocus deadline. Scope is unchanged: publication-only work, no retry or rerouting of the restricted SQLite experiment. Both Linux builds finished with exit0, including the current public-facade snapshot. The current47source hashes equal the tree. The platform is Linux aarch64, ext2/ext3, GHC9.10.3. Real-sync and fault tests passed at N1 and N8. Three warning-free mutant implementations (omit file sync, omit directory sync, swallow directory-sync error) were each refused at N1 and N8 by the intended assertions. Source archive creation succeeded, but an initial overbroad content check expected doc/agent-cat.texi in the Cabal archive and failed with KeyError. Inspecting existing package ownership before deciding the correct archive expectation. No successful archive verification claimed yet. Existing regression gates supply no new SQLite confinement evidence. Next verify the package-owned files, commit the coherent publication-only work and independently audit it. WM007 andG0 remain open. No physical power-loss proof or service/deployment claim.6/44closed.
+
+Publication pre-commit verification at 2026-09-11T20:28:46+00:00: all ten changed package-owned files match the generated source archive byte for byte. The manual is not part of the existing Cabal extra-doc-files contract and remains covered by both documentation gates. The failed initial overbroad archive expectation is retained in publication-archive-check-1.txt. No packaging rule changed to obtain this result. All 578 tracked fixtures and conformance corpus files match HEAD, and both frozen authority documents remain unchanged. The Linux public-facade snapshot matches all 47 current source files. Evidence identities are in publication-verified-source.json. The independently originated reviewer history probe is running under explicit native context=fresh. No audit result is claimed yet, and WM-007 remains in progress with its SQLite experiment restricted. This commit will record only the implemented publication primitive and its verification, not completion of WM-007 or G0.
+
+Publication audit accepted at 2026-09-11T20:46:00+00:00. Work commit 421c7a04412a6b57a5bc4e6c11ffe3bd9255f87b received a read-only, fresh-origin fess review from f637756f-a195-46f3-ad48-289e68047eaa after the prescribed sentinel verifier passed. The report is durability.1upgl3zs/fess-review.md. Verdict: OK with notes, no implementation defects or corrective source edits. The sole finding concerns literal newline escapes in the commit body. It is report-only, with no history rewrite, and future commit messages will use actual paragraph breaks. The reviewer checked publication phases, retained directory authority, sync/error behavior, old Store/export callers, tests, real C forwarding, negative controls, packaging ownership and retained logs. It explicitly retained the physical power-loss, hard-death, exhaustive failure/interleaving, post-link root-close and exact generated-temporary-collision limits. Parent rechecked every recorded source and frozen-document hash after review. Both Linux and macOS focused checks passed at N1/N8, while the broader gate set is macOS evidence. No independent recomputation of parent hashes by the read-only reviewer is claimed. The publication portion is now independently verified within those stated limits. WM-007 remains blocked only on its separate restricted SQLite acceptance, not on a compiler or publication defect. This is not a stop of all implementation work. WM-008 is ready and proceeds independently. No SQLite experiment has been retried or rerouted, and WM-007 and G0 remain open.
+
+Post-audit local restack at 2026-09-11T21:02:07+00:00: incoming main commit b01344e96d8e4a541da74ca67d84aa7c28656e32 changes only the shared tracker. All 224 issue IDs match the canonical export. Apart from our pending WM-007 and WM-008 updates, differences are Org escaping only. The restack preserved the newer shared tracker at each tracker-only conflict and retained pending updates separately. Three redundant tracker-only commits were already represented by that newer export. No source conflict occurred, no sibling branch or stash was changed, and nothing was pushed. The publication work is now 96b0335580e3836ec1bca261ae617fd153db5e28. Every non-tracker file is byte-identical to audited commit 421c7a04412a6b57a5bc4e6c11ffe3bd9255f87b. The post-restack warning-fatal all-target build and all three suites passed in post-restack-build.log and post-restack-tests.log. The existing audit therefore applies to identical implementation bytes. Tracker projection preserves incoming Org escaping and applies only the two intended package updates from the canonical export. Future projections must compare unescaped issue content rather than overwrite unrelated formatting. The branch is zero commits behind its base. WM-007 stays blocked on the separately restricted SQLite experiment, while WM-008 proceeds.
+
 ** Dependencies
 
 #+begin_src json
@@ -7415,14 +7425,14 @@ PUBLICATION-ONLY RESUME/REFOCUS 2026-09-11T17:44:30+00:00, next deadline 2026-09
 ]
 #+end_src
 
-* TODO [#B] WM-008: Implement trusted profiles and composition-root configuration    :p2:
+* DOING [#B] WM-008: Implement trusted profiles and composition-root configuration    :p2:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-wm-008-rr0q
 :LABELS:   ["p2","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-09-11 Fri 13:46]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-008
 :SOURCE_REPO: agent-cat
@@ -7485,6 +7495,10 @@ refuse mutation, and capability/catalogue timeouts are bounded. Profile edits
 cannot replace the environment of an approved worker. Configuration and logs
 contain no accidental credential disclosure. Manager and local-retention roots
 remain disjoint under the configured identity/path checks.
+
+** Notes
+
+Started WM-008 at 2026-09-11T20:46:00+00:00, with refocus due 2026-09-11T21:46:00+00:00. Its dependencies WM-002, WM-003 and WM-005 are closed. WM-007 publication work is committed and independently reviewed, but the separate SQLite experiment remains restricted. No part of WM-008 authorizes bypassing that restriction. Scope is operator-installed profiles, explicit worker environments, bounded trusted-runner capability/catalogue probing, revisions and reload invalidation, safe public profile projection, and manager/local-retention root separation with a root-role refusal in updated clients. No manager service or client activation is claimed. Initial reading covered the frozen package and design section8.3, manager and CLI boundary instructions, and the existing TUI subprocess query path. Manager code must import shared runtime contracts through Agentic.Runtime, never TUI or CLI internals. Next trace existing process queries, CLI target/environment resolution, all local root/retention entrypoints and frozen profile schemas before selecting the smallest implementation. No WM-008 source edits yet. The tracker confirms WM-025 is acat-wm-025-3utw. The full objective remains 44 packages and G0-G5, with six packages closed.
 
 ** Dependencies
 
