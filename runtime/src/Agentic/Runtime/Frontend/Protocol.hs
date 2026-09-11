@@ -55,7 +55,7 @@ import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Aeson.Types (Object, Pair, Parser, parseEither)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
-import Data.List (nub)
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as Text
@@ -350,10 +350,14 @@ instance FromJSON FrontendPreparedInput where
     pure (FrontendPreparedInput name bytes digest)
 
 parseInputBytes :: Text -> Parser Integer
-parseInputBytes text = case TextRead.decimal text :: Either String (Integer, Text) of
-  Right (number, rest)
-    | T.null rest && text == T.pack (show number) && number <= maxArtifactBytes -> pure number
-  _ -> fail "frontend prepared input bytes must be a bounded natural decimal string"
+parseInputBytes text
+  | T.length text > T.length (T.pack (show maxArtifactBytes)) = invalid
+  | otherwise = case TextRead.decimal text :: Either String (Integer, Text) of
+      Right (number, rest)
+        | T.null rest && text == T.pack (show number) && number <= maxArtifactBytes -> pure number
+      _ -> invalid
+  where
+    invalid = fail "frontend prepared input bytes must be a bounded natural decimal string"
 
 instance ToJSON FrontendEditMetadata where
   toJSON (DroppedAnswer occurrence) = object
@@ -421,7 +425,7 @@ instance FromJSON FrontendPrepared where
     invocation <- o .: "invocation"
     inputs <- o .: "inputs"
     let names = map preparedInputName inputs
-    unless (length names == length (nub names)) (fail "frontend prepared inputs contain duplicate names")
+    unless (length names == Set.size (Set.fromList names)) (fail "frontend prepared inputs contain duplicate names")
     when (sum (map preparedInputBytes inputs) > maxArtifactBytes) (fail "frontend prepared inputs exceed their byte bound")
     lineage <- if any (`KeyMap.member` o) ["parentRunId", "lineage", "lineageEdits"]
       then do

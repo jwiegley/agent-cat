@@ -22,7 +22,7 @@ def encode(value: object) -> bytes:
 class Session:
     active: list[Session] = []
 
-    def __init__(self, runner: Path, directory: Path, workflow: str, inputs: list[dict], arguments: list[str] | None = None, environment: dict[str, str] | None = None, request: dict | None = None, command_prefix: list[str] | None = None):
+    def __init__(self, runner: Path, directory: Path, workflow: str, inputs: list[dict], arguments: list[str] | None = None, environment: dict[str, str] | None = None, request: dict | None = None, command_prefix: list[str] | None = None, request_bytes: bytes | None = None):
         self.root = Path(request["stateDirectory"]) if request else directory / "state"
         existing = {path.name for path in (self.root / "runs").glob("*")}
         self.environment = {key: value for key, value in os.environ.items() if not key.startswith("AGENT_CAT_")}
@@ -34,17 +34,23 @@ class Session:
         )
         self.active.append(self)
         self.buffer = b""
-        self.send(request or {"version": 1, "operation": "prepare", "workflow": workflow,
-                              "stateDirectory": str(self.root), "targetArguments": arguments or ["--scripted"], "inputs": inputs})
+        if request_bytes is not None:
+            self.send_raw(request_bytes + b"\n")
+        else:
+            self.send(request or {"version": 1, "operation": "prepare", "workflow": workflow,
+                                  "stateDirectory": str(self.root), "targetArguments": arguments or ["--scripted"], "inputs": inputs})
         self.preview = self.read()
         assert self.preview is not None, (workflow, directory, self.process.wait(timeout=10), self.process.stderr.read())
+        self.preview_frame = self.last_raw_frame
         assert self.preview["version"] == 1 and self.preview["operation"] == "prepared", self.preview
         assert set(self.preview["server"]) == {"runnerId", "executable", "runnerVersion"}
         assert self.preview["invocation"] == (request or {}).get("invocation")
         assert {path.name for path in (self.root / "runs").glob("*")} == existing, "preparation created a run before approval"
 
     def send(self, *values: object) -> None:
-        body = b"".join(encode(value) + b"\n" for value in values)
+        self.send_raw(b"".join(encode(value) + b"\n" for value in values))
+
+    def send_raw(self, body: bytes) -> None:
         view = memoryview(body)
         while view:
             written = self.process.stdin.write(view)
@@ -63,6 +69,7 @@ class Session:
             self.buffer += block
             assert len(self.buffer) <= 64 * 1024 * 1024 + 4096
         line, self.buffer = self.buffer.split(b"\n", 1)
+        self.last_raw_frame = line + b"\n"
         return json.loads(line)
 
     def decision(self, operation: str, **changes: object) -> dict:
@@ -118,6 +125,7 @@ def capability_discovery(runner: Path, directory: Path) -> tuple[Path, list[str]
     )
     assert discovered.returncode == 0 and not discovered.stderr, discovered
     assert discovered.stdout.endswith(b"\n") and discovered.stdout.count(b"\n") == 1
+    (case / "capabilities.ndjson").write_bytes(discovered.stdout)
     capabilities = json.loads(discovered.stdout)
     assert capabilities == {
         "version": 1,
