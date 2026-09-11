@@ -280,6 +280,7 @@ withBufferedControlInputFor version handle initial sink runtime action = do
               (ack, next) <- decideRuntimeControl runtime control
               sink (ackEventFor version control ack)
               case next of
+                -- Cancellation is terminal. A following EOF must not replace its reason.
                 Just ActCancel -> throwTo owner (MachineCancelled "cancelled by control")
                 Just delivery -> do
                   (delivered, afterAcknowledgement) <- deliverRuntimeActionDeferred runtime control delivery
@@ -293,8 +294,8 @@ withBufferedControlInputFor version handle initial sink runtime action = do
                     _ -> pure ()
                   sink (ackEventFor version control delivered)
                   afterAcknowledgement
-                Nothing -> pure ()
-              loop owner rest
+                  loop owner rest
+                Nothing -> loop owner rest
 
     timingWord InterruptNow = "interrupt-now"
     timingWord NextBoundary = "next-boundary"

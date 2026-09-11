@@ -6,8 +6,8 @@ module Main (main) where
 
 import Agentic.Runtime
 import FrontendProtocolTests (frontendProtocolTests, frontendCodecCheck)
-import Control.Concurrent (forkIO, killThread, threadDelay)
-import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar, tryReadMVar)
+import Control.Concurrent (forkIO, killThread, myThreadId, threadDelay, yield)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar, tryPutMVar, tryReadMVar)
 import Control.Exception (IOException, SomeException, bracket, finally, throwIO, try)
 import Data.Bits ((.&.))
 import Crypto.Hash (Digest, SHA256, hash)
@@ -25,6 +25,7 @@ import Data.Word (Word64)
 import Data.Time.Clock (addUTCTime, getCurrentTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import GHC.Clock (getMonotonicTimeNSec)
+import GHC.Conc (ThreadStatus (..), threadStatus)
 import GHC.IO.Handle (hDuplicateTo)
 import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getTemporaryDirectory, listDirectory, removeFile, removePathForcibly, renameDirectory)
 import System.Environment (getArgs, getExecutablePath, lookupEnv, setEnv, unsetEnv)
@@ -1023,11 +1024,26 @@ boundedControlFrameProbe = do
       cancellation <- either (ioError . userError . T.unpack) pure (encodeControlFor 2 (Control (ControlId "buffered") Nothing Nothing CancelRun))
       bufferedRuntime <- newControlRuntime
       bufferedEvents <- newIORef []
+      bufferedReader <- newEmptyMVar
+      let sink event = do
+            reader <- myThreadId
+            _ <- tryPutMVar bufferedReader reader
+            modifyIORef' bufferedEvents (<> [event])
+          waitReader reader = threadStatus reader >>= \case
+            ThreadFinished -> pure ()
+            ThreadDied -> fail "buffered control reader died"
+            _ -> yield >> waitReader reader
+          cancelledAction = do
+            first <- try @MachineCancelled (threadDelay 5000000)
+            reader <- timeout 2000000 (takeMVar bufferedReader) >>= maybe (fail "buffered cancellation emitted no acknowledgement") pure
+            stopped <- timeout 2000000 (waitReader reader)
+            expect "terminal cancellation stops its control reader" (stopped == Just ())
+            either throwIO pure first
       cancelled <- withBinaryFile path ReadMode $ \handle ->
         try @MachineCancelled
-          (withBufferedControlInputFor 2 handle (cancellation <> "\n") (\event -> modifyIORef' bufferedEvents (<> [event])) bufferedRuntime (threadDelay 5000000))
+          (withBufferedControlInputFor 2 handle (cancellation <> "\n") sink bufferedRuntime cancelledAction)
       delivered <- readIORef bufferedEvents
-      expect "retained controls are consumed before EOF without losing correlation" $
+      expect ("retained controls are consumed before EOF without losing correlation: " <> show (cancelled, delivered)) $
         case (cancelled, delivered) of
           (Left failure, [ControlAcknowledgedV2 "buffered" "accepted" _ _ _ _]) -> machineCancellationReason failure == "cancelled by control"
           _ -> False

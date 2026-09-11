@@ -67,7 +67,9 @@ write or establish that unrecorded events were delivered.
 
 Cancellation has one sender and waits for registered worker finalization before
 the runner returns. Further cancellation received during this wait does not
-abandon cleanup or replace the original failure.
+abandon cleanup or replace the original failure. An accepted whole-run
+cancellation terminates its control reader, so a following EOF cannot replace
+the accepted cancellation reason.
 
 ## Dependencies
 

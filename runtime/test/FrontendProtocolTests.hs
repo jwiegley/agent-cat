@@ -3,7 +3,9 @@
 module FrontendProtocolTests (frontendProtocolTests, frontendCodecCheck) where
 
 import Agentic.Runtime
+import Control.Exception (evaluate)
 import Control.Monad (forM_, unless)
+import System.Timeout (timeout)
 import Data.Aeson (Value (..), eitherDecodeStrict', encode, object, toJSON, (.=))
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KM
@@ -108,6 +110,13 @@ frontendProtocolTests = do
   left "aggregate input bound" (encodeFrontendPrepared prepared {preparedInputs =
     [FrontendPreparedInput "x" maxArtifactBytes (T.replicate 64 "a"), FrontendPreparedInput "y" 1 (T.replicate 64 "b")]})
   left "reply above byte bound" (decodeFrontendPrepared (BS.replicate (fromInteger maxFrontendReplyBytes + 1) 32))
+  let longCount = put "inputs" (toJSON [object ["name" .= ("x" :: Text), "bytes" .= T.replicate 1000000 "9", "sha256" .= T.replicate 64 "a"]]) (toJSON prepared)
+      manyInputs = [FrontendPreparedInput ("input-" <> T.pack (show n)) 0 (T.replicate 64 "a") | n <- [0 .. 32767 :: Int]]
+  longResult <- timeout 5000000 (evaluate (decodeFrontendPrepared (bytesOf longCount)))
+  maybe (fail "oversized decimal conversion exceeded five seconds") (left "million-digit byte count") longResult
+  manyResult <- timeout 5000000 (evaluate (decodeFrontendPrepared (bytesOf (toJSON prepared {preparedInputs = manyInputs}))))
+  decodedMany <- maybe (fail "distinct input validation exceeded five seconds") right manyResult
+  check "large distinct metadata remains valid" (preparedInputs decodedMany == manyInputs)
   putStrLn "Frontend.Protocol checks passed"
 
 planValue :: WorkflowDescriptor -> Value
