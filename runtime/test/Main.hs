@@ -8,6 +8,7 @@ import Agentic.Runtime
 import CaptureTests (captureTests)
 import FrontendProtocolTests (frontendProtocolTests, frontendCodecCheck)
 import SnapshotCheckpointTests (snapshotCheckpointTests)
+import RootRoleTests (rootRoleTests)
 import Control.Concurrent (forkIO, killThread, myThreadId, threadDelay, yield)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar, tryPutMVar, tryReadMVar)
 import Control.Exception (IOException, SomeException, bracket, finally, throwIO, try)
@@ -61,6 +62,7 @@ contractTests = do
   snapshotCheckpointTests "."
   privateRootContractTests
   captureTests
+  rootRoleTests
   frontendIoContractTests
   frontendExportContractTests
   recoveryFifoProbe

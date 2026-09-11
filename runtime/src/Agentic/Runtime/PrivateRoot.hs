@@ -8,6 +8,7 @@
 module Agentic.Runtime.PrivateRoot
   ( PrivateRoot,
     withPrivateRoot,
+    withLocalStateRoot,
     openPrivateRoot,
     closePrivateRoot,
     openPrivateSubroot,
@@ -18,6 +19,10 @@ module Agentic.Runtime.PrivateRoot
     withStateAnchor,
     privatePathComponents,
     assertPrivateRoot,
+    StateRootRole (..),
+    readStateRootRoleAt,
+    assertLocalStateRoot,
+    establishManagerRootRole,
     ensurePrivateDirectoryAt,
     createPrivateDirectoryAt,
     openPrivateFileAt,
@@ -37,7 +42,7 @@ module Agentic.Runtime.PrivateRoot
   )
 where
 
-import Agentic.Runtime.PrivateFile (readConfinedFileAt)
+import Agentic.Runtime.PrivateFile (listConfinedDirectoryAt, readConfinedFileAt)
 import Control.Concurrent.MVar (MVar, modifyMVar, newMVar, withMVar)
 import Control.Exception (IOException, bracket, bracketOnError, finally, mask, mask_, onException, throwIO, try)
 import Control.Monad (unless, void, when)
@@ -47,20 +52,20 @@ import Data.Bits ((.&.))
 import qualified Data.ByteString as BS
 import Data.Unique (hashUnique, newUnique)
 import qualified Data.ByteString.Lazy as BL
-import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.IORef (atomicModifyIORef', newIORef, readIORef, writeIORef)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import Foreign.C.Error (eEXIST, eNOENT, getErrno, throwErrno, throwErrnoIfMinus1Retry)
 import Foreign.C.String (CString, withCString)
 import Foreign.C.Types (CInt (..))
-import System.Directory (createDirectoryIfMissing)
+import System.Directory (canonicalizePath, createDirectoryIfMissing)
 import System.Environment (lookupEnv)
 import System.FilePath (dropTrailingPathSeparator, isAbsolute, isPathSeparator, makeRelative, normalise, splitDirectories, takeDirectory, (</>))
 import System.IO (Handle, hClose, hFlush)
 import System.IO.Error (isAlreadyExistsError, isDoesNotExistError)
 import qualified System.Posix.Directory as PosixDirectory
 import System.Posix.Files (FileStatus, deviceID, fileID, fileMode, fileOwner, getFdStatus, getSymbolicLinkStatus, isDirectory, isSymbolicLink, ownerModes)
-import System.Posix.IO (OpenFileFlags (cloexec, creat, directory, exclusive, nofollow), OpenMode (ReadOnly, WriteOnly), closeFd, defaultFileFlags, fdToHandle, openFd, openFdAt)
+import System.Posix.IO (OpenFileFlags (cloexec, creat, directory, exclusive, nofollow, nonBlock), OpenMode (ReadOnly, WriteOnly), closeFd, defaultFileFlags, fdToHandle, openFd, openFdAt)
 import System.Posix.Process (getProcessID)
 import System.Posix.Types (CMode (..), DeviceID, Fd (..), FileID, UserID)
 import System.Posix.User (getEffectiveUserID)
@@ -88,6 +93,39 @@ withPrivateRoot label original action = do
       | otherwise -> throwIO failure
     Right _ -> pure ()
   bracket (openPrivateRoot label path) closePrivateRoot action
+
+-- | Open or create local state without traversing or creating beneath a manager
+-- marker. Creation follows retained, readable directory ancestry, not a checked
+-- pathname. Generic manager access continues to use 'withPrivateRoot'.
+withLocalStateRoot :: String -> FilePath -> (PrivateRoot -> IO a) -> IO a
+withLocalStateRoot label original action = do
+  let path = dropTrailingPathSeparator (normalise original)
+  validateRootPath label path
+  inspected <- try @IOException (getSymbolicLinkStatus path)
+  case inspected of
+    Right status -> getEffectiveUserID >>= \user -> validateDirectory user label status
+    Left failure | isDoesNotExistError failure -> pure ()
+    Left failure -> throwIO failure
+  canonical <- canonicalizePath path
+  let components = drop 1 (splitDirectories canonical)
+  mapM_ validateComponent components
+  when (length components >= 256) (ioError (userError "state root ancestry exceeds 256 directories"))
+  let openChild parent component = do
+        opened <- try @IOException (openFdAt (Just parent) component ReadOnly directoryFlags)
+        case opened of
+          Right descriptor -> pure descriptor
+          Left failure | isDoesNotExistError failure ->
+            mkdirAt parent component True >> openFdAt (Just parent) component ReadOnly directoryFlags
+          Left failure -> throwIO failure
+      descendLocal descriptor remaining = do
+        role <- readStateRootRoleAt descriptor
+        when (role == ManagerStateRoot) (ioError (userError "state root is owned by a manager"))
+        case remaining of
+          component : rest -> bracket (openChild descriptor component) closeFd (\child -> descendLocal child rest)
+          [] -> do
+            let acquire = bracketOnError (openFdAt (Just descriptor) "." ReadOnly directoryFlags) closeFd (rootFromDescriptor label path)
+            bracket acquire closePrivateRoot $ \root -> assertLocalStateRoot root >> action root
+  bracket (openFd "/" ReadOnly directoryFlags) closeFd (\descriptor -> descendLocal descriptor components)
 
 validateRootPath :: String -> FilePath -> IO ()
 validateRootPath label path =
@@ -312,6 +350,86 @@ assertCaptureParents root parents = do
 syncDescriptor :: Fd -> IO ()
 syncDescriptor (Fd descriptor) =
   void (throwErrnoIfMinus1Retry "private publication synchronization" (c_sync_private_descriptor descriptor))
+
+-- | The role recorded on one directory, not an execution or control capability.
+data StateRootRole = UnmarkedStateRoot | ManagerStateRoot
+  deriving (Eq, Show)
+
+stateRootRoleFile :: FilePath
+stateRootRoleFile = ".agentic-root-role.json"
+
+managerRootRoleBytes :: BS.ByteString
+managerRootRoleBytes = "{\"version\":1,\"role\":\"manager\"}\n"
+
+-- | Read the canonical role marker through the supplied directory descriptor.
+readStateRootRoleAt :: Fd -> IO StateRootRole
+readStateRootRoleAt descriptor = maybe UnmarkedStateRoot (const ManagerStateRoot) <$> readRootRoleMarker descriptor
+
+readRootRoleMarker :: Fd -> IO (Maybe FileStatus)
+readRootRoleMarker descriptor = do
+  inspected <- try @IOException (readConfinedFileAt descriptor [stateRootRoleFile] 256)
+  case inspected of
+    Left failure | isDoesNotExistError failure -> pure Nothing
+    Left failure -> throwIO failure
+    Right (bytes, status) -> do
+      user <- getEffectiveUserID
+      unless (fileOwner status == user && fileMode status .&. 0o077 == 0 && bytes == managerRootRoleBytes) $
+        ioError (userError "state root role marker is invalid or not private")
+      pure (Just status)
+
+-- | Refuse local use beneath a manager marker in the observed directory ancestry.
+assertLocalStateRoot :: PrivateRoot -> IO ()
+assertLocalStateRoot root = withPrivateDirectoryAt root [] $ \descriptor -> do
+  assertUnmarkedHierarchy 0 descriptor
+  assertPrivateRoot root
+
+assertUnmarkedHierarchy :: Int -> Fd -> IO ()
+assertUnmarkedHierarchy depth descriptor = do
+  when (depth >= 256) (ioError (userError "state root ancestry exceeds 256 directories"))
+  role <- readStateRootRoleAt descriptor
+  when (role == ManagerStateRoot) (ioError (userError "state root is owned by a manager"))
+  withParentDirectory descriptor $ \parent -> do
+    current <- getFdStatus descriptor
+    above <- getFdStatus parent
+    unless (sameFileIdentity current above) (assertUnmarkedHierarchy (depth + 1) parent)
+
+withParentDirectory :: Fd -> (Fd -> IO a) -> IO a
+withParentDirectory descriptor = bracket (openFdAt (Just descriptor) ".." ReadOnly directoryFlags) closeFd
+
+sameFileIdentity :: FileStatus -> FileStatus -> Bool
+sameFileIdentity left right = deviceID left == deviceID right && fileID left == fileID right
+
+-- | Persist a manager role on an empty, already durably provisioned root.
+-- Existing matching markers are re-synchronized, never replaced. This does not
+-- acquire a service lock or permit transfer of an existing local namespace.
+establishManagerRootRole :: PrivateRoot -> IO ()
+establishManagerRootRole root = withPrivateDirectoryAt root [] $ \descriptor -> do
+  withParentDirectory descriptor $ \parent -> do
+    current <- getFdStatus descriptor
+    above <- getFdStatus parent
+    unless (sameFileIdentity current above) (assertUnmarkedHierarchy 0 parent)
+  existing <- readRootRoleMarker descriptor
+  case existing of
+    Nothing -> do
+      _ <- listConfinedDirectoryAt descriptor 0
+      source <- newIORef managerRootRoleBytes
+      result <- publishPrivateCaptureAt root [stateRootRoleFile] (toInteger (BS.length managerRootRoleBytes)) $
+        atomicModifyIORef' source (\bytes -> (BS.empty, bytes))
+      case result of
+        CapturePublished _ -> pure ()
+        CaptureNotPublished failure -> throwIO failure
+        CaptureUnconfirmed _ failure -> throwIO failure
+    Just expected -> do
+      let flags = defaultFileFlags {nofollow = True, cloexec = True, nonBlock = True}
+      bracket (openFdAt (Just descriptor) stateRootRoleFile ReadOnly flags) closeFd $ \file -> do
+        actual <- getFdStatus file
+        unless (sameFileIdentity expected actual) (ioError (userError "state root role marker identity changed"))
+        syncDescriptor file
+        syncDescriptor descriptor
+        confirmed <- readRootRoleMarker descriptor
+        unless (maybe False (sameFileIdentity actual) confirmed) $
+          ioError (userError "state root role marker identity changed")
+  assertPrivateRoot root
 
 unlinkAt :: Fd -> FilePath -> IO ()
 unlinkAt (Fd descriptor) name =

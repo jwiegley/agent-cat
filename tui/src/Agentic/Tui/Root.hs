@@ -12,6 +12,7 @@ import Agentic.Runtime as Root
     privatePathComponents,
     withPrivateDirectoryAt,
     assertPrivateRoot,
+    assertLocalStateRoot,
     ensurePrivateDirectoryAt,
     createPrivateDirectoryAt,
     openPrivateFileAt,
@@ -24,4 +25,4 @@ import Agentic.Runtime as Root
 import qualified Agentic.Runtime as Runtime
 
 withPrivateRoot :: FilePath -> (PrivateRoot -> IO a) -> IO a
-withPrivateRoot = Runtime.withPrivateRoot "TUI state root"
+withPrivateRoot = Runtime.withLocalStateRoot "TUI state root"

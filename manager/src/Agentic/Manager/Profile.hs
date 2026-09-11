@@ -1,0 +1,277 @@
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
+
+-- | Installed operator authority, separate from historical invocation provenance.
+module Agentic.Manager.Profile
+  ( OperatorProfile (..), Ownership (..), QueryLimits (..), Registry,
+    PublicProfile, publicId, publicRevision, Diagnostic (..),
+    Selection, selectionContext, selectionInvocation,
+    Discovery, discoveryServer, discoveryWorkflows,
+    newRegistry, reloadProfiles, publicProfiles, selectProfile, probeProfile
+  ) where
+
+import Agentic.Runtime
+  ( FrontendInvocation (..), FrontendServer (..), FrontendCapabilities (..),
+    WorkflowDescriptor (..), DescriptorCapabilities (..),
+    decodeFrontendCapabilities, decodeWorkflowDescriptors, maxFrontendQueryBytes,
+    createProcessGroup,
+    terminateProcessGroup, closeGroupPipes, groupOutput, groupErrors, waitProcessGroup )
+import Control.Concurrent.Async (concurrently)
+import Control.Concurrent.MVar (MVar, modifyMVar, newMVar, withMVar)
+import Control.Exception (Exception, IOException, bracket, finally, throwIO, try)
+import Control.Monad (unless)
+import Crypto.Random (getRandomBytes)
+import Data.Aeson (Result (Success, Error), ToJSON (toJSON), fromJSON, object, (.=))
+import Data.ByteArray.Encoding (Base (Base16), convertToBase)
+import qualified Data.ByteString as BS
+import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
+import Data.Text (Text)
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
+import System.Exit (ExitCode (ExitSuccess))
+import System.FilePath (isAbsolute)
+import System.IO (Handle)
+import System.Process (CreateProcess (cwd, env, std_in, std_out, std_err), StdStream (NoStream, CreatePipe), proc)
+import System.Timeout (timeout)
+
+-- | Ownership asserted by trusted CLI policy, not inferred from transport or names.
+data Ownership = ServiceOwned | ClientBound deriving (Eq, Show)
+
+-- | Private immutable configuration supplied only by operator composition.
+-- The caller validates target grammar, ownership (including named routes), and
+-- workspace/root roles. Labels are explicitly public. No manifest or HTTP input
+-- may construct this value. This module does not read configuration files.
+data OperatorProfile = OperatorProfile
+  { operatorId :: !Text,
+    operatorWorkspaceLabel :: !Text,
+    operatorTargetLabel :: !Text,
+    operatorRunnerAlias :: !Text,
+    operatorExecutable :: !FilePath,
+    operatorPrefix :: ![String],
+    operatorCwd :: !FilePath,
+    operatorTargetArguments :: ![Text],
+    operatorEnvironment :: ![(String, String)],
+    operatorOwnership :: !Ownership,
+    operatorQuarantined :: !Bool
+  }
+
+-- | Per-query byte and execution budgets, bounded by the discovery ceiling.
+data QueryLimits = QueryLimits
+  { queryBytes :: !Int, queryMicros :: !Int }
+
+-- | Fixed failure categories. No process output or exception text is retained.
+data Diagnostic
+  = InvalidConfiguration | UnknownProfile | StaleRevision | Quarantined
+  | SupervisionUnavailable | UnsupportedOperation | OutputOverflow
+  | QueryTimeout | ProcessFailure | InvalidReply | RunnerVersionMismatch
+  deriving (Eq, Show)
+
+instance Exception Diagnostic
+
+-- | The frozen public Profile projection, with no private execution fields.
+data PublicProfile = PublicProfile
+  { publicId :: !Text, publicRevision :: !Text,
+    publicWorkspaceLabel :: !Text, publicTargetLabel :: !Text,
+    publicFailure :: !(Maybe Diagnostic)
+  } deriving (Eq, Show)
+
+instance ToJSON PublicProfile where
+  toJSON p = object
+    [ "version" .= (1 :: Int), "id" .= publicId p,
+      "revision" .= publicRevision p,
+      "workspaceLabel" .= publicWorkspaceLabel p,
+      "targetLabel" .= publicTargetLabel p,
+      "readiness" .= readiness, "refusal" .= refusal ]
+    where
+      (readiness, refusal) = case publicFailure p of
+        Nothing -> ("ready" :: Text, Nothing :: Maybe Text)
+        Just Quarantined -> ("quarantined", Just "quarantined")
+        Just UnsupportedOperation -> ("unavailable", Just "unsupported-operation")
+        Just _ -> ("unavailable", Just "supervision-unavailable")
+
+-- | A selected immutable context, not an approval or an independently launchable handle.
+data Selection = Selection !OperatorProfile
+
+selectionContext :: Selection -> OperatorProfile
+selectionContext (Selection p) = p
+
+selectionInvocation :: Selection -> FrontendInvocation
+selectionInvocation (Selection p) = FrontendInvocation
+  1 (operatorRunnerAlias p) (T.pack (operatorExecutable p)) (map T.pack (operatorPrefix p))
+
+-- | Private discovery evidence. Server identity is process-reported, not authority.
+data Discovery = Discovery
+  { discoveryServer :: !FrontendServer,
+    discoveryWorkflows :: ![WorkflowDescriptor] }
+
+data Installed = Installed !OperatorProfile !PublicProfile
+data Snapshot = Snapshot !Integer !(Map.Map Text Installed)
+
+-- | A registry-local revision namespace and one atomically replaced snapshot.
+data Registry = Registry !Text !QueryLimits !(MVar Snapshot)
+
+newRegistry :: QueryLimits -> IO (Either Diagnostic Registry)
+newRegistry limits
+  | queryBytes limits <= 0 || queryBytes limits > 4194304
+      || queryMicros limits <= 0 || queryMicros limits > 30000000 = pure (Left InvalidConfiguration)
+  | otherwise = do
+      nonce <- getRandomBytes 16 :: IO BS.ByteString
+      lock <- newMVar (Snapshot 0 Map.empty)
+      pure (Right (Registry (TE.decodeUtf8 (convertToBase Base16 nonce)) limits lock))
+
+-- | Successful reload gives every profile a fresh token, even if values agree.
+-- Tokens contain random registry identity and a generation, never secret hashes.
+-- Failed validation changes neither the generation nor the installed snapshot.
+reloadProfiles :: Registry -> [OperatorProfile] -> IO (Either Diagnostic [PublicProfile])
+reloadProfiles (Registry nonce _ lock) candidates
+  | not (all validDefinition candidates)
+      || Set.size (Set.fromList (map operatorId candidates)) /= length candidates = pure (Left InvalidConfiguration)
+  | otherwise = modifyMVar lock $ \old@(Snapshot generation _) -> do
+      let revision = nonce <> "_" <> T.pack (show (generation + 1))
+          install p = Installed p (PublicProfile (operatorId p) revision
+            (operatorWorkspaceLabel p) (operatorTargetLabel p) (Just (initialFailure p)))
+          entries = Map.fromList [(operatorId p, install p) | p <- candidates]
+      if not (validToken revision)
+        then pure (old, Left InvalidConfiguration)
+        else pure (Snapshot (generation + 1) entries, Right (map installedPublic (Map.elems entries)))
+
+publicProfiles :: Registry -> IO [PublicProfile]
+publicProfiles (Registry _ _ lock) = withMVar lock $ \(Snapshot _ entries) ->
+  pure (map installedPublic (Map.elems entries))
+
+installedPublic :: Installed -> PublicProfile
+installedPublic (Installed _ p) = p
+
+initialFailure :: OperatorProfile -> Diagnostic
+initialFailure p
+  | operatorQuarantined p = Quarantined
+  | operatorOwnership p == ClientBound = UnsupportedOperation
+  | otherwise = SupervisionUnavailable
+
+validToken :: Text -> Bool
+validToken t = not (T.null t) && T.length t <= 128 && T.all asciiToken t
+  where
+    asciiToken c = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+      || (c >= '0' && c <= '9') || c == '_' || c == '-'
+
+validDefinition :: OperatorProfile -> Bool
+validDefinition p = validToken (operatorId p)
+  && T.length (operatorWorkspaceLabel p) <= 4096
+  && T.length (operatorTargetLabel p) <= 4096
+  && validInvocation
+  && isAbsolute (operatorExecutable p) && isAbsolute (operatorCwd p)
+  && all (notElem '\0') (operatorExecutable p : operatorCwd p : operatorPrefix p)
+  && all (not . T.any (== '\0')) (operatorTargetArguments p)
+  && all validBinding bindings
+  && Set.size (Set.fromList (map fst bindings)) == length bindings
+  where
+    -- Reuse the native provenance codec without treating provenance as authority.
+    validInvocation = case fromJSON (toJSON (selectionInvocation (Selection p))) :: Result FrontendInvocation of
+      Success _ -> True
+      Error _ -> False
+    bindings = operatorEnvironment p
+    validBinding (key, value) = not (null key) && all (`notElem` ['=', '\0']) key && '\0' `notElem` value
+
+lookupInstalled :: Map.Map Text Installed -> Text -> Text -> Either Diagnostic Installed
+lookupInstalled entries ident revision = case Map.lookup ident entries of
+  Nothing -> Left UnknownProfile
+  Just installed@(Installed _ p)
+    | revision /= publicRevision p -> Left StaleRevision
+    | otherwise -> Right installed
+
+-- | Check current ID, exact revision, and discovery readiness before handing off
+-- private values. Parent must serialize approval with reload and revalidate an
+-- unapproved selection at that transaction. This value alone is not approval.
+selectProfile :: Registry -> Text -> Text -> IO (Either Diagnostic Selection)
+selectProfile (Registry _ _ lock) ident revision = withMVar lock $ \(Snapshot _ entries) ->
+  pure $ do
+    Installed p view <- lookupInstalled entries ident revision
+    maybe (Right (Selection p)) Left (publicFailure view)
+
+-- | Probe only installed authority. Reload cannot revoke between selection and
+-- either launch. No public function launches a previously returned selection.
+-- ponytail: registry lock serializes queries, per-profile leases if contention matters.
+probeProfile :: Registry -> Text -> Text -> IO (Either Diagnostic Discovery)
+probeProfile (Registry _ limits lock) ident revision = modifyMVar lock $ \snapshot@(Snapshot generation entries) ->
+  case lookupInstalled entries ident revision of
+    Left failure -> pure (snapshot, Left failure)
+    Right (Installed p view)
+      | operatorQuarantined p -> pure (snapshot, Left Quarantined)
+      | operatorOwnership p == ClientBound -> pure (snapshot, Left UnsupportedOperation)
+      | otherwise -> do
+          result <- discover limits p
+          let updated = view {publicFailure = either Just (const Nothing) result}
+          pure (Snapshot generation (Map.insert ident (Installed p updated) entries), result)
+
+discover :: QueryLimits -> OperatorProfile -> IO (Either Diagnostic Discovery)
+discover limits p = do
+  capabilities <- query limits p ["frontend", "--capabilities"]
+  case capabilities >>= either (const (Left InvalidReply)) Right . decodeFrontendCapabilities of
+    Left failure -> pure (Left failure)
+    Right caps | not (supportsMutation caps) -> pure (Left UnsupportedOperation)
+    Right caps -> do
+      catalogue <- query limits p ["list", "--json", "--descriptor-version", "3"]
+      pure $ do
+        bytes <- catalogue
+        rows <- either (const (Left InvalidReply)) Right (decodeWorkflowDescriptors bytes)
+        unless (all ((== frontendServerRunnerVersion (capabilityServer caps)) . workflowRunnerVersion) rows)
+          (Left RunnerVersionMismatch)
+        unless (all supportsWorkflow rows) (Left UnsupportedOperation)
+        pure (Discovery (capabilityServer caps) rows)
+
+supportsMutation :: FrontendCapabilities -> Bool
+supportsMutation c = and
+  [ 1 `elem` capabilitySessionVersions c,
+    all (`elem` capabilitySessionOperations c) ["prepare", "prepare-lineage", "start", "discard"],
+    all (`elem` capabilityInputSources c) ["literal", "file", "transport"],
+    1 `elem` capabilityInvocationVersions c,
+    capabilityMaxRequestBytes c >= toInteger maxFrontendQueryBytes,
+    2 `elem` capabilityIoVersions c,
+    all (`elem` capabilityIoOperations c)
+      ["open-root", "read-question", "read-result", "list-runs", "read-run", "read-run-checkpoint", "read-question-schema"],
+    1 `elem` capabilityExportVersions c,
+    "export-result" `elem` capabilityExportOperations c,
+    capabilityExportFormat c == "result-json",
+    capabilityExportDestination c == "state-exports",
+    all (`elem` capabilityManifestVersions c) [2, 3],
+    capabilityLegacyManifests c ]
+
+supportsWorkflow :: WorkflowDescriptor -> Bool
+supportsWorkflow d = workflowDescriptorVersion d == 3
+  && and [descriptorStructuredRun c, descriptorWholeRunCancel c,
+          descriptorControlFd c == Just 3, descriptorRequestControls c,
+          descriptorSemanticResume c, descriptorImmutableFork c, descriptorRestartFromScratch c]
+  where c = workflowCapabilities d
+
+query :: QueryLimits -> OperatorProfile -> [String] -> IO (Either Diagnostic BS.ByteString)
+query limits p arguments = do
+  result <- try @IOException $ try @Diagnostic $ timeout (queryMicros limits) $
+    bracket (createProcessGroup command) cleanup collect
+  pure $ case result of
+    Left _ -> Left ProcessFailure
+    Right (Left failure) -> Left failure
+    Right (Right Nothing) -> Left QueryTimeout
+    Right (Right (Just value)) -> value
+  where
+    command = (proc (operatorExecutable p) (operatorPrefix p <> arguments))
+      { cwd = Just (operatorCwd p), env = Just (operatorEnvironment p),
+        std_in = NoStream, std_out = CreatePipe, std_err = CreatePipe }
+    -- Runtime retains sole-reaper authority. Final KILL/reap is not a hard OS deadline.
+    cleanup group = terminateProcessGroup 2000000 group `finally` closeGroupPipes group
+    collect group = case (groupOutput group, groupErrors group) of
+      (Just output, Just errors) -> do
+        (bytes, _) <- concurrently (readBounded (queryBytes limits) output) (readBounded (queryBytes limits) errors)
+        code <- waitProcessGroup group
+        pure (if code == ExitSuccess then Right bytes else Left ProcessFailure)
+      _ -> pure (Left ProcessFailure)
+
+readBounded :: Int -> Handle -> IO BS.ByteString
+readBounded limit handle = BS.concat . reverse <$> go 0 []
+  where
+    go size chunks = do
+      chunk <- BS.hGetSome handle (min 32768 (limit - size + 1))
+      if BS.null chunk then pure chunks else do
+        let next = size + BS.length chunk
+        unless (next <= limit) (throwIO OutputOverflow)
+        go next (chunk : chunks)
