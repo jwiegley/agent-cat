@@ -14,6 +14,7 @@ build-type:      Simple
 extra-source-files:
   nix/haskell-overrides.nix
   nix/process-close-fds-linux.patch
+  cli/ci/policies.sh
   test/fixtures/runtime/descriptor-v2/*.json
   test/fixtures/runtime/descriptor-v3/*.json
   test/fixtures/runtime/frontend-manifest/*.json
@@ -34,9 +35,14 @@ extra-source-files:
   test/source_roots_probe.py
   test/cabal.sh
   test/cabal_env_probe.py
+  test/control_probe.py
+  test/lineage_probe.py
+  test/person_control_probe.py
+  test/person_lineage_probe.py
   test/frontend_export_probe.py
   test/frontend_io_probe.py
   test/frontend_session_probe.py
+  test/frontend_contract_probe.py
   manager/AGENTS.md
   manager/ci/dependencies.sh
   manager/ci/contract.sh
@@ -44,6 +50,7 @@ extra-source-files:
   manager/test/containment_probe.py
 extra-doc-files:
   manager/README.md
+  runtime/README.md
   doc/api/README.md
   doc/api/openapi.yaml
   doc/tui-design.md
@@ -145,6 +152,7 @@ library
     Agentic.Runtime.Control
     Agentic.Runtime.Descriptor
     Agentic.Runtime.Frontend
+    Agentic.Runtime.Frontend.Protocol
     Agentic.Runtime.Machine
     Agentic.Runtime.Plan
     Agentic.Runtime.PrivateFile
@@ -314,6 +322,8 @@ test-suite runtime-contract-test
   type:             exitcode-stdio-1.0
   hs-source-dirs:   runtime/test
   main-is:          Main.hs
+  other-modules:    FrontendProtocolTests
+  ghc-options:      -threaded
   build-depends:
     , agentic
     , base

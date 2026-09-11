@@ -19,25 +19,21 @@ import Control.Concurrent (myThreadId, threadDelay)
 import Control.Concurrent.Async (race_)
 import Control.Exception (AsyncException (UserInterrupt), bracket, finally, throwTo)
 import Control.Monad (foldM, forever, unless, when)
-import Data.Aeson (FromJSON (parseJSON), Value (..), eitherDecodeStrict', encode, object, toJSON, withObject, (.:), (.:?), (.=))
-import qualified Data.Aeson.Key as Key
-import qualified Data.Aeson.KeyMap as KeyMap
-import Data.Aeson.Types (Object, Parser, parseEither)
+import Data.Aeson (Value, eitherDecodeStrict', encode, object, toJSON, (.=))
+import Data.Aeson.Types (Parser, parseEither)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as Text
-import qualified Data.Text.Read as TextRead
-import Data.Word (Word64)
 import Data.Time.Clock (getCurrentTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import GHC.Clock (getMonotonicTimeNSec)
 import System.Directory (getCurrentDirectory, withCurrentDirectory)
 import System.Environment (getEnvironment, getExecutablePath, lookupEnv, setEnv, unsetEnv)
 import System.Exit (exitWith)
-import System.FilePath (isAbsolute, takeDirectory, takeFileName, (</>))
+import System.FilePath (takeDirectory, takeFileName, (</>))
 import System.IO (Handle, hClose, hFlush, stdout)
 import System.Posix.Files (getFdStatus, isNamedPipe, isSocket)
 import System.Posix.IO (fdToHandle)
@@ -65,52 +61,11 @@ data FrontendParent = FrontendParent
     parentEdits :: ![FrontendEdit]
   }
 
-data FrontendEdit = DropAnswer !OccurrenceId | ReplaceAnswer !OccurrenceId !Value
-
-data SetupRequest
-  = RootSetup !Setup
-  | DerivedSetup !FilePath !RunId !LineageOperation ![FrontendEdit] !PersonAnswering !(Maybe FrontendInvocation)
-
-data InputSource = Literal !Text | File !FilePath | Transport !Text
-
-data Setup = Setup
-  { setupWorkflow :: !Text,
-    setupDirectory :: !FilePath,
-    setupArguments :: ![Text],
-    setupTargetKind :: !(Maybe Text),
-    setupPerson :: !PersonAnswering,
-    setupInputs :: ![(Text, InputSource)],
-    setupInvocation :: !(Maybe FrontendInvocation)
-  }
-
 -- | Report process interfaces without consulting workflows, state, or providers.
 runFrontendCapabilities :: Text -> Text -> IO ()
 runFrontendCapabilities runnerId runnerVersion = do
   executable <- getExecutablePath
-  send $ object
-    [ "version" .= (1 :: Int),
-      "operation" .= ("capabilities" :: Text),
-      "server" .= serverValue runnerId executable runnerVersion,
-      "session" .= object
-        [ "versions" .= ([1] :: [Int]),
-          "operations" .= (["prepare", "prepare-lineage", "start", "discard"] :: [Text]),
-          "inputSources" .= (["literal", "file", "transport"] :: [Text]),
-          "invocationVersions" .= ([1] :: [Int]),
-          "maxRequestBytes" .= maxFrontendQueryBytes
-        ],
-      "io" .= object
-        [ "versions" .= ([1] :: [Int]),
-          "operations" .= (["open-root", "read-question", "read-result", "list-runs", "read-run"] :: [Text])
-        ],
-      "export" .= object
-        [ "versions" .= ([1] :: [Int]),
-          "operations" .= (["export-result"] :: [Text]),
-          "format" .= ("result-json" :: Text),
-          "destination" .= ("state-exports" :: Text)
-        ],
-      "frontendManifestVersions" .= ([frontendManifestVersion, frontendManifestVersionWithInvocation] :: [Int]),
-      "legacyFrontendManifests" .= True
-    ]
+  send . toJSON $ frontendCapabilities (FrontendServer runnerId executable runnerVersion)
 
 -- | Supervise one prepared worker, retaining the group leader until sole reap.
 runFrontendSession ::
@@ -154,7 +109,7 @@ runFrontendSession runnerId runnerVersion credentialArgument describe prepare = 
                       withPrivateDirectoryAt parentRoot [] (revalidateLineageParentAt record)
                     parent = FrontendParent record operation edits
                 invocation <- retainLineageInvocation manifest requestedInvocation
-                let setup = Setup (frontendWorkflow manifest) directory (frontendTargetArgs manifest) (Just (frontendTargetKind manifest)) answering [] invocation
+                let setup = FrontendSetup (frontendWorkflow manifest) directory (frontendTargetArgs manifest) (Just (frontendTargetKind manifest)) answering [] invocation
                 revalidate
                 descriptor <- describe (frontendWorkflow manifest)
                 let names = map workflowInputName (workflowInputs descriptor)
@@ -191,23 +146,25 @@ runFrontendSession runnerId runnerVersion credentialArgument describe prepare = 
           | requested == preparationTargetKind prepared -> pure requested
           | preparationTargetKind prepared == "acp" && requested `elem` ["current", "child", "remote"] -> pure requested
           | otherwise -> refuse "frontend target kind disagrees with the resolved backend"
-      send $ object $
-        [ "version" .= (1 :: Int), "operation" .= ("prepared" :: Text), "approvalId" .= approval,
-          "runId" .= runIdText runId, "rootIdentity" .= privateRootIdentity root,
-          "cwd" .= cwd, "descriptor" .= descriptor, "plan" .= preparationPlan prepared,
-          "programHash" .= preparationProgramHash prepared, "targetKind" .= kind,
-          "targetArguments" .= preparationArguments prepared, "policy" .= preparationPolicy prepared,
-          "personAnswering" .= setupPerson setup,
-          "server" .= serverValue runnerId executable runnerVersion,
-          "invocation" .= setupInvocation setup,
-          "inputs" .= [object ["name" .= name, "bytes" .= T.pack (show (BS.length bytes)), "sha256" .= frontendDigest bytes] | (name, bytes) <- inputs]
-        ] <> case parent of
-          Nothing -> []
-          Just selected ->
-            [ "parentRunId" .= runIdText (frontendRunId (recordManifest (parentRecord selected))),
-              "lineage" .= lineageName (parentOperation selected),
-              "lineageEdits" .= map editMetadata (parentEdits selected)
-            ]
+      send . toJSON $ FrontendPrepared
+        { preparedApprovalId = approval,
+          preparedRunId = runId,
+          preparedRootIdentity = T.pack (privateRootIdentity root),
+          preparedCwd = cwd,
+          preparedDescriptor = descriptor,
+          preparedPlan = preparationPlan prepared,
+          preparedProgramHash = preparationProgramHash prepared,
+          preparedTargetKind = kind,
+          preparedTargetArguments = preparationArguments prepared,
+          preparedPolicy = preparationPolicy prepared,
+          preparedPersonAnswering = setupPerson setup,
+          preparedServer = FrontendServer runnerId executable runnerVersion,
+          preparedInvocation = setupInvocation setup,
+          preparedInputs = [FrontendPreparedInput name (toInteger (BS.length bytes)) (frontendDigest bytes) | (name, bytes) <- inputs],
+          preparedLineage = (\selected -> FrontendPreparedLineage
+            (frontendRunId (recordManifest (parentRecord selected)))
+            (parentOperation selected) (map editMetadata (parentEdits selected))) <$> parent
+        }
       (decision, controls) <- receive handle buffered
       start <- parsed (parseDecision approval) decision
       when start $ do
@@ -235,7 +192,7 @@ runFrontendSession runnerId runnerVersion credentialArgument describe prepare = 
                 frontendCreatedAt = created,
                 frontendParentRunId = frontendRunId . recordManifest . parentRecord <$> parent,
                 frontendLineage = lineageName . parentOperation <$> parent,
-                frontendLineageEdits = maybe [] (map editMetadata . parentEdits) parent,
+                frontendLineageEdits = maybe [] (map (toJSON . editMetadata) . parentEdits) parent,
                 frontendPersona = preparationPersona prepared,
                 frontendPolicyDigest = preparationPolicyDigest prepared,
                 frontendPersonAnswering = Just (setupPerson setup),
@@ -252,10 +209,6 @@ runFrontendSession runnerId runnerVersion credentialArgument describe prepare = 
         setEnv "AGENT_CAT_RUN_STORE" (directory </> "runtime")
         setEnv "AGENT_CAT_RUN_OWNER" (T.unpack owner)
         race_ (forever (threadDelay 2000000 >> heartbeat)) (preparationRun prepared runId handle controls)
-
-serverValue :: Text -> FilePath -> Text -> Value
-serverValue runnerId executable runnerVersion =
-  toJSON (FrontendServer runnerId executable runnerVersion)
 
 validateInvocationCredentials :: (String -> Bool) -> Maybe FrontendInvocation -> IO ()
 validateInvocationCredentials credentialArgument invocation =
@@ -297,7 +250,7 @@ receive handle buffered = do
 send :: Value -> IO ()
 send value = do
   let bytes = jsonBytes value
-  when (toInteger (BS.length bytes) > maxArtifactBytes + 4096) (refuse "frontend preview exceeds its byte bound")
+  when (toInteger (BS.length bytes) > maxFrontendReplyBytes) (refuse "frontend preview exceeds its byte bound")
   BS.hPut stdout bytes
   hFlush stdout
 
@@ -310,48 +263,10 @@ parsed parser = either (refuse . T.pack) pure . parseEither parser
 refuse :: Text -> IO a
 refuse = ioError . userError . T.unpack
 
-parseSetupRequest :: Value -> Parser SetupRequest
-parseSetupRequest value = withObject "frontend preparation" (\o -> do
-  version <- o .: "version"
-  unless (version == (1 :: Int)) (fail "unsupported frontend request version")
-  operation <- o .: "operation"
-  case operation :: Text of
-    "prepare" -> RootSetup <$> parseSetup value
-    "prepare-lineage" -> do
-      onlyKeys ["version", "operation", "stateDirectory", "parentRunId", "lineage", "edits", "personAnswering", "invocation"] o
-      directory <- o .: "stateDirectory"
-      unless (isAbsolute directory && not ('\0' `elem` directory) && BS.length (Text.encodeUtf8 (T.pack directory)) <= 4096) (fail "frontend state directory must be an absolute bounded path")
-      parent <- o .: "parentRunId" >>= either (fail . T.unpack) pure . mkRunId
-      lineage <- o .: "lineage" >>= \caseName -> case caseName :: Text of
-        "restart" -> pure RestartRun
-        "resume" -> pure ResumeRun
-        "fork" -> pure ForkRun
-        _ -> fail "frontend lineage must be restart, resume, or fork"
-      edits <- o .:? "edits" >>= maybe (pure []) (traverse parseEdit)
-      unless (null edits || lineage == ForkRun) (fail "answer edits require fork lineage")
-      person <- o .:? "personAnswering"
-      invocation <- optionalInvocation o
-      pure (DerivedSetup directory parent lineage edits (maybe PersonAnswerLocalControl id person) invocation)
-    _ -> fail "frontend requires preparation before a decision") value
-
-parseEdit :: Value -> Parser FrontendEdit
-parseEdit = withObject "frontend answer edit" $ \o -> do
-  text <- o .: "occurrenceId"
-  occurrence <- case TextRead.decimal text :: Either String (Integer, Text) of
-    Right (number, rest) | T.null rest && T.length text <= 20 && number <= toInteger (maxBound :: Word64) -> pure (OccurrenceId (fromInteger number))
-    _ -> fail "frontend edit occurrence must be a Word64 decimal string"
-  operation <- o .: "operation"
-  case operation :: Text of
-    "drop" -> onlyKeys ["occurrenceId", "operation"] o >> pure (DropAnswer occurrence)
-    "replace" -> onlyKeys ["occurrenceId", "operation", "answer"] o >> ReplaceAnswer occurrence <$> o .: "answer"
-    _ -> fail "frontend edit must drop or replace an answer"
-
-editMetadata :: FrontendEdit -> Value
-editMetadata (DropAnswer occurrence) = object
-  ["operation" .= ("drop" :: Text), "occurrenceId" .= T.pack (show (occurrenceNumber occurrence))]
-editMetadata (ReplaceAnswer occurrence answer) = object
-  ["operation" .= ("replace" :: Text), "occurrenceId" .= T.pack (show (occurrenceNumber occurrence)),
-   "sha256" .= frontendDigest (BL.toStrict (encode answer))]
+editMetadata :: FrontendEdit -> FrontendEditMetadata
+editMetadata (DropAnswer occurrence) = DroppedAnswer occurrence
+editMetadata (ReplaceAnswer occurrence answer) =
+  ReplacedAnswer occurrence (frontendDigest (BL.toStrict (encode answer)))
 
 lineageName :: LineageOperation -> Text
 lineageName RestartRun = "restart"
@@ -359,65 +274,7 @@ lineageName ResumeRun = "resume"
 lineageName ForkRun = "fork"
 lineageName RootRun = "root"
 
-parseSetup :: Value -> Parser Setup
-parseSetup = withObject "frontend preparation" $ \o -> do
-  onlyKeys ["version", "operation", "workflow", "stateDirectory", "targetArguments", "targetKind", "personAnswering", "inputs", "invocation"] o
-  version <- o .: "version"
-  unless (version == (1 :: Int)) (fail "unsupported frontend request version")
-  operation <- o .: "operation"
-  unless (operation == ("prepare" :: Text)) (fail "frontend requires preparation before a decision")
-  workflow <- o .: "workflow"
-  directory <- o .: "stateDirectory"
-  unless (isAbsolute directory && not ('\0' `elem` directory) && BS.length (Text.encodeUtf8 (T.pack directory)) <= 4096) (fail "frontend state directory must be an absolute bounded path")
-  arguments <- o .: "targetArguments"
-  when (length arguments > 4096 || sum (map (BS.length . Text.encodeUtf8) arguments) > 65536 || any (T.any (== '\0')) arguments) (fail "frontend target arguments must be bounded and NUL-free")
-  kind <- o .:? "targetKind"
-  person <- o .:? "personAnswering"
-  inputs <- o .: "inputs" >>= traverse parseInput
-  invocation <- optionalInvocation o
-  pure (Setup workflow directory arguments kind (maybe PersonAnswerLocalControl id person) inputs invocation)
-
-parseInput :: Value -> Parser (Text, InputSource)
-parseInput = withObject "frontend input" $ \o -> do
-  name <- o .: "name"
-  source <- o .: "source"
-  case source :: Text of
-    "literal" -> do
-      onlyKeys ["name", "source", "value"] o
-      value <- o .: "value"
-      pure (name, Literal value)
-    "file" -> do
-      onlyKeys ["name", "source", "path"] o
-      path <- o .: "path"
-      unless (isAbsolute path && not ('\0' `elem` path) && BS.length (Text.encodeUtf8 (T.pack path)) <= 4096) (fail "frontend input file must be an absolute bounded path")
-      pure (name, File path)
-    "transport" -> do
-      onlyKeys ["name", "source", "value"] o
-      value <- o .: "value"
-      pure (name, Transport value)
-    _ -> fail "frontend input source must be literal, file, or transport"
-
-parseDecision :: Text -> Value -> Parser Bool
-parseDecision expected = withObject "frontend decision" $ \o -> do
-  onlyKeys ["version", "operation", "approvalId"] o
-  version <- o .: "version"
-  unless (version == (1 :: Int)) (fail "unsupported frontend request version")
-  approval <- o .: "approvalId"
-  unless (approval == expected) (fail "frontend approval does not name this prepared execution")
-  operation <- o .: "operation"
-  case operation :: Text of
-    "start" -> pure True
-    "discard" -> pure False
-    _ -> fail "frontend decision must be start or discard"
-
-onlyKeys :: [Text] -> Object -> Parser ()
-onlyKeys allowed object' =
-  unless (all ((`elem` allowed) . Key.toText) (KeyMap.keys object')) (fail "frontend request has unknown fields")
-
-optionalInvocation :: Object -> Parser (Maybe FrontendInvocation)
-optionalInvocation object' = traverse parseJSON (KeyMap.lookup "invocation" object')
-
-captureInputs :: WorkflowDescriptor -> [(Text, InputSource)] -> IO [(Text, BS.ByteString)]
+captureInputs :: WorkflowDescriptor -> [(Text, FrontendInputSource)] -> IO [(Text, BS.ByteString)]
 captureInputs descriptor supplied = do
   let names = map workflowInputName (workflowInputs descriptor)
       sources = Map.fromList supplied

@@ -6,6 +6,7 @@ module Agentic.Runtime
     module Agentic.Runtime.Descriptor,
     module Agentic.Runtime.Facts,
     module Agentic.Runtime.Frontend,
+    module Agentic.Runtime.Frontend.Protocol,
     module Agentic.Runtime.Machine,
     module Agentic.Runtime.Plan,
     module Agentic.Runtime.PrivateRoot,
@@ -24,6 +25,7 @@ import Agentic.Runtime.Control
 import Agentic.Runtime.Descriptor
 import Agentic.Runtime.Facts
 import Agentic.Runtime.Frontend
+import Agentic.Runtime.Frontend.Protocol
 import Agentic.Runtime.Machine
 import Agentic.Runtime.Plan
 import Agentic.Runtime.PrivateRoot

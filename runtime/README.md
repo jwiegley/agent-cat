@@ -27,6 +27,36 @@ root path, device number, and inode number captured by the parent. The child reo
 and validates that identity before confined input, lineage, or store access. The
 identity is not an authorization token and does not relax ownership or mode checks.
 
+## Neutral frontend transport
+
+`Agentic.Runtime.Frontend.Protocol`, re-exported through `Agentic.Runtime`,
+owns version-1 preparation, lineage, input-source, edit, start, discard,
+prepared-reply, and capability data and codecs. Request parsing preserves the
+native branches and refusal text. Initial sources remain literal text,
+transport text, or a file reference, and replacement answers retain their exact
+JSON values, including false and null. The codec neither reads a file nor
+applies workflow-specific input capture rules.
+
+The bounded encoders return JSON payloads without a newline. The existing
+NDJSON adapter supplies framing and uses `readNdjsonFrame`. Request payloads
+retain the shared two-mebibyte limit. The reply limit is 64 mebibytes plus 4096
+bytes, including the terminating newline. Missing request invocation metadata
+is omitted rather than encoded as null, while the prepared reply retains its
+required nullable invocation field.
+
+Prepared replies reuse descriptor, server, invocation, run-identity, and exact
+plan parsing. `parseExactPlan` accepts an already decoded value without
+serializing its opaque program again. Public policy remains an opaque object.
+Transport validation does not prove that a reply matches the requested workflow,
+trusted profile, captured input, or live worker, and stored identities and
+invocations confer no execution authority. Adapters retain those checks.
+
+Executable preparation closures, registry lookup, target selection, environment
+handling, input capture, private control pipes, and the fd-3 bootstrap remain at
+their existing CLI and runtime boundaries. The TUI consumes the shared
+capability codec while retaining its own required-manifest and legacy-support
+checks.
+
 ## Observation failures and cancellation
 
 An exception from an event observer aborts execution without engine retry or
@@ -54,8 +84,13 @@ nix develop path:. -c cabal build all
 ./engine/agent-deck/ci/deck.sh
 ```
 
-The policy gate drives the policy, control, and lineage probes through this
-runtime. The two engine gates exercise the same runtime through neutral engines.
+The policy gate drives the policy, control, lineage, and native frontend probes
+through this runtime. It also sends real capability and prepared replies through
+the shared codecs, sends encoded preparation and decision requests to live
+scripted workers, and checks captured file bytes after source mutation. These
+checks run with `GHCRTS=-N8`. The runtime contract suite tests codec round trips,
+refusals, and byte limits. The two engine gates exercise the same runtime
+through neutral engines.
 
 ## Conventions
 
