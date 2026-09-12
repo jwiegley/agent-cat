@@ -8,6 +8,27 @@ Implementation follows the [approved design](../doc/research/workflow-manager.md
 [work packages](../doc/research/workflow-manager-implementation-plan.md), and the
 [operator-approved SQLite scope amendment](../doc/research/workflow-manager-storage-amendment.md).
 
+## Client baseline policy
+
+The minimum supported targets for the version 1 manager clients are GNU Emacs
+30.2 and Pi coding-agent 0.85.1. Older versions are outside this manager-client
+support policy. This baseline does not narrow the native extension's existing
+peer-dependency declarations or establish service-mode compatibility before the
+owning client acceptance gates run.
+
+These minima are support-policy decisions, not inferred compatibility limits.
+The [native frontend evidence](../doc/tui-release-evidence.md) records Emacs 30.2
+byte-compilation, checkdoc, and smoke execution. The Pi package pins coding-agent
+0.85.1 for development, and the installed host reports that version. Companion
+Pi client, server, and TUI package pins are separate dependencies rather than
+coding-agent version floors. The current pinned development shell reports Node
+22.23.2, which is a reproducible build-runtime observation rather than an
+independently established Node compatibility minimum.
+
+No older-version compatibility or manager service-mode test is implied by these
+records. Each released client must pass its owning acceptance gate on its actual
+environment, including versions newer than the baseline.
+
 ## Profile authority
 
 `OperatorProfile` is a private immutable value supplied by trusted CLI

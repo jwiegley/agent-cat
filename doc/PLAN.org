@@ -2578,15 +2578,17 @@ From the runtime adversarial pass (commit 71a212a). MEDIUM: (1) Exec.say logs bu
 ]
 #+end_src
 
-* TODO [#B] WM-G0: Verify implementation baseline
+* DONE [#B] WM-G0: Verify implementation baseline
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-g0-r3r7
 :LABELS:   ["wm-release-gate","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-11 Fri 23:03]
+:MODIFIED: [2026-09-11 Fri 23:35]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-11 Fri 23:35]
+:CLOSE_REASON: Baseline independently accepted under the operator storage amendment. Minimum client policy record repaired and independently confirmed. No withdrawn or unavailable test is reported as passing.
 :EXTERNAL_REF: agent-cat/workflow-manager/G0
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -2625,6 +2627,8 @@ Exact source/toolchain provenance, owner agreement, compatibility fixtures, pack
 ** Notes
 
 Operator-authorized scope amendment 2026-09-12T06:03:20+00:00: user explicitly instructed, "Skip this test, drop the requirement. I want to continue." The unrun SQLite directory-replacement confinement experiment and guarantee are withdrawn, not passed. Amendment doc/research/workflow-manager-storage-amendment.md, SHA-256 e6654b8ec1294e1daf2bb634ce3da62426cdb36fdcb9cb820a54ffc192c5e791, supersedes only D2/WM-007 and their dependent acceptance obligation, preserving both original research hashes. Ordinary SQLite work now assumes a stable operator-controlled private local namespace. No existing guard or runnable regression is removed, no rejected experiment is repeated, and no custom VFS is authorized. The already independently reviewed durable publication work satisfies the remaining WM-007 scope. Fresh warning-fatal all-target baseline and all three Haskell suites pass in state.0wnll6Qx/baseline.log. WM-009 may proceed under the amendment. G0 remains open until independently assessed. Full WM-001–044/G0–G5 remains the objective. Refocus completed 2026-09-12T06:03:20+00:00, next deadline 2026-09-12T07:03:20+00:00. Next: publish this scope amendment and implement ordinary coordination storage without reconstructing the rejected experiment.
+
+G0 accepted under the explicit storage amendment at 2026-09-12T06:35:51+00:00. Independent fresh-origin reviewer85a0ee89-3113-45d9-a524-cec6541cd314 found no implementation defect and one missing minimum-client-environment record. Parent declared the support minima in manager/README.md, separated policy from observed/tested versions and future client acceptance, and retained all native peer ranges. Same evaluator85c2d48a-5aa7-49f7-87b7-997e56ef10c7 completed the gate assessment as Ready with no further prerequisite. Evidence: state.0wnll6Qx/g0-review.md, g0-final-review.md, g0-source.json, g0-policy-source.json, baseline.log, amendment-doc-check.log, client-baseline-doc-check.log, client-baseline-source.log and verified history-probe artifacts. All recorded source matches the assessed snapshot except the documented README policy addition. Original design/plan hashes, fixtures, code, model and dependencies are unchanged. The SQLite directory-replacement experiment remains unrun and its withdrawn guarantee is not certified. G0 establishes the baseline/API/model/ownership boundary only, not a service, physical power-loss, containment, approved worker, SQL realization, cross-client, provider or deployment capability.
 
 ** Dependencies
 
@@ -6788,7 +6792,7 @@ deep-review + validated (both medium). Parse.lean:447-451 reads the two idents w
 :LABELS:   ["p0","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-10 Thu 01:03]
+:MODIFIED: [2026-09-11 Fri 23:35]
 :CREATED_BY: johnw
 :FINISHED: [2026-09-10 Thu 01:03]
 :CLOSE_REASON: Established committed native/TUI baseline and current direnv verification environment. Independent fess review identified defects and gaps, all corrected with real red/green evidence: durable buffered cancellation, atomic event sequencing and primary-failure refusal, visible browser status, evaluated resize frames, honest compact-review docs, routing-freeze execution and native worker cleanup. All owning deterministic, conformance, PTY and documentation gates pass after repair. Native repair commit 02bab39; TUI repair is committed with this closure. Pi and downstream source ownership/evidence ceilings recorded without deployment claims.
@@ -6849,6 +6853,8 @@ in an implementation commit.
 ** Notes
 
 Independent fess findings have been corrected and the complete owning gate matrix rerun successfully. Native P1 reproduced as empty durable journal versus streamed started/ack/cancelled events. Prepared control input is now consumed after durable run.started; legacy preflight control behavior is retained. Strong regression then exposed duplicate sequence reuse on asynchronous cancellation; the shared writer now masks sequence publication and poisons failed primary writes. New real-handle test covers sticky primary failure, and 8 repeated buffered-cancel/EOF trials show exact stream/journal agreement plus cancelled history. Native routing-freeze execution and prepared/running worker cleanup checks pass. TUI hidden status, stale failure reset, compact-review prose and vacuous resize assertion are corrected and ready for the next repair commit. All three Cabal suites, policies/native probes, examples, routing, deterministic ACP/deck, tier0, seed-1 differential 500 cases, TUI PTYs and both documentation gates pass after repairs. Logs use fess-* under baseline.jyVC2U. The temporary ghc-pkg failure was traced to applying runtime GHCRTS=-N8 to compiler tools; runner paths are now resolved before runtime-only flags. Fixture corrections supplied required routing fields, absolute adapters, and the actual SIGINT termination outcome. No checks were suppressed. Per Wiggum, audit-fix commits will not trigger recursive fix audits. Last refocus 2026-09-10T07:30:37Z, next deadline 2026-09-10T08:30:37Z.
+
+G0 audit repair 2026-09-12T06:35:51+00:00: minimum manager-v1 client targets are now explicitly declared in manager/README.md#client-baseline-policy as GNU Emacs30.2 and Pi coding-agent0.85.1. This is a conservative support-policy decision, not a measured incompatibility floor or a change to native extension peer ranges. Historical Emacs30.2 byte-compile/checkdoc/smoke evidence remains in doc/tui-release-evidence.md. Installed Pi0.85.1, separate companion SDK pins and the Node22.23.2 build-runtime observation are recorded in state.0wnll6Qx/client-baseline-source.log. No older-version or manager service-mode acceptance is claimed. The documentation gate passes, and independent assessor85c2d48a-5aa7-49f7-87b7-997e56ef10c7 confirms the sole missing G0 prerequisite is satisfied in state.0wnll6Qx/g0-final-review.md.
 
 * DONE [#B] WM-002: Settle package boundaries and dependency feasibility    :p0:
 :PROPERTIES:
@@ -7581,7 +7587,7 @@ WM-008 package-boundary completion verified at 2026-09-12T02:36:23+00:00. Indepe
 :LABELS:   ["p2","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-11 Fri 23:03]
+:MODIFIED: [2026-09-11 Fri 23:35]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-009
 :SOURCE_REPO: agent-cat
@@ -7643,6 +7649,8 @@ PID is not treated as a worker control capability.
 ** Notes
 
 Operator-authorized scope amendment 2026-09-12T06:03:20+00:00: user explicitly instructed, "Skip this test, drop the requirement. I want to continue." The unrun SQLite directory-replacement confinement experiment and guarantee are withdrawn, not passed. Amendment doc/research/workflow-manager-storage-amendment.md, SHA-256 e6654b8ec1294e1daf2bb634ce3da62426cdb36fdcb9cb820a54ffc192c5e791, supersedes only D2/WM-007 and their dependent acceptance obligation, preserving both original research hashes. Ordinary SQLite work now assumes a stable operator-controlled private local namespace. No existing guard or runnable regression is removed, no rejected experiment is repeated, and no custom VFS is authorized. The already independently reviewed durable publication work satisfies the remaining WM-007 scope. Fresh warning-fatal all-target baseline and all three Haskell suites pass in state.0wnll6Qx/baseline.log. WM-009 may proceed under the amendment. G0 remains open until independently assessed. Full WM-001–044/G0–G5 remains the objective. Refocus completed 2026-09-12T06:03:20+00:00, next deadline 2026-09-12T07:03:20+00:00. Next: publish this scope amendment and implement ordinary coordination storage without reconstructing the rejected experiment.
+
+WM-009 execution checkpoint 2026-09-12T06:35:51+00:00: ordinary storage implementation is active in isolated author/agentic-0.1.0.0 under state.0wnll6Qx, based on an exact532-file package snapshot. Native worker1e9c021e-c3cf-414e-ac3a-e5360153fe0b belongs to workflow60aff7a6-bb87-4be5-8677-806449e609d3. It detached for supervisor request95bfa03d-9ba7-4c87-ba5b-fa7393bd23e7 and was answered, not relaunched. Exact foreground completion subscription bac012e7-ccd9-476c-8b07-06df85459514 is armed. Approved seam: installConfiguration owns native root-directory flock before role publication, the store retains its lease/root independently, and closed configuration cannot release ownership beneath an active store. Mandatory constraints: only one store claim per installed configuration, atomic close-on-exec lease duplication, retained Runtime root helpers, normal reload, and real lifetime/exclusion tests. No stored identity confers control, no raw SQL/handle escapes public facade, and no directory-replacement experiment/custom VFS is permitted. Parent alone mutates canonical files and Git. Earlier read-only scoping worker failed with a session-path EEXIST collision before substantive analysis; its output was rejected and its colliding session was not resumed. This implementation worker has a distinct session namespace. Canonical source is unchanged by the author so far. G0 is now independently accepted, with its minimum-environment record repaired. Last refocus06:03:20Z,next07:03:20Z. No repeated signature escalation is active.
 
 ** Dependencies
 
