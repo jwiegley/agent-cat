@@ -105,6 +105,7 @@ checks root source = do
       environment = [("PROFILE_TEST_SECRET", "SYNTHETIC_SECRET_OLD"), ("EXPLICIT_ONLY", "yes"), ("__CF_USER_TEXT_ENCODING", "0x" <> map toUpper (showHex uid "") <> ":0:0")]
       definition mode = OperatorProfile "profile_main" "Review workspace" "Deterministic worker"
         "configured-wrapper" executable (prefix mode) workspace ["--scripted"] environment ServiceOwned False
+        PersonAnswerLocalControl ["workspace"] (ConfigurationLimits 100 100 67108864 2 16 4 67108864 30 1)
       limits = QueryLimits 65536 2000000
       writeCaps caps = BL.writeFile (replies </> "capabilities.json") (encode caps)
       writeRows rows = BL.writeFile (replies </> "catalogue.json") (encode rows)

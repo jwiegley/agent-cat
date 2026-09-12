@@ -1,8 +1,9 @@
 # Manager implementation boundary
 
-This directory provides trusted profile registry and discovery operations through
-`Agentic.Manager`, alongside dependency probes and import-policy checks. It does
-not yet contain an operator-configuration loader or a workflow-manager service.
+This directory provides trusted profile configuration, registry, and discovery
+operations through `Agentic.Manager`, alongside dependency probes and import
+checks. The CLI composes operator files through the existing registry-based
+target parser. It does not yet contain a workflow-manager service.
 Implementation follows the [approved design](../doc/research/workflow-manager.md) and its
 [work packages](../doc/research/workflow-manager-implementation-plan.md).
 
@@ -10,8 +11,9 @@ Implementation follows the [approved design](../doc/research/workflow-manager.md
 
 `OperatorProfile` is a private immutable value supplied by trusted CLI
 composition. It contains the configured invocation, working directory, target
-arguments, explicit environment, public labels, ownership classification, and
-quarantine state. It has no generic `Show`, `Eq`, or JSON representation. The
+arguments, explicit environment, public labels, ownership classification,
+quarantine state, person-answering mode, resource keys, and a configuration-limits
+snapshot. It has no generic `Show`, `Eq`, or JSON representation. The
 caller validates concrete target grammar, named-route ownership, workspace
 policy, and root ownership before installation. An invocation copied from a
 manifest or a process-reported server identity does not supply that authority.
@@ -47,8 +49,37 @@ These operations do not freeze mutable executable or configuration files.
 They do not infer ownership from executable names or ACP transport, and process
 groups do not provide a sandbox. Each query has its own time budget, while the
 shared Runtime cleanup retains sole-reaper authority and can exceed that budget.
-Person-answering policy, resource quotas, CLI composition, and approval lifecycle
-integration remain separate unfinished parts of WM-008.
+The configuration layer captures person and resource policy but does not enforce
+quotas or implement approval and worker lifecycles. Those integration obligations
+remain explicit.
+
+## Operator configuration
+
+The [versioned operator format](CONFIGURATION.md) is loaded through
+`Agentic.Cli.loadManagerConfiguration`. `openManagerConfiguration` installs a
+validated snapshot, and `reloadManagerConfiguration` replaces an active one.
+They reuse the actual native target parser and credential-argument policy,
+including prefix checks on unused runner definitions. The manager receives
+validated private values rather than executable data from a network request.
+
+The shared Runtime reader checks the opened file's type, effective-user
+ownership, private permissions, and byte bound before reading it. Configuration
+parsing checks Aeson's decoded token stream for duplicate keys and excessive
+nesting before object-map construction. Unknown fields and invalid definitions
+refuse with fixed diagnostics, without publishing a role marker or starting a
+query process.
+
+Initial installation requires an existing, durably provisioned private root.
+Active operations recheck the retained root, its existing manager role, and
+configured retention-root separation. Reload cannot change the root binding or
+repair a missing role marker. A masked configuration transaction replaces profile
+revisions and the configuration-limits snapshot together. Closing the installed
+handle closes its descriptor without removing the manager role.
+
+`manager/ci/configuration.sh` builds canonical Cabal targets and runs the actual
+CLI configuration probe at one and eight runtime capabilities. Its private
+fixture evidence remains under `CABAL_BUILDDIR`. No service, provider execution,
+or approval implementation is substituted for that configuration check.
 
 ## Root separation
 

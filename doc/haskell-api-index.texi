@@ -3,8 +3,12 @@
 @hsindex Agentic.Cli.Registry
 @hsindex Agentic.Cli.Row
 @hsindex Agentic.Cli.cliMain
+@hsindex Agentic.Cli.loadManagerConfiguration
+@hsindex Agentic.Cli.openManagerConfiguration
 @hsindex Agentic.Cli.parseCommand
+@hsindex Agentic.Cli.reloadManagerConfiguration
 @hsindex Agentic.Cli.routesFact
+@hsindex Agentic.Cli.validateManagerTarget
 @hsindex Agentic.Runtime.Facts.oneSessionPhrase
 @hsindex Agentic.Runtime.Facts.reservedInput
 @hsindex Agentic.Runtime.Facts.routeDefaultLabel

@@ -238,6 +238,10 @@ module Agentic.Cli
 
     -- * The runner
     cliMain,
+    validateManagerTarget,
+    loadManagerConfiguration,
+    openManagerConfiguration,
+    reloadManagerConfiguration,
 
     -- * One fact, for the gate that holds it against its reader
     routesFact,
@@ -257,6 +261,7 @@ module Agentic.Cli
 where
 
 import qualified Agentic.Cli.Frontend as Frontend
+import qualified Agentic.Manager as Manager
 import Control.Exception
   ( Handler (..),
     IOException,
@@ -3624,6 +3629,34 @@ noRunOpts =
       roRequirePinned = False,
       roInputs = []
     }
+
+-- | Validate installed target argv without workflow lookup, configuration IO,
+-- or a second grammar. Failure categories never include private argument text.
+validateManagerTarget :: Registry -> [Text] -> Either Manager.Diagnostic ()
+validateManagerTarget reg arguments = do
+  (target, _, inputs) <- either (const (Left Manager.InvalidConfiguration)) Right (parseTarget reg arguments)
+  unless (null inputs) (Left Manager.InvalidConfiguration)
+  let adapterArguments = case target of
+        Scripted -> []
+        Routed routes' -> rrAdapterArgs routes'
+        Routing (RoutingUnloaded options) -> map T.unpack (roAdapterArgs options)
+        Routing (RoutingLoaded options _ _) -> map T.unpack (roAdapterArgs options)
+  unless (not (any credentialArgument adapterArguments)) (Left Manager.InvalidConfiguration)
+
+-- | Operator-file composition uses the same registry-based target parser as run
+-- and frontend preparation. Program-dependent routing remains runner-owned.
+loadManagerConfiguration :: Registry -> FilePath -> IO (Either Manager.Diagnostic Manager.Configuration)
+loadManagerConfiguration reg = Manager.loadConfiguration (validateManagerTarget reg) credentialArgument
+
+openManagerConfiguration :: Registry -> FilePath -> IO (Either Manager.Diagnostic Manager.InstalledConfiguration)
+openManagerConfiguration reg path = do
+  candidate <- loadManagerConfiguration reg path
+  either (pure . Left) Manager.installConfiguration candidate
+
+reloadManagerConfiguration :: Registry -> Manager.InstalledConfiguration -> FilePath -> IO (Either Manager.Diagnostic [Manager.PublicProfile])
+reloadManagerConfiguration reg installed path = do
+  candidate <- loadManagerConfiguration reg path
+  either (pure . Left) (Manager.reloadConfiguration installed) candidate
 
 -- | The @run@ options: three mutually exclusive answerers, the knobs that
 -- belong to one of them alone, and @--require-pinned@ and the input flags,

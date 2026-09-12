@@ -17,6 +17,7 @@ module Agentic.Runtime
     module Agentic.Runtime.Snapshot.Checkpoint,
     module Agentic.Runtime.Store,
     module Agentic.Shell,
+    readPrivateConfigurationFile,
   )
 where
 
@@ -30,6 +31,7 @@ import Agentic.Runtime.Frontend.Protocol
 import Agentic.Runtime.Machine
 import Agentic.Runtime.Plan
 import Agentic.Runtime.PrivateRoot
+import Agentic.Runtime.PrivateFile (readPrivateConfigurationFile)
 import Agentic.Runtime.ProcessGroup
 import Agentic.Runtime.Protocol
 import Agentic.Runtime.Route

@@ -3765,10 +3765,12 @@ older clients require disjoint configured directories.
 @findex probeProfile
 @findex validateRootSeparation
 @code{Agentic.Manager} provides a private profile registry and bounded trusted
-runner discovery.  It is not a manager service or an operator-configuration
-loader.  Trusted composition supplies @code{OperatorProfile} values with an
-exact configured invocation, working directory, target arguments, explicit
-environment, public labels, ownership classification, and quarantine state.
+runner discovery, with registry-based operator-file composition in the CLI.
+It is not a manager service.  Trusted composition supplies
+@code{OperatorProfile} values with an exact configured invocation, working
+directory, target arguments, explicit environment, public labels, ownership
+classification, quarantine state, person-answering mode, resource keys, and
+a configuration-limits snapshot.
 Historical manifests and process-reported identity do not grant that authority.
 
 A successful reload validates the whole candidate set and atomically replaces
@@ -3792,8 +3794,40 @@ categories, never private execution fields or raw diagnostics.
 and local-retention paths using canonical ancestry and directory identities.
 It includes not-yet-created suffixes and revalidates the manager root.  It does
 not freeze mount configuration or confer authority over later pathname IO.
-CLI policy construction, resource and person policy, approval integration, and
-the remaining clients are not supplied by this library alone.
+Quota enforcement, service ownership, approval integration, and the remaining
+clients are not supplied by this library alone.
+
+@c COVER API Agentic.Cli.validateManagerTarget support
+@c COVER API Agentic.Cli.loadManagerConfiguration support
+@c COVER API Agentic.Cli.openManagerConfiguration support
+@c COVER API Agentic.Cli.reloadManagerConfiguration support
+@findex readPrivateConfigurationFile
+@findex validateManagerTarget
+@findex loadManagerConfiguration
+@findex openManagerConfiguration
+@findex reloadManagerConfiguration
+@code{loadManagerConfiguration} reads a private version-1 operator JSON file
+through @code{readPrivateConfigurationFile}.  It rejects symlink components,
+non-regular files, foreign ownership, public permissions, more than 2097152
+bytes, duplicate decoded keys, more than 64 nested containers, and unknown or
+invalid fields.  The required top-level fields are @code{version},
+@code{managerRoot}, @code{localRetentionRoots}, @code{runners}, @code{limits},
+and @code{profiles}.  The complete format is documented in
+@file{manager/CONFIGURATION.md}.
+
+The CLI supplies @code{validateManagerTarget}, which reuses the native target
+grammar without a workflow lookup, and its existing credential-argument
+predicate.  Every runner prefix is checked, including unused definitions.
+Wrapper prefixes are not parsed as native target options.  Failures use fixed
+diagnostic categories rather than source text or private argument values.
+
+@code{openManagerConfiguration} validates an existing, durably provisioned root
+and separation before establishing its role.  Active operations recheck that
+identity, existing role, and separation.  @code{reloadManagerConfiguration}
+requires the same root binding and never recreates a lost marker.  Its masked
+transaction updates limits and profile revisions together.  Closing an installed
+configuration releases its descriptor, not its role marker.  Captured limits
+are configuration facts, not per-profile allocations or quota enforcement.
 
 @section Native frontend preparation
 @c COVER CLI verb:frontend author

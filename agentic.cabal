@@ -50,11 +50,13 @@ extra-source-files:
   manager/AGENTS.md
   manager/ci/dependencies.sh
   manager/ci/profiles.sh
+  manager/ci/configuration.sh
   manager/ci/contract.sh
   manager/test/DependencyProbe.hs
   manager/test/containment_probe.py
 extra-doc-files:
   manager/README.md
+  manager/CONFIGURATION.md
   runtime/README.md
   doc/api/README.md
   doc/api/openapi.yaml
@@ -150,6 +152,7 @@ library
     Agentic.DSL.Json
     Agentic.Exec
     Agentic.Manager.Profile
+    Agentic.Manager.Configuration
     Agentic.Manager.Root
     Agentic.Plan.Value
     Agentic.Raw
@@ -324,6 +327,13 @@ executable manager-root-probe
   import:          settings
   hs-source-dirs:  manager/test
   main-is:         RootProbe.hs
+  build-depends:   agentic
+  ghc-options:     -threaded -rtsopts
+
+executable manager-configuration-probe
+  import:          settings
+  hs-source-dirs:  cli/test
+  main-is:         ManagerConfigurationProbe.hs
   build-depends:   agentic
   ghc-options:     -threaded -rtsopts
 
