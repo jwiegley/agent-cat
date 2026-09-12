@@ -7580,15 +7580,17 @@ WM-008 package-boundary completion verified at 2026-09-12T02:36:23+00:00. Indepe
 ]
 #+end_src
 
-* DOING [#B] WM-009: Implement the private coordination database and service lock    :p2:
+* DONE [#B] WM-009: Implement the private coordination database and service lock    :p2:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-wm-009-kmzw
 :LABELS:   ["p2","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-12 Sat 10:59]
+:MODIFIED: [2026-09-12 Sat 11:12]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-12 Sat 11:12]
+:CLOSE_REASON: Leased SQLite coordination storage, relational migration/constraints, bounded transactions/invalidations and lifetime behavior independently accepted with canonical/Linux evidence. Explicit limits and withdrawn experiment remain documented.
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-009
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -7660,6 +7662,8 @@ WM-009 integration refocus 2026-09-12T17:36:37+00:00, next 2026-09-12T18:36:37+0
 
 WM-009 canonical verification 2026-09-12T17:59:59+00:00: ordinary leased coordination storage is integrated and ready for the work-unit commit and independent review, not package closure yet. The parent added a meaningful read-only regression using a valid WITH-prefixed UPDATE RETURNING after finding that the author's DELETE-prefix test stopped at an earlier guard. Final canonical and native Linux/aarch64 storage runs pass113checks each at N1/N8. A full isolated compiled candidate with SQLite statement-readonly enforcement disabled fails the intended new assertion at both settings. Production code is unchanged by that test repair. Current source archive539files,14source/doc work files, and619frozen fixture/model files match verified hashes in state.0wnll6Qx/verified-source.json. Original design, original plan, amended storage record and compatibility corpus are unchanged. Warning-fatal all-target build, configuration/profile gates, all three Haskell suites, complete policies/native/spawn/PTTY, ACP20, deck10, routing, nine examples, both documentation gates and conformance pass. Tier1seed35476924,n500: P1R1/1,P1500/500,P212000/12000,P3412/500,88other skips,zero failures. Linux final logs are linux-final-storage/; final local regression is readonly-regression-green.log; negative control is readonly-negative/. Broad macOS logs are canonical-*.log. No close-error fault injection, physical power-loss, worker lifecycle, provider, network service, deployment or withdrawn SQLite confinement test is claimed. Native temp files can be outside the manager root and cooperative budgets are not hard OS deadlines or total-memory quotas. Storage history release and conditional invalidations support later consumers without implementing their state machines. Independent fresh reviewer667becb7-0bbe-42f7-b392-2ce0b5ac18b2 passed the saved sentinel probe and will assess the committed work. No active writer remains and no partner observation is pending.
 
+WM-009 independently accepted at 2026-09-12T18:12:31+00:00, commit26e147de0c030f7edcf9eddd8f48eb536a430d84. Fresh-origin reviewerbfa9062e-3d65-4ec6-8623-0dfa010e9097 returned Ready at the package boundary, OK with notes, no issues or unresolved P0/P1/P2 findings. Report: state.0wnll6Qx/storage-fess-review.md. Parent rechecked all final work-source hashes and clean canonical state before closure. Canonical/Linux113checks at N1/N8, compiled readonly-disabled negatives, full owning gates and frozen-source preservation remain the evidence. The review checked actual test meanings rather than PASS labels and retained source-supported close retirement without an injected close error. SQLite directory-replacement confinement remains withdrawn and untested. Temporary files outside root, cooperative rather than absolute deadlines, bounded copy rather than total-memory guarantees and later state-machine/backup/retention/containment responsibilities remain explicit. This closes storage mechanisms only. Nine of44packages and G0are now complete. Next WM-010 consumes the internal transaction result/event pair, exact durable identity domains and relational ledger constraints without treating IDs as authority or replaying uncertain effects.
+
 ** Dependencies
 
 #+begin_src json
@@ -7694,14 +7698,14 @@ WM-009 canonical verification 2026-09-12T17:59:59+00:00: ordinary leased coordin
 ]
 #+end_src
 
-* TODO [#B] WM-010: Implement command receipts, revisions, and idempotency    :p2:
+* DOING [#B] WM-010: Implement command receipts, revisions, and idempotency    :p2:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-wm-010-hbip
 :LABELS:   ["p2","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-09-12 Sat 11:12]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-010
 :SOURCE_REPO: agent-cat
@@ -7757,6 +7761,10 @@ dispatch attempt in the owning generation. Different bodies/preconditions
 cannot reuse a key. Stale updates refuse while exact completed retries remain
 recognizable. Credential rotation preserves deduplication, ledger quotas do not
 evict replay protection, and SQL failure produces no false durable receipt.
+
+** Notes
+
+Started 2026-09-12T18:12:31+00:00 after independently accepted WM-00926e147d. Use manager Store's internal Transaction (result,invalidations) mechanism and existing Configuration ownership, never a second transaction loop or interpreter. Current actor/profile authorization facts, exact request binding, revision checks, durable command outcome dimensions and uncertainty refusal remain required. Storage APIs and regression evidence are documented in manager/STORAGE.md and state.0wnll6Qx/storage-fess-review.md. The user requests continuation however long it takes; use the maximum supported per-run allowance rather than another default30-minute timeout, retaining application/test limits. No provider restriction or withdrawn experiment is bypassed. Last refocus17:36:37Z,next18:36:37Z.
 
 ** Dependencies
 
