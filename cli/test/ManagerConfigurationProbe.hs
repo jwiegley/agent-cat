@@ -216,6 +216,20 @@ checks work source fixture = do
          ["--persona", "review", "--offline", "--realize", "axis=model"], ["--require-pinned"]] $ \args -> do
     void (right (Cli.validateManagerTarget registry args))
     void (load (changeProfile (field "targetArguments" (toJSON args)) valid) >>= right)
+  let encoded = BL.toStrict (encode valid)
+      limitsStart = "\"limits\":{"
+      (beforeLimits, limitsSuffix) = BS.breakSubstring limitsStart encoded
+  check "canonical fixture contains limits object" (not (BS.null limitsSuffix))
+  let nestedDuplicate = beforeLimits <> limitsStart <> "\"drafts\":100," <> BS.drop (BS.length limitsStart) limitsSuffix
+      duplicates = ["{\"version\":1," <> BS.drop 1 encoded,
+                    "{\"vers\\u0069on\":1," <> BS.drop 1 encoded, nestedDuplicate]
+  forM_ duplicates $ \bytes -> noLaunch $ do
+    check "duplicate fixture otherwise matches valid configuration"
+      ((eitherDecodeStrict' bytes :: Either String Value) == Right valid)
+    BS.writeFile path bytes
+    Cli.loadManagerConfiguration registry path >>= refused "otherwise-valid duplicate key refused"
+    noMarker
+  putStrLn "PASS duplicate keys: ordinary, escaped-equivalent and nested duplicates in otherwise valid configuration"
   forM_ ["{", "[]", "null", "{\"version\":1,\"version\":1}",
          "{\"version\":1,\"vers\\u0069on\":1}", "{\"a\":{\"x\":1,\"x\":2}}", "{\"a\":[1,]}",
          "{\"a\":tru}", "[", "\"unterminated", "{\"version\":1e999999999}",
@@ -224,7 +238,6 @@ checks work source fixture = do
     BS.writeFile path bytes
     Cli.loadManagerConfiguration registry path >>= refused "bounded JSON token/codec failure"
     noMarker
-  let encoded = BL.toStrict (encode valid)
   BS.writeFile path (encoded <> BS.replicate (2097152 - BS.length encoded) 32)
   void (Cli.loadManagerConfiguration registry path >>= right)
   BS.appendFile path " "
