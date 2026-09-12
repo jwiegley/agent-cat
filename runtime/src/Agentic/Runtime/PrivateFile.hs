@@ -3,7 +3,8 @@
 
 -- | Descriptor-relative file reads which never follow a symbolic link.
 module Agentic.Runtime.PrivateFile
-  ( readConfinedFile,
+  ( readPrivateConfigurationFile,
+    readConfinedFile,
     readConfinedFileAt,
     withConfinedDirectory,
     withConfinedDirectoryAt,
@@ -15,6 +16,7 @@ where
 import Control.Exception (IOException, bracket, bracketOnError, throwIO, try)
 import Control.Monad (unless, when)
 import qualified Data.ByteString as BS
+import Data.Bits ((.&.))
 import Foreign.C.Error (throwErrnoIfMinus1, throwErrnoIfMinus1Retry, throwErrnoIfNull)
 import Foreign.C.String (CString)
 import Foreign.C.Types (CInt (..))
@@ -23,10 +25,10 @@ import Foreign.Ptr (Ptr)
 import Foreign.Storable (peek)
 import qualified GHC.Foreign as GHC
 import GHC.IO.Encoding (getFileSystemEncoding)
-import System.FilePath (isPathSeparator)
+import System.FilePath (isAbsolute, isPathSeparator, splitDirectories)
 import System.IO.Error (isDoesNotExistError)
 import System.IO (hClose)
-import System.Posix.Files (FileStatus, fileSize, getFdStatus, isRegularFile)
+import System.Posix.Files (FileStatus, fileMode, fileOwner, fileSize, getFdStatus, isRegularFile)
 import System.Posix.IO
   ( OpenFileFlags (cloexec, directory, nofollow, nonBlock),
     OpenMode (ReadOnly),
@@ -37,19 +39,36 @@ import System.Posix.IO
     openFdAt,
   )
 import System.Posix.Types (Fd)
+import System.Posix.User (getEffectiveUserID)
+
+-- | A bounded snapshot of an absolute, owned private regular configuration file.
+-- Every path component is opened without following links. Ownership and mode
+-- are checked on the opened file before reading, not on a prior pathname stat.
+readPrivateConfigurationFile :: FilePath -> Integer -> IO BS.ByteString
+readPrivateConfigurationFile path limit = do
+  unless (isAbsolute path && '\0' `notElem` path) $
+    ioError (userError "private configuration path must be absolute")
+  user <- getEffectiveUserID
+  let check status = unless (fileOwner status == user && fileMode status .&. 0o077 == 0) $
+        ioError (userError "configuration file is not owned and private")
+  withConfinedDirectory "/" [] $ \root ->
+    fst <$> readConfinedFileAtChecked check root (drop 1 (splitDirectories path)) limit
 
 readConfinedFile :: FilePath -> [FilePath] -> Integer -> IO (BS.ByteString, FileStatus)
 readConfinedFile root components limit =
   withConfinedDirectory root [] $ \rootFd -> readConfinedFileAt rootFd components limit
 
 readConfinedFileAt :: Fd -> [FilePath] -> Integer -> IO (BS.ByteString, FileStatus)
-readConfinedFileAt root components limit = case components of
+readConfinedFileAt = readConfinedFileAtChecked (const (pure ()))
+
+readConfinedFileAtChecked :: (FileStatus -> IO ()) -> Fd -> [FilePath] -> Integer -> IO (BS.ByteString, FileStatus)
+readConfinedFileAtChecked check root components limit = case components of
   [] -> throwIO (userError "confined file path is empty")
   _ -> go root components
   where
     go parent [file] = do
       validateComponent file
-      readOpened limit (openFdAt (Just parent) file ReadOnly fileFlags)
+      readOpened check limit (openFdAt (Just parent) file ReadOnly fileFlags)
     go parent (component : rest) = do
       validateComponent component
       bracket
@@ -108,8 +127,8 @@ listConfinedDirectoryAt parent limit = do
                 loop stream (count + 1) (name : names)
   bracket acquire close (\stream -> loop stream 0 [])
 
-readOpened :: Integer -> IO Fd -> IO (BS.ByteString, FileStatus)
-readOpened limit open =
+readOpened :: (FileStatus -> IO ()) -> Integer -> IO Fd -> IO (BS.ByteString, FileStatus)
+readOpened check limit open =
   bracket acquire (hClose . fst) $ \(handle, status) -> do
     let bytes = toInteger (fileSize status)
     contents <- BS.hGet handle (fromInteger bytes + 1)
@@ -120,6 +139,7 @@ readOpened limit open =
     acquire = bracketOnError open closeFd $ \descriptor -> do
       status <- getFdStatus descriptor
       unless (isRegularFile status) (throwIO (userError "confined path is not a regular file"))
+      check status
       let bytes = toInteger (fileSize status)
       when (bytes < 0 || bytes > limit) (throwIO (userError "confined file exceeds its byte bound"))
       handle <- fdToHandle descriptor

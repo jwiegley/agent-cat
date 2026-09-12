@@ -121,6 +121,21 @@ before its owned startup, enumeration, preview and launch paths. They do not
 change the existing generic frontend-IO request versions or implement Pi or
 Emacs retention for those clients.
 
+## Private configuration reads
+
+`readPrivateConfigurationFile` captures a bounded absolute configuration file.
+It traverses from the filesystem root through retained no-follow directory
+descriptors and checks the opened leaf before reading. The file must be regular,
+owned by the effective user, and private from group and other access. The helper
+does not repair permissions, follow symlinks, or derive execution authority from
+a pathname. Existing confined readers retain their previous policy, sharing the
+same reader with an additional opened-file check only for this operation.
+
+The reader rejects observed size changes. It does not guarantee a transactional
+snapshot against arbitrary same-owner in-place writes. Operator configuration
+uses a 2 MiB bound and a separate strict JSON token/schema check before installing
+the resulting private values.
+
 ## Neutral frontend transport
 
 `Agentic.Runtime.Frontend.Protocol`, re-exported through `Agentic.Runtime`,

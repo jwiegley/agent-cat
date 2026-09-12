@@ -3,7 +3,8 @@
 
 -- | Installed operator authority, separate from historical invocation provenance.
 module Agentic.Manager.Profile
-  ( OperatorProfile (..), Ownership (..), QueryLimits (..), Registry,
+  ( OperatorProfile (..), Ownership (..), ConfigurationLimits (..),
+    validateConfigurationLimits, validateProfiles, QueryLimits (..), Registry,
     PublicProfile, publicId, publicRevision, Diagnostic (..),
     Selection, selectionContext, selectionInvocation,
     Discovery, discoveryServer, discoveryWorkflows,
@@ -11,7 +12,7 @@ module Agentic.Manager.Profile
   ) where
 
 import Agentic.Runtime
-  ( FrontendInvocation (..), FrontendServer (..), FrontendCapabilities (..),
+  ( PersonAnswering, FrontendInvocation (..), FrontendServer (..), FrontendCapabilities (..),
     WorkflowDescriptor (..), DescriptorCapabilities (..),
     decodeFrontendCapabilities, decodeWorkflowDescriptors, maxFrontendQueryBytes,
     createProcessGroup,
@@ -53,8 +54,35 @@ data OperatorProfile = OperatorProfile
     operatorTargetArguments :: ![Text],
     operatorEnvironment :: ![(String, String)],
     operatorOwnership :: !Ownership,
-    operatorQuarantined :: !Bool
+    operatorQuarantined :: !Bool,
+    operatorPersonAnswering :: !PersonAnswering,
+    operatorResourceKeys :: ![Text],
+    operatorConfigurationLimits :: !ConfigurationLimits
   }
+
+-- | The configurable part of frozen manager Limits, captured with one revision.
+-- Fields retain their contract scopes. This is not a per-profile allocation.
+-- Old selections retain these facts, not authority over current coordinator limits.
+data ConfigurationLimits = ConfigurationLimits
+  { limitDrafts :: !Int,
+    limitGlobalDrafts :: !Int,
+    limitGlobalCaptureBytes :: !Int,
+    limitGlobalPageSets :: !Int,
+    limitGlobalConnections :: !Int,
+    limitGlobalDatabaseReaders :: !Int,
+    limitGlobalMutationLedgerBytes :: !Int,
+    limitSafetyControlsPerMinute :: !Int,
+    limitExecutionReservations :: !Int
+  } deriving (Eq)
+
+validateConfigurationLimits :: ConfigurationLimits -> Either Diagnostic ()
+validateConfigurationLimits limits = unless
+  (all (\n -> n >= 1 && n <= 2147483647)
+    [limitDrafts limits, limitGlobalDrafts limits, limitGlobalCaptureBytes limits,
+     limitGlobalPageSets limits, limitGlobalConnections limits, limitGlobalDatabaseReaders limits,
+     limitGlobalMutationLedgerBytes limits, limitSafetyControlsPerMinute limits]
+    && limitExecutionReservations limits >= 1 && limitExecutionReservations limits <= 16)
+  (Left InvalidConfiguration)
 
 -- | Per-query byte and execution budgets, bounded by the discovery ceiling.
 data QueryLimits = QueryLimits
@@ -124,10 +152,9 @@ newRegistry limits
 -- Tokens contain random registry identity and a generation, never secret hashes.
 -- Failed validation changes neither the generation nor the installed snapshot.
 reloadProfiles :: Registry -> [OperatorProfile] -> IO (Either Diagnostic [PublicProfile])
-reloadProfiles (Registry nonce _ lock) candidates
-  | not (all validDefinition candidates)
-      || Set.size (Set.fromList (map operatorId candidates)) /= length candidates = pure (Left InvalidConfiguration)
-  | otherwise = modifyMVar lock $ \old@(Snapshot generation _) -> do
+reloadProfiles (Registry nonce _ lock) candidates = case validateProfiles candidates of
+  Left failure -> pure (Left failure)
+  Right () -> modifyMVar lock $ \old@(Snapshot generation _) -> do
       let revision = nonce <> "_" <> T.pack (show (generation + 1))
           install p = Installed p (PublicProfile (operatorId p) revision
             (operatorWorkspaceLabel p) (operatorTargetLabel p) (Just (initialFailure p)))
@@ -155,6 +182,11 @@ validToken t = not (T.null t) && T.length t <= 128 && T.all asciiToken t
     asciiToken c = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
       || (c >= '0' && c <= '9') || c == '_' || c == '-'
 
+validateProfiles :: [OperatorProfile] -> Either Diagnostic ()
+validateProfiles candidates = unless
+  (all validDefinition candidates && Set.size (Set.fromList (map operatorId candidates)) == length candidates)
+  (Left InvalidConfiguration)
+
 validDefinition :: OperatorProfile -> Bool
 validDefinition p = validToken (operatorId p)
   && T.length (operatorWorkspaceLabel p) <= 4096
@@ -165,6 +197,10 @@ validDefinition p = validToken (operatorId p)
   && all (not . T.any (== '\0')) (operatorTargetArguments p)
   && all validBinding bindings
   && Set.size (Set.fromList (map fst bindings)) == length bindings
+  && length (operatorResourceKeys p) <= 256
+  && all validToken (operatorResourceKeys p)
+  && Set.size (Set.fromList (operatorResourceKeys p)) == length (operatorResourceKeys p)
+  && validateConfigurationLimits (operatorConfigurationLimits p) == Right ()
   where
     -- Reuse the native provenance codec without treating provenance as authority.
     validInvocation = case fromJSON (toJSON (selectionInvocation (Selection p))) :: Result FrontendInvocation of
