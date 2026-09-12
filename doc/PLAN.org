@@ -7698,15 +7698,17 @@ WM-009 independently accepted at 2026-09-12T18:12:31+00:00, commit26e147de0c030f
 ]
 #+end_src
 
-* DOING [#B] WM-010: Implement command receipts, revisions, and idempotency    :p2:
+* DONE [#B] WM-010: Implement command receipts, revisions, and idempotency    :p2:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-wm-010-hbip
 :LABELS:   ["p2","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-12 Sat 15:03]
+:MODIFIED: [2026-09-12 Sat 15:43]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-12 Sat 15:43]
+:CLOSE_REASON: Transactional command authority, exact idempotency, revisions, charged tombstones, bounded quotas/rates and one-shot dispatch independently accepted. P2 opacity regression corrected and mutation-tested; canonical/Linux gates pass. Later adapter/service responsibilities remain explicit.
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-010
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -7772,6 +7774,10 @@ Parent review removed Generic access to opaque proofs and required exact frozen 
 
 Canonical -Werror all-target build, command/store/configuration/profile N1/N8, all three suites, complete policy/native/PTY/spawn, ACP20/deck10, routing/nine examples, both documentation gates and conformance pass. Native Linux/aarch64GHC9.10.3 command/interop/opacity/store/configuration/profile gates pass in linux-commands-2. Both command logs contain343PASS lines. The first canonical opacity positive failed due ambiguous package-name selection in a multi-component Cabal environment; selecting the actual main unit from plan.json fixed it without weakening negatives. Linux first failed at missing jsonschema_path; using the existing project flake Python closure fixed provisioning only. Failure logs remain distinct. Verified-source.json binds19source/doc work files,548archive source files,619unchanged frozen fixture/model files and original research/amendment hashes. Tier1seed164449638,n500: P1R1/1,P1500/500,P212000/12000,P3422/500,78other skips,zero failures. Independent fresh reviewer d2604172-1e8a-42fe-a8c1-eb9971360c81 passed history isolation and awaits the committed work-unit audit. No package closure, physical power-loss, actual worker, deployed service/client, or withdrawn SQLite confinement test is claimed. Nine packages/G0complete. Last refocus21:34:45Z,next22:34:45Z; continue until the full objective is verified, not until an arbitrary runner deadline.
 
+WM-010 audit repair/refocus 2026-09-12T22:30:48+00:00, next 2026-09-12T23:30:48+00:00. Independent reviewer67d3fe4c-ea54-4d80-9bf8-47b5e8b2b498 accepted production at the package boundary with no production defect and one P2 constructor-opacity test gap: its import excluded the constructor even if the module later exported it. Parent changed that consumer to unrestricted module import, retaining the positive and Generic controls. Next rerun canonical command gate, verify an isolated constructor-export mutant is detected, refresh Linux/source archive and record the test-only repair. No production code change or recursive repair audit is planned. Full44-package/G0-G5goal continues,9packages/G0complete until this repair is verified. No provider or withdrawn-experiment bypass and no deadline stop is active.
+
+WM-010 accepted after audit repair 2026-09-12T22:43:55+00:00. Independent reviewer67d3fe4c-ea54-4d80-9bf8-47b5e8b2b498 returned Ready at package boundary, no production defect, with one P2 constructor-opacity test gap. Parent's unrestricted module import now detects an accidental constructor export. The isolated constructor-export-negative package builds, its positive consumer passes and its constructor consumer compiles, causing the repaired negative gate to fail as intended. Canonical opacity-repair-green.log and native Linux linux-audit-commands/ pass, with548exact archived source files and verified-source-audit.json. Only the one test-import line changed after reviewed production commitf3570cb5bcdb65d5b0362346c40962d9aeb585e8. No recursive repair audit is required. Original receipt/authority/dispatch/migration/quota/legacy-row evidence and explicit later ownership remain valid. This closes WM-010 mechanisms, not HTTP/admin, actual native evidence adapters, worker lifecycle or service deployment. The original SQLite confinement experiment remains withdrawn/unrun. Ten of44packages and G0are complete. Next WM-011 consumes the accepted command and durable-publication contracts for drafts, captures and readiness.
+
 ** Dependencies
 
 #+begin_src json
@@ -7797,14 +7803,14 @@ Canonical -Werror all-target build, command/store/configuration/profile N1/N8, a
 ]
 #+end_src
 
-* TODO [#B] WM-011: Implement drafts, immutable captures, and readiness    :p2:
+* DOING [#B] WM-011: Implement drafts, immutable captures, and readiness    :p2:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-wm-011-fqny
 :LABELS:   ["p2","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-09-12 Sat 15:43]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-011
 :SOURCE_REPO: agent-cat
@@ -7859,6 +7865,10 @@ Post-upload source mutation has no effect. Empty text is supplied input. Large
 Unicode/escaped payloads obey both HTTP and frontend limits. Interrupted uploads
 create no successful binding, and a committed binding to missing/changed bytes
 refuses rather than reconstructing content.
+
+** Notes
+
+Started 2026-09-12T22:43:55+00:00 after accepted WM-010f3570cb and test-only opacity repair. Reuse Commands, Store and Runtime durable publication/input semantics. No raw client pathname, capture ID, stored invocation or digest is execution authority. Preserve literal versus transport representation, exact UTF-8 bytes, declaration order, runtime frame limits, immutable file handles and current client/profile/input/draft/upload quotas. No new interpreter, marker bypass, custom VFS or withdrawn SQLite experiment. Full objective continues however long it takes. Last refocus22:30:48Z,next23:30:48Z.
 
 ** Dependencies
 
