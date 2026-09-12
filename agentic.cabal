@@ -51,12 +51,14 @@ extra-source-files:
   manager/ci/dependencies.sh
   manager/ci/profiles.sh
   manager/ci/configuration.sh
+  manager/ci/store.sh
   manager/ci/contract.sh
   manager/test/DependencyProbe.hs
   manager/test/containment_probe.py
 extra-doc-files:
   manager/README.md
   manager/CONFIGURATION.md
+  manager/STORAGE.md
   runtime/README.md
   doc/api/README.md
   doc/api/openapi.yaml
@@ -102,9 +104,11 @@ common settings
 
 library
   import:          settings
+  build-depends:   direct-sqlite, deepseq
   c-sources:       runtime/cbits/process_group.c
                    runtime/cbits/private_directory.c
                    runtime/cbits/private_sync.c
+                   manager/cbits/coordination.c
                    cli/cbits/control_bootstrap.c
   hs-source-dirs:
     dsl/src
@@ -154,6 +158,9 @@ library
     Agentic.Manager.Profile
     Agentic.Manager.Configuration
     Agentic.Manager.Root
+    Agentic.Manager.Lease
+    Agentic.Manager.Schema
+    Agentic.Manager.Store
     Agentic.Plan.Value
     Agentic.Raw
     Agentic.RequirePinned
@@ -402,3 +409,17 @@ executable tui-test-driver
     , agentic
     , base
   ghc-options:     -threaded
+
+executable manager-store-check
+  import:          settings
+  hs-source-dirs:  manager/test manager/src
+  main-is:         StoreCheck.hs
+  other-modules:
+    Agentic.Manager.Configuration
+    Agentic.Manager.Profile
+    Agentic.Manager.Root
+    Agentic.Manager.Lease
+    Agentic.Manager.Schema
+    Agentic.Manager.Store
+  build-depends:   agentic, direct-sqlite, deepseq
+  ghc-options:     -threaded -rtsopts

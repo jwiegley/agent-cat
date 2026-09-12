@@ -3821,13 +3821,49 @@ predicate.  Every runner prefix is checked, including unused definitions.
 Wrapper prefixes are not parsed as native target options.  Failures use fixed
 diagnostic categories rather than source text or private argument values.
 
-@code{openManagerConfiguration} validates an existing, durably provisioned root
-and separation before establishing its role.  Active operations recheck that
-identity, existing role, and separation.  @code{reloadManagerConfiguration}
-requires the same root binding and never recreates a lost marker.  Its masked
-transaction updates limits and profile revisions together.  Closing an installed
-configuration releases its descriptor, not its role marker.  Captured limits
-are configuration facts, not per-profile allocations or quota enforcement.
+@code{openManagerConfiguration} acquires an exclusive native directory lease on
+an existing, durably provisioned root before publishing its role.  Active
+operations recheck that identity, existing role, and separation.
+@code{reloadManagerConfiguration} requires the same root binding and never
+recreates a lost marker.  Its masked transaction updates limits and profile
+revisions together.  Closing an installed configuration retires the handle
+before releasing its descriptors, not its role marker.  An active coordination
+store retains a duplicate lease until its own scope ends.  Captured limits are
+configuration facts, not per-profile allocations or quota enforcement.
+
+@subsection Private coordination storage
+@findex withCoordinationStore
+@findex storeIdentity
+@findex checkpointStore
+@code{withCoordinationStore} brackets one SQLite store beneath an installed
+configuration.  Only one store may claim that installation, and its lease
+excludes distinct installations in the same process and other processes.
+Lease descriptors close atomically on exec.  The public facade exposes scoped
+composition, @code{storeIdentity}, and @code{checkpointStore}, not SQL, cursors,
+connection handles, or worker authority.
+
+Schema migration, initial durable identities, and schema-version publication
+commit together.  Newer schemas refuse before journaling or schema changes.
+Authority epoch and stream identity survive ordinary reopen, while process
+generation is fresh for each lifetime.  Relational constraints retain historical
+preparations while released reservations relinquish slots and resource claims.
+The owning coordinator, not a stored identity, decides when release is safe.
+
+One connection admits one bounded operation without a waiting queue.  Internal
+transaction programs return a strict result and bounded invalidations from the
+same database snapshot, so a matching duplicate can emit no event.  Resource
+changes and sequence allocation commit together.  Failure rolls back, and an
+uncertain commit or rollback poisons the connection.  The connection verifies
+WAL, synchronous FULL, foreign keys, busy limits, disk-backed temporary storage,
+and fixed cache settings.  Passive checkpoints report observed progress rather
+than guaranteed completion.
+
+SQLite operates under the operator-approved stable private namespace assumption
+documented in @file{manager/STORAGE.md}.  Native temporary files can reside
+outside the manager root.  Cache settings are not total heap or temporary-disk
+quotas, and cooperative cancellation is not an absolute OS IO deadline.
+This library does not implement the manager service, live approval, recovery,
+quota enforcement, or client transports.
 
 @section Native frontend preparation
 @c COVER CLI verb:frontend author
