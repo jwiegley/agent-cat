@@ -1,0 +1,514 @@
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
+
+-- | Durable command acceptance and one-shot live dispatch, not worker interpretation.
+module Agentic.Manager.Commands
+  ( CommandRequest (..), Mutation (..), Intent (..), CommandReferences (..), noReferences,
+    Submission, submissionReceipt, submissionReplayed, submissionTicket,
+    DispatchTicket, dispatchCommandId, submitCommand, readCommand,
+    reserveDispatch, attemptDispatch, recordAcknowledgement, recordEffect, recordUnresolved, recordRefusal,
+    retireReceipt, commandCapacity, tombstoneCapacity
+  ) where
+
+import Agentic.Manager.Authorization
+import Agentic.Manager.Profile (ConfigurationLimits (..), PublicProfile, publicId, publicRevision)
+import Agentic.Manager.Protocol.Command
+import Agentic.Manager.Store
+import Control.DeepSeq (NFData)
+import Control.Exception (SomeException, mask, throwIO, try)
+import Control.Monad (unless, void)
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.Except (ExceptT (..), runExceptT, throwE)
+import Crypto.Hash (Digest, SHA256, hash)
+import Crypto.Random (getRandomBytes)
+import Data.Aeson (FromJSON, Value (..), eitherDecodeStrict')
+import qualified Data.Aeson.Key as Key
+import qualified Data.Aeson.KeyMap as KM
+import Data.ByteArray (convert, constEq)
+import Data.ByteArray.Encoding (Base (Base16), convertToBase)
+import qualified Data.ByteString as BS
+import Data.Int (Int64)
+import Data.IORef (IORef, atomicModifyIORef', newIORef)
+import Data.List (find)
+import Data.Text (Text)
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
+import qualified Database.SQLite3 as SQL
+import GHC.Generics (Generic)
+
+-- | Exact transport binding, after the owning route's strict body/target decoding.
+-- No body normalization is performed. The profile is independently authorized.
+data CommandRequest = CommandRequest
+  { commandOperation :: !Operation, commandProfile :: !Text, commandMethod :: !Text,
+    commandResource :: !Text, commandKey :: !Text, commandMediaType :: !Text,
+    commandPrecondition :: !(Maybe Text), commandBody :: !BS.ByteString
+  }
+
+-- | A source-owned lifecycle validator and deferred state mutation. There is no default.
+-- The version action must read the validator for the exact URI, including its query.
+data Mutation = Mutation
+  { mutationProfileRevision :: !Text,
+    mutationVersion :: Transaction (Maybe (Text, Text, Text)),
+    mutationValidate :: Transaction (Either CommandFailure Intent)
+  }
+
+-- | Existing relational associations and a deferred owning-module mutation.
+data Intent = Intent
+  { intentReferences :: !CommandReferences,
+    intentDispatch :: !Bool,
+    intentApply :: Transaction ([Invalidation], Maybe Effect)
+  }
+
+-- | References to coordination records, never reconstructed worker handles.
+data CommandReferences = CommandReferences
+  { referenceRequest :: !(Maybe Text), referenceRun :: !(Maybe Text),
+    referencePreparation :: !(Maybe Text), referenceDecision :: !(Maybe Text)
+  } deriving (Eq, Generic, NFData)
+noReferences :: CommandReferences
+noReferences = CommandReferences Nothing Nothing Nothing Nothing
+
+-- | A committed original receipt and, only for fresh acceptance, live dispatch authority.
+data Submission = Submission !CommandReceipt !Bool !(Maybe DispatchTicket)
+submissionReceipt :: Submission -> CommandReceipt
+submissionReceipt (Submission receipt _ _) = receipt
+submissionReplayed :: Submission -> Bool
+submissionReplayed (Submission _ replayed _) = replayed
+submissionTicket :: Submission -> Maybe DispatchTicket
+submissionTicket (Submission _ _ ticket) = ticket
+
+-- | One command's live ownership. IDs and durable generation columns cannot mint this.
+data DispatchTicket = DispatchTicket !CoordinationStore !Text !Text !CommandReferences !(IORef TicketState)
+data TicketState = Unreserved | Reserved | Consumed deriving (Eq)
+dispatchCommandId :: DispatchTicket -> Text
+dispatchCommandId (DispatchTicket _ ident _ _ _) = ident
+
+commandCapacity, tombstoneCapacity :: Int64
+commandCapacity = 131072
+tombstoneCapacity = 16384
+
+type CommandTx = ExceptT CommandFailure Transaction
+
+submitCommand :: CoordinationStore -> CredentialProof -> CommandRequest -> Mutation -> IO (Either CommandFailure Submission)
+submitCommand store proof request mutation = case validateRequest request of
+  Left failure -> pure (Left failure)
+  Right () -> mask $ \restore -> do
+    candidate <- freshId "command_"
+    let digest = convert (hash (commandBody request) :: Digest SHA256) :: BS.ByteString
+    outcome <- restore $ configured store proof $ \limits profiles identity -> transaction store $ do
+      client <- checked =<< lift (authorizeProfile proof (commandProfile request) (requiredScopes (commandOperation request)))
+      _ <- knownProfile profiles (commandProfile request)
+      epoch <- currentEpoch
+      require (keyEpoch request == epoch) AuthorityChanged
+      old <- sql "SELECT id,profile_id,operation,retired,media_type,precondition,body_sha256,body_bytes FROM commands WHERE client_id=? AND method=? AND resource_uri=? AND idempotency_key=?"
+        [text client, text (commandMethod request), text (commandResource request), text (commandKey request)]
+      case old of
+        [] -> do
+          require (commandMediaType request == if commandOperation request == Capture then "application/octet-stream" else "application/json") UnsupportedMediaType
+          profile <- knownProfile profiles (commandProfile request)
+          require (publicRevision profile == mutationProfileRevision mutation) StaleRevision
+          current <- lift (mutationVersion mutation)
+          checkPrecondition request current
+          intent <- checked =<< lift (mutationValidate mutation)
+          require (validReferences (intentReferences intent)) InvalidRequest
+          (now, minute) <- trustedTime
+          checkCapacity limits (commandOperation request)
+          checkRate limits proof (commandOperation request) minute
+          (events, immediate) <- lift (intentApply intent)
+          let refs = intentReferences intent
+          case immediate of
+            Nothing -> pure ()
+            Just effect -> do
+              require (not (intentDispatch intent) && commandOperation request `elem` [SetInput, RemoveInput, Enqueue, Withdraw, Restart, Resume, Fork]) StateConflict
+              require (nullField "runtimeSequence" (effectValue effect) && nullField "address" (effectValue effect)) StateConflict
+              validateEffectBinding (commandOperation request) candidate refs effect
+          _ <- checked =<< lift (authorizeProfile proof (commandProfile request) (requiredScopes (commandOperation request)))
+          let receipt = CommandReceipt candidate (commandProfile request) (commandOperation request)
+                (commandResource request) (maybe Accepted (const EffectObserved) immediate) now Nothing Nothing immediate Nothing
+              receiptBytes = encoded receipt
+          require (BS.length receiptBytes <= 65536) StorageUnavailable
+          lift $ execute
+            "INSERT INTO commands (id,revision,profile_id,operation,client_id,authority_epoch,method,resource_uri,idempotency_key,body,media_type,precondition,receipt,retired,request_id,run_id,preparation_id,decision_id,accepted_at,state,effect_evidence,body_sha256,body_bytes,reserved_bytes) VALUES (?,?,?,?,?,?,?,?,?,NULL,?,?,?,0,?,?,?,?,?,?,?,?,?,?)"
+            [text candidate, text candidate, text (commandProfile request), text (operationName (commandOperation request)),
+             text client, text epoch, text (commandMethod request), text (commandResource request), text (commandKey request),
+             text (commandMediaType request), optional (commandPrecondition request), SQL.SQLBlob receiptBytes,
+             optional (referenceRequest refs), optional (referenceRun refs), optional (referencePreparation refs),
+             optional (referenceDecision refs), text now, text (stateName (receiptState receipt)),
+             maybe SQL.SQLNull (SQL.SQLBlob . encoded) immediate, SQL.SQLBlob digest,
+             SQL.SQLInteger (fromIntegral (BS.length (commandBody request))), SQL.SQLInteger commandCapacity]
+          chargeRate proof (commandOperation request) minute
+          pure ((receipt, False, intentDispatch intent, refs, storeProcessGeneration identity), events <> [commandEvent candidate candidate])
+        [[SQL.SQLText ident, SQL.SQLText profile, SQL.SQLText operation, SQL.SQLInteger retired, media, precondition, bodyDigest, bodyLength]] -> do
+          require (profile == commandProfile request && operation == operationName (commandOperation request)) IdempotencyConflict
+          require (retired == 0) ReceiptExpired
+          require (media == text (commandMediaType request) && precondition == optional (commandPrecondition request)) IdempotencyConflict
+          match <- case (bodyDigest, bodyLength) of
+            (SQL.SQLBlob original, SQL.SQLInteger bytes) -> pure (constEq original digest && bytes == fromIntegral (BS.length (commandBody request)))
+            (SQL.SQLNull, SQL.SQLNull) | BS.length (commandBody request) <= 2097152 -> do
+              equality <- sql "SELECT body=? FROM commands WHERE id=?" [SQL.SQLBlob (commandBody request), text ident]
+              pure (equality == [[SQL.SQLInteger 1]])
+            _ -> pure False
+          require match IdempotencyConflict
+          receipt <- originalReceipt ident
+          require (receiptProfile receipt == profile && receiptOperation receipt == commandOperation request
+            && receiptResource receipt == commandResource request) StorageUnavailable
+          pure ((receipt, True, False, noReferences, storeProcessGeneration identity), [])
+        _ -> throwE StorageUnavailable
+    case outcome of
+      Left failure -> pure (Left failure)
+      Right (receipt, replayed, dispatch, refs, generation) -> do
+        ticket <- if dispatch then Just . DispatchTicket store (receiptId receipt) generation refs <$> newIORef Unreserved else pure Nothing
+        pure (Right (Submission receipt replayed ticket))
+
+-- Credential validity is checked before even the authorization-filtered metadata query.
+readCommand :: CoordinationStore -> CredentialProof -> Text -> IO (Either CommandFailure CommandReceipt)
+readCommand store proof ident
+  | not (validId ident) = pure (Left InvalidRequest)
+  | otherwise = configured store proof $ \_ profiles _ -> transaction store $ do
+      _ <- checked =<< lift (currentClient proof)
+      let allowed = map publicId profiles
+      metadata <- sql
+        "SELECT c.profile_id,c.operation FROM commands c WHERE c.id=? AND EXISTS(SELECT 1 FROM credential_scopes s WHERE s.credential_id=? AND s.profile_id=c.profile_id AND s.scope='observe')"
+        [text ident, text (credentialRateKey proof)]
+      case metadata of
+        [[SQL.SQLText profile, SQL.SQLText operation]] -> do
+          require (profile `elem` allowed) Forbidden
+          op <- maybe (throwE StorageUnavailable) pure (parseOperation operation)
+          _ <- checked =<< lift (authorizeProfile proof profile (Observe : requiredScopes op))
+          receipt <- currentReceipt ident
+          require (receiptProfile receipt == profile && receiptOperation receipt == op) StorageUnavailable
+          pure (receipt, [])
+        _ -> throwE Forbidden
+
+reserveDispatch :: DispatchTicket -> IO (Either CommandFailure ())
+reserveDispatch ticket@(DispatchTicket store ident generation _ state) = mask $ \restore -> do
+  claimed <- claim state Unreserved Reserved
+  if not claimed then pure (Left OwnershipUnavailable) else do
+    revision <- freshId "command_revision_"
+    restore $ transaction store $ do
+      current <- liveCommand ticket
+      require (receiptState current == Accepted) StateConflict
+      rows <- sql "SELECT dispatch_generation FROM commands WHERE id=?" [text ident]
+      require (rows == [[SQL.SQLNull]]) OwnershipUnavailable
+      lift $ execute "UPDATE commands SET dispatch_generation=?,revision=? WHERE id=?"
+        [text generation, text revision, text ident]
+      pure ((), [commandEvent ident revision])
+
+-- Consuming the ticket is irreversible even if storage or the callback becomes uncertain.
+attemptDispatch :: DispatchTicket -> IO a -> IO (Either CommandFailure a)
+attemptDispatch ticket@(DispatchTicket store ident generation _ state) action = mask $ \restore -> do
+  claimed <- claim state Reserved Consumed
+  if not claimed then pure (Left OwnershipUnavailable) else do
+    revision <- freshId "command_revision_"
+    marked <- restore $ transaction store $ do
+      current <- liveCommand ticket
+      require (receiptState current == Accepted) StateConflict
+      rows <- sql "SELECT dispatch_generation,attempted_at FROM commands WHERE id=?" [text ident]
+      require (rows == [[text generation, SQL.SQLNull]]) OwnershipUnavailable
+      (now, _) <- trustedTime
+      lift $ execute "UPDATE commands SET attempted_at=?,state='dispatch-attempted',revision=? WHERE id=?"
+        [text now, text revision, text ident]
+      pure ((), [commandEvent ident revision])
+    case marked of
+      Left failure -> pure (Left failure)
+      Right () -> do
+        result <- try @SomeException (restore action)
+        case result of
+          Right value -> pure (Right value)
+          Left failure -> do
+            void (try @SomeException (recordUnresolved ticket))
+            throwIO failure
+
+recordAcknowledgement :: DispatchTicket -> Acknowledgement -> IO (Either CommandFailure CommandReceipt)
+recordAcknowledgement ticket@(DispatchTicket _ ident _ _ _) acknowledgement = observe ticket $ \current -> do
+  require (receiptAttemptedAt current /= Nothing) StateConflict
+  require (field "commandId" (acknowledgementValue acknowledgement) == Just ident) StateConflict
+  require (maybe True (== operationName (receiptOperation current)) (field "command" (acknowledgementValue acknowledgement))) StateConflict
+  case receiptAcknowledgement current of
+    Just old | old == acknowledgement -> pure current
+    Just old -> require (ackRank acknowledgement > ackRank old && ackRank old < 3) StateConflict >> advance current
+    Nothing -> advance current
+  where
+    advance current = do
+      require (receiptState current `elem` [DispatchAttempted, Acknowledged, Unresolved, EffectObserved]) StateConflict
+      pure current {receiptAcknowledgement = Just acknowledgement,
+        receiptState = if receiptState current == EffectObserved then EffectObserved else Acknowledged}
+
+recordEffect :: DispatchTicket -> Effect -> IO (Either CommandFailure CommandReceipt)
+recordEffect ticket@(DispatchTicket _ ident _ refs _) effect = observe ticket $ \current -> do
+  require (receiptAttemptedAt current /= Nothing) StateConflict
+  validateEffectBinding (receiptOperation current) ident refs effect
+  case receiptEffect current of
+    Just old -> require (old == effect) StateConflict >> pure current
+    Nothing -> do
+      require (receiptState current `elem` [DispatchAttempted, Acknowledged, Unresolved]) StateConflict
+      pure current {receiptState = EffectObserved, receiptEffect = Just effect}
+
+effectKind :: Operation -> Maybe Text
+effectKind operation = case operation of
+  SetInput -> Just "input-changed"
+  RemoveInput -> Just "input-changed"
+  Enqueue -> Just "enqueued"
+  Withdraw -> Just "withdrawn"
+  Approve -> Just "started"
+  Discard -> Just "discarded"
+  Cancel -> Just "cancelled"
+  Steer -> Just "steered"
+  Retry -> Just "retried"
+  ChooseRecovery -> Just "recovery-chosen"
+  Redirect -> Just "redirected"
+  Answer -> Just "answer-accepted"
+  Export -> Just "exported"
+  Restart -> Just "lineage-created"
+  Resume -> Just "lineage-created"
+  Fork -> Just "lineage-created"
+  _ -> Nothing
+
+validateEffectBinding :: Operation -> Text -> CommandReferences -> Effect -> CommandTx ()
+validateEffectBinding operation ident refs effect = do
+  require (field "kind" (effectValue effect) == effectKind operation && effectKind operation /= Nothing) StateConflict
+  let value = effectValue effect
+      references = concat
+        [ maybe [] (\key -> ["/v1/requests/" <> key]) (referenceRequest refs),
+          maybe [] (\key -> ["/v1/preparations/" <> key]) (referencePreparation refs),
+          maybe [] (\key -> ["/v1/decisions/" <> key]) (referenceDecision refs),
+          maybe [] (\key -> map (("/v1/runs/" <> key) <>) ["", "/snapshot", "/control", "/exports", "/lineage-requests"]) (referenceRun refs)]
+  exports <- sql "SELECT id,artifact_id FROM exports WHERE command_id=?" [text ident]
+  let exportReferences = concat [["/v1/exports/" <> exportId, "/v1/artifacts/" <> artifact] | [SQL.SQLText exportId, SQL.SQLText artifact] <- exports]
+  require (maybe False (`elem` (references <> exportReferences)) (field "resource" value)) StateConflict
+
+recordUnresolved :: DispatchTicket -> IO (Either CommandFailure CommandReceipt)
+recordUnresolved ticket = observe ticket $ \current -> do
+  require (receiptState current `elem` [Accepted, DispatchAttempted, Acknowledged, Unresolved]) StateConflict
+  pure current {receiptState = Unresolved}
+
+recordRefusal :: DispatchTicket -> Text -> IO (Either CommandFailure CommandReceipt)
+recordRefusal ticket refusal = observe ticket $ \current -> do
+  require (refusal `elem` ["state-conflict", "stale-revision", "unsupported-operation", "ownership-unavailable",
+    "supervision-unavailable", "invalid-answer", "invalid-lineage-edit", "export-conflict", "storage-unavailable"]) InvalidRequest
+  require (receiptEffect current == Nothing && maybe True ((== 3) . ackRank) (receiptAcknowledgement current)) StateConflict
+  case receiptRefusal current of
+    Just previous -> require (previous == refusal) StateConflict >> pure current
+    Nothing -> pure current {receiptState = Refused, receiptRefusal = Just refusal}
+
+observe :: DispatchTicket -> (CommandReceipt -> CommandTx CommandReceipt) -> IO (Either CommandFailure CommandReceipt)
+observe ticket@(DispatchTicket store ident _ _ _) update = do
+  revision <- freshId "command_revision_"
+  transaction store $ do
+    current <- liveCommand ticket
+    next <- update current
+    if next == current then pure (current, []) else do
+      lift $ execute "UPDATE commands SET state=?,acknowledgement=?,effect_evidence=?,refusal=?,revision=? WHERE id=?"
+        [text (stateName (receiptState next)), maybe SQL.SQLNull (SQL.SQLBlob . encoded) (receiptAcknowledgement next),
+         maybe SQL.SQLNull (SQL.SQLBlob . encoded) (receiptEffect next), optional (receiptRefusal next), text revision, text ident]
+      pure (next, [commandEvent ident revision])
+
+-- The owning retention module supplies a real transactional inactivity check for this URI.
+-- There is deliberately no public retire-by-ID operation or default inactivity proof.
+retireReceipt :: CoordinationStore -> Text -> (Text -> Transaction (Maybe Text)) -> IO (Either CommandFailure ())
+retireReceipt store ident inactiveSince
+  | not (validId ident) = pure (Left InvalidRequest)
+  | otherwise = do
+      revision <- freshId "command_revision_"
+      transaction store $ do
+        rows <- sql "SELECT resource_uri,retired FROM commands WHERE id=?" [text ident]
+        case rows of
+          [[_, SQL.SQLInteger 1]] -> pure ((), [])
+          [[SQL.SQLText uri, SQL.SQLInteger 0]] -> do
+            since <- lift (inactiveSince uri)
+            stamp <- maybe (throwE StateConflict) pure since
+            require (validTimestamp stamp) InvalidRequest
+            oldEnough <- sql "SELECT julianday(?)<=julianday('now')-30" [text stamp]
+            require (oldEnough == [[SQL.SQLInteger 1]]) StateConflict
+            lift $ execute
+              "UPDATE commands SET retired=1,body=NULL,body_sha256=NULL,body_bytes=NULL,media_type=NULL,precondition=NULL,receipt=NULL,acknowledgement=NULL,effect_evidence=NULL,reserved_bytes=?,revision=? WHERE id=?"
+              [SQL.SQLInteger tombstoneCapacity, text revision, text ident]
+            pure ((), [commandEvent ident revision])
+          _ -> throwE ResourceUnavailable
+
+configured :: CoordinationStore -> CredentialProof -> (ConfigurationLimits -> [PublicProfile] -> StoreIdentity -> IO (Either CommandFailure a)) -> IO (Either CommandFailure a)
+configured store proof action = do
+  result <- try @StoreFailure $ withStoreConfiguration store $ \limits profiles -> do
+    identity <- storeIdentity store
+    if proofGeneration proof /= storeProcessGeneration identity then pure (Left Unauthenticated)
+      else action limits profiles identity
+  pure $ case result of
+    Left _ -> Left StorageUnavailable
+    Right (Left _) -> Left StorageUnavailable
+    Right (Right value) -> value
+
+transaction :: NFData a => CoordinationStore -> CommandTx (a, [Invalidation]) -> IO (Either CommandFailure a)
+transaction store action = do
+  result <- try @CommandFailure $ try @StoreFailure $ runTransaction store $ do
+    outcome <- runExceptT action
+    either refuseTransaction pure outcome
+  pure $ case result of
+    Left failure -> Left failure
+    Right (Left _) -> Left StorageUnavailable
+    Right (Right value) -> Right value
+
+liveCommand :: DispatchTicket -> CommandTx CommandReceipt
+liveCommand (DispatchTicket _ ident generation refs _) = do
+  currentGeneration <- lift transactionGeneration
+  require (currentGeneration == generation) OwnershipUnavailable
+  rows <- sql "SELECT authority_epoch,dispatch_generation,request_id,run_id,preparation_id,decision_id FROM commands WHERE id=?" [text ident]
+  epoch <- currentEpoch
+  case rows of
+    [[SQL.SQLText authority, storedGeneration, request, run, preparation, decision]] -> do
+      require (authority == epoch) AuthorityChanged
+      require (storedGeneration == SQL.SQLNull || storedGeneration == text generation) OwnershipUnavailable
+      require ([request, run, preparation, decision] == map optional
+        [referenceRequest refs, referenceRun refs, referencePreparation refs, referenceDecision refs]) OwnershipUnavailable
+      currentReceipt ident
+    _ -> throwE ResourceUnavailable
+
+originalReceipt :: Text -> CommandTx CommandReceipt
+originalReceipt ident = do
+  rows <- sql "SELECT receipt,retired FROM commands WHERE id=?" [text ident]
+  case rows of
+    [[SQL.SQLBlob bytes, SQL.SQLInteger 0]] -> do
+      receipt <- checked (decodeReceipt bytes)
+      require (receiptId receipt == ident) StorageUnavailable
+      pure receipt
+    [[_, SQL.SQLInteger 1]] -> throwE ReceiptExpired
+    _ -> throwE StorageUnavailable
+
+currentReceipt :: Text -> CommandTx CommandReceipt
+currentReceipt ident = do
+  original <- originalReceipt ident
+  rows <- sql "SELECT state,attempted_at,acknowledgement,effect_evidence,refusal FROM commands WHERE id=?" [text ident]
+  case rows of
+    [[SQL.SQLText state, attempted, acknowledgement, effect, refusal]] -> do
+      currentState <- maybe (throwE StorageUnavailable) pure (parseState state)
+      attemptTime <- sqlOptionalText attempted
+      ack <- decodeOptional acknowledgement
+      observed <- decodeOptional effect
+      refused <- sqlOptionalText refusal
+      let receipt = original {receiptState = currentState, receiptAttemptedAt = attemptTime,
+            receiptAcknowledgement = ack, receiptEffect = observed, receiptRefusal = case refused of Nothing -> receiptRefusal original; Just code -> Just code}
+      checked (decodeReceipt (encoded receipt))
+    _ -> throwE StorageUnavailable
+
+checkPrecondition :: CommandRequest -> Maybe (Text, Text, Text) -> CommandTx ()
+checkPrecondition request current
+  | commandOperation request `elem` [Create, Capture] = require (commandPrecondition request == Nothing && current == Nothing) InvalidPrecondition
+  | otherwise = do
+      supplied <- maybe (throwE PreconditionRequired) pure (commandPrecondition request)
+      (uri, profile, revision) <- maybe (throwE ResourceUnavailable) pure current
+      require (profile == commandProfile request) Forbidden
+      require (uri == commandResource request && validRevision revision) InvalidPrecondition
+      require (supplied == "\"" <> revision <> "\"") StaleRevision
+
+checkCapacity :: ConfigurationLimits -> Operation -> CommandTx ()
+checkCapacity limits operation = do
+  rows <- sql "SELECT bytes FROM command_ledger_usage WHERE singleton=1" []
+  used <- case rows of [[SQL.SQLInteger value]] -> pure value; _ -> throwE StorageUnavailable
+  let total = fromIntegral (limitGlobalMutationLedgerBytes limits)
+      reserve = min total (16 * commandCapacity)
+      ceilingBytes = if operation == Cancel then total else total - reserve
+  require (used <= ceilingBytes - commandCapacity) StorageQuota
+
+checkRate :: ConfigurationLimits -> CredentialProof -> Operation -> Int64 -> CommandTx ()
+checkRate limits proof operation minute = do
+  rows <- if operation == Cancel
+    then sql "SELECT minute,count FROM command_safety_rate WHERE singleton=1" []
+    else sql "SELECT minute,count FROM command_ordinary_rate WHERE credential_id=?" [text (credentialRateKey proof)]
+  used <- case rows of
+    [] -> pure 0
+    [[SQL.SQLInteger previous, SQL.SQLInteger count]] -> pure (if minute > previous then 0 else count)
+    _ -> throwE StorageUnavailable
+  let allowance = if operation == Cancel then fromIntegral (limitSafetyControlsPerMinute limits) else 30
+  require (used < allowance) RateLimit
+
+chargeRate :: CredentialProof -> Operation -> Int64 -> CommandTx ()
+chargeRate proof operation minute = lift $
+  if operation == Cancel then execute
+    "UPDATE command_safety_rate SET count=CASE WHEN ?>minute THEN 1 ELSE count+1 END,minute=max(minute,?) WHERE singleton=1"
+    [SQL.SQLInteger minute, SQL.SQLInteger minute]
+  else execute
+    "INSERT INTO command_ordinary_rate VALUES (?,?,1) ON CONFLICT(credential_id) DO UPDATE SET count=CASE WHEN excluded.minute>minute THEN 1 ELSE count+1 END,minute=max(minute,excluded.minute)"
+    [text (credentialRateKey proof), SQL.SQLInteger minute]
+
+trustedTime :: CommandTx (Text, Int64)
+trustedTime = do
+  rows <- sql "SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now'),CAST(unixepoch('now')/60 AS INTEGER)" []
+  case rows of [[SQL.SQLText stamp, SQL.SQLInteger minute]] -> pure (stamp, minute); _ -> throwE StorageUnavailable
+currentEpoch :: CommandTx Text
+currentEpoch = do
+  rows <- sql "SELECT authority_epoch FROM service_metadata WHERE singleton=1" []
+  case rows of [[SQL.SQLText epoch]] -> pure epoch; _ -> throwE StorageUnavailable
+knownProfile :: [PublicProfile] -> Text -> CommandTx PublicProfile
+knownProfile profiles ident = maybe (throwE Forbidden) pure (find ((== ident) . publicId) profiles)
+
+validateRequest :: CommandRequest -> Either CommandFailure ()
+validateRequest r = do
+  let operation = commandOperation r
+      bodyLimit = if operation == Capture then 67108864 else 2097152
+      precondition = commandPrecondition r
+  unless (validId (commandProfile r) && commandMethod r == "POST" && validResource (commandResource r)
+    && operationResource operation (commandResource r)) (Left InvalidRequest)
+  unless (BS.length (commandBody r) <= bodyLimit) (Left SizeLimit)
+  unless (not (T.null (commandMediaType r)) && T.length (commandMediaType r) <= 256
+    && T.all (\c -> c >= ' ' && c <= '~') (commandMediaType r)) (Left InvalidRequest)
+  let parts = T.splitOn "." (commandKey r)
+  unless (T.length (commandKey r) <= 128 && case parts of
+    [epoch, nonce] -> validId epoch && T.length epoch <= 105 && validId nonce && T.length nonce >= 22
+    _ -> False) (Left InvalidRequest)
+  mapM_ (\etag -> unless (T.length etag >= 3 && T.head etag == '"' && T.last etag == '"'
+    && validRevision (T.dropEnd 1 (T.drop 1 etag))) (Left InvalidPrecondition)) precondition
+
+operationResource :: Operation -> Text -> Bool
+operationResource operation uri = case T.splitOn "/" (T.takeWhile (/= '?') uri) of
+  ["", "v1", "requests"] -> operation == Create
+  ["", "v1", "requests", ident] -> validId ident && operation `elem` [SetInput, RemoveInput, Enqueue, Withdraw]
+  ["", "v1", "captures"] -> operation == Capture && maybe False validId (T.stripPrefix "/v1/captures?requestId=" uri)
+  ["", "v1", "preparations", ident] -> validId ident && operation `elem` [Approve, Discard]
+  ["", "v1", "decisions", ident] -> validId ident && operation `elem` [Answer, ChooseRecovery]
+  ["", "v1", "runs", ident, "control"] -> validId ident && operation `elem` [Cancel, Steer, Retry, ChooseRecovery, Redirect, Answer]
+  ["", "v1", "runs", ident, "exports"] -> validId ident && operation == Export
+  ["", "v1", "runs", ident, "lineage-requests"] -> validId ident && operation `elem` [Restart, Resume, Fork]
+  _ -> False
+
+keyEpoch :: CommandRequest -> Text
+keyEpoch = T.takeWhile (/= '.') . commandKey
+validReferences :: CommandReferences -> Bool
+validReferences refs = all (maybe True validId) [referenceRequest refs, referenceRun refs, referencePreparation refs, referenceDecision refs]
+commandEvent :: Text -> Text -> Invalidation
+commandEvent ident revision = Invalidation "command.changed" ("/v1/commands/" <> ident) revision
+freshId :: Text -> IO Text
+freshId prefix = do
+  bytes <- getRandomBytes 24 :: IO BS.ByteString
+  pure (prefix <> TE.decodeUtf8 (convertToBase Base16 bytes))
+claim :: IORef TicketState -> TicketState -> TicketState -> IO Bool
+claim state expected next = atomicModifyIORef' state $ \old -> if old == expected then (next, True) else (old, False)
+ackRank :: Acknowledgement -> Int
+ackRank ack = case field "state" (acknowledgementValue ack) of
+  Just "accepted" -> 0
+  Just "queued" -> 1
+  Just "delivered" -> 2
+  _ -> 3
+field :: Text -> Value -> Maybe Text
+field key (Object value) = case KM.lookup (Key.fromText key) value of Just (String textValue) -> Just textValue; _ -> Nothing
+field _ _ = Nothing
+nullField :: Text -> Value -> Bool
+nullField key (Object value) = KM.lookup (Key.fromText key) value == Just Null
+nullField _ _ = False
+sql :: Text -> [SQL.SQLData] -> CommandTx [[SQL.SQLData]]
+sql statement values = lift (query statement values)
+text :: Text -> SQL.SQLData
+text = SQL.SQLText
+optional :: Maybe Text -> SQL.SQLData
+optional = maybe SQL.SQLNull text
+sqlOptionalText :: SQL.SQLData -> CommandTx (Maybe Text)
+sqlOptionalText SQL.SQLNull = pure Nothing
+sqlOptionalText (SQL.SQLText value) = pure (Just value)
+sqlOptionalText _ = throwE StorageUnavailable
+decodeOptional :: FromJSON a => SQL.SQLData -> CommandTx (Maybe a)
+decodeOptional SQL.SQLNull = pure Nothing
+decodeOptional (SQL.SQLBlob bytes) = either (const (throwE StorageUnavailable)) (pure . Just) (eitherDecodeStrict' bytes)
+decodeOptional _ = throwE StorageUnavailable
+checked :: Either CommandFailure a -> CommandTx a
+checked = either throwE pure
+require :: Bool -> CommandFailure -> CommandTx ()
+require condition failure = unless condition (throwE failure)

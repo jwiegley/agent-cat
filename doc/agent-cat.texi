@@ -3862,8 +3862,48 @@ SQLite operates under the operator-approved stable private namespace assumption
 documented in @file{manager/STORAGE.md}.  Native temporary files can reside
 outside the manager root.  Cache settings are not total heap or temporary-disk
 quotas, and cooperative cancellation is not an absolute OS IO deadline.
-This library does not implement the manager service, live approval, recovery,
-quota enforcement, or client transports.
+The storage layer alone does not implement live approval, recovery, wider
+resource quotas, the manager service, or client transports.
+
+@subsection Command receipt transactions
+
+The internal manager command layer uses the existing storage transaction
+rather than a separate ledger engine.  It verifies bounded bearer possession
+against the stored token verifier and rechecks current client, credential, and
+profile authority inside the transaction.  Opaque possession proofs and live
+dispatch tickets cannot be constructed from stored identifiers.  Configuration
+checks hold the owning installation boundary, with configuration-before-store
+lock ordering and explicit busy refusal instead of a waiting mutation queue.
+
+An idempotency key binds the registered client, method, canonical resource URI,
+authority epoch, exact body digest and length, media type, and precondition.
+Current authorization and epoch checks precede ledger lookup.  An authorized
+matching retry returns the immutable original receipt before a fresh revision
+or lifecycle transition is attempted, without another event, charge, or ticket.
+Conflicting bindings refuse.  Aged inactive receipts retain charged non-content
+tombstones rather than permitting replay.
+
+Internal schema version two migrates existing version-one facts transactionally.
+Legacy raw bodies remain exact and are compared within SQLite rather than copied
+through the result buffer.  The frozen public manager-store compatibility domain
+remains version one.  Logical ledger reservations include bounded future receipt
+and observation space.  Ordinary admission cannot consume the finite cancellation
+reserve within the configured total.  Fresh ordinary commands use per-credential
+minute counters, while cancellation uses its independent global rate.  Exact
+retries consume neither counter, and backward clock movement grants no refill.
+
+Only a fresh committed intent may yield a one-shot dispatch ticket.  Reservation
+and attempted delivery are distinct durable facts, and the attempted marker
+commits before the owning adapter is invoked.  A callback return is not native
+acknowledgement or effect evidence.  Explicit local coordination effects can
+commit without a fabricated dispatch.  Receipt, acknowledgement, and effect
+codecs follow the frozen wire schema and its bounded representations.
+
+Credential administration, transport authentication, actual worker correlation,
+safe lifecycle transitions, and wider retention and supervision remain with
+their owning layers.  Logical reservations are not physical database, temporary
+disk, or total-heap limits.  The complete contract and evidence limits are in
+@file{manager/COMMANDS.md}.
 
 @section Native frontend preparation
 @c COVER CLI verb:frontend author

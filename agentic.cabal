@@ -52,6 +52,9 @@ extra-source-files:
   manager/ci/profiles.sh
   manager/ci/configuration.sh
   manager/ci/store.sh
+  manager/ci/commands.sh
+  manager/test/command_contract.py
+  manager/test/proof_opacity.py
   manager/ci/contract.sh
   manager/test/DependencyProbe.hs
   manager/test/containment_probe.py
@@ -59,6 +62,7 @@ extra-doc-files:
   manager/README.md
   manager/CONFIGURATION.md
   manager/STORAGE.md
+  manager/COMMANDS.md
   runtime/README.md
   doc/api/README.md
   doc/api/openapi.yaml
@@ -104,7 +108,7 @@ common settings
 
 library
   import:          settings
-  build-depends:   direct-sqlite, deepseq
+  build-depends:   direct-sqlite, deepseq, transformers
   c-sources:       runtime/cbits/process_group.c
                    runtime/cbits/private_directory.c
                    runtime/cbits/private_sync.c
@@ -157,10 +161,14 @@ library
     Agentic.Exec
     Agentic.Manager.Profile
     Agentic.Manager.Configuration
+    Agentic.Manager.Protocol.Json
     Agentic.Manager.Root
     Agentic.Manager.Lease
     Agentic.Manager.Schema
     Agentic.Manager.Store
+    Agentic.Manager.Commands
+    Agentic.Manager.Authorization
+    Agentic.Manager.Protocol.Command
     Agentic.Plan.Value
     Agentic.Raw
     Agentic.RequirePinned
@@ -416,10 +424,29 @@ executable manager-store-check
   main-is:         StoreCheck.hs
   other-modules:
     Agentic.Manager.Configuration
+    Agentic.Manager.Protocol.Json
     Agentic.Manager.Profile
     Agentic.Manager.Root
     Agentic.Manager.Lease
     Agentic.Manager.Schema
     Agentic.Manager.Store
   build-depends:   agentic, direct-sqlite, deepseq
+  ghc-options:     -threaded -rtsopts
+
+executable manager-command-check
+  import:          settings
+  hs-source-dirs:  manager/test manager/src
+  main-is:         CommandCheck.hs
+  other-modules:
+    Agentic.Manager.Commands
+    Agentic.Manager.Authorization
+    Agentic.Manager.Protocol.Command
+    Agentic.Manager.Configuration
+    Agentic.Manager.Protocol.Json
+    Agentic.Manager.Profile
+    Agentic.Manager.Root
+    Agentic.Manager.Lease
+    Agentic.Manager.Schema
+    Agentic.Manager.Store
+  build-depends:   agentic, direct-sqlite, deepseq, transformers
   ghc-options:     -threaded -rtsopts

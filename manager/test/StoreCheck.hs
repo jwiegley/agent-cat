@@ -259,7 +259,7 @@ databaseChecks work = do
     second <- storeIdentity store
     check "reopen preserves durable identities separately from live generation"
       (storeAuthorityEpoch first == storeAuthorityEpoch second && storeStreamId first == storeStreamId second
-       && storeProcessGeneration first /= storeProcessGeneration second && storeSchemaVersion second == 1)
+       && storeProcessGeneration first /= storeProcessGeneration second && storeSchemaVersion second == 2)
     rowsEqual store "SELECT sequence,retained_floor,revision FROM service_metadata"
       [[SQL.SQLText "4", SQL.SQLText "0", SQL.SQLText "service_1"]] >>= check "stream sequence and resource revisions survive reopen"
   -- Real SQLite trigger failure occurs after resource update and sequence allocation.
@@ -301,9 +301,13 @@ relationalConstraints store = do
      ("missing input cannot retain literal bytes", "UPDATE request_inputs SET source=NULL"),
      ("decision occurrence identity without attempt", "INSERT INTO decisions (id,revision,run_id,occurrence_id,generation,observed_sequence,kind,state) VALUES ('decision_2','revision_1','run_1','0','decision_generation_1','3','question','pending')"),
      ("credential verifier uniqueness", "INSERT INTO credentials VALUES ('credential_2','client_1',X'010203','2030-01-01',0)"),
-     ("registered-client ledger uniqueness", "INSERT INTO commands SELECT 'duplicate',revision,profile_id,operation,client_id,authority_epoch,method,resource_uri,idempotency_key,body,media_type,precondition,receipt,retired,request_id,run_id,preparation_id,decision_id,accepted_at,dispatch_generation,attempted_at,acknowledgement,effect_evidence,state FROM commands"),
      ("capture reference prevents removal", "DELETE FROM requests WHERE id='request_1'")]
     $ \(label, sql) -> expect label StoreUnavailable (mutate store (execute sql []) [event])
+  let duplicateLedger = "INSERT INTO commands (id,revision,profile_id,operation,client_id,authority_epoch,method,resource_uri,idempotency_key,body,media_type,precondition,receipt,retired,request_id,run_id,preparation_id,decision_id,accepted_at,dispatch_generation,attempted_at,acknowledgement,effect_evidence,state) SELECT 'duplicate',revision,profile_id,operation,client_id,authority_epoch,method,resource_uri,idempotency_key || ?,body,media_type,precondition,receipt,retired,request_id,run_id,preparation_id,decision_id,accepted_at,dispatch_generation,attempted_at,acknowledgement,effect_evidence,state FROM commands"
+  expect "ledger duplicate fixture is otherwise valid" StoreIntegrity $
+    mutate store (execute duplicateLedger [SQL.SQLText "_distinct"] >> (refuseTransaction StoreIntegrity :: Transaction ())) [event]
+  expect "registered-client ledger uniqueness with the otherwise-valid fixture" StoreUnavailable $
+    mutate store (execute duplicateLedger [SQL.SQLText ""]) [event]
   rowsEqual store "SELECT runtime_snapshot,snapshot_version,result_state,supervision FROM runs"
     [[SQL.SQLNull, SQL.SQLNull, SQL.SQLText "absent", SQL.SQLText "owned"]] >>= check "reserved run does not fabricate runtime evidence"
   rowsEqual store "SELECT literal FROM request_inputs" [[SQL.SQLBlob (BS.pack [0xce,0xb1,13,10])]] >>=
@@ -451,7 +455,7 @@ migrationChecks work = do
     count store "clients" >>= check "stream exhaustion rolls back resource change" . (== 0)
     rowsEqual store "SELECT sequence FROM service_metadata" [[SQL.SQLText "18446744073709551615"]] >>=
       check "complete UInt64 stream range survives reopen"
-  bracket (rawOpen root) SQL.close $ \db -> SQL.exec db "PRAGMA user_version=2"
+  bracket (rawOpen root) SQL.close $ \db -> SQL.exec db "PRAGMA user_version=3"
   before <- BS.readFile (root </> "coordination.sqlite3")
   withInstalled path $ \installed -> expect "newer schema refused" StoreVersion $
     withCoordinationStore installed (const (pure ()))

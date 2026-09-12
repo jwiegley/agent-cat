@@ -1,12 +1,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Version-one relational coordination facts. Stored identities are not capabilities.
-module Agentic.Manager.Schema (schemaVersion, schemaStatements) where
+-- | Versioned relational coordination facts. Stored identities are not capabilities.
+module Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration) where
 
 import Data.Text (Text)
 
 schemaVersion :: Int
-schemaVersion = 1
+schemaVersion = 2
 
 schemaStatements :: [Text]
 schemaStatements =
@@ -36,4 +36,21 @@ schemaStatements =
     "CREATE TABLE exports (id TEXT PRIMARY KEY NOT NULL, revision TEXT NOT NULL, run_id TEXT NOT NULL REFERENCES runs(id), artifact_id TEXT NOT NULL REFERENCES artifacts(id), command_id TEXT NOT NULL UNIQUE REFERENCES commands(id), destination_root_identity TEXT NOT NULL, name TEXT NOT NULL, expected_sha256 TEXT NOT NULL, receipt BLOB, state TEXT CHECK(state IN ('published','unresolved')), UNIQUE(destination_root_identity,name), FOREIGN KEY(artifact_id,run_id) REFERENCES artifacts(id,run_id)) STRICT",
     "CREATE TABLE invalidations (stream_id TEXT NOT NULL REFERENCES service_metadata(stream_id), sequence TEXT NOT NULL CHECK(length(sequence) BETWEEN 1 AND 20 AND sequence NOT GLOB '*[^0-9]*' AND (sequence='0' OR substr(sequence,1,1) BETWEEN '1' AND '9') AND (length(sequence)<20 OR sequence<='18446744073709551615')), kind TEXT NOT NULL CHECK(kind IN ('request.changed','preparation.changed','run.changed','decision.changed','command.changed','artifact.changed','service.changed')), resource_uri TEXT NOT NULL, revision TEXT NOT NULL, PRIMARY KEY(stream_id,sequence)) STRICT",
     "CREATE INDEX replay_order ON invalidations(stream_id,length(sequence),sequence)"
+  ]
+
+-- | Version-two ledger additions. Version-one records and original receipts survive.
+commandMigration :: [Text]
+commandMigration =
+  [ "ALTER TABLE commands ADD COLUMN body_sha256 BLOB CHECK(body_sha256 IS NULL OR length(body_sha256)=32)",
+    "ALTER TABLE commands ADD COLUMN refusal TEXT CHECK(refusal IN ('state-conflict','stale-revision','unsupported-operation','ownership-unavailable','supervision-unavailable','invalid-answer','invalid-lineage-edit','export-conflict','storage-unavailable'))",
+    "ALTER TABLE commands ADD COLUMN body_bytes INTEGER CHECK(body_bytes IS NULL OR body_bytes BETWEEN 0 AND 67108864)",
+    "ALTER TABLE commands ADD COLUMN reserved_bytes INTEGER NOT NULL DEFAULT 131072 CHECK(reserved_bytes BETWEEN 0 AND 131072)",
+    "CREATE TABLE command_ledger_usage (singleton INTEGER PRIMARY KEY CHECK(singleton=1), bytes INTEGER NOT NULL CHECK(bytes>=0)) STRICT",
+    "INSERT INTO command_ledger_usage SELECT 1,coalesce(sum(reserved_bytes+coalesce(length(body),0)),0) FROM commands",
+    "CREATE TRIGGER command_charge_insert AFTER INSERT ON commands BEGIN UPDATE command_ledger_usage SET bytes=bytes+NEW.reserved_bytes+coalesce(length(NEW.body),0) WHERE singleton=1; END",
+    "CREATE TRIGGER command_charge_update AFTER UPDATE OF reserved_bytes,body ON commands BEGIN UPDATE command_ledger_usage SET bytes=bytes+NEW.reserved_bytes+coalesce(length(NEW.body),0)-OLD.reserved_bytes-coalesce(length(OLD.body),0) WHERE singleton=1; END",
+    "CREATE TRIGGER command_replay_protection BEFORE DELETE ON commands BEGIN SELECT RAISE(ABORT,'command replay protection is retained'); END",
+    "CREATE TABLE command_ordinary_rate (credential_id TEXT PRIMARY KEY NOT NULL REFERENCES credentials(id), minute INTEGER NOT NULL, count INTEGER NOT NULL CHECK(count>=0)) STRICT",
+    "CREATE TABLE command_safety_rate (singleton INTEGER PRIMARY KEY CHECK(singleton=1), minute INTEGER NOT NULL, count INTEGER NOT NULL CHECK(count>=0)) STRICT",
+    "INSERT INTO command_safety_rate VALUES (1,0,0)"
   ]
