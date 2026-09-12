@@ -4,8 +4,9 @@ This directory provides trusted profile configuration, registry, and discovery
 operations through `Agentic.Manager`, alongside dependency probes and import
 checks. The CLI composes operator files through the existing registry-based
 target parser. It does not yet contain a workflow-manager service.
-Implementation follows the [approved design](../doc/research/workflow-manager.md) and its
-[work packages](../doc/research/workflow-manager-implementation-plan.md).
+Implementation follows the [approved design](../doc/research/workflow-manager.md), its
+[work packages](../doc/research/workflow-manager-implementation-plan.md), and the
+[operator-approved SQLite scope amendment](../doc/research/workflow-manager-storage-amendment.md).
 
 ## Profile authority
 
@@ -166,14 +167,15 @@ stream cleanup after client cancellation, a TLS 1.3 listener, certificate
 validation, and plaintext refusal. These are library integration fixtures, not
 manager endpoints or workflow executions.
 
-The initial raw SQLite probe did not establish root-ownership refusal after an
-open WAL database's parent directory was renamed. SQLite is not a substitute
-for `PrivateRoot`. The retained-root probe requires the existing shared guard
-to reject the replacement before an application write and checks that both the
-retained database and substituted directory remain unchanged. WM-007 still owns
-initial-open races, WAL/shared-memory companion-file handling, concurrent root
-replacement, and publication durability. A successful pragma query is not a
-power-loss test.
+The retained-root dependency probe requires the shared guard to reject an
+observed replacement before an application write. It does not establish that
+SQLite's own pathname operations remain confined during directory replacement.
+The operator withdrew that additional experiment and guarantee in the
+[storage scope amendment](../doc/research/workflow-manager-storage-amendment.md).
+Database operation assumes a stable, operator-controlled private local namespace,
+while existing guards and tests remain intact. The independently verified
+immutable-capture publication contract is unchanged, and a successful pragma
+query is not a power-loss test.
 
 ## Process containment
 
