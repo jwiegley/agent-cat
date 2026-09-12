@@ -1,9 +1,9 @@
 # Manager implementation boundary
 
 This directory provides trusted profile configuration, registry, and discovery
-operations through `Agentic.Manager`, alongside dependency probes and import
-checks. The CLI composes operator files through the existing registry-based
-target parser. It does not yet contain a workflow-manager service.
+operations and scoped private SQLite coordination storage through
+`Agentic.Manager`, alongside dependency probes and import checks. The CLI
+composes operator files through the existing registry-based target parser. It does not yet contain a workflow-manager service.
 Implementation follows the [approved design](../doc/research/workflow-manager.md), its
 [work packages](../doc/research/workflow-manager-implementation-plan.md), and the
 [operator-approved SQLite scope amendment](../doc/research/workflow-manager-storage-amendment.md).
@@ -103,6 +103,18 @@ CLI configuration probe at one and eight runtime capabilities. Its private
 fixture evidence remains under `CABAL_BUILDDIR`. No service, provider execution,
 or approval implementation is substituted for that configuration check.
 
+## Coordination storage
+
+The [storage contract](STORAGE.md) describes the installation lease, scoped
+SQLite lifetime, relational records, atomic invalidations, bounded internal
+transactions, and passive checkpoint results. `withCoordinationStore` consumes
+the existing installed configuration. It does not expose SQL, credentials,
+worker authority, or a network listener through the public facade.
+
+`manager/ci/store.sh` runs the real library composition and native SQLite tests
+at one and eight runtime capabilities. Storage mechanisms do not establish the
+later admission, receipt, recovery, retention, or worker-containment contracts.
+
 ## Root separation
 
 `validateRootSeparation` compares manager storage with the configured local
@@ -139,8 +151,9 @@ not its bundled SQLite 3.45.0. The latter predates the
 Direct-sqlite supplies the public `open2`, `SQLOpenNoFollow`, statement, binding,
 and backup interfaces needed at the storage boundary. The evaluation did not
 select sqlite-simple, whose public opening interface does not expose these
-flags. No internal connection constructor or alternate database implementation
-is required. Production package dependencies are added when production code
+flags. The hidden storage module unwraps the binding handles only for native
+SQLite limits, bounded column accounting, and statement-readonly checks. No
+alternate database implementation is used. Production package dependencies are added when production code
 first uses them, while the development shell already supplies the probe tools.
 
 Cabal gates use `test/cabal.sh`, which disables repositories and isolates its

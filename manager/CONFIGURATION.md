@@ -152,9 +152,10 @@ trusted OS principal.
 
 Before installation, the operator must durably provision the manager directory
 and its ancestors. The loader never creates that tree. Initial installation opens
-an existing PrivateRoot, validates separation from every configured retention
-root, validates all policy, and then uses the existing durable manager-role
-establishment contract. An unmarked root must be empty. A role marker whose
+an existing PrivateRoot and acquires an exclusive nonblocking native directory
+lease before validating separation and publishing any role marker. It validates
+all policy and then uses the existing durable manager-role establishment
+contract. An unmarked root must be empty. A role marker whose
 publication was uncertain is not removed as rollback.
 
 Installed operations retain the original PrivateRoot. Selection, snapshot reads,
@@ -162,8 +163,10 @@ probes, and reloads require its current identity, a valid existing manager role,
 and root separation. Active reload additionally requires the same root path
 binding. It never repairs a missing marker, transfers the root, or releases its
 ownership when profiles are removed. Closing the handle closes its descriptor,
-not the marker. A changed root requires a separate installation lifecycle, while
-the old root remains manager-owned.
+not the marker. An active coordination store retains a duplicate lease until its
+own scope ends. A changed root requires a separate installation lifecycle, while
+the old root remains manager-owned. Distinct opens in the same process and
+other processes cannot acquire the same lease. Lease descriptors close on exec.
 
 A configuration lock serializes probing, reload, and snapshot publication. A
 probe holds it across both native queries. Successful reload changes all profile
@@ -174,8 +177,9 @@ The private profile registry is not exposed by InstalledConfiguration.
 The parent coordinator must serialize approval commitment with configuration
 reload, invalidate old unapproved selections, and retain the captured context of
 already approved workers. A Selection is not approval. Actual worker launch must
-use its explicit environment and authorized cwd. This layer creates neither a
-service ownership lock nor a worker or approval implementation.
+use its explicit environment and authorized cwd. Installation acquires the
+service ownership lease but creates no worker or approval implementation. The scoped [coordination store](STORAGE.md) uses this
+same installed binding, with one active store slot per installation.
 
 Program-dependent routing remains owned by actual native preparation. Parsing
 argv and capturing literal environment values do not freeze executable contents,

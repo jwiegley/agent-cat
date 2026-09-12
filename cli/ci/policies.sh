@@ -118,6 +118,7 @@ python3 test/source_roots_probe.py
 bash runtime/ci/capture.sh
 bash manager/ci/profiles.sh
 bash manager/ci/configuration.sh
+bash manager/ci/store.sh
 test/cabal.sh run -v0 policy-probe -- +RTS -N8 -RTS
 test/cabal.sh build agentic-run routing-fixed-point-probe runtime-contract-test schema-probe >/dev/null
 agentic_run=$(test/cabal.sh list-bin agentic-run)
