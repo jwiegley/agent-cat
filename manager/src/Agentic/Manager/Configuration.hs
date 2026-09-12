@@ -6,7 +6,7 @@ module Agentic.Manager.Configuration
   ( Configuration, TargetValidator, InstalledConfiguration,
     loadConfiguration, installConfiguration, reloadConfiguration, closeConfiguration,
     configurationSnapshot, selectConfiguredProfile, probeConfiguredProfile,
-    acquireConfigurationStorage, releaseConfigurationStorage
+    acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationSnapshot
   ) where
 
 import Agentic.Manager.Lease (acquireLease, duplicateLease)
@@ -16,16 +16,14 @@ import Agentic.Runtime
   ( PrivateRoot, FrontendInvocation (..), StateRootRole (ManagerStateRoot), assertPrivateRoot,
     openPrivateRoot, openPrivateSubroot, closePrivateRoot, withPrivateDirectoryAt, readStateRootRoleAt,
     establishManagerRootRole, readPrivateConfigurationFile )
-import Control.Concurrent.MVar (MVar, modifyMVarMasked, newMVar, withMVar)
-import Control.Exception (IOException, bracketOnError, finally, mask_, throwIO, try)
+import Control.Concurrent.MVar (MVar, modifyMVarMasked, newMVar, withMVar, tryTakeMVar, putMVar)
+import Control.Exception (IOException, bracketOnError, finally, mask, mask_, throwIO, try)
 import Control.Monad (unless, when)
 import Data.Aeson (FromJSON (parseJSON), ToJSON (toJSON), Value, withObject, withText, (.:))
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KM
 import Data.Aeson.Types (Object, Parser, parseEither)
-import Data.Aeson.Decoding (toEitherValue)
-import Data.Aeson.Decoding.ByteString (bsToTokens)
-import Data.Aeson.Decoding.Tokens (Tokens (..), TkArray (..), TkRecord (..))
+import Agentic.Manager.Protocol.Json (decodeStrictValue)
 import qualified Data.ByteString as BS
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -54,10 +52,7 @@ loadConfiguration :: TargetValidator -> (String -> Bool) -> FilePath -> IO (Eith
 loadConfiguration validateTarget isCredentialArgument path = configurationIO $ do
   bytes <- readPrivateConfigurationFile path 2097152
   configuration <- requireRight $ do
-    let tokens = bsToTokens bytes
-    rest <- checkTokens 0 tokens
-    unless (BS.all (`elem` [9, 10, 13, 32]) rest) (Left InvalidConfiguration)
-    value <- either (const (Left InvalidConfiguration)) (Right . fst) (toEitherValue tokens)
+    value <- either (const (Left InvalidConfiguration)) Right (decodeStrictValue bytes)
     either (const (Left InvalidConfiguration)) Right (parseEither (parseConfiguration isCredentialArgument) value)
   let Configuration _ _ _ profiles = configuration
   mapM_ (requireRight . validateTarget . operatorTargetArguments) profiles
@@ -121,6 +116,20 @@ releaseConfigurationStorage :: InstalledConfiguration -> IO ()
 releaseConfigurationStorage (InstalledConfiguration _ slot) =
   modifyMVarMasked slot (const (pure (False, ())))
 
+-- | Internal fail-fast configuration boundary. Lock order is configuration, then store.
+withConfigurationSnapshot :: InstalledConfiguration -> (ConfigurationLimits -> [PublicProfile] -> IO a) -> IO (Either Diagnostic a)
+withConfigurationSnapshot (InstalledConfiguration lock _) action = mask $ \restore -> do
+  available <- tryTakeMVar lock
+  case available of
+    Nothing -> pure (Left SupervisionUnavailable)
+    Just current -> (case current of
+      Nothing -> pure (Left InvalidConfiguration)
+      Just active@(ActiveConfiguration _ _ _ limits registry _) ->
+        configurationIO $ do
+          assertActive active
+          profiles <- publicProfiles registry
+          restore (action limits profiles)) `finally` putMVar lock current
+
 configurationSnapshot :: InstalledConfiguration -> IO (Either Diagnostic (ConfigurationLimits, [PublicProfile]))
 configurationSnapshot installed = withActive installed $ \(ActiveConfiguration _ _ _ limits registry _) ->
   (\profiles -> (limits, profiles)) <$> publicProfiles registry
@@ -156,26 +165,6 @@ requireRight = either throwIO pure
 
 flatten :: Either Diagnostic (Either Diagnostic a) -> Either Diagnostic a
 flatten = either Left id
-
--- Check the real Aeson token stream before object maps can discard duplicates.
-checkTokens :: Int -> Tokens k e -> Either Diagnostic k
-checkTokens depth tokens = case tokens of
-  TkLit _ rest -> Right rest
-  TkText _ rest -> Right rest
-  TkNumber _ rest -> Right rest
-  TkErr _ -> Left InvalidConfiguration
-  TkArrayOpen items -> container >> array items
-  TkRecordOpen fields -> container >> record Set.empty fields
-  where
-    container = unless (depth < 64) (Left InvalidConfiguration)
-    array (TkItem item) = checkTokens (depth + 1) item >>= array
-    array (TkArrayEnd rest) = Right rest
-    array (TkArrayErr _) = Left InvalidConfiguration
-    record seen (TkPair key value)
-      | Set.member key seen = Left InvalidConfiguration
-      | otherwise = checkTokens (depth + 1) value >>= record (Set.insert key seen)
-    record _ (TkRecordEnd rest) = Right rest
-    record _ (TkRecordErr _) = Left InvalidConfiguration
 
 parseConfiguration :: (String -> Bool) -> Value -> Parser Configuration
 parseConfiguration isCredentialArgument = withObject "operator configuration" $ \o -> do

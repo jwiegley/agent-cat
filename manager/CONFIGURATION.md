@@ -72,7 +72,8 @@ The limits object has exactly these required fields:
 | `executionReservations` | 1 to 16 | Coordinator execution reservations, initially one. |
 
 All other Limits fields remain fixed by the frozen contract and are not
-configuration options. This module captures limits but does not enforce quotas.
+configuration options. This module captures limits. The command layer enforces its current logical
+ledger and mutation-rate limits under the same configuration boundary.
 Each profile context retains the same configuration-limits snapshot. It is not
 a per-profile quota allocation, and capacities are not multiplied by profile
 count. Older selections retain facts about their revision, not authority to
@@ -172,7 +173,10 @@ A configuration lock serializes probing, reload, and snapshot publication. A
 probe holds it across both native queries. Successful reload changes all profile
 revisions and the limits snapshot together. Even unchanged definitions receive
 fresh revisions. Invalid candidates preserve installed revisions and limits.
-The private profile registry is not exposed by InstalledConfiguration.
+The private profile registry is not exposed by InstalledConfiguration. A hidden
+fail-fast snapshot callback holds this same lock through command acceptance,
+with configuration-before-store lock ordering. It prevents reload or close from
+interleaving with a command while adding no waiting mutation queue.
 
 The parent coordinator must serialize approval commitment with configuration
 reload, invalidate old unapproved selections, and retain the captured context of

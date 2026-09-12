@@ -115,6 +115,18 @@ worker authority, or a network listener through the public facade.
 at one and eight runtime capabilities. Storage mechanisms do not establish the
 later admission, receipt, recovery, retention, or worker-containment contracts.
 
+## Command receipts
+
+The [command contract](COMMANDS.md) provides transactional idempotency, exact
+request bindings, current credential and profile checks, ledger reservations,
+independent cancellation capacity, and one-shot live dispatch. The actual worker
+and native-evidence adapters remain separate. Public receipt codecs follow the
+frozen contract and remain independent of SQLite and authorization machinery.
+
+`manager/ci/commands.sh` runs real N1 and N8 database checks, frozen-validator
+interoperability checks, and compiler-negative proof-opacity checks. No network
+listener or credential administration endpoint is introduced by this unit.
+
 ## Root separation
 
 `validateRootSeparation` compares manager storage with the configured local

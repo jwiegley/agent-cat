@@ -51,9 +51,11 @@ heap or temporary-disk quotas. The pinned Unix SQLite source specifies mode
 0600 for DELETEONCLOSE temporary files. That source evidence is not an exhaustive
 platform or forced-spill test.
 
-`PRAGMA user_version` holds schema version 1. Startup rejects other nonzero
-versions before changing journaling or schema. Version-zero migration executes
-all DDL, initial metadata, and version publication in one immediate transaction.
+`PRAGMA user_version` holds internal schema version 2. Startup accepts versions
+zero, one, and two, and rejects other versions before changing journaling or
+schema. Fresh initialization and the version-one command-ledger migration execute
+DDL, metadata, and version publication in one immediate transaction. Version-one
+DDL remains unchanged. The frozen public managerStore compatibility stays at one.
 Failure rolls that transaction back and never publishes a connection. The
 metadata row separately stores authority epoch, stream identity, stream sequence,
 retained floor, and service revision. Epoch and stream are random 256-bit
@@ -147,10 +149,12 @@ progress. No truncation or durability success is inferred from partial progress.
 The later service coordinator must schedule and monitor this operation. Automatic
 checkpointing is disabled so it cannot hide checkpoint work inside a mutation.
 
-WM-009 supplies storage representation and transaction mechanisms, not the
-WM-010 through WM-021 state machines. Profile authorization, receipt replay,
-recovery fencing, reservation release, retention floors, total storage quotas,
-collection, and checkpoint scheduling remain with those owners. There is no
+WM-009 supplies storage representation and transaction mechanisms. The
+[command layer](COMMANDS.md) supplies WM-010 current credential/profile checks,
+receipt replay, logical ledger reservations, and one-shot dispatch permission.
+Worker authority, recovery fencing, safe reservation release, retention floors,
+wider total-storage quotas, collection, and checkpoint scheduling remain with
+their owning packages. There is no
 backup or restore operation in this unit. WM-020 must use SQLite's coherent
 snapshot facility rather than copying a live database file. WAL and FULL are
 verified settings, not power-loss, filesystem, or hardware test evidence.
