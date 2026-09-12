@@ -2219,14 +2219,14 @@ Today both live engines bind EVERY addressee to one backend per run — run/Main
 ]
 #+end_src
 
-* TODO [#B] Implement the approved remote workflow manager
+* WAIT [#B] Implement the approved remote workflow manager
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-epic-4xte
 :LABELS:   ["wm-epic","workflow-manager"]
 :ISSUE_TYPE: epic
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-11 Fri 01:05]
+:MODIFIED: [2026-09-11 Fri 19:46]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/EPIC
 :SOURCE_REPO: agent-cat
@@ -2308,6 +2308,8 @@ All 44 work packages and G0-G5 closed with real independent evidence, including 
 ** Notes
 
 Wiggum active. WM001-005 complete (5/44), all release gates open. WM005 d47507a extracted native codecs, da5e307 repaired two reviewed parser-cost issues/direct-wire coverage and a separately reviewed native terminal-cancel race. Gates passed, including real N8 frontend, runtime/conformance, TUI/PTTY and docs. Refocus 2026-09-11T08:05:14+00:00, next 2026-09-11T09:05:14+00:00. Current package WM006 full bounded observation/restoration using shared runtime reducer, then WM007 durable publication/confinement. Frozen design and44-package plan unchanged. No manager service or remote clients yet. No production config, paid workflow, push or deployment. Source clean at closure. origin/main refreshed07:11:58Z remained e8b27cae. Preserve existing owned stash backup; no unknown stash or sibling changes. Evidence root ~/Products/agent-cat-workflow-manager/implementation.9tGzKH and per-package notes.
+
+Dependency-boundary stop at 2026-09-12T02:46:02+00:00: independent WM-007 publication work and full WM-008 package-boundary work are implemented, verified and independently reviewed. WM-008 is closed, so7of44packages are complete. The canonical graph has37pending packages and every one reaches blocked WM-007 through its frozen blocking dependencies. obr ready lists only unrelated non-manager work. Evidence: profiles.EgYE9JIT/wm008-dependency-state.json and wm008-completion-review.md. The next package WM-009 requires the outstanding selected-binding SQLite opening/companion-file confinement acceptance in WM-007. Its provider restriction remains unresolved. No rejected experiment was retried, rephrased, moved to another provider, or executed by the parent. This stop is at the frozen package-dependency boundary, not a claim that the compiler, publication primitive, profile configuration, or all conceivable independent code work is unavailable. Resume requires a provider-authorized way to complete the restricted acceptance, or an explicit user decision about any out-of-order work without changing frozen acceptance criteria. Source/test work is committed through651de33 before the closure record, all requested owning gates pass within documented evidence limits, and the branch is current with origin/main b01344e9. All G0-G5remain open. No service installation, paid workflow execution, push, sibling rewrite or unknown stash action occurred. Last refocus02:14:11Z,next03:14:11Z; refocus immediately on any later resumption.
 
 ** Dependencies
 
@@ -7323,7 +7325,7 @@ WM006 COMPLETE 2026-09-11T10:03:45+00:00: independent fresh-origin fess1caf5361-
 :LABELS:   ["p1","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-11 Fri 14:02]
+:MODIFIED: [2026-09-11 Fri 19:46]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-007
 :SOURCE_REPO: agent-cat
@@ -7400,6 +7402,8 @@ Publication audit accepted at 2026-09-11T20:46:00+00:00. Work commit 421c7a04412
 
 Post-audit local restack at 2026-09-11T21:02:07+00:00: incoming main commit b01344e96d8e4a541da74ca67d84aa7c28656e32 changes only the shared tracker. All 224 issue IDs match the canonical export. Apart from our pending WM-007 and WM-008 updates, differences are Org escaping only. The restack preserved the newer shared tracker at each tracker-only conflict and retained pending updates separately. Three redundant tracker-only commits were already represented by that newer export. No source conflict occurred, no sibling branch or stash was changed, and nothing was pushed. The publication work is now 96b0335580e3836ec1bca261ae617fd153db5e28. Every non-tracker file is byte-identical to audited commit 421c7a04412a6b57a5bc4e6c11ffe3bd9255f87b. The post-restack warning-fatal all-target build and all three suites passed in post-restack-build.log and post-restack-tests.log. The existing audit therefore applies to identical implementation bytes. Tracker projection preserves incoming Org escaping and applies only the two intended package updates from the canonical export. Future projections must compare unescaped issue content rather than overwrite unrelated formatting. The branch is zero commits behind its base. WM-007 stays blocked on the separately restricted SQLite experiment, while WM-008 proceeds.
 
+Dependency-boundary stop at 2026-09-12T02:46:02+00:00: independent WM-007 publication work and full WM-008 package-boundary work are implemented, verified and independently reviewed. WM-008 is closed, so7of44packages are complete. The canonical graph has37pending packages and every one reaches blocked WM-007 through its frozen blocking dependencies. obr ready lists only unrelated non-manager work. Evidence: profiles.EgYE9JIT/wm008-dependency-state.json and wm008-completion-review.md. The next package WM-009 requires the outstanding selected-binding SQLite opening/companion-file confinement acceptance in WM-007. Its provider restriction remains unresolved. No rejected experiment was retried, rephrased, moved to another provider, or executed by the parent. This stop is at the frozen package-dependency boundary, not a claim that the compiler, publication primitive, profile configuration, or all conceivable independent code work is unavailable. Resume requires a provider-authorized way to complete the restricted acceptance, or an explicit user decision about any out-of-order work without changing frozen acceptance criteria. Source/test work is committed through651de33 before the closure record, all requested owning gates pass within documented evidence limits, and the branch is current with origin/main b01344e9. All G0-G5remain open. No service installation, paid workflow execution, push, sibling rewrite or unknown stash action occurred. Last refocus02:14:11Z,next03:14:11Z; refocus immediately on any later resumption.
+
 ** Dependencies
 
 #+begin_src json
@@ -7425,15 +7429,17 @@ Post-audit local restack at 2026-09-11T21:02:07+00:00: incoming main commit b013
 ]
 #+end_src
 
-* DOING [#B] WM-008: Implement trusted profiles and composition-root configuration    :p2:
+* DONE [#B] WM-008: Implement trusted profiles and composition-root configuration    :p2:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-wm-008-rr0q
 :LABELS:   ["p2","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-11 Fri 19:23]
+:MODIFIED: [2026-09-11 Fri 19:36]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-11 Fri 19:36]
+:CLOSE_REASON: Frozen WM-008 boundary independently accepted. Private configuration, root-role specification, bounded discovery, revisioned immutable contexts and CLI composition verified. Later lifecycle/client/enforcement handoffs retained.
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-008
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -7525,6 +7531,8 @@ Operator configuration verification 2026-09-12T01:40:34+00:00: actual canonical 
 Configuration audit repair/refocus 2026-09-12T02:14:11+00:00, next 2026-09-12T03:14:11+00:00. Reviewd882123f returned no production defect and one P2 test defect: duplicate-key inputs were otherwise schema-invalid. Parent now injects ordinary, escaped-equivalent and nested duplicate keys into a complete valid serialization and proves ordinary Aeson decoding yields exactly the valid configuration before requiring public-loader refusal. Canonical N1/N8 configuration checks pass. A full isolated package copy with only duplicate detection disabled compiles warning-free and fails the intended new assertion at N1/N8. No production source changed. Source inspection, rather than these tests alone, supports commit-window masking and early-depth rejection; foreign-owner, physical durability and service/approval evidence remain explicitly limited. Next refresh Linux/archives for the corrected test, run owning checks, commit the repair, then reconcile WM-008 completion against the frozen package rather than infer closure from sub-unit reviews. Full44packages/G0-G5remain the objective,6closed, and no SQLite experiment retry occurred.
 
 Operator-configuration audit repair verified 2026-09-12T02:23:09+00:00: the P2 duplicate-key regression now uses complete otherwise-valid configurations for ordinary, escaped-equivalent and nested duplicate keys. Ordinary Aeson decoding is asserted equal to the accepted configuration before the public CLI loader is required to refuse. Canonical checks pass at N1/N8 and all three suites pass. A full isolated Cabal package with only duplicate detection disabled compiles and fails the exact intended assertion at N1/N8. Native Linux Cabal checks pass the updated regression at both scheduler settings. All14package-owned files match the updated source archive and all532Linux snapshot files match current bytes. No production code changed. Evidence: configuration-duplicates-green.log, configuration-audit-tests-all.log, duplicate-negative/, configuration-linux-audit/, configuration-audit-fixed-source.json. The independent audit remains no production defect, with this P2 test defect repaired. Commit-window cancellation, early-depth resource behavior and foreign-owner negatives remain stated verification limits rather than invented tests. Next commit this isolated repair and reconcile full WM-008 done criteria against the frozen plan, without treating unrelated later service/client packages as either implemented or silently waived. WM-007 SQLite acceptance remains restricted.
+
+WM-008 package-boundary completion verified at 2026-09-12T02:36:23+00:00. Independent fresh-origin assessore8956514-5c16-4eb5-892d-1b4d01ac2529 read the full frozen package, dependencies, implementation and evidence, and returned Ready with no remaining WM-008 implementation item. Report: profiles.EgYE9JIT/wm008-completion-review.md. This follows foundation/configuration audits and verified repairs in commits3d72a8b,5535ef8,9b544a7,651de33. Parent rechecked all recorded source/frozen-document hashes and clean source state before closure. Every package criterion is accounted for: private operator configuration and actual CLI grammar/prefix policy, safe public projection, root separation and specified root-role refusal, direct bounded discovery, distinct process identity/provenance, exact revision selection, masked reload, immutable explicit environments, and configured client-bound exclusions. The package says specify the root-role check, while actual Pi startup/pruning acceptance belongs to WM-038. Actual worker/approval consumption belongs to WM-012/014, which depend on WM-008; requiring those before this closure would reverse the frozen dependency graph. Quota configuration is supplied, not enforcement. Effective prepared routing and complete target ownership must still be validated before approval. This closure claims neither a manager service nor future release gates. Mandatory handoffs are recorded on their owning packages. WM-007 remains blocked on the separately restricted SQLite experiment. Seven of44packages are now closed, with allG0-G5open.
 
 ** Dependencies
 
@@ -7871,7 +7879,7 @@ refuses rather than reconstructing content.
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-09-11 Fri 19:36]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-012
 :SOURCE_REPO: agent-cat
@@ -7926,6 +7934,10 @@ frames, stderr flooding, startup exceptions, and failed writes do not leak
 processes. Closing a test observer has no effect on the worker. A restored PID
 cannot be inserted into this adapter as live ownership.
 
+** Notes
+
+WM-008 completed handoff 2026-09-12T02:36:23+00:00: Consume the installed immutable profile context and explicit environment, recheck current authority/root before execution, and preserve native worker identity and manager-owned private pipes. WM-008 configuration/query fixtures do not prove actual approved-worker lifecycle. Source/evidence: profiles.EgYE9JIT/wm008-completion-review.md and manager/CONFIGURATION.md. No owning-package completion follows from this handoff.
+
 ** Dependencies
 
 #+begin_src json
@@ -7967,7 +7979,7 @@ cannot be inserted into this adapter as live ownership.
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-09-11 Fri 19:36]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-013
 :SOURCE_REPO: agent-cat
@@ -8020,6 +8032,10 @@ resource ownership, and FIFO fairness among eligible conflicting requests.
 Review waiting consumes capacity. Expiry never approves work, and release waits
 for verified cleanup. Cancellation remains possible when the admission queue
 is full.
+
+** Notes
+
+WM-008 completed handoff 2026-09-12T02:36:23+00:00: Enforce current coordinator execution reservations and operator resource keys. ConfigurationLimits is one configuration-level immutable snapshot, not per-profile counters or multiplied capacity. Unclassified shared resources require conservative scheduling. Source/evidence: profiles.EgYE9JIT/wm008-completion-review.md and manager/CONFIGURATION.md. No owning-package completion follows from this handoff.
 
 ** Dependencies
 
@@ -8080,7 +8096,7 @@ is full.
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-09-11 Fri 19:36]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-014
 :SOURCE_REPO: agent-cat
@@ -8135,6 +8151,10 @@ worker or start. Expiry, edits, worker death, restart, and changed profile each
 force a new review. Fault injection on both sides of the intent/write boundary
 produces an unresolved outcome where necessary, never automatic re-execution.
 HTTP-style acceptance does not fabricate running or successful state.
+
+** Notes
+
+WM-008 completed handoff 2026-09-12T02:36:23+00:00: Serialize approval with configuration reload, invalidate old unapproved worker/preparation bindings, and validate effective prepared target, policy, person mode, invocation and resource ownership against current authority. A service-owned label or stored Selection is not sufficient approval evidence. Approved workers retain their captured environment. Source/evidence: profiles.EgYE9JIT/wm008-completion-review.md and manager/CONFIGURATION.md. No owning-package completion follows from this handoff.
 
 ** Dependencies
 
@@ -8897,7 +8917,7 @@ implies that effects outside that backup did not occur.
 :LABELS:   ["p4","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-09-11 Fri 19:36]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-021
 :SOURCE_REPO: agent-cat
@@ -8950,6 +8970,10 @@ replay protection, native evidence, or referenced captures. A full submission
 queue leaves cancellation capacity. An open event reader observes either a
 valid retained batch or an explicit retention loss, never a successful gap.
 Collection races cannot unlink content that becomes referenced concurrently.
+
+** Notes
+
+WM-008 completed handoff 2026-09-12T02:36:23+00:00: Enforce each configured quota at its frozen scope, including mandatory global caps and independent safety capacity. Old selected ConfigurationLimits values are revision facts, not permission to bypass current coordinator limits. Source/evidence: profiles.EgYE9JIT/wm008-completion-review.md and manager/CONFIGURATION.md. No owning-package completion follows from this handoff.
 
 ** Dependencies
 
@@ -10675,7 +10699,7 @@ verified output, and lineage behave consistently with the other clients.
 :LABELS:   ["p8","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-09-11 Fri 19:36]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-038
 :SOURCE_REPO: agent-cat
@@ -10732,6 +10756,10 @@ Actual host interaction and server evidence corroborate the
 unit/integration results. Existing local tests pass. The report names the tested
 host/package versions and distinguishes source acceptance from installation,
 production adoption, or deployment.
+
+** Notes
+
+WM-008 completed handoff 2026-09-12T02:36:23+00:00: Adopt the shared root-role refusal before local startup/enumeration/pruning and prove manager records, protected lineage parents and manifest-less partial directories remain untouched. Marker contract is in runtime/README.md and shared Runtime helpers. TUI adoption and WM-008 root/configuration tests do not substitute for actual Pi owner/host acceptance. Older clients still require disjoint configured roots. Source/evidence: profiles.EgYE9JIT/wm008-completion-review.md and manager/CONFIGURATION.md. No owning-package completion follows from this handoff.
 
 ** Dependencies
 
