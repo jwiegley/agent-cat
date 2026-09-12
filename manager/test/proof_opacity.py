@@ -16,7 +16,7 @@ if len(units) != 1:
     raise RuntimeError("expected exactly one local agentic main-library unit")
 cases = [
     ("positive", "import Agentic.Manager.Authorization (CredentialProof)\nkeep :: CredentialProof -> CredentialProof\nkeep = id\n", None),
-    ("constructor", "import Agentic.Manager.Authorization (CredentialProof)\nforge :: CredentialProof\nforge = CredentialProof undefined undefined undefined undefined\n", "Illegal term-level use of the type constructor"),
+    ("constructor", "import Agentic.Manager.Authorization\nforge :: CredentialProof\nforge = CredentialProof undefined undefined undefined undefined\n", "Illegal term-level use of the type constructor"),
     ("generic", "import Agentic.Manager.Authorization (CredentialProof)\nimport GHC.Generics (from)\ninspect :: CredentialProof -> ()\ninspect proof = from proof `seq` ()\n", "Generic CredentialProof"),
 ]
 for name, body, expected in cases:
