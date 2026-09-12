@@ -2219,14 +2219,14 @@ Today both live engines bind EVERY addressee to one backend per run — run/Main
 ]
 #+end_src
 
-* WAIT [#B] Implement the approved remote workflow manager
+* TODO [#B] Implement the approved remote workflow manager
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-epic-4xte
 :LABELS:   ["wm-epic","workflow-manager"]
 :ISSUE_TYPE: epic
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-11 Fri 19:46]
+:MODIFIED: [2026-09-11 Fri 23:04]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/EPIC
 :SOURCE_REPO: agent-cat
@@ -2310,6 +2310,8 @@ All 44 work packages and G0-G5 closed with real independent evidence, including 
 Wiggum active. WM001-005 complete (5/44), all release gates open. WM005 d47507a extracted native codecs, da5e307 repaired two reviewed parser-cost issues/direct-wire coverage and a separately reviewed native terminal-cancel race. Gates passed, including real N8 frontend, runtime/conformance, TUI/PTTY and docs. Refocus 2026-09-11T08:05:14+00:00, next 2026-09-11T09:05:14+00:00. Current package WM006 full bounded observation/restoration using shared runtime reducer, then WM007 durable publication/confinement. Frozen design and44-package plan unchanged. No manager service or remote clients yet. No production config, paid workflow, push or deployment. Source clean at closure. origin/main refreshed07:11:58Z remained e8b27cae. Preserve existing owned stash backup; no unknown stash or sibling changes. Evidence root ~/Products/agent-cat-workflow-manager/implementation.9tGzKH and per-package notes.
 
 Dependency-boundary stop at 2026-09-12T02:46:02+00:00: independent WM-007 publication work and full WM-008 package-boundary work are implemented, verified and independently reviewed. WM-008 is closed, so7of44packages are complete. The canonical graph has37pending packages and every one reaches blocked WM-007 through its frozen blocking dependencies. obr ready lists only unrelated non-manager work. Evidence: profiles.EgYE9JIT/wm008-dependency-state.json and wm008-completion-review.md. The next package WM-009 requires the outstanding selected-binding SQLite opening/companion-file confinement acceptance in WM-007. Its provider restriction remains unresolved. No rejected experiment was retried, rephrased, moved to another provider, or executed by the parent. This stop is at the frozen package-dependency boundary, not a claim that the compiler, publication primitive, profile configuration, or all conceivable independent code work is unavailable. Resume requires a provider-authorized way to complete the restricted acceptance, or an explicit user decision about any out-of-order work without changing frozen acceptance criteria. Source/test work is committed through651de33 before the closure record, all requested owning gates pass within documented evidence limits, and the branch is current with origin/main b01344e9. All G0-G5remain open. No service installation, paid workflow execution, push, sibling rewrite or unknown stash action occurred. Last refocus02:14:11Z,next03:14:11Z; refocus immediately on any later resumption.
+
+Operator-authorized scope amendment 2026-09-12T06:03:20+00:00: user explicitly instructed, "Skip this test, drop the requirement. I want to continue." The unrun SQLite directory-replacement confinement experiment and guarantee are withdrawn, not passed. Amendment doc/research/workflow-manager-storage-amendment.md, SHA-256 e6654b8ec1294e1daf2bb634ce3da62426cdb36fdcb9cb820a54ffc192c5e791, supersedes only D2/WM-007 and their dependent acceptance obligation, preserving both original research hashes. Ordinary SQLite work now assumes a stable operator-controlled private local namespace. No existing guard or runnable regression is removed, no rejected experiment is repeated, and no custom VFS is authorized. The already independently reviewed durable publication work satisfies the remaining WM-007 scope. Fresh warning-fatal all-target baseline and all three Haskell suites pass in state.0wnll6Qx/baseline.log. WM-009 may proceed under the amendment. G0 remains open until independently assessed. Full WM-001–044/G0–G5 remains the objective. Refocus completed 2026-09-12T06:03:20+00:00, next deadline 2026-09-12T07:03:20+00:00. Next: publish this scope amendment and implement ordinary coordination storage without reconstructing the rejected experiment. The aggregate epic cannot be claimed in_progress while its release-gate dependencies remain open. The first update correctly refused with "Validation failed: claim: cannot claim blocked issue: acat-g5-u0w2". Restore the aggregate to open, retain all blocking edges, and claim only ready WM-009. No claim safeguard is bypassed.
 
 ** Dependencies
 
@@ -2583,7 +2585,7 @@ From the runtime adversarial pass (commit 71a212a). MEDIUM: (1) Exec.say logs bu
 :LABELS:   ["wm-release-gate","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-09-11 Fri 23:03]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/G0
 :SOURCE_REPO: agent-cat
@@ -2619,6 +2621,10 @@ Global invariants:
 ** Acceptance Criteria
 
 Exact source/toolchain provenance, owner agreement, compatibility fixtures, package/import rules, and the accepted API/state contract are recorded. Actual evidence and independent verification are recorded. No unavailable check is reported as green.
+
+** Notes
+
+Operator-authorized scope amendment 2026-09-12T06:03:20+00:00: user explicitly instructed, "Skip this test, drop the requirement. I want to continue." The unrun SQLite directory-replacement confinement experiment and guarantee are withdrawn, not passed. Amendment doc/research/workflow-manager-storage-amendment.md, SHA-256 e6654b8ec1294e1daf2bb634ce3da62426cdb36fdcb9cb820a54ffc192c5e791, supersedes only D2/WM-007 and their dependent acceptance obligation, preserving both original research hashes. Ordinary SQLite work now assumes a stable operator-controlled private local namespace. No existing guard or runnable regression is removed, no rejected experiment is repeated, and no custom VFS is authorized. The already independently reviewed durable publication work satisfies the remaining WM-007 scope. Fresh warning-fatal all-target baseline and all three Haskell suites pass in state.0wnll6Qx/baseline.log. WM-009 may proceed under the amendment. G0 remains open until independently assessed. Full WM-001–044/G0–G5 remains the objective. Refocus completed 2026-09-12T06:03:20+00:00, next deadline 2026-09-12T07:03:20+00:00. Next: publish this scope amendment and implement ordinary coordination storage without reconstructing the rejected experiment.
 
 ** Dependencies
 
@@ -7318,15 +7324,17 @@ WM006 COMPLETE 2026-09-11T10:03:45+00:00: independent fresh-origin fess1caf5361-
 ]
 #+end_src
 
-* WAIT [#B] WM-007: Establish durable private publication and database confinement    :p1:
+* DONE [#B] WM-007: Establish durable private publication    :p1:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-wm-007-lfcg
 :LABELS:   ["p1","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-11 Fri 19:46]
+:MODIFIED: [2026-09-11 Fri 23:03]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-11 Fri 23:03]
+:CLOSE_REASON: Remaining durable-publication scope independently accepted. SQLite directory-replacement experiment and guarantee explicitly withdrawn by the operator, not verified. See the 2026-09-12 storage amendment.
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-007
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -7374,11 +7382,7 @@ The complete plan, including global gates, applies. No completion claim follows 
 
 ** Acceptance Criteria
 
-Linux and macOS tests cover no-clobber races, stale temporary
-files, interruption, root/parent replacement, sync errors, and lost replies.
-A successful capture receipt has the claimed persistence barrier. Database
-opening cannot silently cross the agreed storage boundary. Existing Store and
-export consumers retain their semantics and regression coverage.
+Linux and macOS tests cover immutable-capture no-clobber races, stale temporary files, interruption, root/parent replacement, sync errors, and lost replies. A successful capture receipt has the claimed persistence barrier. Existing Store and export consumers retain their semantics and regression coverage. The operator withdrew the separate SQLite directory-replacement confinement experiment and guarantee on 2026-09-12. That experiment remains unrun and is not accepted as passing. See doc/research/workflow-manager-storage-amendment.md.
 
 ** Notes
 
@@ -7403,6 +7407,8 @@ Publication audit accepted at 2026-09-11T20:46:00+00:00. Work commit 421c7a04412
 Post-audit local restack at 2026-09-11T21:02:07+00:00: incoming main commit b01344e96d8e4a541da74ca67d84aa7c28656e32 changes only the shared tracker. All 224 issue IDs match the canonical export. Apart from our pending WM-007 and WM-008 updates, differences are Org escaping only. The restack preserved the newer shared tracker at each tracker-only conflict and retained pending updates separately. Three redundant tracker-only commits were already represented by that newer export. No source conflict occurred, no sibling branch or stash was changed, and nothing was pushed. The publication work is now 96b0335580e3836ec1bca261ae617fd153db5e28. Every non-tracker file is byte-identical to audited commit 421c7a04412a6b57a5bc4e6c11ffe3bd9255f87b. The post-restack warning-fatal all-target build and all three suites passed in post-restack-build.log and post-restack-tests.log. The existing audit therefore applies to identical implementation bytes. Tracker projection preserves incoming Org escaping and applies only the two intended package updates from the canonical export. Future projections must compare unescaped issue content rather than overwrite unrelated formatting. The branch is zero commits behind its base. WM-007 stays blocked on the separately restricted SQLite experiment, while WM-008 proceeds.
 
 Dependency-boundary stop at 2026-09-12T02:46:02+00:00: independent WM-007 publication work and full WM-008 package-boundary work are implemented, verified and independently reviewed. WM-008 is closed, so7of44packages are complete. The canonical graph has37pending packages and every one reaches blocked WM-007 through its frozen blocking dependencies. obr ready lists only unrelated non-manager work. Evidence: profiles.EgYE9JIT/wm008-dependency-state.json and wm008-completion-review.md. The next package WM-009 requires the outstanding selected-binding SQLite opening/companion-file confinement acceptance in WM-007. Its provider restriction remains unresolved. No rejected experiment was retried, rephrased, moved to another provider, or executed by the parent. This stop is at the frozen package-dependency boundary, not a claim that the compiler, publication primitive, profile configuration, or all conceivable independent code work is unavailable. Resume requires a provider-authorized way to complete the restricted acceptance, or an explicit user decision about any out-of-order work without changing frozen acceptance criteria. Source/test work is committed through651de33 before the closure record, all requested owning gates pass within documented evidence limits, and the branch is current with origin/main b01344e9. All G0-G5remain open. No service installation, paid workflow execution, push, sibling rewrite or unknown stash action occurred. Last refocus02:14:11Z,next03:14:11Z; refocus immediately on any later resumption.
+
+Operator-authorized scope amendment 2026-09-12T06:03:20+00:00: user explicitly instructed, "Skip this test, drop the requirement. I want to continue." The unrun SQLite directory-replacement confinement experiment and guarantee are withdrawn, not passed. Amendment doc/research/workflow-manager-storage-amendment.md, SHA-256 e6654b8ec1294e1daf2bb634ce3da62426cdb36fdcb9cb820a54ffc192c5e791, supersedes only D2/WM-007 and their dependent acceptance obligation, preserving both original research hashes. Ordinary SQLite work now assumes a stable operator-controlled private local namespace. No existing guard or runnable regression is removed, no rejected experiment is repeated, and no custom VFS is authorized. The already independently reviewed durable publication work satisfies the remaining WM-007 scope. Fresh warning-fatal all-target baseline and all three Haskell suites pass in state.0wnll6Qx/baseline.log. WM-009 may proceed under the amendment. G0 remains open until independently assessed. Full WM-001–044/G0–G5 remains the objective. Refocus completed 2026-09-12T06:03:20+00:00, next deadline 2026-09-12T07:03:20+00:00. Next: publish this scope amendment and implement ordinary coordination storage without reconstructing the rejected experiment.
 
 ** Dependencies
 
@@ -7568,14 +7574,14 @@ WM-008 package-boundary completion verified at 2026-09-12T02:36:23+00:00. Indepe
 ]
 #+end_src
 
-* TODO [#B] WM-009: Implement the private coordination database and service lock    :p2:
+* DOING [#B] WM-009: Implement the private coordination database and service lock    :p2:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-wm-009-kmzw
 :LABELS:   ["p2","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-09-11 Fri 23:03]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-009
 :SOURCE_REPO: agent-cat
@@ -7633,6 +7639,10 @@ migrations fail safely, and incompatible newer databases refuse older binaries.
 Transaction rollback leaves no partial resource/event change. Power-loss claims
 are limited to the tested filesystem/VFS contract, and a lock file or stored
 PID is not treated as a worker control capability.
+
+** Notes
+
+Operator-authorized scope amendment 2026-09-12T06:03:20+00:00: user explicitly instructed, "Skip this test, drop the requirement. I want to continue." The unrun SQLite directory-replacement confinement experiment and guarantee are withdrawn, not passed. Amendment doc/research/workflow-manager-storage-amendment.md, SHA-256 e6654b8ec1294e1daf2bb634ce3da62426cdb36fdcb9cb820a54ffc192c5e791, supersedes only D2/WM-007 and their dependent acceptance obligation, preserving both original research hashes. Ordinary SQLite work now assumes a stable operator-controlled private local namespace. No existing guard or runnable regression is removed, no rejected experiment is repeated, and no custom VFS is authorized. The already independently reviewed durable publication work satisfies the remaining WM-007 scope. Fresh warning-fatal all-target baseline and all three Haskell suites pass in state.0wnll6Qx/baseline.log. WM-009 may proceed under the amendment. G0 remains open until independently assessed. Full WM-001–044/G0–G5 remains the objective. Refocus completed 2026-09-12T06:03:20+00:00, next deadline 2026-09-12T07:03:20+00:00. Next: publish this scope amendment and implement ordinary coordination storage without reconstructing the rejected experiment.
 
 ** Dependencies
 
