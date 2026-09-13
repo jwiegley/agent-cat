@@ -1,0 +1,200 @@
+#!/usr/bin/env python3
+"""Exact project-owned source instrumentation and compiled audit mutants.
+
+No production hook, database/syscall interposition or reconstructed worker authority.
+All copies, compiler outputs, logs and failed fixtures remain below CABAL_BUILDDIR.
+"""
+from pathlib import Path, PurePosixPath
+import difflib
+import hashlib
+import json
+import os
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+
+source = Path(sys.argv[1]).resolve()
+mode = sys.argv[2]
+if mode not in {"interruption", "ticket-mutant", "retry-mutant", "deadline-mutant", "watchdog-mutant", "policy-mutant", "package-boundary", "termination-mutant"}:
+    raise SystemExit("unknown audit mode")
+work = Path(tempfile.mkdtemp(prefix=f"audit-{mode}.", dir=os.environ["CABAL_BUILDDIR"]))
+copy = work / "agentic-0.1.0.0"
+def capture_package(origin, destination, label):
+    command = ["cabal", "--store-dir=" + os.environ["CABAL_BUILDDIR"] + "/cabal-store",
+               "--active-repositories=:none", "sdist", "--ignore-project", "--list-only",
+               "--null-sep", "--output-directory=-", "--builddir=" + str(work / (label + "-cabal"))]
+    with (work / (label + ".log")).open("wb") as diagnostic:
+        result = subprocess.run(command, cwd=origin, stdout=subprocess.PIPE, stderr=diagnostic, timeout=120)
+    if result.returncode:
+        raise RuntimeError("Cabal source enumeration failed")
+    if len(result.stdout) > 1048576:
+        raise RuntimeError("Cabal source enumeration exceeded audit bound")
+    (work / (label + ".list")).write_bytes(result.stdout)
+    members = {}
+    for raw in result.stdout.split(b"\0"):
+        if not raw:
+            continue
+        spelling = raw.decode("utf-8")
+        name = PurePosixPath(spelling)
+        if name.is_absolute() or ".." in name.parts or "\\" in spelling or not name.parts:
+            raise RuntimeError("non-relative Cabal source member")
+        relative = str(name)
+        if relative in members:
+            raise RuntimeError("duplicate Cabal source member")
+        path = origin
+        for component in name.parts:
+            path = path / component
+            if stat.S_ISLNK(path.lstat().st_mode):
+                raise ValueError("declared source member is a symlink")
+        if not stat.S_ISREG(path.lstat().st_mode):
+            raise ValueError("declared source member is not regular")
+        members[relative] = {"sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                             "mode": oct(path.stat().st_mode & 0o777)}
+    if "agentic.cabal" not in members or "manager/test/Agentic/Manager/Test/AcceptanceAudit.hs" not in members:
+        raise RuntimeError("required declared package source missing")
+    destination.mkdir()
+    for name in members:
+        target = destination / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(origin / name, target, follow_symlinks=False)
+        if target.is_symlink() or not stat.S_ISREG(target.lstat().st_mode):
+            raise RuntimeError("captured package member is not regular")
+        if hashlib.sha256(target.read_bytes()).hexdigest() != members[name]["sha256"]:
+            raise RuntimeError("source changed during package capture")
+    (work / (label + "-hashes.json")).write_text(json.dumps(members, indent=2) + "\n")
+    return members
+
+original_members = capture_package(source, copy, "source")
+if mode == "package-boundary":
+    (copy / ".audit-cache").mkdir()
+    (copy / ".audit-cache/unlisted").write_text("must not be copied")
+    (copy / "unlisted-sentinel").write_text("must not be hashed")
+    outside = work / "outside-sentinel"
+    outside.write_text("unlisted symlink target")
+    (copy / "unlisted-symlink").symlink_to(outside)
+    captured = capture_package(copy, work / "recaptured", "recaptured")
+    if captured != original_members:
+        raise RuntimeError("unlisted content changed package capture")
+    if any((work / "recaptured" / name).exists() for name in [".audit-cache", "unlisted-sentinel", "unlisted-symlink"]):
+        raise RuntimeError("unlisted content crossed positive package boundary")
+    declared = copy / "manager/test/Agentic/Manager/Test/AcceptanceAudit.hs"
+    declared.rename(copy / "unlisted-helper-backup")
+    declared.symlink_to(outside)
+    try:
+        capture_package(copy, work / "rejected", "declared-symlink")
+    except ValueError as failure:
+        if "symlink" not in str(failure):
+            raise
+    else:
+        raise RuntimeError("declared source symlink was not rejected")
+    (work / "package-boundary.json").write_text(json.dumps({"unlistedContentExcluded": True,
+        "declaredHelpersRetained": True, "declaredSymlinkRejected": True, "memberCount": len(captured)}, indent=2) + "\n")
+    print(f"PASS positive Cabal package boundary: {work}")
+    raise SystemExit(0)
+
+changes = []
+
+def replace(path, old, new):
+    target = copy / path
+    before = target.read_text()
+    if before.count(old) != 1:
+        raise RuntimeError(f"expected exactly one {path} boundary anchor")
+    after = before.replace(old, new, 1)
+    target.write_text(after)
+    changes.append({"path": path, "beforeSha256": hashlib.sha256(before.encode()).hexdigest(),
+                    "afterSha256": hashlib.sha256(after.encode()).hexdigest(),
+                    "diff": "".join(difflib.unified_diff(before.splitlines(True), after.splitlines(True), fromfile=path, tofile=path))})
+
+commands = "manager/src/Agentic/Manager/Commands.hs"
+if mode in {"interruption", "ticket-mutant"}:
+    helper = copy / "manager/src/Agentic/Manager/Test/AcceptanceAudit.hs"
+    helper.parent.mkdir(parents=True, exist_ok=True)
+    helper.write_bytes((source / "manager/test/Agentic/Manager/Test/AcceptanceAudit.hs").read_bytes())
+    changes.append({"path": "manager/src/Agentic/Manager/Test/AcceptanceAudit.hs", "beforeSha256": None,
+                    "afterSha256": hashlib.sha256(helper.read_bytes()).hexdigest(),
+                    "source": "manager/test/Agentic/Manager/Test/AcceptanceAudit.hs",
+                    "diff": "".join(difflib.unified_diff([], helper.read_text().splitlines(True), fromfile="/dev/null", tofile="manager/src/Agentic/Manager/Test/AcceptanceAudit.hs"))})
+    replace(commands, "import Agentic.Manager.Authorization\n", "import qualified Agentic.Manager.Test.AcceptanceAudit as Audit\nimport Agentic.Manager.Authorization\n")
+    replace(commands, "CommandAttempt _ _ _ candidate retained generationAtCreation _ <-", "CommandAttempt _ _ _ candidate retained generationAtCreation auditAttemptPhase <-")
+    replace(commands, "      Right (receipt, replayed, dispatch, refs, generation, epoch, association) -> do\n",
+            "      Right (receipt, replayed, dispatch, refs, generation, epoch, association) -> do\n        unless replayed (Audit.afterFreshCommit candidate retained auditAttemptPhase)\n")
+    replace(commands, "  done <- readIORef phase\n", "  Audit.recordReconciliation candidate retained phase\n  done <- readIORef phase\n")
+    replace(commands, "      Right () -> do\n        result <- try @SomeException (restore action)",
+            "      Right () -> do\n        Audit.recordDelivery ident state\n        result <- try @SomeException (restore action)")
+    # Register helper in the real private library and executable components.
+    replace("agentic.cabal", "    Agentic.Exec\n", "    Agentic.Manager.Test.AcceptanceAudit\n    Agentic.Exec\n")
+    if mode == "ticket-mutant":
+        replace(commands, "  reconcile = do\n   outcome <-", "  reconcile = do\n   replacement <- newIORef Unreserved\n   outcome <-")
+        replace(commands, "if dispatch then Just(DispatchTicket store candidate generation refs retained)", "if dispatch then Just(DispatchTicket store candidate generation refs replacement)")
+    target, arguments = "manager-admission-check", ["interrupted-acceptance"]
+    marker = "FAIL interrupted live cleanup uses original attempt and original ticket state"
+elif mode == "retry-mutant":
+    replace("manager/src/Agentic/Manager/Admission.hs", "  completed <- atomically(tryReadTMVar(entryResult entry))\n  unless (isJust completed) (throwIO StateConflict)\n", "")
+    target, arguments = "manager-admission-check", ["active-retry"]
+    marker = "FAIL active retry prevented Admission scope shutdown"
+elif mode == "deadline-mutant":
+    replace("manager/src/Agentic/Manager/Store.hs", "  unless(observed<deadline)(throwIO StoreDeadline)", "  void(pure(observed<deadline))")
+    target, arguments = "manager-command-check", ["deadline-crossing"]
+    marker = "FAIL deadline crossing inside fresh acceptance refuses commit"
+elif mode == "termination-mutant":
+    path = "runtime/src/Agentic/Runtime/ProcessGroup.hs"
+    text = (copy / path).read_text()
+    start = text.index("terminateProcessGroup grace group =")
+    finish = text.index("    signalOwned signal", start)
+    body = text[text.index("    terminate = mask", start):finish]
+    original = "terminateProcessGroup grace group =" + body.split("=", 1)[1]
+    original = "\n".join(line[4:] if line.startswith("    ") else line for line in original.splitlines()) + "\n  where\n"
+    replace(path, text[start:finish], original)
+    replace(path, "import Control.Concurrent.Async (asyncWithUnmask, waitCatch)\n", "")
+    target, arguments = "manager-worker-check", ["termination-cases"]
+    marker = "FAIL caller "
+elif mode == "watchdog-mutant":
+    replace("manager/src/Agentic/Manager/Worker.hs", "    void (readTMVar (prepared worker)) `orElse` void (readTMVar (finished worker))", "    void (readTMVar (finished worker))")
+    target, arguments = "manager-worker-check", ["watchdog-survival"]
+    marker = "FAIL successful preparation disarms startup watchdog independently of caller await"
+else:
+    replace("manager/src/Agentic/Manager/Admission/Policy.hs", "Set.disjoint (candidateResources candidate) claimed", "Set.disjoint Set.empty claimed")
+    target, arguments = "manager-admission-check", ["static-occupancy"]
+    marker = "FAIL supplied held claims exclude conflicts and consume global capacity"
+
+(work / "instrumentation.json").write_text(json.dumps({"mode": mode, "changes": changes}, indent=2) + "\n")
+(work / "instrumentation.diff").write_text("".join(change["diff"] for change in changes))
+environment = dict(os.environ, CABAL_BUILDDIR=str(work / "build"))
+environment.pop("GHCRTS", None)
+results = []
+
+def run(command, log, timeout=300):
+    with (work / log).open("w") as output:
+        result = subprocess.run(command, cwd=copy, env=environment, stdout=output, stderr=subprocess.STDOUT, timeout=timeout)
+    results.append({"command": command, "log": log, "returncode": result.returncode})
+    (work / "results.json").write_text(json.dumps(results, indent=2) + "\n")
+    return result.returncode
+
+print(f"Audit evidence: {work}", flush=True)
+if run(["bash", "test/cabal.sh", "build", target, "routing-fixed-point-probe", "--ghc-options=-Werror"], "build.log"):
+    raise RuntimeError("instrumented/mutant compilation failed")
+
+def binary(name):
+    return subprocess.check_output(["bash", "test/cabal.sh", "list-bin", name], cwd=copy, env=environment, text=True, timeout=60).strip()
+
+checker, native = binary(target), binary("routing-fixed-point-probe")
+(work / "executables.json").write_text(json.dumps({path: hashlib.sha256(Path(path).read_bytes()).hexdigest() for path in [checker, native]}, indent=2) + "\n")
+for capabilities in ["N1", "N8"]:
+    fixture = work / capabilities
+    fixture.mkdir()
+    command = [checker, *arguments]
+    if mode != "policy-mutant":
+        command.append(str(fixture))
+    if mode not in {"deadline-mutant", "policy-mutant"}:
+        command.append(native)
+    command.extend(["+RTS", "-" + capabilities, "-RTS"])
+    code = run(command, capabilities + ".log", timeout=120)
+    output = (work / (capabilities + ".log")).read_text()
+    if mode == "interruption":
+        if code or "PASS original cleanup effect commits with release" not in output:
+            raise RuntimeError("real interrupted acceptance checks failed")
+    elif not code or marker not in output:
+        raise RuntimeError("compiled mutant did not fail its intended assertion")
+    print(f"PASS {mode} {capabilities}: " + ("real interrupted acceptance" if mode == "interruption" else "intended mutant assertion"), flush=True)

@@ -273,3 +273,20 @@ progress is optional and distinct from answer bytes. Bound it and redact both
 credential-shaped fields and exact selected credential values before the machine
 event sink; never project private reasoning or manufacture updates
 for an engine that supplied none.
+
+## Process-group termination grace
+
+`terminateProcessGroup` registers one narrowly owned shutdown task while masked.
+That task runs the existing TERM, completion-or-deadline wait and final KILL/reap
+sequence with a genuine unmask, even when the caller was already uninterruptibly
+masked. The caller always joins that same task shielded from further cancellation.
+A caller-wait exception is rethrown after joined cleanup and is kept separate from
+the shutdown task's own result, including caller-thrown IO exceptions.
+
+This preserves the offered grace for the CLI proxy to clean its separately owned
+inner group. Caller cancellation cannot bypass that grace and immediately kill
+only the proxy. Ordinary completion ends the wait early, and repeated callers
+retain the same original group and sole-reaper ownership. Existing TERM IO-error
+recovery, published cleanup failures and permission/zombie checks remain unchanged.
+The five-second outer and two-second inner budgets are unchanged and remain
+cooperative IO bounds, not arbitrary-descendant containment or absolute OS deadlines.

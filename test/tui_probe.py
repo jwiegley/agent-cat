@@ -16,11 +16,15 @@ import signal
 import stat
 import struct
 import subprocess
+import sys
 import tempfile
 import termios
 import time
 import unicodedata
 from pathlib import Path
+
+# The macOS system ps carries the entitlement required for RSS observations.
+PS_PROGRAM = "/bin/ps" if sys.platform == "darwin" else "ps"
 
 ESC_UP = b"\x1b[A"
 ESC_DOWN = b"\x1b[B"
@@ -386,8 +390,8 @@ def runs(state: Path) -> list[Path]:
     return sorted(root.iterdir()) if root.exists() else []
 
 def resident_kib(pid: int) -> int:
-    result = subprocess.run(["/bin/ps", "-p", str(pid), "-o", "rss="], check=False, capture_output=True, text=True)
-    return int(result.stdout.strip() or "0")
+    result = subprocess.run([PS_PROGRAM, "-p", str(pid), "-o", "rss="], check=True, capture_output=True, text=True)
+    return int(result.stdout.strip())
 
 
 def select_workflow(session: TuiSession, downward_moves: int) -> int:
@@ -1490,12 +1494,12 @@ def test_exact_controls_and_stress(driver: Path, fixture: Path, root: Path) -> N
         assert not any(process_exists(pid) for pid in child_pids), child_pids
 
 def processes_matching(fragment: str) -> set[int]:
-    rows = subprocess.check_output(["/bin/ps", "-axo", "pid=,command="], text=True).splitlines()
+    rows = subprocess.check_output([PS_PROGRAM, "-axo", "pid=,command="], text=True).splitlines()
     return {int(fields[0]) for row in rows if len(fields := row.strip().split(maxsplit=1)) == 2 and fragment in fields[1]}
 
 
 def child_processes(parent: int) -> list[int]:
-    rows = subprocess.check_output(["/bin/ps", "-axo", "pid=,ppid="], text=True).splitlines()
+    rows = subprocess.check_output([PS_PROGRAM, "-axo", "pid=,ppid="], text=True).splitlines()
     return [int(fields[0]) for row in rows if len(fields := row.split()) == 2 and int(fields[1]) == parent]
 
 
@@ -1571,14 +1575,18 @@ def test_machine_group_ownership(driver: Path, fixture: Path, root: Path) -> Non
                     if scenario == "unread-control":
                         session.send(b"i")
                         editor = session.wait_for(b"interrupt-now", after=active)
-                        session.send(b"\x1b[200~" + (b"x" * 64 + b"\n") * 4096 + b"END-BLOCKED\x1b[201~")
+                        control_text = (b"x" * 64 + b"\n") * 4096 + b"END-BLOCKED"
+                        session.send(PASTE_START + control_text + PASTE_END)
                         session.wait_for(b"END-BLOCKED", after=editor, timeout=10)
                         submitted = len(session.output)
                         session.send(CTRL_D)
                         deadline = time.monotonic() + 5
                         while (not ready.exists() or not ready.read_text()) and time.monotonic() < deadline:
                             session.pump()
-                        assert ready.exists() and 0 < int(ready.read_text()) < 256 * 1024, "control write did not enter the unread pipe"
+                        # JSON framing is larger than the submitted ASCII payload.
+                        assert ready.exists() and 0 < int(ready.read_text()) < len(control_text), (
+                            f"control write did not enter the unread pipe: ready={ready.read_text() if ready.exists() else 'missing'}, payload={len(control_text)}"
+                        )
                         session.settle()
                         assert b"control sent" not in session.output[submitted:], "large control unexpectedly fit the unread pipe"
                     session.process.send_signal(signal.SIGTERM)

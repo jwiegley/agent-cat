@@ -145,3 +145,19 @@ WM-014 owns exact approval, WM-015 durable ingestion, WM-016 control semantics,
 and WM-019 broader containment and safety supervision. No listener, deployment,
 provider call, new workflow semantics, stored-worker adoption, SQLite confinement
 experiment or release acceptance is claimed by this unit.
+
+The watchdog survival control observes an actual prepared Worker through its
+non-consuming status operation, then samples it more than thirty seconds later.
+It never uses a caller preparation wait to determine the watchdog lifetime. The
+same original Worker must remain prepared and then discard and join normally.
+The compiled removal of successful-preparation disarm must fail the survival
+assertion, with the original startup budget unchanged.
+
+The backpressure-close regression also observes the actual native inner process
+before close and rejects a live survivor afterward. Its PID is a read-only negative
+witness, not reconstructed signalling authority or a replacement for original
+ProcessGroup cleanup. Direct termination tests cover caller interruption during
+grace, caller-thrown IO exceptions, an already uninterruptibly masked caller,
+ordinary completion and repeated callers. The old termination-body mutant must
+fail the caller/grace assertions. Operator cleanup of a failed fixture is separate
+hygiene and never counted as successful manager cleanup.

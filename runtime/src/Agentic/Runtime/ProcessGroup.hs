@@ -17,6 +17,7 @@ module Agentic.Runtime.ProcessGroup
 where
 
 import Control.Concurrent (forkIO, threadDelay)
+import Control.Concurrent.Async (asyncWithUnmask, waitCatch)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, newMVar, putMVar, readMVar, tryReadMVar, withMVar)
 import Control.Exception (IOException, SomeException, fromException, mask, mask_, throwIO, try, uninterruptibleMask_)
 import Control.Monad (void)
@@ -71,14 +72,23 @@ waitProcessGroup group = readMVar (groupOutcome group) >>= either throwIO pure
 
 terminateProcessGroup :: Int -> ProcessGroup -> IO ()
 terminateProcessGroup grace group = mask $ \restore -> do
-  earlier <- try @SomeException (restore (signalOwned sigTERM >> void (timeout grace (readMVar (groupOutcome group)))))
-  final <- try @SomeException $ uninterruptibleMask_ $ do
-    signalOwned sigKILL
-    readMVar (groupOutcome group) >>= either throwIO (const (pure ()))
-  case earlier of
-    Left failure | Nothing <- (fromException failure :: Maybe IOException) -> throwIO failure
-    _ -> either throwIO pure final
+  -- Caller cancellation must not kill a proxy before its owned children get their grace.
+  shutdown <- asyncWithUnmask (\unmask -> unmask terminate)
+  caller <- try @SomeException (restore (waitCatch shutdown))
+  joined <- uninterruptibleMask_ (waitCatch shutdown)
+  case caller of
+    Left failure -> throwIO failure
+    Right _ -> either throwIO pure joined
+
   where
+    terminate = mask $ \restore -> do
+      earlier <- try @SomeException (restore (signalOwned sigTERM >> void (timeout grace (readMVar (groupOutcome group)))))
+      final <- try @SomeException $ uninterruptibleMask_ $ do
+        signalOwned sigKILL
+        readMVar (groupOutcome group) >>= either throwIO (const (pure ()))
+      case earlier of
+        Left failure | Nothing <- (fromException failure :: Maybe IOException) -> throwIO failure
+        _ -> either throwIO pure final
     signalOwned signal = withMVar (groupLock group) $ \_ -> do
       outcome <- tryReadMVar (groupOutcome group)
       case outcome of
