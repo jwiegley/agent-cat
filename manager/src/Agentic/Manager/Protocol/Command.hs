@@ -76,12 +76,14 @@ instance FromJSON CommandState where
 data CommandFailure = Unauthenticated | Forbidden | AuthorityChanged | InvalidPrecondition
   | PreconditionRequired | StaleRevision | StateConflict | IdempotencyConflict | ReceiptExpired
   | StorageQuota | RateLimit | StorageUnavailable | ResourceUnavailable | InvalidRequest
-  | UnsupportedMediaType | OwnershipUnavailable | SizeLimit
+  | UnsupportedMediaType | OwnershipUnavailable | SizeLimit | InvalidInput | ViewTooLarge
   deriving (Eq, Show, Generic, NFData)
 instance Exception CommandFailure
 
 failureCode :: CommandFailure -> Text
 failureCode failure = case failure of
+  InvalidInput -> "invalid-input"
+  ViewTooLarge -> "view-too-large"
   SizeLimit -> "size-limit"
   Unauthenticated -> "unauthenticated"
   Forbidden -> "insufficient-scope"
@@ -101,6 +103,8 @@ failureCode failure = case failure of
   OwnershipUnavailable -> "ownership-unavailable"
 failureStatus :: CommandFailure -> Int
 failureStatus failure = case failure of
+  InvalidInput -> 422
+  ViewTooLarge -> 413
   SizeLimit -> 413
   Unauthenticated -> 401
   Forbidden -> 403

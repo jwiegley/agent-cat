@@ -13,6 +13,8 @@ import Control.Exception
   (AsyncException (UserInterrupt), bracket, finally, fromException, onException, throwIO, try)
 import Control.Monad (forM_, replicateM_, unless, void)
 import Control.DeepSeq (NFData)
+import Crypto.Hash (Digest, SHA256, hash)
+import Data.ByteArray (convert)
 import Data.Aeson (encode, object, (.=))
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
@@ -259,7 +261,7 @@ databaseChecks work = do
     second <- storeIdentity store
     check "reopen preserves durable identities separately from live generation"
       (storeAuthorityEpoch first == storeAuthorityEpoch second && storeStreamId first == storeStreamId second
-       && storeProcessGeneration first /= storeProcessGeneration second && storeSchemaVersion second == 2)
+       && storeProcessGeneration first /= storeProcessGeneration second && storeSchemaVersion second == 3)
     rowsEqual store "SELECT sequence,retained_floor,revision FROM service_metadata"
       [[SQL.SQLText "4", SQL.SQLText "0", SQL.SQLText "service_1"]] >>= check "stream sequence and resource revisions survive reopen"
   -- Real SQLite trigger failure occurs after resource update and sequence allocation.
@@ -275,7 +277,10 @@ relationalRows :: Transaction ()
 relationalRows = do
   execute "INSERT INTO requests (id,revision,client_id,workflow_id,descriptor_revision,profile_id,profile_revision,phase,admission,blocking_reasons,validation_errors) VALUES ('request_1','revision_1','client_1','workflow_1','descriptor_1','profile_1','profile_revision_1','draft','not-queued',X'5b5d',X'5b5d')" []
   execute "INSERT INTO captures VALUES ('capture_1','revision_1','request_1','client_1','profile_1',X'01',0,?)" [SQL.SQLText (T.replicate 64 "0")]
-  execute "INSERT INTO request_inputs VALUES ('request_1','input_1',0,X'7b7d','literal',?,NULL)" [SQL.SQLBlob (BS.pack [0xce,0xb1,13,10])]
+  let literalBytes = BS.pack [0xce,0xb1,13,10]
+  execute "INSERT INTO request_inputs (request_id,name,declaration_ordinal,declaration,source,literal_bytes,literal_transport_bytes,literal_chunks,literal_digest) VALUES ('request_1','input_1',0,X'7b7d','literal',4,4,1,?)"
+    [SQL.SQLBlob (convert (hash literalBytes :: Digest SHA256))]
+  execute "INSERT INTO request_literal_chunks VALUES ('request_1','input_1',0,?)" [SQL.SQLBlob literalBytes]
   execute "INSERT INTO reservations VALUES ('reservation_1','request_1',0,'generation_1','held')" []
   execute "INSERT INTO reservation_resources VALUES ('workspace_1','reservation_1')" []
   execute "INSERT INTO preparations VALUES ('preparation_1','revision_1','request_1','revision_1','profile_revision_1','reservation_1','generation_1','worker_1','root_1','native_1','2030-01-01','digest_1',X'7b7d',X'7b7d','live',NULL)" []
@@ -310,7 +315,7 @@ relationalConstraints store = do
     mutate store (execute duplicateLedger [SQL.SQLText ""]) [event]
   rowsEqual store "SELECT runtime_snapshot,snapshot_version,result_state,supervision FROM runs"
     [[SQL.SQLNull, SQL.SQLNull, SQL.SQLText "absent", SQL.SQLText "owned"]] >>= check "reserved run does not fabricate runtime evidence"
-  rowsEqual store "SELECT literal FROM request_inputs" [[SQL.SQLBlob (BS.pack [0xce,0xb1,13,10])]] >>=
+  rowsEqual store "SELECT bytes FROM request_literal_chunks" [[SQL.SQLBlob (BS.pack [0xce,0xb1,13,10])]] >>=
     check "input binding preserves exact Unicode/CRLF bytes"
 
 reservationHistory :: CoordinationStore -> IO ()
@@ -455,7 +460,7 @@ migrationChecks work = do
     count store "clients" >>= check "stream exhaustion rolls back resource change" . (== 0)
     rowsEqual store "SELECT sequence FROM service_metadata" [[SQL.SQLText "18446744073709551615"]] >>=
       check "complete UInt64 stream range survives reopen"
-  bracket (rawOpen root) SQL.close $ \db -> SQL.exec db "PRAGMA user_version=3"
+  bracket (rawOpen root) SQL.close $ \db -> SQL.exec db "PRAGMA user_version=4"
   before <- BS.readFile (root </> "coordination.sqlite3")
   withInstalled path $ \installed -> expect "newer schema refused" StoreVersion $
     withCoordinationStore installed (const (pure ()))

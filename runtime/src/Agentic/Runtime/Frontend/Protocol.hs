@@ -5,6 +5,7 @@ module Agentic.Runtime.Frontend.Protocol
   ( FrontendSetupRequest (..),
     FrontendSetup (..),
     FrontendInputSource (..),
+    frontendLiteralBytes,
     FrontendEdit (..),
     FrontendDecision (..),
     FrontendPrepared (..),
@@ -37,7 +38,7 @@ import Agentic.Runtime.Catalogue
     frontendManifestVersion,
     frontendManifestVersionWithInvocation,
   )
-import Agentic.Runtime.Descriptor (WorkflowDescriptor)
+import Agentic.Runtime.Descriptor (WorkflowDescriptor, WorkflowInputSource (..))
 import Agentic.Runtime.Plan (parseExactPlan)
 import Agentic.Runtime.Protocol
   ( OccurrenceId (..),
@@ -84,6 +85,10 @@ data FrontendSetupRequest
 -- | The transport representation of an input, before workflow-specific capture.
 data FrontendInputSource = Literal !Text | File !FilePath | Transport !Text
   deriving (Eq, Show)
+
+-- | Native transport bytes for one logical literal, before workflow interpretation.
+frontendLiteralBytes :: WorkflowInputSource -> Text -> BS.ByteString
+frontendLiteralBytes source value = Text.encodeUtf8 value <> if source == DescriptorPrompt then "\n" else ""
 
 -- | The parameters supplied to root preparation, without a resolved workflow.
 data FrontendSetup = FrontendSetup

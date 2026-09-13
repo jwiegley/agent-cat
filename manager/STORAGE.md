@@ -28,8 +28,10 @@ cannot construct either lease or worker authority.
 One connection serves reads and writes. Admission is fail-fast, with one active
 operation and no waiting queue. The configured positive reader allowance is an
 upper bound, not a promise of parallel readers. An escaped store handle refuses
-after its callback scope. The scoped owner waits for an in-flight operation and
-its joined cleanup before closing SQLite and releasing the lease.
+after its callback scope. The scoped owner waits for in-flight database and file operations and their
+joined cleanup before closing SQLite and releasing the lease. File operations
+use one separate fail-fast slot and retain a private root plus lease duplicate.
+Their lock order is file slot, configuration, then database.
 
 ## Database and schema
 
@@ -51,11 +53,11 @@ heap or temporary-disk quotas. The pinned Unix SQLite source specifies mode
 0600 for DELETEONCLOSE temporary files. That source evidence is not an exhaustive
 platform or forced-spill test.
 
-`PRAGMA user_version` holds internal schema version 2. Startup accepts versions
-zero, one, and two, and rejects other versions before changing journaling or
-schema. Fresh initialization and the version-one command-ledger migration execute
-DDL, metadata, and version publication in one immediate transaction. Version-one
-DDL remains unchanged. The frozen public managerStore compatibility stays at one.
+`PRAGMA user_version` holds internal schema version 3. Startup accepts versions
+zero through three, and rejects other versions before changing journaling or
+schema. Fresh initialization, command-ledger additions, and the explicit literal
+chunk/upload migration execute DDL, metadata and version publication in one
+immediate transaction. Version-one DDL and the version-two migration remain unchanged. The frozen public managerStore compatibility stays at one.
 Failure rolls that transaction back and never publishes a connection. The
 metadata row separately stores authority epoch, stream identity, stream sequence,
 retained floor, and service revision. Epoch and stream are random 256-bit

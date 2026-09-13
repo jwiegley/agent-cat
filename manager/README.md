@@ -127,6 +127,17 @@ frozen contract and remain independent of SQLite and authorization machinery.
 interoperability checks, and compiler-negative proof-opacity checks. No network
 listener or credential administration endpoint is introduced by this unit.
 
+## Drafts and immutable inputs
+
+The [draft contract](DRAFTS.md) provides catalogue-authorized creation, immutable
+creation replies, literal chunk integrity, bounded capture publication, readiness
+and shared frontend-frame assembly. It retains the existing literal/transport
+meaning and refuses unsupported live-worker edits without inventing cleanup.
+
+`manager/ci/drafts.sh` exercises actual installed-runner discovery, SQLite,
+Runtime publication and codecs at N1 and N8. Public output is checked with the
+frozen validator. Worker ownership, approval and later retention remain separate.
+
 ## Root separation
 
 `validateRootSeparation` compares manager storage with the configured local

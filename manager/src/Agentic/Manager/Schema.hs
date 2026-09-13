@@ -1,12 +1,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Versioned relational coordination facts. Stored identities are not capabilities.
-module Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration) where
+module Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration) where
 
 import Data.Text (Text)
 
 schemaVersion :: Int
-schemaVersion = 2
+schemaVersion = 3
 
 schemaStatements :: [Text]
 schemaStatements =
@@ -53,4 +53,24 @@ commandMigration =
     "CREATE TABLE command_ordinary_rate (credential_id TEXT PRIMARY KEY NOT NULL REFERENCES credentials(id), minute INTEGER NOT NULL, count INTEGER NOT NULL CHECK(count>=0)) STRICT",
     "CREATE TABLE command_safety_rate (singleton INTEGER PRIMARY KEY CHECK(singleton=1), minute INTEGER NOT NULL, count INTEGER NOT NULL CHECK(count>=0)) STRICT",
     "INSERT INTO command_safety_rate VALUES (1,0,0)"
+  ]
+
+-- | Version-three input representation and bounded durable upload reservations.
+draftMigration :: [Text]
+draftMigration =
+  [ "ALTER TABLE command_captures RENAME TO command_captures_v2",
+    "CREATE TABLE command_captures (command_id TEXT NOT NULL REFERENCES commands(id) DEFERRABLE INITIALLY DEFERRED, capture_id TEXT NOT NULL REFERENCES captures(id), PRIMARY KEY(command_id,capture_id)) STRICT",
+    "INSERT INTO command_captures SELECT command_id,capture_id FROM command_captures_v2",
+    "DROP TABLE command_captures_v2",
+    "CREATE TABLE request_origins (request_id TEXT PRIMARY KEY NOT NULL REFERENCES requests(id), command_id TEXT NOT NULL UNIQUE REFERENCES commands(id) DEFERRABLE INITIALLY DEFERRED, view BLOB NOT NULL CHECK(length(view)<=1048576)) STRICT",
+    "CREATE TRIGGER request_origin_immutable BEFORE UPDATE ON request_origins BEGIN SELECT RAISE(ABORT,'request origin is immutable'); END",
+    "CREATE TRIGGER request_origin_retained BEFORE DELETE ON request_origins WHEN (SELECT retired FROM commands WHERE id=OLD.command_id)=0 BEGIN SELECT RAISE(ABORT,'request origin is retained'); END",
+    "ALTER TABLE request_inputs RENAME TO request_inputs_v2",
+    "CREATE TABLE request_inputs (request_id TEXT NOT NULL REFERENCES requests(id), name TEXT NOT NULL, declaration_ordinal INTEGER NOT NULL CHECK(declaration_ordinal BETWEEN 0 AND 255), declaration BLOB NOT NULL, source TEXT CHECK(source IN ('literal','capture')), literal_bytes INTEGER CHECK(literal_bytes BETWEEN 0 AND 67108864), literal_transport_bytes INTEGER CHECK(literal_transport_bytes BETWEEN 0 AND 67108864), literal_chunks INTEGER CHECK(literal_chunks BETWEEN 0 AND 1024), literal_digest BLOB CHECK(literal_digest IS NULL OR length(literal_digest)=32), capture_id TEXT, PRIMARY KEY(request_id,name), UNIQUE(request_id,declaration_ordinal), FOREIGN KEY(capture_id,request_id) REFERENCES captures(id,request_id), CHECK((source IS NULL AND literal_bytes IS NULL AND literal_transport_bytes IS NULL AND literal_chunks IS NULL AND literal_digest IS NULL AND capture_id IS NULL) OR (source IS 'literal' AND literal_bytes IS NOT NULL AND literal_chunks IS NOT NULL AND literal_chunks=(literal_bytes+65535)/65536 AND literal_digest IS NOT NULL AND capture_id IS NULL) OR (source IS 'capture' AND literal_bytes IS NULL AND literal_transport_bytes IS NULL AND literal_chunks IS NULL AND literal_digest IS NULL AND capture_id IS NOT NULL))) STRICT",
+    "CREATE TABLE request_literal_chunks (request_id TEXT NOT NULL, name TEXT NOT NULL, ordinal INTEGER NOT NULL CHECK(ordinal BETWEEN 0 AND 1023), bytes BLOB NOT NULL CHECK(length(bytes) BETWEEN 1 AND 65536), PRIMARY KEY(request_id,name,ordinal), FOREIGN KEY(request_id,name) REFERENCES request_inputs(request_id,name) ON DELETE CASCADE) STRICT",
+    "CREATE TRIGGER literal_chunk_bounds BEFORE INSERT ON request_literal_chunks WHEN NOT EXISTS(SELECT 1 FROM request_inputs WHERE request_id=NEW.request_id AND name=NEW.name AND source='literal' AND NEW.ordinal<literal_chunks AND length(NEW.bytes)=min(65536,literal_bytes-NEW.ordinal*65536)) BEGIN SELECT RAISE(ABORT,'literal chunk does not match its input'); END",
+    "INSERT INTO request_inputs SELECT request_id,name,declaration_ordinal,declaration,source,CASE WHEN source='literal' THEN length(literal) END,CASE WHEN source='literal' THEN length(literal) END,CASE WHEN source='literal' THEN (length(literal)+65535)/65536 END,CASE WHEN source='literal' THEN zeroblob(32) END,capture_id FROM request_inputs_v2",
+    "WITH RECURSIVE positions(n) AS (VALUES(0) UNION ALL SELECT n+1 FROM positions WHERE n<31) INSERT INTO request_literal_chunks SELECT request_id,name,n,substr(literal,n*65536+1,65536) FROM request_inputs_v2 JOIN positions ON n<(length(literal)+65535)/65536 WHERE source='literal'",
+    "DROP TABLE request_inputs_v2",
+    "CREATE TABLE capture_uploads (id TEXT PRIMARY KEY NOT NULL, request_id TEXT NOT NULL REFERENCES requests(id), client_id TEXT NOT NULL REFERENCES clients(id), profile_id TEXT NOT NULL, profile_revision TEXT NOT NULL, process_generation TEXT NOT NULL, reserved_bytes INTEGER NOT NULL CHECK(reserved_bytes BETWEEN 0 AND 67108864), created_at TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('pending','orphan')), FOREIGN KEY(request_id,profile_id) REFERENCES requests(id,profile_id)) STRICT"
   ]

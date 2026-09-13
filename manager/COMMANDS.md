@@ -43,8 +43,12 @@ an existence oracle. Knowing a command ID, client ID, or old key grants no acces
 The owning route supplies exact method, canonical resource target including query,
 media type, precondition, and body bytes after its strict transport and operation
 parsing. The common layer checks bounds and the frozen operation/resource family.
-Capture uses `/v1/captures?requestId=ID`. It does not trim, reserialize, or normalize
-body, media type, target, or precondition bindings.
+Capture uses `/v1/captures?requestId=ID`. It does not trim, reserialize, or normalize body, media type, target, or
+precondition bindings. The streamed capture entry point uses an opaque binding
+computed from bounded actual chunks and finalized only at EOF. Both byte and
+streamed entry points use the same command implementation. Catalogue-aware
+builders receive only the current immutable configuration facts and fresh
+correlation ID, and run only after completed-retry recognition.
 
 Current authentication and required profile authorization precede ledger lookup.
 The authority epoch is checked before lookup. For an existing key, operation,
@@ -83,8 +87,9 @@ invalid effect, or failed invalidation produces no successful durable receipt.
 
 ## Schema and exact bindings
 
-Internal SQLite schema version 2 migrates the accepted version-one database in a
-single transaction. Version-one DDL remains unchanged. The migration adds body
+The internal version-two migration extends the accepted version-one database in
+a single transaction. Version three adds the [draft representations](DRAFTS.md)
+without changing this command compatibility domain. Version-one DDL remains unchanged. The migration adds body
 digest and length fields, a fixed refusal field, logical ledger reservations,
 usage accounting, and rate counters. Existing raw body rows and original receipt
 bytes remain intact. Partial migration rolls back columns, tables, data changes,
