@@ -138,6 +138,17 @@ meaning and refuses unsupported live-worker edits without inventing cleanup.
 Runtime publication and codecs at N1 and N8. Public output is checked with the
 frozen validator. Worker ownership, approval and later retention remain separate.
 
+## Native frontend workers
+
+The [worker contract](WORKERS.md) provides scoped native frontend ownership,
+serialized private controls and bounded lossless ingestion. It reuses the actual
+CLI proxy/pre-RTS bootstrap and Runtime ProcessGroup completion. Observers neither
+consume the manager ingestion queue nor own its pipes. Admission, exact approval,
+durable ingestion and broader containment remain with their later owners.
+
+`manager/ci/workers.sh` runs actual native N1/N8 workers, controlled phase failures,
+queue/observer/write regressions and original-token cleanup retention checks.
+
 ## Root separation
 
 `validateRootSeparation` compares manager storage with the configured local

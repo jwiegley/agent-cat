@@ -18,7 +18,7 @@ where
 
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, newMVar, putMVar, readMVar, tryReadMVar, withMVar)
-import Control.Exception (IOException, finally, mask_, throwIO, try, uninterruptibleMask_)
+import Control.Exception (IOException, SomeException, fromException, mask, mask_, throwIO, try, uninterruptibleMask_)
 import Control.Monad (void)
 import Foreign.C.Error (throwErrnoIfMinus1Retry)
 import Foreign.C.Types (CInt (..))
@@ -70,9 +70,14 @@ waitProcessGroup :: ProcessGroup -> IO ExitCode
 waitProcessGroup group = readMVar (groupOutcome group) >>= either throwIO pure
 
 terminateProcessGroup :: Int -> ProcessGroup -> IO ()
-terminateProcessGroup grace group =
-  (signalOwned sigTERM >> void (timeout grace (readMVar (groupOutcome group))))
-    `finally` uninterruptibleMask_ (signalOwned sigKILL >> void (readMVar (groupOutcome group)))
+terminateProcessGroup grace group = mask $ \restore -> do
+  earlier <- try @SomeException (restore (signalOwned sigTERM >> void (timeout grace (readMVar (groupOutcome group)))))
+  final <- try @SomeException $ uninterruptibleMask_ $ do
+    signalOwned sigKILL
+    readMVar (groupOutcome group) >>= either throwIO (const (pure ()))
+  case earlier of
+    Left failure | Nothing <- (fromException failure :: Maybe IOException) -> throwIO failure
+    _ -> either throwIO pure final
   where
     signalOwned signal = withMVar (groupLock group) $ \_ -> do
       outcome <- tryReadMVar (groupOutcome group)

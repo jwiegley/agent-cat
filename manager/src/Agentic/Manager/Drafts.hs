@@ -6,7 +6,7 @@
 
 -- | Durable input representations and verified captures, never workflow execution.
 module Agentic.Manager.Drafts
-  ( createDraft, changeDraftInput, uploadCapture, readDraft, assembleDraft ) where
+  ( createDraft, changeDraftInput, uploadCapture, readDraft, assembleDraft, verifyFrontendFiles ) where
 
 import Agentic.Manager.Authorization
 import Agentic.Manager.Commands
@@ -17,7 +17,7 @@ import Agentic.Manager.Protocol.Command
 import Agentic.Manager.Protocol.Draft
 import Agentic.Manager.Store
 import Agentic.Runtime
-  (PrivateRoot, privateRootPath, withPrivateDirectoryAt, ensurePrivateDirectoryAt,
+  (PrivateRoot, privateRootPath, privatePathComponents, withPrivateDirectoryAt, ensurePrivateDirectoryAt,
    publishPrivateCaptureAt, CapturePublication (..), PrivateCapture, privateCaptureBytes, privateCaptureSha256,
    WorkflowDescriptor (..), WorkflowInputDescriptor (..), frontendLiteralBytes,
    FrontendSetup (..), FrontendSetupRequest (..), FrontendInputSource (..), encodeFrontendSetupRequest,
@@ -310,6 +310,26 @@ assembleDraft store proof ident = draftIO $ withStoreFiles store $ \root -> time
   ensureRevision store proof snapshot [Submit]
   _<-currentCatalogue store view
   pure value
+
+-- | Worker-side revalidation of File sources against actual retained capture records.
+-- Literal/Transport sources carry values, not paths. This grants no approval authority.
+verifyFrontendFiles :: CoordinationStore -> Text -> FrontendSetupRequest -> IO ()
+verifyFrontendFiles store profile setup = withStoreFiles store $ \root -> timed 5000000 $ do
+  let (directory, sources) = case setup of
+        RootSetup request -> (setupDirectory request, map snd (setupInputs request))
+        DerivedSetup path _ _ _ _ _ -> (path, [])
+  unless (directory == privateRootPath root </> "runs") (throwIO InvalidInput)
+  forM_ sources $ \source -> case source of
+    File path -> do
+      components <- privatePathComponents root path
+      ident <- case components of
+        ["captures", name] | validId (T.pack name) -> pure (T.pack name)
+        _ -> throwIO InvalidInput
+      capture <- runRead store $ do
+        rows <- query "SELECT request_id FROM captures WHERE id=? AND profile_id=?" [text ident,text profile]
+        case rows of [[SQL.SQLText request]] -> captureState request ident; _ -> refuseTransaction InvalidInput
+      void (verifyCapture root capture False)
+    _ -> pure ()
 
 requestState :: CredentialProof -> Text -> [Scope] -> Transaction RequestState
 requestState proof ident scopes = do

@@ -6,6 +6,7 @@ module Agentic.Runtime.Frontend.Protocol
     FrontendSetup (..),
     FrontendInputSource (..),
     frontendLiteralBytes,
+    frontendOwnedEnvironment,
     FrontendEdit (..),
     FrontendDecision (..),
     FrontendPrepared (..),
@@ -89,6 +90,13 @@ data FrontendInputSource = Literal !Text | File !FilePath | Transport !Text
 -- | Native transport bytes for one logical literal, before workflow interpretation.
 frontendLiteralBytes :: WorkflowInputSource -> Text -> BS.ByteString
 frontendLiteralBytes source value = Text.encodeUtf8 value <> if source == DescriptorPrompt then "\n" else ""
+
+-- | Process bindings owned by the native frontend proxy and its pre-RTS bootstrap.
+frontendOwnedEnvironment :: [String]
+frontendOwnedEnvironment =
+  [ "AGENT_CAT_FRONTEND_WORKER", "AGENT_CAT_TUI_BOOTSTRAP_FD3", "AGENT_CAT_CONTROL_FD", "AGENT_CAT_CONTROL_STDIN",
+    "AGENT_CAT_RUN_STORE", "AGENT_CAT_RUN_OWNER", "AGENT_CAT_STATE_ANCHOR"
+  ]
 
 -- | The parameters supplied to root preparation, without a resolved workflow.
 data FrontendSetup = FrontendSetup

@@ -217,7 +217,12 @@ def routed_control_probe(choice):
     root = tempfile.mkdtemp(prefix=f"agentic-{choice}-")
     control_read, control_write = os.pipe()
     adapter = os.path.join(ADAPTER_DIR, "retry_adapter.py")
-    spare = os.path.join(ADAPTER_DIR, "stub_adapter.py")
+    stub = os.path.join(ADAPTER_DIR, "stub_adapter.py")
+    spare = os.path.join(root, "spare-adapter")
+    with open(spare, "w", encoding="utf-8") as wrapper:
+        wrapper.write(f"#!{sys.executable}\nimport os\n"
+                      f"os.execv({sys.executable!r}, [{sys.executable!r}, {stub!r}])\n")
+    os.chmod(spare, 0o700)
     process = None
     controls = None
     try:

@@ -40,7 +40,10 @@ and `resourceKeys`. The workspace is an operator-authorized absolute cwd. Target
 arguments are ordered native CLI target options, without workflow inputs.
 Environment bindings are an ordered array of objects with exactly `name` and
 `value`. Values are literal strings, not ambient environment lookups. No manager
-client or administrator environment is inherited.
+client or administrator environment is inherited. Profile validation rejects the
+exact Runtime frontend-owned environment names before discovery or launch,
+including empty values. Those bindings belong to the native proxy/bootstrap.
+Other explicitly configured environment values are not silently rewritten.
 
 Ownership is `service-owned` or `client-bound`. Client-bound profiles are refused
 by this service configuration loader. The presence of any

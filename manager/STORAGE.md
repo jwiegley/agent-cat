@@ -143,6 +143,17 @@ shielded against further asynchronous exceptions. Cooperative budgets do not
 promise an absolute OS IO deadline or a hard total SQLite heap bound. A stalled
 filesystem can extend joining and cleanup beyond the nominal budget.
 
+## Worker cleanup ownership
+
+Worker lifetimes use a separate bounded registration, not the file-operation
+slot. The Store retains their actual Runtime ProcessGroup tokens, private roots
+and duplicated leases. Closing fences new work and stops/joins outside registry,
+configuration and database locks. Only owner-published Right completion proves
+cleanup. Unproven entries retain the configuration storage slot and leases even
+when close raises, so an outer bracket cannot accidentally admit another Store.
+The narrow retry path revisits only original tokens and never clears published
+failure or reconstructs a PID. See [the worker contract](WORKERS.md).
+
 ## Checkpoints and integration ceiling
 
 `checkpointStore` performs a bounded passive checkpoint and returns SQLite's

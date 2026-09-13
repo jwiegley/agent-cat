@@ -6,14 +6,14 @@ module Agentic.Manager.Configuration
   ( Configuration, TargetValidator, InstalledConfiguration,
     loadConfiguration, installConfiguration, reloadConfiguration, closeConfiguration,
     configurationSnapshot, selectConfiguredProfile, probeConfiguredProfile,
-    acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationSnapshot, withConfigurationCatalogues
+    acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationSnapshot, withConfigurationCatalogues, probeConfiguredCapabilities
   ) where
 
 import Agentic.Manager.Lease (acquireLease, duplicateLease)
 import Agentic.Manager.Profile
 import Agentic.Manager.Root (validateRootSeparation)
 import Agentic.Runtime
-  ( PrivateRoot, FrontendInvocation (..), StateRootRole (ManagerStateRoot), assertPrivateRoot,
+  ( PrivateRoot, ProcessGroup, FrontendCapabilities, FrontendInvocation (..), StateRootRole (ManagerStateRoot), assertPrivateRoot,
     openPrivateRoot, openPrivateSubroot, closePrivateRoot, withPrivateDirectoryAt, readStateRootRoleAt,
     establishManagerRootRole, readPrivateConfigurationFile )
 import Control.Concurrent.MVar (MVar, modifyMVarMasked, newMVar, withMVar, tryTakeMVar, putMVar)
@@ -33,6 +33,7 @@ import qualified Data.Text.Encoding as TE
 import System.FilePath (isAbsolute)
 import System.Posix.IO (closeFd)
 import System.Posix.Types (Fd)
+import System.Process (CreateProcess)
 
 -- | CLI-owned target grammar and credential-argv validation, without workflow IO.
 type TargetValidator = [Text] -> Either Diagnostic ()
@@ -145,6 +146,10 @@ selectConfiguredProfile installed ident revision = flatten <$> withActive instal
 probeConfiguredProfile :: InstalledConfiguration -> Text -> Text -> IO (Either Diagnostic Discovery)
 probeConfiguredProfile installed ident revision = flatten <$> withActive installed
   (\(ActiveConfiguration _ _ _ _ registry _) -> probeProfile registry ident revision)
+
+probeConfiguredCapabilities :: InstalledConfiguration -> (CreateProcess -> IO ProcessGroup) -> Text -> Text -> IO (Either Diagnostic FrontendCapabilities)
+probeConfiguredCapabilities installed create ident revision = flatten <$> withActive installed
+  (\(ActiveConfiguration _ _ _ _ registry _) -> probeProfileCapabilitiesWith create registry ident revision)
 
 withActive :: InstalledConfiguration -> (ActiveConfiguration -> IO a) -> IO (Either Diagnostic a)
 withActive (InstalledConfiguration lock _) action = withMVar lock $ \current -> case current of

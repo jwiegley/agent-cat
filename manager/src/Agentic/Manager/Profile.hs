@@ -8,18 +8,18 @@ module Agentic.Manager.Profile
     PublicProfile, publicId, publicRevision, Diagnostic (..),
     Selection, selectionContext, selectionInvocation,
     Discovery, discoveryServer, discoveryWorkflows, discoveryRevision, discoveryEntries, discoverySelection, discoveryProfileRevision, currentCatalogues,
-    newRegistry, reloadProfiles, publicProfiles, selectProfile, probeProfile
+    newRegistry, reloadProfiles, publicProfiles, selectProfile, probeProfile, probeProfileCapabilities, probeProfileCapabilitiesWith
   ) where
 
 import Agentic.Runtime
   ( PersonAnswering, FrontendInvocation (..), FrontendServer (..), FrontendCapabilities (..),
     WorkflowDescriptor (..), DescriptorCapabilities (..),
-    decodeFrontendCapabilities, decodeWorkflowDescriptors, maxFrontendQueryBytes,
-    createProcessGroup,
+    decodeFrontendCapabilities, decodeWorkflowDescriptors, maxFrontendQueryBytes, frontendOwnedEnvironment,
+    ProcessGroup, createProcessGroup,
     terminateProcessGroup, closeGroupPipes, groupOutput, groupErrors, waitProcessGroup )
 import Control.Concurrent.Async (concurrently)
 import Control.Concurrent.MVar (MVar, modifyMVar, newMVar, withMVar)
-import Control.Exception (Exception, IOException, SomeException, bracket, finally, mask, throwIO, try)
+import Control.Exception (Exception, IOException, SomeException, finally, mask, throwIO, try)
 import Control.Monad (unless)
 import Crypto.Hash (Digest, SHA256, hash)
 import Crypto.Random (getRandomBytes)
@@ -202,6 +202,7 @@ validDefinition p = validToken (operatorId p)
   && all (notElem '\0') (operatorExecutable p : operatorCwd p : operatorPrefix p)
   && all (not . T.any (== '\0')) (operatorTargetArguments p)
   && all validBinding bindings
+  && all ((`notElem` frontendOwnedEnvironment) . fst) bindings
   && Set.size (Set.fromList (map fst bindings)) == length bindings
   && length (operatorResourceKeys p) <= 256
   && all validToken (operatorResourceKeys p)
@@ -249,6 +250,29 @@ probeProfile (Registry _ limits lock) ident revision = mask $ \restore -> do
                 current = Installed p updated (either (const Nothing) Just discovered)
             pure (Snapshot generation (Map.insert ident current entries), result)
   either throwIO pure outcome
+
+-- | Fresh bounded capability query without replacing a successful catalogue revision.
+probeProfileCapabilities :: Registry -> Text -> Text -> IO (Either Diagnostic FrontendCapabilities)
+probeProfileCapabilities = probeProfileCapabilitiesWith createProcessGroup
+
+probeProfileCapabilitiesWith :: (CreateProcess -> IO ProcessGroup) -> Registry -> Text -> Text -> IO (Either Diagnostic FrontendCapabilities)
+probeProfileCapabilitiesWith create (Registry _ limits lock) ident revision = withMVar lock $ \(Snapshot _ entries) ->
+  case lookupInstalled entries ident revision of
+    Left failure -> pure (Left failure)
+    Right (Installed p _ _)
+      | operatorQuarantined p -> pure (Left Quarantined)
+      | operatorOwnership p == ClientBound -> pure (Left UnsupportedOperation)
+      | otherwise -> do
+          result <- queryWith create limits p ["frontend", "--capabilities"]
+          pure $ do
+            bytes <- result
+            case BS.break (==10) bytes of
+              (line, rest) | rest == "\n" -> do
+                _ <- either (const (Left InvalidReply)) Right (TE.decodeUtf8' line)
+                caps <- either (const (Left InvalidReply)) Right (decodeFrontendCapabilities line)
+                unless (supportsMutation caps) (Left UnsupportedOperation)
+                pure caps
+              _ -> Left InvalidReply
 
 -- | Only current successful discovery, cleared by reload and every failed probe.
 currentCatalogues :: Registry -> IO [(Text, Discovery)]
@@ -301,9 +325,12 @@ supportsWorkflow d = workflowDescriptorVersion d == 3
   where c = workflowCapabilities d
 
 query :: QueryLimits -> OperatorProfile -> [String] -> IO (Either Diagnostic BS.ByteString)
-query limits p arguments = do
+query = queryWith createProcessGroup
+
+queryWith :: (CreateProcess -> IO ProcessGroup) -> QueryLimits -> OperatorProfile -> [String] -> IO (Either Diagnostic BS.ByteString)
+queryWith create limits p arguments = do
   result <- try @IOException $ try @Diagnostic $ timeout (queryMicros limits) $
-    bracket (createProcessGroup command) cleanup collect
+    ownedQuery create command cleanup collect
   pure $ case result of
     Left _ -> Left ProcessFailure
     Right (Left failure) -> Left failure
@@ -321,6 +348,16 @@ query limits p arguments = do
         code <- waitProcessGroup group
         pure (if code == ExitSuccess then Right bytes else Left ProcessFailure)
       _ -> pure (Left ProcessFailure)
+
+-- Preserve interruption while retaining the Runtime token's separate cleanup evidence.
+ownedQuery :: (CreateProcess -> IO ProcessGroup) -> CreateProcess -> (ProcessGroup -> IO ()) -> (ProcessGroup -> IO a) -> IO a
+ownedQuery create command cleanup collect = mask $ \restore -> do
+  group <- create command
+  result <- try @SomeException (restore (collect group))
+  ended <- try @SomeException (cleanup group)
+  case result of
+    Left failure -> throwIO failure
+    Right value -> either throwIO (const (pure value)) ended
 
 readBounded :: Int -> Handle -> IO BS.ByteString
 readBounded limit handle = BS.concat . reverse <$> go 0 []
