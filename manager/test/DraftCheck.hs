@@ -56,6 +56,8 @@ main = do
     ["review-lifetime",work,source] -> reopenChecks work source >> sameConfigurationReopenChecks work source
     ["review-catalogue",work,source] -> cataloguePageChecks work source
     ["review-migration",work] -> declarationMigrationChecks work
+    ["review-holding",work,source] -> holdingByteChecks work source
+    ["review-utf8-eof",work,source] -> uploadChecks work source
     [work,source] -> do
       literalContract
       bindingContract
@@ -64,6 +66,7 @@ main = do
       draftChecks work source
       uploadChecks work source
       quotaChecks work source
+      holdingByteChecks work source
       lifecycleChecks work source
       atomicOriginChecks work source
       reopenChecks work source
@@ -283,6 +286,11 @@ uploadChecks work source=withFixture work source "uploads" 10 10 134217728 $ \fi
   invalid<-chunks[BS.pack[0xe9],BS.pack[0xff]]
   expect "invalid fragmented UTF8 upload never commits a receipt" InvalidInput(uploadCapture store proof(draftId view)brokenKey 4 invalid)
   number store "SELECT count(*) FROM captures" >>=check "invalid UTF8 creates no capture metadata" . (==1)
+  truncatedKey<-key store "truncated-utf8"
+  truncated<-chunks[BS.pack[0xe9],BS.pack[0x9b]]
+  expect "incomplete UTF8 at EOF refuses upload" InvalidInput(uploadCapture store proof(draftId view)truncatedKey 2 truncated)
+  number store "SELECT count(*) FROM captures" >>=check "truncated UTF8 creates no capture metadata" . (==1)
+  number store "SELECT count(*) FROM command_captures" >>=check "truncated UTF8 creates no command capture link" . (==linksBefore)
   faultKey<-key store "uncertain"
   armFailure 2
   dataSource<-chunks["kept"]
@@ -305,7 +313,7 @@ uploadChecks work source=withFixture work source "uploads" 10 10 134217728 $ \fi
     Left failure->case fromException failure of Just AsyncCancelled->True;Nothing->False
     Right _->False)
   number store "SELECT count(*) FROM captures" >>=check "cancelled upload has no successful metadata" . (==1)
-  forM_ [(brokenKey,"invalid UTF8"),(faultKey,"unconfirmed publication"),(cancelKey,"cancelled upload")] $ \(nonceKey,label)->do
+  forM_ [(brokenKey,"invalid UTF8"),(truncatedKey,"truncated UTF8"),(faultKey,"unconfirmed publication"),(cancelKey,"cancelled upload")] $ \(nonceKey,label)->do
     absent<-runRead store((==[[SQL.SQLInteger 0]]) <$> query "SELECT count(*) FROM commands WHERE idempotency_key=?" [txt nonceKey])
     check(label<>" creates no command receipt") absent
 
@@ -339,6 +347,59 @@ quotaChecks work source=do
     expect "257th zero-byte holding entry refuses" StorageQuota(uploadCapture store proof(draftId view)k2 0 (pure BS.empty))
     uploadCapture store proof(draftId view)k 0 (pure BS.empty)>>=right>>=check "exact retry succeeds at holding saturation" . (==result)
     listDirectory(root </> "captures")>>=check "retry did not publish a 257th file" . ((==256).length)
+
+holdingByteChecks :: FilePath -> FilePath -> IO ()
+holdingByteChecks work source=withFixture work source "holding-bytes" 5 5 134217728 $ \fixture@(Fixture _ _ _ _ _ store proof _ _)->do
+  let limit=67108864
+      publishedBytes=16777216
+      orphanBytes=limit-publishedBytes-4
+      totalHolding="SELECT coalesce((SELECT sum(literal_bytes) FROM request_inputs),0)+coalesce((SELECT sum(bytes) FROM captures),0)+coalesce((SELECT sum(reserved_bytes) FROM capture_uploads),0)"
+  view<-newDraft fixture "mixed"
+  _<-setLiteral store proof view "literal" "first" "abc"
+  current<-readDraft store proof(draftId view)>>=right
+  uploadKey<-key store "published"
+  payload<-chunks(replicate 256 (BS.replicate 65536 120))
+  capture<-uploadCapture store proof(draftId view)uploadKey publishedBytes payload>>=right
+  bindCapture store proof current "bind-second" "second" capture>>=right>>=const(pure())
+  bound<-readDraft store proof(draftId view)>>=right
+  bindCapture store proof bound "bind-third" "third" capture>>=right>>=const(pure())
+  orphanKey<-key store "orphan"
+  orphanSource<-chunks["kept"]
+  armFailure 2
+  expect "mixed holding uses actual uncertain publication" StorageUnavailable(uploadCapture store proof(draftId view)orphanKey orphanBytes orphanSource)
+  failureFired>>=check "mixed holding fault reaches real directory barrier" . (==1)
+  armFailure 0
+  number store "SELECT sum(reserved_bytes) FROM capture_uploads WHERE state='orphan'" >>=check "uncertain upload retains its entire byte reservation" . (==orphanBytes)
+  number store totalHolding>>=check "mixed holdings leave exactly one byte available" . (==limit-1)
+  pendingKey<-key store "pending-boundary"
+  started<-newEmptyMVar;release<-newEmptyMVar
+  bracket (async(uploadCapture store proof(draftId view)pendingKey 1 (putMVar started()>>takeMVar release>>pure BS.empty))) cancel $ \pending->do
+    await(takeMVar started)
+    number store totalHolding>>=check "literal capture orphan and pending bytes accept exact holding limit" . (==limit)
+    rowsEqual store "SELECT reserved_bytes FROM capture_uploads WHERE state='pending'" [[SQL.SQLInteger 1]]>>=check "boundary reservation commits before source proceeds"
+    putMVar release()
+    wait pending>>=right>>=check "empty publication releases unused reserved byte" . ((==0).captureBytes)
+  number store totalHolding>>=check "completed reservation is not double charged" . (==limit-1)
+  ready<-readDraft store proof(draftId view)>>=right
+  _<-setLiteral store proof ready "literal-boundary" "first" "abcd"
+  number store totalHolding>>=check "literal replacement accepts exact mixed holding limit" . (==limit)
+  number store "SELECT sum(CASE WHEN i.source='literal' THEN i.literal_transport_bytes ELSE c.bytes END) FROM request_inputs i LEFT JOIN captures c ON c.id=i.capture_id" >>=check "native assembled input use still has independent headroom" . (<limit)
+  exact<-readDraft store proof(draftId view)>>=right
+  commandsBefore<-number store "SELECT count(*) FROM commands"
+  sequenceBefore<-number store "SELECT CAST(sequence AS INTEGER) FROM service_metadata"
+  overLiteralKey<-key store "literal-over"
+  expect "one extra literal byte refuses per-request holding quota" StorageQuota(changeDraftInput store proof(draftId view)overLiteralKey (Just("\""<>draftRevision exact<>"\""))
+    (encoded(object["operation" .= ("set-input"::Text),"input" .= LiteralValue "first" "abcde"])))
+  calls<-newIORef(0::Int)
+  overUploadKey<-key store "upload-over"
+  expect "one extra upload byte refuses per-request holding quota" StorageQuota(uploadCapture store proof(draftId view)overUploadKey 1 (modifyIORef' calls(+1)>>pure BS.empty))
+  readIORef calls>>=check "holding quota refuses before consuming upload source" . (==0)
+  readDraft store proof(draftId view)>>=right>>=check "holding quota refusals preserve exact request state" . (==exact)
+  number store totalHolding>>=check "holding quota refusals preserve charged bytes" . (==limit)
+  number store "SELECT count(*) FROM commands" >>=check "holding quota refusals create no command receipt" . (==commandsBefore)
+  number store "SELECT CAST(sequence AS INTEGER) FROM service_metadata" >>=check "holding quota refusals emit no invalidation" . (==sequenceBefore)
+  rowsEqual store "SELECT (SELECT count(*) FROM captures),(SELECT count(*) FROM capture_uploads),(SELECT count(*) FROM capture_uploads WHERE state='pending')"
+    [[SQL.SQLInteger 2,SQL.SQLInteger 1,SQL.SQLInteger 0]]>>=check "holding quota refusals create no capture or reservation"
 
 lifecycleChecks :: FilePath -> FilePath -> IO ()
 lifecycleChecks work source=withFixture work source "lifecycle" 5 5 8 $ \fixture@(Fixture _ root _ _ _ store proof _ _)->do
