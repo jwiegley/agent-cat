@@ -3940,6 +3940,44 @@ Worker discard, approval, and retention remain with their owning layers rather
 than being inferred from these coordination records.  The current contract,
 migration rules, and verification limits are in @file{manager/DRAFTS.md}.
 
+@subsection Manager-owned native workers
+
+The internal worker adapter launches the configured native frontend through the
+existing CLI proxy and pre-RTS fd 3 bootstrap.  Current catalogue, invocation,
+working directory, target arguments, and person mode establish its launch
+association.  File inputs are verified against retained manager capture records,
+and a fresh capability query does not replace the selected catalogue revision.
+The shared @code{frontendOwnedEnvironment} list names the native proxy bindings
+that manager profile validation rejects before any discovery or launch.
+
+Each worker has a separate Store-owned registration, private root, and retained
+lease.  The absolute ceiling of sixteen includes construction through joined
+cleanup and does not replace configured admission policy.  Store closure fences
+new registrations and joins existing workers outside the configuration and
+database locks.  Only the original Runtime process-group completion can prove
+cleanup, and unproven completion retains the registration and ownership lease.
+The internal retry operation cannot reconstruct a process from a stored PID.
+
+The private writer serializes native decisions and controls without automatic
+retry after uncertain writes.  Preparation retains the native identity without
+a synthetic started event.  A successful write does not establish native
+acknowledgement, effect, or workflow success, and a low-level start operation
+does not replace the approval transaction.
+
+One internal ingestion consumer reads a bounded queue of unchanged native
+envelopes.  A successful callback removes only its in-memory queue head.
+Exceptions preserve that head without invoking the callback again.  Status
+observers neither consume the queue nor close worker pipes.  The queue is bounded
+at thirty-two frames and eight MiB of wire bytes, while stderr retains at most
+65536 bytes with explicit truncation and continued concurrent draining.
+
+Startup has a thirty-second budget and writes have a five-second budget.
+The outer termination grace is five seconds, with the CLI proxy's existing
+two-second inner grace unchanged.  Final cleanup remains joined rather than
+being represented as an absolute OS IO deadline.  Admission, exact approval,
+durable ingestion, and broader service supervision remain separate owners.
+The current contract and verification boundary are in @file{manager/WORKERS.md}.
+
 @section Native frontend preparation
 @c COVER CLI verb:frontend author
 

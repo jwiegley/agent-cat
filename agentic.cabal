@@ -42,6 +42,9 @@ extra-source-files:
   test/frontend_export_probe.py
   test/frontend_io_probe.py
   test/frontend_session_probe.py
+  engine/acp/test/stub_adapter.py
+  engine/acp/test/retry_adapter.py
+  engine/acp/test/steer_adapter.py
   test/frontend_contract_probe.py
   test/answer_schema_probe.py
   runtime/ci/capture.sh
@@ -54,6 +57,9 @@ extra-source-files:
   manager/ci/store.sh
   manager/ci/commands.sh
   manager/ci/drafts.sh
+  manager/ci/workers.sh
+  manager/test/worker_fixture.py
+  manager/test/worker_evidence.py
   manager/test/draft_contract.py
   manager/test/command_contract.py
   manager/test/proof_opacity.py
@@ -66,6 +72,7 @@ extra-doc-files:
   manager/STORAGE.md
   manager/COMMANDS.md
   manager/DRAFTS.md
+  manager/WORKERS.md
   runtime/README.md
   doc/api/README.md
   doc/api/openapi.yaml
@@ -169,6 +176,7 @@ library
     Agentic.Manager.Lease
     Agentic.Manager.Schema
     Agentic.Manager.Store
+    Agentic.Manager.Worker
     Agentic.Manager.Commands
     Agentic.Manager.Drafts
     Agentic.Manager.Protocol.Draft
@@ -462,6 +470,28 @@ executable manager-draft-check
   main-is:         DraftCheck.hs
   c-sources:       manager/test/draft_sync_fault.c
   other-modules:
+    Agentic.Manager.Drafts
+    Agentic.Manager.Commands
+    Agentic.Manager.Authorization
+    Agentic.Manager.Protocol.Draft
+    Agentic.Manager.Protocol.Command
+    Agentic.Manager.Protocol.Json
+    Agentic.Manager.Configuration
+    Agentic.Manager.Profile
+    Agentic.Manager.Root
+    Agentic.Manager.Lease
+    Agentic.Manager.Schema
+    Agentic.Manager.Store
+  build-depends:   agentic, direct-sqlite, deepseq, transformers
+  ghc-options:     -threaded -rtsopts
+
+executable manager-worker-check
+  import:          settings
+  hs-source-dirs:  manager/test manager/src
+  main-is:         WorkerCheck.hs
+  c-sources:       manager/test/worker_cleanup_fault.c
+  other-modules:
+    Agentic.Manager.Worker
     Agentic.Manager.Drafts
     Agentic.Manager.Commands
     Agentic.Manager.Authorization

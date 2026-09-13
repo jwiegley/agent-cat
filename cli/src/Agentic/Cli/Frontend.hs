@@ -121,7 +121,7 @@ runFrontendSession runnerId runnerVersion credentialArgument describe prepare = 
                   serve root handle buffered setup descriptor inputs (Just parent) revalidate prepared
     _ -> do
       executable <- getExecutablePath
-      ambient <- filter ((`notElem` ownedEnvironment) . fst) <$> getEnvironment
+      ambient <- filter ((`notElem` frontendOwnedEnvironment) . fst) <$> getEnvironment
       let childEnvironment =
             [("AGENT_CAT_FRONTEND_WORKER", "1"), ("AGENT_CAT_TUI_BOOTSTRAP_FD3", "1"), ("AGENT_CAT_CONTROL_FD", "3")] <> ambient
           command = (proc executable ["frontend"])
@@ -223,12 +223,6 @@ retainLineageInvocation manifest requested = case frontendInvocation manifest of
     Just actual
       | actual == expected -> pure (Just expected)
       | otherwise -> refuse "frontend lineage configured invocation does not match its parent"
-
-ownedEnvironment :: [String]
-ownedEnvironment =
-  [ "AGENT_CAT_FRONTEND_WORKER", "AGENT_CAT_TUI_BOOTSTRAP_FD3", "AGENT_CAT_CONTROL_FD", "AGENT_CAT_CONTROL_STDIN",
-    "AGENT_CAT_RUN_STORE", "AGENT_CAT_RUN_OWNER", "AGENT_CAT_STATE_ANCHOR"
-  ]
 
 withTermination :: IO a -> IO a
 withTermination action = do

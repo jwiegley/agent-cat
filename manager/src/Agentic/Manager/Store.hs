@@ -7,25 +7,27 @@
 -- | A single leased SQLite writer with strict, bounded transaction results.
 module Agentic.Manager.Store
   ( CoordinationStore, StoreIdentity (..), StoreFailure (..), Checkpoint (..),
-    withCoordinationStore, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreFiles,
+    withCoordinationStore, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreFiles, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, retryStoreCleanup, probeStoreCapabilities,
     Transaction, execute, query, refuseTransaction, runTransaction, runRead, transactionGeneration,
     Invalidation (..)
   ) where
 
 import Agentic.Manager.Configuration
-  (InstalledConfiguration, acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationSnapshot, withConfigurationCatalogues)
+  (InstalledConfiguration, acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationSnapshot, withConfigurationCatalogues, probeConfiguredCapabilities)
 import Agentic.Manager.Profile (ConfigurationLimits, PublicProfile, Diagnostic, Discovery)
 import Agentic.Manager.Lease (duplicateLease)
 import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration)
 import Agentic.Runtime
   (PrivateRoot, assertPrivateRoot, closePrivateRoot, openPrivateSubroot, privateRootPath,
-   withPrivateDirectoryAt, writePrivateExclusiveAt, WorkflowInputDescriptor (..), frontendLiteralBytes)
+   withPrivateDirectoryAt, writePrivateExclusiveAt, WorkflowInputDescriptor (..), frontendLiteralBytes, FrontendCapabilities, ProcessGroup, createProcessGroup, terminateProcessGroup, groupOutcome)
 import Control.Concurrent (rtsSupportsBoundThreads)
-import Control.Concurrent.MVar (MVar, newMVar, takeMVar, putMVar, tryTakeMVar)
+import Control.Concurrent.Async (race)
+import Control.Concurrent.STM (STM, TMVar, atomically, newEmptyTMVarIO, readTMVar, isEmptyTMVar, tryPutTMVar)
+import Control.Concurrent.MVar (MVar, newMVar, newEmptyMVar, readMVar, tryReadMVar, withMVar, modifyMVarMasked, takeMVar, putMVar, tryTakeMVar)
 import Control.Exception
   (Exception, SomeException, bracket, bracketOnError, finally, mask,
    evaluate, uninterruptibleMask_, throwIO, try)
-import Control.Monad (unless, when, void, foldM)
+import Control.Monad (unless, when, void, foldM, forM_)
 import Control.DeepSeq (NFData, force)
 import Crypto.Hash (Digest, SHA256, hashInit, hashUpdate, hashFinalize)
 import qualified Crypto.Hash as Hash
@@ -52,6 +54,7 @@ import System.Posix.IO
   (OpenFileFlags (cloexec, nofollow, nonBlock), OpenMode (ReadOnly),
    closeFd, defaultFileFlags, openFdAt)
 import System.Posix.Files (fileMode, fileOwner, getFdStatus, isRegularFile, linkCount)
+import System.Process (CreateProcess)
 import System.Posix.Types (Fd)
 import System.Posix.User (getEffectiveUserID)
 import System.Timeout (timeout)
@@ -66,7 +69,7 @@ data StoreIdentity = StoreIdentity
 
 -- | Fixed storage refusals. SQLite details and bound private data are not public diagnostics.
 data StoreFailure = StoreBusy | StoreClosed | StorePoisoned | StoreLimit
-  | StoreDeadline | StoreVersion | StoreIntegrity | StoreUnavailable
+  | StoreDeadline | StoreVersion | StoreIntegrity | StoreUnavailable | StoreCleanupUnproven
   deriving (Eq, Show)
 instance Exception StoreFailure
 
@@ -77,7 +80,10 @@ data Checkpoint = Checkpoint
 
 -- | One connection and a fail-fast admission cell. There is no waiting operation queue.
 data CoordinationStore = CoordinationStore !InstalledConfiguration !PrivateRoot !SQL.Database !StoreIdentity
-  !(MVar ()) !(IORef Bool) !(IORef Bool) !Fd !(MVar ())
+  !(MVar ()) !(IORef Bool) !(IORef Bool) !Fd !(MVar ()) !(MVar (Bool, [StoreWorker])) !(MVar ()) !(IORef Bool)
+
+-- | One in-memory lifetime notification and joined release, not PID authority.
+data StoreWorker = StoreWorker !(TMVar ()) !(MVar ()) !(MVar [ProcessGroup]) !(MVar (Maybe (PrivateRoot, Fd)))
 
 -- | A manager-only transaction program. No IO lift, connection or cursor is exported.
 newtype Transaction a = Transaction (Context -> IO a)
@@ -99,13 +105,18 @@ instance Monad Transaction where
 data Invalidation = Invalidation !Text !Text !Text deriving (Eq, Show)
 
 withCoordinationStore :: InstalledConfiguration -> (CoordinationStore -> IO a) -> IO a
-withCoordinationStore installed action = do
+withCoordinationStore installed action = mask $ \restore -> do
   unless rtsSupportsBoundThreads (throwIO StoreUnavailable)
-  bracket (acquireConfigurationStorage installed) release $ \(root, lease) ->
-    bracket (openStore installed root lease) closeStore action
-  where
-    release (root, lease) =
-      (closePrivateRoot root `finally` closeFd lease) `finally` releaseConfigurationStorage installed
+  let acquire = bracketOnError (acquireConfigurationStorage installed) release $ \(root, lease) ->
+        openStore installed root lease
+      release (root, lease) =
+        (closePrivateRoot root `finally` closeFd lease) `finally` releaseConfigurationStorage installed
+  store <- acquire
+  result <- try @SomeException (restore (action store))
+  cleanup <- try @SomeException (closeStore store)
+  case result of
+    Left failure -> throwIO failure
+    Right value -> either throwIO (const (pure value)) cleanup
 
 openStore :: InstalledConfiguration -> PrivateRoot -> Fd -> IO CoordinationStore
 openStore installed root lease = storageErrors $ do
@@ -138,7 +149,7 @@ openStore installed root lease = storageErrors $ do
         [[SQL.SQLText epoch, SQL.SQLText stream]] -> pure (epoch, stream)
         _ -> throwIO StoreIntegrity
     CoordinationStore installed root db (StoreIdentity schemaVersion epoch stream generation)
-      <$> newMVar () <*> newIORef False <*> newIORef False <*> pure lease <*> newMVar ()
+      <$> newMVar () <*> newIORef False <*> newIORef False <*> pure lease <*> newMVar () <*> newMVar (False, []) <*> newMVar () <*> newIORef False
   where
     databaseName = "coordination.sqlite3"
     checkCompanion name = do
@@ -248,29 +259,46 @@ migrateLiteralDigests db after = do
 
 
 closeStore :: CoordinationStore -> IO ()
-closeStore (CoordinationStore _ _ db _ gate closed poisoned _ files) = uninterruptibleMask_ $ do
-  writeIORef closed True
-  -- Only the scoped owner waits for the single in-flight operation to finish cleanup.
-  -- No lease may be released while a joined SQLite operation still uses this DB.
-  takeMVar files
-  takeMVar gate
-  result <- try @SomeException (SQL.close db)
-  case result of
-    Right () -> pure ()
-    Left failure -> writeIORef poisoned True >> throwIO failure
+closeStore store@(CoordinationStore installed root db _ gate closed poisoned lease files workers closing retired) =
+  uninterruptibleMask_ $ withMVar closing $ \_ -> do
+    already <- readIORef retired
+    unless already $ do
+      writeIORef closed True
+      active <- modifyMVarMasked workers (\(_, entries) -> pure ((True, entries), entries))
+      mapM_ (\(StoreWorker stop _ _ _) -> void (atomically (tryPutTMVar stop ()))) active
+      mapM_ (\(StoreWorker _ done _ _) -> readMVar done) active
+      -- Only the original Runtime tokens may resolve previously unproven completion.
+      forM_ active $ \entry@(StoreWorker _ _ groups _) -> do
+        owned <- readMVar groups
+        forM_ owned $ \group -> void (try @SomeException (terminateProcessGroup 5000000 group))
+        releaseStoreWorker store entry
+      remaining <- snd <$> readMVar workers
+      unless (null remaining) (throwIO StoreCleanupUnproven)
+      takeMVar files
+      takeMVar gate
+      result <- try @SomeException (SQL.close db)
+      case result of
+        Right () -> do
+          writeIORef retired True
+          (closePrivateRoot root `finally` closeFd lease) `finally` releaseConfigurationStorage installed
+        Left failure -> writeIORef poisoned True >> throwIO failure
+
+-- | Bounded recheck of retained original ownership, never PID or command replay.
+retryStoreCleanup :: CoordinationStore -> IO ()
+retryStoreCleanup = closeStore
 
 -- | Configuration authority associated with this store, never a caller-selected registry.
 withStoreConfiguration :: CoordinationStore -> (ConfigurationLimits -> [PublicProfile] -> IO a) -> IO (Either Diagnostic a)
-withStoreConfiguration (CoordinationStore installed _ _ _ _ _ _ _ _) = withConfigurationSnapshot installed
+withStoreConfiguration (CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _) = withConfigurationSnapshot installed
 
 -- | Current catalogue facts from the same associated configuration and lock.
 withStoreCatalogues :: CoordinationStore -> (ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> IO a) -> IO (Either Diagnostic a)
-withStoreCatalogues (CoordinationStore installed _ _ _ _ _ _ _ _) = withConfigurationCatalogues installed
+withStoreCatalogues (CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _) = withConfigurationCatalogues installed
 
 -- | One fail-fast file operation, joined by store close. Lock order: file, configuration, database.
 -- The retained root and duplicated lease cannot escape this callback's lifetime.
 withStoreFiles :: CoordinationStore -> (PrivateRoot -> IO a) -> IO a
-withStoreFiles store@(CoordinationStore _ root _ _ _ closed _ lease files) action = mask $ \restore -> do
+withStoreFiles store@(CoordinationStore _ root _ _ _ closed _ lease files _ _ _) action = mask $ \restore -> do
   readIORef closed >>= \done -> when done (throwIO StoreClosed)
   acquired <- tryTakeMVar files
   case acquired of
@@ -282,11 +310,69 @@ withStoreFiles store@(CoordinationStore _ root _ _ _ closed _ lease files) actio
       pure (retained, copied)
     release (retained, copied) = closePrivateRoot retained `finally` closeFd copied
 
+-- | A separate bounded lifetime for workers. Close signals and joins it without SQL.
+withStoreWorker :: CoordinationStore -> (StoreWorker -> PrivateRoot -> STM Bool -> IO a) -> IO a
+withStoreWorker store@(CoordinationStore _ root _ _ _ _ _ lease _ workers _ _) action = mask $ \restore -> do
+  entry@(StoreWorker stop done _ resources) <- StoreWorker <$> newEmptyTMVarIO <*> newEmptyMVar <*> newMVar [] <*> newMVar Nothing
+  modifyMVarMasked workers $ \(fenced, entries) -> do
+    when fenced (throwIO StoreCleanupUnproven)
+    when (length entries >= 16) (throwIO StoreBusy)
+    pure ((False, entry : entries), ())
+  result <- try @SomeException $ do
+    pair <- admitted store $ bracketOnError (openPrivateSubroot root []) closePrivateRoot $ \retained -> do
+      copied <- duplicateLease lease
+      pure (retained, copied)
+    modifyMVarMasked resources (const (pure (Just pair, ())))
+    raced <- restore $ race (atomically (readTMVar stop)) (action entry (fst pair) (isEmptyTMVar stop))
+    either (const (throwIO StoreClosed)) pure raced
+  cleanup <- try @SomeException (releaseStoreWorker store entry)
+  putMVar done ()
+  case result of
+    Left failure -> throwIO failure
+    Right value -> do
+      either throwIO pure cleanup
+      confirmed <- storeWorkerCleanupConfirmed entry
+      unless confirmed (throwIO StoreCleanupUnproven)
+      pure value
+
+-- | Construct and attach while protected, before a process or its pipes can escape.
+createStoreWorkerGroup :: StoreWorker -> CreateProcess -> IO ProcessGroup
+createStoreWorkerGroup (StoreWorker stop _ groups _) command = mask $ \_ ->
+  modifyMVarMasked groups $ \owned -> do
+    live <- atomically (isEmptyTMVar stop)
+    unless live (throwIO StoreClosed)
+    when (length owned >= 2) (throwIO StoreLimit)
+    group <- createProcessGroup command
+    pure (group : owned, group)
+
+storeWorkerCleanupConfirmed :: StoreWorker -> IO Bool
+storeWorkerCleanupConfirmed (StoreWorker _ _ groups _) = do
+  owned <- readMVar groups
+  results <- mapM (tryReadMVar . groupOutcome) owned
+  pure (all (\value -> case value of Just (Right _) -> True; _ -> False) results)
+
+releaseStoreWorker :: CoordinationStore -> StoreWorker -> IO ()
+releaseStoreWorker (CoordinationStore _ _ _ _ _ closed _ _ _ workers _ _) entry@(StoreWorker stop done _ resources) = do
+  void (atomically (tryPutTMVar stop ()))
+  confirmed <- storeWorkerCleanupConfirmed entry
+  if confirmed then do
+    retained <- modifyMVarMasked resources (\value -> pure (Nothing, value))
+    forM_ retained $ \(root, lease) -> closePrivateRoot root `finally` closeFd lease
+    modifyMVarMasked workers $ \(fenced, entries) -> pure
+      ((fenced, filter (\(StoreWorker _ other _ _) -> other /= done) entries), ())
+  else do
+    writeIORef closed True
+    modifyMVarMasked workers $ \(_, entries) -> pure ((True, entries), ())
+
+
+probeStoreCapabilities :: CoordinationStore -> StoreWorker -> Text -> Text -> IO (Either Diagnostic FrontendCapabilities)
+probeStoreCapabilities (CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _) owner = probeConfiguredCapabilities installed (createStoreWorkerGroup owner)
+
 storeIdentity :: CoordinationStore -> IO StoreIdentity
-storeIdentity store@(CoordinationStore _ _ _ identity _ _ _ _ _) = admitted store (pure identity)
+storeIdentity store@(CoordinationStore _ _ _ identity _ _ _ _ _ _ _ _) = admitted store (pure identity)
 
 checkpointStore :: CoordinationStore -> IO Checkpoint
-checkpointStore store@(CoordinationStore _ _ db _ _ _ _ _ _) = admitted store $ bounded db 5000000 $ do
+checkpointStore store@(CoordinationStore _ _ db _ _ _ _ _ _ _ _ _) = admitted store $ bounded db 5000000 $ do
   verifyPragmas db
   values <- rawRows db "PRAGMA wal_checkpoint(PASSIVE)" []
   case values of
@@ -294,7 +380,7 @@ checkpointStore store@(CoordinationStore _ _ db _ _ _ _ _ _) = admitted store $ 
     _ -> throwIO StoreIntegrity
 
 admitted :: CoordinationStore -> IO a -> IO a
-admitted (CoordinationStore _ root _ _ gate closed poisoned _ _) action = mask $ \restore -> do
+admitted (CoordinationStore _ root _ _ gate closed poisoned _ _ _ _ _) action = mask $ \restore -> do
   readIORef closed >>= \value -> when value (throwIO StoreClosed)
   token <- tryTakeMVar gate
   case token of
@@ -341,7 +427,7 @@ runTransaction :: NFData a => CoordinationStore -> Transaction (a, [Invalidation
 runTransaction store transaction = run store True transaction
 
 run :: NFData a => CoordinationStore -> Bool -> Transaction (a, [Invalidation]) -> IO a
-run store@(CoordinationStore _ _ db identity _ _ poisoned _ _) writable (Transaction action) = admitted store $ do
+run store@(CoordinationStore _ _ db identity _ _ poisoned _ _ _ _ _) writable (Transaction action) = admitted store $ do
   committing <- newIORef False
   changed <- newIORef False
   budget <- newIORef (Budget 256 8388608 1000 1048576)

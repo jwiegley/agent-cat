@@ -15,6 +15,9 @@ units = [item["id"] for item in plan["install-plan"]
 if len(units) != 1:
     raise RuntimeError("expected exactly one local agentic main-library unit")
 cases = [
+    ("worker-positive", "import Agentic.Manager.Worker (FrontendWorker)\nkeep :: FrontendWorker -> FrontendWorker\nkeep = id\n", None),
+    ("worker-constructor", "import Agentic.Manager.Worker\nforge :: FrontendWorker\nforge = FrontendWorker " + " ".join(["undefined"] * 14) + "\n", "Illegal term-level use of the type constructor"),
+    ("worker-generic", "import Agentic.Manager.Worker (FrontendWorker)\nimport GHC.Generics (from)\ninspect :: FrontendWorker -> ()\ninspect worker = from worker `seq` ()\n", "Generic FrontendWorker"),
     ("body-positive", "import Agentic.Manager.Commands (BodyBinding)\nkeep :: BodyBinding -> BodyBinding\nkeep = id\n", None),
     ("body-constructor", "import Agentic.Manager.Commands\nforge :: BodyBinding\nforge = BodyBinding undefined undefined undefined\n", "Illegal term-level use of the type constructor"),
     ("body-generic", "import Agentic.Manager.Commands (BodyBinding)\nimport GHC.Generics (from)\ninspect :: BodyBinding -> ()\ninspect proof = from proof `seq` ()\n", "Generic BodyBinding"),

@@ -777,7 +777,12 @@ def native_controls(runner: Path, directory: Path) -> None:
         arguments = ["--engine", "acp", "--adapter", sys.executable, "--adapter-arg", str(adapter), "--timeout", "10000"]
         routed = choice in ["redirect", "failover"]
         if routed:
-            arguments.extend(["--route", "spare=acp:" + str(adapters / "stub_adapter.py")])
+            spare = case / "spare-adapter"
+            stub = adapters / "stub_adapter.py"
+            spare.write_text(f"#!{sys.executable}\nimport os\n"
+                             f"os.execv({sys.executable!r}, [{sys.executable!r}, {str(stub)!r}])\n")
+            spare.chmod(0o700)
+            arguments.extend(["--route", "spare=acp:" + str(spare)])
         session = Session(runner, case, "controlled" if routed else "controlled-single",
                           [{"name": "input", "source": "literal", "value": "native controls fixture"}],
                           arguments, environment={"TMPDIR": str(case)})
