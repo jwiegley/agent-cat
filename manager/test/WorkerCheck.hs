@@ -12,9 +12,9 @@ import Agentic.Manager.Store
 import Agentic.Manager.Worker
 import Agentic.Runtime
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async (AsyncCancelled (..), async, cancel, concurrently, wait, waitCatch)
+import Control.Concurrent.Async (AsyncCancelled (..), async, asyncThreadId, cancel, concurrently, wait, waitCatch)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar, readMVar, swapMVar, tryReadMVar)
-import Control.Exception (AsyncException (UserInterrupt), IOException, bracket, finally, fromException, throwIO, try)
+import Control.Exception (AsyncException (UserInterrupt), IOException, bracket, finally, fromException, throwIO, throwTo, try, uninterruptibleMask_)
 import Control.Monad (forM, forM_, unless, void, replicateM_)
 import Crypto.Hash (Digest, SHA256, hash)
 import Data.ByteArray (convert)
@@ -25,13 +25,15 @@ import qualified Data.ByteString.Lazy as BL
 import Data.IORef (newIORef, readIORef, modifyIORef')
 import Data.Text (Text)
 import qualified Data.Text as T
+import GHC.Clock (getMonotonicTimeNSec)
 import Foreign.C.Types (CInt (..))
 import System.Directory (createDirectory, doesDirectoryExist, doesFileExist, removeFile)
 import System.Environment (getArgs, getExecutablePath)
-import System.Exit (ExitCode (ExitSuccess))
+import System.Exit (ExitCode (ExitSuccess, ExitFailure))
 import System.FilePath ((</>))
-import System.Process (CreateProcess (std_in, std_out, std_err), StdStream (CreatePipe), proc)
-import System.IO (BufferMode (LineBuffering), hSetBuffering, stdin, stdout)
+import System.Process (CreateProcess (std_in, std_out, std_err), StdStream (CreatePipe), proc, readProcessWithExitCode)
+import System.IO (BufferMode (LineBuffering), hSetBuffering, hGetLine, hPutStrLn, hFlush, stdin, stdout)
+import System.Posix.Signals (installHandler, sigTERM, Handler (Catch))
 import System.Posix.Files (setFileMode)
 import System.Timeout (timeout)
 
@@ -40,15 +42,25 @@ main = do
   hSetBuffering stdout LineBuffering
   args <- getArgs
   case args of
+    ["backpressure-close",work,native] -> withCase work "backpressure" native [] $ \root _ _ store revision catalogue ->
+      withFrontendWorker store "profile" revision (setupFor root catalogue "person-controlled") (backpressureClose native)
+    ["termination-cases",work,native] -> terminationChecks work native
+    ["fixture-term-wait"] -> do
+      _ <- installHandler sigTERM (Catch (putStrLn "term")) Nothing
+      putStrLn "ready"
+      void(BS.hGetSome stdin 1)
     ["fixture-exit"] -> pure ()
     ["fixture-wait"] -> void (BS.hGetSome stdin 1)
     ["cleanup-failure", work, native] -> cleanupFailureChild work native
+    ["watchdog-survival", work, native] -> watchdogSurvivalChecks work native
     ["audit-attachment", work, native] -> attachmentCloseChecks work native
     ["audit-writer", work, source, native, python] -> wrappedChecks work source native python
     [work, source, native, python] -> do
       positiveChecks work native
+      watchdogSurvivalChecks work native
       draftWorkerChecks work native
       cleanupChecks work native
+      terminationChecks work native
       saturationChecks work native
       wrappedChecks work source native python
       registrationChecks work native
@@ -161,13 +173,7 @@ positiveChecks work native = withCase work "native" native [] $ \root _ _ store 
     events <- collectPerson worker
     check "backpressured native acknowledgements are delivered without loss" (length [() | Envelope {envelopeEvent=ControlAcknowledgedV2 ident _ _ _ _ _} <- events, "backpressure_" `T.isPrefixOf` ident] == 80)
     waitWorker worker >>= check "backpressure release preserves normal worker completion" . (== ExitSuccess)
-  withFrontendWorker store "profile" revision person $ \worker -> do
-    startWorker worker
-    replicateM_ 80 $ writeWorkerControl worker (Control (ControlId "shutdown-backpressure") (Just (OccurrenceId 999)) Nothing (Steer NextBoundary "queued fixture"))
-    waitUntil ((==32) . observedQueuedFrames <$> observeWorker worker)
-    closeWorker worker
-    statusAfter <- observeWorker worker
-    check "shutdown does not deadlock behind a full event queue" (observedWorkerPhase statusAfter == WorkerReleased && observedWorkerExit statusAfter == Just (Left WorkerClosed) && not (observedCleanupUnproven statusAfter))
+  withFrontendWorker store "profile" revision person (backpressureClose native)
   withFrontendWorker store "profile" revision person $ \worker -> do
     startWorker worker
     let send ident = writeWorkerControl worker (Control (ControlId ident) (Just (OccurrenceId 999)) Nothing (Steer NextBoundary "serialized"))
@@ -467,3 +473,96 @@ foreign import ccall unsafe "worker_arm_term_failure"
   armTermFailure :: IO ()
 foreign import ccall unsafe "worker_term_failure_fired"
   termFailureFired :: IO CInt
+
+watchdogSurvivalChecks :: FilePath -> FilePath -> IO ()
+watchdogSurvivalChecks work native = withCase work "watchdog-survival" native [] $ \root _ _ store revision catalogue ->
+  withStartingFrontendWorker store "profile" revision (setupFor root catalogue "prompt-source") $ \worker -> do
+    waitUntil ((==WorkerPrepared) . observedWorkerPhase <$> observeWorker worker)
+    observed <- getMonotonicTimeNSec
+    -- Starting after actual preparation makes this strictly later than the startup budget.
+    threadDelay 31000000
+    checked <- getMonotonicTimeNSec
+    status <- observeWorker worker
+    check "survival sample is more than thirty seconds after actual prepared observation" (checked-observed>=31000000000)
+    check "successful preparation disarms startup watchdog independently of caller await"
+      (observedWorkerPhase status==WorkerPrepared && observedWorkerExit status==Nothing && not(observedCleanupUnproven status))
+    discardWorker worker
+    waitWorker worker >>= check "surviving original prepared worker discards and joins normally" . (==ExitSuccess)
+
+-- Native PID is a read-only negative witness, never signalling or replacement ownership.
+backpressureClose :: FilePath -> FrontendWorker -> IO ()
+backpressureClose native worker = do
+  prepared <- workerPrepared worker
+  let pieces=T.splitOn "-" (runIdText(preparedRunId prepared))
+  pid <- case pieces of ["native",number,_] | T.all(\c->c>='0' && c<='9')number -> pure(T.unpack number);_->error "native fixture identity"
+  let observation :: (ExitCode,String,String) -> Either (ExitCode,String,String) Bool
+      observation result@(code,output,diagnostic)
+        | not(null diagnostic) = Left result
+        | code==ExitSuccess && not(null(words output)) = Right(T.pack native `T.isInfixOf` T.pack output)
+        | code==ExitFailure 1 && null(words output) = Right False
+        | otherwise = Left result
+      present=do
+        result<-readProcessWithExitCode "ps" ["-p",pid,"-o","pid=,command="] ""
+        either (error . ("process observation failed: "<>) . show) pure (observation result)
+  check "process observer distinguishes successful presence from clean no-match"
+    (observation(ExitSuccess,native,"")==Right True && observation(ExitFailure 1,"","")==Right False)
+  forM_ [("unexpected exit",(ExitFailure 2,"","")),
+         ("failed no-match",(ExitFailure 1,"","observer error")),
+         ("empty success",(ExitSuccess,"","")),
+         ("success diagnostics",(ExitSuccess,native,"observer warning"))] $ \(label,result)->
+    check ("process observer refuses "<>label) (case observation result of Left _->True;_->False)
+  present >>= check "original inner worker is observable before backpressure close"
+  startWorker worker
+  replicateM_ 80 $ writeWorkerControl worker (Control (ControlId "shutdown-backpressure") (Just (OccurrenceId 999)) Nothing (Steer NextBoundary "queued fixture"))
+  waitUntil ((==32) . observedQueuedFrames <$> observeWorker worker)
+  closeWorker worker
+  status <- observeWorker worker
+  check "shutdown does not deadlock behind a full event queue"
+    (observedWorkerPhase status==WorkerReleased && observedWorkerExit status==Just(Left WorkerClosed) && not(observedCleanupUnproven status))
+  present >>= check "confirmed outer cleanup leaves no live native inner worker" . not
+
+terminationChecks :: FilePath -> FilePath -> IO ()
+terminationChecks _ _ = do
+  executable<-getExecutablePath
+  let fixture action=bracket (createProcessGroup(privateProcess executable ["fixture-term-wait"]))
+        (\group->terminateProcessGroup 2000000 group `finally` closeGroupPipes group) $ \group->do
+          output<-maybe(error "termination stdout")pure(groupOutput group)
+          input<-maybe(error "termination stdin")pure(groupInput group)
+          await(hGetLine output)>>=check "termination fixture ready" . (=="ready")
+          action group output input
+      release input=hPutStrLn input "release" >> hFlush input
+  forM_ [False,True] $ \ioFailure -> fixture $ \group output input -> do
+    caller<-async(terminateProcessGroup 2000000 group)
+    await(hGetLine output)>>=check "original TERM reaches child before caller interruption" . (=="term")
+    if ioFailure then throwTo(asyncThreadId caller)(userError "original caller IO interruption")
+      else throwTo(asyncThreadId caller) UserInterrupt
+    sent<-try @IOException(release input)
+    case sent of Left _->putStrLn "controlled release pipe already closed";Right()->pure()
+    outcome<-await(waitCatch caller)
+    check "caller exception is preserved after joined offered grace" (case outcome of
+      Left failure | ioFailure -> case fromException failure of Just value->"original caller IO interruption" `T.isInfixOf` T.pack(show(value::IOException));Nothing->False
+      Left failure -> case fromException failure of Just UserInterrupt->True;_->False
+      Right()->False)
+    waitProcessGroup group >>=check "caller interruption does not prematurely KILL cooperative child" . (==ExitSuccess)
+  fixture $ \group output input -> do
+    caller<-async(uninterruptibleMask_(terminateProcessGroup 100000 group))
+    await(hGetLine output)>>=check "uninterruptibly masked caller still sends TERM" . (=="term")
+    completed<-timeout 2000000(waitCatch caller)
+    case completed of
+      Nothing->do
+        putStrLn "FAIL inherited masking suppressed native termination deadline"
+        putStrLn "NEGATIVE TEARDOWN ONLY: releasing original child pipe"
+        release input
+        void(await(waitCatch caller))
+        error "uninterruptible termination deadline regression"
+      Just result->either throwIO pure result
+    waitProcessGroup group >>=check "genuine unmask preserves final KILL deadline" . (/=ExitSuccess)
+  fixture $ \group output input -> do
+    first<-async(terminateProcessGroup 2000000 group)
+    second<-async(terminateProcessGroup 2000000 group)
+    void(await(hGetLine output))
+    release input
+    await(wait first)
+    await(wait second)
+    terminateProcessGroup 2000000 group
+    waitProcessGroup group >>=check "ordinary completion and repeated callers join original group" . (==ExitSuccess)

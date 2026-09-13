@@ -43,6 +43,7 @@ extra-source-files:
   test/frontend_io_probe.py
   test/frontend_session_probe.py
   engine/acp/test/stub_adapter.py
+  engine/acp/test/effect_hang_adapter.py
   engine/acp/test/retry_adapter.py
   engine/acp/test/steer_adapter.py
   test/frontend_contract_probe.py
@@ -60,6 +61,8 @@ extra-source-files:
   manager/ci/workers.sh
   manager/ci/admission.sh
   manager/test/worker_fixture.py
+  manager/test/Agentic/Manager/Test/AcceptanceAudit.hs
+  manager/test/admission_audit.py
   manager/test/worker_evidence.py
   manager/test/draft_contract.py
   manager/test/command_contract.py
@@ -517,6 +520,7 @@ executable manager-admission-check
   main-is:         AdmissionCheck.hs
   c-sources:       manager/test/admission_cleanup_fault.c
   other-modules:
+    Agentic.Manager.Test.AcceptanceAudit
     Agentic.Manager.Admission
     Agentic.Manager.Admission.Policy
     Agentic.Manager.Worker

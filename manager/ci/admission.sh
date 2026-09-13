@@ -15,4 +15,6 @@ for capabilities in N1 N8; do
   "$runner" "$work/$capabilities" "$native" "$root" "$python" +RTS "-$capabilities" -RTS 2>&1 | tee "$work/$capabilities.log"
 done
 python3 manager/test/proof_opacity.py "$root" "$work/opacity"
+python3 manager/test/admission_audit.py "$root" package-boundary
+python3 manager/test/admission_audit.py "$root" interruption
 echo "Private admission evidence: $work"

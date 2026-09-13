@@ -133,7 +133,8 @@ claims. The final request transition and command effect commit together, while t
 original accepted receipt stays unchanged. Expiry returns to draft with an expired
 observation reason and never silently enqueues or starts work.
 
-`retryAdmissionCleanup` can retry publication for the same retained association
+`retryAdmissionCleanup` refuses while the original cleanup result is pending,
+before joining its task. It can retry publication for the same retained association
 without repeating an ambiguous native write or minting a ticket from a receipt.
 Later credential revocation does not invalidate already accepted cleanup. Runtime
 failure evidence is never cleared to manufacture physical confirmation. Unproven
@@ -164,8 +165,47 @@ completion report. It verifies retained claims and lease fencing without skippin
 real signalling. This is not a kernel permission-error test, arbitrary-descendant
 containment, a power-loss test or the withdrawn SQLite pathname experiment.
 
-The Coordination model supplies the abstract oldest-eligible and exclusive-resource
+The policy properties and static held-claim assertion check supplied occupancy,
+not lifecycle transitions or a running state machine. Native pre-start tests are
+separate evidence, and actual accepted-running retention remains mandatory WM-014
+integration. The Coordination model supplies the abstract oldest-eligible and exclusive-resource
 meaning. These tests do not claim an SQL refinement theorem or infer physical cleanup
 from a Lean phase label. WM-014 owns the mandatory accepted-running integration gate,
 WM-015 durable ingestion, WM-016 controls, WM-019 broader safety supervision and
 WM-020 restart reconciliation. Service and G1 acceptance remain separate.
+
+## Audit regression boundaries
+
+Premature cleanup retry is rejected before joining an active entry. Its regression
+cancels the retry caller and exits Admission scope with the controlled review clock
+held below expiry. Negative-test teardown advances time only after recording the
+old shutdown cycle, and is not counted as successful scope-shutdown evidence.
+
+The deadline regressions rendezvous at the trusted clock's final read while the
+bounded source-owned transaction is still active. A coordinator advances time
+there, and the expired fresh command rolls back mutation, receipt and invalidations.
+The unexpired transaction and exact-replay controls remain distinct.
+
+`manager/ci/admission.sh` also runs a compiled, test-only Commands slice. Its driver
+requires exact source anchors and records original hashes and the instrumentation
+diff. The sole blocking rendezvous is after a real fresh successful acceptance
+transaction and before Submission publication. The coordinator reads the actual
+committed command, then interrupts that executing thread. Read-only identity
+observations compare the original attempt and dispatch cells through reconciliation
+and actual cleanup dispatch. No hook is added to production, no authority is created
+from receipt rows, and no SQLite or operating-system call is interposed.
+
+`python3 manager/test/admission_audit.py "$PWD" MODE` also runs the `retry-mutant`,
+`deadline-mutant`, `watchdog-mutant`, `policy-mutant` `ticket-mutant` and `termination-mutant` compiled
+negative controls. Every copy, diff, build and schedule log remains under the
+configured build directory. These are specific guard/identity sensitivity checks,
+not a claim that arbitrary fault schedules or WM-014 approved-running transitions
+have been proved.
+
+Audit capture uses Cabal's positive source enumeration rather than recursively
+copying a checkout. Members must be regular relative paths without traversal,
+duplicates or symlink components, and copied bytes are checked against their
+captured hashes. The package-boundary regression excludes unlisted sentinel,
+cache and symlink content while retaining declared helpers, then rejects a
+declared symlink. No ignore blacklist, Git command or canonical-source fallback
+supplies the private compiled slice.

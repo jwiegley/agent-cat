@@ -485,6 +485,8 @@ awaitAdmissionCleanup (LivePreparation _ entry)=atomically(readTMVar(entryResult
 
 retryAdmissionCleanup :: LivePreparation -> IO (Either CommandFailure ())
 retryAdmissionCleanup (LivePreparation controller entry) = operation controller $ do
+  completed <- atomically(tryReadTMVar(entryResult entry))
+  unless (isJust completed) (throwIO StateConflict)
   atomically(readTMVar(entryTask entry)) >>= mapM_ (void . waitCatch)
   final <- selectFinalization controller entry "worker-lost"
   worker <- atomically(tryReadTMVar(entryWorker entry))

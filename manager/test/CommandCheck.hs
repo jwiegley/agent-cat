@@ -14,6 +14,8 @@ import Agentic.Manager.Schema (schemaStatements)
 import Agentic.Manager.Store
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (AsyncCancelled (..), async, cancel, concurrently, poll, wait, waitCatch)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
+import System.Timeout (timeout)
 import Control.DeepSeq (NFData)
 import Control.Exception (AsyncException (UserInterrupt), bracket, fromException, throwIO, try)
 import Control.Monad (forM_, unless, void)
@@ -40,6 +42,7 @@ main = do
   hSetBuffering stdout LineBuffering
   args <- getArgs
   case args of
+    ["deadline-crossing",work] -> commandDeadlineChecks work
     [work, source] -> do
       publicComposition work
       replayChecks work
@@ -694,24 +697,50 @@ retainedAttemptChecks work=withFixture work "retained-attempt" (64*commandCapaci
   check "completed failed candidate proves absence without constructing authority" (case absent of Nothing->True;_->False)
 
 commandDeadlineChecks :: FilePath -> IO ()
-commandDeadlineChecks work=withFixture work "command-deadline" (64*commandCapacity) 10 $ \_ _ _ store profile proof->do
+commandDeadlineChecks work=withFixture work "command-deadline" (64*commandCapacity) 10 $ \_ root _ store profile proof->do
   clock<-newIORef 0
+  calls<-newIORef (0::Int)
+  entered<-newEmptyMVar
+  release<-newEmptyMVar
+  let rendezvous action=timeout 2000000 action >>= maybe(error "final deadline rendezvous timed out")pure
+      finalClock=do
+        modifyIORef' calls (+1)
+        putMVar entered()
+        rendezvous(takeMVar release)
+        readIORef clock
+      atFinalRead action crossing = bracket (async action) cancel $ \pending->do
+        rendezvous(takeMVar entered)
+        active<-try @StoreFailure(storeIdentity store)
+        check "deadline rendezvous occurs while actual acceptance transaction owns Store" (case active of Left StoreBusy->True;_->False)
+        void crossing
+        putMVar release()
+        wait pending
   req<-request store SetInput "deadline"
-  withCommitDeadline store (readIORef clock) 10 $ \guard->do
+  withCommitDeadline store finalClock 10 $ \guard->do
     attempt<-newCommandAttempt store proof req
-    accepted<-submitCommandAttemptWithDeadline guard attempt (\_ _ _->Right(edit profile(commandResource req)"deadline_revision"))>>=right
+    accepted<-atFinalRead (submitCommandAttemptWithDeadline guard attempt (\_ _ _->Right(edit profile(commandResource req)"deadline_revision"))) (pure()) >>=right
     writeIORef clock 10
     repeated<-newCommandAttempt store proof req
     replay<-submitCommandAttemptWithDeadline guard repeated (\_ _ _->Left StateConflict)>>=right
     check "exact command replay bypasses fresh acceptance deadline" (submissionReceipt replay==submissionReceipt accepted && submissionReplayed replay)
+    readIORef calls >>=check "exact replay makes no final clock read" . (==1)
+    -- A new guard begins unexpired. The coordinator advances only at its in-transaction read.
+  writeIORef clock 11
+  withCommitDeadline store finalClock 20 $ \guard->do
     newRequest<-request store SetInput "deadline_expired"
     let freshRequest=newRequest{commandPrecondition=Just "\"deadline_revision\""}
     freshAttempt<-newCommandAttempt store proof freshRequest
-    expect "fresh command enforces deadline after bounded acceptance work" StorageUnavailable
-      (submitCommandAttemptWithDeadline guard freshAttempt(\_ _ _->Right(edit profile(commandResource req)"must_rollback")))
+    beforeEvents<-scalarInt store "SELECT count(*) FROM invalidations"
+    refused<-atFinalRead (submitCommandAttemptWithDeadline guard freshAttempt(\_ _ _->Right(edit profile(commandResource req)"must_rollback"))) $ do
+      bracket (SQL.open(T.pack(root </> "coordination.sqlite3"))) SQL.close $ \database->do
+        rawRows database "SELECT revision FROM requests WHERE id='request_1'" >>=check "active final check has not published source mutation" . (==[[SQL.SQLText "deadline_revision"]])
+        rawRows database "SELECT count(*) FROM commands" >>=check "active final check has not published fresh receipt" . (==[[SQL.SQLInteger 1]])
+      writeIORef clock 20
+    check "deadline crossing inside fresh acceptance refuses commit" (case refused of Left StorageUnavailable->True;_->False)
     scalarText store "SELECT revision FROM requests WHERE id='request_1'" >>=check "expired fresh intent rolls back owning mutation" . (=="deadline_revision")
     scalarInt store "SELECT count(*) FROM commands" >>=check "expired fresh intent publishes no receipt" . (==1)
-  escaped<-withCommitDeadline store (readIORef clock) 20 pure
+    scalarInt store "SELECT count(*) FROM invalidations" >>=check "expired fresh intent rolls back invalidations" . (==beforeEvents)
+  escaped<-withCommitDeadline store (readIORef clock) 30 pure
   expiredScope<-try @StoreFailure $ mutate store $ do
     execute "UPDATE clients SET revision='escaped_deadline' WHERE id='client_1'" []
     enforceCommitDeadline escaped

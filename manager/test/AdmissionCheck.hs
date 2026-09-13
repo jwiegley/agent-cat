@@ -3,6 +3,9 @@
 {-# LANGUAGE TypeApplications #-}
 module Main (main) where
 
+import qualified Agentic.Manager.Test.AcceptanceAudit as Audit
+import Control.Concurrent (throwTo)
+import Control.Exception (AsyncException (UserInterrupt))
 import Agentic.Manager.Admission
 import Agentic.Manager.Admission.Policy
 import Agentic.Manager.Authorization
@@ -15,12 +18,12 @@ import Agentic.Manager.Protocol.Draft
 import Agentic.Manager.Store
 import Agentic.Runtime (workflowName, FrontendPrepared (..), RunId (..), createProcessGroup, terminateProcessGroup, closeGroupPipes, groupOutput, groupErrors, waitProcessGroup)
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async (AsyncCancelled (..), async, cancel, waitCatch)
-import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
+import Control.Concurrent.Async (AsyncCancelled (..), async, asyncThreadId, cancel, waitCatch, wait)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar, readMVar, tryReadMVar)
 import Control.Concurrent.STM (atomically, newTVarIO, readTVar, writeTVar, check)
 import Control.DeepSeq (NFData)
 import Control.Exception (SomeException, bracket, try, fromException)
-import Control.Monad (forM, forM_, unless, void)
+import Control.Monad (forM, forM_, unless, void, when)
 import Crypto.Hash (Digest, SHA256, hash)
 import Data.Aeson (Value (..), eitherDecodeStrict', object, toJSON, (.=))
 import qualified Data.Aeson.KeyMap as KM
@@ -36,7 +39,7 @@ import System.Directory (createDirectory, doesDirectoryExist, doesFileExist, rem
 import System.Environment (getArgs, getExecutablePath)
 import System.Exit (ExitCode (ExitSuccess))
 import System.Process (proc, CreateProcess (cwd, env, std_in, std_out, std_err), StdStream (NoStream, CreatePipe))
-import GHC.Conc (getNumCapabilities)
+import GHC.Conc (getNumCapabilities, threadStatus, ThreadStatus (..), BlockReason (..))
 import Foreign.C.Types (CInt (..))
 import System.FilePath ((</>))
 import System.IO (BufferMode (LineBuffering), hSetBuffering, stdout)
@@ -49,9 +52,14 @@ main = do
   hSetBuffering stdout LineBuffering
   args <- getArgs
   case args of
+    ["policy-only"] -> policyChecks
+    ["static-occupancy"] -> staticOccupancyCheck
+    ["interrupted-acceptance",work,native] -> interruptedAcceptanceChecks work native
+    ["active-retry",work,native] -> activeRetryChecks work native
     ["completion-failure",work,native] -> completionFailureChild work native
     [work,native,source,python] -> do
       policyChecks
+      activeRetryChecks work native
       lifecycleChecks work native
       expiryChecks work native
       rollbackChecks work native
@@ -115,13 +123,7 @@ policyChecks = do
          && Set.disjoint keys(candidateResources candidate)
          && all (\earlier->candidateOrdinal earlier>=candidateOrdinal candidate || not(eligible earlier)) candidates
   assertion "generated production policy preserves bounds, exclusivity, FIFO and independent progress" (isSuccess result)
-  forM_ ["preparing","review","start-pending","running","cleanup-pending","quarantined"] $ \phase -> do
-    let footprint=effectiveResources["x","y"]
-        blocked=Candidate "blocked" 1 True True (effectiveResources["y","z"])
-        independent=Candidate "free" 2 True True (effectiveResources["q"])
-    assertion ("phase alone never releases claims: "<>phase)
-      (oldestEligible 2 [Held 0 footprint] [blocked,independent]==Just(independent,1)
-        && oldestEligible 1 [Held 0 footprint] [independent]==Nothing)
+  staticOccupancyCheck
   where
     resources=effectiveResources <$> sublistOf ["x","y","z","unclassified","operator","resource_0"]
     scenario=do
@@ -132,6 +134,15 @@ policyChecks = do
       candidates<-forM [1..count] $ \ordinal->Candidate(T.pack(show ordinal))(fromIntegral ordinal) <$> arbitrary <*> arbitrary <*> resources
       shuffled<-shuffle candidates
       pure(limit,held,shuffled)
+
+staticOccupancyCheck :: IO ()
+staticOccupancyCheck = do
+  let footprint=effectiveResources["x","y"]
+      blocked=Candidate "blocked" 1 True True (effectiveResources["y","z"])
+      independent=Candidate "free" 2 True True (effectiveResources["q"])
+  assertion "supplied held claims exclude conflicts and consume global capacity"
+    (oldestEligible 2 [Held 0 footprint] [blocked,independent]==Just(independent,1)
+      && oldestEligible 1 [Held 0 footprint] [independent]==Nothing)
 
 data Fixture = Fixture FilePath InstalledConfiguration CoordinationStore [(Text,Discovery)] [CredentialProof]
 withFixture :: FilePath -> FilePath -> String -> Int -> [(Text,[Text])] -> (Fixture -> IO a) -> IO a
@@ -587,7 +598,14 @@ invalidationRollbackChecks work native=withFixture work native "enqueue-event-fa
 commitDeadlineChecks :: FilePath -> FilePath -> IO ()
 commitDeadlineChecks work native=withFixture work native "commit-deadline" 1 [("a",[])] $ \fixture@(Fixture _ _ owner _ _)->do
   time<-newTVarIO 0
-  let clock'=MonotonicClock(atomically(readTVar time))(\deadline->atomically(readTVar time>>=check.(>=deadline)))
+  armed<-newTVarIO False
+  entered<-newEmptyMVar
+  release<-newEmptyMVar
+  let clockRead=do
+        stopHere<-atomically $ do value<-readTVar armed;writeTVar armed False;pure value
+        when stopHere (putMVar entered() >> takeMVar release)
+        atomically(readTVar time)
+      clock'=MonotonicClock clockRead (\deadline->atomically(readTVar time>>=check.(>=deadline)))
   withAdmissionClock clock' owner $ \controller->do
     draft<-newDraft fixture 0 "a" "commit_deadline"
     _<-enqueue controller fixture 0 draft "commit_deadline"
@@ -599,10 +617,129 @@ commitDeadlineChecks work native=withFixture work native "commit-deadline" 1 [("
           pure((),[Invalidation "service.changed" "/v1/capabilities" revision])
     withReviewAcceptance live(\_ guard->program guard "deadline_valid")>>=right
     scalarText owner "SELECT revision FROM clients WHERE id='client_1'" >>=assertion "unexpired final transaction deadline permits legitimate commit" . (=="deadline_valid")
-    refused<-withReviewAcceptance live $ \_ guard->do
-      atomically(writeTVar time(reviewDeadlineNanos review))
-      program guard "deadline_refused"
+    refused<-bracket (async $ withReviewAcceptance live $ \_ guard->do
+      atomically(writeTVar armed True)
+      program guard "deadline_refused") cancel $ \pending->do
+        await(takeMVar entered)
+        active<-try @StoreFailure(storeIdentity owner)
+        assertion "live deadline crosses while owning transaction is active" (case active of Left StoreBusy->True;_->False)
+        atomically(writeTVar time(reviewDeadlineNanos review))
+        putMVar release()
+        wait pending
     assertion "expiry after protected entry refuses final guarded acceptance" (refused==Left StorageUnavailable)
     await(awaitAdmissionCleanup live)>>=right
     scalarText owner "SELECT revision FROM clients WHERE id='client_1'" >>=assertion "final in-transaction expiry rolls back bounded source-owned writes" . (=="deadline_valid")
     number owner "SELECT count(*) FROM invalidations WHERE revision='deadline_refused'" >>=assertion "final in-transaction expiry rolls back invalidations" . (==0)
+
+activeRetryChecks :: FilePath -> FilePath -> IO ()
+activeRetryChecks work native=withFixture work native "active-retry" 1 [("a",[])] $ \fixture@(Fixture _ _ owner _ _)->do
+  time<-newTVarIO 0
+  prepared<-newEmptyMVar
+  leaving<-newEmptyMVar
+  reply<-newEmptyMVar
+  let clock'=MonotonicClock(atomically(readTVar time))(\deadline->atomically(readTVar time>>=check.(>=deadline)))
+  scoped<-async $ withAdmissionClock clock' owner $ \controller->do
+    draft<-newDraft fixture 0 "a" "active_retry"
+    _<-enqueue controller fixture 0 draft "active_retry"
+    live<-admit controller
+    review<-await(awaitReview live)>>=right
+    putMVar prepared review
+    holdReply<-newEmptyMVar
+    caller<-async $ retryAdmissionCleanup live >>= \outcome->putMVar reply outcome>>takeMVar holdReply
+    let entered=do
+          returned<-tryReadMVar reply
+          state<-threadStatus(asyncThreadId caller)
+          case (returned,state) of
+            (Just _,_)->pure()
+            (_,ThreadBlocked BlockedOnSTM)->pure()
+            _->threadDelay 1000>>entered
+    await entered
+    void(timeout 2000000(readMVar reply))
+    cancel caller
+    cancelled<-waitCatch caller
+    assertion "premature retry caller cancellation preserves original exception" (case cancelled of
+      Left failure->case fromException failure of Just AsyncCancelled->True;_->False
+      Right _->False)
+    putMVar leaving()
+  review<-await(takeMVar prepared)
+  await(takeMVar leaving)
+  ending<-timeout 20000000(waitCatch scoped)
+  case ending of
+    Nothing->do
+      putStrLn "FAIL active retry prevented Admission scope shutdown with clock below expiry"
+      number owner "SELECT count(*) FROM reservations WHERE state='held'" >>=assertion "negative schedule retains actual held reservation" . (==1)
+      putStrLn "NEGATIVE TEARDOWN ONLY: advancing controlled expiry after recording shutdown failure"
+      atomically(writeTVar time(reviewDeadlineNanos review))
+      void(await(waitCatch scoped))
+      error "active-retry shutdown regression"
+    Just outcome->do
+      either (error.show) pure outcome
+      returned<-tryReadMVar reply
+      assertion "retry refuses pending original cleanup before task join" (returned==Just(Left StateConflict))
+      atomically(readTVar time)>>=assertion "successful scope shutdown did not advance review clock" . (==0)
+      number owner "SELECT count(*) FROM reservations WHERE state!='released'" >>=assertion "scope shutdown signals and joins original prepared worker" . (==0)
+
+-- The boundary mode requires the exact instrumented Commands slice.
+interruptedAcceptanceChecks :: FilePath -> FilePath -> IO ()
+interruptedAcceptanceChecks work native = do
+  withFixture work native "interrupted-enqueue" 1 [("a",[])] $ \fixture@(Fixture _ _ owner _ proofs)->withAdmission owner $ \controller->do
+    draft<-newDraft fixture 0 "a" "interrupted_enqueue"
+    nonce<-key owner "interrupted_enqueue"
+    Audit.withAcceptanceAudit $ \audit -> do
+      caller<-async(enqueueRequest controller(proofs!!0)(draftId draft)nonce(etag draft)(body "enqueue"))
+      (executing,command)<-Audit.waitAccepted audit
+      original<-receiptBytes owner command
+      number owner "SELECT count(*) FROM requests WHERE phase='queued'" >>=assertion "interruption rendezvous follows actual committed enqueue" . (==1)
+      number owner "SELECT count(*) FROM reservations" >>=assertion "enqueue return gap has not launched or reserved a worker" . (==0)
+      throwTo executing UserInterrupt
+      assertInterrupted caller
+      reply<-enqueueRequest controller(proofs!!0)(draftId draft)nonce(etag draft)(body "enqueue")>>=right
+      assertion "interrupted enqueue exact retry returns immutable committed receipt" (encoded reply==original)
+      number owner "SELECT count(*) FROM commands WHERE operation='enqueue'" >>=assertion "interrupted enqueue creates one durable command" . (==1)
+      live<-admit controller
+      review<-await(awaitReview live)>>=right
+      assertion "interrupted enqueue reconciles original association into real preparation" (reviewRequest review==draftId draft)
+      (reconciled,delivered,sameTicket,sameAttempt)<-Audit.auditSummary audit
+      assertion "enqueue reconciliation retains original attempt and dispatch cell" (reconciled==1 && delivered==0 && sameTicket && sameAttempt)
+  withFixture work native "interrupted-cleanup" 1 [("a",["shared"])] $ \fixture@(Fixture root _ owner _ proofs)->withAdmission owner $ \controller->do
+    draft<-newDraft fixture 0 "a" "interrupted_cleanup"
+    _<-enqueue controller fixture 0 draft "interrupted_cleanup"
+    live<-admit controller
+    void(await(awaitReview live)>>=right)
+    bracket (SQL.open(T.pack(root </> "coordination.sqlite3"))) SQL.close $ \database ->
+      SQL.exec database "CREATE TRIGGER hold_interrupted_release BEFORE UPDATE OF state ON reservations WHEN NEW.state='released' BEGIN SELECT RAISE(ABORT,'controlled publication failure'); END"
+    current<-viewNow fixture 0(draftId draft)
+    nonce<-key owner "interrupted_withdraw"
+    Audit.withAcceptanceAudit $ \audit -> do
+      caller<-async(withdrawRequest controller(proofs!!0)(draftId draft)nonce(etag current)(body "withdraw"))
+      (executing,command)<-Audit.waitAccepted audit
+      original<-receiptBytes owner command
+      number owner "SELECT count(*) FROM reservations WHERE state='cleanup-pending'" >>=assertion "interruption boundary has committed live cleanup intent" . (==1)
+      number owner "SELECT count(*) FROM reservation_resources" >>=assertion "committed return gap retains original complete claims" . (==1)
+      number owner "SELECT count(*) FROM commands WHERE operation='withdraw' AND attempted_at IS NOT NULL" >>=assertion "unpublished cleanup continuation has not dispatched" . (==0)
+      throwTo executing UserInterrupt
+      assertInterrupted caller
+      cleanup<-await(awaitAdmissionCleanup live)
+      assertion "interrupted cleanup reconciles original ticket but retains claims on SQL failure" (cleanup==Left StorageUnavailable)
+      (reconciled,delivered,sameTicket,sameAttempt)<-Audit.auditSummary audit
+      assertion "interrupted live cleanup uses original attempt and original ticket state" (reconciled==1 && delivered==1 && sameTicket && sameAttempt)
+      number owner "SELECT count(*) FROM reservation_resources" >>=assertion "no premature release after interrupted cleanup publication" . (==1)
+      reply<-withdrawRequest controller(proofs!!0)(draftId draft)nonce(etag current)(body "withdraw")>>=right
+      assertion "interrupted cleanup exact retry keeps original accepted receipt" (encoded reply==original && receiptState reply==Accepted)
+      bracket (SQL.open(T.pack(root </> "coordination.sqlite3"))) SQL.close $ \database ->SQL.exec database "DROP TRIGGER hold_interrupted_release"
+      retryAdmissionCleanup live>>=right
+      finalReply<-withdrawRequest controller(proofs!!0)(draftId draft)nonce(etag current)(body "withdraw")>>=right
+      assertion "joined cleanup does not rewrite immutable original receipt" (encoded finalReply==original)
+      (_,finalDeliveries,finalSameTicket,finalSameAttempt)<-Audit.auditSummary audit
+      assertion "interrupted cleanup and exact retries dispatch at most once" (finalDeliveries==1 && finalSameTicket && finalSameAttempt)
+      number owner "SELECT count(*) FROM reservations WHERE state!='released'" >>=assertion "original native cleanup confirms final reservation release" . (==0)
+      number owner "SELECT count(*) FROM commands WHERE operation='withdraw' AND state='effect-observed'" >>=assertion "original cleanup effect commits with release" . (==1)
+  where
+    receiptBytes owner command=runRead owner $ do
+      rows<-query "SELECT receipt FROM commands WHERE id=?" [SQL.SQLText command]
+      case rows of [[SQL.SQLBlob bytes]]->pure bytes;_->refuseTransaction StoreIntegrity
+    assertInterrupted caller=do
+      outcome<-await(waitCatch caller)
+      assertion "original command thread interruption survives reconciliation and publication" (case outcome of
+        Left failure->case fromException failure of Just UserInterrupt->True;_->False
+        Right _->False)
