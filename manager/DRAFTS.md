@@ -71,10 +71,11 @@ never relabelled as transports or files to fit a frame.
 Input edits require current command authority, exact same-resource revision and
 current catalogue selection. Draft and queued requests are editable only when no
 active reservation or live preparation exists. A queued edit clears its queue and
-admission state atomically. Preparing, review and reserved cases refuse without
-pretending a worker was discarded or releasing capacity. WM-012/013/014 must
-compose actual live discard and cleanup before enabling those later lifecycle
-paths. Historical released reservations and invalidated preparations remain intact.
+admission state atomically. The standalone operation refuses preparing and review
+cases because it owns no Worker. The [admission owner](ADMISSION.md) uses the
+guarded input-mutation seam to invalidate its live association and retain claims
+until actual discard and cleanup. Historical released reservations and invalidated
+preparations remain intact.
 
 ## Upload admission and publication
 
@@ -167,3 +168,18 @@ uses a one-shot test-only fault at the existing project synchronization boundary
 with real barriers when unarmed. It does not interpose libc, SQLite or a VFS,
 replace paths, or establish physical power-loss durability. Existing command,
 storage, configuration, profile and protocol gates remain separate.
+
+## Admission materialization
+
+`assembleDraftSnapshot` supplies the admission owner with the verified shared
+setup and exact request/profile revision association under Submit authority.
+`assembleAcceptedDraft` instead requires Commands' opaque accepted-enqueue permit,
+so accepted work does not depend on a renewed submitting credential. It checks
+the exact original command, queue origin, input revision and catalogue association
+before and after materialization through the same representation and file checks.
+Neither entry point grants approval, arbitrary private-file access or adoption.
+
+Batched structural readiness returns bounded request facts without copying input
+contents into admission queries. It does not promise native preparation success.
+Public draft reads preserve current admission blocking reasons while refreshing
+the missing-input indication, and queued requests retain their global position.

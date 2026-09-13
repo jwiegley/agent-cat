@@ -6,6 +6,7 @@ module Main (main) where
 import qualified "agentic" Agentic.Manager as Public
 import Agentic.Manager.Configuration
 import Agentic.Manager.Profile (Diagnostic)
+import Agentic.Manager.Schema (schemaStatements, commandMigration, draftMigration)
 import Agentic.Manager.Store
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (AsyncCancelled (..), async, cancel, poll, waitCatch, withAsync)
@@ -54,6 +55,7 @@ main = do
       ownershipChecks work
       databaseChecks work
       migrationChecks work
+      admissionMigrationChecks work
       conditionalTransactionChecks work
       putStrLn "PASS manager coordination storage"
     _ -> error "usage: manager-store-check PRIVATE_DIRECTORY"
@@ -261,7 +263,7 @@ databaseChecks work = do
     second <- storeIdentity store
     check "reopen preserves durable identities separately from live generation"
       (storeAuthorityEpoch first == storeAuthorityEpoch second && storeStreamId first == storeStreamId second
-       && storeProcessGeneration first /= storeProcessGeneration second && storeSchemaVersion second == 3)
+       && storeProcessGeneration first /= storeProcessGeneration second && storeSchemaVersion second == 4)
     rowsEqual store "SELECT sequence,retained_floor,revision FROM service_metadata"
       [[SQL.SQLText "4", SQL.SQLText "0", SQL.SQLText "service_1"]] >>= check "stream sequence and resource revisions survive reopen"
   -- Real SQLite trigger failure occurs after resource update and sequence allocation.
@@ -281,8 +283,8 @@ relationalRows = do
   execute "INSERT INTO request_inputs (request_id,name,declaration_ordinal,declaration,source,literal_bytes,literal_transport_bytes,literal_chunks,literal_digest) VALUES ('request_1','input_1',0,X'7b7d','literal',4,4,1,?)"
     [SQL.SQLBlob (convert (hash literalBytes :: Digest SHA256))]
   execute "INSERT INTO request_literal_chunks VALUES ('request_1','input_1',0,?)" [SQL.SQLBlob literalBytes]
-  execute "INSERT INTO reservations VALUES ('reservation_1','request_1',0,'generation_1','held')" []
-  execute "INSERT INTO reservation_resources VALUES ('workspace_1','reservation_1')" []
+  execute "INSERT INTO reservations (id,request_id,slot,process_generation,state) VALUES ('reservation_1','request_1',0,'generation_1','held')" []
+  execute "INSERT INTO reservation_resources VALUES ('operator','workspace_1','reservation_1')" []
   execute "INSERT INTO preparations VALUES ('preparation_1','revision_1','request_1','revision_1','profile_revision_1','reservation_1','generation_1','worker_1','root_1','native_1','2030-01-01','digest_1',X'7b7d',X'7b7d','live',NULL)" []
   execute "INSERT INTO runs (id,revision,control_revision,request_id,preparation_id,profile_id,root_identity,native_run_id,supervision,result_state) VALUES ('run_1','revision_1','control_1','request_1','preparation_1','profile_1','root_1','native_1','owned','absent')" []
   execute "INSERT INTO ingestions VALUES ('run_1','18446744073709551615','digest_1',X'7b7d')" []
@@ -296,7 +298,7 @@ relationalRows = do
 relationalConstraints :: CoordinationStore -> IO ()
 relationalConstraints store = do
   forM_
-    [("reservation resource exclusivity", "INSERT INTO reservation_resources VALUES ('workspace_1','reservation_1')"),
+    [("reservation resource exclusivity", "INSERT INTO reservation_resources VALUES ('operator','workspace_1','reservation_1')"),
      ("native run identity uniqueness", "INSERT INTO runs (id,revision,control_revision,profile_id,root_identity,native_run_id,supervision,result_state) VALUES ('duplicate','r','c','profile_1','root_1','native_1','observer','absent')"),
      ("runtime ingestion identity uniqueness", "INSERT INTO ingestions VALUES ('run_1','18446744073709551615','different',X'00')"),
      ("capture profile must match its request", "UPDATE captures SET profile_id='other_profile'"),
@@ -321,7 +323,7 @@ relationalConstraints store = do
 reservationHistory :: CoordinationStore -> IO ()
 reservationHistory store = do
   expect "one active reservation per request" StoreUnavailable $
-    mutate store (execute "INSERT INTO reservations VALUES ('duplicate','request_1',1,'generation_1','held')" []) [event]
+    mutate store (execute "INSERT INTO reservations (id,request_id,slot,process_generation,state) VALUES ('duplicate','request_1',1,'generation_1','held')" []) [event]
   expect "active reservation requires a slot" StoreUnavailable $
     mutate store (execute "UPDATE reservations SET slot=NULL" []) [event]
   expect "reservation release requires removing resource claims" StoreUnavailable $
@@ -334,8 +336,8 @@ reservationHistory store = do
     execute "UPDATE preparations SET state='invalidated',reason='discarded'" []
     execute "DELETE FROM reservation_resources" []
     execute "UPDATE reservations SET slot=NULL,state='released'" []
-    execute "INSERT INTO reservations VALUES ('reservation_2','request_1',0,'generation_2','held')" []
-    execute "INSERT INTO reservation_resources VALUES ('workspace_1','reservation_2')" []) [event]
+    execute "INSERT INTO reservations (id,request_id,slot,process_generation,state) VALUES ('reservation_2','request_1',0,'generation_2','held')" []
+    execute "INSERT INTO reservation_resources VALUES ('operator','workspace_1','reservation_2')" []) [event]
   rowsEqual store "SELECT reservation_id,state FROM preparations"
     [[SQL.SQLText "reservation_1", SQL.SQLText "invalidated"]] >>=
       check "capacity reuse retains historical preparation association"
@@ -344,7 +346,7 @@ reservationHistory store = do
   rowsEqual store "SELECT slot FROM reservations WHERE id='reservation_2'"
     [[SQL.SQLInteger 0]] >>= check "same request and execution slot reusable after release"
   expect "cannot add a claim to released reservation" StoreUnavailable $
-    mutate store (execute "INSERT INTO reservation_resources VALUES ('other','reservation_1')" []) [event]
+    mutate store (execute "INSERT INTO reservation_resources VALUES ('operator','other','reservation_1')" []) [event]
   expect "cannot move a claim to released reservation" StoreUnavailable $
     mutate store (execute "UPDATE reservation_resources SET reservation_id='reservation_1'" []) [event]
 
@@ -460,7 +462,7 @@ migrationChecks work = do
     count store "clients" >>= check "stream exhaustion rolls back resource change" . (== 0)
     rowsEqual store "SELECT sequence FROM service_metadata" [[SQL.SQLText "18446744073709551615"]] >>=
       check "complete UInt64 stream range survives reopen"
-  bracket (rawOpen root) SQL.close $ \db -> SQL.exec db "PRAGMA user_version=4"
+  bracket (rawOpen root) SQL.close $ \db -> SQL.exec db "PRAGMA user_version=5"
   before <- BS.readFile (root </> "coordination.sqlite3")
   withInstalled path $ \installed -> expect "newer schema refused" StoreVersion $
     withCoordinationStore installed (const (pure ()))
@@ -492,3 +494,28 @@ conditionalTransactionChecks work = do
     count store "invalidations" >>= check "conditional duplicate appends no event" . (== 2)
     rowsEqual store "SELECT sequence FROM service_metadata" [[SQL.SQLText "2"]] >>=
       check "conditional duplicate does not advance stream sequence"
+
+admissionMigrationChecks :: FilePath -> IO ()
+admissionMigrationChecks work = do
+  (path,root)<-fixture work "admission-migration"
+  withInstalled path (const(pure()))
+  bracket (rawOpen root) SQL.close $ \database -> do
+    mapM_ (SQL.exec database) (schemaStatements<>commandMigration<>draftMigration)
+    SQL.exec database "INSERT INTO service_metadata VALUES (1,'authority_old','stream_old','0','0','service_old'); INSERT INTO clients VALUES ('client_old','revision','fixture',0)"
+    SQL.exec database "INSERT INTO requests(id,revision,client_id,workflow_id,descriptor_revision,profile_id,profile_revision,phase,admission,queue_ordinal,blocking_reasons,validation_errors) VALUES ('request_old','revision_old','client_old','workflow_old','descriptor_old','profile_old','policy_old','queued','waiting','18446744073709551614',X'5b5d',X'5b5d')"
+    SQL.exec database "INSERT INTO reservations VALUES ('reservation_old','request_old',7,'generation_old','held'); INSERT INTO reservation_resources VALUES ('unclassified','reservation_old'); PRAGMA user_version=3"
+    SQL.exec database "CREATE TABLE admission_observations(sentinel TEXT); INSERT INTO admission_observations VALUES('preserved')"
+  setFileMode (root </> "coordination.sqlite3") 0o600
+  withInstalled path $ \installed -> expect "version-four partial migration refuses" StoreUnavailable (withCoordinationStore installed(const(pure())))
+  bracket (rawOpen root) SQL.close $ \database -> do
+    rawRows database "PRAGMA user_version" >>=check "failed version-four migration retains version three" . (==[[SQL.SQLInteger 3]])
+    rawRows database "SELECT count(*) FROM pragma_table_info('requests') WHERE name='input_revision'" >>=check "failed version-four migration rolls back added request columns" . (==[[SQL.SQLInteger 0]])
+    rawRows database "SELECT resource_key,reservation_id FROM reservation_resources" >>=check "failed version-four migration preserves exact old claims" . (==[[SQL.SQLText "unclassified",SQL.SQLText "reservation_old"]])
+    rawRows database "SELECT sentinel FROM admission_observations" >>=check "failed version-four migration preserves pre-existing conflict" . (==[[SQL.SQLText "preserved"]])
+    SQL.exec database "DROP TABLE admission_observations"
+  withInstalled path $ \installed -> withCoordinationStore installed $ \owner -> do
+    storeIdentity owner >>=check "version-four migration completes transactionally" . ((==4).storeSchemaVersion)
+    rowsEqual owner "SELECT last_ordinal FROM admission_queue_clock" [[SQL.SQLText "18446744073709551614"]] >>=check "migration preserves unsigned queue history beyond signed SQLite integers"
+    rowsEqual owner "SELECT kind,resource_key,reservation_id FROM reservation_resources" [[SQL.SQLText "operator",SQL.SQLText "unclassified",SQL.SQLText "reservation_old"]] >>=check "legacy operator string remains outside internal unclassified domain"
+    rowsEqual owner "SELECT input_revision,queue_generation,queue_origin_revision,enqueue_command FROM requests" [[SQL.SQLNull,SQL.SQLNull,SQL.SQLNull,SQL.SQLNull]] >>=check "migration mints no input-selection or enqueue authority"
+    rowsEqual owner "SELECT slot,process_generation,state FROM reservations" [[SQL.SQLInteger 7,SQL.SQLText "generation_old",SQL.SQLText "held"]] >>=check "migration preserves old held slot without adopting its worker"

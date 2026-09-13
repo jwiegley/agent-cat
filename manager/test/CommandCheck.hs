@@ -21,7 +21,7 @@ import Crypto.Hash (Digest, SHA256, hash)
 import Data.Aeson (FromJSON (parseJSON), Value, eitherDecodeStrict', object, withObject, (.:), (.=))
 import Data.ByteArray (convert)
 import qualified Data.ByteString as BS
-import Data.IORef (modifyIORef', newIORef, readIORef)
+import Data.IORef (writeIORef, modifyIORef', newIORef, readIORef)
 import Data.Int (Int64)
 import Data.Maybe (isNothing)
 import Data.Text (Text)
@@ -43,6 +43,8 @@ main = do
     [work, source] -> do
       publicComposition work
       replayChecks work
+      retainedAttemptChecks work
+      commandDeadlineChecks work
       localEffectChecks work
       bindingBounds work
       dispatchChecks work
@@ -179,7 +181,7 @@ publicComposition work = do
   bracket (Public.installConfiguration configuration >>= right) Public.closeConfiguration $ \installed ->
     Public.withCoordinationStore installed $ \store -> do
       identity <- Public.storeIdentity store
-      check "installed public composition uses migrated store" (Public.storeSchemaVersion identity == 3)
+      check "installed public composition uses migrated store" (Public.storeSchemaVersion identity == 4)
 
 replayChecks :: FilePath -> IO ()
 replayChecks work = do
@@ -544,7 +546,7 @@ largestLegacyChecks work = do
   withInstalled path $ \installed -> withCoordinationStore installed $ \store -> do
     profile <- profileRevision installed
     proof <- authenticateCredential store bearerA >>= right
-    storeIdentity store >>= check "largest legacy row completes current migration" . ((== 3) . storeSchemaVersion)
+    storeIdentity store >>= check "largest legacy row completes current migration" . ((== 4) . storeSchemaVersion)
     largeRead <- try @StoreFailure (runRead store (query "SELECT body FROM commands WHERE id='legacy_largest'" [] >> pure ()))
     check "largest body cannot be copied through the one-MiB result budget" (case largeRead of Left StoreLimit -> True; _ -> False)
     replay <- submitCommand store proof req (edit profile (commandResource req) "never") >>= right
@@ -672,3 +674,45 @@ rawRows db statement = bracket (SQL.prepare db statement) SQL.finalize $ \prepar
         SQL.Done -> pure []
         SQL.Row -> if n <= (0::Int) then error "fixture row bound" else (:) <$> SQL.columns prepared <*> loop (n-1)
   in loop 1000
+
+retainedAttemptChecks :: FilePath -> IO ()
+retainedAttemptChecks work=withFixture work "retained-attempt" (64*commandCapacity) 10 $ \_ _ _ store profile proof->do
+  req<-request store SetInput "retained"
+  attempt<-newCommandAttempt store proof req
+  expect "unsubmitted context cannot reconcile rows or assert absence" OwnershipUnavailable (reconcileCommandAttempt attempt)
+  accepted<-submitCommandAttempt attempt (\_ _ _->Right(edit profile(commandResource req)"retained_revision"))>>=right
+  expect "retained invocation cannot be submitted twice" OwnershipUnavailable (submitCommandAttempt attempt (\_ _ _->Left StateConflict))
+  before<-scalarText store "SELECT sequence FROM service_metadata"
+  recovered<-reconcileCommandAttempt attempt>>=right>>=maybe(error "missing retained receipt")pure
+  check "same completed invocation recovers original receipt without replacement ticket" (submissionReceipt recovered==submissionReceipt accepted && case submissionTicket recovered of Nothing->True;_->False)
+  after<-scalarText store "SELECT sequence FROM service_metadata"
+  check "known invocation reconciliation appends no event" (before==after)
+  failedRequest<-request store SetInput "not-accepted"
+  failed<-newCommandAttempt store proof failedRequest
+  expect "failed retained candidate preserves exact stale revision refusal" StaleRevision (submitCommandAttempt failed(\_ _ _->Right(edit profile(commandResource failedRequest)"never")))
+  absent<-reconcileCommandAttempt failed>>=right
+  check "completed failed candidate proves absence without constructing authority" (case absent of Nothing->True;_->False)
+
+commandDeadlineChecks :: FilePath -> IO ()
+commandDeadlineChecks work=withFixture work "command-deadline" (64*commandCapacity) 10 $ \_ _ _ store profile proof->do
+  clock<-newIORef 0
+  req<-request store SetInput "deadline"
+  withCommitDeadline store (readIORef clock) 10 $ \guard->do
+    attempt<-newCommandAttempt store proof req
+    accepted<-submitCommandAttemptWithDeadline guard attempt (\_ _ _->Right(edit profile(commandResource req)"deadline_revision"))>>=right
+    writeIORef clock 10
+    repeated<-newCommandAttempt store proof req
+    replay<-submitCommandAttemptWithDeadline guard repeated (\_ _ _->Left StateConflict)>>=right
+    check "exact command replay bypasses fresh acceptance deadline" (submissionReceipt replay==submissionReceipt accepted && submissionReplayed replay)
+    newRequest<-request store SetInput "deadline_expired"
+    let freshRequest=newRequest{commandPrecondition=Just "\"deadline_revision\""}
+    freshAttempt<-newCommandAttempt store proof freshRequest
+    expect "fresh command enforces deadline after bounded acceptance work" StorageUnavailable
+      (submitCommandAttemptWithDeadline guard freshAttempt(\_ _ _->Right(edit profile(commandResource req)"must_rollback")))
+    scalarText store "SELECT revision FROM requests WHERE id='request_1'" >>=check "expired fresh intent rolls back owning mutation" . (=="deadline_revision")
+    scalarInt store "SELECT count(*) FROM commands" >>=check "expired fresh intent publishes no receipt" . (==1)
+  escaped<-withCommitDeadline store (readIORef clock) 20 pure
+  expiredScope<-try @StoreFailure $ mutate store $ do
+    execute "UPDATE clients SET revision='escaped_deadline' WHERE id='client_1'" []
+    enforceCommitDeadline escaped
+  check "escaped deadline guard cannot authorize a later transaction" (case expiredScope of Left StoreDeadline->True;_->False)

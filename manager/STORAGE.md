@@ -53,11 +53,12 @@ heap or temporary-disk quotas. The pinned Unix SQLite source specifies mode
 0600 for DELETEONCLOSE temporary files. That source evidence is not an exhaustive
 platform or forced-spill test.
 
-`PRAGMA user_version` holds internal schema version 3. Startup accepts versions
-zero through three, and rejects other versions before changing journaling or
+`PRAGMA user_version` holds internal schema version 4. Startup accepts versions
+zero through four, and rejects other versions before changing journaling or
 schema. Fresh initialization, command-ledger additions, and the explicit literal
-chunk/upload migration execute DDL, metadata and version publication in one
-immediate transaction. Version-one DDL and the version-two migration remain unchanged. The frozen public managerStore compatibility stays at one.
+chunk/upload migration and admission additions execute DDL, metadata and version
+publication in one immediate transaction. Version-one DDL and the version-two
+and version-three migrations remain unchanged. The frozen public managerStore compatibility stays at one.
 Failure rolls that transaction back and never publishes a connection. The
 metadata row separately stores authority epoch, stream identity, stream sequence,
 retained floor, and service revision. Epoch and stream are random 256-bit
@@ -71,7 +72,8 @@ The schema contains relational records rather than a generic object store:
 | Clients and credentials | Registered client keys, independent verifier identities, expiry, revocation, and credential/profile scopes support WM-010 and WM-023. |
 | Requests and inputs | Workflow/profile revisions, request phase, admission, queue ordinal, ordered declarations, validation data, and exclusive literal/capture bindings support WM-011 and WM-013. |
 | Captures | Request, client, profile, immutable private reference, byte count, and digest remain separate from content. |
-| Reservations | Unique execution slots and exclusive resource keys support WM-013 and cleanup quarantine. |
+| Reservations | Unique execution slots, separate operator/unclassified resource domains, exact cleanup-command association and captured revisions support WM-013. |
+| Admission observations and queue clock | Genuine native preparation metadata remains separate from complete public review, and a persistent unsigned queue clock survives release. These rows are not reconstructed timers or worker capabilities. |
 | Preparations | Request/reservation references, exact revisions, worker/native/root identities, expiry, review, and private binding support WM-012 and WM-014. Stored associations are not live capabilities. |
 | Runs and ingestion | Unique profile/root/native-run tuples, separate control revision, optional versioned runtime snapshot, supervision, result verification, and unique run/sequence ingestion support WM-015. |
 | Commands and decisions | Registered-client ledger uniqueness, request bytes, media type, preconditions, retirement, intent, dispatch association, attempted delivery, acknowledgements, effects, and exact decision identity support WM-010 and WM-016. |
@@ -84,8 +86,9 @@ Released reservations retain their historical identity with a null slot. A
 partial index permits only one active reservation per request, and non-null
 slots remain exclusive. Triggers refuse release while resource claims remain
 and refuse attaching claims to a released reservation. A later reservation can
-reuse capacity without deleting preparation history. Choosing when cleanup
-makes release safe remains WM-013's responsibility.
+reuse capacity without deleting preparation history. The [admission owner](ADMISSION.md)
+chooses release only after confirmation from its original live Worker or a
+protected construction that never requested a native worker.
 
 Separate link tables retain capture dependencies for preparations and commands.
 Optional runtime snapshots remain absent before runtime evidence exists.
@@ -179,3 +182,37 @@ strict bounds, cancellation, busy refusal, and pinned-reader checkpoint progress
 Configuration and discovery regression gates remain separate. These checks do
 not certify G1, worker containment, a deployed service, or the withdrawn SQLite
 directory-replacement obligation.
+
+## Admission lifetime registration
+
+Store retains one admission stop-and-join registration independently of its
+sixteen physical Worker slots. Closure fences new registration, signals the
+controller, and joins it outside database and registry locks. The controller
+retains its own bounded jobs and original Worker handles rather than deriving
+physical ownership from reservation rows.
+
+The version-four migration preserves old resource strings as operator-domain
+keys and initializes the queue clock from existing unsigned ordinal history.
+It adds nullable queue/input association fields without rewriting old request
+payloads or creating accepted-enqueue authority. Partial migration rolls back
+both the resource-key rebuild and the new columns. Old reservations retain
+their slots and generation, and a new controller cannot adopt them.
+
+When Store closure prevents the admission owner's final SQL transaction, physical
+workers are still stopped and joined. The controller reports unresolved persistence
+and leaves durable claims in place. This is separate from uncertain physical cleanup,
+which retains the original Worker registration, root, lease and configuration slot
+under the existing quarantine rule.
+
+## Final monotonic acceptance check
+
+The admission owner can loan a scoped opaque `CommitDeadline` carrying its actual
+monotonic clock and deadline. `enforceCommitDeadline` arms one fixed check in a
+writable transaction from the same Store generation. Store checks its active scope
+and current monotonic time after bounded work and invalidations, immediately before
+COMMIT. Expiry raises StoreDeadline and rolls back the transaction. This facility
+adds no general IO lift, client clock or caller-supplied acceptance predicate.
+
+The check is a logical acceptance point, not a promise that time cannot advance
+during commit IO. A confirmed matching start intent is not revoked afterward,
+while uncertain commit retains the existing poisoned-connection discipline.

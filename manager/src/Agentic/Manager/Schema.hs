@@ -1,12 +1,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Versioned relational coordination facts. Stored identities are not capabilities.
-module Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration) where
+module Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration) where
 
 import Data.Text (Text)
 
 schemaVersion :: Int
-schemaVersion = 3
+schemaVersion = 4
 
 schemaStatements :: [Text]
 schemaStatements =
@@ -73,4 +73,33 @@ draftMigration =
     "WITH RECURSIVE positions(n) AS (VALUES(0) UNION ALL SELECT n+1 FROM positions WHERE n<31) INSERT INTO request_literal_chunks SELECT request_id,name,n,substr(literal,n*65536+1,65536) FROM request_inputs_v2 JOIN positions ON n<(length(literal)+65535)/65536 WHERE source='literal'",
     "DROP TABLE request_inputs_v2",
     "CREATE TABLE capture_uploads (id TEXT PRIMARY KEY NOT NULL, request_id TEXT NOT NULL REFERENCES requests(id), client_id TEXT NOT NULL REFERENCES clients(id), profile_id TEXT NOT NULL, profile_revision TEXT NOT NULL, process_generation TEXT NOT NULL, reserved_bytes INTEGER NOT NULL CHECK(reserved_bytes BETWEEN 0 AND 67108864), created_at TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('pending','orphan')), FOREIGN KEY(request_id,profile_id) REFERENCES requests(id,profile_id)) STRICT"
+  ]
+
+-- | Version-four queue order and independently retained native admission observations.
+admissionMigration :: [Text]
+admissionMigration =
+  [ "ALTER TABLE requests ADD COLUMN input_revision TEXT",
+    "ALTER TABLE requests ADD COLUMN queue_origin_revision TEXT",
+    "ALTER TABLE requests ADD COLUMN queue_generation TEXT",
+    "ALTER TABLE requests ADD COLUMN enqueue_command TEXT REFERENCES commands(id) DEFERRABLE INITIALLY DEFERRED",
+    "ALTER TABLE reservations ADD COLUMN request_revision TEXT",
+    "ALTER TABLE reservations ADD COLUMN profile_revision TEXT",
+    "ALTER TABLE reservations ADD COLUMN queue_ordinal TEXT",
+    "ALTER TABLE reservations ADD COLUMN pending_command TEXT REFERENCES commands(id) DEFERRABLE INITIALLY DEFERRED",
+    "ALTER TABLE reservations ADD COLUMN pending_kind TEXT CHECK(pending_kind IN ('edit','withdraw','expired','closed','worker-lost'))",
+    "CREATE TRIGGER admission_ordinal_insert BEFORE INSERT ON requests WHEN NEW.queue_ordinal IS NOT NULL AND NOT(length(NEW.queue_ordinal) BETWEEN 1 AND 20 AND NEW.queue_ordinal NOT GLOB '*[^0-9]*' AND (NEW.queue_ordinal='0' OR substr(NEW.queue_ordinal,1,1) BETWEEN '1' AND '9') AND (length(NEW.queue_ordinal)<20 OR NEW.queue_ordinal<='18446744073709551615')) BEGIN SELECT RAISE(ABORT,'invalid queue ordinal'); END",
+    "CREATE TRIGGER admission_ordinal_update BEFORE UPDATE OF queue_ordinal ON requests WHEN NEW.queue_ordinal IS NOT NULL AND NOT(length(NEW.queue_ordinal) BETWEEN 1 AND 20 AND NEW.queue_ordinal NOT GLOB '*[^0-9]*' AND (NEW.queue_ordinal='0' OR substr(NEW.queue_ordinal,1,1) BETWEEN '1' AND '9') AND (length(NEW.queue_ordinal)<20 OR NEW.queue_ordinal<='18446744073709551615')) BEGIN SELECT RAISE(ABORT,'invalid queue ordinal'); END",
+    "CREATE TABLE admission_queue_clock (singleton INTEGER PRIMARY KEY CHECK(singleton=1), last_ordinal TEXT NOT NULL CHECK(length(last_ordinal) BETWEEN 1 AND 20 AND last_ordinal NOT GLOB '*[^0-9]*' AND (last_ordinal='0' OR substr(last_ordinal,1,1) BETWEEN '1' AND '9') AND (length(last_ordinal)<20 OR last_ordinal<='18446744073709551615'))) STRICT",
+    "INSERT INTO admission_queue_clock SELECT 1,coalesce((SELECT queue_ordinal FROM requests WHERE queue_ordinal IS NOT NULL ORDER BY length(queue_ordinal) DESC,queue_ordinal DESC LIMIT 1),'0')",
+    "DROP TRIGGER release_without_claims",
+    "DROP TRIGGER claim_active_reservation",
+    "DROP TRIGGER move_claim_to_active_reservation",
+    "ALTER TABLE reservation_resources RENAME TO reservation_resources_v3",
+    "CREATE TABLE reservation_resources (kind TEXT NOT NULL CHECK(kind IN ('operator','unclassified')), resource_key TEXT NOT NULL, reservation_id TEXT NOT NULL REFERENCES reservations(id), PRIMARY KEY(kind,resource_key), CHECK(kind='operator' OR resource_key='')) STRICT",
+    "INSERT INTO reservation_resources SELECT 'operator',resource_key,reservation_id FROM reservation_resources_v3",
+    "DROP TABLE reservation_resources_v3",
+    "CREATE TRIGGER release_without_claims BEFORE UPDATE OF state ON reservations WHEN NEW.state='released' AND EXISTS(SELECT 1 FROM reservation_resources WHERE reservation_id=OLD.id) BEGIN SELECT RAISE(ABORT,'reservation retains resource claims'); END",
+    "CREATE TRIGGER claim_active_reservation BEFORE INSERT ON reservation_resources WHEN (SELECT state FROM reservations WHERE id=NEW.reservation_id)='released' BEGIN SELECT RAISE(ABORT,'reservation is released'); END",
+    "CREATE TRIGGER move_claim_to_active_reservation BEFORE UPDATE OF reservation_id ON reservation_resources WHEN (SELECT state FROM reservations WHERE id=NEW.reservation_id)='released' BEGIN SELECT RAISE(ABORT,'reservation is released'); END",
+    "CREATE TABLE admission_observations (reservation_id TEXT PRIMARY KEY NOT NULL REFERENCES reservations(id), native_run_id TEXT NOT NULL, root_identity TEXT NOT NULL, observed_at TEXT NOT NULL, review_expires_at TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('prepared','invalidated','handed-off')), reason TEXT CHECK(reason IN ('input-changed','withdrawn','expired','closed','worker-lost'))) STRICT"
   ]

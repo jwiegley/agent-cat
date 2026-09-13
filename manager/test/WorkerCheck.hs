@@ -250,8 +250,8 @@ wrappedChecks work source native python = do
       check "stderr draining does not replace or block native runtime events" (any (\event -> case envelopeEvent event of RunCompletedV2 {} -> True; _ -> False) events)
   let hangEvidence = work </> "startup-hang.ndjson"
   withCase work "startup-hang" python [wrapper,native,"startup-hang",hangEvidence] $ \root _ _ store revision catalogue -> do
-    expect "whole startup has its actual thirty-second deadline" WorkerStartupTimeout
-      (withFrontendWorker store "profile" revision (setupFor root catalogue "prompt-source") (const (pure ())))
+    expect "whole startup deadline runs even when early owner never awaits preparation" WorkerStartupTimeout
+      (withStartingFrontendWorker store "profile" revision (setupFor root catalogue "prompt-source") waitWorker)
     removeFile (work </> "startup-hang.ready")
     pending <- async (withFrontendWorker store "profile" revision (setupFor root catalogue "prompt-source") (const (pure ())))
     waitUntil (doesFileExist (work </> "startup-hang.ready"))

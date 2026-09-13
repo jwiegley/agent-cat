@@ -197,3 +197,32 @@ existing frozen validator, and compiles positive and negative real-source proof
 consumers. Storage, configuration, profile, and full contract gates remain separate.
 No HTTP service, credential administration, provider execution, restored worker
 adoption, power-loss test, or withdrawn SQLite confinement experiment is claimed.
+
+## Admission continuations
+
+The admission owner retains an opaque `CommandAttempt` before submitting a fresh
+local operation. Submission through that context is one-shot. Reconciliation is
+available only after it finishes and is bound to the same Store generation,
+authority epoch, candidate command and exact original request bytes. It can prove
+that a rolled-back candidate is absent or recover that invocation's retained
+enqueue or cleanup association. It never creates a context from a receipt or
+reconstructs physical authority from SQL.
+
+Accepted enqueue permits retain the exact command, queue origin, input revision
+and catalogue selection. Current credential changes do not revoke accepted work,
+while new client operations retain the ordinary current authorization checks.
+The owning controller preserves known associations across lifecycle revisions
+and invalidates them on input changes, withdrawal and release.
+
+`recordEffectWith` allows the owning release transition and the existing command
+effect to commit in one Store transaction after actual cleanup confirmation.
+An exact repeated effect does not rerun that transition or append an event.
+Runtime acknowledgement and successful workflow completion remain separate facts.
+
+`submitCommandAttemptWithDeadline` shares the ordinary acceptance implementation
+and arms the live owner's final Store check only for fresh acceptance. Completed
+exact replay remains an authorization-checked receipt lookup without a new deadline
+check, charge or effect. An expired final check rolls back the source-owned mutation,
+command receipt and invalidations. The WM-014 approval owner must use this seam with
+the guard loaned by Admission, rather than a clock value captured before its other
+acceptance checks.

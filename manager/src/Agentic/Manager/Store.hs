@@ -7,8 +7,8 @@
 -- | A single leased SQLite writer with strict, bounded transaction results.
 module Agentic.Manager.Store
   ( CoordinationStore, StoreIdentity (..), StoreFailure (..), Checkpoint (..),
-    withCoordinationStore, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreFiles, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, retryStoreCleanup, probeStoreCapabilities,
-    Transaction, execute, query, refuseTransaction, runTransaction, runRead, transactionGeneration,
+    withCoordinationStore, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreFiles, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, retryStoreCleanup, probeStoreCapabilities,
+    CommitDeadline, withCommitDeadline, enforceCommitDeadline, Transaction, execute, query, refuseTransaction, runTransaction, runRead, transactionGeneration,
     Invalidation (..)
   ) where
 
@@ -16,7 +16,7 @@ import Agentic.Manager.Configuration
   (InstalledConfiguration, acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationSnapshot, withConfigurationCatalogues, probeConfiguredCapabilities)
 import Agentic.Manager.Profile (ConfigurationLimits, PublicProfile, Diagnostic, Discovery)
 import Agentic.Manager.Lease (duplicateLease)
-import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration)
+import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration)
 import Agentic.Runtime
   (PrivateRoot, assertPrivateRoot, closePrivateRoot, openPrivateSubroot, privateRootPath,
    withPrivateDirectoryAt, writePrivateExclusiveAt, WorkflowInputDescriptor (..), frontendLiteralBytes, FrontendCapabilities, ProcessGroup, createProcessGroup, terminateProcessGroup, groupOutcome)
@@ -37,6 +37,7 @@ import Crypto.Random (getRandomBytes)
 import Data.ByteArray.Encoding (Base (Base16), convertToBase)
 import qualified Data.ByteString as BS
 import Data.Int (Int64)
+import Data.Word (Word64)
 import Data.Bits ((.&.))
 import Data.Char (isAlphaNum, isAscii, isSpace)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
@@ -80,14 +81,14 @@ data Checkpoint = Checkpoint
 
 -- | One connection and a fail-fast admission cell. There is no waiting operation queue.
 data CoordinationStore = CoordinationStore !InstalledConfiguration !PrivateRoot !SQL.Database !StoreIdentity
-  !(MVar ()) !(IORef Bool) !(IORef Bool) !Fd !(MVar ()) !(MVar (Bool, [StoreWorker])) !(MVar ()) !(IORef Bool)
+  !(MVar ()) !(IORef Bool) !(IORef Bool) !Fd !(MVar ()) !(MVar (Bool, [StoreWorker])) !(MVar ()) !(IORef Bool) !(MVar (Bool, Maybe (TMVar (), MVar ())))
 
 -- | One in-memory lifetime notification and joined release, not PID authority.
 data StoreWorker = StoreWorker !(TMVar ()) !(MVar ()) !(MVar [ProcessGroup]) !(MVar (Maybe (PrivateRoot, Fd)))
 
 -- | A manager-only transaction program. No IO lift, connection or cursor is exported.
 newtype Transaction a = Transaction (Context -> IO a)
-data Context = Context !SQL.Database !Text !Bool !(IORef Budget) !(IORef Bool)
+data Context = Context !SQL.Database !Text !Bool !(IORef Budget) !(IORef Bool) !(IORef (Maybe CommitDeadline))
 data Budget = Budget !Int !Int !Int !Int
 
 instance Functor Transaction where
@@ -136,7 +137,7 @@ openStore installed root lease = storageErrors $ do
     (epoch, stream) <- bounded db 30000000 $ do
       SQL.exec db "PRAGMA busy_timeout=100; PRAGMA foreign_keys=ON; PRAGMA temp_store=FILE; PRAGMA cache_size=-2048; PRAGMA temp.cache_size=-2048"
       version <- scalar db "PRAGMA user_version"
-      unless (version `elem` map SQL.SQLInteger [0, 1, 2, fromIntegral schemaVersion]) $
+      unless (version `elem` map SQL.SQLInteger [0, 1, 2, 3, fromIntegral schemaVersion]) $
         throwIO StoreVersion
       -- Newer versions are refused before changing their journal or schema.
       wal <- scalar db "PRAGMA journal_mode=WAL"
@@ -149,7 +150,7 @@ openStore installed root lease = storageErrors $ do
         [[SQL.SQLText epoch, SQL.SQLText stream]] -> pure (epoch, stream)
         _ -> throwIO StoreIntegrity
     CoordinationStore installed root db (StoreIdentity schemaVersion epoch stream generation)
-      <$> newMVar () <*> newIORef False <*> newIORef False <*> pure lease <*> newMVar () <*> newMVar (False, []) <*> newMVar () <*> newIORef False
+      <$> newMVar () <*> newIORef False <*> newIORef False <*> pure lease <*> newMVar () <*> newMVar (False, []) <*> newMVar () <*> newIORef False <*> newMVar (False, Nothing)
   where
     databaseName = "coordination.sqlite3"
     checkCompanion name = do
@@ -201,15 +202,21 @@ migrate db = mask $ \restore -> do
         SQL.exec db "PRAGMA user_version=1"
       SQL.SQLInteger 1 -> pure ()
       SQL.SQLInteger 2 -> pure ()
+      SQL.SQLInteger 3 -> pure ()
       SQL.SQLInteger current | current == fromIntegral schemaVersion -> pure ()
       _ -> throwIO StoreVersion
     when (version `elem` [SQL.SQLInteger 0, SQL.SQLInteger 1]) $ do
       mapM_ (SQL.exec db) commandMigration
       SQL.exec db "PRAGMA user_version=2"
-    when (version /= SQL.SQLInteger (fromIntegral schemaVersion)) $ do
+    when (version `elem` [SQL.SQLInteger 0, SQL.SQLInteger 1, SQL.SQLInteger 2]) $ do
       mapM_ (SQL.exec db) draftMigration
       migrateLiteralDigests db Nothing
       SQL.exec db "PRAGMA user_version=3"
+    when (version /= SQL.SQLInteger (fromIntegral schemaVersion)) $ do
+      invalid <- scalar db "SELECT count(*) FROM requests WHERE queue_ordinal IS NOT NULL AND NOT(length(queue_ordinal) BETWEEN 1 AND 20 AND queue_ordinal NOT GLOB '*[^0-9]*' AND (queue_ordinal='0' OR substr(queue_ordinal,1,1) BETWEEN '1' AND '9') AND (length(queue_ordinal)<20 OR queue_ordinal<='18446744073709551615'))"
+      unless (invalid==SQL.SQLInteger 0) (throwIO StoreIntegrity)
+      mapM_ (SQL.exec db) admissionMigration
+      SQL.exec db "PRAGMA user_version=4"
     SQL.exec db "COMMIT"
   case result of
     Right () -> pure ()
@@ -259,14 +266,17 @@ migrateLiteralDigests db after = do
 
 
 closeStore :: CoordinationStore -> IO ()
-closeStore store@(CoordinationStore installed root db _ gate closed poisoned lease files workers closing retired) =
+closeStore store@(CoordinationStore installed root db _ gate closed poisoned lease files workers closing retired admission) =
   uninterruptibleMask_ $ withMVar closing $ \_ -> do
     already <- readIORef retired
     unless already $ do
       writeIORef closed True
+      controller <- modifyMVarMasked admission (\(_, owner) -> pure ((True, owner), owner))
+      forM_ controller $ \(stop, _) -> void (atomically (tryPutTMVar stop ()))
       active <- modifyMVarMasked workers (\(_, entries) -> pure ((True, entries), entries))
       mapM_ (\(StoreWorker stop _ _ _) -> void (atomically (tryPutTMVar stop ()))) active
       mapM_ (\(StoreWorker _ done _ _) -> readMVar done) active
+      forM_ controller (readMVar . snd)
       -- Only the original Runtime tokens may resolve previously unproven completion.
       forM_ active $ \entry@(StoreWorker _ _ groups _) -> do
         owned <- readMVar groups
@@ -289,16 +299,16 @@ retryStoreCleanup = closeStore
 
 -- | Configuration authority associated with this store, never a caller-selected registry.
 withStoreConfiguration :: CoordinationStore -> (ConfigurationLimits -> [PublicProfile] -> IO a) -> IO (Either Diagnostic a)
-withStoreConfiguration (CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _) = withConfigurationSnapshot installed
+withStoreConfiguration (CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _) = withConfigurationSnapshot installed
 
 -- | Current catalogue facts from the same associated configuration and lock.
 withStoreCatalogues :: CoordinationStore -> (ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> IO a) -> IO (Either Diagnostic a)
-withStoreCatalogues (CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _) = withConfigurationCatalogues installed
+withStoreCatalogues (CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _) = withConfigurationCatalogues installed
 
 -- | One fail-fast file operation, joined by store close. Lock order: file, configuration, database.
 -- The retained root and duplicated lease cannot escape this callback's lifetime.
 withStoreFiles :: CoordinationStore -> (PrivateRoot -> IO a) -> IO a
-withStoreFiles store@(CoordinationStore _ root _ _ _ closed _ lease files _ _ _) action = mask $ \restore -> do
+withStoreFiles store@(CoordinationStore _ root _ _ _ closed _ lease files _ _ _ _) action = mask $ \restore -> do
   readIORef closed >>= \done -> when done (throwIO StoreClosed)
   acquired <- tryTakeMVar files
   case acquired of
@@ -310,9 +320,26 @@ withStoreFiles store@(CoordinationStore _ root _ _ _ closed _ lease files _ _ _)
       pure (retained, copied)
     release (retained, copied) = closePrivateRoot retained `finally` closeFd copied
 
+-- | One admission owner, separate from the physical worker registration ceiling.
+withStoreAdmission :: CoordinationStore -> (STM Bool -> IO a) -> IO a
+withStoreAdmission (CoordinationStore _ _ _ _ _ closed _ _ _ _ _ _ admission) action = mask $ \restore -> do
+  stop <- newEmptyTMVarIO
+  done <- newEmptyMVar
+  modifyMVarMasked admission $ \(fenced, current) -> do
+    closing <- readIORef closed
+    when (fenced || closing) (throwIO StoreClosed)
+    case current of
+      Just _ -> throwIO StoreBusy
+      Nothing -> pure ((False, Just (stop, done)), ())
+  result <- try @SomeException (restore (action (isEmptyTMVar stop)))
+  atomically (void (tryPutTMVar stop ()))
+  modifyMVarMasked admission (\(fenced, _) -> pure ((fenced, Nothing), ()))
+  putMVar done ()
+  either throwIO pure result
+
 -- | A separate bounded lifetime for workers. Close signals and joins it without SQL.
 withStoreWorker :: CoordinationStore -> (StoreWorker -> PrivateRoot -> STM Bool -> IO a) -> IO a
-withStoreWorker store@(CoordinationStore _ root _ _ _ _ _ lease _ workers _ _) action = mask $ \restore -> do
+withStoreWorker store@(CoordinationStore _ root _ _ _ _ _ lease _ workers _ _ _) action = mask $ \restore -> do
   entry@(StoreWorker stop done _ resources) <- StoreWorker <$> newEmptyTMVarIO <*> newEmptyMVar <*> newMVar [] <*> newMVar Nothing
   modifyMVarMasked workers $ \(fenced, entries) -> do
     when fenced (throwIO StoreCleanupUnproven)
@@ -352,7 +379,7 @@ storeWorkerCleanupConfirmed (StoreWorker _ _ groups _) = do
   pure (all (\value -> case value of Just (Right _) -> True; _ -> False) results)
 
 releaseStoreWorker :: CoordinationStore -> StoreWorker -> IO ()
-releaseStoreWorker (CoordinationStore _ _ _ _ _ closed _ _ _ workers _ _) entry@(StoreWorker stop done _ resources) = do
+releaseStoreWorker (CoordinationStore _ _ _ _ _ closed _ _ _ workers _ _ _) entry@(StoreWorker stop done _ resources) = do
   void (atomically (tryPutTMVar stop ()))
   confirmed <- storeWorkerCleanupConfirmed entry
   if confirmed then do
@@ -366,13 +393,13 @@ releaseStoreWorker (CoordinationStore _ _ _ _ _ closed _ _ _ workers _ _) entry@
 
 
 probeStoreCapabilities :: CoordinationStore -> StoreWorker -> Text -> Text -> IO (Either Diagnostic FrontendCapabilities)
-probeStoreCapabilities (CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _) owner = probeConfiguredCapabilities installed (createStoreWorkerGroup owner)
+probeStoreCapabilities (CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _) owner = probeConfiguredCapabilities installed (createStoreWorkerGroup owner)
 
 storeIdentity :: CoordinationStore -> IO StoreIdentity
-storeIdentity store@(CoordinationStore _ _ _ identity _ _ _ _ _ _ _ _) = admitted store (pure identity)
+storeIdentity store@(CoordinationStore _ _ _ identity _ _ _ _ _ _ _ _ _) = admitted store (pure identity)
 
 checkpointStore :: CoordinationStore -> IO Checkpoint
-checkpointStore store@(CoordinationStore _ _ db _ _ _ _ _ _ _ _ _) = admitted store $ bounded db 5000000 $ do
+checkpointStore store@(CoordinationStore _ _ db _ _ _ _ _ _ _ _ _ _) = admitted store $ bounded db 5000000 $ do
   verifyPragmas db
   values <- rawRows db "PRAGMA wal_checkpoint(PASSIVE)" []
   case values of
@@ -380,7 +407,7 @@ checkpointStore store@(CoordinationStore _ _ db _ _ _ _ _ _ _ _ _) = admitted st
     _ -> throwIO StoreIntegrity
 
 admitted :: CoordinationStore -> IO a -> IO a
-admitted (CoordinationStore _ root _ _ gate closed poisoned _ _ _ _ _) action = mask $ \restore -> do
+admitted (CoordinationStore _ root _ _ gate closed poisoned _ _ _ _ _ _) action = mask $ \restore -> do
   readIORef closed >>= \value -> when value (throwIO StoreClosed)
   token <- tryTakeMVar gate
   case token of
@@ -393,7 +420,7 @@ admitted (CoordinationStore _ root _ _ gate closed poisoned _ _ _ _ _) action = 
 -- | Internal callers supply source-owned SQL, never SQL obtained from a client.
 -- Statement count, binding bytes and strict result bytes share one transaction budget.
 execute :: Text -> [SQL.SQLData] -> Transaction ()
-execute sql parameters = Transaction $ \context@(Context db _ writable _ changed) -> do
+execute sql parameters = Transaction $ \context@(Context db _ writable _ changed _) -> do
   unless writable (throwIO StoreIntegrity)
   unless (T.toUpper (T.takeWhile (not . isSpace) (T.stripStart sql)) `elem` ["INSERT", "UPDATE", "DELETE"]) $
     throwIO StoreIntegrity
@@ -402,7 +429,7 @@ execute sql parameters = Transaction $ \context@(Context db _ writable _ changed
   writeIORef changed True
 
 query :: Text -> [SQL.SQLData] -> Transaction [[SQL.SQLData]]
-query sql parameters = Transaction $ \context@(Context db _ _ budget _) -> do
+query sql parameters = Transaction $ \context@(Context db _ _ budget _ _) -> do
   unless (T.toUpper (T.takeWhile (not . isSpace) (T.stripStart sql)) `elem` ["SELECT", "WITH"]) $
     throwIO StoreIntegrity
   chargeInput context sql parameters
@@ -413,9 +440,35 @@ query sql parameters = Transaction $ \context@(Context db _ _ budget _) -> do
     SQL.bind statement parameters
     collectRows budget statement
 
+-- | One live owner's monotonic acceptance deadline, scoped to a protected loan.
+data CommitDeadline = CommitDeadline !Text !(IO Word64) !Word64 !(IORef Bool)
+
+withCommitDeadline :: CoordinationStore -> IO Word64 -> Word64 -> (CommitDeadline -> IO a) -> IO a
+withCommitDeadline (CoordinationStore _ _ _ identity _ closed _ _ _ _ _ _ _) now deadline action = mask $ \restore -> do
+  readIORef closed >>= \closing -> when closing(throwIO StoreClosed)
+  active <- newIORef True
+  restore(action(CommitDeadline(storeProcessGeneration identity)now deadline active)) `finally` writeIORef active False
+
+-- | Arm one fixed final check after transactional work and invalidations, before COMMIT.
+-- This adds no general IO lift or caller-supplied acceptance predicate.
+enforceCommitDeadline :: CommitDeadline -> Transaction ()
+enforceCommitDeadline guard@(CommitDeadline owner _ _ _) = Transaction $ \(Context _ generation writable _ _ pending) -> do
+  unless(writable && owner==generation)(throwIO StoreIntegrity)
+  existing <- readIORef pending
+  case existing of
+    Nothing -> writeIORef pending(Just guard)
+    Just _ -> throwIO StoreIntegrity
+
+checkCommitDeadline :: CommitDeadline -> IO ()
+checkCommitDeadline (CommitDeadline _ now deadline active) = do
+  current <- readIORef active
+  unless current(throwIO StoreDeadline)
+  observed <- now
+  unless(observed<deadline)(throwIO StoreDeadline)
+
 -- | The current in-memory lifetime, never reconstructed from a database row.
 transactionGeneration :: Transaction Text
-transactionGeneration = Transaction $ \(Context _ generation _ _ _) -> pure generation
+transactionGeneration = Transaction $ \(Context _ generation _ _ _ _) -> pure generation
 
 refuseTransaction :: Exception e => e -> Transaction a
 refuseTransaction failure = Transaction (const (throwIO failure))
@@ -427,19 +480,21 @@ runTransaction :: NFData a => CoordinationStore -> Transaction (a, [Invalidation
 runTransaction store transaction = run store True transaction
 
 run :: NFData a => CoordinationStore -> Bool -> Transaction (a, [Invalidation]) -> IO a
-run store@(CoordinationStore _ _ db identity _ _ poisoned _ _ _ _ _) writable (Transaction action) = admitted store $ do
+run store@(CoordinationStore _ _ db identity _ _ poisoned _ _ _ _ _ _) writable (Transaction action) = admitted store $ do
   committing <- newIORef False
   changed <- newIORef False
   budget <- newIORef (Budget 256 8388608 1000 1048576)
+  deadline <- newIORef Nothing
   mask $ \restore -> do
     result <- try @SomeException $ restore $ bounded db 5000000 $ do
       SQL.exec db (if writable then "BEGIN IMMEDIATE" else "BEGIN")
-      (resultValue, events) <- action (Context db (storeProcessGeneration identity) writable budget changed)
+      (resultValue, events) <- action (Context db (storeProcessGeneration identity) writable budget changed deadline)
       validateEvents events
       value <- evaluate (force resultValue)
       didChange <- readIORef changed
       when (didChange && null events) (throwIO StoreIntegrity)
       mapM_ (appendInvalidation db) events
+      readIORef deadline >>= mapM_ checkCommitDeadline
       writeIORef committing True
       SQL.exec db "COMMIT"
       pure value
@@ -484,7 +539,7 @@ appendInvalidation db (Invalidation kind uri revision) = do
     [SQL.SQLText kind, SQL.SQLText uri, SQL.SQLText revision]
 
 chargeInput :: Context -> Text -> [SQL.SQLData] -> IO ()
-chargeInput (Context _ _ _ budget _) sql parameters = do
+chargeInput (Context _ _ _ budget _ _) sql parameters = do
   when (T.length sql > 65536 || T.any (`elem` ['\0', ';']) sql) (throwIO StoreLimit)
   let sqlBytes = BS.length (TE.encodeUtf8 sql)
   when (sqlBytes > 65536) (throwIO StoreLimit)

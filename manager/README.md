@@ -132,7 +132,8 @@ listener or credential administration endpoint is introduced by this unit.
 The [draft contract](DRAFTS.md) provides catalogue-authorized creation, immutable
 creation replies, literal chunk integrity, bounded capture publication, readiness
 and shared frontend-frame assembly. It retains the existing literal/transport
-meaning and refuses unsupported live-worker edits without inventing cleanup.
+meaning. The admission owner supplies live-worker edit invalidation and confirmed
+cleanup without changing the standalone draft operation into a worker owner.
 
 `manager/ci/drafts.sh` exercises actual installed-runner discovery, SQLite,
 Runtime publication and codecs at N1 and N8. Public output is checked with the
@@ -143,11 +144,24 @@ frozen validator. Worker ownership, approval and later retention remain separate
 The [worker contract](WORKERS.md) provides scoped native frontend ownership,
 serialized private controls and bounded lossless ingestion. It reuses the actual
 CLI proxy/pre-RTS bootstrap and Runtime ProcessGroup completion. Observers neither
-consume the manager ingestion queue nor own its pipes. Admission, exact approval,
-durable ingestion and broader containment remain with their later owners.
+consume the manager ingestion queue nor own its pipes. Exact approval, durable
+ingestion and broader containment remain with their later owners.
 
 `manager/ci/workers.sh` runs actual native N1/N8 workers, controlled phase failures,
 queue/observer/write regressions and original-token cleanup retention checks.
+
+## Admission and reservations
+
+The [admission contract](ADMISSION.md) provides explicit enqueue, global
+oldest-eligible selection, atomic resource claims, live preparation ownership,
+monotonic review expiry and cleanup-confirmed release. It extends the existing
+command and draft owners for real edit and withdrawal invalidation. Original
+worker associations remain opaque and are not reconstructed after reopen.
+
+`manager/ci/admission.sh` runs bounded policy properties and real native lifecycle
+checks at N1 and N8. WM-014 still owns complete review, exact approval and the
+mandatory accepted-running integration gate, without fabricated approval records
+or a new service endpoint in this package.
 
 ## Root separation
 
