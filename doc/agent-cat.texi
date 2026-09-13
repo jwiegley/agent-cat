@@ -3883,7 +3883,8 @@ or lifecycle transition is attempted, without another event, charge, or ticket.
 Conflicting bindings refuse.  Aged inactive receipts retain charged non-content
 tombstones rather than permitting replay.
 
-Internal schema version two migrates existing version-one facts transactionally.
+The version-two command migration preserves existing version-one facts.
+Internal schema version three adds the draft representations transactionally.
 Legacy raw bodies remain exact and are compared within SQLite rather than copied
 through the result buffer.  The frozen public manager-store compatibility domain
 remains version one.  Logical ledger reservations include bounded future receipt
@@ -3904,6 +3905,40 @@ safe lifecycle transitions, and wider retention and supervision remain with
 their owning layers.  Logical reservations are not physical database, temporary
 disk, or total-heap limits.  The complete contract and evidence limits are in
 @file{manager/COMMANDS.md}.
+
+@subsection Drafts and immutable inputs
+
+The internal draft layer creates requests from the current installed catalogue,
+using exact workflow, descriptor, and profile revisions.  Failed discovery and
+reload clear the cached catalogue.  Authorized completed retries retain the
+original creation view without adopting new discovery facts or revealing later
+edits.  Readiness records missing inputs and validation errors without executing
+a workflow, and empty text remains supplied input.
+
+Literal values retain their UTF-8 bytes in bounded ordered chunks with length,
+count, and digest metadata.  Migration preserves previous bytes and declarations.
+Unknown native transport lengths remain unknown rather than becoming zero or
+ready.  Missing or changed chunks refuse instead of becoming empty input.
+
+Uploads reserve bounded holding capacity before streaming to Runtime's durable
+private publisher.  The database transaction does not span upload IO, and the
+exact command-body binding is computed from the actual stream through EOF.
+Confirmed publication and command acceptance remain distinct.  An uncertain
+publication retains its installed bytes and charged orphan protection without a
+successful capture binding.  Completed retries do not publish a second file.
+
+Materialization verifies capture bytes and preserves declaration order through
+the shared frontend encoder.  Captures use inline transport only when the actual
+encoded frame fits, otherwise they use verified server-owned immutable files.
+Oversized literal frames refuse without changing their input representation.
+Per-client and global draft limits, per-request holding and assembled-input
+limits, and global capture reservations are independent accounting bounds.
+
+The file-operation slot is fail-fast and is joined before store closure.
+Draft and queued edits require no active reservation or live preparation.
+Worker discard, approval, and retention remain with their owning layers rather
+than being inferred from these coordination records.  The current contract,
+migration rules, and verification limits are in @file{manager/DRAFTS.md}.
 
 @section Native frontend preparation
 @c COVER CLI verb:frontend author
@@ -3948,7 +3983,9 @@ changes do not change the prepared execution.  Captured input transports are
 bounded at 64 MiB in total.  Literal values use UTF-8, with one additional LF
 in prompt-file transport so that the existing single-LF decoding preserves
 the complete literal value.  Command-tail and standard-input transports retain
-their UTF-8 bytes without that addition.
+their UTF-8 bytes without that addition.  The shared Runtime operation
+@code{frontendLiteralBytes} supplies this encoding for both CLI capture and
+manager accounting.
 
 The @code{transport} source carries UTF-8 text captured by the client before
 preparation.  Its @code{value} encodes the original transport bytes rather

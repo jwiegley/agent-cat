@@ -52,6 +52,7 @@ main = do
       rollbackChecks work
       migrationChecks work
       largestLegacyChecks work
+      legacyCaptureChecks work
       codecChecks work source
       putStrLn "PASS manager command receipts and idempotency"
     _ -> error "usage: manager-command-check PRIVATE_DIRECTORY PACKAGE_DIRECTORY"
@@ -178,7 +179,7 @@ publicComposition work = do
   bracket (Public.installConfiguration configuration >>= right) Public.closeConfiguration $ \installed ->
     Public.withCoordinationStore installed $ \store -> do
       identity <- Public.storeIdentity store
-      check "installed public composition uses migrated store" (Public.storeSchemaVersion identity == 2)
+      check "installed public composition uses migrated store" (Public.storeSchemaVersion identity == 3)
 
 replayChecks :: FilePath -> IO ()
 replayChecks work = do
@@ -462,6 +463,27 @@ migrationChecks work = do
     expect "over-budget migrated records are preserved while new admission refuses" StorageQuota $
       submitCommand store proof (req {commandKey=commandKey req<>"new"}) (edit profile (commandResource req) "never")
 
+legacyCaptureChecks :: FilePath -> IO ()
+legacyCaptureChecks work = withFixture work "legacy-capture" (64 * commandCapacity) 20 $ \_ _ _ store profile proof -> do
+  epoch <- storeAuthorityEpoch <$> storeIdentity store
+  base <- request store Capture "legacy-capture"
+  let req = base {commandResource = "/v1/captures?requestId=request_1", commandMediaType = "application/octet-stream",
+        commandPrecondition = Nothing, commandBody = "captured\r\n"}
+      receipt = CommandReceipt "legacy_capture" "profile_1" Capture (commandResource req) Accepted "2000-01-01T00:00:00Z" Nothing Nothing Nothing Nothing
+      mutation = edit profile (commandResource req) "never"
+  mutate store $ execute
+    "INSERT INTO commands (id,revision,profile_id,operation,client_id,authority_epoch,method,resource_uri,idempotency_key,body,media_type,receipt,retired,accepted_at,state) VALUES ('legacy_capture','r','profile_1','capture','client_1',?,'POST',?,?,?,'application/octet-stream',?,0,'2000-01-01T00:00:00Z','accepted')"
+    [SQL.SQLText epoch, SQL.SQLText (commandResource req), SQL.SQLText (commandKey req), SQL.SQLBlob (commandBody req), SQL.SQLBlob (encoded receipt)]
+  replay <- submitCommand store proof req mutation >>= right
+  check "legacy capture exact body returns original receipt without a ticket"
+    (submissionReplayed replay && submissionReceipt replay == receipt && isNothing (submissionTicket replay))
+  sequenceBefore <- scalarText store "SELECT sequence FROM service_metadata"
+  expect "oversized differing legacy capture is a binding conflict, not storage failure" IdempotencyConflict $
+    submitCommand store proof (req {commandBody = BS.replicate 2097153 97}) mutation
+  scalarText store "SELECT sequence FROM service_metadata" >>= check "legacy capture conflict changes no sequence" . (== sequenceBefore)
+  rowsEqual store "SELECT body,receipt FROM commands WHERE id='legacy_capture'"
+    [[SQL.SQLBlob (commandBody req), SQL.SQLBlob (encoded receipt)]] >>= check "legacy capture conflict preserves original bytes"
+
 -- Exercise the accepted native row ceiling, not merely a large individual parameter.
 largestLegacyChecks :: FilePath -> IO ()
 largestLegacyChecks work = do
@@ -522,7 +544,7 @@ largestLegacyChecks work = do
   withInstalled path $ \installed -> withCoordinationStore installed $ \store -> do
     profile <- profileRevision installed
     proof <- authenticateCredential store bearerA >>= right
-    storeIdentity store >>= check "largest legacy row completes actual v2 migration" . ((== 2) . storeSchemaVersion)
+    storeIdentity store >>= check "largest legacy row completes current migration" . ((== 3) . storeSchemaVersion)
     largeRead <- try @StoreFailure (runRead store (query "SELECT body FROM commands WHERE id='legacy_largest'" [] >> pure ()))
     check "largest body cannot be copied through the one-MiB result budget" (case largeRead of Left StoreLimit -> True; _ -> False)
     replay <- submitCommand store proof req (edit profile (commandResource req) "never") >>= right

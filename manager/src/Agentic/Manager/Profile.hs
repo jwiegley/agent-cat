@@ -7,7 +7,7 @@ module Agentic.Manager.Profile
     validateConfigurationLimits, validateProfiles, QueryLimits (..), Registry,
     PublicProfile, publicId, publicRevision, Diagnostic (..),
     Selection, selectionContext, selectionInvocation,
-    Discovery, discoveryServer, discoveryWorkflows,
+    Discovery, discoveryServer, discoveryWorkflows, discoveryRevision, discoveryEntries, discoverySelection, discoveryProfileRevision, currentCatalogues,
     newRegistry, reloadProfiles, publicProfiles, selectProfile, probeProfile
   ) where
 
@@ -19,12 +19,14 @@ import Agentic.Runtime
     terminateProcessGroup, closeGroupPipes, groupOutput, groupErrors, waitProcessGroup )
 import Control.Concurrent.Async (concurrently)
 import Control.Concurrent.MVar (MVar, modifyMVar, newMVar, withMVar)
-import Control.Exception (Exception, IOException, bracket, finally, throwIO, try)
+import Control.Exception (Exception, IOException, SomeException, bracket, finally, mask, throwIO, try)
 import Control.Monad (unless)
+import Crypto.Hash (Digest, SHA256, hash)
 import Crypto.Random (getRandomBytes)
-import Data.Aeson (Result (Success, Error), ToJSON (toJSON), fromJSON, object, (.=))
+import Data.Aeson (Result (Success, Error), ToJSON (toJSON), encode, fromJSON, object, (.=))
 import Data.ByteArray.Encoding (Base (Base16), convertToBase)
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as BL
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -131,9 +133,13 @@ selectionInvocation (Selection p) = FrontendInvocation
 -- | Private discovery evidence. Server identity is process-reported, not authority.
 data Discovery = Discovery
   { discoveryServer :: !FrontendServer,
-    discoveryWorkflows :: ![WorkflowDescriptor] }
+    discoveryWorkflows :: ![WorkflowDescriptor],
+    discoveryRevision :: !Text,
+    discoveryEntries :: ![(Text, WorkflowDescriptor)],
+    discoverySelection :: !Selection,
+    discoveryProfileRevision :: !Text }
 
-data Installed = Installed !OperatorProfile !PublicProfile
+data Installed = Installed !OperatorProfile !PublicProfile !(Maybe Discovery)
 data Snapshot = Snapshot !Integer !(Map.Map Text Installed)
 
 -- | A registry-local revision namespace and one atomically replaced snapshot.
@@ -157,7 +163,7 @@ reloadProfiles (Registry nonce _ lock) candidates = case validateProfiles candid
   Right () -> modifyMVar lock $ \old@(Snapshot generation _) -> do
       let revision = nonce <> "_" <> T.pack (show (generation + 1))
           install p = Installed p (PublicProfile (operatorId p) revision
-            (operatorWorkspaceLabel p) (operatorTargetLabel p) (Just (initialFailure p)))
+            (operatorWorkspaceLabel p) (operatorTargetLabel p) (Just (initialFailure p))) Nothing
           entries = Map.fromList [(operatorId p, install p) | p <- candidates]
       if not (validToken revision)
         then pure (old, Left InvalidConfiguration)
@@ -168,7 +174,7 @@ publicProfiles (Registry _ _ lock) = withMVar lock $ \(Snapshot _ entries) ->
   pure (map installedPublic (Map.elems entries))
 
 installedPublic :: Installed -> PublicProfile
-installedPublic (Installed _ p) = p
+installedPublic (Installed _ p _) = p
 
 initialFailure :: OperatorProfile -> Diagnostic
 initialFailure p
@@ -212,7 +218,7 @@ validDefinition p = validToken (operatorId p)
 lookupInstalled :: Map.Map Text Installed -> Text -> Text -> Either Diagnostic Installed
 lookupInstalled entries ident revision = case Map.lookup ident entries of
   Nothing -> Left UnknownProfile
-  Just installed@(Installed _ p)
+  Just installed@(Installed _ p _)
     | revision /= publicRevision p -> Left StaleRevision
     | otherwise -> Right installed
 
@@ -222,39 +228,53 @@ lookupInstalled entries ident revision = case Map.lookup ident entries of
 selectProfile :: Registry -> Text -> Text -> IO (Either Diagnostic Selection)
 selectProfile (Registry _ _ lock) ident revision = withMVar lock $ \(Snapshot _ entries) ->
   pure $ do
-    Installed p view <- lookupInstalled entries ident revision
+    Installed p view _ <- lookupInstalled entries ident revision
     maybe (Right (Selection p)) Left (publicFailure view)
 
 -- | Probe only installed authority. Reload cannot revoke between selection and
 -- either launch. No public function launches a previously returned selection.
 -- ponytail: registry lock serializes queries, per-profile leases if contention matters.
 probeProfile :: Registry -> Text -> Text -> IO (Either Diagnostic Discovery)
-probeProfile (Registry _ limits lock) ident revision = modifyMVar lock $ \snapshot@(Snapshot generation entries) ->
-  case lookupInstalled entries ident revision of
-    Left failure -> pure (snapshot, Left failure)
-    Right (Installed p view)
-      | operatorQuarantined p -> pure (snapshot, Left Quarantined)
-      | operatorOwnership p == ClientBound -> pure (snapshot, Left UnsupportedOperation)
-      | otherwise -> do
-          result <- discover limits p
-          let updated = view {publicFailure = either Just (const Nothing) result}
-          pure (Snapshot generation (Map.insert ident (Installed p updated) entries), result)
+probeProfile (Registry _ limits lock) ident revision = mask $ \restore -> do
+  outcome <- modifyMVar lock $ \snapshot@(Snapshot generation entries) ->
+    case lookupInstalled entries ident revision of
+      Left failure -> pure (snapshot, Right (Left failure))
+      Right (Installed p view _)
+        | operatorQuarantined p -> pure (snapshot, Right (Left Quarantined))
+        | operatorOwnership p == ClientBound -> pure (snapshot, Right (Left UnsupportedOperation))
+        | otherwise -> do
+            result <- try @SomeException (restore (discover limits p revision))
+            let discovered = either (const (Left QueryTimeout)) id result
+                updated = view {publicFailure = either Just (const Nothing) discovered}
+                current = Installed p updated (either (const Nothing) Just discovered)
+            pure (Snapshot generation (Map.insert ident current entries), result)
+  either throwIO pure outcome
 
-discover :: QueryLimits -> OperatorProfile -> IO (Either Diagnostic Discovery)
-discover limits p = do
+-- | Only current successful discovery, cleared by reload and every failed probe.
+currentCatalogues :: Registry -> IO [(Text, Discovery)]
+currentCatalogues (Registry _ _ lock) = withMVar lock $ \(Snapshot _ entries) ->
+  pure [(ident, catalogue) | (ident, Installed _ _ (Just catalogue)) <- Map.toList entries]
+
+discover :: QueryLimits -> OperatorProfile -> Text -> IO (Either Diagnostic Discovery)
+discover limits p profileRevision = do
   capabilities <- query limits p ["frontend", "--capabilities"]
   case capabilities >>= either (const (Left InvalidReply)) Right . decodeFrontendCapabilities of
     Left failure -> pure (Left failure)
     Right caps | not (supportsMutation caps) -> pure (Left UnsupportedOperation)
     Right caps -> do
       catalogue <- query limits p ["list", "--json", "--descriptor-version", "3"]
+      nonce <- getRandomBytes 16 :: IO BS.ByteString
       pure $ do
         bytes <- catalogue
         rows <- either (const (Left InvalidReply)) Right (decodeWorkflowDescriptors bytes)
         unless (all ((== frontendServerRunnerVersion (capabilityServer caps)) . workflowRunnerVersion) rows)
           (Left RunnerVersionMismatch)
         unless (all supportsWorkflow rows) (Left UnsupportedOperation)
-        pure (Discovery (capabilityServer caps) rows)
+        unless (Set.size (Set.fromList (map workflowName rows)) == length rows
+          && all ((<= 256) . length . workflowInputs) rows) (Left InvalidReply)
+        let revision = TE.decodeUtf8 (convertToBase Base16 nonce)
+            identifier row = "workflow_" <> T.pack (show (hash (BL.toStrict (encode (operatorId p, workflowName row))) :: Digest SHA256))
+        pure (Discovery (capabilityServer caps) rows revision [(identifier row, row) | row <- rows] (Selection p) profileRevision)
 
 supportsMutation :: FrontendCapabilities -> Bool
 supportsMutation c = and

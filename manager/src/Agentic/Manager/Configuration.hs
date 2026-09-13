@@ -6,7 +6,7 @@ module Agentic.Manager.Configuration
   ( Configuration, TargetValidator, InstalledConfiguration,
     loadConfiguration, installConfiguration, reloadConfiguration, closeConfiguration,
     configurationSnapshot, selectConfiguredProfile, probeConfiguredProfile,
-    acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationSnapshot
+    acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationSnapshot, withConfigurationCatalogues
   ) where
 
 import Agentic.Manager.Lease (acquireLease, duplicateLease)
@@ -118,7 +118,10 @@ releaseConfigurationStorage (InstalledConfiguration _ slot) =
 
 -- | Internal fail-fast configuration boundary. Lock order is configuration, then store.
 withConfigurationSnapshot :: InstalledConfiguration -> (ConfigurationLimits -> [PublicProfile] -> IO a) -> IO (Either Diagnostic a)
-withConfigurationSnapshot (InstalledConfiguration lock _) action = mask $ \restore -> do
+withConfigurationSnapshot installed action = withConfigurationCatalogues installed $ \limits profiles _ -> action limits profiles
+
+withConfigurationCatalogues :: InstalledConfiguration -> (ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> IO a) -> IO (Either Diagnostic a)
+withConfigurationCatalogues (InstalledConfiguration lock _) action = mask $ \restore -> do
   available <- tryTakeMVar lock
   case available of
     Nothing -> pure (Left SupervisionUnavailable)
@@ -128,7 +131,8 @@ withConfigurationSnapshot (InstalledConfiguration lock _) action = mask $ \resto
         configurationIO $ do
           assertActive active
           profiles <- publicProfiles registry
-          restore (action limits profiles)) `finally` putMVar lock current
+          catalogues <- currentCatalogues registry
+          restore (action limits profiles catalogues)) `finally` putMVar lock current
 
 configurationSnapshot :: InstalledConfiguration -> IO (Either Diagnostic (ConfigurationLimits, [PublicProfile]))
 configurationSnapshot installed = withActive installed $ \(ActiveConfiguration _ _ _ limits registry _) ->

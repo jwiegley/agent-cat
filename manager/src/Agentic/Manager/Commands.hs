@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -6,14 +7,15 @@
 -- | Durable command acceptance and one-shot live dispatch, not worker interpretation.
 module Agentic.Manager.Commands
   ( CommandRequest (..), Mutation (..), Intent (..), CommandReferences (..), noReferences,
-    Submission, submissionReceipt, submissionReplayed, submissionTicket,
-    DispatchTicket, dispatchCommandId, submitCommand, readCommand,
+    Submission, submissionReceipt, submissionReplayed, submissionTicket, submissionReferences,
+    DispatchTicket, dispatchCommandId, submitCommand, submitConfiguredCommand, submitStreamedCommand, commandPreflight, readCommand,
+    BodyBinding, measureCommandBody, bodyBindingBytes, bodyBindingSha256,
     reserveDispatch, attemptDispatch, recordAcknowledgement, recordEffect, recordUnresolved, recordRefusal,
     retireReceipt, commandCapacity, tombstoneCapacity
   ) where
 
 import Agentic.Manager.Authorization
-import Agentic.Manager.Profile (ConfigurationLimits (..), PublicProfile, publicId, publicRevision)
+import Agentic.Manager.Profile (ConfigurationLimits (..), PublicProfile, publicId, publicRevision, Discovery)
 import Agentic.Manager.Protocol.Command
 import Agentic.Manager.Store
 import Control.DeepSeq (NFData)
@@ -21,7 +23,7 @@ import Control.Exception (SomeException, mask, throwIO, try)
 import Control.Monad (unless, void)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Except (ExceptT (..), runExceptT, throwE)
-import Crypto.Hash (Digest, SHA256, hash)
+import Crypto.Hash (Context, Digest, SHA256, hash, hashInit, hashUpdate, hashFinalize)
 import Crypto.Random (getRandomBytes)
 import Data.Aeson (FromJSON, Value (..), eitherDecodeStrict')
 import qualified Data.Aeson.Key as Key
@@ -30,7 +32,7 @@ import Data.ByteArray (convert, constEq)
 import Data.ByteArray.Encoding (Base (Base16), convertToBase)
 import qualified Data.ByteString as BS
 import Data.Int (Int64)
-import Data.IORef (IORef, atomicModifyIORef', newIORef)
+import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
 import Data.List (find)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -45,6 +47,34 @@ data CommandRequest = CommandRequest
     commandResource :: !Text, commandKey :: !Text, commandMediaType :: !Text,
     commandPrecondition :: !(Maybe Text), commandBody :: !BS.ByteString
   }
+
+-- | An exact byte-stream binding, minted only after the wrapped source reports EOF.
+-- No Generic, Show, JSON or digest constructor exposes a forging route.
+data BodyBinding = BodyBinding !BS.ByteString !Int !(Maybe BS.ByteString)
+bodyBindingBytes :: BodyBinding -> Int
+bodyBindingBytes (BodyBinding _ count _) = count
+bodyBindingSha256 :: BodyBinding -> Text
+bodyBindingSha256 (BodyBinding digest _ _) = TE.decodeUtf8 (convertToBase Base16 digest)
+
+measureCommandBody :: Operation -> IO BS.ByteString -> (IO BS.ByteString -> IO a) -> IO (a, Maybe BodyBinding)
+measureCommandBody operation source action = do
+  progress <- newIORef (hashInit :: Context SHA256, 0 :: Int, Just [], False)
+  let wrapped = do
+        (context, count, retained, ended) <- readIORef progress
+        if ended then pure BS.empty else do
+          bytes <- source
+          if BS.null bytes then writeIORef progress (context, count, retained, True) >> pure bytes else do
+            let next = count + BS.length bytes
+                limit = if operation == Capture then 67108864 else 2097152
+            unless (BS.length bytes <= 65536 && next <= limit) (throwIO SizeLimit)
+            let prefix = if next <= 2097152 then (bytes :) <$> retained else Nothing
+            let !updated = hashUpdate context bytes
+            writeIORef progress (updated, next, prefix, False)
+            pure bytes
+  value <- action wrapped
+  (context, count, retained, ended) <- readIORef progress
+  let binding = BodyBinding (convert (hashFinalize context :: Digest SHA256)) count (BS.concat . reverse <$> retained)
+  pure (value, if ended then Just binding else Nothing)
 
 -- | A source-owned lifecycle validator and deferred state mutation. There is no default.
 -- The version action must read the validator for the exact URI, including its query.
@@ -70,13 +100,16 @@ noReferences :: CommandReferences
 noReferences = CommandReferences Nothing Nothing Nothing Nothing
 
 -- | A committed original receipt and, only for fresh acceptance, live dispatch authority.
-data Submission = Submission !CommandReceipt !Bool !(Maybe DispatchTicket)
+data Submission = Submission !CommandReceipt !Bool !(Maybe DispatchTicket) !CommandReferences
 submissionReceipt :: Submission -> CommandReceipt
-submissionReceipt (Submission receipt _ _) = receipt
+submissionReceipt (Submission receipt _ _ _) = receipt
 submissionReplayed :: Submission -> Bool
-submissionReplayed (Submission _ replayed _) = replayed
+submissionReplayed (Submission _ replayed _ _) = replayed
 submissionTicket :: Submission -> Maybe DispatchTicket
-submissionTicket (Submission _ _ ticket) = ticket
+submissionTicket (Submission _ _ ticket _) = ticket
+
+submissionReferences :: Submission -> CommandReferences
+submissionReferences (Submission _ _ _ refs) = refs
 
 -- | One command's live ownership. IDs and durable generation columns cannot mint this.
 data DispatchTicket = DispatchTicket !CoordinationStore !Text !Text !CommandReferences !(IORef TicketState)
@@ -91,20 +124,31 @@ tombstoneCapacity = 16384
 type CommandTx = ExceptT CommandFailure Transaction
 
 submitCommand :: CoordinationStore -> CredentialProof -> CommandRequest -> Mutation -> IO (Either CommandFailure Submission)
-submitCommand store proof request mutation = case validateRequest request of
+submitCommand store proof request mutation = submitConfiguredCommand store proof request (\_ _ _ -> Right mutation)
+
+submitConfiguredCommand :: CoordinationStore -> CredentialProof -> CommandRequest -> (Text -> ConfigurationLimits -> [(Text, Discovery)] -> Either CommandFailure Mutation) -> IO (Either CommandFailure Submission)
+submitConfiguredCommand store proof request = submitBoundCommand store proof request Nothing
+
+submitStreamedCommand :: CoordinationStore -> CredentialProof -> CommandRequest -> BodyBinding -> (Text -> ConfigurationLimits -> [(Text, Discovery)] -> Either CommandFailure Mutation) -> IO (Either CommandFailure Submission)
+submitStreamedCommand store proof request binding builder
+  | commandOperation request /= Capture || not (BS.null (commandBody request)) = pure (Left InvalidRequest)
+  | otherwise = submitBoundCommand store proof request (Just binding) builder
+
+submitBoundCommand :: CoordinationStore -> CredentialProof -> CommandRequest -> Maybe BodyBinding -> (Text -> ConfigurationLimits -> [(Text, Discovery)] -> Either CommandFailure Mutation) -> IO (Either CommandFailure Submission)
+submitBoundCommand store proof request streamed buildMutation = case validateRequest request of
   Left failure -> pure (Left failure)
   Right () -> mask $ \restore -> do
     candidate <- freshId "command_"
-    let digest = convert (hash (commandBody request) :: Digest SHA256) :: BS.ByteString
-    outcome <- restore $ configured store proof $ \limits profiles identity -> transaction store $ do
-      client <- checked =<< lift (authorizeProfile proof (commandProfile request) (requiredScopes (commandOperation request)))
-      _ <- knownProfile profiles (commandProfile request)
-      epoch <- currentEpoch
-      require (keyEpoch request == epoch) AuthorityChanged
+    let (digest, bodyBytes, legacyBytes) = case streamed of
+          Nothing -> (convert (hash (commandBody request) :: Digest SHA256), BS.length (commandBody request), Just (commandBody request))
+          Just (BodyBinding checksum count retained) -> (checksum, count, retained)
+    outcome <- restore $ configuredCatalogues store proof $ \limits profiles catalogues identity -> transaction store $ do
+      (client, epoch) <- authorizeRequest profiles proof request
       old <- sql "SELECT id,profile_id,operation,retired,media_type,precondition,body_sha256,body_bytes FROM commands WHERE client_id=? AND method=? AND resource_uri=? AND idempotency_key=?"
         [text client, text (commandMethod request), text (commandResource request), text (commandKey request)]
       case old of
         [] -> do
+          mutation <- checked (buildMutation candidate limits catalogues)
           require (commandMediaType request == if commandOperation request == Capture then "application/octet-stream" else "application/json") UnsupportedMediaType
           profile <- knownProfile profiles (commandProfile request)
           require (publicRevision profile == mutationProfileRevision mutation) StaleRevision
@@ -136,7 +180,7 @@ submitCommand store proof request mutation = case validateRequest request of
              optional (referenceRequest refs), optional (referenceRun refs), optional (referencePreparation refs),
              optional (referenceDecision refs), text now, text (stateName (receiptState receipt)),
              maybe SQL.SQLNull (SQL.SQLBlob . encoded) immediate, SQL.SQLBlob digest,
-             SQL.SQLInteger (fromIntegral (BS.length (commandBody request))), SQL.SQLInteger commandCapacity]
+             SQL.SQLInteger (fromIntegral bodyBytes), SQL.SQLInteger commandCapacity]
           chargeRate proof (commandOperation request) minute
           pure ((receipt, False, intentDispatch intent, refs, storeProcessGeneration identity), events <> [commandEvent candidate candidate])
         [[SQL.SQLText ident, SQL.SQLText profile, SQL.SQLText operation, SQL.SQLInteger retired, media, precondition, bodyDigest, bodyLength]] -> do
@@ -144,22 +188,47 @@ submitCommand store proof request mutation = case validateRequest request of
           require (retired == 0) ReceiptExpired
           require (media == text (commandMediaType request) && precondition == optional (commandPrecondition request)) IdempotencyConflict
           match <- case (bodyDigest, bodyLength) of
-            (SQL.SQLBlob original, SQL.SQLInteger bytes) -> pure (constEq original digest && bytes == fromIntegral (BS.length (commandBody request)))
-            (SQL.SQLNull, SQL.SQLNull) | BS.length (commandBody request) <= 2097152 -> do
-              equality <- sql "SELECT body=? FROM commands WHERE id=?" [SQL.SQLBlob (commandBody request), text ident]
+            (SQL.SQLBlob original, SQL.SQLInteger bytes) -> pure (constEq original digest && bytes == fromIntegral bodyBytes)
+            (SQL.SQLNull, SQL.SQLNull) | Just bytes <- legacyBytes, BS.length bytes <= 2097152 -> do
+              equality <- sql "SELECT body=? FROM commands WHERE id=?" [SQL.SQLBlob bytes, text ident]
               pure (equality == [[SQL.SQLInteger 1]])
             _ -> pure False
           require match IdempotencyConflict
           receipt <- originalReceipt ident
           require (receiptProfile receipt == profile && receiptOperation receipt == commandOperation request
             && receiptResource receipt == commandResource request) StorageUnavailable
-          pure ((receipt, True, False, noReferences, storeProcessGeneration identity), [])
+          referenceRows <- sql "SELECT request_id,run_id,preparation_id,decision_id FROM commands WHERE id=?" [text ident]
+          refs <- case referenceRows of
+            [[r,u,p,d]] -> CommandReferences <$> sqlOptionalText r <*> sqlOptionalText u <*> sqlOptionalText p <*> sqlOptionalText d
+            _ -> throwE StorageUnavailable
+          pure ((receipt, True, False, refs, storeProcessGeneration identity), [])
         _ -> throwE StorageUnavailable
     case outcome of
       Left failure -> pure (Left failure)
       Right (receipt, replayed, dispatch, refs, generation) -> do
         ticket <- if dispatch then Just . DispatchTicket store (receiptId receipt) generation refs <$> newIORef Unreserved else pure Nothing
-        pure (Right (Submission receipt replayed ticket))
+        pure (Right (Submission receipt replayed ticket refs))
+
+-- | Reserve bounded pre-body work without claiming command acceptance or exposing a receipt.
+commandPreflight :: NFData a => CoordinationStore -> CredentialProof -> CommandRequest
+  -> (ConfigurationLimits -> [(Text, Discovery)] -> Text -> Bool -> Transaction (a, [Invalidation]))
+  -> IO (Either CommandFailure a)
+commandPreflight store proof request action = case validateRequest request of
+  Left failure -> pure (Left failure)
+  Right () -> configuredCatalogues store proof $ \limits profiles catalogues _ -> transaction store $ do
+    (client, _) <- authorizeRequest profiles proof request
+    rows <- sql "SELECT count(*) FROM commands WHERE client_id=? AND method=? AND resource_uri=? AND idempotency_key=?"
+      [text client, text (commandMethod request), text (commandResource request), text (commandKey request)]
+    exists <- case rows of [[SQL.SQLInteger count]] -> pure (count /= 0); _ -> throwE StorageUnavailable
+    lift (action limits catalogues client exists)
+
+authorizeRequest :: [PublicProfile] -> CredentialProof -> CommandRequest -> CommandTx (Text, Text)
+authorizeRequest profiles proof request = do
+  client <- checked =<< lift (authorizeProfile proof (commandProfile request) (requiredScopes (commandOperation request)))
+  _ <- knownProfile profiles (commandProfile request)
+  epoch <- currentEpoch
+  require (keyEpoch request == epoch) AuthorityChanged
+  pure (client, epoch)
 
 -- Credential validity is checked before even the authorization-filtered metadata query.
 readCommand :: CoordinationStore -> CredentialProof -> Text -> IO (Either CommandFailure CommandReceipt)
@@ -328,11 +397,14 @@ retireReceipt store ident inactiveSince
           _ -> throwE ResourceUnavailable
 
 configured :: CoordinationStore -> CredentialProof -> (ConfigurationLimits -> [PublicProfile] -> StoreIdentity -> IO (Either CommandFailure a)) -> IO (Either CommandFailure a)
-configured store proof action = do
-  result <- try @StoreFailure $ withStoreConfiguration store $ \limits profiles -> do
+configured store proof action = configuredCatalogues store proof $ \limits profiles _ identity -> action limits profiles identity
+
+configuredCatalogues :: CoordinationStore -> CredentialProof -> (ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> StoreIdentity -> IO (Either CommandFailure a)) -> IO (Either CommandFailure a)
+configuredCatalogues store proof action = do
+  result <- try @StoreFailure $ withStoreCatalogues store $ \limits profiles catalogues -> do
     identity <- storeIdentity store
     if proofGeneration proof /= storeProcessGeneration identity then pure (Left Unauthenticated)
-      else action limits profiles identity
+      else action limits profiles catalogues identity
   pure $ case result of
     Left _ -> Left StorageUnavailable
     Right (Left _) -> Left StorageUnavailable

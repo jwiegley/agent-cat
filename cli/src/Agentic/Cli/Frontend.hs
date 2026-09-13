@@ -285,7 +285,7 @@ captureInputs descriptor supplied = do
   where
     capture sources (collected, remaining) input = do
       bytes <- case sources Map.! workflowInputName input of
-        Literal text -> pure (Text.encodeUtf8 text <> if workflowInputSource input == DescriptorPrompt then "\n" else "")
+        Literal text -> pure (frontendLiteralBytes (workflowInputSource input) text)
         File path -> fst <$> readConfinedFile (takeDirectory path) [takeFileName path] (fromIntegral remaining)
         Transport text -> pure (Text.encodeUtf8 text)
       unless (BS.length bytes <= remaining) (refuse "frontend input snapshots exceed their byte bound")
