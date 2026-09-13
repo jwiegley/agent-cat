@@ -83,6 +83,10 @@ if mode in {"failed-write", "blocked-write"}:
     if mode == "failed-write":
         os.close(0)
     evidence.with_suffix(".ready").write_text("ready")
+    if mode == "blocked-write":
+        sys.stdin.buffer.readline(2 * 1024 * 1024 + 2)
+        first = sys.stdin.buffer.read(1)
+        evidence.with_suffix(".write-started").write_bytes(first)
     time.sleep(120)
     sys.exit(0)
 

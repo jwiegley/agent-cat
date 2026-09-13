@@ -14,7 +14,7 @@ import Agentic.Runtime
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (AsyncCancelled (..), async, cancel, concurrently, wait, waitCatch)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar, readMVar, swapMVar, tryReadMVar)
-import Control.Exception (AsyncException (UserInterrupt), IOException, bracket, fromException, throwIO, try)
+import Control.Exception (AsyncException (UserInterrupt), IOException, bracket, finally, fromException, throwIO, try)
 import Control.Monad (forM, forM_, unless, void, replicateM_)
 import Crypto.Hash (Digest, SHA256, hash)
 import Data.ByteArray (convert)
@@ -43,6 +43,8 @@ main = do
     ["fixture-exit"] -> pure ()
     ["fixture-wait"] -> void (BS.hGetSome stdin 1)
     ["cleanup-failure", work, native] -> cleanupFailureChild work native
+    ["audit-attachment", work, native] -> attachmentCloseChecks work native
+    ["audit-writer", work, source, native, python] -> wrappedChecks work source native python
     [work, source, native, python] -> do
       positiveChecks work native
       draftWorkerChecks work native
@@ -50,6 +52,7 @@ main = do
       saturationChecks work native
       wrappedChecks work source native python
       registrationChecks work native
+      attachmentCloseChecks work native
       reservedEnvironmentChecks work source native python
       putStrLn "PASS manager-owned native frontend workers"
     _ -> error "usage: manager-worker-check PRIVATE_DIRECTORY SOURCE NATIVE_RUNNER PYTHON"
@@ -227,8 +230,13 @@ wrappedChecks work source native python = do
     withFrontendWorker store "profile" revision (setupFor root catalogue "person-controlled") $ \worker -> do
       waitUntil (doesFileExist (work </> "blocked-write.ready"))
       startWorker worker
-      expect "blocked private write obeys its actual five-second attempt budget" WorkerWriteTimeout
-        (writeWorkerControl worker (Control (ControlId "blocked") (Just (OccurrenceId 0)) Nothing (Steer NextBoundary (T.replicate 524288 "x"))))
+      let blocked = writeWorkerControl worker (Control (ControlId "blocked") (Just (OccurrenceId 0)) Nothing (Steer NextBoundary (T.replicate 524288 "x")))
+      bracket (async (try @WorkerFailure blocked)) cancel $ \inFlight -> do
+        waitUntil (doesFileExist (work </> "blocked-write.write-started"))
+        BS.readFile (work </> "blocked-write.write-started") >>= check "fixture observed the first in-flight control byte" . (== "{")
+        expect "concurrent writer refuses while an earlier frame is in flight" WorkerWriterBusy
+          (writeWorkerControl worker (Control (ControlId "contending") (Just (OccurrenceId 0)) Nothing (Steer NextBoundary "must not write")))
+        await (wait inFlight) >>= check "blocked private write obeys its actual five-second attempt budget" . (== Left WorkerWriteTimeout)
       state <- observeWorker worker
       check "ambiguous timed-out write stops with confirmed cleanup" (observedWorkerExit state == Just (Left WorkerWriteTimeout) && not (observedCleanupUnproven state))
   let floodEvidence = work </> "stderr-flood.ndjson"
@@ -280,6 +288,50 @@ registrationChecks work native = do
   bracket (installConfiguration configuration >>= right) closeConfiguration (const (check "store released lease only after joined worker cleanup" True))
   putMVar release ()
   void (await (wait workerOwner))
+
+attachmentCloseChecks :: FilePath -> FilePath -> IO ()
+attachmentCloseChecks work native = do
+  executable <- getExecutablePath
+  let command = privateProcess executable ["fixture-wait"]
+      cleanup group = terminateProcessGroup 5000000 group `finally` closeGroupPipes group
+  withCase work "close-before-attachment" native [] $ \_ _ installed store _ _ -> do
+    ready <- newEmptyMVar
+    hold <- newEmptyMVar @()
+    refused <- newEmptyMVar
+    let construct = try @StoreFailure $ withStoreWorker store $ \owner _ _ ->
+          (putMVar ready () >> takeMVar hold) `finally` do
+            result <- try @StoreFailure (createStoreWorkerGroup owner command)
+            case result of
+              Left StoreClosed -> putMVar refused True
+              Left _ -> putMVar refused False
+              Right group -> cleanup group >> putMVar refused False
+    bracket (async construct) cancel $ \constructing -> do
+      await (takeMVar ready)
+      retryStoreCleanup store
+      await (takeMVar refused) >>= check "Store close fences attachment during startup cleanup"
+      await (wait constructing) >>= check "pre-attachment construction is joined as StoreClosed" . (== Left StoreClosed)
+    withCoordinationStore installed $ \fresh -> void (storeIdentity fresh)
+    check "pre-attachment close releases the storage slot after joining" True
+  withCase work "close-after-attachment" native [] $ \_ _ installed store _ _ -> do
+    attached <- newEmptyMVar
+    hold <- newEmptyMVar @()
+    let construct = try @StoreFailure $ withStoreWorker store $ \owner _ _ -> do
+          group <- createStoreWorkerGroup owner command
+          putMVar attached (owner, group)
+          takeMVar hold
+    bracket (async construct) cancel $ \constructing -> do
+      (owner, group) <- await (takeMVar attached)
+      bracket (pure group) cleanup $ \actual -> do
+        before <- tryReadMVar (groupOutcome actual)
+        check "attachment race begins with an actual live unprepared group" (case before of Nothing -> True; _ -> False)
+        retryStoreCleanup store
+        after <- tryReadMVar (groupOutcome actual)
+        check "Store close joins the actual startup attachment before release" (case after of Just (Right _) -> True; _ -> False)
+        await (wait constructing) >>= check "attached startup construction is joined as StoreClosed" . (== Left StoreClosed)
+        late <- try @StoreFailure (createStoreWorkerGroup owner command)
+        check "closed startup attachment cannot create a replacement process" (case late of Left StoreClosed -> True; _ -> False)
+    withCoordinationStore installed $ \fresh -> void (storeIdentity fresh)
+    check "post-attachment close releases the storage slot after native completion" True
 
 draftWorkerChecks :: FilePath -> FilePath -> IO ()
 draftWorkerChecks work native = withCase work "draft-worker" native [] $ \_ _ _ store revision catalogue -> do
