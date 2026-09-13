@@ -8,8 +8,10 @@ The module remains internal to the manager server boundary.
 
 ## Construction and current policy
 
-`withFrontendWorker` takes the actual Store, current profile ID/revision and a
-shared FrontendSetupRequest. It selects the current retained catalogue and typed
+`withStartingFrontendWorker` takes the actual Store, current profile ID/revision
+and a shared FrontendSetupRequest, and loans the actual opaque handle during
+construction. `withFrontendWorker` uses this same scope and waits for native
+preparation before its callback. It selects the current retained catalogue and typed
 Selection through the associated Configuration. Setup invocation, target arguments,
 person mode and workflow selection must agree with that trusted policy. The
 native state root must be the Store-owned runs root. File inputs are checked
@@ -70,7 +72,9 @@ fail-closed resource ownership, not the WM-019 recovery or graceful-drain servic
 ## Protocol phases and writes
 
 The whole startup sequence has one thirty-second budget, including fresh capability
-checking, launch and prepared-frame reception. Profile keeps its existing bounded
+checking, launch and prepared-frame reception. A dedicated deadline remains active
+even when the early owner never awaits preparation and retires on actual native
+preparation. Profile keeps its existing bounded
 capability-query contract. Prepared replies use maxFrontendReplyBytes with the
 native terminating newline accounted for. Runtime envelopes use maxFrameBytes.
 Setup and decision/control writes use their actual shared codecs and bounds.
@@ -135,8 +139,9 @@ an owned test process so its intentional retained descriptors end with that proc
 
 The native proxy, stdin EOF and original ProcessGroup ownership establish only
 the tested cleanup boundary. They do not contain arbitrary descendants that escape
-supported process ownership or prove external provider cancellation. WM-013 owns
-admission, WM-014 exact approval, WM-015 durable ingestion, WM-016 control semantics,
+supported process ownership or prove external provider cancellation. The
+[admission owner](ADMISSION.md) retains these workers and reservations, while
+WM-014 owns exact approval, WM-015 durable ingestion, WM-016 control semantics,
 and WM-019 broader containment and safety supervision. No listener, deployment,
 provider call, new workflow semantics, stored-worker adoption, SQLite confinement
 experiment or release acceptance is claimed by this unit.

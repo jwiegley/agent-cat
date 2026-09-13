@@ -58,6 +58,7 @@ extra-source-files:
   manager/ci/commands.sh
   manager/ci/drafts.sh
   manager/ci/workers.sh
+  manager/ci/admission.sh
   manager/test/worker_fixture.py
   manager/test/worker_evidence.py
   manager/test/draft_contract.py
@@ -73,6 +74,7 @@ extra-doc-files:
   manager/COMMANDS.md
   manager/DRAFTS.md
   manager/WORKERS.md
+  manager/ADMISSION.md
   runtime/README.md
   doc/api/README.md
   doc/api/openapi.yaml
@@ -177,6 +179,8 @@ library
     Agentic.Manager.Schema
     Agentic.Manager.Store
     Agentic.Manager.Worker
+    Agentic.Manager.Admission.Policy
+    Agentic.Manager.Admission
     Agentic.Manager.Commands
     Agentic.Manager.Drafts
     Agentic.Manager.Protocol.Draft
@@ -491,6 +495,30 @@ executable manager-worker-check
   main-is:         WorkerCheck.hs
   c-sources:       manager/test/worker_cleanup_fault.c
   other-modules:
+    Agentic.Manager.Worker
+    Agentic.Manager.Drafts
+    Agentic.Manager.Commands
+    Agentic.Manager.Authorization
+    Agentic.Manager.Protocol.Draft
+    Agentic.Manager.Protocol.Command
+    Agentic.Manager.Protocol.Json
+    Agentic.Manager.Configuration
+    Agentic.Manager.Profile
+    Agentic.Manager.Root
+    Agentic.Manager.Lease
+    Agentic.Manager.Schema
+    Agentic.Manager.Store
+  build-depends:   agentic, direct-sqlite, deepseq, transformers
+  ghc-options:     -threaded -rtsopts
+
+executable manager-admission-check
+  import:          settings
+  hs-source-dirs:  manager/test manager/src
+  main-is:         AdmissionCheck.hs
+  c-sources:       manager/test/admission_cleanup_fault.c
+  other-modules:
+    Agentic.Manager.Admission
+    Agentic.Manager.Admission.Policy
     Agentic.Manager.Worker
     Agentic.Manager.Drafts
     Agentic.Manager.Commands

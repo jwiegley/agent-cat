@@ -1608,7 +1608,11 @@ observedCancellationProbe failures = do
             awaitDelivery deadline sender
             record "callback-return"
           _ -> pure ()
-      world = concurrentWorld (\c _ -> record "action-entry" >> pure (defaultEl c))
+      world = concurrentWorld $ \c _ -> do
+        -- A blocked throwTo can still be awaiting delivery on another capability.
+        _ <- timeout 2000000 (atomically (readTMVar senderFinished))
+        record "action-return"
+        pure (defaultEl c)
   outcome <- try @SomeException (runPlanObserved sink noChains world (askC1 SText (textQuestion "cancel-at-attempt-start")))
   senderDone <- timeout 2000000 (atomically (readTMVar senderFinished))
   case senderDone of

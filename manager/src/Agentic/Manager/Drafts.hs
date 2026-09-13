@@ -6,7 +6,7 @@
 
 -- | Durable input representations and verified captures, never workflow execution.
 module Agentic.Manager.Drafts
-  ( createDraft, changeDraftInput, uploadCapture, readDraft, assembleDraft, verifyFrontendFiles ) where
+  ( createDraft, changeDraftInput, changeDraftInputGuarded, InputTransition (..), RequestState, requestView, requestOwner, requestState, currentVersion, editable, checkDraftCapacity, uploadCapture, readDraft, assembleDraft, DraftAssembly, assemblyRequest, assemblyRevision, assemblyProfile, assemblyProfileRevision, assemblySetup, assemblyFrame, assembleDraftSnapshot, assembleAcceptedDraft, structuralReadiness, verifyFrontendFiles ) where
 
 import Agentic.Manager.Authorization
 import Agentic.Manager.Commands
@@ -55,6 +55,11 @@ holdingLimit = 67108864
 
 -- | One bounded transactional observation, revalidated before materialization completes.
 data RequestState = RequestState !DraftView !Text !BS.ByteString deriving (Generic, NFData)
+requestView :: RequestState -> DraftView
+requestView (RequestState view _ _) = view
+requestOwner :: RequestState -> Text
+requestOwner (RequestState _ owner _) = owner
+
 data InputState = InputState !Text !BS.ByteString !(Maybe Text) !(Maybe Int64) !(Maybe Int64) !(Maybe Int64) !(Maybe BS.ByteString) !(Maybe Text)
   deriving (Generic, NFData)
 data CaptureState = CaptureState !CaptureReceipt !Text !BS.ByteString deriving (Generic, NFData)
@@ -79,8 +84,8 @@ createDraft store proof key body = draftIO $ do
           client <- currentClient proof >>= requireTransaction
           checkDraftCapacity limits client
           pure $ Right $ Intent (noReferences {referenceRequest=Just ident}) False $ do
-            execute "INSERT INTO requests (id,revision,client_id,workflow_id,descriptor_revision,profile_id,profile_revision,phase,admission,blocking_reasons,validation_errors) VALUES (?,?,?,?,?,?,?,'draft','not-queued',?,?)"
-              [text ident,text ident,text client,text(createWorkflow requestBody),text(createDescriptorRevision requestBody),text(createProfile requestBody),text(createProfileRevision requestBody),
+            execute "INSERT INTO requests (id,revision,client_id,workflow_id,descriptor_revision,profile_id,profile_revision,input_revision,phase,admission,blocking_reasons,validation_errors) VALUES (?,?,?,?,?,?,?,?,'draft','not-queued',?,?)"
+              [text ident,text ident,text client,text(createWorkflow requestBody),text(createDescriptorRevision requestBody),text(createProfile requestBody),text(createProfileRevision requestBody),text ident,
                SQL.SQLBlob(encoded(draftReasons initial)),SQL.SQLBlob(encoded([]::[InputError]))]
             forM_ (groupsOf 32 (zip [0..] (workflowInputs descriptor))) $ \inputs ->
               execute ("INSERT INTO request_inputs (request_id,name,declaration_ordinal,declaration) VALUES " <> T.intercalate "," (replicate(length inputs) "(?,?,?,?)"))
@@ -95,17 +100,31 @@ createDraft store proof key body = draftIO $ do
     case rows of [[SQL.SQLBlob value]] -> decodeTransaction value; _ -> refuseTransaction ResourceUnavailable
 
 changeDraftInput :: CoordinationStore -> CredentialProof -> Text -> Text -> Maybe Text -> BS.ByteString -> IO (Either CommandFailure CommandReceipt)
-changeDraftInput store proof ident key precondition body = draftIO $ withStoreFiles store $ \root -> timed 5000000 $ do
+changeDraftInput store proof ident key precondition body = fmap (fmap submissionReceipt) $
+  changeDraftInputGuarded store proof ident key precondition body (\_ limits current _ -> do
+    editable current
+    let RequestState view owner _ = current
+    when(draftPhase view=="queued")(checkDraftCapacity limits owner)
+    pure(InputTransition "draft" "not-queued" False [])) (submitConfiguredCommand store proof)
+
+-- | A source-owned admission transition checked in the same command transaction.
+data InputTransition = InputTransition !Text !Text !Bool ![Invalidation]
+
+changeDraftInputGuarded :: CoordinationStore -> CredentialProof -> Text -> Text -> Maybe Text -> BS.ByteString
+  -> (Text -> ConfigurationLimits -> RequestState -> Text -> Transaction InputTransition)
+  -> (CommandRequest -> (Text -> ConfigurationLimits -> [(Text, Discovery)] -> Either CommandFailure Mutation) -> IO (Either CommandFailure Submission))
+  -> IO (Either CommandFailure Submission)
+changeDraftInputGuarded store proof ident key precondition body transition submit = draftIO $ withStoreFiles store $ \root -> timed 5000000 $ do
   change <- requireEither (decodeDraftBody body :: Either CommandFailure InputChange)
   original@(RequestState view _ _) <- runRead store (requestState proof ident [Submit])
   let operation = case change of SetBinding _ -> SetInput; RemoveBinding _ -> RemoveInput
       request = CommandRequest operation (draftProfile view) "POST" (requestURI ident) key "application/json" precondition body
   replay <- commandPreflight store proof request (\_ _ _ exists -> pure (exists,[])) >>= requireEither
-  if replay then submissionReceipt <$> (submitConfiguredCommand store proof request (\_ _ _ -> Left StateConflict) >>= requireEither)
-    else changeFresh root store proof original request change
+  if replay then submit request (\_ _ _ -> Left StateConflict) >>= requireEither
+    else changeFresh root store proof original request change transition submit
 
-changeFresh :: PrivateRoot -> CoordinationStore -> CredentialProof -> RequestState -> CommandRequest -> InputChange -> IO CommandReceipt
-changeFresh root store proof original@(RequestState view _ _) request change = do
+changeFresh :: PrivateRoot -> CoordinationStore -> CredentialProof -> RequestState -> CommandRequest -> InputChange -> (Text -> ConfigurationLimits -> RequestState -> Text -> Transaction InputTransition) -> (CommandRequest -> (Text -> ConfigurationLimits -> [(Text, Discovery)] -> Either CommandFailure Mutation) -> IO (Either CommandFailure Submission)) -> IO Submission
+changeFresh root store proof original@(RequestState view _ _) request change transition submit = do
   let ident=draftId view
   revision <- fresh "request_revision_"
   let name = case change of SetBinding value -> suppliedName value; RemoveBinding value -> value
@@ -122,12 +141,11 @@ changeFresh root store proof original@(RequestState view _ _) request change = d
       _ <- verifyCapture root capture False
       pure (Just capture)
     _ -> pure Nothing
-  let builder _ limits catalogues = do
+  let builder commandId limits catalogues = do
         _ <- selectCatalogue catalogues (draftProfile view) (draftProfileRevision view) (draftWorkflow view) (draftDescriptorRevision view)
         pure $ Mutation (draftProfileRevision view) (currentVersion proof ident) $ do
-          current@(RequestState now owner _) <- requestState proof ident [Submit]
-          editable current
-          when (draftPhase now=="queued") (checkDraftCapacity limits owner)
+          current <- requestState proof ident [Submit]
+          InputTransition nextPhase nextAdmission dispatch extraEvents <- transition commandId limits current revision
           allInputs <- inputStates ident
           unless (any ((==name).inputStateName) allInputs) (refuseTransaction InvalidInput)
           client <- currentClient proof >>= requireTransaction
@@ -139,7 +157,7 @@ changeFresh root store proof original@(RequestState view _ _) request change = d
             Nothing -> pure ()
           let replacement = fmap (\(bytes,native) -> (fromIntegral(BS.length bytes),native)) literal
           checkInputReplacement ident name replacement verified
-          pure $ Right $ Intent (noReferences {referenceRequest=Just ident}) False $ do
+          pure $ Right $ Intent (noReferences {referenceRequest=Just ident}) dispatch $ do
             execute "DELETE FROM request_literal_chunks WHERE request_id=? AND name=?" [text ident,text name]
             case change of
               RemoveBinding _ -> execute "UPDATE request_inputs SET source=NULL,literal_bytes=NULL,literal_transport_bytes=NULL,literal_chunks=NULL,literal_digest=NULL,capture_id=NULL WHERE request_id=? AND name=?" [text ident,text name]
@@ -151,12 +169,12 @@ changeFresh root store proof original@(RequestState view _ _) request change = d
                 execute "UPDATE request_inputs SET source='literal',literal_bytes=?,literal_transport_bytes=?,literal_chunks=?,literal_digest=?,capture_id=NULL WHERE request_id=? AND name=?"
                   [integer(BS.length bytes),SQL.SQLInteger native,integer(length parts),SQL.SQLBlob digest,text ident,text name]
                 forM_ (zip [0..] parts) $ \(ordinal,bytes') -> execute "INSERT INTO request_literal_chunks VALUES (?,?,?,?)" [text ident,text name,SQL.SQLInteger ordinal,SQL.SQLBlob bytes']
-            execute "UPDATE requests SET revision=?,phase='draft',admission='not-queued',queue_ordinal=NULL,blocking_reasons=?,validation_errors=? WHERE id=?"
-              [text revision,SQL.SQLBlob(encoded([]::[Text])),SQL.SQLBlob(encoded([]::[InputError])),text ident]
+            execute "UPDATE requests SET revision=?,input_revision=?,phase=?,admission=?,queue_ordinal=NULL,queue_origin_revision=NULL,queue_generation=NULL,blocking_reasons=?,validation_errors=? WHERE id=?"
+              [text revision,text revision,text nextPhase,text nextAdmission,SQL.SQLBlob(encoded([]::[Text])),SQL.SQLBlob(encoded([]::[InputError])),text ident]
             effect <- decodeTransaction (encoded(object ["kind" .= ("input-changed"::Text),"runtimeSequence" .= (Nothing::Maybe Text),"address" .= (Nothing::Maybe Text),"resource" .= requestURI ident]))
-            pure ([requestEvent ident revision],Just effect)
+            pure (requestEvent ident revision : extraEvents,if dispatch then Nothing else Just effect)
   ensureRevision store proof original [Submit]
-  submissionReceipt <$> (submitConfiguredCommand store proof request builder >>= requireEither)
+  submit request builder >>= requireEither
 
 uploadCapture :: CoordinationStore -> CredentialProof -> Text -> Text -> Int64 -> IO BS.ByteString -> IO (Either CommandFailure CaptureReceipt)
 uploadCapture store proof ident key ceilingBytes source = draftIO $ withStoreFiles store $ \root -> do
@@ -273,16 +291,42 @@ readDraft store proof ident = draftIO $ withStoreFiles store $ \root -> timed 50
       errors=catMaybes(map snd pairs)
       missing=[name | InputDeclaration name _ <- declarations,name `notElem` map suppliedName supplied]
       readiness=Readiness declarations supplied missing errors
-      result=view {draftReadiness=readiness,draftReasons=if null missing then [] else ["missing-inputs"]}
+      result=view {draftReadiness=readiness,draftReasons=filter (/="missing-inputs") (draftReasons view) <> if null missing then [] else ["missing-inputs"]}
   unless(BS.length(encoded result)<=1048576) (throwIO ViewTooLarge)
   ensureRevision store proof snapshot [Observe]
   updated <- persistErrors store proof snapshot errors result
   when (any (\(InputError _ code)->code=="invalid-input") errors) (throwIO InvalidInput)
   pure updated
 
+-- | A bounded materialization snapshot, not permission to start a worker.
+data DraftAssembly = DraftAssembly !Text !Text !Text !Text !FrontendSetupRequest !BS.ByteString
+assemblyRequest :: DraftAssembly -> Text
+assemblyRequest (DraftAssembly ident _ _ _ _ _) = ident
+assemblyRevision :: DraftAssembly -> Text
+assemblyRevision (DraftAssembly _ revision _ _ _ _) = revision
+assemblyProfile :: DraftAssembly -> Text
+assemblyProfile (DraftAssembly _ _ profile _ _ _) = profile
+assemblyProfileRevision :: DraftAssembly -> Text
+assemblyProfileRevision (DraftAssembly _ _ _ revision _ _) = revision
+assemblySetup :: DraftAssembly -> FrontendSetupRequest
+assemblySetup (DraftAssembly _ _ _ _ setup _) = setup
+assemblyFrame :: DraftAssembly -> BS.ByteString
+assemblyFrame (DraftAssembly _ _ _ _ _ frame) = frame
+
+data DraftAccess = ClientAccess !CredentialProof | AcceptedAccess !AcceptedEnqueue
+
 assembleDraft :: CoordinationStore -> CredentialProof -> Text -> IO (Either CommandFailure (FrontendSetupRequest, BS.ByteString))
-assembleDraft store proof ident = draftIO $ withStoreFiles store $ \root -> timed 5000000 $ do
-  snapshot@(RequestState view _ _) <- runRead store(requestState proof ident [Submit])
+assembleDraft store proof ident = fmap (fmap (\snapshot -> (assemblySetup snapshot,assemblyFrame snapshot))) (assembleDraftSnapshot store proof ident)
+
+assembleDraftSnapshot :: CoordinationStore -> CredentialProof -> Text -> IO (Either CommandFailure DraftAssembly)
+assembleDraftSnapshot store proof = assembleWith store (ClientAccess proof)
+
+assembleAcceptedDraft :: CoordinationStore -> AcceptedEnqueue -> IO (Either CommandFailure DraftAssembly)
+assembleAcceptedDraft store permit = assembleWith store (AcceptedAccess permit) (acceptedRequest permit)
+
+assembleWith :: CoordinationStore -> DraftAccess -> Text -> IO (Either CommandFailure DraftAssembly)
+assembleWith store access ident = draftIO $ withStoreFiles store $ \root -> timed 5000000 $ do
+  snapshot@(RequestState view _ _) <- runRead store(requestStateWith access ident [Submit])
   (catalogue,descriptor) <- currentCatalogue store view
   inputs <- runRead store(inputStates ident)
   let selection=discoverySelection catalogue
@@ -292,7 +336,7 @@ assembleDraft store proof ident = draftIO $ withStoreFiles store $ \root -> time
   let literalTotal=sum[n | InputState _ _ (Just "literal") (Just n) _ _ _ _ <- inputs]
   when(literalTotal>fromIntegral maxFrontendQueryBytes) (throwIO SizeLimit)
   resolved <- forM inputs $ \input@(InputState name _ representation _ _ _ _ capId) -> case representation of
-    Just "literal" -> do value<-readLiteral store proof snapshot [Submit] input; pure ((name,Literal value),Nothing)
+    Just "literal" -> do value<-readLiteralWith store access snapshot [Submit] input; pure ((name,Literal value),Nothing)
     Just "capture" -> do
       cap<-maybe(throwIO InvalidInput)pure capId
       capture@(CaptureState receipt _ _)<-runRead store(captureState ident cap)
@@ -307,9 +351,9 @@ assembleDraft store proof ident = draftIO $ withStoreFiles store $ \root -> time
       files=setup[(name,maybe source File path) | ((name,source),path)<-resolved]
       result=case encodeFrontendSetupRequest inline of Right bytes -> Right(inline,bytes); Left _ -> case encodeFrontendSetupRequest files of Right bytes -> Right(files,bytes); Left _ -> Left SizeLimit
   value<-requireEither result
-  ensureRevision store proof snapshot [Submit]
+  runRead store (checkRevisionWith access snapshot [Submit])
   _<-currentCatalogue store view
-  pure value
+  pure (DraftAssembly ident (draftRevision view) (draftProfile view) (draftProfileRevision view) (fst value) (snd value))
 
 -- | Worker-side revalidation of File sources against actual retained capture records.
 -- Literal/Transport sources carry values, not paths. This grants no approval authority.
@@ -332,17 +376,28 @@ verifyFrontendFiles store profile setup = withStoreFiles store $ \root -> timed 
     _ -> pure ()
 
 requestState :: CredentialProof -> Text -> [Scope] -> Transaction RequestState
-requestState proof ident scopes = do
+requestState proof = requestStateWith (ClientAccess proof)
+
+requestStateWith :: DraftAccess -> Text -> [Scope] -> Transaction RequestState
+requestStateWith access ident scopes = do
   unless(validId ident) (refuseTransaction InvalidRequest)
-  _<-currentClient proof >>= requireTransaction
-  let predicates=T.concat[" AND EXISTS(SELECT 1 FROM credential_scopes s WHERE s.credential_id=? AND s.profile_id=r.profile_id AND s.scope=?)" | _<-scopes]
-  rows<-query ("SELECT r.revision,r.workflow_id,r.descriptor_revision,r.profile_id,r.profile_revision,r.phase,r.admission,r.queue_ordinal,r.blocking_reasons,r.validation_errors,r.client_id,r.parent_run_id,r.lineage_operation,(SELECT id FROM preparations WHERE request_id=r.id AND state='live'),(SELECT id FROM runs WHERE request_id=r.id) FROM requests r WHERE r.id=?"<>predicates)
-    (text ident:concat[[text(credentialRateKey proof),text(scopeName scope)]|scope<-scopes])
+  (predicates, credentials) <- case access of
+    ClientAccess proof -> do
+      _<-currentClient proof >>= requireTransaction
+      pure (T.concat[" AND EXISTS(SELECT 1 FROM credential_scopes s WHERE s.credential_id=? AND s.profile_id=r.profile_id AND s.scope=?)" | _<-scopes],
+        concat[[text(credentialRateKey proof),text(scopeName scope)]|scope<-scopes])
+    AcceptedAccess permit -> do
+      request <- checkAcceptedEnqueue permit
+      unless(request==ident)(refuseTransaction OwnershipUnavailable)
+      pure ("",[])
+  rows<-query ("SELECT r.revision,r.workflow_id,r.descriptor_revision,r.profile_id,r.profile_revision,r.phase,r.admission,(CASE WHEN r.phase='queued' THEN (SELECT count(*) FROM requests q WHERE q.phase='queued' AND (length(q.queue_ordinal)<length(r.queue_ordinal) OR (length(q.queue_ordinal)=length(r.queue_ordinal) AND q.queue_ordinal<=r.queue_ordinal))) END),r.blocking_reasons,r.validation_errors,r.client_id,r.parent_run_id,r.lineage_operation,(SELECT id FROM preparations WHERE request_id=r.id AND state='live'),(SELECT id FROM runs WHERE request_id=r.id) FROM requests r WHERE r.id=?"<>predicates)
+    (text ident:credentials)
   case rows of
-    [[SQL.SQLText revision,SQL.SQLText workflow,SQL.SQLText descriptor,SQL.SQLText profile,SQL.SQLText policy,SQL.SQLText phase,SQL.SQLText admission,_,SQL.SQLBlob reasons,SQL.SQLBlob errors,SQL.SQLText client,parent,lineage,preparation,run]] -> do
+    [[SQL.SQLText revision,SQL.SQLText workflow,SQL.SQLText descriptor,SQL.SQLText profile,SQL.SQLText policy,SQL.SQLText phase,SQL.SQLText admission,position,SQL.SQLBlob reasons,SQL.SQLBlob errors,SQL.SQLText client,parent,lineage,preparation,run]] -> do
       blocked<-decodeTransaction reasons
+      place<-fmap fromIntegral <$> optionalInteger position
       p<-optionalText parent;l<-optionalText lineage;prep<-optionalText preparation;u<-optionalText run
-      pure(RequestState(DraftView ident revision workflow descriptor profile policy phase (Readiness[][][][]) admission Nothing blocked prep u p l) client errors)
+      pure(RequestState(DraftView ident revision workflow descriptor profile policy phase (Readiness[][][][]) admission place blocked prep u p l) client errors)
     _->refuseTransaction Forbidden
 
 inputStates :: Text -> Transaction [InputState]
@@ -375,18 +430,21 @@ sameCapture :: CaptureState -> CaptureState -> Bool
 sameCapture (CaptureState a x r) (CaptureState b y s)=a==b && x==y && r==s
 
 readLiteral :: CoordinationStore -> CredentialProof -> RequestState -> [Scope] -> InputState -> IO Text
-readLiteral store proof snapshot@(RequestState view _ _) scopes input@(InputState name _ _ raw native count expected _) = do
+readLiteral store proof = readLiteralWith store (ClientAccess proof)
+
+readLiteralWith :: CoordinationStore -> DraftAccess -> RequestState -> [Scope] -> InputState -> IO Text
+readLiteralWith store access snapshot@(RequestState view _ _) scopes input@(InputState name _ _ raw native count expected _) = do
   bytes<-maybe(throwIO InvalidInput)pure raw
   nativeBytes<-maybe(throwIO InvalidInput)pure native
   chunks<-maybe(throwIO InvalidInput)pure count
   digest<-maybe(throwIO InvalidInput)pure expected
   unless(bytes<=2097152 && chunks==(bytes+65535)`div`65536) (throwIO InvalidInput)
   runRead store $ do
-    checkRevision proof snapshot scopes
+    checkRevisionWith access snapshot scopes
     rows <- query "SELECT count(*),coalesce(sum(length(bytes)),0) FROM request_literal_chunks WHERE request_id=? AND name=?" [text(draftId view),text name]
     unless(rows==[[SQL.SQLInteger chunks,SQL.SQLInteger bytes]])(refuseTransaction InvalidInput)
   parts<-forM [0..chunks-1] $ \index -> runRead store $ do
-    checkRevision proof snapshot scopes
+    checkRevisionWith access snapshot scopes
     rows<-query "SELECT bytes FROM request_literal_chunks WHERE request_id=? AND name=? AND ordinal=?" [text(draftId view),text name,SQL.SQLInteger index]
     case rows of [[SQL.SQLBlob value]] | fromIntegral(BS.length value)==min 65536 (bytes-index*65536) -> pure value; _->refuseTransaction InvalidInput
   let result=BS.concat parts
@@ -404,8 +462,10 @@ editable (RequestState view _ _) = do
 currentVersion :: CredentialProof -> Text -> Transaction (Maybe (Text,Text,Text))
 currentVersion proof ident = do RequestState view _ _<-requestState proof ident [Submit];pure(Just(requestURI ident,draftProfile view,draftRevision view))
 checkRevision :: CredentialProof -> RequestState -> [Scope] -> Transaction ()
-checkRevision proof (RequestState expected _ _) scopes = do
-  RequestState actual _ _<-requestState proof (draftId expected) scopes
+checkRevision proof = checkRevisionWith (ClientAccess proof)
+checkRevisionWith :: DraftAccess -> RequestState -> [Scope] -> Transaction ()
+checkRevisionWith access (RequestState expected _ _) scopes = do
+  RequestState actual _ _<-requestStateWith access (draftId expected) scopes
   unless(draftRevision actual==draftRevision expected)(refuseTransaction StaleRevision)
 ensureRevision :: CoordinationStore -> CredentialProof -> RequestState -> [Scope] -> IO ()
 ensureRevision store proof snapshot scopes=runRead store(checkRevision proof snapshot scopes)
@@ -437,6 +497,16 @@ checkInputReplacement ident name replacement capture = do
   unless(literals-old+added+captures<=holdingLimit)(refuseTransaction StorageQuota)
   totals<-query "SELECT coalesce(sum(CASE WHEN i.source='literal' THEN i.literal_transport_bytes WHEN i.source='capture' THEN c.bytes ELSE 0 END),0),coalesce(sum(i.source='literal' AND i.literal_transport_bytes IS NULL),0) FROM request_inputs i LEFT JOIN captures c ON c.id=i.capture_id WHERE i.request_id=? AND i.name!=?" [text ident,text name]
   case totals of [[SQL.SQLInteger total,SQL.SQLInteger 0]]->unless(total+native<=holdingLimit)(refuseTransaction SizeLimit);_->refuseTransaction InvalidInput
+-- | Structural stored readiness. File integrity is still checked by materialization.
+structuralReadiness :: [Text] -> Transaction [(Text, Bool)]
+structuralReadiness identifiers = do
+  unless(length identifiers<=100)(refuseTransaction SizeLimit)
+  if null identifiers then pure [] else do
+    rows <- query ("SELECT r.id,CASE WHEN json_valid(r.validation_errors) AND json_type(r.validation_errors)='array' AND json_array_length(r.validation_errors)=0 AND NOT EXISTS(SELECT 1 FROM request_inputs i LEFT JOIN captures c ON c.id=i.capture_id WHERE i.request_id=r.id AND (i.source IS NULL OR (i.source='literal' AND i.literal_transport_bytes IS NULL) OR (i.source='capture' AND c.id IS NULL))) AND coalesce((SELECT sum(CASE WHEN i.source='literal' THEN i.literal_transport_bytes ELSE c.bytes END) FROM request_inputs i LEFT JOIN captures c ON c.id=i.capture_id WHERE i.request_id=r.id),0)<=67108864 THEN 1 ELSE 0 END FROM requests r WHERE r.id IN (" <> T.intercalate "," (replicate(length identifiers) "?") <> ")") (map text identifiers)
+    forM rows $ \row -> case row of
+      [SQL.SQLText ident,SQL.SQLInteger ready] -> pure(ident,ready==1)
+      _ -> refuseTransaction InvalidInput
+
 ensureReadyTotal :: CoordinationStore -> Text -> IO ()
 ensureReadyTotal store ident = runRead store $ do
   rows<-query "SELECT coalesce(sum(CASE WHEN i.source='literal' THEN i.literal_transport_bytes ELSE c.bytes END),0),coalesce(sum(i.source IS NULL OR (i.source='literal' AND i.literal_transport_bytes IS NULL)),0) FROM request_inputs i LEFT JOIN captures c ON c.id=i.capture_id WHERE i.request_id=?" [text ident]

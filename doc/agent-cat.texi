@@ -3884,7 +3884,9 @@ Conflicting bindings refuse.  Aged inactive receipts retain charged non-content
 tombstones rather than permitting replay.
 
 The version-two command migration preserves existing version-one facts.
-Internal schema version three adds the draft representations transactionally.
+The version-three migration adds draft representations, and internal schema
+version four adds admission order, resource domains, and native observations.
+Both migrations preserve earlier records transactionally.
 Legacy raw bodies remain exact and are compared within SQLite rather than copied
 through the result buffer.  The frozen public manager-store compatibility domain
 remains version one.  Logical ledger reservations include bounded future receipt
@@ -3935,10 +3937,10 @@ Per-client and global draft limits, per-request holding and assembled-input
 limits, and global capture reservations are independent accounting bounds.
 
 The file-operation slot is fail-fast and is joined before store closure.
-Draft and queued edits require no active reservation or live preparation.
-Worker discard, approval, and retention remain with their owning layers rather
-than being inferred from these coordination records.  The current contract,
-migration rules, and verification limits are in @file{manager/DRAFTS.md}.
+The standalone draft operation requires no active reservation or live preparation
+before editing.  The admission owner invalidates its live association and retains
+all claims until actual worker cleanup before completing an edit or withdrawal.
+The representation and verification contract remains in @file{manager/DRAFTS.md}.
 
 @subsection Manager-owned native workers
 
@@ -3971,12 +3973,58 @@ observers neither consume the queue nor close worker pipes.  The queue is bounde
 at thirty-two frames and eight MiB of wire bytes, while stderr retains at most
 65536 bytes with explicit truncation and continued concurrent draining.
 
-Startup has a thirty-second budget and writes have a five-second budget.
+@code{withStartingFrontendWorker} loans the opaque handle during construction,
+while @code{withFrontendWorker} waits for the actual prepared response before its
+callback.  Startup retains one thirty-second deadline even when the early caller
+does not await preparation, and writes have a five-second budget.
 The outer termination grace is five seconds, with the CLI proxy's existing
 two-second inner grace unchanged.  Final cleanup remains joined rather than
-being represented as an absolute OS IO deadline.  Admission, exact approval,
-durable ingestion, and broader service supervision remain separate owners.
+being represented as an absolute OS IO deadline.  Exact approval, durable
+ingestion, and broader service supervision remain separate owners.
 The current contract and verification boundary are in @file{manager/WORKERS.md}.
+
+@subsection Admission and resource reservations
+
+The internal admission controller selects the globally oldest eligible queued
+request and reserves its global slot and complete exclusive resource footprint
+in one transaction.  Current profile and structural readiness remain separate
+from successful native preparation.  Blocked older work does not prevent an
+independent eligible request from progressing, and no partial key set is held
+while waiting for another resource.
+
+Enqueue is explicit, with a one-hundred-request global queue and a persistent
+UInt64 ordering clock distinct from event sequences.  The current execution limit
+is global, defaults to one, and cannot exceed sixteen.  Retained reservations
+still consume capacity after a lower limit is installed.  Operator resource keys
+declare complete exclusive footprints.  Empty declarations share a separate
+unclassified domain that cannot collide with an operator key string.
+
+Commands retains an opaque invocation context before acceptance, so a lost return
+can be reconciled only for that known operation.  An accepted enqueue permit
+allows exact internal materialization after submitting-credential expiry without
+granting new client access or approval.  Original receipts remain immutable, and
+replay cannot reconstruct a missing continuation, timer, or native worker.
+
+The controller retains construction, native preparation, and cleanup ownership
+in bounded memory associated with the actual Store.  Review waiting consumes the
+reservation.  The ten-minute pending-review lifetime starts at the genuine native
+prepared observation and uses monotonic time, not a restored wall-clock field.
+A scoped @code{CommitDeadline} is checked after bounded transaction work and
+invalidations, immediately before COMMIT.  An expired fresh acceptance rolls back,
+while exact authorized receipt replay does not reapply fresh eligibility.
+
+Live edits and withdrawal first invalidate the old association and mark cleanup
+pending without releasing claims.  Only confirmed cleanup of the original worker
+or proven absence of construction permits the final request transition, effect,
+and release.  Storage failure can leave durable claims unresolved even after
+physical cleanup, and physical uncertainty retains its original ownership fence.
+
+The controller supplies actual native review observations and a guarded opaque
+handoff, not a fabricated complete approval record.  The exact approval owner
+must use the final transaction guard and test accepted-start integration.  These
+admission tests establish resource policy and the native pre-start lifecycle,
+not a completed manager service or an SQL refinement theorem.  The current
+contract and evidence limits are in @file{manager/ADMISSION.md}.
 
 @section Native frontend preparation
 @c COVER CLI verb:frontend author

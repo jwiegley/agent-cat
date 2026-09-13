@@ -7,10 +7,10 @@
 -- | Durable command acceptance and one-shot live dispatch, not worker interpretation.
 module Agentic.Manager.Commands
   ( CommandRequest (..), Mutation (..), Intent (..), CommandReferences (..), noReferences,
-    Submission, submissionReceipt, submissionReplayed, submissionTicket, submissionReferences,
-    DispatchTicket, dispatchCommandId, submitCommand, submitConfiguredCommand, submitStreamedCommand, commandPreflight, readCommand,
+    Submission, submissionReceipt, submissionReplayed, submissionTicket, submissionReferences, submissionEnqueue, AcceptedEnqueue, acceptedRequest, checkAcceptedEnqueue, currentAcceptedEnqueues,
+    CommandAttempt, newCommandAttempt, submitCommandAttempt, submitCommandAttemptWithDeadline, reconcileCommandAttempt, DispatchTicket, dispatchCommandId, submitCommand, submitConfiguredCommand, submitStreamedCommand, commandPreflight, readCommand,
     BodyBinding, measureCommandBody, bodyBindingBytes, bodyBindingSha256,
-    reserveDispatch, attemptDispatch, recordAcknowledgement, recordEffect, recordUnresolved, recordRefusal,
+    reserveDispatch, attemptDispatch, recordAcknowledgement, recordEffect, recordEffectWith, recordUnresolved, recordRefusal,
     retireReceipt, commandCapacity, tombstoneCapacity
   ) where
 
@@ -19,8 +19,8 @@ import Agentic.Manager.Profile (ConfigurationLimits (..), PublicProfile, publicI
 import Agentic.Manager.Protocol.Command
 import Agentic.Manager.Store
 import Control.DeepSeq (NFData)
-import Control.Exception (SomeException, mask, throwIO, try)
-import Control.Monad (unless, void)
+import Control.Exception (SomeException, mask, finally, throwIO, try)
+import Control.Monad (unless, void, forM, forM_)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Except (ExceptT (..), runExceptT, throwE)
 import Crypto.Hash (Context, Digest, SHA256, hash, hashInit, hashUpdate, hashFinalize)
@@ -34,6 +34,7 @@ import qualified Data.ByteString as BS
 import Data.Int (Int64)
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
 import Data.List (find)
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -100,16 +101,48 @@ noReferences :: CommandReferences
 noReferences = CommandReferences Nothing Nothing Nothing Nothing
 
 -- | A committed original receipt and, only for fresh acceptance, live dispatch authority.
-data Submission = Submission !CommandReceipt !Bool !(Maybe DispatchTicket) !CommandReferences
+data Submission = Submission !CommandReceipt !Bool !(Maybe DispatchTicket) !CommandReferences !(Maybe AcceptedEnqueue)
 submissionReceipt :: Submission -> CommandReceipt
-submissionReceipt (Submission receipt _ _ _) = receipt
+submissionReceipt (Submission receipt _ _ _ _) = receipt
 submissionReplayed :: Submission -> Bool
-submissionReplayed (Submission _ replayed _ _) = replayed
+submissionReplayed (Submission _ replayed _ _ _) = replayed
 submissionTicket :: Submission -> Maybe DispatchTicket
-submissionTicket (Submission _ _ ticket _) = ticket
+submissionTicket (Submission _ _ ticket _ _) = ticket
 
 submissionReferences :: Submission -> CommandReferences
-submissionReferences (Submission _ _ _ refs) = refs
+submissionReferences (Submission _ _ _ refs _) = refs
+
+-- | A current, accepted enqueue's materialization association, not approval or worker authority.
+data AcceptedEnqueue = AcceptedEnqueue !Text !Text !Text !QueueAssociation
+data QueueAssociation = QueueAssociation !Text !Text !Text !Text !Text !Text !Text !Text
+  deriving (Generic, NFData)
+submissionEnqueue :: Submission -> Maybe AcceptedEnqueue
+submissionEnqueue (Submission _ _ _ _ permit) = permit
+acceptedRequest :: AcceptedEnqueue -> Text
+acceptedRequest (AcceptedEnqueue _ _ _ (QueueAssociation request _ _ _ _ _ _ _)) = request
+
+checkAcceptedEnqueue :: AcceptedEnqueue -> Transaction Text
+checkAcceptedEnqueue permit = do
+  current <- currentAcceptedEnqueues [permit]
+  unless(Set.member (acceptedRequest permit) current)(refuseTransaction OwnershipUnavailable)
+  pure(acceptedRequest permit)
+
+-- | Bounded current associations from retained permits, not capabilities minted from rows.
+currentAcceptedEnqueues :: [AcceptedEnqueue] -> Transaction (Set.Set Text)
+currentAcceptedEnqueues permits = do
+  unless(length permits<=116)(refuseTransaction SizeLimit)
+  generation <- transactionGeneration
+  let current=[permit | permit@(AcceptedEnqueue owner _ _ _) <- permits, owner==generation]
+      chunks []=[]
+      chunks values=let(first,rest)=splitAt 16 values in first:chunks rest
+      parameters (AcceptedEnqueue owner epoch command (QueueAssociation request profile policy workflow descriptor ordinal origin inputRevision)) =
+        map text [owner,epoch,command,request,profile,policy,workflow,descriptor,ordinal,origin,inputRevision]
+  selected <- forM (chunks current) $ \batch -> do
+    rows <- query ("WITH permits(generation,epoch,command,request,profile,policy,workflow,descriptor,ordinal,origin,input_revision) AS (VALUES "
+      <> T.intercalate ","(replicate(length batch)"(?,?,?,?,?,?,?,?,?,?,?)")
+      <> ") SELECT p.request FROM permits p JOIN requests r ON r.id=p.request JOIN commands c ON c.id=p.command AND c.request_id=r.id JOIN service_metadata s ON s.singleton=1 WHERE r.enqueue_command=c.id AND c.operation='enqueue' AND c.retired=0 AND c.authority_epoch=p.epoch AND s.authority_epoch=p.epoch AND r.profile_id=p.profile AND r.profile_revision=p.policy AND r.workflow_id=p.workflow AND r.descriptor_revision=p.descriptor AND r.queue_ordinal=p.ordinal AND r.queue_origin_revision=p.origin AND r.input_revision=p.input_revision AND r.queue_generation=p.generation AND r.phase IN ('queued','preparing','review') AND (r.phase='queued' OR EXISTS(SELECT 1 FROM reservations v WHERE v.request_id=r.id AND v.process_generation=p.generation AND v.state='held'))") (concatMap parameters batch)
+    pure [request | [SQL.SQLText request] <- rows]
+  pure(Set.fromList(concat selected))
 
 -- | One command's live ownership. IDs and durable generation columns cannot mint this.
 data DispatchTicket = DispatchTicket !CoordinationStore !Text !Text !CommandReferences !(IORef TicketState)
@@ -127,21 +160,21 @@ submitCommand :: CoordinationStore -> CredentialProof -> CommandRequest -> Mutat
 submitCommand store proof request mutation = submitConfiguredCommand store proof request (\_ _ _ -> Right mutation)
 
 submitConfiguredCommand :: CoordinationStore -> CredentialProof -> CommandRequest -> (Text -> ConfigurationLimits -> [(Text, Discovery)] -> Either CommandFailure Mutation) -> IO (Either CommandFailure Submission)
-submitConfiguredCommand store proof request = submitBoundCommand store proof request Nothing
+submitConfiguredCommand store proof request = submitBoundCommand store proof request Nothing Nothing Nothing
 
 submitStreamedCommand :: CoordinationStore -> CredentialProof -> CommandRequest -> BodyBinding -> (Text -> ConfigurationLimits -> [(Text, Discovery)] -> Either CommandFailure Mutation) -> IO (Either CommandFailure Submission)
 submitStreamedCommand store proof request binding builder
   | commandOperation request /= Capture || not (BS.null (commandBody request)) = pure (Left InvalidRequest)
-  | otherwise = submitBoundCommand store proof request (Just binding) builder
+  | otherwise = submitBoundCommand store proof request (Just binding) Nothing Nothing builder
 
-submitBoundCommand :: CoordinationStore -> CredentialProof -> CommandRequest -> Maybe BodyBinding -> (Text -> ConfigurationLimits -> [(Text, Discovery)] -> Either CommandFailure Mutation) -> IO (Either CommandFailure Submission)
-submitBoundCommand store proof request streamed buildMutation = case validateRequest request of
+submitBoundCommand :: CoordinationStore -> CredentialProof -> CommandRequest -> Maybe BodyBinding -> Maybe CommandAttempt -> Maybe CommitDeadline -> (Text -> ConfigurationLimits -> [(Text, Discovery)] -> Either CommandFailure Mutation) -> IO (Either CommandFailure Submission)
+submitBoundCommand store proof request streamed known deadline buildMutation = case validateRequest request of
   Left failure -> pure (Left failure)
   Right () -> mask $ \restore -> do
-    candidate <- freshId "command_"
+    CommandAttempt _ _ _ candidate retained generationAtCreation _ <- maybe (newCommandAttempt store proof request) pure known
     let (digest, bodyBytes, legacyBytes) = case streamed of
           Nothing -> (convert (hash (commandBody request) :: Digest SHA256), BS.length (commandBody request), Just (commandBody request))
-          Just (BodyBinding checksum count retained) -> (checksum, count, retained)
+          Just (BodyBinding checksum count prefix) -> (checksum, count, prefix)
     outcome <- restore $ configuredCatalogues store proof $ \limits profiles catalogues identity -> transaction store $ do
       (client, epoch) <- authorizeRequest profiles proof request
       old <- sql "SELECT id,profile_id,operation,retired,media_type,precondition,body_sha256,body_bytes FROM commands WHERE client_id=? AND method=? AND resource_uri=? AND idempotency_key=?"
@@ -182,7 +215,16 @@ submitBoundCommand store proof request streamed buildMutation = case validateReq
              maybe SQL.SQLNull (SQL.SQLBlob . encoded) immediate, SQL.SQLBlob digest,
              SQL.SQLInteger (fromIntegral bodyBytes), SQL.SQLInteger commandCapacity]
           chargeRate proof (commandOperation request) minute
-          pure ((receipt, False, intentDispatch intent, refs, storeProcessGeneration identity), events <> [commandEvent candidate candidate])
+          queue <- case (commandOperation request, referenceRequest refs) of
+            (Enqueue, Just requestId) -> do
+              values <- sql "SELECT id,profile_id,profile_revision,workflow_id,descriptor_revision,queue_ordinal,queue_origin_revision,input_revision FROM requests WHERE id=? AND phase='queued' AND queue_generation=?"
+                [text requestId,text(storeProcessGeneration identity)]
+              pure $ case values of
+                [[SQL.SQLText r,SQL.SQLText p,SQL.SQLText pr,SQL.SQLText w,SQL.SQLText d,SQL.SQLText q,SQL.SQLText o,SQL.SQLText i]] -> Just(QueueAssociation r p pr w d q o i)
+                _ -> Nothing
+            _ -> pure Nothing
+          forM_ deadline (lift . enforceCommitDeadline)
+          pure ((receipt, False, intentDispatch intent, refs, storeProcessGeneration identity, epoch, queue), events <> [commandEvent candidate candidate])
         [[SQL.SQLText ident, SQL.SQLText profile, SQL.SQLText operation, SQL.SQLInteger retired, media, precondition, bodyDigest, bodyLength]] -> do
           require (profile == commandProfile request && operation == operationName (commandOperation request)) IdempotencyConflict
           require (retired == 0) ReceiptExpired
@@ -201,13 +243,73 @@ submitBoundCommand store proof request streamed buildMutation = case validateReq
           refs <- case referenceRows of
             [[r,u,p,d]] -> CommandReferences <$> sqlOptionalText r <*> sqlOptionalText u <*> sqlOptionalText p <*> sqlOptionalText d
             _ -> throwE StorageUnavailable
-          pure ((receipt, True, False, refs, storeProcessGeneration identity), [])
+          pure ((receipt, True, False, refs, storeProcessGeneration identity, epoch, Nothing), [])
         _ -> throwE StorageUnavailable
     case outcome of
       Left failure -> pure (Left failure)
-      Right (receipt, replayed, dispatch, refs, generation) -> do
-        ticket <- if dispatch then Just . DispatchTicket store (receiptId receipt) generation refs <$> newIORef Unreserved else pure Nothing
-        pure (Right (Submission receipt replayed ticket refs))
+      Right (receipt, replayed, dispatch, refs, generation, epoch, association) -> do
+        unless (generation==generationAtCreation) (throwIO OwnershipUnavailable)
+        ticket <- if dispatch then pure (Just (DispatchTicket store (receiptId receipt) generation refs retained)) else pure Nothing
+        pure (Right (Submission receipt replayed ticket refs (AcceptedEnqueue generation epoch (receiptId receipt) <$> association)))
+
+-- | One retained invocation, allocated before acceptance and never recreated from a receipt.
+data CommandAttempt = CommandAttempt !CoordinationStore !CredentialProof !CommandRequest !Text !(IORef TicketState) !Text !(IORef AttemptPhase)
+data AttemptPhase = AttemptNew | AttemptRunning | AttemptFinished deriving (Eq)
+
+newCommandAttempt :: CoordinationStore -> CredentialProof -> CommandRequest -> IO CommandAttempt
+newCommandAttempt store proof request = do
+  candidate <- freshId "command_"
+  state <- newIORef Unreserved
+  phase <- newIORef AttemptNew
+  pure (CommandAttempt store proof request candidate state (proofGeneration proof) phase)
+
+submitCommandAttempt :: CommandAttempt -> (Text -> ConfigurationLimits -> [(Text, Discovery)] -> Either CommandFailure Mutation) -> IO (Either CommandFailure Submission)
+submitCommandAttempt = submitAttempt Nothing
+
+submitCommandAttemptWithDeadline :: CommitDeadline -> CommandAttempt -> (Text -> ConfigurationLimits -> [(Text, Discovery)] -> Either CommandFailure Mutation) -> IO (Either CommandFailure Submission)
+submitCommandAttemptWithDeadline deadline = submitAttempt(Just deadline)
+
+submitAttempt :: Maybe CommitDeadline -> CommandAttempt -> (Text -> ConfigurationLimits -> [(Text, Discovery)] -> Either CommandFailure Mutation) -> IO (Either CommandFailure Submission)
+submitAttempt deadline attempt@(CommandAttempt store proof request _ _ _ phase) builder = mask $ \restore -> do
+  started <- atomicModifyIORef' phase $ \current -> if current==AttemptNew then (AttemptRunning,True) else (current,False)
+  if not started then pure(Left OwnershipUnavailable) else
+    restore(submitBoundCommand store proof request Nothing (Just attempt) deadline builder) `finally` writeIORef phase AttemptFinished
+
+-- Reconcile only this known invocation after a lost return. Current credentials do not
+-- revoke its accepted cleanup, while Store lifetime and authority epoch still fence it.
+reconcileCommandAttempt :: CommandAttempt -> IO (Either CommandFailure (Maybe Submission))
+reconcileCommandAttempt (CommandAttempt store _ request candidate retained generation phase) = do
+  done <- readIORef phase
+  if done/=AttemptFinished then pure(Left OwnershipUnavailable) else reconcile
+  where
+  reconcile = do
+   outcome <- transaction store $ do
+     current <- lift transactionGeneration
+     epoch <- currentEpoch
+     require (generation==current && epoch==keyEpoch request) OwnershipUnavailable
+     rows <- sql "SELECT body_sha256,body_bytes,method,resource_uri,idempotency_key,profile_id,operation,authority_epoch,retired,request_id,run_id,preparation_id,decision_id FROM commands WHERE id=?" [text candidate]
+     if null rows then pure(Nothing,[]) else do
+       refs <- case rows of
+         [[SQL.SQLBlob digest,SQL.SQLInteger count,method,uri,key,profile,operation,authority,SQL.SQLInteger 0,r,u,p,d]] -> do
+           require (constEq digest (convert(hash(commandBody request)::Digest SHA256)::BS.ByteString)
+             && count==fromIntegral(BS.length(commandBody request)) && method==text(commandMethod request)
+             && uri==text(commandResource request) && key==text(commandKey request) && profile==text(commandProfile request)
+             && operation==text(operationName(commandOperation request)) && authority==text epoch) OwnershipUnavailable
+           CommandReferences <$> sqlOptionalText r <*> sqlOptionalText u <*> sqlOptionalText p <*> sqlOptionalText d
+         _ -> throwE OwnershipUnavailable
+       receipt <- originalReceipt candidate
+       association <- case (commandOperation request,referenceRequest refs) of
+         (Enqueue,Just ident) -> do
+           queue <- sql "SELECT id,profile_id,profile_revision,workflow_id,descriptor_revision,queue_ordinal,queue_origin_revision,input_revision FROM requests WHERE id=? AND queue_generation=? AND enqueue_command=? AND queue_origin_revision IS NOT NULL AND phase='queued'" [text ident,text generation,text candidate]
+           pure $ case queue of
+             [[SQL.SQLText r,SQL.SQLText p,SQL.SQLText pr,SQL.SQLText w,SQL.SQLText d,SQL.SQLText q,SQL.SQLText o,SQL.SQLText i]] -> Just(QueueAssociation r p pr w d q o i)
+             _ -> Nothing
+         _ -> pure Nothing
+       pending <- sql "SELECT count(*) FROM reservations WHERE pending_command=? AND process_generation=? AND state='cleanup-pending'" [text candidate,text generation]
+       pure (Just(receipt,refs,epoch,association,pending==[[SQL.SQLInteger 1]]),[])
+   pure $ fmap (fmap (\(receipt,refs,epoch,association,dispatch) -> Submission receipt False
+     (if dispatch then Just(DispatchTicket store candidate generation refs retained) else Nothing) refs
+     (AcceptedEnqueue generation epoch candidate <$> association))) outcome
 
 -- | Reserve bounded pre-body work without claiming command acceptance or exposing a receipt.
 commandPreflight :: NFData a => CoordinationStore -> CredentialProof -> CommandRequest
@@ -305,7 +407,11 @@ recordAcknowledgement ticket@(DispatchTicket _ ident _ _ _) acknowledgement = ob
         receiptState = if receiptState current == EffectObserved then EffectObserved else Acknowledged}
 
 recordEffect :: DispatchTicket -> Effect -> IO (Either CommandFailure CommandReceipt)
-recordEffect ticket@(DispatchTicket _ ident _ refs _) effect = observe ticket $ \current -> do
+recordEffect ticket effect = recordEffectWith ticket effect (pure [])
+
+-- | Owning resource completion and command effect commit together after physical proof.
+recordEffectWith :: DispatchTicket -> Effect -> Transaction [Invalidation] -> IO (Either CommandFailure CommandReceipt)
+recordEffectWith ticket@(DispatchTicket _ ident _ refs _) effect finalTransition = observeWith ticket finalTransition $ \current -> do
   require (receiptAttemptedAt current /= Nothing) StateConflict
   validateEffectBinding (receiptOperation current) ident refs effect
   case receiptEffect current of
@@ -362,16 +468,20 @@ recordRefusal ticket refusal = observe ticket $ \current -> do
     Nothing -> pure current {receiptState = Refused, receiptRefusal = Just refusal}
 
 observe :: DispatchTicket -> (CommandReceipt -> CommandTx CommandReceipt) -> IO (Either CommandFailure CommandReceipt)
-observe ticket@(DispatchTicket store ident _ _ _) update = do
+observe ticket = observeWith ticket (pure [])
+
+observeWith :: DispatchTicket -> Transaction [Invalidation] -> (CommandReceipt -> CommandTx CommandReceipt) -> IO (Either CommandFailure CommandReceipt)
+observeWith ticket@(DispatchTicket store ident _ _ _) finalTransition update = do
   revision <- freshId "command_revision_"
   transaction store $ do
     current <- liveCommand ticket
     next <- update current
     if next == current then pure (current, []) else do
+      changes <- lift finalTransition
       lift $ execute "UPDATE commands SET state=?,acknowledgement=?,effect_evidence=?,refusal=?,revision=? WHERE id=?"
         [text (stateName (receiptState next)), maybe SQL.SQLNull (SQL.SQLBlob . encoded) (receiptAcknowledgement next),
          maybe SQL.SQLNull (SQL.SQLBlob . encoded) (receiptEffect next), optional (receiptRefusal next), text revision, text ident]
-      pure (next, [commandEvent ident revision])
+      pure (next, changes <> [commandEvent ident revision])
 
 -- The owning retention module supplies a real transactional inactivity check for this URI.
 -- There is deliberately no public retire-by-ID operation or default inactivity proof.

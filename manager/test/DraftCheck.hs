@@ -410,7 +410,7 @@ lifecycleChecks work source=withFixture work source "lifecycle" 5 5 8 $ \fixture
   rowsEqual store "SELECT phase,admission,queue_ordinal FROM requests"
     [[txt"draft",txt"not-queued",SQL.SQLNull]]>>=check "queued edit atomically leaves the admission queue"
   current<-readDraft store proof(draftId view)>>=right
-  mutate store(execute "INSERT INTO reservations VALUES ('reservation',?,0,'generation','held')" [txt(draftId view)])
+  mutate store(execute "INSERT INTO reservations (id,request_id,slot,process_generation,state) VALUES ('reservation',?,0,'generation','held')" [txt(draftId view)])
   k<-key store "reserved"
   expect "reserved request cannot pretend a worker was discarded" StateConflict(changeDraftInput store proof(draftId view)k(Just("\""<>draftRevision current<>"\""))(encoded(object["operation" .= ("set-input"::Text),"input" .= LiteralValue "second" "blocked"])))
   mutate store(execute "UPDATE reservations SET state='released',slot=NULL" [])
@@ -628,7 +628,7 @@ declarationMigrationChecks work=do
     forM_ ordinary $ \(name,index)->insert name index(declaration name)
     insert "oversized_unknown" (20::Int) unknown
   bracket(installConfiguration config>>=right)closeConfiguration $ \installed->withCoordinationStore installed $ \store->do
-    storeIdentity store>>=check "large declaration migration completes without raising result limit" . ((==3).storeSchemaVersion)
+    storeIdentity store>>=check "large declaration migration completes without raising result limit" . ((==4).storeSchemaVersion)
     number store "SELECT count(*) FROM request_inputs WHERE literal_transport_bytes=6" >>=check "ordinary large declarations derive exact native lengths individually" . (==20)
     rowsEqual store "SELECT literal_bytes,literal_transport_bytes,literal_chunks,literal_digest FROM request_inputs WHERE name='oversized_unknown'"
       [[SQL.SQLInteger 5,SQL.SQLNull,SQL.SQLInteger 1,SQL.SQLBlob(convert(hash literal::Digest SHA256))]]>>=check "oversized unknown derivation stays explicit with complete literal integrity"

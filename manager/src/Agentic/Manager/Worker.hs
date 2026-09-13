@@ -6,7 +6,7 @@
 module Agentic.Manager.Worker
   ( FrontendWorker, WorkerFailure (..), WorkerPhase (..), WorkerObservation (..),
     WorkerEvent, workerEventEnvelope, workerEventBytes,
-    withFrontendWorker, workerPrepared, startWorker, discardWorker, writeWorkerControl,
+    withFrontendWorker, withStartingFrontendWorker, workerPrepared, startWorker, discardWorker, writeWorkerControl,
     consumeWorkerEvent, observeWorker, workerDiagnostics, waitWorker, closeWorker
   ) where
 
@@ -26,7 +26,7 @@ import Agentic.Runtime
    maxFrontendReplyBytes, maxFrameBytes, latestProtocolVersion, readNdjsonFrame,
    Envelope (..), RuntimeEvent (..), SeqNo, checkSequence, decodeEnvelopeFor,
    Control, encodeControlFor, decodeControlFor)
-import Control.Concurrent.Async (async, waitCatch, race, concurrently_)
+import Control.Concurrent.Async (async, withAsync, waitCatch, race, concurrently_)
 import Control.Concurrent.MVar (MVar, newMVar, tryTakeMVar, putMVar)
 import Control.Concurrent.STM
   (STM, TVar, TMVar, TBQueue, throwSTM, atomically, newTVarIO, readTVar, writeTVar, modifyTVar',
@@ -99,12 +99,18 @@ data FrontendWorker = FrontendWorker
 
 -- | Own a native session independently of observers. This does not authorize approval.
 withFrontendWorker :: CoordinationStore -> Text -> Text -> FrontendSetupRequest -> (FrontendWorker -> IO a) -> IO a
-withFrontendWorker store profile revision setup action = mask $ \restore -> do
+withFrontendWorker store profile revision setup action = withStartingFrontendWorker store profile revision setup $ \worker ->
+  workerPrepared worker >> action worker
+
+-- | Loan construction ownership immediately, without granting preparation or approval.
+withStartingFrontendWorker :: CoordinationStore -> Text -> Text -> FrontendSetupRequest -> (FrontendWorker -> IO a) -> IO a
+withStartingFrontendWorker store profile revision setup action = mask $ \restore -> do
   worker <- FrontendWorker <$> newTVarIO WorkerPreparing <*> newEmptyTMVarIO <*> newTVarIO Nothing
     <*> newTBQueueIO 32 <*> newTVarIO 0 <*> newTVarIO Nothing <*> newTVarIO (BS.empty, False)
     <*> newMVar () <*> newMVar () <*> newEmptyTMVarIO <*> newEmptyTMVarIO <*> newTVarIO False <*> newTVarIO (pure False) <*> newTVarIO Nothing
   supervisor <- async $ do
-    outcome <- try @SomeException (withStoreWorker store (runOwned worker))
+    outcome <- try @SomeException $ withAsync (preparationDeadline worker) $ \_ ->
+      withStoreWorker store (runOwned worker)
     let result = either (Left . classify) Right outcome
     atomically $ do
       writeTVar (inputPipe worker) Nothing
@@ -112,7 +118,7 @@ withFrontendWorker store profile revision setup action = mask $ \restore -> do
       writeTVar (phase worker) (if closed then WorkerReleased else WorkerExited)
       void (tryPutTMVar (finished worker) result)
   preserveException
-    (restore (deadline WorkerStartupTimeout 30000000 (awaitPrepared worker)) >> restore (action worker))
+    (restore (action worker))
     (closeWorker worker `finally` void (waitCatch supervisor))
   where
     runOwned worker owner root live = do
@@ -163,6 +169,14 @@ withFrontendWorker store profile revision setup action = mask $ \restore -> do
         group <- createStoreWorkerGroup owner command
         pure (group, selected)
       either (const (throwIO WorkerConfiguration)) pure result
+
+preparationDeadline :: FrontendWorker -> IO ()
+preparationDeadline worker = do
+  completed <- timeout 30000000 $ atomically $
+    void (readTMVar (prepared worker)) `orElse` void (readTMVar (finished worker))
+  case completed of
+    Just () -> pure ()
+    Nothing -> atomically (void (tryPutTMVar (stopReason worker) (StopFailed WorkerStartupTimeout)))
 
 checkedSelection :: CoordinationStore -> Text -> Text -> FrontendSetupRequest -> IO (Selection, Discovery)
 checkedSelection store profile revision setup = do

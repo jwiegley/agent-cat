@@ -25,6 +25,14 @@ cases = [
     ("constructor", "import Agentic.Manager.Authorization\nforge :: CredentialProof\nforge = CredentialProof undefined undefined undefined undefined\n", "Illegal term-level use of the type constructor"),
     ("generic", "import Agentic.Manager.Authorization (CredentialProof)\nimport GHC.Generics (from)\ninspect :: CredentialProof -> ()\ninspect proof = from proof `seq` ()\n", "Generic CredentialProof"),
 ]
+for module, token in [("Store", "CommitDeadline"), ("Admission", "Admission"), ("Admission", "LivePreparation"),
+                      ("Commands", "AcceptedEnqueue"), ("Commands", "CommandAttempt")]:
+    imported = f"import Agentic.Manager.{module} ({token})\n"
+    cases.extend([
+        (token + "-positive", imported + f"keep :: {token} -> {token}\nkeep = id\n", None),
+        (token + "-constructor", f"import Agentic.Manager.{module}\nforge :: {token}\nforge = {token} `seq` undefined\n", "Illegal term-level use of the type constructor"),
+        (token + "-generic", imported + f"import GHC.Generics (from)\ninspect :: {token} -> ()\ninspect value = from value `seq` ()\n", "Generic " + token),
+    ])
 for name, body, expected in cases:
     directory = work / name
     directory.mkdir()
