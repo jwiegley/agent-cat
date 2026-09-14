@@ -1,26 +1,17 @@
-import { existsSync } from "node:fs";
+import { createRequire } from "node:module";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const packageRoot = process.env.PI_PACKAGE_DIR
   ?? dirname(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))));
-const packageParent = dirname(packageRoot);
-
-function findPackage(name) {
-  const root = [
-    join(packageParent, name),
-    join(packageRoot, "node_modules/@earendil-works", name),
-  ].find(existsSync);
-  if (!root) throw new Error(`Pi runtime package ${name} is unavailable`);
-  return root;
-}
+const require = createRequire(join(packageRoot, "package.json"));
 
 function moduleUrl(root, path) {
   return pathToFileURL(join(root, path)).href;
 }
 
-const clientRoot = findPackage("pi-client");
-const chordRoot = findPackage("chord");
+const clientRoot = dirname(require.resolve("@earendil-works/pi-client/package.json"));
+const chordRoot = dirname(require.resolve("@earendil-works/chord/package.json"));
 const [clientApi, unixApi, chordApi, contextApi] = await Promise.all([
   import(moduleUrl(clientRoot, "dist/index.js")),
   import(moduleUrl(clientRoot, "dist/unix.js")),

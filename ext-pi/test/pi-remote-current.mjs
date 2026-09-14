@@ -1,17 +1,19 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
+import { findPackageJSON } from "node:module";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import readline from "node:readline";
-import {
-  createRemoteServiceEndpoint,
-  defineService,
-  RemoteServiceProvider,
-  replicatedState,
-} from "@earendil-works/chord";
-import { createUnixServer } from "@earendil-works/pi-server/unix";
+import { pathToFileURL } from "node:url";
 import { piPackageRoot } from "./fixtures/pi-package-root.ts";
+
+const packageBase = join(piPackageRoot, "package.json");
+const chordRoot = dirname(findPackageJSON("@earendil-works/chord", packageBase));
+const serverRoot = dirname(findPackageJSON("@earendil-works/pi-server", packageBase));
+const { createRemoteServiceEndpoint, defineService, RemoteServiceProvider, replicatedState } =
+  await import(pathToFileURL(join(chordRoot, "dist/index.js")).href);
+const { createUnixServer } = await import(pathToFileURL(join(serverRoot, "dist/transports/unix/index.js")).href);
 
 process.env.PI_PACKAGE_DIR = piPackageRoot;
 const { selectRemoteTarget } = await import("../src/index.ts");
@@ -104,8 +106,16 @@ try {
   assert.equal(reattached.sessionId, "session-a");
   assert.equal(await close(reattached.child), 0);
 } finally {
-  for (const child of children) child.kill("SIGKILL");
-  await server.close().catch(() => {});
+  for (const sessionId of ["session-a", "session-b"]) {
+    const runtime = host.runtime(sessionId);
+    if (runtime.phase === "turn") runtime.finishPrompt("aborted");
+  }
+  await Promise.all([...children].map((child) => {
+    const closed = new Promise((resolvePromise) => child.once("close", resolvePromise));
+    child.kill("SIGKILL");
+    return closed;
+  }));
+  await server.close();
   await rm(directory, { recursive: true, force: true });
 }
 

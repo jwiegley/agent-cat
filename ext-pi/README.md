@@ -272,15 +272,20 @@ npm test
 AGENT_CAT_E2E_RUNNER="$(cd .. && nix develop path:. -c cabal list-bin agentic-run)" npm run test:integration
 ```
 
-The pinned install keeps unit development reproducible. Remote ownership,
-boundary follow-up, and correlated current-session turns depend on the
-accompanying changes to the Pi protocol, client, server, and coding agent. Those
-changes are `attach.mode`, `follow_up`, `RemoteSession.discover`, and
-`ExtensionAPI.startTaskTurn`. The current-session choice is hidden when
-`startTaskTurn` is absent. The integration tests do not skip when a
-prerequisite is missing. They require a built runner and the accompanying local
-Pi packages, and they exercise the native ACP, native deck, current,
-owned-child, and remote targets without a paid call.
+Remote discovery and control use Pi's Chord `SessionDirectory`,
+`SessionManagement`, `AgentController`, and `Transcript` services. Boundary
+follow-up uses `AgentController.followUp`. Correlated current-session turns
+require `ExtensionAPI.startTaskTurn`, and the current-session choice is hidden
+when that method is absent.
+
+Set `PI_PACKAGE_DIR` to the coding-agent package directory of a built Pi
+checkout to use it for the adapters and integration fixtures. For
+`~/src/fork/pi`, this is `~/src/fork/pi/packages/coding-agent`. Its matching
+client, server, and Chord packages resolve through Node's package resolution.
+The integration gate requires a built runner and these Pi packages. It checks
+that every named test exists and exercises native ACP, native deck, current,
+owned-child, and remote targets without a paid call. Remote follow-up support
+is checked through an actual control exchange rather than a class-name probe.
 
 ## Conventions
 
