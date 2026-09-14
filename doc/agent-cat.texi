@@ -3895,8 +3895,8 @@ tombstones rather than permitting replay.
 The version-two command migration preserves existing version-one facts.
 The version-three migration adds draft representations, internal schema version
 four adds admission order, resource domains, and native observations, and version
-five adds protected preparation bindings and immutable start intents.  These
-migrations preserve earlier records transactionally.
+five adds immutable start intents.  These migrations preserve earlier records
+transactionally.
 Legacy raw bodies remain exact and are compared within SQLite rather than copied
 through the result buffer.  The frozen public manager-store compatibility domain
 remains version one.  Logical ledger reservations include bounded future receipt

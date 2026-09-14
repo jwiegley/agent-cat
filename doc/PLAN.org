@@ -8290,7 +8290,7 @@ WM-013 final acceptance 2026-09-13T21:48:28.400659+00:00: independently accepted
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-14 Mon 04:42]
+:MODIFIED: [2026-09-14 Mon 05:09]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-014
 :SOURCE_REPO: agent-cat
@@ -8348,6 +8348,7 @@ HTTP-style acceptance does not fabricate running or successful state.
 
 ** Notes
 
+#+begin_example
 WM-008 completed handoff 2026-09-12T02:36:23+00:00: Serialize approval with configuration reload, invalidate old unapproved worker/preparation bindings, and validate effective prepared target, policy, person mode, invocation and resource ownership against current authority. A service-owned label or stored Selection is not sufficient approval evidence. Approved workers retain their captured environment. Source/evidence: profiles.EgYE9JIT/wm008-completion-review.md and manager/CONFIGURATION.md. No owning-package completion follows from this handoff.
 
 WM-013 handoff obligation 2026-09-13T09:57:08.689827+00:00: consume the real opaque LivePreparation/reservation association and guarded short approval-acceptance boundary. Do not reconstruct Worker or DispatchTicket from stored rows/receipts. Logical review-timer retirement occurs at the actual accepted approval/start commit, so a timer racing delayed notification/dispatch must recheck durable start-pending/consumed facts and cannot expire already accepted work. Physical start is outside the mutex through original Commands reserve/attempt/one-shot authority. Admission remains capacity/lifetime owner through running and confirmed cleanup. WM-013 verifies occupancy properties and real pre-start lifecycle without fake approval fixtures. WM-014 MUST add actual accepted-start/running retention, delayed-dispatch/timer race, lost-reply/retry and cleanup integration through its genuine complete review/preparation/approval records. This is an existing owning-package requirement, not prior completed evidence or a waiver.
@@ -8369,6 +8370,12 @@ Linux runner3659ffa2 completed one configured build, exit0/checked. Actual Linux
 Additional Pi compatibility: a196-byte Unix socket fixture path was independently refused as too long. Parent shortened only ext-pi/test/current-bridge.test.ts temporary prefix to cb- and used Products base TMPDIR, preserving all protocol assertions. Typecheck and12 files/93 native-enabled tests pass against freshly built agentic-run. Named npm integration command in a byte-verified Products copy still refuses its missing RemoteSession.followUp prerequisite. Stock installed coding-agent/client are0.84.3; installed/current local0.85.1 does not provide that compatible compiled RemoteSession surface. No install, SDK shim, guard removal or success claim. User was asked for the compatible already-built companion SDK location. pi-verification/verification.json records this one extra test-source change and the unresolved gate.
 
 Next: checkpoint coherent verified core work with this issue still in progress, run independent committed-work audit without treating the Pi prerequisite as passed, and resolve that prerequisite before package acceptance. Do not close WM-014/G1 or advance dependent WM-015 as accepted work prematurely. No push, deployment, new Lean build, paid provider, unknown stash operation, or changes in fork-agent-cat/agent-workflows. Refocus completed 2026-09-14T11:42:37.657945+00:00, next no later than 2026-09-14T12:42:37.657945+00:00.
+
+
+WM-014 work-unit commit 2026-09-14T11:59:01.040702+00:00:20780df72a6962c33a335d4485c3f0e1a730a459 records42 verified paths, including only this issue among224 tracker records. Both whitespace checks passed, staged bytes matched the captured manifest, hooks were not bypassed and post-commit tree was clean. No push. The commit explicitly retains the missing compatible Pi RemoteSession.followUp prerequisite and leaves WM-014 in progress. Required committed-work fess workflowe4984346-86a7-42bf-b1c6-da126160745a resumes latest independent reviewerbbfe8cc7 with explicit fresh context, unchanged runner/model/tool contract and its previously passed/saved history probe. committed-audit-brief.md binds one-commit scope, original full goal/user amendments, exact source/verification evidence and all limitations. Parent acceptance and SDK prerequisite remain outstanding. Refocus11:42:37Z,next12:42:37Z;13packages/G0accepted.
+
+WM-014 committed audit correction 2026-09-14T12:09:43.368122+00:00: reviewerd2675744-6587-43ab-a5b3-abaa57856643 audited20780df and found no implementation defect requiring rollback, with one P2 manual error. Parent verified preparations.private_binding already exists in initial Schema.hs:26, while approvalMigration adds only start_intents and its triggers. Manual wording now states only immutable start intents. Both owning documentation gates were freshly rerun and pass in audit-doc-check.log/audit-doc-haskell.log, aggregate audit-doc.exit0. No production code, tests, frozen package archive or runtime budgets changed. This is a direct audit correction, not another work unit to recursively re-audit. The independent verdict is OK with notes as a committed checkpoint but package acceptance BLOCKED on the unchanged compatible Pi SDK prerequisite. WM-014 remains in progress and13packages/G0accepted. User SDK location request remains unanswered. Refocus11:42:37Z,next12:42:37Z.
+#+end_example
 
 ** Dependencies
 
