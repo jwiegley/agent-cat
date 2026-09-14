@@ -290,3 +290,9 @@ retain the same original group and sole-reaper ownership. Existing TERM IO-error
 recovery, published cleanup failures and permission/zombie checks remain unchanged.
 The five-second outer and two-second inner budgets are unchanged and remain
 cooperative IO bounds, not arbitrary-descendant containment or absolute OS deadlines.
+
+`processGroupLive` is a nonblocking observation through an original ProcessGroup
+and its unreaped leader. It acquires no ownership from an ID and does not signal or
+reap during observation. Contended cleanup or completed ownership is not live.
+The manager's fixed final prepared guard uses this observation with actual Worker
+lifecycle cells, without promising liveness during later commit IO.

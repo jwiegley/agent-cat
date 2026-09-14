@@ -53,8 +53,8 @@ heap or temporary-disk quotas. The pinned Unix SQLite source specifies mode
 0600 for DELETEONCLOSE temporary files. That source evidence is not an exhaustive
 platform or forced-spill test.
 
-`PRAGMA user_version` holds internal schema version 4. Startup accepts versions
-zero through four, and rejects other versions before changing journaling or
+`PRAGMA user_version` holds internal schema version 5. Startup accepts versions
+zero through five, and rejects other versions before changing journaling or
 schema. Fresh initialization, command-ledger additions, and the explicit literal
 chunk/upload migration and admission additions execute DDL, metadata and version
 publication in one immediate transaction. Version-one DDL and the version-two
@@ -216,3 +216,18 @@ adds no general IO lift, client clock or caller-supplied acceptance predicate.
 The check is a logical acceptance point, not a promise that time cannot advance
 during commit IO. A confirmed matching start intent is not revoked afterward,
 while uncertain commit retains the existing poisoned-connection discipline.
+
+## Exact approval association
+
+Version five adds immutable start_intents linking original command, approving client,
+request, preparation, run, reservation, process generation and worker identity.
+It preserves existing records and creates no live capability during migration.
+The public managerStore compatibility remains version one.
+
+CommitDeadline has a fixed prepared-worker variant. It retains the original
+registration, Runtime ProcessGroup and shared actual Worker lifecycle cells.
+Final validation is nonblocking and checks the original registration/process
+association, current prepared phase and absence of known stop/failure alongside
+the scoped clock guard. Detected loss refuses before commit, without waiting for
+process/pipe cleanup inside SQL. A later process death is not retroactive revocation
+or a physical commit-time liveness guarantee.

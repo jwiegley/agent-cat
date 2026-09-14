@@ -3,7 +3,7 @@
 
 -- | Installed operator authority, separate from historical invocation provenance.
 module Agentic.Manager.Profile
-  ( OperatorProfile (..), Ownership (..), ConfigurationLimits (..),
+  ( OperatorProfile (..), PreparedTargetValidator, exactPreparedTarget, Ownership (..), ConfigurationLimits (..),
     validateConfigurationLimits, validateProfiles, QueryLimits (..), Registry,
     PublicProfile, publicId, publicRevision, Diagnostic (..),
     Selection, selectionContext, selectionInvocation,
@@ -12,7 +12,7 @@ module Agentic.Manager.Profile
   ) where
 
 import Agentic.Runtime
-  ( PersonAnswering, FrontendInvocation (..), FrontendServer (..), FrontendCapabilities (..),
+  ( PersonAnswering, FrontendInvocation (..), FrontendServer (..), FrontendCapabilities (..), FrontendPrepared (..),
     WorkflowDescriptor (..), DescriptorCapabilities (..),
     decodeFrontendCapabilities, decodeWorkflowDescriptors, maxFrontendQueryBytes, frontendOwnedEnvironment,
     ProcessGroup, createProcessGroup,
@@ -59,8 +59,16 @@ data OperatorProfile = OperatorProfile
     operatorQuarantined :: !Bool,
     operatorPersonAnswering :: !PersonAnswering,
     operatorResourceKeys :: ![Text],
-    operatorConfigurationLimits :: !ConfigurationLimits
+    operatorConfigurationLimits :: !ConfigurationLimits,
+    operatorPreparedTarget :: FrontendPrepared -> Either Diagnostic ()
   }
+
+-- | A pure CLI-owned relation between trusted arguments and a bound native response.
+type PreparedTargetValidator = [Text] -> FrontendPrepared -> Either Diagnostic ()
+
+-- | Explicit exact-argv policy for callers that authorize no native derivation.
+exactPreparedTarget :: PreparedTargetValidator
+exactPreparedTarget arguments prepared = unless(preparedTargetArguments prepared==arguments)(Left InvalidReply)
 
 -- | The configurable part of frozen manager Limits, captured with one revision.
 -- Fields retain their contract scopes. This is not a per-profile allocation.

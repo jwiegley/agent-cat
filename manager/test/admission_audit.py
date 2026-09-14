@@ -17,7 +17,7 @@ import tempfile
 
 source = Path(sys.argv[1]).resolve()
 mode = sys.argv[2]
-if mode not in {"interruption", "ticket-mutant", "retry-mutant", "deadline-mutant", "watchdog-mutant", "policy-mutant", "package-boundary", "termination-mutant"}:
+if mode not in {"interruption", "ticket-mutant", "retry-mutant", "deadline-mutant", "watchdog-mutant", "policy-mutant", "package-boundary", "termination-mutant", "approval-interruption", "approval-live-mutant", "approval-review-gap", "approval-publication-mutant", "approval-catalogue-mutant", "approval-reservation-mutant", "approval-quoted-mutant", "approval-supervision-mutant", "approval-live-target-mutant", "approval-delimiter-mutant"}:
     raise SystemExit("unknown audit mode")
 work = Path(tempfile.mkdtemp(prefix=f"audit-{mode}.", dir=os.environ["CABAL_BUILDDIR"]))
 copy = work / "agentic-0.1.0.0"
@@ -108,7 +108,7 @@ def replace(path, old, new):
                     "diff": "".join(difflib.unified_diff(before.splitlines(True), after.splitlines(True), fromfile=path, tofile=path))})
 
 commands = "manager/src/Agentic/Manager/Commands.hs"
-if mode in {"interruption", "ticket-mutant"}:
+if mode in {"interruption", "ticket-mutant", "approval-interruption", "approval-review-gap", "approval-publication-mutant", "approval-catalogue-mutant"}:
     helper = copy / "manager/src/Agentic/Manager/Test/AcceptanceAudit.hs"
     helper.parent.mkdir(parents=True, exist_ok=True)
     helper.write_bytes((source / "manager/test/Agentic/Manager/Test/AcceptanceAudit.hs").read_bytes())
@@ -116,6 +116,8 @@ if mode in {"interruption", "ticket-mutant"}:
                     "afterSha256": hashlib.sha256(helper.read_bytes()).hexdigest(),
                     "source": "manager/test/Agentic/Manager/Test/AcceptanceAudit.hs",
                     "diff": "".join(difflib.unified_diff([], helper.read_text().splitlines(True), fromfile="/dev/null", tofile="manager/src/Agentic/Manager/Test/AcceptanceAudit.hs"))})
+    replace("agentic.cabal", "    Agentic.Exec\n", "    Agentic.Manager.Test.AcceptanceAudit\n    Agentic.Exec\n")
+if mode in {"interruption", "ticket-mutant", "approval-interruption"}:
     replace(commands, "import Agentic.Manager.Authorization\n", "import qualified Agentic.Manager.Test.AcceptanceAudit as Audit\nimport Agentic.Manager.Authorization\n")
     replace(commands, "CommandAttempt _ _ _ candidate retained generationAtCreation _ <-", "CommandAttempt _ _ _ candidate retained generationAtCreation auditAttemptPhase <-")
     replace(commands, "      Right (receipt, replayed, dispatch, refs, generation, epoch, association) -> do\n",
@@ -123,13 +125,54 @@ if mode in {"interruption", "ticket-mutant"}:
     replace(commands, "  done <- readIORef phase\n", "  Audit.recordReconciliation candidate retained phase\n  done <- readIORef phase\n")
     replace(commands, "      Right () -> do\n        result <- try @SomeException (restore action)",
             "      Right () -> do\n        Audit.recordDelivery ident state\n        result <- try @SomeException (restore action)")
-    # Register helper in the real private library and executable components.
-    replace("agentic.cabal", "    Agentic.Exec\n", "    Agentic.Manager.Test.AcceptanceAudit\n    Agentic.Exec\n")
     if mode == "ticket-mutant":
         replace(commands, "  reconcile = do\n   outcome <-", "  reconcile = do\n   replacement <- newIORef Unreserved\n   outcome <-")
         replace(commands, "if dispatch then Just(DispatchTicket store candidate generation refs retained)", "if dispatch then Just(DispatchTicket store candidate generation refs replacement)")
-    target, arguments = "manager-admission-check", ["interrupted-acceptance"]
+    if mode == "approval-interruption":
+        replace(commands, "        result <- try @SomeException (restore action)", "        result <- try @SomeException (restore (action <* Audit.afterNativeReturn ident state))")
+        target, arguments = "manager-approval-check", ["interrupted-approval"]
+    else:
+        target, arguments = "manager-admission-check", ["interrupted-acceptance"]
     marker = "FAIL interrupted live cleanup uses original attempt and original ticket state"
+elif mode in {"approval-review-gap", "approval-publication-mutant", "approval-catalogue-mutant"}:
+    admission = "manager/src/Agentic/Manager/Admission.hs"
+    replace(admission, "import Agentic.Manager.Authorization\n", "import qualified Agentic.Manager.Test.AcceptanceAudit as Audit\nimport Agentic.Manager.Authorization\n")
+    replace(admission, "  current <- currentReview controller entry\n", "  current <- currentReview controller entry\n  Audit.afterCurrentReview \"publication\"\n")
+    replace(admission, "    current<-currentReview controller entry\n", "    current<-currentReview controller entry\n    Audit.afterCurrentReview \"acceptance\"\n")
+    target, arguments = "manager-approval-check", ["review-gap"]
+    if mode == "approval-publication-mutant":
+        replace("manager/src/Agentic/Manager/Approval.hs", "    unless(currentCatalogue catalogues (P.reviewProfile public) (reviewProfileRevision context) descriptor workflow)(refuseTransaction StaleRevision)", "    unless(currentCatalogue catalogues (P.reviewProfile public) (reviewProfileRevision context) descriptor workflow)(pure())")
+        marker = "FAIL publication final catalogue agrees with original currentReview"
+    elif mode == "approval-catalogue-mutant":
+        replace("manager/src/Agentic/Manager/Approval.hs", "        unless(currentCatalogue catalogues (P.preparationProfile preparation) (P.preparationProfileRevision preparation) (P.preparationDescriptorRevision preparation) (P.reviewWorkflow(P.preparationReview preparation)))(Left StaleRevision)", "        unless(currentCatalogue catalogues (P.preparationProfile preparation) (P.preparationProfileRevision preparation) (P.preparationDescriptorRevision preparation) (P.reviewWorkflow(P.preparationReview preparation)))(pure())")
+        marker = "FAIL fresh approval final catalogue agrees with original currentReview"
+elif mode == "approval-reservation-mutant":
+    replace("manager/src/Agentic/Manager/Approval.hs", "  unless(rows==[[SQL.SQLInteger 1]])(refuseTransaction StateConflict)", "  unless(rows==[[SQL.SQLInteger 1]])(pure())")
+    target, arguments = "manager-approval-check", ["reservation-integrity"]
+    marker = "FAIL approval requires complete original reservation footprint"
+elif mode == "approval-quoted-mutant":
+    path = "manager/src/Agentic/Manager/Approval.hs"
+    replace(path, "      | c=='`' || (isPunctuation c && c `notElem` (\"-_\"::String)) = \" \"", "      | c=='`' || (isPunctuation c && c `notElem` (\"-_\"::String)) = T.singleton c")
+    target, arguments = "manager-approval-check", ["privacy-native"]
+    marker = "FAIL quoted or punctuated native credentials refuse exact review"
+elif mode == "approval-delimiter-mutant":
+    replace("manager/src/Agentic/Manager/Approval.hs", "      | c `elem` (\":=\"::String) = T.pack [' ',c,' ']", "      | c `elem` (\":=\"::String) = T.singleton c")
+    target, arguments = "manager-approval-check", ["privacy-header"]
+    marker = "FAIL uniform credential delimiter matrix refuses native review"
+elif mode == "approval-supervision-mutant":
+    path = "manager/src/Agentic/Manager/Admission.hs"
+    replace(path, "UPDATE runs SET supervision=?,revision=? WHERE request_id=? AND supervision=?", "UPDATE runs SET supervision=?,revision=revision WHERE request_id=? AND supervision=?")
+    replace(path, "[text next,text revision,text(entryRequest entry),text previous]", "[text next,text(entryRequest entry),text previous]")
+    target, arguments = "manager-approval-check", ["supervision"]
+    marker = "FAIL original stop changes run revision with supervision"
+elif mode == "approval-live-target-mutant":
+    replace("manager/src/Agentic/Manager/Worker.hs", "  either (const(throwIO WorkerWrongIdentity)) pure (operatorPreparedTarget (selectionContext selected) reply)", "  pure ()")
+    target, arguments = "manager-approval-check", ["targets-live"]
+    marker = "FAIL live Worker rejects real prepared field corruption: bad-prefix"
+elif mode == "approval-live-mutant":
+    replace("manager/src/Agentic/Manager/Store.hs", "  mapM_ checkPreparedCommit prepared", "  mapM_ (\\guard -> void(try @StoreFailure(checkPreparedCommit guard))) prepared")
+    target, arguments = "manager-approval-check", ["worker-loss"]
+    marker = "FAIL detected original worker loss rejects final acceptance"
 elif mode == "retry-mutant":
     replace("manager/src/Agentic/Manager/Admission.hs", "  completed <- atomically(tryReadTMVar(entryResult entry))\n  unless (isJust completed) (throwIO StateConflict)\n", "")
     target, arguments = "manager-admission-check", ["active-retry"]
@@ -189,12 +232,18 @@ for capabilities in ["N1", "N8"]:
         command.append(str(fixture))
     if mode not in {"deadline-mutant", "policy-mutant"}:
         command.append(native)
+    if mode in {"approval-live-mutant", "approval-live-target-mutant"}:
+        command.extend([str(copy), shutil.which("python3")])
     command.extend(["+RTS", "-" + capabilities, "-RTS"])
     code = run(command, capabilities + ".log", timeout=120)
     output = (work / (capabilities + ".log")).read_text()
-    if mode == "interruption":
-        if code or "PASS original cleanup effect commits with release" not in output:
-            raise RuntimeError("real interrupted acceptance checks failed")
+    if mode in {"interruption", "approval-interruption", "approval-review-gap"}:
+        success = "PASS original cleanup effect commits with release" if mode == "interruption" else "PASS interrupted original start retains one native start and immutable receipt"
+        if mode == "approval-review-gap":
+            success = "PASS catalogue change cannot retroactively reinterpret accepted consent"
+        if code or success not in output:
+            raise RuntimeError(f"real {mode} checks failed")
     elif not code or marker not in output:
         raise RuntimeError("compiled mutant did not fail its intended assertion")
-    print(f"PASS {mode} {capabilities}: " + ("real interrupted acceptance" if mode == "interruption" else "intended mutant assertion"), flush=True)
+    label = "real catalogue race and unchanged/replay controls" if mode == "approval-review-gap" else "real interrupted acceptance" if mode in {"interruption", "approval-interruption"} else "intended mutant assertion"
+    print(f"PASS {mode} {capabilities}: {label}", flush=True)

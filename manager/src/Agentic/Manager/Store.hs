@@ -8,18 +8,19 @@
 module Agentic.Manager.Store
   ( CoordinationStore, StoreIdentity (..), StoreFailure (..), Checkpoint (..),
     withCoordinationStore, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreFiles, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, retryStoreCleanup, probeStoreCapabilities,
-    CommitDeadline, withCommitDeadline, enforceCommitDeadline, Transaction, execute, query, refuseTransaction, runTransaction, runRead, transactionGeneration,
+    CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, Transaction, execute, query, refuseTransaction, runTransaction, runRead, transactionGeneration,
     Invalidation (..)
   ) where
 
 import Agentic.Manager.Configuration
   (InstalledConfiguration, acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationSnapshot, withConfigurationCatalogues, probeConfiguredCapabilities)
 import Agentic.Manager.Profile (ConfigurationLimits, PublicProfile, Diagnostic, Discovery)
+import Agentic.Manager.Worker.State (WorkerLifecycle, acceptingPreparation)
 import Agentic.Manager.Lease (duplicateLease)
-import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration)
+import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration)
 import Agentic.Runtime
   (PrivateRoot, assertPrivateRoot, closePrivateRoot, openPrivateSubroot, privateRootPath,
-   withPrivateDirectoryAt, writePrivateExclusiveAt, WorkflowInputDescriptor (..), frontendLiteralBytes, FrontendCapabilities, ProcessGroup, createProcessGroup, terminateProcessGroup, groupOutcome)
+   withPrivateDirectoryAt, writePrivateExclusiveAt, WorkflowInputDescriptor (..), frontendLiteralBytes, FrontendCapabilities, ProcessGroup, createProcessGroup, terminateProcessGroup, groupOutcome, processGroupLive)
 import Control.Concurrent (rtsSupportsBoundThreads)
 import Control.Concurrent.Async (race)
 import Control.Concurrent.STM (STM, TMVar, atomically, newEmptyTMVarIO, readTMVar, isEmptyTMVar, tryPutTMVar)
@@ -137,7 +138,7 @@ openStore installed root lease = storageErrors $ do
     (epoch, stream) <- bounded db 30000000 $ do
       SQL.exec db "PRAGMA busy_timeout=100; PRAGMA foreign_keys=ON; PRAGMA temp_store=FILE; PRAGMA cache_size=-2048; PRAGMA temp.cache_size=-2048"
       version <- scalar db "PRAGMA user_version"
-      unless (version `elem` map SQL.SQLInteger [0, 1, 2, 3, fromIntegral schemaVersion]) $
+      unless (version `elem` map SQL.SQLInteger [0, 1, 2, 3, 4, fromIntegral schemaVersion]) $
         throwIO StoreVersion
       -- Newer versions are refused before changing their journal or schema.
       wal <- scalar db "PRAGMA journal_mode=WAL"
@@ -203,6 +204,7 @@ migrate db = mask $ \restore -> do
       SQL.SQLInteger 1 -> pure ()
       SQL.SQLInteger 2 -> pure ()
       SQL.SQLInteger 3 -> pure ()
+      SQL.SQLInteger 4 -> pure ()
       SQL.SQLInteger current | current == fromIntegral schemaVersion -> pure ()
       _ -> throwIO StoreVersion
     when (version `elem` [SQL.SQLInteger 0, SQL.SQLInteger 1]) $ do
@@ -212,11 +214,14 @@ migrate db = mask $ \restore -> do
       mapM_ (SQL.exec db) draftMigration
       migrateLiteralDigests db Nothing
       SQL.exec db "PRAGMA user_version=3"
-    when (version /= SQL.SQLInteger (fromIntegral schemaVersion)) $ do
+    when (version `elem` map SQL.SQLInteger [0,1,2,3]) $ do
       invalid <- scalar db "SELECT count(*) FROM requests WHERE queue_ordinal IS NOT NULL AND NOT(length(queue_ordinal) BETWEEN 1 AND 20 AND queue_ordinal NOT GLOB '*[^0-9]*' AND (queue_ordinal='0' OR substr(queue_ordinal,1,1) BETWEEN '1' AND '9') AND (length(queue_ordinal)<20 OR queue_ordinal<='18446744073709551615'))"
       unless (invalid==SQL.SQLInteger 0) (throwIO StoreIntegrity)
       mapM_ (SQL.exec db) admissionMigration
       SQL.exec db "PRAGMA user_version=4"
+    when (version /= SQL.SQLInteger (fromIntegral schemaVersion)) $ do
+      mapM_ (SQL.exec db) approvalMigration
+      SQL.exec db "PRAGMA user_version=5"
     SQL.exec db "COMMIT"
   case result of
     Right () -> pure ()
@@ -441,18 +446,45 @@ query sql parameters = Transaction $ \context@(Context db _ _ budget _ _) -> do
     collectRows budget statement
 
 -- | One live owner's monotonic acceptance deadline, scoped to a protected loan.
-data CommitDeadline = CommitDeadline !Text !(IO Word64) !Word64 !(IORef Bool)
+data CommitDeadline = CommitDeadline !Text !(IO Word64) !Word64 !(IORef Bool) !(Maybe PreparedCommit)
+data PreparedCommit = PreparedCommit !(MVar (Bool,[StoreWorker])) !StoreWorker !ProcessGroup !WorkerLifecycle
 
 withCommitDeadline :: CoordinationStore -> IO Word64 -> Word64 -> (CommitDeadline -> IO a) -> IO a
 withCommitDeadline (CoordinationStore _ _ _ identity _ closed _ _ _ _ _ _ _) now deadline action = mask $ \restore -> do
   readIORef closed >>= \closing -> when closing(throwIO StoreClosed)
   active <- newIORef True
-  restore(action(CommitDeadline(storeProcessGeneration identity)now deadline active)) `finally` writeIORef active False
+  restore(action(CommitDeadline(storeProcessGeneration identity)now deadline active Nothing)) `finally` writeIORef active False
+
+-- | The prepared variant binds the original registration, process and adapter cells.
+withPreparedCommitDeadline :: CoordinationStore -> StoreWorker -> ProcessGroup -> WorkerLifecycle -> IO Word64 -> Word64 -> (CommitDeadline -> IO a) -> IO a
+withPreparedCommitDeadline store@(CoordinationStore _ _ _ _ _ _ _ _ _ registry _ _ _) owner group state now deadline action =
+  withCommitDeadline store now deadline $ \(CommitDeadline generation clock end active _) ->
+    action(CommitDeadline generation clock end active(Just(PreparedCommit registry owner group state)))
+
+checkPreparedCommit :: PreparedCommit -> IO ()
+checkPreparedCommit (PreparedCommit registry (StoreWorker stop done groups _) group state) = do
+  registered <- tryReadMVar registry
+  owned <- tryReadMVar groups
+  let present = case registered of
+        Just(False,entries) -> any(\(StoreWorker _ registeredDone _ _)->registeredDone==done)entries
+        _ -> False
+      attached = case owned of
+        Just entries -> any((==groupOutcome group).groupOutcome)entries
+        _ -> False
+      current = atomically $ do
+        open <- isEmptyTMVar stop
+        ready <- acceptingPreparation state
+        pure(open && ready)
+  ready <- current
+  unless(present && attached && ready)(throwIO StoreClosed)
+  living <- processGroupLive group
+  readyAfter <- current
+  unless(living && readyAfter)(throwIO StoreClosed)
 
 -- | Arm one fixed final check after transactional work and invalidations, before COMMIT.
 -- This adds no general IO lift or caller-supplied acceptance predicate.
 enforceCommitDeadline :: CommitDeadline -> Transaction ()
-enforceCommitDeadline guard@(CommitDeadline owner _ _ _) = Transaction $ \(Context _ generation writable _ _ pending) -> do
+enforceCommitDeadline guard@(CommitDeadline owner _ _ _ _) = Transaction $ \(Context _ generation writable _ _ pending) -> do
   unless(writable && owner==generation)(throwIO StoreIntegrity)
   existing <- readIORef pending
   case existing of
@@ -460,11 +492,12 @@ enforceCommitDeadline guard@(CommitDeadline owner _ _ _) = Transaction $ \(Conte
     Just _ -> throwIO StoreIntegrity
 
 checkCommitDeadline :: CommitDeadline -> IO ()
-checkCommitDeadline (CommitDeadline _ now deadline active) = do
+checkCommitDeadline (CommitDeadline _ now deadline active prepared) = do
   current <- readIORef active
   unless current(throwIO StoreDeadline)
   observed <- now
   unless(observed<deadline)(throwIO StoreDeadline)
+  mapM_ checkPreparedCommit prepared
 
 -- | The current in-memory lifetime, never reconstructed from a database row.
 transactionGeneration :: Transaction Text

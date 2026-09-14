@@ -205,7 +205,7 @@ local operation. Submission through that context is one-shot. Reconciliation is
 available only after it finishes and is bound to the same Store generation,
 authority epoch, candidate command and exact original request bytes. It can prove
 that a rolled-back candidate is absent or recover that invocation's retained
-enqueue or cleanup association. It never creates a context from a receipt or
+enqueue, cleanup or committed start association. It never creates a context from a receipt or
 reconstructs physical authority from SQL.
 
 Accepted enqueue permits retain the exact command, queue origin, input revision
@@ -226,3 +226,9 @@ check, charge or effect. An expired final check rolls back the source-owned muta
 command receipt and invalidations. The WM-014 approval owner must use this seam with
 the guard loaned by Admission, rather than a clock value captured before its other
 acceptance checks.
+
+The approval owner records start_intents in the same original acceptance transaction.
+Known-attempt reconciliation checks that association while reusing its original
+mutable ticket state. A receipt lookup alone still returns no new dispatch authority.
+The prepared variant of CommitDeadline checks original Worker registration, phase,
+known failure/stop and Runtime-owned liveness at the final fresh acceptance point.

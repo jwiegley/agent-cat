@@ -11,6 +11,7 @@ module Agentic.Runtime.ProcessGroup
     groupOutcome,
     createProcessGroup,
     waitProcessGroup,
+    processGroupLive,
     terminateProcessGroup,
     closeGroupPipes,
   )
@@ -18,8 +19,8 @@ where
 
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.Async (asyncWithUnmask, waitCatch)
-import Control.Concurrent.MVar (MVar, newEmptyMVar, newMVar, putMVar, readMVar, tryReadMVar, withMVar)
-import Control.Exception (IOException, SomeException, fromException, mask, mask_, throwIO, try, uninterruptibleMask_)
+import Control.Concurrent.MVar (MVar, newEmptyMVar, newMVar, putMVar, readMVar, tryReadMVar, tryTakeMVar, withMVar)
+import Control.Exception (IOException, SomeException, fromException, mask, mask_, finally, throwIO, try, uninterruptibleMask_)
 import Control.Monad (void)
 import Foreign.C.Error (throwErrnoIfMinus1Retry)
 import Foreign.C.Types (CInt (..))
@@ -69,6 +70,20 @@ awaitExit pid = do
 
 waitProcessGroup :: ProcessGroup -> IO ExitCode
 waitProcessGroup group = readMVar (groupOutcome group) >>= either throwIO pure
+
+-- | A nonblocking liveness observation through the original unreaped leader token.
+-- Later process death is not excluded, and no ownership is created by this result.
+processGroupLive :: ProcessGroup -> IO Bool
+processGroupLive group = mask_ $ do
+  lock <- tryTakeMVar(groupLock group)
+  case lock of
+    Nothing -> pure False
+    Just () -> (do
+      outcome <- tryReadMVar(groupOutcome group)
+      case outcome of
+        Just _ -> pure False
+        Nothing -> (==0) <$> throwErrnoIfMinus1Retry "observe owned process" (childExited(fromIntegral(groupPid group))))
+      `finally` putMVar(groupLock group)()
 
 terminateProcessGroup :: Int -> ProcessGroup -> IO ()
 terminateProcessGroup grace group = mask $ \restore -> do

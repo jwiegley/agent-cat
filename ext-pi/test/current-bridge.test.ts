@@ -11,7 +11,7 @@ afterEach(async () => Promise.all(created.splice(0).map((path) => rm(path, { rec
 
 describe("current Pi session ACP bridge", () => {
   it("authenticates its proxy and completes an ACP prompt", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "agent-cat-current-"));
+    const directory = await mkdtemp(join(tmpdir(), "cb-"));
     created.push(directory);
     let prompt = "";
     let aborted = false;

@@ -114,7 +114,7 @@ writeConfiguration work name executable prefix extra = do
   setFileMode path 0o600
   pure path
 load :: FilePath -> IO Configuration
-load path = loadConfiguration (\arguments -> if arguments == ["--scripted"] then Right () else Left InvalidConfiguration) (const False) path >>= right
+load path = loadConfiguration (\arguments -> if arguments == ["--scripted"] then Right () else Left InvalidConfiguration)  exactPreparedTarget (const False) path >>= right
 
 setupFor :: FilePath -> Discovery -> Text -> FrontendSetupRequest
 setupFor root catalogue workflow =
@@ -465,7 +465,7 @@ reservedEnvironmentChecks work source native python = do
   forM_ (zip [0..] frontendOwnedEnvironment) $ \(index,name) -> forM_ ["", "1"] $ \value -> do
     let label = "reserved-" <> show (index::Int) <> if null value then "-empty" else "-set"
     path <- writeConfiguration work label python prefix [(name,value)]
-    result <- loadConfiguration (const (Right ())) (const False) path
+    result <- loadConfiguration (const (Right ()))  exactPreparedTarget (const False) path
     check ("reserved environment refuses before launch: " <> name) (case result of Left InvalidConfiguration -> True; _ -> False)
   doesFileExist evidence >>= check "reserved environment negatives launched no capability process" . not
 

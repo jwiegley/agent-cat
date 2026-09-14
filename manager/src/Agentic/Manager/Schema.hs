@@ -1,12 +1,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Versioned relational coordination facts. Stored identities are not capabilities.
-module Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration) where
+module Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration) where
 
 import Data.Text (Text)
 
 schemaVersion :: Int
-schemaVersion = 4
+schemaVersion = 5
 
 schemaStatements :: [Text]
 schemaStatements =
@@ -102,4 +102,12 @@ admissionMigration =
     "CREATE TRIGGER claim_active_reservation BEFORE INSERT ON reservation_resources WHEN (SELECT state FROM reservations WHERE id=NEW.reservation_id)='released' BEGIN SELECT RAISE(ABORT,'reservation is released'); END",
     "CREATE TRIGGER move_claim_to_active_reservation BEFORE UPDATE OF reservation_id ON reservation_resources WHEN (SELECT state FROM reservations WHERE id=NEW.reservation_id)='released' BEGIN SELECT RAISE(ABORT,'reservation is released'); END",
     "CREATE TABLE admission_observations (reservation_id TEXT PRIMARY KEY NOT NULL REFERENCES reservations(id), native_run_id TEXT NOT NULL, root_identity TEXT NOT NULL, observed_at TEXT NOT NULL, review_expires_at TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('prepared','invalidated','handed-off')), reason TEXT CHECK(reason IN ('input-changed','withdrawn','expired','closed','worker-lost'))) STRICT"
+  ]
+
+-- | Version-five immutable consent/start association, separate from Runtime evidence.
+approvalMigration :: [Text]
+approvalMigration =
+  [ "CREATE TABLE start_intents (command_id TEXT PRIMARY KEY NOT NULL REFERENCES commands(id) DEFERRABLE INITIALLY DEFERRED, client_id TEXT NOT NULL REFERENCES clients(id), request_id TEXT NOT NULL UNIQUE REFERENCES requests(id), preparation_id TEXT NOT NULL UNIQUE REFERENCES preparations(id), run_id TEXT NOT NULL UNIQUE REFERENCES runs(id), reservation_id TEXT NOT NULL REFERENCES reservations(id), process_generation TEXT NOT NULL, worker_identity TEXT NOT NULL, FOREIGN KEY(preparation_id,request_id) REFERENCES preparations(id,request_id), FOREIGN KEY(reservation_id,request_id) REFERENCES reservations(id,request_id)) STRICT",
+    "CREATE TRIGGER start_intent_immutable BEFORE UPDATE ON start_intents BEGIN SELECT RAISE(ABORT,'start intent is immutable'); END",
+    "CREATE TRIGGER start_intent_retained BEFORE DELETE ON start_intents BEGIN SELECT RAISE(ABORT,'start intent is retained'); END"
   ]

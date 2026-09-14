@@ -239,6 +239,7 @@ module Agentic.Cli
     -- * The runner
     cliMain,
     validateManagerTarget,
+    validateManagerPreparedTarget,
     loadManagerConfiguration,
     openManagerConfiguration,
     reloadManagerConfiguration,
@@ -366,6 +367,7 @@ import Agentic.Builder
   )
 import Agentic.Chains (servedChains)
 import qualified Data.Map.Strict as Map
+import Agentic.Runtime (FrontendPrepared (..))
 import Agentic.Runtime
   ( PersistenceHooks (..),
     WorldIO,
@@ -444,6 +446,7 @@ import Agentic.Runtime
     nullEventSink,
   )
 import Data.IORef (atomicModifyIORef', newIORef, readIORef)
+import Agentic.Route (parseBackend)
 import Agentic.Route
   ( Backend (BackendAcp, BackendDeck),
     Routes,
@@ -3643,10 +3646,53 @@ validateManagerTarget reg arguments = do
         Routing (RoutingLoaded options _ _) -> map T.unpack (roAdapterArgs options)
   unless (not (any credentialArgument adapterArguments)) (Left Manager.InvalidConfiguration)
 
+-- | Native resolution evidence is checked only for the original configured Worker.
+-- No later routing-file IO or manager-side backend grammar participates.
+validateManagerPreparedTarget :: Registry -> [Text] -> FrontendPrepared -> Either Manager.Diagnostic ()
+validateManagerPreparedTarget reg arguments prepared = do
+  (target,_,inputs) <- either (const(Left Manager.InvalidConfiguration)) Right (parseTarget reg arguments)
+  unless(null inputs)(Left Manager.InvalidConfiguration)
+  let field key = case preparedPolicy prepared of Object fields->KM.lookup key fields;_->Nothing
+      configuredScratch=case target of
+        Scripted->Nothing
+        Routed routes'->rrScratch routes'
+        Routing(RoutingUnloaded opts)->T.unpack <$> roScratch opts
+        Routing(RoutingLoaded opts _ _)->T.unpack <$> roScratch opts
+      decodeBackend (String value)=either (const(Left Manager.InvalidReply)) Right(parseBackend value)
+      decodeBackend _=Left Manager.InvalidReply
+  case target of
+    Scripted -> unless(preparedTargetKind prepared=="scripted" && field "kind"==Just(String "scripted") && preparedTargetArguments prepared==arguments)(Left Manager.InvalidReply)
+    _ -> do
+      unless(field "kind"==Just(String "routed"))(Left Manager.InvalidReply)
+      routes' <- case field "routes" of
+        Just(Array values) | length values<=64 -> traverse (\value->case value of Object row->maybe(Left Manager.InvalidReply)decodeBackend(KM.lookup "backend" row);_->Left Manager.InvalidReply) (foldr(:)[]values)
+        _->Left Manager.InvalidReply
+      fallback <- case field "default" of
+        Just value -> Just <$> decodeBackend value
+        Nothing | field "coverage"==Just(String "full") -> Right Nothing
+        _ -> Left Manager.InvalidReply
+      let actualKind=case fallback of Nothing->"routing";Just(BackendAcp _)->"acp";Just(BackendDeck _)->"deck"
+          usesAcp=any (\backend->case backend of BackendAcp _->True;_->False) (maybe routes' (:routes') fallback)
+      unless(preparedTargetKind prepared==actualKind)(Left Manager.InvalidReply)
+      case target of
+        Routed original -> do
+          let expected=targetPolicy(Routed original)
+              same key=case expected of Object fields->KM.lookup key fields==field key;_->False
+          unless(all same ["default","coverage","routes","pollMs","timeoutMs","verbose"])(Left Manager.InvalidReply)
+        _ -> pure()
+      case configuredScratch of
+        Just explicit -> unless(preparedTargetArguments prepared==arguments && field "scratch"==Just(String(T.pack explicit)))(Left Manager.InvalidReply)
+        Nothing -> case field "scratch" of
+          Just(String scratch) | usesAcp ->
+            unless(not(T.null scratch) && T.length scratch<=4096 && not(T.any(=='\NUL')scratch) && preparedTargetArguments prepared==arguments<>["--scratch",scratch])(Left Manager.InvalidReply)
+          Just Null -> unless(preparedTargetArguments prepared==arguments)(Left Manager.InvalidReply)
+          Nothing -> unless(preparedTargetArguments prepared==arguments)(Left Manager.InvalidReply)
+          _ -> Left Manager.InvalidReply
+
 -- | Operator-file composition uses the same registry-based target parser as run
 -- and frontend preparation. Program-dependent routing remains runner-owned.
 loadManagerConfiguration :: Registry -> FilePath -> IO (Either Manager.Diagnostic Manager.Configuration)
-loadManagerConfiguration reg = Manager.loadConfiguration (validateManagerTarget reg) credentialArgument
+loadManagerConfiguration reg = Manager.loadConfiguration (validateManagerTarget reg) (validateManagerPreparedTarget reg) credentialArgument
 
 openManagerConfiguration :: Registry -> FilePath -> IO (Either Manager.Diagnostic Manager.InstalledConfiguration)
 openManagerConfiguration reg path = do

@@ -159,9 +159,9 @@ command and draft owners for real edit and withdrawal invalidation. Original
 worker associations remain opaque and are not reconstructed after reopen.
 
 `manager/ci/admission.sh` runs bounded policy properties and real native lifecycle
-checks at N1 and N8. WM-014 still owns complete review, exact approval and the
-mandatory accepted-running integration gate, without fabricated approval records
-or a new service endpoint in this package.
+checks at N1 and N8. The [approval owner](APPROVAL.md) supplies complete review, exact approval and actual
+accepted-running retention through the original Worker. Its owning gate adds final
+worker/deadline checks and interruption evidence without a new service endpoint.
 
 ## Root separation
 
@@ -297,3 +297,12 @@ metadata, including executable and disabled conditional components. It also
 rejects manager dependencies from lower layers and preserves the existing
 terminal and runtime boundaries. No empty public facade is introduced merely
 to make a package directory exist.
+
+## Exact review and approval
+
+The internal Approval owner publishes frozen public consent with protected exact
+binding and a stable nonce-bound digest. Admission retains the original worker and
+one-shot start ticket through committed intent, delayed delivery, actual running
+and confirmed cleanup. `manager/ci/approval.sh` runs real N1/N8 native cases, frozen
+public-schema validation, opacity and test-only interrupted-delivery controls.
+Public Runtime projection, ingestion and full control intents remain later owners.

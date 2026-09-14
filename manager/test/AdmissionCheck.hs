@@ -163,7 +163,7 @@ withFixtureUsing work native prefix name slots profiles action = do
       "globalPageSets" .= (2::Int),"globalConnections" .= (8::Int),"globalDatabaseReaders" .= (2::Int),
       "globalMutationLedgerBytes" .= (134217728::Int),"safetyControlsPerMinute" .= (20::Int),"executionReservations" .= slots]]))
   setFileMode path 0o600
-  configuration<-loadConfiguration (\arguments->if arguments==["--scripted"] then Right() else Left InvalidConfiguration) (const False) path >>= right
+  configuration<-loadConfiguration (\arguments->if arguments==["--scripted"] then Right() else Left InvalidConfiguration)  exactPreparedTarget (const False) path >>= right
   bracket (installConfiguration configuration >>= right) closeConfiguration $ \installed -> withCoordinationStore installed $ \owner -> do
     (_,public)<-configurationSnapshot installed >>=right
     catalogues<-forM public $ \profile->do value<-probeConfiguredProfile installed(publicId profile)(publicRevision profile)>>=right;pure(publicId profile,value)
@@ -331,7 +331,7 @@ reloadChecks work native=withFixture work native "reload" 2 [("a",["x","y"]),("b
       path=work </> "reloaded.json"
   BS.writeFile path(encoded changed)
   setFileMode path 0o600
-  configuration<-loadConfiguration (\arguments->if arguments==["--scripted"] then Right() else Left InvalidConfiguration) (const False) path >>=right
+  configuration<-loadConfiguration (\arguments->if arguments==["--scripted"] then Right() else Left InvalidConfiguration)  exactPreparedTarget (const False) path >>=right
   void(reloadConfiguration installed configuration >>=right)
   (_,public)<-configurationSnapshot installed >>=right
   catalogues<-forM public $ \profile->do discovery<-probeConfiguredProfile installed(publicId profile)(publicRevision profile)>>=right;pure(publicId profile,discovery)

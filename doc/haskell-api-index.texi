@@ -8,6 +8,7 @@
 @hsindex Agentic.Cli.parseCommand
 @hsindex Agentic.Cli.reloadManagerConfiguration
 @hsindex Agentic.Cli.routesFact
+@hsindex Agentic.Cli.validateManagerPreparedTarget
 @hsindex Agentic.Cli.validateManagerTarget
 @hsindex Agentic.Runtime.Facts.oneSessionPhrase
 @hsindex Agentic.Runtime.Facts.reservedInput

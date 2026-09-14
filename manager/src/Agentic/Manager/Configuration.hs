@@ -4,7 +4,7 @@
 -- | Bounded operator authority and a retained manager-root binding.
 module Agentic.Manager.Configuration
   ( Configuration, TargetValidator, InstalledConfiguration,
-    loadConfiguration, installConfiguration, reloadConfiguration, closeConfiguration,
+    loadConfiguration, exactPreparedTarget, installConfiguration, reloadConfiguration, closeConfiguration,
     configurationSnapshot, selectConfiguredProfile, probeConfiguredProfile,
     acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationSnapshot, withConfigurationCatalogues, probeConfiguredCapabilities
   ) where
@@ -49,12 +49,12 @@ data ActiveConfiguration = ActiveConfiguration !PrivateRoot !FilePath ![FilePath
 -- nesting beyond 64 containers, unknown fields, and invalid native policy values.
 -- The CLI credential predicate checks every runner prefix without interpreting
 -- wrapper arguments as native target grammar, including unused runner definitions.
-loadConfiguration :: TargetValidator -> (String -> Bool) -> FilePath -> IO (Either Diagnostic Configuration)
-loadConfiguration validateTarget isCredentialArgument path = configurationIO $ do
+loadConfiguration :: TargetValidator -> PreparedTargetValidator -> (String -> Bool) -> FilePath -> IO (Either Diagnostic Configuration)
+loadConfiguration validateTarget validatePrepared isCredentialArgument path = configurationIO $ do
   bytes <- readPrivateConfigurationFile path 2097152
   configuration <- requireRight $ do
     value <- either (const (Left InvalidConfiguration)) Right (decodeStrictValue bytes)
-    either (const (Left InvalidConfiguration)) Right (parseEither (parseConfiguration isCredentialArgument) value)
+    either (const (Left InvalidConfiguration)) Right (parseEither (parseConfiguration validatePrepared isCredentialArgument) value)
   let Configuration _ _ _ profiles = configuration
   mapM_ (requireRight . validateTarget . operatorTargetArguments) profiles
   pure configuration
@@ -175,8 +175,8 @@ requireRight = either throwIO pure
 flatten :: Either Diagnostic (Either Diagnostic a) -> Either Diagnostic a
 flatten = either Left id
 
-parseConfiguration :: (String -> Bool) -> Value -> Parser Configuration
-parseConfiguration isCredentialArgument = withObject "operator configuration" $ \o -> do
+parseConfiguration :: PreparedTargetValidator -> (String -> Bool) -> Value -> Parser Configuration
+parseConfiguration validatePrepared isCredentialArgument = withObject "operator configuration" $ \o -> do
   closed ["version", "managerRoot", "localRetentionRoots", "runners", "limits", "profiles"] o
   version <- o .: "version" :: Parser Int
   unless (version == 1) (fail "unsupported version")
@@ -186,7 +186,7 @@ parseConfiguration isCredentialArgument = withObject "operator configuration" $ 
   runners <- o .: "runners" >>= boundedList 256 >>= traverse (parseRunner isCredentialArgument)
   distinct (map fst runners)
   limits <- o .: "limits" >>= parseLimits
-  profiles <- o .: "profiles" >>= boundedList 256 >>= traverse (parseProfile limits (Map.fromList runners))
+  profiles <- o .: "profiles" >>= boundedList 256 >>= traverse (parseProfile validatePrepared limits (Map.fromList runners))
   either (const (fail "invalid profiles")) pure (validateProfiles profiles)
   pure (Configuration root retention limits profiles)
 
@@ -210,21 +210,22 @@ parseRunner isCredentialArgument = withObject "installed runner" $ \o -> do
   _ <- parseJSON (toJSON (FrontendInvocation 1 alias (T.pack executable) prefix)) :: Parser FrontendInvocation
   pure (alias, (executable, map T.unpack prefix))
 
-parseProfile :: ConfigurationLimits -> Map.Map Text (FilePath, [String]) -> Value -> Parser OperatorProfile
-parseProfile limits runners = withObject "installed profile" $ \o -> do
+parseProfile :: PreparedTargetValidator -> ConfigurationLimits -> Map.Map Text (FilePath, [String]) -> Value -> Parser OperatorProfile
+parseProfile validatePrepared limits runners = withObject "installed profile" $ \o -> do
   closed ["id", "runner", "workspace", "workspaceLabel", "targetLabel", "targetArguments",
           "environment", "ownership", "quarantined", "personAnswering", "resourceKeys"] o
   alias <- o .: "runner"
   (executable, prefix) <- maybe (fail "unknown runner") pure (Map.lookup alias runners)
+  target <- o .: "targetArguments" >>= arguments
   profile <- OperatorProfile <$> o .: "id" <*> o .: "workspaceLabel" <*> o .: "targetLabel"
     <*> pure alias <*> pure executable <*> pure prefix
-    <*> (o .: "workspace" >>= absolutePath) <*> (o .: "targetArguments" >>= arguments)
+    <*> (o .: "workspace" >>= absolutePath) <*> pure target
     <*> (o .: "environment" >>= boundedList 256 >>= traverse parseBinding)
     <*> (o .: "ownership" >>= withText "ownership" (\value -> case value of
       "service-owned" -> pure ServiceOwned
       "client-bound" -> pure ClientBound
       _ -> fail "invalid ownership"))
-    <*> o .: "quarantined" <*> o .: "personAnswering" <*> o .: "resourceKeys" <*> pure limits
+    <*> o .: "quarantined" <*> o .: "personAnswering" <*> o .: "resourceKeys" <*> pure limits <*> pure (validatePrepared target)
   -- Known client bridge/session dependencies are not made service-owned by an
   -- operator label or by ACP transport. Arbitrary executable code is not proved safe.
   when (operatorOwnership profile == ClientBound || any ((`elem` clientBindings) . fst) (operatorEnvironment profile)) $

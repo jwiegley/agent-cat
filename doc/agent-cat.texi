@@ -3798,11 +3798,13 @@ Quota enforcement, service ownership, approval integration, and the remaining
 clients are not supplied by this library alone.
 
 @c COVER API Agentic.Cli.validateManagerTarget support
+@c COVER API Agentic.Cli.validateManagerPreparedTarget support
 @c COVER API Agentic.Cli.loadManagerConfiguration support
 @c COVER API Agentic.Cli.openManagerConfiguration support
 @c COVER API Agentic.Cli.reloadManagerConfiguration support
 @findex readPrivateConfigurationFile
 @findex validateManagerTarget
+@findex validateManagerPreparedTarget
 @findex loadManagerConfiguration
 @findex openManagerConfiguration
 @findex reloadManagerConfiguration
@@ -3820,6 +3822,13 @@ grammar without a workflow lookup, and its existing credential-argument
 predicate.  Every runner prefix is checked, including unused definitions.
 Wrapper prefixes are not parsed as native target options.  Failures use fixed
 diagnostic categories rather than source text or private argument values.
+
+The captured @code{validateManagerPreparedTarget} function checks the original
+worker's prepared target through the same CLI grammar without later routing-file
+IO.  Arguments remain exact except for the native ACP resolver's final scratch
+suffix, which must match that worker's private policy and cannot override an
+explicit scratch choice.  The bound native response supplies program-dependent
+resolution facts, not a free-standing policy value or stored profile identifier.
 
 @code{openManagerConfiguration} acquires an exclusive native directory lease on
 an existing, durably provisioned root before publishing its role.  Active
@@ -3884,9 +3893,10 @@ Conflicting bindings refuse.  Aged inactive receipts retain charged non-content
 tombstones rather than permitting replay.
 
 The version-two command migration preserves existing version-one facts.
-The version-three migration adds draft representations, and internal schema
-version four adds admission order, resource domains, and native observations.
-Both migrations preserve earlier records transactionally.
+The version-three migration adds draft representations, internal schema version
+four adds admission order, resource domains, and native observations, and version
+five adds protected preparation bindings and immutable start intents.  These
+migrations preserve earlier records transactionally.
 Legacy raw bodies remain exact and are compared within SQLite rather than copied
 through the result buffer.  The frozen public manager-store compatibility domain
 remains version one.  Logical ledger reservations include bounded future receipt
@@ -4020,11 +4030,63 @@ and release.  Storage failure can leave durable claims unresolved even after
 physical cleanup, and physical uncertainty retains its original ownership fence.
 
 The controller supplies actual native review observations and a guarded opaque
-handoff, not a fabricated complete approval record.  The exact approval owner
-must use the final transaction guard and test accepted-start integration.  These
-admission tests establish resource policy and the native pre-start lifecycle,
-not a completed manager service or an SQL refinement theorem.  The current
-contract and evidence limits are in @file{manager/ADMISSION.md}.
+handoff to the exact approval owner.  Reservations remain held through accepted
+start intent, native running, and original cleanup.  Admission tests establish
+the pre-start lifecycle, while the approval tests exercise accepted-start
+integration.  Neither establishes a completed manager service or an SQL
+refinement theorem.  The current contract and evidence limits are in
+@file{manager/ADMISSION.md}.
+
+@subsection Exact review and original start intent
+
+The internal approval layer consumes the original live preparation rather than
+reconstructing a worker from stored records.  It validates the native identity,
+descriptor, plan, result code, input summaries, and captured invocation and
+target association.  The public plan contains the same validated native plan
+encoded as JSON text.  Capture summaries derive from the verified materialized
+bytes rather than a later pathname lookup.
+
+Public policy uses a fixed allowlist that omits private invocation, environment,
+scratch, and routing fields.  Content-bearing strings are screened against
+known private paths, available private values, every nonempty selected operator
+environment value, and recognized credential syntax.  Unsafe or oversized
+required facts refuse rather than being redacted or truncated into different
+consent.  Public labels and schema-owned identifiers retain their public meaning.
+These checks do not establish universal secret detection or sandbox isolation.
+
+The protected binding records request and profile revisions, original worker
+and process generation, reservation, native identity, and expiry.  Private
+canonical-value hashes and a fresh cryptographic nonce bind the public review
+digest without publishing the nonce or private hashes.  Repeated publication
+and authorized reads preserve the original digest and expiry.  Stored bindings
+and hashes cannot recreate live authority after the owning process ends.
+
+Fresh approval checks current authorization, preparation ETag, review digest,
+catalogue, and the complete original resource footprint.  The final transaction
+guard checks the original registration, prepared lifecycle, generation, scope,
+and monotonic deadline, with a nonblocking liveness observation through Runtime's
+original process-group token.  Detected loss refuses before COMMIT, but later
+death does not revoke an accepted intent.  Physical commit-time liveness and
+completion before a wall-clock deadline are not promised.
+
+Acceptance commits the approving client, immutable receipt, consumed preparation,
+start intent, run identity, reservation association, and invalidations together.
+The original invocation and one-shot dispatch ticket survive a lost return.
+Delivery writes the existing start frame to the same worker outside the database
+and configuration locks.  Authorized exact retries return the original receipt
+without another worker or start attempt, and ambiguous delivery remains unresolved.
+A review timer that observes the accepted intent retires rather than expiring it.
+
+Accepted workers retain their reservations until original cleanup is confirmed.
+Supervision changes to cleanup-pending and lost advance the run revision and
+publish matching invalidations in their existing transactions.  Failed publication
+can retain durable claims after physical cleanup, and only the original retry
+path can publish release.  These observations preserve the original consent and
+do not fabricate Runtime acknowledgement, terminal status, or a successful result.
+
+@file{manager/APPROVAL.md} states the complete internal contract and native
+verification boundary.  Durable Runtime ingestion, public control endpoints,
+the manager service, and client transports remain outside this approval layer.
 
 @section Native frontend preparation
 @c COVER CLI verb:frontend author
