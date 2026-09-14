@@ -8283,15 +8283,17 @@ WM-013 final acceptance 2026-09-13T21:48:28.400659+00:00: independently accepted
 ]
 #+end_src
 
-* DOING [#B] WM-014: Implement exact review, approval, and start intent    :p3:
+* DONE [#B] WM-014: Implement exact review, approval, and start intent    :p3:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-wm-014-5sv9
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-14 Mon 08:51]
+:MODIFIED: [2026-09-14 Mon 09:04]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-14 Mon 09:04]
+:CLOSE_REASON: Exact review and original-worker start intent verified on macOS/Linux; committed audits and the real local-Pi integration gate pass
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-014
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -8383,6 +8385,10 @@ WM-014 local Pi integration 2026-09-14T15:21:41.045097+00:00: User now explicitl
 WM-014 local Pi integration 2026-09-14T15:50:52.316247+00:00: The prior missing-companion-SDK diagnosis was incomplete. User-selected Pi atb20a8180b921f50900eef2a714066a6b39f0f09a already implements AgentController.followUp and ExtensionAPI.startTaskTurn. Agent-cat8ab4f8ba had migrated its adapter to Chord but left the named gate probing removed RemoteSession and selecting a deleted test. Parent reproduced both the obsolete export refusal and the package-layout lookup failure. Replaced handwritten layout search with Node resolution from PI_PACKAGE_DIR, made fixtures honor that directory and load its matching server/Chord packages, restored remote tests to Vitest, and made every named test mandatory. No Pi source change or compatibility class was needed. Remote fixture failure cleanup now settles its original fake pending call and joins owned children/server, without suppressing cleanup errors. Fresh Pi build from1687 tracked files plus40 pre-existing manifest-hash-verified generated model inputs produced2425 compiled files. No install/fetch of dependencies, no paid calls, no lockfiles or configuration changes. Pi source/unrelated untracked metadata file remain untouched. Real gate5files/9tests and full13files/94tests pass, plus Pi owner8tests/Lane30tests, fresh native -Werror build and both doc gates. A production follow-up-to-steer mutant fails the actual remote follow-up assertion and a missing named remote test fails before Vitest launches. Parent verified41 extension files,45 logs,619 frozen files and3 research hashes; see pi-local/verification.json. Origin comparison0behind/35ahead at this checkpoint. Next commit this coherent integration correction and resume the independently isolated committed-work reviewer before accepting WM014. No closure or WM015 advance yet. Refocus check15:52:00Z,next16:52:00Z; full44packages/G0-G5objective remains13packages/G0accepted.
 
 WM-014 local Pi integration 2026-09-14T15:51:30.174793+00:00: Clock correction: actual refocus reading was2026-09-14T15:50:52Z, not the manually mistyped15:52:00Z in the preceding note. Next check is due no later than16:50:52Z. No project deadline or changed application budget follows.
+
+WM-014 local Pi integration 2026-09-14T15:58:30.898453+00:00: Committed22678d1bf29e116720b26820b7075f211d9b0e3f contains the seven-file coherent local-Pi integration fix. Parent compared all committed bytes to the verified manifest and confirmed canonical tree clean, no push. Independent retained review workflow117004e6-058d-4412-8900-10d158a85792 resumes latest reviewerd2675744 using explicit fresh context and the same verified no-parent-history lineage. pi-local/fess-brief.md supplies actual user authority, source owner diagnosis, exact delta, raw green/red evidence and evidence ceilings. Required method existed in the selected Pi source, so no Pi source changes or shim were added. Named gate now passes instead of being waived. Await complete review before parent WM014 acceptance. Refocus15:50:52Z,next16:50:52Z;13packages/G0accepted, full objective unchanged.
+
+WM-014 parent acceptance 2026-09-14T16:04:56.853646+00:00: Core20780df was independently audited byd2675744 with no implementation defect; the one manual P2 was corrected in2f1136d and both docs gates passed. Integration22678d1 is now independently cleared by65d4afe3-b22c-4579-bedf-43e6644cde40 with No issues found / Merge verdict OK. Its full pi-local/fess-review.md confirms the named Pi blocker is genuinely cleared through actual local-Pi behavior, not a bypass. Parent rechecked original core bytes, the seven committed integration paths, both platform exits, documentation correction and current Pi gate exits. Accumulated evidence satisfies the WM014 exact-review, protected original-worker approval, atomic immutable intent, lost-reply replay, invalidation, final deadline/worker guard, ambiguous no-reexecution and cleanup obligations. Native/capture/target/publication/mutant evidence remains in the original/corrective handoffs. Canonical13gates/Linux19gates are passed; fresh local Pi named5files/9tests and complete13files/94tests plus8owner/30Lane tests are passed. All prior limitations and the sole withdrawn SQLite confinement obligation remain. Pi source is unchanged. WM014 is accepted, bringing accepted packages to14/44 plusG0 only. G1-G5, later packages and the overall goal are not accepted. Next owning work is WM015 runtime ingestion. Refocus15:50:52Z,next16:50:52Z.
 #+end_example
 
 ** Dependencies
