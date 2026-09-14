@@ -67,7 +67,7 @@ right :: Show e => Either e a -> IO a
 right = either (error . show) pure
 
 load :: FilePath -> IO Configuration
-load path = loadConfiguration (const (Right ())) (const False) path >>= right
+load path = loadConfiguration (const (Right ()))  exactPreparedTarget (const False) path >>= right
 
 withInstalled :: FilePath -> (InstalledConfiguration -> IO a) -> IO a
 withInstalled path action = do
@@ -100,7 +100,7 @@ expect label expected action = do
 publicChecks :: FilePath -> IO ()
 publicChecks work = do
   (path, _) <- fixture work "public"
-  config <- Public.loadConfiguration (const (Right ())) (const False) path >>= right
+  config <- Public.loadConfiguration (const (Right ())) Public.exactPreparedTarget (const False) path >>= right
   bracket (Public.installConfiguration config >>= right) Public.closeConfiguration $ \installed -> do
     first <- Public.withCoordinationStore installed $ \store -> do
       identity <- Public.storeIdentity store
@@ -263,7 +263,7 @@ databaseChecks work = do
     second <- storeIdentity store
     check "reopen preserves durable identities separately from live generation"
       (storeAuthorityEpoch first == storeAuthorityEpoch second && storeStreamId first == storeStreamId second
-       && storeProcessGeneration first /= storeProcessGeneration second && storeSchemaVersion second == 4)
+       && storeProcessGeneration first /= storeProcessGeneration second && storeSchemaVersion second == 5)
     rowsEqual store "SELECT sequence,retained_floor,revision FROM service_metadata"
       [[SQL.SQLText "4", SQL.SQLText "0", SQL.SQLText "service_1"]] >>= check "stream sequence and resource revisions survive reopen"
   -- Real SQLite trigger failure occurs after resource update and sequence allocation.
@@ -462,7 +462,7 @@ migrationChecks work = do
     count store "clients" >>= check "stream exhaustion rolls back resource change" . (== 0)
     rowsEqual store "SELECT sequence FROM service_metadata" [[SQL.SQLText "18446744073709551615"]] >>=
       check "complete UInt64 stream range survives reopen"
-  bracket (rawOpen root) SQL.close $ \db -> SQL.exec db "PRAGMA user_version=5"
+  bracket (rawOpen root) SQL.close $ \db -> SQL.exec db "PRAGMA user_version=6"
   before <- BS.readFile (root </> "coordination.sqlite3")
   withInstalled path $ \installed -> expect "newer schema refused" StoreVersion $
     withCoordinationStore installed (const (pure ()))
@@ -514,7 +514,7 @@ admissionMigrationChecks work = do
     rawRows database "SELECT sentinel FROM admission_observations" >>=check "failed version-four migration preserves pre-existing conflict" . (==[[SQL.SQLText "preserved"]])
     SQL.exec database "DROP TABLE admission_observations"
   withInstalled path $ \installed -> withCoordinationStore installed $ \owner -> do
-    storeIdentity owner >>=check "version-four migration completes transactionally" . ((==4).storeSchemaVersion)
+    storeIdentity owner >>=check "version-four migration completes transactionally" . ((==5).storeSchemaVersion)
     rowsEqual owner "SELECT last_ordinal FROM admission_queue_clock" [[SQL.SQLText "18446744073709551614"]] >>=check "migration preserves unsigned queue history beyond signed SQLite integers"
     rowsEqual owner "SELECT kind,resource_key,reservation_id FROM reservation_resources" [[SQL.SQLText "operator",SQL.SQLText "unclassified",SQL.SQLText "reservation_old"]] >>=check "legacy operator string remains outside internal unclassified domain"
     rowsEqual owner "SELECT input_revision,queue_generation,queue_origin_revision,enqueue_command FROM requests" [[SQL.SQLNull,SQL.SQLNull,SQL.SQLNull,SQL.SQLNull]] >>=check "migration mints no input-selection or enqueue authority"

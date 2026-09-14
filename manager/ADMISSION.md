@@ -99,13 +99,13 @@ A later public review publication must preserve the queue/input association and
 advance the request and reservation revision together. Returning the callback or
 loan does not release capacity.
 
-WM-014 owns complete review construction and the accepted Approve ticket's native
-start integration. Its transaction is the logical expiry boundary. A timer that
+The [approval owner](APPROVAL.md) constructs complete review and binds the accepted
+Approve ticket to original native start delivery. Its transaction is the logical expiry boundary. A timer that
 fires after a committed start intent rechecks the durable start-pending/consumed
 association and retires rather than invalidating it, even if memory notification
-was delayed. Once retired, the original timer stays retired. WM-014 must bind the
+was delayed. Once retired, the original timer stays retired. Approval binds the
 original fresh ticket to the same request, reservation, native worker and generation,
-retain Commands' reserve/attempt discipline, and write outside the controller mutex.
+retains Commands' reserve/attempt discipline, and writes outside the controller mutex.
 The callback must use `submitCommandAttemptWithDeadline` for fresh acceptance.
 Its final clock check runs inside Store after bounded transactional work and
 invalidations and immediately before COMMIT. This is the logical guarded
@@ -113,7 +113,8 @@ acceptance point, rather than the earlier callback entry check. Exact receipt
 replay does not reapply fresh eligibility. Clock time can still advance while
 SQLite or operating-system commit IO completes, and uncertain commit remains
 uncertain rather than permitting re-execution. No accepted-running integration
-is claimed before WM-014 and its gate exist.
+is inferred from policy assertions. The approval gate supplies actual accepted-running
+retention and delayed-delivery evidence.
 
 ## Invalidation and release
 
@@ -167,10 +168,10 @@ containment, a power-loss test or the withdrawn SQLite pathname experiment.
 
 The policy properties and static held-claim assertion check supplied occupancy,
 not lifecycle transitions or a running state machine. Native pre-start tests are
-separate evidence, and actual accepted-running retention remains mandatory WM-014
-integration. The Coordination model supplies the abstract oldest-eligible and exclusive-resource
+separate evidence. Actual accepted-running retention is exercised by the WM-014
+approval gate rather than by these static policy assertions. The Coordination model supplies the abstract oldest-eligible and exclusive-resource
 meaning. These tests do not claim an SQL refinement theorem or infer physical cleanup
-from a Lean phase label. WM-014 owns the mandatory accepted-running integration gate,
+from a Lean phase label. The approval owner supplies the accepted-running integration gate,
 WM-015 durable ingestion, WM-016 controls, WM-019 broader safety supervision and
 WM-020 restart reconciliation. Service and G1 acceptance remain separate.
 
@@ -209,3 +210,17 @@ captured hashes. The package-boundary regression excludes unlisted sentinel,
 cache and symlink content while retaining declared helpers, then rejects a
 declared symlink. No ignore blacklist, Git command or canonical-source fallback
 supplies the private compiled slice.
+
+## Accepted start ownership
+
+`acceptStartCommand` shares the retained command invocation path and returns an
+opaque AcceptedStart only after fresh acceptance or reconciliation of that same
+original invocation. Its original ticket and Worker remain with Admission.
+Delivery validates the original start association, then reserves and attempts the
+same private start outside the mutex and SQL. The original timer checks committed
+consumed/start-pending facts without reapplying pre-acceptance expiry to delivery.
+
+The internal owner stop and unexpected accepted-worker exit follow existing
+finalization. Claims release only after original cleanup, while accepted consent
+remains consumed and lost supervision is separate from Runtime result. This does
+not supply the later public control/decision surface or durable ingestion.

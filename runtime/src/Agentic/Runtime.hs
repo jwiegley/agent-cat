@@ -1,6 +1,7 @@
 -- | Engine-neutral execution facade.
 module Agentic.Runtime
-  ( module Agentic.Exec,
+  ( answerSchemaForObservationCode,
+    module Agentic.Exec,
     module Agentic.InProcess,
     module Agentic.Runtime.Catalogue,
     module Agentic.Runtime.Control,
@@ -22,6 +23,7 @@ module Agentic.Runtime
   )
 where
 
+import Agentic.Planning (answerSchemaForObservationCode)
 import Agentic.Exec
 import Agentic.InProcess
 import Agentic.Runtime.Catalogue

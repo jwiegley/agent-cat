@@ -16,7 +16,7 @@ if len(units) != 1:
     raise RuntimeError("expected exactly one local agentic main-library unit")
 cases = [
     ("worker-positive", "import Agentic.Manager.Worker (FrontendWorker)\nkeep :: FrontendWorker -> FrontendWorker\nkeep = id\n", None),
-    ("worker-constructor", "import Agentic.Manager.Worker\nforge :: FrontendWorker\nforge = FrontendWorker " + " ".join(["undefined"] * 14) + "\n", "Illegal term-level use of the type constructor"),
+    ("worker-constructor", "import Agentic.Manager.Worker\nforge :: FrontendWorker\nforge = FrontendWorker `seq` undefined\n", "Illegal term-level use of the type constructor"),
     ("worker-generic", "import Agentic.Manager.Worker (FrontendWorker)\nimport GHC.Generics (from)\ninspect :: FrontendWorker -> ()\ninspect worker = from worker `seq` ()\n", "Generic FrontendWorker"),
     ("body-positive", "import Agentic.Manager.Commands (BodyBinding)\nkeep :: BodyBinding -> BodyBinding\nkeep = id\n", None),
     ("body-constructor", "import Agentic.Manager.Commands\nforge :: BodyBinding\nforge = BodyBinding undefined undefined undefined\n", "Illegal term-level use of the type constructor"),
@@ -26,7 +26,7 @@ cases = [
     ("generic", "import Agentic.Manager.Authorization (CredentialProof)\nimport GHC.Generics (from)\ninspect :: CredentialProof -> ()\ninspect proof = from proof `seq` ()\n", "Generic CredentialProof"),
 ]
 for module, token in [("Store", "CommitDeadline"), ("Admission", "Admission"), ("Admission", "LivePreparation"),
-                      ("Commands", "AcceptedEnqueue"), ("Commands", "CommandAttempt")]:
+                      ("Commands", "AcceptedEnqueue"), ("Commands", "CommandAttempt"), ("Approval", "ReviewedPreparation"), ("Admission", "AcceptedStart"), ("Worker.State", "WorkerLifecycle")]:
     imported = f"import Agentic.Manager.{module} ({token})\n"
     cases.extend([
         (token + "-positive", imported + f"keep :: {token} -> {token}\nkeep = id\n", None),
@@ -47,6 +47,6 @@ for name, body, expected in cases:
     if expected is None:
         if result.returncode != 0:
             raise RuntimeError(f"positive compiler control failed: {result.stdout}")
-    elif result.returncode == 0 or expected not in result.stdout:
+    elif result.returncode == 0 or expected not in " ".join(result.stdout.split()):
         raise RuntimeError(f"negative compiler result was not the required opacity refusal: {result.stdout}")
     print(f"PASS real-source credential proof opacity: {name}")

@@ -6,15 +6,16 @@
 
 -- | Durable input representations and verified captures, never workflow execution.
 module Agentic.Manager.Drafts
-  ( createDraft, changeDraftInput, changeDraftInputGuarded, InputTransition (..), RequestState, requestView, requestOwner, requestState, currentVersion, editable, checkDraftCapacity, uploadCapture, readDraft, assembleDraft, DraftAssembly, assemblyRequest, assemblyRevision, assemblyProfile, assemblyProfileRevision, assemblySetup, assemblyFrame, assembleDraftSnapshot, assembleAcceptedDraft, structuralReadiness, verifyFrontendFiles ) where
+  ( createDraft, changeDraftInput, changeDraftInputGuarded, InputTransition (..), RequestState, requestView, requestOwner, requestState, currentVersion, editable, checkDraftCapacity, uploadCapture, readDraft, assembleDraft, DraftAssembly, assemblyRequest, assemblyRevision, assemblyProfile, assemblyProfileRevision, assemblySetup, assemblyFrame, assemblyInputSummaries, assemblySelection, assembleDraftSnapshot, assembleAcceptedDraft, structuralReadiness, verifyFrontendFiles ) where
 
 import Agentic.Manager.Authorization
 import Agentic.Manager.Commands
 import Agentic.Manager.Profile
   (ConfigurationLimits (..), Discovery, discoveryEntries, discoveryRevision, discoveryProfileRevision,
-   discoverySelection, selectionContext, selectionInvocation, OperatorProfile (..))
+   discoverySelection, Selection, selectionContext, selectionInvocation, OperatorProfile (..))
 import Agentic.Manager.Protocol.Command
 import Agentic.Manager.Protocol.Draft
+import Agentic.Manager.Protocol.Preparation (ReviewInput (..))
 import Agentic.Manager.Store
 import Agentic.Runtime
   (PrivateRoot, privateRootPath, privatePathComponents, withPrivateDirectoryAt, ensurePrivateDirectoryAt,
@@ -299,19 +300,24 @@ readDraft store proof ident = draftIO $ withStoreFiles store $ \root -> timed 50
   pure updated
 
 -- | A bounded materialization snapshot, not permission to start a worker.
-data DraftAssembly = DraftAssembly !Text !Text !Text !Text !FrontendSetupRequest !BS.ByteString
+data DraftAssembly = DraftAssembly !Text !Text !Text !Text !FrontendSetupRequest !BS.ByteString ![ReviewInput] !Selection
 assemblyRequest :: DraftAssembly -> Text
-assemblyRequest (DraftAssembly ident _ _ _ _ _) = ident
+assemblyRequest (DraftAssembly ident _ _ _ _ _ _ _) = ident
 assemblyRevision :: DraftAssembly -> Text
-assemblyRevision (DraftAssembly _ revision _ _ _ _) = revision
+assemblyRevision (DraftAssembly _ revision _ _ _ _ _ _) = revision
 assemblyProfile :: DraftAssembly -> Text
-assemblyProfile (DraftAssembly _ _ profile _ _ _) = profile
+assemblyProfile (DraftAssembly _ _ profile _ _ _ _ _) = profile
 assemblyProfileRevision :: DraftAssembly -> Text
-assemblyProfileRevision (DraftAssembly _ _ _ revision _ _) = revision
+assemblyProfileRevision (DraftAssembly _ _ _ revision _ _ _ _) = revision
 assemblySetup :: DraftAssembly -> FrontendSetupRequest
-assemblySetup (DraftAssembly _ _ _ _ setup _) = setup
+assemblySetup (DraftAssembly _ _ _ _ setup _ _ _) = setup
 assemblyFrame :: DraftAssembly -> BS.ByteString
-assemblyFrame (DraftAssembly _ _ _ _ _ frame) = frame
+assemblyFrame (DraftAssembly _ _ _ _ _ frame _ _) = frame
+
+assemblyInputSummaries :: DraftAssembly -> [ReviewInput]
+assemblyInputSummaries (DraftAssembly _ _ _ _ _ _ inputs _) = inputs
+assemblySelection :: DraftAssembly -> Selection
+assemblySelection (DraftAssembly _ _ _ _ _ _ _ selected) = selected
 
 data DraftAccess = ClientAccess !CredentialProof | AcceptedAccess !AcceptedEnqueue
 
@@ -336,24 +342,29 @@ assembleWith store access ident = draftIO $ withStoreFiles store $ \root -> time
   let literalTotal=sum[n | InputState _ _ (Just "literal") (Just n) _ _ _ _ <- inputs]
   when(literalTotal>fromIntegral maxFrontendQueryBytes) (throwIO SizeLimit)
   resolved <- forM inputs $ \input@(InputState name _ representation _ _ _ _ capId) -> case representation of
-    Just "literal" -> do value<-readLiteralWith store access snapshot [Submit] input; pure ((name,Literal value),Nothing)
+    Just "literal" -> do
+      value<-readLiteralWith store access snapshot [Submit] input
+      declaration<-requireEither(nativeDeclaration input)
+      let bytes=frontendLiteralBytes(workflowInputSource declaration)value
+          summary=ReviewInput name "literal" (T.pack(show(BS.length bytes))) (T.pack(show(hash bytes::Digest SHA256)))
+      pure ((name,Literal value),Nothing,summary)
     Just "capture" -> do
       cap<-maybe(throwIO InvalidInput)pure capId
       capture@(CaptureState receipt _ _)<-runRead store(captureState ident cap)
       content<-verifyCapture root capture (captureBytes receipt<=fromIntegral maxFrontendQueryBytes)
       let path=privateRootPath root </> "captures" </> T.unpack cap
-      pure ((name,maybe(File path)Transport content),Just path)
+      pure ((name,maybe(File path)Transport content),Just path,ReviewInput name "capture" (T.pack(show(captureBytes receipt))) (captureDigest receipt))
     _ -> throwIO InvalidInput
   ensurePrivateDirectoryAt root ["runs"]
   let setup values=RootSetup(FrontendSetup (workflowName descriptor) (privateRootPath root </> "runs")
         (operatorTargetArguments policy) Nothing (operatorPersonAnswering policy) values (Just(selectionInvocation selection)))
-      inline=setup(map fst resolved)
-      files=setup[(name,maybe source File path) | ((name,source),path)<-resolved]
+      inline=setup[values | (values,_,_)<-resolved]
+      files=setup[(name,maybe source File path) | ((name,source),path,_)<-resolved]
       result=case encodeFrontendSetupRequest inline of Right bytes -> Right(inline,bytes); Left _ -> case encodeFrontendSetupRequest files of Right bytes -> Right(files,bytes); Left _ -> Left SizeLimit
   value<-requireEither result
   runRead store (checkRevisionWith access snapshot [Submit])
   _<-currentCatalogue store view
-  pure (DraftAssembly ident (draftRevision view) (draftProfile view) (draftProfileRevision view) (fst value) (snd value))
+  pure (DraftAssembly ident (draftRevision view) (draftProfile view) (draftProfileRevision view) (fst value) (snd value) [summary|(_,_,summary)<-resolved] selection)
 
 -- | Worker-side revalidation of File sources against actual retained capture records.
 -- Literal/Transport sources carry values, not paths. This grants no approval authority.

@@ -6,7 +6,7 @@
 module Agentic.Manager.Worker
   ( FrontendWorker, WorkerFailure (..), WorkerPhase (..), WorkerObservation (..),
     WorkerEvent, workerEventEnvelope, workerEventBytes,
-    withFrontendWorker, withStartingFrontendWorker, workerPrepared, startWorker, discardWorker, writeWorkerControl,
+    withFrontendWorker, withStartingFrontendWorker, withWorkerCommitDeadline, workerPrepared, startWorker, discardWorker, writeWorkerControl,
     consumeWorkerEvent, observeWorker, workerDiagnostics, waitWorker, closeWorker
   ) where
 
@@ -16,6 +16,7 @@ import Agentic.Manager.Profile
   (Discovery, discoveryEntries, discoveryRevision, discoveryProfileRevision, discoverySelection,
    Selection, selectionContext, selectionInvocation, OperatorProfile (..))
 import Agentic.Manager.Store
+import Agentic.Manager.Worker.State
 import Agentic.Runtime
   (ProcessGroup, terminateProcessGroup, closeGroupPipes, waitProcessGroup,
    groupInput, groupOutput, groupErrors, privateRootIdentity,
@@ -33,7 +34,7 @@ import Control.Concurrent.STM
    newEmptyTMVarIO, readTMVar, tryReadTMVar, tryPutTMVar, newTBQueueIO, writeTBQueue,
    peekTBQueue, readTBQueue, lengthTBQueue, check, orElse)
 import Control.Exception
-  (Exception, SomeException, IOException, bracket, mask, try, throwIO, fromException,
+  (SomeException, IOException, bracket, mask, try, throwIO, fromException, onException,
    finally, uninterruptibleMask_)
 import Control.Monad (unless, when, void)
 import qualified Data.ByteString as BS
@@ -45,18 +46,7 @@ import System.Exit (ExitCode (..))
 import System.IO (Handle, hFlush, hSetBinaryMode)
 import System.Process (CreateProcess (cwd, env, std_in, std_out, std_err), StdStream (CreatePipe), proc)
 import System.Timeout (timeout)
-
--- | Fixed failure categories, without raw stderr, private paths or request content.
-data WorkerFailure = WorkerConfiguration | WorkerUnavailable | WorkerClosed | WorkerStartupTimeout
-  | WorkerCapabilityRejected | WorkerPreparedFraming | WorkerPreparedDecode | WorkerWrongIdentity
-  | WorkerRuntimeFraming | WorkerRuntimeDecode | WorkerSequenceViolation | WorkerPhaseViolation
-  | WorkerUnexpectedExit | WorkerCleanupUnproven | WorkerWriteFailed | WorkerWriteTimeout | WorkerWriterBusy | WorkerConsumerBusy
-  deriving (Eq, Show)
-instance Exception WorkerFailure
-
--- | Adapter phase, not request admission, approval, or a Runtime outcome.
-data WorkerPhase = WorkerPreparing | WorkerPrepared | WorkerStartSent | WorkerRunning
-  | WorkerDiscardSent | WorkerExited | WorkerReleased deriving (Eq, Show)
+import Data.Word (Word64)
 
 -- | Non-consuming bounded transport observations. Exit is not workflow success.
 data WorkerObservation = WorkerObservation
@@ -77,11 +67,10 @@ workerEventEnvelope (WorkerEvent _ envelope) = envelope
 workerEventBytes :: WorkerEvent -> BS.ByteString
 workerEventBytes (WorkerEvent bytes _) = bytes
 
-data StopReason = StopRequested | StopFailed !WorkerFailure
-
 -- | Live ownership created only by this module. No constructor, Generic, Show or JSON.
 data FrontendWorker = FrontendWorker
-  { phase :: !(TVar WorkerPhase),
+  { lifecycle :: !WorkerLifecycle,
+    nativeProcess :: !(TVar (Maybe ProcessGroup)),
     prepared :: !(TMVar FrontendPrepared),
     inputPipe :: !(TVar (Maybe Handle)),
     eventQueue :: !(TBQueue WorkerEvent),
@@ -90,12 +79,29 @@ data FrontendWorker = FrontendWorker
     diagnostics :: !(TVar (BS.ByteString, Bool)),
     writer :: !(MVar ()),
     consumer :: !(MVar ()),
-    stopReason :: !(TMVar StopReason),
-    finished :: !(TMVar (Either WorkerFailure ExitCode)),
-    released :: !(TVar Bool),
     authority :: !(TVar (STM Bool)),
     ownership :: !(TVar (Maybe StoreWorker))
   }
+
+phase :: FrontendWorker -> TVar WorkerPhase
+phase = lifecyclePhase . lifecycle
+stopReason :: FrontendWorker -> TMVar StopReason
+stopReason = lifecycleStop . lifecycle
+finished :: FrontendWorker -> TMVar (Either WorkerFailure ExitCode)
+finished = lifecycleFinished . lifecycle
+released :: FrontendWorker -> TVar Bool
+released = lifecycleReleased . lifecycle
+
+-- | Loan final acceptance checks over this same native process and lifecycle.
+withWorkerCommitDeadline :: FrontendWorker -> CoordinationStore -> IO Word64 -> Word64 -> (CommitDeadline -> IO a) -> IO a
+withWorkerCommitDeadline worker store now expires action = do
+  (owner,group) <- atomically $ do
+    valid <- acceptingPreparation(lifecycle worker)
+    unless valid(throwSTM WorkerClosed)
+    owner <- readTVar(ownership worker) >>= maybe(throwSTM WorkerClosed)pure
+    group <- readTVar(nativeProcess worker) >>= maybe(throwSTM WorkerClosed)pure
+    pure(owner,group)
+  withPreparedCommitDeadline store owner group (lifecycle worker) now expires action
 
 -- | Own a native session independently of observers. This does not authorize approval.
 withFrontendWorker :: CoordinationStore -> Text -> Text -> FrontendSetupRequest -> (FrontendWorker -> IO a) -> IO a
@@ -105,9 +111,9 @@ withFrontendWorker store profile revision setup action = withStartingFrontendWor
 -- | Loan construction ownership immediately, without granting preparation or approval.
 withStartingFrontendWorker :: CoordinationStore -> Text -> Text -> FrontendSetupRequest -> (FrontendWorker -> IO a) -> IO a
 withStartingFrontendWorker store profile revision setup action = mask $ \restore -> do
-  worker <- FrontendWorker <$> newTVarIO WorkerPreparing <*> newEmptyTMVarIO <*> newTVarIO Nothing
+  worker <- FrontendWorker <$> newWorkerLifecycle <*> newTVarIO Nothing <*> newEmptyTMVarIO <*> newTVarIO Nothing
     <*> newTBQueueIO 32 <*> newTVarIO 0 <*> newTVarIO Nothing <*> newTVarIO (BS.empty, False)
-    <*> newMVar () <*> newMVar () <*> newEmptyTMVarIO <*> newEmptyTMVarIO <*> newTVarIO False <*> newTVarIO (pure False) <*> newTVarIO Nothing
+    <*> newMVar () <*> newMVar () <*> newTVarIO (pure False) <*> newTVarIO Nothing
   supervisor <- async $ do
     outcome <- try @SomeException $ withAsync (preparationDeadline worker) $ \_ ->
       withStoreWorker store (runOwned worker)
@@ -138,13 +144,13 @@ withStartingFrontendWorker store profile revision setup action = mask $ \restore
       capabilities <- probeStoreCapabilities store owner profile revision >>= either (const (throwIO WorkerCapabilityRejected)) pure
       ensurePrivateDirectoryAt root ["runs"]
       expectedRoot <- bracket (openPrivateSubroot root ["runs"]) closePrivateRoot (pure . T.pack . privateRootIdentity)
-      bracketPreserving (launch owner initial) cleanupGroup $ \(group, selected) -> do
+      bracketPreserving (launch worker owner initial) cleanupGroup $ \(group, selected) -> do
         input <- maybe (throwIO WorkerUnavailable) pure (groupInput group)
         output <- maybe (throwIO WorkerUnavailable) pure (groupOutput group)
         errors <- maybe (throwIO WorkerUnavailable) pure (groupErrors group)
         mapM_ (`hSetBinaryMode` True) [input,output,errors]
         atomically (writeTVar (inputPipe worker) (Just input))
-        concurrently_
+        (concurrently_
           (drainErrors worker errors)
           (do
             writeFrame WorkerWriteFailed input bytes
@@ -154,11 +160,14 @@ withStartingFrontendWorker store profile revision setup action = mask $ \restore
             atomically $ do
               writeTVar (phase worker) WorkerPrepared
               void (tryPutTMVar (prepared worker) reply)
-            readEvents worker output reply Nothing False)
+            readEvents worker output reply Nothing False)) `onException`
+              (atomically $ do
+                closed <- readTVar(released worker)
+                unless closed(writeTVar(phase worker)WorkerExited))
         exit <- waitProcessGroup group
         unless (exit == ExitSuccess) (throwIO WorkerUnexpectedExit)
         pure exit
-    launch owner initial = do
+    launch worker owner initial = do
       result <- withStoreCatalogues store $ \_ _ catalogues -> do
         selected <- selectCurrent profile revision setup catalogues
         unless (discoveryRevision (snd selected) == discoveryRevision (snd initial)) (throwIO WorkerConfiguration)
@@ -167,6 +176,7 @@ withStartingFrontendWorker store profile revision setup action = mask $ \restore
               {cwd = Just (operatorCwd policy), env = Just (operatorEnvironment policy),
                std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe}
         group <- createStoreWorkerGroup owner command
+        atomically(writeTVar(nativeProcess worker)(Just group))
         pure (group, selected)
       either (const (throwIO WorkerConfiguration)) pure result
 
@@ -209,6 +219,7 @@ validatePrepared (selected, catalogue) capabilities root setup reply = do
   unless (preparedInvocation reply == invocation && preparedPersonAnswering reply == answering
     && preparedRootIdentity reply == root && preparedCwd reply == working
     && preparedServer reply == capabilityServer capabilities) (throwIO WorkerWrongIdentity)
+  either (const(throwIO WorkerWrongIdentity)) pure (operatorPreparedTarget (selectionContext selected) reply)
   case setup of
     RootSetup request -> unless (any (\(_, descriptor) -> descriptor == preparedDescriptor reply
       && workflowName descriptor == setupWorkflow request) (discoveryEntries catalogue)) (throwIO WorkerWrongIdentity)

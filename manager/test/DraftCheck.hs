@@ -99,7 +99,7 @@ withFixture work source name drafts global bytes action=do
   descriptor<-BS.readFile(source </> "test/fixtures/runtime/descriptor-v3/valid.json") >>= right.decodeWorkflowDescriptor
   let native=descriptor {workflowInputs=[WorkflowInputDescriptor "first" DescriptorPrompt,WorkflowInputDescriptor "second" DescriptorCommandTail,WorkflowInputDescriptor "third" DescriptorStdin]}
   BS.writeFile replies(encoded[native])
-  config<-loadConfiguration (\args->if null args then Right() else Left InvalidConfiguration) (const False) path >>=right
+  config<-loadConfiguration (\args->if null args then Right() else Left InvalidConfiguration)  exactPreparedTarget (const False) path >>=right
   bracket (installConfiguration config >>=right) closeConfiguration $ \installed->withCoordinationStore installed $ \store->do
     (_,profiles)<-configurationSnapshot installed >>=right
     profile<-case profiles of [value]->pure(publicRevision value);_->error "fixture profile"
@@ -464,7 +464,7 @@ reopenChecks work source=do
     (setup,_)<-assembleDraft store proof(draftId view)>>=right
     check "changed client source has no effect on retained transport" (case setup of RootSetup request->lookup "second"(setupInputs request)==Just(Transport "transport雪\r\n");_->False)
     pure(path,ready,proof)
-  config<-loadConfiguration(const(Right()))(const False)path>>=right
+  config<-loadConfiguration(const(Right())) exactPreparedTarget (const False)path>>=right
   bracket(installConfiguration config>>=right)closeConfiguration $ \installed->withCoordinationStore installed $ \store->do
     expect "earlier store proof cannot read reopened draft" Unauthenticated(readDraft store oldProof(draftId expected))
     expect "earlier store proof cannot assemble reopened draft" Unauthenticated(assembleDraft store oldProof(draftId expected))
@@ -480,7 +480,7 @@ sameConfigurationReopenChecks work source=do
   (path,_,replies)<-configurationFile work "same-configuration-reopen" 5 5 1024
   native<-BS.readFile(source </> "test/fixtures/runtime/descriptor-v3/valid.json")>>=right.decodeWorkflowDescriptor
   BS.writeFile replies(encoded[native])
-  config<-loadConfiguration(const(Right()))(const False)path>>=right
+  config<-loadConfiguration(const(Right())) exactPreparedTarget (const False)path>>=right
   bracket(installConfiguration config>>=right)closeConfiguration $ \installed->do
     (_,profiles)<-configurationSnapshot installed>>=right
     revision<-case profiles of [profile]->pure(publicRevision profile);_->error "fixture profile missing"
@@ -562,7 +562,7 @@ lifetimeChecks work source=do
     outcome<-wait worker
     check "closed configuration cannot acknowledge new upload metadata" (either(const True)(const False)outcome)
     pure(path,())
-  config<-loadConfiguration(const(Right()))(const False)path>>=right
+  config<-loadConfiguration(const(Right())) exactPreparedTarget (const False)path>>=right
   bracket(installConfiguration config>>=right)closeConfiguration(const(check "file cleanup releases final ownership" True))
 
 escapedFileChecks :: FilePath -> FilePath -> IO ()
@@ -606,7 +606,7 @@ cataloguePageChecks work source=withFixture work source "catalogue-pages" 5 5 10
 declarationMigrationChecks :: FilePath -> IO ()
 declarationMigrationChecks work=do
   (path,root,_)<-configurationFile work "declaration-migration" 5 5 1024
-  config<-loadConfiguration(const(Right()))(const False)path>>=right
+  config<-loadConfiguration(const(Right())) exactPreparedTarget (const False)path>>=right
   bracket(installConfiguration config>>=right)closeConfiguration(const(pure()))
   let ordinary=[("native_"<>T.pack(show index),index)|index<-[0..19::Int]]
       declaration name=let prefix=encoded(WorkflowInputDescriptor name DescriptorPrompt)
@@ -628,7 +628,7 @@ declarationMigrationChecks work=do
     forM_ ordinary $ \(name,index)->insert name index(declaration name)
     insert "oversized_unknown" (20::Int) unknown
   bracket(installConfiguration config>>=right)closeConfiguration $ \installed->withCoordinationStore installed $ \store->do
-    storeIdentity store>>=check "large declaration migration completes without raising result limit" . ((==4).storeSchemaVersion)
+    storeIdentity store>>=check "large declaration migration completes without raising result limit" . ((==5).storeSchemaVersion)
     number store "SELECT count(*) FROM request_inputs WHERE literal_transport_bytes=6" >>=check "ordinary large declarations derive exact native lengths individually" . (==20)
     rowsEqual store "SELECT literal_bytes,literal_transport_bytes,literal_chunks,literal_digest FROM request_inputs WHERE name='oversized_unknown'"
       [[SQL.SQLInteger 5,SQL.SQLNull,SQL.SQLInteger 1,SQL.SQLBlob(convert(hash literal::Digest SHA256))]]>>=check "oversized unknown derivation stays explicit with complete literal integrity"
@@ -648,7 +648,7 @@ declarationMigrationChecks work=do
 migrationChecks :: FilePath -> IO ()
 migrationChecks work=do
   (path,root,_)<-configurationFile work "migration" 5 5 1024
-  config<-loadConfiguration (const(Right())) (const False) path>>=right
+  config<-loadConfiguration (const(Right()))  exactPreparedTarget (const False) path>>=right
   bracket (installConfiguration config>>=right) closeConfiguration (const(pure()))
   bracket (SQL.open(T.pack(root </> "coordination.sqlite3"))) SQL.close $ \db->do
     setFileMode(root </> "coordination.sqlite3")0o600

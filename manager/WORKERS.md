@@ -85,7 +85,7 @@ started event. Start and discard derive the decision ID only from the same opaqu
 live worker's prepared response. Phase checks reject repeated or out-of-order
 consumption. No constructor, Generic or JSON operation recreates FrontendWorker.
 A closed handle cannot write or signal. The low-level start operation is not an
-approval decision. WM-014 must bind it to exact live review and committed intent.
+approval decision. The approval owner binds it to exact live review and committed intent.
 
 One fail-fast writer serializes setup/decision/control bytes. A contending caller
 receives WorkerWriterBusy without an attempted write or waiting queue. An actual
@@ -141,7 +141,8 @@ The native proxy, stdin EOF and original ProcessGroup ownership establish only
 the tested cleanup boundary. They do not contain arbitrary descendants that escape
 supported process ownership or prove external provider cancellation. The
 [admission owner](ADMISSION.md) retains these workers and reservations, while
-WM-014 owns exact approval, WM-015 durable ingestion, WM-016 control semantics,
+the [approval owner](APPROVAL.md) supplies exact approval. WM-015 owns durable
+ingestion, WM-016 control semantics,
 and WM-019 broader containment and safety supervision. No listener, deployment,
 provider call, new workflow semantics, stored-worker adoption, SQLite confinement
 experiment or release acceptance is claimed by this unit.
@@ -161,3 +162,12 @@ grace, caller-thrown IO exceptions, an already uninterruptibly masked caller,
 ordinary completion and repeated callers. The old termination-body mutant must
 fail the caller/grace assertions. Operator cleanup of a failed fixture is separate
 hygiene and never counted as successful manager cleanup.
+
+Worker validates the retained CLI-owned prepared-target relation after native
+identity validation. Its actual phase, stop, completion and release cells are shared
+through Worker.State with the fixed final acceptance guard, not duplicated into a
+second phase machine. The guard includes the original registration and native group,
+with Runtime owning the nonblocking liveness observation. A known reader failure
+invalidates prepared eligibility before joined process cleanup without replacing
+its original exception. The [approval owner](APPROVAL.md) supplies exact consent and
+same-worker start, while durable ingestion remains separate.

@@ -306,7 +306,8 @@ reconcileCommandAttempt (CommandAttempt store _ request candidate retained gener
              _ -> Nothing
          _ -> pure Nothing
        pending <- sql "SELECT count(*) FROM reservations WHERE pending_command=? AND process_generation=? AND state='cleanup-pending'" [text candidate,text generation]
-       pure (Just(receipt,refs,epoch,association,pending==[[SQL.SQLInteger 1]]),[])
+       started <- sql "SELECT count(*) FROM start_intents WHERE command_id=? AND process_generation=?" [text candidate,text generation]
+       pure (Just(receipt,refs,epoch,association,pending==[[SQL.SQLInteger 1]] || started==[[SQL.SQLInteger 1]]),[])
    pure $ fmap (fmap (\(receipt,refs,epoch,association,dispatch) -> Submission receipt False
      (if dispatch then Just(DispatchTicket store candidate generation refs retained) else Nothing) refs
      (AcceptedEnqueue generation epoch candidate <$> association))) outcome

@@ -99,7 +99,7 @@ fixture work name capacity safety = do
   pure (path, root)
 
 load :: FilePath -> IO Configuration
-load path = loadConfiguration (\args -> if null args then Right () else error "unexpected fixture target") (const False) path >>= right
+load path = loadConfiguration (\args -> if null args then Right () else error "unexpected fixture target")  exactPreparedTarget (const False) path >>= right
 withInstalled :: FilePath -> (InstalledConfiguration -> IO a) -> IO a
 withInstalled path action = load path >>= \configuration -> bracket (installConfiguration configuration >>= right) closeConfiguration action
 withFixture :: FilePath -> String -> Int64 -> Int -> (FilePath -> FilePath -> InstalledConfiguration -> CoordinationStore -> Text -> CredentialProof -> IO a) -> IO a
@@ -180,11 +180,11 @@ ticketOf submission = maybe (error "missing new dispatch ticket") pure (submissi
 publicComposition :: FilePath -> IO ()
 publicComposition work = do
   (path, _) <- fixture work "public" (64 * commandCapacity) 10
-  configuration <- Public.loadConfiguration (\args -> if null args then Right () else error "fixture target") (const False) path >>= right
+  configuration <- Public.loadConfiguration (\args -> if null args then Right () else error "fixture target") Public.exactPreparedTarget (const False) path >>= right
   bracket (Public.installConfiguration configuration >>= right) Public.closeConfiguration $ \installed ->
     Public.withCoordinationStore installed $ \store -> do
       identity <- Public.storeIdentity store
-      check "installed public composition uses migrated store" (Public.storeSchemaVersion identity == 4)
+      check "installed public composition uses migrated store" (Public.storeSchemaVersion identity == 5)
 
 replayChecks :: FilePath -> IO ()
 replayChecks work = do
@@ -549,7 +549,7 @@ largestLegacyChecks work = do
   withInstalled path $ \installed -> withCoordinationStore installed $ \store -> do
     profile <- profileRevision installed
     proof <- authenticateCredential store bearerA >>= right
-    storeIdentity store >>= check "largest legacy row completes current migration" . ((== 4) . storeSchemaVersion)
+    storeIdentity store >>= check "largest legacy row completes current migration" . ((== 5) . storeSchemaVersion)
     largeRead <- try @StoreFailure (runRead store (query "SELECT body FROM commands WHERE id='legacy_largest'" [] >> pure ()))
     check "largest body cannot be copied through the one-MiB result budget" (case largeRead of Left StoreLimit -> True; _ -> False)
     replay <- submitCommand store proof req (edit profile (commandResource req) "never") >>= right

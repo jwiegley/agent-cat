@@ -183,3 +183,8 @@ Batched structural readiness returns bounded request facts without copying input
 contents into admission queries. It does not promise native preparation success.
 Public draft reads preserve current admission blocking reasons while refreshing
 the missing-input indication, and queued requests retain their global position.
+
+DraftAssembly retains its original trusted Selection and input source/byte/hash
+summaries for the exact review owner. Literal summaries use the native encoding,
+and captured summaries use verified capture receipts. They do not expose private
+paths or create execution authority from serialized request rows.

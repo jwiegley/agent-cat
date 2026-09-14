@@ -195,3 +195,14 @@ when those policy inputs change, and the coordinator must validate effective
 prepared policy and ownership before approval. The existing routing fingerprint
 is not a credential-version token. Arbitrary trusted executable code is not
 sandboxed.
+
+## Retained native prepared association
+
+Haskell composition supplies both TargetValidator and PreparedTargetValidator to
+loadConfiguration. The latter is pure and retained with each immutable profile and
+Selection, without serialized function identity. Metadata-only callers explicitly
+use exactPreparedTarget. CLI composition uses the actual native parser and checks
+exact arguments or its authorized ACP scratch derivation against the same bound
+Worker response. It performs no later routing-file IO during acceptance and does
+not grant execution from an unbound prepared DTO. Reload preserves the existing
+revision/lifetime fence for unapproved selections.
