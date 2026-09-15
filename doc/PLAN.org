@@ -8434,15 +8434,17 @@ WM-014 parent acceptance 2026-09-14T16:04:56.853646+00:00: Core20780df was indep
 ]
 #+end_src
 
-* DOING [#B] WM-015: Implement validated runtime ingestion and durable projections    :p3:
+* DONE [#B] WM-015: Implement validated runtime ingestion and durable projections    :p3:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-wm-015-wzl9
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-14 Mon 21:21]
+:MODIFIED: [2026-09-14 Mon 21:48]
 :CREATED_BY: johnw
+:FINISHED: [2026-09-14 Mon 21:48]
+:CLOSE_REASON: Implemented validated ingestion, passed canonical/Pi/Linux verification, and cleared independent committed-work audit of 546d61b.
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-015
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -8499,7 +8501,7 @@ cannot create a success that the validated terminal sequence does not support.
 
 ** Notes
 
-WM-015 current handoff, consolidated 2026-09-15T04:21:17.024226+00:00. Historical intermediate/failure evidence remains in the immutable namespaces and reports below. Status remains in_progress pending implementation commit and committed-work audit. Full WM-001–WM-044/G0–G5 objective is unchanged. WM-001–WM-014/G0 are accepted. No WM-015 acceptance yet. Only SQLite directory-replacement confinement was withdrawn by the operator, restricted and unrun. No project deadline, reduced application/SQL/frame/checkpoint/cleanup bounds, new Lean build, paid backend, deployment or push.
+WM-015 current handoff, consolidated 2026-09-15T04:21:17.024226+00:00. Historical intermediate/failure evidence remains in the immutable namespaces and reports below. Status: accepted after implementation commit and independent committed-work audit. Full WM-001–WM-044/G0–G5 objective is unchanged. WM-001–WM-015/G0 are accepted. This does not accept G1 or the remaining packages/gates. Only SQLite directory-replacement confinement was withdrawn by the operator, restricted and unrun. No project deadline, reduced application/SQL/frame/checkpoint/cleanup bounds, new Lean build, paid backend, deployment or push.
 
 Meaning and ownership: immutable original-wire ingestion prefix with versioned boundary/shared Runtime snapshot digest, bounded512KiB reads and the shared checkpoint fold. Payload limit excludes LF while stored evidence/digests retain it. Canonical checkpoint and original-wire holdings have separate64MiB ceilings. Full-prefix replay per append has explicit quadratic total cost, with no mutable projection cache. First evidence atomically associates managed request/reservation revisions and invalidations. Matching duplicates never repair/backfill state. Original AcceptedStart/Worker can drain retained validated evidence after physical cleanup without acquiring execution/control rights. Empty queue requires original producer completion. Cleanup-pending does not defer ingestion; original finalization admits only its exact post-start association successor with unchanged command/generation/reservation guards. Store.bounded owns and joins its SQL action and repeated interrupter before rollback/reuse, preserving original exceptions and cooperative5s/30s budgets.
 
@@ -8515,7 +8517,13 @@ Linux: linux-verification-04 sole Nix invocation03:04:21–04:04:08UTC passed21/
 
 Failures remain failures: original Linux packet omitted ACP script; -02 staged before writable-copy preparation; -03 revealed FHS interpreter/helper assumptions. All3actual failures/logs/inputs immutable, no Linux pass claimed from them. Original831f62dd finished the failed stage and preflight before new1aa17489 began -04. A -04 Python launcher path typo failed before Nix, preserved and corrected with approval. Current -04 then ran once, no Nix retry. Correction-author report preserves compiler/guessed-API/test-expectation failures, raw /../ configuration refusal and1200s incomplete busy-reader cancellation run. Deterministic old Store interruption controls were rescued only through the original captured SQL connection. Parent verifier allowlist and ghc-pkg/metadata-introspection mistakes were corrected without source/check waivers. Outer workflow continuation losses and stale detached-child labels are not application outcomes; inspect exact child IDs, never restart a live detached child. Refocus missed02:55:34 by82seconds on one check, explicitly recorded. Earlier checkpoint corrections and operator-only orphan hygiene remain in accepted prior package records.
 
-Next: review exact source/issue diff, project only this issue while comparing all224records, stage explicit26paths plus PLAN, verify staged bytes and whitespace, make one coherent WM015 implementation commit. Then resume latest isolated reviewer6f90e186 for committed-work fess audit with exact commit/evidence/full objective. Verify/fix any findings, do not recursively audit a commit solely fixing an audit. Only then accept WM015 and continue remaining packages/gates. Check doc/observations without inventing partner findings. No push. Last refocus 2026-09-15T04:21:17.024226+00:00, next by 2026-09-15T05:21:17.024226+00:00.
+Next: project this accepted issue only, compare all224records and commit the scoped acceptance checkpoint. Then begin WM-016 with its original dependencies and criteria. Latest completed reviewer5849338b-2ab9-4731-a9a6-5af9eea5b6c8 is the next retained-review candidate, subject to resumability check. Last refocus 2026-09-15T04:48:56.292501+00:00, next by 2026-09-15T05:48:56.292501+00:00.
+
+Implementation checkpoint committed 2026-09-15T04:32:29.685241+00:00: 546d61b210644f235737e8067463f87b70526b01, Persist validated native runtime evidence.27explicit files,1358insertions/84deletions, all committed bytes match verified working files and worktree is clean. Both whitespace checks and all224record projection comparisons passed before commit. No installed pre-commit hook was bypassed; none existed. Audit scope is this one coherent WM015 commit, including required Store cancellation regression fix and ACP verification portability. committed-work.diff SHA2563da23830d127e6c4dbc015b8eb6cfd42c5f3038b770236540997e48f18ae0ceb provides exact commit/parent context for read-only evaluator. No doc/observations directory exists. WM015 remains in_progress pending independent committed-work fess audit; do not close yet.
+
+Committed-work audit dispatched 2026-09-15T04:38:16.110116+00:00: workflow f9c8e03c-9da6-4d5d-9fa6-4f1a2043919c resumes latest reviewer6f90e186 with explicit fresh context and unchanged read-only tool ceiling. Existing verified parent-history-isolated lineage/probe attestation supplied. Scope exactly546d61b210644f235737e8067463f87b70526b01 (one coherent WM015 unit), all27committed paths and claims, current canonical/Linux/Pi evidence, frozen full objective and sole withdrawn obligation. Parent status clean after commit, no other edits or pushes. WM015 remains in_progress pending audit. Previous verbose watch notes were consolidated into current handoff without changing frozen description/criteria or removing immutable failure logs. A parent Pi-capture helper was temporarily written at /tmp/agent-cat-wm015-pi-inputs.py rather than Products; this process deviation is recorded, not claimed compliant with Wiggum location policy, and does not alter captured source/output evidence.
+
+Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after code commit546d61b210644f235737e8067463f87b70526b01, exact source/staged/committed checks, fresh canonical/Pi/actual Linux21-gate verification and independent committed-work audit5849338b-2ab9-4731-a9a6-5af9eea5b6c8 (workflowf9c8e03c-9da6-4d5d-9fa6-4f1a2043919c) completed04:41:53Z with No issues found / clean OK. Raw native reviewer output SHA256553d196ce917060cd9d61087c6ccf0a2ab35757cf649a8f0cfe4621085d7deb0. Stated verification limits remain: no stronger SQL theorem, hard IO deadline, universal containment or completed service. Full44/G0-G5 goal continues with15packages/G0accepted. Working tree clean and no partner observations at acceptance. Current next taskWM016/acat-wm-016-bsw2.
 
 ** Dependencies
 
