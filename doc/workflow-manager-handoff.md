@@ -10,9 +10,11 @@ action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
 Refocus completed at `2026-09-15T23:10:55.861310+00:00`. The next deadline is
-`2026-09-16T00:10:55.861310+00:00`. The immediate step is fresh baseline compilation
-and data-only checks, followed by independent review of the unresolved cleanup
-proof and the diagnostic correction. No whole policy gate is being retried.
+`2026-09-16T00:10:55.861310+00:00`. Fresh compilation and data checks passed.
+Independent review cleared the diagnostic correction but kept WM-016 blocked.
+The next step is preparation and review of an ordered ingestion-prefix
+diagnostic. No whole policy gate is being retried and no new native invocation
+has yet been authorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -124,7 +126,7 @@ records, 162 Haskell records and 242 C records, and no overflow or logging failu
 It exercised the real EPERM zombie-leader guard without changing it. These are
 **non-reproductions, not a resolution** of the original failure.
 
-The latest checker and frontend hashes were respectively
+The latest executed native diagnostic used these checker and frontend hashes:
 `77c92448e5bad3022281eb7137f7b63d61e990a714da55f42ecc5a31c774e577`
 and `1757f0f1df301cf3666b3b6c125bfefba6cf099616c5fc75c55dedf063a80677`.
 Current full source/raw owning gates, Linux, final canonical/Pi verification,
@@ -186,12 +188,12 @@ For a new clone, initialize/import the `obr` cache according to `AGENTS.md`.
 Do not rebuild or replace an existing unrelated tracker cache. Keep WM-016 open.
 Recheck the clock and perform the `refocus` check on explicit resumption.
 
-The immediate next technical step is an independent decision on the unresolved
-cleanup-proof failure and the diagnostic/retry correction. Do not repeat a whole
-policy run merely to obtain green. Preserve missing, failed, and confirmed group
-outcomes, the first failure, and both primary/cleanup exceptions. Then obtain
-current-byte full source/raw/platform/client/doc evidence and independent
-acceptance before integrating the candidate or moving to dependent WM-017.
+The next technical step is to finish and review the private prefix diagnostic
+described below, then make a separate bounded execution decision. Do not repeat
+a whole policy run merely to obtain green. Preserve missing, failed, and
+confirmed group outcomes, the first failure, and primary/cleanup exceptions.
+Current-byte full source/raw/platform/client/doc evidence and independent
+acceptance remain necessary before integration or dependent WM-017 work.
 At the end of **every downstream subtask**, run the `fess` skill, verify its
 findings, and record the evidence before marking that subtask complete.
 
@@ -207,12 +209,42 @@ reconstructed from the accepted baseline and both checkpoint patches, with all
 588 positive source files verified by digest, size, and mode. Old evidence is
 read-only.
 
-Workflow `ea331f14-b7bf-4e91-bc75-a4a09e1cf606` starts compile/data-only baseline
-verification and a fresh reviewer isolation probe in disjoint namespaces.
-No retained reviewer children are available in this parent session, so the
-new reviewer is an explicitly identified fallback. No persistent goal is set
-in the current API session. The explicit user request, not this handoff alone,
-authorizes resumed work.
+Workflow `ea331f14-b7bf-4e91-bc75-a4a09e1cf606` completed fresh compilation with
+tests enabled and GHC warnings treated as errors, plus the offline contract
+probe. The build exited zero after 470.116116 seconds. The probe checked 99
+schemas, 29 operations, 327 payload cases, 20 SSE cases, and three byte-bound
+downloads. Its 22 compiled executables were not run. All 1,005 source files
+remained unchanged. The parent verified the 588 checkpoint source records and
+the other 417 files against the accepted Git tree, then checked 1,198 artifact
+records covering 1,176 unique paths. This does not establish native acceptance.
+
+Fresh reviewer isolation probe `9fd10854-1df7-48a7-8f03-a246cb627a21` passed.
+Review `f6a3052a-84d8-4bf2-ae6a-348f21829909` cleared the diagnostic/retry
+correction and recommended testing the untested same-process ingestion prefix.
+Its full report and parent verification are under `resume-parent.zTEX65dI`.
+No retained reviewer was available, so the review used a verified fresh fallback.
+
+The new preparation namespace is `prefix-diagnostic.fpfRbnrI`. It must preserve
+the existing observer, framed maximum/overflow, native ingestion/reopen,
+association cleanup, and native decision fixtures before the first
+non-interrupted pair, with whole-prefix post-unwind capture. Existing fixture
+assertions, owners, order, cleanup, capacities, and deadlines remain unchanged.
+Preparation and data checks are authorized, not native execution.
+
+Workflow `71644dd0-48cc-4f4a-a78b-489bc34d742f` detached while worker
+`d861d8e7-101a-44c3-98ae-414d39ccb7ae` requested the exact `fess` rubric path.
+The parent replied with `/Users/johnw/.agents/skills/command-fess/SKILL.md`.
+Recover that same child result before review rather than launching a replacement.
+The author reported a stopped filename-only search that listed forbidden
+artifact/session/sentinel filenames without reading their contents. Its scope
+deviation must remain in the handback and review. A second preparation-only
+decision permits an explicit private callback after each framed maximum/overflow
+case has fully unwound, validating capture before the next case. Normal dispatch
+and immutable production input remain unchanged, and boundary snapshots remain
+separate. Neither decision authorizes native execution.
+
+No persistent goal is set in the current API session. The explicit user request,
+not this handoff alone, authorizes resumed work.
 
 The latest observed environment was macOS 26.6.2, Darwin 25.6.0
 `xnu-12377.161.14~5`, GHC 9.10.3, Cabal 3.16.1.0, SQLite 3.53.3 and Python 3.14.7.

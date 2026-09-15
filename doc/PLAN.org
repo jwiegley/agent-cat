@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-15 Tue 16:10]
+:MODIFIED: [2026-09-15 Tue 16:44]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8638,6 +8638,14 @@ ambiguous delivery without unauthorized replay.
 RESUMED BY USER 2026-09-15T23:10:55.861310+00:00. Explicit request: Resume your work now and cancel the pause. This supersedes the user-halt state below, not the frozen acceptance contract or action-specific safety restrictions. No API-session goal exists. Full scope remains WM001-WM044/G0-G5, with WM001-WM015/G0 accepted. Next: fresh verified reconstructed baseline compilation and data checks, independent cleanup-proof/correction decision, then a specifically bounded native plan if justified. No blind policy retries, deployment, paid routes, new Lean build or saved-PID signalling.
 
 Refocus 2026-09-15T23:10:55.861310+00:00; next deadline 2026-09-16T00:10:55.861310+00:00. Source reconstructed from accepted7b88f172 plus both checkpoint patches in /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/controls.qzldrova/resume-20260915.ZHiqa0SO/source and all588positive files verified byte/mode/size. Prior evidence is read-only. No retained reviewer children are available in this parent session; verify a fresh isolation probe before the fallback review.
+
+Resumed baseline completed23:22:00UTC: one current-byte all-target build with tests enabled and GHC-Werror exited0 after470.116116seconds. Data-only contract probe exited0 (99schemas/29operations/327payload/20SSE/3download cases). All1005source files stayed unchanged. Parent verified588sealed positive sources plus417accepted Git blobs/modes,1198artifact comparisons/1176unique paths and22compiled executables. No compiled application/checker or Runtime/native suite was executed by that baseline. Evidence under resume-20260915.ZHiqa0SO and resume-parent.zTEX65dI.
+
+Independent fresh-context reviewf6a3052a-84d8-4bf2-ae6a-348f21829909 (workflow938ad20d-bfd4-439d-806c-05b1c085c7c5) cleared the diagnostic/retry correction, with no issues found in that scope. WM016 integration stays BLOCK. Full reviewSHA256af46370e8a0813d275aa0cf0294132d8c7850f9bc7598065d50fbbd0d5ae3677. Fresh reviewer isolation probe9fd10854-1df7-48a7-8f03-a246cb627a21 returned PARENT_HISTORY_ABSENT and verifier exited0. No retained child was available, so review used an explicit same-role fallback.
+
+Next diagnostic preparation 2026-09-15T23:40:36.458615+00:00: reproduce the untested same-process prefix shape, not another pair-only retry. Existing observer, framed(maximum+overflow), native ingestion/reopen, association cleanup, and native decision fixtures precede only first non-interrupted pair. Workflow71644dd0-48cc-4f4a-a78b-489bc34d742f prepares/compiles/data-checks then independently reviews new private prefix-diagnostic.fpfRbnrI. Whole-prefix capture, fixed capacities, original order/owners/joins, first failure and exception provenance are required. Native invocation is NOT authorized yet. Parent must review exact current bytes and make a separate bounded decision. A pass would still be a non-reproduction, not original-cause resolution.
+
+Prefix preparation coordination 2026-09-15T23:44:27.141401+00:00: original childd861d8e7-101a-44c3-98ae-414d39ccb7ae detached for supervisor questions; no replacement or native run. Parent supplied exact fess rubric path and required disclosure of stopped filename-only artifact/session/sentinel search without content reads. Parent also approved diagnostic-only capture validation after each framed maximum/overflow case fully unwinds and before next case, via explicit callback/parameter, preserving normal dispatch and immutable production inputs. Distinct fixed-label snapshots, whole-prefix final flush, fixed capacities, original exceptions and data-only boundary-stop checks are required. Outer workflow continuation must be recovered from the same child result before independent preparation review. This orchestration detach does not reinstate the user pause.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
