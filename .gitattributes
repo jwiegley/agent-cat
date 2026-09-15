@@ -2,3 +2,5 @@
 test/fixtures/manager/v1/sse/*.sse -text whitespace=cr-at-eol,-blank-at-eof
 # Download digests cover exact bytes, including their final line ending.
 test/fixtures/manager/v1/valid/*.utf8 -text
+# Recovery patches are data and retain required unified-diff context spaces.
+doc/checkpoints/**/*.patch -text -whitespace
