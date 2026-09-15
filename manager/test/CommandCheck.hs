@@ -184,7 +184,7 @@ publicComposition work = do
   bracket (Public.installConfiguration configuration >>= right) Public.closeConfiguration $ \installed ->
     Public.withCoordinationStore installed $ \store -> do
       identity <- Public.storeIdentity store
-      check "installed public composition uses migrated store" (Public.storeSchemaVersion identity == 5)
+      check "installed public composition uses migrated store" (Public.storeSchemaVersion identity == 6)
 
 replayChecks :: FilePath -> IO ()
 replayChecks work = do
@@ -549,7 +549,7 @@ largestLegacyChecks work = do
   withInstalled path $ \installed -> withCoordinationStore installed $ \store -> do
     profile <- profileRevision installed
     proof <- authenticateCredential store bearerA >>= right
-    storeIdentity store >>= check "largest legacy row completes current migration" . ((== 5) . storeSchemaVersion)
+    storeIdentity store >>= check "largest legacy row completes current migration" . ((== 6) . storeSchemaVersion)
     largeRead <- try @StoreFailure (runRead store (query "SELECT body FROM commands WHERE id='legacy_largest'" [] >> pure ()))
     check "largest body cannot be copied through the one-MiB result budget" (case largeRead of Left StoreLimit -> True; _ -> False)
     replay <- submitCommand store proof req (edit profile (commandResource req) "never") >>= right

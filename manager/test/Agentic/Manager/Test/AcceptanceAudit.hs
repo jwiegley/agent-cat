@@ -3,11 +3,12 @@
 module Agentic.Manager.Test.AcceptanceAudit
   ( ReviewAudit, withReviewAudit, waitReviewed, releaseReviewed, afterCurrentReview,
     Audit, withAcceptanceAudit, withDeliveryAudit, waitAccepted, waitReturned, auditSummary,
-    afterFreshCommit, afterNativeReturn, recordReconciliation, recordDelivery ) where
+    afterFreshCommit, afterNativeReturn, recordReconciliation, recordDelivery,
+    atSqlStep, retainSqlInterrupt, rescueSql ) where
 
 import Control.Concurrent (ThreadId, myThreadId)
 import Control.Concurrent.MVar
-import Control.Exception (bracket)
+import Control.Exception (bracket, uninterruptibleMask_)
 import Control.Monad (unless, void)
 import Data.Dynamic (Dynamic, Typeable, toDyn, fromDynamic)
 import Data.IORef
@@ -104,7 +105,10 @@ withReviewAudit stage=bracket acquire release
       audit<-ReviewAudit stage <$> newIORef False <*> newEmptyMVar <*> newEmptyMVar
       modifyMVar_ currentReviewAudit $ \old->case old of Nothing->pure(Just audit);Just _->error "concurrent review audit"
       pure audit
-    release audit=releaseReviewed audit>>modifyMVar_ currentReviewAudit(const(pure Nothing))
+    release audit=do
+      releaseReviewed audit
+      modifyMVar_ currentReviewAudit(const(pure Nothing))
+      modifyMVar_ sqlInterrupt(const(pure Nothing))
 waitReviewed :: ReviewAudit -> IO ThreadId
 waitReviewed (ReviewAudit _ _ entered _)=timeout 5000000(takeMVar entered)>>=maybe(error "actual currentReview boundary was not reached")pure
 releaseReviewed :: ReviewAudit -> IO ()
@@ -118,3 +122,18 @@ afterCurrentReview stage=readMVar currentReviewAudit >>= mapM_ (\(ReviewAudit ex
       putMVar entered original
       completed<-timeout 5000000(takeMVar resume)
       unless(completed==Just())(error "currentReview rendezvous timed out"))
+
+-- Compiled audit only: hold the actual step across an inherited-mask cancellation.
+-- Retain the original connection's interrupt solely to join a failing red control.
+{-# NOINLINE sqlInterrupt #-}
+sqlInterrupt :: MVar (Maybe (IO ()))
+sqlInterrupt = unsafePerformIO (newMVar Nothing)
+retainSqlInterrupt :: IO () -> IO ()
+retainSqlInterrupt action = readMVar currentReviewAudit >>= mapM_ (\(ReviewAudit stage _ _ _) ->
+  if stage=="store-step" then modifyMVar_ sqlInterrupt (const (pure (Just action))) else pure ())
+rescueSql :: IO ()
+rescueSql = readMVar sqlInterrupt >>= maybe (error "missing original SQL interrupt") id
+atSqlStep :: IO a -> IO a
+atSqlStep action = readMVar currentReviewAudit >>= \active -> case active of
+  Just (ReviewAudit "store-step" _ _ _) -> uninterruptibleMask_ (afterCurrentReview "store-step" >> action)
+  _ -> action

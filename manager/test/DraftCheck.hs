@@ -628,7 +628,7 @@ declarationMigrationChecks work=do
     forM_ ordinary $ \(name,index)->insert name index(declaration name)
     insert "oversized_unknown" (20::Int) unknown
   bracket(installConfiguration config>>=right)closeConfiguration $ \installed->withCoordinationStore installed $ \store->do
-    storeIdentity store>>=check "large declaration migration completes without raising result limit" . ((==5).storeSchemaVersion)
+    storeIdentity store>>=check "large declaration migration completes without raising result limit" . ((==6).storeSchemaVersion)
     number store "SELECT count(*) FROM request_inputs WHERE literal_transport_bytes=6" >>=check "ordinary large declarations derive exact native lengths individually" . (==20)
     rowsEqual store "SELECT literal_bytes,literal_transport_bytes,literal_chunks,literal_digest FROM request_inputs WHERE name='oversized_unknown'"
       [[SQL.SQLInteger 5,SQL.SQLNull,SQL.SQLInteger 1,SQL.SQLBlob(convert(hash literal::Digest SHA256))]]>>=check "oversized unknown derivation stays explicit with complete literal integrity"

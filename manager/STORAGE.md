@@ -53,8 +53,8 @@ heap or temporary-disk quotas. The pinned Unix SQLite source specifies mode
 0600 for DELETEONCLOSE temporary files. That source evidence is not an exhaustive
 platform or forced-spill test.
 
-`PRAGMA user_version` holds internal schema version 5. Startup accepts versions
-zero through five, and rejects other versions before changing journaling or
+`PRAGMA user_version` holds internal schema version 6. Startup accepts versions
+zero through six, and rejects other versions before changing journaling or
 schema. Fresh initialization, command-ledger additions, and the explicit literal
 chunk/upload migration and admission additions execute DDL, metadata and version
 publication in one immediate transaction. Version-one DDL and the version-two
@@ -139,9 +139,10 @@ uncertain rollback poisons the connection, so it cannot return another success.
 The original asynchronous exception remains distinguishable from storage errors.
 Public diagnostics do not expose SQLite errors, SQL text, paths, or private data.
 
-Operations use the pinned public `SQL.interruptibly` facility and require the
-threaded RTS. Cancellation interrupts SQLite and joins its operation thread.
-Cleanup cannot abandon a connection that SQLite still uses. Final close is
+Operations require the threaded RTS. Cancellation repeatedly interrupts the
+original SQLite operation until its thread joins. A single interrupt can precede
+statement execution and have no effect. The interrupter also joins before rollback,
+connection reuse or close. Cleanup cannot abandon a connection that SQLite still uses. Final close is
 shielded against further asynchronous exceptions. Cooperative budgets do not
 promise an absolute OS IO deadline or a hard total SQLite heap bound. A stalled
 filesystem can extend joining and cleanup beyond the nominal budget.
@@ -231,3 +232,47 @@ association, current prepared phase and absence of known stop/failure alongside
 the scoped clock guard. Detected loss refuses before commit, without waiting for
 process/pipe cleanup inside SQL. A later process death is not retroactive revocation
 or a physical commit-time liveness guarantee.
+
+## Validated ingestion projections
+
+Version six makes ingestion rows immutable and retains the complete original-wire
+prefix. State binds each input to its trusted profile, root and native run, checks
+its original SHA256 and sequence, and uses the Runtime checkpoint append operation
+and its shared stepRunSnapshot fold. The run projection is a versioned manifest of
+that immutable sequence-zero prefix, with its boundary and shared snapshot digest.
+It is not an independently editable snapshot JSON object.
+
+Each appended envelope, manifest, decision observation, reference-only artifact and
+bounded invalidation set commits together. First committed Runtime evidence also
+advances a bound managed request from start-pending to associated, with its request
+revision, reservation revision and request invalidation in that transaction.
+Observer-only runs have no request transition. Original approval facts remain
+immutable. Matching original-byte duplicates change
+nothing. Conflicting duplicates, gaps, wrong associations and invalid terminal
+histories refuse without replacing the valid prefix. Output tails, authored traces,
+bills and attribution remain those of Runtime. Referenced content is not verified
+content, and a decision observation is not a control effect or answer reservation.
+
+Restoration captures a fixed prefix boundary in one bounded read, then reads each
+immutable original record in at most three 512KiB slices and restores through Runtime.
+The shared decoder bounds the payload to 1MiB, excluding its final LF. Evidence
+retains and hashes the complete original record, including that LF. Unframed
+Runtime differential fixtures remain supported without normalizing other whitespace.
+The resulting digest and boundary must match. Both the canonical Runtime checkpoint
+and original-wire evidence have a 64MiB bound per run. Store statement, input, row,
+result and time limits remain unchanged. Exceeding a bound refuses without truncating
+the prefix. The initial implementation replays the full prefix per append and has
+quadratic total replay cost. No mutable projection cache can acknowledge an input
+that failed to commit. A later cache must preserve this reconciliation boundary.
+
+Admission loans the original AcceptedStart association and Worker queue head to
+State. Physical cleanup need not wait for the database, and buffered evidence remains
+readable after cleanup through that original opaque object. Callback failures retain
+the head, including the commit-before-return window that becomes a matching duplicate
+on retry. Association can commit while original cleanup publication remains pending.
+Original finalization recognizes only the exact post-start association revision as
+a successor to its retained revision fence, with unchanged reservation, generation,
+command and cleanup-kind checks. Pre-start stale guards remain unchanged.
+Storage failures propagate explicitly, with no automatic retry, subscriber
+consumption or invented Runtime success. Later owners supply supervision policy,
+control endpoints, artifact verification, retention and restart orchestration.

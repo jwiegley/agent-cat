@@ -59,6 +59,18 @@ try:
     evidence.with_suffix(".prepared").write_text("native prepared relayed")
 
     def relay():
+        if mode in {"frame-max", "frame-overflow"}:
+            frame = child.stdout.readline(1048578)
+            assert frame.endswith(b"\n"), "original Runtime record"
+            payload = frame[:-1]
+            original = json.loads(payload)
+            limit = 1048576 + (mode == "frame-overflow")
+            assert len(payload) <= limit
+            frame = payload + b" " * (limit - len(payload)) + b"\n"
+            assert json.loads(frame) == original, "framing preserves original Envelope"
+            evidence.with_suffix(".wire").write_bytes(frame)
+            sys.stdout.buffer.write(frame)
+            sys.stdout.buffer.flush()
         while data := child.stdout.read(32768):
             os.write(1, data)
 

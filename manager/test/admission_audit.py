@@ -17,7 +17,7 @@ import tempfile
 
 source = Path(sys.argv[1]).resolve()
 mode = sys.argv[2]
-if mode not in {"interruption", "ticket-mutant", "retry-mutant", "deadline-mutant", "watchdog-mutant", "policy-mutant", "package-boundary", "termination-mutant", "approval-interruption", "approval-live-mutant", "approval-review-gap", "approval-publication-mutant", "approval-catalogue-mutant", "approval-reservation-mutant", "approval-quoted-mutant", "approval-supervision-mutant", "approval-live-target-mutant", "approval-delimiter-mutant"}:
+if mode not in {"interruption", "ticket-mutant", "retry-mutant", "deadline-mutant", "watchdog-mutant", "policy-mutant", "package-boundary", "termination-mutant", "approval-interruption", "approval-live-mutant", "approval-review-gap", "approval-publication-mutant", "approval-catalogue-mutant", "approval-reservation-mutant", "approval-quoted-mutant", "approval-supervision-mutant", "approval-live-target-mutant", "approval-delimiter-mutant", "ingestion-retained-mutant", "ingestion-duplicate-mutant", "store-cancel-gap", "store-cancel-mutant", "store-expiry-mutant", "ingestion-race", "ingestion-race-mutant", "ingestion-cleanup-mutant", "ingestion-observer-mutant"}:
     raise SystemExit("unknown audit mode")
 work = Path(tempfile.mkdtemp(prefix=f"audit-{mode}.", dir=os.environ["CABAL_BUILDDIR"]))
 copy = work / "agentic-0.1.0.0"
@@ -108,7 +108,7 @@ def replace(path, old, new):
                     "diff": "".join(difflib.unified_diff(before.splitlines(True), after.splitlines(True), fromfile=path, tofile=path))})
 
 commands = "manager/src/Agentic/Manager/Commands.hs"
-if mode in {"interruption", "ticket-mutant", "approval-interruption", "approval-review-gap", "approval-publication-mutant", "approval-catalogue-mutant"}:
+if mode in {"interruption", "ticket-mutant", "approval-interruption", "approval-review-gap", "approval-publication-mutant", "approval-catalogue-mutant", "store-cancel-gap", "store-cancel-mutant", "store-expiry-mutant", "ingestion-race", "ingestion-race-mutant"}:
     helper = copy / "manager/src/Agentic/Manager/Test/AcceptanceAudit.hs"
     helper.parent.mkdir(parents=True, exist_ok=True)
     helper.write_bytes((source / "manager/test/Agentic/Manager/Test/AcceptanceAudit.hs").read_bytes())
@@ -173,6 +173,53 @@ elif mode == "approval-live-mutant":
     replace("manager/src/Agentic/Manager/Store.hs", "  mapM_ checkPreparedCommit prepared", "  mapM_ (\\guard -> void(try @StoreFailure(checkPreparedCommit guard))) prepared")
     target, arguments = "manager-approval-check", ["worker-loss"]
     marker = "FAIL detected original worker loss rejects final acceptance"
+elif mode in {"ingestion-race", "ingestion-race-mutant"}:
+    path = "manager/src/Agentic/Manager/State.hs"
+    replace(path,"import Agentic.Manager.Store\n","import Agentic.Manager.Store\nimport qualified Agentic.Manager.Test.AcceptanceAudit as Audit\n")
+    replace(path,"\n  empty <- valid (captureSnapshotCheckpoint (associationNative association) [])\n",'\n  Audit.afterCurrentReview "state-prefix"\n  empty <- valid (captureSnapshotCheckpoint (associationNative association) [])\n')
+    replace(path,"      runTransaction store $ do\n",'      Audit.afterCurrentReview "state-publication"\n      runTransaction store $ do\n')
+    if mode == "ingestion-race-mutant":
+        replace(path,"        unless (actual == expected) (refuseTransaction StoreBusy)","        void (pure (actual == expected))")
+    target, arguments = "manager-approval-check", ["ingestion-race"]
+    marker = "FAIL stale concurrent publication returns explicit StoreBusy"
+elif mode == "ingestion-cleanup-mutant":
+    replace("manager/src/Agentic/Manager/Admission.hs","(actual==revision || associated)","(actual==revision && not associated)")
+    target, arguments = "manager-approval-check", ["ingestion-cleanup"]
+    marker = "manager-approval-check: StateConflict"
+elif mode == "ingestion-observer-mutant":
+    path = "cli/test/ManagerApprovalProbe.hs"
+    text = (copy/path).read_text()
+    start = text.index("processObservation observe =")
+    end = text.index("\nobserveProcess ::",start)
+    replace(path,text[start:end],'processObservation observe = do\n  (code,output,_) <- observe\n  pure (if code==ExitFailure 1 then Nothing else Just output)\n')
+    target, arguments = "manager-approval-check", ["ingestion-observer"]
+    marker = "FAIL observer rejects diagnostic exit-one rather than claiming absence"
+elif mode in {"store-cancel-gap", "store-cancel-mutant", "store-expiry-mutant"}:
+    path = "manager/src/Agentic/Manager/Store.hs"
+    replace(path, "import Agentic.Manager.Configuration\n", "import qualified Agentic.Manager.Test.AcceptanceAudit as Audit\nimport Agentic.Manager.Configuration\n")
+    replace(path, "    collectRows budget statement\n", '    if "1000000000000" `T.isInfixOf` sql then Audit.atSqlStep (collectRows budget statement) else collectRows budget statement\n')
+    if mode in {"store-cancel-mutant", "store-expiry-mutant"}:
+        text = (copy / path).read_text()
+        start = text.index("bounded db micros action =")
+        end = text.index("\nstorageErrors ::",start)
+        replace(path,text[start:end],"bounded db micros action = do\n  Audit.retainSqlInterrupt (SQL.interrupt db)\n  result <- timeout micros (SQL.interruptibly db action)\n  maybe (throwIO StoreDeadline) pure result\n")
+        replace(path,"import Control.Concurrent (threadDelay)\nimport Control.Concurrent.Async (race, withAsync, asyncWithUnmask, cancel, wait)","import Control.Concurrent.Async (race)")
+        replace(path,", onException)",")")
+        replace(path,", forever)",")")
+    else:
+        replace(path,"bounded db micros action = mask $ \\restore ->\n  withAsync", "bounded db micros action = mask $ \\restore -> do\n  Audit.retainSqlInterrupt (SQL.interrupt db)\n  withAsync")
+    if mode == "store-expiry-mutant":
+        replace("cli/test/ManagerApprovalProbe.hs", '[False,True] $ \\expiry ->', '[True,False] $ \\expiry ->')
+    target, arguments = "manager-approval-check", ["store-cancel-gap"]
+    marker = "FAIL missed SQL interrupt joins original action"
+elif mode == "ingestion-retained-mutant":
+    replace("manager/src/Agentic/Manager/Worker.hs", "        (Just <$> peekTBQueue (eventQueue worker)) `orElse` do", "        closed <- readTVar (released worker)\n        when closed (throwSTM WorkerClosed)\n        (Just <$> peekTBQueue (eventQueue worker)) `orElse` do")
+    target, arguments = "manager-approval-check", ["ingestion-native"]
+    marker = "manager-approval-check: WorkerClosed"
+elif mode == "ingestion-duplicate-mutant":
+    replace("manager/src/Agentic/Manager/State.hs", "      pure False\n    Nothing -> do", "      runTransaction store (pure (False,[Invalidation \"run.changed\" (runURI association <> \"/snapshot\") \"duplicate\"]))\n    Nothing -> do")
+    target, arguments = "manager-approval-check", ["ingestion-native"]
+    marker = "FAIL commit-return duplicate window creates no invalidation"
 elif mode == "retry-mutant":
     replace("manager/src/Agentic/Manager/Admission.hs", "  completed <- atomically(tryReadTMVar(entryResult entry))\n  unless (isJust completed) (throwIO StateConflict)\n", "")
     target, arguments = "manager-admission-check", ["active-retry"]
@@ -208,7 +255,7 @@ environment = dict(os.environ, CABAL_BUILDDIR=str(work / "build"))
 environment.pop("GHCRTS", None)
 results = []
 
-def run(command, log, timeout=300):
+def run(command, log, timeout=1200):
     with (work / log).open("w") as output:
         result = subprocess.run(command, cwd=copy, env=environment, stdout=output, stderr=subprocess.STDOUT, timeout=timeout)
     results.append({"command": command, "log": log, "returncode": result.returncode})
@@ -232,13 +279,17 @@ for capabilities in ["N1", "N8"]:
         command.append(str(fixture))
     if mode not in {"deadline-mutant", "policy-mutant"}:
         command.append(native)
-    if mode in {"approval-live-mutant", "approval-live-target-mutant"}:
+    if mode in {"approval-live-mutant", "approval-live-target-mutant", "ingestion-race", "ingestion-race-mutant"}:
         command.extend([str(copy), shutil.which("python3")])
     command.extend(["+RTS", "-" + capabilities, "-RTS"])
     code = run(command, capabilities + ".log", timeout=120)
     output = (work / (capabilities + ".log")).read_text()
-    if mode in {"interruption", "approval-interruption", "approval-review-gap"}:
+    if mode in {"interruption", "approval-interruption", "approval-review-gap", "store-cancel-gap", "ingestion-race"}:
         success = "PASS original cleanup effect commits with release" if mode == "interruption" else "PASS interrupted original start retains one native start and immutable receipt"
+        if mode == "store-cancel-gap":
+            success = "PASS rollback restores autocommit for subsequent real commit"
+        if mode == "ingestion-race":
+            success = "PASS competing publication preserves advanced boundary and exact earlier evidence"
         if mode == "approval-review-gap":
             success = "PASS catalogue change cannot retroactively reinterpret accepted consent"
         if code or success not in output:

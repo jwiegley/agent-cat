@@ -6,7 +6,7 @@ module Main (main) where
 import qualified "agentic" Agentic.Manager as Public
 import Agentic.Manager.Configuration
 import Agentic.Manager.Profile (Diagnostic)
-import Agentic.Manager.Schema (schemaStatements, commandMigration, draftMigration)
+import Agentic.Manager.Schema (schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration)
 import Agentic.Manager.Store
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (AsyncCancelled (..), async, cancel, poll, waitCatch, withAsync)
@@ -56,6 +56,7 @@ main = do
       databaseChecks work
       migrationChecks work
       admissionMigrationChecks work
+      ingestionMigrationChecks work
       conditionalTransactionChecks work
       putStrLn "PASS manager coordination storage"
     _ -> error "usage: manager-store-check PRIVATE_DIRECTORY"
@@ -263,7 +264,7 @@ databaseChecks work = do
     second <- storeIdentity store
     check "reopen preserves durable identities separately from live generation"
       (storeAuthorityEpoch first == storeAuthorityEpoch second && storeStreamId first == storeStreamId second
-       && storeProcessGeneration first /= storeProcessGeneration second && storeSchemaVersion second == 5)
+       && storeProcessGeneration first /= storeProcessGeneration second && storeSchemaVersion second == 6)
     rowsEqual store "SELECT sequence,retained_floor,revision FROM service_metadata"
       [[SQL.SQLText "4", SQL.SQLText "0", SQL.SQLText "service_1"]] >>= check "stream sequence and resource revisions survive reopen"
   -- Real SQLite trigger failure occurs after resource update and sequence allocation.
@@ -287,7 +288,7 @@ relationalRows = do
   execute "INSERT INTO reservation_resources VALUES ('operator','workspace_1','reservation_1')" []
   execute "INSERT INTO preparations VALUES ('preparation_1','revision_1','request_1','revision_1','profile_revision_1','reservation_1','generation_1','worker_1','root_1','native_1','2030-01-01','digest_1',X'7b7d',X'7b7d','live',NULL)" []
   execute "INSERT INTO runs (id,revision,control_revision,request_id,preparation_id,profile_id,root_identity,native_run_id,supervision,result_state) VALUES ('run_1','revision_1','control_1','request_1','preparation_1','profile_1','root_1','native_1','owned','absent')" []
-  execute "INSERT INTO ingestions VALUES ('run_1','18446744073709551615','digest_1',X'7b7d')" []
+  execute "INSERT INTO ingestions VALUES ('run_1','18446744073709551615',?,X'7b7d')" [SQL.SQLText (T.pack (show (hash ("{}"::BS.ByteString)::Digest SHA256)))]
   execute "INSERT INTO decisions (id,revision,run_id,occurrence_id,generation,observed_sequence,kind,state) VALUES ('decision_1','revision_1','run_1','0','decision_generation_1','2','question','pending')" []
   execute "INSERT INTO artifacts VALUES ('artifact_1','revision_1','run_1',X'02',X'03','referenced',NULL)" []
   execute "INSERT INTO commands (id,revision,profile_id,operation,client_id,authority_epoch,method,resource_uri,idempotency_key,body,media_type,receipt,retired,run_id,accepted_at,state) VALUES ('command_1','revision_1','profile_1','export','client_1','authority_1','POST','/v1/runs/run_1/exports','authority_1.nonce_1',X'7b7d','application/json',X'7b7d',0,'run_1','2030-01-01','accepted')" []
@@ -462,7 +463,7 @@ migrationChecks work = do
     count store "clients" >>= check "stream exhaustion rolls back resource change" . (== 0)
     rowsEqual store "SELECT sequence FROM service_metadata" [[SQL.SQLText "18446744073709551615"]] >>=
       check "complete UInt64 stream range survives reopen"
-  bracket (rawOpen root) SQL.close $ \db -> SQL.exec db "PRAGMA user_version=6"
+  bracket (rawOpen root) SQL.close $ \db -> SQL.exec db "PRAGMA user_version=7"
   before <- BS.readFile (root </> "coordination.sqlite3")
   withInstalled path $ \installed -> expect "newer schema refused" StoreVersion $
     withCoordinationStore installed (const (pure ()))
@@ -514,8 +515,28 @@ admissionMigrationChecks work = do
     rawRows database "SELECT sentinel FROM admission_observations" >>=check "failed version-four migration preserves pre-existing conflict" . (==[[SQL.SQLText "preserved"]])
     SQL.exec database "DROP TABLE admission_observations"
   withInstalled path $ \installed -> withCoordinationStore installed $ \owner -> do
-    storeIdentity owner >>=check "version-four migration completes transactionally" . ((==5).storeSchemaVersion)
+    storeIdentity owner >>=check "version-four migration completes transactionally" . ((==6).storeSchemaVersion)
     rowsEqual owner "SELECT last_ordinal FROM admission_queue_clock" [[SQL.SQLText "18446744073709551614"]] >>=check "migration preserves unsigned queue history beyond signed SQLite integers"
     rowsEqual owner "SELECT kind,resource_key,reservation_id FROM reservation_resources" [[SQL.SQLText "operator",SQL.SQLText "unclassified",SQL.SQLText "reservation_old"]] >>=check "legacy operator string remains outside internal unclassified domain"
     rowsEqual owner "SELECT input_revision,queue_generation,queue_origin_revision,enqueue_command FROM requests" [[SQL.SQLNull,SQL.SQLNull,SQL.SQLNull,SQL.SQLNull]] >>=check "migration mints no input-selection or enqueue authority"
     rowsEqual owner "SELECT slot,process_generation,state FROM reservations" [[SQL.SQLInteger 7,SQL.SQLText "generation_old",SQL.SQLText "held"]] >>=check "migration preserves old held slot without adopting its worker"
+
+ingestionMigrationChecks :: FilePath -> IO ()
+ingestionMigrationChecks work = do
+  (path,root) <- fixture work "ingestion-migration"
+  withInstalled path (const (pure ()))
+  bracket (rawOpen root) SQL.close $ \db -> do
+    mapM_ (SQL.exec db) (schemaStatements<>commandMigration<>draftMigration<>admissionMigration<>approvalMigration)
+    SQL.exec db "INSERT INTO service_metadata VALUES (1,'old_epoch','old_stream','0','0','old_revision'); INSERT INTO clients VALUES ('old_client','old_revision','old_auth',0); INSERT INTO runs(id,revision,control_revision,profile_id,root_identity,native_run_id,supervision,result_state) VALUES ('old_run','old_revision','old_control','old_profile','old_root','old_native','observer','absent'); PRAGMA user_version=5"
+    SQL.exec db "CREATE INDEX ingestion_order ON clients(id)"
+  setFileMode (root </> "coordination.sqlite3") 0o600
+  withInstalled path $ \installed -> expect "partial version-six migration refuses" StoreUnavailable (withCoordinationStore installed (const (pure ())))
+  bracket (rawOpen root) SQL.close $ \db -> do
+    rawRows db "PRAGMA user_version" >>= check "failed ingestion migration leaves schema five" . (==[[SQL.SQLInteger 5]])
+    rawRows db "SELECT count(*) FROM sqlite_master WHERE name='ingestion_immutable'" >>= check "failed ingestion migration rolls back prefix triggers" . (==[[SQL.SQLInteger 0]])
+    SQL.exec db "DROP INDEX ingestion_order"
+  withInstalled path $ \installed -> withCoordinationStore installed $ \store -> do
+    storeIdentity store >>= check "schema five migrates to six" . ((==6) . storeSchemaVersion)
+    rowsEqual store "SELECT id,revision,profile_id,root_identity,native_run_id,runtime_snapshot FROM runs" [[SQL.SQLText "old_run",SQL.SQLText "old_revision",SQL.SQLText "old_profile",SQL.SQLText "old_root",SQL.SQLText "old_native",SQL.SQLNull]] >>= check "ingestion migration preserves old associations without inventing evidence"
+    rowsEqual store "SELECT authority_epoch,stream_id FROM service_metadata" [[SQL.SQLText "old_epoch",SQL.SQLText "old_stream"]] >>= check "ingestion migration preserves durable authority and stream"
+    count store "start_intents" >>= check "ingestion migration reconstructs no accepted start" . (==0)

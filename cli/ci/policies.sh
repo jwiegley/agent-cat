@@ -124,6 +124,7 @@ bash manager/ci/drafts.sh
 bash manager/ci/workers.sh
 bash manager/ci/admission.sh
 bash manager/ci/approval.sh
+bash manager/ci/ingestion.sh
 test/cabal.sh run -v0 policy-probe -- +RTS -N8 -RTS
 test/cabal.sh build agentic-run routing-fixed-point-probe runtime-contract-test schema-probe >/dev/null
 agentic_run=$(test/cabal.sh list-bin agentic-run)

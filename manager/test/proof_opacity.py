@@ -26,7 +26,7 @@ cases = [
     ("generic", "import Agentic.Manager.Authorization (CredentialProof)\nimport GHC.Generics (from)\ninspect :: CredentialProof -> ()\ninspect proof = from proof `seq` ()\n", "Generic CredentialProof"),
 ]
 for module, token in [("Store", "CommitDeadline"), ("Admission", "Admission"), ("Admission", "LivePreparation"),
-                      ("Commands", "AcceptedEnqueue"), ("Commands", "CommandAttempt"), ("Approval", "ReviewedPreparation"), ("Admission", "AcceptedStart"), ("Worker.State", "WorkerLifecycle")]:
+                      ("Commands", "AcceptedEnqueue"), ("Commands", "CommandAttempt"), ("Approval", "ReviewedPreparation"), ("Admission", "AcceptedStart"), ("Worker", "WorkerEvent"), ("Worker.State", "WorkerLifecycle")]:
     imported = f"import Agentic.Manager.{module} ({token})\n"
     cases.extend([
         (token + "-positive", imported + f"keep :: {token} -> {token}\nkeep = id\n", None),

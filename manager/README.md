@@ -144,8 +144,8 @@ frozen validator. Worker ownership, approval and later retention remain separate
 The [worker contract](WORKERS.md) provides scoped native frontend ownership,
 serialized private controls and bounded lossless ingestion. It reuses the actual
 CLI proxy/pre-RTS bootstrap and Runtime ProcessGroup completion. Observers neither
-consume the manager ingestion queue nor own its pipes. Exact approval, durable
-ingestion and broader containment remain with their later owners.
+consume the manager ingestion queue nor own its pipes. Approval and durable
+ingestion have separate owners, while broader containment remains independent.
 
 `manager/ci/workers.sh` runs actual native N1/N8 workers, controlled phase failures,
 queue/observer/write regressions and original-token cleanup retention checks.
@@ -305,4 +305,23 @@ binding and a stable nonce-bound digest. Admission retains the original worker a
 one-shot start ticket through committed intent, delayed delivery, actual running
 and confirmed cleanup. `manager/ci/approval.sh` runs real N1/N8 native cases, frozen
 public-schema validation, opacity and test-only interrupted-delivery controls.
-Public Runtime projection, ingestion and full control intents remain later owners.
+Public Runtime projection and full control intents remain with their later owners.
+
+## Durable Runtime ingestion
+
+The internal State owner persists original validated Worker envelopes and restores
+their immutable sequence-zero prefix through Runtime's shared checkpoint fold.
+First committed evidence associates a bound managed request, with matching request
+and reservation revisions in the same transaction as its projection and observations.
+Exact duplicates do not publish another invalidation or repair unrelated state.
+
+Physical cleanup does not depend on database availability. The original opaque
+Worker retains validated queued evidence for later ingestion, while starts and
+controls remain fenced. Failed callbacks retain the queue head for explicit retry.
+
+The [storage contract](STORAGE.md#validated-ingestion-projections) states the
+separate original-wire and canonical checkpoint bounds, fixed-prefix restoration,
+concurrent publication checks and quadratic replay cost. `manager/ci/ingestion.sh`
+runs the differential, genuine native, concurrency and negative-control checks at
+N1 and N8. These checks do not establish a deployed manager service, public control
+endpoints or verified artifact content.

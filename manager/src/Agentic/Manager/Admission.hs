@@ -9,7 +9,7 @@ module Agentic.Manager.Admission
     withAdmission, withAdmissionClock, enqueueRequest, admitOldest,
     editRequestInput, withdrawRequest, awaitReview, withReviewAcceptance,
     retryAdmissionCleanup, awaitAdmissionCleanup, closeAdmission, reservationIdentity, observeLivePreparation,
-    AcceptedStart, acceptStartCommand, deliverAcceptedStart, stopAcceptedStart, observeAcceptedStart, acceptedStartRun, acceptedTimerRetired, invalidateLivePreparation
+    AcceptedStart, acceptStartCommand, deliverAcceptedStart, stopAcceptedStart, observeAcceptedStart, acceptedStartRun, acceptedTimerRetired, invalidateLivePreparation, consumeAcceptedStart
   ) where
 
 import Agentic.Manager.Admission.Policy
@@ -484,11 +484,18 @@ finalizeKnown controller entry = locked controller $ do
           [text(entryRequest entry),text(entryReservation entry)]
         let command=maybe SQL.SQLNull (text.dispatchCommandId) ticket
         case rows of
-          [[SQL.SQLText actual,SQL.SQLText phaseName,SQL.SQLText bound,SQL.SQLText generation,storedCommand,SQL.SQLText storedKind]] ->
-            unless(actual==revision && bound==revision && generation==entryGeneration entry && storedCommand==command && storedKind==kind && phaseName `elem` (if kind=="closed" then ["preparing","review","start-pending","associated"] else ["preparing","review"]))(refuseTransaction StateConflict)
+          [[SQL.SQLText actual,SQL.SQLText phaseName,SQL.SQLText bound,SQL.SQLText generation,storedCommand,SQL.SQLText storedKind]] -> do
+            -- First Runtime evidence may associate after cleanup-pending committed.
+            -- Only that exact post-start revision may supersede the retained fence.
+            associated <- if kind=="closed" && phaseName=="associated" && command==SQL.SQLNull then do
+              intents <- query "SELECT run_id FROM start_intents WHERE request_id=? AND reservation_id=? AND process_generation=?"
+                [text(entryRequest entry),text(entryReservation entry),text(entryGeneration entry)]
+              pure (case intents of [[SQL.SQLText run]] -> actual=="associated_"<>run; _ -> False)
+              else pure False
+            unless((actual==revision || associated) && bound==actual && generation==entryGeneration entry && storedCommand==command && storedKind==kind && phaseName `elem` (if kind=="closed" then ["preparing","review","start-pending","associated"] else ["preparing","review"]))(refuseTransaction StateConflict)
           _->refuseTransaction StateConflict
         execute "DELETE FROM reservation_resources WHERE reservation_id=?" [text(entryReservation entry)]
-        execute "UPDATE reservations SET state='released',slot=NULL WHERE id=?" [text(entryReservation entry)]
+        execute "UPDATE reservations SET state='released',slot=NULL,request_revision=? WHERE id=?" [text next,text(entryReservation entry)]
         execute "UPDATE requests SET phase=CASE WHEN phase IN ('start-pending','associated') THEN phase ELSE ? END,admission='released',revision=?,queue_ordinal=NULL,queue_origin_revision=NULL,queue_generation=NULL,blocking_reasons=? WHERE id=?"
           [text finalPhase,text next,SQL.SQLBlob(encoded([]::[Text])),text(entryRequest entry)]
         runChanges <- changeRunSupervision entry "cleanup-pending" "lost" runRevision
@@ -709,6 +716,14 @@ stopAcceptedStart (AcceptedStart controller entry _ _) = operation controller $ 
 -- | A non-authoritative observation that the original timer checked committed intent.
 acceptedTimerRetired :: AcceptedStart -> IO Bool
 acceptedTimerRetired (AcceptedStart _ entry _ _) = readTVarIO(entryRetiredTimer entry)
+
+-- | Loan only the original accepted association and its retained ingestion head.
+-- This grants no new start/control ticket, including during uncertain delivery.
+consumeAcceptedStart :: AcceptedStart -> (CoordinationStore -> Text -> FrontendPrepared -> WorkerEvent -> IO ()) -> IO Bool
+consumeAcceptedStart (AcceptedStart controller entry _ _) action = do
+  context <- atomically (readTMVar (entryReview entry)) >>= need
+  worker <- atomically (readTMVar (entryWorker entry))
+  consumeWorkerEvent worker (action (store controller) (entryProfile entry) (reviewNative context))
 
 observeAcceptedStart :: AcceptedStart -> IO WorkerObservation
 observeAcceptedStart (AcceptedStart _ entry _ _) = atomically(readTMVar(entryWorker entry)) >>= observeWorker

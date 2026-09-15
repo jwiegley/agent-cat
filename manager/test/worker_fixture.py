@@ -115,6 +115,11 @@ def input_reader():
 threading.Thread(target=input_reader, daemon=True).start()
 first = True
 for frame in iter(child.stdout.readline, b''):
+    if first and mode == "prefix-malformed":
+        first = False
+        sys.stdout.buffer.write(frame)
+        sys.stdout.buffer.flush()
+        frame = b'not-json\n'
     if first and mode.startswith("runtime-"):
         first = False
         if mode == "runtime-malformed":
