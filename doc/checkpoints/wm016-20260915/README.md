@@ -11,6 +11,7 @@ active source or certify its cleanup behavior. See
 | `recovery.tar.gz` | Content-addressed recovery data, including exact source versions and retained failure/diagnostic evidence. |
 | `checkpoint.json` | SHA256 identities, byte counts, scope, and omissions. |
 | `recover.py` | Verify all content or restore into a new directory without executing captured work. |
+| `test_recovery.py` | Data-only byte/mode, collision, traversal, digest, and no-overwrite regression. |
 
 The archive SHA256 is
 `6689e10cbbb6e8599b71bfad227b53aac5a4ed1fcc261d0404ab4788692949c4`.
@@ -18,7 +19,8 @@ It contains 82,790 file records backed by 1,495 unique blobs. The compressed
 archive is 11,264,092 bytes. Restoring all paths uses about 623 MB before
 filesystem overhead.
 
-Run verification from the repository root:
+Use Python 3.11 or newer from the supported Nix environment. Run verification
+from the repository root:
 
 ```bash
 python3 doc/checkpoints/wm016-20260915/recover.py \
@@ -26,9 +28,17 @@ python3 doc/checkpoints/wm016-20260915/recover.py \
 ```
 
 Add `--destination` with a new, nonexistent private Products directory to restore
-files and modes. The archive is data. Recorded commands, executable paths,
+files and modes. `recovery-manifest.json` is reserved for generated metadata and
+is created exclusively. The archive is data. Recorded commands, executable paths,
 process IDs, and database rows are never authority to launch, signal, adopt,
 replay, or release work.
+
+Run the data-only regression with an existing private Products directory:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 doc/checkpoints/wm016-20260915/test_recovery.py \
+  "$HOME/Products/agent-cat-resume"
+```
 
 Useful restored paths include:
 
