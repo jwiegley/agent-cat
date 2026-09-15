@@ -1,0 +1,76 @@
+--- sealed/cli/test/ManagerApprovalProbe.hs
++++ correction/cli/test/ManagerApprovalProbe.hs
+@@ -26,7 +26,7 @@
+ import Control.Concurrent.STM hiding (check)
+ import qualified Control.Concurrent.STM as STM
+ import Control.DeepSeq (NFData)
+-import Control.Exception (mask_,bracket,try,fromException,throwIO,finally,AsyncException (UserInterrupt))
++import Control.Exception (IOException,mask_,bracket,try,fromException,throwIO,finally,AsyncException (UserInterrupt))
+ import Control.Monad (unless,forM_,forM,void,when,foldM)
+ import Crypto.Hash (Digest,SHA256,hash)
+ import Data.Aeson (Value (..),toJSON,object,(.=),eitherDecodeStrict')
+@@ -46,7 +46,7 @@
+ import System.Info (os)
+ import System.Environment (getArgs)
+ import System.FilePath ((</>),takeExtension,dropExtension)
+-import System.IO (BufferMode (LineBuffering),hSetBuffering,stdout)
++import System.IO (BufferMode (LineBuffering),hSetBuffering,stdout,hPutStrLn,stderr)
+ import System.Posix.Files (setFileMode)
+ import System.Timeout (timeout)
+ import GHC.Conc (threadStatus, ThreadStatus (ThreadBlocked), BlockReason (BlockedOnException, BlockedOnMVar))
+@@ -1088,16 +1088,31 @@
+ 
+ -- Explicit observation retry retains the same original head. It never resends a control.
+ observeControl :: IO a -> IO a
+-observeControl action = await loop
++observeControl action = await (loop True)
+   where
+-    loop = do
++    loop first = do
+       result <- try @StoreFailure action
+-      case result of Left StoreBusy->threadDelay 1000>>loop;Left failure->throwIO failure;Right value->pure value
++      case result of
++        Left failure -> do
++          when (first || failure/=StoreBusy) (noteControlFailure ("control observation: "<>show failure))
++          case failure of
++            StoreBusy -> threadDelay 1000 >> loop False
++            _ -> throwIO failure
++        Right value -> pure value
++
++noteControlFailure :: String -> IO ()
++noteControlFailure message = void (try @IOException (hPutStrLn stderr message))
+ 
+ readControlReceipt :: CoordinationStore -> CredentialProof -> Text -> IO (Either CommandFailure CommandReceipt)
+-readControlReceipt store proof ident = observeControl $ do
+-  result <- readCommand store proof ident
+-  case result of Left StorageUnavailable->throwIO StoreBusy;_->pure result
++readControlReceipt store proof ident = observeControl $
++  readCommand store proof ident >>= noteControlResult "control receipt"
++
++noteControlResult :: String -> Either CommandFailure a -> IO (Either CommandFailure a)
++noteControlResult source result = do
++  case result of
++    Left failure -> noteControlFailure (source<>" public refusal (cause opaque): "<>show failure)
++    Right _ -> pure ()
++  pure result
+ 
+ controlNumber :: CoordinationStore -> Text -> IO Int64
+ controlNumber store = observeControl . number store
+@@ -1438,15 +1453,8 @@
+ 
+ joinControlCleanup :: LivePreparation -> AcceptedStart -> IO ()
+ joinControlCleanup live owned = do
+-  stopped <- stopAcceptedStart owned
+-  case stopped of
+-    Left StorageUnavailable -> do
+-      putStrLn "OBSERVED cleanup publication contention; retrying original joined owner"
+-      let retryOriginal = do
+-            result <- retryAdmissionCleanup live
+-            case result of Left StorageUnavailable -> threadDelay 1000 >> retryOriginal; _ -> right result
+-      await retryOriginal
+-    _ -> right stopped
++  stopped <- stopAcceptedStart owned >>= noteControlResult "control cleanup (no retry)"
++  right stopped
+   await(awaitAdmissionCleanup live) >>=right
+ 
+ nativeMixedControlChecks :: FilePath -> FilePath -> FilePath -> FilePath -> IO ()

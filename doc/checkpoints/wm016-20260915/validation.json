@@ -1,0 +1,16 @@
+{
+  "restoreFilesModeSizeVerified": 82790,
+  "patchReplayFilesBytesModesVerified": 588,
+  "unsafePathsRejected": 7,
+  "runtimeOrNativeTestsRun": false,
+  "priorRecoveryAttempt": "timed out due repeated compressed seeks, helper corrected; failed output retained",
+  "restoredFileHashesVerified": 82790,
+  "maliciousArchiveRejected": true,
+  "existingDestinationRejected": true,
+  "remainingPackagesCovered": 29,
+  "trackerRecordsCompared": 224,
+  "documentationGate": "make -C doc check passed in the Nix shell",
+  "checkHaskellNotRun": "No API/source change; native execution remains stopped",
+  "credentialPatternScan": "No high-signal private-key/provider-token pattern in checkpoint blobs",
+  "reportSha256": "b4d96c9bde5b4323451e2cd5efe38675cbbdf5a7c13ccecab1704e1ac43d9fd1"
+}

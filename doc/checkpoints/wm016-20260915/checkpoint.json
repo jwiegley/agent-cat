@@ -1,0 +1,34 @@
+{
+  "files": {
+    "recovery.tar.gz": {
+      "sha256": "6689e10cbbb6e8599b71bfad227b53aac5a4ed1fcc261d0404ab4788692949c4",
+      "bytes": 11264092
+    },
+    "candidate.patch": {
+      "sha256": "56455cd0ec54448b28fc3b9d3c61d23f27be6f3c2888eff4b9099e74759f5f0b",
+      "bytes": 267312
+    },
+    "failure-correction.patch": {
+      "sha256": "5b301f4f80ede485ce9454e3cefecaa7a4637068a53b8948b77012767645afa5",
+      "bytes": 3576
+    }
+  },
+  "uniqueBlobs": 1495,
+  "uniqueBytes": 31628024,
+  "archiveBytes": 11264092,
+  "archiveSha256": "6689e10cbbb6e8599b71bfad227b53aac5a4ed1fcc261d0404ab4788692949c4",
+  "manifestSha256": "744a34df3ff4b2288f2a1fe2926a1b5c354ed9568abf59a0c75e20a369d79685",
+  "omittedEntries": 6,
+  "excluded": [
+    "compiler outputs and build/package caches",
+    "agent transcripts/session files",
+    "private homes and environment credentials",
+    "unrelated repositories/worktrees",
+    "older accepted-package local Products evidence outside controls"
+  ],
+  "baseCommit": "7b88f17263b32eb2e222d952ebac88fb972c4f04",
+  "status": "halted-by-user; WM-016 unaccepted",
+  "originalRoot": "/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/controls.qzldrova",
+  "logicalRestoredBytes": 622617617,
+  "omissionMeaning": "Five unavailable historical package-boundary test source paths and one excluded compiled data-test executable. Current candidate/correction sources and original cleanup evidence are present."
+}

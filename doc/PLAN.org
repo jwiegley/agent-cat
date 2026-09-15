@@ -8568,14 +8568,14 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 ]
 #+end_src
 
-* TODO [#B] WM-016: Implement decisions and correlated runtime controls    :p3:
+* DOING [#B] WM-016: Implement decisions and correlated runtime controls    :p3:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-wm-016-bsw2
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-09-15 Tue 13:35]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8632,6 +8632,26 @@ non-head decisions refuse through every route, and another run can continue.
 Typed false/null/structured values arrive unchanged. Tests exercise delayed
 acceptance, unsupported-after-acceptance, failure release, stale editors, and
 ambiguous delivery without unauthorized replay.
+
+** Notes
+
+HALTED BY USER on 2026-09-15. The implementation loop is paused, not complete. Resume only on an explicit new request.
+
+Accepted baseline: WM-001 through WM-015 and G0, canonical commit 7b88f17263b32eb2e222d952ebac88fb972c4f04. WM-016 remains unaccepted. WM-017 through WM-044 and G1 through G5 remain unfinished.
+
+Handoff: doc/workflow-manager-handoff.md. Portable unaccepted work and evidence: doc/checkpoints/wm016-20260915/. The accepted runtime remains active in the branch. candidate.patch preserves 38 changed paths/588 positive source members. failure-correction.patch preserves the later test-only correction. recovery.tar.gz contains 82790 file records deduplicated to1495 blobs, including available historical positive audit sources, helpers, command/binary identities, reviews, logs, and failure databases with WAL/SHM. It excludes large compiled outputs/caches, agent sessions/private homes, unrelated repositories, and older accepted-package Products evidence. All earlier issue notes are preserved verbatim in the bundle at halt-20260915/wm016-issue.json.
+
+Current blocker: policies-gate-05 failed WorkerCleanupUnproven after genuine cross-run answering. The original second journal ends run.completed sequence18, but its original per-group IOException/outcome is unavailable. The first reservation released and the second remains cleanup-pending. Later process absence is not original cleanup proof. Two original-author diagnostics and one corrected first-failure diagnostic passed without reproducing it, which does not resolve or waive that failure.
+
+Independent review86768f3d-66ac-4078-8e98-603059bf2310: BLOCK. No ProcessGroup algorithm or additional control-acceptance defect was established. Confirmed defects were opaque StorageUnavailable classified as StoreBusy/publication contention and incorrect analysis of Worker IOException classification. Current correction removes opaque retries, preserves direct StoreBusy and first failure, and uses cancellation-safe logging. The compile-only audit pins first failed proof at actual Store release/fencing, not normal live Missing observations. Data checks24each at N1/N8 and C bounded-recorder tests passed. The single original-order native-01 exited0 with four Store groups confirmed, no first failed confirmation,162Haskell/242C records, and no diagnostic overflow/logging failure. It remains a non-reproduction.
+
+Current local work: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/controls.qzldrova. Original author/diagnostics are sealed. failure-correction.suwgl8b7 worker645433ed-c35e-4903-9928-1bf2c3bcb6bc was explicitly interrupted after its native run at20:18:12UTC. No more native run or gate is authorized. No API-session goal exists. Reconstruct fresh working copies from the checkpoint rather than reviving or editing sealed evidence.
+
+Verification ceiling: earlier source/raw all-target-Werror/all3suite passes belong to archive333fc94d274f55363c33a0909caeb00b5307b955de524d95bd49540dd0cca328. Sealed archiveafecaf6f6fe97a1f3322d31011747131da8d6a6d3680dc04edc54914d6753ecc includes later test changes and lacks complete final validation. Corrected full source/raw owning gates, Linux, final canonical/Pi, committed-work audit and acceptance remain outstanding. Full policies failures01-05 and raw-controls01 are retained. Do not combine partial/component passes into a whole-gate pass or assign current executable hashes to uncaptured historical runs.
+
+Next: verify checkpoint hashes, restore to a new private Products directory, read handoff/frozen design/plan/amendment and complete review, compile the reconstructed baseline and run only permitted data checks. Obtain an independent next-step decision on the unresolved cleanup proof and any explicitly bounded native reproduction. Preserve original objects and failure categories. Then finish current-byte source/raw/platform/client/doc gates and independent acceptance before closing WM-016 or starting dependent packages.
+
+Standing rules: only SQLite directory-replacement confinement is withdrawn/restricted/unrun. Do not lower any other budget, weaken tests or infer authority from IDs/PIDs/paths/digests. Keep Runtime the sole interpreter. Session2 opts into observation3 while controls remain2, legacy behavior remains, and v3 preserves256ordinary plus one extra cancellation slot. Current authorization does not replace captured worker facts. Every downstream subtask must finish with fess and verification. Use current Nix environments, private Products build paths, unchanged test/cabal.sh, serialized same-directory Cabal, selected Pi ~/src/fork/pi, and the existing hash-verified conformance oracle when available. No paid route-live, dependency install, new Lean build, production change or PID signalling is authorized by this checkpoint. Recheck the clock and refocus on explicit resumption.
 
 ** Dependencies
 
