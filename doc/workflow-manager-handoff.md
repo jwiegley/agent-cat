@@ -132,7 +132,8 @@ The external remaining-scope report is
 `~/dl/agent-cat-workflow-manager-remaining-2026-09-15.md`. It can be regenerated
 from the frozen plan and this checkpoint if it is not on the new machine.
 
-Verify and restore evidence from the repository root:
+Use Python 3.11 or newer from the supported Nix environment. Verify and restore
+evidence from the repository root:
 
 ```bash
 python3 doc/checkpoints/wm016-20260915/recover.py \

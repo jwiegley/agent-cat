@@ -34,7 +34,9 @@ def main():
             raise ValueError("Unsupported recovery format")
         expected = {}
         for name, record in manifest["files"].items():
-            relative_path(name)
+            path = relative_path(name)
+            if path.parts[0].casefold() == "recovery-manifest.json":
+                raise ValueError(f"Reserved recovery path: {name}")
             digest = record["sha256"]
             if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
                 raise ValueError(f"Invalid digest for {name}")
@@ -76,8 +78,8 @@ def main():
                 with target.open("xb") as output:
                     output.write(payloads[record["sha256"]])
                 target.chmod(record["mode"])
-            (destination / "recovery-manifest.json").write_text(
-                json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+            with (destination / "recovery-manifest.json").open("x") as output:
+                output.write(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
         print(f"Verified {len(manifest['files'])} file records and {len(expected)} blobs")
         if args.destination is not None:
             print(f"Restored data to {args.destination}")
