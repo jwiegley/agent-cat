@@ -3867,6 +3867,11 @@ WAL, synchronous FULL, foreign keys, busy limits, disk-backed temporary storage,
 and fixed cache settings.  Passive checkpoints report observed progress rather
 than guaranteed completion.
 
+Cancellation repeatedly interrupts the original SQLite action until its thread
+joins.  The interruption task also joins before rollback, connection reuse, or
+close, so a late interrupt cannot affect a subsequent operation.  Caller
+exceptions remain distinct from storage refusals and operation expiry.
+
 SQLite operates under the operator-approved stable private namespace assumption
 documented in @file{manager/STORAGE.md}.  Native temporary files can reside
 outside the manager root.  Cache settings are not total heap or temporary-disk
@@ -3895,8 +3900,9 @@ tombstones rather than permitting replay.
 The version-two command migration preserves existing version-one facts.
 The version-three migration adds draft representations, internal schema version
 four adds admission order, resource domains, and native observations, and version
-five adds immutable start intents.  These migrations preserve earlier records
-transactionally.
+five adds immutable start intents.  Version six retains immutable ingestion
+prefixes and protects observed run identities.  These migrations preserve earlier
+records transactionally.
 Legacy raw bodies remain exact and are compared within SQLite rather than copied
 through the result buffer.  The frozen public manager-store compatibility domain
 remains version one.  Logical ledger reservations include bounded future receipt
@@ -3982,6 +3988,10 @@ Exceptions preserve that head without invoking the callback again.  Status
 observers neither consume the queue nor close worker pipes.  The queue is bounded
 at thirty-two frames and eight MiB of wire bytes, while stderr retains at most
 65536 bytes with explicit truncation and continued concurrent draining.
+Buffered evidence remains readable through the original opaque handle after
+physical cleanup.  An empty queue waits for original producer completion before
+returning its recorded failure or end of input, without restoring execution or
+control authority.
 
 @code{withStartingFrontendWorker} loans the opaque handle during construction,
 while @code{withFrontendWorker} waits for the actual prepared response before its
@@ -4087,6 +4097,45 @@ do not fabricate Runtime acknowledgement, terminal status, or a successful resul
 @file{manager/APPROVAL.md} states the complete internal contract and native
 verification boundary.  Durable Runtime ingestion, public control endpoints,
 the manager service, and client transports remain outside this approval layer.
+
+@subsection Durable Runtime ingestion
+
+The internal @code{Agentic.Manager.State} layer consumes validated envelopes
+through the original accepted-worker association.  Each record is bound to its
+trusted profile, root, native run, and unsigned Runtime sequence.  Its complete
+original bytes and digest remain immutable, including the final LF when present.
+The shared decoder applies its one-MiB limit to the payload before that delimiter.
+
+Ingestion appends the envelope through Runtime's checkpoint operation rather
+than a second interpreter.  The durable projection is a versioned manifest of
+the immutable sequence-zero prefix, its boundary, and its shared snapshot digest.
+Envelope identity, projection, decision observations, reference-only artifacts,
+and bounded invalidations commit together.  First committed evidence also moves
+a bound managed request from start-pending to associated, with matching request
+and reservation revisions.  Observer-only runs have no request transition.
+
+Matching original-byte duplicates have no effect.  Conflicting duplicates, gaps,
+wrong associations, and invalid terminal histories preserve the prior valid
+prefix and refuse.  Failed callbacks retain the original Worker queue head for
+explicit retry, including a committed record whose callback return was lost.
+Association can commit while cleanup publication remains pending, and only the
+original finalization owner can reconcile that post-start revision and release
+its reservation.  Pre-start edit and withdrawal guards remain unchanged.
+
+Restoration captures one fixed boundary, then reads each immutable record in at
+most three 512-KiB slices and restores it through Runtime.  Concurrent appends
+cannot change that captured prefix.  Publication rechecks the prior boundary
+and refuses a stale fold rather than replacing a newer projection.  Canonical
+checkpoints and complete original-wire evidence have independent 64-MiB bounds.
+Storage statement, row, input, result, and time limits remain unchanged.
+
+The initial implementation replays the full prefix per append, with quadratic
+total replay cost and no mutable projection cache.  Decisions remain observations
+and referenced artifacts remain unverified content.  Neither process exit nor
+prose can establish Runtime success.  Public control endpoints, artifact
+verification, retention, restart orchestration, and the manager service remain
+with their owning layers.  The storage contract and executable ingestion gate
+are documented in @file{manager/STORAGE.md}.
 
 @section Native frontend preparation
 @c COVER CLI verb:frontend author

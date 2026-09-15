@@ -138,6 +138,9 @@ and nothing else.
 import json
 import os
 import sys
+import signal
+import time
+from pathlib import Path
 
 PROTOCOL_VERSION = 1
 # A UUID, because both real adapters return one; the old stub's "sess_stub_0001"
@@ -171,6 +174,9 @@ APOLOGY = (
 )
 
 ARGV = sys.argv[1:]
+# Test-owned rendezvous at a real prompt request, before its real response.
+PROMPT_BARRIER = next((Path(arg.split("=", 1)[1]) for arg in ARGV
+                       if arg.startswith("--prompt-barrier=")), None)
 
 # Whether the owner withholds consent. A flag rather than an environment
 # variable because `Acp.Config` can set the child's argv and cannot set its
@@ -808,10 +814,22 @@ def main():
         elif method == "session/set_config_option":
             handle_set_config_option(rid, params)
         elif method == "session/prompt":
+            if PROMPT_BARRIER is not None:
+                (PROMPT_BARRIER / (str(os.getpid()) + ".ready")).write_text("prompt received\n")
+                while not (PROMPT_BARRIER / "release").exists():
+                    time.sleep(0.01)
             handle_prompt(rid, params)
         else:
             error(rid, -32601, '"Method not found": ' + method, {"method": method})
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    if PROMPT_BARRIER is not None:
+        def stop_fixture(_signal, _frame):
+            raise SystemExit(143)
+        signal.signal(signal.SIGTERM, stop_fixture)
+    try:
+        sys.exit(main())
+    finally:
+        if PROMPT_BARRIER is not None:
+            (PROMPT_BARRIER / (str(os.getpid()) + ".done")).write_text("adapter exiting\n")

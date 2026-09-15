@@ -14,3 +14,6 @@ for capabilities in N1 N8; do
   "$runner" "$work/$capabilities" +RTS "-$capabilities" -RTS 2>&1 | tee "$work/$capabilities.log"
 done
 echo "Private coordination storage evidence: $work"
+python3 manager/test/admission_audit.py "$root" store-cancel-gap
+python3 manager/test/admission_audit.py "$root" store-cancel-mutant
+python3 manager/test/admission_audit.py "$root" store-expiry-mutant

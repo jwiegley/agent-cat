@@ -105,14 +105,16 @@ independent of queue capacity.
 Exactly one ingestion callback can hold the queue head. It is removed only after
 that callback returns successfully. Exceptions or cancellation preserve the head
 and propagate to that caller without closing worker pipes or automatically invoking
-the callback again. This acknowledges only in-memory consumption. WM-015 still owns
+the callback again. This acknowledges only in-memory consumption. State owns
 durable commit, duplicate identity checks and commit-then-lost-reply ambiguity.
 There is no replay/outbox implementation in this adapter.
 
 Status observers do not consume that queue and cannot close its transport.
-Validated queued data can be drained after native process completion while its
-owner scope remains active. Scope closure refuses further consumption. Reported
-process exit is separate from Runtime result evidence, and owner-requested shutdown
+Validated queued data can be drained through the original opaque handle even after
+scope closure and physical cleanup. An empty queue waits for the original producer
+completion before returning its recorded failure or end of input. Closure still
+refuses every execution and control operation. Reported process exit is separate
+from Runtime result evidence, and owner-requested shutdown
 is not represented as a fabricated successful child exit.
 
 Stderr is drained concurrently. At most 65536 bytes are retained privately, with

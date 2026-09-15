@@ -17,18 +17,19 @@ import Agentic.Manager.Configuration
 import Agentic.Manager.Profile (ConfigurationLimits, PublicProfile, Diagnostic, Discovery)
 import Agentic.Manager.Worker.State (WorkerLifecycle, acceptingPreparation)
 import Agentic.Manager.Lease (duplicateLease)
-import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration)
+import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration)
 import Agentic.Runtime
   (PrivateRoot, assertPrivateRoot, closePrivateRoot, openPrivateSubroot, privateRootPath,
    withPrivateDirectoryAt, writePrivateExclusiveAt, WorkflowInputDescriptor (..), frontendLiteralBytes, FrontendCapabilities, ProcessGroup, createProcessGroup, terminateProcessGroup, groupOutcome, processGroupLive)
 import Control.Concurrent (rtsSupportsBoundThreads)
-import Control.Concurrent.Async (race)
+import Control.Concurrent (threadDelay)
+import Control.Concurrent.Async (race, withAsync, asyncWithUnmask, cancel, wait)
 import Control.Concurrent.STM (STM, TMVar, atomically, newEmptyTMVarIO, readTMVar, isEmptyTMVar, tryPutTMVar)
 import Control.Concurrent.MVar (MVar, newMVar, newEmptyMVar, readMVar, tryReadMVar, withMVar, modifyMVarMasked, takeMVar, putMVar, tryTakeMVar)
 import Control.Exception
   (Exception, SomeException, bracket, bracketOnError, finally, mask,
-   evaluate, uninterruptibleMask_, throwIO, try)
-import Control.Monad (unless, when, void, foldM, forM_)
+   evaluate, uninterruptibleMask_, throwIO, try, onException)
+import Control.Monad (unless, when, void, foldM, forM_, forever)
 import Control.DeepSeq (NFData, force)
 import Crypto.Hash (Digest, SHA256, hashInit, hashUpdate, hashFinalize)
 import qualified Crypto.Hash as Hash
@@ -138,7 +139,7 @@ openStore installed root lease = storageErrors $ do
     (epoch, stream) <- bounded db 30000000 $ do
       SQL.exec db "PRAGMA busy_timeout=100; PRAGMA foreign_keys=ON; PRAGMA temp_store=FILE; PRAGMA cache_size=-2048; PRAGMA temp.cache_size=-2048"
       version <- scalar db "PRAGMA user_version"
-      unless (version `elem` map SQL.SQLInteger [0, 1, 2, 3, 4, fromIntegral schemaVersion]) $
+      unless (version `elem` map SQL.SQLInteger [0, 1, 2, 3, 4, 5, fromIntegral schemaVersion]) $
         throwIO StoreVersion
       -- Newer versions are refused before changing their journal or schema.
       wal <- scalar db "PRAGMA journal_mode=WAL"
@@ -205,6 +206,7 @@ migrate db = mask $ \restore -> do
       SQL.SQLInteger 2 -> pure ()
       SQL.SQLInteger 3 -> pure ()
       SQL.SQLInteger 4 -> pure ()
+      SQL.SQLInteger 5 -> pure ()
       SQL.SQLInteger current | current == fromIntegral schemaVersion -> pure ()
       _ -> throwIO StoreVersion
     when (version `elem` [SQL.SQLInteger 0, SQL.SQLInteger 1]) $ do
@@ -219,9 +221,12 @@ migrate db = mask $ \restore -> do
       unless (invalid==SQL.SQLInteger 0) (throwIO StoreIntegrity)
       mapM_ (SQL.exec db) admissionMigration
       SQL.exec db "PRAGMA user_version=4"
-    when (version /= SQL.SQLInteger (fromIntegral schemaVersion)) $ do
+    when (version `elem` map SQL.SQLInteger [0,1,2,3,4]) $ do
       mapM_ (SQL.exec db) approvalMigration
       SQL.exec db "PRAGMA user_version=5"
+    when (version /= SQL.SQLInteger (fromIntegral schemaVersion)) $ do
+      mapM_ (SQL.exec db) ingestionMigration
+      SQL.exec db "PRAGMA user_version=6"
     SQL.exec db "COMMIT"
   case result of
     Right () -> pure ()
@@ -639,9 +644,17 @@ withStatement db sql action = mask $ \restore -> do
     Right value -> either throwIO (const (pure value)) cleanup
 
 bounded :: SQL.Database -> Int -> IO a -> IO a
-bounded db micros action = do
-  result <- timeout micros (SQL.interruptibly db action)
-  maybe (throwIO StoreDeadline) pure result
+bounded db micros action = mask $ \restore ->
+  withAsync (restore action) $ \running -> do
+    -- One interrupt can precede sqlite3_step and do nothing. Keep interrupting
+    -- the original action until it joins; join the interrupter before reuse.
+    let stop = uninterruptibleMask_ $
+          bracket (asyncWithUnmask (\unmask -> unmask (forever (SQL.interrupt db >> threadDelay 1000)))) cancel
+            (\_ -> cancel running)
+    result <- restore (timeout micros (wait running)) `onException` stop
+    case result of
+      Nothing -> stop >> throwIO StoreDeadline
+      Just value -> pure value
 
 storageErrors :: IO a -> IO a
 storageErrors action = do

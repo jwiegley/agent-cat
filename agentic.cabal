@@ -61,6 +61,7 @@ extra-source-files:
   manager/ci/workers.sh
   manager/ci/admission.sh
   manager/ci/approval.sh
+  manager/ci/ingestion.sh
   manager/test/worker_fixture.py
   manager/test/approval_fixture.py
   manager/test/approval_contract.py
@@ -190,6 +191,7 @@ library
     Agentic.Manager.Admission.Policy
     Agentic.Manager.Admission
     Agentic.Manager.Approval
+    Agentic.Manager.State
     Agentic.Manager.Commands
     Agentic.Manager.Drafts
     Agentic.Manager.Protocol.Preparation
@@ -559,8 +561,10 @@ executable manager-approval-check
   hs-source-dirs:  cli/test manager/src manager/test
   main-is:         ManagerApprovalProbe.hs
   other-modules:
+    IngestionCheck
     Agentic.Manager.Test.AcceptanceAudit
     Agentic.Manager.Approval
+    Agentic.Manager.State
     Agentic.Manager.Admission
     Agentic.Manager.Admission.Policy
     Agentic.Manager.Worker

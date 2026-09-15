@@ -32,6 +32,7 @@ registry =
           ("controlled", row controlledExample),
           ("controlled-single", row controlledSingleExample),
           ("person-controlled", row personControlledExample),
+          ("parallel-person", row (Needs $ taking (input "input" :> noInputs) parallelPersonProgram)),
           ("prompt-source", row (Needs $ taking (input "input" :> noInputs) sourceProgram)),
           ("tail-source", row (Needs $ taking (argsInputAs "input" :> noInputs) sourceProgram)),
           ("stdin-source", row (Needs $ taking (stdinInputAs "input" :> noInputs) sourceProgram)),
@@ -96,6 +97,14 @@ personControlledProgram :: Text -> Program
 personControlledProgram body = workflow W.do
   _first <- confirm (person "first") [wf|First approval? {body}|]
   _second <- confirm (person "second") [wf|Second approval? {body}|]
+  stop
+
+-- Genuine independent branches for manager observation, not synthetic envelopes.
+parallelPersonProgram :: Text -> Program
+parallelPersonProgram body = workflow W.do
+  _answers <- panelText
+    [("engine", ask (model "reviewer") [wf|Review concurrently: {body}|]),
+     ("person", ask (person "owner") [wf|Mandatory concurrent answer: {body}|])]
   stop
 
 pinnedProgram :: Text -> Program

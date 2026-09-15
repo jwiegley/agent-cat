@@ -1,12 +1,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Versioned relational coordination facts. Stored identities are not capabilities.
-module Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration) where
+module Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration) where
 
 import Data.Text (Text)
 
 schemaVersion :: Int
-schemaVersion = 5
+schemaVersion = 6
 
 schemaStatements :: [Text]
 schemaStatements =
@@ -110,4 +110,14 @@ approvalMigration =
   [ "CREATE TABLE start_intents (command_id TEXT PRIMARY KEY NOT NULL REFERENCES commands(id) DEFERRABLE INITIALLY DEFERRED, client_id TEXT NOT NULL REFERENCES clients(id), request_id TEXT NOT NULL UNIQUE REFERENCES requests(id), preparation_id TEXT NOT NULL UNIQUE REFERENCES preparations(id), run_id TEXT NOT NULL UNIQUE REFERENCES runs(id), reservation_id TEXT NOT NULL REFERENCES reservations(id), process_generation TEXT NOT NULL, worker_identity TEXT NOT NULL, FOREIGN KEY(preparation_id,request_id) REFERENCES preparations(id,request_id), FOREIGN KEY(reservation_id,request_id) REFERENCES reservations(id,request_id)) STRICT",
     "CREATE TRIGGER start_intent_immutable BEFORE UPDATE ON start_intents BEGIN SELECT RAISE(ABORT,'start intent is immutable'); END",
     "CREATE TRIGGER start_intent_retained BEFORE DELETE ON start_intents BEGIN SELECT RAISE(ABORT,'start intent is retained'); END"
+  ]
+
+-- | Version-six immutable original-wire evidence backing versioned projections.
+ingestionMigration :: [Text]
+ingestionMigration =
+  [ "CREATE TRIGGER ingestion_immutable BEFORE UPDATE ON ingestions BEGIN SELECT RAISE(ABORT,'ingestion is immutable'); END",
+    "CREATE TRIGGER ingestion_retained BEFORE DELETE ON ingestions BEGIN SELECT RAISE(ABORT,'ingestion prefix is retained'); END",
+    "CREATE TRIGGER ingestion_frame_bound BEFORE INSERT ON ingestions WHEN length(NEW.envelope) NOT BETWEEN 1 AND 1048577 OR (length(NEW.envelope)=1048577 AND substr(NEW.envelope,-1)!=X'0A') OR length(NEW.envelope_digest)!=64 BEGIN SELECT RAISE(ABORT,'invalid ingestion evidence'); END",
+    "CREATE TRIGGER observed_run_identity BEFORE UPDATE OF profile_id,root_identity,native_run_id ON runs WHEN EXISTS(SELECT 1 FROM ingestions WHERE run_id=OLD.id) BEGIN SELECT RAISE(ABORT,'observed run identity is immutable'); END",
+    "CREATE INDEX ingestion_order ON ingestions(run_id,length(sequence),sequence)"
   ]

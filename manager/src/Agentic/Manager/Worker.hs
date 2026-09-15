@@ -353,8 +353,8 @@ consumeWorkerEvent worker action = mask $ \restore -> do
     Nothing -> throwIO WorkerConsumerBusy
     Just () -> (do
       next <- restore $ atomically $ do
-        closed <- readTVar (released worker)
-        when closed (throwSTM WorkerClosed)
+        -- Physical release cannot erase buffered evidence. Only the original
+        -- producer's completion proves no later frame can enter an empty queue.
         (Just <$> peekTBQueue (eventQueue worker)) `orElse` do
           result <- readTMVar (finished worker)
           either throwSTM (const (pure Nothing)) result

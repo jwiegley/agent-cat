@@ -41,6 +41,9 @@
 set -uo pipefail
 root=$(cd "$(dirname "$0")/../../.." && pwd)
 cd "$root"
+shell=$(type -P bash) || exit 1
+python=$(type -P python3) || exit 1
+false_adapter=$(type -P false) || exit 1
 
 stub="engine/acp/test/stub_adapter.py"
 [ -f "$stub" ] || { echo "ci/acp: no $stub — this gate needs agent-cat's stub adapter" >&2; exit 1; }
@@ -89,7 +92,7 @@ EOF
   out="$state/out"
   stdout="$state/stdout"
   stderr="$state/stderr"
-  XDG_CONFIG_HOME="$state/config" test/cabal.sh run -v0 agentic-run -- "$@" --scratch "$state" +RTS -N8 -RTS \
+  XDG_CONFIG_HOME="$state/config" "$shell" test/cabal.sh run -v0 agentic-run -- "$@" --scratch "$state" +RTS -N8 -RTS \
     < /dev/null > "$stdout" 2> "$stderr"
   code=$?
   # Keep process stdout and stderr distinct while they are written. Redirecting
@@ -246,12 +249,12 @@ note "default-adapter: the default is the stub, and it says so, exit 0"
 # ---------------------------------------------------------------------------
 # 8. An adapter that dies at once.
 #
-# `/usr/bin/false` starts and exits, so the pipe reaches EOF with the handshake
+# The resolved `false` executable starts and exits, so the pipe reaches EOF with the handshake
 # outstanding. The failure must name the program and the call that was waiting,
 # because "the adapter is not what you think it is" and "the adapter is slow"
 # ask different things of the operator.
 # ---------------------------------------------------------------------------
-play dead run harden --engine acp --adapter /usr/bin/false --timeout 10000
+play dead run harden --engine acp --adapter "$false_adapter" --timeout 10000
 want_code 2
 want_line "closed its output while the initialize handshake was outstanding"
 note "dead: named as a transport failure, exit 2"
@@ -270,7 +273,7 @@ note "missing: named as a transport failure, exit 2"
 # The line is quoted back verbatim: a client that read on hoping for something
 # parseable would report the timeout of a conversation that was never one.
 # ---------------------------------------------------------------------------
-play babble run harden --engine acp --adapter engine/acp/test/acp-misbehave.sh --adapter-arg babble --timeout 10000
+play babble run harden --engine acp --adapter "$shell" --adapter-arg "$root/engine/acp/test/acp-misbehave.sh" --adapter-arg babble --timeout 10000
 want_code 2
 want_line "said a line this client could not read"
 want_line "I am not a JSON-RPC adapter, I am prose."
@@ -284,7 +287,7 @@ note "babble: the unparseable line is quoted, exit 2"
 # no child behind, which is the second assertion: the helper `exec`s a sleep of
 # an unusual length, so a survivor is identifiable as this scenario's.
 # ---------------------------------------------------------------------------
-play mute run harden --engine acp --adapter engine/acp/test/acp-misbehave.sh --adapter-arg mute --timeout 3000
+play mute run harden --engine acp --adapter "$shell" --adapter-arg "$root/engine/acp/test/acp-misbehave.sh" --adapter-arg mute --timeout 3000
 want_code 2
 want_line "did not answer the initialize handshake within 3000ms"
 want_line "it was killed"
@@ -335,8 +338,8 @@ note "crossed-flags: refused before anything was spawned, exit 1"
 stubabs="$root/engine/acp/test/stub_adapter.py"
 mkdir -p "$work/two-adapters/bin"
 cat > "$work/two-adapters/bin/stub-writing" <<EOF
-#!/bin/sh
-exec python3 "$stubabs" --write-on-ask "\$@"
+#!$shell
+exec "$python" "$stubabs" --write-on-ask "\$@"
 EOF
 chmod +x "$work/two-adapters/bin/stub-writing"
 
@@ -364,7 +367,7 @@ note "two-adapters: the pin went to the routed stub, everything else to the defa
 # ---------------------------------------------------------------------------
 # 14. A route to a dead adapter fails before anything is spent.
 #
-# `/usr/bin/false` starts and exits, so the pipe reaches EOF with the handshake
+# The resolved `false` executable starts and exits, so the pipe reaches EOF with the handshake
 # outstanding — scenario 8's failure, reached through a route instead of through
 # `--adapter`. What this scenario pins that scenario 8 cannot is *eager
 # startup*: every routed backend is connected before the first question, so a
@@ -379,11 +382,11 @@ note "two-adapters: the pin went to the routed stub, everything else to the defa
 # transport failure against their own command line.
 # ---------------------------------------------------------------------------
 play dead-route run harden --engine acp --adapter stub \
-  --route 'deep=acp:/usr/bin/false' --timeout 10000
+  --route "deep=acp:$false_adapter" --timeout 10000
 want_code 2
 want_line "closed its output while the initialize handshake was outstanding"
-want_line "/usr/bin/false"
-grep -qE '^  deep +the /usr/bin/false adapter: ' "$out" \
+want_line "$false_adapter"
+grep -E '^  deep +' "$out" | grep -qF "the $false_adapter adapter: " \
   || bad "the header did not name the pin the dead backend was routed for"
 want_no_line "billFresh"
 note "dead-route: eager startup failed before anything was spent, exit 2"
@@ -394,7 +397,7 @@ note "dead-route: eager startup failed before anything was spent, exit 2"
 # which is why it is the fixture here and the flagship is not; the run dies at
 # the same connect, so this costs no turns.
 play unclaimed-pins run grind-tests --engine acp --adapter stub \
-  --route 'review=acp:/usr/bin/false' --timeout 10000
+  --route "review=acp:$false_adapter" --timeout 10000
 want_code 2
 want_line "balanced, coding, reasoning  the default (no --route names them)"
 want_no_line "billFresh"
@@ -464,7 +467,7 @@ note "route-usage: four refusals, each before anything was spawned, exit 1"
 # billMemo 10, `applied.c` never written, exit 0. A run that quietly did
 # nothing, which is why 7/7 here is the assertion and not the exit code.
 # ---------------------------------------------------------------------------
-play narrating-adapter run harden --engine acp --adapter engine/acp/test/acp-narrator.py --timeout 60000
+play narrating-adapter run harden --engine acp --adapter "$python" --adapter-arg "$root/engine/acp/test/acp-narrator.py" --timeout 60000
 want_code 0
 # Every prompt clean, at the far end of the pipe: the first that quotes an
 # answer, and the last, which quotes the patch the act is about to write.
@@ -502,7 +505,7 @@ droid_bin="$work/droid/bin"
 droid_argv="$work/droid/argv"
 mkdir -p "$droid_bin"
 cat > "$droid_bin/droid" <<EOF
-#!/bin/sh
+#!$shell
 printf '%s\n' "\$@" > "$droid_argv"
 [ "\$#" -ge 3 ] &&
   [ "\$1" = exec ] &&
@@ -513,7 +516,7 @@ set -- --foreign-session-events "\$@"
 case " \$* " in
   *" --route-probe "*) set -- --write-on-ask "\$@" ;;
 esac
-exec python3 "$stubabs" "\$@"
+exec "$python" "$stubabs" "\$@"
 EOF
 chmod +x "$droid_bin/droid"
 old_path=$PATH
@@ -543,8 +546,8 @@ cmp -s "$work/droid/expected" "$droid_argv" \
   || bad "routed droid argv was:$(printf '\n  %s' "$(cat "$droid_argv")")"
 note "droid-route: deep reached acp:droid; unpinned asks kept the default, 7/7, exit 0"
 
-cat > "$droid_bin/droid" <<'EOF'
-#!/bin/sh
+cat > "$droid_bin/droid" <<EOF
+#!$shell
 exit 19
 EOF
 chmod +x "$droid_bin/droid"
@@ -568,7 +571,7 @@ note "configured-options: explicit ACP ignored ambient routing, 7/7, exit 0"
 # 19. Protocol-v2 public progress is optional, redacted, persisted, and answer-neutral.
 # ---------------------------------------------------------------------------
 scenario=public-progress
-runner=$(test/cabal.sh list-bin agentic-run)
+runner=$("$shell" test/cabal.sh list-bin agentic-run)
 mkdir -p "$work/progress-config"
 if env -u AGENT_CAT_PERSONA XDG_CONFIG_HOME="$work/progress-config" python3 test/progress_probe.py "$runner"; then
   note "public-progress: v2 tool/todo/usage updates persisted without changing v1 answers or bills"
@@ -597,7 +600,7 @@ main = do
           && renderAcpError refusal == expectedRefusal)
     (die "ACP exceptions expose raw protocol data or Haskell constructors")
 EOF
-if test/cabal.sh exec -- bash -c \
+if "$shell" test/cabal.sh exec -- bash -c \
   'runghc --ghc-arg=-package-id --ghc-arg=agentic-0.1.0.0-inplace "$1"' \
   _ "$work/display-acp-error.hs"; then
   note "exception-display: machine startup failures retain the human ACP diagnostic"
