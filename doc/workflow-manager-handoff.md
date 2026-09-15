@@ -1,12 +1,18 @@
 # Workflow-manager handoff
 
-<!-- handoff-id: wm016-20260915; status: halted-by-user; accepted: WM-001..WM-015,G0 -->
+<!-- handoff-id: wm016-20260915; status: resumed-by-user; accepted: WM-001..WM-015,G0 -->
 
 ## Status and authority
 
-Work was halted at the user's request on 2026-09-15. The implementation loop is
-paused, not complete. No further native experiment, gate, or deployment is
-currently authorized. Resume only after an explicit new request.
+The user explicitly resumed work and cancelled the pause on 2026-09-15.
+Implementation is active, not complete. The frozen acceptance contract and
+action-specific restrictions remain unchanged. Native work requires a bounded
+next-step decision rather than reuse of an earlier diagnostic authorization.
+
+Refocus completed at `2026-09-15T23:10:55.861310+00:00`. The next deadline is
+`2026-09-16T00:10:55.861310+00:00`. The immediate step is fresh baseline compilation
+and data-only checks, followed by independent review of the unresolved cleanup
+proof and the diagnostic correction. No whole policy gate is being retried.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -171,10 +177,10 @@ be installed as production code.
 Use the canonical Nix shell, private build/home/tmp/config directories under
 Products, and unchanged `test/cabal.sh`. Create a repository-free Cabal config
 with `active-repositories: :none`. Reconfirm tool versions and compile the fresh
-baseline before edits. Inspect tests before running them. Only compilation and
-previously permitted data-only checks are currently appropriate. Any further
-native reproduction or full gate needs a fresh explicit decision covering its
-inputs, original owners, budgets, first-failure capture, and stopping rule.
+baseline before edits. Inspect tests before running them. Compilation and
+previously permitted data-only checks form the initial resumed baseline. Any
+further native reproduction or full gate needs a fresh explicit decision covering
+its inputs, original owners, budgets, first-failure capture, and stopping rule.
 
 For a new clone, initialize/import the `obr` cache according to `AGENTS.md`.
 Do not rebuild or replace an existing unrelated tracker cache. Keep WM-016 open.
@@ -194,11 +200,19 @@ findings, and record the evidence before marking that subtask complete.
 The original local workspace was
 `/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/controls.qzldrova`.
 The original author is sealed. Correction workspace `failure-correction.suwgl8b7`
-was interrupted after its authorized native run. Worker
-`645433ed-c35e-4903-9928-1bf2c3bcb6bc` is paused. Neither old agent session is
-required for recovery, and no worker should be revived or replaced based merely
-on a lost workflow continuation. No persistent goal is set in the current API
-session. This handoff is not an instruction to auto-continue.
+was interrupted after its authorized native run. The prior worker remains
+stopped and is not being revived. The fresh resumed workspace is
+`resume-20260915.ZHiqa0SO` under the original local workspace. Its `source/` was
+reconstructed from the accepted baseline and both checkpoint patches, with all
+588 positive source files verified by digest, size, and mode. Old evidence is
+read-only.
+
+Workflow `ea331f14-b7bf-4e91-bc75-a4a09e1cf606` starts compile/data-only baseline
+verification and a fresh reviewer isolation probe in disjoint namespaces.
+No retained reviewer children are available in this parent session, so the
+new reviewer is an explicitly identified fallback. No persistent goal is set
+in the current API session. The explicit user request, not this handoff alone,
+authorizes resumed work.
 
 The latest observed environment was macOS 26.6.2, Darwin 25.6.0
 `xnu-12377.161.14~5`, GHC 9.10.3, Cabal 3.16.1.0, SQLite 3.53.3 and Python 3.14.7.
