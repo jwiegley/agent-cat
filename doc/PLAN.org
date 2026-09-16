@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-15 Tue 16:59]
+:MODIFIED: [2026-09-15 Tue 17:25]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8648,6 +8648,10 @@ Next diagnostic preparation 2026-09-15T23:40:36.458615+00:00: reproduce the unte
 Prefix preparation coordination 2026-09-15T23:44:27.141401+00:00: original childd861d8e7-101a-44c3-98ae-414d39ccb7ae detached for supervisor questions; no replacement or native run. Parent supplied exact fess rubric path and required disclosure of stopped filename-only artifact/session/sentinel search without content reads. Parent also approved diagnostic-only capture validation after each framed maximum/overflow case fully unwinds and before next case, via explicit callback/parameter, preserving normal dispatch and immutable production inputs. Distinct fixed-label snapshots, whole-prefix final flush, fixed capacities, original exceptions and data-only boundary-stop checks are required. Outer workflow continuation must be recovered from the same child result before independent preparation review. This orchestration detach does not reinstate the user pause.
 
 Preparation-only capture decisions: parent approved a local outer finalizer preserving original exception precedence without audit writes after final flush, with serialized-tail/count data regression. Parent also approved bounded tracked-group identity serialization and exactly one monitor.published event per identity, including unlabelled groups. Missing/duplicate/extra publication is inconclusive and stops advancement, not a changed cleanup result. Published Left stays complete failure evidence. No wait/reset/retry or production ordering change, and a later complete final capture cannot erase an earlier rejected boundary. Current data checks and source/helper/binary identities must be refreshed. No native execution is approved. Refocus scope remains this one bounded prefix, not a general diagnostic framework.
+
+Prefix preparation handback 2026-09-16T00:25:54.001227+00:00: original workerd861d8e7 reached the harness30-minute timeout after green v4 data checks, with no native run. Parent inspected partial changes, then revived the same persisted author asf684c7c8-02fa-456f-b609-058da3d72eb4. Revival finished report/manifest-only handback without changing source/binaries or repeating successful checks. Current source is prefix-diagnostic.fpfRbnrI/audit-source-v4, not unversionedv1. Parent independently verified2104artifact comparisons:588immutable production inputs,592generated files plus exact deterministic replica,321evidence files,3binaries,24legacy/34prefix data assertions eachN1/N8 and2meaningful expected-failing negative controls. Native-prefix-01 remains absent and unauthorized. CheckerSHA256bfd17d9b58402887576cab25e7decf0a11ac0f8c659d1e173cacfb66f231a14d, compiledfrontendSHA256b2f2c63dd5e523ffc929ce641597ba87b89cc2e2e08de6f23fe89e531cc14d1c.
+
+Independent preparation/fess review now runs as workflowd9b7c9c4-4a0f-46b4-8a9b-c3d74ab4fafd. It must examine complete capture, all normal dispatch/body preservation, fixed budgets, actual capacity limitations and the NOT-EXECUTED native manifest. Source-derived successful prefix requires7/16owners and28/64tracked groups. Dynamic ordinary-event/C-slot capacity is not promised; overflow remains inconclusive. Source inspection, not earlier green tests, discovered the capture gaps, and new regressions were added afterward. No application failure is inferred from the orchestration timeout. No active writer remains. Parent must review the independent result before any one-shot native decision.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
