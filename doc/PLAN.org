@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 15:13]
+:MODIFIED: [2026-09-16 Wed 15:57]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8892,6 +8892,14 @@ Source Store gate preparation 8754b14a-85b1-4b5e-b516-b2fbd92345dc completed wit
 The parent refreshed zero-native preflight and issued one exact source Store gate decision at 2026-09-16T22:08:57.207271+00:00. Execution run 8e67da30-7ff8-4ba1-b324-98a05ad6d11b owns the original gate/launcher handles. Scope includes all six top-level and six helper cases, unchanged meaningful negative predicates and 120/1200-second helper budgets. The existing disposable lease-death sigKILL test is explicitly acknowledged only through its newly created original ProcessHandle and subsequent join, not as saved-PID recovery or cleanup fallback. No result is claimed. Original exit/failure notice must precede raw preservation, and any failure stops progression without retry. No raw or other gate is authorized.
 
 Refocus completed at 2026-09-16T22:01:59.114078+00:00, with next deadline 2026-09-16T23:01:59.114078+00:00. The preceding interval ended awaiting asynchronous preparation. Full WM-001 through WM-044 and G0 through G5 scope is unchanged, with WM-016 still unaccepted.
+
+Complete source Store gate 8e67da30-7ff8-4ba1-b324-98a05ad6d11b returned exit 0 from 22:11:45.253596 through 22:23:12.185578 UTC after 686.9298316249915 seconds. Original gate/launcher handles joined without outer failure, interruption or timeout. Immediate exit notice preceded raw preservation. All four roots, six top-level cases, six helper cases and three Werror builds are present. Four mutant cases retained exit 1 with their exact intended missed-interrupt markers, original joins and unchanged 120/1200 budgets. Observed PASS output totals 1,156 repeated lines, not unique obligations.
+
+Preservation retained 2,348 entries, 1,958 regular files, 28 databases with absent sidecars, and seven actual gate-built executable copies. Six compiler directories remain explicitly retained in place. Parent verification passed 6,772 identity comparisons, including sequential 594-member input to 595-file variant hashes. Its initial assumption that a new audit module inherited source mode failed: the helper uses write_bytes under umask077, producing mode0600. The verifier was corrected from source, with failure retained and no mode normalization. Independent review bb363bad-7853-4955-aac7-7b1ac77bcba6 found no issues and cleared this complete SOURCE Store result only. Authority is consumed, and historical quarantines remain unchanged.
+
+Preparation-only run 721b4881-666f-4f5e-8e6f-6cff5401a5c1 owns terminal-source-commands.utkqghes for the next complete source Commands gate. It must retain N1/N8 command checks, both frozen contract validations, proof-opacity checks and original budgets, with exact fresh source/resource/binary/preservation bindings. No compiler, Store/native, Commands gate, raw lane or other gate is authorized yet. Full remaining source/raw/platform/client/canonical verification and WM-016 acceptance remain outstanding.
+
+Refocus completed at 2026-09-16T22:56:49.156040+00:00, with next deadline 2026-09-16T23:56:49.156040+00:00. The next unmet requirement is full source Commands verification, not another Store diagnostic. All native permissions are consumed until a new exact parent decision.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 

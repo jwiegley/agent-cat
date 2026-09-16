@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-16T22:01:59.114078+00:00`. The next deadline is
-`2026-09-16T23:01:59.114078+00:00`. Complete instrumented and uninstrumented
+Refocus completed at `2026-09-16T22:56:49.156040+00:00`. The next deadline is
+`2026-09-16T23:56:49.156040+00:00`. Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
 also passed all 14 outcomes with verified bytes/modes and independent scoped
 clearance. The controls evidence analyzer correction is independently cleared.
@@ -38,10 +38,10 @@ Store cases and final-private startup, publication and cancellation cases passed
 at N1/N8. The earlier private cancellation failure remains preserved and does not
 establish its hidden cause. Independent review cleared the focused results, and
 a fresh default-target build/package passed. A reviewed wrapper-probe portability
-fix is packaged and data-checked without changing source/raw modes. Preparation
-of the complete source Store gate is independently cleared, and one separately
-authorized source gate is active. No result is claimed. Raw or other gates,
-old-resource recovery and acceptance remain unauthorized.
+fix is packaged and data-checked without changing source/raw modes. The complete
+source Store gate passed with parent verification and independent scoped
+clearance. Source Commands gate preparation is active. Raw and remaining source
+gates, old-resource recovery and acceptance remain unauthorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -702,17 +702,30 @@ inert preservation checks, with 52 prior resource footprints excluded. Review
 
 After refreshed zero-native preflight, the parent authorized one complete source
 Store gate at `2026-09-16T22:08:57.207271+00:00`. Execution run
-`8e67da30-7ff8-4ba1-b324-98a05ad6d11b` retains original gate/launcher handles. All
-six top-level and six helper cases, exact negative predicates and 120/1200-second
-helper budgets remain. The unchanged disposable lease-death test is explicitly
-acknowledged only through its newly created original ProcessHandle and join,
-not as generic saved-PID or cleanup kill authority.
+`8e67da30-7ff8-4ba1-b324-98a05ad6d11b` returned exit zero after 686.929832 seconds.
+Original gate/launcher handles joined without outer failure or interruption.
+The immediate exit notice preceded raw preservation. All six top-level and six
+helper cases passed their exact predicates, including four intended negative
+exits. Three Werror helper builds passed with unchanged 120/1200-second budgets.
+The disposable lease-death fixture was narrowly acknowledged through its newly
+created original ProcessHandle and join, not as generic PID/kill authority.
 
-The original exit/failure notice must precede raw preservation and analysis.
-No result is claimed yet. Preservation alone cannot establish full gate success.
-Any failure stops progression without retry. Prior packages and failed resources
-remain read-only. Raw, other gates and full platform/client/canonical acceptance
-still need separate current decisions. WM-016 remains unaccepted.
+Parent verified 6,772 identities over 2,348 preserved entries, 1,958 regular files,
+28 databases and seven actual gate-built executable copies. Six compiler paths
+remain explicitly retained in place. Helper source captures and sequential
+mutation hashes match their final 595-file variants. The initial parent verifier
+used the wrong mode for a newly created audit file. Source requires mode0600
+under umask077, and correcting that expectation preserved the failure record
+without normalizing artifacts. The 1,156 PASS lines are repeated observations,
+not unique obligations. Independent result review
+`bb363bad-7853-4955-aac7-7b1ac77bcba6` found no issues for complete SOURCE Store.
+
+Preparation-only run `721b4881-666f-4f5e-8e6f-6cff5401a5c1` owns
+`terminal-source-commands.utkqghes` for N1/N8 Commands checks, both frozen
+contract validations and proof-opacity checks. Exact fresh bindings and original
+budgets/predicates remain required. No compiler, Store/native or gate execution
+is authorized yet. Raw Store and all other remaining source/raw, platform,
+client and canonical verification remain outstanding. WM-016 is unaccepted.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
