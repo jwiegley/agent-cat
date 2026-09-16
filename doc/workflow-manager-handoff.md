@@ -38,9 +38,9 @@ Store cases and final-private startup, publication and cancellation cases passed
 at N1/N8. The earlier private cancellation failure remains preserved and does not
 establish its hidden cause. Independent review cleared the focused results, and
 a fresh default-target build/package passed. A reviewed wrapper-probe portability
-fix is being repackaged without changing source/raw modes. Full owning gates
-remain unrun. No further native execution, old-resource recovery or acceptance
-is authorized.
+fix is packaged and data-checked without changing source/raw modes. Preparation
+of the complete source Store gate is active. Owning gates remain unrun. No
+further native execution, old-resource recovery or acceptance is authorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -684,13 +684,24 @@ canonical fake-Cabal tests passed. Review
 `4efd216d-0068-419c-ab77-f62c655d5654` found no issues. The two-line probe fix is
 integrated canonically, without activating the WM-016 application candidate.
 
-Package-only continuation `3dc43cde-2094-4d58-8647-6b6e627f8c20` owns
+Committed fess `43efed89-0285-48ed-8841-f255b318274d` cleared the exact wrapper
+probe commit `6392fcb` with stated limits. Repackaging
+`3dc43cde-2094-4d58-8647-6b6e627f8c20` completed under
 `terminal-owning-ready.j5g2ki94`, whose 1,021-file source differs only in that probe
-from the successful build. Haskell, C and Cabal inputs are unchanged. It may
-create a new archive/raw extraction, run the fake-Cabal probe on source/raw and
-refresh gate plans. No rebuild, source edit, Store/native or owning-gate execution
-is authorized. Prior package and failure evidence remain read-only. Full source,
-raw, Linux, client, canonical and owning-gate verification remain outstanding.
+from the successful build. Haskell, C and Cabal inputs remain unchanged. The new
+archive contains 594 files and 664 entries, with 12 unchanged mode differences.
+Parent verified 2,682 identities, including source/raw fake-Cabal results and the
+compiled-input reference. Archive SHA256 is
+`45de8b3a53ed96e931bab49f51acf9fb6065b56922fe35672fd66440caf34209`.
+
+Preparation-only run `8754b14a-85b1-4b5e-b516-b2fbd92345dc` owns
+`terminal-source-store.OxhV3gKM` for the complete source Store gate. Its scope
+retains all default and added N1/N8 cases and the three SQL-audit helper modes,
+their meaningful negative predicates and original budgets. Exact fresh input,
+resource, original-owner and raw-preservation bindings are required before a
+separate execution decision. No compiler, Store/native or gate invocation is
+authorized now. Prior packages and failures remain read-only. Full source, raw,
+Linux, client, canonical and owning-gate verification remain outstanding.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
