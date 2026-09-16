@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-16T20:12:05.229227+00:00`. The next deadline is
-`2026-09-16T21:12:05.229227+00:00`. Complete instrumented and uninstrumented
+Refocus completed at `2026-09-16T20:58:17.552249+00:00`. The next deadline is
+`2026-09-16T21:58:17.552249+00:00`. Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
 also passed all 14 outcomes with verified bytes/modes and independent scoped
 clearance. The controls evidence analyzer correction is independently cleared.
@@ -36,9 +36,11 @@ actions within their existing operation budgets, with admitted execution once.
 The isolated implementation compiles and has scoped source clearance. Production
 Store cases and final-private startup, publication and cancellation cases passed
 at N1/N8. The earlier private cancellation failure remains preserved and does not
-establish its hidden cause. Independent focused-result review and a fresh
-production build/package are active. Full owning gates remain unrun. No further
-native execution, old-resource recovery or acceptance is authorized.
+establish its hidden cause. Independent review cleared the focused results, and
+a fresh default-target build/package passed. A reviewed wrapper-probe portability
+fix is being repackaged without changing source/raw modes. Full owning gates
+remain unrun. No further native execution, old-resource recovery or acceptance
+is authorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -664,13 +666,31 @@ production Store cases and six use the final explicit private overlay. This is
 not a full uninstrumented owning-gate result or an exhaustive fence matrix.
 All native permissions are consumed, and old-resource recovery is unauthorized.
 
-Read-only result review `988942c4-d63f-4d10-b5e1-59c2399f8b70` is active.
-Build/package-only run `5de42cb2-13ab-4250-a458-ce38d317fd42` owns
-`terminal-owning-build.j93qps0a`, using the composed 1,021-file production source.
-It may compile all targets with tests enabled and warnings fatal, create source
-archive/raw identities and prepare owning-gate plans. No source edit, Store/native
-test or gate execution is authorized. Full source/raw/Linux/client/canonical
-verification and WM-016 acceptance remain outstanding.
+Read-only result review `988942c4-d63f-4d10-b5e1-59c2399f8b70` cleared the eight
+focused cases at their stated scopes. Build/package run
+`5de42cb2-13ab-4250-a458-ce38d317fd42` completed under
+`terminal-owning-build.j93qps0a`. Its 26 default-enabled components and 22 binaries
+built with tests enabled and warnings fatal in 314.268021 seconds. The existing
+manual flag `tui-tests=False` was retained by explicit parent decision. Optional
+TUI-driver verification remains outstanding. The source package has 594 regular
+files and 664 entries, with 12 unnormalized mode differences and 427 source-only
+files. Parent verified 2,673 identities. No raw build or owning gate ran.
+
+The raw Cabal environment probe attempted to execute a mode0644 wrapper and failed
+before reaching its assertions. Parent reproduced that failure in fresh data
+copies, then changed only two invocation prefixes to use Bash. The wrapper bytes,
+source/raw modes and all assertions remain unchanged. Corrected source/raw and
+canonical fake-Cabal tests passed. Review
+`4efd216d-0068-419c-ab77-f62c655d5654` found no issues. The two-line probe fix is
+integrated canonically, without activating the WM-016 application candidate.
+
+Package-only continuation `3dc43cde-2094-4d58-8647-6b6e627f8c20` owns
+`terminal-owning-ready.j5g2ki94`, whose 1,021-file source differs only in that probe
+from the successful build. Haskell, C and Cabal inputs are unchanged. It may
+create a new archive/raw extraction, run the fake-Cabal probe on source/raw and
+refresh gate plans. No rebuild, source edit, Store/native or owning-gate execution
+is authorized. Prior package and failure evidence remain read-only. Full source,
+raw, Linux, client, canonical and owning-gate verification remain outstanding.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.

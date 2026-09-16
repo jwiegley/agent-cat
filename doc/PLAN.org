@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 13:30]
+:MODIFIED: [2026-09-16 Wed 14:12]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8876,6 +8876,12 @@ A new separately authorized cancellation N1 case on v3 in terminal-cancel-N1-v3.
 The final-private startup and publication cases were rerun at N1/N8 on the same v3 binary set, and cancellation N8 also passed after 51.20820366698899 seconds. Separate current decisions, fresh resources, original joins and raw-before-interpretation records are retained for each. terminal-focused-final-results.json binds eight focused cases: two production Store cases and six final-private-v3 cases. They produced 96 assertion outcomes and 8,645 parent identity comparisons. Superseded private-version successes are not mixed into this final-private result set. All native permissions are consumed. This is not a full uninstrumented owning-gate result or WM-016 acceptance.
 
 Read-only review 988942c4-d63f-4d10-b5e1-59c2399f8b70 is checking the final focused evidence. Build/package-only run 5de42cb2-13ab-4250-a458-ce38d317fd42 owns terminal-owning-build.j93qps0a and may copy the exact composed 1,021-file production source, build all targets with tests enabled and warnings fatal, produce a source archive/raw identities, and prepare owning-gate plans. It may not edit source or run Store/native tests or gates. Refocus completed at 2026-09-16T20:12:05.229227+00:00, with next deadline 2026-09-16T21:12:05.229227+00:00. Full source/raw/Linux/client/canonical/owning-gate verification and WM-016 acceptance remain outstanding.
+
+Review 988942c4-d63f-4d10-b5e1-59c2399f8b70 cleared all eight focused results at their stated scopes. Fresh production build/package 5de42cb2-13ab-4250-a458-ce38d317fd42 completed under terminal-owning-build.j93qps0a. All 26 default-enabled components built with tests enabled and GHC warnings fatal in 314.26802075 seconds, yielding 22 hashed binaries without invocation. Parent explicitly retained tui-tests=False and the optional TUI driver remains unbuilt. The fresh archive has 594 regular files and 664 entries. Parent verification passed 2,673 identities over exact source, package/raw modes, build and binary evidence. All 12 source-to-raw mode differences and 427 source-only files remain explicit. No raw build, suite or owning gate ran.
+
+The raw wrapper probe directly executed a mode0644 cabal.sh and was reproduced as PermissionError in fresh data-only copies. Parent corrected only its two subprocess prefixes to invoke bash, matching owning-gate usage. All assertions and wrapper bytes/modes remain unchanged. Corrected source/raw and canonical fake-Cabal checks passed, while the original raw failure remains preserved in terminal-wrapper-probe.8ysv5a1o. Review 4efd216d-0068-419c-ab77-f62c655d5654 found no issues. The exact two-line test/cabal_env_probe.py correction was integrated canonically without activating the unaccepted WM-016 candidate.
+
+Updated production source terminal-owning-ready.j5g2ki94 contains only that probe change after the successful build, with Haskell, C and Cabal inputs unchanged. Package-only continuation 3dc43cde-2094-4d58-8647-6b6e627f8c20 may create a new archive/raw extraction, run only the fake-Cabal source/raw probe checks, and refresh unexecuted gate plans. It may not rebuild, edit source or run actual Store/native/owning gates. The old package remains immutable. Refocus completed at 2026-09-16T20:58:17.552249+00:00, with next deadline 2026-09-16T21:58:17.552249+00:00. Full source/raw/platform/client/canonical verification and WM-016 acceptance remain outstanding.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
