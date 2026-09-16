@@ -13,10 +13,10 @@ Refocus completed at `2026-09-16T09:12:54.174961+00:00`. The next deadline is
 `2026-09-16T10:12:54.174961+00:00`. Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
 also passed all 14 outcomes with verified bytes/modes and independent scoped
-clearance. Controls evidence preparation is blocked by a missing-helper-fixture
-check in its analyzer. A preparation-only correction is active. Further gates,
-retries and package acceptance remain unauthorized, and the historical incident
-is unexplained and quarantined.
+clearance. The controls evidence analyzer correction is independently cleared.
+One complete source-controls gate is now authorized with no result claimed yet.
+Raw controls, other gates, retries and package acceptance remain unauthorized,
+and the historical incident is unexplained and quarantined.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -416,14 +416,23 @@ could claim complete evidence without a preserved helper N1 or N8 directory.
 The original synthetic checks covered root selection rather than this analyzer
 refusal. No controls gate had run.
 
-Correction run `6520bec3-427a-4872-b9c4-69e8ab94d0fc` owns only the new
-`current-source.jJwlsNm8/controls-source-verification/preparation-v2` namespace.
-It must enforce both helper fixture directories and test the actual analyzer
-with complete and missing-helper layouts, including a negative control against
-the old analyzer. The original preparation, blocked review, application sources,
-archive and parent launchers remain unchanged. Verification and review of this
-minimal correction precede any source-controls execution decision. Full WM-016
-acceptance remains outstanding.
+Correction run `6520bec3-427a-4872-b9c4-69e8ab94d0fc` added one assertion in
+`current-source.jJwlsNm8/controls-source-verification/preparation-v2`. Actual
+analyzer regressions demonstrated both old false acceptances and corrected
+refusals, with a complete-data positive check. Parent verification passed 1,690
+identity comparisons. Reviewer `4eafa11b-3dbe-477e-b067-0694c8981b66` found no issues
+and cleared the preparation correction only. The original preparation, blocked
+review, application sources, archive and parent launchers remain unchanged.
+
+Fresh checks compared 17 old resource footprints against five new roots, with
+an empty controls build directory and absent cache. The exact read-only launcher
+preflight passed before any native spawn. The parent then authorized run
+`e1f5b003-07a5-4c39-8c2c-8905cbd05f49` for one complete source-controls gate through
+the existing `controls-source-verification/attempt-01/execute.py`. Its only
+post-return work is the reviewed raw preservation and analysis. No gate result
+is claimed yet, and the original exit/join notice must precede preservation.
+Failure, timeout, uncertain ownership or invalid capture stops execution without
+retry or repair. Raw controls and full WM-016 acceptance remain outstanding.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
