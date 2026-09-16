@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 09:35]
+:MODIFIED: [2026-09-16 Wed 10:36]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8840,6 +8840,12 @@ Review 45737ef0-195b-4188-8dc5-48fd9b2da0c4 found no issue with the actual N1 st
 The next step requires an explicit user policy decision: permit bounded internal admission waiting for the original terminal owner’s narrowly identified Store actions, or retain immediate refusal plus explicit original-owner recovery. Recommendation is the former only before action admission, with waiting charged to that action’s existing allowance, once-only admitted execution, proven lock-order safety, unchanged rollback/SQLite busy bounds, original ownership/fences/native exits and explicit failure on timeout/shutdown/poisoning/admitted-action or uncertain-publication errors. No opaque-result, whole-workflow, command or cleanup retry is implied. Until chosen, current fail-fast policy controls and no new implementation or native execution is authorized.
 
 Any approved change still needs N1/N8 contention, exhaustion and interruption checks, actual post-start cancellation130 and associated-run fences, the protected publication-failure comparison and current owning gates. These remain unrun requirements, not acceptance evidence. WM-001 through WM-015 and G0 remain the accepted boundary.
+
+The user explicitly approved bounded internal Store-admission waiting with "Yes, implement it." The selected policy applies only to the original terminal owner’s identified persistence actions, with waiting charged to each action’s existing operation allowance and admitted execution occurring once. Ordinary callers remain fail-fast. Commands, cleanup and opaque or admitted persistence failures are not replayed. Original ownership, native errors, fences, first failures, rollback/SQLite busy limits and explicit-owner recovery obligations remain unchanged.
+
+Implementation and subsequent source-review workflow 75dbb5d8-baf1-4bf5-a100-4b52fda16a30 uses fresh terminal-admission-wait.NYcHOsPx against the uninstrumented current-source.jJwlsNm8/source. Prior candidates and incident resources remain read-only. Source, tests, documentation, private warning-fatal compilation and pure data checks are authorized. Store/native execution still requires an exact fresh-resource parent decision after source review, and no prior invocation permission is reused. The candidate remains isolated until reviewed integration and owning-gate verification.
+
+Refocus completed at 2026-09-16T17:33:32.575880+00:00, with next deadline 2026-09-16T18:33:32.575880+00:00. The preceding turn ended awaiting this user decision. The full WM-001 through WM-044 and G0 through G5 objective remains unchanged, with only WM-001 through WM-015 and G0 accepted.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
