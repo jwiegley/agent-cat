@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-16T17:33:32.575880+00:00`. The next deadline is
-`2026-09-16T18:33:32.575880+00:00`. Complete instrumented and uninstrumented
+Refocus completed at `2026-09-16T19:19:23.104601+00:00`. The next deadline is
+`2026-09-16T20:19:23.104601+00:00`. Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
 also passed all 14 outcomes with verified bytes/modes and independent scoped
 clearance. The controls evidence analyzer correction is independently cleared.
@@ -33,9 +33,12 @@ passed all 16 assertions, including explicit original-owner recovery. Parent
 verification and independent review passed. The user has now approved bounded
 internal pre-admission waiting for the original terminal owner's persistence
 actions within their existing operation budgets, with admitted execution once.
-Implementation is active in an isolated candidate. Store/native execution still
-requires a separate bounded decision. Old-resource recovery and acceptance remain
-unauthorized.
+The isolated implementation compiles and has scoped source clearance. Real Store
+checks passed at N1/N8, with startup and protected publication checks passed at
+N1. The N1 cancellation case failed at a private coordinator rendezvous. Its raw
+failure is preserved, and a source-proved holder-supervision defect is being
+corrected in a fresh private overlay. No further native execution, old-resource
+recovery or acceptance is authorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -593,16 +596,59 @@ busy bounds, and explicit failure on timeout, shutdown, poisoning or admitted
 and uncertain persistence failure. No opaque-result, whole-workflow, command or
 cleanup retry is implied. Ordinary callers retain immediate refusal.
 
-Workflow `75dbb5d8-baf1-4bf5-a100-4b52fda16a30` implements this policy in fresh
-`terminal-admission-wait.NYcHOsPx` from the uninstrumented current candidate, then
-continues the fresh-origin reviewer's own history for source review. Compilation
-and pure data checks are authorized. Store/native execution requires its next
-separate parent decision and fresh resources. Prior evidence is read-only.
+Workflow `75dbb5d8-baf1-4bf5-a100-4b52fda16a30` produced the policy implementation
+under `terminal-admission-wait.NYcHOsPx`. Production and private targets compiled
+with warnings fatal, and 17 no-Store assertions passed per N1/N8. Parent verified
+5,124 identities and exact diffs. The production documentation gate passed.
 
-The implementation needs N1/N8 contention, exhaustion and interruption checks,
-post-start cancellation and associated-run fences, protected publication failure
-and current owning gates. These tests are not yet run for the changed policy.
-Full controls verification and WM-016 acceptance remain outstanding.
+Review `2f12639e-e4ac-4c66-999c-688756a93045` found an unintended private aggregate
+timeout. Correction `a474d6c7-e7a8-4294-a81b-df38e72733c6` under
+`terminal-wait-coordinator-fix.595o0yuv` removed it, preserving original outcomes
+and refusing missing coverage. Its 16 no-Store assertions per N1/N8 used two real
+21-second delays each. Parent verified 4,113 identities. The two initial parent
+verifier failures concerned patch-header and output-trailer assumptions, not the
+application. The corrected report and failed logs remain retained.
+
+Parent corrected owning-gate wiring and SQL-audit anchors under
+`terminal-wait-gate-fix.7har15_7`. Three old rewrite refusals and three corrected
+data transformations were verified. Review
+`0c85c4cc-83d0-4c19-b63a-dddd35942050` found no issues. Composed source
+`terminal-wait-current.fc0w2qn4` has 1,021 files and unchanged compiled Haskell
+and Cabal inputs. Only the two gate scripts changed after compilation.
+
+The following cases ran once under separate decisions. Each original checker and
+launcher joined, and raw preservation preceded interpretation without database
+API access. Store N1 and N8 passed 14 assertions each, with 1,070 and 1,072 parent
+identity checks. Startup N1 passed six assertions with 1,075 checks. The unchanged
+publication comparison N1 passed seven assertions with 1,074 checks, preserving
+failure/claims until explicit recovery by that fresh original owner. Their roots
+are `terminal-store-native.0k5p9541`, `terminal-store-N8.hz22rtev`,
+`terminal-startup-N1.0kb28xxr` and `terminal-publication-N1.vzbq_6bp`. Review
+`7f119323-ebd5-4718-95b8-76237af624c3` cleared the first Store result and private
+correction at their stated scopes. The timeout handoff argument is supported by
+matching upstream GHC 9.10.3 uninterruptible timer cleanup, not an exhaustive
+schedule proof or comparison of every compiler patch.
+
+The subsequent N1 cancellation case `terminal-cancel-N1.hxyg6l2u` failed with
+exit one after 55.408605 seconds. Original handles joined without outer failure
+or interruption. Parent reported failure before preservation and verified 1,101
+identities over 44 entries and 27 regular files. Eleven assertions passed, ending
+at the original terminal-category check. The shared local rendezvous timed out
+before held-gate, release/fence and final exit130 assertions. Journal sequence
+779 records run.cancelled, not original process exit or Manager release.
+
+Review `40a9ad22-8b5b-457b-be72-9b29cb445763` proved that a private holder failure
+can be hidden by its notification-only wait. It did not identify this invocation's
+hidden failure or exact timeout stage. Preparation-only correction
+`386a6b68-efb0-4571-a177-89f9268351f9` owns `terminal-holder-fix.i_kyd3cy`. It must
+observe the same holder completion with its milestone, preserve failures and
+joins, use one budgeted private loan and distinguish local timeout stages.
+Production, previous overlays and failed resources remain read-only. No native
+retry, budget increase or opaque retry is authorized.
+
+Startup, publication and cancellation N8 remain unexecuted. The failed N1
+cancellation and all composed owning/source/raw/Linux/client gates remain
+outstanding. No focused result constitutes WM-016 acceptance.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
