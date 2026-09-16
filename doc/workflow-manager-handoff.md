@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-16T15:23:18.101911+00:00`. The next deadline is
-`2026-09-16T16:23:18.101911+00:00`. Complete instrumented and uninstrumented
+Refocus completed at `2026-09-16T16:14:41.639380+00:00`. The next deadline is
+`2026-09-16T17:14:41.639380+00:00`. Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
 also passed all 14 outcomes with verified bytes/modes and independent scoped
 clearance. The controls evidence analyzer correction is independently cleared.
@@ -28,10 +28,12 @@ capture. It records original ExitFailure 130 before WorkerUnexpectedExit, then
 selection StoreBusy. Its preserved Runtime journal records run.cancelled.
 Parent verification passed 1,126 checks, and review identifies the deliberate
 CLI cancellation-exit path for this invocation. Selection failed before Store
-database admission. Preparation of a deterministic contention regression is
-active, without choosing automatic retry or running the Store/native fixture.
-No policy change, causal repair, native execution, reuse or acceptance is
-authorized.
+database admission. A separately authorized startup-phase contention regression
+passed all 16 assertions, including explicit original-owner recovery. Parent
+verification and independent review passed. No production policy is selected.
+The next step requires the user to choose bounded internal pre-admission waiting
+or continued immediate refusal with explicit recovery. No new implementation,
+native execution, old-resource recovery or acceptance is authorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -564,16 +566,36 @@ SQLite/OS failure. Selection failure skips finalization and reservation release.
 Existing publication-failure tests require explicit original-owner recovery,
 rather than automatically retrying opaque failures.
 
-Preparation run `8a2f4110-f7b2-4668-bb80-b2d2606c44bc` owns
-`selection-contention-prep.VByl47hE`. It may prepare and compile a deterministic
-admission-hold/terminal-selection/release regression, preserving retained claims
-and using explicit recovery only as a separate test action. The parent approved
-the existing startup-exit fixture for this narrow shared path, not as coverage
-of post-start cancellation 130. Existing deadline callbacks can hold admission,
-with minimal private observations of selection and refused DB-body entry.
-The actual Store/native regression remains unexecuted pending review. No
-production persistence-policy change, automatic retry or weakened budget is
-authorized. Full controls verification and WM-016 acceptance remain outstanding.
+Preparation run `8a2f4110-f7b2-4668-bb80-b2d2606c44bc` completed under
+`selection-contention-prep.VByl47hE`. Parent verification passed 4,682 identities,
+with protected Store admission, selection/finalization, explicit recovery and
+publication-failure test bodies unchanged. Six pure barrier assertions passed
+per N1/N8. A first NFData SQLData test-typing failure remains retained. Review
+`ab8d7aee-8635-49d7-aad1-d2963145f9b2` cleared the standalone regression preparation.
+
+Separately authorized run `896c90fc-9bbe-4a1a-92d0-f3024fcefe18` used fresh
+`selection-contention-native.iepK6AJg` and returned exit zero after 1.733511 seconds
+at N1, with both original handles joined. Raw preservation retained 23 entries
+and 15 regular files before interpretation. Parent verification passed 1,089
+identities and all 16 exact source-bound assertion matches. The test established
+pre-transaction StoreBusy, retained failure/claims without fabricated effects or
+release, then explicit recovery on its fresh original LivePreparation. It does
+not cover post-start cancellation 130, N8 or the publication comparison.
+
+Review `45737ef0-195b-4188-8dc5-48fd9b2da0c4` found no issues with that scoped result.
+A user policy decision is now required. Recommended scope is bounded internal
+waiting only before admission of the original terminal owner's identified Store
+actions, charged against their existing execution allowances. Admitted actions
+execute once, with lock-order safety, original authority/fences/native outcomes,
+unchanged rollback and SQLite busy bounds, and explicit failure on timeout,
+shutdown, poisoning or admitted/uncertain persistence failure. No opaque-result,
+whole-workflow, command or cleanup retry is implied. Until explicitly chosen,
+current immediate refusal and explicit-recovery policy remains controlling.
+
+Any approved implementation needs N1/N8 contention, exhaustion and interruption
+checks, post-start cancellation and associated-run fences, protected publication
+failure and current owning gates. No additional execution or policy change is
+authorized now. Full controls verification and WM-016 acceptance remain outstanding.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
