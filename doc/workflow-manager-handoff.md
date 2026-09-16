@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-16T16:14:41.639380+00:00`. The next deadline is
-`2026-09-16T17:14:41.639380+00:00`. Complete instrumented and uninstrumented
+Refocus completed at `2026-09-16T17:33:32.575880+00:00`. The next deadline is
+`2026-09-16T18:33:32.575880+00:00`. Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
 also passed all 14 outcomes with verified bytes/modes and independent scoped
 clearance. The controls evidence analyzer correction is independently cleared.
@@ -30,10 +30,12 @@ Parent verification passed 1,126 checks, and review identifies the deliberate
 CLI cancellation-exit path for this invocation. Selection failed before Store
 database admission. A separately authorized startup-phase contention regression
 passed all 16 assertions, including explicit original-owner recovery. Parent
-verification and independent review passed. No production policy is selected.
-The next step requires the user to choose bounded internal pre-admission waiting
-or continued immediate refusal with explicit recovery. No new implementation,
-native execution, old-resource recovery or acceptance is authorized.
+verification and independent review passed. The user has now approved bounded
+internal pre-admission waiting for the original terminal owner's persistence
+actions within their existing operation budgets, with admitted execution once.
+Implementation is active in an isolated candidate. Store/native execution still
+requires a separate bounded decision. Old-resource recovery and acceptance remain
+unauthorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -583,19 +585,24 @@ release, then explicit recovery on its fresh original LivePreparation. It does
 not cover post-start cancellation 130, N8 or the publication comparison.
 
 Review `45737ef0-195b-4188-8dc5-48fd9b2da0c4` found no issues with that scoped result.
-A user policy decision is now required. Recommended scope is bounded internal
-waiting only before admission of the original terminal owner's identified Store
-actions, charged against their existing execution allowances. Admitted actions
-execute once, with lock-order safety, original authority/fences/native outcomes,
-unchanged rollback and SQLite busy bounds, and explicit failure on timeout,
-shutdown, poisoning or admitted/uncertain persistence failure. No opaque-result,
-whole-workflow, command or cleanup retry is implied. Until explicitly chosen,
-current immediate refusal and explicit-recovery policy remains controlling.
+The user subsequently approved bounded internal waiting only before admission of
+the original terminal owner's identified Store actions, charged against their
+existing execution allowances. Admitted actions execute once, with lock-order
+safety, original authority/fences/native outcomes, unchanged rollback and SQLite
+busy bounds, and explicit failure on timeout, shutdown, poisoning or admitted
+and uncertain persistence failure. No opaque-result, whole-workflow, command or
+cleanup retry is implied. Ordinary callers retain immediate refusal.
 
-Any approved implementation needs N1/N8 contention, exhaustion and interruption
-checks, post-start cancellation and associated-run fences, protected publication
-failure and current owning gates. No additional execution or policy change is
-authorized now. Full controls verification and WM-016 acceptance remain outstanding.
+Workflow `75dbb5d8-baf1-4bf5-a100-4b52fda16a30` implements this policy in fresh
+`terminal-admission-wait.NYcHOsPx` from the uninstrumented current candidate, then
+continues the fresh-origin reviewer's own history for source review. Compilation
+and pure data checks are authorized. Store/native execution requires its next
+separate parent decision and fresh resources. Prior evidence is read-only.
+
+The implementation needs N1/N8 contention, exhaustion and interruption checks,
+post-start cancellation and associated-run fences, protected publication failure
+and current owning gates. These tests are not yet run for the changed policy.
+Full controls verification and WM-016 acceptance remain outstanding.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
