@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-16T03:22:16.847955+00:00`. The next deadline is
-`2026-09-16T04:22:16.847955+00:00`. Fresh compilation and data checks passed.
+Refocus completed at `2026-09-16T04:12:26.213677+00:00`. The next deadline is
+`2026-09-16T05:12:26.213677+00:00`. Fresh compilation and data checks passed.
 Independent review cleared the prepared prefix harness with one data-assertion
 gap, which the parent verified as corrected. The single authorized N1 ordered
 prefix diagnostic completed with exit zero and complete capture. Its permission
@@ -333,6 +333,13 @@ No hard-kill fallback, saved-PID action, fake outcomes, repeated failure, manage
 workflow, backend, gate or code correction is authorized. Production timeout
 callers remain unchanged. The candidate is immutable pending parent review of
 those results. The CI-helper defect is not a proved cause of the old incident.
+At 04:10 UTC, the original worker remained active without case reports in the
+expected paths. The parent required essential preflight and execution of the
+scoped cases or a concrete blocker, rather than further harness generalization.
+Unnecessary full-environment logging in the prepared harness was also identified
+and removal directed before unstarted cases. No sensitive values were inspected
+or claimed to have been logged. A wait-subscription expiry is not a worker
+timeout, and it does not justify replacement or repeating a case.
 
 The author disclosed a stopped filename-only search that listed forbidden
 artifact/session/sentinel filenames, with no reported content reads. The
