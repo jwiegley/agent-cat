@@ -150,16 +150,10 @@
 --
 -- == Every addressee is this adapter
 --
--- A question carries an 'Agentic.Raw.Addressee' — @model \"reviewer-secure\"@,
--- @tool \"apply\"@, @person \"owner\"@ — and all three kinds are prompted here,
--- the person included. Lean had a second route for that one — an
--- @askPersonOnStdin@ setting, a question printed on stderr and a line read from
--- stdin, turned on for a /live/ adapter and off for the stub, which answers for
--- the human — and it went with the rest of wire policy (@Exec.lean:553@).
--- This port has only the off position, which is the stub's, and a run against a
--- live adapter therefore lets the agent play the owner. That is a limitation of
--- this version and is named rather than hidden: the addressee is not lost — it is the first thing 'renderQ' says — but
--- nothing here asks a human anything.
+-- Model, tool and person questions that reach this engine are all prompted
+-- through the adapter. Their addressees remain in request metadata and the run
+-- trace, not in the prompt. The runtime may intercept person questions for a
+-- local control broker before they reach an engine.
 --
 -- == Which questions may write
 --
@@ -187,13 +181,10 @@
 --
 -- == What is not here
 --
--- Decoding, re-asking and abandonment-on-unreadable are "Agentic.Exec"'s
--- ('askDecoding'), exactly as in "Agentic.AgentDeck", so a run against an
--- adapter and a run against a table fail in the same words. The rendered
--- question is 'renderQ' — imported from "Agentic.AgentDeck", never re-worded,
--- because @Exec.renderQ@ (@Exec.lean:534@) is one function in Lean and two
--- copies of a prompt header is how two transports come to tell an addressee two
--- different answer formats.
+-- Rendering, decoding, re-asking and abandonment belong to "Agentic.Exec".
+-- This engine sends 'enginePrompt' without adding a bookkeeping header. Text
+-- prompts contain only authored bytes, while other answer kinds retain the
+-- format instruction required by the runtime decoder.
 --
 -- == Departures from the Lean transport, kept as a record of what was decided
 --
@@ -217,12 +208,11 @@
 --   id is not the one in flight is a desynchronized stream, and continuing to
 --   read one is how a reply gets attributed to the wrong question.
 -- * __No @session\/load@, no @session\/fork@ and no mode call.__ v1 opens
---   sessions of its own. The symbolic model and mode axes still travel in
---   'renderQ'\'s header; when routing policy also names a concrete model or
---   generation setting, 'worldOfAcpConfigured' applies the adapter's advertised
+--   sessions of its own. Symbolic model and mode axes remain request metadata.
+--   When routing policy names a concrete model or generation setting,
+--   'engineOfAcpConfigured' applies the adapter's advertised
 --   @session\/set_config_option@ before the prompt. An unconfigured question
---   makes no such call. Capabilities are still read at the handshake, because
---   that is what a client that later wants to ask for a handoff must not skip.
+--   makes no such call. Capabilities are still read at the handshake.
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}

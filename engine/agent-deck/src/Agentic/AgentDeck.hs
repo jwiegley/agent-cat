@@ -9,20 +9,14 @@
 -- @Oracle IO@ over them and the entry points @exec@\/@execIO@ are gone and that
 -- @agentic-run@ on the Haskell side is the runner. What Lean still states, and
 -- what this module is held to, is the trusted base and the retry discipline
--- around it: @Decode@, @renderQ@, @nudge@, @askDecoding@.
+-- around it: @Decode@, @nudge@, @askDecoding@.
 --
 -- == Everything goes to the one session
 --
--- A question carries an 'Agentic.Raw.Addressee' — @model \"reviewer-secure\"@,
--- @tool \"apply\"@, @person \"owner\"@ — and all three kinds are sent to the
--- same @--session@. The addressee is not lost: it is the first thing the
--- rendered question says (@[question for person owner@ …), so the agent knows
--- whose part it is being asked to play. But there is one session, one
--- conversation and one agent, and the /language/ says three addressees. That
--- gap is this adapter's, not the semantics': a world in
--- @Agentic\/Core\/World.lean@ is a function of the question, and this one is a
--- function of the question that happens to route every question to the same
--- place.
+-- Model, tool and person questions all reach the same @--session@. Their
+-- addressees remain in engine metadata and the run trace, not in the message.
+-- One session and one agent therefore answer several authored parties. This
+-- is a property of the transport, not of the question's mathematical meaning.
 --
 -- == The transport, in three commands
 --
@@ -33,7 +27,7 @@
 --    without it, a session that has not started working yet reads as idle and
 --    the /previous/ turn's text is read as this question's answer.
 -- 2. @agent-deck session send \<id\> --message-file \<private-file\>@ — the
---    'renderQ' question without prompt text in argv.
+--    runtime-rendered prompt without prompt text in argv.
 -- 3. @agent-deck session show \<id\> --json@, repeatedly, @deckPollMs@ apart,
 --    until the session is not working any more (see 'Liveness'), and then
 --    @agent-deck session output \<id\> --json@ for the reply — accepted only
@@ -64,26 +58,15 @@
 --
 -- == What is sent, and the format line
 --
--- 'renderQ' is @Exec.renderQ@ (@Exec.lean:534@) verbatim, with @Selected@ empty:
--- a header naming the addressee, the scope axes, the draw when it is not the
--- first, and the answer format, then a blank line, then the prompt. Both scope
--- axes are said /in words/ because this transport has no call for either — that
--- is the fallback @Exec.lean@ documents, not an invention here.
+-- The runtime supplies 'enginePrompt'. Text questions carry the authored bytes
+-- unchanged. Other answer kinds append the decoder's format instruction unless
+-- the authored prompt already ends with it. The adapter adds no bookkeeping.
+-- Model and mode labels are metadata, not instructions to the session.
 --
--- The format line is @Exec.answerSpec@ (imported, never re-worded): a @flag@
--- question carries @Reply with exactly yes or no.@ and a @verdict@ carries
--- @Reply with exactly APPROVE if acceptable, or OBJECTION: \<one line\> if
--- not.@ __This is adapter behaviour and not language semantics.__ Nothing in
--- @Agentic\/Core\/Question.lean@ says a question carries its own answer format;
--- what the language says is that a @flag@'s answer set is @Bool@, and this
--- header is one runtime's way of making a live model likely to say something
--- "Agentic.Text" can read. A different transport may say it differently and the
--- program means the same thing.
---
--- Decoding, re-asking and abandonment are __not__ here: 'worldOfDeck' hands the
--- transport to "Agentic.Exec"'s 'askDecoding', which is @Exec.attemptWith@
--- (@Exec.lean:594@) and @Exec.askDecoding@'s error (@Exec.lean:648@), so the
--- retry wording and the exhaustion message exist once in this package.
+-- Rendering, decoding, re-asking and abandonment belong to "Agentic.Exec".
+-- Answer-format instructions retain Lean's @answerSpec@ vocabulary, while live
+-- prompts omit the envelope used by Lean's reference @renderQ@. The typed
+-- question, trace and decoder are unchanged.
 --
 -- == One rule this transport cannot apply
 --

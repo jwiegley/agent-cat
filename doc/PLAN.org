@@ -4546,6 +4546,24 @@ Phase 1 gate of acat-haskell-program-xgw. Research the four mechanisms with 2026
 ]
 #+end_src
 
+* DONE [#B] Keep runtime bookkeeping out of live session prompts
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-lijk
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-16 Wed 15:45]
+:MODIFIED: [2026-09-16 Wed 16:13]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-16 Wed 16:13]
+:CLOSE_REASON: Removed the shared live-prompt envelope. Text is sent byte-for-byte. Non-text requests retain only decoder format instructions and avoid an authored suffix duplicate. Routing, intent, scope, draw, completion policy, and traces retain their metadata. Added a failing-before/passing-after rendering probe, deck prompt and route assertions, and Pi native coverage. Build, Haskell tests, tier0/tier1, policies, examples, routing, 19 ACP scenarios, 10 deck scenarios, both documentation gates, Pi typecheck, 93 Pi tests, and the current integration checks pass. No corpus or Lean changes and no live calls or activation.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Remove the unconditional question envelope from the shared live-prompt renderer. Text questions must send authored prompt bytes only. Typed replies retain decoder-required format instructions without role, intent, routing, mode, or draw bookkeeping in the message. Preserve request metadata, routing, permission policy, memoization, decoding, and retries. Verify the runtime boundary and deterministic deck and ACP transports. No live model calls or activation.
+
 * DONE [#D] Rendering homomorphism out of the term algebra
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17

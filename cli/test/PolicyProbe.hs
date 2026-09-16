@@ -125,6 +125,8 @@ import Agentic.Cli
     routesFact,
   )
 import Agentic.Runtime
+import qualified Agentic.Engine as Engine
+import Agentic.Schema (schemaBoolean)
 import Agentic.Plan
   ( AnswerSource (AnswerAsked, AnswerReused),
     Cont (..),
@@ -1572,10 +1574,49 @@ steeredMemoProbe failures = do
       ("the authored program still completes", either (const False) (const True) outcome)
     ]
 
+-- | Live prompts contain authored text and only decoder-required instructions.
+promptRenderingProbe :: IORef Int -> IO ()
+promptRenderingProbe failures = do
+  let prompt = "  Authored text.\n\n[question for literal content]\n"
+      request :: Request c
+      request = consultRequest (Q (AddrModel "reviewer") (QScope (Just "deep") (Just "plan")) prompt 3)
+      neutral = engineRequest SText request
+      flagSpec = "Reply with exactly yes or no."
+      flagPrompt text = renderRequest SFlag (consultRequest (Q (AddrPerson "owner") scopeUnit text 0))
+      receipt = engineRequest SAck (effectRequest (Q (AddrTool "apply") scopeUnit prompt 0))
+  pureProbe failures "live prompt rendering keeps bookkeeping out of message text"
+    [ ("text is byte-for-byte authored, including whitespace and literal brackets",
+        Engine.enginePrompt neutral == prompt),
+      ("metadata survives outside the prompt",
+        Engine.engineTarget neutral == "model reviewer"
+          && Engine.engineModelAxis neutral == Just "deep"
+          && Engine.engineModeAxis neutral == Just "plan"
+          && Engine.engineDraw neutral == 3
+          && Engine.engineIntent neutral == Engine.Consult
+          && Engine.engineAnswerKind neutral == Engine.TextAnswer),
+      ("flag gets only its format instruction",
+        renderRequest SFlag request == prompt <> "\n\n" <> flagSpec),
+      ("verdict keeps its exact decoder vocabulary",
+        renderRequest SVerdict request == prompt <> "\n\nReply with exactly APPROVE if acceptable, or OBJECTION: <one line> if not."),
+      ("receipt keeps the completion instruction and effect policy",
+        Engine.enginePrompt receipt == prompt <> "\n\nDo what was asked, then reply with exactly DONE."
+          && Engine.engineIntent receipt == Engine.Effect
+          && Engine.engineRequiresCompletedTurn receipt),
+      ("structured reply carries its schema without bookkeeping",
+        renderRequest (SStructured schemaBoolean) request ==
+          prompt <> "\n\nReply with exactly one JSON value matching this schema and nothing else: {\"type\":\"boolean\"}"),
+      ("an authored format suffix is not duplicated or trimmed",
+        flagPrompt ("Proceed?\n\n" <> flagSpec <> "\n ") == "Proceed?\n\n" <> flagSpec <> "\n "),
+      ("an earlier quoted instruction does not suppress the final format",
+        flagPrompt (flagSpec <> "\nThat was an earlier request.") ==
+          flagSpec <> "\nThat was an earlier request.\n\n" <> flagSpec)
+    ]
+
 main :: IO ()
 main = do
   failures <- newIORef (0 :: Int)
   inputSourceProbe failures
+  promptRenderingProbe failures
   let d = defaultExecSettings
   machineFrameProbe failures
   storeProbe failures

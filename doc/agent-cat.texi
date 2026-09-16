@@ -804,8 +804,6 @@ so a later act cannot overtake an earlier one.  ACP requires a completed turn
 before an effect is credited with a receipt.  Every execution event retains the
 authored request beside its answer source.  A trace therefore states whether an
 answer was reused, or which dispatched question produced it after a fail-over.
-The rendered question header also names the intent, so an addressee knows
-whether it is consulted or asked to act.
 
 The theorem @code{Plan.execAnnotated_correct} in
 @file{model/Agentic/Core/AnnotatedExec.lean} ties these policies back to the
@@ -930,10 +928,11 @@ reason, so this engine cannot perform ACP's completed-turn check.
 @end table
 
 All three services receive the same typed request and use the same decode and
-recovery loop.  The live transports share one rendered question header, and
-the scripted table selects bytes directly from the authored prompt.  Session
-ownership, permission channels, and completion evidence differ.  @ref{Running
-Workflows} gives the corresponding operator commands and safety rules.
+recovery loop.  The live transports send the authored prompt with any required
+reply-format instruction, without adding a bookkeeping header.  The scripted
+table selects bytes directly from the authored prompt.  Session ownership,
+permission channels, and completion evidence differ.  @ref{Running Workflows}
+gives the corresponding operator commands and safety rules.
 
 @section Routing and fail-over
 
@@ -1418,7 +1417,7 @@ expression that the Lean checker and the frozen corpus expect.
 
 A question names one of three parties through @code{model}, @code{tool}, or
 @code{person}.  The identifier belongs to the authored question and appears in
-traces and rendered headers.  A model party can be modified by
+run traces.  A model party can be modified by
 @code{servedBy} and repeated @code{fallingBackTo} applications:
 
 @example
@@ -2009,10 +2008,15 @@ changes.  This staleness guard prevents the output of the previous turn from
 becoming the current answer.
 
 When no @code{--route} option is present, every model, tool, and person question
-goes to the selected session.  The rendered header states the authored addressee,
-the intent, the serving model, and the answer format.  Deck reports no ACP stop
-reason, so the completion evidence is limited to an idle session and newer
-output.
+goes to the selected session.  Text questions send the authored prompt unchanged.
+For verdicts, flags, receipts, and structured answers, the runtime appends the
+required reply-format instruction unless the authored prompt already ends with
+it.  Structured instructions include the JSON Schema used by the decoder.
+The addressee, intent, scope axes, and draw remain in request metadata and the
+run trace rather than being injected into the session.  Serving-model pins still
+control runtime routing, but sending a symbolic label does not reconfigure the
+session.  Deck reports no ACP stop reason, so the completion evidence is limited
+to an idle session and newer output.
 
 @section Routes
 

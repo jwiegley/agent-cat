@@ -102,38 +102,25 @@ PATCH='--- a/src/parse.c
 
 # What this stub says to one rendered question.
 #
-# The question arrives as `Agentic.AgentDeck.renderQ` wrote it: a bracketed
-# header naming the addressee, the scope axes and the answer format, a blank
-# line, then the prompt. The answer code is read off the header's
-# `answer (<code>):` line and the text questions are told apart by what the
-# prompt starts with — the same prefix rule `Agentic.Exec.scriptedWorld` uses,
-# and for the same reason: a substring key can match a prompt through an answer
-# that was spliced into it.
+# Match authored text and the decoder instructions that a live session receives.
+# Known text requests take precedence over format words quoted in their input.
 answer_for() {
-  local msg="$1" code prompt
-  code=$(printf '%s\n' "$msg" | grep -m1 -o 'answer ([a-z]*)' | grep -o '(.*)' | tr -d '()')
-  prompt=$(printf '%s\n' "$msg" | awk 'seen { print } !seen && /^$/ { seen = 1 }')
-
-  case "$code" in
-    ack) printf '%s' 'DONE'; return ;;
-    flag)
-      if [ "$MODE" = undecodable ]; then printf '%s' 'maybe'; else printf '%s' 'yes'; fi
-      return ;;
-    verdict)
-      if [ "$MODE" = objects ]
-      then printf '%s' 'OBJECTION: the buffer bound is still unchecked'
-      else printf '%s' 'APPROVE'
-      fi
-      return ;;
-  esac
-
-  # A text question: the guide, a patch, or — for anything this fixture was not
-  # written for — the prompt itself, which is the corpus's default world.
+  local prompt="$1"
   case "$prompt" in
     'Write out the house style guide'*) printf '%s' "$GUIDE" ;;
     'Draft a patch satisfying:'*)       printf '%s' "$PATCH" ;;
     *'Revise this patch:'*)             printf '%s' "$PATCH" ;;
-    *)                                  printf '%s' "$prompt" ;;
+    *'Do what was asked, then reply with exactly DONE.'*) printf '%s' 'DONE' ;;
+    *'Reply with exactly yes or no.'*)
+      if [ "$MODE" = undecodable ]; then printf '%s' 'maybe'; else printf '%s' 'yes'; fi
+      ;;
+    *'Reply with exactly APPROVE if acceptable, or OBJECTION: <one line> if not.'*)
+      if [ "$MODE" = objects ]
+      then printf '%s' 'OBJECTION: the buffer bound is still unchecked'
+      else printf '%s' 'APPROVE'
+      fi
+      ;;
+    *) printf '%s' "$prompt" ;;
   esac
 }
 

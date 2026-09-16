@@ -77,7 +77,8 @@ describe.runIf(Boolean(runnerPath))("native agent-cat targets through the extens
     expect(result, `${result.failureClass}: ${result.failure}`).toMatchObject({ status: "succeeded", billFresh: "7", billMemo: "7" });
     expect(await readFile(join(deckState, "sends"), "utf8")).toBe("7\n");
     expect(await readFile(join(deckState, "message-mode"), "utf8")).toBe("600\n");
-    expect(await readFile(join(deckState, "argv"), "utf8")).not.toContain("[question for");
+    expect(await readFile(join(deckState, "prompts"), "utf8")).not.toContain("[question for");
+    expect(await readFile(join(deckState, "argv"), "utf8")).not.toContain("Write out the house style guide");
   }, 60_000);
 
   it("keeps Agent Deck prompt text out of argv and failure diagnostics", async () => {

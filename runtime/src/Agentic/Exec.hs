@@ -464,29 +464,17 @@ engineRequest code request =
   where
     question = reqQuestion request
 
--- | Render the common question envelope before any transport sees it.
+-- | The authored prompt, followed only by any missing decoding instruction.
+-- Bookkeeping remains in the request and trace rather than in conversation text.
+-- This live wire policy leaves the typed question and its identity unchanged.
 renderRequest :: SCode c -> Request c -> Text
-renderRequest code request =
-  "[question for "
-    <> addresseeWord (qAddressee question)
-    <> "\nintent: "
-    <> intentName (reqIntent request)
-    <> "\n"
-    <> axis "model" (scopeModelAxis (qScope question))
-    <> axis "mode" (scopeModeAxis (qScope question))
-    <> draw
-    <> "answer ("
-    <> codeWord (fromSCode code)
-    <> "): "
-    <> answerSpec code
-    <> "]\n\n"
-    <> qPrompt question
+renderRequest SText request = qPrompt (reqQuestion request)
+renderRequest code request
+  | instruction `T.isSuffixOf` T.stripEnd prompt = prompt
+  | otherwise = prompt <> "\n\n" <> instruction
   where
-    question = reqQuestion request
-    axis name = maybe "" (\value -> name <> ": " <> value <> "\n")
-    draw
-      | qDraw question == 0 = ""
-      | otherwise = "draw: " <> T.pack (show (qDraw question)) <> " (an independent re-draw)\n"
+    prompt = qPrompt (reqQuestion request)
+    instruction = answerSpec code
 
 engineContextFor :: [Text] -> Maybe AttemptContext -> EngineContext
 engineContextFor _ Nothing =
@@ -1375,15 +1363,9 @@ sayEl (SStructured schema) value =
 -- What a question says about itself on the wire
 -- ---------------------------------------------------------------------------
 
--- | @Exec.Code.name@ (@Exec.lean:455@) — how a code names itself in a prompt
--- header, a warning and an abandonment message.
---
--- __This is not @Agentic.Raw.codeName@.__ That one spells @CodeAck@ as
--- @receipt@, because that is the keyword the surface language and the oracle's
--- wire use. Lean's @IO@ layer spells it @ack@, in the prompt header, in the
--- re-ask nudge and in both error messages, so this port does too; a run's
--- diagnostics are compared against Lean's by eye and by test, and \"receipt\"
--- here would be a silent divergence in the one text a stuck operator reads.
+-- | @Exec.Code.name@ (@Exec.lean:455@), used in warnings and re-ask diagnostics.
+-- The authoring surface and oracle call acknowledgements @receipt@, while
+-- these diagnostics retain Lean's @ack@ vocabulary.
 codeWord :: SomeCode -> Text
 codeWord (SomeCode code) = case code of
   SText -> "text"
@@ -1392,8 +1374,7 @@ codeWord (SomeCode code) = case code of
   SAck -> "ack"
   SStructured _ -> "structured"
 
--- | @Addressee.render@ (@Exec.lean:463@) — how an addressee names itself in a
--- prompt header and in an error.
+-- | @Addressee.render@ (@Exec.lean:463@), used in trace and error messages.
 addresseeWord :: Addressee -> Text
 addresseeWord = \case
   AddrModel i -> "model " <> i
@@ -1403,13 +1384,10 @@ addresseeWord = \case
   -- wants to know which gate ran, and the argv is in the printed program.
   AddrToolExec i cmd _ -> "tool " <> i <> " (" <> cmd <> ")"
 
--- | @Exec.answerSpec@ (@Exec.lean:486@) — what the addressee must say for
--- 'decodeEl' to read it, sent with every question because the trusted base is
--- narrow on purpose and an addressee cannot be expected to guess it.
---
--- These sentences are the exact bytes Lean sends. A structured code includes its
--- standard JSON Schema, so the addressee receives the same validator the decoder
--- uses.
+-- | @Exec.answerSpec@ (@Exec.lean:486@), the instruction for 'decodeEl'.
+-- Non-text prompts carry this instruction when the author has not ended with
+-- it already. Text prompts need no instruction because every text is decodable.
+-- Structured replies carry the same JSON Schema that the decoder validates.
 answerSpec :: SCode c -> Text
 answerSpec = \case
   SText -> "Reply with the text itself and nothing else."

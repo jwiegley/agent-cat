@@ -116,7 +116,14 @@ want_code 0
 want_line "billFresh   7"
 want_line "billMemo    7"
 want_sends 7
-note "happy: settled in 7 turns, exit 0"
+if grep -qE '^\[question for |^(intent|model|mode|draw):|^answer \(' "$state/prompts"; then
+  bad "session prompts contain runtime bookkeeping"
+fi
+[ "$(grep -cFx 'Reply with exactly yes or no.' "$state/prompts")" = 1 ] \
+  || bad "the authored flag format was duplicated or lost"
+grep -qF 'Do what was asked, then reply with exactly DONE.' "$state/prompts" \
+  || bad "the receipt format was not sent"
+note "happy: settled in 7 turns without bookkeeping in prompts, exit 0"
 
 # ---------------------------------------------------------------------------
 # 2. The memo table, from outside.
@@ -320,17 +327,15 @@ want_line "text -> tool cat: Write out the house style guide"
 # with no axis to route by — the tool, the reviewers, the person, the act — is in
 # the default's. The two negative pairs are what a run that sent both questions
 # to both panes would fail.
-saw     pane-b 'question for model author'
-saw     pane-b 'model: deep'
-saw_not pane-a 'question for model author'
-saw_not pane-a 'model: deep'
+saw     pane-b 'Draft a patch satisfying:'
+saw_not pane-a 'Draft a patch satisfying:'
 
-saw     pane-a 'question for tool cat'
-saw     pane-a 'question for model reviewer-correct'
-saw     pane-a 'question for person owner'
-saw_not pane-b 'question for tool cat'
-saw_not pane-b 'question for model reviewer-correct'
-saw_not pane-b 'question for person owner'
+saw     pane-a 'Write out the house style guide'
+saw     pane-a 'Is this patch correct?'
+saw     pane-a 'Apply this patch?'
+saw_not pane-b 'Write out the house style guide'
+saw_not pane-b 'Is this patch correct?'
+saw_not pane-b 'Apply this patch?'
 
 # Neither pane idle, and the two summing to the run's own bill: 1 for the pin,
 # 6 for everything else. The amendment is the second `served by "deep"` and is
