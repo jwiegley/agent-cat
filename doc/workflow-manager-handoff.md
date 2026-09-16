@@ -9,17 +9,19 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-16T10:01:18.865908+00:00`. The next deadline is
-`2026-09-16T11:01:18.865908+00:00`. Complete instrumented and uninstrumented
+Refocus completed at `2026-09-16T10:53:41.558072+00:00`. The next deadline is
+`2026-09-16T11:53:41.558072+00:00`. Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
 also passed all 14 outcomes with verified bytes/modes and independent scoped
 clearance. The controls evidence analyzer correction is independently cleared.
 The first source-controls gate failed with opaque `StorageUnavailable` during
 control cleanup. Its preserved snapshot and partial disposition are verified
 and independently reviewed, without a proved cause. Bounded private observation
-preparation is active, including compilation and data-only checks. No native
-diagnostic, repair, other gate or acceptance is authorized. Both failed resource
-trees remain unavailable for reuse.
+preparation is finishing with a blocked native plan because file-only receipts
+cannot establish publication return after an after-effect exception. Existing
+compilation and data checks may finish. No new channel, native diagnostic, repair
+or other gate is authorized. Both failed resource trees remain unavailable for
+reuse.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -464,10 +466,17 @@ the needed targets offline and run data-only checks. Bounded private records
 must distinguish first submission refusal, drain outcome, stop guard/action/result
 and original entry selection, cleanup and finalization outcomes while preserving
 public opacity, original failure precedence, ownership and budgets. No new
-capture framework or speculative deeper hooks are authorized. A proposed native
-invocation needs a separate reviewed source/resource justification and execution
-decision. The source matrix, raw controls and full WM-016 acceptance remain
-outstanding.
+capture framework or speculative deeper hooks are authorized. Build one failed
+under Werror because the private module lacked a checker other-modules entry.
+That preparation failure is retained.
+
+The proposed digest receipt is supplementary. Publication can create the entire
+receipt and then throw, leaving external files insufficient to establish the
+publication return when the native primary exception takes precedence. The
+parent requested a bounded blocked handback with an explicit red data control
+for this case, not another completion channel or an expanded publication
+protocol. No native readiness claim is authorized. The source matrix, raw
+controls and full WM-016 acceptance remain outstanding.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
