@@ -9,10 +9,10 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-16T06:40:53.152529+00:00`. The next deadline is
-`2026-09-16T07:40:53.152529+00:00`. Complete instrumented ingestion passed and
+Refocus completed at `2026-09-16T06:57:56.942740+00:00`. The next deadline is
+`2026-09-16T07:57:56.942740+00:00`. Complete instrumented ingestion passed and
 received independent scoped clearance. One complete uninstrumented source gate
-is now authorized for run `74e89127-433e-43a2-9bf8-c5f822db2d53`. Raw execution,
+is now authorized for run `7c640c36-c26e-41e5-a4ba-0d6724753a82`. Raw execution,
 other gates, retries and package acceptance remain unauthorized. The original
 incident remains unexplained and quarantined.
 
@@ -372,9 +372,16 @@ portable regression files. Pure packaging verified 592 source/raw member bytes.
 Archive SHA256 is
 `79bede955e86e7759c4201a54a7b1fe5c3e22dc8e3f0bf34b1b03a181f6d7651`.
 Its 12 source/raw mode differences remain unchanged. Source and raw verification
-have separate private build/home/tmp/config roots. Run
-`74e89127-433e-43a2-9bf8-c5f822db2d53` is authorized for one exact source-lane
-ingestion gate only. The 14 checker matrix, original markers, 120/1200 helper
+have separate private build/home/tmp/config roots. Source attempt-01 failed
+before spawn because its recorder equated the complete checkout with the
+positive package list. The parent verified all 1,019 files against canonical
+Git origin plus the approved overlay, including 427 legitimate non-package
+files. No source was removed or changed. Corrected attempt-02 checks the full
+tree and the 592 package members separately. Its entire read-only preflight
+was executed successfully before any record or spawn.
+
+Run `7c640c36-c26e-41e5-a4ba-0d6724753a82` is separately authorized for the first
+actual source-lane ingestion gate only. The 14 checker matrix, original markers,
 budgets and original-owner supervision remain unchanged. Stop on unexpected
 failure, timeout or unproved ownership and preserve available evidence without
 inventing private recorder detail. No raw lane, retry, source fix or further gate
