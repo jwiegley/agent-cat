@@ -476,6 +476,40 @@ Certify verdict: NOT yet certified; 25 declarations. V1: Mat.powSum/sumPow ARE M
 
 Mat vs Matrix (Fintype-bound HMul), MSemiring vs MonoidAlgebra (finite support), Env/Ext vs Option Kleisli — absences real, nowhere stated. After steps 1-7 the survivor registry is checkable by eye.
 
+* DONE [#C] Run the current Chord checks from the Pi integration launcher
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-3ajx
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-16 Wed 16:11]
+:MODIFIED: [2026-09-16 Wed 16:13]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-16 Wed 16:13]
+:CLOSE_REASON: Replaced the removed RemoteSession import and deleted remote test reference with the existing Chord executable check after the four maintained Vitest integration suites. The launcher now passes eight integration tests and the Chord ownership, steering, cancellation, and reattach checks against the Nix-provided Pi 0.85.1 runtime.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+npm run test:integration imports the removed pi-coding-agent/client RemoteSession API and names deleted pi-remote-acp.test.ts. The maintained Chord transport check is test/pi-remote-current.mjs. Update the launcher to run the existing native/owned/current/child suites plus that executable check without dropping transport coverage.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-3ajx",
+    "depends_on_id": "acat-lijk",
+    "type": "discovered-from",
+    "created_at": "2026-09-16T23:11:12.514718Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#D] Leastness at expectation: SqZero star has no order; IdemAdd (SqZero P M) derivable when M's accumulation is idempotent
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
