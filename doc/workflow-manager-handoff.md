@@ -9,14 +9,13 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-16T04:12:26.213677+00:00`. The next deadline is
-`2026-09-16T05:12:26.213677+00:00`. Fresh compilation and data checks passed.
-Independent review cleared the prepared prefix harness with one data-assertion
-gap, which the parent verified as corrected. The single authorized N1 ordered
-prefix diagnostic completed with exit zero and complete capture. Its permission
-is consumed. No further native invocation or gate is authorized. Independent
-review supports preparing prospective validation on genuinely disjoint resources,
-without resolving the historical incident or accepting WM-016.
+Refocus completed at `2026-09-16T05:04:31.671153+00:00`. The next deadline is
+`2026-09-16T06:04:31.671153+00:00`. The prefix diagnostic and controlled
+supervision regressions passed with their stated limits. The owning CI-helper
+fix is committed and independently audited. One complete instrumented ingestion
+gate is now authorized on verified disjoint resources, owned by run
+`002e93ce-83c2-4e5d-a6c5-1cf9bdcb26bc`. No other lane, retry or package acceptance
+is authorized, and the historical incident remains unexplained.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -312,7 +311,8 @@ cleared preparation with stated limits. It supports the source/configuration
 resource separation, preserved 14 checker invocations and fixed capture bounds.
 The parent separately checked seven old mutable paths and five new roots.
 Both lanes share outer home/tmp/config and must be sequential. Unresolved work
-prohibits their reuse without disposition. No native manager gate is authorized.
+prohibits their reuse without disposition. Only the instrumented lane is now
+authorized by the separate decision recorded below.
 
 Source inspection found an owning CI-helper defect: `admission_audit.py` uses
 `subprocess.run` with 120-second checker and 1,200-second build timeouts. Installed
@@ -340,7 +340,32 @@ source review `5e521030-c061-4e2c-897f-e0ac39284f84` found no issues. The portab
 command then passed its three cases from 04:49:00 to 04:49:02 UTC, with all six
 source hashes unchanged and parent-verified results. Evidence is under
 `helper-integration.qC6vWWdV`. Existing ingestion gate bytes remain unchanged.
-No full manager gate is authorized by those results.
+Commit `fa186851dc76f4253bf460ea0de9ef04820cd7c8` preserves that fix and regression.
+Committed-work fess `5144160a-bd65-4e90-b55d-d071f5d60fb3` found no issues.
+
+The first gate recorder, `gate-instrumented-01`, failed before spawn because it
+required an old configured XDG path to exist. It launched zero checkers. That
+failure is preserved, and no historical path was created or changed. The parent
+corrected only preflight in `gate-instrumented-02`, retaining resolved potential
+footprints even when absent. Six data checks cover absent paths, overlap, aliases
+and permission errors. This does not treat absence as cleanup proof.
+
+Run `002e93ce-83c2-4e5d-a6c5-1cf9bdcb26bc` alone owns the newly authorized first
+actual gate launch, using the exact hash-bound prepared launcher and unchanged
+full ingestion script. All 14 checker invocations and, if complete, 86 captures
+must be retained and checked. Stop at first unexpected failure, timeout, unproved
+ownership or invalid capture, without patching, repeating or moving to another
+lane. Intended mutants require their original predicate and acceptable cleanup
+capture. Original databases and sidecars remain raw evidence. Saved decisions
+cannot authorize another invocation.
+
+For later uninstrumented verification, `current-source.jJwlsNm8` combines the
+corrected 38-path WM-016 candidate with canonical commit `fa186851` and the four
+portable regression files. Pure packaging verified 592 source/raw member bytes.
+Archive SHA256 is
+`79bede955e86e7759c4201a54a7b1fe5c3e22dc8e3f0bf34b1b03a181f6d7651`.
+Its 12 source/raw mode differences remain unchanged. No native source/raw gate
+has run or been authorized from that package.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
