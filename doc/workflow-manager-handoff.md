@@ -9,13 +9,14 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-16T00:45:25.542815+00:00`. The next deadline is
-`2026-09-16T01:45:25.542815+00:00`. Fresh compilation and data checks passed.
+Refocus completed at `2026-09-16T01:27:57.816495+00:00`. The next deadline is
+`2026-09-16T02:27:57.816495+00:00`. Fresh compilation and data checks passed.
 Independent review cleared the prepared prefix harness with one data-assertion
 gap, which the parent verified as corrected. The single authorized N1 ordered
 prefix diagnostic completed with exit zero and complete capture. Its permission
-is consumed. No further native invocation or gate is authorized. An independent
-review is deciding the next contract-grounded step, and WM-016 remains unaccepted.
+is consumed. No further native invocation or gate is authorized. Independent
+review supports preparing prospective validation on genuinely disjoint resources,
+without resolving the historical incident or accepting WM-016.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -290,10 +291,32 @@ was opened during preservation or analysis. Evidence is under
 
 This is a fourth diagnostic non-reproduction. The original failed fixture and
 its quarantined reservation remain untouched. The authorization is consumed,
-and a saved decision record cannot authorize another launch. Workflow
-`f229f4c0-76ec-418c-8f74-4e46c0f4dc23` is independently interpreting the result
-and the exact requirements for prospective current-byte gates. It cannot grant
-execution, waive obligations, explain an uncaptured cause, or close WM-016.
+and a saved decision record cannot authorize another launch. Independent review
+`366c030c-a80c-4826-9dae-0d043418927a` accepted the result interpretation with
+stated limits and found no new execution defects. It distinguishes historical
+quarantine disposition from prospective verification on independent resources.
+Operator action is required to reuse affected quarantine, not merely to collect
+evidence on actually disjoint resources. Package acceptance remains blocked by
+the incomplete current-byte verification matrix.
+
+The next target is complete `manager/ci/ingestion.sh`, including N1, N8, interrupted
+and later cases, vectors, and all six existing helper modes. Preparation-only
+worker `e9e1f5e7-c846-4b28-a1d3-d82db4cf7665` owns
+`ingestion-gate-prep.jhjMS3l4`. It must establish actual resource non-overlap,
+prepare bounded full-dispatch capture, and keep instrumented evidence separate
+from future uninstrumented source/raw gates. No native gate is authorized.
+
+Source inspection found an owning CI-helper defect: `admission_audit.py` uses
+`subprocess.run` with 120-second checker and 1,200-second build timeouts. Installed
+CPython kills the child on timeout or interruption before propagating the error.
+A narrow owning-helper correction is being prepared in a new candidate copy.
+It must preserve failure deadlines, interrupt through the original Popen handle,
+join cleanup, preserve primary/secondary failure evidence, and never convert
+late exit zero into success. No hard-kill fallback or stored-PID reconstruction
+is allowed. A failed join must remain explicitly unproved and stop advancement.
+Private capture validation must also precede helper advancement after expected
+mutant failures. No live supervision test or gate is authorized yet, and this
+helper defect is not an established cause of the original policies failure.
 
 The author disclosed a stopped filename-only search that listed forbidden
 artifact/session/sentinel filenames, with no reported content reads. The
