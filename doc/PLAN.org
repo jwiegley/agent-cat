@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 01:41]
+:MODIFIED: [2026-09-16 Wed 02:29]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8714,6 +8714,12 @@ Immediate RAW gate exit: actual raw attempt01 ran07:56:26.099419–08:17:31.7288
 Complete RAW ingestion22c838ca passed one actual14checker gate:4positive0,10intendednegative1, sixbuilds0, original120/1200budgets and original helper joins. Parent verified17408identities,4026preservedentries,12helper+2top binaries,1019sourcefiles/592source+rawmembers, sixmutationchains/markers,28DBsidecar absences and public lifecyclecounts. Archive79bede...1073774bytes/raw592modes/12source-rawmode differences unchanged; no chmod or private telemetry. Independent raw-result review9b697149-e2f5-44f5-a6b2-d446ea754806 found No issues, scopedOK-with-notes, reportSHA2563bed31b53866ade5bf01f9adafbc2977b358ae3a05de2555b56f88702eb2574e. No broader acceptance.
 
 Next prerequisite is controls-specific preservation/supervision preparation, not gate execution. Current unchanged controls.sh selects38checkers (12top+26helper),22positive/16intendednegative, six public-contract validations and13helperbuilds. Reviewer requires N<cap>-<scenario> top-tree coverage,13audit-control roots, both declared added modules (Manager.Test.AcceptanceAudit and runtimeControlDeliveryAudit), exact predicates/rewrites, and actual source/resource/supervision mapping. Source/raw controls plans and parent source launcher are prepared but NOT authorized. Original author38fdd173-c848-4fa7-9a86-e27e77940ca7 writes only current-source.jJwlsNm8/controls-source-verification/preparation with minimal adapted raw-preservation/analysis/data checks; no native/checker/build/gate/source fix/DBAPI/Git. All prior sources/results/quarantine remain immutable.
+
+Controls evidence preparation completed without executing a gate. Parent verification passed 1,667 identity comparisons, including 1,019 full source files, 592 raw members, 18 source references and two launcher references. Synthetic checks passed but did not exercise the complete analyzer's refusal for missing helper fixture trees. Independent reviewer fa14e0dc-2fc0-477e-b57d-aedecbc89f1f therefore blocked preparation with P1: the analyzer could claim complete evidence when a helper N1 or N8 directory was absent. This is a source-proved preparation defect, not a native controls failure.
+
+Preparation-only correction run 6520bec3-427a-4872-b9c4-69e8ab94d0fc owns current-source.jJwlsNm8/controls-source-verification/preparation-v2. It must enforce both helper fixture directories before complete disposition and add actual-analyzer synthetic positive, missing-N1 and missing-N8 checks that detect the old defect. Partial preservation remains allowed. Version one, its blocked review, all source/raw/archive bytes and parent launchers remain unchanged. No native test, build, gate, repair to application source, retry or acceptance is authorized. The next action is verification and review of the minimal correction before any separate source-controls execution decision.
+
+Refocus completed at 2026-09-16T09:12:54.174961+00:00, with next deadline 2026-09-16T10:12:54.174961+00:00. Full WM-001 through WM-044 and G0 through G5 remain the objective. Accepted packages remain WM-001 through WM-015 and G0. Two parent-only path assumptions failed during preparation identity inspection and were corrected before the successful comparison. They did not change source or execute native work.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 

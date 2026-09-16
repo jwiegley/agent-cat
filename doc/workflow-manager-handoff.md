@@ -9,13 +9,14 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-16T08:18:45.222781+00:00`. The next deadline is
-`2026-09-16T09:18:45.222781+00:00`. Complete instrumented and uninstrumented
+Refocus completed at `2026-09-16T09:12:54.174961+00:00`. The next deadline is
+`2026-09-16T10:12:54.174961+00:00`. Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
 also passed all 14 outcomes with verified bytes/modes and independent scoped
-clearance. Controls-specific evidence preparation is now active, not gate
-execution. Further gates, retries and package acceptance remain unauthorized,
-and the historical incident is unexplained and quarantined.
+clearance. Controls evidence preparation is blocked by a missing-helper-fixture
+check in its analyzer. A preparation-only correction is active. Further gates,
+retries and package acceptance remain unauthorized, and the historical incident
+is unexplained and quarantined.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -406,13 +407,23 @@ No private telemetry or historical cleanup proof is claimed.
 
 The next source-controls prerequisite is preservation/analysis for its distinct
 layout: 38 checkers, 22 positive and 16 intended-negative outcomes, six public
-contract validations and 13 helper builds. Preparation-only run
-`38fdd173-c848-4fa7-9a86-e27e77940ca7` owns
-`current-source.jJwlsNm8/controls-source-verification/preparation`. It must cover
-all top-level scenario roots, helper variants and both declared added audit
-modules, preserve exact predicates/budgets, and map actual resource/supervision
-behavior. Source/raw controls plans and a parent launcher exist but are not
-authorized for execution. Full WM-016 acceptance remains outstanding.
+contract validations and 13 helper builds. Preparation run
+`38fdd173-c848-4fa7-9a86-e27e77940ca7` completed data-only checks under
+`current-source.jJwlsNm8/controls-source-verification/preparation`. The parent
+verified 1,667 identities. Independent reviewer
+`fa14e0dc-2fc0-477e-b57d-aedecbc89f1f` blocked the preparation because its analyzer
+could claim complete evidence without a preserved helper N1 or N8 directory.
+The original synthetic checks covered root selection rather than this analyzer
+refusal. No controls gate had run.
+
+Correction run `6520bec3-427a-4872-b9c4-69e8ab94d0fc` owns only the new
+`current-source.jJwlsNm8/controls-source-verification/preparation-v2` namespace.
+It must enforce both helper fixture directories and test the actual analyzer
+with complete and missing-helper layouts, including a negative control against
+the old analyzer. The original preparation, blocked review, application sources,
+archive and parent launchers remain unchanged. Verification and review of this
+minimal correction precede any source-controls execution decision. Full WM-016
+acceptance remains outstanding.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
