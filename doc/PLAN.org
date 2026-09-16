@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 02:50]
+:MODIFIED: [2026-09-16 Wed 02:56]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8724,6 +8724,10 @@ Refocus completed at 2026-09-16T09:12:54.174961+00:00, with next deadline 2026-0
 The controls preparation P1 was corrected with one assertion requiring both preserved helper directories before complete disposition. Actual-analyzer synthetic regressions reproduced false acceptance in the old analyzer for missing N1 and N8, then verified corrected rejection and a complete-data pass. Parent verification passed 1,690 identity comparisons with source, raw archive and original preparation unchanged. Reviewer 4eafa11b-3dbe-477e-b067-0694c8981b66 found no issues and cleared only this preparation correction.
 
 The parent refreshed 17 old resource footprints against five new controls roots. The build directory was empty and its cache absent. The exact read-only source-controls launcher preflight passed with 1,019 source files, 592 positive members and zero native spawns. The parent then authorized run e1f5b003-07a5-4c39-8c2c-8905cbd05f49 for one complete uninstrumented source-controls gate and its reviewed raw preservation and analysis. The unchanged matrix has 38 checker invocations, 22 positive and 16 intended-nonzero outcomes, six public-contract validations and 13 helper builds. No result is claimed yet. The child must report original gate exit and join before preservation. Unexpected failure, timeout, uncertain ownership or invalid capture stops execution without retry or repair. Raw controls, other gates, historical quarantine reuse and WM-016 acceptance remain unauthorized.
+
+The first complete source-controls attempt e1f5b003-07a5-4c39-8c2c-8905cbd05f49 returned exit 1 from 2026-09-16T09:50:26.259136+00:00 to 09:53:19.374411+00:00, after 173.115048667 seconds. The original outer gate handle joined, with no outer primary failure, wait failure or deferred interruption. The first available public refusal is "control cleanup (no retry) public refusal (cause opaque): StorageUnavailable", followed by "manager-approval-check: StorageUnavailable". It follows the saturation assertions in stdout. No contention or historical-cause equivalence is inferred. Only controls.eqILIg exists, with no helper variant roots. The required matrix did not complete.
+
+The parent received and inspected the original exit record before preservation. All further execution is stopped. The same author may only finish the exact reviewed raw preservation and partial analysis. No retry, application repair, replacement capture, other gate, SQLite API, saved-PID action or reuse of the failed run resources is authorized. Runtime completion, outer process exit and original native cleanup proof remain distinct. The historical quarantine remains untouched and this new failure is retained separately. Source-controls result verification and diagnosis remain pending.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 

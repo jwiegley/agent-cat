@@ -14,9 +14,10 @@ Refocus completed at `2026-09-16T09:12:54.174961+00:00`. The next deadline is
 source ingestion passed with independent scoped clearance. Raw ingestion has
 also passed all 14 outcomes with verified bytes/modes and independent scoped
 clearance. The controls evidence analyzer correction is independently cleared.
-One complete source-controls gate is now authorized with no result claimed yet.
-Raw controls, other gates, retries and package acceptance remain unauthorized,
-and the historical incident is unexplained and quarantined.
+The first source-controls gate failed with opaque `StorageUnavailable` during
+control cleanup. Only raw preservation and partial analysis continue. Raw
+controls, other gates, retries and acceptance remain unauthorized. The new
+failure and historical quarantine remain separate and unresolved.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -429,10 +430,21 @@ an empty controls build directory and absent cache. The exact read-only launcher
 preflight passed before any native spawn. The parent then authorized run
 `e1f5b003-07a5-4c39-8c2c-8905cbd05f49` for one complete source-controls gate through
 the existing `controls-source-verification/attempt-01/execute.py`. Its only
-post-return work is the reviewed raw preservation and analysis. No gate result
-is claimed yet, and the original exit/join notice must precede preservation.
-Failure, timeout, uncertain ownership or invalid capture stops execution without
-retry or repair. Raw controls and full WM-016 acceptance remain outstanding.
+post-return work is the reviewed raw preservation and partial analysis. This
+first gate failed with exit one from 09:50:26.259136 to 09:53:19.374411 UTC, after
+173.115 seconds. The original outer gate handle joined without outer failure or
+interruption. The first available public refusal was
+`control cleanup (no retry) public refusal (cause opaque): StorageUnavailable`,
+followed by `manager-approval-check: StorageUnavailable`. It followed saturation
+assertions in stdout. No contention or relationship to the historical incident
+is inferred. Only `controls.eqILIg` was created, with no helper variant roots.
+
+The parent inspected the original exit record before preservation. All further
+execution stopped, and the failed resources cannot be reused. Only the exact
+reviewed raw preservation and partial analysis remain allowed. Outer gate exit
+does not supply missing original native cleanup evidence. No retry, repair,
+replacement capture, SQLite access or another gate is authorized. The source
+matrix, raw controls and full WM-016 acceptance remain outstanding.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
