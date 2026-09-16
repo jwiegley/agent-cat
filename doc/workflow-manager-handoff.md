@@ -9,13 +9,12 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-16T07:33:15.773424+00:00`. The next deadline is
-`2026-09-16T08:33:15.773424+00:00`. Complete instrumented ingestion passed and
-received independent scoped clearance. The uninstrumented source gate has now
-returned exit zero with its original outer handle joined. Preservation and
-outcome/provenance checks are pending. Raw execution, other gates, retries and
-package acceptance remain unauthorized. The original incident is unexplained
-and quarantined.
+Refocus completed at `2026-09-16T07:53:04.297130+00:00`. The next deadline is
+`2026-09-16T08:53:04.297130+00:00`. Complete instrumented and uninstrumented
+source ingestion passed with independent scoped clearance. One raw-archive
+ingestion gate is now separately authorized for run
+`22c838ca-6b3d-4036-ac76-7b7f355965cb`. Other gates, retries and package acceptance
+remain unauthorized. The original incident remains unexplained and quarantined.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -384,10 +383,21 @@ was executed successfully before any record or spawn.
 Run `7c640c36-c26e-41e5-a4ba-0d6724753a82` completed its one actual source gate
 from 07:01:19.385939 to 07:29:53.159673 UTC, with exit zero, original gate handle
 joined, and no outer primary/wait failure. The parent read that completion on
-the immediate exit notice before preservation/analysis. Only raw preservation
-and the 14-outcome/provenance checks continue. Available evidence must not be
-augmented with invented private recorder detail. No raw lane, retry, source fix
-or further gate is authorized. Review the source result before a raw decision.
+the immediate exit notice before preservation/analysis. Parent verification
+checked 17,407 identities, all 14 outcomes and markers, six mutation chains,
+4,026 preserved entries, 28 databases and public lifecycle assertions. No private
+recorder telemetry was present or borrowed. Independent result review
+`93479663-030f-4efe-8c46-ee7e1f0ec4e4` found no issues and supports a separate
+raw decision, not raw or package acceptance.
+
+The parent prepared `raw-verification/attempt-01` and successfully evaluated
+its complete read-only preflight before any record or spawn. It checks exact
+592-member raw bytes/modes, the immutable archive and actual resource separation.
+Run `22c838ca-6b3d-4036-ac76-7b7f355965cb` is authorized for one exact raw-lane
+ingestion gate. All 12 source/raw mode differences remain unchanged. No chmod,
+source substitution, retry, repair, other gate, database API or stored-PID action
+is allowed. Preserve first available failure evidence without inventing telemetry
+and report gate exit before lengthy analysis. Full acceptance remains outstanding.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
