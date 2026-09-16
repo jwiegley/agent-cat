@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-16T14:04:09.109863+00:00`. The next deadline is
-`2026-09-16T15:04:09.109863+00:00`. Complete instrumented and uninstrumented
+Refocus completed at `2026-09-16T15:23:18.101911+00:00`. The next deadline is
+`2026-09-16T16:23:18.101911+00:00`. Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
 also passed all 14 outcomes with verified bytes/modes and independent scoped
 clearance. The controls evidence analyzer correction is independently cleared.
@@ -22,9 +22,15 @@ failed because the parent omitted the fixture-directory prelude. A separately
 authorized diagnostic with corrected setup returned native exit one and eligible
 capture. It records WorkerUnexpectedExit, then StoreBusy during selection and
 final action, with cleanup returned. Parent verification passed 1,126 identity
-checks, and independent review supports this failed result. Only narrow
-preparation to distinguish Worker's existing failure-collapse paths is active.
-No native execution, causal repair, cleanup retry, reuse or acceptance is
+checks, and independent review supports this failed result. A separately
+authorized Worker-boundary diagnostic returned native exit one with eligible
+capture. It records original ExitFailure 130 before WorkerUnexpectedExit, then
+selection StoreBusy. Its preserved Runtime journal records run.cancelled.
+Parent verification passed 1,126 checks, and review identifies the deliberate
+CLI cancellation-exit path for this invocation. Selection failed before Store
+database admission. Preparation of a deterministic contention regression is
+active, without choosing automatic retry or running the Store/native fixture.
+No policy change, causal repair, native execution, reuse or acceptance is
 authorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
@@ -529,16 +535,45 @@ Given this established Worker, returned original closeWorker entails passing the
 retained group-outcome cleanup check. It does not establish reservation release,
 lease/root closure, escaped-descendant containment or reuse authority.
 
-WorkerUnexpectedExit still conflates non-success original group exit, premature
-EOF and otherwise-unclassified exception. Preparation-only run
-`7e0acf63-fd0d-455a-acb2-53cd2d9a9373` owns `worker-boundary-prep.16u1FQxm` and may
-record bounded original values at those existing reduction sites. Inspection
-also found a send-side classify call. Only its first failure may be recorded,
-not every successful send, with existing capacities unchanged. No new reads,
-waits, owners, Store/C/ProcessGroup hooks, cleanup/finalization retries or public
-error changes are authorized. Only fresh compilation and data checks may run
-before independent review. Full source/raw controls verification and WM-016
-acceptance remain outstanding.
+WorkerUnexpectedExit was ambiguous between non-success original exit, premature
+EOF and otherwise-unclassified exception. Preparation run
+`7e0acf63-fd0d-455a-acb2-53cd2d9a9373` under `worker-boundary-prep.16u1FQxm` added
+only bounded observations at those existing reductions, including first failed
+send before its separate classify call. Parent verification passed 6,731
+identities and 57 data assertions per N1/N8. The initial wrong test expectation
+for UserInterrupt rendering remains retained. Independent review
+`3a1b5069-9ee4-4b67-b1f8-1bcf4f664f35` cleared the preparation.
+
+Fresh `worker-boundary-native.Nj49DR3k` passed exact preflight with 30 old resource
+exclusions and the original empty fixture-directory prelude. Separately authorized
+run `6307d3f1-38d1-4535-92e7-0d6c0dc5149c` returned exit one after 43.625212 seconds.
+Both original handles joined, raw preservation preceded interpretation, and the
+reviewed receiver returned eligible-capture with exact bindings. Parent verified
+1,126 identities over 47 entries, 29 regular files and all bound records.
+
+The 28-event capture observes original ExitFailure 130, then supervisor
+WorkerUnexpectedExit, followed by selection/final-action StoreBusy and stop's
+entry-result StorageUnavailable. No EOF or first-send failure marker appears.
+The journal ends with run.cancelled at sequence 779. The CLI has explicit
+MachineCancelled handlers that emit RunCancelled then throw ExitFailure 130.
+Read-only review `6bb9c3b3-1f63-43bd-b47b-9a9404622673` identifies this selected
+prepared-frontend cancellation path without inferring an OS signal or relabelling
+cancellation as success. Further broad Worker-cause diagnostics are unnecessary.
+The remaining StoreBusy is pre-transaction in-process gate refusal, not a proved
+SQLite/OS failure. Selection failure skips finalization and reservation release.
+Existing publication-failure tests require explicit original-owner recovery,
+rather than automatically retrying opaque failures.
+
+Preparation run `8a2f4110-f7b2-4668-bb80-b2d2606c44bc` owns
+`selection-contention-prep.VByl47hE`. It may prepare and compile a deterministic
+admission-hold/terminal-selection/release regression, preserving retained claims
+and using explicit recovery only as a separate test action. The parent approved
+the existing startup-exit fixture for this narrow shared path, not as coverage
+of post-start cancellation 130. Existing deadline callbacks can hold admission,
+with minimal private observations of selection and refused DB-body entry.
+The actual Store/native regression remains unexecuted pending review. No
+production persistence-policy change, automatic retry or weakened budget is
+authorized. Full controls verification and WM-016 acceptance remain outstanding.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
