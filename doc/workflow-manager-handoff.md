@@ -9,19 +9,21 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-16T11:42:15.636230+00:00`. The next deadline is
-`2026-09-16T12:42:15.636230+00:00`. Complete instrumented and uninstrumented
+Refocus completed at `2026-09-16T13:15:55.076893+00:00`. The next deadline is
+`2026-09-16T14:15:55.076893+00:00`. Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
 also passed all 14 outcomes with verified bytes/modes and independent scoped
 clearance. The controls evidence analyzer correction is independently cleared.
 The first source-controls gate failed with opaque `StorageUnavailable` during
 control cleanup. Its preserved snapshot and partial disposition are verified
 and independently reviewed, without a proved cause. Bounded private observation
-preparation completed with data evidence, but review found a caller-quiescence
-gap. A narrow preparation-only correction is active for caller settlement and
-a settled flush-result report over the existing captured stream. No native
-diagnostic, causal repair or other gate is authorized. Both failed resource
-trees remain unavailable for reuse.
+corrections and the parent receiver are independently cleared. One diagnostic
+failed because the parent omitted the fixture-directory prelude. A separately
+authorized diagnostic with corrected setup returned native exit one and eligible
+capture. It records WorkerUnexpectedExit, then StoreBusy during selection and
+final action, with cleanup returned. Parent verification passed 1,126 identity
+checks. Read-only result/source review is active. No further native execution,
+repair, reuse or acceptance is authorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -487,14 +489,41 @@ assume they are settled. This is not a diagnosed cause of the native failure.
 The review also distinguished preceding validated capture facts from publication
 return and rejected a universal requirement to prove every reporting write.
 
-Preparation-only run `d53b9d93-d18d-474d-8d64-f8971dc1eada` owns
-`controls-observation-fix.R4JRrPtF`. It may add conservative fixed caller
-settlement eligibility and a bounded report of the already settled flush result
-over existing parent-captured stdout or stderr. Original waits, cleanup,
-exception precedence and public outcomes remain unchanged. Missing or ambiguous
-received status remains inconclusive. Only fresh compilation and data checks
-are authorized, with all prior versions and failed resources retained. The
-source matrix, raw controls and full WM-016 acceptance remain outstanding.
+Preparation-only run `d53b9d93-d18d-474d-8d64-f8971dc1eada` completed under
+`controls-observation-fix.R4JRrPtF`. Its current `audit-source-v2` has conservative
+caller-settlement eligibility and a bounded settled-flush report. Parent
+verification passed 6,736 identities, with 41 positive assertions per N1/N8 and
+two retained file-only reds. A report-schema rejection was corrected without
+code changes or test reruns. Independent correction review
+`55ef50b5-e718-4b0a-90b3-8b95d9d52c71` found no issues. The actual Python parent
+receiver passed 30 data checks and review
+`a1c52cda-c18a-44f3-9cf9-f46f7db73959`. Received status is not native cleanup proof.
+
+The first one-shot diagnostic, `d04b7ef9-2d7d-4427-8dbf-dc8145c3c743`, ran under
+`controls-boundary-native.nxDtUJw9` and failed in 0.170422 seconds because the
+parent omitted the original gate's fixture-directory creation. It failed before
+runner setup and produced no capture. The attempt remains consumed and retained
+with 1,079 parent integrity checks. This setup failure does not explain the
+original StorageUnavailable refusal.
+
+Review `fb9cb0b3-4d5f-4661-9782-bc01dd05922b` cleared the minimal correction: a
+fresh exclusive empty work directory checked before launch. Separately authorized
+run `7cd600da-edf7-435e-8db8-8a4843ee9c4b` used
+`controls-boundary-native-02.GkjxSMoY` without source, fixture or budget changes.
+It returned native exit one after 41.555732 seconds, with both original handles
+joined. Raw preservation retained 47 entries and 29 regular files. The reviewed
+receiver returned exit zero with exact fresh scope and three input hash matches.
+
+The eligible 26-record capture observes WorkerUnexpectedExit before entry
+classification and in the discarded drain, then StoreBusy at original selection
+and final-action result. Original cleanup returned, classification produced
+StorageUnavailable, and stop observed that entry result. Both original callers
+settled, with no capture fault or recorded first submission refusal. These facts
+do not establish deeper worker cause, release or equivalence with prior failures.
+Parent verification passed 1,126 identity comparisons. Read-only review
+`0aa6accf-5f1e-4949-9f19-3dc56b1bb3fe` now assesses the result and relevant source
+paths. No further native execution or repair is authorized. Full source/raw
+controls verification and WM-016 acceptance remain outstanding.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
