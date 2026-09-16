@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-15 Tue 17:33]
+:MODIFIED: [2026-09-15 Tue 17:47]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8637,7 +8637,7 @@ ambiguous delivery without unauthorized replay.
 
 RESUMED BY USER 2026-09-15T23:10:55.861310+00:00. Explicit request: Resume your work now and cancel the pause. This supersedes the user-halt state below, not the frozen acceptance contract or action-specific safety restrictions. No API-session goal exists. Full scope remains WM001-WM044/G0-G5, with WM001-WM015/G0 accepted. Next: fresh verified reconstructed baseline compilation and data checks, independent cleanup-proof/correction decision, then a specifically bounded native plan if justified. No blind policy retries, deployment, paid routes, new Lean build or saved-PID signalling.
 
-Refocus 2026-09-15T23:59:46.052389+00:00; next deadline 2026-09-16T00:59:46.052389+00:00. Source reconstructed from accepted7b88f172 plus both checkpoint patches in /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/controls.qzldrova/resume-20260915.ZHiqa0SO/source and all588positive files verified byte/mode/size. Prior evidence is read-only. No retained reviewer children are available in this parent session; verify a fresh isolation probe before the fallback review.
+Refocus 2026-09-16T00:45:25.542815+00:00; next deadline 2026-09-16T01:45:25.542815+00:00. Source reconstructed from accepted7b88f172 plus both checkpoint patches in /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/controls.qzldrova/resume-20260915.ZHiqa0SO/source and all588positive files verified byte/mode/size. Prior evidence is read-only. No retained reviewer children are available in this parent session; verify a fresh isolation probe before the fallback review.
 
 Resumed baseline completed23:22:00UTC: one current-byte all-target build with tests enabled and GHC-Werror exited0 after470.116116seconds. Data-only contract probe exited0 (99schemas/29operations/327payload/20SSE/3download cases). All1005source files stayed unchanged. Parent verified588sealed positive sources plus417accepted Git blobs/modes,1198artifact comparisons/1176unique paths and22compiled executables. No compiled application/checker or Runtime/native suite was executed by that baseline. Evidence under resume-20260915.ZHiqa0SO and resume-parent.zTEX65dI.
 
@@ -8654,6 +8654,8 @@ Prefix preparation handback 2026-09-16T00:25:54.001227+00:00: original workerd86
 Independent preparation/fess review now runs as workflowd9b7c9c4-4a0f-46b4-8a9b-c3d74ab4fafd. It must examine complete capture, all normal dispatch/body preservation, fixed budgets, actual capacity limitations and the NOT-EXECUTED native manifest. Source-derived successful prefix requires7/16owners and28/64tracked groups. Dynamic ordinary-event/C-slot capacity is not promised; overflow remains inconclusive. Source inspection, not earlier green tests, discovered the capture gaps, and new regressions were added afterward. No application failure is inferred from the orchestration timeout. No active writer remains. Parent must review the independent result before any one-shot native decision.
 
 Preparation review01df0736-4702-4528-af56-f4ceb4b7e15e completed with OK-with-notes, no execution authority (reportSHA256ed21bfb49aae5679c5b06d626ee3e1bb7a505880b69aba69c7db86fc5dcca923). OneP2requires final file/memory count+tail comparison in the combined primary-plus-checked-flush-refusal data case, beyond the already-passing exception assertion. Parent verified this exact omission. Same author revived asa26892c7-195b-474b-bbf6-9ee4e0e8be6d at 2026-09-16T00:33:00.116410+00:00 for that one assertion and affected current-byte build/data/provenance refresh in fresh prefix-tail-fix.HbgBun4G. Entire reviewedv4namespace remains read-only. No native launch, new launcher framework or production change. Review-fix-only work is parent-verified rather than recursively restarting an unchanged broad review. Native decision remains pending the fixed handback.
+
+Native decision 2026-09-16T00:45:25.542815+00:00: parent verified the requested one-assertion correction as sole generated code delta versus independently reviewedv4,1885artifact comparisons,588immutable/592generated files with replica,24legacy/35prefix assertions eachN1/N8 and2negative controls. No new independent re-review is claimed for this fess-only fix. Parent authorizes EXACTLY ONE N1failure-prefix invocation from prefix-tail-fix.HbgBun4G/artifacts/final/native-plan.NOT-EXECUTED.json after immediate identity/fresh-destination checks. Same author run8947b749-9f31-4aaf-9cd5-f2a55775a810 owns it. No v4run, N8, interrupted pair, later cases, mutants, full gate or retry. Original guards/capacities/deadlines/owner joins and all boundary captures remain required. Any incomplete capture is inconclusive even if final capture later completes. A pass is one more non-reproduction, never original-failure resolution. On unknown live state inspect this exact run, do not launch another worker or signal savedPIDs.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
