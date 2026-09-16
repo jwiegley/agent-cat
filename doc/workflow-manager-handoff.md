@@ -9,12 +9,13 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-16T06:57:56.942740+00:00`. The next deadline is
-`2026-09-16T07:57:56.942740+00:00`. Complete instrumented ingestion passed and
-received independent scoped clearance. One complete uninstrumented source gate
-is now authorized for run `7c640c36-c26e-41e5-a4ba-0d6724753a82`. Raw execution,
-other gates, retries and package acceptance remain unauthorized. The original
-incident remains unexplained and quarantined.
+Refocus completed at `2026-09-16T07:33:15.773424+00:00`. The next deadline is
+`2026-09-16T08:33:15.773424+00:00`. Complete instrumented ingestion passed and
+received independent scoped clearance. The uninstrumented source gate has now
+returned exit zero with its original outer handle joined. Preservation and
+outcome/provenance checks are pending. Raw execution, other gates, retries and
+package acceptance remain unauthorized. The original incident is unexplained
+and quarantined.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -380,12 +381,13 @@ files. No source was removed or changed. Corrected attempt-02 checks the full
 tree and the 592 package members separately. Its entire read-only preflight
 was executed successfully before any record or spawn.
 
-Run `7c640c36-c26e-41e5-a4ba-0d6724753a82` is separately authorized for the first
-actual source-lane ingestion gate only. The 14 checker matrix, original markers,
-budgets and original-owner supervision remain unchanged. Stop on unexpected
-failure, timeout or unproved ownership and preserve available evidence without
-inventing private recorder detail. No raw lane, retry, source fix or further gate
-is authorized. Review the source result before any raw-archive decision.
+Run `7c640c36-c26e-41e5-a4ba-0d6724753a82` completed its one actual source gate
+from 07:01:19.385939 to 07:29:53.159673 UTC, with exit zero, original gate handle
+joined, and no outer primary/wait failure. The parent read that completion on
+the immediate exit notice before preservation/analysis. Only raw preservation
+and the 14-outcome/provenance checks continue. Available evidence must not be
+augmented with invented private recorder detail. No raw lane, retry, source fix
+or further gate is authorized. Review the source result before a raw decision.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
