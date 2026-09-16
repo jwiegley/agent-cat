@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-16T02:28:35.979035+00:00`. The next deadline is
-`2026-09-16T03:28:35.979035+00:00`. Fresh compilation and data checks passed.
+Refocus completed at `2026-09-16T03:22:16.847955+00:00`. The next deadline is
+`2026-09-16T04:22:16.847955+00:00`. Fresh compilation and data checks passed.
 Independent review cleared the prepared prefix harness with one data-assertion
 gap, which the parent verified as corrected. The single authorized N1 ordered
 prefix diagnostic completed with exit zero and complete capture. Its permission
@@ -299,29 +299,40 @@ Operator action is required to reuse affected quarantine, not merely to collect
 evidence on actually disjoint resources. Package acceptance remains blocked by
 the incomplete current-byte verification matrix.
 
-The next target is complete `manager/ci/ingestion.sh`, including N1, N8, interrupted
-and later cases, vectors, and all six existing helper modes. Preparation-only
-worker `e9e1f5e7-c846-4b28-a1d3-d82db4cf7665` owns
-`ingestion-gate-prep.jhjMS3l4`. It must establish actual resource non-overlap,
-prepare bounded full-dispatch capture, and keep instrumented evidence separate
-from future uninstrumented source/raw gates. No native gate is authorized.
+The next gate target is complete `manager/ci/ingestion.sh`, including N1, N8,
+interrupted and later cases, vectors, and all six existing helper modes.
+Preparation in `ingestion-gate-prep.jhjMS3l4` is complete. Current candidates are
+`audit-source-v3` and `candidate-source`, with evidence under `artifacts/final-v3`.
+Only the owning Python helper differs in the 1,005-file source candidate.
+The parent verified 5,190 identities and the 589 instrumented versus 588 source
+Cabal list-only members. This is not raw-archive or full-gate execution.
+
+Independent review `7f9d50b2-bb19-4bf5-8ce5-f63a13f22a2c` found no issues and
+cleared preparation with stated limits. It supports the source/configuration
+resource separation, preserved 14 checker invocations and fixed capture bounds.
+The parent separately checked seven old mutable paths and five new roots.
+Both lanes share outer home/tmp/config and must be sequential. Unresolved work
+prohibits their reuse without disposition. No native manager gate is authorized.
 
 Source inspection found an owning CI-helper defect: `admission_audit.py` uses
 `subprocess.run` with 120-second checker and 1,200-second build timeouts. Installed
 CPython kills the child on timeout or interruption before propagating the error.
-A narrow owning-helper correction is being prepared in a new candidate copy.
-It must preserve failure deadlines, interrupt through the original Popen handle,
-join cleanup, preserve primary/secondary failure evidence, and never convert
-late exit zero into success. No hard-kill fallback or stored-PID reconstruction
-is allowed. A failed join must remain explicitly unproved and stop advancement.
-Monotonic accounting must start before status I/O. Secondary interruption while
-reporting an existing primary must not bypass original-owner cleanup. An initial
-or cleanup wait error must not trigger signalling after ownership becomes
-uncertain. Deterministic regressions are required for these concrete cases.
-The author is to finish a bounded review handback after those corrections rather
-than expand a general launcher. Private capture validation must precede helper
-advancement after expected mutant failures. No live supervision test or gate is
-authorized, and the helper defect is not a proved cause of the original failure.
+The reviewed candidate corrects that owning helper while retaining execution
+deadlines and original Popen ownership. It accounts for status-I/O time, defers
+secondary interruption only with a primary, preserves separate failure facts,
+and stops without signalling when wait ownership is uncertain. Twelve synthetic
+supervision cases pass. These do not prove real signal delivery or joining.
+
+Exactly three controlled live-supervision cases are now authorized under
+`live-supervision.evIZ0aBc`, owned by run
+`94d8c7d8-e36e-4aa1-b009-6adcc5cd67a9`. They exercise the actual helper with
+real disposable children for success, timeout with held descendant cleanup and
+late exit zero, and caller interruption plus one further interrupt while cleanup
+is held. Deterministic handshakes and original handles are required throughout.
+No hard-kill fallback, saved-PID action, fake outcomes, repeated failure, manager
+workflow, backend, gate or code correction is authorized. Production timeout
+callers remain unchanged. The candidate is immutable pending parent review of
+those results. The CI-helper defect is not a proved cause of the old incident.
 
 The author disclosed a stopped filename-only search that listed forbidden
 artifact/session/sentinel filenames, with no reported content reads. The
