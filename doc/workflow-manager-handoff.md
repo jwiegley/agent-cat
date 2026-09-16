@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-16T13:15:55.076893+00:00`. The next deadline is
-`2026-09-16T14:15:55.076893+00:00`. Complete instrumented and uninstrumented
+Refocus completed at `2026-09-16T14:04:09.109863+00:00`. The next deadline is
+`2026-09-16T15:04:09.109863+00:00`. Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
 also passed all 14 outcomes with verified bytes/modes and independent scoped
 clearance. The controls evidence analyzer correction is independently cleared.
@@ -22,8 +22,10 @@ failed because the parent omitted the fixture-directory prelude. A separately
 authorized diagnostic with corrected setup returned native exit one and eligible
 capture. It records WorkerUnexpectedExit, then StoreBusy during selection and
 final action, with cleanup returned. Parent verification passed 1,126 identity
-checks. Read-only result/source review is active. No further native execution,
-repair, reuse or acceptance is authorized.
+checks, and independent review supports this failed result. Only narrow
+preparation to distinguish Worker's existing failure-collapse paths is active.
+No native execution, causal repair, cleanup retry, reuse or acceptance is
+authorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -521,9 +523,22 @@ StorageUnavailable, and stop observed that entry result. Both original callers
 settled, with no capture fault or recorded first submission refusal. These facts
 do not establish deeper worker cause, release or equivalence with prior failures.
 Parent verification passed 1,126 identity comparisons. Read-only review
-`0aa6accf-5f1e-4949-9f19-3dc56b1bb3fe` now assesses the result and relevant source
-paths. No further native execution or repair is authorized. Full source/raw
-controls verification and WM-016 acceptance remain outstanding.
+`0aa6accf-5f1e-4949-9f19-3dc56b1bb3fe` supports the failed result and locates this
+public refusal at retained selection StoreBusy. Finalization was not reached.
+Given this established Worker, returned original closeWorker entails passing the
+retained group-outcome cleanup check. It does not establish reservation release,
+lease/root closure, escaped-descendant containment or reuse authority.
+
+WorkerUnexpectedExit still conflates non-success original group exit, premature
+EOF and otherwise-unclassified exception. Preparation-only run
+`7e0acf63-fd0d-455a-acb2-53cd2d9a9373` owns `worker-boundary-prep.16u1FQxm` and may
+record bounded original values at those existing reduction sites. Inspection
+also found a send-side classify call. Only its first failure may be recorded,
+not every successful send, with existing capacities unchanged. No new reads,
+waits, owners, Store/C/ProcessGroup hooks, cleanup/finalization retries or public
+error changes are authorized. Only fresh compilation and data checks may run
+before independent review. Full source/raw controls verification and WM-016
+acceptance remain outstanding.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
