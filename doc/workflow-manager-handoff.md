@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-16T20:58:17.552249+00:00`. The next deadline is
-`2026-09-16T21:58:17.552249+00:00`. Complete instrumented and uninstrumented
+Refocus completed at `2026-09-16T22:01:59.114078+00:00`. The next deadline is
+`2026-09-16T23:01:59.114078+00:00`. Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
 also passed all 14 outcomes with verified bytes/modes and independent scoped
 clearance. The controls evidence analyzer correction is independently cleared.
@@ -39,8 +39,9 @@ at N1/N8. The earlier private cancellation failure remains preserved and does no
 establish its hidden cause. Independent review cleared the focused results, and
 a fresh default-target build/package passed. A reviewed wrapper-probe portability
 fix is packaged and data-checked without changing source/raw modes. Preparation
-of the complete source Store gate is active. Owning gates remain unrun. No
-further native execution, old-resource recovery or acceptance is authorized.
+of the complete source Store gate is independently cleared, and one separately
+authorized source gate is active. No result is claimed. Raw or other gates,
+old-resource recovery and acceptance remain unauthorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -694,14 +695,24 @@ Parent verified 2,682 identities, including source/raw fake-Cabal results and th
 compiled-input reference. Archive SHA256 is
 `45de8b3a53ed96e931bab49f51acf9fb6065b56922fe35672fd66440caf34209`.
 
-Preparation-only run `8754b14a-85b1-4b5e-b516-b2fbd92345dc` owns
-`terminal-source-store.OxhV3gKM` for the complete source Store gate. Its scope
-retains all default and added N1/N8 cases and the three SQL-audit helper modes,
-their meaningful negative predicates and original budgets. Exact fresh input,
-resource, original-owner and raw-preservation bindings are required before a
-separate execution decision. No compiler, Store/native or gate invocation is
-authorized now. Prior packages and failures remain read-only. Full source, raw,
-Linux, client, canonical and owning-gate verification remain outstanding.
+Preparation run `8754b14a-85b1-4b5e-b516-b2fbd92345dc` completed in
+`terminal-source-store.OxhV3gKM`. Parent verified 1,335 identities and the 14
+inert preservation checks, with 52 prior resource footprints excluded. Review
+`b77aa38a-2514-4e88-8a05-266e0e9dbefa` found no issues at preparation scope.
+
+After refreshed zero-native preflight, the parent authorized one complete source
+Store gate at `2026-09-16T22:08:57.207271+00:00`. Execution run
+`8e67da30-7ff8-4ba1-b324-98a05ad6d11b` retains original gate/launcher handles. All
+six top-level and six helper cases, exact negative predicates and 120/1200-second
+helper budgets remain. The unchanged disposable lease-death test is explicitly
+acknowledged only through its newly created original ProcessHandle and join,
+not as generic saved-PID or cleanup kill authority.
+
+The original exit/failure notice must precede raw preservation and analysis.
+No result is claimed yet. Preservation alone cannot establish full gate success.
+Any failure stops progression without retry. Prior packages and failed resources
+remain read-only. Raw, other gates and full platform/client/canonical acceptance
+still need separate current decisions. WM-016 remains unaccepted.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.

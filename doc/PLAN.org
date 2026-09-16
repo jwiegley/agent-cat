@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 14:34]
+:MODIFIED: [2026-09-16 Wed 15:13]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8886,6 +8886,12 @@ Updated production source terminal-owning-ready.j5g2ki94 contains only that prob
 Committed fess 43efed89-0285-48ed-8841-f255b318274d cleared the exact portable-wrapper commit 6392fcb with stated read-only verification limits. Repackaging 3dc43cde-2094-4d58-8647-6b6e627f8c20 completed under terminal-owning-ready.j5g2ki94 without source edits or a rebuild. Its new archive hash is 45de8b3a53ed96e931bab49f51acf9fb6065b56922fe35672fd66440caf34209, with 594 regular files and 664 entries. Source has 1,021 files and 14 deltas. The corrected probe is packaged, all 12 mode differences and 427 source-only files remain explicit, and source/raw fake-Cabal tests passed. Parent verified 2,682 identities, including the exact two-line change and unchanged compiled-input/build reference. No raw build or owning gate ran.
 
 Preparation-only run 8754b14a-85b1-4b5e-b516-b2fbd92345dc owns terminal-source-store.OxhV3gKM for the first complete source Store owning gate. It must bind exact corrected source/archive, fresh resources, original-handle supervision, all N1/N8 default and added test modes, and all three SQL-audit helper modes. Expected-negative markers and original 120/1200-second helper budgets remain unchanged. Raw fixture/sidecar evidence and actual gate-built binary identities must be preserved, with compiler intermediates explicitly retained in place. The unchanged disposable original-handle lease-death fixture is identified for later exact authorization, not treated as general PID or hard-kill permission. No gate, compiler, Store or native execution is currently authorized.
+
+Source Store gate preparation 8754b14a-85b1-4b5e-b516-b2fbd92345dc completed with exact 1,021-file/594-member bindings, 52 excluded resource footprints and 14 inert preservation checks. Parent verified 1,335 identities and confirmed empty real build/record directories with no authorization. Review b77aa38a-2514-4e88-8a05-266e0e9dbefa found no issues at preparation scope. The preserver explicitly does not claim gate completeness, and actual gate-built executable identities remain required on return.
+
+The parent refreshed zero-native preflight and issued one exact source Store gate decision at 2026-09-16T22:08:57.207271+00:00. Execution run 8e67da30-7ff8-4ba1-b324-98a05ad6d11b owns the original gate/launcher handles. Scope includes all six top-level and six helper cases, unchanged meaningful negative predicates and 120/1200-second helper budgets. The existing disposable lease-death sigKILL test is explicitly acknowledged only through its newly created original ProcessHandle and subsequent join, not as saved-PID recovery or cleanup fallback. No result is claimed. Original exit/failure notice must precede raw preservation, and any failure stops progression without retry. No raw or other gate is authorized.
+
+Refocus completed at 2026-09-16T22:01:59.114078+00:00, with next deadline 2026-09-16T23:01:59.114078+00:00. The preceding interval ended awaiting asynchronous preparation. Full WM-001 through WM-044 and G0 through G5 scope is unchanged, with WM-016 still unaccepted.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
