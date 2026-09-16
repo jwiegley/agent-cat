@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-16T19:19:23.104601+00:00`. The next deadline is
-`2026-09-16T20:19:23.104601+00:00`. Complete instrumented and uninstrumented
+Refocus completed at `2026-09-16T20:12:05.229227+00:00`. The next deadline is
+`2026-09-16T21:12:05.229227+00:00`. Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
 also passed all 14 outcomes with verified bytes/modes and independent scoped
 clearance. The controls evidence analyzer correction is independently cleared.
@@ -33,12 +33,12 @@ passed all 16 assertions, including explicit original-owner recovery. Parent
 verification and independent review passed. The user has now approved bounded
 internal pre-admission waiting for the original terminal owner's persistence
 actions within their existing operation budgets, with admitted execution once.
-The isolated implementation compiles and has scoped source clearance. Real Store
-checks passed at N1/N8, with startup and protected publication checks passed at
-N1. The N1 cancellation case failed at a private coordinator rendezvous. Its raw
-failure is preserved, and a source-proved holder-supervision defect is being
-corrected in a fresh private overlay. No further native execution, old-resource
-recovery or acceptance is authorized.
+The isolated implementation compiles and has scoped source clearance. Production
+Store cases and final-private startup, publication and cancellation cases passed
+at N1/N8. The earlier private cancellation failure remains preserved and does not
+establish its hidden cause. Independent focused-result review and a fresh
+production build/package are active. Full owning gates remain unrun. No further
+native execution, old-resource recovery or acceptance is authorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -639,16 +639,38 @@ before held-gate, release/fence and final exit130 assertions. Journal sequence
 
 Review `40a9ad22-8b5b-457b-be72-9b29cb445763` proved that a private holder failure
 can be hidden by its notification-only wait. It did not identify this invocation's
-hidden failure or exact timeout stage. Preparation-only correction
-`386a6b68-efb0-4571-a177-89f9268351f9` owns `terminal-holder-fix.i_kyd3cy`. It must
-observe the same holder completion with its milestone, preserve failures and
-joins, use one budgeted private loan and distinguish local timeout stages.
-Production, previous overlays and failed resources remain read-only. No native
-retry, budget increase or opaque retry is authorized.
+hidden failure or exact timeout stage. Correction
+`386a6b68-efb0-4571-a177-89f9268351f9` completed in
+`terminal-holder-fix.i_kyd3cy/corrected-source-v3`. It observes original holder
+completion alongside its milestone, makes barrier releases idempotent, and uses
+one budgeted private loan with distinct timeout stages. Its Werror build and 31
+no-Store assertions per N1/N8 passed, including the existing real 21-second tests.
+The first type-related build failure and superseded v2 release source finding
+remain retained. Parent verified 4,117 identities and the exact two-path delta.
+Review `1533b5a4-e11f-47ca-a49e-eff7e0d8ad59` found no issues at preparation scope.
 
-Startup, publication and cancellation N8 remain unexecuted. The failed N1
-cancellation and all composed owning/source/raw/Linux/client gates remain
-outstanding. No focused result constitutes WM-016 acceptance.
+Separate fresh v3 cancellation cases passed at N1 and N8 after 38.451752 and
+51.208204 seconds. Each completed all 21 assertions, including original exit130
+and positive release/association-generation checks. Final-private startup and
+publication cases also passed at both capabilities on this same private version.
+All original checker/launcher handles joined without outer failure/interruption.
+Raw preservation and identity checks preceded interpretation without database API
+access or controls receivers. Prior failures and superseded successes remain
+distinct records.
+
+`resume-parent.zTEX65dI/terminal-focused-final-results.json` binds eight focused
+cases with 96 assertion outcomes and 8,645 parent identity comparisons. Two are
+production Store cases and six use the final explicit private overlay. This is
+not a full uninstrumented owning-gate result or an exhaustive fence matrix.
+All native permissions are consumed, and old-resource recovery is unauthorized.
+
+Read-only result review `988942c4-d63f-4d10-b5e1-59c2399f8b70` is active.
+Build/package-only run `5de42cb2-13ab-4250-a458-ce38d317fd42` owns
+`terminal-owning-build.j93qps0a`, using the composed 1,021-file production source.
+It may compile all targets with tests enabled and warnings fatal, create source
+archive/raw identities and prepare owning-gate plans. No source edit, Store/native
+test or gate execution is authorized. Full source/raw/Linux/client/canonical
+verification and WM-016 acceptance remain outstanding.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
