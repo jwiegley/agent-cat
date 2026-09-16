@@ -15,10 +15,11 @@ source ingestion passed with independent scoped clearance. Raw ingestion has
 also passed all 14 outcomes with verified bytes/modes and independent scoped
 clearance. The controls evidence analyzer correction is independently cleared.
 The first source-controls gate failed with opaque `StorageUnavailable` during
-control cleanup. Its raw snapshot is preserved and verified. A read-only failure
-review is active. Raw controls, other gates, retries and acceptance remain
-unauthorized. The new failure and historical quarantine remain separate and
-unresolved.
+control cleanup. Its preserved snapshot and partial disposition are verified
+and independently reviewed, without a proved cause. Bounded private observation
+preparation is active, including compilation and data-only checks. No native
+diagnostic, repair, other gate or acceptance is authorized. Both failed resource
+trees remain unavailable for reuse.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -449,12 +450,23 @@ and no SQLite API was used. Three N1 checkers completed, saturation failed, and
 two contract calls produced 14 and four resource outputs. No N8 or helper run
 is claimed.
 
-Read-only review `2c1beee8-9a23-4a70-8569-447a5d9b1a0c` now checks this disposition
-and the original source paths that can produce the opaque refusal. Available
-source shows an information-losing drain/cleanup path but does not identify the
-underlying exception. Outer gate exit supplies no missing native cleanup proof.
-No retry, repair, replacement capture, SQLite access or another gate is
-authorized. The source matrix, raw controls and full WM-016 acceptance remain
+Read-only review `2c1beee8-9a23-4a70-8569-447a5d9b1a0c` supports this disposition
+and found no preservation defect. It identifies information lost before the
+public cleanup refusal, but the records do not establish whether those hidden
+branches occurred. Same-key submission replay supplies no new dispatch authority
+and is not a cleanup retry. The preserved Runtime journal records accepted
+cancellation and `run.cancelled` at sequence 779. Neither that event nor outer
+gate exit proves Manager finalization or native cleanup.
+
+Preparation run `4945d86e-e986-4480-b872-0eedff520cd0` owns only
+`controls-failure-prep.oTZCvtjN`. It may instrument a fresh source copy, compile
+the needed targets offline and run data-only checks. Bounded private records
+must distinguish first submission refusal, drain outcome, stop guard/action/result
+and original entry selection, cleanup and finalization outcomes while preserving
+public opacity, original failure precedence, ownership and budgets. No new
+capture framework or speculative deeper hooks are authorized. A proposed native
+invocation needs a separate reviewed source/resource justification and execution
+decision. The source matrix, raw controls and full WM-016 acceptance remain
 outstanding.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the

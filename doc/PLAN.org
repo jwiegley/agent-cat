@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 03:08]
+:MODIFIED: [2026-09-16 Wed 03:19]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8734,6 +8734,10 @@ The failed source-controls snapshot is preserved and parent-verified. Verificati
 Read-only review 2c1beee8-9a23-4a70-8569-447a5d9b1a0c is checking the failure evidence and original source information boundaries. stopAcceptedStart can report opaque StorageUnavailable through several paths, and the preceding drain discards a WorkerFailure result without establishing whether such a failure occurred. This source map does not identify the underlying cause. The reviewer may inspect preserved Runtime text but cannot execute commands, open databases, run a diagnostic, modify source or release quarantined resources. No native execution or repair is authorized.
 
 Refocus completed at 2026-09-16T10:01:18.865908+00:00, with next deadline 2026-09-16T11:01:18.865908+00:00. The full objective and acceptance criteria remain unchanged. The shortest next step is a bounded evidence/source-path disposition before any separately reviewed discriminating diagnostic, not a blind retry or expanded capture framework.
+
+Reviewer 2c1beee8-9a23-4a70-8569-447a5d9b1a0c supports the failed and partial source-controls disposition, with no preservation defect found. Root cause and native cleanup remain unproved. The review identifies an evidence gap before the public refusal: first submission refusals can be repeated without recording them, and the drain result is discarded. The records do not show whether either hidden failure branch occurred. Same-key submissions retain their binding and do not create new dispatch authority, so they are not cleanup retries or proof of duplicate cancellation. The preserved Runtime journal records accepted cancelRun and run.cancelled at sequence 779, which does not prove Manager ingestion, finalization or native cleanup.
+
+The parent authorized preparation run 4945d86e-e986-4480-b872-0eedff520cd0 only in controls-failure-prep.oTZCvtjN. It may create a fresh instrumented source copy, compile required targets offline and run data-only tests. It must prepare bounded observations of the first submission refusal, drain result, stop guard/action/entry result and original entry selection, cleanup and finalization outcomes. Public opacity, original outcomes and exception precedence, ownership, fixture bodies and budgets must remain unchanged. No new capture framework or speculative deeper hooks are authorized. The author may propose one discriminating native invocation with source and resource justification but must not execute it. Both failed resource/cache trees remain unavailable for reuse. No causal repair, native diagnostic, retry, other gate or package acceptance is authorized.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
