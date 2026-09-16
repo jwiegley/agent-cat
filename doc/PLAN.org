@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 02:29]
+:MODIFIED: [2026-09-16 Wed 02:50]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8720,6 +8720,10 @@ Controls evidence preparation completed without executing a gate. Parent verific
 Preparation-only correction run 6520bec3-427a-4872-b9c4-69e8ab94d0fc owns current-source.jJwlsNm8/controls-source-verification/preparation-v2. It must enforce both helper fixture directories before complete disposition and add actual-analyzer synthetic positive, missing-N1 and missing-N8 checks that detect the old defect. Partial preservation remains allowed. Version one, its blocked review, all source/raw/archive bytes and parent launchers remain unchanged. No native test, build, gate, repair to application source, retry or acceptance is authorized. The next action is verification and review of the minimal correction before any separate source-controls execution decision.
 
 Refocus completed at 2026-09-16T09:12:54.174961+00:00, with next deadline 2026-09-16T10:12:54.174961+00:00. Full WM-001 through WM-044 and G0 through G5 remain the objective. Accepted packages remain WM-001 through WM-015 and G0. Two parent-only path assumptions failed during preparation identity inspection and were corrected before the successful comparison. They did not change source or execute native work.
+
+The controls preparation P1 was corrected with one assertion requiring both preserved helper directories before complete disposition. Actual-analyzer synthetic regressions reproduced false acceptance in the old analyzer for missing N1 and N8, then verified corrected rejection and a complete-data pass. Parent verification passed 1,690 identity comparisons with source, raw archive and original preparation unchanged. Reviewer 4eafa11b-3dbe-477e-b067-0694c8981b66 found no issues and cleared only this preparation correction.
+
+The parent refreshed 17 old resource footprints against five new controls roots. The build directory was empty and its cache absent. The exact read-only source-controls launcher preflight passed with 1,019 source files, 592 positive members and zero native spawns. The parent then authorized run e1f5b003-07a5-4c39-8c2c-8905cbd05f49 for one complete uninstrumented source-controls gate and its reviewed raw preservation and analysis. The unchanged matrix has 38 checker invocations, 22 positive and 16 intended-nonzero outcomes, six public-contract validations and 13 helper builds. No result is claimed yet. The child must report original gate exit and join before preservation. Unexpected failure, timeout, uncertain ownership or invalid capture stops execution without retry or repair. Raw controls, other gates, historical quarantine reuse and WM-016 acceptance remain unauthorized.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
