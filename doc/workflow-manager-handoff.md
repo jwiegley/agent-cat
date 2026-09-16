@@ -40,8 +40,9 @@ establish its hidden cause. Independent review cleared the focused results, and
 a fresh default-target build/package passed. A reviewed wrapper-probe portability
 fix is packaged and data-checked without changing source/raw modes. The complete
 source Store gate passed with parent verification and independent scoped
-clearance. Source Commands gate preparation is active. Raw and remaining source
-gates, old-resource recovery and acceptance remain unauthorized.
+clearance. Complete source Commands preparation passed review, and one separately
+authorized Commands gate is active. No Commands result is claimed. Raw and other
+remaining gates, old-resource recovery and acceptance remain unauthorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -720,12 +721,21 @@ without normalizing artifacts. The 1,156 PASS lines are repeated observations,
 not unique obligations. Independent result review
 `bb363bad-7853-4955-aac7-7b1ac77bcba6` found no issues for complete SOURCE Store.
 
-Preparation-only run `721b4881-666f-4f5e-8e6f-6cff5401a5c1` owns
-`terminal-source-commands.utkqghes` for N1/N8 Commands checks, both frozen
-contract validations and proof-opacity checks. Exact fresh bindings and original
-budgets/predicates remain required. No compiler, Store/native or gate execution
-is authorized yet. Raw Store and all other remaining source/raw, platform,
-client and canonical verification remain outstanding. WM-016 is unaccepted.
+Commands preparation `721b4881-666f-4f5e-8e6f-6cff5401a5c1` completed under
+`terminal-source-commands.utkqghes`. Parent verified 1,388 identities and 13 inert
+preservation checks, with 53 prior footprints excluded. Review
+`51c05afc-23a9-43eb-8752-834acfe71334` found no issues. Scope preserves both N1/N8
+checkers, seven receipts per capability, both frozen contract validations and
+all 36 opacity consumers, with 12 positive and 24 diagnostic-specific refusals.
+
+The parent authorized one complete source Commands gate at
+`2026-09-16T23:19:47.503182+00:00`. Run
+`71099adf-c99f-47b2-8afc-93fd73a2c352` retains original gate/launcher handles.
+Compiler-only opacity limits remain 120 seconds. Store lease-death permission is
+not carried over. Original exit notice must precede raw preservation and result
+interpretation. No result is claimed yet, and failure stops progression without
+retry. Raw Store, other source/raw gates, platform/client/canonical verification
+and WM-016 acceptance remain outstanding.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.

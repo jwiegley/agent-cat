@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 15:57]
+:MODIFIED: [2026-09-16 Wed 16:22]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8900,6 +8900,10 @@ Preservation retained 2,348 entries, 1,958 regular files, 28 databases with abse
 Preparation-only run 721b4881-666f-4f5e-8e6f-6cff5401a5c1 owns terminal-source-commands.utkqghes for the next complete source Commands gate. It must retain N1/N8 command checks, both frozen contract validations, proof-opacity checks and original budgets, with exact fresh source/resource/binary/preservation bindings. No compiler, Store/native, Commands gate, raw lane or other gate is authorized yet. Full remaining source/raw/platform/client/canonical verification and WM-016 acceptance remain outstanding.
 
 Refocus completed at 2026-09-16T22:56:49.156040+00:00, with next deadline 2026-09-16T23:56:49.156040+00:00. The next unmet requirement is full source Commands verification, not another Store diagnostic. All native permissions are consumed until a new exact parent decision.
+
+Complete source Commands preparation 721b4881-666f-4f5e-8e6f-6cff5401a5c1 completed with two N1/N8 checkers, seven expected receipts per capability, both frozen contract validations and 36 opacity consumers: 12 positive controls and 24 diagnostic-specific refusals. Parent verified 1,388 identities and 13 inert preservation checks, with 53 old resource footprints excluded. Review 51c05afc-23a9-43eb-8752-834acfe71334 found no issues at preparation scope. No Store lease-death or admission-audit helper permission is carried over.
+
+After refreshed zero-native preflight, the parent separately authorized one complete source Commands gate at 2026-09-16T23:19:47.503182+00:00. Execution run 71099adf-c99f-47b2-8afc-93fd73a2c352 owns the original gate/launcher handles in terminal-source-commands.utkqghes. Original compiler-only 120-second opacity limits, checked-flow predicates and complete receipt/consumer coverage remain unchanged. The original return notice must precede raw preservation and analysis, and any failure stops progression without retry. No result, raw lane, other gate or WM-016 acceptance is claimed or authorized.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
