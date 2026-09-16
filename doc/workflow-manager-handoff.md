@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-15T23:10:55.861310+00:00`. The next deadline is
-`2026-09-16T00:10:55.861310+00:00`. Fresh compilation and data checks passed.
+Refocus completed at `2026-09-15T23:59:46.052389+00:00`. The next deadline is
+`2026-09-16T00:59:46.052389+00:00`. Fresh compilation and data checks passed.
 Independent review cleared the diagnostic correction but kept WM-016 blocked.
 The next step is preparation and review of an ordered ingestion-prefix
 diagnostic. No whole policy gate is being retried and no new native invocation
