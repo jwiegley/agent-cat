@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 06:52]
+:MODIFIED: [2026-09-16 Wed 07:07]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8784,6 +8784,16 @@ The author reports successful raw preservation for the corrected diagnostic: 47 
 These are directly observed bounded facts in the corrected diagnostic, not proof of the deeper WorkerUnexpectedExit cause, resource release, or causal identity with either prior incident. Parent integrity verification and independent result/source-path review remain required. No further native execution or repair is authorized.
 
 Parent verification of the corrected diagnostic passed 1,126 identity comparisons over 47 entries and 29 regular files, bound inputs and exact receiver command/output/input hashes. Receiver eligibility was independently rechecked as data only. The 26 ordered records, caller-settlement flags and lack of capture faults match the retained evidence. Read-only review 0aa6accf-5f1e-4949-9f19-3dc56b1bb3fe is now assessing result interpretation and the relevant Worker/Admission source paths. No additional native execution or repair is authorized.
+
+Review 0aa6accf-5f1e-4949-9f19-3dc56b1bb3fe supports eligible evidence of the failed diagnostic and found no preservation/receiver defect. The observed selection StoreBusy is retained through successful cleanup, classified into StorageUnavailable and read by stop from entryResult. Finalization was not reached. This explains this public refusal without explaining the earlier WorkerUnexpectedExit. That tag has three source-supported origins: non-success original group exit, premature EOF without terminal evidence and otherwise-unclassified exception. Drain can rethrow the retained finished failure rather than introduce a second failure.
+
+The review also establishes a limited cleanup implication: given this established Worker, returned original closeWorker entails waiting for Worker completion and passing the retained group-outcome cleanup check. It does not establish Manager reservation release, successful lease/root closure, containment of escaped descendants or reuse authority. Selection failed before the release transaction.
+
+Preparation-only run 7e0acf63-fd0d-455a-acb2-53cd2d9a9373 owns worker-boundary-prep.16u1FQxm. It may add bounded observations of the existing original exit value, EOF state and pre-classification exception category, preserving the exact original reads, public reductions, exception values and budgets. No new waits, owners, signal path, Store/C/ProcessGroup hook, cleanup/finalization retry, causal repair or native scenario is authorized. Only fresh offline warning-fatal compilation and bounded synthetic data checks are allowed. Prior code, binaries, caches and all failed resources remain read-only.
+
+Refocus completed at 2026-09-16T14:04:09.109863+00:00, with next deadline 2026-09-16T15:04:09.109863+00:00. The next step is this narrow original-cause boundary, not a blind repeated gate or expanded capture framework.
+
+Worker source inspection found two classify callers: supervisor and send. A send exception can already be reduced into StopFailed WorkerUnexpectedExit before the supervisor sees it. The parent therefore approved observing the existing caught send failure before its unchanged classify call. This remains preparation only and adds no catch, read, wait, owner or policy. Only first failed sends may be retained through the bounded first-failure mechanism, because recording every successful send would exceed the fixed event budget during saturation. A data-only check must cover many successes followed by the original failed-send category. No capacity increase or native execution is authorized.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
