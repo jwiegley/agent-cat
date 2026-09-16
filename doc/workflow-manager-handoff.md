@@ -9,12 +9,12 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-15T23:59:46.052389+00:00`. The next deadline is
-`2026-09-16T00:59:46.052389+00:00`. Fresh compilation and data checks passed.
-Independent review cleared the diagnostic correction but kept WM-016 blocked.
-The next step is preparation and review of an ordered ingestion-prefix
-diagnostic. No whole policy gate is being retried and no new native invocation
-has yet been authorized.
+Refocus completed at `2026-09-16T00:45:25.542815+00:00`. The next deadline is
+`2026-09-16T01:45:25.542815+00:00`. Fresh compilation and data checks passed.
+Independent review cleared the prepared prefix harness with one data-assertion
+gap, which the parent has now verified as corrected. Exactly one N1 ordered
+prefix diagnostic is authorized for run `8947b749-9f31-4aaf-9cd5-f2a55775a810`.
+No whole policy gate, N8 run, or retry is authorized, and WM-016 remains blocked.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -257,15 +257,28 @@ Independent preparation review `01df0736-4702-4528-af56-f4ceb4b7e15e` completed
 with **OK with notes**, without execution authorization. One P2 finding requires
 a file/memory count-and-tail comparison after the combined primary failure and
 checked-flush refusal. The existing test checked only exception precedence.
-The same author, run `a26892c7-195b-474b-bbf6-9ee4e0e8be6d`, is making that
-one-assertion correction and refreshing affected evidence in
-`prefix-tail-fix.HbgBun4G`. The reviewed v4 namespace remains read-only.
+The same author completed that one-assertion correction in
+`prefix-tail-fix.HbgBun4G`. The parent verified 1,885 artifact comparisons, exact
+one-line helper/generated-code delta, deterministic regeneration, 24 original
+and 35 prefix data assertions at each of N1 and N8, and two failing negative
+controls. No new independent re-review is claimed for this review-only fix.
+The reviewed v4 namespace remains read-only.
 
-The v4 handback is `resume-parent.zTEX65dI/prefix-workflow-result.prefix-prepare.md`,
-with artifacts under `prefix-diagnostic.fpfRbnrI/artifacts/final`. The native plan
-is a manifest only, explicitly not executed. It does not enforce or authorize
-a launch. The proposed `native-prefix-01` destination remains absent. The parent
-must verify the narrow correction and make a separate bounded execution decision.
+The current handback is `resume-parent.zTEX65dI/prefix-workflow-result.prefix-prepare.md`.
+Its preceding handback remains in `prefix-tail-fix.HbgBun4G/artifacts/handback-before-tail-fix.md`.
+Prepared manifests remain explicitly not-executed records and are not authority.
+The parent separately authorized one invocation at
+`2026-09-16T00:45:25.542815+00:00`, recorded in
+`resume-parent.zTEX65dI/native-prefix-authorization.json`.
+
+Run `8947b749-9f31-4aaf-9cd5-f2a55775a810` alone owns that authorized attempt.
+It must use the current `prefix-tail-fix.HbgBun4G` command and fresh destination,
+recheck identities, preserve every boundary/final capture and original-owner
+unwind, and stop after the first unexpected failure or invalid capture. It must
+not repeat, increase budgets, signal stored PIDs, or continue to another gate.
+On an unknown live state, inspect that exact run rather than replacing it.
+A successful invocation would remain a non-reproduction, not an explanation of
+the original failure. A saved decision record cannot authorize another launch.
 
 The author disclosed a stopped filename-only search that listed forbidden
 artifact/session/sentinel filenames, with no reported content reads. The
