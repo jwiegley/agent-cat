@@ -231,17 +231,40 @@ non-interrupted pair, with whole-prefix post-unwind capture. Existing fixture
 assertions, owners, order, cleanup, capacities, and deadlines remain unchanged.
 Preparation and data checks are authorized, not native execution.
 
-Workflow `71644dd0-48cc-4f4a-a78b-489bc34d742f` detached while worker
-`d861d8e7-101a-44c3-98ae-414d39ccb7ae` requested the exact `fess` rubric path.
-The parent replied with `/Users/johnw/.agents/skills/command-fess/SKILL.md`.
-Recover that same child result before review rather than launching a replacement.
-The author reported a stopped filename-only search that listed forbidden
-artifact/session/sentinel filenames without reading their contents. Its scope
-deviation must remain in the handback and review. A second preparation-only
-decision permits an explicit private callback after each framed maximum/overflow
-case has fully unwound, validating capture before the next case. Normal dispatch
-and immutable production input remain unchanged, and boundary snapshots remain
-separate. Neither decision authorizes native execution.
+Preparation worker `d861d8e7-101a-44c3-98ae-414d39ccb7ae` detached for supervisor
+questions and later reached the harness 30-minute timeout. After inspecting
+partial files, the parent revived the same author as
+`f684c7c8-02fa-456f-b609-058da3d72eb4`. Revival completed the handback without
+changing source/binaries or repeating successful checks. No active writer remains.
+The timeout was an orchestration failure, not an application test result.
+
+Current generated source is `prefix-diagnostic.fpfRbnrI/audit-source-v4`. The
+unversioned `audit-source` is preserved v1 evidence. The parent verified 2,104
+artifact comparisons, including 588 immutable production inputs, 592 generated
+files and their deterministic replica, 321 evidence files, and three binaries.
+Current data checks passed 24 original assertions and 34 synthetic prefix
+assertions at each of N1 and N8, with two meaningful failing negative controls.
+Source inspection found the capture gaps before those regressions were added.
+
+Private capture now checks between the framed scenarios, flushes after the
+complete diagnostic tail, and requires one publication event per tracked group.
+Normal dispatch, original fixture bodies, and production inputs remain unchanged.
+Earlier rejected boundary captures cannot be validated by a later complete file.
+The successful source path requires seven of 16 owners and 28 of 64 tracked
+groups. Dynamic event-slot sufficiency is not promised, and overflow is inconclusive.
+
+Independent preparation review runs as workflow
+`d9b7c9c4-4a0f-46b4-8a9b-c3d74ab4fafd`. The handback is
+`resume-parent.zTEX65dI/prefix-workflow-result.prefix-prepare.md`, with final
+artifacts under `prefix-diagnostic.fpfRbnrI/artifacts/final`. Its native plan is
+a manifest only, explicitly not executed. It does not enforce or authorize a
+launch. The proposed `native-prefix-01` destination remains absent. Review and
+a separate parent decision remain required before any native invocation.
+
+The author disclosed a stopped filename-only search that listed forbidden
+artifact/session/sentinel filenames, with no reported content reads. The
+scope deviation remains in the handback and review. The supplied `fess` rubric
+was `/Users/johnw/.agents/skills/command-fess/SKILL.md`.
 
 No persistent goal is set in the current API session. The explicit user request,
 not this handoff alone, authorizes resumed work.
