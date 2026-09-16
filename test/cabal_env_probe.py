@@ -24,7 +24,7 @@ with tempfile.TemporaryDirectory(prefix="agentic-cabal-env-") as temporary:
                CABAL_BUILDDIR=builddir, GATE_MARKER="fixture environment")
     arguments = ["--", "argument with spaces", "α雪", ""]
     for command in ["build", "test", "run", "exec", "list-bin", "repl"]:
-        reply = subprocess.run([str(helper), command, *arguments], cwd=root,
+        reply = subprocess.run(["bash", str(helper), command, *arguments], cwd=root,
                                env=env, capture_output=True, text=True, timeout=10)
         assert reply.returncode == 23, reply
         assert reply.stderr == "", reply.stderr
@@ -34,7 +34,7 @@ with tempfile.TemporaryDirectory(prefix="agentic-cabal-env-") as temporary:
             str(root.resolve()), "fixture environment",
         ], reply.stdout
     del env["CABAL_BUILDDIR"]
-    reply = subprocess.run([str(helper), "build"], cwd=root, env=env,
+    reply = subprocess.run(["bash", str(helper), "build"], cwd=root, env=env,
                            capture_output=True, text=True, timeout=10)
     assert reply.returncode != 0 and reply.stdout == "", reply
     assert "configured project direnv" in reply.stderr, reply.stderr
