@@ -9,13 +9,12 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-16T05:04:31.671153+00:00`. The next deadline is
-`2026-09-16T06:04:31.671153+00:00`. The prefix diagnostic and controlled
-supervision regressions passed with their stated limits. The owning CI-helper
-fix is committed and independently audited. One complete instrumented ingestion
-gate is now authorized on verified disjoint resources, owned by run
-`002e93ce-83c2-4e5d-a6c5-1cf9bdcb26bc`. No other lane, retry or package acceptance
-is authorized, and the historical incident remains unexplained.
+Refocus completed at `2026-09-16T06:40:53.152529+00:00`. The next deadline is
+`2026-09-16T07:40:53.152529+00:00`. Complete instrumented ingestion passed and
+received independent scoped clearance. One complete uninstrumented source gate
+is now authorized for run `74e89127-433e-43a2-9bf8-c5f822db2d53`. Raw execution,
+other gates, retries and package acceptance remain unauthorized. The original
+incident remains unexplained and quarantined.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -350,22 +349,36 @@ corrected only preflight in `gate-instrumented-02`, retaining resolved potential
 footprints even when absent. Six data checks cover absent paths, overlap, aliases
 and permission errors. This does not treat absence as cleanup proof.
 
-Run `002e93ce-83c2-4e5d-a6c5-1cf9bdcb26bc` alone owns the newly authorized first
-actual gate launch, using the exact hash-bound prepared launcher and unchanged
-full ingestion script. All 14 checker invocations and, if complete, 86 captures
-must be retained and checked. Stop at first unexpected failure, timeout, unproved
-ownership or invalid capture, without patching, repeating or moving to another
-lane. Intended mutants require their original predicate and acceptable cleanup
-capture. Original databases and sidecars remain raw evidence. Saved decisions
-cannot authorize another invocation.
+Run `002e93ce-83c2-4e5d-a6c5-1cf9bdcb26bc` completed its one actual gate invocation
+from 05:29:30.620758 to 05:46:51.856574 UTC, with exit zero and original outer
+handle joined. All 14 checker invocations passed their required predicates,
+including ten intended negative exits. All 86 captures were verified, with 116
+confirmed original group publications and no capture faults. The parent performed
+15,386 identity comparisons, checked every history prefix and outcome, and
+verified six variant hash chains. Raw preservation includes 4,092 entries, 28
+databases and 52 Runtime journals plus two wrapper logs. No database API was used.
+
+Independent result review `42856e78-1b40-488d-bba1-046e1f85bf1e` found no issues
+and accepted this scoped instrumented result. It is not uninstrumented, raw,
+platform or package acceptance. Two parent-verifier data-shape assumptions were
+corrected with failure records retained, and were not application failures.
+The 06:21 refocus missed its previous deadline during gate/post-return work.
+Subsequent execution authorizations reset the clock explicitly and require an
+immediate gate-exit progress event before lengthy preservation analysis.
 
 For later uninstrumented verification, `current-source.jJwlsNm8` combines the
 corrected 38-path WM-016 candidate with canonical commit `fa186851` and the four
 portable regression files. Pure packaging verified 592 source/raw member bytes.
 Archive SHA256 is
 `79bede955e86e7759c4201a54a7b1fe5c3e22dc8e3f0bf34b1b03a181f6d7651`.
-Its 12 source/raw mode differences remain unchanged. No native source/raw gate
-has run or been authorized from that package.
+Its 12 source/raw mode differences remain unchanged. Source and raw verification
+have separate private build/home/tmp/config roots. Run
+`74e89127-433e-43a2-9bf8-c5f822db2d53` is authorized for one exact source-lane
+ingestion gate only. The 14 checker matrix, original markers, 120/1200 helper
+budgets and original-owner supervision remain unchanged. Stop on unexpected
+failure, timeout or unproved ownership and preserve available evidence without
+inventing private recorder detail. No raw lane, retry, source fix or further gate
+is authorized. Review the source result before any raw-archive decision.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
