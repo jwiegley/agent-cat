@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 03:53]
+:MODIFIED: [2026-09-16 Wed 04:42]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8742,6 +8742,16 @@ The parent authorized preparation run 4945d86e-e986-4480-b872-0eedff520cd0 only 
 Observation preparation has a publication ambiguity, separate from the unresolved native failure. A digest-bound receipt can be fully created and its publication action can still throw. Preserving the native primary exception then prevents external files alone from establishing the publication outcome. The parent requested a bounded blocked handback: keep the receipt supplementary, retain a red data control for this ambiguity, finish the existing warning-fatal compilation and data checks, and make no native readiness claim. No new completion channel, changed exception/exit semantics, deletion/overwrite protocol, deeper hook or native execution is authorized. Build one failed because the private module was absent from the checker other-modules declaration, with Werror unchanged and that evidence retained.
 
 Refocus completed at 2026-09-16T10:53:41.558072+00:00, with next deadline 2026-09-16T11:53:41.558072+00:00. The full objective remains unchanged. Further protocol design is deferred until review of the bounded handback, rather than widening this preparation indefinitely.
+
+Bounded observation preparation 4945d86e-e986-4480-b872-0eedff520cd0 completed with native use explicitly blocked. Current private source is controls-failure-prep.oTZCvtjN/audit-source-v3, with a deterministic replica and final-v2 evidence. Only Main, Admission, the private ControlsFailureAudit helper and necessary Cabal declarations changed. Build three passed with Werror, six current data runs passed and two expected red runs retained publication ambiguity. Boundary tests passed 22 assertions each at N1 and N8. The private SomeException constructor-tag correction and its regression are retained separately from the native incident. The first missing-module compile failure and a binary-fixture diff decoding failure remain recorded. No native scenario or database action ran.
+
+Parent verification passed 4,683 identity comparisons over the 1,019-file baseline and source, both 1,022-member generated inventories, exact four-path scope, compiled binaries and current data records, plus unchanged raw/archive identities. Original operation, tryCommand and classify bodies are byte-identical. This is artifact and data evidence, not native readiness or causal repair. Read-only review 5d1bde98-8690-4bfd-9e69-0a1fcdade7df now checks the actual instrumentation, failure preservation and publication contract. It must distinguish required capture facts from stronger invented publication-return claims without lowering any real obligation. No further implementation, completion channel, native diagnostic, repair or resource reuse is authorized.
+
+Reviewer 5d1bde98-8690-4bfd-9e69-0a1fcdade7df blocked native readiness with P1: two bare async submission callers can outlive an exceptional mapM wait, and Admission shutdown does not join those enclosing threads. The recorder therefore lacked a proved quiescent tail on that path. This is a source-proved capture gap, not the diagnosed cause of the native failure. The review confirmed exact four-path scope, original failure propagation, helper module identity and data-only evidence. It also distinguished a receipt supporting preceding checks from proof that publication returned, without inventing a universal requirement to prove every reporting write succeeded.
+
+Preparation-only run d53b9d93-d18d-474d-8d64-f8971dc1eada owns controls-observation-fix.R4JRrPtF. It may add conservative fixed launch/settlement eligibility around existing original caller handles, with an early-unwind data control, but no new cancellation, joins, polling loop or registry. It may separately report the already settled flush Right/Left through existing parent-captured stdout or stderr, preserving primary/flush/caller semantics and requiring a bound, unambiguous received report. That report states the prior settled outcome, not the success of its own emission. Existing file-only red evidence remains. Only fresh offline compilation and bounded data checks are permitted. Sealed prior versions and both failed resource/cache trees remain read-only. Native execution, causal repair and acceptance remain unauthorized.
+
+Refocus completed at 2026-09-16T11:42:15.636230+00:00, with next deadline 2026-09-16T12:42:15.636230+00:00. The next step is the smallest reviewed correction, not another native retry or publication framework.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
