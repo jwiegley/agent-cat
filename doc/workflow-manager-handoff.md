@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-16T22:56:49.156040+00:00`. The next deadline is
-`2026-09-16T23:56:49.156040+00:00`. Complete instrumented and uninstrumented
+Refocus completed at `2026-09-16T23:45:49.017807+00:00`. The next deadline is
+`2026-09-17T00:45:49.017807+00:00`. Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
 also passed all 14 outcomes with verified bytes/modes and independent scoped
 clearance. The controls evidence analyzer correction is independently cleared.
@@ -40,9 +40,9 @@ establish its hidden cause. Independent review cleared the focused results, and
 a fresh default-target build/package passed. A reviewed wrapper-probe portability
 fix is packaged and data-checked without changing source/raw modes. The complete
 source Store gate passed with parent verification and independent scoped
-clearance. Complete source Commands preparation passed review, and one separately
-authorized Commands gate is active. No Commands result is claimed. Raw and other
-remaining gates, old-resource recovery and acceptance remain unauthorized.
+clearance. The complete source Commands gate also passed parent verification
+and independent scoped review. Source Admission preparation is active. Raw and
+remaining source gates, old-resource recovery and acceptance remain unauthorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -730,12 +730,27 @@ all 36 opacity consumers, with 12 positive and 24 diagnostic-specific refusals.
 
 The parent authorized one complete source Commands gate at
 `2026-09-16T23:19:47.503182+00:00`. Run
-`71099adf-c99f-47b2-8afc-93fd73a2c352` retains original gate/launcher handles.
-Compiler-only opacity limits remain 120 seconds. Store lease-death permission is
-not carried over. Original exit notice must precede raw preservation and result
-interpretation. No result is claimed yet, and failure stops progression without
-retry. Raw Store, other source/raw gates, platform/client/canonical verification
-and WM-016 acceptance remain outstanding.
+`71099adf-c99f-47b2-8afc-93fd73a2c352` returned exit zero after 277.387010 seconds.
+Original gate/launcher handles joined without outer failure or interruption.
+The immediate exit notice preceded raw preservation. Both 196-PASS checker logs,
+all 14 frozen receipt validations and all 36 opacity consumers are retained,
+with 12 positive controls and 24 exact diagnostic refusals. Compiler-only limits
+remain 120 seconds. Numeric invocation exits not separately persisted are
+labelled as checked-flow conclusions, not direct records.
+
+Parent verified 1,457 identities over 274 entries, 198 regular files, 30 databases
+and the actual gate-built checker, with three compiler paths retained in place.
+Consumer bodies and ordered predicate labels match source. No compiler, validator
+or database API was rerun post-return. Review
+`bc2c3b2b-67ec-4d8f-a4f6-83920982fe41` found no issues for complete SOURCE Commands.
+The 442 PASS lines are observations, not unique obligations. Authority is consumed.
+
+Preparation-only run `1479eb5f-e0d1-4d20-909e-084e3af6b39f` owns
+`terminal-source-admission.KiEgo5Jc` for the complete source Admission gate, with
+N1/N8 fixtures, opacity, package-boundary evidence and interruption audits.
+No compiler, Store/native, helper or gate execution is authorized yet. Remaining
+source/raw, platform/client/canonical verification and WM-016 acceptance are
+outstanding.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.

@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 16:22]
+:MODIFIED: [2026-09-16 Wed 16:45]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8904,6 +8904,14 @@ Refocus completed at 2026-09-16T22:56:49.156040+00:00, with next deadline 2026-0
 Complete source Commands preparation 721b4881-666f-4f5e-8e6f-6cff5401a5c1 completed with two N1/N8 checkers, seven expected receipts per capability, both frozen contract validations and 36 opacity consumers: 12 positive controls and 24 diagnostic-specific refusals. Parent verified 1,388 identities and 13 inert preservation checks, with 53 old resource footprints excluded. Review 51c05afc-23a9-43eb-8752-834acfe71334 found no issues at preparation scope. No Store lease-death or admission-audit helper permission is carried over.
 
 After refreshed zero-native preflight, the parent separately authorized one complete source Commands gate at 2026-09-16T23:19:47.503182+00:00. Execution run 71099adf-c99f-47b2-8afc-93fd73a2c352 owns the original gate/launcher handles in terminal-source-commands.utkqghes. Original compiler-only 120-second opacity limits, checked-flow predicates and complete receipt/consumer coverage remain unchanged. The original return notice must precede raw preservation and analysis, and any failure stops progression without retry. No result, raw lane, other gate or WM-016 acceptance is claimed or authorized.
+
+Complete source Commands gate 71099adf-c99f-47b2-8afc-93fd73a2c352 returned exit 0 from 23:21:52.206935 through 23:26:29.594587 UTC after 277.3870102910005 seconds. Original gate/launcher handles joined without outer failure or interruption, and immediate notice preceded raw preservation. Both checker logs contain 196 PASS lines. Complete checked flow includes all 14 frozen receipt validations and all 36 opacity consumers, with 12 positive controls and 24 exact diagnostic refusals under unchanged 120-second compiler limits. Individual numeric checker/validator/compiler exits were not separately persisted or fabricated.
+
+Preservation retained 274 entries, 198 regular files, 30 databases with absent sidecars, actual gate-built manager-command-check and three explicitly retained compiler paths. Parent verification passed 1,457 identity comparisons, reconstructing exact consumer bodies from static declarations and checking ordered receipt/opacity labels without rerunning compilers or validators or opening databases. Review bc2c3b2b-67ec-4d8f-a4f6-83920982fe41 found no issues and cleared complete SOURCE Commands only. All execution permission is consumed.
+
+Preparation-only run 1479eb5f-e0d1-4d20-909e-084e3af6b39f owns terminal-source-admission.KiEgo5Jc for the next unchanged complete source Admission gate, including N1/N8 fixtures, opacity, positive package-boundary evidence and interruption audits. Exact helper layouts, native original-owner scopes and predicates must be derived rather than copied blindly from earlier gates. No compiler, Store/native/helper/gate or raw-lane execution is authorized yet.
+
+Refocus completed at 2026-09-16T23:45:49.017807+00:00, with next deadline 2026-09-17T00:45:49.017807+00:00. Source Store and Commands are verified at their scoped gate boundaries. Source Admission, ingestion and Controls, all raw/platform/client/canonical obligations and WM-016 acceptance remain outstanding without weakened criteria.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
