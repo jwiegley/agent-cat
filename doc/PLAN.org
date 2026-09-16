@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 14:12]
+:MODIFIED: [2026-09-16 Wed 14:34]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8882,6 +8882,10 @@ Review 988942c4-d63f-4d10-b5e1-59c2399f8b70 cleared all eight focused results at
 The raw wrapper probe directly executed a mode0644 cabal.sh and was reproduced as PermissionError in fresh data-only copies. Parent corrected only its two subprocess prefixes to invoke bash, matching owning-gate usage. All assertions and wrapper bytes/modes remain unchanged. Corrected source/raw and canonical fake-Cabal checks passed, while the original raw failure remains preserved in terminal-wrapper-probe.8ysv5a1o. Review 4efd216d-0068-419c-ab77-f62c655d5654 found no issues. The exact two-line test/cabal_env_probe.py correction was integrated canonically without activating the unaccepted WM-016 candidate.
 
 Updated production source terminal-owning-ready.j5g2ki94 contains only that probe change after the successful build, with Haskell, C and Cabal inputs unchanged. Package-only continuation 3dc43cde-2094-4d58-8647-6b6e627f8c20 may create a new archive/raw extraction, run only the fake-Cabal source/raw probe checks, and refresh unexecuted gate plans. It may not rebuild, edit source or run actual Store/native/owning gates. The old package remains immutable. Refocus completed at 2026-09-16T20:58:17.552249+00:00, with next deadline 2026-09-16T21:58:17.552249+00:00. Full source/raw/platform/client/canonical verification and WM-016 acceptance remain outstanding.
+
+Committed fess 43efed89-0285-48ed-8841-f255b318274d cleared the exact portable-wrapper commit 6392fcb with stated read-only verification limits. Repackaging 3dc43cde-2094-4d58-8647-6b6e627f8c20 completed under terminal-owning-ready.j5g2ki94 without source edits or a rebuild. Its new archive hash is 45de8b3a53ed96e931bab49f51acf9fb6065b56922fe35672fd66440caf34209, with 594 regular files and 664 entries. Source has 1,021 files and 14 deltas. The corrected probe is packaged, all 12 mode differences and 427 source-only files remain explicit, and source/raw fake-Cabal tests passed. Parent verified 2,682 identities, including the exact two-line change and unchanged compiled-input/build reference. No raw build or owning gate ran.
+
+Preparation-only run 8754b14a-85b1-4b5e-b516-b2fbd92345dc owns terminal-source-store.OxhV3gKM for the first complete source Store owning gate. It must bind exact corrected source/archive, fresh resources, original-handle supervision, all N1/N8 default and added test modes, and all three SQL-audit helper modes. Expected-negative markers and original 120/1200-second helper budgets remain unchanged. Raw fixture/sidecar evidence and actual gate-built binary identities must be preserved, with compiler intermediates explicitly retained in place. The unchanged disposable original-handle lease-death fixture is identified for later exact authorization, not treated as general PID or hard-kill permission. No gate, compiler, Store or native execution is currently authorized.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
