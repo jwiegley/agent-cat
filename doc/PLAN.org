@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 02:56]
+:MODIFIED: [2026-09-16 Wed 03:08]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8728,6 +8728,12 @@ The parent refreshed 17 old resource footprints against five new controls roots.
 The first complete source-controls attempt e1f5b003-07a5-4c39-8c2c-8905cbd05f49 returned exit 1 from 2026-09-16T09:50:26.259136+00:00 to 09:53:19.374411+00:00, after 173.115048667 seconds. The original outer gate handle joined, with no outer primary failure, wait failure or deferred interruption. The first available public refusal is "control cleanup (no retry) public refusal (cause opaque): StorageUnavailable", followed by "manager-approval-check: StorageUnavailable". It follows the saturation assertions in stdout. No contention or historical-cause equivalence is inferred. Only controls.eqILIg exists, with no helper variant roots. The required matrix did not complete.
 
 The parent received and inspected the original exit record before preservation. All further execution is stopped. The same author may only finish the exact reviewed raw preservation and partial analysis. No retry, application repair, replacement capture, other gate, SQLite API, saved-PID action or reuse of the failed run resources is authorized. Runtime completion, outer process exit and original native cleanup proof remain distinct. The historical quarantine remains untouched and this new failure is retained separately. Source-controls result verification and diagnosis remain pending.
+
+The failed source-controls snapshot is preserved and parent-verified. Verification passed 2,549 identity comparisons over 159 raw entries, nine databases, 18 Runtime journals, two compiled executables, record hashes, 1,019 source files, 592 source/raw members and the unchanged archive/modes. No WAL/SHM was present and no database API was used. The unchanged script and outputs reconstruct three completed N1 checkers, failed N1 controls-saturation and two completed contract calls with 14 and four resource outputs. No N8 checker or helper variant ran. Complete controls validation remains false.
+
+Read-only review 2c1beee8-9a23-4a70-8569-447a5d9b1a0c is checking the failure evidence and original source information boundaries. stopAcceptedStart can report opaque StorageUnavailable through several paths, and the preceding drain discards a WorkerFailure result without establishing whether such a failure occurred. This source map does not identify the underlying cause. The reviewer may inspect preserved Runtime text but cannot execute commands, open databases, run a diagnostic, modify source or release quarantined resources. No native execution or repair is authorized.
+
+Refocus completed at 2026-09-16T10:01:18.865908+00:00, with next deadline 2026-09-16T11:01:18.865908+00:00. The full objective and acceptance criteria remain unchanged. The shortest next step is a bounded evidence/source-path disposition before any separately reviewed discriminating diagnostic, not a blind retry or expanded capture framework.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 

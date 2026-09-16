@@ -9,15 +9,16 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-16T09:12:54.174961+00:00`. The next deadline is
-`2026-09-16T10:12:54.174961+00:00`. Complete instrumented and uninstrumented
+Refocus completed at `2026-09-16T10:01:18.865908+00:00`. The next deadline is
+`2026-09-16T11:01:18.865908+00:00`. Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
 also passed all 14 outcomes with verified bytes/modes and independent scoped
 clearance. The controls evidence analyzer correction is independently cleared.
 The first source-controls gate failed with opaque `StorageUnavailable` during
-control cleanup. Only raw preservation and partial analysis continue. Raw
-controls, other gates, retries and acceptance remain unauthorized. The new
-failure and historical quarantine remain separate and unresolved.
+control cleanup. Its raw snapshot is preserved and verified. A read-only failure
+review is active. Raw controls, other gates, retries and acceptance remain
+unauthorized. The new failure and historical quarantine remain separate and
+unresolved.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -440,11 +441,21 @@ assertions in stdout. No contention or relationship to the historical incident
 is inferred. Only `controls.eqILIg` was created, with no helper variant roots.
 
 The parent inspected the original exit record before preservation. All further
-execution stopped, and the failed resources cannot be reused. Only the exact
-reviewed raw preservation and partial analysis remain allowed. Outer gate exit
-does not supply missing original native cleanup evidence. No retry, repair,
-replacement capture, SQLite access or another gate is authorized. The source
-matrix, raw controls and full WM-016 acceptance remain outstanding.
+execution stopped, and the failed resources cannot be reused. The exact reviewed
+preservation and partial analysis completed. Parent verification passed 2,549
+identity comparisons over 159 raw entries, nine databases, 18 Runtime journals,
+two executables, source/raw members, archive and modes. No WAL/SHM was present
+and no SQLite API was used. Three N1 checkers completed, saturation failed, and
+two contract calls produced 14 and four resource outputs. No N8 or helper run
+is claimed.
+
+Read-only review `2c1beee8-9a23-4a70-8569-447a5d9b1a0c` now checks this disposition
+and the original source paths that can produce the opaque refusal. Available
+source shows an information-losing drain/cleanup path but does not identify the
+underlying exception. Outer gate exit supplies no missing native cleanup proof.
+No retry, repair, replacement capture, SQLite access or another gate is
+authorized. The source matrix, raw controls and full WM-016 acceptance remain
+outstanding.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
