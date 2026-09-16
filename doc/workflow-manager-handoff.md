@@ -12,9 +12,10 @@ next-step decision rather than reuse of an earlier diagnostic authorization.
 Refocus completed at `2026-09-16T00:45:25.542815+00:00`. The next deadline is
 `2026-09-16T01:45:25.542815+00:00`. Fresh compilation and data checks passed.
 Independent review cleared the prepared prefix harness with one data-assertion
-gap, which the parent has now verified as corrected. Exactly one N1 ordered
-prefix diagnostic is authorized for run `8947b749-9f31-4aaf-9cd5-f2a55775a810`.
-No whole policy gate, N8 run, or retry is authorized, and WM-016 remains blocked.
+gap, which the parent verified as corrected. The single authorized N1 ordered
+prefix diagnostic completed with exit zero and complete capture. Its permission
+is consumed. No further native invocation or gate is authorized. An independent
+review is deciding the next contract-grounded step, and WM-016 remains unaccepted.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -118,15 +119,15 @@ Logging catches IOException rather than swallowing interruption or timeout.
 Twenty-four data assertions passed at each of N1 and N8, and the C recorder's
 bounded behavior passed a data-only test.
 
-Three separately authorized diagnostic invocations passed without reproducing the
-original failure. Two belong to the original author, including a changed-order
+Before the pause, three separately authorized diagnostics passed without
+reproducing the original failure. Two belong to the original author, including a changed-order
 natural-exit observation. The latest correction run preserved the original stop
 order and completed with four Store-owned groups confirmed, empty first-failure
 records, 162 Haskell records and 242 C records, and no overflow or logging failure.
 It exercised the real EPERM zombie-leader guard without changing it. These are
 **non-reproductions, not a resolution** of the original failure.
 
-The latest executed native diagnostic used these checker and frontend hashes:
+The last pre-pause native diagnostic used these checker and frontend hashes:
 `77c92448e5bad3022281eb7137f7b63d61e990a714da55f42ecc5a31c774e577`
 and `1757f0f1df301cf3666b3b6c125bfefba6cf099616c5fc75c55dedf063a80677`.
 Current full source/raw owning gates, Linux, final canonical/Pi verification,
@@ -271,14 +272,28 @@ The parent separately authorized one invocation at
 `2026-09-16T00:45:25.542815+00:00`, recorded in
 `resume-parent.zTEX65dI/native-prefix-authorization.json`.
 
-Run `8947b749-9f31-4aaf-9cd5-f2a55775a810` alone owns that authorized attempt.
-It must use the current `prefix-tail-fix.HbgBun4G` command and fresh destination,
-recheck identities, preserve every boundary/final capture and original-owner
-unwind, and stop after the first unexpected failure or invalid capture. It must
-not repeat, increase budgets, signal stored PIDs, or continue to another gate.
-On an unknown live state, inspect that exact run rather than replacing it.
-A successful invocation would remain a non-reproduction, not an explanation of
-the original failure. A saved decision record cannot authorize another launch.
+Run `8947b749-9f31-4aaf-9cd5-f2a55775a810` completed its one authorized N1
+invocation from `00:49:11.239659` to `00:49:18.854329` UTC, with exit zero.
+All 16 boundary captures and the final capture were complete and prefixes of
+the final history. They contain 1,571 Haskell and 489 C records, 28 original
+tracked groups, seven owners, and no failed confirmation or capture overflow.
+All groups published confirmed outcomes, including four nonzero exits. The 28
+raw KILL/EPERM returns each have matching evidence for the unchanged Darwin guard.
+These are this run's original-token observations, not historical cleanup proof.
+
+The parent verified 879 identities and all 17 captures, including 121 preserved
+run files and five command/log records. Six databases and 14 Runtime journals
+were copied as raw bytes. WAL/SHM sidecars were absent after return and no database
+was opened during preservation or analysis. Evidence is under
+`prefix-tail-fix.HbgBun4G/artifacts/native-prefix-01*`, with the parent's
+`resume-parent.zTEX65dI/native-prefix-parent-verification.json`.
+
+This is a fourth diagnostic non-reproduction. The original failed fixture and
+its quarantined reservation remain untouched. The authorization is consumed,
+and a saved decision record cannot authorize another launch. Workflow
+`f229f4c0-76ec-418c-8f74-4e46c0f4dc23` is independently interpreting the result
+and the exact requirements for prospective current-byte gates. It cannot grant
+execution, waive obligations, explain an uncaptured cause, or close WM-016.
 
 The author disclosed a stopped filename-only search that listed forbidden
 artifact/session/sentinel filenames, with no reported content reads. The
