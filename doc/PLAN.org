@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 03:19]
+:MODIFIED: [2026-09-16 Wed 03:53]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8738,6 +8738,10 @@ Refocus completed at 2026-09-16T10:01:18.865908+00:00, with next deadline 2026-0
 Reviewer 2c1beee8-9a23-4a70-8569-447a5d9b1a0c supports the failed and partial source-controls disposition, with no preservation defect found. Root cause and native cleanup remain unproved. The review identifies an evidence gap before the public refusal: first submission refusals can be repeated without recording them, and the drain result is discarded. The records do not show whether either hidden failure branch occurred. Same-key submissions retain their binding and do not create new dispatch authority, so they are not cleanup retries or proof of duplicate cancellation. The preserved Runtime journal records accepted cancelRun and run.cancelled at sequence 779, which does not prove Manager ingestion, finalization or native cleanup.
 
 The parent authorized preparation run 4945d86e-e986-4480-b872-0eedff520cd0 only in controls-failure-prep.oTZCvtjN. It may create a fresh instrumented source copy, compile required targets offline and run data-only tests. It must prepare bounded observations of the first submission refusal, drain result, stop guard/action/entry result and original entry selection, cleanup and finalization outcomes. Public opacity, original outcomes and exception precedence, ownership, fixture bodies and budgets must remain unchanged. No new capture framework or speculative deeper hooks are authorized. The author may propose one discriminating native invocation with source and resource justification but must not execute it. Both failed resource/cache trees remain unavailable for reuse. No causal repair, native diagnostic, retry, other gate or package acceptance is authorized.
+
+Observation preparation has a publication ambiguity, separate from the unresolved native failure. A digest-bound receipt can be fully created and its publication action can still throw. Preserving the native primary exception then prevents external files alone from establishing the publication outcome. The parent requested a bounded blocked handback: keep the receipt supplementary, retain a red data control for this ambiguity, finish the existing warning-fatal compilation and data checks, and make no native readiness claim. No new completion channel, changed exception/exit semantics, deletion/overwrite protocol, deeper hook or native execution is authorized. Build one failed because the private module was absent from the checker other-modules declaration, with Werror unchanged and that evidence retained.
+
+Refocus completed at 2026-09-16T10:53:41.558072+00:00, with next deadline 2026-09-16T11:53:41.558072+00:00. The full objective remains unchanged. Further protocol design is deferred until review of the bounded handback, rather than widening this preparation indefinitely.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
