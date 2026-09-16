@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 08:29]
+:MODIFIED: [2026-09-16 Wed 09:35]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8818,6 +8818,28 @@ Preparation run 8a2f4110-f7b2-4668-bb80-b2d2606c44bc owns selection-contention-p
 Refocus completed at 2026-09-16T15:23:18.101911+00:00, with next deadline 2026-09-16T16:23:18.101911+00:00. The full objective remains unchanged; this step isolates the persistence-admission policy boundary rather than weakening existing failure tests.
 
 The parent approved the existing startup-exit terminal fixture for the narrow contention regression preparation, retaining its exit 7 and WorkerPreparedFraming outcome. It must not claim post-start cancellation-130 coverage. Source/path differences remain explicit, while the shared original terminal-owner selection/cleanup/retention path is checked. The existing withCommitDeadline/enforceCommitDeadline callback may hold the Store admission gate. Two scoped private observations/counter hooks may prove original selection and lack of entry to the refused DB body, without a new public gate, owner, registry or policy. The actual Store/native regression is still unexecuted and unauthorized pending review.
+
+Selection-contention preparation 8a2f4110-f7b2-4668-bb80-b2d2606c44bc completed with the actual Store/native regression still unexecuted. Current selection-contention-prep.VByl47hE/audit-source-v2 contains one standalone 16-assertion proposal and minimal private observations/counters. Parent verification passed 4,682 identity comparisons and source equality for Store admission policy, selection/finalization, explicit recovery and the existing publication-failure comparison. Six pure barrier assertions passed each at N1/N8. The first build failed because raw SQLData lacked NFData; strict typed snapshot decoding corrected only the test, with failed evidence retained and Werror unchanged.
+
+Independent review ab8d7aee-8635-49d7-aad1-d2963145f9b2 is checking deterministic gate holding, lock/order/budget safety, original-owner provenance, refused-DB-body counters, retained claims and explicit recovery assertions. The startup-exit phase is not cancellation-130 coverage. No Store/native execution, automatic retry, policy change, old-resource recovery or WM-016 acceptance is authorized.
+
+Review ab8d7aee-8635-49d7-aad1-d2963145f9b2 cleared the compiled selection-contention preparation with execution prerequisites, without selecting persistence policy. The parent created selection-contention-native.iepK6AJg with fresh exclusive empty work and private mutable roots. Exact source/binary/tool/preflight checks passed, with 32 old resource locations excluded and original-handle supervision unchanged. Run 896c90fc-9bbe-4a1a-92d0-f3024fcefe18 is separately authorized for one N1 standalone regression, including its explicit existing-owner recovery call on the fresh test LivePreparation after failure/retention assertions. No result is claimed yet.
+
+This scope permits the reviewed test to use its own fresh Store database and original fixture, not old-resource recovery or automatic production continuation. The publication comparison, N8, further tests/gates and policy repair remain unauthorized. Complete raw evidence must be preserved before parent interpretation. The earlier controls-capture receiver is not applicable to this standalone assertion-based regression and must not be substituted.
+
+Refocus completed at 2026-09-16T16:14:41.639380+00:00, with next deadline 2026-09-16T17:14:41.639380+00:00. Actual results must precede any persistence-admission policy choice.
+
+The standalone N1 selection-contention regression 896c90fc-9bbe-4a1a-92d0-f3024fcefe18 returned exit 0 from 16:13:56.900121 through 16:13:58.633609 UTC, after 1.73351125 seconds. Both original checker and launcher handles joined without outer failure, interruption or timeout. Parent received the immediate exit notice before preservation. Only raw preservation and subsequent assertion/input verification may continue. No actual assertion disposition or persistence-policy conclusion is claimed from exit alone, and no further native invocation or automatic recovery policy is authorized.
+
+Standalone N1 selection-contention preservation and assertion validation completed. Parent verification passed 1,089 identity comparisons over 23 entries, 15 regular files, bound inputs and all 16 exact ordered assertion/source-line matches. The actual startup-phase test observed WorkerPreparedFraming, held Store admission, concrete pre-transaction StoreBusy, positive holder and zero refused-selection DB-body entries, retained claims/failure without fabricated release, and successful explicit original-owner recovery only after those checks. No post-return database API or controls receiver was used.
+
+Read-only result review 45737ef0-195b-4188-8dc5-48fd9b2da0c4 is validating the scoped result and identifying the precise persistence-admission policy decision against frozen requirements. No automatic production continuation, N8, publication comparison, post-start cancellation coverage, old-resource recovery, further native execution or WM-016 acceptance is authorized.
+
+Review 45737ef0-195b-4188-8dc5-48fd9b2da0c4 found no issue with the actual N1 startup-selection result. The 16-assertion regression passed and preserved pre-DB refusal, retained failure/claims and subsequent explicit fresh-owner recovery. It selects no production policy. Frozen requirements allow more than one bounded admission strategy, while the implementation currently fails fast before admission and uses explicit recovery.
+
+The next step requires an explicit user policy decision: permit bounded internal admission waiting for the original terminal owner’s narrowly identified Store actions, or retain immediate refusal plus explicit original-owner recovery. Recommendation is the former only before action admission, with waiting charged to that action’s existing allowance, once-only admitted execution, proven lock-order safety, unchanged rollback/SQLite busy bounds, original ownership/fences/native exits and explicit failure on timeout/shutdown/poisoning/admitted-action or uncertain-publication errors. No opaque-result, whole-workflow, command or cleanup retry is implied. Until chosen, current fail-fast policy controls and no new implementation or native execution is authorized.
+
+Any approved change still needs N1/N8 contention, exhaustion and interruption checks, actual post-start cancellation130 and associated-run fences, the protected publication-failure comparison and current owning gates. These remain unrun requirements, not acceptance evidence. WM-001 through WM-015 and G0 remain the accepted boundary.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
