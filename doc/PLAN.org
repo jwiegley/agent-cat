@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-15 Tue 17:25]
+:MODIFIED: [2026-09-15 Tue 17:33]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8652,6 +8652,8 @@ Preparation-only capture decisions: parent approved a local outer finalizer pres
 Prefix preparation handback 2026-09-16T00:25:54.001227+00:00: original workerd861d8e7 reached the harness30-minute timeout after green v4 data checks, with no native run. Parent inspected partial changes, then revived the same persisted author asf684c7c8-02fa-456f-b609-058da3d72eb4. Revival finished report/manifest-only handback without changing source/binaries or repeating successful checks. Current source is prefix-diagnostic.fpfRbnrI/audit-source-v4, not unversionedv1. Parent independently verified2104artifact comparisons:588immutable production inputs,592generated files plus exact deterministic replica,321evidence files,3binaries,24legacy/34prefix data assertions eachN1/N8 and2meaningful expected-failing negative controls. Native-prefix-01 remains absent and unauthorized. CheckerSHA256bfd17d9b58402887576cab25e7decf0a11ac0f8c659d1e173cacfb66f231a14d, compiledfrontendSHA256b2f2c63dd5e523ffc929ce641597ba87b89cc2e2e08de6f23fe89e531cc14d1c.
 
 Independent preparation/fess review now runs as workflowd9b7c9c4-4a0f-46b4-8a9b-c3d74ab4fafd. It must examine complete capture, all normal dispatch/body preservation, fixed budgets, actual capacity limitations and the NOT-EXECUTED native manifest. Source-derived successful prefix requires7/16owners and28/64tracked groups. Dynamic ordinary-event/C-slot capacity is not promised; overflow remains inconclusive. Source inspection, not earlier green tests, discovered the capture gaps, and new regressions were added afterward. No application failure is inferred from the orchestration timeout. No active writer remains. Parent must review the independent result before any one-shot native decision.
+
+Preparation review01df0736-4702-4528-af56-f4ceb4b7e15e completed with OK-with-notes, no execution authority (reportSHA256ed21bfb49aae5679c5b06d626ee3e1bb7a505880b69aba69c7db86fc5dcca923). OneP2requires final file/memory count+tail comparison in the combined primary-plus-checked-flush-refusal data case, beyond the already-passing exception assertion. Parent verified this exact omission. Same author revived asa26892c7-195b-474b-bbf6-9ee4e0e8be6d at 2026-09-16T00:33:00.116410+00:00 for that one assertion and affected current-byte build/data/provenance refresh in fresh prefix-tail-fix.HbgBun4G. Entire reviewedv4namespace remains read-only. No native launch, new launcher framework or production change. Review-fix-only work is parent-verified rather than recursively restarting an unchanged broad review. Native decision remains pending the fixed handback.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
