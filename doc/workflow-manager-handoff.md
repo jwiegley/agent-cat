@@ -9,19 +9,19 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-16T10:53:41.558072+00:00`. The next deadline is
-`2026-09-16T11:53:41.558072+00:00`. Complete instrumented and uninstrumented
+Refocus completed at `2026-09-16T11:42:15.636230+00:00`. The next deadline is
+`2026-09-16T12:42:15.636230+00:00`. Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
 also passed all 14 outcomes with verified bytes/modes and independent scoped
 clearance. The controls evidence analyzer correction is independently cleared.
 The first source-controls gate failed with opaque `StorageUnavailable` during
 control cleanup. Its preserved snapshot and partial disposition are verified
 and independently reviewed, without a proved cause. Bounded private observation
-preparation is finishing with a blocked native plan because file-only receipts
-cannot establish publication return after an after-effect exception. Existing
-compilation and data checks may finish. No new channel, native diagnostic, repair
-or other gate is authorized. Both failed resource trees remain unavailable for
-reuse.
+preparation completed with data evidence, but review found a caller-quiescence
+gap. A narrow preparation-only correction is active for caller settlement and
+a settled flush-result report over the existing captured stream. No native
+diagnostic, causal repair or other gate is authorized. Both failed resource
+trees remain unavailable for reuse.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -475,8 +475,26 @@ receipt and then throw, leaving external files insufficient to establish the
 publication return when the native primary exception takes precedence. The
 parent requested a bounded blocked handback with an explicit red data control
 for this case, not another completion channel or an expanded publication
-protocol. No native readiness claim is authorized. The source matrix, raw
-controls and full WM-016 acceptance remain outstanding.
+protocol. That preparation completed with 22 boundary assertions per N1/N8,
+six passing current data runs and two expected publication reds. Parent
+verification passed 4,683 identity comparisons across the exact four-path patch,
+baseline, deterministic generated replicas, binaries and raw/archive inputs.
+
+Reviewer `5d1bde98-8690-4bfd-9e69-0a1fcdade7df` found a separate P1: the fixture's
+two bare async submission callers can outlive an exceptional wait, and Admission
+shutdown does not join those enclosing threads. Capture completeness must not
+assume they are settled. This is not a diagnosed cause of the native failure.
+The review also distinguished preceding validated capture facts from publication
+return and rejected a universal requirement to prove every reporting write.
+
+Preparation-only run `d53b9d93-d18d-474d-8d64-f8971dc1eada` owns
+`controls-observation-fix.R4JRrPtF`. It may add conservative fixed caller
+settlement eligibility and a bounded report of the already settled flush result
+over existing parent-captured stdout or stderr. Original waits, cleanup,
+exception precedence and public outcomes remain unchanged. Missing or ambiguous
+received status remains inconclusive. Only fresh compilation and data checks
+are authorized, with all prior versions and failed resources retained. The
+source matrix, raw controls and full WM-016 acceptance remain outstanding.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
