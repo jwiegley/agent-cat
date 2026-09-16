@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-15 Tue 20:25]
+:MODIFIED: [2026-09-15 Tue 21:12]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8637,7 +8637,7 @@ ambiguous delivery without unauthorized replay.
 
 RESUMED BY USER 2026-09-15T23:10:55.861310+00:00. Explicit request: Resume your work now and cancel the pause. This supersedes the user-halt state below, not the frozen acceptance contract or action-specific safety restrictions. No API-session goal exists. Full scope remains WM001-WM044/G0-G5, with WM001-WM015/G0 accepted. Next: fresh verified reconstructed baseline compilation and data checks, independent cleanup-proof/correction decision, then a specifically bounded native plan if justified. No blind policy retries, deployment, paid routes, new Lean build or saved-PID signalling.
 
-Refocus 2026-09-16T03:22:16.847955+00:00; next deadline 2026-09-16T04:22:16.847955+00:00. Source reconstructed from accepted7b88f172 plus both checkpoint patches in /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/controls.qzldrova/resume-20260915.ZHiqa0SO/source and all588positive files verified byte/mode/size. Prior evidence is read-only. No retained reviewer children are available in this parent session; verify a fresh isolation probe before the fallback review.
+Refocus 2026-09-16T04:12:26.213677+00:00; next deadline 2026-09-16T05:12:26.213677+00:00. Source reconstructed from accepted7b88f172 plus both checkpoint patches in /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/controls.qzldrova/resume-20260915.ZHiqa0SO/source and all588positive files verified byte/mode/size. Prior evidence is read-only. No retained reviewer children are available in this parent session; verify a fresh isolation probe before the fallback review.
 
 Resumed baseline completed23:22:00UTC: one current-byte all-target build with tests enabled and GHC-Werror exited0 after470.116116seconds. Data-only contract probe exited0 (99schemas/29operations/327payload/20SSE/3download cases). All1005source files stayed unchanged. Parent verified588sealed positive sources plus417accepted Git blobs/modes,1198artifact comparisons/1176unique paths and22compiled executables. No compiled application/checker or Runtime/native suite was executed by that baseline. Evidence under resume-20260915.ZHiqa0SO and resume-parent.zTEX65dI.
 
@@ -8674,6 +8674,8 @@ Complete ingestion preparation handback 2026-09-16T03:16:17.495082+00:00: curren
 Parent separately checked original configuration/adapter hashes,7derived old mutable paths and5new root identities for non-overlap, supported by selected source flow. This is not OS-wide containment or historical cleanup. Independent preparation review workflow7329624e-92f8-4be6-8a15-72c85b99d57b now examines current v3 helper/capture/resource evidence and proposes minimal controlled live supervision regressions before integration. No native gate or live supervision test authorized. Original quarantine unchanged, no fifth narrow diagnostic, all owning source/raw/platform/client/doc/package criteria remain.
 
 Independent complete-gate preparation review7f9d50b2-bb19-4bf5-8ce5-f63a13f22a2c found No issues, preparation OK-with-notes, reportSHA2561deb0609a3e5d565a6c2495731a5c896617e27bd58aa3cb9eb3bbadd35a89c51. No live supervision, integration or full gate proof follows. Parent authorizes exactly three controlled live-supervision cases using actual reviewed run() and real original Popen objects: success, timeout with held descendant cleanup and lateexit0, caller interruption plus one additional interrupt during held cleanup. Same author94d8c7d8-e36e-4aa1-b009-6adcc5cd67a9 owns fresh live-supervision.evIZ0aBc. All-path readiness/release/join handshakes, no savedPIDs/hardkill/replacement/fake outcomes, stop on first unexpected failure. No manager/workflow/backend, gate, mutant-native, old-behavior comparison, repetition or code correction authorized. Short test-only timeout parameter leaves production120/1200callers unchanged. Candidate/helper remains immutable; parent/reviewer result decision required afterward.
+
+Live-supervision oversight: wait subscription expiry is not a run timeout; original run94d8c7d8 remains active. Parent source inspection found unnecessary inherited environment-value logging in prepared harness and directed removal before unstarted cases, with minimal explicit child environment/names/fingerprint and no secret-value inspection or case repetition. At04:10UTC no case reports were present in expected paths after46minutes, so parent refocused author to essential preflight and the three authorized cases or a concrete blocker, not optional harness/framework work. Do not interrupt active original-owned children or launch a replacement.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
