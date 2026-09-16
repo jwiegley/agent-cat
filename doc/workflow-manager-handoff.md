@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-16T01:27:57.816495+00:00`. The next deadline is
-`2026-09-16T02:27:57.816495+00:00`. Fresh compilation and data checks passed.
+Refocus completed at `2026-09-16T02:28:35.979035+00:00`. The next deadline is
+`2026-09-16T03:28:35.979035+00:00`. Fresh compilation and data checks passed.
 Independent review cleared the prepared prefix harness with one data-assertion
 gap, which the parent verified as corrected. The single authorized N1 ordered
 prefix diagnostic completed with exit zero and complete capture. Its permission
@@ -314,9 +314,14 @@ It must preserve failure deadlines, interrupt through the original Popen handle,
 join cleanup, preserve primary/secondary failure evidence, and never convert
 late exit zero into success. No hard-kill fallback or stored-PID reconstruction
 is allowed. A failed join must remain explicitly unproved and stop advancement.
-Private capture validation must also precede helper advancement after expected
-mutant failures. No live supervision test or gate is authorized yet, and this
-helper defect is not an established cause of the original policies failure.
+Monotonic accounting must start before status I/O. Secondary interruption while
+reporting an existing primary must not bypass original-owner cleanup. An initial
+or cleanup wait error must not trigger signalling after ownership becomes
+uncertain. Deterministic regressions are required for these concrete cases.
+The author is to finish a bounded review handback after those corrections rather
+than expand a general launcher. Private capture validation must precede helper
+advancement after expected mutant failures. No live supervision test or gate is
+authorized, and the helper defect is not a proved cause of the original failure.
 
 The author disclosed a stopped filename-only search that listed forbidden
 artifact/session/sentinel filenames, with no reported content reads. The
