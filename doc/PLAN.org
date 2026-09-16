@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 00:57]
+:MODIFIED: [2026-09-16 Wed 01:18]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8637,7 +8637,7 @@ ambiguous delivery without unauthorized replay.
 
 RESUMED BY USER 2026-09-15T23:10:55.861310+00:00. Explicit request: Resume your work now and cancel the pause. This supersedes the user-halt state below, not the frozen acceptance contract or action-specific safety restrictions. No API-session goal exists. Full scope remains WM001-WM044/G0-G5, with WM001-WM015/G0 accepted. Next: fresh verified reconstructed baseline compilation and data checks, independent cleanup-proof/correction decision, then a specifically bounded native plan if justified. No blind policy retries, deployment, paid routes, new Lean build or saved-PID signalling.
 
-Refocus 2026-09-16T07:53:04.297130+00:00; next deadline 2026-09-16T08:53:04.297130+00:00. Source reconstructed from accepted7b88f172 plus both checkpoint patches in /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/controls.qzldrova/resume-20260915.ZHiqa0SO/source and all588positive files verified byte/mode/size. Prior evidence is read-only. No retained reviewer children are available in this parent session; verify a fresh isolation probe before the fallback review.
+Refocus 2026-09-16T08:18:45.222781+00:00; next deadline 2026-09-16T09:18:45.222781+00:00. Source reconstructed from accepted7b88f172 plus both checkpoint patches in /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/controls.qzldrova/resume-20260915.ZHiqa0SO/source and all588positive files verified byte/mode/size. Prior evidence is read-only. No retained reviewer children are available in this parent session; verify a fresh isolation probe before the fallback review.
 
 Resumed baseline completed23:22:00UTC: one current-byte all-target build with tests enabled and GHC-Werror exited0 after470.116116seconds. Data-only contract probe exited0 (99schemas/29operations/327payload/20SSE/3download cases). All1005source files stayed unchanged. Parent verified588sealed positive sources plus417accepted Git blobs/modes,1198artifact comparisons/1176unique paths and22compiled executables. No compiled application/checker or Runtime/native suite was executed by that baseline. Evidence under resume-20260915.ZHiqa0SO and resume-parent.zTEX65dI.
 
@@ -8708,6 +8708,8 @@ Immediate source gate exit notice: actual attempt02 ran07:01:19.385939–07:29:5
 Complete uninstrumented SOURCE lane7c640c36 passed one actual gate with all14checker outcomes:4positive0,10intended negative1, sixbuilds0, unchanged120/1200budgets and original helper joins. Parent verified17407identities,4026preserved entries,12helper+2top executables,1019fullsource and592source/raw members, sixmutationchains/markers and public lifecyclecounts8joins/8drains/4releases/8backendexits/2checkpointrestores.28DBs/52runtimejournals retained asbytes; sidecarsabsent; no DBAPI/privateProcessGroupAudit or borrowed transient/history proof. Source review93479663-030f-4efe-8c46-ee7e1f0ec4e4 found No issues, scoped OK-with-notes, reportSHA256a85e9e1cf00ff6fc5c73c36a1236307eef2a949259381dff5c85ccb569e3918d.
 
 Separate RAW authorization 2026-09-16T07:53:04.297130+00:00: parent prepared hash-bound raw-verification/attempt-01 launcher and successfully executed all read-only preflight statements before first record/spawn, verifying archive79bede...1073774bytes, exact592rawmember bytes/rawModes, all12mode differences, tools/config and disjointness from historical/instrumented/completed-source resources. Original author22c838ca-6b3d-4036-ac76-7b7f355965cb may run exactly ONE complete raw manager/ci/ingestion.sh lane from U/raw/agentic-0.1.0.0 with private raw-verification environment. No chmod/source substitution, retry/fix/othergate/DBAPI/savedPIDs. Exact14matrix and originalbudgets/markers/owner stops retained. Gate-exit progress before preservation required; raw/platform/fullWM016 acceptance not implied.
+
+Immediate RAW gate exit: actual raw attempt01 ran07:56:26.099419–08:17:31.728822UTC,1265.6280182909977seconds,exit0,originalGateJoined=true,ownership original-gate-joined,outerprimary/waitfailures null and0deferredinterruptions. Parent directly read completion08:17:57UTC before author preservation/analysis. Author22c838ca continues only raw preservation and outcome/provenance/mode/archive checks. No retry, othergate, source/mode change or fix. Full result review/acceptance remains pending.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 

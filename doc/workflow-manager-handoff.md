@@ -9,12 +9,12 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-16T07:53:04.297130+00:00`. The next deadline is
-`2026-09-16T08:53:04.297130+00:00`. Complete instrumented and uninstrumented
-source ingestion passed with independent scoped clearance. One raw-archive
-ingestion gate is now separately authorized for run
-`22c838ca-6b3d-4036-ac76-7b7f355965cb`. Other gates, retries and package acceptance
-remain unauthorized. The original incident remains unexplained and quarantined.
+Refocus completed at `2026-09-16T08:18:45.222781+00:00`. The next deadline is
+`2026-09-16T09:18:45.222781+00:00`. Complete instrumented and uninstrumented
+source ingestion passed with independent scoped clearance. Raw ingestion has
+returned exit zero with its original gate handle joined. Preservation and
+detailed result checks are pending. Other gates, retries and package acceptance
+remain unauthorized, and the historical incident is unexplained and quarantined.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -393,11 +393,13 @@ raw decision, not raw or package acceptance.
 The parent prepared `raw-verification/attempt-01` and successfully evaluated
 its complete read-only preflight before any record or spawn. It checks exact
 592-member raw bytes/modes, the immutable archive and actual resource separation.
-Run `22c838ca-6b3d-4036-ac76-7b7f355965cb` is authorized for one exact raw-lane
-ingestion gate. All 12 source/raw mode differences remain unchanged. No chmod,
-source substitution, retry, repair, other gate, database API or stored-PID action
-is allowed. Preserve first available failure evidence without inventing telemetry
-and report gate exit before lengthy analysis. Full acceptance remains outstanding.
+Run `22c838ca-6b3d-4036-ac76-7b7f355965cb` completed its one raw gate from
+07:56:26.099419 to 08:17:31.728822 UTC, with exit zero, original gate joined, and
+no outer primary/wait failure or deferred interruption. The parent read completion
+on the immediate exit notice, before preservation. Only raw preservation and
+outcome/provenance/mode/archive checks continue. No chmod, source substitution,
+retry, repair, other gate, database API or stored-PID action is allowed. No
+private telemetry may be invented. Full acceptance remains outstanding.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
