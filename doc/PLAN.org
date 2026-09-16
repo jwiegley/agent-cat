@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 01:18]
+:MODIFIED: [2026-09-16 Wed 01:41]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8710,6 +8710,10 @@ Complete uninstrumented SOURCE lane7c640c36 passed one actual gate with all14che
 Separate RAW authorization 2026-09-16T07:53:04.297130+00:00: parent prepared hash-bound raw-verification/attempt-01 launcher and successfully executed all read-only preflight statements before first record/spawn, verifying archive79bede...1073774bytes, exact592rawmember bytes/rawModes, all12mode differences, tools/config and disjointness from historical/instrumented/completed-source resources. Original author22c838ca-6b3d-4036-ac76-7b7f355965cb may run exactly ONE complete raw manager/ci/ingestion.sh lane from U/raw/agentic-0.1.0.0 with private raw-verification environment. No chmod/source substitution, retry/fix/othergate/DBAPI/savedPIDs. Exact14matrix and originalbudgets/markers/owner stops retained. Gate-exit progress before preservation required; raw/platform/fullWM016 acceptance not implied.
 
 Immediate RAW gate exit: actual raw attempt01 ran07:56:26.099419–08:17:31.728822UTC,1265.6280182909977seconds,exit0,originalGateJoined=true,ownership original-gate-joined,outerprimary/waitfailures null and0deferredinterruptions. Parent directly read completion08:17:57UTC before author preservation/analysis. Author22c838ca continues only raw preservation and outcome/provenance/mode/archive checks. No retry, othergate, source/mode change or fix. Full result review/acceptance remains pending.
+
+Complete RAW ingestion22c838ca passed one actual14checker gate:4positive0,10intendednegative1, sixbuilds0, original120/1200budgets and original helper joins. Parent verified17408identities,4026preservedentries,12helper+2top binaries,1019sourcefiles/592source+rawmembers, sixmutationchains/markers,28DBsidecar absences and public lifecyclecounts. Archive79bede...1073774bytes/raw592modes/12source-rawmode differences unchanged; no chmod or private telemetry. Independent raw-result review9b697149-e2f5-44f5-a6b2-d446ea754806 found No issues, scopedOK-with-notes, reportSHA2563bed31b53866ade5bf01f9adafbc2977b358ae3a05de2555b56f88702eb2574e. No broader acceptance.
+
+Next prerequisite is controls-specific preservation/supervision preparation, not gate execution. Current unchanged controls.sh selects38checkers (12top+26helper),22positive/16intendednegative, six public-contract validations and13helperbuilds. Reviewer requires N<cap>-<scenario> top-tree coverage,13audit-control roots, both declared added modules (Manager.Test.AcceptanceAudit and runtimeControlDeliveryAudit), exact predicates/rewrites, and actual source/resource/supervision mapping. Source/raw controls plans and parent source launcher are prepared but NOT authorized. Original author38fdd173-c848-4fa7-9a86-e27e77940ca7 writes only current-source.jJwlsNm8/controls-source-verification/preparation with minimal adapted raw-preservation/analysis/data checks; no native/checker/build/gate/source fix/DBAPI/Git. All prior sources/results/quarantine remain immutable.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
