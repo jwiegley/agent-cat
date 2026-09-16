@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-15 Tue 21:12]
+:MODIFIED: [2026-09-15 Tue 21:53]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8676,6 +8676,10 @@ Parent separately checked original configuration/adapter hashes,7derived old mut
 Independent complete-gate preparation review7f9d50b2-bb19-4bf5-8ce5-f63a13f22a2c found No issues, preparation OK-with-notes, reportSHA2561deb0609a3e5d565a6c2495731a5c896617e27bd58aa3cb9eb3bbadd35a89c51. No live supervision, integration or full gate proof follows. Parent authorizes exactly three controlled live-supervision cases using actual reviewed run() and real original Popen objects: success, timeout with held descendant cleanup and lateexit0, caller interruption plus one additional interrupt during held cleanup. Same author94d8c7d8-e36e-4aa1-b009-6adcc5cd67a9 owns fresh live-supervision.evIZ0aBc. All-path readiness/release/join handshakes, no savedPIDs/hardkill/replacement/fake outcomes, stop on first unexpected failure. No manager/workflow/backend, gate, mutant-native, old-behavior comparison, repetition or code correction authorized. Short test-only timeout parameter leaves production120/1200callers unchanged. Candidate/helper remains immutable; parent/reviewer result decision required afterward.
 
 Live-supervision oversight: wait subscription expiry is not a run timeout; original run94d8c7d8 remains active. Parent source inspection found unnecessary inherited environment-value logging in prepared harness and directed removal before unstarted cases, with minimal explicit child environment/names/fingerprint and no secret-value inspection or case repetition. At04:10UTC no case reports were present in expected paths after46minutes, so parent refocused author to essential preflight and the three authorized cases or a concrete blocker, not optional harness/framework work. Do not interrupt active original-owned children or launch a replacement.
+
+Controlled live-supervision94d8c7d8 completed exactly3cases04:15:34–04:15:36UTC, allpassed and original handles/descendants joined. Actual helper returned0 for success, preserved the first TimeoutExpired despite cleanup exit0, and preserved first KeyboardInterrupt while a second was deferred during held cleanup. HelperSHA32c9b5c988c91ba7948a4e6d074c26a4266b839ccee504d422643c4d2b43c7ea stayed unchanged. Parent verified67manifested files and case/status/event/exception identities. No manager/workflow/gate or original-failure cause proof. Unnecessary inherited-env logging was removed before any case; old draft retained, no values logged. Long preparation was explicitly refocused.
+
+Helper integration 2026-09-16T04:53:17.703543+00:00: parent copied only reviewed run() and signal/time imports into canonical manager/test/admission_audit.py, without WM016-specific modes. Added portable unchanged-fixture/case logic at manager/test/supervision/{fixture.py,case.py,check.py}, standalone manager/ci/supervision.sh, and four Cabal source entries. Existing ingestion gate bytes remain unchanged. Independent source review5e521030-c061-4e2c-897f-e0ac39284f84 found No issues, scoped integration OK-with-notes. Fresh worker28a4fc9c ran portable command once04:49:00–04:49:02UTC, all3casespassed and6source hashesunchanged; parent verified results. Cabal list-only includes589canonical members. No full inherited-env dump is desired; explicit private overrides plus names/hash are intentional. Complete helper-integration.qC6vWWdV evidence retained. No full manager gate authorized yet.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 

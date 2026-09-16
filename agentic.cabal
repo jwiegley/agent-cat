@@ -67,6 +67,10 @@ extra-source-files:
   manager/test/approval_contract.py
   manager/test/Agentic/Manager/Test/AcceptanceAudit.hs
   manager/test/admission_audit.py
+  manager/ci/supervision.sh
+  manager/test/supervision/check.py
+  manager/test/supervision/case.py
+  manager/test/supervision/fixture.py
   manager/test/worker_evidence.py
   manager/test/draft_contract.py
   manager/test/command_contract.py

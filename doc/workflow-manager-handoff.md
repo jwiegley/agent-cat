@@ -323,23 +323,32 @@ secondary interruption only with a primary, preserves separate failure facts,
 and stops without signalling when wait ownership is uncertain. Twelve synthetic
 supervision cases pass. These do not prove real signal delivery or joining.
 
-Exactly three controlled live-supervision cases are now authorized under
-`live-supervision.evIZ0aBc`, owned by run
-`94d8c7d8-e36e-4aa1-b009-6adcc5cd67a9`. They exercise the actual helper with
-real disposable children for success, timeout with held descendant cleanup and
-late exit zero, and caller interruption plus one further interrupt while cleanup
-is held. Deterministic handshakes and original handles are required throughout.
-No hard-kill fallback, saved-PID action, fake outcomes, repeated failure, manager
-workflow, backend, gate or code correction is authorized. Production timeout
-callers remain unchanged. The candidate is immutable pending parent review of
-those results. The CI-helper defect is not a proved cause of the old incident.
+The three authorized controlled live-supervision cases in
+`live-supervision.evIZ0aBc` passed once from 04:15:34 to 04:15:36 UTC. Original
+handles and fixture-owned descendants were joined. Success returned zero,
+timeout retained its first exception despite child exit zero, and interruption
+retained its first exception while a second was deferred during held cleanup.
+The parent verified 67 manifested files and the status/event/object-identity
+evidence. These are disposable-child mechanics, not manager-gate or historical
+cleanup proof.
+
+The parent integrated the exact reviewed `run()` function and its imports into
+canonical `manager/test/admission_audit.py`, without importing WM-016-specific
+modes. The portable regression is `manager/ci/supervision.sh`, with three scripts
+under `manager/test/supervision/` and explicit Cabal source entries. Independent
+source review `5e521030-c061-4e2c-897f-e0ac39284f84` found no issues. The portable
+command then passed its three cases from 04:49:00 to 04:49:02 UTC, with all six
+source hashes unchanged and parent-verified results. Evidence is under
+`helper-integration.qC6vWWdV`. Existing ingestion gate bytes remain unchanged.
+No full manager gate is authorized by those results.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
-Unnecessary full-environment logging in the prepared harness was also identified
-and removal directed before unstarted cases. No sensitive values were inspected
-or claimed to have been logged. A wait-subscription expiry is not a worker
-timeout, and it does not justify replacement or repeating a case.
+Unnecessary full-environment logging in the prepared harness was identified and
+removed before any case. The earlier unexecuted revision remains retained. No
+sensitive values were inspected or reported as logged. Explicit private overrides,
+environment names and fingerprints replace inherited-value dumps. Wait-subscription
+expiry is not worker timeout and cannot justify replacement or repeating a case.
 
 The author disclosed a stopped filename-only search that listed forbidden
 artifact/session/sentinel filenames, with no reported content reads. The
