@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-15 Tue 17:47]
+:MODIFIED: [2026-09-15 Tue 18:08]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8656,6 +8656,12 @@ Independent preparation/fess review now runs as workflowd9b7c9c4-4a0f-46b4-8a9b-
 Preparation review01df0736-4702-4528-af56-f4ceb4b7e15e completed with OK-with-notes, no execution authority (reportSHA256ed21bfb49aae5679c5b06d626ee3e1bb7a505880b69aba69c7db86fc5dcca923). OneP2requires final file/memory count+tail comparison in the combined primary-plus-checked-flush-refusal data case, beyond the already-passing exception assertion. Parent verified this exact omission. Same author revived asa26892c7-195b-474b-bbf6-9ee4e0e8be6d at 2026-09-16T00:33:00.116410+00:00 for that one assertion and affected current-byte build/data/provenance refresh in fresh prefix-tail-fix.HbgBun4G. Entire reviewedv4namespace remains read-only. No native launch, new launcher framework or production change. Review-fix-only work is parent-verified rather than recursively restarting an unchanged broad review. Native decision remains pending the fixed handback.
 
 Native decision 2026-09-16T00:45:25.542815+00:00: parent verified the requested one-assertion correction as sole generated code delta versus independently reviewedv4,1885artifact comparisons,588immutable/592generated files with replica,24legacy/35prefix assertions eachN1/N8 and2negative controls. No new independent re-review is claimed for this fess-only fix. Parent authorizes EXACTLY ONE N1failure-prefix invocation from prefix-tail-fix.HbgBun4G/artifacts/final/native-plan.NOT-EXECUTED.json after immediate identity/fresh-destination checks. Same author run8947b749-9f31-4aaf-9cd5-f2a55775a810 owns it. No v4run, N8, interrupted pair, later cases, mutants, full gate or retry. Original guards/capacities/deadlines/owner joins and all boundary captures remain required. Any incomplete capture is inconclusive even if final capture later completes. A pass is one more non-reproduction, never original-failure resolution. On unknown live state inspect this exact run, do not launch another worker or signal savedPIDs.
+
+Authorized prefix attempt8947b749 completed: exactly one N1failure-prefix00:49:11.239659–00:49:18.854329UTC,7.614554582998608s,exit0. All17boundary/final captures are complete, retain final-history prefixes,1571Haskell/489C records,28groups/7owners, no overflow/logging failure/unpublished C/first failed confirmation. Publications are24success and4confirmed nonzero exits.28raw KILL-EPERM cases each have matching exited-original-leader/single-member Darwin guard evidence. This is current-run original-token evidence and a FOURTH diagnostic non-reproduction, not original policies05cause resolution or whole-gate acceptance. Authorization consumed, no additional run/fix/gate allowed.
+
+Parent verification 2026-09-16T01:08:15.548143+00:00:879identity checks,121original run files plus5records byte-preserved, all17captures individually checked and compared with final prefixes, source/helpers/binaries/tools unchanged.6DBs/14journals preserved as raw bytes; post-return WAL/SHM absent, no database opened during preservation/analysis. Evidence: prefix-tail-fix.HbgBun4G/artifacts/native-prefix-01{.json,-evidence.json,-preservation.json,-analysis.json}, with parent native-prefix-parent-verification.json under resume-parent.zTEX65dI. Original failed fixture and its quarantine remain untouched.
+
+Read-only independent disposition review runs as workflowf229f4c0-76ec-418c-8f74-4e46c0f4dc23. It must audit current claims and distinguish unexplained historical incident, prospective current-byte owning-gate verification, and package acceptance against exact frozen criteria. No blind fifth diagnostic, no invented retrospective-certainty requirement, no waiver of real obligations, and no execution/closure authority is delegated. Await that result before the next decision.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
