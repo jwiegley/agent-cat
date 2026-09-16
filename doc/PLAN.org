@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 12:34]
+:MODIFIED: [2026-09-16 Wed 13:30]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8868,6 +8868,14 @@ Read-only review 40a9ad22-8b5b-457b-be72-9b29cb445763 is inspecting this failed/
 Refocus completed at 2026-09-16T19:19:23.104601+00:00, with next deadline 2026-09-16T20:19:23.104601+00:00. The full WM-001 through WM-044 and G0 through G5 objective and accepted WM-001 through WM-015/G0 boundary remain unchanged.
 
 Review 40a9ad22-8b5b-457b-be72-9b29cb445763 confirmed a source-proved private coordination P1: an early holder failure can be replaced by the held-milestone timeout. It did not identify the actual hidden exception in the failed run. The parent authorized preparation-only correction 386a6b68-efb0-4571-a177-89f9268351f9 in fresh terminal-holder-fix.i_kyd3cy: observe the same holder completion alongside its milestone, preserve original failures and joins, use one budgeted admission call for the private loan, add distinct local timeout labels and actual-seam no-Store checks. Production source, previous overlays and failed resources remain unchanged. No native rerun, additional execution, budget increase or opaque retry is authorized.
+
+Private holder correction 386a6b68-efb0-4571-a177-89f9268351f9 completed in terminal-holder-fix.i_kyd3cy/corrected-source-v3. It observes original holder completion with its milestone, uses one budgeted private Store loan, labels local timeout stages and makes releases idempotent. Current Werror build and 31 no-Store assertions per N1/N8 passed, retaining the two real 21-second coordinator tests. The first type-related build failure and superseded v2 release-race source finding remain preserved. Parent verified 4,117 identities and exact two-path delta, with production and CI unchanged. Review 1533b5a4-e11f-47ca-a49e-eff7e0d8ad59 found no issues at preparation scope.
+
+A new separately authorized cancellation N1 case on v3 in terminal-cancel-N1-v3.p7c23q77 returned exit 0 after 38.451752332999604 seconds with original handles joined. Raw preservation preceded interpretation, with 45 entries and 28 regular files. Parent checked 1,101 identities and all 21 assertions, including release, positive associated-phase/start-generation preservation and the original Worker exit130 check. The earlier failure remains preserved with its holder exception and exact stage unknown. No historical equivalence or old-resource recovery is inferred.
+
+The final-private startup and publication cases were rerun at N1/N8 on the same v3 binary set, and cancellation N8 also passed after 51.20820366698899 seconds. Separate current decisions, fresh resources, original joins and raw-before-interpretation records are retained for each. terminal-focused-final-results.json binds eight focused cases: two production Store cases and six final-private-v3 cases. They produced 96 assertion outcomes and 8,645 parent identity comparisons. Superseded private-version successes are not mixed into this final-private result set. All native permissions are consumed. This is not a full uninstrumented owning-gate result or WM-016 acceptance.
+
+Read-only review 988942c4-d63f-4d10-b5e1-59c2399f8b70 is checking the final focused evidence. Build/package-only run 5de42cb2-13ab-4250-a458-ce38d317fd42 owns terminal-owning-build.j93qps0a and may copy the exact composed 1,021-file production source, build all targets with tests enabled and warnings fatal, produce a source archive/raw identities, and prepare owning-gate plans. It may not edit source or run Store/native tests or gates. Refocus completed at 2026-09-16T20:12:05.229227+00:00, with next deadline 2026-09-16T21:12:05.229227+00:00. Full source/raw/Linux/client/canonical/owning-gate verification and WM-016 acceptance remain outstanding.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
