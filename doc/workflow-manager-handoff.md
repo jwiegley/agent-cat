@@ -253,13 +253,19 @@ Earlier rejected boundary captures cannot be validated by a later complete file.
 The successful source path requires seven of 16 owners and 28 of 64 tracked
 groups. Dynamic event-slot sufficiency is not promised, and overflow is inconclusive.
 
-Independent preparation review runs as workflow
-`d9b7c9c4-4a0f-46b4-8a9b-c3d74ab4fafd`. The handback is
-`resume-parent.zTEX65dI/prefix-workflow-result.prefix-prepare.md`, with final
-artifacts under `prefix-diagnostic.fpfRbnrI/artifacts/final`. Its native plan is
-a manifest only, explicitly not executed. It does not enforce or authorize a
-launch. The proposed `native-prefix-01` destination remains absent. Review and
-a separate parent decision remain required before any native invocation.
+Independent preparation review `01df0736-4702-4528-af56-f4ceb4b7e15e` completed
+with **OK with notes**, without execution authorization. One P2 finding requires
+a file/memory count-and-tail comparison after the combined primary failure and
+checked-flush refusal. The existing test checked only exception precedence.
+The same author, run `a26892c7-195b-474b-bbf6-9ee4e0e8be6d`, is making that
+one-assertion correction and refreshing affected evidence in
+`prefix-tail-fix.HbgBun4G`. The reviewed v4 namespace remains read-only.
+
+The v4 handback is `resume-parent.zTEX65dI/prefix-workflow-result.prefix-prepare.md`,
+with artifacts under `prefix-diagnostic.fpfRbnrI/artifacts/final`. The native plan
+is a manifest only, explicitly not executed. It does not enforce or authorize
+a launch. The proposed `native-prefix-01` destination remains absent. The parent
+must verify the narrow correction and make a separate bounded execution decision.
 
 The author disclosed a stopped filename-only search that listed forbidden
 artifact/session/sentinel filenames, with no reported content reads. The
