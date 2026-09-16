@@ -10,10 +10,12 @@ import hashlib
 import json
 import os
 import shutil
+import signal
 import stat
 import subprocess
 import sys
 import tempfile
+import time
 
 source = Path(sys.argv[1]).resolve()
 mode = sys.argv[2]
@@ -256,11 +258,73 @@ environment.pop("GHCRTS", None)
 results = []
 
 def run(command, log, timeout=1200):
+    entry = {"command": command, "log": log, "executionDeadlineSeconds": timeout,
+             "returncode": None, "primaryFailure": None, "signalFailure": None,
+             "waitFailure": None, "joinInterruptions": 0, "ownership": "not-started"}
+    results.append(entry)
+    def record(primary=None):
+        try:
+            (work / "results.json").write_text(json.dumps(results, indent=2) + "\n")
+        except OSError:
+            if primary is None:
+                raise
+        except KeyboardInterrupt:
+            if primary is None:
+                raise
+            entry["joinInterruptions"] += 1
     with (work / log).open("w") as output:
-        result = subprocess.run(command, cwd=copy, env=environment, stdout=output, stderr=subprocess.STDOUT, timeout=timeout)
-    results.append({"command": command, "log": log, "returncode": result.returncode})
-    (work / "results.json").write_text(json.dumps(results, indent=2) + "\n")
-    return result.returncode
+        process = None
+        waiting = False
+        try:
+            process = subprocess.Popen(command, cwd=copy, env=environment,
+                                       stdout=output, stderr=subprocess.STDOUT)
+            deadline = time.monotonic() + timeout
+            entry["ownership"] = "original-child-running"
+            record()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(command, timeout)
+            waiting = True
+            code = process.wait(timeout=remaining)
+            waiting = False
+        except BaseException as primary:
+            entry["primaryFailure"] = type(primary).__name__
+            if process is None:
+                entry["ownership"] = "process-creation-UNPROVEN"
+                record(primary)
+                raise
+            if waiting and not isinstance(primary, (subprocess.TimeoutExpired, KeyboardInterrupt)):
+                entry["waitFailure"] = type(primary).__name__
+                entry["ownership"] = "original-child-and-descendant-cleanup-UNPROVEN"
+                record(primary)
+                raise
+            entry["ownership"] = "cleanup-unresolved"
+            record(primary)
+            try:
+                process.send_signal(signal.SIGINT)
+            except BaseException as failure:
+                entry["signalFailure"] = type(failure).__name__
+                record(primary)
+            # Execution deadline has failed. Joining the original child has no kill deadline.
+            while True:
+                try:
+                    entry["returncode"] = process.wait()
+                    entry["ownership"] = "original-child-joined"
+                    record(primary)
+                    break
+                except KeyboardInterrupt:
+                    entry["joinInterruptions"] += 1
+                    record(primary)
+                except BaseException as failure:
+                    entry["waitFailure"] = type(failure).__name__
+                    entry["ownership"] = "original-child-and-descendant-cleanup-UNPROVEN"
+                    record(primary)
+                    break
+            raise
+        entry["returncode"] = code
+        entry["ownership"] = "original-child-joined"
+        record()
+    return code
 
 print(f"Audit evidence: {work}", flush=True)
 if run(["bash", "test/cabal.sh", "build", target, "routing-fixed-point-probe", "--ghc-options=-Werror"], "build.log"):
