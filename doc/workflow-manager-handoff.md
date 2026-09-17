@@ -41,8 +41,10 @@ a fresh default-target build/package passed. A reviewed wrapper-probe portabilit
 fix is packaged and data-checked without changing source/raw modes. The complete
 source Store gate passed with parent verification and independent scoped
 clearance. The complete source Commands gate also passed parent verification
-and independent scoped review. Source Admission preparation is active. Raw and
-remaining source gates, old-resource recovery and acceptance remain unauthorized.
+and independent scoped review. Complete source Admission preparation is cleared,
+and one separately authorized Admission gate is active. No result is claimed.
+Raw and other remaining gates, old-resource recovery and acceptance remain
+unauthorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -745,12 +747,25 @@ or database API was rerun post-return. Review
 `bc2c3b2b-67ec-4d8f-a4f6-83920982fe41` found no issues for complete SOURCE Commands.
 The 442 PASS lines are observations, not unique obligations. Authority is consumed.
 
-Preparation-only run `1479eb5f-e0d1-4d20-909e-084e3af6b39f` owns
-`terminal-source-admission.KiEgo5Jc` for the complete source Admission gate, with
-N1/N8 fixtures, opacity, package-boundary evidence and interruption audits.
-No compiler, Store/native, helper or gate execution is authorized yet. Remaining
-source/raw, platform/client/canonical verification and WM-016 acceptance are
-outstanding.
+Admission preparation `1479eb5f-e0d1-4d20-909e-084e3af6b39f` completed in
+`terminal-source-admission.KiEgo5Jc`. Parent verified 1,530 identities and 16 inert
+preservation checks, with 54 prior footprints excluded. Review
+`ec4e9c41-4b14-4fc1-a8f9-231696d12958` found no issues. Scope retains all 19
+default families per N1/N8, 36 opacity consumers, the distinct package-boundary
+branch and compiled interruption audit.
+
+At `2026-09-17T00:09:39.321793+00:00`, the parent separately authorized one complete
+source Admission gate. Run `3cf17b57-5ffb-40e7-ae2d-a0010150ba4c` retains original
+gate/launcher handles. The exact completion-report fault is acknowledged only
+for its original-owned fresh Runtime group. Real signalling precedes one
+synthetic EIO report after successful SIGKILL and observed exited leader, not
+skipped cleanup or a claimed kernel error. Explicit retries/reopen comparisons
+operate only on their fresh original test owners, not historical resources.
+
+No result is claimed yet. Original exit notice must precede raw preservation
+and interpretation, with unchanged budgets and no fallback authority. Raw and
+other source gates, platform/client/canonical verification and WM-016 acceptance
+remain outstanding.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
