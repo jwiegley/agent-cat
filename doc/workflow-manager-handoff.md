@@ -9,14 +9,15 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T20:14:19.082303+00:00`. The next deadline is
-`2026-09-17T21:14:19.082303+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T20:45:02.087348+00:00`. The next deadline is
+`2026-09-17T21:45:02.087348+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 
 **P1 corrected and independently cleared:** the neutral test module restores
 the Cabal boundary. The committed audit accepts the repair and its final-byte
-verification. Only the separately authorized L07 directory-hygiene unit has
-resumed. Full policies and WM-016 remain unaccepted.
+verification. L07 directory disposal has independent source/data clearance
+and canonical post-process verification. Its committed fess is next. Full
+policies and WM-016 remain unaccepted.
 
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -1525,24 +1526,41 @@ the recorded fail-fast full-commit gates support the amendment. This closes
 only P1. Earlier mistaken clearance remains superseded, and native execution,
 full policies, preimages/A15 and WM-016 acceptance remain open.
 
-The next reviewed unit is L07 directory disposal in test/cabal_env_probe.py.
-Parent inspected pinned Python3.14.7 TemporaryDirectory: delete=False prevents
-both context-exit and implicit-finalizer deletion, while explicit cleanup
-still removes. At `2026-09-17T20:10:13.996686+00:00`, parent authorized only
-the isolated `terminal-cabal-temp-evidence.ts7m6u8p` unit. Worker
-`be5c22e5-53cf-4aaf-a7f7-5bd121f367a8` may edit that existing probe to use the
-standard delete parameter and add a post-context retention assertion. The
-real wrapper and inert Cabal producer, body/argv/status/diagnostic predicates,
-Bash invocation, cwd/environment behavior and ten-second budgets remain
-unchanged. Unmodified wrapper and Popen helper support copies are allowed.
+L07 changes only the existing TemporaryDirectory deletion policy and adds a
+post-context assertion in test/cabal_env_probe.py. The body, generated inert
+Cabal producer, real wrapper, argv/status/diagnostic predicates, Unicode/empty
+arguments, Bash calls, summary and two ten-second budgets remain unchanged.
+Pinned Python3.14.7 respects delete=False at both context exit and implicit
+finalization. Explicit cleanup still deletes but is not called.
 
-An actual old-probe deletion red, exact corrected fixture bytes/modes after
-process return, a specific source-bound body exception and distinct repeated
-roots are required. No replacement owner, cleanup monkeypatch/tracer, global
-retention switch, actual Cabal/build/compiler, native fixture/full gate,
-package/dependency action, canonical edit or A15/memory-reply repair is
-authorized. Only directory disposal is in scope. Memory-only replies/L06,
-A15, preimages and complete policies preservation remain unresolved.
+The isolated `terminal-cabal-temp-evidence.ts7m6u8p` unit has scoped clearance
+from review `799c4bfb-4af4-47d2-9c77-94a2fb19e6df`, conditional on parent
+integrity. That verification passed 1,680 comparisons, including 43 completed
+identities and five original outer Popen joins. The complete old probe returns
+normally through runpy and prints its original summary, then the driver fails
+because the real owner deleted the directory. No separate old-probe process
+exit zero is invented. Corrected and exception cases retain exact generated
+fixtures after context and process return.
+
+At `2026-09-17T20:37:23.789782+00:00`, parent separately authorized and applied
+the exact canonical two-line change. Two direct canonical probe invocations
+exited zero, preserving the summary and original fixtures after process exit.
+A bound one-raise variant preserves and propagates its specific RuntimeError
+at exit one without printing success. Three original outer joins have null
+errors and zero interruptions. Three mode0700 roots retain exact 139-byte
+mode0755 fake executables, with earlier bytes/inode/mode/times unchanged.
+The 24 completed identities were collected after return under
+`terminal-cabal-temp-canonical.ast0rhl4`. These invocations execute the inert
+producer, not real Cabal commands or native builds.
+
+Earlier L07 wording incorrectly grouped memory-only replies with L06. The
+sealed inventory names L06-profile-root-probe, the directory disposal in
+manager/test/RootProbe.hs. That disposal and memory-only replies are separate
+open concerns, as the retained clarification records. L07 fixes neither.
+Inner seven-call flow remains source-derived checks rather than new persisted
+per-child joins/replies. A15, preimages and complete preservation remain open.
+Separate documentation checking includes its static Haskell probe. Committed
+fess is next, without full-policies or WM-016 acceptance.
 
 Other deletion/retention, frontend ownership/read boundaries, ACP cleanup,
 A15 interruption handling, environment and complete-capture gaps remain blocked.
