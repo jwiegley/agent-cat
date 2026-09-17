@@ -726,6 +726,7 @@ privateRootContractTests = do
         mapM_ (\component -> expectIoFailure "invalid private component" (writePrivateExclusiveAt root [component] "bad"))
           ["", ".", "..", "a/b", "nul\NULsuffix"]
         PosixDirectory.createDirectory (path </> "public") 0o755
+        setFileMode (path </> "public") 0o755
         expectIoFailure "public descendants are refused" (ensurePrivateDirectoryAt root ["public", "escaped"])
         publicStatus <- getFileStatus (path </> "public")
         expect "public descendant permissions are not repaired" (fileMode publicStatus .&. 0o777 == 0o755)
