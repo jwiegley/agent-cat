@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-17 Thu 09:08]
+:MODIFIED: [2026-09-17 Thu 09:29]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -9228,6 +9228,12 @@ Refocus 2026-09-17T15:44:39.573110+00:00. Next deadline 2026-09-17T16:44:39.5731
 At2026-09-17T16:01:31.981584+00:00, parent separately authorized exact canonical L02 test-producer integration. A pre-execution byte check caught six missing backslashes in nested generator-string newline escapes during manual transfer. The mismatch/diff were retained, and all three canonical source paths were restored to exact reviewed hashes before any syntax or inert test ran. The support helper remained unchanged. Canonical Bash syntax and default no-argument capture_build_evidence.py then passed five cases with seven original Popen joins, null failures and zero interruptions.21 synthetic file bytes/modes, normalized argv/order and fixture identities match the isolated run.90 completed-file identities were collected after the verifier returned. Evidence root terminal-capture-build-canonical.7rn8j8cs. Real capture GHC/native checkers, timeout or signal injection, inner Haskell cleanup/A15 changes, package construction and full policies did not run. The separately authorized documentation gate includes its ordinary static runghc probe. Committed fess is next. Full policies and WM-016 remain unaccepted, with15/44 packages and G0 only accepted.
 
 Refocus 2026-09-17T16:08:47.375364+00:00. Next deadline 2026-09-17T17:08:47.375364+00:00. Next: exact L02 commit and committed fess, then one next reviewed policies remedy.
+
+2026-09-17 committed L02 fess3ddcda4a-73c6-4146-9537-cc9734adb32d found no issues in62c73ead8798942fb007d130d347da57fd546d38. The disclosed pre-execution escape repair, default inert entrypoint, seven original joins,21 synthetic artifacts and90 completed identities remain scoped data evidence. No real capture/native/full policies result follows.
+
+The review selected only L03 outer CaptureTests bucket hygiene. Parent read CaptureTests.hs and withPrivateRoot's descriptor bracket. Native worker cleanup, replacement-directory deletion/restoration, temporary-file assertion and descriptor closure must remain unchanged. Cymbal could not resolve this module's outline/refs, so parent used exact text references in runtime/test/Main.hs and runtime/ci/capture.sh without claiming indexed absence. At2026-09-17T16:25:51.082027+00:00, parent authorized isolated terminal-capture-bucket-evidence.18qe63n3. Worker0629340b-a51d-4d93-81e3-f9177d7dcf0b may edit only runtime/test/CaptureTests.hs, sharing its actual allocation/action owner with filesystem-only data checks and removing only outer hygiene disposal. A mode-preserving1017-file source/support copy is bound, excluding mutable PLAN/handoff. Warning-fatal complete-module Haskell/C compilation and an explicit data-only entrypoint atN1/N8 are authorized, with fresh private TMPDIR and a source-bound old allocation/finalizer inert red. Native captureTests, runtime-contract/full policies, Runtime PrivateRoot/publication/Worker/Store/group/backend/signal fixtures, behavioral deletion changes, other source edits, package actions and canonical edits remain forbidden. This subgap does not close all L03 pre-mutation evidence. Full policies and WM-016 remain unaccepted, with15/44 packages and G0 only accepted.
+
+Refocus 2026-09-17T16:29:08.857031+00:00. Next deadline 2026-09-17T17:29:08.857031+00:00. Next: isolated L03 outer-bucket source/data remedy and independent review.
 #+end_example
 
 ** Dependencies
