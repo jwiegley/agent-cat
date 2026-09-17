@@ -9,7 +9,7 @@ import tempfile
 
 
 helper = Path(__file__).resolve().with_name("cabal.sh")
-with tempfile.TemporaryDirectory(prefix="agentic-cabal-env-") as temporary:
+with tempfile.TemporaryDirectory(prefix="agentic-cabal-env-", delete=False) as temporary:
     root = Path(temporary)
     binary = root / "cabal"
     binary.write_text(
@@ -38,4 +38,5 @@ with tempfile.TemporaryDirectory(prefix="agentic-cabal-env-") as temporary:
                            capture_output=True, text=True, timeout=10)
     assert reply.returncode != 0 and reply.stdout == "", reply
     assert "configured project direnv" in reply.stderr, reply.stderr
+assert root.is_dir() and binary.is_file(), "cabal environment evidence was not retained"
 print("cabal environment: offline/build-directory flags, argv, cwd, environment, and exit status preserved")
