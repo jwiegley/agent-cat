@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-17 Thu 02:42]
+:MODIFIED: [2026-09-17 Thu 03:16]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -9092,6 +9092,18 @@ Review 87ed6bec-11b3-49c6-8c84-9acbd29529c8 found no issues with full parent ver
 A separate preparation-only decision assigns terminal-raw-controls.ybq6ts2k to worker 9376f86e-e2fa-46fa-8f78-53091be32bc8. It must bind exact raw modes, all 38 checker cases, six contracts with forty resources, fourteen builds and 28 own-built paths. Corrected both-owner completeness, explicit ACK-before-copy, full raw membership and no-follow preservation remain required. Existing missing-case and owner regressions must be retained, with raw-mode and membership refusals. No native, compiler, enumeration, validator, Store/database, backend/provider or process-control operation is authorized during preparation. No source/package/infrastructure change or previous fixture permission transfers.
 
 Refocus completed at 2026-09-17T09:42:33.941590+00:00, with next deadline 2026-09-17T10:42:33.941590+00:00. Prepare and review the remaining raw Controls lane without treating source/raw gate completion as full package acceptance. Frozen requirements and historical incident limits remain unchanged.
+
+Exact RAW Controls preparation under terminal-raw-controls.ybq6ts2k passed review 2be88c00-1034-42e2-9f63-fff444db9862 and parent verification of 2,643 comparisons. It binds raw594/source1021/archive, twelve mode differences and 427 source-only exclusions. The full matrix retains 38 checker cases, 22 positives and sixteen exact negatives, six contracts with forty resources, fourteen builds and 28 own-built paths. Exact raw membership, preimage modes, rewritten sets and mutation chains are required, not equal file counts or source modes.
+
+All 141 actual-analyzer and 21 preservation inert checks passed. They retain helper/capability and contract omissions, both-owner failures, every pair wrong marker/exit, build/timeout/wait/signal/unjoined/interruption/budget failures, raw-mode and same-count membership substitutions, extra rewritten files, missing summaries and preservation defects. Observation retries remain StoreBusy-only under the existing bound, distinct from same-key submission retries. No fixed stderr-note count or unsupported case attribution is assumed.
+
+Fresh canonical/private preflight verified 165 exclusions, empty build/record and absent cache. At 2026-09-17T10:13:17.547401+00:00 parent authorized one exact raw Controls gate. Authorization SHA256 32b97e935d6c8b04f66e9bfed075006dba60194d286f1e4e9570ac7cc003a939 binds plan d37443b4d6e0584875671cd3cb176056ebd518e3eb8251d2b8a1f2027721ad06. Worker f6219f0d-179b-4d58-aa88-e84f08566487 is active under original launcher/gate ownership. No result is claimed.
+
+Only selected fresh original-owned typed rejection/correlated cancellation, offline mixed/steering adapters, original partial-write/read-delivery-retirement barriers, Async/UserInterrupt/preparation cancellation, profile/credential reload/revocation, pair progress and bounded original saturation racers are included. Native130 stays non-success and terminal events do not establish cleanup or release. No Store lease-death, Admission completion fault or historical authority transfers. Budgets and failure precedence remain unchanged, with no aggregate native or killing outer deadline.
+
+Preservation is not authorized until both original owners return and parent explicitly acknowledges their exit/timing/join/error/interruption facts through need_decision. Without ACK or on failure/uncertainty, stop without retry, repair, recopy, PID adoption or next gate. The exact-run45minute wake is attention only. Even success in this last current raw owning lane grants no integration, platform/client execution, historical recovery or WM-016 acceptance.
+
+Refocus completed at 2026-09-17T10:13:17.547401+00:00, with next deadline 2026-09-17T11:13:17.547401+00:00. Five SOURCE gates and four RAW gates are scoped passes. Current raw Controls and broader acceptance remain unproved. Only WM-001 through WM-015 and G0 are accepted.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
