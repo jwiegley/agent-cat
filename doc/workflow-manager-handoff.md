@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T08:34:34.735400+00:00`. The next deadline is
-`2026-09-17T09:34:34.735400+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T09:42:33.941590+00:00`. The next deadline is
+`2026-09-17T10:42:33.941590+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -55,10 +55,10 @@ after its successful original invocation, explicit acknowledgement, faithful
 capture, review and full parent verification. Exact raw Commands also has
 scoped clearance after its original run and full verification. Exact raw
 Admission also has scoped clearance, including faithful first capture of both
-mode0700 package links. Exact raw ingestion preparation passed review and parent
-verification, followed by one authorized invocation. No result is claimed,
-and preservation awaits explicit parent acknowledgement. Other gates,
-old-resource recovery and WM-016 acceptance remain unauthorized.
+mode0700 package links. Exact raw ingestion also has scoped clearance after
+its original run, explicit acknowledgement, capture and full verification.
+Raw Controls preparation only is active. No further native gate, old-resource
+recovery or WM-016 acceptance is authorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -1023,22 +1023,38 @@ separate from native evidence, and the earlier 89-check version is retained.
 
 At `2026-09-17T08:34:34.735400+00:00`, fresh private preflight verified 147
 exclusions and parent authorized one exact raw ingestion gate. Run
-`9c3e2b1a-f44f-4f8f-aee5-4aef22e1d96c` is active under original ownership.
-Fourteen outcomes, seven builds and fourteen own-built paths are in scope.
-No result is claimed.
+`9c3e2b1a-f44f-4f8f-aee5-4aef22e1d96c` returned zero after 2,701.238048 seconds,
+with both original owners joined and no errors or interruptions. Actual elapsed
+time changed no budget. Parent checked both return records and absent capture,
+then issued copy-only ACK at 09:23:17.632768 UTC. Preservation began at
+09:24:01.294145 after the blocking reply.
 
-Selected fresh framing, interruption, group cleanup, SQL faults, original-owner
-retry/reopen and read-only observations are authorized. No earlier Store,
-Admission fault, historical PID or recovery permission transfers. Existing
-budgets and original handles remain unchanged, without an outer killing
-deadline or aggregate native timeout.
+Capture and both validators returned zero. Parent verification passed 13,478
+comparisons over 5,010 entries, 28 databases without sidecars, fourteen actual
+executable paths and nine retained compiler directories. All fourteen outcomes
+have four positives and ten exact negatives. Both top capabilities retain all
+source-derived family/corpus output, and helper records retain original joins,
+errors, budgets and argv. Exact raw modes and source/archive bindings remain
+unchanged.
 
-Both original owners must return before their facts are sent through
-need_decision. Explicit parent ACK remains required before copying or
-interpretation. Without it, or on failure or uncertain ownership, work stops
-without retry, repair, recopy or further gate. Raw ingestion and Controls,
-platform/client/canonical checks and final acceptance remain unproved, with
-WM-016 unaccepted.
+The inherited preserver banner still says source ingestion. It was not repaired
+after execution. Bound raw cwd, manifest, modes and original records establish
+the lane independently of that cosmetic text. No rerun, retry, repair or
+database API occurred.
+
+Review `87ed6bec-11b3-49c6-8c84-9acbd29529c8` found no issues, conditional on
+full parent verification. The completed 13,478-check report satisfies it, and
+parent accepted exact raw ingestion at `2026-09-17T09:39:19.922743+00:00`.
+The reviewer did not independently rerun hashes or tests. Permissions are
+consumed, and historical limits remain unchanged.
+
+Preparation-only run `9376f86e-e2fa-46fa-8f78-53091be32bc8` owns
+`terminal-raw-controls.ybq6ts2k`. It must bind all 38 checker cases, six contracts
+and exact raw membership/modes with corrected ownership and acknowledgement
+before copying. No native, compiler, database API or old-resource mutation is
+authorized. Raw Controls is the last unproved current source/raw owning lane,
+not the last overall requirement. Platform/client/canonical checks and full
+WM-016 acceptance remain open.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
