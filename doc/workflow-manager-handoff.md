@@ -9,10 +9,10 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T00:46:37.675187+00:00`. The next deadline is
-`2026-09-17T01:46:37.675187+00:00`. The previous checkpoint was less than one minute
-late during read-only verification, and the lapse was disclosed. Complete
-instrumented and uninstrumented
+Refocus completed at `2026-09-17T01:36:39.191411+00:00`. The next deadline is
+`2026-09-17T02:36:39.191411+00:00`. The earlier 00:46 checkpoint was less than one
+minute late during read-only verification, and the lapse was disclosed.
+Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
 also passed all 14 outcomes with verified bytes/modes and independent scoped
 clearance. The controls evidence analyzer correction is independently cleared.
@@ -43,12 +43,12 @@ a fresh default-target build/package passed. A reviewed wrapper-probe portabilit
 fix is packaged and data-checked without changing source/raw modes. The complete
 source Store gate passed with parent verification and independent scoped
 clearance. The complete source Commands gate also passed parent verification
-and independent scoped review. The source Admission gate returned zero, but its
-first preservation copied two symlink modes incorrectly. A separately reviewed
-copier and authorized new capture now preserve those modes faithfully. Parent
-verification passed, and independent result disposition is active. Old copies
-and failed preservation records remain unchanged. Further gates, old-resource
-recovery and WM-016 acceptance remain unauthorized.
+and independent scoped review. The complete source Admission gate now also
+passes scoped review using a separately authorized faithful new capture.
+Its first preservation copied two link modes incorrectly, and that old snapshot
+and failed disposition remain unchanged. Preparation only for the current-byte
+source ingestion gate is active. Further native gates, old-resource recovery
+and WM-016 acceptance remain unauthorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -804,11 +804,22 @@ each, nine completion-child PASS lines each, 36 exact opacity consumers and
 the package/interruption predicates. The four quarantine sidecars remain raw.
 No database API or native/compiler/helper rerun occurred.
 
-Independent disposition `b257493b-115c-484d-8096-932e33ad4575` is active. It must
-decide whether the faithful new capture closes the source Admission evidence
-gap. No old snapshot repair, historical pre-first-copy inode continuity, atomic
-database state, resource recovery or WM-016 acceptance is claimed. Remaining
-source/raw/platform/client/canonical verification stays outstanding.
+Independent disposition `b257493b-115c-484d-8096-932e33ad4575` found no issues and
+cleared the complete source Admission gate for the same bound candidate and
+original invocation. Parent accepted that scoped result at
+`2026-09-17T01:33:07.817091+00:00`. The faithful new capture closes the concrete
+copying gap without native repetition or old snapshot repair. No historical
+pre-first-copy inode continuity, atomic database state, resource recovery or
+WM-016 acceptance is claimed.
+
+Preparation-only run `5722a5d1-ffa3-423c-a9ce-09699997628f` now owns
+`terminal-source-ingestion.e8c2q8d7`. It must bind the current source ingestion
+gate and all fourteen N1/N8 outcomes, with the top build, six helper builds,
+four positive cases and ten specifically diagnosed negatives. Existing
+supervision and minimal no-follow metadata preservation are reused with inert
+tests. No native gate, compiler, Cabal operation, database API or old-resource
+change is authorized during preparation. Remaining source Controls/ingestion,
+raw, platform/client/canonical verification and full acceptance stay open.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.

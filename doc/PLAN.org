@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 18:30]
+:MODIFIED: [2026-09-16 Wed 18:36]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8932,6 +8932,12 @@ After a fresh read-only agreement check, parent explicitly authorized one new ex
 Parent result verification passed9268checks across original/new/old artifacts, current source, archive, four actual gate-built binaries,40DBs/four sidecars and relevant default/package/opacity/interruption predicates.19defaultfamilies eachN1/N8 produced93PASS/2000QuickCheck cases, completionchildren9PASS each, opacity36consumers/12positive/24specificrefusals, interruptionbuild plus two19PASS cases with original joins and unchanged budgets. No post-return database API, compiler/helper rerun, historical pre-first-copy inode continuity or atomic snapshot claim. New capture under terminal-admission-capture-fix.l8ioyj5u/capture is faithful at its new time. Its completeGateClaim remains false.
 
 Independent result dispositionb257493b-115c-484d-8096-932e33ad4575 is active. It must decide whether the same original exit0 SOURCE Admission gate can now be accepted from the faithful new capture and preserved original predicates. No further gate, resource recovery, canonical candidate integration or WM016 acceptance is authorized by this capture. Source Controls/ingestion and current raw/platform/client/full acceptance obligations remain outstanding.
+
+Independent review b257493b-115c-484d-8096-932e33ad4575 found no issues and cleared the complete SOURCE Admission gate for the bound current candidate and original invocation. Parent disposition at 2026-09-17T01:33:07.817091+00:00 accepts that scoped gate result using the faithful new capture. The original successful native invocation was not repeated. Old mode-inexact copies and failure records remain unchanged, with no historical inode continuity, atomic database state or historical cleanup claim. Source Store, Commands and Admission owning gates now pass. WM-016 remains in progress and unaccepted, with only WM-001 through WM-015 and G0 accepted.
+
+A new parent preparation-only decision assigned terminal-source-ingestion.e8c2q8d7 to worker run 5722a5d1-ffa3-423c-a9ce-09699997628f. It prepares the complete unchanged current SOURCE ingestion gate: fourteen N1/N8 outcomes, the top build and six helper builds, four positive and ten specifically diagnosed negative cases. Current source modes and the twelve source/raw differences stay unchanged. It must reuse original-handle supervision and minimally carry the reviewed first-capture symlink metadata primitive, with inert tests and fresh resource exclusions. No native gate, compiler/Cabal execution, database API, old-resource modification, raw lane or authorization is permitted during this preparation.
+
+Refocus completed at 2026-09-17T01:36:39.191411+00:00, with next deadline 2026-09-17T02:36:39.191411+00:00. The resolved preservation gap is not a reason for further investigation or native repetition. The shortest remaining step is current-byte source ingestion preparation and independent review, followed only by a separate exact execution decision. Frozen full-scope acceptance criteria remain unchanged.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
