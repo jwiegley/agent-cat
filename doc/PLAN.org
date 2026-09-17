@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-17 Thu 04:43]
+:MODIFIED: [2026-09-17 Thu 05:46]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -9138,6 +9138,18 @@ The worker may finish the read-only transitive inventory and propose the smalles
 The source-only policies inventory reports additional prospective gaps: transitive probes/Haskell tests delete temporary roots, some child output remains memory-only, and selected fixtures include deliberate fresh killpg(SIGKILL), original-Popen kill fallbacks and SIGSTOP/SIGCONT export races. These actions require individual ownership and permission analysis, not blanket signal authority. Reported failure-path gaps include export Popen handles outside Session.active cleanup, person-control/person-lineage root deletion without guaranteed joins, and blocking reads before bounded waits. Exact source/caller mapping is still being completed.
 
 Parent directed the worker to keep preparation BLOCKED / NOT EXECUTED, distinguish deliberate original-owned test faults from generic fallbacks or lost ownership, identify every affected caller/finalizer and deadline boundary, and propose minimal reuse of existing supervision. Root deletion is not cleanup proof and cannot erase uncertain evidence. No repair, live capture, native experiment or source mutation is authorized, and these observations establish no cause or cleanup conclusion for historical policies-gate-05.
+
+SOURCE policies preparation e6c09e88-7490-4905-92a1-0f1e09504265 finished BLOCKED / NOT EXECUTED under terminal-source-policies.fddhjig5. Its sealed inventory has 29 logical stages, 34 selected helpers, 78 bound definitions, 24 artifact-lifetime rows and 15 authority rows. Prospective counts include 108 fixed checker calls, 44 Cabal build selections, three capture GHC builds, four boundary runghc calls and 144 opacity consumers. These are not executions or unique obligations. Runtime contract codec modes are not its default full suite.
+
+Parent verification passed 1,806 comparisons over 68 pre-seal artifacts, source1021, raw594 comparison files, archive/mode bindings, literal source command order and source references. The 46 inert checks cover owner records, deleted/memory-only eligibility, blocked execution before Popen, actual inert temporary disposal and no-follow link fidelity. Build/record remain empty, cache and authorization absent. No complete policies preserver/analyzer exists, and executionReady, authorization and completeGateClaim remain false. No owning compiler, gate, database, process or provider operation occurred.
+
+Blockers remain evidence deletion and memory-only bytes, original-owner/read/finalizer gaps, absent exact aggregate fixture authority, unresolved selected environment effects and incomplete full preservation. Keeping a directory does not prove a child joined. Behavioral deletions cannot be disabled to retain data. Proposed remedies remain unimplemented and need separate review. Historical policies05 and all prior quarantine dispositions are unchanged.
+
+The worker retained its failed -j1 assumption and corrected only private assertions/prose after parent clarified serialized Cabal invocations rather than one compile job. Parent verification initially assumed every input binding was a regular file and rejected the immutable Nix subprocess.py symlink. The corrected verifier records its Nix-store target and verifies resolved immutable bytes, without changing capture no-follow rules or the sealed preparation. Both failed checks remain retained.
+
+Independent blocker/remedy review c0b35d7c-afed-43d4-b0cb-9a620f1db61f is active. Its source inspection confirms deletion and original-owner/read boundaries, while narrowing environment attribution: observed AGENT_CAT_RUNNER is consumed by an unselected Pi path, and AGENT_CAT_STATE_DIR by unselected tuiCmd. Names-only presence is not proof these variables redirect policies. Selected machine consumers and inherited query environments still need precise isolation review, without exposing values. No environment rewrite or source fix is authorized.
+
+Refocus completed at 2026-09-17T12:46:33.374735+00:00, with next deadline 2026-09-17T13:46:33.374735+00:00. Obtain one minimal source-owned remedy recommendation without a generic recorder, global interception, parallel supervisor or weakened acceptance. All ten owning lanes remain scoped passes, and WM-016 remains open.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 

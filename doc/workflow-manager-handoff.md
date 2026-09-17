@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T11:33:43.030675+00:00`. The next deadline is
-`2026-09-17T12:33:43.030675+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T12:46:33.374735+00:00`. The next deadline is
+`2026-09-17T13:46:33.374735+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -60,9 +60,10 @@ its original run, explicit acknowledgement, capture and full verification.
 Exact raw Controls also has scoped clearance after its original run, explicit
 acknowledgement, faithful capture, review and full parent verification. All ten
 current macOS SOURCE/RAW owning lanes pass. Reconciliation identified remaining
-changed-layer compatibility and integration evidence. Data-only preparation of
-the complete candidate policies gate is active but has confirmed retention
-blockers. No integration, broader execution, platform/client work, old-resource
+changed-layer compatibility and integration evidence. The complete policies
+preparation is sealed but blocked on retention, ownership/read boundaries and
+unresolved authority/environment prerequisites. Independent remedy review is
+active. No integration, broader execution, platform/client work, old-resource
 recovery or WM-016 acceptance is authorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
@@ -1104,10 +1105,11 @@ canonical execution, installation or deployment.
 
 At `2026-09-17T11:28:40.361345+00:00`, parent authorized data-only preparation
 under `terminal-source-policies.fddhjig5`. Worker
-`e6c09e88-7490-4905-92a1-0f1e09504265` must map the complete policies invocation,
-including its transitive manager gates and final frontend/policy/CLI probes.
-No compiler, gate, database, native/process-control, remote/client, model/oracle,
-source or integration operation is authorized.
+`e6c09e88-7490-4905-92a1-0f1e09504265` finished a blocked source/data inventory
+covering 29 logical stages, 34 helper selections, 78 definition files, 24
+artifact-lifetime rows and fifteen authority rows. Parent verification passed
+1,806 comparisons and the 46 inert boundary checks remain explicitly non-native.
+No complete policies preserver/analyzer or execution authorization exists.
 
 Preparation is blocked on source-defined artifact retention. Policies deletes
 answer-schema vectors through an EXIT trap, and runtime capture deletes its
@@ -1120,12 +1122,23 @@ Selected crash and export-race signals need exact original-owner analysis,
 rather than blanket kill permission. These remain prospective source findings,
 not a diagnosis of historical policies05.
 
-The worker may complete the exact caller/lifetime inventory and propose minimal
-retention and supervision remedies for separate review. Root deletion is not
-cleanup proof and must not erase uncertain evidence. No live capture, script
-change, native experiment, fabricated evidence or preservation waiver is
-permitted. Historical limits and all ten scoped owning-lane results remain
-unchanged.
+Independent review `c0b35d7c-afed-43d4-b0cb-9a620f1db61f` is validating the
+blockers and selecting one minimal source-owned remedy. It has narrowed the
+environment claim: names-only presence of AGENT_CAT_RUNNER and AGENT_CAT_STATE_DIR
+does not prove selected consumption. Their identified consumers are unselected
+Pi/TUI paths, while machine and query environment handling needs exact review.
+No inherited values were exposed or environment rewritten.
+
+The failed worker -j1 assertion remains retained after clarification that Cabal
+invocations are serialized, not forced to one compile job. A parent verifier
+regular-file assumption also failed on an immutable Nix source symlink, then
+was corrected to bind its resolved bytes without changing capture rules.
+Neither correction changed candidate source.
+
+Root deletion is not cleanup proof and must not erase uncertain evidence.
+No live capture, script change, native experiment, fabricated evidence or
+preservation waiver is permitted. Historical limits and all ten scoped
+owning-lane results remain unchanged, with WM-016 open.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
