@@ -1113,10 +1113,19 @@ Preparation is blocked on source-defined artifact retention. Policies deletes
 answer-schema vectors through an EXIT trap, and runtime capture deletes its
 whole temporary root, including three built executables and compiler outputs,
 before returning. Parent confirmed the blocker without executing anything.
-The worker may complete the source inventory and propose a minimal retention
-remedy for separate review. No live capture, script change, fabricated evidence
-or preservation waiver is permitted. Historical limits and all ten scoped
-owning-lane results remain unchanged.
+The source inventory also reports memory-only child output, more temporary-root
+deletion, unbounded reads before bounded waits, export handles outside shared
+cleanup and person-control/lineage failure paths without guaranteed joins.
+Selected crash and export-race signals need exact original-owner analysis,
+rather than blanket kill permission. These remain prospective source findings,
+not a diagnosis of historical policies05.
+
+The worker may complete the exact caller/lifetime inventory and propose minimal
+retention and supervision remedies for separate review. Root deletion is not
+cleanup proof and must not erase uncertain evidence. No live capture, script
+change, native experiment, fabricated evidence or preservation waiver is
+permitted. Historical limits and all ten scoped owning-lane results remain
+unchanged.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.

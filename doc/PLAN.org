@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-17 Thu 04:36]
+:MODIFIED: [2026-09-17 Thu 04:43]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -9134,6 +9134,10 @@ Refocus completed at 2026-09-17T11:33:43.030675+00:00, with next deadline 2026-0
 Policies preparation has confirmed retention blockers before any owning execution. The unchanged policies script removes generated answer-schema vectors through its EXIT trap. The selected runtime capture gate removes its entire capture.* directory, including three freshly built test executables and compiler outputs, before returning to policies. Parent verified the capture.sh source and confirmed request b775ff1d-8121-42f9-b8b4-44640f4ea066 as BLOCKED / NOT EXECUTED preparation.
 
 The worker may finish the read-only transitive inventory and propose the smallest separately reviewed retention remedy. It must distinguish behavioral cleanup from evidence disposal, preserve process teardown/failure/budget semantics, and identify existing supported retention controls. No script change, live capture, fabricated post-return evidence, compiler/native run or waiver is authorized. These findings do not invalidate the already scoped owning lanes or resolve historical failures.
+
+The source-only policies inventory reports additional prospective gaps: transitive probes/Haskell tests delete temporary roots, some child output remains memory-only, and selected fixtures include deliberate fresh killpg(SIGKILL), original-Popen kill fallbacks and SIGSTOP/SIGCONT export races. These actions require individual ownership and permission analysis, not blanket signal authority. Reported failure-path gaps include export Popen handles outside Session.active cleanup, person-control/person-lineage root deletion without guaranteed joins, and blocking reads before bounded waits. Exact source/caller mapping is still being completed.
+
+Parent directed the worker to keep preparation BLOCKED / NOT EXECUTED, distinguish deliberate original-owned test faults from generic fallbacks or lost ownership, identify every affected caller/finalizer and deadline boundary, and propose minimal reuse of existing supervision. Root deletion is not cleanup proof and cannot erase uncertain evidence. No repair, live capture, native experiment or source mutation is authorized, and these observations establish no cause or cleanup conclusion for historical policies-gate-05.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
