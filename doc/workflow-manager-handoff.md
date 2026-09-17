@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T06:26:10.853887+00:00`. The next deadline is
-`2026-09-17T07:26:10.853887+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T06:55:24.022774+00:00`. The next deadline is
+`2026-09-17T07:55:24.022774+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -52,10 +52,10 @@ now has scoped clearance after its original successful run, explicit
 acknowledgement, faithful capture, review and full parent verification. All five
 current source owning gates pass. Exact raw Store now has scoped clearance
 after its successful original invocation, explicit acknowledgement, faithful
-capture, review and full parent verification. Exact raw Commands preparation
-passed review and parent verification, followed by one authorized invocation.
-No result is claimed, and preservation awaits explicit parent acknowledgement.
-Other gates, old-resource recovery and WM-016 acceptance remain unauthorized.
+capture, review and full parent verification. Exact raw Commands also has
+scoped clearance after its original run and full verification. Raw Admission
+preparation only is active. No further native gate, old-resource recovery or
+WM-016 acceptance is authorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -958,19 +958,41 @@ do not substitute for those future gate outcomes.
 
 At `2026-09-17T06:26:10.853887+00:00`, fresh private preflight passed and parent
 authorized one complete raw Commands gate. Run
-`7cc019d0-318d-4e36-9f29-b86ee175b4d4` is active under original ownership.
-No result is claimed. Scope includes only the selected fresh SQL and in-process
-fixtures plus existing original compiler timeout behavior. The configured
-`/bin/false` placeholder must remain unexecuted. No backend launch, Store
-SIGKILL, Admission fault or historical permission transfers.
+`7cc019d0-318d-4e36-9f29-b86ee175b4d4` returned zero after 142.169725 seconds,
+with both original owners joined and no errors or interruptions. Parent
+checked the original return records and absent capture, then issued copy-only
+ACK at 06:31:29.434742 UTC. Preservation began at 06:32:17.566466 after the
+blocking reply. Gate and copy permissions are consumed.
 
-Preservation is not authorized until both original owners return and parent
-explicitly acknowledges the exit, timing, join and failure facts through the
-existing request/reply mechanism. Without that reply, work stops without copy
-or interpretation. Existing budgets, raw modes and failure precedence remain
-unchanged, with no new outer killing deadline, retry or repair. Remaining raw,
-platform/client/canonical and final acceptance requirements stay open, with
-WM-016 unaccepted.
+Capture and both validators returned zero. Parent verification passed 2,104
+comparisons over 274 entries, thirty databases without sidecars, the actual
+own-built checker and three retained compiler directories. Raw modes, archive
+and source bindings remain unchanged. Both 196-PASS checkers cover sixteen
+families, the exact receipt corpus, fourteen emitted receipts and all 36
+source-reconstructed opacity consumers. Individual status classes remain
+checked-flow inferences.
+
+Review `d4aaad06-81bc-475a-8680-13c00d607281` found no issues with full parent
+verification as a condition. The completed 2,104-check report satisfies it,
+and parent accepted scoped raw Commands at `2026-09-17T06:51:17.212223+00:00`.
+The reviewer did not independently rerun hashes or tests. No backend launch,
+rerun, repair, normalization or historical permission transfer occurred.
+
+Preparation-only run `3c25cb13-b1f8-4839-9dfe-0b2c08f6d79c` owns
+`terminal-raw-admission.6_9pd_li`. It must bind raw defaults, completion-child
+evidence, opacity, package-boundary and interruption branches. Latest
+mode-faithful first capture and both-owner/ACK checks remain required. No
+native, compiler, database API or old-resource mutation is authorized.
+
+The parent clarified its imprecise fault-library wording. Cabal compiles
+`admission_cleanup_fault.c` directly into the checker, with no separate library
+invocation. When armed, the C wrapper probes child exit before calling the real
+signal function. It reports one synthetic EIO only after that call succeeds
+and the earlier probe was positive. This is neither a kernel error nor a
+post-signal exit observation. Actual linked checker and supported compiler
+artifacts must be retained, not an invented standalone library. Future fault
+execution needs a new exact parent decision. Remaining raw, platform/client/
+canonical and final acceptance requirements stay open, with WM-016 unaccepted.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.

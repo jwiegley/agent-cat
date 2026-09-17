@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 23:28]
+:MODIFIED: [2026-09-16 Wed 23:58]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -9028,6 +9028,22 @@ Selected effects are onlyfreshSQLtriggers/rollback/migrations/legacybounds/curre
 Preservation isnotcurrentlyauthorized. Immediatelyafterreturn theworker mustreportbothoriginalowners exit/timing/joins/errors/interruptions throughneed_decision andwaitforexplicitparentACK. Noqueuednotice substitutesforreceipt, andno copyingorinterpretation precedesACK. Failure/noACK meansstopretainoriginals, notretry/repair/recopy/PIDadoption/recovery/nextgate. CanonicalNixPython, exactrawmodes andown-buildprovenance remainrequired. The45minute exact-runwake isattentiononly.
 
 Refocus completed at 2026-09-17T06:26:10.853887+00:00, with next deadline 2026-09-17T07:26:10.853887+00:00. FivecurrentSOURCEowninggatesandRAWStorearescopedpasses. CurrentRAWCommands andremainingraw/platform/client/canonical/finalacceptance remainunproved. WM-001 throughWM-015andG0remain theonlyacceptedpackages/gate.
+
+Exact RAW Commands invocation7cc019d0-318d-4e36-9f29-b86ee175b4d4 returned gate exit0 after142.16972466699372seconds and launcher exit0 after142.45389541699842seconds, with both original joins and no errors/interruptions. The child blocked on need_decision8f507d58-fd2a-4264-8b40-c8526a22e277. Parent checked records and absent capture/analysis, then issued copy-only ACK persistedAt2026-09-17T06:31:29.434742+00:00, SHA1b612bc0655fa7879480cb61653cafb026c55108ae173882540ed300eb969790. Preservation began06:32:17.566466 after blocking reply. Permissions are consumed, not acceptance or repeat authority.
+
+Capture, unchanged both-owner analyzer and supplemental full validator returned0. Parent verification passed2,104comparisons over274entries/198regular/76directories/30DB/no sidecars/no symlinks,oneactualown-builtchecker andthreeretainedcompilerdirs. Raw273entriesremainunchangedwithonlycheckeraddition. OwnCabalplan andoriginalJbuildfile proveprovenance independently of equalSOURCEbinaryhash. Raw594/source1021/archive/12mode differences/427source-onlyexclusions remainunchanged. No database API, compiler/frozenvalidator/gate rerun, normalization, repair, historicalaction orbackendlaunchoccurred.
+
+Both196PASScheckers cover16source-selected families and15Storefixtures each, exact13receipt-corpus examples/ninevalid/fourinvalid/eightinvaliddatechecks, twocontractcalls/fourteenreceipts andall36source-reconstructed consumers/12positive24specificrefusals. Exactbody/log/diagnostic/order/120scompilerbound/localmainlibrary selection werechecked. Individualstatusclasses remainchecked-flowinferences,notfabricatednumericobservations.442PASS is anoutputcount,notuniqueobligations.
+
+Reviewerd4aaad06-81bc-475a-8680-13c00d607281 found noissues, leavingfullparentintegrityverificationasacondition. The completed2,104-checkparentreport satisfiesit, andparentacceptedexactRAWCommandsat2026-09-17T06:51:17.212223+00:00. Thereviewer didnotindependentlyrerunhashesortests. FivecurrentSOURCEgatesandRAWStore/Commandsnowpass,whileRAWAdmission/ingestion/Controlsandplatform/client/canonical/finalacceptanceremainunproved. WM-016isunaccepted.
+
+A newpreparation-onlydecision assigns terminal-raw-admission.6_9pd_li toworkerrun3c25cb13-b1f8-4839-9dfe-0b2c08f6d79c. Itmustbindexactraw594/modes/archive,defaultN1/N8families/completionchild,36opacityconsumers,distinctpackage-boundary(noNcases/binaries)andinterruptionbranches,withactualfault-librarybytesandpresentDBsidecars. Itmustcarrylatestbothowner/ACK/nofollowmodefaithfulfirstcapture,notoldSOURCEAdmissiondefectivecopierorrecapturebaseline. Futurecompletion-reportfaultrequiresanexplicitnewdecisioncoveringrealoriginal-ownedsignallingfollowedbyoneEIOreportafterSIGKILLandobservedexitedleader;itdoesnotskipcleanupprovekernelerrorortransferhistoricalpermission. No gate/build/compiler/enumeration/Store/DB/native/provider/processcontrol/source/Git/obr orauthorizationispermittedduringpreparation.
+
+Refocus completed at 2026-09-17T06:55:24.022774+00:00, with next deadline 2026-09-17T07:55:24.022774+00:00. The next unmet requirement is raw Admission preparation/review, not another Commands run. Frozenfullscopeacceptancecriteriaandhistoricalquarantinelimitsremainunchanged.
+
+Raw Admission preparation clarification: the parent phrase fault-library build was imprecise. Raw agentic.cabal:545-549 links manager/test/admission_cleanup_fault.c directly as c-sources of manager-admission-check. No separate library build/load or nonexistent library artifact is required. Bind that source, included runtime/cbits/process_group.c, actual linked own-built checkers and only compiler artifacts established by original records, retaining intermediates in place where appropriate.
+
+Parent verified the C sequence and replied to request de8acd4d-9af2-49f6-8141-5bfb1207fa09. When armed for SIGKILL, agentic_child_exited is probed first, with EINTR-only repetition, then the real signal function runs. Only real result0 plus the earlier positive exit probe and consumed armed flag yields one simulated EIO completion report. It is not a post-signal exit observation, kernel EIO or skipped signalling. The original brief and A/parent-c-fault-linkage-clarification.md retain this correction. No compiler/native invocation or new authority occurred.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
