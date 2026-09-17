@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T17:18:42.663809+00:00`. The next deadline is
-`2026-09-17T18:18:42.663809+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T17:43:10.958410+00:00`. The next deadline is
+`2026-09-17T18:43:10.958410+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -77,9 +77,10 @@ integration passed syntax and the default inert entrypoint. Committed L02
 fess is clear. L03 outer CaptureTests bucket hygiene has independent
 source/data clearance and full parent verification. Exact canonical integration
 passed warning-fatal compilation and filesystem-only N1/N8. Its committed
-fess is clear. The isolated L04 outer root-role bucket remedy is active,
-reusing the existing owner and filesystem checks. Native capture/role fixtures
-and L03/L04 pre-mutation evidence remain unverified.
+fess is clear. L04 outer root-role bucket hygiene has independent source/data
+clearance and parent verification. Exact canonical reuse passed both
+warning-fatal data-main builds and all four filesystem N1/N8 runs. Committed
+L04 fess is next. Native capture/role fixtures and preimages remain unverified.
 No native fixture, full gate, WM-016 application integration, platform/client
 work, old-resource recovery or WM-016 acceptance is authorized.
 
@@ -1358,27 +1359,40 @@ blockers remain unresolved. Committed fess review
 `ca86b29ceddac4548c4d5af28c858dbaf3a19963`, limited to outer hygiene. The 27
 non-build identities do not imply exhaustive compiler-intermediate hashing.
 
-The next reviewed subgap is L04 outer root-role bucket hygiene. Parent
-inspected both native actions and direct main/capture-script references.
-Indexed outline/importer resolution remained unavailable, so no indexed
-absence claim follows. At `2026-09-17T17:15:50.902001+00:00`, parent authorized
-only the isolated `terminal-role-bucket-evidence.b7796fr5` unit. Worker
-`a4fc8e4d-27fd-48b5-9d3f-2a1477a98921` may edit CaptureTests.hs and
-RootRoleTests.hs, reusing the existing allocation/action seam and filesystem
-assertions with explicit prefixes, rather than cloning an owner. A 1,017-file
-copy is bound, excluding mutable tracker/handoff documents.
+L04 outer root-role bucket hygiene reuses the existing allocator and filesystem
+assertions through explicit prefixes. The isolated
+`terminal-role-bucket-evidence.b7796fr5` copy binds 1,017 files and changes only
+CaptureTests.hs and RootRoleTests.hs. RootRoleTests imports the shared owner
+and checks in one direction. Existing L03 payloads, entrypoint and summary are
+preserved, with an added observed-prefix assertion. Both native actions, role
+bindings, descriptor brackets, replacement deletion/restoration, marker/
+absence/FIFO/symlink refusals and capture finalizers/bounds remain unchanged.
 
-Both literal prefixes, the existing L03 entrypoint/results/summary, native
-bodies and marker bindings, descriptor brackets, behavioral replacement
-deletion/restoration, marker/absence/FIFO/symlink refusals and capture
-finalizers/bounds must remain unchanged. Complete-module/C warning-fatal
-compilation of explicit capture and root-role data-only mains, all four
-filesystem N1/N8 runs in separate private roots, and source-bound old root-role
-allocation/finalizer reds are allowed. Native capture/root-role, Runtime
-PrivateRoot/state-role/publication, FIFO/symlink/Worker/Store/group/backend/
-signal fixtures, runtime-contract/full policies, package actions, canonical
-edits, new modules and further source paths remain unauthorized. L03/L04
-preimages, L05, A15 and other blockers still require separate remedies.
+Review `c26db081-a7b3-4d2c-9f04-5e00a998703b` found no issues, conditional on
+parent integrity verification. That verification passed 3,736 comparisons,
+including 67 completed-file identities, all source bindings, shared assertion
+reuse, three warning-fatal builds, four data outcomes, ten original Popen
+joins, twelve retained buckets and two source-bound old root-role reds.
+The exact old finalizer deletes the fresh inert tree, not a recreated output.
+
+At `2026-09-17T17:36:46.288554+00:00`, parent separately authorized and applied
+the exact two-file canonical change. Fresh complete-module/C data-main builds
+passed in 29.934385459 seconds for capture and 28.932322333 seconds for role,
+with empty stderr. All four filesystem N1/N8 runs passed in separate private
+temporary roots, with six original Popen joins, null failures and zero
+interruptions. All 1,017 bound nontracking inputs remained unchanged during
+verification. Twelve canonical trees match isolated prefixes/bytes/modes, and
+existing canonical L03 data remains unchanged. The 47 completed non-build
+identities were collected after return. Own binaries are separately bound,
+and compiler intermediates remain in place. Evidence is retained under
+`terminal-role-bucket-canonical.pprwk3v3`.
+
+No native capture/rootRoleTests, Runtime PrivateRoot/state-role/publication,
+FIFO/symlink/Worker/Store/group/backend/signal fixture, descriptor-closure
+execution, runtime-contract/full policies or package operation ran. Separate
+documentation checking includes its standard static Haskell probe. Only outer
+disposal is addressed. L03/L04 preimages, L05/A15 and all other blockers remain.
+Committed fess is next. Other remedies require new decisions.
 
 Other deletion/retention, frontend ownership/read boundaries, ACP cleanup,
 A15 interruption handling, environment and complete-capture gaps remain blocked.

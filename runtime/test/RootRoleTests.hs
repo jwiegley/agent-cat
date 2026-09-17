@@ -2,16 +2,16 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 
-module RootRoleTests (rootRoleTests) where
+module RootRoleTests (rootRoleTests, rootRoleBucketEvidenceData) where
 
 import Agentic.Runtime
-import Control.Exception (IOException, bracket, finally, try)
+import CaptureTests (withCaptureBucket, bucketEvidenceChecks)
+import Control.Exception (IOException, bracket, try)
 import Control.Monad (forM_, unless, void)
 import qualified Data.ByteString as BS
 import Data.Bits ((.&.))
 import Foreign.C.Error (throwErrnoIfMinus1Retry)
 import Foreign.C.Types (CInt (..))
-import GHC.Clock (getMonotonicTimeNSec)
 import System.Directory (getTemporaryDirectory, listDirectory, removePathForcibly, renameDirectory)
 import System.FilePath ((</>))
 import qualified System.Posix.Directory as Directory
@@ -21,16 +21,14 @@ import System.Posix.Types (Fd (..))
 
 rootRoleTests :: IO ()
 rootRoleTests = do
+  rootRoleBucketEvidenceData
   temporary <- getTemporaryDirectory
-  stamp <- getMonotonicTimeNSec
-  let bucket = temporary </> ("agentic-root-roles-" <> show stamp)
-      marker = ".agentic-root-role.json"
-      canonical = "{\"version\":1,\"role\":\"manager\"}\n"
-      fixture name action = withPrivateRoot "role fixture" (bucket </> name) $ \root -> do
-        mapM_ syncDirectory [privateRootPath root, bucket, temporary]
-        action root
-  Directory.createDirectory bucket 0o700
-  (do
+  withCaptureBucket "agentic-root-roles-" temporary $ \bucket -> do
+    let marker = ".agentic-root-role.json"
+        canonical = "{\"version\":1,\"role\":\"manager\"}\n"
+        fixture name action = withPrivateRoot "role fixture" (bucket </> name) $ \root -> do
+          mapM_ syncDirectory [privateRootPath root, bucket, temporary]
+          action root
     withLocalStateRoot "new local state" (bucket </> "new-local" </> "state") $ \root -> do
       assertLocalStateRoot root
       status <- getFileStatus (privateRootPath root)
@@ -100,9 +98,13 @@ rootRoleTests = do
       createPrivateDirectoryAt root ["child"]
       bracket (openPrivateSubroot root ["child"]) closePrivateRoot $ \child -> do
         refuses "invalid ancestor marker became local absence" (assertLocalStateRoot child)
-        refuses "invalid ancestor marker allowed manager claim" (establishManagerRootRole child))
-    `finally` removePathForcibly bucket
+        refuses "invalid ancestor marker allowed manager claim" (establishManagerRootRole child)
   putStrLn "root role checks passed: canonical private markers, durable establishment, inherited refusals, retained identity and legacy access"
+
+rootRoleBucketEvidenceData :: IO ()
+rootRoleBucketEvidenceData = do
+  bucketEvidenceChecks "agentic-root-roles-"
+  putStrLn "PASS root role bucket evidence data-only checks"
 
 rejectsMarker :: PrivateRoot -> IO ()
 rejectsMarker root = do

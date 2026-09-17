@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 
-module CaptureTests (captureTests, captureBucketEvidenceData) where
+module CaptureTests (captureTests, captureBucketEvidenceData, withCaptureBucket, bucketEvidenceChecks) where
 
 import Agentic.Runtime
 import Control.Concurrent (forkIO, killThread)
@@ -13,14 +13,14 @@ import Crypto.Hash (Digest, SHA256, hash)
 import Data.Bits ((.&.))
 import qualified Data.ByteString as BS
 import Data.IORef (atomicModifyIORef', newIORef, readIORef, writeIORef)
-import Data.List (sort)
+import Data.List (isPrefixOf, sort)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import Foreign.C.Error (throwErrnoIfMinus1Retry)
 import Foreign.C.Types (CInt (..))
 import GHC.Clock (getMonotonicTimeNSec)
 import System.Directory (doesFileExist, getTemporaryDirectory, listDirectory, removePathForcibly, renameDirectory)
-import System.FilePath ((</>))
+import System.FilePath ((</>), takeFileName)
 import qualified System.Posix.Directory as Directory
 import System.Posix.Files (createSymbolicLink, fileID, fileMode, getFileStatus, modificationTimeHiRes, setFileMode, statusChangeTimeHiRes)
 import System.Posix.IO (OpenFileFlags (cloexec, directory, nofollow), OpenMode (ReadOnly), closeFd, defaultFileFlags, openFd)
@@ -31,7 +31,7 @@ captureTests :: IO ()
 captureTests = do
   captureBucketEvidenceData
   temporary <- getTemporaryDirectory
-  withCaptureBucket temporary $ \bucket -> do
+  withCaptureBucket "agentic-capture-" temporary $ \bucket -> do
     let path = bucket </> "root"
     withPrivateRoot "capture test root" path $ \root -> do
       -- Establish the fixture's root namespace before testing relative publication.
@@ -130,16 +130,21 @@ captureTests = do
   putStrLn "capture tests passed: bytes, limits, exclusivity, cancellation, retained parents and lost replies"
 
 -- Retain the diagnostic bucket whether its action returns or raises.
-withCaptureBucket :: FilePath -> (FilePath -> IO a) -> IO a
-withCaptureBucket temporary action = do
+withCaptureBucket :: String -> FilePath -> (FilePath -> IO a) -> IO a
+withCaptureBucket prefix temporary action = do
   stamp <- getMonotonicTimeNSec
-  let bucket = temporary </> ("agentic-capture-" <> show stamp)
+  let bucket = temporary </> (prefix <> show stamp)
   Directory.createDirectory bucket 0o700
   action bucket
 
 -- This entrypoint uses ordinary files only, never Runtime PrivateRoot or capture publication.
 captureBucketEvidenceData :: IO ()
 captureBucketEvidenceData = do
+  bucketEvidenceChecks "agentic-capture-"
+  putStrLn "PASS capture bucket evidence data-only checks"
+
+bucketEvidenceChecks :: String -> IO ()
+bucketEvidenceChecks prefix = do
   temporary <- getTemporaryDirectory
   let firstBytes = BS.pack [0, 255] <> "first\r\n\n"
       failedBytes = BS.pack [254, 0] <> "body failure\n\n"
@@ -149,17 +154,18 @@ captureBucketEvidenceData = do
         BS.writeFile file bytes
         setFileMode file 0o600
       retained bucket bytes = do
+        check "bucket uses supplied prefix" (prefix `isPrefixOf` takeFileName bucket)
         BS.readFile (bucket </> "evidence.bin") >>= check "bucket retains exact action bytes" . (== bytes)
         getFileStatus bucket >>= check "retained bucket remains private" . (== 0o700) . (.&. 0o777) . fileMode
         getFileStatus (bucket </> "evidence.bin") >>= check "retained data remains private" . (== 0o600) . (.&. 0o777) . fileMode
       identity path = do
         status <- getFileStatus path
         pure (fileID status, fileMode status, modificationTimeHiRes status, statusChangeTimeHiRes status)
-  first <- withCaptureBucket temporary $ \bucket -> emit bucket firstBytes >> pure bucket
+  first <- withCaptureBucket prefix temporary $ \bucket -> emit bucket firstBytes >> pure bucket
   retained first firstBytes
   failedPath <- newIORef Nothing
   let primary = userError "capture bucket inert body failure"
-  outcome <- try @IOException $ withCaptureBucket temporary $ \bucket -> do
+  outcome <- try @IOException $ withCaptureBucket prefix temporary $ \bucket -> do
     writeIORef failedPath (Just bucket)
     emit bucket failedBytes
     throwIO primary :: IO ()
@@ -167,7 +173,7 @@ captureBucketEvidenceData = do
   failed <- readIORef failedPath >>= maybe (ioError (userError "inert body did not run")) pure
   retained failed failedBytes
   before <- mapM identity [first, first </> "evidence.bin", failed, failed </> "evidence.bin"]
-  second <- withCaptureBucket temporary $ \bucket -> emit bucket secondBytes >> pure bucket
+  second <- withCaptureBucket prefix temporary $ \bucket -> emit bucket secondBytes >> pure bucket
   check "repeated bucket allocations are distinct" (first /= failed && first /= second && failed /= second)
   retained second secondBytes
   retained first firstBytes
@@ -178,12 +184,11 @@ captureBucketEvidenceData = do
   BS.writeFile obstruction "allocation obstruction\n"
   setFileMode obstruction 0o600
   called <- newIORef False
-  refused <- try @IOException (withCaptureBucket obstruction (\_ -> writeIORef called True))
+  refused <- try @IOException (withCaptureBucket prefix obstruction (\_ -> writeIORef called True))
   check "bucket allocation obstruction refuses" (case refused of Left _ -> True; Right () -> False)
   readIORef called >>= check "failed allocation cannot invoke action" . not
   BS.readFile obstruction >>= check "failed allocation preserves obstruction" . (== "allocation obstruction\n")
   (sort <$> listDirectory second) >>= check "failed allocation creates no output" . (== ["evidence.bin", "not-a-directory"])
-  putStrLn "PASS capture bucket evidence data-only checks"
 
 chunksOf :: [BS.ByteString] -> IO (IO BS.ByteString)
 chunksOf chunks = do
