@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T16:29:08.857031+00:00`. The next deadline is
-`2026-09-17T17:29:08.857031+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T16:58:08.786387+00:00`. The next deadline is
+`2026-09-17T17:58:08.786387+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -74,9 +74,10 @@ test-producer integration passed syntax and the default inert entrypoint.
 Committed L01 fess is clear. L02 outer capture-build retention has independent
 source/data clearance and parent verification. Its exact canonical producer
 integration passed syntax and the default inert entrypoint. Committed L02
-fess is clear. The isolated L03 outer CaptureTests bucket remedy is active,
-with warning-fatal compilation and filesystem-only execution allowed, but
-native capture and behavioral deletion changes excluded.
+fess is clear. L03 outer CaptureTests bucket hygiene has independent
+source/data clearance and full parent verification. Exact canonical integration
+passed warning-fatal compilation and filesystem-only N1/N8. Committed fess is
+next, with native capture and L03 pre-mutation evidence still unverified.
 No native fixture, full gate, WM-016 application integration, platform/client
 work, old-resource recovery or WM-016 acceptance is authorized.
 
@@ -1312,32 +1313,45 @@ capture, durability or complete preservation. Committed fess review
 `3ddcda4a-73c6-4146-9537-cc9734adb32d` found no issues in
 `62c73ead8798942fb007d130d347da57fd546d38`, limited to the test-producer remedy.
 
-The next reviewed subgap is L03 outer bucket hygiene in
-`runtime/test/CaptureTests.hs`. The native action uses a fresh private bucket
-and closes runtime descriptors through `withPrivateRoot`, then outer hygiene
-deletes the surviving tree. Parent inspected this owner and the descriptor
-bracket. Indexed outline/reference resolution was unavailable for this module,
-so exact text references in the runtime test main and capture script were used
-without claiming indexed absence.
+L03 outer bucket hygiene is implemented in `runtime/test/CaptureTests.hs`.
+The actual allocation/action seam retains its fresh0700 bucket whether the
+action succeeds or raises, and native captureTests and permanent filesystem
+checks share that seam. The separately exported data entrypoint uses ordinary
+files only. Indexed navigation was unavailable for this module, so direct
+source references and comparison were used without claiming indexed absence.
 
-At `2026-09-17T16:25:51.082027+00:00`, parent authorized only the isolated
-`terminal-capture-bucket-evidence.18qe63n3` source/data unit. Worker
-`0629340b-a51d-4d93-81e3-f9177d7dcf0b` may edit only CaptureTests.hs, sharing its
-actual allocation/action owner with filesystem-only checks and an explicit
-data-only entrypoint. A 1,017-file mode-preserving source/support copy is bound,
-excluding the independently mutable tracker and handoff. Warning-fatal
-compilation of the complete module and existing C sources, data-only N1/N8
-execution in fresh private temporary roots, and an old allocation/finalizer
-inert red are permitted.
+The isolated `terminal-capture-bucket-evidence.18qe63n3` copy binds 1,017 files,
+excluding mutable tracker/handoff documents. Only CaptureTests.hs differs.
+Review `24057d14-8f1c-4bdd-8d41-7a94e6a3adf2` found no issues, conditional on
+parent integrity verification. That verification passed 3,708 comparisons,
+including native-body equivalence modulo scope indentation/grouping, unchanged
+helpers/PrivateRoot implementation, exact compiler entrypoint provenance,
+seven original Popen joins and six retained buckets. Both source-bound old
+allocation/finalizer witnesses produce the expected retention red.
 
-All native-body assertions and resource finalizers remain unchanged. This
-includes worker cleanup, closing-root brackets, replacement-directory removal
-and restoration, the owned-temporary-file assertion, five-second bounds and
-descriptor closure. No native captureTests, runtime-contract/full policies,
-Runtime PrivateRoot/publication, Worker/Store/group/backend/signal fixture,
-behavioral deletion edit, package action, canonical edit or additional source
-path is authorized. This outer hygiene subgap does not cover L03 pre-mutation
-evidence or the other capture modules. Other remedies require new decisions.
+Native worker cleanup, closing-root bracket, replacement deletion/restoration,
+owned-temporary assertion and five-second bounds remain unchanged. The body
+exception test compares the supplied IOException display, not object identity.
+Direct action invocation without catch or transformation separately supports
+exception pass-through by construction. No descriptor-closure execution or
+native capture proof follows from this comparison.
+
+At `2026-09-17T16:50:25.740905+00:00`, parent separately authorized and applied
+the exact reviewed one-file canonical change. A fresh complete-module build
+with the existing three C sources passed warning-fatal in 56.429099875 seconds,
+explicitly selecting `CaptureTests.captureBucketEvidenceData`. Filesystem-only
+N1/N8 passed, with three original Popen joins, null failures and zero
+interruptions. All 1,017 bound nontracking inputs remained unchanged during
+verification, and six bucket trees match isolated bytes/modes. The 27 completed
+non-build identities were collected after return. The own binary is separately
+identified, and compiler intermediates remain retained in place. Evidence is
+under `terminal-capture-bucket-canonical.53r754ng`.
+
+No native captureTests, Runtime PrivateRoot/publication, Worker/Store/group/
+backend/signal fixture, runtime-contract/full policies or package operation
+ran. The separate documentation gate includes its static Haskell probe. Only
+outer hygiene is remedied. L03 pre-mutation evidence, L04/L05 and all other
+blockers remain unresolved. Committed fess is next.
 
 Other deletion/retention, frontend ownership/read boundaries, ACP cleanup,
 A15 interruption handling, environment and complete-capture gaps remain blocked.
