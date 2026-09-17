@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T14:42:44.276555+00:00`. The next deadline is
-`2026-09-17T15:42:44.276555+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T15:03:12.719919+00:00`. The next deadline is
+`2026-09-17T16:03:12.719919+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -67,7 +67,8 @@ test-helper-only canonical integration passed a warning-fatal build and compiled
 data-only N1/N8 checks, followed by a clear committed fess audit. The L21
 merged refusal-byte remedy also has independent source/data clearance and
 parent verification. Its separate canonical test-producer integration passed
-syntax and the default inert regression entrypoint. Committed fess is next.
+syntax and the default inert regression entrypoint, followed by a clear
+committed fess audit. The isolated L01 schema-vector lifetime remedy is active.
 No native fixture, full gate, WM-016 application integration, platform/client
 work, old-resource recovery or WM-016 acceptance is authorized.
 
@@ -1224,8 +1225,33 @@ chronology clarification. This correction did not repeat or replace any test.
 Writes remain sequential, without atomicity or fsync durability claims.
 Directory obstructions do not prove disk-exhaustion or arbitrary partial-write
 behavior, and the existing command-substitution semantics remain unchanged.
-Committed fess review is next. Broader integration and other remedies require
-new decisions.
+Committed fess review `1a52be53-1cf5-47cf-a4e7-ddd88c4bbea3` found no issues
+in `59c5aa15507dc2f0967afe212da399c9e61bd067`, limited to the test-producer
+remedy. It confirms the default inert entrypoint and disclosed identity
+correction, not native or full-policies completion.
+
+The next reviewed unit is L01. The schema-vector EXIT trap removes original
+generated JSON after the existing validator consumes it and prints only a
+count. No behavioral absence assertion depends on this hygiene deletion.
+At `2026-09-17T15:00:41.264829+00:00`, parent authorized the isolated
+`terminal-schema-evidence.rpn23nrr` overlay. Worker
+`c0059bc0-d591-4b88-91fb-33c6ae361ea1` may remove only that trap, add an adjacent
+focused-test invocation, add `test/answer_schema_evidence.py`, and add its
+single Cabal source-membership entry. Existing allocation, generator argv and
+redirection, real validator, failure propagation and surrounding source remain
+unchanged. Unmodified bound support copies of the validator and the existing
+refusal-test helper are permitted.
+
+Source-exact inert checks must prove the old trap actually deletes successfully
+validated supplied vectors, then distinguish the corrected full and partial
+retention through normal, generator-failure and later-failure paths. They must
+preserve diagnostic-specific real-validator rejection, reject allocation/open
+failures, and retain distinct private files across repeated invocations.
+Only pinned Nix Bash/Python filesystem tests with an inert generator and the
+unchanged JSON Schema validator are allowed. The validator's schema/decoder
+wording does not prove Haskell decoder execution in these tests. No compiled
+schema runner, real Cabal/compiler/runner, native fixture, package construction,
+full gate, canonical edit or broader remedy is authorized by this unit.
 
 Other deletion/retention, frontend ownership/read boundaries, ACP cleanup,
 A15 interruption handling, environment and complete-capture gaps remain blocked.
