@@ -9,14 +9,13 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T18:47:39.649515+00:00`. The next deadline is
-`2026-09-17T19:47:39.649515+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T19:48:14.543579+00:00`. The next deadline is
+`2026-09-17T20:48:14.543579+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 
-**Current P1 blocker:** the committed L05 import narrowing violates the Cabal
-runtime-contract-test component boundary. The isolated correction is active.
-No new inventory unit may proceed before this regression is repaired and
-independently cleared.
+**P1 repair awaiting committed review:** the neutral test module restores the
+Cabal boundary. Isolated red/green and a fresh canonical build-only check pass.
+Inventory remains stopped until the committed corrective audit clears.
 
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -89,9 +88,10 @@ warning-fatal data-main builds and all four filesystem N1/N8 runs. Committed
 L04 fess is clear. L05's direct-GHC data/link results remain valid in their
 scope, but committed fess found a P1 hidden-module import regression in the
 Cabal test component. Parent adopted that narrowing without a component build.
-The earlier recommendation/clearance is superseded, not rewritten. A neutral
-test-module correction and real Cabal build-only red/green are now authorized
-in isolation. Native fixtures and pre-mutation evidence remain unverified.
+The earlier recommendation/clearance is superseded, not rewritten. The neutral
+test-module repair has independent isolated support and full parent integrity,
+with actual Cabal red/green and a fresh canonical build-only pass. Committed
+P1 fess is still required. Native fixtures and preimages remain unverified.
 No native fixture, full gate, WM-016 application integration, platform/client
 work, old-resource recovery or WM-016 acceptance is authorized.
 
@@ -1452,28 +1452,74 @@ depends on agentic. Its public facade import had respected the boundary.
 Direct GHC builds with runtime/src on the search path made the hidden module
 a home module and did not verify Cabal visibility. Parent checked the component
 declarations and accepts responsibility for integrating the narrowing without
-that build. The finding is source-based, with no executed Cabal failure yet
-recorded. The reviewer explicitly corrects its earlier recommendation and
+that build. The initial finding was source-based. The subsequently authorized
+baseline build reproduced it. The reviewer corrects its earlier recommendation and
 clearance. Earlier records remain intact and limited to their actual scope.
 
-At `2026-09-17T18:43:44.998990+00:00`, parent authorized only the isolated
-`terminal-bucket-package-repair.ubb62xm5` corrective unit. Worker
-`205880e4-69b3-4d58-a7f0-c392e0a92f77` may change CaptureTests.hs,
-CaptureFaultTests.hs, new runtime/test/BucketEvidence.hs and agentic.cabal.
-Restore the public facade import and move the existing filesystem owner and
-assertions into neutral test-only support, with reexports for existing callers
-and a direct neutral import for fault tests. Declare the helper in the test
-component. PrivateRoot stays hidden, and Runtime implementation paths must
-not be added to the test component. All native bodies, finalizers, payloads,
-C sources and gate recipes remain intact.
+The isolated `terminal-bucket-package-repair.ubb62xm5` correction moves the
+existing allocator and filesystem assertions verbatim into neutral test-only
+BucketEvidence. CaptureTests restores its public Runtime import and reexports
+the helpers. CaptureFaultTests imports them directly, and Cabal adds only the
+test other-modules entry. PrivateRoot remains hidden, test home sources remain
+runtime/test, and native bodies, assertions, C sources and gate recipes stay
+unchanged. No dependency or source-directory bypass is introduced.
 
-Fresh independent private offline baseline/corrected Cabal builds of
-test:runtime-contract-test with tests enabled and warnings fatal are permitted.
-The baseline must fail specifically at the hidden-module boundary, not for an
-arbitrary setup error. Build only, never cabal test or the native test binary.
-Three direct data-main builds and six filesystem regressions must retain the
-frozen normal/fault C lists. No package construction, installation, lock/job
-override, canonical edit, other source path or inventory advance is authorized.
+Independent fresh baseline and corrected Cabal build-only commands use the
+same explicit test:runtime-contract-test target, enabled tests and warnings
+fatal. Baseline exits one in 136.371888 seconds with CaptureTests.hs:7:1,
+GHC-87110 and the hidden-PrivateRoot diagnostic. Corrected build exits zero in
+128.621121 seconds and links its own test executable without running it.
+Review `6e970035-8ecc-45f1-94d2-030d36716d4f` supports this P1 correction,
+conditional on parent integrity. That verification passed 4,792 comparisons,
+including all source bindings, exact moves/declarations, real package-boundary
+red/green, standalone regressions and unchanged previous inputs.
+
+Raw plans exceeded the review tool's single-line limit. Parent supplied
+hash-bound pretty views retaining complete local library/test entries and
+metadata without changing or rerunning the plans. The first parent verifier
+also encountered a record-shape mismatch because summaries now include cwd.
+The corrected verifier binds both the original command and completion fields,
+and its initial failed log remains unchanged. No test predicate was weakened.
+
+At `2026-09-17T19:19:05.705975+00:00`, parent separately authorized and applied
+the exact four-path canonical repair. Fresh private offline/repository-free
+Cabal build-only verification passed in 190.601771792 seconds. Its own plan and
+63,112,232-byte native test executable are bound, with executable SHA256
+`cfe37f332f7b7bd0476ab2478d927d3ea293ec418c2b7bec823e1d56bb50bda8`.
+That binary was never executed. Three direct warning-fatal data-main builds
+and all six filesystem N1/N8 runs also passed, with ten original Popen joins,
+null errors and zero interruptions. All 1,018 bound nontracking inputs remained
+unchanged. Eighteen trees match isolated and earlier canonical data, and eight
+own C objects preserve the frozen fault pair. The 75 completed non-build
+identities were collected after return, with binaries/objects/plans separately
+bound and other compiler intermediates retained. Evidence is under
+`terminal-bucket-package-canonical.uqx8wghe`.
+
+The staged whitespace gate then rejected a trailing empty line in the new
+BucketEvidence module. A shell sequence without fail-fast control nevertheless
+created local commit `b9f48bea080ebe58438e6c905c95a8affe64ed8b`, and the gated
+staged-byte snapshot did not run. Parent disclosed the mistake, removed only
+that EOF empty line and preserved the final newline. A separate decision
+authorized fresh verification and amendment of this own unpublished commit.
+The final helper is 4,059 bytes, SHA256
+`86d1a5035203101b2ffa1e72f57edae9b82a69747cd52b9994dfccc00392ba05`,
+equal to the reviewed source apart from that trailing empty line.
+
+Fresh final-byte Cabal build-only verification passed in 99.872889625 seconds.
+Three fresh data-main builds and six filesystem runs passed, with ten original
+joins, null errors and zero interruptions. All 1,018 current inputs remained
+unchanged. Eighteen bucket trees preserve prior bytes/modes/prefixes, and the
+native package executable remains unexecuted. Its own plan/build provenance
+is retained rather than inferred from equal hashes. The 75 completed non-build
+identities were collected after return under
+`terminal-bucket-package-final.cozkowds`. Full staged-diff whitespace and
+exact-byte checks are required under fail-fast shell control before finalizing
+the amendment. Earlier evidence and the initial failure remain unchanged.
+
+Committed P1 fess remains required before inventory work resumes. Cabal build
+success is not native test execution, full preservation or full-policies
+acceptance. Previous mistaken clearance remains superseded rather than
+rewritten. All preimage/A15 and WM-016 obligations remain open.
 
 Other deletion/retention, frontend ownership/read boundaries, ACP cleanup,
 A15 interruption handling, environment and complete-capture gaps remain blocked.

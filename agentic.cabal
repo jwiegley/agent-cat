@@ -412,6 +412,7 @@ test-suite runtime-contract-test
   hs-source-dirs:   runtime/test
   main-is:          Main.hs
   other-modules:
+    BucketEvidence
     CaptureTests
     FrontendProtocolTests
     SnapshotCheckpointTests

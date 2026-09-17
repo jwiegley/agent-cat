@@ -5,7 +5,7 @@
 module Main (main, captureFaultBucketEvidenceData) where
 
 import Agentic.Runtime.PrivateRoot
-import CaptureTests (withCaptureBucket, bucketEvidenceChecks)
+import BucketEvidence (withCaptureBucket, bucketEvidenceChecks)
 import Control.Concurrent (forkIO, killThread, yield)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.Exception (AsyncException (ThreadKilled), SomeException, bracket, finally, fromException, mask, try)
