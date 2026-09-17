@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T05:25:12.130996+00:00`. The next deadline is
-`2026-09-17T06:25:12.130996+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T05:58:22.525645+00:00`. The next deadline is
+`2026-09-17T06:58:22.525645+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -50,10 +50,11 @@ and failed disposition remain unchanged. The complete current source ingestion
 gate also passed parent verification and independent scoped review. Controls
 now has scoped clearance after its original successful run, explicit
 acknowledgement, faithful capture, review and full parent verification. All five
-current source owning gates pass. Exact raw Store preparation passed review
-and parent verification, followed by one separately authorized raw invocation.
-No raw result is claimed. Preservation awaits explicit parent acknowledgement,
-with no other gate, old-resource recovery or WM-016 acceptance authorized.
+current source owning gates pass. Exact raw Store now has scoped clearance
+after its successful original invocation, explicit acknowledgement, faithful
+capture, review and full parent verification. Raw Commands preparation only
+is active. No further native gate, old-resource recovery or WM-016 acceptance
+is authorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -922,23 +923,40 @@ preservation inert checks remain separate from native evidence.
 
 At `2026-09-17T05:25:12.130996+00:00`, fresh private preflight passed and parent
 authorized one complete raw Store gate. Run
-`7ceef218-cddf-4cd4-9cb5-dd36eb7fa1a0` is active under original ownership.
-Twelve N1/N8 outcomes, four builds and seven own-built executable paths are
-in scope. No result is claimed.
+`7ceef218-cddf-4cd4-9cb5-dd36eb7fa1a0` returned zero after 601.702225 seconds,
+with both original owners joined and no errors or interruptions. The worker
+reported through `need_decision` and waited. Parent checked the records and
+absent capture, then issued copy-only permission at 05:37:57.813672 UTC.
+Preservation began at 05:38:43.689400 after the blocking reply.
 
-New specific lease-death permission applies only to the selected fresh default
-Store N1/N8 fixture. It obtains PID from its newly created original process
-handle, signals that disposable child and waits on the same handle. No source
-permission transfers, and no arbitrary PID signalling or kill fallback is
-authorized.
+Preservation and both validators returned zero. Parent verification passed
+7,385 comparisons over 2,348 entries, 28 databases without sidecars, seven
+own-built binary paths and six retained compiler directories. Exact raw modes,
+archive bindings and all twelve source/raw differences remain unchanged. All
+twelve outcomes have eight positives and four exact pair-specific negatives.
+No source result or earlier binary was substituted, and admission-data has no
+fabricated Store fixture.
 
-Preservation remains unauthorized until the original gate and launcher return
-facts reach parent through `need_decision` and an explicit reply permits copying.
-Without that acknowledgement, or on failure or uncertain ownership, work stops
-without retry, repair, recopy or further gate. Existing budgets and raw modes
-remain unchanged. The 45-minute wake is attention only, not a process deadline.
-Remaining raw, platform/client/canonical and final acceptance requirements
-stay open, with WM-016 unaccepted.
+The new lease-death permission remained limited to the selected fresh original
+handles. Both default logs contain the lease-release assertion. This does not
+grant historical signalling or general containment proof. Top status classes
+remain checked-flow inferences, while nine helper records directly retain
+their outcomes, budgets and original joins.
+
+Review `9c530f20-90df-4b89-a090-9786692fca65` found no issues, conditional on full
+parent verification. Parent subsequently completed the 7,385 checks and accepted
+the exact raw Store scope at `2026-09-17T05:55:11.650028+00:00`. The reviewer
+did not inspect that subsequently completed report. No rerun, repair or
+normalization occurred, and the gate and copy permissions are consumed.
+
+Preparation-only run `ceb81976-4afa-4f0e-8e53-d46fbd0b3e6b` owns
+`terminal-raw-commands.jrxqxna6`. It must bind the full raw Commands checkers,
+receipt contracts and opacity consumers with unchanged raw modes, original
+ownership and acknowledgement before copying. No gate, compiler, validator,
+database API or native execution is authorized during preparation, and no
+earlier fixture permission transfers. Four raw owning gates and the remaining
+platform/client/canonical/final acceptance requirements remain open. WM-016
+is unaccepted.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
