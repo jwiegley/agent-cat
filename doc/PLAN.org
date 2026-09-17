@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-17 Thu 08:03]
+:MODIFIED: [2026-09-17 Thu 08:28]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -9210,6 +9210,12 @@ Refocus 2026-09-17T14:42:44.276555+00:00. Next deadline 2026-09-17T15:42:44.2765
 The reviewer selected L01: the specific schema_vectors EXIT trap in cli/ci/policies.sh deletes generated JSON that the existing validator consumes but does not reproduce. Parent verified the owner block and validator, with no behavioral absence assertion depending on this hygiene deletion. At2026-09-17T15:00:41.264829+00:00, parent authorized only isolated terminal-schema-evidence.rpn23nrr. Workerc0059bc0-d591-4b88-91fb-33c6ae361ea1 may remove that trap and add adjacent focused-test wiring, add test/answer_schema_evidence.py, and add its one explicit Cabal source-membership entry. Read-only support copies of answer_schema_probe.py and policy_refusal_evidence.py are allowed, with exact bytes/modes. Existing allocation, generator argv/redirection, actual validator, failure propagation and surrounding source stay unchanged. Tests must demonstrate actual old deletion red, exact full/partial retention after success/generator/later failure, diagnostic-specific real-validator rejection, allocation/open failure and distinct private repeated files. Only pinned Nix Bash/Python inert data/filesystem tests may run, with an inert generator and unchanged real JSON Schema validator. Printed schema/decoder wording is not proof of Haskell decoder execution. No compiled schema runner, real Cabal/compiler/runner, native fixture, full policies, package operation, canonical edit, remote/client or broader remedy is authorized. All other blockers and prior acceptance limits remain.
 
 Refocus 2026-09-17T15:03:12.719919+00:00. Next deadline 2026-09-17T16:03:12.719919+00:00. Next: isolated L01 lifetime remedy and independent review.
+
+2026-09-17 L01 review00b5cb46-b107-4c34-afa4-5b0c1b905d40 found no issues, conditional on parent full integrity. Parent verification passed1771 comparisons:120 completed-file identities, three edited paths and two unchanged support copies, seven inert cases, five retained original full/partial files, seven exact validator copies including old red, eleven original Popen joins, actual old validation/shell success0 followed by deletion and retention-red1. Earlier Z/source/raw/archive remain unchanged. Default allocation was still unexecuted at that isolated review.
+
+At2026-09-17T15:22:07.509230+00:00, parent separately authorized exact canonical L01 test-producer integration. The three reviewed paths now match the overlay, and both support files remain unchanged. Canonical Bash syntax and the default no-argument answer_schema_evidence.py entrypoint passed, with seven cases and nine original Popen joins, null failures and zero interruptions. All case inputs/outcomes and five original retained byte streams match isolated evidence. Six canonical sandbox validator copies match the unchanged real probe.93 completed file identities were collected only after the outer verifier returned. Evidence root terminal-schema-canonical.kwcme8vh. These tests invoke an inert generator and real JSON Schema validator, not the Haskell emitter/decoder, native fixtures, real Cabal/workflow runner, package construction or policies gate. The separately allowed documentation gate includes its ordinary static runghc probe. Committed fess is next. Full policies and all other ownership/retention/environment/capture blockers remain unresolved, with WM-016 unaccepted and accepted15/44 plus G0 only.
+
+Refocus 2026-09-17T15:28:03.803601+00:00. Next deadline 2026-09-17T16:28:03.803601+00:00. Next: exact L01 commit and committed fess, then one next reviewed policies remedy.
 #+end_example
 
 ** Dependencies

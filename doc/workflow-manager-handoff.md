@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T15:03:12.719919+00:00`. The next deadline is
-`2026-09-17T16:03:12.719919+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T15:28:03.803601+00:00`. The next deadline is
+`2026-09-17T16:28:03.803601+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -68,7 +68,10 @@ data-only N1/N8 checks, followed by a clear committed fess audit. The L21
 merged refusal-byte remedy also has independent source/data clearance and
 parent verification. Its separate canonical test-producer integration passed
 syntax and the default inert regression entrypoint, followed by a clear
-committed fess audit. The isolated L01 schema-vector lifetime remedy is active.
+committed fess audit. The L01 schema-vector lifetime remedy now has independent
+source/data clearance and full parent verification. Its exact canonical
+test-producer integration passed syntax and the default inert entrypoint.
+Committed L01 fess is next.
 No native fixture, full gate, WM-016 application integration, platform/client
 work, old-resource recovery or WM-016 acceptance is authorized.
 
@@ -1230,28 +1233,39 @@ in `59c5aa15507dc2f0967afe212da399c9e61bd067`, limited to the test-producer
 remedy. It confirms the default inert entrypoint and disclosed identity
 correction, not native or full-policies completion.
 
-The next reviewed unit is L01. The schema-vector EXIT trap removes original
-generated JSON after the existing validator consumes it and prints only a
-count. No behavioral absence assertion depends on this hygiene deletion.
-At `2026-09-17T15:00:41.264829+00:00`, parent authorized the isolated
-`terminal-schema-evidence.rpn23nrr` overlay. Worker
-`c0059bc0-d591-4b88-91fb-33c6ae361ea1` may remove only that trap, add an adjacent
-focused-test invocation, add `test/answer_schema_evidence.py`, and add its
-single Cabal source-membership entry. Existing allocation, generator argv and
-redirection, real validator, failure propagation and surrounding source remain
-unchanged. Unmodified bound support copies of the validator and the existing
-refusal-test helper are permitted.
+L01 removes the schema-vector EXIT hygiene trap, retaining the original JSON
+that the validator consumes. The isolated `terminal-schema-evidence.rpn23nrr`
+overlay changes only that deletion and adjacent focused-test invocation, adds
+`test/answer_schema_evidence.py`, and adds its single package membership.
+Allocation, generator argv/redirection, validator invocation and surrounding
+program remain unchanged. The actual validator and existing Popen test helper
+are reused without modification.
 
-Source-exact inert checks must prove the old trap actually deletes successfully
-validated supplied vectors, then distinguish the corrected full and partial
-retention through normal, generator-failure and later-failure paths. They must
-preserve diagnostic-specific real-validator rejection, reject allocation/open
-failures, and retain distinct private files across repeated invocations.
-Only pinned Nix Bash/Python filesystem tests with an inert generator and the
-unchanged JSON Schema validator are allowed. The validator's schema/decoder
-wording does not prove Haskell decoder execution in these tests. No compiled
-schema runner, real Cabal/compiler/runner, native fixture, package construction,
-full gate, canonical edit or broader remedy is authorized by this unit.
+Review `00b5cb46-b107-4c34-afa4-5b0c1b905d40` found no issues, conditional on
+parent integrity verification. That verification passed 1,771 comparisons,
+including 120 completed-file identities, seven cases and eleven original
+Popen joins. Five original files remain, including partial generation bytes
+and rejected JSON. Seven sandbox validator copies, including the old-red
+fixture, match the unchanged real probe. The source-exact old block validates
+and exits zero before its real EXIT trap removes the original file. The
+separate retention assertion then fails for that precise absence.
+
+At `2026-09-17T15:22:07.509230+00:00`, parent separately authorized and applied
+the exact three reviewed paths to canonical source. Syntax and the default
+no-argument inert regression passed, with seven cases and nine original Popen
+joins, null failures and zero interruptions. Supplied inputs, outcomes and
+five retained original byte streams match the isolated run. Six canonical
+sandbox validator copies match the unchanged source. The 93 completed-file
+identities were collected after the verifier returned. Evidence is retained
+under `terminal-schema-canonical.kwcme8vh`.
+
+The tests execute an inert generator and the real JSON Schema validator.
+Supplied acceptance flags and the validator's schema/decoder wording do not
+prove Haskell decoder agreement. No compiled schema runner, real workflow
+runner, native fixture, package construction or full policies gate ran. The
+separate documentation check includes its standard static Haskell probe.
+Retention is not atomic publication or fsync durability. Committed fess review
+is next, and other lifetime/ownership remedies require new decisions.
 
 Other deletion/retention, frontend ownership/read boundaries, ACP cleanup,
 A15 interruption handling, environment and complete-capture gaps remain blocked.

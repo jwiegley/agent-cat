@@ -49,6 +49,7 @@ extra-source-files:
   engine/acp/test/steer_adapter.py
   test/frontend_contract_probe.py
   test/answer_schema_probe.py
+  test/answer_schema_evidence.py
   runtime/ci/capture.sh
   runtime/test/CaptureFaultTests.hs
   runtime/test/capture_sync_fault.c
