@@ -167,26 +167,50 @@ GHCRTS=-N8 python3 test/frontend_contract_probe.py "$control_runner" "$codec_run
 # is the newest, and it is the one whose value an operator is most likely to
 # believe is theirs to set — it is a table they typed on the same command line.
 refuses_fact() {
-  local fact="$1" refusal code
-  refusal=$(test/cabal.sh run -v0 agentic-run -- \
-              plan review-lite --input-arg "$fact=" 2>&1) && code=0 || code=$?
+  local fact="$1" refusal code writer directory retained=0 observed=0
+  local -a statuses
+  directory=$(umask 077; mktemp -d "${CABAL_BUILDDIR:?}/policy-refusal.XXXXXX") || return 1
+  # Keep predicate input available even when the evidence destination fails.
+  if test/cabal.sh run -v0 agentic-run -- \
+       plan review-lite --input-arg "$fact=" 2>&1 |
+       (umask 077; exec tee "$directory/refusal.log" > "$directory/observed.log"); then
+    statuses=("${PIPESTATUS[@]}")
+  else
+    statuses=("${PIPESTATUS[@]}")
+  fi
+  code=${statuses[0]}
+  writer=${statuses[1]}
+  (umask 077; printf 'command=%s\nwriter=%s\n' "$code" "$writer" > "$directory/status") || retained=1
+  [ "$writer" = 0 ] || retained=1
+  refusal=$(cat "$directory/observed.log") || { observed=1; retained=1; }
 
   if [ "$code" != 1 ]; then
     echo "ci/policies: FAIL --input-arg $fact: expected exit 1, actual $code" >&2
     echo "$refusal" >&2
+    [ "$retained" = 0 ] || echo "ci/policies: refusal evidence failed: $directory" >&2
+    exit 1
+  fi
+  if [ "$observed" != 0 ]; then
+    echo "ci/policies: refusal observation unavailable: $directory" >&2
     exit 1
   fi
   case "$refusal" in
     *"is a run fact: the runner binds it"*)
+      if [ "$retained" != 0 ]; then
+        echo "ci/policies: refusal evidence failed: $directory" >&2
+        exit 1
+      fi
       echo "policy probe: --input-arg $fact is refused, and names who binds it"
       ;;
     *)
       echo "ci/policies: FAIL --input-arg $fact: refused, but not as a run fact" >&2
       echo "$refusal" >&2
+      [ "$retained" = 0 ] || echo "ci/policies: refusal evidence failed: $directory" >&2
       exit 1
       ;;
   esac
 }
 
+python3 test/policy_refusal_evidence.py
 refuses_fact run.engine
 refuses_fact run.routes

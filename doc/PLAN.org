@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-17 Thu 07:11]
+:MODIFIED: [2026-09-17 Thu 07:42]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -9196,6 +9196,14 @@ Refocus 2026-09-17T13:47:32.343949+00:00. Next deadline 2026-09-17T14:47:32.3439
 The same review recommends L21 next: preserve the original merged CLI refusal stream at refuses_fact rather than reconstructing shell-substitution bytes. At 2026-09-17T14:08:49.511957+00:00, parent authorized isolated root terminal-refusal-evidence.gbvuv2fm. Worker5b02fe29-3ac9-4833-bbd1-762dc0eb3b3e may change cli/ci/policies.sh only at this helper plus adjacent focused-test wiring, add test/policy_refusal_evidence.py, and add only that explicit extra-source-files membership in agentic.cabal. Extra paths are authorized to retain a runnable regression and package membership, not an unrelated refactor. Existing canonical file bytes/modes and surrounding policies/Cabal programs stay unchanged. Source-exact old red and actual-path inert tests must prove exact original merged bytes, both facts, original argv/status/predicate/summaries, failed retention refusal, primary error precedence and non-overwriting repeated cases. Only pinned Nix Bash/Python data/filesystem tests and inert local command producers may execute, never real Cabal/compiler/runner or full policies. No native Worker/Store/Runtime/group/signal, source integration, repackaging, remote/client or historical recovery authority follows. All remaining full-policies blockers and WM-016's unaccepted status remain.
 
 Refocus 2026-09-17T14:11:38.505964+00:00. Next deadline 2026-09-17T15:11:38.505964+00:00. Next: isolated L21 actual-path retention remedy and independent review.
+
+2026-09-17 L21 isolated review04558e67-e21c-422e-b592-d28f666ffc22 found no issues, conditional on parent integrity. Parent verification passed1812 comparisons, including178 result identities,13 actual-path cases,17 original joins, source-exact old predicate success then retention red, exact unchanged surrounding programs/modes, and unchanged1021 Z/source files,594 raw files and archive. The review also explicitly corrected its earlier L19 documentation citation after reading the fresh14:03:18Z-14:03:24Z canonical doc-check evidence, without retroactively validating the older log.
+
+At2026-09-17T14:36:43.517400+00:00, parent separately authorized and applied only the reviewed three-path canonical test-producer remedy. The policies helper now retains original merged bytes in fresh0700 case directories, with0600 refusal/predicate/status files and distinct command/writer status. Primary status/diagnostic refusal survives secondary retention failure, and failed retention cannot pass. The permanent regression and its one Cabal membership entry are present. Canonical Bash syntax and the default no-argument inert regression invocation both exited0, covering13 cases with15 original Popen joins. All recorded primary/wait errors were null, interruptions zero, and raw case bytes/exits matched the isolated run. Evidence root terminal-refusal-canonical.zm2vaben. No real Cabal/compiler/runner, native fixture, package construction or policies gate ran.
+
+The parent's preliminary canonical identity manifest included its still-open redirected verify.log, binding the prefix before its final PASS line rather than the completed log. All other entries matched. The prefix was verified against the completed log, the original manifest remains unchanged, and162 completed file identities were separately recorded after return. This is an explicit metadata correction, not a rerun or replacement of tests. Full policies and remaining ownership/retention/environment/capture blockers remain blocked. Older source/raw evidence is not relabeled. Accepted stays15/44 and G0 only, with WM-016 unaccepted.
+
+Refocus 2026-09-17T14:42:44.276555+00:00. Next deadline 2026-09-17T15:42:44.276555+00:00. Next: exact L21 commit and committed fess, then one next reviewed policies remedy.
 #+end_example
 
 ** Dependencies

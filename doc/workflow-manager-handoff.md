@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T14:11:38.505964+00:00`. The next deadline is
-`2026-09-17T15:11:38.505964+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T14:42:44.276555+00:00`. The next deadline is
+`2026-09-17T15:42:44.276555+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -64,11 +64,12 @@ changed-layer compatibility and integration evidence. The complete policies
 preparation remains blocked. The isolated Worker child-output retention remedy
 has independent scoped clearance and full parent verification. A separate
 test-helper-only canonical integration passed a warning-fatal build and compiled
-data-only N1/N8 checks, followed by a clear committed fess audit. The next
-isolated remedy is original merged refusal-byte retention in `refuses_fact`,
-with actual-path inert tests. No native fixture, full gate, WM-016 application
-integration, platform/client work, old-resource recovery or WM-016 acceptance
-is authorized.
+data-only N1/N8 checks, followed by a clear committed fess audit. The L21
+merged refusal-byte remedy also has independent source/data clearance and
+parent verification. Its separate canonical test-producer integration passed
+syntax and the default inert regression entrypoint. Committed fess is next.
+No native fixture, full gate, WM-016 application integration, platform/client
+work, old-resource recovery or WM-016 acceptance is authorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -1185,27 +1186,46 @@ this unit's documentation verification. Parent had run the current check before
 commit in tool output, then separately persisted a fresh post-commit check under
 `terminal-worker-evidence-canonical.5zutr_9v/doc-check.log`, with exit zero. The
 older log and review remain unchanged, and a separate citation clarification
-records the chronology. Reviewer has not read this later log.
+records the chronology. The L21 reviewer has now read the fresh post-commit
+log and explicitly corrected the earlier citation, limited to that invocation.
 
-The review recommends L21 next, retaining the original merged stream in the
-existing `refuses_fact` helper rather than reconstructing its shell variable.
-At `2026-09-17T14:08:49.511957+00:00`, parent authorized only the isolated
-`terminal-refusal-evidence.gbvuv2fm` overlay. Worker
-`5b02fe29-3ac9-4833-bbd1-762dc0eb3b3e` may edit the helper and adjacent focused-test
-invocation in `cli/ci/policies.sh`, add `test/policy_refusal_evidence.py`, and
-add that one explicit package membership in `agentic.cabal`. The additional
-paths retain a permanent runnable regression without mixing unrelated tests
-into an existing probe. All other source and surrounding program bytes remain
-unchanged, and package construction is not authorized.
+L21 retains the original merged stream in the existing `refuses_fact` helper
+rather than reconstructing its shell variable. The isolated
+`terminal-refusal-evidence.gbvuv2fm` overlay changed only this helper and
+adjacent focused-test invocation, added `test/policy_refusal_evidence.py`, and
+added its one explicit package membership in `agentic.cabal`. Review
+`04558e67-e21c-422e-b592-d28f666ffc22` found no issues, conditional on parent
+integrity verification. That verification passed 1,812 comparisons, including
+178 result identities, all 13 actual-path cases and 17 original Popen joins.
+The exact old helper passes its original predicate, then fails the new raw
+retention assertion. Surrounding policies/Cabal programs, existing modes and
+the earlier Z/source/raw/archive inputs remain unchanged.
 
-Source-exact old red and actual-path inert tests must preserve original argv,
-exit-one requirement, wording predicate and console summaries. They must retain
-exact merged bytes, including trailing newlines, fail closed on writing errors,
-preserve primary command or predicate failure, and prevent repeated calls from
-overwriting earlier artifacts. Only pinned Nix Bash/Python data/filesystem tests
-with explicitly inert local command producers may execute. Real Cabal, compiler,
-runner, native fixtures and full policies remain forbidden. Canonical source
-integration and broader remedies require new decisions.
+Each invocation creates a private case directory and retains the original
+merged bytes, including invalid UTF-8 and trailing newlines. Command and writer
+statuses remain separate, failed retention cannot pass, and primary command
+or wording refusal survives secondary evidence failure. Separate predicate
+input remains available when the raw destination fails. The emitted status
+file is diagnostic output, not a reconstructed status channel.
+
+At `2026-09-17T14:36:43.517400+00:00`, parent separately authorized and applied
+only these three reviewed test-producer paths to canonical source. Bash syntax
+and the default no-argument inert regression entrypoint passed, with 13 cases
+and 15 original Popen joins, null recorded failures and zero interruptions.
+Raw case bytes and exits match the isolated run. Evidence is retained under
+`terminal-refusal-canonical.zm2vaben`. The real Cabal/compiler/runner, native
+fixtures, package construction and full policies were not invoked.
+
+The preliminary canonical identity manifest bound its still-open verification
+log before the final PASS line. All other entries matched, and the prefix was
+verified against the completed log. The original manifest remains unchanged,
+with a separate post-return manifest binding 162 completed files and a
+chronology clarification. This correction did not repeat or replace any test.
+Writes remain sequential, without atomicity or fsync durability claims.
+Directory obstructions do not prove disk-exhaustion or arbitrary partial-write
+behavior, and the existing command-substitution semantics remain unchanged.
+Committed fess review is next. Broader integration and other remedies require
+new decisions.
 
 Other deletion/retention, frontend ownership/read boundaries, ACP cleanup,
 A15 interruption handling, environment and complete-capture gaps remain blocked.
