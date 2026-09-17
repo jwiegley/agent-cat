@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T03:35:30.298770+00:00`. The next deadline is
-`2026-09-17T04:35:30.298770+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T03:56:14.247476+00:00`. The next deadline is
+`2026-09-17T04:56:14.247476+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -47,10 +47,11 @@ and independent scoped review. The complete source Admission gate now also
 passes scoped review using a separately authorized faithful new capture.
 Its first preservation copied two link modes incorrectly, and that old snapshot
 and failed disposition remain unchanged. The complete current source ingestion
-gate also passed parent verification and independent scoped review. Controls
-preparation is blocked by an analyzer ownership defect, with a source/data-only
-correction active. Native execution, other gates, old-resource recovery and
-WM-016 acceptance remain unauthorized.
+gate also passed parent verification and independent scoped review. Corrected
+Controls preparation passed review and parent verification, followed by one
+separately authorized gate dispatch. No result is claimed. Preservation must
+await explicit parent acknowledgement. Other gates, old-resource recovery
+and WM-016 acceptance remain unauthorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -869,18 +870,36 @@ can retain an outer interruption after child exit zero, which must not become
 complete accepted evidence. Parent confirmed this false positive read-only.
 Earlier preparation and false-positive evidence remain unchanged.
 
-Source/data-only correction run `865be8e7-672f-411e-8a19-4d7ecc3a7c85` owns
-`terminal-controls-owner-fix.qqacwmy6`. The existing analyzer must require
-successful original gate and launcher exits and joins, with no failure or
-interruption. Its fixtures must test each missing or failed ownership condition
-and retain all earlier case/contract negatives. Full parent verification and
-independent corrected-preparation review remain pending. No native execution,
-production change or old-resource mutation is authorized.
+Correction run `865be8e7-672f-411e-8a19-4d7ecc3a7c85` completed under
+`terminal-controls-owner-fix.qqacwmy6`. The existing analyzer now requires
+present successful original gate and launcher records, with joined handles and
+no failure or interruption. Its 67 checks retain the original 43 and add
+23 independent ownership refusals plus restored completeness. The 21
+preservation checks remain passing. Old K and its false-positive evidence are
+unchanged and blocked.
 
-Future Controls execution requires an immediate original exit notice through
-the existing supervisor request/reply mechanism and explicit parent
-acknowledgement before copying. Persistence times must be named accordingly,
-rather than being mislabeled as receipt times. No new harness is introduced.
+Review `43f7fc19-b01f-456c-a3da-ddcf3a848bea` closed the P1 for preparation.
+Parent verification passed 20,728 comparisons, including all 18,856 old K
+entries and unchanged source, matrix, producers and preservation logic. A
+parent verifier summary-field assumption failed once, then the corrected
+verifier counted actual expected resources. No prepared artifact changed.
+
+At `2026-09-17T03:56:14.247476+00:00`, fresh private-environment preflight passed
+and parent authorized one complete current source Controls gate. Worker run
+`fc010197-817d-4444-a3b8-010f64567763` is active under original ownership, with
+38 checkers, six contracts, fourteen builds and 28 own-built executable paths
+in scope. Exact fresh original-owned faults, interruptions and bounded retries
+are included. Native cancellation 130 remains non-success, and no historical
+or other-gate authority transfers.
+
+Preservation is not currently authorized. The worker must send an immediate
+original gate and launcher exit, timing, join and error notice through the
+existing supervisor request/reply mechanism, then await explicit parent
+acknowledgement permitting copying. Without that reply, or on unexpected
+failure or uncertain ownership, it must stop without retry, repair, PID
+adoption or further execution. Existing budgets are unchanged, with no outer
+killing deadline. The 45-minute wake is attention only, not a process timeout.
+No result is claimed.
 Remaining Controls, raw, platform/client/canonical and full acceptance
 requirements stay open, and WM-016 remains unaccepted.
 At 04:10 UTC, the original worker remained active without case reports in the
