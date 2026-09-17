@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-17 Thu 10:43]
+:MODIFIED: [2026-09-17 Thu 11:02]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -9252,6 +9252,12 @@ Refocus 2026-09-17T17:18:42.663809+00:00. Next deadline 2026-09-17T18:18:42.6638
 At2026-09-17T17:36:46.288554+00:00, parent separately authorized exact canonical two-file L04 integration. Fresh complete-module/C data-main builds passed capture29.934385459s and role28.932322333s with empty stderr. Capture and role N1/N8 all passed in separate private TMPDIRs, six original Popen joins/null failures/zero interruptions. All1017bound nontracking inputs stayed unchanged during verification. Twelve canonical bucket trees match isolated prefixes/bytes/modes, and existing canonical L03 data bytes/modes remain unchanged.47completed non-build identities were collected after return, own binaries separately bound, compiler intermediates retained in place. Evidence root terminal-role-bucket-canonical.pprwk3v3. No native capture/rootRoleTests, Runtime PrivateRoot/state-role/publication/FIFO/symlink/Worker/Store/group/backend/signal fixture, descriptor-closure execution, runtime-contract/full policies or package operation ran. Separate documentation checking includes its ordinary static Haskell probe. Only L04 outer disposal is addressed; L03/L04 preimages, L05/A15 and other blockers remain. Committed fess is next, with WM-016 unaccepted and acceptance15/44 plus G0 unchanged.
 
 Refocus 2026-09-17T17:43:10.958410+00:00. Next deadline 2026-09-17T18:43:10.958410+00:00. Next: exact L04 commit and committed fess, then one next reviewed policies remedy.
+
+2026-09-17 committed L04 fess4a0c3999-6d68-4255-af27-7c51f5b12b8f found no issues in3e79af18b93d29d32751b4d981b72cc322970570. Native fixtures, interrupted paths, durability and preimages remain unverified, and47non-build identities do not mean exhaustive compiler-tree hashing.
+
+The next reviewed subgap is L05 outer fault-bucket hygiene. Parent inspected CaptureFaultTests, the Runtime facade/PrivateRoot exports and capture_sync_fault.c. At2026-09-17T17:58:20.943738+00:00, parent authorized isolated terminal-fault-bucket-evidence.6za6qkjr. Worker986e79ae-4fa1-4e6c-b58b-29252782dd6f may only narrow CaptureTests' Runtime import to PrivateRoot and change CaptureFaultTests to reuse the shared owner/assertions with agentic-capture-fault-, remove outer disposal, and add an explicit data entry plus permanent call. Native Main.main/action/helpers/release-worker finalizers/pipe brackets/behavioral removals/5s remain unchanged. Fault linkage is frozen to private_directory.c plus capture_sync_fault.c, which includes/renames the real private_sync.c implementation. No separate normal private_sync.c, extra fault process_group.c, shim edit or gate-recipe expansion is allowed.1017source/support files are bound excluding tracking. Warning-fatal explicit capture/role/fault DATA-main builds with original respective link lists, six filesystem N1/N8 runs and source-bound old fault allocation/finalizer reds are permitted. Fault data must not configure, publish, sync/barrier, pause, invoke roleFaultTests, cancel or run native main. No Runtime/Worker/Store/group/backend/signal fixture, full policy/runtime-contract, package/dependency, canonical or other-source edit is authorized. L03/L04/L05 preimages, A15 and remaining blockers stay open, with WM-016 unaccepted and acceptance15/44 plus G0 unchanged.
+
+Refocus 2026-09-17T18:02:23.705783+00:00. Next deadline 2026-09-17T19:02:23.705783+00:00. Next: isolated L05 outer-fault hygiene and import/link verification, then independent review.
 #+end_example
 
 ** Dependencies

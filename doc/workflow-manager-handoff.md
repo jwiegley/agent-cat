@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T17:43:10.958410+00:00`. The next deadline is
-`2026-09-17T18:43:10.958410+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T18:02:23.705783+00:00`. The next deadline is
+`2026-09-17T19:02:23.705783+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -80,7 +80,9 @@ passed warning-fatal compilation and filesystem-only N1/N8. Its committed
 fess is clear. L04 outer root-role bucket hygiene has independent source/data
 clearance and parent verification. Exact canonical reuse passed both
 warning-fatal data-main builds and all four filesystem N1/N8 runs. Committed
-L04 fess is next. Native capture/role fixtures and preimages remain unverified.
+L04 fess is clear. The isolated L05 outer fault-bucket remedy is active, with
+one precise import narrowing and frozen fault-shim linkage. Native fixtures
+and pre-mutation evidence remain unverified.
 No native fixture, full gate, WM-016 application integration, platform/client
 work, old-resource recovery or WM-016 acceptance is authorized.
 
@@ -1392,7 +1394,36 @@ FIFO/symlink/Worker/Store/group/backend/signal fixture, descriptor-closure
 execution, runtime-contract/full policies or package operation ran. Separate
 documentation checking includes its standard static Haskell probe. Only outer
 disposal is addressed. L03/L04 preimages, L05/A15 and all other blockers remain.
-Committed fess is next. Other remedies require new decisions.
+Committed fess review `4a0c3999-6d68-4255-af27-7c51f5b12b8f` found no issues
+in `3e79af18b93d29d32751b4d981b72cc322970570`, limited to shared-owner outer
+hygiene. Native fixtures, interrupted paths, durability and preimages remain
+unverified, and non-build identities do not imply complete compiler hashing.
+
+The next reviewed subgap is L05 outer fault-bucket hygiene. Parent inspected
+the native fault action, Runtime facade/PrivateRoot exports and C shim. At
+`2026-09-17T17:58:20.943738+00:00`, parent authorized only the isolated
+`terminal-fault-bucket-evidence.6za6qkjr` unit. Worker
+`986e79ae-4fa1-4e6c-b58b-29252782dd6f` may narrow CaptureTests' Runtime import
+to PrivateRoot and change CaptureFaultTests to reuse the existing owner and
+assertions with its original prefix, remove outer disposal, and add an explicit
+filesystem entrypoint and permanent check call. All other CaptureTests code,
+native Main.main/action/helpers, release/worker finalizers, pipe closure,
+behavioral removals and five-second bounds remain unchanged.
+
+Fault linkage remains the original private_directory.c plus
+capture_sync_fault.c pair. The shim includes the real synchronization source
+under a renamed symbol before wrapping it. Separately linking normal
+private_sync.c, adding process_group.c to the fault target, editing the shim
+or changing the gate recipe is forbidden. A 1,017-file copy is bound, excluding
+mutable tracking. Warning-fatal explicit capture/role/fault data-main builds
+with their original respective C sources, six filesystem N1/N8 runs, and old
+fault allocation/finalizer inert reds are allowed.
+
+Data execution must not configure faults, publish, invoke barriers/pauses or
+roleFaultTests, cancel, or enter native main. No Runtime/Worker/Store/group/
+backend/signal fixture, full policy/runtime-contract gate, package/dependency
+operation, canonical edit or additional source change is authorized. L03/L04/
+L05 preimages, A15 and other blockers remain. Other remedies need new decisions.
 
 Other deletion/retention, frontend ownership/read boundaries, ACP cleanup,
 A15 interruption handling, environment and complete-capture gaps remain blocked.
