@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T04:55:01.063040+00:00`. The next deadline is
-`2026-09-17T05:55:01.063040+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T05:25:12.130996+00:00`. The next deadline is
+`2026-09-17T06:25:12.130996+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -50,8 +50,10 @@ and failed disposition remain unchanged. The complete current source ingestion
 gate also passed parent verification and independent scoped review. Controls
 now has scoped clearance after its original successful run, explicit
 acknowledgement, faithful capture, review and full parent verification. All five
-current source owning gates pass. Raw Store preparation only is active, with
-no raw native execution, old-resource recovery or WM-016 acceptance authorized.
+current source owning gates pass. Exact raw Store preparation passed review
+and parent verification, followed by one separately authorized raw invocation.
+No raw result is claimed. Preservation awaits explicit parent acknowledgement,
+with no other gate, old-resource recovery or WM-016 acceptance authorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -912,15 +914,31 @@ reviewer did not rehash or inspect that subsequently completed report. Old
 evidence remains unchanged, and no native, preservation or validator rerun
 occurred.
 
-Preparation-only run `d6d0b2e4-af81-4e6e-a576-36a6c7418d05` owns
-`terminal-raw-store.3o4iwgga`. Its target is the exact raw package, with all
-594 files and twelve source/raw mode differences unchanged. It must prepare
-the complete raw Store gate, both-owner completion checks and explicit
-acknowledgement before copying. The lease-death fixture needs a new specific
-execution decision, not transferred source permission. No raw gate, build,
-compiler, database API or native operation is authorized during preparation.
-Full raw, platform/client/canonical and final acceptance requirements remain
-open, with WM-016 unaccepted.
+Raw Store preparation under `terminal-raw-store.3o4iwgga` passed review
+`2c1f5a78-c5c0-47b2-a2a0-b87134c70652` and 2,066 parent comparisons. It targets
+the exact 594-file raw package, preserving all twelve source/raw mode
+differences and excluding 427 source-only files. The 54 analyzer and nineteen
+preservation inert checks remain separate from native evidence.
+
+At `2026-09-17T05:25:12.130996+00:00`, fresh private preflight passed and parent
+authorized one complete raw Store gate. Run
+`7ceef218-cddf-4cd4-9cb5-dd36eb7fa1a0` is active under original ownership.
+Twelve N1/N8 outcomes, four builds and seven own-built executable paths are
+in scope. No result is claimed.
+
+New specific lease-death permission applies only to the selected fresh default
+Store N1/N8 fixture. It obtains PID from its newly created original process
+handle, signals that disposable child and waits on the same handle. No source
+permission transfers, and no arbitrary PID signalling or kill fallback is
+authorized.
+
+Preservation remains unauthorized until the original gate and launcher return
+facts reach parent through `need_decision` and an explicit reply permits copying.
+Without that acknowledgement, or on failure or uncertain ownership, work stops
+without retry, repair, recopy or further gate. Existing budgets and raw modes
+remain unchanged. The 45-minute wake is attention only, not a process deadline.
+Remaining raw, platform/client/canonical and final acceptance requirements
+stay open, with WM-016 unaccepted.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.

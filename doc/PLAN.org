@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 21:55]
+:MODIFIED: [2026-09-16 Wed 22:28]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8996,6 +8996,16 @@ Reviewer a1f3487b-9c51-4019-848d-a6be804f877d found no issues, with full parent 
 A new preparation-only decision assigns terminal-raw-store.3o4iwgga to worker rund6d0b2e4-af81-4e6e-a576-36a6c7418d05. Target is the exact existing raw package594files, not the1021file source tree or a mode-normalized copy. It must bind unchanged archive/source/raw identities and twelve mode differences, complete Store default/admission-data/terminal cases and three SQL-interruption helpers atN1/N8, both-owner completion and ACK-before-copy. No gate/build/compiler/Cabal enumeration/Store/DB/native/provider/processcontrol or authorization is permitted during preparation. The selected fresh original-handle lease-death fixture needs a new later case-specific decision; no source Store permission transfers.
 
 Refocus completed at 2026-09-17T04:55:01.063040+00:00, with next deadline 2026-09-17T05:55:01.063040+00:00. The next unmet requirement is current raw Store preparation and review, not a source rerun or further investigation of retained benign observation notes. Full raw/platform/client/canonical/final acceptance and historical incident requirements remain unchanged.
+
+Complete current RAW Store preparation under terminal-raw-store.3o4iwgga passed independent review2c1f5a78-c5c0-47b2-a2a0-b87134c70652 and parent2,066identity comparisons. It binds the exact existing raw594-member tree, originalsource1021,archive and all12source0755/raw0644differences, with427source-only files excluded. No mode-normalized copy, extraction or source pass substitutes for raw evidence. Fifty-four actual-analyzer and19preserver inert checks passed, including both original owners, missing cases, exact negative pair markers, raw-mode substitution refusal and no-Store admission-data layout.
+
+Fresh canonical/private preflight verified114excluded footprints and empty build/record/absent cache. At2026-09-17T05:25:12.130996+00:00 parent authorized exactly one complete raw Store gate through Bash. Authorization SHAa5dce854023637c3a85f5ab91d37a1713c35c35efce46f52122672bb16f8cba6 binds plan4b12d28466f36f13e4e6b777b6da5f4a8ef6480d31286dc4a2d3997a06b351fa. Worker run7ceef218-cddf-4cd4-9cb5-dd36eb7fa1a0 is active under original ownership. Scope is twelve N1/N8 outcomes, eight positives/four exact negatives, four Werror builds and seven own-built executable paths. No result is claimed.
+
+NEW specific allowDisposableLeaseDeathFixture permission covers only the selected fresh default Store N1/N8 child: create and retain original ProcessHandle through withChild/startChild, obtain PID from that handle, SIGKILL that new disposable child and waitForProcess on the same handle. No earlier source permission is transferred. No arbitrary PID/group signalling, saved-PID adoption or general kill fallback is allowed. Other fresh Store/SQL fixture interruptions, migrations, poisoning, original action/interrupter joins and explicit cleanup retries remain source-selected. No Admission completion-report fault or historical recovery authority exists.
+
+Preservation is not yet authorized. The worker must report both original gate and launcher return/timing/join/error/interruption facts through need_decision, then wait for explicit parent ACK before copying or interpretation. Without reply or on unexpected failure/uncertain ownership, stop without retry, repair, recopy, further gate or ownership reconstruction. Existing helper budgets and primary failure precedence remain unchanged, with no aggregate native or outer killing deadline. The45minute exact-run wake is attention only.
+
+Refocus completed at 2026-09-17T05:25:12.130996+00:00, with next deadline 2026-09-17T06:25:12.130996+00:00. All five current SOURCE owning gates are scoped passes, while this first current raw invocation and remaining raw/platform/client/canonical/final acceptance remain unproved. WM-001 through WM-015 and G0 remain the only accepted packages/gate.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
