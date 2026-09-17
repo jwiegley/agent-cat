@@ -4,17 +4,69 @@ module Agentic.Manager.Test.AcceptanceAudit
   ( ReviewAudit, withReviewAudit, waitReviewed, releaseReviewed, afterCurrentReview,
     Audit, withAcceptanceAudit, withDeliveryAudit, waitAccepted, waitReturned, auditSummary,
     afterFreshCommit, afterNativeReturn, recordReconciliation, recordDelivery,
-    atSqlStep, retainSqlInterrupt, rescueSql ) where
+    atSqlStep, retainSqlInterrupt, rescueSql,
+    FrameAudit, withFrameAudit, waitFramePrefix, frameSummary, writeControlFrame,
+    recordControlWait, waitControlWaiter ) where
 
-import Control.Concurrent (ThreadId, myThreadId)
+import Control.Concurrent (ThreadId, myThreadId, threadDelay)
 import Control.Concurrent.MVar
 import Control.Exception (bracket, uninterruptibleMask_)
 import Control.Monad (unless, void)
+import Crypto.Hash (Digest, SHA256, hash)
+import qualified Data.ByteString as BS
+import qualified Data.Text as T
+import System.IO (Handle, hFlush)
 import Data.Dynamic (Dynamic, Typeable, toDyn, fromDynamic)
 import Data.IORef
 import Data.Text (Text)
 import System.IO.Unsafe (unsafePerformIO)
 import System.Timeout (timeout)
+
+-- The audit retains only the original Handle identity and bounded measurements.
+data FrameAudit = FrameAudit !(IORef (Maybe Handle)) !(MVar ()) !(IORef (Int,Int,Int,Text,Bool))
+{-# NOINLINE currentFrameAudit #-}
+currentFrameAudit :: MVar (Maybe FrameAudit)
+currentFrameAudit = unsafePerformIO(newMVar Nothing)
+
+withFrameAudit :: (FrameAudit -> IO a) -> IO a
+withFrameAudit = bracket acquire (const(modifyMVar_ currentFrameAudit (const(pure Nothing))))
+  where
+    acquire = do
+      audit <- FrameAudit <$> newIORef Nothing <*> newEmptyMVar <*> newIORef(0,0,0,"",True)
+      modifyMVar_ currentFrameAudit $ \old -> case old of Nothing->pure(Just audit);_->error "concurrent frame audit"
+      pure audit
+
+waitFramePrefix :: FrameAudit -> IO ()
+waitFramePrefix (FrameAudit _ ready _) = timeout 5000000(readMVar ready) >>= maybe(error "original flushed prefix not observed")pure
+frameSummary :: FrameAudit -> IO (Int,Int,Int,Text,Bool)
+frameSummary (FrameAudit _ _ summary) = readIORef summary
+
+-- Called inside the original single five-second deadline in compiled fixtures.
+writeControlFrame :: Handle -> BS.ByteString -> IO ()
+writeControlFrame pipe frame = do
+  active <- readMVar currentFrameAudit
+  case active of
+    Nothing -> normal
+    Just(FrameAudit original ready summary) -> do
+      first <- atomicModifyIORef' original $ \old -> case old of Nothing->(Just pipe,True);_->(old,False)
+      if not first then normal else do
+        let size=BS.length frame
+            prefixBytes=max 1 (min 4096 ((size-1) `div` 2))
+            prefix=BS.take prefixBytes frame
+            remainder=BS.drop prefixBytes frame
+            digest=T.pack(show(hash(prefix<>remainder)::Digest SHA256))
+        unless(prefixBytes<size)(error "control frame too small for original prefix audit")
+        same <- (==Just pipe) <$> readIORef original
+        writeIORef summary(size,prefixBytes,1,digest,same)
+        BS.hPut pipe prefix
+        hFlush pipe
+        writeIORef summary(size,prefixBytes,2,digest,same)
+        putMVar ready()
+        writeIORef summary(size,prefixBytes,3,digest,same)
+        BS.hPut pipe remainder
+        hFlush pipe
+        writeIORef summary(size,prefixBytes,4,digest,same)
+  where normal=BS.hPut pipe frame >> hFlush pipe
 
 data Anchor = Anchor !Text !Dynamic !Dynamic
 data Audit = Audit !Bool !(IORef Bool) !(IORef (Maybe Anchor)) !(MVar (ThreadId,Text)) !(MVar ()) !(IORef (Int,Int,Bool,Bool))
@@ -94,6 +146,24 @@ recordDelivery command ticket = readMVar currentAudit >>= mapM_ (\(Audit _ _ anc
       ((reconciled,delivered+1,sameTicket && sameReference ticket oldTicket,sameAttempt),())
     _ -> pure())
 
+{-# NOINLINE controlWaiters #-}
+controlWaiters :: MVar (Maybe (Text,[ThreadId]))
+controlWaiters = unsafePerformIO(newMVar Nothing)
+recordControlWait :: Text -> IO ()
+recordControlWait stage = do
+  thread <- myThreadId
+  modifyMVar_ controlWaiters $ \current -> case current of
+    Just(expected,threads) | expected==stage -> do
+      unless(length threads<16)(error "control waiter audit exceeded operation bound")
+      pure(Just(expected,threads<>[thread]))
+    _ -> pure current
+waitControlWaiter :: ReviewAudit -> IO ThreadId
+waitControlWaiter _ = timeout 5000000 wait >>= maybe(error "original queued control not observed")pure
+  where
+    wait = readMVar controlWaiters >>= \current -> case current of
+      Just(_, _:second:_) -> pure second
+      _ -> threadDelay 1000 >> wait
+
 data ReviewAudit = ReviewAudit !Text !(IORef Bool) !(MVar ThreadId) !(MVar ())
 {-# NOINLINE currentReviewAudit #-}
 currentReviewAudit :: MVar (Maybe ReviewAudit)
@@ -104,10 +174,12 @@ withReviewAudit stage=bracket acquire release
     acquire=do
       audit<-ReviewAudit stage <$> newIORef False <*> newEmptyMVar <*> newEmptyMVar
       modifyMVar_ currentReviewAudit $ \old->case old of Nothing->pure(Just audit);Just _->error "concurrent review audit"
+      modifyMVar_ controlWaiters (const(pure(Just(stage,[]))))
       pure audit
     release audit=do
       releaseReviewed audit
       modifyMVar_ currentReviewAudit(const(pure Nothing))
+      modifyMVar_ controlWaiters(const(pure Nothing))
       modifyMVar_ sqlInterrupt(const(pure Nothing))
 waitReviewed :: ReviewAudit -> IO ThreadId
 waitReviewed (ReviewAudit _ _ entered _)=timeout 5000000(takeMVar entered)>>=maybe(error "actual currentReview boundary was not reached")pure

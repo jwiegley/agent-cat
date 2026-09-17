@@ -19,6 +19,7 @@ module Agentic.Runtime.Snapshot
     initialRunSnapshot,
     stepRunSnapshot,
     runSnapshotValue,
+    controlAcknowledgementLimit,
   )
 where
 
@@ -77,6 +78,7 @@ data AttemptSnapshot = AttemptSnapshot
   { snapshotAttemptId :: !AttemptId,
     snapshotAttemptTarget :: !Text,
     snapshotAttemptState :: !AttemptState,
+    snapshotAttemptSteerable :: !(Maybe Bool),
     snapshotAttemptOutput :: !Text,
     snapshotAttemptSteers :: ![SteerSnapshot],
     snapshotAttemptMessages :: ![Text],
@@ -201,7 +203,7 @@ initialRunSnapshot runId =
 -- | Fold one validated envelope, refusing every invalid lifecycle transition.
 stepRunSnapshot :: RunSnapshot -> Envelope -> Either SnapshotError RunSnapshot
 stepRunSnapshot current envelope = do
-  unless (envelopeVersion envelope `elem` [protocolVersion, latestProtocolVersion]) $
+  unless (envelopeVersion envelope `elem` supportedProtocolVersions) $
     refuse SnapshotVersion ("unsupported protocol version " <> tshow (envelopeVersion envelope))
   unless (envelopeRunId envelope == snapshotRunId current) $
     refuse SnapshotRun "runtime protocol run id changed within one snapshot"
@@ -210,11 +212,18 @@ stepRunSnapshot current envelope = do
   case checkSequence (snapshotLastEnvelope current) envelope of
     Left why -> refuse SnapshotSequence why
     Right SequenceNext -> pure ()
-  applyEvent
+  next <- applyEvent
     current
       { snapshotLastEnvelope = Just envelope
       }
     (envelopeEvent envelope)
+  pure $ if terminalStatus (snapshotRunStatus next)
+    then next {snapshotOccurrences = Map.map clearSteering (snapshotOccurrences next)}
+    else next
+  where
+    clearSteering occurrence = occurrence {snapshotOccurrenceAttempts = Map.map
+      (\attempt -> attempt {snapshotAttemptSteerable = False <$ snapshotAttemptSteerable attempt})
+      (snapshotOccurrenceAttempts occurrence)}
 
 applyEvent :: RunSnapshot -> RuntimeEvent -> Either SnapshotError RunSnapshot
 applyEvent snapshot = \case
@@ -255,13 +264,19 @@ applyEvent snapshot = \case
         lifecycle ("duplicate attempt " <> attemptText attempt)
       when (snapshotAttemptCount snapshot >= maxSnapshotAttempts) $
         lifecycle "runtime snapshot exceeds 512 attempts"
-      let attemptSnapshot = AttemptSnapshot attempt target AttemptRunning "" [] [] Map.empty [] Nothing [] Nothing Nothing
+      let attemptSnapshot = AttemptSnapshot attempt target AttemptRunning Nothing "" [] [] Map.empty [] Nothing [] Nothing Nothing
           closeDispatch dispatch = dispatch {dispatchOpen = False}
       pure
         occurrence
           { snapshotOccurrenceDispatch = closeDispatch <$> snapshotOccurrenceDispatch occurrence,
             snapshotOccurrenceAttempts = Map.insert attempt attemptSnapshot (snapshotOccurrenceAttempts occurrence)
           }
+  AttemptControlAvailability attempt steerable -> do
+    unless (snapshotLastEnvelopeVersion snapshot == Just latestProtocolVersion) $
+      lifecycle "control availability requires protocol version 3"
+    modifyAttempt snapshot attempt $ \current -> do
+      requireAttemptRunning current "control availability"
+      pure current {snapshotAttemptSteerable = Just steerable}
   AttemptOutput attempt chunk ->
     modifyAttempt snapshot attempt $ \attemptSnapshot -> do
       requireAttemptRunning attemptSnapshot "output"
@@ -285,13 +300,15 @@ applyEvent snapshot = \case
   AttemptCompleted attempt _source ->
     modifyAttempt snapshot attempt $ \attemptSnapshot -> do
       requireAttemptRunning attemptSnapshot "completion"
-      pure attemptSnapshot {snapshotAttemptState = AttemptCompletedState}
+      pure attemptSnapshot {snapshotAttemptState = AttemptCompletedState,
+        snapshotAttemptSteerable = False <$ snapshotAttemptSteerable attemptSnapshot}
   AttemptFailed attempt failure message ->
     modifyAttempt snapshot attempt $ \attemptSnapshot -> do
       requireAttemptRunning attemptSnapshot "failure"
       pure
         attemptSnapshot
           { snapshotAttemptState = AttemptFailedState,
+            snapshotAttemptSteerable = False <$ snapshotAttemptSteerable attemptSnapshot,
             snapshotAttemptFailure = Just message,
             snapshotAttemptFailureClass = Just failure
           }
@@ -462,8 +479,10 @@ recordControlAck snapshot control state message command occurrence attempt =
    in case Map.lookup control (snapshotControlAcks snapshot) of
         Just prior | prior == nextAck -> pure snapshot
         prior -> do
-          when (Map.notMember control (snapshotControlAcks snapshot) && Map.size (snapshotControlAcks snapshot) >= maxSnapshotControls) $
-            lifecycle "runtime snapshot exceeds 256 control acknowledgements"
+          let hasCancellation = command==Just "cancelRun" || any ((==Just "cancelRun") . snapshotControlCommand) (Map.elems(snapshotControlAcks snapshot))
+              limit = controlAcknowledgementLimit (maybe protocolVersion id (snapshotLastEnvelopeVersion snapshot)) hasCancellation
+          when (Map.notMember control (snapshotControlAcks snapshot) && Map.size (snapshotControlAcks snapshot) >= limit) $
+            lifecycle ("runtime snapshot exceeds " <> tshow limit <> " control acknowledgements")
           unless (snapshotRunStatus snapshot `elem` [RunRunning, RunCancelling]) $
             lifecycle "control acknowledged while run is not active"
           case prior of
@@ -511,7 +530,7 @@ completeRun snapshot fresh memo result = do
         && all occurrenceComplete (Map.elems (snapshotOccurrences snapshot))
     ) $
     lifecycle "run completed before authored trace/occurrences completed"
-  when (snapshotLastEnvelopeVersion snapshot == Just latestProtocolVersion && not (isJust result)) $
+  when (maybe False (>= correlatedProtocolVersion) (snapshotLastEnvelopeVersion snapshot) && not (isJust result)) $
     lifecycle "protocol version 2 completed without a result reference"
   pure
     snapshot
@@ -582,6 +601,11 @@ maxSnapshotOccurrences = 2048
 maxSnapshotAttempts = 512
 maxSnapshotSteers = 256
 maxSnapshotControls = 256
+
+-- | Observation v3 adds one cancellation-only slot without reducing ordinary IDs.
+controlAcknowledgementLimit :: Int -> Bool -> Int
+controlAcknowledgementLimit version hasCancellation = maxSnapshotControls +
+  if version==latestProtocolVersion && hasCancellation then 1 else 0
 maxSnapshotOptions = 64
 maxSnapshotHistory = 64
 
@@ -602,6 +626,7 @@ eventName = \case
   RunStartedV2 {} -> "run.started"
   OccurrenceStarted {} -> "occurrence.started"
   AttemptStarted {} -> "attempt.started"
+  AttemptControlAvailability {} -> "attempt.control-availability"
   AttemptOutput {} -> "attempt.output"
   AttemptProgress {} -> "attempt.progress"
   AttemptSteered {} -> "attempt.steered"
@@ -678,6 +703,7 @@ attemptValueSnapshot attempt =
       "failure" .= snapshotAttemptFailure attempt,
       "failureClass" .= fmap failureTextValue (snapshotAttemptFailureClass attempt)
     ]
+      <> maybe [] (\support -> ["steerable" .= support]) (snapshotAttemptSteerable attempt)
       <> ["messages" .= snapshotAttemptMessages attempt | not (null (snapshotAttemptMessages attempt))]
       <> ["tools" .= Map.elems (snapshotAttemptTools attempt) | not (Map.null (snapshotAttemptTools attempt))]
       <> ["todos" .= snapshotAttemptTodos attempt | not (null (snapshotAttemptTodos attempt))]

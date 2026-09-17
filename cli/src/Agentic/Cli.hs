@@ -383,7 +383,7 @@ import Agentic.Runtime
     sayEl,
     stderrLog,
   )
-import Agentic.Runtime (ControlRuntime, newControlRuntime)
+import Agentic.Runtime (ControlRuntime, newControlRuntimeFor)
 import Agentic.Runtime
   ( DeferredEventSink,
     MachineCancelled (..),
@@ -439,7 +439,7 @@ import Agentic.Runtime
     RunId,
     RuntimeEvent (..),
     mkRunId,
-    latestProtocolVersion,
+    correlatedProtocolVersion,
     latestStoreVersion,
     protocolVersion,
     storeVersion,
@@ -880,7 +880,7 @@ validateMachineEnvironment options = do
   store <- lookupEnv "AGENT_CAT_RUN_STORE"
   controlFd <- lookupEnv "AGENT_CAT_CONTROL_FD"
   legacyControl <- lookupEnv "AGENT_CAT_CONTROL_STDIN"
-  when (machineProtocolVersion options == latestProtocolVersion && store == Nothing) $
+  when (machineProtocolVersion options >= correlatedProtocolVersion && store == Nothing) $
     ioError (userError "protocol version 2 requires AGENT_CAT_RUN_STORE")
   when (machinePersonAnswering options == PersonAnswerLocalControl && controlFd /= Just "3") $
     ioError (userError "local person answering requires AGENT_CAT_CONTROL_FD=3")
@@ -999,7 +999,7 @@ frontendCmd reg = Frontend.runFrontendSession (regBinary reg) runnerVersion cred
       row <- requireRow name
       facts <- require (listFacts name row)
       pure (descriptorOfFacts latestDescriptorVersion facts)
-    prepare parent name arguments answering captured = do
+    prepare runtimeVersion parent name arguments answering captured = do
       row <- requireRow name
       inputs <- traverse
         (\(inputName', bytes) -> NamedArg inputName' <$> require (decodeInputFileBytes (inputSource (inputSpecFor (rowExample row) inputName')) ("frontend input " <> inputName') bytes))
@@ -1034,7 +1034,7 @@ frontendCmd reg = Frontend.runFrontendSession (regBinary reg) runnerVersion cred
                   Nothing -> "routing"
                   Just (BackendAcp _) -> "acp"
                   Just (BackendDeck _) -> "deck"
-              options = MachineOptions latestProtocolVersion answering
+              options = MachineOptions runtimeVersion answering
               lineage = maybe RootRun Frontend.parentOperation parent
               checkParent = traverse
                 (\selected -> validateLineage options (Frontend.parentOperation selected)
@@ -1164,7 +1164,7 @@ withMachineControls options runId name initialTarget action = do
   case handle of
     Nothing -> action Nothing
     Just controlHandle -> do
-      runtime <- newControlRuntime
+      runtime <- newControlRuntimeFor (machineProtocolVersion options)
       deferred <- newDeferredEventSink
       let sink = deferredEventSink deferred
       outcome <- try (withBufferedControlInputFor (machineProtocolVersion options) controlHandle BS.empty sink runtime (action (Just (MachineControl runtime deferred sink))))
@@ -1822,7 +1822,7 @@ descriptorOfFacts version f =
   WorkflowDescriptor
     { workflowDescriptorVersion = version,
       workflowRunnerVersion = runnerVersion,
-      workflowProtocolVersions = if version >= latestDescriptorVersion then [protocolVersion, latestProtocolVersion] else [protocolVersion],
+      workflowProtocolVersions = if version >= latestDescriptorVersion then [protocolVersion, correlatedProtocolVersion] else [protocolVersion],
       workflowStoreVersions = if version >= latestDescriptorVersion then [storeVersion, latestStoreVersion] else [storeVersion],
       workflowCapabilities =
         DescriptorCapabilities
@@ -2731,7 +2731,7 @@ runMachineWith options control lineage parent inherited reg runId name target pr
           unless activated (ioError (userError "machine event sink was activated twice"))
           executeRun (Just controls) sink id
         Just (MachineControlInput handle buffered) -> do
-          controls <- newControlRuntime
+          controls <- newControlRuntimeFor (machineProtocolVersion options)
           -- Prepared runs establish durable history before consuming queued controls.
           actualSink started
           executeRun (Just controls) actualSink
@@ -3473,13 +3473,13 @@ parseCommand reg = \case
         goMachineOptions options seenProtocol seenPerson remaining args = case args of
           [] -> do
             whenE
-              (machinePersonAnswering options == PersonAnswerLocalControl && machineProtocolVersion options /= latestProtocolVersion)
+              (machinePersonAnswering options == PersonAnswerLocalControl && machineProtocolVersion options /= correlatedProtocolVersion)
               "--person-answering local-control requires --protocol-version 2"
             Right (options, reverse remaining)
           ("--protocol-version" : value : rest)
             | seenProtocol -> Left "--protocol-version was given more than once"
             | value == "1" -> goMachineOptions options {machineProtocolVersion = protocolVersion} True seenPerson remaining rest
-            | value == "2" -> goMachineOptions options {machineProtocolVersion = latestProtocolVersion} True seenPerson remaining rest
+            | value == "2" -> goMachineOptions options {machineProtocolVersion = correlatedProtocolVersion} True seenPerson remaining rest
             | otherwise -> Left ("--protocol-version takes 1 or 2, not '" <> value <> "'")
           ("--person-answering" : value : rest)
             | seenPerson -> Left "--person-answering was given more than once"

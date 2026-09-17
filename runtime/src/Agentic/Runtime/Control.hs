@@ -15,6 +15,7 @@ module Agentic.Runtime.Control
     ControlRuntime,
     AttemptSteerer,
     newControlRuntime,
+    newControlRuntimeFor,
     registerControlAttempt,
     unregisterControlAttempt,
     waitForRuntimeRecovery,
@@ -22,6 +23,7 @@ module Agentic.Runtime.Control
     registerRuntimeRedirects,
     awaitRuntimeRedirect,
     controlRuntimeSnapshot,
+    registeredAttemptSteerability,
     runtimeOccurrenceReplayable,
     decideRuntimeControl,
     deliverRuntimeAction,
@@ -31,6 +33,8 @@ module Agentic.Runtime.Control
     ackEvent,
     ackEventFor,
     invalidAckEventFor,
+    controlCommandName,
+    timingText,
     encodeControl,
     encodeControlFor,
     decodeControl,
@@ -42,7 +46,9 @@ import Agentic.Runtime.Protocol
   ( AttemptId (..),
     OccurrenceId (..),
     RuntimeEvent (ControlAcknowledged, ControlAcknowledgedV2),
+    correlatedProtocolVersion,
     latestProtocolVersion,
+    supportedProtocolVersions,
     maxFrameBytes,
     protocolVersion,
   )
@@ -156,7 +162,8 @@ data PersonAnswerGate = PersonAnswerGate
   }
 
 data LiveControlState = LiveControlState
-  { liveSnapshot :: !ControlSnapshot,
+  { liveObserveAvailability :: !Bool,
+    liveSnapshot :: !ControlSnapshot,
     liveSteerers :: !(Map AttemptId (Maybe AttemptSteerer)),
     liveRetries :: !(Map OccurrenceId (MVar (ControlId, RecoveryControl))),
     liveRedirects :: !(Map OccurrenceId (MVar Text)),
@@ -168,10 +175,13 @@ data LiveControlState = LiveControlState
 newtype ControlRuntime = ControlRuntime (MVar LiveControlState)
 
 newControlRuntime :: IO ControlRuntime
-newControlRuntime =
-  ControlRuntime
-    <$> newMVar
-      (LiveControlState emptyControlSnapshot Map.empty Map.empty Map.empty Map.empty Map.empty Map.empty)
+newControlRuntime = newControlRuntimeFor correlatedProtocolVersion
+
+newControlRuntimeFor :: Int -> IO ControlRuntime
+newControlRuntimeFor version
+  | version `notElem` supportedProtocolVersions = ioError (userError "unsupported control observation version")
+  | otherwise = ControlRuntime <$> newMVar
+      (LiveControlState (version == latestProtocolVersion) emptyControlSnapshot Map.empty Map.empty Map.empty Map.empty Map.empty Map.empty)
 
 registerControlAttempt :: ControlRuntime -> AttemptId -> Maybe AttemptSteerer -> IO ()
 registerControlAttempt (ControlRuntime state) attempt steerer =
@@ -300,6 +310,12 @@ runtimeOccurrenceReplayable (ControlRuntime state) occurrence =
 
 controlRuntimeSnapshot :: ControlRuntime -> IO ControlSnapshot
 controlRuntimeSnapshot (ControlRuntime state) = liveSnapshot <$> readMVar state
+
+-- | Negotiated observation of actual registration, never a control capability.
+registeredAttemptSteerability :: ControlRuntime -> AttemptId -> IO (Maybe Bool)
+registeredAttemptSteerability (ControlRuntime state) attempt = do
+  live <- readMVar state
+  pure $ if liveObserveAvailability live then isJust <$> Map.lookup attempt (liveSteerers live) else Nothing
 
 decideRuntimeControl :: ControlRuntime -> Control -> IO (ControlAck, Maybe ControlAction)
 decideRuntimeControl (ControlRuntime state) control =
@@ -503,7 +519,7 @@ encodeControl = BL.toStrict . encode
 
 encodeControlFor :: Int -> Control -> Either Text ByteString
 encodeControlFor version control
-  | version `notElem` [protocolVersion, latestProtocolVersion] = Left ("unsupported runtime protocol version " <> T.pack (show version))
+  | version `notElem` [protocolVersion, correlatedProtocolVersion] = Left ("unsupported runtime protocol version " <> T.pack (show version))
   | version == protocolVersion, AnswerPerson {} <- controlCommand control = Left "answerPerson is unavailable in protocol version 1"
   | BS.length bytes > maxFrameBytes = Left "runtime control frame exceeds 1048576 bytes"
   | otherwise = Right bytes
@@ -515,7 +531,7 @@ decodeControl = decodeControlFor protocolVersion
 
 decodeControlFor :: Int -> ByteString -> Either Text Control
 decodeControlFor version bytes
-  | version `notElem` [protocolVersion, latestProtocolVersion] = Left ("unsupported runtime protocol version " <> T.pack (show version))
+  | version `notElem` [protocolVersion, correlatedProtocolVersion] = Left ("unsupported runtime protocol version " <> T.pack (show version))
   | BS.length bytes > maxFrameBytes = Left "runtime control frame exceeds 1048576 bytes"
   | otherwise = do
       value <- either (Left . T.pack) Right (eitherDecodeStrict' bytes :: Either String Value)
@@ -563,7 +579,7 @@ parseCommandFor version = withObject "runtime control command" $ \o -> do
     "abandonOccurrence" -> pure (ChooseRecovery RecoveryAbandon)
     "redirectOccurrence" -> RedirectOccurrence <$> o .: "target"
     "answerPerson"
-      | version == latestProtocolVersion -> AnswerPerson <$> o .: "answer"
+      | version == correlatedProtocolVersion -> AnswerPerson <$> o .: "answer"
       | otherwise -> fail "answerPerson is unavailable in protocol version 1"
     _ -> fail ("unknown runtime control command " <> T.unpack command)
 

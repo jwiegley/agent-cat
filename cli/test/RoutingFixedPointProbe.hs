@@ -4,11 +4,14 @@
 {-# LANGUAGE QualifiedDo #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE RebindableSyntax #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Main (main) where
 
 import Agentic.Cli (Registry (..), Row (..), cliMain)
 import Agentic.Runtime.Facts (runFactEngine, runFactName, runFactRoutes, sharesOneSession)
+import qualified Agentic.Builder as B
+import qualified Agentic.Schema as S
 import Agentic.Workflow
 import qualified Agentic.Workflow.Do as W
 import Data.String (fromString)
@@ -32,6 +35,8 @@ registry =
           ("controlled", row controlledExample),
           ("controlled-single", row controlledSingleExample),
           ("person-controlled", row personControlledExample),
+          ("typed-person", row (Needs $ taking (input "input" :> noInputs) typedPersonProgram)),
+          ("mixed-controls", row (Needs $ taking (input "input" :> noInputs) mixedControlProgram)),
           ("parallel-person", row (Needs $ taking (input "input" :> noInputs) parallelPersonProgram)),
           ("prompt-source", row (Needs $ taking (input "input" :> noInputs) sourceProgram)),
           ("tail-source", row (Needs $ taking (argsInputAs "input" :> noInputs) sourceProgram)),
@@ -106,6 +111,26 @@ parallelPersonProgram body = workflow W.do
     [("engine", ask (model "reviewer") [wf|Review concurrently: {body}|]),
      ("person", ask (person "owner") [wf|Mandatory concurrent answer: {body}|])]
   stop
+
+mixedControlProgram :: Text -> Program
+mixedControlProgram body = workflow W.do
+  _engine <- confirm (model "controlled" `servedBy` "primary" `fallingBackTo` "spare") [wf|Apply this patch? {body}|]
+  _person <- confirm (person "owner") [wf|Independent confirmation? {body}|]
+  stop
+
+-- Real authored typed questions. Runtime alone validates and delivers answers.
+typedPersonProgram :: Text -> Program
+typedPersonProgram body = B.program [] $
+  B.bindAsI S.SFlag "flag" (B.one (B.askPerson "flag" [B.lit body])) $
+  B.bindAsI (S.SStructured S.schemaNull) "null" (B.one (B.askPerson "null" [B.lit body])) $
+  B.bindAsI (S.SStructured (S.schemaProperty @"ok" S.schemaBoolean
+    (S.schemaProperty @"notes" (S.schemaArray S.schemaString) S.schemaObject)))
+    "object" (B.one (B.askPerson "object" [B.lit body])) $
+  B.bindAsI (S.SStructured (S.schemaArray S.schemaInteger)) "array" (B.one (B.askPerson "array" [B.lit body])) $
+  B.bindAsI (S.SStructured S.schemaNumber) "number" (B.one (B.askPerson "number" [B.lit body])) $
+  B.bindAsI S.SVerdict "verdict" (B.one (B.askPerson "verdict" [B.lit body])) $
+  B.bindAsI (S.SStructured (S.schemaProperty @"ratio" S.schemaNumber S.schemaObject)) "nested-number"
+    (B.one (B.askPerson "nested-number" [B.lit body])) B.stop
 
 pinnedProgram :: Text -> Program
 pinnedProgram pin = workflow W.do

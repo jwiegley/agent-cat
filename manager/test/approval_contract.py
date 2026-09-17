@@ -10,12 +10,15 @@ import manager_contract_probe as frozen
 document = frozen.yaml.load((source / "doc/api/openapi.yaml").read_text(), Loader=frozen.UniqueYamlLoader)
 files = [(path,"Preparation") for path in sorted(work.glob("public-preparation*.json")) + sorted(work.glob("preparation.json"))]
 files += [(path,"CommandReceipt") for path in work.glob("approved-receipt.json")]
+files += [(path,"Decision") for path in work.glob("decision-view-*.json")]
+files += [(path,"RunControl") for path in work.glob("control-view-*.json")]
+files += [(path,"CommandReceipt") for path in work.glob("*-steering-receipt.json")]
 if not files:
-    raise RuntimeError("no real public preparation evidence")
+    raise RuntimeError("no real public resource evidence")
 for path, schema in files:
     validator = frozen.ContractValidator({"$id": frozen.BASE_URI, "components": document["components"],
         "allOf": [{"$ref": "#/components/schemas/" + schema}]}, registry=frozen.Registry(), format_checker=frozen.FORMATS)
     value = frozen.parse_json(path.read_bytes())
     failures = list(validator.iter_errors(value))
     frozen.require(not failures, f"{path.name}: {failures}")
-    print(f"PASS frozen public preparation: {path.name}")
+    print(f"PASS frozen public resource: {path.name}")

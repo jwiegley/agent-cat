@@ -125,12 +125,14 @@ bash manager/ci/workers.sh
 bash manager/ci/admission.sh
 bash manager/ci/approval.sh
 bash manager/ci/ingestion.sh
-test/cabal.sh run -v0 policy-probe -- +RTS -N8 -RTS
-test/cabal.sh build agentic-run routing-fixed-point-probe runtime-contract-test schema-probe >/dev/null
-agentic_run=$(test/cabal.sh list-bin agentic-run)
-control_runner=$(test/cabal.sh list-bin routing-fixed-point-probe)
-codec_runner=$(test/cabal.sh list-bin runtime-contract-test)
-schema_runner=$(test/cabal.sh list-bin schema-probe)
+bash manager/ci/controls.sh
+bash test/cabal.sh build policy-probe agentic-run routing-fixed-point-probe runtime-contract-test schema-probe >/dev/null
+policy_runner=$(bash test/cabal.sh list-bin policy-probe)
+"$policy_runner" +RTS -N8 -RTS
+agentic_run=$(bash test/cabal.sh list-bin agentic-run)
+control_runner=$(bash test/cabal.sh list-bin routing-fixed-point-probe)
+codec_runner=$(bash test/cabal.sh list-bin runtime-contract-test)
+schema_runner=$(bash test/cabal.sh list-bin schema-probe)
 "$schema_runner"
 python3 test/answer_schema_evidence.py
 schema_vectors=$(mktemp "${CABAL_BUILDDIR:?}/answer-schema.XXXXXX.json")
@@ -171,7 +173,7 @@ refuses_fact() {
   local -a statuses
   directory=$(umask 077; mktemp -d "${CABAL_BUILDDIR:?}/policy-refusal.XXXXXX") || return 1
   # Keep predicate input available even when the evidence destination fails.
-  if test/cabal.sh run -v0 agentic-run -- \
+  if bash test/cabal.sh run -v0 agentic-run -- \
        plan review-lite --input-arg "$fact=" 2>&1 |
        (umask 077; exec tee "$directory/refusal.log" > "$directory/observed.log"); then
     statuses=("${PIPESTATUS[@]}")

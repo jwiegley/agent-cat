@@ -9,11 +9,10 @@ redirected work toward substantive WM-016 closure. This direction supersedes
 every earlier next-helper instruction in this handoff, without changing the
 frozen acceptance contract or safety limits.
 
-The [WM-016 closure plan](workflow-manager-closure-plan.md) governs the next
-work: establish one application delta, close actual failure-path ownership
-issues in a consolidated unit, integrate and run the existing required matrix,
-then obtain one milestone-level final review. No new fixture-retention helper,
-hash inventory, custom recorder or per-leaf review cycle is scheduled.
+The [WM-016 closure plan](workflow-manager-closure-plan.md) governs the remaining
+work: run the existing integrated-source matrix, resolve actual failures at their
+owners, and obtain one milestone-level final review. No new fixture-retention
+helper, hash inventory, custom recorder or per-leaf review cycle is scheduled.
 
 The L08 leaf reviewer is paused. Its isolated work is preserved and has not
 been integrated. Resume it only if a demonstrated product-validation blocker
@@ -27,17 +26,37 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T21:55:25.082467+00:00`. The next deadline is
-`2026-09-17T22:55:25.082467+00:00`. The earlier 00:46 checkpoint was less than one
-minute late during read-only verification, and the lapse was disclosed.
+Refocus completed at `2026-09-17T22:43:54Z`. The next deadline is
+`2026-09-17T23:43:54Z`. The earlier 00:46 checkpoint was less than one minute
+late during read-only verification, and the lapse was disclosed.
 
-**P1 corrected and independently cleared:** the neutral test module restores
-the Cabal boundary. The committed audit accepts the repair and its final-byte
-verification. L07 directory disposal has independent source/data clearance
-and canonical post-process verification. Its committed fess is clear. The
-isolated L08 review has been paused under the user-directed refocus. The next
-action is application-delta reconciliation under the closure plan. Full
-policies and WM-016 remain unaccepted.
+**Application integration milestone:** the WM-016 application changes now
+compose with the later canonical repairs, including the Cabal test-component
+boundary. The policies merge also required its existing inert refusal fixture
+to provide a Bash wrapper, and the storage documentation now names schema seven.
+The bounded Store admission policy and all runtime budgets remain unchanged.
+
+The whole-workspace warning-fatal build passed. Its first invocation wrongly
+specified `jobs: 1` in private configuration. That setting was removed, and the
+same build command passed without a job override. The existing refusal regression
+and documentation gate passed on the corrected integration.
+
+Fresh `controls-saturation` and `ingestion-concurrent` execution passed at both
+N1 and N8. The latter covers success and caller interruption with original-worker
+joins, preserved transport outcomes and release of both reservations only after
+cleanup. Saturation retains the ordinary limit and cancellation-only extra slot.
+These fresh results do not recover or explain historical `policies-gate-05`.
+
+Source, build output and ordinary native results are under
+`controls.qzldrova/wm016-delivery.LdWQA6B3`, in `source`, `build.22UhyK` and
+`functional.toRJdNVE`. The decision covered only these fresh local scenarios
+with offline adapters, original owners and existing budgets. The next work is
+the remaining local suites and owning gates. Linux and affected Pi/Emacs/client
+checks still require their requested authorization. Full policies and final
+milestone review remain outstanding, so WM-016 is not accepted.
+
+The following verification history retains its original scope. The paused L08
+review and earlier next-helper instructions do not govern current work.
 
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has

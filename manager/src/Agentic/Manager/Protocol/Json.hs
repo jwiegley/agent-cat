@@ -1,13 +1,37 @@
+{-# LANGUAGE OverloadedStrings #-}
 -- | JSON values decoded without discarding duplicate fields or excessive nesting.
-module Agentic.Manager.Protocol.Json (decodeStrictValue) where
+module Agentic.Manager.Protocol.Json (decodeStrictValue, representableEditorSchema) where
 
 import Control.Monad (unless)
-import Data.Aeson (Value)
+import Data.Aeson (Value (..))
+import qualified Data.Aeson.Key as Key
+import qualified Data.Aeson.KeyMap as KM
+import Data.Foldable (toList)
+import qualified Data.Text as T
 import Data.Aeson.Decoding (toEitherValue)
 import Data.Aeson.Decoding.ByteString (bsToTokens)
 import Data.Aeson.Decoding.Tokens (Tokens (..), TkArray (..), TkRecord (..))
 import qualified Data.ByteString as BS
 import qualified Data.Set as Set
+
+-- | The frozen supplementary editor vocabulary. Reject the whole rendering when
+-- a nested constraint cannot be represented, rather than silently weakening it.
+representableEditorSchema :: Value -> Bool
+representableEditorSchema (Object fields) = case KM.lookup "type" fields of
+  Just(String kind) | kind `elem` ["null","boolean","integer","number","string"] -> keys==Set.singleton "type"
+  Just(String "array") -> keys==Set.fromList ["type","items"] && maybe False representableEditorSchema (KM.lookup "items" fields)
+  Just(String "object") -> keys==Set.fromList ["type","properties","required","additionalProperties"] &&
+    KM.lookup "additionalProperties" fields==Just(Bool False) && case (KM.lookup "properties" fields,KM.lookup "required" fields) of
+      (Just(Object properties),Just(Array required)) ->
+        let names=map Key.toText(KM.keys properties)
+            requested=[name|String name<-toList required]
+        in KM.size properties<=256 && length requested==length required && length requested<=256 &&
+          Set.size(Set.fromList requested)==length requested && Set.fromList requested==Set.fromList names &&
+          all ((<=1024) . T.length) (names<>requested) && all representableEditorSchema (KM.elems properties)
+      _ -> False
+  _ -> False
+  where keys=Set.fromList(KM.keys fields)
+representableEditorSchema _ = False
 
 -- Callers enforce their byte ceiling before this bounded-depth decode.
 decodeStrictValue :: BS.ByteString -> Either String Value

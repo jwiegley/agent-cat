@@ -65,6 +65,8 @@ extra-source-files:
   manager/ci/admission.sh
   manager/ci/approval.sh
   manager/ci/ingestion.sh
+  manager/ci/controls.sh
+  runtime/test/ControlDeliveryAudit.hs
   manager/test/worker_fixture.py
   manager/test/approval_fixture.py
   manager/test/approval_contract.py
@@ -86,6 +88,7 @@ extra-doc-files:
   manager/CONFIGURATION.md
   manager/STORAGE.md
   manager/COMMANDS.md
+  manager/CONTROLS.md
   manager/DRAFTS.md
   manager/WORKERS.md
   manager/ADMISSION.md
@@ -193,6 +196,7 @@ library
     Agentic.Manager.Lease
     Agentic.Manager.Schema
     Agentic.Manager.Store
+    Agentic.Manager.Store.Admission
     Agentic.Manager.Worker.State
     Agentic.Manager.Worker
     Agentic.Manager.Admission.Policy
@@ -460,6 +464,7 @@ executable manager-store-check
   hs-source-dirs:  manager/test manager/src
   main-is:         StoreCheck.hs
   other-modules:
+    StoreAdmissionCheck
     Agentic.Manager.Configuration
     Agentic.Manager.Protocol.Json
     Agentic.Manager.Profile
@@ -467,6 +472,7 @@ executable manager-store-check
     Agentic.Manager.Lease
     Agentic.Manager.Schema
     Agentic.Manager.Store
+    Agentic.Manager.Store.Admission
     Agentic.Manager.Worker.State
   build-depends:   agentic, direct-sqlite, deepseq
   ghc-options:     -threaded -rtsopts
@@ -486,6 +492,7 @@ executable manager-command-check
     Agentic.Manager.Lease
     Agentic.Manager.Schema
     Agentic.Manager.Store
+    Agentic.Manager.Store.Admission
     Agentic.Manager.Worker.State
   build-depends:   agentic, direct-sqlite, deepseq, transformers
   ghc-options:     -threaded -rtsopts
@@ -509,6 +516,7 @@ executable manager-draft-check
     Agentic.Manager.Lease
     Agentic.Manager.Schema
     Agentic.Manager.Store
+    Agentic.Manager.Store.Admission
     Agentic.Manager.Worker.State
   build-depends:   agentic, direct-sqlite, deepseq, transformers
   ghc-options:     -threaded -rtsopts
@@ -533,6 +541,7 @@ executable manager-worker-check
     Agentic.Manager.Lease
     Agentic.Manager.Schema
     Agentic.Manager.Store
+    Agentic.Manager.Store.Admission
     Agentic.Manager.Worker.State
   build-depends:   agentic, direct-sqlite, deepseq, transformers
   ghc-options:     -threaded -rtsopts
@@ -560,6 +569,7 @@ executable manager-admission-check
     Agentic.Manager.Lease
     Agentic.Manager.Schema
     Agentic.Manager.Store
+    Agentic.Manager.Store.Admission
     Agentic.Manager.Worker.State
   build-depends:   agentic, direct-sqlite, deepseq, transformers
   ghc-options:     -threaded -rtsopts
@@ -589,6 +599,7 @@ executable manager-approval-check
     Agentic.Manager.Lease
     Agentic.Manager.Schema
     Agentic.Manager.Store
+    Agentic.Manager.Store.Admission
     Agentic.Manager.Worker.State
   build-depends:   agentic, direct-sqlite, deepseq, transformers
   ghc-options:     -threaded -rtsopts

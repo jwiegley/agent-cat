@@ -26,7 +26,7 @@ import Control.Concurrent.MVar (newEmptyMVar,putMVar,takeMVar)
 import Control.Concurrent.STM hiding (check)
 import qualified Control.Concurrent.STM as STM
 import Control.DeepSeq (NFData)
-import Control.Exception (mask_,bracket,try,fromException,throwIO,finally,AsyncException (UserInterrupt))
+import Control.Exception (IOException,mask_,bracket,try,fromException,throwIO,finally,AsyncException (UserInterrupt))
 import Control.Monad (unless,forM_,forM,void,when,foldM)
 import Crypto.Hash (Digest,SHA256,hash)
 import Data.Aeson (Value (..),toJSON,object,(.=),eitherDecodeStrict')
@@ -46,16 +46,27 @@ import System.Exit (ExitCode (..))
 import System.Info (os)
 import System.Environment (getArgs)
 import System.FilePath ((</>),takeExtension,dropExtension)
-import System.IO (BufferMode (LineBuffering),hSetBuffering,stdout)
+import System.IO (BufferMode (LineBuffering),hSetBuffering,stdout,hPutStrLn,stderr)
 import System.Posix.Files (setFileMode)
 import System.Timeout (timeout)
-import GHC.Conc (threadStatus, ThreadStatus (ThreadBlocked), BlockReason (BlockedOnException))
+import GHC.Conc (threadStatus, ThreadStatus (ThreadBlocked), BlockReason (BlockedOnException, BlockedOnMVar))
+import GHC.Clock (getMonotonicTimeNSec)
 
 main :: IO ()
 main=do
   hSetBuffering stdout LineBuffering
   args<-getArgs
   case args of
+    ["controls",work,native]->nativeControlChecks work native
+    ["controls-live",work,native,source,python]->nativeMixedControlChecks work native source python
+    ["controls-steering",work,native,source,python]->nativeSteeringChecks False 1 work native source python
+    ["controls-stale-steer",work,native,source,python]->nativeSteeringChecks True 1 work native source python
+    ["controls-saturation",work,native,source,python]->nativeSteeringChecks False 256 work native source python
+    ["controls-write",work,native]->nativeControlWriteChecks work native
+    ["controls-interruption",work,native]->nativeControlInterruptionChecks work native
+    ["controls-reload",work,native]->nativeControlReloadChecks False work native
+    ["controls-reload-race",work,native]->nativeControlReloadChecks True work native
+    ["controls-preparation",work,native,source,python]->nativeConcurrentChecks True work native source python
     ["store-cancel-gap",work,native]->storeCancellationChecks work native
     ["ingestion-framing",work,native,source,python]->framedIngestionChecks work native source python
     ["ingestion-association",work,native]->nativeIngestionChecks work native
@@ -124,7 +135,10 @@ withReady :: FilePath -> FilePath -> String -> [Text] -> [(Text,Text)] -> (Fixtu
 withReady work native = withReadyRunner work native [] "person-controlled"
 
 withReadyRunner :: FilePath -> FilePath -> [Text] -> Text -> String -> [Text] -> [(Text,Text)] -> (Fixture -> IO a) -> IO a
-withReadyRunner work native prefix selectedWorkflow name arguments environment action=do
+withReadyRunner = withReadyRunnerLedger 8388608
+
+withReadyRunnerLedger :: Int64 -> FilePath -> FilePath -> [Text] -> Text -> String -> [Text] -> [(Text,Text)] -> (Fixture -> IO a) -> IO a
+withReadyRunnerLedger ledger work native prefix selectedWorkflow name arguments environment action=do
   capabilities <- getNumCapabilities
   let root=work </> name;path=work </> (name<>".json")
   createDirectory root;setFileMode root 0o700
@@ -133,7 +147,7 @@ withReadyRunner work native prefix selectedWorkflow name arguments environment a
     "profiles" .= [object["id" .= ("profile"::Text),"runner" .= ("native"::Text),"workspace" .= work,"workspaceLabel" .= ("Review workspace"::Text),"targetLabel" .= ("Deterministic worker"::Text),
       "targetArguments" .= arguments,"environment" .= [object["name" .= envName,"value" .= value]|(envName,value)<-[("TMPDIR",T.pack work),("XDG_CONFIG_HOME",T.pack(work </> "config")),("GHCRTS",T.pack ("-N"<>show capabilities))]<>environment],
       "ownership" .= ("service-owned"::Text),"quarantined" .= False,"personAnswering" .= ("local-control"::Text),"resourceKeys" .= ["shared"::Text]]],
-    "limits" .= object["drafts" .= (10::Int),"globalDrafts" .= (20::Int),"globalCaptureBytes" .= (67108864::Int),"globalPageSets" .= (2::Int),"globalConnections" .= (8::Int),"globalDatabaseReaders" .= (2::Int),"globalMutationLedgerBytes" .= (8388608::Int),"safetyControlsPerMinute" .= (20::Int),"executionReservations" .= (1::Int)]]))
+    "limits" .= object["drafts" .= (10::Int),"globalDrafts" .= (20::Int),"globalCaptureBytes" .= (67108864::Int),"globalPageSets" .= (2::Int),"globalConnections" .= (8::Int),"globalDatabaseReaders" .= (2::Int),"globalMutationLedgerBytes" .= ledger,"safetyControlsPerMinute" .= (20::Int),"executionReservations" .= (1::Int)]]))
   setFileMode path 0o600
   let registry=Cli.Registry "approval-check" "workflow" "approval fixture" []
       validate requested=either(const(Left InvalidConfiguration))Right(Cli.validateManagerTarget registry requested)
@@ -221,7 +235,9 @@ withPrepared :: Fixture -> MonotonicClock -> (Admission -> LivePreparation -> Re
 withPrepared (Fixture _ _ store proof key ready) clock action=withAdmissionClock clock store $ \controller->do
   _<-enqueueRequest controller proof(draftId ready)(key "enqueue_ready")(Just("\""<>draftRevision ready<>"\""))(encoded(object["operation" .= ("enqueue"::Text)]))>>=right
   live<-admitOldest controller>>=right>>=maybe(error "no live admission")pure
-  context<-await(awaitReview live)>>=right
+  outcome<-await(awaitReview live)
+  case outcome of Left _->observeLivePreparation live >>= print;_->pure ()
+  context<-right outcome
   reviewed<-publishReview store live>>=right
   ident<-runRead store $ do
     rows<-query "SELECT id FROM preparations WHERE state='live'" []
@@ -397,7 +413,7 @@ framedIngestionChecks work native source python = forM_ ["frame-max","frame-over
         check "genuine Worker maximum payload plus exact LF fixture" (BS.length wire==Runtime.maxFrameBytes+1 && BS.last wire==10)
         ingestAcceptedStart owned >>= check "genuine Worker exact maximum framed payload commits"
         restored <- restoreRunProjection store association >>= maybe (error "missing framed restoration") pure
-        envelope <- right (Runtime.decodeEnvelopeFor [1,2] (BS.init wire))
+        envelope <- right (Runtime.decodeEnvelopeFor Runtime.supportedProtocolVersions (BS.init wire))
         check "framed restoration uses unchanged Runtime decoder and fold" (Runtime.checkpointEnvelopes restored==[envelope])
         digestRows <- storeRows store "SELECT envelope_digest,length(envelope) FROM ingestions"
         check "complete original framed digest and length retained" (digestRows==show [[SQL.SQLText(T.pack(show(hash wire::Digest SHA256))),SQL.SQLInteger(fromIntegral(BS.length wire))]])
@@ -750,7 +766,8 @@ supervisionChecks work native=withReady work native "supervision-stop" ["--scrip
   await(awaitAdmissionCleanup live)>>=right
   after<-texts store "SELECT revision FROM runs"
   check "original stop changes run revision with supervision" (before/=after)
-  number store "SELECT count(*) FROM invalidations WHERE kind='run.changed'" >>=check "original stop publishes both run supervision invalidations" . (==3)
+  number store "SELECT count(*) FROM invalidations WHERE kind='run.changed' AND resource_uri NOT LIKE '%/control'" >>=check "original stop publishes both run supervision invalidations" . (==3)
+  number store "SELECT count(*) FROM invalidations WHERE kind='run.changed' AND resource_uri LIKE '%/control'" >>=check "original stop separately invalidates live control availability" . (==2)
   (replay,_)<-acceptApproval reviewed proof(key "supervision_start")(condition public)(approvalBody public)>>=right
   check "versioned supervision preserves immutable original receipt" (submissionReceipt receipt==submissionReceipt replay)
   checkRunEvents store
@@ -799,8 +816,8 @@ captureApprovalChecks work native=withReady work native "capture-approval" ["--s
 checkRunEvents :: CoordinationStore -> IO ()
 checkRunEvents store=do
   current<-texts store "SELECT revision FROM runs"
-  revisions<-texts store "SELECT revision FROM invalidations WHERE kind='run.changed' ORDER BY length(sequence),sequence"
-  resources<-texts store "SELECT resource_uri FROM invalidations WHERE kind='run.changed' ORDER BY length(sequence),sequence"
+  revisions<-texts store "SELECT revision FROM invalidations WHERE kind='run.changed' AND resource_uri NOT LIKE '%/control' ORDER BY length(sequence),sequence"
+  resources<-texts store "SELECT resource_uri FROM invalidations WHERE kind='run.changed' AND resource_uri NOT LIKE '%/control' ORDER BY length(sequence),sequence"
   ids<-texts store "SELECT '/v1/runs/'||id FROM runs"
   check "both supervision transitions have fresh revisions and exact run invalidations" (case revisions of
     [first,middle,lastRevision]->first/=middle && middle/=lastRevision && first/=lastRevision && current==[lastRevision] && resources==concat(replicate 3 ids)
@@ -846,7 +863,7 @@ supervisionFaultChecks work native source python=forM_ [False,True] $ \loss->do
     middle<-snapshot
     phase<-texts store "SELECT supervision FROM runs"
     check "actual intermediate supervision committed despite final publication refusal" (phase==["cleanup-pending"] && middle/=before)
-    revisions<-texts store "SELECT revision FROM invalidations WHERE kind='run.changed' ORDER BY length(sequence),sequence"
+    revisions<-texts store "SELECT revision FROM invalidations WHERE kind='run.changed' AND resource_uri NOT LIKE '%/control' ORDER BY length(sequence),sequence"
     current<-texts store "SELECT revision FROM runs"
     check "committed intermediate run revision matches its atomic invalidation" (case revisions of [old,new]->old/=new && current==[new];_->False)
     number store "SELECT count(*) FROM reservations WHERE state='cleanup-pending' AND slot IS NOT NULL" >>=check "failed lost publication rolls back reservation release" . (==1)
@@ -1038,7 +1055,7 @@ nativeIngestionChecks work native = checkReopenedIngestion work $ withReadyRunne
     number store "SELECT count(*) FROM invalidations" >>= check "commit-return duplicate window creates no invalidation" . (==beforeReplay)
     storeRows store "SELECT * FROM requests" >>= check "duplicate does not transition or repair request" . (==requestBeforeReplay)
     first <- readIORef retained >>= maybe (error "missing first wire") pure
-    firstEnvelope <- right (Runtime.decodeEnvelopeFor [1,2] first)
+    firstEnvelope <- right (Runtime.decodeEnvelopeFor Runtime.supportedProtocolVersions first)
     envelopes <- newIORef [firstEnvelope]
     let drain = consumeAcceptedStart owned (\_ _ _ event -> do
           void (ingestRuntimeEnvelope store association (workerEventBytes event))
@@ -1068,6 +1085,608 @@ checkReopenedIngestion work action = do
     ingestRuntimeEnvelope store association wire >>= check "matching original native wire remains duplicate after reopen" . not
     number store "SELECT count(*) FROM invalidations" >>= check "reopened duplicate does not advance manager commit sequence" . (==before)
     number store "SELECT count(*) FROM start_intents" >>= check "projection restoration reconstructs no start authority or new intent" . (==1)
+
+-- Explicit observation retry retains the same original head. It never resends a control.
+observeControl :: IO a -> IO a
+observeControl action = await (loop True)
+  where
+    loop first = do
+      result <- try @StoreFailure action
+      case result of
+        Left failure -> do
+          when (first || failure/=StoreBusy) (noteControlFailure ("control observation: "<>show failure))
+          case failure of
+            StoreBusy -> threadDelay 1000 >> loop False
+            _ -> throwIO failure
+        Right value -> pure value
+
+noteControlFailure :: String -> IO ()
+noteControlFailure message = void (try @IOException (hPutStrLn stderr message))
+
+readControlReceipt :: CoordinationStore -> CredentialProof -> Text -> IO (Either CommandFailure CommandReceipt)
+readControlReceipt store proof ident = observeControl $
+  readCommand store proof ident >>= noteControlResult "control receipt"
+
+noteControlResult :: String -> Either CommandFailure a -> IO (Either CommandFailure a)
+noteControlResult source result = do
+  case result of
+    Left failure -> noteControlFailure (source<>" public refusal (cause opaque): "<>show failure)
+    Right _ -> pure ()
+  pure result
+
+controlNumber :: CoordinationStore -> Text -> IO Int64
+controlNumber store = observeControl . number store
+
+nativeControlReloadChecks :: Bool -> FilePath -> FilePath -> IO ()
+nativeControlReloadChecks racing work native = withReady work native "reload-control" ["--scripted"] [] $ \fixture@(Fixture _ installed store proof key _) ->
+  withPrepared fixture fixedClock $ \_ live context reviewed public -> do
+    (_,start)<-acceptApproval reviewed proof(key "approve-reload")(condition public)(approvalBody public) >>=right
+    owned<-maybe(error "missing reload owner")pure start
+    deliverAcceptedStart owned >>=right
+    let pending=observeControl $ runRead store $ do
+          rows<-query "SELECT id,occurrence_id,generation,revision FROM decisions WHERE state='pending'" []
+          pure[(i,o,g,r)|[SQL.SQLText i,SQL.SQLText o,SQL.SQLText g,SQL.SQLText r]<-rows]
+        ingestUntil predicate=await loop
+          where loop=do done<-predicate;unless done(observeControl (ingestAcceptedStart owned)>>loop)
+        registry=Cli.Registry "approval-check" "workflow" "approval fixture" []
+        validate args=either(const(Left InvalidConfiguration))Right(Cli.validateManagerTarget registry args)
+        prepared args value=either(const(Left InvalidReply))Right(Cli.validateManagerPreparedTarget registry args value)
+        load path=loadConfiguration validate prepared(const False)path >>=right
+    original<-load(work </> "reload-control.json")
+    ingestUntil(not . null <$> pending)
+    (decision,occurrence,generation,revision)<-pending >>= \rows->case rows of [row]->pure row;_->error "missing reload decision"
+    let body=encoded(object["operation" .= ("answer"::Text),"occurrenceId" .= occurrence,"generation" .= generation,"value" .= False])
+        etag=Just("\""<>revision<>"\"")
+    when racing $ Audit.withReviewAudit "control-authorization" $ \audit ->
+      bracket(async(submitDecisionControl owned proof decision(key "racing-reload")etag body)) (\job->cancel job>>void(waitCatch job)) $ \job -> do
+        _<-Audit.waitReviewed audit
+        _<-reloadConfiguration installed original >>=right
+        Audit.releaseReviewed audit
+        outcome<-await(wait job)
+        check "profile reload racing control acceptance cannot authorize write" (case outcome of Left StaleRevision->True;_->False)
+        controlNumber store "SELECT count(*) FROM control_intents" >>=check "racing reload creates no control or native write" . (==0)
+    _<-reloadConfiguration installed original >>=right
+    observed<-observeAcceptedStart owned
+    check "actual reload retains original approved worker and captured person mode" (observedWorkerPhase observed==WorkerRunning && preparedPersonAnswering(reviewNative context)==Runtime.PersonAnswerLocalControl)
+    mutate store(execute "DELETE FROM credential_scopes WHERE credential_id='credential' AND scope='control'" [])
+    forbidden<-submitDecisionControl owned proof decision(key "revoked-control")etag body
+    check "fresh control rechecks actual revoked scope" (case forbidden of Left Forbidden->True;_->False)
+    mutate store(execute "INSERT INTO credential_scopes VALUES ('credential','profile','control')" [])
+    configurationValue<-BS.readFile(work </> "reload-control.json") >>=right . (eitherDecodeStrict' :: BS.ByteString -> Either String Value)
+    removedValue<-case configurationValue of
+      Object fields -> case KM.lookup "profiles" fields of
+        Just(Array profiles) -> pure(Object(KM.insert "profiles" (Array(fmap (\value->case value of Object profile->Object(KM.insert "id" (String "replacement")profile);_->error "profile object")profiles))fields))
+        _->error "missing profiles"
+      _->error "configuration object"
+    let removedPath=work </> "removed-control-profile.json"
+    BS.writeFile removedPath(encoded removedValue)
+    setFileMode removedPath 0o600
+    removed<-load removedPath
+    _<-reloadConfiguration installed removed >>=right
+    missing<-submitDecisionControl owned proof decision(key "removed-profile")etag body
+    check "removed current profile cannot control original worker" (case missing of Left Forbidden->True;_->False)
+    _<-reloadConfiguration installed original >>=right
+    let revokedSecret=BS.replicate 32 122
+    mutate store $ do
+      execute "INSERT INTO clients VALUES ('revoked-client','revision','authority',0)" []
+      execute "INSERT INTO credentials VALUES ('revoked-credential','revoked-client',?,'2999-01-01T00:00:00Z',0)" [SQL.SQLBlob(convert(hash revokedSecret::Digest SHA256))]
+      execute "INSERT INTO credential_scopes VALUES ('revoked-credential','profile','control')" []
+    revoked<-authenticateCredential store revokedSecret >>=right
+    mutate store(execute "UPDATE credentials SET revoked=1 WHERE id='revoked-credential'" [])
+    denied<-submitDecisionControl owned revoked decision(key "revoked-credential")etag body
+    check "revoked credential cannot submit a fresh original-worker answer" (case denied of Left Unauthenticated->True;_->False)
+    accepted<-submitDecisionControl owned proof decision(key "after-reload")etag body >>=right
+    _<-reloadConfiguration installed original >>=right
+    replay<-submitDecisionControl owned proof decision(key "after-reload")etag body >>=right
+    check "accepted control replay survives reload without changing original consent" (submissionReceipt replay==submissionReceipt accepted && submissionReplayed replay && case submissionTicket replay of Nothing->True;_->False)
+    deliverAcceptedControl owned(receiptId(submissionReceipt accepted)) >>=right
+    ingestUntil $ do receipt<-readControlReceipt store proof(receiptId(submissionReceipt accepted)) >>=right;pure(receiptEffect receipt/=Nothing)
+    preparation<-readPreparation store proof(P.preparationId public) >>=right
+    check "reload and fresh answer never rewrite captured approval digest" (P.preparationDigest preparation==P.preparationDigest public)
+    _<-reloadConfiguration installed original >>=right
+    cancelView<-observeControl (readControlSurface owned proof)
+    let revisionOf(Object fields)=case KM.lookup "revision" fields of Just(String value)->value;_->error "missing control revision"
+        revisionOf _=error "missing control view"
+    cancellation<-submitRunControl owned proof(key "cancel-after-reload")(Just("\""<>revisionOf cancelView<>"\""))(encoded(object["operation" .= ("cancel"::Text)])) >>=right
+    deliverAcceptedControl owned(receiptId(submissionReceipt cancellation)) >>=right
+    joinControlCleanup live owned
+    nativePresent native context >>=check "reloaded control fixture joins only original native owner" . not
+
+nativeControlWriteChecks :: FilePath -> FilePath -> IO ()
+nativeControlWriteChecks work native = forM_ [False,True] $ \paused -> do
+  let name=if paused then "blocked-control" else "full-control"
+      barrier=work </> (name<>"-reader")
+      release=BS.writeFile(barrier<>".release")BS.empty
+      environment=[("AGENT_CAT_TEST_CONTROL_READ_BARRIER",T.pack barrier)|paused]
+  withReadyRunner work native [] "parallel-person" name ["--scripted"] environment $ \fixture@(Fixture _ _ store proof key _) ->
+    withPrepared fixture fixedClock $ \_ live context reviewed public -> flip finally release $ do
+      (approval,start)<-acceptApproval reviewed proof(key "approve-write")(condition public)(approvalBody public) >>=right
+      owned<-maybe(error "missing write owner")pure start
+      deliverAcceptedStart owned >>=right
+      let pending=observeControl $ runRead store $ do
+            rows<-query "SELECT id,occurrence_id,generation,revision FROM decisions WHERE state='pending'" []
+            pure[(i,o,g,r)|[SQL.SQLText i,SQL.SQLText o,SQL.SQLText g,SQL.SQLText r]<-rows]
+          ingestUntil predicate=await loop
+            where loop=do done<-predicate;unless done(observeControl (ingestAcceptedStart owned)>>loop)
+      ingestUntil(not . null <$> pending)
+      (decision,occurrence,generation,revision)<-pending >>= \rows->case rows of [row]->pure row;_->error "missing original large-answer decision"
+      when paused $ do
+        await $ let ready=doesFileExist(barrier<>".ready") >>= \done->unless done(threadDelay 1000>>ready) in ready
+        buffered<-readFile(barrier<>".ready")
+        check "original native reader paused with unchanged empty initial buffer" (buffered=="0")
+      occurrenceId<-case reads(T.unpack occurrence) of [(value,"")]->pure(Runtime.OccurrenceId value);_->error "native occurrence number"
+      let template ident value=Runtime.Control(Runtime.ControlId ident)(Just occurrenceId)Nothing(Runtime.AnswerPerson value)
+          placeholder=T.replicate(T.length(receiptId(submissionReceipt approval)))"x"
+      emptyFrame<-right(Runtime.encodeControlFor 2(template placeholder(String "")))
+      let value=String(T.replicate(Runtime.maxFrameBytes-BS.length emptyFrame)"w")
+          body=encoded(object["operation" .= ("answer"::Text),"occurrenceId" .= occurrence,"generation" .= generation,"value" .= value])
+          etag=Just("\""<>revision<>"\"")
+      submission<-submitDecisionControl owned proof decision(key "large-answer")etag body >>=right
+      let command=receiptId(submissionReceipt submission)
+      nativeFrame<-right(Runtime.encodeControlFor 2(template command value))
+      check "original native control frame reaches unchanged maximum" (BS.length nativeFrame==Runtime.maxFrameBytes)
+      Audit.withFrameAudit $ \audit -> do
+        result<-bracket(async(try @WorkerFailure(deliverAcceptedControl owned command))) (\job->cancel job>>void(waitCatch job)) $ \job -> do
+          Audit.waitFramePrefix audit
+          when paused $ do
+            ongoing<-poll job
+            check "real remainder write remains incomplete after flushed prefix" (case ongoing of Nothing->True;_->False)
+            controlNumber store "SELECT count(*) FROM decisions WHERE state='submitting'" >>=check "blocked original write retains reservation" . (==1)
+            competing<-submitDecisionControl owned proof decision(key "blocked-second")etag body
+            check "blocked write cannot authorize another answer" (case competing of Left StaleRevision->True;_->False)
+          await(wait job)
+        (size,prefix,stage,digest,sameHandle)<-Audit.frameSummary audit
+        check "split uses exact original frame plus one LF and original Handle" (size==BS.length nativeFrame+1 && prefix>0 && prefix<size && sameHandle && digest==T.pack(show(hash(nativeFrame<>"\n")::Digest SHA256)))
+        if paused then do
+          check "original five-second deadline fails in real remainder write" (stage==3 && case result of Left WorkerWriteTimeout->True;_->False)
+          controlNumber store "SELECT count(*) FROM decisions WHERE state='submitting'" >>=check "write timeout alone never releases decision" . (==1)
+        else check "unpaused identical maximum frame completes original write" (stage==4 && case result of Right(Right())->True;_->False)
+      release
+      if paused then do
+        joinControlCleanup live owned
+        ticket<-maybe(error "missing original timed-out ticket")pure(submissionTicket submission)
+        _<-recordUnresolved ticket >>=right
+        receipt<-readControlReceipt store proof command >>=right
+        check "actual partial-write outcome remains unresolved without a native acknowledgement" (receiptState receipt==Unresolved && receiptAcknowledgement receipt==Nothing && receiptEffect receipt==Nothing)
+      else do
+        ingestUntil $ do receipt<-readControlReceipt store proof command >>=right;pure(receiptEffect receipt/=Nothing)
+        joinControlCleanup live owned
+      replay<-submitDecisionControl owned proof decision(key "large-answer")etag body >>=right
+      check "lost ownership exact replay returns no payload or ticket" (submissionReplayed replay && submissionReceipt replay==submissionReceipt submission && case submissionTicket replay of Nothing->True;_->False)
+      repeated<-deliverAcceptedControl owned command
+      check "maximum-frame control cannot be replayed after original owner loss" (case repeated of Left OwnershipUnavailable->True;_->False)
+      nativePresent native context >>=check "maximum-frame fixtures join original native owners" . not
+
+nativeControlInterruptionChecks :: FilePath -> FilePath -> IO ()
+nativeControlInterruptionChecks work native = forM_ [False,True] $ \afterWrite ->
+  withReady work native (if afterWrite then "control-return" else "control-commit") ["--scripted"] [] $ \fixture@(Fixture _ _ store proof key _) ->
+    withPrepared fixture fixedClock $ \_ live context reviewed public -> do
+      (_,start)<-acceptApproval reviewed proof(key "approve-control")(condition public)(approvalBody public) >>=right
+      owned<-maybe(error "missing interrupted control owner")pure start
+      deliverAcceptedStart owned >>=right
+      let pending=observeControl $ runRead store $ do
+            rows<-query "SELECT id,occurrence_id,generation,revision FROM decisions WHERE state='pending'" []
+            pure[(i,o,g,r)|[SQL.SQLText i,SQL.SQLText o,SQL.SQLText g,SQL.SQLText r]<-rows]
+          ingestUntil predicate=await loop
+            where loop=do done<-predicate;unless done(observeControl (ingestAcceptedStart owned)>>loop)
+      ingestUntil(not . null <$> pending)
+      (decision,occurrence,generation,revision)<-pending >>= \rows->case rows of [row]->pure row;_->error "missing interrupted decision"
+      let body=encoded(object["operation" .= ("answer"::Text),"occurrenceId" .= occurrence,"generation" .= generation,"value" .= False])
+          etag=Just("\""<>revision<>"\"")
+          submit=submitDecisionControl owned proof decision(key "interrupted-answer")etag body
+          auditScope=if afterWrite then Audit.withDeliveryAudit else Audit.withAcceptanceAudit
+      auditScope $ \audit -> do
+        command<-if afterWrite then do
+          accepted<-submit >>=right
+          let command=receiptId(submissionReceipt accepted)
+          bracket(async(try @AsyncException(deliverAcceptedControl owned command))) (\job->cancel job>>void(waitCatch job)) $ \job -> do
+            (thread,actual)<-Audit.waitReturned audit
+            check "write-return audit names original control" (actual==command)
+            throwTo thread UserInterrupt
+            outcome<-await(wait job)
+            check "original control write-return exception survives" (case outcome of Left UserInterrupt->True;_->False)
+          pure command
+          else do
+            bracket(async(try @AsyncException submit)) (\job->cancel job>>void(waitCatch job)) $ \job -> do
+              (thread,command)<-Audit.waitAccepted audit
+              throwTo thread UserInterrupt
+              outcome<-await(wait job)
+              check "original control commit-return exception survives" (case outcome of Left UserInterrupt->True;_->False)
+              (reconciled,_,sameTicket,sameAttempt)<-Audit.auditSummary audit
+              check "control acceptance reconciles original ticket and payload" (reconciled>=1 && sameTicket && sameAttempt)
+              pure command
+        replay<-submit >>=right
+        check "interrupted control retry is immutable and does not mint a ticket" (submissionReplayed replay && receiptId(submissionReceipt replay)==command && case submissionTicket replay of Nothing->True;_->False)
+        unless afterWrite $ do
+          delivery<-deliverAcceptedControl owned command
+          check "control acceptance reconciles original ticket and payload" (case delivery of Right()->True;_->False)
+        ingestUntil $ do receipt<-readControlReceipt store proof command >>=right;pure(receiptEffect receipt/=Nothing)
+        (_,delivered,sameTicket,sameAttempt)<-Audit.auditSummary audit
+        check "interrupted controls retain one original native write" (delivered==1 && sameTicket && sameAttempt)
+        repeated<-deliverAcceptedControl owned command
+        check "lost control return never authorizes another write" (case repeated of Left OwnershipUnavailable->True;_->False)
+      joinControlCleanup live owned
+      nativePresent native context >>=check "interrupted control fixture joins original native owner" . not
+
+nativeSteeringChecks :: Bool -> Int -> FilePath -> FilePath -> FilePath -> FilePath -> IO ()
+nativeSteeringChecks stale count work native source python = forM_ (if count==256 then ["next-boundary"] else ["interrupt-now","next-boundary"]) $ \timing -> do
+  let base=work </> T.unpack timing
+      adapters=base </> "adapters"
+      launcher=adapters </> "steer-adapter"
+      completion=base </> "engine-finish"
+      controlBarrier=base </> "control"
+      release=BS.writeFile completion BS.empty >> BS.writeFile(controlBarrier<>".release")BS.empty
+  createDirectory base
+  createDirectory adapters
+  writeFile launcher ("#!"<>python<>"\nimport os\nos.execv("<>show python<>",["<>show python<>","<>show(source </> "engine/acp/test/steer_adapter.py")<>","<>show("--completion-barrier="<>completion)<>"])\n")
+  setFileMode launcher 0o700
+  let environment=[("PATH",T.pack adapters)]<>[("AGENT_CAT_TEST_CONTROL_BARRIER",T.pack controlBarrier)|stale]
+  let ledger=max (64*commandCapacity) (fromIntegral(count+21)*commandCapacity)
+      arguments=["--engine","acp","--adapter","steer-adapter"]<>[value|count>1,value<-["--timeout","600000"]]
+  withReadyRunnerLedger ledger work native [] "parallel-person" ("steering-"<>T.unpack timing) arguments environment $ \fixture@(Fixture _ _ store proof key ready) ->
+    withPrepared fixture fixedClock $ \_ live context reviewed public -> flip finally release $ do
+      (_,start)<-acceptApproval reviewed proof(key "approve-steering")(condition public)(approvalBody public) >>=right
+      owned<-maybe(error "missing steering original owner")pure start
+      let association=RunAssociation(acceptedStartRun owned)"profile"(preparedRootIdentity(reviewNative context))(preparedRunId(reviewNative context))
+          snapshot=observeControl $ restoreRunProjection store association >>=maybe(error "no steering projection")(pure . Runtime.checkpointSnapshot)
+          textField fieldName (Object fields)=case KM.lookup fieldName fields of Just(String value)->value;_->error "missing steering text"
+          textField _ _=error "missing steering object"
+      outputSeen<-newIORef False
+      let ingestOne=observeControl $ consumeAcceptedStart owned $ \current _ _ event -> do
+            let output=case Runtime.envelopeEvent(workerEventEnvelope event) of Runtime.AttemptOutput {}->True;_->False
+            before<-if output then Just . textField "revision" <$> observeControl (readControlSurface owned proof) else pure Nothing
+            _<-ingestRuntimeEnvelope current association(workerEventBytes event)
+            forM_ before $ \revision -> do
+              after<-observeControl (readControlSurface owned proof)
+              check "real output does not revise Runtime control availability" (textField "revision" after==revision)
+              modifyIORef' outputSeen(const True)
+          ingestUntil predicate=await loop
+            where loop=do
+                    done<-predicate
+                    unless done $ do more<-ingestOne;unless more(error "steering native evidence ended early");loop
+          acknowledgement command expected=do
+            receipt<-readControlReceipt store proof command >>=right
+            pure(maybe False ((==expected) . textField "state" . acknowledgementValue)(receiptAcknowledgement receipt))
+      deliverAcceptedStart owned >>=right
+      first<-ingestOne;check "steering original runtime started" first
+      ingestUntil $ do
+        current<-snapshot
+        output<-readIORef outputSeen
+        pure(output && any Runtime.snapshotOccurrencePersonPending(Map.elems(Runtime.snapshotOccurrences current)) &&
+          any (any ((==Runtime.AttemptRunning) . Runtime.snapshotAttemptState) . Map.elems . Runtime.snapshotOccurrenceAttempts)(Map.elems(Runtime.snapshotOccurrences current)))
+      current<-snapshot
+      activeAttempt<-case [a|occurrence<-Map.elems(Runtime.snapshotOccurrences current),a<-Map.elems(Runtime.snapshotOccurrenceAttempts occurrence),Runtime.snapshotAttemptState a==Runtime.AttemptRunning] of
+        [value]->pure value;_->error "missing genuine active attempt"
+      check "genuine registered steerability observed" (Runtime.snapshotAttemptSteerable activeAttempt==Just True)
+      let attempt=Runtime.snapshotAttemptId activeAttempt
+      view<-observeControl (readControlSurface owned proof)
+      BS.writeFile(work </> ("control-view-"<>T.unpack timing<>".json"))(encoded view)
+      let body=encoded(object["operation" .= ("steer"::Text),"occurrenceId" .= T.pack(show(Runtime.occurrenceNumber(Runtime.attemptOccurrence attempt))),
+            "attemptId" .= T.pack(show(Runtime.attemptNumber attempt)),"timing" .= timing,"text" .= ("Keep exact steering evidence."::Text)])
+      submission<-submitRunControl owned proof(key "steer")(Just("\""<>textField "revision" view<>"\""))body >>=right
+      let command=receiptId(submissionReceipt submission)
+      deliverAcceptedControl owned command >>=right
+      if stale then do
+        ingestUntil(acknowledgement command "accepted")
+        acceptedReceipt<-readControlReceipt store proof command >>=right
+        check "genuine native Accepted is not delivery or effect" (receiptEffect acceptedReceipt==Nothing)
+        BS.writeFile completion BS.empty
+        ingestUntil $ do currentState<-snapshot;pure(any (any ((/=Runtime.AttemptRunning) . Runtime.snapshotAttemptState) . Map.elems . Runtime.snapshotOccurrenceAttempts)(Map.elems(Runtime.snapshotOccurrences currentState)))
+        currentState<-snapshot
+        check "normal original attempt finish removes authoritative steering support"
+          (all (all ((/=Just True) . Runtime.snapshotAttemptSteerable) . Map.elems . Runtime.snapshotOccurrenceAttempts)(Map.elems(Runtime.snapshotOccurrences currentState)))
+        await $ let retired=doesFileExist(controlBarrier<>".retired") >>= \done->unless done(threadDelay 1000>>retired) in retired
+        retiredAttempt<-TE.decodeUtf8 <$> BS.readFile(controlBarrier<>".retired")
+        check "original unregister returned for exact steering attempt" (retiredAttempt==T.pack(show attempt))
+        BS.writeFile(controlBarrier<>".release")BS.empty
+        ingestUntil $ do latest<-snapshot;pure(maybe False ((=="unsupported") . Runtime.snapshotControlState)(Map.lookup command(Runtime.snapshotControlAcks latest)))
+        refused<-readControlReceipt store proof command >>=right
+        check "genuine Accepted to Unsupported remains distinct with no effect" (receiptEffect refused==Nothing && receiptState refused==Acknowledged &&
+          maybe False ((=="unsupported") . textField "state" . acknowledgementValue)(receiptAcknowledgement refused))
+      else do
+        ingestUntil(acknowledgement command "delivered")
+        delivered<-readControlReceipt store proof command >>=right
+        check "unchanged live native steering preserves timing address and effect" (maybe False ((=="steered") . textField "kind" . effectValue)(receiptEffect delivered))
+      when(count>1) $ do
+        actors <- forM [0::Int ..8] $ \index -> do
+          let client="stress_client_"<>T.pack(show index)
+              credential="stress_credential_"<>T.pack(show index)
+              secret=BS.replicate 32(fromIntegral(120+index))
+          mutate store $ do
+            execute "INSERT INTO clients VALUES (?,'revision','authority',0)" [SQL.SQLText client]
+            execute "INSERT INTO credentials VALUES (?,?,?,'2999-01-01T00:00:00Z',0)" [SQL.SQLText credential,SQL.SQLText client,SQL.SQLBlob(convert(hash secret::Digest SHA256))]
+            forM_ ["observe","control"::Text] $ \scope->execute "INSERT INTO credential_scopes VALUES (?,'profile',?)" [SQL.SQLText credential,SQL.SQLText scope]
+          authenticateCredential store secret >>=right
+        forM_ [2..count] $ \index -> do
+          actor <- case drop ((index-2) `mod` length actors) actors of value:_->pure value;_->error "missing stress actor"
+          controlView<-observeControl (readControlSurface owned actor)
+          accepted<-submitRunControl owned actor(key("stress-"<>T.pack(show index)))(Just("\""<>textField "revision" controlView<>"\""))body >>=right
+          let ident=receiptId(submissionReceipt accepted)
+          deliverAcceptedControl owned ident >>=right
+          ingestUntil(acknowledgement ident "delivered")
+        full<-snapshot
+        check "all 256 ordinary controls retain original native acknowledgements" (Map.size(Runtime.snapshotControlAcks full)==256)
+        fullView<-observeControl (readControlSurface owned proof)
+        overflow<-submitRunControl owned proof(key "ordinary-overflow")(Just("\""<>textField "revision" fullView<>"\""))body
+        check "257th ordinary Manager control refuses before write" (case overflow of Left SizeLimit->True;_->False)
+        _<-createDraft store proof(key "fill-ledger")(encoded(object["workflowId" .= draftWorkflow ready,"descriptorRevision" .= draftDescriptorRevision ready,
+          "profileId" .= draftProfile ready,"profileRevision" .= draftProfileRevision ready])) >>=right
+        controlNumber store "SELECT bytes FROM command_ledger_usage" >>=check "ordinary ledger is saturated without changing C or R" . (==ledger-16*commandCapacity)
+        cancelView<-observeControl (readControlSurface owned proof)
+        let cancelBody=encoded(object["operation" .= ("cancel"::Text)])
+            cancelEtag=Just("\""<>textField "revision" cancelView<>"\"")
+            retrySame action=await loop
+              where loop=do
+                      result<-try @StoreFailure action
+                      case result of Left StoreBusy->threadDelay 1000>>loop;Left failure->throwIO failure
+                                     Right(Left StorageUnavailable)->threadDelay 1000>>loop;Right value->pure value
+        rendezvous<-newEmptyTMVarIO
+        raceStarted<-getMonotonicTimeNSec
+        a<-async(atomically(readTMVar rendezvous)>>retrySame(submitRunControl owned proof(key "extra-cancel-a")cancelEtag cancelBody))
+        secondActor<-case actors of actor:_->pure actor;_->error "missing cancel racer"
+        b<-async(atomically(readTMVar rendezvous)>>retrySame(submitRunControl owned secondActor(key "extra-cancel-b")cancelEtag cancelBody))
+        atomically(putTMVar rendezvous())
+        outcomes<-mapM wait [a,b]
+        raceEnded<-getMonotonicTimeNSec
+        putStrLn("extra-cancel preparation race microseconds="<>show((raceEnded-raceStarted)`div`1000)<>" outcomes="<>show[either failureCode (const "accepted") value|value<-outcomes])
+        extra<-case [accepted|Right accepted<-outcomes] of [accepted]->pure accepted;_->error "extra cancel race did not select one original ticket"
+        check "one extra cancellation wins across distinct clients at saturation" (length[()|Left _<-outcomes]==1)
+        occupiedView<-observeControl (readControlSurface owned proof)
+        another<-submitRunControl owned proof(key "second-extra-cancel")(Just("\""<>textField "revision" occupiedView<>"\""))cancelBody
+        check "second extra cancellation cannot acquire original live slot" (case another of Left SizeLimit->True;_->False)
+        let extraId=receiptId(submissionReceipt extra)
+        deliverAcceptedControl owned extraId >>=right
+        ticket<-maybe(error "missing original extra cancellation ticket")pure(submissionTicket extra)
+        _<-recordUnresolved ticket >>=right
+        again<-retrySame(submitRunControl owned proof(key "uncertain-extra-cancel")(Just("\""<>textField "revision" occupiedView<>"\""))cancelBody)
+        check "uncertainty never reopens extra cancellation slot" (case again of Left SizeLimit->True;Left OwnershipUnavailable->True;Left StaleRevision->True;_->False)
+        let drain=ingestOne >>= \more->when more drain
+        _<-try @WorkerFailure(await drain)
+        joinControlCleanup live owned
+        final<-snapshot
+        check "v3 records 256 ordinary controls and genuine correlated cancellation" (Map.size(Runtime.snapshotControlAcks final)==257 && Runtime.snapshotRunStatus final==Runtime.RunCancelledStatus &&
+          maybe False ((==Just "cancelRun") . Runtime.snapshotControlCommand)(Map.lookup extraId(Runtime.snapshotControlAcks final)))
+      release
+      joinControlCleanup live owned
+      BS.writeFile(work </> (T.unpack timing<>"-steering-receipt.json")) . encoded =<< (readControlReceipt store proof command >>=right)
+      nativePresent native context >>=check "steering fixture joins original native process" . not
+
+joinControlCleanup :: LivePreparation -> AcceptedStart -> IO ()
+joinControlCleanup live owned = do
+  stopped <- stopAcceptedStart owned >>= noteControlResult "control cleanup (no retry)"
+  right stopped
+  await(awaitAdmissionCleanup live) >>=right
+
+nativeMixedControlChecks :: FilePath -> FilePath -> FilePath -> FilePath -> IO ()
+nativeMixedControlChecks work native source python = do
+  let adapters=work </> "mixed-adapters"
+      launcher=adapters </> "mixed-adapter"
+      script=source </> "engine/acp/test/retry_adapter.py"
+  createDirectory adapters
+  writeFile launcher ("#!"<>python<>"\nimport os\nos.execv("<>show python<>",["<>show python<>","<>show script<>"])\n")
+  setFileMode launcher 0o700
+  forM_ ["retry","choose-retry","failover","abandon"] $ \choice -> withReadyRunner work native [] "mixed-controls" ("mixed-"<>choice)
+    ["--engine","acp","--adapter","mixed-adapter"] [("PATH",T.pack adapters)] $ \fixture@(Fixture _ _ store proof key _) ->
+      withPrepared fixture fixedClock $ \_ live context reviewed public -> do
+        (_,start)<-acceptApproval reviewed proof(key "approve-mixed")(condition public)(approvalBody public) >>=right
+        owned<-maybe(error "missing mixed original owner")pure start
+        let association=RunAssociation(acceptedStartRun owned)"profile"(preparedRootIdentity(reviewNative context))(preparedRunId(reviewNative context))
+            snapshot=observeControl $ restoreRunProjection store association >>=maybe(error "no mixed projection")(pure . Runtime.checkpointSnapshot)
+            pending=observeControl $ runRead store $ do
+              rows<-query "SELECT id,occurrence_id,generation,revision,kind FROM decisions WHERE run_id=? AND state IN ('pending','submitting') ORDER BY length(observed_sequence),observed_sequence" [SQL.SQLText(acceptedStartRun owned)]
+              forM rows $ \row->case row of [SQL.SQLText i,SQL.SQLText o,SQL.SQLText g,SQL.SQLText r,SQL.SQLText k]->pure(i,o,g,r,k);_->refuseTransaction StoreIntegrity
+            conditionOf revision=Just("\""<>revision<>"\"")
+            controlCondition=observeControl (readControlSurface owned proof) >>= \value->pure(conditionOf(textField "revision" value))
+            bodyFor (_,occurrence,generation,_,kind) selected=encoded(object
+              (["operation" .= (if kind=="question" then "answer" else if selected=="retry" then "retry" else "choose-recovery"::Text),"occurrenceId" .= occurrence,"generation" .= generation] <>
+               if kind=="question" then ["value" .= False] else if selected=="retry" then [] else ["choice" .= (if selected=="choose-retry" then "retry" else selected)]))
+            ingestUntil predicate=await loop
+              where loop=do
+                      done<-predicate
+                      unless done $ do more<-observeControl (ingestAcceptedStart owned);unless more(error "mixed native stream ended early");loop
+            deliver suffix body=do
+              etag<-controlCondition
+              submission<-submitRunControl owned proof(key suffix)etag body >>=right
+              let command=receiptId(submissionReceipt submission)
+              deliverAcceptedControl owned command >>=right
+              pure command
+        deliverAcceptedStart owned >>=right
+        first<-observeControl (ingestAcceptedStart owned);check "mixed original runtime started" first
+        ingestUntil $ do current<-snapshot;pure(any (maybe False Runtime.dispatchOpen . Runtime.snapshotOccurrenceDispatch)(Map.elems(Runtime.snapshotOccurrences current)))
+        current<-snapshot
+        (occurrence,target)<-case [(Runtime.occurrenceNumber(Runtime.snapshotOccurrenceId item),selected)|item<-Map.elems(Runtime.snapshotOccurrences current),Just dispatch<-[Runtime.snapshotOccurrenceDispatch item],selected<-take 1(Runtime.dispatchTargets dispatch)] of
+          pair:_->pure pair;_->error "native reserved redirect absent"
+        redirected<-deliver "redirect" (encoded(object["operation" .= ("redirect"::Text),"occurrenceId" .= T.pack(show occurrence),"target" .= target]))
+        ingestUntil ((==2) . length <$> pending)
+        redirectReceipt<-readControlReceipt store proof redirected >>=right
+        check "native redirect correlates exact original control" (maybe False ((=="redirected") . textField "kind" . effectValue)(receiptEffect redirectReceipt))
+        rows<-pending
+        nonHead@(ident,_,_,revision,_)<-case drop 1 rows of [row]->pure row;_->error "missing genuine person/recovery non-head"
+        etag<-controlCondition
+        let refusedBody=bodyFor nonHead ("choose-retry"::Text)
+        refusedRun<-submitRunControl owned proof(key "nonhead-run")etag refusedBody
+        refusedDecision<-submitDecisionControl owned proof ident(key "nonhead-decision")(conditionOf revision)refusedBody
+        check "genuine mixed non-head refuses through both internal entrypoints" (case(refusedRun,refusedDecision)of(Left DecisionNotHead,Left DecisionNotHead)->True;_->False)
+        chosen<-newIORef False
+        let processHead count=do
+              available<-pending
+              case available of
+                []->do
+                  currentState<-snapshot
+                  unless(Runtime.snapshotRunStatus currentState `elem` [Runtime.RunSucceeded,Runtime.RunFailedStatus,Runtime.RunCancelledStatus]) $ do
+                    more<-observeControl (ingestAcceptedStart owned)
+                    unless more(error "mixed control ended without terminal evidence")
+                    processHead count
+                row@(decision,_,_,decisionRevision,kind):_->do
+                  used<-readIORef chosen
+                  let selection=if used then "retry" else T.pack choice
+                      body=bodyFor row selection
+                  command<-if kind=="recovery" && selection=="retry" then deliver("recovery-"<>T.pack(show count))body else do
+                    accepted<-submitDecisionControl owned proof decision(key("decision-"<>T.pack(show count)))(conditionOf decisionRevision)body >>=right
+                    let command=receiptId(submissionReceipt accepted)
+                    deliverAcceptedControl owned command >>=right
+                    pure command
+                  when(kind=="recovery")(modifyIORef' chosen(const True))
+                  ingestUntil $ do receipt<-readControlReceipt store proof command >>=right;pure(receiptEffect receipt/=Nothing)
+                  receipt<-readControlReceipt store proof command >>=right
+                  check "mixed native effect keeps exact occurrence and control receipt" (receiptEffect receipt/=Nothing)
+                  processHead(count+1::Int)
+        await(processHead 0)
+        let drain=observeControl (ingestAcceptedStart owned) >>= \more->when more drain
+        _<-try @WorkerFailure(await drain)
+        joinControlCleanup live owned
+        final<-snapshot
+        check "recovery terminal outcome remains native evidence" (Runtime.snapshotRunStatus final==if choice=="abandon" then Runtime.RunFailedStatus else Runtime.RunSucceeded)
+        BS.writeFile(work </> ("mixed-"<>choice<>"-snapshot.json"))(encoded(Runtime.runSnapshotValue final))
+        nativePresent native context >>=check "mixed control fixture joins original native process" . not
+  where
+    textField key (Object fields)=case KM.lookup key fields of Just(String value)->value;_->error "missing control text"
+    textField _ _=error "missing control object"
+
+nativeControlChecks :: FilePath -> FilePath -> IO ()
+nativeControlChecks work native = do
+  precise <- right(eitherDecodeStrict' "123456789012345678901234567890" :: Either String Value)
+  let expectedAnswers=Map.fromList [(0,Bool False),(1,Null),(2,object["ok" .= False,"notes" .= ([]::[Text])]),
+        (3,toJSON [precise,Number (-7)]),(4,object["numerator" .= (1::Integer),"denominator" .= (8::Integer)]),
+        (5,object["tag" .= ("approve"::Text)]),(6,object["ratio" .= object["numerator" .= (1::Integer),"denominator" .= (8::Integer)]])]
+  withReadyRunner work native [] "typed-person" "typed-controls" ["--scripted"] [] $ \fixture@(Fixture root _ store proof key _) ->
+    withPrepared fixture fixedClock $ \_ live context reviewed public -> do
+      let otherSecret=BS.replicate 32 98
+      mutate store $ do
+        execute "INSERT INTO clients VALUES ('other-client','revision','authority',0)" []
+        execute "INSERT INTO credentials VALUES ('other-credential','other-client',?,'2999-01-01T00:00:00Z',0)" [SQL.SQLBlob(convert(hash otherSecret::Digest SHA256))]
+        forM_ ["observe","submit","control"::Text] $ \scope->execute "INSERT INTO credential_scopes VALUES ('other-credential','profile',?)" [SQL.SQLText scope]
+      other <- authenticateCredential store otherSecret >>= right
+      (_,start) <- acceptApproval reviewed proof(key "control-approve")(condition public)(approvalBody public) >>= right
+      owned <- maybe(error "missing native control owner")pure start
+      let association=RunAssociation (acceptedStartRun owned) "profile" (preparedRootIdentity(reviewNative context)) (preparedRunId(reviewNative context))
+          pending=observeControl $ runRead store $ do
+            rows<-query "SELECT id,occurrence_id,generation,revision FROM decisions WHERE run_id=? AND state IN ('pending','submitting') ORDER BY length(observed_sequence),observed_sequence" [SQL.SQLText(acceptedStartRun owned)]
+            forM rows $ \row->case row of [SQL.SQLText i,SQL.SQLText o,SQL.SQLText g,SQL.SQLText r]->pure(i,o,g,r);_->refuseTransaction StoreIntegrity
+          controlEtag=observeControl (readControlSurface owned proof) >>= \value->pure(Just("\""<>valueText "revision" value<>"\""))
+          bodyFor (_,occurrence,generation,_) value=encoded(object["operation" .= ("answer"::Text),"occurrenceId" .= occurrence,"generation" .= generation,"value" .= value])
+          decisionEtag (_,_,_,revision)=Just("\""<>revision<>"\"")
+          ingestUntil predicate=await loop
+            where
+              loop=do
+                done<-predicate
+                unless done $ do more<-observeControl (ingestAcceptedStart owned);unless more(error "native control evidence ended early");loop
+          submitSame action=await loop
+            where
+              loop=do
+                result<-try @StoreFailure action
+                case result of
+                  Left StoreBusy->threadDelay 1000>>loop
+                  Left failure->throwIO failure
+                  Right(Left StorageUnavailable)->threadDelay 1000>>loop
+                  Right value->pure value
+      deliverAcceptedStart owned >>= right
+      ingestUntil (not . null <$> pending)
+      initial<-pending
+      check "genuine typed person lane opens one decision" (length initial==1)
+      firstRow@(firstId,_,_,_) <- case initial of row:_->pure row;_->error "missing first typed decision"
+      question<-readDecision store proof association firstId
+      check "verified Runtime editor schema present" (case question of
+        Object fields -> case KM.lookup "question" fields of Just(Object q)->KM.member "editorSchema" q;_->False
+        _ -> False)
+      invalid<-submitDecisionControl owned proof firstId(key "invalid-typed")(decisionEtag firstRow)(bodyFor firstRow (String "invalid typed answer")) >>= right
+      deliverAcceptedControl owned(receiptId(submissionReceipt invalid)) >>= right
+      ingestUntil $ do receipt<-readControlReceipt store proof(receiptId(submissionReceipt invalid)) >>= right;pure(case receiptAcknowledgement receipt of Just ack->valueText "state" (acknowledgementValue ack)=="failed";_->False)
+      released<-pending
+      check "native typed failure releases exact reservation and revises editor" (case released of (_,_,_,revision):_->revision/=fourth firstRow;_->False)
+      stale<-submitDecisionControl owned proof firstId(key "stale-editor")(decisionEtag firstRow)(bodyFor firstRow(Bool False))
+      check "pre-failure editor stale after proven release" (case stale of Left StaleRevision->True;_->False)
+      forM_ [0::Int ..6] $ \index->do
+        ingestUntil (not . null <$> pending)
+        row@(ident,occurrence,_,_)<-pending >>= \rows->case rows of x:_->pure x;_->error "missing next typed decision"
+        decisionView<-readDecision store proof association ident
+        controlView<-observeControl (readControlSurface owned proof)
+        let editor=case decisionView of
+              Object fields -> case KM.lookup "question" fields of Just(Object questionFields)->KM.lookup "editorSchema" questionFields;_->Nothing
+              _ -> Nothing
+        check "unsupported full Runtime editor is null without weakening nested constraints"
+          (if occurrence `elem` ["4","5","6"] then editor==Just Null else editor/=Nothing && editor/=Just Null)
+        BS.writeFile(work </> ("decision-view-"<>show index<>".json"))(encoded decisionView)
+        BS.writeFile(work </> ("control-view-"<>show index<>".json"))(encoded controlView)
+        value <- case lookup occurrence [(T.pack(show occurrenceNumber),answer)|(occurrenceNumber,answer)<-Map.toList expectedAnswers] of
+          Just answer->pure answer;_->error "unexpected typed occurrence"
+        etag<-controlEtag
+        let body=bodyFor row value; decisionKey=key("answer-decision-"<>T.pack(show index));runKey=key("answer-run-"<>T.pack(show index))
+        rendezvous<-newEmptyTMVarIO
+        a<-async(atomically(readTMVar rendezvous)>>submitSame(submitDecisionControl owned proof ident decisionKey(decisionEtag row)body))
+        b<-async(atomically(readTMVar rendezvous)>>submitSame(submitRunControl owned other runKey etag body))
+        atomically(putTMVar rendezvous())
+        answers<-mapM wait [a,b]
+        winner<-case [accepted|Right accepted<-answers] of [accepted]->pure accepted;_->error "two clients did not arbitrate one generation"
+        check "distinct clients race across both entrypoints with one reservation" (length[()|Left _<-answers]==1)
+        let receipt=submissionReceipt winner;command=receiptId receipt
+        check "manager acceptance distinct from attempted write" (receiptState receipt==Accepted && receiptAttemptedAt receipt==Nothing)
+        latestEtag<-controlEtag
+        blocked<-submitRunControl owned proof(key("second-answer-"<>T.pack(show index)))latestEtag body
+        check "reserved generation cannot accept another answer before write" (case blocked of Left StaleRevision->True;_->False)
+        deliverAcceptedControl owned command >>= right
+        ticket<-maybe(error "missing original live control ticket")pure(submissionTicket winner)
+        _<-recordUnresolved ticket >>= right
+        afterTimeout<-submitRunControl owned proof(key("timeout-answer-"<>T.pack(show index)))latestEtag body
+        check "unresolved acknowledgement does not release reservation" (case afterTimeout of Left StaleRevision->True;Left OwnershipUnavailable->True;_->False)
+        controlNumber store "SELECT count(*) FROM decisions WHERE state='submitting'" >>= check "uncertain delivery retains durable decision reservation" . (==1)
+        duplicate<-deliverAcceptedControl owned command
+        check "consumed original dispatch never writes twice" (case duplicate of Left OwnershipUnavailable->True;_->False)
+        when(index==0) $ do
+          ingestUntil $ do current<-readControlReceipt store proof command >>=right;pure(maybe False ((=="accepted") . valueText "state" . acknowledgementValue)(receiptAcknowledgement current))
+          acceptedEtag<-controlEtag
+          afterAcceptance<-submitRunControl owned proof(key "after-native-accepted")acceptedEtag body
+          check "native Accepted cannot release submitting decision" (case afterAcceptance of Left StaleRevision->True;_->False)
+        ingestUntil $ do current<-readControlReceipt store proof command >>= right;pure(receiptEffect current/=Nothing)
+        when(index==6) $ do
+          let drain=observeControl (ingestAcceptedStart owned) >>= \more->when more drain
+          await drain
+          joinControlCleanup live owned
+        current<-readControlReceipt store proof command >>= right
+        check "native Delivered correlates typed acceptance, separate from command receipt" (receiptState current==EffectObserved && maybe False ((=="delivered") . valueText "state" . acknowledgementValue)(receiptAcknowledgement current))
+        replay<-case answers of
+          [Right _,_] -> submitDecisionControl owned proof ident decisionKey(decisionEtag row)body >>= right
+          _ -> submitRunControl owned other runKey etag body >>= right
+        check "exact replay returns immutable acceptance without a ticket" (submissionReplayed replay && submissionReceipt replay==receipt && case submissionTicket replay of Nothing->True;_->False)
+        conflict<-case answers of
+          [Right _,_] -> submitSame(submitDecisionControl owned proof ident decisionKey(decisionEtag row)(body<>" "))
+          _ -> submitSame(submitRunControl owned other runKey etag(body<>" "))
+        check "exact original body bytes bind replay" (case conflict of Left IdempotencyConflict->True;_->False)
+        controlNumber store "SELECT count(*) FROM decisions WHERE state='submitting'" >>= check "matching typed delivery resolves reservation" . (==0)
+      let drain=observeControl (ingestAcceptedStart owned) >>= \more->when more drain
+      await drain
+      checkpoint<-restoreRunProjection store association >>=maybe(error "no typed terminal checkpoint")pure
+      check "all typed native answers complete original run" (Runtime.snapshotRunStatus(Runtime.checkpointSnapshot checkpoint)==Runtime.RunSucceeded)
+      answers <- Runtime.readAnswerRecords (root </> "runs" </> "runs" </> T.unpack(runIdText(preparedRunId(reviewNative context))) </> "runtime")
+      check "false null arrays objects and numbers reach original Runtime typed answer store unchanged"
+        (Map.fromList [(Runtime.occurrenceNumber(Runtime.answerOccurrence answer),Runtime.answerValue answer)|answer<-answers]
+          == expectedAnswers)
+      BS.writeFile(work </> "typed-controls-checkpoint.json")(encoded(Runtime.snapshotCheckpointValue checkpoint))
+      joinControlCleanup live owned
+      nativePresent native context >>=check "typed controls join original native workers" . not
+  withReady work native "cancel-controls" ["--scripted"] [] $ \fixture@(Fixture _ _ store proof key _) ->
+    withPrepared fixture fixedClock $ \_ live context reviewed public -> do
+      (_,start)<-acceptApproval reviewed proof(key "approve-cancel")(condition public)(approvalBody public) >>=right
+      owned<-maybe(error "no cancellation owner")pure start
+      deliverAcceptedStart owned >>=right
+      more<-observeControl (ingestAcceptedStart owned);check "native cancellation run observed" more
+      let association=RunAssociation(acceptedStartRun owned)"profile"(preparedRootIdentity(reviewNative context))(preparedRunId(reviewNative context))
+      view<-observeControl (readControlSurface owned proof)
+      submitted<-submitRunControl owned proof(key "cancel")(Just("\""<>valueText "revision" view<>"\""))(encoded(object["operation" .= ("cancel"::Text)])) >>=right
+      let command=receiptId(submissionReceipt submitted)
+      check "accepted cancellation is not terminal" (receiptState(submissionReceipt submitted)==Accepted)
+      deliverAcceptedControl owned command >>=right
+      let drain=observeControl (ingestAcceptedStart owned) >>= \next->when next drain
+      _<-try @WorkerFailure(await drain)
+      joinControlCleanup live owned
+      current<-readControlReceipt store proof command >>=right
+      check "uncorrelated terminal cancellation never manufactures command effect" (receiptEffect current==Nothing)
+      checkpoint<-restoreRunProjection store association >>=maybe(error "no cancellation checkpoint")pure
+      check "native terminal remains independent of cancellation receipt" (Runtime.snapshotRunStatus(Runtime.checkpointSnapshot checkpoint)==Runtime.RunCancelledStatus)
+  where
+    fourth (_,_,_,value)=value
+    valueText key (Object fields)=case KM.lookup key fields of Just(String value)->value;_->error "missing text field"
+    valueText _ _=error "missing object"
 
 nativeDecisionIngestionChecks :: FilePath -> FilePath -> IO ()
 nativeDecisionIngestionChecks work native = withReady work native "native-decision-ingestion" ["--scripted"] [] $ \fixture@(Fixture root _ store proof key _) ->
@@ -1116,7 +1735,10 @@ failedNativeIngestionChecks work native source python =
 
 -- A06 observation: two original workers, each with independent engine/person branches.
 nativeConcurrentIngestionChecks :: FilePath -> FilePath -> FilePath -> FilePath -> IO ()
-nativeConcurrentIngestionChecks work native source python = forM_ [False,True] $ \interrupt -> do
+nativeConcurrentIngestionChecks = nativeConcurrentChecks False
+
+nativeConcurrentChecks :: Bool -> FilePath -> FilePath -> FilePath -> FilePath -> IO ()
+nativeConcurrentChecks gateCheck work native source python = forM_ [False,True] $ \interrupt -> do
   let name=if interrupt then "native-pair-interrupted" else "native-pair"
       base=work </> name
       root=base </> "manager"
@@ -1207,9 +1829,74 @@ nativeConcurrentIngestionChecks work native source python = forM_ [False,True] $
       number store "SELECT count(*) FROM requests r JOIN reservations v ON v.request_id=r.id WHERE r.phase='associated' AND v.state='held' AND r.revision=v.request_revision" >>= check "live native pair associates before cleanup with matching held reservations" . (==2)
       let nativeIds=map (associationNative . third) entries
       check "native pair retains distinct original identities" (case nativeIds of [a,b] -> a/=b; _ -> False)
+      when gateCheck $ do
+        (firstOwner,firstAssociation,secondOwner,secondAssociation)<-case entries of
+          [(_,a,aa),(_,b,bb)]->pure(a,aa,b,bb);_->error "missing preparation pair"
+        let prepareBody association=runRead store $ do
+              rows<-query "SELECT id,occurrence_id,generation,revision FROM decisions WHERE run_id=? AND state='pending'" [SQL.SQLText(associationRun association)]
+              case rows of
+                [[SQL.SQLText ident,SQL.SQLText occurrence,SQL.SQLText generation,SQL.SQLText revision]] -> pure(ident,Just("\""<>revision<>"\""),encoded(object["operation" .= ("answer"::Text),"occurrenceId" .= occurrence,"generation" .= generation,"value" .= ("Original prepared answer"::Text)]))
+                _->refuseTransaction StoreIntegrity
+            finishAnswer owned accepted=do
+              let command=receiptId(submissionReceipt accepted)
+              deliverAcceptedControl owned command >>=right
+              await $ let ingest=do
+                            receipt<-readCommand store proof command >>=right
+                            unless(receiptEffect receipt/=Nothing)(ingestAcceptedStart owned>>ingest)
+                      in ingest
+        (firstDecision,firstEtag,firstBody)<-prepareBody firstAssociation
+        (secondDecision,secondEtag,secondBody)<-prepareBody secondAssociation
+        Audit.withReviewAudit ("control-preparation:"<>associationRun firstAssociation) $ \audit ->
+          bracket(async(try @AsyncException(submitDecisionControl firstOwner proof firstDecision(key "held-preparation")firstEtag firstBody))) (\job->cancel job>>void(waitCatch job)) $ \held -> do
+            originalThread<-Audit.waitReviewed audit
+            bracket(async(submitDecisionControl firstOwner proof firstDecision(key "queued-preparation")firstEtag firstBody)) (\job->cancel job>>void(waitCatch job)) $ \queued -> do
+              queuedThread<-Audit.waitControlWaiter audit
+              await $ let blocked=do
+                            status<-threadStatus queuedThread
+                            case status of
+                              ThreadBlocked BlockedOnMVar -> pure ()
+                              _ -> do finishedQueued<-poll queued;case finishedQueued of Just _->error "FAIL same-run preparation holds original queued caller";_->threadDelay 1000>>blocked
+                      in blocked
+              independent<-submitDecisionControl secondOwner proof secondDecision(key "independent-preparation")secondEtag secondBody >>=right
+              finishAnswer secondOwner independent
+              check "independent run progresses during held original preparation" True
+              if interrupt then do
+                throwTo originalThread UserInterrupt
+                stopped<-await(wait held)
+                check "interrupted preparation preserves original exception" (case stopped of Left UserInterrupt->True;_->False)
+                accepted<-await(wait queued) >>=right
+                finishAnswer firstOwner accepted
+              else do
+                cancel queued
+                Audit.releaseReviewed audit
+                accepted<-await(wait held) >>=right >>=right
+                finishAnswer firstOwner accepted
+              Audit.releaseReviewed audit
+              check "same-run preparation holds original queued caller" True
+      unless (interrupt || gateCheck) $ do
+        heads <- readDecisionHeads store proof
+        let fieldText fieldName (Object fields)=case KM.lookup fieldName fields of Just(String value)->value;_->error "missing head field"
+            fieldText _ _=error "missing head object"
+        check "global inbox follows manager observation order, independent of selected run"
+          (map(fieldText "runId")heads==map(associationRun . third)entries)
+        (_,second,association) <- case reverse entries of entry:_->pure entry;_->error "missing independent native run"
+        decision <- case [value|value<-heads,fieldText "runId" value==associationRun association] of [value]->pure value;_->error "missing second run head"
+        let occurrence=case decision of
+              Object fields -> case KM.lookup "address" fields of Just address->fieldText "occurrenceId" address;_->error "missing address"
+              _ -> error "missing decision"
+            body=encoded(object["operation" .= ("answer"::Text),"occurrenceId" .= occurrence,"generation" .= fieldText "generation" decision,"value" .= ("Independent original run answer"::Text)])
+        accepted <- submitDecisionControl second proof(fieldText "id" decision)(key "independent-answer")(Just("\""<>fieldText "revision" decision<>"\""))body >>= right
+        deliverAcceptedControl second(receiptId(submissionReceipt accepted)) >>= right
+        let ingest=do
+              current<-readCommand store proof(receiptId(submissionReceipt accepted)) >>=right
+              unless(receiptEffect current/=Nothing)(ingestAcceptedStart second>>ingest)
+        await ingest
+        remainingHeads <- readDecisionHeads store proof
+        check "second run answers while first run remains pending and engines remain active"
+          (map(fieldText "runId")remainingHeads==take 1(map(associationRun . third)entries))
       when interrupt (throwIO UserInterrupt)
       release
-      forM_ entries $ \(live,owned,_) -> stopAcceptedStart owned >>= right >> await (awaitAdmissionCleanup live) >>= right
+      forM_ entries $ \(live,owned,_) -> joinControlCleanup live owned
     check "native pair preserves injected caller failure after joined cleanup" (if interrupt then outcome==Left UserInterrupt else outcome==Right ())
     entries <- readIORef retained
     forM_ entries $ \(_,owned,_) -> do

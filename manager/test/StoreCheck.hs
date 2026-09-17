@@ -3,13 +3,15 @@
 {-# LANGUAGE TypeApplications #-}
 module Main (main) where
 
+import qualified StoreAdmissionCheck
 import qualified "agentic" Agentic.Manager as Public
 import Agentic.Manager.Configuration
 import Agentic.Manager.Profile (Diagnostic)
-import Agentic.Manager.Schema (schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration)
+import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration)
 import Agentic.Manager.Store
-import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async (AsyncCancelled (..), async, cancel, poll, waitCatch, withAsync)
+import Control.Concurrent (threadDelay, throwTo)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar, readMVar, tryPutMVar)
+import Control.Concurrent.Async (AsyncCancelled (..), async, asyncThreadId, wait, cancel, poll, waitCatch, withAsync)
 import Control.Exception
   (AsyncException (UserInterrupt), bracket, finally, fromException, onException, throwIO, try)
 import Control.Monad (forM_, replicateM_, unless, void)
@@ -20,7 +22,7 @@ import Data.Aeson (encode, object, (.=))
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
 import Data.Either (isLeft)
-import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.IORef (newIORef, readIORef, writeIORef, modifyIORef')
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Database.SQLite3 as SQL
@@ -43,6 +45,8 @@ main = do
   hSetBuffering stdout LineBuffering
   args <- getArgs
   case args of
+    ["admission-data"] -> StoreAdmissionCheck.dataChecks
+    ["terminal-admission",work] -> terminalAdmissionChecks work
     ["hold", path] -> withInstalled path $ \installed -> withCoordinationStore installed $ \_ ->
       putStrLn "ready" >> threadDelay 60000000
     ["refuse", path] -> do
@@ -264,7 +268,7 @@ databaseChecks work = do
     second <- storeIdentity store
     check "reopen preserves durable identities separately from live generation"
       (storeAuthorityEpoch first == storeAuthorityEpoch second && storeStreamId first == storeStreamId second
-       && storeProcessGeneration first /= storeProcessGeneration second && storeSchemaVersion second == 6)
+       && storeProcessGeneration first /= storeProcessGeneration second && storeSchemaVersion second == schemaVersion)
     rowsEqual store "SELECT sequence,retained_floor,revision FROM service_metadata"
       [[SQL.SQLText "4", SQL.SQLText "0", SQL.SQLText "service_1"]] >>= check "stream sequence and resource revisions survive reopen"
   -- Real SQLite trigger failure occurs after resource update and sequence allocation.
@@ -463,7 +467,7 @@ migrationChecks work = do
     count store "clients" >>= check "stream exhaustion rolls back resource change" . (== 0)
     rowsEqual store "SELECT sequence FROM service_metadata" [[SQL.SQLText "18446744073709551615"]] >>=
       check "complete UInt64 stream range survives reopen"
-  bracket (rawOpen root) SQL.close $ \db -> SQL.exec db "PRAGMA user_version=7"
+  bracket (rawOpen root) SQL.close $ \db -> SQL.exec db ("PRAGMA user_version="<>T.pack(show(schemaVersion+1)))
   before <- BS.readFile (root </> "coordination.sqlite3")
   withInstalled path $ \installed -> expect "newer schema refused" StoreVersion $
     withCoordinationStore installed (const (pure ()))
@@ -515,7 +519,7 @@ admissionMigrationChecks work = do
     rawRows database "SELECT sentinel FROM admission_observations" >>=check "failed version-four migration preserves pre-existing conflict" . (==[[SQL.SQLText "preserved"]])
     SQL.exec database "DROP TABLE admission_observations"
   withInstalled path $ \installed -> withCoordinationStore installed $ \owner -> do
-    storeIdentity owner >>=check "version-four migration completes transactionally" . ((==6).storeSchemaVersion)
+    storeIdentity owner >>=check "version-four migration completes transactionally" . ((==schemaVersion).storeSchemaVersion)
     rowsEqual owner "SELECT last_ordinal FROM admission_queue_clock" [[SQL.SQLText "18446744073709551614"]] >>=check "migration preserves unsigned queue history beyond signed SQLite integers"
     rowsEqual owner "SELECT kind,resource_key,reservation_id FROM reservation_resources" [[SQL.SQLText "operator",SQL.SQLText "unclassified",SQL.SQLText "reservation_old"]] >>=check "legacy operator string remains outside internal unclassified domain"
     rowsEqual owner "SELECT input_revision,queue_generation,queue_origin_revision,enqueue_command FROM requests" [[SQL.SQLNull,SQL.SQLNull,SQL.SQLNull,SQL.SQLNull]] >>=check "migration mints no input-selection or enqueue authority"
@@ -536,7 +540,76 @@ ingestionMigrationChecks work = do
     rawRows db "SELECT count(*) FROM sqlite_master WHERE name='ingestion_immutable'" >>= check "failed ingestion migration rolls back prefix triggers" . (==[[SQL.SQLInteger 0]])
     SQL.exec db "DROP INDEX ingestion_order"
   withInstalled path $ \installed -> withCoordinationStore installed $ \store -> do
-    storeIdentity store >>= check "schema five migrates to six" . ((==6) . storeSchemaVersion)
+    storeIdentity store >>= check "schema five migrates to current version" . ((==schemaVersion) . storeSchemaVersion)
     rowsEqual store "SELECT id,revision,profile_id,root_identity,native_run_id,runtime_snapshot FROM runs" [[SQL.SQLText "old_run",SQL.SQLText "old_revision",SQL.SQLText "old_profile",SQL.SQLText "old_root",SQL.SQLText "old_native",SQL.SQLNull]] >>= check "ingestion migration preserves old associations without inventing evidence"
     rowsEqual store "SELECT authority_epoch,stream_id FROM service_metadata" [[SQL.SQLText "old_epoch",SQL.SQLText "old_stream"]] >>= check "ingestion migration preserves durable authority and stream"
     count store "start_intents" >>= check "ingestion migration reconstructs no accepted start" . (==0)
+
+-- Focused Store checks. Execution requires a separately authorized fresh fixture.
+terminalAdmissionChecks :: FilePath -> IO ()
+terminalAdmissionChecks work = do
+  (path,_) <- fixture work "terminal-admission"
+  withInstalled path $ \installed -> withCoordinationStore installed $ \store -> do
+    entered <- newIORef (0::Int)
+    let markedClock = modifyIORef' entered (+1) >> pure 0
+        marked = withCommitDeadline store markedClock 1 $ \guard ->
+          runTransactionWithAdmission WaitWithinBudget store (enforceCommitDeadline guard >> pure((),[]))
+    withHeld store $ \release -> do
+      expect "ordinary Store callers still refuse the held gate" StoreBusy (runRead store (pure ()))
+      withAsync marked $ \waiter -> do
+        StoreAdmissionCheck.blocked waiter
+        readIORef entered >>= check "waiting Store action has not reached its commit check" . (==0)
+        release
+        wait waiter
+    readIORef entered >>= check "released terminal Store action executes once" . (==1)
+    writeIORef entered 0
+    withHeld store $ \release -> withAsync marked $ \waiter -> do
+      StoreAdmissionCheck.blocked waiter
+      throwTo (asyncThreadId waiter) UserInterrupt
+      result <- waitCatch waiter
+      check "Store admission interruption preserves original exception"
+        (case result of Left failure -> fromException failure==Just UserInterrupt; _->False)
+      release
+    readIORef entered >>= check "interrupted Store action never runs after release" . (==0)
+    withHeld store $ \release -> do
+      let delayed = withCommitDeadline store (modifyIORef' entered (+1) >> threadDelay 3000000 >> pure 0) 1 $ \guard ->
+            runTransactionWithAdmission WaitWithinBudget store (enforceCommitDeadline guard >> pure((),[]))
+      withAsync (try @StoreFailure delayed) $ \waiter -> do
+        StoreAdmissionCheck.blocked waiter
+        threadDelay 3000000
+        release
+        result <- wait waiter
+        check "three seconds waiting leaves less than three seconds for execution" (result==Left StoreDeadline)
+    readIORef entered >>= check "execution deadline does not replay admitted action" . (==1)
+    writeIORef entered 0
+    withCommitDeadline store (modifyIORef' entered (+1) >> throwIO(userError "admitted publication failure")) 1 $ \guard ->
+      expect "admitted action failure is not retried" StoreUnavailable
+        (runTransactionWithAdmission WaitWithinBudget store (enforceCommitDeadline guard >> pure((),[])))
+    readIORef entered >>= check "failing admitted body executed once" . (==1)
+    runTransaction store $ do
+      execute "INSERT INTO clients VALUES ('terminal_client','revision','authority',0)" []
+      execute "INSERT INTO requests(id,revision,client_id,workflow_id,descriptor_revision,profile_id,profile_revision,phase,admission,blocking_reasons,validation_errors) VALUES ('terminal_request','revision','terminal_client','workflow','descriptor','profile','policy','draft','not-queued',?,?)" [SQL.SQLBlob "[]",SQL.SQLBlob "[]"]
+      pure((),[Invalidation "service.changed" "/v1/capabilities" "terminal_seed"])
+    expect "deferred commit failure remains uncertain and is not retried" StoreUnavailable $
+      runTransactionWithAdmission WaitWithinBudget store $ do
+        execute "UPDATE requests SET enqueue_command='missing_command' WHERE id='terminal_request'" []
+        pure((),[Invalidation "service.changed" "/v1/capabilities" "terminal_poison"])
+    expect "poisoned Store refuses terminal action before its body" StorePoisoned marked
+    readIORef entered >>= check "poisoned Store never enters later body" . (==1)
+    retryStoreCleanup store
+    expect "closed Store refuses terminal action" StoreClosed marked
+    readIORef entered >>= check "closed Store never enters later body" . (==1)
+  where
+    withHeld store action = do
+      held <- newEmptyMVar
+      resume <- newEmptyMVar
+      let clock = putMVar held () >> readMVar resume >> pure 0
+          release = void(tryPutMVar resume ())
+      withCommitDeadline store clock 1 $ \guard ->
+        bracket (async(runTransaction store (enforceCommitDeadline guard >> pure((),[]))))
+          (\holder -> release >> cancel holder) $ \holder -> do
+            timeout 1000000(takeMVar held) >>= maybe(error "Store holder not admitted")pure
+            value <- action release
+            release
+            wait holder
+            pure value

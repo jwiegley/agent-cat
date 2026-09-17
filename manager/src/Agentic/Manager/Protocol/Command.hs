@@ -77,11 +77,14 @@ data CommandFailure = Unauthenticated | Forbidden | AuthorityChanged | InvalidPr
   | PreconditionRequired | StaleRevision | StateConflict | IdempotencyConflict | ReceiptExpired
   | StorageQuota | RateLimit | StorageUnavailable | ResourceUnavailable | InvalidRequest
   | UnsupportedMediaType | OwnershipUnavailable | SizeLimit | InvalidInput | ViewTooLarge
+  | DecisionNotHead | UnsupportedOperation
   deriving (Eq, Show, Generic, NFData)
 instance Exception CommandFailure
 
 failureCode :: CommandFailure -> Text
 failureCode failure = case failure of
+  DecisionNotHead -> "decision-not-head"
+  UnsupportedOperation -> "unsupported-operation"
   InvalidInput -> "invalid-input"
   ViewTooLarge -> "view-too-large"
   SizeLimit -> "size-limit"
@@ -103,6 +106,8 @@ failureCode failure = case failure of
   OwnershipUnavailable -> "ownership-unavailable"
 failureStatus :: CommandFailure -> Int
 failureStatus failure = case failure of
+  DecisionNotHead -> 409
+  UnsupportedOperation -> 409
   InvalidInput -> 422
   ViewTooLarge -> 413
   SizeLimit -> 413

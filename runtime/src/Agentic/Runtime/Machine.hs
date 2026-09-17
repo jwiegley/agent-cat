@@ -50,6 +50,7 @@ import Agentic.Runtime.Protocol
     ResultRef (..),
     RuntimeEvent (..),
     encodeEnvelopeFor,
+    correlatedProtocolVersion,
     latestProtocolVersion,
     maxFrameBytes,
     protocolVersion,
@@ -115,7 +116,7 @@ handlesEventSinkFor :: Int -> [Handle] -> RunId -> IO EventSink
 handlesEventSinkFor version handles runId = do
   next <- newMVar (Right 0 :: Either SomeException Word64)
   pure $ \event -> case event of
-    AttemptProgress {} | version /= latestProtocolVersion -> pure ()
+    AttemptProgress {} | version < correlatedProtocolVersion -> pure ()
     _ -> mapM_ (writeEvent next) (splitOutput event)
   where
     writeEvent next event = do
@@ -182,6 +183,7 @@ eventTextFits event = go 0 (texts event)
     texts (RunStartedV2 workflow target _) = [workflow, target]
     texts (OccurrenceStarted _ code intent addressee prompt) = [code, intent, addressee, prompt]
     texts (AttemptStarted _ target) = [target]
+    texts (AttemptControlAvailability _ _) = []
     texts (AttemptOutput _ chunk) = [chunk]
     texts (AttemptProgress _ progress) = progressTexts progress
     texts (AttemptSteered _ control timing text) = [control, timing, text]
@@ -272,7 +274,7 @@ withBufferedControlInputFor version handle initial sink runtime action = do
           throwTo owner (MachineCancelled (T.unpack why))
         Right Nothing -> throwTo owner (MachineCancelled "control input closed")
         Right (Just (line, rest)) ->
-          case decodeControlFor version line of
+          case decodeControlFor (if version == latestProtocolVersion then correlatedProtocolVersion else version) line of
             Left why -> do
               sink (invalidAckEventFor version (ControlAck (ControlId "invalid") ControlFailed why))
               throwTo owner (MachineCancelled (T.unpack why))

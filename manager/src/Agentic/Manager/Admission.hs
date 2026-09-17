@@ -9,6 +9,7 @@ module Agentic.Manager.Admission
     withAdmission, withAdmissionClock, enqueueRequest, admitOldest,
     editRequestInput, withdrawRequest, awaitReview, withReviewAcceptance,
     retryAdmissionCleanup, awaitAdmissionCleanup, closeAdmission, reservationIdentity, observeLivePreparation,
+    acceptControlCommand, deliverAcceptedControl, acceptedControlContext,
     AcceptedStart, acceptStartCommand, deliverAcceptedStart, stopAcceptedStart, observeAcceptedStart, acceptedStartRun, acceptedTimerRetired, invalidateLivePreparation, consumeAcceptedStart
   ) where
 
@@ -25,7 +26,7 @@ import Agentic.Manager.Protocol.Preparation (ReviewInput)
 import Agentic.Manager.Protocol.Json (decodeStrictValue)
 import Agentic.Manager.Store
 import Agentic.Manager.Worker
-import Agentic.Runtime (FrontendPrepared (..), FrontendSetupRequest, RunId (..))
+import Agentic.Runtime (FrontendPrepared (..), FrontendSetupRequest, RunId (..), Control (controlId), ControlId (..), decodeControlFor, encodeControlFor, correlatedProtocolVersion, controlAcknowledgementLimit)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (Async, async, waitCatch, poll, race)
 import Control.Concurrent.MVar (MVar, newMVar, withMVar)
@@ -36,6 +37,7 @@ import Control.DeepSeq (NFData)
 import Control.Exception (SomeException, mask, uninterruptibleMask_, finally, onException, try, throwIO, fromException)
 import Control.Monad (forM, forM_, unless, when, void)
 import Crypto.Random (getRandomBytes)
+import Crypto.Hash (Digest, SHA256, hash)
 import Data.Aeson (FromJSON, Value, eitherDecodeStrict', object, (.=))
 import Data.ByteArray.Encoding (Base (Base16), convertToBase)
 import qualified Data.ByteString as BS
@@ -89,7 +91,7 @@ data Entry = Entry
     entryWorker :: !(TMVar FrontendWorker),
     entryReview :: !(TMVar (Either CommandFailure ReviewContext)), entryRetiredTimer :: !(TVar Bool),
     entryStop :: !(TMVar Stop), entryTask :: !(TMVar (Maybe (Async ()))),
-    entryFinal :: !(TVar (Maybe Finalization)), entryDispatched :: !(TVar Bool), entryCleanupConfirmed :: !(TVar Bool), entryResult :: !(TMVar (Either CommandFailure ())), entryStart :: !(TVar (Maybe AcceptedStart)) }
+    entryFinal :: !(TVar (Maybe Finalization)), entryDispatched :: !(TVar Bool), entryCleanupConfirmed :: !(TVar Bool), entryResult :: !(TMVar (Either CommandFailure ())), entryStart :: !(TVar (Maybe AcceptedStart)), entryControls :: !(TVar (Map.Map Text (Operation,DispatchTicket))), entryControlGate :: !(MVar ()) }
 
 -- | One committed start association retaining its original one-shot ticket and Worker.
 data AcceptedStart = AcceptedStart !Admission !Entry !DispatchTicket !Text
@@ -262,7 +264,7 @@ admitOldest controller = operation controller $ locked controller $ do
     Nothing -> pure Nothing
     Just(ident,profile,policy) -> do
       permit <- maybe(throwIO StateConflict)pure(Map.lookup ident permits)
-      entry <- Entry ident reservation generation profile policy permit <$> newEmptyTMVarIO <*> newEmptyTMVarIO <*> newTVarIO False <*> newEmptyTMVarIO <*> newEmptyTMVarIO <*> newTVarIO Nothing <*> newTVarIO False <*> newTVarIO False <*> newEmptyTMVarIO <*> newTVarIO Nothing
+      entry <- Entry ident reservation generation profile policy permit <$> newEmptyTMVarIO <*> newEmptyTMVarIO <*> newTVarIO False <*> newEmptyTMVarIO <*> newEmptyTMVarIO <*> newTVarIO Nothing <*> newTVarIO False <*> newTVarIO False <*> newEmptyTMVarIO <*> newTVarIO Nothing <*> newTVarIO Map.empty <*> newMVar ()
       atomically $ modifyTVar'(entries controller)(Map.insert ident entry)
       start <- newEmptyTMVarIO
       task <- async (atomically(readTMVar start) >> runEntry controller entry) `onException`
@@ -344,6 +346,7 @@ runEntry controller entry = do
               outcome' <- race (waitWorker worker) (reviewWait controller entry deadline)
               pure(either(const(StopService "worker-lost"))id outcome')
           restore(finishEntry controller entry worker stopping)
+  mapM_ (discardControlPayload . snd) . Map.elems =<< readTVarIO(entryControls entry)
   case result of
     Right () -> atomically $ do
       void(tryPutTMVar(entryReview entry)(Left StateConflict))
@@ -379,11 +382,14 @@ selectFinalization controller entry fallback = locked controller $ do
       recovered <- case attempt of
         Nothing -> pure Nothing
         Just known -> do
-          result <- reconcileCommandAttempt known
+          result <- reconcileCommandAttemptWithAdmission WaitWithinBudget known
           case result of
             Right (Just accepted) | Just _ <- submissionTicket accepted -> do
-              let kind=case receiptOperation(submissionReceipt accepted) of Approve->"approve";Withdraw->"withdraw";_->"edit"
-              publishRetained controller (entryRequest entry) kind accepted
+              let kind=case receiptOperation(submissionReceipt accepted) of
+                    Approve->"approve"; Withdraw->"withdraw"
+                    op | op `elem` [Cancel,Steer,Retry,ChooseRecovery,Redirect,Answer] -> "control"
+                    _->"edit"
+              publishRetainedWithAdmission WaitWithinBudget controller (entryRequest entry) kind accepted
               atomically(modifyTVar'(attempts controller)(Map.delete(entryRequest entry)))
               readTVarIO(entryFinal entry)
             Right Nothing -> atomically(modifyTVar'(attempts controller)(Map.delete(entryRequest entry))) >> pure Nothing
@@ -392,7 +398,7 @@ selectFinalization controller entry fallback = locked controller $ do
         Just final -> pure final
         Nothing -> do
           stopping <- atomically(tryReadTMVar(entryStop entry))
-          started<-dbRead controller(startCommitted entry)
+          started<-dbTerminalRead controller(startCommitted entry)
           let kind=if started then "closed" else case stopping of Just(StopService reason)->reason;_->fallback
           revision <- markServiceCleanup controller entry kind
           let final=Finalization Nothing kind revision
@@ -407,7 +413,7 @@ reviewWait controller entry deadline = do
     Right () -> do
       retired <- locked controller $ do
         already <- readTVarIO(entryRetiredTimer entry)
-        started <- if already then pure True else dbRead controller(startCommitted entry)
+        started <- if already then pure True else dbTerminalRead controller(startCommitted entry)
         if started then atomically(writeTVar(entryRetiredTimer entry)True) >> pure True else do
           now <- monotonicNow(clock controller)
           unless(now>=deadline)(throwIO StateConflict)
@@ -418,7 +424,7 @@ reviewWait controller entry deadline = do
 
 finishEntry :: Admission -> Entry -> FrontendWorker -> Stop -> IO ()
 finishEntry controller entry worker stopping = do
-  started<-dbRead controller(startCommitted entry)
+  started<-dbTerminalRead controller(startCommitted entry)
   let effective=case stopping of StopService _ | started -> StopService "closed";_->stopping
   case effective of
     StopCommand ticket kind revision -> do
@@ -438,8 +444,8 @@ finishEntry controller entry worker stopping = do
 dispatchCleanup :: Entry -> DispatchTicket -> IO () -> IO ()
 dispatchCleanup entry ticket action = do
   atomically(writeTVar(entryDispatched entry)True)
-  reserveDispatch ticket >>= need
-  attemptDispatch ticket action >>= need
+  reserveDispatchWithAdmission WaitWithinBudget ticket >>= need
+  attemptDispatchWithAdmission WaitWithinBudget ticket action >>= need
 
 discardAndClose :: FrontendWorker -> IO ()
 discardAndClose worker = do
@@ -452,13 +458,13 @@ discardAndClose worker = do
   closeWorker worker
 
 markServiceCleanup :: Admission -> Entry -> Text -> IO Text
-markServiceCleanup controller entry reason = markServiceCleanupWithReason controller entry reason Nothing
+markServiceCleanup controller entry reason = markServiceCleanupWithReason WaitWithinBudget controller entry reason Nothing
 
-markServiceCleanupWithReason :: Admission -> Entry -> Text -> Maybe Text -> IO Text
-markServiceCleanupWithReason controller entry reason publicReason = do
+markServiceCleanupWithReason :: StoreAdmission -> Admission -> Entry -> Text -> Maybe Text -> IO Text
+markServiceCleanupWithReason admission controller entry reason publicReason = do
   revision <- fresh "request_revision_"
   runRevision <- fresh "run_revision_"
-  dbChange controller $ do
+  runTransactionWithAdmission admission (store controller) $ do
     validateOwner entry (if reason=="closed" then ["preparing","review","start-pending","associated"] else ["preparing","review"]) ["held"]
     started <- startCommitted entry
     when (started && reason/="closed") (refuseTransaction StateConflict)
@@ -501,10 +507,10 @@ finalizeKnown controller entry = locked controller $ do
         runChanges <- changeRunSupervision entry "cleanup-pending" "lost" runRevision
         pure (requestEvent(entryRequest entry)next:runChanges)
   case ticket of
-    Nothing -> dbChange controller $ do events<-publish;pure((),events)
+    Nothing -> dbTerminalChange controller $ do events<-publish;pure((),events)
     Just actual -> do
       effect <- need (decodeEffect(if kind=="edit" then "input-changed" else "withdrawn")(entryRequest entry))
-      void(recordEffectWith actual effect publish >>= need)
+      void(recordEffectWithAdmission WaitWithinBudget actual effect publish >>= need)
   atomically $ do
     modifyTVar'(queued controller)(Map.delete(entryRequest entry))
 
@@ -512,11 +518,12 @@ changeRunSupervision :: Entry -> Text -> Text -> Text -> Transaction [Invalidati
 changeRunSupervision entry previous next revision = do
   rows <- query "SELECT id FROM runs WHERE request_id=? AND supervision=?" [text(entryRequest entry),text previous]
   events <- mapM (\row -> case row of
-    [SQL.SQLText ident] -> pure(Invalidation "run.changed" ("/v1/runs/"<>ident) revision)
+    [SQL.SQLText ident] -> pure [Invalidation "run.changed" ("/v1/runs/"<>ident) revision,
+      Invalidation "run.changed" ("/v1/runs/"<>ident<>"/control") revision]
     _ -> refuseTransaction StorageUnavailable) rows
-  execute "UPDATE runs SET supervision=?,revision=? WHERE request_id=? AND supervision=?"
-    [text next,text revision,text(entryRequest entry),text previous]
-  pure events
+  execute "UPDATE runs SET supervision=?,revision=?,control_revision=? WHERE request_id=? AND supervision=?"
+    [text next,text revision,text revision,text(entryRequest entry),text previous]
+  pure (concat events)
 
 awaitAdmissionCleanup :: LivePreparation -> IO (Either CommandFailure ())
 awaitAdmissionCleanup (LivePreparation _ entry)=atomically(readTMVar(entryResult entry))
@@ -592,12 +599,13 @@ withdrawRequest controller proof requestId key precondition body = operation con
 submitRetained :: Admission -> CredentialProof -> Text -> Text -> CommandRequest
   -> (Text -> ConfigurationLimits -> [(Text,Discovery)] -> Either CommandFailure Mutation)
   -> IO (Either CommandFailure Submission)
-submitRetained controller proof requestId kind request = submitRetainedGuarded controller proof requestId kind request Nothing
+submitRetained controller proof requestId kind request = submitRetainedGuarded controller proof requestId kind request Nothing Nothing
 
 submitRetainedGuarded :: Admission -> CredentialProof -> Text -> Text -> CommandRequest -> Maybe CommitDeadline
+  -> Maybe (Text -> Either CommandFailure BS.ByteString)
   -> (Text -> ConfigurationLimits -> [(Text,Discovery)] -> Either CommandFailure Mutation)
   -> IO (Either CommandFailure Submission)
-submitRetainedGuarded controller proof requestId kind request deadlineGuard builder = mask $ \restore -> do
+submitRetainedGuarded controller proof requestId kind request deadlineGuard controlEncoder builder = mask $ \restore -> do
   pending <- readTVarIO(attempts controller)
   case Map.lookup requestId pending of
     Nothing -> freshAttempt restore pending
@@ -619,7 +627,8 @@ submitRetainedGuarded controller proof requestId kind request deadlineGuard buil
     publish accepted = publishRetained controller requestId kind accepted >> forget
     freshAttempt restore pending = do
       when(Map.size pending>=16)(throwIO StateConflict)
-      attempt <- newCommandAttempt (store controller) proof request
+      attempt <- maybe (newCommandAttempt (store controller) proof request)
+        (newControlCommandAttempt (store controller) proof request) controlEncoder
       atomically(modifyTVar'(attempts controller)(Map.insert requestId attempt))
       result <- try @SomeException(restore(maybe(submitCommandAttempt attempt builder)(\guard->submitCommandAttemptWithDeadline guard attempt builder)deadlineGuard))
       resolved <- case result of
@@ -637,18 +646,25 @@ submitRetainedGuarded controller proof requestId kind request deadlineGuard buil
         Right original -> pure $ case resolved of Right(Just accepted)->Right accepted;_->original
 
 publishRetained :: Admission -> Text -> Text -> Submission -> IO ()
-publishRetained controller requestId kind accepted =
-  if kind=="approve" then retainStart controller requestId accepted else if kind=="enqueue" then case submissionEnqueue accepted of
+publishRetained = publishRetainedWithAdmission FailFast
+
+publishRetainedWithAdmission :: StoreAdmission -> Admission -> Text -> Text -> Submission -> IO ()
+publishRetainedWithAdmission admission controller requestId kind accepted =
+  if kind=="approve" then retainStartWithAdmission admission controller requestId accepted else if kind=="enqueue" then case submissionEnqueue accepted of
     Just permit -> atomically(modifyTVar'(queued controller)(Map.insert requestId permit))
     Nothing -> pure()
-  else retainMutation controller requestId kind (Right accepted)
+  else if kind=="control" then unless (submissionReplayed accepted) $ do
+    entry <- Map.lookup requestId <$> readTVarIO(entries controller) >>= maybe(throwIO OwnershipUnavailable)pure
+    ticket <- maybe(throwIO OwnershipUnavailable)pure(submissionTicket accepted)
+    atomically(modifyTVar' (entryControls entry) (Map.insert (dispatchCommandId ticket) (receiptOperation(submissionReceipt accepted),ticket)))
+  else retainMutationWithAdmission admission controller requestId kind (Right accepted)
 
-retainStart :: Admission -> Text -> Submission -> IO ()
-retainStart controller requestId accepted = unless(submissionReplayed accepted) $ do
+retainStartWithAdmission :: StoreAdmission -> Admission -> Text -> Submission -> IO ()
+retainStartWithAdmission admission controller requestId accepted = unless(submissionReplayed accepted) $ do
   entry <- Map.lookup requestId <$> readTVarIO(entries controller) >>= maybe(throwIO OwnershipUnavailable)pure
   ticket <- maybe(throwIO OwnershipUnavailable)pure(submissionTicket accepted)
   native <- atomically(readTMVar(entryReview entry)) >>= need
-  run <- dbRead controller $ do
+  run <- runReadWithAdmission admission (store controller) $ do
     rows<-query "SELECT s.run_id,s.preparation_id FROM start_intents s JOIN runs r ON r.id=s.run_id JOIN preparations p ON p.id=s.preparation_id WHERE s.command_id=? AND s.request_id=? AND s.reservation_id=? AND s.process_generation=? AND r.native_run_id=? AND r.root_identity=? AND p.native_run_id=r.native_run_id AND p.root_identity=r.root_identity AND p.state='consumed'"
       (map text [dispatchCommandId ticket,requestId,entryReservation entry,entryGeneration entry,runIdText(preparedRunId(reviewNative native)),preparedRootIdentity(reviewNative native)])
     case rows of
@@ -673,7 +689,7 @@ acceptStartCommand (LivePreparation controller entry) proof request builder = op
     current<-currentReview controller entry
     worker<-atomically(readTMVar(entryWorker entry))
     withWorkerCommitDeadline worker (store controller) (monotonicNow(clock controller)) (reviewDeadlineNanos current) $ \guard->
-      submitRetainedGuarded controller proof (entryRequest entry) "approve" request (Just guard) (builder current) >>= need
+      submitRetainedGuarded controller proof (entryRequest entry) "approve" request (Just guard) Nothing (builder current) >>= need
   retained<-readTVarIO(entryStart entry)
   let same=case retained of Just value@(AcceptedStart _ _ ticket _) | dispatchCommandId ticket==receiptId(submissionReceipt accepted)->Just value;_->Nothing
   pure(accepted,same)
@@ -686,7 +702,7 @@ invalidateLivePreparation (LivePreparation controller entry) reason = operation 
     ensureController controller
     started<-dbRead controller(startCommitted entry)
     when started(throwIO StateConflict)
-    revision<-markServiceCleanupWithReason controller entry "closed" (Just reason)
+    revision<-markServiceCleanupWithReason FailFast controller entry "closed" (Just reason)
     atomically $ do
       writeTVar(entryFinal entry)(Just(Finalization Nothing "closed" revision))
       void(tryPutTMVar(entryStop entry)(StopService "closed"))
@@ -706,6 +722,82 @@ deliverAcceptedStart (AcceptedStart controller entry ticket run) = operation con
     atomically(readTMVar(entryWorker entry))
   reserveDispatch ticket >>= need
   attemptDispatch ticket (startWorker worker) >>= need
+
+-- | Observation context from the original association. It cannot create a ticket.
+acceptedControlContext :: AcceptedStart -> IO (CoordinationStore, Text, Text, FrontendPrepared)
+acceptedControlContext (AcceptedStart controller entry _ _) = do
+  context <- atomically(readTMVar(entryReview entry)) >>= need
+  pure(store controller,entryProfile entry,entryPolicy entry,reviewNative context)
+
+-- Both internal control entrypoints use the same retained command attempt path.
+acceptControlCommand :: AcceptedStart -> CredentialProof -> CommandRequest
+  -> Transaction (Maybe (Text,Text,Text))
+  -> IO (Text -> Either CommandFailure BS.ByteString,
+         Text -> ConfigurationLimits -> [(Text,Discovery)] -> Either CommandFailure Mutation)
+  -> IO (Either CommandFailure Submission)
+acceptControlCommand (AcceptedStart controller entry _ run) proof request version prepare = operation controller $
+  withMVar (entryControlGate entry) $ \_ -> do
+    ensureController controller
+    unless(commandOperation request `elem` [Cancel,Steer,Retry,ChooseRecovery,Redirect,Answer]
+      && commandProfile request==entryProfile entry)(throwIO InvalidRequest)
+    replay <- commandPreflightVersion (store controller) proof request version >>= need
+    if replay then locked controller $ submitConfiguredCommand (store controller) proof request (\_ _ _->Left StateConflict) >>= need
+    else do
+      checkLive
+      available <- capacityAvailable
+      unless available(throwIO SizeLimit)
+      -- Never hold global admission or configuration locks during restoration.
+      (encoder,builder) <- prepare
+      locked controller $ do
+        checkLive
+        capacity <- capacityAvailable
+        let checked candidate limits catalogues = do
+              mutation <- builder candidate limits catalogues
+              pure mutation {mutationValidate = do
+                validateOwner entry ["start-pending","associated"] ["held"]
+                rows <- query "SELECT id FROM runs WHERE id=? AND request_id=? AND supervision='owned'"
+                  [text run,text(entryRequest entry)]
+                unless(rows==[[text run]])(refuseTransaction OwnershipUnavailable)
+                result <- mutationValidate mutation
+                pure $ case result of Right _ | not capacity -> Left SizeLimit; _ -> result}
+        submitRetainedGuarded controller proof (entryRequest entry) "control" request Nothing (Just encoder) checked >>= need
+  where
+    checkLive = do
+      ensureController controller
+      stopped <- atomically(tryReadTMVar(entryStop entry))
+      when(isJust stopped)(throwIO OwnershipUnavailable)
+      worker <- atomically(readTMVar(entryWorker entry))
+      observed <- observeWorker worker
+      unless(observedWorkerPhase observed `elem` [WorkerStartSent,WorkerRunning]
+        && not(isJust(observedWorkerExit observed)))(throwIO OwnershipUnavailable)
+    capacityAvailable = do
+      retained <- readTVarIO(entryControls entry)
+      worker <- atomically(readTMVar(entryWorker entry))
+      protocol <- workerProtocolVersion worker
+      let cancellation=commandOperation request==Cancel || any ((==Cancel) . fst) (Map.elems retained)
+      pure(Map.size retained<controlAcknowledgementLimit protocol cancellation)
+
+-- | Explicit one-shot dispatch through the original ticket, Worker and pipe.
+-- Only the original ticket supplies bytes. Stored bindings cannot recreate them.
+deliverAcceptedControl :: AcceptedStart -> Text -> IO (Either CommandFailure ())
+deliverAcceptedControl (AcceptedStart controller entry _ run) command = operation controller $ do
+  (ticket,worker) <- locked controller $ do
+    ensureController controller
+    (_,ticket) <- Map.lookup command <$> readTVarIO(entryControls entry) >>= maybe(throwIO OwnershipUnavailable)pure
+    dbRead controller $ do
+      rows <- query "SELECT command_id FROM control_intents WHERE command_id=? AND run_id=?" [text command,text run]
+      unless(rows==[[text command]])(refuseTransaction OwnershipUnavailable)
+    worker <- atomically(readTMVar(entryWorker entry))
+    pure(ticket,worker)
+  reserveDispatch ticket >>= need
+  attemptControlDispatch ticket (\bytes -> do
+    control <- either (const(throwIO InvalidRequest)) pure (decodeControlFor correlatedProtocolVersion bytes)
+    encodedControl <- either (const(throwIO InvalidRequest)) pure (encodeControlFor correlatedProtocolVersion control)
+    unless(controlId control==ControlId command && encodedControl==bytes)(throwIO InvalidRequest)
+    dbRead controller $ do
+      rows <- query "SELECT native_sha256,native_bytes FROM control_intents WHERE command_id=? AND run_id=?" [text command,text run]
+      unless(rows==[[text(T.pack(show(hash bytes::Digest SHA256))),SQL.SQLInteger(fromIntegral(BS.length bytes))]])(refuseTransaction OwnershipUnavailable)
+    writeWorkerControl worker control) >>= need
 
 -- | Internal owner stop, not a public control receipt or fabricated cancellation event.
 stopAcceptedStart :: AcceptedStart -> IO (Either CommandFailure ())
@@ -728,13 +820,13 @@ consumeAcceptedStart (AcceptedStart controller entry _ _) action = do
 observeAcceptedStart :: AcceptedStart -> IO WorkerObservation
 observeAcceptedStart (AcceptedStart _ entry _ _) = atomically(readTMVar(entryWorker entry)) >>= observeWorker
 
-retainMutation :: Admission -> Text -> Text -> Either CommandFailure Submission -> IO ()
-retainMutation controller requestId kind outcome = case outcome of
+retainMutationWithAdmission :: StoreAdmission -> Admission -> Text -> Text -> Either CommandFailure Submission -> IO ()
+retainMutationWithAdmission admission controller requestId kind outcome = case outcome of
   Right accepted | not(submissionReplayed accepted) -> do
     current <- Map.lookup requestId <$> readTVarIO(entries controller)
     case (current,submissionTicket accepted) of
       (Just entry,Just ticket) -> do
-        revision <- dbRead controller $ do
+        revision <- runReadWithAdmission admission (store controller) $ do
           rows<-query "SELECT request_revision FROM reservations WHERE id=? AND pending_command=?" [text(entryReservation entry),text(dispatchCommandId ticket)]
           case rows of [[SQL.SQLText value]]->pure value;_->refuseTransaction StateConflict
         atomically $ do
@@ -800,6 +892,8 @@ shutdown controller = do
   current<-Map.elems <$> readTVarIO(entries controller)
   forM_ current $ \entry->atomically(void(tryPutTMVar(entryStop entry)(StopService "closed")))
   forM_ current $ \entry->atomically(readTMVar(entryTask entry))>>=mapM_ (void . waitCatch)
+  mapM_ discardControlAttempt . Map.elems =<< readTVarIO(attempts controller)
+  atomically(writeTVar(attempts controller)Map.empty)
   outcomes<-mapM (atomically.readTMVar.entryResult) current
   unless(all (either(const False)(const True)) outcomes)(throwIO StorageUnavailable)
 
@@ -838,6 +932,13 @@ nextOrdinal = do
   let next=T.pack(show(current+1))
   execute "UPDATE admission_queue_clock SET last_ordinal=? WHERE singleton=1" [text next]
   pure next
+
+-- Each original terminal-owner Store action keeps its own existing allowance.
+dbTerminalRead :: NFData a => Admission -> Transaction a -> IO a
+dbTerminalRead controller = runReadWithAdmission WaitWithinBudget (store controller)
+
+dbTerminalChange :: NFData a => Admission -> Transaction (a,[Invalidation]) -> IO a
+dbTerminalChange controller = runTransactionWithAdmission WaitWithinBudget (store controller)
 
 dbRead :: NFData a => Admission -> Transaction a -> IO a
 dbRead controller action = runRead(store controller)action

@@ -10,17 +10,19 @@ import Agentic.Manager.Commands
 import Agentic.Manager.Configuration
 import Agentic.Manager.Profile (publicRevision)
 import Agentic.Manager.Protocol.Command
-import Agentic.Manager.Schema (schemaStatements)
+import Agentic.Manager.Protocol.Json (representableEditorSchema)
+import Agentic.Manager.Schema (schemaVersion, schemaStatements)
 import Agentic.Manager.Store
+import qualified Agentic.Runtime as Runtime
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (AsyncCancelled (..), async, cancel, concurrently, poll, wait, waitCatch)
-import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar, tryPutMVar)
 import System.Timeout (timeout)
 import Control.DeepSeq (NFData)
 import Control.Exception (AsyncException (UserInterrupt), bracket, fromException, throwIO, try)
 import Control.Monad (forM_, unless, void)
 import Crypto.Hash (Digest, SHA256, hash)
-import Data.Aeson (FromJSON (parseJSON), Value, eitherDecodeStrict', object, withObject, (.:), (.=))
+import Data.Aeson (FromJSON (parseJSON), Value (..), eitherDecodeStrict', object, withObject, (.:), (.=))
 import Data.ByteArray (convert)
 import qualified Data.ByteString as BS
 import Data.IORef (writeIORef, modifyIORef', newIORef, readIORef)
@@ -47,6 +49,7 @@ main = do
       publicComposition work
       replayChecks work
       retainedAttemptChecks work
+      controlBindingChecks work
       commandDeadlineChecks work
       localEffectChecks work
       bindingBounds work
@@ -177,6 +180,59 @@ control profile = Mutation profile version validate
 ticketOf :: Submission -> IO DispatchTicket
 ticketOf submission = maybe (error "missing new dispatch ticket") pure (submissionTicket submission)
 
+-- Ledger/ownership checks supplement the genuine Worker delivery gate.
+controlBindingChecks :: FilePath -> IO ()
+controlBindingChecks work = do
+  (path,req,receipt) <- withFixture work "control-binding" (64*commandCapacity) 20 $ \path _ _ store profile proof -> do
+    initial<-request store Cancel "control-binding"
+    let base=commandResource initial<>"?"
+        uri=base<>T.replicate(8192-T.length base)"x"
+        revision=T.replicate 128 "r"
+        original=commandBody initial
+        req=initial {commandResource=uri,commandKey=commandKey initial<>T.replicate(128-T.length(commandKey initial))"n",
+          commandPrecondition=Just("\""<>revision<>"\""),commandBody=original<>BS.replicate(2097152-BS.length original)32}
+        encoder ident=either(const(Left InvalidRequest))Right(Runtime.encodeControlFor 2(Runtime.Control(Runtime.ControlId ident)Nothing Nothing Runtime.CancelRun))
+        builder candidate _ _=Right (control profile)
+          {mutationVersion=pure(Just(uri,"profile_1",revision)),mutationValidate=pure(Right(Intent(noReferences {referenceRun=Just "run_1"})True $ do
+            bytes<-either refuseTransaction pure(encoder candidate)
+            execute "INSERT INTO control_intents(command_id,run_id,native_command,native_sha256,native_bytes) VALUES (?,'run_1','cancelRun',?,?)"
+              [SQL.SQLText candidate,SQL.SQLText(T.pack(show(hash bytes::Digest SHA256))),SQL.SQLInteger(fromIntegral(BS.length bytes))]
+            pure([],Nothing)))}
+    mutate store(execute "UPDATE runs SET control_revision=? WHERE id='run_1'" [SQL.SQLText revision])
+    attempt<-newControlCommandAttempt store proof req encoder
+    accepted<-submitCommandAttempt attempt builder >>=right
+    ticket<-ticketOf accepted
+    expected<-right(encoder(dispatchCommandId ticket))
+    reserveDispatch ticket >>=right
+    entered<-newEmptyMVar
+    release<-newEmptyMVar
+    bracket(async(attemptControlDispatch ticket(\bytes->putMVar entered()>>takeMVar release>>pure(bytes==expected))))
+      (\worker->void(tryPutMVar release())>>void(waitCatch worker)) $ \worker->do
+        takeMVar entered
+        discarded<-attemptControlDispatch ticket(\_->error "losing claimant received bytes")
+        check "competing control claimant has no original payload" (case discarded of Left OwnershipUnavailable->True;_->False)
+        discardControlPayload ticket
+        putMVar release()
+        result<-wait worker >>=right
+        check "discard cannot disrupt consumed winner's original payload" result
+    scalarInt store "SELECT count(*) FROM pragma_table_info('control_intents') WHERE type='BLOB'" >>=check "durable control binding contains no payload BLOB" . (==0)
+    scalarInt store "SELECT bytes FROM command_ledger_usage" >>=check "maximal binding fields retain unchanged command reserve" . (==commandCapacity)
+    replay<-submitCommand store proof req ((control profile){mutationVersion=pure Nothing}) >>=right
+    check "maximal exact body replay has no control payload ticket" (submissionReceipt replay==submissionReceipt accepted && isNothing(submissionTicket replay))
+    pure(path,req,submissionReceipt accepted)
+  withInstalled path $ \installed->withCoordinationStore installed $ \store->do
+    proof<-authenticateCredential store bearerA >>=right
+    profile<-profileRevision installed
+    replay<-submitCommand store proof req(control profile) >>=right
+    check "reopened metadata cannot reconstruct original control payload" (submissionReceipt replay==receipt && isNothing(submissionTicket replay))
+    mutate store(execute "UPDATE runs SET supervision='observer' WHERE id='run_1'" [])
+    let inactive uri=do
+          rows<-query "SELECT supervision FROM runs WHERE id='run_1'" []
+          pure(if uri==commandResource req && rows==[[SQL.SQLText "observer"]] then Just "2000-01-01T00:00:00Z" else Nothing)
+    retireReceipt store(receiptId receipt)inactive >>=right
+    expect "retired control cannot acquire another dispatch" ReceiptExpired(submitCommand store proof req(control profile))
+    scalarInt store "SELECT bytes FROM command_ledger_usage" >>=check "retired control metadata fits unchanged tombstone reserve" . (==tombstoneCapacity)
+
 publicComposition :: FilePath -> IO ()
 publicComposition work = do
   (path, _) <- fixture work "public" (64 * commandCapacity) 10
@@ -184,7 +240,7 @@ publicComposition work = do
   bracket (Public.installConfiguration configuration >>= right) Public.closeConfiguration $ \installed ->
     Public.withCoordinationStore installed $ \store -> do
       identity <- Public.storeIdentity store
-      check "installed public composition uses migrated store" (Public.storeSchemaVersion identity == 6)
+      check "installed public composition uses migrated store" (Public.storeSchemaVersion identity == schemaVersion)
 
 replayChecks :: FilePath -> IO ()
 replayChecks work = do
@@ -549,7 +605,7 @@ largestLegacyChecks work = do
   withInstalled path $ \installed -> withCoordinationStore installed $ \store -> do
     profile <- profileRevision installed
     proof <- authenticateCredential store bearerA >>= right
-    storeIdentity store >>= check "largest legacy row completes current migration" . ((== 6) . storeSchemaVersion)
+    storeIdentity store >>= check "largest legacy row completes current migration" . ((== schemaVersion) . storeSchemaVersion)
     largeRead <- try @StoreFailure (runRead store (query "SELECT body FROM commands WHERE id='legacy_largest'" [] >> pure ()))
     check "largest body cannot be copied through the one-MiB result budget" (case largeRead of Left StoreLimit -> True; _ -> False)
     replay <- submitCommand store proof req (edit profile (commandResource req) "never") >>= right
@@ -580,6 +636,13 @@ foreign import ccall unsafe "agentic_manager_sqlite_limits"
 
 codecChecks :: FilePath -> FilePath -> IO ()
 codecChecks work source = do
+  let primitive=object["type" .= ("integer"::Text)]
+      constrained=object["type" .= ("integer"::Text),"minimum" .= (1::Int)]
+      record field=object["type" .= ("object"::Text),"properties" .= object["value" .= field],"required" .= ["value"::Text],"additionalProperties" .= False]
+  check "frozen editor subset preserves nested supported schema" (representableEditorSchema(record(object["type" .= ("array"::Text),"items" .= primitive])))
+  check "frozen editor subset refuses whole nested unsupported constraint" (not(representableEditorSchema(record constrained)))
+  check "frozen editor subset refuses unsupported alternatives" (not(representableEditorSchema(object["oneOf" .= [primitive,constrained]])))
+  check "frozen editor subset enforces required-property agreement" (not(representableEditorSchema(object["type" .= ("object"::Text),"properties" .= object["value" .= primitive],"required" .= ([]::[Text]),"additionalProperties" .= False])))
   Manifest cases <- BS.readFile (source </> "test/fixtures/manager/v1/manifest.json") >>= right . eitherDecodeStrict'
   forM_ [entry | entry@(CorpusCase _ schema _) <- cases, schema == "CommandReceipt"] $ \(CorpusCase file _ valid) -> do
     bytes <- BS.readFile (source </> "test/fixtures/manager/v1" </> file)

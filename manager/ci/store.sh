@@ -12,6 +12,11 @@ for capabilities in N1 N8; do
   mkdir "$work/$capabilities"
   echo "manager storage checks -$capabilities"
   "$runner" "$work/$capabilities" +RTS "-$capabilities" -RTS 2>&1 | tee "$work/$capabilities.log"
+  echo "manager admission primitive checks -$capabilities"
+  "$runner" admission-data +RTS "-$capabilities" -RTS 2>&1 | tee "$work/$capabilities-admission-data.log"
+  mkdir "$work/$capabilities-terminal-admission"
+  echo "manager terminal admission checks -$capabilities"
+  "$runner" terminal-admission "$work/$capabilities-terminal-admission" +RTS "-$capabilities" -RTS 2>&1 | tee "$work/$capabilities-terminal-admission.log"
 done
 echo "Private coordination storage evidence: $work"
 python3 manager/test/admission_audit.py "$root" store-cancel-gap

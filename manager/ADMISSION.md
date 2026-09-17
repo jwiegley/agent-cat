@@ -134,6 +134,29 @@ claims. The final request transition and command effect commit together, while t
 original accepted receipt stays unchanged. Expiry returns to draft with an expired
 observation reason and never silently enqueues or starts work.
 
+Original terminal-owner persistence uses bounded Store admission rather than
+immediate busy refusal. Selection, retained command reconciliation and its
+publication, expiry checks, service cleanup transitions, ticket-backed cleanup
+coordination and final publication opt in explicitly. Each Store action waits
+within its own existing five-second allowance and executes once after admission.
+Ordinary enqueue, approval, edit, withdrawal and control acceptance remain
+fail-fast. Native outcomes, revision and generation fences are unchanged.
+
+The controller may hold its Admission mutex while waiting for Store admission.
+Production Store transaction bodies have no IO lift and do not acquire that
+mutex or the configuration/file locks. Production commit clocks read monotonic
+time, and prepared-worker checks use nonblocking registry and group observations.
+Native dispatch and joins occur outside Store transactions. Store shutdown fences
+and joins owners before taking the database cell. This preserves the existing
+Admission to configuration to Store order without requiring a holder to wait for
+the terminal owner. Artificial test clock barriers do not add a production lock
+dependency.
+
+Waiting grants no workflow retry or automatic cleanup recovery. An expired,
+interrupted, closed or poisoned admission refuses. An admitted SQL failure or
+uncertain publication retains the existing failure and cleanup-versus-release
+contract. The no-SQL Worker cleanup path remains available.
+
 `retryAdmissionCleanup` refuses while the original cleanup result is pending,
 before joining its task. It can retry publication for the same retained association
 without repeating an ambiguous native write or minting a ticket from a receipt.

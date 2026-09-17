@@ -12,6 +12,7 @@ import qualified Data.Aeson.KeyMap as KM
 import Data.Aeson.Types (parseEither)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
+import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 
@@ -39,6 +40,13 @@ frontendProtocolTests = do
     bytes <- right (encodeFrontendSetupRequest value)
     check "setup round trip" (decodeFrontendSetupRequest bytes == Right value)
     check "encoder leaves NDJSON delimiter to adapter" (BS.last bytes /= 10)
+  check "explicit legacy setup bytes" (encodeFrontendSetupRequestFor 1 root == encodeFrontendSetupRequest root)
+  negotiated <- right (encodeFrontendSetupRequestFor 2 root)
+  negotiatedValue <- right (eitherDecodeStrict' negotiated)
+  check "session v2 selects same preparation facts" (parseEither parseSessionSetup negotiatedValue == Right (2, root))
+  left "old parser refuses session v2" (decodeFrontendSetupRequest negotiated)
+  left "unknown session encoder refuses" (encodeFrontendSetupRequestFor 3 root)
+  check "session protocol domains remain distinct" (sessionRuntimeProtocol 1 == Right 2 && sessionRuntimeProtocol 2 == Right 3)
   check "absent invocation omitted" (field "invocation" (toJSON root) == Nothing)
   check "false replacement exact" (field "answer" (toJSON (edits !! 1)) == Just (Bool False))
   check "null replacement exact" (field "answer" (toJSON (edits !! 2)) == Just Null)
@@ -97,6 +105,14 @@ frontendProtocolTests = do
     bytes <- right (encodeFrontendPrepared value)
     check "prepared round trip" (decodeFrontendPrepared bytes == Right value)
     check "prepared semantic JSON preservation" ((toJSON <$> decodeFrontendPrepared (bytesOf (toJSON value))) == Right (toJSON value))
+  negotiatedReply <- right (encodeFrontendPreparedFor 2 prepared)
+  check "negotiated prepared round trip" (decodeFrontendPreparedFor 2 negotiatedReply == Right prepared)
+  left "prepared reply cannot downgrade session" (decodeFrontendPreparedFor 1 negotiatedReply)
+  check "legacy prepared bytes unchanged" (encodeFrontendPreparedFor 1 prepared == encodeFrontendPrepared prepared)
+  decision2 <- right (encodeFrontendDecisionFor 2 (FrontendStart "approval")) >>= right . eitherDecodeStrict'
+  check "same-session approval" (parseEither (parseSessionDecision 2 "approval") decision2 == Right True)
+  left "cross-session approval refused" (parseEither (parseSessionDecision 1 "approval") decision2)
+  controlObservationChecks
   check "native null reply invocation retained" (field "invocation" (toJSON prepared) == Just Null)
   forM_ ["approvalId", "runId", "rootIdentity", "cwd", "descriptor", "plan", "programHash", "targetKind", "targetArguments", "policy", "personAnswering", "server", "invocation", "inputs"] $ \key ->
     left "required prepared field" (decodeFrontendPrepared (bytesOf (delete key (toJSON prepared))))
@@ -119,6 +135,66 @@ frontendProtocolTests = do
   decodedMany <- maybe (fail "distinct input validation exceeded five seconds") right manyResult
   check "large distinct metadata remains valid" (preparedInputs decodedMany == manyInputs)
   putStrLn "Frontend.Protocol checks passed"
+
+controlObservationChecks :: IO ()
+controlObservationChecks = do
+  let occurrence = OccurrenceId 0
+      attempt = AttemptId occurrence 0
+      run = RunId "control-observation"
+      envelope n event = Envelope 3 run (SeqNo n) "2026-09-10T00:00:00Z" event
+      opening = [envelope 0 (RunStartedV2 "fixture" "fixture" PersonAnswerEngine),
+        envelope 1 (OccurrenceStarted occurrence "text" "consult" "engine" "question"),
+        envelope 2 (AttemptStarted attempt "fixture")]
+      support snapshot = snapshotAttemptSteerable =<<
+        (Map.lookup occurrence (snapshotOccurrences snapshot) >>= Map.lookup attempt . snapshotOccurrenceAttempts)
+  legacy <- newControlRuntime
+  registerControlAttempt legacy attempt (Just (\_ _ -> pure (Right ())))
+  check "legacy availability is unknown" . (== Nothing) =<< registeredAttemptSteerability legacy attempt
+  unregisterControlAttempt legacy attempt
+  observed <- newControlRuntimeFor 3
+  registerControlAttempt observed attempt Nothing
+  check "registered nonsteerable evidence" . (== Just False) =<< registeredAttemptSteerability observed attempt
+  unregisterControlAttempt observed attempt
+  registerControlAttempt observed attempt (Just (\_ _ -> pure (Right ())))
+  check "registered steerable evidence" . (== Just True) =<< registeredAttemptSteerability observed attempt
+  unregisterControlAttempt observed attempt
+  check "unregistered attempt has no support" . (== Nothing) =<< registeredAttemptSteerability observed attempt
+  prefix <- right (captureSnapshotCheckpoint run opening)
+  check "start alone never implies support" (support (checkpointSnapshot prefix) == Nothing)
+  ready <- right (appendSnapshotCheckpoint prefix [envelope 3 (AttemptControlAvailability attempt True)])
+  check "native availability projected" (support (checkpointSnapshot ready) == Just True)
+  restored <- right (encodeSnapshotCheckpoint ready >>= decodeSnapshotCheckpoint)
+  check "v3 checkpoint exact restoration" (restored == ready)
+  ended <- right (appendSnapshotCheckpoint ready [envelope 4 (AttemptCompleted attempt "fixture")])
+  check "completion removes live support" (support (checkpointSnapshot ended) == Just False)
+  cancelled <- right (appendSnapshotCheckpoint ready [envelope 4 (RunCancelled "fixture")])
+  check "terminal removes live support" (support (checkpointSnapshot cancelled) == Just False)
+  left "post-completion availability refused" (appendSnapshotCheckpoint ended [envelope 5 (AttemptControlAvailability attempt True)])
+  left "unknown attempt availability refused" (appendSnapshotCheckpoint prefix [envelope 3 (AttemptControlAvailability (AttemptId occurrence 1) True)])
+  forM_ [1,2] $ \version -> left "legacy availability encode refused"
+    (encodeEnvelopeFor version ((envelope 3 (AttemptControlAvailability attempt True)) {envelopeVersion = version}))
+  bytes <- right (encodeEnvelopeFor 3 (envelope 3 (AttemptControlAvailability attempt True)))
+  left "old negotiated decoder refuses v3" (decodeEnvelopeFor [1,2] bytes)
+  left "observation version does not become control version" (encodeControlFor 3 (Control (ControlId "test") Nothing Nothing CancelRun))
+  forM_ [1,2,3] $ \version -> do
+    let start=if version==1 then RunStarted "fixture" "fixture" else RunStartedV2 "fixture" "fixture" PersonAnswerEngine
+        frame n event=Envelope version run (SeqNo n) "2026-09-10T00:00:00Z" event
+        acknowledgement ident command state=if version==1 then ControlAcknowledged ident state "fixture" else ControlAcknowledgedV2 ident state "fixture" command Nothing Nothing
+        ordinary n=frame n (acknowledgement ("ordinary_"<>T.pack(show n)) "retryOccurrence" "rejected-stale")
+    full<-right(captureSnapshotCheckpoint run (frame 0 start:map ordinary [1..256]))
+    check "all versions preserve 256 ordinary acknowledgements" (Map.size(snapshotControlAcks(checkpointSnapshot full))==256)
+    left "257th ordinary control is refused" (appendSnapshotCheckpoint full [ordinary 257])
+    let cancel=frame 257(acknowledgement "safety_cancel" "cancelRun" "accepted")
+    if version/=3 then left "legacy cancellation bound remains 256" (appendSnapshotCheckpoint full [cancel]) else do
+      safety<-right(appendSnapshotCheckpoint full [cancel])
+      check "v3 has one additional cancel-only slot" (Map.size(snapshotControlAcks(checkpointSnapshot safety))==257)
+      restoredSafety<-right(encodeSnapshotCheckpoint safety >>= decodeSnapshotCheckpoint)
+      check "v3 safety capacity checkpoint restores exactly" (restoredSafety==safety)
+      duplicate<-right(appendSnapshotCheckpoint safety [frame 258(acknowledgement "safety_cancel" "cancelRun" "accepted")])
+      check "duplicate saturated cancellation creates no new ID" (Map.size(snapshotControlAcks(checkpointSnapshot duplicate))==257)
+      rejected<-right(appendSnapshotCheckpoint safety [frame 258(acknowledgement "safety_cancel" "cancelRun" "unsupported")])
+      left "native refusal does not reopen extra cancellation ID" (appendSnapshotCheckpoint rejected [frame 259(acknowledgement "second_cancel" "cancelRun" "accepted")])
+      left "saturated correlation cannot change cancellation into ordinary control" (appendSnapshotCheckpoint safety [frame 258(acknowledgement "safety_cancel" "retryOccurrence" "unsupported")])
 
 planValue :: WorkflowDescriptor -> Value
 planValue descriptor = put "program" (object []) $ put "codes" Null $ put "fold"

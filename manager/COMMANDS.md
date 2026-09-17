@@ -28,9 +28,17 @@ configuration callback acquires the existing configuration lock without waiting,
 then holds it through the store transaction. Lock order is configuration followed
 by store. Reload, discovery, and close cannot interleave with admission. Command
 code never receives a caller-selected replacement registry or stale quota value.
-An unavailable lock or writer produces explicit storage-unavailable refusal.
-There is no internal retry loop or waiting queue. A caller may retry the exact
-same key after such a refusal, never substitute a new key to discover an outcome.
+For ordinary callers, an unavailable lock or writer produces explicit
+storage-unavailable refusal. A caller may retry the exact same key after such a
+refusal, never substitute a new key to discover an outcome.
+
+The original terminal owner can explicitly select bounded Store admission for
+reconciliation, retained dispatch coordination and effect publication through
+the corresponding `WithAdmission` functions. These retain the same opaque
+CommandAttempt or DispatchTicket and the same lifetime, epoch, revision and
+once-only dispatch fences. Each admitted Store action executes once within its
+existing allowance, including time spent waiting. No command, SQL failure,
+uncertain publication or native callback is replayed.
 
 Receipt GET first checks current credential validity. An authorization-filtered
 metadata query selects no body or receipt. The same transaction checks current
@@ -110,9 +118,11 @@ The tested fixed metadata permits 2096575 body bytes, while one additional byte
 gets SQLITE_TOOBIG. The body cannot be copied through the one-MiB result budget,
 but its exact retry still succeeds through SQLite comparison.
 
-Legacy retry and GET do not mint dispatch tickets. Every WM-010 observation
-update requires such a live ticket, so no current command API can enlarge a
-migrated legacy row with new acknowledgement or effect content. Permitted
+Legacy retry and GET do not mint dispatch tickets. WM-010 observation updates
+require such a live ticket. WM-016 additionally records validated Runtime evidence
+only for a matching bounded non-content control binding created by fresh
+acceptance. Neither path enlarges a migrated legacy raw-body row with new
+acknowledgement or effect content. Permitted
 retirement removes its large body and shrinks the row. A future owner introducing
 historical observation updates must check the native row limit or provide a
 compatible representation before enlarging these rows. A logical reservation is

@@ -60,6 +60,7 @@ import Agentic.Runtime.Protocol
     decodeEnvelopeFor,
     encodeEnvelopeFor,
     latestProtocolVersion,
+    correlatedProtocolVersion,
     latestStoreVersion,
     maxArtifactBytes,
     protocolVersion,
@@ -346,6 +347,7 @@ validateVersionPair path storeFormat protocol =
   unless
     ( (storeFormat, protocol)
         `elem` [ (storeVersion, protocolVersion),
+                 (latestStoreVersion, correlatedProtocolVersion),
                  (latestStoreVersion, latestProtocolVersion)
                ]
     )
@@ -644,7 +646,7 @@ requireStore2 :: RunStore -> IO ()
 requireStore2 store =
   unless
     ( runStoreFormatVersion store == latestStoreVersion
-        && runStoreProtocolVersion store == latestProtocolVersion
+        && runStoreProtocolVersion store `elem` [correlatedProtocolVersion, latestProtocolVersion]
     )
     (throwIO (StoreIncompatible (runStoreDirectory store) "artifacts require store format 2 and protocol version 2"))
 

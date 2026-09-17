@@ -106,7 +106,7 @@ def main():
         streams = [first + f"invocation {index}\n".encode() for index in range(len(facts))]
         expected_streams = {stream + last for stream in streams}
         save(sandbox / "producer-input.json", {"stdout": [stream.hex() for stream in streams], "stderr": last.hex(), "exit": status})
-        producer = sandbox / "test/cabal.sh"
+        producer = sandbox / "test/cabal.py"
         producer.write_text(
             "#!" + sys.executable + "\n"
             "import json,os,sys\n"
@@ -122,6 +122,9 @@ def main():
             "raise SystemExit(data['exit'])\n"
         )
         producer.chmod(0o700)
+        wrapper = sandbox / "test/cabal.sh"
+        wrapper.write_text("#!" + bash + "\nexec " + shlex.join([sys.executable, str(producer)]) + ' "$@"\n')
+        wrapper.chmod(0o700)
         # Actual filesystem obstructions, not a replacement recorder or status producer.
         if obstruction:
             allocation = sandbox / "bin/mktemp"

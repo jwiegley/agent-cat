@@ -25,9 +25,12 @@ The slot is released after storage cleanup, including callback exceptions and
 cancellation. A stored PID, generation, root identity, or native run identity
 cannot construct either lease or worker authority.
 
-One connection serves reads and writes. Admission is fail-fast, with one active
-operation and no waiting queue. The configured positive reader allowance is an
-upper bound, not a promise of parallel readers. An escaped store handle refuses
+One connection serves reads and writes. Ordinary admission is fail-fast, with one
+active operation. Original terminal-owner persistence explicitly selects
+`WaitWithinBudget` through `runReadWithAdmission` or `runTransactionWithAdmission`.
+Waiting and execution share that Store action's existing five-second allowance.
+The configured positive reader allowance is an upper bound, not a promise of
+parallel readers. An escaped store handle refuses
 after its callback scope. The scoped owner waits for in-flight database and file operations and their
 joined cleanup before closing SQLite and releasing the lease. File operations
 use one separate fail-fast slot and retain a private root plus lease duplicate.
@@ -53,12 +56,13 @@ heap or temporary-disk quotas. The pinned Unix SQLite source specifies mode
 0600 for DELETEONCLOSE temporary files. That source evidence is not an exhaustive
 platform or forced-spill test.
 
-`PRAGMA user_version` holds internal schema version 6. Startup accepts versions
-zero through six, and rejects other versions before changing journaling or
-schema. Fresh initialization, command-ledger additions, and the explicit literal
-chunk/upload migration and admission additions execute DDL, metadata and version
-publication in one immediate transaction. Version-one DDL and the version-two
-and version-three migrations remain unchanged. The frozen public managerStore compatibility stays at one.
+`PRAGMA user_version` holds internal schema version 7. Startup accepts versions
+zero through seven, and rejects other versions before changing journaling or
+schema. Fresh initialization, command-ledger additions, the explicit literal
+chunk/upload migration, and admission and control-state additions execute DDL,
+metadata and version publication in one immediate transaction. Version-one DDL
+and the version-two and version-three migrations remain unchanged. The frozen
+public managerStore compatibility stays at one.
 Failure rolls that transaction back and never publishes a connection. The
 metadata row separately stores authority epoch, stream identity, stream sequence,
 retained floor, and service revision. Epoch and stream are random 256-bit
@@ -138,6 +142,14 @@ cancellation rolls back without returning a receipt. Commit-path failure or
 uncertain rollback poisons the connection, so it cannot return another success.
 The original asynchronous exception remains distinguishable from storage errors.
 Public diagnostics do not expose SQLite errors, SQL text, paths, or private data.
+
+Waiting uses monotonic time and the admission cell only. It does not invoke SQL
+or interrupt the current holder. Masked acquisition installs token release before
+restoring the caller's action. Closure, poisoning, root identity and remaining
+budget are checked after acquisition. Exhaustion refuses before the transaction
+body or BEGIN. The SQL action and its deadline monitor both use the remaining
+allowance, without resetting it. Rollback retains its separate five-second bound.
+Admitted failures are not retried, including uncertain publication.
 
 Operations require the threaded RTS. Cancellation repeatedly interrupts the
 original SQLite operation until its thread joins. A single interrupt can precede

@@ -1,12 +1,22 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Versioned relational coordination facts. Stored identities are not capabilities.
-module Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration) where
+module Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration) where
 
 import Data.Text (Text)
 
 schemaVersion :: Int
-schemaVersion = 6
+schemaVersion = 7
+
+-- Non-content correlation bindings never reconstruct the original live payload or ticket.
+controlMigration :: [Text]
+controlMigration =
+  [ "ALTER TABLE decisions ADD COLUMN observed_order TEXT",
+    "UPDATE decisions SET observed_order=(SELECT sequence FROM invalidations WHERE resource_uri='/v1/decisions/'||decisions.id ORDER BY length(sequence),sequence LIMIT 1)",
+    "CREATE TABLE control_intents (command_id TEXT PRIMARY KEY REFERENCES commands(id) DEFERRABLE INITIALLY DEFERRED, run_id TEXT NOT NULL REFERENCES runs(id), decision_id TEXT REFERENCES decisions(id), native_command TEXT NOT NULL CHECK(native_command IN ('cancelRun','steerOccurrence','retryOccurrence','failoverOccurrence','abandonOccurrence','redirectOccurrence','answerPerson')), occurrence_id TEXT, attempt_id TEXT, generation TEXT, native_sha256 TEXT NOT NULL CHECK(length(native_sha256)=64), native_bytes INTEGER NOT NULL CHECK(native_bytes BETWEEN 1 AND 1048576), effect_sha256 TEXT CHECK(length(effect_sha256)=64), effect_bytes INTEGER CHECK(effect_bytes BETWEEN 0 AND 1048576), CHECK((effect_sha256 IS NULL)=(effect_bytes IS NULL)), CHECK(attempt_id IS NULL OR occurrence_id IS NOT NULL), CHECK((decision_id IS NULL)=(generation IS NULL))) STRICT",
+    "CREATE TRIGGER control_intents_immutable BEFORE UPDATE ON control_intents BEGIN SELECT RAISE(ABORT,'control intent immutable'); END",
+    "CREATE TRIGGER control_intents_retained BEFORE DELETE ON control_intents BEGIN SELECT RAISE(ABORT,'control intent retained'); END"
+  ]
 
 schemaStatements :: [Text]
 schemaStatements =
