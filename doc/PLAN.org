@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-17 Thu 10:18]
+:MODIFIED: [2026-09-17 Thu 10:43]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -9246,6 +9246,12 @@ Refocus 2026-09-17T16:58:08.786387+00:00. Next deadline 2026-09-17T17:58:08.7863
 The review selected L04 outer root-role bucket hygiene. Parent inspected RootRoleTests, CaptureTests and direct test-main/capture-script references. Indexed outline/importer resolution remains unavailable, not evidence of no importers. At2026-09-17T17:15:50.902001+00:00, parent authorized only isolated terminal-role-bucket-evidence.b7796fr5. Workera4fc8e4d-27fd-48b5-9d3f-2a1477a98921 may edit only CaptureTests.hs and RootRoleTests.hs, parameterizing/reusing the existing allocation/action seam and filesystem assertions instead of cloning them. Preserve both literal prefixes, existing L03 data entry/results/summary, native bodies/marker bindings, descriptor brackets, replacement deletion/restoration, marker/absence/FIFO/symlink refusals and Capture finalizers/bounds.1017source/support files are bound, excluding mutable tracking. Warning-fatal complete-module/C compilation of explicit capture and root-role DATA-only mains, all four N1/N8 data runs in fresh temporary roots and source-bound old root-role allocation/finalizer reds are allowed. No native capture/root-role, Runtime PrivateRoot/state-role/publication/FIFO/symlink/Worker/Store/group/backend/signal fixture, runtime-contract/full policies, package, canonical edit, new module or additional source path is authorized. L03/L04 preimages, L05, A15 and other blockers remain, with WM-016 unaccepted and acceptance15/44 plus G0 unchanged.
 
 Refocus 2026-09-17T17:18:42.663809+00:00. Next deadline 2026-09-17T18:18:42.663809+00:00. Next: isolated L04 shared-owner outer-hygiene remedy and independent review.
+
+2026-09-17 L04 reviewc26db081-a7b3-4d2c-9f04-5e00a998703b found no issues, conditional on parent integrity. Parent verification passed3736 comparisons:1017canonical/source-copy bindings, only two edited files,67 completed identities, unchanged native bodies/role bindings/helpers, one-way RootRoleTests-to-CaptureTests import, unchanged reused L03 assertions/payloads plus explicit prefix observation, three warning-fatal builds, four data passes, ten original joins,12 actual retained buckets and two source-bound old role-finalizer reds. Earlier Z/source/raw/archive remain unchanged.
+
+At2026-09-17T17:36:46.288554+00:00, parent separately authorized exact canonical two-file L04 integration. Fresh complete-module/C data-main builds passed capture29.934385459s and role28.932322333s with empty stderr. Capture and role N1/N8 all passed in separate private TMPDIRs, six original Popen joins/null failures/zero interruptions. All1017bound nontracking inputs stayed unchanged during verification. Twelve canonical bucket trees match isolated prefixes/bytes/modes, and existing canonical L03 data bytes/modes remain unchanged.47completed non-build identities were collected after return, own binaries separately bound, compiler intermediates retained in place. Evidence root terminal-role-bucket-canonical.pprwk3v3. No native capture/rootRoleTests, Runtime PrivateRoot/state-role/publication/FIFO/symlink/Worker/Store/group/backend/signal fixture, descriptor-closure execution, runtime-contract/full policies or package operation ran. Separate documentation checking includes its ordinary static Haskell probe. Only L04 outer disposal is addressed; L03/L04 preimages, L05/A15 and other blockers remain. Committed fess is next, with WM-016 unaccepted and acceptance15/44 plus G0 unchanged.
+
+Refocus 2026-09-17T17:43:10.958410+00:00. Next deadline 2026-09-17T18:43:10.958410+00:00. Next: exact L04 commit and committed fess, then one next reviewed policies remedy.
 #+end_example
 
 ** Dependencies
