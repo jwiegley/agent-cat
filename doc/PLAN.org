@@ -12462,3 +12462,69 @@ HIGH (validated, machine-checked): at Cost with mA=d=fin 0, mB=fin 3, all of fin
 :ORIGINAL_SIZE: 0
 :END:
 
+* DONE [#C] Use the /wf namespace for every Pi extension command
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-jg00
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-17 Thu 15:56]
+:MODIFIED: [2026-09-17 Thu 16:01]
+:CREATED_BY: johnw
+:FINISHED: [2026-09-17 Thu 16:01]
+:CLOSE_REASON: Renamed all remaining Pi slash commands to /wf-*, preserving /wf current-session behavior, the alternate-target wizard as /wf-launch, and the agent_cat_workflow API. Updated both current READMEs. Registration regression failed before the fix and passes now. In the Nix shell, typecheck, all 94 extension tests, eight integration cases, and both documentation gates passed. The remote integration script remains blocked by the separately recorded missing @earendil-works/chord dependency.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Replace the remaining /workflow command namespace in the Pi extension with /wf names. Preserve /wf current-session launch, expose the alternate-target wizard as /wf-launch, and rename help, controls, and grant guidance to /wf-*. Update current documentation and add registration regression coverage that rejects the old namespace. Prior acat-l3z renamed only the catalogue, and acat-4qa retained compatibility commands.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-jg00",
+    "depends_on_id": "acat-l3z",
+    "type": "discovered-from",
+    "created_at": "2026-09-17T22:56:59.233286Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* TODO [#C] Declare the Chord prerequisite for the Pi integration gate
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-3sq1
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-09-17 Thu 16:01]
+:MODIFIED: [2026-09-17 Thu 16:01]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A clean npm ci in ext-pi followed by npm run test:integration passes all eight Vitest integration cases, then test/pi-remote-current.mjs fails with ERR_MODULE_NOT_FOUND for @earendil-works/chord. The package is imported directly but is absent from ext-pi/package.json and its installed dependency tree. Reproduced at base 1858e000 while checking the /wf rename. Reconcile the integration prerequisite with the pinned package setup and verify the complete gate after a clean install. No dependency changes were made during the command rename.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-3sq1",
+    "depends_on_id": "acat-jg00",
+    "type": "discovered-from",
+    "created_at": "2026-09-17T23:01:38.597073Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+

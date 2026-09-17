@@ -10,7 +10,7 @@ to runs. It never searches the file system or `PATH` for a runner.
 ## Boundary
 
 Pi loads `src/index.ts`, which registers the `/wf` command, the
-`/workflow-...` commands, and the `agent_cat_workflow` tool. The extension
+`/wf-...` commands, and the `agent_cat_workflow` tool. The extension
 imports no Haskell code and never interprets a `RawProgram` or a `Plan`. It
 speaks three versioned process protocols of `agentic-run`: the descriptor that
 `list --json` publishes (version 3, while versions 1 and 2 remain accepted), the
@@ -122,26 +122,26 @@ for the control descriptor.
 | Command | Purpose |
 |---|---|
 | `/wf [RUNNER:WORKFLOW]` | Launch in the current Agent Deck session. Omit the name to select from the catalogue. |
-| `/workflow-help RUNNER:WORKFLOW` | Show the exact `help` output of the runner. |
-| `/workflow-plan RUNNER:WORKFLOW` | Show `plan --json --raw` with the actual inputs. |
-| `/workflow RUNNER:WORKFLOW` | Compatibility launch wizard for alternate targets. |
-| `/workflow-status` | Summaries of active and recent runs. |
-| `/workflow-monitor [RUN_ID]` | Live monitor in authored order. The arrow keys or `j` and `k` move, Enter folds, and Escape closes. |
-| `/workflow-steer [RUN_ID]` | Steer one exact attempt. |
-| `/workflow-retry [RUN_ID]` | Retry an occurrence that waits after automatic recovery is spent. |
-| `/workflow-recover [RUN_ID]` | Choose one runner-offered retry, fail-over, or abandon action. |
-| `/workflow-redirect RUN_ID OCCURRENCE_ID RESERVED_TARGET` | Redirect a scheduler-reserved occurrence during the thirty-second decision window. |
-| `/workflow-grant` | Issue a one-time scoped grant for model-initiated starts, lineage, or controls. |
-| `/workflow-restart PARENT_RUN_ID` | Start a new run from scratch with immutable lineage. |
-| `/workflow-resume PARENT_RUN_ID` | Resume a compatible run semantically. |
-| `/workflow-fork PARENT_RUN_ID` | Fork a workflow immutably, with drops or replacements of persisted answers. This is distinct from a Pi conversation fork. |
-| `/workflow-diff CHILD_RUN_ID` | Compare lineage, identity, answer edits, and outcomes with the immutable parent. |
-| `/workflow-cancel RUN_ID` | Cancel an owned live run after approval. |
+| `/wf-help RUNNER:WORKFLOW` | Show the exact `help` output of the runner. |
+| `/wf-plan RUNNER:WORKFLOW` | Show `plan --json --raw` with the actual inputs. |
+| `/wf-launch RUNNER:WORKFLOW` | Launch wizard for alternate targets. |
+| `/wf-status` | Summaries of active and recent runs. |
+| `/wf-monitor [RUN_ID]` | Live monitor in authored order. The arrow keys or `j` and `k` move, Enter folds, and Escape closes. |
+| `/wf-steer [RUN_ID]` | Steer one exact attempt. |
+| `/wf-retry [RUN_ID]` | Retry an occurrence that waits after automatic recovery is spent. |
+| `/wf-recover [RUN_ID]` | Choose one runner-offered retry, fail-over, or abandon action. |
+| `/wf-redirect RUN_ID OCCURRENCE_ID RESERVED_TARGET` | Redirect a scheduler-reserved occurrence during the thirty-second decision window. |
+| `/wf-grant` | Issue a one-time scoped grant for model-initiated starts, lineage, or controls. |
+| `/wf-restart PARENT_RUN_ID` | Start a new run from scratch with immutable lineage. |
+| `/wf-resume PARENT_RUN_ID` | Resume a compatible run semantically. |
+| `/wf-fork PARENT_RUN_ID` | Fork a workflow immutably, with drops or replacements of persisted answers. This is distinct from a Pi conversation fork. |
+| `/wf-diff CHILD_RUN_ID` | Compare lineage, identity, answer edits, and outcomes with the immutable parent. |
+| `/wf-cancel RUN_ID` | Cancel an owned live run after approval. |
 
 The `agent_cat_workflow` tool lets a model discover, start, inspect, control,
 restart, resume, or fork runs. Starts from the tool are limited to the
 scripted, tool-free child, and known remote targets. Every mutation requires an
-unused matching grant from `/workflow-grant`, and an unresolved or expired grant
+unused matching grant from `/wf-grant`, and an unresolved or expired grant
 refuses before anything is spent. Controls wait for the terminal acknowledgement
 of agent-cat, and they report `delivered`, `rejected-stale`, `unsupported`, or
 `failed` verbatim. A request is never presented as a success.
@@ -149,7 +149,7 @@ of agent-cat, and they report `delivered`, `rejected-stale`, `unsupported`, or
 ## Routing selection
 
 `/wf` always uses the current Agent Deck session and does not inspect or load
-routing configuration. `/workflow` offers routing configuration as a distinct
+routing configuration. `/wf-launch` offers routing configuration as a distinct
 live target when a trusted descriptor-version-3 runner advertises inspection.
 For that target, Pi invokes `agentic-run --routing --json`, offers the configured
 persona or another user-owned persona, and offers optional concrete model aliases
@@ -173,7 +173,7 @@ have mode 0600 and store only the selected non-secret argument vector.
 | Scripted | The registered canned table. | Offline. No command runs. |
 | Routing configuration | Configured profile engines. Every engine-bound question must have a configured pin. | Containment depends on every selected engine. |
 | Native ACP | One explicit adapter plus optional raw pin routes. The built-in adapters are `stub`, `claude`, `codex`, and `droid`, and `droid` launches `droid exec --output-format acp`. | The scratch directory of agent-cat, which is not an operating-system sandbox. |
-| Native agent-deck | The Agent Deck session that `/wf` inherits, or a session chosen in `/workflow`, plus optional raw pin routes. | The workspace of that session. |
+| Native agent-deck | The Agent Deck session that `/wf` inherits, or a session chosen in `/wf-launch`, plus optional raw pin routes. | The workspace of that session. |
 | Current Pi session | Visible, exclusive injected turns in the current project. | Not a sandbox. |
 | Owned Pi child | An in-memory Pi session with tools disabled. | The scratch directory of agent-cat. |
 | Remote Pi session | A known or discovered session under an exclusive lease. | Its remote workspace, which is not a sandbox. |
@@ -231,7 +231,7 @@ invalid stored-answer schema, or any started or completed parent effect also
 refuses. Restart is always a new run.
 Fork inherits only matching bare-question answers. It can drop or replace
 selected answers after the schema-validating preflight of the runner, and it
-never mutates its parent. `/workflow-diff` reports the durable edit hashes and
+never mutates its parent. `/wf-diff` reports the durable edit hashes and
 the resulting occurrence differences. Steered answer groups are marked as not
 replayable.
 

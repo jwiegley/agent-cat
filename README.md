@@ -366,7 +366,7 @@ protocol v2, shared frontend manifests, terminal result references, and public
 progress. Descriptor-v1 and descriptor-v2 protocol-v1 runners retain their
 existing launch flow. The `/wf`
 command launches a workflow in the current Agent Deck session, and a family of
-`/workflow-...` commands covers help, plan, status, monitoring, steering,
+`/wf-...` commands covers help, plan, status, monitoring, steering,
 recovery, redirect, grants, lineage, and cancellation. The extension never
 interprets a `RawProgram` or a `Plan`; agent-cat remains the only workflow
 interpreter. `ext-pi/README.md` gives its configuration, commands, targets, and

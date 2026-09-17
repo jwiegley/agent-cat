@@ -176,7 +176,7 @@ export default function agentCatExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("workflow-help", {
+  pi.registerCommand("wf-help", {
     description: "Show exact runner help for an agent-cat workflow",
     handler: async (args, ctx) => {
       const selected = selectWorkflow(await discover(ctx), args.trim());
@@ -185,7 +185,7 @@ export default function agentCatExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("workflow-plan", {
+  pi.registerCommand("wf-plan", {
     description: "Show the runner's raw plan for an agent-cat workflow",
     handler: async (args, ctx) => {
       const selected = selectWorkflow(await discover(ctx), args.trim());
@@ -198,8 +198,8 @@ export default function agentCatExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("workflow", {
-    description: "Run an agent-cat workflow",
+  pi.registerCommand("wf-launch", {
+    description: "Run an agent-cat workflow with an explicit execution target",
     getArgumentCompletions: async (prefix) => {
       if (!lastContext) return null;
       const catalogue = await discover(lastContext);
@@ -209,8 +209,8 @@ export default function agentCatExtension(pi: ExtensionAPI): void {
       return items.length ? items : null;
     },
     handler: async (args, ctx) => {
-      if (!ctx.hasUI) return ctx.ui.notify("/workflow requires interactive approval and is unavailable in this mode", "error");
-      if (!ctx.isProjectTrusted()) return ctx.ui.notify("/workflow requires a trusted project", "error");
+      if (!ctx.hasUI) return ctx.ui.notify("/wf-launch requires interactive approval and is unavailable in this mode", "error");
+      if (!ctx.isProjectTrusted()) return ctx.ui.notify("/wf-launch requires a trusted project", "error");
       const catalogue = await discover(ctx);
       const selected = selectWorkflow(catalogue, args.trim());
       if (!selected) return ctx.ui.notify(`Unknown workflow: ${args.trim()}`, "error");
@@ -319,17 +319,17 @@ export default function agentCatExtension(pi: ExtensionAPI): void {
   });
 
   for (const operation of ["restart", "resume", "fork"] as const) {
-    pi.registerCommand(`workflow-${operation}`, {
+    pi.registerCommand(`wf-${operation}`, {
       description: `${operation} an agent-cat workflow as a new immutable child run`,
       handler: async (args, ctx) => {
         const parentRunId = args.trim();
-        if (!parentRunId) return ctx.ui.notify(`Usage: /workflow-${operation} PARENT_RUN_ID`, "warning");
+        if (!parentRunId) return ctx.ui.notify(`Usage: /wf-${operation} PARENT_RUN_ID`, "warning");
         await launchLineage(operation, parentRunId, ctx);
       },
     });
   }
 
-  pi.registerCommand("workflow-diff", {
+  pi.registerCommand("wf-diff", {
     description: "Show immutable lineage differences for a child run",
     handler: async (args, ctx) => {
       const child = supervisor.get(args.trim());
@@ -369,7 +369,7 @@ export default function agentCatExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("workflow-status", {
+  pi.registerCommand("wf-status", {
     description: "Show recent agent-cat workflow runs",
     handler: async (_args, ctx) => {
       const rows = supervisor.snapshots().map((snapshot) => `${snapshot.runId}  ${snapshot.status}  ${snapshot.workflow ?? "starting"}`);
@@ -377,12 +377,12 @@ export default function agentCatExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("workflow-monitor", {
+  pi.registerCommand("wf-monitor", {
     description: "Inspect one active or recent agent-cat workflow run",
     handler: async (args, ctx) => {
       let runId = args.trim();
       if (!runId) {
-        if (!ctx.hasUI) return ctx.ui.notify("Usage: /workflow-monitor RUN_ID", "warning");
+        if (!ctx.hasUI) return ctx.ui.notify("Usage: /wf-monitor RUN_ID", "warning");
         const snapshots = supervisor.snapshots().reverse();
         if (snapshots.length === 0) return ctx.ui.notify("No workflow runs", "info");
         const selected = await ctx.ui.select("Workflow run", snapshots.map((snapshot) => `${snapshot.runId}  ${snapshot.status}  ${snapshot.workflow ?? "starting"}`));
@@ -404,7 +404,7 @@ export default function agentCatExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("workflow-steer", {
+  pi.registerCommand("wf-steer", {
     description: "Steer one active agent-cat attempt",
     handler: async (args, ctx) => {
       if (!ctx.hasUI) return ctx.ui.notify("workflow steering requires interactive approval", "error");
@@ -434,7 +434,7 @@ export default function agentCatExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("workflow-retry", {
+  pi.registerCommand("wf-retry", {
     description: "Retry one recoverable agent-cat occurrence",
     handler: async (args, ctx) => {
       if (!ctx.hasUI) return ctx.ui.notify("workflow retry requires interactive approval", "error");
@@ -458,7 +458,7 @@ export default function agentCatExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("workflow-recover", {
+  pi.registerCommand("wf-recover", {
     description: "Choose retry, failover, or abandon for a recoverable occurrence",
     handler: async (args, ctx) => {
       if (!ctx.hasUI) return ctx.ui.notify("workflow recovery requires interactive approval", "error");
@@ -486,13 +486,13 @@ export default function agentCatExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("workflow-redirect", {
+  pi.registerCommand("wf-redirect", {
     description: "Redirect one dispatch-pending occurrence to a reserved target",
     handler: async (args, ctx) => {
       if (!ctx.hasUI) return ctx.ui.notify("workflow redirect requires interactive approval", "error");
       if (!ctx.isProjectTrusted()) return ctx.ui.notify("workflow redirect requires a trusted project", "error");
       const [runId, occurrenceId, target] = args.trim().split(/\s+/, 3);
-      if (!runId || !occurrenceId || !target) return ctx.ui.notify("Usage: /workflow-redirect RUN_ID OCCURRENCE_ID RESERVED_TARGET", "warning");
+      if (!runId || !occurrenceId || !target) return ctx.ui.notify("Usage: /wf-redirect RUN_ID OCCURRENCE_ID RESERVED_TARGET", "warning");
       const run = supervisor.get(runId);
       if (!run) return ctx.ui.notify(`Unknown run ${runId}`, "error");
       try {
@@ -503,7 +503,7 @@ export default function agentCatExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("workflow-cancel", {
+  pi.registerCommand("wf-cancel", {
     description: "Cancel one owned agent-cat workflow run",
     handler: async (args, ctx) => {
       if (!ctx.hasUI) return ctx.ui.notify("workflow cancellation requires interactive approval", "error");
@@ -585,10 +585,10 @@ function parseLineageEdits(value: string | undefined): LineageEdit[] {
 }
 
 function grantError(scope: string) {
-  return { content: [{ type: "text" as const, text: `${scope} requires an unused matching grantId from /workflow-grant` }], details: {}, isError: true };
+  return { content: [{ type: "text" as const, text: `${scope} requires an unused matching grantId from /wf-grant` }], details: {}, isError: true };
 }
 
-  pi.registerCommand("workflow-grant", {
+  pi.registerCommand("wf-grant", {
     description: "Issue a one-time scoped grant for model-initiated workflow mutation",
     handler: async (_args, ctx) => {
       if (!ctx.hasUI) return ctx.ui.notify("grant issuance requires interactive UI", "error");
@@ -604,7 +604,7 @@ function grantError(scope: string) {
   pi.registerTool({
     name: "agent_cat_workflow",
     label: "agent-cat workflow",
-    description: "Discover, launch, inspect, control, restart, resume, or fork agent-cat workflows. Every model-initiated mutation requires a one-time /workflow-grant token.",
+    description: "Discover, launch, inspect, control, restart, resume, or fork agent-cat workflows. Every model-initiated mutation requires a one-time /wf-grant token.",
     parameters: Type.Object({
       action: Type.Union([
         Type.Literal("list"), Type.Literal("status"), Type.Literal("inspect"), Type.Literal("start"), Type.Literal("restart"), Type.Literal("resume"), Type.Literal("fork"),
