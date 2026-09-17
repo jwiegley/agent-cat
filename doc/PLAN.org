@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-17 Thu 00:34]
+:MODIFIED: [2026-09-17 Thu 01:05]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -9054,6 +9054,20 @@ NEW allowOriginalCompletionReportFaultFixture permission appliesonlytothefreshso
 Preservationisnotcurrentlyauthorized. Bothoriginalowners return/timing/join/error/interruptionfactsmustreachparentthroughneed_decision,followedbyanexplicitACKbeforecopyorinterpretation. Queuedprogressisnotreceiptproof. WithoutACK,oronfailure/uncertainownership,stopwithoutretry/repair/recopy/PIDadoption/recovery/nextgate. Destination-onlyfaithfulmetadataoperationsmustpreserveactualpackage-linkmode700,notrepair/normalizesource,targetoroldcopies. Existingbudgetsandfailureprecedenceareunchanged;noaggregate/nativeouterkillingdeadline. The45minutewakeisattentiononly.
 
 Refocus completed at 2026-09-17T07:30:51.266846+00:00, with next deadline 2026-09-17T08:30:51.266846+00:00. FivecurrentSOURCEowninggatesandRAWStore/Commandsarescopedpasses. RAWAdmission/ingestion/Controlsandplatform/client/canonical/finalacceptanceremainunproved,withWM-001throughWM-015andG0theonlyacceptedpackages/gate.
+
+Exact RAW Admission run 78c103d3-6fc4-470a-8ce2-ac7518468ebb returned gate exit 0 after 375.760610583995 seconds and launcher exit 0 after 376.0700289580127 seconds. Both original owners joined with null failure fields and zero interruptions. The child blocked on request dc5269a6-3023-4752-bb81-5fe61ff29591. Parent checked the return records and absent capture, then granted one copy through explicit reply. ACK persistedAt was 2026-09-17T07:40:33.842239+00:00, SHA256 5adad4ac04c1822d976829841b10ec6214aa624ac6c77974380bc51b711729cf. Preservation began at 07:41:27.681915 after the reply. Both permissions are consumed.
+
+First capture, unchanged analyzer and supplemental validator returned zero. Parent verification passed 7,608 comparisons over 2,525 entries, including 2,048 regular files, 475 directories, two actual links, 40 databases and four quarantine WAL/SHM sidecars. Both links preserve mode0700, target/type/mtime and recorded current source identity. Original target bytes also agree. No repair or recopy occurred, and old failed SOURCE mode0755 copies remain separate failed evidence. Raw2,521 entries are unchanged before the four own-built executable additions.
+
+The selected outcomes cover 19 default families per capability, 93 PASS plus 2,000 QuickCheck cases each, nine exact completion-child assertions, 36 opacity consumers, raw594 package recapture/exclusions/declared-link refusal and the interruption build with two 19-PASS cases. Own helper records retain zero exits, joins, errors and budgets. Unrecorded top/opacity/package status classes remain checked-flow inferences. Exact raw modes, all twelve source/raw differences, source1021 and archive bindings remain unchanged. No database API or native/compiler/helper rerun occurred.
+
+The linked C fault retains its precise pre-signal exit probe, real signal call and conditional single simulated EIO report. Two actual 2,456-byte C objects were checked under their own original checker build directories and retained in place, not claimed as copied libraries. No standalone library, kernel EIO, post-signal exit observation or general containment claim was introduced. Four compiler directories remain retained read-only by scope. New quarantine evidence grants no release or historical recovery authority.
+
+Review 27a3c24e-0b86-4842-8867-f652f4c7e967 found no issues with full parent verification as a condition. The completed 7,608-check report satisfies it, and parent accepted this exact raw Admission scope at 2026-09-17T08:02:05.726338+00:00. The reviewer did not independently rerun hashes or tests. Five current SOURCE owning gates and RAW Store, Commands and Admission pass. RAW ingestion and Controls, platform/client/canonical checks and WM-016 acceptance remain open.
+
+A new preparation-only decision assigns terminal-raw-ingestion.midhqa44 to worker ad25994e-0433-4727-81a8-0fefa1d87c1f. It must bind the exact raw package, fourteen outcomes, four positives and ten specific negatives, seven builds and fourteen own-built paths. Source ingestion results remain references only. Latest both-owner, explicit ACK, no-follow first-capture and raw-mode checks are required. No gate, compiler, enumeration, validator, Store, database, native/provider or process-control invocation is authorized during preparation. No previous fault, signalling, retry or historical-resource permission transfers.
+
+Refocus completed at 2026-09-17T08:05:29.897806+00:00, with next deadline 2026-09-17T09:05:29.897806+00:00. Prepare and review raw ingestion without widening scope or repeating completed gates. Frozen full acceptance criteria and historical incident limits remain unchanged.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
