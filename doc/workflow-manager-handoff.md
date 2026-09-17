@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T11:21:20.327738+00:00`. The next deadline is
-`2026-09-17T12:21:20.327738+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T11:33:43.030675+00:00`. The next deadline is
+`2026-09-17T12:33:43.030675+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -59,9 +59,11 @@ mode0700 package links. Exact raw ingestion also has scoped clearance after
 its original run, explicit acknowledgement, capture and full verification.
 Exact raw Controls also has scoped clearance after its original run, explicit
 acknowledgement, faithful capture, review and full parent verification. All ten
-current macOS SOURCE/RAW owning lanes pass. A read-only acceptance reconciliation
-is active. No integration, broader gate, platform/client work, old-resource
-recovery or WM-016 acceptance is authorized by those results.
+current macOS SOURCE/RAW owning lanes pass. Reconciliation identified remaining
+changed-layer compatibility and integration evidence. Data-only preparation of
+the complete candidate policies gate is active but has confirmed retention
+blockers. No integration, broader execution, platform/client work, old-resource
+recovery or WM-016 acceptance is authorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -1085,13 +1087,36 @@ snapshots that must not be overlaid. The other 44 paths, including five new
 files, form the candidate integration surface. Frozen document hashes match.
 No source was integrated.
 
-Read-only reconciliation run `8b238e8c-8702-45b2-9491-8ab5b13fa7b4` is assessing
-the frozen WM-016 clauses and changed-layer gates against that surface. Its
-evidence root is `terminal-acceptance-reconciliation.o5j56l8r`. It must separate
-current prerequisites from later client/release packages and recommend one
-bounded next work unit. No integration, compiler/gate, remote, platform/client,
-model or recovery action is authorized. Optional TUI and current platform,
-compatibility, conformance and documentation ceilings remain explicit.
+Reconciliation `8b238e8c-8702-45b2-9491-8ab5b13fa7b4` confirms core WM-016
+behavior on the candidate but identifies a package-closure evidence gap.
+The 44 implementation paths change shared Runtime, CLI, storage and protocol
+behavior. Section9.2 therefore still requires broader compatibility checks,
+including relevant Cabal suite execution, complete policies, retained CLI and
+engine gates, workflow conformance, changed candidate documentation and affected
+local-client/platform evidence. New service-client implementations and manager
+refinement remain later packages, not work to invent inside WM-016.
+
+Canonical integration requires fresh parent baseline checks, an exact reviewed
+44-path delta excluding stale tracking, and aggregate compatibility review of
+negotiation, legacy defaults, migration and cancellation-only capacity. The
+approved waiting policy is settled. No candidate pass may be relabeled as
+canonical execution, installation or deployment.
+
+At `2026-09-17T11:28:40.361345+00:00`, parent authorized data-only preparation
+under `terminal-source-policies.fddhjig5`. Worker
+`e6c09e88-7490-4905-92a1-0f1e09504265` must map the complete policies invocation,
+including its transitive manager gates and final frontend/policy/CLI probes.
+No compiler, gate, database, native/process-control, remote/client, model/oracle,
+source or integration operation is authorized.
+
+Preparation is blocked on source-defined artifact retention. Policies deletes
+answer-schema vectors through an EXIT trap, and runtime capture deletes its
+whole temporary root, including three built executables and compiler outputs,
+before returning. Parent confirmed the blocker without executing anything.
+The worker may complete the source inventory and propose a minimal retention
+remedy for separate review. No live capture, script change, fabricated evidence
+or preservation waiver is permitted. Historical limits and all ten scoped
+owning-lane results remain unchanged.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
