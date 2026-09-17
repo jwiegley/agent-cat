@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 17:13]
+:MODIFIED: [2026-09-16 Wed 17:49]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8916,6 +8916,14 @@ Refocus completed at 2026-09-16T23:45:49.017807+00:00, with next deadline 2026-0
 Complete source Admission preparation 1479eb5f-e0d1-4d20-909e-084e3af6b39f completed with all 19 default N1/N8 families, 36 opacity consumers, distinct positive package-boundary evidence and compiled interruption N1/N8. Parent verified 1,530 identities and 16 inert preservation checks, with 54 prior resource footprints excluded. Review ec4e9c41-4b14-4fc1-a8f9-231696d12958 found no issues at preparation scope. Package-boundary has no invented native fixtures, executable records or rejected destination.
 
 The parent refreshed zero-native preflight and separately authorized one complete source Admission gate at 2026-09-17T00:09:39.321793+00:00. Run 3cf17b57-5ffb-40e7-ae2d-a0010150ba4c owns the original gate/launcher handles in terminal-source-admission.KiEgo5Jc. Authority explicitly includes only the unchanged original-owned completion-report fault: admission_cleanup_fault.c delegates real signalling, then injects one EIO report after successful SIGKILL and observed exited leader. It does not authorize skipped cleanup, a kernel-error claim, generic PID signalling or historical recovery. Existing retries and reopen comparisons concern only fresh original test owners. All budgets, source bodies and predicates remain unchanged. No result, raw lane, other gate or WM-016 acceptance is claimed. Original return notice must precede raw preservation and interpretation.
+
+Source Admission gate 3cf17b57-5ffb-40e7-ae2d-a0010150ba4c returned exit 0 after 351.6026165840012 seconds, with original gate/launcher joins and no outer failure or interruption. Immediate notice preceded preservation. Read-only validation retained all 19 default families per N1/N8, 36 opacity consumers, positive package-boundary predicates and interruption build/N1/N8 results. This is not accepted gate success because preservation has a concrete P1.
+
+Two package-boundary symlinks were recorded as mode0700 but their new copied links are mode0755. The preserver checked only target text, so its exit0 and success field do not establish mode fidelity. Original recorded modes/targets/mtimes still agree, while no pre-copy inode values were recorded. Parent authorized only read-only validation and a partial report, with no repair, chmod, recopy or further gate. Parent verification passed 5,761 identities over available regular/directory/binary/source evidence and confirmed both mismatches. The snapshot has 2,525 entries, including 2,048 regular files, 475 directories, two symlinks, 40 databases and four preserved quarantine WAL/SHM files. No post-return database API was used. CompleteModeFaithfulPreservation, completeAcceptedGateSuccess and permissionToAdvance remain false.
+
+Review 845e9b53-10f9-4c53-ac65-def4687b4fe1 confirmed the copying defect and recommended a separately authorized new capture only if retained originals agree with previously recorded fields. It does not justify a native rerun. Preparation-only run d87bb2c8-8a18-4066-83fa-a08d4e16a9c5 owns terminal-admission-capture-fix.l8ioyj5u to correct no-follow symlink metadata preservation and test it with inert fixtures. No actual recapture or mutation of originals, old copies, manifests, source/package members or link targets is authorized now. A future capture must claim fidelity at its new time, not historical inode continuity or atomic database state.
+
+Refocus completed at 2026-09-17T00:46:37.675187+00:00, with next deadline 2026-09-17T01:46:37.675187+00:00. The checkpoint was less than one minute late during read-only verification, and that lapse was disclosed. Next work is closing the evidence-copy gap, not repeating native tests or weakening acceptance. Full WM-001 through WM-044 and G0 through G5 scope and the WM-001 through WM-015/G0 accepted boundary remain unchanged.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
