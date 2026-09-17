@@ -43,11 +43,12 @@ a fresh default-target build/package passed. A reviewed wrapper-probe portabilit
 fix is packaged and data-checked without changing source/raw modes. The complete
 source Store gate passed with parent verification and independent scoped
 clearance. The complete source Commands gate also passed parent verification
-and independent scoped review. The source Admission gate returned zero, but two
-copied symlink modes differ from their recorded originals. Available predicates
-are retained in a partial report, not complete accepted gate success. A no-follow
-preserver correction is being prepared with inert tests only. Actual recapture,
-further gates, old-resource recovery and acceptance remain unauthorized.
+and independent scoped review. The source Admission gate returned zero, but its
+first preservation copied two symlink modes incorrectly. A separately reviewed
+copier and authorized new capture now preserve those modes faithfully. Parent
+verification passed, and independent result disposition is active. Old copies
+and failed preservation records remain unchanged. Further gates, old-resource
+recovery and WM-016 acceptance remain unauthorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -782,11 +783,32 @@ Review `845e9b53-10f9-4c53-ac65-def4687b4fe1` confirmed this copy defect. A new
 separately authorized capture can close it only if retained originals match the
 available earlier fields, with no-follow destination metadata and before/after
 checks. This does not justify a native rerun or an atomic snapshot claim.
-Preparation-only run `d87bb2c8-8a18-4066-83fa-a08d4e16a9c5` owns
-`terminal-admission-capture-fix.l8ioyj5u` for the minimal copier correction and
-inert tests. No actual recopy, original/old-copy chmod or further gate is
-authorized. Remaining source/raw/platform/client/canonical verification and
-WM-016 acceptance stay outstanding.
+Preparation run `d87bb2c8-8a18-4066-83fa-a08d4e16a9c5` completed the corrected
+no-follow copier and 32 inert checks under `terminal-admission-capture-fix.l8ioyj5u`.
+Review `44d902a4-b2f5-4870-9979-acee676cbb15` cleared this preparation. Parent
+verified 3,309 identities and repeated agreement checks on 2,525 original
+artifacts and 1,021 source files before authorizing one exclusive capture at
+`2026-09-17T01:10:36.019015+00:00`. This permission excluded native rerun, retry,
+original or old-copy changes and gate acceptance.
+
+The capture returned zero and recorded fidelity at the new capture time,
+`2026-09-17T01:10:44.114714+00:00`. Both new links preserve mode0700, type, target
+and mtime. Old mode0755 copies and failed-preservation flags remain unchanged.
+The new capture is at `terminal-admission-capture-fix.l8ioyj5u/capture`.
+Its `completeGateClaim` remains false, and capture authority is consumed.
+
+Parent result verification passed 9,268 checks across originals, new and old
+copies, source, archive and actual executable identities. It also checked
+19 default families per capability, 93 PASS lines and 2,000 QuickCheck cases
+each, nine completion-child PASS lines each, 36 exact opacity consumers and
+the package/interruption predicates. The four quarantine sidecars remain raw.
+No database API or native/compiler/helper rerun occurred.
+
+Independent disposition `b257493b-115c-484d-8096-932e33ad4575` is active. It must
+decide whether the faithful new capture closes the source Admission evidence
+gap. No old snapshot repair, historical pre-first-copy inode continuity, atomic
+database state, resource recovery or WM-016 acceptance is claimed. Remaining
+source/raw/platform/client/canonical verification stays outstanding.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.

@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 17:49]
+:MODIFIED: [2026-09-16 Wed 18:30]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8924,6 +8924,14 @@ Two package-boundary symlinks were recorded as mode0700 but their new copied lin
 Review 845e9b53-10f9-4c53-ac65-def4687b4fe1 confirmed the copying defect and recommended a separately authorized new capture only if retained originals agree with previously recorded fields. It does not justify a native rerun. Preparation-only run d87bb2c8-8a18-4066-83fa-a08d4e16a9c5 owns terminal-admission-capture-fix.l8ioyj5u to correct no-follow symlink metadata preservation and test it with inert fixtures. No actual recapture or mutation of originals, old copies, manifests, source/package members or link targets is authorized now. A future capture must claim fidelity at its new time, not historical inode continuity or atomic database state.
 
 Refocus completed at 2026-09-17T00:46:37.675187+00:00, with next deadline 2026-09-17T01:46:37.675187+00:00. The checkpoint was less than one minute late during read-only verification, and that lapse was disclosed. Next work is closing the evidence-copy gap, not repeating native tests or weakening acceptance. Full WM-001 through WM-044 and G0 through G5 scope and the WM-001 through WM-015/G0 accepted boundary remain unchanged.
+
+Admission capture-only correction passed independent preparation review44d902a4-b2f5-4870-9979-acee676cbb15 and parent3309identity checks across304preparation entries,32inertchecks,2525original artifacts and1021source files. Earlier observer-test failure remains visible and was corrected using OS-level stat/lstat guards. No native test was repeated.
+
+After a fresh read-only agreement check, parent explicitly authorized one new exclusive capture at2026-09-17T01:10:36.019015+00:00. terminal-admission-capture-fix.l8ioyj5u/authorization.json binds the exact prepared plan and forbids native rerun, retry, original/old-copy/target/source mutation and acceptance. The one capture returned0 with fidelityAtNewTime=true at2026-09-17T01:10:44.114714+00:00. Both destination links are700 with exact target/type/mtime. The old755copies and original partial-failure flags remain unchanged, not repaired. This authority is consumed.
+
+Parent result verification passed9268checks across original/new/old artifacts, current source, archive, four actual gate-built binaries,40DBs/four sidecars and relevant default/package/opacity/interruption predicates.19defaultfamilies eachN1/N8 produced93PASS/2000QuickCheck cases, completionchildren9PASS each, opacity36consumers/12positive/24specificrefusals, interruptionbuild plus two19PASS cases with original joins and unchanged budgets. No post-return database API, compiler/helper rerun, historical pre-first-copy inode continuity or atomic snapshot claim. New capture under terminal-admission-capture-fix.l8ioyj5u/capture is faithful at its new time. Its completeGateClaim remains false.
+
+Independent result dispositionb257493b-115c-484d-8096-932e33ad4575 is active. It must decide whether the same original exit0 SOURCE Admission gate can now be accepted from the faithful new capture and preserved original predicates. No further gate, resource recovery, canonical candidate integration or WM016 acceptance is authorized by this capture. Source Controls/ingestion and current raw/platform/client/full acceptance obligations remain outstanding.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
