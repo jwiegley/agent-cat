@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-17 Thu 12:48]
+:MODIFIED: [2026-09-17 Thu 13:14]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -9282,6 +9282,12 @@ Refocus 2026-09-17T19:32:00.610695+00:00. Next deadline 2026-09-17T20:32:00.6106
 Fresh final-byte private Cabal BUILD ONLY passed0 in99.872889625seconds. Three fresh frozen-link data-main builds and all six filesystem runs passed, with ten original joins/null errors/zero interruptions. The package component binary remains separately bound and never executed; its equal hash to earlier builds is not substituted for own-build provenance. All1018current inputs stayed unchanged during these checks.18bucket trees retain prior bytes/modes/prefixes, and75completed non-build identities were collected after return. Evidence root terminal-bucket-package-final.cozkowds. Full staged-diff whitespace/byte checks will be rerun with fail-fast control before finalizing the amendment and committed fess. Prior build evidence, initial whitespace failure and mistaken local commit identity remain recorded. Inventory remains stopped until committed P1 clearance; no native/full-policy/package acceptance follows.
 
 Refocus 2026-09-17T19:48:14.543579+00:00. Next deadline 2026-09-17T20:48:14.543579+00:00. Next: fail-fast final staged gates and committed P1 fess, no inventory advance.
+
+2026-09-17 explicit committed P1 clearance b1c1e0d5-0426-475e-a871-f19b120e241d supports7763a87973c1e73cac30fff8d3a8b09e73764d9b. The hidden-module regression is corrected, while the initial failed whitespace gate, absent staged snapshot and non-fail-fast local commit remain failed historical events. Fresh final-byte builds and actual fail-fast full-commit gates support the amendment. This closes only P1, not full policies, preimages, A15 or WM-016.
+
+The next reviewed unit is L07 temporary-directory hygiene in test/cabal_env_probe.py. Parent inspected the exact pinned Python3.14.7 tempfile.py: delete=False disables context-exit and implicit-finalizer deletion, while explicit cleanup still removes. At2026-09-17T20:10:13.996686+00:00, parent authorized isolated terminal-cabal-temp-evidence.ts7m6u8p. Workerbe5c22e5-53cf-4aaf-a7f7-5bd121f367a8 may edit only the existing probe, using delete=False on its existing owner plus a post-context retention assertion. Real wrapper and existing inert Cabal producer, exact body/argv/status/diagnostics/Bash/cwd/environment and10-second budgets remain unchanged. Unmodified wrapper and process-helper support copies are allowed. Actual old-probe deletion red, post-process corrected bytes/modes, source-bound specific body exception and non-overwriting repeats are required. No replacement owner, cleanup monkeypatch/tracer, global switch, actual Cabal/build/compiler, native fixture/full gate, A15 or memory-reply remedy, package/dependency or canonical edit is authorized. This closes only directory disposal if verified. Memory-only replies/L06, A15, preimages and complete preservation remain open, with WM-016 unaccepted and acceptance15/44 plus G0 unchanged.
+
+Refocus 2026-09-17T20:14:19.082303+00:00. Next deadline 2026-09-17T21:14:19.082303+00:00. Next: isolated L07 directory-disposal source/data remedy and independent review.
 #+end_example
 
 ** Dependencies

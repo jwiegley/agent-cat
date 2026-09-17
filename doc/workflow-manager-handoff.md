@@ -9,13 +9,14 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T19:48:14.543579+00:00`. The next deadline is
-`2026-09-17T20:48:14.543579+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T20:14:19.082303+00:00`. The next deadline is
+`2026-09-17T21:14:19.082303+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 
-**P1 repair awaiting committed review:** the neutral test module restores the
-Cabal boundary. Isolated red/green and a fresh canonical build-only check pass.
-Inventory remains stopped until the committed corrective audit clears.
+**P1 corrected and independently cleared:** the neutral test module restores
+the Cabal boundary. The committed audit accepts the repair and its final-byte
+verification. Only the separately authorized L07 directory-hygiene unit has
+resumed. Full policies and WM-016 remain unaccepted.
 
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -90,8 +91,8 @@ scope, but committed fess found a P1 hidden-module import regression in the
 Cabal test component. Parent adopted that narrowing without a component build.
 The earlier recommendation/clearance is superseded, not rewritten. The neutral
 test-module repair has independent isolated support and full parent integrity,
-with actual Cabal red/green and a fresh canonical build-only pass. Committed
-P1 fess is still required. Native fixtures and preimages remain unverified.
+with actual Cabal red/green and a fresh canonical build-only pass. Its committed
+P1 fess is now clear. Native fixtures and preimages remain unverified.
 No native fixture, full gate, WM-016 application integration, platform/client
 work, old-resource recovery or WM-016 acceptance is authorized.
 
@@ -1516,10 +1517,32 @@ identities were collected after return under
 exact-byte checks are required under fail-fast shell control before finalizing
 the amendment. Earlier evidence and the initial failure remain unchanged.
 
-Committed P1 fess remains required before inventory work resumes. Cabal build
-success is not native test execution, full preservation or full-policies
-acceptance. Previous mistaken clearance remains superseded rather than
-rewritten. All preimage/A15 and WM-016 obligations remain open.
+Committed P1 review `b1c1e0d5-0426-475e-a871-f19b120e241d` explicitly clears
+`7763a87973c1e73cac30fff8d3a8b09e73764d9b` for the hidden-module correction.
+The initial whitespace gate failure, missing staged-byte snapshot and mistaken
+local commit are not retroactively passed. Fresh final-byte verification and
+the recorded fail-fast full-commit gates support the amendment. This closes
+only P1. Earlier mistaken clearance remains superseded, and native execution,
+full policies, preimages/A15 and WM-016 acceptance remain open.
+
+The next reviewed unit is L07 directory disposal in test/cabal_env_probe.py.
+Parent inspected pinned Python3.14.7 TemporaryDirectory: delete=False prevents
+both context-exit and implicit-finalizer deletion, while explicit cleanup
+still removes. At `2026-09-17T20:10:13.996686+00:00`, parent authorized only
+the isolated `terminal-cabal-temp-evidence.ts7m6u8p` unit. Worker
+`be5c22e5-53cf-4aaf-a7f7-5bd121f367a8` may edit that existing probe to use the
+standard delete parameter and add a post-context retention assertion. The
+real wrapper and inert Cabal producer, body/argv/status/diagnostic predicates,
+Bash invocation, cwd/environment behavior and ten-second budgets remain
+unchanged. Unmodified wrapper and Popen helper support copies are allowed.
+
+An actual old-probe deletion red, exact corrected fixture bytes/modes after
+process return, a specific source-bound body exception and distinct repeated
+roots are required. No replacement owner, cleanup monkeypatch/tracer, global
+retention switch, actual Cabal/build/compiler, native fixture/full gate,
+package/dependency action, canonical edit or A15/memory-reply repair is
+authorized. Only directory disposal is in scope. Memory-only replies/L06,
+A15, preimages and complete policies preservation remain unresolved.
 
 Other deletion/retention, frontend ownership/read boundaries, ACP cleanup,
 A15 interruption handling, environment and complete-capture gaps remain blocked.
