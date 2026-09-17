@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T16:08:47.375364+00:00`. The next deadline is
-`2026-09-17T17:08:47.375364+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T16:29:08.857031+00:00`. The next deadline is
+`2026-09-17T17:29:08.857031+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -74,7 +74,9 @@ test-producer integration passed syntax and the default inert entrypoint.
 Committed L01 fess is clear. L02 outer capture-build retention has independent
 source/data clearance and parent verification. Its exact canonical producer
 integration passed syntax and the default inert entrypoint. Committed L02
-fess is next, with inner fixture cleanup and native execution still excluded.
+fess is clear. The isolated L03 outer CaptureTests bucket remedy is active,
+with warning-fatal compilation and filesystem-only execution allowed, but
+native capture and behavioral deletion changes excluded.
 No native fixture, full gate, WM-016 application integration, platform/client
 work, old-resource recovery or WM-016 acceptance is authorized.
 
@@ -1306,8 +1308,36 @@ No real capture GHC/native checker, timeout/signal injection, inner Haskell
 cleanup/assertion change, Python/A15 repair, package construction or full
 policies gate ran. The separate documentation gate includes its standard
 static Haskell probe. These are outer-lifetime data results, not native
-capture, durability or complete preservation. Committed fess is next. Other
-remedies and broader integration require new decisions.
+capture, durability or complete preservation. Committed fess review
+`3ddcda4a-73c6-4146-9537-cc9734adb32d` found no issues in
+`62c73ead8798942fb007d130d347da57fd546d38`, limited to the test-producer remedy.
+
+The next reviewed subgap is L03 outer bucket hygiene in
+`runtime/test/CaptureTests.hs`. The native action uses a fresh private bucket
+and closes runtime descriptors through `withPrivateRoot`, then outer hygiene
+deletes the surviving tree. Parent inspected this owner and the descriptor
+bracket. Indexed outline/reference resolution was unavailable for this module,
+so exact text references in the runtime test main and capture script were used
+without claiming indexed absence.
+
+At `2026-09-17T16:25:51.082027+00:00`, parent authorized only the isolated
+`terminal-capture-bucket-evidence.18qe63n3` source/data unit. Worker
+`0629340b-a51d-4d93-81e3-f9177d7dcf0b` may edit only CaptureTests.hs, sharing its
+actual allocation/action owner with filesystem-only checks and an explicit
+data-only entrypoint. A 1,017-file mode-preserving source/support copy is bound,
+excluding the independently mutable tracker and handoff. Warning-fatal
+compilation of the complete module and existing C sources, data-only N1/N8
+execution in fresh private temporary roots, and an old allocation/finalizer
+inert red are permitted.
+
+All native-body assertions and resource finalizers remain unchanged. This
+includes worker cleanup, closing-root brackets, replacement-directory removal
+and restoration, the owned-temporary-file assertion, five-second bounds and
+descriptor closure. No native captureTests, runtime-contract/full policies,
+Runtime PrivateRoot/publication, Worker/Store/group/backend/signal fixture,
+behavioral deletion edit, package action, canonical edit or additional source
+path is authorized. This outer hygiene subgap does not cover L03 pre-mutation
+evidence or the other capture modules. Other remedies require new decisions.
 
 Other deletion/retention, frontend ownership/read boundaries, ACP cleanup,
 A15 interruption handling, environment and complete-capture gaps remain blocked.
