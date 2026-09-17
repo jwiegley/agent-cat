@@ -9,9 +9,14 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T18:02:23.705783+00:00`. The next deadline is
-`2026-09-17T19:02:23.705783+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T19:48:14.543579+00:00`. The next deadline is
+`2026-09-17T20:48:14.543579+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
+
+**P1 repair awaiting committed review:** the neutral test module restores the
+Cabal boundary. Isolated red/green and a fresh canonical build-only check pass.
+Inventory remains stopped until the committed corrective audit clears.
+
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
 also passed all 14 outcomes with verified bytes/modes and independent scoped
@@ -80,9 +85,13 @@ passed warning-fatal compilation and filesystem-only N1/N8. Its committed
 fess is clear. L04 outer root-role bucket hygiene has independent source/data
 clearance and parent verification. Exact canonical reuse passed both
 warning-fatal data-main builds and all four filesystem N1/N8 runs. Committed
-L04 fess is clear. The isolated L05 outer fault-bucket remedy is active, with
-one precise import narrowing and frozen fault-shim linkage. Native fixtures
-and pre-mutation evidence remain unverified.
+L04 fess is clear. L05's direct-GHC data/link results remain valid in their
+scope, but committed fess found a P1 hidden-module import regression in the
+Cabal test component. Parent adopted that narrowing without a component build.
+The earlier recommendation/clearance is superseded, not rewritten. The neutral
+test-module repair has independent isolated support and full parent integrity,
+with actual Cabal red/green and a fresh canonical build-only pass. Committed
+P1 fess is still required. Native fixtures and preimages remain unverified.
 No native fixture, full gate, WM-016 application integration, platform/client
 work, old-resource recovery or WM-016 acceptance is authorized.
 
@@ -1399,31 +1408,118 @@ in `3e79af18b93d29d32751b4d981b72cc322970570`, limited to shared-owner outer
 hygiene. Native fixtures, interrupted paths, durability and preimages remain
 unverified, and non-build identities do not imply complete compiler hashing.
 
-The next reviewed subgap is L05 outer fault-bucket hygiene. Parent inspected
-the native fault action, Runtime facade/PrivateRoot exports and C shim. At
-`2026-09-17T17:58:20.943738+00:00`, parent authorized only the isolated
-`terminal-fault-bucket-evidence.6za6qkjr` unit. Worker
-`986e79ae-4fa1-4e6c-b58b-29252782dd6f` may narrow CaptureTests' Runtime import
-to PrivateRoot and change CaptureFaultTests to reuse the existing owner and
-assertions with its original prefix, remove outer disposal, and add an explicit
-filesystem entrypoint and permanent check call. All other CaptureTests code,
-native Main.main/action/helpers, release/worker finalizers, pipe closure,
-behavioral removals and five-second bounds remain unchanged.
+L05 outer fault-bucket hygiene reuses the existing owner and assertions in
+CaptureFaultTests. CaptureTests changes only its import from the broad Runtime
+facade to PrivateRoot. All other shared code and the native fault action and
+helpers remain unchanged modulo necessary scope syntax, including release/
+worker finalizers, behavioral removals, role fault checks, pipe closure and
+five-second bounds. The isolated `terminal-fault-bucket-evidence.6za6qkjr`
+copy binds 1,017 source files and changes only these two Haskell files.
 
-Fault linkage remains the original private_directory.c plus
-capture_sync_fault.c pair. The shim includes the real synchronization source
-under a renamed symbol before wrapping it. Separately linking normal
-private_sync.c, adding process_group.c to the fault target, editing the shim
-or changing the gate recipe is forbidden. A 1,017-file copy is bound, excluding
-mutable tracking. Warning-fatal explicit capture/role/fault data-main builds
-with their original respective C sources, six filesystem N1/N8 runs, and old
-fault allocation/finalizer inert reds are allowed.
+Review `cf4da514-0e04-4afd-8de3-7d7507a3c940` found no issues, conditional on
+parent integrity verification. That verification passed 3,780 comparisons,
+including 87 completed-file identities, four own binaries, eight C objects,
+four warning-fatal builds, six filesystem outcomes, thirteen original Popen
+joins, eighteen retained trees and two source-bound old finalizer reds.
+The actual fault link pair remains private_directory.c and capture_sync_fault.c.
+The unchanged shim includes and renames the real synchronization implementation.
+No separate normal-sync or process-group object exists in the fault output.
 
-Data execution must not configure faults, publish, invoke barriers/pauses or
-roleFaultTests, cancel, or enter native main. No Runtime/Worker/Store/group/
-backend/signal fixture, full policy/runtime-contract gate, package/dependency
-operation, canonical edit or additional source change is authorized. L03/L04/
-L05 preimages, A15 and other blockers remain. Other remedies need new decisions.
+At `2026-09-17T18:17:48.357184+00:00`, parent separately authorized and applied
+the exact two-file canonical change. Capture/role/fault complete-module
+data-main builds passed warning-fatal in 5.440832084, 45.781017583 and
+7.144227875 seconds respectively, with empty stderr. Six filesystem N1/N8 runs
+passed with nine original Popen joins, null errors and zero interruptions.
+All 1,017 nontracking inputs remained unchanged during verification. Eighteen
+canonical trees match isolated prefixes/bytes/modes and previous canonical
+capture/role data. Eight own C-object bindings match isolated provenance.
+The 67 completed non-build identities were collected after return, with own
+binaries/C objects separately bound and other intermediates retained in place.
+Evidence is retained under `terminal-fault-bucket-canonical.p0ra7g8j`.
+
+No fault configuration, publication, barriers, pauses, cancellation, native
+Main/capture/rootRole fixture, runtime-contract/full policies or package
+operation ran. Separate documentation checking includes its static Haskell
+probe. Linking and object identity do not prove shim execution. Only outer
+hygiene has scoped data evidence. The import narrowing is now blocked by the
+following package-boundary finding, and L03/L04/L05 preimages, A15 and other
+full-policies obligations remain unresolved.
+
+Committed fess `1069c368-7ef7-489f-a1ae-0eb5b4ffd544` found P1: CaptureTests
+imports Agentic.Runtime.PrivateRoot, but that module is hidden in the library.
+The runtime-contract-test component has only runtime/test home sources and
+depends on agentic. Its public facade import had respected the boundary.
+Direct GHC builds with runtime/src on the search path made the hidden module
+a home module and did not verify Cabal visibility. Parent checked the component
+declarations and accepts responsibility for integrating the narrowing without
+that build. The initial finding was source-based. The subsequently authorized
+baseline build reproduced it. The reviewer corrects its earlier recommendation and
+clearance. Earlier records remain intact and limited to their actual scope.
+
+The isolated `terminal-bucket-package-repair.ubb62xm5` correction moves the
+existing allocator and filesystem assertions verbatim into neutral test-only
+BucketEvidence. CaptureTests restores its public Runtime import and reexports
+the helpers. CaptureFaultTests imports them directly, and Cabal adds only the
+test other-modules entry. PrivateRoot remains hidden, test home sources remain
+runtime/test, and native bodies, assertions, C sources and gate recipes stay
+unchanged. No dependency or source-directory bypass is introduced.
+
+Independent fresh baseline and corrected Cabal build-only commands use the
+same explicit test:runtime-contract-test target, enabled tests and warnings
+fatal. Baseline exits one in 136.371888 seconds with CaptureTests.hs:7:1,
+GHC-87110 and the hidden-PrivateRoot diagnostic. Corrected build exits zero in
+128.621121 seconds and links its own test executable without running it.
+Review `6e970035-8ecc-45f1-94d2-030d36716d4f` supports this P1 correction,
+conditional on parent integrity. That verification passed 4,792 comparisons,
+including all source bindings, exact moves/declarations, real package-boundary
+red/green, standalone regressions and unchanged previous inputs.
+
+Raw plans exceeded the review tool's single-line limit. Parent supplied
+hash-bound pretty views retaining complete local library/test entries and
+metadata without changing or rerunning the plans. The first parent verifier
+also encountered a record-shape mismatch because summaries now include cwd.
+The corrected verifier binds both the original command and completion fields,
+and its initial failed log remains unchanged. No test predicate was weakened.
+
+At `2026-09-17T19:19:05.705975+00:00`, parent separately authorized and applied
+the exact four-path canonical repair. Fresh private offline/repository-free
+Cabal build-only verification passed in 190.601771792 seconds. Its own plan and
+63,112,232-byte native test executable are bound, with executable SHA256
+`cfe37f332f7b7bd0476ab2478d927d3ea293ec418c2b7bec823e1d56bb50bda8`.
+That binary was never executed. Three direct warning-fatal data-main builds
+and all six filesystem N1/N8 runs also passed, with ten original Popen joins,
+null errors and zero interruptions. All 1,018 bound nontracking inputs remained
+unchanged. Eighteen trees match isolated and earlier canonical data, and eight
+own C objects preserve the frozen fault pair. The 75 completed non-build
+identities were collected after return, with binaries/objects/plans separately
+bound and other compiler intermediates retained. Evidence is under
+`terminal-bucket-package-canonical.uqx8wghe`.
+
+The staged whitespace gate then rejected a trailing empty line in the new
+BucketEvidence module. A shell sequence without fail-fast control nevertheless
+created local commit `b9f48bea080ebe58438e6c905c95a8affe64ed8b`, and the gated
+staged-byte snapshot did not run. Parent disclosed the mistake, removed only
+that EOF empty line and preserved the final newline. A separate decision
+authorized fresh verification and amendment of this own unpublished commit.
+The final helper is 4,059 bytes, SHA256
+`86d1a5035203101b2ffa1e72f57edae9b82a69747cd52b9994dfccc00392ba05`,
+equal to the reviewed source apart from that trailing empty line.
+
+Fresh final-byte Cabal build-only verification passed in 99.872889625 seconds.
+Three fresh data-main builds and six filesystem runs passed, with ten original
+joins, null errors and zero interruptions. All 1,018 current inputs remained
+unchanged. Eighteen bucket trees preserve prior bytes/modes/prefixes, and the
+native package executable remains unexecuted. Its own plan/build provenance
+is retained rather than inferred from equal hashes. The 75 completed non-build
+identities were collected after return under
+`terminal-bucket-package-final.cozkowds`. Full staged-diff whitespace and
+exact-byte checks are required under fail-fast shell control before finalizing
+the amendment. Earlier evidence and the initial failure remain unchanged.
+
+Committed P1 fess remains required before inventory work resumes. Cabal build
+success is not native test execution, full preservation or full-policies
+acceptance. Previous mistaken clearance remains superseded rather than
+rewritten. All preimage/A15 and WM-016 obligations remain open.
 
 Other deletion/retention, frontend ownership/read boundaries, ACP cleanup,
 A15 interruption handling, environment and complete-capture gaps remain blocked.
