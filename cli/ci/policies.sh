@@ -132,8 +132,8 @@ control_runner=$(test/cabal.sh list-bin routing-fixed-point-probe)
 codec_runner=$(test/cabal.sh list-bin runtime-contract-test)
 schema_runner=$(test/cabal.sh list-bin schema-probe)
 "$schema_runner"
+python3 test/answer_schema_evidence.py
 schema_vectors=$(mktemp "${CABAL_BUILDDIR:?}/answer-schema.XXXXXX.json")
-trap 'rm -f "$schema_vectors"' EXIT
 "$schema_runner" --answer-schema-vectors > "$schema_vectors"
 python3 test/answer_schema_probe.py "$schema_vectors"
 GHCRTS=-N8 python3 test/lineage_probe.py "$agentic_run"
