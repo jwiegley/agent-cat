@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T05:58:22.525645+00:00`. The next deadline is
-`2026-09-17T06:58:22.525645+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T06:26:10.853887+00:00`. The next deadline is
+`2026-09-17T07:26:10.853887+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -52,9 +52,10 @@ now has scoped clearance after its original successful run, explicit
 acknowledgement, faithful capture, review and full parent verification. All five
 current source owning gates pass. Exact raw Store now has scoped clearance
 after its successful original invocation, explicit acknowledgement, faithful
-capture, review and full parent verification. Raw Commands preparation only
-is active. No further native gate, old-resource recovery or WM-016 acceptance
-is authorized.
+capture, review and full parent verification. Exact raw Commands preparation
+passed review and parent verification, followed by one authorized invocation.
+No result is claimed, and preservation awaits explicit parent acknowledgement.
+Other gates, old-resource recovery and WM-016 acceptance remain unauthorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -949,14 +950,27 @@ the exact raw Store scope at `2026-09-17T05:55:11.650028+00:00`. The reviewer
 did not inspect that subsequently completed report. No rerun, repair or
 normalization occurred, and the gate and copy permissions are consumed.
 
-Preparation-only run `ceb81976-4afa-4f0e-8e53-d46fbd0b3e6b` owns
-`terminal-raw-commands.jrxqxna6`. It must bind the full raw Commands checkers,
-receipt contracts and opacity consumers with unchanged raw modes, original
-ownership and acknowledgement before copying. No gate, compiler, validator,
-database API or native execution is authorized during preparation, and no
-earlier fixture permission transfers. Four raw owning gates and the remaining
-platform/client/canonical/final acceptance requirements remain open. WM-016
-is unaccepted.
+Raw Commands preparation under `terminal-raw-commands.jrxqxna6` passed review
+`9359f468-c497-4f66-bf72-4e7adf36ba63` and 2,010 parent comparisons. Its two
+checkers, two contracts, fourteen receipts and 36 exact opacity consumers remain
+bound to raw source and modes. The 274 analyzer and 22 preservation inert checks
+do not substitute for those future gate outcomes.
+
+At `2026-09-17T06:26:10.853887+00:00`, fresh private preflight passed and parent
+authorized one complete raw Commands gate. Run
+`7cc019d0-318d-4e36-9f29-b86ee175b4d4` is active under original ownership.
+No result is claimed. Scope includes only the selected fresh SQL and in-process
+fixtures plus existing original compiler timeout behavior. The configured
+`/bin/false` placeholder must remain unexecuted. No backend launch, Store
+SIGKILL, Admission fault or historical permission transfers.
+
+Preservation is not authorized until both original owners return and parent
+explicitly acknowledges the exit, timing, join and failure facts through the
+existing request/reply mechanism. Without that reply, work stops without copy
+or interpretation. Existing budgets, raw modes and failure precedence remain
+unchanged, with no new outer killing deadline, retry or repair. Remaining raw,
+platform/client/canonical and final acceptance requirements stay open, with
+WM-016 unaccepted.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.

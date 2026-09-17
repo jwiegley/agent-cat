@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 22:58]
+:MODIFIED: [2026-09-16 Wed 23:28]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -9018,6 +9018,16 @@ Reviewer9c530f20-90df-4b89-a090-9786692fca65 found no issues, conditional on pen
 A new preparation-only decision assigns terminal-raw-commands.jrxqxna6 to worker runceb81976-4afa-4f0e-8e53-d46fbd0b3e6b. It must bind exactraw594/modes/archive,fullCommandsN1/N8,two receipt-contract calls/fourteenresources,36opacityconsumers/12positive24specificrefusals andoneactualown-builtchecker. It reuses sourceCommands and latest both-owner/raw/ACK-before-copy patterns, with fresh exclusions and inert regressions. No gate/build/compiler/contractvalidator/enumeration/Store/DB/native/provider/processcontrol/source/Git/obr or authorization is permitted during preparation. No lease-death or previous fixture authority transfers.
 
 Refocus completed at 2026-09-17T05:58:22.525645+00:00, with next deadline 2026-09-17T06:58:22.525645+00:00. The shortest next step is raw Commands preparation/review, not another Store invocation. Full remaining raw/platform/client/canonical/final acceptance and historical incident requirements are unchanged.
+
+Exact RAW Commands preparation under terminal-raw-commands.jrxqxna6 passed independent review9359f468-c497-4f66-bf72-4e7adf36ba63 and parent2,010comparisons. It bindsraw594/source1021/archive/twelvemode differences/427source-only exclusions, twoN1/N8checkers selecting16families/15Storefixtures each,twocontractcalls/fourteenreceipts,36exactopacitybodies/12positive24specificrefusals andoneown-builtchecker.274actual-analyzer and22preserver inertchecks passed, with both-owner predicates and explicitACK-before-copy intact. No preparationcommand failed.
+
+Fresh canonical/private preflight verified126excluded old footprints, emptybuild/record andabsentcache. At2026-09-17T06:26:10.853887+00:00 parent authorized one complete exact raw Commands gate. Authorization SHAa3e052b6f29885a55a9903431ccfb9fbdbbb5e94db2bd8a6dafa1e16f50bfb86 bindsplan1ce950400d2ae9682abf65a7dd28557f284457e7e03cb06d532fe01546b387d1. Worker run7cc019d0-318d-4e36-9f29-b86ee175b4d4 is active underoriginallauncher/gatehandles. Noresult isclaimed.
+
+Selected effects are onlyfreshSQLtriggers/rollback/migrations/legacybounds/currentcredentials andconfiguration,originalAsync cancellation/UserInterruptcallback,same-keyretry/retained-attempt reconciliation/reopen/deadline observations andexistingSQLiteFFIlimits. Existing opacitycompiler subprocess.run timeout120 behavior is authorized for its original compilerprocess. /bin/false remains a nonexecuted placeholder. NoWorker/Runtimebackend, StoreSIGKILL, Admissioncompletionfault, Controlsnative orhistoricalpermission transfers. No newouterkillingdeadline, aggregatebudget orkillfallback isallowed.
+
+Preservation isnotcurrentlyauthorized. Immediatelyafterreturn theworker mustreportbothoriginalowners exit/timing/joins/errors/interruptions throughneed_decision andwaitforexplicitparentACK. Noqueuednotice substitutesforreceipt, andno copyingorinterpretation precedesACK. Failure/noACK meansstopretainoriginals, notretry/repair/recopy/PIDadoption/recovery/nextgate. CanonicalNixPython, exactrawmodes andown-buildprovenance remainrequired. The45minute exact-runwake isattentiononly.
+
+Refocus completed at 2026-09-17T06:26:10.853887+00:00, with next deadline 2026-09-17T07:26:10.853887+00:00. FivecurrentSOURCEowninggatesandRAWStorearescopedpasses. CurrentRAWCommands andremainingraw/platform/client/canonical/finalacceptance remainunproved. WM-001 throughWM-015andG0remain theonlyacceptedpackages/gate.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
