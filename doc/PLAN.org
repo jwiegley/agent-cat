@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-17 Thu 06:47]
+:MODIFIED: [2026-09-17 Thu 07:11]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -9190,6 +9190,12 @@ Standing rules: only SQLite directory-replacement confinement is withdrawn/restr
 Parent separately authorized only this canonical test-helper integration at 2026-09-17T13:28:39.317993+00:00, preserving reviewed SHA a015e6d076d0bf36cbcdca964c2804da6f253515e5032c2f0de2e06919c09bd0. Fresh canonical-Nix private offline manager-worker-check -Werror build passed in 114.206744209 seconds, then compiled data-only N1/N8 passed. Three original command handles joined, null failures and zero interruptions. All 1016 canonical input files remained unchanged during verification, and 14 retained files per capability match the isolated data bytes. Evidence root terminal-worker-evidence-canonical.5zutr_9v. No native Worker/ProcessGroup/Store/Runtime fixture or owning gate ran. This fixes only the test producer and does not integrate the WM-016 application candidate. Z/source and the old raw archive remain immutable, with old WorkerCheck bytes, so earlier scoped evidence is not relabeled. Full policies and all other retention/lifecycle/environment/capture blockers remain blocked. Accepted stays 15/44 and G0 only, with WM-016 unaccepted.
 
 Refocus 2026-09-17T13:47:32.343949+00:00. Next deadline 2026-09-17T14:47:32.343949+00:00. Next: exact helper commit and committed fess, then one next reviewed policies remedy.
+
+2026-09-17 committed L19 fess review 4e4f8445-5be2-4259-9a31-26faf09dd46b found no issues in commit6878f5e9ad94dcdbfdfe91f03a5751cac64278d1, with all previous source/data/native limits retained. The reviewer cited R/doc-check.log, whose modification time predates L19. That older file does not establish this unit's documentation check. Parent had run the current check before commit in the tool output, then separately persisted a fresh post-commit check under terminal-worker-evidence-canonical.5zutr_9v/doc-check.log, exit0. The old review/log remain unchanged, and the chronology is recorded in terminal-worker-evidence-doc-citation-clarification.json. Reviewer has not read the later log.
+
+The same review recommends L21 next: preserve the original merged CLI refusal stream at refuses_fact rather than reconstructing shell-substitution bytes. At 2026-09-17T14:08:49.511957+00:00, parent authorized isolated root terminal-refusal-evidence.gbvuv2fm. Worker5b02fe29-3ac9-4833-bbd1-762dc0eb3b3e may change cli/ci/policies.sh only at this helper plus adjacent focused-test wiring, add test/policy_refusal_evidence.py, and add only that explicit extra-source-files membership in agentic.cabal. Extra paths are authorized to retain a runnable regression and package membership, not an unrelated refactor. Existing canonical file bytes/modes and surrounding policies/Cabal programs stay unchanged. Source-exact old red and actual-path inert tests must prove exact original merged bytes, both facts, original argv/status/predicate/summaries, failed retention refusal, primary error precedence and non-overwriting repeated cases. Only pinned Nix Bash/Python data/filesystem tests and inert local command producers may execute, never real Cabal/compiler/runner or full policies. No native Worker/Store/Runtime/group/signal, source integration, repackaging, remote/client or historical recovery authority follows. All remaining full-policies blockers and WM-016's unaccepted status remain.
+
+Refocus 2026-09-17T14:11:38.505964+00:00. Next deadline 2026-09-17T15:11:38.505964+00:00. Next: isolated L21 actual-path retention remedy and independent review.
 #+end_example
 
 ** Dependencies
