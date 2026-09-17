@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-17 Thu 03:16]
+:MODIFIED: [2026-09-17 Thu 04:21]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -9104,6 +9104,20 @@ Only selected fresh original-owned typed rejection/correlated cancellation, offl
 Preservation is not authorized until both original owners return and parent explicitly acknowledges their exit/timing/join/error/interruption facts through need_decision. Without ACK or on failure/uncertainty, stop without retry, repair, recopy, PID adoption or next gate. The exact-run45minute wake is attention only. Even success in this last current raw owning lane grants no integration, platform/client execution, historical recovery or WM-016 acceptance.
 
 Refocus completed at 2026-09-17T10:13:17.547401+00:00, with next deadline 2026-09-17T11:13:17.547401+00:00. Five SOURCE gates and four RAW gates are scoped passes. Current raw Controls and broader acceptance remain unproved. Only WM-001 through WM-015 and G0 are accepted.
+
+Exact RAW Controls run f6219f0d-179b-4d58-aa88-e84f08566487 returned gate exit 0 after 2331.4689377080067 seconds and launcher exit 0 after 2331.830967792019 seconds. Both original owners joined without failures or interruptions. The child blocked on request 0264c754-a323-4fbf-a28e-440698b32ad8. Parent checked original records and absent capture, then issued one-copy ACK persisted at 2026-09-17T10:55:25.609190+00:00, SHA256 bc0b382be56f8e0ceb3b9bf28b46f50a305fb978afc320fa172891e09464a8ff. Capture began at 10:56:12.625984 after reply. Both permissions are consumed.
+
+Capture, corrected analyzer and supplemental validator returned zero. Parent verification passed 27,803 comparisons over 11,320 entries, 9,147 regular files, 2,173 directories, 58 databases without sidecars, 28 own-built paths and sixteen retained compiler directories. All 11,292 raw-phase records remain unchanged before binary additions. Exact raw594 preimages/modes, complete rewritten sets, declared audit origins, source1021, archive and twelve mode differences remain intact. No database API, source substitution, normalization, repair, recopy or native/compiler/helper/validator rerun occurred.
+
+All 38 checker cases have 22 positives and sixteen exact negatives, with six contracts and forty resources. Thirteen helper builds and 39 direct records retain original joins, errors, budgets and argv. Unrecorded top/contract statuses remain checked-flow inferences. The two StoreBusy observation notes are retained as an observed count, not a fixed expectation, retry count or case attribution. Native cancellation130 remains non-success, and terminal events alone confer no cleanup/release proof. PASS counts remain repeated observations, not unique obligations.
+
+Review 36d4c4e6-bd41-4c39-956e-7afb5948f82d found no issues with full parent integrity as a condition. The completed 27,803-check report satisfies it. Parent accepted exact raw Controls scope at 2026-09-17T11:13:02.677424+00:00. The reviewer did not independently rerun hashes or tests. All ten current macOS SOURCE/RAW Store, Commands, Admission, ingestion and Controls lanes now have scoped clearance. This is not canonical integration, Linux/client evidence, historical cleanup, WM-016 acceptance or G1 completion.
+
+Parent performed a read-only canonical/candidate comparison under terminal-acceptance-reconciliation.o5j56l8r. Of 1,021 candidate files, 975 match canonical bytes/modes and 46 differ or are new. Two are stale tracking/handoff snapshots that must not be overlaid. The other 44 paths form the implementation integration surface, including five new files. No tracked canonical file is absent from the candidate. All three frozen design/plan/amendment hashes still match. No source was changed or native command run.
+
+Read-only reviewer run 8b238e8c-8702-45b2-9491-8ab5b13fa7b4 is reconciling frozen WM-016 clauses and Section9.2 changed-layer gates with this actual surface. It must distinguish current requirements from later service-client/release packages, identify integration prerequisites and recommend one bounded next work unit without executing it. Optional TUI driver, current Linux/client/canonical/conformance/documentation ceilings and historical policies05/quarantines remain explicit. There is no new integration, compiler/gate, remote, platform/client, model or recovery permission.
+
+Refocus completed at 2026-09-17T11:21:20.327738+00:00, with next deadline 2026-09-17T12:21:20.327738+00:00. The next action is acceptance reconciliation, not treating successful owning lanes as full completion. Only WM-001 through WM-015 and G0 remain accepted.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
