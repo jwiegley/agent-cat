@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-17 Thu 13:45]
+:MODIFIED: [2026-09-17 Thu 14:13]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -9294,6 +9294,12 @@ Refocus 2026-09-17T20:14:19.082303+00:00. Next deadline 2026-09-17T21:14:19.0823
 At2026-09-17T20:37:23.789782+00:00, parent separately authorized and applied exact canonical L07 bytes68aef2305b63037a0e1ae0bbfc72588259e35ee501739f6d5a113ee530cf0f57, mode0755. Two DIRECT canonical probe invocations exited0 with the unchanged summary and retained original fixtures after process return. A separately bound one-raise variant propagated the same specific RuntimeError at exit1 while retaining its original directory/file. Three original outer Popen joins have null errors/zero interruptions.24completed identities were collected after return. Evidence root terminal-cabal-temp-canonical.ast0rhl4. No real Cabal/compiler/native/full policies ran in these probe commands; separately permitted documentation checking retains its usual static Haskell check. Only L07 disposal is remedied. Earlier wording grouped memory-only replies with L06 incorrectly: the sealed inventory labels L06-profile-root-probe, manager/test/RootProbe.hs outer cleanup. L06 disposal and memory-only replies are distinct open concerns. The standalone label clarification preserves older records without changing acceptance. Committed fess is next, with A15/preimages/full policies and WM-016 still unresolved or unaccepted, acceptance15/44 plus G0 unchanged.
 
 Refocus 2026-09-17T20:45:02.087348+00:00. Next deadline 2026-09-17T21:45:02.087348+00:00. Next: exact L07 commit and committed fess, then one next reviewed policies subgap.
+
+2026-09-17 committed L07 fessfb92dfd9-f5e6-43ca-9fa6-d026d3745ff2 found no issues in560a000890a840a32a5aae12daa20d121d4ed477, limited to directory disposal. Three retained post-process fixtures and outer joins do not establish inner reply/join evidence. L06 RootProbe disposal remains distinct from memory-only replies.
+
+The next reviewed unit is L08 source-discovery TemporaryDirectory hygiene. Parent inspected source_roots_probe.py and the real source-boundaries.hs header-parser/Cabal-root checker. At2026-09-17T21:10:43.782653+00:00, parent authorized isolated terminal-source-roots-evidence.gxvf54vu. Workerf111ed04-0d8e-4711-aeb8-f66ce2fe6779 may edit only the existing Python probe to use delete=False and a post-context surviving-fixture assertion. Keep original body/argv/predicates/summary/owners and30-second checker budget unchanged. Crucially source.unlink() stays, removing each deliberate Escape.hs violation before the next case. Pinned ghc --print-libdir and the unchanged REAL runghc -package=ghc -package=Cabal-syntax source-boundaries.hs checker are newly authorized for this static/data unit, not fixture module execution. Required evidence is full old-probe deletion red, corrected post-process surviving bytes/modes and repeats, a specific exception only after all checks/unlinks, and the real positive plus two diagnostic-specific checker refusals. Unchanged checker/process-helper support copies are allowed. No mocked checker, namespace/assertion weakening, Escape preimage capture, A15/reply remedy, native/runtime/Worker/Store/group/backend/signal fixture, real Cabal/workflow, full policies/package/dependency/oracle, canonical or additional-source edit is authorized. L06/A15/memory replies/preimages/full preservation and WM-016 remain unresolved or unaccepted, acceptance15/44 plus G0 unchanged.
+
+Refocus 2026-09-17T21:13:16.874985+00:00. Next deadline 2026-09-17T22:13:16.874985+00:00. Next: isolated L08 owner/checker-preserving source/data remedy and independent review.
 #+end_example
 
 ** Dependencies
