@@ -9,8 +9,10 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-16T23:45:49.017807+00:00`. The next deadline is
-`2026-09-17T00:45:49.017807+00:00`. Complete instrumented and uninstrumented
+Refocus completed at `2026-09-17T00:46:37.675187+00:00`. The next deadline is
+`2026-09-17T01:46:37.675187+00:00`. The previous checkpoint was less than one minute
+late during read-only verification, and the lapse was disclosed. Complete
+instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
 also passed all 14 outcomes with verified bytes/modes and independent scoped
 clearance. The controls evidence analyzer correction is independently cleared.
@@ -41,10 +43,11 @@ a fresh default-target build/package passed. A reviewed wrapper-probe portabilit
 fix is packaged and data-checked without changing source/raw modes. The complete
 source Store gate passed with parent verification and independent scoped
 clearance. The complete source Commands gate also passed parent verification
-and independent scoped review. Complete source Admission preparation is cleared,
-and one separately authorized Admission gate is active. No result is claimed.
-Raw and other remaining gates, old-resource recovery and acceptance remain
-unauthorized.
+and independent scoped review. The source Admission gate returned zero, but two
+copied symlink modes differ from their recorded originals. Available predicates
+are retained in a partial report, not complete accepted gate success. A no-follow
+preserver correction is being prepared with inert tests only. Actual recapture,
+further gates, old-resource recovery and acceptance remain unauthorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -755,17 +758,35 @@ default families per N1/N8, 36 opacity consumers, the distinct package-boundary
 branch and compiled interruption audit.
 
 At `2026-09-17T00:09:39.321793+00:00`, the parent separately authorized one complete
-source Admission gate. Run `3cf17b57-5ffb-40e7-ae2d-a0010150ba4c` retains original
-gate/launcher handles. The exact completion-report fault is acknowledged only
-for its original-owned fresh Runtime group. Real signalling precedes one
-synthetic EIO report after successful SIGKILL and observed exited leader, not
-skipped cleanup or a claimed kernel error. Explicit retries/reopen comparisons
-operate only on their fresh original test owners, not historical resources.
+source Admission gate. Run `3cf17b57-5ffb-40e7-ae2d-a0010150ba4c` returned zero
+after 351.602617 seconds, with original gate/launcher joins and no outer failure
+or interruption. Immediate notice preceded raw preservation. The completion-report
+fault scope used its original fresh Runtime group, with real signalling before
+one synthetic EIO report. It grants no kernel-error or historical recovery claim.
 
-No result is claimed yet. Original exit notice must precede raw preservation
-and interpretation, with unchanged budgets and no fallback authority. Raw and
-other source gates, platform/client/canonical verification and WM-016 acceptance
-remain outstanding.
+Read-only validation supports available default, opacity, package-boundary and
+interruption predicates. However, two package-boundary links were recorded and
+remain mode0700 while their copied links are mode0755. Target text and recorded
+original mtimes agree. The preserver checks targets but omits link-mode fidelity,
+so its exit zero does not establish complete preservation. No pre-copy link
+inode record exists, and historical inode continuity is not claimed.
+
+Parent verified 5,761 identities over available evidence and both mismatches.
+The snapshot has 2,525 entries, including 2,048 regular files, 475 directories
+and two symlinks. Forty databases and four quarantine WAL/SHM files remain raw,
+without post-return database access. Originals, old snapshot, discrepancy report
+and partial disposition remain untouched. Complete preservation, accepted gate
+success and permission to advance remain false.
+
+Review `845e9b53-10f9-4c53-ac65-def4687b4fe1` confirmed this copy defect. A new
+separately authorized capture can close it only if retained originals match the
+available earlier fields, with no-follow destination metadata and before/after
+checks. This does not justify a native rerun or an atomic snapshot claim.
+Preparation-only run `d87bb2c8-8a18-4066-83fa-a08d4e16a9c5` owns
+`terminal-admission-capture-fix.l8ioyj5u` for the minimal copier correction and
+inert tests. No actual recopy, original/old-copy chmod or further gate is
+authorized. Remaining source/raw/platform/client/canonical verification and
+WM-016 acceptance stay outstanding.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
