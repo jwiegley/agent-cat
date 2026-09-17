@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T09:42:33.941590+00:00`. The next deadline is
-`2026-09-17T10:42:33.941590+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T10:13:17.547401+00:00`. The next deadline is
+`2026-09-17T11:13:17.547401+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -57,8 +57,10 @@ scoped clearance after its original run and full verification. Exact raw
 Admission also has scoped clearance, including faithful first capture of both
 mode0700 package links. Exact raw ingestion also has scoped clearance after
 its original run, explicit acknowledgement, capture and full verification.
-Raw Controls preparation only is active. No further native gate, old-resource
-recovery or WM-016 acceptance is authorized.
+Exact raw Controls preparation passed review and parent verification, followed
+by one authorized invocation. No result is claimed, and preservation awaits
+explicit parent acknowledgement. Other gates, integration, platform/client
+work, old-resource recovery and WM-016 acceptance remain unauthorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -1048,13 +1050,30 @@ parent accepted exact raw ingestion at `2026-09-17T09:39:19.922743+00:00`.
 The reviewer did not independently rerun hashes or tests. Permissions are
 consumed, and historical limits remain unchanged.
 
-Preparation-only run `9376f86e-e2fa-46fa-8f78-53091be32bc8` owns
-`terminal-raw-controls.ybq6ts2k`. It must bind all 38 checker cases, six contracts
-and exact raw membership/modes with corrected ownership and acknowledgement
-before copying. No native, compiler, database API or old-resource mutation is
-authorized. Raw Controls is the last unproved current source/raw owning lane,
-not the last overall requirement. Platform/client/canonical checks and full
-WM-016 acceptance remain open.
+Raw Controls preparation under `terminal-raw-controls.ybq6ts2k` passed review
+`2be88c00-1034-42e2-9f63-fff444db9862` and 2,643 parent comparisons. The 141
+analyzer and 21 preserver inert checks retain complete cases, ownership, raw
+membership/modes and failure boundaries. No native result follows from them.
+
+At `2026-09-17T10:13:17.547401+00:00`, renewed private preflight checked 165
+exclusions and parent authorized one exact raw Controls gate. Run
+`f6219f0d-179b-4d58-aa88-e84f08566487` is active under original ownership.
+Its 38 checker cases, six contracts, fourteen builds and 28 own-built paths
+remain separately required. No result is claimed.
+
+Only selected fresh original-owned cancellation, barriers, interruptions,
+reload/revocation, paired progress and bounded saturation retries are included.
+StoreBusy observation retries are distinct from submission retries, with no
+fixed stderr-note count or unsupported case attribution. Native130 remains
+non-success. No prior Store, Admission fault or historical authority transfers.
+
+Both original return records must reach parent through need_decision and
+receive explicit ACK before preservation. No ACK or a failure/uncertainty means
+stop without retry, repair, recopy, PID adoption or next gate. Existing budgets
+and original handles remain unchanged, with no outer killing deadline.
+Raw Controls is the last unproved current source/raw owning lane, not the last
+overall acceptance requirement. Integration, platform/client/canonical work
+and WM-016 acceptance remain open and unauthorized by this invocation.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
