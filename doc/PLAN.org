@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-17 Thu 09:58]
+:MODIFIED: [2026-09-17 Thu 10:18]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -9240,6 +9240,12 @@ Refocus 2026-09-17T16:29:08.857031+00:00. Next deadline 2026-09-17T17:29:08.8570
 At2026-09-17T16:50:25.740905+00:00, parent separately authorized and applied exact canonical CaptureTests.hs bytes db86bb15f5f70a9195c6a0322d4149d317d80e08e6bf417627150716e0bc450d. Fresh complete-module/three-C-source compilation selected only CaptureTests.captureBucketEvidenceData and passed warning-fatal in56.429099875seconds. Filesystem-only N1/N8 passed with three original Popen joins, null failures and zero interruptions. All1017bound nontracking inputs remained unchanged during verification. Six actual bucket trees' bytes/modes match isolated results.27completed non-build identities were sealed after return, with the own binary separately identified and compiler intermediates retained in place. Evidence root terminal-capture-bucket-canonical.53r754ng. No native captureTests, Runtime PrivateRoot/publication/Worker/Store/group/backend/signal fixture, descriptor-closure execution, runtime-contract/full policies or package operation ran. The separately permitted documentation gate includes its static Haskell probe. Only outer hygiene is remedied; L03 preimages, L04/L05 and all other blockers remain. Committed fess is next, with WM-016 unaccepted and acceptance15/44 plus G0 unchanged.
 
 Refocus 2026-09-17T16:58:08.786387+00:00. Next deadline 2026-09-17T17:58:08.786387+00:00. Next: exact L03 outer-bucket commit and committed fess, then one next reviewed policies remedy.
+
+2026-09-17 committed L03 outer-bucket fess3b50d15d-0bef-46d8-8c95-26baff8b7d57 found no issues inca86b29ceddac4548c4d5af28c858dbaf3a19963. Native descriptor/interruption behavior, durability and full pre-mutation preservation remain unproved.27non-build identities do not imply exhaustive hashing of compiler intermediates.
+
+The review selected L04 outer root-role bucket hygiene. Parent inspected RootRoleTests, CaptureTests and direct test-main/capture-script references. Indexed outline/importer resolution remains unavailable, not evidence of no importers. At2026-09-17T17:15:50.902001+00:00, parent authorized only isolated terminal-role-bucket-evidence.b7796fr5. Workera4fc8e4d-27fd-48b5-9d3f-2a1477a98921 may edit only CaptureTests.hs and RootRoleTests.hs, parameterizing/reusing the existing allocation/action seam and filesystem assertions instead of cloning them. Preserve both literal prefixes, existing L03 data entry/results/summary, native bodies/marker bindings, descriptor brackets, replacement deletion/restoration, marker/absence/FIFO/symlink refusals and Capture finalizers/bounds.1017source/support files are bound, excluding mutable tracking. Warning-fatal complete-module/C compilation of explicit capture and root-role DATA-only mains, all four N1/N8 data runs in fresh temporary roots and source-bound old root-role allocation/finalizer reds are allowed. No native capture/root-role, Runtime PrivateRoot/state-role/publication/FIFO/symlink/Worker/Store/group/backend/signal fixture, runtime-contract/full policies, package, canonical edit, new module or additional source path is authorized. L03/L04 preimages, L05, A15 and other blockers remain, with WM-016 unaccepted and acceptance15/44 plus G0 unchanged.
+
+Refocus 2026-09-17T17:18:42.663809+00:00. Next deadline 2026-09-17T18:18:42.663809+00:00. Next: isolated L04 shared-owner outer-hygiene remedy and independent review.
 #+end_example
 
 ** Dependencies
