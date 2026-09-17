@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 22:28]
+:MODIFIED: [2026-09-16 Wed 22:58]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -9006,6 +9006,18 @@ NEW specific allowDisposableLeaseDeathFixture permission covers only the selecte
 Preservation is not yet authorized. The worker must report both original gate and launcher return/timing/join/error/interruption facts through need_decision, then wait for explicit parent ACK before copying or interpretation. Without reply or on unexpected failure/uncertain ownership, stop without retry, repair, recopy, further gate or ownership reconstruction. Existing helper budgets and primary failure precedence remain unchanged, with no aggregate native or outer killing deadline. The45minute exact-run wake is attention only.
 
 Refocus completed at 2026-09-17T05:25:12.130996+00:00, with next deadline 2026-09-17T06:25:12.130996+00:00. All five current SOURCE owning gates are scoped passes, while this first current raw invocation and remaining raw/platform/client/canonical/final acceptance remain unproved. WM-001 through WM-015 and G0 remain the only accepted packages/gate.
+
+Exact RAW Store invocation7ceef218-cddf-4cd4-9cb5-dd36eb7fa1a0 returned gate exit0 after601.7022247920104seconds and launcher exit0 after602.0023185419996seconds, with both original joins and no errors or interruptions. The child blocked on need_decision9218ca4a-90f9-4b78-8f60-e840d0e346fe. Parent checked return records and absent snapshot/analysis, persisted copy-only ACK at2026-09-17T05:37:57.813672+00:00 and replied. Preservation began05:38:43.689400 after that reply. ACK SHA6f0303b97b7189930a2150ebc059e882e1f4d0477aa097a130b5a6eb1f61c581. Gate and copy permissions are consumed, not repeat authority.
+
+Reviewed preservation, both-owner analyzer and supplemental validator returned0. Parent passed7,385comparisons over2,348entries/1,958regular files/390directories,28databases/no sidecars/no symlinks,sevenown-built binarypaths andsixretainedcompiler dirs. Raw2,341entries remain unchanged with onlysevenactualbinaryrecordsadded. Exact raw594/originalsource1021/archive/all12mode differences/427source-onlyexclusions remain intact. Helpers use raw modes and exact sequential mutations with new audit source0600. No source binary substitution, normalization, database API, retry, repair, recopy or native/compiler/helper rerun occurred.
+
+Twelve outcomes haveeightpositive/fourexactnegative cases. Default131/admission-data17/terminal14PASS lines occurpercapability, admission-datahasnofixture. Positivegap hasexact416line sequencepercapability acrossallfourmask/expiry combinations. Cancel/expirymutants haveexact(False,False)/(False,True)first-linediagnosticsandrecordedexit1. Allninehelperbuild/caserecordsretainoriginaljoins/errors/budgets. Topclasses remainchecked-flowinferences. The twolease-deathassertionsuseonlycurrentneworiginalhandlepermission, nothistoricalsignallingorcontainmentproof.
+
+Reviewer9c530f20-90df-4b89-a090-9786692fca65 found no issues, conditional on pending full parent verification. Parent subsequently completed7,385checks and accepted this exact raw Store scope at2026-09-17T05:55:11.650028+00:00. The reviewer did not independently rerun hashes or inspect that subsequently completed parent report. AllfivecurrentSOURCEowninggatesandRAWStore nowpass, withfourrawowninggatesstillunproved. This is not integration or WM016/package acceptance.
+
+A new preparation-only decision assigns terminal-raw-commands.jrxqxna6 to worker runceb81976-4afa-4f0e-8e53-d46fbd0b3e6b. It must bind exactraw594/modes/archive,fullCommandsN1/N8,two receipt-contract calls/fourteenresources,36opacityconsumers/12positive24specificrefusals andoneactualown-builtchecker. It reuses sourceCommands and latest both-owner/raw/ACK-before-copy patterns, with fresh exclusions and inert regressions. No gate/build/compiler/contractvalidator/enumeration/Store/DB/native/provider/processcontrol/source/Git/obr or authorization is permitted during preparation. No lease-death or previous fixture authority transfers.
+
+Refocus completed at 2026-09-17T05:58:22.525645+00:00, with next deadline 2026-09-17T06:58:22.525645+00:00. The shortest next step is raw Commands preparation/review, not another Store invocation. Full remaining raw/platform/client/canonical/final acceptance and historical incident requirements are unchanged.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
