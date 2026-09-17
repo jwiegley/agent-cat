@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T03:02:50.586242+00:00`. The next deadline is
-`2026-09-17T04:02:50.586242+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T03:35:30.298770+00:00`. The next deadline is
+`2026-09-17T04:35:30.298770+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -47,9 +47,10 @@ and independent scoped review. The complete source Admission gate now also
 passes scoped review using a separately authorized faithful new capture.
 Its first preservation copied two link modes incorrectly, and that old snapshot
 and failed disposition remain unchanged. The complete current source ingestion
-gate also passed parent verification and independent scoped review. Preparation
-only for complete current source Controls is active. Native execution, other
-gates, old-resource recovery and WM-016 acceptance remain unauthorized.
+gate also passed parent verification and independent scoped review. Controls
+preparation is blocked by an analyzer ownership defect, with a source/data-only
+correction active. Native execution, other gates, old-resource recovery and
+WM-016 acceptance remain unauthorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -856,12 +857,25 @@ Parent accepted this scoped result at `2026-09-17T02:58:50.319331+00:00`.
 An optional host-Python metadata-display failure remains recorded separately,
 with no artifact change or native, preservation or validator rerun.
 
-Preparation-only run `2098e18d-dae4-4c43-99cc-20c4122f4f09` owns
-`terminal-source-controls.kjrqc6s8`. It must bind all 38 checker outcomes and
-six contract invocations, with 22 positive and 16 specifically diagnosed
-negative outcomes. Corrected completeness and no-follow preservation patterns
-are reused. No gate, build, compiler, database API or old-resource mutation is
-authorized during preparation.
+Preparation run `2098e18d-dae4-4c43-99cc-20c4122f4f09` completed under
+`terminal-source-controls.kjrqc6s8`, binding 38 checker outcomes, six contracts
+and 40 resources. It retained 21 preservation and 43 analyzer inert checks.
+No native, compiler, contract-validator or database invocation occurred.
+
+Review `c1dd4f81-6d06-44a8-afe8-0cc129a7274b` blocked preparation on one P1.
+The analyzer never reads original launcher completion, so its existing synthetic
+positive reports complete success with no launcher record. The real launcher
+can retain an outer interruption after child exit zero, which must not become
+complete accepted evidence. Parent confirmed this false positive read-only.
+Earlier preparation and false-positive evidence remain unchanged.
+
+Source/data-only correction run `865be8e7-672f-411e-8a19-4d7ecc3a7c85` owns
+`terminal-controls-owner-fix.qqacwmy6`. The existing analyzer must require
+successful original gate and launcher exits and joins, with no failure or
+interruption. Its fixtures must test each missing or failed ownership condition
+and retain all earlier case/contract negatives. Full parent verification and
+independent corrected-preparation review remain pending. No native execution,
+production change or old-resource mutation is authorized.
 
 Future Controls execution requires an immediate original exit notice through
 the existing supervisor request/reply mechanism and explicit parent
