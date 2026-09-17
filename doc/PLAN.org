@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 18:36]
+:MODIFIED: [2026-09-16 Wed 19:08]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8938,6 +8938,16 @@ Independent review b257493b-115c-484d-8096-932e33ad4575 found no issues and clea
 A new parent preparation-only decision assigned terminal-source-ingestion.e8c2q8d7 to worker run 5722a5d1-ffa3-423c-a9ce-09699997628f. It prepares the complete unchanged current SOURCE ingestion gate: fourteen N1/N8 outcomes, the top build and six helper builds, four positive and ten specifically diagnosed negative cases. Current source modes and the twelve source/raw differences stay unchanged. It must reuse original-handle supervision and minimally carry the reviewed first-capture symlink metadata primitive, with inert tests and fresh resource exclusions. No native gate, compiler/Cabal execution, database API, old-resource modification, raw lane or authorization is permitted during this preparation.
 
 Refocus completed at 2026-09-17T01:36:39.191411+00:00, with next deadline 2026-09-17T02:36:39.191411+00:00. The resolved preservation gap is not a reason for further investigation or native repetition. The shortest remaining step is current-byte source ingestion preparation and independent review, followed only by a separate exact execution decision. Frozen full-scope acceptance criteria remain unchanged.
+
+Complete current SOURCE ingestion preparation passed independent review 13e86850-2fee-49c5-85ba-b63f51debb9c and parent 1,641 identity comparisons. The source-derived matrix has fourteen ordered N1/N8 outcomes, seven root families, top plus six helper Werror builds, fourteen actual executable paths, four positives and ten diagnostic-specific negatives. Twenty-two inert preservation checks passed, with exact reviewed first-capture no-follow primitives. Build/record were empty, cache and authorization absent. Top output is combined stdout/stderr, with no invented N1/N8 logs or final marker. Observer helper capability directories intentionally remain empty.
+
+Parent verification attempts 01 and 02 failed only schema assumptions about the reference-identity map and the fourteen-entry outcome list. Corrected verifier03 passed without changing prepared or application artifacts. Parent read-only preflight01 correctly refused an omitted private CABAL_BUILDDIR override before any authorization or native invocation. The corrected caller supplied the unchanged planned private environment, and fresh preflight02 verified source1021/package594/twelve mode differences/63 excluded footprints. Failed records remain visible. A late steering message was not delivered because the reviewer had already completed, not because review failed.
+
+At 2026-09-17T02:05:44.721648+00:00, parent explicitly authorized one complete SOURCE ingestion gate under terminal-source-ingestion.e8c2q8d7. Authorization SHA256 ecc8300e088269c58948878ea0b74c2b779274f362a94e91ae97609c7070048c binds exact prepared scripts and plan f8bfd0eb50a69556db0be8c67ad4c8ffbf74bcd020a7dab6ef8a3d7bc500d00d. Worker run 088525dc-be1e-4852-ab58-fd5c0a3ead69 is active with original launcher/gate ownership. No result is claimed. Selected fresh original-owned framing, malformed transport, pair interruption, SQL-fault, retained-input/cleanup retries and reopen fixtures are explicitly included. No Store lease-death, Admission completion-report fault or historical authority transfers.
+
+Original exit/timing/join/error notice must reach parent before preservation. Expected zero with original joins permits raw capture and separate validation, while unexpected failure, uncertain ownership or preservation defect stops progression. No retry, repair, saved-PID signalling, killing outer deadline, raw/other gate, database API, old-resource recovery or WM016 acceptance is authorized. The exact-run45minute wake subscription is a parent attention timer, not a process deadline.
+
+Refocus completed at 2026-09-17T02:04:03.882945+00:00, with next deadline 2026-09-17T03:04:03.882945+00:00. Full WM-001 through WM-044 and G0 through G5 scope remains unchanged, with WM-001 through WM-015 and G0 accepted. Current source Store, Commands and Admission owning gates pass, while this source ingestion invocation and remaining Controls/raw/platform/client/full acceptance remain unproved.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
