@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T01:36:39.191411+00:00`. The next deadline is
-`2026-09-17T02:36:39.191411+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T02:04:03.882945+00:00`. The next deadline is
+`2026-09-17T03:04:03.882945+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -46,9 +46,10 @@ clearance. The complete source Commands gate also passed parent verification
 and independent scoped review. The complete source Admission gate now also
 passes scoped review using a separately authorized faithful new capture.
 Its first preservation copied two link modes incorrectly, and that old snapshot
-and failed disposition remain unchanged. Preparation only for the current-byte
-source ingestion gate is active. Further native gates, old-resource recovery
-and WM-016 acceptance remain unauthorized.
+and failed disposition remain unchanged. Current source ingestion preparation
+passed parent verification and independent review, followed by one separately
+authorized gate dispatch. No result is claimed. Other gates, old-resource
+recovery and WM-016 acceptance remain unauthorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -812,14 +813,33 @@ copying gap without native repetition or old snapshot repair. No historical
 pre-first-copy inode continuity, atomic database state, resource recovery or
 WM-016 acceptance is claimed.
 
-Preparation-only run `5722a5d1-ffa3-423c-a9ce-09699997628f` now owns
-`terminal-source-ingestion.e8c2q8d7`. It must bind the current source ingestion
-gate and all fourteen N1/N8 outcomes, with the top build, six helper builds,
-four positive cases and ten specifically diagnosed negatives. Existing
-supervision and minimal no-follow metadata preservation are reused with inert
-tests. No native gate, compiler, Cabal operation, database API or old-resource
-change is authorized during preparation. Remaining source Controls/ingestion,
-raw, platform/client/canonical verification and full acceptance stay open.
+Preparation run `5722a5d1-ffa3-423c-a9ce-09699997628f` completed under
+`terminal-source-ingestion.e8c2q8d7`. It binds fourteen N1/N8 outcomes, the top
+build and six helper builds, four positive cases and ten specifically diagnosed
+negatives. Parent verification passed 1,641 comparisons and the 22 inert checks
+were retained. Review `13e86850-2fee-49c5-85ba-b63f51debb9c` cleared preparation.
+
+Two parent verifier-schema assumptions were corrected without changing prepared
+artifacts. A parent preflight caller then correctly failed for an omitted
+private CABAL_BUILDDIR override. No authority or native invocation existed at
+that failure. The corrected caller supplied the unchanged planned environment
+and fresh preflight verified 1,021 source files, 594 package files, twelve mode
+differences and 63 excluded footprints. The failed records remain visible.
+
+At `2026-09-17T02:05:44.721648+00:00`, parent authorized one complete source
+ingestion gate. Run `088525dc-be1e-4852-ab58-fd5c0a3ead69` retains original
+launcher/gate ownership and is active. Selected fresh original-owned framing,
+malformed transport, pair interruption, SQL-fault, explicit retained-input and
+cleanup retry, and reopen fixtures are included. No Store lease-death, Admission
+completion-report fault or historical-resource authority transfers.
+
+Original exit, timing, joins and failures must reach parent before copying.
+Expected zero with original joins permits faithful raw capture and separate
+validation. Unexpected failure, uncertain ownership or a preservation defect
+stops progression without retry or repair. No result is claimed. The 45-minute
+wake subscription is an attention timer, not a process deadline. Remaining
+source Controls, raw, platform/client/canonical verification and full acceptance
+stay open.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
