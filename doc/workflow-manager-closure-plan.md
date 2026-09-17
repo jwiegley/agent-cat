@@ -5,7 +5,7 @@ previous next-helper instructions, not the frozen implementation requirements.
 The immediate deliverable is accepted, integrated WM-016 functionality. The
 remaining WM-017–WM-044 and G1–G5 roadmap follows that milestone.
 
-## Starting position
+## Starting position at the 2026-09-17 refocus
 
 WM-001–WM-015 and G0 are accepted. WM-016 is not accepted. Its application
 implementation remains isolated, while ten focused macOS SOURCE/RAW owning
@@ -23,7 +23,7 @@ WM-016 and sections 9.1–9.3. Those sections require meaningful behavioral evid
 and existing owning gates. They do not require an independent preparation,
 manifest, preservation and review project for every helper.
 
-## Remaining blockers
+## Blockers identified at the refocus
 
 | Blocker | Required resolution |
 |---|---|
@@ -116,6 +116,6 @@ decisions. Remote/client execution, paid providers, deployment and new Lean/orac
 builds retain their existing authorization limits. No test or frozen criterion
 is weakened to obtain completion.
 
-The next decisive action is the application-delta reconciliation, followed by the
-consolidated failure-path and integration effort above. Report product progress,
-remaining blockers and the next action rather than artifact comparison counts.
+Current progress and the next decisive action are recorded in the
+[handoff](workflow-manager-handoff.md). Report product progress, remaining
+blockers and the next action rather than artifact comparison counts.

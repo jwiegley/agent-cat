@@ -305,7 +305,8 @@ binding and a stable nonce-bound digest. Admission retains the original worker a
 one-shot start ticket through committed intent, delayed delivery, actual running
 and confirmed cleanup. `manager/ci/approval.sh` runs real N1/N8 native cases, frozen
 public-schema validation, opacity and test-only interrupted-delivery controls.
-Public Runtime projection and full control intents remain with their later owners.
+Runtime projection and correlated control intents have the separate State owner
+described below.
 
 ## Durable Runtime ingestion
 
@@ -324,4 +325,14 @@ separate original-wire and canonical checkpoint bounds, fixed-prefix restoration
 concurrent publication checks and quadratic replay cost. `manager/ci/ingestion.sh`
 runs the differential, genuine native, concurrency and negative-control checks at
 N1 and N8. These checks do not establish a deployed manager service, public control
-endpoints or verified artifact content.
+endpoints or general verified artifact content.
+
+## Decisions and correlated controls
+
+The [control contract](CONTROLS.md) provides verified person questions, recovery
+choices, per-run FIFO reservations and manager-ordered run heads. Decision and
+run-control entrypoints share strict acceptance and the original Admission owner.
+Native frames remain in original one-shot tickets rather than durable replay
+payloads. Acknowledgements, effects, terminal state and uncertainty remain distinct.
+The dedicated `manager/ci/controls.sh` gate exercises native workers and compiled
+negative controls. It does not introduce HTTP endpoints or client presentation.

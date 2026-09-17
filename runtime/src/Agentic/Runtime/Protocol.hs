@@ -27,6 +27,8 @@ module Agentic.Runtime.Protocol
     mkRunId,
     protocolVersion,
     latestProtocolVersion,
+    correlatedProtocolVersion,
+    supportedProtocolVersions,
     storeVersion,
     latestStoreVersion,
     maxFrameBytes,
@@ -329,6 +331,7 @@ data RuntimeEvent
   | RunStartedV2 !Text !Text !PersonAnswering
   | OccurrenceStarted !OccurrenceId !Text !Text !Text !Text
   | AttemptStarted !AttemptId !Text
+  | AttemptControlAvailability !AttemptId !Bool
   | AttemptOutput !AttemptId !Text
   | AttemptProgress !AttemptId !PublicProgress
   | AttemptSteered !AttemptId !Text !Text !Text
@@ -369,9 +372,13 @@ type EventSink = RuntimeEvent -> IO ()
 nullEventSink :: EventSink
 nullEventSink _ = pure ()
 
-protocolVersion, latestProtocolVersion, storeVersion, latestStoreVersion :: Int
+protocolVersion, correlatedProtocolVersion, latestProtocolVersion, storeVersion, latestStoreVersion :: Int
 protocolVersion = 1
-latestProtocolVersion = 2
+correlatedProtocolVersion = 2
+latestProtocolVersion = 3
+
+supportedProtocolVersions :: [Int]
+supportedProtocolVersions = [protocolVersion, correlatedProtocolVersion, latestProtocolVersion]
 storeVersion = 1
 latestStoreVersion = 2
 
@@ -388,7 +395,7 @@ encodeEnvelope = BL.toStrict . encode
 
 encodeEnvelopeFor :: Int -> Envelope -> Either Text ByteString
 encodeEnvelopeFor version envelope
-  | version `notElem` [protocolVersion, latestProtocolVersion] = Left ("unsupported runtime protocol version " <> T.pack (show version))
+  | version `notElem` supportedProtocolVersions = Left ("unsupported runtime protocol version " <> T.pack (show version))
   | envelopeVersion envelope /= version = Left "runtime envelope version does not match selected protocol"
   | not (eventSupported version (envelopeEvent envelope)) = Left "runtime event is not available in selected protocol"
   | Left failure <- validateRuntimeEventFor version (envelopeEvent envelope) = Left ("runtime event is invalid: " <> failure)
@@ -453,7 +460,7 @@ instance ToJSON Envelope where
 instance FromJSON Envelope where
   parseJSON = withObject "runtime envelope" $ \o -> do
     version <- o .: "protocolVersion"
-    if version `notElem` [protocolVersion, latestProtocolVersion]
+    if version `notElem` supportedProtocolVersions
       then fail ("unsupported runtime protocol version " <> show (version :: Int))
       else do
         run <- parseRunId =<< o .: "runId"
@@ -510,6 +517,8 @@ instance ToJSON RuntimeEvent where
         ]
     AttemptStarted attempt target ->
       attemptObject "attempt.started" attempt ["target" .= target]
+    AttemptControlAvailability attempt steerable ->
+      attemptObject "attempt.control-availability" attempt ["steerable" .= steerable]
     AttemptOutput attempt chunk ->
       attemptObject "attempt.output" attempt ["stream" .= ("transport-text" :: Text), "chunk" .= chunk]
     AttemptProgress attempt progress ->
@@ -587,13 +596,16 @@ parseRuntimeEventFor version = withObject "runtime event" $ \o -> do
         <*> o .: "addressee"
         <*> o .: "prompt"
     "attempt.started" -> AttemptStarted <$> attemptFrom o <*> o .: "target"
+    "attempt.control-availability"
+      | version == latestProtocolVersion -> AttemptControlAvailability <$> attemptFrom o <*> o .: "steerable"
+      | otherwise -> fail "control availability requires protocol version 3"
     "attempt.output" -> do
       stream <- o .: "stream" :: Parser Text
       if stream /= "transport-text"
         then fail ("unknown attempt output stream " <> T.unpack stream)
         else AttemptOutput <$> attemptFrom o <*> o .: "chunk"
     "attempt.progress"
-      | version == latestProtocolVersion -> AttemptProgress <$> attemptFrom o <*> o .: "progress"
+      | version >= correlatedProtocolVersion -> AttemptProgress <$> attemptFrom o <*> o .: "progress"
       | otherwise -> fail "attempt progress is unavailable in protocol version 1"
     "attempt.steered" -> do
       attempt <- attemptFrom o
@@ -630,7 +642,7 @@ parseRuntimeEventFor version = withObject "runtime event" $ \o -> do
     "occurrence.completed" -> OccurrenceCompleted <$> occurrenceFrom o <*> o .: "source" <*> o .: "answer"
     "occurrence.failed" -> OccurrenceFailed <$> occurrenceFrom o <*> failureFrom o <*> o .: "message"
     "occurrence.person-answer-pending"
-      | version == latestProtocolVersion -> OccurrencePersonAnswerPending <$> occurrenceFrom o <*> o .: "question"
+      | version >= correlatedProtocolVersion -> OccurrencePersonAnswerPending <$> occurrenceFrom o <*> o .: "question"
       | otherwise -> fail "person answer event is unavailable in protocol version 1"
     "control.ack" -> do
       control <- o .: "controlId" >>= parseControlId
@@ -800,6 +812,7 @@ unlessP condition message = if condition then pure () else fail message
 
 eventSupported :: Int -> RuntimeEvent -> Bool
 eventSupported version event
+  | AttemptControlAvailability {} <- event = version == latestProtocolVersion
   | version == protocolVersion = case event of
       RunStartedV2 {} -> False
       ControlAcknowledgedV2 {} -> False
@@ -807,7 +820,7 @@ eventSupported version event
       AttemptProgress {} -> False
       RunCompletedV2 {} -> False
       _ -> True
-  | version == latestProtocolVersion = case event of
+  | version `elem` [correlatedProtocolVersion, latestProtocolVersion] = case event of
       RunStarted {} -> False
       ControlAcknowledged {} -> False
       RunCompleted {} -> False

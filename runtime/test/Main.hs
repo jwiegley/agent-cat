@@ -248,9 +248,9 @@ personControlTests = do
   release
   delivered <- takeMVar answered
   expect "person gate returns canonical JSON" (delivered == (ControlId "person-valid", Bool True))
-  let encodedAnswer = encodeControlFor latestProtocolVersion validControl
+  let encodedAnswer = encodeControlFor correlatedProtocolVersion validControl
   expect "protocol v2 control round trip" $
-    (encodedAnswer >>= decodeControlFor latestProtocolVersion) == Right validControl
+    (encodedAnswer >>= decodeControlFor correlatedProtocolVersion) == Right validControl
   expectLeft "protocol v1 refuses answerPerson" (encodedAnswer >>= decodeControlFor protocolVersion)
   where
     validAnswer = \case
@@ -456,7 +456,7 @@ frontendIoContractTests = do
           (encodeFrontendManifest frontend {frontendRunId = run1, frontendPersonAnswering = Just PersonAnswerLocalControl, frontendOwnerId = Just "pi:foreign"})
         writePrivate (runDirectory </> "owner.json") ownerBytes
         (questionRequest, resultRequest) <-
-          withRunStoreVersioned latestStoreVersion latestProtocolVersion runtimeDirectory (testManifest (Just PersonAnswerLocalControl)) $ \store -> do
+          withRunStoreVersioned latestStoreVersion correlatedProtocolVersion runtimeDirectory (testManifest (Just PersonAnswerLocalControl)) $ \store -> do
             reference <- writeQuestionArtifact store run1 occurrence0 "consult" question
             _ <- appendStoredEvent store (envelopeV2 0 (RunStartedV2 "review" "scripted" PersonAnswerLocalControl))
             _ <- appendStoredEvent store (envelopeV2 1 (OccurrenceStarted occurrence0 "flag" "consult" "person owner" "approve?"))
@@ -549,7 +549,7 @@ frontendExportContractTests = do
         ensurePrivateDirectoryAt root ["runs"]
         createPrivateDirectoryAt root ["runs", T.unpack (runIdText run1)]
         reference <- withAnchorEnvironment root $
-          withRunStoreVersioned latestStoreVersion latestProtocolVersion runtimeDirectory (testManifest (Just PersonAnswerLocalControl)) $ \store ->
+          withRunStoreVersioned latestStoreVersion correlatedProtocolVersion runtimeDirectory (testManifest (Just PersonAnswerLocalControl)) $ \store ->
             writeResultArtifact store run1 code result "typed result"
         BS.writeFile (runtimeDirectory </> "events.ndjson") "{damaged journal"
         let request name reference' identity = object
@@ -615,7 +615,7 @@ storeContractTests = do
           ]
       exercise = do
         (writtenResult, writtenQuestion) <-
-          withRunStoreVersioned latestStoreVersion latestProtocolVersion store2 localManifest $ \store -> do
+          withRunStoreVersioned latestStoreVersion correlatedProtocolVersion store2 localManifest $ \store -> do
             _ <- appendStoredEvent store (envelopeV2 0 (RunStartedV2 "review" "scripted" PersonAnswerLocalControl))
             resultReference <- writeResultArtifact store run1 code result "done\nnow"
             questionReference <- writeQuestionArtifact store run1 occurrence0 "consult" question

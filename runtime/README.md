@@ -14,9 +14,14 @@ its run; it has no dependency on the DSL or on a concrete engine. Hosts such as
 the CLI import it, while a workflow names a run fact through an ordinary
 `input` and imports nothing from this directory. The implementation modules are
 hidden by the Cabal file. `Agentic.Runtime.Protocol` fixes the process contracts:
-descriptor versions 2 and 3, machine protocols 1 and 2, control protocols 1 and
-2, and store formats 1 and 2. Version 2 adds private result and question
-artifacts, local person answering, and typed public attempt progress.
+descriptor versions 2 and 3, machine observation protocols 1, 2 and 3, control
+protocols 1 and 2, and store formats 1 and 2. Version 2 adds private result and
+question artifacts, local person answering, and typed public attempt progress.
+Explicit frontend session version 2 opts into observation protocol 3, which adds
+exact registered steering availability and one additional cancellation-only
+acknowledgement slot after the existing 256 ordinary IDs. Legacy frontend session
+version 1 and CLI defaults remain on their original protocol versions. Control
+frames remain version 2 for both frontend sessions.
 
 `Agentic.Runtime.PrivateRoot` supplies the retained, effective-user-owned, private
 directory contract used by both the runtime store and terminal frontend. File
@@ -139,8 +144,11 @@ the resulting private values.
 ## Neutral frontend transport
 
 `Agentic.Runtime.Frontend.Protocol`, re-exported through `Agentic.Runtime`,
-owns version-1 preparation, lineage, input-source, edit, start, discard,
-prepared-reply, and capability data and codecs. Request parsing preserves the
+owns preparation, lineage, input-source, edit, start, discard, prepared-reply,
+and capability data and codecs. Its existing encoders retain session version 1.
+The explicit versioned encoders negotiate session version 2 without changing
+captured preparation facts, and reject a reply or decision from another session
+version. Request parsing preserves the
 native branches and refusal text. Initial sources remain literal text,
 transport text, or a file reference, and replacement answers retain their exact
 JSON values, including false and null. The codec neither reads a file nor

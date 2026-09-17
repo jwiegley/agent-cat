@@ -18,6 +18,13 @@ module Agentic.Runtime.Frontend.Protocol
     maxFrontendQueryBytes,
     maxFrontendReplyBytes,
     parseSetupRequest,
+    parseSessionSetup,
+    parseSessionDecision,
+    encodeFrontendSetupRequestFor,
+    encodeFrontendDecisionFor,
+    encodeFrontendPreparedFor,
+    decodeFrontendPreparedFor,
+    sessionRuntimeProtocol,
     parseSetup,
     parseInput,
     parseEdit,
@@ -48,6 +55,8 @@ import Agentic.Runtime.Protocol
     maxArtifactBytes,
     maxFrameBytes,
     mkRunId,
+    correlatedProtocolVersion,
+    latestProtocolVersion,
   )
 import Agentic.Runtime.Store (LineageOperation (..))
 import Control.Monad (unless, when)
@@ -181,7 +190,7 @@ data FrontendCapabilities = FrontendCapabilityReply
 frontendCapabilities :: FrontendServer -> FrontendCapabilities
 frontendCapabilities server = FrontendCapabilityReply
   { capabilityServer = server,
-    capabilitySessionVersions = [1],
+    capabilitySessionVersions = [1, 2],
     capabilitySessionOperations = ["prepare", "prepare-lineage", "start", "discard"],
     capabilityInputSources = ["literal", "file", "transport"],
     capabilityInvocationVersions = [1],
@@ -250,6 +259,49 @@ instance FromJSON FrontendDecision where
 instance ToJSON FrontendDecision where
   toJSON (FrontendStart approval) = request "start" ["approvalId" .= approval]
   toJSON (FrontendDiscard approval) = request "discard" ["approvalId" .= approval]
+
+-- | Session v2 opts into Runtime observation v3, retaining control v2.
+sessionRuntimeProtocol :: Int -> Either Text Int
+sessionRuntimeProtocol 1 = Right correlatedProtocolVersion
+sessionRuntimeProtocol 2 = Right latestProtocolVersion
+sessionRuntimeProtocol _ = Left "unsupported frontend session version"
+
+parseSessionSetup :: Value -> Parser (Int, FrontendSetupRequest)
+parseSessionSetup value = withObject "frontend session" (\o -> do
+  version <- o .: "version"
+  _ <- either (fail . T.unpack) pure (sessionRuntimeProtocol version)
+  setup <- parseSetupRequest (sessionValue 1 value)
+  pure (version, setup)) value
+
+parseSessionDecision :: Int -> Text -> Value -> Parser Bool
+parseSessionDecision version approval = parseSession version (parseDecision approval)
+
+parseSession :: Int -> (Value -> Parser a) -> Value -> Parser a
+parseSession version parser value = withObject "frontend session" (\o -> do
+  _ <- either (fail . T.unpack) pure (sessionRuntimeProtocol version)
+  actual <- o .: "version"
+  unless (actual == version) (fail "frontend session version changed")
+  parser (sessionValue 1 value)) value
+
+sessionValue :: Int -> Value -> Value
+sessionValue version (Object fields) = Object (KeyMap.insert "version" (toJSON version) fields)
+sessionValue _ value = value
+
+encodeFrontendSetupRequestFor :: Int -> FrontendSetupRequest -> Either Text BS.ByteString
+encodeFrontendSetupRequestFor version = encodeBounded (toInteger maxFrontendQueryBytes)
+  "frontend request exceeds its byte bound" (parseSession version parseSetupRequest) . sessionValue version . toJSON
+
+encodeFrontendDecisionFor :: Int -> FrontendDecision -> Either Text BS.ByteString
+encodeFrontendDecisionFor version = encodeBounded (toInteger maxFrontendQueryBytes)
+  "frontend request exceeds its byte bound" (parseSession version (parseJSON :: Value -> Parser FrontendDecision)) . sessionValue version . toJSON
+
+encodeFrontendPreparedFor :: Int -> FrontendPrepared -> Either Text BS.ByteString
+encodeFrontendPreparedFor version = encodeReply (parseSession version (parseJSON :: Value -> Parser FrontendPrepared)) . sessionValue version . toJSON
+
+decodeFrontendPreparedFor :: Int -> BS.ByteString -> Either Text FrontendPrepared
+decodeFrontendPreparedFor version bytes = do
+  value <- decodeReply bytes
+  either (Left . T.pack) Right (parseEither (parseSession version parseJSON) value)
 
 parseSetupRequest :: Value -> Parser FrontendSetupRequest
 parseSetupRequest value = withObject "frontend preparation" (\o -> do

@@ -73,7 +73,7 @@ runFrontendSession ::
   Text ->
   (String -> Bool) ->
   (Text -> IO WorkflowDescriptor) ->
-  (Maybe FrontendParent -> Text -> [Text] -> PersonAnswering -> [(Text, BS.ByteString)] -> IO FrontendPreparation) ->
+  (Int -> Maybe FrontendParent -> Text -> [Text] -> PersonAnswering -> [(Text, BS.ByteString)] -> IO FrontendPreparation) ->
   IO ()
 runFrontendSession runnerId runnerVersion credentialArgument describe prepare = withTermination $ do
   worker <- lookupEnv "AGENT_CAT_FRONTEND_WORKER"
@@ -86,15 +86,16 @@ runFrontendSession runnerId runnerVersion credentialArgument describe prepare = 
       unless (isNamedPipe status || isSocket status) (refuse "frontend preparation requires a pipe or socket")
       bracket (fdToHandle (Fd 3)) hClose $ \handle -> do
         (request, buffered) <- receive handle BS.empty
-        requested <- parsed parseSetupRequest request
+        (sessionVersion, requested) <- parsed parseSessionSetup request
+        runtimeVersion <- either refuse pure (sessionRuntimeProtocol sessionVersion)
         case requested of
           RootSetup setup -> do
             validateInvocationCredentials credentialArgument (setupInvocation setup)
             descriptor <- describe (setupWorkflow setup)
             inputs <- captureInputs descriptor (setupInputs setup)
             withPrivateRoot "frontend state" (setupDirectory setup) $ \root -> do
-              prepared <- prepare Nothing (setupWorkflow setup) (setupArguments setup) (setupPerson setup) inputs
-              serve root handle buffered setup descriptor inputs Nothing (pure ()) prepared
+              prepared <- prepare runtimeVersion Nothing (setupWorkflow setup) (setupArguments setup) (setupPerson setup) inputs
+              serve sessionVersion root handle buffered setup descriptor inputs Nothing (pure ()) prepared
           DerivedSetup directory parentId operation edits answering requestedInvocation -> do
             validateInvocationCredentials credentialArgument requestedInvocation
             bracket (openPrivateRoot "frontend state" directory) closePrivateRoot $ \root -> do
@@ -117,8 +118,8 @@ runFrontendSession runnerId runnerVersion credentialArgument describe prepare = 
                 let inputs = [(name, captured Map.! name) | name <- names]
                 setEnv "AGENT_CAT_STATE_ANCHOR" (privateRootIdentity root)
                 withCurrentDirectory (frontendCwd manifest) $ do
-                  prepared <- prepare (Just parent) (setupWorkflow setup) (setupArguments setup) answering inputs
-                  serve root handle buffered setup descriptor inputs (Just parent) revalidate prepared
+                  prepared <- prepare runtimeVersion (Just parent) (setupWorkflow setup) (setupArguments setup) answering inputs
+                  serve sessionVersion root handle buffered setup descriptor inputs (Just parent) revalidate prepared
     _ -> do
       executable <- getExecutablePath
       ambient <- filter ((`notElem` frontendOwnedEnvironment) . fst) <$> getEnvironment
@@ -129,7 +130,7 @@ runFrontendSession runnerId runnerVersion credentialArgument describe prepare = 
       bracket (createProcessGroup command) (\group -> terminateProcessGroup 2000000 group `finally` closeGroupPipes group) $ \group ->
         waitProcessGroup group >>= exitWith
   where
-    serve root handle buffered setup descriptor inputs parent revalidate prepared = do
+    serve sessionVersion root handle buffered setup descriptor inputs parent revalidate prepared = do
       pid <- getProcessID
       stamp <- getMonotonicTimeNSec
       runId <- either refuse pure (mkRunId ("native-" <> T.pack (show pid) <> "-" <> T.pack (show stamp)))
@@ -146,7 +147,7 @@ runFrontendSession runnerId runnerVersion credentialArgument describe prepare = 
           | requested == preparationTargetKind prepared -> pure requested
           | preparationTargetKind prepared == "acp" && requested `elem` ["current", "child", "remote"] -> pure requested
           | otherwise -> refuse "frontend target kind disagrees with the resolved backend"
-      send . toJSON $ FrontendPrepared
+      reply <- either refuse pure . encodeFrontendPreparedFor sessionVersion $ FrontendPrepared
         { preparedApprovalId = approval,
           preparedRunId = runId,
           preparedRootIdentity = T.pack (privateRootIdentity root),
@@ -165,8 +166,10 @@ runFrontendSession runnerId runnerVersion credentialArgument describe prepare = 
             (frontendRunId (recordManifest (parentRecord selected)))
             (parentOperation selected) (map editMetadata (parentEdits selected))) <$> parent
         }
+      BS.hPut stdout (reply <> "\n")
+      hFlush stdout
       (decision, controls) <- receive handle buffered
-      start <- parsed (parseDecision approval) decision
+      start <- parsed (parseSessionDecision sessionVersion approval) decision
       when start $ do
         assertPrivateRoot root
         _ <- revalidate

@@ -211,6 +211,7 @@ import Agentic.Runtime.Control
     controlIdText,
     runtimeOccurrenceReplayable,
     registerControlAttempt,
+    registeredAttemptSteerability,
     registerRuntimeRedirects,
     reservedRedirects,
     unregisterControlAttempt,
@@ -288,7 +289,7 @@ import Control.Exception
     throwIO,
     try,
   )
-import Control.Monad (unless, void, when)
+import Control.Monad (forM_, unless, void, when)
 import Data.Foldable (traverse_)
 import Data.IntSet (IntSet)
 import Data.Char (isAlphaNum)
@@ -1068,6 +1069,9 @@ withPhysicalAttempt context target action = mask $ \restore -> do
   attempt <- nextAttemptId context
   let run = do
         attemptEvents context (AttemptStarted attempt target)
+        forM_ (attemptControlRuntime context) $ \controls -> do
+          support <- registeredAttemptSteerability controls attempt
+          forM_ support (attemptEvents context . AttemptControlAvailability attempt)
         outcome <- try (restore (action attempt))
         case outcome of
           Right answer -> attemptEvents context (AttemptCompleted attempt target) >> pure answer

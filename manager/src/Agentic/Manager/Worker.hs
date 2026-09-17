@@ -7,7 +7,7 @@ module Agentic.Manager.Worker
   ( FrontendWorker, WorkerFailure (..), WorkerPhase (..), WorkerObservation (..),
     WorkerEvent, workerEventEnvelope, workerEventBytes,
     withFrontendWorker, withStartingFrontendWorker, withWorkerCommitDeadline, workerPrepared, startWorker, discardWorker, writeWorkerControl,
-    consumeWorkerEvent, observeWorker, workerDiagnostics, waitWorker, closeWorker
+    consumeWorkerEvent, observeWorker, workerProtocolVersion, workerDiagnostics, waitWorker, closeWorker
   ) where
 
 import Agentic.Manager.Protocol.Command (CommandFailure)
@@ -23,8 +23,8 @@ import Agentic.Runtime
    ensurePrivateDirectoryAt, openPrivateSubroot, closePrivateRoot,
    FrontendSetupRequest (..), FrontendSetup (..), FrontendDecision (..),
    FrontendPrepared (..), FrontendCapabilities (..), WorkflowDescriptor (..),
-   encodeFrontendSetupRequest, encodeFrontendDecision, decodeFrontendPrepared,
-   maxFrontendReplyBytes, maxFrameBytes, latestProtocolVersion, readNdjsonFrame,
+   encodeFrontendSetupRequestFor, encodeFrontendDecisionFor, decodeFrontendPreparedFor, sessionRuntimeProtocol,
+   maxFrontendReplyBytes, maxFrameBytes, correlatedProtocolVersion, readNdjsonFrame,
    Envelope (..), RuntimeEvent (..), SeqNo, checkSequence, decodeEnvelopeFor,
    Control, encodeControlFor, decodeControlFor)
 import Control.Concurrent.Async (async, withAsync, waitCatch, race, concurrently_)
@@ -72,6 +72,7 @@ data FrontendWorker = FrontendWorker
   { lifecycle :: !WorkerLifecycle,
     nativeProcess :: !(TVar (Maybe ProcessGroup)),
     prepared :: !(TMVar FrontendPrepared),
+    sessionVersion :: !(TVar Int),
     inputPipe :: !(TVar (Maybe Handle)),
     eventQueue :: !(TBQueue WorkerEvent),
     queueBytes :: !(TVar Int),
@@ -111,7 +112,7 @@ withFrontendWorker store profile revision setup action = withStartingFrontendWor
 -- | Loan construction ownership immediately, without granting preparation or approval.
 withStartingFrontendWorker :: CoordinationStore -> Text -> Text -> FrontendSetupRequest -> (FrontendWorker -> IO a) -> IO a
 withStartingFrontendWorker store profile revision setup action = mask $ \restore -> do
-  worker <- FrontendWorker <$> newWorkerLifecycle <*> newTVarIO Nothing <*> newEmptyTMVarIO <*> newTVarIO Nothing
+  worker <- FrontendWorker <$> newWorkerLifecycle <*> newTVarIO Nothing <*> newEmptyTMVarIO <*> newTVarIO 1 <*> newTVarIO Nothing
     <*> newTBQueueIO 32 <*> newTVarIO 0 <*> newTVarIO Nothing <*> newTVarIO (BS.empty, False)
     <*> newMVar () <*> newMVar () <*> newTVarIO (pure False) <*> newTVarIO Nothing
   supervisor <- async $ do
@@ -135,13 +136,15 @@ withStartingFrontendWorker store profile revision setup action = mask $ \restore
         Left (StopFailed failure) -> throwIO failure
         Right value -> pure value
     startup worker owner root = do
-      bytes <- either (const (throwIO WorkerConfiguration)) pure (encodeFrontendSetupRequest setup)
       initial <- checkedSelection store profile revision setup
       files <- try @CommandFailure (try @IOException (verifyFrontendFiles store profile setup))
       case files of
         Right (Right ()) -> pure ()
         _ -> throwIO WorkerConfiguration
       capabilities <- probeStoreCapabilities store owner profile revision >>= either (const (throwIO WorkerCapabilityRejected)) pure
+      let version = if 2 `elem` capabilitySessionVersions capabilities then 2 else 1
+      atomically (writeTVar (sessionVersion worker) version)
+      bytes <- either (const (throwIO WorkerConfiguration)) pure (encodeFrontendSetupRequestFor version setup)
       ensurePrivateDirectoryAt root ["runs"]
       expectedRoot <- bracket (openPrivateSubroot root ["runs"]) closePrivateRoot (pure . T.pack . privateRootIdentity)
       bracketPreserving (launch worker owner initial) cleanupGroup $ \(group, selected) -> do
@@ -154,7 +157,7 @@ withStartingFrontendWorker store profile revision setup action = mask $ \restore
           (drainErrors worker errors)
           (do
             writeFrame WorkerWriteFailed input bytes
-            (reply, rest) <- readPrepared output
+            (reply, rest) <- readPrepared version output
             validatePrepared selected capabilities expectedRoot setup reply
             unless (BS.null rest) (throwIO WorkerPhaseViolation)
             atomically $ do
@@ -225,15 +228,15 @@ validatePrepared (selected, catalogue) capabilities root setup reply = do
       && workflowName descriptor == setupWorkflow request) (discoveryEntries catalogue)) (throwIO WorkerWrongIdentity)
     DerivedSetup {} -> pure ()
 
-readPrepared :: Handle -> IO (FrontendPrepared, BS.ByteString)
-readPrepared handle = do
+readPrepared :: Int -> Handle -> IO (FrontendPrepared, BS.ByteString)
+readPrepared version handle = do
   frame <- readNdjsonFrame (fromInteger maxFrontendReplyBytes - 1) "worker prepared" handle BS.empty
     >>= either (const (throwIO WorkerPreparedFraming)) pure
   case frame of
     Nothing -> throwIO WorkerPreparedFraming
     Just (bytes, rest) -> do
       validUtf8 WorkerPreparedDecode bytes
-      reply <- either (const (throwIO WorkerPreparedDecode)) pure (decodeFrontendPrepared bytes)
+      reply <- either (const (throwIO WorkerPreparedDecode)) pure (decodeFrontendPreparedFor version bytes)
       pure (reply, rest)
 
 readEvents :: FrontendWorker -> Handle -> FrontendPrepared -> Maybe Envelope -> Bool -> IO ()
@@ -247,7 +250,9 @@ readEvents worker handle reply previous terminal = loop BS.empty previous termin
           unless (ended || (state == WorkerDiscardSent && lastEnvelope == Nothing)) (throwIO WorkerUnexpectedExit)
         Just (bytes, rest) -> do
           validUtf8 WorkerRuntimeDecode bytes
-          envelope <- either (const (throwIO WorkerRuntimeDecode)) pure (decodeEnvelopeFor [latestProtocolVersion] bytes)
+          version <- atomically (readTVar (sessionVersion worker))
+          runtimeVersion <- either (const (throwIO WorkerRuntimeDecode)) pure (sessionRuntimeProtocol version)
+          envelope <- either (const (throwIO WorkerRuntimeDecode)) pure (decodeEnvelopeFor [runtimeVersion] bytes)
           unless (envelopeRunId envelope == preparedRunId reply) (throwIO WorkerWrongIdentity)
           _ <- either (const (throwIO WorkerSequenceViolation)) pure (checkSequence lastEnvelope envelope)
           state <- atomically (readTVar (phase worker))
@@ -305,15 +310,21 @@ decision worker next construct = serializedWrite worker $ do
   reply <- workerPrepared worker
   state <- atomically (readTVar (phase worker))
   unless (state == WorkerPrepared) (throwIO WorkerPhaseViolation)
-  bytes <- either (const (throwIO WorkerConfiguration)) pure (encodeFrontendDecision (construct (preparedApprovalId reply)))
+  version <- atomically (readTVar (sessionVersion worker))
+  bytes <- either (const (throwIO WorkerConfiguration)) pure (encodeFrontendDecisionFor version (construct (preparedApprovalId reply)))
   send worker (Just next) bytes
+
+-- | The protocol negotiated on this original session, not a runner-name inference.
+workerProtocolVersion :: FrontendWorker -> IO Int
+workerProtocolVersion worker = atomically(readTVar(sessionVersion worker)) >>=
+  either (const(throwIO WorkerConfiguration)) pure . sessionRuntimeProtocol
 
 writeWorkerControl :: FrontendWorker -> Control -> IO ()
 writeWorkerControl worker control = serializedWrite worker $ do
   state <- atomically (readTVar (phase worker))
   unless (state `elem` [WorkerStartSent, WorkerRunning]) (throwIO WorkerPhaseViolation)
-  bytes <- either (const (throwIO WorkerConfiguration)) pure (encodeControlFor latestProtocolVersion control)
-  _ <- either (const (throwIO WorkerConfiguration)) pure (decodeControlFor latestProtocolVersion bytes)
+  bytes <- either (const (throwIO WorkerConfiguration)) pure (encodeControlFor correlatedProtocolVersion control)
+  _ <- either (const (throwIO WorkerConfiguration)) pure (decodeControlFor correlatedProtocolVersion bytes)
   send worker Nothing bytes
 
 serializedWrite :: FrontendWorker -> IO a -> IO a

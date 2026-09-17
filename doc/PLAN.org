@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-17 Thu 14:55]
+:MODIFIED: [2026-09-17 Thu 15:44]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -9345,6 +9345,20 @@ Refocus 2026-09-17T21:55:25.082467+00:00. Next deadline 2026-09-17T22:55:25.0824
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 234,
+    "issue_id": "acat-wm-016-bsw2",
+    "author": "johnw",
+    "text": "WM-016 application integration, 2026-09-17.\n\nThe reviewed application changes are reconciled with the current canonical repairs. Cabal retains the public Runtime/test-component boundary and BucketEvidence. The policies merge retains the later refusal and schema checks. The existing refusal fixture now supplies a Bash wrapper around its inert Python producer, and the storage documentation names schema seven. The original Store admission policy, runtime budgets and failure distinctions are unchanged.\n\nThe first whole-workspace warning-fatal build passed but used a prohibited explicit jobs: 1 setting. That configuration error is disclosed rather than accepted. The setting was removed, and the unchanged Bash wrapper subsequently completed build all --enable-tests --ghc-options=-Werror without a job override. The existing refusal regression and documentation gate passed.\n\nFresh controls-saturation and ingestion-concurrent scenarios both passed at N1 and N8 on the reconciled application. Their original Worker/ProcessGroup owners exercised cancellation, successful and interrupted caller cleanup, transport-outcome preservation, physical joins and release of both reservations only after cleanup. Saturation retained 256 ordinary controls and the cancellation-only extra slot. These are actual native execution results, not compilation or artifact-retention claims. No historical resources were signalled or recovered, and historical policies-gate-05 remains unresolved.\n\nWork and ordinary command output are under controls.qzldrova/wm016-delivery.LdWQA6B3. Build and regression output is in build.22UhyK, and the fresh native fixtures are in functional.toRJdNVE. The execution decision covered only these fresh local scenarios, their original owners, existing budgets and offline adapters. It grants no later process-fault, remote, client, deployment or paid-provider execution.\n\nNext: land this coherent application delta, run the remaining existing local changed-layer suites and owning gates, and obtain current Linux and affected local-client/UI compatibility plus one milestone-level final review. Authorization for vulcan.lan and the selected Pi/Emacs checkouts has been requested, not assumed. WM-016 remains open, with acceptance still WM-001–WM-015 and G0.\n\nRefocus completed at 2026-09-17T22:43:54Z. Next deadline is 2026-09-17T23:43:54Z. Continue product integration and required validation, not the paused L08 review or the old retention-helper queue.\n",
+    "created_at": "2026-09-17T22:44:53Z"
   }
 ]
 #+end_src

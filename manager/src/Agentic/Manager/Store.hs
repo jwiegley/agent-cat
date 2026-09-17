@@ -8,16 +8,18 @@
 module Agentic.Manager.Store
   ( CoordinationStore, StoreIdentity (..), StoreFailure (..), Checkpoint (..),
     withCoordinationStore, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreFiles, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, retryStoreCleanup, probeStoreCapabilities,
-    CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, Transaction, execute, query, refuseTransaction, runTransaction, runRead, transactionGeneration,
+    CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, Transaction, execute, query, refuseTransaction, runTransaction, runRead, StoreAdmission (..), runTransactionWithAdmission, runReadWithAdmission, transactionGeneration,
     Invalidation (..)
   ) where
 
+import Agentic.Manager.Store.Admission (StoreAdmission (..))
+import qualified Agentic.Manager.Store.Admission as Admission
 import Agentic.Manager.Configuration
   (InstalledConfiguration, acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationSnapshot, withConfigurationCatalogues, probeConfiguredCapabilities)
 import Agentic.Manager.Profile (ConfigurationLimits, PublicProfile, Diagnostic, Discovery)
 import Agentic.Manager.Worker.State (WorkerLifecycle, acceptingPreparation)
 import Agentic.Manager.Lease (duplicateLease)
-import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration)
+import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration)
 import Agentic.Runtime
   (PrivateRoot, assertPrivateRoot, closePrivateRoot, openPrivateSubroot, privateRootPath,
    withPrivateDirectoryAt, writePrivateExclusiveAt, WorkflowInputDescriptor (..), frontendLiteralBytes, FrontendCapabilities, ProcessGroup, createProcessGroup, terminateProcessGroup, groupOutcome, processGroupLive)
@@ -28,7 +30,7 @@ import Control.Concurrent.STM (STM, TMVar, atomically, newEmptyTMVarIO, readTMVa
 import Control.Concurrent.MVar (MVar, newMVar, newEmptyMVar, readMVar, tryReadMVar, withMVar, modifyMVarMasked, takeMVar, putMVar, tryTakeMVar)
 import Control.Exception
   (Exception, SomeException, bracket, bracketOnError, finally, mask,
-   evaluate, uninterruptibleMask_, throwIO, try, onException)
+   evaluate, uninterruptibleMask_, throwIO, try, onException, catch)
 import Control.Monad (unless, when, void, foldM, forM_, forever)
 import Control.DeepSeq (NFData, force)
 import Crypto.Hash (Digest, SHA256, hashInit, hashUpdate, hashFinalize)
@@ -81,7 +83,8 @@ data Checkpoint = Checkpoint
   { checkpointBusy :: !Bool, checkpointLogPages :: !Int64, checkpointedPages :: !Int64
   } deriving (Eq, Show)
 
--- | One connection and a fail-fast admission cell. There is no waiting operation queue.
+-- | One connection and admission cell. Ordinary calls fail fast, terminal-owner
+-- persistence can spend its existing operation allowance waiting for the cell.
 data CoordinationStore = CoordinationStore !InstalledConfiguration !PrivateRoot !SQL.Database !StoreIdentity
   !(MVar ()) !(IORef Bool) !(IORef Bool) !Fd !(MVar ()) !(MVar (Bool, [StoreWorker])) !(MVar ()) !(IORef Bool) !(MVar (Bool, Maybe (TMVar (), MVar ())))
 
@@ -139,7 +142,7 @@ openStore installed root lease = storageErrors $ do
     (epoch, stream) <- bounded db 30000000 $ do
       SQL.exec db "PRAGMA busy_timeout=100; PRAGMA foreign_keys=ON; PRAGMA temp_store=FILE; PRAGMA cache_size=-2048; PRAGMA temp.cache_size=-2048"
       version <- scalar db "PRAGMA user_version"
-      unless (version `elem` map SQL.SQLInteger [0, 1, 2, 3, 4, 5, fromIntegral schemaVersion]) $
+      unless (version `elem` map SQL.SQLInteger [0, 1, 2, 3, 4, 5, 6, fromIntegral schemaVersion]) $
         throwIO StoreVersion
       -- Newer versions are refused before changing their journal or schema.
       wal <- scalar db "PRAGMA journal_mode=WAL"
@@ -207,6 +210,7 @@ migrate db = mask $ \restore -> do
       SQL.SQLInteger 3 -> pure ()
       SQL.SQLInteger 4 -> pure ()
       SQL.SQLInteger 5 -> pure ()
+      SQL.SQLInteger 6 -> pure ()
       SQL.SQLInteger current | current == fromIntegral schemaVersion -> pure ()
       _ -> throwIO StoreVersion
     when (version `elem` [SQL.SQLInteger 0, SQL.SQLInteger 1]) $ do
@@ -224,9 +228,12 @@ migrate db = mask $ \restore -> do
     when (version `elem` map SQL.SQLInteger [0,1,2,3,4]) $ do
       mapM_ (SQL.exec db) approvalMigration
       SQL.exec db "PRAGMA user_version=5"
-    when (version /= SQL.SQLInteger (fromIntegral schemaVersion)) $ do
+    when (version `elem` map SQL.SQLInteger [0,1,2,3,4,5]) $ do
       mapM_ (SQL.exec db) ingestionMigration
       SQL.exec db "PRAGMA user_version=6"
+    when (version /= SQL.SQLInteger (fromIntegral schemaVersion)) $ do
+      mapM_ (SQL.exec db) controlMigration
+      SQL.exec db "PRAGMA user_version=7"
     SQL.exec db "COMMIT"
   case result of
     Right () -> pure ()
@@ -417,15 +424,17 @@ checkpointStore store@(CoordinationStore _ _ db _ _ _ _ _ _ _ _ _ _) = admitted 
     _ -> throwIO StoreIntegrity
 
 admitted :: CoordinationStore -> IO a -> IO a
-admitted (CoordinationStore _ root _ _ gate closed poisoned _ _ _ _ _ _) action = mask $ \restore -> do
+admitted store action = admittedWith FailFast store (const action)
+
+admittedWith :: StoreAdmission -> CoordinationStore -> (Maybe Admission.Deadline -> IO a) -> IO a
+admittedWith policy (CoordinationStore _ root _ _ gate closed poisoned _ _ _ _ _ _) action = do
   readIORef closed >>= \value -> when value (throwIO StoreClosed)
-  token <- tryTakeMVar gate
-  case token of
-    Nothing -> throwIO StoreBusy
-    Just () -> (do
-      readIORef closed >>= \value -> when value (throwIO StoreClosed)
-      readIORef poisoned >>= \value -> when value (throwIO StorePoisoned)
-      storageErrors (assertPrivateRoot root >> restore action)) `finally` putMVar gate ()
+  let ready = do
+        readIORef closed >>= \value -> when value (throwIO StoreClosed)
+        readIORef poisoned >>= \value -> when value (throwIO StorePoisoned)
+        assertPrivateRoot root
+  storageErrors (Admission.withGate policy gate ready action) `catch` \failure ->
+    throwIO (case failure of Admission.AdmissionBusy -> StoreBusy; Admission.AdmissionExpired -> StoreDeadline)
 
 -- | Internal callers supply source-owned SQL, never SQL obtained from a client.
 -- Statement count, binding bytes and strict result bytes share one transaction budget.
@@ -517,14 +526,26 @@ runRead store transaction = run store False ((\value -> (value, [])) <$> transac
 runTransaction :: NFData a => CoordinationStore -> Transaction (a, [Invalidation]) -> IO a
 runTransaction store transaction = run store True transaction
 
+-- | Explicit admission policy for one read. Waiting creates no replay authority.
+runReadWithAdmission :: NFData a => StoreAdmission -> CoordinationStore -> Transaction a -> IO a
+runReadWithAdmission policy store transaction = runWithAdmission policy store False ((\value -> (value, [])) <$> transaction)
+
+-- | Explicit admission policy for one transaction, preserving the original fences.
+runTransactionWithAdmission :: NFData a => StoreAdmission -> CoordinationStore -> Transaction (a, [Invalidation]) -> IO a
+runTransactionWithAdmission policy store transaction = runWithAdmission policy store True transaction
+
 run :: NFData a => CoordinationStore -> Bool -> Transaction (a, [Invalidation]) -> IO a
-run store@(CoordinationStore _ _ db identity _ _ poisoned _ _ _ _ _ _) writable (Transaction action) = admitted store $ do
+run = runWithAdmission FailFast
+
+runWithAdmission :: NFData a => StoreAdmission -> CoordinationStore -> Bool -> Transaction (a, [Invalidation]) -> IO a
+runWithAdmission policy store@(CoordinationStore _ _ db identity _ _ poisoned _ _ _ _ _ _) writable (Transaction action) = admittedWith policy store $ \end -> do
   committing <- newIORef False
   changed <- newIORef False
   budget <- newIORef (Budget 256 8388608 1000 1048576)
   deadline <- newIORef Nothing
   mask $ \restore -> do
-    result <- try @SomeException $ restore $ bounded db 5000000 $ do
+    result <- try @SomeException $ restore $ boundedWith db (maybe (pure 5000000) Admission.remainingMicros end) $ do
+      mapM_ (void . Admission.remainingMicros) end
       SQL.exec db (if writable then "BEGIN IMMEDIATE" else "BEGIN")
       (resultValue, events) <- action (Context db (storeProcessGeneration identity) writable budget changed deadline)
       validateEvents events
@@ -644,14 +665,17 @@ withStatement db sql action = mask $ \restore -> do
     Right value -> either throwIO (const (pure value)) cleanup
 
 bounded :: SQL.Database -> Int -> IO a -> IO a
-bounded db micros action = mask $ \restore ->
+bounded db micros = boundedWith db (pure micros)
+
+boundedWith :: SQL.Database -> IO Int -> IO a -> IO a
+boundedWith db remaining action = mask $ \restore ->
   withAsync (restore action) $ \running -> do
     -- One interrupt can precede sqlite3_step and do nothing. Keep interrupting
     -- the original action until it joins; join the interrupter before reuse.
     let stop = uninterruptibleMask_ $
           bracket (asyncWithUnmask (\unmask -> unmask (forever (SQL.interrupt db >> threadDelay 1000)))) cancel
             (\_ -> cancel running)
-    result <- restore (timeout micros (wait running)) `onException` stop
+    result <- restore (remaining >>= \micros -> timeout micros (wait running)) `onException` stop
     case result of
       Nothing -> stop >> throwIO StoreDeadline
       Just value -> pure value

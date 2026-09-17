@@ -59,7 +59,7 @@ appendEnvelope (SnapshotCheckpoint snapshot envelopes payloadBytes) envelope = d
   when (BL.length (BL.take (fromIntegral maxFrameBytes + 1) (encode envelope)) > fromIntegral maxFrameBytes) $
     Left "snapshot checkpoint envelope exceeds 1048576 bytes"
   bytes <- encodeEnvelopeFor (envelopeVersion envelope) envelope
-  decoded <- decodeEnvelopeFor [protocolVersion, latestProtocolVersion] bytes
+  decoded <- decodeEnvelopeFor supportedProtocolVersions bytes
   unless (decoded == envelope) $ Left "checkpoint envelope changed during protocol validation"
   let nextPayloadBytes = payloadBytes + BS.length bytes + if Seq.null envelopes then 0 else 1
       boundary = snapshot {snapshotLastEnvelope = Just envelope}
@@ -108,7 +108,7 @@ decodeSnapshotCheckpoint bytes = do
           bounded = BL.take (fromIntegral maxFrameBytes + 1) encoded
       when (BL.length bounded > fromIntegral maxFrameBytes) $
         Left "snapshot checkpoint envelope exceeds 1048576 bytes"
-      envelope <- decodeEnvelopeFor [protocolVersion, latestProtocolVersion] (BL.toStrict bounded)
+      envelope <- decodeEnvelopeFor supportedProtocolVersions (BL.toStrict bounded)
       appendEnvelope checkpoint envelope
 
 metadata :: RunSnapshot -> [Pair]
