@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-17 Thu 06:02]
+:MODIFIED: [2026-09-17 Thu 06:47]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8635,6 +8635,7 @@ ambiguous delivery without unauthorized replay.
 
 ** Notes
 
+#+begin_example
 RESUMED BY USER 2026-09-15T23:10:55.861310+00:00. Explicit request: Resume your work now and cancel the pause. This supersedes the user-halt state below, not the frozen acceptance contract or action-specific safety restrictions. No API-session goal exists. Full scope remains WM001-WM044/G0-G5, with WM001-WM015/G0 accepted. Next: fresh verified reconstructed baseline compilation and data checks, independent cleanup-proof/correction decision, then a specifically bounded native plan if justified. No blind policy retries, deployment, paid routes, new Lean build or saved-PID signalling.
 
 Refocus 2026-09-16T08:18:45.222781+00:00; next deadline 2026-09-16T09:18:45.222781+00:00. Source reconstructed from accepted7b88f172 plus both checkpoint patches in /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/controls.qzldrova/resume-20260915.ZHiqa0SO/source and all588positive files verified byte/mode/size. Prior evidence is read-only. No retained reviewer children are available in this parent session; verify a fresh isolation probe before the fallback review.
@@ -9182,6 +9183,14 @@ Verification ceiling: earlier source/raw all-target-Werror/all3suite passes belo
 Next: verify checkpoint hashes, restore to a new private Products directory, read handoff/frozen design/plan/amendment and complete review, compile the reconstructed baseline and run only permitted data checks. Obtain an independent next-step decision on the unresolved cleanup proof and any explicitly bounded native reproduction. Preserve original objects and failure categories. Then finish current-byte source/raw/platform/client/doc gates and independent acceptance before closing WM-016 or starting dependent packages.
 
 Standing rules: only SQLite directory-replacement confinement is withdrawn/restricted/unrun. Do not lower any other budget, weaken tests or infer authority from IDs/PIDs/paths/digests. Keep Runtime the sole interpreter. Session2 opts into observation3 while controls remain2, legacy behavior remains, and v3 preserves256ordinary plus one extra cancellation slot. Current authorization does not replace captured worker facts. Every downstream subtask must finish with fess and verification. Use current Nix environments, private Products build paths, unchanged test/cabal.sh, serialized same-directory Cabal, selected Pi ~/src/fork/pi, and the existing hash-verified conformance oracle when available. No paid route-live, dependency install, new Lean build, production change or PID signalling is authorized by this checkpoint. Recheck the clock and refocus on explicit resumption.
+
+
+2026-09-17 L19 Worker child-output remedy: isolated one-file WorkerCheck.hs change independently cleared by review d8380fee-f89e-4367-995a-07966c5d06be. Parent verification passed 2712 identity comparisons and exact original native wait/read/bracket/grace/pipe comparisons. Compiled inert N1/N8 checks each cover 12 scenarios and 32 PASS observations. Source-exact old no-emission producer reds fail at the retention assertion after passing the original predicate. All seven isolated command handles joined. Secondary reporting-sink failure was inspected, not executed. Partial evidence is not atomic publication or durability. Initial parent verifier incorrectly compared a completion record with a summary augmented by label/command. The corrected verifier binds both original records, and the first failure remains retained.
+
+Parent separately authorized only this canonical test-helper integration at 2026-09-17T13:28:39.317993+00:00, preserving reviewed SHA a015e6d076d0bf36cbcdca964c2804da6f253515e5032c2f0de2e06919c09bd0. Fresh canonical-Nix private offline manager-worker-check -Werror build passed in 114.206744209 seconds, then compiled data-only N1/N8 passed. Three original command handles joined, null failures and zero interruptions. All 1016 canonical input files remained unchanged during verification, and 14 retained files per capability match the isolated data bytes. Evidence root terminal-worker-evidence-canonical.5zutr_9v. No native Worker/ProcessGroup/Store/Runtime fixture or owning gate ran. This fixes only the test producer and does not integrate the WM-016 application candidate. Z/source and the old raw archive remain immutable, with old WorkerCheck bytes, so earlier scoped evidence is not relabeled. Full policies and all other retention/lifecycle/environment/capture blockers remain blocked. Accepted stays 15/44 and G0 only, with WM-016 unaccepted.
+
+Refocus 2026-09-17T13:47:32.343949+00:00. Next deadline 2026-09-17T14:47:32.343949+00:00. Next: exact helper commit and committed fess, then one next reviewed policies remedy.
+#+end_example
 
 ** Dependencies
 

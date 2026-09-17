@@ -14,7 +14,7 @@ import Agentic.Runtime
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (AsyncCancelled (..), async, asyncThreadId, cancel, concurrently, wait, waitCatch)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar, readMVar, swapMVar, tryReadMVar)
-import Control.Exception (AsyncException (UserInterrupt), IOException, bracket, finally, fromException, throwIO, throwTo, try, uninterruptibleMask_)
+import Control.Exception (AsyncException (UserInterrupt), IOException, SomeException, bracket, finally, fromException, throwIO, throwTo, try, uninterruptibleMask_)
 import Control.Monad (forM, forM_, unless, void, replicateM_)
 import Crypto.Hash (Digest, SHA256, hash)
 import Data.ByteArray (convert)
@@ -32,7 +32,7 @@ import System.Environment (getArgs, getExecutablePath)
 import System.Exit (ExitCode (ExitSuccess, ExitFailure))
 import System.FilePath ((</>))
 import System.Process (CreateProcess (std_in, std_out, std_err), StdStream (CreatePipe), proc, readProcessWithExitCode)
-import System.IO (BufferMode (LineBuffering), hSetBuffering, hGetLine, hPutStrLn, hFlush, stdin, stdout)
+import System.IO (BufferMode (LineBuffering), hSetBuffering, hGetLine, hPutStrLn, hFlush, stdin, stdout, stderr)
 import System.Posix.Signals (installHandler, sigTERM, Handler (Catch))
 import System.Posix.Files (setFileMode)
 import System.Timeout (timeout)
@@ -42,6 +42,7 @@ main = do
   hSetBuffering stdout LineBuffering
   args <- getArgs
   case args of
+    ["cleanup-evidence-data", work] -> cleanupEvidenceDataChecks work
     ["backpressure-close",work,native] -> withCase work "backpressure" native [] $ \root _ _ store revision catalogue ->
       withFrontendWorker store "profile" revision (setupFor root catalogue "person-controlled") (backpressureClose native)
     ["termination-cases",work,native] -> terminationChecks work native
@@ -424,10 +425,74 @@ cleanupChecks work native = do
     (\group -> terminateProcessGroup 5000000 group >> closeGroupPipes group) $ \group -> do
       output <- maybe (error "child stdout unavailable") pure (groupOutput group)
       errors <- maybe (error "child stderr unavailable") pure (groupErrors group)
-      result <- await (waitProcessGroup group)
-      bytes <- BS.hGetSome output 65536
-      diagnostic <- BS.hGetSome errors 65536
-      check "isolated published-failure fixture completed its checks" (result == ExitSuccess && "PASS retained published cleanup failure" `BS.isInfixOf` bytes && BS.null diagnostic)
+      retainCleanupChildOutput directory $ do
+        result <- await (waitProcessGroup group)
+        bytes <- BS.hGetSome output 65536
+        diagnostic <- BS.hGetSome errors 65536
+        pure (result, bytes, diagnostic)
+
+retainCleanupChildOutput :: FilePath -> IO (ExitCode, BS.ByteString, BS.ByteString) -> IO ()
+retainCleanupChildOutput directory observe = do
+  (result, bytes, diagnostic) <- observe
+  written <- try @SomeException $ do
+    BS.writeFile (directory </> "stdout.log") bytes
+    BS.writeFile (directory </> "stderr.log") diagnostic
+  let label = "isolated published-failure fixture completed its checks"
+  asserted <- try @SomeException $
+    unless (result == ExitSuccess && "PASS retained published cleanup failure" `BS.isInfixOf` bytes && BS.null diagnostic) (check label False)
+  case (asserted, written) of
+    (Left primary, Left secondary) -> do
+      -- Reporting an evidence error must not replace the original child refusal.
+      void (try @SomeException (hPutStrLn stderr ("worker child evidence write failed: " <> show secondary)))
+      throwIO primary
+    (Left primary, Right ()) -> throwIO primary
+    (Right (), Left failure) -> throwIO failure
+    (Right (), Right ()) -> check label True
+
+cleanupEvidenceDataChecks :: FilePath -> IO ()
+cleanupEvidenceDataChecks work = do
+  createDirectory work
+  let marker = "PASS retained published cleanup failure\n"
+      refusal failure = "FAIL isolated published-failure fixture completed its checks" `T.isPrefixOf` T.pack (show failure)
+      exact directory bytes diagnostic = do
+        actual <- BS.readFile (directory </> "stdout.log")
+        errors <- BS.readFile (directory </> "stderr.log")
+        check "child evidence retains exact stdout and stderr bytes" (actual == bytes && errors == diagnostic)
+  forM_ [("positive", ExitSuccess, marker, BS.empty, True),
+         ("nonzero", ExitFailure 1, marker, BS.empty, False),
+         ("missing-marker", ExitSuccess, "not completed\n", BS.empty, False),
+         ("nonempty-stderr", ExitSuccess, marker, BS.pack [255,0,10,10], False),
+         ("nontext-newlines", ExitSuccess, BS.pack [255,0] <> marker <> "\n\n", BS.empty, True),
+         ("bounded-buffer", ExitSuccess, BS.replicate (65536 - BS.length marker) 255 <> marker, BS.empty, True)] $
+    \(name, result, bytes, diagnostic, success) -> do
+      let directory = work </> name
+      createDirectory directory
+      outcome <- try @SomeException (retainCleanupChildOutput directory (pure (result, bytes, diagnostic)))
+      exact directory bytes diagnostic
+      check ("child evidence outcome: " <> name) (case outcome of Right () -> success; Left failure -> not success && refusal failure)
+  forM_ ["stdout.log", "stderr.log"] $ \blocked -> forM_ [True, False] $ \success -> do
+    let directory = work </> (blocked <> if success then "-success" else "-refusal")
+    createDirectory directory
+    createDirectory (directory </> blocked)
+    outcome <- try @SomeException (retainCleanupChildOutput directory (pure (if success then ExitSuccess else ExitFailure 1, marker, BS.empty)))
+    check ("evidence-write failure cannot pass or erase refusal: " <> blocked) (case outcome of
+      Left failure -> if success
+        then case fromException failure :: Maybe IOException of Just _ -> True; Nothing -> False
+        else refusal failure
+      Right () -> False)
+    stdoutWritten <- doesFileExist (directory </> "stdout.log")
+    if blocked == "stderr.log" then do
+      check "stdout survives subsequent stderr write failure" stdoutWritten
+      BS.readFile (directory </> "stdout.log") >>= check "partial retained stdout remains exact" . (== marker)
+    else doesFileExist (directory </> "stderr.log") >>= check "failed first write does not invent stderr evidence" . not
+  forM_ ["wait-incomplete", "read-incomplete"] $ \name -> do
+    let directory = work </> name
+    createDirectory directory
+    outcome <- try @IOException (retainCleanupChildOutput directory (throwIO (userError name)))
+    check "uncompleted observation propagates unchanged" (case outcome of Left failure -> T.pack name `T.isInfixOf` T.pack (show failure); Right () -> False)
+    forM_ ["stdout.log", "stderr.log"] $ \file ->
+      doesFileExist (directory </> file) >>= check "uncompleted observation emits no invented bytes" . not
+  putStrLn "PASS cleanup child evidence data-only checks"
 
 cleanupFailureChild :: FilePath -> FilePath -> IO ()
 cleanupFailureChild work native = do
