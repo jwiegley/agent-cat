@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 20:35]
+:MODIFIED: [2026-09-16 Wed 20:59]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8974,6 +8974,16 @@ Independent review c1dd4f81-6d06-44a8-afe8-0cc129a7274b BLOCKED preparation clea
 A new source/data-only correction decision assigns terminal-controls-owner-fix.qqacwmy6 to worker run865be8e7-672f-411e-8a19-4d7ecc3a7c85. Old Kpreparation, all versions and false-positive evidence remain unchanged. The existing analyzer must require both original gate and launcher zero exits, successful joins, no primary/outer/wait failures and no interruptions before complete disposition. Actual-analyzer fixtures must include the producer-shaped successful launcher and independent missing/failed/unjoined/failure/interruption negatives, while retaining all previous43cases. The corrected preparation gets fresh private paths, source/resource/plan bindings and independent review. No native or other execution authorization exists.
 
 Refocus completed at 2026-09-17T03:35:30.298770+00:00, with next deadline 2026-09-17T04:35:30.298770+00:00. The smallest next step is the analyzer ownership correction, not a production change, new harness or native diagnostic. Original supervisor ACK-before-copy ordering, budgets, modes, fixture scope and full WM-016 acceptance obligations stay unchanged.
+
+Controls ownership P1 is corrected in separately versioned terminal-controls-owner-fix.qqacwmy6. Reviewer43f7fc19-b01f-456c-a3da-ddcf3a848bea found no issues and closed it for preparation only. The existing analyzer now requires present, successful original gate and launcher records with zero exit, joined handles, no failures and no interruptions. Missing evidence gives partial false and retains the actual records or null. The independently missing-launcher regression has a complete successful gate, so the refusal is not masked by gate omissions. Old K and its false-positive evidence remain blocked and unchanged.
+
+Parent verification passed20,728comparisons, including all18,856recorded Kentries,source1021/raw594,unchanged matrix/producers/preservation,82excluded footprints,67actual-analyzer checks and21preserver checks. All original43tests remain exercised,23independent owner refusals were added and complete controls succeed after restoration. Producer key sets match the real launcher/executor AST. Parent verifier01 incorrectly used a summary-only resourceCount property in the full matrix, then verifier02 counted actual expectedResources and passed without prepared changes. The failure log remains retained.
+
+Fresh canonical/private-environment preflight passed, and parent authorized exactly one complete current SOURCE Controls invocation at2026-09-17T03:56:14.247476+00:00. Authorization SHA256094665efdd3b02fc99734137df50ff42b70bcdf19f378d66865db86216b649af binds corrected plan73428173029b7a9e26d79cec0b36a4d7c33fc1e4de5664eeb2dc38a6a8ca852a. Worker runfc010197-817d-4444-a3b8-010f64567763 is active, with38checkers,sixcontracts/40resources,top+13builds and28own-built executable paths in scope. Exact selected fresh original-owned cancellation, partial-write/read-retirement, interruption, reload/revocation, pair/preparation and bounded same-key saturation-racer behavior is authorized. Native130 remains non-success. No previous or historical authority transfers.
+
+Preservation is NOT currently authorized. On original return, the worker must send exact gate AND launcher exit/timing/join/error/interruption facts via need_decision and WAIT for explicit parent ACK permitting copying. Queued progress alone is insufficient. Without ACK or on unexpected failure/uncertain ownership, stop without copy, interpretation, retry, repair, PID adoption, hard-kill fallback or next gate. Existing120/1200/120/60helper bounds and original-handle supervision remain unchanged, with no aggregate native or outer killing deadline. The45minute exact-run wake is attention only, not a process timeout. No result is claimed.
+
+Refocus completed at 2026-09-17T03:56:14.247476+00:00, with next deadline 2026-09-17T04:56:14.247476+00:00. Full WM-001 through WM-044 and G0 through G5 scope remains unchanged, with only WM-001 through WM-015 and G0 accepted. Current source Store, Commands, Admission and ingestion pass. Current Controls, all raw/platform/client/canonical/final acceptance and historical incident obligations remain open.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
