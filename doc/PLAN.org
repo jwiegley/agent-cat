@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 23:58]
+:MODIFIED: [2026-09-17 Thu 00:34]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -9044,6 +9044,16 @@ Refocus completed at 2026-09-17T06:55:24.022774+00:00, with next deadline 2026-0
 Raw Admission preparation clarification: the parent phrase fault-library build was imprecise. Raw agentic.cabal:545-549 links manager/test/admission_cleanup_fault.c directly as c-sources of manager-admission-check. No separate library build/load or nonexistent library artifact is required. Bind that source, included runtime/cbits/process_group.c, actual linked own-built checkers and only compiler artifacts established by original records, retaining intermediates in place where appropriate.
 
 Parent verified the C sequence and replied to request de8acd4d-9af2-49f6-8141-5bfb1207fa09. When armed for SIGKILL, agentic_child_exited is probed first, with EINTR-only repetition, then the real signal function runs. Only real result0 plus the earlier positive exit probe and consumed armed flag yields one simulated EIO completion report. It is not a post-signal exit observation, kernel EIO or skipped signalling. The original brief and A/parent-c-fault-linkage-clarification.md retain this correction. No compiler/native invocation or new authority occurred.
+
+Exact RAW Admission preparation under terminal-raw-admission.6_9pd_li passed reviewf98b5c6f-4fb9-4e54-9057-eed925afc45f and parent2,165comparisons. It bindsexactraw594/source1021/archive/twelvemodedifferences/427source-only exclusions,19defaultfamiliesN1/N8/completionchildren,36opacityconsumers anddistinctpackage-boundary/interruptionbranches,withfouractualexecutablepaths.155analyzer and26preserver inertchecks passed, including sixcheckedmode700links acrossactualpackage-copybranches. Initialsource.log/list omissionsinthe inertinterruptionfixturewerecorrectedwithoutweakeningtherealrequirements;failedv1evidenceisretained.
+
+Freshcanonical/privatepreflightverified132excludedfootprintsandemptybuild/record/absentcache. At2026-09-17T07:30:51.266846+00:00,parentauthorizedoneexactRAWAdmissiongate. AuthorizationSHA815cec8cd558684b08c4cbea817c4f8daf8f24f7b46a927c61c1a8d1748ed9a4bindsplan12f9b8a8fe66d2b8670c360cb36155561f53f654328bcfb4c71df645a52d0e29. Workerrun78c103d3-6fc4-470a-8ce2-ac7518468ebb isactiveunderoriginalhandles. Noresultisclaimed.
+
+NEW allowOriginalCompletionReportFaultFixture permission appliesonlytothefreshsource-selectedoriginal-ownedfixture. ThelinkedC firstprobeschildexitwithEINTR-onlyrepeats,thencallstherealsignalfunction. Onlyrealresult0,earlierexited>0andconsumedarmedflagproduceonesimulatedEIOcompletionreport. Signallingisnotskipped,andno kernelEIOorpost-signalexitobservationisclaimed. Thereisnostandalonefault-libraryinvocation. Ordinaryoriginalgroupcleanup,loancancellation,Async/UserInterrupt,SQLpublicationfaultsandexplicitsame-fresh-ownerretry/reopenremainexactlyselected. NoStoreleaseDeathorhistoricalauthoritytransfers.
+
+Preservationisnotcurrentlyauthorized. Bothoriginalowners return/timing/join/error/interruptionfactsmustreachparentthroughneed_decision,followedbyanexplicitACKbeforecopyorinterpretation. Queuedprogressisnotreceiptproof. WithoutACK,oronfailure/uncertainownership,stopwithoutretry/repair/recopy/PIDadoption/recovery/nextgate. Destination-onlyfaithfulmetadataoperationsmustpreserveactualpackage-linkmode700,notrepair/normalizesource,targetoroldcopies. Existingbudgetsandfailureprecedenceareunchanged;noaggregate/nativeouterkillingdeadline. The45minutewakeisattentiononly.
+
+Refocus completed at 2026-09-17T07:30:51.266846+00:00, with next deadline 2026-09-17T08:30:51.266846+00:00. FivecurrentSOURCEowninggatesandRAWStore/Commandsarescopedpasses. RAWAdmission/ingestion/Controlsandplatform/client/canonical/finalacceptanceremainunproved,withWM-001throughWM-015andG0theonlyacceptedpackages/gate.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
