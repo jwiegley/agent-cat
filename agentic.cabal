@@ -51,6 +51,7 @@ extra-source-files:
   test/answer_schema_probe.py
   test/answer_schema_evidence.py
   runtime/ci/capture.sh
+  test/capture_build_evidence.py
   runtime/test/CaptureFaultTests.hs
   runtime/test/capture_sync_fault.c
   manager/AGENTS.md

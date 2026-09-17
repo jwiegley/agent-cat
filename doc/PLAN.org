@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-17 Thu 08:44]
+:MODIFIED: [2026-09-17 Thu 09:08]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -9222,6 +9222,12 @@ Refocus 2026-09-17T15:28:03.803601+00:00. Next deadline 2026-09-17T16:28:03.8036
 The review selected L02 outer capture-build retention. Parent inspected runtime/ci/capture.sh: its EXIT trap deletes the work directory holding three checker executables and compiler outputs. At2026-09-17T15:41:41.432158+00:00, parent authorized isolated terminal-capture-build-evidence.6b34_ers. Workerfa1ee34d-b549-49ca-9409-97782cf11119 may remove only that trap and add adjacent focused-test wiring, add test/capture_build_evidence.py, and add one Cabal source-membership entry. An unchanged L21 run/save support copy is allowed. Preserve capture.sh mode0644, allocation, directories, TMPDIR, GHCRTS, every compiler/checker argument, order, six capability invocations and the existing Python60-second timeout. Tests use the source-exact owner with asserted-selected inert ghc/checkers, real old-trap deletion red, distinct build/checker failure classifications, allocation failure without invented activity and retained repeated artifacts. A public dummy GHCRTS value may test the unchanged unset only inside inert cases. No real GHC/native checker, actual timeout/signal fault, inner Haskell fixture deletion change, A15 ownership change, canonical edit, package operation, remote/client or full policies execution is authorized. All remaining blockers, historical limits and accepted15/44 plus G0 remain unchanged.
 
 Refocus 2026-09-17T15:44:39.573110+00:00. Next deadline 2026-09-17T16:44:39.573110+00:00. Next: isolated L02 outer-lifetime remedy and independent review.
+
+2026-09-17 L02 review7da50c35-106c-4026-904b-18c65be5bfb5 found no issues, conditional on parent full integrity. Parent verification passed1776 comparisons:114 completed identities, three edited paths/one unchanged support, five inert cases, nine original Popen joins,21 synthetic retained artifacts, old owner success0 followed by real deletion/retention-red1, unchanged argv/order/environment/source60s runner and earlier Z/source/raw/archive. Default no-argument allocation was still unexecuted at isolated review.
+
+At2026-09-17T16:01:31.981584+00:00, parent separately authorized exact canonical L02 test-producer integration. A pre-execution byte check caught six missing backslashes in nested generator-string newline escapes during manual transfer. The mismatch/diff were retained, and all three canonical source paths were restored to exact reviewed hashes before any syntax or inert test ran. The support helper remained unchanged. Canonical Bash syntax and default no-argument capture_build_evidence.py then passed five cases with seven original Popen joins, null failures and zero interruptions.21 synthetic file bytes/modes, normalized argv/order and fixture identities match the isolated run.90 completed-file identities were collected after the verifier returned. Evidence root terminal-capture-build-canonical.7rn8j8cs. Real capture GHC/native checkers, timeout or signal injection, inner Haskell cleanup/A15 changes, package construction and full policies did not run. The separately authorized documentation gate includes its ordinary static runghc probe. Committed fess is next. Full policies and WM-016 remain unaccepted, with15/44 packages and G0 only accepted.
+
+Refocus 2026-09-17T16:08:47.375364+00:00. Next deadline 2026-09-17T17:08:47.375364+00:00. Next: exact L02 commit and committed fess, then one next reviewed policies remedy.
 #+end_example
 
 ** Dependencies

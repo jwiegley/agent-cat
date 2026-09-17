@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T15:44:39.573110+00:00`. The next deadline is
-`2026-09-17T16:44:39.573110+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T16:08:47.375364+00:00`. The next deadline is
+`2026-09-17T17:08:47.375364+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -71,8 +71,10 @@ syntax and the default inert regression entrypoint, followed by a clear
 committed fess audit. The L01 schema-vector lifetime remedy now has independent
 source/data clearance and full parent verification. Its exact canonical
 test-producer integration passed syntax and the default inert entrypoint.
-Committed L01 fess is clear. The isolated L02 outer capture-build lifetime
-remedy is active, with inner fixture cleanup and native execution excluded.
+Committed L01 fess is clear. L02 outer capture-build retention has independent
+source/data clearance and parent verification. Its exact canonical producer
+integration passed syntax and the default inert entrypoint. Committed L02
+fess is next, with inner fixture cleanup and native execution still excluded.
 No native fixture, full gate, WM-016 application integration, platform/client
 work, old-resource recovery or WM-016 acceptance is authorized.
 
@@ -1269,27 +1271,43 @@ Retention is not atomic publication or fsync durability. Committed fess review
 `7476813c-3718-488a-a8e3-6f127bf98afb` found no issues in
 `e9dd5afd98b2b8c9915a05b7339e4495d5f3ef79`, limited to the test-producer remedy.
 
-The next reviewed unit is L02, the outer capture-build work directory in
-`runtime/ci/capture.sh`. Its EXIT trap removes the three checker executables
-and compiler outputs. At `2026-09-17T15:41:41.432158+00:00`, parent authorized
-only the isolated `terminal-capture-build-evidence.6b34_ers` overlay. Worker
-`fa1ee34d-b549-49ca-9409-97782cf11119` may delete that trap and add adjacent
-focused-test wiring, add `test/capture_build_evidence.py`, and add its one Cabal
-source-membership entry. An unchanged copy of the existing Popen helper is
-permitted. Allocation, mode0644, directories, TMPDIR/GHCRTS handling, compiler
-and checker arguments, execution order, six capability invocations and the
-source Python runner's 60-second timeout remain unchanged.
+L02 removes only the outer capture-build EXIT hygiene trap in
+`runtime/ci/capture.sh`. The isolated
+`terminal-capture-build-evidence.6b34_ers` overlay adds adjacent regression
+wiring, `test/capture_build_evidence.py`, and its one Cabal membership entry.
+The existing Popen helper is reused unchanged. Review
+`7da50c35-106c-4026-904b-18c65be5bfb5` found no issues, conditional on parent
+integrity verification. That verification passed 1,776 comparisons, including
+114 completed-file identities, five cases, nine original Popen joins and
+21 retained synthetic artifacts. The actual old trap deletes the original
+fresh tree after successful inert builds/checks, producing the meaningful
+post-return retention red.
 
-Only the source-exact owner with explicitly selected inert compiler/checker
-fixtures may run. Tests must preserve the real old-trap deletion red, exact
-artifacts through success and specific build/checker failures, allocation
-failure without invented activity, and distinct repeated private roots. The
-inert checker failure must retain the Python runner's actual failure class,
-not replace its outer exit with the child exit. A public dummy GHCRTS value
-may test the existing unset operation only inside inert fixtures. No real GHC
-or native checker, timeout/signal injection, inner Haskell cleanup/assertion
-change, Python/A15 repair, canonical edit, package construction or full
-policies execution is authorized. Other remedies require new decisions.
+The owner retains allocation, mode0644, directories, TMPDIR/GHCRTS handling,
+compiler/checker arguments, order, six capability invocations and its real
+Python check/60-second-timeout runner. Python and Bash both assert inert GHC
+selection. A public dummy GHCRTS tests the original unset operation only in
+inert cases. Build failure remains seven, while checker failure nine becomes
+the original Python CalledProcessError and outer exit one. Neither is replaced
+by an arbitrary nonzero result or a native success claim.
+
+At `2026-09-17T16:01:31.981584+00:00`, parent separately authorized exact
+canonical integration of the three reviewed test-producer paths. The first
+byte check detected six nested newline-escape transfer errors. Their diff was
+retained, and reviewed hashes were restored before any syntax/data execution.
+Canonical syntax and the default no-argument regression then passed five
+cases with seven original Popen joins, null failures and zero interruptions.
+All 21 synthetic artifact bytes/modes, normalized argv/order and fixture
+identities match the isolated run. The 90 completed-file identities were
+collected after the verifier returned. Evidence is retained under
+`terminal-capture-build-canonical.7rn8j8cs`.
+
+No real capture GHC/native checker, timeout/signal injection, inner Haskell
+cleanup/assertion change, Python/A15 repair, package construction or full
+policies gate ran. The separate documentation gate includes its standard
+static Haskell probe. These are outer-lifetime data results, not native
+capture, durability or complete preservation. Committed fess is next. Other
+remedies and broader integration require new decisions.
 
 Other deletion/retention, frontend ownership/read boundaries, ACP cleanup,
 A15 interruption handling, environment and complete-capture gaps remain blocked.

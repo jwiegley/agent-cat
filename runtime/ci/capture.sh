@@ -3,8 +3,8 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$root"
 : "${CABAL_BUILDDIR:?Run through the configured project environment}"
+python3 test/capture_build_evidence.py
 work=$(mktemp -d "$CABAL_BUILDDIR/capture.XXXXXX")
-trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/normal" "$work/fault" "$work/tmp"
 export TMPDIR="$work/tmp"
 unset GHCRTS
