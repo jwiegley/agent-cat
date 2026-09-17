@@ -136,7 +136,7 @@ def capability_discovery(runner: Path, directory: Path) -> tuple[Path, list[str]
             "runnerVersion": capabilities["server"]["runnerVersion"],
         },
         "session": {
-            "versions": [1],
+            "versions": [1, 2],
             "operations": ["prepare", "prepare-lineage", "start", "discard"],
             "inputSources": ["literal", "file", "transport"],
             "invocationVersions": [1],

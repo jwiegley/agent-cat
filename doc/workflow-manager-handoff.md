@@ -47,13 +47,38 @@ joins, preserved transport outcomes and release of both reservations only after
 cleanup. Saturation retains the ordinary limit and cancellation-only extra slot.
 These fresh results do not recover or explain historical `policies-gate-05`.
 
-Source, build output and ordinary native results are under
-`controls.qzldrova/wm016-delivery.LdWQA6B3`, in `source`, `build.22UhyK` and
-`functional.toRJdNVE`. The decision covered only these fresh local scenarios
-with offline adapters, original owners and existing budgets. The next work is
-the remaining local suites and owning gates. Linux and affected Pi/Emacs/client
-checks still require their requested authorization. Full policies and final
-milestone review remain outstanding, so WM-016 is not accepted.
+Application integration is committed on `tui` as `5b283978`. Source, build output
+and ordinary native results are under `controls.qzldrova/wm016-delivery.LdWQA6B3`,
+in `source`, `build.22UhyK` and `functional.toRJdNVE`. The earlier native decision
+covered only its fresh local scenarios with offline adapters, original owners
+and existing budgets.
+
+Canonical execution now also passes the engine, runtime-contract and TUI-model
+Cabal suites, examples, tier0, tier1, deterministic ACP/deck, routing configuration,
+Haskell documentation and manager-contract gates. The runtime suite genuinely
+executed capture and root-role bodies. The manager contract remains data-only,
+not a service execution. Tier1 used the existing oracle with seed `91797864` and
+500 inputs, including 412 checked P3 cases and 88 existing other-case skips.
+No Lean or oracle build occurred.
+
+Two concrete validation fixes preserve their original assertions. The private-root
+refusal fixture now explicitly sets mode 0755 rather than depending on the umask.
+The native capability-discovery expectation now includes session versions one
+and two, while requests still default to version one. The original runtime and
+capability failures remain recorded. The corrected runtime/TUI suites and targeted
+discovery check passed, but the latter is not a complete frontend-session pass.
+
+Results are in `canonical-suites.2wyjVH56`, `canonical-suites-fixed.qx9rq4WY`,
+`canonical-gates.ZhA7cmOX`, `canonical-transport.OUxLX9W2`,
+`session-capabilities-red.9YF2Pxoh` and `session-capabilities-green.L2GralIM`
+under the same delivery directory. The remaining local work is full policies
+and native UI compatibility. Consolidate only concrete owner repairs needed to
+run those existing gates safely. Linux and affected Pi/Emacs/client checks still
+require their requested authorization. Final milestone review remains outstanding,
+so WM-016 is not accepted.
+
+The authority-only tracker issues `acat-lijk`, `acat-3ajx`, `acat-3sq1` and
+`acat-jg00` are outside this worktree projection and remain untouched.
 
 The following verification history retains its original scope. The paused L08
 review and earlier next-helper instructions do not govern current work.
