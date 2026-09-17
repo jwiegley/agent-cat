@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 20:02]
+:MODIFIED: [2026-09-16 Wed 20:35]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8966,6 +8966,14 @@ A separate preparation-only decision assigns terminal-source-controls.kjrqc6s8 t
 Future Controls execution must use the existing supervisor ask/reply mechanism for an immediate original exit/join/error notice and explicit parent acknowledgement before copying. A queued progress update alone is not a receipt. This ordering constraint adds no new harness or telemetry protocol. Future persistence timestamps must be labeled as such unless actual runtime receipt metadata supports the name. Exact selected fresh fixture faults/retries need a later separate decision. No previous signalling, cancellation, recovery or gate authority transfers.
 
 Refocus completed at 2026-09-17T03:02:50.586242+00:00, with next deadline 2026-09-17T04:02:50.586242+00:00. The receipt gap is resolved and requires no more investigation. Complete SOURCE controls preparation/review is the shortest next unmet requirement, while all current raw/platform/client/canonical/final acceptance requirements remain unchanged.
+
+Complete current SOURCE Controls preparation under terminal-source-controls.kjrqc6s8 reports38checker outcomes,22positives/16specific negatives,six contract calls and40resources,14Werror builds and28actual executable paths. It retained21preserver and43actual-analyzer inert checks,source1021/raw594/twelve mode differences and81old-footprint exclusions. The initial tee substring check falsely matched steering and was narrowed to the command word, with failed evidence retained. No native, compiler, contract-validator or database invocation occurred.
+
+Independent review c1dd4f81-6d06-44a8-afe8-0cc129a7274b BLOCKED preparation clearance on oneP1. analyze_controls.py checks gate completion but never reads launcher-completion.json, so it can declare completeControlsGate:true without successful original launcher exit/join. Existing analyzer-data-v2/results/complete.json proves the false positive with no launcher record. Parent confirmed that record read-only, SHA256 a46028dfb38e4beae2cf3e903e6882def1675a7a25bbad5cfb419417773a0414. Launcher source can retain outer KeyboardInterrupt after child exit0. This violates original-owner failure precedence and is not cured by a later ACK alone. Full parent preparation integrity verification remains pending rather than being borrowed from ingestion.
+
+A new source/data-only correction decision assigns terminal-controls-owner-fix.qqacwmy6 to worker run865be8e7-672f-411e-8a19-4d7ecc3a7c85. Old Kpreparation, all versions and false-positive evidence remain unchanged. The existing analyzer must require both original gate and launcher zero exits, successful joins, no primary/outer/wait failures and no interruptions before complete disposition. Actual-analyzer fixtures must include the producer-shaped successful launcher and independent missing/failed/unjoined/failure/interruption negatives, while retaining all previous43cases. The corrected preparation gets fresh private paths, source/resource/plan bindings and independent review. No native or other execution authorization exists.
+
+Refocus completed at 2026-09-17T03:35:30.298770+00:00, with next deadline 2026-09-17T04:35:30.298770+00:00. The smallest next step is the analyzer ownership correction, not a production change, new harness or native diagnostic. Original supervisor ACK-before-copy ordering, budgets, modes, fixture scope and full WM-016 acceptance obligations stay unchanged.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
