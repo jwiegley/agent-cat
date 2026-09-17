@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 20:59]
+:MODIFIED: [2026-09-16 Wed 21:55]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8984,6 +8984,18 @@ Fresh canonical/private-environment preflight passed, and parent authorized exac
 Preservation is NOT currently authorized. On original return, the worker must send exact gate AND launcher exit/timing/join/error/interruption facts via need_decision and WAIT for explicit parent ACK permitting copying. Queued progress alone is insufficient. Without ACK or on unexpected failure/uncertain ownership, stop without copy, interpretation, retry, repair, PID adoption, hard-kill fallback or next gate. Existing120/1200/120/60helper bounds and original-handle supervision remain unchanged, with no aggregate native or outer killing deadline. The45minute exact-run wake is attention only, not a process timeout. No result is claimed.
 
 Refocus completed at 2026-09-17T03:56:14.247476+00:00, with next deadline 2026-09-17T04:56:14.247476+00:00. Full WM-001 through WM-044 and G0 through G5 scope remains unchanged, with only WM-001 through WM-015 and G0 accepted. Current source Store, Commands, Admission and ingestion pass. Current Controls, all raw/platform/client/canonical/final acceptance and historical incident obligations remain open.
+
+Complete current SOURCE Controls runfc010197-817d-4444-a3b8-010f64567763 returned gate exit0 after1927.3342660000053seconds and launcher exit0 after1927.633693958007seconds, with both original joins and no errors or interruptions. The worker sent need_decision request5cbc44d1-4ac5-4da4-9fd5-8bb916859c8e and waited. Parent checked original records and absent snapshot/analysis, then explicitly permitted one copy through the blocking reply. ACK persistedAt2026-09-17T04:31:53.502119+00:00, SHA80155e46cf301950b5222d1704919c757dc0168e2b23f8407a2566ddfa1543e0. Preservation began04:32:34.424495, after the ACK. ACK was not acceptance, and both permissions are consumed.
+
+Reviewed preservation, corrected both-owner analyzer and supplemental full validator all returned0. Parent verified53,594comparisons over11,320entries,9,147regular files,2,173directories,58databases/no sidecars/no symlinks,28own-built executable paths and16retained compiler directories. Raw11,292entries remain unchanged, with only28actualbinary records added. Source1021/raw594/all12mode differences and all18,856old Kentries remain unchanged. No database API, native/helper/compiler/contract rerun, repair or old-resource recovery occurred.
+
+All38checker outcomes have22positives and16exact-diagnostic negatives, with13helper builds and39direct original-child result records retaining joins/errors/budgets. Six contracts cover40resources. Top numeric statuses remain explicitly checked-flow inferences. Combinedstdout442PASS/helperlogs460PASS are counts, not unique obligations. Three retained control observation: StoreBusy stderr notes match the unchanged StoreBusy-only observer retry under15-second await and1ms delay. They have no individual-case attribution and imply neither opaque-command replay nor successful native130. Runtime terminal events alone remain insufficient cleanup/release evidence.
+
+Reviewer a1f3487b-9c51-4019-848d-a6be804f877d found no issues, with full parent integrity verification still pending at its completion. Parent subsequently completed53,594checks and accepted scoped SOURCE Controls at2026-09-17T04:51:47.736831+00:00, satisfying that stated prerequisite. The reviewer did not rehash or inspect the subsequently completed parent report. All five current SOURCE Store/Commands/Admission/ingestion/Controls owning gates now pass for the bound candidate. No raw, integration or WM016/package acceptance follows.
+
+A new preparation-only decision assigns terminal-raw-store.3o4iwgga to worker rund6d0b2e4-af81-4e6e-a576-36a6c7418d05. Target is the exact existing raw package594files, not the1021file source tree or a mode-normalized copy. It must bind unchanged archive/source/raw identities and twelve mode differences, complete Store default/admission-data/terminal cases and three SQL-interruption helpers atN1/N8, both-owner completion and ACK-before-copy. No gate/build/compiler/Cabal enumeration/Store/DB/native/provider/processcontrol or authorization is permitted during preparation. The selected fresh original-handle lease-death fixture needs a new later case-specific decision; no source Store permission transfers.
+
+Refocus completed at 2026-09-17T04:55:01.063040+00:00, with next deadline 2026-09-17T05:55:01.063040+00:00. The next unmet requirement is current raw Store preparation and review, not a source rerun or further investigation of retained benign observation notes. Full raw/platform/client/canonical/final acceptance and historical incident requirements remain unchanged.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 

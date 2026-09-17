@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T03:56:14.247476+00:00`. The next deadline is
-`2026-09-17T04:56:14.247476+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T04:55:01.063040+00:00`. The next deadline is
+`2026-09-17T05:55:01.063040+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -47,11 +47,11 @@ and independent scoped review. The complete source Admission gate now also
 passes scoped review using a separately authorized faithful new capture.
 Its first preservation copied two link modes incorrectly, and that old snapshot
 and failed disposition remain unchanged. The complete current source ingestion
-gate also passed parent verification and independent scoped review. Corrected
-Controls preparation passed review and parent verification, followed by one
-separately authorized gate dispatch. No result is claimed. Preservation must
-await explicit parent acknowledgement. Other gates, old-resource recovery
-and WM-016 acceptance remain unauthorized.
+gate also passed parent verification and independent scoped review. Controls
+now has scoped clearance after its original successful run, explicit
+acknowledgement, faithful capture, review and full parent verification. All five
+current source owning gates pass. Raw Store preparation only is active, with
+no raw native execution, old-resource recovery or WM-016 acceptance authorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -885,23 +885,42 @@ parent verifier summary-field assumption failed once, then the corrected
 verifier counted actual expected resources. No prepared artifact changed.
 
 At `2026-09-17T03:56:14.247476+00:00`, fresh private-environment preflight passed
-and parent authorized one complete current source Controls gate. Worker run
-`fc010197-817d-4444-a3b8-010f64567763` is active under original ownership, with
-38 checkers, six contracts, fourteen builds and 28 own-built executable paths
-in scope. Exact fresh original-owned faults, interruptions and bounded retries
-are included. Native cancellation 130 remains non-success, and no historical
-or other-gate authority transfers.
+and parent authorized one complete current source Controls gate. Run
+`fc010197-817d-4444-a3b8-010f64567763` returned zero after 1,927.334266 seconds,
+with both original owners joined and no errors or interruptions. The worker
+sent the original facts through `need_decision` and waited. Parent checked
+those records and the absent snapshot, then issued explicit one-copy
+permission. The ACK was persisted at 04:31:53.502119 UTC, and preservation
+began at 04:32:34.424495. Neither permission remains reusable.
 
-Preservation is not currently authorized. The worker must send an immediate
-original gate and launcher exit, timing, join and error notice through the
-existing supervisor request/reply mechanism, then await explicit parent
-acknowledgement permitting copying. Without that reply, or on unexpected
-failure or uncertain ownership, it must stop without retry, repair, PID
-adoption or further execution. Existing budgets are unchanged, with no outer
-killing deadline. The 45-minute wake is attention only, not a process timeout.
-No result is claimed.
-Remaining Controls, raw, platform/client/canonical and full acceptance
-requirements stay open, and WM-016 remains unaccepted.
+Preservation and both validators returned zero. Parent verification passed
+53,594 comparisons over 11,320 entries, 58 databases with no sidecars, 28 actual
+executable paths and sixteen retained compiler directories. All 38 checker
+outcomes, six contracts and forty resources are supported. The sixteen negative
+cases retain their exact diagnostics, with original helper joins and budgets.
+Top numeric outcomes remain checked-flow inferences.
+
+Three `control observation: StoreBusy` notes remain in stderr. The unchanged
+observer retries only StoreBusy under a fifteen-second await, without resending
+controls. The notes cannot be assigned to individual cases. Native cancellation
+130 remains non-success, and terminal events alone are not cleanup proof.
+
+Review `a1f3487b-9c51-4019-848d-a6be804f877d` found no issues, conditional on full
+parent verification. Parent subsequently completed the 53,594 checks and
+accepted scoped source Controls at `2026-09-17T04:51:47.736831+00:00`. The
+reviewer did not rehash or inspect that subsequently completed report. Old
+evidence remains unchanged, and no native, preservation or validator rerun
+occurred.
+
+Preparation-only run `d6d0b2e4-af81-4e6e-a576-36a6c7418d05` owns
+`terminal-raw-store.3o4iwgga`. Its target is the exact raw package, with all
+594 files and twelve source/raw mode differences unchanged. It must prepare
+the complete raw Store gate, both-owner completion checks and explicit
+acknowledgement before copying. The lease-death fixture needs a new specific
+execution decision, not transferred source permission. No raw gate, build,
+compiler, database API or native operation is authorized during preparation.
+Full raw, platform/client/canonical and final acceptance requirements remain
+open, with WM-016 unaccepted.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
