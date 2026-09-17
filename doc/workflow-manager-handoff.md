@@ -9,15 +9,17 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T20:45:02.087348+00:00`. The next deadline is
-`2026-09-17T21:45:02.087348+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T21:13:16.874985+00:00`. The next deadline is
+`2026-09-17T22:13:16.874985+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 
 **P1 corrected and independently cleared:** the neutral test module restores
 the Cabal boundary. The committed audit accepts the repair and its final-byte
 verification. L07 directory disposal has independent source/data clearance
-and canonical post-process verification. Its committed fess is next. Full
-policies and WM-016 remain unaccepted.
+and canonical post-process verification. Its committed fess is clear. The
+isolated L08 source-discovery directory remedy is active, preserving the real
+static checker and required per-case unlinks. Full policies and WM-016 remain
+unaccepted.
 
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -1560,7 +1562,30 @@ open concerns, as the retained clarification records. L07 fixes neither.
 Inner seven-call flow remains source-derived checks rather than new persisted
 per-child joins/replies. A15, preimages and complete preservation remain open.
 Separate documentation checking includes its static Haskell probe. Committed
-fess is next, without full-policies or WM-016 acceptance.
+fess `fb92dfd9-f5e6-43ca-9fa6-d026d3745ff2` found no issues in
+`560a000890a840a32a5aae12daa20d121d4ed477`, limited to L07 disposal.
+
+The next reviewed unit is L08 source-discovery directory hygiene. Parent
+inspected the Python probe and actual GHC header-parser/Cabal-root checker.
+At `2026-09-17T21:10:43.782653+00:00`, parent authorized only isolated
+`terminal-source-roots-evidence.gxvf54vu`. Worker
+`f111ed04-0d8e-4711-aeb8-f66ce2fe6779` may edit source_roots_probe.py to use the
+existing owner's delete=False policy and a post-context survivor assertion.
+The body, libdir query, checker argv, original positive and diagnostic-specific
+negative predicates, summary, owners and 30-second budget remain unchanged.
+Required source.unlink() stays, removing each deliberate Escape.hs violation
+before the next case. Its deleted preimages are not silently counted retained.
+
+Pinned GHC libdir discovery and the unchanged real runghc static checker are
+explicitly permitted for this unit. Fixture modules are parsed, not executed.
+Required evidence includes the full old-probe deletion red, post-process
+surviving bytes/modes, distinct repeated roots and a specific exception only
+after all original checks and unlinks. Checker and Popen-helper support copies
+remain exact. No mocked checker, relaxed namespace rule, cleanup interception,
+A15/reply/preimage repair, workflow/native/runtime fixture, real Cabal gate,
+package/dependency/oracle action, canonical edit or further source change is
+authorized. L06, A15, memory replies, preimages and full preservation remain
+open, without full-policies or WM-016 acceptance.
 
 Other deletion/retention, frontend ownership/read boundaries, ACP cleanup,
 A15 interruption handling, environment and complete-capture gaps remain blocked.
