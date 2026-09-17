@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-17 Thu 11:24]
+:MODIFIED: [2026-09-17 Thu 11:47]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -9264,6 +9264,12 @@ Refocus 2026-09-17T18:02:23.705783+00:00. Next deadline 2026-09-17T19:02:23.7057
 At2026-09-17T18:17:48.357184+00:00, parent separately authorized exact canonical L05 integration. Capture/role/fault complete-module DATA-main builds passed warning-fatal in5.440832084s,45.781017583s and7.144227875s, with empty stderr. All six filesystem N1/N8 runs passed, nine original Popen joins/null errors/zero interruptions. All1017bound nontracking inputs stayed unchanged during verification.18canonical trees match isolated prefixes/bytes/modes and prior canonical capture/role data. Eight actual C-object bindings match isolated provenance. Fault still links only private_directory.c+capture_sync_fault.c, with the real sync implementation included, not separately linked.67completed non-build identities were collected after return, binaries/C objects separately bound and other compiler intermediates retained in place. Evidence root terminal-fault-bucket-canonical.p0ra7g8j. No configure, publication, barrier, pause, cancellation, native Main/capture/rootRole fixture, runtime-contract/full policies or package operation ran. Separate documentation checking includes its static Haskell probe. Only outer hygiene/import dependency is remedied; L03/L04/L05 preimages, A15 and all other blockers remain. Committed fess is next, with WM-016 unaccepted and acceptance15/44 plus G0 unchanged.
 
 Refocus 2026-09-17T18:24:19.484691+00:00. Next deadline 2026-09-17T19:24:19.484691+00:00. Next: exact L05 commit and committed fess, then one next reviewed policies remedy.
+
+2026-09-17 P1 BLOCK from committed fess1069c368-7ef7-489f-a1ae-0eb5b4ffd544: L05's CaptureTests direct import of Agentic.Runtime.PrivateRoot violates runtime-contract-test's Cabal component boundary. Parent verified that the library exposes Agentic.Runtime but hides PrivateRoot, and the test has only runtime/test home sources plus the agentic dependency. Direct-GHC -iruntime/src tests had made PrivateRoot a home module, so their success did not verify this boundary. The finding is source-based; no actual Cabal failure has yet been recorded. Parent accepts responsibility for integrating the narrowing without a component build. Reviewer explicitly withdraws its incomplete recommendation/clearance. Prior records and scoped data/link results remain unchanged, but they do not establish Cabal compatibility. No next inventory unit may proceed.
+
+At2026-09-17T18:43:44.998990+00:00, parent authorized isolated corrective root terminal-bucket-package-repair.ubb62xm5. Worker205880e4-69b3-4d58-a7f0-c392e0a92f77 may change only CaptureTests.hs, CaptureFaultTests.hs, new runtime/test/BucketEvidence.hs and agentic.cabal. Restore the public facade import, MOVE shared owner/assertions to neutral test-only support, import/reexport it for existing callers and import it directly from fault tests, and declare it in runtime-contract-test other-modules. PrivateRoot must stay hidden, test source dirs must not gain runtime implementation paths, and all C/gate recipes/native bodies/finalizers/data behavior stay intact.1017baseline source bindings exclude mutable tracking. Fresh independent private offline baseline/corrected Cabal BUILD-ONLY of test:runtime-contract-test with enable-tests/Werror is authorized, requiring the specific hidden-module red before the green. No cabal test or native executable may run. Three direct DATA-main builds and six filesystem regressions retain frozen normal/fault C lists. No package construction, dependency install/lock/job override, canonical edit, other path or inventory advance is authorized. WM-016/full policies/preimages/A15 remain unaccepted or unresolved, with accepted15/44 plus G0 unchanged.
+
+Refocus 2026-09-17T18:47:39.649515+00:00. Next deadline 2026-09-17T19:47:39.649515+00:00. Next: P1 neutral-test-module/package-boundary correction and independent review before inventory work.
 #+end_example
 
 ** Dependencies

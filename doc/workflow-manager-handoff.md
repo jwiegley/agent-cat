@@ -9,9 +9,15 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T18:24:19.484691+00:00`. The next deadline is
-`2026-09-17T19:24:19.484691+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T18:47:39.649515+00:00`. The next deadline is
+`2026-09-17T19:47:39.649515+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
+
+**Current P1 blocker:** the committed L05 import narrowing violates the Cabal
+runtime-contract-test component boundary. The isolated correction is active.
+No new inventory unit may proceed before this regression is repaired and
+independently cleared.
+
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
 also passed all 14 outcomes with verified bytes/modes and independent scoped
@@ -80,11 +86,12 @@ passed warning-fatal compilation and filesystem-only N1/N8. Its committed
 fess is clear. L04 outer root-role bucket hygiene has independent source/data
 clearance and parent verification. Exact canonical reuse passed both
 warning-fatal data-main builds and all four filesystem N1/N8 runs. Committed
-L04 fess is clear. L05 outer fault-bucket hygiene and import narrowing have
-independent source/data clearance and parent verification. Exact canonical
-integration passed three warning-fatal data-main builds and six filesystem
-runs with the original shim linkage. Committed L05 fess is next. Native
-fixtures and pre-mutation evidence remain unverified.
+L04 fess is clear. L05's direct-GHC data/link results remain valid in their
+scope, but committed fess found a P1 hidden-module import regression in the
+Cabal test component. Parent adopted that narrowing without a component build.
+The earlier recommendation/clearance is superseded, not rewritten. A neutral
+test-module correction and real Cabal build-only red/green are now authorized
+in isolation. Native fixtures and pre-mutation evidence remain unverified.
 No native fixture, full gate, WM-016 application integration, platform/client
 work, old-resource recovery or WM-016 acceptance is authorized.
 
@@ -1434,9 +1441,39 @@ No fault configuration, publication, barriers, pauses, cancellation, native
 Main/capture/rootRole fixture, runtime-contract/full policies or package
 operation ran. Separate documentation checking includes its static Haskell
 probe. Linking and object identity do not prove shim execution. Only outer
-hygiene and the import dependency are remedied. L03/L04/L05 preimages, A15 and
-other blockers remain unresolved. Committed fess is next. Other remedies
-require new decisions.
+hygiene has scoped data evidence. The import narrowing is now blocked by the
+following package-boundary finding, and L03/L04/L05 preimages, A15 and other
+full-policies obligations remain unresolved.
+
+Committed fess `1069c368-7ef7-489f-a1ae-0eb5b4ffd544` found P1: CaptureTests
+imports Agentic.Runtime.PrivateRoot, but that module is hidden in the library.
+The runtime-contract-test component has only runtime/test home sources and
+depends on agentic. Its public facade import had respected the boundary.
+Direct GHC builds with runtime/src on the search path made the hidden module
+a home module and did not verify Cabal visibility. Parent checked the component
+declarations and accepts responsibility for integrating the narrowing without
+that build. The finding is source-based, with no executed Cabal failure yet
+recorded. The reviewer explicitly corrects its earlier recommendation and
+clearance. Earlier records remain intact and limited to their actual scope.
+
+At `2026-09-17T18:43:44.998990+00:00`, parent authorized only the isolated
+`terminal-bucket-package-repair.ubb62xm5` corrective unit. Worker
+`205880e4-69b3-4d58-a7f0-c392e0a92f77` may change CaptureTests.hs,
+CaptureFaultTests.hs, new runtime/test/BucketEvidence.hs and agentic.cabal.
+Restore the public facade import and move the existing filesystem owner and
+assertions into neutral test-only support, with reexports for existing callers
+and a direct neutral import for fault tests. Declare the helper in the test
+component. PrivateRoot stays hidden, and Runtime implementation paths must
+not be added to the test component. All native bodies, finalizers, payloads,
+C sources and gate recipes remain intact.
+
+Fresh independent private offline baseline/corrected Cabal builds of
+test:runtime-contract-test with tests enabled and warnings fatal are permitted.
+The baseline must fail specifically at the hidden-module boundary, not for an
+arbitrary setup error. Build only, never cabal test or the native test binary.
+Three direct data-main builds and six filesystem regressions must retain the
+frozen normal/fault C lists. No package construction, installation, lock/job
+override, canonical edit, other source path or inventory advance is authorized.
 
 Other deletion/retention, frontend ownership/read boundaries, ACP cleanup,
 A15 interruption handling, environment and complete-capture gaps remain blocked.
