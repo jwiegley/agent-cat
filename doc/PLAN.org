@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-16 Wed 16:45]
+:MODIFIED: [2026-09-16 Wed 17:13]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -8912,6 +8912,10 @@ Preservation retained 274 entries, 198 regular files, 30 databases with absent s
 Preparation-only run 1479eb5f-e0d1-4d20-909e-084e3af6b39f owns terminal-source-admission.KiEgo5Jc for the next unchanged complete source Admission gate, including N1/N8 fixtures, opacity, positive package-boundary evidence and interruption audits. Exact helper layouts, native original-owner scopes and predicates must be derived rather than copied blindly from earlier gates. No compiler, Store/native/helper/gate or raw-lane execution is authorized yet.
 
 Refocus completed at 2026-09-16T23:45:49.017807+00:00, with next deadline 2026-09-17T00:45:49.017807+00:00. Source Store and Commands are verified at their scoped gate boundaries. Source Admission, ingestion and Controls, all raw/platform/client/canonical obligations and WM-016 acceptance remain outstanding without weakened criteria.
+
+Complete source Admission preparation 1479eb5f-e0d1-4d20-909e-084e3af6b39f completed with all 19 default N1/N8 families, 36 opacity consumers, distinct positive package-boundary evidence and compiled interruption N1/N8. Parent verified 1,530 identities and 16 inert preservation checks, with 54 prior resource footprints excluded. Review ec4e9c41-4b14-4fc1-a8f9-231696d12958 found no issues at preparation scope. Package-boundary has no invented native fixtures, executable records or rejected destination.
+
+The parent refreshed zero-native preflight and separately authorized one complete source Admission gate at 2026-09-17T00:09:39.321793+00:00. Run 3cf17b57-5ffb-40e7-ae2d-a0010150ba4c owns the original gate/launcher handles in terminal-source-admission.KiEgo5Jc. Authority explicitly includes only the unchanged original-owned completion-report fault: admission_cleanup_fault.c delegates real signalling, then injects one EIO report after successful SIGKILL and observed exited leader. It does not authorize skipped cleanup, a kernel-error claim, generic PID signalling or historical recovery. Existing retries and reopen comparisons concern only fresh original test owners. All budgets, source bodies and predicates remain unchanged. No result, raw lane, other gate or WM-016 acceptance is claimed. Original return notice must precede raw preservation and interpretation.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
