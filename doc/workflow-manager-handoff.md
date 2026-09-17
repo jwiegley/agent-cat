@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T13:47:32.343949+00:00`. The next deadline is
-`2026-09-17T14:47:32.343949+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T14:11:38.505964+00:00`. The next deadline is
+`2026-09-17T15:11:38.505964+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -64,7 +64,9 @@ changed-layer compatibility and integration evidence. The complete policies
 preparation remains blocked. The isolated Worker child-output retention remedy
 has independent scoped clearance and full parent verification. A separate
 test-helper-only canonical integration passed a warning-fatal build and compiled
-data-only N1/N8 checks. No native fixture, full gate, WM-016 application
+data-only N1/N8 checks, followed by a clear committed fess audit. The next
+isolated remedy is original merged refusal-byte retention in `refuses_fact`,
+with actual-path inert tests. No native fixture, full gate, WM-016 application
 integration, platform/client work, old-resource recovery or WM-016 acceptance
 is authorized.
 
@@ -1175,8 +1177,35 @@ No Worker, ProcessGroup, Store, Runtime/backend, signal or native cleanup fixtur
 ran. The canonical change is only the test producer, not the WM-016 application
 candidate. Immutable Z/source and the raw archive retain the old WorkerCheck
 bytes, so their earlier scoped gate results are not relabeled. Committed fess
-review is next, followed by one narrowly selected policies remedy. Additional
-source changes, repackaging and full policies execution require new decisions.
+review `4e4f8445-5be2-4259-9a31-26faf09dd46b` found no issues in commit
+`6878f5e9ad94dcdbfdfe91f03a5751cac64278d1`, with the same source/data limits.
+
+That reviewer cited `R/doc-check.log`, which predates L19 and cannot establish
+this unit's documentation verification. Parent had run the current check before
+commit in tool output, then separately persisted a fresh post-commit check under
+`terminal-worker-evidence-canonical.5zutr_9v/doc-check.log`, with exit zero. The
+older log and review remain unchanged, and a separate citation clarification
+records the chronology. Reviewer has not read this later log.
+
+The review recommends L21 next, retaining the original merged stream in the
+existing `refuses_fact` helper rather than reconstructing its shell variable.
+At `2026-09-17T14:08:49.511957+00:00`, parent authorized only the isolated
+`terminal-refusal-evidence.gbvuv2fm` overlay. Worker
+`5b02fe29-3ac9-4833-bbd1-762dc0eb3b3e` may edit the helper and adjacent focused-test
+invocation in `cli/ci/policies.sh`, add `test/policy_refusal_evidence.py`, and
+add that one explicit package membership in `agentic.cabal`. The additional
+paths retain a permanent runnable regression without mixing unrelated tests
+into an existing probe. All other source and surrounding program bytes remain
+unchanged, and package construction is not authorized.
+
+Source-exact old red and actual-path inert tests must preserve original argv,
+exit-one requirement, wording predicate and console summaries. They must retain
+exact merged bytes, including trailing newlines, fail closed on writing errors,
+preserve primary command or predicate failure, and prevent repeated calls from
+overwriting earlier artifacts. Only pinned Nix Bash/Python data/filesystem tests
+with explicitly inert local command producers may execute. Real Cabal, compiler,
+runner, native fixtures and full policies remain forbidden. Canonical source
+integration and broader remedies require new decisions.
 
 Other deletion/retention, frontend ownership/read boundaries, ACP cleanup,
 A15 interruption handling, environment and complete-capture gaps remain blocked.
