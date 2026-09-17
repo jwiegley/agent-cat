@@ -4,7 +4,7 @@
 
 module CaptureTests (captureTests, captureBucketEvidenceData, withCaptureBucket, bucketEvidenceChecks) where
 
-import Agentic.Runtime
+import Agentic.Runtime.PrivateRoot
 import Control.Concurrent (forkIO, killThread)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.Exception (AsyncException (ThreadKilled), IOException, SomeException, bracket, finally, fromException, throwIO, try)

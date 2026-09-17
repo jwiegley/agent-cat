@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T18:02:23.705783+00:00`. The next deadline is
-`2026-09-17T19:02:23.705783+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T18:24:19.484691+00:00`. The next deadline is
+`2026-09-17T19:24:19.484691+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -80,9 +80,11 @@ passed warning-fatal compilation and filesystem-only N1/N8. Its committed
 fess is clear. L04 outer root-role bucket hygiene has independent source/data
 clearance and parent verification. Exact canonical reuse passed both
 warning-fatal data-main builds and all four filesystem N1/N8 runs. Committed
-L04 fess is clear. The isolated L05 outer fault-bucket remedy is active, with
-one precise import narrowing and frozen fault-shim linkage. Native fixtures
-and pre-mutation evidence remain unverified.
+L04 fess is clear. L05 outer fault-bucket hygiene and import narrowing have
+independent source/data clearance and parent verification. Exact canonical
+integration passed three warning-fatal data-main builds and six filesystem
+runs with the original shim linkage. Committed L05 fess is next. Native
+fixtures and pre-mutation evidence remain unverified.
 No native fixture, full gate, WM-016 application integration, platform/client
 work, old-resource recovery or WM-016 acceptance is authorized.
 
@@ -1399,31 +1401,42 @@ in `3e79af18b93d29d32751b4d981b72cc322970570`, limited to shared-owner outer
 hygiene. Native fixtures, interrupted paths, durability and preimages remain
 unverified, and non-build identities do not imply complete compiler hashing.
 
-The next reviewed subgap is L05 outer fault-bucket hygiene. Parent inspected
-the native fault action, Runtime facade/PrivateRoot exports and C shim. At
-`2026-09-17T17:58:20.943738+00:00`, parent authorized only the isolated
-`terminal-fault-bucket-evidence.6za6qkjr` unit. Worker
-`986e79ae-4fa1-4e6c-b58b-29252782dd6f` may narrow CaptureTests' Runtime import
-to PrivateRoot and change CaptureFaultTests to reuse the existing owner and
-assertions with its original prefix, remove outer disposal, and add an explicit
-filesystem entrypoint and permanent check call. All other CaptureTests code,
-native Main.main/action/helpers, release/worker finalizers, pipe closure,
-behavioral removals and five-second bounds remain unchanged.
+L05 outer fault-bucket hygiene reuses the existing owner and assertions in
+CaptureFaultTests. CaptureTests changes only its import from the broad Runtime
+facade to PrivateRoot. All other shared code and the native fault action and
+helpers remain unchanged modulo necessary scope syntax, including release/
+worker finalizers, behavioral removals, role fault checks, pipe closure and
+five-second bounds. The isolated `terminal-fault-bucket-evidence.6za6qkjr`
+copy binds 1,017 source files and changes only these two Haskell files.
 
-Fault linkage remains the original private_directory.c plus
-capture_sync_fault.c pair. The shim includes the real synchronization source
-under a renamed symbol before wrapping it. Separately linking normal
-private_sync.c, adding process_group.c to the fault target, editing the shim
-or changing the gate recipe is forbidden. A 1,017-file copy is bound, excluding
-mutable tracking. Warning-fatal explicit capture/role/fault data-main builds
-with their original respective C sources, six filesystem N1/N8 runs, and old
-fault allocation/finalizer inert reds are allowed.
+Review `cf4da514-0e04-4afd-8de3-7d7507a3c940` found no issues, conditional on
+parent integrity verification. That verification passed 3,780 comparisons,
+including 87 completed-file identities, four own binaries, eight C objects,
+four warning-fatal builds, six filesystem outcomes, thirteen original Popen
+joins, eighteen retained trees and two source-bound old finalizer reds.
+The actual fault link pair remains private_directory.c and capture_sync_fault.c.
+The unchanged shim includes and renames the real synchronization implementation.
+No separate normal-sync or process-group object exists in the fault output.
 
-Data execution must not configure faults, publish, invoke barriers/pauses or
-roleFaultTests, cancel, or enter native main. No Runtime/Worker/Store/group/
-backend/signal fixture, full policy/runtime-contract gate, package/dependency
-operation, canonical edit or additional source change is authorized. L03/L04/
-L05 preimages, A15 and other blockers remain. Other remedies need new decisions.
+At `2026-09-17T18:17:48.357184+00:00`, parent separately authorized and applied
+the exact two-file canonical change. Capture/role/fault complete-module
+data-main builds passed warning-fatal in 5.440832084, 45.781017583 and
+7.144227875 seconds respectively, with empty stderr. Six filesystem N1/N8 runs
+passed with nine original Popen joins, null errors and zero interruptions.
+All 1,017 nontracking inputs remained unchanged during verification. Eighteen
+canonical trees match isolated prefixes/bytes/modes and previous canonical
+capture/role data. Eight own C-object bindings match isolated provenance.
+The 67 completed non-build identities were collected after return, with own
+binaries/C objects separately bound and other intermediates retained in place.
+Evidence is retained under `terminal-fault-bucket-canonical.p0ra7g8j`.
+
+No fault configuration, publication, barriers, pauses, cancellation, native
+Main/capture/rootRole fixture, runtime-contract/full policies or package
+operation ran. Separate documentation checking includes its static Haskell
+probe. Linking and object identity do not prove shim execution. Only outer
+hygiene and the import dependency are remedied. L03/L04/L05 preimages, A15 and
+other blockers remain unresolved. Committed fess is next. Other remedies
+require new decisions.
 
 Other deletion/retention, frontend ownership/read boundaries, ACP cleanup,
 A15 interruption handling, environment and complete-capture gaps remain blocked.

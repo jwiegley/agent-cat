@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-17 Thu 11:02]
+:MODIFIED: [2026-09-17 Thu 11:24]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -9258,6 +9258,12 @@ Refocus 2026-09-17T17:43:10.958410+00:00. Next deadline 2026-09-17T18:43:10.9584
 The next reviewed subgap is L05 outer fault-bucket hygiene. Parent inspected CaptureFaultTests, the Runtime facade/PrivateRoot exports and capture_sync_fault.c. At2026-09-17T17:58:20.943738+00:00, parent authorized isolated terminal-fault-bucket-evidence.6za6qkjr. Worker986e79ae-4fa1-4e6c-b58b-29252782dd6f may only narrow CaptureTests' Runtime import to PrivateRoot and change CaptureFaultTests to reuse the shared owner/assertions with agentic-capture-fault-, remove outer disposal, and add an explicit data entry plus permanent call. Native Main.main/action/helpers/release-worker finalizers/pipe brackets/behavioral removals/5s remain unchanged. Fault linkage is frozen to private_directory.c plus capture_sync_fault.c, which includes/renames the real private_sync.c implementation. No separate normal private_sync.c, extra fault process_group.c, shim edit or gate-recipe expansion is allowed.1017source/support files are bound excluding tracking. Warning-fatal explicit capture/role/fault DATA-main builds with original respective link lists, six filesystem N1/N8 runs and source-bound old fault allocation/finalizer reds are permitted. Fault data must not configure, publish, sync/barrier, pause, invoke roleFaultTests, cancel or run native main. No Runtime/Worker/Store/group/backend/signal fixture, full policy/runtime-contract, package/dependency, canonical or other-source edit is authorized. L03/L04/L05 preimages, A15 and remaining blockers stay open, with WM-016 unaccepted and acceptance15/44 plus G0 unchanged.
 
 Refocus 2026-09-17T18:02:23.705783+00:00. Next deadline 2026-09-17T19:02:23.705783+00:00. Next: isolated L05 outer-fault hygiene and import/link verification, then independent review.
+
+2026-09-17 L05 reviewcf4da514-0e04-4afd-8de3-7d7507a3c940 found no issues, conditional on parent integrity. Parent verification passed3780 comparisons:1017canonical/source-copy bindings, two edited paths with CaptureTests import-only change,87 completed identities, native fault action/helpers preserved, exact fault link pair, eight own C objects/four binaries, four warning-fatal builds, six filesystem passes,13 original joins,18 retained trees and two old-finalizer reds. No separate normal-sync or process-group fault object exists. Earlier Z/source/raw/archive remain unchanged.
+
+At2026-09-17T18:17:48.357184+00:00, parent separately authorized exact canonical L05 integration. Capture/role/fault complete-module DATA-main builds passed warning-fatal in5.440832084s,45.781017583s and7.144227875s, with empty stderr. All six filesystem N1/N8 runs passed, nine original Popen joins/null errors/zero interruptions. All1017bound nontracking inputs stayed unchanged during verification.18canonical trees match isolated prefixes/bytes/modes and prior canonical capture/role data. Eight actual C-object bindings match isolated provenance. Fault still links only private_directory.c+capture_sync_fault.c, with the real sync implementation included, not separately linked.67completed non-build identities were collected after return, binaries/C objects separately bound and other compiler intermediates retained in place. Evidence root terminal-fault-bucket-canonical.p0ra7g8j. No configure, publication, barrier, pause, cancellation, native Main/capture/rootRole fixture, runtime-contract/full policies or package operation ran. Separate documentation checking includes its static Haskell probe. Only outer hygiene/import dependency is remedied; L03/L04/L05 preimages, A15 and all other blockers remain. Committed fess is next, with WM-016 unaccepted and acceptance15/44 plus G0 unchanged.
+
+Refocus 2026-09-17T18:24:19.484691+00:00. Next deadline 2026-09-17T19:24:19.484691+00:00. Next: exact L05 commit and committed fess, then one next reviewed policies remedy.
 #+end_example
 
 ** Dependencies
