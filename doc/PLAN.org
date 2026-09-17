@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-17 Thu 14:13]
+:MODIFIED: [2026-09-17 Thu 14:55]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -9300,6 +9300,10 @@ Refocus 2026-09-17T20:45:02.087348+00:00. Next deadline 2026-09-17T21:45:02.0873
 The next reviewed unit is L08 source-discovery TemporaryDirectory hygiene. Parent inspected source_roots_probe.py and the real source-boundaries.hs header-parser/Cabal-root checker. At2026-09-17T21:10:43.782653+00:00, parent authorized isolated terminal-source-roots-evidence.gxvf54vu. Workerf111ed04-0d8e-4711-aeb8-f66ce2fe6779 may edit only the existing Python probe to use delete=False and a post-context surviving-fixture assertion. Keep original body/argv/predicates/summary/owners and30-second checker budget unchanged. Crucially source.unlink() stays, removing each deliberate Escape.hs violation before the next case. Pinned ghc --print-libdir and the unchanged REAL runghc -package=ghc -package=Cabal-syntax source-boundaries.hs checker are newly authorized for this static/data unit, not fixture module execution. Required evidence is full old-probe deletion red, corrected post-process surviving bytes/modes and repeats, a specific exception only after all checks/unlinks, and the real positive plus two diagnostic-specific checker refusals. Unchanged checker/process-helper support copies are allowed. No mocked checker, namespace/assertion weakening, Escape preimage capture, A15/reply remedy, native/runtime/Worker/Store/group/backend/signal fixture, real Cabal/workflow, full policies/package/dependency/oracle, canonical or additional-source edit is authorized. L06/A15/memory replies/preimages/full preservation and WM-016 remain unresolved or unaccepted, acceptance15/44 plus G0 unchanged.
 
 Refocus 2026-09-17T21:13:16.874985+00:00. Next deadline 2026-09-17T22:13:16.874985+00:00. Next: isolated L08 owner/checker-preserving source/data remedy and independent review.
+
+USER-DIRECTED REFOCUS 2026-09-17: stop the verification-machinery micro-fix loop and finish substantive WM-016 work. The L08 leaf reviewer was interrupted and is paused. Its isolated source/evidence is preserved, not integrated, and no further hygiene unit is scheduled. New confirmed goal mu629ta5-11s8ax replaces earlier next-helper instructions. Frozen acceptance and safety requirements remain unchanged. The closure plan is doc/workflow-manager-closure-plan.md: reconcile one application delta, resolve actual failure-path ownership/terminal-persistence blockers as a consolidated unit, integrate and run the existing required matrix, then obtain one milestone-level final review. The existing reconciliation supports core behavior on the isolated candidate; it does not establish canonical or broader compatibility. Do not invent missing features or require historical-quarantine recovery as a new feature. Stop treating complete temporary-artifact capture or comparison counts as delivery milestones. Only repair a harness defect that blocks safe and meaningful execution of a required product check. WM-001 through WM-015 and G0 remain accepted; WM-016 remains open. Further progress reports concern functionality, blockers and the next decisive action.
+
+Refocus 2026-09-17T21:55:25.082467+00:00. Next deadline 2026-09-17T22:55:25.082467+00:00. Next: deliver the concise closure plan before implementation edits, then begin application-delta reconciliation.
 #+end_example
 
 ** Dependencies

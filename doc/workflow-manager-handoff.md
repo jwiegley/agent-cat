@@ -2,6 +2,24 @@
 
 <!-- handoff-id: wm016-20260915; status: resumed-by-user; accepted: WM-001..WM-015,G0 -->
 
+## Current delivery direction
+
+On 2026-09-17 the user stopped the verification-machinery micro-fix loop and
+redirected work toward substantive WM-016 closure. This direction supersedes
+every earlier next-helper instruction in this handoff, without changing the
+frozen acceptance contract or safety limits.
+
+The [WM-016 closure plan](workflow-manager-closure-plan.md) governs the next
+work: establish one application delta, close actual failure-path ownership
+issues in a consolidated unit, integrate and run the existing required matrix,
+then obtain one milestone-level final review. No new fixture-retention helper,
+hash inventory, custom recorder or per-leaf review cycle is scheduled.
+
+The L08 leaf reviewer is paused. Its isolated work is preserved and has not
+been integrated. Resume it only if a demonstrated product-validation blocker
+requires that change. Reports now concern delivered behavior, blockers and
+the next decisive action, not artifact counts.
+
 ## Status and authority
 
 The user explicitly resumed work and cancelled the pause on 2026-09-15.
@@ -9,17 +27,17 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T21:13:16.874985+00:00`. The next deadline is
-`2026-09-17T22:13:16.874985+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T21:55:25.082467+00:00`. The next deadline is
+`2026-09-17T22:55:25.082467+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 
 **P1 corrected and independently cleared:** the neutral test module restores
 the Cabal boundary. The committed audit accepts the repair and its final-byte
 verification. L07 directory disposal has independent source/data clearance
 and canonical post-process verification. Its committed fess is clear. The
-isolated L08 source-discovery directory remedy is active, preserving the real
-static checker and required per-case unlinks. Full policies and WM-016 remain
-unaccepted.
+isolated L08 review has been paused under the user-directed refocus. The next
+action is application-delta reconciliation under the closure plan. Full
+policies and WM-016 remain unaccepted.
 
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -1606,8 +1624,10 @@ artifact/session/sentinel filenames, with no reported content reads. The
 scope deviation remains in the handback and review. The supplied `fess` rubric
 was `/Users/johnw/.agents/skills/command-fess/SKILL.md`.
 
-No persistent goal is set in the current API session. The explicit user request,
-not this handoff alone, authorizes resumed work.
+The focused persistent goal is `mu629ta5-11s8ax`, created from the user's
+explicit 2026-09-17 refocus. Its five milestones cover the closure plan,
+substantive WM-016 work, integration/validation, milestone acceptance and the
+remaining frozen roadmap. The user's direction remains the authority.
 
 The latest observed environment was macOS 26.6.2, Darwin 25.6.0
 `xnu-12377.161.14~5`, GHC 9.10.3, Cabal 3.16.1.0, SQLite 3.53.3 and Python 3.14.7.
