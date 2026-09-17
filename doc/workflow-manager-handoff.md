@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T02:04:03.882945+00:00`. The next deadline is
-`2026-09-17T03:04:03.882945+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T03:02:50.586242+00:00`. The next deadline is
+`2026-09-17T04:02:50.586242+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -46,10 +46,10 @@ clearance. The complete source Commands gate also passed parent verification
 and independent scoped review. The complete source Admission gate now also
 passes scoped review using a separately authorized faithful new capture.
 Its first preservation copied two link modes incorrectly, and that old snapshot
-and failed disposition remain unchanged. Current source ingestion preparation
-passed parent verification and independent review, followed by one separately
-authorized gate dispatch. No result is claimed. Other gates, old-resource
-recovery and WM-016 acceptance remain unauthorized.
+and failed disposition remain unchanged. The complete current source ingestion
+gate also passed parent verification and independent scoped review. Preparation
+only for complete current source Controls is active. Native execution, other
+gates, old-resource recovery and WM-016 acceptance remain unauthorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -827,19 +827,48 @@ and fresh preflight verified 1,021 source files, 594 package files, twelve mode
 differences and 63 excluded footprints. The failed records remain visible.
 
 At `2026-09-17T02:05:44.721648+00:00`, parent authorized one complete source
-ingestion gate. Run `088525dc-be1e-4852-ab58-fd5c0a3ead69` retains original
-launcher/gate ownership and is active. Selected fresh original-owned framing,
-malformed transport, pair interruption, SQL-fault, explicit retained-input and
-cleanup retry, and reopen fixtures are included. No Store lease-death, Admission
-completion-report fault or historical-resource authority transfers.
+ingestion gate. Run `088525dc-be1e-4852-ab58-fd5c0a3ead69` returned zero after
+1,280.779244 seconds with original gate and launcher joins. No primary, outer or
+wait failure or interruption was recorded. Selected fresh original-owned faults
+and retries remained within that authorization, which is consumed.
 
-Original exit, timing, joins and failures must reach parent before copying.
-Expected zero with original joins permits faithful raw capture and separate
-validation. Unexpected failure, uncertain ownership or a preservation defect
-stops progression without retry or repair. No result is claimed. The 45-minute
-wake subscription is an attention timer, not a process deadline. Remaining
-source Controls, raw, platform/client/canonical verification and full acceptance
-stay open.
+Raw preservation and separate validation returned zero. Parent verification
+passed 17,046 comparisons over 5,008 entries, 28 databases with no sidecars,
+fourteen actual executable paths, nine retained compiler directories and exact
+source/archive/raw bindings. All fourteen outcomes have four positives and ten
+diagnostic-specific negatives. Top numeric statuses remain checked-flow
+inferences, while the eighteen helper build/case records directly retain exits
+and original joins. Each top capability has 511 ordered PASS lines, including
+385 corpus lines. These are output counts, not unique obligations.
+
+The reviewer identified a parent timestamp-label error. The standalone notice
+used `receivedAt` for its later persistence time rather than runtime receipt.
+That record remains unchanged. A bounded exact parent-runtime delivery event
+records receipt at 02:29:33.161 UTC, which precedes preservation start by
+20.443313 seconds. The event and timestamp clarification resolve the ordering
+question without treating a child queued acknowledgement as receipt evidence.
+
+The first read-only result review timed out while reading a large manifest and
+produced no verdict. It resumed with bounded derived views and the full parent
+verification report, without changing original evidence. Review
+`5e371486-b856-45c3-8da8-f622bc471776` cleared complete current source ingestion.
+Parent accepted this scoped result at `2026-09-17T02:58:50.319331+00:00`.
+An optional host-Python metadata-display failure remains recorded separately,
+with no artifact change or native, preservation or validator rerun.
+
+Preparation-only run `2098e18d-dae4-4c43-99cc-20c4122f4f09` owns
+`terminal-source-controls.kjrqc6s8`. It must bind all 38 checker outcomes and
+six contract invocations, with 22 positive and 16 specifically diagnosed
+negative outcomes. Corrected completeness and no-follow preservation patterns
+are reused. No gate, build, compiler, database API or old-resource mutation is
+authorized during preparation.
+
+Future Controls execution requires an immediate original exit notice through
+the existing supervisor request/reply mechanism and explicit parent
+acknowledgement before copying. Persistence times must be named accordingly,
+rather than being mislabeled as receipt times. No new harness is introduced.
+Remaining Controls, raw, platform/client/canonical and full acceptance
+requirements stay open, and WM-016 remains unaccepted.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
