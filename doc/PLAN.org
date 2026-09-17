@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-17 Thu 09:29]
+:MODIFIED: [2026-09-17 Thu 09:58]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -9234,6 +9234,12 @@ Refocus 2026-09-17T16:08:47.375364+00:00. Next deadline 2026-09-17T17:08:47.3753
 The review selected only L03 outer CaptureTests bucket hygiene. Parent read CaptureTests.hs and withPrivateRoot's descriptor bracket. Native worker cleanup, replacement-directory deletion/restoration, temporary-file assertion and descriptor closure must remain unchanged. Cymbal could not resolve this module's outline/refs, so parent used exact text references in runtime/test/Main.hs and runtime/ci/capture.sh without claiming indexed absence. At2026-09-17T16:25:51.082027+00:00, parent authorized isolated terminal-capture-bucket-evidence.18qe63n3. Worker0629340b-a51d-4d93-81e3-f9177d7dcf0b may edit only runtime/test/CaptureTests.hs, sharing its actual allocation/action owner with filesystem-only data checks and removing only outer hygiene disposal. A mode-preserving1017-file source/support copy is bound, excluding mutable PLAN/handoff. Warning-fatal complete-module Haskell/C compilation and an explicit data-only entrypoint atN1/N8 are authorized, with fresh private TMPDIR and a source-bound old allocation/finalizer inert red. Native captureTests, runtime-contract/full policies, Runtime PrivateRoot/publication/Worker/Store/group/backend/signal fixtures, behavioral deletion changes, other source edits, package actions and canonical edits remain forbidden. This subgap does not close all L03 pre-mutation evidence. Full policies and WM-016 remain unaccepted, with15/44 packages and G0 only accepted.
 
 Refocus 2026-09-17T16:29:08.857031+00:00. Next deadline 2026-09-17T17:29:08.857031+00:00. Next: isolated L03 outer-bucket source/data remedy and independent review.
+
+2026-09-17 L03 outer-bucket review24057d14-8f1c-4bdd-8d41-7a94e6a3adf2 found no issues, conditional on parent full integrity. Parent verification passed3708 comparisons, including1017canonical/source-copy bindings, one edited file,46 completed identities, exact native-body equivalence modulo scope indentation/grouping, unchanged existing helpers/PrivateRoot, explicit data-main compiler provenance, seven original joins, six retained data buckets and two source-bound old-finalizer reds. The exception test compares the supplied IOException display. Direct action invocation without catch/transformation provides separate source evidence of pass-through, not object-identity instrumentation.
+
+At2026-09-17T16:50:25.740905+00:00, parent separately authorized and applied exact canonical CaptureTests.hs bytes db86bb15f5f70a9195c6a0322d4149d317d80e08e6bf417627150716e0bc450d. Fresh complete-module/three-C-source compilation selected only CaptureTests.captureBucketEvidenceData and passed warning-fatal in56.429099875seconds. Filesystem-only N1/N8 passed with three original Popen joins, null failures and zero interruptions. All1017bound nontracking inputs remained unchanged during verification. Six actual bucket trees' bytes/modes match isolated results.27completed non-build identities were sealed after return, with the own binary separately identified and compiler intermediates retained in place. Evidence root terminal-capture-bucket-canonical.53r754ng. No native captureTests, Runtime PrivateRoot/publication/Worker/Store/group/backend/signal fixture, descriptor-closure execution, runtime-contract/full policies or package operation ran. The separately permitted documentation gate includes its static Haskell probe. Only outer hygiene is remedied; L03 preimages, L04/L05 and all other blockers remain. Committed fess is next, with WM-016 unaccepted and acceptance15/44 plus G0 unchanged.
+
+Refocus 2026-09-17T16:58:08.786387+00:00. Next deadline 2026-09-17T17:58:08.786387+00:00. Next: exact L03 outer-bucket commit and committed fess, then one next reviewed policies remedy.
 #+end_example
 
 ** Dependencies
