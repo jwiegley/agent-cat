@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-17 Thu 07:42]
+:MODIFIED: [2026-09-17 Thu 08:03]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -9204,6 +9204,12 @@ At2026-09-17T14:36:43.517400+00:00, parent separately authorized and applied onl
 The parent's preliminary canonical identity manifest included its still-open redirected verify.log, binding the prefix before its final PASS line rather than the completed log. All other entries matched. The prefix was verified against the completed log, the original manifest remains unchanged, and162 completed file identities were separately recorded after return. This is an explicit metadata correction, not a rerun or replacement of tests. Full policies and remaining ownership/retention/environment/capture blockers remain blocked. Older source/raw evidence is not relabeled. Accepted stays15/44 and G0 only, with WM-016 unaccepted.
 
 Refocus 2026-09-17T14:42:44.276555+00:00. Next deadline 2026-09-17T15:42:44.276555+00:00. Next: exact L21 commit and committed fess, then one next reviewed policies remedy.
+
+2026-09-17 committed L21 fess1a52be53-1cf5-47cf-a4e7-ddd88c4bbea3 found no issues in59c5aa15507dc2f0967afe212da399c9e61bd067. It confirms the default inert entrypoint, exact reviewed scope, separate documentation check and preserved-prefix/post-return identity correction. Scope remains test-producer only, with full policies and WM-016 unaccepted.
+
+The reviewer selected L01: the specific schema_vectors EXIT trap in cli/ci/policies.sh deletes generated JSON that the existing validator consumes but does not reproduce. Parent verified the owner block and validator, with no behavioral absence assertion depending on this hygiene deletion. At2026-09-17T15:00:41.264829+00:00, parent authorized only isolated terminal-schema-evidence.rpn23nrr. Workerc0059bc0-d591-4b88-91fb-33c6ae361ea1 may remove that trap and add adjacent focused-test wiring, add test/answer_schema_evidence.py, and add its one explicit Cabal source-membership entry. Read-only support copies of answer_schema_probe.py and policy_refusal_evidence.py are allowed, with exact bytes/modes. Existing allocation, generator argv/redirection, actual validator, failure propagation and surrounding source stay unchanged. Tests must demonstrate actual old deletion red, exact full/partial retention after success/generator/later failure, diagnostic-specific real-validator rejection, allocation/open failure and distinct private repeated files. Only pinned Nix Bash/Python inert data/filesystem tests may run, with an inert generator and unchanged real JSON Schema validator. Printed schema/decoder wording is not proof of Haskell decoder execution. No compiled schema runner, real Cabal/compiler/runner, native fixture, full policies, package operation, canonical edit, remote/client or broader remedy is authorized. All other blockers and prior acceptance limits remain.
+
+Refocus 2026-09-17T15:03:12.719919+00:00. Next deadline 2026-09-17T16:03:12.719919+00:00. Next: isolated L01 lifetime remedy and independent review.
 #+end_example
 
 ** Dependencies
