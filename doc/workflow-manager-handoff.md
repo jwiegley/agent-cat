@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T10:13:17.547401+00:00`. The next deadline is
-`2026-09-17T11:13:17.547401+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T11:21:20.327738+00:00`. The next deadline is
+`2026-09-17T12:21:20.327738+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -57,10 +57,11 @@ scoped clearance after its original run and full verification. Exact raw
 Admission also has scoped clearance, including faithful first capture of both
 mode0700 package links. Exact raw ingestion also has scoped clearance after
 its original run, explicit acknowledgement, capture and full verification.
-Exact raw Controls preparation passed review and parent verification, followed
-by one authorized invocation. No result is claimed, and preservation awaits
-explicit parent acknowledgement. Other gates, integration, platform/client
-work, old-resource recovery and WM-016 acceptance remain unauthorized.
+Exact raw Controls also has scoped clearance after its original run, explicit
+acknowledgement, faithful capture, review and full parent verification. All ten
+current macOS SOURCE/RAW owning lanes pass. A read-only acceptance reconciliation
+is active. No integration, broader gate, platform/client work, old-resource
+recovery or WM-016 acceptance is authorized by those results.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -1057,23 +1058,40 @@ membership/modes and failure boundaries. No native result follows from them.
 
 At `2026-09-17T10:13:17.547401+00:00`, renewed private preflight checked 165
 exclusions and parent authorized one exact raw Controls gate. Run
-`f6219f0d-179b-4d58-aa88-e84f08566487` is active under original ownership.
-Its 38 checker cases, six contracts, fourteen builds and 28 own-built paths
-remain separately required. No result is claimed.
+`f6219f0d-179b-4d58-aa88-e84f08566487` returned zero after 2,331.468938 seconds,
+with both original owners joined and no errors or interruptions. Parent checked
+return records and absent capture, then issued copy-only ACK at 10:55:25.609190
+UTC. Capture began at 10:56:12.625984 after the blocking reply.
 
-Only selected fresh original-owned cancellation, barriers, interruptions,
-reload/revocation, paired progress and bounded saturation retries are included.
-StoreBusy observation retries are distinct from submission retries, with no
-fixed stderr-note count or unsupported case attribution. Native130 remains
-non-success. No prior Store, Admission fault or historical authority transfers.
+Capture and both validators returned zero. Parent verification passed 27,803
+comparisons over 11,320 entries, 58 databases without sidecars, 28 own-built
+paths and sixteen retained compiler directories. All 38 outcomes and six
+contracts remain complete, with exact raw membership/modes and original
+helper joins, errors, budgets and argv. The two observed StoreBusy notes remain
+unattributed and are not a prescribed note or retry count. Native130 remains
+non-success.
 
-Both original return records must reach parent through need_decision and
-receive explicit ACK before preservation. No ACK or a failure/uncertainty means
-stop without retry, repair, recopy, PID adoption or next gate. Existing budgets
-and original handles remain unchanged, with no outer killing deadline.
-Raw Controls is the last unproved current source/raw owning lane, not the last
-overall acceptance requirement. Integration, platform/client/canonical work
-and WM-016 acceptance remain open and unauthorized by this invocation.
+Review `36d4c4e6-bd41-4c39-956e-7afb5948f82d` found no issues, conditional on
+full parent verification. The completed 27,803-check report satisfies it.
+Parent accepted exact raw Controls at `2026-09-17T11:13:02.677424+00:00`.
+The reviewer did not independently rerun hashes or tests. Permissions are
+consumed, and all ten current macOS source/raw owning lanes have scoped
+clearance. That is not canonical integration, Linux/client evidence, historical
+cleanup, G1 completion or WM-016 acceptance.
+
+Parent read-only comparison found 975 of 1,021 candidate files identical to
+canonical source, with 46 differences or additions. Two are stale PLAN/handoff
+snapshots that must not be overlaid. The other 44 paths, including five new
+files, form the candidate integration surface. Frozen document hashes match.
+No source was integrated.
+
+Read-only reconciliation run `8b238e8c-8702-45b2-9491-8ab5b13fa7b4` is assessing
+the frozen WM-016 clauses and changed-layer gates against that surface. Its
+evidence root is `terminal-acceptance-reconciliation.o5j56l8r`. It must separate
+current prerequisites from later client/release packages and recommend one
+bounded next work unit. No integration, compiler/gate, remote, platform/client,
+model or recovery action is authorized. Optional TUI and current platform,
+compatibility, conformance and documentation ceilings remain explicit.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
