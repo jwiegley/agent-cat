@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-17 Thu 01:05]
+:MODIFIED: [2026-09-17 Thu 01:37]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -9068,6 +9068,18 @@ Review 27a3c24e-0b86-4842-8867-f652f4c7e967 found no issues with full parent ver
 A new preparation-only decision assigns terminal-raw-ingestion.midhqa44 to worker ad25994e-0433-4727-81a8-0fefa1d87c1f. It must bind the exact raw package, fourteen outcomes, four positives and ten specific negatives, seven builds and fourteen own-built paths. Source ingestion results remain references only. Latest both-owner, explicit ACK, no-follow first-capture and raw-mode checks are required. No gate, compiler, enumeration, validator, Store, database, native/provider or process-control invocation is authorized during preparation. No previous fault, signalling, retry or historical-resource permission transfers.
 
 Refocus completed at 2026-09-17T08:05:29.897806+00:00, with next deadline 2026-09-17T09:05:29.897806+00:00. Prepare and review raw ingestion without widening scope or repeating completed gates. Frozen full acceptance criteria and historical incident limits remain unchanged.
+
+Exact RAW ingestion preparation under terminal-raw-ingestion.midhqa44 passed independent review 2a4385a2-d4ae-48b4-8044-1ce849db21ae and parent verification of 2,235 comparisons. It binds raw594, source1021, archive, twelve mode differences and 427 source-only exclusions. The full matrix has fourteen outcomes, four positives and ten specific negatives, seven Werror builds and fourteen own-built executable paths. Top source-derived family and corpus output checks do not reinterpret Runtime semantics or substitute earlier SOURCE results.
+
+All 91 actual-analyzer and 22 preservation inert checks passed. Tests cover both owners, top and helper omissions, precise negative markers, raw-mode substitution, invented observer Store/top logs, preservation defects, missing family assertions and wrong corpus order. Earlier passing 89-check preparation remains retained. No preparation check failed, and no native/compiler/Store operation occurred during preparation.
+
+Fresh canonical/private preflight verified 147 old-footprint exclusions, empty build/record and absent cache. At 2026-09-17T08:34:34.735400+00:00 parent authorized one exact raw ingestion gate. Authorization SHA256 79cd3547119c31f73b3162cf3e77aa3c250a6af7016443a30ee946e506a99c38 binds plan 5defd6a80f30d4247a3a660fa1e304641b26ee91be9ba14d933b6e25723d2ded. Worker 9c3e2b1a-f44f-4f8f-aee5-4aef22e1d96c is active under original launcher/gate ownership. No result is claimed.
+
+Only selected fresh original-owner framing/malformed wrappers, paired-worker Async/UserInterrupt, normal group cleanup, SQL faults, retained-input and original-owner cleanup retries, reopen comparisons and strict read-only observations are included. No Store lease-death, Admission completion-report fault, historical PID or recovery authority transfers. Existing helper budgets remain unchanged, with no aggregate native or outer killing deadline. The 45-minute wake is attention only.
+
+Preservation is not yet authorized. On original return, both owners return/timing/join/error/interruption facts must reach parent through need_decision and receive explicit ACK before copying or interpretation. Without ACK or on failure/uncertainty, stop without retry, repair, recopy, PID adoption or further gate. Latest raw-first, no-follow metadata, exact raw-mode, own-build and no-database-API requirements remain unchanged.
+
+Refocus completed at 2026-09-17T08:34:34.735400+00:00, with next deadline 2026-09-17T09:34:34.735400+00:00. Five SOURCE gates and RAW Store, Commands and Admission are scoped passes. Current raw ingestion, raw Controls and remaining platform/client/canonical/final acceptance remain unproved. Only WM-001 through WM-015 and G0 are accepted.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
