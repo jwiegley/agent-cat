@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-17 Thu 04:21]
+:MODIFIED: [2026-09-17 Thu 04:36]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -9118,6 +9118,22 @@ Parent performed a read-only canonical/candidate comparison under terminal-accep
 Read-only reviewer run 8b238e8c-8702-45b2-9491-8ab5b13fa7b4 is reconciling frozen WM-016 clauses and Section9.2 changed-layer gates with this actual surface. It must distinguish current requirements from later service-client/release packages, identify integration prerequisites and recommend one bounded next work unit without executing it. Optional TUI driver, current Linux/client/canonical/conformance/documentation ceilings and historical policies05/quarantines remain explicit. There is no new integration, compiler/gate, remote, platform/client, model or recovery permission.
 
 Refocus completed at 2026-09-17T11:21:20.327738+00:00, with next deadline 2026-09-17T12:21:20.327738+00:00. The next action is acceptance reconciliation, not treating successful owning lanes as full completion. Only WM-001 through WM-015 and G0 remain accepted.
+
+Read-only reconciliation 8b238e8c-8702-45b2-9491-8ab5b13fa7b4 confirms core WM-016 decision/FIFO/generation/typed-control/correlation and ambiguity behaviors on the bound macOS candidate. It identifies a P1 package-closure evidence gap: the actual 44-path implementation surface changes shared Runtime, CLI, storage and protocol behavior, so the ten focused source/raw owning lanes do not replace Section9.2 compatibility gates or canonical integration. WM-016 remains open.
+
+Required current-byte work includes relevant Cabal test execution, complete policies composition, examples/routing and deterministic ACP/deck, workflow tier0/tier1 with a verified compatible prebuilt oracle, changed candidate documentation/API checks, Linux compatibility and affected existing local-client/native-UI coverage. Prior compilation, old platform/client results and canonical documentation checks do not establish these candidate results. Optional TUI driver remains unbuilt. Separate manager conformance and new service-client/G4 implementations remain later packages, not work to invent inside WM-016. Historical policies05/quarantines and withdrawn SQLite namespace-replacement experimentation retain their limits.
+
+Canonical integration still requires fresh parent status/byte/mode/collision checks, an exact independently reviewed 44-path delta that excludes stale PLAN/handoff snapshots, and aggregate compatibility review of session2/observation3 negotiation, legacy defaults/control versions, schema7 migration and cancellation-only capacity. The settled Store waiting policy is not reopened. No source, frozen corpus or theorem may be weakened for a pass. Candidate results must not be relabeled as canonical execution or deployment.
+
+At 2026-09-17T11:28:40.361345+00:00 parent authorized only SOURCE/DATA preparation under terminal-source-policies.fddhjig5. Worker e6c09e88-7490-4905-92a1-0f1e09504265 must map the entire unchanged candidate cli/ci/policies.sh invocation, including capture/profiles/configuration/drafts/workers/approval and final frontend/policy/CLI probes, not skip already-cleared lanes. It must inventory exact fixture effects and new authority requirements, original ownership/budgets, source-defined deleted/retained artifact lifetimes and any existing retention mechanisms. The answer-schema EXIT trap and other ephemeral fixtures require explicit accounting, not fabricated post-return captures or silent requirement changes. Any unresolved lifetime/authority/preservation gap blocks execution.
+
+Preparation permits no compiler/runghc/Cabal/gate/validator/Store/database/native/process observation or control, paid provider, Pi/SSH, model/oracle, source/package/Git/obr or infrastructure operation. No native authorization, integration or recovery follows. The deliverable is a sealed NOT-EXECUTED plan, transitive case/artifact/authority matrix, fresh private resource exclusions and meaningful inert boundary checks. It must avoid a new generic telemetry or daemon framework and retain every failure and unresolved prerequisite.
+
+Refocus completed at 2026-09-17T11:33:43.030675+00:00, with next deadline 2026-09-17T12:33:43.030675+00:00. This preparation addresses the largest shared-layer evidence gap while preserving all ten owning-lane results and unchanged full-scope acceptance criteria.
+
+Policies preparation has confirmed retention blockers before any owning execution. The unchanged policies script removes generated answer-schema vectors through its EXIT trap. The selected runtime capture gate removes its entire capture.* directory, including three freshly built test executables and compiler outputs, before returning to policies. Parent verified the capture.sh source and confirmed request b775ff1d-8121-42f9-b8b4-44640f4ea066 as BLOCKED / NOT EXECUTED preparation.
+
+The worker may finish the read-only transitive inventory and propose the smallest separately reviewed retention remedy. It must distinguish behavioral cleanup from evidence disposal, preserve process teardown/failure/budget semantics, and identify existing supported retention controls. No script change, live capture, fabricated post-return evidence, compiler/native run or waiver is authorized. These findings do not invalidate the already scoped owning lanes or resolve historical failures.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 
