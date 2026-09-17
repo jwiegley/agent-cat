@@ -8575,7 +8575,7 @@ Parent acceptance 2026-09-15T04:48:56.292501+00:00: WM015 accepted only after co
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-17 Thu 05:46]
+:MODIFIED: [2026-09-17 Thu 06:02]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-016
 :SOURCE_REPO: agent-cat
@@ -9150,6 +9150,18 @@ The worker retained its failed -j1 assumption and corrected only private asserti
 Independent blocker/remedy review c0b35d7c-afed-43d4-b0cb-9a620f1db61f is active. Its source inspection confirms deletion and original-owner/read boundaries, while narrowing environment attribution: observed AGENT_CAT_RUNNER is consumed by an unselected Pi path, and AGENT_CAT_STATE_DIR by unselected tuiCmd. Names-only presence is not proof these variables redirect policies. Selected machine consumers and inherited query environments still need precise isolation review, without exposing values. No environment rewrite or source fix is authorized.
 
 Refocus completed at 2026-09-17T12:46:33.374735+00:00, with next deadline 2026-09-17T13:46:33.374735+00:00. Obtain one minimal source-owned remedy recommendation without a generic recorder, global interception, parallel supervisor or weakened acceptance. All ten owning lanes remain scoped passes, and WM-016 remains open.
+
+Independent policies blocker review c0b35d7c-afed-43d4-b0cb-9a620f1db61f confirms execution must remain blocked. Retention, memory-only evidence, original-owner/read/finalizer gaps and complete capture/authority remain unresolved. It corrects two inventory claims. A15 cannot assert unconditional child joins on Python KeyboardInterrupt, because communicate and context exit may only briefly wait or skip a further wait. Parent independently checked the pinned source and retained a separate clarification without modifying stdlib or sealed inventory. Normal returned timeout wait and unproven interrupted cleanup remain distinct.
+
+B05 must separate ambient name presence from selected consumers. AGENT_CAT_RUNNER and AGENT_CAT_STATE_DIR have identified unselected Pi/TUI consumers. Selected machine paths use RUN_STORE, CONTROL_FD, CONTROL_STDIN and RUN_OWNER, while shared query() inherits environment unlike Session initialization. No redirection cause is proved merely by the two observed names. Environment isolation still needs an exact decision without exposing values. No source, environment or native change was performed for this correction.
+
+The smallest recommended remedy is L19: persist bounded stdout/stderr from the isolated Worker cleanup-failure child at its existing owner boundary in manager/test/WorkerCheck.hs. Parent confirmed this file is byte-identical in canonical and candidate source, SHA256 f0d06c65b9df306201eb346215d7272abcc1a5ea45c2713cee2fe567654bc7c3. The adjacent Admission test provides the existing emission pattern. Original wait/read limits, termination, group handle and pipe cleanup must remain unchanged. Raw bytes must survive, failed evidence writing cannot produce success, and primary child/assertion failure must not be replaced by secondary writing failure.
+
+At 2026-09-17T12:58:51.901174+00:00 parent authorized only an isolated overlay under terminal-worker-child-evidence.jmsmsy30, with candidate edits limited to WorkerCheck.hs. Worker 7365bc13-1915-43ed-a1ac-6eb39914e88c may implement that narrow owner-boundary fix and actual-path inert buffer/filesystem tests. Explicit compilation permission covers canonical-Nix private offline Werror manager-worker-check and a clearly isolated data-only evidence mode or source-exact inert driver. It does not permit Worker, ProcessGroup, Store, Runtime/backend, signal or native cleanup-fixture construction. Canonical edits, repackaging, integration and the full policies gate remain unauthorized.
+
+Required tests include old no-emission regression, exact bytes/empty stderr, nonzero status/missing marker/nonempty stderr, non-text and trailing newlines, writing failure precedence and no fabricated output when observation never completed. Retain every failure and build/test record. Any additional candidate path requires a new decision. Other retention, frontend ownership/deadline, ACP cleanup, stdlib-interruption, environment and full-capture gaps remain blocked after this unit. Producer-owned emission is distinct from external capture after parent ACK, not a waiver of the latter.
+
+Refocus completed at 2026-09-17T13:02:11.332367+00:00, with next deadline 2026-09-17T14:02:11.332367+00:00. Implement and independently review this one minimal remedy without expanding into a recorder, supervisor rewrite or native experiment. All prior scoped lane results and historical limits remain unchanged.
 
 Historical halt snapshot follows. Its pause is cancelled by the explicit request above.
 

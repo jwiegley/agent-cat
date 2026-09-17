@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T12:46:33.374735+00:00`. The next deadline is
-`2026-09-17T13:46:33.374735+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T13:02:11.332367+00:00`. The next deadline is
+`2026-09-17T14:02:11.332367+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -61,10 +61,10 @@ Exact raw Controls also has scoped clearance after its original run, explicit
 acknowledgement, faithful capture, review and full parent verification. All ten
 current macOS SOURCE/RAW owning lanes pass. Reconciliation identified remaining
 changed-layer compatibility and integration evidence. The complete policies
-preparation is sealed but blocked on retention, ownership/read boundaries and
-unresolved authority/environment prerequisites. Independent remedy review is
-active. No integration, broader execution, platform/client work, old-resource
-recovery or WM-016 acceptance is authorized.
+preparation remains blocked. A narrowly authorized isolated Worker child-output
+retention fix and compiled data-only tests are active. No native fixture, full
+gate, canonical integration, platform/client work, old-resource recovery or
+WM-016 acceptance is authorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -1122,12 +1122,13 @@ Selected crash and export-race signals need exact original-owner analysis,
 rather than blanket kill permission. These remain prospective source findings,
 not a diagnosis of historical policies05.
 
-Independent review `c0b35d7c-afed-43d4-b0cb-9a620f1db61f` is validating the
-blockers and selecting one minimal source-owned remedy. It has narrowed the
-environment claim: names-only presence of AGENT_CAT_RUNNER and AGENT_CAT_STATE_DIR
-does not prove selected consumption. Their identified consumers are unselected
-Pi/TUI paths, while machine and query environment handling needs exact review.
-No inherited values were exposed or environment rewritten.
+Review `c0b35d7c-afed-43d4-b0cb-9a620f1db61f` confirms the blockers and selects
+one minimal remedy. It corrects A15: Python KeyboardInterrupt paths can leave
+the original child without an observed completed join, unlike a returned normal
+timeout wait. The pinned source was checked without modification or experiment.
+It also narrows B05: observed RUNNER/STATE_DIR names have unselected consumers,
+while actual machine/query environment handling requires separate review.
+No values were exposed and no environment was rewritten.
 
 The failed worker -j1 assertion remains retained after clarification that Cabal
 invocations are serialized, not forced to one compile job. A parent verifier
@@ -1135,10 +1136,29 @@ regular-file assumption also failed on an immutable Nix source symlink, then
 was corrected to bind its resolved bytes without changing capture rules.
 Neither correction changed candidate source.
 
-Root deletion is not cleanup proof and must not erase uncertain evidence.
-No live capture, script change, native experiment, fabricated evidence or
-preservation waiver is permitted. Historical limits and all ten scoped
-owning-lane results remain unchanged, with WM-016 open.
+The first remedy is L19 at `manager/test/WorkerCheck.hs`: retain the isolated
+cleanup-failure child's exact bounded output before the existing predicate,
+using the established Admission pattern while preserving primary failure.
+Canonical and candidate copies of this file match. At
+`2026-09-17T12:58:51.901174+00:00`, parent authorized an isolated overlay under
+`terminal-worker-child-evidence.jmsmsy30`, with that one candidate edit path.
+Worker `7365bc13-1915-43ed-a1ac-6eb39914e88c` may implement the fix and actual-path
+inert buffer/filesystem checks. Warning-fatal compilation and a clearly isolated
+compiled data-only test mode are explicitly allowed.
+
+No Worker, ProcessGroup, Store, Runtime/backend, signal or native cleanup fixture
+may be constructed. Original wait/read limits, termination and pipe behavior
+must remain unchanged. Empty stderr and non-text bytes must survive, writing
+failure cannot create success or replace primary child refusal, and incomplete
+observation must not fabricate output. Any extra candidate path needs a new
+decision. Canonical edits, repackaging, integration and full policies execution
+remain unauthorized.
+
+Other deletion/retention, frontend ownership/read boundaries, ACP cleanup,
+A15 interruption handling, environment and complete-capture gaps remain blocked.
+Root deletion is not join proof. Producer-owned evidence emission is distinct
+from external post-return capture after ACK, not a waiver. Historical limits
+and all prior scoped lane results remain unchanged, with WM-016 open.
 At 04:10 UTC, the original worker remained active without case reports in the
 expected paths. The parent required essential preflight and execution of the
 scoped cases or a concrete blocker, rather than further harness generalization.
