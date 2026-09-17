@@ -9,8 +9,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T13:02:11.332367+00:00`. The next deadline is
-`2026-09-17T14:02:11.332367+00:00`. The earlier 00:46 checkpoint was less than one
+Refocus completed at `2026-09-17T13:47:32.343949+00:00`. The next deadline is
+`2026-09-17T14:47:32.343949+00:00`. The earlier 00:46 checkpoint was less than one
 minute late during read-only verification, and the lapse was disclosed.
 Complete instrumented and uninstrumented
 source ingestion passed with independent scoped clearance. Raw ingestion has
@@ -61,10 +61,12 @@ Exact raw Controls also has scoped clearance after its original run, explicit
 acknowledgement, faithful capture, review and full parent verification. All ten
 current macOS SOURCE/RAW owning lanes pass. Reconciliation identified remaining
 changed-layer compatibility and integration evidence. The complete policies
-preparation remains blocked. A narrowly authorized isolated Worker child-output
-retention fix and compiled data-only tests are active. No native fixture, full
-gate, canonical integration, platform/client work, old-resource recovery or
-WM-016 acceptance is authorized.
+preparation remains blocked. The isolated Worker child-output retention remedy
+has independent scoped clearance and full parent verification. A separate
+test-helper-only canonical integration passed a warning-fatal build and compiled
+data-only N1/N8 checks. No native fixture, full gate, WM-016 application
+integration, platform/client work, old-resource recovery or WM-016 acceptance
+is authorized.
 
 The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
 WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
@@ -1136,23 +1138,45 @@ regular-file assumption also failed on an immutable Nix source symlink, then
 was corrected to bind its resolved bytes without changing capture rules.
 Neither correction changed candidate source.
 
-The first remedy is L19 at `manager/test/WorkerCheck.hs`: retain the isolated
-cleanup-failure child's exact bounded output before the existing predicate,
-using the established Admission pattern while preserving primary failure.
-Canonical and candidate copies of this file match. At
-`2026-09-17T12:58:51.901174+00:00`, parent authorized an isolated overlay under
-`terminal-worker-child-evidence.jmsmsy30`, with that one candidate edit path.
-Worker `7365bc13-1915-43ed-a1ac-6eb39914e88c` may implement the fix and actual-path
-inert buffer/filesystem checks. Warning-fatal compilation and a clearly isolated
-compiled data-only test mode are explicitly allowed.
+The first remedy, L19 at `manager/test/WorkerCheck.hs`, is implemented and
+independently cleared as a source/data unit. The isolated overlay under
+`terminal-worker-child-evidence.jmsmsy30` retains exact bounded child output
+before the existing predicate. Empty stderr produces an empty file, and
+non-text bytes and trailing newlines remain unchanged. Child refusal stays
+primary if writing also fails, successful children cannot pass failed evidence
+writes, and incomplete observation emits no invented output.
+
+Review `d8380fee-f89e-4367-995a-07966c5d06be` found no issues, conditional on
+parent integrity verification. That verification passed 2,712 identity
+comparisons, including the unchanged original wait, read bounds/order, bracket,
+termination grace and pipe cleanup. Compiled inert N1/N8 checks each exercise
+12 scenarios with 32 PASS observations. Source-exact old producers pass the
+old predicate, then fail the required retention assertion. All seven original
+isolated command handles joined. These are data tests, not native cleanup proof.
+
+At `2026-09-17T13:28:39.317993+00:00`, parent separately authorized integration
+of this one test-helper file into canonical source, preserving reviewed SHA256
+`a015e6d076d0bf36cbcdca964c2804da6f253515e5032c2f0de2e06919c09bd0`.
+Fresh canonical-Nix private offline compilation of `manager-worker-check` with
+`-Werror` passed in 114.206744209 seconds. Explicit compiled data-only N1/N8
+checks also passed, with three original handles joined, null failures and zero
+interruptions. All 1,016 bound canonical inputs remained unchanged during these
+checks, and 14 retained data files per capability match the isolated bytes.
+The evidence root is `terminal-worker-evidence-canonical.5zutr_9v`.
+
+The first parent verifier failed because it compared a completion record with
+an augmented summary. The corrected verifier binds both the original command
+and completion records, and its first failed log remains retained. The
+secondary stderr-reporting failure branch was inspected, not executed. Writes
+are sequential and may leave partial failed evidence. No atomic publication,
+durability or full-stream drainage claim follows.
 
 No Worker, ProcessGroup, Store, Runtime/backend, signal or native cleanup fixture
-may be constructed. Original wait/read limits, termination and pipe behavior
-must remain unchanged. Empty stderr and non-text bytes must survive, writing
-failure cannot create success or replace primary child refusal, and incomplete
-observation must not fabricate output. Any extra candidate path needs a new
-decision. Canonical edits, repackaging, integration and full policies execution
-remain unauthorized.
+ran. The canonical change is only the test producer, not the WM-016 application
+candidate. Immutable Z/source and the raw archive retain the old WorkerCheck
+bytes, so their earlier scoped gate results are not relabeled. Committed fess
+review is next, followed by one narrowly selected policies remedy. Additional
+source changes, repackaging and full policies execution require new decisions.
 
 Other deletion/retention, frontend ownership/read boundaries, ACP cleanup,
 A15 interruption handling, environment and complete-capture gaps remain blocked.
