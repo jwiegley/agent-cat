@@ -97,10 +97,27 @@ terminateProcessGroup grace group = mask $ \restore -> do
 
   where
     terminate = mask $ \restore -> do
-      earlier <- try @SomeException (restore (signalOwned sigTERM >> void (timeout grace (readMVar (groupOutcome group)))))
+      earlier <- try @SomeException $ restore $ do
+        signalled <- try @IOException (signalOwned sigTERM)
+        -- Refused TERM does not exclude completion during the existing grace.
+        void (timeout grace (readMVar (groupOutcome group)))
+        either throwIO pure signalled
       final <- try @SomeException $ uninterruptibleMask_ $ do
-        signalOwned sigKILL
-        readMVar (groupOutcome group) >>= either throwIO (const (pure ()))
+        signalled <- try @IOException (signalOwned sigKILL)
+        case signalled of
+          Left failure -> do
+            joinable <- try @IOException $ withMVar (groupLock group) $ \_ -> do
+              published <- tryReadMVar (groupOutcome group)
+              case published of
+                Just _ -> pure True
+                Nothing -> (/= 0) <$> throwErrnoIfMinus1Retry "observe refused process group" (childExited (fromIntegral (groupPid group)))
+            -- A refused signal is still a failure. Join only a published outcome
+            -- or the original monitor of a positively observed dead leader.
+            case joinable of
+              Right True -> void (readMVar (groupOutcome group))
+              _ -> pure ()
+            throwIO failure
+          Right () -> readMVar (groupOutcome group) >>= either throwIO (const (pure ()))
       case earlier of
         Left failure | Nothing <- (fromException failure :: Maybe IOException) -> throwIO failure
         _ -> either throwIO pure final

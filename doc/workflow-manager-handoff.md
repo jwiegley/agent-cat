@@ -26,11 +26,11 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-18T03:11:00Z`. The next deadline is
-`2026-09-18T04:11:00Z`. Interim checks at 01:03:06Z and 01:48:01Z were recorded
-in the full-gate execution brief while canonical source remained stable. The
-earlier 00:46 checkpoint was less than one minute late during read-only
-verification, and the lapse was disclosed.
+Refocus completed at `2026-09-18T05:18:39Z`. The next deadline is
+`2026-09-18T06:18:39Z`. Interim checks were recorded in the private full-gate
+and diagnosis briefs while canonical source remained stable. The 04:54:54Z
+check was sixteen seconds late during review/dispatch, and the earlier 00:46
+checkpoint was less than one minute late. Both lapses remain disclosed.
 
 **Application integration milestone:** the WM-016 application changes now
 compose with the later canonical repairs, including the Cabal test-component
@@ -141,23 +141,43 @@ They passed at N1 without claiming naturally occurring native storage failures.
 The review and ordinary product diff are under
 `controls.qzldrova/wm016-milestone-review.zs1HY3rS`.
 
-**Current blocker:** the affected controls gate then failed in N1
-`ingestion-concurrent` after the second run answered while the first remained
-pending. It reported opaque `StorageUnavailable` at original-owner cleanup.
-The preceding `StoreBusy` observation does not establish its cause. N8 and the
-audit suffix were not reached. Logs are under
-`controls.qzldrova/wm016-controls-no-replay.E0xzEq0N`, and the exact fixture is
+The affected controls gate failed in N1 `ingestion-concurrent` after the second
+run answered while the first remained pending. It reported opaque
+`StorageUnavailable` at cleanup. The preceding `StoreBusy` did not establish its
+cause. Its original logs and failed fixture remain under
+`controls.qzldrova/wm016-controls-no-replay.E0xzEq0N` and
 `wm016-delivery.LdWQA6B3/build.22UhyK/dist/controls.4THI1R/N1-ingestion-concurrent/native-pair`.
 
-Read-only observations on a private database/WAL/SHM copy show pair-a released
-and pair-b cleanup-pending with its slot retained. This does not prove physical
-cleanup or identify the original exception. No rerun, signal, PID adoption or
-recovery was attempted. The next decisive work is diagnosis at the original
-Admission/Worker/Store/ProcessGroup owners, preserving the first failure before
-public classification. Do not restore opaque retries or weaken cleanup assertions.
-The earlier full-policy pass does not erase this fresh failed invocation.
-The existing milestone review continues after correction, without a new leaf
-review cycle. Required Linux and external-client authorization remains pending.
+Focused original-owner diagnosis is retained in
+`controls.qzldrova/wm016-cleanup-diagnosis.yyYkyjPm`. Instrumented failures
+captured native signal permission refusal with an unpublished original native
+outcome, followed by `WorkerCleanupUnproven`. They do not prove a StoreBusy
+cause, an ACP defect, kernel partial delivery or historical equivalence. A
+standalone non-reproduction used a wrong Nix entry, and later batches used the
+required canonical direnv. Initial diagnostic-build and test-barrier failures
+are preserved, as are all failed roots. No historical recovery was attempted.
+
+The coherent correction keeps existing ProcessGroup ownership and failure
+precedence. TERM IO refusal no longer skips the same bounded grace observation.
+After final signal refusal, only existing publication or positive protected
+original-leader exit permits joining the original monitor. The refusal remains
+failure, and live/unknown ownership is not granted an unbounded wait. Store
+release requirements, C errno predicate, signal count and all budgets remain.
+
+Existing owner regressions fail against the old sequencing and pass after the
+correction. Final diagnostics-free builds and focused grace, interruption,
+masking, final-refusal and published-Left checks passed. The normal N1 prefix
+and twenty fresh concurrent samples also passed from 05:00:38Z to 05:02:49Z.
+This is bounded current-byte evidence, not proof of historical causality or
+zero races. No diagnostic-only patch enters production.
+
+Continued milestone review `74520045-10f3-436d-960e-779e7e0ea406` found no issues
+and cleared integration with notes. **Remaining blockers:** runtime/engine/TUI
+suites, direct native TUI and full policies must validate the corrected canonical
+bytes. Full policies includes complete workers/controls, so run it once rather
+than duplicating those gates. Earlier unaffected examples, transport and
+conformance results retain their scoped value. Current Linux and affected
+external-client/UI checks still require authorization. WM-016 remains open.
 
 The authority-only tracker issues `acat-lijk`, `acat-3ajx`, `acat-3sq1` and
 `acat-jg00` are outside this worktree projection. Export encountered duplicate

@@ -10,6 +10,7 @@ runner=$(bash test/cabal.sh list-bin manager-worker-check)
 native=$(bash test/cabal.sh list-bin routing-fixed-point-probe)
 python=$(command -v python3)
 work=$(mktemp -d "$CABAL_BUILDDIR/manager-workers.XXXXXX")
+"$runner" signal-refusal +RTS -N2 -RTS
 for capabilities in N1 N8; do
   mkdir "$work/$capabilities"
   echo "manager worker checks -$capabilities"
