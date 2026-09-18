@@ -2,11 +2,18 @@
 
 module Main (main) where
 
+import Agentic.Runtime (closeGroupPipes, createProcessGroup, groupErrors, groupInput, groupOutput, terminateProcessGroup, waitProcessGroup)
 import Agentic.Tui (TuiConfig (..), runTui)
+import Control.Concurrent (myThreadId, throwTo)
+import Control.Concurrent.Async (concurrently)
+import Control.Exception (AsyncException (UserInterrupt), bracket, finally)
+import Control.Monad (void)
+import qualified Data.ByteString as BS
 import System.Environment (getArgs)
 import System.Exit (exitWith)
-import System.IO (hPutStr, stderr)
-import System.Process (CreateProcess (close_fds, new_session), proc, readCreateProcessWithExitCode)
+import System.IO (hClose, hPutStr, stderr)
+import System.Posix.Signals (Handler (CatchOnce), installHandler, sigTERM)
+import System.Process (CreateProcess (std_in, std_out, std_err), StdStream (CreatePipe), proc)
 
 main :: IO ()
 main = do
@@ -14,10 +21,23 @@ main = do
   case arguments of
     [] -> putStrLn "tui PTY driver: ready"
     "--spawn-probe" : executable : args -> do
-      (code, output, errors) <- readCreateProcessWithExitCode
-        (proc executable args) {close_fds = True, new_session = True} "probe stdin"
-      putStr output
-      hPutStr stderr errors
+      owner <- myThreadId
+      (code, output, errors) <- bracket
+        (installHandler sigTERM (CatchOnce (throwTo owner UserInterrupt)) Nothing)
+        (\previous -> void (installHandler sigTERM previous Nothing)) $ \_ ->
+          bracket
+            (createProcessGroup (proc executable args) {std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe})
+            (\group -> terminateProcessGroup 2000000 group `finally` closeGroupPipes group) $ \group ->
+              case (groupInput group, groupOutput group, groupErrors group) of
+                (Just input, Just output, Just errors) -> do
+                  hPutStr input "probe stdin"
+                  hClose input
+                  (out, err) <- concurrently (BS.hGetContents output) (BS.hGetContents errors)
+                  code <- waitProcessGroup group
+                  pure (code, out, err)
+                _ -> ioError (userError "spawn probe did not create pipes")
+      BS.putStr output
+      BS.hPutStr stderr errors
       exitWith code
     [runner, stateDirectory, workingDirectory] ->
       runTui

@@ -3,7 +3,7 @@
 {-# LANGUAGE TypeApplications #-}
 module Main (main) where
 
-import qualified StoreAdmissionCheck
+import qualified Agentic.Manager.Test.StoreAdmissionCheck as StoreAdmissionCheck
 import qualified "agentic" Agentic.Manager as Public
 import Agentic.Manager.Configuration
 import Agentic.Manager.Profile (Diagnostic)

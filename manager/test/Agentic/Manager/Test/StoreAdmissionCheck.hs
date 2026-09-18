@@ -1,6 +1,6 @@
 {-# LANGUAGE TypeApplications #-}
 -- No Store or SQL instance. These checks exercise the production admission primitive.
-module StoreAdmissionCheck (dataChecks, blocked) where
+module Agentic.Manager.Test.StoreAdmissionCheck (dataChecks, blocked) where
 
 import Agentic.Manager.Store.Admission
 import Control.Concurrent (threadDelay, throwTo)

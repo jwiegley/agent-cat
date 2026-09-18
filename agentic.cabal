@@ -464,7 +464,7 @@ executable manager-store-check
   hs-source-dirs:  manager/test manager/src
   main-is:         StoreCheck.hs
   other-modules:
-    StoreAdmissionCheck
+    Agentic.Manager.Test.StoreAdmissionCheck
     Agentic.Manager.Configuration
     Agentic.Manager.Protocol.Json
     Agentic.Manager.Profile
