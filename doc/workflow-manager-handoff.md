@@ -10,10 +10,10 @@ every earlier next-helper instruction in this handoff, without changing the
 frozen acceptance contract or safety limits.
 
 The [WM-016 closure plan](workflow-manager-closure-plan.md) governs the remaining
-work. Local implementation and final canonical validation are clear after the
-continued milestone review. The user has now authorized current Linux and affected
-external-client compatibility. Those checks are the next work, not another local
-correction, helper, hash inventory, custom recorder or per-leaf review cycle.
+work. The macOS core matrix and the adopted client compatibility baseline pass.
+The current Linux policies gate failed on an opaque control-receipt refusal.
+Resolve that failure at its actual owner before acceptance, without replaying
+opaque operations or reopening a helper, recorder or per-leaf review programme.
 
 The L08 leaf reviewer is paused. Its isolated work is preserved and has not
 been integrated. Resume it only if a demonstrated product-validation blocker
@@ -28,10 +28,10 @@ authorized the requested Linux and selected Pi/Emacs compatibility execution on
 still requires actual results and final disposition. Paid providers, deployment,
 dependency changes, historical recovery and new Lean/oracle builds remain excluded.
 
-Refocus completed at `2026-09-18T20:28:43Z`. The next active-work deadline is
-`2026-09-18T21:28:43Z`. The preceding interval was blocked on authorization.
-Interim checks were recorded in private briefs while canonical source stayed stable.
-check was sixteen seconds late during review/dispatch, and the earlier 00:46
+Refocus completed at `2026-09-18T22:20:18Z`. The next active-work deadline is
+`2026-09-18T23:20:18Z`. Interim checks and bounded decisions were recorded in
+private briefs while canonical application source stayed stable. The earlier
+04:54:54Z check was sixteen seconds late during review/dispatch, and the 00:46
 checkpoint was less than one minute late. Both lapses remain disclosed.
 
 **Application integration milestone:** the WM-016 application changes now
@@ -192,17 +192,52 @@ and cleared local implementation and validation. No further local correction
 or rerun was requested. The result remains in
 `controls.qzldrova/wm016-milestone-review.zs1HY3rS/result.md`.
 
-**Remaining acceptance work:** the user authorized current Linux owning checks
-and selected Pi/Emacs/client/UI compatibility under frozen section 9.2. A single
-execution wave `3a442e6e-a64a-40e9-b253-66adc32cdb05` runs isolated Linux and
-macOS-client lanes under `controls.qzldrova/wm016-compatibility.BECaF4KE`. Their
-inputs preserve the clean canonical application and selected owner edits. The
-lanes have separate builds and fixture roots, stop on the first unexpected gate
-failure, and cannot edit source, dependencies, Git state or the tracker.
+**Adopted client acceptance baseline:** parent explicitly designates
+`controls.qzldrova/wm016-compatibility.BECaF4KE/clients` as the reconciled selected
+baseline under frozen sections 9.2–9.3. The Pi host is `10998453`, selected Emacs
+is `f37e007f` with preserved owner edits, and selected extension is `828e8cac`
+with preserved owner edits. Extension production adds only the existing canonical
+loader prerequisite `22678d1b`. Its reviewed `lifecycle-correction.patch` changes
+`ext-pi/test/fixtures/runner.mjs`, `ext-pi/test/extension.test.ts` and
+`ext-pi/test/pi-input-ui.py`, against retained `lifecycle-preimages`. Untouched
+owner checkouts are not labeled passing, and no wholesale fork merge is implied.
 
-These results are pending and cannot be replaced by earlier macOS passes.
+This baseline passes Emacs native checks, local PTY UI and native batch plus
+interactive TRAMP. Pi passes its selected offline host build, source/module
+binding, typecheck, 189 tests, integration contract plus 21 tests, and complete
+actual-host UI at all three supported sizes. The final UI ran from 21:58:19Z to
+22:00:40Z with exit zero and terminal restoration. Current application binaries
+come from the immutable `21da33c6` snapshot, whose application bytes are `26e35af9`,
+plus selected sibling `wf`. Short real binary copies were compared with those
+outputs. No dependency installation, lock change or paid provider was used.
+
+Continued milestone review `29428902-3d74-465e-91fc-83221a39f30d` found no issues
+and cleared this client patch/evidence with its explicit source qualifications.
+`clients/result-products.md` links complete history, patch and ordinary logs.
+The initial `/tmp` HOME deviation, SSH refusal, command-length refusal, obsolete
+fixtures and failed UI cases remain distinct failures. Earlier failed UI roots
+retain unproven normal shutdown/restoration/cleanup and are not recovered by the
+fresh passing invocation.
+
+**Remaining Linux failure:** its first Nix sandbox passed compilation and three
+actual suites, then lacked `/usr/bin/env` for direct TUI. The fresh ordinary-user
+workspace uses the same pinned Nix dependencies without source or host changes.
+Full direct TUI passed, but policies ran from 21:16:08Z to 22:11:58Z and failed
+inside `manager/ci/controls.sh`, `N1-controls-live`, reading a mixed-control receipt.
+The public refusal was `StorageUnavailable`. Its underlying cause is unknown,
+and nearby `StoreBusy` observations do not identify it. The earlier approval gate
+passed. Later controls cases, RTS arms, audits, policy tail and remaining Linux
+examples/routing/ACP/deck gates were not reached.
+
+The failed fixture remains at
+`/home/johnw/Products/wm016-compatibility-BECaF4KE-host.X9bCPg/build/controls.61tmE3`.
+Ordinary local outputs are `linux/host-policies.stdout.log` and
+`linux/host-policies.stderr.log` under the compatibility root. Parent authorized
+one fresh N1 controls-live diagnostic in a private source copy at the existing
+command-classification boundary, preserving all admission, SQL counts, failure
+mapping, budgets and original ownership. No opaque retry, broader waiting policy
+or historical recovery is authorized. A passing diagnostic is only non-reproduction.
 WM-016 remains open and the accepted baseline remains WM-001–WM-015 and G0.
-Do not reopen local helpers or historical recovery while these owning checks run.
 
 The authority-only tracker issues `acat-lijk`, `acat-3ajx`, `acat-3sq1` and
 `acat-jg00` are outside this worktree projection. Export encountered duplicate
