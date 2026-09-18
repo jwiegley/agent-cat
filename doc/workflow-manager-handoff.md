@@ -26,9 +26,11 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-18T00:07:48Z`. The next deadline is
-`2026-09-18T01:07:48Z`. The earlier 00:46 checkpoint was less than one minute
-late during read-only verification, and the lapse was disclosed.
+Refocus completed at `2026-09-18T02:35:15Z`. The next deadline is
+`2026-09-18T03:35:15Z`. Interim checks at 01:03:06Z and 01:48:01Z were recorded
+in the full-gate execution brief while canonical source remained stable. The
+earlier 00:46 checkpoint was less than one minute late during read-only
+verification, and the lapse was disclosed.
 
 **Application integration milestone:** the WM-016 application changes now
 compose with the later canonical repairs, including the Cabal test-component
@@ -71,9 +73,10 @@ discovery check passed, but the latter is not a complete frontend-session pass.
 Results are in `canonical-suites.2wyjVH56`, `canonical-suites-fixed.qx9rq4WY`,
 `canonical-gates.ZhA7cmOX`, `canonical-transport.OUxLX9W2`,
 `session-capabilities-red.9YF2Pxoh` and `session-capabilities-green.L2GralIM`
-under the same delivery directory. Full policies and final milestone review
-remain outstanding. Linux and affected Pi/Emacs/client checks still require
-their requested authorization, so WM-016 is not accepted.
+under the same delivery directory. Full policies now returned zero, with the
+environment qualification below. Final milestone review is active. Linux and
+affected Pi/Emacs/client checks still require their requested authorization,
+so WM-016 is not accepted.
 
 The consolidated correction from `controls.qzldrova/wm016-owner-closure.uw37fnwn`
 fixes the selected Session/export/contract/lineage/TUI test owners. It removes
@@ -112,8 +115,28 @@ unchanged refusal and non-repair assertions. The retained failed directory
 confirmed that diagnosis. A fresh full direct canonical gate then passed, with
 output in `canonical-fixed.OKcf8hGw` and the failure in `canonical.doaAgBqX`.
 
-The next decisive action is canonical full-policy execution. One independent
-review remains scheduled for the coherent WM-016 milestone, not these files.
+The unchanged canonical `bash cli/ci/policies.sh` ran once from 00:42:13Z to
+02:20:48Z on 2026-09-18, at `6fde4d395b48e52f9dd737fa67ab32426bd1ae49`, and
+returned top-level exit zero. It completed native Manager, schema, lineage,
+control, person and frontend checks through both final run-fact refusals.
+Ordinary output and original times/status are under
+`controls.qzldrova/wm016-canonical-policies.fLG7K1Ew`. No ownership/wait failure
+was observed, and the parent removed only generated Python cache files afterward.
+
+The worker's requested outer environment filtering failed because `compgen` was
+unavailable inside a command substitution. The shell continued into the gate.
+The empty names file is not isolation proof. Later names-only inspection found
+`AGENT_CAT_RUNNER` and `AGENT_CAT_STATE_DIR`, but no `GHCRTS`. That is not a
+gate-start snapshot. Source places the two observed names in unselected Pi/TUI
+consumers, and every Manager owning gate and runtime capture clears `GHCRTS`
+itself. This supports the functional result, not a blanket isolation claim.
+The qualification remains for milestone review rather than an automatic rerun.
+
+The one fresh-context independent review is active as
+`499b9e48-712a-43cc-ad50-71ef28155222`, with its brief and product diff under
+`controls.qzldrova/wm016-milestone-review.zs1HY3rS`. It is read-only and will
+separate actual defects, execution qualifications and unavailable compatibility
+checks. No per-leaf review or historical-resource recovery is scheduled.
 
 The authority-only tracker issues `acat-lijk`, `acat-3ajx`, `acat-3sq1` and
 `acat-jg00` are outside this worktree projection. Export encountered duplicate
