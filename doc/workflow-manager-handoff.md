@@ -11,9 +11,10 @@ frozen acceptance contract or safety limits.
 
 The [WM-016 closure plan](workflow-manager-closure-plan.md) governs the remaining
 work. The macOS core matrix and the adopted client compatibility baseline pass.
-The current Linux policies gate failed on an opaque control-receipt refusal.
-Resolve that failure at its actual owner before acceptance, without replaying
-opaque operations or reopening a helper, recorder or per-leaf review programme.
+The Linux receipt failure exposed a probe synchronization mismatch, not a Store
+policy defect. The reviewed test-only correction preserves one-shot public reads
+and moves final receipt assertions after original-owner cleanup. Remaining work
+is integrated Linux policies and its remaining example/transport gates.
 
 The L08 leaf reviewer is paused. Its isolated work is preserved and has not
 been integrated. Resume it only if a demonstrated product-validation blocker
@@ -28,8 +29,8 @@ authorized the requested Linux and selected Pi/Emacs compatibility execution on
 still requires actual results and final disposition. Paid providers, deployment,
 dependency changes, historical recovery and new Lean/oracle builds remain excluded.
 
-Refocus completed at `2026-09-18T22:20:18Z`. The next active-work deadline is
-`2026-09-18T23:20:18Z`. Interim checks and bounded decisions were recorded in
+Refocus completed at `2026-09-18T23:07:34Z`. The next active-work deadline is
+`2026-09-19T00:07:34Z`. Interim checks and bounded decisions were recorded in
 private briefs while canonical application source stayed stable. The earlier
 04:54:54Z check was sixteen seconds late during review/dispatch, and the 00:46
 checkpoint was less than one minute late. Both lapses remain disclosed.
@@ -219,25 +220,46 @@ fixtures and failed UI cases remain distinct failures. Earlier failed UI roots
 retain unproven normal shutdown/restoration/cleanup and are not recovered by the
 fresh passing invocation.
 
-**Remaining Linux failure:** its first Nix sandbox passed compilation and three
-actual suites, then lacked `/usr/bin/env` for direct TUI. The fresh ordinary-user
-workspace uses the same pinned Nix dependencies without source or host changes.
-Full direct TUI passed, but policies ran from 21:16:08Z to 22:11:58Z and failed
-inside `manager/ci/controls.sh`, `N1-controls-live`, reading a mixed-control receipt.
-The public refusal was `StorageUnavailable`. Its underlying cause is unknown,
-and nearby `StoreBusy` observations do not identify it. The earlier approval gate
-passed. Later controls cases, RTS arms, audits, policy tail and remaining Linux
-examples/routing/ACP/deck gates were not reached.
+**Linux receipt correction:** the first Nix sandbox passed compilation and three
+actual suites, then lacked `/usr/bin/env` for direct TUI. A fresh ordinary-user
+workspace with the same pinned dependencies passed full direct TUI. Policies
+then failed from 21:16:08Z to 22:11:58Z in `N1-controls-live` on an opaque receipt
+`StorageUnavailable`. Its failed root and original stdout/stderr remain preserved.
 
-The failed fixture remains at
-`/home/johnw/Products/wm016-compatibility-BECaF4KE-host.X9bCPg/build/controls.61tmE3`.
-Ordinary local outputs are `linux/host-policies.stdout.log` and
-`linux/host-policies.stderr.log` under the compatibility root. Parent authorized
-one fresh N1 controls-live diagnostic in a private source copy at the existing
-command-classification boundary, preserving all admission, SQL counts, failure
-mapping, budgets and original ownership. No opaque retry, broader waiting policy
-or historical recovery is authorized. A passing diagnostic is only non-reproduction.
-WM-016 remains open and the accepted baseline remains WM-001–WM-015 and G0.
+One fresh diagnostic case passed without reproducing. A fixed maximum twenty-case
+batch stopped at case one with `configuredCatalogues StoreFailure=StoreBusy`
+during `storeIdentity` admission, before receipt SQL. Cases two through twenty
+were not invoked. This directly diagnoses that fresh failure, not the uncaptured
+earlier one. Production fail-fast admission, health checks and error mapping are
+correct and unchanged.
+
+Continued milestone review identified a test-owner mismatch: public receipt reads
+cannot be assumed to succeed while another operation owns admission. The coherent
+correction changes only `cli/test/ManagerApprovalProbe.hs`. Active ingestion uses
+existing typed Store observation for the exact command effect, requiring one row.
+It retains acceptance identities, occurrences and expected effects, then performs
+unchanged one-shot public receipt checks after terminal evidence, drain and
+successful original cleanup. Assertions preserve and strengthen correlation,
+acceptance, dispatch, refusal, effect and outcome checks without moving unrelated
+intermediate timing requirements.
+
+The existing controls owner includes a held-Store regression for opaque public
+refusal once, typed busy before successful observation, missing-row integrity,
+non-busy failures once, actual SQL failure once and no opaque replay. The first
+new-regression build failed on `NFData SQL.SQLData`, and a type-only discard
+inside the transaction corrected it. That failed build remains recorded. Corrected
+Linux build, focused regression and controls-live N1/N8 passed once. Evidence and
+exact proposal are under `linux/receipt-correction2-logs` and
+`linux/receipt-correction.patch` in the compatibility root.
+
+Review `18ba6f17-a204-4dc1-80f7-da40b35201ca` found no issues and cleared parent
+integration. Complete Linux full policies on the integrated correction, followed
+by examples, routing-config, deterministic ACP and deck. Policies already includes
+complete controls and audits, so do not duplicate those gates. Unchanged macOS
+core/client results, Linux suites and Linux direct TUI retain their scope.
+Temporary diagnostics are excluded from the correction and no historical recovery
+is required. WM-016 remains open until those Linux results and final disposition.
+The accepted baseline remains WM-001–WM-015 and G0.
 
 The authority-only tracker issues `acat-lijk`, `acat-3ajx`, `acat-3sq1` and
 `acat-jg00` are outside this worktree projection. Export encountered duplicate
