@@ -22,7 +22,7 @@ import qualified Agentic.Runtime as Runtime
 import Agentic.Runtime (workflowName, FrontendPrepared (..), RunId (..), FrontendPreparedInput (..))
 import Control.Concurrent (threadDelay,throwTo,getNumCapabilities)
 import Control.Concurrent.Async (asyncThreadId,async,wait,waitCatch,cancel,poll)
-import Control.Concurrent.MVar (newEmptyMVar,putMVar,takeMVar)
+import Control.Concurrent.MVar (newEmptyMVar,putMVar,takeMVar,readMVar,tryPutMVar)
 import Control.Concurrent.STM hiding (check)
 import qualified Control.Concurrent.STM as STM
 import Control.DeepSeq (NFData)
@@ -58,6 +58,7 @@ main=do
   args<-getArgs
   case args of
     ["controls",work,native]->nativeControlChecks work native
+    ["controls-receipt-observation",work,native]->receiptObservationChecks work native
     ["controls-live",work,native,source,python]->nativeMixedControlChecks work native source python
     ["controls-steering",work,native,source,python]->nativeSteeringChecks False 1 work native source python
     ["controls-stale-steer",work,native,source,python]->nativeSteeringChecks True 1 work native source python
@@ -1104,7 +1105,7 @@ noteControlFailure :: String -> IO ()
 noteControlFailure message = void (try @IOException (hPutStrLn stderr message))
 
 readControlReceipt :: CoordinationStore -> CredentialProof -> Text -> IO (Either CommandFailure CommandReceipt)
-readControlReceipt store proof ident = observeControl $
+readControlReceipt store proof ident =
   readCommand store proof ident >>= noteControlResult "control receipt"
 
 noteControlResult :: String -> Either CommandFailure a -> IO (Either CommandFailure a)
@@ -1116,6 +1117,71 @@ noteControlResult source result = do
 
 controlNumber :: CoordinationStore -> Text -> IO Int64
 controlNumber store = observeControl . number store
+
+controlEffectRecorded :: Text -> Transaction Bool
+controlEffectRecorded command = do
+  rows <- query "SELECT effect_evidence FROM commands WHERE id=?" [SQL.SQLText command]
+  case rows of
+    [[SQL.SQLNull]] -> pure False
+    [[SQL.SQLBlob _]] -> pure True
+    _ -> refuseTransaction StoreIntegrity
+
+receiptObservationChecks :: FilePath -> FilePath -> IO ()
+receiptObservationChecks work native = withReady work native "receipt-observation" ["--scripted"] [] $ \(Fixture _ _ store proof key _) -> do
+  command <- runRead store $ do
+    rows <- query "SELECT id FROM commands WHERE idempotency_key=?" [SQL.SQLText(key "input")]
+    case rows of [[SQL.SQLText ident]] -> pure ident; _ -> refuseTransaction StoreIntegrity
+  publicCalls <- newIORef (0::Int)
+  typedCalls <- newIORef (0::Int)
+  completedReads <- newIORef (0::Int)
+  held <- newEmptyMVar
+  resume <- newEmptyMVar
+  let clock = putMVar held () >> readMVar resume >> pure 0
+      release = void(tryPutMVar resume ())
+  -- Same held-Store rendezvous as StoreCheck.terminalAdmissionChecks.
+  withCommitDeadline store clock 1 $ \guard ->
+    bracket (async(runTransaction store (enforceCommitDeadline guard >> pure((),[]))))
+      (\holder -> release >> cancel holder) $ \holder -> do
+        timeout 1000000(takeMVar held) >>= maybe(error "Store holder not admitted")pure
+        modifyIORef' publicCalls (+1)
+        refused <- readControlReceipt store proof command
+        calls <- readIORef publicCalls
+        check "public receipt under held Store returns opaque refusal once" (refused==Left StorageUnavailable && calls==1)
+        let typedRead = do
+              modifyIORef' typedCalls (+1)
+              result <- try @StoreFailure (runRead store (controlEffectRecorded command))
+              case result of
+                Left StoreBusy -> do
+                  completed <- readIORef completedReads
+                  check "typed receipt observation refuses before query completion" (completed==0)
+                  release
+                  wait holder
+                  throwIO StoreBusy
+                Left failure -> throwIO failure
+                Right value -> modifyIORef' completedReads (+1) >> pure value
+        recorded <- observeControl typedRead
+        attempts <- readIORef typedCalls
+        completed <- readIORef completedReads
+        check "released typed observation executes one admitted read without replay" (recorded && attempts==2 && completed==1)
+  receipt <- readControlReceipt store proof command >>= right
+  check "released public receipt retains original command" (receiptId receipt==command && receiptEffect receipt/=Nothing)
+  absent <- try @StoreFailure (runRead store (controlEffectRecorded "missing_receipt"))
+  check "typed receipt predicate requires exactly one matching row" (absent==Left StoreIntegrity)
+  forM_ [StoreClosed,StorePoisoned,StoreLimit,StoreDeadline,StoreVersion,StoreIntegrity,StoreUnavailable,StoreCleanupUnproven] $ \failure -> do
+    calls <- newIORef (0::Int)
+    outcome <- try @StoreFailure (observeControl (modifyIORef' calls (+1) >> throwIO failure :: IO ()))
+    attempts <- readIORef calls
+    check ("non-busy observation failure propagates once: "<>show failure) (outcome==Left failure && attempts==1)
+  sqlCalls <- newIORef (0::Int)
+  sqlFailure <- try @StoreFailure $ observeControl $ do
+    modifyIORef' sqlCalls (+1)
+    runRead store (void (query "SELECT missing_receipt_observation_column FROM commands" []))
+  sqlAttempts <- readIORef sqlCalls
+  check "SQL StoreUnavailable propagates once without replay" (sqlFailure==Left StoreUnavailable && sqlAttempts==1)
+  opaqueCalls <- newIORef (0::Int)
+  opaque <- observeControl (modifyIORef' opaqueCalls (+1) >> pure(Left StorageUnavailable :: Either CommandFailure ()))
+  opaqueAttempts <- readIORef opaqueCalls
+  check "returned opaque observation refusal propagates once" (opaque==Left StorageUnavailable && opaqueAttempts==1)
 
 nativeControlReloadChecks :: Bool -> FilePath -> FilePath -> IO ()
 nativeControlReloadChecks racing work native = withReady work native "reload-control" ["--scripted"] [] $ \fixture@(Fixture _ installed store proof key _) ->
@@ -1497,7 +1563,8 @@ nativeMixedControlChecks work native source python = do
               submission<-submitRunControl owned proof(key suffix)etag body >>=right
               let command=receiptId(submissionReceipt submission)
               deliverAcceptedControl owned command >>=right
-              pure command
+              pure(submissionReceipt submission)
+            effectRecorded command=observeControl (runRead store (controlEffectRecorded command))
         deliverAcceptedStart owned >>=right
         first<-observeControl (ingestAcceptedStart owned);check "mixed original runtime started" first
         ingestUntil $ do current<-snapshot;pure(any (maybe False Runtime.dispatchOpen . Runtime.snapshotOccurrenceDispatch)(Map.elems(Runtime.snapshotOccurrences current)))
@@ -1505,9 +1572,9 @@ nativeMixedControlChecks work native source python = do
         (occurrence,target)<-case [(Runtime.occurrenceNumber(Runtime.snapshotOccurrenceId item),selected)|item<-Map.elems(Runtime.snapshotOccurrences current),Just dispatch<-[Runtime.snapshotOccurrenceDispatch item],selected<-take 1(Runtime.dispatchTargets dispatch)] of
           pair:_->pure pair;_->error "native reserved redirect absent"
         redirected<-deliver "redirect" (encoded(object["operation" .= ("redirect"::Text),"occurrenceId" .= T.pack(show occurrence),"target" .= target]))
+        retained<-newIORef [(redirected,T.pack(show occurrence),"redirected")]
+        ingestUntil(effectRecorded(receiptId redirected))
         ingestUntil ((==2) . length <$> pending)
-        redirectReceipt<-readControlReceipt store proof redirected >>=right
-        check "native redirect correlates exact original control" (maybe False ((=="redirected") . textField "kind" . effectValue)(receiptEffect redirectReceipt))
         rows<-pending
         nonHead@(ident,_,_,revision,_)<-case drop 1 rows of [row]->pure row;_->error "missing genuine person/recovery non-head"
         etag<-controlCondition
@@ -1525,19 +1592,19 @@ nativeMixedControlChecks work native source python = do
                     more<-observeControl (ingestAcceptedStart owned)
                     unless more(error "mixed control ended without terminal evidence")
                     processHead count
-                row@(decision,_,_,decisionRevision,kind):_->do
+                row@(decision,decisionOccurrence,_,decisionRevision,kind):_->do
                   used<-readIORef chosen
                   let selection=if used then "retry" else T.pack choice
                       body=bodyFor row selection
-                  command<-if kind=="recovery" && selection=="retry" then deliver("recovery-"<>T.pack(show count))body else do
+                      expectedKind=if kind=="question" then "answer-accepted" else if selection=="retry" then "retried" else "recovery-chosen"
+                  acceptedReceipt<-if kind=="recovery" && selection=="retry" then deliver("recovery-"<>T.pack(show count))body else do
                     accepted<-submitDecisionControl owned proof decision(key("decision-"<>T.pack(show count)))(conditionOf decisionRevision)body >>=right
                     let command=receiptId(submissionReceipt accepted)
                     deliverAcceptedControl owned command >>=right
-                    pure command
+                    pure(submissionReceipt accepted)
+                  modifyIORef' retained (<>[(acceptedReceipt,decisionOccurrence,expectedKind)])
                   when(kind=="recovery")(modifyIORef' chosen(const True))
-                  ingestUntil $ do receipt<-readControlReceipt store proof command >>=right;pure(receiptEffect receipt/=Nothing)
-                  receipt<-readControlReceipt store proof command >>=right
-                  check "mixed native effect keeps exact occurrence and control receipt" (receiptEffect receipt/=Nothing)
+                  ingestUntil(effectRecorded(receiptId acceptedReceipt))
                   processHead(count+1::Int)
         await(processHead 0)
         let drain=observeControl (ingestAcceptedStart owned) >>= \more->when more drain
@@ -1545,14 +1612,29 @@ nativeMixedControlChecks work native source python = do
         joinControlCleanup live owned
         final<-snapshot
         check "recovery terminal outcome remains native evidence" (Runtime.snapshotRunStatus final==if choice=="abandon" then Runtime.RunFailedStatus else Runtime.RunSucceeded)
+        -- Public reads are one-shot, after the original owner has successfully joined.
+        expected<-readIORef retained
+        forM_ expected $ \(original,expectedOccurrence,expectedKind)->do
+          receipt<-readControlReceipt store proof(receiptId original) >>=right
+          check "post-cleanup public receipt retains original acceptance binding"
+            (receiptBinding receipt==receiptBinding original && receiptState receipt==EffectObserved && receiptAttemptedAt receipt/=Nothing && receiptRefusal receipt==Nothing)
+          check "post-cleanup public acknowledgement correlates original command and occurrence"
+            (maybe False (\ack->let value=acknowledgementValue ack in textField "commandId" value==receiptId original && textField "command" value==operationName(receiptOperation original) && textField "occurrenceId" value==expectedOccurrence) (receiptAcknowledgement receipt))
+          effect<-maybe(error "missing mixed native effect")pure(receiptEffect receipt)
+          let value=effectValue effect
+          check (if expectedKind=="redirected" then "native redirect correlates exact original control" else "mixed native effect keeps exact occurrence and control receipt")
+            (textField "kind" value==expectedKind && textField "occurrenceId" (valueField "address" value)==expectedOccurrence && textField "resource" value=="/v1/runs/"<>acceptedStartRun owned<>"/control")
         BS.writeFile(work </> ("mixed-"<>choice<>"-snapshot.json"))(encoded(Runtime.runSnapshotValue final))
         nativePresent native context >>=check "mixed control fixture joins original native process" . not
   where
-    textField key (Object fields)=case KM.lookup key fields of Just(String value)->value;_->error "missing control text"
-    textField _ _=error "missing control object"
+    receiptBinding receipt=(receiptId receipt,receiptProfile receipt,receiptOperation receipt,receiptResource receipt,receiptAcceptedAt receipt)
+    valueField key (Object fields)=maybe(error "missing control field")id(KM.lookup key fields)
+    valueField _ _=error "missing control object"
+    textField key value=case valueField key value of String text->text;_->error "missing control text"
 
 nativeControlChecks :: FilePath -> FilePath -> IO ()
 nativeControlChecks work native = do
+  receiptObservationChecks work native
   precise <- right(eitherDecodeStrict' "123456789012345678901234567890" :: Either String Value)
   let expectedAnswers=Map.fromList [(0,Bool False),(1,Null),(2,object["ok" .= False,"notes" .= ([]::[Text])]),
         (3,toJSON [precise,Number (-7)]),(4,object["numerator" .= (1::Integer),"denominator" .= (8::Integer)]),
