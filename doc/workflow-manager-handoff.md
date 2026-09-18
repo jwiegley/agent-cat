@@ -10,9 +10,10 @@ every earlier next-helper instruction in this handoff, without changing the
 frozen acceptance contract or safety limits.
 
 The [WM-016 closure plan](workflow-manager-closure-plan.md) governs the remaining
-work: run the existing integrated-source matrix, resolve actual failures at their
-owners, and obtain one milestone-level final review. No new fixture-retention
-helper, hash inventory, custom recorder or per-leaf review cycle is scheduled.
+work. Local implementation and final canonical validation are clear after the
+continued milestone review. The next action requires authorization for current
+Linux and affected external-client compatibility, not another local correction,
+helper, hash inventory, custom recorder or per-leaf review cycle.
 
 The L08 leaf reviewer is paused. Its isolated work is preserved and has not
 been integrated. Resume it only if a demonstrated product-validation blocker
@@ -22,13 +23,14 @@ the next decisive action, not artifact counts.
 ## Status and authority
 
 The user explicitly resumed work and cancelled the pause on 2026-09-15.
-Implementation is active, not complete. The frozen acceptance contract and
-action-specific restrictions remain unchanged. Native work requires a bounded
-next-step decision rather than reuse of an earlier diagnostic authorization.
+Local implementation is complete, but WM-016 acceptance is blocked on required
+compatibility execution for which authorization has not been granted. The frozen
+contract and action-specific restrictions remain unchanged. An automatic goal
+checkpoint does not grant remote or external-client authority.
 
-Refocus completed at `2026-09-18T05:18:39Z`. The next deadline is
-`2026-09-18T06:18:39Z`. Interim checks were recorded in the private full-gate
-and diagnosis briefs while canonical source remained stable. The 04:54:54Z
+Refocus completed at `2026-09-18T07:33:58Z`. On active continuation the next
+deadline is `2026-09-18T08:33:58Z`. Interim checks were recorded in the private
+gate/diagnosis briefs while canonical source remained stable. The 04:54:54Z
 check was sixteen seconds late during review/dispatch, and the earlier 00:46
 checkpoint was less than one minute late. Both lapses remain disclosed.
 
@@ -73,10 +75,10 @@ discovery check passed, but the latter is not a complete frontend-session pass.
 Results are in `canonical-suites.2wyjVH56`, `canonical-suites-fixed.qx9rq4WY`,
 `canonical-gates.ZhA7cmOX`, `canonical-transport.OUxLX9W2`,
 `session-capabilities-red.9YF2Pxoh` and `session-capabilities-green.L2GralIM`
-under the same delivery directory. Full policies now returned zero, with the
-environment qualification below. Final milestone review is active. Linux and
-affected Pi/Emacs/client checks still require their requested authorization,
-so WM-016 is not accepted.
+under the same delivery directory. These earlier results retain their original
+scope and qualifications. The final corrected-source matrix and review disposition
+below govern current local completion. Required external compatibility remains
+unauthorized, so WM-016 is not accepted.
 
 The consolidated correction from `controls.qzldrova/wm016-owner-closure.uw37fnwn`
 fixes the selected Session/export/contract/lineage/TUI test owners. It removes
@@ -171,13 +173,32 @@ and twenty fresh concurrent samples also passed from 05:00:38Z to 05:02:49Z.
 This is bounded current-byte evidence, not proof of historical causality or
 zero races. No diagnostic-only patch enters production.
 
-Continued milestone review `74520045-10f3-436d-960e-779e7e0ea406` found no issues
-and cleared integration with notes. **Remaining blockers:** runtime/engine/TUI
-suites, direct native TUI and full policies must validate the corrected canonical
-bytes. Full policies includes complete workers/controls, so run it once rather
-than duplicating those gates. Earlier unaffected examples, transport and
-conformance results retain their scoped value. Current Linux and affected
-external-client/UI checks still require authorization. WM-016 remains open.
+Continued milestone review cleared the coherent correction for integration.
+The final canonical matrix then ran once on
+`26e35af927ca96f0c0deb0f902d5c84ec49bb679` and passed all five commands:
+engine, runtime-contract and TUI-model Cabal suites with warnings fatal, direct
+complete native TUI, and direct complete policies. Policies included workers
+and controls N1/N8, the new N2 refusal-publication regression and audit suffix.
+It ran from 05:36:19Z to 07:25:37Z without a rerun.
+
+Every gate has a successful prelaunch assertion that inherited `GHCRTS` and
+`AGENT_CAT_*` variables are absent. Ordinary output and matrix exit zero are in
+`controls.qzldrova/wm016-final-canonical.o6ITDVN2`. Parent verified unchanged
+HEAD, clean status and empty tracked/staged diffs after execution. This fresh
+compliant result does not relabel the earlier setup deviation or failed batches.
+
+Final local disposition `455bb12a-8481-437e-ad59-ed261e5aa3e0` found no issues
+and cleared local implementation and validation. No further local correction
+or rerun was requested. The result remains in
+`controls.qzldrova/wm016-milestone-review.zs1HY3rS/result.md`.
+
+**Sole remaining acceptance blocker:** authorization is absent for current Linux
+owning checks and affected selected Pi/Emacs/client/UI compatibility under frozen
+section 9.2. These checks are unrun and are not replaced by macOS passes. Once
+authorized, use the selected Linux builder and client checkouts without implying
+paid providers, deployment or dependency changes. WM-016 remains open and the
+accepted baseline remains WM-001–WM-015 and G0. Do not reopen local helper work
+or historical recovery to avoid this operator decision.
 
 The authority-only tracker issues `acat-lijk`, `acat-3ajx`, `acat-3sq1` and
 `acat-jg00` are outside this worktree projection. Export encountered duplicate
