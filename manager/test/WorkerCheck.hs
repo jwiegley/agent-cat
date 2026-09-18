@@ -12,7 +12,7 @@ import Agentic.Manager.Store
 import Agentic.Manager.Worker
 import Agentic.Runtime
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async (AsyncCancelled (..), async, asyncThreadId, cancel, concurrently, wait, waitCatch)
+import Control.Concurrent.Async (AsyncCancelled (..), async, asyncThreadId, cancel, concurrently, wait, waitCatch, withAsync)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar, readMVar, swapMVar, tryReadMVar)
 import Control.Exception (AsyncException (UserInterrupt), IOException, SomeException, bracket, finally, fromException, throwIO, throwTo, try, uninterruptibleMask_)
 import Control.Monad (forM, forM_, unless, void, replicateM_)
@@ -33,6 +33,7 @@ import System.Exit (ExitCode (ExitSuccess, ExitFailure))
 import System.FilePath ((</>))
 import System.Process (CreateProcess (std_in, std_out, std_err), StdStream (CreatePipe), proc, readProcessWithExitCode)
 import System.IO (BufferMode (LineBuffering), hSetBuffering, hGetLine, hPutStrLn, hFlush, stdin, stdout, stderr)
+import System.IO.Error (isPermissionError)
 import System.Posix.Signals (installHandler, sigTERM, Handler (Catch))
 import System.Posix.Files (setFileMode)
 import System.Timeout (timeout)
@@ -43,6 +44,7 @@ main = do
   args <- getArgs
   case args of
     ["cleanup-evidence-data", work] -> cleanupEvidenceDataChecks work
+    ["signal-refusal"] -> signalRefusalChecks
     ["backpressure-close",work,native] -> withCase work "backpressure" native [] $ \root _ _ store revision catalogue ->
       withFrontendWorker store "profile" revision (setupFor root catalogue "person-controlled") (backpressureClose native)
     ["termination-cases",work,native] -> terminationChecks work native
@@ -494,6 +496,36 @@ cleanupEvidenceDataChecks work = do
       doesFileExist (directory </> file) >>= check "uncompleted observation emits no invented bytes" . not
   putStrLn "PASS cleanup child evidence data-only checks"
 
+-- A second capability releases the monitor's injected EINTR loop.
+signalRefusalChecks :: IO ()
+signalRefusalChecks = do
+  executable <- getExecutablePath
+  let cleanup group = releaseMonitor >> (terminateProcessGroup 1000 group `finally` closeGroupPipes group)
+      command = privateProcess executable ["fixture-wait"]
+      refused result = case result of Left failure -> isPermissionError failure; Right () -> False
+  bracket (createProcessGroup command) cleanup $ \group -> do
+    armFinalRefusal 1
+    withAsync (try @IOException (terminateProcessGroup 1000 group)) $ \ending -> do
+      (do
+        waitUntil ((== 1) <$> monitorHeld)
+        early <- timeout 1000000 (wait ending)
+        held <- monitorHeld
+        check "final signal refusal waits for the original dead leader's publication"
+          (held == 1 && case early of Nothing -> True; _ -> False)) `finally` releaseMonitor
+      await (wait ending) >>= check "joined dead leader still returns the original signal refusal" . refused
+    outcome <- tryReadMVar (groupOutcome group)
+    check "original monitor publishes actual cleanup before refusal returns"
+      (case outcome of Just (Right _) -> True; _ -> False)
+  bracket (createProcessGroup command) cleanup $ \group -> do
+    armFinalRefusal 0
+    withAsync (try @IOException (terminateProcessGroup 1000 group)) $ \ending -> (do
+      result <- timeout 1000000 (wait ending)
+      check "live leader signal refusal returns without waiting for its exit"
+        (case result of Just value -> refused value; _ -> False)
+      outcome <- tryReadMVar (groupOutcome group)
+      check "live denied group remains unproven" (case outcome of Nothing -> True; _ -> False))
+      `finally` cleanup group
+
 cleanupFailureChild :: FilePath -> FilePath -> IO ()
 cleanupFailureChild work native = do
   executable <- getExecutablePath
@@ -533,6 +565,13 @@ reservedEnvironmentChecks work source native python = do
     result <- loadConfiguration (const (Right ()))  exactPreparedTarget (const False) path
     check ("reserved environment refuses before launch: " <> name) (case result of Left InvalidConfiguration -> True; _ -> False)
   doesFileExist evidence >>= check "reserved environment negatives launched no capability process" . not
+
+foreign import ccall unsafe "worker_arm_final_refusal"
+  armFinalRefusal :: CInt -> IO ()
+foreign import ccall unsafe "worker_monitor_held"
+  monitorHeld :: IO CInt
+foreign import ccall unsafe "worker_release_monitor"
+  releaseMonitor :: IO ()
 
 foreign import ccall unsafe "worker_arm_term_failure"
   armTermFailure :: IO ()
@@ -596,6 +635,34 @@ terminationChecks _ _ = do
           await(hGetLine output)>>=check "termination fixture ready" . (=="ready")
           action group output input
       release input=hPutStrLn input "release" >> hFlush input
+  fixture $ \group output input -> do
+    armTermFailure
+    withAsync (terminateProcessGroup 2000000 group) $ \ending -> do
+      waitUntil ((==1) <$> termFailureFired)
+      early <- timeout 100000 (waitCatch ending)
+      check "TERM refusal still offers grace before escalation"
+        (case early of Nothing -> True; _ -> False)
+      release input
+      await (wait ending)
+    outcome <- tryReadMVar (groupOutcome group)
+    check "TERM refusal permits original cooperative exit and publication"
+      (case outcome of Just (Right ExitSuccess) -> True; _ -> False)
+    BS.hGetContents output >>= check "refused TERM was not delivered to the original child" . BS.null
+  fixture $ \group _ input -> do
+    armTermFailure
+    started <- getMonotonicTimeNSec
+    withAsync (uninterruptibleMask_ (terminateProcessGroup 100000 group)) $ \ending -> do
+      completed <- timeout 2000000 (waitCatch ending)
+      case completed of
+        Nothing -> do
+          release input
+          void(await(waitCatch ending))
+          error "TERM refusal suppressed the bounded grace deadline"
+        Just result -> either throwIO pure result
+    elapsed <- subtract started <$> getMonotonicTimeNSec
+    termFailureFired >>= check "non-completing grace case injected TERM refusal" . (==1)
+    check "TERM refusal retains the unchanged grace interval" (elapsed>=100000000)
+    waitProcessGroup group >>= check "TERM refusal escalates after grace for a non-completing child" . (/=ExitSuccess)
   forM_ [False,True] $ \ioFailure -> fixture $ \group output input -> do
     caller<-async(terminateProcessGroup 2000000 group)
     await(hGetLine output)>>=check "original TERM reaches child before caller interruption" . (=="term")
