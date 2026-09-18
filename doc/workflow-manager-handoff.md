@@ -26,8 +26,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-18T02:35:15Z`. The next deadline is
-`2026-09-18T03:35:15Z`. Interim checks at 01:03:06Z and 01:48:01Z were recorded
+Refocus completed at `2026-09-18T03:11:00Z`. The next deadline is
+`2026-09-18T04:11:00Z`. Interim checks at 01:03:06Z and 01:48:01Z were recorded
 in the full-gate execution brief while canonical source remained stable. The
 earlier 00:46 checkpoint was less than one minute late during read-only
 verification, and the lapse was disclosed.
@@ -132,11 +132,32 @@ consumers, and every Manager owning gate and runtime capture clears `GHCRTS`
 itself. This supports the functional result, not a blanket isolation claim.
 The qualification remains for milestone review rather than an automatic rerun.
 
-The one fresh-context independent review is active as
-`499b9e48-712a-43cc-ad50-71ef28155222`, with its brief and product diff under
-`controls.qzldrova/wm016-milestone-review.zs1HY3rS`. It is read-only and will
-separate actual defects, execution qualifications and unavailable compatibility
-checks. No per-leaf review or historical-resource recovery is scheduled.
+The milestone review `499b9e48-712a-43cc-ad50-71ef28155222` blocked closure on
+one local P1: two control-race probes silently retried opaque
+`StorageUnavailable`. The parent removed those branches and used the existing
+diagnostic owner to return and report the first public refusal. Injected
+first-failure/would-succeed-next regressions exercise both actual probe loops.
+They passed at N1 without claiming naturally occurring native storage failures.
+The review and ordinary product diff are under
+`controls.qzldrova/wm016-milestone-review.zs1HY3rS`.
+
+**Current blocker:** the affected controls gate then failed in N1
+`ingestion-concurrent` after the second run answered while the first remained
+pending. It reported opaque `StorageUnavailable` at original-owner cleanup.
+The preceding `StoreBusy` observation does not establish its cause. N8 and the
+audit suffix were not reached. Logs are under
+`controls.qzldrova/wm016-controls-no-replay.E0xzEq0N`, and the exact fixture is
+`wm016-delivery.LdWQA6B3/build.22UhyK/dist/controls.4THI1R/N1-ingestion-concurrent/native-pair`.
+
+Read-only observations on a private database/WAL/SHM copy show pair-a released
+and pair-b cleanup-pending with its slot retained. This does not prove physical
+cleanup or identify the original exception. No rerun, signal, PID adoption or
+recovery was attempted. The next decisive work is diagnosis at the original
+Admission/Worker/Store/ProcessGroup owners, preserving the first failure before
+public classification. Do not restore opaque retries or weaken cleanup assertions.
+The earlier full-policy pass does not erase this fresh failed invocation.
+The existing milestone review continues after correction, without a new leaf
+review cycle. Required Linux and external-client authorization remains pending.
 
 The authority-only tracker issues `acat-lijk`, `acat-3ajx`, `acat-3sq1` and
 `acat-jg00` are outside this worktree projection. Export encountered duplicate

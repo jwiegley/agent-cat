@@ -1419,7 +1419,15 @@ nativeSteeringChecks stale count work native source python = forM_ (if count==25
               where loop=do
                       result<-try @StoreFailure action
                       case result of Left StoreBusy->threadDelay 1000>>loop;Left failure->throwIO failure
-                                     Right(Left StorageUnavailable)->threadDelay 1000>>loop;Right value->pure value
+                                     Right value->noteControlResult "cancellation submission (no opaque retry)" value
+        opaqueSubmissionCalls<-newIORef (0::Int)
+        opaqueSubmissionOutcome<-retrySame $ do
+          callNumber<-readIORef opaqueSubmissionCalls
+          modifyIORef' opaqueSubmissionCalls (+1)
+          pure(if callNumber==0 then Left StorageUnavailable else Right ())
+        opaqueSubmissionAttempts<-readIORef opaqueSubmissionCalls
+        check "opaque cancellation submission refusal is returned without replay"
+          (opaqueSubmissionOutcome==Left StorageUnavailable && opaqueSubmissionAttempts==1)
         rendezvous<-newEmptyTMVarIO
         raceStarted<-getMonotonicTimeNSec
         a<-async(atomically(readTMVar rendezvous)>>retrySame(submitRunControl owned proof(key "extra-cancel-a")cancelEtag cancelBody))
@@ -1578,8 +1586,15 @@ nativeControlChecks work native = do
                 case result of
                   Left StoreBusy->threadDelay 1000>>loop
                   Left failure->throwIO failure
-                  Right(Left StorageUnavailable)->threadDelay 1000>>loop
-                  Right value->pure value
+                  Right value->noteControlResult "typed-answer submission (no opaque retry)" value
+      opaqueSubmissionCalls<-newIORef (0::Int)
+      opaqueSubmissionOutcome<-submitSame $ do
+        callNumber<-readIORef opaqueSubmissionCalls
+        modifyIORef' opaqueSubmissionCalls (+1)
+        pure(if callNumber==0 then Left StorageUnavailable else Right ())
+      opaqueSubmissionAttempts<-readIORef opaqueSubmissionCalls
+      check "opaque typed-answer submission refusal is returned without replay"
+        (opaqueSubmissionOutcome==Left StorageUnavailable && opaqueSubmissionAttempts==1)
       deliverAcceptedStart owned >>= right
       ingestUntil (not . null <$> pending)
       initial<-pending
