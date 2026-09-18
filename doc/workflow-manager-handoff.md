@@ -11,9 +11,9 @@ frozen acceptance contract or safety limits.
 
 The [WM-016 closure plan](workflow-manager-closure-plan.md) governs the remaining
 work. Local implementation and final canonical validation are clear after the
-continued milestone review. The next action requires authorization for current
-Linux and affected external-client compatibility, not another local correction,
-helper, hash inventory, custom recorder or per-leaf review cycle.
+continued milestone review. The user has now authorized current Linux and affected
+external-client compatibility. Those checks are the next work, not another local
+correction, helper, hash inventory, custom recorder or per-leaf review cycle.
 
 The L08 leaf reviewer is paused. Its isolated work is preserved and has not
 been integrated. Resume it only if a demonstrated product-validation blocker
@@ -22,15 +22,15 @@ the next decisive action, not artifact counts.
 
 ## Status and authority
 
-The user explicitly resumed work and cancelled the pause on 2026-09-15.
-Local implementation is complete, but WM-016 acceptance is blocked on required
-compatibility execution for which authorization has not been granted. The frozen
-contract and action-specific restrictions remain unchanged. An automatic goal
-checkpoint does not grant remote or external-client authority.
+The user explicitly resumed work and cancelled the pause on 2026-09-15, then
+authorized the requested Linux and selected Pi/Emacs compatibility execution on
+2026-09-18. The permission blocker is resolved, not waived. WM-016 acceptance
+still requires actual results and final disposition. Paid providers, deployment,
+dependency changes, historical recovery and new Lean/oracle builds remain excluded.
 
-Refocus completed at `2026-09-18T07:33:58Z`. On active continuation the next
-deadline is `2026-09-18T08:33:58Z`. Interim checks were recorded in the private
-gate/diagnosis briefs while canonical source remained stable. The 04:54:54Z
+Refocus completed at `2026-09-18T20:28:43Z`. The next active-work deadline is
+`2026-09-18T21:28:43Z`. The preceding interval was blocked on authorization.
+Interim checks were recorded in private briefs while canonical source stayed stable.
 check was sixteen seconds late during review/dispatch, and the earlier 00:46
 checkpoint was less than one minute late. Both lapses remain disclosed.
 
@@ -77,8 +77,8 @@ Results are in `canonical-suites.2wyjVH56`, `canonical-suites-fixed.qx9rq4WY`,
 `session-capabilities-red.9YF2Pxoh` and `session-capabilities-green.L2GralIM`
 under the same delivery directory. These earlier results retain their original
 scope and qualifications. The final corrected-source matrix and review disposition
-below govern current local completion. Required external compatibility remains
-unauthorized, so WM-016 is not accepted.
+below govern current local completion. Authorized external compatibility remains
+pending, so WM-016 is not accepted.
 
 The consolidated correction from `controls.qzldrova/wm016-owner-closure.uw37fnwn`
 fixes the selected Session/export/contract/lineage/TUI test owners. It removes
@@ -192,13 +192,17 @@ and cleared local implementation and validation. No further local correction
 or rerun was requested. The result remains in
 `controls.qzldrova/wm016-milestone-review.zs1HY3rS/result.md`.
 
-**Sole remaining acceptance blocker:** authorization is absent for current Linux
-owning checks and affected selected Pi/Emacs/client/UI compatibility under frozen
-section 9.2. These checks are unrun and are not replaced by macOS passes. Once
-authorized, use the selected Linux builder and client checkouts without implying
-paid providers, deployment or dependency changes. WM-016 remains open and the
-accepted baseline remains WM-001–WM-015 and G0. Do not reopen local helper work
-or historical recovery to avoid this operator decision.
+**Remaining acceptance work:** the user authorized current Linux owning checks
+and selected Pi/Emacs/client/UI compatibility under frozen section 9.2. A single
+execution wave `3a442e6e-a64a-40e9-b253-66adc32cdb05` runs isolated Linux and
+macOS-client lanes under `controls.qzldrova/wm016-compatibility.BECaF4KE`. Their
+inputs preserve the clean canonical application and selected owner edits. The
+lanes have separate builds and fixture roots, stop on the first unexpected gate
+failure, and cannot edit source, dependencies, Git state or the tracker.
+
+These results are pending and cannot be replaced by earlier macOS passes.
+WM-016 remains open and the accepted baseline remains WM-001–WM-015 and G0.
+Do not reopen local helpers or historical recovery while these owning checks run.
 
 The authority-only tracker issues `acat-lijk`, `acat-3ajx`, `acat-3sq1` and
 `acat-jg00` are outside this worktree projection. Export encountered duplicate
