@@ -2,11 +2,13 @@
 """Exercise managed verified result export through the real runner boundary."""
 from __future__ import annotations
 
+from contextlib import ExitStack, contextmanager
 import hashlib
 import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -20,8 +22,9 @@ def main() -> None:
     if len(sys.argv) != 2:
         raise SystemExit("usage: frontend_export_probe.py RUNNER")
     runner = Path(sys.argv[1]).resolve()
-    try:
-        with tempfile.TemporaryDirectory(prefix="agent-cat-export-probe-") as temporary:
+    with Session.active:
+        temporary = tempfile.mkdtemp(prefix="agent-cat-export-probe-")
+        with ExitStack() as exporters:
             case = Path(temporary).resolve()
             session = Session(
                 runner,
@@ -43,6 +46,84 @@ def main() -> None:
             })
             environment = {key: value for key, value in os.environ.items() if not key.startswith("AGENT_CAT_")}
             environment["XDG_CONFIG_HOME"] = str(case / "invalid-config")
+
+            @contextmanager
+            def exporter():
+                process = subprocess.Popen(
+                    [str(runner), "frontend-export", "--state", str(state)],
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    cwd=case, env=environment, close_fds=True,
+                )
+                try:
+                    yield process
+                finally:
+                    failure = sys.exc_info()[1]
+                    previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
+                    try:
+                        cleanup_failure = None
+                        try:
+                            try:
+                                if process.poll() is None:
+                                    process.terminate()
+                            except KeyboardInterrupt as interrupted:
+                                cleanup_failure = interrupted
+                            if process.stdin is not None and process.stdin.closed:
+                                process.stdin = None
+                            timeout = 10 if cleanup_failure is None else None
+                            while True:
+                                try:
+                                    process.communicate(timeout=timeout)
+                                    break
+                                except (subprocess.TimeoutExpired, KeyboardInterrupt) as interrupted:
+                                    cleanup_failure = cleanup_failure or interrupted
+                                    # Failure is final, but ownership lasts through the original join.
+                                    timeout = None
+                        except BaseException as unjoined:
+                            primary = failure or cleanup_failure
+                            if primary is None:
+                                raise
+                            primary.add_note(f"Exporter original join UNPROVEN: {unjoined!r}")
+                            raise primary from unjoined
+                        if cleanup_failure is not None:
+                            if failure is None:
+                                raise cleanup_failure
+                            failure.add_note(f"Exporter cleanup failed: {cleanup_failure!r}; original child joined")
+                    finally:
+                        primary = sys.exc_info()[1] or failure
+                        try:
+                            signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+                        except KeyboardInterrupt:
+                            if primary is None:
+                                raise
+                            primary.add_note("Caller interruption deferred until original-owner cleanup finished")
+
+            from unittest.mock import patch
+
+            with ExitStack() as interrupted_exporters:
+                interrupted_exporter = interrupted_exporters.enter_context(exporter())
+                original_communicate = interrupted_exporter.communicate
+                first = subprocess.TimeoutExpired(interrupted_exporter.args, 10)
+                faults = [first, KeyboardInterrupt(), KeyboardInterrupt()]
+                waits = []
+
+                def interrupted_communicate(*args, **kwargs):
+                    assert case.is_dir(), "export root disposed before original join"
+                    waits.append(kwargs.get("timeout"))
+                    if faults:
+                        signal.raise_signal(signal.SIGINT)
+                        assert signal.SIGINT in signal.sigpending(), "caller SIGINT was not deferred"
+                        raise faults.pop(0)
+                    return original_communicate(*args, **kwargs)
+
+                with patch.object(interrupted_exporter, "communicate", interrupted_communicate):
+                    try:
+                        interrupted_exporters.close()
+                    except subprocess.TimeoutExpired as observed:
+                        assert observed is first
+                    else:
+                        raise AssertionError("export cleanup timeout became success")
+                assert not faults and waits == [10, None, None, None], waits
+                assert interrupted_exporter.returncode is not None, "original exporter was not joined"
 
             def request(name: object, reference_value: object = reference, root_identity: object = identity, **extra: object) -> dict:
                 return {
@@ -89,11 +170,7 @@ def main() -> None:
             assert owner_path.read_bytes() == owner_before
 
             fragmented_request = encode(request("fragmented.json"))
-            fragmented = subprocess.Popen(
-                [str(runner), "frontend-export", "--state", str(state)],
-                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                cwd=case, env=environment, close_fds=True,
-            )
+            fragmented = exporters.enter_context(exporter())
             assert fragmented.stdin is not None
             midpoint = len(fragmented_request) // 2
             fragmented.stdin.write(fragmented_request[:midpoint])
@@ -221,11 +298,7 @@ def main() -> None:
             assert (state / "exports/damaged-journal.json").read_bytes() == expected
 
             concurrent_name = "concurrent.json"
-            processes = [subprocess.Popen(
-                [str(runner), "frontend-export", "--state", str(state)],
-                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                cwd=case, env=environment, close_fds=True,
-            ) for _ in range(8)]
+            processes = [exporters.enter_context(exporter()) for _ in range(8)]
             outcomes = [process.communicate(encode(request(concurrent_name)), timeout=30) + (process.returncode,) for process in processes]
             assert sum(code == 0 for _, _, code in outcomes) == 1, outcomes
             assert all(code in [0, 3] and (output.endswith(b"\n") if code == 0 else not output) and len(error) <= 4097
@@ -267,11 +340,7 @@ def main() -> None:
             }
             race_expected = encode({"code": race_code, "value": race_value}) + b"\n"
             before_temporaries = {path.name for path in exports.iterdir() if path.name.startswith(".agentic-tmp-")}
-            publishing = subprocess.Popen(
-                [str(runner), "frontend-export", "--state", str(state)],
-                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                cwd=case, env=environment, close_fds=True,
-            )
+            publishing = exporters.enter_context(exporter())
             assert publishing.stdin is not None and publishing.stdout is not None and publishing.stderr is not None
             publishing.stdin.write(encode(race_request))
             publishing.stdin.close()
@@ -284,16 +353,44 @@ def main() -> None:
                 if new_temporaries and not (exports / race_name).exists():
                     break
                 assert publishing.poll() is None and time.monotonic() < deadline, "did not observe export temporary before commit"
-            os.kill(publishing.pid, signal.SIGSTOP)
-            time.sleep(0.1)
-            assert not (exports / race_name).exists()
-            detached_exports = case / "detached-exports"
-            exports.rename(detached_exports)
-            exports.mkdir(mode=0o700)
-            os.kill(publishing.pid, signal.SIGCONT)
-            race_stdout = publishing.stdout.read()
-            race_stderr = publishing.stderr.read()
-            race_code_status = publishing.wait(timeout=60)
+            try:
+                publishing.send_signal(signal.SIGSTOP)
+                time.sleep(0.1)
+                assert not (exports / race_name).exists()
+                detached_exports = case / "detached-exports"
+                exports.rename(detached_exports)
+                exports.mkdir(mode=0o700)
+            finally:
+                failure = sys.exc_info()[1]
+                previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
+                try:
+                    interrupted = None
+                    while True:
+                        try:
+                            publishing.send_signal(signal.SIGCONT)
+                            break
+                        except KeyboardInterrupt as interruption:
+                            interrupted = interrupted or interruption
+                        except BaseException as cleanup:
+                            if failure is None:
+                                raise
+                            failure.add_note(f"Exporter resume UNPROVEN: {cleanup!r}")
+                            raise failure from cleanup
+                    if interrupted is not None:
+                        if failure is None:
+                            raise interrupted
+                        failure.add_note(f"Exporter resume interrupted: {interrupted!r}; original exporter resumed")
+                finally:
+                    primary = sys.exc_info()[1] or failure
+                    try:
+                        signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+                    except KeyboardInterrupt:
+                        if primary is None:
+                            raise
+                        primary.add_note("Caller interruption deferred until original-owner cleanup finished")
+            publishing.stdin = None
+            race_stdout, race_stderr = publishing.communicate(timeout=60)
+            race_code_status = publishing.returncode
             assert race_code_status == 3 and not race_stdout and 0 < len(race_stderr) <= 4097, (race_code_status, race_stdout, race_stderr)
             assert not (exports / race_name).exists()
             assert (detached_exports / race_name).read_bytes() == race_expected
@@ -301,17 +398,14 @@ def main() -> None:
             detached_exports.rename(exports)
 
             lost_name = "lost-reply.json"
-            lost = subprocess.Popen(
-                [str(runner), "frontend-export", "--state", str(state)],
-                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                cwd=case, env=environment, close_fds=True,
-            )
+            lost = exporters.enter_context(exporter())
             assert lost.stdout is not None and lost.stdin is not None and lost.stderr is not None
             lost.stdout.close()
             lost.stdin.write(encode(request(lost_name)))
             lost.stdin.close()
-            lost_error = lost.stderr.read()
-            lost_code = lost.wait(timeout=30)
+            lost.stdin = None
+            _, lost_error = lost.communicate(timeout=30)
+            lost_code = lost.returncode
             assert lost_code != 0 and len(lost_error) <= 4097, (lost_code, lost_error)
             lost_path = state / "exports" / lost_name
             assert lost_path.read_bytes() == expected
@@ -343,14 +437,7 @@ def main() -> None:
             ]:
                 refused = subprocess.run([str(runner), *arguments], input=encode(request("cli.json")), capture_output=True, cwd=case, env=environment, timeout=10)
                 assert refused.returncode == 1 and not refused.stdout, refused
-    finally:
-        for session in Session.active:
-            if session.process.poll() is None:
-                session.process.terminate()
-                session.process.wait(timeout=10)
-            for pipe in [session.process.stdin, session.process.stdout, session.process.stderr]:
-                if not pipe.closed:
-                    pipe.close()
+    shutil.rmtree(temporary)
     print("frontend export: root binding, strict schema, verified typed bytes, no-clobber concurrency, stale temps, interruption, and lost reply passed")
 
 

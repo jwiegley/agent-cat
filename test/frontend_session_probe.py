@@ -2,6 +2,7 @@
 """Verify native preparation and execution through the real CLI and private pipe."""
 from __future__ import annotations
 
+from contextlib import ExitStack
 import hashlib
 import json
 import os
@@ -9,6 +10,7 @@ from pathlib import Path
 import select
 import signal
 import stat
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -20,7 +22,7 @@ def encode(value: object) -> bytes:
 
 
 class Session:
-    active: list[Session] = []
+    active = ExitStack()
 
     def __init__(self, runner: Path, directory: Path, workflow: str, inputs: list[dict], arguments: list[str] | None = None, environment: dict[str, str] | None = None, request: dict | None = None, command_prefix: list[str] | None = None, request_bytes: bytes | None = None):
         self.root = Path(request["stateDirectory"]) if request else directory / "state"
@@ -32,7 +34,7 @@ class Session:
             [*(command_prefix or [str(runner)]), "frontend"], cwd=directory, env=self.environment,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0, close_fds=True,
         )
-        self.active.append(self)
+        self.active.push(self)
         self.buffer = b""
         if request_bytes is not None:
             self.send_raw(request_bytes + b"\n")
@@ -40,7 +42,7 @@ class Session:
             self.send(request or {"version": 1, "operation": "prepare", "workflow": workflow,
                                   "stateDirectory": str(self.root), "targetArguments": arguments or ["--scripted"], "inputs": inputs})
         self.preview = self.read()
-        assert self.preview is not None, (workflow, directory, self.process.wait(timeout=10), self.process.stderr.read())
+        assert self.preview is not None, (workflow, directory, self.process.communicate(timeout=10))
         self.preview_frame = self.last_raw_frame
         assert self.preview["version"] == 1 and self.preview["operation"] == "prepared", self.preview
         assert set(self.preview["server"]) == {"runnerId", "executable", "runnerVersion"}
@@ -79,13 +81,52 @@ class Session:
         frames = []
         while (frame := self.read()) is not None:
             frames.append(frame)
-        code = self.process.wait(timeout=20)
-        errors = self.process.stderr.read()
-        self.process.stdin.close()
-        self.process.stdout.close()
-        self.process.stderr.close()
+        if self.process.stdin is not None and self.process.stdin.closed:
+            self.process.stdin = None
+        _, errors = self.process.communicate(timeout=20)
+        code = self.process.returncode
         assert code == expected, (code, errors, frames[-3:])
         return frames
+
+    def __exit__(self, _kind, failure, _traceback) -> None:
+        previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
+        try:
+            cleanup_failure = None
+            try:
+                try:
+                    if self.process.poll() is None:
+                        self.process.terminate()
+                except KeyboardInterrupt as interrupted:
+                    cleanup_failure = interrupted
+                if self.process.stdin is not None and self.process.stdin.closed:
+                    self.process.stdin = None
+                timeout = 10 if cleanup_failure is None else None
+                while True:
+                    try:
+                        self.process.communicate(timeout=timeout)
+                        break
+                    except (subprocess.TimeoutExpired, KeyboardInterrupt) as interrupted:
+                        cleanup_failure = cleanup_failure or interrupted
+                        # The deadline has failed. Keep the original owner until joined.
+                        timeout = None
+            except BaseException as unjoined:
+                primary = failure or cleanup_failure
+                if primary is None:
+                    raise
+                primary.add_note(f"Session original join UNPROVEN: {unjoined!r}")
+                raise primary from unjoined
+            if cleanup_failure is not None:
+                if failure is None:
+                    raise cleanup_failure
+                failure.add_note(f"Session cleanup failed: {cleanup_failure!r}; original child joined")
+        finally:
+            primary = sys.exc_info()[1] or failure
+            try:
+                signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+            except KeyboardInterrupt:
+                if primary is None:
+                    raise
+                primary.add_note("Caller interruption deferred until original-owner cleanup finished")
 
     @property
     def run(self) -> Path:
@@ -510,6 +551,55 @@ def native_cleanup(runner: Path, directory: Path) -> None:
             assert session.finish() == []
         assert workers.isdisjoint(process_parents()), (operation, workers)
 
+    case = directory / "native-cleanup-assertion"
+    case.mkdir()
+    failure = AssertionError("prepared-session caller failure")
+    try:
+        with Session.active:
+            session = Session(runner, case, "person-controlled",
+                              [{"name": "input", "source": "literal", "value": "cleanup fixture"}])
+            workers = {pid for pid, parent in process_parents().items() if parent == session.process.pid}
+            assert workers
+            raise failure
+    except AssertionError as observed:
+        assert observed is failure and not getattr(observed, "__notes__", []), observed
+    assert session.process.returncode is not None
+    assert workers.isdisjoint(process_parents()), workers
+
+    from unittest.mock import patch
+
+    for caller_failure in (None, AssertionError("caller before interrupted cleanup")):
+        case = directory / ("cleanup-deadline" if caller_failure is None else "cleanup-interruption")
+        case.mkdir()
+        session = Session(runner, case, "person-controlled",
+                          [{"name": "input", "source": "literal", "value": "cleanup join fixture"}])
+        original_communicate = session.process.communicate
+        first = (subprocess.TimeoutExpired(session.process.args, 10) if caller_failure is None
+                 else KeyboardInterrupt())
+        faults = [first, KeyboardInterrupt(), KeyboardInterrupt()]
+        waits = []
+
+        def interrupted_communicate(*args, **kwargs):
+            assert case.is_dir(), "root disposed before original join"
+            waits.append(kwargs.get("timeout"))
+            if faults:
+                signal.raise_signal(signal.SIGINT)
+                assert signal.SIGINT in signal.sigpending(), "caller SIGINT was not deferred"
+                raise faults.pop(0)
+            return original_communicate(*args, **kwargs)
+
+        with patch.object(session.process, "communicate", interrupted_communicate):
+            try:
+                with Session.active:
+                    if caller_failure is not None:
+                        raise caller_failure
+            except BaseException as observed:
+                assert observed is (caller_failure or first), observed
+            else:
+                raise AssertionError("cleanup failure became success")
+        assert not faults and waits == [10, None, None, None], waits
+        assert session.process.returncode is not None, "original Session was not joined"
+
 
 def person(runner: Path, directory: Path) -> None:
     case = directory / "person"
@@ -828,37 +918,30 @@ def native_controls(runner: Path, directory: Path) -> None:
 
 def main() -> None:
     runner = Path(sys.argv[1]).resolve()
-    try:
-        with tempfile.TemporaryDirectory(prefix="agent-cat-native-probe-") as temporary:
-            root = Path(temporary).resolve()
-            wrapper, prefix, capabilities = capability_discovery(runner, root)
-            v3_parent = invocation_contract(runner, root, wrapper, prefix, capabilities)
-            source_vectors(runner, root)
-            decisions(runner, root)
-            targets(runner, root)
-            frozen_routing(runner, root)
-            native_cleanup(runner, root)
-            person(runner, root)
-            native_controls(runner, root)
-            invalid_sources(runner, root)
-            invocation_lineage_matrix(runner, root, wrapper, prefix, v3_parent)
-            native_lineage(runner, root)
-            legacy_lineage(runner, root)
-            corrupt_history(runner, root)
-            bootstrap = root / "inherited-bootstrap"
-            bootstrap.mkdir()
-            session = Session(runner, bootstrap, "prompt-source", [{"name": "input", "source": "literal", "value": "@literal"}],
-                              environment={"AGENT_CAT_TUI_BOOTSTRAP_FD3": "1", "AGENT_CAT_CONTROL_FD": "3"})
-            session.send(session.decision("discard"))
-            assert session.finish() == []
-    finally:
-        for session in Session.active:
-            if session.process.poll() is None:
-                session.process.terminate()
-                session.process.wait(timeout=10)
-            for pipe in [session.process.stdin, session.process.stdout, session.process.stderr]:
-                if not pipe.closed:
-                    pipe.close()
+    temporary = tempfile.mkdtemp(prefix="agent-cat-native-probe-")
+    with Session.active:
+        root = Path(temporary).resolve()
+        wrapper, prefix, capabilities = capability_discovery(runner, root)
+        v3_parent = invocation_contract(runner, root, wrapper, prefix, capabilities)
+        source_vectors(runner, root)
+        decisions(runner, root)
+        targets(runner, root)
+        frozen_routing(runner, root)
+        native_cleanup(runner, root)
+        person(runner, root)
+        native_controls(runner, root)
+        invalid_sources(runner, root)
+        invocation_lineage_matrix(runner, root, wrapper, prefix, v3_parent)
+        native_lineage(runner, root)
+        legacy_lineage(runner, root)
+        corrupt_history(runner, root)
+        bootstrap = root / "inherited-bootstrap"
+        bootstrap.mkdir()
+        session = Session(runner, bootstrap, "prompt-source", [{"name": "input", "source": "literal", "value": "@literal"}],
+                          environment={"AGENT_CAT_TUI_BOOTSTRAP_FD3": "1", "AGENT_CAT_CONTROL_FD": "3"})
+        session.send(session.decision("discard"))
+        assert session.finish() == []
+    shutil.rmtree(temporary)
     print("native session: capability discovery, exact invocation retention, v2/v3 lineage, transport capture, approval, controls, and local human answers passed")
 
 

@@ -264,15 +264,20 @@ class TuiSession:
             environment.pop("AGENT_CAT_STATE_DIR", None)
             environment["XDG_STATE_HOME"] = str(state)
         environment.update(extra_environment or {})
-        self.process = subprocess.Popen(
-            command or [str(runner), "--tui"],
-            stdin=self.slave,
-            stdout=self.slave,
-            stderr=self.slave,
-            env=environment,
-            start_new_session=True,
-            close_fds=True,
-        )
+        try:
+            self.process = subprocess.Popen(
+                command or [str(runner), "--tui"],
+                stdin=self.slave,
+                stdout=self.slave,
+                stderr=self.slave,
+                env=environment,
+                start_new_session=True,
+                close_fds=True,
+            )
+        except BaseException:
+            os.close(self.master)
+            os.close(self.slave)
+            raise
         self.output = bytearray()
 
     def pump(self, wait: float = 0.05) -> None:
@@ -361,17 +366,63 @@ class TuiSession:
         assert b"\x1b[?25h" in self.output, ("cursor was not restored", len(self.output), bytes(self.output[-500:]))
 
     def close(self) -> None:
-        if self.process.poll() is None:
-            self.process.kill()
-            self.process.wait()
-        os.close(self.master)
-        os.close(self.slave)
+        previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
+        try:
+            stopping = self.process.poll() is None
+            cleanup_failure = None
+            if stopping:
+                try:
+                    self.process.terminate()
+                    self.wait_exit()
+                except (AssertionError, KeyboardInterrupt) as interrupted:
+                    cleanup_failure = interrupted
+            # A failed deadline does not release the PTY or its original owner.
+            while True:
+                try:
+                    while self.process.poll() is None:
+                        self.pump()
+                    self.process.wait()
+                    self.settle()
+                    break
+                except KeyboardInterrupt as interrupted:
+                    cleanup_failure = cleanup_failure or interrupted
+                except BaseException as unjoined:
+                    if cleanup_failure is None:
+                        raise
+                    cleanup_failure.add_note(f"TUI original join UNPROVEN: {unjoined!r}")
+                    raise cleanup_failure from unjoined
+            try:
+                if stopping:
+                    self.assert_restored()
+            except BaseException as restoration:
+                if cleanup_failure is None:
+                    raise
+                cleanup_failure.add_note(f"TUI restoration failed after join: {restoration!r}")
+            finally:
+                os.close(self.master)
+                os.close(self.slave)
+            if cleanup_failure is not None:
+                raise cleanup_failure
+        finally:
+            primary = sys.exc_info()[1]
+            try:
+                signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+            except KeyboardInterrupt:
+                if primary is None:
+                    raise
+                primary.add_note("Caller interruption deferred until original-owner cleanup finished")
 
     def __enter__(self) -> "TuiSession":
         return self
 
-    def __exit__(self, _kind, _value, _traceback) -> None:
-        self.close()
+    def __exit__(self, _kind, failure, _traceback) -> None:
+        try:
+            self.close()
+        except BaseException as cleanup:
+            if failure is None:
+                raise
+            failure.add_note(f"TUI cleanup failed: {cleanup!r}")
+            raise failure from cleanup
 
 
 def mode(path: Path) -> int:
@@ -450,26 +501,69 @@ print(json.dumps({"closed": closed, "limit": resource.getrlimit(resource.RLIMIT_
 print("probe stderr", file=sys.stderr)
 '''
         limits = [soft, 256] if sys.platform.startswith("linux") and soft > 256 else [soft]
-        for limit in limits:
+        ready = root / "spawn-interruption-ready"
+        interrupted_child = '''import os, pathlib, signal, sys
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+pathlib.Path(sys.argv[1]).write_text(str(os.getpid()))
+signal.pause()
+'''
+        for limit, interrupted in [(limit, False) for limit in limits] + [(soft, True)]:
             resource.setrlimit(resource.RLIMIT_NOFILE, (limit, hard))
             process = subprocess.Popen(
-                [str(driver), "--spawn-probe", sys.executable, "-c", child, str(descriptor)],
+                [str(driver), "--spawn-probe", sys.executable, "-c",
+                 interrupted_child if interrupted else child, str(ready if interrupted else descriptor)],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, pass_fds=(descriptor,),
             )
             try:
+                if interrupted:
+                    deadline = time.monotonic() + 10
+                    while not ready.exists() and time.monotonic() < deadline:
+                        assert process.poll() is None, "spawn driver exited before child readiness"
+                        time.sleep(0.01)
+                    assert ready.exists(), "spawn child did not become ready"
+                    process.terminate()
                 output, errors = process.communicate(timeout=10)
             finally:
-                if process.poll() is None:
-                    for pid in child_processes(process.pid):
-                        try:
-                            os.kill(pid, signal.SIGKILL)
-                        except ProcessLookupError:
-                            pass
+                failure = sys.exc_info()[1]
+                previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
+                try:
+                    cleanup_failure = None
                     try:
-                        process.communicate(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.communicate()
+                        try:
+                            if process.poll() is None:
+                                process.terminate()
+                        except KeyboardInterrupt as interrupted:
+                            cleanup_failure = interrupted
+                        timeout = 5 if cleanup_failure is None else None
+                        while True:
+                            try:
+                                process.communicate(timeout=timeout)
+                                break
+                            except (subprocess.TimeoutExpired, KeyboardInterrupt) as interrupted:
+                                cleanup_failure = cleanup_failure or interrupted
+                                timeout = None
+                    except BaseException as unjoined:
+                        primary = failure or cleanup_failure
+                        if primary is None:
+                            raise
+                        primary.add_note(f"Spawn driver original join UNPROVEN: {unjoined!r}")
+                        raise primary from unjoined
+                    if cleanup_failure is not None:
+                        if failure is None:
+                            raise cleanup_failure
+                        failure.add_note(f"Spawn driver cleanup failed: {cleanup_failure!r}; original child joined")
+                finally:
+                    primary = sys.exc_info()[1] or failure
+                    try:
+                        signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+                    except KeyboardInterrupt:
+                        if primary is None:
+                            raise
+                        primary.add_note("Caller interruption deferred until original-owner cleanup finished")
+            if interrupted:
+                assert process.returncode != 0, (output, errors)
+                assert not process_exists(int(ready.read_text())), "spawn driver did not join its child"
+                continue
             assert process.returncode == 0, errors
             assert json.loads(output) == {
                 "closed": True, "limit": [limit, hard], "session": True, "input": "probe stdin",
@@ -485,7 +579,7 @@ print("probe stderr", file=sys.stderr)
         resource.setrlimit(resource.RLIMIT_NOFILE, original)
         if descriptor is not None:
             os.close(descriptor)
-    print(f"spawn probe: nofile={soft}, inherited FD closure, stdio, session, and exec failure passed")
+    print(f"spawn probe: nofile={soft}, inherited FD closure, stdio, session, exec failure, and interrupted owner join passed")
 
 
 def test_interrupted_helper_shutdown(driver: Path, fixture: Path, root: Path) -> None:
@@ -496,46 +590,39 @@ def test_interrupted_helper_shutdown(driver: Path, fixture: Path, root: Path) ->
         command = [str(driver), str(fixture), str(state), str(root)]
         baseline = processes_matching(str(fixture))
         pause = "list" if first == "quit" else "help"
-        try:
-            with TuiSession(driver, state, command=command, extra_environment={
-                "TUI_FIXTURE_PAUSE": pause, "TUI_FIXTURE_READY": str(ready),
-                "TUI_FIXTURE_TERM_SEEN": str(term_seen),
-            }) as session:
-                if first == "quit":
-                    session.wait_screen("Loading workflows, stored runs, and offline routing")
-                else:
-                    session.wait_for(b"Workflows"); session.settle(); session.send(b"h")
-                deadline = time.monotonic() + 5
-                while (not ready.exists() or not ready.read_text()) and time.monotonic() < deadline:
-                    session.pump(0.005)
-                assert ready.exists() and ready.read_text(), "shutdown helper did not start"
-                if first == "quit":
-                    session.send(b"q")
-                else:
-                    session.process.send_signal(signal.SIGTERM)
-                deadline = time.monotonic() + 5
-                while not term_seen.exists() and time.monotonic() < deadline:
-                    session.pump(0.005)
-                assert term_seen.exists(), "helper cleanup did not enter TERM grace"
-                assert session.process.poll() is None, "owner exited before cleanup interruption"
-                session.process.send_signal(signal.SIGINT)
-                status = session.wait_exit(timeout=10)
-                if first == "quit":
-                    assert status == 0
-                else:
-                    assert status != 0
-                try:
-                    session.assert_restored()
-                except AssertionError as failure:
-                    raise AssertionError(f"{first} shutdown restoration failed with exit {status}: {failure}") from failure
-            survivors = processes_matching(str(fixture)) - baseline
-            assert not survivors, f"helper survived interrupted shutdown: {survivors}"
-        finally:
-            for pid in processes_matching(str(fixture)) - baseline:
-                try:
-                    os.kill(pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
+        with TuiSession(driver, state, command=command, extra_environment={
+            "TUI_FIXTURE_PAUSE": pause, "TUI_FIXTURE_READY": str(ready),
+            "TUI_FIXTURE_TERM_SEEN": str(term_seen),
+        }) as session:
+            if first == "quit":
+                session.wait_screen("Loading workflows, stored runs, and offline routing")
+            else:
+                session.wait_for(b"Workflows"); session.settle(); session.send(b"h")
+            deadline = time.monotonic() + 5
+            while (not ready.exists() or not ready.read_text()) and time.monotonic() < deadline:
+                session.pump(0.005)
+            assert ready.exists() and ready.read_text(), "shutdown helper did not start"
+            if first == "quit":
+                session.send(b"q")
+            else:
+                session.process.send_signal(signal.SIGTERM)
+            deadline = time.monotonic() + 5
+            while not term_seen.exists() and time.monotonic() < deadline:
+                session.pump(0.005)
+            assert term_seen.exists(), "helper cleanup did not enter TERM grace"
+            assert session.process.poll() is None, "owner exited before cleanup interruption"
+            session.process.send_signal(signal.SIGINT)
+            status = session.wait_exit(timeout=10)
+            if first == "quit":
+                assert status == 0
+            else:
+                assert status != 0
+            try:
+                session.assert_restored()
+            except AssertionError as failure:
+                raise AssertionError(f"{first} shutdown restoration failed with exit {status}: {failure}") from failure
+        survivors = processes_matching(str(fixture)) - baseline
+        assert not survivors, f"helper survived interrupted shutdown: {survivors}"
 
 
 def test_helper_ownership(driver: Path, fixture: Path, root: Path) -> None:
@@ -545,65 +632,58 @@ def test_helper_ownership(driver: Path, fixture: Path, root: Path) -> None:
         ready = root / f"helper-ready-{label}"
         command = [str(driver), str(fixture), str(state), str(root)]
         children = set()
-        try:
-            with TuiSession(driver, state, command=command, extra_environment={
-                "TUI_FIXTURE_PAUSE": verb, "TUI_FIXTURE_READY": str(ready),
-                "TUI_FIXTURE_HELP_CHILD": "redirect" if label == "help-redirect" else "pipes" if label == "help-child" else "",
-            }) as session:
+        with TuiSession(driver, state, command=command, extra_environment={
+            "TUI_FIXTURE_PAUSE": verb, "TUI_FIXTURE_READY": str(ready),
+            "TUI_FIXTURE_HELP_CHILD": "redirect" if label == "help-redirect" else "pipes" if label == "help-child" else "",
+        }) as session:
+            if verb == "help":
+                session.wait_for(b"Workflows"); session.settle(); session.send(b"h")
+            elif verb == "plan":
+                select_workflow(session, 0)
+                session.wait_for(b"Execution target"); session.send(b"s")
+            else:
+                session.wait_for(b"Loading workflows, stored runs, and offline routing")
+            deadline = time.monotonic() + 10
+            while (not ready.exists() or not ready.read_text()) and time.monotonic() < deadline:
+                session.pump()
+            assert ready.exists() and ready.read_text(), f"{verb} helper did not start; exit={session.process.poll()}; output={bytes(session.output[-1500:])!r}"
+            if verb == "list":
+                session.wait_screen("Loading workflows, stored runs, and offline routing")
+            first = int(ready.read_text()); children.add(first)
+            if label in ("help-child", "help-redirect"):
+                session.wait_for(b"fixture help")
+            if verb in ("list", "--routing"):
+                session.process.send_signal(signal.SIGTERM)
+                assert session.wait_exit(timeout=10) != 0
+                session.assert_restored()
+            else:
+                cursor = len(session.output); session.send(ESCAPE)
+                if verb == "plan":
+                    cursor = session.wait_for(b"Execution target", after=cursor)
+                    session.send(ESCAPE)
+                    session.wait_for(b"browser", after=cursor)
+                else:
+                    session.wait_for(b"filter /", after=cursor)
                 if verb == "help":
-                    session.wait_for(b"Workflows"); session.settle(); session.send(b"h")
-                elif verb == "plan":
-                    select_workflow(session, 0)
-                    session.wait_for(b"Execution target"); session.send(b"s")
-                else:
-                    session.wait_for(b"Loading workflows, stored runs, and offline routing")
-                deadline = time.monotonic() + 10
-                while (not ready.exists() or not ready.read_text()) and time.monotonic() < deadline:
-                    session.pump()
-                assert ready.exists() and ready.read_text(), f"{verb} helper did not start; exit={session.process.poll()}; output={bytes(session.output[-1500:])!r}"
-                if verb == "list":
-                    session.wait_screen("Loading workflows, stored runs, and offline routing")
-                first = int(ready.read_text()); children.add(first)
-                if label in ("help-child", "help-redirect"):
-                    session.wait_for(b"fixture help")
-                if verb in ("list", "--routing"):
-                    session.process.send_signal(signal.SIGTERM)
-                    assert session.wait_exit(timeout=10) != 0
-                    session.assert_restored()
-                else:
+                    session.send(b"h")
+                    deadline = time.monotonic() + 10
+                    while int(ready.read_text() or first) == first and time.monotonic() < deadline:
+                        session.pump()
+                    second = int(ready.read_text()); children.add(second)
+                    assert second != first, "superseding help did not start a new worker"
+                    deadline = time.monotonic() + 3
+                    while process_exists(first) and time.monotonic() < deadline:
+                        time.sleep(0.05)
+                    assert not process_exists(first), "superseded helper was not reaped"
                     cursor = len(session.output); session.send(ESCAPE)
-                    if verb == "plan":
-                        cursor = session.wait_for(b"Execution target", after=cursor)
-                        session.send(ESCAPE)
-                        session.wait_for(b"browser", after=cursor)
-                    else:
-                        session.wait_for(b"filter /", after=cursor)
-                    if verb == "help":
-                        session.send(b"h")
-                        deadline = time.monotonic() + 10
-                        while int(ready.read_text() or first) == first and time.monotonic() < deadline:
-                            session.pump()
-                        second = int(ready.read_text()); children.add(second)
-                        assert second != first, "superseding help did not start a new worker"
-                        deadline = time.monotonic() + 3
-                        while process_exists(first) and time.monotonic() < deadline:
-                            time.sleep(0.05)
-                        assert not process_exists(first), "superseded helper was not reaped"
-                        cursor = len(session.output); session.send(ESCAPE)
-                        session.wait_for(b"filter /", after=cursor)
-                    session.send(b"q")
-                    assert session.wait_exit(timeout=10) == 0
-                    session.assert_restored()
-                deadline = time.monotonic() + 3
-                while any(process_exists(pid) for pid in children) and time.monotonic() < deadline:
-                    time.sleep(0.05)
-                assert not any(process_exists(pid) for pid in children), f"{label} orphaned helpers: {children}"
-        finally:
-            for pid in children:
-                try:
-                    os.kill(pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
+                    session.wait_for(b"filter /", after=cursor)
+                session.send(b"q")
+                assert session.wait_exit(timeout=10) == 0
+                session.assert_restored()
+            deadline = time.monotonic() + 3
+            while any(process_exists(pid) for pid in children) and time.monotonic() < deadline:
+                time.sleep(0.05)
+            assert not any(process_exists(pid) for pid in children), f"{label} orphaned helpers: {children}"
 
 
 def test_catalogue_fifo(runner: Path, root: Path) -> None:
@@ -652,6 +732,7 @@ def test_state_root_confinement(runner: Path, root: Path) -> None:
 
     public = root / "public-state"
     public.mkdir(mode=0o755)
+    public.chmod(0o755)
     with TuiSession(runner, public) as session:
         assert session.wait_exit() != 0
         assert b"state root permissions are not private" in session.output
@@ -1556,53 +1637,46 @@ def test_machine_group_ownership(driver: Path, fixture: Path, root: Path) -> Non
         ready = root / f"machine-descendant-{scenario}"
         command = [str(driver), str(fixture), str(state), str(root)]
         baseline = processes_matching(str(fixture))
-        try:
-            with TuiSession(driver, state, command=command, extra_environment={
-                "TUI_FIXTURE_MODE": scenario, "TUI_FIXTURE_READY": str(ready),
-            }) as session:
-                select_workflow(session, 0)
-                cursor = session.wait_for(b"Execution target")
-                session.send(b"s")
-                cursor = session.wait_for(b"launch confirmation", after=cursor)
-                session.send(b"y")
-                if scenario.startswith("orphan-"):
-                    failure = session.wait_for(b"machine child exited before a terminal", after=cursor, timeout=8)
-                    assert ready.exists(), "descendant did not publish its synchronized PID"
-                    quit_failed_run(session, failure)
-                else:
-                    marker = b"orphan ready" if scenario == "term-orphan" else b"Running on fixture"
-                    active = session.wait_for(marker, after=cursor)
-                    if scenario == "unread-control":
-                        session.send(b"i")
-                        editor = session.wait_for(b"interrupt-now", after=active)
-                        control_text = (b"x" * 64 + b"\n") * 4096 + b"END-BLOCKED"
-                        session.send(PASTE_START + control_text + PASTE_END)
-                        session.wait_for(b"END-BLOCKED", after=editor, timeout=10)
-                        submitted = len(session.output)
-                        session.send(CTRL_D)
-                        deadline = time.monotonic() + 5
-                        while (not ready.exists() or not ready.read_text()) and time.monotonic() < deadline:
-                            session.pump()
-                        # JSON framing is larger than the submitted ASCII payload.
-                        assert ready.exists() and 0 < int(ready.read_text()) < len(control_text), (
-                            f"control write did not enter the unread pipe: ready={ready.read_text() if ready.exists() else 'missing'}, payload={len(control_text)}"
-                        )
-                        session.settle()
-                        assert b"control sent" not in session.output[submitted:], "large control unexpectedly fit the unread pipe"
-                    session.process.send_signal(signal.SIGTERM)
-                    assert session.wait_exit(timeout=12) != 0
-                session.assert_restored()
-            deadline = time.monotonic() + 3
-            while time.monotonic() < deadline and processes_matching(str(fixture)) - baseline:
-                time.sleep(0.05)
-            survivors = processes_matching(str(fixture)) - baseline
-            assert not survivors, f"{scenario} left group members alive: {survivors}"
-        finally:
-            for pid in processes_matching(str(fixture)) - baseline:
-                try:
-                    os.kill(pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
+        with TuiSession(driver, state, command=command, extra_environment={
+            "TUI_FIXTURE_MODE": scenario, "TUI_FIXTURE_READY": str(ready),
+        }) as session:
+            select_workflow(session, 0)
+            cursor = session.wait_for(b"Execution target")
+            session.send(b"s")
+            cursor = session.wait_for(b"launch confirmation", after=cursor)
+            session.send(b"y")
+            if scenario.startswith("orphan-"):
+                failure = session.wait_for(b"machine child exited before a terminal", after=cursor, timeout=8)
+                assert ready.exists(), "descendant did not publish its synchronized PID"
+                quit_failed_run(session, failure)
+            else:
+                marker = b"orphan ready" if scenario == "term-orphan" else b"Running on fixture"
+                active = session.wait_for(marker, after=cursor)
+                if scenario == "unread-control":
+                    session.send(b"i")
+                    editor = session.wait_for(b"interrupt-now", after=active)
+                    control_text = (b"x" * 64 + b"\n") * 4096 + b"END-BLOCKED"
+                    session.send(PASTE_START + control_text + PASTE_END)
+                    session.wait_for(b"END-BLOCKED", after=editor, timeout=10)
+                    submitted = len(session.output)
+                    session.send(CTRL_D)
+                    deadline = time.monotonic() + 5
+                    while (not ready.exists() or not ready.read_text()) and time.monotonic() < deadline:
+                        session.pump()
+                    # JSON framing is larger than the submitted ASCII payload.
+                    assert ready.exists() and 0 < int(ready.read_text()) < len(control_text), (
+                        f"control write did not enter the unread pipe: ready={ready.read_text() if ready.exists() else 'missing'}, payload={len(control_text)}"
+                    )
+                    session.settle()
+                    assert b"control sent" not in session.output[submitted:], "large control unexpectedly fit the unread pipe"
+                session.process.send_signal(signal.SIGTERM)
+                assert session.wait_exit(timeout=12) != 0
+            session.assert_restored()
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and processes_matching(str(fixture)) - baseline:
+            time.sleep(0.05)
+        survivors = processes_matching(str(fixture)) - baseline
+        assert not survivors, f"{scenario} left group members alive: {survivors}"
 
 
 def test_confirmed_machine_launch(runner: Path, root: Path) -> None:
@@ -1792,6 +1866,51 @@ def test_signal_restoration(runner: Path, root: Path) -> None:
         assert status != 0
         session.assert_restored()
 
+    failure = AssertionError("TUI caller failure")
+    try:
+        with TuiSession(runner, root / "assertion-state") as session:
+            session.wait_for(b"Workflows")
+            session.settle()
+            raise failure
+    except AssertionError as observed:
+        assert observed is failure and not getattr(observed, "__notes__", []), observed
+    assert session.process.returncode is not None
+
+    from unittest.mock import patch
+
+    for caller_failure in (None, AssertionError("TUI caller before cleanup deadline")):
+        state = root / ("cleanup-deadline-state" if caller_failure is None else "cleanup-caller-state")
+        session = TuiSession(runner, state)
+        first = AssertionError("TUI did not exit before the timeout")
+        faults = [KeyboardInterrupt(), KeyboardInterrupt()]
+        original_wait = session.process.wait
+        joins = []
+
+        def interrupted_wait(*args, **kwargs):
+            assert state.is_dir(), "TUI root disposed before original join"
+            os.fstat(session.master)
+            os.fstat(session.slave)
+            joins.append(kwargs.get("timeout"))
+            if faults:
+                signal.raise_signal(signal.SIGINT)
+                assert signal.SIGINT in signal.sigpending(), "caller SIGINT was not deferred"
+                raise faults.pop(0)
+            return original_wait(*args, **kwargs)
+
+        with patch.object(session, "wait_exit", side_effect=first), patch.object(session.process, "wait", interrupted_wait):
+            try:
+                with session:
+                    session.wait_for(b"Workflows")
+                    session.settle()
+                    if caller_failure is not None:
+                        raise caller_failure
+            except BaseException as observed:
+                assert observed is (caller_failure or first), observed
+            else:
+                raise AssertionError("TUI cleanup timeout became success")
+        assert not faults and joins == [None, None, None], joins
+        assert session.process.returncode is not None, "original TUI was not joined"
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -1800,31 +1919,32 @@ def main() -> None:
     parser.add_argument("--fixture", type=Path, default=Path("test/tui_fixture_runner.py"))
     arguments = parser.parse_args()
     runner = arguments.runner.resolve()
-    with tempfile.TemporaryDirectory(prefix="agent-cat-tui-probe-") as directory:
-        root = Path(directory)
-        test_non_tty(runner)
-        if arguments.driver is not None:
-            test_spawn_descriptors(arguments.driver.resolve(), root)
-        test_startup_and_input(runner, root)
-        test_default_state_isolation(runner, root)
-        test_state_root_confinement(runner, root)
-        test_catalogue_fifo(runner, root)
-        test_child_state_anchor(runner, root)
-        test_confirmed_machine_launch(runner, root)
-        test_lineage_owner_refresh(runner, root)
-        if arguments.driver is not None:
-            test_helper_ownership(arguments.driver.resolve(), arguments.fixture.resolve(), root)
-            test_interrupted_helper_shutdown(arguments.driver.resolve(), arguments.fixture.resolve(), root)
-            test_machine_group_ownership(arguments.driver.resolve(), arguments.fixture.resolve(), root)
-            test_filter_and_responsive_browser(arguments.driver.resolve(), arguments.fixture.resolve(), root)
-            test_resize_confirmation_and_no_color(arguments.driver.resolve(), arguments.fixture.resolve(), root)
-            test_exact_plan_preview(arguments.driver.resolve(), arguments.fixture.resolve(), root)
-            test_run_failure_details(arguments.driver.resolve(), arguments.fixture.resolve(), root)
-            test_recovery_layout(arguments.driver.resolve(), arguments.fixture.resolve(), root)
-            test_exact_controls_and_stress(arguments.driver.resolve(), arguments.fixture.resolve(), root)
-        test_local_person_answer_and_cancel(runner, root)
-        test_child_exec_failure(runner, root)
-        test_signal_restoration(runner, root)
+    directory = tempfile.mkdtemp(prefix="agent-cat-tui-probe-")
+    root = Path(directory)
+    test_non_tty(runner)
+    if arguments.driver is not None:
+        test_spawn_descriptors(arguments.driver.resolve(), root)
+    test_startup_and_input(runner, root)
+    test_default_state_isolation(runner, root)
+    test_state_root_confinement(runner, root)
+    test_catalogue_fifo(runner, root)
+    test_child_state_anchor(runner, root)
+    test_confirmed_machine_launch(runner, root)
+    test_lineage_owner_refresh(runner, root)
+    if arguments.driver is not None:
+        test_helper_ownership(arguments.driver.resolve(), arguments.fixture.resolve(), root)
+        test_interrupted_helper_shutdown(arguments.driver.resolve(), arguments.fixture.resolve(), root)
+        test_machine_group_ownership(arguments.driver.resolve(), arguments.fixture.resolve(), root)
+        test_filter_and_responsive_browser(arguments.driver.resolve(), arguments.fixture.resolve(), root)
+        test_resize_confirmation_and_no_color(arguments.driver.resolve(), arguments.fixture.resolve(), root)
+        test_exact_plan_preview(arguments.driver.resolve(), arguments.fixture.resolve(), root)
+        test_run_failure_details(arguments.driver.resolve(), arguments.fixture.resolve(), root)
+        test_recovery_layout(arguments.driver.resolve(), arguments.fixture.resolve(), root)
+        test_exact_controls_and_stress(arguments.driver.resolve(), arguments.fixture.resolve(), root)
+    test_local_person_answer_and_cancel(runner, root)
+    test_child_exec_failure(runner, root)
+    test_signal_restoration(runner, root)
+    shutil.rmtree(directory)
     print("tui probe: all checks passed")
 
 

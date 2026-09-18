@@ -26,8 +26,8 @@ Implementation is active, not complete. The frozen acceptance contract and
 action-specific restrictions remain unchanged. Native work requires a bounded
 next-step decision rather than reuse of an earlier diagnostic authorization.
 
-Refocus completed at `2026-09-17T22:43:54Z`. The next deadline is
-`2026-09-17T23:43:54Z`. The earlier 00:46 checkpoint was less than one minute
+Refocus completed at `2026-09-18T00:07:48Z`. The next deadline is
+`2026-09-18T01:07:48Z`. The earlier 00:46 checkpoint was less than one minute
 late during read-only verification, and the lapse was disclosed.
 
 **Application integration milestone:** the WM-016 application changes now
@@ -71,14 +71,55 @@ discovery check passed, but the latter is not a complete frontend-session pass.
 Results are in `canonical-suites.2wyjVH56`, `canonical-suites-fixed.qx9rq4WY`,
 `canonical-gates.ZhA7cmOX`, `canonical-transport.OUxLX9W2`,
 `session-capabilities-red.9YF2Pxoh` and `session-capabilities-green.L2GralIM`
-under the same delivery directory. The remaining local work is full policies
-and native UI compatibility. Consolidate only concrete owner repairs needed to
-run those existing gates safely. Linux and affected Pi/Emacs/client checks still
-require their requested authorization. Final milestone review remains outstanding,
-so WM-016 is not accepted.
+under the same delivery directory. Full policies and final milestone review
+remain outstanding. Linux and affected Pi/Emacs/client checks still require
+their requested authorization, so WM-016 is not accepted.
+
+The consolidated correction from `controls.qzldrova/wm016-owner-closure.uw37fnwn`
+fixes the selected Session/export/contract/lineage/TUI test owners. It removes
+process-enumeration signalling, registers exporter children immediately, resumes
+the original stopped publisher in finally, and joins before resource disposal.
+The TUI spawn Driver retains the existing Runtime ProcessGroup and its existing
+two-second grace. No production owner or budget changed.
+
+The unchanged boundary guard first rejected StoreAdmissionCheck. Its move into
+the existing `Agentic.Manager.Test` namespace changes only the module declaration,
+import and Cabal registration, not the helper behavior or boundary policy.
+
+Parent review refused an initial revision that still allowed teardown after a
+failed join. The completed revision retains the same child through deferred-
+interruption joining and preserves the expired deadline as a failure. Direct
+temporary-directory allocation and explicit post-owner disposal leave resources
+intact if an unexpected OS join error prevents proof. No such OS error occurred
+in validation, and that branch was not artificially induced.
+
+The initial full TUI stages passed through a sourced invocation with an ephemeral
+Bash wrapper function, not a relabeled direct script invocation. Final-source
+frontend/session/export/contract/person-lineage probes and affected native TUI
+signal, spawn, helper and machine-group cases passed after the residual fix.
+Timeout regressions inject deadline exceptions into observations of real original
+children and finish with original communicate/wait calls. They do not establish
+naturally elapsed ten/eight-second timeouts. The selected owners defer real
+pending SIGINT through cleanup, without making a universal claim about every
+other subprocess helper's interruption path.
+
+The ordinary `logs` under the owner-closure directory retain the initial boundary
+failure, successful native gates and final owner results. Canonical Cabal builds
+of the Driver and Store checker passed with warnings fatal. The parent then ran
+`bash tui/ci/tui.sh` directly. Its first run failed because another public-mode
+fixture was actually 0700 under umask 077. Explicit chmod to 0755 preserves the
+unchanged refusal and non-repair assertions. The retained failed directory
+confirmed that diagnosis. A fresh full direct canonical gate then passed, with
+output in `canonical-fixed.OKcf8hGw` and the failure in `canonical.doaAgBqX`.
+
+The next decisive action is canonical full-policy execution. One independent
+review remains scheduled for the coherent WM-016 milestone, not these files.
 
 The authority-only tracker issues `acat-lijk`, `acat-3ajx`, `acat-3sq1` and
-`acat-jg00` are outside this worktree projection and remain untouched.
+`acat-jg00` are outside this worktree projection. Export encountered duplicate
+serialized copies of the latter two records. Only those byte-identical duplicate
+copies were removed from the shared projection, leaving their original issue
+records and database fields unchanged. Normal export then succeeded.
 
 The following verification history retains its original scope. The paused L08
 review and earlier next-helper instructions do not govern current work.
