@@ -19,19 +19,40 @@ remain the authority for their respective scopes.
 
 ## Active WM-017 unit
 
-Issue `acat-wm-017-1hda` is claimed. One author works in
-`implementation.9tGzKH/artifacts.Rdk65Wyh/source`, branch
-`wm017-artifacts-20260919` from acceptance commit `c450ef3`. Workflow
-`51d937e8-b8d6-499d-ac5b-b8374a147ca4` launched retained child
-`ee5e9fb7-d7e1-4e1f-964c-2928aed870f3`; supervisor replies continue that original
-child after its coordination detach. Do not launch a duplicate writer.
+Issue `acat-wm-017-1hda` remains in progress. The coherent library unit is
+reviewed for integration, not accepted. Its proposal is retained under
+`implementation.9tGzKH/artifacts.Rdk65Wyh`, with current review, focused results
+and first-failure history. Parent carried the source onto current canonical
+tracking without replacing later issue/handoff changes. No duplicate writer
+or stale tracking overlay is permitted.
 
-The unit implements frozen outputs, verified captured downloads and exclusive
-exports through existing Runtime/Store/Commands owners. Short private runtime
-paths are under `/Users/johnw/Products/a.9iWkXa`. Initial checks cover builds and
-bounded deterministic pure/SQLite/filesystem cases, not a complete native/client
-matrix. Broader owning validation receives a bounded decision after a coherent
-proposal. Parent retains Git, tracker, integration and acceptance authority.
+The implementation reuses State references, Commands acceptance/dispatch, Store
+file/transaction ownership and shared Runtime verification/publication. Captured
+native source envelopes and export documents retain distinct bytes and handles.
+Schema eight defers only the export-command FK until commit. Lost completion
+can reconcile a durably witnessed publication after current verification, but
+matching bytes without witness do not authorize adoption or republication.
+
+Initial review found revision ABA and incomplete durable acceptance binding.
+Both are corrected with fresh transition revisions, idempotent completed
+observation and private exact request/name provenance. Review
+`f4175cee-bc67-49bc-9505-c5b7eedc9651` found no issues and cleared owning gates.
+Focused real filesystem/SQLite checks pass 147 assertions at each N1/N8, plus
+frozen representation validation, source boundaries, docs and checker builds.
+These are not native workflow-process or complete platform/client results.
+
+Next run the existing Runtime/engine suites, full policies with its manager and
+native frontend probes, and Haskell documentation gate on integrated bytes.
+Do not duplicate manager/audit launches already owned by policies. Required
+platform execution remains explicit. Private runtime paths are under
+`/Users/johnw/Products/a.9iWkXa`, with exact canonical direnv entry and unchanged
+offline wrapper. Parent owns Git, tracker, gates and acceptance.
+
+The file loan bounds raw captures/reads through callback return, not total heap.
+Callback consumers may not retain bytes afterward. Atomic output-page/revision
+snapshots belong to WM025, and active callback credential revocation to WM023/A16.
+Full-size stress is unrun. Structured public-shape validation is not complete
+semantic-schema validation, as recorded in `acat-4978`.
 
 ## Acceptance and authority
 
@@ -62,8 +83,8 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-19T07:44:10Z`. The next active-work deadline is
-`2026-09-19T08:44:10Z`. Interim checks were recorded in private briefs while
+Refocus completed at `2026-09-19T09:40:59Z`. The next active-work deadline is
+`2026-09-19T10:40:59Z`. Interim checks were recorded in private briefs while
 canonical execution bytes stayed stable. Earlier disclosed timing lapses remain
 in the historical records.
 

@@ -32,6 +32,24 @@ root path, device number, and inode number captured by the parent. The child reo
 and validates that identity before confined input, lineage, or store access. The
 identity is not an authorization token and does not relax ownership or mode checks.
 
+## Verified result capture and export
+
+`readResultArtifactBytesAt` returns the exact verified native envelope and its
+decoded value from one capture. `readResultArtifactAt` uses that reader and retains
+its previous value-only behavior. Verification still checks canonical format,
+version, run, reference code, length and digest independently of journal health.
+The captured-byte API preserves typed IO failures from that same read. Legacy
+value-only and question readers retain their existing `StoreCorrupt` wrapping.
+
+`withPreparedResultExport` exposes the verified compact document and its length,
+digest and retained export-root identity before publication. The scoped prepared
+value has an opaque constructor. `publishPreparedResultExport` uses the same
+exclusive fixed-root implementation as `frontend-export`. Callers must not retain
+the prepared value beyond its callback. `readPublishedResultExportBytes` captures
+and verifies that separate document without reopening or re-encoding a response.
+These primitives do not confer credential authority or infer publication provenance
+from matching destination bytes. The manager owns those coordination claims.
+
 ## Durable capture publication
 
 `publishPrivateCaptureAt root components limit source`, exported through

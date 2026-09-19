@@ -19,7 +19,7 @@ import Agentic.Manager.Configuration
 import Agentic.Manager.Profile (ConfigurationLimits, PublicProfile, Diagnostic, Discovery)
 import Agentic.Manager.Worker.State (WorkerLifecycle, acceptingPreparation)
 import Agentic.Manager.Lease (duplicateLease)
-import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration)
+import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration, artifactMigration)
 import Agentic.Runtime
   (PrivateRoot, assertPrivateRoot, closePrivateRoot, openPrivateSubroot, privateRootPath,
    withPrivateDirectoryAt, writePrivateExclusiveAt, WorkflowInputDescriptor (..), frontendLiteralBytes, FrontendCapabilities, ProcessGroup, createProcessGroup, terminateProcessGroup, groupOutcome, processGroupLive)
@@ -142,7 +142,7 @@ openStore installed root lease = storageErrors $ do
     (epoch, stream) <- bounded db 30000000 $ do
       SQL.exec db "PRAGMA busy_timeout=100; PRAGMA foreign_keys=ON; PRAGMA temp_store=FILE; PRAGMA cache_size=-2048; PRAGMA temp.cache_size=-2048"
       version <- scalar db "PRAGMA user_version"
-      unless (version `elem` map SQL.SQLInteger [0, 1, 2, 3, 4, 5, 6, fromIntegral schemaVersion]) $
+      unless (version `elem` map SQL.SQLInteger [0, 1, 2, 3, 4, 5, 6, 7, fromIntegral schemaVersion]) $
         throwIO StoreVersion
       -- Newer versions are refused before changing their journal or schema.
       wal <- scalar db "PRAGMA journal_mode=WAL"
@@ -211,6 +211,7 @@ migrate db = mask $ \restore -> do
       SQL.SQLInteger 4 -> pure ()
       SQL.SQLInteger 5 -> pure ()
       SQL.SQLInteger 6 -> pure ()
+      SQL.SQLInteger 7 -> pure ()
       SQL.SQLInteger current | current == fromIntegral schemaVersion -> pure ()
       _ -> throwIO StoreVersion
     when (version `elem` [SQL.SQLInteger 0, SQL.SQLInteger 1]) $ do
@@ -231,9 +232,12 @@ migrate db = mask $ \restore -> do
     when (version `elem` map SQL.SQLInteger [0,1,2,3,4,5]) $ do
       mapM_ (SQL.exec db) ingestionMigration
       SQL.exec db "PRAGMA user_version=6"
-    when (version /= SQL.SQLInteger (fromIntegral schemaVersion)) $ do
+    when (version `elem` map SQL.SQLInteger [0,1,2,3,4,5,6]) $ do
       mapM_ (SQL.exec db) controlMigration
       SQL.exec db "PRAGMA user_version=7"
+    when (version /= SQL.SQLInteger (fromIntegral schemaVersion)) $ do
+      mapM_ (SQL.exec db) artifactMigration
+      SQL.exec db "PRAGMA user_version=8"
     SQL.exec db "COMMIT"
   case result of
     Right () -> pure ()

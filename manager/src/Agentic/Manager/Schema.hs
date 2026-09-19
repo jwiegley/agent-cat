@@ -1,12 +1,22 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Versioned relational coordination facts. Stored identities are not capabilities.
-module Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration) where
+module Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration, artifactMigration) where
 
 import Data.Text (Text)
 
 schemaVersion :: Int
-schemaVersion = 7
+schemaVersion = 8
+
+-- | Keep export acceptance and its command in one transaction, with the
+-- existing foreign key checked at commit rather than at the intent insert.
+artifactMigration :: [Text]
+artifactMigration =
+  [ "CREATE TABLE exports_v8 (id TEXT PRIMARY KEY NOT NULL, revision TEXT NOT NULL, run_id TEXT NOT NULL REFERENCES runs(id), artifact_id TEXT NOT NULL REFERENCES artifacts(id), command_id TEXT NOT NULL UNIQUE REFERENCES commands(id) DEFERRABLE INITIALLY DEFERRED, destination_root_identity TEXT NOT NULL, name TEXT NOT NULL, expected_sha256 TEXT NOT NULL, receipt BLOB, state TEXT CHECK(state IN ('published','unresolved')), UNIQUE(destination_root_identity,name), FOREIGN KEY(artifact_id,run_id) REFERENCES artifacts(id,run_id)) STRICT",
+    "INSERT INTO exports_v8 SELECT id,revision,run_id,artifact_id,command_id,destination_root_identity,name,expected_sha256,receipt,state FROM exports",
+    "DROP TABLE exports",
+    "ALTER TABLE exports_v8 RENAME TO exports"
+  ]
 
 -- Non-content correlation bindings never reconstruct the original live payload or ticket.
 controlMigration :: [Text]

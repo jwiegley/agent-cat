@@ -56,13 +56,19 @@ heap or temporary-disk quotas. The pinned Unix SQLite source specifies mode
 0600 for DELETEONCLOSE temporary files. That source evidence is not an exhaustive
 platform or forced-spill test.
 
-`PRAGMA user_version` holds internal schema version 7. Startup accepts versions
-zero through seven, and rejects other versions before changing journaling or
+`PRAGMA user_version` holds internal schema version 8. Startup accepts versions
+zero through eight, and rejects other versions before changing journaling or
 schema. Fresh initialization, command-ledger additions, the explicit literal
 chunk/upload migration, and admission and control-state additions execute DDL,
 metadata and version publication in one immediate transaction. Version-one DDL
 and the version-two and version-three migrations remain unchanged. The frozen
-public managerStore compatibility stays at one.
+public managerStore compatibility stays at one. Version eight rebuilds only the
+exports table to defer its command foreign key until commit. Every existing
+column, constraint, unique index and stored value is retained. The change permits
+Commands to record an export intent before inserting its owning command in the
+same transaction, without changing command acceptance order. The
+[artifact gate](ARTIFACTS.md#evidence) checks populated version-seven upgrade,
+migration rollback and rejection of missing command references at commit.
 Failure rolls that transaction back and never publishes a connection. The
 metadata row separately stores authority epoch, stream identity, stream sequence,
 retained floor, and service revision. Epoch and stream are random 256-bit
