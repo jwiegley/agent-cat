@@ -94,15 +94,15 @@ released :: FrontendWorker -> TVar Bool
 released = lifecycleReleased . lifecycle
 
 -- | Loan final acceptance checks over this same native process and lifecycle.
-withWorkerCommitDeadline :: FrontendWorker -> CoordinationStore -> IO Word64 -> Word64 -> (CommitDeadline -> IO a) -> IO a
-withWorkerCommitDeadline worker store now expires action = do
+withWorkerCommitDeadline :: FrontendWorker -> CoordinationStore -> TVar Bool -> IO Word64 -> Word64 -> (CommitDeadline -> IO a) -> IO a
+withWorkerCommitDeadline worker store fence now expires action = do
   (owner,group) <- atomically $ do
     valid <- acceptingPreparation(lifecycle worker)
     unless valid(throwSTM WorkerClosed)
     owner <- readTVar(ownership worker) >>= maybe(throwSTM WorkerClosed)pure
     group <- readTVar(nativeProcess worker) >>= maybe(throwSTM WorkerClosed)pure
     pure(owner,group)
-  withPreparedCommitDeadline store owner group (lifecycle worker) now expires action
+  withPreparedCommitDeadline store owner group (lifecycle worker) fence now expires action
 
 -- | Own a native session independently of observers. This does not authorize approval.
 withFrontendWorker :: CoordinationStore -> Text -> Text -> FrontendSetupRequest -> (FrontendWorker -> IO a) -> IO a

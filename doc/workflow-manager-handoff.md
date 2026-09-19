@@ -19,29 +19,44 @@ remain the authority for their respective scopes.
 
 ## Active WM-019 unit
 
-Issue `acat-wm-019-9eye` is in progress. The single isolated lane is
-`implementation.9tGzKH/shutdown.327OnbQj/source`, based on acceptance commit
-`0e35e3d`, with private runtime root `/Users/johnw/Products/s.t3xROC`. Workflow
-`02a0817b-544f-4362-bcec-50d7c05698ef` started the lane. Correction workflow
-`b7e31cda-6072-4698-a5a2-89f663fcf991` now resumes that original author.
-Use its live child identity rather than duplicating a detached workflow.
-Parent retains Git, tracker, execution and acceptance authority.
+Issue `acat-wm-019-9eye` remains in progress. This commit integrates its bounded
+shutdown/safety core, not the full containment package. Source, successive
+reviews and retained failures remain under
+`implementation.9tGzKH/shutdown.327OnbQj`, with focused runtime root
+`/Users/johnw/Products/s.t3xROC`. Parent retains integration and acceptance.
 
-The isolated five-file core builds with Werror and passes focused non-native
-N1/N8 checks. Those checks construct no native process and do not prove live
-drain or Admission-operation saturation. Coherent reviewer
-`a031b6c3-6ebe-423b-a109-9e214b5ea01a` withheld source clearance for scoped
-Store fencing, live ownership during drain and original-batch join retention.
-It also identified the missing safety notification at definite Store poisoning.
+The ten-path core provides explicit drain deadlines and cancellation through
+existing Admission, Store and Worker owners. New admissions are fenced while
+healthy original live-run interaction may finish. Emergency notification and
+broadcast precede ordinary operation/SQL joins. Scoped construction fences
+retire only after original confirmed cleanup and registration retirement,
+without clearing permanent close/quarantine or writable unavailability.
 
-Parent authorized these owner-level corrections together with focused local
-native lifecycle evidence through existing harnesses. Healthy drain retains
-original live-run controls and ownership while fencing new admissions. Scoped
-fences retire only after confirmed cleanup, without clearing permanent close
-or quarantine. Definite poison notification is distinct from ordinary Busy,
-opaque failure and confirmed rollback. Full/I/O classification requires an
-exact Store-boundary decision. Existing guards, budgets and failure precedence
-remain. No WM-019 source integration or acceptance is claimed.
+Continued reviewer `a49816f4-1443-4c4f-a855-0dfc1b71909e` found no issues and
+cleared the corrected core for integrated owning gates. Original stop batches
+remain immutable, healthy drain preserves owned History, and committed start
+publication retires the original preparation timer. Shutdown callers only
+publish mode and await their retained result. Broadcasts stay inside the
+retained supervisor/watchdog lifetime, so delayed callers cannot stop a later
+scope on a reused Store.
+
+Existing poison and exact writable SQLite FULL/I/O failures notify original
+safety cells without blocking callbacks or SQL/cleanup joins. Poison, confirmed
+rollback and writable unavailability remain distinct. Read-only I/O with
+confirmed rollback, ordinary Busy and opaque failure are not treated as
+global poison. No committed receipt or Runtime cancellation is manufactured.
+
+Current local Werror and focused native N1/N8 checks pass, including sixteen
+actual Admission slots with SQL held, person-waiting drain, owned history,
+active cancellation/expiry, automatic storage safety and a delayed old caller
+resuming after actual native reuse. FULL is real pager exhaustion under a private
+test quota, and I/O is an injected SQLite result rather than device failure.
+Earlier failures and evidence scopes remain recorded.
+
+Next run `manager/ci/admission.sh` followed by `manager/ci/approval.sh` once on
+integrated bytes. These own the new modes and race audit without duplicate
+launches. No full historical matrix or new evidence programme is required
+for that bounded core validation. WM-019 itself is not accepted.
 
 Linux read-only metadata confirms active cgroup2 delegation, but user-writable
 migration controls mean a bare user-service cgroup is not sufficient evidence.
@@ -54,7 +69,7 @@ run under this unit.
 
 Both-platform acceptance remains an unmet requirement. Unsupported containment
 must not advertise unattended mutation, and disabling all profiles cannot make
-the requirement vacuous. No WM-019 source integration or acceptance is claimed.
+the requirement vacuous. The integrated core does not close that requirement.
 
 ## WM-018 acceptance
 
@@ -210,10 +225,10 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-19T19:58:39Z`. The next active-work deadline is
-`2026-09-19T20:58:39Z`. Next complete the consolidated WM-019 core corrections
-and local lifecycle checks. Platform containment permission and capability
-remain separate blockers. Earlier disclosed timing lapses remain recorded.
+Refocus completed at `2026-09-19T21:35:19Z`. The next active-work deadline is
+`2026-09-19T22:35:19Z`. Next run the two integrated core gates and continue the
+same review. Platform containment permission and capability remain separate
+blockers. Earlier disclosed timing lapses remain recorded.
 
 ## Historical WM-016 closure record
 
