@@ -9608,14 +9608,14 @@ or false export receipt. Sensitive content is absent from incidental logs.
 ]
 #+end_src
 
-* TODO [#B] WM-018: Implement history, lineage requests, and legacy observation    :p3:
+* DOING [#B] WM-018: Implement history, lineage requests, and legacy observation    :p3:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-wm-018-9huh
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-09-19 Sat 04:59]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-018
 :SOURCE_REPO: agent-cat
@@ -9728,6 +9728,20 @@ contract rather than silently truncated.
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 252,
+    "issue_id": "acat-wm-018-9huh",
+    "author": "johnw",
+    "text": "WM-018 started after WM-017 acceptance on 2026-09-19. The accepted baseline is WM-001 through WM-017 and G0. All frozen dependencies are accepted. G1 and later gates remain open.\n\nThe single implementation lane is /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/history.t5kx5b6A/source on wm018-history-20260919, based on add7141a2c9417825719021d961a9f2b98102521. Its private runtime root is /Users/johnw/Products/h.fXa5l9. Parent owns Git, tracker, integration, further execution decisions and acceptance.\n\nDeliver retained bounded history over trusted roots, opaque handles, full lineage links, verified results and explicit corrupt or foreign-owner observation. Legacy roots remain locally configured and read-only. Restart, resume and fork must use the shared prepare-lineage path with exact trusted invocation and permitted person/typed edits, distinct request/run identities, immutable parent facts and post-approval revalidation. Preserve authored answers, traces, memoization, bills and policy provenance. Block live or quarantined conflicts without deriving execution authority from stored metadata. Cover legacy/v2/v3 branches honestly, including the existing Emacs v3-metadata refusal.\n\nThe initial grant covers one coherent implementation with focused Werror builds and deterministic pure/SQLite/filesystem/contract regressions through existing owners. It does not launch full policies, native process batches, Linux or client matrices, paid backends, deployment, dependency changes or new Lean/oracle builds. Later required native evidence receives a concrete parent decision. Preserve settled Store admission, original handles, uncertain-failure distinctions and non-replay rules. Do not add verification recorders, inventories, retention frameworks or per-leaf review ceremonies. Exact environment and safety boundaries are in history.t5kx5b6A/brief.md.\n\nNo WM-018 implementation or acceptance is claimed at startup. Next action is the minimal complete history/lineage library unit and meaningful regressions, followed by coherent review and owning execution. Refocus continues with a 2026-09-19T12:53:39Z deadline.\n",
+    "created_at": "2026-09-19T11:59:11Z"
   }
 ]
 #+end_src
