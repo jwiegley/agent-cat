@@ -13,11 +13,13 @@ native=$(bash test/cabal.sh list-bin routing-fixed-point-probe)
 python=$(command -v python3)
 work=$(mktemp -d "$CABAL_BUILDDIR/manager-approval.XXXXXX")
 for capabilities in N1 N8; do
-  mkdir "$work/$capabilities"
+  mkdir "$work/$capabilities" "$work/shutdown-drain-$capabilities"
+  "$checker" shutdown-drain "$work/shutdown-drain-$capabilities" "$native" +RTS "-$capabilities" -RTS 2>&1 | tee "$work/shutdown-drain-$capabilities.log"
   "$checker" "$work/$capabilities" "$native" "$root" "$python" +RTS "-$capabilities" -RTS 2>&1 | tee "$work/$capabilities.log"
   python3 manager/test/approval_contract.py "$root" "$work/$capabilities"
 done
 python3 manager/test/proof_opacity.py "$root" "$work/opacity"
+python3 manager/test/admission_audit.py "$root" shutdown-races
 python3 manager/test/admission_audit.py "$root" approval-interruption
 python3 manager/test/admission_audit.py "$root" approval-live-mutant
 python3 manager/test/admission_audit.py "$root" approval-review-gap

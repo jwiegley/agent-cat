@@ -171,6 +171,78 @@ refuses unsafe admission when historical reservations belong to another generati
 Neither a process exit, a phase label nor callback success is a release proof or
 workflow success.
 
+## Local shutdown and physical safety
+
+`closeAdmission controller deadline` requests draining shutdown with an explicit
+absolute monotonic deadline in nanoseconds. `shutdownAdmission` also accepts
+`CancelNow`. Neither operation changes the frozen administrative JSON contract.
+Scope exit uses explicit cancellation as lifetime cleanup, not an implicit drain
+timeout. The original body exception retains precedence over cleanup failure.
+
+Shutdown atomically fences new Admission operations. Fresh enqueue, reservation,
+review publication and approval have fixed final acceptance checks before SQL
+COMMIT. These are logical validation boundaries, not simultaneous STM and SQLite
+commits. Shutdown accounts for already-entered acceptance before distinguishing
+committed starts from genuinely unapproved preparations. Unapproved preparations
+are invalidated through existing finalization. Queued facts remain durable.
+Original accepted starts, ticket delivery and authorized live-run controls can
+continue during healthy drain through the same bounded operation ownership.
+History still observes that actual live ownership. Verified original start
+publication retires the preparation timer in the same STM transaction.
+Cancellation closes that eligibility without replaying any ticket.
+
+Shutdown callers only publish their mode and await the retained result. The
+existing supervisor and its watchdog own cancellation broadcasts and finish before
+the scoped Store fence is released. A delayed caller cannot stop a later scope.
+Explicit cancellation and drain expiry first fence construction and notify all
+original Store worker registrations without taking the database cell or Admission
+mutex and without joining ordinary operations. Existing Worker cancellation and
+Runtime group cleanup retain their grace and joined completion rules. Joins occur
+after the broadcast and outside those locks. Drain expiry remains recorded even
+when later physical cleanup succeeds. The returned cleanup outcome includes
+unresolved final persistence and is not a command receipt or Runtime result.
+Reservations still require the existing original cleanup and publication fences.
+
+The Store registry retains its first stop batch across concurrent retirement and
+repeated requests. A scoped construction fence is retired only after those original
+registrations have joined, confirmed their groups and left the registry. Permanent
+Store close, quarantine and unavailable state are never cleared by scope release.
+A healthy still-open Store can therefore serve a later Admission scope.
+
+Store lifetime loss, a failed drain classification and the existing definite
+poison transition notify original safety cells. Notification is bounded STM data
+work, without a callback, SQL acquisition or cleanup join. At the writable SQL
+exception boundary, SQLite FULL and the pinned SQLite I/O-error family also latch
+a distinct Store-lifetime unavailable state, even after confirmed rollback.
+Ordinary operations then refuse, and only a legitimate new Store lifetime can
+restore eligibility. The original exception and poison meaning are preserved.
+
+Opaque `StorageUnavailable`, Busy, Locked, validation and constraint refusals do
+not establish this state. Read-only I/O failure with confirmed rollback does not
+set the writable-failure latch. Existing poison rules still apply to uncertain
+COMMIT and failed rollback. A caller can request cancellation independently of
+these automatic triggers.
+
+The `shutdown-only` mode of `manager-admission-check` checks non-native original
+registration notification, retirement, joins, scope reuse and final acceptance
+rollback. Its `shutdown-native` mode checks actual native preparation reuse,
+sixteen occupied Admission operations, SQL contention, active drain expiry,
+interrupted callers and automatic storage safety. The test-linked SQLite helper
+sets a bounded pager quota through the original connection callback for actual
+FULL. Its I/O function injects a SQLite I/O result, not a device or VFS failure.
+No connection pointer escapes either callback.
+
+The approval probe's `shutdown-drain` mode checks committed original delivery,
+unapproved invalidation, person answers, owned History, genuine terminal evidence
+and native reuse. The existing captured-source `shutdown-races` audit adds only
+phase barriers before validation, after committed approval and after shutdown mode
+publication. It checks refusal versus retained original consent, exactly-once
+delivery and an old caller delayed across completed shutdown and actual native
+reuse. The Admission gate owns both shutdown modes in its N1/N8 loop. The Approval
+gate owns drain in its N1/N8 loop and launches the race audit once, which owns its
+own N1/N8 runs. These local fixtures are not OS containment. Both-platform hard-death and escaped-descendant acceptance
+remain open, with the process-group and control-EOF limits in the manager README.
+
 ## Evidence and limits
 
 `manager/ci/admission.sh` builds actual Cabal targets with warnings as errors and

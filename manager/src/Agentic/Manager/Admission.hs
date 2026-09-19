@@ -8,7 +8,7 @@ module Agentic.Manager.Admission
   ( Admission, LivePreparation, ReviewContext (..), MonotonicClock (..),
     withAdmission, withAdmissionClock, enqueueRequest, admitOldest,
     editRequestInput, withdrawRequest, awaitReview, withReviewAcceptance,
-    retryAdmissionCleanup, awaitAdmissionCleanup, closeAdmission, reservationIdentity, observeLivePreparation, ownsHistoryRun,
+    retryAdmissionCleanup, awaitAdmissionCleanup, closeAdmission, ShutdownMode (..), ShutdownResult (..), shutdownAdmission, reservationIdentity, observeLivePreparation, ownsHistoryRun,
     acceptControlCommand, deliverAcceptedControl, acceptedControlContext,
     AcceptedStart, acceptStartCommand, deliverAcceptedStart, stopAcceptedStart, observeAcceptedStart, acceptedStartRun, acceptedTimerRetired, invalidateLivePreparation, consumeAcceptedStart
   ) where
@@ -28,7 +28,7 @@ import Agentic.Manager.Store
 import Agentic.Manager.Worker
 import Agentic.Runtime (FrontendPrepared (..), FrontendSetupRequest, RunId (..), Control (controlId), ControlId (..), decodeControlFor, encodeControlFor, correlatedProtocolVersion, controlAcknowledgementLimit)
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async (Async, async, waitCatch, poll, race)
+import Control.Concurrent.Async (Async, async, waitCatch, poll, race, withAsync)
 import Control.Concurrent.MVar (MVar, newMVar, withMVar)
 import Control.Concurrent.STM
   (STM, TVar, TMVar, atomically, newTVarIO, readTVar, writeTVar, modifyTVar',
@@ -76,9 +76,18 @@ data ReviewContext = ReviewContext
 data Admission = Admission
   { store :: !CoordinationStore, clock :: !MonotonicClock,
     gate :: !(MVar ()), closed :: !(TVar Bool), liveStore :: !(TVar (STM Bool)),
+    shutdownMode :: !(TVar (Maybe ShutdownMode)), cancelled :: !(TVar Bool), drainExpired :: !(TVar Bool),
     queued :: !(TVar (Map.Map Text AcceptedEnqueue)), entries :: !(TVar (Map.Map Text Entry)),
     attempts :: !(TVar (Map.Map Text CommandAttempt)),
     operations :: !(TVar [TMVar (Maybe (Async ()))]), finished :: !(TMVar (Either CommandFailure ())) }
+
+-- | Local shutdown policy. Deadlines are absolute monotonic nanoseconds, not wire fields.
+data ShutdownMode = DrainUntil !Word64 | CancelNow deriving (Eq, Show)
+
+-- | Deadline expiry and joined cleanup are independent of Runtime and durable receipts.
+data ShutdownResult = ShutdownResult
+  { shutdownDrainExpired :: !Bool, shutdownCleanup :: !(Either CommandFailure ()) }
+  deriving (Eq, Show)
 
 -- | A loan of the original live association. It exposes no native Worker constructor.
 data LivePreparation = LivePreparation !Admission !Entry
@@ -111,44 +120,95 @@ withAdmission = withAdmissionClock realClock
 withAdmissionClock :: MonotonicClock -> CoordinationStore -> (Admission -> IO a) -> IO a
 withAdmissionClock timer owner action = mask $ \restore -> do
   controller <- Admission owner timer <$> newMVar () <*> newTVarIO False <*> newTVarIO (pure False)
+    <*> newTVarIO Nothing <*> newTVarIO False <*> newTVarIO False
     <*> newTVarIO Map.empty <*> newTVarIO Map.empty <*> newTVarIO Map.empty <*> newTVarIO [] <*> newEmptyTMVarIO
   ready <- newEmptyTMVarIO
   supervisor <- async $ do
     result <- try @SomeException $ withStoreAdmission owner $ \alive -> do
       atomically (writeTVar (liveStore controller) alive >> putTMVar ready ())
-      atomically $ do
+      current <- atomically $ do
         ending <- readTVar (closed controller)
-        current <- alive
-        check (ending || not current)
+        active <- alive
+        check (ending || not active)
+        pure active
+      unless current (void(requestCancellation controller))
       shutdown controller
     atomically $ do
       void(tryPutTMVar ready ())
       putTMVar (finished controller) (either (Left . classify) (const (Right ())) result)
   result <- try @SomeException (restore (atomically(readTMVar ready) >> ensureController controller >> action controller))
-  ending <- try @SomeException $ uninterruptibleMask_ $ closeAdmission controller >> void(waitCatch supervisor)
+  ending <- try @SomeException $ uninterruptibleMask_ $ do
+    result' <- shutdownAdmission controller CancelNow
+    void(waitCatch supervisor)
+    either throwIO pure (shutdownCleanup result')
   case result of Left failure -> throwIO failure; Right value -> either throwIO (const(pure value)) ending
 
-closeAdmission :: Admission -> IO ()
-closeAdmission controller = uninterruptibleMask_ $ do
-  atomically(writeTVar(closed controller)True)
-  atomically(readTMVar(finished controller)) >>= either throwIO pure
+-- | Normal shutdown drains until the caller's explicit monotonic deadline.
+closeAdmission :: Admission -> Word64 -> IO ShutdownResult
+closeAdmission controller deadline = shutdownAdmission controller (DrainUntil deadline)
+
+-- | Scope teardown uses CancelNow. Repeated calls cannot postpone cancellation or
+-- erase an expired deadline. Only the retained supervisor and watchdog broadcast,
+-- so a delayed caller cannot stop workers in a later Store admission scope.
+shutdownAdmission :: Admission -> ShutdownMode -> IO ShutdownResult
+shutdownAdmission controller requested = mask $ \restore -> do
+  atomically $ do
+    done <- tryReadTMVar(finished controller)
+    case done of
+      Just _ -> pure()
+      Nothing -> do
+        writeTVar(closed controller)True
+        old <- readTVar(shutdownMode controller)
+        let selected = case (old,requested) of
+              (Just CancelNow,_) -> CancelNow
+              (_,CancelNow) -> CancelNow
+              (Just(DrainUntil earlier),DrainUntil later) -> DrainUntil(min earlier later)
+              (Nothing,mode) -> mode
+        writeTVar(shutdownMode controller)(Just selected)
+        when(selected==CancelNow)(writeTVar(cancelled controller)True)
+  outcome <- restore(atomically(readTMVar(finished controller)))
+  ShutdownResult <$> readTVarIO(drainExpired controller) <*> pure outcome
+
+requestCancellation :: Admission -> IO [StoreWorker]
+requestCancellation controller = do
+  atomically $ do
+    writeTVar(closed controller)True
+    writeTVar(cancelled controller)True
+    writeTVar(shutdownMode controller)(Just CancelNow)
+  owned <- requestStoreWorkersStop(store controller)
+  atomically $ do
+    current <- readTVar(entries controller)
+    forM_ (Map.elems current) $ \entry -> void(tryPutTMVar(entryStop entry)(StopService "closed"))
+  pure owned
 
 ensureController :: Admission -> IO ()
-ensureController controller = atomically $ do
-  stopping <- readTVar(closed controller)
+ensureController controller = ensureOpen controller (closed controller)
+
+ensureRunController :: Admission -> IO ()
+ensureRunController controller = ensureOpen controller (cancelled controller)
+
+ensureOpen :: Admission -> TVar Bool -> IO ()
+ensureOpen controller fence = atomically $ do
+  stopping <- readTVar fence
   active <- readTVar(liveStore controller) >>= id
   unless (not stopping && active) (throwSTM StorageUnavailable)
 
 -- A cancelled caller abandons only its wait, not the retained acceptance/cleanup job.
 operation :: Admission -> IO a -> IO (Either CommandFailure a)
-operation controller action = do
+operation controller = operationWithFence controller (closed controller)
+
+-- Existing runs retain their normal bounded controls and original dispatch during drain.
+runOperation :: Admission -> IO a -> IO (Either CommandFailure a)
+runOperation controller = operationWithFence controller (cancelled controller)
+
+operationWithFence :: Admission -> TVar Bool -> IO a -> IO (Either CommandFailure a)
+operationWithFence controller fence action = do
   outcome <- try @CommandFailure $ mask $ \restore -> do
-    ensureController controller
     slot <- newEmptyTMVarIO
     start <- newEmptyTMVarIO
     result <- newEmptyTMVarIO
     atomically $ do
-      stopping <- readTVar(closed controller)
+      stopping <- readTVar fence
       active <- readTVar(liveStore controller) >>= id
       unless (not stopping && active) (throwSTM StorageUnavailable)
       current <- readTVar(operations controller)
@@ -220,6 +280,7 @@ admitOldest controller = operation controller $ locked controller $ do
   revision <- fresh "request_revision_"
   generation <- storeProcessGeneration <$> storeIdentity(store controller)
   selected <- configured controller $ \limits catalogues -> runTransaction (store controller) $ do
+    enforceAdmissionFence(closed controller)
     rows <- queueRows
     valid <- currentAcceptedEnqueues(Map.elems permits)
     occupancy <- heldRows
@@ -276,8 +337,11 @@ admitOldest controller = operation controller $ locked controller $ do
 ownsHistoryRun :: CoordinationStore -> Admission -> Text -> RunId -> Text -> IO Bool
 ownsHistoryRun expected controller run native root = do
   same <- (==) <$> storeIdentity expected <*> storeIdentity (store controller)
-  shut <- readTVarIO (closed controller)
-  if not same || shut then pure False else do
+  owned <- atomically $ do
+    stopping <- readTVar(cancelled controller)
+    active <- readTVar(liveStore controller) >>= id
+    pure(not stopping && active)
+  if not same || not owned then pure False else do
     tracked <- Map.elems <$> readTVarIO (entries controller)
     matches <- forM tracked $ \entry -> do
       accepted <- readTVarIO (entryStart entry)
@@ -306,7 +370,7 @@ withReviewAcceptance (LivePreparation controller entry) action = operation contr
   ensureController controller
   current <- currentReview controller entry
   worker <- atomically(readTMVar(entryWorker entry))
-  result <- try @SomeException $ withWorkerCommitDeadline worker (store controller) (monotonicNow(clock controller)) (reviewDeadlineNanos current) (action current)
+  result <- try @SomeException $ withWorkerCommitDeadline worker (store controller) (closed controller) (monotonicNow(clock controller)) (reviewDeadlineNanos current) (action current)
   committed <- try @SomeException(dbRead controller (startCommitted entry))
   case committed of Right True -> atomically(writeTVar(entryRetiredTimer entry)True); _->pure()
   either throwIO pure result
@@ -647,6 +711,10 @@ submitRetainedGuarded controller proof requestId kind request deadlineGuard cont
             _ -> pure()
           pure replay
   where
+    guardedBuilder command limits catalogues = do
+      mutation <- builder command limits catalogues
+      let fence = if kind=="control" then cancelled controller else closed controller
+      pure mutation {mutationValidate = enforceAdmissionFence fence >> mutationValidate mutation}
     forget = atomically(modifyTVar'(attempts controller)(Map.delete requestId))
     publish accepted = publishRetained controller requestId kind accepted >> forget
     freshAttempt restore pending = do
@@ -654,7 +722,7 @@ submitRetainedGuarded controller proof requestId kind request deadlineGuard cont
       attempt <- maybe (newCommandAttempt (store controller) proof request)
         (newControlCommandAttempt (store controller) proof request) controlEncoder
       atomically(modifyTVar'(attempts controller)(Map.insert requestId attempt))
-      result <- try @SomeException(restore(maybe(submitCommandAttempt attempt builder)(\guard->submitCommandAttemptWithDeadline guard attempt builder)deadlineGuard))
+      result <- try @SomeException(restore(maybe(submitCommandAttempt attempt guardedBuilder)(\guard->submitCommandAttemptWithDeadline guard attempt guardedBuilder)deadlineGuard))
       resolved <- case result of
         Right(Right accepted) -> pure(Right(Just accepted))
         Right(Left failure) | failure/=StorageUnavailable -> pure(Right Nothing)
@@ -696,10 +764,12 @@ retainStartWithAdmission admission controller requestId accepted = unless(submis
         unless(submissionReferences accepted==CommandReferences(Just requestId)(Just run)(Just preparation)Nothing)(refuseTransaction OwnershipUnavailable)
         pure run
       _->refuseTransaction OwnershipUnavailable
-  old<-readTVarIO(entryStart entry)
-  case old of
-    Just(AcceptedStart _ _ existing _) -> unless(dispatchCommandId existing==dispatchCommandId ticket)(throwIO OwnershipUnavailable)
-    Nothing -> atomically(writeTVar(entryStart entry)(Just(AcceptedStart controller entry ticket run)))
+  atomically $ do
+    old<-readTVar(entryStart entry)
+    case old of
+      Just(AcceptedStart _ _ existing _) -> unless(dispatchCommandId existing==dispatchCommandId ticket)(throwSTM OwnershipUnavailable)
+      Nothing -> writeTVar(entryStart entry)(Just(AcceptedStart controller entry ticket run))
+    writeTVar(entryRetiredTimer entry)True
 
 -- | Accept only through the original live association, without performing native IO.
 acceptStartCommand :: LivePreparation -> CredentialProof -> CommandRequest
@@ -712,7 +782,7 @@ acceptStartCommand (LivePreparation controller entry) proof request builder = op
   accepted<-if replay then submitRetained controller proof (entryRequest entry) "approve" request (\_ _ _->Left StateConflict) >>= need else do
     current<-currentReview controller entry
     worker<-atomically(readTMVar(entryWorker entry))
-    withWorkerCommitDeadline worker (store controller) (monotonicNow(clock controller)) (reviewDeadlineNanos current) $ \guard->
+    withWorkerCommitDeadline worker (store controller) (closed controller) (monotonicNow(clock controller)) (reviewDeadlineNanos current) $ \guard->
       submitRetainedGuarded controller proof (entryRequest entry) "approve" request (Just guard) Nothing (builder current) >>= need
   retained<-readTVarIO(entryStart entry)
   let same=case retained of Just value@(AcceptedStart _ _ ticket _) | dispatchCommandId ticket==receiptId(submissionReceipt accepted)->Just value;_->Nothing
@@ -733,9 +803,9 @@ invalidateLivePreparation (LivePreparation controller entry) reason = operation 
   atomically(readTMVar(entryResult entry)) >>= need
 
 deliverAcceptedStart :: AcceptedStart -> IO (Either CommandFailure ())
-deliverAcceptedStart (AcceptedStart controller entry ticket run) = operation controller $ do
+deliverAcceptedStart (AcceptedStart controller entry ticket run) = runOperation controller $ do
   worker<-locked controller $ do
-    ensureController controller
+    ensureRunController controller
     dbRead controller $ do
       validateOwner entry ["start-pending","associated"] ["held"]
       rows<-query "SELECT count(*) FROM start_intents WHERE command_id=? AND run_id=? AND reservation_id=? AND process_generation=?"
@@ -759,9 +829,9 @@ acceptControlCommand :: AcceptedStart -> CredentialProof -> CommandRequest
   -> IO (Text -> Either CommandFailure BS.ByteString,
          Text -> ConfigurationLimits -> [(Text,Discovery)] -> Either CommandFailure Mutation)
   -> IO (Either CommandFailure Submission)
-acceptControlCommand (AcceptedStart controller entry _ run) proof request version prepare = operation controller $
+acceptControlCommand (AcceptedStart controller entry _ run) proof request version prepare = runOperation controller $
   withMVar (entryControlGate entry) $ \_ -> do
-    ensureController controller
+    ensureRunController controller
     unless(commandOperation request `elem` [Cancel,Steer,Retry,ChooseRecovery,Redirect,Answer]
       && commandProfile request==entryProfile entry)(throwIO InvalidRequest)
     replay <- commandPreflightVersion (store controller) proof request version >>= need
@@ -787,7 +857,7 @@ acceptControlCommand (AcceptedStart controller entry _ run) proof request versio
         submitRetainedGuarded controller proof (entryRequest entry) "control" request Nothing (Just encoder) checked >>= need
   where
     checkLive = do
-      ensureController controller
+      ensureRunController controller
       stopped <- atomically(tryReadTMVar(entryStop entry))
       when(isJust stopped)(throwIO OwnershipUnavailable)
       worker <- atomically(readTMVar(entryWorker entry))
@@ -804,9 +874,9 @@ acceptControlCommand (AcceptedStart controller entry _ run) proof request versio
 -- | Explicit one-shot dispatch through the original ticket, Worker and pipe.
 -- Only the original ticket supplies bytes. Stored bindings cannot recreate them.
 deliverAcceptedControl :: AcceptedStart -> Text -> IO (Either CommandFailure ())
-deliverAcceptedControl (AcceptedStart controller entry _ run) command = operation controller $ do
+deliverAcceptedControl (AcceptedStart controller entry _ run) command = runOperation controller $ do
   (ticket,worker) <- locked controller $ do
-    ensureController controller
+    ensureRunController controller
     (_,ticket) <- Map.lookup command <$> readTVarIO(entryControls entry) >>= maybe(throwIO OwnershipUnavailable)pure
     dbRead controller $ do
       rows <- query "SELECT command_id FROM control_intents WHERE command_id=? AND run_id=?" [text command,text run]
@@ -911,15 +981,71 @@ pruneCompleted controller = do
 shutdown :: Admission -> IO ()
 shutdown controller = do
   atomically(writeTVar(closed controller)True)
-  jobs<-readTVarIO(operations controller)
-  forM_ jobs $ \slot->atomically(readTMVar slot)>>=mapM_ (void . waitCatch)
-  current<-Map.elems <$> readTVarIO(entries controller)
-  forM_ current $ \entry->atomically(void(tryPutTMVar(entryStop entry)(StopService "closed")))
-  forM_ current $ \entry->atomically(readTMVar(entryTask entry))>>=mapM_ (void . waitCatch)
-  mapM_ discardControlAttempt . Map.elems =<< readTVarIO(attempts controller)
-  atomically(writeTVar(attempts controller)Map.empty)
-  outcomes<-mapM (atomically.readTMVar.entryResult) current
-  unless(all (either(const False)(const True)) outcomes)(throwIO StorageUnavailable)
+  initial <- try @SomeException $ do
+    mode <- readTVarIO(shutdownMode controller)
+    case mode of
+      Just(DrainUntil deadline) -> do
+        now <- monotonicNow(clock controller)
+        when(now>=deadline) $ do
+          atomically(writeTVar(drainExpired controller)True)
+          void(requestCancellation controller)
+      _ -> void(requestCancellation controller)
+  case initial of
+    Left _ -> void(requestCancellation controller)
+    Right () -> pure()
+  withAsync (shutdownDeadline controller) $ \watchdog -> do
+    joinOperations controller
+    current <- Map.elems <$> readTVarIO(entries controller)
+    classification <- try @SomeException $ forM_ current $ \entry -> do
+      stoppingNow <- readTVarIO(cancelled controller)
+      started <- if stoppingNow then pure False else locked controller (dbTerminalRead controller(startCommitted entry))
+      unless started $ atomically(void(tryPutTMVar(entryStop entry)(StopService "closed")))
+    case classification of
+      Left _ -> void(requestCancellation controller)
+      Right () -> pure()
+    forM_ current $ \entry -> atomically(readTMVar(entryTask entry)) >>= mapM_ (void . waitCatch)
+    owned <- requestCancellation controller
+    cleanup <- try @SomeException(awaitStoreWorkersStop owned)
+    joinOperations controller
+    mapM_ discardControlAttempt . Map.elems =<< readTVarIO(attempts controller)
+    atomically(writeTVar(attempts controller)Map.empty)
+    outcomes <- mapM (atomically.readTMVar.entryResult) current
+    timerResult <- poll watchdog
+    either throwIO pure initial
+    either throwIO pure classification
+    case timerResult of
+      Just(Left failure) -> throwIO failure
+      _ -> pure()
+    either throwIO pure cleanup
+    unless(all (either(const False)(const True)) outcomes)(throwIO StorageUnavailable)
+
+joinOperations :: Admission -> IO ()
+joinOperations controller = do
+  jobs <- readTVarIO(operations controller)
+  forM_ jobs $ \slot -> atomically(readTMVar slot) >>= mapM_ (void . waitCatch)
+
+-- The watchdog never waits for ordinary operations, Admission's mutex, or SQLite.
+shutdownDeadline :: Admission -> IO ()
+shutdownDeadline controller = watch `onException` requestCancellation controller
+  where
+    watch = do
+      mode <- atomically $ readTVar(shutdownMode controller) >>= maybe (check False >> pure CancelNow) pure
+      case mode of
+        CancelNow -> void(requestCancellation controller)
+        DrainUntil deadline -> do
+          outcome <- race (monotonicUntil(clock controller)deadline) (atomically $ do
+            latest <- readTVar(shutdownMode controller)
+            active <- readTVar(liveStore controller) >>= id
+            check(latest/=Just mode || not active)
+            pure active)
+          case outcome of
+            Right False -> void(requestCancellation controller)
+            Right True -> watch
+            Left () -> do
+              now <- monotonicNow(clock controller)
+              when(now<deadline)(throwIO StateConflict)
+              atomically(writeTVar(drainExpired controller)True)
+              void(requestCancellation controller)
 
 queueRows :: Transaction [QueueRow]
 queueRows = do

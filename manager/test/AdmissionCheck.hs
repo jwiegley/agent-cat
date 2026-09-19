@@ -16,13 +16,14 @@ import Agentic.Manager.Profile hiding (StaleRevision)
 import Agentic.Manager.Protocol.Command
 import Agentic.Manager.Protocol.Draft
 import Agentic.Manager.Store
+import qualified Agentic.Manager.Worker as Worker
 import Agentic.Runtime (workflowName, FrontendPrepared (..), RunId (..), createProcessGroup, terminateProcessGroup, closeGroupPipes, groupOutput, groupErrors, waitProcessGroup)
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async (AsyncCancelled (..), async, asyncThreadId, cancel, waitCatch, wait)
-import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar, readMVar, tryReadMVar)
+import Control.Concurrent.Async (AsyncCancelled (..), async, asyncThreadId, cancel, waitCatch, wait, poll)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar, readMVar, tryReadMVar, tryPutMVar)
 import Control.Concurrent.STM (atomically, newTVarIO, readTVar, writeTVar, check)
 import Control.DeepSeq (NFData)
-import Control.Exception (SomeException, bracket, try, fromException)
+import Control.Exception (SomeException, bracket, try, fromException, finally, throwIO, uninterruptibleMask_)
 import Control.Monad (forM, forM_, unless, void, when)
 import Crypto.Hash (Digest, SHA256, hash)
 import Data.Aeson (Value (..), eitherDecodeStrict', object, toJSON, (.=))
@@ -53,6 +54,8 @@ main = do
   args <- getArgs
   case args of
     ["policy-only"] -> policyChecks
+    ["shutdown-only",work] -> shutdownChecks work
+    ["shutdown-native",work,native] -> shutdownNativeChecks work native
     ["static-occupancy"] -> staticOccupancyCheck
     ["interrupted-acceptance",work,native] -> interruptedAcceptanceChecks work native
     ["active-retry",work,native] -> activeRetryChecks work native
@@ -98,6 +101,231 @@ etag :: DraftView -> Maybe Text
 etag view=Just("\""<>draftRevision view<>"\"")
 body :: Text -> BS.ByteString
 body operationName'=encoded(object["operation" .= operationName'])
+
+-- These fixtures retain actual Store registrations but never construct a process.
+shutdownChecks :: FilePath -> IO ()
+shutdownChecks work = do
+  native <- getExecutablePath
+  let fixture name action = withFixture work native name 1 [] $ \(Fixture _ _ owner _ _) -> action owner
+      clock = MonotonicClock (pure 10) (\_ -> atomically(check False))
+  fixture "shutdown-empty" $ \owner -> do
+    withAdmissionClock clock owner $ \controller -> do
+      result <- await(closeAdmission controller 20)
+      assertion "empty healthy drain completes without invented cancellation" (result==ShutdownResult False(Right()))
+      refusal <- admitOldest controller
+      assertion "drain fences new admission" (case refusal of Left StorageUnavailable -> True; _ -> False)
+      repeated <- shutdownAdmission controller CancelNow
+      assertion "completed shutdown result is immutable" (repeated==result)
+    withAdmissionClock clock owner $ \controller -> do
+      withStoreWorker owner(\_ _ _ -> pure())
+      result <- await(closeAdmission controller 20)
+      assertion "healthy sequential Admission scopes reuse the same open Store" (result==ShutdownResult False(Right()))
+  fixture "shutdown-expired" $ \owner -> withAdmissionClock clock owner $ \controller -> do
+    result <- await(closeAdmission controller 10)
+    assertion "expired drain remains separate from confirmed cleanup" (result==ShutdownResult True(Right()))
+    repeated <- closeAdmission controller 100
+    assertion "later drain cannot erase original deadline expiry" (repeated==result)
+  fixture "shutdown-busy" $ \owner -> withAdmission owner $ \controller -> do
+    ready <- forM [1..16::Int] $ \_ -> do
+      entered <- newEmptyMVar
+      stopped <- newEmptyMVar
+      release <- newEmptyMVar
+      task <- async $ try @StoreFailure $ withStoreWorker owner $ \_ _ _ ->
+        (putMVar entered () >> atomically(check False)) `finally`
+          uninterruptibleMask_ (putMVar stopped () >> readMVar release)
+      await(takeMVar entered)
+      pure(task,stopped,release)
+    held <- newEmptyMVar
+    releaseSQL <- newEmptyMVar
+    let holderClock = putMVar held () >> readMVar releaseSQL >> pure 0
+        releaseAll = do
+          void(tryPutMVar releaseSQL ())
+          forM_ ready $ \(_,_,release) -> void(tryPutMVar release ())
+    (withCommitDeadline owner holderClock 1 $ \guard -> do
+      holder <- async(runTransaction owner(enforceCommitDeadline guard >> pure((),[])))
+      await(takeMVar held)
+      busy <- try @StoreFailure(runRead owner(pure()))
+      assertion "ordinary SQL remains fail-fast while safety is requested" (busy==Left StoreBusy)
+      shutdownTask <- async(shutdownAdmission controller CancelNow)
+      forM_ ready $ \(_,stopped,_) -> await(takeMVar stopped)
+      stillJoining <- poll shutdownTask
+      assertion "all sixteen original registrations notified before the first join" (case stillJoining of Nothing -> True; _ -> False)
+      let (retiring,_,releaseOne)=case ready of first:_->first;[]->error "missing original registrations"
+      putMVar releaseOne ()
+      await(wait retiring) >>= assertion "one original registration retires during shutdown" . (==Left StoreClosed)
+      retained <- requestStoreWorkersStop owner
+      assertion "repeat broadcast retains all original handles after retirement" (length retained==16)
+      joined <- async(awaitStoreWorkersStop retained)
+      poll joined >>= assertion "original batch join still waits for unpublished cleanup" . maybe True (const False)
+      releaseAll
+      await(wait joined)
+      await(wait holder)
+      result <- await(wait shutdownTask)
+      assertion "SQL saturation cannot block emergency original-owner cleanup" (result==ShutdownResult False(Right()))
+      forM_ ready $ \(task,_,_) -> do
+        original <- await(wait task)
+        assertion "owner stop preserves original StoreClosed outcome" (original==Left StoreClosed)
+      number owner "SELECT count(*) FROM commands" >>= assertion "physical cleanup creates no committed receipt" . (==0)
+      number owner "SELECT count(*) FROM runs" >>= assertion "physical cleanup fabricates no Runtime cancellation" . (==0)
+      late <- admitOldest controller
+      assertion "closed controller refuses later admission after joined cleanup" (case late of Left StorageUnavailable -> True; _ -> False)) `finally` releaseAll
+  fixture "shutdown-poisoned" $ \owner -> withAdmission owner $ \controller -> do
+    entered <- newEmptyMVar
+    stopped <- newEmptyMVar
+    task <- async $ try @StoreFailure $ withStoreWorker owner $ \_ _ _ ->
+      (putMVar entered () >> atomically(check False)) `finally` putMVar stopped ()
+    await(takeMVar entered)
+    mutate owner $ execute "INSERT INTO requests(id,revision,client_id,workflow_id,descriptor_revision,profile_id,profile_revision,phase,admission,blocking_reasons,validation_errors) VALUES ('poison-request','revision','client_1','workflow','descriptor','profile','policy','draft','not-queued',?,?)" [SQL.SQLBlob "[]",SQL.SQLBlob "[]"]
+    failed <- try @StoreFailure $ runTransaction owner $ do
+      execute "UPDATE requests SET enqueue_command='missing-command' WHERE id='poison-request'" []
+      pure((),[Invalidation "request.changed" "/v1/requests/poison-request" "revision"])
+    assertion "deferred commit failure is preserved" (failed==Left StoreUnavailable)
+    refused <- try @StoreFailure(runRead owner(pure()))
+    assertion "uncertain commit preserves original poison fence" (refused==Left StorePoisoned)
+    await(takeMVar stopped)
+    await(wait task) >>= assertion "definite poison automatically stops original worker before explicit shutdown" . (==Left StoreClosed)
+    result <- await(shutdownAdmission controller CancelNow)
+    assertion "explicit safety completion is not a durable receipt" (result==ShutdownResult False(Right()))
+  fixture "shutdown-exception" $ \owner -> do
+    result <- try @SomeException $ withAdmission owner $ \_ -> throwIO UserInterrupt
+    assertion "bracket cancellation preserves original body exception" (case result of Left failure -> fromException failure==Just UserInterrupt; _ -> False)
+  fixture "shutdown-commit-fence" $ \owner -> do
+    fence <- newTVarIO False
+    entered <- newEmptyMVar
+    release <- newEmptyMVar
+    let clockAtCommit = putMVar entered () >> readMVar release >> pure 0
+    withCommitDeadline owner clockAtCommit 1 $ \guard -> do
+      task <- async $ try @StoreFailure $ runTransaction owner $ do
+        enforceAdmissionFence fence
+        enforceCommitDeadline guard
+        execute "UPDATE clients SET revision='must-rollback' WHERE id='client_1'" []
+        pure((),[Invalidation "service.changed" "/v1/capabilities" "must-rollback"])
+      await(takeMVar entered)
+      atomically(writeTVar fence True)
+      putMVar release ()
+      await(wait task) >>= assertion "shutdown fence rejects in-flight acceptance at final validation" . (==Left StoreClosed)
+    scalarText owner "SELECT revision FROM clients WHERE id='client_1'" >>= assertion "fenced transaction preserves original durable revision" . (=="revision")
+    number owner "SELECT count(*) FROM invalidations WHERE revision='must-rollback'" >>= assertion "fenced acceptance rolls back its invalidation too" . (==0)
+    atomically(writeTVar fence False)
+    runTransaction owner $ do
+      enforceAdmissionFence fence
+      execute "UPDATE clients SET revision='accepted' WHERE id='client_1'" []
+      pure((),[Invalidation "service.changed" "/v1/capabilities" "accepted"])
+    scalarText owner "SELECT revision FROM clients WHERE id='client_1'" >>= assertion "open final fence permits original acceptance once" . (=="accepted")
+  putStrLn "PASS in-memory shutdown and Store safety without native process construction"
+
+shutdownNativeChecks :: FilePath -> FilePath -> IO ()
+shutdownNativeChecks work native = do
+  withFixture work native "shutdown-reuse" 1 [("a",[])] $ \fixture@(Fixture _ _ owner _ _) -> do
+    withAdmission owner (const(pure()))
+    forM_ ["first","second"] $ \suffix -> withAdmission owner $ \controller -> do
+      draft <- newDraft fixture 0 "a" suffix
+      void(enqueue controller fixture 0 draft suffix)
+      live <- admit controller
+      void(await(awaitReview live) >>= right)
+      assertion "healthy same-Store reuse constructs an actual native preparation" True
+  forM_ [False,True] $ \expiry -> withFixture work native (if expiry then "shutdown-deadline" else "shutdown-cancel") 1 [("a",[])] $ \fixture@(Fixture _ _ owner _ _) -> do
+    time <- newTVarIO 0
+    watching <- newEmptyMVar
+    let timer = MonotonicClock (atomically(readTVar time)) $ \deadline -> do
+          when(deadline==100)(void(tryPutMVar watching ()))
+          atomically(readTVar time >>= check . (>=deadline))
+    withAdmissionClock timer owner $ \controller -> do
+      draft <- newDraft fixture 0 "a" "urgent"
+      void(enqueue controller fixture 0 draft "urgent")
+      live <- admit controller
+      void(await(awaitReview live) >>= right)
+      entered <- newEmptyMVar
+      release <- newEmptyMVar
+      held <- newEmptyMVar
+      releaseSQL <- newEmptyMVar
+      let releaseAll = void(tryPutMVar releaseSQL ()) >> void(tryPutMVar release ())
+      (do
+        first <- async(withReviewAcceptance live(\_ _ -> putMVar entered () >> readMVar release))
+        await(takeMVar entered)
+        callers <- forM [1..15::Int] $ \_ -> do
+          task <- async(withReviewAcceptance live(\_ _ -> pure()))
+          let waiting = do
+                status <- threadStatus(asyncThreadId task)
+                case status of
+                  ThreadBlocked BlockedOnSTM -> pure()
+                  ThreadFinished -> error "Admission caller unexpectedly finished before saturation"
+                  ThreadDied -> error "Admission caller died before saturation"
+                  _ -> threadDelay 1000 >> waiting
+          await waiting
+          pure task
+        refused <- withReviewAcceptance live(\_ _ -> error "seventeenth operation entered")
+        assertion "sixteen actual Admission operation slots are occupied" (case refused of Left StorageUnavailable -> True; _ -> False)
+        cancel first
+        withCommitDeadline owner (putMVar held () >> readMVar releaseSQL >> pure 0) 1 $ \guard -> do
+          holder <- async(runTransaction owner(enforceCommitDeadline guard >> pure((),[])))
+          await(takeMVar held)
+          ending <- async(shutdownAdmission controller(if expiry then DrainUntil 100 else CancelNow))
+          when expiry $ await(takeMVar watching) >> atomically(writeTVar time 100)
+          awaitNativeStop live
+          poll ending >>= assertion "native stop precedes SQL and retained-operation joins" . maybe True (const False)
+          cancel ending
+          repeated <- async(closeAdmission controller 200)
+          releaseAll
+          await(wait holder)
+          forM_ callers $ \task -> await(wait task) >>= assertion "fenced retained callers do not enter new acceptance" . (==Left StorageUnavailable)
+          result <- await(wait repeated)
+          assertion "interrupted shutdown waiter cannot erase original expiry or cleanup" (result==ShutdownResult expiry(Right()))
+          await(awaitAdmissionCleanup live) >>= right) `finally` releaseAll
+  forM_ ["poison","full","io"] $ \fault -> withFixture work native ("shutdown-"<>fault) 1 [("a",[])] $ \fixture@(Fixture root _ owner _ _) -> do
+    outcome <- try @CommandFailure $ withAdmission owner $ \controller -> do
+      draft <- newDraft fixture 0 "a" (T.pack fault)
+      void(enqueue controller fixture 0 draft (T.pack fault))
+      live <- admit controller
+      void(await(awaitReview live) >>= right)
+      entered <- newEmptyMVar
+      release <- newEmptyMVar
+      (withCommitDeadline owner (putMVar entered () >> readMVar release >> pure 0) 1 $ \guard -> do
+        holder <- async(runTransaction owner(enforceCommitDeadline guard >> pure((),[])))
+        await(takeMVar entered)
+        busy <- try @StoreFailure(runTransaction owner(pure((),[])))
+        assertion "transient Busy does not request native safety" (busy==Left StoreBusy)
+        observeLivePreparation live >>= assertion "native preparation stays live under Busy" . maybe False ((==Worker.WorkerPrepared) . Worker.observedWorkerPhase)
+        putMVar release ()
+        await(wait holder)) `finally` void(tryPutMVar release ())
+      rollbackResult <- try @StoreFailure $ mutate owner(execute "INSERT INTO clients VALUES ('client_1','duplicate','fixture',0)" [])
+      assertion "confirmed constraint rollback retains original refusal" (rollbackResult==Left StoreUnavailable)
+      runRead owner(pure())
+      observeLivePreparation live >>= assertion "confirmed rollback does not stop original native worker" . maybe False ((==Worker.WorkerPrepared) . Worker.observedWorkerPhase)
+      when(fault=="io") $ do
+        readFailure <- try @StoreFailure(runRead owner(void(query "SELECT admission_io_failure()" [])))
+        assertion "read-only injected IO retains original error without widening writable fault policy" (readFailure==Left StoreUnavailable)
+        runRead owner(pure())
+        observeLivePreparation live >>= assertion "read-only IO with confirmed rollback does not set writable availability latch" . maybe False ((==Worker.WorkerPrepared) . Worker.observedWorkerPhase)
+      when(fault=="full") $ do
+        quota <- number owner "SELECT admission_page_quota()"
+        assertion "test-only original connection page quota applied" (quota>0)
+      failed <- try @StoreFailure $ mutate owner $ case fault of
+        "poison" -> execute "UPDATE requests SET enqueue_command='missing-command' WHERE id=?" [SQL.SQLText(draftId draft)]
+        "full" -> execute "INSERT INTO clients VALUES ('full','revision',CAST(zeroblob(1048576) AS TEXT),0)" []
+        _ -> execute "INSERT INTO clients VALUES ('io','revision',admission_io_failure(),0)" []
+      assertion (fault<>" preserves original opaque SQL error") (failed==Left StoreUnavailable)
+      unavailable <- try @StoreFailure(runRead owner(pure()))
+      assertion (fault<>" keeps poison distinct from definite writable unavailability") (unavailable==Left(if fault=="poison" then StorePoisoned else StoreUnavailable))
+      awaitNativeStop live
+      await(awaitAdmissionCleanup live) >>= assertion "automatic native cleanup does not fabricate durable release" . (==Left StorageUnavailable)
+      rawNumber root "SELECT count(*) FROM reservations WHERE state!='released'" >>= assertion "unpublished release retains original reservation" . (==1)
+      rawNumber root "SELECT count(*) FROM commands WHERE operation='cancel'" >>= assertion "automatic physical stop creates no cancellation receipt" . (==0)
+      rawNumber root "SELECT count(*) FROM runs" >>= assertion "unapproved native stop creates no Runtime terminal result" . (==0)
+    assertion (fault<>" preserves failed cleanup publication at scope exit") (outcome==Left StorageUnavailable)
+    reused <- try @CommandFailure(withAdmission owner(\_ -> error "unhealthy Store admitted a fresh controller"))
+    assertion "original joined cleanup never clears permanent storage unavailability" (case reused of Left StorageUnavailable -> True; _ -> False)
+  putStrLn "PASS local native shutdown, saturation, reuse and automatic storage safety"
+
+awaitNativeStop :: LivePreparation -> IO ()
+awaitNativeStop live = await loop
+  where
+    loop = do
+      value <- observeLivePreparation live
+      case value of
+        Just observation | maybe False (const True) (Worker.observedWorkerExit observation) ->
+          assertion "original native Worker joins with confirmed physical cleanup" (not(Worker.observedCleanupUnproven observation))
+        _ -> threadDelay 1000 >> loop
 
 policyChecks :: IO ()
 policyChecks = do

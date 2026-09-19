@@ -7,8 +7,8 @@
 -- | A single leased SQLite writer with strict, bounded transaction results.
 module Agentic.Manager.Store
   ( CoordinationStore, StoreIdentity (..), StoreFailure (..), Checkpoint (..),
-    withCoordinationStore, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreFiles, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, retryStoreCleanup, probeStoreCapabilities,
-    CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, Transaction, execute, query, refuseTransaction, runTransaction, runRead, StoreAdmission (..), runTransactionWithAdmission, runReadWithAdmission, transactionGeneration,
+    withCoordinationStore, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreFiles, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, requestStoreWorkersStop, awaitStoreWorkersStop, retryStoreCleanup, probeStoreCapabilities,
+    CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, enforceAdmissionFence, Transaction, execute, query, refuseTransaction, runTransaction, runRead, StoreAdmission (..), runTransactionWithAdmission, runReadWithAdmission, transactionGeneration,
     Invalidation (..)
   ) where
 
@@ -26,11 +26,11 @@ import Agentic.Runtime
 import Control.Concurrent (rtsSupportsBoundThreads)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (race, withAsync, asyncWithUnmask, cancel, wait)
-import Control.Concurrent.STM (STM, TMVar, atomically, newEmptyTMVarIO, readTMVar, isEmptyTMVar, tryPutTMVar)
+import Control.Concurrent.STM (STM, TMVar, TVar, atomically, newEmptyTMVarIO, newTVarIO, readTMVar, readTVar, readTVarIO, writeTVar, modifyTVar', throwSTM, isEmptyTMVar, tryPutTMVar)
 import Control.Concurrent.MVar (MVar, newMVar, newEmptyMVar, readMVar, tryReadMVar, withMVar, modifyMVarMasked, takeMVar, putMVar, tryTakeMVar)
 import Control.Exception
   (Exception, SomeException, bracket, bracketOnError, finally, mask,
-   evaluate, uninterruptibleMask_, throwIO, try, onException, catch)
+   evaluate, uninterruptibleMask_, throwIO, try, onException, catch, fromException)
 import Control.Monad (unless, when, void, foldM, forM_, forever)
 import Control.DeepSeq (NFData, force)
 import Crypto.Hash (Digest, SHA256, hashInit, hashUpdate, hashFinalize)
@@ -86,14 +86,19 @@ data Checkpoint = Checkpoint
 -- | One connection and admission cell. Ordinary calls fail fast, terminal-owner
 -- persistence can spend its existing operation allowance waiting for the cell.
 data CoordinationStore = CoordinationStore !InstalledConfiguration !PrivateRoot !SQL.Database !StoreIdentity
-  !(MVar ()) !(IORef Bool) !(IORef Bool) !Fd !(MVar ()) !(MVar (Bool, [StoreWorker])) !(MVar ()) !(IORef Bool) !(MVar (Bool, Maybe (TMVar (), MVar ())))
+  !(MVar ()) !(IORef Bool) !(IORef Bool) !Fd !(MVar ()) !(TVar WorkerRegistry) !(MVar ()) !(IORef Bool) !(TVar (Bool, Maybe (TMVar (), MVar ())))
+
+-- | Original registrations and their first stop batch. A scoped fence is not permanent quarantine.
+data WorkerRegistry = WorkerRegistry
+  { registryClosed :: !Bool, registryUnavailable :: !Bool,
+    registryStopped :: !(Maybe [StoreWorker]), registryWorkers :: ![StoreWorker] }
 
 -- | One in-memory lifetime notification and joined release, not PID authority.
 data StoreWorker = StoreWorker !(TMVar ()) !(MVar ()) !(MVar [ProcessGroup]) !(MVar (Maybe (PrivateRoot, Fd)))
 
 -- | A manager-only transaction program. No IO lift, connection or cursor is exported.
 newtype Transaction a = Transaction (Context -> IO a)
-data Context = Context !SQL.Database !Text !Bool !(IORef Budget) !(IORef Bool) !(IORef (Maybe CommitDeadline))
+data Context = Context !SQL.Database !Text !Bool !(IORef Budget) !(IORef Bool) !(IORef (Maybe CommitDeadline)) !(IORef (Maybe (TVar Bool)))
 data Budget = Budget !Int !Int !Int !Int
 
 instance Functor Transaction where
@@ -155,7 +160,7 @@ openStore installed root lease = storageErrors $ do
         [[SQL.SQLText epoch, SQL.SQLText stream]] -> pure (epoch, stream)
         _ -> throwIO StoreIntegrity
     CoordinationStore installed root db (StoreIdentity schemaVersion epoch stream generation)
-      <$> newMVar () <*> newIORef False <*> newIORef False <*> pure lease <*> newMVar () <*> newMVar (False, []) <*> newMVar () <*> newIORef False <*> newMVar (False, Nothing)
+      <$> newMVar () <*> newIORef False <*> newIORef False <*> pure lease <*> newMVar () <*> newTVarIO (WorkerRegistry False False Nothing []) <*> newMVar () <*> newIORef False <*> newTVarIO (False, Nothing)
   where
     databaseName = "coordination.sqlite3"
     checkCompanion name = do
@@ -296,10 +301,13 @@ closeStore store@(CoordinationStore installed root db _ gate closed poisoned lea
     already <- readIORef retired
     unless already $ do
       writeIORef closed True
-      controller <- modifyMVarMasked admission (\(_, owner) -> pure ((True, owner), owner))
-      forM_ controller $ \(stop, _) -> void (atomically (tryPutTMVar stop ()))
-      active <- modifyMVarMasked workers (\(_, entries) -> pure ((True, entries), entries))
-      mapM_ (\(StoreWorker stop _ _ _) -> void (atomically (tryPutTMVar stop ()))) active
+      controller <- atomically $ do
+        (_, owner) <- readTVar admission
+        writeTVar admission (True, owner)
+        modifyTVar' workers (\state -> state {registryClosed=True})
+        forM_ owner $ \(stop, _) -> void(tryPutTMVar stop ())
+        pure owner
+      active <- requestStoreWorkersStop store
       mapM_ (\(StoreWorker _ done _ _) -> readMVar done) active
       forM_ controller (readMVar . snd)
       -- Only the original Runtime tokens may resolve previously unproven completion.
@@ -307,7 +315,7 @@ closeStore store@(CoordinationStore installed root db _ gate closed poisoned lea
         owned <- readMVar groups
         forM_ owned $ \group -> void (try @SomeException (terminateProcessGroup 5000000 group))
         releaseStoreWorker store entry
-      remaining <- snd <$> readMVar workers
+      remaining <- registryWorkers <$> readTVarIO workers
       unless (null remaining) (throwIO StoreCleanupUnproven)
       takeMVar files
       takeMVar gate
@@ -317,6 +325,41 @@ closeStore store@(CoordinationStore installed root db _ gate closed poisoned lea
           writeIORef retired True
           (closePrivateRoot root `finally` closeFd lease) `finally` releaseConfigurationStorage installed
         Left failure -> writeIORef poisoned True >> throwIO failure
+
+-- | Fence construction and notify every original registration before any join or SQL.
+-- This is physical safety authority, not durable acceptance or containment evidence.
+requestStoreWorkersStop :: CoordinationStore -> IO [StoreWorker]
+requestStoreWorkersStop (CoordinationStore _ _ _ _ _ _ _ _ _ workers _ _ _) = atomically(stopWorkers workers)
+
+stopWorkers :: TVar WorkerRegistry -> STM [StoreWorker]
+stopWorkers workers = do
+  state <- readTVar workers
+  case registryStopped state of
+    Just original -> pure original
+    Nothing -> do
+      let original = registryWorkers state
+      forM_ original $ \(StoreWorker stop _ _ _) -> void(tryPutTMVar stop ())
+      writeTVar workers state {registryStopped=Just original}
+      pure original
+
+-- No callback, SQL acquisition or join runs in this notification transaction.
+notifyStoreFailure :: CoordinationStore -> Bool -> IO ()
+notifyStoreFailure (CoordinationStore _ _ _ _ _ _ _ _ _ workers _ _ admission) unavailable = atomically $ do
+  modifyTVar' workers (\state -> state {registryClosed=True, registryUnavailable=registryUnavailable state || unavailable})
+  (_, owner) <- readTVar admission
+  forM_ owner $ \(stop, _) -> void(tryPutTMVar stop ())
+  void(stopWorkers workers)
+
+-- | Join the original broadcast snapshot, including registrations retiring meanwhile.
+awaitStoreWorkersStop :: [StoreWorker] -> IO ()
+awaitStoreWorkersStop entries = do
+  forM_ entries $ \(StoreWorker stop _ _ _) -> do
+    live <- atomically(isEmptyTMVar stop)
+    when live (throwIO StoreIntegrity)
+  forM_ entries $ \(StoreWorker _ done _ _) -> readMVar done
+  forM_ entries $ \entry -> do
+    confirmed <- storeWorkerCleanupConfirmed entry
+    unless confirmed (throwIO StoreCleanupUnproven)
 
 -- | Bounded recheck of retained original ownership, never PID or command replay.
 retryStoreCleanup :: CoordinationStore -> IO ()
@@ -362,29 +405,44 @@ withStoreFiles store@(CoordinationStore _ root _ _ _ closed _ lease files _ _ _ 
 
 -- | One admission owner, separate from the physical worker registration ceiling.
 withStoreAdmission :: CoordinationStore -> (STM Bool -> IO a) -> IO a
-withStoreAdmission (CoordinationStore _ _ _ _ _ closed _ _ _ _ _ _ admission) action = mask $ \restore -> do
+withStoreAdmission store@(CoordinationStore _ _ _ _ _ closed poisoned _ _ workers _ _ admission) action = mask $ \restore -> do
   stop <- newEmptyTMVarIO
   done <- newEmptyMVar
-  modifyMVarMasked admission $ \(fenced, current) -> do
-    closing <- readIORef closed
-    when (fenced || closing) (throwIO StoreClosed)
+  readIORef closed >>= \closing -> when closing (throwIO StoreClosed)
+  readIORef poisoned >>= \failed -> when failed (throwIO StorePoisoned)
+  atomically $ do
+    (fenced, current) <- readTVar admission
+    state <- readTVar workers
+    when (registryUnavailable state) (throwSTM StoreUnavailable)
+    when (fenced || registryClosed state) (throwSTM StoreClosed)
+    when (maybe False (const True) (registryStopped state)) (throwSTM StoreCleanupUnproven)
     case current of
-      Just _ -> throwIO StoreBusy
-      Nothing -> pure ((False, Just (stop, done)), ())
+      Just _ -> throwSTM StoreBusy
+      Nothing -> writeTVar admission (False, Just (stop, done))
   result <- try @SomeException (restore (action (isEmptyTMVar stop)))
   atomically (void (tryPutTMVar stop ()))
-  modifyMVarMasked admission (\(fenced, _) -> pure ((fenced, Nothing), ()))
+  cleanup <- try @SomeException $ do
+    original <- requestStoreWorkersStop store
+    awaitStoreWorkersStop original
+    atomically $ do
+      state <- readTVar workers
+      unless (null(registryWorkers state)) (throwSTM StoreCleanupUnproven)
+      writeTVar workers state {registryStopped=Nothing}
+  atomically(modifyTVar' admission (\(fenced, _) -> (fenced, Nothing)))
   putMVar done ()
-  either throwIO pure result
+  case result of
+    Left failure -> throwIO failure
+    Right value -> either throwIO (const(pure value)) cleanup
 
 -- | A separate bounded lifetime for workers. Close signals and joins it without SQL.
 withStoreWorker :: CoordinationStore -> (StoreWorker -> PrivateRoot -> STM Bool -> IO a) -> IO a
 withStoreWorker store@(CoordinationStore _ root _ _ _ _ _ lease _ workers _ _ _) action = mask $ \restore -> do
   entry@(StoreWorker stop done _ resources) <- StoreWorker <$> newEmptyTMVarIO <*> newEmptyMVar <*> newMVar [] <*> newMVar Nothing
-  modifyMVarMasked workers $ \(fenced, entries) -> do
-    when fenced (throwIO StoreCleanupUnproven)
-    when (length entries >= 16) (throwIO StoreBusy)
-    pure ((False, entry : entries), ())
+  atomically $ do
+    state <- readTVar workers
+    when (registryClosed state || maybe False (const True) (registryStopped state)) (throwSTM StoreCleanupUnproven)
+    when (length (registryWorkers state) >= 16) (throwSTM StoreBusy)
+    writeTVar workers state {registryWorkers=entry:registryWorkers state}
   result <- try @SomeException $ do
     pair <- admitted store $ bracketOnError (openPrivateSubroot root []) closePrivateRoot $ \retained -> do
       copied <- duplicateLease lease
@@ -425,11 +483,11 @@ releaseStoreWorker (CoordinationStore _ _ _ _ _ closed _ _ _ workers _ _ _) entr
   if confirmed then do
     retained <- modifyMVarMasked resources (\value -> pure (Nothing, value))
     forM_ retained $ \(root, lease) -> closePrivateRoot root `finally` closeFd lease
-    modifyMVarMasked workers $ \(fenced, entries) -> pure
-      ((fenced, filter (\(StoreWorker _ other _ _) -> other /= done) entries), ())
+    atomically $ modifyTVar' workers $ \state -> state
+      {registryWorkers=filter (\(StoreWorker _ other _ _) -> other /= done) (registryWorkers state)}
   else do
     writeIORef closed True
-    modifyMVarMasked workers $ \(_, entries) -> pure ((True, entries), ())
+    atomically(modifyTVar' workers (\state -> state {registryClosed=True}))
 
 
 probeStoreCapabilities :: CoordinationStore -> StoreWorker -> Text -> Text -> IO (Either Diagnostic FrontendCapabilities)
@@ -450,11 +508,12 @@ admitted :: CoordinationStore -> IO a -> IO a
 admitted store action = admittedWith FailFast store (const action)
 
 admittedWith :: StoreAdmission -> CoordinationStore -> (Maybe Admission.Deadline -> IO a) -> IO a
-admittedWith policy (CoordinationStore _ root _ _ gate closed poisoned _ _ _ _ _ _) action = do
+admittedWith policy (CoordinationStore _ root _ _ gate closed poisoned _ _ workers _ _ _) action = do
   readIORef closed >>= \value -> when value (throwIO StoreClosed)
   let ready = do
         readIORef closed >>= \value -> when value (throwIO StoreClosed)
         readIORef poisoned >>= \value -> when value (throwIO StorePoisoned)
+        readTVarIO workers >>= \state -> when (registryUnavailable state) (throwIO StoreUnavailable)
         assertPrivateRoot root
   storageErrors (Admission.withGate policy gate ready action) `catch` \failure ->
     throwIO (case failure of Admission.AdmissionBusy -> StoreBusy; Admission.AdmissionExpired -> StoreDeadline)
@@ -462,7 +521,7 @@ admittedWith policy (CoordinationStore _ root _ _ gate closed poisoned _ _ _ _ _
 -- | Internal callers supply source-owned SQL, never SQL obtained from a client.
 -- Statement count, binding bytes and strict result bytes share one transaction budget.
 execute :: Text -> [SQL.SQLData] -> Transaction ()
-execute sql parameters = Transaction $ \context@(Context db _ writable _ changed _) -> do
+execute sql parameters = Transaction $ \context@(Context db _ writable _ changed _ _) -> do
   unless writable (throwIO StoreIntegrity)
   unless (T.toUpper (T.takeWhile (not . isSpace) (T.stripStart sql)) `elem` ["INSERT", "UPDATE", "DELETE"]) $
     throwIO StoreIntegrity
@@ -471,7 +530,7 @@ execute sql parameters = Transaction $ \context@(Context db _ writable _ changed
   writeIORef changed True
 
 query :: Text -> [SQL.SQLData] -> Transaction [[SQL.SQLData]]
-query sql parameters = Transaction $ \context@(Context db _ _ budget _ _) -> do
+query sql parameters = Transaction $ \context@(Context db _ _ budget _ _ _) -> do
   unless (T.toUpper (T.takeWhile (not . isSpace) (T.stripStart sql)) `elem` ["SELECT", "WITH"]) $
     throwIO StoreIntegrity
   chargeInput context sql parameters
@@ -484,7 +543,7 @@ query sql parameters = Transaction $ \context@(Context db _ _ budget _ _) -> do
 
 -- | One live owner's monotonic acceptance deadline, scoped to a protected loan.
 data CommitDeadline = CommitDeadline !Text !(IO Word64) !Word64 !(IORef Bool) !(Maybe PreparedCommit)
-data PreparedCommit = PreparedCommit !(MVar (Bool,[StoreWorker])) !StoreWorker !ProcessGroup !WorkerLifecycle
+data PreparedCommit = PreparedCommit !(TVar WorkerRegistry) !StoreWorker !ProcessGroup !WorkerLifecycle !(TVar Bool)
 
 withCommitDeadline :: CoordinationStore -> IO Word64 -> Word64 -> (CommitDeadline -> IO a) -> IO a
 withCommitDeadline (CoordinationStore _ _ _ identity _ closed _ _ _ _ _ _ _) now deadline action = mask $ \restore -> do
@@ -493,25 +552,25 @@ withCommitDeadline (CoordinationStore _ _ _ identity _ closed _ _ _ _ _ _ _) now
   restore(action(CommitDeadline(storeProcessGeneration identity)now deadline active Nothing)) `finally` writeIORef active False
 
 -- | The prepared variant binds the original registration, process and adapter cells.
-withPreparedCommitDeadline :: CoordinationStore -> StoreWorker -> ProcessGroup -> WorkerLifecycle -> IO Word64 -> Word64 -> (CommitDeadline -> IO a) -> IO a
-withPreparedCommitDeadline store@(CoordinationStore _ _ _ _ _ _ _ _ _ registry _ _ _) owner group state now deadline action =
+withPreparedCommitDeadline :: CoordinationStore -> StoreWorker -> ProcessGroup -> WorkerLifecycle -> TVar Bool -> IO Word64 -> Word64 -> (CommitDeadline -> IO a) -> IO a
+withPreparedCommitDeadline store@(CoordinationStore _ _ _ _ _ _ _ _ _ registry _ _ _) owner group state fence now deadline action =
   withCommitDeadline store now deadline $ \(CommitDeadline generation clock end active _) ->
-    action(CommitDeadline generation clock end active(Just(PreparedCommit registry owner group state)))
+    action(CommitDeadline generation clock end active(Just(PreparedCommit registry owner group state fence)))
 
 checkPreparedCommit :: PreparedCommit -> IO ()
-checkPreparedCommit (PreparedCommit registry (StoreWorker stop done groups _) group state) = do
-  registered <- tryReadMVar registry
+checkPreparedCommit (PreparedCommit registry (StoreWorker stop done groups _) group state fence) = do
+  registered <- readTVarIO registry
   owned <- tryReadMVar groups
-  let present = case registered of
-        Just(False,entries) -> any(\(StoreWorker _ registeredDone _ _)->registeredDone==done)entries
-        _ -> False
+  let present = not(registryClosed registered) && maybe True (const False) (registryStopped registered)
+        && any(\(StoreWorker _ registeredDone _ _)->registeredDone==done)(registryWorkers registered)
       attached = case owned of
         Just entries -> any((==groupOutcome group).groupOutcome)entries
         _ -> False
       current = atomically $ do
         open <- isEmptyTMVar stop
         ready <- acceptingPreparation state
-        pure(open && ready)
+        stopped <- readTVar fence
+        pure(open && ready && not stopped)
   ready <- current
   unless(present && attached && ready)(throwIO StoreClosed)
   living <- processGroupLive group
@@ -521,7 +580,7 @@ checkPreparedCommit (PreparedCommit registry (StoreWorker stop done groups _) gr
 -- | Arm one fixed final check after transactional work and invalidations, before COMMIT.
 -- This adds no general IO lift or caller-supplied acceptance predicate.
 enforceCommitDeadline :: CommitDeadline -> Transaction ()
-enforceCommitDeadline guard@(CommitDeadline owner _ _ _ _) = Transaction $ \(Context _ generation writable _ _ pending) -> do
+enforceCommitDeadline guard@(CommitDeadline owner _ _ _ _) = Transaction $ \(Context _ generation writable _ _ pending _) -> do
   unless(writable && owner==generation)(throwIO StoreIntegrity)
   existing <- readIORef pending
   case existing of
@@ -536,9 +595,19 @@ checkCommitDeadline (CommitDeadline _ now deadline active prepared) = do
   unless(observed<deadline)(throwIO StoreDeadline)
   mapM_ checkPreparedCommit prepared
 
+-- | A fixed refusal-only admission check at the logical pre-COMMIT boundary.
+-- The flag grants no authority and does not make SQLite COMMIT atomic with STM.
+enforceAdmissionFence :: TVar Bool -> Transaction ()
+enforceAdmissionFence fence = Transaction $ \(Context _ _ writable _ _ _ pending) -> do
+  unless writable (throwIO StoreIntegrity)
+  existing <- readIORef pending
+  case existing of
+    Nothing -> writeIORef pending (Just fence)
+    Just _ -> throwIO StoreIntegrity
+
 -- | The current in-memory lifetime, never reconstructed from a database row.
 transactionGeneration :: Transaction Text
-transactionGeneration = Transaction $ \(Context _ generation _ _ _ _) -> pure generation
+transactionGeneration = Transaction $ \(Context _ generation _ _ _ _ _) -> pure generation
 
 refuseTransaction :: Exception e => e -> Transaction a
 refuseTransaction failure = Transaction (const (throwIO failure))
@@ -566,17 +635,19 @@ runWithAdmission policy store@(CoordinationStore _ _ db identity _ _ poisoned _ 
   changed <- newIORef False
   budget <- newIORef (Budget 256 8388608 1000 1048576)
   deadline <- newIORef Nothing
+  admissionFence <- newIORef Nothing
   mask $ \restore -> do
     result <- try @SomeException $ restore $ boundedWith db (maybe (pure 5000000) Admission.remainingMicros end) $ do
       mapM_ (void . Admission.remainingMicros) end
       SQL.exec db (if writable then "BEGIN IMMEDIATE" else "BEGIN")
-      (resultValue, events) <- action (Context db (storeProcessGeneration identity) writable budget changed deadline)
+      (resultValue, events) <- action (Context db (storeProcessGeneration identity) writable budget changed deadline admissionFence)
       validateEvents events
       value <- evaluate (force resultValue)
       didChange <- readIORef changed
       when (didChange && null events) (throwIO StoreIntegrity)
       mapM_ (appendInvalidation db) events
       readIORef deadline >>= mapM_ checkCommitDeadline
+      readIORef admissionFence >>= mapM_ (\fence -> atomically (readTVar fence) >>= \stopped -> when stopped (throwIO StoreClosed))
       writeIORef committing True
       SQL.exec db "COMMIT"
       pure value
@@ -585,8 +656,27 @@ runWithAdmission policy store@(CoordinationStore _ _ db identity _ _ poisoned _ 
       Left failure -> do
         uncertain <- readIORef committing
         cleanup <- try @SomeException (bounded db 5000000 (rollback db))
-        when (uncertain || either (const True) (const False) cleanup) (writeIORef poisoned True)
+        let poison = uncertain || either (const True) (const False) cleanup
+            unavailable = writable && definiteWriteFailure failure
+        when poison (writeIORef poisoned True)
+        when (poison || unavailable) (notifyStoreFailure store unavailable)
         throwIO failure
+
+-- The writable SQL boundary observes definite recording failure before opaque mapping.
+-- Confirmed rollback is still not poison, and read-only errors do not set this latch.
+definiteWriteFailure :: SomeException -> Bool
+definiteWriteFailure failure = case fromException failure of
+  Just sql -> SQL.sqlError sql `elem`
+    [ SQL.ErrorFull, SQL.ErrorIO, SQL.ErrorIORead, SQL.ErrorIOShortRead, SQL.ErrorIOWrite,
+      SQL.ErrorIOFsync, SQL.ErrorIODirectoryFsync, SQL.ErrorIOTruncate, SQL.ErrorIOFstat,
+      SQL.ErrorIOUnlock, SQL.ErrorIOReadLock, SQL.ErrorIOBlocked, SQL.ErrorIODelete,
+      SQL.ErrorIONoMemory, SQL.ErrorIOAccess, SQL.ErrorIOCheckReservedLock, SQL.ErrorIOLock,
+      SQL.ErrorIOClose, SQL.ErrorIODirectoryClose, SQL.ErrorIOShmOpen, SQL.ErrorIOShmSize,
+      SQL.ErrorIOShmLock, SQL.ErrorIOShmMap, SQL.ErrorIOSeek, SQL.ErrorIODeleteNoEntity,
+      SQL.ErrorIOMmap, SQL.ErrorIOGetTempPath, SQL.ErrorIOConvertedPath, SQL.ErrorIOVNode,
+      SQL.ErrorIOAuth, SQL.ErrorIOBeginAtomic, SQL.ErrorIOCommitAtomic,
+      SQL.ErrorIORollbackAtomic, SQL.ErrorIOData, SQL.ErrorIOCorruptFilesystem ]
+  Nothing -> False
 
 rollback :: SQL.Database -> IO ()
 rollback db@(Direct.Database raw) = do
@@ -621,7 +711,7 @@ appendInvalidation db (Invalidation kind uri revision) = do
     [SQL.SQLText kind, SQL.SQLText uri, SQL.SQLText revision]
 
 chargeInput :: Context -> Text -> [SQL.SQLData] -> IO ()
-chargeInput (Context _ _ _ budget _ _) sql parameters = do
+chargeInput (Context _ _ _ budget _ _ _) sql parameters = do
   when (T.length sql > 65536 || T.any (`elem` ['\0', ';']) sql) (throwIO StoreLimit)
   let sqlBytes = BS.length (TE.encodeUtf8 sql)
   when (sqlBytes > 65536) (throwIO StoreLimit)

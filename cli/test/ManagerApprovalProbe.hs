@@ -62,6 +62,8 @@ main=do
   hSetBuffering stdout LineBuffering
   args<-getArgs
   case args of
+    ["shutdown-drain",work,native]->shutdownDrainChecks work native >> shutdownRunningChecks work native
+    ["shutdown-races",work,native]->shutdownReuseRaceChecks work native >> shutdownRaceChecks work native
     ["history-lineage",work,native]->awaitHistory(nativeLineageChecks False work native)
     ["history-corrections",work,native]->awaitHistory(nativeLineageChecks True work native)
     ["history-policy",work,native,source,python]->awaitHistory(nativeRoutedLineageChecks work native source python)
@@ -147,16 +149,19 @@ withReadyRunner :: FilePath -> FilePath -> [Text] -> Text -> String -> [Text] ->
 withReadyRunner = withReadyRunnerLedger 8388608
 
 withReadyRunnerLedger :: Int64 -> FilePath -> FilePath -> [Text] -> Text -> String -> [Text] -> [(Text,Text)] -> (Fixture -> IO a) -> IO a
-withReadyRunnerLedger ledger work native prefix selectedWorkflow name arguments environment action=do
+withReadyRunnerLedger = withReadyRunnerProfiles [("profile",["shared"])]
+
+withReadyRunnerProfiles :: [(Text,[Text])] -> Int64 -> FilePath -> FilePath -> [Text] -> Text -> String -> [Text] -> [(Text,Text)] -> (Fixture -> IO a) -> IO a
+withReadyRunnerProfiles configuredProfiles ledger work native prefix selectedWorkflow name arguments environment action=do
   capabilities <- getNumCapabilities
   let root=work </> name;path=work </> (name<>".json")
   createDirectory root;setFileMode root 0o700
   BS.writeFile path(encoded(object["version" .= (1::Int),"managerRoot" .= root,"localRetentionRoots" .= ([]::[String]),
     "runners" .= [object["alias" .= ("native"::Text),"executable" .= native,"prefix" .= prefix]],
-    "profiles" .= [object["id" .= ("profile"::Text),"runner" .= ("native"::Text),"workspace" .= work,"workspaceLabel" .= ("Review workspace"::Text),"targetLabel" .= ("Deterministic worker"::Text),
+    "profiles" .= [object["id" .= profileId,"runner" .= ("native"::Text),"workspace" .= work,"workspaceLabel" .= ("Review workspace"::Text),"targetLabel" .= ("Deterministic worker"::Text),
       "targetArguments" .= arguments,"environment" .= [object["name" .= envName,"value" .= value]|(envName,value)<-[("TMPDIR",T.pack work),("XDG_CONFIG_HOME",T.pack(work </> "config")),("GHCRTS",T.pack ("-N"<>show capabilities))]<>environment],
-      "ownership" .= ("service-owned"::Text),"quarantined" .= False,"personAnswering" .= ("local-control"::Text),"resourceKeys" .= ["shared"::Text]]],
-    "limits" .= object["drafts" .= (10::Int),"globalDrafts" .= (20::Int),"globalCaptureBytes" .= (67108864::Int),"globalPageSets" .= (2::Int),"globalConnections" .= (8::Int),"globalDatabaseReaders" .= (2::Int),"globalMutationLedgerBytes" .= ledger,"safetyControlsPerMinute" .= (20::Int),"executionReservations" .= (1::Int)]]))
+      "ownership" .= ("service-owned"::Text),"quarantined" .= False,"personAnswering" .= ("local-control"::Text),"resourceKeys" .= resources]|(profileId,resources)<-configuredProfiles],
+    "limits" .= object["drafts" .= (10::Int),"globalDrafts" .= (20::Int),"globalCaptureBytes" .= (67108864::Int),"globalPageSets" .= (2::Int),"globalConnections" .= (8::Int),"globalDatabaseReaders" .= (2::Int),"globalMutationLedgerBytes" .= ledger,"safetyControlsPerMinute" .= (20::Int),"executionReservations" .= length configuredProfiles]]))
   setFileMode path 0o600
   let registry=Cli.Registry "approval-check" "workflow" "approval fixture" []
       validate requested=either(const(Left InvalidConfiguration))Right(Cli.validateManagerTarget registry requested)
@@ -164,13 +169,13 @@ withReadyRunnerLedger ledger work native prefix selectedWorkflow name arguments 
   config<-loadConfiguration validate validatePrepared (const False) path >>=right
   bracket (installConfiguration config >>=right) closeConfiguration $ \installed->withCoordinationStore installed $ \store->do
     (_,profiles)<-configurationSnapshot installed >>=right
-    policy<-case profiles of [profile]->pure(publicRevision profile);_->error "profile count"
+    policy<-case filter ((=="profile") . publicId) profiles of [profile]->pure(publicRevision profile);_->error "profile count"
     catalogue<-probeConfiguredProfile installed "profile" policy>>=right
     let secret=BS.replicate 32 97
     mutate store $ do
       execute "INSERT INTO clients VALUES ('client','revision','authority',0)" []
       execute "INSERT INTO credentials VALUES ('credential','client',?,'2999-01-01T00:00:00Z',0)" [SQL.SQLBlob(convert(hash secret::Digest SHA256))]
-      forM_ ["observe","submit","control"::Text] $ \scope->execute "INSERT INTO credential_scopes VALUES ('credential','profile',?)" [SQL.SQLText scope]
+      forM_ configuredProfiles $ \(profileId,_) -> forM_ ["observe","submit","control"::Text] $ \scope->execute "INSERT INTO credential_scopes VALUES ('credential',?,?)" [SQL.SQLText profileId,SQL.SQLText scope]
     proof<-authenticateCredential store secret>>=right
     identity<-storeIdentity store
     let key suffix=storeAuthorityEpoch identity<>"."<>T.replicate 22 "n"<>suffix
@@ -528,6 +533,159 @@ withPrepared (Fixture _ _ store proof key ready) clock action=withAdmissionClock
     case rows of [[SQL.SQLText value]]->pure value;_->refuseTransaction StoreIntegrity
   public<-readPreparation store proof ident>>=right
   action controller live context reviewed public
+
+shutdownDrainChecks :: FilePath -> FilePath -> IO ()
+shutdownDrainChecks work native = withReadyRunnerProfiles [("profile",["shared"]),("pending",["pending"])] 8388608 work native [] "person-controlled" "shutdown-drain" ["--scripted"] [] $ \fixture@(Fixture _ installed store proof key _) -> do
+  pendingId <- withPrepared fixture fixedClock $ \controller live context reviewed public -> do
+    (_,start) <- acceptApproval reviewed proof(key "drain-approve")(condition public)(approvalBody public) >>= right
+    owned <- maybe(error "missing retained drain start")pure start
+    (_,profiles) <- configurationSnapshot installed >>= right
+    revision <- case [publicRevision p|p<-profiles,publicId p=="pending"] of [value]->pure value;_->error "pending profile"
+    catalogue <- probeConfiguredProfile installed "pending" revision >>= right
+    workflow <- case [ident|(ident,descriptor)<-discoveryEntries catalogue,workflowName descriptor=="person-controlled"] of [ident]->pure ident;_->error "pending workflow"
+    pending <- createDraft store proof(key "pending-create")(encoded(object["workflowId" .= workflow,"descriptorRevision" .= discoveryRevision catalogue,"profileId" .= ("pending"::Text),"profileRevision" .= revision])) >>= right
+    _ <- changeDraftInput store proof(draftId pending)(key "pending-input")(Just("\""<>draftRevision pending<>"\""))(encoded(object["operation" .= ("set-input"::Text),"input" .= LiteralValue "input" "unapproved preparation"])) >>= right
+    queued <- readDraft store proof(draftId pending) >>= right
+    _ <- enqueueRequest controller proof(draftId queued)(key "pending-enqueue")(Just("\""<>draftRevision queued<>"\""))(encoded(object["operation" .= ("enqueue"::Text)])) >>= right
+    unapproved <- admitOldest controller >>= right >>= maybe(error "pending admission")pure
+    void(await(awaitReview unapproved) >>= right)
+    void(publishReview store unapproved >>= right)
+    ending <- async(closeAdmission controller 100)
+    await(awaitAdmissionCleanup unapproved) >>= right
+    number store "SELECT count(*) FROM preparations WHERE state='invalidated'" >>= check "drain invalidates only genuinely unapproved preparation" . (==1)
+    number store "SELECT count(*) FROM start_intents" >>= check "committed original start survives unapproved cleanup" . (==1)
+    refusal <- admitOldest controller
+    check "healthy drain refuses new admission" (case refusal of Left StorageUnavailable->True;_->False)
+    refusedApproval <- acceptApproval reviewed proof(key "after-drain")(condition public)(approvalBody public)
+    check "healthy drain refuses new approval acceptance" (case refusedApproval of Left StorageUnavailable->True;_->False)
+    deliverAcceptedStart owned >>= right
+    finishShutdownPerson store proof key controller context owned
+    await(awaitAdmissionCleanup live) >>= right
+    result <- await(wait ending)
+    check "genuine terminal drain completes without expiry" (result==ShutdownResult False(Right()))
+    number store "SELECT count(*) FROM reservations WHERE state!='released'" >>= check "native drain releases only after original joined cleanup" . (==0)
+    pure(draftId pending)
+  withAdmission store $ \controller -> do
+    pending <- readDraft store proof pendingId >>= right
+    _ <- enqueueRequest controller proof pendingId(key "reuse-enqueue")(Just("\""<>draftRevision pending<>"\""))(encoded(object["operation" .= ("enqueue"::Text)])) >>= right
+    live <- admitOldest controller >>= right >>= maybe(error "reused admission")pure
+    void(await(awaitReview live) >>= right)
+    check "same still-open Store prepares native work after healthy drain" True
+
+shutdownRunningChecks :: FilePath -> FilePath -> IO ()
+shutdownRunningChecks work native = forM_ [False,True] $ \expiry ->
+  withReady work native ("shutdown-running-"<>show expiry) ["--scripted"] [] $ \fixture@(Fixture _ _ store proof key _) -> do
+    time <- newTVarIO 0
+    watching <- newEmptyMVar
+    let timer=MonotonicClock(atomically(readTVar time))(\deadline -> do
+          when(deadline==100)(void(tryPutMVar watching ()))
+          atomically(readTVar time >>= STM.check . (>=deadline)))
+    withPrepared fixture timer $ \controller live context reviewed public -> do
+      (_,start) <- acceptApproval reviewed proof(key "running-approve")(condition public)(approvalBody public) >>= right
+      owned <- maybe(error "missing running original start")pure start
+      deliverAcceptedStart owned >>= right
+      let pending = do
+            count <- observeControl(number store "SELECT count(*) FROM decisions WHERE state='pending'")
+            when(count==0)(observeControl(ingestAcceptedStart owned) >>= \more -> if more then pending else error "running stream ended early")
+      await pending
+      ending <- async(shutdownAdmission controller(if expiry then DrainUntil 100 else CancelNow))
+      when expiry (await(takeMVar watching) >> atomically(writeTVar time 100))
+      result <- await(wait ending)
+      check "approved person-waiting shutdown retains actual deadline outcome" (result==ShutdownResult expiry(Right()))
+      await(awaitAdmissionCleanup live) >>= right
+      observed <- observeAcceptedStart owned
+      check "approved native cancellation joins original physical owner without success fabrication"
+        (case observedWorkerExit observed of Just(Left _) -> not(observedCleanupUnproven observed);_->False)
+      let association=RunAssociation(acceptedStartRun owned) "profile" (preparedRootIdentity(reviewNative context))(preparedRunId(reviewNative context))
+      projection <- restoreRunProjection store association >>= maybe(error "missing original running prefix")pure
+      check "physical cancellation leaves Runtime terminal evidence separate"
+        (Runtime.snapshotRunStatus(Runtime.checkpointSnapshot projection)==Runtime.RunRunning)
+      number store "SELECT count(*) FROM commands WHERE operation='cancel'" >>= check "local cancellation does not invent committed public consent" . (==0)
+      number store "SELECT count(*) FROM reservations WHERE state!='released'" >>= check "approved cancellation releases after original cleanup" . (==0)
+
+finishShutdownPerson :: CoordinationStore -> CredentialProof -> (Text -> Text) -> Admission -> ReviewContext -> AcceptedStart -> IO ()
+finishShutdownPerson store proof key controller context owned = do
+  let association=RunAssociation(acceptedStartRun owned) "profile" (preparedRootIdentity(reviewNative context))(preparedRunId(reviewNative context))
+      pending=runRead store $ do
+        rows <- query "SELECT id,occurrence_id,generation,revision FROM decisions WHERE run_id=? AND state='pending'" [SQL.SQLText(acceptedStartRun owned)]
+        forM rows $ \row -> case row of [SQL.SQLText i,SQL.SQLText o,SQL.SQLText g,SQL.SQLText r]->pure(i,o,g,r);_->refuseTransaction StoreIntegrity
+      untilPending = do
+        rows <- observeControl pending
+        if null rows then observeControl(ingestAcceptedStart owned) >>= \more -> if more then untilPending else error "native person stream ended early" else pure rows
+  forM_ [1,2::Int] $ \index -> do
+    (ident,occurrence,generation,revision) <- await untilPending >>= \rows -> case rows of [row]->pure row;_->error "person decision count"
+    observed <- newIORef []
+    withHistory store proof [] (Just controller)(writeIORef observed)
+    history <- readIORef observed
+    check "healthy drain retains original owned live history" (or[KM.lookup "supervision" fields==Just(String "owned")|Object fields<-history,KM.lookup "id" fields==Just(String(acceptedStartRun owned))])
+    let answer=encoded(object["operation" .= ("answer"::Text),"occurrenceId" .= occurrence,"generation" .= generation,"value" .= Bool True])
+    accepted <- submitDecisionControl owned proof ident(key("drain-answer-"<>T.pack(show index)))(Just("\""<>revision<>"\""))answer >>= right
+    check "answer acceptance during drain is not yet a native effect" (receiptState(submissionReceipt accepted)==Accepted)
+    deliverAcceptedControl owned(receiptId(submissionReceipt accepted)) >>= right
+    -- Consume the current decision before looking for the next generation.
+    let consumed = do
+          rows <- observeControl pending
+          when(any(\(current,_,_,_)->current==ident)rows)(observeControl(ingestAcceptedStart owned) >>= \more -> if more then consumed else error "answer stream ended early")
+    await consumed
+  let drain = observeControl(ingestAcceptedStart owned) >>= \more -> when more drain
+  await drain
+  snapshot <- observeControl(restoreRunProjection store association) >>= maybe(error "missing terminal Runtime evidence")pure
+  check "drain ingests genuine successful Runtime terminal evidence" (Runtime.snapshotRunStatus(Runtime.checkpointSnapshot snapshot)==Runtime.RunSucceeded)
+
+shutdownReuseRaceChecks :: FilePath -> FilePath -> IO ()
+shutdownReuseRaceChecks work native = withReady work native "shutdown-reuse-race" ["--scripted"] [] $ \fixture@(Fixture _ _ store _ _ _) ->
+  Audit.withReviewAudit "shutdown-request" $ \audit -> do
+    caller <- withAdmission store $ \controller -> do
+      delayed <- async(shutdownAdmission controller CancelNow)
+      _ <- Audit.waitReviewed audit
+      pure delayed
+    poll caller >>= check "old shutdown caller remains paused after original scope release" . maybe True (const False)
+    withPrepared fixture fixedClock $ \_ live _ _ _ -> do
+      observeLivePreparation live >>= check "new scope owns actual prepared native worker before old caller resumes" . maybe False ((==WorkerPrepared) . observedWorkerPhase)
+      Audit.releaseReviewed audit
+      result <- await(wait caller)
+      check "delayed old caller returns original completed shutdown result" (result==ShutdownResult False(Right()))
+      construction <- try @StoreFailure(withStoreWorker store(\_ _ _ -> pure()))
+      check "delayed old caller cannot re-fence new scope construction" (construction==Right())
+      observeLivePreparation live >>= check "delayed old caller cannot stop new scope native worker" . maybe False ((==WorkerPrepared) . observedWorkerPhase)
+
+shutdownRaceChecks :: FilePath -> FilePath -> IO ()
+shutdownRaceChecks work native = forM_ [False,True] $ \committed -> withReady work native ("shutdown-race-"<>show committed) ["--scripted"] [] $ \fixture@(Fixture _ _ store proof key _) -> do
+  watching <- newEmptyMVar
+  let timer=MonotonicClock(pure 0)(\deadline -> when(deadline==100)(void(tryPutMVar watching ())) >> atomically retry)
+  withPrepared fixture timer $ \controller live context reviewed public -> do
+    if committed then do
+      (caller,ending) <- Audit.withAcceptanceAudit $ \audit -> do
+        caller <- async(acceptApproval reviewed proof(key "race-approve")(condition public)(approvalBody public))
+        _ <- Audit.waitAccepted audit
+        number store "SELECT count(*) FROM start_intents" >>= check "shutdown race begins after actual committed approval" . (==1)
+        ending <- async(closeAdmission controller 100)
+        await(takeMVar watching)
+        pure(caller,ending)
+      (accepted,start) <- await(wait caller) >>= right
+      owned <- maybe(error "committed approval lost original association")pure start
+      check "post-commit drain retains original receipt without replay" (not(submissionReplayed accepted))
+      acceptedTimerRetired owned >>= check "committed approval retires original preparation timer"
+      deliverAcceptedStart owned >>= right
+      second <- deliverAcceptedStart owned
+      check "drain cannot deliver original start twice" (case second of Left _->True;_->False)
+      finishShutdownPerson store proof key controller context owned
+      result <- await(wait ending)
+      check "committed acceptance race drains through original worker" (result==ShutdownResult False(Right()))
+      number store "SELECT count(*) FROM commands WHERE operation='approve' AND attempted_at IS NOT NULL" >>= check "one committed approval has one original attempted delivery" . (==1)
+    else Audit.withReviewAudit "acceptance" $ \audit -> do
+      caller <- async(acceptApproval reviewed proof(key "race-approve")(condition public)(approvalBody public))
+      _ <- Audit.waitReviewed audit
+      ending <- async(closeAdmission controller 100)
+      await(takeMVar watching)
+      Audit.releaseReviewed audit
+      refused <- await(wait caller)
+      check "pre-validation shutdown refuses uncommitted approval" (case refused of Left _->True;_->False)
+      await(awaitAdmissionCleanup live) >>= right
+      result <- await(wait ending)
+      check "uncommitted acceptance race invalidates only original preparation" (result==ShutdownResult False(Right()))
+      number store "SELECT count(*) FROM start_intents" >>= check "fenced approval creates no committed start" . (==0)
+      number store "SELECT count(*) FROM commands WHERE operation='approve'" >>= check "fenced approval creates no receipt" . (==0)
 
 fixedClock :: MonotonicClock
 fixedClock=MonotonicClock (pure 0) (\_->atomically retry)
