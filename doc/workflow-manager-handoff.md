@@ -22,18 +22,26 @@ remain the authority for their respective scopes.
 Issue `acat-wm-019-9eye` is in progress. The single isolated lane is
 `implementation.9tGzKH/shutdown.327OnbQj/source`, based on acceptance commit
 `0e35e3d`, with private runtime root `/Users/johnw/Products/s.t3xROC`. Workflow
-`02a0817b-544f-4362-bcec-50d7c05698ef` started the lane. Its original author
-`7640e8d5-3e6c-48a8-9726-1ac78f263ef4` continues after supervisor decisions.
-Wait for that original child rather than duplicating a detached workflow.
+`02a0817b-544f-4362-bcec-50d7c05698ef` started the lane. Correction workflow
+`b7e31cda-6072-4698-a5a2-89f663fcf991` now resumes that original author.
+Use its live child identity rather than duplicating a detached workflow.
 Parent retains Git, tracker, execution and acceptance authority.
 
-The owner assessment is complete. Independent in-memory shutdown/safety work
-is authorized at existing Admission, Worker and Store owners with focused
-Werror and deterministic checks. Drain has an explicit local deadline and
-preserves bounded live-run interaction while fencing new admissions. Emergency
-stop broadcast precedes ordinary operation and SQL waits, without inventing
-committed receipts or Runtime terminal cancellation. Existing guards, budgets,
-original handles and failure precedence remain.
+The isolated five-file core builds with Werror and passes focused non-native
+N1/N8 checks. Those checks construct no native process and do not prove live
+drain or Admission-operation saturation. Coherent reviewer
+`a031b6c3-6ebe-423b-a109-9e214b5ea01a` withheld source clearance for scoped
+Store fencing, live ownership during drain and original-batch join retention.
+It also identified the missing safety notification at definite Store poisoning.
+
+Parent authorized these owner-level corrections together with focused local
+native lifecycle evidence through existing harnesses. Healthy drain retains
+original live-run controls and ownership while fencing new admissions. Scoped
+fences retire only after confirmed cleanup, without clearing permanent close
+or quarantine. Definite poison notification is distinct from ordinary Busy,
+opaque failure and confirmed rollback. Full/I/O classification requires an
+exact Store-boundary decision. Existing guards, budgets and failure precedence
+remain. No WM-019 source integration or acceptance is claimed.
 
 Linux read-only metadata confirms active cgroup2 delegation, but user-writable
 migration controls mean a bare user-service cgroup is not sufficient evidence.
@@ -202,10 +210,10 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-19T18:57:07Z`. The next active-work deadline is
-`2026-09-19T19:57:07Z`. WM-018 delivery and its required verification are
-complete. Next implement WM-019 without reopening historical helpers or
-repeating unchanged gates. Earlier disclosed timing lapses remain recorded.
+Refocus completed at `2026-09-19T19:58:39Z`. The next active-work deadline is
+`2026-09-19T20:58:39Z`. Next complete the consolidated WM-019 core corrections
+and local lifecycle checks. Platform containment permission and capability
+remain separate blockers. Earlier disclosed timing lapses remain recorded.
 
 ## Historical WM-016 closure record
 
