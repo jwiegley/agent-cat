@@ -11,10 +11,10 @@ frozen acceptance contract or safety limits.
 
 The [WM-016 closure plan](workflow-manager-closure-plan.md) governs the remaining
 work. The macOS core matrix and the adopted client compatibility baseline pass.
-Linux receipt observation and typed-control lifetime failures exposed two probe
-synchronization gaps. Their test-owner corrections preserve fail-fast admission
-and every intermediate negative assertion. Independent Linux example/transport
-gates now pass. Remaining work is full Linux policies and combined disposition.
+Linux receipt observation, typed-control lifetime and related effect-only polling
+exposed test-owner synchronization gaps. Their corrections preserve fail-fast
+admission, public failures and intermediate negative assertions. Independent Linux
+example/transport gates pass. Remaining work is full policies and disposition.
 
 The L08 leaf reviewer is paused. Its isolated work is preserved and has not
 been integrated. Resume it only if a demonstrated product-validation blocker
@@ -29,8 +29,8 @@ authorized the requested Linux and selected Pi/Emacs compatibility execution on
 still requires actual results and final disposition. Paid providers, deployment,
 dependency changes, historical recovery and new Lean/oracle builds remain excluded.
 
-Refocus completed at `2026-09-19T01:08:56Z`. The next active-work deadline is
-`2026-09-19T02:08:56Z`. Interim checks and bounded decisions were recorded in
+Refocus completed at `2026-09-19T03:16:10Z`. The next active-work deadline is
+`2026-09-19T04:16:10Z`. Interim checks and bounded decisions were recorded in
 private briefs while canonical application source stayed stable. The earlier
 04:54:54Z check was sixteen seconds late during review/dispatch, and the 00:46
 checkpoint was less than one minute late. Both lapses remain disclosed.
@@ -282,16 +282,44 @@ Parent restored exactly the original label, leaving the stronger count/equality
 predicate unchanged. Static comparison and audit-marker match passed. Final patch
 is `typed-lifetime/final.patch`, and the earlier proposal, pre-label source and
 Linux focused results remain preserved. Integration follows the review's precise
-label correction. Full policies must still exercise the intended mutant failure.
+label correction. The next full Linux invocation confirmed the intended
+control-body-mutant failure marker in both N1 and N8.
 
 Independent Linux examples, routing-config, deterministic ACP and deck passed on
 `a2c8b63`, with ordinary evidence in `linux/independent-linux-logs`. Their results
 and unchanged macOS/client workflows, Linux suites and Linux direct TUI remain
-credited. Complete one full Linux policies gate on the integrated lifetime fix,
-including controls N1/N8 and all audits, without duplicating completed gates.
-Temporary diagnostics and historical resources remain separate and unrecovered.
-WM-016 stays open pending full policies and final combined disposition. The
-accepted baseline remains WM-001–WM-015 and G0.
+credited.
+
+Full policies on `2debfe0` completed all ordinary controls N1/N8 and the first
+seven control audits in both arms. It stopped at control-write after successful
+unpaused maximum-frame delivery, when public receipt polling returned opaque
+`StorageUnavailable`. Exact inner cause remains uncaptured. The first audit log
+is retained as `linux/control-write-first-N1.log`, and prior failed roots remain
+untouched.
+
+Review `a236cb70-4881-42b3-9d0a-81ae1740e484` identified the same observation gap
+in three related effect-only polls: write, interruption and reload. The single
+test-file correction reuses typed Store progress observation, then checks one-shot
+public receipts after existing successful original cleanup. Public checks retain
+acceptance, dispatch, refusal, delivered acknowledgement and effect correlations.
+The genuine maximum-frame/partial-write/deadline checks remain, and paused receipt
+still requires Unresolved with no acknowledgement or effect. Interruption duplicate
+refusal stays before cleanup, and reload authorization/digest phases are unchanged.
+Other live-phase assertions and exact audit markers are not moved or weakened.
+
+The first author segment failed on provider fetch before editing or execution.
+The same owner resumed safely. Affected build, receipt regression, ordinary reload
+N1/N8 and four owning audits passed once on Linux, including genuine partial-write
+timeout and intended ticket-mutant failures. Exact patch and raw child logs are in
+`linux/effect-observation.patch` and `linux/effect-observation-logs`. Review
+`07894eab-f249-46fe-9363-897ec53a2111` found no issues and cleared integration.
+
+Complete one full direct Linux policies gate on integrated bytes, including the
+preparation audits and final policy/schema/lineage/person/frontend tail. No
+duplicate audit, client or independent-gate matrix is required. Temporary
+diagnostics and historical resources remain separate and unrecovered. WM-016 stays
+open pending that gate and combined disposition. The accepted baseline remains
+WM-001–WM-015 and G0.
 
 The authority-only tracker issues `acat-lijk`, `acat-3ajx`, `acat-3sq1` and
 `acat-jg00` are outside this worktree projection. Export encountered duplicate
