@@ -1,9 +1,24 @@
 # WM-016 closure plan
 
-This plan implements the user-directed refocus of 2026-09-17. It supersedes
-previous next-helper instructions, not the frozen implementation requirements.
-The immediate deliverable is accepted, integrated WM-016 functionality. The
-remaining WM-017–WM-044 and G1–G5 roadmap follows that milestone.
+This plan records the user-directed refocus of 2026-09-17 and its completed
+WM-016 milestone. It supersedes previous next-helper instructions, not the
+frozen implementation requirements. The remaining WM-017–WM-044 and G1–G5
+roadmap continues from the accepted implementation.
+
+## Accepted result on 2026-09-19
+
+WM-016 is accepted at canonical `430b411a3282ba93b10a94e1ce1ef4943e405dd9`.
+Full integrated Linux policies passed through its final refusals, and the
+combined macOS/Linux, conformance, documentation and adopted Pi/Emacs client
+evidence satisfies the frozen requirements at its recorded scope. Independent
+milestone review `8bb51054-e179-4ade-8c3e-28e80b6eae48` found no issues and
+explicitly approved closure. The [handoff](workflow-manager-handoff.md) and
+`doc/PLAN.org` retain source bindings, qualifications and original failures.
+
+The adopted client baseline is the explicitly reconciled snapshot, not untouched
+external owner checkouts. No historical failed resource is recovered by a later
+pass. G1 and later packages remain open, and WM-017 is the next delivery.
+The sections below retain the original starting conditions and closure plan.
 
 ## Starting position at the 2026-09-17 refocus
 
