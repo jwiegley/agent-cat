@@ -17,6 +17,28 @@ as a substitute for the next product milestone. The completed
 [closure plan](workflow-manager-closure-plan.md) and frozen implementation plan
 remain the authority for their respective scopes.
 
+## Active WM-018 unit
+
+Issue `acat-wm-018-9huh` is in progress. One isolated writer implements history,
+lineage requests and read-only legacy observation in
+`implementation.9tGzKH/history.t5kx5b6A/source`, based on WM-017 acceptance
+`add7141a`. Workflow `baeb62fe-0af4-4e45-b7d9-e7d101816724` owns that lane,
+with private runtime root `/Users/johnw/Products/h.fXa5l9`. Parent retains Git,
+tracker, integration and acceptance authority.
+
+The unit reuses trusted Manager references and shared Runtime query and
+prepare-lineage behavior. It must preserve exact current invocation authority,
+immutable parent facts and distinct child identities, while refusing live or
+quarantined conflicts. Bounded history must expose corrupt and foreign-owner
+entries without silent truncation or inferred execution authority. Frozen
+WM-018 and its legacy/v2/v3 branches govern the complete work.
+
+Initial execution covers relevant Werror builds and deterministic
+pure/SQLite/filesystem/contract checks only. Native lineage preservation and
+owning-platform gates require the next concrete execution decision. No WM-018
+implementation or acceptance is claimed yet, and no new verification framework
+or per-leaf review programme is authorized.
+
 ## WM-017 acceptance
 
 Issue `acat-wm-017-1hda` is closed. Continued milestone review
