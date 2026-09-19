@@ -9463,14 +9463,14 @@ Refocus 2026-09-17T21:55:25.082467+00:00. Next deadline 2026-09-17T22:55:25.0824
 ]
 #+end_src
 
-* TODO [#B] WM-017: Implement outputs, verified artifacts, and exclusive export    :p3:
+* DOING [#B] WM-017: Implement outputs, verified artifacts, and exclusive export    :p3:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-wm-017-1hda
 :LABELS:   ["p3","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-09-19 Sat 00:44]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-017
 :SOURCE_REPO: agent-cat
@@ -9574,6 +9574,20 @@ or false export receipt. Sensitive content is absent from incidental logs.
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 249,
+    "issue_id": "acat-wm-017-1hda",
+    "author": "johnw",
+    "text": "WM-017 started after WM-016 acceptance, 2026-09-19.\n\nThe frozen outputs, verified artifacts and exclusive export package is claimed. Its dependencies are accepted. Implementation worktree is /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/artifacts.Rdk65Wyh/source, branchwm017-artifacts-20260919, basec450ef3. The sole author runs in workflow51d937e8-b8d6-499d-ac5b-b8374a147ca4. Parent retains Git/tracker/integration/acceptance. Short private runtime root is /Users/johnw/Products/a.9iWkXa, avoiding incidental command/socket path limits without weakening them.\n\nThe unit follows frozen WM-017, I02/I09 and A11/A12/A21. Reuse existing State artifact-reference mapping, Commands original receipt/ticket coordination, Store file/transaction ownership and Runtime verification/export. The identified shared-library gap is retaining the same verified captured source-result bytes instead of verifying and reopening/re-encoding. Source-result native envelopes and compact export code/value JSON plus LF remain distinct byte identities. Runtime success and verification availability remain independent. Export uses only an allowed name beneath the fixed trusted root, with recorded intent, exclusive publication and truthful unresolved/lost-reply handling.\n\nInitial author authority covers coherent implementation, current documentation/Cabal registration, relevant Werror builds and bounded deterministic pure/SQLite/filesystem artifact checks using real shared primitives. It does not authorize full policies, native process-fault batches, remote/client/deployment/provider work, dependency changes or new Lean/oracle builds. Later meaningful native/owning validation will receive a concrete bounded decision. No new verification recorder, manifest inventory, retention project or per-leaf review programme is scheduled. Semantic ambiguity or wider policy/schema scope must return to parent.\n\nNo WM-017 implementation or completion is claimed yet. WM-001–WM-016 and G0 remain accepted. Next action is the minimal artifact/verified-byte/export implementation and focused regressions, then coherent milestone review and required owning checks.\n",
+    "created_at": "2026-09-19T07:44:10Z"
   }
 ]
 #+end_src
