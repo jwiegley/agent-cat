@@ -2017,9 +2017,12 @@ nativeConcurrentChecks gateCheck work native source python = forM_ [False,True] 
                 accepted<-await(wait queued) >>=right
                 finishAnswer firstOwner accepted
               else do
-                cancel queued
                 Audit.releaseReviewed audit
                 accepted<-await(wait held) >>=right >>=right
+                queuedResult<-await(wait queued)
+                check "original preparation returns fresh acceptance with original ticket before delivery"
+                  (not(submissionReplayed accepted) && receiptState(submissionReceipt accepted)==Accepted && receiptAttemptedAt(submissionReceipt accepted)==Nothing && maybe False ((==receiptId(submissionReceipt accepted)) . dispatchCommandId) (submissionTicket accepted))
+                check "queued preparation returns exact stale revision before original delivery" (case queuedResult of Left StaleRevision->True;_->False)
                 finishAnswer firstOwner accepted
               Audit.releaseReviewed audit
               check "same-run preparation holds original queued caller" True

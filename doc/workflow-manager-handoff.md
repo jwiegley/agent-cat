@@ -11,10 +11,10 @@ frozen acceptance contract or safety limits.
 
 The [WM-016 closure plan](workflow-manager-closure-plan.md) governs the remaining
 work. The macOS core matrix and the adopted client compatibility baseline pass.
-Linux receipt observation, typed-control lifetime and related effect-only polling
-exposed test-owner synchronization gaps. Their corrections preserve fail-fast
-admission, public failures and intermediate negative assertions. Independent Linux
-example/transport gates pass. Remaining work is full policies and disposition.
+Linux probes exposed receipt, lifetime, effect-observation and retained-preparation
+synchronization gaps. Their test-owner corrections preserve fail-fast admission,
+public failures and intermediate negative assertions. Independent Linux example
+and transport gates pass. Remaining work is full policies and final disposition.
 
 The L08 leaf reviewer is paused. Its isolated work is preserved and has not
 been integrated. Resume it only if a demonstrated product-validation blocker
@@ -29,8 +29,8 @@ authorized the requested Linux and selected Pi/Emacs compatibility execution on
 still requires actual results and final disposition. Paid providers, deployment,
 dependency changes, historical recovery and new Lean/oracle builds remain excluded.
 
-Refocus completed at `2026-09-19T03:16:10Z`. The next active-work deadline is
-`2026-09-19T04:16:10Z`. Interim checks and bounded decisions were recorded in
+Refocus completed at `2026-09-19T05:35:26Z`. The next active-work deadline is
+`2026-09-19T06:35:26Z`. Interim checks and bounded decisions were recorded in
 private briefs while canonical application source stayed stable. The earlier
 04:54:54Z check was sixteen seconds late during review/dispatch, and the 00:46
 checkpoint was less than one minute late. Both lapses remain disclosed.
@@ -314,9 +314,33 @@ timeout and intended ticket-mutant failures. Exact patch and raw child logs are 
 `linux/effect-observation.patch` and `linux/effect-observation-logs`. Review
 `07894eab-f249-46fe-9363-897ec53a2111` found no issues and cleared integration.
 
-Complete one full direct Linux policies gate on integrated bytes, including the
+Full policies on `fb6214eb` passed ordinary controls N1/N8 and eleven audits
+through reload-race, then failed the preparation audit after independent progress.
+One scoped private diagnostic captured original delivery returning opaque
+`StorageUnavailable` after Admission caught `StoreBusy`. Original acceptance had
+returned, and receipt polling was not reached. The exact inner Store check/holder
+and ticket/write progress remain unproved, so no replay safety is inferred.
+
+Review `0faa0592-703c-4b6a-be5b-e85275773d8d` identified a test-owner gap: cancelling
+the queued caller stops its wait but leaves Admission's retained acceptance job
+alive. After the original preparation releases, queued Store work may therefore
+overlap original delivery. The small correction changes only the non-interrupt
+branch: release preparation, await both original results, require original fresh
+acceptance with its matching ticket and queued exactly `Left StaleRevision`, then
+deliver. The interrupt branch, blocking/progress proof, engine barrier, original
+handles, mapping, budgets, cleanup and exact mutant marker remain unchanged.
+
+Both existing preparation audits passed once on Linux, with Werror builds and
+N1/N8 arms. Real checks preserve exception identity, physical joins, evidence drains,
+reservation release and backend cleanup. Mutants fail the exact intended marker,
+and audit metadata records all six children joined without deadline/signal/wait
+failure or join interruption. Evidence and exact patch are
+`linux/preparation-owner-logs` and `linux/preparation-owner.patch`. Review
+`1ca8c7bb-e935-4a95-a760-9ccb8bc02366` found no issues and cleared integration.
+
+Complete one full direct Linux policies gate on integrated bytes, including
 preparation audits and final policy/schema/lineage/person/frontend tail. No
-duplicate audit, client or independent-gate matrix is required. Temporary
+duplicate focused, client or independent-gate matrix is required. Temporary
 diagnostics and historical resources remain separate and unrecovered. WM-016 stays
 open pending that gate and combined disposition. The accepted baseline remains
 WM-001–WM-015 and G0.
