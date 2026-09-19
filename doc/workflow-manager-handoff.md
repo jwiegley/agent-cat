@@ -1,14 +1,14 @@
 # Workflow-manager handoff
 
-<!-- handoff-id: wm016-20260915; status: wm017-accepted; accepted: WM-001..WM-017,G0 -->
+<!-- handoff-id: wm016-20260915; status: wm018-accepted; accepted: WM-001..WM-018,G0 -->
 
 ## Current delivery direction
 
-WM-017 is accepted on 2026-09-19 at canonical
-`5ef7612e5536f90dac64b20948d2b8c1f9ccfdc5`. The accepted baseline is
-WM-001–WM-017 and G0, which is 17 of 44 packages and one of six gates.
-Next delivery is WM-018 history, lineage requests and legacy observation,
-followed by the unchanged WM-019–WM-044 and G1–G5 roadmap. G1 and later
+WM-018 is accepted on 2026-09-19 at canonical
+`4ad20a43ad5c1b59cbf566accddd6a9cb24a08b6`. The accepted baseline is
+WM-001–WM-018 and G0, which is 18 of 44 packages and one of six gates.
+Next delivery is WM-019 shutdown, containment and storage-failure supervision,
+followed by the unchanged WM-020–WM-044 and G1–G5 roadmap. G1 and later
 service, client, containment and release packages are not closed by this result.
 
 The user's 2026-09-17 refocus continues to govern delivery. Do not reopen the
@@ -17,14 +17,15 @@ as a substitute for the next product milestone. The completed
 [closure plan](workflow-manager-closure-plan.md) and frozen implementation plan
 remain the authority for their respective scopes.
 
-## Active WM-018 unit
+## WM-018 acceptance
 
-Issue `acat-wm-018-9huh` remains in progress. The reviewed 25-path library unit
-is integrated by this commit, with required platform/client validation pending.
-Source, reports, reviews and first failures remain under
-`implementation.9tGzKH/history.t5kx5b6A`. Parent carried the implementation onto
-current canonical tracking rather than overlaying the original `add7141a`
-PLAN/handoff. The private focused runtime root is `/Users/johnw/Products/h.fXa5l9`.
+Issue `acat-wm-018-9huh` is closed. Final continued milestone reviewer
+`cf967881-af85-4a1f-8ca9-4a631988b15f` found no issues and explicitly approved
+frozen WM-018 closure and adoption of the reconciled selected client test
+snapshot. Tracker comment 255 records the combined disposition. Source, reviews,
+raw evidence and first failures remain under
+`implementation.9tGzKH/history.t5kx5b6A`. The accepted implementation is
+`4ad20a43`, with no later application changes during validation.
 
 The unit supplies bounded complete history, opaque handles, read-only legacy
 roots with explicit local profile bindings and lineage through existing
@@ -37,9 +38,9 @@ and lineage facts without rebuilding accepted tables.
 Coherent review resolved seven findings at those owners: parent binding,
 original ownership observation, resource revisions, response-entry root
 authorization, original query-child cleanup, result failure reasons and
-descriptor-independent invocation comparison. Review
-`e8800d97-5aba-4362-85ca-0065037eff21` found no issues and cleared integration.
-This is not package acceptance.
+descriptor-independent invocation comparison. Final review confirms that the
+complete implementation and combined execution satisfy WM-018 at the recorded
+scope, without closing later packages.
 
 Actual native correction tests passed at N1/N8 through approval, start and
 ingestion, including legacy/v2/v3 frontend formats, nonempty inputs, typed
@@ -63,12 +64,33 @@ exact bytes consumed by another process under adversarial substitution and
 restoration. The reviewer accepted that explicit existing-protocol ceiling
 without adding a stronger claim or changing frozen wire formats.
 
-Next run the full integrated owning policies and suites on macOS/Linux, the
-documentation gates and selected Emacs/Pi/TUI compatibility, including actual
-Emacs invocation-omission refusal. Reuse policies-owned manager/native modes
-without duplicate launches. Parent retains source, execution and acceptance
-authority. No paid backend, dependency change, deployment, new Lean/oracle
-build, helper programme or per-leaf review is authorized.
+All eight integrated owning gates passed once: actual engine/runtime Werror
+suites, Haskell documentation, full TUI and full policies on macOS arm64 and
+Linux aarch64. Policies include all new history modes at N1/N8 and their
+existing manager/native prerequisites through both final run-fact refusals.
+Mac policies passed 15:57:01–17:41:25Z and Linux 15:48:27–17:26:28Z. Evidence
+is under `history.t5kx5b6A/validation/{mac,linux}`.
+
+Parent adopts the exact client snapshot in `validation/clients/result-fixed.md`,
+including the reviewed isolated `wf-smoke.el` test correction. Fixture mocks
+are installed before the unchanged process guards surround real setup. Fresh
+Emacs31 compilation/checkdoc, 38 ERT tests and 32 smoke facts pass. Actual
+production-client v3 invocation omission receives the native refusal without
+approval/start, with unchanged parent and catalogue. Local PTY/TRAMP, Pi
+typecheck, 189 tests, 21 integration tests plus remote contract, and complete
+actual Pi UI pass with normal exit and terminal restoration.
+
+Original owner checkouts and client production files remain untouched. Earlier
+failed Emacs fixture, premature driver assertion and omitted Pi fixture runs
+remain failures. The private-HOME cleanliness assertion also remains failed,
+with read-only evidence of different Git ignore classification and no tracked
+or staged changes. No unexpected path was removed or adopted.
+
+The accepted ceiling remains the existing parent-read attestation limit,
+current-journal frontend formats, one local pinned provider and selected local
+or loopback clients. Active revocation, atomic HTTP pages, service-mode clients,
+later recovery/conformance/deployment and G1 remain separate. No further helper
+or rerun programme is required for this WM-018 disposition.
 
 ## WM-017 acceptance
 
@@ -149,10 +171,10 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-19T15:26:30Z`. The next active-work deadline is
-`2026-09-19T16:26:30Z`. Next complete integrated WM-018 owning/platform/client
-validation and the same milestone review, without historical-helper detours.
-Earlier disclosed timing lapses remain recorded.
+Refocus completed at `2026-09-19T18:57:07Z`. The next active-work deadline is
+`2026-09-19T19:57:07Z`. WM-018 delivery and its required verification are
+complete. Next implement WM-019 without reopening historical helpers or
+repeating unchanged gates. Earlier disclosed timing lapses remain recorded.
 
 ## Historical WM-016 closure record
 

@@ -2,8 +2,8 @@
 
 This plan records the user-directed refocus of 2026-09-17 and its completed
 WM-016 milestone. It supersedes previous next-helper instructions, not the
-frozen implementation requirements. WM-017 is now accepted separately, and the
-remaining WM-018–WM-044 and G1–G5 roadmap continues from that baseline.
+frozen implementation requirements. WM-017 and WM-018 are now accepted
+separately, and the remaining WM-019–WM-044 and G1–G5 roadmap continues.
 
 ## Accepted result on 2026-09-19
 
@@ -17,9 +17,9 @@ explicitly approved closure. The [handoff](workflow-manager-handoff.md) and
 
 The adopted client baseline is the explicitly reconciled snapshot, not untouched
 external owner checkouts. No historical failed resource is recovered by a later
-pass. WM-017 was subsequently accepted at `5ef7612e`, as recorded in the handoff.
-G1 and later packages remain open, and WM-018 is the next delivery. The sections
-below retain the original starting conditions and WM-016 closure plan.
+pass. WM-017 and WM-018 were subsequently accepted at `5ef7612e` and `4ad20a43`,
+as recorded in the handoff. G1 and later packages remain open, and WM-019 is the
+next delivery. The sections below retain the original WM-016 closure plan.
 
 ## Starting position at the 2026-09-17 refocus
 
