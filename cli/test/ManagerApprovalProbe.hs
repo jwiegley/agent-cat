@@ -1638,7 +1638,8 @@ nativeControlChecks work native = do
   precise <- right(eitherDecodeStrict' "123456789012345678901234567890" :: Either String Value)
   let expectedAnswers=Map.fromList [(0,Bool False),(1,Null),(2,object["ok" .= False,"notes" .= ([]::[Text])]),
         (3,toJSON [precise,Number (-7)]),(4,object["numerator" .= (1::Integer),"denominator" .= (8::Integer)]),
-        (5,object["tag" .= ("approve"::Text)]),(6,object["ratio" .= object["numerator" .= (1::Integer),"denominator" .= (8::Integer)]])]
+        (5,object["tag" .= ("approve"::Text)]),(6,object["ratio" .= object["numerator" .= (1::Integer),"denominator" .= (8::Integer)]]),
+        (7,Bool True)]
   withReadyRunner work native [] "typed-person" "typed-controls" ["--scripted"] [] $ \fixture@(Fixture root _ store proof key _) ->
     withPrepared fixture fixedClock $ \_ live context reviewed public -> do
       let otherSecret=BS.replicate 32 98
@@ -1693,9 +1694,9 @@ nativeControlChecks work native = do
       check "native typed failure releases exact reservation and revises editor" (case released of (_,_,_,revision):_->revision/=fourth firstRow;_->False)
       stale<-submitDecisionControl owned proof firstId(key "stale-editor")(decisionEtag firstRow)(bodyFor firstRow(Bool False))
       check "pre-failure editor stale after proven release" (case stale of Left StaleRevision->True;_->False)
-      forM_ [0::Int ..6] $ \index->do
+      typedCommands<-forM [0::Int ..6] $ \index->do
         ingestUntil (not . null <$> pending)
-        row@(ident,occurrence,_,_)<-pending >>= \rows->case rows of x:_->pure x;_->error "missing next typed decision"
+        row@(ident,occurrence,generation,_)<-pending >>= \rows->case rows of x:_->pure x;_->error "missing next typed decision"
         decisionView<-readDecision store proof association ident
         controlView<-observeControl (readControlSurface owned proof)
         let editor=case decisionView of
@@ -1727,6 +1728,12 @@ nativeControlChecks work native = do
         afterTimeout<-submitRunControl owned proof(key("timeout-answer-"<>T.pack(show index)))latestEtag body
         check "unresolved acknowledgement does not release reservation" (case afterTimeout of Left StaleRevision->True;Left OwnershipUnavailable->True;_->False)
         controlNumber store "SELECT count(*) FROM decisions WHERE state='submitting'" >>= check "uncertain delivery retains durable decision reservation" . (==1)
+        reserved<-observeControl $ runRead store $ do
+          currentReservation<-query "SELECT command_id,generation,state FROM decisions WHERE id=? AND run_id=?" [SQL.SQLText ident,SQL.SQLText(acceptedStartRun owned)]
+          competing<-query "SELECT id FROM commands WHERE idempotency_key IN (?,?)"
+            [SQL.SQLText(key("second-answer-"<>T.pack(show index))),SQL.SQLText(key("timeout-answer-"<>T.pack(show index)))]
+          pure(currentReservation==[[SQL.SQLText command,SQL.SQLText generation,SQL.SQLText "submitting"]] && null competing)
+        check "unresolved original command and generation stay reserved without another acceptance" reserved
         duplicate<-deliverAcceptedControl owned command
         check "consumed original dispatch never writes twice" (case duplicate of Left OwnershipUnavailable->True;_->False)
         when(index==0) $ do
@@ -1735,10 +1742,6 @@ nativeControlChecks work native = do
           afterAcceptance<-submitRunControl owned proof(key "after-native-accepted")acceptedEtag body
           check "native Accepted cannot release submitting decision" (case afterAcceptance of Left StaleRevision->True;_->False)
         ingestUntil $ do current<-readControlReceipt store proof command >>= right;pure(receiptEffect current/=Nothing)
-        when(index==6) $ do
-          let drain=observeControl (ingestAcceptedStart owned) >>= \more->when more drain
-          await drain
-          joinControlCleanup live owned
         current<-readControlReceipt store proof command >>= right
         check "native Delivered correlates typed acceptance, separate from command receipt" (receiptState current==EffectObserved && maybe False ((=="delivered") . valueText "state" . acknowledgementValue)(receiptAcknowledgement current))
         replay<-case answers of
@@ -1750,16 +1753,44 @@ nativeControlChecks work native = do
           _ -> submitSame(submitRunControl owned other runKey etag(body<>" "))
         check "exact original body bytes bind replay" (case conflict of Left IdempotencyConflict->True;_->False)
         controlNumber store "SELECT count(*) FROM decisions WHERE state='submitting'" >>= check "matching typed delivery resolves reservation" . (==0)
+        pure command
+      -- Observe the real final person gate only after every intermediate assertion.
+      ingestUntil (not . null <$> pending)
+      holdRow@(holdId,_,_,_)<-pending >>= \rows->case rows of
+        [row@(_,"7",_,_)]->pure row
+        _->error "missing exact final-control-confirmation decision"
+      held<-observeControl (restoreRunProjection store association) >>=maybe(error "no final hold checkpoint")pure
+      liveWorker<-observeAcceptedStart owned
+      let heldSnapshot=Runtime.checkpointSnapshot held
+      check "unanswered final person confirmation prevents native terminal completion"
+        (Runtime.snapshotRunStatus heldSnapshot==Runtime.RunRunning &&
+         any (\occurrence->Runtime.occurrenceNumber(Runtime.snapshotOccurrenceId occurrence)==7 && Runtime.snapshotOccurrencePersonPending occurrence) (Map.elems(Runtime.snapshotOccurrences heldSnapshot)) &&
+         observedWorkerPhase liveWorker==WorkerRunning && maybe True (const False) (observedWorkerExit liveWorker))
+      holdAnswer<-submitDecisionControl owned proof holdId(key "answer-final-hold")(decisionEtag holdRow)(bodyFor holdRow(Bool True)) >>=right
+      let holdCommand=receiptId(submissionReceipt holdAnswer)
+      check "final hold answer uses fresh ordinary acceptance"
+        (not(submissionReplayed holdAnswer) && receiptState(submissionReceipt holdAnswer)==Accepted && case submissionTicket holdAnswer of Just _->True;Nothing->False)
+      deliverAcceptedControl owned holdCommand >>=right
       let drain=observeControl (ingestAcceptedStart owned) >>= \more->when more drain
       await drain
+      joinControlCleanup live owned
       checkpoint<-restoreRunProjection store association >>=maybe(error "no typed terminal checkpoint")pure
-      check "all typed native answers complete original run" (Runtime.snapshotRunStatus(Runtime.checkpointSnapshot checkpoint)==Runtime.RunSucceeded)
+      let finalSnapshot=Runtime.checkpointSnapshot checkpoint
+      check "all typed native answers and final confirmation complete original run" (Runtime.snapshotRunStatus finalSnapshot==Runtime.RunSucceeded)
+      holdReceipt<-readControlReceipt store proof holdCommand >>=right
+      check "final confirmation has correlated native delivery and effect after cleanup"
+        (receiptId holdReceipt==holdCommand && receiptState holdReceipt==EffectObserved &&
+         maybe False (\ack->valueText "commandId" (acknowledgementValue ack)==holdCommand && valueText "state" (acknowledgementValue ack)=="delivered" && valueText "occurrenceId" (acknowledgementValue ack)=="7") (receiptAcknowledgement holdReceipt) &&
+         maybe False ((=="answer-accepted") . valueText "kind" . effectValue) (receiptEffect holdReceipt))
+      let expectedControls=receiptId(submissionReceipt invalid):typedCommands<>[holdCommand]
+      check "native control acknowledgements contain only the original dispatched commands"
+        (Map.keys(Runtime.snapshotControlAcks finalSnapshot)==Map.keys(Map.fromList[(ident,())|ident<-expectedControls]))
       answers <- Runtime.readAnswerRecords (root </> "runs" </> "runs" </> T.unpack(runIdText(preparedRunId(reviewNative context))) </> "runtime")
       check "false null arrays objects and numbers reach original Runtime typed answer store unchanged"
-        (Map.fromList [(Runtime.occurrenceNumber(Runtime.answerOccurrence answer),Runtime.answerValue answer)|answer<-answers]
+        (length answers==Map.size expectedAnswers &&
+         Map.fromList [(Runtime.occurrenceNumber(Runtime.answerOccurrence answer),Runtime.answerValue answer)|answer<-answers]
           == expectedAnswers)
       BS.writeFile(work </> "typed-controls-checkpoint.json")(encoded(Runtime.snapshotCheckpointValue checkpoint))
-      joinControlCleanup live owned
       nativePresent native context >>=check "typed controls join original native workers" . not
   withReady work native "cancel-controls" ["--scripted"] [] $ \fixture@(Fixture _ _ store proof key _) ->
     withPrepared fixture fixedClock $ \_ live context reviewed public -> do

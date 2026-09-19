@@ -11,10 +11,10 @@ frozen acceptance contract or safety limits.
 
 The [WM-016 closure plan](workflow-manager-closure-plan.md) governs the remaining
 work. The macOS core matrix and the adopted client compatibility baseline pass.
-The Linux receipt failure exposed a probe synchronization mismatch, not a Store
-policy defect. The reviewed test-only correction preserves one-shot public reads
-and moves final receipt assertions after original-owner cleanup. Remaining work
-is integrated Linux policies and its remaining example/transport gates.
+Linux receipt observation and typed-control lifetime failures exposed two probe
+synchronization gaps. Their test-owner corrections preserve fail-fast admission
+and every intermediate negative assertion. Independent Linux example/transport
+gates now pass. Remaining work is full Linux policies and combined disposition.
 
 The L08 leaf reviewer is paused. Its isolated work is preserved and has not
 been integrated. Resume it only if a demonstrated product-validation blocker
@@ -29,8 +29,8 @@ authorized the requested Linux and selected Pi/Emacs compatibility execution on
 still requires actual results and final disposition. Paid providers, deployment,
 dependency changes, historical recovery and new Lean/oracle builds remain excluded.
 
-Refocus completed at `2026-09-18T23:07:34Z`. The next active-work deadline is
-`2026-09-19T00:07:34Z`. Interim checks and bounded decisions were recorded in
+Refocus completed at `2026-09-19T01:08:56Z`. The next active-work deadline is
+`2026-09-19T02:08:56Z`. Interim checks and bounded decisions were recorded in
 private briefs while canonical application source stayed stable. The earlier
 04:54:54Z check was sixteen seconds late during review/dispatch, and the 00:46
 checkpoint was less than one minute late. Both lapses remain disclosed.
@@ -252,14 +252,46 @@ Linux build, focused regression and controls-live N1/N8 passed once. Evidence an
 exact proposal are under `linux/receipt-correction2-logs` and
 `linux/receipt-correction.patch` in the compatibility root.
 
-Review `18ba6f17-a204-4dc1-80f7-da40b35201ca` found no issues and cleared parent
-integration. Complete Linux full policies on the integrated correction, followed
-by examples, routing-config, deterministic ACP and deck. Policies already includes
-complete controls and audits, so do not duplicate those gates. Unchanged macOS
-core/client results, Linux suites and Linux direct TUI retain their scope.
-Temporary diagnostics are excluded from the correction and no historical recovery
-is required. WM-016 remains open until those Linux results and final disposition.
-The accepted baseline remains WM-001–WM-015 and G0.
+Review `18ba6f17-a204-4dc1-80f7-da40b35201ca` cleared receipt correction, integrated
+as `a2c8b63`. Its regression passed in the next Linux policies invocation, which
+then failed on the distinct unresolved-reservation assertion. The actual result
+was not printed. A bounded diagnostic stopped at fresh case one, capturing
+`Left StorageUnavailable` mapped from `Admission.operation StoreBusy`. Cases two
+through twenty never ran. No accepted submission or reservation release was shown,
+and the inner Store step/holder is unproved. This Busy is not automatically
+pre-admission because preparation may refuse a changed projection after a read.
+
+Review `71b586d3-152d-405b-8fa8-688e44a20471` identified the separate lifetime gap:
+the seventh typed answer immediately finished the native fixture while its
+intermediate unresolved/duplicate/acknowledgement assertions were still running.
+Not consuming Manager evidence does not keep the original native process alive.
+
+The two-test-file correction appends a real final person confirmation and leaves
+it unanswered through all seven generations and their unchanged negative checks.
+It additionally binds reservations to exact commands/generations and rejects extra
+accepted commands. Only afterward does it observe the hold, verify native Runtime
+and original Worker remain running, answer normally, drain and join cleanup, and
+check all eight answer records and exact native acknowledgement IDs. No answer is
+filtered away, and no Store policy, timeout, retry or production behavior changes.
+The affected build and controls N1/N8 passed once on Linux. Other authored fixture
+programs remain unchanged, though the rebuilt binary is not byte-identical.
+
+Review `5a65e592-c774-4f40-8a53-a4c1b4950803` found the lifetime design sound but
+caught a renamed assertion that would break the existing control-body mutant gate.
+Parent restored exactly the original label, leaving the stronger count/equality
+predicate unchanged. Static comparison and audit-marker match passed. Final patch
+is `typed-lifetime/final.patch`, and the earlier proposal, pre-label source and
+Linux focused results remain preserved. Integration follows the review's precise
+label correction. Full policies must still exercise the intended mutant failure.
+
+Independent Linux examples, routing-config, deterministic ACP and deck passed on
+`a2c8b63`, with ordinary evidence in `linux/independent-linux-logs`. Their results
+and unchanged macOS/client workflows, Linux suites and Linux direct TUI remain
+credited. Complete one full Linux policies gate on the integrated lifetime fix,
+including controls N1/N8 and all audits, without duplicating completed gates.
+Temporary diagnostics and historical resources remain separate and unrecovered.
+WM-016 stays open pending full policies and final combined disposition. The
+accepted baseline remains WM-001–WM-015 and G0.
 
 The authority-only tracker issues `acat-lijk`, `acat-3ajx`, `acat-3sq1` and
 `acat-jg00` are outside this worktree projection. Export encountered duplicate

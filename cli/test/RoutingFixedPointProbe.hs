@@ -130,7 +130,9 @@ typedPersonProgram body = B.program [] $
   B.bindAsI (S.SStructured S.schemaNumber) "number" (B.one (B.askPerson "number" [B.lit body])) $
   B.bindAsI S.SVerdict "verdict" (B.one (B.askPerson "verdict" [B.lit body])) $
   B.bindAsI (S.SStructured (S.schemaProperty @"ratio" S.schemaNumber S.schemaObject)) "nested-number"
-    (B.one (B.askPerson "nested-number" [B.lit body])) B.stop
+    (B.one (B.askPerson "nested-number" [B.lit body])) $
+  B.bindAsI S.SFlag "final-control-confirmation"
+    (B.one (B.askPerson "final-control-confirmation" [B.lit "Confirm after all seven typed-control generations have been checked."])) B.stop
 
 pinnedProgram :: Text -> Program
 pinnedProgram pin = workflow W.do
