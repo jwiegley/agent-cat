@@ -13542,3 +13542,35 @@ HIGH (validated, machine-checked): at Cost with mA=d=fin 0, mB=fin 3, all of fin
 :ORIGINAL_SIZE: 0
 :END:
 
+* TODO [#C] Define compatible semantic validation for stored result values
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-4978
+:LABELS:   []
+:ISSUE_TYPE: question
+:CREATED:  [2026-09-19 Sat 01:12]
+:MODIFIED: [2026-09-19 Sat 01:12]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Runtime.Store verifies canonical envelope, reference code, run, size and digest but does not fully decode value at code. Planning.answerFromJson uses exact native structured numbers encoded as numerator/denominator, while the frozen manager ExportDocument fixture artifact-structured-decimal accepts 0.125. These are distinct representation contracts. Any stricter shared stored-value verifier must preserve supported native and frozen wire behavior through an explicit compatible policy rather than an ad hoc dual decoder or narrowed corpus. WM-017 retains the existing shared artifact verifier and validates the manager public document shape exactly as frozen, without claiming full structured semantic-schema conformance. This records a future semantic-contract question, not a new implementation prerequisite or authority to change frozen fixtures.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-4978",
+    "depends_on_id": "acat-wm-017-1hda",
+    "type": "discovered-from",
+    "created_at": "2026-09-19T08:12:28.630692Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
