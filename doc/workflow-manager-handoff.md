@@ -17,6 +17,22 @@ as a substitute for the next product milestone. The completed
 [closure plan](workflow-manager-closure-plan.md) and frozen implementation plan
 remain the authority for their respective scopes.
 
+## Active WM-017 unit
+
+Issue `acat-wm-017-1hda` is claimed. One author works in
+`implementation.9tGzKH/artifacts.Rdk65Wyh/source`, branch
+`wm017-artifacts-20260919` from acceptance commit `c450ef3`. Workflow
+`51d937e8-b8d6-499d-ac5b-b8374a147ca4` launched retained child
+`ee5e9fb7-d7e1-4e1f-964c-2928aed870f3`; supervisor replies continue that original
+child after its coordination detach. Do not launch a duplicate writer.
+
+The unit implements frozen outputs, verified captured downloads and exclusive
+exports through existing Runtime/Store/Commands owners. Short private runtime
+paths are under `/Users/johnw/Products/a.9iWkXa`. Initial checks cover builds and
+bounded deterministic pure/SQLite/filesystem cases, not a complete native/client
+matrix. Broader owning validation receives a bounded decision after a coherent
+proposal. Parent retains Git, tracker, integration and acceptance authority.
+
 ## Acceptance and authority
 
 Final milestone review `8bb51054-e179-4ade-8c3e-28e80b6eae48` found no issues
@@ -46,8 +62,8 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-19T07:23:31Z`. The next active-work deadline is
-`2026-09-19T08:23:31Z`. Interim checks were recorded in private briefs while
+Refocus completed at `2026-09-19T07:44:10Z`. The next active-work deadline is
+`2026-09-19T08:44:10Z`. Interim checks were recorded in private briefs while
 canonical execution bytes stayed stable. Earlier disclosed timing lapses remain
 in the historical records.
 
