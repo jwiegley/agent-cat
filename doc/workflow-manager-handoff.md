@@ -22,21 +22,31 @@ remain the authority for their respective scopes.
 Issue `acat-wm-019-9eye` is in progress. The single isolated lane is
 `implementation.9tGzKH/shutdown.327OnbQj/source`, based on acceptance commit
 `0e35e3d`, with private runtime root `/Users/johnw/Products/s.t3xROC`. Workflow
-`02a0817b-544f-4362-bcec-50d7c05698ef` owns the initial bounded assessment.
+`02a0817b-544f-4362-bcec-50d7c05698ef` started the lane. Its original author
+`7640e8d5-3e6c-48a8-9726-1ac78f263ef4` continues after supervisor decisions.
+Wait for that original child rather than duplicating a detached workflow.
 Parent retains Git, tracker, execution and acceptance authority.
 
-First establish the existing shutdown owners and actual OS containment boundary
-before implementation. Linux service cgroups remain the recorded candidate.
-The documented macOS launchd process-group behavior does not establish cleanup
-of escaping descendants. Existing negative evidence is not to be relabeled a
-stronger guarantee. Read-only source, documentation and narrow capability
-inspection are authorized, not service/cgroup creation or hard-death testing.
+The owner assessment is complete. Independent in-memory shutdown/safety work
+is authorized at existing Admission, Worker and Store owners with focused
+Werror and deterministic checks. Drain has an explicit local deadline and
+preserves bounded live-run interaction while fencing new admissions. Emergency
+stop broadcast precedes ordinary operation and SQL waits, without inventing
+committed receipts or Runtime terminal cancellation. Existing guards, budgets,
+original handles and failure precedence remain.
 
-The full unit requires draining shutdown, explicit cancellation deadlines,
-preparation invalidation, cleanup-based release and an in-memory safety path
-independent of unavailable durable storage. Unsupported environments cannot
-advertise unattended mutation, and both-platform acceptance cannot be made
-vacuous. No new implementation or WM-019 acceptance is claimed at startup.
+Linux read-only metadata confirms active cgroup2 delegation, but user-writable
+migration controls mean a bare user-service cgroup is not sufficient evidence.
+Authorization has been requested for temporary non-production systemd/cgroup
+test units without privilege escalation or persistent configuration changes.
+That decision is pending. The documented macOS launchd process-group behavior
+still does not establish cleanup of escaping descendants, and no stronger
+boundary is established. No service, sandbox, VM or hard-death experiment has
+run under this unit.
+
+Both-platform acceptance remains an unmet requirement. Unsupported containment
+must not advertise unattended mutation, and disabling all profiles cannot make
+the requirement vacuous. No WM-019 source integration or acceptance is claimed.
 
 ## WM-018 acceptance
 
