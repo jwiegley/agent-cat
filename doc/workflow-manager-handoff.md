@@ -1,45 +1,67 @@
 # Workflow-manager handoff
 
-<!-- handoff-id: wm016-20260915; status: resumed-by-user; accepted: WM-001..WM-015,G0 -->
+<!-- handoff-id: wm016-20260915; status: wm016-accepted; accepted: WM-001..WM-016,G0 -->
 
 ## Current delivery direction
 
-On 2026-09-17 the user stopped the verification-machinery micro-fix loop and
-redirected work toward substantive WM-016 closure. This direction supersedes
-every earlier next-helper instruction in this handoff, without changing the
-frozen acceptance contract or safety limits.
+WM-016 is accepted on 2026-09-19 at canonical
+`430b411a3282ba93b10a94e1ce1ef4943e405dd9`. The accepted baseline is
+WM-001–WM-016 and G0, which is 16 of 44 packages and one of six gates.
+Next delivery is WM-017 outputs, verified artifacts and exclusive export,
+followed by the unchanged WM-018–WM-044 and G1–G5 roadmap. G1 and later
+service, client, containment and release packages are not closed by this result.
 
-The [WM-016 closure plan](workflow-manager-closure-plan.md) governs the remaining
-work. The macOS core matrix and the adopted client compatibility baseline pass.
-Linux probes exposed receipt, lifetime, effect-observation and retained-preparation
-synchronization gaps. Their test-owner corrections preserve fail-fast admission,
-public failures and intermediate negative assertions. Independent Linux example
-and transport gates pass. Remaining work is full policies and final disposition.
+The user's 2026-09-17 refocus continues to govern delivery. Do not reopen the
+verification-machinery micro-fix loop, paused L08 review or historical recovery
+as a substitute for the next product milestone. The completed
+[closure plan](workflow-manager-closure-plan.md) and frozen implementation plan
+remain the authority for their respective scopes.
 
-The L08 leaf reviewer is paused. Its isolated work is preserved and has not
-been integrated. Resume it only if a demonstrated product-validation blocker
-requires that change. Reports now concern delivered behavior, blockers and
-the next decisive action, not artifact counts.
+## Acceptance and authority
 
-## Status and authority
+Final milestone review `8bb51054-e179-4ade-8c3e-28e80b6eae48` found no issues
+and explicitly approved closure under frozen WM-016 and sections 9.1–9.3.
+The full direct Linux policies gate passed from 05:40:38Z to 07:10:58Z with
+exit zero, including all controls/audits, preparation and mutant N1/N8, and
+the entire policy/schema/lineage/person/frontend tail through both run-fact
+refusals. Those negative commands retain exit one, not success.
 
-The user explicitly resumed work and cancelled the pause on 2026-09-15, then
-authorized the requested Linux and selected Pi/Emacs compatibility execution on
-2026-09-18. The permission blocker is resolved, not waived. WM-016 acceptance
-still requires actual results and final disposition. Paid providers, deployment,
-dependency changes, historical recovery and new Lean/oracle builds remain excluded.
+Combine that result with the scoped macOS core matrix, actual Linux suites/TUI,
+independent Linux examples/routing/ACP/deck, existing conformance/prebuilt oracle
+and documentation gates, and the adopted Pi/Emacs acceptance baseline. Client
+source is the reconciled snapshot recorded by `6022ee4`, including canonical
+loader prerequisite `22678d1b` and the reviewed three-test-file correction.
+Untouched owner checkouts are not labeled passing. Actual client UI/restoration
+outcomes and all source/runner qualifications remain in the records below.
 
-Refocus completed at `2026-09-19T05:35:26Z`. The next active-work deadline is
-`2026-09-19T06:35:26Z`. Interim checks and bounded decisions were recorded in
-private briefs while canonical application source stayed stable. The earlier
-04:54:54Z check was sixteen seconds late during review/dispatch, and the 00:46
-checkpoint was less than one minute late. Both lapses remain disclosed.
+The final review is `controls.qzldrova/wm016-milestone-review.zs1HY3rS/result.md`.
+Final Linux output is under
+`controls.qzldrova/wm016-compatibility.BECaF4KE/linux/final-preparation-logs`.
+Issue `acat-wm-016-bsw2` is closed with the combined acceptance record. Parent
+verified unchanged canonical execution bytes and all three frozen documents.
 
-**Application integration milestone:** the WM-016 application changes now
-compose with the later canonical repairs, including the Cabal test-component
-boundary. The policies merge also required its existing inert refusal fixture
-to provide a Bash wrapper, and the storage documentation now names schema seven.
-The bounded Store admission policy and all runtime budgets remain unchanged.
+Linux and selected Pi/Emacs compatibility execution was explicitly authorized.
+Paid providers, deployment, dependency changes, historical recovery and new
+Lean/oracle builds remain excluded absent their own authorization. Earlier
+failures, unknown holders and failed UI cleanup/restoration qualifications remain
+unresolved historical evidence rather than new closure prerequisites.
+
+Refocus completed at `2026-09-19T07:23:31Z`. The next active-work deadline is
+`2026-09-19T08:23:31Z`. Interim checks were recorded in private briefs while
+canonical execution bytes stayed stable. Earlier disclosed timing lapses remain
+in the historical records.
+
+## Historical WM-016 closure record
+
+The following chronological notes retain the scope and outcomes recorded at
+each stage. Earlier open-status and next-action statements do not supersede the
+accepted status above, and later passes do not rewrite earlier failures.
+
+**Application integration milestone:** the WM-016 application changes composed
+with the later canonical repairs, including the Cabal test-component boundary.
+The policies merge required its existing inert refusal fixture to provide a
+Bash wrapper, and the storage documentation named schema seven. The bounded
+Store admission policy and all runtime budgets remained unchanged.
 
 The whole-workspace warning-fatal build passed. Its first invocation wrongly
 specified `jobs: 1` in private configuration. That setting was removed, and the
@@ -338,12 +360,11 @@ failure or join interruption. Evidence and exact patch are
 `linux/preparation-owner-logs` and `linux/preparation-owner.patch`. Review
 `1ca8c7bb-e935-4a95-a760-9ccb8bc02366` found no issues and cleared integration.
 
-Complete one full direct Linux policies gate on integrated bytes, including
-preparation audits and final policy/schema/lineage/person/frontend tail. No
-duplicate focused, client or independent-gate matrix is required. Temporary
-diagnostics and historical resources remain separate and unrecovered. WM-016 stays
-open pending that gate and combined disposition. The accepted baseline remains
-WM-001–WM-015 and G0.
+The final full direct Linux policies gate completed on `430b411a`, including
+preparation audits and the entire final policy/schema/lineage/person/frontend
+tail. Review `8bb51054-e179-4ade-8c3e-28e80b6eae48` approved WM-016 closure.
+Temporary diagnostics and historical resources remain separate and unrecovered.
+The current accepted baseline is WM-001–WM-016 and G0.
 
 The authority-only tracker issues `acat-lijk`, `acat-3ajx`, `acat-3sq1` and
 `acat-jg00` are outside this worktree projection. Export encountered duplicate
@@ -432,12 +453,11 @@ P1 fess is now clear. Native fixtures and preimages remain unverified.
 No native fixture, full gate, WM-016 application integration, platform/client
 work, old-resource recovery or WM-016 acceptance is authorized.
 
-The accepted implementation ends at `7b88f17263b32eb2e222d952ebac88fb972c4f04`.
-WM-001 through WM-015 and G0 are accepted, which is 15 of 44 packages and one of
-six gates. WM-016 remains unaccepted. WM-017 through WM-044 and G1 through G5
-remain unfinished. The branch retains the accepted implementation as its active
-source. Unaccepted work is committed as a portable recovery checkpoint rather
-than installed as accepted functionality.
+At the earlier recovery checkpoint, accepted implementation ended at
+`7b88f17263b32eb2e222d952ebac88fb972c4f04`: WM-001–WM-015 and G0, or 15 of
+44 packages and one of six gates. WM-016 was then unaccepted, and its work was
+committed as a portable recovery checkpoint rather than accepted functionality.
+This historical boundary is superseded by the current acceptance above.
 
 The architectural authority remains the frozen
 [design](research/workflow-manager.md),
