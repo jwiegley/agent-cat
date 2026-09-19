@@ -35,4 +35,7 @@ expected = frozen.parse_json((source / "test/fixtures/manager/v1/valid/outputs.j
 assert items[:2] == expected[:2]
 assert items[-1]["artifact"]["sha256"] == expected[-1]["artifact"]["sha256"]
 assert receipt["bytes"] == "30" and receipt["sha256"] == metadata["sha256"]
-print("PASS frozen OutputItem, ArtifactMetadata, ExportReceipt and exact source/export fixtures")
+validate("ArtifactMetadata", frozen.parse_json((work / "history/history-artifact.json").read_bytes()))
+for item in frozen.parse_json((work / "history/history.json").read_bytes()):
+    validate("Run", item)
+print("PASS frozen Run, OutputItem, ArtifactMetadata, ExportReceipt and exact source/export fixtures")

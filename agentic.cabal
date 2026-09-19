@@ -207,11 +207,13 @@ library
     Agentic.Manager.Approval
     Agentic.Manager.State
     Agentic.Manager.Artifacts
+    Agentic.Manager.History
     Agentic.Manager.Protocol.Artifact
     Agentic.Manager.Commands
     Agentic.Manager.Drafts
     Agentic.Manager.Protocol.Preparation
     Agentic.Manager.Protocol.Draft
+    Agentic.Manager.Lineage
     Agentic.Manager.Authorization
     Agentic.Manager.Protocol.Command
     Agentic.Plan.Value
@@ -515,6 +517,7 @@ executable manager-draft-check
     Agentic.Manager.Protocol.Artifact
     Agentic.Manager.Authorization
     Agentic.Manager.Protocol.Draft
+    Agentic.Manager.Lineage
     Agentic.Manager.Protocol.Command
     Agentic.Manager.Protocol.Json
     Agentic.Manager.Configuration
@@ -541,6 +544,7 @@ executable manager-worker-check
     Agentic.Manager.Protocol.Artifact
     Agentic.Manager.Authorization
     Agentic.Manager.Protocol.Draft
+    Agentic.Manager.Lineage
     Agentic.Manager.Protocol.Command
     Agentic.Manager.Protocol.Json
     Agentic.Manager.Configuration
@@ -570,6 +574,7 @@ executable manager-admission-check
     Agentic.Manager.Protocol.Artifact
     Agentic.Manager.Authorization
     Agentic.Manager.Protocol.Draft
+    Agentic.Manager.Lineage
     Agentic.Manager.Protocol.Command
     Agentic.Manager.Protocol.Json
     Agentic.Manager.Configuration
@@ -589,6 +594,8 @@ executable manager-approval-check
   main-is:         ManagerApprovalProbe.hs
   other-modules:
     IngestionCheck
+    Agentic.Manager.History
+    Agentic.Manager.Artifacts
     Agentic.Manager.Test.AcceptanceAudit
     Agentic.Manager.Approval
     Agentic.Manager.State
@@ -601,6 +608,7 @@ executable manager-approval-check
     Agentic.Manager.Protocol.Artifact
     Agentic.Manager.Authorization
     Agentic.Manager.Protocol.Draft
+    Agentic.Manager.Lineage
     Agentic.Manager.Protocol.Command
     Agentic.Manager.Protocol.Json
     Agentic.Manager.Configuration
@@ -620,6 +628,7 @@ executable manager-artifact-check
   main-is:         ArtifactCheck.hs
   other-modules:
     Agentic.Manager.Artifacts
+    Agentic.Manager.History
     Agentic.Manager.Protocol.Artifact
     Agentic.Manager.State
     Agentic.Manager.Admission
@@ -630,6 +639,39 @@ executable manager-artifact-check
     Agentic.Manager.Commands
     Agentic.Manager.Authorization
     Agentic.Manager.Protocol.Draft
+    Agentic.Manager.Lineage
+    Agentic.Manager.Protocol.Command
+    Agentic.Manager.Protocol.Json
+    Agentic.Manager.Configuration
+    Agentic.Manager.Profile
+    Agentic.Manager.Root
+    Agentic.Manager.Lease
+    Agentic.Manager.Schema
+    Agentic.Manager.Store
+    Agentic.Manager.Store.Admission
+    Agentic.Manager.Worker.State
+  build-depends:   agentic, direct-sqlite, deepseq, transformers
+  ghc-options:     -threaded -rtsopts
+
+executable manager-history-check
+  import:          settings
+  hs-source-dirs:  manager/src manager/test
+  main-is:         HistoryCheck.hs
+  other-modules:
+    Agentic.Manager.Test.AcceptanceAudit
+    Agentic.Manager.Artifacts
+    Agentic.Manager.History
+    Agentic.Manager.Protocol.Artifact
+    Agentic.Manager.State
+    Agentic.Manager.Admission
+    Agentic.Manager.Admission.Policy
+    Agentic.Manager.Worker
+    Agentic.Manager.Drafts
+    Agentic.Manager.Protocol.Preparation
+    Agentic.Manager.Commands
+    Agentic.Manager.Authorization
+    Agentic.Manager.Protocol.Draft
+    Agentic.Manager.Lineage
     Agentic.Manager.Protocol.Command
     Agentic.Manager.Protocol.Json
     Agentic.Manager.Configuration

@@ -19,7 +19,7 @@ import time
 
 source = Path(sys.argv[1]).resolve()
 mode = sys.argv[2]
-if mode not in {"interruption", "ticket-mutant", "retry-mutant", "deadline-mutant", "watchdog-mutant", "policy-mutant", "package-boundary", "termination-mutant", "approval-interruption", "approval-live-mutant", "approval-review-gap", "approval-publication-mutant", "approval-catalogue-mutant", "approval-reservation-mutant", "approval-quoted-mutant", "approval-supervision-mutant", "approval-live-target-mutant", "approval-delimiter-mutant", "ingestion-retained-mutant", "ingestion-duplicate-mutant", "store-cancel-gap", "store-cancel-mutant", "store-expiry-mutant", "ingestion-race", "ingestion-race-mutant", "ingestion-cleanup-mutant", "ingestion-observer-mutant", "control-reservation-mutant", "control-body-mutant", "control-release-mutant", "control-fifo-mutant", "control-unsupported", "control-unsupported-mutant", "control-steer-observation-mutant", "control-write", "control-interruption", "control-ticket-mutant", "control-reload-race", "control-preparation", "control-preparation-mutant"}:
+if mode not in {"history-policy", "history-corrections", "history-observation", "interruption", "ticket-mutant", "retry-mutant", "deadline-mutant", "watchdog-mutant", "policy-mutant", "package-boundary", "termination-mutant", "approval-interruption", "approval-live-mutant", "approval-review-gap", "approval-publication-mutant", "approval-catalogue-mutant", "approval-reservation-mutant", "approval-quoted-mutant", "approval-supervision-mutant", "approval-live-target-mutant", "approval-delimiter-mutant", "ingestion-retained-mutant", "ingestion-duplicate-mutant", "store-cancel-gap", "store-cancel-mutant", "store-expiry-mutant", "ingestion-race", "ingestion-race-mutant", "ingestion-cleanup-mutant", "ingestion-observer-mutant", "control-reservation-mutant", "control-body-mutant", "control-release-mutant", "control-fifo-mutant", "control-unsupported", "control-unsupported-mutant", "control-steer-observation-mutant", "control-write", "control-interruption", "control-ticket-mutant", "control-reload-race", "control-preparation", "control-preparation-mutant"}:
     raise SystemExit("unknown audit mode")
 work = Path(tempfile.mkdtemp(prefix=f"audit-{mode}.", dir=os.environ["CABAL_BUILDDIR"]))
 copy = work / "agentic-0.1.0.0"
@@ -110,7 +110,7 @@ def replace(path, old, new):
                     "diff": "".join(difflib.unified_diff(before.splitlines(True), after.splitlines(True), fromfile=path, tofile=path))})
 
 commands = "manager/src/Agentic/Manager/Commands.hs"
-if mode in {"interruption", "ticket-mutant", "approval-interruption", "approval-review-gap", "approval-publication-mutant", "approval-catalogue-mutant", "store-cancel-gap", "store-cancel-mutant", "store-expiry-mutant", "ingestion-race", "ingestion-race-mutant", "control-write", "control-interruption", "control-ticket-mutant", "control-reload-race", "control-preparation", "control-preparation-mutant"}:
+if mode in {"history-corrections", "history-observation", "interruption", "ticket-mutant", "approval-interruption", "approval-review-gap", "approval-publication-mutant", "approval-catalogue-mutant", "store-cancel-gap", "store-cancel-mutant", "store-expiry-mutant", "ingestion-race", "ingestion-race-mutant", "control-write", "control-interruption", "control-ticket-mutant", "control-reload-race", "control-preparation", "control-preparation-mutant"}:
     helper = copy / "manager/src/Agentic/Manager/Test/AcceptanceAudit.hs"
     helper.parent.mkdir(parents=True, exist_ok=True)
     helper.write_bytes((source / "manager/test/Agentic/Manager/Test/AcceptanceAudit.hs").read_bytes())
@@ -119,7 +119,19 @@ if mode in {"interruption", "ticket-mutant", "approval-interruption", "approval-
                     "source": "manager/test/Agentic/Manager/Test/AcceptanceAudit.hs",
                     "diff": "".join(difflib.unified_diff([], helper.read_text().splitlines(True), fromfile="/dev/null", tofile="manager/src/Agentic/Manager/Test/AcceptanceAudit.hs"))})
     replace("agentic.cabal", "    Agentic.Exec\n", "    Agentic.Manager.Test.AcceptanceAudit\n    Agentic.Exec\n")
-if mode in {"control-preparation", "control-preparation-mutant"}:
+if mode == "history-policy":
+    target, arguments = "manager-approval-check", ["history-policy"]
+elif mode == "history-corrections":
+    path = "manager/src/Agentic/Manager/Admission.hs"
+    replace(path, "import Agentic.Manager.Authorization\n", "import Agentic.Manager.Authorization\nimport qualified Agentic.Manager.Test.AcceptanceAudit as Audit\n")
+    replace(path, "    assembled <- assembleAcceptedDraft (store controller) (entryPermit entry) >>= need\n", "    assembled <- assembleAcceptedDraft (store controller) (entryPermit entry) >>= need\n    Audit.afterCurrentReview \"lineage-assembly\"\n")
+    target, arguments = "manager-approval-check", ["history-corrections"]
+elif mode == "history-observation":
+    path = "manager/src/Agentic/Manager/Artifacts.hs"
+    replace(path, "import Agentic.Manager.Store\n", "import Agentic.Manager.Store\nimport qualified Agentic.Manager.Test.AcceptanceAudit as Audit\n")
+    replace(path, "        bytes <- captureObservedResult root nativeId ref\n", "        bytes <- captureObservedResult root nativeId ref\n        Audit.afterCurrentReview \"history-artifact-captured\"\n")
+    target, arguments = "manager-history-check", ["corrections"]
+elif mode in {"control-preparation", "control-preparation-mutant"}:
     replace("manager/src/Agentic/Manager/State.hs", "import Agentic.Manager.Authorization\n", "import qualified Agentic.Manager.Test.AcceptanceAudit as Audit\nimport Agentic.Manager.Authorization\n")
     replace("manager/src/Agentic/Manager/State.hs", "          policy <- either (const(throwIO Command.StorageUnavailable)) pure selected\n",
             '          policy <- either (const(throwIO Command.StorageUnavailable)) pure selected\n          Audit.afterCurrentReview ("control-preparation:"<>associationRun association)\n')
@@ -327,6 +339,8 @@ environment.pop("GHCRTS", None)
 results = []
 
 def run(command, log, timeout=1200):
+    if mode in {"history-policy", "history-corrections", "history-observation"}:
+        assert not any(name == "GHCRTS" or name.startswith("AGENT_CAT_") for name in environment)
     entry = {"command": command, "log": log, "executionDeadlineSeconds": timeout,
              "returncode": None, "primaryFailure": None, "signalFailure": None,
              "waitFailure": None, "joinInterruptions": 0, "ownership": "not-started"}
@@ -405,20 +419,29 @@ def binary(name):
 checker, native = binary(target), binary("routing-fixed-point-probe")
 (work / "executables.json").write_text(json.dumps({path: hashlib.sha256(Path(path).read_bytes()).hexdigest() for path in [checker, native]}, indent=2) + "\n")
 for capabilities in ["N1", "N8"]:
-    fixture = work / capabilities
-    fixture.mkdir()
+    if mode in {"history-policy", "history-corrections", "history-observation"}:
+        fixture = Path(tempfile.mkdtemp(prefix=f"wm018-{capabilities}.", dir=os.environ["TMPDIR"]))
+    else:
+        fixture = work / capabilities
+        fixture.mkdir()
     command = [checker, *arguments]
     if mode != "policy-mutant":
         command.append(str(fixture))
     if mode not in {"deadline-mutant", "policy-mutant"}:
-        command.append(native)
-    if mode in {"approval-live-mutant", "approval-live-target-mutant", "ingestion-race", "ingestion-race-mutant", "control-fifo-mutant", "control-unsupported", "control-unsupported-mutant", "control-steer-observation-mutant", "control-preparation", "control-preparation-mutant"}:
+        command.append(str(copy) if mode == "history-observation" else native)
+    if mode in {"history-policy", "approval-live-mutant", "approval-live-target-mutant", "ingestion-race", "ingestion-race-mutant", "control-fifo-mutant", "control-unsupported", "control-unsupported-mutant", "control-steer-observation-mutant", "control-preparation", "control-preparation-mutant"}:
         command.extend([str(copy), shutil.which("python3")])
     command.extend(["+RTS", "-" + capabilities, "-RTS"])
     code = run(command, capabilities + ".log", timeout=120)
     output = (work / (capabilities + ".log")).read_text()
-    if mode in {"interruption", "approval-interruption", "approval-review-gap", "store-cancel-gap", "ingestion-race", "control-unsupported", "control-write", "control-interruption", "control-reload-race", "control-preparation"}:
+    if mode in {"history-policy", "history-corrections", "history-observation", "interruption", "approval-interruption", "approval-review-gap", "store-cancel-gap", "ingestion-race", "control-unsupported", "control-write", "control-interruption", "control-reload-race", "control-preparation"}:
         success = "PASS original cleanup effect commits with release" if mode == "interruption" else "PASS interrupted original start retains one native start and immutable receipt"
+        if mode == "history-policy":
+            success = "PASS actual WM018 non-null routed policy provenance"
+        if mode == "history-corrections":
+            success = "PASS actual WM018 native lineage preservation and original ownership"
+        if mode == "history-observation":
+            success = "PASS removed retention root cannot enter artifact response"
         if mode == "control-preparation":
             success = "PASS independent run progresses during held original preparation"
         if mode == "control-reload-race":
@@ -439,5 +462,5 @@ for capabilities in ["N1", "N8"]:
             raise RuntimeError(f"real {mode} checks failed")
     elif not code or marker not in output:
         raise RuntimeError("compiled mutant did not fail its intended assertion")
-    label = "real per-entry preparation ownership" if mode == "control-preparation" else "real control authorization race" if mode == "control-reload-race" else "real original-handle write evidence" if mode == "control-write" else "real original control interruption" if mode == "control-interruption" else "real Accepted-to-Unsupported evidence" if mode == "control-unsupported" else "real catalogue race and unchanged/replay controls" if mode == "approval-review-gap" else "real interrupted acceptance" if mode in {"interruption", "approval-interruption"} else "intended mutant assertion"
+    label = "real WM018 owner checks" if mode in {"history-policy", "history-corrections", "history-observation"} else "real per-entry preparation ownership" if mode == "control-preparation" else "real control authorization race" if mode == "control-reload-race" else "real original-handle write evidence" if mode == "control-write" else "real original control interruption" if mode == "control-interruption" else "real Accepted-to-Unsupported evidence" if mode == "control-unsupported" else "real catalogue race and unchanged/replay controls" if mode == "approval-review-gap" else "real interrupted acceptance" if mode in {"interruption", "approval-interruption"} else "intended mutant assertion"
     print(f"PASS {mode} {capabilities}: {label}", flush=True)

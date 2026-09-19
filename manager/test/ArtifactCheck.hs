@@ -301,7 +301,7 @@ migrationChecks work = do
     SQL.exec db "DROP VIEW migration_fault"
   withInstalled config $ \installed -> withCoordinationStore installed $ \store -> do
     identity <- storeIdentity store
-    check "populated schema7 upgrades to schema8" (storeSchemaVersion identity==schemaVersion && schemaVersion==8)
+    check "populated schema7 upgrades through schema8 to schema9" (storeSchemaVersion identity==schemaVersion && schemaVersion==9)
     preserved <- runRead store ((==original) <$> query "SELECT * FROM exports ORDER BY id" [])
     check "published and unresolved export rows retained byte-for-byte" preserved
     before <- scalar store "SELECT sequence FROM service_metadata"

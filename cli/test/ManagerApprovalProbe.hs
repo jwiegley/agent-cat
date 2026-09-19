@@ -9,6 +9,9 @@ import Agentic.Manager.Authorization
 import Agentic.Manager.Commands
 import Agentic.Manager.Configuration
 import Agentic.Manager.Drafts
+import Agentic.Manager.History
+import Agentic.Manager.Lineage
+import qualified Agentic.Manager.Worker as Worker
 import Agentic.Manager.Profile hiding (StaleRevision)
 import Agentic.Manager.Protocol.Command
 import Agentic.Manager.Protocol.Draft
@@ -34,7 +37,9 @@ import qualified Data.Aeson.KeyMap as KM
 import Data.ByteArray (convert)
 import qualified Data.ByteString as BS
 import Data.Int (Int64)
-import Data.IORef (newIORef, readIORef, modifyIORef')
+import Data.IORef (newIORef, readIORef, modifyIORef', writeIORef)
+import Data.Time.Clock (getCurrentTime)
+import Data.List (sortOn)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -57,6 +62,9 @@ main=do
   hSetBuffering stdout LineBuffering
   args<-getArgs
   case args of
+    ["history-lineage",work,native]->awaitHistory(nativeLineageChecks False work native)
+    ["history-corrections",work,native]->awaitHistory(nativeLineageChecks True work native)
+    ["history-policy",work,native,source,python]->awaitHistory(nativeRoutedLineageChecks work native source python)
     ["controls",work,native]->nativeControlChecks work native
     ["controls-receipt-observation",work,native]->receiptObservationChecks work native
     ["controls-live",work,native,source,python]->nativeMixedControlChecks work native source python
@@ -172,6 +180,281 @@ withReadyRunnerLedger ledger work native prefix selectedWorkflow name arguments 
     _<-changeDraftInput store proof (draftId draft) (key "input") (etag draft) (encoded(object["operation" .= ("set-input"::Text),"input" .= LiteralValue "input" "Consent for this exact worker."]))>>=right
     ready<-readDraft store proof(draftId draft)>>=right
     action(Fixture root installed store proof key ready)
+
+awaitHistory :: IO a -> IO a
+awaitHistory action=timeout 120000000 action >>= maybe(error "history native deadline expired; original cleanup not certified")pure
+
+lineageAnswers :: Map.Map Runtime.OccurrenceId Value
+lineageAnswers=Map.fromList [(Runtime.OccurrenceId 1,Bool False),(Runtime.OccurrenceId 2,Null),(Runtime.OccurrenceId 3,object["ok" .= False,"notes" .= ([]::[Text])])]
+
+nativeLineageChecks :: Bool -> FilePath -> FilePath -> IO ()
+nativeLineageChecks barriers base native = nativeLineageChecksWith barriers False [1,2,3] base native ["--scripted"] []
+
+nativeRoutedLineageChecks :: FilePath -> FilePath -> FilePath -> FilePath -> IO ()
+nativeRoutedLineageChecks base native source python=do
+  routedPolicyProjectionChecks
+  let work=base </> "manifest-v3"
+      adapters=work </> "adapter-bin"
+      adapter=adapters </> "history-adapter"
+      script=source </> "engine/acp/test/stub_adapter.py"
+      routing=work </> "config/agent-cat/routing.yaml"
+      scratch=work </> "scratch"
+  createDirectoryIfMissing True adapters
+  createDirectoryIfMissing True(work </> "config/agent-cat")
+  createDirectory scratch
+  writeFile adapter("#!"<>python<>"\nimport os,sys\nos.execv("<>show python<>",["<>show python<>","<>show script<>",*sys.argv[1:]])\n")
+  setFileMode adapter 0o700
+  BS.writeFile routing(encoded(object["version" .= (2::Int),"default-persona" .= ("fixture"::Text),"secrets" .= object[],
+    "engines" .= object["local" .= object["backend" .= ("acp:history-adapter"::Text),"provider" .= ("fixture"::Text)]],
+    "models" .= object["selected" .= object["engine" .= ("local"::Text),"select" .= [object["exact" .= ("stub-default"::Text)]]]],
+    "personas" .= object["fixture" .= object["engines" .= ["local"::Text],"models" .= ["selected"::Text],
+      "profiles" .= object["primary" .= object["chain" .= [object["model" .= ("selected"::Text),"thinking" .= ("low"::Text),"max-output" .= ("unconstrained"::Text)]]]]]]]))
+  setFileMode routing 0o600
+  nativeLineageChecksWith False True [3] base native ["--scratch",T.pack scratch] [("PATH",T.pack adapters)]
+  putStrLn "PASS actual WM018 non-null routed policy provenance"
+
+routedPolicyProjectionChecks :: IO ()
+routedPolicyProjectionChecks=do
+  let digest=T.replicate 64 "a"
+      bare=String digest
+      native=String("sha256:"<>digest)
+      policy policyDigest executionFingerprint=object["kind" .= ("routed"::Text),"coverage" .= ("full"::Text),"routes" .= ([]::[Value]),
+        "pollMs" .= Null,"timeoutMs" .= Null,"verbose" .= False,"routingVersion" .= (2::Int),"persona" .= ("fixture"::Text),"personaSource" .= ("user-default"::Text),"policyDigest" .= policyDigest,
+        "realizations" .= [object["profile" .= ("primary"::Text),"axis" .= ("controlled"::Text),"rung" .= (0::Int),"backend" .= ("acp:history-adapter"::Text),"router" .= ("local"::Text),"provider" .= ("fixture"::Text),"model" .= ("stub-default"::Text),"thinking" .= ("low"::Text),"maxOutput" .= Null,"executionFingerprint" .= executionFingerprint]]]
+      projected value=P.policyValue <$> P.projectPolicy value
+      refused value=case P.projectPolicy value of Left InvalidInput->True;_->False
+      publicAccepts value=case eitherDecodeStrict' @P.PublicPolicy(encoded value) of Right _->True;_->False
+  check "native policy projection preserves both SHA256 meanings" (projected(policy native native)==Right(policy bare bare))
+  check "policy projection preserves accepted bare hex" (projected(policy bare bare)==Right(policy bare bare))
+  check "strict public parser accepts bare hex" (publicAccepts(policy bare bare))
+  forM_ [policy native native,policy native bare,policy bare native] $ \value ->
+    check "strict public parser still refuses native fingerprint spelling" (not(publicAccepts value))
+  forM_ [String("sha512:"<>digest),String("sha256:"<>T.take 63 digest),String("sha256:"<>digest<>"a"),String("sha256:"<>T.toUpper digest),String("sha256:sha256:"<>digest),Null,Number 1,Bool False,object[]] $ \bad -> do
+    check "projection refuses malformed native policy digest" (refused(policy bad native))
+    check "projection refuses malformed native execution fingerprint" (refused(policy native bad))
+
+nativeLineageChecksWith :: Bool -> Bool -> [Int] -> FilePath -> FilePath -> [Text] -> [(Text,Text)] -> IO ()
+nativeLineageChecksWith barriers routed versions base native arguments environment = forM_ versions $ \branchVersion -> do
+  let work=base </> ("manifest-v"<>show branchVersion)
+      workflow=if routed then "controlled-single" else "lineage-typed"
+      expectedCount=if routed then 1 else 4
+      forkEdits=if routed then [Runtime.ReplaceAnswer(Runtime.OccurrenceId 0)(Bool False)] else
+        [Runtime.DropAnswer(Runtime.OccurrenceId 0),Runtime.ReplaceAnswer(Runtime.OccurrenceId 1)(Bool False),Runtime.ReplaceAnswer(Runtime.OccurrenceId 2)Null,Runtime.ReplaceAnswer(Runtime.OccurrenceId 3)(object["ok" .= False,"notes" .= (["replacement"]::[Text])])]
+  createDirectoryIfMissing True work
+  withReadyRunner work native [] workflow "history-managed" arguments environment $ \fixture@(Fixture root _ store proof originalKey ready) ->
+    withReadyRunner work native [] workflow "history-direct" arguments environment $ \(Fixture directRoot _ directStore directProof _ directReady) -> do
+      let key = shortLineageKey originalKey
+      directAssembly<-assembleDraftSnapshot directStore directProof(draftId directReady)>>=right
+      directParent<-directLineageRun directStore directReady (assemblySetup directAssembly)
+      withAdmissionClock fixedClock store $ \controller -> do
+        (parent,context)<-managedLineageRun store proof key controller ready (if routed then Nothing else Just (fixture,controller)) routed
+        let parentNative=preparedRunId(reviewNative context)
+            parentPath=root </> "runs/runs" </> T.unpack(runIdText parentNative) </> "supervisor-manifest.json"
+            directPath=directRoot </> "runs/runs" </> T.unpack(runIdText directParent) </> "supervisor-manifest.json"
+        source<-BS.readFile parentPath >>= right . Runtime.decodeFrontendManifest
+        directSource<-BS.readFile directPath >>= right . Runtime.decodeFrontendManifest
+        check "native lineage parent has nonempty captured inputs" (not(Map.null(Runtime.frontendInputHashes source)))
+        parentPolicy<-if routed then do
+          managedFacts<-lineageFacts expectedCount(root </> "runs") parentNative
+          directFacts<-lineageFacts expectedCount(directRoot </> "runs") directParent
+          managedPolicy<-requireRoutedPolicy parentNative managedFacts
+          directPolicy<-requireRoutedPolicy directParent directFacts
+          check "routed native parents preserve exact direct facts and policy" (managedFacts==directFacts && managedPolicy==directPolicy)
+          check "routed parent review binds executed policy" (preparedPolicy(reviewNative context)==fst managedPolicy)
+          pure(Just managedPolicy)
+          else pure Nothing
+        forM_ [branchVersion] $ \version -> do
+          let branch manifest=manifest {Runtime.frontendVersion=version,
+                Runtime.frontendInvocation=if version==3 then Runtime.frontendInvocation manifest else Nothing,
+                Runtime.frontendRunnerExecutable=if version==1 then Nothing else Runtime.frontendRunnerExecutable manifest,
+                Runtime.frontendRunnerVersion=if version==1 then Nothing else Runtime.frontendRunnerVersion manifest,
+                Runtime.frontendPersonAnswering=if version==1 then Nothing else Runtime.frontendPersonAnswering manifest,
+                Runtime.frontendOwnerId=if version==1 then Nothing else Runtime.frontendOwnerId manifest}
+          parentBytes<-if routed then BS.readFile parentPath else pure(Runtime.encodeFrontendManifest(branch source))
+          unless routed $ do
+            BS.writeFile parentPath parentBytes
+            BS.writeFile directPath(Runtime.encodeFrontendManifest(branch directSource))
+          _<-right(Runtime.decodeFrontendManifest parentBytes)
+          forM_ (zip [0::Int ..] [RestartParent,ResumeParent,ForkParent forkEdits]) $ \(index,mutation) -> do
+            let suffix=T.pack(show version<>"-"<>show index)
+            draft<-lineageDraft store proof key parent suffix mutation
+            (child,childContext)<-managedLineageRun store proof key controller draft Nothing routed
+            direct<-directLineageRun directStore directReady (Runtime.DerivedSetup(directRoot </> "runs") directParent (lineageOperation mutation) (lineageEdits mutation) Runtime.PersonAnswerLocalControl (Just(assemblySelectionInvocation directAssembly)))
+            let childNative=preparedRunId(reviewNative childContext)
+            check "distinct accepted request, manager run and native run" (draftId draft/=draftId ready && child/=parent && childNative/=parentNative)
+            links<-runRead store $ do rows<-query "SELECT parent_run_id FROM runs WHERE id=?" [SQL.SQLText child];pure[link|[SQL.SQLText link]<-rows]
+            check "approved native child retains manager parent link" (links==[parent])
+            managedFacts<-lineageFacts expectedCount(root </> "runs") childNative
+            directFacts<-lineageFacts expectedCount(directRoot </> "runs") direct
+            check ("native legacy/v"<>show version<>" "<>show mutation<>" preserves direct answers trace reuse bills policy result") (managedFacts==directFacts)
+            forM_ parentPolicy $ \expectedPolicy -> do
+              managedPolicy<-requireRoutedPolicy childNative managedFacts
+              directPolicy<-requireRoutedPolicy direct directFacts
+              check "routed child preserves immutable parent policy document and fingerprint" (managedPolicy==expectedPolicy && directPolicy==expectedPolicy)
+              check "routed child review binds executed policy" (preparedPolicy(reviewNative childContext)==fst managedPolicy)
+              currentParent<-lineageFacts expectedCount(root </> "runs") parentNative >>= requireRoutedPolicy parentNative
+              currentDirectParent<-lineageFacts expectedCount(directRoot </> "runs") directParent >>= requireRoutedPolicy directParent
+              directUnchanged<-BS.readFile directPath >>= right . Runtime.decodeFrontendManifest
+              check "both routed parents retain original provenance and immutable manifests" (currentParent==expectedPolicy && currentDirectParent==expectedPolicy && directUnchanged==directSource)
+            unchanged<-BS.readFile parentPath
+            check "native lineage leaves accepted parent manifest unchanged" (unchanged==parentBytes)
+        when barriers (lineageParentBarriers store proof key controller parent parentPath)
+        putStrLn "PASS actual WM018 native lineage preservation and original ownership"
+  where assemblySelectionInvocation=selectionInvocation . assemblySelection
+
+requireRoutedPolicy :: RunId -> Value -> IO (Value,Text)
+requireRoutedPolicy native (Object facts)=case (KM.lookup "policy" facts,KM.lookup "fingerprint" facts) of
+  (Just policy@(Object fields),Just(String fingerprint))->do
+    let expected="sha256:"<>T.pack(show(hash(encoded(Object(KM.delete "policyDigest" fields)))::Digest SHA256))
+    check "required routed policy fingerprint is non-null, well-formed and matches actual policy" (KM.lookup "kind" fields==Just(String "routed") && KM.lookup "routingVersion" fields==Just(Number 2) && KM.lookup "policyDigest" fields==Just(String fingerprint) && fingerprint==expected)
+    putStrLn("POLICY "<>T.unpack(runIdText native)<>" "<>T.unpack fingerprint)
+    pure(policy,fingerprint)
+  _->error "required routed policy document or fingerprint absent"
+requireRoutedPolicy _ _=error "native lineage facts object absent"
+
+shortLineageKey :: (Text -> Text) -> Text -> Text
+shortLineageKey key suffix=key(T.take 24(T.pack(show(hash(encoded suffix)::Digest SHA256))))
+
+lineageDraft :: CoordinationStore -> CredentialProof -> (Text->Text) -> Text -> Text -> LineageMutation -> IO DraftView
+lineageDraft store proof key parent suffix mutation=do
+  revision<-runRead store $ do rows<-query "SELECT revision FROM runs WHERE id=?" [SQL.SQLText parent];case rows of [[SQL.SQLText r]]->pure r;_->refuseTransaction StoreIntegrity
+  receipt<-createLineageDraft store proof parent(key("lineage-"<>suffix))(Just("\""<>revision<>"\""))(encoded mutation)>>=right
+  ident<-runRead store $ do rows<-query "SELECT request_id FROM commands WHERE id=?" [SQL.SQLText(receiptId receipt)];case rows of [[SQL.SQLText r]]->pure r;_->refuseTransaction StoreIntegrity
+  readDraft store proof ident >>=right
+
+managedLineageRun :: CoordinationStore -> CredentialProof -> (Text->Text) -> Admission -> DraftView -> Maybe (Fixture,Admission) -> Bool -> IO (Text,ReviewContext)
+managedLineageRun store proof key controller draft ownershipCheck modelOnly=do
+  _<-enqueueRequest controller proof(draftId draft)(key("enqueue-"<>draftId draft))(Just("\""<>draftRevision draft<>"\""))(encoded(object["operation" .= ("enqueue"::Text)]))>>=right
+  live<-admitOldest controller>>=right>>=maybe(error "lineage admission")pure
+  context<-await(awaitReview live)>>=right
+  reviewed<-publishReview store live>>=right
+  ident<-runRead store $ do rows<-query "SELECT id FROM preparations WHERE request_id=?" [SQL.SQLText(draftId draft)];case rows of [[SQL.SQLText i]]->pure i;_->refuseTransaction StoreIntegrity
+  public<-readPreparation store proof ident>>=right
+  (_,start)<-acceptApproval reviewed proof(key("approve-"<>draftId draft))(condition public)(approvalBody public)>>=right
+  owned<-maybe(error "lineage original start")pure start
+  deliverAcceptedStart owned>>=right
+  firstQuestion<-newIORef True
+  let loop=do
+        more<-ingestAcceptedStart owned
+        when more $ do
+          pending<-runRead store $ do
+            rows<-query "SELECT id,occurrence_id,generation,revision FROM decisions WHERE run_id=? AND state='pending'" [SQL.SQLText(acceptedStartRun owned)]
+            pure[(i,o,g,r)|[SQL.SQLText i,SQL.SQLText o,SQL.SQLText g,SQL.SQLText r]<-rows]
+          forM_ pending $ \(decision,occurrence,generation,revision)->do
+            firstQuestionNow<-readIORef firstQuestion
+            when firstQuestionNow $ do
+              writeIORef firstQuestion False
+              forM_ ownershipCheck $ \(fixture,owner)->nativeHistoryOwnership fixture owner context owned
+            numberValue<-case reads(T.unpack occurrence) of [(n,"")]->pure(Runtime.OccurrenceId n);_->error "occurrence"
+            value<-maybe(error "unexpected native question")pure(Map.lookup numberValue lineageAnswers)
+            submitted<-submitDecisionControl owned proof decision(key("answer-"<>decision))(Just("\""<>revision<>"\""))(encoded(object["operation" .= ("answer"::Text),"occurrenceId" .= occurrence,"generation" .= generation,"value" .= value]))>>=right
+            deliverAcceptedControl owned(receiptId(submissionReceipt submitted))>>=right
+            when(occurrence=="3")(await(awaitAdmissionCleanup live)>>=right)
+          loop
+  -- Model-only and reused/edited answers have no interactive lane to hold completion.
+  when(modelOnly || draftLineage draft `elem` [Just "resume",Just "fork"])(await(awaitAdmissionCleanup live)>>=right)
+  await loop
+  await(awaitAdmissionCleanup live)>>=right
+  pure(acceptedStartRun owned,context)
+
+directLineageRun :: CoordinationStore -> DraftView -> Runtime.FrontendSetupRequest -> IO RunId
+directLineageRun store draft setup=Worker.withFrontendWorker store(draftProfile draft)(draftProfileRevision draft)setup $ \worker -> do
+  prepared<-Worker.workerPrepared worker
+  Worker.startWorker worker
+  let loop=Worker.consumeWorkerEvent worker (\event -> case Runtime.envelopeEvent(workerEventEnvelope event) of
+        Runtime.OccurrencePersonAnswerPending occurrence _ -> do
+          value<-maybe(error "direct native question")pure(Map.lookup occurrence lineageAnswers)
+          Worker.writeWorkerControl worker(Runtime.Control(Runtime.ControlId("direct_"<>T.pack(show(Runtime.occurrenceNumber occurrence))))(Just occurrence)Nothing(Runtime.AnswerPerson value))
+        _->pure()) >>= \more -> when more loop
+  await loop
+  pure(preparedRunId prepared)
+
+lineageFacts :: Int -> FilePath -> RunId -> IO Value
+lineageFacts expectedCount root native=Runtime.withPrivateRoot "native comparison" root $ \owned -> do
+  now<-getCurrentTime
+  (record,_)<-Runtime.withPrivateDirectoryAt owned ["runs",T.unpack(runIdText native)] $ \fd -> Runtime.readRunRecordWithEnvelopesAt(root </> "runs" </> T.unpack(runIdText native)) fd Nothing now
+  snapshot<-maybe(error "native snapshot")pure(Runtime.recordSnapshot record)
+  result<-BS.readFile(root </> "runs" </> T.unpack(runIdText native) </> "runtime/result.json") >>= right . (eitherDecodeStrict' :: BS.ByteString -> Either String Value)
+  answers<-BS.readFile(root </> "runs" </> T.unpack(runIdText native) </> "runtime/answers.json") >>= right . (eitherDecodeStrict' :: BS.ByteString -> Either String Value)
+  let get name(Object fields)=KM.lookup name fields;get _ _=Nothing
+  resultBody<-maybe(error "native result document")pure(get "result" result)
+  nativeAnswers<-case get "answers" answers of Just(Array values)->pure(sortOn(get "occurrenceId")(foldr (:) [] values));_->error "native answers"
+  check "actual native terminal result succeeded" (Runtime.snapshotRunStatus snapshot==Runtime.RunSucceeded)
+  check "comparison includes populated typed answers trace bills and native result" (length nativeAnswers==expectedCount && length(Runtime.snapshotAuthoredOrder snapshot)==expectedCount && Runtime.snapshotTraceRecorded snapshot && Runtime.snapshotBillFresh snapshot/=Nothing && Runtime.snapshotBillMemo snapshot/=Nothing && get "code" resultBody/=Nothing && get "value" resultBody/=Nothing)
+  pure(object["nativeAnswers" .= nativeAnswers,"trace" .= map (\(Runtime.OccurrenceId n)->n) (Runtime.snapshotAuthoredOrder snapshot),"answers" .= [(Runtime.snapshotOccurrenceCode o,Runtime.snapshotOccurrenceAnswer o,Runtime.snapshotOccurrenceReuseKind o)|o<-Map.elems(Runtime.snapshotOccurrences snapshot)],
+    "fresh" .= Runtime.snapshotBillFresh snapshot,"memo" .= Runtime.snapshotBillMemo snapshot,"policy" .= Runtime.recordPolicy record,
+    "fingerprint" .= Runtime.frontendPolicyDigest(Runtime.recordManifest record),"code" .= get "code" resultBody,"value" .= get "value" resultBody])
+
+nativeHistoryOwnership :: Fixture -> Admission -> ReviewContext -> AcceptedStart -> IO ()
+nativeHistoryOwnership (Fixture _ _ store proof originalKey draft) controller context owned =
+  Worker.withFrontendWorker store(draftProfile draft)(draftProfileRevision draft)(reviewSetup context) $ \foreignWorker -> do
+    let key = shortLineageKey originalKey
+    prepared<-Worker.workerPrepared foreignWorker
+    mutate store $ execute "INSERT INTO runs(id,revision,control_revision,profile_id,root_identity,native_run_id,supervision,result_state) VALUES ('run_foreign','foreign','foreign','profile',?,?,'observer','absent')" [SQL.SQLText(preparedRootIdentity prepared),SQL.SQLText(runIdText(preparedRunId prepared))]
+    Worker.startWorker foreignWorker
+    let pending=do reached<-newIORef False;_<-Worker.consumeWorkerEvent foreignWorker(\event->case Runtime.envelopeEvent(workerEventEnvelope event) of Runtime.OccurrencePersonAnswerPending {}->writeIORef reached True;_->pure());readIORef reached >>= \yes->unless yes pending
+    await pending
+    before<-number store "SELECT count(*) FROM commands"
+    forM_ [acceptedStartRun owned,"run_foreign"] $ \parent -> do
+      revision<-runRead store $ do rows<-query "SELECT revision FROM runs WHERE id=?" [SQL.SQLText parent];case rows of [[SQL.SQLText r]]->pure r;_->refuseTransaction StoreIntegrity
+      denied<-createLineageDraft store proof parent(key("live-parent-"<>parent))(Just("\""<>revision<>"\""))(encoded RestartParent)
+      check "actual live original or foreign parent refuses mutation" (denied==Left OwnershipUnavailable)
+    number store "SELECT count(*) FROM commands" >>=check "live-parent refusals have no command effect" . (==before)
+    values<-newIORef []
+    withHistory store proof [] (Just controller)(writeIORef values)
+    observed<-readIORef values
+    let limitations ident=[v|v@(Object fields)<-observed,KM.lookup "id" fields==Just(String ident)]
+        has name(Object fields)=case KM.lookup "limitations" fields of Just(Array xs)->String name `elem` xs;_->False
+        has _ _=False
+    check "actual original live manager worker is not foreign" (case limitations(acceptedStartRun owned) of [v]->not(has "foreign-owner" v);_->False)
+    check "actual foreign worker stays foreign observation" (case limitations "run_foreign" of [v]->has "foreign-owner" v;_->False)
+    withHistory store proof [] Nothing(writeIORef values)
+    absent<-readIORef values
+    check "without original controller stored ownership is not adopted" (or [has "foreign-owner" v | v@(Object fields)<-absent,KM.lookup "id" fields==Just(String(acceptedStartRun owned))])
+
+lineageParentBarriers :: CoordinationStore -> CredentialProof -> (Text->Text) -> Admission -> Text -> FilePath -> IO ()
+lineageParentBarriers store proof key controller parent path=do
+  original<-BS.readFile path
+  manifest<-right(Runtime.decodeFrontendManifest original)
+  let substitute=BS.writeFile path(Runtime.encodeFrontendManifest(manifest {Runtime.frontendCreatedAt="2026-09-19T00:00:01Z"}))
+  invalid<-lineageDraft store proof key parent "invalid-native-edit" (ForkParent [Runtime.ReplaceAnswer(Runtime.OccurrenceId 1)(String "not-a-flag")])
+  _<-enqueueRequest controller proof(draftId invalid)(key "invalid-edit-enqueue")(Just("\""<>draftRevision invalid<>"\""))(encoded(object["operation" .= ("enqueue"::Text)]))>>=right
+  invalidLive<-admitOldest controller>>=right>>=maybe(error "invalid edit admission")pure
+  invalidReview<-await(awaitReview invalidLive)
+  check "actual native typed replacement validation refuses invalid edit" (case invalidReview of Left _->True;_->False)
+  await(awaitAdmissionCleanup invalidLive)>>=right
+  draft<-lineageDraft store proof key parent "assembly-race" RestartParent
+  Audit.withReviewAudit "lineage-assembly" $ \barrier -> do
+    _<-enqueueRequest controller proof(draftId draft)(key "assembly-enqueue")(Just("\""<>draftRevision draft<>"\""))(encoded(object["operation" .= ("enqueue"::Text)]))>>=right
+    live<-admitOldest controller>>=right>>=maybe(error "assembly barrier admission")pure
+    _<-Audit.waitReviewed barrier
+    substitute
+    Audit.releaseReviewed barrier
+    refused<-await(awaitReview live)
+    check "parent substitution after assembly cannot publish native review" (case refused of Left _->True;_->False)
+    await(awaitAdmissionCleanup live)>>=right
+    BS.writeFile path original
+  draft2<-lineageDraft store proof key parent "approval-race" RestartParent
+  _<-enqueueRequest controller proof(draftId draft2)(key "approval-race-enqueue")(Just("\""<>draftRevision draft2<>"\""))(encoded(object["operation" .= ("enqueue"::Text)]))>>=right
+  live<-admitOldest controller>>=right>>=maybe(error "approval parent admission")pure
+  _<-await(awaitReview live)>>=right
+  reviewed<-publishReview store live>>=right
+  ident<-runRead store $ do rows<-query "SELECT id FROM preparations WHERE request_id=?" [SQL.SQLText(draftId draft2)];case rows of [[SQL.SQLText i]]->pure i;_->refuseTransaction StoreIntegrity
+  public<-readPreparation store proof ident>>=right
+  substitute
+  rejected<-acceptApproval reviewed proof(key "changed-parent-approval")(condition public)(approvalBody public)
+  check "parent substitution before approval cannot consume consent" (case rejected of Left _->True;_->False)
+  BS.writeFile path original
+  (_,start)<-acceptApproval reviewed proof(key "original-parent-approval")(condition public)(approvalBody public)>>=right
+  owned<-maybe(error "original parent approved start")pure start
+  substitute
+  _<-deliverAcceptedStart owned
+  cleanup<-await(awaitAdmissionCleanup live)
+  observation<-observeAcceptedStart owned
+  putStrLn("Post-approval negative original cleanup: "<>show cleanup)
+  check "native post-approval revalidation refuses substituted parent" (observedQueuedFrames observation==0 && case observedWorkerExit observation of Just(Left _)->True;_->False)
+  check "post-approval negative retains proven original cleanup" (cleanup==Right() && not(observedCleanupUnproven observation))
+  BS.writeFile path original
 
 positive :: FilePath -> FilePath -> IO ()
 positive work native=withReady work native "positive" ["--scripted"] [] $ \(Fixture _ _ store proof key ready)->do

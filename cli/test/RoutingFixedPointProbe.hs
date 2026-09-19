@@ -36,6 +36,7 @@ registry =
           ("controlled-single", row controlledSingleExample),
           ("person-controlled", row personControlledExample),
           ("typed-person", row (Needs $ taking (input "input" :> noInputs) typedPersonProgram)),
+          ("lineage-typed", row (Needs $ taking (input "input" :> noInputs) lineageTypedProgram)),
           ("mixed-controls", row (Needs $ taking (input "input" :> noInputs) mixedControlProgram)),
           ("parallel-person", row (Needs $ taking (input "input" :> noInputs) parallelPersonProgram)),
           ("prompt-source", row (Needs $ taking (input "input" :> noInputs) sourceProgram)),
@@ -117,6 +118,16 @@ mixedControlProgram body = workflow W.do
   _engine <- confirm (model "controlled" `servedBy` "primary" `fallingBackTo` "spare") [wf|Apply this patch? {body}|]
   _person <- confirm (person "owner") [wf|Independent confirmation? {body}|]
   stop
+
+-- Nonempty capture, billed engine work, and typed edits on replayable answers.
+lineageTypedProgram :: Text -> Program
+lineageTypedProgram body = B.program [] $
+  B.bindAsI S.SText "engine" (B.one (B.askModel "fixed-point" [B.lit "fixed-point lineage"])) $
+  B.bindAsI S.SFlag "flag" (B.one (B.askPerson "flag" [B.lit body])) $
+  B.bindAsI (S.SStructured S.schemaNull) "null" (B.one (B.askPerson "null" [B.lit body])) $
+  B.bindAsI (S.SStructured (S.schemaProperty @"ok" S.schemaBoolean
+    (S.schemaProperty @"notes" (S.schemaArray S.schemaString) S.schemaObject)))
+    "object" (B.one (B.askPerson "object" [B.lit body])) B.stop
 
 -- Real authored typed questions. Runtime alone validates and delivers answers.
 typedPersonProgram :: Text -> Program

@@ -6,7 +6,7 @@
 
 -- | Durable input representations and verified captures, never workflow execution.
 module Agentic.Manager.Drafts
-  ( createDraft, changeDraftInput, changeDraftInputGuarded, InputTransition (..), RequestState, requestView, requestOwner, requestState, currentVersion, editable, checkDraftCapacity, uploadCapture, readDraft, assembleDraft, DraftAssembly, assemblyRequest, assemblyRevision, assemblyProfile, assemblyProfileRevision, assemblySetup, assemblyFrame, assemblyInputSummaries, assemblySelection, assembleDraftSnapshot, assembleAcceptedDraft, structuralReadiness, verifyFrontendFiles ) where
+  ( createDraft, createLineageDraft, withLineageRequests, checkLineageParent, changeDraftInput, changeDraftInputGuarded, InputTransition (..), RequestState, requestView, requestOwner, requestState, currentVersion, editable, checkDraftCapacity, uploadCapture, readDraft, assembleDraft, DraftAssembly, assemblyRequest, assemblyRevision, assemblyProfile, assemblyProfileRevision, assemblySetup, assemblyFrame, assemblyInputSummaries, assemblySelection, assemblyParentBinding, validateAssemblyParent, assembleDraftSnapshot, assembleAcceptedDraft, structuralReadiness, verifyFrontendFiles ) where
 
 import Agentic.Manager.Authorization
 import Agentic.Manager.Commands
@@ -15,6 +15,7 @@ import Agentic.Manager.Profile
    discoverySelection, Selection, selectionContext, selectionInvocation, OperatorProfile (..))
 import Agentic.Manager.Protocol.Command
 import Agentic.Manager.Protocol.Draft
+import Agentic.Manager.Lineage
 import Agentic.Manager.Protocol.Preparation (ReviewInput (..))
 import Agentic.Manager.Store
 import Agentic.Runtime
@@ -22,7 +23,10 @@ import Agentic.Runtime
    publishPrivateCaptureAt, CapturePublication (..), PrivateCapture, privateCaptureBytes, privateCaptureSha256,
    WorkflowDescriptor (..), WorkflowInputDescriptor (..), frontendLiteralBytes,
    FrontendSetup (..), FrontendSetupRequest (..), FrontendInputSource (..), encodeFrontendSetupRequest,
-   maxFrontendQueryBytes)
+   maxFrontendQueryBytes, FrontendManifest (..), RunRecord (..), RunOwnership (..),
+   RunId (..), mkRunId, openPrivateSubroot, closePrivateRoot, privateRootIdentity,
+   readRunRecordWithEnvelopesAt, revalidateLineageParentAt, readFrontendInputBytesBoundedAt,
+   retainLineageInvocation, encodeFrontendManifest, FrontendPrepared (..))
 import Control.DeepSeq (NFData)
 import Control.Exception (IOException, SomeException, bracket, evaluate, throwIO, try)
 import Control.Monad (forM, forM_, unless, when, void)
@@ -37,6 +41,8 @@ import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.List (find)
 import Data.Maybe (catMaybes)
 import qualified Data.Set as Set
+import qualified Data.Map.Strict as Map
+import Data.Time.Clock (getCurrentTime)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -100,6 +106,120 @@ createDraft store proof key body = draftIO $ do
       [text(receiptId(submissionReceipt submission)),text client]
     case rows of [[SQL.SQLBlob value]] -> decodeTransaction value; _ -> refuseTransaction ResourceUnavailable
 
+-- | Lineage creates an ordinary draft. Only the existing admission owner can enqueue it.
+createLineageDraft :: CoordinationStore -> CredentialProof -> Text -> Text -> Maybe Text -> BS.ByteString -> IO (Either CommandFailure CommandReceipt)
+createLineageDraft store proof parent key precondition body = draftIO $ do
+  mutation <- requireEither (decodeDraftBody body :: Either CommandFailure LineageMutation)
+  when (BS.length (encoded mutation) > 524288) (throwIO ViewTooLarge)
+  (profile,_,_) <- runRead store $ do
+    address@(profile,_,_) <- parentAddress parent
+    _ <- authorizeProfile proof profile [Observe,Submit] >>= requireTransaction
+    pure address
+  let operation = case mutation of RestartParent -> Restart; ResumeParent -> Resume; ForkParent _ -> Fork
+      uri = "/v1/runs/" <> parent <> "/lineage-requests"
+      request = CommandRequest operation profile "POST" uri key "application/json" precondition body
+      version = do
+        rows <- query "SELECT revision FROM runs WHERE id=?" [text parent]
+        pure $ case rows of [[SQL.SQLText revision]] -> Just (uri,profile,revision); _ -> Nothing
+  replay <- commandPreflightVersion store proof request version >>= requireEither
+  if replay then submissionReceipt <$> (submitConfiguredCommand store proof request (\_ _ _ -> Left StateConflict) >>= requireEither)
+  else withStoreFiles store $ \root -> timed 5000000 $ do
+    configured <- withStoreCatalogues store $ \_ _ catalogues -> case lookup profile catalogues of
+      Just catalogue -> pure catalogue
+      Nothing -> throwIO StaleRevision
+    catalogue <- either (const (throwIO StorageUnavailable)) pure configured
+    let selection = discoverySelection catalogue
+        policy = selectionContext selection
+    record <- readParent store root parent selection
+    let manifest = recordManifest record
+    (workflow,descriptor) <- case [(ident,descriptor) | (ident,descriptor) <- discoveryEntries catalogue, workflowName descriptor == frontendWorkflow manifest] of
+      [entry] -> pure entry
+      _ -> throwIO StaleRevision
+    _ <- parentInputs root record descriptor
+    ident <- fresh "request_"
+    parentRevision <- fresh "run_revision_"
+    let profileRevision = discoveryProfileRevision catalogue
+        descriptorRevision = discoveryRevision catalogue
+        initial = DraftView ident ident workflow descriptorRevision profile profileRevision "draft" (Readiness [] [] [] []) "not-queued" Nothing [] Nothing Nothing (Just parent) (Just (operationName operation))
+        builder commandId limits catalogues = do
+          _ <- selectCatalogue catalogues profile profileRevision workflow descriptorRevision
+          pure $ Mutation profileRevision version $ do
+            _ <- authorizeProfile proof profile [Observe,Submit] >>= requireTransaction
+            checkLineageParent parent
+            client <- currentClient proof >>= requireTransaction
+            checkDraftCapacity limits client
+            pure $ Right $ Intent (noReferences {referenceRequest=Just ident,referenceRun=Just parent}) False $ do
+              execute "INSERT INTO requests (id,revision,client_id,workflow_id,descriptor_revision,profile_id,profile_revision,input_revision,phase,admission,blocking_reasons,validation_errors,parent_run_id,lineage_operation,lineage_edits) VALUES (?,?,?,?,?,?,?,?,'draft','not-queued',?,?,?,?,?)"
+                [text ident,text ident,text client,text workflow,text descriptorRevision,text profile,text profileRevision,text ident,
+                 SQL.SQLBlob(encoded ([]::[Text])),SQL.SQLBlob(encoded ([]::[InputError])),text parent,text(operationName operation),SQL.SQLBlob(encoded mutation)]
+              execute "INSERT INTO request_lineage VALUES (?,?)" [text ident,SQL.SQLBlob(encodeFrontendManifest manifest)]
+              execute "INSERT INTO request_origins VALUES (?,?,?)" [text ident,text commandId,SQL.SQLBlob(encoded initial)]
+              effect <- requireTransaction $ case fromJSON (object ["kind" .= ("lineage-created"::Text),"resource" .= requestURI ident,"runtimeSequence" .= (Nothing::Maybe Text),"address" .= (Nothing::Maybe Text)]) of
+                Success value -> Right value
+                Error _ -> Left InvalidRequest
+              execute "UPDATE runs SET revision=? WHERE id=?" [text parentRevision,text parent]
+              pure ([requestEvent ident ident,Invalidation "run.changed" uri parentRevision],Just effect)
+    when (BS.length (encodeFrontendManifest manifest) > 1048576) (throwIO ViewTooLarge)
+    unless (operatorId policy == profile) (throwIO StaleRevision)
+    submissionReceipt <$> (submitConfiguredCommand store proof request builder >>= requireEither)
+
+-- | Complete bounded child-request collection, not an HTTP page-set implementation.
+withLineageRequests :: CoordinationStore -> CredentialProof -> Text -> ([DraftView] -> IO ()) -> IO ()
+withLineageRequests store proof parent respond = do
+  (profile,revision,idents) <- runRead store $ do
+    (profile,_,_) <- parentAddress parent
+    _ <- authorizeProfile proof profile [Observe] >>= requireTransaction
+    versions <- query "SELECT revision FROM runs WHERE id=?" [text parent]
+    revision <- case versions of [[SQL.SQLText value]] -> pure value; _ -> refuseTransaction ResourceUnavailable
+    rows <- query "SELECT id FROM requests WHERE parent_run_id=? ORDER BY id LIMIT 257" [text parent]
+    when (length rows > 256) (refuseTransaction ViewTooLarge)
+    idents <- mapM (\row -> case row of [SQL.SQLText ident] -> pure ident; _ -> refuseTransaction StorageUnavailable) rows
+    pure (profile,revision,idents)
+  views <- mapM (\ident -> readDraft store proof ident >>= requireEither) idents
+  when (BS.length(encoded views) > 1048576) (throwIO ViewTooLarge)
+  runRead store $ do
+    _ <- authorizeProfile proof profile [Observe] >>= requireTransaction
+    versions <- query "SELECT revision FROM runs WHERE id=?" [text parent]
+    unless (versions == [[text revision]]) (refuseTransaction StaleRevision)
+  respond views
+
+parentAddress :: Text -> Transaction (Text,Text,Text)
+parentAddress parent = do
+  rows <- query "SELECT profile_id,root_identity,native_run_id FROM runs WHERE id=?" [text parent]
+  case rows of
+    [[SQL.SQLText profile,SQL.SQLText root,SQL.SQLText native]] -> pure (profile,root,native)
+    _ -> refuseTransaction ResourceUnavailable
+
+-- | Durable conflicts are refusals, never a reconstructed ownership capability.
+checkLineageParent :: Text -> Transaction ()
+checkLineageParent parent = do
+  rows <- query "SELECT u.supervision,v.state FROM runs u LEFT JOIN start_intents i ON i.run_id=u.id LEFT JOIN reservations v ON v.id=i.reservation_id WHERE u.id=?" [text parent]
+  case rows of
+    [[SQL.SQLText supervision,state]] -> unless (supervision /= "cleanup-pending" && (state == text "released" || (supervision `elem` ["observer","lost"] && state == SQL.SQLNull))) (refuseTransaction OwnershipUnavailable)
+    _ -> refuseTransaction ResourceUnavailable
+
+readParent :: CoordinationStore -> PrivateRoot -> Text -> Selection -> IO RunRecord
+readParent store root parent selection = do
+  (profile,identity,native) <- runRead store (checkLineageParent parent >> parentAddress parent)
+  unless (operatorId (selectionContext selection) == profile && not (operatorQuarantined (selectionContext selection))) (throwIO OwnershipUnavailable)
+  nativeId <- either (const (throwIO ResourceUnavailable)) pure (mkRunId native)
+  bracket (openPrivateSubroot root ["runs"]) closePrivateRoot $ \runs -> do
+    unless (T.pack (privateRootIdentity runs) == identity) (throwIO OwnershipUnavailable)
+    now <- getCurrentTime
+    record <- withPrivateDirectoryAt runs ["runs",T.unpack native] $ \fd ->
+      fst <$> readRunRecordWithEnvelopesAt (privateRootPath runs </> "runs" </> T.unpack native) fd Nothing now
+    unless (frontendRunId (recordManifest record) == nativeId && recordOwnership record /= RunOwnedElsewhere) (throwIO OwnershipUnavailable)
+    _ <- either (const (throwIO StateConflict)) pure (retainLineageInvocation (recordManifest record) (Just(selectionInvocation selection)))
+    withPrivateDirectoryAt runs ["runs",T.unpack native] (revalidateLineageParentAt record)
+    pure record
+
+parentInputs :: PrivateRoot -> RunRecord -> WorkflowDescriptor -> IO [ReviewInput]
+parentInputs root record descriptor = do
+  let names = map workflowInputName (workflowInputs descriptor)
+      native = T.unpack (runIdText (frontendRunId (recordManifest record)))
+  captured <- withPrivateDirectoryAt root ["runs","runs",native] $ \fd -> readFrontendInputBytesBoundedAt 67108864 record fd names
+  pure [ReviewInput name "capture" (T.pack(show(BS.length bytes))) (T.pack(show(hash bytes::Digest SHA256))) | name <- names, let bytes = captured Map.! name]
+
 changeDraftInput :: CoordinationStore -> CredentialProof -> Text -> Text -> Maybe Text -> BS.ByteString -> IO (Either CommandFailure CommandReceipt)
 changeDraftInput store proof ident key precondition body = fmap (fmap submissionReceipt) $
   changeDraftInputGuarded store proof ident key precondition body (\_ limits current _ -> do
@@ -118,6 +238,7 @@ changeDraftInputGuarded :: CoordinationStore -> CredentialProof -> Text -> Text 
 changeDraftInputGuarded store proof ident key precondition body transition submit = draftIO $ withStoreFiles store $ \root -> timed 5000000 $ do
   change <- requireEither (decodeDraftBody body :: Either CommandFailure InputChange)
   original@(RequestState view _ _) <- runRead store (requestState proof ident [Submit])
+  unless (draftParent view == Nothing) (throwIO InvalidInput)
   let operation = case change of SetBinding _ -> SetInput; RemoveBinding _ -> RemoveInput
       request = CommandRequest operation (draftProfile view) "POST" (requestURI ident) key "application/json" precondition body
   replay <- commandPreflight store proof request (\_ _ _ exists -> pure (exists,[])) >>= requireEither
@@ -181,6 +302,7 @@ uploadCapture :: CoordinationStore -> CredentialProof -> Text -> Text -> Int64 -
 uploadCapture store proof ident key ceilingBytes source = draftIO $ withStoreFiles store $ \root -> do
   unless (ceilingBytes>=0 && ceilingBytes<=holdingLimit) (throwIO SizeLimit)
   RequestState view _ _ <- runRead store (requestState proof ident [Submit])
+  unless (draftParent view == Nothing) (throwIO InvalidInput)
   capId <- fresh "capture_"
   generation <- storeProcessGeneration <$> storeIdentity store
   let request = CommandRequest Capture (draftProfile view) "POST" ("/v1/captures?requestId="<>ident) key "application/octet-stream" Nothing BS.empty
@@ -300,24 +422,26 @@ readDraft store proof ident = draftIO $ withStoreFiles store $ \root -> timed 50
   pure updated
 
 -- | A bounded materialization snapshot, not permission to start a worker.
-data DraftAssembly = DraftAssembly !Text !Text !Text !Text !FrontendSetupRequest !BS.ByteString ![ReviewInput] !Selection
-assemblyRequest :: DraftAssembly -> Text
-assemblyRequest (DraftAssembly ident _ _ _ _ _ _ _) = ident
-assemblyRevision :: DraftAssembly -> Text
-assemblyRevision (DraftAssembly _ revision _ _ _ _ _ _) = revision
-assemblyProfile :: DraftAssembly -> Text
-assemblyProfile (DraftAssembly _ _ profile _ _ _ _ _) = profile
-assemblyProfileRevision :: DraftAssembly -> Text
-assemblyProfileRevision (DraftAssembly _ _ _ revision _ _ _ _) = revision
-assemblySetup :: DraftAssembly -> FrontendSetupRequest
-assemblySetup (DraftAssembly _ _ _ _ setup _ _ _) = setup
-assemblyFrame :: DraftAssembly -> BS.ByteString
-assemblyFrame (DraftAssembly _ _ _ _ _ frame _ _) = frame
+data DraftAssembly = DraftAssembly
+  { assemblyRequest :: !Text, assemblyRevision :: !Text, assemblyProfile :: !Text,
+    assemblyProfileRevision :: !Text, assemblySetup :: !FrontendSetupRequest,
+    assemblyFrame :: !BS.ByteString, assemblyInputSummaries :: ![ReviewInput],
+    assemblySelection :: !Selection, assemblyDescriptor :: !WorkflowDescriptor,
+    assemblyParent :: !(Maybe (Text,FrontendManifest)) }
 
-assemblyInputSummaries :: DraftAssembly -> [ReviewInput]
-assemblyInputSummaries (DraftAssembly _ _ _ _ _ _ inputs _) = inputs
-assemblySelection :: DraftAssembly -> Selection
-assemblySelection (DraftAssembly _ _ _ _ _ _ _ selected) = selected
+assemblyParentBinding :: DraftAssembly -> Maybe BS.ByteString
+assemblyParentBinding = fmap (encodeFrontendManifest . snd) . assemblyParent
+
+-- | Recheck the accepted parent, not a new parent selected by the native reply.
+validateAssemblyParent :: CoordinationStore -> DraftAssembly -> FrontendPrepared -> IO ()
+validateAssemblyParent store assembly prepared = case assemblyParent assembly of
+  Nothing -> pure ()
+  Just (parent,expected) -> withStoreFiles store $ \root -> do
+    record <- readParent store root parent (assemblySelection assembly)
+    unless (recordManifest record == expected && preparedDescriptor prepared == assemblyDescriptor assembly
+      && workflowName (preparedDescriptor prepared) == frontendWorkflow expected) (throwIO StateConflict)
+    summaries <- parentInputs root record (assemblyDescriptor assembly)
+    unless (summaries == assemblyInputSummaries assembly) (throwIO StateConflict)
 
 data DraftAccess = ClientAccess !CredentialProof | AcceptedAccess !AcceptedEnqueue
 
@@ -334,6 +458,31 @@ assembleWith :: CoordinationStore -> DraftAccess -> Text -> IO (Either CommandFa
 assembleWith store access ident = draftIO $ withStoreFiles store $ \root -> timed 5000000 $ do
   snapshot@(RequestState view _ _) <- runRead store(requestStateWith access ident [Submit])
   (catalogue,descriptor) <- currentCatalogue store view
+  case draftParent view of
+    Nothing -> assembleRoot store access root snapshot catalogue descriptor
+    Just parent -> do
+      let selection = discoverySelection catalogue
+          policy = selectionContext selection
+      expected <- runRead store $ do
+        rows <- query "SELECT parent_manifest FROM request_lineage WHERE request_id=?" [text ident]
+        case rows of [[SQL.SQLBlob manifest]] -> pure manifest; _ -> refuseTransaction InvalidInput
+      mutation <- runRead store $ do
+        rows <- query "SELECT lineage_edits FROM requests WHERE id=?" [text ident]
+        case rows of [[SQL.SQLBlob edits]] -> pure edits; _ -> refuseTransaction InvalidInput
+      record <- readParent store root parent selection
+      unless (encodeFrontendManifest (recordManifest record) == expected) (throwIO StateConflict)
+      edits <- requireEither (decodeDraftBody mutation :: Either CommandFailure LineageMutation)
+      summaries <- parentInputs root record descriptor
+      let setup = DerivedSetup (privateRootPath root </> "runs") (frontendRunId(recordManifest record))
+            (lineageOperation edits) (lineageEdits edits) (operatorPersonAnswering policy) (Just(selectionInvocation selection))
+      frame <- either (const (throwIO SizeLimit)) pure (encodeFrontendSetupRequest setup)
+      runRead store (checkRevisionWith access snapshot [Submit])
+      _ <- currentCatalogue store view
+      pure (DraftAssembly ident (draftRevision view) (draftProfile view) (draftProfileRevision view) setup frame summaries selection descriptor (Just(parent,recordManifest record)))
+
+assembleRoot :: CoordinationStore -> DraftAccess -> PrivateRoot -> RequestState -> Discovery -> WorkflowDescriptor -> IO DraftAssembly
+assembleRoot store access root snapshot@(RequestState view _ _) catalogue descriptor = do
+  let ident = draftId view
   inputs <- runRead store(inputStates ident)
   let selection=discoverySelection catalogue
       policy=selectionContext selection
@@ -364,7 +513,7 @@ assembleWith store access ident = draftIO $ withStoreFiles store $ \root -> time
   value<-requireEither result
   runRead store (checkRevisionWith access snapshot [Submit])
   _<-currentCatalogue store view
-  pure (DraftAssembly ident (draftRevision view) (draftProfile view) (draftProfileRevision view) (fst value) (snd value) [summary|(_,_,summary)<-resolved] selection)
+  pure (DraftAssembly ident (draftRevision view) (draftProfile view) (draftProfileRevision view) (fst value) (snd value) [summary|(_,_,summary)<-resolved] selection descriptor Nothing)
 
 -- | Worker-side revalidation of File sources against actual retained capture records.
 -- Literal/Transport sources carry values, not paths. This grants no approval authority.

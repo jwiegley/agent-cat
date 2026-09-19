@@ -7,7 +7,7 @@
 -- | A single leased SQLite writer with strict, bounded transaction results.
 module Agentic.Manager.Store
   ( CoordinationStore, StoreIdentity (..), StoreFailure (..), Checkpoint (..),
-    withCoordinationStore, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreFiles, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, retryStoreCleanup, probeStoreCapabilities,
+    withCoordinationStore, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreFiles, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, retryStoreCleanup, probeStoreCapabilities,
     CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, Transaction, execute, query, refuseTransaction, runTransaction, runRead, StoreAdmission (..), runTransactionWithAdmission, runReadWithAdmission, transactionGeneration,
     Invalidation (..)
   ) where
@@ -15,14 +15,14 @@ module Agentic.Manager.Store
 import Agentic.Manager.Store.Admission (StoreAdmission (..))
 import qualified Agentic.Manager.Store.Admission as Admission
 import Agentic.Manager.Configuration
-  (InstalledConfiguration, acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationSnapshot, withConfigurationCatalogues, probeConfiguredCapabilities)
+  (InstalledConfiguration, acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationSnapshot, withConfigurationCatalogues, withConfiguredRetentionRoot, validateHistoryBindings, revalidateRetentionRoot, configuredInvocations, probeConfiguredCapabilities)
 import Agentic.Manager.Profile (ConfigurationLimits, PublicProfile, Diagnostic, Discovery)
 import Agentic.Manager.Worker.State (WorkerLifecycle, acceptingPreparation)
 import Agentic.Manager.Lease (duplicateLease)
-import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration, artifactMigration)
+import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration, artifactMigration, historyMigration)
 import Agentic.Runtime
   (PrivateRoot, assertPrivateRoot, closePrivateRoot, openPrivateSubroot, privateRootPath,
-   withPrivateDirectoryAt, writePrivateExclusiveAt, WorkflowInputDescriptor (..), frontendLiteralBytes, FrontendCapabilities, ProcessGroup, createProcessGroup, terminateProcessGroup, groupOutcome, processGroupLive)
+   withPrivateDirectoryAt, writePrivateExclusiveAt, WorkflowInputDescriptor (..), frontendLiteralBytes, FrontendCapabilities, FrontendInvocation, ProcessGroup, createProcessGroup, terminateProcessGroup, groupOutcome, processGroupLive)
 import Control.Concurrent (rtsSupportsBoundThreads)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (race, withAsync, asyncWithUnmask, cancel, wait)
@@ -142,7 +142,7 @@ openStore installed root lease = storageErrors $ do
     (epoch, stream) <- bounded db 30000000 $ do
       SQL.exec db "PRAGMA busy_timeout=100; PRAGMA foreign_keys=ON; PRAGMA temp_store=FILE; PRAGMA cache_size=-2048; PRAGMA temp.cache_size=-2048"
       version <- scalar db "PRAGMA user_version"
-      unless (version `elem` map SQL.SQLInteger [0, 1, 2, 3, 4, 5, 6, 7, fromIntegral schemaVersion]) $
+      unless (version `elem` map SQL.SQLInteger [0, 1, 2, 3, 4, 5, 6, 7, 8, fromIntegral schemaVersion]) $
         throwIO StoreVersion
       -- Newer versions are refused before changing their journal or schema.
       wal <- scalar db "PRAGMA journal_mode=WAL"
@@ -212,6 +212,7 @@ migrate db = mask $ \restore -> do
       SQL.SQLInteger 5 -> pure ()
       SQL.SQLInteger 6 -> pure ()
       SQL.SQLInteger 7 -> pure ()
+      SQL.SQLInteger 8 -> pure ()
       SQL.SQLInteger current | current == fromIntegral schemaVersion -> pure ()
       _ -> throwIO StoreVersion
     when (version `elem` [SQL.SQLInteger 0, SQL.SQLInteger 1]) $ do
@@ -235,9 +236,12 @@ migrate db = mask $ \restore -> do
     when (version `elem` map SQL.SQLInteger [0,1,2,3,4,5,6]) $ do
       mapM_ (SQL.exec db) controlMigration
       SQL.exec db "PRAGMA user_version=7"
-    when (version /= SQL.SQLInteger (fromIntegral schemaVersion)) $ do
+    when (version `elem` map SQL.SQLInteger [0,1,2,3,4,5,6,7]) $ do
       mapM_ (SQL.exec db) artifactMigration
       SQL.exec db "PRAGMA user_version=8"
+    when (version /= SQL.SQLInteger (fromIntegral schemaVersion)) $ do
+      mapM_ (SQL.exec db) historyMigration
+      SQL.exec db "PRAGMA user_version=9"
     SQL.exec db "COMMIT"
   case result of
     Right () -> pure ()
@@ -328,6 +332,21 @@ withStoreCatalogues (CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _) = with
 
 -- | One fail-fast file operation, joined by store close. Lock order: file, configuration, database.
 -- The retained root and duplicated lease cannot escape this callback's lifetime.
+storeInvocations :: CoordinationStore -> IO (Either Diagnostic [(Text,FrontendInvocation)])
+storeInvocations (CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _) = configuredInvocations installed
+
+revalidateStoreRetentionRoot :: CoordinationStore -> PrivateRoot -> Text -> IO (Either Diagnostic ())
+revalidateStoreRetentionRoot (CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _) = revalidateRetentionRoot installed
+
+validateStoreHistoryBindings :: CoordinationStore -> [(FilePath,Text)] -> IO (Either Diagnostic ())
+validateStoreHistoryBindings store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _) bindings =
+  withStoreFiles store $ \_ -> validateHistoryBindings installed bindings
+
+-- | A Store-lifetime loan of an explicitly configured read-only retention root.
+withStoreRetentionRoot :: CoordinationStore -> FilePath -> Text -> (PrivateRoot -> IO a) -> IO (Either Diagnostic a)
+withStoreRetentionRoot store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _) path profile action =
+  withStoreFiles store $ \_ -> withConfiguredRetentionRoot installed path profile action
+
 withStoreFiles :: CoordinationStore -> (PrivateRoot -> IO a) -> IO a
 withStoreFiles store@(CoordinationStore _ root _ _ _ closed _ lease files _ _ _ _) action = mask $ \restore -> do
   readIORef closed >>= \done -> when done (throwIO StoreClosed)

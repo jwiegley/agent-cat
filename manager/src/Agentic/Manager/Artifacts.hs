@@ -81,10 +81,15 @@ withRunRoot root association action = bracket (openPrivateSubroot root ["runs"])
   pure result
 
 sourceBytes :: PrivateRoot -> RunAssociation -> ResultRef -> IO BS.ByteString
-sourceBytes runs association reference =
-  bracket (openPrivateSubroot runs ["runs",T.unpack (runIdText (associationNative association)),"runtime"]) closePrivateRoot $ \runtime -> do
+sourceBytes runs association = captureObservedResult runs (associationNative association)
+
+-- | Shared verification for a retained observation address. The caller owns the
+-- Store file loan, current authorization and response lifetime, not this address.
+captureObservedResult :: PrivateRoot -> RunId -> ResultRef -> IO BS.ByteString
+captureObservedResult runs native reference =
+  bracket (openPrivateSubroot runs ["runs",T.unpack (runIdText native),"runtime"]) closePrivateRoot $ \runtime -> do
     (bytes,value) <- withPrivateDirectoryAt runtime [] $ \descriptor ->
-      readResultArtifactBytesAt (privateRootPath runtime) descriptor (associationNative association) reference
+      readResultArtifactBytesAt (privateRootPath runtime) descriptor native reference
     validateDocument (object ["code" .= resultArtifactCode reference,"value" .= value])
     assertPrivateRoot runtime
     assertPrivateRoot runs
@@ -100,7 +105,35 @@ metadata ident run kind code bytes = object
 -- Store's single file loan covers capture, verification, authorization and response.
 -- At most one <=64MiB artifact is served per Store, with no unaccounted response queue.
 withArtifactDownload :: CoordinationStore -> CredentialProof -> Text -> (Value -> BS.ByteString -> IO ()) -> IO ()
-withArtifactDownload store proof ident respond = withStoreFiles store $ \root -> do
+withArtifactDownload store proof ident respond = do
+  legacy <- runRead store $ do
+    _ <- currentClient proof >>= either refuseTransaction pure
+    unless (Command.validId ident) (refuseTransaction Command.InvalidRequest)
+    rows <- query "SELECT e.id,e.profile_id,e.root_identity,e.component,h.path,r.reference FROM history_entries e JOIN history_roots h ON h.identity=e.root_identity AND h.profile_id=e.profile_id JOIN history_results r ON r.entry_id=e.id WHERE 'artifact_'||e.id=? AND h.legacy=1" [text ident]
+    case rows of
+      [[SQL.SQLText run,SQL.SQLText profile,SQL.SQLText root,SQL.SQLText native,SQL.SQLText path,SQL.SQLBlob reference]] -> do
+        _ <- authorizeProfile proof profile [Command.Observe] >>= either refuseTransaction pure
+        pure (Just(run,profile,root,native,path,reference))
+      [] -> pure Nothing
+      _ -> refuseTransaction StoreIntegrity
+  case legacy of
+    Nothing -> withManagedArtifactDownload store proof ident respond
+    Just (run,profile,identity,native,path,reference) -> do
+      -- A persisted local binding is only an observation address. Configuration
+      -- must still allow this exact root and profile before any file is opened.
+      result <- withStoreRetentionRoot store (T.unpack path) profile $ \root -> contentRead $ do
+        unless (T.pack(privateRootIdentity root) == identity) (throwIO StoreIntegrity)
+        nativeId <- either (const (throwIO StoreIntegrity)) pure (mkRunId native)
+        ref <- either (const (throwIO StoreIntegrity)) pure (decodeStrictValue reference) >>= json
+        bytes <- captureObservedResult root nativeId ref
+        revalidateStoreRetentionRoot store root profile >>= either (const (throwIO Command.ResourceUnavailable)) pure
+        runRead store $ void (authorizeProfile proof profile [Command.Observe] >>= either refuseTransaction pure)
+        revalidateStoreRetentionRoot store root profile >>= either (const (throwIO Command.ResourceUnavailable)) pure
+        respond (metadata ident run "source-result" (resultArtifactCode ref) bytes) bytes
+      either (const (throwIO Command.ResourceUnavailable)) pure result
+
+withManagedArtifactDownload :: CoordinationStore -> CredentialProof -> Text -> (Value -> BS.ByteString -> IO ()) -> IO ()
+withManagedArtifactDownload store proof ident respond = withStoreFiles store $ \root -> do
   ArtifactBinding association _ code reference <- binding store proof ident
   withProfile store (associationProfile association) $ do
     (kind,bytes) <- contentRead $ withRunRoot root association $ \runs -> case reference of

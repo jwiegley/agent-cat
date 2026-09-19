@@ -8,7 +8,7 @@ module Agentic.Manager.Admission
   ( Admission, LivePreparation, ReviewContext (..), MonotonicClock (..),
     withAdmission, withAdmissionClock, enqueueRequest, admitOldest,
     editRequestInput, withdrawRequest, awaitReview, withReviewAcceptance,
-    retryAdmissionCleanup, awaitAdmissionCleanup, closeAdmission, reservationIdentity, observeLivePreparation,
+    retryAdmissionCleanup, awaitAdmissionCleanup, closeAdmission, reservationIdentity, observeLivePreparation, ownsHistoryRun,
     acceptControlCommand, deliverAcceptedControl, acceptedControlContext,
     AcceptedStart, acceptStartCommand, deliverAcceptedStart, stopAcceptedStart, observeAcceptedStart, acceptedStartRun, acceptedTimerRetired, invalidateLivePreparation, consumeAcceptedStart
   ) where
@@ -70,7 +70,7 @@ realClock = MonotonicClock getMonotonicTimeNSec waitUntil
 data ReviewContext = ReviewContext
   { reviewRequest :: !Text, reviewRequestRevision :: !Text, reviewProfileRevision :: !Text,
     reviewReservation :: !Text, reviewGeneration :: !Text, reviewDeadlineNanos :: !Word64,
-    reviewNative :: !FrontendPrepared, reviewSelection :: !Selection, reviewInputSummaries :: ![ReviewInput], reviewSetup :: !FrontendSetupRequest }
+    reviewNative :: !FrontendPrepared, reviewSelection :: !Selection, reviewInputSummaries :: ![ReviewInput], reviewSetup :: !FrontendSetupRequest, reviewAssembly :: !DraftAssembly }
 
 -- | One scoped controller, associated with one actual Store lifetime.
 data Admission = Admission
@@ -272,6 +272,28 @@ admitOldest controller = operation controller $ locked controller $ do
       atomically(putTMVar(entryTask entry)(Just task) >> putTMVar start ())
       pure(Just(LivePreparation controller entry))
 
+-- | Observation from this controller's original accepted association, never durable adoption.
+ownsHistoryRun :: CoordinationStore -> Admission -> Text -> RunId -> Text -> IO Bool
+ownsHistoryRun expected controller run native root = do
+  same <- (==) <$> storeIdentity expected <*> storeIdentity (store controller)
+  shut <- readTVarIO (closed controller)
+  if not same || shut then pure False else do
+    tracked <- Map.elems <$> readTVarIO (entries controller)
+    matches <- forM tracked $ \entry -> do
+      accepted <- readTVarIO (entryStart entry)
+      case accepted of
+        Just original | acceptedStartRun original == run -> do
+          context <- atomically (tryReadTMVar (entryReview entry))
+          observed <- observeAcceptedStart original
+          pure $ case context of
+            Just (Right review) -> preparedRunId (reviewNative review) == native
+              && preparedRootIdentity (reviewNative review) == root
+              && observedWorkerPhase observed `elem` [WorkerStartSent,WorkerRunning]
+              && not (isJust (observedWorkerExit observed)) && not (observedCleanupUnproven observed)
+            _ -> False
+        _ -> pure False
+    pure (or matches)
+
 observeLivePreparation :: LivePreparation -> IO (Maybe WorkerObservation)
 observeLivePreparation (LivePreparation _ entry) = atomically(tryReadTMVar(entryWorker entry)) >>= traverse observeWorker
 
@@ -306,6 +328,7 @@ currentReview controller entry = do
         unless(currentPolicy catalogues (entryProfile entry) (entryPolicy entry) workflow descriptor)(refuseTransaction StaleRevision)
         pure current
       _ -> refuseTransaction StateConflict
+  validateAssemblyParent (store controller) (reviewAssembly value) (reviewNative value)
   pure value {reviewRequestRevision=revision}
 
 runEntry :: Admission -> Entry -> IO ()
@@ -322,6 +345,7 @@ runEntry controller entry = do
       case outcome of
         Left stopping -> finishEntry controller entry worker stopping
         Right native -> do
+          validateAssemblyParent (store controller) assembled native
           now <- monotonicNow(clock controller)
           published <- locked controller $ do
             pending <- atomically(tryReadTMVar(entryStop entry))
@@ -337,7 +361,7 @@ runEntry controller entry = do
                   execute "UPDATE requests SET phase='review',revision=? WHERE id=?" [text revision,text(entryRequest entry)]
                   execute "UPDATE reservations SET request_revision=? WHERE id=?" [text revision,text(entryReservation entry)]
                   pure((),[requestEvent(entryRequest entry)revision])
-                let review=ReviewContext(entryRequest entry)revision(entryPolicy entry)(entryReservation entry)(entryGeneration entry)deadline native (assemblySelection assembled) (assemblyInputSummaries assembled) (assemblySetup assembled)
+                let review=ReviewContext(entryRequest entry)revision(entryPolicy entry)(entryReservation entry)(entryGeneration entry)deadline native (assemblySelection assembled) (assemblyInputSummaries assembled) (assemblySetup assembled) assembled
                 atomically(putTMVar(entryReview entry)(Right review))
                 pure(Just deadline)
           stopping <- case published of

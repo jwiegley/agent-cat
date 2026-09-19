@@ -1,12 +1,27 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Versioned relational coordination facts. Stored identities are not capabilities.
-module Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration, artifactMigration) where
+module Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration, artifactMigration, historyMigration) where
 
 import Data.Text (Text)
 
 schemaVersion :: Int
-schemaVersion = 8
+schemaVersion = 9
+
+-- | Observation addresses and immutable lineage facts confer no worker authority.
+historyMigration :: [Text]
+historyMigration =
+  [ "CREATE TABLE history_roots (identity TEXT NOT NULL, profile_id TEXT NOT NULL, path TEXT NOT NULL, legacy INTEGER NOT NULL CHECK(legacy IN (0,1)), PRIMARY KEY(identity,profile_id), UNIQUE(path,profile_id)) STRICT",
+    "CREATE TABLE history_entries (id TEXT PRIMARY KEY NOT NULL, root_identity TEXT NOT NULL, profile_id TEXT NOT NULL, component TEXT NOT NULL, UNIQUE(root_identity,component), FOREIGN KEY(root_identity,profile_id) REFERENCES history_roots(identity,profile_id)) STRICT",
+    "CREATE TABLE history_views (id TEXT PRIMARY KEY NOT NULL, revision TEXT NOT NULL, digest TEXT NOT NULL CHECK(length(digest)=64)) STRICT",
+    "CREATE TABLE history_results (entry_id TEXT PRIMARY KEY NOT NULL REFERENCES history_entries(id), reference BLOB NOT NULL CHECK(length(reference)<=1048576)) STRICT",
+    "CREATE TRIGGER history_results_immutable BEFORE UPDATE ON history_results BEGIN SELECT RAISE(ABORT,'history result immutable'); END",
+    "CREATE TRIGGER history_roots_immutable BEFORE UPDATE ON history_roots BEGIN SELECT RAISE(ABORT,'history root immutable'); END",
+    "CREATE TRIGGER history_entries_immutable BEFORE UPDATE ON history_entries BEGIN SELECT RAISE(ABORT,'history address immutable'); END",
+    "CREATE TABLE request_lineage (request_id TEXT PRIMARY KEY NOT NULL REFERENCES requests(id), parent_manifest BLOB NOT NULL CHECK(length(parent_manifest)<=1048576)) STRICT",
+    "CREATE TRIGGER request_lineage_immutable BEFORE UPDATE ON request_lineage BEGIN SELECT RAISE(ABORT,'lineage parent immutable'); END",
+    "CREATE TRIGGER lineage_request_immutable BEFORE UPDATE OF parent_run_id,lineage_operation,lineage_edits ON requests WHEN OLD.parent_run_id IS NOT NULL BEGIN SELECT RAISE(ABORT,'lineage request immutable'); END"
+  ]
 
 -- | Keep export acceptance and its command in one transaction, with the
 -- existing foreign key checked at commit rather than at the intent insert.

@@ -8,6 +8,54 @@ Implementation follows the [approved design](../doc/research/workflow-manager.md
 [work packages](../doc/research/workflow-manager-implementation-plan.md), and the
 [operator-approved SQLite scope amendment](../doc/research/workflow-manager-storage-amendment.md).
 
+## Retained history and lineage
+
+`Agentic.Manager.History` materializes complete observations of the manager root
+and explicitly supplied local retention bindings. Every configured retention root
+requires exactly one binding, and a missing binding refuses the observation.
+Its contract is at most 256
+entries and 1 MiB of public JSON within 30 seconds. Each Runtime journal read
+is bounded at 64 MiB, and the catalogue fold releases each full snapshot before
+reading the next. Overflow or an unassociated manager-root entry refuses the
+whole observation rather than returning a prefix. HTTP page sets remain outside
+this library. A request association normally commits before native start creates
+its directory.
+
+Local retention bindings validate an already configured root and profile. Their
+opaque handles retain that exact root identity and profile across reopening.
+Unreadable entries remain visible without invented workflow or native facts.
+Historical workflow IDs reuse the existing profile-scoped identity rule even
+when current discovery no longer contains the workflow. Retained result references
+use the shared Artifacts and Runtime verification path, independently of later
+journal damage. Downloads recheck the exact configured root and profile after
+capture and immediately before callback entry. History retains the artifact
+owner's fixed failure reason and rejects a managed revision changed since its
+sample. The optional original Admission controller supplies live ownership
+observations. Durable flags and absent controllers do not establish ownership.
+These observations grant no worker, signalling, or cleanup rights.
+
+Configured legacy roots remain read-only and refuse lineage mutations. This root
+policy does not reject legacy manifest formats on the manager-owned root.
+Restart, resume, and fork create distinct ordinary drafts through Commands and
+use the existing admission, preparation, approval, and Worker owners. The route
+accepts no workflow, input, target, root, or invocation override. Parent manifests
+and typed edits are immutable. The accepted parent binding remains private in
+assembly and review. Admission rechecks it after native preparation and before
+review publication or approval consumption, including the selected descriptor
+and inherited inputs. The native worker retains its post-approval revalidation.
+These point-in-time checks do not attest the exact bytes read under adversarial
+cross-process substitution followed by restoration. Invocation comparison uses
+the current configured profile independently of descriptor availability.
+
+The history checker in `manager/ci/artifacts.sh` owns local capability and
+catalogue child processes. Its deadline unwinds the original ProcessGroup owners
+inside Haskell. Its blocked-query check observes cleanup through that original
+token, while a checker timeout remains a failure rather than cleanup certification.
+The existing compiled audit modes `history-observation` and `history-corrections`
+exercise response-entry and native lineage barriers. The latter belongs to
+`manager/ci/approval.sh` and compares the manager path with the direct native
+frontend at N1 and N8. Client compatibility remains separate evidence.
+
 ## Client baseline policy
 
 The minimum supported targets for the version 1 manager clients are GNU Emacs

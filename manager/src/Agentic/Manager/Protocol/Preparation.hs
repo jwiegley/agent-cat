@@ -110,9 +110,9 @@ projectPolicy raw = either(const(Left InvalidInput))Right $ parseEither project 
       kind<-o .: "kind"
       let allowed=if kind==("scripted"::Text) then ["kind"] else policyKeys
           keep fields object'=KM.filterWithKey (\key _->Key.toText key `elem` fields) object'
-          projected=keep allowed o
+      projected<-projectDigest "policyDigest" (keep allowed o)
       routes<-case KM.lookup "realizations" projected of
-        Just(Array values)->Just . toJSON <$> mapM (withObject "realization" (pure . Object . keep realizationKeys)) (foldr(:)[]values)
+        Just(Array values)->Just . toJSON <$> mapM (withObject "realization" (fmap Object . projectDigest "executionFingerprint" . keep realizationKeys)) (foldr(:)[]values)
         value->pure value
       routeRows<-case KM.lookup "routes" projected of
         Just(Array values)->Just . toJSON <$> mapM (withObject "route" (pure . Object . keep ["name","backend"])) (foldr(:)[]values)
@@ -120,6 +120,12 @@ projectPolicy raw = either(const(Left InvalidInput))Right $ parseEither project 
       let realized=maybe projected (\rows->KM.insert "realizations" rows projected)routes
           value=Object(maybe realized (\rows->KM.insert "routes" rows realized)routeRows)
       parseJSON value
+    -- Native fingerprints name their algorithm. The frozen public fields contain only hex.
+    projectDigest key fields=case KM.lookup key fields of
+      Just(String value) | Just digest<-T.stripPrefix "sha256:" value -> do
+        unless(validDigest digest)(fail "native sha256 fingerprint")
+        pure(KM.insert key (String digest) fields)
+      _->pure fields
 
 policyKeys,realizationKeys :: [Text]
 policyKeys=["kind","default","coverage","routes","pollMs","timeoutMs","verbose","realizations","routingVersion","persona","personaSource","policyDigest"]
