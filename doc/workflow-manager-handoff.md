@@ -17,6 +17,27 @@ as a substitute for the next product milestone. The completed
 [closure plan](workflow-manager-closure-plan.md) and frozen implementation plan
 remain the authority for their respective scopes.
 
+## Active WM-019 unit
+
+Issue `acat-wm-019-9eye` is in progress. The single isolated lane is
+`implementation.9tGzKH/shutdown.327OnbQj/source`, based on acceptance commit
+`0e35e3d`, with private runtime root `/Users/johnw/Products/s.t3xROC`. Workflow
+`02a0817b-544f-4362-bcec-50d7c05698ef` owns the initial bounded assessment.
+Parent retains Git, tracker, execution and acceptance authority.
+
+First establish the existing shutdown owners and actual OS containment boundary
+before implementation. Linux service cgroups remain the recorded candidate.
+The documented macOS launchd process-group behavior does not establish cleanup
+of escaping descendants. Existing negative evidence is not to be relabeled a
+stronger guarantee. Read-only source, documentation and narrow capability
+inspection are authorized, not service/cgroup creation or hard-death testing.
+
+The full unit requires draining shutdown, explicit cancellation deadlines,
+preparation invalidation, cleanup-based release and an in-memory safety path
+independent of unavailable durable storage. Unsupported environments cannot
+advertise unattended mutation, and both-platform acceptance cannot be made
+vacuous. No new implementation or WM-019 acceptance is claimed at startup.
+
 ## WM-018 acceptance
 
 Issue `acat-wm-018-9huh` is closed. Final continued milestone reviewer
