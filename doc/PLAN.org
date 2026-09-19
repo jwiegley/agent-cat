@@ -9769,14 +9769,14 @@ contract rather than silently truncated.
 ]
 #+end_src
 
-* TODO [#B] WM-019: Implement shutdown, containment, and storage-failure supervision    :p4:
+* DOING [#B] WM-019: Implement shutdown, containment, and storage-failure supervision    :p4:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-wm-019-9eye
 :LABELS:   ["p4","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-10 Thu 02:43]
+:MODIFIED: [2026-09-19 Sat 12:08]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-019
 :SOURCE_REPO: agent-cat
@@ -9884,6 +9884,20 @@ WM-002 containment ceiling: manager/test/containment_probe.py proves a descendan
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 256,
+    "issue_id": "acat-wm-019-9eye",
+    "author": "johnw",
+    "text": "WM-019 started after WM-018 acceptance on 2026-09-19. Accepted baseline is WM-001 through WM-018 and G0. Frozen dependencies are accepted. G1 remains open.\n\nThe single isolated implementation lane is /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/shutdown.327OnbQj/source, branch wm019-shutdown-20260919, base0e35e3d4478291c47ea96cbb014009490c5fe22d. Private runtime root is /Users/johnw/Products/s.t3xROC. Parent retains Git, tracker, integration, execution and acceptance authority.\n\nFirst decisive action is a bounded existing-owner and OS-containment decision before implementation. Admission, Worker, Store and Runtime already own original handles and cleanup. Linux service cgroups are the recorded candidate. Existing macOS launchd process-group cleanup is explicitly insufficient for escaping descendants. Read current records/installed primary documentation and only necessary narrow read-only platform capability metadata. No cgroup/job creation, sandbox/VM/service change, hard-death experiment or host/security mutation is authorized at startup.\n\nThe product unit must provide draining shutdown, explicit cancellation deadlines, invalidation of unapproved preparations, cleanup-based reservation release, and an in-memory safety path independent of saturated/unavailable durable mutation queues. Emergency physical cleanup cannot manufacture a committed receipt or runtime terminal outcome. Unproven survivors remain quarantined, and unsupported containment cannot advertise unattended mutation. Both-platform hard-death and clean-shutdown requirements remain unchanged and cannot be satisfied vacuously by disabling all profiles.\n\nPreserve settled fail-fast Store admission, existing terminal pre-admission waits/budgets, exactly-once admitted actions, original process handles, exception precedence and separate cleanup evidence. No metadata/PID adoption, opaque replay, aggregate killing timeout, historical recovery, generic supervisor/retention framework or per-leaf evidence ceremony. Full/native/platform execution and any required operator authorization are separate next decisions. No paid backend, deployment, dependency change or new Lean/oracle build.\n\nThe precise scope is shutdown.327OnbQj/brief.md. No WM-019 implementation or acceptance is claimed at startup. Refocus completed19:06:29Z, next deadline19:57:07Z.\n",
+    "created_at": "2026-09-19T19:08:29Z"
   }
 ]
 #+end_src
