@@ -1,14 +1,14 @@
 # Workflow-manager handoff
 
-<!-- handoff-id: wm016-20260915; status: wm016-accepted; accepted: WM-001..WM-016,G0 -->
+<!-- handoff-id: wm016-20260915; status: wm017-accepted; accepted: WM-001..WM-017,G0 -->
 
 ## Current delivery direction
 
-WM-016 is accepted on 2026-09-19 at canonical
-`430b411a3282ba93b10a94e1ce1ef4943e405dd9`. The accepted baseline is
-WM-001–WM-016 and G0, which is 16 of 44 packages and one of six gates.
-Next delivery is WM-017 outputs, verified artifacts and exclusive export,
-followed by the unchanged WM-018–WM-044 and G1–G5 roadmap. G1 and later
+WM-017 is accepted on 2026-09-19 at canonical
+`5ef7612e5536f90dac64b20948d2b8c1f9ccfdc5`. The accepted baseline is
+WM-001–WM-017 and G0, which is 17 of 44 packages and one of six gates.
+Next delivery is WM-018 history, lineage requests and legacy observation,
+followed by the unchanged WM-019–WM-044 and G1–G5 roadmap. G1 and later
 service, client, containment and release packages are not closed by this result.
 
 The user's 2026-09-17 refocus continues to govern delivery. Do not reopen the
@@ -17,14 +17,15 @@ as a substitute for the next product milestone. The completed
 [closure plan](workflow-manager-closure-plan.md) and frozen implementation plan
 remain the authority for their respective scopes.
 
-## Active WM-017 unit
+## WM-017 acceptance
 
-Issue `acat-wm-017-1hda` remains in progress. The coherent library unit is
-reviewed for integration, not accepted. Its proposal is retained under
-`implementation.9tGzKH/artifacts.Rdk65Wyh`, with current review, focused results
-and first-failure history. Parent carried the source onto current canonical
-tracking without replacing later issue/handoff changes. No duplicate writer
-or stale tracking overlay is permitted.
+Issue `acat-wm-017-1hda` is closed. Continued milestone review
+`a5d1a0cc-fd1e-4b0d-9948-e75f6279f935` found no issues and explicitly approved
+closure under frozen WM-017, I02/I09, its A11/A12/A21 portions and section 9.3.
+The reviewed source, final review, initial failures and raw platform evidence
+remain under `implementation.9tGzKH/artifacts.Rdk65Wyh`. Tracker comment 251
+records the combined disposition. Parent verified unchanged clean source and
+frozen records after execution, without importing stale tracking.
 
 The implementation reuses State references, Commands acceptance/dispatch, Store
 file/transaction ownership and shared Runtime verification/publication. Captured
@@ -41,12 +42,24 @@ Focused real filesystem/SQLite checks pass 147 assertions at each N1/N8, plus
 frozen representation validation, source boundaries, docs and checker builds.
 These are not native workflow-process or complete platform/client results.
 
-Next run the existing Runtime/engine suites, full policies with its manager and
-native frontend probes, and Haskell documentation gate on integrated bytes.
-Do not duplicate manager/audit launches already owned by policies. Required
-platform execution remains explicit. Private runtime paths are under
-`/Users/johnw/Products/a.9iWkXa`, with exact canonical direnv entry and unchanged
-offline wrapper. Parent owns Git, tracker, gates and acceptance.
+Both complete owning matrices passed on the accepted implementation. Each
+platform executed the actual Runtime/engine Werror suites, Haskell documentation
+checks and full direct policies exactly once, sequentially. Policies included
+the manager and artifact gates, audits, native frontend IO/session/export/codecs
+and both final run-fact refusals. No prefix or suffix was skipped or duplicated.
+
+| Platform | Full policies UTC on 2026-09-19 | Exit | Evidence |
+| --- | --- | --- | --- |
+| macOS arm64 | 09:59:00–11:33:01 | 0 | `artifacts.Rdk65Wyh/validation/mac` |
+| Linux aarch64 | 09:58:13–11:28:51 | 0 | `artifacts.Rdk65Wyh/validation/linux` |
+
+All six top-level exits are zero. Exact canonical direnv entry preceded private
+overrides, with clean inherited controls and unchanged offline Cabal settings.
+Original foreground owners and gate budgets remained intact, without replay,
+manual process intervention, paid execution, deployment or a new Lean build.
+Nonfatal Linux C unused-result diagnostics remain recorded, without a
+warning-free C-build claim. Native process probes and deterministic artifact
+primitives provide distinct evidence, not an end-to-end manager lifecycle claim.
 
 The file loan bounds raw captures/reads through callback return, not total heap.
 Callback consumers may not retain bytes afterward. Atomic output-page/revision
@@ -54,7 +67,7 @@ snapshots belong to WM025, and active callback credential revocation to WM023/A1
 Full-size stress is unrun. Structured public-shape validation is not complete
 semantic-schema validation, as recorded in `acat-4978`.
 
-## Acceptance and authority
+## Accepted WM-016 baseline
 
 Final milestone review `8bb51054-e179-4ade-8c3e-28e80b6eae48` found no issues
 and explicitly approved closure under frozen WM-016 and sections 9.1–9.3.
@@ -83,10 +96,10 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-19T09:40:59Z`. The next active-work deadline is
-`2026-09-19T10:40:59Z`. Interim checks were recorded in private briefs while
-canonical execution bytes stayed stable. Earlier disclosed timing lapses remain
-in the historical records.
+Refocus completed at `2026-09-19T11:53:39Z`. The next active-work deadline is
+`2026-09-19T12:53:39Z`. WM-017 delivery and its owning verification are complete.
+Next implement the bounded WM-018 unit rather than reopening historical helpers
+or repeating unchanged gates. Earlier disclosed timing lapses remain recorded.
 
 ## Historical WM-016 closure record
 
