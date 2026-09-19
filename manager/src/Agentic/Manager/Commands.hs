@@ -11,14 +11,16 @@ module Agentic.Manager.Commands
     CommandAttempt, newCommandAttempt, newControlCommandAttempt, submitCommandAttempt, submitCommandAttemptWithDeadline, reconcileCommandAttempt, reconcileCommandAttemptWithAdmission, DispatchTicket, dispatchCommandId, submitCommand, submitConfiguredCommand, submitStreamedCommand, commandPreflight, commandPreflightVersion, readCommand,
     BodyBinding, measureCommandBody, bodyBindingBytes, bodyBindingSha256,
     reserveDispatch, reserveDispatchWithAdmission, attemptDispatch, attemptDispatchWithAdmission, attemptControlDispatch, discardControlPayload, discardControlAttempt, recordAcknowledgement, recordEffect, recordEffectWith, recordEffectWithAdmission, recordUnresolved, recordRefusal,
-    recordRuntimeObservation, retireReceipt, commandCapacity, tombstoneCapacity
+    recordRuntimeObservation, recordExportObservation, retireReceipt, commandCapacity, tombstoneCapacity
   ) where
 
 import Agentic.Manager.Authorization
 import Agentic.Manager.Profile (ConfigurationLimits (..), PublicProfile, publicId, publicRevision, Discovery)
 import Agentic.Manager.Protocol.Command
+import Agentic.Manager.Protocol.Artifact (validExportName)
+import Agentic.Manager.Protocol.Json (decodeStrictValue)
 import Agentic.Manager.Store
-import Agentic.Runtime (maxFrameBytes)
+import Agentic.Runtime (maxFrameBytes, maxArtifactBytes)
 import Control.DeepSeq (NFData)
 import Control.Exception (SomeException, mask, finally, throwIO, try)
 import Control.Monad (unless, void, forM, forM_)
@@ -581,9 +583,47 @@ observeWithAdmission admission ticket@(DispatchTicket store ident _ _ _) finalTr
 -- | Atomic native evidence publication. This creates no dispatch capability.
 recordRuntimeObservation :: Text -> Text -> Maybe Acknowledgement -> Maybe Effect -> Transaction [Invalidation]
 recordRuntimeObservation ident revision acknowledgement effect = do
+  binding <- query "SELECT count(*) FROM control_intents WHERE command_id=?" [text ident]
+  unless (binding==[[SQL.SQLInteger 1]]) (refuseTransaction OwnershipUnavailable)
+  recordObservation ident revision acknowledgement effect
+
+-- | Complete a durably witnessed export, without creating dispatch authority.
+-- The artifact owner verifies the exact retained destination before this transaction.
+recordExportObservation :: Text -> Text -> Text -> Effect -> Transaction [Invalidation]
+recordExportObservation ident exportId revision effect = do
+  binding <- query "SELECT r.id,r.profile_id,c.profile_id,c.resource_uri,c.body_sha256,c.body_bytes,a.private_reference,e.name FROM exports e JOIN runs r ON r.id=e.run_id JOIN artifacts a ON a.id=e.artifact_id AND a.run_id=e.run_id JOIN commands c ON c.id=e.command_id JOIN service_metadata s ON s.singleton=1 WHERE e.id=? AND c.id=? AND c.operation='export' AND c.run_id=e.run_id AND c.authority_epoch=s.authority_epoch AND e.receipt IS NOT NULL AND e.state IN ('published','unresolved') AND c.refusal IS NULL AND c.attempted_at IS NOT NULL AND c.method='POST' AND c.media_type='application/json'" [text exportId,text ident]
+  case binding of
+    [[SQL.SQLText run,SQL.SQLText profile,SQL.SQLText commandProfileId,SQL.SQLText resource,SQL.SQLBlob digest,SQL.SQLInteger count,SQL.SQLBlob private,SQL.SQLText name]] -> do
+      let collection = "/v1/runs/" <> run <> "/exports"
+      result <- runExceptT $ do
+        receipt <- originalReceipt ident
+        require (commandProfileId == profile && resource == collection
+          && receiptProfile receipt == profile && receiptResource receipt == collection
+          && receiptOperation receipt == Export && receiptState receipt == Accepted) OwnershipUnavailable
+        require (exportAcceptanceMatches exportId name digest count private) OwnershipUnavailable
+      either refuseTransaction pure result
+    _ -> refuseTransaction OwnershipUnavailable
+  recordObservation ident revision Nothing (Just effect)
+
+-- Only the export owner's immutable private reference carries parsed-name provenance.
+-- Its digest/count refer to the accepted raw body, never a re-encoded mutation.
+exportAcceptanceMatches :: Text -> Text -> BS.ByteString -> Int64 -> BS.ByteString -> Bool
+exportAcceptanceMatches exportId name digest count private = case decodeStrictValue private of
+  Right (Object fields) | KM.size fields == 5,
+    KM.lookup "exportId" fields == Just (String exportId),
+    KM.lookup "acceptedName" fields == Just (String name), validExportName name,
+    BS.length digest == 32, count > 0, count <= 2097152,
+    KM.lookup "acceptedBodySha256" fields == Just (String (TE.decodeUtf8 (convertToBase Base16 digest))),
+    KM.lookup "acceptedBodyBytes" fields == Just (String (T.pack (show count))),
+    Just (String bytes) <- KM.lookup "bytes" fields ->
+      case reads (T.unpack bytes) of
+        [(size,"")] -> size > 0 && size <= maxArtifactBytes && T.pack (show size) == bytes
+        _ -> False
+  _ -> False
+
+recordObservation :: Text -> Text -> Maybe Acknowledgement -> Maybe Effect -> Transaction [Invalidation]
+recordObservation ident revision acknowledgement effect = do
   result <- runExceptT $ do
-    binding <- sql "SELECT count(*) FROM control_intents WHERE command_id=?" [text ident]
-    require (binding==[[SQL.SQLInteger 1]]) OwnershipUnavailable
     current <- currentReceipt ident
     next <- maybe (pure current) (\ack -> acknowledge ident ack current) acknowledgement
     updated <- case effect of

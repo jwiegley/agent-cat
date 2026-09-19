@@ -126,6 +126,7 @@ bash manager/ci/admission.sh
 bash manager/ci/approval.sh
 bash manager/ci/ingestion.sh
 bash manager/ci/controls.sh
+bash manager/ci/artifacts.sh
 bash test/cabal.sh build policy-probe agentic-run routing-fixed-point-probe runtime-contract-test schema-probe >/dev/null
 policy_runner=$(bash test/cabal.sh list-bin policy-probe)
 "$policy_runner" +RTS -N8 -RTS

@@ -66,6 +66,9 @@ extra-source-files:
   manager/ci/approval.sh
   manager/ci/ingestion.sh
   manager/ci/controls.sh
+  manager/ci/artifacts.sh
+  manager/test/artifact_contract.py
+  manager/ARTIFACTS.md
   runtime/test/ControlDeliveryAudit.hs
   manager/test/worker_fixture.py
   manager/test/approval_fixture.py
@@ -203,6 +206,8 @@ library
     Agentic.Manager.Admission
     Agentic.Manager.Approval
     Agentic.Manager.State
+    Agentic.Manager.Artifacts
+    Agentic.Manager.Protocol.Artifact
     Agentic.Manager.Commands
     Agentic.Manager.Drafts
     Agentic.Manager.Protocol.Preparation
@@ -483,6 +488,7 @@ executable manager-command-check
   main-is:         CommandCheck.hs
   other-modules:
     Agentic.Manager.Commands
+    Agentic.Manager.Protocol.Artifact
     Agentic.Manager.Authorization
     Agentic.Manager.Protocol.Command
     Agentic.Manager.Configuration
@@ -506,6 +512,7 @@ executable manager-draft-check
     Agentic.Manager.Drafts
     Agentic.Manager.Protocol.Preparation
     Agentic.Manager.Commands
+    Agentic.Manager.Protocol.Artifact
     Agentic.Manager.Authorization
     Agentic.Manager.Protocol.Draft
     Agentic.Manager.Protocol.Command
@@ -531,6 +538,7 @@ executable manager-worker-check
     Agentic.Manager.Drafts
     Agentic.Manager.Protocol.Preparation
     Agentic.Manager.Commands
+    Agentic.Manager.Protocol.Artifact
     Agentic.Manager.Authorization
     Agentic.Manager.Protocol.Draft
     Agentic.Manager.Protocol.Command
@@ -559,6 +567,7 @@ executable manager-admission-check
     Agentic.Manager.Drafts
     Agentic.Manager.Protocol.Preparation
     Agentic.Manager.Commands
+    Agentic.Manager.Protocol.Artifact
     Agentic.Manager.Authorization
     Agentic.Manager.Protocol.Draft
     Agentic.Manager.Protocol.Command
@@ -582,6 +591,36 @@ executable manager-approval-check
     IngestionCheck
     Agentic.Manager.Test.AcceptanceAudit
     Agentic.Manager.Approval
+    Agentic.Manager.State
+    Agentic.Manager.Admission
+    Agentic.Manager.Admission.Policy
+    Agentic.Manager.Worker
+    Agentic.Manager.Drafts
+    Agentic.Manager.Protocol.Preparation
+    Agentic.Manager.Commands
+    Agentic.Manager.Protocol.Artifact
+    Agentic.Manager.Authorization
+    Agentic.Manager.Protocol.Draft
+    Agentic.Manager.Protocol.Command
+    Agentic.Manager.Protocol.Json
+    Agentic.Manager.Configuration
+    Agentic.Manager.Profile
+    Agentic.Manager.Root
+    Agentic.Manager.Lease
+    Agentic.Manager.Schema
+    Agentic.Manager.Store
+    Agentic.Manager.Store.Admission
+    Agentic.Manager.Worker.State
+  build-depends:   agentic, direct-sqlite, deepseq, transformers
+  ghc-options:     -threaded -rtsopts
+
+executable manager-artifact-check
+  import:          settings
+  hs-source-dirs:  manager/src manager/test
+  main-is:         ArtifactCheck.hs
+  other-modules:
+    Agentic.Manager.Artifacts
+    Agentic.Manager.Protocol.Artifact
     Agentic.Manager.State
     Agentic.Manager.Admission
     Agentic.Manager.Admission.Policy

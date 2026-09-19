@@ -39,6 +39,7 @@ module Agentic.Runtime.Store
     writeResultArtifact,
     readResultArtifact,
     readResultArtifactAt,
+    readResultArtifactBytesAt,
     writeQuestionArtifact,
     readQuestionArtifact,
     readQuestionArtifactByCodeName,
@@ -543,11 +544,19 @@ readResultArtifact directory expectedRun reference =
   withStoreDirectory directory $ \descriptor -> readResultArtifactAt directory descriptor expectedRun reference
 
 readResultArtifactAt :: FilePath -> Fd -> RunId -> ResultRef -> IO Value
-readResultArtifactAt directory descriptor expectedRun reference = do
+readResultArtifactAt directory descriptor expectedRun reference =
+  artifactIOErrors (directory </> "result.json") $
+    snd <$> readResultArtifactBytesAt directory descriptor expectedRun reference
+
+-- | The exact captured native envelope and its value, verified in one read.
+-- This byte-oriented API preserves typed IO failures for content-status consumers.
+-- The legacy value-only reader retains its StoreCorrupt wrapping.
+readResultArtifactBytesAt :: FilePath -> Fd -> RunId -> ResultRef -> IO (BS.ByteString, Value)
+readResultArtifactBytesAt directory descriptor expectedRun reference = do
   let path = directory </> "result.json"
   unless (resultArtifactVersion reference == 1 && resultArtifactPath reference == "result.json") $
     throwIO (StoreCorrupt path "invalid result artifact reference")
-  bytes <- readArtifactBytes descriptor ["result.json"] path (resultArtifactBytes reference) (resultArtifactSha256 reference)
+  bytes <- readCapturedArtifactBytes descriptor ["result.json"] path (resultArtifactBytes reference) (resultArtifactSha256 reference)
   artifact <- decodeArtifact path bytes
   unless (canonicalArtifactBytes artifact == bytes) $
     throwIO (StoreCorrupt path "result artifact is not canonical compact JSON followed by one newline")
@@ -557,7 +566,7 @@ readResultArtifactAt directory descriptor expectedRun reference = do
     throwIO (StoreCorrupt path "result artifact run id does not match its event")
   unless (storedResultCode artifact == resultArtifactCode reference) $
     throwIO (StoreCorrupt path "result artifact code does not match its event")
-  pure (storedResultValue artifact)
+  pure (bytes, storedResultValue artifact)
 
 writeQuestionArtifact :: RunStore -> RunId -> OccurrenceId -> Text -> Value -> IO QuestionRef
 writeQuestionArtifact store runId occurrence intent question = do
@@ -680,15 +689,18 @@ writeBoundedArtifact path handle bytes = do
       pure (next, hashUpdate context chunk)
 
 readArtifactBytes :: Fd -> [FilePath] -> FilePath -> Integer -> Text -> IO BS.ByteString
-readArtifactBytes descriptor components path expectedBytes expectedDigest = do
+readArtifactBytes descriptor components path expectedBytes expectedDigest =
+  artifactIOErrors path (readCapturedArtifactBytes descriptor components path expectedBytes expectedDigest)
+
+artifactIOErrors :: FilePath -> IO a -> IO a
+artifactIOErrors path action = try @IOException action >>=
+  either (throwIO . StoreCorrupt path . T.pack . displayException) pure
+
+readCapturedArtifactBytes :: Fd -> [FilePath] -> FilePath -> Integer -> Text -> IO BS.ByteString
+readCapturedArtifactBytes descriptor components path expectedBytes expectedDigest = do
   when (expectedBytes <= 0 || expectedBytes > maxArtifactBytes) $
     throwIO (StoreCorrupt path "artifact byte count is outside the supported bound")
-  opened <- try @IOException (readConfinedFileAt descriptor components maxArtifactBytes)
-  (bytes, _) <-
-    either
-      (throwIO . StoreCorrupt path . T.pack . displayException)
-      pure
-      opened
+  (bytes, _) <- readConfinedFileAt descriptor components maxArtifactBytes
   unless (toInteger (BS.length bytes) == expectedBytes) $
     throwIO (StoreCorrupt path "artifact byte count does not match its reference")
   unless (digestText bytes == expectedDigest) $

@@ -7,6 +7,9 @@ module Agentic.Runtime.Frontend
   ( maxFrontendQueryBytes,
     runFrontendQuery,
     runFrontendExport,
+    PreparedResultExport, withPreparedResultExport, publishPreparedResultExport,
+    preparedExportRootIdentity, preparedExportBytes, preparedExportSha256, preparedExportDocument,
+    readPublishedResultExport, readPublishedResultExportBytes,
   )
 where
 
@@ -23,7 +26,7 @@ import Crypto.Hash (Digest, SHA256, hash)
 import Data.Aeson (FromJSON (parseJSON), Value (..), eitherDecodeStrict', encode, object, withObject, (.:), (.=))
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
-import Data.Aeson.Types (Object, Pair, Parser)
+import Data.Aeson.Types (Object, Pair, Parser, parseEither)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
 import Data.Char (ord)
@@ -180,32 +183,75 @@ executeExport :: FilePath -> FrontendExportRequest -> IO BS.ByteString
 executeExport stateRoot request = bracket (openPrivateRoot "frontend export state root" stateRoot) closePrivateRoot $ \root -> do
   unless (exportRootIdentity request == privateRootIdentity root) $
     ioError (userError "frontend export root identity does not match configured state")
-  let run = exportRunId request
-      reference = exportReference request
-      name = T.unpack (exportName request)
-      runtimeComponents = ["runs", T.unpack (runIdText run), "runtime"]
-      runtimeDirectory = privateRootPath root </> "runs" </> T.unpack (runIdText run) </> "runtime"
-      destination = privateRootPath root </> "exports" </> name
-  value <- withPrivateDirectoryAt root runtimeComponents $ \descriptor ->
-    readResultArtifactAt runtimeDirectory descriptor run reference
+  withPreparedResultExport root (exportRunId request) (exportReference request) (exportName request) $ \prepared -> do
+    publishPreparedResultExport prepared
+    pure $ BL.toStrict (encode (reply "export-result"
+      [ "runId" .= runIdText (exportRunId request),
+        "name" .= exportName request,
+        "path" .= (privateRootPath root </> "exports" </> T.unpack (exportName request)),
+        "bytes" .= T.pack (show (preparedExportBytes prepared)),
+        "sha256" .= preparedExportSha256 prepared,
+        "code" .= resultArtifactCode (exportReference request)
+      ]) <> "\n")
+
+-- | Verified compact export bytes under retained state and export roots.
+-- The callback owns these roots and bytes until publication or abandonment.
+data PreparedResultExport = PreparedResultExport !PrivateRoot !PrivateRoot !Text !BS.ByteString !Value
+
+preparedExportRootIdentity :: PreparedResultExport -> String
+preparedExportRootIdentity (PreparedResultExport _ root _ _ _) = privateRootIdentity root
+preparedExportBytes :: PreparedResultExport -> Integer
+preparedExportBytes (PreparedResultExport _ _ _ bytes _) = toInteger (BS.length bytes)
+preparedExportSha256 :: PreparedResultExport -> Text
+preparedExportSha256 (PreparedResultExport _ _ _ bytes _) = digestText bytes
+preparedExportDocument :: PreparedResultExport -> Value
+preparedExportDocument (PreparedResultExport _ _ _ _ document) = document
+
+withPreparedResultExport :: PrivateRoot -> RunId -> ResultRef -> Text -> (PreparedResultExport -> IO a) -> IO a
+withPreparedResultExport root run reference name action = do
+  _ <- either (ioError . userError) pure (parseEither parseExportName name)
+  let components = ["runs", T.unpack (runIdText run), "runtime"]
+      directory = privateRootPath root </> "runs" </> T.unpack (runIdText run) </> "runtime"
+  value <- withPrivateDirectoryAt root components $ \descriptor -> readResultArtifactAt directory descriptor run reference
   assertPrivateRoot root
-  let output = BL.toStrict (encode (object ["code" .= resultArtifactCode reference, "value" .= value]) <> "\n")
+  let document = object ["code" .= resultArtifactCode reference, "value" .= value]
+      output = BL.toStrict (encode document <> "\n")
   when (toInteger (BS.length output) > maxArtifactBytes) $
     ioError (userError "frontend export result exceeds 67108864 bytes")
-  let receipt = BL.toStrict (encode (reply "export-result"
-        [ "runId" .= runIdText run,
-          "name" .= exportName request,
-          "path" .= destination,
-          "bytes" .= T.pack (show (BS.length output)),
-          "sha256" .= digestText output,
-          "code" .= resultArtifactCode reference
-        ]) <> "\n")
   ensurePrivateDirectoryAt root ["exports"]
+  bracket (openPrivateSubroot root ["exports"]) closePrivateRoot $ \exportsRoot ->
+    action (PreparedResultExport root exportsRoot name output document)
+
+publishPreparedResultExport :: PreparedResultExport -> IO ()
+publishPreparedResultExport (PreparedResultExport root exportsRoot name output _) = do
+  assertPrivateRoot root
+  publishPrivateFileAt exportsRoot [T.unpack name] (\handle -> BS.hPut handle output)
+  assertPrivateRoot exportsRoot
+  assertPrivateRoot root
+
+-- | Capture a published document by its retained identity, never by a caller path.
+readPublishedResultExport :: PrivateRoot -> String -> Text -> Integer -> Text -> Value -> IO BS.ByteString
+readPublishedResultExport root identity name size digest code =
+  fst <$> readPublishedResultExportBytes root identity name size digest code
+
+-- | The same captured document and decoded value, without reopening the file.
+readPublishedResultExportBytes :: PrivateRoot -> String -> Text -> Integer -> Text -> Value -> IO (BS.ByteString, Value)
+readPublishedResultExportBytes root identity name size digest code = do
+  _ <- either (ioError . userError) pure (parseEither parseExportName name)
+  unless (size >= 0 && size <= maxArtifactBytes) (ioError (userError "invalid export byte bound"))
   bracket (openPrivateSubroot root ["exports"]) closePrivateRoot $ \exportsRoot -> do
-    publishPrivateFileAt exportsRoot [name] (\handle -> BS.hPut handle output)
+    unless (privateRootIdentity exportsRoot == identity) (ioError (userError "export root identity changed"))
+    bytes <- readPrivateFileAt exportsRoot [T.unpack name] size
+    unless (toInteger (BS.length bytes) == size && digestText bytes == digest) (ioError (userError "export byte identity changed"))
+    document <- either (const (ioError (userError "invalid export document"))) pure (eitherDecodeStrict' bytes)
+    case document of
+      Object fields | KeyMap.size fields == 2 && KeyMap.member "value" fields ->
+        unless (KeyMap.lookup "code" fields == Just code && BL.toStrict (encode document <> "\n") == bytes)
+          (ioError (userError "export document identity changed"))
+      _ -> ioError (userError "invalid export document")
     assertPrivateRoot exportsRoot
     assertPrivateRoot root
-  pure receipt
+    pure (bytes,document)
 
 executeQuery :: FrontendQuery -> IO Value
 executeQuery = \case

@@ -336,3 +336,14 @@ Native frames remain in original one-shot tickets rather than durable replay
 payloads. Acknowledgements, effects, terminal state and uncertainty remain distinct.
 The dedicated `manager/ci/controls.sh` gate exercises native workers and compiled
 negative controls. It does not introduce HTTP endpoints or client presentation.
+
+## Verified artifacts and exclusive export
+
+The [artifact contract](ARTIFACTS.md) describes bounded output items, authorized
+captured-byte downloads and explicit exclusive publication. State owns trusted
+references, Store owns the response-lifetime file loan, Commands owns acceptance
+and dispatch, and Runtime owns verification and publication. Source and export
+byte identities remain distinct. Durable successful-publisher observations can be
+reconciled after reopen, while filesystem-only publication remains unresolved.
+`manager/ci/artifacts.sh` checks the shared primitives, frozen representations and
+schema-eight migration at N1 and N8 without executing workflow processes.

@@ -3,7 +3,8 @@
 -- | Durable Runtime observations. Stored associations never grant worker authority.
 module Agentic.Manager.State
   ( RunAssociation (..), ingestAcceptedStart, ingestRuntimeEnvelope, restoreRunProjection,
-    submitRunControl, submitDecisionControl, readControlSurface, readDecision, readDecisionHeads
+    submitRunControl, submitDecisionControl, readControlSurface, readDecision, readDecisionHeads,
+    authorizeObservation, requireProjection
   ) where
 
 import Agentic.Manager.Admission (AcceptedStart, acceptedStartRun, consumeAcceptedStart, acceptedControlContext, acceptControlCommand, observeAcceptedStart)
