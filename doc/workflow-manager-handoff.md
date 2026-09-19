@@ -17,13 +17,15 @@ as a substitute for the next product milestone. The completed
 [closure plan](workflow-manager-closure-plan.md) and frozen implementation plan
 remain the authority for their respective scopes.
 
-## Active WM-019 unit
+## WM-019 reviewed checkpoint and blockers
 
-Issue `acat-wm-019-9eye` remains in progress. This commit integrates its bounded
-shutdown/safety core, not the full containment package. Source, successive
-reviews and retained failures remain under
-`implementation.9tGzKH/shutdown.327OnbQj`, with focused runtime root
-`/Users/johnw/Products/s.t3xROC`. Parent retains integration and acceptance.
+Issue `acat-wm-019-9eye` remains in progress. Its bounded local shutdown/safety
+core is integrated and validated at
+`489a1a411aca4017284fe2f34b2b69f0b390db52`, not accepted as the full package.
+Source, reviews and retained failures remain under
+`implementation.9tGzKH/shutdown.327OnbQj`. The active goal is stopping here
+pending explicit platform authorization and decisions. No later package or G1
+completion follows from this core result.
 
 The ten-path core provides explicit drain deadlines and cancellation through
 existing Admission, Store and Worker owners. New admissions are fenced while
@@ -32,8 +34,8 @@ broadcast precede ordinary operation/SQL joins. Scoped construction fences
 retire only after original confirmed cleanup and registration retirement,
 without clearing permanent close/quarantine or writable unavailability.
 
-Continued reviewer `a49816f4-1443-4c4f-a855-0dfc1b71909e` found no issues and
-cleared the corrected core for integrated owning gates. Original stop batches
+Continued reviewer `0fd80d8f-8c95-4df9-8407-09f5479e463d` found no issues and
+validated this core after integrated execution. Original stop batches
 remain immutable, healthy drain preserves owned History, and committed start
 publication retires the original preparation timer. Shutdown callers only
 publish mode and await their retained result. Broadcasts stay inside the
@@ -53,10 +55,13 @@ resuming after actual native reuse. FULL is real pager exhaustion under a privat
 test quota, and I/O is an injected SQLite result rather than device failure.
 Earlier failures and evidence scopes remain recorded.
 
-Next run `manager/ci/admission.sh` followed by `manager/ci/approval.sh` once on
-integrated bytes. These own the new modes and race audit without duplicate
-launches. No full historical matrix or new evidence programme is required
-for that bounded core validation. WM-019 itself is not accepted.
+Both requested integrated owning gates passed once on unchanged source.
+Admission ran 21:43:36–21:49:20Z and Approval ran 21:49:38–22:26:29Z on
+2026-09-19, both with exit zero. They executed the new N1/N8 shutdown modes,
+actual lifecycle and acceptance races, and existing owning checks/audits.
+Raw evidence is in `shutdown.327OnbQj/validation`, and the final disposition is
+`review-integrated-core.md`. No further local corrective edit or duplicate gate
+is indicated. Tracker comment 260 records this bounded stopping point.
 
 Linux read-only metadata confirms active cgroup2 delegation, but user-writable
 migration controls mean a bare user-service cgroup is not sufficient evidence.
@@ -69,7 +74,9 @@ run under this unit.
 
 Both-platform acceptance remains an unmet requirement. Unsupported containment
 must not advertise unattended mutation, and disabling all profiles cannot make
-the requirement vacuous. The integrated core does not close that requirement.
+the requirement vacuous. Broader A19 storage/pressure acceptance also remains,
+with pager-quota and injected-I/O evidence distinguished from physical disk
+or device failure. No helper or ordinary rerun removes these platform blockers.
 
 ## WM-018 acceptance
 
@@ -225,10 +232,11 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-19T21:35:19Z`. The next active-work deadline is
-`2026-09-19T22:35:19Z`. Next run the two integrated core gates and continue the
-same review. Platform containment permission and capability remain separate
-blockers. Earlier disclosed timing lapses remain recorded.
+Refocus completed at `2026-09-19T22:35:09Z`. On resumption, check the real clock
+before new work and use `2026-09-19T23:35:09Z` as the prior active-work deadline.
+The immediate requirement is explicit Linux experiment authorization and a
+stronger macOS containment decision, not another local helper or rerun.
+Earlier disclosed timing lapses remain recorded.
 
 ## Historical WM-016 closure record
 
