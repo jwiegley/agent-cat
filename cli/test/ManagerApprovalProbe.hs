@@ -1126,6 +1126,24 @@ controlEffectRecorded command = do
     [[SQL.SQLBlob _]] -> pure True
     _ -> refuseTransaction StoreIntegrity
 
+checkAnsweredControlReceipt :: CoordinationStore -> CredentialProof -> CommandReceipt -> Text -> Text -> IO ()
+checkAnsweredControlReceipt store proof original occurrence run = do
+  receipt <- readControlReceipt store proof(receiptId original) >>= right
+  check "post-cleanup answer receipt retains original acceptance binding"
+    (binding receipt==binding original && receiptOperation receipt==Answer && receiptState receipt==EffectObserved && receiptAttemptedAt receipt/=Nothing && receiptRefusal receipt==Nothing)
+  check "post-cleanup answer acknowledgement correlates original delivered command"
+    (maybe False (\ack -> let value=acknowledgementValue ack in
+      field "commandId" value==Just(String(receiptId original)) && field "command" value==Just(String "answer") &&
+      field "state" value==Just(String "delivered") && field "occurrenceId" value==Just(String occurrence)) (receiptAcknowledgement receipt))
+  check "post-cleanup answer effect retains original occurrence and run resource"
+    (maybe False (\effect -> let value=effectValue effect in
+      field "kind" value==Just(String "answer-accepted") && field "resource" value==Just(String("/v1/runs/"<>run<>"/control")) &&
+      (field "address" value >>= field "occurrenceId")==Just(String occurrence)) (receiptEffect receipt))
+  where
+    binding receipt=(receiptId receipt,receiptProfile receipt,receiptOperation receipt,receiptResource receipt,receiptAcceptedAt receipt)
+    field name (Object fields)=KM.lookup name fields
+    field _ _=Nothing
+
 receiptObservationChecks :: FilePath -> FilePath -> IO ()
 receiptObservationChecks work native = withReady work native "receipt-observation" ["--scripted"] [] $ \(Fixture _ _ store proof key _) -> do
   command <- runRead store $ do
@@ -1246,7 +1264,7 @@ nativeControlReloadChecks racing work native = withReady work native "reload-con
     replay<-submitDecisionControl owned proof decision(key "after-reload")etag body >>=right
     check "accepted control replay survives reload without changing original consent" (submissionReceipt replay==submissionReceipt accepted && submissionReplayed replay && case submissionTicket replay of Nothing->True;_->False)
     deliverAcceptedControl owned(receiptId(submissionReceipt accepted)) >>=right
-    ingestUntil $ do receipt<-readControlReceipt store proof(receiptId(submissionReceipt accepted)) >>=right;pure(receiptEffect receipt/=Nothing)
+    ingestUntil (observeControl (runRead store (controlEffectRecorded(receiptId(submissionReceipt accepted)))))
     preparation<-readPreparation store proof(P.preparationId public) >>=right
     check "reload and fresh answer never rewrite captured approval digest" (P.preparationDigest preparation==P.preparationDigest public)
     _<-reloadConfiguration installed original >>=right
@@ -1256,6 +1274,7 @@ nativeControlReloadChecks racing work native = withReady work native "reload-con
     cancellation<-submitRunControl owned proof(key "cancel-after-reload")(Just("\""<>revisionOf cancelView<>"\""))(encoded(object["operation" .= ("cancel"::Text)])) >>=right
     deliverAcceptedControl owned(receiptId(submissionReceipt cancellation)) >>=right
     joinControlCleanup live owned
+    checkAnsweredControlReceipt store proof(submissionReceipt accepted)occurrence(acceptedStartRun owned)
     nativePresent native context >>=check "reloaded control fixture joins only original native owner" . not
 
 nativeControlWriteChecks :: FilePath -> FilePath -> IO ()
@@ -1315,8 +1334,9 @@ nativeControlWriteChecks work native = forM_ [False,True] $ \paused -> do
         receipt<-readControlReceipt store proof command >>=right
         check "actual partial-write outcome remains unresolved without a native acknowledgement" (receiptState receipt==Unresolved && receiptAcknowledgement receipt==Nothing && receiptEffect receipt==Nothing)
       else do
-        ingestUntil $ do receipt<-readControlReceipt store proof command >>=right;pure(receiptEffect receipt/=Nothing)
+        ingestUntil (observeControl (runRead store (controlEffectRecorded command)))
         joinControlCleanup live owned
+        checkAnsweredControlReceipt store proof(submissionReceipt submission)occurrence(acceptedStartRun owned)
       replay<-submitDecisionControl owned proof decision(key "large-answer")etag body >>=right
       check "lost ownership exact replay returns no payload or ticket" (submissionReplayed replay && submissionReceipt replay==submissionReceipt submission && case submissionTicket replay of Nothing->True;_->False)
       repeated<-deliverAcceptedControl owned command
@@ -1341,8 +1361,8 @@ nativeControlInterruptionChecks work native = forM_ [False,True] $ \afterWrite -
           etag=Just("\""<>revision<>"\"")
           submit=submitDecisionControl owned proof decision(key "interrupted-answer")etag body
           auditScope=if afterWrite then Audit.withDeliveryAudit else Audit.withAcceptanceAudit
-      auditScope $ \audit -> do
-        command<-if afterWrite then do
+      original<-auditScope $ \audit -> do
+        (command,acceptance)<-if afterWrite then do
           accepted<-submit >>=right
           let command=receiptId(submissionReceipt accepted)
           bracket(async(try @AsyncException(deliverAcceptedControl owned command))) (\job->cancel job>>void(waitCatch job)) $ \job -> do
@@ -1351,7 +1371,7 @@ nativeControlInterruptionChecks work native = forM_ [False,True] $ \afterWrite -
             throwTo thread UserInterrupt
             outcome<-await(wait job)
             check "original control write-return exception survives" (case outcome of Left UserInterrupt->True;_->False)
-          pure command
+          pure(command,Just(submissionReceipt accepted))
           else do
             bracket(async(try @AsyncException submit)) (\job->cancel job>>void(waitCatch job)) $ \job -> do
               (thread,command)<-Audit.waitAccepted audit
@@ -1360,18 +1380,20 @@ nativeControlInterruptionChecks work native = forM_ [False,True] $ \afterWrite -
               check "original control commit-return exception survives" (case outcome of Left UserInterrupt->True;_->False)
               (reconciled,_,sameTicket,sameAttempt)<-Audit.auditSummary audit
               check "control acceptance reconciles original ticket and payload" (reconciled>=1 && sameTicket && sameAttempt)
-              pure command
+              pure(command,Nothing)
         replay<-submit >>=right
-        check "interrupted control retry is immutable and does not mint a ticket" (submissionReplayed replay && receiptId(submissionReceipt replay)==command && case submissionTicket replay of Nothing->True;_->False)
+        check "interrupted control retry is immutable and does not mint a ticket" (submissionReplayed replay && receiptId(submissionReceipt replay)==command && maybe True (==submissionReceipt replay) acceptance && case submissionTicket replay of Nothing->True;_->False)
         unless afterWrite $ do
           delivery<-deliverAcceptedControl owned command
           check "control acceptance reconciles original ticket and payload" (case delivery of Right()->True;_->False)
-        ingestUntil $ do receipt<-readControlReceipt store proof command >>=right;pure(receiptEffect receipt/=Nothing)
+        ingestUntil (observeControl (runRead store (controlEffectRecorded command)))
         (_,delivered,sameTicket,sameAttempt)<-Audit.auditSummary audit
         check "interrupted controls retain one original native write" (delivered==1 && sameTicket && sameAttempt)
         repeated<-deliverAcceptedControl owned command
         check "lost control return never authorizes another write" (case repeated of Left OwnershipUnavailable->True;_->False)
+        pure(submissionReceipt replay)
       joinControlCleanup live owned
+      checkAnsweredControlReceipt store proof original occurrence(acceptedStartRun owned)
       nativePresent native context >>=check "interrupted control fixture joins original native owner" . not
 
 nativeSteeringChecks :: Bool -> Int -> FilePath -> FilePath -> FilePath -> FilePath -> IO ()
