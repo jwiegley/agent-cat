@@ -22,7 +22,7 @@ import Agentic.Runtime
    groupInput, groupOutput, groupErrors, privateRootIdentity,
    ensurePrivateDirectoryAt, openPrivateSubroot, closePrivateRoot,
    FrontendSetupRequest (..), FrontendSetup (..), FrontendDecision (..),
-   FrontendPrepared (..), FrontendCapabilities (..), WorkflowDescriptor (..),
+   FrontendPrepared (..), FrontendPreparedLineage (..), editMetadata, FrontendCapabilities (..), WorkflowDescriptor (..),
    encodeFrontendSetupRequestFor, encodeFrontendDecisionFor, decodeFrontendPreparedFor, sessionRuntimeProtocol,
    maxFrontendReplyBytes, maxFrameBytes, correlatedProtocolVersion, readNdjsonFrame,
    Envelope (..), RuntimeEvent (..), SeqNo, checkSequence, decodeEnvelopeFor,
@@ -226,7 +226,10 @@ validatePrepared (selected, catalogue) capabilities root setup reply = do
   case setup of
     RootSetup request -> unless (any (\(_, descriptor) -> descriptor == preparedDescriptor reply
       && workflowName descriptor == setupWorkflow request) (discoveryEntries catalogue)) (throwIO WorkerWrongIdentity)
-    DerivedSetup {} -> pure ()
+    DerivedSetup _ parent operation edits _ _ -> unless
+      (preparedLineage reply == Just (FrontendPreparedLineage parent operation (map editMetadata edits))
+       && preparedRunId reply /= parent && any ((== preparedDescriptor reply) . snd) (discoveryEntries catalogue))
+      (throwIO WorkerWrongIdentity)
 
 readPrepared :: Int -> Handle -> IO (FrontendPrepared, BS.ByteString)
 readPrepared version handle = do

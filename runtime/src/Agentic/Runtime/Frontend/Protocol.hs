@@ -13,6 +13,7 @@ module Agentic.Runtime.Frontend.Protocol
     FrontendPreparedInput (..),
     FrontendPreparedLineage (..),
     FrontendEditMetadata (..),
+    editMetadata,
     FrontendCapabilities (..),
     frontendCapabilities,
     maxFrontendQueryBytes,
@@ -60,6 +61,7 @@ import Agentic.Runtime.Protocol
   )
 import Agentic.Runtime.Store (LineageOperation (..))
 import Control.Monad (unless, when)
+import Crypto.Hash (Digest, SHA256, hash)
 import Data.Aeson (FromJSON (parseJSON), ToJSON (toJSON), Value (..), eitherDecodeStrict', encode, object, withObject, (.:), (.:?), (.=))
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
@@ -423,6 +425,12 @@ parseInputBytes text
       _ -> invalid
   where
     invalid = fail "frontend prepared input bytes must be a bounded natural decimal string"
+
+-- | The native prepared reply commits to the exact typed replacement bytes.
+editMetadata :: FrontendEdit -> FrontendEditMetadata
+editMetadata (DropAnswer occurrence) = DroppedAnswer occurrence
+editMetadata (ReplaceAnswer occurrence answer) =
+  ReplacedAnswer occurrence (T.pack (show (hash (BL.toStrict (encode answer)) :: Digest SHA256)))
 
 instance ToJSON FrontendEditMetadata where
   toJSON (DroppedAnswer occurrence) = object

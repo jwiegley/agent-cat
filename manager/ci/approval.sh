@@ -7,6 +7,8 @@ umask 077
 unset GHCRTS
 bash test/cabal.sh build manager-approval-check routing-fixed-point-probe --ghc-options=-Werror
 checker=$(bash test/cabal.sh list-bin manager-approval-check)
+python3 manager/test/admission_audit.py "$root" history-corrections
+python3 manager/test/admission_audit.py "$root" history-policy
 native=$(bash test/cabal.sh list-bin routing-fixed-point-probe)
 python=$(command -v python3)
 work=$(mktemp -d "$CABAL_BUILDDIR/manager-approval.XXXXXX")

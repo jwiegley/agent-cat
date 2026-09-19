@@ -16,12 +16,16 @@ module Agentic.Runtime.Catalogue
     encodeFrontendManifest,
     decodeFrontendManifest,
     readFrontendManifest,
+    readFrontendManifestAt,
+    retainLineageInvocation,
     readFrontendInputBytes,
     readFrontendInputBytesAt,
     readFrontendInputBytesBoundedAt,
     revalidateLineageParentAt,
     listRunCatalogue,
     listRunCatalogueAt,
+    listRunCatalogueBoundedAt,
+    foldRunCatalogueBoundedAt,
     readRunRecordAt,
     readRunRecordWithEnvelopesAt,
   )
@@ -227,19 +231,38 @@ listRunCatalogue stateRoot localOwner now =
   withConfinedDirectory stateRoot [] $ \descriptor -> listRunCatalogueAt stateRoot descriptor localOwner now
 
 listRunCatalogueAt :: FilePath -> Fd -> Maybe Text -> UTCTime -> IO [CatalogueEntry]
-listRunCatalogueAt stateRoot stateDescriptor localOwner now = do
+listRunCatalogueAt = listCatalogueWith readRunRecordAt 1000
+
+-- | A complete catalogue within explicit entry and journal byte bounds.
+-- Overflow refuses the whole observation rather than silently hiding a suffix.
+listRunCatalogueBoundedAt :: Int -> FilePath -> Fd -> Maybe Text -> UTCTime -> IO [CatalogueEntry]
+listRunCatalogueBoundedAt = listCatalogueWith (\directory descriptor owner now ->
+  fst <$> readRunRecordWithEnvelopesAt directory descriptor owner now)
+
+listCatalogueWith :: (FilePath -> Fd -> Maybe Text -> UTCTime -> IO RunRecord) -> Int -> FilePath -> Fd -> Maybe Text -> UTCTime -> IO [CatalogueEntry]
+listCatalogueWith readRecord limit stateRoot stateDescriptor localOwner now =
+  reverse <$> foldCatalogueWith readRecord limit stateRoot stateDescriptor localOwner now (\entries entry -> pure (entry:entries)) []
+
+-- | Fold one bounded journal at a time. The consumer can enforce an aggregate
+-- public-byte ceiling without retaining every run's full snapshot.
+foldRunCatalogueBoundedAt :: Int -> FilePath -> Fd -> Maybe Text -> UTCTime -> (a -> CatalogueEntry -> IO a) -> a -> IO a
+foldRunCatalogueBoundedAt = foldCatalogueWith (\directory descriptor owner now ->
+  fst <$> readRunRecordWithEnvelopesAt directory descriptor owner now)
+
+foldCatalogueWith :: (FilePath -> Fd -> Maybe Text -> UTCTime -> IO RunRecord) -> Int -> FilePath -> Fd -> Maybe Text -> UTCTime -> (a -> CatalogueEntry -> IO a) -> a -> IO a
+foldCatalogueWith readRecord limit stateRoot stateDescriptor localOwner now consume initial = do
   let runs = stateRoot </> "runs"
   entries <- withConfinedDirectoryIfPresentAt stateDescriptor "runs" $ \runsDescriptor -> do
-    names <- sort <$> listConfinedDirectoryAt runsDescriptor 1000
-    mapM (readEntry runs runsDescriptor) names
-  pure (fromMaybe [] entries)
+    names <- sort <$> listConfinedDirectoryAt runsDescriptor limit
+    foldM (\current name -> readEntry runs runsDescriptor name >>= consume current) initial names
+  pure (fromMaybe initial entries)
   where
     readEntry runs runsDescriptor name = do
       let directory = runs </> name
       outcome <-
         try @SomeException $
           withConfinedDirectoryAt runsDescriptor [name] $ \runDescriptor ->
-            readRunRecordAt directory runDescriptor localOwner now
+            readRecord directory runDescriptor localOwner now
       case outcome of
         Right record -> pure (CatalogueRun record)
         Left failure | Just _ <- fromException @SomeAsyncException failure -> throwIO failure
@@ -291,6 +314,16 @@ readRunRecordWithStoreAt readStore directory descriptor localOwner now = do
           recordSnapshot = snapshot
         }
   pure (record, events)
+
+-- | Current configured invocation must equal v3 provenance, never stored argv authority.
+retainLineageInvocation :: FrontendManifest -> Maybe FrontendInvocation -> Either Text (Maybe FrontendInvocation)
+retainLineageInvocation manifest requested = case frontendInvocation manifest of
+  Nothing -> Right requested
+  Just expected -> case requested of
+    Nothing -> Left "frontend lineage from manifest version 3 requires its configured invocation"
+    Just actual
+      | actual == expected -> Right (Just expected)
+      | otherwise -> Left "frontend lineage configured invocation does not match its parent"
 
 -- | Recheck the current parent identity and ownership rather than browser facts.
 revalidateLineageParentAt :: RunRecord -> Fd -> IO ()

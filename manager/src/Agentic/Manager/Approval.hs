@@ -7,6 +7,7 @@ module Agentic.Manager.Approval
     AcceptedStart, deliverAcceptedStart, stopAcceptedStart, observeAcceptedStart, acceptedStartRun, acceptedTimerRetired ) where
 
 import Agentic.Manager.Admission
+import Agentic.Manager.Drafts (checkLineageParent, assemblyParentBinding)
 import Agentic.Manager.Admission.Policy (Resource (..), effectiveResources)
 import Agentic.Manager.Authorization
 import Agentic.Manager.Commands
@@ -126,6 +127,11 @@ acceptApproval (ReviewedPreparation store live preparation privateBytes) proof k
           unless(selectors==P.ApprovalRequest (P.preparationDigest preparation) (P.preparationRequestRevision preparation) (P.preparationProfileRevision preparation) (P.preparationDescriptorRevision preparation) (P.preparationGeneration preparation))(refuseTransaction StateConflict)
           unless(reviewRequestRevision context==P.preparationRequestRevision preparation && reviewProfileRevision context==P.preparationProfileRevision preparation && reviewGeneration context==P.preparationGeneration preparation)(refuseTransaction StateConflict)
           checkReservation context
+          parents <- query "SELECT parent_run_id FROM requests WHERE id=?" [text(reviewRequest context)]
+          case parents of
+            [[SQL.SQLText parent]] -> checkLineageParent parent
+            [[SQL.SQLNull]] -> pure ()
+            _ -> refuseTransaction StateConflict
           rows<-query "SELECT request_id,request_revision,profile_revision,reservation_id,process_generation,worker_identity,root_identity,native_run_id,review_digest,review,private_binding,state FROM preparations WHERE id=?" [text(P.preparationId preparation)]
           let native=reviewNative context
               expected=[text(reviewRequest context),text(reviewRequestRevision context),text(reviewProfileRevision context),text(reviewReservation context),text(reviewGeneration context),text(reviewReservation context),text(preparedRootIdentity native),text(runIdText(preparedRunId native)),text(P.preparationDigest preparation),SQL.SQLBlob(encoded(P.preparationReview preparation)),SQL.SQLBlob privateBytes,text "live"]
@@ -134,8 +140,8 @@ acceptApproval (ReviewedPreparation store live preparation privateBytes) proof k
           unless(field "nativeSha256" binding==Just(String(digest(encoded native))) && field "contextSha256" binding==Just(String(digest(encoded(contextValue context)))))(refuseTransaction StateConflict)
           client<-currentClient proof >>= needT
           pure $ Right $ Intent (CommandReferences(Just(reviewRequest context))(Just run)(Just(P.preparationId preparation))Nothing) True $ do
-            execute "INSERT INTO runs(id,revision,control_revision,request_id,preparation_id,profile_id,root_identity,native_run_id,supervision,result_state) VALUES (?,?,?,?,?,?,?,?,'owned','absent')"
-              (map text [run,run,run,reviewRequest context,P.preparationId preparation,P.preparationProfile preparation,preparedRootIdentity native,runIdText(preparedRunId native)])
+            execute "INSERT INTO runs(id,revision,control_revision,request_id,preparation_id,profile_id,root_identity,native_run_id,parent_run_id,supervision,result_state) VALUES (?,?,?,?,?,?,?,?,(SELECT parent_run_id FROM requests WHERE id=?),'owned','absent')"
+              (map text [run,run,run,reviewRequest context,P.preparationId preparation,P.preparationProfile preparation,preparedRootIdentity native,runIdText(preparedRunId native),reviewRequest context])
             execute "INSERT INTO start_intents VALUES (?,?,?,?,?,?,?,?)"
               (map text [command,client,reviewRequest context,P.preparationId preparation,run,reviewReservation context,reviewGeneration context,reviewReservation context])
             execute "UPDATE preparations SET state='consumed',reason='consumed',revision=? WHERE id=?" [text preparationRevision,text(P.preparationId preparation)]
@@ -253,7 +259,8 @@ contextValue context=object["invocation" .= selectionInvocation(reviewSelection 
   "arguments" .= operatorTargetArguments selected,"environment" .= operatorEnvironment selected,
   "resourceKeys" .= operatorResourceKeys selected,"personAnswering" .= operatorPersonAnswering selected,
   "ownership" .= (case operatorOwnership selected of ServiceOwned->("service-owned"::Text);ClientBound->"client-bound"),
-  "quarantined" .= operatorQuarantined selected,"limits" .= limits]
+  "quarantined" .= operatorQuarantined selected,"limits" .= limits,
+  "parentManifestSha256" .= fmap digest (assemblyParentBinding (reviewAssembly context))]
   where
     selected=selectionContext(reviewSelection context)
     config=operatorConfigurationLimits selected

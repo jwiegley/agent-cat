@@ -6,9 +6,9 @@ module Agentic.Manager.Profile
   ( OperatorProfile (..), PreparedTargetValidator, exactPreparedTarget, Ownership (..), ConfigurationLimits (..),
     validateConfigurationLimits, validateProfiles, QueryLimits (..), Registry,
     PublicProfile, publicId, publicRevision, Diagnostic (..),
-    Selection, selectionContext, selectionInvocation,
+    Selection, selectionContext, selectionInvocation, workflowIdentity,
     Discovery, discoveryServer, discoveryWorkflows, discoveryRevision, discoveryEntries, discoverySelection, discoveryProfileRevision, currentCatalogues,
-    newRegistry, reloadProfiles, publicProfiles, selectProfile, probeProfile, probeProfileCapabilities, probeProfileCapabilitiesWith
+    newRegistry, reloadProfiles, publicProfiles, profileInvocations, selectProfile, probeProfile, probeProfileCapabilities, probeProfileCapabilitiesWith
   ) where
 
 import Agentic.Runtime
@@ -231,6 +231,11 @@ lookupInstalled entries ident revision = case Map.lookup ident entries of
     | revision /= publicRevision p -> Left StaleRevision
     | otherwise -> Right installed
 
+-- | Installed invocation facts remain observable without a discovered descriptor.
+profileInvocations :: Registry -> IO [(Text,FrontendInvocation)]
+profileInvocations (Registry _ _ lock) = withMVar lock $ \(Snapshot _ entries) ->
+  pure [(operatorId p,selectionInvocation (Selection p)) | Installed p _ _ <- Map.elems entries]
+
 -- | Check current ID, exact revision, and discovery readiness before handing off
 -- private values. Parent must serialize approval with reload and revalidate an
 -- unapproved selection at that transaction. This value alone is not approval.
@@ -305,8 +310,12 @@ discover limits p profileRevision = do
         unless (Set.size (Set.fromList (map workflowName rows)) == length rows
           && all ((<= 256) . length . workflowInputs) rows) (Left InvalidReply)
         let revision = TE.decodeUtf8 (convertToBase Base16 nonce)
-            identifier row = "workflow_" <> T.pack (show (hash (BL.toStrict (encode (operatorId p, workflowName row))) :: Digest SHA256))
+            identifier row = workflowIdentity (operatorId p) (workflowName row)
         pure (Discovery (capabilityServer caps) rows revision [(identifier row, row) | row <- rows] (Selection p) profileRevision)
+
+-- | The existing profile-scoped workflow identity, independent of descriptor availability.
+workflowIdentity :: Text -> Text -> Text
+workflowIdentity profile name = "workflow_" <> T.pack (show (hash (BL.toStrict (encode (profile,name))) :: Digest SHA256))
 
 supportsMutation :: FrontendCapabilities -> Bool
 supportsMutation c = and

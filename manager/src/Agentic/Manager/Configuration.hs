@@ -6,7 +6,7 @@ module Agentic.Manager.Configuration
   ( Configuration, TargetValidator, InstalledConfiguration,
     loadConfiguration, exactPreparedTarget, installConfiguration, reloadConfiguration, closeConfiguration,
     configurationSnapshot, selectConfiguredProfile, probeConfiguredProfile,
-    acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationSnapshot, withConfigurationCatalogues, probeConfiguredCapabilities
+    acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationSnapshot, withConfigurationCatalogues, probeConfiguredCapabilities, withConfiguredRetentionRoot, validateHistoryBindings, revalidateRetentionRoot, configuredInvocations
   ) where
 
 import Agentic.Manager.Lease (acquireLease, duplicateLease)
@@ -14,7 +14,7 @@ import Agentic.Manager.Profile
 import Agentic.Manager.Root (validateRootSeparation)
 import Agentic.Runtime
   ( PrivateRoot, ProcessGroup, FrontendCapabilities, FrontendInvocation (..), StateRootRole (ManagerStateRoot), assertPrivateRoot,
-    openPrivateRoot, openPrivateSubroot, closePrivateRoot, withPrivateDirectoryAt, readStateRootRoleAt,
+    privateRootPath, openPrivateRoot, openPrivateSubroot, closePrivateRoot, withPrivateDirectoryAt, readStateRootRoleAt,
     establishManagerRootRole, readPrivateConfigurationFile )
 import Control.Concurrent.MVar (MVar, modifyMVarMasked, newMVar, withMVar, tryTakeMVar, putMVar)
 import Control.Exception (IOException, bracketOnError, finally, mask, mask_, throwIO, try)
@@ -134,6 +134,39 @@ withConfigurationCatalogues (InstalledConfiguration lock _) action = mask $ \res
           profiles <- publicProfiles registry
           catalogues <- currentCatalogues registry
           restore (action limits profiles catalogues)) `finally` putMVar lock current
+
+configuredInvocations :: InstalledConfiguration -> IO (Either Diagnostic [(Text,FrontendInvocation)])
+configuredInvocations installed = withActive installed $ \active@(ActiveConfiguration _ _ _ _ registry _) ->
+  assertActive active >> profileInvocations registry
+
+-- | Recheck local observation authority at response entry without extending its lifetime.
+revalidateRetentionRoot :: InstalledConfiguration -> PrivateRoot -> Text -> IO (Either Diagnostic ())
+revalidateRetentionRoot installed root profile = withActive installed $ \active@(ActiveConfiguration _ _ retention _ registry _) -> do
+  assertActive active
+  profiles <- publicProfiles registry
+  require (privateRootPath root `elem` retention && profile `elem` map publicId profiles)
+  assertPrivateRoot root
+
+-- | Every configured retention root needs exactly one explicit local profile binding.
+validateHistoryBindings :: InstalledConfiguration -> [(FilePath,Text)] -> IO (Either Diagnostic ())
+validateHistoryBindings installed bindings = withActive installed $ \active@(ActiveConfiguration _ _ retention _ registry _) -> do
+  assertActive active
+  profiles <- publicProfiles registry
+  require (length bindings == length retention && Set.fromList(map fst bindings) == Set.fromList retention)
+  require (all ((`elem` map publicId profiles) . snd) bindings)
+
+-- | Local composition only. A configured retention path never becomes execution authority.
+withConfiguredRetentionRoot :: InstalledConfiguration -> FilePath -> Text -> (PrivateRoot -> IO a) -> IO (Either Diagnostic a)
+withConfiguredRetentionRoot installed path profile action = mask $ \restore -> do
+  acquired <- withActive installed $ \active@(ActiveConfiguration _ _ retention _ registry _) -> do
+    assertActive active
+    require (path `elem` retention)
+    profiles <- publicProfiles registry
+    require (profile `elem` map publicId profiles)
+    openPrivateRoot "configured retention root" path
+  case acquired of
+    Left failure -> pure (Left failure)
+    Right root -> (Right <$> restore (action root)) `finally` closePrivateRoot root
 
 configurationSnapshot :: InstalledConfiguration -> IO (Either Diagnostic (ConfigurationLimits, [PublicProfile]))
 configurationSnapshot installed = withActive installed $ \(ActiveConfiguration _ _ _ limits registry _) ->

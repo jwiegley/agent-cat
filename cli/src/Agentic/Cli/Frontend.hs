@@ -109,7 +109,7 @@ runFrontendSession runnerId runnerVersion credentialArgument describe prepare = 
                       assertPrivateRoot parentRoot
                       withPrivateDirectoryAt parentRoot [] (revalidateLineageParentAt record)
                     parent = FrontendParent record operation edits
-                invocation <- retainLineageInvocation manifest requestedInvocation
+                invocation <- either refuse pure (retainLineageInvocation manifest requestedInvocation)
                 let setup = FrontendSetup (frontendWorkflow manifest) directory (frontendTargetArgs manifest) (Just (frontendTargetKind manifest)) answering [] invocation
                 revalidate
                 descriptor <- describe (frontendWorkflow manifest)
@@ -218,15 +218,6 @@ validateInvocationCredentials credentialArgument invocation =
   when (maybe False (any (credentialArgument . T.unpack) . frontendInvocationPrefixArgs) invocation) $
     refuse "frontend invocation prefix arguments cannot carry credentials"
 
-retainLineageInvocation :: FrontendManifest -> Maybe FrontendInvocation -> IO (Maybe FrontendInvocation)
-retainLineageInvocation manifest requested = case frontendInvocation manifest of
-  Nothing -> pure requested
-  Just expected -> case requested of
-    Nothing -> refuse "frontend lineage from manifest version 3 requires its configured invocation"
-    Just actual
-      | actual == expected -> pure (Just expected)
-      | otherwise -> refuse "frontend lineage configured invocation does not match its parent"
-
 withTermination :: IO a -> IO a
 withTermination action = do
   owner <- myThreadId
@@ -259,11 +250,6 @@ parsed parser = either (refuse . T.pack) pure . parseEither parser
 
 refuse :: Text -> IO a
 refuse = ioError . userError . T.unpack
-
-editMetadata :: FrontendEdit -> FrontendEditMetadata
-editMetadata (DropAnswer occurrence) = DroppedAnswer occurrence
-editMetadata (ReplaceAnswer occurrence answer) =
-  ReplacedAnswer occurrence (frontendDigest (BL.toStrict (encode answer)))
 
 lineageName :: LineageOperation -> Text
 lineageName RestartRun = "restart"
