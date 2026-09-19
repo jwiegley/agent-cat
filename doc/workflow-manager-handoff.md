@@ -22,9 +22,11 @@ remain the authority for their respective scopes.
 Issue `acat-wm-018-9huh` is in progress. One isolated writer implements history,
 lineage requests and read-only legacy observation in
 `implementation.9tGzKH/history.t5kx5b6A/source`, based on WM-017 acceptance
-`add7141a`. Workflow `baeb62fe-0af4-4e45-b7d9-e7d101816724` owns that lane,
-with private runtime root `/Users/johnw/Products/h.fXa5l9`. Parent retains Git,
-tracker, integration and acceptance authority.
+`add7141a`. Correction workflow `915148ce-1196-47ad-9d75-b65507457c2c`
+continues the original author, with private runtime root
+`/Users/johnw/Products/h.fXa5l9`. The first workflow detached for supervisor
+coordination and later lost its JavaScript continuation, without losing the
+completed author handback. Parent retains Git, tracker and acceptance authority.
 
 The unit reuses trusted Manager references and shared Runtime query and
 prepare-lineage behavior. It must preserve exact current invocation authority,
@@ -33,11 +35,27 @@ quarantined conflicts. Bounded history must expose corrupt and foreign-owner
 entries without silent truncation or inferred execution authority. Frozen
 WM-018 and its legacy/v2/v3 branches govern the complete work.
 
-Initial execution covers relevant Werror builds and deterministic
-pure/SQLite/filesystem/contract checks only. Native lineage preservation and
-owning-platform gates require the next concrete execution decision. No WM-018
-implementation or acceptance is claimed yet, and no new verification framework
-or per-leaf review programme is authorized.
+The 19-path proposal passed focused artifacts/history checks at N1/N8, frozen
+contract and boundary checks, and native runner compilation. Coherent reviewer
+`dcee437b-9e90-4b18-807f-f140d98ff959` withheld source clearance for seven
+findings: parent binding across preparation, original ownership observation,
+per-run revision integrity, configured-root authorization before response,
+checker deadline cleanup, result failure reasons and descriptor-independent
+invocation comparison. These are one correction unit, not deferred obligations.
+
+The parent now authorizes the focused local native preservation and negative
+cases in `history.t5kx5b6A/correction-brief.md`. Actual manager lineage must pass
+command acceptance through explicit approval, start and ingestion with nonempty
+inputs, typed edits and eligible legacy/v2/v3 formats. Existing owners, Store
+admission and failure precedence remain unchanged. Full policies, Linux and
+external client matrices await the later integration decision.
+
+For the parent-manifest gap, retain the accepted private binding through review
+and approval and revalidate at both boundaries without extending native wire
+formats. This does not attest which bytes a separate process read under an
+adversarial ABA substitution. The continued reviewer must assess that explicit
+existing-protocol ceiling. No WM-018 integration or acceptance is claimed.
+Initial dispatch quoting failure and all build/test failures remain recorded.
 
 ## WM-017 acceptance
 
@@ -118,10 +136,10 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-19T11:53:39Z`. The next active-work deadline is
-`2026-09-19T12:53:39Z`. WM-017 delivery and its owning verification are complete.
-Next implement the bounded WM-018 unit rather than reopening historical helpers
-or repeating unchanged gates. Earlier disclosed timing lapses remain recorded.
+Refocus completed at `2026-09-19T13:13:12Z`. The next active-work deadline is
+`2026-09-19T14:13:12Z`. Next complete the seven WM-018 owner-level corrections
+and essential native preservation checks rather than reopen historical helpers
+or repeat unchanged gates. Earlier disclosed timing lapses remain recorded.
 
 ## Historical WM-016 closure record
 
