@@ -2,7 +2,7 @@
 
 This plan records the user-directed refocus of 2026-09-17 and its completed
 WM-016 milestone. It supersedes previous next-helper instructions, not the
-original implementation requirements. WM-017–WM-019 are now accepted
+original implementation requirements. WM-017–WM-020 are now accepted
 separately, and the remaining roadmap follows the user's 2026-09-20
 [exclusion of OS containment](workflow-manager-handoff.md#scope-correction-of-2026-09-20).
 
@@ -20,8 +20,9 @@ The adopted client baseline is the explicitly reconciled snapshot, not untouched
 external owner checkouts. No historical failed resource is recovered by a later
 pass. WM-017 and WM-018 were subsequently accepted at `5ef7612e` and `4ad20a43`,
 as recorded in the handoff. WM-019 is accepted at `489a1a4` under the user's
-scope correction. G1 and later packages remain open, and WM-020 is the next
-delivery. The sections below retain the original WM-016 closure plan.
+scope correction. WM-020 is accepted at `626981a7` under its reviewed same-root
+restoration boundary. G1 and later packages remain open, and WM-021 is the
+next delivery. The sections below retain the original WM-016 closure plan.
 
 ## Starting position at the 2026-09-17 refocus
 
