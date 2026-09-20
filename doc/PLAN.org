@@ -10157,7 +10157,7 @@ implies that effects outside that backup did not occur.
 :LABELS:   ["p4","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-20 Sun 13:47]
+:MODIFIED: [2026-09-20 Sun 14:35]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-021
 :SOURCE_REPO: agent-cat
@@ -10293,6 +10293,13 @@ WM-008 completed handoff 2026-09-12T02:36:23+00:00: Enforce each configured quot
     "author": "johnw",
     "text": "# WM021 collection eligibility policy\n\nParent approves a fixed 24-hour capture grace from the first durable observation that eligibility is proven. This is a conservative local policy, not a new configuration or wire knob, and file age alone grants no deletion authority. Eligibility resets when reference or safety facts change. The existing Store/file owner rechecks current draft, retained preparation, pending/nonretired command, export, backup and lineage dependencies immediately before collection.\n\nOnly manager-recorded identities with known publication provenance can qualify. Unknown directory entries, unprovable temporary files and uncertain cleanup remain retained. No historical test root is subject to this grant, and no total-disk bound is inferred for arbitrary operator-created files. The implementation uses only the minimum durable eligibility facts at existing owners, not a second collector registry or cleanup/recovery authority.\n\nReceipt retirement uses a conservative first-proven-inactive observation and at least 30 days afterward. All linked resources must be inactive, with no unresolved/pending command or unreleased reservation obligation. A linked run requires genuine previously validated Runtime terminal evidence, not accepted_at, process exit or absence, synthesized timestamps or a later join that erases uncertainty. A conclusively refused/terminal operation without a linked run does not require nonexistent Runtime evidence, but its actual dependencies still govern eligibility. Renewed activity resets eligibility.\n\nNon-content tombstones remain for the registered client lifetime. Quota pressure refuses new ordinary work before protective eviction, and uncertainty can prevent collection. Tests must cover eligibility reset, active/unresolved retention and reference-versus-collection races using fresh fixtures. The standing original-owner, bounded Store, no-containment and first-failure rules remain unchanged.\n",
     "created_at": "2026-09-20T20:47:15Z"
+  },
+  {
+    "id": 275,
+    "issue_id": "acat-wm-021-ez37",
+    "author": "johnw",
+    "text": "WM-021 remains in progress and unverified. The isolated change stays in existing Store, Schema, Commands, Drafts and State owners with their existing Store/Draft checks. No parallel subsystem, transport implementation, dependency or frozen-record change is in the observed scope.\n\nThree first build failures are preserved: an invalid manager-state-check target before compilation, a StoreCheck test import that crossed its declared module boundary, and three omitted explicit DraftCheck imports. Parent approved only the exact target correction, relocation of collection coverage to its Drafts owner and explicit-import repair. Production compilation is not test execution, and required pressure, terminal-evidence, reset/race and documentation work remain until actually completed.\n\nParent approved one narrow retention classification. Successful local create/capture receipts intentionally remain accepted in the original Commands model. Only their exact original committed request_origins or command_captures associations, with matching resource/client/profile and no contradictory native dispatch/start/control intent, may witness local completion for retention eligibility. All inactivity, unresolved-operation, reservation, grace and reset protections remain. No receipt/state is rewritten to effect-observed and no Runtime outcome is synthesized. Missing or inconsistent associations and every other potentially pending accepted command remain protected. The exact policy is in decision-note.md.\n\nRefocus completed 2026-09-20T21:30:44Z, next active-work deadline 22:30:44Z. Current work implements the next product package and its meaningful regressions, rather than adding evidence machinery or revisiting accepted WM020. Continue within the standing first-failure, original-owner and absolute no-containment boundaries.\n",
+    "created_at": "2026-09-20T21:35:29Z"
   }
 ]
 #+end_src

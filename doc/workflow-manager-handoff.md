@@ -53,7 +53,7 @@ endpoint, speculative transport service or historical cleanup project. The
 initial grant is affected Werror and meaningful local fresh-fixture tests,
 with integrated gates selected from the actual coherent delta afterward.
 
-Tracker comments 273–274 and the unit's `brief.md`, `start-note.md` and
+Tracker comments 273–275 and the unit's `brief.md`, `start-note.md` and
 `decision-note.md` define the boundaries. Known manager capture identities use
 a fixed 24-hour grace after first proven durable eligibility, reset on changed
 references or safety facts. Age alone is not authority, and unknown entries or
@@ -62,6 +62,14 @@ proven inactivity and at least 30 further days, followed by lifetime non-content
 tombstones. Linked runs need genuine validated terminal evidence, with no
 inferred cleanup or fabricated terminal time. Quota pressure refuses rather
 than evicting protection. No WM-021 acceptance is claimed.
+
+For retention eligibility only, accepted create/capture commands may count as
+completed local effects when exact original durable associations establish
+their resource/client/profile binding, with no contradictory dispatch or intent.
+All inactivity and protection conditions still apply. Original receipts remain
+accepted, missing associations remain uncertain, and no Runtime outcome is
+invented. Initial build failures and still-unrun pressure/race obligations are
+recorded in `progress-note.md`, rather than being treated as completed tests.
 
 ## WM-020 acceptance
 
@@ -393,8 +401,8 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-20T20:40:19Z`. The next active-work deadline is
-`2026-09-20T21:40:19Z`. Continue with WM-021 through existing owners, with no
+Refocus completed at `2026-09-20T21:30:44Z`. The next active-work deadline is
+`2026-09-20T22:30:44Z`. Continue with WM-021 through existing owners, with no
 OS containment or verification-machinery detour. The resumed persistent goal
 still contains older baseline and scope wording. The user's latest correction
 governs current work, and `/goal-tweak` remains available for updating that
