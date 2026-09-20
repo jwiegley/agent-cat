@@ -42,8 +42,9 @@ or undo provider effects. This exclusion does not close other package criteria.
 
 Issue `acat-wm-020-5x61` remains in progress. The reviewed restart/restoration
 application is integrated at `094604c482898197a8e0cdc08bffa9b65afda8d0`.
-This commit adds only the two authorized StoreCheck fixture corrections, not
-package acceptance. Source and evidence remain in
+The two authorized StoreCheck fixture corrections are integrated at `65e7854`.
+The current correction changes one existing negative-test import anchor, not
+production behavior or package acceptance. Source and evidence remain in
 `implementation.9tGzKH/restart.gQ3o7Iag`. Parent retains integration, execution
 decisions and acceptance.
 
@@ -102,15 +103,27 @@ Evidence is `/Users/johnw/Products/w20m.Pt9TPL` and the unit's
 Original failed logs and roots remain, including the diagnostic query's
 stripped-label failure, and none is relabeled passing.
 
-The user resumed broader delivery after these scoped checks. Reuse the
-unchanged-production documentation/Profile results, then run the existing
-Store, Commands, Drafts, Admission and Approval gates on each platform.
-Registered modes own their constituents without duplicate standalone runs or
-another historical/client matrix. Final disposition remains with the same
-independent milestone reviewer after the integrated results. Seeded crash
-prefixes, native preparation and the captured interruption barrier retain their
-distinct limits, with no full failure-matrix or hardware-durability claim from
-the focused checks.
+The user resumed broader delivery after these scoped checks. Both revised
+platform Store gates passed restart, normal, admission-data and terminal-admission
+N1/N8, followed by restore-interruption and store-cancel-gap N1/N8. They then
+failed before building the next mutant because its unused-import removal
+assumed `catch` ended the import list. Store now also imports `fromException`.
+The correction targets the comma-delimited `onException` token and preserves
+the existing exact-one-occurrence guard, mutation bodies and negative assertions.
+
+Evidence remains in `validation-revised/{mac,linux}` and tracker comment 268.
+No mutant execution or full Store-gate pass is inferred from the preparation
+failure. Reuse the passed Store constituents and earlier documentation/Profile
+results, then run only the existing `store-cancel-mutant` and
+`store-expiry-mutant` modes and the unrun Commands, Drafts, Admission and
+Approval gates on each platform. Report this composed coverage explicitly,
+without fabricating a fresh successful Store wrapper exit or repeating valid
+constituents merely for that label.
+
+Final disposition remains with the same independent milestone reviewer after
+the integrated results. Seeded crash prefixes, native preparation and the
+captured interruption barrier retain their distinct limits, with no full
+failure-matrix or hardware-durability claim from the focused checks.
 
 ## WM-019 acceptance
 
