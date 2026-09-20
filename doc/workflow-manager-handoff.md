@@ -40,44 +40,55 @@ or undo provider effects. This exclusion does not close other package criteria.
 
 ## Active WM-020 unit
 
-Issue `acat-wm-020-5x61` is in progress after acceptance commit `0c05a5d3`.
-The isolated writer uses `implementation.9tGzKH/restart.gQ3o7Iag/source`,
-branch `wm020-restart-20260920`, with private roots
-`/Users/johnw/Products/r.hV68Vj`. Parent retains Git mutation, tracking,
-canonical integration, execution decisions and acceptance.
+Issue `acat-wm-020-5x61` remains in progress. This commit integrates its reviewed
+restart/restoration application delta, not package acceptance. Source and
+evidence remain in `implementation.9tGzKH/restart.gQ3o7Iag`, with focused
+private roots `/Users/johnw/Products/r.hV68Vj`. Parent retains integration,
+execution decisions and acceptance.
 
-The isolated proposal implements startup reconciliation and coherent offline
-database/capture restoration at existing owners. Current authorization permits
-bounded local Werror, SQLite/file and fresh ordinary native checks, followed by
-one coherent independent review. No containment work or historical test-resource
-recovery is included.
+The unit supplies ordinary startup reconciliation and coherent offline
+database/capture restoration through existing owners. Current focused Werror,
+SQLite/file and fresh ordinary native checks pass. No containment work or
+historical test-resource recovery is included.
 
-Tracker comments 263–265 and the unit's `brief.md` and `decision-note.md` retain
+Tracker comments 263–266 and the unit's `brief.md` and `decision-note.md` retain
 the authority decisions. The approved restore interface is same-root and
 requires validated current safety facts. Its temporary in-progress fence must
 not become permanent global admission disablement after successful restoration.
 A minimal reservation-owner quarantine extension may preserve newer claims
 without fabricating request graphs or live handles. Missing/corrupt current
 safety state refuses before publication, and backup-only disaster recovery is
-not claimed. The reviewer must assess this boundary against WM-020.
+not claimed. The source reviewer accepted this declared supported boundary.
 
-The initial thirteen-file proposal passed focused Werror, fresh Store/native
-restart N1/N8 and deterministic original-Async interruption checks. A private
-declared-configuration/descriptor binding addresses freshly generated revision
-tokens without weakening guards or reconstructing execution authority. Earlier
-compile and native failures remain in the original report and fixture roots.
+Continued reviewer `3f507dab-91b4-47f5-852e-1b31471b20f3` found no issues
+and granted source integration clearance for the corrected thirteen-file
+proposal. Unavailable historical selections remain inert without suppressing
+real storage/configuration failures or preventing usable unrelated work.
+Only successfully validated requests provide restored queue associations.
+Restart changes now publish matching bounded resource/revision invalidations
+atomically, with unchanged-resource, rollback and multi-page cases tested.
 
-Reviewer `8c7773e1-995a-465b-9529-0ba764ad7a44` withheld integration for two
-P1s: an unavailable historical profile blocks unrelated startup, and changed
-resources lack their specific durable invalidations. Correction workflow
-`7ab27367-2cb5-4b05-afc0-d85a7cdc410a` resumes the same author and reviewer,
-with current author `66299a81-1aca-4a90-882d-fb642efde948`. The bounded grant
-is `correction-brief.md`, and original `result.md`, `proposal.patch` and
-`review.md` remain separate from the forthcoming correction reports.
+The private declared-configuration/descriptor binding permits fresh revision
+tokens only after exact current validation. FIFO and original receipts remain,
+and no worker, dispatch or previous approval authority is reconstructed. Store
+N1, corrected native N1 and then N8 passed on their recorded current owners.
+The AdmissionCheck-only fixture repair did not invalidate Store N1, so that
+valid result was reused. The current captured interruption audit is
+`audit-restore-interruption.v33gvina`. Original reports, failed logs and roots
+remain separate from `correction-result.md` and `review-corrected.md`.
 
-Neither canonical application integration nor WM-020 acceptance is claimed.
-Seeded crash-prefix rows, native preparation tests and the captured interruption
-barrier retain their distinct scope. Integrated gates remain parent-owned.
+The reviewed patch equals the application delta byte-for-byte when Git uses
+the same a/b path prefixes. Original-HOME i/w mnemonic prefixes explain the
+initial different diff-text hash, not a source change. Parent applied no stale
+PLAN or handoff copy.
+
+Next run documentation `check-haskell` and the existing profiles, Store,
+Commands, Drafts, Admission and Approval gates once on each platform. Their
+registered modes own constituent execution, without an extra historical matrix.
+Integrated gates and final WM-020 acceptance remain outstanding. Seeded crash
+prefixes, native preparation and the captured interruption barrier retain their
+distinct limits. No full failure-matrix, client or hardware-durability claim
+follows from source integration.
 
 ## WM-019 acceptance
 
@@ -281,8 +292,8 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-20T10:32:23Z`. The next active-work deadline is
-`2026-09-20T11:32:23Z`. Continue with WM-020 through existing owners, with no
+Refocus completed at `2026-09-20T11:14:27Z`. The next active-work deadline is
+`2026-09-20T12:14:27Z`. Continue with WM-020 through existing owners, with no
 OS containment or verification-machinery detour. The resumed persistent goal
 still contains older baseline and scope wording. The user's latest correction
 governs current work, and `/goal-tweak` remains available for updating that

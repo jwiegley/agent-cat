@@ -27,7 +27,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Database.SQLite3 as SQL
 import GHC.Clock (getMonotonicTimeNSec)
-import System.Directory (createDirectory)
+import System.Directory (createDirectory, doesFileExist, removeFile)
 import System.Environment (getArgs, getExecutablePath)
 import System.Exit (ExitCode (ExitSuccess))
 import System.FilePath ((</>))
@@ -46,6 +46,7 @@ main = do
   args <- getArgs
   case args of
     ["admission-data"] -> StoreAdmissionCheck.dataChecks
+    ["restart",work] -> restartChecks work
     ["terminal-admission",work] -> terminalAdmissionChecks work
     ["hold", path] -> withInstalled path $ \installed -> withCoordinationStore installed $ \_ ->
       putStrLn "ready" >> threadDelay 60000000
@@ -101,6 +102,128 @@ expect :: String -> StoreFailure -> IO a -> IO ()
 expect label expected action = do
   result <- try @StoreFailure action
   check label (case result of Left failure -> failure == expected; Right _ -> False)
+
+restartChecks :: FilePath -> IO ()
+restartChecks work = do
+  (path,root) <- fixture work "restart"
+  let backup=work </> "snapshot"
+      content="immutable input\r\nUTF8 snow: \233\155\170"
+      capture=root </> "captures" </> "capture_one"
+  createDirectory backup
+  setFileMode backup 0o700
+  -- Establish the role before adding the fixture capture.
+  withInstalled path $ \installed -> do
+    void(withCoordinationStore installed storeIdentity)
+    createDirectory(root </> "captures")
+    setFileMode(root </> "captures")0o700
+    BS.writeFile capture content
+    setFileMode capture 0o600
+    withCoordinationStore installed $ \store -> do
+      mutate store (do
+        client "client_1"
+        execute "INSERT INTO requests(id,revision,client_id,workflow_id,descriptor_revision,profile_id,profile_revision,phase,admission,blocking_reasons,validation_errors) VALUES ('request_1','revision_1','client_1','workflow','descriptor','profile','policy','draft','not-queued',?,?)" [SQL.SQLBlob "[]",SQL.SQLBlob "[]"]
+        execute "INSERT INTO captures VALUES ('capture_one','revision_1','request_1','client_1','profile',?,?,?)" [SQL.SQLBlob "capture_one",SQL.SQLInteger(fromIntegral(BS.length content)),SQL.SQLText(T.pack(show(hash content::Digest SHA256)))]
+        execute "INSERT INTO restoration_quarantine VALUES ('older_claim',0,'[[\"operator\",\"a\"]]')" []) [event]
+      refused <- try @Diagnostic(backupCoordinationStore installed backup)
+      check "offline backup refuses a live Store lifetime" (isLeft refused)
+    backupCoordinationStore installed backup
+    saved <- BS.readFile(backup </> "captures" </> "capture_one")
+    check "coherent backup retains exact immutable capture bytes" (saved==content)
+    withCoordinationStore installed $ \store -> mutate store (execute "INSERT INTO restoration_quarantine VALUES ('newer_claim',0,'[[\"operator\",\"b\"]]')" []) [event]
+    removeFile capture
+    restoreCoordinationStore installed backup
+    restored <- BS.readFile capture
+    check "restore durably republishes a missing immutable capture" (restored==content)
+    let expected=[("newer_claim",0,[("operator","b")]),("older_claim",0,[("operator","a")])]
+    withCoordinationStore installed $ \store -> do
+      claims <- runRead store reservationOccupancy
+      check "slot collision retains both original claims and resource pressure" (claims==expected)
+      count store "restorations WHERE effects_uncertain=1" >>= check "lost-interval effects remain explicitly uncertain" . (==1)
+    restoreCoordinationStore installed backup
+    withCoordinationStore installed $ \store -> runRead store reservationOccupancy >>= check "repeated restore deduplicates only identical original claims" . (==expected)
+    -- An actual target publication failure must retain the restoration fence.
+    BS.writeFile capture "changed target bytes"
+    expect "different immutable target bytes are never overwritten" StoreIntegrity (restoreCoordinationStore installed backup)
+    doesFileExist(root </> "restore-in-progress") >>= check "failed restoration leaves durable startup fence"
+    expect "incomplete restore refuses ordinary serving" StoreUnavailable(withCoordinationStore installed (const(pure())))
+  (badPath,badRoot) <- fixture work "missing-current"
+  withInstalled badPath $ \installed -> do
+    void(withCoordinationStore installed storeIdentity)
+    removeFile(badRoot </> "coordination.sqlite3")
+    expect "backup-only recovery without current safety facts refuses" StoreUnavailable(restoreCoordinationStore installed backup)
+    doesFileExist(badRoot </> "coordination.sqlite3") >>= check "refused restore does not create an empty replacement current state" . not
+  (boundedPath,_) <- fixture work "occupancy-bounds"
+  withInstalled boundedPath $ \installed -> withCoordinationStore installed $ \store -> do
+    mutate store (execute "INSERT INTO restoration_quarantine VALUES ('incomplete',0,'[]')" []) [event]
+    expect "incomplete resource footprint refuses instead of becoming free" StoreIntegrity(runRead store reservationOccupancy)
+    mutate store (execute "DELETE FROM restoration_quarantine" []) [event]
+    forM_ [0..16::Int] $ \index -> mutate store (execute "INSERT INTO restoration_quarantine VALUES (?,?,?)" [SQL.SQLText(T.pack(show index)),SQL.SQLInteger(fromIntegral(index `mod` 16)),SQL.SQLText "[[\"operator\",\"a\"]]"]) [event]
+    expect "over-budget safety facts refuse instead of dropping occupancy" StoreLimit(runRead store reservationOccupancy)
+  restartStateChecks work
+  putStrLn "PASS restart restoration SQLite and immutable files"
+
+-- SQLite crash-prefix facts only. These rows do not create native cleanup authority.
+restartStateChecks :: FilePath -> IO ()
+restartStateChecks work = do
+  (path,root) <- fixture work "restart-prefix"
+  withInstalled path $ \installed -> do
+    (first,initialEvents) <- withCoordinationStore installed $ \store -> do
+      identity <- storeIdentity store
+      mutate store (do
+        client "client_1"
+        forM_ [("1",0::Int),("2",1)] $ \(suffix,slot) -> do
+          let request="request_"<>suffix;reservation="reservation_"<>suffix;preparation="preparation_"<>suffix
+          execute "INSERT INTO requests(id,revision,client_id,workflow_id,descriptor_revision,profile_id,profile_revision,phase,admission,blocking_reasons,validation_errors) VALUES (?,'revision','client_1','workflow','descriptor','profile','policy','review','reserved',?,?)" [SQL.SQLText request,SQL.SQLBlob "[]",SQL.SQLBlob "[]"]
+          execute "INSERT INTO reservations(id,request_id,slot,process_generation,state) VALUES (?,?,?,?,'held')" [SQL.SQLText reservation,SQL.SQLText request,SQL.SQLInteger(fromIntegral slot),SQL.SQLText(storeProcessGeneration identity)]
+          execute "INSERT INTO reservation_resources VALUES ('operator',?,?)" [SQL.SQLText suffix,SQL.SQLText reservation]
+          execute "INSERT INTO preparations VALUES (?,'revision',?,'revision','policy',?,?,'worker','root',?,'2999-01-01T00:00:00Z','digest',?,?,'live',NULL)" [SQL.SQLText preparation,SQL.SQLText request,SQL.SQLText reservation,SQL.SQLText(storeProcessGeneration identity),SQL.SQLText suffix,SQL.SQLBlob "review",SQL.SQLBlob "binding"]
+        execute "UPDATE preparations SET state='consumed',reason='consumed' WHERE id='preparation_2'" []
+        execute "UPDATE requests SET phase='start-pending' WHERE id='request_2'" []
+        execute "INSERT INTO runs(id,revision,control_revision,request_id,preparation_id,profile_id,root_identity,native_run_id,supervision,result_state) VALUES ('run_2','revision','control','request_2','preparation_2','profile','root','2','owned','absent')" []
+        forM_ [("start_2","approve"),("control_2","cancel")] $ \(ident,operationName') ->
+          execute "INSERT INTO commands(id,revision,profile_id,operation,client_id,authority_epoch,method,resource_uri,idempotency_key,body,receipt,retired,request_id,run_id,preparation_id,accepted_at,dispatch_generation,state) VALUES (?,'revision','profile',?,'client_1',?,'POST','/v1/runs/run_2',?,?,?,0,'request_2','run_2','preparation_2','2026-01-01T00:00:00Z',?,'dispatch-attempted')" [SQL.SQLText ident,SQL.SQLText operationName',SQL.SQLText(storeAuthorityEpoch identity),SQL.SQLText ident,SQL.SQLBlob "original body",SQL.SQLBlob "immutable accepted receipt",SQL.SQLText(storeProcessGeneration identity)]
+        execute "INSERT INTO start_intents VALUES ('start_2','client_1','request_2','preparation_2','run_2','reservation_2',?,'worker')" [SQL.SQLText(storeProcessGeneration identity)]
+        execute "INSERT INTO control_intents VALUES ('control_2','run_2',NULL,'cancelRun',NULL,NULL,NULL,?,1,NULL,NULL)" [SQL.SQLText(T.replicate 64 "a")]
+        execute "INSERT INTO capture_uploads VALUES ('partial','request_1','client_1','profile','policy',?,10,'2026-01-01T00:00:00Z','pending')" [SQL.SQLText(storeProcessGeneration identity)]) [event]
+      events <- count store "invalidations"
+      pure(identity,events)
+    second <- withCoordinationStore installed $ \store -> do
+      second <- storeIdentity store
+      check "restart rotates only live generation, not ordinary authority" (storeAuthorityEpoch first==storeAuthorityEpoch second && storeProcessGeneration first/=storeProcessGeneration second)
+      rowsEqual store "SELECT state,reason FROM preparations ORDER BY id" [[SQL.SQLText "invalidated",SQL.SQLText "worker-lost"],[SQL.SQLText "consumed",SQL.SQLText "consumed"]] >>= check "lost preparation invalidates without undoing committed approval"
+      count store "reservations WHERE state='quarantined'" >>= check "restart retains both unproven resource claims" . (==2)
+      count store "commands WHERE state='unresolved' AND body=X'6F726967696E616C20626F6479' AND receipt=X'696D6D757461626C652061636365707465642072656365697074'" >>= check "uncertain starts and controls retain original body and immutable receipt" . (==2)
+      rowsEqual store "SELECT supervision,runtime_snapshot,result_state FROM runs" [[SQL.SQLText "lost",SQL.SQLNull,SQL.SQLText "absent"]] >>= check "missing Runtime terminal evidence remains missing with lost supervision"
+      count store "capture_uploads WHERE state='orphan'" >>= check "interrupted upload retains orphan bookkeeping without a capture receipt" . (==1)
+      count store "captures" >>= check "restart invents no capture publication" . (==0)
+      let changed=[("command.changed","/v1/commands/control_2"),("command.changed","/v1/commands/start_2"),("preparation.changed","/v1/preparations/preparation_1"),("request.changed","/v1/requests/request_1"),("run.changed","/v1/runs/run_2"),("run.changed","/v1/runs/run_2/control")]
+      rowsEqual store "SELECT kind,resource_uri,revision,stream_id FROM invalidations WHERE revision!='revision_1' ORDER BY resource_uri"
+        [[SQL.SQLText kind,SQL.SQLText uri,SQL.SQLText(storeProcessGeneration second),SQL.SQLText(storeStreamId first)] | (kind,uri)<-changed]
+        >>= check "restart publishes each changed resource and matching revision on the retained stream"
+      rowsEqual store "SELECT revision FROM preparations WHERE id='preparation_2' UNION ALL SELECT revision FROM requests WHERE id='request_2'" [[SQL.SQLText "revision"],[SQL.SQLText "revision"]] >>= check "consumed preparation and start-pending request remain unchanged"
+      rowsEqual store "SELECT stream_id,sequence,retained_floor FROM service_metadata" [[SQL.SQLText(storeStreamId first),SQL.SQLText(T.pack(show(initialEvents+6))),SQL.SQLText "0"]] >>= check "restart advances exactly six events without resetting stream or retained floor"
+      pure second
+    withCoordinationStore installed $ \store -> do
+      count store "invalidations" >>= check "no-op reopen appends no events" . (==initialEvents+6)
+      rowsEqual store "SELECT revision FROM preparations WHERE id='preparation_1' UNION ALL SELECT revision FROM requests WHERE id='request_1' UNION ALL SELECT revision FROM runs UNION ALL SELECT control_revision FROM runs UNION ALL SELECT revision FROM commands" (replicate 6[SQL.SQLText(storeProcessGeneration second)]) >>= check "no-op reopen changes no resource revisions"
+      forM_ [[1..100],[101..200],[201..205]::[Int]] $ \batch -> mutate store (forM_ batch $ \index -> do
+        let ident="paged_"<>T.pack(show index)
+        execute "INSERT INTO commands(id,revision,profile_id,operation,client_id,authority_epoch,method,resource_uri,idempotency_key,body,receipt,retired,request_id,run_id,preparation_id,accepted_at,state) VALUES (?,'revision','profile','cancel','client_1',?,'POST','/v1/runs/run_2',?,?,?,0,'request_2','run_2','preparation_2','2026-01-01T00:00:00Z','accepted')" [SQL.SQLText ident,SQL.SQLText(storeAuthorityEpoch first),SQL.SQLText ident,SQL.SQLBlob "original body",SQL.SQLBlob "original receipt"]
+        execute "INSERT INTO control_intents VALUES (?,'run_2',NULL,'cancelRun',NULL,NULL,NULL,?,1,NULL,NULL)" [SQL.SQLText ident,SQL.SQLText(T.replicate 64 "a")]) [event]
+    beforeFault <- withCoordinationStore installed $ \store -> do
+      identity <- storeIdentity store
+      let revision="'"<>storeProcessGeneration identity<>"'"
+      count store ("commands c JOIN invalidations i ON i.kind='command.changed' AND i.resource_uri='/v1/commands/'||c.id AND i.revision=c.revision WHERE c.state='unresolved' AND c.revision="<>revision) >>= check "bounded restart pages publish all 205 changed command revisions" . (==205)
+      count store ("invalidations WHERE revision="<>revision) >>= check "paged reconciliation adds no capabilities substitute or duplicate events" . (==205)
+      mutate store (execute "UPDATE requests SET phase='preparing',revision='before-fault' WHERE id='request_1'" []) [event]
+      count store "invalidations"
+    bracket (rawOpen root) SQL.close $ \db -> SQL.exec db "CREATE TRIGGER deny_restart_event BEFORE INSERT ON invalidations WHEN NEW.kind='request.changed' AND NEW.revision!='revision_1' BEGIN SELECT RAISE(ABORT,'fixture event failure'); END"
+    expect "restart event publication failure refuses startup" StoreUnavailable(withCoordinationStore installed(const(pure())))
+    bracket (rawOpen root) SQL.close $ \db -> do
+      rows <- rawRows db "SELECT phase,revision FROM requests WHERE id='request_1'"
+      check "failed invalidation rolls back its matching resource mutation" (rows==[[SQL.SQLText "preparing",SQL.SQLText "before-fault"]])
+      events <- rawRows db "SELECT count(*) FROM invalidations"
+      check "failed invalidation leaves durable replay unchanged" (events==[[SQL.SQLInteger(fromIntegral beforeFault)]])
 
 publicChecks :: FilePath -> IO ()
 publicChecks work = do

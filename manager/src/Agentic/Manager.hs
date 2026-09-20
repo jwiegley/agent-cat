@@ -6,7 +6,7 @@ module Agentic.Manager
     loadConfiguration, installConfiguration, reloadConfiguration, closeConfiguration,
     configurationSnapshot, selectConfiguredProfile, probeConfiguredProfile,
     CoordinationStore, StoreIdentity (..), StoreFailure (..), Checkpoint (..),
-    withCoordinationStore, storeIdentity, checkpointStore,
+    withCoordinationStore, storeIdentity, checkpointStore, backupCoordinationStore, restoreCoordinationStore,
   ) where
 
 import Agentic.Manager.Profile

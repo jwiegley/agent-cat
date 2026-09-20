@@ -6,7 +6,7 @@ module Agentic.Manager.Profile
   ( OperatorProfile (..), PreparedTargetValidator, exactPreparedTarget, Ownership (..), ConfigurationLimits (..),
     validateConfigurationLimits, validateProfiles, QueryLimits (..), Registry,
     PublicProfile, publicId, publicRevision, Diagnostic (..),
-    Selection, selectionContext, selectionInvocation, workflowIdentity,
+    Selection, selectionContext, selectionInvocation, workflowIdentity, restartBinding,
     Discovery, discoveryServer, discoveryWorkflows, discoveryRevision, discoveryEntries, discoverySelection, discoveryProfileRevision, currentCatalogues,
     newRegistry, reloadProfiles, publicProfiles, profileInvocations, selectProfile, probeProfile, probeProfileCapabilities, probeProfileCapabilitiesWith
   ) where
@@ -312,6 +312,25 @@ discover limits p profileRevision = do
         let revision = TE.decodeUtf8 (convertToBase Base16 nonce)
             identifier row = workflowIdentity (operatorId p) (workflowName row)
         pure (Discovery (capabilityServer caps) rows revision [(identifier row, row) | row <- rows] (Selection p) profileRevision)
+
+-- | A private versioned equality digest of declared configuration and descriptor.
+-- It does not certify function identity. Fresh preparation still runs the current validator.
+restartBinding :: Discovery -> WorkflowDescriptor -> Text
+restartBinding discovery descriptor = T.pack(show(hash(BL.toStrict(encode value)) :: Digest SHA256))
+  where
+    profile=selectionContext(discoverySelection discovery)
+    limits=operatorConfigurationLimits profile
+    value=object
+      ["domain" .= ("manager-restart-declaration-v1"::Text),"descriptor" .= descriptor,
+       "id" .= operatorId profile,"workspaceLabel" .= operatorWorkspaceLabel profile,
+       "targetLabel" .= operatorTargetLabel profile,"invocation" .= selectionInvocation(discoverySelection discovery),
+       "cwd" .= operatorCwd profile,"arguments" .= operatorTargetArguments profile,
+       "environment" .= operatorEnvironment profile,"ownership" .= show(operatorOwnership profile),
+       "quarantined" .= operatorQuarantined profile,"person" .= operatorPersonAnswering profile,
+       "resources" .= operatorResourceKeys profile,
+       "limits" .= [limitDrafts limits,limitGlobalDrafts limits,limitGlobalCaptureBytes limits,
+         limitGlobalPageSets limits,limitGlobalConnections limits,limitGlobalDatabaseReaders limits,
+         limitGlobalMutationLedgerBytes limits,limitSafetyControlsPerMinute limits,limitExecutionReservations limits]]
 
 -- | The existing profile-scoped workflow identity, independent of descriptor availability.
 workflowIdentity :: Text -> Text -> Text

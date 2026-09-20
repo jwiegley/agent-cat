@@ -38,7 +38,7 @@ import Control.Exception (SomeException, mask, uninterruptibleMask_, finally, on
 import Control.Monad (forM, forM_, unless, when, void)
 import Crypto.Random (getRandomBytes)
 import Crypto.Hash (Digest, SHA256, hash)
-import Data.Aeson (FromJSON, Value, eitherDecodeStrict', object, (.=))
+import Data.Aeson (Value, eitherDecodeStrict', object, (.=))
 import Data.ByteArray.Encoding (Base (Base16), convertToBase)
 import qualified Data.ByteString as BS
 import qualified Data.List
@@ -125,6 +125,8 @@ withAdmissionClock timer owner action = mask $ \restore -> do
   ready <- newEmptyTMVarIO
   supervisor <- async $ do
     result <- try @SomeException $ withStoreAdmission owner $ \alive -> do
+      permits <- reconcileDrafts owner
+      atomically(writeTVar (queued controller)(Map.fromList[(acceptedRequest permit,permit)|permit<-permits]))
       atomically (writeTVar (liveStore controller) alive >> putTMVar ready ())
       current <- atomically $ do
         ending <- readTVar (closed controller)
@@ -289,13 +291,12 @@ admitOldest controller = operation controller $ locked controller $ do
           (Set.member ident valid && currentPolicy catalogues profile policy workflow descriptor)
           (maybe False id(lookup ident ready)) (resourcesFor catalogues profile)
         candidates=map candidate rows
-        foreignOwner=any (\(_,_,owner)->owner/=generation) occupancy
-        held=[heldLease | (_,heldLease,_)<-occupancy]
-        choice=if foreignOwner then Nothing else oldestEligible (limitExecutionReservations limits) held candidates
+        held=[heldLease | (_,heldLease)<-occupancy]
+        choice=oldestEligible (limitExecutionReservations limits) held candidates
     events <- forM rows $ \row@(QueueRow ident _ _ _ _ _ _) -> do
       let facts=candidate row
           reasons :: [Text]
-          reasons=if foreignOwner || not(candidateEnabled facts) then ["quarantined"] else
+          reasons=if not(candidateEnabled facts) then ["quarantined"] else
             if not(candidateReady facts) then ["missing-inputs"] else
             if length held>=limitExecutionReservations limits then ["capacity"] else
             if any (\(Held _ keys)->not(Set.disjoint keys(candidateResources facts))) held then ["profile-busy"] else []
@@ -1054,15 +1055,13 @@ queueRows = do
   forM rows $ \row->case row of
     [SQL.SQLText a,SQL.SQLText b,SQL.SQLText c,SQL.SQLText d,SQL.SQLText e,SQL.SQLText f,SQL.SQLText g]->QueueRow a b c d e f <$> decimal g
     _->refuseTransaction StorageUnavailable
-heldRows :: Transaction [(Text,Held,Text)]
+heldRows :: Transaction [(Text,Held)]
 heldRows = do
-  rows<-query "SELECT v.id,v.slot,v.process_generation,(SELECT json_group_array(json_array(kind,resource_key)) FROM reservation_resources WHERE reservation_id=v.id) FROM reservations v WHERE v.state!='released'" []
-  forM rows $ \row->case row of
-    [SQL.SQLText ident,SQL.SQLInteger slot,SQL.SQLText generation,SQL.SQLText keys]->do
-      values<-decodeT(TE.encodeUtf8 keys)::Transaction [[Text]]
-      resources<-forM values $ \value->case value of ["operator",name]->pure(OperatorResource name);["unclassified",""]->pure UnclassifiedResource;_->refuseTransaction StorageUnavailable
-      pure(ident,Held(fromIntegral slot)(Set.fromList resources),generation)
-    _->refuseTransaction StorageUnavailable
+  claims <- reservationOccupancy
+  forM claims $ \(ident,slot,keys) -> do
+    let resource ("operator",name)=OperatorResource name
+        resource _=UnclassifiedResource
+    pure(ident,Held slot(Set.fromList(map resource keys)))
 currentPolicy :: [(Text,Discovery)] -> Text -> Text -> Text -> Text -> Bool
 currentPolicy catalogues profile revision workflow descriptor = case lookup profile catalogues of
   Just value->discoveryProfileRevision value==revision && discoveryRevision value==descriptor && isJust(lookup workflow(discoveryEntries value))
@@ -1126,8 +1125,6 @@ decimal :: Text -> Transaction Integer
 decimal value=case reads(T.unpack value)of [(number,"")]|number>=0 && number<=18446744073709551615 && T.pack(show number)==value->pure number;_->refuseTransaction StorageUnavailable
 readTVarIO :: TVar a -> IO a
 readTVarIO=atomically.readTVar
-decodeT :: FromJSON a => BS.ByteString -> Transaction a
-decodeT=either(const(refuseTransaction StorageUnavailable))pure.eitherDecodeStrict'
 groupsOf :: Int -> [a] -> [[a]]
 groupsOf _ []=[]
 groupsOf size values=let (prefix,rest)=splitAt size values in prefix:groupsOf size rest
