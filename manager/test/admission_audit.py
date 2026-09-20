@@ -309,7 +309,7 @@ elif mode in {"store-cancel-gap", "store-cancel-mutant", "store-expiry-mutant"}:
     else:
         replace(path,"boundedWith db remaining action = mask $ \\restore ->\n  withAsync", "boundedWith db remaining action = mask $ \\restore -> do\n  Audit.retainSqlInterrupt (SQL.interrupt db)\n  withAsync")
     if mode == "store-expiry-mutant":
-        replace("cli/test/ManagerApprovalProbe.hs", '[False,True] $ \\expiry ->', '[True,False] $ \\expiry ->')
+        replace("cli/test/ManagerApprovalProbe.hs", 'storeCancellationChecks work native = forM_ [False,True] $ \\masked -> forM_ [False,True] $ \\expiry ->', 'storeCancellationChecks work native = forM_ [False,True] $ \\masked -> forM_ [True,False] $ \\expiry ->')
     target, arguments = "manager-approval-check", ["store-cancel-gap"]
     marker = "FAIL missed SQL interrupt joins original action"
 elif mode == "ingestion-retained-mutant":
