@@ -21,7 +21,7 @@ import Agentic.Manager.Protocol.Artifact (validExportName)
 import Agentic.Manager.Protocol.Json (decodeStrictValue)
 import Agentic.Manager.Store
 import Agentic.Runtime (maxFrameBytes, maxArtifactBytes)
-import Control.DeepSeq (NFData)
+import Control.DeepSeq (NFData (..))
 import Control.Exception (SomeException, mask, finally, throwIO, try)
 import Control.Monad (unless, when, void, forM, forM_)
 import Control.Monad.Trans.Class (lift)
@@ -118,7 +118,8 @@ submissionReferences (Submission _ _ _ refs _) = refs
 -- | Enqueue materialization only, from fresh acceptance or validated durable queue intent.
 -- It is never approval, a CommandAttempt, a DispatchTicket or worker authority.
 data AcceptedEnqueue = AcceptedEnqueue !Text !Text !Text !QueueAssociation
-  deriving (Generic, NFData)
+instance NFData AcceptedEnqueue where
+  rnf (AcceptedEnqueue generation epoch command association) = rnf (generation, epoch, command, association)
 data QueueAssociation = QueueAssociation !Text !Text !Text !Text !Text !Text !Text !Text
   deriving (Generic, NFData)
 submissionEnqueue :: Submission -> Maybe AcceptedEnqueue
