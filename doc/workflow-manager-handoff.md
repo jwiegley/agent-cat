@@ -43,8 +43,9 @@ or undo provider effects. This exclusion does not close other package criteria.
 Issue `acat-wm-020-5x61` remains in progress. The reviewed restart/restoration
 application is integrated at `094604c482898197a8e0cdc08bffa9b65afda8d0`.
 The two authorized StoreCheck fixture corrections are integrated at `65e7854`.
-The current correction changes one existing negative-test import anchor, not
-production behavior or package acceptance. Source and evidence remain in
+Test-only corrections also update existing import-removal and expiry-case
+anchors, without changing production behavior or granting package acceptance.
+Source and evidence remain in
 `implementation.9tGzKH/restart.gQ3o7Iag`. Parent retains integration, execution
 decisions and acceptance.
 
@@ -111,14 +112,19 @@ assumed `catch` ended the import list. Store now also imports `fromException`.
 The correction targets the comma-delimited `onException` token and preserves
 the existing exact-one-occurrence guard, mutation bodies and negative assertions.
 
-Evidence remains in `validation-revised/{mac,linux}` and tracker comment 268.
-No mutant execution or full Store-gate pass is inferred from the preparation
-failure. Reuse the passed Store constituents and earlier documentation/Profile
-results, then run only the existing `store-cancel-mutant` and
-`store-expiry-mutant` modes and the unrun Commands, Drafts, Admission and
-Approval gates on each platform. Report this composed coverage explicitly,
-without fabricating a fresh successful Store wrapper exit or repeating valid
-constituents merely for that label.
+The initial anchor failure remains in `validation-revised/{mac,linux}` and
+tracker comment 268. Both subsequent tails passed `store-cancel-mutant` N1/N8,
+then stopped before expiry-mutant build because its generic expiry-loop anchor
+matched both shutdown and Store probes. The correction scopes the transformation
+to `storeCancellationChecks`, leaving the shutdown probe and mask order unchanged.
+Its intended first failure is the `(masked,expiry)` case `(False,True)`.
+
+Tail evidence and the original failure remain in `validation-tail/{mac,linux}`
+and tracker comment 269. Reuse the completed constituents and earlier
+documentation/Profile results, then execute only `store-expiry-mutant` and
+the unrun Commands, Drafts, Admission and Approval gates on each platform.
+Report composed coverage explicitly, without inventing a fresh successful
+Store wrapper exit or repeating valid constituents merely for that label.
 
 Final disposition remains with the same independent milestone reviewer after
 the integrated results. Seeded crash prefixes, native preparation and the
@@ -327,8 +333,8 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-20T17:47:19Z`. The next active-work deadline is
-`2026-09-20T18:47:19Z`. Continue with WM-020 through existing owners, with no
+Refocus completed at `2026-09-20T18:37:39Z`. The next active-work deadline is
+`2026-09-20T19:37:39Z`. Continue with WM-020 through existing owners, with no
 OS containment or verification-machinery detour. The resumed persistent goal
 still contains older baseline and scope wording. The user's latest correction
 governs current work, and `/goal-tweak` remains available for updating that

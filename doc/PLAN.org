@@ -9939,7 +9939,7 @@ Current scope: doc/workflow-manager-handoff.md#scope-correction-of-2026-09-20. T
 :LABELS:   ["p4","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-20 Sun 11:23]
+:MODIFIED: [2026-09-20 Sun 11:38]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-020
 :SOURCE_REPO: agent-cat
@@ -10116,6 +10116,13 @@ implies that effects outside that backup did not occur.
     "author": "johnw",
     "text": "Both platform Store gates on65e785477c202235e8e062f4f62dee2db57a6e5e passed their restart, normal, admission-data and terminal-admission modes at N1/N8, followed by restore-interruption and store-cancel-gap N1/N8. They then stopped at the same store-cancel-mutant preparation error: expected exactly one manager/src/Agentic/Manager/Store.hs boundary anchor. Neither mutant execution nor a complete Store-gate pass is inferred from that failure.\n\nThe existing negative-test builder removes the unused onException import after replacing boundedWith. Its old anchor assumed catch ended the import list. Current Store correctly also imports fromException. The only code correction changes that one anchor to the comma-delimited onException token, retaining the existing exact-one-occurrence guard and all mutation bodies, assertions, budgets and cleanup semantics. Production source is unchanged, and no new helper or fallback is introduced. This concrete test defect prevents essential existing product validation.\n\nRetain the valid Store constituent evidence at its unchanged execution scope. Next execute the existing store-cancel-mutant and store-expiry-mutant modes on each platform, then the still-unrun Commands, Drafts, Admission and Approval gates. Do not repeat passed Store constituents merely to obtain a fresh wrapper exit. Report composed constituent coverage explicitly and retain the failed original top-level Store results. Full owning-gate equivalence is a final reviewer decision, not a fabricated fresh gate pass.\n\nOriginal source archives, stdout/stderr, audit roots and platform reports remain untouched. No package acceptance, OS containment, historical cleanup, new verification framework, client or paid execution is claimed. Refocus remains17:47:19Z with next active-work deadline18:47:19Z.\n",
     "created_at": "2026-09-20T18:23:56Z"
+  },
+  {
+    "id": 269,
+    "issue_id": "acat-wm-020-5x61",
+    "author": "johnw",
+    "text": "Both current platform tails passed store-cancel-mutant at N1/N8 with the intended missed-interrupt assertion. The following store-expiry-mutant stopped before build because its expiry-loop anchor occurs twice, in shutdownRunningChecks and storeCancellationChecks. The exact-one guard correctly refused ambiguity. Commands, Drafts, Admission and Approval remain unrun.\n\nThe single-line correction scopes the existing expiry-order transformation to the complete storeCancellationChecks definition line. It leaves the shutdown probe, mask-case order, exact-one guard, mutation body and expected assertion unchanged. The first intended expiry failure must identify the (masked,expiry) pair(False,True). Python syntax and unique targeting were checked, with no production or other test change.\n\nNext execute only the missing expiry mutant on each platform, then the remaining four owning gates. Reuse the already passed cancellation mutant and all earlier valid constituent evidence, without inventing a fresh whole Store-gate exit. The original preparation failures, completed audit roots and raw logs remain in validation-tail. No package acceptance or historical cleanup follows.\n\nRefocus completed18:37:39Z, next active-work deadline19:37:39Z. These narrowly repaired existing checks directly block essential WM020 validation. No new verification mechanism or product scope is added, and the containment exclusion remains absolute. Continue to the same milestone review after meaningful integrated results, then the dependent roadmap.\n",
+    "created_at": "2026-09-20T18:38:25Z"
   }
 ]
 #+end_src
