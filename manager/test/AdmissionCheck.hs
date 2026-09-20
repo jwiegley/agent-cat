@@ -800,10 +800,12 @@ captureChecks work native=withFixture work native "captures" 1 [("a",[])] $ \fix
   assertion "invalid capture remains visible and is not silently re-enqueued" (draftPhase current=="draft" && case draftReadiness current of Readiness _ _ _ errors->not(null errors))
 
 reopenChecks :: FilePath -> FilePath -> IO ()
-reopenChecks work native=withFixture work native "reopen" 1 [("a",[])] $ \fixture@(Fixture _ installed owner _ _)->do
+reopenChecks work native=forM_ [False,True] $ \hasBinding->withFixture work native ("reopen-"<>show hasBinding) 1 [("a",[])] $ \fixture@(Fixture _ installed owner _ _)->do
   (draft,nonce,original)<-withAdmission owner $ \controller->do
     draft<-newDraft fixture 0 "a" "reopen"
     (nonce,receipt)<-enqueue controller fixture 0 draft "reopen"
+    -- Model a historical queue that predates the immutable restart binding.
+    unless hasBinding $ mutate owner(execute "DELETE FROM request_restart_bindings WHERE request_id=?" [SQL.SQLText(draftId draft)])
     pure(draft,nonce,receipt)
   oldGeneration<-storeProcessGeneration <$> storeIdentity owner
   retryStoreCleanup owner
@@ -812,9 +814,18 @@ reopenChecks work native=withFixture work native "reopen" 1 [("a",[])] $ \fixtur
     assertion "actual Store reopen changes ownership generation" (storeProcessGeneration identity/=oldGeneration)
     proof<-authenticateCredential fresh(BS.replicate 32 1)>>=right
     reply<-enqueueRequest controller proof(draftId draft)nonce(etag draft)(body "enqueue")>>=right
-    assertion "reopen exact receipt cannot mint a missing enqueue capability" (reply==original)
+    assertion "reopen exact enqueue retry preserves the original receipt" (reply==original)
     selected<-admitOldest controller>>=right
-    assertion "durable queued facts cannot recreate admission authority" (case selected of Nothing->True;_->False)
+    if hasBinding then do
+      live<-case selected of Just value->pure value;Nothing->error "validated restart did not admit"
+      review<-await(awaitReview live)>>=right
+      assertion "validated durable queue materializes a fresh native preparation" (reviewRequest review==draftId draft)
+    else do
+      assertion "unbound durable queued facts cannot recreate admission authority" (case selected of Nothing->True;_->False)
+      number fresh "SELECT count(*) FROM reservations" >>=assertion "unbound historical queue creates no worker reservation" . (==0)
+    bindings<-number fresh "SELECT count(*) FROM request_restart_bindings"
+    assertion "restart preserves existing bindings without fabricating missing ones" (bindings==(if hasBinding then 1 else 0))
+    number fresh "SELECT count(*) FROM start_intents" >>=assertion "reopened queue and exact retry fabricate no approval or start" . (==0)
     scalarText fresh "SELECT last_ordinal FROM admission_queue_clock" >>=assertion "durable queue clock survives actual reopen" . (=="1")
 
 reservationBoundaryChecks :: FilePath -> FilePath -> IO ()
