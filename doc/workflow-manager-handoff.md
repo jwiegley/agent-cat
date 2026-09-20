@@ -135,10 +135,24 @@ at 18:58:40–19:02:40Z. Current evidence and the exact source patch are in
 `/Users/johnw/Products/o20.eDcoMR` and `opacity-correction-result.md`, with
 tracker comment 270. Original failed Commands results remain untouched.
 
-Reuse those current macOS results and source-valid Store/Profile evidence,
-then run current Linux Commands and finish Drafts, Admission and Approval on
-both platforms. The prior Store wrapper failures remain failures, with their
-successful constituents reused explicitly rather than a fabricated new exit.
+Current Commands and Drafts subsequently passed on both platforms. Admission
+then stopped at an older fixture that rejected every durable queue after reopen,
+including the now-supported fully validated case. The test-only correction
+retains an unbound historical queue as the negative control and requires an
+actual fresh native review for valid bound intent. Both cases preserve the
+original receipt and queue clock, create no start intent, and never fabricate
+a missing binding.
+
+The complete macOS Admission gate passed at 19:21:12–19:25:24Z, including
+restart, shutdown and normal N1/N8, source opacity, package boundary and real
+interruption checks. Evidence is `o20.eDcoMR/admission-reopen.*`, with fresh
+`manager-admission.MXiUi5`, `audit-package-boundary.g85pifwo` and
+`audit-interruption.y9_eueli`. The unit's `reopen-correction-result.md` and
+tracker comment 271 retain the exact scope and all original failures.
+
+Reuse these current results, run current Linux Admission and both Approval
+gates, then request final milestone disposition. The prior Store wrapper
+failures remain failures, with successful constituents explicitly reused.
 
 Final disposition remains with the same independent milestone reviewer after
 the integrated results. Seeded crash prefixes, native preparation and the
