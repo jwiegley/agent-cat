@@ -38,6 +38,31 @@ cleanup quarantine, storage-safety behavior and the prohibition on signalling
 stored PIDs. Do not claim that these mechanisms contain arbitrary descendants
 or undo provider effects. This exclusion does not close other package criteria.
 
+## Active WM-021 unit
+
+Issue `acat-wm-021-ez37` is in progress after all recorded dependencies closed.
+One isolated author works in `implementation.9tGzKH/quotas.N3qrqDWt/source`,
+branch `wm021-quotas-20260920`, based on WM-020 acceptance `77652019`. Private
+runtime paths are under `/Users/johnw/Products/q.KqVeHD`, with a serialized
+sibling build directory. Parent retains Git, tracker, integration and acceptance.
+
+The unit implements existing-scope quotas, consistent event retention and
+bounded reads, protected receipt retirement and conservative collection through
+current owners. It does not create a parallel resource framework, remote prune
+endpoint, speculative transport service or historical cleanup project. The
+initial grant is affected Werror and meaningful local fresh-fixture tests,
+with integrated gates selected from the actual coherent delta afterward.
+
+Tracker comments 273–274 and the unit's `brief.md`, `start-note.md` and
+`decision-note.md` define the boundaries. Known manager capture identities use
+a fixed 24-hour grace after first proven durable eligibility, reset on changed
+references or safety facts. Age alone is not authority, and unknown entries or
+unprovable temporary files remain retained. Receipt eligibility requires
+proven inactivity and at least 30 further days, followed by lifetime non-content
+tombstones. Linked runs need genuine validated terminal evidence, with no
+inferred cleanup or fabricated terminal time. Quota pressure refuses rather
+than evicting protection. No WM-021 acceptance is claimed.
+
 ## WM-020 acceptance
 
 Issue `acat-wm-020-5x61` is closed. Continued independent milestone reviewer
@@ -368,8 +393,8 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-20T19:47:34Z`. The next active-work deadline is
-`2026-09-20T20:47:34Z`. Continue with WM-021 through existing owners, with no
+Refocus completed at `2026-09-20T20:40:19Z`. The next active-work deadline is
+`2026-09-20T21:40:19Z`. Continue with WM-021 through existing owners, with no
 OS containment or verification-machinery detour. The resumed persistent goal
 still contains older baseline and scope wording. The user's latest correction
 governs current work, and `/goal-tweak` remains available for updating that
