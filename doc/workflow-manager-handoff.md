@@ -7,25 +7,46 @@
 WM-018 is accepted on 2026-09-19 at canonical
 `4ad20a43ad5c1b59cbf566accddd6a9cb24a08b6`. The accepted baseline is
 WM-001–WM-018 and G0, which is 18 of 44 packages and one of six gates.
-Next delivery is WM-019 shutdown, containment and storage-failure supervision,
-followed by the unchanged WM-020–WM-044 and G1–G5 roadmap. G1 and later
-service, client, containment and release packages are not closed by this result.
+Next delivery is WM-019 shutdown and storage-failure supervision, followed by
+WM-020–WM-044 and G1–G5 under the scope correction below. G1 and later service,
+client and release packages remain open.
 
 The user's 2026-09-17 refocus continues to govern delivery. Do not reopen the
 verification-machinery micro-fix loop, paused L08 review or historical recovery
 as a substitute for the next product milestone. The completed
-[closure plan](workflow-manager-closure-plan.md) and frozen implementation plan
-remain the authority for their respective scopes.
+[closure plan](workflow-manager-closure-plan.md) and implementation plan remain
+the references for their respective scopes, subject to the user's correction
+below.
 
-## WM-019 reviewed checkpoint and blockers
+## Scope correction of 2026-09-20
+
+The user explicitly excludes all OS containment features from this project.
+Do not implement or experiment with systemd/cgroup containment, launchd
+containment, sandboxes, containers, VMs or another OS-enforced descendant
+boundary. The pending request for Linux containment experiments is withdrawn,
+not awaiting authorization. A stronger macOS boundary is not a deliverable.
+
+This correction applies throughout WM-001–WM-044 and G0–G5, including D3 and
+the OS-containment portions of A20. The research documents remain historical
+records. Their containment requirements and containment-based capability or
+release gates no longer govern active work. Do not create a replacement
+containment feature under another name.
+
+Ordinary ownership, cancellation and cleanup of processes started by the
+application remain in scope. Retain original handles, join outcomes, uncertain
+cleanup quarantine, storage-safety behavior and the prohibition on signalling
+stored PIDs. Do not claim that these mechanisms contain arbitrary descendants
+or undo provider effects. This exclusion does not close other package criteria.
+
+## WM-019 reviewed checkpoint
 
 Issue `acat-wm-019-9eye` remains in progress. Its bounded local shutdown/safety
 core is integrated and validated at
 `489a1a411aca4017284fe2f34b2b69f0b390db52`, not accepted as the full package.
 Source, reviews and retained failures remain under
-`implementation.9tGzKH/shutdown.327OnbQj`. The active goal is stopping here
-pending explicit platform authorization and decisions. No later package or G1
-completion follows from this core result.
+`implementation.9tGzKH/shutdown.327OnbQj`. The containment-based blocker is
+withdrawn. Next reconcile remaining in-scope shutdown and storage requirements
+against existing results, without new containment work or duplicate local gates.
 
 The ten-path core provides explicit drain deadlines and cancellation through
 existing Admission, Store and Worker owners. New admissions are fenced while
@@ -63,20 +84,12 @@ Raw evidence is in `shutdown.327OnbQj/validation`, and the final disposition is
 `review-integrated-core.md`. No further local corrective edit or duplicate gate
 is indicated. Tracker comment 260 records this bounded stopping point.
 
-Linux read-only metadata confirms active cgroup2 delegation, but user-writable
-migration controls mean a bare user-service cgroup is not sufficient evidence.
-Authorization has been requested for temporary non-production systemd/cgroup
-test units without privilege escalation or persistent configuration changes.
-That decision is pending. The documented macOS launchd process-group behavior
-still does not establish cleanup of escaping descendants, and no stronger
-boundary is established. No service, sandbox, VM or hard-death experiment has
-run under this unit.
-
-Both-platform acceptance remains an unmet requirement. Unsupported containment
-must not advertise unattended mutation, and disabling all profiles cannot make
-the requirement vacuous. Broader A19 storage/pressure acceptance also remains,
-with pager-quota and injected-I/O evidence distinguished from physical disk
-or device failure. No helper or ordinary rerun removes these platform blockers.
+Earlier Linux and macOS capability observations remain historical evidence.
+No service, sandbox, VM or hard-death containment experiment ran in this unit.
+Neither missing containment permission nor an unproved stronger macOS boundary
+is a current blocker. Broader A19 storage/pressure acceptance remains separate,
+with pager-quota and injected-I/O results distinguished from physical disk or
+device failure. The user's scope correction does not relabel those results.
 
 ## WM-018 acceptance
 
@@ -232,10 +245,11 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-19T22:35:09Z`. On resumption, check the real clock
-before new work and use `2026-09-19T23:35:09Z` as the prior active-work deadline.
-The immediate requirement is explicit Linux experiment authorization and a
-stronger macOS containment decision, not another local helper or rerun.
+Refocus completed at `2026-09-20T07:35:47Z`. The next active-work deadline is
+`2026-09-20T08:35:47Z`. The user's exclusion of OS containment supersedes the
+previous platform blocker. Continue only the requested workflow-manager work.
+The persistent goal still contains the older frozen-scope wording and requires
+the user's `/goal-tweak` command to reflect this correction before resumption.
 Earlier disclosed timing lapses remain recorded.
 
 ## Historical WM-016 closure record

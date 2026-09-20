@@ -9769,14 +9769,14 @@ contract rather than silently truncated.
 ]
 #+end_src
 
-* DOING [#B] WM-019: Implement shutdown, containment, and storage-failure supervision    :p4:
+* DOING [#B] WM-019: Implement shutdown and storage-failure supervision    :p4:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-wm-019-9eye
 :LABELS:   ["p4","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-19 Sat 15:35]
+:MODIFIED: [2026-09-20 Sun 00:40]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-019
 :SOURCE_REPO: agent-cat
@@ -9784,57 +9784,43 @@ contract rather than silently truncated.
 :ORIGINAL_SIZE: 0
 :END:
 
-Frozen plan: doc/research/workflow-manager-implementation-plan.md
+Original plan: doc/research/workflow-manager-implementation-plan.md
 Work package: WM-019
 Phase: P4
-Plan SHA-256: 80d0fc1f5785d1ba18136c840492f83d8920ea33d67e609c44f098f5d7c5ebf6
+Original plan SHA-256: 80d0fc1f5785d1ba18136c840492f83d8920ea33d67e609c44f098f5d7c5ebf6
+Current scope correction: doc/workflow-manager-handoff.md#scope-correction-of-2026-09-20
+
+The user excludes all OS containment features and experiments. The original research record remains unchanged, but its containment requirements do not govern active work. No service/cgroup, launchd, sandbox, container, VM or stronger descendant boundary is a deliverable. The Linux experiment request is withdrawn, and an unproved stronger macOS boundary is not a blocker.
 
 ,**Dependencies:** WM-012, WM-013, WM-014, WM-015, WM-016.
 
-,**Work:** Implement draining shutdown, explicit cancel-with-deadline, invalidation
-of unapproved preparations, and cleanup-based reservation release. Keep a
-bounded safety path able to stop workers when ordinary mutation/storage queues
-are saturated. If durable storage is unavailable, refuse normal operations and
-do not return a committed receipt for emergency physical cleanup.
+,**Work:** Implement draining shutdown, explicit cancel-with-deadline, invalidation of unapproved preparations, and cleanup-based reservation release. Keep a bounded safety path able to stop original owned workers when ordinary mutation/storage queues are saturated. If durable storage is unavailable, refuse normal operations and do not return a committed receipt for emergency physical cleanup.
 
-Integrate the selected Linux/macOS containment boundary around manager-owned
-workers. Test parent death, nested children, ignored termination, and descendants
-that leave an ordinary process group. Containment evidence must identify what
-engine/process resources it can actually stop. Never claim cancellation undoes
-completed provider effects. Do not signal old PIDs read from disk.
+Preserve original process/worker/control ownership and join outcomes. Unconfirmed cleanup retains quarantine rather than enabling reuse. Stored PIDs confer no signalling authority, and cancellation does not undo completed provider effects. Ordinary clean-shutdown validation remains distinct from the withdrawn OS-containment feature and adversarial escaped-descendant acceptance.
 
-,**Complete when:** Both platforms have real hard-death and clean-shutdown
-acceptance for supported profiles. Unproven survivors cause resource quarantine,
-not reuse. Database full/busy/failure does not block the in-memory safety path
-or produce false terminal cancellation. An unsupported containment environment
-cannot advertise unattended mutation support.
+,**Complete when:** Ordinary owned-process clean shutdown is validated on Linux and macOS. Unconfirmed cleanup does not release resources. Database full/busy/failure does not block the in-memory safety path or produce false terminal cancellation. Existing ownership, bounded-admission, uncertainty and no-replay rules remain satisfied, with actual execution evidence and independent review.
 
-Primary editing surfaces from the plan:
-| WM-019 through WM-022 | Manager worker/state/store lifecycle, the selected service-containment support, proposed `manager/test/` and `test/manager_probe.py`. |
+Primary editing surfaces: existing manager worker/state/store lifecycle and existing manager tests. No service-containment support is required.
 
 Assigned invariants:
 | I04 | A manager-owned control pipe outlives any HTTP/SSE connection. Network disconnection does not become control EOF. | WM-012, WM-019, WM-026, WM-039. |
 | I07 | Stored paths, root identities, native IDs, PIDs, and invocation metadata do not confer execution or signalling authority. | WM-008, WM-012, WM-018 through WM-020, WM-024. |
 | I14 | Resource bounds are enforced before large allocation and at global as well as client/profile boundaries. Safety supervision survives ordinary queue saturation. | WM-007, WM-009 through WM-013, WM-019, WM-021, WM-024 through WM-028. |
 
-Explicitly assigned acceptance scenarios:
+Assigned acceptance scenarios:
 | A03 | Enqueue competing shared/independent profiles at maximum reservations. Confirm FIFO eligibility, no partial-resource deadlock, review occupancy, and cleanup-based release. | WM-013, WM-019, WM-041. |
 | A19 | Saturate uploads/drafts/event streams/page sets/commands and fill the DB disk. Refuse normal work honestly, keep bounded safety supervision available, and never acknowledge an uncommitted cancellation. | WM-019, WM-021, WM-028, WM-041. |
-| A20 | Kill manager/worker/group leader and exercise escaped descendants on Linux and macOS. Prove containment or quarantine affected resources, never signal a recycled stored PID. | WM-019, WM-020, WM-041, WM-043. |
+| A20, remaining scope | Preserve ordinary original-owner cleanup and quarantine uncertainty. Never signal a recycled stored PID. OS-containment and escaped-descendant boundary acceptance are withdrawn. | WM-019, WM-020, WM-041, WM-043. |
 
-The complete plan, including global gates, applies. No completion claim follows from registration. Use current-worktree direnv only. Never run nix develop or install dependencies ad hoc. Coordinate existing source ownership, preserve unrelated work, and attach actual checks plus independent review before closure.
+The remaining plan and global gates apply subject to the user's scope correction. This correction does not itself close the package. Use current-worktree direnv, preserve unrelated work and existing results, and avoid duplicate local gate runs when the application bytes are unchanged.
 
 ** Acceptance Criteria
 
-Both platforms have real hard-death and clean-shutdown
-acceptance for supported profiles. Unproven survivors cause resource quarantine,
-not reuse. Database full/busy/failure does not block the in-memory safety path
-or produce false terminal cancellation. An unsupported containment environment
-cannot advertise unattended mutation support.
+Ordinary owned-process clean shutdown is validated on Linux and macOS. Unconfirmed cleanup does not release resources. Database full/busy/failure does not block the in-memory safety path or produce false terminal cancellation. Existing ownership, bounded-admission, uncertainty and no-replay rules remain satisfied, with actual execution evidence and independent review. OS containment features, experiments and containment-based capability/release conditions are excluded by the user on 2026-09-20.
 
 ** Notes
 
-WM-002 containment ceiling: manager/test/containment_probe.py proves a descendant that calls setsid survives original process-group SIGTERM, then verifies private-pipe fixture cleanup. This is negative capability evidence, not service containment. Existing native supervisor/worker discard/cancel/SIGTERM cleanup passed WM-001, but does not prove arbitrary escaped-descendant cleanup. Upstream systemd.kill.xml documents KillMode=control-group and finite stop/final-kill behavior as the Linux candidate; actual Linux acceptance remains required. Installed macOS launchd.plist(5), AbandonProcessGroup, only promises same-PGID cleanup and is insufficient alone. Do not enable unattended mutation on an unproven platform or claim G1/G3/G5 containment complete. Full plan scope, including macOS acceptance, is unchanged.
+Current scope: doc/workflow-manager-handoff.md#scope-correction-of-2026-09-20. The user withdrew all OS containment features and experiments. Linux experiment authorization is not pending, and a stronger macOS boundary is not a deliverable or blocker. Existing process-group limitation evidence is historical, not a future implementation requirement. Preserve ordinary owned-process cleanup, uncertainty, storage-safety and original-handle authority. Prior containment-oriented notes and decisions remain in Git history and comments, not current acceptance criteria.
 
 ** Dependencies
 
@@ -9926,6 +9912,13 @@ WM-002 containment ceiling: manager/test/containment_probe.py proves a descendan
     "author": "johnw",
     "text": "WM-019 bounded local core validated, 2026-09-19. Full package and G1 remain open.\n\nCanonical implementation489a1a411aca4017284fe2f34b2b69f0b390db52 passed both requested integrated gates once, sequentially, with no unexpected top-level failure. Admission ran21:43:36–21:49:20Z and Approval21:49:38–22:26:29Z, both exit0. They executed registered shutdown modes at N1/N8, current native lifecycle/pressure/storage-safety checks, the delayed-caller and acceptance races, and existing owning checks/audits. Build-only results are not presented as native evidence. Exact raw commands, environments, statuses, stdout/stderr and gate-owned artifacts are under shutdown.327OnbQj/validation.\n\nContinued independent reviewer0fd80d8f-8c95-4df9-8407-09f5479e463d found no issues and validated this bounded local shutdown/storage-safety core. Review-integrated-core.md records the disposition. No further local corrective edit or duplicate gate is indicated. Parent independently confirmed unchanged canonical HEAD, empty tracked/index changes and all three frozen research hashes after execution. Original-environment Git cleanliness is qualified separately from private-HOME default-ignore differences. No path was cleaned or adopted.\n\nVerified core behavior includes original registration notification before ordinary joins, retained batches and immutable outcomes, sixteen occupied Admission slots with held SQL, real running/person-waiting drain and controls with owned History, original cleanup and safe scoped reuse, active cancellation/deadline without fabricated Runtime cancellation or consent, automatic definite poison and exact writable FULL/IO response, original committed timer retirement and no delayed old-caller effect on a later scope. Existing failure, quarantine, admission, contract, opacity and mutant checks remain intact. Old failures retain their original scope.\n\nRemaining frozen WM019 requirements are substantive platform work: supported Linux/macOS containment and actual parent-death, nested-child, ignored-termination, escaped-group and clean-shutdown cases, containment-or-quarantine evidence, and withholding unattended mutation where unsupported. Broader A19 storage/pressure acceptance also exceeds this local core. Private pager-quota FULL is not host-disk exhaustion, injected SQLite IO is not actual device/VFS failure, and confirmed-rollback read-only IO is outside the approved writable latch. No exhaustive cross-product or provider-effect rollback is claimed.\n\nLinux temporary service/cgroup fixture authorization has been requested and remains absent across continuation checkpoints. No such experiment was run. Read-only metadata showed writable migration controls, so a bare user-service cgroup is not yet a sufficient boundary. Stronger macOS containment is unestablished, and launchd process-group cleanup cannot be relabeled as escaped-descendant proof. No additional helper or ordinary rerun can remove these blockers. The active goal must stop at this reviewed checkpoint pending explicit authorization and platform decisions, without claiming WM019/G1 or the full roadmap complete.\n\nAccepted baseline remains WM-001 through WM-018 and G0. Parent owns the next bounded experiment decision after user authorization, with no privilege escalation or persistent configuration change implied. Refocus22:35:09Z, next active-work deadline23:35:09Z. WM-019 stays in progress with the validated core integrated.\n",
     "created_at": "2026-09-19T22:35:52Z"
+  },
+  {
+    "id": 261,
+    "issue_id": "acat-wm-019-9eye",
+    "author": "johnw",
+    "text": "User-directed scope correction, 2026-09-20.\n\nThe user explicitly rejects all OS containment features as unrequested scope expansion. Remove them from active work across WM-001 through WM-044 and G0 through G5, including D3 and the OS-containment portions of A20. Do not implement or experiment with systemd/cgroup containment, launchd containment, sandboxes, containers, VMs or another OS-enforced descendant boundary. Do not reintroduce the feature under another name. The pending Linux experiment request is withdrawn, not awaiting approval. A stronger macOS containment boundary is not a deliverable or blocker.\n\nOrdinary owned-process shutdown, cancellation, original-handle joining, uncertain-cleanup quarantine and storage-failure safety remain. Stored PIDs still confer no signalling authority. These mechanisms do not promise arbitrary escaped-descendant cleanup or reversal of provider effects. Existing negative capability evidence remains historical, and no OS containment experiment ran in the WM-019 unit.\n\nThe current scope is recorded in doc/workflow-manager-handoff.md#scope-correction-of-2026-09-20 and current manager documentation. Frozen research records and prior reviews/results remain unchanged as historical evidence. Their OS-containment requirements and containment-based capability/release gates no longer apply to active work. This is an explicit user-directed scope correction, not a passing containment claim or automatic closure of other criteria.\n\nWM-019 is renamed shutdown and storage-failure supervision. Its reviewed local core remains integrated at489a1a4, with both local owning gates passing. Next use existing results to reconcile remaining in-scope requirements. Do not reopen a helper project or duplicate passing local gates. Broader A19 evidence retains its actual scope. The persistent goal has immutable older wording, so its correction requires the user's /goal-tweak command rather than an agent edit. The withdrawn containment requirement must not remain an active product blocker.\n",
+    "created_at": "2026-09-20T07:40:23Z"
   }
 ]
 #+end_src
