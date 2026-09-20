@@ -10150,14 +10150,14 @@ implies that effects outside that backup did not occur.
 ]
 #+end_src
 
-* TODO [#B] WM-021: Implement quotas, retention, and bounded collection    :p4:
+* DOING [#B] WM-021: Implement quotas, retention, and bounded collection    :p4:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-wm-021-ez37
 :LABELS:   ["p4","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-11 Fri 19:36]
+:MODIFIED: [2026-09-20 Sun 13:47]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-021
 :SOURCE_REPO: agent-cat
@@ -10272,6 +10272,27 @@ WM-008 completed handoff 2026-09-12T02:36:23+00:00: Enforce each configured quot
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 273,
+    "issue_id": "acat-wm-021-ez37",
+    "author": "johnw",
+    "text": "WM-021 starts after WM-020 acceptance 776520190ef1de9e9931f61350a0c7433ef32b9f. All recorded dependencies are closed. The accepted baseline is WM001–WM020 and G0, with G1 still open. The user directed continued broader delivery without scope creep, and the absolute OS-containment exclusion remains in force.\n\nOne isolated implementation writer owns implementation.9tGzKH/quotas.N3qrqDWt/source, branch wm021-quotas-20260920, base77652019. Its private runtime environment is /Users/johnw/Products/q.KqVeHD with a serialized sibling builddir. Parent owns Git, tracker, canonical integration, execution decisions and acceptance. The unit brief defines exact boundaries and first-unexpected-failure stops.\n\nImplement core quotas at their frozen global/client/profile scopes, consistent event retention/read boundaries, active-plus-thirty-day receipt protection followed by lifetime non-content tombstones, and bounded collection only after proven unreferenced status, grace and root checks. Preserve independent safety capacity and all existing stricter bounds. Configuration limits are shared revision facts, not multiplied per profile. Native history/lineage and replay protection do not disappear with event/UI retention.\n\nUse the existing Store, configuration, command, draft, admission, state/history/artifact and retained-file owners. Do not create a parallel storage/worker/decoder/publisher system, speculative transport service, remote prune endpoint, generic recovery framework or verification-machinery project. Unspecified authority, grace or provenance policy must be raised before inventing a knob or destructive behavior. Historical failed test resources remain untouched.\n\nThe initial grant covers affected Werror builds and meaningful deterministic local fresh-fixture SQLite/file tests, with scripted native work only where an actual ownership boundary requires it. Integrated platform gates follow the actual coherent delta and one independent milestone review. No remote/client/paid/deployment/host-security/dependency/Lean work, containment experiment, root-replacement/VFS experiment or old-resource recovery is implied.\n\nRefocus completed 2026-09-20T20:40:19Z, next active-work deadline 21:40:19Z. The next decisive action is this product implementation at existing owners, not reopening accepted milestones or accumulating evidence helpers.\n",
+    "created_at": "2026-09-20T20:43:35Z"
+  },
+  {
+    "id": 274,
+    "issue_id": "acat-wm-021-ez37",
+    "author": "johnw",
+    "text": "# WM021 collection eligibility policy\n\nParent approves a fixed 24-hour capture grace from the first durable observation that eligibility is proven. This is a conservative local policy, not a new configuration or wire knob, and file age alone grants no deletion authority. Eligibility resets when reference or safety facts change. The existing Store/file owner rechecks current draft, retained preparation, pending/nonretired command, export, backup and lineage dependencies immediately before collection.\n\nOnly manager-recorded identities with known publication provenance can qualify. Unknown directory entries, unprovable temporary files and uncertain cleanup remain retained. No historical test root is subject to this grant, and no total-disk bound is inferred for arbitrary operator-created files. The implementation uses only the minimum durable eligibility facts at existing owners, not a second collector registry or cleanup/recovery authority.\n\nReceipt retirement uses a conservative first-proven-inactive observation and at least 30 days afterward. All linked resources must be inactive, with no unresolved/pending command or unreleased reservation obligation. A linked run requires genuine previously validated Runtime terminal evidence, not accepted_at, process exit or absence, synthesized timestamps or a later join that erases uncertainty. A conclusively refused/terminal operation without a linked run does not require nonexistent Runtime evidence, but its actual dependencies still govern eligibility. Renewed activity resets eligibility.\n\nNon-content tombstones remain for the registered client lifetime. Quota pressure refuses new ordinary work before protective eviction, and uncertainty can prevent collection. Tests must cover eligibility reset, active/unresolved retention and reference-versus-collection races using fresh fixtures. The standing original-owner, bounded Store, no-containment and first-failure rules remain unchanged.\n",
+    "created_at": "2026-09-20T20:47:15Z"
   }
 ]
 #+end_src
