@@ -38,6 +38,33 @@ cleanup quarantine, storage-safety behavior and the prohibition on signalling
 stored PIDs. Do not claim that these mechanisms contain arbitrary descendants
 or undo provider effects. This exclusion does not close other package criteria.
 
+## Active WM-020 unit
+
+Issue `acat-wm-020-5x61` is in progress after acceptance commit `0c05a5d3`.
+The isolated writer uses `implementation.9tGzKH/restart.gQ3o7Iag/source`,
+branch `wm020-restart-20260920`, with private roots
+`/Users/johnw/Products/r.hV68Vj`. Parent retains Git mutation, tracking,
+canonical integration, execution decisions and acceptance.
+
+The unit implements ordinary startup reconciliation and coherent offline
+database/capture restoration at existing owners. Current authorization permits
+bounded local Werror, SQLite/file and fresh ordinary native checks, followed by
+one coherent independent review. No containment work or historical test-resource
+recovery is included.
+
+Tracker comments 263–264 and the unit's `brief.md` and `decision-note.md` retain
+the authority decisions. The approved restore interface is same-root and
+requires validated current safety facts. Its temporary in-progress fence must
+not become permanent global admission disablement after successful restoration.
+A minimal reservation-owner quarantine extension may preserve newer claims
+without fabricating request graphs or live handles. Missing/corrupt current
+safety state refuses before publication, and backup-only disaster recovery is
+not claimed. The reviewer must assess this boundary against WM-020.
+
+Workflow `329c2612-448f-4750-83fc-3c1cb5025b2e` owns current author
+`a03e19dd-7a51-40ad-aa87-6ad3239072bb` and the following independent review.
+No WM-020 implementation or acceptance is claimed by this start record.
+
 ## WM-019 acceptance
 
 Issue `acat-wm-019-9eye` is closed. Continued independent milestone reviewer
@@ -240,8 +267,8 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-20T08:31:10Z`. The next active-work deadline is
-`2026-09-20T09:31:10Z`. Continue with WM-020 through existing owners, with no
+Refocus completed at `2026-09-20T08:53:10Z`. The next active-work deadline is
+`2026-09-20T09:53:10Z`. Continue with WM-020 through existing owners, with no
 OS containment or verification-machinery detour. The resumed persistent goal
 still contains older baseline and scope wording. The user's latest correction
 governs current work, and `/goal-tweak` remains available for updating that
