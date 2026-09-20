@@ -1,15 +1,15 @@
 # Workflow-manager handoff
 
-<!-- handoff-id: wm016-20260915; status: wm019-accepted; accepted: WM-001..WM-019,G0 -->
+<!-- handoff-id: wm016-20260915; status: wm020-accepted; accepted: WM-001..WM-020,G0 -->
 
 ## Current delivery direction
 
-WM-019 is accepted on 2026-09-20 at canonical
-`489a1a411aca4017284fe2f34b2b69f0b390db52` under the scope correction below.
-The accepted baseline is WM-001–WM-019 and G0, which is 19 of 44 packages and
-one of six gates. Next delivery is WM-020 restart reconciliation and fenced
-offline backup restoration through existing owners, followed by WM-021–WM-044
-and G1–G5. G1 and later service, client and release packages remain open.
+WM-020 is accepted on 2026-09-20 at canonical
+`626981a72eceb9b4e5400bf188ab60901311243f` under the scope correction below.
+The accepted baseline is WM-001–WM-020 and G0, which is 20 of 44 packages and
+one of six gates. Next delivery is WM-021 quotas, retention and bounded
+collection through existing owners, followed by WM-022–WM-044 and G1–G5.
+G1 and later service, client and release packages remain open.
 
 The user's 2026-09-17 refocus continues to govern delivery. Do not reopen the
 verification-machinery micro-fix loop, paused L08 review or historical recovery
@@ -38,22 +38,20 @@ cleanup quarantine, storage-safety behavior and the prohibition on signalling
 stored PIDs. Do not claim that these mechanisms contain arbitrary descendants
 or undo provider effects. This exclusion does not close other package criteria.
 
-## Active WM-020 unit
+## WM-020 acceptance
 
-Issue `acat-wm-020-5x61` remains in progress. The reviewed restart/restoration
-application is integrated at `094604c482898197a8e0cdc08bffa9b65afda8d0`.
-The two authorized StoreCheck fixture corrections are integrated at `65e7854`.
-Test-only corrections also update existing import-removal and expiry-case
-anchors, without changing production behavior or granting package acceptance.
-Source and evidence remain in
-`implementation.9tGzKH/restart.gQ3o7Iag`. Parent retains integration, execution
-decisions and acceptance.
+Issue `acat-wm-020-5x61` is closed. Continued independent milestone reviewer
+`ea813971-e4a9-41cb-9abc-e7ba6cce0d1f` found no issues and explicitly granted
+closure for `626981a72eceb9b4e5400bf188ab60901311243f`. Tracker comment 272
+records parent acceptance and the approved same-root, readable-current-safety
+restoration boundary. Source, corrections, raw failures and final
+`review-closure.md` remain in `implementation.9tGzKH/restart.gQ3o7Iag`.
 
 The unit supplies ordinary startup reconciliation and coherent offline
-database/capture restoration through existing owners. Prior SQLite/file and
-ordinary native results retain their recorded scope, while the current opacity
-correction requires completion of its affected validation. No containment work
-or historical test-resource recovery is included.
+database/capture restoration through existing owners. Its corrected opacity
+boundary and affected consumers passed current validation. The reviewer
+accepted source-valid reuse and composed Store coverage without relabeling
+failed wrappers or inferring historical cleanup. No containment work is included.
 
 Tracker comments 263–266 and the unit's `brief.md` and `decision-note.md` retain
 the authority decisions. The approved restore interface is same-root and
@@ -150,14 +148,23 @@ interruption checks. Evidence is `o20.eDcoMR/admission-reopen.*`, with fresh
 `audit-interruption.y9_eueli`. The unit's `reopen-correction-result.md` and
 tracker comment 271 retain the exact scope and all original failures.
 
-Reuse these current results, run current Linux Admission and both Approval
-gates, then request final milestone disposition. The prior Store wrapper
-failures remain failures, with successful constituents explicitly reused.
+Current Linux Admission passed at 19:32:23–19:37:22Z. Final macOS Approval
+passed at 19:32:43–20:08:04Z and Linux Approval at 19:37:44–20:07:43Z. Final
+reports are `validation-approval/{mac,linux}/result.md`, with the Linux source
+and original fixtures retained in `/home/johnw/Products/w20a.lZsGk3`.
 
-Final disposition remains with the same independent milestone reviewer after
-the integrated results. Seeded crash prefixes, native preparation and the
-captured interruption barrier retain their distinct limits, with no full
-failure-matrix or hardware-durability claim from the focused checks.
+Independent review accepts the complete owning coverage at its actual source
+bindings, including the explicitly composed Store constituents. Original
+failed wrapper, compiler, fixture and orchestration outcomes remain unchanged.
+The initial review launcher failed before any child ran, and the corrected
+workflow completed the same retained reviewer without changing validation.
+
+Seeded crash prefixes, native preparation and captured interruption retain
+their distinct evidence limits. Acceptance does not claim a complete physical
+crash matrix, approved-running recovery, hardware durability, unsupported
+backup-only recovery or later HTTP/client behavior. Collection, transport,
+cursor/client reconciliation and deployment integration remain with their
+later named owners. G1 remains open.
 
 ## WM-019 acceptance
 
@@ -361,8 +368,8 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-20T19:04:36Z`. The next active-work deadline is
-`2026-09-20T20:04:36Z`. Continue with WM-020 through existing owners, with no
+Refocus completed at `2026-09-20T19:47:34Z`. The next active-work deadline is
+`2026-09-20T20:47:34Z`. Continue with WM-021 through existing owners, with no
 OS containment or verification-machinery detour. The resumed persistent goal
 still contains older baseline and scope wording. The user's latest correction
 governs current work, and `/goal-tweak` remains available for updating that
