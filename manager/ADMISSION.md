@@ -240,8 +240,10 @@ publication. It checks refusal versus retained original consent, exactly-once
 delivery and an old caller delayed across completed shutdown and actual native
 reuse. The Admission gate owns both shutdown modes in its N1/N8 loop. The Approval
 gate owns drain in its N1/N8 loop and launches the race audit once, which owns its
-own N1/N8 runs. These local fixtures are not OS containment. Both-platform hard-death and escaped-descendant acceptance
-remain open, with the process-group and control-EOF limits in the manager README.
+own N1/N8 runs. These local fixtures establish no OS containment guarantee.
+OS containment is excluded by the user's
+[scope correction](../doc/workflow-manager-handoff.md#scope-correction-of-2026-09-20).
+The manager README records the ordinary process-ownership and cleanup limits.
 
 ## Evidence and limits
 

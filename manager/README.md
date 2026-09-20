@@ -161,7 +161,7 @@ worker authority, or a network listener through the public facade.
 
 `manager/ci/store.sh` runs the real library composition and native SQLite tests
 at one and eight runtime capabilities. Storage mechanisms do not establish the
-later admission, receipt, recovery, retention, or worker-containment contracts.
+later admission, receipt, recovery, retention or worker-cleanup contracts.
 
 ## Command receipts
 
@@ -193,7 +193,7 @@ The [worker contract](WORKERS.md) provides scoped native frontend ownership,
 serialized private controls and bounded lossless ingestion. It reuses the actual
 CLI proxy/pre-RTS bootstrap and Runtime ProcessGroup completion. Observers neither
 consume the manager ingestion queue nor own its pipes. Approval and durable
-ingestion have separate owners, while broader containment remains independent.
+ingestion have separate owners, as does restart reconciliation.
 
 `manager/ci/workers.sh` runs actual native N1/N8 workers, controlled phase failures,
 queue/observer/write regressions and original-token cleanup retention checks.
@@ -307,28 +307,24 @@ while existing guards and tests remain intact. The independently verified
 immutable-capture publication contract is unchanged, and a successful pragma
 query is not a power-loss test.
 
-## Process containment
+## Process ownership and cleanup limits
 
-`containment_probe.py` demonstrates the limit of process-group termination:
-a descendant that creates a new session survives termination of the original
-group. The fixture then terminates that descendant through its retained private
-pipe and checks cleanup. It also interrupts startup and readiness waits with
-SIGTERM and verifies cleanup of the owned fixture processes. This is negative
-capability evidence, not a passing claim of service containment.
+The manager uses existing Runtime process ownership, private control pipes and
+process-group cleanup. It does not provide an OS containment boundary. The
+[user's scope correction](../doc/workflow-manager-handoff.md#scope-correction-of-2026-09-20)
+excludes OS containment features and experiments across the roadmap.
 
-The Linux candidate is a service control group with finite stop deadlines,
-`KillMode=control-group`, and final killing enabled. The
-[upstream systemd kill contract](https://github.com/systemd/systemd/blob/main/man/systemd.kill.xml)
-states that this covers the unit's remaining control-group members. Actual
-Linux execution and adversarial descendant tests remain required in WM-019.
+The existing `containment_probe.py` records a limitation of process-group
+termination: a descendant that creates a new session survives termination of
+the original group. Its fixture then terminates that descendant through a
+retained private pipe and checks cleanup. Its interrupted startup/readiness
+cases check cleanup of owned fixture processes. This retained evidence does
+not promise cleanup of arbitrary escaped descendants after manager death.
 
-The installed macOS `launchd.plist(5)` documentation, under
-`AbandonProcessGroup`, promises cleanup only for processes with the job's
-process-group ID. It therefore does not establish the stronger containment
-contract. The existing native supervisor and control-EOF cleanup remain useful,
-but they do not justify an unattended macOS capability by themselves. WM-019
-must establish the stronger boundary or keep that release capability blocked.
-No service installation or platform-containment acceptance is claimed here.
+Original-handle cleanup and honest uncertainty remain required. Stored PIDs
+do not confer signalling authority, and unconfirmed cleanup does not justify
+resource reuse. No service, sandbox or VM boundary is required by the current
+product scope.
 
 ## Module policy
 

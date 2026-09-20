@@ -2,8 +2,9 @@
 
 This plan records the user-directed refocus of 2026-09-17 and its completed
 WM-016 milestone. It supersedes previous next-helper instructions, not the
-frozen implementation requirements. WM-017 and WM-018 are now accepted
-separately, and the remaining WM-019–WM-044 and G1–G5 roadmap continues.
+original implementation requirements. WM-017 and WM-018 are now accepted
+separately, and the remaining roadmap follows the user's 2026-09-20
+[exclusion of OS containment](workflow-manager-handoff.md#scope-correction-of-2026-09-20).
 
 ## Accepted result on 2026-09-19
 
@@ -118,7 +119,7 @@ and delayed/stale/unsupported/failed/unresolved outcomes without unauthorized
 replay. Update the issue only when its criteria are met.
 
 **Exit:** WM-016 is accepted on canonical source. This does not automatically
-close G1 or implement the later HTTP/service-client, containment or release work.
+close G1 or implement the later HTTP/service-client or release work.
 
 ## Operating limits
 
