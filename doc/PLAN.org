@@ -9932,14 +9932,14 @@ Current scope: doc/workflow-manager-handoff.md#scope-correction-of-2026-09-20. T
 ]
 #+end_src
 
-* TODO [#B] WM-020: Implement restart reconciliation and fenced backup restoration    :p4:
+* DOING [#B] WM-020: Implement restart reconciliation and fenced backup restoration    :p4:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-wm-020-5x61
 :LABELS:   ["p4","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-09-20 Sun 01:53]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-020
 :SOURCE_REPO: agent-cat
@@ -10067,6 +10067,27 @@ implies that effects outside that backup did not occur.
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 263,
+    "issue_id": "acat-wm-020-5x61",
+    "author": "johnw",
+    "text": "WM-020 started on 2026-09-20 after WM-019 acceptance0c05a5d30b71a62380fbd6ea677509243657523a. All recorded WM-020 dependencies are closed. Accepted baseline is WM-001 through WM-019 and G0. G1 remains open.\n\nThe user excludes all OS containment features and experiments. That exclusion governs this unit, including historical failure-matrix language about containment. No service/cgroup/sandbox/container/VM/launchd feature or substitute is planned. Ordinary ownership, original-handle cleanup and uncertainty remain.\n\nOne isolated writer works in implementation.9tGzKH/restart.gQ3o7Iag/source, branch wm020-restart-20260920, base0c05a5d3. Private runtime roots are /Users/johnw/Products/r.hV68Vj and the unit build directory. Parent owns Git mutations, tracker, canonical integration, execution decisions and acceptance. Read-only worktree diff/status may supply the complete proposal for one coherent independent review.\n\nImplement ordinary startup reconciliation through existing Store/Configuration/Lease, Commands/Admission, Drafts and State/History owners. Preserve validated submissions/FIFO order, invalidate previous preparations, keep history observational and retain uncertain starts/controls without reconstructed dispatch. Add the minimum coherent SQLite database/capture backup and offline restoration procedure, with closed exposure, original-owner fencing, fresh authority/stream identities, revoked restored credentials and interruption refusal. An old mutation key must refuse even with replacement credentials. Backup restoration never proves that newer external effects did not occur.\n\nUse existing profile/capture validators, native evidence codecs, root/publication primitives and SQLite snapshot support. No parallel store, decoder, registry, supervisor, generic recovery framework, historical test-resource cleanup or verification-machine project. Preserve settled fail-fast admission, terminal-only pre-admission waits, budgets, poisoning, root guards and all non-replay distinctions.\n\nThe bounded grant covers Werror and deterministic/local fresh ordinary SQLite/file/native restart fixtures through original handles. No remote/client/paid/deployment/host-security/dependency/Lean work or OS containment. Stop the first unexpected top-level execution failure, retain its meaning and ask the parent for a decision. Integrated platform gates follow source review. Details are in restart.gQ3o7Iag/brief.md. No implementation or package acceptance is claimed at startup.\n\nRefocus08:37:21Z, next deadline09:31:10Z. Next decisive action is the coherent restart/restoration implementation at existing owners.\n",
+    "created_at": "2026-09-20T08:42:33Z"
+  },
+  {
+    "id": 264,
+    "issue_id": "acat-wm-020-5x61",
+    "author": "johnw",
+    "text": "WM-020 restoration authority decision, 2026-09-20. Implementation and package acceptance remain pending.\n\nAuthor a03e19dd-7a51-40ad-aa87-6ad3239072bb identified that a backup cannot know later external effects or resource claims, and that current claims can reference requests absent from the backup. Parent approved a same installed/root-bound offline API, using the existing exclusive storage/lease owner and coherent SQLite snapshot plus verified referenced captures. No cross-root migration or OS containment feature is added.\n\nA durable in-progress marker fences normal exposure until database/capture publication, authority/stream rotation and credential revocation finish. It is not a permanent global admission prohibition. A completed restore must allow genuinely new authorized/approved work on eligible resources. Uncertainty about lost-interval effects is recorded honestly and never treated as proof those effects were undone or as permission to replay an old command.\n\nKnown uncertain occupancy must not disappear when rolling back database facts. Since newer reservations are FK-bound to request graphs absent from the backup, a minimal schema10 restoration_quarantine representation is approved at the existing reservation owner. It retains original claim identity, bounded actual slot pressure and complete resource keys without Worker/PID/dispatch authority. Existing admission occupancy/selection consumes it. No second scheduler, mutable worker registry or fabricated request/lineage graph is allowed. Narrow the blanket foreign-generation fence only for complete validated footprints. Malformed, incomplete or over-budget safety facts refuse rather than becoming free occupancy.\n\nRepeated restores must preserve all affected keys and slot pressure. Deduplicate only a verified identical original claim. Slot collisions cannot be resolved by dropping claims or inventing cleanup or free slots. Tests must include affected-resource refusal, disjoint eligible progress, repeated restoration, collisions/bounds and interruption. No clearing API is authorized without original cleanup evidence, and neither new consent nor an operator assertion is that evidence.\n\nThe supported operation restores an older coherent snapshot only when the current installed safety state can be read and validated. If current database or prior restoration-quarantine facts are unreadable, refuse before publication and retain current files/lease safety. Backup-only recovery of a missing/corrupt current target is unsupported and must be visibly documented and tested as refusal, not marketed as successful disaster recovery. The reviewer must assess the actual implementation and this declared boundary against WM020. No full package completion is asserted by this design approval.\n\nThe original settled admission, generation, uncertainty, non-replay, budget and root rules remain. Scope correction excludes containment entirely. These are two consolidated authority decisions within one implementation unit, not new per-leaf reviews or a helper project.\n",
+    "created_at": "2026-09-20T08:53:09Z"
   }
 ]
 #+end_src
