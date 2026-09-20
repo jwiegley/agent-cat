@@ -10157,7 +10157,7 @@ implies that effects outside that backup did not occur.
 :LABELS:   ["p4","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-20 Sun 14:35]
+:MODIFIED: [2026-09-20 Sun 15:29]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-021
 :SOURCE_REPO: agent-cat
@@ -10300,6 +10300,13 @@ WM-008 completed handoff 2026-09-12T02:36:23+00:00: Enforce each configured quot
     "author": "johnw",
     "text": "WM-021 remains in progress and unverified. The isolated change stays in existing Store, Schema, Commands, Drafts and State owners with their existing Store/Draft checks. No parallel subsystem, transport implementation, dependency or frozen-record change is in the observed scope.\n\nThree first build failures are preserved: an invalid manager-state-check target before compilation, a StoreCheck test import that crossed its declared module boundary, and three omitted explicit DraftCheck imports. Parent approved only the exact target correction, relocation of collection coverage to its Drafts owner and explicit-import repair. Production compilation is not test execution, and required pressure, terminal-evidence, reset/race and documentation work remain until actually completed.\n\nParent approved one narrow retention classification. Successful local create/capture receipts intentionally remain accepted in the original Commands model. Only their exact original committed request_origins or command_captures associations, with matching resource/client/profile and no contradictory native dispatch/start/control intent, may witness local completion for retention eligibility. All inactivity, unresolved-operation, reservation, grace and reset protections remain. No receipt/state is rewritten to effect-observed and no Runtime outcome is synthesized. Missing or inconsistent associations and every other potentially pending accepted command remain protected. The exact policy is in decision-note.md.\n\nRefocus completed 2026-09-20T21:30:44Z, next active-work deadline 22:30:44Z. Current work implements the next product package and its meaningful regressions, rather than adding evidence machinery or revisiting accepted WM020. Continue within the standing first-failure, original-owner and absolute no-containment boundaries.\n",
     "created_at": "2026-09-20T21:35:29Z"
+  },
+  {
+    "id": 276,
+    "issue_id": "acat-wm-021-ez37",
+    "author": "johnw",
+    "text": "WM-021 remains isolated and unaccepted. Focused Store quota N1 exercised the frozen event-byte boundary and retained-floor rollback. Draft retention checks exposed a real SQLite expression-depth64 limit and a shared preflight gap for expired upload keys. The earlier excess-parenthesis explanation was withdrawn after exact read-only diagnosis showed the current query was syntactically valid. All original logs and roots remain. Query decomposition must preserve the same transaction, all protections and existing expression/statement/result budgets, including worst-case page/fanout accounting. Tombstones must refuse at shared authorized/epoch-checked preflight before body consumption, without weakening final replay binding.\n\nParent approved two concrete existing-owner extensions needed for truthful retention. Durable capture removal uses the same retained parent descriptor for unlink and directory synchronization before quota discharge, preserving original charges and errors on uncertainty. A separate State-owned historical terminal observation derives only from existing bounded authenticated-prefix replay, rechecks the same association/boundary before recording the private fact, and does not turn ordinary reads into writers. These add no worker/cleanup authority, synthetic terminal evidence, bulk backfill, observer registry, custom VFS or containment feature. Exact decisions and test requirements are in decision-note.md.\n\nThe current source scope remains the established manager owners, a narrow Runtime retained-file primitive and their existing test owners. Required pressure, terminal-evidence, sync failure, expiry, reset/race and documentation coverage must actually complete before review. Compilation and partial focused passes are not package acceptance.\n\nRefocus completed 2026-09-20T22:24:35Z, next active-work deadline 23:24:35Z. Continue this bounded product implementation without new infrastructure, old-resource recovery or verification-machinery detours.\n",
+    "created_at": "2026-09-20T22:29:03Z"
   }
 ]
 #+end_src
