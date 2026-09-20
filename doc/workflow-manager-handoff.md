@@ -1,15 +1,15 @@
 # Workflow-manager handoff
 
-<!-- handoff-id: wm016-20260915; status: wm018-accepted; accepted: WM-001..WM-018,G0 -->
+<!-- handoff-id: wm016-20260915; status: wm019-accepted; accepted: WM-001..WM-019,G0 -->
 
 ## Current delivery direction
 
-WM-018 is accepted on 2026-09-19 at canonical
-`4ad20a43ad5c1b59cbf566accddd6a9cb24a08b6`. The accepted baseline is
-WM-001–WM-018 and G0, which is 18 of 44 packages and one of six gates.
-Next delivery is WM-019 shutdown and storage-failure supervision, followed by
-WM-020–WM-044 and G1–G5 under the scope correction below. G1 and later service,
-client and release packages remain open.
+WM-019 is accepted on 2026-09-20 at canonical
+`489a1a411aca4017284fe2f34b2b69f0b390db52` under the scope correction below.
+The accepted baseline is WM-001–WM-019 and G0, which is 19 of 44 packages and
+one of six gates. Next delivery is WM-020 restart reconciliation and fenced
+offline backup restoration through existing owners, followed by WM-021–WM-044
+and G1–G5. G1 and later service, client and release packages remain open.
 
 The user's 2026-09-17 refocus continues to govern delivery. Do not reopen the
 verification-machinery micro-fix loop, paused L08 review or historical recovery
@@ -38,58 +38,53 @@ cleanup quarantine, storage-safety behavior and the prohibition on signalling
 stored PIDs. Do not claim that these mechanisms contain arbitrary descendants
 or undo provider effects. This exclusion does not close other package criteria.
 
-## WM-019 reviewed checkpoint
+## WM-019 acceptance
 
-Issue `acat-wm-019-9eye` remains in progress. Its bounded local shutdown/safety
-core is integrated and validated at
-`489a1a411aca4017284fe2f34b2b69f0b390db52`, not accepted as the full package.
-Source, reviews and retained failures remain under
-`implementation.9tGzKH/shutdown.327OnbQj`. The containment-based blocker is
-withdrawn. Next reconcile remaining in-scope shutdown and storage requirements
-against existing results, without new containment work or duplicate local gates.
+Issue `acat-wm-019-9eye` is closed. Continued independent milestone reviewer
+`1815eb21-b06d-49fe-b1ba-04f249e66216` found no issues and explicitly cleared
+WM-019 under the user's scope correction. Tracker comment 262 records parent
+acceptance. The implementation is `489a1a4`, and subsequent changes through
+`1ef2ec88` affect only five documentation/tracking files.
 
-The ten-path core provides explicit drain deadlines and cancellation through
-existing Admission, Store and Worker owners. New admissions are fenced while
-healthy original live-run interaction may finish. Emergency notification and
-broadcast precede ordinary operation/SQL joins. Scoped construction fences
-retire only after original confirmed cleanup and registration retirement,
-without clearing permanent close/quarantine or writable unavailability.
+The unit provides explicit drain deadlines and cancellation through existing
+Admission, Store and Worker owners. New admissions and approvals are fenced
+while healthy original live-run interaction may finish. Emergency notification
+precedes ordinary operation/SQL joins. Original registration batches, immutable
+outcomes and scoped construction fences preserve cleanup uncertainty, permanent
+quarantine and healthy Store reuse without granting authority to old metadata.
 
-Continued reviewer `0fd80d8f-8c95-4df9-8407-09f5479e463d` found no issues and
-validated this core after integrated execution. Original stop batches
-remain immutable, healthy drain preserves owned History, and committed start
-publication retires the original preparation timer. Shutdown callers only
-publish mode and await their retained result. Broadcasts stay inside the
-retained supervisor/watchdog lifetime, so delayed callers cannot stop a later
-scope on a reused Store.
+Healthy drain retains committed start delivery, genuine person answers and owned
+History. Committed start publication retires the preparation timer. Shutdown
+callers only publish mode and await their retained result, while broadcasts
+remain within the retained supervisor/watchdog lifetime. A delayed caller cannot
+affect a later Store scope.
 
 Existing poison and exact writable SQLite FULL/I/O failures notify original
-safety cells without blocking callbacks or SQL/cleanup joins. Poison, confirmed
-rollback and writable unavailability remain distinct. Read-only I/O with
-confirmed rollback, ordinary Busy and opaque failure are not treated as
-global poison. No committed receipt or Runtime cancellation is manufactured.
+safety cells without blocking callbacks or SQL/cleanup joins. Confirmed rollback
+and writable unavailability remain distinct from poison. Read-only I/O with
+confirmed rollback, ordinary Busy and opaque failure do not become global
+poison. No public consent, receipt or Runtime cancellation is manufactured.
 
-Current local Werror and focused native N1/N8 checks pass, including sixteen
-actual Admission slots with SQL held, person-waiting drain, owned history,
-active cancellation/expiry, automatic storage safety and a delayed old caller
-resuming after actual native reuse. FULL is real pager exhaustion under a private
-test quota, and I/O is an injected SQLite result rather than device failure.
-Earlier failures and evidence scopes remain recorded.
+Both owning gates passed once per platform with actual N1/N8 native execution.
+On macOS, Admission ran 2026-09-19 21:43:36–21:49:20Z and Approval ran
+21:49:38–22:26:29Z. On Linux, Admission ran 2026-09-20 07:49:40–07:54:58Z
+and Approval ran 07:54:58–08:24:44Z. All four exits were zero. The scripts owned
+shutdown modes, acceptance/lifetime races and existing integrated checks/audits,
+without duplicated local gates or separate constituent launches.
 
-Both requested integrated owning gates passed once on unchanged source.
-Admission ran 21:43:36–21:49:20Z and Approval ran 21:49:38–22:26:29Z on
-2026-09-19, both with exit zero. They executed the new N1/N8 shutdown modes,
-actual lifecycle and acceptance races, and existing owning checks/audits.
-Raw evidence is in `shutdown.327OnbQj/validation`, and the final disposition is
-`review-integrated-core.md`. No further local corrective edit or duplicate gate
-is indicated. Tracker comment 260 records this bounded stopping point.
+Source, successive reviews and original failures remain under
+`implementation.9tGzKH/shutdown.327OnbQj`. The final disposition is
+`review-closure-scope.md`, and `acceptance-note.md` binds both reports under
+`validation/`. Linux used fresh `/home/johnw/Products/w19.iH0jwt` with current
+archived source. Decisive integrated race audits are local
+`audit-shutdown-races.1ci5q6ur` and Linux `audit-shutdown-races.s6dmzagw`.
 
-Earlier Linux and macOS capability observations remain historical evidence.
-No service, sandbox, VM or hard-death containment experiment ran in this unit.
-Neither missing containment permission nor an unproved stronger macOS boundary
-is a current blocker. Broader A19 storage/pressure acceptance remains separate,
-with pager-quota and injected-I/O results distinguished from physical disk or
-device failure. The user's scope correction does not relabel those results.
+Pager-quota FULL is not host-disk exhaustion, and injected I/O is not a physical
+device/VFS failure. Broader A19 scenarios remain with their assigned future
+quota, HTTP/event, retention and capacity owners. Logical pre-COMMIT fencing is
+not atomic STM/SQLite COMMIT. Nonfatal Linux C diagnostics and earlier failures
+retain their meaning. No warning-free or historical-cleanup claim follows.
+OS containment is excluded, not a remaining milestone or permission request.
 
 ## WM-018 acceptance
 
@@ -245,12 +240,12 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-20T07:35:47Z`. The next active-work deadline is
-`2026-09-20T08:35:47Z`. The user's exclusion of OS containment supersedes the
-previous platform blocker. Continue only the requested workflow-manager work.
-The persistent goal still contains the older frozen-scope wording and requires
-the user's `/goal-tweak` command to reflect this correction before resumption.
-Earlier disclosed timing lapses remain recorded.
+Refocus completed at `2026-09-20T08:31:10Z`. The next active-work deadline is
+`2026-09-20T09:31:10Z`. Continue with WM-020 through existing owners, with no
+OS containment or verification-machinery detour. The resumed persistent goal
+still contains older baseline and scope wording. The user's latest correction
+governs current work, and `/goal-tweak` remains available for updating that
+immutable text. Earlier disclosed timing lapses remain recorded.
 
 ## Historical WM-016 closure record
 
