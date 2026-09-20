@@ -7,7 +7,7 @@
 -- | Durable command acceptance and one-shot live dispatch, not worker interpretation.
 module Agentic.Manager.Commands
   ( CommandRequest (..), Mutation (..), Intent (..), CommandReferences (..), noReferences,
-    Submission, submissionReceipt, submissionReplayed, submissionTicket, submissionReferences, submissionEnqueue, AcceptedEnqueue, acceptedRequest, checkAcceptedEnqueue, currentAcceptedEnqueues,
+    Submission, submissionReceipt, submissionReplayed, submissionTicket, submissionReferences, submissionEnqueue, AcceptedEnqueue, acceptedRequest, checkAcceptedEnqueue, currentAcceptedEnqueues, restoreAcceptedEnqueues,
     CommandAttempt, newCommandAttempt, newControlCommandAttempt, submitCommandAttempt, submitCommandAttemptWithDeadline, reconcileCommandAttempt, reconcileCommandAttemptWithAdmission, DispatchTicket, dispatchCommandId, submitCommand, submitConfiguredCommand, submitStreamedCommand, commandPreflight, commandPreflightVersion, readCommand,
     BodyBinding, measureCommandBody, bodyBindingBytes, bodyBindingSha256,
     reserveDispatch, reserveDispatchWithAdmission, attemptDispatch, attemptDispatchWithAdmission, attemptControlDispatch, discardControlPayload, discardControlAttempt, recordAcknowledgement, recordEffect, recordEffectWith, recordEffectWithAdmission, recordUnresolved, recordRefusal,
@@ -23,7 +23,7 @@ import Agentic.Manager.Store
 import Agentic.Runtime (maxFrameBytes, maxArtifactBytes)
 import Control.DeepSeq (NFData)
 import Control.Exception (SomeException, mask, finally, throwIO, try)
-import Control.Monad (unless, void, forM, forM_)
+import Control.Monad (unless, when, void, forM, forM_)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Except (ExceptT (..), runExceptT, throwE)
 import Crypto.Hash (Context, Digest, SHA256, hash, hashInit, hashUpdate, hashFinalize)
@@ -115,8 +115,10 @@ submissionTicket (Submission _ _ ticket _ _) = ticket
 submissionReferences :: Submission -> CommandReferences
 submissionReferences (Submission _ _ _ refs _) = refs
 
--- | A current, accepted enqueue's materialization association, not approval or worker authority.
+-- | Enqueue materialization only, from fresh acceptance or validated durable queue intent.
+-- It is never approval, a CommandAttempt, a DispatchTicket or worker authority.
 data AcceptedEnqueue = AcceptedEnqueue !Text !Text !Text !QueueAssociation
+  deriving (Generic, NFData)
 data QueueAssociation = QueueAssociation !Text !Text !Text !Text !Text !Text !Text !Text
   deriving (Generic, NFData)
 submissionEnqueue :: Submission -> Maybe AcceptedEnqueue
@@ -146,6 +148,20 @@ currentAcceptedEnqueues permits = do
       <> ") SELECT p.request FROM permits p JOIN requests r ON r.id=p.request JOIN commands c ON c.id=p.command AND c.request_id=r.id JOIN service_metadata s ON s.singleton=1 WHERE r.enqueue_command=c.id AND c.operation='enqueue' AND c.retired=0 AND c.authority_epoch=p.epoch AND s.authority_epoch=p.epoch AND r.profile_id=p.profile AND r.profile_revision=p.policy AND r.workflow_id=p.workflow AND r.descriptor_revision=p.descriptor AND r.queue_ordinal=p.ordinal AND r.queue_origin_revision=p.origin AND r.input_revision=p.input_revision AND r.queue_generation=p.generation AND r.phase IN ('queued','preparing','review') AND (r.phase='queued' OR EXISTS(SELECT 1 FROM reservations v WHERE v.request_id=r.id AND v.process_generation=p.generation AND v.state='held'))") (concatMap parameters batch)
     pure [request | [SQL.SQLText request] <- rows]
   pure(Set.fromList(concat selected))
+
+-- | Restore enqueue intent only inside Drafts' validated, unchanged-request transaction.
+-- The caller publishes the request revision when the internal association changes.
+restoreAcceptedEnqueues :: Text -> Transaction ([AcceptedEnqueue], Bool)
+restoreAcceptedEnqueues ident = do
+  generation <- transactionGeneration
+  rows <- query "SELECT s.authority_epoch,c.id,r.id,r.profile_id,r.profile_revision,r.workflow_id,r.descriptor_revision,r.queue_ordinal,r.queue_origin_revision,r.input_revision,r.queue_generation FROM requests r JOIN request_restart_bindings b ON b.request_id=r.id JOIN commands c ON c.id=r.enqueue_command AND c.request_id=r.id JOIN service_metadata s ON s.authority_epoch=c.authority_epoch WHERE r.id=? AND r.phase='queued' AND r.admission='waiting' AND c.operation='enqueue' AND c.retired=0 AND c.state='effect-observed' AND c.client_id=r.client_id AND NOT EXISTS(SELECT 1 FROM reservations v WHERE v.request_id=r.id AND v.state!='released')" [text ident]
+  case rows of
+    [] -> pure([],False)
+    [[SQL.SQLText epoch,SQL.SQLText command,SQL.SQLText request,SQL.SQLText profile,SQL.SQLText policy,SQL.SQLText workflow,SQL.SQLText descriptor,SQL.SQLText ordinal,SQL.SQLText origin,SQL.SQLText inputRevision,previous]] -> do
+      let changed=previous/=text generation
+      when changed(execute "UPDATE requests SET queue_generation=? WHERE id=?" [text generation,text request])
+      pure([AcceptedEnqueue generation epoch command (QueueAssociation request profile policy workflow descriptor ordinal origin inputRevision)],changed)
+    _ -> refuseTransaction StorageUnavailable
 
 -- | One command's live ownership. IDs and durable generation columns cannot mint this.
 data DispatchTicket = DispatchTicket !CoordinationStore !Text !Text !CommandReferences !(IORef TicketState)

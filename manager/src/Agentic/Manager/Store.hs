@@ -9,7 +9,7 @@ module Agentic.Manager.Store
   ( CoordinationStore, StoreIdentity (..), StoreFailure (..), Checkpoint (..),
     withCoordinationStore, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreFiles, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, requestStoreWorkersStop, awaitStoreWorkersStop, retryStoreCleanup, probeStoreCapabilities,
     CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, enforceAdmissionFence, Transaction, execute, query, refuseTransaction, runTransaction, runRead, StoreAdmission (..), runTransactionWithAdmission, runReadWithAdmission, transactionGeneration,
-    Invalidation (..)
+    Invalidation (..), backupCoordinationStore, restoreCoordinationStore, reservationOccupancy
   ) where
 
 import Agentic.Manager.Store.Admission (StoreAdmission (..))
@@ -19,9 +19,12 @@ import Agentic.Manager.Configuration
 import Agentic.Manager.Profile (ConfigurationLimits, PublicProfile, Diagnostic, Discovery)
 import Agentic.Manager.Worker.State (WorkerLifecycle, acceptingPreparation)
 import Agentic.Manager.Lease (duplicateLease)
-import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration, artifactMigration, historyMigration)
+import Agentic.Manager.Root (validateRootSeparation)
+import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration, artifactMigration, historyMigration, restartMigration)
 import Agentic.Runtime
   (PrivateRoot, assertPrivateRoot, closePrivateRoot, openPrivateSubroot, privateRootPath,
+   openPrivateRoot, privateRootIdentity, readPrivateFileAt, ensurePrivateDirectoryAt, removePrivateFileAt,
+   publishPrivateCaptureAt, CapturePublication (..), privateCaptureBytes, privateCaptureSha256,
    withPrivateDirectoryAt, writePrivateExclusiveAt, WorkflowInputDescriptor (..), frontendLiteralBytes, FrontendCapabilities, FrontendInvocation, ProcessGroup, createProcessGroup, terminateProcessGroup, groupOutcome, processGroupLive)
 import Control.Concurrent (rtsSupportsBoundThreads)
 import Control.Concurrent (threadDelay)
@@ -31,12 +34,13 @@ import Control.Concurrent.MVar (MVar, newMVar, newEmptyMVar, readMVar, tryReadMV
 import Control.Exception
   (Exception, SomeException, bracket, bracketOnError, finally, mask,
    evaluate, uninterruptibleMask_, throwIO, try, onException, catch, fromException)
-import Control.Monad (unless, when, void, foldM, forM_, forever)
+import Control.Monad (unless, when, void, foldM, forM, forM_, forever)
 import Control.DeepSeq (NFData, force)
 import Crypto.Hash (Digest, SHA256, hashInit, hashUpdate, hashFinalize)
 import qualified Crypto.Hash as Hash
 import Data.ByteArray (convert)
-import Data.Aeson (eitherDecodeStrict')
+import Data.Aeson (eitherDecodeStrict', encode)
+import qualified Data.ByteString.Lazy as BL
 import Crypto.Random (getRandomBytes)
 import Data.ByteArray.Encoding (Base (Base16), convertToBase)
 import qualified Data.ByteString as BS
@@ -47,6 +51,8 @@ import Data.Char (isAlphaNum, isAscii, isSpace)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import qualified Data.Text.Encoding as TE
 import qualified Database.SQLite3 as SQL
 import qualified Database.SQLite3.Direct as Direct
@@ -54,10 +60,11 @@ import Foreign.C.Types (CInt (..))
 import Foreign.Ptr (Ptr)
 import System.FilePath ((</>))
 import System.IO.Error (isDoesNotExistError)
+import System.IO (Handle, hClose)
 import Control.Exception (IOException)
 import System.Posix.IO
   (OpenFileFlags (cloexec, nofollow, nonBlock), OpenMode (ReadOnly),
-   closeFd, defaultFileFlags, openFdAt)
+   closeFd, defaultFileFlags, openFdAt, fdToHandle)
 import System.Posix.Files (fileMode, fileOwner, getFdStatus, isRegularFile, linkCount)
 import System.Process (CreateProcess)
 import System.Posix.Types (Fd)
@@ -116,10 +123,13 @@ instance Monad Transaction where
 data Invalidation = Invalidation !Text !Text !Text deriving (Eq, Show)
 
 withCoordinationStore :: InstalledConfiguration -> (CoordinationStore -> IO a) -> IO a
-withCoordinationStore installed action = mask $ \restore -> do
+withCoordinationStore = withStoreMode True
+
+withStoreMode :: Bool -> InstalledConfiguration -> (CoordinationStore -> IO a) -> IO a
+withStoreMode restart installed action = mask $ \restore -> do
   unless rtsSupportsBoundThreads (throwIO StoreUnavailable)
   let acquire = bracketOnError (acquireConfigurationStorage installed) release $ \(root, lease) ->
-        openStore installed root lease
+        openStore restart installed root lease
       release (root, lease) =
         (closePrivateRoot root `finally` closeFd lease) `finally` releaseConfigurationStorage installed
   store <- acquire
@@ -129,12 +139,13 @@ withCoordinationStore installed action = mask $ \restore -> do
     Left failure -> throwIO failure
     Right value -> either throwIO (const (pure value)) cleanup
 
-openStore :: InstalledConfiguration -> PrivateRoot -> Fd -> IO CoordinationStore
-openStore installed root lease = storageErrors $ do
+openStore :: Bool -> InstalledConfiguration -> PrivateRoot -> Fd -> IO CoordinationStore
+openStore restart installed root lease = storageErrors $ do
+  requireNoRestoration root
   -- Stable operator-controlled paths are required. Runtime still checks private files.
   existing <- try @IOException (checkPrivateFile root databaseName)
   case existing of
-    Left failure | isDoesNotExistError failure -> writePrivateExclusiveAt root [databaseName] BS.empty
+    Left failure | restart && isDoesNotExistError failure -> writePrivateExclusiveAt root [databaseName] BS.empty
     Left failure -> throwIO failure
     Right () -> pure ()
   mapM_ checkCompanion [databaseName <> "-wal", databaseName <> "-shm", databaseName <> "-journal"]
@@ -147,14 +158,15 @@ openStore installed root lease = storageErrors $ do
     (epoch, stream) <- bounded db 30000000 $ do
       SQL.exec db "PRAGMA busy_timeout=100; PRAGMA foreign_keys=ON; PRAGMA temp_store=FILE; PRAGMA cache_size=-2048; PRAGMA temp.cache_size=-2048"
       version <- scalar db "PRAGMA user_version"
-      unless (version `elem` map SQL.SQLInteger [0, 1, 2, 3, 4, 5, 6, 7, 8, fromIntegral schemaVersion]) $
+      unless (version `elem` map SQL.SQLInteger [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, fromIntegral schemaVersion]) $
         throwIO StoreVersion
+      unless(restart || version==SQL.SQLInteger(fromIntegral schemaVersion))(throwIO StoreVersion)
       -- Newer versions are refused before changing their journal or schema.
       wal <- scalar db "PRAGMA journal_mode=WAL"
       unless (wal == SQL.SQLText "wal") (throwIO StoreUnavailable)
       SQL.exec db "PRAGMA synchronous=FULL; PRAGMA wal_autocheckpoint=0; PRAGMA journal_size_limit=16777216"
       verifyPragmas db
-      migrate db
+      when restart $ migrate db >> reconcileRestart db generation
       values <- rawRows db "SELECT authority_epoch,stream_id FROM service_metadata WHERE singleton=1" []
       case values of
         [[SQL.SQLText epoch, SQL.SQLText stream]] -> pure (epoch, stream)
@@ -170,16 +182,246 @@ openStore installed root lease = storageErrors $ do
         Left failure -> throwIO failure
         Right () -> pure ()
 
+-- Startup changes observations, never releases claims or recreates delivery authority.
+reconcileRestart :: SQL.Database -> Text -> IO ()
+reconcileRestart db generation = do
+  affected <- scalar db "SELECT EXISTS(SELECT 1 FROM preparations WHERE state='live') OR EXISTS(SELECT 1 FROM reservations WHERE state NOT IN ('released','quarantined')) OR EXISTS(SELECT 1 FROM admission_observations WHERE state='prepared') OR EXISTS(SELECT 1 FROM requests WHERE phase IN ('preparing','review')) OR EXISTS(SELECT 1 FROM runs WHERE supervision IN ('owned','cleanup-pending')) OR EXISTS(SELECT 1 FROM commands WHERE state IN ('accepted','dispatch-attempted') AND (id IN (SELECT command_id FROM start_intents) OR id IN (SELECT command_id FROM control_intents))) OR EXISTS(SELECT 1 FROM capture_uploads WHERE state='pending')"
+  when (affected/=SQL.SQLInteger 0) (reconcileChanged db generation)
+
+reconcileChanged :: SQL.Database -> Text -> IO ()
+reconcileChanged db generation = do
+  change "preparations" "state='live'" "state='invalidated',reason='worker-lost',revision=?" [revision] "preparation.changed" [""]
+  change "requests" "phase IN ('preparing','review')" "phase='refused',admission='refused',revision=?,blocking_reasons=X'5B2271756172616E74696E6564225D'" [revision] "request.changed" [""]
+  change "runs" "supervision IN ('owned','cleanup-pending')" "supervision='lost',revision=?,control_revision=?" [revision,revision] "run.changed" ["","/control"]
+  change "commands" "state IN ('accepted','dispatch-attempted') AND (id IN (SELECT command_id FROM start_intents) OR id IN (SELECT command_id FROM control_intents))" "state='unresolved',revision=?" [revision] "command.changed" [""]
+  transaction $ do
+    SQL.exec db "UPDATE reservations SET state='quarantined' WHERE state NOT IN ('released','quarantined')"
+    SQL.exec db "UPDATE admission_observations SET state='invalidated',reason='worker-lost' WHERE state='prepared'"
+    SQL.exec db "UPDATE capture_uploads SET state='orphan' WHERE state='pending'"
+  where
+    revision=SQL.SQLText generation
+    -- At most 100 rows and 200 events per transaction, within the existing limits.
+    change table predicate assignment parameters kind suffixes = do
+      more <- transaction $ do
+        rows <- rawRows db ("SELECT CASE WHEN length(id)<=128 THEN id END FROM "<>table<>" WHERE "<>predicate<>" ORDER BY id LIMIT 100") []
+        identifiers <- forM rows $ \row -> case row of
+          [SQL.SQLText ident] -> pure ident
+          _ -> throwIO StoreIntegrity
+        unless(null identifiers) $ do
+          let events=[Invalidation kind ("/v1/"<>table<>"/"<>ident<>suffix) generation | ident<-identifiers,suffix<-suffixes]
+          validateEvents events
+          rawExecute db ("UPDATE "<>table<>" SET "<>assignment<>" WHERE id IN ("<>T.intercalate ","(replicate(length identifiers)"?")<>")") (parameters<>map SQL.SQLText identifiers)
+          mapM_ (appendInvalidation db) events
+        pure(not(null identifiers))
+      when more(change table predicate assignment parameters kind suffixes)
+    transaction action = bounded db 5000000 $ do
+      SQL.exec db "BEGIN IMMEDIATE"
+      outcome <- try @SomeException(action <* SQL.exec db "COMMIT")
+      case outcome of
+        Right value -> pure value
+        Left failure -> void(try @SomeException(bounded db 5000000(rollback db))) >> throwIO failure
+
+-- | Validated negative occupancy shared by restart, restoration and admission.
+-- Colliding slots remain separate pressure. Only identical original claims deduplicate.
+reservationOccupancy :: Transaction [(Text, Int, [(Text, Text)])]
+reservationOccupancy = query occupancySQL [] >>= either refuseTransaction pure . decodeOccupancy
+
+occupancySQL :: Text
+occupancySQL = "SELECT id,slot,resources FROM restoration_quarantine UNION ALL SELECT v.id,v.slot,(SELECT json_group_array(json_array(kind,resource_key)) FROM (SELECT kind,resource_key FROM reservation_resources WHERE reservation_id=v.id ORDER BY kind,resource_key)) FROM reservations v WHERE v.state!='released' LIMIT 33"
+
+readOccupancy :: SQL.Database -> IO [(Text, Int, [(Text, Text)])]
+readOccupancy db = bounded db 5000000 $ do
+  bytes <- scalar db ("SELECT coalesce(sum(length(CAST(id AS BLOB))+length(CAST(resources AS BLOB))+8),0) FROM ("<>occupancySQL<>")")
+  case bytes of
+    SQL.SQLInteger size | size<=1048576 -> pure()
+    _ -> throwIO StoreLimit
+  rawRows db occupancySQL [] >>= either throwIO pure . decodeOccupancy
+
+decodeOccupancy :: [[SQL.SQLData]] -> Either StoreFailure [(Text, Int, [(Text, Text)])]
+decodeOccupancy rows = do
+  unless(length rows<=32)(Left StoreLimit)
+  claims <- foldM collect Map.empty rows
+  unless(Map.size claims<=16)(Left StoreLimit)
+  pure [(ident,slot,keys) | (ident,(slot,keys)) <- Map.toList claims]
+  where
+    collect claims [SQL.SQLText ident,SQL.SQLInteger slot,SQL.SQLText encodedKeys] = do
+      unless(slot>=0 && slot<16 && T.length ident<=128 && not(T.null ident) && T.length encodedKeys<=65536)(Left StoreIntegrity)
+      values <- either(const(Left StoreIntegrity))Right(eitherDecodeStrict'(TE.encodeUtf8 encodedKeys) :: Either String [[Text]])
+      unless(not(null values) && length values<=256)(Left StoreIntegrity)
+      keys <- mapM (\value -> case value of
+        ["operator",key] | not(T.null key) && T.length key<=128 && T.all (\c -> isAscii c && (isAlphaNum c || c=='_' || c=='-')) key -> Right("operator",key)
+        ["unclassified",""] -> Right("unclassified","")
+        _ -> Left StoreIntegrity) values
+      let fact=(fromIntegral slot,Set.toAscList(Set.fromList keys))
+      case Map.lookup ident claims of
+        Just previous | previous/=fact -> Left StoreIntegrity
+        _ -> Right(Map.insert ident fact claims)
+    collect _ _ = Left StoreIntegrity
+
+requireNoRestoration :: PrivateRoot -> IO ()
+requireNoRestoration root = do
+  marker <- try @IOException(readPrivateFileAt root ["restore-in-progress"] 1024)
+  case marker of
+    Left failure | isDoesNotExistError failure -> pure()
+    Left failure -> throwIO failure
+    Right _ -> throwIO StoreUnavailable
+
+-- | A same-root, offline coherent snapshot. An active Store refuses slot acquisition.
+-- Callers first finish Admission and close its Store through their original owners.
+backupCoordinationStore :: InstalledConfiguration -> FilePath -> IO ()
+backupCoordinationStore installed destination = withStoreMode False installed $ \(CoordinationStore _ root db _ _ _ _ _ _ _ _ _ _) ->
+  bracket (openPrivateRoot "coordination backup" destination) closePrivateRoot $ \backup -> do
+    validateRootSeparation root [destination]
+    writePrivateExclusiveAt backup ["coordination.sqlite3"] BS.empty
+    withSnapshotDatabase backup False $ \target -> do
+      copyDatabase target db
+      copyCaptures db root backup
+    let binding = TE.encodeUtf8(T.pack(privateRootIdentity root))
+    publishBytes backup ["complete"] binding
+
+-- | Restore only with a readable current safety state under the original service lease.
+-- No Store escapes, and an interrupted publication leaves startup fenced by the marker.
+restoreCoordinationStore :: InstalledConfiguration -> FilePath -> IO ()
+restoreCoordinationStore installed source = withStoreMode False installed $ \(CoordinationStore _ root db identity _ _ _ _ _ _ _ _ _) ->
+  bracket (openPrivateRoot "coordination backup" source) closePrivateRoot $ \backup -> do
+    validateRootSeparation root [source]
+    let expected = TE.encodeUtf8(T.pack(privateRootIdentity root))
+    binding <- readPrivateFileAt backup ["complete"] 1024
+    unless(binding==expected)(throwIO StoreIntegrity)
+    withSnapshotDatabase backup True $ \snapshot -> do
+      validateSnapshot db
+      validateSnapshot snapshot
+      current <- readOccupancy db
+      older <- readOccupancy snapshot
+      let rows facts = [[SQL.SQLText ident,SQL.SQLInteger(fromIntegral slot),SQL.SQLText(TE.decodeUtf8(BL.toStrict(encode keys)))] | (ident,slot,keys)<-facts]
+      claims <- either throwIO pure(decodeOccupancy(rows(current<>older)))
+      -- Read and verify every immutable source before touching the target database.
+      verifyCaptures snapshot backup
+      backupEpoch <- scalar snapshot "SELECT authority_epoch FROM service_metadata WHERE singleton=1"
+      epoch <- freshIdentity "authority_"
+      stream <- freshIdentity "stream_"
+      revision <- freshIdentity "restoration_"
+      publishBytes root ["restore-in-progress"] (BL.toStrict(encode(revision,storeAuthorityEpoch identity,claims)))
+      copyCaptures snapshot backup root
+      copyDatabase db snapshot
+      bounded db 30000000 $ do
+        SQL.exec db "PRAGMA foreign_keys=ON; BEGIN IMMEDIATE"
+        result <- try @SomeException $ do
+          SQL.exec db "DELETE FROM invalidations"
+          rawExecute db "UPDATE service_metadata SET authority_epoch=?,stream_id=?,sequence='0',retained_floor='0',revision=? WHERE singleton=1" (map SQL.SQLText [epoch,stream,revision])
+          SQL.exec db "UPDATE credentials SET revoked=1"
+          forM_ claims $ \(ident,slot,keys) -> rawExecute db "INSERT INTO restoration_quarantine VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET slot=excluded.slot,resources=excluded.resources"
+            [SQL.SQLText ident,SQL.SQLInteger(fromIntegral slot),SQL.SQLText(TE.decodeUtf8(BL.toStrict(encode keys)))]
+          rawExecute db "INSERT INTO restorations VALUES (?,?,?,1)" [SQL.SQLText revision,SQL.SQLText(storeAuthorityEpoch identity),backupEpoch]
+          SQL.exec db "COMMIT"
+        either (\failure -> void(try @SomeException(rollback db)) >> throwIO failure) pure result
+        reconcileRestart db revision
+      removePrivateFileAt root ["restore-in-progress"]
+
+withSnapshotDatabase :: PrivateRoot -> Bool -> (SQL.Database -> IO a) -> IO a
+withSnapshotDatabase root readonly action = do
+  checkPrivateFile root "coordination.sqlite3"
+  bracket (SQL.open2 (T.pack(privateRootPath root </> "coordination.sqlite3"))
+    [if readonly then SQL.SQLOpenReadOnly else SQL.SQLOpenReadWrite,SQL.SQLOpenFullMutex,SQL.SQLOpenNoFollow,SQL.SQLOpenPrivateCache] SQL.SQLVFSDefault) SQL.close $ \db -> do
+      let Direct.Database raw=db
+      sqliteLimits raw
+      SQL.exec db "PRAGMA busy_timeout=100"
+      unless readonly (SQL.exec db "PRAGMA synchronous=FULL")
+      action db
+
+validateSnapshot :: SQL.Database -> IO ()
+validateSnapshot db = bounded db 30000000 $ do
+  version <- scalar db "PRAGMA user_version"
+  unless(version==SQL.SQLInteger(fromIntegral schemaVersion))(throwIO StoreVersion)
+  integrity <- scalar db "PRAGMA integrity_check"
+  unless(integrity==SQL.SQLText "ok")(throwIO StoreIntegrity)
+  violations <- rawRows db "PRAGMA foreign_key_check" []
+  unless(null violations)(throwIO StoreIntegrity)
+
+copyDatabase :: SQL.Database -> SQL.Database -> IO ()
+copyDatabase destination source = bounded destination 30000000 $
+  bracket (SQL.backupInit destination "main" source "main") SQL.backupFinish $ \backup ->
+    let step = SQL.backupStep backup 256 >>= \status -> case status of
+          SQL.BackupDone -> pure()
+          SQL.BackupOK -> step
+    in step
+
+publishBytes :: PrivateRoot -> [FilePath] -> BS.ByteString -> IO ()
+publishBytes root path bytes = do
+  cell <- newIORef bytes
+  published <- publishPrivateCaptureAt root path (fromIntegral(BS.length bytes)) $ do
+    value <- readIORef cell
+    writeIORef cell BS.empty
+    pure value
+  case published of
+    CapturePublished _ -> pure()
+    _ -> throwIO StoreUnavailable
+
+-- Captures remain immutable. Existing different bytes refuse rather than being overwritten.
+copyCaptures :: SQL.Database -> PrivateRoot -> PrivateRoot -> IO ()
+copyCaptures db source destination = do
+  ensurePrivateDirectoryAt destination ["captures"]
+  eachCapture db $ \ident size digest -> do
+    present <- try @IOException(checkCapture destination ident size digest)
+    case present of
+      Right () -> checkCapture source ident size digest
+      Left failure | isDoesNotExistError failure -> withCapture source ident $ \handle -> do
+        result <- publishPrivateCaptureAt destination ["captures",T.unpack ident] size (BS.hGetSome handle 65536)
+        case result of
+          CapturePublished receipt | privateCaptureBytes receipt==size && privateCaptureSha256 receipt==digest -> pure()
+          _ -> throwIO StoreIntegrity
+      Left failure -> throwIO failure
+
+verifyCaptures :: SQL.Database -> PrivateRoot -> IO ()
+verifyCaptures db root = eachCapture db (checkCapture root)
+
+eachCapture :: SQL.Database -> (Text -> Integer -> Text -> IO ()) -> IO ()
+eachCapture db action = loop ""
+  where
+    loop after = do
+      rows <- bounded db 5000000 $ rawRows db "SELECT CASE WHEN length(id)<=128 THEN id END,CASE WHEN length(private_reference)<=128 THEN private_reference END,bytes,sha256 FROM captures WHERE id>? ORDER BY id LIMIT 100" [SQL.SQLText after]
+      forM_ rows $ \row -> case row of
+        [SQL.SQLText ident,SQL.SQLBlob reference,SQL.SQLInteger size,SQL.SQLText digest]
+          | reference==TE.encodeUtf8 ident && size>=0 && size<=67108864 ->
+              timeout 5000000(action ident (fromIntegral size) digest) >>= maybe(throwIO StoreUnavailable)pure
+        _ -> throwIO StoreIntegrity
+      case reverse rows of
+        (SQL.SQLText ident:_):_ -> loop ident
+        [] -> pure()
+        _ -> throwIO StoreIntegrity
+
+withCapture :: PrivateRoot -> Text -> (Handle -> IO a) -> IO a
+withCapture root ident action = do
+  unless(not(T.null ident) && T.length ident<=128 && T.all (\c -> isAscii c && (isAlphaNum c || c=='_' || c=='-')) ident)(throwIO StoreIntegrity)
+  bracket (openPrivateSubroot root ["captures"]) closePrivateRoot $ \captures ->
+    withPrivateDirectoryAt captures [] $ \parent ->
+      bracket (bracketOnError
+        (openFdAt (Just parent) (T.unpack ident) ReadOnly defaultFileFlags {cloexec=True,nofollow=True,nonBlock=True}) closeFd
+        (\fd -> checkPrivateDescriptor fd >> fdToHandle fd)) hClose action
+
+checkCapture :: PrivateRoot -> Text -> Integer -> Text -> IO ()
+checkCapture root ident expected digest = withCapture root ident $ \handle ->
+  let loop count context = do
+        bytes <- BS.hGetSome handle 65536
+        let total=count+fromIntegral(BS.length bytes)
+        when(total>expected)(throwIO StoreIntegrity)
+        if BS.null bytes then unless(total==expected && T.pack(show(hashFinalize context :: Digest SHA256))==digest)(throwIO StoreIntegrity)
+        else loop total (hashUpdate context bytes)
+  in loop 0 (hashInit :: Hash.Context SHA256)
+
 -- Runtime owns directory traversal for the database and its named companions.
 -- SQLite also owns native private temporary files outside this root.
 checkPrivateFile :: PrivateRoot -> FilePath -> IO ()
 checkPrivateFile root name = withPrivateDirectoryAt root [] $ \parent ->
   bracket (openFdAt (Just parent) name ReadOnly
-    defaultFileFlags {cloexec = True, nofollow = True, nonBlock = True}) closeFd $ \fd -> do
-      status <- getFdStatus fd
-      owner <- getEffectiveUserID
-      unless (isRegularFile status && fileOwner status == owner && fileMode status .&. 0o777 == 0o600
-              && linkCount status == 1) (throwIO StoreUnavailable)
+    defaultFileFlags {cloexec = True, nofollow = True, nonBlock = True}) closeFd checkPrivateDescriptor
+
+checkPrivateDescriptor :: Fd -> IO ()
+checkPrivateDescriptor fd = do
+  status <- getFdStatus fd
+  owner <- getEffectiveUserID
+  unless (isRegularFile status && fileOwner status == owner && fileMode status .&. 0o777 == 0o600
+          && linkCount status == 1) (throwIO StoreUnavailable)
 
 freshIdentity :: Text -> IO Text
 freshIdentity prefix = do
@@ -218,6 +460,7 @@ migrate db = mask $ \restore -> do
       SQL.SQLInteger 6 -> pure ()
       SQL.SQLInteger 7 -> pure ()
       SQL.SQLInteger 8 -> pure ()
+      SQL.SQLInteger 9 -> pure ()
       SQL.SQLInteger current | current == fromIntegral schemaVersion -> pure ()
       _ -> throwIO StoreVersion
     when (version `elem` [SQL.SQLInteger 0, SQL.SQLInteger 1]) $ do
@@ -244,9 +487,12 @@ migrate db = mask $ \restore -> do
     when (version `elem` map SQL.SQLInteger [0,1,2,3,4,5,6,7]) $ do
       mapM_ (SQL.exec db) artifactMigration
       SQL.exec db "PRAGMA user_version=8"
-    when (version /= SQL.SQLInteger (fromIntegral schemaVersion)) $ do
+    when (version `elem` map SQL.SQLInteger [0,1,2,3,4,5,6,7,8]) $ do
       mapM_ (SQL.exec db) historyMigration
       SQL.exec db "PRAGMA user_version=9"
+    when (version /= SQL.SQLInteger (fromIntegral schemaVersion)) $ do
+      mapM_ (SQL.exec db) restartMigration
+      SQL.exec db "PRAGMA user_version=10"
     SQL.exec db "COMMIT"
   case result of
     Right () -> pure ()

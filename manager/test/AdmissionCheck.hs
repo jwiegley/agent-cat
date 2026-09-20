@@ -17,7 +17,7 @@ import Agentic.Manager.Protocol.Command
 import Agentic.Manager.Protocol.Draft
 import Agentic.Manager.Store
 import qualified Agentic.Manager.Worker as Worker
-import Agentic.Runtime (workflowName, FrontendPrepared (..), RunId (..), createProcessGroup, terminateProcessGroup, closeGroupPipes, groupOutput, groupErrors, waitProcessGroup)
+import Agentic.Runtime (WorkflowDescriptor (..), FrontendPrepared (..), RunId (..), createProcessGroup, terminateProcessGroup, closeGroupPipes, groupOutput, groupErrors, waitProcessGroup)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (AsyncCancelled (..), async, asyncThreadId, cancel, waitCatch, wait, poll)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar, readMVar, tryReadMVar, tryPutMVar)
@@ -32,9 +32,11 @@ import Data.ByteArray (convert)
 import qualified Data.ByteString as BS
 import Data.Int (Int64)
 import Data.List (find, sortOn)
+import Data.Foldable (toList)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import qualified Database.SQLite3 as SQL
 import System.Directory (createDirectory, doesDirectoryExist, doesFileExist, removeFile)
 import System.Environment (getArgs, getExecutablePath)
@@ -56,6 +58,8 @@ main = do
     ["policy-only"] -> policyChecks
     ["shutdown-only",work] -> shutdownChecks work
     ["shutdown-native",work,native] -> shutdownNativeChecks work native
+    ["restart-native",work,native] -> restartNativeChecks work native
+    ["restart-interruption",work,native] -> restartInterruptionChecks work native
     ["static-occupancy"] -> staticOccupancyCheck
     ["interrupted-acceptance",work,native] -> interruptedAcceptanceChecks work native
     ["active-retry",work,native] -> activeRetryChecks work native
@@ -101,6 +105,195 @@ etag :: DraftView -> Maybe Text
 etag view=Just("\""<>draftRevision view<>"\"")
 body :: Text -> BS.ByteString
 body operationName'=encoded(object["operation" .= operationName'])
+
+restartInterruptionChecks :: FilePath -> FilePath -> IO ()
+restartInterruptionChecks work native = do
+  withFixture work native "restore-interruption" 1 [] (const(pure()))
+  let root=work </> "restore-interruption"
+      backup=work </> "interrupted-backup"
+  createDirectory backup
+  setFileMode backup 0o700
+  config <- loadConfiguration (const(Right())) exactPreparedTarget (const False) (work </> "restore-interruption.json") >>= right
+  bracket (installConfiguration config >>= right) closeConfiguration $ \installed -> do
+    backupCoordinationStore installed backup
+    Audit.withReviewAudit "restore-marker" $ \audit -> do
+      original <- async(restoreCoordinationStore installed backup)
+      (do
+        originalThread <- Audit.waitReviewed audit
+        assertion "restore marker belongs to original retained Async" (originalThread==asyncThreadId original)
+        doesFileExist(root </> "restore-in-progress") >>= assertion "restore interruption barrier follows durable marker publication"
+        cancel original
+        outcome <- waitCatch original
+        assertion "restore preserves original AsyncCancelled after original join" (case outcome of Left failure -> fromException failure==Just AsyncCancelled; _ -> False)
+        doesFileExist(root </> "restore-in-progress") >>= assertion "cancelled restore retains durable in-progress fence"
+        refused <- try @StoreFailure(withCoordinationStore installed (const(pure())))
+        assertion "interrupted restore refuses ordinary startup without fabricated success" (refused==Left StoreUnavailable)) `finally` cancel original
+
+restartNativeChecks :: FilePath -> FilePath -> IO ()
+restartNativeChecks work native = do
+  (originalIdentity,queuedA,queuedB,oldKey,oldReceipt) <- withFixture work native "restart" 2 [("a",["a"]),("b",["b"])] $ \fixture@(Fixture _ _ owner _ _) -> withAdmission owner $ \controller -> do
+    draftA <- newDraft fixture 0 "a" "restart_a"
+    draftB <- newDraft fixture 0 "b" "restart_b"
+    (nonce,receipt) <- enqueue controller fixture 0 draftA "restart_a"
+    void(enqueue controller fixture 0 draftB "restart_b")
+    identity <- storeIdentity owner
+    pure(identity,draftA,draftB,nonce,receipt)
+  let root=work </> "restart"
+      backup=work </> "backup"
+  createDirectory backup
+  setFileMode backup 0o700
+  config <- loadConfiguration (const(Right())) exactPreparedTarget (const False) (work </> "restart.json") >>= right
+  bracket (installConfiguration config >>= right) closeConfiguration $ \installed -> do
+    -- Discovery belongs to the newly installed registry, never the previous lifetime.
+    (_,public) <- configurationSnapshot installed >>= right
+    catalogues <- forM public $ \profile -> do
+      discovered <- probeConfiguredProfile installed(publicId profile)(publicRevision profile) >>= right
+      pure(publicId profile,discovered)
+    backupCoordinationStore installed backup
+    withCoordinationStore installed $ \owner -> do
+      currentIdentity <- storeIdentity owner
+      assertion "ordinary restart preserves epoch/stream and changes process generation" (storeAuthorityEpoch currentIdentity==storeAuthorityEpoch originalIdentity && storeStreamId currentIdentity==storeStreamId originalIdentity && storeProcessGeneration currentIdentity/=storeProcessGeneration originalIdentity)
+      proof <- authenticateCredential owner (BS.replicate 32 1) >>= right
+      restoredA <- readDraft owner proof(draftId queuedA) >>= right
+      restoredB <- readDraft owner proof(draftId queuedB) >>= right
+      assertion "durable FIFO queue order survives without recreating start consent" (draftPosition restoredA==Just 1 && draftPosition restoredB==Just 2)
+      beforeReconcile <- number owner "SELECT count(*) FROM invalidations"
+      withAdmission owner $ \controller -> do
+        number owner "SELECT count(*) FROM requests r JOIN invalidations i ON i.kind='request.changed' AND i.resource_uri='/v1/requests/'||r.id AND i.revision=r.revision" >>= assertion "reconciled queue revisions have matching request invalidations" . (==2)
+        afterReconcile <- number owner "SELECT count(*) FROM invalidations"
+        assertion "queue reconciliation emits exactly its changed request events" (afterReconcile==beforeReconcile+2)
+        void(reconcileDrafts owner)
+        number owner "SELECT count(*) FROM invalidations" >>= assertion "unchanged validated associations emit no extra events or revisions" . (==afterReconcile)
+        replayed <- enqueueRequest controller proof(draftId queuedA)oldKey(etag queuedA)(body "enqueue") >>= right
+        assertion "ordinary restart retains exact enqueue receipt without a new command" (replayed==oldReceipt)
+        liveA <- admit controller
+        reviewA <- await(awaitReview liveA) >>= right
+        liveB <- admit controller
+        reviewB <- await(awaitReview liveB) >>= right
+        assertion "revalidated durable queue prepares fresh native workers in FIFO order" (reviewRequest reviewA==draftId queuedA && reviewRequest reviewB==draftId queuedB)
+      number owner "SELECT count(*) FROM reservations WHERE state!='released'" >>= assertion "original newly prepared owners join before offline restore" . (==0)
+      mutate owner(execute "INSERT INTO restoration_quarantine VALUES ('lost_after_backup',0,'[[\"operator\",\"b\"]]')" [])
+    restoreCoordinationStore installed backup
+    withCoordinationStore installed $ \owner -> do
+      restoredIdentity <- storeIdentity owner
+      assertion "offline restoration rotates epoch and stream" (storeAuthorityEpoch restoredIdentity/=storeAuthorityEpoch originalIdentity && storeStreamId restoredIdentity/=storeStreamId originalIdentity)
+      staleCredential <- authenticateCredential owner (BS.replicate 32 1)
+      assertion "all restored credential authority is revoked" (case staleCredential of Left Unauthenticated -> True; _ -> False)
+      mutate owner $ do
+        execute "INSERT INTO credentials VALUES ('replacement','client_1',?,'2999-01-01T00:00:00Z',0)" [SQL.SQLBlob(convert(hash(BS.replicate 32 33)::Digest SHA256))]
+        forM_ ["a","b"::Text] $ \profile -> forM_ ["submit","observe","control"::Text] $ \scope -> execute "INSERT INTO credential_scopes VALUES ('replacement',?,?)" [SQL.SQLText profile,SQL.SQLText scope]
+      proof <- authenticateCredential owner (BS.replicate 32 33) >>= right
+      let fixture=Fixture root installed owner catalogues [proof]
+      withAdmission owner $ \controller -> do
+        refused <- enqueueRequest controller proof(draftId queuedA)oldKey(etag queuedA)(body "enqueue")
+        assertion "old mutation key refuses even with replacement credentials" (refused==Left AuthorityChanged)
+        blocked <- newDraft fixture 0 "b" "blocked_after_restore"
+        void(enqueue controller fixture 0 blocked "blocked_after_restore")
+        admitOldest controller >>= right >>= assertion "affected restored resource stays quarantined" . maybe True (const False)
+        eligible <- newDraft fixture 0 "a" "eligible_after_restore"
+        void(enqueue controller fixture 0 eligible "eligible_after_restore")
+        live <- admit controller
+        review <- await(awaitReview live) >>= right
+        assertion "genuinely new consented disjoint work can prepare after restoration" (reviewRequest review==draftId eligible)
+        number owner "SELECT count(*) FROM start_intents" >>= assertion "restart and restoration fabricate no approval or native start" . (==0)
+    restoreCoordinationStore installed backup
+    withCoordinationStore installed $ \owner -> do
+      occupancy <- runRead owner reservationOccupancy
+      assertion "repeated restore retains original affected-resource and slot facts" (occupancy==[("lost_after_backup",0,[("operator","b")])])
+  restartBindingChecks work native
+  restartUnavailableChecks work native
+  putStrLn "PASS ordinary native restart and fenced offline restoration"
+
+restartBindingChecks :: FilePath -> FilePath -> IO ()
+restartBindingChecks work native = do
+  original <- withFixture work native "restart-changed" 1 [("a",["a"])] $ \fixture@(Fixture _ _ _ catalogues _) -> do
+    let catalogue=case lookup "a" catalogues of Just value->value;Nothing->error "missing catalogue"
+    case discoveryEntries catalogue of
+      (_,descriptor):_ -> assertion "full native descriptor changes invalidate declared restart equality"
+        (restartBinding catalogue descriptor/=restartBinding catalogue (descriptor {workflowResultCode=String "different"}))
+      [] -> error "missing descriptor"
+    withAdmission (case fixture of Fixture _ _ owner _ _->owner) $ \controller -> do
+      draft <- newDraft fixture 0 "a" "changed"
+      void(enqueue controller fixture 0 draft "changed")
+      pure draft
+  let path=work </> "restart-changed.json"
+  bytes <- BS.readFile path
+  let changed=T.replace "\"resourceKeys\":[\"a\"]" "\"resourceKeys\":[\"changed\"]" (TE.decodeUtf8 bytes)
+  assertion "changed-configuration fixture changes actual declared resources" (TE.encodeUtf8 changed/=bytes)
+  BS.writeFile path(TE.encodeUtf8 changed)
+  config <- loadConfiguration (const(Right())) exactPreparedTarget (const False) path >>= right
+  bracket (installConfiguration config >>= right) closeConfiguration $ \installed -> do
+    (_,public) <- configurationSnapshot installed >>= right
+    forM_ public $ \profile -> void(probeConfiguredProfile installed(publicId profile)(publicRevision profile) >>= right)
+    withCoordinationStore installed $ \owner -> withAdmission owner $ \controller -> do
+      admitOldest controller >>= right >>= assertion "changed declared configuration cannot restore queue eligibility" . maybe True (const False)
+      scalarText owner "SELECT profile_revision FROM requests" >>= assertion "failed equality never rotates historical request authority" . (==draftProfileRevision original)
+      number owner "SELECT count(*) FROM reservations" >>= assertion "changed restart creates no worker reservation" . (==0)
+
+restartUnavailableChecks :: FilePath -> FilePath -> IO ()
+restartUnavailableChecks work native = forM_ ["removed","quarantined","failed-discovery"] $ \mode -> do
+  let name="restart-"<>mode
+      path=work </> name<>".json"
+      root=work </> name
+      retained owner = runRead owner $ do
+        rows <- query "SELECT id,revision,profile_revision,descriptor_revision,phase,coalesce(queue_generation,'') FROM requests WHERE profile_id='a' ORDER BY id" []
+        forM rows $ \row -> forM row $ \value -> case value of SQL.SQLText textValue -> pure textValue; _ -> refuseTransaction StoreIntegrity
+  original <- withFixture work native name 1 [("a",["a"]),("b",["b"])] $ \fixture@(Fixture _ _ owner _ _) -> withAdmission owner $ \controller -> do
+    void(newDraft fixture 0 "a" "inert_draft")
+    draft <- newDraft fixture 0 "a" "inert_queue"
+    void(enqueue controller fixture 0 draft "inert_queue")
+    retained owner
+  checker <- getExecutablePath
+  document <- BS.readFile path >>= either(error . show)pure . eitherDecodeStrict'
+  revised <- case document of
+    Object fields -> case (KM.lookup "profiles" fields,KM.lookup "runners" fields) of
+      (Just (Array profiles),Just (Array runners)) -> do
+        let changed (Object profile) | KM.lookup "id" profile==Just(String "a") = case mode of
+              "removed" -> []
+              "quarantined" -> [Object(KM.insert "quarantined" (Bool True) profile)]
+              _ -> [Object(KM.insert "runner" (String "unavailable") profile)]
+            changed value=[value]
+            unavailable=[object["alias" .= ("unavailable"::Text),"executable" .= checker,"prefix" .= ([]::[Text])] | mode=="failed-discovery"]
+        pure(Object(KM.insert "runners" (toJSON(toList runners<>unavailable))(KM.insert "profiles" (toJSON(concatMap changed(toList profiles))) fields)))
+      _ -> error "missing fixture profiles"
+    _ -> error "invalid fixture configuration"
+  BS.writeFile path(encoded revised)
+  config <- loadConfiguration (const(Right())) exactPreparedTarget (const False) path >>= right
+  bracket (installConfiguration config >>= right) closeConfiguration $ \installed -> do
+    (_,public) <- configurationSnapshot installed >>= right
+    catalogues <- fmap concat $ forM public $ \profile -> do
+      discovered <- probeConfiguredProfile installed(publicId profile)(publicRevision profile)
+      case discovered of
+        Right catalogue -> pure[(publicId profile,catalogue)]
+        Left failure -> assertion (mode<>" has unavailable A discovery") (publicId profile=="a" && failure==(if mode=="quarantined" then Quarantined else ProcessFailure)) >> pure[]
+    assertion (mode<>" retains usable B only") (map fst catalogues==["b"])
+    escaped <- withCoordinationStore installed $ \owner -> do
+      proof <- authenticateCredential owner(BS.replicate 32 1) >>= right
+      when(mode=="removed") $ do
+        entered <- newEmptyMVar
+        release <- newEmptyMVar
+        withCommitDeadline owner (putMVar entered () >> readMVar release >> pure 0) 1 $ \guard ->
+          bracket (async(runTransaction owner(enforceCommitDeadline guard >> pure((),[])))) (\task -> putMVar release () >> await(wait task)) $ \_ -> do
+            await(takeMVar entered)
+            busy <- try @StoreFailure(reconcileDrafts owner)
+            assertion "restart reconciliation preserves fail-fast StoreBusy" (case busy of Left StoreBusy -> True; _ -> False)
+      before <- number owner "SELECT count(*) FROM invalidations"
+      withAdmission owner $ \controller -> do
+        retained owner >>= assertion (mode<>" leaves historical A revisions and queue association inert") . (==original)
+        number owner "SELECT count(*) FROM invalidations" >>= assertion (mode<>" adds no events for unavailable historical selections") . (==before)
+        let fixture=Fixture root installed owner catalogues [proof]
+        draft <- newDraft fixture 0 "b" "usable_b"
+        void(enqueue controller fixture 0 draft "usable_b")
+        live <- admit controller
+        review <- await(awaitReview live) >>= right
+        assertion (mode<>" permits actual fresh B native preparation") (reviewRequest review==draftId draft)
+      number owner "SELECT count(*) FROM reservations WHERE state!='released'" >>= assertion (mode<>" joins original B owner without releasing historical authority") . (==0)
+      closeConfiguration installed
+      unavailable <- try @CommandFailure(withAdmission owner(const(pure())))
+      assertion (mode<>" still propagates genuine configuration-access failure") (unavailable==Left StorageUnavailable)
+      pure owner
+    closed <- try @StoreFailure(reconcileDrafts escaped)
+    assertion (mode<>" still propagates original StoreClosed") (case closed of Left StoreClosed -> True; _ -> False)
 
 -- These fixtures retain actual Store registrations but never construct a process.
 shutdownChecks :: FilePath -> IO ()

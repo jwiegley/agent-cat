@@ -6,13 +6,13 @@
 
 -- | Durable input representations and verified captures, never workflow execution.
 module Agentic.Manager.Drafts
-  ( createDraft, createLineageDraft, withLineageRequests, checkLineageParent, changeDraftInput, changeDraftInputGuarded, InputTransition (..), RequestState, requestView, requestOwner, requestState, currentVersion, editable, checkDraftCapacity, uploadCapture, readDraft, assembleDraft, DraftAssembly, assemblyRequest, assemblyRevision, assemblyProfile, assemblyProfileRevision, assemblySetup, assemblyFrame, assemblyInputSummaries, assemblySelection, assemblyParentBinding, validateAssemblyParent, assembleDraftSnapshot, assembleAcceptedDraft, structuralReadiness, verifyFrontendFiles ) where
+  ( reconcileDrafts, createDraft, createLineageDraft, withLineageRequests, checkLineageParent, changeDraftInput, changeDraftInputGuarded, InputTransition (..), RequestState, requestView, requestOwner, requestState, currentVersion, editable, checkDraftCapacity, uploadCapture, readDraft, assembleDraft, DraftAssembly, assemblyRequest, assemblyRevision, assemblyProfile, assemblyProfileRevision, assemblySetup, assemblyFrame, assemblyInputSummaries, assemblySelection, assemblyParentBinding, validateAssemblyParent, assembleDraftSnapshot, assembleAcceptedDraft, structuralReadiness, verifyFrontendFiles ) where
 
 import Agentic.Manager.Authorization
 import Agentic.Manager.Commands
 import Agentic.Manager.Profile
   (ConfigurationLimits (..), Discovery, discoveryEntries, discoveryRevision, discoveryProfileRevision,
-   discoverySelection, Selection, selectionContext, selectionInvocation, OperatorProfile (..))
+   discoverySelection, restartBinding, Selection, selectionContext, selectionInvocation, OperatorProfile (..))
 import Agentic.Manager.Protocol.Command
 import Agentic.Manager.Protocol.Draft
 import Agentic.Manager.Lineage
@@ -57,6 +57,66 @@ import System.Posix.User (getEffectiveUserID)
 import Data.Bits ((.&.))
 import System.Timeout (timeout)
 
+-- | Reconcile only declared-equal draft/queue intent against current discovery.
+-- Missing historical bindings remain inert. This creates no live approval or ticket.
+reconcileDrafts :: CoordinationStore -> IO [AcceptedEnqueue]
+reconcileDrafts store = page ""
+  where
+    page after = do
+      identifiers <- runRead store $ do
+        rows <- query "SELECT r.id FROM requests r JOIN request_restart_bindings b ON b.request_id=r.id WHERE r.id>? AND r.phase IN ('draft','queued') AND NOT EXISTS(SELECT 1 FROM reservations v WHERE v.request_id=r.id AND v.state!='released') ORDER BY r.id LIMIT 100" [text after]
+        pure [ident | [SQL.SQLText ident] <- rows]
+      eligible <- forM identifiers $ \ident -> do
+        outcome <- draftIO(withStoreFiles store(\root -> timed 5000000(reconcile root ident)))
+        case outcome of
+          Right permits -> pure permits
+          Left failure | failure `elem` [StaleRevision,InvalidInput,ResourceUnavailable,StateConflict] -> pure[]
+          Left failure -> throwIO failure
+      remaining <- case reverse identifiers of
+        ident:_ -> page ident
+        [] -> pure[]
+      let permits=concat eligible<>remaining
+      unless(length permits<=100)(throwIO SizeLimit)
+      pure permits
+    reconcile root ident = do
+      let access=RestartAccess ident
+      snapshot@(RequestState original client errors) <- runRead store(requestStateWith access ident [])
+      binding <- runRead store $ do
+        rows <- query "SELECT digest FROM request_restart_bindings WHERE request_id=?" [text ident]
+        case rows of [[SQL.SQLText digest]] -> pure digest; _ -> refuseTransaction InvalidInput
+      catalogues <- withStoreCatalogues store(\_ _ current -> pure current) >>= either(const(throwIO StorageUnavailable))pure
+      catalogue <- maybe(throwIO ResourceUnavailable)pure(lookup(draftProfile original)catalogues)
+      descriptor <- maybe(throwIO ResourceUnavailable)pure(lookup(draftWorkflow original)(discoveryEntries catalogue))
+      unless(restartBinding catalogue descriptor==binding)(throwIO StaleRevision)
+      let revised=original {draftProfileRevision=discoveryProfileRevision catalogue,draftDescriptorRevision=discoveryRevision catalogue}
+          checked=RequestState revised client errors
+      if draftPhase original=="queued" || draftParent original/=Nothing
+        then void(assembleSnapshot store access root checked catalogue descriptor)
+        else do
+          inputs <- runRead store(inputStates ident)
+          declarations <- mapM (requireEither . nativeDeclaration) inputs
+          unless(declarations==workflowInputs descriptor)(throwIO InvalidInput)
+          forM_ inputs $ \input@(InputState _ _ source _ _ _ _ capture) -> case source of
+            Nothing -> pure()
+            Just "literal" -> void(readLiteralWith store access snapshot [] input)
+            Just "capture" -> do
+              captureId' <- maybe(throwIO InvalidInput)pure capture
+              captured <- runRead store(captureState ident captureId')
+              void(verifyCapture root captured False)
+            _ -> throwIO InvalidInput
+      revision <- fresh "request_revision_"
+      result <- withStoreCatalogues store $ \_ _ current -> do
+        _ <- maybe(throwIO ResourceUnavailable)pure(lookup(draftProfile revised)current)
+        _ <- either throwIO pure(selectCatalogue current (draftProfile revised) (draftProfileRevision revised) (draftWorkflow revised) (draftDescriptorRevision revised))
+        runTransaction store $ do
+          checkRevisionWith access snapshot []
+          let changed=draftProfileRevision original/=draftProfileRevision revised || draftDescriptorRevision original/=draftDescriptorRevision revised
+          when changed $ execute "UPDATE requests SET profile_revision=?,descriptor_revision=?,revision=? WHERE id=?" [text(draftProfileRevision revised),text(draftDescriptorRevision revised),text revision,text ident]
+          (permits,associated) <- restoreAcceptedEnqueues ident
+          when (associated && not changed) $ execute "UPDATE requests SET revision=? WHERE id=?" [text revision,text ident]
+          pure(permits,[requestEvent ident revision | changed || associated])
+      either(const(throwIO StorageUnavailable))pure result
+
 holdingLimit :: Int64
 holdingLimit = 67108864
 
@@ -77,7 +137,7 @@ createDraft store proof key body = draftIO $ do
   ident <- fresh "request_"
   let request = CommandRequest Create (createProfile requestBody) "POST" "/v1/requests" key "application/json" Nothing body
       builder commandId limits catalogues = do
-        (_, descriptor) <- selectCatalogue catalogues (createProfile requestBody) (createProfileRevision requestBody)
+        (catalogue, descriptor) <- selectCatalogue catalogues (createProfile requestBody) (createProfileRevision requestBody)
           (createWorkflow requestBody) (createDescriptorRevision requestBody)
         declarations <- traverse publicDeclaration (workflowInputs descriptor)
         let names = map workflowInputName (workflowInputs descriptor)
@@ -97,6 +157,7 @@ createDraft store proof key body = draftIO $ do
             forM_ (groupsOf 32 (zip [0..] (workflowInputs descriptor))) $ \inputs ->
               execute ("INSERT INTO request_inputs (request_id,name,declaration_ordinal,declaration) VALUES " <> T.intercalate "," (replicate(length inputs) "(?,?,?,?)"))
                 (concat [[text ident,text(workflowInputName input),SQL.SQLInteger ordinal,SQL.SQLBlob(encoded input)] | (ordinal,input)<-inputs])
+            execute "INSERT INTO request_restart_bindings VALUES (?,?)" [text ident,text(restartBinding catalogue descriptor)]
             execute "INSERT INTO request_origins VALUES (?,?,?)" [text ident,text commandId,SQL.SQLBlob initialBytes]
             pure ([requestEvent ident ident], Nothing)
   submission <- submitConfiguredCommand store proof request builder >>= requireEither
@@ -152,6 +213,7 @@ createLineageDraft store proof parent key precondition body = draftIO $ do
               execute "INSERT INTO requests (id,revision,client_id,workflow_id,descriptor_revision,profile_id,profile_revision,input_revision,phase,admission,blocking_reasons,validation_errors,parent_run_id,lineage_operation,lineage_edits) VALUES (?,?,?,?,?,?,?,?,'draft','not-queued',?,?,?,?,?)"
                 [text ident,text ident,text client,text workflow,text descriptorRevision,text profile,text profileRevision,text ident,
                  SQL.SQLBlob(encoded ([]::[Text])),SQL.SQLBlob(encoded ([]::[InputError])),text parent,text(operationName operation),SQL.SQLBlob(encoded mutation)]
+              execute "INSERT INTO request_restart_bindings VALUES (?,?)" [text ident,text(restartBinding catalogue descriptor)]
               execute "INSERT INTO request_lineage VALUES (?,?)" [text ident,SQL.SQLBlob(encodeFrontendManifest manifest)]
               execute "INSERT INTO request_origins VALUES (?,?,?)" [text ident,text commandId,SQL.SQLBlob(encoded initial)]
               effect <- requireTransaction $ case fromJSON (object ["kind" .= ("lineage-created"::Text),"resource" .= requestURI ident,"runtimeSequence" .= (Nothing::Maybe Text),"address" .= (Nothing::Maybe Text)]) of
@@ -443,7 +505,7 @@ validateAssemblyParent store assembly prepared = case assemblyParent assembly of
     summaries <- parentInputs root record (assemblyDescriptor assembly)
     unless (summaries == assemblyInputSummaries assembly) (throwIO StateConflict)
 
-data DraftAccess = ClientAccess !CredentialProof | AcceptedAccess !AcceptedEnqueue
+data DraftAccess = ClientAccess !CredentialProof | AcceptedAccess !AcceptedEnqueue | RestartAccess !Text
 
 assembleDraft :: CoordinationStore -> CredentialProof -> Text -> IO (Either CommandFailure (FrontendSetupRequest, BS.ByteString))
 assembleDraft store proof ident = fmap (fmap (\snapshot -> (assemblySetup snapshot,assemblyFrame snapshot))) (assembleDraftSnapshot store proof ident)
@@ -457,7 +519,12 @@ assembleAcceptedDraft store permit = assembleWith store (AcceptedAccess permit) 
 assembleWith :: CoordinationStore -> DraftAccess -> Text -> IO (Either CommandFailure DraftAssembly)
 assembleWith store access ident = draftIO $ withStoreFiles store $ \root -> timed 5000000 $ do
   snapshot@(RequestState view _ _) <- runRead store(requestStateWith access ident [Submit])
-  (catalogue,descriptor) <- currentCatalogue store view
+  (catalogue,descriptor) <- currentCatalogue store access view
+  assembleSnapshot store access root snapshot catalogue descriptor
+
+assembleSnapshot :: CoordinationStore -> DraftAccess -> PrivateRoot -> RequestState -> Discovery -> WorkflowDescriptor -> IO DraftAssembly
+assembleSnapshot store access root snapshot@(RequestState view _ _) catalogue descriptor = do
+  let ident=draftId view
   case draftParent view of
     Nothing -> assembleRoot store access root snapshot catalogue descriptor
     Just parent -> do
@@ -477,7 +544,7 @@ assembleWith store access ident = draftIO $ withStoreFiles store $ \root -> time
             (lineageOperation edits) (lineageEdits edits) (operatorPersonAnswering policy) (Just(selectionInvocation selection))
       frame <- either (const (throwIO SizeLimit)) pure (encodeFrontendSetupRequest setup)
       runRead store (checkRevisionWith access snapshot [Submit])
-      _ <- currentCatalogue store view
+      _ <- currentCatalogue store access view
       pure (DraftAssembly ident (draftRevision view) (draftProfile view) (draftProfileRevision view) setup frame summaries selection descriptor (Just(parent,recordManifest record)))
 
 assembleRoot :: CoordinationStore -> DraftAccess -> PrivateRoot -> RequestState -> Discovery -> WorkflowDescriptor -> IO DraftAssembly
@@ -486,7 +553,8 @@ assembleRoot store access root snapshot@(RequestState view _ _) catalogue descri
   inputs <- runRead store(inputStates ident)
   let selection=discoverySelection catalogue
       policy=selectionContext selection
-  unless(map workflowInputName(workflowInputs descriptor)==map inputStateName inputs) (throwIO InvalidInput)
+  declarations <- mapM (requireEither . nativeDeclaration) inputs
+  unless(declarations==workflowInputs descriptor) (throwIO InvalidInput)
   ensureReadyTotal store ident
   let literalTotal=sum[n | InputState _ _ (Just "literal") (Just n) _ _ _ _ <- inputs]
   when(literalTotal>fromIntegral maxFrontendQueryBytes) (throwIO SizeLimit)
@@ -512,7 +580,7 @@ assembleRoot store access root snapshot@(RequestState view _ _) catalogue descri
       result=case encodeFrontendSetupRequest inline of Right bytes -> Right(inline,bytes); Left _ -> case encodeFrontendSetupRequest files of Right bytes -> Right(files,bytes); Left _ -> Left SizeLimit
   value<-requireEither result
   runRead store (checkRevisionWith access snapshot [Submit])
-  _<-currentCatalogue store view
+  _<-currentCatalogue store access view
   pure (DraftAssembly ident (draftRevision view) (draftProfile view) (draftProfileRevision view) (fst value) (snd value) [summary|(_,_,summary)<-resolved] selection descriptor Nothing)
 
 -- | Worker-side revalidation of File sources against actual retained capture records.
@@ -546,6 +614,11 @@ requestStateWith access ident scopes = do
       _<-currentClient proof >>= requireTransaction
       pure (T.concat[" AND EXISTS(SELECT 1 FROM credential_scopes s WHERE s.credential_id=? AND s.profile_id=r.profile_id AND s.scope=?)" | _<-scopes],
         concat[[text(credentialRateKey proof),text(scopeName scope)]|scope<-scopes])
+    RestartAccess expected -> do
+      unless(expected==ident)(refuseTransaction OwnershipUnavailable)
+      eligible <- query "SELECT count(*) FROM requests r JOIN request_restart_bindings b ON b.request_id=r.id WHERE r.id=? AND r.phase IN ('draft','queued') AND NOT EXISTS(SELECT 1 FROM reservations v WHERE v.request_id=r.id AND v.state!='released')" [text ident]
+      unless(eligible==[[SQL.SQLInteger 1]])(refuseTransaction OwnershipUnavailable)
+      pure ("",[])
     AcceptedAccess permit -> do
       request <- checkAcceptedEnqueue permit
       unless(request==ident)(refuseTransaction OwnershipUnavailable)
@@ -678,9 +751,13 @@ selectCatalogue catalogues profile policy workflow revision = do
   unless(discoveryProfileRevision catalogue==policy && discoveryRevision catalogue==revision)(Left StaleRevision)
   descriptor<-maybe(Left ResourceUnavailable)Right(lookup workflow (discoveryEntries catalogue))
   pure(catalogue,descriptor)
-currentCatalogue :: CoordinationStore -> DraftView -> IO (Discovery,WorkflowDescriptor)
-currentCatalogue store view = do
-  result<-withStoreCatalogues store $ \_ _ catalogues -> pure(selectCatalogue catalogues (draftProfile view) (draftProfileRevision view) (draftWorkflow view) (draftDescriptorRevision view))
+currentCatalogue :: CoordinationStore -> DraftAccess -> DraftView -> IO (Discovery,WorkflowDescriptor)
+currentCatalogue store access view = do
+  result<-withStoreCatalogues store $ \_ _ catalogues -> pure $ do
+    case access of
+      RestartAccess _ -> maybe(Left ResourceUnavailable)(const(Right()))(lookup(draftProfile view)catalogues)
+      _ -> Right()
+    selectCatalogue catalogues (draftProfile view) (draftProfileRevision view) (draftWorkflow view) (draftDescriptorRevision view)
   either(const(throwIO StorageUnavailable)) requireEither result
 
 persistErrors :: CoordinationStore -> CredentialProof -> RequestState -> [InputError] -> DraftView -> IO DraftView

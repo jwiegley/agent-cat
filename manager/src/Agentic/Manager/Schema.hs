@@ -1,12 +1,21 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Versioned relational coordination facts. Stored identities are not capabilities.
-module Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration, artifactMigration, historyMigration) where
+module Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration, artifactMigration, historyMigration, restartMigration) where
 
 import Data.Text (Text)
 
 schemaVersion :: Int
-schemaVersion = 9
+schemaVersion = 10
+
+-- | Negative occupancy facts retained across restoration, never execution authority.
+restartMigration :: [Text]
+restartMigration =
+  [ "CREATE TABLE request_restart_bindings (request_id TEXT PRIMARY KEY NOT NULL REFERENCES requests(id), digest TEXT NOT NULL CHECK(length(digest)=64)) STRICT",
+    "CREATE TRIGGER request_restart_binding_immutable BEFORE UPDATE ON request_restart_bindings BEGIN SELECT RAISE(ABORT,'restart binding immutable'); END",
+    "CREATE TABLE restoration_quarantine (id TEXT PRIMARY KEY NOT NULL, slot INTEGER NOT NULL CHECK(slot BETWEEN 0 AND 15), resources TEXT NOT NULL CHECK(length(resources)<=65536)) STRICT",
+    "CREATE TABLE restorations (id TEXT PRIMARY KEY NOT NULL, previous_epoch TEXT NOT NULL, backup_epoch TEXT NOT NULL, effects_uncertain INTEGER NOT NULL CHECK(effects_uncertain=1)) STRICT"
+  ]
 
 -- | Observation addresses and immutable lineage facts confer no worker authority.
 historyMigration :: [Text]

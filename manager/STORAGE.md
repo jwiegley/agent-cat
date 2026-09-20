@@ -56,8 +56,8 @@ heap or temporary-disk quotas. The pinned Unix SQLite source specifies mode
 0600 for DELETEONCLOSE temporary files. That source evidence is not an exhaustive
 platform or forced-spill test.
 
-`PRAGMA user_version` holds internal schema version 8. Startup accepts versions
-zero through eight, and rejects other versions before changing journaling or
+`PRAGMA user_version` holds internal schema version 10. Startup accepts versions
+zero through ten, and rejects other versions before changing journaling or
 schema. Fresh initialization, command-ledger additions, the explicit literal
 chunk/upload migration, and admission and control-state additions execute DDL,
 metadata and version publication in one immediate transaction. Version-one DDL
@@ -165,6 +165,100 @@ shielded against further asynchronous exceptions. Cooperative budgets do not
 promise an absolute OS IO deadline or a hard total SQLite heap bound. A stalled
 filesystem can extend joining and cleanup beyond the nominal budget.
 
+## Restart and offline restoration
+
+An ordinary Store open acquires the existing configuration storage slot and
+service lease, validates the private files, migrates the schema, and creates a
+fresh process generation. Epoch and stream identity survive. Old live
+preparations become invalidated, unresolved reservations remain quarantined,
+and owned runs become lost supervision without changing their Runtime evidence.
+Uncertain starts and controls remain unresolved with their original request and
+receipt bytes. No stored identifier becomes a dispatch or cleanup handle.
+Reconciliation pages at most 100 changed resources per transaction and publishes
+their matching preparation, request, run, control and command invalidations in
+that transaction. Each page has at most 200 events within the existing limit of
+256, with the existing five-second operation and thirty-second startup bounds.
+A failed page rolls back its resource changes and events and refuses startup.
+Completed pages retain coherent replay facts. Unchanged resources and no-op
+reopening acquire neither new revisions nor extra events, and ordinary restart
+preserves the stream identity and retained floor.
+
+The composition root probes the current installed profiles before entering
+Admission. `withAdmission` reconciles draft and queue intent
+through Drafts before publishing its controller. Schema ten stores a private,
+versioned digest of the complete declared profile configuration and native
+workflow descriptor at request creation. This includes invocation, working
+directory, arguments, environment, ownership, quarantine, resources, person
+policy and configuration limits. Declared equality is not workflow semantic
+identity and does not certify the prepared-target validator function. Fresh
+native preparation still invokes the current validator and requires fresh
+approval.
+
+Reconciliation verifies stored inputs and captures using Drafts, then updates
+current revision tokens and restores enqueue associations in the same transaction
+against unchanged request facts. Removed, quarantined or unsuccessfully discovered
+historical selections remain inert without blocking unrelated usable profiles.
+Store, private-root and configuration-access failures still propagate. FIFO ordinals and
+original enqueue bodies, preconditions and receipts remain unchanged. Only
+enqueue materialization associations can be retained again. No CommandAttempt,
+DispatchTicket, accepted start or control payload is reconstructed. Requests
+without historical bindings are not backfilled from current configuration and
+remain inert across a new configuration lifetime. Explicit new requests remain
+available. Changed declarations or unavailable bytes do not become eligible.
+
+`backupCoordinationStore installed destination` and
+`restoreCoordinationStore installed source` are local offline operations exposed
+through `Agentic.Manager`. Their directory argument is an existing private root
+outside manager storage. First finish Admission using its explicit shutdown
+policy and close its Store through the original owner. A live or quarantined
+Store retains its slot and lease and refuses the offline operation. No listener
+or network boundary exists at this layer. Future service composition must close
+exposure before releasing its Store and invoking these operations.
+
+Backup requires an initialized current-schema target and a fresh destination.
+It uses SQLite backup, copies all referenced immutable captures with bounded
+streaming and verification, and publishes its durable completion binding last.
+The binding names the original private root identity. Native history remains in
+that root as observational evidence and is not a source of recovered control
+handles. The snapshot does not relocate native history or support cross-root
+migration.
+
+Restore requires that same root and a readable current safety state. Missing,
+corrupt, incomplete or over-budget current safety facts refuse before database
+publication. Backup-only recovery of an unreadable target is not supported.
+Validated pre-restore and backup claims feed the existing admission occupancy
+path. Identical original claims deduplicate only after their complete slot and
+resource facts agree. Slot collisions retain separate capacity pressure. No
+claim is discarded to make capacity available, and no clearing API is supplied
+without original cleanup evidence. Eligible disjoint new work can proceed.
+
+Before publication, restore durably records `restore-in-progress`, including
+the bounded original safety claims. It verifies source captures, refuses
+replacement of different immutable target bytes, restores through SQLite backup,
+rotates authority and stream identities, revokes every restored credential and
+records uncertainty about effects newer than the backup. Completion removes the
+startup fence only after these commits. An exception or interruption leaves
+normal Store opening refused. Do not delete that marker to assert completion.
+Automated repair of an interrupted restoration is not provided by this API.
+
+Local reprovisioning must use the existing registered client identity. Fresh
+credentials do not validate an old mutation key because Commands checks its
+epoch before ledger lookup. A completed restore does not imply that lost-interval
+effects were absent or undone. Clients must reconcile rather than inventing
+replacement keys or replaying uncertain work. Ordinary credential rotation is
+not restoration and does not reset that client's ledger.
+
+Schema ten adds only request declaration bindings, bounded restoration quarantine
+facts and restoration uncertainty records. Prior migrations and relational
+constraints remain intact. The Store and Admission gates register focused
+SQLite/private-file and ordinary native restart modes at N1 and N8. Store also
+runs the existing captured-source audit once for restoration interruption. Its
+single phase barrier follows durable marker publication, and its N1 and N8
+checks cancel and join the original Async before asserting startup refusal.
+These are not HTTP, client transport, hardware durability or full failure-matrix
+evidence.
+OS containment is excluded from this project and is not a pending capability.
+
 ## Worker cleanup ownership
 
 Worker lifetimes use a separate bounded registration, not the file-operation
@@ -189,10 +283,10 @@ WM-009 supplies storage representation and transaction mechanisms. The
 receipt replay, logical ledger reservations, and one-shot dispatch permission.
 Worker authority, recovery fencing, safe reservation release, retention floors,
 wider total-storage quotas, collection, and checkpoint scheduling remain with
-their owning packages. There is no
-backup or restore operation in this unit. WM-020 must use SQLite's coherent
-snapshot facility rather than copying a live database file. WAL and FULL are
-verified settings, not power-loss, filesystem, or hardware test evidence.
+their owning packages. The offline backup and restoration operations above use
+SQLite's coherent snapshot facility rather than copying a live database file.
+WAL and FULL are verified settings, not power-loss, filesystem, or hardware test
+evidence.
 
 `manager/ci/store.sh` builds the real Cabal executable and runs separate N1 and N8
 checks against SQLite and native service leases. The tests include the installed
