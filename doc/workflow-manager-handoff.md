@@ -68,8 +68,16 @@ completed local effects when exact original durable associations establish
 their resource/client/profile binding, with no contradictory dispatch or intent.
 All inactivity and protection conditions still apply. Original receipts remain
 accepted, missing associations remain uncertain, and no Runtime outcome is
-invented. Initial build failures and still-unrun pressure/race obligations are
-recorded in `progress-note.md`, rather than being treated as completed tests.
+invented. Initial failures and still-unrun obligations are recorded in
+`progress-note.md` and `owner-boundary-note.md`, not treated as completed tests.
+
+Tracker comment 276 records narrow existing-owner corrections: expression-limit
+preserving inactivity queries, expired-key refusal before upload consumption,
+durable retained-parent unlink/synchronization before quota discharge, and
+explicit State-owned historical terminal observation after bounded replay and
+same-boundary revalidation. They create no new execution/cleanup authority or
+bulk backfill. The initial parenthesis diagnosis was withdrawn, and all failed
+logs remain. Full pressure, sync, terminal-evidence and race coverage is pending.
 
 ## WM-020 acceptance
 
@@ -401,8 +409,8 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-20T21:30:44Z`. The next active-work deadline is
-`2026-09-20T22:30:44Z`. Continue with WM-021 through existing owners, with no
+Refocus completed at `2026-09-20T22:24:35Z`. The next active-work deadline is
+`2026-09-20T23:24:35Z`. Continue with WM-021 through existing owners, with no
 OS containment or verification-machinery detour. The resumed persistent goal
 still contains older baseline and scope wording. The user's latest correction
 governs current work, and `/goal-tweak` remains available for updating that
