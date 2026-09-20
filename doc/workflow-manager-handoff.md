@@ -40,11 +40,12 @@ or undo provider effects. This exclusion does not close other package criteria.
 
 ## Active WM-020 unit
 
-Issue `acat-wm-020-5x61` remains in progress. This commit integrates its reviewed
-restart/restoration application delta, not package acceptance. Source and
-evidence remain in `implementation.9tGzKH/restart.gQ3o7Iag`, with focused
-private roots `/Users/johnw/Products/r.hV68Vj`. Parent retains integration,
-execution decisions and acceptance.
+Issue `acat-wm-020-5x61` remains in progress. The reviewed restart/restoration
+application is integrated at `094604c482898197a8e0cdc08bffa9b65afda8d0`.
+This commit adds only the two authorized StoreCheck fixture corrections, not
+package acceptance. Source and evidence remain in
+`implementation.9tGzKH/restart.gQ3o7Iag`. Parent retains integration, execution
+decisions and acceptance.
 
 The unit supplies ordinary startup reconciliation and coherent offline
 database/capture restoration through existing owners. Current focused Werror,
@@ -82,13 +83,34 @@ the same a/b path prefixes. Original-HOME i/w mnemonic prefixes explain the
 initial different diff-text hash, not a source change. Parent applied no stale
 PLAN or handoff copy.
 
-Next run documentation `check-haskell` and the existing profiles, Store,
-Commands, Drafts, Admission and Approval gates once on each platform. Their
-registered modes own constituent execution, without an extra historical matrix.
-Integrated gates and final WM-020 acceptance remain outstanding. Seeded crash
+Both platforms passed documentation `check-haskell` and Profiles once, then
+stopped at the original normal Store N1 reopen assertion. The fixture contains
+an owned run, so required reconciliation adds matching run/control invalidations
+after the original four-event prefix. The corrected test checks the transition
+and exact retained history rather than treating that reopen as a no-op.
+
+A subsequent fresh normal N1 exposed a legacy migration expectation of `held`
+where startup requires `quarantined`. The authorized same-file correction checks
+the exact held claim before migration, retained reservation/request/resource and
+metadata facts afterward, NULL input/enqueue authority, zero invalidations and
+a no-op reopen. Existing rollback and occupancy assertions remain.
+
+The affected Werror rebuild passed at 12:09:42–12:09:54Z on 2026-09-20. Fresh
+normal N1 passed at 12:10:26–12:10:38Z, followed by N8 at 12:10:59–12:11:10Z.
+Evidence is `/Users/johnw/Products/w20m.Pt9TPL` and the unit's
+`migration-correction-result.md`. Tracker comment 267 records the correction.
+Original failed logs and roots remain, including the diagnostic query's
+stripped-label failure, and none is relabeled passing.
+
+The user resumed broader delivery after these scoped checks. Reuse the
+unchanged-production documentation/Profile results, then run the existing
+Store, Commands, Drafts, Admission and Approval gates on each platform.
+Registered modes own their constituents without duplicate standalone runs or
+another historical/client matrix. Final disposition remains with the same
+independent milestone reviewer after the integrated results. Seeded crash
 prefixes, native preparation and the captured interruption barrier retain their
-distinct limits. No full failure-matrix, client or hardware-durability claim
-follows from source integration.
+distinct limits, with no full failure-matrix or hardware-durability claim from
+the focused checks.
 
 ## WM-019 acceptance
 
@@ -292,8 +314,8 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-20T11:14:27Z`. The next active-work deadline is
-`2026-09-20T12:14:27Z`. Continue with WM-020 through existing owners, with no
+Refocus completed at `2026-09-20T17:47:19Z`. The next active-work deadline is
+`2026-09-20T18:47:19Z`. Continue with WM-020 through existing owners, with no
 OS containment or verification-machinery detour. The resumed persistent goal
 still contains older baseline and scope wording. The user's latest correction
 governs current work, and `/goal-tweak` remains available for updating that

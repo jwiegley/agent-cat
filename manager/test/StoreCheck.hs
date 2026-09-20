@@ -336,6 +336,10 @@ count store table = runRead store $ do
 databaseChecks :: FilePath -> IO ()
 databaseChecks work = do
   (path, root) <- fixture work "database"
+  let eventsSQL = "SELECT stream_id,sequence,kind,resource_uri,revision FROM invalidations ORDER BY length(sequence),sequence"
+      runSQL = "SELECT runtime_snapshot,snapshot_version,result_state,supervision,revision,control_revision FROM runs WHERE id='run_1'"
+      originalEvents stream =
+        [[SQL.SQLText stream, SQL.SQLText (T.pack (show ordinal)), SQL.SQLText "request.changed", SQL.SQLText "/v1/requests/request_1", SQL.SQLText "revision_1"] | ordinal <- [1..4 :: Int]]
   first <- withInstalled path $ \installed -> withCoordinationStore installed $ \store -> do
     version <- runRead store $ do
       values <- query "SELECT sqlite_version()" []
@@ -386,22 +390,43 @@ databaseChecks work = do
     check "ordinary checkpoint completes after reader release"
       (not (checkpointBusy completed) && checkpointLogPages completed == checkpointedPages completed)
     identity <- storeIdentity store
-    pure identity
-  withInstalled path $ \installed -> withCoordinationStore installed $ \store -> do
-    second <- storeIdentity store
-    check "reopen preserves durable identities separately from live generation"
-      (storeAuthorityEpoch first == storeAuthorityEpoch second && storeStreamId first == storeStreamId second
-       && storeProcessGeneration first /= storeProcessGeneration second && storeSchemaVersion second == schemaVersion)
     rowsEqual store "SELECT sequence,retained_floor,revision FROM service_metadata"
-      [[SQL.SQLText "4", SQL.SQLText "0", SQL.SQLText "service_1"]] >>= check "stream sequence and resource revisions survive reopen"
+      [[SQL.SQLText "4", SQL.SQLText "0", SQL.SQLText "service_1"]] >>= check "fixture closes at sequence four with stable service metadata"
+    rowsEqual store eventsSQL (originalEvents (storeStreamId identity)) >>= check "fixture retains exact original four-event prefix before close"
+    rowsEqual store runSQL [[SQL.SQLNull, SQL.SQLNull, SQL.SQLText "absent", SQL.SQLText "owned", SQL.SQLText "revision_1", SQL.SQLText "control_1"]]
+      >>= check "fixture closes with owned run and absent Runtime snapshot evidence"
+    pure identity
+  let checkReconciled label identity store = do
+        let generation = storeProcessGeneration identity
+            events = originalEvents (storeStreamId first) <>
+              [[SQL.SQLText (storeStreamId first), SQL.SQLText ordinal, SQL.SQLText "run.changed", SQL.SQLText uri, SQL.SQLText generation]
+                | (ordinal,uri) <- [("5","/v1/runs/run_1"),("6","/v1/runs/run_1/control")]]
+        rowsEqual store "SELECT sequence,retained_floor,revision FROM service_metadata"
+          [[SQL.SQLText "6", SQL.SQLText "0", SQL.SQLText "service_1"]] >>= check (label <> " preserves sequence six and stable service metadata")
+        rowsEqual store eventsSQL events >>= check (label <> " retains original prefix and exactly matching run/control invalidations")
+        rowsEqual store runSQL [[SQL.SQLNull, SQL.SQLNull, SQL.SQLText "absent", SQL.SQLText "lost", SQL.SQLText generation, SQL.SQLText generation]]
+          >>= check (label <> " retains lost supervision and matching revisions without invented Runtime evidence")
+  second <- withInstalled path $ \installed -> withCoordinationStore installed $ \store -> do
+    identity <- storeIdentity store
+    check "reopen preserves durable identities separately from live generation"
+      (storeAuthorityEpoch first == storeAuthorityEpoch identity && storeStreamId first == storeStreamId identity
+       && storeProcessGeneration first /= storeProcessGeneration identity && storeSchemaVersion identity == schemaVersion)
+    checkReconciled "reconciling reopen" identity store
+    pure identity
   -- Real SQLite trigger failure occurs after resource update and sequence allocation.
   bracket (rawOpen root) SQL.close $ \db -> SQL.exec db
     "CREATE TRIGGER reject_event BEFORE INSERT ON invalidations BEGIN SELECT RAISE(ABORT,'synthetic event failure'); END"
   withInstalled path $ \installed -> withCoordinationStore installed $ \store -> do
+    identity <- storeIdentity store
+    check "no-op reopen preserves durable identities with another fresh generation"
+      (storeAuthorityEpoch second == storeAuthorityEpoch identity && storeStreamId second == storeStreamId identity
+       && storeProcessGeneration second /= storeProcessGeneration identity && storeSchemaVersion identity == schemaVersion)
+    checkReconciled "no-op reopen" second store
     expect "event insertion failure rolls back resource and sequence" StoreUnavailable $
       mutate store (client "event_failed") [event]
     count store "clients" >>= check "failed event leaves no new client" . (== 2)
-    rowsEqual store "SELECT sequence FROM service_metadata" [[SQL.SQLText "4"]] >>= check "failed event leaves no sequence gap"
+    rowsEqual store "SELECT sequence FROM service_metadata" [[SQL.SQLText "6"]] >>= check "failed event leaves no sequence gap"
+    checkReconciled "failed event insertion" second store
 
 relationalRows :: Transaction ()
 relationalRows = do
@@ -626,12 +651,15 @@ conditionalTransactionChecks work = do
 admissionMigrationChecks :: FilePath -> IO ()
 admissionMigrationChecks work = do
   (path,root)<-fixture work "admission-migration"
+  let reservationSQL = "SELECT id,request_id,slot,process_generation,state FROM reservations"
+      reservation state = [[SQL.SQLText "reservation_old",SQL.SQLText "request_old",SQL.SQLInteger 7,SQL.SQLText "generation_old",SQL.SQLText state]]
   withInstalled path (const(pure()))
   bracket (rawOpen root) SQL.close $ \database -> do
     mapM_ (SQL.exec database) (schemaStatements<>commandMigration<>draftMigration)
     SQL.exec database "INSERT INTO service_metadata VALUES (1,'authority_old','stream_old','0','0','service_old'); INSERT INTO clients VALUES ('client_old','revision','fixture',0)"
     SQL.exec database "INSERT INTO requests(id,revision,client_id,workflow_id,descriptor_revision,profile_id,profile_revision,phase,admission,queue_ordinal,blocking_reasons,validation_errors) VALUES ('request_old','revision_old','client_old','workflow_old','descriptor_old','profile_old','policy_old','queued','waiting','18446744073709551614',X'5b5d',X'5b5d')"
     SQL.exec database "INSERT INTO reservations VALUES ('reservation_old','request_old',7,'generation_old','held'); INSERT INTO reservation_resources VALUES ('unclassified','reservation_old'); PRAGMA user_version=3"
+    rawRows database reservationSQL >>=check "migration fixture starts with exact old held reservation" . (==reservation "held")
     SQL.exec database "CREATE TABLE admission_observations(sentinel TEXT); INSERT INTO admission_observations VALUES('preserved')"
   setFileMode (root </> "coordination.sqlite3") 0o600
   withInstalled path $ \installed -> expect "version-four partial migration refuses" StoreUnavailable (withCoordinationStore installed(const(pure())))
@@ -640,13 +668,21 @@ admissionMigrationChecks work = do
     rawRows database "SELECT count(*) FROM pragma_table_info('requests') WHERE name='input_revision'" >>=check "failed version-four migration rolls back added request columns" . (==[[SQL.SQLInteger 0]])
     rawRows database "SELECT resource_key,reservation_id FROM reservation_resources" >>=check "failed version-four migration preserves exact old claims" . (==[[SQL.SQLText "unclassified",SQL.SQLText "reservation_old"]])
     rawRows database "SELECT sentinel FROM admission_observations" >>=check "failed version-four migration preserves pre-existing conflict" . (==[[SQL.SQLText "preserved"]])
+    rawRows database reservationSQL >>=check "failed version-four migration retains exact old held reservation" . (==reservation "held")
     SQL.exec database "DROP TABLE admission_observations"
-  withInstalled path $ \installed -> withCoordinationStore installed $ \owner -> do
-    storeIdentity owner >>=check "version-four migration completes transactionally" . ((==schemaVersion).storeSchemaVersion)
-    rowsEqual owner "SELECT last_ordinal FROM admission_queue_clock" [[SQL.SQLText "18446744073709551614"]] >>=check "migration preserves unsigned queue history beyond signed SQLite integers"
-    rowsEqual owner "SELECT kind,resource_key,reservation_id FROM reservation_resources" [[SQL.SQLText "operator",SQL.SQLText "unclassified",SQL.SQLText "reservation_old"]] >>=check "legacy operator string remains outside internal unclassified domain"
-    rowsEqual owner "SELECT input_revision,queue_generation,queue_origin_revision,enqueue_command FROM requests" [[SQL.SQLNull,SQL.SQLNull,SQL.SQLNull,SQL.SQLNull]] >>=check "migration mints no input-selection or enqueue authority"
-    rowsEqual owner "SELECT slot,process_generation,state FROM reservations" [[SQL.SQLInteger 7,SQL.SQLText "generation_old",SQL.SQLText "held"]] >>=check "migration preserves old held slot without adopting its worker"
+  forM_ ["migration","no-op reopen"] $ \stage ->
+    withInstalled path $ \installed -> withCoordinationStore installed $ \owner -> do
+      storeIdentity owner >>=check (stage<>" retains current schema version") . ((==schemaVersion).storeSchemaVersion)
+      rowsEqual owner "SELECT last_ordinal FROM admission_queue_clock" [[SQL.SQLText "18446744073709551614"]] >>=check (stage<>" preserves unsigned queue history beyond signed SQLite integers")
+      rowsEqual owner "SELECT kind,resource_key,reservation_id FROM reservation_resources" [[SQL.SQLText "operator",SQL.SQLText "unclassified",SQL.SQLText "reservation_old"]] >>=check (stage<>" retains exact legacy operator claim outside internal unclassified domain")
+      rowsEqual owner "SELECT id,revision,phase,admission,queue_ordinal FROM requests"
+        [[SQL.SQLText "request_old",SQL.SQLText "revision_old",SQL.SQLText "queued",SQL.SQLText "waiting",SQL.SQLText "18446744073709551614"]] >>=check (stage<>" preserves exact queued request facts")
+      rowsEqual owner "SELECT input_revision,queue_generation,queue_origin_revision,enqueue_command FROM requests" [[SQL.SQLNull,SQL.SQLNull,SQL.SQLNull,SQL.SQLNull]] >>=check (stage<>" mints no input-selection or enqueue authority")
+      rowsEqual owner reservationSQL (reservation "quarantined") >>=check (stage<>" retains quarantined reservation identity, request, slot and original generation")
+      rowsEqual owner "SELECT count(*) FROM reservations WHERE state<>'released'" [[SQL.SQLInteger 1]] >>=check (stage<>" retains unreleased occupancy")
+      rowsEqual owner "SELECT authority_epoch,stream_id,sequence,retained_floor,revision FROM service_metadata"
+        [[SQL.SQLText "authority_old",SQL.SQLText "stream_old",SQL.SQLText "0",SQL.SQLText "0",SQL.SQLText "service_old"]] >>=check (stage<>" preserves exact authority, stream and service metadata")
+      count owner "invalidations" >>=check (stage<>" appends no invalidation") . (==0)
 
 ingestionMigrationChecks :: FilePath -> IO ()
 ingestionMigrationChecks work = do
