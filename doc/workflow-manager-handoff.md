@@ -50,9 +50,10 @@ Source and evidence remain in
 decisions and acceptance.
 
 The unit supplies ordinary startup reconciliation and coherent offline
-database/capture restoration through existing owners. Current focused Werror,
-SQLite/file and fresh ordinary native checks pass. No containment work or
-historical test-resource recovery is included.
+database/capture restoration through existing owners. Prior SQLite/file and
+ordinary native results retain their recorded scope, while the current opacity
+correction requires completion of its affected validation. No containment work
+or historical test-resource recovery is included.
 
 Tracker comments 263–266 and the unit's `brief.md` and `decision-note.md` retain
 the authority decisions. The approved restore interface is same-root and
@@ -120,11 +121,24 @@ to `storeCancellationChecks`, leaving the shutdown probe and mask order unchange
 Its intended first failure is the `(masked,expiry)` case `(False,True)`.
 
 Tail evidence and the original failure remain in `validation-tail/{mac,linux}`
-and tracker comment 269. Reuse the completed constituents and earlier
-documentation/Profile results, then execute only `store-expiry-mutant` and
-the unrun Commands, Drafts, Admission and Approval gates on each platform.
-Report composed coverage explicitly, without inventing a fresh successful
-Store wrapper exit or repeating valid constituents merely for that label.
+and tracker comment 269. Both subsequent completion lanes passed expiry-mutant
+N1/N8 with the exact `(False,True)` pair, completing composed Store coverage.
+Their Commands gates then found a production opacity regression: the WM-020
+`Generic AcceptedEnqueue` instance exposed an intentionally opaque representation.
+
+The correction removes that instance while retaining full `NFData` evaluation
+through the complete four-field tuple and the existing private association
+instance. The opacity tests and constructor boundary are unchanged. The full
+macOS Commands gate passed at 18:55:27–18:57:50Z, including actual N1/N8 receipt
+behavior and all source compiler opacity checks. Haskell documentation passed
+at 18:58:40–19:02:40Z. Current evidence and the exact source patch are in
+`/Users/johnw/Products/o20.eDcoMR` and `opacity-correction-result.md`, with
+tracker comment 270. Original failed Commands results remain untouched.
+
+Reuse those current macOS results and source-valid Store/Profile evidence,
+then run current Linux Commands and finish Drafts, Admission and Approval on
+both platforms. The prior Store wrapper failures remain failures, with their
+successful constituents reused explicitly rather than a fabricated new exit.
 
 Final disposition remains with the same independent milestone reviewer after
 the integrated results. Seeded crash prefixes, native preparation and the
@@ -333,8 +347,8 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-20T18:37:39Z`. The next active-work deadline is
-`2026-09-20T19:37:39Z`. Continue with WM-020 through existing owners, with no
+Refocus completed at `2026-09-20T19:04:36Z`. The next active-work deadline is
+`2026-09-20T20:04:36Z`. Continue with WM-020 through existing owners, with no
 OS containment or verification-machinery detour. The resumed persistent goal
 still contains older baseline and scope wording. The user's latest correction
 governs current work, and `/goal-tweak` remains available for updating that
