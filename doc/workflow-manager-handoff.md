@@ -111,9 +111,13 @@ this call without replay or fixture repair.
 
 This defect supersedes the earlier clearance as an integration blocker. The
 author stopped without production edits, bypass, retry or wait widening.
-Correcting the existing-owner composition requires authorization beyond the
-test-only grant, while preserving quotas, authorization, response lifetime and
-fail-fast behavior. Both failed Artifact roots and all successful gate records
+The operator then explicitly approved the production correction. The retained
+author is active in workflow `5eb7e66f-9ad0-4507-b1ff-251a437ed1a7` under
+`composition-fix-brief.md`. The grant covers the minimal existing-owner
+composition fix and affected local checks, preserving quotas, authorization,
+response lifetime, original ownership, exact release and fail-fast behavior.
+It allows no bypass, stale limits, retry, wait widening or new infrastructure.
+Both failed Artifact roots and all successful gate records
 remain in `owning-local`, with the correction handback in
 `owning-local/correction-result.md`. Artifact/History completion, Ingestion,
 Haskell documentation and other-platform execution remain unestablished.
@@ -449,8 +453,8 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-21T04:48:49Z`. The next active-work deadline is
-`2026-09-21T05:48:49Z`. Continue with WM-021 through existing owners, with no
+Refocus completed at `2026-09-21T04:56:34Z`. The next active-work deadline is
+`2026-09-21T05:56:34Z`. Continue with WM-021 through existing owners, with no
 OS containment or verification-machinery detour. The resumed persistent goal
 still contains older baseline and scope wording. The user's latest correction
 governs current work, and `/goal-tweak` remains available for updating that
