@@ -95,16 +95,29 @@ deletions. `proposal-corrected.patch`, `correction-result.md` and raw
 integration in `review.md`. Package acceptance is not established, and no
 WM-021 application integration has occurred.
 
-Local owning validation runs against the unchanged candidate in workflow
-`1083746d-1d57-4750-9ef0-60075326c846`, with execution/reporting authority only.
-Documentation, compiler-parsed source boundaries and Runtime capture passed.
-The full Store wrapper passed at `2026-09-21T03:53:37Z`, including N1/N8 and
-all four existing audit modes. Commands is next in the authorized sequence,
-followed by Drafts, Artifacts/History, Ingestion and Haskell documentation.
-Raw records are in `owning-local`. Earlier failed runs remain unchanged.
-Other-platform execution is not included in this local grant. Owning results
-and exact integration still govern acceptance, without a physical power-loss
-claim or any containment requirement.
+Initial local owning validation passed documentation, compiler-parsed source
+boundaries, Runtime capture, the complete Store gate, Commands and Drafts.
+The first Artifact run failed at a stale schema9 assertion. Its test-only
+correction independently checks persisted and current versions and preserves
+all existing migration assertions, which passed in the next run.
+
+The fresh Artifact gate then failed with `StoreUnavailable` at
+`2026-09-21T04:29:03Z`. Read-only diagnosis established a production composition
+defect: `withRunOutputs` holds the profile/configuration guard while projection
+restoration enters the new reader admission, which tries to acquire the same
+non-reentrant configuration lock. Fail-fast acquisition refuses rather than
+waiting. The original corrupt-result marker and persisted Runtime facts identify
+this call without replay or fixture repair.
+
+This defect supersedes the earlier clearance as an integration blocker. The
+author stopped without production edits, bypass, retry or wait widening.
+Correcting the existing-owner composition requires authorization beyond the
+test-only grant, while preserving quotas, authorization, response lifetime and
+fail-fast behavior. Both failed Artifact roots and all successful gate records
+remain in `owning-local`, with the correction handback in
+`owning-local/correction-result.md`. Artifact/History completion, Ingestion,
+Haskell documentation and other-platform execution remain unestablished.
+No WM-021 integration or acceptance occurred.
 
 ## WM-020 acceptance
 
@@ -436,8 +449,8 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-21T03:51:35Z`. The next active-work deadline is
-`2026-09-21T04:51:35Z`. Continue with WM-021 through existing owners, with no
+Refocus completed at `2026-09-21T04:48:49Z`. The next active-work deadline is
+`2026-09-21T05:48:49Z`. Continue with WM-021 through existing owners, with no
 OS containment or verification-machinery detour. The resumed persistent goal
 still contains older baseline and scope wording. The user's latest correction
 governs current work, and `/goal-tweak` remains available for updating that
