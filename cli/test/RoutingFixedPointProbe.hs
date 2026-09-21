@@ -14,6 +14,8 @@ import qualified Agentic.Builder as B
 import qualified Agentic.Schema as S
 import Agentic.Workflow
 import qualified Agentic.Workflow.Do as W
+import Crypto.Hash (Digest, SHA256, hash)
+import qualified Data.Text.Encoding as TE
 import Data.String (fromString)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -40,6 +42,7 @@ registry =
           ("mixed-controls", row (Needs $ taking (input "input" :> noInputs) mixedControlProgram)),
           ("parallel-person", row (Needs $ taking (input "input" :> noInputs) parallelPersonProgram)),
           ("prompt-source", row (Needs $ taking (input "input" :> noInputs) sourceProgram)),
+          ("captured-input", row (Needs $ taking (stdinInputAs "input" :> noInputs) capturedInputProgram)),
           ("tail-source", row (Needs $ taking (argsInputAs "input" :> noInputs) sourceProgram)),
           ("stdin-source", row (Needs $ taking (stdinInputAs "input" :> noInputs) sourceProgram)),
           ("target-sensitive", row (Needs $ taking (input (runFactName runFactEngine) :> noInputs) targetSensitiveProgram))
@@ -55,6 +58,10 @@ targetSensitiveProgram engine
       _first <- ask (model "fixed-point") [wf|fixed-point first|]
       _second <- ask (model "fixed-point") [wf|fixed-point second|]
       stop
+
+-- Consume the complete semantic input while keeping the review plan bounded.
+capturedInputProgram :: Text -> Program
+capturedInputProgram body = sourceProgram (T.pack (show (hash (TE.encodeUtf8 body) :: Digest SHA256)))
 
 sourceProgram :: Text -> Program
 sourceProgram body = workflow W.do

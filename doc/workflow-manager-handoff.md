@@ -46,7 +46,7 @@ source branch `wm022-vertical.d42c7UhQ` based on acceptance commit `c6698af4`.
 Private runtime paths are under `/Users/johnw/Products/v.OSGikI2D`, with a
 serialized sibling builddir and supplied offline environment.
 
-The six-file proposal adds `manager-vertical-check`, its owning gate, a strict
+The reviewed six-file implementation adds `manager-vertical-check`, its owning gate, a strict
 typed Runtime comparator, CLI fixture/comparison hooks and documentation.
 It retains existing frontend, Runtime and manager owners without production
 changes. Actual direct/managed answers, authored traces, exact bills, policies,
@@ -55,7 +55,7 @@ The literal-prompt lineage fixture declares its independent model and shared
 person lane, preserving all events and within-lane order without global sorting.
 A02, A10 and A13 remain explicit obligations.
 
-Tracker comments 286–287 and the unit's `brief.md`, `start-note.md` and
+Tracker comments 286–288 and the unit's `brief.md`, `start-note.md` and
 `parent-result.md` record the grant and current evidence. The complete local
 owning gate passed at N1 then N8 on 2026-09-21, 21:54:55–22:09:39Z, including
 the existing instrumented history-corrections and control-write audits.
@@ -67,16 +67,23 @@ syntax, an overly strict total event order, partial list access and two audit-on
 helpers called without their existing instrumentation. No semantic assertion
 was removed. Author `ff060536-6859-422c-8722-da9fe8ecebd2` reached its default
 agent deadline after the third failed build, between commands. Parent inspected
-original returns and
-partial source, took sole writing ownership and ran subsequent gates directly.
+original returns and partial source, took sole writing ownership and ran
+subsequent gates directly.
 The timeout is not test success, and runtime budgets were unchanged.
 The initial incorrect compiler-error/time report was corrected from raw output.
 
-Workflow `9c6ce501-a7e0-4880-81d1-f5a276e37524` performs the coherent independent
-source/evidence review. No application integration or WM-022/G1 acceptance is
-claimed. Other-platform work remains unrun for this unit. The first unexpected
-failure still stops before correction or retry, and all no-containment,
-original-owner and non-replay constraints remain in force.
+Independent reviewer `7e8ef36b-3588-40fc-a8fa-9fc53f4a639b` found no issues,
+classified the architecture as aligned and cleared integration. Parent applied
+the exact six-file proposal, verified both its full delta and file-byte equality,
+and passed canonical source boundaries and documentation. Current-byte isolated
+native, audit and Haskell-documentation evidence is reused at its stated scope.
+`review.md` and `integration-note.md` retain the verdict and integration facts.
+
+WM-022 remains in progress and G1 remains open. The next platform check is the
+new Linux vertical gate with current boundaries and Haskell documentation, using
+the unchanged pinned environment. No Linux execution has been launched for this
+unit. The first unexpected failure still stops before correction or retry,
+with all no-containment, original-owner and non-replay constraints in force.
 
 Parent retains Git, tracker, integration, platform and acceptance decisions.
 Existing source-valid evidence may be reused at its actual scope. G1 remains
@@ -500,8 +507,8 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-21T21:48:16Z`. The next active-work deadline is
-`2026-09-21T22:48:16Z`. Continue with WM-022 through existing owners, with no
+Refocus completed at `2026-09-21T22:39:40Z`. The next active-work deadline is
+`2026-09-21T23:39:40Z`. Continue with WM-022 through existing owners, with no
 OS containment or verification-machinery detour. The resumed persistent goal
 still contains older baseline and scope wording. The user's latest correction
 governs current work, and `/goal-tweak` remains available for updating that

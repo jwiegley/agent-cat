@@ -56,6 +56,40 @@ exercise response-entry and native lineage barriers. The latter belongs to
 `manager/ci/approval.sh` and compares the manager path with the direct native
 frontend at N1 and N8. Client compatibility remains separate evidence.
 
+## Non-network lifecycle harness
+
+`manager/ci/vertical.sh` builds `manager-vertical-check` and its configured native
+frontend with Haskell warnings treated as errors, then runs fresh private roots at one
+and eight runtime capabilities. It reuses the approval probe's original Worker,
+Admission and Store owners without an HTTP listener. The sequence exercises
+captured inputs, exact approval, concurrent runs, typed person answers, ACP
+recovery and steering, verified results, exclusive export, history, lineage,
+restart and uncertain delivery. Existing ingestion fixtures supply malformed
+sequence and terminal-trace refusals through the same manager ingestion path.
+Parent-substitution races and blocked control writes run through the existing
+instrumented audits after the ordinary N1/N8 sequence.
+
+`VerticalCheck` compares independently executed managed and direct native runs.
+It uses Runtime codecs, artifact verification and lifecycle projection, and
+compares complete native manifests, captured bytes, typed answer records,
+checkpoints, effects, ordered events, policies and exact bills. The log records
+injective run and control correspondences and explicit owner, timestamp and
+verified artifact correspondences. Only physical identities, wall clocks and
+artifact envelopes containing those identities may differ. Authored occurrence
+and attempt coordinates, answer text, typed values, lineage edits and policy
+facts must agree exactly. The lineage fixture explicitly declares its independent
+model occurrence and shared person lane. Their physical events may interleave,
+but each lane retains its original order and the start, authored trace and
+terminal boundaries stay fixed. Every original sequence validates independently,
+and the log records each matched sequence pair without sorting or dropping events.
+Mutations of actual answers, bills, within-lane order or event counts must fail
+the comparison. The capture fixture hashes the complete semantic input inside its
+workflow so that large input transport does not require an oversized review.
+Raw captured bytes are also compared without normalization.
+
+The gate retains its private roots and logs. It does not certify client,
+network, deployment or platform acceptance, and it performs no OS containment.
+
 ## Client baseline policy
 
 The minimum supported targets for the version 1 manager clients are GNU Emacs

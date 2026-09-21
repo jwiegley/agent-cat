@@ -4,6 +4,8 @@ module Main (main) where
 
 import qualified Agentic.Cli as Cli
 import Agentic.Manager.Admission
+import qualified Agentic.Manager.Artifacts as Artifacts
+import VerticalCheck (EventOrder (..), compareNativeRuns)
 import Agentic.Manager.Approval
 import Agentic.Manager.Authorization
 import Agentic.Manager.Commands
@@ -62,6 +64,7 @@ main=do
   hSetBuffering stdout LineBuffering
   args<-getArgs
   case args of
+    ["vertical",work,native,source,python]->verticalChecks work native source python
     ["shutdown-drain",work,native]->shutdownDrainChecks work native >> shutdownRunningChecks work native
     ["shutdown-races",work,native]->shutdownReuseRaceChecks work native >> shutdownRaceChecks work native
     ["history-lineage",work,native]->awaitHistory(nativeLineageChecks False work native)
@@ -131,6 +134,135 @@ main=do
       targetChecks work native source python
     _->error "usage: manager-approval-check PRIVATE_DIRECTORY NATIVE"
 
+verticalChecks :: FilePath -> FilePath -> FilePath -> FilePath -> IO ()
+verticalChecks work native source python = do
+  identities <- newIORef []
+  let compareRuns order fixture@(Fixture root _ _ _ _ _) run context directRoot direct = do
+        compareNativeRuns order identities (root </> "runs") (preparedRunId (reviewNative context)) (directRoot </> "runs") direct
+        verticalOutputs fixture run context
+      section name action = do
+        let directory = work </> name
+        createDirectory directory
+        putStrLn ("SECTION " <> name)
+        action directory
+  section "captures" $ \directory -> do
+    forM_ [("unicode",TE.encodeUtf8 "Captured café λ.\r\nSecond line.\n",False),
+           ("expanded",BS.replicate 1100000 10,True),("large",BS.replicate 2100000 120,True)] $ \(name,bytes,file) ->
+      verticalCaptureCheck (compareRuns SerialEvents) directory native name ["--scripted"] [] bytes file
+  section "lineage" $ \directory -> nativeLineageChecksCompared (compareRuns IndependentModelPerson) False False [1,2,3] directory native ["--scripted"] []
+  section "routed" $ \directory -> nativeRoutedLineageChecksWith (compareRuns SerialEvents) directory native source python
+  section "deck" $ \directory -> verticalCaptureCheck (compareRuns SerialEvents) directory native "deck"
+    ["--session","stub","--binary",T.pack(source </> "engine/agent-deck/test/stub-deck.sh"),"--poll","20","--timeout","30000"]
+    [("DECK_STUB_STATE",T.pack(directory </> "transport")),("DECK_STUB_MODE","happy")]
+    (TE.encodeUtf8 "Deck capture café.\r\nExact input.\n") False
+  section "approval" $ \directory -> do
+    selectorChecks directory native
+    lifecycleChecks directory native
+    deadlineChecks directory native
+    captureApprovalChecks directory native
+    workerLossChecks directory native source python
+    postStartLossChecks directory native source python
+    reopenChecks directory native
+  section "ingestion" $ \directory -> do
+    withReady directory native "refusals" ["--scripted"] [] $ \(Fixture _ _ store _ _ _) -> ingestionChecks source store
+    nativeIngestionChecks directory native
+    nativeConcurrentIngestionChecks directory native source python
+  section "controls" $ \directory -> do
+    nativeControlChecks directory native
+    nativeMixedControlChecks directory native source python
+    nativeSteeringChecks False 1 directory native source python
+  section "shutdown" $ \directory -> shutdownDrainChecks directory native >> shutdownRunningChecks directory native
+  putStrLn "PASS WM022 non-network vertical lifecycle"
+
+verticalCaptureCheck :: NativeComparison -> FilePath -> FilePath -> String -> [Text] -> [(Text,Text)] -> BS.ByteString -> Bool -> IO ()
+verticalCaptureCheck compareRuns work native name arguments environment bytes file =
+  withReadyRunner work native [] "captured-input" (name<>"-managed") arguments environment $ \(Fixture root installed store proof key ready) ->
+    withReadyRunner work native [] "captured-input" (name<>"-direct") arguments environment $ \(Fixture directRoot _ directStore directProof directKey directReady) -> do
+      let bindInput current auth makeKey draft = do
+            _ <- changeDraftInput current auth (draftId draft) (makeKey "remove") (Just("\""<>draftRevision draft<>"\""))
+              (encoded(object["operation" .= ("remove-input"::Text),"name" .= ("input"::Text)])) >>= right
+            missing <- readDraft current auth (draftId draft) >>= right
+            check "selection reports exact missing input without engine work" (case draftReadiness missing of Readiness _ [] ["input"] [] -> True; _ -> False)
+            denied <- assembleDraftSnapshot current auth (draftId missing)
+            check "missing input cannot prepare a worker" (case denied of Left InvalidInput -> True; _ -> False)
+            let original=work </> (name<>"-"<>T.unpack(draftId draft)<>".input")
+            BS.writeFile original bytes
+            capturedBytes <- BS.readFile original
+            chunks <- newIORef (splitChunks capturedBytes)
+            let readChunk = do
+                  remaining <- readIORef chunks
+                  case remaining of [] -> pure BS.empty; x:xs -> writeIORef chunks xs >> pure x
+            captured <- uploadCapture current auth (draftId missing) (makeKey "capture") (fromIntegral(BS.length capturedBytes)) readChunk >>= right
+            BS.writeFile original "mutated after capture"
+            check "capture digest and byte count survive original mutation"
+              (captureBytes captured==fromIntegral(BS.length bytes) && captureDigest captured==T.pack(show(hash bytes::Digest SHA256)))
+            _ <- changeDraftInput current auth (draftId missing) (makeKey "bind") (Just("\""<>draftRevision missing<>"\""))
+              (encoded(object["operation" .= ("set-input"::Text),"input" .= CapturedValue "input" (captureId captured)])) >>= right
+            linked <- readDraft current auth (draftId missing) >>= right
+            assembly <- assembleDraftSnapshot current auth (draftId linked) >>= right
+            check "capture uses expected inline or server-owned file transport" (case assemblySetup assembly of
+              Runtime.RootSetup setup -> case Runtime.setupInputs setup of
+                [("input",Runtime.File _)] -> file
+                [("input",Runtime.Transport value)] -> not file && value==TE.decodeUtf8 bytes
+                _ -> False
+              _ -> False)
+            pure (linked,assembly)
+      (linked,_) <- bindInput store proof key ready
+      (directLinked,directAssembly) <- bindInput directStore directProof directKey directReady
+      direct <- directLineageRun directStore directLinked (assemblySetup directAssembly)
+      withAdmissionClock fixedClock store $ \controller -> do
+        (run,context) <- managedLineageRun store proof (shortLineageKey key) controller linked Nothing True
+        check "real worker preserves captured digest and exact semantic input"
+          (preparedInputs(reviewNative context)==[FrontendPreparedInput "input" (fromIntegral(BS.length bytes)) (T.pack(show(hash bytes::Digest SHA256)))])
+        let nativeDirectory=root </> "runs/runs" </> T.unpack(runIdText(preparedRunId(reviewNative context)))
+        answers <- Runtime.readAnswerRecords (nativeDirectory </> "runtime")
+        check "actual native program consumes complete unmodified semantic input"
+          (case answers of
+            [answer] -> case Runtime.answerQuestion answer of
+              Object fields -> KM.lookup "prompt" fields==Just(String("fixed-point source: "<>T.pack(show(hash bytes::Digest SHA256))))
+              _ -> False
+            _ -> False)
+        compareRuns (Fixture root installed store proof key linked) run context directRoot direct
+  where
+    splitChunks content | BS.null content = [BS.empty]
+                        | otherwise = let (chunk,rest)=BS.splitAt 65536 content in chunk:splitChunks rest
+
+verticalOutputs :: Fixture -> Text -> ReviewContext -> IO ()
+verticalOutputs (Fixture root _ store proof originalKey _) run context = do
+  let key=shortLineageKey originalKey
+      association=RunAssociation run "profile" (preparedRootIdentity(reviewNative context)) (preparedRunId(reviewNative context))
+      scalar sql=runRead store $ do
+        rows<-query sql [SQL.SQLText run]
+        case rows of [[SQL.SQLText value]]->pure value;_->refuseTransaction StoreIntegrity
+  withHistory store proof [] Nothing $ \rows -> check "completed actual run remains in history"
+    (any (\value -> case value of Object fields -> KM.lookup "id" fields==Just(String run); _ -> False) rows)
+  Artifacts.withRunOutputs store proof association $ \rows -> check "actual authored result is verified"
+    (any (\value -> case value of
+      Object fields -> case KM.lookup "verification" fields of
+        Just(Object verification)->KM.lookup "state" verification==Just(String "verified")
+        _ -> False
+      _ -> False) rows)
+  artifact <- scalar "SELECT result_artifact_id FROM runs WHERE id=?"
+  let nativeFile=root </> "runs/runs" </> T.unpack(runIdText(preparedRunId(reviewNative context))) </> "runtime/result.json"
+  sourceBytes <- BS.readFile nativeFile
+  Artifacts.withArtifactDownload store proof artifact $ \_ bytes -> check "verified manager download is exact native result envelope" (bytes==sourceBytes)
+  mutate store (execute "INSERT OR IGNORE INTO credential_scopes VALUES ('credential','profile','export')" [])
+  revision <- scalar "SELECT revision FROM runs WHERE id=?"
+  let name="vertical-"<>run<>".json"
+      request=CommandRequest Export "profile" "POST" ("/v1/runs/"<>run<>"/exports") (key("export-"<>run)) "application/json" (Just("\""<>revision<>"\"")) (encoded(object["name" .= name]))
+  first <- Artifacts.submitExport store proof association request >>= right
+  let receipt=submissionReceipt first
+      path=root </> "runs/exports" </> T.unpack name
+  completed <- readCommand store proof (receiptId receipt) >>= right
+  check "real result export completes under original publication owner" (receiptState completed==EffectObserved)
+  published <- BS.readFile path
+  replay <- Artifacts.submitExport store proof association request >>= right
+  check "lost export reply returns original receipt without publication replay" (submissionReceipt replay==receipt && submissionReplayed replay)
+  currentRevision <- scalar "SELECT revision FROM runs WHERE id=?"
+  conflict <- Artifacts.submitExport store proof association request{commandKey=key("collision-"<>run),commandPrecondition=Just("\""<>currentRevision<>"\"")}
+  check "exclusive export refuses distinct command for existing name" (case conflict of Left StateConflict -> True; _ -> False)
+  BS.readFile path >>= check "exclusive refusal leaves published bytes unchanged" . (==published)
+
 right :: Show e => Either e a -> IO a
 right=either(error.show)pure
 check :: String -> Bool -> IO ()
@@ -197,7 +329,10 @@ nativeLineageChecks :: Bool -> FilePath -> FilePath -> IO ()
 nativeLineageChecks barriers base native = nativeLineageChecksWith barriers False [1,2,3] base native ["--scripted"] []
 
 nativeRoutedLineageChecks :: FilePath -> FilePath -> FilePath -> FilePath -> IO ()
-nativeRoutedLineageChecks base native source python=do
+nativeRoutedLineageChecks = nativeRoutedLineageChecksWith (\_ _ _ _ _ -> pure ())
+
+nativeRoutedLineageChecksWith :: NativeComparison -> FilePath -> FilePath -> FilePath -> FilePath -> IO ()
+nativeRoutedLineageChecksWith compareRuns base native source python=do
   routedPolicyProjectionChecks
   let work=base </> "manifest-v3"
       adapters=work </> "adapter-bin"
@@ -216,7 +351,7 @@ nativeRoutedLineageChecks base native source python=do
     "personas" .= object["fixture" .= object["engines" .= ["local"::Text],"models" .= ["selected"::Text],
       "profiles" .= object["primary" .= object["chain" .= [object["model" .= ("selected"::Text),"thinking" .= ("low"::Text),"max-output" .= ("unconstrained"::Text)]]]]]]]))
   setFileMode routing 0o600
-  nativeLineageChecksWith False True [3] base native ["--scratch",T.pack scratch] [("PATH",T.pack adapters)]
+  nativeLineageChecksCompared compareRuns False True [3] base native ["--scratch",T.pack scratch] [("PATH",T.pack adapters)]
   putStrLn "PASS actual WM018 non-null routed policy provenance"
 
 routedPolicyProjectionChecks :: IO ()
@@ -240,7 +375,12 @@ routedPolicyProjectionChecks=do
     check "projection refuses malformed native execution fingerprint" (refused(policy native bad))
 
 nativeLineageChecksWith :: Bool -> Bool -> [Int] -> FilePath -> FilePath -> [Text] -> [(Text,Text)] -> IO ()
-nativeLineageChecksWith barriers routed versions base native arguments environment = forM_ versions $ \branchVersion -> do
+nativeLineageChecksWith = nativeLineageChecksCompared (\_ _ _ _ _ -> pure ())
+
+type NativeComparison = Fixture -> Text -> ReviewContext -> FilePath -> RunId -> IO ()
+
+nativeLineageChecksCompared :: NativeComparison -> Bool -> Bool -> [Int] -> FilePath -> FilePath -> [Text] -> [(Text,Text)] -> IO ()
+nativeLineageChecksCompared compareRuns barriers routed versions base native arguments environment = forM_ versions $ \branchVersion -> do
   let work=base </> ("manifest-v"<>show branchVersion)
       workflow=if routed then "controlled-single" else "lineage-typed"
       expectedCount=if routed then 1 else 4
@@ -257,6 +397,7 @@ nativeLineageChecksWith barriers routed versions base native arguments environme
         let parentNative=preparedRunId(reviewNative context)
             parentPath=root </> "runs/runs" </> T.unpack(runIdText parentNative) </> "supervisor-manifest.json"
             directPath=directRoot </> "runs/runs" </> T.unpack(runIdText directParent) </> "supervisor-manifest.json"
+        compareRuns fixture parent context directRoot directParent
         source<-BS.readFile parentPath >>= right . Runtime.decodeFrontendManifest
         directSource<-BS.readFile directPath >>= right . Runtime.decodeFrontendManifest
         check "native lineage parent has nonempty captured inputs" (not(Map.null(Runtime.frontendInputHashes source)))
@@ -286,6 +427,7 @@ nativeLineageChecksWith barriers routed versions base native arguments environme
             draft<-lineageDraft store proof key parent suffix mutation
             (child,childContext)<-managedLineageRun store proof key controller draft Nothing routed
             direct<-directLineageRun directStore directReady (Runtime.DerivedSetup(directRoot </> "runs") directParent (lineageOperation mutation) (lineageEdits mutation) Runtime.PersonAnswerLocalControl (Just(assemblySelectionInvocation directAssembly)))
+            compareRuns fixture child childContext directRoot direct
             let childNative=preparedRunId(reviewNative childContext)
             check "distinct accepted request, manager run and native run" (draftId draft/=draftId ready && child/=parent && childNative/=parentNative)
             links<-runRead store $ do rows<-query "SELECT parent_run_id FROM runs WHERE id=?" [SQL.SQLText child];pure[link|[SQL.SQLText link]<-rows]

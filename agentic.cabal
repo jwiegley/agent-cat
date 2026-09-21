@@ -64,6 +64,7 @@ extra-source-files:
   manager/ci/workers.sh
   manager/ci/admission.sh
   manager/ci/approval.sh
+  manager/ci/vertical.sh
   manager/ci/ingestion.sh
   manager/ci/controls.sh
   manager/ci/artifacts.sh
@@ -588,12 +589,12 @@ executable manager-admission-check
   build-depends:   agentic, direct-sqlite, deepseq, transformers
   ghc-options:     -threaded -rtsopts
 
-executable manager-approval-check
+common manager-lifecycle-checks
   import:          settings
   hs-source-dirs:  cli/test manager/src manager/test
-  main-is:         ManagerApprovalProbe.hs
   other-modules:
     IngestionCheck
+    VerticalCheck
     Agentic.Manager.History
     Agentic.Manager.Artifacts
     Agentic.Manager.Test.AcceptanceAudit
@@ -621,6 +622,14 @@ executable manager-approval-check
     Agentic.Manager.Worker.State
   build-depends:   agentic, direct-sqlite, deepseq, transformers
   ghc-options:     -threaded -rtsopts
+
+executable manager-approval-check
+  import:          manager-lifecycle-checks
+  main-is:         ManagerApprovalProbe.hs
+
+executable manager-vertical-check
+  import:          manager-lifecycle-checks
+  main-is:         ManagerApprovalProbe.hs
 
 executable manager-artifact-check
   import:          settings
