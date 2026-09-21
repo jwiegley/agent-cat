@@ -38,6 +38,35 @@ cleanup quarantine, storage-safety behavior and the prohibition on signalling
 stored PIDs. Do not claim that these mechanisms contain arbitrary descendants
 or undo provider effects. This exclusion does not close other package criteria.
 
+## Active WM-022 unit
+
+Issue `acat-wm-022-j655` is in progress after all nine recorded dependencies
+closed. The isolated unit is `implementation.9tGzKH/vertical.d42c7UhQ`, with
+source branch `wm022-vertical.d42c7UhQ` based on acceptance commit `c6698af4`.
+Private runtime paths are under `/Users/johnw/Products/v.OSGikI2D`, with a
+serialized sibling builddir and supplied offline environment.
+
+Workflow `ab8c0cbd-96ac-4c72-8f4b-8f8509f8039f` delegates the minimum real
+non-network lifecycle executable/harness through existing frontend, Runtime
+and manager owners. It must exercise lifecycle branches and refusals, use
+deterministic scripted/ACP/deck fixtures and compare actual direct/managed
+answers, authored traces, exact bills, policies, typed values and lineage.
+Physical IDs and clocks require an explicit validated correspondence, not
+semantic normalization. A02, A10 and A13 remain explicit obligations.
+
+Tracker comment 286 and the unit's `brief.md` and `start-note.md` record the
+grant. Initial execution is local Werror, fresh N1 then N8, source boundaries
+and relevant documentation. The first unexpected setup/build/test failure stops
+before edits or retry. A concrete production defect must be reported before
+production changes rather than hidden in a fixture. No remote/client/provider
+work, deployment, dependency change or Lean/oracle build is granted to this lane.
+
+Parent retains Git, tracker, integration, platform and acceptance decisions.
+Existing source-valid evidence may be reused at its actual scope. G1 remains
+a separate evidence decision, and accepted prerequisites do not close it.
+No interpreter, recorder, inventory, retention helper, per-leaf review, old-root
+recovery or OS-containment work is part of this unit.
+
 ## WM-021 acceptance
 
 Issue `acat-wm-021-ez37` is closed. Continued independent milestone reviewer
@@ -454,8 +483,8 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-21T20:45:35Z`. The next active-work deadline is
-`2026-09-21T21:45:35Z`. Continue with WM-022 through existing owners, with no
+Refocus completed at `2026-09-21T21:04:24Z`. The next active-work deadline is
+`2026-09-21T22:04:24Z`. Continue with WM-022 through existing owners, with no
 OS containment or verification-machinery detour. The resumed persistent goal
 still contains older baseline and scope wording. The user's latest correction
 governs current work, and `/goal-tweak` remains available for updating that
