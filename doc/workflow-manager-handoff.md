@@ -1,14 +1,14 @@
 # Workflow-manager handoff
 
-<!-- handoff-id: wm016-20260915; status: wm020-accepted; accepted: WM-001..WM-020,G0 -->
+<!-- handoff-id: wm016-20260915; status: wm021-accepted; accepted: WM-001..WM-021,G0 -->
 
 ## Current delivery direction
 
-WM-020 is accepted on 2026-09-20 at canonical
-`626981a72eceb9b4e5400bf188ab60901311243f` under the scope correction below.
-The accepted baseline is WM-001–WM-020 and G0, which is 20 of 44 packages and
-one of six gates. Next delivery is WM-021 quotas, retention and bounded
-collection through existing owners, followed by WM-022–WM-044 and G1–G5.
+WM-021 is accepted on 2026-09-21 at canonical
+`248e772e999d483f7017e6d956dc42daf5626400` under the scope correction below.
+The accepted baseline is WM-001–WM-021 and G0, which is 21 of 44 packages and
+one of six gates. Next delivery is WM-022, the complete non-network lifecycle
+and direct-versus-managed semantic comparison, followed by WM-023–WM-044.
 G1 and later service, client and release packages remain open.
 
 The user's 2026-09-17 refocus continues to govern delivery. Do not reopen the
@@ -38,137 +38,91 @@ cleanup quarantine, storage-safety behavior and the prohibition on signalling
 stored PIDs. Do not claim that these mechanisms contain arbitrary descendants
 or undo provider effects. This exclusion does not close other package criteria.
 
-## Active WM-021 unit
+## WM-021 acceptance
 
-Issue `acat-wm-021-ez37` is in progress after all recorded dependencies closed.
-The isolated proposal is retained in `implementation.9tGzKH/quotas.N3qrqDWt/source`,
-branch `wm021-quotas-20260920`, based on WM-020 acceptance `77652019`. Private
-runtime paths are under `/Users/johnw/Products/q.KqVeHD`, with a serialized
-sibling build directory. Parent retains Git, tracker, integration and acceptance.
+Issue `acat-wm-021-ez37` is closed. Continued independent milestone reviewer
+`cfb203a1-1751-4bd8-97e6-ffb460b6a128` found no issues and explicitly supported
+closure for `248e772e999d483f7017e6d956dc42daf5626400`. Tracker comment 285
+records parent acceptance. The complete seventeen-file application delta was
+integrated after exact proposal and file-byte comparison, without replacing
+stale tracking or frozen records.
 
-The unit implements existing-scope quotas, consistent event retention and
-bounded reads, protected receipt retirement and conservative collection through
-current owners. It does not create a parallel resource framework, remote prune
-endpoint, speculative transport service or historical cleanup project. The
-initial grant is affected Werror and meaningful local fresh-fixture tests,
-with integrated gates selected from the actual coherent delta afterward.
+Source, reports and original failures remain under
+`implementation.9tGzKH/quotas.N3qrqDWt`. Principal reports are
+`composition-result.md`, `review-composition.md`, `linux-realized/result.md`,
+`review-closure.md` and `acceptance-note.md`. The isolated source and private
+macOS roots remain preserved.
 
-Tracker comments 273–277 and the unit's `brief.md`, `start-note.md` and
-`decision-note.md` define the boundaries. Known manager capture identities use
-a fixed 24-hour grace after first proven durable eligibility, reset on changed
-references or safety facts. Age alone is not authority, and unknown entries or
-unprovable temporary files remain retained. Receipt eligibility requires
-proven inactivity and at least 30 further days, followed by lifetime non-content
-tombstones. Linked runs need genuine validated terminal evidence, with no
-inferred cleanup or fabricated terminal time. Quota pressure refuses rather
-than evicting protection. No WM-021 acceptance is claimed.
+Schema 11 implements current-scope quotas, bounded reader admission and atomic
+event retention through existing owners. Seven-day or 256 MiB event retention
+preserves a consistent retained floor, high water and complete batches, without
+deleting native history, lineage or referenced artifacts. Protected receipts
+require proven inactivity and at least 30 further days before content retirement.
+Non-content tombstones remain charged for the registered client's lifetime,
+and quota pressure refuses rather than evicting replay protection.
 
-For retention eligibility only, accepted create/capture commands may count as
-completed local effects when exact original durable associations establish
-their resource/client/profile binding, with no contradictory dispatch or intent.
-All inactivity and protection conditions still apply. Original receipts remain
-accepted, missing associations remain uncertain, and no Runtime outcome is
-invented. Initial failures and still-unrun obligations are recorded in
-`progress-note.md` and `owner-boundary-note.md`, not treated as completed tests.
+Capture collection requires manager-recorded provenance, all reference and
+safety checks, and 24 hours from durable eligibility. Changed protection resets
+eligibility. Unknown or uncertain entries remain retained. Accepted local
+create/capture effects count as completed for retention only through exact
+original associations, preserving cross-client capture authorization and
+unchanged receipts. Historical terminal observation requires bounded shared-codec
+replay and same-boundary transactional revalidation. Stored terminal labels
+and history never recreate execution authority.
 
-Tracker comment 276 records narrow existing-owner corrections: expression-limit
-preserving inactivity queries, expired-key refusal before upload consumption,
-durable retained-parent unlink/synchronization before quota discharge, and
-explicit State-owned historical terminal observation after bounded replay and
-same-boundary revalidation. They create no new execution/cleanup authority or
-bulk backfill. The initial parenthesis diagnosis was withdrawn, and all failed
-logs remain. The unit's `result.md` preserves these original failures.
+Retained-parent unlink synchronizes the directory even for an absent name.
+Synchronization or identity uncertainty preserves the original charge/error.
+The reader/profile correction acquires current reader capacity before the
+profile/configuration guard and retains both through response within the original
+file owner. Current lower-limit reload, authorization, response failure/cancellation
+and subsequent sole-slot reuse are exercised. Store/SQLite limits, fail-fast
+ordinary admission, bounded terminal-owner waiting and non-replay remain unchanged.
 
-The goal resumed at `2026-09-21T02:42:53Z`. The test-only callback correction
-changed only `ArtifactCheck.hs`, retaining a fully evaluated 32-byte identity
-rather than content between download callbacks. The affected Werror build,
-fresh native/Artifact retention N1 and all five focused N8 modes passed.
-Current unchanged Store/Draft/Command N1 evidence is reused. Genuine terminal
-native state leaves unresolved approval/cancellation receipts protected, while
-an independent validated observer/export fixture proves eligible retirement
-without deleting artifact bytes or Runtime history.
+Fresh Linux workspace `/home/johnw/Products/w21r.SHNUXI` used the exact current
+archive and unchanged required patched environment. Setup passed separately at
+19:54:44–19:54:49Z on 2026-09-21. Each subsequent original SSH, gate and log-copy
+operation returned zero.
 
-The earlier fifteen-file proposal and focused correction are preserved in
-`proposal-corrected.patch`, `correction-result.md` and raw
-`callback-*.meta`/`.log` files. The initial `review.md` clearance preceded the
-owning-gate defect described below and did not establish package acceptance.
+| Linux gate | UTC start–end |
+|---|---|
+| API contract | 19:55:02–19:55:03 |
+| Compiler-parsed boundaries | 19:55:14–19:55:15 |
+| Runtime capture | 19:55:25–19:55:58 |
+| Store | 19:56:12–20:08:10 |
+| Commands | 20:08:25–20:09:24 |
+| Drafts | 20:09:46–20:10:31 |
+| Artifacts/History | 20:10:43–20:13:42 |
+| Ingestion | 20:13:52–20:33:25 |
+| Haskell documentation | 20:33:35–20:35:43 |
 
-Initial local owning validation passed documentation, compiler-parsed source
-boundaries, Runtime capture, the complete Store gate, Commands and Drafts.
-The first Artifact run failed at a stale schema9 assertion. Its test-only
-correction independently checks persisted and current versions and preserves
-all existing migration assertions, which passed in the next run.
+Native N1/N8 and intended-negative audit returns remain distinct from build
+success. Both-platform WM-021 Store wrappers and the Linux Ingestion wrapper
+passed. The earlier macOS Ingestion wrapper remains exit 1, with explicitly
+source-valid completed constituents and four later corrected audit phases.
+Earlier unchanged macOS owning evidence remains reused at its actual scope.
+Linux full Texinfo rendering remains NOT RUN, with current-byte canonical
+macOS documentation evidence reused rather than represented as a Linux pass.
 
-The fresh Artifact gate then failed with `StoreUnavailable` at
-`2026-09-21T04:29:03Z`. Read-only diagnosis established a production composition
-defect: `withRunOutputs` held the profile/configuration guard while projection
-restoration entered reader admission and tried to acquire the same non-reentrant
-configuration lock. Fail-fast acquisition refused rather than waiting. The
-original corrupt-result marker and persisted Runtime facts identified this call
-without replay or fixture repair.
+All earlier build, predicate-depth, callback, migration, native-retention
+expectation, reader/configuration composition and audit-anchor failures remain
+in their original reports and roots. The initial review clearance was superseded
+after the actual composition defect. The corrected source review and final
+closure review support the accepted implementation.
 
-The operator approved the production correction. `State.withProfileProjection`
-now acquires the existing current reader scope before the profile/configuration
-guard, authorizes before private replay and retains both through response.
-`Artifacts.withRunOutputs` preserves its original file owner, verification,
-bounds and final authorization. No bypass, stale limits, retry, budget expansion
-or new registry was added.
+The old `/home/johnw/Products/w21.g0thhv` bootstrap remains untouched and
+unclaimed. Its original SSH/Nix terminal and join evidence is still missing.
+The fresh lane neither adopts that operation nor proves its cleanup. Explicit
+realization and fresh validation were approved without version, lock, profile
+or host-security changes. The new lane's post-run tar comparison remains exit 1
+for recorded Mode/Uid/Gid differences only, with no content/error diagnostic,
+correction or retry. Store stderr retains offline-package and bootstrap
+diagnostic-write compiler warnings, so no blanket warning-free claim is made.
 
-Current focused composition/quota N1/N8, the full Artifact/History gate, Haskell
-documentation and refreshed compiler-parsed boundaries passed. Ingestion has
-complete source-valid composed coverage: native N1/N8 and two audit modes
-preceded a failed anchor setup, then the remaining four modes passed after a
-context-only anchor correction. The original failed wrapper remains failed.
-Earlier unchanged owning evidence is reused, not relabelled or rerun.
-`composition-result.md` and `composition-checks` retain the exact results.
-
-Continued milestone reviewer `bc4d9b77-b9df-43e2-a123-8ab0bf2f1db2` found no
-issues, cleared the complete seventeen-file proposal and accepted the evidence
-scope in `review-composition.md`. Parent applied only that exact reviewed
-application delta to canonical at `2026-09-21T06:12:41Z`, verifying patch and
-file-byte equality without overlaying stale tracking or frozen records. The
-application delta is 923 insertions and 68 deletions, committed as
-`248e772e999d483f7017e6d956dc42daf5626400`.
-
-The operator approved Linux validation on `vulcan.lan`. Its archive was verified
-at `/home/johnw/Products/w21.g0thhv/app`, but the first foreground SSH operation
-entered toolchain realization instead of an application gate. Logs retain cache
-and Hackage downloads and the required patched GHC build. Parent intended reuse
-of the existing environment and interrupted the registered validator at
-`2026-09-21T08:29Z`. The resulting workflow pause does not establish the original
-SSH exit or remote Nix cancellation/join. No application-gate outcome is recorded.
-
-The current pinned Texinfo executable was absent. Linux full documentation
-rendering is explicitly not run, with current-byte canonical macOS documentation
-evidence reused. The revised sequence starts with the existing API contract gate,
-then boundaries, Runtime capture, Store, Commands, Drafts, Artifacts/History,
-Ingestion and Haskell documentation. The initial setup quoting failure and
-absent-tool check remain preserved, without a fake tool override or weakened gate.
-
-Read-only diagnosis in `linux-validation/bootstrap-diagnosis.md` established
-that the current required compiler wrapper is identical to the previously
-accepted patched GHC environment, but its exact output and compiler were absent
-when inspected. Flake, lock, overrides and process-patch bytes are unchanged.
-An unpatched compiler is not a valid substitute. The cause of absence and the
-interrupted build's current state remain unknown.
-
-The operator subsequently approved realization of that same pinned environment
-and fresh-workspace validation. Workflow
-`6dcc52c6-ef70-44a3-b7bf-30f6d0089ff6` resumes the retained validator under
-`linux-realized/brief.md`. Setup runs as a separate original foreground operation
-before the nine existing gates. Successful validation proceeds to the same
-independent milestone reviewer for closure assessment.
-
-The grant covers the existing pinned environment and its transitive build
-inputs, without version, lock, profile or host-security changes. New validation
-uses fresh original ownership and disjoint private resources. The interrupted
-lane and its missing ownership evidence remain intact. No old PID/handle
-adoption, cleanup inference, cache-management or containment work is authorized.
-Long authorized builds and refocus timers do not justify cancellation.
-
-WM-021 remains in progress pending actual Linux outcomes and parent closure.
-Accepted milestones remain WM-001–WM-020 and G0, with G1 open. All original
-failed roots and reports remain preserved.
+Acceptance does not establish total-service heap/disk bounds, physical-power-loss
+durability, real elapsed retention from aged fixtures, cross-process ABA
+protection or deterministic historical-terminal-observation post-replay/pre-COMMIT
+coverage. Later HTTP/client obligations and G1 remain open. OS containment
+remains excluded throughout the roadmap.
 
 ## WM-020 acceptance
 
@@ -500,8 +454,8 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-21T19:49:58Z`. The next active-work deadline is
-`2026-09-21T20:49:58Z`. Continue with WM-021 through existing owners, with no
+Refocus completed at `2026-09-21T20:45:35Z`. The next active-work deadline is
+`2026-09-21T21:45:35Z`. Continue with WM-022 through existing owners, with no
 OS containment or verification-machinery detour. The resumed persistent goal
 still contains older baseline and scope wording. The user's latest correction
 governs current work, and `/goal-tweak` remains available for updating that
