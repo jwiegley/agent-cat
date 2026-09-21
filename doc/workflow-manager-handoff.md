@@ -127,12 +127,26 @@ issues, cleared the complete seventeen-file proposal and accepted the evidence
 scope in `review-composition.md`. Parent applied only that exact reviewed
 application delta to canonical at `2026-09-21T06:12:41Z`, verifying patch and
 file-byte equality without overlaying stale tracking or frozen records. The
-application delta is 923 insertions and 68 deletions.
+application delta is 923 insertions and 68 deletions, committed as
+`248e772e999d483f7017e6d956dc42daf5626400`.
 
-WM-021 remains in progress. Other-platform validation and package acceptance
-are not established by these local results, and remote execution is not included
-in the local grant. Accepted milestones remain WM-001–WM-020 and G0, with G1
-open. All original failed roots and reports remain preserved.
+The operator approved Linux validation on `vulcan.lan`. The retained validator
+runs execution-only workflow `42c39c77-4018-4789-8eb4-1c767d8e64ca` from the
+verified current source archive in fresh `/home/johnw/Products/w21.g0thhv/app`.
+Scope and source binding are in `linux-validation/brief.md`. No application,
+host, dependency, gate, profile or lock changes are authorized.
+
+The current pinned Texinfo executable was absent. Linux full documentation
+rendering is explicitly not run, with current-byte canonical macOS documentation
+evidence reused. The existing API contract gate runs separately, followed by
+boundaries, Runtime capture, Store, Commands, Drafts, Artifacts/History, Ingestion
+and Haskell documentation. No fake tool override, installation or weakened gate
+is used. The initial local setup quoting failure and absent-tool check remain
+preserved.
+
+WM-021 remains in progress pending actual Linux outcomes and parent closure.
+Accepted milestones remain WM-001–WM-020 and G0, with G1 open. All original
+failed roots and reports remain preserved.
 
 ## WM-020 acceptance
 
@@ -464,8 +478,8 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-21T05:47:31Z`. The next active-work deadline is
-`2026-09-21T06:47:31Z`. Continue with WM-021 through existing owners, with no
+Refocus completed at `2026-09-21T07:38:22Z`. The next active-work deadline is
+`2026-09-21T08:38:22Z`. Continue with WM-021 through existing owners, with no
 OS containment or verification-machinery detour. The resumed persistent goal
 still contains older baseline and scope wording. The user's latest correction
 governs current work, and `/goal-tweak` remains available for updating that
