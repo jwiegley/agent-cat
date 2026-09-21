@@ -41,7 +41,7 @@ or undo provider effects. This exclusion does not close other package criteria.
 ## Active WM-021 unit
 
 Issue `acat-wm-021-ez37` is in progress after all recorded dependencies closed.
-One isolated author works in `implementation.9tGzKH/quotas.N3qrqDWt/source`,
+The isolated proposal is retained in `implementation.9tGzKH/quotas.N3qrqDWt/source`,
 branch `wm021-quotas-20260920`, based on WM-020 acceptance `77652019`. Private
 runtime paths are under `/Users/johnw/Products/q.KqVeHD`, with a serialized
 sibling build directory. Parent retains Git, tracker, integration and acceptance.
@@ -53,7 +53,7 @@ endpoint, speculative transport service or historical cleanup project. The
 initial grant is affected Werror and meaningful local fresh-fixture tests,
 with integrated gates selected from the actual coherent delta afterward.
 
-Tracker comments 273–275 and the unit's `brief.md`, `start-note.md` and
+Tracker comments 273–277 and the unit's `brief.md`, `start-note.md` and
 `decision-note.md` define the boundaries. Known manager capture identities use
 a fixed 24-hour grace after first proven durable eligibility, reset on changed
 references or safety facts. Age alone is not authority, and unknown entries or
@@ -77,7 +77,26 @@ durable retained-parent unlink/synchronization before quota discharge, and
 explicit State-owned historical terminal observation after bounded replay and
 same-boundary revalidation. They create no new execution/cleanup authority or
 bulk backfill. The initial parenthesis diagnosis was withdrawn, and all failed
-logs remain. Full pressure, sync, terminal-evidence and race coverage is pending.
+logs remain. The unit's `result.md` preserves these original failures.
+
+The goal resumed at `2026-09-21T02:42:53Z`. The test-only callback correction
+changed only `ArtifactCheck.hs`, retaining a fully evaluated 32-byte identity
+rather than content between download callbacks. The affected Werror build,
+fresh native/Artifact retention N1 and all five focused N8 modes passed.
+Current unchanged Store/Draft/Command N1 evidence is reused. Genuine terminal
+native state leaves unresolved approval/cancellation receipts protected, while
+an independent validated observer/export fixture proves eligible retirement
+without deleting artifact bytes or Runtime history.
+
+The full proposal spans fifteen existing files, with 837 insertions and 60
+deletions. `proposal-corrected.patch`, `correction-result.md` and raw
+`callback-*.meta`/`.log` files record scope and execution. A fresh read-only
+milestone review is running in workflow
+`b86f8a50-c6dc-46b7-b9cc-c5dddc43c725`. No WM-021 application integration has
+occurred. Full owning/source-boundary/platform gates and acceptance remain
+pending. Focused passes are not successful whole-gate wrappers or hardware
+power-loss evidence, and no new production change was made during the callback
+correction.
 
 ## WM-020 acceptance
 
@@ -409,8 +428,8 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-20T22:24:35Z`. The next active-work deadline is
-`2026-09-20T23:24:35Z`. Continue with WM-021 through existing owners, with no
+Refocus completed at `2026-09-21T02:54:58Z`. The next active-work deadline is
+`2026-09-21T03:54:58Z`. Continue with WM-021 through existing owners, with no
 OS containment or verification-machinery detour. The resumed persistent goal
 still contains older baseline and scope wording. The user's latest correction
 governs current work, and `/goal-tweak` remains available for updating that
