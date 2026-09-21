@@ -91,6 +91,22 @@ a separate evidence decision, and accepted prerequisites do not close it.
 No interpreter, recorder, inventory, retention helper, per-leaf review, old-root
 recovery or OS-containment work is part of this unit.
 
+## WM-023 local preparation
+
+Issue `acat-wm-023-d20b` is in progress with its four dependencies closed.
+This independent local preparation does not authorize WM-022 Linux execution
+or close WM-022/G1. The unit is `implementation.9tGzKH/credentials.QHYL3FHM`.
+Workflow `49e59e6e-3517-469b-9ff0-f77e5c817597` performs one bounded read-only
+check of existing Authorization, Store, CLI, private-file and frozen admin
+schema interfaces. No source-writing worktree or implementation exists yet.
+
+Tracker comment 289 and `seams-brief.md` preserve the scope. The next decision
+is the smallest existing-owner extension for secret publication, rotation,
+view invalidation and local administration under the exclusive Store lease.
+The frozen stdin-JSON grammar and private one-time output remain authoritative.
+No listener, real credential provisioning, live credential/configuration access,
+remote action, containment or new framework is authorized by this preparation.
+
 ## WM-021 acceptance
 
 Issue `acat-wm-021-ez37` is closed. Continued independent milestone reviewer
