@@ -46,20 +46,37 @@ source branch `wm022-vertical.d42c7UhQ` based on acceptance commit `c6698af4`.
 Private runtime paths are under `/Users/johnw/Products/v.OSGikI2D`, with a
 serialized sibling builddir and supplied offline environment.
 
-Workflow `ab8c0cbd-96ac-4c72-8f4b-8f8509f8039f` delegates the minimum real
-non-network lifecycle executable/harness through existing frontend, Runtime
-and manager owners. It must exercise lifecycle branches and refusals, use
-deterministic scripted/ACP/deck fixtures and compare actual direct/managed
-answers, authored traces, exact bills, policies, typed values and lineage.
-Physical IDs and clocks require an explicit validated correspondence, not
-semantic normalization. A02, A10 and A13 remain explicit obligations.
+The six-file proposal adds `manager-vertical-check`, its owning gate, a strict
+typed Runtime comparator, CLI fixture/comparison hooks and documentation.
+It retains existing frontend, Runtime and manager owners without production
+changes. Actual direct/managed answers, authored traces, exact bills, policies,
+typed values and lineage are compared under explicit physical correspondence.
+The literal-prompt lineage fixture declares its independent model and shared
+person lane, preserving all events and within-lane order without global sorting.
+A02, A10 and A13 remain explicit obligations.
 
-Tracker comment 286 and the unit's `brief.md` and `start-note.md` record the
-grant. Initial execution is local Werror, fresh N1 then N8, source boundaries
-and relevant documentation. The first unexpected setup/build/test failure stops
-before edits or retry. A concrete production defect must be reported before
-production changes rather than hidden in a fixture. No remote/client/provider
-work, deployment, dependency change or Lean/oracle build is granted to this lane.
+Tracker comments 286–287 and the unit's `brief.md`, `start-note.md` and
+`parent-result.md` record the grant and current evidence. The complete local
+owning gate passed at N1 then N8 on 2026-09-21, 21:54:55–22:09:39Z, including
+the existing instrumented history-corrections and control-write audits.
+Compiler-parsed boundaries and both documentation gates passed afterward.
+`proposal.patch` contains 431 insertions and 5 deletions against `c6698af4`.
+
+Five failed build/gate invocations remain preserved. They exposed nested-case
+syntax, an overly strict total event order, partial list access and two audit-only
+helpers called without their existing instrumentation. No semantic assertion
+was removed. Author `ff060536-6859-422c-8722-da9fe8ecebd2` reached its default
+agent deadline after the third failed build, between commands. Parent inspected
+original returns and
+partial source, took sole writing ownership and ran subsequent gates directly.
+The timeout is not test success, and runtime budgets were unchanged.
+The initial incorrect compiler-error/time report was corrected from raw output.
+
+Workflow `9c6ce501-a7e0-4880-81d1-f5a276e37524` performs the coherent independent
+source/evidence review. No application integration or WM-022/G1 acceptance is
+claimed. Other-platform work remains unrun for this unit. The first unexpected
+failure still stops before correction or retry, and all no-containment,
+original-owner and non-replay constraints remain in force.
 
 Parent retains Git, tracker, integration, platform and acceptance decisions.
 Existing source-valid evidence may be reused at its actual scope. G1 remains
@@ -483,8 +500,8 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-21T21:04:24Z`. The next active-work deadline is
-`2026-09-21T22:04:24Z`. Continue with WM-022 through existing owners, with no
+Refocus completed at `2026-09-21T21:48:16Z`. The next active-work deadline is
+`2026-09-21T22:48:16Z`. Continue with WM-022 through existing owners, with no
 OS containment or verification-machinery detour. The resumed persistent goal
 still contains older baseline and scope wording. The user's latest correction
 governs current work, and `/goal-tweak` remains available for updating that
