@@ -10555,14 +10555,14 @@ manager's correctness boundary.
 ]
 #+end_src
 
-* TODO [#B] WM-023: Implement local credential administration and authorization    :p5:
+* DOING [#B] WM-023: Implement local credential administration and authorization    :p5:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-wm-023-d20b
 :LABELS:   ["p5","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-09-21 Mon 16:03]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-023
 :SOURCE_REPO: agent-cat
@@ -10656,6 +10656,20 @@ callers. Worker environments contain no manager credential material.
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 289,
+    "issue_id": "acat-wm-023-d20b",
+    "author": "johnw",
+    "text": "WM-023 local credential administration preparation is in progress while WM-022 awaits its separately requested Linux validation decision. WM023 dependencies WM008, WM009, WM010 and WM020 are closed. This does not close WM022 or G1, introduce a listener, provision real credentials, or authorize remote/host/account actions.\n\nThe preparation unit is implementation.9tGzKH/credentials.QHYL3FHM. Workflow49e59e6e-3517-469b-9ff0-f77e5c817597 performs one bounded read-only check of the existing Authorization, Store, CLI, private-file and frozen schema seams against canonical ea0fc12. No source-writing worktree or implementation exists yet. Its output will identify the minimum extension and any concrete parent decisions, not another repository audit or generic framework.\n\nExisting opaque possession proofs, transactional current-client/profile authorization, permanent registered-client/credential identities, exclusive Store ownership and original Worker authority remain the baseline. The frozen local admin interface consumes one versioned JSON request through stdin and publishes generated secret material only into the selected private file. No wire fields or operation spelling may be invented. The pending check focuses on fail-closed secret publication, bounded rotation overlap under the existing grammar, reader/view invalidation without cancelling owned work, and local administration without a second Store writer or backdoor HTTP route.\n\nAll OS containment, live credential/configuration access, token disclosure, provider/client/deployment work, dependency changes, old-resource recovery and Lean/oracle builds remain excluded. The next action is a minimal owner-level implementation decision after this single targeted pass. The current accepted baseline remains WM001–WM021 and G0.\n",
+    "created_at": "2026-09-21T23:03:01Z"
   }
 ]
 #+end_src
