@@ -130,19 +130,33 @@ file-byte equality without overlaying stale tracking or frozen records. The
 application delta is 923 insertions and 68 deletions, committed as
 `248e772e999d483f7017e6d956dc42daf5626400`.
 
-The operator approved Linux validation on `vulcan.lan`. The retained validator
-runs execution-only workflow `42c39c77-4018-4789-8eb4-1c767d8e64ca` from the
-verified current source archive in fresh `/home/johnw/Products/w21.g0thhv/app`.
-Scope and source binding are in `linux-validation/brief.md`. No application,
-host, dependency, gate, profile or lock changes are authorized.
+The operator approved Linux validation on `vulcan.lan`. Its archive was verified
+at `/home/johnw/Products/w21.g0thhv/app`, but the first foreground SSH operation
+entered toolchain realization instead of an application gate. Logs retain cache
+and Hackage downloads and the required patched GHC build. Parent intended reuse
+of the existing environment and interrupted the registered validator at
+`2026-09-21T08:29Z`. The resulting workflow pause does not establish the original
+SSH exit or remote Nix cancellation/join. No application-gate outcome is recorded.
 
 The current pinned Texinfo executable was absent. Linux full documentation
 rendering is explicitly not run, with current-byte canonical macOS documentation
-evidence reused. The existing API contract gate runs separately, followed by
-boundaries, Runtime capture, Store, Commands, Drafts, Artifacts/History, Ingestion
-and Haskell documentation. No fake tool override, installation or weakened gate
-is used. The initial local setup quoting failure and absent-tool check remain
-preserved.
+evidence reused. The revised sequence starts with the existing API contract gate,
+then boundaries, Runtime capture, Store, Commands, Drafts, Artifacts/History,
+Ingestion and Haskell documentation. The initial setup quoting failure and
+absent-tool check remain preserved, without a fake tool override or weakened gate.
+
+Read-only diagnosis in `linux-validation/bootstrap-diagnosis.md` established
+that the current required compiler wrapper is identical to the previously
+accepted patched GHC environment, but its exact output and compiler were absent
+when inspected. Flake, lock, overrides and process-patch bytes are unchanged.
+An unpatched compiler is not a valid substitute. The cause of absence and the
+interrupted build's current state remain unknown.
+
+Explicit realization of that same pinned environment requires a setup decision.
+Any new validation must retain fresh original ownership and private resources,
+leaving the interrupted lane and its missing ownership evidence intact. No old
+PID/handle adoption, cleanup inference, cache-management or containment work is
+authorized. Linux validation remains unestablished.
 
 WM-021 remains in progress pending actual Linux outcomes and parent closure.
 Accepted milestones remain WM-001–WM-020 and G0, with G1 open. All original
@@ -478,8 +492,8 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-21T07:38:22Z`. The next active-work deadline is
-`2026-09-21T08:38:22Z`. Continue with WM-021 through existing owners, with no
+Refocus completed at `2026-09-21T08:33:33Z`. The next active-work deadline is
+`2026-09-21T09:33:33Z`. Continue with WM-021 through existing owners, with no
 OS containment or verification-machinery detour. The resumed persistent goal
 still contains older baseline and scope wording. The user's latest correction
 governs current work, and `/goal-tweak` remains available for updating that
