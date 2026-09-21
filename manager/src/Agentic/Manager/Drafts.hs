@@ -6,7 +6,7 @@
 
 -- | Durable input representations and verified captures, never workflow execution.
 module Agentic.Manager.Drafts
-  ( reconcileDrafts, createDraft, createLineageDraft, withLineageRequests, checkLineageParent, changeDraftInput, changeDraftInputGuarded, InputTransition (..), RequestState, requestView, requestOwner, requestState, currentVersion, editable, checkDraftCapacity, uploadCapture, readDraft, assembleDraft, DraftAssembly, assemblyRequest, assemblyRevision, assemblyProfile, assemblyProfileRevision, assemblySetup, assemblyFrame, assemblyInputSummaries, assemblySelection, assemblyParentBinding, validateAssemblyParent, assembleDraftSnapshot, assembleAcceptedDraft, structuralReadiness, verifyFrontendFiles ) where
+  ( reconcileDrafts, createDraft, createLineageDraft, withLineageRequests, checkLineageParent, changeDraftInput, changeDraftInputGuarded, InputTransition (..), RequestState, requestView, requestOwner, requestState, currentVersion, editable, checkDraftCapacity, uploadCapture, collectCaptures, readDraft, assembleDraft, DraftAssembly, assemblyRequest, assemblyRevision, assemblyProfile, assemblyProfileRevision, assemblySetup, assemblyFrame, assemblyInputSummaries, assemblySelection, assemblyParentBinding, validateAssemblyParent, assembleDraftSnapshot, assembleAcceptedDraft, structuralReadiness, verifyFrontendFiles ) where
 
 import Agentic.Manager.Authorization
 import Agentic.Manager.Commands
@@ -20,7 +20,7 @@ import Agentic.Manager.Protocol.Preparation (ReviewInput (..))
 import Agentic.Manager.Store
 import Agentic.Runtime
   (PrivateRoot, privateRootPath, privatePathComponents, withPrivateDirectoryAt, ensurePrivateDirectoryAt,
-   publishPrivateCaptureAt, CapturePublication (..), PrivateCapture, privateCaptureBytes, privateCaptureSha256,
+   removePrivateFileDurablyAt, publishPrivateCaptureAt, CapturePublication (..), PrivateCapture, privateCaptureBytes, privateCaptureSha256,
    WorkflowDescriptor (..), WorkflowInputDescriptor (..), frontendLiteralBytes,
    FrontendSetup (..), FrontendSetupRequest (..), FrontendInputSource (..), encodeFrontendSetupRequest,
    maxFrontendQueryBytes, FrontendManifest (..), RunRecord (..), RunOwnership (..),
@@ -374,7 +374,7 @@ uploadCapture store proof ident key ceilingBytes source = draftIO $ withStoreFil
       current <- requestState proof ident [Submit]
       editable current
       checkUploadCapacity limits ident ceilingBytes
-      execute "INSERT INTO capture_uploads VALUES (?,?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'),'pending')"
+      execute "INSERT INTO capture_uploads(id,request_id,client_id,profile_id,profile_revision,process_generation,reserved_bytes,created_at,state) VALUES (?,?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'),'pending')"
         [text capId,text ident,text client,text(draftProfile view),text(draftProfileRevision view),text generation,SQL.SQLInteger ceilingBytes]
       pure (False,[Invalidation "service.changed" "/v1/capabilities" capId])) >>= requireEither
   checkedSource <- utf8Source ceilingBytes source
@@ -399,7 +399,12 @@ uploadCapture store proof ident key ceilingBytes source = draftIO $ withStoreFil
         verifiedBody <- maybe (throwIO StorageUnavailable) pure binding
         unless (privateCaptureBytes publication==fromIntegral(bodyBindingBytes verifiedBody)
           && privateCaptureSha256 publication==bodyBindingSha256 verifiedBody) (markOrphan store capId >> throwIO StorageUnavailable)
-        result <- try @SomeException (finishCapture store proof request view capId (Just publication) verifiedBody)
+        result <- try @SomeException $ do
+          runTransaction store $ do
+            execute "UPDATE capture_uploads SET published_bytes=?,published_sha256=? WHERE id=? AND state='pending'"
+              [integer(bodyBindingBytes verifiedBody),text(bodyBindingSha256 verifiedBody),text capId]
+            pure((),[Invalidation "service.changed" "/v1/capabilities" capId])
+          finishCapture store proof request view capId (Just publication) verifiedBody
         case result of
           Left failure -> void(try @SomeException(markOrphan store capId)) >> throwIO failure
           Right receipt -> pure receipt
@@ -407,7 +412,7 @@ uploadCapture store proof ident key ceilingBytes source = draftIO $ withStoreFil
 finishCapture :: CoordinationStore -> CredentialProof -> CommandRequest -> DraftView -> Text -> Maybe PrivateCapture -> BodyBinding -> IO CaptureReceipt
 finishCapture store proof request view capId publication binding = do
   let ident=draftId view
-      builder commandId _ catalogues = do
+      builder commandId limits catalogues = do
         _ <- selectCatalogue catalogues (draftProfile view) (draftProfileRevision view) (draftWorkflow view) (draftDescriptorRevision view)
         unless (publication/=Nothing) (Left StateConflict)
         pure $ Mutation (draftProfileRevision view) (pure Nothing) $ do
@@ -420,8 +425,10 @@ finishCapture store proof request view capId publication binding = do
             [[SQL.SQLText owner,SQL.SQLText profile,SQL.SQLText revision,SQL.SQLInteger reserved]] ->
               unless(owner==client && profile==draftProfile view && revision==draftProfileRevision view && fromIntegral(bodyBindingBytes binding)<=reserved) (refuseTransaction StateConflict)
             _ -> refuseTransaction StateConflict
+          capacity <- query "SELECT coalesce((SELECT sum(bytes) FROM captures),0)+coalesce((SELECT sum(reserved_bytes) FROM capture_uploads WHERE id!=?),0)+?" [text capId,integer(bodyBindingBytes binding)]
+          unless (case capacity of [[SQL.SQLInteger used]] -> used<=fromIntegral(limitGlobalCaptureBytes limits); _ -> False) (refuseTransaction StorageQuota)
           pure $ Right $ Intent (noReferences {referenceRequest=Just ident}) False $ do
-            execute "INSERT INTO captures VALUES (?,?,?,?,?,?,?,?)"
+            execute "INSERT INTO captures(id,revision,request_id,client_id,profile_id,private_reference,bytes,sha256) VALUES (?,?,?,?,?,?,?,?)"
               [text capId,text capId,text ident,text client,text(draftProfile view),SQL.SQLBlob(TE.encodeUtf8 capId),integer(bodyBindingBytes binding),text(bodyBindingSha256 binding)]
             execute "INSERT INTO command_captures VALUES (?,?)" [text commandId,text capId]
             execute "DELETE FROM capture_uploads WHERE id=?" [text capId]
@@ -434,6 +441,53 @@ finishCapture store proof request view capId publication binding = do
     case rows of
       [[SQL.SQLText actual]] -> do CaptureState receipt _ _ <- captureState ident actual; pure receipt
       _ -> refuseTransaction ResourceUnavailable
+
+-- | Examine at most sixteen recorded identities under the original file owner.
+-- Unknown files and unconfirmed publications are never candidates. A durable
+-- upload row retains quota and provenance across an interrupted unlink.
+collectCaptures :: CoordinationStore -> Text -> IO (Either CommandFailure (Maybe Text))
+collectCaptures store after = draftIO $ withStoreFiles store $ \root -> timed 5000000 $ do
+  candidates <- runRead store $ do
+    rows <- query "SELECT id,request_id,profile_id,bytes,sha256,0 FROM captures WHERE id>? AND private_reference=CAST(id AS BLOB) UNION ALL SELECT id,request_id,profile_id,published_bytes,published_sha256,1 FROM capture_uploads WHERE id>? AND state='orphan' AND published_bytes IS NOT NULL AND published_sha256 IS NOT NULL ORDER BY id LIMIT 16" [text after,text after]
+    forM rows $ \row -> case row of
+      [SQL.SQLText ident,SQL.SQLText request,SQL.SQLText profile,SQL.SQLInteger bytes,SQL.SQLText digest,SQL.SQLInteger orphan] -> pure(ident,request,profile,bytes,digest,orphan==1)
+      _ -> refuseTransaction StorageUnavailable
+  forM_ candidates $ \(ident,request,profile,bytes,digest,orphan) -> do
+    let table=if orphan then "capture_uploads" else "captures"
+        eligible = do
+          inactive <- if orphan then pure True else requestInactive request
+          rows <- query "SELECT NOT EXISTS(SELECT 1 FROM request_inputs WHERE capture_id=?) AND NOT EXISTS(SELECT 1 FROM preparation_captures WHERE capture_id=?) AND NOT EXISTS(SELECT 1 FROM command_captures cc JOIN commands c ON c.id=cc.command_id WHERE cc.capture_id=? AND c.retired=0) AND NOT EXISTS(SELECT 1 FROM retention_pending_commands WHERE request_id=?) AND NOT EXISTS(SELECT 1 FROM requests child JOIN runs parent ON child.parent_run_id=parent.id WHERE parent.request_id=?) AND NOT EXISTS(SELECT 1 FROM restoration_quarantine) AND (?=0 OR NOT EXISTS(SELECT 1 FROM captures WHERE id=?))" [text ident,text ident,text ident,text request,text request,SQL.SQLInteger(if orphan then 1 else 0),text ident]
+          pure(inactive && rows==[[SQL.SQLInteger 1]])
+        event=Invalidation "service.changed" "/v1/capabilities" ident
+    ready <- runTransaction store $ do
+      allowed <- eligible
+      rows <- query ("SELECT collection_since,collection_since<=unixepoch()-86400 FROM "<>table<>" WHERE id=?") [text ident]
+      case rows of
+        [[since,aged]]
+          | not allowed -> case since of
+              SQL.SQLNull -> pure(False,[])
+              _ -> execute ("UPDATE "<>table<>" SET collection_since=NULL WHERE id=?") [text ident] >> pure(False,[event])
+          | since==SQL.SQLNull -> execute ("UPDATE "<>table<>" SET collection_since=unixepoch() WHERE id=?") [text ident] >> pure(False,[event])
+          | otherwise -> pure(aged==SQL.SQLInteger 1,[])
+        _ -> refuseTransaction StateConflict
+    when ready $ do
+      _ <- verifyCapture root (CaptureState (CaptureReceipt ident request profile bytes digest) "" (TE.encodeUtf8 ident)) False
+      runTransaction store $ do
+        allowed <- eligible
+        age <- query ("SELECT collection_since<=unixepoch()-86400 FROM "<>table<>" WHERE id=?") [text ident]
+        current <- if orphan
+          then query "SELECT request_id,profile_id,published_bytes,published_sha256 FROM capture_uploads WHERE id=? AND state='orphan'" [text ident]
+          else query "SELECT request_id,profile_id,bytes,sha256 FROM captures WHERE id=? AND private_reference=CAST(id AS BLOB)" [text ident]
+        unless (allowed && age==[[SQL.SQLInteger 1]] && current==[[text request,text profile,SQL.SQLInteger bytes,text digest]]) (refuseTransaction StateConflict)
+        unless orphan $ do
+          generation <- transactionGeneration
+          execute "INSERT INTO capture_uploads(id,request_id,client_id,profile_id,profile_revision,process_generation,reserved_bytes,created_at,state,collection_since,published_bytes,published_sha256) SELECT c.id,c.request_id,c.client_id,c.profile_id,r.profile_revision,?,c.bytes,strftime('%Y-%m-%dT%H:%M:%fZ','now'),'orphan',c.collection_since,c.bytes,c.sha256 FROM captures c JOIN requests r ON r.id=c.request_id WHERE c.id=?" [text generation,text ident]
+          execute "DELETE FROM command_captures WHERE capture_id=? AND command_id IN (SELECT id FROM commands WHERE retired=1)" [text ident]
+          execute "DELETE FROM captures WHERE id=?" [text ident]
+        pure((),if orphan then [] else [event])
+      removePrivateFileDurablyAt root ["captures",T.unpack ident]
+      releaseUpload store ident
+  pure(case reverse candidates of (ident,_,_,_,_,_):_ -> Just ident; _ -> Nothing)
 
 readDraft :: CoordinationStore -> CredentialProof -> Text -> IO (Either CommandFailure DraftView)
 readDraft store proof ident = draftIO $ withStoreFiles store $ \root -> timed 5000000 $ do

@@ -56,8 +56,8 @@ heap or temporary-disk quotas. The pinned Unix SQLite source specifies mode
 0600 for DELETEONCLOSE temporary files. That source evidence is not an exhaustive
 platform or forced-spill test.
 
-`PRAGMA user_version` holds internal schema version 10. Startup accepts versions
-zero through ten, and rejects other versions before changing journaling or
+`PRAGMA user_version` holds internal schema version 11. Startup accepts versions
+zero through eleven, and rejects other versions before changing journaling or
 schema. Fresh initialization, command-ledger additions, the explicit literal
 chunk/upload migration, and admission and control-state additions execute DDL,
 metadata and version publication in one immediate transaction. Version-one DDL
@@ -281,9 +281,9 @@ checkpointing is disabled so it cannot hide checkpoint work inside a mutation.
 WM-009 supplies storage representation and transaction mechanisms. The
 [command layer](COMMANDS.md) supplies WM-010 current credential/profile checks,
 receipt replay, logical ledger reservations, and one-shot dispatch permission.
-Worker authority, recovery fencing, safe reservation release, retention floors,
-wider total-storage quotas, collection, and checkpoint scheduling remain with
-their owning packages. The offline backup and restoration operations above use
+Worker authority, recovery fencing and safe reservation release remain with their
+existing owners. The retention operations below use this Store, while service
+checkpoint scheduling remains with the later coordinator. The offline backup and restoration operations above use
 SQLite's coherent snapshot facility rather than copying a live database file.
 WAL and FULL are verified settings, not power-loss, filesystem, or hardware test
 evidence.
@@ -386,5 +386,72 @@ Original finalization recognizes only the exact post-start association revision 
 a successor to its retained revision fence, with unchanged reservation, generation,
 command and cleanup-kind checks. Pre-start stale guards remain unchanged.
 Storage failures propagate explicitly, with no automatic retry, subscriber
-consumption or invented Runtime success. Later owners supply supervision policy,
-control endpoints, artifact verification, retention and restart orchestration.
+consumption or invented Runtime success. Supervision, control, artifact verification
+and restart operations use their existing owners.
+
+## Core quotas and retention
+
+Schema eleven adds event accounting, eligibility observations and validated terminal
+facts. Registered client identities and credential identities cannot be deleted or
+reassigned, and retired clients cannot be revived. These constraints preserve replay
+and credential identity independently of content collection.
+
+`withStoreReader` reserves materialization capacity against the current installed
+`globalDatabaseReaders` limit before invoking a callback. Reloaded limits apply to
+new readers even while older readers finish. Acquisition releases configuration and
+SQL ownership before the callback, and completion or an exception returns capacity.
+State uses this scope for complete prefix replay and ingestion. Its profile projection
+scope acquires reader capacity before entering the current configuration guard,
+validates profile and client authority before replay, and retains both reader capacity
+and configuration through the response callback. File responses retain
+the existing single Store file slot, while SQL still has its stricter single
+fail-fast admission slot. Neither reader pressure nor retention consumes the separate
+original-worker stop cells or the cancellation ledger reserve.
+
+The existing owners continue to enforce per-client and global drafts, per-request
+input holdings, global capture holdings, the hundred-request queue, current global
+execution reservations and command ledger/rate limits. ConfigurationLimits is one
+current global configuration, not an allocation multiplied by profile count.
+Runtime frames, diagnostics, artifact reads, one-MiB views and sixty-four-MiB
+checkpoints retain their existing bounds. The core does not allocate transport
+connections or materialized page sets. Their later owners must enforce the frozen
+global connection/page-set caps, two sets per client and sixty-second expiry.
+No HTTP, SSE or page-token implementation is provided here.
+
+`retainEvents` advances at most 256 expired records per call. Appending an invalidation
+also advances a bounded prefix, and refuses rather than committing above 268435456
+charged bytes. The charge includes the ASCII event fields and 256 bytes of framing
+allowance per record. The age limit is 604800 seconds using SQLite time. A large age
+backlog can require several bounded maintenance calls, without retaining a transaction
+between them. Old schema-ten events start their age interval at migration rather
+than acquiring an invented historical timestamp.
+
+Deletion, byte accounting and the last-removed sequence in retained_floor commit
+atomically. `readRetainedEvents` maintains that boundary and returns at most 64 complete
+events under one transaction. Wrong stream, cursor before the retained floor and
+cursor beyond the high-water mark are distinct results. Expired records still awaiting
+a later maintenance page cause retention loss rather than a successful expired batch.
+A missing sequence within a retained batch is an integrity refusal. No database
+transaction or cursor escapes to a consumer, and no history, snapshot, command,
+decision, capture or artifact is deleted by event retention.
+
+State records terminal_observed only from the shared validated Runtime terminal fold.
+Physical cleanup, supervision loss and reservation release cannot substitute for that
+fact. Historical schema-ten runs initially lack it. `observeRetainedTerminal` explicitly
+replays their original immutable prefix under the reader cap, then rechecks the same
+association and projection boundary before recording a terminal observation. Ordinary
+projection reads remain observational. Missing or nonterminal evidence records nothing,
+while corrupt, changed or over-budget evidence refuses. A new historical proof resets
+linked receipt eligibility rather than inventing an old inactivity date.
+
+The coordinator can call the bounded event, receipt and capture operations between
+ordinary work. Their continuation keys are scan positions, not permissions or replay
+tickets. There is no background scheduler or remote prune endpoint. Logical quotas do
+not bound arbitrary operator-created files, SQLite journal overhead or total process
+heap usage, and uncertainty may retain charges until new work must refuse.
+
+The Store quotas mode covers current-limit reader admission, actual default event-byte
+saturation, exact accounting, retained batches, domain/history separation and atomic
+floor rollback. Existing draft and command gate entries include receipt/collection
+and preflight-pressure checks. Existing native ingestion and control entries check
+terminal evidence separately from physical cleanup and unresolved cancellation.

@@ -88,12 +88,10 @@ native state leaves unresolved approval/cancellation receipts protected, while
 an independent validated observer/export fixture proves eligible retirement
 without deleting artifact bytes or Runtime history.
 
-The full proposal spans fifteen existing files, with 837 insertions and 60
-deletions. `proposal-corrected.patch`, `correction-result.md` and raw
-`callback-*.meta`/`.log` files record scope and execution. Independent reviewer
-`67b9a224-9e76-46a9-b0ca-03453c000eb5` found no issues and cleared source
-integration in `review.md`. Package acceptance is not established, and no
-WM-021 application integration has occurred.
+The earlier fifteen-file proposal and focused correction are preserved in
+`proposal-corrected.patch`, `correction-result.md` and raw
+`callback-*.meta`/`.log` files. The initial `review.md` clearance preceded the
+owning-gate defect described below and did not establish package acceptance.
 
 Initial local owning validation passed documentation, compiler-parsed source
 boundaries, Runtime capture, the complete Store gate, Commands and Drafts.
@@ -103,25 +101,38 @@ all existing migration assertions, which passed in the next run.
 
 The fresh Artifact gate then failed with `StoreUnavailable` at
 `2026-09-21T04:29:03Z`. Read-only diagnosis established a production composition
-defect: `withRunOutputs` holds the profile/configuration guard while projection
-restoration enters the new reader admission, which tries to acquire the same
-non-reentrant configuration lock. Fail-fast acquisition refuses rather than
-waiting. The original corrupt-result marker and persisted Runtime facts identify
-this call without replay or fixture repair.
+defect: `withRunOutputs` held the profile/configuration guard while projection
+restoration entered reader admission and tried to acquire the same non-reentrant
+configuration lock. Fail-fast acquisition refused rather than waiting. The
+original corrupt-result marker and persisted Runtime facts identified this call
+without replay or fixture repair.
 
-This defect supersedes the earlier clearance as an integration blocker. The
-author stopped without production edits, bypass, retry or wait widening.
-The operator then explicitly approved the production correction. The retained
-author is active in workflow `5eb7e66f-9ad0-4507-b1ff-251a437ed1a7` under
-`composition-fix-brief.md`. The grant covers the minimal existing-owner
-composition fix and affected local checks, preserving quotas, authorization,
-response lifetime, original ownership, exact release and fail-fast behavior.
-It allows no bypass, stale limits, retry, wait widening or new infrastructure.
-Both failed Artifact roots and all successful gate records
-remain in `owning-local`, with the correction handback in
-`owning-local/correction-result.md`. Artifact/History completion, Ingestion,
-Haskell documentation and other-platform execution remain unestablished.
-No WM-021 integration or acceptance occurred.
+The operator approved the production correction. `State.withProfileProjection`
+now acquires the existing current reader scope before the profile/configuration
+guard, authorizes before private replay and retains both through response.
+`Artifacts.withRunOutputs` preserves its original file owner, verification,
+bounds and final authorization. No bypass, stale limits, retry, budget expansion
+or new registry was added.
+
+Current focused composition/quota N1/N8, the full Artifact/History gate, Haskell
+documentation and refreshed compiler-parsed boundaries passed. Ingestion has
+complete source-valid composed coverage: native N1/N8 and two audit modes
+preceded a failed anchor setup, then the remaining four modes passed after a
+context-only anchor correction. The original failed wrapper remains failed.
+Earlier unchanged owning evidence is reused, not relabelled or rerun.
+`composition-result.md` and `composition-checks` retain the exact results.
+
+Continued milestone reviewer `bc4d9b77-b9df-43e2-a123-8ab0bf2f1db2` found no
+issues, cleared the complete seventeen-file proposal and accepted the evidence
+scope in `review-composition.md`. Parent applied only that exact reviewed
+application delta to canonical at `2026-09-21T06:12:41Z`, verifying patch and
+file-byte equality without overlaying stale tracking or frozen records. The
+application delta is 923 insertions and 68 deletions.
+
+WM-021 remains in progress. Other-platform validation and package acceptance
+are not established by these local results, and remote execution is not included
+in the local grant. Accepted milestones remain WM-001–WM-020 and G0, with G1
+open. All original failed roots and reports remain preserved.
 
 ## WM-020 acceptance
 
@@ -453,8 +464,8 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-21T04:56:34Z`. The next active-work deadline is
-`2026-09-21T05:56:34Z`. Continue with WM-021 through existing owners, with no
+Refocus completed at `2026-09-21T05:47:31Z`. The next active-work deadline is
+`2026-09-21T06:47:31Z`. Continue with WM-021 through existing owners, with no
 OS containment or verification-machinery detour. The resumed persistent goal
 still contains older baseline and scope wording. The user's latest correction
 governs current work, and `/goal-tweak` remains available for updating that

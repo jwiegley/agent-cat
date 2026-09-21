@@ -11,7 +11,7 @@ module Agentic.Manager.Commands
     CommandAttempt, newCommandAttempt, newControlCommandAttempt, submitCommandAttempt, submitCommandAttemptWithDeadline, reconcileCommandAttempt, reconcileCommandAttemptWithAdmission, DispatchTicket, dispatchCommandId, submitCommand, submitConfiguredCommand, submitStreamedCommand, commandPreflight, commandPreflightVersion, readCommand,
     BodyBinding, measureCommandBody, bodyBindingBytes, bodyBindingSha256,
     reserveDispatch, reserveDispatchWithAdmission, attemptDispatch, attemptDispatchWithAdmission, attemptControlDispatch, discardControlPayload, discardControlAttempt, recordAcknowledgement, recordEffect, recordEffectWith, recordEffectWithAdmission, recordUnresolved, recordRefusal,
-    recordRuntimeObservation, recordExportObservation, retireReceipt, commandCapacity, tombstoneCapacity
+    recordRuntimeObservation, recordExportObservation, retireReceipt, retainReceipts, requestInactive, commandCapacity, tombstoneCapacity
   ) where
 
 import Agentic.Manager.Authorization
@@ -378,9 +378,15 @@ commandPreflight store proof request action = case validateRequest request of
   Left failure -> pure (Left failure)
   Right () -> configuredCatalogues store proof $ \limits profiles catalogues _ -> transaction store $ do
     (client, _) <- authorizeRequest profiles proof request
-    rows <- sql "SELECT count(*) FROM commands WHERE client_id=? AND method=? AND resource_uri=? AND idempotency_key=?"
+    rows <- sql "SELECT profile_id,operation,retired FROM commands WHERE client_id=? AND method=? AND resource_uri=? AND idempotency_key=?"
       [text client, text (commandMethod request), text (commandResource request), text (commandKey request)]
-    exists <- case rows of [[SQL.SQLInteger count]] -> pure (count /= 0); _ -> throwE StorageUnavailable
+    exists <- case rows of
+      [] -> pure False
+      [[SQL.SQLText profile,SQL.SQLText operation,SQL.SQLInteger retired]] -> do
+        require (profile==commandProfile request && operation==operationName(commandOperation request)) IdempotencyConflict
+        require (retired==0) ReceiptExpired
+        pure True
+      _ -> throwE StorageUnavailable
     lift (action limits catalogues client exists)
 
 -- | Cheap fresh-version refusal, using the same check as final acceptance.
@@ -662,6 +668,82 @@ recordObservation ident revision acknowledgement effect = do
       pure [commandEvent ident revision]
   either refuseTransaction pure result
 
+-- | Proven inactivity of a request and all its actual linked execution obligations.
+-- A lost owner or a released slot is not Runtime terminal evidence.
+requestInactive :: Text -> Transaction Bool
+requestInactive ident = do
+  rows <- query "SELECT q.phase,r.id FROM requests q LEFT JOIN runs r ON r.request_id=q.id WHERE q.id=?" [text ident]
+  case rows of
+    [[SQL.SQLText phase,run]] | phase `elem` ["withdrawn","refused","associated"] -> do
+      execution <- case run of
+        SQL.SQLNull -> pure(phase/="associated")
+        SQL.SQLText value -> runInactive value
+        _ -> refuseTransaction StorageUnavailable
+      obligations <- query "SELECT NOT EXISTS(SELECT 1 FROM reservations WHERE request_id=? AND state!='released') AND NOT EXISTS(SELECT 1 FROM preparations WHERE request_id=? AND state='live')" [text ident,text ident]
+      pending <- query "SELECT NOT EXISTS(SELECT 1 FROM retention_pending_commands WHERE request_id=?)" [text ident]
+      pure(execution && obligations==[[SQL.SQLInteger 1]] && pending==[[SQL.SQLInteger 1]])
+    [[SQL.SQLText _,_]] -> pure False
+    [] -> pure False
+    _ -> refuseTransaction StorageUnavailable
+
+runInactive :: Text -> Transaction Bool
+runInactive ident = do
+  rows <- query "SELECT request_id,terminal_observed,supervision FROM runs WHERE id=?" [text ident]
+  case rows of
+    [[request,SQL.SQLInteger 1,SQL.SQLText supervision]] | supervision `elem` ["lost","observer"] -> do
+      obligations <- query "SELECT NOT EXISTS(SELECT 1 FROM reservations WHERE request_id=? AND state!='released') AND NOT EXISTS(SELECT 1 FROM preparations WHERE request_id=? AND state='live') AND NOT EXISTS(SELECT 1 FROM decisions WHERE run_id=? AND state IN ('pending','submitting')) AND NOT EXISTS(SELECT 1 FROM exports WHERE run_id=? AND (state IS NULL OR state!='published'))" [request,request,text ident,text ident]
+      pending <- query "SELECT NOT EXISTS(SELECT 1 FROM retention_pending_commands WHERE run_id=? OR request_id=?)" [text ident,request]
+      pure(obligations==[[SQL.SQLInteger 1]] && pending==[[SQL.SQLInteger 1]])
+    [[_,SQL.SQLInteger _,SQL.SQLText _]] -> pure False
+    [] -> pure False
+    _ -> refuseTransaction StorageUnavailable
+
+-- | Observe or retire at most 16 receipts after the supplied key. At most thirteen
+-- statements per receipt plus one page query fit the existing 256-statement budget.
+-- Run/request uniqueness bounds linked execution fanout, and contradictory links retain.
+-- The continuation
+-- is a scan position, not execution authority. Unknown historical evidence retains content.
+retainReceipts :: CoordinationStore -> Text -> IO (Either CommandFailure (Maybe Text))
+retainReceipts store after = do
+  revision <- freshId "command_revision_"
+  transaction store $ do
+    rows <- sql "SELECT id,request_id,run_id,preparation_id,decision_id,state,inactive_since FROM commands WHERE retired=0 AND id>? ORDER BY id LIMIT 16" [text after]
+    events <- fmap concat $ forM rows $ \row -> case row of
+      [SQL.SQLText ident,request,run,preparation,decision,SQL.SQLText state,since] -> do
+        requestReady <- case request of SQL.SQLNull -> pure True; SQL.SQLText value -> lift(requestInactive value); _ -> throwE StorageUnavailable
+        runReady <- case run of
+          SQL.SQLNull -> pure True
+          SQL.SQLText value -> lift(runInactive value)
+          _ -> throwE StorageUnavailable
+        other <- sql "SELECT (? IS NULL OR EXISTS(SELECT 1 FROM preparations WHERE id=? AND request_id=? AND state!='live')) AND (? IS NULL OR EXISTS(SELECT 1 FROM decisions WHERE id=? AND run_id=? AND state NOT IN ('pending','submitting'))) AND NOT EXISTS(SELECT 1 FROM exports WHERE command_id=? AND (state IS NULL OR state!='published'))" [preparation,preparation,request,decision,decision,run,text ident]
+        local <- sql "SELECT EXISTS(SELECT 1 FROM retention_local_commands WHERE id=?)" [text ident]
+        let bound=any (/=SQL.SQLNull) [request,run,preparation,decision]
+            ready=bound && (state `elem` ["effect-observed","refused"] || local==[[SQL.SQLInteger 1]]) && requestReady && runReady && other==[[SQL.SQLInteger 1]]
+        if not ready then case since of
+          SQL.SQLNull -> pure []
+          _ -> do
+            lift(execute "UPDATE commands SET inactive_since=NULL WHERE id=?" [text ident])
+            pure[Invalidation "service.changed" "/v1/capabilities" revision]
+        else case since of
+          SQL.SQLNull -> do
+            lift(execute "UPDATE commands SET inactive_since=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?" [text ident])
+            pure[Invalidation "service.changed" "/v1/capabilities" revision]
+          SQL.SQLText stamp -> do
+            eligible <- sql "SELECT julianday(?)<=julianday('now')-30" [text stamp]
+            if eligible==[[SQL.SQLInteger 1]] then do
+              retireContent ident revision
+              pure[commandEvent ident revision]
+            else pure []
+          _ -> throwE StorageUnavailable
+      _ -> throwE StorageUnavailable
+    let next = case reverse rows of (SQL.SQLText ident:_):_ -> Just ident; _ -> Nothing
+    pure(next,events)
+
+retireContent :: Text -> Text -> CommandTx ()
+retireContent ident revision = lift $ execute
+  "UPDATE commands SET retired=1,body=NULL,body_sha256=NULL,body_bytes=NULL,media_type=NULL,precondition=NULL,receipt=NULL,acknowledgement=NULL,effect_evidence=NULL,reserved_bytes=?,revision=? WHERE id=?"
+  [SQL.SQLInteger tombstoneCapacity, text revision, text ident]
+
 -- The owning retention module supplies a real transactional inactivity check for this URI.
 -- There is deliberately no public retire-by-ID operation or default inactivity proof.
 retireReceipt :: CoordinationStore -> Text -> (Text -> Transaction (Maybe Text)) -> IO (Either CommandFailure ())
@@ -679,9 +761,7 @@ retireReceipt store ident inactiveSince
             require (validTimestamp stamp) InvalidRequest
             oldEnough <- sql "SELECT julianday(?)<=julianday('now')-30" [text stamp]
             require (oldEnough == [[SQL.SQLInteger 1]]) StateConflict
-            lift $ execute
-              "UPDATE commands SET retired=1,body=NULL,body_sha256=NULL,body_bytes=NULL,media_type=NULL,precondition=NULL,receipt=NULL,acknowledgement=NULL,effect_evidence=NULL,reserved_bytes=?,revision=? WHERE id=?"
-              [SQL.SQLInteger tombstoneCapacity, text revision, text ident]
+            retireContent ident revision
             pure ((), [commandEvent ident revision])
           _ -> throwE ResourceUnavailable
 

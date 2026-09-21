@@ -12,7 +12,7 @@ import Agentic.Manager.Profile (publicId, publicRevision)
 import qualified Agentic.Manager.Protocol.Command as Command
 import Agentic.Manager.Protocol.Json (decodeStrictValue)
 import Agentic.Manager.Protocol.Artifact (validExportDocument, validExportName)
-import Agentic.Manager.State (RunAssociation (..), authorizeObservation, requireProjection)
+import Agentic.Manager.State (RunAssociation (..), authorizeObservation, withProfileProjection)
 import Agentic.Manager.Store
 import Agentic.Runtime
 import Control.Exception (IOException, SomeException, bracket, fromException, throwIO, try)
@@ -156,9 +156,7 @@ withManagedArtifactDownload store proof ident respond = withStoreFiles store $ \
 -- than pretending that a truncated set is a complete page.
 withRunOutputs :: CoordinationStore -> CredentialProof -> RunAssociation -> ([Value] -> IO ()) -> IO ()
 withRunOutputs store proof association respond = withStoreFiles store $ \root ->
-  withProfile store (associationProfile association) $ do
-    runRead store (authorizeObservation proof association)
-    snapshot <- requireProjection store association
+  withProfileProjection store proof association $ \snapshot -> do
     artifact <- runRead store $ do
       authorizeObservation proof association
       rows <- query "SELECT result_artifact_id FROM runs WHERE id=?" [text (associationRun association)]

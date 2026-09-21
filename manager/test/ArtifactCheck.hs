@@ -7,15 +7,16 @@ import Agentic.Manager.Protocol.Artifact (validExportDocument)
 import Agentic.Manager.Authorization
 import qualified Agentic.Manager.Commands as Commands
 import Agentic.Manager.Configuration
+import Agentic.Manager.Profile (Diagnostic (..))
 import qualified Agentic.Manager.Protocol.Command as Command
 import Agentic.Manager.State
 import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration)
 import Agentic.Manager.Store
 import Agentic.Runtime hiding (Checkpoint)
-import Control.Concurrent.Async (async, concurrently, wait)
+import Control.Concurrent.Async (AsyncCancelled (..), async, cancel, concurrently, wait, waitCatch, withAsync)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
-import Control.DeepSeq (NFData)
-import Control.Exception (IOException, bracket, try)
+import Control.DeepSeq (NFData, force)
+import Control.Exception (IOException, bracket, evaluate, fromException, throwIO, try)
 import Control.Monad (forM_, unless, void)
 import Crypto.Hash (Digest, SHA256, hash)
 import Data.Aeson (Value (..), object, (.=), eitherDecodeStrict')
@@ -23,6 +24,7 @@ import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KM
 import Data.ByteArray (convert)
 import Data.Foldable (toList)
+import Data.IORef (newIORef, readIORef, writeIORef)
 import qualified Data.ByteString as BS
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -37,7 +39,113 @@ import System.Posix.Files (createSymbolicLink, setFileMode)
 main :: IO ()
 main = do
   hSetBuffering stdout LineBuffering
-  [work,source] <- getArgs
+  args <- getArgs
+  case args of
+    ["retention",work] -> retentionChecks work
+    ["composition",work] -> compositionChecks work
+    [work,source] -> do
+      createDirectory(work </> "composition")
+      compositionChecks(work </> "composition")
+      createDirectory(work </> "retention")
+      retentionChecks(work </> "retention")
+      artifactChecks work source
+    _ -> error "usage: manager-artifact-check [retention|composition] PRIVATE_DIRECTORY [PACKAGE_DIRECTORY]"
+
+compositionChecks :: FilePath -> IO ()
+compositionChecks work = do
+  (config,_) <- fixture work
+  withInstalled config $ \installed -> withCoordinationStore installed $ \store -> do
+    seed store
+    proof <- authenticateCredential store bearer >>= right
+    (association,reference,directory) <- sourceRun store
+    ingest store association reference
+    entered <- newIORef False
+    let outputs = withRunOutputs store proof association
+        refused label action = do
+          outcome <- try @StoreFailure (void action)
+          check label (outcome == Left StoreLimit)
+        verified = outputs $ \items -> check "charged profile projection returns verified output"
+          (field "state" (field "verification" (last items)) == String "verified")
+    withStoreReader store $ do
+      verified
+      withStoreReader store $ do
+        refused "output quota refuses before response" (outputs (\_ -> writeIORef entered True))
+        refused "standalone restoration shares reader quota" (restoreRunProjection store association)
+        refused "historical terminal observation shares reader quota" (observeRetainedTerminal store association)
+        refused "ingestion shares reader quota" (ingest store association reference)
+      readIORef entered >>= check "quota refusal never enters output callback" . not
+      document <- BS.readFile config >>= right . eitherDecodeStrict'
+      case document of
+        Object fields | Just(Object limits) <- KM.lookup "limits" fields ->
+          BS.writeFile config (Command.encoded (Object(KM.insert "limits" (Object(KM.insert "globalDatabaseReaders" (Number 1) limits)) fields)))
+        _ -> error "configuration fixture shape"
+      replacement <- loadConfiguration (\args -> if null args then Right () else error "unexpected target") exactPreparedTarget (const False) config >>= right
+      void (reloadConfiguration installed replacement >>= right)
+      refused "output uses current lowered global quota" (outputs (\_ -> error "stale reader allowance"))
+    outputs $ \_ -> do
+      locked <- withStoreConfiguration store (\_ _ -> pure ())
+      check "profile configuration remains held through response" (locked == Left SupervisionUnavailable)
+      files <- try @StoreFailure (withStoreFiles store (\_ -> pure ()))
+      check "original file owner remains held through response" (files == Left StoreBusy)
+    failed <- try @StoreFailure (outputs (\_ -> throwIO StoreIntegrity))
+    check "response failure remains original failure" (failed == Left StoreIntegrity)
+    verified
+    ready <- newEmptyMVar
+    blocked <- newEmptyMVar
+    withAsync (outputs (\_ -> putMVar ready () >> takeMVar blocked)) $ \reader -> do
+      takeMVar ready
+      cancel reader
+      outcome <- waitCatch reader
+      check "response interruption joins original reader" (case outcome of Left failure -> fromException failure == Just AsyncCancelled; _ -> False)
+    verified
+    original <- BS.readFile (directory </> "result.json")
+    BS.writeFile (directory </> "result.json") "corrupt"
+    outputs $ \items -> check "charged profile projection reports unavailable output"
+      (field "state" (field "verification" (last items)) == String "unavailable")
+    BS.writeFile (directory </> "result.json") original
+    verified
+    absent <- try @Command.CommandFailure (withRunOutputs store proof (association {associationProfile="profile_missing"}) (\_ -> error "absent profile response"))
+    check "current profile membership still required" (absent == Left Command.Forbidden)
+    verified
+    mutate store (execute "DELETE FROM credential_scopes WHERE credential_id='credential_1'" [])
+    denied <- try @Command.CommandFailure (outputs (\_ -> error "unauthorized output response"))
+    check "current client authorization still required" (denied == Left Command.Forbidden)
+    withStoreReader store (check "authorization failure releases sole reader capacity" True)
+
+retentionChecks :: FilePath -> IO ()
+retentionChecks work = do
+  (config,_) <- fixture work
+  withInstalled config $ \installed -> withCoordinationStore installed $ \store -> do
+    (association,reference,_) <- sourceRun store
+    seed store
+    proof <- authenticateCredential store bearer >>= right
+    ingest store association reference
+    scalar store "SELECT CAST(terminal_observed AS TEXT) FROM runs" >>= check "independent observer prefix has shared validated Runtime terminal evidence" . (=="1")
+    exportRequest <- request store association "retention" "retained.json"
+    submitted <- submitExport store proof association exportRequest >>= right
+    let ident=Command.receiptId(Commands.submissionReceipt submitted)
+        exportId="export_"<>ident
+    scalar store "SELECT state FROM commands" >>= check "actual export owner records its independent completed effect" . (=="effect-observed")
+    public <- readExport store proof exportId
+    let artifact=T.drop(T.length "/v1/artifacts/")(string(field "download" public))
+    original <- newIORef Nothing
+    withArtifactDownload store proof artifact $ \_ bytes -> do
+      digest <- evaluate(force(convert(hash bytes :: Digest SHA256) :: BS.ByteString))
+      writeIORef original (Just digest)
+    void(Commands.retainReceipts store "" >>= right)
+    scalar store "SELECT CAST(count(*) AS TEXT) FROM commands WHERE inactive_since IS NOT NULL AND retired=0" >>= check "terminal linked resource without unresolved work begins real inactivity observation" . (=="1")
+    mutate store(execute "UPDATE commands SET inactive_since='2000-01-01T00:00:00Z'" [])
+    void(Commands.retainReceipts store "" >>= right)
+    receipt <- Commands.readCommand store proof ident
+    check "completed linked-run receipt expires only after full observed interval" (case receipt of Left Command.ReceiptExpired -> True; _ -> False)
+    withArtifactDownload store proof artifact $ \_ bytes -> do
+      digest <- evaluate(force(convert(hash bytes :: Digest SHA256) :: BS.ByteString))
+      expected <- readIORef original
+      check "receipt retirement preserves independently referenced artifact bytes" (Just digest==expected)
+    scalar store "SELECT CAST(count(*) AS TEXT) FROM ingestions" >>= check "receipt retirement retains original Runtime history" . (/="0")
+
+artifactChecks :: FilePath -> FilePath -> IO ()
+artifactChecks work source = do
   migrationChecks work
   reviewRegressions (work </> "review")
   documents <- documentFixtures source
@@ -301,7 +409,8 @@ migrationChecks work = do
     SQL.exec db "DROP VIEW migration_fault"
   withInstalled config $ \installed -> withCoordinationStore installed $ \store -> do
     identity <- storeIdentity store
-    check "populated schema7 upgrades through schema8 to schema9" (storeSchemaVersion identity==schemaVersion && schemaVersion==9)
+    current <- runRead store ((==[[SQL.SQLInteger(fromIntegral schemaVersion)]]) <$> query "SELECT user_version FROM pragma_user_version" [])
+    check "populated schema7 upgrades to current schema" (storeSchemaVersion identity==schemaVersion && current)
     preserved <- runRead store ((==original) <$> query "SELECT * FROM exports ORDER BY id" [])
     check "published and unresolved export rows retained byte-for-byte" preserved
     before <- scalar store "SELECT sequence FROM service_metadata"

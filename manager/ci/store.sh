@@ -9,7 +9,8 @@ bash test/cabal.sh build manager-store-check --ghc-options=-Werror
 runner=$(bash test/cabal.sh list-bin manager-store-check)
 work=$(mktemp -d "$CABAL_BUILDDIR/manager-store.XXXXXX")
 for capabilities in N1 N8; do
-  mkdir "$work/$capabilities" "$work/restart-$capabilities"
+  mkdir "$work/$capabilities" "$work/restart-$capabilities" "$work/quotas-$capabilities"
+  "$runner" quotas "$work/quotas-$capabilities" +RTS "-$capabilities" -RTS 2>&1 | tee "$work/quotas-$capabilities.log"
   "$runner" restart "$work/restart-$capabilities" +RTS "-$capabilities" -RTS 2>&1 | tee "$work/restart-$capabilities.log"
   echo "manager storage checks -$capabilities"
   "$runner" "$work/$capabilities" +RTS "-$capabilities" -RTS 2>&1 | tee "$work/$capabilities.log"

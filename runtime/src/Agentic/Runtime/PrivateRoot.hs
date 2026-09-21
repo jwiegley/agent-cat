@@ -38,6 +38,7 @@ module Agentic.Runtime.PrivateRoot
     publishPrivateCaptureAt,
     movePrivateAt,
     removePrivateFileAt,
+    removePrivateFileDurablyAt,
     removePrivateDirectoryAt,
   )
 where
@@ -460,11 +461,24 @@ movePrivateAt root oldComponents newComponents =
 removePrivateFileAt :: PrivateRoot -> [FilePath] -> IO ()
 removePrivateFileAt root components = unlinkPrivateAt root components 0
 
+-- | Unlink and synchronize the same retained parent, then revalidate its chain.
+-- Absence still requires synchronization. An exception is not durable completion.
+removePrivateFileDurablyAt :: PrivateRoot -> [FilePath] -> IO ()
+removePrivateFileDurablyAt root components =
+  withCaptureParents root components $ \parents parent file -> do
+    assertCaptureParents root parents
+    unlinkEntryAt parent file 0
+    syncDescriptor parent
+    assertCaptureParents root parents
+
 removePrivateDirectoryAt :: PrivateRoot -> [FilePath] -> IO ()
 removePrivateDirectoryAt root components = unlinkPrivateAt root components atRemovedir
 
 unlinkPrivateAt :: PrivateRoot -> [FilePath] -> CInt -> IO ()
-unlinkPrivateAt root components flags = withParent root components $ \(Fd descriptor) name -> do
+unlinkPrivateAt root components flags = withParent root components $ \parent name -> unlinkEntryAt parent name flags
+
+unlinkEntryAt :: Fd -> FilePath -> CInt -> IO ()
+unlinkEntryAt (Fd descriptor) name flags = do
   result <- withCString name (\path -> c_unlinkat descriptor path flags)
   when (result == -1) $ do
     errno <- getErrno

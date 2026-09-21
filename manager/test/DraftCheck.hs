@@ -4,7 +4,7 @@
 module Main (main) where
 
 import Agentic.Manager.Authorization
-import Agentic.Manager.Commands (measureCommandBody, bodyBindingBytes, bodyBindingSha256)
+import Agentic.Manager.Commands (measureCommandBody, bodyBindingBytes, bodyBindingSha256, retainReceipts)
 import Agentic.Manager.Configuration
 import Agentic.Manager.Drafts
 import Agentic.Manager.Profile hiding (StaleRevision)
@@ -14,17 +14,17 @@ import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration
 import Agentic.Manager.Store
 import Agentic.Runtime
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async (AsyncCancelled (..), async, cancel, waitCatch, wait, poll)
+import Control.Concurrent.Async (AsyncCancelled (..), async, cancel, waitCatch, wait, poll, withAsync)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.DeepSeq (NFData)
-import Control.Exception (bracket, fromException, try)
+import Control.Exception (IOException, bracket, fromException, try)
 import Control.Monad (forM_, unless, void)
 import Crypto.Hash (Digest, SHA256, hash)
 import Data.Aeson (FromJSON (parseJSON), eitherDecodeStrict', object, withObject, (.:), (.=))
 import Data.Either (isRight)
 import Data.ByteArray (convert)
 import qualified Data.ByteString as BS
-import Data.IORef (atomicModifyIORef', newIORef, modifyIORef', readIORef)
+import Data.IORef (atomicModifyIORef', newIORef, modifyIORef', readIORef, writeIORef)
 import Data.Int (Int64)
 import Data.List (find)
 import Data.Text (Text)
@@ -58,7 +58,12 @@ main = do
     ["review-migration",work] -> declarationMigrationChecks work
     ["review-holding",work,source] -> holdingByteChecks work source
     ["review-utf8-eof",work,source] -> uploadChecks work source
+    ["retention",work,source] -> retentionChecks work source >> retentionPageChecks work source >> retentionFaultChecks work source >> retentionUploaderChecks work source
     [work,source] -> do
+      retentionChecks work source
+      retentionPageChecks work source
+      retentionFaultChecks work source
+      retentionUploaderChecks work source
       literalContract
       bindingContract
       corpusChecks source
@@ -158,6 +163,140 @@ rowsEqual :: CoordinationStore -> Text -> [[SQL.SQLData]] -> IO Bool
 rowsEqual store sql expected=runRead store((==expected)<$>query sql [])
 txt :: Text -> SQL.SQLData
 txt=SQL.SQLText
+
+retentionChecks :: FilePath -> FilePath -> IO ()
+retentionChecks work source = withFixture work source "retention" 10 20 67108864 $ \fixture@(Fixture _ root _ _ _ store proof _ _) -> do
+  view <- newDraft fixture "create"
+  nonce <- key store "capture"
+  let content="retained UTF-8 input\r\n"
+  input <- chunks [content]
+  capture <- uploadCapture store proof (draftId view) nonce 64 input >>= right
+  let ident=captureId capture
+      capturePath=root </> "captures" </> T.unpack ident
+      scanReceipts=void(retainReceipts store "" >>= right)
+      scanCaptures=void(collectCaptures store "" >>= right)
+      phase value=mutate store(execute "UPDATE requests SET phase=?,revision=? WHERE id=?" [txt value,txt value,txt(draftId view)])
+  number store "SELECT count(*) FROM retention_local_commands" >>= check "original local create/capture commits are recognized without receipt rewriting" . (==2)
+  scanReceipts
+  number store "SELECT count(*) FROM commands WHERE inactive_since IS NULL" >>= check "active resources retain every original receipt" . (==2)
+  phase "withdrawn"
+  scanReceipts
+  number store "SELECT count(*) FROM commands WHERE inactive_since IS NOT NULL AND retired=0" >>= check "inactive no-run resources start thirty-day observation without invented Runtime evidence" . (==2)
+  mutate store(execute "UPDATE captures SET client_id='client_2' WHERE id=?" [txt ident])
+  scanReceipts
+  number store "SELECT count(*) FROM commands WHERE inactive_since IS NULL" >>= check "mismatched original capture association remains uncertain" . (==2)
+  mutate store(execute "UPDATE captures SET client_id='client_1' WHERE id=?" [txt ident])
+  captureCommand <- runRead store $ do
+    rows <- query "SELECT command_id FROM command_captures WHERE capture_id=?" [txt ident]
+    case rows of [[SQL.SQLText value]] -> pure value; _ -> refuseTransaction StoreIntegrity
+  mutate store(execute "DELETE FROM command_captures WHERE command_id=?" [txt captureCommand])
+  scanReceipts
+  number store "SELECT count(*) FROM commands WHERE inactive_since IS NULL" >>= check "missing local completion association cannot authorize retirement" . (==2)
+  mutate store(execute "INSERT INTO command_captures VALUES (?,?)" [txt captureCommand,txt ident])
+  scanReceipts
+  mutate store(execute "UPDATE commands SET inactive_since='2000-01-01T00:00:00Z'" [])
+  phase "draft"
+  scanReceipts
+  number store "SELECT count(*) FROM commands WHERE inactive_since IS NULL AND retired=0" >>= check "renewed resource activity resets receipt eligibility" . (==2)
+  phase "withdrawn"
+  scanReceipts
+  number store "SELECT count(*) FROM commands WHERE retired=0" >>= check "fresh observation cannot reuse a previous aged interval" . (==2)
+  mutate store(execute "UPDATE commands SET inactive_since='2000-01-01T00:00:00Z'" [])
+  scanReceipts
+  number store "SELECT count(*) FROM commands WHERE retired=1 AND state='accepted' AND receipt IS NULL AND body_sha256 IS NULL" >>= check "elapsed inactive receipts become non-content tombstones without rewriting accepted state" . (==2)
+  sourceEntered <- newIORef False
+  expect "expired upload key refuses before reading bytes" ReceiptExpired (uploadCapture store proof (draftId view) nonce 64 (writeIORef sourceEntered True >> pure content))
+  readIORef sourceEntered >>= check "tombstone prevents old content allocation or replay" . not
+  withStoreFiles store $ \owner -> writePrivateExclusiveAt owner ["captures","unknown"] "unknown provenance"
+  scanCaptures
+  BS.readFile capturePath >>= check "first proven capture eligibility starts grace without deletion" . (==content)
+  mutate store(execute "UPDATE captures SET collection_since=unixepoch()-86401" [])
+  ready <- newEmptyMVar
+  release <- newEmptyMVar
+  withAsync (withStoreFiles store $ \_ -> do
+    putMVar ready ()
+    await(takeMVar release)
+    mutate store(execute "UPDATE request_inputs SET source='capture',capture_id=? WHERE request_id=? AND name='first'" [txt ident,txt(draftId view)])) $ \binder -> do
+      await(takeMVar ready)
+      expect "original binding owner excludes collection" StorageUnavailable (collectCaptures store "")
+      putMVar release ()
+      wait binder
+  rowsEqual store "SELECT collection_since IS NULL FROM captures" [[SQL.SQLInteger 1]] >>= check "new capture reference resets proven eligibility"
+  scanCaptures
+  BS.readFile capturePath >>= check "referenced capture survives collection" . (==content)
+  mutate store(execute "UPDATE request_inputs SET source=NULL,capture_id=NULL WHERE request_id=? AND name='first'" [txt(draftId view)])
+  scanCaptures
+  BS.readFile capturePath >>= check "removed reference requires another full capture grace" . (==content)
+  mutate store(execute "UPDATE captures SET collection_since=unixepoch()-86401" [])
+  scanCaptures
+  doesFileExist capturePath >>= check "proven unreferenced capture is unlinked after grace" . not
+  number store "SELECT count(*) FROM captures" >>= check "collected metadata is removed" . (==0)
+  number store "SELECT count(*) FROM capture_uploads" >>= check "confirmed unlink releases retained quota claim" . (==0)
+  BS.readFile(root </> "captures" </> "unknown") >>= check "unknown provenance remains untouched" . (=="unknown provenance")
+  number store "SELECT count(*) FROM commands WHERE retired=1" >>= check "collection cannot delete lifetime replay tombstones" . (==2)
+  putStrLn "PASS manager receipt retention and reference-safe collection"
+
+retentionPageChecks :: FilePath -> FilePath -> IO ()
+retentionPageChecks work source = withFixture work source "retention-page" 32 32 67108864 $ \fixture@(Fixture _ _ _ _ _ store _ _ _) -> do
+  forM_ [1..16 :: Int] $ \index -> void(newDraft fixture (T.pack(show index)))
+  mutate store(execute "UPDATE requests SET phase='withdrawn',revision='withdrawn'" [])
+  boundary <- retainReceipts store "" >>= right
+  number store "SELECT count(*) FROM commands WHERE inactive_since IS NOT NULL AND retired=0" >>= check "full sixteen-receipt page observes every original resource within Store budget" . (==16)
+  mutate store(execute "UPDATE commands SET inactive_since='2000-01-01T00:00:00Z'" [])
+  void(retainReceipts store "" >>= right)
+  number store "SELECT count(*) FROM commands WHERE retired=1 AND reserved_bytes=16384" >>= check "full page retires content but preserves all charged key tombstones" . (==16)
+  case boundary of
+    Just lastKey -> retainReceipts store lastKey >>= right >>= check "retention continuation completes without truncating the page" . (==Nothing)
+    Nothing -> error "missing full-page continuation"
+
+retentionFaultChecks :: FilePath -> FilePath -> IO ()
+retentionFaultChecks work source = withFixture work source "retention-fault" 10 20 67108864 $ \fixture@(Fixture _ root _ _ _ store proof _ _) -> do
+  view <- newDraft fixture "create"
+  nonce <- key store "capture"
+  input <- chunks ["durable collection"]
+  capture <- uploadCapture store proof (draftId view) nonce 64 input >>= right
+  mutate store(execute "UPDATE requests SET phase='withdrawn',revision='withdrawn'" [])
+  void(retainReceipts store "" >>= right)
+  mutate store(execute "UPDATE commands SET inactive_since='2000-01-01T00:00:00Z'" [])
+  void(retainReceipts store "" >>= right)
+  void(collectCaptures store "" >>= right)
+  mutate store(execute "UPDATE captures SET collection_since=unixepoch()-86401" [])
+  armFailure 1
+  expect "directory sync failure refuses collection completion" StorageUnavailable (collectCaptures store "")
+  failureFired >>= check "durable unlink uses actual directory barrier seam" . (==1)
+  doesFileExist(root </> "captures" </> T.unpack(captureId capture)) >>= check "unlink visibility alone is not durable cleanup proof" . not
+  rowsEqual store "SELECT state,reserved_bytes,published_bytes,published_sha256 FROM capture_uploads"
+    [[txt "orphan",SQL.SQLInteger(captureBytes capture),SQL.SQLInteger(captureBytes capture),txt(captureDigest capture)]] >>= check "uncertain directory barrier retains original provenance and quota charge"
+  withStoreFiles store $ \owner -> do
+    armFailure 1
+    absent <- try @IOException(removePrivateFileDurablyAt owner ["captures","never-published"])
+    check "already-absent removal still requires directory synchronization" (case absent of Left _ -> True; _ -> False)
+    failureFired >>= check "absent entry does not bypass the real barrier" . (==1)
+    armFailure 0
+    writePrivateExclusiveAt owner ["captures","ordinary-remove"] "ordinary"
+    armFailure 1
+    removePrivateFileAt owner ["captures","ordinary-remove"]
+    failureFired >>= check "ordinary removal semantics acquire no new barrier" . (==0)
+    armFailure 0
+  number store "SELECT count(*) FROM capture_uploads" >>= check "absence and unrelated cleanup never release an uncertain original claim" . (==1)
+
+retentionUploaderChecks :: FilePath -> FilePath -> IO ()
+retentionUploaderChecks work source = withFixture work source "retention-uploader" 10 20 67108864 $ \fixture@(Fixture _ _ _ _ _ store _ _ _) -> do
+  view <- newDraft fixture "create"
+  uploader <- authenticateCredential store secondBearer >>= right
+  nonce <- key store "capture"
+  input <- chunks ["other authorized uploader"]
+  capture <- uploadCapture store uploader (draftId view) nonce 64 input >>= right
+  rowsEqual store "SELECT r.client_id,p.client_id,c.client_id FROM captures p JOIN requests r ON r.id=p.request_id JOIN command_captures l ON l.capture_id=p.id JOIN commands c ON c.id=l.command_id"
+    [[txt "client_1",txt "client_2",txt "client_2"]] >>= check "original capture uploader is independent of request creator"
+  mutate store(execute "UPDATE requests SET phase='withdrawn',revision='withdrawn'" [])
+  void(retainReceipts store "" >>= right)
+  number store "SELECT count(*) FROM commands WHERE inactive_since IS NOT NULL" >>= check "actual cross-client local completion is eligible under original associations" . (==2)
+  mutate store(execute "UPDATE commands SET inactive_since='2000-01-01T00:00:00Z'" [])
+  void(retainReceipts store "" >>= right)
+  expect "uploader tombstone still rejects its own expired capture retry" ReceiptExpired (uploadCapture store uploader (draftId view) nonce 64 (pure BS.empty))
+  number store "SELECT count(*) FROM captures" >>= check "receipt retirement alone never deletes captured content" . (==1)
+  check "capture retains its original request" (captureRequest capture==draftId view)
 
 literalContract :: IO ()
 literalContract=forM_ ["","x","x\r\n","x\n","雪λ"] $ \value->do
