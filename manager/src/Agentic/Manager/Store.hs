@@ -7,20 +7,20 @@
 -- | A single leased SQLite writer with strict, bounded transaction results.
 module Agentic.Manager.Store
   ( CoordinationStore, StoreIdentity (..), StoreFailure (..), Checkpoint (..),
-    withCoordinationStore, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreFiles, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, requestStoreWorkersStop, awaitStoreWorkersStop, retryStoreCleanup, probeStoreCapabilities,
+    withCoordinationStore, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreFiles, withStoreReader, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, requestStoreWorkersStop, awaitStoreWorkersStop, retryStoreCleanup, probeStoreCapabilities,
     CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, enforceAdmissionFence, Transaction, execute, query, refuseTransaction, runTransaction, runRead, StoreAdmission (..), runTransactionWithAdmission, runReadWithAdmission, transactionGeneration,
-    Invalidation (..), backupCoordinationStore, restoreCoordinationStore, reservationOccupancy
+    Invalidation (..), EventReadFailure (..), RetainedEvents (..), readRetainedEvents, retainEvents, backupCoordinationStore, restoreCoordinationStore, reservationOccupancy
   ) where
 
 import Agentic.Manager.Store.Admission (StoreAdmission (..))
 import qualified Agentic.Manager.Store.Admission as Admission
 import Agentic.Manager.Configuration
   (InstalledConfiguration, acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationSnapshot, withConfigurationCatalogues, withConfiguredRetentionRoot, validateHistoryBindings, revalidateRetentionRoot, configuredInvocations, probeConfiguredCapabilities)
-import Agentic.Manager.Profile (ConfigurationLimits, PublicProfile, Diagnostic, Discovery)
+import Agentic.Manager.Profile (ConfigurationLimits (..), PublicProfile, Diagnostic, Discovery)
 import Agentic.Manager.Worker.State (WorkerLifecycle, acceptingPreparation)
 import Agentic.Manager.Lease (duplicateLease)
 import Agentic.Manager.Root (validateRootSeparation)
-import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration, artifactMigration, historyMigration, restartMigration)
+import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration, artifactMigration, historyMigration, restartMigration, retentionMigration)
 import Agentic.Runtime
   (PrivateRoot, assertPrivateRoot, closePrivateRoot, openPrivateSubroot, privateRootPath,
    openPrivateRoot, privateRootIdentity, readPrivateFileAt, ensurePrivateDirectoryAt, removePrivateFileAt,
@@ -35,7 +35,7 @@ import Control.Exception
   (Exception, SomeException, bracket, bracketOnError, finally, mask,
    evaluate, uninterruptibleMask_, throwIO, try, onException, catch, fromException)
 import Control.Monad (unless, when, void, foldM, forM, forM_, forever)
-import Control.DeepSeq (NFData, force)
+import Control.DeepSeq (NFData (..), force)
 import Crypto.Hash (Digest, SHA256, hashInit, hashUpdate, hashFinalize)
 import qualified Crypto.Hash as Hash
 import Data.ByteArray (convert)
@@ -93,7 +93,7 @@ data Checkpoint = Checkpoint
 -- | One connection and admission cell. Ordinary calls fail fast, terminal-owner
 -- persistence can spend its existing operation allowance waiting for the cell.
 data CoordinationStore = CoordinationStore !InstalledConfiguration !PrivateRoot !SQL.Database !StoreIdentity
-  !(MVar ()) !(IORef Bool) !(IORef Bool) !Fd !(MVar ()) !(TVar WorkerRegistry) !(MVar ()) !(IORef Bool) !(TVar (Bool, Maybe (TMVar (), MVar ())))
+  !(MVar ()) !(IORef Bool) !(IORef Bool) !Fd !(MVar (), TVar Int) !(TVar WorkerRegistry) !(MVar ()) !(IORef Bool) !(TVar (Bool, Maybe (TMVar (), MVar ())))
 
 -- | Original registrations and their first stop batch. A scoped fence is not permanent quarantine.
 data WorkerRegistry = WorkerRegistry
@@ -158,7 +158,7 @@ openStore restart installed root lease = storageErrors $ do
     (epoch, stream) <- bounded db 30000000 $ do
       SQL.exec db "PRAGMA busy_timeout=100; PRAGMA foreign_keys=ON; PRAGMA temp_store=FILE; PRAGMA cache_size=-2048; PRAGMA temp.cache_size=-2048"
       version <- scalar db "PRAGMA user_version"
-      unless (version `elem` map SQL.SQLInteger [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, fromIntegral schemaVersion]) $
+      unless (version `elem` map SQL.SQLInteger [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, fromIntegral schemaVersion]) $
         throwIO StoreVersion
       unless(restart || version==SQL.SQLInteger(fromIntegral schemaVersion))(throwIO StoreVersion)
       -- Newer versions are refused before changing their journal or schema.
@@ -172,7 +172,7 @@ openStore restart installed root lease = storageErrors $ do
         [[SQL.SQLText epoch, SQL.SQLText stream]] -> pure (epoch, stream)
         _ -> throwIO StoreIntegrity
     CoordinationStore installed root db (StoreIdentity schemaVersion epoch stream generation)
-      <$> newMVar () <*> newIORef False <*> newIORef False <*> pure lease <*> newMVar () <*> newTVarIO (WorkerRegistry False False Nothing []) <*> newMVar () <*> newIORef False <*> newTVarIO (False, Nothing)
+      <$> newMVar () <*> newIORef False <*> newIORef False <*> pure lease <*> ((,) <$> newMVar () <*> newTVarIO 0) <*> newTVarIO (WorkerRegistry False False Nothing []) <*> newMVar () <*> newIORef False <*> newTVarIO (False, Nothing)
   where
     databaseName = "coordination.sqlite3"
     checkCompanion name = do
@@ -461,6 +461,7 @@ migrate db = mask $ \restore -> do
       SQL.SQLInteger 7 -> pure ()
       SQL.SQLInteger 8 -> pure ()
       SQL.SQLInteger 9 -> pure ()
+      SQL.SQLInteger 10 -> pure ()
       SQL.SQLInteger current | current == fromIntegral schemaVersion -> pure ()
       _ -> throwIO StoreVersion
     when (version `elem` [SQL.SQLInteger 0, SQL.SQLInteger 1]) $ do
@@ -490,9 +491,12 @@ migrate db = mask $ \restore -> do
     when (version `elem` map SQL.SQLInteger [0,1,2,3,4,5,6,7,8]) $ do
       mapM_ (SQL.exec db) historyMigration
       SQL.exec db "PRAGMA user_version=9"
-    when (version /= SQL.SQLInteger (fromIntegral schemaVersion)) $ do
+    when (version `elem` map SQL.SQLInteger [0,1,2,3,4,5,6,7,8,9]) $ do
       mapM_ (SQL.exec db) restartMigration
       SQL.exec db "PRAGMA user_version=10"
+    when (version /= SQL.SQLInteger (fromIntegral schemaVersion)) $ do
+      mapM_ (SQL.exec db) retentionMigration
+      SQL.exec db "PRAGMA user_version=11"
     SQL.exec db "COMMIT"
   case result of
     Right () -> pure ()
@@ -542,7 +546,7 @@ migrateLiteralDigests db after = do
 
 
 closeStore :: CoordinationStore -> IO ()
-closeStore store@(CoordinationStore installed root db _ gate closed poisoned lease files workers closing retired admission) =
+closeStore store@(CoordinationStore installed root db _ gate closed poisoned lease (files,_) workers closing retired admission) =
   uninterruptibleMask_ $ withMVar closing $ \_ -> do
     already <- readIORef retired
     unless already $ do
@@ -637,7 +641,7 @@ withStoreRetentionRoot store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ 
   withStoreFiles store $ \_ -> withConfiguredRetentionRoot installed path profile action
 
 withStoreFiles :: CoordinationStore -> (PrivateRoot -> IO a) -> IO a
-withStoreFiles store@(CoordinationStore _ root _ _ _ closed _ lease files _ _ _ _) action = mask $ \restore -> do
+withStoreFiles store@(CoordinationStore _ root _ _ _ closed _ lease (files,_) _ _ _ _) action = mask $ \restore -> do
   readIORef closed >>= \done -> when done (throwIO StoreClosed)
   acquired <- tryTakeMVar files
   case acquired of
@@ -648,6 +652,17 @@ withStoreFiles store@(CoordinationStore _ root _ _ _ closed _ lease files _ _ _ 
       copied <- duplicateLease lease
       pure (retained, copied)
     release (retained, copied) = closePrivateRoot retained `finally` closeFd copied
+
+-- | A bounded materialization lifetime at the existing file/read owner. Acquisition
+-- uses current configuration, but neither configuration nor SQL is held by a reader.
+withStoreReader :: CoordinationStore -> IO a -> IO a
+withStoreReader store@(CoordinationStore _ _ _ _ _ _ _ _ (_,readers) _ _ _ _) action = mask $ \restore -> do
+  result <- withStoreConfiguration store $ \limits _ -> admitted store $ atomically $ do
+    count <- readTVar readers
+    when (count>=limitGlobalDatabaseReaders limits) (throwSTM StoreLimit)
+    writeTVar readers (count+1)
+  either (const(throwIO StoreUnavailable)) pure result
+  restore action `finally` atomically(modifyTVar' readers (subtract 1))
 
 -- | One admission owner, separate from the physical worker registration ceiling.
 withStoreAdmission :: CoordinationStore -> (STM Bool -> IO a) -> IO a
@@ -953,8 +968,90 @@ appendInvalidation db (Invalidation kind uri revision) = do
       _ -> throwIO StoreLimit
     _ -> throwIO StoreIntegrity
   rawExecute db "UPDATE service_metadata SET sequence=? WHERE singleton=1" [SQL.SQLText sequenceNumber]
-  rawExecute db "INSERT INTO invalidations SELECT stream_id,sequence,?,?,? FROM service_metadata WHERE singleton=1"
+  rawExecute db "INSERT INTO invalidations(stream_id,sequence,kind,resource_uri,revision,recorded_at) SELECT stream_id,sequence,?,?,?,unixepoch() FROM service_metadata WHERE singleton=1"
     [SQL.SQLText kind, SQL.SQLText uri, SQL.SQLText revision]
+  _ <- trimEvents db
+  bytes <- scalar db "SELECT event_bytes FROM service_metadata WHERE singleton=1"
+  case bytes of
+    SQL.SQLInteger size | size <= 268435456 -> pure ()
+    _ -> throwIO StoreLimit
+
+-- | Distinct cursor refusals. None authorizes silent replay past a missing prefix.
+data EventReadFailure = WrongEventStream | EventRetentionLost | EventCursorAhead deriving (Eq, Show)
+instance NFData EventReadFailure where rnf failure = failure `seq` ()
+
+-- | One complete bounded prefix after a cursor, observed at a single SQLite snapshot.
+data RetainedEvents = RetainedEvents
+  { retainedStream :: !Text, retainedFloor :: !Word64, retainedHighWater :: !Word64,
+    retainedEvents :: ![(Word64, Text, Text, Text)]
+  } deriving (Eq, Show)
+instance NFData RetainedEvents where
+  rnf (RetainedEvents stream floorKey high events) = rnf (stream,floorKey,high,events)
+
+-- | Advance at most 256 events per call. The caller can continue bounded maintenance
+-- without holding a read transaction or a client connection between calls.
+retainEvents :: CoordinationStore -> IO Int
+retainEvents store = runTransaction store $ Transaction $ \(Context db _ _ _ _ _ _) -> do
+  count <- trimEvents db
+  pure (count, [])
+
+trimEvents :: SQL.Database -> IO Int
+trimEvents db = do
+  values <- rawRows db "SELECT event_bytes,unixepoch() FROM service_metadata WHERE singleton=1" []
+  (used,now) <- case values of
+    [[SQL.SQLInteger bytes,SQL.SQLInteger stamp]] -> pure (bytes,stamp)
+    _ -> throwIO StoreIntegrity
+  oldest <- rawRows db "SELECT recorded_at FROM invalidations ORDER BY length(sequence),sequence LIMIT 1" []
+  rows <- if used<=268435456 && (case oldest of [] -> True; [[SQL.SQLInteger stamp]] -> stamp>now-604800; _ -> False)
+    then pure []
+    else rawRows db "SELECT sequence,recorded_at,length(stream_id)+length(sequence)+length(kind)+length(resource_uri)+length(revision)+256 FROM invalidations ORDER BY length(sequence),sequence LIMIT 256" []
+  let prefix _ [] = pure []
+      prefix bytes ([SQL.SQLText key,SQL.SQLInteger stamp,SQL.SQLInteger size]:rest)
+        | stamp <= now-604800 || bytes > 268435456 = (key :) <$> prefix (bytes-size) rest
+        | otherwise = pure []
+      prefix _ _ = throwIO StoreIntegrity
+  removed <- prefix used rows
+  case reverse removed of
+    [] -> pure 0
+    key:_ -> do
+      rawExecute db "DELETE FROM invalidations WHERE length(sequence)<length(?) OR (length(sequence)=length(?) AND sequence<=?)" (replicate 3 (SQL.SQLText key))
+      rawExecute db "UPDATE service_metadata SET retained_floor=? WHERE singleton=1" [SQL.SQLText key]
+      pure (length removed)
+
+-- | Maintenance and the retained batch share the same commit. No SQLite transaction
+-- escapes to a consumer. Sixty-four maximum-sized events fit the existing read budget.
+readRetainedEvents :: CoordinationStore -> Text -> Word64 -> IO (Either EventReadFailure RetainedEvents)
+readRetainedEvents store expected after = runTransaction store $ Transaction $ \context@(Context db _ _ _ _ _ _) -> do
+  _ <- trimEvents db
+  let Transaction readBatch = do
+        metadata <- query "SELECT stream_id,retained_floor,sequence FROM service_metadata WHERE singleton=1" []
+        (stream,floorKey,high) <- case metadata of
+          [[SQL.SQLText stream,SQL.SQLText floorText,SQL.SQLText highText]] ->
+            (,,) stream <$> sequenceValue floorText <*> sequenceValue highText
+          _ -> refuseTransaction StoreIntegrity
+        unless (floorKey<=high) (refuseTransaction StoreIntegrity)
+        if stream/=expected then pure (Left WrongEventStream)
+        else if after<floorKey then pure (Left EventRetentionLost)
+        else if after>high then pure (Left EventCursorAhead)
+        else do
+          let cursor=SQL.SQLText (T.pack (show after))
+          rows <- query "SELECT sequence,kind,resource_uri,revision,recorded_at<=unixepoch()-604800 FROM invalidations WHERE length(sequence)>length(?) OR (length(sequence)=length(?) AND sequence>?) ORDER BY length(sequence),sequence LIMIT 64" [cursor,cursor,cursor]
+          events <- forM rows $ \row -> case row of
+            [SQL.SQLText key,SQL.SQLText kind,SQL.SQLText uri,SQL.SQLText revision,SQL.SQLInteger expired] -> do
+              number <- sequenceValue key
+              pure ((number,kind,uri,revision),expired/=0)
+            _ -> refuseTransaction StoreIntegrity
+          let keys=[number | ((number,_,_,_),_)<-events]
+          unless (map toInteger keys == take (length keys) [toInteger after+1..toInteger high]
+            && (not(null keys) || after==high)) (refuseTransaction StoreIntegrity)
+          if any snd events then pure (Left EventRetentionLost)
+          else pure (Right (RetainedEvents stream floorKey high (map fst events)))
+  result <- readBatch context
+  pure (result,[])
+  where
+    sequenceValue value = case reads (T.unpack value) of
+      [(number,"")] | (number::Integer)>=0 && number<=18446744073709551615 && T.pack(show number)==value -> pure(fromInteger number)
+      _ -> refuseTransaction StoreIntegrity
 
 chargeInput :: Context -> Text -> [SQL.SQLData] -> IO ()
 chargeInput (Context _ _ _ budget _ _ _) sql parameters = do

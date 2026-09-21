@@ -277,7 +277,7 @@ elif mode in {"ingestion-race", "ingestion-race-mutant"}:
     path = "manager/src/Agentic/Manager/State.hs"
     replace(path,"import Agentic.Manager.Store\n","import Agentic.Manager.Store\nimport qualified Agentic.Manager.Test.AcceptanceAudit as Audit\n")
     replace(path,"\n  empty <- valid (captureSnapshotCheckpoint (associationNative association) [])\n",'\n  Audit.afterCurrentReview "state-prefix"\n  empty <- valid (captureSnapshotCheckpoint (associationNative association) [])\n')
-    replace(path,"      runTransaction store $ do\n",'      Audit.afterCurrentReview "state-publication"\n      runTransaction store $ do\n')
+    replace(path,'          revision = "runtime_" <> sequenceKey\n      runTransaction store $ do\n','          revision = "runtime_" <> sequenceKey\n      Audit.afterCurrentReview "state-publication"\n      runTransaction store $ do\n')
     if mode == "ingestion-race-mutant":
         replace(path,"        unless (actual == expected) (refuseTransaction StoreBusy)","        void (pure (actual == expected))")
     target, arguments = "manager-approval-check", ["ingestion-race"]

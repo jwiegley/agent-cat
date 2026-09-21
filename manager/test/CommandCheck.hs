@@ -44,6 +44,7 @@ main = do
   hSetBuffering stdout LineBuffering
   args <- getArgs
   case args of
+    ["quota-pressure",work] -> preflightRetentionChecks work >> capacityChecks work >> rateChecks work
     ["deadline-crossing",work] -> commandDeadlineChecks work
     [work, source] -> do
       publicComposition work
@@ -55,6 +56,7 @@ main = do
       bindingBounds work
       dispatchChecks work
       restartDispatchChecks work
+      preflightRetentionChecks work
       capacityChecks work
       rateChecks work
       rollbackChecks work
@@ -241,6 +243,33 @@ publicComposition work = do
     Public.withCoordinationStore installed $ \store -> do
       identity <- Public.storeIdentity store
       check "installed public composition uses migrated store" (Public.storeSchemaVersion identity == schemaVersion)
+
+preflightRetentionChecks :: FilePath -> IO ()
+preflightRetentionChecks work = withFixture work "preflight-retention" 8388608 10 $ \_ _ _ store profile proof -> do
+  req <- request store SetInput "preflight"
+  original <- submitCommand store proof req (edit profile (commandResource req) "next") >>= right
+  replay <- commandPreflight store proof req (\_ _ _ exists -> pure(exists,[])) >>= right
+  check "unretired replay preserves preflight callback path" replay
+  mutate store(execute "UPDATE requests SET phase='withdrawn' WHERE id='request_1'" [])
+  let inactive _ = do
+        rows <- query "SELECT phase FROM requests WHERE id='request_1'" []
+        pure(if rows==[[SQL.SQLText "withdrawn"]] then Just "2000-01-01T00:00:00Z" else Nothing)
+      forbiddenCallback _ _ _ _ = refuseTransaction StoreIntegrity :: Transaction ((),[Invalidation])
+      preflight value=commandPreflight store proof value forbiddenCallback
+  retireReceipt store (receiptId(submissionReceipt original)) inactive >>= right
+  expect "matching tombstone refuses before preflight callback" ReceiptExpired (preflight req)
+  expect "operation conflict precedes tombstone expiry" IdempotencyConflict (preflight (req {commandOperation=RemoveInput}))
+  expect "wrong epoch precedes tombstone lookup" AuthorityChanged (preflight (req {commandKey="old_authority."<>T.replicate 22 "n"}))
+  mutate store(execute "UPDATE credentials SET revoked=1 WHERE id='credential_a'" [])
+  expect "current authorization precedes tombstone lookup" Unauthenticated (preflight req)
+  mutate store(execute "INSERT INTO clients VALUES ('retired_client','revision','authorization',1)" [])
+  forM_ ["DELETE FROM clients WHERE id='retired_client'",
+         "UPDATE clients SET retired=0 WHERE id='retired_client'",
+         "UPDATE clients SET id='replacement_client' WHERE id='retired_client'",
+         "DELETE FROM credentials WHERE id='credential_a'",
+         "UPDATE credentials SET verifier=X'04' WHERE id='credential_a'"] $ \statement -> do
+    refused <- try @StoreFailure(mutate store(execute statement []))
+    check "retention cannot recycle registered client or credential identities" (refused==Left StoreUnavailable)
 
 replayChecks :: FilePath -> IO ()
 replayChecks work = do

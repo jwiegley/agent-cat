@@ -198,8 +198,33 @@ timestamp and at least thirty days of inactivity against trusted time. There is
 no public retire-by-ID shortcut or default inactivity assertion. Retirement
 clears original receipt content, raw body, digest, length, media type, precondition,
 acknowledgement, and effect. The non-content key record remains charged at 16384
-bytes and permanently prevents replay. WM-021 owns determining actual inactivity,
-retention scheduling, and wider collection obligations.
+bytes and permanently prevents replay.
+
+`retainReceipts` observes at most sixteen original commands per page within the
+existing transaction. At most thirteen statements per record plus the page query
+fit the 256-statement Store budget. Unique request/run associations bound linked
+execution checks, and missing or contradictory links remain protected. Active
+requests, live preparations, unreleased reservations, pending decisions, uncertain
+exports and unresolved commands prevent inactivity. A linked run also requires a
+State-owned validated terminal observation, not process exit or a released slot.
+
+Only committed local create/capture operations with matching original request,
+client and profile associations can be locally complete while their receipt remains
+accepted. Missing associations, dispatch facts or contradictory start/control facts
+keep them pending. This classification never rewrites original receipt state or
+manufactures Runtime evidence. Records with no provable resource association retain
+content rather than acquiring an inferred inactivity date.
+
+The first proven inactive observation starts the thirty-day interval. Resource and
+reference activity resets that observation, and retirement rechecks all conditions in
+the committing transaction. Eligibility clocks use trusted SQLite time, not accepted_at.
+After retirement, registered-client key tombstones remain charged and cannot be deleted.
+Client and credential identities cannot be recycled to evade this protection.
+
+Preflight retains current authorization and authority-epoch precedence. It checks
+profile/operation conflicts before returning receipt-expired for a matching tombstone,
+without invoking the pre-body callback or consuming an upload stream. Unretired retries
+continue through the existing exact byte, media-type and precondition checks.
 
 `manager/ci/commands.sh` builds the actual Cabal target with warnings as errors,
 runs independent N1 and N8 database checks, validates emitted receipts with the

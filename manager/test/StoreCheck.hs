@@ -7,18 +7,19 @@ import qualified Agentic.Manager.Test.StoreAdmissionCheck as StoreAdmissionCheck
 import qualified "agentic" Agentic.Manager as Public
 import Agentic.Manager.Configuration
 import Agentic.Manager.Profile (Diagnostic)
-import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration)
+import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration, artifactMigration, historyMigration, restartMigration)
 import Agentic.Manager.Store
 import Control.Concurrent (threadDelay, throwTo)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar, readMVar, tryPutMVar)
 import Control.Concurrent.Async (AsyncCancelled (..), async, asyncThreadId, wait, cancel, poll, waitCatch, withAsync)
 import Control.Exception
   (AsyncException (UserInterrupt), bracket, finally, fromException, onException, throwIO, try)
-import Control.Monad (forM_, replicateM_, unless, void)
+import Control.Monad (forM_, replicateM_, unless, void, when)
 import Control.DeepSeq (NFData)
 import Crypto.Hash (Digest, SHA256, hash)
 import Data.ByteArray (convert)
-import Data.Aeson (encode, object, (.=))
+import Data.Aeson (Value (..), eitherDecodeStrict', encode, object, (.=))
+import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
 import Data.Either (isLeft)
@@ -46,6 +47,7 @@ main = do
   args <- getArgs
   case args of
     ["admission-data"] -> StoreAdmissionCheck.dataChecks
+    ["quotas",work] -> quotaChecks work
     ["restart",work] -> restartChecks work
     ["terminal-admission",work] -> terminalAdmissionChecks work
     ["hold", path] -> withInstalled path $ \installed -> withCoordinationStore installed $ \_ ->
@@ -103,6 +105,91 @@ expect label expected action = do
   result <- try @StoreFailure action
   check label (case result of Left failure -> failure == expected; Right _ -> False)
 
+quotaChecks :: FilePath -> IO ()
+quotaChecks work = do
+  quotaMigrationChecks work
+  (path,root) <- fixture work "quotas"
+  withInstalled path $ \installed -> withCoordinationStore installed $ \store -> do
+    withStoreReader store $ do
+      withStoreReader store $ do
+        entered <- newIORef False
+        expect "reader quota refuses before materialization" StoreLimit (withStoreReader store (writeIORef entered True))
+        readIORef entered >>= check "refused reader allocates no callback state" . not
+        mutate store (client "client_1" >> relationalRows) [event]
+        document <- BS.readFile path >>= right . eitherDecodeStrict'
+        case document of
+          Object fields | Just(Object limits)<-KM.lookup "limits" fields ->
+            BS.writeFile path (BL.toStrict(encode(Object(KM.insert "limits" (Object(KM.insert "globalDatabaseReaders" (Number 1) limits)) fields))))
+          _ -> error "configuration fixture shape"
+        replacement <- load path
+        void(reloadConfiguration installed replacement >>= right)
+        check "reader pressure does not retain configuration or SQL locks" True
+      expect "old reader allowance cannot bypass current lowered coordinator cap" StoreLimit (withStoreReader store (pure()))
+    withStoreReader store (check "reader capacity is returned" True)
+    identity <- storeIdentity store
+    let stream=storeStreamId identity
+    wrong <- readRetainedEvents store "other_stream" 0
+    check "wrong event stream remains distinct" (wrong==Left WrongEventStream)
+    ahead <- readRetainedEvents store stream 2
+    check "future event cursor remains distinct" (ahead==Left EventCursorAhead)
+    batch <- readRetainedEvents store stream 0 >>= right
+    check "initial batch is exact complete prefix" (map (\(n,_,_,_)->n)(retainedEvents batch)==[1])
+    mutate store (execute "UPDATE invalidations SET recorded_at=unixepoch()-604801" []) [event]
+    lost <- readRetainedEvents store stream 0
+    check "reader overtaken by age retention observes explicit loss" (lost==Left EventRetentionLost)
+    next <- readRetainedEvents store stream 1 >>= right
+    check "floor and next batch share committed eviction boundary" (retainedFloor next==1 && map (\(n,_,_,_)->n)(retainedEvents next)==[2])
+    -- Actual valid event records cross the frozen 256 MiB bound without a test knob.
+    forM_ [1..260 :: Int] $ \_ -> mutate store (do
+      execute "INSERT INTO invalidations(stream_id,sequence,kind,resource_uri,revision,recorded_at) WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<128) SELECT stream_id,CAST(CAST(sequence AS INTEGER)+i AS TEXT),'request.changed',?,'revision_1',unixepoch() FROM service_metadata,n" [SQL.SQLText("/v1/requests/"<>T.replicate 8000 "a")]
+      execute "UPDATE service_metadata SET sequence=CAST(CAST(sequence AS INTEGER)+128 AS TEXT)" []) [event]
+    rowsEqual store "SELECT event_bytes<=268435456 AND event_bytes>260000000 AND retained_floor!='1' FROM service_metadata" [[SQL.SQLInteger 1]] >>= check "actual event bytes evict bounded prefixes at frozen global cap"
+    rowsEqual store "SELECT event_bytes=(SELECT sum(length(stream_id)+length(sequence)+length(kind)+length(resource_uri)+length(revision)+256) FROM invalidations) FROM service_metadata" [[SQL.SQLInteger 1]] >>= check "event accounting equals actual retained records"
+    floorKey <- runRead store $ do
+      rows <- query "SELECT retained_floor FROM service_metadata" []
+      case rows of
+        [[SQL.SQLText value]] -> case reads(T.unpack value) of [(key,"")] -> pure key; _ -> refuseTransaction StoreIntegrity
+        _ -> refuseTransaction StoreIntegrity
+    retained <- readRetainedEvents store stream floorKey >>= right
+    check "large retained event page is bounded to sixty-four complete records" (length(retainedEvents retained)==64)
+    rowsEqual store "SELECT count(*) FROM clients WHERE id='client_1'" [[SQL.SQLInteger 1]] >>= check "event retention does not delete domain records"
+    rowsEqual store "SELECT envelope FROM ingestions WHERE run_id='run_1'" [[SQL.SQLBlob "{}"]] >>= check "event eviction preserves exact independent Runtime evidence bytes"
+    rowsEqual store "SELECT runtime_snapshot,snapshot_version,result_state FROM runs WHERE id='run_1'" [[SQL.SQLNull,SQL.SQLNull,SQL.SQLText "absent"]] >>= check "event expiry invents no snapshot or terminal result"
+    forM_ ["requests","captures","preparations","decisions","commands","artifacts"] $ \table -> count store table >>= check ("event expiry retains "<>T.unpack table) . (==1)
+    bracket (rawOpen root) SQL.close $ \db -> do
+      SQL.exec db "UPDATE invalidations SET recorded_at=unixepoch()-604801"
+      SQL.exec db "CREATE TRIGGER fail_floor BEFORE UPDATE OF retained_floor ON service_metadata BEGIN SELECT RAISE(ABORT,'floor fixture'); END"
+    before <- count store "invalidations"
+    expect "failed floor publication rolls back eviction" StoreUnavailable (retainEvents store)
+    count store "invalidations" >>= check "failed retention loses no event rows" . (==before)
+    bracket (rawOpen root) SQL.close $ \db -> SQL.exec db "DROP TRIGGER fail_floor"
+    removed <- retainEvents store
+    check "one maintenance call evicts at most 256 records" (removed==256)
+    lostAgain <- readRetainedEvents store stream 2
+    check "open reader cannot skip evicted events successfully" (lostAgain==Left EventRetentionLost)
+  putStrLn "PASS manager quota retention"
+
+quotaMigrationChecks :: FilePath -> IO ()
+quotaMigrationChecks work = forM_ [False,True] $ \conflict -> do
+  (path,root) <- fixture work (if conflict then "retention-migration-refusal" else "retention-migration")
+  withInstalled path (const(pure()))
+  bracket (rawOpen root) SQL.close $ \db -> do
+    mapM_ (SQL.exec db) (schemaStatements<>commandMigration<>draftMigration<>admissionMigration<>approvalMigration<>ingestionMigration<>controlMigration<>artifactMigration<>historyMigration<>restartMigration)
+    SQL.exec db "INSERT INTO service_metadata VALUES(1,'old_authority','old_stream','1','0','old_revision'); INSERT INTO invalidations VALUES('old_stream','1','service.changed','/v1/capabilities','old_revision'); INSERT INTO clients VALUES('old_client','revision','authorization',0); INSERT INTO runs(id,revision,control_revision,profile_id,root_identity,native_run_id,supervision,result_state) VALUES('old_run','revision','control','profile','root','native','observer','absent'); PRAGMA user_version=10"
+    when conflict (SQL.exec db "CREATE TABLE retention_local_commands(sentinel TEXT)")
+  setFileMode(root </> "coordination.sqlite3")0o600
+  if conflict then do
+    withInstalled path $ \installed -> expect "partial retention migration refuses" StoreUnavailable (withCoordinationStore installed(const(pure())))
+    bracket (rawOpen root) SQL.close $ \db -> do
+      rawRows db "PRAGMA user_version" >>= check "retention migration failure retains schema ten" . (==[[SQL.SQLInteger 10]])
+      rawRows db "SELECT count(*) FROM pragma_table_info('runs') WHERE name='terminal_observed'" >>= check "failed migration rolls back eligibility facts" . (==[[SQL.SQLInteger 0]])
+      rawRows db "SELECT sequence FROM invalidations" >>= check "failed migration retains exact replay prefix" . (==[[SQL.SQLText "1"]])
+  else withInstalled path $ \installed -> withCoordinationStore installed $ \store -> do
+    storeIdentity store >>= check "schema ten upgrades transactionally to retention schema" . ((==schemaVersion).storeSchemaVersion)
+    rowsEqual store "SELECT stream_id,sequence,retained_floor,event_bytes>0 FROM service_metadata" [[SQL.SQLText "old_stream",SQL.SQLText "1",SQL.SQLText "0",SQL.SQLInteger 1]] >>= check "migration preserves stream boundary and accounts existing replay"
+    rowsEqual store "SELECT terminal_observed FROM runs" [[SQL.SQLInteger 0]] >>= check "migration fabricates no historical Runtime terminal fact"
+    rowsEqual store "SELECT recorded_at>0 FROM invalidations" [[SQL.SQLInteger 1]] >>= check "legacy event age starts at actual migration observation"
+
 restartChecks :: FilePath -> IO ()
 restartChecks work = do
   (path,root) <- fixture work "restart"
@@ -122,7 +209,7 @@ restartChecks work = do
       mutate store (do
         client "client_1"
         execute "INSERT INTO requests(id,revision,client_id,workflow_id,descriptor_revision,profile_id,profile_revision,phase,admission,blocking_reasons,validation_errors) VALUES ('request_1','revision_1','client_1','workflow','descriptor','profile','policy','draft','not-queued',?,?)" [SQL.SQLBlob "[]",SQL.SQLBlob "[]"]
-        execute "INSERT INTO captures VALUES ('capture_one','revision_1','request_1','client_1','profile',?,?,?)" [SQL.SQLBlob "capture_one",SQL.SQLInteger(fromIntegral(BS.length content)),SQL.SQLText(T.pack(show(hash content::Digest SHA256)))]
+        execute "INSERT INTO captures(id,revision,request_id,client_id,profile_id,private_reference,bytes,sha256) VALUES ('capture_one','revision_1','request_1','client_1','profile',?,?,?)" [SQL.SQLBlob "capture_one",SQL.SQLInteger(fromIntegral(BS.length content)),SQL.SQLText(T.pack(show(hash content::Digest SHA256)))]
         execute "INSERT INTO restoration_quarantine VALUES ('older_claim',0,'[[\"operator\",\"a\"]]')" []) [event]
       refused <- try @Diagnostic(backupCoordinationStore installed backup)
       check "offline backup refuses a live Store lifetime" (isLeft refused)
@@ -184,7 +271,7 @@ restartStateChecks work = do
           execute "INSERT INTO commands(id,revision,profile_id,operation,client_id,authority_epoch,method,resource_uri,idempotency_key,body,receipt,retired,request_id,run_id,preparation_id,accepted_at,dispatch_generation,state) VALUES (?,'revision','profile',?,'client_1',?,'POST','/v1/runs/run_2',?,?,?,0,'request_2','run_2','preparation_2','2026-01-01T00:00:00Z',?,'dispatch-attempted')" [SQL.SQLText ident,SQL.SQLText operationName',SQL.SQLText(storeAuthorityEpoch identity),SQL.SQLText ident,SQL.SQLBlob "original body",SQL.SQLBlob "immutable accepted receipt",SQL.SQLText(storeProcessGeneration identity)]
         execute "INSERT INTO start_intents VALUES ('start_2','client_1','request_2','preparation_2','run_2','reservation_2',?,'worker')" [SQL.SQLText(storeProcessGeneration identity)]
         execute "INSERT INTO control_intents VALUES ('control_2','run_2',NULL,'cancelRun',NULL,NULL,NULL,?,1,NULL,NULL)" [SQL.SQLText(T.replicate 64 "a")]
-        execute "INSERT INTO capture_uploads VALUES ('partial','request_1','client_1','profile','policy',?,10,'2026-01-01T00:00:00Z','pending')" [SQL.SQLText(storeProcessGeneration identity)]) [event]
+        execute "INSERT INTO capture_uploads(id,request_id,client_id,profile_id,profile_revision,process_generation,reserved_bytes,created_at,state) VALUES ('partial','request_1','client_1','profile','policy',?,10,'2026-01-01T00:00:00Z','pending')" [SQL.SQLText(storeProcessGeneration identity)]) [event]
       events <- count store "invalidations"
       pure(identity,events)
     second <- withCoordinationStore installed $ \store -> do
@@ -431,7 +518,7 @@ databaseChecks work = do
 relationalRows :: Transaction ()
 relationalRows = do
   execute "INSERT INTO requests (id,revision,client_id,workflow_id,descriptor_revision,profile_id,profile_revision,phase,admission,blocking_reasons,validation_errors) VALUES ('request_1','revision_1','client_1','workflow_1','descriptor_1','profile_1','profile_revision_1','draft','not-queued',X'5b5d',X'5b5d')" []
-  execute "INSERT INTO captures VALUES ('capture_1','revision_1','request_1','client_1','profile_1',X'01',0,?)" [SQL.SQLText (T.replicate 64 "0")]
+  execute "INSERT INTO captures(id,revision,request_id,client_id,profile_id,private_reference,bytes,sha256) VALUES ('capture_1','revision_1','request_1','client_1','profile_1',X'01',0,?)" [SQL.SQLText (T.replicate 64 "0")]
   let literalBytes = BS.pack [0xce,0xb1,13,10]
   execute "INSERT INTO request_inputs (request_id,name,declaration_ordinal,declaration,source,literal_bytes,literal_transport_bytes,literal_chunks,literal_digest) VALUES ('request_1','input_1',0,X'7b7d','literal',4,4,1,?)"
     [SQL.SQLBlob (convert (hash literalBytes :: Digest SHA256))]

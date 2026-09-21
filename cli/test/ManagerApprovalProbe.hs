@@ -94,6 +94,7 @@ main=do
       nativeConcurrentIngestionChecks work native source python
       failedNativeIngestionChecks work native source python
       withReady work native "ingestion-fixtures" ["--scripted"] [] $ \(Fixture _ _ store _ _ _)->ingestionChecks source store
+    ["retention-native",work,native]->nativeIngestionChecks work native >> cancellationRetentionChecks work native
     ["ingestion-native",work,native]->nativeIngestionChecks work native
     ["ingestion-concurrent",work,native,source,python]->nativeConcurrentIngestionChecks work native source python
     ["targets-live",work,native,source,python]->targetChecks work native source python
@@ -1414,16 +1415,20 @@ associationCleanupChecks work native = withReadyRunner work native [] "prompt-so
 nativeIngestionChecks :: FilePath -> FilePath -> IO ()
 nativeIngestionChecks work native = checkReopenedIngestion work $ withReadyRunner work native [] "prompt-source" "native-ingestion" ["--scripted"] [] $ \fixture@(Fixture root _ store proof key _) ->
   withPrepared fixture fixedClock $ \_ live context reviewed public -> do
-    (_,start) <- acceptApproval reviewed proof (key "approve") (condition public) (approvalBody public) >>= right
+    (approved,start) <- acceptApproval reviewed proof (key "approve") (condition public) (approvalBody public) >>= right
     owned <- maybe (error "missing original accepted start") pure start
     let association = RunAssociation (acceptedStartRun owned) "profile" (preparedRootIdentity (reviewNative context)) (preparedRunId (reviewNative context))
     restoreRunProjection store association >>= check "accepted intent has no fabricated Runtime snapshot" . (==Nothing)
+    observeRetainedTerminal store association >>= check "missing native prefix provides no terminal retention proof" . not
     texts store "SELECT phase FROM requests" >>= check "genuine approval remains start-pending before Runtime evidence" . (==["start-pending"])
     immutable <- storeRows store "SELECT * FROM start_intents"
     deliverAcceptedStart owned >>= right
     await (awaitAdmissionCleanup live) >>= right
     stopped <- observeAcceptedStart owned
     check "genuine fast native run physically cleaned before ingestion starts" (observedWorkerPhase stopped==WorkerReleased && observedQueuedFrames stopped>0 && not (observedCleanupUnproven stopped))
+    void(retainReceipts store "" >>= right)
+    number store "SELECT terminal_observed FROM runs" >>= check "physical cleanup cannot supply retention terminal evidence" . (==0)
+    number store "SELECT count(*) FROM commands WHERE inactive_since IS NOT NULL" >>= check "unobserved terminal result leaves original receipts protected" . (==0)
     forbidden <- deliverAcceptedStart owned
     check "closed original accepted start cannot acquire execution again" (case forbidden of Left _ -> True; _ -> False)
     let associationFacts = mapM (storeRows store)
@@ -1488,6 +1493,7 @@ nativeIngestionChecks work native = checkReopenedIngestion work $ withReadyRunne
     check "commit then callback failure remains explicit" (committed==Left UserInterrupt)
     number store "SELECT count(*) FROM ingestions" >>= check "commit-return window contains exactly one durable envelope" . (==1)
     texts store "SELECT phase FROM requests" >>= check "first committed Runtime evidence associates managed request" . (==["associated"])
+    observeRetainedTerminal store association >>= check "nonterminal validated prefix cannot supply terminal retention proof" . not
     number store "SELECT count(*) FROM requests r JOIN reservations v ON v.request_id=r.id WHERE r.revision=v.request_revision" >>= check "association keeps reservation revision consistent after cleanup" . (==1)
     number store "SELECT count(*) FROM requests r JOIN invalidations i ON i.resource_uri='/v1/requests/'||r.id AND i.revision=r.revision WHERE i.kind='request.changed'" >>= check "association publishes matching request invalidation" . (==1)
     storeRows store "SELECT * FROM start_intents" >>= check "association preserves immutable original consent" . (==immutable)
@@ -1507,6 +1513,27 @@ nativeIngestionChecks work native = checkReopenedIngestion work $ withReadyRunne
     direct <- right (foldM Runtime.stepRunSnapshot (Runtime.initialRunSnapshot (associationNative association)) actual)
     restored <- restoreRunProjection store association >>= maybe (error "missing native projection") pure
     check "genuine approved native completion equals unchanged direct fold" (Runtime.checkpointSnapshot restored==direct && Runtime.checkpointEnvelopes restored==actual && Runtime.snapshotRunStatus direct==Runtime.RunSucceeded && Runtime.snapshotTraceRecorded direct && Runtime.snapshotResult direct/=Nothing)
+    number store "SELECT terminal_observed FROM runs" >>= check "shared Runtime terminal fold publishes retention evidence atomically" . (==1)
+    boundary <- runRead store $ do
+      rows <- query "SELECT runtime_snapshot FROM runs" []
+      case rows of [[SQL.SQLBlob bytes]] -> pure bytes; _ -> refuseTransaction StoreIntegrity
+    let replaceBoundary bytes = runTransaction store $ do
+          execute "UPDATE runs SET runtime_snapshot=?,terminal_observed=0" [SQL.SQLBlob bytes]
+          pure((),[Invalidation "service.changed" "/v1/capabilities" "retention_fixture"])
+    forM_ [("corrupt", "not-a-boundary"),("changed",boundary<>" ")] $ \(label,bytes) -> do
+      replaceBoundary bytes
+      refusal <- try @StoreFailure(observeRetainedTerminal store association)
+      check (label<>" stored boundary cannot mint historical terminal proof") (refusal==Left StoreIntegrity)
+      number store "SELECT terminal_observed FROM runs" >>= check "failed historical proof preserves absence of authority" . (==0)
+    replaceBoundary boundary
+    observeRetainedTerminal store association >>= check "explicit historical observation validates original complete Runtime prefix"
+    beforeProofDuplicate <- number store "SELECT count(*) FROM invalidations"
+    observeRetainedTerminal store association >>= check "repeated terminal proof is a no-op" . not
+    number store "SELECT count(*) FROM invalidations" >>= check "repeated proof appends no event" . (==beforeProofDuplicate)
+    number store "SELECT count(*) FROM commands WHERE inactive_since IS NOT NULL" >>= check "historical proof requires a new inactivity interval" . (==0)
+    void(retainReceipts store "" >>= right)
+    storeRows store "SELECT id,state FROM commands WHERE operation='approve'" >>= check "original approval remains dispatch-attempted despite terminal run" . (==show [[SQL.SQLText(receiptId(submissionReceipt approved)),SQL.SQLText "dispatch-attempted"]])
+    number store "SELECT count(*) FROM commands WHERE inactive_since IS NOT NULL OR retired=1" >>= check "pending original approval protects every linked receipt despite terminal evidence" . (==0)
     number store "SELECT count(*) FROM artifacts WHERE verification='referenced'" >>= check "native result observed as reference, never verified content" . (>0)
     number store "SELECT count(*) FROM runs WHERE result_state='referenced' AND runtime_snapshot IS NOT NULL" >>= check "native result and projection commit together" . (==1)
     remaining <- observeAcceptedStart owned
@@ -2255,6 +2282,14 @@ nativeControlChecks work native = do
           == expectedAnswers)
       BS.writeFile(work </> "typed-controls-checkpoint.json")(encoded(Runtime.snapshotCheckpointValue checkpoint))
       nativePresent native context >>=check "typed controls join original native workers" . not
+  cancellationRetentionChecks work native
+  where
+    fourth (_,_,_,value)=value
+    valueText key (Object fields)=case KM.lookup key fields of Just(String value)->value;_->error "missing text field"
+    valueText _ _=error "missing object"
+
+cancellationRetentionChecks :: FilePath -> FilePath -> IO ()
+cancellationRetentionChecks work native =
   withReady work native "cancel-controls" ["--scripted"] [] $ \fixture@(Fixture _ _ store proof key _) ->
     withPrepared fixture fixedClock $ \_ live context reviewed public -> do
       (_,start)<-acceptApproval reviewed proof(key "approve-cancel")(condition public)(approvalBody public) >>=right
@@ -2274,8 +2309,13 @@ nativeControlChecks work native = do
       check "uncorrelated terminal cancellation never manufactures command effect" (receiptEffect current==Nothing)
       checkpoint<-restoreRunProjection store association >>=maybe(error "no cancellation checkpoint")pure
       check "native terminal remains independent of cancellation receipt" (Runtime.snapshotRunStatus(Runtime.checkpointSnapshot checkpoint)==Runtime.RunCancelledStatus)
+      number store "SELECT terminal_observed FROM runs" >>= check "cancelled Runtime terminal evidence is genuine but not command completion" . (==1)
+      runTransaction store $ do
+        execute "UPDATE commands SET inactive_since='2000-01-01T00:00:00Z'" []
+        pure((),[Invalidation "service.changed" "/v1/capabilities" "retention_fixture"])
+      void(retainReceipts store "" >>= right)
+      number store "SELECT count(*) FROM commands WHERE retired=1 OR inactive_since IS NOT NULL" >>= check "real unresolved cancellation protects receipts despite terminal run and aged eligibility" . (==0)
   where
-    fourth (_,_,_,value)=value
     valueText key (Object fields)=case KM.lookup key fields of Just(String value)->value;_->error "missing text field"
     valueText _ _=error "missing object"
 

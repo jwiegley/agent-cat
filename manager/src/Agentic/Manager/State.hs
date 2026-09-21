@@ -2,9 +2,9 @@
 
 -- | Durable Runtime observations. Stored associations never grant worker authority.
 module Agentic.Manager.State
-  ( RunAssociation (..), ingestAcceptedStart, ingestRuntimeEnvelope, restoreRunProjection,
+  ( RunAssociation (..), ingestAcceptedStart, ingestRuntimeEnvelope, restoreRunProjection, observeRetainedTerminal,
     submitRunControl, submitDecisionControl, readControlSurface, readDecision, readDecisionHeads,
-    authorizeObservation, requireProjection
+    authorizeObservation, requireProjection, withProfileProjection
   ) where
 
 import Agentic.Manager.Admission (AcceptedStart, acceptedStartRun, consumeAcceptedStart, acceptedControlContext, acceptControlCommand, observeAcceptedStart)
@@ -53,10 +53,10 @@ ingestRuntimeEnvelope store association bytes = do
   ingestValidated store association bytes envelope
 
 ingestValidated :: CoordinationStore -> RunAssociation -> BS.ByteString -> Envelope -> IO Bool
-ingestValidated store association bytes envelope = do
+ingestValidated store association bytes envelope = withStoreReader store $ do
   decoded <- decodeEvidence bytes
   unless (decoded == envelope && envelopeRunId envelope == associationNative association) (throwIO StoreIntegrity)
-  old <- restoreRunProjection store association
+  old <- restoreProjection store association
   let before = maybe (initialRunSnapshot (associationNative association)) checkpointSnapshot old
       sequenceKey = sequenceText envelope
   duplicate <- runRead store $ do
@@ -90,8 +90,8 @@ ingestValidated store association bytes envelope = do
         requestEvents <- if BS.null expected then associateRequest association else pure []
         observations <- observeChanges association revision sequenceKey before after
         controls <- observeControls association revision envelope before after
-        execute "UPDATE runs SET runtime_snapshot=?,snapshot_version=1,revision=? WHERE id=?"
-          [SQL.SQLBlob boundary, text revision, text (associationRun association)]
+        execute "UPDATE runs SET runtime_snapshot=?,snapshot_version=1,revision=?,terminal_observed=? WHERE id=?"
+          [SQL.SQLBlob boundary, text revision, SQL.SQLInteger (if snapshotRunStatus after `elem` [RunSucceeded,RunFailedStatus,RunCancelledStatus] then 1 else 0), text (associationRun association)]
         pure (True, Invalidation "run.changed" (runURI association <> "/snapshot") revision : requestEvents <> observations <> controls)
 
 -- | Restore one immutable, fixed sequence-zero prefix using bounded reads.
@@ -99,7 +99,43 @@ ingestValidated store association bytes envelope = do
 -- appends cannot change an earlier prefix. The shared checkpoint enforces 64MiB.
 -- ponytail: full prefix replay per ingestion, cache validated checkpoints if throughput requires it.
 restoreRunProjection :: CoordinationStore -> RunAssociation -> IO (Maybe SnapshotCheckpoint)
-restoreRunProjection store association = do
+restoreRunProjection store association = withStoreReader store (restoreProjection store association)
+
+-- | One charged projection and response under current profile authority. Reader
+-- admission precedes the configuration loan, which remains held through response.
+withProfileProjection :: CoordinationStore -> CredentialProof -> RunAssociation -> (RunSnapshot -> IO a) -> IO a
+withProfileProjection store proof association respond = withStoreReader store $ do
+  result <- withStoreConfiguration store $ \_ profiles -> do
+    unless (associationProfile association `elem` map publicId profiles) (throwIO Command.Forbidden)
+    runRead store (authorizeObservation proof association)
+    snapshot <- restoreProjection store association >>= maybe (throwIO Command.ResourceUnavailable) (pure . checkpointSnapshot)
+    respond snapshot
+  either (const (throwIO Command.StorageUnavailable)) pure result
+
+-- | Record a newly proved terminal fact from an existing immutable Runtime prefix.
+-- This grants neither cleanup nor execution authority and does not change ordinary reads.
+observeRetainedTerminal :: CoordinationStore -> RunAssociation -> IO Bool
+observeRetainedTerminal store association = withStoreReader store $ do
+  expected <- runRead store (checkAssociation association >> projectionRow association)
+  checkpoint <- restoreProjection store association
+  case checkpoint of
+    Just restored | snapshotRunStatus(checkpointSnapshot restored) `elem` [RunSucceeded,RunFailedStatus,RunCancelledStatus] ->
+      runTransaction store $ do
+        checkAssociation association
+        actual <- projectionRow association
+        unless (actual==expected && actual==projectionBoundary(checkpointSnapshot restored)) (refuseTransaction StoreBusy)
+        rows <- query "SELECT terminal_observed FROM runs WHERE id=?" [text(associationRun association)]
+        case rows of
+          [[SQL.SQLInteger 1]] -> pure(False,[])
+          [[SQL.SQLInteger 0]] -> do
+            execute "UPDATE runs SET terminal_observed=1 WHERE id=?" [text(associationRun association)]
+            generation <- transactionGeneration
+            pure(True,[Invalidation "service.changed" "/v1/capabilities" generation])
+          _ -> refuseTransaction StoreIntegrity
+    _ -> pure False
+
+restoreProjection :: CoordinationStore -> RunAssociation -> IO (Maybe SnapshotCheckpoint)
+restoreProjection store association = do
   (boundary, lastRow) <- runRead store $ do
     checkAssociation association
     boundary <- projectionRow association

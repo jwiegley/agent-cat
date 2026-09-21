@@ -113,8 +113,40 @@ Known not-published outcomes can release their reservation through a successful
 cleanup transaction. Unconfirmed, cancelled or lost-publication outcomes retain
 charged pending/orphan state for later reconciliation. A final installed file is
 never deleted as rollback for a missing database receipt. Metadata failure after
-confirmed publication likewise retains the file and orphan charge. WM-021 owns
-collection and reconciliation, not an opportunistic retry-time unlink.
+confirmed publication likewise retains the file and orphan charge. Successful
+publication records its original byte count and digest on the upload before final
+capture acceptance. An unconfirmed publication does not acquire this provenance.
+Final acceptance rechecks the current global capture allowance rather than relying
+only on the allowance sampled before streaming.
+
+## Conservative collection
+
+`collectCaptures` examines at most sixteen recorded identities per call under the
+original Store file owner and existing five-second operation bound. A fixed
+24-hour grace starts only at the first durable observation of proven eligibility.
+Reference or resource activity resets it. The committing check requires the full
+interval again, not the file modification time.
+
+A completed capture requires an inactive owning request, no input binding, no
+retained preparation reference and no nonretired command reference. Pending commands,
+lineage dependencies and restoration quarantine prevent collection. Provenance-bearing
+orphan uploads cannot alias an existing capture. The file owner excludes concurrent
+binding, materialization and exports, while backup and restore require exclusive
+Store lifetime ownership. Reference checks and metadata retirement share a transaction.
+An insertion cannot successfully bind metadata that collection has already removed.
+
+Before unlink, a completed capture becomes an orphan upload retaining its original
+provenance and quota charge. The existing Runtime retained-file primitive verifies
+root and parent identities, unlinks and synchronizes the same parent descriptor, then
+revalidates the chain. Only confirmed completion permits release of the upload charge.
+A synchronization or identity failure remains a failure even if the name is absent.
+Unknown files, unproven temporary files and absent files with unresolved cleanup remain
+retained or charged. There is no directory-wide age sweep, Runtime-root pruning or
+automatic cleanup of historical resources.
+
+The retention checks use actual command acceptance, publication, SQLite references,
+file-owner exclusion and the existing directory-sync fault seam. Injected synchronization
+failure is not a physical power-loss test, and a missing name alone is not cleanup proof.
 
 ## Bounds and materialization
 

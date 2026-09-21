@@ -1,12 +1,59 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Versioned relational coordination facts. Stored identities are not capabilities.
-module Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration, artifactMigration, historyMigration, restartMigration) where
+module Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration, artifactMigration, historyMigration, restartMigration, retentionMigration) where
 
 import Data.Text (Text)
 
 schemaVersion :: Int
-schemaVersion = 10
+schemaVersion = 11
+
+-- | Retention clocks are observations of eligibility, never cleanup authority.
+retentionMigration :: [Text]
+retentionMigration =
+  [ "CREATE TRIGGER client_identity_retained BEFORE DELETE ON clients BEGIN SELECT RAISE(ABORT,'client identity retained'); END",
+    "CREATE TRIGGER client_retirement_permanent BEFORE UPDATE OF retired ON clients WHEN OLD.retired=1 AND NEW.retired!=1 BEGIN SELECT RAISE(ABORT,'client identity retired'); END",
+    "CREATE TRIGGER credential_identity_retained BEFORE DELETE ON credentials BEGIN SELECT RAISE(ABORT,'credential identity retained'); END",
+    "CREATE TRIGGER client_identity_immutable BEFORE UPDATE OF id ON clients WHEN NEW.id!=OLD.id BEGIN SELECT RAISE(ABORT,'client identity immutable'); END",
+    "CREATE TRIGGER credential_identity_immutable BEFORE UPDATE OF id,client_id,verifier ON credentials WHEN NEW.id!=OLD.id OR NEW.client_id!=OLD.client_id OR NEW.verifier!=OLD.verifier BEGIN SELECT RAISE(ABORT,'credential identity immutable'); END",
+    "ALTER TABLE invalidations ADD COLUMN recorded_at INTEGER NOT NULL DEFAULT 0",
+    "UPDATE invalidations SET recorded_at=unixepoch()",
+    "ALTER TABLE service_metadata ADD COLUMN event_bytes INTEGER NOT NULL DEFAULT 0 CHECK(event_bytes>=0)",
+    "UPDATE service_metadata SET event_bytes=(SELECT coalesce(sum(length(stream_id)+length(sequence)+length(kind)+length(resource_uri)+length(revision)+256),0) FROM invalidations)",
+    "CREATE INDEX invalidations_order ON invalidations(length(sequence),sequence)",
+    "CREATE TRIGGER event_charge AFTER INSERT ON invalidations BEGIN UPDATE service_metadata SET event_bytes=event_bytes+length(NEW.stream_id)+length(NEW.sequence)+length(NEW.kind)+length(NEW.resource_uri)+length(NEW.revision)+256; END",
+    "CREATE TRIGGER event_release AFTER DELETE ON invalidations BEGIN UPDATE service_metadata SET event_bytes=event_bytes-length(OLD.stream_id)-length(OLD.sequence)-length(OLD.kind)-length(OLD.resource_uri)-length(OLD.revision)-256; END",
+    "ALTER TABLE commands ADD COLUMN inactive_since TEXT",
+    "ALTER TABLE runs ADD COLUMN terminal_observed INTEGER NOT NULL DEFAULT 0 CHECK(terminal_observed IN (0,1))",
+    "ALTER TABLE captures ADD COLUMN collection_since INTEGER",
+    "ALTER TABLE capture_uploads ADD COLUMN collection_since INTEGER",
+    "ALTER TABLE capture_uploads ADD COLUMN published_bytes INTEGER CHECK(published_bytes BETWEEN 0 AND 67108864)",
+    "ALTER TABLE capture_uploads ADD COLUMN published_sha256 TEXT CHECK(length(published_sha256)=64)",
+    "CREATE VIEW retention_local_commands AS SELECT c.id FROM commands c JOIN requests r ON r.id=c.request_id AND r.profile_id=c.profile_id WHERE c.operation IN ('create','capture') AND c.state='accepted' AND c.run_id IS NULL AND c.preparation_id IS NULL AND c.decision_id IS NULL AND c.dispatch_generation IS NULL AND c.attempted_at IS NULL AND c.acknowledgement IS NULL AND c.effect_evidence IS NULL AND NOT EXISTS(SELECT 1 FROM start_intents s WHERE s.command_id=c.id) AND NOT EXISTS(SELECT 1 FROM control_intents s WHERE s.command_id=c.id) AND ((c.operation='create' AND r.client_id=c.client_id AND c.resource_uri='/v1/requests' AND EXISTS(SELECT 1 FROM request_origins o WHERE o.command_id=c.id AND o.request_id=r.id) AND NOT EXISTS(SELECT 1 FROM command_captures l WHERE l.command_id=c.id)) OR (c.operation='capture' AND c.resource_uri='/v1/captures?requestId='||r.id AND (SELECT count(*) FROM command_captures l WHERE l.command_id=c.id)=1 AND EXISTS(SELECT 1 FROM command_captures l JOIN captures p ON p.id=l.capture_id WHERE l.command_id=c.id AND p.request_id=r.id AND p.client_id=c.client_id AND p.profile_id=c.profile_id) AND NOT EXISTS(SELECT 1 FROM request_origins o WHERE o.command_id=c.id)))",
+    "CREATE VIEW retention_pending_commands AS SELECT id,request_id,run_id FROM commands WHERE retired=0 AND (state IN ('dispatch-attempted','acknowledged','unresolved') OR (state='accepted' AND id NOT IN (SELECT id FROM retention_local_commands)))",
+    "CREATE INDEX command_request_retention ON commands(request_id,state)",
+    "CREATE INDEX command_run_retention ON commands(run_id,state)",
+    "CREATE TRIGGER request_retention_reset AFTER UPDATE ON requests BEGIN UPDATE commands SET inactive_since=NULL WHERE request_id=NEW.id; UPDATE captures SET collection_since=NULL WHERE request_id=NEW.id; UPDATE capture_uploads SET collection_since=NULL WHERE request_id=NEW.id; END",
+    "CREATE TRIGGER run_retention_reset AFTER UPDATE OF revision,control_revision,supervision,terminal_observed ON runs BEGIN UPDATE commands SET inactive_since=NULL WHERE run_id=NEW.id OR request_id=NEW.request_id; UPDATE captures SET collection_since=NULL WHERE request_id=NEW.request_id; UPDATE capture_uploads SET collection_since=NULL WHERE request_id=NEW.request_id; END",
+    "CREATE TRIGGER command_retention_reset AFTER UPDATE OF state ON commands BEGIN UPDATE commands SET inactive_since=NULL WHERE id=NEW.id OR request_id=NEW.request_id OR run_id=NEW.run_id OR request_id=(SELECT request_id FROM runs WHERE id=NEW.run_id); UPDATE captures SET collection_since=NULL WHERE request_id=NEW.request_id OR request_id=(SELECT request_id FROM runs WHERE id=NEW.run_id); END",
+    "CREATE TRIGGER command_retention_insert AFTER INSERT ON commands BEGIN UPDATE commands SET inactive_since=NULL WHERE request_id=NEW.request_id OR run_id=NEW.run_id OR request_id=(SELECT request_id FROM runs WHERE id=NEW.run_id); UPDATE captures SET collection_since=NULL WHERE request_id=NEW.request_id OR request_id=(SELECT request_id FROM runs WHERE id=NEW.run_id); END"
+  ] <> ["CREATE TRIGGER " <> name <> " AFTER " <> operation <> " ON " <> table <> " BEGIN UPDATE captures SET collection_since=NULL WHERE id=" <> reference <> "; END"
+       | (name,operation,table,reference) <-
+           [("input_capture_insert","INSERT","request_inputs","NEW.capture_id"),
+            ("input_capture_update","UPDATE OF capture_id","request_inputs","NEW.capture_id OR id=OLD.capture_id"),
+            ("input_capture_delete","DELETE","request_inputs","OLD.capture_id"),
+            ("preparation_capture_insert","INSERT","preparation_captures","NEW.capture_id"),
+            ("command_capture_insert","INSERT","command_captures","NEW.capture_id")]]
+  <> ["CREATE TRIGGER " <> name <> " AFTER " <> operation <> " ON " <> table <> " BEGIN UPDATE commands SET inactive_since=NULL WHERE request_id=NEW.request_id; UPDATE captures SET collection_since=NULL WHERE request_id=NEW.request_id; END"
+     | (name,operation,table) <- [("reservation_retention_insert","INSERT","reservations"),
+         ("reservation_retention_update","UPDATE OF state","reservations"),
+         ("preparation_retention_insert","INSERT","preparations"),
+         ("preparation_retention_update","UPDATE OF state","preparations"),
+         ("run_retention_insert","INSERT","runs")]]
+  <> ["CREATE TRIGGER capture_provenance_reset AFTER UPDATE OF request_id,client_id,profile_id,private_reference,bytes,sha256 ON captures BEGIN UPDATE captures SET collection_since=NULL WHERE id=NEW.id; UPDATE commands SET inactive_since=NULL WHERE id IN (SELECT command_id FROM command_captures WHERE capture_id=NEW.id) OR request_id=NEW.request_id; END",
+      "CREATE TRIGGER upload_provenance_reset AFTER UPDATE OF state,published_bytes,published_sha256 ON capture_uploads BEGIN UPDATE capture_uploads SET collection_since=NULL WHERE id=NEW.id; END",
+      "CREATE TRIGGER lineage_collection_reset AFTER INSERT ON requests WHEN NEW.parent_run_id IS NOT NULL BEGIN UPDATE captures SET collection_since=NULL WHERE request_id=(SELECT request_id FROM runs WHERE id=NEW.parent_run_id); END",
+      "CREATE TRIGGER retired_capture_reset AFTER UPDATE OF retired ON commands BEGIN UPDATE captures SET collection_since=NULL WHERE id IN (SELECT capture_id FROM command_captures WHERE command_id=NEW.id); END"]
 
 -- | Negative occupancy facts retained across restoration, never execution authority.
 restartMigration :: [Text]
