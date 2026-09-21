@@ -91,21 +91,34 @@ a separate evidence decision, and accepted prerequisites do not close it.
 No interpreter, recorder, inventory, retention helper, per-leaf review, old-root
 recovery or OS-containment work is part of this unit.
 
-## WM-023 local preparation
+## Active WM-023 local implementation
 
 Issue `acat-wm-023-d20b` is in progress with its four dependencies closed.
-This independent local preparation does not authorize WM-022 Linux execution
-or close WM-022/G1. The unit is `implementation.9tGzKH/credentials.QHYL3FHM`.
-Workflow `49e59e6e-3517-469b-9ff0-f77e5c817597` performs one bounded read-only
-check of existing Authorization, Store, CLI, private-file and frozen admin
-schema interfaces. No source-writing worktree or implementation exists yet.
+This independent local work does not authorize WM-022 Linux execution or close
+WM-022/G1. The unit is `implementation.9tGzKH/credentials.QHYL3FHM`, with source
+branch `wm023-credentials.QHYL3FHM` based on `a54b310b`. Private roots are under
+`/Users/johnw/Products/k.M0a5ItPm`, with a serialized sibling builddir.
 
-Tracker comment 289 and `seams-brief.md` preserve the scope. The next decision
-is the smallest existing-owner extension for secret publication, rotation,
-view invalidation and local administration under the exclusive Store lease.
-The frozen stdin-JSON grammar and private one-time output remain authoritative.
-No listener, real credential provisioning, live credential/configuration access,
-remote action, containment or new framework is authorized by this preparation.
+The bounded interface check is complete in `seams.md`. Tracker comments 289–290,
+`decision-note.md` and `brief.md` define the initial implementation. It extends
+the original Store/Authorization owners with embeddable credential operations
+and the frozen offline CLI. An already-owned Store must refuse a second writer.
+Live external administration remains an unresolved integration obligation,
+rather than being silently treated as satisfied.
+
+Rotation uses a fixed documented 60-second positive overlap, preserves the
+registered client/label/scopes, never extends old authority and retains at most
+the current/immediate predecessor pair. Legacy labels use non-secret credential
+IDs. Lists over the frozen bound refuse whole. Durable private secret publication
+precedes activation, preserving inert-file and uncertain-COMMIT outcomes without
+retry or cleanup inference. Authorization views and wakeups do not become
+Worker cancellation or an unimplemented transport claim.
+
+Workflow `9701c7dc-7e30-484a-b36f-86a71f1297b0` delegates code/test/documentation
+authoring only. Parent owns compiler/native execution after handback, without
+an agent-run deadline around validation. No build, test, program, credential
+generator, listener, live configuration, remote/account action, containment or
+new framework is authorized in the author lane. WM-023 remains unaccepted.
 
 ## WM-021 acceptance
 
@@ -523,8 +536,9 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-21T22:39:40Z`. The next active-work deadline is
-`2026-09-21T23:39:40Z`. Continue with WM-022 through existing owners, with no
+Refocus completed at `2026-09-21T23:10:17Z`. The next active-work deadline is
+`2026-09-22T00:10:17Z`. Continue the WM-022 platform decision and local WM-023
+implementation through existing owners, with no
 OS containment or verification-machinery detour. The resumed persistent goal
 still contains older baseline and scope wording. The user's latest correction
 governs current work, and `/goal-tweak` remains available for updating that
