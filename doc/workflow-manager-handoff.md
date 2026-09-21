@@ -152,11 +152,19 @@ when inspected. Flake, lock, overrides and process-patch bytes are unchanged.
 An unpatched compiler is not a valid substitute. The cause of absence and the
 interrupted build's current state remain unknown.
 
-Explicit realization of that same pinned environment requires a setup decision.
-Any new validation must retain fresh original ownership and private resources,
-leaving the interrupted lane and its missing ownership evidence intact. No old
-PID/handle adoption, cleanup inference, cache-management or containment work is
-authorized. Linux validation remains unestablished.
+The operator subsequently approved realization of that same pinned environment
+and fresh-workspace validation. Workflow
+`6dcc52c6-ef70-44a3-b7bf-30f6d0089ff6` resumes the retained validator under
+`linux-realized/brief.md`. Setup runs as a separate original foreground operation
+before the nine existing gates. Successful validation proceeds to the same
+independent milestone reviewer for closure assessment.
+
+The grant covers the existing pinned environment and its transitive build
+inputs, without version, lock, profile or host-security changes. New validation
+uses fresh original ownership and disjoint private resources. The interrupted
+lane and its missing ownership evidence remain intact. No old PID/handle
+adoption, cleanup inference, cache-management or containment work is authorized.
+Long authorized builds and refocus timers do not justify cancellation.
 
 WM-021 remains in progress pending actual Linux outcomes and parent closure.
 Accepted milestones remain WM-001–WM-020 and G0, with G1 open. All original
@@ -492,8 +500,8 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-21T08:33:33Z`. The next active-work deadline is
-`2026-09-21T09:33:33Z`. Continue with WM-021 through existing owners, with no
+Refocus completed at `2026-09-21T19:49:58Z`. The next active-work deadline is
+`2026-09-21T20:49:58Z`. Continue with WM-021 through existing owners, with no
 OS containment or verification-machinery detour. The resumed persistent goal
 still contains older baseline and scope wording. The user's latest correction
 governs current work, and `/goal-tweak` remains available for updating that
