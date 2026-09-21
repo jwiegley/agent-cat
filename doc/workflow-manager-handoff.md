@@ -90,13 +90,21 @@ without deleting artifact bytes or Runtime history.
 
 The full proposal spans fifteen existing files, with 837 insertions and 60
 deletions. `proposal-corrected.patch`, `correction-result.md` and raw
-`callback-*.meta`/`.log` files record scope and execution. A fresh read-only
-milestone review is running in workflow
-`b86f8a50-c6dc-46b7-b9cc-c5dddc43c725`. No WM-021 application integration has
-occurred. Full owning/source-boundary/platform gates and acceptance remain
-pending. Focused passes are not successful whole-gate wrappers or hardware
-power-loss evidence, and no new production change was made during the callback
-correction.
+`callback-*.meta`/`.log` files record scope and execution. Independent reviewer
+`67b9a224-9e76-46a9-b0ca-03453c000eb5` found no issues and cleared source
+integration in `review.md`. Package acceptance is not established, and no
+WM-021 application integration has occurred.
+
+Local owning validation runs against the unchanged candidate in workflow
+`1083746d-1d57-4750-9ef0-60075326c846`, with execution/reporting authority only.
+Documentation, compiler-parsed source boundaries and Runtime capture passed.
+The full Store wrapper passed at `2026-09-21T03:53:37Z`, including N1/N8 and
+all four existing audit modes. Commands is next in the authorized sequence,
+followed by Drafts, Artifacts/History, Ingestion and Haskell documentation.
+Raw records are in `owning-local`. Earlier failed runs remain unchanged.
+Other-platform execution is not included in this local grant. Owning results
+and exact integration still govern acceptance, without a physical power-loss
+claim or any containment requirement.
 
 ## WM-020 acceptance
 
@@ -428,8 +436,8 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-21T02:54:58Z`. The next active-work deadline is
-`2026-09-21T03:54:58Z`. Continue with WM-021 through existing owners, with no
+Refocus completed at `2026-09-21T03:51:35Z`. The next active-work deadline is
+`2026-09-21T04:51:35Z`. Continue with WM-021 through existing owners, with no
 OS containment or verification-machinery detour. The resumed persistent goal
 still contains older baseline and scope wording. The user's latest correction
 governs current work, and `/goal-tweak` remains available for updating that
