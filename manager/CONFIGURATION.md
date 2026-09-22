@@ -12,7 +12,7 @@ workflow or load routing files.
 
 ## Version 1 format
 
-The file is a JSON object with exactly six required fields:
+The file is a JSON object with six required fields and one optional field:
 
 - `version` is the integer 1.
 - `managerRoot` is an absolute path to an existing private manager directory.
@@ -20,6 +20,18 @@ The file is a JSON object with exactly six required fields:
 - `runners` lists installed runner definitions.
 - `limits` contains the configurable fields of the frozen manager Limits contract.
 - `profiles` lists installed profile definitions.
+- `administrationRoot`, when present, is an absolute path to an existing private
+  directory for the local administrative channel. Explicit null is refused.
+
+The administration directory is separate from manager storage and every local
+retention root. Its `admin.sock` pathname must fit the host's Unix socket address
+limit, so a short directory may be selected independently of a long storage path.
+Installation and reload validate its privacy and separation before publishing
+changes. Reload cannot add, remove or transfer this binding. Omitting the field
+selects the offline CLI, while a configured channel never falls back to offline
+Store acquisition when connection or delivery fails. The directory is not
+implicitly created. See [local administration](COMMANDS.md#local-credential-administration)
+for the channel lifetime and authority boundary.
 
 A runner has exactly `alias`, `executable`, and `prefix`. The executable is
 absolute, and the prefix is an ordered array of argument strings. The native
@@ -164,13 +176,16 @@ publication was uncertain is not removed as rollback.
 
 Installed operations retain the original PrivateRoot. Selection, snapshot reads,
 probes, and reloads require its current identity, a valid existing manager role,
-and root separation. Active reload additionally requires the same root path
-binding. It never repairs a missing marker, transfers the root, or releases its
+and root separation. Active reload additionally requires the same storage and
+administration path bindings. It never repairs a missing marker, transfers a root, or releases its
 ownership when profiles are removed. Closing the handle closes its descriptor,
 not the marker. An active coordination store retains a duplicate lease until its
 own scope ends. A changed root requires a separate installation lifecycle, while
 the old root remains manager-owned. Distinct opens in the same process and
 other processes cannot acquire the same lease. Lease descriptors close on exec.
+The local administration loan holds a separate nonblocking directory lease and
+a duplicate of the original manager lease. It releases the configuration guard
+before serving and retains both leases until the scoped channel ends.
 
 A configuration lock serializes probing, reload, and snapshot publication. A
 probe holds it across both native queries. Successful reload changes all profile

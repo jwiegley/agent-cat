@@ -190,11 +190,13 @@ or approval implementation is substituted for that configuration check.
 The [storage contract](STORAGE.md) describes the installation lease, scoped
 SQLite lifetime, relational records, atomic invalidations, bounded internal
 transactions, and passive checkpoint results. `withCoordinationStore` consumes
-the existing installed configuration. It does not expose SQL, bearer material,
-worker authority, or a network listener through the public facade. The local
-credential operations described in [COMMANDS.md](COMMANDS.md) use that original
-Store through trusted embedding or the exclusive offline stdin CLI. Live external
-administration of a running service remains an unresolved integration obligation.
+the existing installed configuration without exposing SQL, bearer material or
+worker authority. The local credential operations described in
+[COMMANDS.md](COMMANDS.md) use that original Store through trusted embedding,
+the exclusive offline stdin CLI, or its configured same-user local channel.
+`withLocalAdministration` scopes that channel around an existing Store owner's
+action. It creates no HTTP listener, and foreground service startup remains
+unimplemented.
 
 `manager/ci/store.sh` runs the real library composition and native SQLite tests
 at one and eight runtime capabilities. Storage mechanisms do not establish the
@@ -208,9 +210,9 @@ independent cancellation capacity, and one-shot live dispatch. The actual worker
 and native-evidence adapters remain separate. Public receipt codecs follow the
 frozen contract and remain independent of SQLite and authorization machinery.
 
-`manager/ci/commands.sh` runs real N1 and N8 database checks, frozen-validator
-interoperability checks, and compiler-negative proof-opacity checks. No network
-listener or credential administration endpoint is introduced by this unit.
+`manager/ci/commands.sh` runs real N1 and N8 database and offline/live local CLI
+checks, frozen-validator interoperability, and compiler-negative proof-opacity
+checks. The local administrative channel does not provide a public HTTP service.
 
 ## Drafts and immutable inputs
 

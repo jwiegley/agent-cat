@@ -253,9 +253,10 @@ storage failures are not converted into successful receipts.
 ## Command-line boundary
 
 `RUNNER` denotes the configured registry executable. The following forms define
-the command boundary. Offline administration implements credential listing,
-issuance, rotation and revocation. Other administration operations, service
-startup and client service selection remain unimplemented.
+the command boundary. Offline administration and a configured same-user local
+channel implement credential listing, issuance, rotation and revocation. Other
+administration operations, service startup and client service selection remain
+unimplemented.
 Existing `RUNNER --tui` and native frontend commands remain unchanged.
 
 ```text
@@ -265,9 +266,12 @@ RUNNER --tui --service CLIENT_PROFILE
 RUNNER --tui --local
 ```
 
-Offline administration acquires the original Store through local configuration
-and refuses an already-owned Store rather than opening another writer. It does
-not provide an external administrative channel into a running service.
+Without `administrationRoot`, administration acquires the original Store through
+local configuration and refuses an already-owned Store. With that private
+directory configured, it reaches the existing owner's Unix socket without a
+second writer or an offline fallback. Trusted embedding hosts this channel with
+`withLocalAdministration`. Its implementation and authority limits are described
+in [the command contract](../../manager/COMMANDS.md#local-credential-administration).
 
 Service startup is foreground and takes trust, TLS, profiles, and storage
 configuration only from the selected local file. Administration consumes one

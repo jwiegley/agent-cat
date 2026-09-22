@@ -26,8 +26,8 @@ import System.FilePath (takeDirectory, takeFileName)
 import System.IO.Error (isAlreadyExistsError)
 
 -- | Trusted local composition supplies the Store, never a bearer or stored ID.
--- Offline callers must acquire the existing exclusive lease. Live external-admin
--- integration is unresolved and is not supplied by this embeddable operation.
+-- Offline callers acquire the existing exclusive lease. The live local channel
+-- calls this same operation on its original Store without opening another writer.
 administerCredentials :: CoordinationStore -> LocalAdminRequest -> IO BS.ByteString
 administerCredentials store request = do
   result <- try @IOException $ try @StoreFailure $ try @AdminFailure $ do

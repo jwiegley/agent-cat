@@ -86,6 +86,7 @@ checks work source fixture = do
   check "harness has synthetic manager-only credential" (lookup "PROFILE_CHECK_MANAGER_ONLY" ambient == Just "SYNTHETIC_MANAGER_ONLY")
   let manager = work </> "manager"
       alternate = work </> "alternate"
+      administration = work </> "administration"
       workspace = work </> "workspace"
       retention = work </> "retention"
       replies = work </> "replies"
@@ -149,13 +150,27 @@ checks work source fixture = do
         _ -> error "expected single public profile"
       probe installed row = probeConfiguredProfile installed (publicId row) (publicRevision row)
       select installed row = selectConfiguredProfile installed (publicId row) (publicRevision row)
-  forM_ [manager, alternate, workspace, retention, replies] durableDirectory
+  forM_ [manager, alternate, administration, workspace, retention, replies] durableDirectory
   BS.writeFile observations BS.empty
   descriptor <- BS.readFile (source </> "test/fixtures/runtime/descriptor-v3/valid.json") >>= right . decodeWorkflowDescriptor
   BL.writeFile (replies </> "capabilities.json") (encode (frontendCapabilities (FrontendServer "native-fixture" "/actual/native" "0.1.0.0")))
   BL.writeFile (replies </> "catalogue.json") (encode [descriptor])
   void (load valid >>= right)
   noMarker
+  invalid "missing administration root refuses before marker publication"
+    (field "administrationRoot" (toJSON (work </> "missing-administration")) valid)
+  invalid "administration cannot share manager storage"
+    (field "administrationRoot" (toJSON manager) valid)
+  invalid "administration cannot share local retention"
+    (field "administrationRoot" (toJSON retention) valid)
+  invalid "administration root must be absolute"
+    (field "administrationRoot" (String "relative") valid)
+  invalid "explicit administration null is not an omitted endpoint"
+    (field "administrationRoot" Null valid)
+  setFileMode administration 0o755
+  invalid "administration root must be private"
+    (field "administrationRoot" (toJSON administration) valid)
+  setFileMode administration 0o700
   forM_ prefixCandidates $ \candidate -> noLaunch $ unchangedRoot $ do
     load candidate >>= refused "credential prefix loader diagnostic is fixed"
     install candidate >>= refused "credential prefix refuses before installation"
@@ -405,6 +420,17 @@ checks work source fixture = do
   quarantined <- one reopened
   noLaunch $ probe reopened quarantined >>= \result -> check "quarantine captured and refuses service probing" (case result of Left Quarantined -> True; _ -> False)
   closeConfiguration reopened
+  let withAdministration = field "administrationRoot" (toJSON administration) valid
+  bracket (install withAdministration >>= right) closeConfiguration $ \owner -> do
+    prior <- snapshot owner
+    forM_ [valid, field "administrationRoot" (toJSON alternate) valid,
+      field "localRetentionRoots" (toJSON [administration]) withAdministration] $ \adminCandidate -> do
+      writeValue adminCandidate
+      Cli.reloadManagerConfiguration registry owner path >>= refused "reload preserves administration binding and separation"
+      snapshot owner >>= check "invalid administration reload preserves profile revisions and limits" . (== prior)
+    writeValue withAdministration
+    void (Cli.reloadManagerConfiguration registry owner path >>= right)
+  putStrLn "PASS local administration configuration: private separated root, immutable endpoint and atomic reload refusal"
   getEnvironment >>= check "manager environment unchanged" . (== ambient)
   putStrLn "PASS installation/reload: retained root and role checks, no implicit provisioning, atomic policy revision replacement, old context retention, no role transfer or deletion"
   putStrLn "PASS boundary: actual CLI and Runtime modules, deterministic native fixture only, no service/approval/quota enforcement claim"

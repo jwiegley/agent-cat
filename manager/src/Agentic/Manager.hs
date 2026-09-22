@@ -7,7 +7,7 @@ module Agentic.Manager
     configurationSnapshot, selectConfiguredProfile, probeConfiguredProfile,
     CoordinationStore, StoreIdentity (..), StoreFailure (..), Checkpoint (..),
     withCoordinationStore, storeIdentity, checkpointStore, backupCoordinationStore, restoreCoordinationStore,
-    LocalAdminRequest, decodeLocalAdminRequest, administerCredentials,
+    LocalAdminRequest, decodeLocalAdminRequest, administerCredentials, withLocalAdministration,
   ) where
 
 import Agentic.Manager.Profile
@@ -16,4 +16,5 @@ import Agentic.Manager.Root
 
 import Agentic.Manager.Store
 import Agentic.Manager.Credentials (administerCredentials)
+import Agentic.Manager.LocalAdmin (withLocalAdministration)
 import Agentic.Manager.Protocol.LocalAdmin (LocalAdminRequest, decodeLocalAdminRequest)

@@ -1,11 +1,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 
--- | Offline stdin administration through the original configuration and Store owners.
+-- | Frozen stdin administration through the selected local authority.
 module Agentic.Cli.LocalAdmin (runLocalAdmin) where
 
 import Agentic.Manager.Configuration
 import Agentic.Manager.Credentials (administerCredentials)
+import Agentic.Manager.LocalAdmin (callLocalAdministration)
 import Agentic.Manager.Profile (Diagnostic)
 import Agentic.Manager.Protocol.LocalAdmin
 import Agentic.Manager.Store (StoreFailure, withCoordinationStore)
@@ -16,8 +17,8 @@ import qualified Data.ByteString as BS
 import System.Exit (exitFailure, exitSuccess)
 import System.IO (stdin, stdout)
 
--- No listener, secondary writer, or access to an already-owned Store is implied.
--- Opening offline retains the Store's normal restart reconciliation semantics.
+-- A configured channel is authoritative even when unavailable. Only omission
+-- selects offline ownership, including the normal restart reconciliation.
 runLocalAdmin :: (FilePath -> IO (Either Diagnostic Configuration)) -> FilePath -> IO ()
 runLocalAdmin load path = do
   input <- try @IOException (BS.hGet stdin 2097153)
@@ -36,11 +37,15 @@ runLocalAdmin load path = do
                 case configuration of
                   Left _ -> pure (adminError (Just (adminOperation request)) StorageUnavailable)
                   Right value -> do
-                    installed <- installConfiguration value
-                    case installed of
-                      Left _ -> pure (adminError (Just (adminOperation request)) StorageUnavailable)
-                      Right owner -> bracket (pure owner) closeConfiguration $ \active ->
-                        withCoordinationStore active $ \store -> administerCredentials store request
+                    live <- callLocalAdministration value bytes
+                    case live of
+                      Just response -> pure response
+                      Nothing -> do
+                        installed <- installConfiguration value
+                        case installed of
+                          Left _ -> pure (adminError (Just (adminOperation request)) StorageUnavailable)
+                          Right owner -> bracket (pure owner) closeConfiguration $ \active ->
+                            withCoordinationStore active $ \store -> administerCredentials store request
         pure $ case result of
           Right (Right (Right response)) -> response
           _ -> adminError (Just (adminOperation request)) StorageUnavailable

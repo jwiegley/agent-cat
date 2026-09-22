@@ -13,8 +13,8 @@ SHA-256 and comparing against actual credential verifiers. The returned opaque
 `CredentialProof` contains no retained bearer and has no Show, JSON, Generic, or
 public constructor. Its explicit NFData instance does not expose its fields.
 Length checks do not measure entropy. The local credential operations below own
-secure generation and rotation. Live external administration and transport
-authentication remain separate integration obligations.
+secure generation and rotation. The local channel reaches the original Store,
+while protected HTTP authentication remains a separate integration obligation.
 
 Every authorization check inside a transaction verifies the actual in-memory
 store generation, current credential verifier, registered client association,
@@ -57,13 +57,38 @@ parser diagnostics. The implemented operations are `issue-credential`,
 `rotate-credential`, `revoke-credential`, and `list-credentials`. Other recognized
 operations receive `state-conflict` and remain with their existing owners.
 
-The offline CLI acquires the existing configuration lease and original Store.
-It refuses an already-owned installation and retains ordinary Store restart
-reconciliation. Trusted embedding passes that same Store to
-`administerCredentials`. A bearer proof, client ID, or stored credential ID does
-not grant administrative access. There is no listener or secondary writer.
-Live external administration of an already-running service remains unresolved.
-These operations do not establish full WM-023 acceptance.
+When `administrationRoot` is omitted from the trusted operator configuration,
+the CLI acquires the existing configuration lease and original Store. It refuses
+an already-owned installation and retains ordinary Store restart reconciliation.
+When that directory is configured, the CLI sends the same request to its private
+Unix socket and never opens a second Store or falls back after a channel failure.
+
+Trusted embedding uses `withLocalAdministration store action` to retain a local
+channel during the action. The original Store supplies its installed directory
+binding and retains the configuration lease. A separate exclusive directory
+lease prevents duplicate listeners and authorizes removal of a stale socket name.
+Regular files and symbolic links are not removed. A scoped listener removes only
+its own observed socket entry, and its original socket and Async owners finish
+before the directory loan ends. No configuration or Store admission lock spans
+the listener lifetime.
+
+The directory is private, the socket is mode 0600, and both endpoints check the
+peer's operating-system UID. Processes in that account share this local
+administrative authority. Bearer proofs, client IDs and stored credential IDs
+do not provide it, and there is no HTTP administration route.
+
+One request is processed at a time through stdin-equivalent EOF framing. Frames
+are limited to 2 MiB and replies to the frozen 1 MiB ceiling, including the CLI
+newline. Server reads and reply writes each have a five-second connection IO
+deadline, and the client exchange has a fifteen-second deadline. Native mutation
+bounds remain unchanged, without an outer timer interrupting or replaying an
+admitted action. A lost reply remains uncertain.
+
+Live revocation uses the existing SQL operation and authorization notification
+while response configuration/file scopes remain held. It does not signal the
+original worker registrations. Foreground service startup, protected HTTP, page
+and cursor enforcement, and SSE remain unimplemented integration obligations.
+This channel does not establish full WM-023 acceptance.
 
 Issuance creates a registered client and a credential using 32 cryptographically
 random bytes encoded as 64 lowercase hexadecimal ASCII bytes without a newline.
@@ -310,12 +335,15 @@ profile/operation conflicts before returning receipt-expired for a matching tomb
 without invoking the pre-body callback or consuming an upload stream. Unretired retries
 continue through the existing exact byte, media-type and precondition checks.
 
-`manager/ci/commands.sh` builds the actual Cabal target with warnings as errors,
-runs independent N1 and N8 database checks, validates emitted receipts with the
-existing frozen validator, and compiles positive and negative real-source proof
-consumers. Storage, configuration, profile, and full contract gates remain separate.
-No HTTP service, credential administration, provider execution, restored worker
-adoption, power-loss test, or withdrawn SQLite confinement experiment is claimed.
+`manager/ci/commands.sh` builds the actual Cabal targets with warnings as errors,
+runs independent N1 and N8 database and offline/live CLI checks, validates emitted
+responses with the frozen validator, and compiles real-source proof consumers.
+The live fixture checks held-response revocation, unchanged worker-registration
+signals, exclusive endpoint ownership, framing and absence of offline fallback.
+It does not launch a physical workflow through that new fixture. Storage,
+configuration, profile and full contract gates remain separate. No HTTP service,
+paid provider execution, restored worker adoption, power-loss test or withdrawn
+SQLite confinement experiment is claimed.
 
 ## Admission continuations
 

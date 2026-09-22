@@ -8,6 +8,7 @@
 module Agentic.Manager.Store
   ( CoordinationStore, StoreIdentity (..), StoreFailure (..), Checkpoint (..),
     withCoordinationStore, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreFiles, withStoreReader, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, requestStoreWorkersStop, awaitStoreWorkersStop, retryStoreCleanup, probeStoreCapabilities,
+    withStoreAdministration,
     AuthorizationWatch, withStoreAuthorizationWatch, withStoreConfigurationWatch, authorizationWatchCurrent, withAuthorizationObservation, awaitAuthorizationChange,
     CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, enforceAdmissionFence, Transaction, execute, query, refuseTransaction, runTransaction, runRead, StoreAdmission (..), runTransactionWithAdmission, runReadWithAdmission, transactionGeneration,
     Invalidation (..), EventReadFailure (..), RetainedEvents (..), readRetainedEvents, retainEvents, backupCoordinationStore, restoreCoordinationStore, reservationOccupancy
@@ -16,7 +17,7 @@ module Agentic.Manager.Store
 import Agentic.Manager.Store.Admission (StoreAdmission (..))
 import qualified Agentic.Manager.Store.Admission as Admission
 import Agentic.Manager.Configuration
-  (InstalledConfiguration, acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationSnapshot, withConfigurationCatalogues, withConfiguredRetentionRoot, validateHistoryBindings, revalidateRetentionRoot, configuredInvocations, probeConfiguredCapabilities)
+  (InstalledConfiguration, acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationAdministration, withConfigurationSnapshot, withConfigurationCatalogues, withConfiguredRetentionRoot, validateHistoryBindings, revalidateRetentionRoot, configuredInvocations, probeConfiguredCapabilities)
 import Agentic.Manager.Profile (ConfigurationLimits (..), PublicProfile, Diagnostic, Discovery)
 import Agentic.Manager.Worker.State (WorkerLifecycle, acceptingPreparation)
 import Agentic.Manager.Lease (duplicateLease)
@@ -625,6 +626,11 @@ retryStoreCleanup = closeStore
 -- | Configuration authority associated with this store, never a caller-selected registry.
 withStoreConfiguration :: CoordinationStore -> (ConfigurationLimits -> [PublicProfile] -> IO a) -> IO (Either Diagnostic a)
 withStoreConfiguration (CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _) = withConfigurationSnapshot installed
+
+-- | The local administration namespace of this Store's original configuration.
+withStoreAdministration :: CoordinationStore -> (PrivateRoot -> IO a) -> IO (Either Diagnostic a)
+withStoreAdministration store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _) action =
+  withConfigurationAdministration installed $ \root -> admitted store (pure ()) >> action root
 
 -- | Current catalogue facts from the same associated configuration and lock.
 withStoreCatalogues :: CoordinationStore -> (ConfigurationLimits -> [PublicProfile] -> [(Text, Discovery)] -> IO a) -> IO (Either Diagnostic a)
