@@ -113,13 +113,22 @@ Closed scopes stay invalid, and worker stop cells remain separate from revocatio
 A one-second wakeup bounds quiet expiry checks, which revalidate trusted SQLite
 time rather than treating the timer or view token as authority.
 
-Future transport, page, cursor, and SSE owners must integrate current-view
-revalidation before releasing protected data and observe invalidations during
-streaming. Existing response scopes remain unchanged. These primitives do not
-recall emitted bytes or claim completed streaming closure or page enforcement.
-Full view revalidation still needs the current configuration guard and may fail
-fast while a response holds it. Transport integration must compose that boundary
-without treating storage contention as credential revocation.
+`withAuthorizedView` observes configuration afresh between independently acquired
+scopes. `withAuthorizedResponse` keeps one reader charge and the current
+configuration loan through its callback. Its view rechecks transactional
+authorization using that retained configuration, and its watch closes before
+the configuration loan ends. An escaped view remains invalid.
+
+Artifact downloads, projected outputs, export collections, and retained history
+result callbacks receive this response-scoped view. Valid revalidation, unrelated
+client changes, quiet expiry, and revocation therefore compose with the original
+file and configuration owners without a second reader charge or reentrant guard.
+Storage contention remains distinct from credential revocation.
+
+Transport, page, cursor, and SSE owners must check the supplied view before
+releasing protected data and observe invalidations during streaming. These
+primitives do not recall emitted bytes or claim implemented streaming closure
+or page enforcement.
 
 ## Mutation transaction
 

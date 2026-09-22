@@ -251,7 +251,7 @@ retainResult store ident observed = do
     case fromJSON value of Success reference -> pure reference; Error _ -> throwIO StoreIntegrity
 
 -- | Verified retained result through the shared Artifacts/Runtime owner. Legacy roots never mutate.
-withHistoryResult :: CoordinationStore -> CredentialProof -> [LegacyHistory] -> Text -> (BS.ByteString -> IO ()) -> IO ()
+withHistoryResult :: CoordinationStore -> CredentialProof -> [LegacyHistory] -> Text -> (AuthorizedView -> BS.ByteString -> IO ()) -> IO ()
 withHistoryResult store proof bindings ident respond = bounded $ do
   (profile,identity) <- runRead store $ do
     rows <- query "SELECT profile_id,root_identity FROM history_entries WHERE id=?" [text ident]
@@ -261,7 +261,7 @@ withHistoryResult store proof bindings ident respond = bounded $ do
         pure (profile,identity)
       _ -> refuseTransaction C.ResourceUnavailable
   unless (length [() | LegacyHistory _ p r <- bindings,p==profile,r==identity] == 1) (throwIO C.ResourceUnavailable)
-  withArtifactDownload store proof (resultHandle ident) (\_ bytes -> respond bytes)
+  withArtifactDownload store proof (resultHandle ident) (\view _ bytes -> respond view bytes)
 
 -- | Observation handles are not admitted as parents. No command or worker effect precedes refusal.
 createHistoryLineage :: CoordinationStore -> CredentialProof -> Text -> Text -> Maybe Text -> BS.ByteString -> IO (Either C.CommandFailure C.CommandReceipt)

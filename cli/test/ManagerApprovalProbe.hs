@@ -236,7 +236,7 @@ verticalOutputs (Fixture root _ store proof originalKey _) run context = do
         case rows of [[SQL.SQLText value]]->pure value;_->refuseTransaction StoreIntegrity
   withHistory store proof [] Nothing $ \rows -> check "completed actual run remains in history"
     (any (\value -> case value of Object fields -> KM.lookup "id" fields==Just(String run); _ -> False) rows)
-  Artifacts.withRunOutputs store proof association $ \rows -> check "actual authored result is verified"
+  Artifacts.withRunOutputs store proof association $ \_ rows -> check "actual authored result is verified"
     (any (\value -> case value of
       Object fields -> case KM.lookup "verification" fields of
         Just(Object verification)->KM.lookup "state" verification==Just(String "verified")
@@ -245,7 +245,7 @@ verticalOutputs (Fixture root _ store proof originalKey _) run context = do
   artifact <- scalar "SELECT result_artifact_id FROM runs WHERE id=?"
   let nativeFile=root </> "runs/runs" </> T.unpack(runIdText(preparedRunId(reviewNative context))) </> "runtime/result.json"
   sourceBytes <- BS.readFile nativeFile
-  Artifacts.withArtifactDownload store proof artifact $ \_ bytes -> check "verified manager download is exact native result envelope" (bytes==sourceBytes)
+  Artifacts.withArtifactDownload store proof artifact $ \_ _ bytes -> check "verified manager download is exact native result envelope" (bytes==sourceBytes)
   mutate store (execute "INSERT OR IGNORE INTO credential_scopes VALUES ('credential','profile','export')" [])
   revision <- scalar "SELECT revision FROM runs WHERE id=?"
   let name="vertical-"<>run<>".json"

@@ -4,9 +4,9 @@
 -- | Verified credential possession, rechecked against current transactional facts.
 module Agentic.Manager.Authorization
   ( CredentialProof, authenticateCredential, currentClient, authorizeProfile, proofGeneration, credentialRateKey,
-    AuthorizedView, withAuthorizedView, revalidateAuthorizedView, awaitAuthorizedView ) where
+    AuthorizedView, withAuthorizedView, withAuthorizedResponse, revalidateAuthorizedView, awaitAuthorizedView ) where
 
-import Agentic.Manager.Profile (publicId, publicRevision)
+import Agentic.Manager.Profile (PublicProfile, publicId, publicRevision)
 import Agentic.Manager.Protocol.Command
 import Agentic.Manager.Store
 import Control.DeepSeq (NFData (rnf))
@@ -76,46 +76,65 @@ authorizeProfile proof@(CredentialProof credential _ _ _) profile scopes = do
 -- | A scoped binding to current authority, credential, client authorization revision,
 -- profile revision, scope facts and effective deadline. Neither Show nor Generic is safe.
 -- Future page/cursor/transport owners must revalidate before releasing protected data.
-data AuthorizedView = AuthorizedView !CoordinationStore !AuthorizationWatch !CredentialProof
-  !Text ![Scope] ![Text]
+data AuthorizedView = AuthorizedView !AuthorizationWatch !(IO [Text]) ![Text]
 
 withAuthorizedView :: CoordinationStore -> CredentialProof -> Text -> [Scope]
   -> (AuthorizedView -> IO a) -> IO (Either CommandFailure a)
 withAuthorizedView store proof profile scopes action = authorizationIO $ do
   unless (validId profile && length (take 5 scopes) <= 4) (throwIO InvalidRequest)
-  withStoreAuthorizationWatch store $ \watch -> do
-    observed <- withAuthorizationObservation watch (currentViewFacts store proof profile scopes)
-    facts <- maybe (throwIO Unauthenticated) pure observed
-    action (AuthorizedView store watch proof profile scopes facts)
+  withStoreAuthorizationWatch store $ \watch ->
+    withView watch (currentViewFacts store proof profile scopes) action
+
+-- | A response view under the original configuration loan and one reader charge.
+-- Its revalidation borrows that configuration rather than reacquiring its guard.
+-- The original watch ends before the configuration loan is released.
+withAuthorizedResponse :: CoordinationStore -> CredentialProof -> Text -> [Scope]
+  -> (AuthorizedView -> IO a) -> IO a
+withAuthorizedResponse store proof profile scopes action = do
+  unless (validId profile && length (take 5 scopes) <= 4) (throwIO InvalidRequest)
+  runRead store (currentClient proof) >>= either throwIO (const (pure ()))
+  result <- withStoreConfigurationWatch store $ \watch _ profiles ->
+    withView watch (profileViewFacts store proof profile scopes profiles) action
+  either (const (throwIO StorageUnavailable)) pure result
+
+withView :: AuthorizationWatch -> IO [Text] -> (AuthorizedView -> IO a) -> IO a
+withView watch observe action = do
+  observed <- withAuthorizationObservation watch observe
+  facts <- maybe (throwIO Unauthenticated) pure observed
+  action (AuthorizedView watch observe facts)
 
 revalidateAuthorizedView :: AuthorizedView -> IO (Either CommandFailure ())
-revalidateAuthorizedView (AuthorizedView store watch proof profile scopes bound) = authorizationIO $ do
+revalidateAuthorizedView (AuthorizedView watch observe bound) = authorizationIO $ do
   observed <- withAuthorizationObservation watch $ do
-    facts <- currentViewFacts store proof profile scopes
+    facts <- observe
     unless (facts == bound) (throwIO Unauthenticated)
   unless (observed == Just ()) (throwIO Unauthenticated)
 
 -- A wakeup is not current authority. Every timer expiry rechecks SQLite time.
 awaitAuthorizedView :: AuthorizedView -> IO (Either CommandFailure ())
-awaitAuthorizedView view@(AuthorizedView _ watch _ _ _ _) =
+awaitAuthorizedView view@(AuthorizedView watch _ _) =
   awaitAuthorizationChange watch >> revalidateAuthorizedView view
 
 currentViewFacts :: CoordinationStore -> CredentialProof -> Text -> [Scope] -> IO [Text]
-currentViewFacts store proof@(CredentialProof credential client _ generation) profile scopes = do
+currentViewFacts store proof profile scopes = do
   runRead store (currentClient proof) >>= either throwIO (const (pure ()))
-  result <- withStoreConfiguration store $ \_ profiles -> do
+  result <- withStoreConfiguration store $ \_ profiles ->
+    profileViewFacts store proof profile scopes profiles
+  either (const (throwIO StorageUnavailable)) pure result
+
+profileViewFacts :: CoordinationStore -> CredentialProof -> Text -> [Scope] -> [PublicProfile] -> IO [Text]
+profileViewFacts store proof@(CredentialProof credential client _ generation) profile scopes profiles =
+  runRead store $ do
+    _ <- authorizeProfile proof profile scopes >>= either refuseTransaction pure
     revision <- case [publicRevision p | p <- profiles, publicId p == profile] of
       [value] -> pure value
-      _ -> throwIO Forbidden
-    runRead store $ do
-      _ <- authorizeProfile proof profile scopes >>= either refuseTransaction pure
-      rows <- query "SELECT s.authority_epoch,p.authorization_revision,c.expires_at,coalesce(a.rotation_cutoff,''),(SELECT json_group_array(scope) FROM (SELECT scope FROM credential_scopes WHERE credential_id=c.id AND profile_id=? ORDER BY scope)) FROM credentials c JOIN clients p ON p.id=c.client_id CROSS JOIN service_metadata s LEFT JOIN credential_administration a ON a.credential_id=c.id WHERE c.id=? AND s.singleton=1"
-        [SQL.SQLText profile,SQL.SQLText credential]
-      case rows of
-        [[SQL.SQLText epoch,SQL.SQLText authorization,SQL.SQLText expiry,SQL.SQLText cutoff,SQL.SQLText actualScopes]] ->
-          pure [generation,epoch,credential,client,authorization,profile,revision,actualScopes,expiry,cutoff]
-        _ -> refuseTransaction Unauthenticated
-  either (const (throwIO StorageUnavailable)) pure result
+      _ -> refuseTransaction Forbidden
+    rows <- query "SELECT s.authority_epoch,p.authorization_revision,c.expires_at,coalesce(a.rotation_cutoff,''),(SELECT json_group_array(scope) FROM (SELECT scope FROM credential_scopes WHERE credential_id=c.id AND profile_id=? ORDER BY scope)) FROM credentials c JOIN clients p ON p.id=c.client_id CROSS JOIN service_metadata s LEFT JOIN credential_administration a ON a.credential_id=c.id WHERE c.id=? AND s.singleton=1"
+      [SQL.SQLText profile,SQL.SQLText credential]
+    case rows of
+      [[SQL.SQLText epoch,SQL.SQLText authorization,SQL.SQLText expiry,SQL.SQLText cutoff,SQL.SQLText actualScopes]] ->
+        pure [generation,epoch,credential,client,authorization,profile,revision,actualScopes,expiry,cutoff]
+      _ -> refuseTransaction Unauthenticated
 
 authorizationIO :: IO a -> IO (Either CommandFailure a)
 authorizationIO action = either (const (Left StorageUnavailable)) id <$> try @StoreFailure (try @CommandFailure action)

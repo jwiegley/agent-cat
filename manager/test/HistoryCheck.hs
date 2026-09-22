@@ -119,7 +119,7 @@ main = do
           (_,envelopes) <- withPrivateRoot "managed result" (root </> "runs") $ \runs -> withPrivateDirectoryAt runs ["runs","native-3"] $ \fd -> readRunRecordWithEnvelopesAt (root </> "runs/runs/native-3") fd Nothing now
           forM_ envelopes (void . ingestRuntimeEnvelope store association . encodeEnvelope)
           removeFile (root </> "runs/runs/native-3/runtime/result.json")
-          withRunOutputs store proof association (\_ -> pure ())
+          withRunOutputs store proof association (\_ _ -> pure ())
           resultViews <- history store proof [binding]
           check "history preserves shared missing-result reason" (any (\v -> field "id" v==String "run_3" && field "reason" (field "verification" v)==String "missing") resultViews)
           views <- history store proof [binding]
@@ -133,14 +133,16 @@ main = do
           refused <- createHistoryLineage store proof ident "unused" Nothing "{\"operation\":\"restart\"}"
           check "legacy ROOT refuses before mutation" (refused == Left OwnershipUnavailable)
           expected <- BS.readFile(legacy </> "runs/old/runtime/result.json")
-          withHistoryResult store proof [binding] ident (\bytes -> check "legacy result uses verified original bytes" (bytes==expected))
-          withArtifactDownload store proof (string(field "artifactId" (field "verification" legacyView))) $ \metadata bytes -> do
+          withHistoryResult store proof [binding] ident (\view bytes -> do
+            revalidateAuthorizedView view >>= check "legacy response view revalidates under retained scopes" . (==Right ())
+            check "legacy result uses verified original bytes" (bytes==expected))
+          withArtifactDownload store proof (string(field "artifactId" (field "verification" legacyView))) $ \_ metadata bytes -> do
             check "advertised legacy artifact resolves through existing owner" (bytes==expected && field "runId" metadata==String ident)
             BS.writeFile(work </> "history-artifact.json") (encoded metadata)
           BS.writeFile(legacy </> "runs/old/runtime/journal.ndjson") "corrupt\n"
-          withHistoryResult store proof [binding] ident (\bytes -> check "retained reference survives corrupt journal" (bytes==expected))
+          withHistoryResult store proof [binding] ident (\_ bytes -> check "retained reference survives corrupt journal" (bytes==expected))
           BS.writeFile(legacy </> "runs/old/runtime/result.json") "tampered"
-          badResult <- try @SomeException(withHistoryResult store proof [binding] ident (\_ -> error "unverified response"))
+          badResult <- try @SomeException(withHistoryResult store proof [binding] ident (\_ _ -> error "unverified response"))
           check "tampered legacy result never responds" (isLeft badResult)
           BS.writeFile(legacy </> "runs/old/runtime/result.json") expected
           BS.writeFile(work </> "history.json") (encoded views)
@@ -184,7 +186,7 @@ main = do
         _ <- reloadConfiguration installed config >>= right
         withCoordinationStore installed $ \store -> do
           proof <- authenticateCredential store bearer >>= right
-          withHistoryResult store proof [binding] ident (\bytes -> check "retained result survives Store reopen without authority adoption" (bytes==expected))
+          withHistoryResult store proof [binding] ident (\_ bytes -> check "retained result survives Store reopen without authority adoption" (bytes==expected))
           nonce <- key store "absent"
           absent <- createLineageDraft store proof "run_1" nonce Nothing "{\"operation\":\"restart\"}"
           check "missing precondition refuses without worker" (isLeft absent)
@@ -210,7 +212,7 @@ observationRace work source = do
       ident <- case [string(field "id" value) | value<-items,field "kind" value==Null] of [i]->pure i;_->error "legacy run"
       entered <- newIORef False
       Audit.withReviewAudit "history-artifact-captured" $ \barrier ->
-        withAsync (try @CommandFailure(withHistoryResult store proof [binding] ident (\_ -> writeIORef entered True))) $ \download -> do
+        withAsync (try @CommandFailure(withHistoryResult store proof [binding] ident (\_ _ -> writeIORef entered True))) $ \download -> do
           _ <- Audit.waitReviewed barrier
           original <- BS.readFile(work </> "configuration.json") >>= right . (eitherDecodeStrict' :: BS.ByteString -> Either String Value)
           let removed = case original of Object fields->Object(KM.insert "localRetentionRoots" (toJSON([]::[Text])) fields);_->error "configuration"

@@ -8,7 +8,7 @@
 module Agentic.Manager.Store
   ( CoordinationStore, StoreIdentity (..), StoreFailure (..), Checkpoint (..),
     withCoordinationStore, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreFiles, withStoreReader, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, requestStoreWorkersStop, awaitStoreWorkersStop, retryStoreCleanup, probeStoreCapabilities,
-    AuthorizationWatch, withStoreAuthorizationWatch, authorizationWatchCurrent, withAuthorizationObservation, awaitAuthorizationChange,
+    AuthorizationWatch, withStoreAuthorizationWatch, withStoreConfigurationWatch, authorizationWatchCurrent, withAuthorizationObservation, awaitAuthorizationChange,
     CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, enforceAdmissionFence, Transaction, execute, query, refuseTransaction, runTransaction, runRead, StoreAdmission (..), runTransactionWithAdmission, runReadWithAdmission, transactionGeneration,
     Invalidation (..), EventReadFailure (..), RetainedEvents (..), readRetainedEvents, retainEvents, backupCoordinationStore, restoreCoordinationStore, reservationOccupancy
   ) where
@@ -675,8 +675,18 @@ withStoreReader store@(CoordinationStore _ _ _ _ _ _ _ _ (_,readers,_) _ _ _ _) 
 data AuthorizationWatch = AuthorizationWatch !CoordinationStore !(TVar (Maybe Word64)) !(TVar Word64) !(TVar Bool)
 
 withStoreAuthorizationWatch :: CoordinationStore -> (AuthorizationWatch -> IO a) -> IO a
-withStoreAuthorizationWatch store@(CoordinationStore _ _ _ _ _ _ _ _ (_,_,cell) _ _ _ _) action =
-  withStoreReader store $ bracket acquire release action
+withStoreAuthorizationWatch store action = withStoreReader store (withAuthorizationWatch store action)
+
+-- | One charged response whose watch expires before its configuration loan ends.
+withStoreConfigurationWatch :: CoordinationStore
+  -> (AuthorizationWatch -> ConfigurationLimits -> [PublicProfile] -> IO a) -> IO (Either Diagnostic a)
+withStoreConfigurationWatch store action = withStoreReader store $
+  withStoreConfiguration store $ \limits profiles ->
+    withAuthorizationWatch store $ \watch -> action watch limits profiles
+
+withAuthorizationWatch :: CoordinationStore -> (AuthorizationWatch -> IO a) -> IO a
+withAuthorizationWatch store@(CoordinationStore _ _ _ _ _ _ _ _ (_,_,cell) _ _ _ _) action =
+  bracket acquire release action
   where
     acquire = atomically (readTVar cell) >>= maybe (throwIO StoreClosed)
       (\revision -> AuthorizationWatch store cell <$> newTVarIO revision <*> newTVarIO True)
