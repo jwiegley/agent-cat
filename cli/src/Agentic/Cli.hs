@@ -303,6 +303,7 @@ import Numeric (showFFloat)
 import qualified Paths_agentic as Paths
 import Data.Version (showVersion)
 import System.Directory (createDirectoryIfMissing, doesFileExist, getCurrentDirectory, getHomeDirectory, getTemporaryDirectory)
+import Agentic.Cli.LocalAdmin (runLocalAdmin)
 import System.Environment (getArgs, getEnvironment, getExecutablePath, lookupEnv)
 import System.Exit (ExitCode (..), exitSuccess, exitWith)
 import System.FilePath (isAbsolute, (</>))
@@ -852,6 +853,12 @@ cliMain reg = do
   hSetEncoding stdout utf8
   hSetEncoding stderr utf8
   args <- map T.pack <$> getArgs
+  case args of
+    ["--manager", "admin", "--config", path] -> runLocalAdmin (loadManagerConfiguration reg) (T.unpack path)
+    _ -> runOrdinaryCommand reg args
+
+runOrdinaryCommand :: Registry -> [Text] -> IO ()
+runOrdinaryCommand reg args =
   case parseCommand reg args of
     Left problem -> die reg 1 problem
     Right cmd ->

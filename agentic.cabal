@@ -190,6 +190,9 @@ library
     Agentic.Workflow.Do
   other-modules:
     Agentic.Chains
+    Agentic.Cli.LocalAdmin
+    Agentic.Manager.Credentials
+    Agentic.Manager.Protocol.LocalAdmin
     Agentic.Cli.Frontend
     Agentic.DSL.Json
     Agentic.Exec
@@ -489,7 +492,11 @@ executable manager-command-check
   import:          settings
   hs-source-dirs:  manager/test manager/src
   main-is:         CommandCheck.hs
+  c-sources:       manager/test/draft_sync_fault.c
   other-modules:
+    Agentic.Manager.Test.AcceptanceAudit
+    Agentic.Manager.Credentials
+    Agentic.Manager.Protocol.LocalAdmin
     Agentic.Manager.Commands
     Agentic.Manager.Protocol.Artifact
     Agentic.Manager.Authorization
@@ -636,6 +643,8 @@ executable manager-artifact-check
   hs-source-dirs:  manager/src manager/test
   main-is:         ArtifactCheck.hs
   other-modules:
+    Agentic.Manager.Credentials
+    Agentic.Manager.Protocol.LocalAdmin
     Agentic.Manager.Artifacts
     Agentic.Manager.History
     Agentic.Manager.Protocol.Artifact

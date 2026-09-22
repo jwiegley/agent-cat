@@ -8,6 +8,7 @@
 module Agentic.Manager.Store
   ( CoordinationStore, StoreIdentity (..), StoreFailure (..), Checkpoint (..),
     withCoordinationStore, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreFiles, withStoreReader, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, requestStoreWorkersStop, awaitStoreWorkersStop, retryStoreCleanup, probeStoreCapabilities,
+    AuthorizationWatch, withStoreAuthorizationWatch, authorizationWatchCurrent, withAuthorizationObservation, awaitAuthorizationChange,
     CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, enforceAdmissionFence, Transaction, execute, query, refuseTransaction, runTransaction, runRead, StoreAdmission (..), runTransactionWithAdmission, runReadWithAdmission, transactionGeneration,
     Invalidation (..), EventReadFailure (..), RetainedEvents (..), readRetainedEvents, retainEvents, backupCoordinationStore, restoreCoordinationStore, reservationOccupancy
   ) where
@@ -20,7 +21,7 @@ import Agentic.Manager.Profile (ConfigurationLimits (..), PublicProfile, Diagnos
 import Agentic.Manager.Worker.State (WorkerLifecycle, acceptingPreparation)
 import Agentic.Manager.Lease (duplicateLease)
 import Agentic.Manager.Root (validateRootSeparation)
-import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration, artifactMigration, historyMigration, restartMigration, retentionMigration)
+import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration, artifactMigration, historyMigration, restartMigration, retentionMigration, credentialMigration)
 import Agentic.Runtime
   (PrivateRoot, assertPrivateRoot, closePrivateRoot, openPrivateSubroot, privateRootPath,
    openPrivateRoot, privateRootIdentity, readPrivateFileAt, ensurePrivateDirectoryAt, removePrivateFileAt,
@@ -29,7 +30,7 @@ import Agentic.Runtime
 import Control.Concurrent (rtsSupportsBoundThreads)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (race, withAsync, asyncWithUnmask, cancel, wait)
-import Control.Concurrent.STM (STM, TMVar, TVar, atomically, newEmptyTMVarIO, newTVarIO, readTMVar, readTVar, readTVarIO, writeTVar, modifyTVar', throwSTM, isEmptyTMVar, tryPutTMVar)
+import Control.Concurrent.STM (STM, TMVar, TVar, atomically, newEmptyTMVarIO, newTVarIO, readTMVar, readTVar, readTVarIO, writeTVar, modifyTVar', throwSTM, isEmptyTMVar, tryPutTMVar, check, orElse, registerDelay)
 import Control.Concurrent.MVar (MVar, newMVar, newEmptyMVar, readMVar, tryReadMVar, withMVar, modifyMVarMasked, takeMVar, putMVar, tryTakeMVar)
 import Control.Exception
   (Exception, SomeException, bracket, bracketOnError, finally, mask,
@@ -93,7 +94,7 @@ data Checkpoint = Checkpoint
 -- | One connection and admission cell. Ordinary calls fail fast, terminal-owner
 -- persistence can spend its existing operation allowance waiting for the cell.
 data CoordinationStore = CoordinationStore !InstalledConfiguration !PrivateRoot !SQL.Database !StoreIdentity
-  !(MVar ()) !(IORef Bool) !(IORef Bool) !Fd !(MVar (), TVar Int) !(TVar WorkerRegistry) !(MVar ()) !(IORef Bool) !(TVar (Bool, Maybe (TMVar (), MVar ())))
+  !(MVar ()) !(IORef Bool) !(IORef Bool) !Fd !(MVar (), TVar Int, TVar (Maybe Word64)) !(TVar WorkerRegistry) !(MVar ()) !(IORef Bool) !(TVar (Bool, Maybe (TMVar (), MVar ())))
 
 -- | Original registrations and their first stop batch. A scoped fence is not permanent quarantine.
 data WorkerRegistry = WorkerRegistry
@@ -158,7 +159,7 @@ openStore restart installed root lease = storageErrors $ do
     (epoch, stream) <- bounded db 30000000 $ do
       SQL.exec db "PRAGMA busy_timeout=100; PRAGMA foreign_keys=ON; PRAGMA temp_store=FILE; PRAGMA cache_size=-2048; PRAGMA temp.cache_size=-2048"
       version <- scalar db "PRAGMA user_version"
-      unless (version `elem` map SQL.SQLInteger [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, fromIntegral schemaVersion]) $
+      unless (version `elem` map SQL.SQLInteger [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, fromIntegral schemaVersion]) $
         throwIO StoreVersion
       unless(restart || version==SQL.SQLInteger(fromIntegral schemaVersion))(throwIO StoreVersion)
       -- Newer versions are refused before changing their journal or schema.
@@ -172,7 +173,7 @@ openStore restart installed root lease = storageErrors $ do
         [[SQL.SQLText epoch, SQL.SQLText stream]] -> pure (epoch, stream)
         _ -> throwIO StoreIntegrity
     CoordinationStore installed root db (StoreIdentity schemaVersion epoch stream generation)
-      <$> newMVar () <*> newIORef False <*> newIORef False <*> pure lease <*> ((,) <$> newMVar () <*> newTVarIO 0) <*> newTVarIO (WorkerRegistry False False Nothing []) <*> newMVar () <*> newIORef False <*> newTVarIO (False, Nothing)
+      <$> newMVar () <*> newIORef False <*> newIORef False <*> pure lease <*> ((,,) <$> newMVar () <*> newTVarIO 0 <*> newTVarIO (Just 0)) <*> newTVarIO (WorkerRegistry False False Nothing []) <*> newMVar () <*> newIORef False <*> newTVarIO (False, Nothing)
   where
     databaseName = "coordination.sqlite3"
     checkCompanion name = do
@@ -462,6 +463,7 @@ migrate db = mask $ \restore -> do
       SQL.SQLInteger 8 -> pure ()
       SQL.SQLInteger 9 -> pure ()
       SQL.SQLInteger 10 -> pure ()
+      SQL.SQLInteger 11 -> pure ()
       SQL.SQLInteger current | current == fromIntegral schemaVersion -> pure ()
       _ -> throwIO StoreVersion
     when (version `elem` [SQL.SQLInteger 0, SQL.SQLInteger 1]) $ do
@@ -494,9 +496,12 @@ migrate db = mask $ \restore -> do
     when (version `elem` map SQL.SQLInteger [0,1,2,3,4,5,6,7,8,9]) $ do
       mapM_ (SQL.exec db) restartMigration
       SQL.exec db "PRAGMA user_version=10"
-    when (version /= SQL.SQLInteger (fromIntegral schemaVersion)) $ do
+    when (version `elem` map SQL.SQLInteger [0..10]) $ do
       mapM_ (SQL.exec db) retentionMigration
       SQL.exec db "PRAGMA user_version=11"
+    when (version /= SQL.SQLInteger (fromIntegral schemaVersion)) $ do
+      mapM_ (SQL.exec db) credentialMigration
+      SQL.exec db "PRAGMA user_version=12"
     SQL.exec db "COMMIT"
   case result of
     Right () -> pure ()
@@ -546,11 +551,12 @@ migrateLiteralDigests db after = do
 
 
 closeStore :: CoordinationStore -> IO ()
-closeStore store@(CoordinationStore installed root db _ gate closed poisoned lease (files,_) workers closing retired admission) =
+closeStore store@(CoordinationStore installed root db _ gate closed poisoned lease (files,_,_) workers closing retired admission) =
   uninterruptibleMask_ $ withMVar closing $ \_ -> do
     already <- readIORef retired
     unless already $ do
       writeIORef closed True
+      invalidateAuthorization store
       controller <- atomically $ do
         (_, owner) <- readTVar admission
         writeTVar admission (True, owner)
@@ -594,7 +600,8 @@ stopWorkers workers = do
 
 -- No callback, SQL acquisition or join runs in this notification transaction.
 notifyStoreFailure :: CoordinationStore -> Bool -> IO ()
-notifyStoreFailure (CoordinationStore _ _ _ _ _ _ _ _ _ workers _ _ admission) unavailable = atomically $ do
+notifyStoreFailure (CoordinationStore _ _ _ _ _ _ _ _ (_,_,authorization) workers _ _ admission) unavailable = atomically $ do
+  writeTVar authorization Nothing
   modifyTVar' workers (\state -> state {registryClosed=True, registryUnavailable=registryUnavailable state || unavailable})
   (_, owner) <- readTVar admission
   forM_ owner $ \(stop, _) -> void(tryPutTMVar stop ())
@@ -641,7 +648,7 @@ withStoreRetentionRoot store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ 
   withStoreFiles store $ \_ -> withConfiguredRetentionRoot installed path profile action
 
 withStoreFiles :: CoordinationStore -> (PrivateRoot -> IO a) -> IO a
-withStoreFiles store@(CoordinationStore _ root _ _ _ closed _ lease (files,_) _ _ _ _) action = mask $ \restore -> do
+withStoreFiles store@(CoordinationStore _ root _ _ _ closed _ lease (files,_,_) _ _ _ _) action = mask $ \restore -> do
   readIORef closed >>= \done -> when done (throwIO StoreClosed)
   acquired <- tryTakeMVar files
   case acquired of
@@ -656,13 +663,70 @@ withStoreFiles store@(CoordinationStore _ root _ _ _ closed _ lease (files,_) _ 
 -- | A bounded materialization lifetime at the existing file/read owner. Acquisition
 -- uses current configuration, but neither configuration nor SQL is held by a reader.
 withStoreReader :: CoordinationStore -> IO a -> IO a
-withStoreReader store@(CoordinationStore _ _ _ _ _ _ _ _ (_,readers) _ _ _ _) action = mask $ \restore -> do
+withStoreReader store@(CoordinationStore _ _ _ _ _ _ _ _ (_,readers,_) _ _ _ _) action = mask $ \restore -> do
   result <- withStoreConfiguration store $ \limits _ -> admitted store $ atomically $ do
     count <- readTVar readers
     when (count>=limitGlobalDatabaseReaders limits) (throwSTM StoreLimit)
     writeTVar readers (count+1)
   either (const(throwIO StoreUnavailable)) pure result
   restore action `finally` atomically(modifyTVar' readers (subtract 1))
+
+-- | A scoped, payload-free reader notification. Registration precedes authorization.
+data AuthorizationWatch = AuthorizationWatch !CoordinationStore !(TVar (Maybe Word64)) !(TVar Word64) !(TVar Bool)
+
+withStoreAuthorizationWatch :: CoordinationStore -> (AuthorizationWatch -> IO a) -> IO a
+withStoreAuthorizationWatch store@(CoordinationStore _ _ _ _ _ _ _ _ (_,_,cell) _ _ _ _) action =
+  withStoreReader store $ bracket acquire release action
+  where
+    acquire = atomically (readTVar cell) >>= maybe (throwIO StoreClosed)
+      (\revision -> AuthorizationWatch store cell <$> newTVarIO revision <*> newTVarIO True)
+    release (AuthorizationWatch _ _ _ active) = atomically (writeTVar active False)
+
+authorizationWatchCurrent :: AuthorizationWatch -> IO Bool
+authorizationWatchCurrent (AuthorizationWatch _ cell revision active) = atomically $ do
+  expected <- readTVar revision
+  (&&) <$> readTVar active <*> ((== Just expected) <$> readTVar cell)
+
+-- | Observe current authorization once and acknowledge only a stable generation.
+-- A notification is not revocation. Closed scopes stay invalid, and a concurrent
+-- commit refuses this observation rather than replaying its action. Final
+-- acknowledgement uses the original fail-fast Store gate, closing the interval
+-- between SQL COMMIT and its notification without re-entering the observation.
+withAuthorizationObservation :: NFData a => AuthorizationWatch -> IO a -> IO (Maybe a)
+withAuthorizationObservation (AuthorizationWatch store cell revision active) action = do
+  initial <- atomically $ do
+    live <- readTVar active
+    if live then readTVar cell else pure Nothing
+  case initial of
+    Nothing -> pure Nothing
+    Just expected -> do
+      value <- action >>= evaluate . force
+      admitted store $ atomically $ do
+        live <- readTVar active
+        current <- readTVar cell
+        if not live || current == Nothing then pure Nothing else do
+          unless (current == Just expected) (throwSTM StoreBusy)
+          writeTVar revision expected
+          pure (Just value)
+
+-- | At most one second before trusted-time revalidation, even without a commit.
+-- No callbacks, file/configuration locks, or worker cancellation participate.
+awaitAuthorizationChange :: AuthorizationWatch -> IO ()
+awaitAuthorizationChange (AuthorizationWatch _ cell revision active) = do
+  timer <- registerDelay 1000000
+  atomically $ (do
+    live <- readTVar active
+    current <- readTVar cell
+    expected <- readTVar revision
+    check (not live || current /= Just expected)) `orElse` (readTVar timer >>= check)
+
+advanceAuthorization :: CoordinationStore -> IO ()
+advanceAuthorization (CoordinationStore _ _ _ _ _ _ _ _ (_,_,cell) _ _ _ _) = atomically $
+  modifyTVar' cell (>>= \revision -> if revision == maxBound then Nothing else Just (revision + 1))
+
+invalidateAuthorization :: CoordinationStore -> IO ()
+invalidateAuthorization (CoordinationStore _ _ _ _ _ _ _ _ (_,_,cell) _ _ _ _) =
+  atomically (writeTVar cell Nothing)
 
 -- | One admission owner, separate from the physical worker registration ceiling.
 withStoreAdmission :: CoordinationStore -> (STM Bool -> IO a) -> IO a
@@ -911,6 +975,7 @@ runWithAdmission policy store@(CoordinationStore _ _ db identity _ _ poisoned _ 
       readIORef admissionFence >>= mapM_ (\fence -> atomically (readTVar fence) >>= \stopped -> when stopped (throwIO StoreClosed))
       writeIORef committing True
       SQL.exec db "COMMIT"
+      when didChange (advanceAuthorization store)
       pure value
     case result of
       Right value -> pure value

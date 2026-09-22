@@ -56,8 +56,8 @@ heap or temporary-disk quotas. The pinned Unix SQLite source specifies mode
 0600 for DELETEONCLOSE temporary files. That source evidence is not an exhaustive
 platform or forced-spill test.
 
-`PRAGMA user_version` holds internal schema version 11. Startup accepts versions
-zero through eleven, and rejects other versions before changing journaling or
+`PRAGMA user_version` holds internal schema version 12. Startup accepts versions
+zero through twelve, and rejects other versions before changing journaling or
 schema. Fresh initialization, command-ledger additions, the explicit literal
 chunk/upload migration, and admission and control-state additions execute DDL,
 metadata and version publication in one immediate transaction. Version-one DDL
@@ -73,7 +73,11 @@ Failure rolls that transaction back and never publishes a connection. The
 metadata row separately stores authority epoch, stream identity, stream sequence,
 retained floor, and service revision. Epoch and stream are random 256-bit
 identifiers that survive ordinary reopen. A fresh random process-generation
-identifier exists only in the new store lifetime.
+identifier exists only in the new store lifetime. Version twelve adds credential
+labels, effective rotation cutoffs, successor relationships, and explicit profile
+membership without changing the original credential table or ledgers. Legacy
+labels equal credential IDs. [Local administration](COMMANDS.md#local-credential-administration)
+uses the same writer and unchanged transaction budgets.
 
 The schema contains relational records rather than a generic object store:
 

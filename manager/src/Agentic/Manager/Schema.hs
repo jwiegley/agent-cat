@@ -1,12 +1,27 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Versioned relational coordination facts. Stored identities are not capabilities.
-module Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration, artifactMigration, historyMigration, restartMigration, retentionMigration) where
+module Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration, artifactMigration, historyMigration, restartMigration, retentionMigration, credentialMigration) where
 
 import Data.Text (Text)
 
 schemaVersion :: Int
-schemaVersion = 11
+schemaVersion = 12
+
+-- | Non-secret labels and effective rotation deadlines, separate from declared expiry.
+-- SQLite counts label bytes without truncating at NUL. Protocol validation and
+-- metadata decoding retain the exact 1–256 Unicode-scalar bound.
+credentialMigration :: [Text]
+credentialMigration =
+  [ "CREATE TABLE credential_administration (credential_id TEXT PRIMARY KEY NOT NULL REFERENCES credentials(id), label TEXT NOT NULL CHECK(length(CAST(label AS BLOB)) BETWEEN 1 AND 1024), rotation_cutoff TEXT, superseded_by TEXT UNIQUE REFERENCES credentials(id), CHECK(rotation_cutoff IS NULL OR julianday(rotation_cutoff) IS NOT NULL)) STRICT",
+    "INSERT INTO credential_administration(credential_id,label) SELECT id,id FROM credentials",
+    "CREATE TABLE credential_profiles (credential_id TEXT NOT NULL REFERENCES credentials(id), profile_id TEXT NOT NULL, PRIMARY KEY(credential_id,profile_id)) STRICT",
+    "INSERT INTO credential_profiles SELECT DISTINCT credential_id,profile_id FROM credential_scopes",
+    "CREATE TRIGGER credential_label_immutable BEFORE UPDATE OF credential_id,label ON credential_administration WHEN NEW.credential_id!=OLD.credential_id OR NEW.label!=OLD.label BEGIN SELECT RAISE(ABORT,'credential label immutable'); END",
+    "CREATE TRIGGER credential_cutoff_monotone BEFORE UPDATE OF rotation_cutoff ON credential_administration WHEN OLD.rotation_cutoff IS NOT NULL AND (NEW.rotation_cutoff IS NULL OR julianday(NEW.rotation_cutoff)>julianday(OLD.rotation_cutoff)) BEGIN SELECT RAISE(ABORT,'credential cutoff immutable'); END",
+    "CREATE TRIGGER credential_successor_immutable BEFORE UPDATE OF superseded_by ON credential_administration WHEN OLD.superseded_by IS NOT NULL AND (NEW.superseded_by IS NULL OR NEW.superseded_by!=OLD.superseded_by) BEGIN SELECT RAISE(ABORT,'credential successor immutable'); END",
+    "CREATE TRIGGER credential_administration_retained BEFORE DELETE ON credential_administration BEGIN SELECT RAISE(ABORT,'credential metadata retained'); END"
+  ]
 
 -- | Retention clocks are observations of eligibility, never cleanup authority.
 retentionMigration :: [Text]

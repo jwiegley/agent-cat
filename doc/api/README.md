@@ -252,9 +252,11 @@ storage failures are not converted into successful receipts.
 
 ## Command-line boundary
 
-`RUNNER` denotes the configured registry executable. These new command forms
-are specified here and are not yet implemented. Existing `RUNNER --tui` and
-native frontend commands remain unchanged.
+`RUNNER` denotes the configured registry executable. The following forms define
+the command boundary. Offline administration implements credential listing,
+issuance, rotation and revocation. Other administration operations, service
+startup and client service selection remain unimplemented.
+Existing `RUNNER --tui` and native frontend commands remain unchanged.
 
 ```text
 RUNNER --manager serve --config ABSOLUTE_FILE
@@ -262,6 +264,10 @@ RUNNER --manager admin --config ABSOLUTE_FILE
 RUNNER --tui --service CLIENT_PROFILE
 RUNNER --tui --local
 ```
+
+Offline administration acquires the original Store through local configuration
+and refuses an already-owned Store rather than opening another writer. It does
+not provide an external administrative channel into a running service.
 
 Service startup is foreground and takes trust, TLS, profiles, and storage
 configuration only from the selected local file. Administration consumes one

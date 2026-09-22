@@ -3,8 +3,8 @@
 `Agentic.Manager.Commands` implements the internal WM-010 command mechanism over
 `Store.runTransaction`. It does not create HTTP routes, provision credentials,
 interpret workflows, or reconstruct worker authority. The public Manager facade
-continues to expose trusted configuration and scoped storage composition, not
-credential construction, SQL, or dispatch-by-ID operations.
+exposes trusted configuration, scoped storage composition, and local credential
+administration. It does not expose SQL or dispatch-by-ID operations.
 
 ## Current authority
 
@@ -12,8 +12,9 @@ credential construction, SQL, or dispatch-by-ID operations.
 SHA-256 and comparing against actual credential verifiers. The returned opaque
 `CredentialProof` contains no retained bearer and has no Show, JSON, Generic, or
 public constructor. Its explicit NFData instance does not expose its fields.
-Length checks do not measure entropy. WM-023 owns secure credential generation,
-provisioning, rotation administration, and transport authentication.
+Length checks do not measure entropy. The local credential operations below own
+secure generation and rotation. Live external administration and transport
+authentication remain separate integration obligations.
 
 Every authorization check inside a transaction verifies the actual in-memory
 store generation, current credential verifier, registered client association,
@@ -45,6 +46,80 @@ metadata query selects no body or receipt. The same transaction checks current
 profile visibility and observe plus all scopes derived from the stored original
 operation before reading the projection. Missing or unauthorized metadata is not
 an existence oracle. Knowing a command ID, client ID, or old key grants no access.
+
+## Local credential administration
+
+`RUNNER --manager admin --config ABSOLUTE_FILE` reads one strict version-one
+JSON request through stdin EOF and writes one bounded JSON result. Duplicate
+fields, unknown fields, unknown operations, malformed input, and oversized input
+refuse before dispatch with `operation: null`. Errors do not reflect input or
+parser diagnostics. The implemented operations are `issue-credential`,
+`rotate-credential`, `revoke-credential`, and `list-credentials`. Other recognized
+operations receive `state-conflict` and remain with their existing owners.
+
+The offline CLI acquires the existing configuration lease and original Store.
+It refuses an already-owned installation and retains ordinary Store restart
+reconciliation. Trusted embedding passes that same Store to
+`administerCredentials`. A bearer proof, client ID, or stored credential ID does
+not grant administrative access. There is no listener or secondary writer.
+Live external administration of an already-running service remains unresolved.
+These operations do not establish full WM-023 acceptance.
+
+Issuance creates a registered client and a credential using 32 cryptographically
+random bytes encoded as 64 lowercase hexadecimal ASCII bytes without a newline.
+Only the SHA-256 verifier of those exact bearer bytes enters SQLite. The one-time
+secret is published exclusively in an existing private parent directory through
+the Runtime durable capture publisher. A confirmed file and confirmed database
+commit are both required for success. Responses contain only non-secret metadata.
+No secret, verifier, publication receipt, or selected path enters diagnostics.
+
+Publication precedes activation and no SQL transaction contains file IO. An
+uncertain publication causes no activation attempt. Confirmed publication followed
+by a definite SQL refusal leaves an inert private file. Uncertain COMMIT preserves
+the file and original Store poison. No failure permits automatic replay, removal,
+overwrite, or an inference that the credential is absent. The operator must retain
+and investigate the selected file after any uncertain outcome. Provisioning the
+private parent and its ancestors remains the operator's responsibility.
+
+Rotation preserves the registered client, label, and scopes. Its fixed positive
+overlap is 60 seconds, bounded further by the old declared expiry and any earlier
+cutoff. A superseded credential cannot rotate again. Rotation atomically revokes
+older predecessors, so only the current credential and its immediate predecessor
+can remain active. Trusted SQLite time is checked in the committing transaction.
+Declared expiry remains separate from the effective rotation cutoff. Metadata
+reports `revoked` when the cutoff takes effect. Accepted RFC3339 letter case is
+normalized for SQLite comparison and stored expiry without changing its meaning.
+
+Schema 12 adds retained label, rotation, and profile metadata without altering
+credential identities, verifiers, client-keyed ledgers, scopes, or declared expiry.
+Labels preserve Unicode scalar values, including NUL, within the frozen length
+bound. Legacy labels equal credential IDs. List returns the complete retained set within
+256 records and existing result budgets, or refuses the whole materialization
+with `size-limit`. There is no lifetime issuance cap or pagination. Profile and
+scope operations use set-oriented SQL within unchanged Store budgets.
+
+`AuthorizedView` binds the scoped current process and authority, client,
+credential, authorization revision, profile revision, scopes, and effective
+deadline. Registration precedes validation so concurrent invalidation is not
+lost. Store commit, poison, and close signal a bounded payload-free reader cell
+without callbacks or file/configuration lock acquisition. The coalesced signal
+wakes observers but does not itself revoke authorization. Revalidation checks
+current facts once across a stable Store generation before acknowledging the
+signal, so an ordinary request mutation does not invalidate unchanged authority.
+Final acknowledgement uses original fail-fast Store admission, serializing it
+with SQL COMMIT and notification. A concurrent commit refuses the observation
+without replay. The observation action runs outside that final admission.
+Closed scopes stay invalid, and worker stop cells remain separate from revocation.
+A one-second wakeup bounds quiet expiry checks, which revalidate trusted SQLite
+time rather than treating the timer or view token as authority.
+
+Future transport, page, cursor, and SSE owners must integrate current-view
+revalidation before releasing protected data and observe invalidations during
+streaming. Existing response scopes remain unchanged. These primitives do not
+recall emitted bytes or claim completed streaming closure or page enforcement.
+Full view revalidation still needs the current configuration guard and may fail
+fast while a response holds it. Transport integration must compose that boundary
+without treating storage contention as credential revocation.
 
 ## Mutation transaction
 

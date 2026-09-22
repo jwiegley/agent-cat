@@ -56,7 +56,7 @@ checkTokens depth tokens = case tokens of
     array (TkArrayEnd rest) = Right rest
     array (TkArrayErr _) = Left "invalid JSON"
     record seen (TkPair key value)
-      | Set.member key seen = Left "invalid JSON"
+      | Set.member key seen = Left "duplicate-field"
       | otherwise = checkTokens (depth + 1) value >>= record (Set.insert key seen)
     record _ (TkRecordEnd rest) = Right rest
     record _ (TkRecordErr _) = Left "invalid JSON"

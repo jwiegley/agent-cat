@@ -190,8 +190,11 @@ or approval implementation is substituted for that configuration check.
 The [storage contract](STORAGE.md) describes the installation lease, scoped
 SQLite lifetime, relational records, atomic invalidations, bounded internal
 transactions, and passive checkpoint results. `withCoordinationStore` consumes
-the existing installed configuration. It does not expose SQL, credentials,
-worker authority, or a network listener through the public facade.
+the existing installed configuration. It does not expose SQL, bearer material,
+worker authority, or a network listener through the public facade. The local
+credential operations described in [COMMANDS.md](COMMANDS.md) use that original
+Store through trusted embedding or the exclusive offline stdin CLI. Live external
+administration of a running service remains an unresolved integration obligation.
 
 `manager/ci/store.sh` runs the real library composition and native SQLite tests
 at one and eight runtime capabilities. Storage mechanisms do not establish the
