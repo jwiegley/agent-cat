@@ -20,23 +20,21 @@ below.
 
 ## Scope correction of 2026-09-20
 
-The user explicitly excludes all OS containment features from this project.
-Do not implement or experiment with systemd/cgroup containment, launchd
-containment, sandboxes, containers, VMs or another OS-enforced descendant
-boundary. The pending request for Linux containment experiments is withdrawn,
-not awaiting authorization. A stronger macOS boundary is not a deliverable.
+The user's clarification of 2026-09-22 supersedes the earlier broad wording
+of this section. No sandbox implementation is requested or planned. The existing
+process-group probe is not a sandbox and is not an authorization violation.
+Do not infer an excluded-test requirement from the earlier summary.
 
-This correction applies throughout WM-001–WM-044 and G0–G5, including D3 and
-the OS-containment portions of A20. The research documents remain historical
-records. Their containment requirements and containment-based capability or
-release gates no longer govern active work. Do not create a replacement
-containment feature under another name.
+The full WM-001–WM-044 and G0–G5 delivery remains the objective. Historical
+research remains a record and does not create an additional sandbox deliverable.
+Before running an aggregate validation gate, inspect its actual invocations
+and relevant nested drivers. Escalate only a concrete owner decision.
 
-Ordinary ownership, cancellation and cleanup of processes started by the
-application remain in scope. Retain original handles, join outcomes, uncertain
-cleanup quarantine, storage-safety behavior and the prohibition on signalling
-stored PIDs. Do not claim that these mechanisms contain arbitrary descendants
-or undo provider effects. This exclusion does not close other package criteria.
+Ordinary ownership, cancellation and cleanup of application-owned processes
+remain in scope. Retain original handles, join outcomes, uncertain-cleanup
+quarantine, storage-safety behavior and the prohibition on signalling stored
+PIDs. Do not claim that these mechanisms contain arbitrary descendants or undo
+provider effects. The clarification does not close other package criteria.
 
 ## Active WM-022 unit
 
@@ -83,13 +81,13 @@ WM-022 remains in progress and G1 remains open. The next platform check is the
 new Linux vertical gate with current boundaries and Haskell documentation, using
 the unchanged pinned environment. No Linux execution has been launched for this
 unit. The first unexpected failure still stops before correction or retry,
-with all no-containment, original-owner and non-replay constraints in force.
+with original-owner, bounded-admission and non-replay constraints in force.
 
 Parent retains Git, tracker, integration, platform and acceptance decisions.
 Existing source-valid evidence may be reused at its actual scope. G1 remains
 a separate evidence decision, and accepted prerequisites do not close it.
 No interpreter, recorder, inventory, retention helper, per-leaf review, old-root
-recovery or OS-containment work is part of this unit.
+recovery work is part of this unit.
 
 ## Active WM-023 local implementation
 
@@ -99,8 +97,8 @@ WM-022/G1. The unit is `implementation.9tGzKH/credentials.QHYL3FHM`, with source
 branch `wm023-credentials.QHYL3FHM` based on `a54b310b`. Private roots are under
 `/Users/johnw/Products/k.M0a5ItPm`, with a serialized sibling builddir.
 
-The bounded interface check is complete in `seams.md`. Tracker comments 289–290,
-`decision-note.md` and `brief.md` define the initial implementation. It extends
+The bounded interface check is complete in `seams.md`. Tracker comments 289–291,
+`decision-note.md`, `brief.md` and `parent-result.md` describe the implementation. It extends
 the original Store/Authorization owners with embeddable credential operations
 and the frozen offline CLI. An already-owned Store must refuse a second writer.
 Live external administration remains an unresolved integration obligation,
@@ -114,11 +112,32 @@ precedes activation, preserving inert-file and uncertain-COMMIT outcomes without
 retry or cleanup inference. Authorization views and wakeups do not become
 Worker cancellation or an unimplemented transport claim.
 
-Workflow `9701c7dc-7e30-484a-b36f-86a71f1297b0` delegates code/test/documentation
-authoring only. Parent owns compiler/native execution after handback, without
-an agent-run deadline around validation. No build, test, program, credential
-generator, listener, live configuration, remote/account action, containment or
-new framework is authorized in the author lane. WM-023 remains unaccepted.
+Code-only author workflow `9701c7dc-7e30-484a-b36f-86a71f1297b0` timed out
+after leaving its handback and patch. Parent inspected the original returns,
+took sole writing ownership and ran compiler/native validation directly.
+The failed author invocation remains failed. Its original report and patch
+are historical snapshots, not current validation or review conclusions.
+
+Parent corrected three compiler errors, one pre-link synchronization-fault
+expectation and a genuine authorization-view defect. An ordinary request
+mutation no longer invalidates unchanged authority. Coalesced Store signals
+prompt one current-fact observation, acknowledged only across a stable
+generation. A concurrent commit refuses that observation without replay or
+consuming the invalidation. Worker stop cells remain separate.
+
+Current Commands, Artifact/History and Store gates passed at N1 then N8 on
+2026-09-22 from 00:42:09Z through 00:56:41Z. Configuration, Dependency, Worker,
+compiler-boundary and documentation checks passed afterward through 01:10:53Z.
+The dependency gate includes local TLS and process-group probes. Their results
+remain ordinary evidence at the recorded scope, without a new sandbox claim.
+All original failures and raw command records remain in the unit.
+
+The current complete review input is `proposal-parent-reviewed-input.patch`,
+with 19 files, 1041 insertions and 34 deletions. Review workflow
+`811cfba7-4f3d-4ce4-889d-0d36ddf03751` is assessing that source and evidence
+read-only. Full view revalidation still needs current configuration, and live
+external administration and transport/page/cursor/SSE composition remain
+unclosed product obligations. WM-023 is not integrated or accepted.
 
 ## WM-021 acceptance
 
@@ -536,13 +555,12 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-21T23:10:17Z`. The next active-work deadline is
-`2026-09-22T00:10:17Z`. Continue the WM-022 platform decision and local WM-023
-implementation through existing owners, with no
-OS containment or verification-machinery detour. The resumed persistent goal
-still contains older baseline and scope wording. The user's latest correction
-governs current work, and `/goal-tweak` remains available for updating that
-immutable text. Earlier disclosed timing lapses remain recorded.
+Refocus completed at `2026-09-22T04:16:19Z`. The next active-work deadline is
+`2026-09-22T05:16:19Z`. Continue the WM-022 platform decision and the coherent
+WM-023 review and product corrections through existing owners. Inspect aggregate
+gate invocations before execution and do not reopen verification machinery or
+historical recovery. The persistent goal still contains older baseline wording.
+The accepted milestones and the user's latest clarification govern current work.
 
 ## Historical WM-016 closure record
 
