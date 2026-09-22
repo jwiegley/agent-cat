@@ -2,9 +2,9 @@
 
 This plan records the user-directed refocus of 2026-09-17 and its completed
 WM-016 milestone. It supersedes previous next-helper instructions, not the
-original implementation requirements. WM-017–WM-021 are now accepted
-separately, and the remaining roadmap follows the user's 2026-09-20
-[exclusion of OS containment](workflow-manager-handoff.md#scope-correction-of-2026-09-20).
+original functional requirements. WM-017–WM-022 and G1 are now accepted
+separately. The remaining roadmap follows the current scope corrections and
+[local-only validation amendment](workflow-manager-handoff.md#local-only-validation-amendment-of-2026-09-22).
 
 ## Accepted result on 2026-09-19
 
@@ -22,9 +22,10 @@ pass. WM-017 and WM-018 were subsequently accepted at `5ef7612e` and `4ad20a43`,
 as recorded in the handoff. WM-019 is accepted at `489a1a4` under the user's
 scope correction. WM-020 is accepted at `626981a7` under its reviewed same-root
 restoration boundary. WM-021 is accepted at `248e772e` after the completed
-Linux owning sequence and independent closure review. G1 and later packages
-remain open, and WM-022 is the next delivery. The sections below retain the
-original WM-016 closure plan.
+Linux owning sequence and independent closure review. WM-022 and G1 are accepted
+on 2026-09-22 from local real-worker evidence and continued independent review
+under the user's local-only validation amendment. WM-023 remains partial and
+unaccepted. The sections below retain the original WM-016 closure plan.
 
 ## Starting position at the 2026-09-17 refocus
 

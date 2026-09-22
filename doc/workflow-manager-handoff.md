@@ -1,22 +1,38 @@
 # Workflow-manager handoff
 
-<!-- handoff-id: wm016-20260915; status: wm021-accepted; accepted: WM-001..WM-021,G0 -->
+<!-- handoff-id: wm016-20260915; status: wm022-g1-accepted; accepted: WM-001..WM-022,G0,G1 -->
 
 ## Current delivery direction
 
-WM-021 is accepted on 2026-09-21 at canonical
-`248e772e999d483f7017e6d956dc42daf5626400` under the scope correction below.
-The accepted baseline is WM-001–WM-021 and G0, which is 21 of 44 packages and
-one of six gates. Next delivery is WM-022, the complete non-network lifecycle
-and direct-versus-managed semantic comparison, followed by WM-023–WM-044.
-G1 and later service, client and release packages remain open.
+WM-022 and G1 are accepted on 2026-09-22 under the local-only validation
+amendment below. The vertical slice was integrated at `ea0fc12c`, and current
+application evidence includes the response correction at `72c2abf`. The accepted
+baseline is WM-001–WM-022 and G0/G1, which is 22 of 44 packages and two of six
+gates. Next delivery is the unfinished WM-023 work, followed by the remaining
+service, client and release packages. G2–G5 remain open.
 
 The user's 2026-09-17 refocus continues to govern delivery. Do not reopen the
 verification-machinery micro-fix loop, paused L08 review or historical recovery
 as a substitute for the next product milestone. The completed
 [closure plan](workflow-manager-closure-plan.md) and implementation plan remain
-the references for their respective scopes, subject to the user's correction
+the references for their respective scopes, subject to the user's corrections
 below.
+
+## Local-only validation amendment of 2026-09-22
+
+The user removed Linux, remote-host and cross-platform validation requirements
+and confirmed the revised persistent goal. Required builds, tests, compatibility
+checks and acceptance validation run only on this macOS machine in the existing
+Nix/direnv environment. This amendment overrides conflicting platform clauses
+in the frozen requirements and task verification contracts, including WM-022/G1.
+No Linux validation or associated remote approval remains a prerequisite.
+
+Functional requirements, negative assertions, independent review and existing
+safety limits remain unchanged. Existing local evidence retains its actual
+scope. Historical platform results and failures remain records rather than
+requirements to repeat, and untested platforms are not represented as passing.
+Accepted WM-001–WM-021/G0 remain closed. WM-022/G1 are now accepted against
+local evidence and independent review, with unfinished WM-023 as the next work.
 
 ## Scope correction of 2026-09-20
 
@@ -36,10 +52,11 @@ quarantine, storage-safety behavior and the prohibition on signalling stored
 PIDs. Do not claim that these mechanisms contain arbitrary descendants or undo
 provider effects. The clarification does not close other package criteria.
 
-## Active WM-022 unit
+## WM-022 and G1 acceptance
 
-Issue `acat-wm-022-j655` is in progress after all nine recorded dependencies
-closed. The isolated unit is `implementation.9tGzKH/vertical.d42c7UhQ`, with
+Issues `acat-wm-022-j655` and `acat-g1-h1wc` are closed. All nine recorded WM-022
+dependencies were already accepted. The isolated unit is
+`implementation.9tGzKH/vertical.d42c7UhQ`, with
 source branch `wm022-vertical.d42c7UhQ` based on acceptance commit `c6698af4`.
 Private runtime paths are under `/Users/johnw/Products/v.OSGikI2D`, with a
 serialized sibling builddir and supplied offline environment.
@@ -77,23 +94,34 @@ and passed canonical source boundaries and documentation. Current-byte isolated
 native, audit and Haskell-documentation evidence is reused at its stated scope.
 `review.md` and `integration-note.md` retain the verdict and integration facts.
 
-WM-022 remains in progress and G1 remains open. The next platform check is the
-new Linux vertical gate with current boundaries and Haskell documentation, using
-the unchanged pinned environment. No Linux execution has been launched for this
-unit. The first unexpected failure still stops before correction or retry,
-with original-owner, bounded-admission and non-replay constraints in force.
+Continued milestone reviewer `53ee90a0-49e3-48f4-a005-cb64521f9980` found no
+issues and gave separate SUPPORTED verdicts for WM-022 and G1 under the local-only
+amendment. Parent accepts both at the isolated-core boundary. The current
+application passed the complete vertical gate at N1 then N8 on 2026-09-22,
+08:48:34Z–09:00:58Z, after the WM-023 response correction. Its original audits
+and subsequent boundary/documentation results are retained in
+`credentials.QHYL3FHM/response-result.md`. The only vertical fixture changes
+are ignored response-view callback parameters, with comparisons and assertions
+unchanged. Both audit results retain original-child joins and their actual
+outcomes. No Linux run is required or claimed.
 
-Parent retains Git, tracker, integration, platform and acceptance decisions.
-Existing source-valid evidence may be reused at its actual scope. G1 remains
-a separate evidence decision, and accepted prerequisites do not close it.
-No interpreter, recorder, inventory, retention helper, per-leaf review, old-root
-recovery work is part of this unit.
+G1 combines this real-worker demonstration with accepted WM-008–WM-021/G0
+foundations at their recorded scope. It is not inferred from dependency closure
+alone. `review-local-closure.md` and `acceptance-note.md` record the two decisions.
+Original failures remain failed, composed Store evidence remains composed, and
+no physical-power-loss, arbitrary-descendant containment, cross-process ABA or
+total-service resource claim follows.
+
+Parent retains Git, tracker, integration and acceptance decisions. Existing
+source-valid evidence is reused at its actual scope. No new interpreter,
+recorder, inventory, retention helper, per-leaf review or old-root recovery
+work was needed for closure.
 
 ## Active WM-023 local implementation
 
 Issue `acat-wm-023-d20b` is in progress with its four dependencies closed.
-This independent local work does not authorize WM-022 Linux execution or close
-WM-022/G1. The unit is `implementation.9tGzKH/credentials.QHYL3FHM`, with source
+This work remains separate from the accepted isolated core. The unit is
+`implementation.9tGzKH/credentials.QHYL3FHM`, with source
 branch `wm023-credentials.QHYL3FHM` based on `a54b310b`. Private roots are under
 `/Users/johnw/Products/k.M0a5ItPm`, with a serialized sibling builddir.
 
@@ -200,7 +228,8 @@ retain results, qualifications and the original failures.
 
 Live external administration through the original running Store, public
 page/cursor binding and actual SSE/protected transport enforcement remain
-unfinished. WM-023 is not accepted, and WM-022 Linux/G1 remain separate.
+unfinished. WM-023 is not accepted, and G1 closure does not satisfy those
+protected-service requirements.
 
 ## WM-021 acceptance
 
@@ -618,14 +647,14 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-22T09:21:46Z`. The next active-work deadline is
-`2026-09-22T10:21:46Z`. Environment regeneration and response/configuration
-composition are complete. Continue the remaining live administration and
-protected observation requirements through existing owners. WM-022 Linux
-remains separately pending. Inspect aggregate invocations before execution,
-reuse valid scoped evidence and do not reopen verification machinery, sandbox
-work or historical recovery. The persistent goal still contains older baseline
-wording. The accepted milestones and latest user clarification govern current work.
+Refocus completed at `2026-09-22T16:52:05Z`. The next active-work deadline is
+`2026-09-22T17:52:05Z`. The revised goal is running with local-only validation.
+WM-022/G1 closure is supported by the continued independent milestone review
+and accepted by parent. Continue the remaining WM-023 product requirements
+through existing owners. No Linux approval blocker remains. Inspect aggregate
+invocations before execution and reuse valid scoped evidence without reopening
+verification machinery, sandbox work or historical recovery. The revised goal
+preserves accepted prerequisites and the platform amendment.
 
 ## Historical WM-016 closure record
 
