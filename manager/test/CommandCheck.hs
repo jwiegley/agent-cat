@@ -6,11 +6,12 @@ module Main (main) where
 
 import qualified "agentic" Agentic.Manager as Public
 import Agentic.Manager.Credentials (administerCredentials)
+import Agentic.Manager.LocalAdmin (withLocalAdministration)
 import qualified Agentic.Manager.Protocol.LocalAdmin as Admin
 import Agentic.Manager.Authorization
 import Agentic.Manager.Commands
 import Agentic.Manager.Configuration
-import Agentic.Manager.Profile (publicRevision)
+import Agentic.Manager.Profile (Diagnostic, publicRevision)
 import Agentic.Manager.Protocol.Command
 import Agentic.Manager.Protocol.Json (representableEditorSchema)
 import Agentic.Manager.Schema (schemaVersion, schemaStatements)
@@ -46,7 +47,7 @@ import Foreign.Ptr (Ptr)
 import Foreign.C.Types (CInt (..))
 import System.Directory (createDirectory, doesFileExist)
 import System.Environment (getArgs)
-import System.FilePath ((</>))
+import System.FilePath ((</>), takeDirectory)
 import System.IO (BufferMode (LineBuffering), hSetBuffering, stdout)
 import System.Posix.Files (setFileMode, fileMode, getSymbolicLinkStatus)
 
@@ -60,6 +61,7 @@ main = do
     ["authorization-commit-gap",work] -> credentialCommitGapChecks work
     ["hold-credentials",path] -> withInstalled path $ \installed -> withCoordinationStore installed $ \_ ->
       putStrLn "ready" >> threadDelay 60000000
+    ["serve-credentials",path] -> serveCredentialChecks path
     [work, source] -> do
       credentialParserChecks source
       credentialAdministrationChecks work
@@ -86,6 +88,42 @@ main = do
       codecChecks work source
       putStrLn "PASS manager command receipts and idempotency"
     _ -> error "usage: manager-command-check PRIVATE_DIRECTORY PACKAGE_DIRECTORY"
+
+-- The Python CLI owner drives these barriers through the original private pipe.
+-- Only this fixture reads its disposable bearer file, never argv or diagnostics.
+serveCredentialChecks :: FilePath -> IO ()
+serveCredentialChecks path = do
+  configuration <- loadConfiguration
+    (\args -> if args == ["--scripted"] then Right () else error "unexpected live fixture target")
+    exactPreparedTarget (const False) path >>= right
+  bracket (installConfiguration configuration >>= right) closeConfiguration $ \installed ->
+    withCoordinationStore installed $ \store -> withLocalAdministration store $ do
+      conflict <- try @Diagnostic (withLocalAdministration store (pure ()))
+      requireCheck "second live endpoint refuses without replacing the original"
+        (case conflict of Left _ -> True; Right _ -> False)
+      putStrLn "ready"
+      command <- getLine
+      unless (command == "stop") $ do
+        requireCheck "live fixture watch barrier" (command == "watch")
+        bearer <- BS.readFile (takeDirectory path </> "cli-live.credential")
+        proof <- authenticateCredential store bearer >>= right
+        withStoreWorker store $ \_ _ active -> withStoreFiles store $ \_ ->
+          withAuthorizedResponse store proof "profile_1" [Observe] $ \view -> do
+            putStrLn "watching"
+            getLine >>= requireCheck "unrelated revocation barrier" . (== "unrelated")
+            unchanged <- timeout 7000000 (awaitAuthorizedView view)
+            requireCheck "unrelated client revocation preserves retained response" (unchanged == Just (Right ()))
+            atomically active >>= requireCheck "unrelated revocation preserves original worker registration"
+            putStrLn "unchanged"
+            getLine >>= requireCheck "own revocation barrier" . (== "revoked")
+            revoked <- timeout 7000000 (awaitAuthorizedView view)
+            requireCheck "live CLI revocation invalidates retained response" (revoked == Just (Left Unauthenticated))
+            atomically active >>= requireCheck "own revocation preserves original worker registration"
+            putStrLn "revoked"
+        getLine >>= requireCheck "live fixture stop barrier" . (== "stop")
+  putStrLn "closed"
+  where
+    requireCheck label condition = unless condition (error ("FAIL " <> label))
 
 check :: String -> Bool -> IO ()
 check label condition = unless condition (error ("FAIL " <> label)) >> putStrLn ("PASS " <> label)

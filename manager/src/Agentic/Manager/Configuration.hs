@@ -6,6 +6,7 @@ module Agentic.Manager.Configuration
   ( Configuration, TargetValidator, InstalledConfiguration,
     loadConfiguration, exactPreparedTarget, installConfiguration, reloadConfiguration, closeConfiguration,
     configurationSnapshot, selectConfiguredProfile, probeConfiguredProfile,
+    configurationAdministrationRoot, withConfigurationAdministration,
     acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationSnapshot, withConfigurationCatalogues, probeConfiguredCapabilities, withConfiguredRetentionRoot, validateHistoryBindings, revalidateRetentionRoot, configuredInvocations
   ) where
 
@@ -17,7 +18,7 @@ import Agentic.Runtime
     privateRootPath, openPrivateRoot, openPrivateSubroot, closePrivateRoot, withPrivateDirectoryAt, readStateRootRoleAt,
     establishManagerRootRole, readPrivateConfigurationFile )
 import Control.Concurrent.MVar (MVar, modifyMVarMasked, newMVar, withMVar, tryTakeMVar, putMVar)
-import Control.Exception (IOException, bracketOnError, finally, mask, mask_, throwIO, try)
+import Control.Exception (IOException, bracket, bracketOnError, finally, mask, mask_, throwIO, try)
 import Control.Monad (unless, when)
 import Data.Aeson (FromJSON (parseJSON), ToJSON (toJSON), Value, withObject, withText, (.:))
 import qualified Data.Aeson.Key as Key
@@ -39,11 +40,15 @@ import System.Process (CreateProcess)
 type TargetValidator = [Text] -> Either Diagnostic ()
 
 -- | One fully validated private file snapshot. Constructors are not public.
-data Configuration = Configuration !FilePath ![FilePath] !ConfigurationLimits ![OperatorProfile]
+data Configuration = Configuration !FilePath ![FilePath] !ConfigurationLimits ![OperatorProfile] !(Maybe FilePath)
+
+-- | The explicitly selected local channel directory, not execution authority.
+configurationAdministrationRoot :: Configuration -> Maybe FilePath
+configurationAdministrationRoot (Configuration _ _ _ _ administration) = administration
 
 -- | One leased root binding, closed explicitly by its owner. No worker is created.
 data InstalledConfiguration = InstalledConfiguration !(MVar (Maybe ActiveConfiguration)) !(MVar Bool)
-data ActiveConfiguration = ActiveConfiguration !PrivateRoot !FilePath ![FilePath] !ConfigurationLimits !Registry !Fd
+data ActiveConfiguration = ActiveConfiguration !PrivateRoot !FilePath ![FilePath] !ConfigurationLimits !Registry !Fd !(Maybe FilePath)
 
 -- | Read no more than the frozen JSON byte ceiling, then reject duplicate keys,
 -- nesting beyond 64 containers, unknown fields, and invalid native policy values.
@@ -55,7 +60,7 @@ loadConfiguration validateTarget validatePrepared isCredentialArgument path = co
   configuration <- requireRight $ do
     value <- either (const (Left InvalidConfiguration)) Right (decodeStrictValue bytes)
     either (const (Left InvalidConfiguration)) Right (parseEither (parseConfiguration validatePrepared isCredentialArgument) value)
-  let Configuration _ _ _ profiles = configuration
+  let Configuration _ _ _ profiles _ = configuration
   mapM_ (requireRight . validateTarget . operatorTargetArguments) profiles
   pure configuration
 
@@ -63,27 +68,27 @@ loadConfiguration validateTarget validatePrepared isCredentialArgument path = co
 -- Exclusive service ownership and all configuration checks precede marker publication.
 -- A marker whose publication was uncertain is never rolled back or deleted here.
 installConfiguration :: Configuration -> IO (Either Diagnostic InstalledConfiguration)
-installConfiguration (Configuration path retention limits profiles) = configurationIO $
+installConfiguration (Configuration path retention limits profiles administration) = configurationIO $
   bracketOnError (openPrivateRoot "manager configuration root" path) closePrivateRoot $ \root -> do
     bracketOnError (acquireLease root) closeFd $ \lease -> do
-      validateRootSeparation root retention
+      validateConfigurationRoots root retention administration
       registry <- newRegistry (QueryLimits 4194304 30000000) >>= requireRight
       _ <- reloadProfiles registry profiles >>= requireRight
       establishManagerRootRole root
-      InstalledConfiguration <$> newMVar (Just (ActiveConfiguration root path retention limits registry lease)) <*> newMVar False
+      InstalledConfiguration <$> newMVar (Just (ActiveConfiguration root path retention limits registry lease administration)) <*> newMVar False
 
 -- | Active reload cannot move the root, recreate a lost role, or release ownership.
 -- Limits and all profile revisions commit under one configuration lock. The parent
 -- must use this same reload boundary when coordinating pending approval invalidation.
 reloadConfiguration :: InstalledConfiguration -> Configuration -> IO (Either Diagnostic [PublicProfile])
-reloadConfiguration (InstalledConfiguration lock _) (Configuration path retention limits profiles) =
+reloadConfiguration (InstalledConfiguration lock _) (Configuration path retention limits profiles administration) =
   modifyMVarMasked lock $ \current -> case current of
     Nothing -> pure (Nothing, Left InvalidConfiguration)
-    Just active@(ActiveConfiguration root bound _ _ registry lease) -> do
+    Just active@(ActiveConfiguration root bound _ _ registry lease boundAdministration) -> do
       checked <- configurationIO $ do
-        require (path == bound)
+        require (path == bound && administration == boundAdministration)
         assertActive active
-        validateRootSeparation root retention
+        validateConfigurationRoots root retention administration
       case checked of
         Left failure -> pure (current, Left failure)
         -- Keep the outer transaction masked through both MVar publications.
@@ -91,20 +96,20 @@ reloadConfiguration (InstalledConfiguration lock _) (Configuration path retentio
           result <- reloadProfiles registry profiles
           pure (case result of
             Left _ -> current
-            Right _ -> Just (ActiveConfiguration root bound retention limits registry lease), result)
+            Right _ -> Just (ActiveConfiguration root bound retention limits registry lease administration), result)
 
 closeConfiguration :: InstalledConfiguration -> IO ()
 closeConfiguration (InstalledConfiguration lock _) = mask_ $ do
   current <- modifyMVarMasked lock (\active -> pure (Nothing, active))
   case current of
     Nothing -> pure ()
-    Just (ActiveConfiguration root _ _ _ _ lease) -> closePrivateRoot root `finally` closeFd lease
+    Just (ActiveConfiguration root _ _ _ _ lease _) -> closePrivateRoot root `finally` closeFd lease
 
 -- | Internal storage acquisition. One slot per installation survives concurrent close.
 -- The caller owns both returned resources and must release the slot after cleanup.
 acquireConfigurationStorage :: InstalledConfiguration -> IO (PrivateRoot, Fd)
 acquireConfigurationStorage installed@(InstalledConfiguration _ slot) = do
-  acquired <- withActive installed $ \(ActiveConfiguration root _ _ _ _ lease) ->
+  acquired <- withActive installed $ \(ActiveConfiguration root _ _ _ _ lease _) ->
     modifyMVarMasked slot $ \occupied -> do
       require (not occupied)
       pair <- bracketOnError (openPrivateSubroot root []) closePrivateRoot $ \retained -> do
@@ -117,6 +122,31 @@ releaseConfigurationStorage :: InstalledConfiguration -> IO ()
 releaseConfigurationStorage (InstalledConfiguration _ slot) =
   modifyMVarMasked slot (const (pure (False, ())))
 
+-- | A loan of the local administration namespace under its own exclusive lease.
+-- The original manager lease remains retained, but configuration is not held
+-- while serving. This creates neither another Store slot nor a database reader.
+withConfigurationAdministration :: InstalledConfiguration -> (PrivateRoot -> IO a) -> IO (Either Diagnostic a)
+withConfigurationAdministration (InstalledConfiguration lock _) action = mask $ \restore -> do
+  available <- tryTakeMVar lock
+  acquired <- case available of
+    Nothing -> pure (Left SupervisionUnavailable)
+    Just current -> (case current of
+      Nothing -> pure (Left InvalidConfiguration)
+      Just active -> configurationIO (assertActive active >> acquire active)) `finally` putMVar lock current
+  case acquired of
+    Left failure -> pure (Left failure)
+    Right (root, lease, original) ->
+      (Right <$> restore (action root)) `finally`
+        (closePrivateRoot root `finally` closeFd lease `finally` closeFd original)
+  where
+    acquire (ActiveConfiguration manager _ retention _ _ original administration) = do
+      path <- maybe (throwIO InvalidConfiguration) pure administration
+      bracketOnError (openPrivateRoot "local administration root" path) closePrivateRoot $ \root -> do
+        validateRootSeparation root (privateRootPath manager : retention)
+        bracketOnError (acquireLease root) closeFd $ \lease -> do
+          retained <- duplicateLease original
+          pure (root, lease, retained)
+
 -- | Internal fail-fast configuration boundary. Lock order is configuration, then store.
 withConfigurationSnapshot :: InstalledConfiguration -> (ConfigurationLimits -> [PublicProfile] -> IO a) -> IO (Either Diagnostic a)
 withConfigurationSnapshot installed action = withConfigurationCatalogues installed $ \limits profiles _ -> action limits profiles
@@ -128,7 +158,7 @@ withConfigurationCatalogues (InstalledConfiguration lock _) action = mask $ \res
     Nothing -> pure (Left SupervisionUnavailable)
     Just current -> (case current of
       Nothing -> pure (Left InvalidConfiguration)
-      Just active@(ActiveConfiguration _ _ _ limits registry _) ->
+      Just active@(ActiveConfiguration _ _ _ limits registry _ _) ->
         configurationIO $ do
           assertActive active
           profiles <- publicProfiles registry
@@ -136,12 +166,12 @@ withConfigurationCatalogues (InstalledConfiguration lock _) action = mask $ \res
           restore (action limits profiles catalogues)) `finally` putMVar lock current
 
 configuredInvocations :: InstalledConfiguration -> IO (Either Diagnostic [(Text,FrontendInvocation)])
-configuredInvocations installed = withActive installed $ \active@(ActiveConfiguration _ _ _ _ registry _) ->
+configuredInvocations installed = withActive installed $ \active@(ActiveConfiguration _ _ _ _ registry _ _) ->
   assertActive active >> profileInvocations registry
 
 -- | Recheck local observation authority at response entry without extending its lifetime.
 revalidateRetentionRoot :: InstalledConfiguration -> PrivateRoot -> Text -> IO (Either Diagnostic ())
-revalidateRetentionRoot installed root profile = withActive installed $ \active@(ActiveConfiguration _ _ retention _ registry _) -> do
+revalidateRetentionRoot installed root profile = withActive installed $ \active@(ActiveConfiguration _ _ retention _ registry _ _) -> do
   assertActive active
   profiles <- publicProfiles registry
   require (privateRootPath root `elem` retention && profile `elem` map publicId profiles)
@@ -149,7 +179,7 @@ revalidateRetentionRoot installed root profile = withActive installed $ \active@
 
 -- | Every configured retention root needs exactly one explicit local profile binding.
 validateHistoryBindings :: InstalledConfiguration -> [(FilePath,Text)] -> IO (Either Diagnostic ())
-validateHistoryBindings installed bindings = withActive installed $ \active@(ActiveConfiguration _ _ retention _ registry _) -> do
+validateHistoryBindings installed bindings = withActive installed $ \active@(ActiveConfiguration _ _ retention _ registry _ _) -> do
   assertActive active
   profiles <- publicProfiles registry
   require (length bindings == length retention && Set.fromList(map fst bindings) == Set.fromList retention)
@@ -158,7 +188,7 @@ validateHistoryBindings installed bindings = withActive installed $ \active@(Act
 -- | Local composition only. A configured retention path never becomes execution authority.
 withConfiguredRetentionRoot :: InstalledConfiguration -> FilePath -> Text -> (PrivateRoot -> IO a) -> IO (Either Diagnostic a)
 withConfiguredRetentionRoot installed path profile action = mask $ \restore -> do
-  acquired <- withActive installed $ \active@(ActiveConfiguration _ _ retention _ registry _) -> do
+  acquired <- withActive installed $ \active@(ActiveConfiguration _ _ retention _ registry _ _) -> do
     assertActive active
     require (path `elem` retention)
     profiles <- publicProfiles registry
@@ -169,20 +199,20 @@ withConfiguredRetentionRoot installed path profile action = mask $ \restore -> d
     Right root -> (Right <$> restore (action root)) `finally` closePrivateRoot root
 
 configurationSnapshot :: InstalledConfiguration -> IO (Either Diagnostic (ConfigurationLimits, [PublicProfile]))
-configurationSnapshot installed = withActive installed $ \(ActiveConfiguration _ _ _ limits registry _) ->
+configurationSnapshot installed = withActive installed $ \(ActiveConfiguration _ _ _ limits registry _ _) ->
   (\profiles -> (limits, profiles)) <$> publicProfiles registry
 
 selectConfiguredProfile :: InstalledConfiguration -> Text -> Text -> IO (Either Diagnostic Selection)
 selectConfiguredProfile installed ident revision = flatten <$> withActive installed
-  (\(ActiveConfiguration _ _ _ _ registry _) -> selectProfile registry ident revision)
+  (\(ActiveConfiguration _ _ _ _ registry _ _) -> selectProfile registry ident revision)
 
 probeConfiguredProfile :: InstalledConfiguration -> Text -> Text -> IO (Either Diagnostic Discovery)
 probeConfiguredProfile installed ident revision = flatten <$> withActive installed
-  (\(ActiveConfiguration _ _ _ _ registry _) -> probeProfile registry ident revision)
+  (\(ActiveConfiguration _ _ _ _ registry _ _) -> probeProfile registry ident revision)
 
 probeConfiguredCapabilities :: InstalledConfiguration -> (CreateProcess -> IO ProcessGroup) -> Text -> Text -> IO (Either Diagnostic FrontendCapabilities)
 probeConfiguredCapabilities installed create ident revision = flatten <$> withActive installed
-  (\(ActiveConfiguration _ _ _ _ registry _) -> probeProfileCapabilitiesWith create registry ident revision)
+  (\(ActiveConfiguration _ _ _ _ registry _ _) -> probeProfileCapabilitiesWith create registry ident revision)
 
 withActive :: InstalledConfiguration -> (ActiveConfiguration -> IO a) -> IO (Either Diagnostic a)
 withActive (InstalledConfiguration lock _) action = withMVar lock $ \current -> case current of
@@ -190,11 +220,21 @@ withActive (InstalledConfiguration lock _) action = withMVar lock $ \current -> 
   Just active -> configurationIO (assertActive active >> action active)
 
 assertActive :: ActiveConfiguration -> IO ()
-assertActive (ActiveConfiguration root _ retention _ _ _) = do
+assertActive (ActiveConfiguration root _ retention _ _ _ administration) = do
   assertPrivateRoot root
   role <- withPrivateDirectoryAt root [] readStateRootRoleAt
   require (role == ManagerStateRoot)
-  validateRootSeparation root retention
+  validateConfigurationRoots root retention administration
+
+-- | Storage, local retention and administration are disjoint configured roles.
+-- Validate the optional private directory before publishing a role or reload.
+validateConfigurationRoots :: PrivateRoot -> [FilePath] -> Maybe FilePath -> IO ()
+validateConfigurationRoots root retention administration = do
+  validateRootSeparation root (retention <> maybe [] pure administration)
+  case administration of
+    Nothing -> pure ()
+    Just path -> bracket (openPrivateRoot "local administration root" path) closePrivateRoot $ \endpoint ->
+      validateRootSeparation endpoint retention
 
 configurationIO :: IO a -> IO (Either Diagnostic a)
 configurationIO action = either (const (Left InvalidConfiguration)) id <$> try @IOException (try @Diagnostic action)
@@ -210,10 +250,11 @@ flatten = either Left id
 
 parseConfiguration :: PreparedTargetValidator -> (String -> Bool) -> Value -> Parser Configuration
 parseConfiguration validatePrepared isCredentialArgument = withObject "operator configuration" $ \o -> do
-  closed ["version", "managerRoot", "localRetentionRoots", "runners", "limits", "profiles"] o
+  closed ["version", "managerRoot", "administrationRoot", "localRetentionRoots", "runners", "limits", "profiles"] o
   version <- o .: "version" :: Parser Int
   unless (version == 1) (fail "unsupported version")
   root <- o .: "managerRoot" >>= absolutePath
+  administration <- traverse (\value -> parseJSON value >>= absolutePath) (KM.lookup "administrationRoot" o)
   retention <- o .: "localRetentionRoots" >>= boundedList 256 >>= traverse absolutePath
   distinct retention
   runners <- o .: "runners" >>= boundedList 256 >>= traverse (parseRunner isCredentialArgument)
@@ -221,7 +262,7 @@ parseConfiguration validatePrepared isCredentialArgument = withObject "operator 
   limits <- o .: "limits" >>= parseLimits
   profiles <- o .: "profiles" >>= boundedList 256 >>= traverse (parseProfile validatePrepared limits (Map.fromList runners))
   either (const (fail "invalid profiles")) pure (validateProfiles profiles)
-  pure (Configuration root retention limits profiles)
+  pure (Configuration root retention limits profiles administration)
 
 parseLimits :: Value -> Parser ConfigurationLimits
 parseLimits = withObject "configuration limits" $ \o -> do

@@ -226,10 +226,35 @@ cleared integration. Parent verified the exact patch, bytes and Git modes at
 `response-result.md`, `review-response.md` and `response-integration-note.md`
 retain results, qualifications and the original failures.
 
-Live external administration through the original running Store, public
-page/cursor binding and actual SSE/protected transport enforcement remain
-unfinished. WM-023 is not accepted, and G1 closure does not satisfy those
-protected-service requirements.
+The next local-administration layer is integrated from `live-source`, branch
+`wm023-live-administration`, based on `834afeed`. Its corrected fourteen-file
+patch contains 570 insertions and 77 deletions. The frozen stdin CLI can reach
+the original running Store through an explicitly configured same-user Unix
+socket. The optional private `administrationRoot` is separately leased, and the
+original installation lease remains retained without holding configuration or
+file guards across the listener lifetime. Configured channel failure never
+falls back to another Store or replays a request.
+
+Current native Commands and real offline/live CLI checks passed N1 then N8 at
+19:13:32Z–19:14:13Z on 2026-09-22. They cover held-response revocation, unchanged
+worker-registration signals, real dropped replies and endpoint ownership.
+Configuration, Artifact/History, boundaries and both documentation gates passed
+at their recorded scope. Unchanged opacity/COMMIT-gap evidence is reused rather
+than represented as another whole-wrapper pass. The registration test does not
+claim a separate physical frontend launch.
+
+Continued reviewer `3eafb77d-1d6b-4bf4-b4cd-c1de8c97e127` cleared integration
+with no remaining findings. The timeout-envelope defect was reproduced against
+the frozen schema before correction, and its original failure remains preserved.
+All five failed native/build invocations, earlier failures and private roots
+retain their original outcomes. Parent matched every reviewed byte and Git
+executable mode at 19:21:52Z before recording this integration.
+`live-result.md`, `live-correction-result.md`, `review-live-corrected.md` and
+`live-integration-note.md` retain the evidence and qualifications.
+
+Foreground service startup, public page/cursor binding and SSE/protected
+transport enforcement remain unfinished. WM-023 is not accepted, and G1 closure
+does not satisfy those protected-service requirements.
 
 ## WM-021 acceptance
 
@@ -647,14 +672,13 @@ Lean/oracle builds remain excluded absent their own authorization. Earlier
 failures, unknown holders and failed UI cleanup/restoration qualifications remain
 unresolved historical evidence rather than new closure prerequisites.
 
-Refocus completed at `2026-09-22T16:52:05Z`. The next active-work deadline is
-`2026-09-22T17:52:05Z`. The revised goal is running with local-only validation.
-WM-022/G1 closure is supported by the continued independent milestone review
-and accepted by parent. Continue the remaining WM-023 product requirements
-through existing owners. No Linux approval blocker remains. Inspect aggregate
-invocations before execution and reuse valid scoped evidence without reopening
-verification machinery, sandbox work or historical recovery. The revised goal
-preserves accepted prerequisites and the platform amendment.
+Refocus completed at `2026-09-22T18:59:12Z`. The next active-work deadline is
+`2026-09-22T19:59:12Z`. The revised goal is running with local-only validation.
+WM-022/G1 remain accepted. The reviewed local-administration layer is integrated,
+and the next work is foreground service composition and the remaining WM-023
+page/cursor and stream requirements. No Linux approval blocker remains. Inspect
+aggregate invocations before execution and reuse valid scoped evidence without
+reopening verification machinery, sandbox work or historical recovery.
 
 ## Historical WM-016 closure record
 

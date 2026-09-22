@@ -142,7 +142,7 @@ common settings
 
 library
   import:          settings
-  build-depends:   direct-sqlite, deepseq, transformers
+  build-depends:   direct-sqlite, deepseq, transformers, network
   c-sources:       runtime/cbits/process_group.c
                    runtime/cbits/private_directory.c
                    runtime/cbits/private_sync.c
@@ -192,6 +192,7 @@ library
     Agentic.Chains
     Agentic.Cli.LocalAdmin
     Agentic.Manager.Credentials
+    Agentic.Manager.LocalAdmin
     Agentic.Manager.Protocol.LocalAdmin
     Agentic.Cli.Frontend
     Agentic.DSL.Json
@@ -496,6 +497,7 @@ executable manager-command-check
   other-modules:
     Agentic.Manager.Test.AcceptanceAudit
     Agentic.Manager.Credentials
+    Agentic.Manager.LocalAdmin
     Agentic.Manager.Protocol.LocalAdmin
     Agentic.Manager.Commands
     Agentic.Manager.Protocol.Artifact
@@ -510,7 +512,7 @@ executable manager-command-check
     Agentic.Manager.Store
     Agentic.Manager.Store.Admission
     Agentic.Manager.Worker.State
-  build-depends:   agentic, direct-sqlite, deepseq, transformers
+  build-depends:   agentic, direct-sqlite, deepseq, transformers, network
   ghc-options:     -threaded -rtsopts
 
 executable manager-draft-check
